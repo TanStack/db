@@ -323,6 +323,16 @@ function parseSnapshotMessage(message: SnapshotEndMessage): PostgresSnapshot {
   }
 }
 
+function getStableShapeIdentity(shapeOptions: {
+  url: string
+  params?: Record<string, unknown>
+}): string {
+  return JSON.stringify({
+    url: shapeOptions.url,
+    params: shapeOptions.params ?? null,
+  })
+}
+
 // Check if a message contains txids in its headers
 function hasTxids<T extends Row<unknown>>(
   message: Message<T>,
@@ -1228,10 +1238,18 @@ function createElectricSync<T extends Row<unknown>>(
       }
 
       const persistedResumeState = readPersistedResumeState()
+      const shapeIdentity = getStableShapeIdentity({
+        url: shapeOptions.url,
+        params: shapeOptions.params as Record<string, unknown> | undefined,
+      })
+      const hasIncompatiblePersistedResume =
+        persistedResumeState?.kind === `resume` &&
+        persistedResumeState.shapeId !== shapeIdentity
       const canUsePersistedResume =
         shapeOptions.offset === undefined &&
         shapeOptions.handle === undefined &&
-        persistedResumeState?.kind === `resume`
+        persistedResumeState?.kind === `resume` &&
+        !hasIncompatiblePersistedResume
 
       // Wrap markReady to wait for test hook in progressive mode
       let progressiveReadyGate: Promise<void> | null = null
@@ -1354,7 +1372,7 @@ function createElectricSync<T extends Row<unknown>>(
           kind: `resume`,
           offset: lastOffset,
           handle: shapeHandle,
-          shapeId: shapeHandle,
+          shapeId: shapeIdentity,
           updatedAt: Date.now(),
         })
       }
@@ -1370,6 +1388,10 @@ function createElectricSync<T extends Row<unknown>>(
           updatedAt: Date.now(),
         })
         commit()
+      }
+
+      if (hasIncompatiblePersistedResume) {
+        commitResetResumeMetadataImmediately()
       }
 
       /**

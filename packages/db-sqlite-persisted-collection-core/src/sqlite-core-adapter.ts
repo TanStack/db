@@ -15,8 +15,11 @@ import {
 import type { LoadSubsetOptions } from '@tanstack/db'
 import type {
   PersistedIndexSpec,
+  PersistedRowScanOptions,
+  PersistedScannedRow,
   PersistedTx,
   PersistenceAdapter,
+  ReplayableTxDelta,
   SQLiteDriver,
 } from './persisted'
 
@@ -65,6 +68,7 @@ export type SQLitePullSinceResult<TKey extends string | number> =
       requiresFullReload: false
       changedKeys: Array<TKey>
       deletedKeys: Array<TKey>
+      deltas: Array<ReplayableTxDelta<Record<string, unknown>, TKey>>
     }
 
 const DEFAULT_SCHEMA_VERSION = 1
@@ -591,6 +595,28 @@ type InMemoryRow<TKey extends string | number, T extends object> = {
   value: T
   metadata?: unknown
   rowVersion: number
+}
+
+function decodeStoredSqliteRows<TKey extends string | number, T extends object>(
+  storedRows: ReadonlyArray<StoredSqliteRow>,
+): Array<InMemoryRow<TKey, T>> {
+  return storedRows.map((row) => {
+    const key = decodePersistedStorageKey(row.key) as TKey
+    const value = deserializePersistedRowValue<T>(row.value)
+    return {
+      key,
+      value,
+      metadata:
+        row.metadata != null
+          ? deserializePersistedRowValue(row.metadata)
+          : undefined,
+      rowVersion: row.row_version,
+    }
+  })
+}
+
+function stableStringify(value: unknown): string {
+  return JSON.stringify(value)
 }
 
 function compileSqlExpression(
@@ -1122,6 +1148,24 @@ export class SQLiteCorePersistenceAdapter<
       )
       const currentRowVersion = versionRows[0]?.latest_row_version ?? 0
       const nextRowVersion = Math.max(currentRowVersion + 1, tx.rowVersion)
+      const replayDelta: ReplayableTxDelta<Record<string, unknown>, TKey> | null =
+        tx.truncate
+          ? null
+          : {
+              txId: tx.txId,
+              latestRowVersion: nextRowVersion,
+              changedRows: tx.mutations
+                .filter((mutation) => mutation.type !== `delete`)
+                .map((mutation) => ({
+                  key: mutation.key,
+                  value: mutation.value as Record<string, unknown>,
+                })),
+              deletedKeys: tx.mutations
+                .filter((mutation) => mutation.type === `delete`)
+                .map((mutation) => mutation.key),
+              rowMetadataMutations: tx.rowMetadataMutations ?? [],
+              collectionMetadataMutations: tx.collectionMetadataMutations ?? [],
+            }
 
       if (tx.truncate) {
         await transactionDriver.run(`DELETE FROM ${collectionTableSql}`)
@@ -1276,10 +1320,20 @@ export class SQLiteCorePersistenceAdapter<
            seq,
            tx_id,
            row_version,
+           replay_json,
+           replay_requires_full_reload,
            applied_at
          )
-         VALUES (?, ?, ?, ?, ?, CAST(strftime('%s', 'now') AS INTEGER))`,
-        [collectionId, tx.term, tx.seq, tx.txId, nextRowVersion],
+         VALUES (?, ?, ?, ?, ?, ?, ?, CAST(strftime('%s', 'now') AS INTEGER))`,
+        [
+          collectionId,
+          tx.term,
+          tx.seq,
+          tx.txId,
+          nextRowVersion,
+          replayDelta ? stableStringify(replayDelta) : null,
+          tx.truncate ? 1 : 0,
+        ],
       )
 
       await this.pruneAppliedTxRows(collectionId, transactionDriver)
@@ -1299,6 +1353,29 @@ export class SQLiteCorePersistenceAdapter<
     return rows.map((row) => ({
       key: row.key,
       value: deserializePersistedRowValue(row.value),
+    }))
+  }
+
+  async scanRows(
+    collectionId: string,
+    options?: PersistedRowScanOptions,
+  ): Promise<Array<PersistedScannedRow<T, TKey>>> {
+    const tableMapping = await this.ensureCollectionReady(collectionId)
+    const collectionTableSql = quoteIdentifier(tableMapping.tableName)
+
+    const storedRows = await this.driver.query<StoredSqliteRow>(
+      options?.metadataOnly
+        ? `SELECT key, value, metadata, row_version
+           FROM ${collectionTableSql}
+           WHERE metadata IS NOT NULL`
+        : `SELECT key, value, metadata, row_version
+           FROM ${collectionTableSql}`,
+    )
+
+    return decodeStoredSqliteRows<TKey, T>(storedRows).map((row) => ({
+      key: row.key,
+      value: row.value,
+      metadata: row.metadata,
     }))
   }
 
@@ -1439,7 +1516,8 @@ export class SQLiteCorePersistenceAdapter<
     const collectionTableSql = quoteIdentifier(tableMapping.tableName)
     const tombstoneTableSql = quoteIdentifier(tableMapping.tombstoneTableName)
 
-    const [changedRows, deletedRows, latestVersionRows] = await Promise.all([
+    const [changedRows, deletedRows, latestVersionRows, replayRows] =
+      await Promise.all([
       this.driver.query<{ key: string }>(
         `SELECT key
          FROM ${collectionTableSql}
@@ -1459,12 +1537,36 @@ export class SQLiteCorePersistenceAdapter<
          LIMIT 1`,
         [collectionId],
       ),
+      this.driver.query<{
+        tx_id: string
+        row_version: number
+        replay_json: string | null
+        replay_requires_full_reload: number
+      }>(
+        `SELECT tx_id, row_version, replay_json, replay_requires_full_reload
+         FROM applied_tx
+         WHERE collection_id = ? AND row_version > ?
+         ORDER BY term ASC, seq ASC`,
+        [collectionId, fromRowVersion],
+      ),
     ])
 
     const latestRowVersion = latestVersionRows[0]?.latest_row_version ?? 0
     const changedKeyCount = changedRows.length + deletedRows.length
 
     if (changedKeyCount > this.pullSinceReloadThreshold) {
+      return {
+        latestRowVersion,
+        requiresFullReload: true,
+      }
+    }
+
+    if (
+      replayRows.some(
+        (row) =>
+          row.replay_requires_full_reload !== 0 || row.replay_json == null,
+      )
+    ) {
       return {
         latestRowVersion,
         requiresFullReload: true,
@@ -1481,11 +1583,41 @@ export class SQLiteCorePersistenceAdapter<
       }
     }
 
+    const deltas = replayRows.map((row) => {
+      const parsed = JSON.parse(
+        row.replay_json ?? `null`,
+      ) as ReplayableTxDelta<Record<string, unknown>, TKey> | null
+      if (!parsed) {
+        throw new InvalidPersistedCollectionConfigError(
+          `missing replay payload for applied_tx row`,
+        )
+      }
+      return parsed
+    })
+
+    const replayChangeCount = deltas.reduce(
+      (count, delta) =>
+        count +
+        delta.changedRows.length +
+        delta.deletedKeys.length +
+        delta.rowMetadataMutations.length +
+        delta.collectionMetadataMutations.length,
+      0,
+    )
+
+    if (replayChangeCount > this.pullSinceReloadThreshold) {
+      return {
+        latestRowVersion,
+        requiresFullReload: true,
+      }
+    }
+
     return {
       latestRowVersion,
       requiresFullReload: false,
       changedKeys: changedRows.map((row) => decodeKey(row.key)),
       deletedKeys: deletedRows.map((row) => decodeKey(row.key)),
+      deltas,
     }
   }
 
@@ -1516,19 +1648,7 @@ export class SQLiteCorePersistenceAdapter<
       sql,
       queryParams,
     )
-    const parsedRows = storedRows.map((row) => {
-      const key = decodePersistedStorageKey(row.key) as TKey
-      const value = deserializePersistedRowValue<T>(row.value)
-      return {
-        key,
-        value,
-        metadata:
-          row.metadata != null
-            ? deserializePersistedRowValue(row.metadata)
-            : undefined,
-        rowVersion: row.row_version,
-      }
-    })
+    const parsedRows = decodeStoredSqliteRows<TKey, T>(storedRows)
 
     const filteredRows = this.applyInMemoryWhere(parsedRows, options.where)
     const orderedRows = this.applyInMemoryOrderBy(filteredRows, options.orderBy)
@@ -1908,10 +2028,22 @@ export class SQLiteCorePersistenceAdapter<
          seq INTEGER NOT NULL,
          tx_id TEXT NOT NULL,
          row_version INTEGER NOT NULL,
+         replay_json TEXT,
+         replay_requires_full_reload INTEGER NOT NULL DEFAULT 0,
          applied_at INTEGER NOT NULL,
          PRIMARY KEY (collection_id, term, seq)
        )`,
     )
+    try {
+      await this.driver.exec(
+        `ALTER TABLE applied_tx ADD COLUMN replay_json TEXT`,
+      )
+    } catch {}
+    try {
+      await this.driver.exec(
+        `ALTER TABLE applied_tx ADD COLUMN replay_requires_full_reload INTEGER NOT NULL DEFAULT 0`,
+      )
+    } catch {}
     await this.driver.exec(
       `CREATE TABLE IF NOT EXISTS collection_version (
          collection_id TEXT PRIMARY KEY,

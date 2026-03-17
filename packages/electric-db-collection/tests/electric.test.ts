@@ -4,6 +4,7 @@ import {
   createCollection,
   createTransaction,
 } from '@tanstack/db'
+import { persistedCollectionOptions } from '../../db-sqlite-persisted-collection-core/src'
 import { electricCollectionOptions, isChangeMessage } from '../src/electric'
 import { stripVirtualProps } from '../../db/tests/utils'
 import type { ElectricCollectionUtils } from '../src/electric'
@@ -91,6 +92,27 @@ describe(`Electric Integration`, () => {
       },
     }
   }
+
+  const createPersistedAdapter = (collectionMetadata?: Map<string, unknown>) => ({
+    loadSubset: async () => [],
+    loadCollectionMetadata: async () =>
+      Array.from((collectionMetadata ?? new Map()).entries()).map(
+        ([key, value]) => ({
+          key,
+          value,
+        }),
+      ),
+    applyCommittedTx: async (_collectionId: string, tx: any) => {
+      for (const mutation of tx.collectionMetadataMutations ?? []) {
+        if (mutation.type === `delete`) {
+          collectionMetadata?.delete(mutation.key)
+        } else {
+          collectionMetadata?.set(mutation.key, mutation.value)
+        }
+      }
+    },
+    ensureIndex: async () => {},
+  })
 
   beforeEach(() => {
     vi.clearAllMocks()
@@ -2978,7 +3000,10 @@ describe(`Electric Integration`, () => {
               kind: `resume`,
               offset: `10_0`,
               handle: `handle-1`,
-              shapeId: `shape-1`,
+              shapeId: JSON.stringify({
+                url: `http://test-url`,
+                params: { table: `test_table` },
+              }),
               updatedAt: 1,
             },
           ],
@@ -3067,6 +3092,51 @@ describe(`Electric Integration`, () => {
       )
     })
 
+    it(`should honor persisted reset resume metadata through the persisted wrapper`, async () => {
+      vi.clearAllMocks()
+
+      const { ShapeStream } = await import(`@electric-sql/client`)
+      const collectionMetadata = new Map<string, unknown>([
+        [
+          `electric:resume`,
+          {
+            kind: `reset`,
+            updatedAt: 1,
+          },
+        ],
+      ])
+
+      const persistedCollection = createCollection(
+        persistedCollectionOptions({
+          ...(electricCollectionOptions({
+            id: `persisted-wrapper-reset-test`,
+            shapeOptions: {
+              url: `http://test-url`,
+              params: {
+                table: `test_table`,
+              },
+            },
+            syncMode: `on-demand` as const,
+            getKey: (item: Row) => item.id as number,
+            startSync: true,
+          }) as any),
+          persistence: {
+            adapter: createPersistedAdapter(collectionMetadata),
+          },
+        }) as any,
+      )
+
+      persistedCollection.startSyncImmediate()
+      await new Promise((resolve) => setTimeout(resolve, 0))
+
+      expect(ShapeStream).toHaveBeenCalledWith(
+        expect.objectContaining({
+          offset: `now`,
+          handle: undefined,
+        }),
+      )
+    })
+
     it(`should not mix explicit handle with persisted offset`, async () => {
       vi.clearAllMocks()
 
@@ -3079,7 +3149,10 @@ describe(`Electric Integration`, () => {
               kind: `resume`,
               offset: `10_0`,
               handle: `persisted-handle`,
-              shapeId: `shape-1`,
+              shapeId: JSON.stringify({
+                url: `http://test-url`,
+                params: { table: `test_table` },
+              }),
               updatedAt: 1,
             },
           ],
@@ -3132,7 +3205,10 @@ describe(`Electric Integration`, () => {
               kind: `resume`,
               offset: `10_0`,
               handle: `persisted-handle`,
-              shapeId: `shape-1`,
+              shapeId: JSON.stringify({
+                url: `http://test-url`,
+                params: { table: `test_table` },
+              }),
               updatedAt: 1,
             },
           ],
@@ -3219,6 +3295,65 @@ describe(`Electric Integration`, () => {
         expect.objectContaining({
           offset: `now`,
           handle: undefined,
+        }),
+      )
+    })
+
+    it(`should reset and fall back when persisted resume identity is incompatible`, async () => {
+      vi.clearAllMocks()
+
+      const { ShapeStream } = await import(`@electric-sql/client`)
+      const metadataHarness = createInMemorySyncMetadataApi(
+        new Map([
+          [
+            `electric:resume`,
+            {
+              kind: `resume`,
+              offset: `10_0`,
+              handle: `handle-1`,
+              shapeId: `{"url":"http://other-url","params":{"table":"test_table"}}`,
+              updatedAt: 1,
+            },
+          ],
+        ]),
+      )
+
+      const baseOptions = electricCollectionOptions({
+        id: `persisted-incompatible-resume-test`,
+        shapeOptions: {
+          url: `http://test-url`,
+          params: {
+            table: `test_table`,
+          },
+        },
+        syncMode: `on-demand` as const,
+        getKey: (item: Row) => item.id as number,
+        startSync: true,
+      })
+
+      const originalSync = baseOptions.sync
+      createCollection({
+        ...baseOptions,
+        sync: {
+          sync: (params: Parameters<typeof originalSync.sync>[0]) =>
+            originalSync.sync({
+              ...params,
+              metadata: metadataHarness.api,
+            }),
+        },
+      })
+
+      expect(ShapeStream).toHaveBeenCalledWith(
+        expect.objectContaining({
+          offset: `now`,
+          handle: undefined,
+        }),
+      )
+      expect(
+        metadataHarness.collectionMetadata.get(`electric:resume`),
+      ).toEqual(
+        expect.objectContaining({
+          kind: `reset`,
         }),
       )
     })

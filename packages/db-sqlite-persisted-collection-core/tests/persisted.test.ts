@@ -1,5 +1,9 @@
 import { describe, expect, it } from 'vitest'
-import { IR, createCollection, createTransaction } from '@tanstack/db'
+import {
+  IR,
+  createCollection,
+  createTransaction,
+} from '@tanstack/db'
 import {
   InvalidPersistedCollectionCoordinatorError,
   InvalidPersistedStorageKeyEncodingError,
@@ -91,6 +95,14 @@ function createRecordingAdapter(
         ),
       )
     },
+    scanRows: () =>
+      Promise.resolve(
+        Array.from(rows.values()).map((value) => ({
+          key: value.id,
+          value,
+          metadata: rowMetadata.get(value.id),
+        })),
+      ),
     applyCommittedTx: (collectionId, tx) => {
       adapter.applyCommittedTxCalls.push({
         collectionId,
@@ -459,6 +471,180 @@ describe(`persistedCollectionOptions`, () => {
       collection._state.syncedCollectionMetadata.get(`runtime:key`),
     ).toEqual({
       persisted: true,
+    })
+  })
+
+  it(`replays metadata-only tx:committed deltas without full reload`, async () => {
+    const adapter = createRecordingAdapter([
+      {
+        id: `1`,
+        title: `Tracked`,
+      },
+    ])
+    adapter.rowMetadata.set(`1`, { source: `initial` })
+    const coordinator = createCoordinatorHarness()
+
+    const collection = createCollection(
+      persistedCollectionOptions<Todo, string>({
+        id: `sync-present`,
+        getKey: (item) => item.id,
+        sync: {
+          sync: ({ markReady }) => {
+            markReady()
+          },
+        },
+        persistence: {
+          adapter,
+          coordinator,
+        },
+      }),
+    )
+
+    await collection.preload()
+    await flushAsyncWork()
+    const loadSubsetCallsAfterPreload = adapter.loadSubsetCalls.length
+
+    coordinator.emit({
+      type: `tx:committed`,
+      term: 1,
+      seq: 1,
+      txId: `tx-metadata-only`,
+      latestRowVersion: 2,
+      requiresFullReload: false,
+      changedRows: [],
+      deletedKeys: [],
+      rowMetadataMutations: [
+        {
+          type: `set`,
+          key: `1`,
+          value: { source: `replayed` },
+        },
+      ],
+      collectionMetadataMutations: [
+        {
+          type: `set`,
+          key: `electric:resume`,
+          value: {
+            kind: `reset`,
+            updatedAt: 2,
+          },
+        },
+      ],
+    })
+
+    await flushAsyncWork()
+    await flushAsyncWork()
+
+    expect(adapter.loadSubsetCalls.length).toBe(loadSubsetCallsAfterPreload)
+    expect(collection._state.syncedMetadata.get(`1`)).toEqual({
+      source: `replayed`,
+    })
+    expect(
+      collection._state.syncedCollectionMetadata.get(`electric:resume`),
+    ).toEqual({
+      kind: `reset`,
+      updatedAt: 2,
+    })
+  })
+
+  it(`uses pullSince replay deltas for metadata-bearing seq-gap recovery`, async () => {
+    const adapter = createRecordingAdapter([
+      {
+        id: `1`,
+        title: `Tracked`,
+      },
+    ])
+    adapter.rowMetadata.set(`1`, { source: `initial` })
+    const coordinator = createCoordinatorHarness()
+    coordinator.setPullSinceResponse({
+      type: `rpc:pullSince:res`,
+      rpcId: `pull-metadata`,
+      ok: true,
+      latestTerm: 1,
+      latestSeq: 3,
+      latestRowVersion: 3,
+      requiresFullReload: false,
+      changedKeys: [],
+      deletedKeys: [],
+      deltas: [
+        {
+          txId: `tx-gap-1`,
+          latestRowVersion: 2,
+          changedRows: [],
+          deletedKeys: [],
+          rowMetadataMutations: [
+            {
+              type: `set`,
+              key: `1`,
+              value: { source: `gap-replayed` },
+            },
+          ],
+          collectionMetadataMutations: [],
+        },
+        {
+          txId: `tx-gap-2`,
+          latestRowVersion: 3,
+          changedRows: [],
+          deletedKeys: [],
+          rowMetadataMutations: [],
+          collectionMetadataMutations: [
+            {
+              type: `set`,
+              key: `queryCollection:gc:q1`,
+              value: {
+                queryHash: `q1`,
+                mode: `until-revalidated`,
+              },
+            },
+          ],
+        },
+      ],
+    })
+
+    const collection = createCollection(
+      persistedCollectionOptions<Todo, string>({
+        id: `sync-present`,
+        getKey: (item) => item.id,
+        sync: {
+          sync: ({ markReady }) => {
+            markReady()
+          },
+        },
+        persistence: {
+          adapter,
+          coordinator,
+        },
+      }),
+    )
+
+    await collection.preload()
+    await flushAsyncWork()
+    const loadSubsetCallsAfterPreload = adapter.loadSubsetCalls.length
+
+    coordinator.emit({
+      type: `tx:committed`,
+      term: 1,
+      seq: 3,
+      txId: `tx-gap-trigger`,
+      latestRowVersion: 3,
+      requiresFullReload: false,
+      changedRows: [],
+      deletedKeys: [],
+    })
+
+    await flushAsyncWork()
+    await flushAsyncWork()
+
+    expect(coordinator.pullSinceCalls).toBe(1)
+    expect(adapter.loadSubsetCalls.length).toBe(loadSubsetCallsAfterPreload)
+    expect(collection._state.syncedMetadata.get(`1`)).toEqual({
+      source: `gap-replayed`,
+    })
+    expect(
+      collection._state.syncedCollectionMetadata.get(`queryCollection:gc:q1`),
+    ).toEqual({
+      queryHash: `q1`,
+      mode: `until-revalidated`,
     })
   })
 

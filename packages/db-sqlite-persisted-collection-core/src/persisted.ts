@@ -78,6 +78,8 @@ export type TxCommitted = {
         value: Record<string, unknown>
       }>
       deletedKeys: Array<string | number>
+      rowMetadataMutations?: Array<PersistedRowMetadataMutation<string | number>>
+      collectionMetadataMutations?: Array<PersistedCollectionMetadataMutation>
     }
 )
 
@@ -151,6 +153,7 @@ export type PullSinceResponse =
       requiresFullReload: false
       changedKeys: Array<string | number>
       deletedKeys: Array<string | number>
+      deltas?: Array<ReplayableTxDelta<Record<string, unknown>, string | number>>
     }
   | {
       type: `rpc:pullSince:res`
@@ -169,6 +172,41 @@ export interface PersistedIndexSpec {
   readonly expressionSql: ReadonlyArray<string>
   readonly whereSql?: string
   readonly metadata?: Readonly<Record<string, unknown>>
+}
+
+export type PersistedRowMetadataMutation<
+  TKey extends string | number = string | number,
+> =
+  | { type: `set`; key: TKey; value: unknown }
+  | { type: `delete`; key: TKey }
+
+export type PersistedCollectionMetadataMutation =
+  | { type: `set`; key: string; value: unknown }
+  | { type: `delete`; key: string }
+
+export type ReplayableTxDelta<
+  T extends Record<string, unknown> = Record<string, unknown>,
+  TKey extends string | number = string | number,
+> = {
+  txId: string
+  latestRowVersion: number
+  changedRows: Array<{ key: TKey; value: T }>
+  deletedKeys: Array<TKey>
+  rowMetadataMutations: Array<PersistedRowMetadataMutation<TKey>>
+  collectionMetadataMutations: Array<PersistedCollectionMetadataMutation>
+}
+
+export type PersistedScannedRow<
+  T extends object,
+  TKey extends string | number = string | number,
+> = {
+  key: TKey
+  value: T
+  metadata?: unknown
+}
+
+export type PersistedRowScanOptions = {
+  metadataOnly?: boolean
 }
 
 export type PersistedTx<
@@ -197,13 +235,8 @@ export type PersistedTx<
       }
     | { type: `delete`; key: TKey; value: T }
   >
-  rowMetadataMutations?: Array<
-    { type: `set`; key: TKey; value: unknown } | { type: `delete`; key: TKey }
-  >
-  collectionMetadataMutations?: Array<
-    | { type: `set`; key: string; value: unknown }
-    | { type: `delete`; key: string }
-  >
+  rowMetadataMutations?: Array<PersistedRowMetadataMutation<TKey>>
+  collectionMetadataMutations?: Array<PersistedCollectionMetadataMutation>
 }
 
 export interface PersistenceAdapter<
@@ -222,6 +255,10 @@ export interface PersistenceAdapter<
   loadCollectionMetadata?: (
     collectionId: string,
   ) => Promise<Array<{ key: string; value: unknown }>>
+  scanRows?: (
+    collectionId: string,
+    options?: PersistedRowScanOptions,
+  ) => Promise<Array<PersistedScannedRow<T, TKey>>>
   ensureIndex: (
     collectionId: string,
     signature: string,
@@ -442,6 +479,7 @@ export class SingleProcessCoordinator implements PersistedCollectionCoordinator 
       requiresFullReload: false,
       changedKeys: [],
       deletedKeys: [],
+      deltas: [],
     })
   }
 }
@@ -715,7 +753,12 @@ function isTxCommittedPayload(payload: unknown): payload is TxCommitted {
   }
 
   return (
-    Array.isArray(payload.changedRows) && Array.isArray(payload.deletedKeys)
+    Array.isArray(payload.changedRows) &&
+    Array.isArray(payload.deletedKeys) &&
+    (payload.rowMetadataMutations === undefined ||
+      Array.isArray(payload.rowMetadataMutations)) &&
+    (payload.collectionMetadataMutations === undefined ||
+      Array.isArray(payload.collectionMetadataMutations))
   )
 }
 
@@ -1153,6 +1196,22 @@ class PersistedCollectionRuntime<
     })
   }
 
+  private async scanPersistedRowsUnsafe(
+    options?: PersistedRowScanOptions,
+  ): Promise<Array<PersistedScannedRow<T, TKey>>> {
+    if (!this.persistence.adapter.scanRows) {
+      return []
+    }
+
+    return this.persistence.adapter.scanRows(this.collectionId, options)
+  }
+
+  async scanPersistedRows(
+    options?: PersistedRowScanOptions,
+  ): Promise<Array<PersistedScannedRow<T, TKey>>> {
+    return this.applyMutex.run(() => this.scanPersistedRowsUnsafe(options))
+  }
+
   private async hydrateSubsetUnsafe(
     options: LoadSubsetOptions,
     config: {
@@ -1357,9 +1416,6 @@ class PersistedCollectionRuntime<
         seq: tx.seq,
         txId: tx.txId,
         latestRowVersion: tx.rowVersion,
-        hasMetadataChanges:
-          transaction.rowMetadataWrites.size > 0 ||
-          transaction.collectionMetadataWrites.size > 0,
         requiresFullReload: transaction.truncate,
         changedRows: transaction.operations
           .filter((operation) => operation.type === `update`)
@@ -1367,6 +1423,8 @@ class PersistedCollectionRuntime<
         deletedKeys: transaction.operations
           .filter((operation) => operation.type === `delete`)
           .map((operation) => operation.key),
+        rowMetadataMutations: tx.rowMetadataMutations,
+        collectionMetadataMutations: tx.collectionMetadataMutations,
       }),
     )
   }
@@ -1555,11 +1613,6 @@ class PersistedCollectionRuntime<
         seq: tx.seq,
         txId: tx.txId,
         latestRowVersion: tx.rowVersion,
-        hasMetadataChanges:
-          (tx.rowMetadataMutations !== undefined &&
-            tx.rowMetadataMutations.length > 0) ||
-          (tx.collectionMetadataMutations !== undefined &&
-            tx.collectionMetadataMutations.length > 0),
         changedRows: mutations
           .filter((mutation) => mutation.type !== `delete`)
           .map((mutation) => ({
@@ -1569,6 +1622,8 @@ class PersistedCollectionRuntime<
         deletedKeys: mutations
           .filter((mutation) => mutation.type === `delete`)
           .map((mutation) => mutation.key as TKey),
+        rowMetadataMutations: tx.rowMetadataMutations,
+        collectionMetadataMutations: tx.collectionMetadataMutations,
       }),
     )
 
@@ -1582,13 +1637,19 @@ class PersistedCollectionRuntime<
     latestRowVersion: number
     changedRows: Array<{ key: TKey; value: T }>
     deletedKeys: Array<TKey>
+    rowMetadataMutations?: Array<PersistedRowMetadataMutation<TKey>>
+    collectionMetadataMutations?: Array<PersistedCollectionMetadataMutation>
     hasMetadataChanges?: boolean
     requiresFullReload?: boolean
   }): TxCommitted {
+    const rowMetadataMutations = args.rowMetadataMutations ?? []
+    const collectionMetadataMutations = args.collectionMetadataMutations ?? []
     const requiresFullReload =
       args.requiresFullReload === true ||
-      args.hasMetadataChanges === true ||
-      args.changedRows.length + args.deletedKeys.length >
+      args.changedRows.length +
+        args.deletedKeys.length +
+        rowMetadataMutations.length +
+        collectionMetadataMutations.length >
         TARGETED_INVALIDATION_KEY_LIMIT
 
     if (requiresFullReload) {
@@ -1614,6 +1675,9 @@ class PersistedCollectionRuntime<
         value: Record<string, unknown>
       }>,
       deletedKeys: args.deletedKeys,
+      rowMetadataMutations:
+        rowMetadataMutations as Array<PersistedRowMetadataMutation<string | number>>,
+      collectionMetadataMutations,
     }
   }
 
@@ -1842,6 +1906,13 @@ class PersistedCollectionRuntime<
 
     if (hasGap) {
       await this.recoverFromSeqGapUnsafe()
+      if (
+        txCommitted.term < this.latestTerm ||
+        (txCommitted.term === this.latestTerm &&
+          txCommitted.seq <= this.latestSeq)
+      ) {
+        return
+      }
     }
 
     this.observeStreamPosition(
@@ -1867,7 +1938,25 @@ class PersistedCollectionRuntime<
             pullResponse.latestSeq,
             pullResponse.latestRowVersion,
           )
-          await this.reloadActiveSubsetsUnsafe()
+          if (pullResponse.requiresFullReload || !pullResponse.deltas) {
+            await this.reloadActiveSubsetsUnsafe()
+            return
+          }
+
+          for (const delta of pullResponse.deltas) {
+            await this.invalidateFromCommittedTxUnsafe({
+              type: `tx:committed`,
+              term: pullResponse.latestTerm,
+              seq: pullResponse.latestSeq,
+              txId: delta.txId,
+              latestRowVersion: delta.latestRowVersion,
+              requiresFullReload: false,
+              changedRows: delta.changedRows,
+              deletedKeys: delta.deletedKeys,
+              rowMetadataMutations: delta.rowMetadataMutations,
+              collectionMetadataMutations: delta.collectionMetadataMutations,
+            })
+          }
           return
         }
       } catch (error) {
@@ -1915,7 +2004,7 @@ class PersistedCollectionRuntime<
       (opt) => opt.limit != null || opt.offset != null || opt.cursor != null,
     )
 
-    if (!hasPaginatedSubset) {
+    if (!hasPaginatedSubset || changedKeyCount === 0) {
       await this.applyTargetedInvalidationUnsafe(txCommitted)
       return
     }
@@ -1954,6 +2043,28 @@ class PersistedCollectionRuntime<
       for (const deletedKey of txCommitted.deletedKeys) {
         this.syncControls.write?.({ type: `delete`, key: deletedKey as TKey })
       }
+
+      txCommitted.rowMetadataMutations?.forEach((mutation) => {
+        if (mutation.type === `delete`) {
+          this.syncControls.metadata?.row.delete(mutation.key as TKey)
+        } else {
+          this.syncControls.metadata?.row.set(
+            mutation.key as TKey,
+            mutation.value,
+          )
+        }
+      })
+
+      txCommitted.collectionMetadataMutations?.forEach((mutation) => {
+        if (mutation.type === `delete`) {
+          this.syncControls.metadata?.collection.delete(mutation.key)
+        } else {
+          this.syncControls.metadata?.collection.set(
+            mutation.key,
+            mutation.value,
+          )
+        }
+      })
 
       this.syncControls.commit?.()
     })
@@ -2185,6 +2296,8 @@ function createWrappedSyncConfig<
                   }
                   return params.metadata!.row.get(key)
                 },
+                scanPersisted: (options?: PersistedRowScanOptions) =>
+                  runtime.scanPersistedRows(options),
                 set: (key: TKey, value: unknown) => {
                   const openTransaction = getOpenTransaction()
                   if (!openTransaction) {

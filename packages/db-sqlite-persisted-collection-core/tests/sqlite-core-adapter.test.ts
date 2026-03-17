@@ -1085,9 +1085,141 @@ export function runSQLiteCoreAdapterContractSuite(
       }
       expect(delta.changedKeys).toEqual([])
       expect(delta.deletedKeys).toEqual([`1`])
+      expect(delta.deltas).toEqual([
+        {
+          txId: `seed-pull-2`,
+          latestRowVersion: 2,
+          changedRows: [],
+          deletedKeys: [`1`],
+          rowMetadataMutations: [],
+          collectionMetadataMutations: [],
+        },
+      ])
 
       const fullReload = await adapter.pullSince(collectionId, 0)
       expect(fullReload.requiresFullReload).toBe(true)
+    })
+
+    it(`scans persisted rows with metadata and replays metadata-only deltas`, async () => {
+      const { adapter } = registerContractHarness()
+      const collectionId = `scan-and-replay`
+
+      await adapter.applyCommittedTx(collectionId, {
+        txId: `scan-seed-1`,
+        term: 1,
+        seq: 1,
+        rowVersion: 1,
+        mutations: [
+          {
+            type: `insert`,
+            key: `1`,
+            value: {
+              id: `1`,
+              title: `Tracked`,
+              createdAt: `2026-01-01T00:00:00.000Z`,
+              score: 1,
+            },
+            metadata: {
+              queryCollection: {
+                owners: {
+                  q1: true,
+                },
+              },
+            },
+            metadataChanged: true,
+          },
+        ],
+      })
+
+      const scannedRows = await adapter.scanRows?.(collectionId, {
+        metadataOnly: true,
+      })
+      expect(scannedRows).toEqual([
+        {
+          key: `1`,
+          value: {
+            id: `1`,
+            title: `Tracked`,
+            createdAt: `2026-01-01T00:00:00.000Z`,
+            score: 1,
+          },
+          metadata: {
+            queryCollection: {
+              owners: {
+                q1: true,
+              },
+            },
+          },
+        },
+      ])
+
+      await adapter.applyCommittedTx(collectionId, {
+        txId: `scan-seed-2`,
+        term: 1,
+        seq: 2,
+        rowVersion: 2,
+        mutations: [],
+        rowMetadataMutations: [
+          {
+            type: `set`,
+            key: `1`,
+            value: {
+              queryCollection: {
+                owners: {
+                  q2: true,
+                },
+              },
+            },
+          },
+        ],
+        collectionMetadataMutations: [
+          {
+            type: `set`,
+            key: `electric:resume`,
+            value: {
+              kind: `reset`,
+              updatedAt: 2,
+            },
+          },
+        ],
+      })
+
+      const replayDelta = await adapter.pullSince(collectionId, 1)
+      if (replayDelta.requiresFullReload) {
+        throw new Error(`Expected replay delta, received full reload`)
+      }
+
+      expect(replayDelta.deltas).toEqual([
+        {
+          txId: `scan-seed-2`,
+          latestRowVersion: 2,
+          changedRows: [],
+          deletedKeys: [],
+          rowMetadataMutations: [
+            {
+              type: `set`,
+              key: `1`,
+              value: {
+                queryCollection: {
+                  owners: {
+                    q2: true,
+                  },
+                },
+              },
+            },
+          ],
+          collectionMetadataMutations: [
+            {
+              type: `set`,
+              key: `electric:resume`,
+              value: {
+                kind: `reset`,
+                updatedAt: 2,
+              },
+            },
+          ],
+        },
+      ])
     })
 
     it(`keeps numeric and string keys distinct in storage`, async () => {

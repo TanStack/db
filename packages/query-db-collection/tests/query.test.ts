@@ -8,6 +8,7 @@ import {
   or,
 } from '@tanstack/db'
 import { stripVirtualProps } from '../../db/tests/utils'
+import { persistedCollectionOptions } from '../../db-sqlite-persisted-collection-core/src'
 import { queryCollectionOptions } from '../src/query'
 import type { QueryFunctionContext } from '@tanstack/query-core'
 import type {
@@ -39,44 +40,120 @@ const flushPromises = () => new Promise((resolve) => setTimeout(resolve, 0))
 
 function createInMemorySyncMetadataApi<
   TKey extends string | number = string | number,
+  TItem extends object = Record<string, unknown>,
 >(seed?: {
   rowMetadata?: ReadonlyMap<TKey, unknown>
   collectionMetadata?: ReadonlyMap<string, unknown>
+  persistedRows?: ReadonlyMap<TKey, TItem>
 }): {
   api: SyncMetadataApi<TKey>
   rowMetadata: Map<TKey, unknown>
   collectionMetadata: Map<string, unknown>
+  persistedRows: Map<TKey, TItem>
 } {
   const rowMetadata = new Map(seed?.rowMetadata)
   const collectionMetadata = new Map(seed?.collectionMetadata)
+  const persistedRows = new Map(seed?.persistedRows)
+  const api = {
+    row: {
+      get: (key: TKey) => rowMetadata.get(key),
+      set: (key: TKey, value: unknown) => {
+        rowMetadata.set(key, value)
+      },
+      delete: (key: TKey) => {
+        rowMetadata.delete(key)
+      },
+      scanPersisted: async () =>
+        Array.from(persistedRows.entries()).map(([key, value]) => ({
+          key,
+          value,
+          metadata: rowMetadata.get(key),
+        })),
+    },
+    collection: {
+      get: (key: string) => collectionMetadata.get(key),
+      set: (key: string, value: unknown) => {
+        collectionMetadata.set(key, value)
+      },
+      delete: (key: string) => {
+        collectionMetadata.delete(key)
+      },
+      list: (prefix?: string) =>
+        Array.from(collectionMetadata.entries())
+          .filter(([key]) => (prefix ? key.startsWith(prefix) : true))
+          .map(([key, value]) => ({ key, value })),
+    },
+  }
 
   return {
     rowMetadata,
     collectionMetadata,
-    api: {
-      row: {
-        get: (key) => rowMetadata.get(key),
-        set: (key, value) => {
-          rowMetadata.set(key, value)
-        },
-        delete: (key) => {
-          rowMetadata.delete(key)
-        },
-      },
-      collection: {
-        get: (key) => collectionMetadata.get(key),
-        set: (key, value) => {
-          collectionMetadata.set(key, value)
-        },
-        delete: (key) => {
-          collectionMetadata.delete(key)
-        },
-        list: (prefix) =>
-          Array.from(collectionMetadata.entries())
-            .filter(([key]) => (prefix ? key.startsWith(prefix) : true))
-            .map(([key, value]) => ({ key, value })),
-      },
+    persistedRows,
+    api: api as SyncMetadataApi<TKey>,
+  }
+}
+
+function createPersistedQueryAdapter<TItem extends { id: string }>(
+  seed: {
+    rows?: ReadonlyMap<string, TItem>
+    rowMetadata?: ReadonlyMap<string, unknown>
+    collectionMetadata?: ReadonlyMap<string, unknown>
+  } = {},
+) {
+  const rows = new Map(seed.rows)
+  const rowMetadata = new Map(seed.rowMetadata)
+  const collectionMetadata = new Map(seed.collectionMetadata)
+
+  return {
+    rows,
+    rowMetadata,
+    collectionMetadata,
+    loadSubset: async () =>
+      Array.from(rows.values()).map((value) => ({
+        key: value.id,
+        value,
+        metadata: rowMetadata.get(value.id),
+      })),
+    loadCollectionMetadata: async () =>
+      Array.from(collectionMetadata.entries()).map(([key, value]) => ({
+        key,
+        value,
+      })),
+    scanRows: async () =>
+      Array.from(rows.values()).map((value) => ({
+        key: value.id,
+        value,
+        metadata: rowMetadata.get(value.id),
+      })),
+    applyCommittedTx: async (_collectionId: string, tx: any) => {
+      if (tx.truncate) {
+        rows.clear()
+        rowMetadata.clear()
+      }
+      for (const mutation of tx.mutations) {
+        if (mutation.type === `delete`) {
+          rows.delete(mutation.key)
+          rowMetadata.delete(mutation.key)
+        } else {
+          rows.set(mutation.key, mutation.value)
+        }
+      }
+      for (const mutation of tx.rowMetadataMutations ?? []) {
+        if (mutation.type === `delete`) {
+          rowMetadata.delete(mutation.key)
+        } else {
+          rowMetadata.set(mutation.key, mutation.value)
+        }
+      }
+      for (const mutation of tx.collectionMetadataMutations ?? []) {
+        if (mutation.type === `delete`) {
+          collectionMetadata.delete(mutation.key)
+        } else {
+          collectionMetadata.set(mutation.key, mutation.value)
+        }
+      }
     },
+    ensureIndex: async () => {},
   }
 }
 
@@ -4360,6 +4437,10 @@ describe(`QueryCollection`, () => {
             },
           ],
         ]),
+        persistedRows: new Map([
+          [ownedRow.id, ownedRow],
+          [unrelatedRow.id, unrelatedRow],
+        ]),
       })
 
       const collection = createCollection({
@@ -4446,6 +4527,10 @@ describe(`QueryCollection`, () => {
             },
           ],
         ]),
+        persistedRows: new Map([
+          [orphanRow.id, orphanRow],
+          [sharedRow.id, sharedRow],
+        ]),
       })
 
       const collection = createCollection({
@@ -4475,11 +4560,7 @@ describe(`QueryCollection`, () => {
         metadataHarness.collectionMetadata.get(
           `queryCollection:gc:${expiredQueryHash}`,
         ),
-      ).toEqual({
-        queryHash: expiredQueryHash,
-        mode: `ttl`,
-        expiresAt: expect.any(Number),
-      })
+      ).toBeUndefined()
       expect(metadataHarness.rowMetadata.get(sharedRow.id)).toEqual({
         queryCollection: {
           owners: {
@@ -4560,6 +4641,223 @@ describe(`QueryCollection`, () => {
         queryHash: retainedQueryHash,
         mode: `until-revalidated`,
       })
+    })
+
+    it(`should clean up expired retained placeholders for cold persisted rows through the persisted wrapper`, async () => {
+      const queryHash = hashKey([`persisted-cold-ttl-cleanup`])
+      const otherOwnerHash = `other-owner`
+      const orphanRow = { id: `1`, name: `Cold orphan`, category: `A` }
+      const sharedRow = { id: `2`, name: `Cold shared`, category: `B` }
+      const adapter = createPersistedQueryAdapter<CategorisedItem>({
+        rows: new Map([
+          [orphanRow.id, orphanRow],
+          [sharedRow.id, sharedRow],
+        ]),
+        rowMetadata: new Map([
+          [
+            orphanRow.id,
+            {
+              queryCollection: {
+                owners: {
+                  [queryHash]: true,
+                },
+              },
+            },
+          ],
+          [
+            sharedRow.id,
+            {
+              queryCollection: {
+                owners: {
+                  [queryHash]: true,
+                  [otherOwnerHash]: true,
+                },
+              },
+            },
+          ],
+        ]),
+        collectionMetadata: new Map([
+          [
+            `queryCollection:gc:${queryHash}`,
+            {
+              queryHash,
+              mode: `ttl`,
+              expiresAt: Date.now() - 1_000,
+            },
+          ],
+        ]),
+      })
+
+      const collection = createCollection(
+        persistedCollectionOptions({
+          ...(queryCollectionOptions<CategorisedItem>({
+            id: `persisted-cold-ttl-cleanup`,
+            queryClient,
+            queryKey: [`persisted-cold-ttl-cleanup`],
+            queryFn: async () => [],
+            getKey: (item: CategorisedItem): string => item.id,
+            syncMode: `on-demand`,
+            startSync: true,
+          }) as any),
+          persistence: {
+            adapter,
+          },
+        }) as any,
+      )
+
+      await collection.stateWhenReady()
+      await flushPromises()
+
+      expect(adapter.rows.has(orphanRow.id)).toBe(false)
+      expect(adapter.rows.has(sharedRow.id)).toBe(true)
+      expect(
+        adapter.collectionMetadata.has(`queryCollection:gc:${queryHash}`),
+      ).toBe(false)
+      expect(adapter.rowMetadata.get(sharedRow.id)).toEqual({
+        queryCollection: {
+          owners: {
+            [otherOwnerHash]: true,
+          },
+        },
+      })
+    })
+
+    it(`should revalidate retained queries against cold persisted baselines through the persisted wrapper`, async () => {
+      const queryHash = hashKey([`persisted-cold-retained`])
+      const retainedRow = { id: `1`, name: `Stale retained`, category: `A` }
+      const adapter = createPersistedQueryAdapter<CategorisedItem>({
+        rows: new Map([[retainedRow.id, retainedRow]]),
+        rowMetadata: new Map([
+          [
+            retainedRow.id,
+            {
+              queryCollection: {
+                owners: {
+                  [queryHash]: true,
+                },
+              },
+            },
+          ],
+        ]),
+        collectionMetadata: new Map([
+          [
+            `queryCollection:gc:${queryHash}`,
+            {
+              queryHash,
+              mode: `until-revalidated`,
+            },
+          ],
+        ]),
+      })
+
+      const collection = createCollection(
+        persistedCollectionOptions({
+          ...(queryCollectionOptions<CategorisedItem>({
+            id: `persisted-cold-retained`,
+            queryClient,
+            queryKey: [`persisted-cold-retained`],
+            queryFn: async () => [],
+            getKey: (item: CategorisedItem): string => item.id,
+            syncMode: `on-demand`,
+            startSync: true,
+          }) as any),
+          persistence: {
+            adapter,
+          },
+        }) as any,
+      )
+
+      await collection.stateWhenReady()
+      expect(adapter.rows.has(retainedRow.id)).toBe(true)
+
+      const liveQuery = createLiveQueryCollection({
+        query: (q) => q.from({ item: collection }),
+      })
+
+      await liveQuery.preload()
+      await flushPromises()
+
+      expect(adapter.rows.has(retainedRow.id)).toBe(false)
+      expect(
+        adapter.collectionMetadata.has(`queryCollection:gc:${queryHash}`),
+      ).toBe(false)
+    })
+
+    it(`should expire retained ttl placeholders while the app stays open`, async () => {
+      vi.useFakeTimers()
+      try {
+        const baseQueryKey = [`runtime-ttl-retention-test`]
+        const retainedQueryHash = hashKey(baseQueryKey)
+        const items: Array<CategorisedItem> = [
+          { id: `1`, name: `Retained`, category: `A` },
+        ]
+        const queryFn = vi.fn().mockResolvedValue(items)
+
+        const config: QueryCollectionConfig<CategorisedItem> = {
+          id: `runtime-ttl-retention-test`,
+          queryClient,
+          queryKey: () => baseQueryKey,
+          queryFn,
+          getKey: (item) => item.id,
+          syncMode: `on-demand`,
+          startSync: true,
+          persistedGcTime: 100,
+        }
+
+        const baseOptions = queryCollectionOptions(config)
+        const originalSync = baseOptions.sync
+        const metadataHarness = createInMemorySyncMetadataApi<
+          string | number,
+          CategorisedItem
+        >({
+          persistedRows: new Map(items.map((item) => [item.id, item])),
+        })
+
+        const collection = createCollection({
+          ...baseOptions,
+          sync: {
+            sync: (params: Parameters<typeof originalSync.sync>[0]) =>
+              originalSync.sync({
+                ...params,
+                metadata: metadataHarness.api,
+              }),
+          },
+        })
+
+        const liveQuery = createLiveQueryCollection({
+          query: (q) =>
+            q.from({ item: collection }).where(({ item }) => eq(item.category, `A`)),
+        })
+
+        await liveQuery.preload()
+        await vi.waitFor(() => {
+          expect(collection.size).toBe(1)
+        })
+
+        await liveQuery.cleanup()
+
+        expect(
+          metadataHarness.collectionMetadata.get(
+            `queryCollection:gc:${retainedQueryHash}`,
+          ),
+        ).toEqual({
+          queryHash: retainedQueryHash,
+          mode: `ttl`,
+          expiresAt: expect.any(Number),
+        })
+
+        await vi.advanceTimersByTimeAsync(150)
+        await vi.runOnlyPendingTimersAsync()
+
+        expect(
+          metadataHarness.collectionMetadata.get(
+            `queryCollection:gc:${retainedQueryHash}`,
+          ),
+        ).toBeUndefined()
+        expect(collection.has(`1`)).toBe(false)
+      } finally {
+        vi.useRealTimers()
+      }
     })
 
     it(`should reset refcount after query GC and reload (stale refcount bug)`, async () => {
