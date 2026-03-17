@@ -997,11 +997,11 @@ importers:
         version: 4.0.1
     devDependencies:
       '@powersync/common':
-        specifier: ^1.46.0
-        version: 1.47.0
+        specifier: 1.49.0
+        version: 1.49.0
       '@powersync/node':
-        specifier: ^0.15.2
-        version: 0.15.2(@powersync/common@1.47.0)(better-sqlite3@12.8.0)
+        specifier: 0.18.1
+        version: 0.18.1(@powersync/common@1.49.0)(better-sqlite3@12.8.0)
       '@types/debug':
         specifier: ^4.1.12
         version: 4.1.12
@@ -3795,13 +3795,13 @@ packages:
   '@polka/url@1.0.0-next.29':
     resolution: {integrity: sha512-wwQAWhWSuHaag8c4q/KN/vCoeOJYshAIvMQwD4GpSb3OiZklFfvAgmj0VCBBImRpuF/aFgIRzllXlVX93Jevww==}
 
-  '@powersync/common@1.47.0':
-    resolution: {integrity: sha512-fL7NcjCMONaFmag5pPAHyIjY5uR56E2wo2RzxckrayevQS/emqKryQusQMZKkw0e8oCGHtUZSOH76zXe9zyw8w==}
+  '@powersync/common@1.49.0':
+    resolution: {integrity: sha512-g6uonubvtmtyx8hS/G5trg9LsBvzHY3tAKHiV7SIQV3Xyz9ONM6NNnjDMP2vcLZVmsOSi8x/QJZmy/ig1YtBMg==}
 
-  '@powersync/node@0.15.2':
-    resolution: {integrity: sha512-sLWBks3DFYR6xdv0e3fMmLw2iCpRMD6+h333lO1N1wAProq9d0hSXGvTVGuvbpoNUF/mzzMIBDzUN2UIfal+kA==}
+  '@powersync/node@0.18.1':
+    resolution: {integrity: sha512-fcTICgs61CAEb39xiC7pedYsPgbjUInJ/47dr7RIdnEHpAgjWH8bW95/b70qK1fQUANy9lKBBF3PcmfswVgfCw==}
     peerDependencies:
-      '@powersync/common': ^1.45.0
+      '@powersync/common': ^1.49.0
       better-sqlite3: 12.x
     peerDependenciesMeta:
       better-sqlite3:
@@ -13537,14 +13537,14 @@ snapshots:
 
   '@polka/url@1.0.0-next.29': {}
 
-  '@powersync/common@1.47.0':
+  '@powersync/common@1.49.0':
     dependencies:
       async-mutex: 0.5.0
       event-iterator: 2.0.0
 
-  '@powersync/node@0.15.2(@powersync/common@1.47.0)(better-sqlite3@12.8.0)':
+  '@powersync/node@0.18.1(@powersync/common@1.49.0)(better-sqlite3@12.8.0)':
     dependencies:
-      '@powersync/common': 1.47.0
+      '@powersync/common': 1.49.0
       async-mutex: 0.5.0
       bson: 6.10.4
       comlink: 4.4.2
