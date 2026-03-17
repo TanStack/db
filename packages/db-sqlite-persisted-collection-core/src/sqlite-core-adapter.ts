@@ -1586,9 +1586,10 @@ export class SQLiteCorePersistenceAdapter<
     }
 
     const deltas = replayRows.map((row) => {
-      const parsed = deserializePersistedRowValue<
-        ReplayableTxDelta<Record<string, unknown>, TKey> | null
-      >(row.replay_json ?? `null`)
+      const parsed = deserializePersistedRowValue<ReplayableTxDelta<
+        Record<string, unknown>,
+        TKey
+      > | null>(row.replay_json ?? `null`)
       if (!parsed) {
         throw new InvalidPersistedCollectionConfigError(
           `missing replay payload for applied_tx row`,
