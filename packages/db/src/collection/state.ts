@@ -28,6 +28,8 @@ interface PendingSyncedTransaction<
   operations: Array<OptimisticChangeMessage<T>>
   truncate?: boolean
   deletedKeys: Set<string | number>
+  rowMetadataWrites: Map<TKey, PendingMetadataWrite>
+  collectionMetadataWrites: Map<string, PendingMetadataWrite>
   optimisticSnapshot?: {
     upserts: Map<TKey, T>
     deletes: Set<TKey>
@@ -39,6 +41,10 @@ interface PendingSyncedTransaction<
    */
   immediate?: boolean
 }
+
+type PendingMetadataWrite =
+  | { type: `set`; value: unknown }
+  | { type: `delete` }
 
 type InternalChangeMessage<
   T extends object = Record<string, unknown>,
@@ -70,6 +76,7 @@ export class CollectionStateManager<
   > = []
   public syncedData: SortedMap<TKey, TOutput>
   public syncedMetadata = new Map<TKey, unknown>()
+  public syncedCollectionMetadata = new Map<string, unknown>()
 
   // Optimistic state tracking - make public for testing
   public optimisticUpserts = new Map<TKey, TOutput>()
@@ -870,6 +877,9 @@ export class CollectionStateManager<
         for (const operation of transaction.operations) {
           changedKeys.add(operation.key as TKey)
         }
+        for (const [key] of transaction.rowMetadataWrites) {
+          changedKeys.add(key)
+        }
       }
 
       // Use pre-captured state if available (from optimistic scenarios),
@@ -959,26 +969,6 @@ export class CollectionStateManager<
           const key = operation.key as TKey
           this.syncedKeys.add(key)
 
-          // Update metadata
-          switch (operation.type) {
-            case `insert`:
-              this.syncedMetadata.set(key, operation.metadata)
-              break
-            case `update`:
-              this.syncedMetadata.set(
-                key,
-                Object.assign(
-                  {},
-                  this.syncedMetadata.get(key),
-                  operation.metadata,
-                ),
-              )
-              break
-            case `delete`:
-              this.syncedMetadata.delete(key)
-              break
-          }
-
           // Determine origin: 'local' for local-only collections or pending local changes
           const origin: VirtualOrigin =
             this.isLocalOnly ||
@@ -1025,6 +1015,7 @@ export class CollectionStateManager<
             }
             case `delete`:
               this.syncedData.delete(key)
+              this.syncedMetadata.delete(key)
               // Clean up origin and pending tracking for deleted rows
               this.rowOrigins.delete(key)
               this.pendingLocalChanges.delete(key)
@@ -1035,6 +1026,22 @@ export class CollectionStateManager<
               this.pendingOptimisticDirectDeletes.delete(key)
               break
           }
+        }
+
+        for (const [key, metadataWrite] of transaction.rowMetadataWrites) {
+          if (metadataWrite.type === `delete`) {
+            this.syncedMetadata.delete(key)
+            continue
+          }
+          this.syncedMetadata.set(key, metadataWrite.value)
+        }
+
+        for (const [key, metadataWrite] of transaction.collectionMetadataWrites) {
+          if (metadataWrite.type === `delete`) {
+            this.syncedCollectionMetadata.delete(key)
+            continue
+          }
+          this.syncedCollectionMetadata.set(key, metadataWrite.value)
         }
       }
 
@@ -1365,6 +1372,7 @@ export class CollectionStateManager<
   public cleanup(): void {
     this.syncedData.clear()
     this.syncedMetadata.clear()
+    this.syncedCollectionMetadata.clear()
     this.optimisticUpserts.clear()
     this.optimisticDeletes.clear()
     this.pendingOptimisticUpserts.clear()

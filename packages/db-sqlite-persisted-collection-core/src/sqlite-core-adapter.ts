@@ -37,6 +37,7 @@ type CompiledSqlFragment = {
 type StoredSqliteRow = {
   key: string
   value: string
+  metadata: string | null
   row_version: number
 }
 
@@ -588,6 +589,7 @@ function sanitizeExpressionSqlFragment(fragment: string): string {
 type InMemoryRow<TKey extends string | number, T extends object> = {
   key: TKey
   value: T
+  metadata?: unknown
   rowVersion: number
 }
 
@@ -1035,7 +1037,7 @@ export class SQLiteCorePersistenceAdapter<
     collectionId: string,
     options: LoadSubsetOptions,
     ctx?: { requiredIndexSignatures?: ReadonlyArray<string> },
-  ): Promise<Array<{ key: TKey; value: T }>> {
+  ): Promise<Array<{ key: TKey; value: T; metadata?: unknown }>> {
     const tableMapping = await this.ensureCollectionReady(collectionId)
     await this.touchRequiredIndexes(collectionId, ctx?.requiredIndexSignatures)
 
@@ -1072,6 +1074,7 @@ export class SQLiteCorePersistenceAdapter<
       return orderedRows.map((row) => ({
         key: row.key,
         value: row.value,
+        metadata: row.metadata,
       }))
     }
 
@@ -1079,6 +1082,7 @@ export class SQLiteCorePersistenceAdapter<
     return rows.map((row) => ({
       key: row.key,
       value: row.value,
+      metadata: row.metadata,
     }))
   }
 
@@ -1140,8 +1144,11 @@ export class SQLiteCorePersistenceAdapter<
           continue
         }
 
-        const existingRows = await transactionDriver.query<{ value: string }>(
-          `SELECT value
+        const existingRows = await transactionDriver.query<{
+          value: string
+          metadata: string | null
+        }>(
+          `SELECT value, metadata
            FROM ${collectionTableSql}
            WHERE key = ?
            LIMIT 1`,
@@ -1150,24 +1157,85 @@ export class SQLiteCorePersistenceAdapter<
         const existingValue = existingRows[0]?.value
           ? deserializePersistedRowValue(existingRows[0].value)
           : undefined
+        const existingMetadata =
+          existingRows[0]?.metadata != null
+            ? deserializePersistedRowValue(existingRows[0].metadata)
+            : undefined
         const mergedValue =
           mutation.type === `update`
             ? mergeObjectRows(existingValue, mutation.value)
             : mutation.value
+        const nextMetadata =
+          mutation.metadataChanged === true ? mutation.metadata : existingMetadata
 
         await transactionDriver.run(
-          `INSERT INTO ${collectionTableSql} (key, value, row_version)
-           VALUES (?, ?, ?)
+          `INSERT INTO ${collectionTableSql} (key, value, metadata, row_version)
+           VALUES (?, ?, ?, ?)
            ON CONFLICT(key) DO UPDATE SET
              value = excluded.value,
+             metadata = excluded.metadata,
              row_version = excluded.row_version`,
-          [encodedKey, serializePersistedRowValue(mergedValue), nextRowVersion],
+          [
+            encodedKey,
+            serializePersistedRowValue(mergedValue),
+            nextMetadata === undefined
+              ? null
+              : serializePersistedRowValue(nextMetadata),
+            nextRowVersion,
+          ],
         )
         await transactionDriver.run(
           `DELETE FROM ${tombstoneTableSql}
            WHERE key = ?`,
           [encodedKey],
         )
+      }
+
+      for (const rowMetadataMutation of tx.rowMetadataMutations ?? []) {
+        const encodedKey = encodePersistedStorageKey(rowMetadataMutation.key)
+        if (rowMetadataMutation.type === `delete`) {
+          await transactionDriver.run(
+            `UPDATE ${collectionTableSql}
+             SET metadata = NULL
+             WHERE key = ?`,
+            [encodedKey],
+          )
+        } else {
+          await transactionDriver.run(
+            `UPDATE ${collectionTableSql}
+             SET metadata = ?
+             WHERE key = ?`,
+            [
+              rowMetadataMutation.value === undefined
+                ? null
+                : serializePersistedRowValue(rowMetadataMutation.value),
+              encodedKey,
+            ],
+          )
+        }
+      }
+
+      for (const metadataMutation of tx.collectionMetadataMutations ?? []) {
+        if (metadataMutation.type === `delete`) {
+          await transactionDriver.run(
+            `DELETE FROM collection_metadata
+             WHERE collection_id = ? AND key = ?`,
+            [collectionId, metadataMutation.key],
+          )
+        } else {
+          await transactionDriver.run(
+            `INSERT INTO collection_metadata (collection_id, key, value, updated_at)
+             VALUES (?, ?, ?, CAST(strftime('%s', 'now') AS INTEGER))
+             ON CONFLICT(collection_id, key) DO UPDATE SET
+               value = excluded.value,
+               updated_at = excluded.updated_at`,
+            [
+              collectionId,
+              metadataMutation.key,
+              serializePersistedRowValue(metadataMutation.value),
+            ],
+          )
+        }
       }
 
       await transactionDriver.run(
@@ -1205,6 +1273,22 @@ export class SQLiteCorePersistenceAdapter<
 
       await this.pruneAppliedTxRows(collectionId, transactionDriver)
     })
+  }
+
+  async loadCollectionMetadata(
+    collectionId: string,
+  ): Promise<Array<{ key: string; value: unknown }>> {
+    const rows = await this.driver.query<{ key: string; value: string }>(
+      `SELECT key, value
+       FROM collection_metadata
+       WHERE collection_id = ?`,
+      [collectionId],
+    )
+
+    return rows.map((row) => ({
+      key: row.key,
+      value: deserializePersistedRowValue(row.value),
+    }))
   }
 
   async ensureIndex(
@@ -1405,7 +1489,7 @@ export class SQLiteCorePersistenceAdapter<
     const orderByCompiled = compileOrderByClauses(options.orderBy)
 
     const queryParams: Array<SqliteSupportedValue> = []
-    let sql = `SELECT key, value, row_version FROM ${collectionTableSql}`
+    let sql = `SELECT key, value, metadata, row_version FROM ${collectionTableSql}`
 
     if (options.where && whereCompiled.supported) {
       sql = `${sql} WHERE ${whereCompiled.sql}`
@@ -1427,6 +1511,10 @@ export class SQLiteCorePersistenceAdapter<
       return {
         key,
         value,
+        metadata:
+          row.metadata != null
+            ? deserializePersistedRowValue(row.metadata)
+            : undefined,
         rowVersion: row.row_version,
       }
     })
@@ -1646,6 +1734,7 @@ export class SQLiteCorePersistenceAdapter<
       `CREATE TABLE IF NOT EXISTS ${collectionTableSql} (
          key TEXT PRIMARY KEY,
          value TEXT NOT NULL,
+         metadata TEXT,
          row_version INTEGER NOT NULL
        )`,
     )
@@ -1798,6 +1887,15 @@ export class SQLiteCorePersistenceAdapter<
       `CREATE TABLE IF NOT EXISTS collection_version (
          collection_id TEXT PRIMARY KEY,
          latest_row_version INTEGER NOT NULL
+       )`,
+    )
+    await this.driver.exec(
+      `CREATE TABLE IF NOT EXISTS collection_metadata (
+         collection_id TEXT NOT NULL,
+         key TEXT NOT NULL,
+         value TEXT NOT NULL,
+         updated_at INTEGER NOT NULL,
+         PRIMARY KEY (collection_id, key)
        )`,
     )
     await this.driver.exec(

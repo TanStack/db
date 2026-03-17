@@ -44,7 +44,9 @@ type RecordingAdapter = PersistenceAdapter<Todo, string> & {
     options: LoadSubsetOptions
     requiredIndexSignatures: ReadonlyArray<string>
   }>
+  loadCollectionMetadataCalls: Array<string>
   rows: Map<string, Todo>
+  collectionMetadata: Map<string, unknown>
 }
 
 function createRecordingAdapter(
@@ -54,10 +56,12 @@ function createRecordingAdapter(
 
   const adapter: RecordingAdapter = {
     rows,
+    collectionMetadata: new Map(),
     applyCommittedTxCalls: [],
     ensureIndexCalls: [],
     markIndexRemovedCalls: [],
     loadSubsetCalls: [],
+    loadCollectionMetadataCalls: [],
     loadSubset: (collectionId, options, ctx) => {
       adapter.loadSubsetCalls.push({
         collectionId,
@@ -67,6 +71,15 @@ function createRecordingAdapter(
       return Promise.resolve(
         Array.from(rows.values()).map((value) => ({
           key: value.id,
+          value,
+        })),
+      )
+    },
+    loadCollectionMetadata: (collectionId) => {
+      adapter.loadCollectionMetadataCalls.push(collectionId)
+      return Promise.resolve(
+        Array.from(adapter.collectionMetadata.entries()).map(([key, value]) => ({
+          key,
           value,
         })),
       )
@@ -90,6 +103,13 @@ function createRecordingAdapter(
           rows.delete(mutation.key)
         } else {
           rows.set(mutation.key, mutation.value)
+        }
+      }
+      for (const metadataMutation of tx.collectionMetadataMutations ?? []) {
+        if (metadataMutation.type === `delete`) {
+          adapter.collectionMetadata.delete(metadataMutation.key)
+        } else {
+          adapter.collectionMetadata.set(metadataMutation.key, metadataMutation.value)
         }
       }
       return Promise.resolve()
@@ -255,6 +275,42 @@ describe(`persistedCollectionOptions`, () => {
       title: `Manual`,
     })
     expect(adapter.applyCommittedTxCalls).toHaveLength(1)
+  })
+
+  it(`loads collection metadata into collection state during startup`, async () => {
+    const adapter = createRecordingAdapter()
+    adapter.collectionMetadata.set(`electric:resume`, {
+      kind: `resume`,
+      offset: `10_0`,
+      handle: `handle-1`,
+      shapeId: `shape-1`,
+      updatedAt: 1,
+    })
+
+    const collection = createCollection(
+      persistedCollectionOptions<Todo, string>({
+        id: `persisted-startup-metadata`,
+        getKey: (item) => item.id,
+        persistence: {
+          adapter,
+        },
+      }),
+    )
+
+    await collection.stateWhenReady()
+
+    expect(adapter.loadCollectionMetadataCalls).toEqual([
+      `persisted-startup-metadata`,
+    ])
+    expect(collection._state.syncedCollectionMetadata.get(`electric:resume`)).toEqual(
+      {
+        kind: `resume`,
+        offset: `10_0`,
+        handle: `handle-1`,
+        shapeId: `shape-1`,
+        updatedAt: 1,
+      },
+    )
   })
 
   it(`throws InvalidSyncConfigError when sync key is present but null`, () => {

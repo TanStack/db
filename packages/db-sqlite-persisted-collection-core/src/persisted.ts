@@ -19,6 +19,7 @@ import type {
   PendingMutation,
   SyncConfig,
   SyncConfigRes,
+  SyncMetadataApi,
   UpdateMutationFnParams,
   UtilsRecord,
 } from '@tanstack/db'
@@ -179,9 +180,29 @@ export type PersistedTx<
   seq: number
   rowVersion: number
   mutations: Array<
-    | { type: `insert`; key: TKey; value: T }
-    | { type: `update`; key: TKey; value: T }
+    | {
+        type: `insert`
+        key: TKey
+        value: T
+        metadata?: unknown
+        metadataChanged?: boolean
+      }
+    | {
+        type: `update`
+        key: TKey
+        value: T
+        metadata?: unknown
+        metadataChanged?: boolean
+      }
     | { type: `delete`; key: TKey; value: T }
+  >
+  rowMetadataMutations?: Array<
+    | { type: `set`; key: TKey; value: unknown }
+    | { type: `delete`; key: TKey }
+  >
+  collectionMetadataMutations?: Array<
+    | { type: `set`; key: string; value: unknown }
+    | { type: `delete`; key: string }
   >
 }
 
@@ -193,11 +214,14 @@ export interface PersistenceAdapter<
     collectionId: string,
     options: LoadSubsetOptions,
     ctx?: { requiredIndexSignatures?: ReadonlyArray<string> },
-  ) => Promise<Array<{ key: TKey; value: T }>>
+  ) => Promise<Array<{ key: TKey; value: T; metadata?: unknown }>>
   applyCommittedTx: (
     collectionId: string,
     tx: PersistedTx<T, TKey>,
   ) => Promise<void>
+  loadCollectionMetadata?: (
+    collectionId: string,
+  ) => Promise<Array<{ key: string; value: unknown }>>
   ensureIndex: (
     collectionId: string,
     signature: string,
@@ -366,13 +390,14 @@ type SyncControlFns<T extends object, TKey extends string | number> = {
   write:
     | ((
         message:
-          | { type: `insert`; value: T }
-          | { type: `update`; value: T }
+          | { type: `insert`; value: T; metadata?: Record<string, unknown> }
+          | { type: `update`; value: T; metadata?: Record<string, unknown> }
           | { type: `delete`; key: TKey },
       ) => void)
     | null
   commit: (() => void) | null
   truncate: (() => void) | null
+  metadata: SyncMetadataApi<TKey> | null
 }
 
 /**
@@ -511,6 +536,7 @@ type NormalizedSyncOperation<T extends object, TKey extends string | number> =
       type: `update`
       key: TKey
       value: T
+      metadata?: Record<string, unknown>
     }
   | {
       type: `delete`
@@ -520,6 +546,11 @@ type NormalizedSyncOperation<T extends object, TKey extends string | number> =
 
 type BufferedSyncTransaction<T extends object, TKey extends string | number> = {
   operations: Array<NormalizedSyncOperation<T, TKey>>
+  rowMetadataWrites: Map<TKey, { type: `set`; value: unknown } | { type: `delete` }>
+  collectionMetadataWrites: Map<
+    string,
+    { type: `set`; value: unknown } | { type: `delete` }
+  >
   truncate: boolean
   internal: boolean
 }
@@ -536,6 +567,7 @@ type SyncWriteNormalization<T extends object, TKey extends string | number> = {
     | {
         type: `update`
         value: T
+        metadata?: Record<string, unknown>
       }
     | {
         type: `delete`
@@ -735,6 +767,7 @@ class PersistedCollectionRuntime<
     write: null,
     commit: null,
     truncate: null,
+    metadata: null,
   }
   private started = false
   private startPromise: Promise<void> | null = null
@@ -771,6 +804,7 @@ class PersistedCollectionRuntime<
       write: null,
       commit: null,
       truncate: null,
+      metadata: null,
     }
   }
 
@@ -829,6 +863,8 @@ class PersistedCollectionRuntime<
       )
     }
 
+    await this.loadCollectionMetadataIntoCollection()
+
     const indexBootstrapSnapshot = this.collection?.getIndexMetadata() ?? []
     this.attachIndexLifecycleListeners()
     await this.bootstrapPersistedIndexes(indexBootstrapSnapshot)
@@ -839,6 +875,32 @@ class PersistedCollectionRuntime<
         this.hydrateSubsetUnsafe({}, { requestRemoteEnsure: false }),
       )
     }
+  }
+
+  private async loadCollectionMetadataIntoCollection(): Promise<void> {
+    if (
+      !this.persistence.adapter.loadCollectionMetadata ||
+      !this.syncControls.begin ||
+      !this.syncControls.commit ||
+      !this.syncControls.metadata
+    ) {
+      return
+    }
+
+    const collectionMetadata =
+      await this.persistence.adapter.loadCollectionMetadata(this.collectionId)
+
+    if (collectionMetadata.length === 0) {
+      return
+    }
+
+    this.withInternalApply(() => {
+      this.syncControls.begin?.({ immediate: true })
+      collectionMetadata.forEach(({ key, value }) => {
+        this.syncControls.metadata?.collection.set(key, value)
+      })
+      this.syncControls.commit?.()
+    })
   }
 
   async loadSubset(
@@ -951,11 +1013,13 @@ class PersistedCollectionRuntime<
       forwardMessage: {
         type: `update`,
         value: message.value,
+          metadata: message.metadata,
       },
       operation: {
         type: `update`,
         key,
         value: message.value,
+          metadata: message.metadata,
       },
     }
   }
@@ -1042,7 +1106,7 @@ class PersistedCollectionRuntime<
 
   private loadSubsetRowsUnsafe(
     options: LoadSubsetOptions,
-  ): Promise<Array<{ key: TKey; value: T }>> {
+  ): Promise<Array<{ key: TKey; value: T; metadata?: unknown }>> {
     return this.persistence.adapter.loadSubset(this.collectionId, options, {
       requiredIndexSignatures: this.getRequiredIndexSignatures(),
     })
@@ -1071,7 +1135,9 @@ class PersistedCollectionRuntime<
     }
   }
 
-  private applyRowsToCollection(rows: Array<{ key: TKey; value: T }>): void {
+  private applyRowsToCollection(
+    rows: Array<{ key: TKey; value: T; metadata?: unknown }>,
+  ): void {
     if (
       !this.syncControls.begin ||
       !this.syncControls.write ||
@@ -1087,6 +1153,7 @@ class PersistedCollectionRuntime<
         this.syncControls.write?.({
           type: `update`,
           value: row.value,
+          metadata: row.metadata as Record<string, unknown> | undefined,
         })
       }
 
@@ -1094,7 +1161,9 @@ class PersistedCollectionRuntime<
     })
   }
 
-  private replaceCollectionRows(rows: Array<{ key: TKey; value: T }>): void {
+  private replaceCollectionRows(
+    rows: Array<{ key: TKey; value: T; metadata?: unknown }>,
+  ): void {
     if (
       !this.syncControls.begin ||
       !this.syncControls.write ||
@@ -1111,6 +1180,7 @@ class PersistedCollectionRuntime<
         this.syncControls.write?.({
           type: `update`,
           value: row.value,
+          metadata: row.metadata as Record<string, unknown> | undefined,
         })
       }
 
@@ -1156,7 +1226,24 @@ class PersistedCollectionRuntime<
           this.syncControls.write?.({
             type: `update`,
             value: operation.value,
+            metadata: operation.metadata,
           })
+        }
+      }
+
+      for (const [key, metadataWrite] of transaction.rowMetadataWrites) {
+        if (metadataWrite.type === `delete`) {
+          this.syncControls.metadata?.row.delete(key)
+        } else {
+          this.syncControls.metadata?.row.set(key, metadataWrite.value)
+        }
+      }
+
+      for (const [key, metadataWrite] of transaction.collectionMetadataWrites) {
+        if (metadataWrite.type === `delete`) {
+          this.syncControls.metadata?.collection.delete(key)
+        } else {
+          this.syncControls.metadata?.collection.set(key, metadataWrite.value)
         }
       }
 
@@ -1181,7 +1268,12 @@ class PersistedCollectionRuntime<
 
     const streamPosition = this.nextLocalStreamPosition()
 
-    if (transaction.truncate || transaction.operations.length === 0) {
+    if (
+      transaction.truncate ||
+      (transaction.operations.length === 0 &&
+        transaction.rowMetadataWrites.size === 0 &&
+        transaction.collectionMetadataWrites.size === 0)
+    ) {
       this.publishTxCommittedEvent(
         this.createTxCommittedPayload({
           term: streamPosition.term,
@@ -1197,7 +1289,7 @@ class PersistedCollectionRuntime<
     }
 
     const tx = this.createPersistedTxFromOperations(
-      transaction.operations,
+      transaction,
       streamPosition,
     )
 
@@ -1208,6 +1300,9 @@ class PersistedCollectionRuntime<
         seq: tx.seq,
         txId: tx.txId,
         latestRowVersion: tx.rowVersion,
+        hasMetadataChanges:
+          transaction.rowMetadataWrites.size > 0 ||
+          transaction.collectionMetadataWrites.size > 0,
         changedRows: transaction.operations
           .filter((operation) => operation.type === `update`)
           .map((operation) => ({ key: operation.key, value: operation.value })),
@@ -1219,7 +1314,7 @@ class PersistedCollectionRuntime<
   }
 
   private createPersistedTxFromOperations(
-    operations: Array<NormalizedSyncOperation<T, TKey>>,
+    transaction: BufferedSyncTransaction<T, TKey>,
     streamPosition: { term: number; seq: number; rowVersion: number },
   ): PersistedTx<T, TKey> {
     return {
@@ -1227,18 +1322,33 @@ class PersistedCollectionRuntime<
       term: streamPosition.term,
       seq: streamPosition.seq,
       rowVersion: streamPosition.rowVersion,
-      mutations: operations.map((operation) =>
+      mutations: transaction.operations.map((operation) =>
         operation.type === `update`
           ? {
               type: `update`,
               key: operation.key,
               value: operation.value,
+              metadata: operation.metadata,
+              metadataChanged: operation.metadata !== undefined,
             }
           : {
               type: `delete`,
               key: operation.key,
               value: operation.value,
             },
+      ),
+      rowMetadataMutations: Array.from(transaction.rowMetadataWrites.entries()).map(
+        ([key, metadataWrite]) =>
+          metadataWrite.type === `delete`
+            ? { type: `delete`, key }
+            : { type: `set`, key, value: metadataWrite.value },
+      ),
+      collectionMetadataMutations: Array.from(
+        transaction.collectionMetadataWrites.entries(),
+      ).map(([key, metadataWrite]) =>
+        metadataWrite.type === `delete`
+          ? { type: `delete`, key }
+          : { type: `set`, key, value: metadataWrite.value },
       ),
     }
   }
@@ -1387,6 +1497,11 @@ class PersistedCollectionRuntime<
         seq: tx.seq,
         txId: tx.txId,
         latestRowVersion: tx.rowVersion,
+        hasMetadataChanges:
+          (tx.rowMetadataMutations !== undefined &&
+            tx.rowMetadataMutations.length > 0) ||
+          tx.collectionMetadataMutations !== undefined &&
+          tx.collectionMetadataMutations.length > 0,
         changedRows: mutations
           .filter((mutation) => mutation.type !== `delete`)
           .map((mutation) => ({
@@ -1409,10 +1524,12 @@ class PersistedCollectionRuntime<
     latestRowVersion: number
     changedRows: Array<{ key: TKey; value: T }>
     deletedKeys: Array<TKey>
+    hasMetadataChanges?: boolean
     requiresFullReload?: boolean
   }): TxCommitted {
     const requiresFullReload =
       args.requiresFullReload === true ||
+      args.hasMetadataChanges === true ||
       args.changedRows.length + args.deletedKeys.length >
         TARGETED_INVALIDATION_KEY_LIMIT
 
@@ -1925,6 +2042,7 @@ function createWrappedSyncConfig<
         write: params.write as SyncControlFns<T, TKey>[`write`],
         commit: params.commit,
         truncate: params.truncate,
+        metadata: params.metadata ?? null,
       })
       runtime.setCollection(
         params.collection as Collection<T, TKey, PersistedCollectionUtils>,
@@ -1949,6 +2067,8 @@ function createWrappedSyncConfig<
         begin: (options?: { immediate?: boolean }) => {
           const transaction: OpenSyncTransaction<T, TKey> = {
             operations: [],
+            rowMetadataWrites: new Map(),
+            collectionMetadataWrites: new Map(),
             truncate: false,
             internal: runtime.isApplyingInternally(),
             queuedBecauseHydrating:
@@ -1970,10 +2090,66 @@ function createWrappedSyncConfig<
           }
 
           openTransaction.operations.push(normalization.operation)
+          if (normalization.operation.type === `delete`) {
+            openTransaction.rowMetadataWrites.set(normalization.operation.key, {
+              type: `delete`,
+            })
+          } else if (normalization.operation.metadata !== undefined) {
+            openTransaction.rowMetadataWrites.set(normalization.operation.key, {
+              type: `set`,
+              value: normalization.operation.metadata,
+            })
+          }
           if (!openTransaction.queuedBecauseHydrating) {
             params.write(normalization.forwardMessage)
           }
         },
+        metadata: params.metadata
+          ? {
+              row: {
+                get: (key: TKey) => params.metadata!.row.get(key),
+                set: (key: TKey, value: unknown) => {
+                  const openTransaction =
+                    transactionStack[transactionStack.length - 1]
+                  openTransaction?.rowMetadataWrites.set(key, {
+                    type: `set`,
+                    value,
+                  })
+                  params.metadata!.row.set(key, value)
+                },
+                delete: (key: TKey) => {
+                  const openTransaction =
+                    transactionStack[transactionStack.length - 1]
+                  openTransaction?.rowMetadataWrites.set(key, {
+                    type: `delete`,
+                  })
+                  params.metadata!.row.delete(key)
+                },
+              },
+              collection: {
+                get: (key: string) => params.metadata!.collection.get(key),
+                set: (key: string, value: unknown) => {
+                  const openTransaction =
+                    transactionStack[transactionStack.length - 1]
+                  openTransaction?.collectionMetadataWrites.set(key, {
+                    type: `set`,
+                    value,
+                  })
+                  params.metadata!.collection.set(key, value)
+                },
+                delete: (key: string) => {
+                  const openTransaction =
+                    transactionStack[transactionStack.length - 1]
+                  openTransaction?.collectionMetadataWrites.set(key, {
+                    type: `delete`,
+                  })
+                  params.metadata!.collection.delete(key)
+                },
+                list: (prefix?: string) =>
+                  params.metadata!.collection.list(prefix),
+              },
+            }
+          : undefined,
         truncate: () => {
           const openTransaction = transactionStack[transactionStack.length - 1]
           if (!openTransaction) {
@@ -1996,6 +2172,8 @@ function createWrappedSyncConfig<
           if (openTransaction.queuedBecauseHydrating) {
             runtime.queueHydrationBufferedTransaction({
               operations: openTransaction.operations,
+              rowMetadataWrites: openTransaction.rowMetadataWrites,
+              collectionMetadataWrites: openTransaction.collectionMetadataWrites,
               truncate: openTransaction.truncate,
               internal: openTransaction.internal,
             })
@@ -2007,6 +2185,8 @@ function createWrappedSyncConfig<
             void runtime
               .persistAndBroadcastExternalSyncTransaction({
                 operations: openTransaction.operations,
+                rowMetadataWrites: openTransaction.rowMetadataWrites,
+                collectionMetadataWrites: openTransaction.collectionMetadataWrites,
                 truncate: openTransaction.truncate,
                 internal: false,
               })
@@ -2051,6 +2231,7 @@ function createLoopbackSyncConfig<
         write: params.write as SyncControlFns<T, TKey>[`write`],
         commit: params.commit,
         truncate: params.truncate,
+        metadata: params.metadata ?? null,
       })
       runtime.setCollection(
         params.collection as Collection<T, TKey, PersistedCollectionUtils>,

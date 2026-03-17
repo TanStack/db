@@ -118,6 +118,7 @@ export interface QueryCollectionConfig<
     TQueryData,
     TQueryKey
   >[`staleTime`]
+  persistedGcTime?: number
 
   /**
    * Metadata to pass to the query.
@@ -547,6 +548,7 @@ export function queryCollectionOptions(
     retry,
     retryDelay,
     staleTime,
+    persistedGcTime,
     getKey,
     onInsert,
     onUpdate,
@@ -645,10 +647,73 @@ export function queryCollectionOptions(
   }
 
   const internalSync: SyncConfig<any>[`sync`] = (params) => {
-    const { begin, write, commit, markReady, collection } = params
+    const { begin, write, commit, markReady, collection, metadata } = params
 
     // Track whether sync has been started
     let syncStarted = false
+
+    const getRowMetadata = (rowKey: string | number) => {
+      return (metadata?.row.get(rowKey) ??
+        collection._state.syncedMetadata.get(rowKey)) as
+        | Record<string, unknown>
+        | undefined
+    }
+
+    const getPersistedOwners = (rowKey: string | number) => {
+      const rowMetadata = getRowMetadata(rowKey)
+      const queryMetadata = rowMetadata?.queryCollection
+      if (!queryMetadata || typeof queryMetadata !== `object`) {
+        return new Set<string>()
+      }
+
+      const owners = (queryMetadata as Record<string, unknown>).owners
+      if (!owners || typeof owners !== `object`) {
+        return new Set<string>()
+      }
+
+      return new Set(Object.keys(owners as Record<string, true>))
+    }
+
+    const setPersistedOwners = (
+      rowKey: string | number,
+      owners: Set<string>,
+    ) => {
+      if (!metadata) {
+        return
+      }
+
+      const currentMetadata = { ...(getRowMetadata(rowKey) ?? {}) }
+      if (owners.size === 0) {
+        delete currentMetadata.queryCollection
+        if (Object.keys(currentMetadata).length === 0) {
+          metadata.row.delete(rowKey)
+        } else {
+          metadata.row.set(rowKey, currentMetadata)
+        }
+        return
+      }
+
+      metadata.row.set(rowKey, {
+        ...currentMetadata,
+        queryCollection: {
+          owners: Object.fromEntries(
+            Array.from(owners.values()).map((owner) => [owner, true]),
+          ),
+        },
+      })
+    }
+
+    const getOwnedRowsForQuery = (hashedQueryKey: string) => {
+      const ownedRows = new Set<string | number>()
+      for (const [rowKey] of collection._state.syncedData.entries()) {
+        const owners = getPersistedOwners(rowKey)
+        if (owners.has(hashedQueryKey)) {
+          ownedRows.add(rowKey)
+          addRow(rowKey, hashedQueryKey)
+        }
+      }
+      return ownedRows
+    }
 
     /**
      * Generate a consistent query key from LoadSubsetOptions.
@@ -679,6 +744,12 @@ export function queryCollectionOptions(
       const key = generateQueryKeyFromOptions(opts)
       const hashedQueryKey = hashKey(key)
       const extendedMeta = { ...meta, loadSubsetOptions: opts }
+
+      if (metadata) {
+        begin()
+        metadata.collection.delete(`queryCollection:gc:${hashedQueryKey}`)
+        commit()
+      }
 
       if (state.observers.has(hashedQueryKey)) {
         // We already have a query for this queryKey
@@ -830,6 +901,7 @@ export function queryCollectionOptions(
           const currentSyncedItems: Map<string | number, any> = new Map(
             collection._state.syncedData.entries(),
           )
+          const previouslyOwnedRows = getOwnedRowsForQuery(hashedQueryKey)
           const newItemsMap = new Map<string | number, any>()
           newItemsArray.forEach((item) => {
             const key = getKey(item)
@@ -838,9 +910,16 @@ export function queryCollectionOptions(
 
           begin()
 
-          currentSyncedItems.forEach((oldItem, key) => {
+          previouslyOwnedRows.forEach((key) => {
+            const oldItem = currentSyncedItems.get(key)
+            if (!oldItem) {
+              return
+            }
             const newItem = newItemsMap.get(key)
             if (!newItem) {
+              const owners = getPersistedOwners(key)
+              owners.delete(hashedQueryKey)
+              setPersistedOwners(key, owners)
               const needToRemove = removeRow(key, hashedQueryKey) // returns true if the row is no longer referenced by any queries
               if (needToRemove) {
                 write({ type: `delete`, value: oldItem })
@@ -852,6 +931,11 @@ export function queryCollectionOptions(
           })
 
           newItemsMap.forEach((newItem, key) => {
+            const owners = getPersistedOwners(key)
+            if (!owners.has(hashedQueryKey)) {
+              owners.add(hashedQueryKey)
+              setPersistedOwners(key, owners)
+            }
             addRow(key, hashedQueryKey)
             if (!currentSyncedItems.has(key)) {
               write({ type: `insert`, value: newItem })
@@ -968,6 +1052,11 @@ export function queryCollectionOptions(
 
       const rowKeys = queryToRows.get(hashedQueryKey) ?? new Set()
       const rowsToDelete: Array<any> = []
+      const shouldWriteMetadata = metadata !== undefined && rowKeys.size > 0
+
+      if (shouldWriteMetadata) {
+        begin()
+      }
 
       rowKeys.forEach((rowKey) => {
         const queries = rowToQueries.get(rowKey)
@@ -977,6 +1066,7 @@ export function queryCollectionOptions(
         }
 
         queries.delete(hashedQueryKey)
+        setPersistedOwners(rowKey, queries)
 
         if (queries.size === 0) {
           rowToQueries.delete(rowKey)
@@ -987,11 +1077,17 @@ export function queryCollectionOptions(
         }
       })
 
-      if (rowsToDelete.length > 0) {
+      if (!shouldWriteMetadata && rowsToDelete.length > 0) {
         begin()
+      }
+
+      if (rowsToDelete.length > 0) {
         rowsToDelete.forEach((row) => {
           write({ type: `delete`, value: row })
         })
+      }
+
+      if (shouldWriteMetadata || rowsToDelete.length > 0) {
         commit()
       }
 
@@ -1032,6 +1128,28 @@ export function queryCollectionOptions(
           `[cleanupQueryIfIdle] Invariant violation: refcount=${refcount} but no listeners. Cleaning up to prevent leak.`,
           { hashedQueryKey },
         )
+      }
+
+      if (persistedGcTime !== undefined) {
+        if (metadata) {
+          begin()
+          metadata.collection.set(`queryCollection:gc:${hashedQueryKey}`, {
+            queryHash: hashedQueryKey,
+            mode:
+              persistedGcTime === Number.POSITIVE_INFINITY
+                ? `until-revalidated`
+                : `ttl`,
+            ...(persistedGcTime === Number.POSITIVE_INFINITY
+              ? {}
+              : { expiresAt: Date.now() + persistedGcTime }),
+          })
+          commit()
+        }
+        unsubscribes.get(hashedQueryKey)?.()
+        unsubscribes.delete(hashedQueryKey)
+        state.observers.delete(hashedQueryKey)
+        queryRefCounts.set(hashedQueryKey, 0)
+        return
       }
 
       cleanupQueryInternal(hashedQueryKey)

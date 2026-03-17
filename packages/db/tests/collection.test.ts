@@ -1440,6 +1440,127 @@ describe(`Collection`, () => {
     expect(collection._state.syncedMetadata.size).toBe(0)
   })
 
+  it(`should allow startup metadata reads and commit metadata-only sync transactions`, async () => {
+    let observedCollectionMetadata: unknown
+    let testSyncFunctions: any = null
+
+    const collection = createCollection<{ id: number; value: string }>({
+      id: `sync-metadata-startup-read-test`,
+      getKey: (item) => item.id,
+      startSync: true,
+      sync: {
+        sync: ({ begin, commit, markReady, metadata }) => {
+          observedCollectionMetadata = metadata?.collection.get(`startup:key`)
+
+          begin()
+          metadata?.collection.set(`startup:key`, { ready: true })
+          commit()
+          markReady()
+
+          testSyncFunctions = { begin, commit, metadata }
+        },
+      },
+    })
+
+    await collection.stateWhenReady()
+
+    expect(observedCollectionMetadata).toBeUndefined()
+    expect(collection._state.syncedCollectionMetadata.get(`startup:key`)).toEqual({
+      ready: true,
+    })
+
+    const { begin, commit, metadata } = testSyncFunctions
+    begin()
+    metadata.collection.set(`runtime:key`, { persisted: true })
+    commit()
+
+    expect(collection._state.syncedCollectionMetadata.get(`runtime:key`)).toEqual(
+      { persisted: true },
+    )
+  })
+
+  it(`should use last-write-wins for row metadata in sync transactions`, async () => {
+    let testSyncFunctions: any = null
+
+    const collection = createCollection<{ id: number; value: string }>({
+      id: `sync-row-metadata-last-write-test`,
+      getKey: (item) => item.id,
+      startSync: true,
+      sync: {
+        sync: ({ begin, write, commit, markReady, metadata }) => {
+          begin()
+          write({
+            type: `insert`,
+            value: { id: 1, value: `initial` },
+            metadata: { source: `write` },
+          })
+          metadata?.row.set(1, { source: `explicit-set` })
+          commit()
+          markReady()
+
+          testSyncFunctions = { begin, write, commit, metadata }
+        },
+      },
+    })
+
+    await collection.stateWhenReady()
+
+    expect(collection._state.syncedMetadata.get(1)).toEqual({
+      source: `explicit-set`,
+    })
+
+    const { begin, write, commit, metadata } = testSyncFunctions
+    begin()
+    metadata.row.set(1, { source: `set-first` })
+    write({
+      type: `update`,
+      value: { id: 1, value: `updated` },
+      metadata: { source: `write-last` },
+    })
+    commit()
+
+    expect(collection._state.syncedMetadata.get(1)).toEqual({
+      source: `write-last`,
+    })
+  })
+
+  it(`should delete row metadata when sync deletes the row`, async () => {
+    let testSyncFunctions: any = null
+
+    const collection = createCollection<{ id: number; value: string }>({
+      id: `sync-row-metadata-delete-test`,
+      getKey: (item) => item.id,
+      startSync: true,
+      sync: {
+        sync: ({ begin, write, commit, markReady }) => {
+          begin()
+          write({
+            type: `insert`,
+            value: { id: 1, value: `initial` },
+            metadata: { source: `sync` },
+          })
+          commit()
+          markReady()
+
+          testSyncFunctions = { begin, write, commit }
+        },
+      },
+    })
+
+    await collection.stateWhenReady()
+    expect(collection._state.syncedMetadata.get(1)).toEqual({ source: `sync` })
+
+    const { begin, write, commit } = testSyncFunctions
+    begin()
+    write({
+      type: `delete`,
+      key: 1,
+    })
+    commit()
+
+    expect(collection._state.syncedMetadata.has(1)).toBe(false)
+  })
+
   it(`open sync transaction isn't applied when optimistic mutation is resolved/rejected`, async () => {
     type Row = { id: number; name: string }
 

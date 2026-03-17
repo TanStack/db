@@ -47,6 +47,7 @@ import type {
   ControlMessage,
   GetExtensions,
   Message,
+  Offset,
   PostgresSnapshot,
   Row,
   ShapeStreamOptions,
@@ -1181,7 +1182,21 @@ function createElectricSync<T extends Row<unknown>>(
 
   return {
     sync: (params: Parameters<SyncConfig<T>[`sync`]>[0]) => {
-      const { begin, write, commit, markReady, truncate, collection } = params
+      const { begin, write, commit, markReady, truncate, collection, metadata } =
+        params
+      const persistedResumeState = metadata?.collection.get(`electric:resume`) as
+        | {
+            kind: `resume`
+            offset: string
+            handle: string
+            shapeId: string
+            updatedAt: number
+          }
+        | {
+            kind: `reset`
+            updatedAt: number
+          }
+        | undefined
 
       // Wrap markReady to wait for test hook in progressive mode
       let progressiveReadyGate: Promise<void> | null = null
@@ -1239,7 +1254,17 @@ function createElectricSync<T extends Row<unknown>>(
         // In on-demand mode, we only need the changes from the point of time the collection was created
         // so we default to `now` when there is no saved offset.
         offset:
-          shapeOptions.offset ?? (syncMode === `on-demand` ? `now` : undefined),
+          shapeOptions.offset ??
+          (persistedResumeState?.kind === `resume`
+            ? (persistedResumeState.offset as Offset)
+            : syncMode === `on-demand`
+              ? `now`
+              : undefined),
+        handle:
+          shapeOptions.handle ??
+          (persistedResumeState?.kind === `resume`
+            ? persistedResumeState.handle
+            : undefined),
         signal: abortController.signal,
         onError: (errorParams) => {
           // Just immediately mark ready if there's an error to avoid blocking
@@ -1279,6 +1304,25 @@ function createElectricSync<T extends Row<unknown>>(
       // for each response. We convert subsequent inserts to updates to avoid
       // duplicate key errors when the row's data has changed between requests.
       const syncedKeys = new Set<string | number>()
+
+      const stageResumeMetadata = () => {
+        if (!metadata) {
+          return
+        }
+        const shapeHandle = stream.shapeHandle
+        const lastOffset = stream.lastOffset
+        if (!shapeHandle || lastOffset === `-1`) {
+          return
+        }
+
+        metadata.collection.set(`electric:resume`, {
+          kind: `resume`,
+          offset: lastOffset,
+          handle: shapeHandle,
+          shapeId: shapeHandle,
+          updatedAt: Date.now(),
+        })
+      }
 
       /**
        * Process a change message: handle tags and write the mutation
@@ -1464,6 +1508,11 @@ function createElectricSync<T extends Row<unknown>>(
               transactionStarted = true
             }
 
+            metadata?.collection.set(`electric:resume`, {
+              kind: `reset`,
+              updatedAt: Date.now(),
+            })
+
             truncate()
 
             // Clear tag tracking state
@@ -1534,6 +1583,7 @@ function createElectricSync<T extends Row<unknown>>(
             }
 
             // Commit the atomic swap
+            stageResumeMetadata()
             commit()
 
             // Exit buffering phase by marking that we've received up-to-date
@@ -1547,8 +1597,13 @@ function createElectricSync<T extends Row<unknown>>(
             // Normal mode or on-demand: commit transaction if one was started
             // Both up-to-date and subset-end trigger a commit
             if (transactionStarted) {
+              stageResumeMetadata()
               commit()
               transactionStarted = false
+            } else if (commitPoint === `up-to-date` && metadata) {
+              begin()
+              stageResumeMetadata()
+              commit()
             }
           }
           wrappedMarkReady(isBufferingInitialSync())
