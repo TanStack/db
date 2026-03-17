@@ -1072,6 +1072,42 @@ export function runSQLiteCoreAdapterContractSuite(
       expect(loadedRows[0]?.key).toBe(`safe`)
     })
 
+    it(`deduplicates concurrent ensureCollectionReady calls for the same collection`, async () => {
+      const { adapter } = registerContractHarness()
+      const collectionId = `concurrent-startup`
+
+      const [rowsA, rowsB] = await Promise.all([
+        adapter.loadSubset(collectionId, {}),
+        adapter.loadSubset(collectionId, {}),
+      ])
+
+      expect(rowsA).toEqual([])
+      expect(rowsB).toEqual([])
+
+      await adapter.applyCommittedTx(collectionId, {
+        txId: `concurrent-startup-seed`,
+        term: 1,
+        seq: 1,
+        rowVersion: 1,
+        mutations: [
+          {
+            type: `insert`,
+            key: `1`,
+            value: {
+              id: `1`,
+              title: `Seeded`,
+              createdAt: `2026-01-01T00:00:00.000Z`,
+              score: 1,
+            },
+          },
+        ],
+      })
+
+      const loadedRows = await adapter.loadSubset(collectionId, {})
+      expect(loadedRows).toHaveLength(1)
+      expect(loadedRows[0]?.key).toBe(`1`)
+    })
+
     it(`prunes applied_tx rows by sequence threshold`, async () => {
       const { adapter, driver } = registerContractHarness({
         appliedTxPruneMaxRows: 2,

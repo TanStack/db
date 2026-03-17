@@ -974,6 +974,10 @@ export class SQLiteCorePersistenceAdapter<
     string,
     CollectionTableMapping
   >()
+  private readonly collectionTableLoads = new Map<
+    string,
+    Promise<CollectionTableMapping>
+  >()
 
   constructor(options: SQLiteCoreAdapterOptions) {
     const schemaVersion = options.schemaVersion ?? DEFAULT_SCHEMA_VERSION
@@ -1685,6 +1689,24 @@ export class SQLiteCorePersistenceAdapter<
       return cached
     }
 
+    const inFlight = this.collectionTableLoads.get(collectionId)
+    if (inFlight) {
+      return inFlight
+    }
+
+    const loadPromise = this.ensureCollectionReadyInternal(collectionId)
+    this.collectionTableLoads.set(collectionId, loadPromise)
+
+    try {
+      return await loadPromise
+    } finally {
+      this.collectionTableLoads.delete(collectionId)
+    }
+  }
+
+  private async ensureCollectionReadyInternal(
+    collectionId: string,
+  ): Promise<CollectionTableMapping> {
     const existingRows = await this.driver.query<{
       table_name: string
       tombstone_table_name: string

@@ -5246,4 +5246,131 @@ describe(`QueryCollection`, () => {
       customQueryClient.clear()
     })
   })
+
+  describe(`rows from external sync sources`, () => {
+    it(`should retain pre-hydrated rows when a disjoint query correctly returns empty results`, async () => {
+      // Simulates a warm-start scenario where a persistence layer has already
+      // hydrated "history" rows into the collection. Two disjoint queries
+      // share the collection:
+      //   - "history": returns the same rows (but with a server delay)
+      //   - "live":    correctly returns [] (there are no live items yet)
+      //
+      // When the live query resolves first with its correct empty result,
+      // the history rows should remain in the collection. The live query's
+      // empty result only means there are no *live* items — it should not
+      // affect rows from a different query's domain.
+
+      const preHydratedItems: Array<CategorisedItem> = [
+        { id: `1`, name: `History 1`, category: `history` },
+        { id: `2`, name: `History 2`, category: `history` },
+        { id: `3`, name: `History 3`, category: `history` },
+      ]
+
+      let resolveHistoryQueryFn!: (value: Array<CategorisedItem>) => void
+
+      const isQueryCategory = (category: string, where: any): boolean => {
+        return (
+          where &&
+          where.type === `func` &&
+          where.name === `eq` &&
+          where.args[0]?.path?.[0] === `category` &&
+          where.args[1]?.value === category
+        )
+      }
+
+      const queryFn = vi.fn().mockImplementation((ctx: any) => {
+        const where = ctx.meta?.loadSubsetOptions?.where
+
+        if (isQueryCategory(`history`, where)) {
+          // History query: returns data, but the server is slow
+          return new Promise<Array<CategorisedItem>>((resolve) => {
+            resolveHistoryQueryFn = resolve
+          })
+        }
+
+        if (isQueryCategory(`live`, where)) {
+          // Live query: correctly returns empty — no live items exist yet
+          return Promise.resolve([])
+        }
+
+        return Promise.resolve([])
+      })
+
+      const baseQueryKey = [`warm-start-disjoint-test`]
+
+      const baseOptions = queryCollectionOptions<CategorisedItem>({
+        id: `warm-start-disjoint-test`,
+        queryClient,
+        queryKey: (opts: any) => {
+          if (opts.where) {
+            return [...baseQueryKey, opts.where]
+          }
+          return baseQueryKey
+        },
+        queryFn,
+        getKey: (item: CategorisedItem) => item.id,
+        syncMode: `on-demand`,
+        startSync: true,
+      })
+
+      const originalSync = baseOptions.sync
+      const collection = createCollection({
+        ...baseOptions,
+        sync: {
+          sync: (params: Parameters<typeof originalSync.sync>[0]) => {
+            // Simulate a persistence layer hydrating rows from a previous
+            // session on warm start, before the query layer initializes.
+            params.begin({ immediate: true })
+            for (const item of preHydratedItems) {
+              params.write({ type: `insert`, value: item })
+            }
+            params.commit()
+
+            return originalSync.sync(params)
+          },
+        },
+      })
+
+      // Verify the persistence layer's hydrated rows are present
+      expect(collection.size).toBe(3)
+
+      // Subscribe two disjoint queries — history (delayed) and live (immediate)
+      const historyQuery = createLiveQueryCollection({
+        query: (q) =>
+          q
+            .from({ item: collection })
+            .where(({ item }) => eq(item.category, `history`)),
+      })
+
+      const liveQuery = createLiveQueryCollection({
+        query: (q) =>
+          q
+            .from({ item: collection })
+            .where(({ item }) => eq(item.category, `live`)),
+      })
+
+      // Trigger both queries. The history queryFn is pending; the live
+      // queryFn resolves immediately with [].
+      const historyPreload = historyQuery.preload()
+      await liveQuery.preload()
+      await flushPromises()
+
+      // The live query correctly returned [] (no live items exist).
+      // The pre-hydrated history rows should still be in the collection.
+      expect(collection.size).toBe(3)
+      expect(collection.has(`1`)).toBe(true)
+      expect(collection.has(`2`)).toBe(true)
+      expect(collection.has(`3`)).toBe(true)
+
+      // Now the history query's server response arrives
+      resolveHistoryQueryFn(preHydratedItems)
+      await historyPreload
+
+      // Collection should still have all history items
+      expect(collection.size).toBe(3)
+
+      await historyQuery.cleanup()
+      await liveQuery.cleanup()
+    })
+  })
 })

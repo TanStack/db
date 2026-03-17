@@ -2111,19 +2111,33 @@ function createWrappedSyncConfig<
                 set: (key: TKey, value: unknown) => {
                   const openTransaction =
                     transactionStack[transactionStack.length - 1]
-                  openTransaction?.rowMetadataWrites.set(key, {
+                  if (!openTransaction) {
+                    throw new InvalidPersistedCollectionConfigError(
+                      `metadata.row.set must be called within an open sync transaction`,
+                    )
+                  }
+                  openTransaction.rowMetadataWrites.set(key, {
                     type: `set`,
                     value,
                   })
-                  params.metadata!.row.set(key, value)
+                  if (!openTransaction.queuedBecauseHydrating) {
+                    params.metadata!.row.set(key, value)
+                  }
                 },
                 delete: (key: TKey) => {
                   const openTransaction =
                     transactionStack[transactionStack.length - 1]
-                  openTransaction?.rowMetadataWrites.set(key, {
+                  if (!openTransaction) {
+                    throw new InvalidPersistedCollectionConfigError(
+                      `metadata.row.delete must be called within an open sync transaction`,
+                    )
+                  }
+                  openTransaction.rowMetadataWrites.set(key, {
                     type: `delete`,
                   })
-                  params.metadata!.row.delete(key)
+                  if (!openTransaction.queuedBecauseHydrating) {
+                    params.metadata!.row.delete(key)
+                  }
                 },
               },
               collection: {
@@ -2131,19 +2145,33 @@ function createWrappedSyncConfig<
                 set: (key: string, value: unknown) => {
                   const openTransaction =
                     transactionStack[transactionStack.length - 1]
-                  openTransaction?.collectionMetadataWrites.set(key, {
+                  if (!openTransaction) {
+                    throw new InvalidPersistedCollectionConfigError(
+                      `metadata.collection.set must be called within an open sync transaction`,
+                    )
+                  }
+                  openTransaction.collectionMetadataWrites.set(key, {
                     type: `set`,
                     value,
                   })
-                  params.metadata!.collection.set(key, value)
+                  if (!openTransaction.queuedBecauseHydrating) {
+                    params.metadata!.collection.set(key, value)
+                  }
                 },
                 delete: (key: string) => {
                   const openTransaction =
                     transactionStack[transactionStack.length - 1]
-                  openTransaction?.collectionMetadataWrites.set(key, {
+                  if (!openTransaction) {
+                    throw new InvalidPersistedCollectionConfigError(
+                      `metadata.collection.delete must be called within an open sync transaction`,
+                    )
+                  }
+                  openTransaction.collectionMetadataWrites.set(key, {
                     type: `delete`,
                   })
-                  params.metadata!.collection.delete(key)
+                  if (!openTransaction.queuedBecauseHydrating) {
+                    params.metadata!.collection.delete(key)
+                  }
                 },
                 list: (prefix?: string) =>
                   params.metadata!.collection.list(prefix),
