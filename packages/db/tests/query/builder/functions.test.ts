@@ -196,7 +196,7 @@ describe(`QueryBuilder Functions`, () => {
         .from({ employees: employeesCollection })
         .select(({ employees }) => ({
           id: employees.id,
-          name_or_default: coalesce([employees.name, `Unknown`]),
+          name_or_default: coalesce(employees.name, `Unknown`),
         }))
 
       const builtQuery = getQueryIR(query)

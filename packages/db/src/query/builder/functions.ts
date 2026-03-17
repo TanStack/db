@@ -285,13 +285,35 @@ export function concat(
   )
 }
 
-export function coalesce<T extends Array<ExpressionLike>>(
+// Helper type for coalesce: extracts non-nullish value types from all args
+type CoalesceArgTypes<T extends Array<ExpressionLike>> = {
+  [K in keyof T]: NonNullable<ExtractType<T[K]>>
+}[number]
+
+// Whether any arg in the tuple is statically guaranteed non-null (i.e., does not include null | undefined)
+type HasGuaranteedNonNull<T extends Array<ExpressionLike>> = {
+  [K in keyof T]: null extends ExtractType<T[K]>
+    ? false
+    : undefined extends ExtractType<T[K]>
+      ? false
+      : true
+}[number] extends false
+  ? false
+  : true
+
+// coalesce() return type: union of all non-null arg types; null included unless a guaranteed non-null arg exists
+type CoalesceReturnType<T extends Array<ExpressionLike>> =
+  HasGuaranteedNonNull<T> extends true
+    ? BasicExpression<CoalesceArgTypes<T>>
+    : BasicExpression<CoalesceArgTypes<T> | null>
+
+export function coalesce<T extends [ExpressionLike, ...Array<ExpressionLike>]>(
   ...args: T
-): BasicExpression<NonNullable<ExtractType<T[number]>>> {
+): CoalesceReturnType<T> {
   return new Func(
     `coalesce`,
     args.map((arg) => toExpression(arg)),
-  ) as BasicExpression<NonNullable<ExtractType<T[number]>>>
+  ) as CoalesceReturnType<T>
 }
 
 export function add<T1 extends ExpressionLike, T2 extends ExpressionLike>(
