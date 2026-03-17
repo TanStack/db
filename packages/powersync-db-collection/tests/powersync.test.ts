@@ -16,6 +16,7 @@ import {
 import { describe, expect, it, onTestFinished, vi } from 'vitest'
 import { powerSyncCollectionOptions } from '../src'
 import { PowerSyncTransactor } from '../src/PowerSyncTransactor'
+import { TEST_DATABASE_IMPLEMENTATION } from './test-db-implementation'
 import type { AbstractPowerSyncDatabase } from '@powersync/node'
 
 const APP_SCHEMA = new Schema({
@@ -35,13 +36,17 @@ const APP_SCHEMA = new Schema({
   ),
 })
 
-describe(`PowerSync Integration`, () => {
+const describePowerSync = TEST_DATABASE_IMPLEMENTATION
+  ? describe
+  : describe.skip
+
+describePowerSync(`PowerSync Integration`, () => {
   async function createDatabase() {
     const db = new PowerSyncDatabase({
       database: {
         dbFilename: `test-${randomUUID()}.sqlite`,
         dbLocation: tmpdir(),
-        implementation: { type: `node:sqlite` },
+        implementation: TEST_DATABASE_IMPLEMENTATION,
       },
       schema: APP_SCHEMA,
     })

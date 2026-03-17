@@ -12,7 +12,11 @@ import { CollectionIndexesManager } from './indexes'
 import { CollectionMutationsManager } from './mutations'
 import { CollectionEventsManager } from './events.js'
 import type { CollectionSubscription } from './subscription'
-import type { AllCollectionEvents, CollectionEventHandler } from './events.js'
+import type {
+  AllCollectionEvents,
+  CollectionEventHandler,
+  CollectionIndexMetadata,
+} from './events.js'
 import type { BaseIndex, IndexResolver } from '../indexes/base-index.js'
 import type { IndexOptions } from '../indexes/index-options.js'
 import type {
@@ -37,6 +41,9 @@ import type { SingleRowRefProxy } from '../query/builder/ref-proxy'
 import type { StandardSchemaV1 } from '@standard-schema/spec'
 import type { BTreeIndex } from '../indexes/btree-index.js'
 import type { IndexProxy } from '../indexes/lazy-index.js'
+import type { WithVirtualProps } from '../virtual-props.js'
+
+export type { CollectionIndexMetadata } from './events.js'
 
 /**
  * Enhanced Collection interface that includes both data type T and utilities TUtils
@@ -340,6 +347,7 @@ export class CollectionImpl<
       lifecycle: this._lifecycle,
       sync: this._sync,
       events: this._events,
+      state: this._state, // Required for enriching changes with virtual properties
     })
     this._events.setDeps({
       collection: this, // Required for adding to emitted events
@@ -347,6 +355,7 @@ export class CollectionImpl<
     this._indexes.setDeps({
       state: this._state,
       lifecycle: this._lifecycle,
+      events: this._events,
     })
     this._lifecycle.setDeps({
       changes: this._changes,
@@ -451,8 +460,8 @@ export class CollectionImpl<
   /**
    * Get the current value for a key (virtual derived state)
    */
-  public get(key: TKey): TOutput | undefined {
-    return this._state.get(key)
+  public get(key: TKey): WithVirtualProps<TOutput, TKey> | undefined {
+    return this._state.getWithVirtualProps(key)
   }
 
   /**
@@ -479,40 +488,68 @@ export class CollectionImpl<
   /**
    * Get all values (virtual derived state)
    */
-  public *values(): IterableIterator<TOutput> {
-    yield* this._state.values()
+  public *values(): IterableIterator<WithVirtualProps<TOutput, TKey>> {
+    for (const key of this._state.keys()) {
+      const value = this.get(key)
+      if (value !== undefined) {
+        yield value
+      }
+    }
   }
 
   /**
    * Get all entries (virtual derived state)
    */
-  public *entries(): IterableIterator<[TKey, TOutput]> {
-    yield* this._state.entries()
+  public *entries(): IterableIterator<[TKey, WithVirtualProps<TOutput, TKey>]> {
+    for (const key of this._state.keys()) {
+      const value = this.get(key)
+      if (value !== undefined) {
+        yield [key, value]
+      }
+    }
   }
 
   /**
    * Get all entries (virtual derived state)
    */
-  public *[Symbol.iterator](): IterableIterator<[TKey, TOutput]> {
-    yield* this._state[Symbol.iterator]()
+  public *[Symbol.iterator](): IterableIterator<
+    [TKey, WithVirtualProps<TOutput, TKey>]
+  > {
+    yield* this.entries()
   }
 
   /**
    * Execute a callback for each entry in the collection
    */
   public forEach(
-    callbackfn: (value: TOutput, key: TKey, index: number) => void,
+    callbackfn: (
+      value: WithVirtualProps<TOutput, TKey>,
+      key: TKey,
+      index: number,
+    ) => void,
   ): void {
-    return this._state.forEach(callbackfn)
+    let index = 0
+    for (const [key, value] of this.entries()) {
+      callbackfn(value, key, index++)
+    }
   }
 
   /**
    * Create a new array with the results of calling a function for each entry in the collection
    */
   public map<U>(
-    callbackfn: (value: TOutput, key: TKey, index: number) => U,
+    callbackfn: (
+      value: WithVirtualProps<TOutput, TKey>,
+      key: TKey,
+      index: number,
+    ) => U,
   ): Array<U> {
-    return this._state.map(callbackfn)
+    const result: Array<U> = []
+    let index = 0
+    for (const [key, value] of this.entries()) {
+      result.push(callbackfn(value, key, index++))
+    }
+    return result
   }
 
   public getKeyFromItem(item: TOutput): TKey {
@@ -557,6 +594,27 @@ export class CollectionImpl<
     config: IndexOptions<TResolver> = {},
   ): IndexProxy<TKey> {
     return this._indexes.createIndex(indexCallback, config)
+  }
+
+  /**
+   * Removes an index created with createIndex.
+   * Returns true when an index existed and was removed.
+   *
+   * Best-effort semantics: removing an index guarantees it is detached from
+   * collection query planning. Existing index proxy references should be treated
+   * as invalid after removal.
+   */
+  public removeIndex(indexOrId: IndexProxy<TKey> | number): boolean {
+    return this._indexes.removeIndex(indexOrId)
+  }
+
+  /**
+   * Returns a snapshot of current index metadata sorted by indexId.
+   * Persistence wrappers can use this to bootstrap index state if indexes were
+   * created before event listeners were attached.
+   */
+  public getIndexMetadata(): Array<CollectionIndexMetadata> {
+    return this._indexes.getIndexMetadataSnapshot()
   }
 
   /**
@@ -755,7 +813,7 @@ export class CollectionImpl<
    * }
    */
   get state() {
-    const result = new Map<TKey, TOutput>()
+    const result = new Map<TKey, WithVirtualProps<TOutput, TKey>>()
     for (const [key, value] of this.entries()) {
       result.set(key, value)
     }
@@ -768,7 +826,7 @@ export class CollectionImpl<
    *
    * @returns Promise that resolves to a Map containing all items in the collection
    */
-  stateWhenReady(): Promise<Map<TKey, TOutput>> {
+  stateWhenReady(): Promise<Map<TKey, WithVirtualProps<TOutput, TKey>>> {
     // If we already have data or collection is ready, resolve immediately
     if (this.size > 0 || this.isReady()) {
       return Promise.resolve(this.state)
@@ -793,7 +851,7 @@ export class CollectionImpl<
    *
    * @returns Promise that resolves to an Array containing all items in the collection
    */
-  toArrayWhenReady(): Promise<Array<TOutput>> {
+  toArrayWhenReady(): Promise<Array<WithVirtualProps<TOutput, TKey>>> {
     // If we already have data or collection is ready, resolve immediately
     if (this.size > 0 || this.isReady()) {
       return Promise.resolve(this.toArray)
@@ -823,7 +881,7 @@ export class CollectionImpl<
    */
   public currentStateAsChanges(
     options: CurrentStateAsChangesOptions = {},
-  ): Array<ChangeMessage<TOutput>> | void {
+  ): Array<ChangeMessage<WithVirtualProps<TOutput, TKey>>> | void {
     return currentStateAsChanges(this, options)
   }
 
@@ -870,8 +928,10 @@ export class CollectionImpl<
    * })
    */
   public subscribeChanges(
-    callback: (changes: Array<ChangeMessage<TOutput>>) => void,
-    options: SubscribeChangesOptions<TOutput> = {},
+    callback: (
+      changes: Array<ChangeMessage<WithVirtualProps<TOutput, TKey>>>,
+    ) => void,
+    options: SubscribeChangesOptions<TOutput, TKey> = {},
   ): CollectionSubscription {
     return this._changes.subscribeChanges(callback, options)
   }

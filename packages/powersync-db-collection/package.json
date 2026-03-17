@@ -1,6 +1,6 @@
 {
   "name": "@tanstack/powersync-db-collection",
-  "version": "0.1.36",
+  "version": "0.1.37",
   "description": "PowerSync collection for TanStack DB",
   "author": "POWERSYNC",
   "license": "MIT",
@@ -65,6 +65,7 @@
     "@powersync/common": "1.49.0",
     "@powersync/node": "0.18.1",
     "@types/debug": "^4.1.12",
-    "@vitest/coverage-istanbul": "^3.2.4"
+    "@vitest/coverage-istanbul": "^3.2.4",
+    "better-sqlite3": "^12.6.2"
   }
 }
