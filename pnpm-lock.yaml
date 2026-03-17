@@ -925,8 +925,8 @@ importers:
   packages/electric-db-collection:
     dependencies:
       '@electric-sql/client':
-        specifier: ^1.5.12
-        version: 1.5.12
+        specifier: ^1.5.13
+        version: 1.5.13
       '@standard-schema/spec':
         specifier: ^1.1.0
         version: 1.1.0
@@ -934,8 +934,8 @@ importers:
         specifier: workspace:*
         version: link:../db
       '@tanstack/store':
-        specifier: ^0.8.0
-        version: 0.8.1
+        specifier: ^0.9.2
+        version: 0.9.2
       debug:
         specifier: ^4.4.3
         version: 4.4.3
@@ -950,8 +950,8 @@ importers:
         specifier: ^3.2.4
         version: 3.2.4(vitest@3.2.4)
       pg:
-        specifier: ^8.18.0
-        version: 8.19.0
+        specifier: ^8.20.0
+        version: 8.20.0
 
   packages/offline-transactions:
     dependencies:
@@ -2073,6 +2073,10 @@ packages:
 
   '@electric-sql/client@1.5.12':
     resolution: {integrity: sha512-mWDEpKog0Zo4WOjReW4x9ELaHsjTthpziLVJkjmSdh/4Y/ZHw5EoY5e9dJX9itPSKVk9GNFz3YfHFv5EAyCOmw==}
+    hasBin: true
+
+  '@electric-sql/client@1.5.13':
+    resolution: {integrity: sha512-cR5U/mDNUTRrdrZ8Fr3QPFKwTwDUZ2ux88mEvIxQq5PoyW3UrHkK/GIq3arHoeiXrUnieRIz2U+TBOaQKld8XA==}
     hasBin: true
 
   '@emnapi/core@1.7.1':
@@ -4612,6 +4616,9 @@ packages:
 
   '@tanstack/store@0.9.1':
     resolution: {integrity: sha512-+qcNkOy0N1qSGsP7omVCW0SDrXtaDcycPqBDE726yryiA5eTDFpjBReaYjghVJwNf1pcPMyzIwTGlYjCSQR0Fg==}
+
+  '@tanstack/store@0.9.2':
+    resolution: {integrity: sha512-K013lUJEFJK2ofFQ/hZKJUmCnpcV00ebLyOyFOWQvyQHUOZp/iYO84BM6aOGiV81JzwbX0APTVmW8YI7yiG5oA==}
 
   '@tanstack/typedoc-config@0.3.2':
     resolution: {integrity: sha512-4S6vIl2JmjvSQC87py/ZS9YWb1//1RRlHQRCUNLaGAdnptZYX7qJvSJS8GmAZ6nele2eRlpmPZGSw3MpCR22Tg==}
@@ -8724,6 +8731,9 @@ packages:
   pg-connection-string@2.11.0:
     resolution: {integrity: sha512-kecgoJwhOpxYU21rZjULrmrBJ698U2RxXofKVzOn5UDj61BPj/qMb7diYUR1nLScCDbrztQFl1TaQZT0t1EtzQ==}
 
+  pg-connection-string@2.12.0:
+    resolution: {integrity: sha512-U7qg+bpswf3Cs5xLzRqbXbQl85ng0mfSV/J0nnA31MCLgvEaAo7CIhmeyrmJpOr7o+zm0rXK+hNnT5l9RHkCkQ==}
+
   pg-int8@1.0.1:
     resolution: {integrity: sha512-WCtabS6t3c8SkpDBUlb1kjOs7l66xsGdKpIPZsg4wR+B3+u9UAum2odSsF9tnvxg80h4ZxLWMy4pRjOsFIqQpw==}
     engines: {node: '>=4.0.0'}
@@ -8733,8 +8743,16 @@ packages:
     peerDependencies:
       pg: '>=8.0'
 
+  pg-pool@3.13.0:
+    resolution: {integrity: sha512-gB+R+Xud1gLFuRD/QgOIgGOBE2KCQPaPwkzBBGC9oG69pHTkhQeIuejVIk3/cnDyX39av2AxomQiyPT13WKHQA==}
+    peerDependencies:
+      pg: '>=8.0'
+
   pg-protocol@1.12.0:
     resolution: {integrity: sha512-uOANXNRACNdElMXJ0tPz6RBM0XQ61nONGAwlt8da5zs/iUOOCLBQOHSXnrC6fMsvtjxbOJrZZl5IScGv+7mpbg==}
+
+  pg-protocol@1.13.0:
+    resolution: {integrity: sha512-zzdvXfS6v89r6v7OcFCHfHlyG/wvry1ALxZo4LqgUoy7W9xhBDMaqOuMiF3qEV45VqsN6rdlcehHrfDtlCPc8w==}
 
   pg-types@2.2.0:
     resolution: {integrity: sha512-qTAAlrEsl8s4OiEQY69wDvcMIdQN6wdz5ojQiOy6YRMuynxenON0O5oCpJI6lshc6scgAY8qvJ2On/p+CXY0GA==}
@@ -8742,6 +8760,15 @@ packages:
 
   pg@8.19.0:
     resolution: {integrity: sha512-QIcLGi508BAHkQ3pJNptsFz5WQMlpGbuBGBaIaXsWK8mel2kQ/rThYI+DbgjUvZrIr7MiuEuc9LcChJoEZK1xQ==}
+    engines: {node: '>= 16.0.0'}
+    peerDependencies:
+      pg-native: '>=3.0.1'
+    peerDependenciesMeta:
+      pg-native:
+        optional: true
+
+  pg@8.20.0:
+    resolution: {integrity: sha512-ldhMxz2r8fl/6QkXnBD3CR9/xg694oT6DZQ2s6c/RI28OjtSOpxnPrUCGOBJ46RCUxcWdx3p6kw/xnDHjKvaRA==}
     engines: {node: '>= 16.0.0'}
     peerDependencies:
       pg-native: '>=3.0.1'
@@ -11842,6 +11869,12 @@ snapshots:
     optionalDependencies:
       '@rollup/rollup-darwin-arm64': 4.59.0
 
+  '@electric-sql/client@1.5.13':
+    dependencies:
+      '@microsoft/fetch-event-source': 2.0.1
+    optionalDependencies:
+      '@rollup/rollup-darwin-arm64': 4.59.0
+
   '@emnapi/core@1.7.1':
     dependencies:
       '@emnapi/wasi-threads': 1.1.0
@@ -14373,7 +14406,7 @@ snapshots:
   '@tanstack/router-core@1.163.3':
     dependencies:
       '@tanstack/history': 1.161.4
-      '@tanstack/store': 0.9.1
+      '@tanstack/store': 0.9.2
       cookie-es: 2.0.0
       seroval: 1.5.0
       seroval-plugins: 1.5.0(seroval@1.5.0)
@@ -14558,6 +14591,8 @@ snapshots:
   '@tanstack/store@0.8.1': {}
 
   '@tanstack/store@0.9.1': {}
+
+  '@tanstack/store@0.9.2': {}
 
   '@tanstack/typedoc-config@0.3.2(typescript@5.9.3)':
     dependencies:
@@ -19264,13 +19299,21 @@ snapshots:
 
   pg-connection-string@2.11.0: {}
 
+  pg-connection-string@2.12.0: {}
+
   pg-int8@1.0.1: {}
 
   pg-pool@3.12.0(pg@8.19.0):
     dependencies:
       pg: 8.19.0
 
+  pg-pool@3.13.0(pg@8.20.0):
+    dependencies:
+      pg: 8.20.0
+
   pg-protocol@1.12.0: {}
+
+  pg-protocol@1.13.0: {}
 
   pg-types@2.2.0:
     dependencies:
@@ -19285,6 +19328,16 @@ snapshots:
       pg-connection-string: 2.11.0
       pg-pool: 3.12.0(pg@8.19.0)
       pg-protocol: 1.12.0
+      pg-types: 2.2.0
+      pgpass: 1.0.5
+    optionalDependencies:
+      pg-cloudflare: 1.3.0
+
+  pg@8.20.0:
+    dependencies:
+      pg-connection-string: 2.12.0
+      pg-pool: 3.13.0(pg@8.20.0)
+      pg-protocol: 1.13.0
       pg-types: 2.2.0
       pgpass: 1.0.5
     optionalDependencies:
