@@ -17,6 +17,7 @@ import {
   min,
   not,
   or,
+  stringAgg,
   sum,
 } from '../../src/query/builder/functions.js'
 
@@ -57,6 +58,14 @@ type Order = {
       status: string
     }
   }
+}
+
+type TextDelta = {
+  id: number
+  response_id: number
+  created_at: Date
+  seq: number
+  text: string | null
 }
 
 // Sample order data
@@ -210,12 +219,61 @@ const sampleOrders: Array<Order> = [
   },
 ]
 
+const sampleTextDeltas: Array<TextDelta> = [
+  {
+    id: 1,
+    response_id: 1,
+    created_at: new Date(`2023-03-01T00:00:02.000Z`),
+    seq: 2,
+    text: `world`,
+  },
+  {
+    id: 2,
+    response_id: 1,
+    created_at: new Date(`2023-03-01T00:00:01.000Z`),
+    seq: 1,
+    text: `Hello`,
+  },
+  {
+    id: 3,
+    response_id: 1,
+    created_at: new Date(`2023-03-01T00:00:03.000Z`),
+    seq: 3,
+    text: null,
+  },
+  {
+    id: 4,
+    response_id: 2,
+    created_at: new Date(`2023-03-02T00:00:01.000Z`),
+    seq: 1,
+    text: `Bye`,
+  },
+  {
+    id: 5,
+    response_id: 2,
+    created_at: new Date(`2023-03-02T00:00:02.000Z`),
+    seq: 2,
+    text: `now`,
+  },
+]
+
 function createOrdersCollection(autoIndex: `off` | `eager` = `eager`) {
   return createCollection(
     mockSyncCollectionOptions<Order>({
       id: `test-orders`,
       getKey: (order) => order.id,
       initialData: sampleOrders,
+      autoIndex,
+    }),
+  )
+}
+
+function createTextDeltaCollection(autoIndex: `off` | `eager` = `eager`) {
+  return createCollection(
+    mockSyncCollectionOptions<TextDelta>({
+      id: `test-text-deltas`,
+      getKey: (delta) => delta.id,
+      initialData: sampleTextDeltas,
       autoIndex,
     }),
   )
@@ -446,6 +504,33 @@ function createGroupByTests(autoIndex: `off` | `eager`): void {
         expect(customer3?.last_status).toBe(`pending`)
         expect(customer3?.first_category).toBe(`books`)
         expect(customer3?.last_category).toBe(`electronics`)
+      })
+
+      test(`stringAgg concatenates grouped text in explicit order`, () => {
+        const textDeltaCollection = createTextDeltaCollection(autoIndex)
+
+        const responses = createLiveQueryCollection({
+          startSync: true,
+          query: (q) =>
+            q
+              .from({ delta: textDeltaCollection })
+              .groupBy(({ delta }) => delta.response_id)
+              .select(({ delta }) => ({
+                response_id: delta.response_id,
+                text_by_created_at: stringAgg(delta.text, delta.created_at),
+                text_by_seq: stringAgg(delta.text, ` `, delta.seq),
+              })),
+        })
+
+        const response1 = responses.get(1)
+        expect(response1?.response_id).toBe(1)
+        expect(response1?.text_by_created_at).toBe(`Helloworld`)
+        expect(response1?.text_by_seq).toBe(`Hello world`)
+
+        const response2 = responses.get(2)
+        expect(response2?.response_id).toBe(2)
+        expect(response2?.text_by_created_at).toBe(`Byenow`)
+        expect(response2?.text_by_seq).toBe(`Bye now`)
       })
     })
 

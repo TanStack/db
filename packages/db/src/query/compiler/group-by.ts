@@ -59,7 +59,7 @@ function getRowVirtualMetadata(row: NamespacedRow): RowVirtualMetadata {
   }
 }
 
-const { sum, count, avg, min, max } = groupByOperators
+const { sum, count, avg, stringAgg, min, max } = groupByOperators
 
 /**
  * Interface for caching the mapping between GROUP BY expressions and SELECT expressions
@@ -535,6 +535,14 @@ function getAggregateFunction(aggExpr: Aggregate) {
     return compiledExpr(namespacedRow)
   }
 
+  const stringValueExtractor = ([, namespacedRow]: [string, NamespacedRow]) => {
+    const value = compiledExpr(namespacedRow)
+    if (value == null) {
+      return value
+    }
+    return typeof value === `string` ? value : String(value)
+  }
+
   // Return the appropriate aggregate function
   switch (aggExpr.name.toLowerCase()) {
     case `sum`:
@@ -543,6 +551,53 @@ function getAggregateFunction(aggExpr: Aggregate) {
       return count(rawValueExtractor)
     case `avg`:
       return avg(valueExtractor)
+    case `stringagg`: {
+      // `stringAgg(value, orderBy)` and `stringAgg(value, separator, orderBy)`
+      // share the second argument slot. Treat literal strings as separators;
+      // otherwise the second argument is the orderBy expression.
+      const separatorOrOrderByExpr = aggExpr.args[1]
+      const explicitOrderByExpr = aggExpr.args[2]
+
+      const separator =
+        separatorOrOrderByExpr?.type === `val` &&
+        typeof separatorOrOrderByExpr.value === `string`
+          ? separatorOrOrderByExpr.value
+          : ``
+
+      const orderByExpr =
+        explicitOrderByExpr ??
+        (separatorOrOrderByExpr?.type === `val`
+          ? undefined
+          : separatorOrOrderByExpr)
+
+      const compiledOrderByExpr = orderByExpr
+        ? compileExpression(orderByExpr)
+        : undefined
+
+      const orderByExtractor = orderByExpr
+        ? ([, namespacedRow]: [string, NamespacedRow]) => {
+            const value = compiledOrderByExpr!(namespacedRow)
+            if (
+              value == null ||
+              typeof value === `string` ||
+              typeof value === `number` ||
+              typeof value === `bigint` ||
+              typeof value === `boolean` ||
+              value instanceof Date
+            ) {
+              return value
+            }
+            return String(value)
+          }
+        : ([key]: [string, NamespacedRow]) => key
+
+      return stringAgg(
+        stringValueExtractor,
+        separator,
+        orderByExtractor,
+        ([key]: [string, NamespacedRow]) => key,
+      )
+    }
     case `min`:
       return min(valueExtractorForMinMax)
     case `max`:

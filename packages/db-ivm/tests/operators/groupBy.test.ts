@@ -9,6 +9,7 @@ import {
   median,
   min,
   mode,
+  stringAgg,
   sum,
 } from '../../src/operators/groupBy.js'
 import { output } from '../../src/operators/index.js'
@@ -517,6 +518,414 @@ describe(`Operators`, () => {
       ]
 
       expect(latestMessage.getInner()).toEqual(expectedDeleteResult)
+    })
+
+    test(`with stringAgg ordered by a sequence field`, () => {
+      const graph = new D2()
+      const input = graph.newInput<{
+        id: string
+        responseId: string
+        seq: number
+        text: string | null
+      }>()
+      let latestMessage: any = null
+
+      input.pipe(
+        groupBy((data) => ({ responseId: data.responseId }), {
+          message: stringAgg(
+            (data) => data.text,
+            ``,
+            (data) => data.seq,
+            (data) => data.id,
+          ),
+        }),
+        output((message) => {
+          latestMessage = message
+        }),
+      )
+
+      graph.finalize()
+
+      input.sendData(
+        new MultiSet([
+          [{ id: `a-2`, responseId: `a`, seq: 2, text: `world` }, 1],
+          [{ id: `a-1`, responseId: `a`, seq: 1, text: `Hello ` }, 1],
+          [{ id: `a-3`, responseId: `a`, seq: 3, text: null }, 1],
+          [{ id: `b-1`, responseId: `b`, seq: 1, text: `Bye` }, 1],
+          [{ id: `b-2`, responseId: `b`, seq: 2, text: ` now` }, 1],
+        ]),
+      )
+      graph.run()
+
+      expect(latestMessage.getInner()).toEqual([
+        [
+          [
+            `{"responseId":"a"}`,
+            {
+              responseId: `a`,
+              message: `Hello world`,
+            },
+          ],
+          1,
+        ],
+        [
+          [
+            `{"responseId":"b"}`,
+            {
+              responseId: `b`,
+              message: `Bye now`,
+            },
+          ],
+          1,
+        ],
+      ])
+
+      input.sendData(
+        new MultiSet([
+          [{ id: `a-2`, responseId: `a`, seq: 2, text: `world` }, -1],
+          [{ id: `a-2`, responseId: `a`, seq: 2, text: `there` }, 1],
+        ]),
+      )
+      graph.run()
+
+      expect(latestMessage.getInner()).toEqual([
+        [
+          [
+            `{"responseId":"a"}`,
+            {
+              responseId: `a`,
+              message: `Hello world`,
+            },
+          ],
+          -1,
+        ],
+        [
+          [
+            `{"responseId":"a"}`,
+            {
+              responseId: `a`,
+              message: `Hello there`,
+            },
+          ],
+          1,
+        ],
+      ])
+
+      input.sendData(
+        new MultiSet([
+          [{ id: `a-4`, responseId: `a`, seq: 4, text: `!` }, 1],
+          [{ id: `b-0`, responseId: `b`, seq: 0, text: `Start: ` }, 1],
+        ]),
+      )
+      graph.run()
+
+      expect(latestMessage.getInner()).toEqual([
+        [
+          [
+            `{"responseId":"a"}`,
+            {
+              responseId: `a`,
+              message: `Hello there`,
+            },
+          ],
+          -1,
+        ],
+        [
+          [
+            `{"responseId":"a"}`,
+            {
+              responseId: `a`,
+              message: `Hello there!`,
+            },
+          ],
+          1,
+        ],
+        [
+          [
+            `{"responseId":"b"}`,
+            {
+              responseId: `b`,
+              message: `Bye now`,
+            },
+          ],
+          -1,
+        ],
+        [
+          [
+            `{"responseId":"b"}`,
+            {
+              responseId: `b`,
+              message: `Start: Bye now`,
+            },
+          ],
+          1,
+        ],
+      ])
+
+      input.sendData(
+        new MultiSet([
+          [{ id: `a-2`, responseId: `a`, seq: 2, text: `there` }, -1],
+        ]),
+      )
+      graph.run()
+
+      expect(latestMessage.getInner()).toEqual([
+        [
+          [
+            `{"responseId":"a"}`,
+            {
+              responseId: `a`,
+              message: `Hello there!`,
+            },
+          ],
+          -1,
+        ],
+        [
+          [
+            `{"responseId":"a"}`,
+            {
+              responseId: `a`,
+              message: `Hello !`,
+            },
+          ],
+          1,
+        ],
+      ])
+    })
+
+    test(`stringAgg handles large out-of-order inserts in a single batch`, () => {
+      const graph = new D2()
+      const input = graph.newInput<{
+        id: string
+        responseId: string
+        seq: number
+        text: string
+      }>()
+      let latestMessage: any = null
+
+      input.pipe(
+        groupBy((data) => ({ responseId: data.responseId }), {
+          message: stringAgg(
+            (data) => data.text,
+            ``,
+            (data) => data.seq,
+            (data) => data.id,
+          ),
+        }),
+        output((message) => {
+          latestMessage = message
+        }),
+      )
+
+      graph.finalize()
+
+      const rows = [1, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 2, 20, 3, 4, 5, 6, 7, 8, 9]
+        .map((seq) => ({
+          id: `delta-${seq}`,
+          responseId: `a`,
+          seq,
+          text: String.fromCharCode(96 + seq),
+        }))
+
+      input.sendData(new MultiSet(rows.map((row) => [row, 1])))
+      graph.run()
+
+      expect(latestMessage.getInner()).toEqual([
+        [
+          [
+            `{"responseId":"a"}`,
+            {
+              responseId: `a`,
+              message: `abcdefghijklmnopqrst`,
+            },
+          ],
+          1,
+        ],
+      ])
+    })
+
+    test(`stringAgg fallback path is deterministic without a row key extractor`, () => {
+      const graph = new D2()
+      const input = graph.newInput<{
+        responseId: string
+        seq: number
+        text: string
+      }>()
+      let latestMessage: any = null
+
+      input.pipe(
+        groupBy((data) => ({ responseId: data.responseId }), {
+          message: stringAgg(
+            (data) => data.text,
+            ` | `,
+            (data) => data.seq,
+          ),
+        }),
+        output((message) => {
+          latestMessage = message
+        }),
+      )
+
+      graph.finalize()
+
+      input.sendData(
+        new MultiSet([
+          [{ responseId: `a`, seq: 1, text: `beta` }, 1],
+          [{ responseId: `a`, seq: 1, text: `alpha` }, 1],
+          [{ responseId: `a`, seq: 2, text: `gamma` }, 1],
+        ]),
+      )
+      graph.run()
+
+      expect(latestMessage.getInner()).toEqual([
+        [
+          [
+            `{"responseId":"a"}`,
+            {
+              responseId: `a`,
+              message: `alpha | beta | gamma`,
+            },
+          ],
+          1,
+        ],
+      ])
+    })
+
+    test(`stringAgg cleans up per-group state after group deletion and re-creation`, () => {
+      const graph = new D2()
+      const input = graph.newInput<{
+        id: string
+        responseId: string
+        seq: number
+        text: string
+      }>()
+      let latestMessage: any = null
+
+      input.pipe(
+        groupBy((data) => ({ responseId: data.responseId }), {
+          message: stringAgg(
+            (data) => data.text,
+            ``,
+            (data) => data.seq,
+            (data) => data.id,
+          ),
+        }),
+        output((message) => {
+          latestMessage = message
+        }),
+      )
+
+      graph.finalize()
+
+      input.sendData(
+        new MultiSet([
+          [{ id: `a-1`, responseId: `a`, seq: 1, text: `A` }, 1],
+          [{ id: `a-2`, responseId: `a`, seq: 2, text: `B` }, 1],
+        ]),
+      )
+      graph.run()
+
+      expect(latestMessage.getInner()).toEqual([
+        [
+          [
+            `{"responseId":"a"}`,
+            {
+              responseId: `a`,
+              message: `AB`,
+            },
+          ],
+          1,
+        ],
+      ])
+
+      input.sendData(
+        new MultiSet([
+          [{ id: `a-1`, responseId: `a`, seq: 1, text: `A` }, -1],
+          [{ id: `a-2`, responseId: `a`, seq: 2, text: `B` }, -1],
+        ]),
+      )
+      graph.run()
+
+      expect(latestMessage.getInner()).toEqual([
+        [
+          [
+            `{"responseId":"a"}`,
+            {
+              responseId: `a`,
+              message: `AB`,
+            },
+          ],
+          -1,
+        ],
+      ])
+
+      input.sendData(
+        new MultiSet([
+          [{ id: `a-3`, responseId: `a`, seq: 1, text: `C` }, 1],
+        ]),
+      )
+      graph.run()
+
+      expect(latestMessage.getInner()).toEqual([
+        [
+          [
+            `{"responseId":"a"}`,
+            {
+              responseId: `a`,
+              message: `C`,
+            },
+          ],
+          1,
+        ],
+      ])
+    })
+
+    test(`stringAgg preserves values that already contain the separator`, () => {
+      const graph = new D2()
+      const input = graph.newInput<{
+        id: string
+        responseId: string
+        seq: number
+        text: string
+      }>()
+      let latestMessage: any = null
+
+      input.pipe(
+        groupBy((data) => ({ responseId: data.responseId }), {
+          message: stringAgg(
+            (data) => data.text,
+            ` -> `,
+            (data) => data.seq,
+            (data) => data.id,
+          ),
+        }),
+        output((message) => {
+          latestMessage = message
+        }),
+      )
+
+      graph.finalize()
+
+      input.sendData(
+        new MultiSet([
+          [{ id: `a-1`, responseId: `a`, seq: 1, text: `A -> B` }, 1],
+          [{ id: `a-2`, responseId: `a`, seq: 2, text: `C` }, 1],
+        ]),
+      )
+      graph.run()
+
+      expect(latestMessage.getInner()).toEqual([
+        [
+          [
+            `{"responseId":"a"}`,
+            {
+              responseId: `a`,
+              message: `A -> B -> C`,
+            },
+          ],
+          1,
+        ],
+      ])
     })
 
     test(`with min and max aggregates`, () => {

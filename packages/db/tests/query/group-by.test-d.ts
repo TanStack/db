@@ -13,6 +13,7 @@ import {
   max,
   min,
   or,
+  stringAgg,
   sum,
 } from '../../src/query/builder/functions.js'
 import type { OutputWithVirtual } from '../utils.js'
@@ -127,6 +128,28 @@ describe(`Query GROUP BY Types`, () => {
           total_amount: number
           order_count: number
           avg_amount: number
+        }>
+      | undefined
+    >()
+  })
+
+  test(`group by customer_id with stringAgg return type`, () => {
+    const customerStatuses = createLiveQueryCollection({
+      query: (q) =>
+        q
+          .from({ orders: ordersCollection })
+          .groupBy(({ orders }) => orders.customer_id)
+          .select(({ orders }) => ({
+            customer_id: orders.customer_id,
+            statuses: stringAgg(orders.status, `, `, orders.date_instance),
+          })),
+    })
+
+    const customer1 = customerStatuses.get(1)
+    expectTypeOf(customer1).toMatchTypeOf<
+      | OutputWithVirtual<{
+          customer_id: number
+          statuses: string
         }>
       | undefined
     >()

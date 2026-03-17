@@ -1122,7 +1122,7 @@ const userStats = createCollection(liveQueryCollectionOptions({
 Use various aggregate functions to summarize your data:
 
 ```ts
-import { count, sum, avg, min, max } from '@tanstack/db'
+import { count, sum, avg, min, max, stringAgg } from '@tanstack/db'
 
 const orderStats = createCollection(liveQueryCollectionOptions({
   query: (q) =>
@@ -1136,6 +1136,7 @@ const orderStats = createCollection(liveQueryCollectionOptions({
         avgOrderValue: avg(order.amount),
         minOrder: min(order.amount),
         maxOrder: max(order.amount),
+        statusTimeline: stringAgg(order.status, ' -> ', order.createdAt),
       }))
 }))
 ```
@@ -2252,6 +2253,15 @@ Find minimum and maximum values:
 ```ts
 min(user.salary)
 max(order.amount)
+```
+
+#### `stringAgg(value)`, `stringAgg(value, orderBy)`, `stringAgg(value, separator)`, `stringAgg(value, separator, orderBy)`
+Concatenate string values within each group. When `orderBy` is omitted, TanStack DB falls back to the source row key for deterministic ordering:
+```ts
+stringAgg(delta.text)                  // Deterministic fallback order by row key
+stringAgg(delta.text, delta.createdAt) // Ordered by createdAt
+stringAgg(delta.text, ' ')             // Custom separator with fallback order by row key
+stringAgg(delta.text, ' ', delta.seq)  // Ordered by seq with separator
 ```
 
 ### Function Composition

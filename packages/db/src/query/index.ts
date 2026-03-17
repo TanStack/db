@@ -60,6 +60,7 @@ export {
   sum,
   min,
   max,
+  stringAgg,
   // Includes helpers
   toArray,
 } from './builder/functions.js'

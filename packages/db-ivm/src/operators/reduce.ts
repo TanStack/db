@@ -11,13 +11,13 @@ import type { IStreamBuilder, KeyValue } from '../types.js'
 export class ReduceOperator<K, V1, V2> extends UnaryOperator<[K, V1], [K, V2]> {
   #index = new Index<K, V1>()
   #indexOut = new Index<K, V2>()
-  #f: (values: Array<[V1, number]>) => Array<[V2, number]>
+  #f: (values: Array<[V1, number]>, key: K) => Array<[V2, number]>
 
   constructor(
     id: number,
     inputA: DifferenceStreamReader<[K, V1]>,
     output: DifferenceStreamWriter<[K, V2]>,
-    f: (values: Array<[V1, number]>) => Array<[V2, number]>,
+    f: (values: Array<[V1, number]>, key: K) => Array<[V2, number]>,
   ) {
     super(id, inputA, output)
     this.#f = f
@@ -39,7 +39,7 @@ export class ReduceOperator<K, V1, V2> extends UnaryOperator<[K, V1], [K, V2]> {
     for (const key of keysTodo) {
       const curr = this.#index.get(key)
       const currOut = this.#indexOut.get(key)
-      const out = this.#f(curr)
+      const out = this.#f(curr, key)
 
       // Create maps for current and previous outputs using values directly as keys
       const newOutputMap = new Map<V2, number>()
@@ -105,7 +105,7 @@ export function reduce<
   V1Type extends T extends KeyValue<KType, infer V> ? V : never,
   R,
   T,
->(f: (values: Array<[V1Type, number]>) => Array<[R, number]>) {
+>(f: (values: Array<[V1Type, number]>, key: KType) => Array<[R, number]>) {
   return (stream: IStreamBuilder<T>): IStreamBuilder<KeyValue<KType, R>> => {
     const output = new StreamBuilder<KeyValue<KType, R>>(
       stream.graph,

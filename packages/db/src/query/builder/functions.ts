@@ -25,6 +25,13 @@ type StringLike =
   | null
   | undefined
 
+type OrderByScalar = number | bigint | boolean | Date | null | undefined
+type OrderByLike =
+  | RefLeaf<string | OrderByScalar>
+  | RefProxy<string | OrderByScalar>
+  | BasicExpression<string | OrderByScalar>
+  | OrderByScalar
+
 type ComparisonOperand<T> =
   | RefProxy<T>
   | RefLeaf<T>
@@ -58,6 +65,13 @@ type AggregateReturnType<T> =
       ? Aggregate<U>
       : Aggregate<number | undefined | null | Date | bigint | string>
     : Aggregate<number | undefined | null | Date | bigint | string>
+
+type StringAggregateReturnType<T> =
+  ExtractType<T> extends infer U
+    ? U extends string | undefined | null
+      ? Aggregate<U>
+      : Aggregate<string | undefined | null>
+    : Aggregate<string | undefined | null>
 
 // Helper type to determine string function return type based on input nullability
 type StringFunctionReturnType<T> =
@@ -325,6 +339,41 @@ export function max<T extends ExpressionLike>(arg: T): AggregateReturnType<T> {
   return new Aggregate(`max`, [toExpression(arg)]) as AggregateReturnType<T>
 }
 
+export function stringAgg<T extends StringLike>(
+  arg: T,
+): StringAggregateReturnType<T>
+export function stringAgg<T extends StringLike>(
+  arg: T,
+  separator: string,
+): StringAggregateReturnType<T>
+export function stringAgg<T extends StringLike, TOrderBy extends OrderByLike>(
+  arg: T,
+  orderBy: TOrderBy,
+): StringAggregateReturnType<T>
+export function stringAgg<T extends StringLike, TOrderBy extends OrderByLike>(
+  arg: T,
+  separator: string,
+  orderBy: TOrderBy,
+): StringAggregateReturnType<T>
+export function stringAgg<T extends StringLike>(
+  arg: T,
+  separatorOrOrderBy?: string | OrderByLike,
+  orderBy?: OrderByLike,
+): StringAggregateReturnType<T> {
+  const args: Array<BasicExpression> = [toExpression(arg) as BasicExpression]
+
+  if (typeof separatorOrOrderBy === `string`) {
+    args.push(toExpression(separatorOrOrderBy) as BasicExpression)
+    if (orderBy !== undefined) {
+      args.push(toExpression(orderBy) as BasicExpression)
+    }
+  } else if (separatorOrOrderBy !== undefined) {
+    args.push(toExpression(separatorOrOrderBy) as BasicExpression)
+  }
+
+  return new Aggregate(`stringAgg`, args) as StringAggregateReturnType<T>
+}
+
 /**
  * List of comparison function names that can be used with indexes
  */
@@ -374,6 +423,7 @@ export const operators = [
   `sum`,
   `min`,
   `max`,
+  `stringAgg`,
 ] as const
 
 export type OperatorName = (typeof operators)[number]

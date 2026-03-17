@@ -21,6 +21,7 @@ import {
   min,
   not,
   or,
+  stringAgg,
   sum,
   upper,
 } from '../../../src/query/builder/functions.js'
@@ -273,6 +274,39 @@ describe(`QueryBuilder Functions`, () => {
       const select = builtQuery.select!
       expect((select.min_salary as any).name).toBe(`min`)
       expect((select.max_salary as any).name).toBe(`max`)
+    })
+
+    it(`stringAgg function works with separator and orderBy`, () => {
+      const query = new Query()
+        .from({ employees: employeesCollection })
+        .groupBy(({ employees }) => employees.department_id)
+        .select(({ employees }) => ({
+          department_id: employees.department_id,
+          employee_names: stringAgg(employees.name, `, `, employees.id),
+        }))
+
+      const builtQuery = getQueryIR(query)
+      const select = builtQuery.select!
+      expect((select.employee_names as any).name).toBe(`stringAgg`)
+      expect((select.employee_names as any).args).toHaveLength(3)
+    })
+
+    it(`stringAgg function supports orderBy-only and separator-only overloads`, () => {
+      const query = new Query()
+        .from({ employees: employeesCollection })
+        .groupBy(({ employees }) => employees.department_id)
+        .select(({ employees }) => ({
+          department_id: employees.department_id,
+          ordered_names: stringAgg(employees.name, employees.id),
+          spaced_names: stringAgg(employees.name, `, `),
+        }))
+
+      const builtQuery = getQueryIR(query)
+      const select = builtQuery.select!
+      expect((select.ordered_names as any).name).toBe(`stringAgg`)
+      expect((select.ordered_names as any).args).toHaveLength(2)
+      expect((select.spaced_names as any).name).toBe(`stringAgg`)
+      expect((select.spaced_names as any).args).toHaveLength(2)
     })
   })
 
