@@ -1465,7 +1465,9 @@ describe(`Collection`, () => {
     await collection.stateWhenReady()
 
     expect(observedCollectionMetadata).toBeUndefined()
-    expect(collection._state.syncedCollectionMetadata.get(`startup:key`)).toEqual({
+    expect(
+      collection._state.syncedCollectionMetadata.get(`startup:key`),
+    ).toEqual({
       ready: true,
     })
 
@@ -1474,9 +1476,9 @@ describe(`Collection`, () => {
     metadata.collection.set(`runtime:key`, { persisted: true })
     commit()
 
-    expect(collection._state.syncedCollectionMetadata.get(`runtime:key`)).toEqual(
-      { persisted: true },
-    )
+    expect(
+      collection._state.syncedCollectionMetadata.get(`runtime:key`),
+    ).toEqual({ persisted: true })
   })
 
   it(`should use last-write-wins for row metadata in sync transactions`, async () => {

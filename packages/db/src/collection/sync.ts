@@ -311,9 +311,8 @@ export class CollectionSyncManager<
             this.state.pendingSyncedTransactions[
               this.state.pendingSyncedTransactions.length - 1
             ]
-          const pendingWrite = pendingTransaction?.collectionMetadataWrites.get(
-            key,
-          )
+          const pendingWrite =
+            pendingTransaction?.collectionMetadataWrites.get(key)
           if (pendingWrite) {
             return pendingWrite.type === `delete`
               ? undefined
@@ -341,7 +340,10 @@ export class CollectionSyncManager<
               this.state.pendingSyncedTransactions.length - 1
             ]
           if (pendingTransaction) {
-            for (const [key, pendingWrite] of pendingTransaction.collectionMetadataWrites) {
+            for (const [
+              key,
+              pendingWrite,
+            ] of pendingTransaction.collectionMetadataWrites) {
               if (pendingWrite.type === `delete`) {
                 merged.delete(key)
               } else {

@@ -54,9 +54,7 @@ Update the internal pending synced transaction shape so it can stage:
 Suggested internal shape:
 
 ```ts
-type PendingMetadataWrite =
-  | { type: 'set'; value: unknown }
-  | { type: 'delete' }
+type PendingMetadataWrite = { type: 'set'; value: unknown } | { type: 'delete' }
 
 type PendingSyncedTransaction = {
   committed: boolean

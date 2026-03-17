@@ -1166,7 +1166,9 @@ export class SQLiteCorePersistenceAdapter<
             ? mergeObjectRows(existingValue, mutation.value)
             : mutation.value
         const nextMetadata =
-          mutation.metadataChanged === true ? mutation.metadata : existingMetadata
+          mutation.metadataChanged === true
+            ? mutation.metadata
+            : existingMetadata
 
         await transactionDriver.run(
           `INSERT INTO ${collectionTableSql} (key, value, metadata, row_version)

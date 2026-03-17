@@ -197,8 +197,7 @@ export type PersistedTx<
     | { type: `delete`; key: TKey; value: T }
   >
   rowMetadataMutations?: Array<
-    | { type: `set`; key: TKey; value: unknown }
-    | { type: `delete`; key: TKey }
+    { type: `set`; key: TKey; value: unknown } | { type: `delete`; key: TKey }
   >
   collectionMetadataMutations?: Array<
     | { type: `set`; key: string; value: unknown }
@@ -546,7 +545,10 @@ type NormalizedSyncOperation<T extends object, TKey extends string | number> =
 
 type BufferedSyncTransaction<T extends object, TKey extends string | number> = {
   operations: Array<NormalizedSyncOperation<T, TKey>>
-  rowMetadataWrites: Map<TKey, { type: `set`; value: unknown } | { type: `delete` }>
+  rowMetadataWrites: Map<
+    TKey,
+    { type: `set`; value: unknown } | { type: `delete` }
+  >
   collectionMetadataWrites: Map<
     string,
     { type: `set`; value: unknown } | { type: `delete` }
@@ -1013,13 +1015,13 @@ class PersistedCollectionRuntime<
       forwardMessage: {
         type: `update`,
         value: message.value,
-          metadata: message.metadata,
+        metadata: message.metadata,
       },
       operation: {
         type: `update`,
         key,
         value: message.value,
-          metadata: message.metadata,
+        metadata: message.metadata,
       },
     }
   }
@@ -1288,10 +1290,7 @@ class PersistedCollectionRuntime<
       return
     }
 
-    const tx = this.createPersistedTxFromOperations(
-      transaction,
-      streamPosition,
-    )
+    const tx = this.createPersistedTxFromOperations(transaction, streamPosition)
 
     await this.persistence.adapter.applyCommittedTx(this.collectionId, tx)
     this.publishTxCommittedEvent(
@@ -1337,11 +1336,12 @@ class PersistedCollectionRuntime<
               value: operation.value,
             },
       ),
-      rowMetadataMutations: Array.from(transaction.rowMetadataWrites.entries()).map(
-        ([key, metadataWrite]) =>
-          metadataWrite.type === `delete`
-            ? { type: `delete`, key }
-            : { type: `set`, key, value: metadataWrite.value },
+      rowMetadataMutations: Array.from(
+        transaction.rowMetadataWrites.entries(),
+      ).map(([key, metadataWrite]) =>
+        metadataWrite.type === `delete`
+          ? { type: `delete`, key }
+          : { type: `set`, key, value: metadataWrite.value },
       ),
       collectionMetadataMutations: Array.from(
         transaction.collectionMetadataWrites.entries(),
@@ -1500,8 +1500,8 @@ class PersistedCollectionRuntime<
         hasMetadataChanges:
           (tx.rowMetadataMutations !== undefined &&
             tx.rowMetadataMutations.length > 0) ||
-          tx.collectionMetadataMutations !== undefined &&
-          tx.collectionMetadataMutations.length > 0,
+          (tx.collectionMetadataMutations !== undefined &&
+            tx.collectionMetadataMutations.length > 0),
         changedRows: mutations
           .filter((mutation) => mutation.type !== `delete`)
           .map((mutation) => ({
@@ -2173,7 +2173,8 @@ function createWrappedSyncConfig<
             runtime.queueHydrationBufferedTransaction({
               operations: openTransaction.operations,
               rowMetadataWrites: openTransaction.rowMetadataWrites,
-              collectionMetadataWrites: openTransaction.collectionMetadataWrites,
+              collectionMetadataWrites:
+                openTransaction.collectionMetadataWrites,
               truncate: openTransaction.truncate,
               internal: openTransaction.internal,
             })
@@ -2186,7 +2187,8 @@ function createWrappedSyncConfig<
               .persistAndBroadcastExternalSyncTransaction({
                 operations: openTransaction.operations,
                 rowMetadataWrites: openTransaction.rowMetadataWrites,
-                collectionMetadataWrites: openTransaction.collectionMetadataWrites,
+                collectionMetadataWrites:
+                  openTransaction.collectionMetadataWrites,
                 truncate: openTransaction.truncate,
                 internal: false,
               })

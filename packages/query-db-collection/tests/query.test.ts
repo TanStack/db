@@ -4275,44 +4275,44 @@ describe(`QueryCollection`, () => {
       })
     })
 
-  it(`should diff against persisted query-owned rows on warm start`, async () => {
-    const baseQueryKey = [`persisted-baseline-test`]
-    const queryFn = vi.fn().mockResolvedValue([])
+    it(`should diff against persisted query-owned rows on warm start`, async () => {
+      const baseQueryKey = [`persisted-baseline-test`]
+      const queryFn = vi.fn().mockResolvedValue([])
 
-    const config: QueryCollectionConfig<CategorisedItem> = {
-      id: `persisted-baseline-test`,
-      queryClient,
-      queryKey: baseQueryKey,
-      queryFn,
-      getKey: (item) => item.id,
-      syncMode: `eager`,
-      startSync: false,
-    }
+      const config: QueryCollectionConfig<CategorisedItem> = {
+        id: `persisted-baseline-test`,
+        queryClient,
+        queryKey: baseQueryKey,
+        queryFn,
+        getKey: (item) => item.id,
+        syncMode: `eager`,
+        startSync: false,
+      }
 
-    const collection = createCollection(queryCollectionOptions(config))
-    const ownedRow = { id: `1`, name: `Owned row`, category: `A` }
-    const unrelatedRow = { id: `2`, name: `Unrelated row`, category: `B` }
-    const ownedQueryHash = hashKey(baseQueryKey)
+      const collection = createCollection(queryCollectionOptions(config))
+      const ownedRow = { id: `1`, name: `Owned row`, category: `A` }
+      const unrelatedRow = { id: `2`, name: `Unrelated row`, category: `B` }
+      const ownedQueryHash = hashKey(baseQueryKey)
 
-    collection._state.syncedData.set(ownedRow.id, ownedRow)
-    collection._state.syncedData.set(unrelatedRow.id, unrelatedRow)
-    collection._state.syncedMetadata.set(ownedRow.id, {
-      queryCollection: {
-        owners: {
-          [ownedQueryHash]: true,
+      collection._state.syncedData.set(ownedRow.id, ownedRow)
+      collection._state.syncedData.set(unrelatedRow.id, unrelatedRow)
+      collection._state.syncedMetadata.set(ownedRow.id, {
+        queryCollection: {
+          owners: {
+            [ownedQueryHash]: true,
+          },
         },
-      },
+      })
+      collection._state.syncedMetadata.set(unrelatedRow.id, undefined)
+      collection._state.size = 2
+
+      await collection.preload()
+      await flushPromises()
+
+      expect(queryFn).toHaveBeenCalledTimes(1)
+      expect(collection.has(ownedRow.id)).toBe(false)
+      expect(collection.has(unrelatedRow.id)).toBe(true)
     })
-    collection._state.syncedMetadata.set(unrelatedRow.id, undefined)
-    collection._state.size = 2
-
-    await collection.preload()
-    await flushPromises()
-
-    expect(queryFn).toHaveBeenCalledTimes(1)
-    expect(collection.has(ownedRow.id)).toBe(false)
-    expect(collection.has(unrelatedRow.id)).toBe(true)
-  })
 
     it(`should reset refcount after query GC and reload (stale refcount bug)`, async () => {
       // This test catches Bug 2: stale refcounts after GC/remove

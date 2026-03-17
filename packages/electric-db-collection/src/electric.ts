@@ -1182,9 +1182,18 @@ function createElectricSync<T extends Row<unknown>>(
 
   return {
     sync: (params: Parameters<SyncConfig<T>[`sync`]>[0]) => {
-      const { begin, write, commit, markReady, truncate, collection, metadata } =
-        params
-      const persistedResumeState = metadata?.collection.get(`electric:resume`) as
+      const {
+        begin,
+        write,
+        commit,
+        markReady,
+        truncate,
+        collection,
+        metadata,
+      } = params
+      const persistedResumeState = metadata?.collection.get(
+        `electric:resume`,
+      ) as
         | {
             kind: `resume`
             offset: string

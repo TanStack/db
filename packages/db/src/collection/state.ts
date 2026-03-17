@@ -42,9 +42,7 @@ interface PendingSyncedTransaction<
   immediate?: boolean
 }
 
-type PendingMetadataWrite =
-  | { type: `set`; value: unknown }
-  | { type: `delete` }
+type PendingMetadataWrite = { type: `set`; value: unknown } | { type: `delete` }
 
 type InternalChangeMessage<
   T extends object = Record<string, unknown>,
@@ -1036,7 +1034,10 @@ export class CollectionStateManager<
           this.syncedMetadata.set(key, metadataWrite.value)
         }
 
-        for (const [key, metadataWrite] of transaction.collectionMetadataWrites) {
+        for (const [
+          key,
+          metadataWrite,
+        ] of transaction.collectionMetadataWrites) {
           if (metadataWrite.type === `delete`) {
             this.syncedCollectionMetadata.delete(key)
             continue

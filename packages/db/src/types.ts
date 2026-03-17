@@ -358,7 +358,9 @@ export interface SyncConfig<
   rowUpdateMode?: `partial` | `full`
 }
 
-export interface SyncMetadataApi<TKey extends string | number = string | number> {
+export interface SyncMetadataApi<
+  TKey extends string | number = string | number,
+> {
   row: {
     get: (key: TKey) => unknown | undefined
     set: (key: TKey, metadata: unknown) => void

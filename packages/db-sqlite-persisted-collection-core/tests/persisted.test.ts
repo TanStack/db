@@ -78,10 +78,12 @@ function createRecordingAdapter(
     loadCollectionMetadata: (collectionId) => {
       adapter.loadCollectionMetadataCalls.push(collectionId)
       return Promise.resolve(
-        Array.from(adapter.collectionMetadata.entries()).map(([key, value]) => ({
-          key,
-          value,
-        })),
+        Array.from(adapter.collectionMetadata.entries()).map(
+          ([key, value]) => ({
+            key,
+            value,
+          }),
+        ),
       )
     },
     applyCommittedTx: (collectionId, tx) => {
@@ -109,7 +111,10 @@ function createRecordingAdapter(
         if (metadataMutation.type === `delete`) {
           adapter.collectionMetadata.delete(metadataMutation.key)
         } else {
-          adapter.collectionMetadata.set(metadataMutation.key, metadataMutation.value)
+          adapter.collectionMetadata.set(
+            metadataMutation.key,
+            metadataMutation.value,
+          )
         }
       }
       return Promise.resolve()
@@ -302,15 +307,15 @@ describe(`persistedCollectionOptions`, () => {
     expect(adapter.loadCollectionMetadataCalls).toEqual([
       `persisted-startup-metadata`,
     ])
-    expect(collection._state.syncedCollectionMetadata.get(`electric:resume`)).toEqual(
-      {
-        kind: `resume`,
-        offset: `10_0`,
-        handle: `handle-1`,
-        shapeId: `shape-1`,
-        updatedAt: 1,
-      },
-    )
+    expect(
+      collection._state.syncedCollectionMetadata.get(`electric:resume`),
+    ).toEqual({
+      kind: `resume`,
+      offset: `10_0`,
+      handle: `handle-1`,
+      shapeId: `shape-1`,
+      updatedAt: 1,
+    })
   })
 
   it(`throws InvalidSyncConfigError when sync key is present but null`, () => {
