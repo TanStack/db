@@ -223,10 +223,7 @@ export interface PersistenceAdapter<
     key: string,
     value: unknown,
   ) => Promise<void>
-  deleteMetadata?: (
-    collectionId: string,
-    key: string,
-  ) => Promise<void>
+  deleteMetadata?: (collectionId: string, key: string) => Promise<void>
 }
 
 export interface SQLiteDriver {
@@ -798,7 +795,11 @@ class PersistedCollectionRuntime<
 
   createMetadataStorage(): MetadataStorage | undefined {
     const adapter = this.persistence.adapter
-    if (!adapter.loadMetadata || !adapter.storeMetadata || !adapter.deleteMetadata) {
+    if (
+      !adapter.loadMetadata ||
+      !adapter.storeMetadata ||
+      !adapter.deleteMetadata
+    ) {
       return undefined
     }
     const collectionId = this.collectionId
@@ -1097,7 +1098,10 @@ class PersistedCollectionRuntime<
       const refCountEntries = rows
         .filter((row) => (row.refCount ?? 0) > 0)
         .map((row) => [String(row.key), row.refCount!] as const)
-      if (refCountEntries.length > 0 && this.persistence.adapter.storeMetadata) {
+      if (
+        refCountEntries.length > 0 &&
+        this.persistence.adapter.storeMetadata
+      ) {
         // Merge with any existing ref counts from prior hydrations
         const existing =
           ((await this.persistence.adapter.loadMetadata?.(

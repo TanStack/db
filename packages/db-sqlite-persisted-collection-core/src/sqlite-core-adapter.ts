@@ -1908,10 +1908,7 @@ export class SQLiteCorePersistenceAdapter<
     )
   }
 
-  async deleteMetadata(
-    collectionId: string,
-    key: string,
-  ): Promise<void> {
+  async deleteMetadata(collectionId: string, key: string): Promise<void> {
     await this.ensureInitialized()
     await this.driver.run(
       `DELETE FROM collection_metadata WHERE collection_id = ? AND key = ?`,
