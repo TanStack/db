@@ -36,23 +36,26 @@ type StringAggOrderable =
   | null
   | undefined
 
-type StringAggValue<TOrderBy extends StringAggOrderable = StringAggOrderable> = {
-  rowKey?: string | number
-  value: string | null | undefined
-  orderBy: TOrderBy
-}
+type StringAggValue<TOrderBy extends StringAggOrderable = StringAggOrderable> =
+  {
+    rowKey?: string | number
+    value: string | null | undefined
+    orderBy: TOrderBy
+  }
 
-type StringAggEntry<TOrderBy extends StringAggOrderable = StringAggOrderable> = {
-  rowKey: string | number
-  value: string
-  orderBy: TOrderBy
-}
+type StringAggEntry<TOrderBy extends StringAggOrderable = StringAggOrderable> =
+  {
+    rowKey: string | number
+    value: string
+    orderBy: TOrderBy
+  }
 
-type StringAggState<TOrderBy extends StringAggOrderable = StringAggOrderable> = {
-  entriesByKey: Map<string | number, StringAggEntry<TOrderBy>>
-  orderedEntries: Array<StringAggEntry<TOrderBy>>
-  text: string
-}
+type StringAggState<TOrderBy extends StringAggOrderable = StringAggOrderable> =
+  {
+    entriesByKey: Map<string | number, StringAggEntry<TOrderBy>>
+    orderedEntries: Array<StringAggEntry<TOrderBy>>
+    text: string
+  }
 
 function isPipedAggregateFunction<T, R>(
   aggregate: AggregateFunction<T, R>,
@@ -405,11 +408,7 @@ export function stringAgg<T, TOrderBy extends StringAggOrderable>(
       >()
 
       for (const [entry, multiplicity] of values) {
-        if (
-          entry.rowKey == null ||
-          multiplicity <= 0 ||
-          entry.value == null
-        ) {
+        if (entry.rowKey == null || multiplicity <= 0 || entry.value == null) {
           continue
         }
 

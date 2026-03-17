@@ -719,13 +719,14 @@ describe(`Operators`, () => {
 
       graph.finalize()
 
-      const rows = [1, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 2, 20, 3, 4, 5, 6, 7, 8, 9]
-        .map((seq) => ({
-          id: `delta-${seq}`,
-          responseId: `a`,
-          seq,
-          text: String.fromCharCode(96 + seq),
-        }))
+      const rows = [
+        1, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 2, 20, 3, 4, 5, 6, 7, 8, 9,
+      ].map((seq) => ({
+        id: `delta-${seq}`,
+        responseId: `a`,
+        seq,
+        text: String.fromCharCode(96 + seq),
+      }))
 
       input.sendData(new MultiSet(rows.map((row) => [row, 1])))
       graph.run()
@@ -860,9 +861,7 @@ describe(`Operators`, () => {
       ])
 
       input.sendData(
-        new MultiSet([
-          [{ id: `a-3`, responseId: `a`, seq: 1, text: `C` }, 1],
-        ]),
+        new MultiSet([[{ id: `a-3`, responseId: `a`, seq: 1, text: `C` }, 1]]),
       )
       graph.run()
 
