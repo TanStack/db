@@ -30,7 +30,7 @@ export function TodoList({ collection, executor }: TodoListProps) {
     [executor, collection],
   )
 
-  const { data: todoList = [] } = useLiveQuery((q) =>
+  const { data: todoList = [], isLoading } = useLiveQuery((q) =>
     q.from({ todo: collection }).orderBy(({ todo }) => todo.createdAt, `desc`),
   )
 
@@ -175,7 +175,12 @@ export function TodoList({ collection, executor }: TodoListProps) {
       </View>
 
       {/* Todo list */}
-      {todoList.length === 0 ? (
+      {isLoading && todoList.length === 0 ? (
+        <View style={styles.emptyContainer}>
+          <ActivityIndicator size="large" color="#3b82f6" />
+          <Text style={styles.emptyText}>Loading todos...</Text>
+        </View>
+      ) : todoList.length === 0 ? (
         <View style={styles.emptyContainer}>
           <Text style={styles.emptyText}>No todos yet. Add one above!</Text>
           <Text style={styles.emptySubtext}>
