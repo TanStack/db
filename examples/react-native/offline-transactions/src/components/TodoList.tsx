@@ -34,20 +34,17 @@ export function TodoList({ collection, executor }: TodoListProps) {
     q.from({ todo: collection }).orderBy(({ todo }) => todo.createdAt, `desc`),
   )
 
-  // Monitor network status
+  // Monitor network status for UI display
+  // (The executor's ReactNativeOnlineDetector handles sync retries internally)
   useEffect(() => {
     const unsubscribe = NetInfo.addEventListener((state) => {
       const connected =
         state.isConnected === true && state.isInternetReachable !== false
       setIsOnline(connected)
-
-      if (connected) {
-        executor.notifyOnline()
-      }
     })
 
     return () => unsubscribe()
-  }, [executor])
+  }, [])
 
   // Monitor pending transactions
   useEffect(() => {
