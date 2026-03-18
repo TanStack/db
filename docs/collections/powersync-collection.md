@@ -610,6 +610,48 @@ In examples 3 and 4, Sync Stream subscription parameters are hardcoded. Examples
 
 In `eager` mode, all data from the SQLite database is synced into the TanStack DB collection. The live query then filters this full dataset to produce the final result. This means the collection holds all rows regardless of whether they match any active query.
 
+```mermaid
+block-beta
+    columns 5
+
+    block:SQL
+        columns 2
+        sql_title["SQLite"]:2
+        SQL1["id: 1\nlist_id: list_1\ncompleted: 0"]
+        SQL2["id: 2\nlist_id: list_1\ncompleted: 1"]
+        SQL3["id: 3\nlist_id: list_2\ncompleted: 0"]
+        SQL4["id: 4\nlist_id: list_2\ncompleted: 1"]
+    end
+
+    space
+
+    block:COL
+        columns 2
+        col_title["Collection"]:2
+        COL1["id: 1\nlist_id: list_1\ncompleted: 0"]
+        COL2["id: 2\nlist_id: list_1\ncompleted: 1"]
+        COL3["id: 3\nlist_id: list_2\ncompleted: 0"]
+        COL4["id: 4\nlist_id: list_2\ncompleted: 1"]
+    end
+
+    space
+
+    block:RES
+        columns 2
+        res_title["Result"]:2
+        RES1["id: 1\nlist_id: list_1\ncompleted: 0"]
+        RES2["id: 2\nlist_id: list_1\ncompleted: 1"]
+        space space
+    end
+
+    SQL -- "Eager mode syncs all SQLite data\nto TanStack DB Collection" --> COL
+    COL -- "TanStack DB Query filters\nfor list_id = 'list_1'" --> RES
+
+    style sql_title fill:none,stroke:none
+    style col_title fill:none,stroke:none
+    style res_title fill:none,stroke:none
+```
+
 ```typescript
 const collection = createCollection(
   powerSyncCollectionOptions({
@@ -636,6 +678,47 @@ const liveQuery = createLiveQueryCollection({
 ### 2. On-Demand Mode
 
 In `on-demand` mode, only data from the SQLite database that satisfies the predicates of active TanStack DB live queries is synced into the TanStack DB collection. This reduces the amount of data held in memory, since the collection only contains rows that are relevant to the queries currently registered against it.
+
+```mermaid
+block-beta
+    columns 5
+
+    block:SQL
+        columns 2
+        sql_title["SQLite"]:2
+        SQL1["id: 1\nlist_id: list_1\ncompleted: 0"]
+        SQL2["id: 2\nlist_id: list_1\ncompleted: 1"]
+        SQL3["id: 3\nlist_id: list_2\ncompleted: 0"]
+        SQL4["id: 4\nlist_id: list_2\ncompleted: 1"]
+    end
+
+    space
+
+    block:COL
+        columns 2
+        col_title["Collection"]:2
+        COL1["id: 1\nlist_id: list_1\ncompleted: 0"]
+        COL2["id: 2\nlist_id: list_1\ncompleted: 1"]
+        space space
+    end
+
+    space
+
+    block:RES
+        columns 2
+        res_title["Result"]:2
+        RES1["id: 1\nlist_id: list_1\ncompleted: 0"]
+        RES2["id: 2\nlist_id: list_1\ncompleted: 1"]
+        space space
+    end
+
+    SQL -- "On-demand mode only syncs \n data from SQLite to the\n TanStack DB collection if they\nsatisfy any of the live queries:\nlist_id = 'list_1'" --> COL
+    COL -- "TanStack DB Query filters\nfor list_id = 'list_1'" --> RES
+
+    style sql_title fill:none,stroke:none
+    style col_title fill:none,stroke:none
+    style res_title fill:none,stroke:none
+```
 
 ```typescript
 const collection = createCollection(
@@ -684,6 +767,59 @@ The hook can optionally return a cleanup function where you can unsubscribe from
 
 This example starts with 4 todos in the PowerSync Service, only 2 of which get synced via the Sync Stream to the SQLite database. Because it's eager mode, both get synced from the SQLite database to the collection. Finally the TanStack DB query only returns the single todo that matches the live query predicate.
 
+```mermaid
+block-beta
+    columns 7
+
+    block:PS
+        columns 2
+        ps_title["PS Service"]:2
+        PS1["id: 1\nlist_id: list_1\ncompleted: 0"]
+        PS2["id: 2\nlist_id: list_1\ncompleted: 1"]
+        PS3["id: 3\nlist_id: list_2\ncompleted: 0"]
+        PS4["id: 4\nlist_id: list_2\ncompleted: 1"]
+    end
+
+    space
+
+    block:SQL
+        columns 2
+        sql_title["SQLite"]:2
+        SQL1["id: 1\nlist_id: list_1\ncompleted: 0"]
+        SQL2["id: 2\nlist_id: list_1\ncompleted: 1"]
+        space space
+    end
+
+    space
+
+    block:COL
+        columns 2
+        col_title["Collection"]:2
+        COL1["id: 1\nlist_id: list_1\ncompleted: 0"]
+        COL2["id: 2\nlist_id: list_1\ncompleted: 1"]
+        space space
+    end
+
+    space
+
+    block:RES
+        columns 2
+        res_title["Result"]:2
+        RES1["id: 2\nlist_id: list_1\ncompleted: 1"]
+        space
+        space space
+    end
+
+    PS -- "Subscribe to Sync Stream,\nonly sync where list_id = 'list_1'" --> SQL
+    SQL -- "Eager mode syncs all SQLite data\nto TanStack DB Collection" --> COL
+    COL -- "TanStack DB Query filters\nfor completed = 1" --> RES
+
+    style ps_title fill:none,stroke:none
+    style sql_title fill:none,stroke:none
+    style col_title fill:none,stroke:none
+    style res_title fill:none,stroke:none
+```
+
 ```typescript
 const collection = createCollection(
   powerSyncCollectionOptions({
@@ -725,6 +861,59 @@ Use the `onLoadSubset` hook to subscribe to a Sync Stream whenever the collectio
 The hook can optionally return a cleanup function where you can unsubscribe from the Sync Stream when that subset is no longer needed.
 
 This example starts with 4 todos in the PowerSync Service, only 2 of which get synced via the Sync Stream to the SQLite database. Because it's on-demand mode, only 1 todo matches gets synced from the SQLite database to the collection. Finally the TanStack DB query only returns the single todo that matches the live query predicate.
+
+```mermaid
+block-beta
+    columns 7
+
+    block:PS
+        columns 2
+        ps_title["PS Service"]:2
+        PS1["id: 1\nlist_id: list_1\ncompleted: 0"]
+        PS2["id: 2\nlist_id: list_1\ncompleted: 1"]
+        PS3["id: 3\nlist_id: list_2\ncompleted: 0"]
+        PS4["id: 4\nlist_id: list_2\ncompleted: 1"]
+    end
+
+    space
+
+    block:SQL
+        columns 2
+        sql_title["SQLite"]:2
+        SQL1["id: 1\nlist_id: list_1\ncompleted: 0"]
+        SQL2["id: 2\nlist_id: list_1\ncompleted: 1"]
+        space space
+    end
+
+    space
+
+    block:COL
+        columns 2
+        col_title["Collection"]:2
+        COL1["id: 2\nlist_id: list_1\ncompleted: 1"]
+        space
+        space space
+    end
+
+    space
+
+    block:RES
+        columns 2
+        res_title["Result"]:2
+        RES1["id: 2\nlist_id: list_1\ncompleted: 1"]
+        space
+        space space
+    end
+
+    PS -- "Subscribe to Sync Stream,\nonly sync where list_id = 'list_1'" --> SQL
+    SQL -- "On-demand mode only syncs \n data from SQLite to the\n TanStack DB collection if they\nsatisfy any of the live queries:\ncompleted = 1" --> COL
+    COL -- "TanStack DB Query filters\nfor completed = 1" --> RES
+
+    style ps_title fill:none,stroke:none
+    style sql_title fill:none,stroke:none
+    style col_title fill:none,stroke:none
+    style res_title fill:none,stroke:none
+```
 
 ```typescript
 const collection = createCollection(
@@ -777,6 +966,59 @@ The `list_id` value is parsed from the expression tree and passed to `syncStream
 Note: This example slightly differs from the previous two as it aims to illustrate `extractSimpleComparisons` usage.
 
 This example starts with 4 todos in the PowerSync Service, the Sync Stream subscription criteria (`list_id = "list_1"`) is derived from the live query registered against the collection. Only 2 todos get synced via the Sync Stream to the SQLite database. Two todos get synced from the SQLite database to the collection. Finally the TanStack DB query returns both todos as they both match `eq(todo.list_id, 'list_id')`.
+
+```mermaid
+block-beta
+    columns 7
+
+    block:PS
+        columns 2
+        ps_title["PS Service"]:2
+        PS1["id: 1\nlist_id: list_1\ncompleted: 0"]
+        PS2["id: 2\nlist_id: list_1\ncompleted: 1"]
+        PS3["id: 3\nlist_id: list_2\ncompleted: 0"]
+        PS4["id: 4\nlist_id: list_2\ncompleted: 1"]
+    end
+
+    space
+
+    block:SQL
+        columns 2
+        sql_title["SQLite"]:2
+        SQL1["id: 1\nlist_id: list_1\ncompleted: 0"]
+        SQL2["id: 2\nlist_id: list_1\ncompleted: 1"]
+        space space
+    end
+
+    space
+
+    block:COL
+        columns 2
+        col_title["Collection"]:2
+        COL1["id: 1\nlist_id: list_1\ncompleted: 0"]
+        COL2["id: 2\nlist_id: list_1\ncompleted: 1"]
+        space space
+    end
+
+    space
+
+    block:RES
+        columns 2
+        res_title["Result"]:2
+        RES1["id: 1\nlist_id: list_1\ncompleted: 0"]
+        RES2["id: 2\nlist_id: list_1\ncompleted: 1"]
+        space space
+    end
+
+    PS -- "Derive the list_id criteria from \n live query, subscribe to sync\n stream, only sync \n where list = 'list_1'" --> SQL
+    SQL -- "On-demand mode only syncs\n data from SQLite to the\n TanStack DB collection if they\nsatisfy any of the live queries:\nlist_id = 'list_1'" --> COL
+    COL -- "TanStack DB Query filters\nfor list_id = 'list_1'" --> RES
+
+    style ps_title fill:none,stroke:none
+    style sql_title fill:none,stroke:none
+    style col_title fill:none,stroke:none
+    style res_title fill:none,stroke:none
+```
 
 ```typescript
 const collection = createCollection(
@@ -843,6 +1085,59 @@ todos:
 The `list` parameter name is kept as-is (consistent with most examples), but must be mapped to `list_id` to work with the following example. Alternatively, it can be named `list_id` in the Sync Stream definition to skip the programmatic mapping step.
 
 This example starts with 4 todos in the PowerSync Service, the Sync Stream subscription criteria (`list_id = "list_1" and completed = 1`) is derived from the live query registered against the collection. Only 1 todo gets synced via the Sync Stream to the SQLite database. One todo gets synced from the SQLite database to the collection. Finally the TanStack DB query returns 1 todo that matches `eq(todo.list_id, 'list_id') and eq(todo.completed, 1)`.
+
+```mermaid
+block-beta 
+    columns 7
+
+    block:PS
+        columns 2
+        ps_title["PS Service"]:2
+        PS1["id: 1\nlist_id: list_1\ncompleted: 0"]
+        PS2["id: 2\nlist_id: list_1\ncompleted: 1"]
+        PS3["id: 3\nlist_id: list_2\ncompleted: 0"]
+        PS4["id: 4\nlist_id: list_2\ncompleted: 1"]
+    end
+
+    space
+
+    block:SQL
+        columns 2
+        sql_title["SQLite"]:2
+        SQL1["id: 2\nlist_id: list_1\ncompleted: 1"]
+        space
+        space space
+    end
+
+    space
+
+    block:COL
+        columns 2
+        col_title["Collection"]:2
+        COL1["id: 2\nlist_id: list_1\ncompleted: 1"]
+        space
+        space space
+    end
+
+    space
+
+    block:RES
+        columns 2
+        res_title["Result"]:2
+        RES1["id: 2\nlist_id: list_1\ncompleted: 1"]
+        space
+        space space
+    end
+
+    PS -- "Derive the list_id criteria and \n completed from live query,\n subscribe to Sync Stream\nwhere\n list = 'list_1' AND completed = 1" --> SQL
+    SQL -- "On-demand mode only syncs\n data from SQLite to the TanStack DB\n collection if they\nsatisfy any of the live queries:\nlist = 'list_1' AND completed = 1" --> COL
+    COL -- "TanStack DB Query filters for\nlist = 'list_1' AND completed = 1" --> RES
+
+    style ps_title fill:none,stroke:none
+    style sql_title fill:none,stroke:none
+    style col_title fill:none,stroke:none
+    style res_title fill:none,stroke:none
+```
 
 ```typescript
 const collection = createCollection(
