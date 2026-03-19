@@ -122,6 +122,7 @@ function createPersistedCollection<T extends PersistableRow>(
 ): PersistedCollectionHarness<T> {
   const persistence = createElectronSQLitePersistence<T, string | number>({
     invoke,
+    timeoutMs: isElectronFullE2EEnabled() ? 90_000 : undefined,
   })
   let seedSequence = 0
   const seedPersisted = async (rows: Array<T>): Promise<void> => {
