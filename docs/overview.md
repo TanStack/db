@@ -383,7 +383,6 @@ Here we illustrate two common ways of using TanStack DB:
 
 1. [using TanStack Query](#1-tanstack-query) with an existing REST API
 2. [using the ElectricSQL sync engine](#2-electricsql-sync) for real-time sync with your existing API
-3. [using PowerSync](#3-powersync-sync) for offline-first sync with SQLite-based persistence
 
 > [!TIP]
 > You can combine these patterns. One of the benefits of TanStack DB is that you can integrate different ways of loading data and handling mutations into the same app. Your components don't need to know where the data came from or goes.
@@ -516,53 +515,6 @@ const AddTodo = () => {
   )
 }
 ```
-
-### 3. PowerSync sync
-
-[PowerSync](https://powersync.com) provides offline-first sync with a SQLite-based local database and real-time synchronization with PostgreSQL, MongoDB, MySQL, and SQL Server (Alpha) backends.
-
-```tsx
-import { Schema, Table, column, PowerSyncDatabase } from "@powersync/web"
-import { createCollection } from "@tanstack/react-db"
-import { powerSyncCollectionOptions } from "@tanstack/powersync-db-collection"
-
-// Define PowerSync schema and initialize database
-const APP_SCHEMA = new Schema({
-  todos: new Table({
-    text: column.text,
-    completed: column.integer,
-  }),
-})
-
-const db = new PowerSyncDatabase({
-  database: { dbFilename: "app.sqlite" },
-  schema: APP_SCHEMA,
-})
-
-// Create a TanStack DB collection backed by PowerSync
-const todoCollection = createCollection(
-  powerSyncCollectionOptions({
-    database: db,
-    table: APP_SCHEMA.props.todos,
-  })
-)
-
-const AddTodo = () => {
-  return (
-    <Button
-      onClick={() =>
-        todoCollection.insert({
-          id: crypto.randomUUID(),
-          text: "Review PR",
-          completed: 0,
-        })
-      }
-    />
-  )
-}
-```
-
-Data is stored locally in SQLite and works offline. When connected to a PowerSync backend, changes sync automatically across all clients. See the [PowerSync Collection documentation](./collections/powersync-collection.md) for full setup details including schema validation, type transformations, and advanced transactions.
 
 ## React Native
 
