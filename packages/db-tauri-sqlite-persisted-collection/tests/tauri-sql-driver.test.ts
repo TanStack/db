@@ -55,6 +55,81 @@ it(`keeps literal question marks untouched while binding positional parameters`,
   ])
 })
 
+it(`does not convert question marks inside line comments`, async () => {
+  let capturedSql = ``
+  const driver = new TauriSQLiteDriver({
+    database: {
+      path: `sqlite:test.db`,
+      execute: async (sql) => {
+        capturedSql = sql
+        return { rowsAffected: 0 }
+      },
+      select: async <TRow>() => [] as unknown as TRow,
+      close: async () => true,
+    },
+  })
+
+  await driver.run(
+    `UPDATE prompts
+     SET notes = 'changed'
+     -- keep this literal ? untouched
+     WHERE id = ?`,
+    [`1`],
+  )
+
+  expect(capturedSql).toContain(`-- keep this literal ? untouched`)
+  expect(capturedSql).toContain(`WHERE id = $1`)
+})
+
+it(`does not convert question marks inside block comments`, async () => {
+  let capturedSql = ``
+  const driver = new TauriSQLiteDriver({
+    database: {
+      path: `sqlite:test.db`,
+      execute: async () => ({ rowsAffected: 0 }),
+      select: async <TRow>(sql: string) => {
+        capturedSql = sql
+        return [] as unknown as TRow
+      },
+      close: async () => true,
+    },
+  })
+
+  await driver.query(
+    `SELECT title
+     FROM prompts
+     /* keep this literal ? untouched */
+     WHERE id = ?`,
+    [`1`],
+  )
+
+  expect(capturedSql).toContain(`/* keep this literal ? untouched */`)
+  expect(capturedSql).toContain(`WHERE id = $1`)
+})
+
+it(`keeps escaped single-quote literals unchanged while converting bindings`, async () => {
+  let capturedSql = ``
+  const driver = new TauriSQLiteDriver({
+    database: {
+      path: `sqlite:test.db`,
+      execute: async (sql) => {
+        capturedSql = sql
+        return { rowsAffected: 0 }
+      },
+      select: async <TRow>() => [] as unknown as TRow,
+      close: async () => true,
+    },
+  })
+
+  await driver.run(
+    `INSERT INTO prompts (id, title, notes)
+     VALUES (?, 'it''s still a literal ?', ?)`,
+    [`1`, `note`],
+  )
+
+  expect(capturedSql).toContain(`VALUES ($1, 'it''s still a literal ?', $2)`)
+})
+
 it(`closes the underlying database when close is available`, async () => {
   let closeCount = 0
   const driver = new TauriSQLiteDriver({

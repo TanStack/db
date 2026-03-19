@@ -10,7 +10,6 @@
     "esModuleInterop": true,
     "skipLibCheck": true,
     "forceConsistentCasingInFileNames": true,
-    "jsx": "react",
     "paths": {
       "@tanstack/db": ["../db/src"],
       "@tanstack/db-ivm": ["../db-ivm/src"],
