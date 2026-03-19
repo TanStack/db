@@ -22,7 +22,7 @@ import type {
 // jsdom doesn't provide navigator.locks, which the WebLocksLeader uses.
 // We pass custom implementations (FakeLeaderElection, ManualOnlineDetector,
 // FakeStorageAdapter) so these mocks just prevent initialization errors.
- 
+
 if (!(globalThis.navigator as any)?.locks) {
   Object.defineProperty(globalThis.navigator, `locks`, {
     value: { request: vi.fn().mockResolvedValue(false) },
