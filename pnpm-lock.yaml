@@ -1153,6 +1153,9 @@ importers:
         specifier: '>=4.7'
         version: 5.9.3
     devDependencies:
+      '@tanstack/offline-transactions':
+        specifier: workspace:*
+        version: link:../offline-transactions
       '@tanstack/query-core':
         specifier: ^5.90.20
         version: 5.90.20
