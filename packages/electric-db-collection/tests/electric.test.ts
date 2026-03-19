@@ -3367,8 +3367,7 @@ describe(`Electric Integration`, () => {
               kind: `resume`,
               offset: `10_0`,
               handle: `handle-1`,
-              shapeId:
-                `{"params":{"table":"test_table","where":"room=1"},"url":"http://test-url"}`,
+              shapeId: `{"params":{"table":"test_table","where":"room=1"},"url":"http://test-url"}`,
               updatedAt: 1,
             },
           ],
