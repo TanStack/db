@@ -968,6 +968,33 @@ describe(`persistedCollectionOptions`, () => {
     })
   })
 
+  it(`marks ready even when persisted startup fails before markReady`, async () => {
+    const adapter = createRecordingAdapter()
+    adapter.loadSubset = async () => {
+      throw new Error(`startup failure`)
+    }
+
+    const collection = createCollection(
+      persistedCollectionOptions<Todo, string>({
+        id: `sync-present-mark-ready-on-startup-failure`,
+        getKey: (item) => item.id,
+        sync: {
+          sync: ({ markReady }) => {
+            markReady()
+            return {}
+          },
+        },
+        persistence: {
+          adapter,
+        },
+      }),
+    )
+
+    await collection.stateWhenReady()
+    await flushAsyncWork()
+    expect(collection.status).toBe(`ready`)
+  })
+
   it(`reads staged metadata writes during hydration-queued transactions`, async () => {
     const adapter = createRecordingAdapter([
       {

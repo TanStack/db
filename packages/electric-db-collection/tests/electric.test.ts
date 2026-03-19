@@ -3002,10 +3002,7 @@ describe(`Electric Integration`, () => {
               kind: `resume`,
               offset: `10_0`,
               handle: `handle-1`,
-              shapeId: JSON.stringify({
-                url: `http://test-url`,
-                params: { table: `test_table` },
-              }),
+              shapeId: `{"params":{"table":"test_table"},"url":"http://test-url"}`,
               updatedAt: 1,
             },
           ],
@@ -3354,6 +3351,60 @@ describe(`Electric Integration`, () => {
       expect(metadataHarness.collectionMetadata.get(`electric:resume`)).toEqual(
         expect.objectContaining({
           kind: `reset`,
+        }),
+      )
+    })
+
+    it(`should treat persisted resume identity as compatible when params key order differs`, async () => {
+      vi.clearAllMocks()
+
+      const { ShapeStream } = await import(`@electric-sql/client`)
+      const metadataHarness = createInMemorySyncMetadataApi(
+        new Map([
+          [
+            `electric:resume`,
+            {
+              kind: `resume`,
+              offset: `10_0`,
+              handle: `handle-1`,
+              shapeId:
+                `{"params":{"table":"test_table","where":"room=1"},"url":"http://test-url"}`,
+              updatedAt: 1,
+            },
+          ],
+        ]),
+      )
+
+      const baseOptions = electricCollectionOptions({
+        id: `persisted-ordered-params-resume-test`,
+        shapeOptions: {
+          url: `http://test-url`,
+          params: {
+            where: `room=1`,
+            table: `test_table`,
+          },
+        },
+        syncMode: `on-demand` as const,
+        getKey: (item: Row) => item.id as number,
+        startSync: true,
+      })
+
+      const originalSync = baseOptions.sync
+      createCollection({
+        ...baseOptions,
+        sync: {
+          sync: (params: Parameters<typeof originalSync.sync>[0]) =>
+            originalSync.sync({
+              ...params,
+              metadata: metadataHarness.api,
+            }),
+        },
+      })
+
+      expect(ShapeStream).toHaveBeenCalledWith(
+        expect.objectContaining({
+          offset: `10_0`,
+          handle: `handle-1`,
         }),
       )
     })

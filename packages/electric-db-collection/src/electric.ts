@@ -323,14 +323,44 @@ function parseSnapshotMessage(message: SnapshotEndMessage): PostgresSnapshot {
   }
 }
 
+function toStableSerializable(value: unknown): unknown {
+  if (value == null) {
+    return value
+  }
+
+  if (Array.isArray(value)) {
+    return value.map((entry) => toStableSerializable(entry))
+  }
+
+  if (value instanceof Date) {
+    return value.toISOString()
+  }
+
+  if (typeof value === `object`) {
+    const record = value as Record<string, unknown>
+    const stableRecord: Record<string, unknown> = {}
+    const keys = Object.keys(record).sort((left, right) =>
+      left < right ? -1 : left > right ? 1 : 0,
+    )
+    for (const key of keys) {
+      stableRecord[key] = toStableSerializable(record[key])
+    }
+    return stableRecord
+  }
+
+  return value
+}
+
 function getStableShapeIdentity(shapeOptions: {
   url: string
   params?: Record<string, unknown>
 }): string {
-  return JSON.stringify({
-    url: shapeOptions.url,
-    params: shapeOptions.params ?? null,
-  })
+  return JSON.stringify(
+    toStableSerializable({
+      url: shapeOptions.url,
+      params: shapeOptions.params ?? null,
+    }),
+  )
 }
 
 // Check if a message contains txids in its headers

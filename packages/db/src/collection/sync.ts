@@ -226,6 +226,10 @@ export class CollectionSyncManager<
             pendingTransaction.operations = []
             pendingTransaction.deletedKeys.clear()
             pendingTransaction.rowMetadataWrites.clear()
+            // Intentionally preserve collectionMetadataWrites across truncate.
+            // Collection-scoped metadata (for example persisted resume/reset
+            // state) can be staged before truncate and should commit atomically
+            // with the truncate transaction.
 
             // Mark the transaction as a truncate operation. During commit, this triggers:
             // - Delete events for all previously synced keys (excluding optimistic-deleted keys)

@@ -2218,7 +2218,24 @@ function createWrappedSyncConfig<
       const getOpenTransaction = () =>
         transactionStack[transactionStack.length - 1]
       let fullStartPromise: Promise<void> | null = null
-      const cancelledLoads = new WeakSet<object>()
+      const cancelledLoadKeys = new Set<string>()
+      const loadSubscriptionIds = new WeakMap<object, string>()
+      let nextLoadSubscriptionId = 0
+      const getLoadKey = (options: LoadSubsetOptions) => {
+        const subscription = options.subscription as object | undefined
+        if (subscription && typeof subscription === `object`) {
+          const existingId = loadSubscriptionIds.get(subscription)
+          if (existingId) {
+            return `sub:${existingId}`
+          }
+          nextLoadSubscriptionId++
+          const nextId = String(nextLoadSubscriptionId)
+          loadSubscriptionIds.set(subscription, nextId)
+          return `sub:${nextId}`
+        }
+
+        return `opts:${stableSerialize(normalizeSubsetOptionsForKey(options))}`
+      }
       runtime.setSyncControls({
         begin: params.begin,
         write: params.write as SyncControlFns<T, TKey>[`write`],
@@ -2233,9 +2250,17 @@ function createWrappedSyncConfig<
       const wrappedParams = {
         ...params,
         markReady: () => {
-          void (fullStartPromise ?? runtime.ensureStarted()).then(() => {
-            params.markReady()
-          })
+          void (fullStartPromise ?? runtime.ensureStarted())
+            .then(() => {
+              params.markReady()
+            })
+            .catch((error) => {
+              console.warn(
+                `Failed persisted sync startup before markReady:`,
+                error,
+              )
+              params.markReady()
+            })
         },
         begin: (options?: { immediate?: boolean }) => {
           const transaction: OpenSyncTransaction<T, TKey> = {
@@ -2413,6 +2438,10 @@ function createWrappedSyncConfig<
 
           openTransaction.operations = []
           openTransaction.rowMetadataWrites.clear()
+          // Intentionally preserve collectionMetadataWrites across truncate.
+          // Callers (for example electric resume/reset handling) may stage
+          // collection-scoped metadata before truncating row data, and those
+          // writes must commit atomically with the truncate transaction.
           openTransaction.truncate = true
           if (!openTransaction.queuedBecauseHydrating) {
             params.truncate()
@@ -2482,16 +2511,17 @@ function createWrappedSyncConfig<
           runtime.clearSyncControls()
         },
         loadSubset: async (options: LoadSubsetOptions) => {
-          cancelledLoads.delete(options as object)
+          const loadKey = getLoadKey(options)
+          cancelledLoadKeys.delete(loadKey)
           await fullStartPromise
           const resolvedSourceResult = await sourceResultPromise
-          if (startupState.cleanedUp || cancelledLoads.has(options as object)) {
+          if (startupState.cleanedUp || cancelledLoadKeys.has(loadKey)) {
             return
           }
           await runtime.loadSubset(options, resolvedSourceResult.loadSubset)
         },
         unloadSubset: (options: LoadSubsetOptions) => {
-          cancelledLoads.add(options as object)
+          cancelledLoadKeys.add(getLoadKey(options))
           runtime.unloadSubset(options, sourceResult.unloadSubset)
         },
       }

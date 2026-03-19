@@ -102,6 +102,24 @@ const persistedTaggedValueTypes = new Set<PersistedTaggedValueType>([
 const orderByObjectIds = new WeakMap<object, number>()
 let nextOrderByObjectId = 1
 
+function isDuplicateColumnAddError(
+  error: unknown,
+  columnName: string,
+): boolean {
+  if (!(error instanceof Error)) {
+    return false
+  }
+
+  const message = error.message.toLowerCase()
+  const normalizedColumnName = columnName.toLowerCase()
+  return (
+    (message.includes(`duplicate column name`) &&
+      message.includes(normalizedColumnName)) ||
+    (message.includes(`already exists`) &&
+      message.includes(normalizedColumnName))
+  )
+}
+
 function quoteIdentifier(identifier: string): string {
   if (!SAFE_IDENTIFIER_PATTERN.test(identifier)) {
     throw new InvalidPersistedCollectionConfigError(
@@ -2041,12 +2059,20 @@ export class SQLiteCorePersistenceAdapter<
       await this.driver.exec(
         `ALTER TABLE applied_tx ADD COLUMN replay_json TEXT`,
       )
-    } catch {}
+    } catch (error) {
+      if (!isDuplicateColumnAddError(error, `replay_json`)) {
+        throw error
+      }
+    }
     try {
       await this.driver.exec(
         `ALTER TABLE applied_tx ADD COLUMN replay_requires_full_reload INTEGER NOT NULL DEFAULT 0`,
       )
-    } catch {}
+    } catch (error) {
+      if (!isDuplicateColumnAddError(error, `replay_requires_full_reload`)) {
+        throw error
+      }
+    }
     await this.driver.exec(
       `CREATE TABLE IF NOT EXISTS collection_version (
          collection_id TEXT PRIMARY KEY,
