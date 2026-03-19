@@ -82,12 +82,6 @@ export type ElectronRuntimeBridgeProcessError = {
   stack?: string
 }
 
-export type ElectronRuntimeBridgeProcessError = {
-  name: string
-  message: string
-  stack?: string
-}
-
 export type ElectronRuntimeBridgeProcessResult =
   | {
       ok: true
