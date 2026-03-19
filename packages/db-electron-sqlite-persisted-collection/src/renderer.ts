@@ -212,7 +212,12 @@ function createResolvedRendererAdapter<
     loadCollectionMetadata: async (
       collectionId: string,
     ): Promise<Array<{ key: string; value: unknown }>> => {
-      return executeRequest(`loadCollectionMetadata`, collectionId, {}, resolution)
+      return executeRequest(
+        `loadCollectionMetadata`,
+        collectionId,
+        {},
+        resolution,
+      )
     },
     scanRows: async (
       collectionId: string,
