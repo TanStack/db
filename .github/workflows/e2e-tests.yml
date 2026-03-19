@@ -41,6 +41,7 @@ jobs:
           pnpm --filter @tanstack/db-ivm build
           pnpm --filter @tanstack/db build
           pnpm --filter @tanstack/electric-db-collection build
+          pnpm --filter @tanstack/offline-transactions build
           pnpm --filter @tanstack/query-db-collection build
 
       - name: Run Electric E2E tests
