@@ -6,7 +6,9 @@ description: >
   React (renderHook, waitFor), Vue (nextTick), Svelte ($effect.root, flushSync),
   Solid (renderHook), and Angular (TestBed). Testing mutations (insert, update,
   delete), createOptimisticAction, and live queries. Stripping virtual props.
-  Vitest setup and configuration.
+  Vitest setup and configuration. Use when writing tests, setting up test
+  infrastructure, or debugging test failures for code that uses TanStack DB.
+user-invocable: false
 type: sub-skill
 library: db
 library_version: '0.5.30'
@@ -22,6 +24,9 @@ sources:
 
 This skill builds on db-core. Read it first for the overall mental model.
 
+For the full test inventory with file counts and coverage areas,
+see [references/test-inventory.md](references/test-inventory.md).
+
 # TanStack DB — Testing
 
 ## Quick Decision Tree
@@ -33,6 +38,7 @@ This skill builds on db-core. Read it first for the overall mental model.
 - Testing a Solid component with useLiveQuery? → [Solid](#solid)
 - Testing an Angular component with injectLiveQuery? → [Angular](#angular)
 - Testing mutations or optimistic actions? → [Testing Mutations](#testing-mutations)
+- Want to see what the built-in test suite covers? → [references/test-inventory.md](references/test-inventory.md)
 
 ## Setup
 
@@ -329,32 +335,19 @@ expect(stripVirtualProps(item)).toEqual({ id: '1', name: 'Alice', age: 30 })
 | Using `toEqual` on collection items | Use `toMatchObject` to ignore virtual props |
 | Forgetting mutation handlers | Provide `onInsert`/`onUpdate`/`onDelete` (even empty async functions) |
 
-## Test Suite Overview
-
-TanStack DB ships with 166+ test files covering:
-
-| Area | Files | Focus |
-|------|-------|-------|
-| Collection Core | ~15 | CRUD, lifecycle, events, errors, schemas, indexes |
-| Query System | ~30 | Builder, compiler, optimizer, operators, joins |
-| IVM Operators | ~27 | filter, join, orderBy, groupBy, topK, etc. |
-| Framework Hooks | 5 | React, Vue, Svelte, Solid, Angular |
-| Persistence | ~20 | SQLite adapters (Node, Browser, Electron, React Native) |
-| Offline Sync | 8 | Transaction queuing, failover, leader election |
-| Integrations | ~6 | Electric, PowerSync, RxDB, TrailBase, Query |
-
-Run the full suite with:
+## Running the Built-in Tests
 
 ```bash
+# Full suite
 pnpm test
-```
 
-Or test a specific package:
-
-```bash
+# Specific package
 pnpm --filter @tanstack/db test
 pnpm --filter @tanstack/react-db test
 ```
+
+For a detailed inventory of all 166+ built-in test files grouped by package and area,
+see [references/test-inventory.md](references/test-inventory.md).
 
 ## Version
 
