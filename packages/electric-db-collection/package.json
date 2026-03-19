@@ -53,8 +53,8 @@
     "debug": "^4.4.3"
   },
   "devDependencies": {
-    "@types/debug": "^4.1.12",
-    "@types/pg": "^8.16.0",
+    "@types/debug": "^4.1.13",
+    "@types/pg": "^8.18.0",
     "@vitest/coverage-istanbul": "^3.2.4",
     "pg": "^8.20.0"
   }
