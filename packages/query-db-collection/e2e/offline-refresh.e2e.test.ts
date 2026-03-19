@@ -10,7 +10,7 @@ import { createCollection } from '@tanstack/db'
 import { QueryClient } from '@tanstack/query-core'
 import { startOfflineExecutor } from '@tanstack/offline-transactions'
 import { queryCollectionOptions } from '../src/query'
-import type { Collection, PendingMutation } from '@tanstack/db'
+import type { Collection } from '@tanstack/db'
 import type {
   LeaderElection,
   OfflineConfig,
@@ -206,12 +206,9 @@ describe(`offline transactions + query collection refresh`, () => {
           })
 
           // Update server state (simulating the server processing the mutation)
-          const mutations = params.transaction.mutations as Array<
-            PendingMutation<TestItem>
-          >
-          for (const mutation of mutations) {
+          for (const mutation of params.transaction.mutations) {
             if (mutation.type === `insert`) {
-              serverItems.push(mutation.modified)
+              serverItems.push(mutation.modified as TestItem)
             }
           }
 
