@@ -26,7 +26,9 @@ function canAttemptNodeAsyncLocalStorageLoad(): boolean {
     return false
   }
 
-  return typeof process.versions.node === `string`
+  // In Capacitor webviews, process may be polyfilled without versions.
+  // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition
+  return typeof process.versions?.node === `string`
 }
 
 function getNodeAsyncHooksSpecifier(): string {

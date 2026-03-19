@@ -1,10 +1,14 @@
 import { mkdtempSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { afterEach, expect, it } from 'vitest'
-import { CapacitorSQLiteDriver } from '../src/capacitor-sqlite-driver'
+import { afterEach, expect, it, vi } from 'vitest'
+import {
+  
+  CapacitorSQLiteDriver
+} from '../src/capacitor-sqlite-driver'
 import { InvalidPersistedCollectionConfigError } from '../../db-sqlite-persisted-collection-core/src'
 import { createCapacitorSQLiteTestDatabase } from './helpers/capacitor-sqlite-test-db'
+import type {CapacitorSQLiteDatabaseLike} from '../src/capacitor-sqlite-driver';
 
 const activeCleanupFns: Array<() => void | Promise<void>> = []
 
@@ -185,4 +189,27 @@ it(`throws config error when db methods are missing`, () => {
   expect(
     () => new CapacitorSQLiteDriver({ database: {} as never }),
   ).toThrowError(InvalidPersistedCollectionConfigError)
+})
+
+it(`does not throw when process is polyfilled without versions`, async () => {
+  vi.stubGlobal(`process`, {
+    env: {},
+  })
+  activeCleanupFns.push(() => {
+    vi.unstubAllGlobals()
+  })
+
+  const database = {
+    execute: async () => undefined,
+    query: async () => ({
+      values: [] as Array<unknown>,
+    }),
+    run: async () => undefined,
+    close: async () => undefined,
+  }
+
+  const driver = new CapacitorSQLiteDriver({
+    database: database as unknown as CapacitorSQLiteDatabaseLike,
+  })
+  await expect(driver.query(`SELECT 1`)).resolves.toEqual([])
 })

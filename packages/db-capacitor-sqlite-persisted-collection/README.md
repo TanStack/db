@@ -74,6 +74,8 @@ export const todosCollection = createCollection(
   `sync` config is present in `persistedCollectionOptions`.
 - This package assumes you provide an already-created and opened
   `SQLiteDBConnection`.
+- Calling `close()` on this driver's database adapter closes the underlying
+  `SQLiteDBConnection`, so treat driver ownership as connection ownership.
 - This package targets native Capacitor runtimes. Use the dedicated browser and
   Electron persistence packages instead of the plugin's web or Electron modes.
 - The plugin's database version and upgrade APIs are separate from TanStack DB
