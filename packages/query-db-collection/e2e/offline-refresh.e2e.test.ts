@@ -208,7 +208,7 @@ describe(`offline transactions + query collection refresh`, () => {
           // Update server state (simulating the server processing the mutation)
           for (const mutation of params.transaction.mutations) {
             if (mutation.type === `insert`) {
-              serverItems.push(mutation.modified as TestItem)
+              serverItems.push(mutation.modified as unknown as TestItem)
             }
           }
 
