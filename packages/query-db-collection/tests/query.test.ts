@@ -5,6 +5,7 @@ import {
   createLiveQueryCollection,
   eq,
   ilike,
+  inArray,
   or,
 } from '@tanstack/db'
 import { stripVirtualProps } from '../../db/tests/utils'
@@ -5919,6 +5920,212 @@ describe(`QueryCollection`, () => {
 
       await historyQuery.cleanup()
       await liveQuery.cleanup()
+    })
+  })
+
+  describe(`Stale cache consistency`, () => {
+    const sleep = (ms: number) =>
+      new Promise((resolve) => setTimeout(resolve, ms))
+
+    it(`should not re-insert deleted item when a destroyed query is recreated with stale cache`, async () => {
+      const customQueryClient = new QueryClient({
+        defaultOptions: {
+          queries: {
+            staleTime: Infinity,
+            gcTime: Infinity,
+            retry: false,
+            refetchOnWindowFocus: false,
+            refetchOnMount: false,
+            refetchOnReconnect: false,
+          },
+        },
+      })
+
+      interface Assignment {
+        id: number
+        task_id: number
+        resource_id: number
+        hours_per_day: number
+      }
+
+      const MUTATION_DELAY = 50
+
+      let serverItems: Array<Assignment> = [
+        { id: 1, task_id: 10, resource_id: 1, hours_per_day: 8 },
+        { id: 2, task_id: 10, resource_id: 2, hours_per_day: 4 },
+        { id: 3, task_id: 20, resource_id: 3, hours_per_day: 8 },
+      ]
+      let nextId = 100
+
+      const apiCreate = async (
+        item: Omit<Assignment, 'id'>,
+      ): Promise<Assignment> => {
+        await sleep(MUTATION_DELAY)
+        const created = { ...item, id: nextId++ }
+        serverItems.push(created)
+        return created
+      }
+
+      const apiDelete = async (id: number): Promise<void> => {
+        await sleep(MUTATION_DELAY)
+        serverItems = serverItems.filter((a) => a.id !== id)
+      }
+
+      const collection = createCollection(
+        queryCollectionOptions<Assignment>({
+          id: `stale-cache-${Date.now()}-${Math.random()}`,
+          queryClient: customQueryClient,
+          queryKey: ['stale-cache', String(Date.now()), String(Math.random())],
+          queryFn: async () => [...serverItems],
+          getKey: (item) => item.id,
+          syncMode: 'on-demand',
+          startSync: true,
+
+          onInsert: async ({ transaction, collection: col }) => {
+            const { id: _id, ...rest } = transaction.mutations[0].modified
+            const serverItem = await apiCreate(rest)
+            col.utils.writeInsert(serverItem)
+            return { refetch: false }
+          },
+
+          onDelete: async ({ transaction, collection: col }) => {
+            const id = transaction.mutations[0].key as number
+            await apiDelete(id)
+            col.utils.writeDelete(id)
+            return { refetch: false }
+          },
+        }),
+      )
+
+      // Always-active queries
+      const taskQuery = createLiveQueryCollection({
+        query: (q) =>
+          q
+            .from({ assignment: collection })
+            .where(({ assignment }) => inArray(assignment.task_id, [10])),
+      })
+      await taskQuery.preload()
+
+      const projectQuery = createLiveQueryCollection({
+        query: (q) =>
+          q
+            .from({ assignment: collection })
+            .where(({ assignment }) => eq(assignment.task_id, 10)),
+      })
+      await projectQuery.preload()
+
+      await vi.waitFor(() => {
+        expect(collection.size).toBe(3)
+      })
+
+      // Step 1: Toggle ON → add item → toggle OFF
+      let workloadQuery = createLiveQueryCollection({
+        query: (q) =>
+          q
+            .from({ assignment: collection })
+            .where(({ assignment }) =>
+              inArray(assignment.resource_id, [1, 2, 3, 4]),
+            ),
+      })
+      await workloadQuery.preload()
+
+      collection.insert({
+        id: -1,
+        task_id: 10,
+        resource_id: 4,
+        hours_per_day: 8,
+      })
+
+      workloadQuery.cleanup()
+      workloadQuery = createLiveQueryCollection({
+        query: (q) =>
+          q
+            .from({ assignment: collection })
+            .where(({ assignment }) =>
+              inArray(assignment.resource_id, [1, 2, 4]),
+            ),
+      })
+      await workloadQuery.preload()
+      await flushPromises()
+      await sleep(MUTATION_DELAY + 50)
+      await flushPromises()
+
+      const carolId = 100
+      expect(collection.has(carolId)).toBe(true)
+
+      // Step 2: Delete
+      collection.delete(carolId)
+
+      workloadQuery.cleanup()
+      workloadQuery = createLiveQueryCollection({
+        query: (q) =>
+          q
+            .from({ assignment: collection })
+            .where(({ assignment }) => inArray(assignment.resource_id, [1, 2])),
+      })
+      await workloadQuery.preload()
+      await flushPromises()
+      await sleep(MUTATION_DELAY + 50)
+      await flushPromises()
+
+      expect(collection.has(carolId)).toBe(false)
+      expect(collection._state.syncedData.has(carolId)).toBe(false)
+
+      // Step 3: Toggle ON again (stale cache)
+      workloadQuery.cleanup()
+      workloadQuery = createLiveQueryCollection({
+        query: (q) =>
+          q
+            .from({ assignment: collection })
+            .where(({ assignment }) =>
+              inArray(assignment.resource_id, [1, 2, 3, 4]),
+            ),
+      })
+      await workloadQuery.preload()
+      await flushPromises()
+
+      // Step 4: Re-add → toggle OFF
+      const t2 = collection.insert({
+        id: -2,
+        task_id: 10,
+        resource_id: 4,
+        hours_per_day: 8,
+      })
+
+      workloadQuery.cleanup()
+      workloadQuery = createLiveQueryCollection({
+        query: (q) =>
+          q
+            .from({ assignment: collection })
+            .where(({ assignment }) =>
+              inArray(assignment.resource_id, [1, 2, 4]),
+            ),
+      })
+      await workloadQuery.preload()
+      await flushPromises()
+
+      await t2.isPersisted.promise
+      await flushPromises()
+      await sleep(50)
+
+      // The deleted item (id=100) must NOT be in syncedData
+      expect(collection._state.syncedData.has(carolId)).toBe(false)
+
+      // The new item (id=101) should exist
+      expect(collection.has(101)).toBe(true)
+
+      // Only one assignment with resource_id=4
+      const allItems = Array.from(collection.values())
+      const carolAssignments = allItems.filter((a) => a.resource_id === 4)
+      expect(carolAssignments).toHaveLength(1)
+      expect(carolAssignments[0]?.id).toBe(101)
+
+      expect(collection.size).toBe(4)
+
+      workloadQuery.cleanup()
+      taskQuery.cleanup()
+      projectQuery.cleanup()
+      customQueryClient.clear()
     })
   })
 })

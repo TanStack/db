@@ -590,6 +590,33 @@ export function queryCollectionOptions(
   // Default to eager sync mode if not provided
   const syncMode = baseCollectionConfig.syncMode ?? `eager`
 
+  // Compute the base query key once for cache lookups.
+  // All derived keys (from on-demand predicates or function-based queryKey) must
+  // share this prefix so that queryCache.findAll({ queryKey: baseKey }) can find them.
+  const baseKey: QueryKey =
+    typeof queryKey === `function`
+      ? (queryKey({}) as unknown as QueryKey)
+      : (queryKey as unknown as QueryKey)
+
+  /**
+   * Validates that a derived query key extends the base key prefix.
+   * TanStack Query uses prefix matching in findAll(), so all keys for this collection
+   * must start with baseKey for stale cache updates to work correctly.
+   */
+  const validateQueryKeyPrefix = (key: QueryKey): void => {
+    if (typeof queryKey !== `function`) return
+    const isValidPrefix =
+      key.length >= baseKey.length &&
+      baseKey.every((segment, i) => deepEquals(segment, key[i]))
+    if (!isValidPrefix) {
+      console.warn(
+        `[QueryCollection] queryKey function must return keys that extend the base key prefix. ` +
+          `Base: ${JSON.stringify(baseKey)}, Got: ${JSON.stringify(key)}. ` +
+          `This can cause stale cache issues.`,
+      )
+    }
+  }
+
   // Validate required parameters
 
   // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition
@@ -1067,6 +1094,8 @@ export function queryCollectionOptions(
         retainedQueriesPendingRevalidation.add(hashedQueryKey)
       }
       cancelPersistedRetentionExpiry(hashedQueryKey)
+
+      validateQueryKeyPrefix(key)
 
       if (state.observers.has(hashedQueryKey)) {
         // We already have a query for this queryKey
@@ -1752,26 +1781,28 @@ export function queryCollectionOptions(
   }
 
   /**
-   * Updates the query cache with new items for ALL active query keys.
-   * This is critical for on-demand mode where multiple query keys may exist
-   * (each with different predicates).
+   * Updates the query cache with new items for ALL query keys matching this collection,
+   * including stale/inactive cache entries from destroyed observers.
+   *
+   * This prevents ghost items: when an observer is destroyed but gcTime > 0, TanStack Query
+   * keeps the cached data. If syncedData changes (via writeDelete/writeInsert/writeUpdate)
+   * after the observer is destroyed, the stale cache becomes inconsistent. When a new observer
+   * later picks up this stale cache, makeQueryResultHandler would create spurious sync
+   * operations (re-inserting deleted items, reverting updated values, etc).
+   *
+   * By updating all cache entries (active and stale), we ensure the cache always reflects
+   * the current syncedData state.
    */
   const updateCacheData = (items: Array<any>): void => {
-    // Get all active query keys from the hashToQueryKey map
-    const activeQueryKeys = Array.from(hashToQueryKey.values())
+    const allCached = queryClient.getQueryCache().findAll({ queryKey: baseKey })
 
-    if (activeQueryKeys.length > 0) {
-      // Update all active query keys in the cache
-      for (const key of activeQueryKeys) {
-        updateCacheDataForKey(key, items)
+    if (allCached.length > 0) {
+      for (const query of allCached) {
+        updateCacheDataForKey(query.queryKey, items)
       }
     } else {
-      // Fallback: no active queries yet, use the base query key
-      // This handles the case where updateCacheData is called before any queries are created
-      const baseKey =
-        typeof queryKey === `function`
-          ? queryKey({})
-          : (queryKey as unknown as QueryKey)
+      // Fallback: no queries in cache yet, seed the base query key.
+      // This handles the case where updateCacheData is called before any queries are created.
       updateCacheDataForKey(baseKey, items)
     }
   }

@@ -707,26 +707,29 @@ export function electricCollectionOptions<T extends Row<unknown>>(
     if (hasSnapshot) return true
 
     return new Promise((resolve, reject) => {
+      const cleanup = () => {
+        clearTimeout(timeoutId)
+        subSeenTxids.unsubscribe()
+        subSeenSnapshots.unsubscribe()
+      }
+
       const timeoutId = setTimeout(() => {
-        unsubscribeSeenTxids()
-        unsubscribeSeenSnapshots()
+        cleanup()
         reject(new TimeoutWaitingForTxIdError(txId, config.id))
       }, timeout)
 
-      const unsubscribeSeenTxids = seenTxids.subscribe(() => {
+      const subSeenTxids = seenTxids.subscribe(() => {
         if (seenTxids.state.has(txId)) {
           debug(
             `${config.id ? `[${config.id}] ` : ``}awaitTxId found match for txid %o`,
             txId,
           )
-          clearTimeout(timeoutId)
-          unsubscribeSeenTxids()
-          unsubscribeSeenSnapshots()
+          cleanup()
           resolve(true)
         }
       })
 
-      const unsubscribeSeenSnapshots = seenSnapshots.subscribe(() => {
+      const subSeenSnapshots = seenSnapshots.subscribe(() => {
         const visibleSnapshot = seenSnapshots.state.find((snapshot) =>
           isVisibleInSnapshot(txId, snapshot),
         )
@@ -736,9 +739,7 @@ export function electricCollectionOptions<T extends Row<unknown>>(
             txId,
             visibleSnapshot,
           )
-          clearTimeout(timeoutId)
-          unsubscribeSeenSnapshots()
-          unsubscribeSeenTxids()
+          cleanup()
           resolve(true)
         }
       })
