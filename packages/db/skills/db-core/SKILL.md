@@ -34,6 +34,7 @@ hooks. In framework projects, import from the framework package directly.
 | Insert, update, delete with optimistic UI        | db-core/mutations-optimistic/SKILL.md                |
 | Build a custom sync adapter                      | db-core/custom-adapter/SKILL.md                      |
 | Preload collections in route loaders             | meta-framework/SKILL.md                              |
+| Test collections and components                  | db-core/testing/SKILL.md                             |
 | Add offline transaction queueing                 | offline/SKILL.md (in @tanstack/offline-transactions) |
 
 For framework-specific hooks:
@@ -54,6 +55,7 @@ For framework-specific hooks:
 - Using React hooks? → react-db
 - Preloading in route loaders (Start, Next, Remix)? → meta-framework
 - Building an adapter for a new backend? → db-core/custom-adapter
+- Testing collections or components? → db-core/testing
 - Need offline transaction persistence? → offline
 
 ## Version
