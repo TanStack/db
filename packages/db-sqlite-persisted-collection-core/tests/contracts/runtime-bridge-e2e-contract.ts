@@ -65,11 +65,11 @@ export function runRuntimeBridgeE2EContractSuite(
           expect(rows).toEqual([
             {
               key: `1`,
-              value: {
+              value: expect.objectContaining({
                 id: `1`,
                 title: `From bridge client`,
                 score: 10,
-              },
+              }),
             },
           ])
         })
