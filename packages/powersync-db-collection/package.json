@@ -64,8 +64,8 @@
   "devDependencies": {
     "@powersync/common": "1.49.0",
     "@powersync/node": "0.18.1",
-    "@types/debug": "^4.1.12",
+    "@types/debug": "^4.1.13",
     "@vitest/coverage-istanbul": "^3.2.4",
-    "better-sqlite3": "^12.6.2"
+    "better-sqlite3": "^12.8.0"
   }
 }
