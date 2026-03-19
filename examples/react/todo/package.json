@@ -40,7 +40,7 @@
     "eslint": "^9.39.2",
     "eslint-plugin-react-hooks": "^5.2.0",
     "eslint-plugin-react-refresh": "^0.4.26",
-    "pg": "^8.18.0",
+    "pg": "^8.20.0",
     "tsx": "^4.21.0",
     "typescript": "^5.9.2",
     "vite": "^7.3.0"
