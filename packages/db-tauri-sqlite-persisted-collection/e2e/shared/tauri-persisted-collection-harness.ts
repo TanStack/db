@@ -2,7 +2,12 @@ import { createCollection } from '@tanstack/db'
 import { persistedCollectionOptions } from '../../src'
 import { generateSeedData } from '../../../db-collection-e2e/src/fixtures/seed-data'
 import type { Collection } from '@tanstack/db'
-import type { Comment, E2ETestConfig , Post , User  } from '../../../db-collection-e2e/src/types'
+import type {
+  Comment,
+  E2ETestConfig,
+  Post,
+  User,
+} from '../../../db-collection-e2e/src/types'
 import type { PersistedCollectionPersistence } from '@tanstack/db-sqlite-persisted-collection-core'
 
 type PersistableRow = {

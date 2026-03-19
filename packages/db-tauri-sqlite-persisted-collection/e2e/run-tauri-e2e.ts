@@ -16,7 +16,10 @@ type TauriE2ERunResult =
     }
 
 function isTauriE2ERunResult(
-  value: TauriE2ERunResult | { kind: `status`; phase: string; details?: unknown } | null,
+  value:
+    | TauriE2ERunResult
+    | { kind: `status`; phase: string; details?: unknown }
+    | null,
 ): value is TauriE2ERunResult {
   return value?.kind === `result`
 }
@@ -42,11 +45,7 @@ export async function runTauriPersistedCollectionE2E(options?: {
 }): Promise<TauriE2ERunResult> {
   const timeoutMs = options?.timeoutMs ?? 180_000
   const runId = Date.now().toString(36)
-  const appDirectory = join(
-    process.cwd(),
-    `e2e`,
-    `app`,
-  )
+  const appDirectory = join(process.cwd(), `e2e`, `app`)
   let latestMessage:
     | TauriE2ERunResult
     | {

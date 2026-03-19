@@ -26,7 +26,9 @@ afterEach(async () => {
 })
 
 function createTempSqlitePath(): string {
-  const tempDirectory = mkdtempSync(join(tmpdir(), `db-tauri-persistence-test-`))
+  const tempDirectory = mkdtempSync(
+    join(tmpdir(), `db-tauri-persistence-test-`),
+  )
   const dbPath = join(tempDirectory, `state.sqlite`)
   activeCleanupFns.push(() => {
     rmSync(tempDirectory, { recursive: true, force: true })

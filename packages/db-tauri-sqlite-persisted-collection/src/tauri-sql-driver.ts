@@ -36,7 +36,10 @@ function isTauriSQLiteDatabaseLike(
   )
 }
 
-function normalizeQueryRows<TRow>(rows: unknown, sql: string): ReadonlyArray<TRow> {
+function normalizeQueryRows<TRow>(
+  rows: unknown,
+  sql: string,
+): ReadonlyArray<TRow> {
   if (Array.isArray(rows)) {
     return rows as ReadonlyArray<TRow>
   }
@@ -217,7 +220,9 @@ export class TauriSQLiteDriver implements SQLiteDriver {
     )
   }
 
-  private enqueue<TReturn>(operation: () => Promise<TReturn>): Promise<TReturn> {
+  private enqueue<TReturn>(
+    operation: () => Promise<TReturn>,
+  ): Promise<TReturn> {
     const queuedOperation = this.queue.then(operation, operation)
     this.queue = queuedOperation.then(
       () => undefined,
