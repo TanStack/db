@@ -237,9 +237,7 @@ export class OfflineExecutor {
               )
             })
             .finally(() => {
-              for (const collection of Object.values(
-                this.config.collections,
-              )) {
+              for (const collection of Object.values(this.config.collections)) {
                 if (collection.deferDataRefresh === barrierPromise) {
                   collection.deferDataRefresh = null
                 }
