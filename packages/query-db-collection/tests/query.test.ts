@@ -5261,19 +5261,14 @@ describe(`QueryCollection`, () => {
         queryCollectionOptions<Assignment>({
           id: `stale-cache-${Date.now()}-${Math.random()}`,
           queryClient: customQueryClient,
-          queryKey: [
-            'stale-cache',
-            String(Date.now()),
-            String(Math.random()),
-          ],
+          queryKey: ['stale-cache', String(Date.now()), String(Math.random())],
           queryFn: async () => [...serverItems],
           getKey: (item) => item.id,
           syncMode: 'on-demand',
           startSync: true,
 
           onInsert: async ({ transaction, collection: col }) => {
-            const { id: _id, ...rest } = transaction.mutations[0]
-              .modified
+            const { id: _id, ...rest } = transaction.mutations[0].modified
             const serverItem = await apiCreate(rest)
             col.utils.writeInsert(serverItem)
             return { refetch: false }
@@ -5352,9 +5347,7 @@ describe(`QueryCollection`, () => {
         query: (q) =>
           q
             .from({ assignment: collection })
-            .where(({ assignment }) =>
-              inArray(assignment.resource_id, [1, 2]),
-            ),
+            .where(({ assignment }) => inArray(assignment.resource_id, [1, 2])),
       })
       await workloadQuery.preload()
       await flushPromises()
