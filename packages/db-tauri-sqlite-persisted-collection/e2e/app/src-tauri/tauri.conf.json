@@ -1,0 +1,27 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "productName": "TanStack DB Tauri E2E",
+  "version": "0.0.0",
+  "identifier": "com.tanstack.db.tauri.e2e",
+  "build": {
+    "beforeDevCommand": "pnpm dev --host 127.0.0.1 --port 1420",
+    "devUrl": "http://127.0.0.1:1420",
+    "frontendDist": "../dist"
+  },
+  "app": {
+    "windows": [
+      {
+        "title": "TanStack DB Tauri E2E",
+        "width": 1280,
+        "height": 900
+      }
+    ],
+    "security": {
+      "csp": null
+    }
+  },
+  "bundle": {
+    "active": false,
+    "icon": []
+  }
+}
