@@ -1,5 +1,5 @@
 ---
-"@tanstack/db": patch
+'@tanstack/db': patch
 ---
 
 fix(db): preserve null in coalesce() return type when no guaranteed non-null arg is present
