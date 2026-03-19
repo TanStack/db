@@ -382,7 +382,7 @@ See the [Mutations guide](./guides/mutations.md) for comprehensive documentation
 Here we illustrate two common ways of using TanStack DB:
 
 1. [using TanStack Query](#1-tanstack-query) with an existing REST API
-2. [using the ElectricSQL sync engine](#2-electricsql-sync) for real-time sync with your existing API
+2. [using a sync engine](#2-sync-engine) for real-time sync with your backend
 
 > [!TIP]
 > You can combine these patterns. One of the benefits of TanStack DB is that you can integrate different ways of loading data and handling mutations into the same app. Your components don't need to know where the data came from or goes.
@@ -459,7 +459,7 @@ const Todos = () => {
 
 This pattern allows you to extend an existing TanStack Query application, or any application built on a REST API, with blazing fast, cross-collection live queries and local optimistic mutations with automatically managed optimistic state.
 
-### 2. ElectricSQL sync
+### 2. Sync Engine
 
 One of the most powerful ways of using TanStack DB is with a sync engine, for a fully local-first experience with real-time sync. This allows you to incrementally adopt sync into an existing app, whilst still handling writes with your existing API.
 
@@ -473,7 +473,7 @@ While TanStack DB works great with REST APIs, sync engines provide powerful bene
 
 This pattern enables the "load everything once" approach that makes apps like Linear and Figma feel instant.
 
-Here, we illustrate this pattern using [ElectricSQL](https://electric-sql.com) as the sync engine.
+Here, we illustrate this pattern using [ElectricSQL](https://electric-sql.com) as the sync engine, but this pattern also works with other sync engines like [PowerSync](https://www.powersync.com/?utm_source=tanstack&utm_campaign=tanstack_partner), [RxDB](https://rxdb.info/), and [TrailBase](https://trailbase.io/).
 
 ```tsx
 import type { Collection } from "@tanstack/db"
