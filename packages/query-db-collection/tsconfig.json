@@ -18,6 +18,13 @@
       "@tanstack/db-collection-e2e": ["../db-collection-e2e/src"]
     }
   },
-  "include": ["src", "tests", "e2e", "vite.config.ts", "vitest.config.ts", "vitest.e2e.config.ts"],
+  "include": [
+    "src",
+    "tests",
+    "e2e",
+    "vite.config.ts",
+    "vitest.config.ts",
+    "vitest.e2e.config.ts"
+  ],
   "exclude": ["node_modules", "dist"]
 }
