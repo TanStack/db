@@ -153,6 +153,13 @@ type ElectronRendererResolvedAdapter<
   T extends object,
   TKey extends string | number = string | number,
 > = PersistedCollectionPersistence<T, TKey>[`adapter`] & {
+  loadCollectionMetadata: (
+    collectionId: string,
+  ) => Promise<Array<{ key: string; value: unknown }>>
+  scanRows: (
+    collectionId: string,
+    options?: { metadataOnly?: boolean },
+  ) => Promise<Array<{ key: TKey; value: T; metadata?: unknown }>>
   pullSince: (
     collectionId: string,
     fromRowVersion: number,
@@ -201,6 +208,23 @@ function createResolvedRendererAdapter<
         },
         resolution,
       )
+    },
+    loadCollectionMetadata: async (
+      collectionId: string,
+    ): Promise<Array<{ key: string; value: unknown }>> => {
+      return executeRequest(`loadCollectionMetadata`, collectionId, {}, resolution)
+    },
+    scanRows: async (
+      collectionId: string,
+      options?: { metadataOnly?: boolean },
+    ): Promise<Array<{ key: TKey; value: T; metadata?: unknown }>> => {
+      const result = await executeRequest(
+        `scanRows`,
+        collectionId,
+        { options },
+        resolution,
+      )
+      return result as Array<{ key: TKey; value: T; metadata?: unknown }>
     },
     ensureIndex: async (
       collectionId: string,

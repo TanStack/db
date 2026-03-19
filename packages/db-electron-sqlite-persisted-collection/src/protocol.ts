@@ -19,6 +19,8 @@ export type ElectronPersistenceResolution = {
 
 export type ElectronPersistenceMethod =
   | `loadSubset`
+  | `loadCollectionMetadata`
+  | `scanRows`
   | `applyCommittedTx`
   | `ensureIndex`
   | `markIndexRemoved`
@@ -29,6 +31,12 @@ export type ElectronPersistencePayloadMap = {
   loadSubset: {
     options: LoadSubsetOptions
     ctx?: { requiredIndexSignatures?: ReadonlyArray<string> }
+  }
+  loadCollectionMetadata: {}
+  scanRows: {
+    options?: {
+      metadataOnly?: boolean
+    }
   }
   applyCommittedTx: {
     tx: PersistedTx<ElectronPersistedRow, ElectronPersistedKey>
@@ -48,6 +56,12 @@ export type ElectronPersistencePayloadMap = {
 
 export type ElectronPersistenceResultMap = {
   loadSubset: Array<{ key: ElectronPersistedKey; value: ElectronPersistedRow }>
+  loadCollectionMetadata: Array<{ key: string; value: unknown }>
+  scanRows: Array<{
+    key: ElectronPersistedKey
+    value: ElectronPersistedRow
+    metadata?: unknown
+  }>
   applyCommittedTx: null
   ensureIndex: null
   markIndexRemoved: null
