@@ -189,7 +189,7 @@ Electric is typically deployed behind a proxy server that handles shape configur
 
 Here is an example proxy implementation using TanStack Starter:
 
-```js
+```typescript
 import { createServerFileRoute } from "@tanstack/react-start/server"
 import { ELECTRIC_PROTOCOL_QUERY_PARAMS } from "@electric-sql/client"
 
