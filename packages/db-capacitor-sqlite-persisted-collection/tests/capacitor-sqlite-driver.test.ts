@@ -2,13 +2,10 @@ import { mkdtempSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, expect, it, vi } from 'vitest'
-import {
-  
-  CapacitorSQLiteDriver
-} from '../src/capacitor-sqlite-driver'
+import { CapacitorSQLiteDriver } from '../src/capacitor-sqlite-driver'
 import { InvalidPersistedCollectionConfigError } from '../../db-sqlite-persisted-collection-core/src'
 import { createCapacitorSQLiteTestDatabase } from './helpers/capacitor-sqlite-test-db'
-import type {CapacitorSQLiteDatabaseLike} from '../src/capacitor-sqlite-driver';
+import type { CapacitorSQLiteDatabaseLike } from '../src/capacitor-sqlite-driver'
 
 const activeCleanupFns: Array<() => void | Promise<void>> = []
 
