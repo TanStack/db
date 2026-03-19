@@ -1554,18 +1554,6 @@ export class SQLiteCorePersistenceAdapter<
     }
 
     if (
-      this.appliedTxPruneMaxAgeSeconds !== undefined &&
-      this.appliedTxPruneMaxAgeSeconds > 0
-    ) {
-      await this.driver.run(
-        `DELETE FROM applied_tx
-         WHERE collection_id = ?
-           AND applied_at < (CAST(strftime('%s', 'now') AS INTEGER) - ?)`,
-        [collectionId, this.appliedTxPruneMaxAgeSeconds],
-      )
-    }
-
-    if (
       this.appliedTxPruneMaxRows === undefined ||
       this.appliedTxPruneMaxRows <= 0
     ) {
