@@ -187,7 +187,7 @@ async function generateTxId(tx) {
 Electric is typically deployed behind a proxy server that handles shape configuration, authentication and authorization. This provides better security and allows you to control what data users can access without exposing Electric to the client.
 
 
-Here is an example proxy implementation using TanStack Starter:
+Here is an example proxy implementation using TanStack Start:
 
 ```typescript
 import { createServerFileRoute } from "@tanstack/react-start/server"
