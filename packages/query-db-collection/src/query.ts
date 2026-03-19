@@ -837,6 +837,21 @@ export function queryCollectionOptions(
       const hashedQueryKey = hashKey(queryKey)
       const handleQueryResult: UpdateHandler = (result) => {
         if (result.isSuccess) {
+          // Skip processing this result while data refreshes are deferred.
+          // Optimistic state covers the gap. Once the barrier resolves,
+          // trigger a fresh refetch to get authoritative data.
+          if (collection.deferDataRefresh) {
+            collection.deferDataRefresh.then(() => {
+              const observer = state.observers.get(hashedQueryKey)
+              if (observer) {
+                observer.refetch().catch(() => {
+                  // Errors handled by the next handleQueryResult invocation
+                })
+              }
+            })
+            return
+          }
+
           // Clear error state
           state.lastError = undefined
           state.errorCount = 0
