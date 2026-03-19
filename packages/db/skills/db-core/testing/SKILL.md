@@ -98,6 +98,7 @@ const collection = createCollection<Person>({
 ```
 
 **Key points:**
+
 - Call `begin()` before writing, `commit()` after, and `markReady()` once initial load is done.
 - Each test should use a unique collection `id` to avoid state leakage.
 - Keep references to `begin`/`write`/`commit` to simulate live updates later in the test.
@@ -125,7 +126,9 @@ const collection = createCollection<Person>({
 await collection.stateWhenReady()
 
 // Test mutation
-collection.update('1', (draft) => { draft.name = 'Alice Updated' })
+collection.update('1', (draft) => {
+  draft.name = 'Alice Updated'
+})
 expect(collection.get('1')).toMatchObject({ name: 'Alice Updated' })
 
 // Test size
@@ -169,8 +172,7 @@ import { nextTick } from 'vue'
 import { useLiveQuery } from '@tanstack/vue-db'
 
 const { data, state } = useLiveQuery((q) =>
-  q.from({ persons: collection })
-   .where(({ persons }) => gt(persons.age, 28)),
+  q.from({ persons: collection }).where(({ persons }) => gt(persons.age, 28)),
 )
 
 await nextTick()
@@ -194,8 +196,7 @@ afterEach(() => cleanup?.())
 
 cleanup = $effect.root(() => {
   const query = useLiveQuery((q) =>
-    q.from({ persons: collection })
-     .where(({ persons }) => gt(persons.age, 28)),
+    q.from({ persons: collection }).where(({ persons }) => gt(persons.age, 28)),
   )
 
   flushSync()
@@ -207,6 +208,7 @@ cleanup = $effect.root(() => {
 **Access pattern:** `query.data`, `query.state` (direct access, reactive via runes)
 
 **Note:** When destructuring, wrap in `$derived` to maintain reactivity:
+
 ```ts
 const { data } = $derived(query) // preserves reactivity
 ```
@@ -221,8 +223,7 @@ import { useLiveQuery } from '@tanstack/solid-db'
 
 const rendered = renderHook(() =>
   useLiveQuery((q) =>
-    q.from({ persons: collection })
-     .where(({ persons }) => gt(persons.age, 28)),
+    q.from({ persons: collection }).where(({ persons }) => gt(persons.age, 28)),
   ),
 )
 
@@ -246,8 +247,7 @@ import { injectLiveQuery } from '@tanstack/angular-db'
 
 TestBed.runInInjectionContext(() => {
   const query = injectLiveQuery((q) =>
-    q.from({ persons: collection })
-     .where(({ persons }) => gt(persons.age, 28)),
+    q.from({ persons: collection }).where(({ persons }) => gt(persons.age, 28)),
   )
 
   await new Promise((resolve) => setTimeout(resolve, 50))
@@ -269,7 +269,9 @@ const collection = createCollection<Person>({
   getKey: (p) => p.id,
   sync: {
     sync: ({ begin, commit, markReady }) => {
-      begin(); commit(); markReady()
+      begin()
+      commit()
+      markReady()
     },
   },
   startSync: true,
@@ -285,7 +287,9 @@ collection.insert({ id: '1', name: 'Alice', age: 30 })
 expect(collection.has('1')).toBe(true)
 
 // Update (Immer-style draft)
-collection.update('1', (draft) => { draft.age = 31 })
+collection.update('1', (draft) => {
+  draft.age = 31
+})
 expect(collection.get('1')).toMatchObject({ age: 31 })
 
 // Delete
@@ -300,9 +304,13 @@ import { createOptimisticAction } from '@tanstack/db'
 
 const likePost = createOptimisticAction<string>({
   onMutate: (postId) => {
-    collection.update(postId, (draft) => { draft.liked = true })
+    collection.update(postId, (draft) => {
+      draft.liked = true
+    })
   },
-  mutationFn: async () => { /* mock */ },
+  mutationFn: async () => {
+    /* mock */
+  },
 })
 
 likePost('1')
@@ -327,13 +335,13 @@ expect(stripVirtualProps(item)).toEqual({ id: '1', name: 'Alice', age: 30 })
 
 ## Common Mistakes
 
-| Mistake | Fix |
-|---------|-----|
-| Not calling `markReady()` in sync | Collection stays in `loading` state; queries never resolve |
-| Reusing collection `id` across tests | State leaks between tests; use unique IDs |
-| Not waiting for reactivity flush | Use framework-appropriate wait mechanism |
-| Using `toEqual` on collection items | Use `toMatchObject` to ignore virtual props |
-| Forgetting mutation handlers | Provide `onInsert`/`onUpdate`/`onDelete` (even empty async functions) |
+| Mistake                              | Fix                                                                   |
+| ------------------------------------ | --------------------------------------------------------------------- |
+| Not calling `markReady()` in sync    | Collection stays in `loading` state; queries never resolve            |
+| Reusing collection `id` across tests | State leaks between tests; use unique IDs                             |
+| Not waiting for reactivity flush     | Use framework-appropriate wait mechanism                              |
+| Using `toEqual` on collection items  | Use `toMatchObject` to ignore virtual props                           |
+| Forgetting mutation handlers         | Provide `onInsert`/`onUpdate`/`onDelete` (even empty async functions) |
 
 ## Running the Built-in Tests
 
