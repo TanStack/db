@@ -423,6 +423,227 @@ export function runSQLiteCoreAdapterContractSuite(
       expect(txRows[0]?.count).toBe(0)
     })
 
+    it(`persists row metadata and collection metadata atomically`, async () => {
+      const { adapter, driver } = registerContractHarness()
+      const collectionId = `metadata-roundtrip`
+
+      await adapter.applyCommittedTx(collectionId, {
+        txId: `metadata-1`,
+        term: 1,
+        seq: 1,
+        rowVersion: 1,
+        mutations: [
+          {
+            type: `insert`,
+            key: `1`,
+            value: {
+              id: `1`,
+              title: `Tracked`,
+              createdAt: `2026-01-01T00:00:00.000Z`,
+              score: 1,
+            },
+            metadata: {
+              queryCollection: {
+                owners: {
+                  q1: true,
+                },
+              },
+            },
+            metadataChanged: true,
+          },
+        ],
+        collectionMetadataMutations: [
+          {
+            type: `set`,
+            key: `electric:resume`,
+            value: {
+              kind: `resume`,
+              offset: `10_0`,
+              handle: `handle-1`,
+              shapeId: `shape-1`,
+              updatedAt: 1,
+            },
+          },
+        ],
+      })
+
+      const rows = await adapter.loadSubset(collectionId, {})
+      expect(rows).toEqual([
+        {
+          key: `1`,
+          value: {
+            id: `1`,
+            title: `Tracked`,
+            createdAt: `2026-01-01T00:00:00.000Z`,
+            score: 1,
+          },
+          metadata: {
+            queryCollection: {
+              owners: {
+                q1: true,
+              },
+            },
+          },
+        },
+      ])
+
+      const collectionMetadata =
+        await adapter.loadCollectionMetadata?.(collectionId)
+      expect(collectionMetadata).toEqual([
+        {
+          key: `electric:resume`,
+          value: {
+            kind: `resume`,
+            offset: `10_0`,
+            handle: `handle-1`,
+            shapeId: `shape-1`,
+            updatedAt: 1,
+          },
+        },
+      ])
+
+      await expect(
+        adapter.applyCommittedTx(collectionId, {
+          txId: `metadata-2`,
+          term: 1,
+          seq: 2,
+          rowVersion: 2,
+          mutations: [
+            {
+              type: `insert`,
+              key: `2`,
+              value: {
+                id: `2`,
+                title: `Bad`,
+                createdAt: `2026-01-01T00:00:00.000Z`,
+                score: 2,
+              },
+            },
+          ],
+          collectionMetadataMutations: [
+            {
+              type: `set`,
+              key: `broken`,
+              value: {
+                invalid: new Date(Number.NaN),
+              },
+            },
+          ],
+        }),
+      ).rejects.toThrow()
+
+      const rowsAfterFailure = await adapter.loadSubset(collectionId, {})
+      expect(rowsAfterFailure).toEqual(rows)
+
+      const metadataRows = await driver.query<{ key: string }>(
+        `SELECT key
+         FROM collection_metadata
+         WHERE collection_id = ?`,
+        [collectionId],
+      )
+      expect(metadataRows).toEqual([{ key: `electric:resume` }])
+    })
+
+    it(`persists truncate transactions while preserving explicit collection metadata`, async () => {
+      const { adapter } = registerContractHarness()
+      const collectionId = `truncate-metadata-roundtrip`
+
+      await adapter.applyCommittedTx(collectionId, {
+        txId: `seed-1`,
+        term: 1,
+        seq: 1,
+        rowVersion: 1,
+        mutations: [
+          {
+            type: `insert`,
+            key: `1`,
+            value: {
+              id: `1`,
+              title: `Before truncate`,
+              createdAt: `2026-01-01T00:00:00.000Z`,
+              score: 1,
+            },
+            metadata: {
+              owner: `before`,
+            },
+            metadataChanged: true,
+          },
+        ],
+        collectionMetadataMutations: [
+          {
+            type: `set`,
+            key: `electric:resume`,
+            value: {
+              kind: `resume`,
+              offset: `10_0`,
+              handle: `handle-1`,
+              shapeId: `shape-1`,
+              updatedAt: 1,
+            },
+          },
+        ],
+      })
+
+      await adapter.applyCommittedTx(collectionId, {
+        txId: `truncate-2`,
+        term: 1,
+        seq: 2,
+        rowVersion: 2,
+        truncate: true,
+        mutations: [
+          {
+            type: `insert`,
+            key: `2`,
+            value: {
+              id: `2`,
+              title: `After truncate`,
+              createdAt: `2026-01-02T00:00:00.000Z`,
+              score: 2,
+            },
+            metadata: {
+              owner: `after`,
+            },
+            metadataChanged: true,
+          },
+        ],
+        collectionMetadataMutations: [
+          {
+            type: `set`,
+            key: `electric:resume`,
+            value: {
+              kind: `reset`,
+              updatedAt: 2,
+            },
+          },
+        ],
+      })
+
+      expect(await adapter.loadSubset(collectionId, {})).toEqual([
+        {
+          key: `2`,
+          value: {
+            id: `2`,
+            title: `After truncate`,
+            createdAt: `2026-01-02T00:00:00.000Z`,
+            score: 2,
+          },
+          metadata: {
+            owner: `after`,
+          },
+        },
+      ])
+
+      expect(await adapter.loadCollectionMetadata?.(collectionId)).toEqual([
+        {
+          key: `electric:resume`,
+          value: {
+            kind: `reset`,
+            updatedAt: 2,
+          },
+        },
+      ])
+    })
+
     it(`supports pushdown operators with correctness-preserving fallback`, async () => {
       const { adapter } = registerContractHarness()
       const collectionId = `todos`
@@ -864,9 +1085,141 @@ export function runSQLiteCoreAdapterContractSuite(
       }
       expect(delta.changedKeys).toEqual([])
       expect(delta.deletedKeys).toEqual([`1`])
+      expect(delta.deltas).toEqual([
+        {
+          txId: `seed-pull-2`,
+          latestRowVersion: 2,
+          changedRows: [],
+          deletedKeys: [`1`],
+          rowMetadataMutations: [],
+          collectionMetadataMutations: [],
+        },
+      ])
 
       const fullReload = await adapter.pullSince(collectionId, 0)
       expect(fullReload.requiresFullReload).toBe(true)
+    })
+
+    it(`scans persisted rows with metadata and replays metadata-only deltas`, async () => {
+      const { adapter } = registerContractHarness()
+      const collectionId = `scan-and-replay`
+
+      await adapter.applyCommittedTx(collectionId, {
+        txId: `scan-seed-1`,
+        term: 1,
+        seq: 1,
+        rowVersion: 1,
+        mutations: [
+          {
+            type: `insert`,
+            key: `1`,
+            value: {
+              id: `1`,
+              title: `Tracked`,
+              createdAt: `2026-01-01T00:00:00.000Z`,
+              score: 1,
+            },
+            metadata: {
+              queryCollection: {
+                owners: {
+                  q1: true,
+                },
+              },
+            },
+            metadataChanged: true,
+          },
+        ],
+      })
+
+      const scannedRows = await adapter.scanRows?.(collectionId, {
+        metadataOnly: true,
+      })
+      expect(scannedRows).toEqual([
+        {
+          key: `1`,
+          value: {
+            id: `1`,
+            title: `Tracked`,
+            createdAt: `2026-01-01T00:00:00.000Z`,
+            score: 1,
+          },
+          metadata: {
+            queryCollection: {
+              owners: {
+                q1: true,
+              },
+            },
+          },
+        },
+      ])
+
+      await adapter.applyCommittedTx(collectionId, {
+        txId: `scan-seed-2`,
+        term: 1,
+        seq: 2,
+        rowVersion: 2,
+        mutations: [],
+        rowMetadataMutations: [
+          {
+            type: `set`,
+            key: `1`,
+            value: {
+              queryCollection: {
+                owners: {
+                  q2: true,
+                },
+              },
+            },
+          },
+        ],
+        collectionMetadataMutations: [
+          {
+            type: `set`,
+            key: `electric:resume`,
+            value: {
+              kind: `reset`,
+              updatedAt: 2,
+            },
+          },
+        ],
+      })
+
+      const replayDelta = await adapter.pullSince(collectionId, 1)
+      if (replayDelta.requiresFullReload) {
+        throw new Error(`Expected replay delta, received full reload`)
+      }
+
+      expect(replayDelta.deltas).toEqual([
+        {
+          txId: `scan-seed-2`,
+          latestRowVersion: 2,
+          changedRows: [],
+          deletedKeys: [],
+          rowMetadataMutations: [
+            {
+              type: `set`,
+              key: `1`,
+              value: {
+                queryCollection: {
+                  owners: {
+                    q2: true,
+                  },
+                },
+              },
+            },
+          ],
+          collectionMetadataMutations: [
+            {
+              type: `set`,
+              key: `electric:resume`,
+              value: {
+                kind: `reset`,
+                updatedAt: 2,
+              },
+            },
+          ],
+        },
+      ])
     })
 
     it(`keeps numeric and string keys distinct in storage`, async () => {
@@ -949,6 +1302,42 @@ export function runSQLiteCoreAdapterContractSuite(
       const loadedRows = await adapter.loadSubset(hostileCollectionId, {})
       expect(loadedRows).toHaveLength(1)
       expect(loadedRows[0]?.key).toBe(`safe`)
+    })
+
+    it(`deduplicates concurrent ensureCollectionReady calls for the same collection`, async () => {
+      const { adapter } = registerContractHarness()
+      const collectionId = `concurrent-startup`
+
+      const [rowsA, rowsB] = await Promise.all([
+        adapter.loadSubset(collectionId, {}),
+        adapter.loadSubset(collectionId, {}),
+      ])
+
+      expect(rowsA).toEqual([])
+      expect(rowsB).toEqual([])
+
+      await adapter.applyCommittedTx(collectionId, {
+        txId: `concurrent-startup-seed`,
+        term: 1,
+        seq: 1,
+        rowVersion: 1,
+        mutations: [
+          {
+            type: `insert`,
+            key: `1`,
+            value: {
+              id: `1`,
+              title: `Seeded`,
+              createdAt: `2026-01-01T00:00:00.000Z`,
+              score: 1,
+            },
+          },
+        ],
+      })
+
+      const loadedRows = await adapter.loadSubset(collectionId, {})
+      expect(loadedRows).toHaveLength(1)
+      expect(loadedRows[0]?.key).toBe(`1`)
     })
 
     it(`prunes applied_tx rows by sequence threshold`, async () => {

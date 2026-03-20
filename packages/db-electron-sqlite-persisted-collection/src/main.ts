@@ -20,6 +20,19 @@ type ElectronMainPersistenceAdapter = PersistenceAdapter<
   ElectronPersistedRow,
   ElectronPersistedKey
 > & {
+  loadCollectionMetadata?: (
+    collectionId: string,
+  ) => Promise<Array<{ key: string; value: unknown }>>
+  scanRows?: (
+    collectionId: string,
+    options?: { metadataOnly?: boolean },
+  ) => Promise<
+    Array<{
+      key: ElectronPersistedKey
+      value: ElectronPersistedRow
+      metadata?: unknown
+    }>
+  >
   pullSince?: (
     collectionId: string,
     fromRowVersion: number,
@@ -100,6 +113,41 @@ async function executeRequestAgainstAdapter(
         request.collectionId,
         request.payload.options,
         request.payload.ctx,
+      )
+      return {
+        v: ELECTRON_PERSISTENCE_PROTOCOL_VERSION,
+        requestId: request.requestId,
+        method: request.method,
+        ok: true,
+        result,
+      }
+    }
+
+    case `loadCollectionMetadata`: {
+      if (!adapter.loadCollectionMetadata) {
+        throw new InvalidPersistedCollectionConfigError(
+          `loadCollectionMetadata is not supported by the configured electron persistence adapter`,
+        )
+      }
+      const result = await adapter.loadCollectionMetadata(request.collectionId)
+      return {
+        v: ELECTRON_PERSISTENCE_PROTOCOL_VERSION,
+        requestId: request.requestId,
+        method: request.method,
+        ok: true,
+        result,
+      }
+    }
+
+    case `scanRows`: {
+      if (!adapter.scanRows) {
+        throw new InvalidPersistedCollectionConfigError(
+          `scanRows is not supported by the configured electron persistence adapter`,
+        )
+      }
+      const result = await adapter.scanRows(
+        request.collectionId,
+        request.payload.options,
       )
       return {
         v: ELECTRON_PERSISTENCE_PROTOCOL_VERSION,

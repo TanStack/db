@@ -34,6 +34,7 @@ type RecordingAdapter = PersistenceAdapter<Todo, string> & {
       term: number
       seq: number
       rowVersion: number
+      truncate?: boolean
       mutations: Array<{ type: `insert` | `update` | `delete`; key: string }>
     }
   }>
@@ -44,20 +45,27 @@ type RecordingAdapter = PersistenceAdapter<Todo, string> & {
     options: LoadSubsetOptions
     requiredIndexSignatures: ReadonlyArray<string>
   }>
+  loadCollectionMetadataCalls: Array<string>
   rows: Map<string, Todo>
+  rowMetadata: Map<string, unknown>
+  collectionMetadata: Map<string, unknown>
 }
 
 function createRecordingAdapter(
   initialRows: Array<Todo> = [],
 ): RecordingAdapter {
   const rows = new Map(initialRows.map((row) => [row.id, row]))
+  const rowMetadata = new Map<string, unknown>()
 
   const adapter: RecordingAdapter = {
     rows,
+    rowMetadata,
+    collectionMetadata: new Map(),
     applyCommittedTxCalls: [],
     ensureIndexCalls: [],
     markIndexRemovedCalls: [],
     loadSubsetCalls: [],
+    loadCollectionMetadataCalls: [],
     loadSubset: (collectionId, options, ctx) => {
       adapter.loadSubsetCalls.push({
         collectionId,
@@ -68,9 +76,29 @@ function createRecordingAdapter(
         Array.from(rows.values()).map((value) => ({
           key: value.id,
           value,
+          metadata: rowMetadata.get(value.id),
         })),
       )
     },
+    loadCollectionMetadata: (collectionId) => {
+      adapter.loadCollectionMetadataCalls.push(collectionId)
+      return Promise.resolve(
+        Array.from(adapter.collectionMetadata.entries()).map(
+          ([key, value]) => ({
+            key,
+            value,
+          }),
+        ),
+      )
+    },
+    scanRows: () =>
+      Promise.resolve(
+        Array.from(rows.values()).map((value) => ({
+          key: value.id,
+          value,
+          metadata: rowMetadata.get(value.id),
+        })),
+      ),
     applyCommittedTx: (collectionId, tx) => {
       adapter.applyCommittedTxCalls.push({
         collectionId,
@@ -78,6 +106,7 @@ function createRecordingAdapter(
           term: tx.term,
           seq: tx.seq,
           rowVersion: tx.rowVersion,
+          truncate: tx.truncate,
           mutations: tx.mutations.map((mutation) => ({
             type: mutation.type,
             key: mutation.key,
@@ -85,11 +114,37 @@ function createRecordingAdapter(
         },
       })
 
+      if (tx.truncate) {
+        rows.clear()
+        rowMetadata.clear()
+      }
+
       for (const mutation of tx.mutations) {
         if (mutation.type === `delete`) {
           rows.delete(mutation.key)
+          rowMetadata.delete(mutation.key)
         } else {
           rows.set(mutation.key, mutation.value)
+          if (mutation.metadataChanged) {
+            rowMetadata.set(mutation.key, mutation.metadata)
+          }
+        }
+      }
+      for (const rowMetadataMutation of tx.rowMetadataMutations ?? []) {
+        if (rowMetadataMutation.type === `delete`) {
+          rowMetadata.delete(rowMetadataMutation.key)
+        } else {
+          rowMetadata.set(rowMetadataMutation.key, rowMetadataMutation.value)
+        }
+      }
+      for (const metadataMutation of tx.collectionMetadataMutations ?? []) {
+        if (metadataMutation.type === `delete`) {
+          adapter.collectionMetadata.delete(metadataMutation.key)
+        } else {
+          adapter.collectionMetadata.set(
+            metadataMutation.key,
+            metadataMutation.value,
+          )
         }
       }
       return Promise.resolve()
@@ -255,6 +310,338 @@ describe(`persistedCollectionOptions`, () => {
       title: `Manual`,
     })
     expect(adapter.applyCommittedTxCalls).toHaveLength(1)
+  })
+
+  it(`loads collection metadata into collection state during startup`, async () => {
+    const adapter = createRecordingAdapter()
+    adapter.collectionMetadata.set(`electric:resume`, {
+      kind: `resume`,
+      offset: `10_0`,
+      handle: `handle-1`,
+      shapeId: `shape-1`,
+      updatedAt: 1,
+    })
+
+    const collection = createCollection(
+      persistedCollectionOptions<Todo, string>({
+        id: `persisted-startup-metadata`,
+        getKey: (item) => item.id,
+        persistence: {
+          adapter,
+        },
+      }),
+    )
+
+    await collection.stateWhenReady()
+
+    expect(adapter.loadCollectionMetadataCalls).toEqual([
+      `persisted-startup-metadata`,
+    ])
+    expect(
+      collection._state.syncedCollectionMetadata.get(`electric:resume`),
+    ).toEqual({
+      kind: `resume`,
+      offset: `10_0`,
+      handle: `handle-1`,
+      shapeId: `shape-1`,
+      updatedAt: 1,
+    })
+  })
+
+  it(`restores row and collection metadata after metadata-bearing full reload`, async () => {
+    const adapter = createRecordingAdapter([
+      {
+        id: `1`,
+        title: `Tracked`,
+      },
+    ])
+    adapter.rowMetadata.set(`1`, {
+      source: `initial`,
+    })
+    adapter.collectionMetadata.set(`electric:resume`, {
+      kind: `resume`,
+      offset: `10_0`,
+      handle: `handle-1`,
+      shapeId: `shape-1`,
+      updatedAt: 1,
+    })
+    const coordinator = createCoordinatorHarness()
+
+    const collection = createCollection(
+      persistedCollectionOptions<Todo, string>({
+        id: `sync-present`,
+        getKey: (item) => item.id,
+        sync: {
+          sync: ({ markReady }) => {
+            markReady()
+          },
+        },
+        persistence: {
+          adapter,
+          coordinator,
+        },
+      }),
+    )
+
+    await collection.preload()
+    await flushAsyncWork()
+
+    expect(collection._state.syncedMetadata.get(`1`)).toEqual({
+      source: `initial`,
+    })
+    expect(
+      collection._state.syncedCollectionMetadata.get(`electric:resume`),
+    ).toEqual({
+      kind: `resume`,
+      offset: `10_0`,
+      handle: `handle-1`,
+      shapeId: `shape-1`,
+      updatedAt: 1,
+    })
+
+    adapter.rowMetadata.set(`1`, {
+      source: `reloaded`,
+    })
+    adapter.collectionMetadata.delete(`electric:resume`)
+    adapter.collectionMetadata.set(`queryCollection:gc:q1`, {
+      queryHash: `q1`,
+      mode: `until-revalidated`,
+    })
+
+    coordinator.emit({
+      type: `tx:committed`,
+      term: 1,
+      seq: 1,
+      txId: `tx-reload`,
+      latestRowVersion: 1,
+      requiresFullReload: true,
+    })
+
+    await flushAsyncWork()
+    await flushAsyncWork()
+
+    expect(collection._state.syncedMetadata.get(`1`)).toEqual({
+      source: `reloaded`,
+    })
+    expect(
+      collection._state.syncedCollectionMetadata.has(`electric:resume`),
+    ).toBe(false)
+    expect(
+      collection._state.syncedCollectionMetadata.get(`queryCollection:gc:q1`),
+    ).toEqual({
+      queryHash: `q1`,
+      mode: `until-revalidated`,
+    })
+  })
+
+  it(`persists metadata-only wrapped sync transactions`, async () => {
+    const adapter = createRecordingAdapter()
+
+    const collection = createCollection(
+      persistedCollectionOptions<Todo, string>({
+        id: `persisted-metadata-only`,
+        getKey: (item) => item.id,
+        sync: {
+          sync: ({ begin, commit, markReady, metadata }) => {
+            begin()
+            metadata?.collection.set(`runtime:key`, { persisted: true })
+            commit()
+            markReady()
+          },
+        },
+        persistence: {
+          adapter,
+        },
+      }),
+    )
+
+    await collection.stateWhenReady()
+    await flushAsyncWork()
+
+    expect(adapter.applyCommittedTxCalls).toHaveLength(1)
+    expect(adapter.applyCommittedTxCalls[0]?.tx.mutations).toEqual([])
+    expect(adapter.collectionMetadata.get(`runtime:key`)).toEqual({
+      persisted: true,
+    })
+    expect(
+      collection._state.syncedCollectionMetadata.get(`runtime:key`),
+    ).toEqual({
+      persisted: true,
+    })
+  })
+
+  it(`replays metadata-only tx:committed deltas without full reload`, async () => {
+    const adapter = createRecordingAdapter([
+      {
+        id: `1`,
+        title: `Tracked`,
+      },
+    ])
+    adapter.rowMetadata.set(`1`, { source: `initial` })
+    const coordinator = createCoordinatorHarness()
+
+    const collection = createCollection(
+      persistedCollectionOptions<Todo, string>({
+        id: `sync-present`,
+        getKey: (item) => item.id,
+        sync: {
+          sync: ({ markReady }) => {
+            markReady()
+          },
+        },
+        persistence: {
+          adapter,
+          coordinator,
+        },
+      }),
+    )
+
+    await collection.preload()
+    await flushAsyncWork()
+    const loadSubsetCallsAfterPreload = adapter.loadSubsetCalls.length
+
+    coordinator.emit({
+      type: `tx:committed`,
+      term: 1,
+      seq: 1,
+      txId: `tx-metadata-only`,
+      latestRowVersion: 2,
+      requiresFullReload: false,
+      changedRows: [],
+      deletedKeys: [],
+      rowMetadataMutations: [
+        {
+          type: `set`,
+          key: `1`,
+          value: { source: `replayed` },
+        },
+      ],
+      collectionMetadataMutations: [
+        {
+          type: `set`,
+          key: `electric:resume`,
+          value: {
+            kind: `reset`,
+            updatedAt: 2,
+          },
+        },
+      ],
+    })
+
+    await flushAsyncWork()
+    await flushAsyncWork()
+
+    expect(adapter.loadSubsetCalls.length).toBe(loadSubsetCallsAfterPreload)
+    expect(collection._state.syncedMetadata.get(`1`)).toEqual({
+      source: `replayed`,
+    })
+    expect(
+      collection._state.syncedCollectionMetadata.get(`electric:resume`),
+    ).toEqual({
+      kind: `reset`,
+      updatedAt: 2,
+    })
+  })
+
+  it(`uses pullSince replay deltas for metadata-bearing seq-gap recovery`, async () => {
+    const adapter = createRecordingAdapter([
+      {
+        id: `1`,
+        title: `Tracked`,
+      },
+    ])
+    adapter.rowMetadata.set(`1`, { source: `initial` })
+    const coordinator = createCoordinatorHarness()
+    coordinator.setPullSinceResponse({
+      type: `rpc:pullSince:res`,
+      rpcId: `pull-metadata`,
+      ok: true,
+      latestTerm: 1,
+      latestSeq: 3,
+      latestRowVersion: 3,
+      requiresFullReload: false,
+      changedKeys: [],
+      deletedKeys: [],
+      deltas: [
+        {
+          txId: `tx-gap-1`,
+          latestRowVersion: 2,
+          changedRows: [],
+          deletedKeys: [],
+          rowMetadataMutations: [
+            {
+              type: `set`,
+              key: `1`,
+              value: { source: `gap-replayed` },
+            },
+          ],
+          collectionMetadataMutations: [],
+        },
+        {
+          txId: `tx-gap-2`,
+          latestRowVersion: 3,
+          changedRows: [],
+          deletedKeys: [],
+          rowMetadataMutations: [],
+          collectionMetadataMutations: [
+            {
+              type: `set`,
+              key: `queryCollection:gc:q1`,
+              value: {
+                queryHash: `q1`,
+                mode: `until-revalidated`,
+              },
+            },
+          ],
+        },
+      ],
+    })
+
+    const collection = createCollection(
+      persistedCollectionOptions<Todo, string>({
+        id: `sync-present`,
+        getKey: (item) => item.id,
+        sync: {
+          sync: ({ markReady }) => {
+            markReady()
+          },
+        },
+        persistence: {
+          adapter,
+          coordinator,
+        },
+      }),
+    )
+
+    await collection.preload()
+    await flushAsyncWork()
+    const loadSubsetCallsAfterPreload = adapter.loadSubsetCalls.length
+
+    coordinator.emit({
+      type: `tx:committed`,
+      term: 1,
+      seq: 3,
+      txId: `tx-gap-trigger`,
+      latestRowVersion: 3,
+      requiresFullReload: false,
+      changedRows: [],
+      deletedKeys: [],
+    })
+
+    await flushAsyncWork()
+    await flushAsyncWork()
+
+    expect(coordinator.pullSinceCalls).toBe(1)
+    expect(adapter.loadSubsetCalls.length).toBe(loadSubsetCallsAfterPreload)
+    expect(collection._state.syncedMetadata.get(`1`)).toEqual({
+      source: `gap-replayed`,
+    })
+    expect(
+      collection._state.syncedCollectionMetadata.get(`queryCollection:gc:q1`),
+    ).toEqual({
+      queryHash: `q1`,
+      mode: `until-revalidated`,
+    })
   })
 
   it(`throws InvalidSyncConfigError when sync key is present but null`, () => {
@@ -578,6 +965,217 @@ describe(`persistedCollectionOptions`, () => {
     expect(stripVirtualProps(collection.get(`during-hydrate`))).toEqual({
       id: `during-hydrate`,
       title: `During hydrate`,
+    })
+  })
+
+  it(`marks ready even when persisted startup fails before markReady`, async () => {
+    const adapter = createRecordingAdapter()
+    adapter.loadSubset = async () => {
+      throw new Error(`startup failure`)
+    }
+
+    const collection = createCollection(
+      persistedCollectionOptions<Todo, string>({
+        id: `sync-present-mark-ready-on-startup-failure`,
+        getKey: (item) => item.id,
+        sync: {
+          sync: ({ markReady }) => {
+            markReady()
+            return {}
+          },
+        },
+        persistence: {
+          adapter,
+        },
+      }),
+    )
+
+    await collection.stateWhenReady()
+    await flushAsyncWork()
+    expect(collection.status).toBe(`ready`)
+  })
+
+  it(`reads staged metadata writes during hydration-queued transactions`, async () => {
+    const adapter = createRecordingAdapter([
+      {
+        id: `cached-1`,
+        title: `Cached row`,
+      },
+    ])
+    adapter.rowMetadata.set(`cached-1`, { source: `persisted` })
+    adapter.collectionMetadata.set(`startup:key`, { ready: true })
+
+    let resolveLoadSubset: (() => void) | undefined
+    adapter.loadSubset = async () => {
+      await new Promise<void>((resolve) => {
+        resolveLoadSubset = resolve
+      })
+      return [
+        {
+          key: `cached-1`,
+          value: {
+            id: `cached-1`,
+            title: `Cached row`,
+          },
+          metadata: adapter.rowMetadata.get(`cached-1`),
+        },
+      ]
+    }
+
+    let remoteBegin: (() => void) | undefined
+    let remoteCommit: (() => void) | undefined
+    let remoteTruncate: (() => void) | undefined
+    let remoteMetadata:
+      | Parameters<SyncConfig<Todo, string>[`sync`]>[0][`metadata`]
+      | undefined
+
+    const collection = createCollection(
+      persistedCollectionOptions<Todo, string>({
+        id: `sync-present-metadata-read`,
+        getKey: (item) => item.id,
+        sync: {
+          sync: ({ begin, commit, truncate, markReady, metadata }) => {
+            remoteBegin = begin
+            remoteCommit = commit
+            remoteTruncate = truncate
+            remoteMetadata = metadata
+            markReady()
+            return {}
+          },
+        },
+        persistence: {
+          adapter,
+        },
+      }),
+    )
+
+    const readyPromise = collection.stateWhenReady()
+    for (let attempt = 0; attempt < 20 && !resolveLoadSubset; attempt++) {
+      await flushAsyncWork()
+    }
+
+    expect(resolveLoadSubset).toBeDefined()
+    expect(remoteBegin).toBeDefined()
+    expect(remoteMetadata).toBeDefined()
+
+    remoteBegin?.()
+    remoteMetadata?.row.set(`cached-1`, { source: `staged` })
+    remoteMetadata?.collection.set(`runtime:key`, { persisted: true })
+
+    expect(remoteMetadata?.row.get(`cached-1`)).toEqual({ source: `staged` })
+    expect(remoteMetadata?.collection.get(`runtime:key`)).toEqual({
+      persisted: true,
+    })
+    expect(remoteMetadata?.collection.list()).toContainEqual({
+      key: `runtime:key`,
+      value: { persisted: true },
+    })
+
+    remoteTruncate?.()
+
+    expect(remoteMetadata?.row.get(`cached-1`)).toBeUndefined()
+    expect(remoteMetadata?.collection.get(`startup:key`)).toEqual({
+      ready: true,
+    })
+
+    remoteCommit?.()
+    resolveLoadSubset?.()
+    await readyPromise
+  })
+
+  it(`persists truncate transactions and preserves intended collection metadata`, async () => {
+    const adapter = createRecordingAdapter()
+
+    let remoteBegin: (() => void) | undefined
+    let remoteWrite:
+      | ((message: { type: `insert`; value: Todo }) => void)
+      | undefined
+    let remoteCommit: (() => void) | undefined
+    let remoteTruncate: (() => void) | undefined
+    let remoteMetadata:
+      | Parameters<SyncConfig<Todo, string>[`sync`]>[0][`metadata`]
+      | undefined
+
+    const collection = createCollection(
+      persistedCollectionOptions<Todo, string>({
+        id: `sync-present-truncate`,
+        getKey: (item) => item.id,
+        sync: {
+          sync: ({ begin, write, commit, truncate, markReady, metadata }) => {
+            remoteBegin = begin
+            remoteWrite = write as (message: {
+              type: `insert`
+              value: Todo
+            }) => void
+            remoteCommit = commit
+            remoteTruncate = truncate
+            remoteMetadata = metadata
+            markReady()
+            return {}
+          },
+        },
+        persistence: {
+          adapter,
+        },
+      }),
+    )
+
+    await collection.stateWhenReady()
+    await flushAsyncWork()
+
+    remoteBegin?.()
+    remoteWrite?.({
+      type: `insert`,
+      value: {
+        id: `pre-truncate`,
+        title: `Pre truncate`,
+      },
+    })
+    remoteMetadata?.collection.set(`electric:resume`, {
+      kind: `reset`,
+      updatedAt: 1,
+    })
+    remoteTruncate?.()
+    remoteWrite?.({
+      type: `insert`,
+      value: {
+        id: `post-truncate`,
+        title: `Post truncate`,
+      },
+    })
+    remoteCommit?.()
+    await flushAsyncWork()
+
+    expect(adapter.applyCommittedTxCalls.at(-1)?.tx.truncate).toBe(true)
+
+    const reloadedCollection = createCollection(
+      persistedCollectionOptions<Todo, string>({
+        id: `sync-present-truncate`,
+        getKey: (item) => item.id,
+        sync: {
+          sync: ({ markReady }) => {
+            markReady()
+          },
+        },
+        persistence: {
+          adapter,
+        },
+      }),
+    )
+
+    await reloadedCollection.preload()
+    await flushAsyncWork()
+
+    expect(reloadedCollection.get(`pre-truncate`)).toBeUndefined()
+    expect(stripVirtualProps(reloadedCollection.get(`post-truncate`))).toEqual({
+      id: `post-truncate`,
+      title: `Post truncate`,
+    })
+    expect(
+      reloadedCollection._state.syncedCollectionMetadata.get(`electric:resume`),
+    ).toEqual({
+      kind: `reset`,
+      updatedAt: 1,
     })
   })
 
