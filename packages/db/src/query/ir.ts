@@ -16,6 +16,7 @@ export interface QueryIR {
   orderBy?: OrderBy
   limit?: Limit
   offset?: Offset
+  meta?: Record<string, unknown>
   distinct?: true
   singleResult?: true
 

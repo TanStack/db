@@ -670,6 +670,33 @@ export class BaseQueryBuilder<TContext extends Context = Context> {
   }
 
   /**
+   * Attach runtime metadata to the query.
+   * This metadata is forwarded to sync layer `loadSubset` calls and downstream adapters.
+   * 
+   * @param data - The metadata to attach to the query
+   * @returns A QueryBuilder with the metadata applied
+   *
+   * Multiple calls merge values, with later calls overriding earlier keys.
+   *
+   * @example
+   * ```ts
+   * query
+   *   .from({ products: productsCollection })
+   *   .meta({ scope: 'tenant-1' })
+   *   .meta({ includeClients: true })
+   * ```
+   */
+  meta(data: Record<string, unknown>): QueryBuilder<TContext> {
+    return new BaseQueryBuilder({
+      ...this.query,
+      meta: {
+        ...(this.query.meta ?? {}),
+        ...data,
+      },
+    }) as any
+  }
+
+  /**
    * Specify that the query should return distinct rows.
    * Deduplicates rows based on the selected columns.
    * @returns A QueryBuilder with distinct enabled

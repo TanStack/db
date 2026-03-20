@@ -216,6 +216,7 @@ export class CollectionSubscriber<
       ...(includeInitialState && { includeInitialState }),
       whereExpression,
       onStatusChange,
+      meta: this.collectionConfigBuilder.query.meta,
       orderBy: hints.orderBy,
       limit: hints.limit,
       onLoadSubsetResult,
@@ -272,6 +273,7 @@ export class CollectionSubscriber<
     const subscription = this.collection.subscribeChanges(sendChangesInRange, {
       whereExpression,
       onStatusChange,
+      meta: this.collectionConfigBuilder.query.meta,
     })
     subscriptionHolder.current = subscription
 

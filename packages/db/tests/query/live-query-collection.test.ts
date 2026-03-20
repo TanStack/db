@@ -78,6 +78,47 @@ describe(`createLiveQueryCollection`, () => {
     expect(activeUsers.size).toBe(2) // Only Alice and Bob are active
   })
 
+  it(`passes query-level meta to loadSubset`, async () => {
+    type Item = { id: number; name: string }
+    const loadSubsetSpy = vi.fn().mockReturnValue(true)
+
+    const sourceCollection = createCollection<Item>({
+      id: `meta-forwarding-source`,
+      getKey: (item) => item.id,
+      syncMode: `on-demand`,
+      startSync: true,
+      autoIndex: `eager`,
+      sync: {
+        sync: ({ markReady }) => {
+          markReady()
+          return {
+            loadSubset: loadSubsetSpy,
+          }
+        },
+      },
+    })
+
+    const liveQuery = createLiveQueryCollection((q) =>
+      q
+        .from({ item: sourceCollection })
+        .where(({ item }) => eq(item.id, 1))
+        .meta({ scope: `tenant-1`, includeClients: true }),
+    )
+
+    await liveQuery.preload()
+
+    expect(loadSubsetSpy).toHaveBeenCalled()
+    const [firstCall] = loadSubsetSpy.mock.calls
+    expect(firstCall?.[0]).toEqual(
+      expect.objectContaining({
+        meta: {
+          scope: `tenant-1`,
+          includeClients: true,
+        },
+      }),
+    )
+  })
+
   it(`should work with both callback and QueryBuilder instance via config`, async () => {
     // Test with callback
     const activeUsers1 = createLiveQueryCollection((q) =>

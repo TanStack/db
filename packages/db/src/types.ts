@@ -310,6 +310,11 @@ export type LoadSubsetOptions = {
    * @optional Available when called from CollectionSubscription, may be undefined for direct calls
    */
   subscription?: Subscription
+  /**
+   * Query-level metadata passed via the query builder `.meta(...)`.
+   * This allows sync adapters to receive additional dynamic context.
+   */
+  meta?: Record<string, unknown>
 }
 
 export type LoadSubsetFn = (options: LoadSubsetOptions) => true | Promise<void>
@@ -828,6 +833,11 @@ export interface SubscribeChangesOptions<
    * @internal
    */
   onLoadSubsetResult?: (result: Promise<void> | true) => void
+  /**
+   * Optional metadata to include in downstream loadSubset requests.
+   * @internal
+   */
+  meta?: Record<string, unknown>
 }
 
 export interface SubscribeChangesSnapshotOptions<

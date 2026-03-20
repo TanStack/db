@@ -705,7 +705,11 @@ export function queryCollectionOptions(
       // Generate key using common function
       const key = generateQueryKeyFromOptions(opts)
       const hashedQueryKey = hashKey(key)
-      const extendedMeta = { ...meta, loadSubsetOptions: opts }
+      const extendedMeta = {
+        ...meta,
+        ...(opts.meta ?? {}),
+        loadSubsetOptions: opts,
+      }
 
       validateQueryKeyPrefix(key)
 

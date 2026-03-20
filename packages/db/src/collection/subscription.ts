@@ -28,6 +28,8 @@ type RequestSnapshotOptions = {
   orderBy?: OrderBy
   /** Optional limit to pass to loadSubset for backend optimization */
   limit?: number
+  /** Optional metadata to include in loadSubset */
+  meta?: Record<string, unknown>
   /** Callback that receives the raw loadSubset result for external tracking */
   onLoadSubsetResult?: (result: Promise<void> | true) => void
 }
@@ -39,6 +41,8 @@ type RequestLimitedSnapshotOptions = {
   minValues?: Array<unknown>
   /** Row offset for offset-based pagination (passed to sync layer) */
   offset?: number
+  /** Optional metadata to include in loadSubset */
+  meta?: Record<string, unknown>
   /** Whether to track the loadSubset promise on this subscription (default: true) */
   trackLoadSubsetPromise?: boolean
   /** Callback that receives the raw loadSubset result for external tracking */
@@ -49,6 +53,8 @@ type CollectionSubscriptionOptions = {
   includeInitialState?: boolean
   /** Pre-compiled expression for filtering changes */
   whereExpression?: BasicExpression<boolean>
+  /** Optional metadata included in all loadSubset requests for this subscription */
+  meta?: Record<string, unknown>
   /** Callback to call when the subscription is unsubscribed */
   onUnsubscribe?: (event: SubscriptionUnsubscribedEvent) => void
 }
@@ -368,6 +374,10 @@ export class CollectionSubscription
       // Include orderBy and limit if provided so sync layer can optimize the query
       orderBy: opts?.orderBy,
       limit: opts?.limit,
+      meta: {
+        ...(this.options.meta ?? {}),
+        ...(opts?.meta ?? {}),
+      },
     }
     const syncResult = this.collection._sync.loadSubset(loadOptions)
 
@@ -425,6 +435,7 @@ export class CollectionSubscription
     limit,
     minValues,
     offset,
+    meta,
     trackLoadSubsetPromise: shouldTrackLoadSubsetPromise = true,
     onLoadSubsetResult,
   }: RequestLimitedSnapshotOptions) {
@@ -606,6 +617,10 @@ export class CollectionSubscription
       cursor: cursorExpressions, // Cursor expressions passed separately
       offset: offset ?? currentOffset, // Use provided offset, or auto-tracked offset
       subscription: this,
+      meta: {
+        ...(this.options.meta ?? {}),
+        ...(meta ?? {}),
+      },
     }
     const syncResult = this.collection._sync.loadSubset(loadOptions)
 

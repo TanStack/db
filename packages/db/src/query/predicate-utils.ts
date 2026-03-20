@@ -1,3 +1,4 @@
+import { deepEquals } from '../utils.js'
 import { Func, Value } from './ir.js'
 import type { BasicExpression, OrderBy, PropRef } from './ir.js'
 import type { LoadSubsetOptions } from '../types.js'
@@ -857,6 +858,12 @@ export function isPredicateSubset(
   subset: LoadSubsetOptions,
   superset: LoadSubsetOptions,
 ): boolean {
+  // Dynamic metadata must match exactly; otherwise requests may target
+  // different backend scopes despite sharing predicates.
+  if (!deepEquals(subset.meta, superset.meta)) {
+    return false
+  }
+
   // When the superset has a limit, we can only determine subset relationship
   // if the where clauses are equal (not just subset relationship).
   //

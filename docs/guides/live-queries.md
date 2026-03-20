@@ -54,6 +54,7 @@ query outputs automatically and should not be persisted back to storage.
 - [findOne](#findone)
 - [Distinct](#distinct)
 - [Order By, Limit, and Offset](#order-by-limit-and-offset)
+- [Query Metadata](#query-metadata)
 - [Composable Queries](#composable-queries)
 - [Reactive Effects (createEffect)](#reactive-effects-createeffect)
 - [Expression Functions Reference](#expression-functions-reference)
@@ -1497,6 +1498,168 @@ const page2Users = createLiveQueryCollection((q) =>
       name: user.name,
     }))
 )
+```
+
+## Query Metadata
+
+Query metadata allows you to pass dynamic context and parameters to your query function at runtime. This is useful for multi-tenancy, authorization, API-specific parameters, and other request-scoped data that can't be determined at query definition time.
+
+The `.meta()` chainable method lets you attach metadata to a query, which gets merged with any collection-level metadata and passed to your query function via `ctx.meta`.
+
+### Basic Usage
+
+Use `.meta()` to pass context data with your query:
+
+```ts
+import { createLiveQueryCollection, eq } from '@tanstack/db'
+
+const userPosts = createLiveQueryCollection((q) =>
+  q
+    .from({ post: postsCollection })
+    .where(({ post }) => eq(post.userId, userId))
+    .meta({ tenantId: 'tenant-abc' })
+)
+```
+
+### Real-World Use Cases
+
+#### Multi-Tenancy
+
+Pass tenant context to ensure data isolation:
+
+```ts
+const tenantUsers = createLiveQueryCollection((q) =>
+  q
+    .from({ user: usersCollection })
+    .meta({ tenantId: 'tenant-123' })
+)
+```
+
+The `tenantId` is available in your query function:
+
+```ts
+const collection = createCollection(
+  queryCollectionOptions({
+    queryKey: ['tenant-users'],
+    queryFn: async (ctx) => {
+      const { tenantId } = ctx.meta
+      const response = await fetch(`/api/users?tenantId=${tenantId}`)
+      return response.json()
+    },
+    getKey: (user) => user.id,
+  })
+)
+```
+
+#### Authorization Context
+
+Pass authorization headers or user context:
+
+```ts
+const userProfile = createLiveQueryCollection((q) =>
+  q
+    .from({ profile: profilesCollection })
+    .where(({ profile }) => eq(profile.userId, currentUserId))
+    .meta({ userId: currentUserId, roles: userRoles })
+)
+```
+
+#### API Feature Flags
+
+Control API behavior with query-specific parameters:
+
+```ts
+const detailedUsers = createLiveQueryCollection((q) =>
+  q
+    .from({ user: usersCollection })
+    .meta({ includeDetails: true, includeAuditLog: false })
+)
+```
+
+In your query function:
+
+```ts
+queryFn: async (ctx) => {
+  const { includeDetails, includeAuditLog } = ctx.meta
+  const params = new URLSearchParams()
+  if (includeDetails) params.append('details', 'true')
+  if (includeAuditLog) params.append('audit', 'true')
+  
+  const response = await fetch(`/api/users?${params}`)
+  return response.json()
+}
+```
+
+### Metadata Merging
+
+When you combine collection-level `meta` with query-level `.meta()`, they merge together. Query-level metadata takes precedence when the same key exists in both:
+
+```ts
+// Collection has base metadata
+const collection = createCollection(
+  queryCollectionOptions({
+    queryKey: ['items'],
+    queryFn: async (ctx) => {
+      // ctx.meta includes both collection and query-level meta
+      console.log(ctx.meta)
+    },
+    meta: { apiVersion: 'v2', environment: 'production' },
+    getKey: (item) => item.id,
+  })
+)
+
+// Query adds or overrides metadata
+const items = createLiveQueryCollection((q) =>
+  q
+    .from({ item: collection })
+    .meta({ tenantId: 'tenant-a', apiVersion: 'v3' })
+)
+
+// Result in queryFn:
+// { apiVersion: 'v3', environment: 'production', tenantId: 'tenant-a' }
+```
+
+Notice that `apiVersion` was overridden to `'v3'` because the query-level `.meta()` takes precedence.
+
+### Multiple Meta Calls
+
+You can chain multiple `.meta()` calls, and they will merge together:
+
+```ts
+const items = createLiveQueryCollection((q) =>
+  q
+    .from({ item: collection })
+    .where(({ item }) => eq(item.active, true))
+    .meta({ tenantId: 'tenant-a' })
+    .meta({ includeArchived: false })
+    .meta({ userId: 'user-123' })
+)
+
+// Result: { tenantId: 'tenant-a', includeArchived: false, userId: 'user-123' }
+```
+
+### Caching Implications
+
+Different metadata values create different cache entries. This ensures that queries with the same predicates but different metadata (like different tenants) don't accidentally share cached data:
+
+```ts
+// These are cached separately
+const tenantAUsers = createLiveQueryCollection((q) =>
+  q
+    .from({ user: usersCollection })
+    .where(({ user }) => eq(user.active, true))
+    .meta({ tenantId: 'tenant-a' })
+)
+
+const tenantBUsers = createLiveQueryCollection((q) =>
+  q
+    .from({ user: usersCollection })
+    .where(({ user }) => eq(user.active, true))
+    .meta({ tenantId: 'tenant-b' })
+)
+
+// Different metadata = different cache keys in TanStack Query
+// Tenant A's data won't be served to Tenant B
 ```
 
 ## Composable Queries
