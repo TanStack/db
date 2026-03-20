@@ -4,6 +4,7 @@ import {
   createCollection,
   createTransaction,
 } from '@tanstack/db'
+import { persistedCollectionOptions } from '../../db-sqlite-persisted-collection-core/src'
 import { electricCollectionOptions, isChangeMessage } from '../src/electric'
 import { stripVirtualProps } from '../../db/tests/utils'
 import type { ElectricCollectionUtils } from '../src/electric'
@@ -12,6 +13,7 @@ import type {
   InsertMutationFnParams,
   MutationFnParams,
   PendingMutation,
+  SyncMetadataApi,
   Transaction,
   TransactionWithMutations,
 } from '@tanstack/db'
@@ -29,6 +31,8 @@ const mockStream = {
   fetchSnapshot: mockFetchSnapshot,
   forceDisconnectAndRefresh: mockForceDisconnectAndRefresh,
   isUpToDate: false,
+  shapeHandle: undefined as string | undefined,
+  lastOffset: `-1` as string,
 }
 
 vi.mock(`@electric-sql/client`, async () => {
@@ -57,6 +61,61 @@ describe(`Electric Integration`, () => {
       ]),
     )
 
+  const createInMemorySyncMetadataApi = (
+    seed?: ReadonlyMap<string, unknown>,
+  ): {
+    api: SyncMetadataApi<string | number>
+    collectionMetadata: Map<string, unknown>
+  } => {
+    const collectionMetadata = new Map(seed)
+    return {
+      collectionMetadata,
+      api: {
+        row: {
+          get: () => undefined,
+          set: () => {},
+          delete: () => {},
+        },
+        collection: {
+          get: (key) => collectionMetadata.get(key),
+          set: (key, value) => {
+            collectionMetadata.set(key, value)
+          },
+          delete: (key) => {
+            collectionMetadata.delete(key)
+          },
+          list: (prefix) =>
+            Array.from(collectionMetadata.entries())
+              .filter(([key]) => (prefix ? key.startsWith(prefix) : true))
+              .map(([key, value]) => ({ key, value })),
+        },
+      },
+    }
+  }
+
+  const createPersistedAdapter = (
+    collectionMetadata?: Map<string, unknown>,
+  ) => ({
+    loadSubset: async () => [],
+    loadCollectionMetadata: async () =>
+      Array.from((collectionMetadata ?? new Map()).entries()).map(
+        ([key, value]) => ({
+          key,
+          value,
+        }),
+      ),
+    applyCommittedTx: async (_collectionId: string, tx: any) => {
+      for (const mutation of tx.collectionMetadataMutations ?? []) {
+        if (mutation.type === `delete`) {
+          collectionMetadata?.delete(mutation.key)
+        } else {
+          collectionMetadata?.set(mutation.key, mutation.value)
+        }
+      }
+    },
+    ensureIndex: async () => {},
+  })
+
   beforeEach(() => {
     vi.clearAllMocks()
 
@@ -70,6 +129,8 @@ describe(`Electric Integration`, () => {
     mockRequestSnapshot.mockResolvedValue(undefined)
     mockForceDisconnectAndRefresh.mockResolvedValue(undefined)
     mockStream.isUpToDate = false
+    mockStream.shapeHandle = undefined
+    mockStream.lastOffset = `-1`
 
     // Create collection with Electric configuration
     const config = {
@@ -2925,6 +2986,519 @@ describe(`Electric Integration`, () => {
       expect(ShapeStream).toHaveBeenCalledWith(
         expect.objectContaining({
           offset: -1,
+        }),
+      )
+    })
+
+    it(`should use persisted resume metadata when no explicit offset or handle is provided`, async () => {
+      vi.clearAllMocks()
+
+      const { ShapeStream } = await import(`@electric-sql/client`)
+      const metadataHarness = createInMemorySyncMetadataApi(
+        new Map([
+          [
+            `electric:resume`,
+            {
+              kind: `resume`,
+              offset: `10_0`,
+              handle: `handle-1`,
+              shapeId: `{"params":{"table":"test_table"},"url":"http://test-url"}`,
+              updatedAt: 1,
+            },
+          ],
+        ]),
+      )
+
+      const baseOptions = electricCollectionOptions({
+        id: `persisted-resume-test`,
+        shapeOptions: {
+          url: `http://test-url`,
+          params: {
+            table: `test_table`,
+          },
+        },
+        syncMode: `on-demand` as const,
+        getKey: (item: Row) => item.id as number,
+        startSync: true,
+      })
+
+      const originalSync = baseOptions.sync
+      createCollection({
+        ...baseOptions,
+        sync: {
+          sync: (params: Parameters<typeof originalSync.sync>[0]) =>
+            originalSync.sync({
+              ...params,
+              metadata: metadataHarness.api,
+            }),
+        },
+      })
+
+      expect(ShapeStream).toHaveBeenCalledWith(
+        expect.objectContaining({
+          offset: `10_0`,
+          handle: `handle-1`,
+        }),
+      )
+    })
+
+    it(`should ignore reset resume metadata and fall back to default startup`, async () => {
+      vi.clearAllMocks()
+
+      const { ShapeStream } = await import(`@electric-sql/client`)
+      const metadataHarness = createInMemorySyncMetadataApi(
+        new Map([
+          [
+            `electric:resume`,
+            {
+              kind: `reset`,
+              updatedAt: 1,
+            },
+          ],
+        ]),
+      )
+
+      const baseOptions = electricCollectionOptions({
+        id: `persisted-reset-test`,
+        shapeOptions: {
+          url: `http://test-url`,
+          params: {
+            table: `test_table`,
+          },
+        },
+        syncMode: `on-demand` as const,
+        getKey: (item: Row) => item.id as number,
+        startSync: true,
+      })
+
+      const originalSync = baseOptions.sync
+      createCollection({
+        ...baseOptions,
+        sync: {
+          sync: (params: Parameters<typeof originalSync.sync>[0]) =>
+            originalSync.sync({
+              ...params,
+              metadata: metadataHarness.api,
+            }),
+        },
+      })
+
+      expect(ShapeStream).toHaveBeenCalledWith(
+        expect.objectContaining({
+          offset: `now`,
+          handle: undefined,
+        }),
+      )
+    })
+
+    it(`should honor persisted reset resume metadata through the persisted wrapper`, async () => {
+      vi.clearAllMocks()
+
+      const { ShapeStream } = await import(`@electric-sql/client`)
+      const collectionMetadata = new Map<string, unknown>([
+        [
+          `electric:resume`,
+          {
+            kind: `reset`,
+            updatedAt: 1,
+          },
+        ],
+      ])
+
+      const persistedCollection = createCollection(
+        persistedCollectionOptions({
+          ...(electricCollectionOptions({
+            id: `persisted-wrapper-reset-test`,
+            shapeOptions: {
+              url: `http://test-url`,
+              params: {
+                table: `test_table`,
+              },
+            },
+            syncMode: `on-demand` as const,
+            getKey: (item: Row) => item.id as number,
+            startSync: true,
+          }) as any),
+          persistence: {
+            adapter: createPersistedAdapter(collectionMetadata),
+          },
+        }) as any,
+      )
+
+      persistedCollection.startSyncImmediate()
+      await new Promise((resolve) => setTimeout(resolve, 0))
+
+      expect(ShapeStream).toHaveBeenCalledWith(
+        expect.objectContaining({
+          offset: `now`,
+          handle: undefined,
+        }),
+      )
+    })
+
+    it(`should not mix explicit handle with persisted offset`, async () => {
+      vi.clearAllMocks()
+
+      const { ShapeStream } = await import(`@electric-sql/client`)
+      const metadataHarness = createInMemorySyncMetadataApi(
+        new Map([
+          [
+            `electric:resume`,
+            {
+              kind: `resume`,
+              offset: `10_0`,
+              handle: `persisted-handle`,
+              shapeId: JSON.stringify({
+                url: `http://test-url`,
+                params: { table: `test_table` },
+              }),
+              updatedAt: 1,
+            },
+          ],
+        ]),
+      )
+
+      const baseOptions = electricCollectionOptions({
+        id: `persisted-partial-override-handle-test`,
+        shapeOptions: {
+          url: `http://test-url`,
+          params: {
+            table: `test_table`,
+          },
+          handle: `explicit-handle`,
+        },
+        syncMode: `on-demand` as const,
+        getKey: (item: Row) => item.id as number,
+        startSync: true,
+      })
+
+      const originalSync = baseOptions.sync
+      createCollection({
+        ...baseOptions,
+        sync: {
+          sync: (params: Parameters<typeof originalSync.sync>[0]) =>
+            originalSync.sync({
+              ...params,
+              metadata: metadataHarness.api,
+            }),
+        },
+      })
+
+      expect(ShapeStream).toHaveBeenCalledWith(
+        expect.objectContaining({
+          offset: `now`,
+          handle: `explicit-handle`,
+        }),
+      )
+    })
+
+    it(`should not mix explicit offset with persisted handle`, async () => {
+      vi.clearAllMocks()
+
+      const { ShapeStream } = await import(`@electric-sql/client`)
+      const metadataHarness = createInMemorySyncMetadataApi(
+        new Map([
+          [
+            `electric:resume`,
+            {
+              kind: `resume`,
+              offset: `10_0`,
+              handle: `persisted-handle`,
+              shapeId: JSON.stringify({
+                url: `http://test-url`,
+                params: { table: `test_table` },
+              }),
+              updatedAt: 1,
+            },
+          ],
+        ]),
+      )
+
+      const baseOptions = electricCollectionOptions({
+        id: `persisted-partial-override-offset-test`,
+        shapeOptions: {
+          url: `http://test-url`,
+          params: {
+            table: `test_table`,
+          },
+          offset: -1 as any,
+        },
+        syncMode: `on-demand` as const,
+        getKey: (item: Row) => item.id as number,
+        startSync: true,
+      })
+
+      const originalSync = baseOptions.sync
+      createCollection({
+        ...baseOptions,
+        sync: {
+          sync: (params: Parameters<typeof originalSync.sync>[0]) =>
+            originalSync.sync({
+              ...params,
+              metadata: metadataHarness.api,
+            }),
+        },
+      })
+
+      expect(ShapeStream).toHaveBeenCalledWith(
+        expect.objectContaining({
+          offset: -1,
+          handle: undefined,
+        }),
+      )
+    })
+
+    it(`should ignore malformed persisted resume metadata`, async () => {
+      vi.clearAllMocks()
+
+      const { ShapeStream } = await import(`@electric-sql/client`)
+      const metadataHarness = createInMemorySyncMetadataApi(
+        new Map([
+          [
+            `electric:resume`,
+            {
+              kind: `resume`,
+              offset: 10,
+              updatedAt: 1,
+            },
+          ],
+        ]),
+      )
+
+      const baseOptions = electricCollectionOptions({
+        id: `persisted-malformed-resume-test`,
+        shapeOptions: {
+          url: `http://test-url`,
+          params: {
+            table: `test_table`,
+          },
+        },
+        syncMode: `on-demand` as const,
+        getKey: (item: Row) => item.id as number,
+        startSync: true,
+      })
+
+      const originalSync = baseOptions.sync
+      createCollection({
+        ...baseOptions,
+        sync: {
+          sync: (params: Parameters<typeof originalSync.sync>[0]) =>
+            originalSync.sync({
+              ...params,
+              metadata: metadataHarness.api,
+            }),
+        },
+      })
+
+      expect(ShapeStream).toHaveBeenCalledWith(
+        expect.objectContaining({
+          offset: `now`,
+          handle: undefined,
+        }),
+      )
+    })
+
+    it(`should reset and fall back when persisted resume identity is incompatible`, async () => {
+      vi.clearAllMocks()
+
+      const { ShapeStream } = await import(`@electric-sql/client`)
+      const metadataHarness = createInMemorySyncMetadataApi(
+        new Map([
+          [
+            `electric:resume`,
+            {
+              kind: `resume`,
+              offset: `10_0`,
+              handle: `handle-1`,
+              shapeId: `{"url":"http://other-url","params":{"table":"test_table"}}`,
+              updatedAt: 1,
+            },
+          ],
+        ]),
+      )
+
+      const baseOptions = electricCollectionOptions({
+        id: `persisted-incompatible-resume-test`,
+        shapeOptions: {
+          url: `http://test-url`,
+          params: {
+            table: `test_table`,
+          },
+        },
+        syncMode: `on-demand` as const,
+        getKey: (item: Row) => item.id as number,
+        startSync: true,
+      })
+
+      const originalSync = baseOptions.sync
+      createCollection({
+        ...baseOptions,
+        sync: {
+          sync: (params: Parameters<typeof originalSync.sync>[0]) =>
+            originalSync.sync({
+              ...params,
+              metadata: metadataHarness.api,
+            }),
+        },
+      })
+
+      expect(ShapeStream).toHaveBeenCalledWith(
+        expect.objectContaining({
+          offset: `now`,
+          handle: undefined,
+        }),
+      )
+      expect(metadataHarness.collectionMetadata.get(`electric:resume`)).toEqual(
+        expect.objectContaining({
+          kind: `reset`,
+        }),
+      )
+    })
+
+    it(`should treat persisted resume identity as compatible when params key order differs`, async () => {
+      vi.clearAllMocks()
+
+      const { ShapeStream } = await import(`@electric-sql/client`)
+      const metadataHarness = createInMemorySyncMetadataApi(
+        new Map([
+          [
+            `electric:resume`,
+            {
+              kind: `resume`,
+              offset: `10_0`,
+              handle: `handle-1`,
+              shapeId: `{"params":{"table":"test_table","where":"room=1"},"url":"http://test-url"}`,
+              updatedAt: 1,
+            },
+          ],
+        ]),
+      )
+
+      const baseOptions = electricCollectionOptions({
+        id: `persisted-ordered-params-resume-test`,
+        shapeOptions: {
+          url: `http://test-url`,
+          params: {
+            where: `room=1`,
+            table: `test_table`,
+          },
+        },
+        syncMode: `on-demand` as const,
+        getKey: (item: Row) => item.id as number,
+        startSync: true,
+      })
+
+      const originalSync = baseOptions.sync
+      createCollection({
+        ...baseOptions,
+        sync: {
+          sync: (params: Parameters<typeof originalSync.sync>[0]) =>
+            originalSync.sync({
+              ...params,
+              metadata: metadataHarness.api,
+            }),
+        },
+      })
+
+      expect(ShapeStream).toHaveBeenCalledWith(
+        expect.objectContaining({
+          offset: `10_0`,
+          handle: `handle-1`,
+        }),
+      )
+    })
+
+    it(`should persist reset resume metadata immediately on must-refetch`, () => {
+      const metadataHarness = createInMemorySyncMetadataApi()
+      const baseOptions = electricCollectionOptions({
+        id: `must-refetch-reset-metadata-test`,
+        shapeOptions: {
+          url: `http://test-url`,
+          params: {
+            table: `test_table`,
+          },
+        },
+        getKey: (item: Row) => item.id as number,
+        startSync: true,
+      })
+
+      const originalSync = baseOptions.sync
+      createCollection({
+        ...baseOptions,
+        sync: {
+          sync: (params: Parameters<typeof originalSync.sync>[0]) =>
+            originalSync.sync({
+              ...params,
+              metadata: metadataHarness.api,
+            }),
+        },
+      })
+
+      subscriber([
+        {
+          headers: { control: `must-refetch` },
+        },
+      ])
+
+      expect(metadataHarness.collectionMetadata.get(`electric:resume`)).toEqual(
+        expect.objectContaining({
+          kind: `reset`,
+        }),
+      )
+    })
+
+    it(`should only advance resume metadata when a batch commits`, () => {
+      const metadataHarness = createInMemorySyncMetadataApi()
+      mockStream.shapeHandle = `shape-1`
+      mockStream.lastOffset = `10_0`
+
+      const baseOptions = electricCollectionOptions({
+        id: `resume-commit-boundary-test`,
+        shapeOptions: {
+          url: `http://test-url`,
+          params: {
+            table: `test_table`,
+          },
+        },
+        getKey: (item: Row) => item.id as number,
+        startSync: true,
+      })
+
+      const originalSync = baseOptions.sync
+      createCollection({
+        ...baseOptions,
+        sync: {
+          sync: (params: Parameters<typeof originalSync.sync>[0]) =>
+            originalSync.sync({
+              ...params,
+              metadata: metadataHarness.api,
+            }),
+        },
+      })
+
+      subscriber([
+        {
+          key: `1`,
+          value: { id: 1, name: `Before commit` },
+          headers: { operation: `insert` },
+        },
+      ])
+
+      expect(metadataHarness.collectionMetadata.has(`electric:resume`)).toBe(
+        false,
+      )
+
+      subscriber([
+        {
+          headers: { control: `up-to-date` },
+        },
+      ])
+
+      expect(metadataHarness.collectionMetadata.get(`electric:resume`)).toEqual(
+        expect.objectContaining({
+          kind: `resume`,
+          offset: `10_0`,
+          handle: `shape-1`,
         }),
       )
     })

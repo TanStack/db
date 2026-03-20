@@ -36,6 +36,22 @@ test(`renderer persistence requires invoke transport`, () => {
             latestRowVersion: 0,
           },
         })
+      case `loadCollectionMetadata`:
+        return Promise.resolve({
+          v: 1,
+          requestId: request.requestId,
+          method: request.method,
+          ok: true,
+          result: [],
+        })
+      case `scanRows`:
+        return Promise.resolve({
+          v: 1,
+          requestId: request.requestId,
+          method: request.method,
+          ok: true,
+          result: [],
+        })
       default:
         return Promise.resolve({
           v: 1,

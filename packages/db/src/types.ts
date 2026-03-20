@@ -339,6 +339,7 @@ export interface SyncConfig<
     commit: () => void
     markReady: () => void
     truncate: () => void
+    metadata?: SyncMetadataApi<TKey>
   }) => void | CleanupFn | SyncConfigRes
 
   /**
@@ -355,6 +356,25 @@ export interface SyncConfig<
    * - `full`: Updates contain the entire row.
    */
   rowUpdateMode?: `partial` | `full`
+}
+
+export interface SyncMetadataApi<
+  TKey extends string | number = string | number,
+> {
+  row: {
+    get: (key: TKey) => unknown | undefined
+    set: (key: TKey, metadata: unknown) => void
+    delete: (key: TKey) => void
+  }
+  collection: {
+    get: (key: string) => unknown | undefined
+    set: (key: string, value: unknown) => void
+    delete: (key: string) => void
+    list: (prefix?: string) => ReadonlyArray<{
+      key: string
+      value: unknown
+    }>
+  }
 }
 
 export interface ChangeMessage<
