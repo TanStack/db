@@ -444,6 +444,15 @@ export class FnSelectWithGroupByError extends QueryCompilationError {
   }
 }
 
+export class UnsupportedRootScalarSelectError extends QueryCompilationError {
+  constructor() {
+    super(
+      `Top-level scalar select() is not supported by createLiveQueryCollection() or queryOnce(). ` +
+        `Return an object from .select(), or use the scalar query inside toArray(...) or concat(toArray(...)).`,
+    )
+  }
+}
+
 export class HavingRequiresGroupByError extends QueryCompilationError {
   constructor() {
     super(`HAVING clause requires GROUP BY clause`)

@@ -8,9 +8,9 @@ import type {
   PropRef,
   Value,
 } from '../ir.js'
-import type { QueryBuilder } from './index.js'
+import type { InitialQueryBuilder, QueryBuilder } from './index.js'
 import type { VirtualRowProps, WithVirtualProps } from '../../virtual-props.js'
-import type { ToArrayWrapper } from './functions.js'
+import type { ConcatToArrayWrapper, ToArrayWrapper } from './functions.js'
 
 /**
  * Context - The central state container for query builder operations
@@ -50,6 +50,8 @@ export interface Context {
   >
   // The result type after select (if select has been called)
   result?: any
+  // Whether select/fn.select has been called
+  hasResult?: true
   // Single result only (if findOne has been called)
   singleResult?: boolean
 }
@@ -179,10 +181,22 @@ type SelectValue =
   | { [key: string]: SelectValue }
   | Array<RefLeaf<any>>
   | ToArrayWrapper // toArray() wrapped subquery
+  | ConcatToArrayWrapper // concat(toArray(...)) wrapped subquery
   | QueryBuilder<any> // includes subquery (produces a child Collection)
 
 // Recursive shape for select objects allowing nested projections
 type SelectShape = { [key: string]: SelectValue | SelectShape }
+export type ScalarSelectValue =
+  | BasicExpression
+  | Aggregate
+  | Ref
+  | RefLeaf<any>
+  | string
+  | number
+  | boolean
+  | null
+  | undefined
+export type StringifiableScalar = string | number | boolean | null | undefined
 
 /**
  * SelectObject - Wrapper type for select clause objects
@@ -192,6 +206,69 @@ type SelectShape = { [key: string]: SelectValue | SelectShape }
  * messages when invalid selections are attempted.
  */
 export type SelectObject<T extends SelectShape = SelectShape> = T
+type RefBrandKeys = typeof RefBrand | typeof NullableBrand
+type HasNamedSelectKeys<T> =
+  Exclude<keyof T, RefBrandKeys> extends never ? false : true
+type IsScalarSelectLike<T> = T extends BasicExpression | Aggregate
+  ? true
+  : T extends string | number | boolean | null | undefined
+    ? true
+    : typeof RefBrand extends keyof T
+      ? HasNamedSelectKeys<T> extends true
+        ? false
+        : true
+      : false
+export type NonScalarSelectObject<T> = T extends SelectObject
+  ? IsScalarSelectLike<T> extends true
+    ? never
+    : T
+  : never
+
+export type ResultTypeFromSelectValue<TSelectValue> =
+  IsAny<TSelectValue> extends true
+    ? any
+    : WithoutRefBrand<
+        NeedsExtraction<TSelectValue> extends true
+          ? ExtractExpressionType<TSelectValue>
+          : TSelectValue extends ToArrayWrapper<infer T>
+            ? Array<T>
+            : TSelectValue extends ConcatToArrayWrapper<any>
+              ? string
+              : TSelectValue extends QueryBuilder<infer TChildContext>
+                ? Collection<GetResult<TChildContext>>
+                : TSelectValue extends Ref<infer _T>
+                  ? ExtractRef<TSelectValue>
+                  : TSelectValue extends RefLeaf<infer T>
+                    ? IsNullableRef<TSelectValue> extends true
+                      ? T | undefined
+                      : T
+                    : TSelectValue extends RefLeaf<infer T> | undefined
+                      ? T | undefined
+                      : TSelectValue extends RefLeaf<infer T> | null
+                        ? IsNullableRef<
+                            Exclude<TSelectValue, null>
+                          > extends true
+                          ? T | null | undefined
+                          : T | null
+                        : TSelectValue extends Ref<infer _T> | undefined
+                          ?
+                              | ExtractRef<Exclude<TSelectValue, undefined>>
+                              | undefined
+                          : TSelectValue extends Ref<infer _T> | null
+                            ? ExtractRef<Exclude<TSelectValue, null>> | null
+                            : TSelectValue extends Aggregate<infer T>
+                              ? T
+                              : TSelectValue extends
+                                    | string
+                                    | number
+                                    | boolean
+                                    | null
+                                    | undefined
+                                ? TSelectValue
+                                : TSelectValue extends Record<string, any>
+                                  ? ResultTypeFromSelect<TSelectValue>
+                                  : never
+      >
 
 /**
  * ResultTypeFromSelect - Infers the result type from a select object
@@ -229,53 +306,71 @@ export type SelectObject<T extends SelectShape = SelectShape> = T
  * { id: number, name: string, status: 'active', count: 42, profile: { bio: string } }
  * ```
  */
-export type ResultTypeFromSelect<TSelectObject> = WithoutRefBrand<
-  Prettify<{
-    [K in keyof TSelectObject]: NeedsExtraction<TSelectObject[K]> extends true
-      ? ExtractExpressionType<TSelectObject[K]>
-      : TSelectObject[K] extends ToArrayWrapper<infer T>
-        ? Array<T>
-        : // includes subquery (bare QueryBuilder) — produces a child Collection
-          TSelectObject[K] extends QueryBuilder<infer TChildContext>
-          ? Collection<GetResult<TChildContext>>
-          : // Ref (full object ref or spread with RefBrand) - recursively process properties
-            TSelectObject[K] extends Ref<infer _T>
-            ? ExtractRef<TSelectObject[K]>
-            : // RefLeaf (simple property ref like user.name)
-              TSelectObject[K] extends RefLeaf<infer T>
-              ? IsNullableRef<TSelectObject[K]> extends true
-                ? T | undefined
-                : T
-              : // RefLeaf | undefined (schema-optional field)
-                TSelectObject[K] extends RefLeaf<infer T> | undefined
-                ? T | undefined
-                : // RefLeaf | null (schema-nullable field)
-                  TSelectObject[K] extends RefLeaf<infer T> | null
-                  ? IsNullableRef<Exclude<TSelectObject[K], null>> extends true
-                    ? T | null | undefined
-                    : T | null
-                  : // Ref | undefined (optional object-type schema field)
-                    TSelectObject[K] extends Ref<infer _T> | undefined
-                    ?
-                        | ExtractRef<Exclude<TSelectObject[K], undefined>>
-                        | undefined
-                    : // Ref | null (nullable object-type schema field)
-                      TSelectObject[K] extends Ref<infer _T> | null
-                      ? ExtractRef<Exclude<TSelectObject[K], null>> | null
-                      : TSelectObject[K] extends Aggregate<infer T>
-                        ? T
-                        : TSelectObject[K] extends
-                              | string
-                              | number
-                              | boolean
-                              | null
-                              | undefined
-                          ? TSelectObject[K]
-                          : TSelectObject[K] extends Record<string, any>
-                            ? ResultTypeFromSelect<TSelectObject[K]>
-                            : never
-  }>
->
+export type ResultTypeFromSelect<TSelectObject> =
+  IsAny<TSelectObject> extends true
+    ? any
+    : WithoutRefBrand<
+        Prettify<{
+          [K in keyof TSelectObject]: NeedsExtraction<
+            TSelectObject[K]
+          > extends true
+            ? ExtractExpressionType<TSelectObject[K]>
+            : TSelectObject[K] extends ToArrayWrapper<infer T>
+              ? Array<T>
+              : TSelectObject[K] extends ConcatToArrayWrapper<any>
+                ? string
+                : // includes subquery (bare QueryBuilder) — produces a child Collection
+                  TSelectObject[K] extends QueryBuilder<infer TChildContext>
+                  ? Collection<GetResult<TChildContext>>
+                  : // Ref (full object ref or spread with RefBrand) - recursively process properties
+                    TSelectObject[K] extends Ref<infer _T>
+                    ? ExtractRef<TSelectObject[K]>
+                    : // RefLeaf (simple property ref like user.name)
+                      TSelectObject[K] extends RefLeaf<infer T>
+                      ? IsNullableRef<TSelectObject[K]> extends true
+                        ? T | undefined
+                        : T
+                      : // RefLeaf | undefined (schema-optional field)
+                        TSelectObject[K] extends RefLeaf<infer T> | undefined
+                        ? T | undefined
+                        : // RefLeaf | null (schema-nullable field)
+                          TSelectObject[K] extends RefLeaf<infer T> | null
+                          ? IsNullableRef<
+                              Exclude<TSelectObject[K], null>
+                            > extends true
+                            ? T | null | undefined
+                            : T | null
+                          : // Ref | undefined (optional object-type schema field)
+                            TSelectObject[K] extends Ref<infer _T> | undefined
+                            ?
+                                | ExtractRef<
+                                    Exclude<TSelectObject[K], undefined>
+                                  >
+                                | undefined
+                            : // Ref | null (nullable object-type schema field)
+                              TSelectObject[K] extends Ref<infer _T> | null
+                              ? ExtractRef<
+                                  Exclude<TSelectObject[K], null>
+                                > | null
+                              : TSelectObject[K] extends Aggregate<infer T>
+                                ? T
+                                : TSelectObject[K] extends
+                                      | string
+                                      | number
+                                      | boolean
+                                      | null
+                                      | undefined
+                                  ? TSelectObject[K]
+                                  : TSelectObject[K] extends Record<string, any>
+                                    ? ResultTypeFromSelect<TSelectObject[K]>
+                                    : never
+        }>
+      >
+
+export type SelectResult<TSelect> =
+  IsPlainObject<TSelect> extends true
+    ? ResultTypeFromSelect<TSelect>
+    : ResultTypeFromSelectValue<TSelect>
 
 // Extract Ref or subobject with a spread or a Ref
 type ExtractRef<T> = Prettify<ResultTypeFromSelect<WithoutRefBrand<T>>>
@@ -386,7 +481,7 @@ export type JoinOnCallback<TContext extends Context> = (
  * Example (no GROUP BY): `(row) => row.user.salary > 70000 && row.$selected.user_count > 2`
  */
 export type FunctionalHavingRow<TContext extends Context> = TContext[`schema`] &
-  (TContext[`result`] extends object ? { $selected: TContext[`result`] } : {})
+  (TContext[`hasResult`] extends true ? { $selected: TContext[`result`] } : {})
 
 /**
  * RefsForContext - Creates ref proxies for all tables/collections in a query context
@@ -422,7 +517,7 @@ export type RefsForContext<TContext extends Context> = {
       : // T is exactly undefined, exactly null, or neither optional nor nullable
         // Wrap in Ref as-is (includes exact undefined, exact null, and normal types)
         Ref<TContext[`schema`][K]>
-} & (TContext[`result`] extends object
+} & (TContext[`hasResult`] extends true
   ? { $selected: Ref<TContext[`result`]> }
   : {})
 
@@ -586,7 +681,7 @@ type IsNullableRef<T> = typeof NullableBrand extends keyof T ? true : false
 
 // Helper type to remove RefBrand and NullableBrand from objects
 type WithoutRefBrand<T> =
-  T extends Record<string, any>
+  IsPlainObject<T> extends true
     ? Omit<T, typeof RefBrand | typeof NullableBrand>
     : T
 
@@ -602,6 +697,10 @@ type WithoutRefBrand<T> =
  */
 type PreserveSingleResultFlag<TFlag> = [TFlag] extends [true]
   ? { singleResult: true }
+  : {}
+
+type PreserveHasResultFlag<TFlag> = [TFlag] extends [true]
+  ? { hasResult: true }
   : {}
 
 /**
@@ -649,7 +748,8 @@ export type MergeContextWithJoinType<
     [K in keyof TNewSchema & string]: TJoinType
   }
   result: TContext[`result`]
-} & PreserveSingleResultFlag<TContext[`singleResult`]>
+} & PreserveSingleResultFlag<TContext[`singleResult`]> &
+  PreserveHasResultFlag<TContext[`hasResult`]>
 
 /**
  * ApplyJoinOptionalityToMergedSchema - Applies optionality rules when merging schemas
@@ -711,6 +811,13 @@ type WithVirtualPropsIfObject<TResult> = TResult extends object
   ? WithVirtualProps<TResult, string | number>
   : TResult
 
+type PrettifyIfPlainObject<T> = IsPlainObject<T> extends true ? Prettify<T> : T
+type ResultValue<TContext extends Context> = TContext[`hasResult`] extends true
+  ? WithVirtualPropsIfObject<TContext[`result`]>
+  : TContext[`hasJoins`] extends true
+    ? TContext[`schema`]
+    : TContext[`schema`][TContext[`fromSourceName`]]
+
 /**
  * GetResult - Determines the final result type of a query
  *
@@ -736,15 +843,45 @@ type WithVirtualPropsIfObject<TResult> = TResult extends object
  * The `Prettify` wrapper ensures clean type display in IDEs by flattening
  * complex intersection types into readable object types.
  */
+export type GetRawResult<TContext extends Context> = ResultValue<TContext>
+
 export type GetResult<TContext extends Context> = Prettify<
-  TContext[`result`] extends object
-    ? WithVirtualPropsIfObject<TContext[`result`]>
-    : TContext[`hasJoins`] extends true
-      ? // Optionality is already applied in the schema, just return it
-        TContext[`schema`]
-      : // Single table query - return the specific table
-        TContext[`schema`][TContext[`fromSourceName`]]
+  ResultValue<TContext>
 >
+
+type IsExactlyContext<TContext extends Context> = [Context] extends [TContext]
+  ? [TContext] extends [Context]
+    ? true
+    : false
+  : false
+
+type RootScalarResultError = {
+  readonly __tanstackDbRootQueryError__: `Top-level scalar results are not supported by createLiveQueryCollection() or queryOnce(). Return an object, or use the scalar query inside toArray(...) or concat(toArray(...)).`
+}
+
+export type RootObjectResultConstraint<TContext extends Context> =
+  IsExactlyContext<TContext> extends true
+    ? unknown
+    : GetResult<TContext> extends object
+      ? unknown
+      : RootScalarResultError
+
+type ContextFromQueryBuilder<TQuery extends QueryBuilder<any>> =
+  TQuery extends QueryBuilder<infer TContext> ? TContext : never
+
+export type RootQueryBuilder<TQuery extends QueryBuilder<any>> = TQuery &
+  RootObjectResultConstraint<ContextFromQueryBuilder<TQuery>>
+
+export type RootQueryFn<TQuery extends QueryBuilder<any>> = (
+  q: InitialQueryBuilder,
+) => RootQueryBuilder<TQuery>
+
+export type RootQueryResult<TContext extends Context> =
+  IsExactlyContext<TContext> extends true
+    ? any
+    : GetResult<TContext> extends object
+      ? GetResult<TContext>
+      : never
 
 /**
  * ApplyJoinOptionalityToSchema - Legacy helper for complex join scenarios
@@ -878,7 +1015,7 @@ export type MergeContextForJoinCallback<
     ? TContext[`joinTypes`]
     : {}
   result: TContext[`result`]
-}
+} & PreserveHasResultFlag<TContext[`hasResult`]>
 
 /**
  * WithResult - Updates a context with a new result type after select()
@@ -895,8 +1032,9 @@ export type MergeContextForJoinCallback<
  * result type display cleanly in IDEs.
  */
 export type WithResult<TContext extends Context, TResult> = Prettify<
-  Omit<TContext, `result`> & {
-    result: Prettify<TResult>
+  Omit<TContext, `result` | `hasResult`> & {
+    result: PrettifyIfPlainObject<TResult>
+    hasResult: true
   }
 >
 
@@ -919,6 +1057,8 @@ type IsPlainObject<T> = T extends unknown
         : true
     : false
   : false
+
+type IsAny<T> = 0 extends 1 & T ? true : false
 
 /**
  * JsBuiltIns - List of JavaScript built-ins

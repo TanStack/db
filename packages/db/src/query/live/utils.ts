@@ -1,4 +1,5 @@
 import { MultiSet, serializeValue } from '@tanstack/db-ivm'
+import { UnsupportedRootScalarSelectError } from '../../errors.js'
 import { normalizeOrderByPaths } from '../compiler/expressions.js'
 import { buildQuery, getQueryIR } from '../builder/index.js'
 import { IncludesSubquery } from '../ir.js'
@@ -191,12 +192,23 @@ export function buildQueryFromConfig<TContext extends Context>(config: {
   query:
     | ((q: InitialQueryBuilder) => QueryBuilder<TContext>)
     | QueryBuilder<TContext>
+  requireObjectResult?: boolean
 }): QueryIR {
   // Build the query using the provided query builder function or instance
-  if (typeof config.query === `function`) {
-    return buildQuery<TContext>(config.query)
+  const query =
+    typeof config.query === `function`
+      ? buildQuery<TContext>(config.query)
+      : getQueryIR(config.query)
+
+  if (
+    config.requireObjectResult &&
+    query.select &&
+    !isNestedSelectObject(query.select)
+  ) {
+    throw new UnsupportedRootScalarSelectError()
   }
-  return getQueryIR(config.query)
+
+  return query
 }
 
 /**

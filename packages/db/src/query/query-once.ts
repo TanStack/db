@@ -1,6 +1,16 @@
 import { createLiveQueryCollection } from './live-query-collection.js'
-import type { InitialQueryBuilder, QueryBuilder } from './builder/index.js'
-import type { Context, InferResultType } from './builder/types.js'
+import type {
+  ExtractContext,
+  InitialQueryBuilder,
+  QueryBuilder,
+} from './builder/index.js'
+import type {
+  Context,
+  InferResultType,
+  RootObjectResultConstraint,
+  RootQueryBuilder,
+  RootQueryFn,
+} from './builder/types.js'
 
 /**
  * Configuration options for queryOnce
@@ -10,8 +20,10 @@ export interface QueryOnceConfig<TContext extends Context> {
    * Query builder function that defines the query
    */
   query:
-    | ((q: InitialQueryBuilder) => QueryBuilder<TContext>)
-    | QueryBuilder<TContext>
+    | ((
+        q: InitialQueryBuilder,
+      ) => QueryBuilder<TContext> & RootObjectResultConstraint<TContext>)
+    | (QueryBuilder<TContext> & RootObjectResultConstraint<TContext>)
   // Future: timeout, signal, etc.
 }
 
@@ -44,9 +56,12 @@ export interface QueryOnceConfig<TContext extends Context> {
  * )
  * ```
  */
-export function queryOnce<TContext extends Context>(
-  queryFn: (q: InitialQueryBuilder) => QueryBuilder<TContext>,
-): Promise<InferResultType<TContext>>
+export function queryOnce<
+  TQueryFn extends (q: InitialQueryBuilder) => QueryBuilder<any>,
+  TQuery extends QueryBuilder<any> = ReturnType<TQueryFn>,
+>(
+  queryFn: TQueryFn & RootQueryFn<TQuery>,
+): Promise<InferResultType<ExtractContext<TQuery>>>
 
 // Overload 2: Config object form returning array (non-single result)
 /**
@@ -65,15 +80,19 @@ export function queryOnce<TContext extends Context>(
  * })
  * ```
  */
-export function queryOnce<TContext extends Context>(
-  config: QueryOnceConfig<TContext>,
-): Promise<InferResultType<TContext>>
+export function queryOnce<TQuery extends QueryBuilder<any>>(
+  config: QueryOnceConfig<ExtractContext<TQuery>> & {
+    query: RootQueryFn<TQuery> | RootQueryBuilder<TQuery>
+  },
+): Promise<InferResultType<ExtractContext<TQuery>>>
 
 // Implementation
 export async function queryOnce<TContext extends Context>(
   configOrQuery:
     | QueryOnceConfig<TContext>
-    | ((q: InitialQueryBuilder) => QueryBuilder<TContext>),
+    | ((
+        q: InitialQueryBuilder,
+      ) => QueryBuilder<TContext> & RootObjectResultConstraint<TContext>),
 ): Promise<InferResultType<TContext>> {
   // Normalize input
   const config: QueryOnceConfig<TContext> =
