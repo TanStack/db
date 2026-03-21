@@ -16,6 +16,7 @@ import type {
   InsertMutationFnParams,
   LoadSubsetOptions,
   SyncConfig,
+  SyncMetadataApi,
   UpdateMutationFnParams,
   UtilsRecord,
 } from '@tanstack/db'
@@ -118,6 +119,7 @@ export interface QueryCollectionConfig<
     TQueryData,
     TQueryKey
   >[`staleTime`]
+  persistedGcTime?: number
 
   /**
    * Metadata to pass to the query.
@@ -217,6 +219,35 @@ interface QueryCollectionState {
     string,
     QueryObserver<Array<any>, any, Array<any>, Array<any>, any>
   >
+}
+
+type PersistedQueryRetentionEntry =
+  | {
+      queryHash: string
+      mode: `ttl`
+      expiresAt: number
+    }
+  | {
+      queryHash: string
+      mode: `until-revalidated`
+    }
+
+const QUERY_COLLECTION_GC_PREFIX = `queryCollection:gc:`
+
+type PersistedScannedRowForQuery<TItem extends object> = {
+  key: string | number
+  value: TItem
+  metadata?: unknown
+}
+
+type QuerySyncMetadataWithPersistedScan<TItem extends object> = SyncMetadataApi<
+  string | number
+> & {
+  row: SyncMetadataApi<string | number>[`row`] & {
+    scanPersisted?: (options?: {
+      metadataOnly?: boolean
+    }) => Promise<Array<PersistedScannedRowForQuery<TItem>>>
+  }
 }
 
 /**
@@ -547,6 +578,7 @@ export function queryCollectionOptions(
     retry,
     retryDelay,
     staleTime,
+    persistedGcTime,
     getKey,
     onInsert,
     onUpdate,
@@ -672,10 +704,332 @@ export function queryCollectionOptions(
   }
 
   const internalSync: SyncConfig<any>[`sync`] = (params) => {
-    const { begin, write, commit, markReady, collection } = params
+    const { begin, write, commit, markReady, collection, metadata } = params
+    const persistedMetadata = metadata as
+      | QuerySyncMetadataWithPersistedScan<any>
+      | undefined
 
     // Track whether sync has been started
     let syncStarted = false
+    let startupRetentionSettled = false
+    const retainedQueriesPendingRevalidation = new Set<string>()
+    const persistedRetentionTimers = new Map<
+      string,
+      ReturnType<typeof setTimeout>
+    >()
+    let persistedRetentionMaintenance = Promise.resolve()
+
+    const getRowMetadata = (rowKey: string | number) => {
+      return (metadata?.row.get(rowKey) ??
+        collection._state.syncedMetadata.get(rowKey)) as
+        | Record<string, unknown>
+        | undefined
+    }
+
+    const getPersistedOwners = (rowKey: string | number) => {
+      const rowMetadata = getRowMetadata(rowKey)
+      const queryMetadata = rowMetadata?.queryCollection
+      if (!queryMetadata || typeof queryMetadata !== `object`) {
+        return new Set<string>()
+      }
+
+      const owners = (queryMetadata as Record<string, unknown>).owners
+      if (!owners || typeof owners !== `object`) {
+        return new Set<string>()
+      }
+
+      return new Set(Object.keys(owners as Record<string, true>))
+    }
+
+    const setPersistedOwners = (
+      rowKey: string | number,
+      owners: Set<string>,
+    ) => {
+      if (!metadata) {
+        return
+      }
+
+      const currentMetadata = { ...(getRowMetadata(rowKey) ?? {}) }
+      if (owners.size === 0) {
+        delete currentMetadata.queryCollection
+        if (Object.keys(currentMetadata).length === 0) {
+          metadata.row.delete(rowKey)
+        } else {
+          metadata.row.set(rowKey, currentMetadata)
+        }
+        return
+      }
+
+      metadata.row.set(rowKey, {
+        ...currentMetadata,
+        queryCollection: {
+          owners: Object.fromEntries(
+            Array.from(owners.values()).map((owner) => [owner, true]),
+          ),
+        },
+      })
+    }
+
+    const parsePersistedQueryRetentionEntry = (
+      value: unknown,
+      expectedHash: string,
+    ): PersistedQueryRetentionEntry | undefined => {
+      if (!value || typeof value !== `object`) {
+        return undefined
+      }
+
+      const record = value as Record<string, unknown>
+      if (record.queryHash !== expectedHash) {
+        return undefined
+      }
+
+      if (record.mode === `until-revalidated`) {
+        return {
+          queryHash: expectedHash,
+          mode: `until-revalidated`,
+        }
+      }
+
+      if (
+        record.mode === `ttl` &&
+        typeof record.expiresAt === `number` &&
+        Number.isFinite(record.expiresAt)
+      ) {
+        return {
+          queryHash: expectedHash,
+          mode: `ttl`,
+          expiresAt: record.expiresAt,
+        }
+      }
+
+      return undefined
+    }
+
+    const runPersistedRetentionMaintenance = (task: () => Promise<void>) => {
+      persistedRetentionMaintenance = persistedRetentionMaintenance.then(
+        task,
+        task,
+      )
+      return persistedRetentionMaintenance
+    }
+
+    const cancelPersistedRetentionExpiry = (hashedQueryKey: string) => {
+      const timer = persistedRetentionTimers.get(hashedQueryKey)
+      if (timer) {
+        clearTimeout(timer)
+        persistedRetentionTimers.delete(hashedQueryKey)
+      }
+    }
+
+    const getHydratedOwnedRowsForQueryBaseline = (hashedQueryKey: string) => {
+      const knownRows = queryToRows.get(hashedQueryKey)
+      if (knownRows) {
+        return new Set(knownRows)
+      }
+
+      const ownedRows = new Set<string | number>()
+      for (const [rowKey] of collection._state.syncedData.entries()) {
+        const owners = getPersistedOwners(rowKey)
+        if (owners.size === 0) {
+          continue
+        }
+
+        rowToQueries.set(rowKey, new Set(owners))
+        owners.forEach((owner) => {
+          const queryToRowsSet = queryToRows.get(owner) || new Set()
+          queryToRowsSet.add(rowKey)
+          queryToRows.set(owner, queryToRowsSet)
+        })
+
+        if (owners.has(hashedQueryKey)) {
+          ownedRows.add(rowKey)
+        }
+      }
+      return ownedRows
+    }
+
+    const loadPersistedBaselineForQuery = async (
+      hashedQueryKey: string,
+    ): Promise<
+      Map<
+        string | number,
+        {
+          value: any
+          owners: Set<string>
+        }
+      >
+    > => {
+      const knownRows = queryToRows.get(hashedQueryKey)
+      if (
+        knownRows &&
+        Array.from(knownRows).every((rowKey) => collection.has(rowKey))
+      ) {
+        const baseline = new Map<
+          string | number,
+          { value: any; owners: Set<string> }
+        >()
+        knownRows.forEach((rowKey) => {
+          const value = collection.get(rowKey)
+          const owners = rowToQueries.get(rowKey)
+          if (value && owners) {
+            baseline.set(rowKey, {
+              value,
+              owners: new Set(owners),
+            })
+          }
+        })
+        return baseline
+      }
+
+      const scanPersisted = persistedMetadata?.row.scanPersisted
+      if (!scanPersisted) {
+        const baseline = new Map<
+          string | number,
+          { value: any; owners: Set<string> }
+        >()
+        getHydratedOwnedRowsForQueryBaseline(hashedQueryKey).forEach(
+          (rowKey) => {
+            const value = collection.get(rowKey)
+            const owners = rowToQueries.get(rowKey)
+            if (value && owners) {
+              baseline.set(rowKey, {
+                value,
+                owners: new Set(owners),
+              })
+            }
+          },
+        )
+        return baseline
+      }
+
+      const baseline = new Map<
+        string | number,
+        { value: any; owners: Set<string> }
+      >()
+      const scannedRows = await scanPersisted()
+
+      scannedRows.forEach((row) => {
+        const rowMetadata = row.metadata as Record<string, unknown> | undefined
+        const queryMetadata = rowMetadata?.queryCollection
+        if (!queryMetadata || typeof queryMetadata !== `object`) {
+          return
+        }
+
+        const owners = (queryMetadata as Record<string, unknown>).owners
+        if (!owners || typeof owners !== `object`) {
+          return
+        }
+
+        const ownerSet = new Set(Object.keys(owners as Record<string, true>))
+        if (ownerSet.size === 0) {
+          return
+        }
+
+        rowToQueries.set(row.key, new Set(ownerSet))
+        ownerSet.forEach((owner) => {
+          const queryToRowsSet = queryToRows.get(owner) || new Set()
+          queryToRowsSet.add(row.key)
+          queryToRows.set(owner, queryToRowsSet)
+        })
+
+        if (ownerSet.has(hashedQueryKey)) {
+          baseline.set(row.key, {
+            value: row.value,
+            owners: ownerSet,
+          })
+        }
+      })
+
+      return baseline
+    }
+
+    const cleanupPersistedPlaceholder = async (hashedQueryKey: string) => {
+      if (!metadata) {
+        return
+      }
+
+      const baseline = await loadPersistedBaselineForQuery(hashedQueryKey)
+      const rowsToDelete: Array<any> = []
+
+      begin()
+
+      baseline.forEach(({ value: oldItem, owners }, rowKey) => {
+        owners.delete(hashedQueryKey)
+        setPersistedOwners(rowKey, owners)
+        const needToRemove = removeRow(rowKey, hashedQueryKey)
+        if (needToRemove) {
+          rowsToDelete.push(oldItem)
+        }
+      })
+
+      rowsToDelete.forEach((row) => {
+        write({ type: `delete`, value: row })
+      })
+
+      metadata.collection.delete(
+        `${QUERY_COLLECTION_GC_PREFIX}${hashedQueryKey}`,
+      )
+      commit()
+    }
+
+    const schedulePersistedRetentionExpiry = (
+      entry: PersistedQueryRetentionEntry,
+    ) => {
+      if (entry.mode !== `ttl`) {
+        return
+      }
+
+      cancelPersistedRetentionExpiry(entry.queryHash)
+
+      const delay = Math.max(0, entry.expiresAt - Date.now())
+      const timer = setTimeout(() => {
+        persistedRetentionTimers.delete(entry.queryHash)
+        void runPersistedRetentionMaintenance(async () => {
+          const currentEntry = metadata?.collection.get(
+            `${QUERY_COLLECTION_GC_PREFIX}${entry.queryHash}`,
+          )
+          const parsedCurrentEntry = parsePersistedQueryRetentionEntry(
+            currentEntry,
+            entry.queryHash,
+          )
+          if (
+            !parsedCurrentEntry ||
+            parsedCurrentEntry.mode !== `ttl` ||
+            parsedCurrentEntry.expiresAt > Date.now()
+          ) {
+            return
+          }
+          await cleanupPersistedPlaceholder(entry.queryHash)
+        })
+      }, delay)
+
+      persistedRetentionTimers.set(entry.queryHash, timer)
+    }
+
+    const consumePersistedQueryRetentionAtStartup = async () => {
+      if (!metadata) {
+        return
+      }
+
+      const retentionEntries = metadata.collection.list(
+        QUERY_COLLECTION_GC_PREFIX,
+      )
+      const now = Date.now()
+
+      for (const { key, value } of retentionEntries) {
+        const hashedQueryKey = key.slice(QUERY_COLLECTION_GC_PREFIX.length)
+        const parsed = parsePersistedQueryRetentionEntry(value, hashedQueryKey)
+        if (!parsed) {
+          continue
+        }
+
+        if (parsed.mode === `ttl` && parsed.expiresAt <= now) {
+          await cleanupPersistedPlaceholder(parsed.queryHash)
+        } else if (parsed.mode === `ttl`) {
+          schedulePersistedRetentionExpiry(parsed)
+        }
+      }
+    }
 
     /**
      * Generate a consistent query key from LoadSubsetOptions.
@@ -698,14 +1052,48 @@ export function queryCollectionOptions(
       }
     }
 
+    const startupRetentionEntries = metadata?.collection.list(
+      QUERY_COLLECTION_GC_PREFIX,
+    )
+    const startupRetentionMaintenancePromise =
+      !startupRetentionEntries || startupRetentionEntries.length === 0
+        ? (() => {
+            startupRetentionSettled = true
+            return Promise.resolve()
+          })()
+        : runPersistedRetentionMaintenance(async () => {
+            try {
+              await consumePersistedQueryRetentionAtStartup()
+            } finally {
+              startupRetentionSettled = true
+            }
+          })
+
     const createQueryFromOpts = (
       opts: LoadSubsetOptions = {},
       queryFunction: typeof queryFn = queryFn,
     ): true | Promise<void> => {
+      if (!startupRetentionSettled) {
+        return startupRetentionMaintenancePromise.then(() => {
+          const resumed = createQueryFromOpts(opts, queryFunction)
+          return resumed === true ? undefined : resumed
+        })
+      }
+
       // Generate key using common function
       const key = generateQueryKeyFromOptions(opts)
       const hashedQueryKey = hashKey(key)
       const extendedMeta = { ...meta, loadSubsetOptions: opts }
+      const retainedEntry = metadata?.collection.get(
+        `${QUERY_COLLECTION_GC_PREFIX}${hashedQueryKey}`,
+      )
+      if (
+        parsePersistedQueryRetentionEntry(retainedEntry, hashedQueryKey) !==
+        undefined
+      ) {
+        retainedQueriesPendingRevalidation.add(hashedQueryKey)
+      }
+      cancelPersistedRetentionExpiry(hashedQueryKey)
 
       validateQueryKeyPrefix(key)
 
@@ -832,6 +1220,116 @@ export function queryCollectionOptions(
 
     type UpdateHandler = Parameters<QueryObserver[`subscribe`]>[0]
 
+    const applySuccessfulResult = (
+      queryKey: QueryKey,
+      result: QueryObserverResult<any, any>,
+      persistedBaseline?: Map<
+        string | number,
+        {
+          value: any
+          owners: Set<string>
+        }
+      >,
+    ) => {
+      const hashedQueryKey = hashKey(queryKey)
+
+      if (collection.status === `cleaned-up`) {
+        return
+      }
+
+      // Clear error state
+      state.lastError = undefined
+      state.errorCount = 0
+
+      const rawData = result.data
+      const newItemsArray = select ? select(rawData) : rawData
+
+      if (
+        !Array.isArray(newItemsArray) ||
+        newItemsArray.some((item) => typeof item !== `object`)
+      ) {
+        const errorMessage = select
+          ? `@tanstack/query-db-collection: select() must return an array of objects. Got: ${typeof newItemsArray} for queryKey ${JSON.stringify(queryKey)}`
+          : `@tanstack/query-db-collection: queryFn must return an array of objects. Got: ${typeof newItemsArray} for queryKey ${JSON.stringify(queryKey)}`
+
+        console.error(errorMessage)
+        return
+      }
+
+      const currentSyncedItems: Map<string | number, any> = new Map(
+        collection._state.syncedData.entries(),
+      )
+      const shouldUsePersistedBaseline = persistedBaseline !== undefined
+      const previouslyOwnedRows = shouldUsePersistedBaseline
+        ? new Set(persistedBaseline.keys())
+        : getHydratedOwnedRowsForQueryBaseline(hashedQueryKey)
+      const newItemsMap = new Map<string | number, any>()
+      newItemsArray.forEach((item) => {
+        const key = getKey(item)
+        newItemsMap.set(key, item)
+      })
+
+      begin()
+      if (metadata) {
+        metadata.collection.delete(
+          `${QUERY_COLLECTION_GC_PREFIX}${hashedQueryKey}`,
+        )
+      }
+
+      previouslyOwnedRows.forEach((key) => {
+        const oldItem = shouldUsePersistedBaseline
+          ? persistedBaseline.get(key)?.value
+          : currentSyncedItems.get(key)
+        if (!oldItem) {
+          return
+        }
+        const newItem = newItemsMap.get(key)
+        if (!newItem) {
+          const owners = getPersistedOwners(key)
+          owners.delete(hashedQueryKey)
+          setPersistedOwners(key, owners)
+          const needToRemove = removeRow(key, hashedQueryKey)
+          if (needToRemove) {
+            write({ type: `delete`, value: oldItem })
+          }
+        } else if (!deepEquals(oldItem, newItem)) {
+          write({ type: `update`, value: newItem })
+        }
+      })
+
+      newItemsMap.forEach((newItem, key) => {
+        const owners = getPersistedOwners(key)
+        if (!owners.has(hashedQueryKey)) {
+          owners.add(hashedQueryKey)
+          setPersistedOwners(key, owners)
+        }
+        addRow(key, hashedQueryKey)
+        if (!currentSyncedItems.has(key)) {
+          write({ type: `insert`, value: newItem })
+        }
+      })
+
+      commit()
+      retainedQueriesPendingRevalidation.delete(hashedQueryKey)
+      cancelPersistedRetentionExpiry(hashedQueryKey)
+
+      // Mark collection as ready after first successful query result
+      markReady()
+    }
+
+    const reconcileSuccessfulResult = async (
+      queryKey: QueryKey,
+      result: QueryObserverResult<any, any>,
+    ) => {
+      const hashedQueryKey = hashKey(queryKey)
+      const persistedBaseline =
+        await loadPersistedBaselineForQuery(hashedQueryKey)
+      if (collection.status === `cleaned-up`) {
+        return
+      }
+      applySuccessfulResult(queryKey, result, persistedBaseline)
+    }
+
     // eslint-disable-next-line no-shadow
     const makeQueryResultHandler = (queryKey: QueryKey) => {
       const hashedQueryKey = hashKey(queryKey)
@@ -852,60 +1350,16 @@ export function queryCollectionOptions(
             return
           }
 
-          // Clear error state
-          state.lastError = undefined
-          state.errorCount = 0
-
-          const rawData = result.data
-          const newItemsArray = select ? select(rawData) : rawData
-
-          if (
-            !Array.isArray(newItemsArray) ||
-            newItemsArray.some((item) => typeof item !== `object`)
-          ) {
-            const errorMessage = select
-              ? `@tanstack/query-db-collection: select() must return an array of objects. Got: ${typeof newItemsArray} for queryKey ${JSON.stringify(queryKey)}`
-              : `@tanstack/query-db-collection: queryFn must return an array of objects. Got: ${typeof newItemsArray} for queryKey ${JSON.stringify(queryKey)}`
-
-            console.error(errorMessage)
-            return
+          if (retainedQueriesPendingRevalidation.has(hashedQueryKey)) {
+            void reconcileSuccessfulResult(queryKey, result).catch((error) => {
+              console.error(
+                `[QueryCollection] Error reconciling query ${String(queryKey)}:`,
+                error,
+              )
+            })
+          } else {
+            applySuccessfulResult(queryKey, result)
           }
-
-          const currentSyncedItems: Map<string | number, any> = new Map(
-            collection._state.syncedData.entries(),
-          )
-          const newItemsMap = new Map<string | number, any>()
-          newItemsArray.forEach((item) => {
-            const key = getKey(item)
-            newItemsMap.set(key, item)
-          })
-
-          begin()
-
-          currentSyncedItems.forEach((oldItem, key) => {
-            const newItem = newItemsMap.get(key)
-            if (!newItem) {
-              const needToRemove = removeRow(key, hashedQueryKey) // returns true if the row is no longer referenced by any queries
-              if (needToRemove) {
-                write({ type: `delete`, value: oldItem })
-              }
-            } else if (!deepEquals(oldItem, newItem)) {
-              // Only update if there are actual differences in the properties
-              write({ type: `update`, value: newItem })
-            }
-          })
-
-          newItemsMap.forEach((newItem, key) => {
-            addRow(key, hashedQueryKey)
-            if (!currentSyncedItems.has(key)) {
-              write({ type: `insert`, value: newItem })
-            }
-          })
-
-          commit()
-
-          // Mark collection as ready after first successful query result
-          markReady()
         } else if (result.isError) {
           const isNewError =
             result.errorUpdatedAt !== state.lastErrorUpdatedAt ||
@@ -987,8 +1441,15 @@ export function queryCollectionOptions(
         })
       }
     } else {
-      // In on-demand mode, mark ready immediately since there's no initial query
-      markReady()
+      if (startupRetentionSettled) {
+        markReady()
+      } else {
+        // In on-demand mode, there is no initial query, but retained-placeholder
+        // maintenance still needs to finish before the collection is treated as ready.
+        void startupRetentionMaintenancePromise.then(() => {
+          markReady()
+        })
+      }
     }
 
     // Always subscribe when sync starts (this could be from preload(), startSync config, or first subscriber)
@@ -1009,8 +1470,11 @@ export function queryCollectionOptions(
     const cleanupQueryInternal = (hashedQueryKey: string) => {
       unsubscribes.get(hashedQueryKey)?.()
       unsubscribes.delete(hashedQueryKey)
+      cancelPersistedRetentionExpiry(hashedQueryKey)
+      retainedQueriesPendingRevalidation.delete(hashedQueryKey)
 
       const rowKeys = queryToRows.get(hashedQueryKey) ?? new Set()
+      const nextOwnersByRow = new Map<string | number, Set<string>>()
       const rowsToDelete: Array<any> = []
 
       rowKeys.forEach((rowKey) => {
@@ -1020,22 +1484,41 @@ export function queryCollectionOptions(
           return
         }
 
-        queries.delete(hashedQueryKey)
+        const nextOwners = new Set(queries)
+        nextOwners.delete(hashedQueryKey)
+        nextOwnersByRow.set(rowKey, nextOwners)
 
-        if (queries.size === 0) {
+        if (nextOwners.size === 0 && collection.has(rowKey)) {
+          rowsToDelete.push(collection.get(rowKey))
+        }
+      })
+
+      const shouldWriteMetadata =
+        metadata !== undefined && nextOwnersByRow.size > 0
+      const needsTransaction = shouldWriteMetadata || rowsToDelete.length > 0
+      if (needsTransaction) {
+        begin()
+      }
+
+      nextOwnersByRow.forEach((owners, rowKey) => {
+        if (owners.size === 0) {
           rowToQueries.delete(rowKey)
+        } else {
+          rowToQueries.set(rowKey, owners)
+        }
 
-          if (collection.has(rowKey)) {
-            rowsToDelete.push(collection.get(rowKey))
-          }
+        if (shouldWriteMetadata) {
+          setPersistedOwners(rowKey, owners)
         }
       })
 
       if (rowsToDelete.length > 0) {
-        begin()
         rowsToDelete.forEach((row) => {
           write({ type: `delete`, value: row })
         })
+      }
+
+      if (needsTransaction) {
         commit()
       }
 
@@ -1078,6 +1561,39 @@ export function queryCollectionOptions(
         )
       }
 
+      if (persistedGcTime !== undefined) {
+        if (metadata) {
+          begin()
+          metadata.collection.set(
+            `${QUERY_COLLECTION_GC_PREFIX}${hashedQueryKey}`,
+            {
+              queryHash: hashedQueryKey,
+              mode:
+                persistedGcTime === Number.POSITIVE_INFINITY
+                  ? `until-revalidated`
+                  : `ttl`,
+              ...(persistedGcTime === Number.POSITIVE_INFINITY
+                ? {}
+                : { expiresAt: Date.now() + persistedGcTime }),
+            },
+          )
+          commit()
+          if (persistedGcTime !== Number.POSITIVE_INFINITY) {
+            schedulePersistedRetentionExpiry({
+              queryHash: hashedQueryKey,
+              mode: `ttl`,
+              expiresAt: Date.now() + persistedGcTime,
+            })
+          }
+        }
+        unsubscribes.get(hashedQueryKey)?.()
+        unsubscribes.delete(hashedQueryKey)
+        state.observers.delete(hashedQueryKey)
+        hashToQueryKey.delete(hashedQueryKey)
+        queryRefCounts.set(hashedQueryKey, 0)
+        return
+      }
+
       cleanupQueryInternal(hashedQueryKey)
     }
 
@@ -1107,6 +1623,10 @@ export function queryCollectionOptions(
     const cleanup = async () => {
       unsubscribeFromCollectionEvents()
       unsubscribeFromQueries()
+      persistedRetentionTimers.forEach((timer) => {
+        clearTimeout(timer)
+      })
+      persistedRetentionTimers.clear()
 
       const allQueryKeys = [...hashToQueryKey.values()]
       const allHashedKeys = [...state.observers.keys()]

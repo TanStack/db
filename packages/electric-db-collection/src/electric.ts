@@ -47,6 +47,7 @@ import type {
   ControlMessage,
   GetExtensions,
   Message,
+  Offset,
   PostgresSnapshot,
   Row,
   ShapeStreamOptions,
@@ -320,6 +321,46 @@ function parseSnapshotMessage(message: SnapshotEndMessage): PostgresSnapshot {
     xmax: message.headers.xmax,
     xip_list: message.headers.xip_list,
   }
+}
+
+function toStableSerializable(value: unknown): unknown {
+  if (value == null) {
+    return value
+  }
+
+  if (Array.isArray(value)) {
+    return value.map((entry) => toStableSerializable(entry))
+  }
+
+  if (value instanceof Date) {
+    return value.toISOString()
+  }
+
+  if (typeof value === `object`) {
+    const record = value as Record<string, unknown>
+    const stableRecord: Record<string, unknown> = {}
+    const keys = Object.keys(record).sort((left, right) =>
+      left < right ? -1 : left > right ? 1 : 0,
+    )
+    for (const key of keys) {
+      stableRecord[key] = toStableSerializable(record[key])
+    }
+    return stableRecord
+  }
+
+  return value
+}
+
+function getStableShapeIdentity(shapeOptions: {
+  url: string
+  params?: Record<string, unknown>
+}): string {
+  return JSON.stringify(
+    toStableSerializable({
+      url: shapeOptions.url,
+      params: shapeOptions.params ?? null,
+    }),
+  )
 }
 
 // Check if a message contains txids in its headers
@@ -1182,7 +1223,61 @@ function createElectricSync<T extends Row<unknown>>(
 
   return {
     sync: (params: Parameters<SyncConfig<T>[`sync`]>[0]) => {
-      const { begin, write, commit, markReady, truncate, collection } = params
+      const {
+        begin,
+        write,
+        commit,
+        markReady,
+        truncate,
+        collection,
+        metadata,
+      } = params
+      const readPersistedResumeState = () => {
+        const persistedResumeState = metadata?.collection.get(`electric:resume`)
+        if (!persistedResumeState || typeof persistedResumeState !== `object`) {
+          return undefined
+        }
+
+        const record = persistedResumeState as Record<string, unknown>
+        if (
+          record.kind === `resume` &&
+          typeof record.offset === `string` &&
+          typeof record.handle === `string` &&
+          typeof record.shapeId === `string` &&
+          typeof record.updatedAt === `number`
+        ) {
+          return {
+            kind: `resume` as const,
+            offset: record.offset,
+            handle: record.handle,
+            shapeId: record.shapeId,
+            updatedAt: record.updatedAt,
+          }
+        }
+
+        if (record.kind === `reset` && typeof record.updatedAt === `number`) {
+          return {
+            kind: `reset` as const,
+            updatedAt: record.updatedAt,
+          }
+        }
+
+        return undefined
+      }
+
+      const persistedResumeState = readPersistedResumeState()
+      const shapeIdentity = getStableShapeIdentity({
+        url: shapeOptions.url,
+        params: shapeOptions.params as Record<string, unknown> | undefined,
+      })
+      const hasIncompatiblePersistedResume =
+        persistedResumeState?.kind === `resume` &&
+        persistedResumeState.shapeId !== shapeIdentity
+      const canUsePersistedResume =
+        shapeOptions.offset === undefined &&
+        shapeOptions.handle === undefined &&
+        persistedResumeState?.kind === `resume` &&
+        !hasIncompatiblePersistedResume
 
       // Wrap markReady to wait for test hook in progressive mode
       let progressiveReadyGate: Promise<void> | null = null
@@ -1240,7 +1335,15 @@ function createElectricSync<T extends Row<unknown>>(
         // In on-demand mode, we only need the changes from the point of time the collection was created
         // so we default to `now` when there is no saved offset.
         offset:
-          shapeOptions.offset ?? (syncMode === `on-demand` ? `now` : undefined),
+          shapeOptions.offset ??
+          (canUsePersistedResume
+            ? (persistedResumeState.offset as Offset)
+            : syncMode === `on-demand`
+              ? `now`
+              : undefined),
+        handle:
+          shapeOptions.handle ??
+          (canUsePersistedResume ? persistedResumeState.handle : undefined),
         signal: abortController.signal,
         onError: (errorParams) => {
           // Just immediately mark ready if there's an error to avoid blocking
@@ -1280,6 +1383,42 @@ function createElectricSync<T extends Row<unknown>>(
       // for each response. We convert subsequent inserts to updates to avoid
       // duplicate key errors when the row's data has changed between requests.
       const syncedKeys = new Set<string | number>()
+
+      const stageResumeMetadata = () => {
+        if (!metadata) {
+          return
+        }
+        const shapeHandle = stream.shapeHandle
+        const lastOffset = stream.lastOffset
+        if (!shapeHandle || lastOffset === `-1`) {
+          return
+        }
+
+        metadata.collection.set(`electric:resume`, {
+          kind: `resume`,
+          offset: lastOffset,
+          handle: shapeHandle,
+          shapeId: shapeIdentity,
+          updatedAt: Date.now(),
+        })
+      }
+
+      const commitResetResumeMetadataImmediately = () => {
+        if (!metadata) {
+          return
+        }
+
+        begin({ immediate: true })
+        metadata.collection.set(`electric:resume`, {
+          kind: `reset`,
+          updatedAt: Date.now(),
+        })
+        commit()
+      }
+
+      if (hasIncompatiblePersistedResume) {
+        commitResetResumeMetadataImmediately()
+      }
 
       /**
        * Process a change message: handle tags and write the mutation
@@ -1459,6 +1598,8 @@ function createElectricSync<T extends Row<unknown>>(
               `${collectionId ? `[${collectionId}] ` : ``}Received must-refetch message, starting transaction with truncate`,
             )
 
+            commitResetResumeMetadataImmediately()
+
             // Start a transaction and truncate the collection
             if (!transactionStarted) {
               begin()
@@ -1535,6 +1676,7 @@ function createElectricSync<T extends Row<unknown>>(
             }
 
             // Commit the atomic swap
+            stageResumeMetadata()
             commit()
 
             // Exit buffering phase by marking that we've received up-to-date
@@ -1548,8 +1690,13 @@ function createElectricSync<T extends Row<unknown>>(
             // Normal mode or on-demand: commit transaction if one was started
             // Both up-to-date and subset-end trigger a commit
             if (transactionStarted) {
+              stageResumeMetadata()
               commit()
               transactionStarted = false
+            } else if (commitPoint === `up-to-date` && metadata) {
+              begin()
+              stageResumeMetadata()
+              commit()
             }
           }
           wrappedMarkReady(isBufferingInitialSync())
