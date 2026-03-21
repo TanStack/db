@@ -1332,9 +1332,25 @@ export function queryCollectionOptions(
 
     // eslint-disable-next-line no-shadow
     const makeQueryResultHandler = (queryKey: QueryKey) => {
+      const hashedQueryKey = hashKey(queryKey)
       const handleQueryResult: UpdateHandler = (result) => {
         if (result.isSuccess) {
-          if (retainedQueriesPendingRevalidation.has(hashKey(queryKey))) {
+          // Skip processing this result while data refreshes are deferred.
+          // Optimistic state covers the gap. Once the barrier resolves,
+          // trigger a fresh refetch to get authoritative data.
+          if (collection.deferDataRefresh) {
+            collection.deferDataRefresh.then(() => {
+              const observer = state.observers.get(hashedQueryKey)
+              if (observer) {
+                observer.refetch().catch(() => {
+                  // Errors handled by the next handleQueryResult invocation
+                })
+              }
+            })
+            return
+          }
+
+          if (retainedQueriesPendingRevalidation.has(hashedQueryKey)) {
             void reconcileSuccessfulResult(queryKey, result).catch((error) => {
               console.error(
                 `[QueryCollection] Error reconciling query ${String(queryKey)}:`,

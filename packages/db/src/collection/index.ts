@@ -301,6 +301,13 @@ export class CollectionImpl<
   // and for debugging
   public _state: CollectionStateManager<TOutput, TKey, TSchema, TInput>
 
+  /**
+   * When set, collection consumers should defer processing incoming data
+   * refreshes until this promise resolves. This prevents stale data from
+   * overwriting optimistic state while pending writes are being applied.
+   */
+  public deferDataRefresh: Promise<void> | null = null
+
   private comparisonOpts: StringCollationConfig
 
   /**
