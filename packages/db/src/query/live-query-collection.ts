@@ -6,7 +6,11 @@ import {
 } from './live/collection-registry.js'
 import type { LiveQueryCollectionUtils } from './live/collection-config-builder.js'
 import type { LiveQueryCollectionConfig } from './live/types.js'
-import type { InitialQueryBuilder, QueryBuilder } from './builder/index.js'
+import type {
+  ExtractContext,
+  InitialQueryBuilder,
+  QueryBuilder,
+} from './builder/index.js'
 import type { Collection } from '../collection/index.js'
 import type {
   CollectionConfig,
@@ -15,20 +19,13 @@ import type {
   SingleResult,
   UtilsRecord,
 } from '../types.js'
-import type { Context, GetResult } from './builder/types.js'
-
-type IsExactlyContext<TContext extends Context> = [Context] extends [TContext]
-  ? [TContext] extends [Context]
-    ? true
-    : false
-  : false
-
-type QueryResultObject<TContext extends Context> =
-  IsExactlyContext<TContext> extends true
-    ? any
-    : GetResult<TContext> extends object
-      ? GetResult<TContext>
-      : any
+import type {
+  Context,
+  RootObjectResultConstraint,
+  RootQueryBuilder,
+  RootQueryFn,
+  RootQueryResult,
+} from './builder/types.js'
 
 type CollectionConfigForContext<
   TContext extends Context,
@@ -73,10 +70,13 @@ type CollectionForContext<
  * @returns Collection options that can be passed to createCollection
  */
 export function liveQueryCollectionOptions<
-  TContext extends Context,
-  TResult extends object = QueryResultObject<TContext>,
+  TQuery extends QueryBuilder<any>,
+  TContext extends Context = ExtractContext<TQuery>,
+  TResult extends object = RootQueryResult<TContext>,
 >(
-  config: LiveQueryCollectionConfig<TContext, TResult>,
+  config: LiveQueryCollectionConfig<TContext, TResult> & {
+    query: RootQueryFn<TQuery> | RootQueryBuilder<TQuery>
+  },
 ): CollectionConfigForContext<TContext, TResult> & {
   utils: LiveQueryCollectionUtils
 } {
@@ -125,33 +125,43 @@ export function liveQueryCollectionOptions<
  */
 
 // Overload 1: Accept just the query function
-export function createLiveQueryCollection<TContext extends Context>(
-  query: (q: InitialQueryBuilder) => QueryBuilder<TContext>,
-): CollectionForContext<TContext, QueryResultObject<TContext>> & {
+export function createLiveQueryCollection<
+  TQueryFn extends (q: InitialQueryBuilder) => QueryBuilder<any>,
+  TQuery extends QueryBuilder<any> = ReturnType<TQueryFn>,
+>(
+  query: TQueryFn & RootQueryFn<TQuery>,
+): CollectionForContext<
+  ExtractContext<TQuery>,
+  RootQueryResult<ExtractContext<TQuery>>
+> & {
   utils: LiveQueryCollectionUtils
 }
 
 // Overload 2: Accept full config object with optional utilities
 export function createLiveQueryCollection<
-  TContext extends Context,
+  TQuery extends QueryBuilder<any>,
+  TContext extends Context = ExtractContext<TQuery>,
   TUtils extends UtilsRecord = {},
 >(
-  config: LiveQueryCollectionConfig<TContext, QueryResultObject<TContext>> & {
+  config: LiveQueryCollectionConfig<TContext, RootQueryResult<TContext>> & {
+    query: RootQueryFn<TQuery> | RootQueryBuilder<TQuery>
     utils?: TUtils
   },
-): CollectionForContext<TContext, QueryResultObject<TContext>> & {
+): CollectionForContext<TContext, RootQueryResult<TContext>> & {
   utils: LiveQueryCollectionUtils & TUtils
 }
 
 // Implementation
 export function createLiveQueryCollection<
   TContext extends Context,
-  TResult extends object = QueryResultObject<TContext>,
+  TResult extends object = RootQueryResult<TContext>,
   TUtils extends UtilsRecord = {},
 >(
   configOrQuery:
     | (LiveQueryCollectionConfig<TContext, TResult> & { utils?: TUtils })
-    | ((q: InitialQueryBuilder) => QueryBuilder<TContext>),
+    | ((
+        q: InitialQueryBuilder,
+      ) => QueryBuilder<TContext> & RootObjectResultConstraint<TContext>),
 ): CollectionForContext<TContext, TResult> & {
   utils: LiveQueryCollectionUtils & TUtils
 } {
@@ -161,9 +171,11 @@ export function createLiveQueryCollection<
     const config: LiveQueryCollectionConfig<TContext, TResult> = {
       query: configOrQuery as (
         q: InitialQueryBuilder,
-      ) => QueryBuilder<TContext>,
+      ) => QueryBuilder<TContext> & RootObjectResultConstraint<TContext>,
     }
-    const options = liveQueryCollectionOptions<TContext, TResult>(config)
+    // The implementation accepts both overload shapes, but TypeScript cannot
+    // preserve the overload-specific query-builder inference through this branch.
+    const options = liveQueryCollectionOptions(config as any)
     return bridgeToCreateCollection(options) as CollectionForContext<
       TContext,
       TResult
@@ -174,7 +186,9 @@ export function createLiveQueryCollection<
       TContext,
       TResult
     > & { utils?: TUtils }
-    const options = liveQueryCollectionOptions<TContext, TResult>(config)
+    // Same overload implementation limitation as above: the config has already
+    // been validated by the public signatures, but the branch loses that precision.
+    const options = liveQueryCollectionOptions(config as any)
 
     // Merge custom utils if provided, preserving the getBuilder() method for dependency tracking
     if (config.utils) {

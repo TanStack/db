@@ -108,6 +108,20 @@ describe(`select spreads (runtime)`, () => {
     expect(stripVirtualProps(collection.get(1))).toEqual(initialMessages[0])
   })
 
+  it(`returning the source alias directly projects the full row`, async () => {
+    const collection = createLiveQueryCollection((q) =>
+      q.from({ message: messagesCollection }).select(({ message }) => message),
+    )
+    await collection.preload()
+
+    const results = Array.from(collection.values())
+    expect(results).toHaveLength(2)
+    expect(results.map((row) => stripVirtualProps(row))).toEqual(
+      initialMessages,
+    )
+    expect(stripVirtualProps(collection.get(1))).toEqual(initialMessages[0])
+  })
+
   it(`spread + computed fields merges fields with correct values`, async () => {
     const collection = createLiveQueryCollection((q) =>
       q.from({ message: messagesCollection }).select(({ message }) => ({
@@ -203,6 +217,21 @@ describe(`select spreads (runtime)`, () => {
     expect(r1.meta.tags).toEqual([`a`, `b`])
   })
 
+  it(`returning an alias directly preserves nested object fields intact`, async () => {
+    const messagesNested = createMessagesWithMetaCollection()
+    const collection = createLiveQueryCollection((q) =>
+      q.from({ m: messagesNested }).select(({ m }) => m),
+    )
+    await collection.preload()
+
+    const results = Array.from(collection.values())
+    expect(results.map((row) => stripVirtualProps(row))).toEqual(nestedMessages)
+
+    const r1 = results.find((r) => r.id === 1) as MessageWithMeta
+    expect(r1.meta.author.name).toBe(`sam`)
+    expect(r1.meta.tags).toEqual([`a`, `b`])
+  })
+
   it(`repeating the same alias spread multiple times uses last-wins for all fields`, async () => {
     const collection = createLiveQueryCollection((q) =>
       q.from({ message: messagesCollection }).select(({ message }) => ({
@@ -282,5 +311,27 @@ describe(`select spreads (runtime)`, () => {
 
     const r1 = Array.from(collection.values()).find((r) => r.id === 1) as any
     expect(r1.meta.author).toEqual({ name: `sam`, rating: 5 })
+  })
+
+  it(`returning an alias directly keeps live updates working`, async () => {
+    const collection = createLiveQueryCollection((q) =>
+      q.from({ message: messagesCollection }).select(({ message }) => message),
+    )
+    await collection.preload()
+
+    messagesCollection.utils.begin()
+    messagesCollection.utils.write({
+      type: `insert`,
+      value: { id: 3, text: `test`, user: `alex` },
+    })
+    messagesCollection.utils.commit()
+
+    const results = Array.from(collection.values())
+    expect(results).toHaveLength(3)
+    expect(stripVirtualProps(collection.get(3))).toEqual({
+      id: 3,
+      text: `test`,
+      user: `alex`,
+    })
   })
 })

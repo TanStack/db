@@ -1,8 +1,10 @@
 import { describe, expectTypeOf, test } from 'vitest'
 import {
+  Query,
   concat,
   createLiveQueryCollection,
   eq,
+  queryOnce,
   toArray,
 } from '../../src/query/index.js'
 import { createCollection } from '../../src/collection/index.js'
@@ -344,6 +346,79 @@ describe(`includes subquery types`, () => {
       const content: string = result.content
       expectTypeOf(result.id).toEqualTypeOf<number>()
       expectTypeOf(content).toEqualTypeOf<string>()
+    })
+
+    test(`scalar-selecting builders remain composable for toArray`, () => {
+      const collection = createLiveQueryCollection((q) =>
+        q.from({ m: messages }).select(({ m }) => {
+          const contentPartsQuery = q
+            .from({ c: chunks })
+            .where(({ c }) => eq(c.messageId, m.id))
+            .orderBy(({ c }) => c.timestamp)
+            .select(({ c }) => c.text)
+
+          return {
+            id: m.id,
+            contentParts: toArray(contentPartsQuery),
+          }
+        }),
+      )
+
+      const result = collection.toArray[0]!
+      expectTypeOf(result.contentParts[0]!).toEqualTypeOf<string>()
+    })
+
+    test(`returning an alias directly infers the full row shape`, () => {
+      const collection = createLiveQueryCollection((q) =>
+        q.from({ m: messages }).select(({ m }) => m),
+      )
+
+      const result = collection.toArray[0]!
+      expectTypeOf(result).toMatchTypeOf<WithVirtualProps<Message>>()
+      expectTypeOf(result.role).toEqualTypeOf<string>()
+    })
+
+    test(`concat(toArray(...)) rejects non-scalar child queries`, () => {
+      createLiveQueryCollection((q) =>
+        q.from({ m: messages }).select(({ m }) => ({
+          id: m.id,
+          content: concat(
+            // @ts-expect-error - concat(toArray(...)) requires a scalar child select
+            toArray(
+              q
+                .from({ c: chunks })
+                .where(({ c }) => eq(c.messageId, m.id))
+                .select(({ c }) => ({
+                  text: c.text,
+                })),
+            ),
+          ),
+        })),
+      )
+
+      createLiveQueryCollection((q) =>
+        q.from({ m: messages }).select(({ m }) => ({
+          id: m.id,
+          content: concat(
+            // @ts-expect-error - concat(toArray(...)) requires the child query result to be scalar
+            toArray(
+              q.from({ c: chunks }).where(({ c }) => eq(c.messageId, m.id)),
+            ),
+          ),
+        })),
+      )
+    })
+
+    test(`root consumers reject top-level scalar select builders`, () => {
+      const scalarRootQuery = new Query()
+        .from({ m: messages })
+        .select(({ m }) => m.role)
+
+      // @ts-expect-error - top-level scalar select is not supported for live query collections
+      createLiveQueryCollection({ query: scalarRootQuery })
+
+      // @ts-expect-error - top-level scalar select is not supported for queryOnce
+      queryOnce({ query: scalarRootQuery })
     })
   })
 })

@@ -167,7 +167,10 @@ export class CollectionConfigBuilder<
     // Generate a unique ID if not provided
     this.id = config.id || `live-query-${++liveQueryCollectionCounter}`
 
-    this.query = buildQueryFromConfig(config)
+    this.query = buildQueryFromConfig({
+      query: config.query,
+      requireObjectResult: true,
+    })
     this.collections = extractCollectionsFromQuery(this.query)
     const collectionAliasesById = extractCollectionAliases(this.query)
 

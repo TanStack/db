@@ -277,6 +277,18 @@ describe(`includes subqueries`, () => {
 
       subscription.unsubscribe()
     })
+
+    it(`top-level scalar select throws at root consumers`, () => {
+      const messages = createMessagesCollection()
+
+      expect(() =>
+        (createLiveQueryCollection as any)((q: any) =>
+          q.from({ m: messages }).select(({ m }: any) => m.role),
+        ),
+      ).toThrow(
+        `Top-level scalar select() is not supported by createLiveQueryCollection() or queryOnce().`,
+      )
+    })
   })
 
   describe(`basic includes`, () => {

@@ -8,7 +8,7 @@ import type {
   PropRef,
   Value,
 } from '../ir.js'
-import type { QueryBuilder } from './index.js'
+import type { InitialQueryBuilder, QueryBuilder } from './index.js'
 import type { VirtualRowProps, WithVirtualProps } from '../../virtual-props.js'
 import type { ConcatToArrayWrapper, ToArrayWrapper } from './functions.js'
 
@@ -196,6 +196,7 @@ export type ScalarSelectValue =
   | boolean
   | null
   | undefined
+export type StringifiableScalar = string | number | boolean | null | undefined
 
 /**
  * SelectObject - Wrapper type for select clause objects
@@ -205,7 +206,6 @@ export type ScalarSelectValue =
  * messages when invalid selections are attempted.
  */
 export type SelectObject<T extends SelectShape = SelectShape> = T
-export type SelectCallbackResult = SelectObject | ScalarSelectValue
 type RefBrandKeys = typeof RefBrand | typeof NullableBrand
 type HasNamedSelectKeys<T> =
   Exclude<keyof T, RefBrandKeys> extends never ? false : true
@@ -848,6 +848,40 @@ export type GetRawResult<TContext extends Context> = ResultValue<TContext>
 export type GetResult<TContext extends Context> = Prettify<
   ResultValue<TContext>
 >
+
+type IsExactlyContext<TContext extends Context> = [Context] extends [TContext]
+  ? [TContext] extends [Context]
+    ? true
+    : false
+  : false
+
+type RootScalarResultError = {
+  readonly __tanstackDbRootQueryError__: `Top-level scalar results are not supported by createLiveQueryCollection() or queryOnce(). Return an object, or use the scalar query inside toArray(...) or concat(toArray(...)).`
+}
+
+export type RootObjectResultConstraint<TContext extends Context> =
+  IsExactlyContext<TContext> extends true
+    ? unknown
+    : GetResult<TContext> extends object
+      ? unknown
+      : RootScalarResultError
+
+type ContextFromQueryBuilder<TQuery extends QueryBuilder<any>> =
+  TQuery extends QueryBuilder<infer TContext> ? TContext : never
+
+export type RootQueryBuilder<TQuery extends QueryBuilder<any>> = TQuery &
+  RootObjectResultConstraint<ContextFromQueryBuilder<TQuery>>
+
+export type RootQueryFn<TQuery extends QueryBuilder<any>> = (
+  q: InitialQueryBuilder,
+) => RootQueryBuilder<TQuery>
+
+export type RootQueryResult<TContext extends Context> =
+  IsExactlyContext<TContext> extends true
+    ? any
+    : GetResult<TContext> extends object
+      ? GetResult<TContext>
+      : never
 
 /**
  * ApplyJoinOptionalityToSchema - Legacy helper for complex join scenarios

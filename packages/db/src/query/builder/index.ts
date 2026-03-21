@@ -54,7 +54,6 @@ import type {
   ResultTypeFromSelectValue,
   ScalarSelectValue,
   SchemaFromSource,
-  SelectCallbackResult,
   SelectObject,
   Source,
   WhereCallback,
@@ -503,11 +502,21 @@ export class BaseQueryBuilder<TContext extends Context = Context> {
     callback: (refs: RefsForContext<TContext>) => TSelectValue,
   ): QueryBuilder<WithResult<TContext, ResultTypeFromSelectValue<TSelectValue>>>
   select(
-    callback: (refs: RefsForContext<TContext>) => SelectCallbackResult,
-  ): QueryBuilder<WithResult<TContext, any>> {
+    callback: (
+      refs: RefsForContext<TContext>,
+    ) => SelectObject | ScalarSelectValue,
+  ) {
     const aliases = this._getCurrentAliases()
     const refProxy = createRefProxy(aliases) as RefsForContext<TContext>
-    const selectObject = callback(refProxy)
+    let selectObject = callback(refProxy)
+
+    // Returning a top-level alias directly is equivalent to spreading it.
+    // Leaf refs like `row.name` must remain scalar selections.
+    if (isRefProxy(selectObject) && selectObject.__path.length === 1) {
+      const sentinelKey = `__SPREAD_SENTINEL__${selectObject.__path[0]}__0`
+      selectObject = { [sentinelKey]: true }
+    }
+
     const select = buildNestedSelect(selectObject, aliases)
 
     return new BaseQueryBuilder({
@@ -693,7 +702,7 @@ export class BaseQueryBuilder<TContext extends Context = Context> {
    * // Get countries our users are from
    * query
    *   .from({ users: usersCollection })
-   *   .select(({users}) => users.country)
+   *   .select(({users}) => ({ country: users.country }))
    *   .distinct()
    * ```
    */
