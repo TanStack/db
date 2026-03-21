@@ -137,6 +137,8 @@ interface TestItem {
   value: string
 }
 
+type OfflineMutationParams = Parameters<OfflineConfig[`mutationFns`][string]>[0]
+
 // --- Tests ---
 
 describe(`offline transactions + query collection refresh`, () => {
@@ -199,7 +201,7 @@ describe(`offline transactions + query collection refresh`, () => {
     const offlineConfig: OfflineConfig = {
       collections: { [`offline-refresh-test`]: collection as any },
       mutationFns: {
-        [mutationFnName]: async (params) => {
+        [mutationFnName]: async (params: OfflineMutationParams) => {
           // Block until the test explicitly resolves (simulating slow API POST)
           await new Promise<void>((resolve) => {
             resolveMutation = resolve
