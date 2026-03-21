@@ -1,5 +1,80 @@
 # @tanstack/db
 
+## 0.5.34
+
+### Patch Changes
+
+- fix(db): preserve null in coalesce() return type when no guaranteed non-null arg is present ([#1342](https://github.com/TanStack/db/pull/1342))
+
+  `coalesce()` was typed as returning `BasicExpression<any>`, losing all type information. The signature now infers types from all arguments via tuple generics, returns the union of non-null arg types, and only removes nullability when at least one argument is statically guaranteed non-null.
+
+- Fix Temporal objects breaking live query updates when used with joins. Temporal objects (e.g. `Temporal.PlainDate`) have no enumerable properties, so the structural hash function produced identical hashes for all Temporal values, causing join index updates to be silently swallowed. Also add Temporal support to value normalization for join key matching and to the comparator for correct sort ordering. ([#1370](https://github.com/TanStack/db/pull/1370))
+
+- Fix `loadSubset` dedupe follow-up edge cases and add regression coverage. ([#1352](https://github.com/TanStack/db/pull/1352))
+
+- fix: Optimized unmount performance by batching cleanup tasks in a central queue. ([#1326](https://github.com/TanStack/db/pull/1326))
+
+- fix: support aggregates (e.g. count) in child/includes subqueries with per-parent scoping ([#1294](https://github.com/TanStack/db/pull/1294))
+
+- feat: support parent-referencing WHERE filters in includes child queries ([#1294](https://github.com/TanStack/db/pull/1294))
+
+- feat: support for subqueries for including hierarchical data in live queries ([#1294](https://github.com/TanStack/db/pull/1294))
+
+- feat: add `toArray()` wrapper for includes subqueries to materialize child results as plain arrays instead of live Collections ([#1294](https://github.com/TanStack/db/pull/1294))
+
+- fix: prevent stale query refreshes from overwriting optimistic offline changes on reconnect ([#1390](https://github.com/TanStack/db/pull/1390))
+
+  When reconnecting with pending offline transactions, query-backed collections now defer processing query refreshes until queued writes finish replaying, avoiding temporary reverts to stale server data.
+
+- fix(persistence): harden persisted startup, truncate metadata semantics, and resume identity matching ([#1380](https://github.com/TanStack/db/pull/1380))
+  - Restore persisted wrapper `markReady` fallback behavior so startup failures do not leave collections stuck in loading state
+  - Replace load cancellation reference identity tracking with deterministic load keys for `loadSubset` / `unloadSubset`
+  - Document intentional truncate behavior where collection-scoped metadata writes are preserved across truncate transactions
+  - Tighten SQLite `applied_tx` migration handling to only ignore duplicate-column add errors
+  - Stabilize Electric shape identity serialization so persisted resume compatibility does not depend on object key insertion order
+
+- Implement virtual properties end-to-end, including live query behavior and ([#1213](https://github.com/TanStack/db/pull/1213))
+  typing support for virtual metadata on rows.
+
+- feat(persistence): add SQLite-based offline persistence for collections ([#1358](https://github.com/TanStack/db/pull/1358))
+
+  Adds a new persistence layer that durably stores collection data in SQLite, enabling applications to survive page reloads and app restarts across browser, Node, mobile, desktop, and edge runtimes.
+
+  **Core persistence (`@tanstack/db-sqlite-persisted-collection-core`)**
+  - New package providing the shared SQLite persistence runtime: hydration, streaming, transaction tracking, and applied-tx pruning
+  - SQLite core adapter with full query compilation, index management, and schema migration support
+  - Portable conformance test contracts for runtime-specific adapters
+
+  **Browser (`@tanstack/db-browser-wa-sqlite-persisted-collection`)**
+  - New package for browser persistence via wa-sqlite backed by OPFS
+  - Single-tab persistence with OPFS-based SQLite storage
+  - `BrowserCollectionCoordinator` for multi-tab leader-election and cross-tab sync
+
+  **Cloudflare Durable Objects (`@tanstack/db-cloudflare-do-sqlite-persisted-collection`)**
+  - New package for SQLite persistence in Cloudflare Durable Objects runtimes
+
+  **Node (`@tanstack/db-node-sqlite-persisted-collection`)**
+  - New package for Node persistence via SQLite
+
+  **Electron (`@tanstack/db-electron-sqlite-persisted-collection`)**
+  - New package providing Electron main and renderer persistence bridge helpers
+
+  **Expo (`@tanstack/db-expo-sqlite-persisted-collection`)**
+  - New package for Expo persistence via `expo-sqlite`
+
+  **React Native (`@tanstack/db-react-native-sqlite-persisted-collection`)**
+  - New package for React Native persistence via op-sqlite
+  - Adapter with transaction deadlock prevention and runtime parity coverage
+
+  **Capacitor (`@tanstack/db-capacitor-sqlite-persisted-collection`)**
+  - New package for Capacitor persistence via `@capacitor-community/sqlite`
+
+  **Tauri (`@tanstack/db-tauri-sqlite-persisted-collection`)**
+  - New package for Tauri persistence via `@tauri-apps/plugin-sql`
+
+- Updated dependencies [[`bb09eb1`](https://github.com/TanStack/db/commit/bb09eb1eecbf680bb95a0bb08639f337e9982043)]:
+  - @tanstack/db-ivm@0.1.18
+
 ## 0.5.33
 
 ### Patch Changes

@@ -1,6 +1,6 @@
 {
   "name": "offline-first-electron",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "private": true,
   "type": "module",
   "main": "electron/main.ts",
@@ -13,11 +13,11 @@
     "postinstall": "prebuild-install --runtime electron --target 40.2.1 --arch arm64 || echo 'prebuild-install failed, try: npx @electron/rebuild'"
   },
   "dependencies": {
-    "@tanstack/db-electron-sqlite-persisted-collection": "workspace:*",
-    "@tanstack/db-node-sqlite-persisted-collection": "workspace:*",
-    "@tanstack/offline-transactions": "workspace:*",
-    "@tanstack/query-db-collection": "workspace:*",
-    "@tanstack/react-db": "workspace:*",
+    "@tanstack/db-electron-sqlite-persisted-collection": "^0.1.1",
+    "@tanstack/db-node-sqlite-persisted-collection": "^0.1.1",
+    "@tanstack/offline-transactions": "^1.0.25",
+    "@tanstack/query-db-collection": "^1.0.31",
+    "@tanstack/react-db": "^0.1.78",
     "@tanstack/react-query": "^5.90.20",
     "better-sqlite3": "^12.6.2",
     "react": "^19.2.4",
