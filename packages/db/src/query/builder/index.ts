@@ -3,6 +3,7 @@ import {
   Aggregate as AggregateExpr,
   CollectionRef,
   Func as FuncExpr,
+  INCLUDES_SCALAR_FIELD,
   IncludesSubquery,
   PropRef,
   QueryRef,
@@ -24,11 +25,12 @@ import {
   isRefProxy,
   toExpression,
 } from './ref-proxy.js'
-import { ToArrayWrapper } from './functions.js'
+import { ConcatToArrayWrapper, ToArrayWrapper } from './functions.js'
 import type { NamespacedRow, SingleResult } from '../../types.js'
 import type {
   Aggregate,
   BasicExpression,
+  IncludesMaterialization,
   JoinClause,
   OrderBy,
   OrderByDirection,
@@ -44,11 +46,15 @@ import type {
   JoinOnCallback,
   MergeContextForJoinCallback,
   MergeContextWithJoinType,
+  NonScalarSelectObject,
   OrderByCallback,
   OrderByOptions,
   RefsForContext,
   ResultTypeFromSelect,
+  ResultTypeFromSelectValue,
+  ScalarSelectValue,
   SchemaFromSource,
+  SelectCallbackResult,
   SelectObject,
   Source,
   WhereCallback,
@@ -489,8 +495,16 @@ export class BaseQueryBuilder<TContext extends Context = Context> {
    * ```
    */
   select<TSelectObject extends SelectObject>(
-    callback: (refs: RefsForContext<TContext>) => TSelectObject,
-  ): QueryBuilder<WithResult<TContext, ResultTypeFromSelect<TSelectObject>>> {
+    callback: (
+      refs: RefsForContext<TContext>,
+    ) => NonScalarSelectObject<TSelectObject>,
+  ): QueryBuilder<WithResult<TContext, ResultTypeFromSelect<TSelectObject>>>
+  select<TSelectValue extends ScalarSelectValue>(
+    callback: (refs: RefsForContext<TContext>) => TSelectValue,
+  ): QueryBuilder<WithResult<TContext, ResultTypeFromSelectValue<TSelectValue>>>
+  select(
+    callback: (refs: RefsForContext<TContext>) => SelectCallbackResult,
+  ): QueryBuilder<WithResult<TContext, any>> {
     const aliases = this._getCurrentAliases()
     const refProxy = createRefProxy(aliases) as RefsForContext<TContext>
     const selectObject = callback(refProxy)
@@ -709,7 +723,7 @@ export class BaseQueryBuilder<TContext extends Context = Context> {
       // TODO: enforcing return only one result with also a default orderBy if none is specified
       // limit: 1,
       singleResult: true,
-    })
+    }) as any
   }
 
   // Helper methods
@@ -772,7 +786,7 @@ export class BaseQueryBuilder<TContext extends Context = Context> {
           ...builder.query,
           select: undefined, // remove the select clause if it exists
           fnSelect: callback,
-        })
+        }) as any
       },
       /**
        * Filter rows using a function that operates on each row
@@ -880,14 +894,21 @@ function buildNestedSelect(obj: any, parentAliases: Array<string> = []): any {
       continue
     }
     if (v instanceof BaseQueryBuilder) {
-      out[k] = buildIncludesSubquery(v, k, parentAliases, false)
+      out[k] = buildIncludesSubquery(v, k, parentAliases, `collection`)
       continue
     }
     if (v instanceof ToArrayWrapper) {
       if (!(v.query instanceof BaseQueryBuilder)) {
         throw new Error(`toArray() must wrap a subquery builder`)
       }
-      out[k] = buildIncludesSubquery(v.query, k, parentAliases, true)
+      out[k] = buildIncludesSubquery(v.query, k, parentAliases, `array`)
+      continue
+    }
+    if (v instanceof ConcatToArrayWrapper) {
+      if (!(v.query instanceof BaseQueryBuilder)) {
+        throw new Error(`concat(toArray(...)) must wrap a subquery builder`)
+      }
+      out[k] = buildIncludesSubquery(v.query, k, parentAliases, `concat`)
       continue
     }
     out[k] = buildNestedSelect(v, parentAliases)
@@ -937,7 +958,7 @@ function buildIncludesSubquery(
   childBuilder: BaseQueryBuilder,
   fieldName: string,
   parentAliases: Array<string>,
-  materializeAsArray: boolean,
+  materialization: IncludesMaterialization,
 ): IncludesSubquery {
   const childQuery = childBuilder._getQuery()
 
@@ -1093,14 +1114,45 @@ function buildIncludesSubquery(
     where: pureChildWhere.length > 0 ? pureChildWhere : undefined,
   }
 
+  const rawChildSelect = modifiedQuery.select as any
+  const hasObjectSelect =
+    rawChildSelect === undefined || isPlainObject(rawChildSelect)
+  let includesQuery = modifiedQuery
+  let scalarField: string | undefined
+
+  if (materialization === `concat`) {
+    if (rawChildSelect === undefined || hasObjectSelect) {
+      throw new Error(
+        `concat(toArray(...)) for "${fieldName}" requires the subquery to select a scalar value`,
+      )
+    }
+  }
+
+  if (!hasObjectSelect) {
+    if (materialization === `collection`) {
+      throw new Error(
+        `Includes subquery for "${fieldName}" must select an object when materializing as a Collection`,
+      )
+    }
+
+    scalarField = INCLUDES_SCALAR_FIELD
+    includesQuery = {
+      ...modifiedQuery,
+      select: {
+        [scalarField]: rawChildSelect,
+      },
+    }
+  }
+
   return new IncludesSubquery(
-    modifiedQuery,
+    includesQuery,
     parentRef,
     childRef,
     fieldName,
     parentFilters.length > 0 ? parentFilters : undefined,
     parentProjection,
-    materializeAsArray,
+    materialization,
+    scalarField,
   )
 }
 

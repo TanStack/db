@@ -2,7 +2,7 @@ import { Aggregate, Func } from '../ir'
 import { toExpression } from './ref-proxy.js'
 import type { BasicExpression } from '../ir'
 import type { RefProxy } from './ref-proxy.js'
-import type { Context, GetResult, RefLeaf } from './types.js'
+import type { Context, GetRawResult, RefLeaf } from './types.js'
 import type { QueryBuilder } from './index.js'
 
 type StringRef =
@@ -277,9 +277,24 @@ export function length<T extends ExpressionLike>(
   return new Func(`length`, [toExpression(arg)]) as NumericFunctionReturnType<T>
 }
 
+export function concat<T>(arg: ToArrayWrapper<T>): ConcatToArrayWrapper<T>
+export function concat(...args: Array<ExpressionLike>): BasicExpression<string>
 export function concat(
   ...args: Array<ExpressionLike>
-): BasicExpression<string> {
+): BasicExpression<string> | ConcatToArrayWrapper<any> {
+  const toArrayArg = args.find(
+    (arg): arg is ToArrayWrapper<any> => arg instanceof ToArrayWrapper,
+  )
+
+  if (toArrayArg) {
+    if (args.length !== 1) {
+      throw new Error(
+        `concat(toArray(...)) currently supports only a single toArray(...) argument`,
+      )
+    }
+    return new ConcatToArrayWrapper(toArrayArg.query)
+  }
+
   return new Func(
     `concat`,
     args.map((arg) => toExpression(arg)),
@@ -402,13 +417,18 @@ export const operators = [
 
 export type OperatorName = (typeof operators)[number]
 
-export class ToArrayWrapper<T = any> {
-  declare readonly _type: T
+export class ToArrayWrapper<_T = any> {
+  declare readonly _type: `toArray`
+  constructor(public readonly query: QueryBuilder<any>) {}
+}
+
+export class ConcatToArrayWrapper<_T = any> {
+  declare readonly _type: `concatToArray`
   constructor(public readonly query: QueryBuilder<any>) {}
 }
 
 export function toArray<TContext extends Context>(
   query: QueryBuilder<TContext>,
-): ToArrayWrapper<GetResult<TContext>> {
+): ToArrayWrapper<GetRawResult<TContext>> {
   return new ToArrayWrapper(query)
 }

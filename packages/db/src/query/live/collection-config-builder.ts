@@ -36,7 +36,12 @@ import type {
   UtilsRecord,
 } from '../../types.js'
 import type { Context, GetResult } from '../builder/types.js'
-import type { BasicExpression, PropRef, QueryIR } from '../ir.js'
+import type {
+  BasicExpression,
+  IncludesMaterialization,
+  PropRef,
+  QueryIR,
+} from '../ir.js'
 import type { LazyCollectionCallbacks } from '../compiler/joins.js'
 import type {
   Changes,
@@ -825,7 +830,8 @@ export class CollectionConfigBuilder<
         fieldName: entry.fieldName,
         childCorrelationField: entry.childCorrelationField,
         hasOrderBy: entry.hasOrderBy,
-        materializeAsArray: entry.materializeAsArray,
+        materialization: entry.materialization,
+        scalarField: entry.scalarField,
         childRegistry: new Map(),
         pendingChildChanges: new Map(),
         correlationToParentKeys: new Map(),
@@ -1144,8 +1150,10 @@ type IncludesOutputState = {
   childCorrelationField: PropRef
   /** Whether the child query has an ORDER BY clause */
   hasOrderBy: boolean
-  /** When true, parent gets Array<T> instead of Collection<T> */
-  materializeAsArray: boolean
+  /** How the child result is materialized on the parent row */
+  materialization: IncludesMaterialization
+  /** Internal field used to unwrap scalar child selects */
+  scalarField?: string
   /** Maps correlation key value → child Collection entry */
   childRegistry: Map<unknown, ChildCollectionEntry>
   /** Pending child changes: correlationKey → Map<childKey, Changes> */
@@ -1167,6 +1175,40 @@ type ChildCollectionEntry = {
   orderByIndices: WeakMap<object, string> | null
   /** Per-entry nested includes states (one per nested includes level) */
   includesStates?: Array<IncludesOutputState>
+}
+
+function materializesInline(state: IncludesOutputState): boolean {
+  return state.materialization !== `collection`
+}
+
+function materializeIncludedValue(
+  state: IncludesOutputState,
+  entry: ChildCollectionEntry | undefined,
+): unknown {
+  if (!entry) {
+    if (state.materialization === `array`) {
+      return []
+    }
+    if (state.materialization === `concat`) {
+      return ``
+    }
+    return undefined
+  }
+
+  if (state.materialization === `collection`) {
+    return entry.collection
+  }
+
+  const rows = [...entry.collection.toArray]
+  const values = state.scalarField
+    ? rows.map((row) => row?.[state.scalarField!])
+    : rows
+
+  if (state.materialization === `array`) {
+    return values
+  }
+
+  return values.map((value) => String(value ?? ``)).join(``)
 }
 
 /**
@@ -1252,7 +1294,8 @@ function createPerEntryIncludesStates(
       fieldName: setup.compilationResult.fieldName,
       childCorrelationField: setup.compilationResult.childCorrelationField,
       hasOrderBy: setup.compilationResult.hasOrderBy,
-      materializeAsArray: setup.compilationResult.materializeAsArray,
+      materialization: setup.compilationResult.materialization,
+      scalarField: setup.compilationResult.scalarField,
       childRegistry: new Map(),
       pendingChildChanges: new Map(),
       correlationToParentKeys: new Map(),
@@ -1535,15 +1578,11 @@ function flushIncludesState(
             }
             parentKeys.add(parentKey)
 
-            // Attach child Collection (or array snapshot for toArray) to the parent result
-            const childValue = state.materializeAsArray
-              ? [...state.childRegistry.get(routingKey)!.collection.toArray]
-              : state.childRegistry.get(routingKey)!.collection
-            if (state.materializeAsArray) {
-              parentResult[state.fieldName] = childValue
-            } else {
-              parentResult[state.fieldName] = childValue
-            }
+            const childValue = materializeIncludedValue(
+              state,
+              state.childRegistry.get(routingKey),
+            )
+            parentResult[state.fieldName] = childValue
 
             // Parent rows may already be materialized in the live collection by the
             // time includes state is flushed, so update the stored row as well.
@@ -1556,8 +1595,8 @@ function flushIncludesState(
       }
     }
 
-    // Track affected correlation keys for toArray re-emit (before clearing pendingChildChanges)
-    const affectedCorrelationKeys = state.materializeAsArray
+    // Track affected correlation keys for inline materializations before clearing child changes.
+    const affectedCorrelationKeys = materializesInline(state)
       ? new Set<unknown>(state.pendingChildChanges.keys())
       : null
 
@@ -1582,9 +1621,7 @@ function flushIncludesState(
           state.childRegistry.set(correlationKey, entry)
         }
 
-        // For non-toArray: attach the child Collection to ANY parent that has this correlation key
-        // For toArray: skip — the array snapshot is set during re-emit below
-        if (!state.materializeAsArray) {
+        if (state.materialization === `collection`) {
           attachChildCollectionToParent(
             parentCollection,
             state.fieldName,
@@ -1658,18 +1695,18 @@ function flushIncludesState(
       }
     }
 
-    // For toArray entries: re-emit affected parents with updated array snapshots.
+    // For inline materializations: re-emit affected parents with updated snapshots.
     // We mutate items in-place (so collection.get() reflects changes immediately)
     // and emit UPDATE events directly. We bypass the sync methods because
     // commitPendingTransactions compares previous vs new visible state using
     // deepEquals, but in-place mutation means both sides reference the same
     // object, so the comparison always returns true and suppresses the event.
-    const toArrayReEmitKeys = state.materializeAsArray
+    const inlineReEmitKeys = materializesInline(state)
       ? new Set([...(affectedCorrelationKeys || []), ...dirtyFromBuffers])
       : null
-    if (parentSyncMethods && toArrayReEmitKeys && toArrayReEmitKeys.size > 0) {
+    if (parentSyncMethods && inlineReEmitKeys && inlineReEmitKeys.size > 0) {
       const events: Array<ChangeMessage<any>> = []
-      for (const correlationKey of toArrayReEmitKeys) {
+      for (const correlationKey of inlineReEmitKeys) {
         const parentKeys = state.correlationToParentKeys.get(correlationKey)
         if (!parentKeys) continue
         const entry = state.childRegistry.get(correlationKey)
@@ -1679,9 +1716,7 @@ function flushIncludesState(
             const key = parentSyncMethods.collection.getKeyFromItem(item)
             // Capture previous value before in-place mutation
             const previousValue = { ...item }
-            if (entry) {
-              item[state.fieldName] = [...entry.collection.toArray]
-            }
+            item[state.fieldName] = materializeIncludedValue(state, entry)
             events.push({
               type: `update`,
               key,

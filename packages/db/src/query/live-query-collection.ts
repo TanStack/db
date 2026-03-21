@@ -17,6 +17,19 @@ import type {
 } from '../types.js'
 import type { Context, GetResult } from './builder/types.js'
 
+type IsExactlyContext<TContext extends Context> = [Context] extends [TContext]
+  ? [TContext] extends [Context]
+    ? true
+    : false
+  : false
+
+type QueryResultObject<TContext extends Context> =
+  IsExactlyContext<TContext> extends true
+    ? any
+    : GetResult<TContext> extends object
+      ? GetResult<TContext>
+      : any
+
 type CollectionConfigForContext<
   TContext extends Context,
   TResult extends object,
@@ -61,7 +74,7 @@ type CollectionForContext<
  */
 export function liveQueryCollectionOptions<
   TContext extends Context,
-  TResult extends object = GetResult<TContext>,
+  TResult extends object = QueryResultObject<TContext>,
 >(
   config: LiveQueryCollectionConfig<TContext, TResult>,
 ): CollectionConfigForContext<TContext, TResult> & {
@@ -112,30 +125,28 @@ export function liveQueryCollectionOptions<
  */
 
 // Overload 1: Accept just the query function
-export function createLiveQueryCollection<
-  TContext extends Context,
-  TResult extends object = GetResult<TContext>,
->(
+export function createLiveQueryCollection<TContext extends Context>(
   query: (q: InitialQueryBuilder) => QueryBuilder<TContext>,
-): CollectionForContext<TContext, TResult> & {
+): CollectionForContext<TContext, QueryResultObject<TContext>> & {
   utils: LiveQueryCollectionUtils
 }
 
 // Overload 2: Accept full config object with optional utilities
 export function createLiveQueryCollection<
   TContext extends Context,
-  TResult extends object = GetResult<TContext>,
   TUtils extends UtilsRecord = {},
 >(
-  config: LiveQueryCollectionConfig<TContext, TResult> & { utils?: TUtils },
-): CollectionForContext<TContext, TResult> & {
+  config: LiveQueryCollectionConfig<TContext, QueryResultObject<TContext>> & {
+    utils?: TUtils
+  },
+): CollectionForContext<TContext, QueryResultObject<TContext>> & {
   utils: LiveQueryCollectionUtils & TUtils
 }
 
 // Implementation
 export function createLiveQueryCollection<
   TContext extends Context,
-  TResult extends object = GetResult<TContext>,
+  TResult extends object = QueryResultObject<TContext>,
   TUtils extends UtilsRecord = {},
 >(
   configOrQuery:

@@ -32,6 +32,7 @@ import type { OrderByOptimizationInfo } from './order-by.js'
 import type {
   BasicExpression,
   CollectionRef,
+  IncludesMaterialization,
   QueryIR,
   QueryRef,
 } from '../ir.js'
@@ -68,8 +69,10 @@ export interface IncludesCompilationResult {
   childCompilationResult: CompilationResult
   /** Parent-side projection refs for parent-referencing filters */
   parentProjection?: Array<PropRef>
-  /** When true, the output layer materializes children as Array<T> instead of Collection<T> */
-  materializeAsArray: boolean
+  /** How the output layer materializes the child result on the parent row */
+  materialization: IncludesMaterialization
+  /** Internal field used to unwrap scalar child selects */
+  scalarField?: string
 }
 
 /**
@@ -418,7 +421,8 @@ export function compileQuery(
         ),
         childCompilationResult: childResult,
         parentProjection: subquery.parentProjection,
-        materializeAsArray: subquery.materializeAsArray,
+        materialization: subquery.materialization,
+        scalarField: subquery.scalarField,
       })
 
       // Capture routing function for INCLUDES_ROUTING tagging

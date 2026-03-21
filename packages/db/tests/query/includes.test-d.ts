@@ -1,5 +1,6 @@
 import { describe, expectTypeOf, test } from 'vitest'
 import {
+  concat,
   createLiveQueryCollection,
   eq,
   toArray,
@@ -23,6 +24,18 @@ type Comment = {
   id: number
   issueId: number
   body: string
+}
+
+type Message = {
+  id: number
+  role: string
+}
+
+type Chunk = {
+  id: number
+  messageId: number
+  text: string
+  timestamp: number
 }
 
 function createProjectsCollection() {
@@ -55,10 +68,32 @@ function createCommentsCollection() {
   )
 }
 
+function createMessagesCollection() {
+  return createCollection(
+    mockSyncCollectionOptions<Message>({
+      id: `includes-type-messages`,
+      getKey: (m) => m.id,
+      initialData: [],
+    }),
+  )
+}
+
+function createChunksCollection() {
+  return createCollection(
+    mockSyncCollectionOptions<Chunk>({
+      id: `includes-type-chunks`,
+      getKey: (c) => c.id,
+      initialData: [],
+    }),
+  )
+}
+
 describe(`includes subquery types`, () => {
   const projects = createProjectsCollection()
   const issues = createIssuesCollection()
   const comments = createCommentsCollection()
+  const messages = createMessagesCollection()
+  const chunks = createChunksCollection()
 
   describe(`Collection includes`, () => {
     test(`includes with select infers child result as Collection`, () => {
@@ -264,6 +299,51 @@ describe(`includes subquery types`, () => {
           comments: Array<WithVirtualProps<{ id: number; body: string }>>
         }>
       >()
+    })
+
+    test(`toArray supports scalar child subquery selects`, () => {
+      const collection = createLiveQueryCollection((q) =>
+        q.from({ m: messages }).select(({ m }) => ({
+          id: m.id,
+          contentParts: toArray(
+            q
+              .from({ c: chunks })
+              .where(({ c }) => eq(c.messageId, m.id))
+              .orderBy(({ c }) => c.timestamp)
+              .select(({ c }) => c.text),
+          ),
+        })),
+      )
+
+      const result = collection.toArray[0]!
+      expectTypeOf(result).toMatchTypeOf<
+        WithVirtualProps<{
+          id: number
+          contentParts: Array<string>
+        }>
+      >()
+    })
+
+    test(`concat(toArray(scalar subquery)) infers string`, () => {
+      const collection = createLiveQueryCollection((q) =>
+        q.from({ m: messages }).select(({ m }) => ({
+          id: m.id,
+          content: concat(
+            toArray(
+              q
+                .from({ c: chunks })
+                .where(({ c }) => eq(c.messageId, m.id))
+                .orderBy(({ c }) => c.timestamp)
+                .select(({ c }) => c.text),
+            ),
+          ),
+        })),
+      )
+
+      const result = collection.toArray[0]!
+      const content: string = result.content
+      expectTypeOf(result.id).toEqualTypeOf<number>()
+      expectTypeOf(content).toEqualTypeOf<string>()
     })
   })
 })

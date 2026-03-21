@@ -25,6 +25,10 @@ export interface QueryIR {
   fnHaving?: Array<(row: NamespacedRow) => any>
 }
 
+export type IncludesMaterialization = `collection` | `array` | `concat`
+
+export const INCLUDES_SCALAR_FIELD = `__includes_scalar__`
+
 export type From = CollectionRef | QueryRef
 
 export type Select = {
@@ -141,7 +145,8 @@ export class IncludesSubquery extends BaseExpression {
     public fieldName: string, // Result field name (e.g., "issues")
     public parentFilters?: Array<Where>, // WHERE clauses referencing parent aliases (applied post-join)
     public parentProjection?: Array<PropRef>, // Parent field refs used by parentFilters
-    public materializeAsArray: boolean = false, // When true, parent gets Array<T> instead of Collection<T>
+    public materialization: IncludesMaterialization = `collection`,
+    public scalarField?: string,
   ) {
     super()
   }
