@@ -20,6 +20,7 @@ export const projectsTable = pgTable(`projects`, {
   description: text(),
   shared_user_ids: text('shared_user_ids').array().notNull().default([]),
   created_at: timestamp({ withTimezone: true }).notNull().defaultNow(),
+  updated_at: timestamp({ withTimezone: true }).notNull().defaultNow(),
   owner_id: text('owner_id')
     .notNull()
     .references(() => users.id, { onDelete: 'cascade' }),
@@ -30,6 +31,7 @@ export const todosTable = pgTable(`todos`, {
   text: varchar({ length: 500 }).notNull(),
   completed: boolean().notNull().default(false),
   created_at: timestamp({ withTimezone: true }).notNull().defaultNow(),
+  updated_at: timestamp({ withTimezone: true }).notNull().defaultNow(),
   user_id: text('user_id')
     .notNull()
     .references(() => users.id, { onDelete: 'cascade' }),
