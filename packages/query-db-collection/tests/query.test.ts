@@ -4961,6 +4961,117 @@ describe(`QueryCollection`, () => {
       }
     })
 
+    it(`should default persisted retention to resolved query gcTime when queryClient gcTime is implicit`, async () => {
+      vi.useFakeTimers()
+      const implicitGcTimeQueryClient = new QueryClient({
+        defaultOptions: {
+          queries: {
+            staleTime: 0,
+            retry: false,
+          },
+        },
+      })
+
+      try {
+        const baseQueryKey = [`runtime-ttl-retention-implicit-gctime-test`]
+        const retainedQueryHash = hashKey(baseQueryKey)
+        const items: Array<CategorisedItem> = [
+          { id: `1`, name: `Retained`, category: `A` },
+        ]
+        const queryFn = vi.fn().mockResolvedValue(items)
+
+        const config: QueryCollectionConfig<CategorisedItem> = {
+          id: `runtime-ttl-retention-implicit-gctime-test`,
+          queryClient: implicitGcTimeQueryClient,
+          queryKey: () => baseQueryKey,
+          queryFn,
+          getKey: (item) => item.id,
+          syncMode: `on-demand`,
+          startSync: true,
+        }
+
+        const baseOptions = queryCollectionOptions(config)
+        const originalSync = baseOptions.sync
+        const metadataHarness = createInMemorySyncMetadataApi<
+          string | number,
+          CategorisedItem
+        >({
+          persistedRows: new Map(items.map((item) => [item.id, item])),
+        })
+
+        const collection = createCollection({
+          ...baseOptions,
+          sync: {
+            sync: (params: Parameters<typeof originalSync.sync>[0]) =>
+              originalSync.sync({
+                ...params,
+                metadata: metadataHarness.api,
+              }),
+          },
+        })
+
+        const liveQuery = createLiveQueryCollection({
+          query: (q) =>
+            q
+              .from({ item: collection })
+              .where(({ item }) => eq(item.category, `A`)),
+        })
+
+        await liveQuery.preload()
+        await vi.waitFor(() => {
+          expect(collection.size).toBe(1)
+        })
+
+        const resolvedQueryGcTime = implicitGcTimeQueryClient
+          .getQueryCache()
+          .find({ queryKey: baseQueryKey, exact: true })?.gcTime
+
+        expect(resolvedQueryGcTime).toBeDefined()
+
+        await liveQuery.cleanup()
+
+        const retentionEntry = metadataHarness.collectionMetadata.get(
+          `queryCollection:gc:${retainedQueryHash}`,
+        ) as
+          | {
+              queryHash: string
+              mode: `ttl` | `until-revalidated`
+              expiresAt?: number
+            }
+          | undefined
+
+        if (resolvedQueryGcTime === Number.POSITIVE_INFINITY) {
+          expect(retentionEntry).toEqual({
+            queryHash: retainedQueryHash,
+            mode: `until-revalidated`,
+          })
+        } else {
+          expect(retentionEntry).toEqual({
+            queryHash: retainedQueryHash,
+            mode: `ttl`,
+            expiresAt: expect.any(Number),
+          })
+          expect(retentionEntry?.expiresAt).toBeGreaterThanOrEqual(Date.now())
+          expect(retentionEntry?.expiresAt).toBeLessThanOrEqual(
+            Date.now() + resolvedQueryGcTime!,
+          )
+
+          await vi.advanceTimersByTimeAsync(resolvedQueryGcTime! + 25)
+          await vi.runOnlyPendingTimersAsync()
+
+          expect(
+            metadataHarness.collectionMetadata.get(
+              `queryCollection:gc:${retainedQueryHash}`,
+            ),
+          ).toBeUndefined()
+          expect(collection.has(`1`)).toBe(false)
+        }
+      } finally {
+        implicitGcTimeQueryClient.clear()
+        vi.useRealTimers()
+      }
+    })
+
     it(`should reset refcount after query GC and reload (stale refcount bug)`, async () => {
       // This test catches Bug 2: stale refcounts after GC/remove
       // When TanStack Query GCs a query, the refcount should be cleaned up

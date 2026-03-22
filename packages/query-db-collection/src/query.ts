@@ -1164,10 +1164,6 @@ export function queryCollectionOptions(
         ...(retryDelay !== undefined && { retryDelay }),
         ...(staleTime !== undefined && { staleTime }),
       }
-      const effectivePersistedGcTime =
-        persistedGcTime ??
-        queryClient.defaultQueryOptions(observerOptions).gcTime
-
       const localObserver = new QueryObserver<
         Array<any>,
         any,
@@ -1175,6 +1171,11 @@ export function queryCollectionOptions(
         Array<any>,
         any
       >(queryClient, observerOptions)
+      const resolvedQueryGcTime = queryClient.getQueryCache().find({
+        queryKey: key,
+        exact: true,
+      })?.gcTime
+      const effectivePersistedGcTime = persistedGcTime ?? resolvedQueryGcTime
 
       hashToQueryKey.set(hashedQueryKey, key)
       state.observers.set(hashedQueryKey, localObserver)
