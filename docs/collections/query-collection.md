@@ -447,12 +447,31 @@ todosCollection.insert({ text: "Buy milk", completed: false })
 
 ### Example: Large Dataset Pagination
 
+You can use direct writes to append additional pages of data to a collection. However, because query collections treat the `queryFn` result as the [complete state](#full-state-sync), any automatic refetch will replace all directly-written items with whatever `queryFn` returns. To prevent this, you should either disable automatic refetching or design your `queryFn` to merge paginated data.
+
+#### Approach 1: Direct Writes with Refetch Prevention
+
+Use direct writes with `staleTime: Infinity` (or `enabled: false`) to prevent the query from refetching and wiping out your paginated data:
+
 ```typescript
-// Load additional pages without refetching existing data
-const loadMoreTodos = async (page) => {
+const todosCollection = createCollection(
+  queryCollectionOptions({
+    queryKey: ["todos"],
+    queryFn: async () => {
+      // Initial page load
+      return api.getTodos({ page: 1, limit: 50 })
+    },
+    queryClient,
+    getKey: (item) => item.id,
+    // Prevent automatic refetches from replacing paginated data
+    staleTime: Infinity,
+  })
+)
+
+// Load additional pages via direct writes
+const loadMoreTodos = async (page: number) => {
   const newTodos = await api.getTodos({ page, limit: 50 })
 
-  // Add new items without affecting existing ones
   todosCollection.utils.writeBatch(() => {
     newTodos.forEach((todo) => {
       todosCollection.utils.writeInsert(todo)
@@ -460,6 +479,50 @@ const loadMoreTodos = async (page) => {
   })
 }
 ```
+
+#### Approach 2: On-Demand Sync Mode (Recommended)
+
+For pagination that works with TanStack Query's caching, use `syncMode: 'on-demand'`. This automatically pushes `limit` and `offset` to your `queryFn` and incorporates them into the query key so each page gets its own cache entry:
+
+```typescript
+const todosCollection = createCollection(
+  queryCollectionOptions({
+    id: "todos",
+    queryKey: ["todos"],
+    queryClient,
+    getKey: (item) => item.id,
+    syncMode: "on-demand",
+
+    queryFn: async (ctx) => {
+      const { limit, offset } = ctx.meta.loadSubsetOptions
+
+      return api.getTodos({ limit, offset })
+    },
+  })
+)
+
+// Each live query with different limit/offset gets its own cache entry
+// and its own queryFn call — no data is overwritten
+const page1 = createLiveQueryCollection({
+  query: (q) =>
+    q.from({ todo: todosCollection })
+      .limit(50)
+      .offset(0)
+      .select(({ todo }) => todo),
+})
+
+const page2 = createLiveQueryCollection({
+  query: (q) =>
+    q.from({ todo: todosCollection })
+      .limit(50)
+      .offset(50)
+      .select(({ todo }) => todo),
+})
+```
+
+With `syncMode: 'on-demand'` and a static `queryKey`, the collection automatically appends serialized predicate options (including `limit` and `offset`) to the query key. This means each unique combination of filters and pagination creates a separate TanStack Query cache entry, so refetches for one page don't affect another.
+
+> **Note:** If you use a [function-based `queryKey`](#using-query-key-builders), you are responsible for including `limit`, `offset`, and any filter values in the returned key so that different queries get distinct cache entries.
 
 ## Important Behaviors
 
