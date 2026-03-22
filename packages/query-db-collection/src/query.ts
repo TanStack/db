@@ -713,7 +713,7 @@ export function queryCollectionOptions(
     let syncStarted = false
     let startupRetentionSettled = false
     const retainedQueriesPendingRevalidation = new Set<string>()
-    const effectivePersistedGcTimes = new Map<string, number | undefined>()
+    const effectivePersistedGcTimes = new Map<string, number>()
     const persistedRetentionTimers = new Map<
       string,
       ReturnType<typeof setTimeout>
@@ -1178,7 +1178,11 @@ export function queryCollectionOptions(
 
       hashToQueryKey.set(hashedQueryKey, key)
       state.observers.set(hashedQueryKey, localObserver)
-      effectivePersistedGcTimes.set(hashedQueryKey, effectivePersistedGcTime)
+      if (effectivePersistedGcTime !== undefined) {
+        effectivePersistedGcTimes.set(hashedQueryKey, effectivePersistedGcTime)
+      } else {
+        effectivePersistedGcTimes.delete(hashedQueryKey)
+      }
 
       // Increment reference count for this query
       queryRefCounts.set(

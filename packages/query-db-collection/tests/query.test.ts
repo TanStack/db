@@ -4943,7 +4943,6 @@ describe(`QueryCollection`, () => {
           mode: `ttl`,
           expiresAt: expect.any(Number),
         })
-        expect(retentionEntry?.mode).toBe(`ttl`)
         expect(retentionEntry?.expiresAt).toBeGreaterThanOrEqual(Date.now())
         expect(retentionEntry?.expiresAt).toBeLessThanOrEqual(Date.now() + gcTime)
 
