@@ -50,6 +50,7 @@ query outputs automatically and should not be persisted back to storage.
 - [Select Projections](#select)
 - [Joins](#joins)
 - [Subqueries](#subqueries)
+- [Includes](#includes)
 - [groupBy and Aggregations](#groupby-and-aggregations)
 - [findOne](#findone)
 - [Distinct](#distinct)
@@ -760,9 +761,8 @@ A `join` without a `select` will return row objects that are namespaced with the
 
 The result type of a join will take into account the join type, with the optionality of the joined fields being determined by the join type.
 
-> [!NOTE]
-> We are working on an `include` system that will enable joins that project to a hierarchical object. For example an `issue` row could have a `comments` property that is an array of `comment` rows.
-> See [this issue](https://github.com/TanStack/db/issues/288) for more details.
+> [!TIP]
+> If you need hierarchical results instead of flat joined rows (e.g., each project with its nested issues), see [Includes](#includes) below.
 
 ### Method Signature
 
@@ -1052,6 +1052,223 @@ const topUsers = createCollection(liveQueryCollectionOptions({
   }
 }))
 ```
+
+## Includes
+
+Includes let you nest subqueries inside `.select()` to produce hierarchical results. Instead of joins that flatten 1:N relationships into repeated rows, each parent row gets a nested collection of its related items.
+
+```ts
+import { createLiveQueryCollection, eq } from '@tanstack/db'
+
+const projectsWithIssues = createLiveQueryCollection((q) =>
+  q.from({ p: projectsCollection }).select(({ p }) => ({
+    id: p.id,
+    name: p.name,
+    issues: q
+      .from({ i: issuesCollection })
+      .where(({ i }) => eq(i.projectId, p.id))
+      .select(({ i }) => ({
+        id: i.id,
+        title: i.title,
+      })),
+  })),
+)
+```
+
+Each project's `issues` field is a live `Collection` that updates incrementally as the underlying data changes.
+
+### Correlation Condition
+
+The child query's `.where()` must contain an `eq()` that links a child field to a parent field — this is the **correlation condition**. It tells the system how children relate to parents.
+
+```ts
+// The correlation condition: links issues to their parent project
+.where(({ i }) => eq(i.projectId, p.id))
+```
+
+The correlation condition can appear as a standalone `.where()`, or inside an `and()`:
+
+```ts
+// Also valid — correlation is extracted from inside and()
+.where(({ i }) => and(eq(i.projectId, p.id), eq(i.status, 'open')))
+```
+
+The correlation field does not need to be included in the parent's `.select()`.
+
+### Additional Filters
+
+Child queries support additional `.where()` clauses beyond the correlation condition, including filters that reference parent fields:
+
+```ts
+q.from({ p: projectsCollection }).select(({ p }) => ({
+  id: p.id,
+  name: p.name,
+  issues: q
+    .from({ i: issuesCollection })
+    .where(({ i }) => eq(i.projectId, p.id))       // correlation
+    .where(({ i }) => eq(i.createdBy, p.createdBy)) // parent-referencing filter
+    .where(({ i }) => eq(i.status, 'open'))          // pure child filter
+    .select(({ i }) => ({
+      id: i.id,
+      title: i.title,
+    })),
+}))
+```
+
+Parent-referencing filters are fully reactive — if a parent's field changes, the child results update automatically.
+
+### Ordering and Limiting
+
+Child queries support `.orderBy()` and `.limit()`, applied per parent:
+
+```ts
+q.from({ p: projectsCollection }).select(({ p }) => ({
+  id: p.id,
+  name: p.name,
+  issues: q
+    .from({ i: issuesCollection })
+    .where(({ i }) => eq(i.projectId, p.id))
+    .orderBy(({ i }) => i.createdAt, 'desc')
+    .limit(5)
+    .select(({ i }) => ({
+      id: i.id,
+      title: i.title,
+    })),
+}))
+```
+
+Each project gets its own top-5 issues, not 5 issues shared across all projects.
+
+### toArray
+
+By default, each child result is a live `Collection`. If you want a plain array instead, wrap the child query with `toArray()`:
+
+```ts
+import { createLiveQueryCollection, eq, toArray } from '@tanstack/db'
+
+const projectsWithIssues = createLiveQueryCollection((q) =>
+  q.from({ p: projectsCollection }).select(({ p }) => ({
+    id: p.id,
+    name: p.name,
+    issues: toArray(
+      q
+        .from({ i: issuesCollection })
+        .where(({ i }) => eq(i.projectId, p.id))
+        .select(({ i }) => ({
+          id: i.id,
+          title: i.title,
+        })),
+    ),
+  })),
+)
+```
+
+With `toArray()`, the project row is re-emitted whenever its issues change. Without it, the child `Collection` updates independently.
+
+### Aggregates
+
+You can use aggregate functions in child queries. Aggregates are computed per parent:
+
+```ts
+import { createLiveQueryCollection, eq, count } from '@tanstack/db'
+
+const projectsWithCounts = createLiveQueryCollection((q) =>
+  q.from({ p: projectsCollection }).select(({ p }) => ({
+    id: p.id,
+    name: p.name,
+    issueCount: q
+      .from({ i: issuesCollection })
+      .where(({ i }) => eq(i.projectId, p.id))
+      .select(({ i }) => ({ total: count(i.id) })),
+  })),
+)
+```
+
+Each project gets its own count. The count updates reactively as issues are added or removed.
+
+### Nested Includes
+
+Includes nest arbitrarily. For example, projects can include issues, which include comments:
+
+```ts
+const tree = createLiveQueryCollection((q) =>
+  q.from({ p: projectsCollection }).select(({ p }) => ({
+    id: p.id,
+    name: p.name,
+    issues: q
+      .from({ i: issuesCollection })
+      .where(({ i }) => eq(i.projectId, p.id))
+      .select(({ i }) => ({
+        id: i.id,
+        title: i.title,
+        comments: q
+          .from({ c: commentsCollection })
+          .where(({ c }) => eq(c.issueId, i.id))
+          .select(({ c }) => ({
+            id: c.id,
+            body: c.body,
+          })),
+      })),
+  })),
+)
+```
+
+Each level updates independently and incrementally — adding a comment to an issue does not re-process other issues or projects.
+
+### Using Includes with React
+
+When using includes with React, each child `Collection` needs its own `useLiveQuery` subscription to receive reactive updates. Pass the child collection to a subcomponent that calls `useLiveQuery(childCollection)`:
+
+```tsx
+import { useLiveQuery } from '@tanstack/react-db'
+import { eq } from '@tanstack/db'
+
+function ProjectList() {
+  const { data: projects } = useLiveQuery((q) =>
+    q.from({ p: projectsCollection }).select(({ p }) => ({
+      id: p.id,
+      name: p.name,
+      issues: q
+        .from({ i: issuesCollection })
+        .where(({ i }) => eq(i.projectId, p.id))
+        .select(({ i }) => ({
+          id: i.id,
+          title: i.title,
+        })),
+    })),
+  )
+
+  return (
+    <ul>
+      {projects.map((project) => (
+        <li key={project.id}>
+          {project.name}
+          {/* Pass the child collection to a subcomponent */}
+          <IssueList issuesCollection={project.issues} />
+        </li>
+      ))}
+    </ul>
+  )
+}
+
+function IssueList({ issuesCollection }) {
+  // Subscribe to the child collection for reactive updates
+  const { data: issues } = useLiveQuery(issuesCollection)
+
+  return (
+    <ul>
+      {issues.map((issue) => (
+        <li key={issue.id}>{issue.title}</li>
+      ))}
+    </ul>
+  )
+}
+```
+
+Each `IssueList` component independently subscribes to its project's issues. When an issue is added or removed, only the affected `IssueList` re-renders — the parent `ProjectList` does not.
+
+> [!NOTE]
+> You must pass the child collection to a subcomponent and subscribe with `useLiveQuery`. Reading `project.issues` directly in the parent without subscribing will give you the collection object, but the component won't re-render when the child data changes.
 
 ## groupBy and Aggregations
 
