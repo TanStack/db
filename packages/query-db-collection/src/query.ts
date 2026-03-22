@@ -713,6 +713,7 @@ export function queryCollectionOptions(
     let syncStarted = false
     let startupRetentionSettled = false
     const retainedQueriesPendingRevalidation = new Set<string>()
+    const effectivePersistedGcTimes = new Map<string, number | undefined>()
     const persistedRetentionTimers = new Map<
       string,
       ReturnType<typeof setTimeout>
@@ -1163,6 +1164,9 @@ export function queryCollectionOptions(
         ...(retryDelay !== undefined && { retryDelay }),
         ...(staleTime !== undefined && { staleTime }),
       }
+      const effectivePersistedGcTime =
+        persistedGcTime ??
+        queryClient.defaultQueryOptions(observerOptions).gcTime
 
       const localObserver = new QueryObserver<
         Array<any>,
@@ -1174,6 +1178,7 @@ export function queryCollectionOptions(
 
       hashToQueryKey.set(hashedQueryKey, key)
       state.observers.set(hashedQueryKey, localObserver)
+      effectivePersistedGcTimes.set(hashedQueryKey, effectivePersistedGcTime)
 
       // Increment reference count for this query
       queryRefCounts.set(
@@ -1526,6 +1531,7 @@ export function queryCollectionOptions(
       queryToRows.delete(hashedQueryKey)
       hashToQueryKey.delete(hashedQueryKey)
       queryRefCounts.delete(hashedQueryKey)
+      effectivePersistedGcTimes.delete(hashedQueryKey)
     }
 
     /**
@@ -1535,6 +1541,9 @@ export function queryCollectionOptions(
     const cleanupQueryIfIdle = (hashedQueryKey: string) => {
       const refcount = queryRefCounts.get(hashedQueryKey) || 0
       const observer = state.observers.get(hashedQueryKey)
+      const effectivePersistedGcTime = effectivePersistedGcTimes.get(
+        hashedQueryKey,
+      )
 
       if (refcount <= 0) {
         // Drop our subscription so hasListeners reflects only active consumers
@@ -1561,7 +1570,7 @@ export function queryCollectionOptions(
         )
       }
 
-      if (persistedGcTime !== undefined) {
+      if (effectivePersistedGcTime !== undefined) {
         if (metadata) {
           begin()
           metadata.collection.set(
@@ -1569,20 +1578,20 @@ export function queryCollectionOptions(
             {
               queryHash: hashedQueryKey,
               mode:
-                persistedGcTime === Number.POSITIVE_INFINITY
+                effectivePersistedGcTime === Number.POSITIVE_INFINITY
                   ? `until-revalidated`
                   : `ttl`,
-              ...(persistedGcTime === Number.POSITIVE_INFINITY
+              ...(effectivePersistedGcTime === Number.POSITIVE_INFINITY
                 ? {}
-                : { expiresAt: Date.now() + persistedGcTime }),
+                : { expiresAt: Date.now() + effectivePersistedGcTime }),
             },
           )
           commit()
-          if (persistedGcTime !== Number.POSITIVE_INFINITY) {
+          if (effectivePersistedGcTime !== Number.POSITIVE_INFINITY) {
             schedulePersistedRetentionExpiry({
               queryHash: hashedQueryKey,
               mode: `ttl`,
-              expiresAt: Date.now() + persistedGcTime,
+              expiresAt: Date.now() + effectivePersistedGcTime,
             })
           }
         }
