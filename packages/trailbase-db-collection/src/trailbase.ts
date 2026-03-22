@@ -94,9 +94,9 @@ export interface TrailBaseCollectionConfig<
   TRecord extends ShapeOf<TItem> = TItem,
   TKey extends string | number = string | number,
 > extends Omit<
-  BaseCollectionConfig<TItem, TKey>,
-  `onInsert` | `onUpdate` | `onDelete` | `syncMode`
-> {
+    BaseCollectionConfig<TItem, TKey>,
+    `onInsert` | `onUpdate` | `onDelete` | `syncMode`
+  > {
   /**
    * Record API name
    */
@@ -486,9 +486,9 @@ function buildFilters<
   }
 
   function serializeValue<T = any>(column: string, value: T): string {
-    const convert = (config.serialize as any)[column]
-    if (convert) {
-      return `${convert(value)}`
+    const conv = (config.serialize as any)[column]
+    if (conv) {
+      return `${conv(value)}`
     }
 
     if (typeof value === 'boolean') {

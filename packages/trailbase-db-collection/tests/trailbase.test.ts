@@ -48,6 +48,9 @@ class MockRecordApi<T> implements RecordApi<T> {
   listOp = vi.fn((_opts?: ListOpts): ListOperation<T> => {
     throw `listOp`
   })
+  listGeoOp = vi.fn((_geometryColumn: string, _opts?: ListOpts) => {
+    throw `listGeoOp`
+  })
 
   read = vi.fn(
     (
