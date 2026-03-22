@@ -1546,9 +1546,8 @@ export function queryCollectionOptions(
     const cleanupQueryIfIdle = (hashedQueryKey: string) => {
       const refcount = queryRefCounts.get(hashedQueryKey) || 0
       const observer = state.observers.get(hashedQueryKey)
-      const effectivePersistedGcTime = effectivePersistedGcTimes.get(
-        hashedQueryKey,
-      )
+      const effectivePersistedGcTime =
+        effectivePersistedGcTimes.get(hashedQueryKey)
 
       if (refcount <= 0) {
         // Drop our subscription so hasListeners reflects only active consumers

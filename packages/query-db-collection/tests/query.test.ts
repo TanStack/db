@@ -4944,7 +4944,9 @@ describe(`QueryCollection`, () => {
           expiresAt: expect.any(Number),
         })
         expect(retentionEntry?.expiresAt).toBeGreaterThanOrEqual(Date.now())
-        expect(retentionEntry?.expiresAt).toBeLessThanOrEqual(Date.now() + gcTime)
+        expect(retentionEntry?.expiresAt).toBeLessThanOrEqual(
+          Date.now() + gcTime,
+        )
 
         await vi.advanceTimersByTimeAsync(gcTime + 25)
         await vi.runOnlyPendingTimersAsync()
