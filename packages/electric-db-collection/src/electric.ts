@@ -1577,7 +1577,11 @@ function createElectricSync<T extends Row<unknown>>(
 
         for (const message of messages) {
           // Add message to current batch buffer (for race condition handling)
-          if (isChangeMessage(message) || isMoveOutMessage(message) || isMoveInMessage(message)) {
+          if (
+            isChangeMessage(message) ||
+            isMoveOutMessage(message) ||
+            isMoveInMessage(message)
+          ) {
             currentBatchMessages.setState((currentBuffer) => {
               const newBuffer = [...currentBuffer, message]
               // Limit buffer size for safety
