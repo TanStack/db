@@ -19,6 +19,7 @@ import {
   deriveDisjunctPositions,
   findRowsMatchingPattern,
   getTagLength,
+  isMoveInMessage,
   isMoveOutMessage,
   parseTag as parseTagString,
   removeTagFromIndex,
@@ -29,7 +30,7 @@ import type { ColumnEncoder } from './sql-compiler'
 import type {
   ActiveConditions,
   DisjunctPositions,
-  MoveOutPattern,
+  MovePattern,
   MoveTag,
   ParsedMoveTag,
   RowId,
@@ -1162,30 +1163,27 @@ function createElectricSync<T extends Row<unknown>>(
    */
   const removeMatchingTagsFromRow = (
     rowId: RowId,
-    pattern: MoveOutPattern,
+    pattern: MovePattern,
   ): boolean => {
     const rowTagSet = rowTagSets.get(rowId)
     if (!rowTagSet) {
       return false
     }
 
-    // Find tags that match this pattern and remove them
-    for (const tag of rowTagSet) {
-      const parsedTag = parseTag(tag)
-      if (tagMatchesPattern(parsedTag, pattern)) {
-        rowTagSet.delete(tag)
-        removeTagFromIndex(parsedTag, rowId, tagIndex, tagLength!)
-      }
-    }
-
-    // DNF mode: check visibility using active conditions
+    // DNF mode: check visibility using active conditions.
+    // Tag index entries are preserved so that move-in can re-activate positions.
     const activeConditions = rowActiveConditions.get(rowId)
     if (activeConditions && disjunctPositions) {
       // Set the condition at this pattern's position to false
       activeConditions[pattern.pos] = false
 
       if (!rowVisible(activeConditions, disjunctPositions)) {
-        // Row is no longer visible — clean up all state
+        // Row is no longer visible — clean up all state including tag index
+        for (const tag of rowTagSet) {
+          const parsedTag = parseTag(tag)
+          removeTagFromIndex(parsedTag, rowId, tagIndex, tagLength!)
+          tagCache.delete(tag)
+        }
         rowTagSets.delete(rowId)
         rowActiveConditions.delete(rowId)
         return true
@@ -1194,7 +1192,15 @@ function createElectricSync<T extends Row<unknown>>(
     }
 
     // Simple shape (no subquery dependencies — server sends no active_conditions):
-    // delete if tag set is empty
+    // Remove matching tags and delete if tag set is empty
+    for (const tag of rowTagSet) {
+      const parsedTag = parseTag(tag)
+      if (tagMatchesPattern(parsedTag, pattern)) {
+        rowTagSet.delete(tag)
+        removeTagFromIndex(parsedTag, rowId, tagIndex, tagLength!)
+      }
+    }
+
     if (rowTagSet.size === 0) {
       rowTagSets.delete(rowId)
       return true
@@ -1207,7 +1213,7 @@ function createElectricSync<T extends Row<unknown>>(
    * Process move-out event: remove matching tags from rows and delete rows with empty tag sets
    */
   const processMoveOutEvent = (
-    patterns: Array<MoveOutPattern>,
+    patterns: Array<MovePattern>,
     begin: () => void,
     write: (message: ChangeMessageOrDeleteKeyMessage<T>) => void,
     transactionStarted: boolean,
@@ -1243,6 +1249,30 @@ function createElectricSync<T extends Row<unknown>>(
     }
 
     return txStarted
+  }
+
+  /**
+   * Process move-in event: re-activate conditions for rows matching the patterns.
+   * This is a silent operation — no messages are emitted to the collection.
+   */
+  const processMoveInEvent = (patterns: Array<MovePattern>): void => {
+    if (tagLength === undefined) {
+      debug(
+        `${collectionId ? `[${collectionId}] ` : ``}Received move-in message but no tag length set yet, ignoring`,
+      )
+      return
+    }
+
+    for (const pattern of patterns) {
+      const affectedRowIds = findRowsMatchingPattern(pattern, tagIndex)
+
+      for (const rowId of affectedRowIds) {
+        const activeConditions = rowActiveConditions.get(rowId)
+        if (activeConditions) {
+          activeConditions[pattern.pos] = true
+        }
+      }
+    }
   }
 
   /**
@@ -1547,7 +1577,7 @@ function createElectricSync<T extends Row<unknown>>(
 
         for (const message of messages) {
           // Add message to current batch buffer (for race condition handling)
-          if (isChangeMessage(message) || isMoveOutMessage(message)) {
+          if (isChangeMessage(message) || isMoveOutMessage(message) || isMoveInMessage(message)) {
             currentBatchMessages.setState((currentBuffer) => {
               const newBuffer = [...currentBuffer, message]
               // Limit buffer size for safety
@@ -1644,6 +1674,14 @@ function createElectricSync<T extends Row<unknown>>(
                 transactionStarted,
               )
             }
+          } else if (isMoveInMessage(message)) {
+            // Handle move-in event: re-activate conditions for matching rows.
+            // Buffer if buffering, otherwise process immediately.
+            if (isBufferingInitialSync() && !transactionStarted) {
+              bufferedMessages.push(message)
+            } else {
+              processMoveInEvent(message.headers.patterns)
+            }
           } else if (isMustRefetchMessage(message)) {
             debug(
               `${collectionId ? `[${collectionId}] ` : ``}Received must-refetch message, starting transaction with truncate`,
@@ -1723,6 +1761,9 @@ function createElectricSync<T extends Row<unknown>>(
                   write,
                   transactionStarted,
                 )
+              } else if (isMoveInMessage(bufferedMsg)) {
+                // Process buffered move-in messages during atomic swap
+                processMoveInEvent(bufferedMsg.headers.patterns)
               }
             }
 

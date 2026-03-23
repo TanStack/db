@@ -6,7 +6,7 @@ export type MoveTag = string
 export type ParsedMoveTag = Array<string | NonParticipating>
 export type Position = number
 export type Value = string
-export type MoveOutPattern = {
+export type MovePattern = {
   pos: Position
   value: Value
 }
@@ -14,7 +14,7 @@ export type MoveOutPattern = {
 /**
  * Sentinel value for tag positions where the disjunct does not participate
  * in that condition. These positions are not indexed and won't match any
- * move-out pattern.
+ * move pattern.
  */
 export const NON_PARTICIPATING = null
 export type NonParticipating = typeof NON_PARTICIPATING
@@ -23,12 +23,12 @@ export type ActiveConditions = Array<boolean>
 export type DisjunctPositions = Array<Array<number>>
 
 /**
- * Event message type for move-out events
+ * Event message type for move-out and move-in events
  */
 export interface EventMessage {
   headers: {
-    event: `move-out`
-    patterns: Array<MoveOutPattern>
+    event: `move-out` | `move-in`
+    patterns: Array<MovePattern>
   }
 }
 
@@ -74,7 +74,7 @@ export function getValue(
 /**
  * Abstraction to extract position and value from a pattern.
  */
-function getPositionalValue(pattern: MoveOutPattern): {
+function getPositionalValue(pattern: MovePattern): {
   pos: number
   value: string
 } {
@@ -95,7 +95,7 @@ export function getTagLength(tag: ParsedMoveTag): number {
  */
 export function tagMatchesPattern(
   tag: ParsedMoveTag,
-  pattern: MoveOutPattern,
+  pattern: MovePattern,
 ): boolean {
   const { pos, value } = getPositionalValue(pattern)
   const tagValue = getValue(tag, pos)
@@ -159,7 +159,7 @@ export function removeTagFromIndex(
  * Find all rows that match a given pattern
  */
 export function findRowsMatchingPattern(
-  pattern: MoveOutPattern,
+  pattern: MovePattern,
   index: TagIndex,
 ): Set<RowId> {
   const { pos, value } = getPositionalValue(pattern)
@@ -207,4 +207,13 @@ export function isMoveOutMessage<T extends Row<unknown>>(
   message: Message<T>,
 ): message is Message<T> & EventMessage {
   return message.headers.event === `move-out`
+}
+
+/**
+ * Check if a message is an event message with move-in event
+ */
+export function isMoveInMessage<T extends Row<unknown>>(
+  message: Message<T>,
+): message is Message<T> & EventMessage {
+  return message.headers.event === `move-in`
 }
