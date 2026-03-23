@@ -21,15 +21,28 @@ import { createLiveQueryCollection } from '../src/query/live-query-collection.js
 import { eq } from '../src/query/builder/functions.js'
 import { BTreeIndex } from '../src/indexes/btree-index.js'
 import { PropRef } from '../src/query/ir.js'
-import { DEFAULT_COMPARE_OPTIONS, makeComparator } from '../src/utils/comparison.js'
+import {
+  DEFAULT_COMPARE_OPTIONS,
+  makeComparator,
+} from '../src/utils/comparison.js'
 import type { Collection } from '../src/collection/index.js'
 
 describe(`BTreeIndex multi-column comparator regression`, () => {
   it(`multi-column comparator returns NaN for single values (documents the root cause)`, () => {
     // Simulates the comparator that order-by.ts creates for multi-column orderBy
     const compiledOrderBy = [
-      { compareOptions: { ...DEFAULT_COMPARE_OPTIONS, direction: `desc` as const } },
-      { compareOptions: { ...DEFAULT_COMPARE_OPTIONS, direction: `desc` as const } },
+      {
+        compareOptions: {
+          ...DEFAULT_COMPARE_OPTIONS,
+          direction: `desc` as const,
+        },
+      },
+      {
+        compareOptions: {
+          ...DEFAULT_COMPARE_OPTIONS,
+          direction: `desc` as const,
+        },
+      },
     ]
 
     const multiColumnCompare = (a: any, b: any): number => {
