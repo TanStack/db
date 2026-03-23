@@ -21,10 +21,8 @@ import { createLiveQueryCollection } from '../src/query/live-query-collection.js
 import { eq } from '../src/query/builder/functions.js'
 import { BTreeIndex } from '../src/indexes/btree-index.js'
 import { PropRef } from '../src/query/ir.js'
-import {
-  DEFAULT_COMPARE_OPTIONS,
-  makeComparator,
-} from '../src/utils/comparison.js'
+import { makeComparator } from '../src/utils/comparison.js'
+import { DEFAULT_COMPARE_OPTIONS } from '../src/utils.js'
 import type { Collection } from '../src/collection/index.js'
 
 describe(`BTreeIndex multi-column comparator regression`, () => {
