@@ -256,24 +256,23 @@ describe(`Deterministic Ordering`, () => {
       let writeFn: (msg: { type: string; value: Msg }) => void
       let commitFn: () => void
 
-      const collection: Collection<Msg, string> = createCollection<
-        Msg,
-        string
-      >({
-        id: `multi-col-orderby-messages`,
-        getKey: (item) => item.id,
-        startSync: true,
-        sync: {
-          sync: ({ begin, write, commit, markReady }) => {
-            beginFn = begin
-            writeFn = write as any
-            commitFn = commit
-            begin()
-            commit()
-            markReady()
+      const collection: Collection<Msg, string> = createCollection<Msg, string>(
+        {
+          id: `multi-col-orderby-messages`,
+          getKey: (item) => item.id,
+          startSync: true,
+          sync: {
+            sync: ({ begin, write, commit, markReady }) => {
+              beginFn = begin
+              writeFn = write as any
+              commitFn = commit
+              begin()
+              commit()
+              markReady()
+            },
           },
         },
-      })
+      )
 
       await collection.stateWhenReady()
 
