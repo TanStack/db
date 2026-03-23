@@ -2,11 +2,17 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { createCollection } from '@tanstack/db'
 import { electricCollectionOptions } from '../src/electric'
 import { stripVirtualProps } from '../../db/tests/utils'
+import {
+  NON_PARTICIPATING,
+  deriveDisjunctPositions,
+  parseTag,
+  rowVisible,
+} from '../src/tag-index'
 import type { ElectricCollectionUtils } from '../src/electric'
 import type { Collection } from '@tanstack/db'
 import type { Message, Row } from '@electric-sql/client'
 import type { StandardSchemaV1 } from '@standard-schema/spec'
-import type { MoveOutPattern } from '../src/tag-index'
+import type { MovePattern } from '../src/tag-index'
 
 // Mock the ShapeStream module
 const mockSubscribe = vi.fn()
@@ -658,7 +664,7 @@ describe(`Electric Tag Tracking and GC`, () => {
     expect(collection.state.size).toBe(3)
 
     // Send move-out event with pattern matching hash1 at position 0
-    const pattern: MoveOutPattern = {
+    const pattern: MovePattern = {
       pos: 0,
       value: `hash1`,
     }
@@ -730,7 +736,7 @@ describe(`Electric Tag Tracking and GC`, () => {
 
     // Send move-out event matching sharedTag1 (hash1 at position 0)
     // This should remove sharedTag1 from both row 1 and row 2
-    const pattern: MoveOutPattern = {
+    const pattern: MovePattern = {
       pos: 0,
       value: `hash1`,
     }
@@ -759,7 +765,7 @@ describe(`Electric Tag Tracking and GC`, () => {
 
     // Send move-out event matching sharedTag2 (hash4 at position 0)
     // This should remove sharedTag2 from both row 2 and row 3
-    const pattern2: MoveOutPattern = {
+    const pattern2: MovePattern = {
       pos: 0,
       value: `hash4`,
     }
@@ -786,7 +792,7 @@ describe(`Electric Tag Tracking and GC`, () => {
 
     // Send move-out event matching uniqueTag1 (hash7 at position 0)
     // This should remove uniqueTag1 from row 1
-    const pattern3: MoveOutPattern = {
+    const pattern3: MovePattern = {
       pos: 0,
       value: `hash7`,
     }
@@ -837,7 +843,7 @@ describe(`Electric Tag Tracking and GC`, () => {
     // Send move-out event with pattern matching position 1 (where nil is)
     // Since the tag is not indexed at position 1, it won't be found in the index
     // and the tag should remain
-    const patternNonIndexed: MoveOutPattern = {
+    const patternNonIndexed: MovePattern = {
       pos: 1,
       value: `b`,
     }
@@ -861,7 +867,7 @@ describe(`Electric Tag Tracking and GC`, () => {
     // Send move-out event with pattern matching position 2 (where 'c' is)
     // Position 2 is indexed (has value 'c'), so it will be found in the index
     // The pattern matching position 2 with value 'c' matches the tag a//c, so the tag is removed
-    const patternIndexed: MoveOutPattern = {
+    const patternIndexed: MovePattern = {
       pos: 2,
       value: `c`,
     }
@@ -923,11 +929,11 @@ describe(`Electric Tag Tracking and GC`, () => {
     expect(collection.state.size).toBe(3)
 
     // Send move-out event with multiple patterns
-    const pattern1: MoveOutPattern = {
+    const pattern1: MovePattern = {
       pos: 0,
       value: `hash1`,
     }
-    const pattern2: MoveOutPattern = {
+    const pattern2: MovePattern = {
       pos: 0,
       value: `hash4`,
     }
@@ -1110,7 +1116,7 @@ describe(`Electric Tag Tracking and GC`, () => {
     )
 
     // Move out that matches the tag
-    const pattern: MoveOutPattern = {
+    const pattern: MovePattern = {
       pos: 1,
       value: `hash2`,
     }
@@ -1575,5 +1581,438 @@ describe(`Electric Tag Tracking and GC`, () => {
     expect(collection.state.size).toBe(1)
     expect(collection.state.get(1)).toEqual({ id: 1, name: `DNF User` })
     expect(collection.state.has(2)).toBe(false)
+  })
+
+  it(`should activate correct positions on move-in`, () => {
+    // Insert row with two disjuncts, position 1 inactive
+    subscriber([
+      {
+        key: `1`,
+        value: { id: 1, name: `User 1` },
+        headers: {
+          operation: `insert`,
+          tags: [`hash_a/`, `/hash_b`],
+          active_conditions: [true, false],
+        },
+      },
+      {
+        headers: { control: `up-to-date` },
+      },
+    ])
+
+    expect(collection.state.size).toBe(1)
+
+    // Move-in at position 1 — should re-activate it
+    subscriber([
+      {
+        headers: {
+          event: `move-in`,
+          patterns: [{ pos: 1, value: `hash_b` }],
+        },
+      } as unknown as Message<Row>,
+      {
+        headers: { control: `up-to-date` },
+      },
+    ])
+
+    // Row should still be there (move-in is silent, no visible change)
+    expect(collection.state.size).toBe(1)
+    expect(collection.state.get(1)).toEqual({ id: 1, name: `User 1` })
+
+    // Verify position 1 was actually re-activated:
+    // Move-out at position 0 should NOT delete because disjunct 1 (pos 1) is now active
+    subscriber([
+      {
+        headers: {
+          event: `move-out`,
+          patterns: [{ pos: 0, value: `hash_a` }],
+        },
+      },
+      {
+        headers: { control: `up-to-date` },
+      },
+    ])
+
+    // Row stays because disjunct 1 is satisfied
+    expect(collection.state.size).toBe(1)
+    expect(collection.state.get(1)).toEqual({ id: 1, name: `User 1` })
+  })
+
+  it(`should support move-out then move-in then move-out cycle`, () => {
+    // Row with two disjuncts: pos 0 and pos 1
+    subscriber([
+      {
+        key: `1`,
+        value: { id: 1, name: `User 1` },
+        headers: {
+          operation: `insert`,
+          tags: [`hash_a/`, `/hash_b`],
+          active_conditions: [true, true],
+        },
+      },
+      {
+        headers: { control: `up-to-date` },
+      },
+    ])
+
+    expect(collection.state.size).toBe(1)
+
+    // Move-out at pos 0 — row stays via disjunct 1
+    subscriber([
+      {
+        headers: {
+          event: `move-out`,
+          patterns: [{ pos: 0, value: `hash_a` }],
+        },
+      },
+      {
+        headers: { control: `up-to-date` },
+      },
+    ])
+
+    expect(collection.state.size).toBe(1)
+
+    // Move-in at pos 0 — re-activates disjunct 0
+    subscriber([
+      {
+        headers: {
+          event: `move-in`,
+          patterns: [{ pos: 0, value: `hash_a` }],
+        },
+      } as unknown as Message<Row>,
+      {
+        headers: { control: `up-to-date` },
+      },
+    ])
+
+    expect(collection.state.size).toBe(1)
+
+    // Move-out at pos 1 — disjunct 1 fails, but disjunct 0 re-activated so row stays
+    subscriber([
+      {
+        headers: {
+          event: `move-out`,
+          patterns: [{ pos: 1, value: `hash_b` }],
+        },
+      },
+      {
+        headers: { control: `up-to-date` },
+      },
+    ])
+
+    // Row should still be alive because disjunct 0 was re-activated by move-in
+    expect(collection.state.size).toBe(1)
+    expect(collection.state.get(1)).toEqual({ id: 1, name: `User 1` })
+  })
+
+  it(`should not resurrect deleted rows on move-in (tag index cleaned up)`, () => {
+    // Row with single disjunct [0, 1]
+    subscriber([
+      {
+        key: `1`,
+        value: { id: 1, name: `User 1` },
+        headers: {
+          operation: `insert`,
+          tags: [`hash_a/hash_b`],
+          active_conditions: [true, true],
+        },
+      },
+      {
+        headers: { control: `up-to-date` },
+      },
+    ])
+
+    expect(collection.state.size).toBe(1)
+
+    // Move-out at pos 0 — single disjunct [0,1] fails → row deleted
+    subscriber([
+      {
+        headers: {
+          event: `move-out`,
+          patterns: [{ pos: 0, value: `hash_a` }],
+        },
+      },
+      {
+        headers: { control: `up-to-date` },
+      },
+    ])
+
+    expect(collection.state.size).toBe(0)
+
+    // Move-in at pos 0 — should have no effect because the row was fully deleted
+    // and its tag index entries were cleaned up
+    subscriber([
+      {
+        headers: {
+          event: `move-in`,
+          patterns: [{ pos: 0, value: `hash_a` }],
+        },
+      } as unknown as Message<Row>,
+      {
+        headers: { control: `up-to-date` },
+      },
+    ])
+
+    // Row should NOT reappear
+    expect(collection.state.size).toBe(0)
+  })
+
+  it(`should not cause phantom deletes from orphaned tag index entries`, () => {
+    // Shape: two disjuncts [[0,1], [2,3]]
+    // Row "r" has all 4 positions active with hash "X"
+    subscriber([
+      {
+        key: `1`,
+        value: { id: 1, name: `User 1` },
+        headers: {
+          operation: `insert`,
+          tags: [`X/X//`, `//X/X`],
+          active_conditions: [true, true, true, true],
+        },
+      },
+      {
+        headers: { control: `up-to-date` },
+      },
+    ])
+
+    expect(collection.state.size).toBe(1)
+
+    // Deactivate positions 1 and 3 — both disjuncts lose their second position → row invisible → deleted
+    subscriber([
+      {
+        headers: {
+          event: `move-out`,
+          patterns: [
+            { pos: 1, value: `X` },
+            { pos: 3, value: `X` },
+          ],
+        },
+      },
+      {
+        headers: { control: `up-to-date` },
+      },
+    ])
+
+    expect(collection.state.size).toBe(0)
+
+    // Re-insert row with NEW hash "Y" at all positions
+    subscriber([
+      {
+        key: `1`,
+        value: { id: 1, name: `User 1 v2` },
+        headers: {
+          operation: `insert`,
+          tags: [`Y/Y//`, `//Y/Y`],
+          active_conditions: [true, true, true, true],
+        },
+      },
+      {
+        headers: { control: `up-to-date` },
+      },
+    ])
+
+    expect(collection.state.size).toBe(1)
+
+    // Move-out with STALE hash "X" at pos 0 — should have NO effect
+    // because the row's current hash at pos 0 is "Y", not "X"
+    subscriber([
+      {
+        headers: {
+          event: `move-out`,
+          patterns: [{ pos: 0, value: `X` }],
+        },
+      },
+      {
+        headers: { control: `up-to-date` },
+      },
+    ])
+
+    // Row should still exist with active_conditions unchanged
+    expect(collection.state.size).toBe(1)
+    expect(collection.state.get(1)).toEqual({ id: 1, name: `User 1 v2` })
+
+    // Now a legitimate deactivation at position 2 with current hash "Y"
+    subscriber([
+      {
+        headers: {
+          event: `move-out`,
+          patterns: [{ pos: 2, value: `Y` }],
+        },
+      },
+      {
+        headers: { control: `up-to-date` },
+      },
+    ])
+
+    // Disjunct 0 ([0,1]) is still fully active → row should remain visible
+    expect(collection.state.size).toBe(1)
+    expect(collection.state.get(1)).toEqual({ id: 1, name: `User 1 v2` })
+  })
+
+  it(`should clean up ALL tag index entries when row is deleted by move-out`, () => {
+    // Row with single disjunct using positions 0 and 1
+    subscriber([
+      {
+        key: `1`,
+        value: { id: 1, name: `User 1` },
+        headers: {
+          operation: `insert`,
+          tags: [`hash_a/hash_b`],
+          active_conditions: [true, true],
+        },
+      },
+      {
+        headers: { control: `up-to-date` },
+      },
+    ])
+
+    expect(collection.state.size).toBe(1)
+
+    // Move-out at pos 0 — single disjunct [0,1] fails → row deleted
+    subscriber([
+      {
+        headers: {
+          event: `move-out`,
+          patterns: [{ pos: 0, value: `hash_a` }],
+        },
+      },
+      {
+        headers: { control: `up-to-date` },
+      },
+    ])
+
+    expect(collection.state.size).toBe(0)
+
+    // Insert a NEW row with hash_b at position 1 (same value the deleted row had)
+    subscriber([
+      {
+        key: `2`,
+        value: { id: 2, name: `User 2` },
+        headers: {
+          operation: `insert`,
+          tags: [`hash_c/hash_b`],
+          active_conditions: [true, true],
+        },
+      },
+      {
+        headers: { control: `up-to-date` },
+      },
+    ])
+
+    expect(collection.state.size).toBe(1)
+
+    // Move-out at pos 1 with "hash_b" should only affect the new row (key 2),
+    // not ghost-reference the deleted row (key 1)
+    subscriber([
+      {
+        headers: {
+          event: `move-out`,
+          patterns: [{ pos: 1, value: `hash_b` }],
+        },
+      },
+      {
+        headers: { control: `up-to-date` },
+      },
+    ])
+
+    // Only row 2 should be affected (deleted because single disjunct [0,1] fails)
+    expect(collection.state.size).toBe(0)
+  })
+
+  it(`should handle multiple patterns deactivating the same row in one call`, () => {
+    // Row with single disjunct needing both pos 0 and pos 1
+    subscriber([
+      {
+        key: `1`,
+        value: { id: 1, name: `User 1` },
+        headers: {
+          operation: `insert`,
+          tags: [`hash_a/hash_b`],
+          active_conditions: [true, true],
+        },
+      },
+      {
+        headers: { control: `up-to-date` },
+      },
+    ])
+
+    expect(collection.state.size).toBe(1)
+
+    // Both positions deactivated in one move-out call
+    subscriber([
+      {
+        headers: {
+          event: `move-out`,
+          patterns: [
+            { pos: 0, value: `hash_a` },
+            { pos: 1, value: `hash_b` },
+          ],
+        },
+      },
+      {
+        headers: { control: `up-to-date` },
+      },
+    ])
+
+    expect(collection.state.size).toBe(0)
+    expect(collection.state.has(1)).toBe(false)
+  })
+})
+
+describe(`Tag index utilities`, () => {
+  it(`parseTag should normalize slash-delimited tags correctly`, () => {
+    // Basic tag
+    expect(parseTag(`hash_a`)).toEqual([`hash_a`])
+
+    // Multi-position tag
+    expect(parseTag(`hash1/hash2/hash3`)).toEqual([`hash1`, `hash2`, `hash3`])
+
+    // Tags with non-participating positions (empty segments)
+    expect(parseTag(`hash_a/`)).toEqual([`hash_a`, NON_PARTICIPATING])
+    expect(parseTag(`/hash_b`)).toEqual([NON_PARTICIPATING, `hash_b`])
+    expect(parseTag(`hash_a//hash_c`)).toEqual([
+      `hash_a`,
+      NON_PARTICIPATING,
+      `hash_c`,
+    ])
+    expect(parseTag(`//hash_c`)).toEqual([
+      NON_PARTICIPATING,
+      NON_PARTICIPATING,
+      `hash_c`,
+    ])
+  })
+
+  it(`rowVisible should evaluate DNF correctly`, () => {
+    // Disjunct 0 needs positions [0, 1], disjunct 1 needs position [2]
+    const disjunctPositions = [[0, 1], [2]]
+
+    // All active
+    expect(rowVisible([true, true, true], disjunctPositions)).toBe(true)
+
+    // Only disjunct 0 satisfied
+    expect(rowVisible([true, true, false], disjunctPositions)).toBe(true)
+
+    // Only disjunct 1 satisfied
+    expect(rowVisible([false, false, true], disjunctPositions)).toBe(true)
+
+    // No disjunct satisfied (pos 0 false breaks disjunct 0, pos 2 false breaks disjunct 1)
+    expect(rowVisible([false, true, false], disjunctPositions)).toBe(false)
+
+    // All false
+    expect(rowVisible([false, false, false], disjunctPositions)).toBe(false)
+  })
+
+  it(`deriveDisjunctPositions should extract participating positions per disjunct`, () => {
+    // Two disjuncts: first uses pos 0, second uses pos 1
+    const tags = [`hash_a/`, `/hash_b`].map(parseTag)
+    expect(deriveDisjunctPositions(tags)).toEqual([[0], [1]])
+
+    // Single disjunct using both positions
+    const tags2 = [`hash_a/hash_b`].map(parseTag)
+    expect(deriveDisjunctPositions(tags2)).toEqual([[0, 1]])
+
+    // Three positions, two disjuncts
+    const tags3 = [`hash_a/hash_b/`, `//hash_c`].map(parseTag)
+    expect(deriveDisjunctPositions(tags3)).toEqual([[0, 1], [2]])
   })
 })
