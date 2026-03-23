@@ -657,8 +657,8 @@ importers:
         specifier: ^4.1.18
         version: 4.2.1
       trailbase:
-        specifier: ^0.8.0
-        version: 0.8.0
+        specifier: ^0.10.0
+        version: 0.10.0
       vite-tsconfig-paths:
         specifier: ^5.1.4
         version: 5.1.4(typescript@5.9.3)(vite@7.3.1(@types/node@25.2.2)(jiti@2.6.1)(lightningcss@1.31.1)(sass@1.90.0)(terser@5.44.0)(tsx@4.21.0)(yaml@2.8.1))
@@ -775,8 +775,8 @@ importers:
         specifier: ^4.1.18
         version: 4.2.1
       trailbase:
-        specifier: ^0.8.0
-        version: 0.8.0
+        specifier: ^0.10.0
+        version: 0.10.0
       vite-tsconfig-paths:
         specifier: ^5.1.4
         version: 5.1.4(typescript@5.9.3)(vite@7.3.1(@types/node@25.2.2)(jiti@2.6.1)(lightningcss@1.31.1)(sass@1.90.0)(terser@5.44.0)(tsx@4.21.0)(yaml@2.8.1))
@@ -1470,8 +1470,8 @@ importers:
         specifier: ^4.4.3
         version: 4.4.3
       trailbase:
-        specifier: ^0.8.0
-        version: 0.8.0
+        specifier: ^0.10.0
+        version: 0.10.0
       typescript:
         specifier: '>=4.7'
         version: 5.9.3
@@ -5696,6 +5696,9 @@ packages:
   '@types/fs-extra@8.1.5':
     resolution: {integrity: sha512-0dzKcwO+S8s2kuF5Z9oUWatQJj5Uq/iqphEtE3GQJVRRYm/tD1LglU2UnXi2A8jLq5umkGouOXOR9y0n613ZwQ==}
 
+  '@types/geojson@7946.0.16':
+    resolution: {integrity: sha512-6C8nqWur3j98U6+lXDfTUWIfgvZU+EumvpHKcYjujKH7woYyLj2sUmff0tRhrqM7BohUw7Pz3ZB1jj2gW9Fvmg==}
+
   '@types/graceful-fs@4.1.9':
     resolution: {integrity: sha512-olP3sd1qOEe5dXTSaFvQG+02VdRXcdytWLAZsAq1PecU8uqQAhkrnbli7DagjtXKW/Bl7YJbUsa8MPcuc8LHEQ==}
 
@@ -8140,6 +8143,10 @@ packages:
   gensync@1.0.0-beta.2:
     resolution: {integrity: sha512-3hN7NaskYvMDLQY55gnW3NQ+mesEAepTqlg+VEbj7zzqEMBVNhzcGYYeqFo/TlYz6eQiFcp1HcsCZO+nGgS8zg==}
     engines: {node: '>=6.9.0'}
+
+  geojson@0.5.0:
+    resolution: {integrity: sha512-/Bx5lEn+qRF4TfQ5aLu6NH+UKtvIv7Lhc487y/c8BdludrCTpiWf9wyI0RTyqg49MFefIAvFDuEi5Dfd/zgNxQ==}
+    engines: {node: '>= 0.10'}
 
   get-browser-rtc@1.1.0:
     resolution: {integrity: sha512-MghbMJ61EJrRsDe7w1Bvqt3ZsBuqhce5nrn/XAwgwOXhcsz53/ltdxOse1h/8eKXj5slzxdsz56g5rzOFSGwfQ==}
@@ -11581,8 +11588,8 @@ packages:
     resolution: {integrity: sha512-bLVMLPtstlZ4iMQHpFHTR7GAGj2jxi8Dg0s2h2MafAE4uSWF98FC/3MomU51iQAMf8/qDUbKWf5GxuvvVcXEhw==}
     engines: {node: '>=20'}
 
-  trailbase@0.8.0:
-    resolution: {integrity: sha512-8lMmQJoQQtsjiy9GxEaJjR754kSAV+0iY7gnu4qhL52Ph7OnZWt1an0IB8A1IPuf3pmWUO/c+WpIF/Uwg7HehQ==}
+  trailbase@0.10.0:
+    resolution: {integrity: sha512-IGIofZQWU3RRUZVXIAztWQ1vBabtbcuFFLZhTLj5gtZOIR2ml/levQgKaWNE+RhcDsFE/pD1gf+tfHVfrC9NGw==}
 
   tree-kill@1.2.2:
     resolution: {integrity: sha512-L0Orpi8qGpRG//Nd+H90vFB+3iHnue1zSSGmNOOCh1GLJ7rUKVwV2HvijphGQS2UmhUZewS9VgvxYIdgr+fG1A==}
@@ -17657,6 +17664,8 @@ snapshots:
     dependencies:
       '@types/node': 25.2.2
 
+  '@types/geojson@7946.0.16': {}
+
   '@types/graceful-fs@4.1.9':
     dependencies:
       '@types/node': 25.2.2
@@ -20754,6 +20763,8 @@ snapshots:
       is-property: 1.0.2
 
   gensync@1.0.0-beta.2: {}
+
+  geojson@0.5.0: {}
 
   get-browser-rtc@1.1.0: {}
 
@@ -24964,9 +24975,11 @@ snapshots:
     dependencies:
       punycode: 2.3.1
 
-  trailbase@0.8.0:
+  trailbase@0.10.0:
     dependencies:
+      '@types/geojson': 7946.0.16
       '@ungap/raw-json': 0.4.4
+      geojson: 0.5.0
       jwt-decode: 4.0.0
       uuid: 13.0.0
 
