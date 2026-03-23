@@ -1609,7 +1609,7 @@ describe(`Electric Tag Tracking and GC`, () => {
           event: `move-in`,
           patterns: [{ pos: 1, value: `hash_b` }],
         },
-      } as unknown as Message<Row>,
+      },
       {
         headers: { control: `up-to-date` },
       },
@@ -1679,7 +1679,7 @@ describe(`Electric Tag Tracking and GC`, () => {
           event: `move-in`,
           patterns: [{ pos: 0, value: `hash_a` }],
         },
-      } as unknown as Message<Row>,
+      },
       {
         headers: { control: `up-to-date` },
       },
@@ -1747,7 +1747,7 @@ describe(`Electric Tag Tracking and GC`, () => {
           event: `move-in`,
           patterns: [{ pos: 0, value: `hash_a` }],
         },
-      } as unknown as Message<Row>,
+      },
       {
         headers: { control: `up-to-date` },
       },
