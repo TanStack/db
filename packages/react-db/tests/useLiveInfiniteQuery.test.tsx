@@ -51,7 +51,7 @@ function createOnDemandCollection(opts: OnDemandCollectionOptions) {
     syncMode: `on-demand`,
     startSync: true,
     autoIndex: autoIndex ?? `eager`,
-    defaultIndexType: BTreeIndex,
+    defaultIndexType: BTreeIndex as any,
     sync: {
       sync: ({ markReady, begin, write, commit }) => {
         markReady()
