@@ -7,6 +7,7 @@ import {
   ilike,
   inArray,
   or,
+  BTreeIndex,
 } from '@tanstack/db'
 import { stripVirtualProps } from '../../db/tests/utils'
 import { persistedCollectionOptions } from '../../db-sqlite-persisted-collection-core/src'
@@ -4240,6 +4241,8 @@ describe(`QueryCollection`, () => {
         getKey,
         startSync: true,
         syncMode: `on-demand`,
+        autoIndex: `eager`,
+        defaultIndexType: BTreeIndex,
       }
 
       const options = queryCollectionOptions(config)
