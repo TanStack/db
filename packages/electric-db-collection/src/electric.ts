@@ -709,8 +709,8 @@ export function electricCollectionOptions<T extends Row<unknown>>(
     return new Promise((resolve, reject) => {
       const cleanup = () => {
         clearTimeout(timeoutId)
-        unsubscribeSeenTxids()
-        unsubscribeSeenSnapshots()
+        subSeenTxids.unsubscribe()
+        subSeenSnapshots.unsubscribe()
       }
 
       const timeoutId = setTimeout(() => {
@@ -718,7 +718,7 @@ export function electricCollectionOptions<T extends Row<unknown>>(
         reject(new TimeoutWaitingForTxIdError(txId, config.id))
       }, timeout)
 
-      const unsubscribeSeenTxids = seenTxids.subscribe(() => {
+      const subSeenTxids = seenTxids.subscribe(() => {
         if (seenTxids.state.has(txId)) {
           debug(
             `${config.id ? `[${config.id}] ` : ``}awaitTxId found match for txid %o`,
@@ -729,7 +729,7 @@ export function electricCollectionOptions<T extends Row<unknown>>(
         }
       })
 
-      const unsubscribeSeenSnapshots = seenSnapshots.subscribe(() => {
+      const subSeenSnapshots = seenSnapshots.subscribe(() => {
         const visibleSnapshot = seenSnapshots.state.find((snapshot) =>
           isVisibleInSnapshot(txId, snapshot),
         )
