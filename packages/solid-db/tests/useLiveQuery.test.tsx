@@ -2453,4 +2453,138 @@ describe(`Query Collections`, () => {
       expect(finalIds).toEqual([`1`, `2`, `3`, `4`])
     })
   })
+
+  describe(`findOne`, () => {
+    it(`should return a single row with query builder`, async () => {
+      const collection = createCollection(
+        mockSyncCollectionOptions<Person>({
+          id: `test-persons-findone-qb`,
+          getKey: (person: Person) => person.id,
+          initialData: initialPersons,
+        }),
+      )
+
+      const rendered = renderHook(() => {
+        return useLiveQuery((q) =>
+          q
+            .from({ collection })
+            .where(({ collection: c }) => eq(c.id, `3`))
+            .findOne(),
+        )
+      })
+
+      // Wait for collection to sync
+      await waitFor(() => {
+        expect(rendered.result.state.size).toBe(1)
+      })
+
+      expect(rendered.result.state.get(`3`)).toMatchObject({
+        id: `3`,
+        name: `John Smith`,
+      })
+
+      expect(rendered.result()).toMatchObject({
+        id: `3`,
+        name: `John Smith`,
+      })
+    })
+
+    it(`should return a single row with config object`, async () => {
+      const collection = createCollection(
+        mockSyncCollectionOptions<Person>({
+          id: `test-persons-findone-config`,
+          getKey: (person: Person) => person.id,
+          initialData: initialPersons,
+        }),
+      )
+
+      const rendered = renderHook(() => {
+        return useLiveQuery(() => ({
+          query: (q: any) =>
+            q
+              .from({ collection })
+              .where(({ collection: c }: any) => eq(c.id, `3`))
+              .findOne(),
+        }))
+      })
+
+      // Wait for collection to sync
+      await waitFor(() => {
+        expect(rendered.result.state.size).toBe(1)
+      })
+
+      expect(rendered.result.state.get(`3`)).toMatchObject({
+        id: `3`,
+        name: `John Smith`,
+      })
+
+      expect(rendered.result()).toMatchObject({
+        id: `3`,
+        name: `John Smith`,
+      })
+    })
+
+    it(`should return a single row with pre-created collection`, async () => {
+      const collection = createCollection(
+        mockSyncCollectionOptions<Person>({
+          id: `test-persons-findone-collection`,
+          getKey: (person: Person) => person.id,
+          initialData: initialPersons,
+        }),
+      )
+
+      const liveQueryCollection = createLiveQueryCollection({
+        query: (q) =>
+          q
+            .from({ collection })
+            .where(({ collection: c }) => eq(c.id, `3`))
+            .findOne(),
+      })
+
+      const rendered = renderHook(() => {
+        return useLiveQuery(() => liveQueryCollection)
+      })
+
+      // Wait for collection to sync
+      await waitFor(() => {
+        expect(rendered.result.state.size).toBe(1)
+      })
+
+      expect(rendered.result.state.get(`3`)).toMatchObject({
+        id: `3`,
+        name: `John Smith`,
+      })
+
+      expect(rendered.result()).toMatchObject({
+        id: `3`,
+        name: `John Smith`,
+      })
+    })
+
+    it(`should return undefined when findOne matches no rows`, async () => {
+      const collection = createCollection(
+        mockSyncCollectionOptions<Person>({
+          id: `test-persons-findone-empty`,
+          getKey: (person: Person) => person.id,
+          initialData: initialPersons,
+        }),
+      )
+
+      const rendered = renderHook(() => {
+        return useLiveQuery((q) =>
+          q
+            .from({ collection })
+            .where(({ collection: c }) => eq(c.id, `nonexistent`))
+            .findOne(),
+        )
+      })
+
+      // Wait for collection to be ready
+      await waitFor(() => {
+        expect(rendered.result.isReady).toBe(true)
+      })
+
+      expect(rendered.result()).toBeUndefined()
+    })
+  })
 })
