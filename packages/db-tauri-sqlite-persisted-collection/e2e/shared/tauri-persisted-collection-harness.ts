@@ -1,4 +1,4 @@
-import { createCollection } from '@tanstack/db'
+import { createCollection, BTreeIndex } from '@tanstack/db'
 import { persistedCollectionOptions } from '../../src'
 import { generateSeedData } from '../../../db-collection-e2e/src/fixtures/seed-data'
 import type { Collection } from '@tanstack/db'
@@ -69,6 +69,8 @@ function createPersistedCollection<T extends PersistableRow, TDatabase>(
       syncMode,
       getKey: (item) => item.id,
       persistence,
+      autoIndex: `eager`,
+      defaultIndexType: BTreeIndex,
     }),
   )
 

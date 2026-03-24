@@ -2,7 +2,7 @@ import { mkdtempSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterAll, afterEach, beforeAll } from 'vitest'
-import { createCollection } from '@tanstack/db'
+import { createCollection, BTreeIndex } from '@tanstack/db'
 import {
   createBrowserWASQLitePersistence,
   persistedCollectionOptions,
@@ -64,6 +64,8 @@ function createPersistedCollection<T extends PersistableRow>(
       syncMode,
       getKey: (item) => item.id,
       persistence,
+      autoIndex: `eager`,
+      defaultIndexType: BTreeIndex,
     }),
   )
 
