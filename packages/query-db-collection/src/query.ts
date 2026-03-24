@@ -1575,7 +1575,10 @@ export function queryCollectionOptions(
         )
       }
 
-      if (effectivePersistedGcTime !== undefined && persistedMetadata?.row.scanPersisted) {
+      if (
+        effectivePersistedGcTime !== undefined &&
+        persistedMetadata?.row.scanPersisted
+      ) {
         begin()
         metadata.collection.set(
           `${QUERY_COLLECTION_GC_PREFIX}${hashedQueryKey}`,
