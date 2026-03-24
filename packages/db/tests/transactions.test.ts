@@ -561,7 +561,15 @@ describe(`Transactions`, () => {
       const marker = Symbol.for(`@tanstack/db/instance-marker`)
       const w = (globalThis as any).window
       const isBrowserTopWindow =
-        w && `document` in w && (() => { try { return w === w.top } catch { return true } })()
+        w &&
+        `document` in w &&
+        (() => {
+          try {
+            return w === w.top
+          } catch {
+            return true
+          }
+        })()
 
       if (isBrowserTopWindow) {
         expect((globalThis as any)[marker]).toBe(true)
@@ -580,7 +588,15 @@ describe(`Transactions`, () => {
         typeof process !== `undefined` && process.env.NODE_ENV !== `production`
       const w = (globalThis as any).window
       const isBrowserTopWindow =
-        w && `document` in w && (() => { try { return w === w.top } catch { return true } })()
+        w &&
+        `document` in w &&
+        (() => {
+          try {
+            return w === w.top
+          } catch {
+            return true
+          }
+        })()
 
       if (isDev && isBrowserTopWindow) {
         expect((globalThis as any)[marker]).toBe(true)
