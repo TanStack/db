@@ -1457,7 +1457,7 @@ describe(`useLiveInfiniteQuery`, () => {
       const posts = createMockPosts(50)
       const collection = createCollection(
         mockSyncCollectionOptions<Post>({
-        autoIndex: `eager`,
+          autoIndex: `eager`,
           id: `pre-created-test`,
           getKey: (post: Post) => post.id,
           initialData: posts,
@@ -1503,7 +1503,7 @@ describe(`useLiveInfiniteQuery`, () => {
       const posts = createMockPosts(50)
       const collection = createCollection(
         mockSyncCollectionOptions<Post>({
-        autoIndex: `eager`,
+          autoIndex: `eager`,
           id: `pre-created-multi-page-test`,
           getKey: (post: Post) => post.id,
           initialData: posts,
@@ -1555,7 +1555,7 @@ describe(`useLiveInfiniteQuery`, () => {
       const posts1 = createMockPosts(30)
       const collection1 = createCollection(
         mockSyncCollectionOptions<Post>({
-        autoIndex: `eager`,
+          autoIndex: `eager`,
           id: `pre-created-reset-1`,
           getKey: (post: Post) => post.id,
           initialData: posts1,
@@ -1576,7 +1576,7 @@ describe(`useLiveInfiniteQuery`, () => {
       const posts2 = createMockPosts(40)
       const collection2 = createCollection(
         mockSyncCollectionOptions<Post>({
-        autoIndex: `eager`,
+          autoIndex: `eager`,
           id: `pre-created-reset-2`,
           getKey: (post: Post) => post.id,
           initialData: posts2,
@@ -1637,7 +1637,7 @@ describe(`useLiveInfiniteQuery`, () => {
       const posts = createMockPosts(50)
       const collection = createCollection(
         mockSyncCollectionOptions<Post>({
-        autoIndex: `eager`,
+          autoIndex: `eager`,
           id: `no-orderby-test`,
           getKey: (post: Post) => post.id,
           initialData: posts,
@@ -1700,7 +1700,7 @@ describe(`useLiveInfiniteQuery`, () => {
       const posts = createMockPosts(50)
       const collection = createCollection(
         mockSyncCollectionOptions<Post>({
-        autoIndex: `eager`,
+          autoIndex: `eager`,
           id: `mismatched-window-test`,
           getKey: (post: Post) => post.id,
           initialData: posts,
@@ -1742,7 +1742,7 @@ describe(`useLiveInfiniteQuery`, () => {
       const posts = createMockPosts(30)
       const collection = createCollection(
         mockSyncCollectionOptions<Post>({
-        autoIndex: `eager`,
+          autoIndex: `eager`,
           id: `pre-created-live-updates-test`,
           getKey: (post: Post) => post.id,
           initialData: posts,
@@ -1816,7 +1816,7 @@ describe(`useLiveInfiniteQuery`, () => {
       const posts = createMockPosts(50)
       const collection = createCollection(
         mockSyncCollectionOptions<Post>({
-        autoIndex: `eager`,
+          autoIndex: `eager`,
           id: `router-loader-test`,
           getKey: (post: Post) => post.id,
           initialData: posts,
