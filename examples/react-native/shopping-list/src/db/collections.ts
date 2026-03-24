@@ -1,16 +1,17 @@
 import { open } from '@op-engineering/op-sqlite'
 import { createCollection } from '@tanstack/react-db'
-import { queryCollectionOptions } from '@tanstack/query-db-collection'
+import { electricCollectionOptions } from '@tanstack/electric-db-collection'
 import {
   createReactNativeSQLitePersistence,
-  OpSQLiteDatabaseLike,
   persistedCollectionOptions,
 } from '@tanstack/db-react-native-sqlite-persisted-collection'
 import { startOfflineExecutor } from '@tanstack/offline-transactions/react-native'
-import { queryClient } from '../utils/queryClient'
-import { listsApi, itemsApi } from '../utils/api'
+import { API_URL, itemsApi, listsApi } from '../utils/api'
 import { AsyncStorageAdapter } from './AsyncStorageAdapter'
-import type { Collection, PendingMutation } from '@tanstack/db'
+import type {
+  OpSQLiteDatabaseLike} from '@tanstack/db-react-native-sqlite-persisted-collection';
+import type { PendingMutation } from '@tanstack/db'
+import type { ElectricCollectionUtils } from '@tanstack/electric-db-collection'
 
 export type ShoppingList = {
   id: string
@@ -26,59 +27,63 @@ export type ShoppingItem = {
   createdAt: string
 }
 
-// ─── SQLite Persistence (shared) ────────────────────────
-
 const database = open({
   name: `shopping-list.sqlite`,
   location: `default`,
 }) as unknown as OpSQLiteDatabaseLike
-const persistence = createReactNativeSQLitePersistence({ database })
 
-// ─── Collections ────────────────────────────────────────
+const listPersistence = createReactNativeSQLitePersistence<
+  ShoppingList,
+  string | number
+>({ database })
+const itemPersistence = createReactNativeSQLitePersistence<
+  ShoppingItem,
+  string | number
+>({ database })
 
-export const listsCollection = createCollection<ShoppingList, string>(
-  persistedCollectionOptions<ShoppingList, string>({
-    ...queryCollectionOptions<ShoppingList, string>({
+export const listsCollection = createCollection(
+  persistedCollectionOptions<
+    ShoppingList,
+    string | number,
+    never,
+    ElectricCollectionUtils<ShoppingList>
+  >({
+    ...electricCollectionOptions<ShoppingList>({
       id: `lists-collection`,
-      queryClient,
-      queryKey: [`lists`],
-      queryFn: async (): Promise<Array<ShoppingList>> => {
-        const lists = await listsApi.getAll()
-        return lists.map((l) => ({
-          ...l,
-          createdAt: l.createdAt.toISOString(),
-        }))
+      shapeOptions: {
+        url: `${API_URL}/api/shapes/lists`,
+        onError: (error) => {
+          console.error(`[Electric] lists shape error`, error)
+        },
       },
       getKey: (item) => item.id,
-      refetchInterval: 3000,
     }),
-    persistence,
+    persistence: listPersistence,
     schemaVersion: 1,
   }),
 )
 
-export const itemsCollection = createCollection<ShoppingItem, string>(
-  persistedCollectionOptions<ShoppingItem, string>({
-    ...queryCollectionOptions<ShoppingItem, string>({
+export const itemsCollection = createCollection(
+  persistedCollectionOptions<
+    ShoppingItem,
+    string | number,
+    never,
+    ElectricCollectionUtils<ShoppingItem>
+  >({
+    ...electricCollectionOptions<ShoppingItem>({
       id: `items-collection`,
-      queryClient,
-      queryKey: [`items`],
-      queryFn: async (): Promise<Array<ShoppingItem>> => {
-        const items = await itemsApi.getAll()
-        return items.map((i) => ({
-          ...i,
-          createdAt: i.createdAt.toISOString(),
-        }))
+      shapeOptions: {
+        url: `${API_URL}/api/shapes/items`,
+        onError: (error) => {
+          console.error(`[Electric] items shape error`, error)
+        },
       },
       getKey: (item) => item.id,
-      refetchInterval: 3000,
     }),
-    persistence,
+    persistence: itemPersistence,
     schemaVersion: 1,
   }),
 )
-
-// ─── Sync Functions ─────────────────────────────────────
 
 async function syncLists({
   transaction,
@@ -89,20 +94,31 @@ async function syncLists({
   for (const mutation of transaction.mutations) {
     const data = mutation.modified as ShoppingList
     switch (mutation.type) {
-      case `insert`:
-        await listsApi.create({ id: data.id, name: data.name })
+      case `insert`: {
+        const created = await listsApi.create({
+          id: data.id,
+          name: data.name,
+          createdAt: data.createdAt,
+        })
+        await listsCollection.utils.awaitTxId(created.txid)
         break
-      case `update`:
-        await listsApi.update(data.id, { name: data.name })
+      }
+      case `update`: {
+        const updated = await listsApi.update(data.id, { name: data.name })
+        if (updated) {
+          await listsCollection.utils.awaitTxId(updated.txid)
+        }
         break
+      }
       case `delete`: {
-        const id = (mutation.original as ShoppingList).id
-        await listsApi.delete(id)
+        const deleted = await listsApi.delete((mutation.original as ShoppingList).id)
+        if (deleted) {
+          await listsCollection.utils.awaitTxId(deleted.txid)
+        }
         break
       }
     }
   }
-  await listsCollection.utils.refetch()
 }
 
 async function syncItems({
@@ -114,31 +130,37 @@ async function syncItems({
   for (const mutation of transaction.mutations) {
     const data = mutation.modified as ShoppingItem
     switch (mutation.type) {
-      case `insert`:
-        await itemsApi.create({
+      case `insert`: {
+        const created = await itemsApi.create({
           id: data.id,
           listId: data.listId,
           text: data.text,
           checked: data.checked,
+          createdAt: data.createdAt,
         })
+        await itemsCollection.utils.awaitTxId(created.txid)
         break
-      case `update`:
-        await itemsApi.update(data.id, {
+      }
+      case `update`: {
+        const updated = await itemsApi.update(data.id, {
           text: data.text,
           checked: data.checked,
         })
+        if (updated) {
+          await itemsCollection.utils.awaitTxId(updated.txid)
+        }
         break
+      }
       case `delete`: {
-        const id = (mutation.original as ShoppingItem).id
-        await itemsApi.delete(id)
+        const deleted = await itemsApi.delete((mutation.original as ShoppingItem).id)
+        if (deleted) {
+          await itemsCollection.utils.awaitTxId(deleted.txid)
+        }
         break
       }
     }
   }
-  await itemsCollection.utils.refetch()
 }
-
-// ─── Offline Executor ───────────────────────────────────
 
 export function createOfflineExecutor() {
   return startOfflineExecutor({
@@ -159,8 +181,6 @@ export function createOfflineExecutor() {
     },
   })
 }
-
-// ─── Offline Actions ────────────────────────────────────
 
 export function createListActions(
   offline: ReturnType<typeof createOfflineExecutor> | null,
@@ -188,9 +208,7 @@ export function createListActions(
       const list = listsCollection.get(id)
       if (list) {
         listsCollection.delete(id)
-        // Also delete all items in this list
-        const allItems =
-          itemsCollection.toArray as unknown as Array<ShoppingItem>
+        const allItems = itemsCollection.toArray as Array<ShoppingItem>
         for (const item of allItems) {
           if (item.listId === id) {
             itemsCollection.delete(item.id)
@@ -229,11 +247,9 @@ export function createItemActions(
   const toggleItem = offline.createOfflineAction({
     mutationFnName: `syncItems`,
     onMutate: (id: string) => {
-      const item = itemsCollection.get(id) as unknown as
-        | ShoppingItem
-        | undefined
+      const item = itemsCollection.get(id) as ShoppingItem | undefined
       if (!item) return
-      itemsCollection.update(id, (draft: any) => {
+      itemsCollection.update(id, (draft) => {
         draft.checked = !draft.checked
       })
       return item

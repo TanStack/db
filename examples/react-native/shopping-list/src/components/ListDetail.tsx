@@ -1,15 +1,14 @@
 import React, { useState } from 'react'
 import {
-  View,
+  FlatList,
+  StyleSheet,
   Text,
   TextInput,
   TouchableOpacity,
-  FlatList,
-  StyleSheet,
+  View,
 } from 'react-native'
-import { useLiveQuery } from '@tanstack/react-db'
-import { eq } from '@tanstack/react-db'
-import { itemsCollection, listsCollection } from '../db/collections'
+import { eq, useLiveQuery  } from '@tanstack/react-db'
+import { itemsCollection } from '../db/collections'
 import { useShopping } from '../db/ShoppingContext'
 
 interface ListDetailProps {
@@ -20,17 +19,6 @@ export function ListDetail({ listId }: ListDetailProps) {
   const [newItemText, setNewItemText] = useState(``)
   const { itemActions } = useShopping()
 
-  // Get the list name
-  const listResult = useLiveQuery((q) =>
-    q
-      .from({ list: listsCollection })
-      .where(({ list }) => eq(list.id, listId))
-      .select(({ list }) => ({ id: list.id, name: list.name })),
-  )
-  const list = (listResult.data ?? [])[0] as
-    | { id: string; name: string }
-    | undefined
-
   // Get items for this list
   const itemsResult = useLiveQuery((q) =>
     q
@@ -38,12 +26,12 @@ export function ListDetail({ listId }: ListDetailProps) {
       .where(({ item }) => eq(item.listId, listId))
       .orderBy(({ item }) => item.createdAt, `asc`),
   )
-  const items = (itemsResult.data ?? []) as Array<{
+  const items = itemsResult.data as Array<{
     id: string
     listId: string
     text: string
     checked: boolean
-    createdAt: Date
+    createdAt: string
   }>
 
   const handleAddItem = async () => {

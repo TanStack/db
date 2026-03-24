@@ -1,17 +1,17 @@
 import React, { useState } from 'react'
 import {
-  View,
+  ActivityIndicator,
+  Alert,
+  FlatList,
+  StyleSheet,
   Text,
   TextInput,
   TouchableOpacity,
-  FlatList,
-  StyleSheet,
-  ActivityIndicator,
-  Alert,
+  View,
 } from 'react-native'
 import { useRouter } from 'expo-router'
-import { useLiveQuery, eq, count } from '@tanstack/react-db'
-import { listsCollection, itemsCollection } from '../db/collections'
+import { count, eq, useLiveQuery } from '@tanstack/react-db'
+import { itemsCollection, listsCollection } from '../db/collections'
 import { useShopping } from '../db/ShoppingContext'
 
 // Subcomponent that subscribes to the child aggregate collections for reactive counts
@@ -80,7 +80,7 @@ export function ListsScreen() {
       }))
       .orderBy(({ list }) => list.createdAt, `desc`),
   )
-  const lists = (queryResult.data ?? []) as unknown as Array<{
+  const lists = queryResult.data as unknown as Array<{
     id: string
     name: string
     createdAt: string
@@ -200,10 +200,13 @@ export function ListsScreen() {
           1. Includes — item counts from nested child queries
         </Text>
         <Text style={styles.instructionsText}>
-          2. Offline transactions — works without network
+          2. Electric sync — real-time replication via shape streams
         </Text>
         <Text style={styles.instructionsText}>
-          3. SQLite persistence — data survives app restart
+          3. Offline transactions — works without network
+        </Text>
+        <Text style={styles.instructionsText}>
+          4. SQLite persistence — data survives app restart
         </Text>
       </View>
     </View>

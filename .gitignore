@@ -39,6 +39,7 @@ stats.html
 .tsup
 .svelte-kit
 .expo
+examples/react-native/shopping-list/ios/
 
 vite.config.js.timestamp-*
 vite.config.ts.timestamp-*
