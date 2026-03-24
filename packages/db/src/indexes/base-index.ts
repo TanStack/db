@@ -86,10 +86,10 @@ export abstract class BaseIndex<
   public readonly expression: BasicExpression
   public abstract readonly supportedOperations: Set<IndexOperation>
 
-  /** @internal */ lookupCount = 0
-  /** @internal */ totalLookupTime = 0
-  /** @internal */ lastUpdated = new Date()
-  /** @internal */ compareOptions: CompareOptions
+  protected lookupCount = 0
+  protected totalLookupTime = 0
+  protected lastUpdated = new Date()
+  protected compareOptions: CompareOptions
 
   constructor(
     id: number,
@@ -189,24 +189,20 @@ export abstract class BaseIndex<
     }
   }
 
-  /** @internal */
-  abstract initialize(options?: any): void
+  protected abstract initialize(options?: any): void
 
-  /** @internal */
-  evaluateIndexExpression(item: any): any {
+  protected evaluateIndexExpression(item: any): any {
     const evaluator = compileSingleRowExpression(this.expression)
     return evaluator(item as Record<string, unknown>)
   }
 
-  /** @internal */
-  trackLookup(startTime: number): void {
+  protected trackLookup(startTime: number): void {
     const duration = performance.now() - startTime
     this.lookupCount++
     this.totalLookupTime += duration
   }
 
-  /** @internal */
-  updateTimestamp(): void {
+  protected updateTimestamp(): void {
     this.lastUpdated = new Date()
   }
 }

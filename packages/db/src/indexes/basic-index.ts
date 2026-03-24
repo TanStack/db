@@ -70,7 +70,7 @@ export class BasicIndex<
     }
   }
 
-  initialize(_options?: BasicIndexOptions): void {}
+  protected initialize(_options?: BasicIndexOptions): void {}
 
   /**
    * Adds a value to the index

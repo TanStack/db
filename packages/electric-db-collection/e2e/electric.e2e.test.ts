@@ -5,8 +5,7 @@
  */
 
 import { afterAll, afterEach, beforeAll, describe, inject } from 'vitest'
-import { createCollection } from '@tanstack/db'
-import { BasicIndex } from '@tanstack/db/indexing'
+import { createCollection, BasicIndex } from '@tanstack/db'
 import { ELECTRIC_TEST_HOOKS, electricCollectionOptions } from '../src/electric'
 import { makePgClient } from '../../db-collection-e2e/support/global-setup'
 import {

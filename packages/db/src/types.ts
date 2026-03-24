@@ -571,10 +571,10 @@ export interface BaseCollectionConfig<
   autoIndex?: `off` | `eager`
   /**
    * Default index type to use when creating indexes without an explicit type.
-   * Required for auto-indexing. Import from '@tanstack/db/indexing'.
+   * Required for auto-indexing. Import from '@tanstack/db'.
    * @example
    * ```ts
-   * import { BasicIndex } from '@tanstack/db/indexing'
+   * import { BasicIndex } from '@tanstack/db'
    * const collection = createCollection({
    *   defaultIndexType: BasicIndex,
    *   autoIndex: 'eager',

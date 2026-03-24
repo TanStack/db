@@ -342,7 +342,7 @@ export class CollectionImpl<
       throw new CollectionConfigurationError(
         `autoIndex: 'eager' requires defaultIndexType to be set. ` +
           `Import an index type and set it:\n` +
-          `  import { BasicIndex } from '@tanstack/db/indexing'\n` +
+          `  import { BasicIndex } from '@tanstack/db'\n` +
           `  createCollection({ defaultIndexType: BasicIndex, autoIndex: 'eager', ... })`,
       )
     }
@@ -583,7 +583,7 @@ export class CollectionImpl<
    *
    * @example
    * ```ts
-   * import { BasicIndex } from '@tanstack/db/indexing'
+   * import { BasicIndex } from '@tanstack/db'
    *
    * // Create an index with explicit type
    * const ageIndex = collection.createIndex((row) => row.age, {

@@ -241,7 +241,7 @@ export class CollectionIndexesManager<
    * @example
    * ```ts
    * // With explicit index type (recommended for tree-shaking)
-   * import { BasicIndex } from '@tanstack/db/indexing'
+   * import { BasicIndex } from '@tanstack/db'
    * collection.createIndex((row) => row.userId, { indexType: BasicIndex })
    *
    * // With collection's default index type
@@ -265,7 +265,7 @@ export class CollectionIndexesManager<
       throw new CollectionConfigurationError(
         `No index type specified and no defaultIndexType set on collection. ` +
           `Either pass indexType in config, or set defaultIndexType on the collection:\n` +
-          `  import { BasicIndex } from '@tanstack/db/indexing'\n` +
+          `  import { BasicIndex } from '@tanstack/db'\n` +
           `  createCollection({ defaultIndexType: BasicIndex, ... })`,
       )
     }

@@ -5,8 +5,8 @@ import {
   eq,
   gt,
   lt,
+  BasicIndex,
 } from '@tanstack/db'
-import { BasicIndex } from '@tanstack/db/indexing'
 import { electricCollectionOptions } from '../src/electric'
 import type { ElectricCollectionUtils } from '../src/electric'
 import type { Collection } from '@tanstack/db'
