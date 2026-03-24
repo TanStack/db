@@ -75,7 +75,7 @@ export class BTreeIndex<
     this.orderedEntries = new BTree(this.compareFn)
   }
 
-  protected initialize(_options?: BTreeIndexOptions): void {}
+  initialize(_options?: BTreeIndexOptions): void {}
 
   /**
    * Adds a value to the index
