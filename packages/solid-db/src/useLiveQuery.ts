@@ -17,12 +17,16 @@ import type { Accessor } from 'solid-js'
 import type {
   ChangeMessage,
   Collection,
+  CollectionConfigSingleRowOption,
   CollectionStatus,
   Context,
   GetResult,
+  InferResultType,
   InitialQueryBuilder,
   LiveQueryCollectionConfig,
+  NonSingleResult,
   QueryBuilder,
+  SingleResult,
 } from '@tanstack/db'
 
 /**
@@ -97,12 +101,12 @@ import type {
 // Overload 1: Accept query function that always returns QueryBuilder
 export function useLiveQuery<TContext extends Context>(
   queryFn: (q: InitialQueryBuilder) => QueryBuilder<TContext>,
-): Accessor<Array<GetResult<TContext>>> & {
+): Accessor<InferResultType<TContext>> & {
   /**
    * @deprecated use function result instead
    * query.data -> query()
    */
-  data: Array<GetResult<TContext>>
+  data: InferResultType<TContext>
   state: ReactiveMap<string | number, GetResult<TContext>>
   collection: Collection<GetResult<TContext>, string | number, {}>
   status: CollectionStatus
@@ -118,12 +122,12 @@ export function useLiveQuery<TContext extends Context>(
   queryFn: (
     q: InitialQueryBuilder,
   ) => QueryBuilder<TContext> | undefined | null,
-): Accessor<Array<GetResult<TContext>>> & {
+): Accessor<InferResultType<TContext>> & {
   /**
    * @deprecated use function result instead
    * query.data -> query()
    */
-  data: Array<GetResult<TContext>>
+  data: InferResultType<TContext>
   state: ReactiveMap<string | number, GetResult<TContext>>
   collection: Collection<GetResult<TContext>, string | number, {}> | null
   status: CollectionStatus | `disabled`
@@ -177,12 +181,12 @@ export function useLiveQuery<TContext extends Context>(
 // Overload 2: Accept config object
 export function useLiveQuery<TContext extends Context>(
   config: Accessor<LiveQueryCollectionConfig<TContext>>,
-): Accessor<Array<GetResult<TContext>>> & {
+): Accessor<InferResultType<TContext>> & {
   /**
    * @deprecated use function result instead
    * query.data -> query()
    */
-  data: Array<GetResult<TContext>>
+  data: InferResultType<TContext>
   state: ReactiveMap<string | number, GetResult<TContext>>
   collection: Collection<GetResult<TContext>, string | number, {}>
   status: CollectionStatus
@@ -228,13 +232,15 @@ export function useLiveQuery<TContext extends Context>(
  *  </Switch>
  * )
  */
-// Overload 3: Accept pre-created live query collection
+// Overload 3: Accept pre-created live query collection (non-single result)
 export function useLiveQuery<
   TResult extends object,
   TKey extends string | number,
   TUtils extends Record<string, any>,
 >(
-  liveQueryCollection: Accessor<Collection<TResult, TKey, TUtils>>,
+  liveQueryCollection: Accessor<
+    Collection<TResult, TKey, TUtils> & NonSingleResult
+  >,
 ): Accessor<Array<TResult>> & {
   /**
    * @deprecated use function result instead
@@ -243,6 +249,31 @@ export function useLiveQuery<
   data: Array<TResult>
   state: ReactiveMap<TKey, TResult>
   collection: Collection<TResult, TKey, TUtils>
+  status: CollectionStatus
+  isLoading: boolean
+  isReady: boolean
+  isIdle: boolean
+  isError: boolean
+  isCleanedUp: boolean
+}
+
+// Overload 3b: Accept pre-created live query collection with singleResult: true
+export function useLiveQuery<
+  TResult extends object,
+  TKey extends string | number,
+  TUtils extends Record<string, any>,
+>(
+  liveQueryCollection: Accessor<
+    Collection<TResult, TKey, TUtils> & SingleResult
+  >,
+): Accessor<TResult | undefined> & {
+  /**
+   * @deprecated use function result instead
+   * query.data -> query()
+   */
+  data: TResult | undefined
+  state: ReactiveMap<TKey, TResult>
+  collection: Collection<TResult, TKey, TUtils> & SingleResult
   status: CollectionStatus
   isLoading: boolean
   isReady: boolean
@@ -393,6 +424,16 @@ export function useLiveQuery(
 
   // We have to remove getters from the resource function so we wrap it
   function getData() {
+    const currentCollection = collection()
+    if (currentCollection) {
+      const config: CollectionConfigSingleRowOption<any, any, any> =
+        currentCollection.config
+      if (config.singleResult) {
+        // Force resource tracking so Suspense works
+        getDataResource()
+        return data[0]
+      }
+    }
     return getDataResource()
   }
 
