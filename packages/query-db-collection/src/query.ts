@@ -1164,6 +1164,7 @@ export function queryCollectionOptions(
         ...(retryDelay !== undefined && { retryDelay }),
         ...(staleTime !== undefined && { staleTime }),
       }
+
       const localObserver = new QueryObserver<
         Array<any>,
         any,
@@ -1574,30 +1575,28 @@ export function queryCollectionOptions(
         )
       }
 
-      if (effectivePersistedGcTime !== undefined) {
-        if (metadata) {
-          begin()
-          metadata.collection.set(
-            `${QUERY_COLLECTION_GC_PREFIX}${hashedQueryKey}`,
-            {
-              queryHash: hashedQueryKey,
-              mode:
-                effectivePersistedGcTime === Number.POSITIVE_INFINITY
-                  ? `until-revalidated`
-                  : `ttl`,
-              ...(effectivePersistedGcTime === Number.POSITIVE_INFINITY
-                ? {}
-                : { expiresAt: Date.now() + effectivePersistedGcTime }),
-            },
-          )
-          commit()
-          if (effectivePersistedGcTime !== Number.POSITIVE_INFINITY) {
-            schedulePersistedRetentionExpiry({
-              queryHash: hashedQueryKey,
-              mode: `ttl`,
-              expiresAt: Date.now() + effectivePersistedGcTime,
-            })
-          }
+      if (effectivePersistedGcTime !== undefined && persistedMetadata?.row.scanPersisted) {
+        begin()
+        metadata.collection.set(
+          `${QUERY_COLLECTION_GC_PREFIX}${hashedQueryKey}`,
+          {
+            queryHash: hashedQueryKey,
+            mode:
+              effectivePersistedGcTime === Number.POSITIVE_INFINITY
+                ? `until-revalidated`
+                : `ttl`,
+            ...(effectivePersistedGcTime === Number.POSITIVE_INFINITY
+              ? {}
+              : { expiresAt: Date.now() + effectivePersistedGcTime }),
+          },
+        )
+        commit()
+        if (effectivePersistedGcTime !== Number.POSITIVE_INFINITY) {
+          schedulePersistedRetentionExpiry({
+            queryHash: hashedQueryKey,
+            mode: `ttl`,
+            expiresAt: Date.now() + effectivePersistedGcTime,
+          })
         }
         unsubscribes.get(hashedQueryKey)?.()
         unsubscribes.delete(hashedQueryKey)
