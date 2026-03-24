@@ -158,12 +158,19 @@ export function processOrderBy(
         )
 
         if (fieldName) {
+          // Use a single-column comparator for the index, not the
+          // multi-column `compare` function. The multi-column comparator
+          // expects array values [col1, col2, ...] but the index stores
+          // individual field values. Passing `compare` here causes the
+          // BTree to treat all single values as equal (since number[0]
+          // === undefined for both sides of the comparison).
+          const firstColumnCompareFn = makeComparator(compareOpts)
           ensureIndexForField(
             fieldName,
             followRefResult.path,
             followRefCollection,
             compareOpts,
-            compare,
+            firstColumnCompareFn,
           )
         }
 
