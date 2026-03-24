@@ -6,7 +6,7 @@
  */
 
 import { describe, expect, inject } from 'vitest'
-import { createCollection } from '@tanstack/db'
+import { createCollection, BTreeIndex } from '@tanstack/db'
 import { initClient } from 'trailbase'
 import { trailBaseCollectionOptions } from '../src/trailbase'
 import {
@@ -171,6 +171,8 @@ function createCollectionsForSyncMode(
       getKey: (item: User) => item.id,
       startSync: true,
       syncMode,
+      autoIndex: `eager`,
+      defaultIndexType: BTreeIndex,
       parse: {
         id: parseTrailBaseId,
         isActive: (isActive) => Boolean(isActive),
@@ -195,6 +197,8 @@ function createCollectionsForSyncMode(
       getKey: (item: Post) => item.id,
       startSync: true,
       syncMode,
+      autoIndex: `eager`,
+      defaultIndexType: BTreeIndex,
       parse: {
         id: parseTrailBaseId,
         largeViewCount: (l) => BigInt(l),
@@ -217,6 +221,8 @@ function createCollectionsForSyncMode(
       getKey: (item: Comment) => item.id,
       startSync: true,
       syncMode,
+      autoIndex: `eager`,
+      defaultIndexType: BTreeIndex,
       parse: {
         id: parseTrailBaseId,
         createdAt: (v) => new Date(v),

@@ -260,6 +260,8 @@ describe(`Deterministic Ordering`, () => {
         {
           id: `multi-col-orderby-messages`,
           getKey: (item) => item.id,
+          autoIndex: `eager`,
+          defaultIndexType: BTreeIndex,
           startSync: true,
           sync: {
             sync: ({ begin, write, commit, markReady }) => {

@@ -255,6 +255,10 @@ function createEmployeesWithNullableCollection(
 
 function createOrderByTests(autoIndex: `off` | `eager`): void {
   describe(`with autoIndex ${autoIndex}`, () => {
+    // Some tests require an index for incremental updates (loadMoreIfNeeded).
+    // These only work with autoIndex: 'eager' which auto-creates the needed indexes.
+    const itWhenAutoIndexEager = autoIndex === `eager` ? it : it.skip
+
     let employeesCollection: ReturnType<typeof createEmployeesCollection>
     let departmentsCollection: ReturnType<typeof createDepartmentsCollection>
 
@@ -557,56 +561,59 @@ function createOrderByTests(autoIndex: `off` | `eager`): void {
         ])
       })
 
-      it(`applies incremental insert of a new row inside the topK but after max sent value correctly`, async () => {
-        const collection = createLiveQueryCollection((q) =>
-          q
-            .from({ employees: employeesCollection })
-            .orderBy(({ employees }) => employees.salary, `asc`)
-            .offset(1)
-            .limit(10)
-            .select(({ employees }) => ({
-              id: employees.id,
-              name: employees.name,
-              salary: employees.salary,
-            })),
-        )
-        await collection.preload()
+      itWhenAutoIndexEager(
+        `applies incremental insert of a new row inside the topK but after max sent value correctly`,
+        async () => {
+          const collection = createLiveQueryCollection((q) =>
+            q
+              .from({ employees: employeesCollection })
+              .orderBy(({ employees }) => employees.salary, `asc`)
+              .offset(1)
+              .limit(10)
+              .select(({ employees }) => ({
+                id: employees.id,
+                name: employees.name,
+                salary: employees.salary,
+              })),
+          )
+          await collection.preload()
 
-        const results = Array.from(collection.values())
+          const results = Array.from(collection.values())
 
-        expect(results.map((r) => r.salary)).toEqual([
-          52_000, 55_000, 60_000, 65_000,
-        ])
+          expect(results.map((r) => r.salary)).toEqual([
+            52_000, 55_000, 60_000, 65_000,
+          ])
 
-        // Now insert a new employee with highest salary
-        // this should now become part of the topK because
-        // the topK isn't full yet, so even though it's after the max sent value
-        // it should still be part of the topK
-        const newEmployee = {
-          id: 6,
-          name: `George`,
-          department_id: 1,
-          salary: 72_000,
-          hire_date: `2023-01-01`,
-        }
+          // Now insert a new employee with highest salary
+          // this should now become part of the topK because
+          // the topK isn't full yet, so even though it's after the max sent value
+          // it should still be part of the topK
+          const newEmployee = {
+            id: 6,
+            name: `George`,
+            department_id: 1,
+            salary: 72_000,
+            hire_date: `2023-01-01`,
+          }
 
-        employeesCollection.utils.begin()
-        employeesCollection.utils.write({
-          type: `insert`,
-          value: newEmployee,
-        })
-        employeesCollection.utils.commit()
+          employeesCollection.utils.begin()
+          employeesCollection.utils.write({
+            type: `insert`,
+            value: newEmployee,
+          })
+          employeesCollection.utils.commit()
 
-        const newResults = Array.from(collection.values())
+          const newResults = Array.from(collection.values())
 
-        expect(newResults.map((r) => [r.id, r.salary])).toEqual([
-          [5, 52_000],
-          [3, 55_000],
-          [2, 60_000],
-          [4, 65_000],
-          [6, 72_000],
-        ])
-      })
+          expect(newResults.map((r) => [r.id, r.salary])).toEqual([
+            [5, 52_000],
+            [3, 55_000],
+            [2, 60_000],
+            [4, 65_000],
+            [6, 72_000],
+          ])
+        },
+      )
 
       it(`applies incremental insert of a new row after the topK correctly`, async () => {
         const collection = createLiveQueryCollection((q) =>
@@ -734,37 +741,40 @@ function createOrderByTests(autoIndex: `off` | `eager`): void {
         ])
       })
 
-      it(`handles deletion from partial page with limit larger than data`, async () => {
-        const collection = createLiveQueryCollection((q) =>
-          q
-            .from({ employees: employeesCollection })
-            .orderBy(({ employees }) => employees.salary, `desc`)
-            .limit(20) // Limit larger than number of employees (5)
-            .select(({ employees }) => ({
-              id: employees.id,
-              name: employees.name,
-              salary: employees.salary,
-            })),
-        )
-        await collection.preload()
+      itWhenAutoIndexEager(
+        `handles deletion from partial page with limit larger than data`,
+        async () => {
+          const collection = createLiveQueryCollection((q) =>
+            q
+              .from({ employees: employeesCollection })
+              .orderBy(({ employees }) => employees.salary, `desc`)
+              .limit(20) // Limit larger than number of employees (5)
+              .select(({ employees }) => ({
+                id: employees.id,
+                name: employees.name,
+                salary: employees.salary,
+              })),
+          )
+          await collection.preload()
 
-        const results = Array.from(collection.values())
-        expect(results).toHaveLength(5)
-        expect(results[0]!.name).toBe(`Diana`)
+          const results = Array.from(collection.values())
+          expect(results).toHaveLength(5)
+          expect(results[0]!.name).toBe(`Diana`)
 
-        // Delete Diana (the highest paid employee, first in DESC order)
-        const dianaData = employeeData.find((e) => e.id === 4)!
-        employeesCollection.utils.begin()
-        employeesCollection.utils.write({
-          type: `delete`,
-          value: dianaData,
-        })
-        employeesCollection.utils.commit()
+          // Delete Diana (the highest paid employee, first in DESC order)
+          const dianaData = employeeData.find((e) => e.id === 4)!
+          employeesCollection.utils.begin()
+          employeesCollection.utils.write({
+            type: `delete`,
+            value: dianaData,
+          })
+          employeesCollection.utils.commit()
 
-        const newResults = Array.from(collection.values())
-        expect(newResults).toHaveLength(4)
-        expect(newResults[0]!.name).toBe(`Bob`)
-      })
+          const newResults = Array.from(collection.values())
+          expect(newResults).toHaveLength(4)
+          expect(newResults[0]!.name).toBe(`Bob`)
+        },
+      )
     })
 
     describe(`OrderBy with Joins`, () => {

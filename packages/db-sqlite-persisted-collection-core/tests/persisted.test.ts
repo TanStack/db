@@ -1,5 +1,10 @@
 import { describe, expect, it } from 'vitest'
-import { IR, createCollection, createTransaction } from '@tanstack/db'
+import {
+  IR,
+  createCollection,
+  createTransaction,
+  BasicIndex,
+} from '@tanstack/db'
 import {
   InvalidPersistedCollectionCoordinatorError,
   InvalidPersistedStorageKeyEncodingError,
@@ -835,6 +840,7 @@ describe(`persistedCollectionOptions`, () => {
       persistedCollectionOptions<Todo, string>({
         id: `sync-present-indexes`,
         getKey: (item) => item.id,
+        defaultIndexType: BasicIndex,
         sync: {
           sync: ({ markReady }) => {
             markReady()

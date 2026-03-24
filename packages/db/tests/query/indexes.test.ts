@@ -1,5 +1,6 @@
 import { beforeEach, describe, expect, it } from 'vitest'
 import { createCollection } from '../../src/collection/index.js'
+import { BTreeIndex } from '../../src/indexes/btree-index'
 
 import { createLiveQueryCollection } from '../../src/query/live-query-collection'
 import {
@@ -234,6 +235,7 @@ function createTestItemCollection(autoIndex: `off` | `eager` = `off`) {
       getKey: (item) => item.id,
       initialData: testData,
       autoIndex,
+      defaultIndexType: BTreeIndex,
     }),
   )
 }
@@ -600,6 +602,7 @@ describe(`Query Index Optimization`, () => {
       const secondCollection = createCollection<TestItem, string>({
         getKey: (item) => item.id,
         autoIndex: `off`,
+        defaultIndexType: BTreeIndex,
         startSync: true,
         sync: {
           sync: ({ begin, write, commit }) => {
@@ -895,6 +898,7 @@ describe(`Query Index Optimization`, () => {
       const secondCollection = createCollection<TestItem2, string>({
         getKey: (item) => item.id2,
         autoIndex: `off`,
+        defaultIndexType: BTreeIndex,
         startSync: true,
         sync: {
           sync: ({ begin, write, commit }) => {

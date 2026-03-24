@@ -1,15 +1,10 @@
 import {
-  IndexProxy,
-  IndexRemovedError,
-  LazyIndexWrapper,
-} from '../indexes/lazy-index'
-import {
   createSingleRowRefProxy,
   toExpression,
 } from '../query/builder/ref-proxy'
-import { BTreeIndex } from '../indexes/btree-index'
+import { CollectionConfigurationError } from '../errors'
 import type { StandardSchemaV1 } from '@standard-schema/spec'
-import type { BaseIndex, IndexResolver } from '../indexes/base-index'
+import type { BaseIndex, IndexConstructor } from '../indexes/base-index'
 import type { ChangeMessage } from '../types'
 import type { IndexOptions } from '../indexes/index-options'
 import type { SingleRowRefProxy } from '../query/builder/ref-proxy'
@@ -33,24 +28,12 @@ function compareStringsCodePoint(left: string, right: string): number {
   return left < right ? -1 : 1
 }
 
-function isConstructorResolver<TKey extends string | number>(
-  resolver: IndexResolver<TKey>,
-): boolean {
-  return typeof resolver === `function` && resolver.prototype !== undefined
-}
-
 function resolveResolverMetadata<TKey extends string | number>(
-  resolver: IndexResolver<TKey>,
+  resolver: IndexConstructor<TKey>,
 ): CollectionIndexResolverMetadata {
-  if (isConstructorResolver(resolver)) {
-    return {
-      kind: `constructor`,
-      ...(resolver.name ? { name: resolver.name } : {}),
-    }
-  }
-
   return {
-    kind: `async`,
+    kind: `constructor`,
+    ...(resolver.name ? { name: resolver.name } : {}),
   }
 }
 
@@ -174,7 +157,7 @@ function createCollectionIndexMetadata<TKey extends string | number>(
   indexId: number,
   expression: BasicExpression,
   name: string | undefined,
-  resolver: IndexResolver<TKey>,
+  resolver: IndexConstructor<TKey>,
   options: unknown,
 ): CollectionIndexMetadata {
   const resolverMetadata = resolveResolverMetadata(resolver)
@@ -223,10 +206,6 @@ function cloneExpression(expression: BasicExpression): BasicExpression {
   return JSON.parse(JSON.stringify(expression)) as BasicExpression
 }
 
-function isIndexRemovedError(error: unknown): boolean {
-  return error instanceof IndexRemovedError
-}
-
 export class CollectionIndexesManager<
   TOutput extends object = Record<string, unknown>,
   TKey extends string | number = string | number,
@@ -235,12 +214,11 @@ export class CollectionIndexesManager<
 > {
   private lifecycle!: CollectionLifecycleManager<TOutput, TKey, TSchema, TInput>
   private state!: CollectionStateManager<TOutput, TKey, TSchema, TInput>
+  private defaultIndexType: IndexConstructor<TKey> | undefined
   private events!: CollectionEventsManager
 
-  public lazyIndexes = new Map<number, LazyIndexWrapper<TKey>>()
-  public resolvedIndexes = new Map<number, BaseIndex<TKey>>()
+  public indexes = new Map<number, BaseIndex<TKey>>()
   public indexMetadata = new Map<number, CollectionIndexMetadata>()
-  public isIndexesResolved = false
   public indexCounter = 0
 
   constructor() {}
@@ -248,20 +226,32 @@ export class CollectionIndexesManager<
   setDeps(deps: {
     state: CollectionStateManager<TOutput, TKey, TSchema, TInput>
     lifecycle: CollectionLifecycleManager<TOutput, TKey, TSchema, TInput>
+    defaultIndexType?: IndexConstructor<TKey>
     events: CollectionEventsManager
   }) {
     this.state = deps.state
     this.lifecycle = deps.lifecycle
+    this.defaultIndexType = deps.defaultIndexType
     this.events = deps.events
   }
 
   /**
    * Creates an index on a collection for faster queries.
+   *
+   * @example
+   * ```ts
+   * // With explicit index type (recommended for tree-shaking)
+   * import { BasicIndex } from '@tanstack/db'
+   * collection.createIndex((row) => row.userId, { indexType: BasicIndex })
+   *
+   * // With collection's default index type
+   * collection.createIndex((row) => row.userId)
+   * ```
    */
-  public createIndex<TResolver extends IndexResolver<TKey> = typeof BTreeIndex>(
+  public createIndex<TIndexType extends IndexConstructor<TKey>>(
     indexCallback: (row: SingleRowRefProxy<TOutput>) => any,
-    config: IndexOptions<TResolver> = {},
-  ): IndexProxy<TKey> {
+    config: IndexOptions<TIndexType> = {},
+  ): BaseIndex<TKey> {
     this.lifecycle.validateCollectionUsable(`createIndex`)
 
     const indexId = ++this.indexCounter
@@ -269,90 +259,63 @@ export class CollectionIndexesManager<
     const indexExpression = indexCallback(singleRowRefProxy)
     const expression = toExpression(indexExpression)
 
-    // Default to BTreeIndex if no type specified
-    const resolver = config.indexType ?? (BTreeIndex as unknown as TResolver)
+    // Use provided index type, or fall back to collection's default
+    const IndexType = config.indexType ?? this.defaultIndexType
+    if (!IndexType) {
+      throw new CollectionConfigurationError(
+        `No index type specified and no defaultIndexType set on collection. ` +
+          `Either pass indexType in config, or set defaultIndexType on the collection:\n` +
+          `  import { BasicIndex } from '@tanstack/db'\n` +
+          `  createCollection({ defaultIndexType: BasicIndex, ... })`,
+      )
+    }
 
-    // Create lazy wrapper
-    const lazyIndex = new LazyIndexWrapper<TKey>(
+    // Create index synchronously
+    const index = new IndexType(
       indexId,
       expression,
       config.name,
-      resolver,
       config.options,
-      this.state.entries(),
     )
 
-    this.lazyIndexes.set(indexId, lazyIndex)
+    // Build with current data
+    index.build(this.state.entries())
+
+    this.indexes.set(indexId, index)
+
+    // Track metadata and emit event
     const metadata = createCollectionIndexMetadata(
       indexId,
       expression,
       config.name,
-      resolver,
+      IndexType,
       config.options,
     )
     this.indexMetadata.set(indexId, metadata)
-
-    // For BTreeIndex, resolve immediately and synchronously
-    if ((resolver as unknown) === BTreeIndex) {
-      try {
-        const resolvedIndex = lazyIndex.getResolved()
-        this.resolvedIndexes.set(indexId, resolvedIndex)
-      } catch (error) {
-        console.warn(`Failed to resolve BTreeIndex:`, error)
-      }
-    } else if (typeof resolver === `function` && resolver.prototype) {
-      // Other synchronous constructors - resolve immediately
-      try {
-        const resolvedIndex = lazyIndex.getResolved()
-        this.resolvedIndexes.set(indexId, resolvedIndex)
-      } catch {
-        // Fallback to async resolution
-        this.resolveSingleIndex(indexId, lazyIndex).catch((error) => {
-          if (isIndexRemovedError(error)) {
-            return
-          }
-          console.warn(`Failed to resolve single index:`, error)
-        })
-      }
-    } else if (this.isIndexesResolved) {
-      // Async loader but indexes are already resolved - resolve this one
-      this.resolveSingleIndex(indexId, lazyIndex).catch((error) => {
-        if (isIndexRemovedError(error)) {
-          return
-        }
-        console.warn(`Failed to resolve single index:`, error)
-      })
-    }
-
     this.events.emitIndexAdded(metadata)
 
-    return new IndexProxy(indexId, lazyIndex)
+    return index
   }
 
   /**
    * Removes an index from this collection.
    * Returns true when an index existed and was removed, false otherwise.
    */
-  public removeIndex(indexOrId: IndexProxy<TKey> | number): boolean {
+  public removeIndex(indexOrId: BaseIndex<TKey> | number): boolean {
     this.lifecycle.validateCollectionUsable(`removeIndex`)
 
     const indexId = typeof indexOrId === `number` ? indexOrId : indexOrId.id
-    const lazyIndex = this.lazyIndexes.get(indexId)
-    if (!lazyIndex) {
+    const index = this.indexes.get(indexId)
+    if (!index) {
       return false
     }
 
-    if (
-      indexOrId instanceof IndexProxy &&
-      lazyIndex !== indexOrId._getLazyWrapper()
-    ) {
-      // Same numeric id from another collection should not remove this index.
+    if (typeof indexOrId !== `number` && index !== indexOrId) {
+      // Passed a different index instance with the same id — do not remove.
       return false
     }
 
-    lazyIndex.markRemoved()
-    this.lazyIndexes.delete(indexId)
-    this.resolvedIndexes.delete(indexId)
+    this.indexes.delete(indexId)
 
     const metadata = this.indexMetadata.get(indexId)
     this.indexMetadata.delete(indexId)
@@ -361,61 +324,6 @@ export class CollectionIndexesManager<
     }
 
     return true
-  }
-
-  /**
-   * Resolve all lazy indexes (called when collection first syncs)
-   */
-  public async resolveAllIndexes(): Promise<void> {
-    if (this.isIndexesResolved) return
-
-    const resolutionPromises = Array.from(this.lazyIndexes.entries()).map(
-      async ([indexId, lazyIndex]) => {
-        let resolvedIndex: BaseIndex<TKey>
-        try {
-          resolvedIndex = await lazyIndex.resolve()
-        } catch (error) {
-          if (isIndexRemovedError(error)) {
-            return { indexId, resolvedIndex: undefined }
-          }
-
-          throw error
-        }
-
-        // Build index with current data
-        resolvedIndex.build(this.state.entries())
-
-        if (this.lazyIndexes.has(indexId)) {
-          this.resolvedIndexes.set(indexId, resolvedIndex)
-        }
-        return { indexId, resolvedIndex }
-      },
-    )
-
-    await Promise.all(resolutionPromises)
-    this.isIndexesResolved = true
-  }
-
-  /**
-   * Resolve a single index immediately
-   */
-  private async resolveSingleIndex(
-    indexId: number,
-    lazyIndex: LazyIndexWrapper<TKey>,
-  ): Promise<BaseIndex<TKey>> {
-    const resolvedIndex = await lazyIndex.resolve()
-    resolvedIndex.build(this.state.entries())
-    if (this.lazyIndexes.has(indexId)) {
-      this.resolvedIndexes.set(indexId, resolvedIndex)
-    }
-    return resolvedIndex
-  }
-
-  /**
-   * Get resolved indexes for query optimization
-   */
-  get indexes(): Map<number, BaseIndex<TKey>> {
-    return this.resolvedIndexes
   }
 
   /**
@@ -440,7 +348,7 @@ export class CollectionIndexesManager<
    * Updates all indexes when the collection changes
    */
   public updateIndexes(changes: Array<ChangeMessage<TOutput, TKey>>): void {
-    for (const index of this.resolvedIndexes.values()) {
+    for (const index of this.indexes.values()) {
       for (const change of changes) {
         switch (change.type) {
           case `insert`:
@@ -462,15 +370,10 @@ export class CollectionIndexesManager<
   }
 
   /**
-   * Clean up the collection by stopping sync and clearing data
-   * This can be called manually or automatically by garbage collection
+   * Clean up indexes
    */
   public cleanup(): void {
-    for (const lazyIndex of this.lazyIndexes.values()) {
-      lazyIndex.markRemoved()
-    }
-    this.lazyIndexes.clear()
-    this.resolvedIndexes.clear()
+    this.indexes.clear()
     this.indexMetadata.clear()
   }
 }

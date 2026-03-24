@@ -2,7 +2,7 @@ import { mkdtempSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterAll, afterEach, beforeAll } from 'vitest'
-import { createCollection } from '@tanstack/db'
+import { createCollection, BTreeIndex } from '@tanstack/db'
 import { persistedCollectionOptions } from '../src'
 import { generateSeedData } from '../../db-collection-e2e/src/fixtures/seed-data'
 import { runPersistedCollectionConformanceSuite } from '../../db-sqlite-persisted-collection-core/tests/contracts/persisted-collection-conformance-contract'
@@ -62,6 +62,8 @@ function createPersistedCollection<T extends PersistableRow>(
       syncMode,
       getKey: (item) => item.id,
       persistence,
+      autoIndex: `eager`,
+      defaultIndexType: BTreeIndex,
     }),
   )
 

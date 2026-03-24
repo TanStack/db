@@ -6,7 +6,7 @@
  */
 
 import { describe, expect, it, vi } from 'vitest'
-import { createCollection } from '@tanstack/db'
+import { createCollection, BTreeIndex } from '@tanstack/db'
 import { QueryClient } from '@tanstack/query-core'
 import { startOfflineExecutor } from '@tanstack/offline-transactions'
 import { queryCollectionOptions } from '../src/query'
@@ -186,6 +186,8 @@ describe(`offline transactions + query collection refresh`, () => {
         queryFn,
         getKey: (item: TestItem) => item.id,
         startSync: true,
+        autoIndex: `eager`,
+        defaultIndexType: BTreeIndex,
       }),
     )
 

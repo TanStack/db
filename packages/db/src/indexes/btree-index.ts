@@ -33,7 +33,7 @@ export interface RangeQueryOptions {
  * This maintains items in sorted order and provides efficient range operations
  */
 export class BTreeIndex<
-  TKey extends string | number | undefined = string | number | undefined,
+  TKey extends string | number = string | number,
 > extends BaseIndex<TKey> {
   public readonly supportedOperations = new Set<IndexOperation>([
     `eq`,

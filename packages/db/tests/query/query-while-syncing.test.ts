@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, test, vi } from 'vitest'
 import { createLiveQueryCollection, eq, gt } from '../../src/query/index.js'
 import { createCollection } from '../../src/collection/index.js'
 import { createTransaction } from '../../src/transactions.js'
+import { BTreeIndex } from '../../src/indexes/btree-index.js'
 import { stripVirtualProps } from '../utils.js'
 
 // Sample user type for tests
@@ -54,6 +55,7 @@ describe(`Query while syncing`, () => {
           id: `test-users-delayed-sync`,
           getKey: (user) => user.id,
           autoIndex,
+          ...(autoIndex === `eager` ? { defaultIndexType: BTreeIndex } : {}),
           startSync: false,
           sync: {
             sync: ({ begin, write, commit, markReady }) => {
@@ -140,6 +142,7 @@ describe(`Query while syncing`, () => {
           id: `test-users-where-sync`,
           getKey: (user) => user.id,
           autoIndex,
+          ...(autoIndex === `eager` ? { defaultIndexType: BTreeIndex } : {}),
           startSync: false,
           sync: {
             sync: ({ begin, write, commit, markReady }) => {
@@ -212,6 +215,7 @@ describe(`Query while syncing`, () => {
           id: `test-users-select-sync`,
           getKey: (user) => user.id,
           autoIndex,
+          ...(autoIndex === `eager` ? { defaultIndexType: BTreeIndex } : {}),
           startSync: false,
           sync: {
             sync: ({ begin, write, commit, markReady }) => {
@@ -270,6 +274,7 @@ describe(`Query while syncing`, () => {
           id: `test-users-join-sync`,
           getKey: (user) => user.id,
           autoIndex,
+          ...(autoIndex === `eager` ? { defaultIndexType: BTreeIndex } : {}),
           startSync: false,
           sync: {
             sync: ({ begin, write, commit, markReady }) => {
@@ -285,6 +290,7 @@ describe(`Query while syncing`, () => {
           id: `test-departments-join-sync`,
           getKey: (dept) => dept.id,
           autoIndex,
+          ...(autoIndex === `eager` ? { defaultIndexType: BTreeIndex } : {}),
           startSync: false,
           sync: {
             sync: ({ begin, write, commit, markReady }) => {
@@ -392,6 +398,7 @@ describe(`Query while syncing`, () => {
           id: `test-users-left-join-sync`,
           getKey: (user) => user.id,
           autoIndex,
+          ...(autoIndex === `eager` ? { defaultIndexType: BTreeIndex } : {}),
           startSync: false,
           sync: {
             sync: ({ begin, write, commit, markReady }) => {
@@ -407,6 +414,7 @@ describe(`Query while syncing`, () => {
           id: `test-departments-left-join-sync`,
           getKey: (dept) => dept.id,
           autoIndex,
+          ...(autoIndex === `eager` ? { defaultIndexType: BTreeIndex } : {}),
           startSync: false,
           sync: {
             sync: ({ begin, write, commit, markReady }) => {
@@ -502,6 +510,7 @@ describe(`Query while syncing`, () => {
           id: `multi-source-1`,
           getKey: (user) => user.id,
           autoIndex,
+          ...(autoIndex === `eager` ? { defaultIndexType: BTreeIndex } : {}),
           startSync: false,
           sync: {
             sync: ({ begin, write, commit, markReady }) => {
@@ -517,6 +526,7 @@ describe(`Query while syncing`, () => {
           id: `multi-source-2`,
           getKey: (user) => user.id,
           autoIndex,
+          ...(autoIndex === `eager` ? { defaultIndexType: BTreeIndex } : {}),
           startSync: false,
           sync: {
             sync: ({ begin, write, commit, markReady }) => {
@@ -532,6 +542,7 @@ describe(`Query while syncing`, () => {
           id: `multi-source-3`,
           getKey: (user) => user.id,
           autoIndex,
+          ...(autoIndex === `eager` ? { defaultIndexType: BTreeIndex } : {}),
           startSync: false,
           sync: {
             sync: ({ begin, write, commit, markReady }) => {
@@ -614,6 +625,7 @@ describe(`Query while syncing`, () => {
           id: `test-users-error-sync`,
           getKey: (user) => user.id,
           autoIndex,
+          ...(autoIndex === `eager` ? { defaultIndexType: BTreeIndex } : {}),
           startSync: false,
           sync: {
             sync: ({ begin, write, commit }) => {
@@ -672,6 +684,7 @@ describe(`Query while syncing`, () => {
           id: `test-users-preload-sync`,
           getKey: (user) => user.id,
           autoIndex,
+          ...(autoIndex === `eager` ? { defaultIndexType: BTreeIndex } : {}),
           startSync: false,
           sync: {
             sync: ({ begin, write, commit, markReady }) => {
@@ -766,6 +779,7 @@ describe(`Query while syncing`, () => {
           id: `test-users-where-preload`,
           getKey: (user) => user.id,
           autoIndex,
+          ...(autoIndex === `eager` ? { defaultIndexType: BTreeIndex } : {}),
           startSync: false,
           sync: {
             sync: ({ begin, write, commit, markReady }) => {
@@ -849,6 +863,7 @@ describe(`Query while syncing`, () => {
           id: `test-users-join-preload`,
           getKey: (user) => user.id,
           autoIndex,
+          ...(autoIndex === `eager` ? { defaultIndexType: BTreeIndex } : {}),
           startSync: false,
           sync: {
             sync: ({ begin, write, commit, markReady }) => {
@@ -864,6 +879,7 @@ describe(`Query while syncing`, () => {
           id: `test-departments-join-preload`,
           getKey: (dept) => dept.id,
           autoIndex,
+          ...(autoIndex === `eager` ? { defaultIndexType: BTreeIndex } : {}),
           startSync: false,
           sync: {
             sync: ({ begin, write, commit, markReady }) => {
@@ -940,6 +956,7 @@ describe(`Query while syncing`, () => {
           id: `test-users-state-when-ready`,
           getKey: (user) => user.id,
           autoIndex,
+          ...(autoIndex === `eager` ? { defaultIndexType: BTreeIndex } : {}),
           startSync: false,
           sync: {
             sync: ({ begin, write, commit, markReady }) => {
@@ -1009,6 +1026,7 @@ describe(`Query while syncing`, () => {
           id: `test-users-optimistic-mutations`,
           getKey: (user) => user.id,
           autoIndex,
+          ...(autoIndex === `eager` ? { defaultIndexType: BTreeIndex } : {}),
           startSync: false,
           sync: {
             sync: ({ begin, write, commit, markReady }) => {

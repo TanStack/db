@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { createCollection } from '../src/collection/index.js'
 import type { Collection } from '../src/collection/index.js'
+import { BTreeIndex } from '../src/indexes/btree-index.js'
 
 describe(`Collection Events System`, () => {
   let collection: Collection
@@ -11,6 +12,7 @@ describe(`Collection Events System`, () => {
     collection = createCollection({
       id: `test-collection`,
       getKey: (item: any) => item.id,
+      defaultIndexType: BTreeIndex,
       sync: {
         sync: mockSync,
       },

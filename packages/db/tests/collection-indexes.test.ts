@@ -102,6 +102,8 @@ describe(`Collection Indexes`, () => {
     collection = createCollection<TestItem, string>({
       getKey: (item) => item.id,
       startSync: true,
+      autoIndex: `eager`,
+      defaultIndexType: BTreeIndex,
       sync: {
         sync: ({ begin, write, commit, markReady }) => {
           // Provide initial data through sync
@@ -213,6 +215,7 @@ describe(`Collection Indexes`, () => {
       const otherCollection = createCollection<TestItem, string>({
         getKey: (item) => item.id,
         startSync: true,
+        defaultIndexType: BTreeIndex,
         sync: {
           sync: ({ begin, write, commit, markReady }) => {
             begin()
@@ -278,6 +281,7 @@ describe(`Collection Indexes`, () => {
 
       const preSyncIndex = lazyCollection.createIndex((row) => row.status, {
         name: `statusIndex`,
+        indexType: BTreeIndex,
       })
       const snapshot = lazyCollection.getIndexMetadata()
 
@@ -306,34 +310,15 @@ describe(`Collection Indexes`, () => {
       expect(snapshotB[0]!.resolver.kind).toBe(`constructor`)
     })
 
-    it(`should invalidate removed index proxies`, async () => {
+    it(`should remove index from collection`, () => {
       const statusIndex = collection.createIndex((row) => row.status)
 
       expect(collection.removeIndex(statusIndex)).toBe(true)
-      expect(statusIndex.isReady).toBe(false)
-      expect(() => statusIndex.indexedKeysSet).toThrow(
-        `has been removed from its collection`,
-      )
-      await expect(statusIndex.whenReady()).rejects.toThrow(
-        `has been removed from its collection`,
-      )
+      expect(collection.indexes.has(statusIndex.id)).toBe(false)
     })
 
-    it(`should not resurrect async indexes removed before they resolve`, async () => {
-      const delayedIndex = collection.createIndex((row) => row.age, {
-        indexType: async () => {
-          await new Promise((resolve) => setTimeout(resolve, 20))
-          return BTreeIndex
-        },
-      })
-
-      expect(collection.removeIndex(delayedIndex)).toBe(true)
-      await new Promise((resolve) => setTimeout(resolve, 35))
-
-      expect(collection.indexes.has(delayedIndex.id)).toBe(false)
-      await expect(delayedIndex.whenReady()).rejects.toThrow(
-        `has been removed from its collection`,
-      )
+    it(`should return false when removing non-existent index`, () => {
+      expect(collection.removeIndex(999)).toBe(false)
     })
   })
 
@@ -1482,6 +1467,7 @@ describe(`Collection Indexes`, () => {
       const specialCollection = createCollection<TestItem, string>({
         getKey: (item) => item.id,
         startSync: true,
+        defaultIndexType: BTreeIndex,
         sync: {
           sync: ({ begin, write, commit }) => {
             begin()
@@ -1543,6 +1529,7 @@ describe(`Collection Indexes`, () => {
     it(`should handle index creation on empty collection`, () => {
       const emptyCollection = createCollection<TestItem, string>({
         getKey: (item) => item.id,
+        defaultIndexType: BTreeIndex,
         sync: { sync: () => {} },
       })
 
