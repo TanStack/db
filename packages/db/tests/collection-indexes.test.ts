@@ -14,10 +14,24 @@ import {
   or,
 } from '../src/query/builder/functions'
 import { PropRef } from '../src/query/ir'
-import { BTreeIndex } from '../src/indexes/btree-index'
-import { expectIndexUsage, withIndexTracking } from './utils'
+import { BTreeIndex } from '../src/indexes/btree-index.js'
+import { expectIndexUsage, stripVirtualProps, withIndexTracking } from './utils'
 import type { Collection } from '../src/collection/index.js'
 import type { MutationFn, PendingMutation } from '../src/types'
+
+const normalizeChange = (change: any) => ({
+  ...change,
+  value: stripVirtualProps(change.value),
+  previousValue: stripVirtualProps(change.previousValue),
+})
+
+const stripVirtualOnlyUpdates = (changes: Array<any>) =>
+  changes.map(normalizeChange).filter((change) => {
+    if (change.type !== `update`) {
+      return true
+    }
+    return JSON.stringify(change.value) !== JSON.stringify(change.previousValue)
+  })
 
 interface TestItem {
   id: string
@@ -88,6 +102,7 @@ describe(`Collection Indexes`, () => {
     collection = createCollection<TestItem, string>({
       getKey: (item) => item.id,
       startSync: true,
+      autoIndex: `eager`,
       defaultIndexType: BTreeIndex,
       sync: {
         sync: ({ begin, write, commit, markReady }) => {
@@ -186,6 +201,127 @@ describe(`Collection Indexes`, () => {
     })
   })
 
+  describe(`Index Removal`, () => {
+    it(`should remove indexes by proxy and by id`, () => {
+      const ageIndex = collection.createIndex((row) => row.age)
+      const statusIndex = collection.createIndex((row) => row.status)
+
+      expect(collection.removeIndex(ageIndex)).toBe(true)
+      expect(collection.removeIndex(statusIndex.id)).toBe(true)
+      expect(collection.removeIndex(ageIndex.id)).toBe(false)
+    })
+
+    it(`should ignore removeIndex calls from other collections`, async () => {
+      const otherCollection = createCollection<TestItem, string>({
+        getKey: (item) => item.id,
+        startSync: true,
+        defaultIndexType: BTreeIndex,
+        sync: {
+          sync: ({ begin, write, commit, markReady }) => {
+            begin()
+            write({
+              type: `insert`,
+              value: testData[0]!,
+            })
+            commit()
+            markReady()
+          },
+        },
+      })
+      await otherCollection.stateWhenReady()
+
+      const otherIndex = otherCollection.createIndex((row) => row.status)
+
+      collection.createIndex((row) => row.status)
+      expect(collection.removeIndex(otherIndex)).toBe(false)
+      expect(collection.indexes.size).toBe(1)
+    })
+
+    it(`should emit one auto-index lifecycle event per auto-created index`, () => {
+      const addedEvents: Array<string | undefined> = []
+      collection.on(`index:added`, (event) => {
+        addedEvents.push(event.index.name)
+      })
+
+      const activeItems: Array<any> = []
+      const subscription = collection.subscribeChanges(
+        (items) => {
+          activeItems.push(...items)
+        },
+        {
+          includeInitialState: true,
+          whereExpression: eq(new PropRef([`status`]), `active`),
+        },
+      )
+      subscription.unsubscribe()
+
+      expect(activeItems).toHaveLength(3)
+      expect(addedEvents.filter((name) => name === `auto:status`)).toHaveLength(
+        1,
+      )
+    })
+
+    it(`should expose index metadata snapshot for pre-sync bootstrap`, () => {
+      const lazyCollection = createCollection<TestItem, string>({
+        getKey: (item) => item.id,
+        sync: {
+          sync: ({ begin, write, commit, markReady }) => {
+            begin()
+            for (const item of testData) {
+              write({
+                type: `insert`,
+                value: item,
+              })
+            }
+            commit()
+            markReady()
+          },
+        },
+      })
+
+      const preSyncIndex = lazyCollection.createIndex((row) => row.status, {
+        name: `statusIndex`,
+        indexType: BTreeIndex,
+      })
+      const snapshot = lazyCollection.getIndexMetadata()
+
+      expect(snapshot).toHaveLength(1)
+      expect(snapshot[0]).toMatchObject({
+        indexId: preSyncIndex.id,
+        name: `statusIndex`,
+        signatureVersion: 1,
+      })
+    })
+
+    it(`should return a defensive metadata snapshot copy`, () => {
+      collection.createIndex((row) => row.status, {
+        name: `statusIndex`,
+      })
+
+      const snapshotA = collection.getIndexMetadata()
+      expect(snapshotA).toHaveLength(1)
+
+      const originalSignature = snapshotA[0]!.signature
+      snapshotA[0]!.signature = `tampered`
+      snapshotA[0]!.resolver.kind = `async`
+
+      const snapshotB = collection.getIndexMetadata()
+      expect(snapshotB[0]!.signature).toBe(originalSignature)
+      expect(snapshotB[0]!.resolver.kind).toBe(`constructor`)
+    })
+
+    it(`should remove index from collection`, () => {
+      const statusIndex = collection.createIndex((row) => row.status)
+
+      expect(collection.removeIndex(statusIndex)).toBe(true)
+      expect(collection.indexes.has(statusIndex.id)).toBe(false)
+    })
+
+    it(`should return false when removing non-existent index`, () => {
+      expect(collection.removeIndex(999)).toBe(false)
+    })
+  })
+
   describe(`Index Maintenance`, () => {
     beforeEach(() => {
       collection.createIndex((row) => row.status)
@@ -214,12 +350,13 @@ describe(`Collection Indexes`, () => {
 
       // Item should be in collection state
       expect(collection.size).toBe(6)
-      expect(collection.get(`6`)).toEqual(newItem)
+      expect(stripVirtualProps(collection.get(`6`))).toEqual(newItem)
 
-      // Should trigger subscription
-      expect(changes).toHaveLength(1)
-      expect(changes[0]?.type).toBe(`insert`)
-      expect(changes[0]?.value.name).toBe(`Frank`)
+      // Should trigger subscription (ignore virtual-only confirmation update)
+      const dataChanges = stripVirtualOnlyUpdates(changes)
+      expect(dataChanges).toHaveLength(1)
+      expect(dataChanges[0]?.type).toBe(`insert`)
+      expect(dataChanges[0]?.value.name).toBe(`Frank`)
 
       subscription.unsubscribe()
     })
@@ -253,10 +390,11 @@ describe(`Collection Indexes`, () => {
       expect(updatedItem?.status).toBe(`inactive`)
       expect(updatedItem?.age).toBe(26)
 
-      // Should trigger subscription
-      expect(changes).toHaveLength(1)
-      expect(changes[0]?.type).toBe(`update`)
-      expect(changes[0]?.value.status).toBe(`inactive`)
+      // Should trigger subscription (ignore virtual-only confirmation update)
+      const dataChanges = stripVirtualOnlyUpdates(changes)
+      expect(dataChanges).toHaveLength(1)
+      expect(dataChanges[0]?.type).toBe(`update`)
+      expect(dataChanges[0]?.value.status).toBe(`inactive`)
 
       subscription.unsubscribe()
     })
@@ -282,10 +420,11 @@ describe(`Collection Indexes`, () => {
       expect(updatedItem?.status).toBe(`inactive`)
       expect(updatedItem?.age).toBe(26)
 
-      // Should trigger subscription
-      expect(changes).toHaveLength(1)
-      expect(changes[0]?.type).toBe(`insert`)
-      expect(changes[0]?.value.status).toBe(`inactive`)
+      // Should trigger subscription (ignore virtual-only confirmation update)
+      const dataChanges = stripVirtualOnlyUpdates(changes)
+      expect(dataChanges).toHaveLength(1)
+      expect(dataChanges[0]?.type).toBe(`insert`)
+      expect(dataChanges[0]?.value.status).toBe(`inactive`)
 
       subscription.unsubscribe()
     })
@@ -373,8 +512,9 @@ describe(`Collection Indexes`, () => {
       )
       await tx1.isPersisted.promise
 
-      expect(activeChanges).toHaveLength(1)
-      expect(activeChanges[0]?.value.name).toBe(`Bob`)
+      const dataChanges = stripVirtualOnlyUpdates(activeChanges)
+      expect(dataChanges).toHaveLength(1)
+      expect(dataChanges[0]?.value.name).toBe(`Bob`)
 
       // Change active item to inactive (should trigger delete event for item leaving filter)
       activeChanges.length = 0
@@ -387,10 +527,11 @@ describe(`Collection Indexes`, () => {
       await tx2.isPersisted.promise
 
       // Should trigger delete event for item that no longer matches filter
-      expect(activeChanges).toHaveLength(1)
-      expect(activeChanges[0]?.type).toBe(`delete`)
-      expect(activeChanges[0]?.key).toBe(`1`)
-      expect(activeChanges[0]?.value.status).toBe(`active`) // Should be the previous value
+      const filteredChanges = stripVirtualOnlyUpdates(activeChanges)
+      expect(filteredChanges).toHaveLength(1)
+      expect(filteredChanges[0]?.type).toBe(`delete`)
+      expect(filteredChanges[0]?.key).toBe(`1`)
+      expect(filteredChanges[0]?.value.status).toBe(`active`) // Should be the previous value
 
       subscription.unsubscribe()
     })
@@ -416,8 +557,9 @@ describe(`Collection Indexes`, () => {
       )
       await tx1.isPersisted.promise
 
-      expect(activeChanges).toHaveLength(1)
-      expect(activeChanges[0]?.value.name).toBe(`Bob`)
+      const dataChanges = stripVirtualOnlyUpdates(activeChanges)
+      expect(dataChanges).toHaveLength(1)
+      expect(dataChanges[0]?.value.name).toBe(`Bob`)
 
       // Change active item to inactive (should trigger delete event for item leaving filter)
       activeChanges.length = 0
@@ -432,7 +574,8 @@ describe(`Collection Indexes`, () => {
       // Subscriber shoiuld not receive any changes
       // because it is not aware of that key
       // so it should also not receive the delete of that key
-      expect(activeChanges).toHaveLength(0)
+      const filteredChanges = stripVirtualOnlyUpdates(activeChanges)
+      expect(filteredChanges).toHaveLength(0)
 
       subscription.unsubscribe()
     })
@@ -1177,8 +1320,9 @@ describe(`Collection Indexes`, () => {
         )
         await tx1.isPersisted.promise
 
-        expect(changes).toHaveLength(1)
-        expect(changes[0]?.value.name).toBe(`Frank`)
+        const dataChanges = stripVirtualOnlyUpdates(changes)
+        expect(dataChanges).toHaveLength(1)
+        expect(dataChanges[0]?.value.name).toBe(`Frank`)
 
         // Add an inactive item (should not trigger)
         changes.length = 0
@@ -1253,8 +1397,9 @@ describe(`Collection Indexes`, () => {
         )
         await tx.isPersisted.promise
 
-        expect(changes).toHaveLength(1)
-        expect(changes[0]?.value.name).toBe(`Diana`)
+        const dataChanges = stripVirtualOnlyUpdates(changes)
+        expect(dataChanges).toHaveLength(1)
+        expect(dataChanges[0]?.value.name).toBe(`Diana`)
 
         subscription.unsubscribe()
       })

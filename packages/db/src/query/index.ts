@@ -60,6 +60,8 @@ export {
   sum,
   min,
   max,
+  // Includes helpers
+  toArray,
 } from './builder/functions.js'
 
 // Ref proxy utilities
@@ -67,6 +69,11 @@ export type { Ref } from './builder/types.js'
 
 // Compiler
 export { compileQuery } from './compiler/index.js'
+export {
+  compileExpression,
+  compileSingleRowExpression,
+  toBooleanPredicate,
+} from './compiler/evaluators.js'
 
 // Live query collection utilities
 export {

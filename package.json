@@ -10,7 +10,11 @@
   "pnpm": {
     "overrides": {
       "metro": "0.82.5"
-    }
+    },
+    "onlyBuiltDependencies": [
+      "better-sqlite3",
+      "electron"
+    ]
   },
   "scripts": {
     "build": "pnpm --filter \"./packages/**\" build",
@@ -24,7 +28,7 @@
     "prepare": "husky",
     "test": "pnpm --filter \"./packages/**\" test",
     "test:docs": "node scripts/verify-links.ts",
-    "test:sherif": "sherif -i zod",
+    "test:sherif": "sherif -i zod -p offline-transactions-react-native",
     "generate-docs": "node scripts/generate-docs.ts"
   },
   "devDependencies": {

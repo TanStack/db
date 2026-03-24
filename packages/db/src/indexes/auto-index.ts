@@ -1,5 +1,6 @@
 import { DEFAULT_COMPARE_OPTIONS } from '../utils'
 import { checkCollectionSizeForIndex, isDevModeEnabled } from './index-registry'
+import { hasVirtualPropPath } from '../virtual-props'
 import type { CompareOptions } from '../query/builder/types'
 import type { BasicExpression } from '../query/ir'
 import type { CollectionImpl } from '../collection/index.js'
@@ -25,6 +26,9 @@ export function ensureIndexForField<
   compareOptions?: CompareOptions,
   compareFn?: (a: any, b: any) => number,
 ) {
+  if (hasVirtualPropPath(fieldPath)) {
+    return
+  }
   if (!shouldAutoIndex(collection)) {
     return
   }

@@ -18,6 +18,7 @@ import type {
   LoadSubsetOptions,
   OptimisticChangeMessage,
   SyncConfigRes,
+  SyncMetadataApi,
 } from '../types'
 import type { CollectionImpl } from './index.js'
 import type { CollectionStateManager } from './state'
@@ -93,6 +94,8 @@ export class CollectionSyncManager<
               committed: false,
               operations: [],
               deletedKeys: new Set(),
+              rowMetadataWrites: new Map(),
+              collectionMetadataWrites: new Map(),
               immediate: options?.immediate,
             })
           },
@@ -118,6 +121,10 @@ export class CollectionSyncManager<
               key = messageWithOptionalKey.key
             } else {
               key = this.config.getKey(messageWithOptionalKey.value)
+            }
+
+            if (this.state.pendingLocalChanges.has(key)) {
+              this.state.pendingLocalOrigins.add(key)
             }
 
             let messageType = messageWithOptionalKey.type
@@ -165,6 +172,23 @@ export class CollectionSyncManager<
 
             if (messageType === `delete`) {
               pendingTransaction.deletedKeys.add(key)
+              pendingTransaction.rowMetadataWrites.set(key, { type: `delete` })
+            } else if (messageType === `insert`) {
+              if (message.metadata !== undefined) {
+                pendingTransaction.rowMetadataWrites.set(key, {
+                  type: `set`,
+                  value: message.metadata,
+                })
+              } else {
+                pendingTransaction.rowMetadataWrites.set(key, {
+                  type: `delete`,
+                })
+              }
+            } else if (message.metadata !== undefined) {
+              pendingTransaction.rowMetadataWrites.set(key, {
+                type: `set`,
+                value: message.metadata,
+              })
             }
           },
           commit: () => {
@@ -201,6 +225,11 @@ export class CollectionSyncManager<
             // Clear all operations from the current transaction
             pendingTransaction.operations = []
             pendingTransaction.deletedKeys.clear()
+            pendingTransaction.rowMetadataWrites.clear()
+            // Intentionally preserve collectionMetadataWrites across truncate.
+            // Collection-scoped metadata (for example persisted resume/reset
+            // state) can be staged before truncate and should commit atomically
+            // with the truncate transaction.
 
             // Mark the transaction as a truncate operation. During commit, this triggers:
             // - Delete events for all previously synced keys (excluding optimistic-deleted keys)
@@ -216,6 +245,7 @@ export class CollectionSyncManager<
               deletes: new Set(this.state.optimisticDeletes),
             }
           },
+          metadata: this.createSyncMetadataApi(),
         }),
       )
 
@@ -238,6 +268,113 @@ export class CollectionSyncManager<
     } catch (error) {
       this.lifecycle.setStatus(`error`)
       throw error
+    }
+  }
+
+  private getActivePendingSyncTransaction() {
+    const pendingTransaction =
+      this.state.pendingSyncedTransactions[
+        this.state.pendingSyncedTransactions.length - 1
+      ]
+
+    if (!pendingTransaction) {
+      throw new NoPendingSyncTransactionWriteError()
+    }
+    if (pendingTransaction.committed) {
+      throw new SyncTransactionAlreadyCommittedWriteError()
+    }
+
+    return pendingTransaction
+  }
+
+  private createSyncMetadataApi(): SyncMetadataApi<TKey> {
+    return {
+      row: {
+        get: (key) => {
+          const pendingTransaction =
+            this.state.pendingSyncedTransactions[
+              this.state.pendingSyncedTransactions.length - 1
+            ]
+          const pendingWrite = pendingTransaction?.rowMetadataWrites.get(key)
+          if (pendingWrite) {
+            return pendingWrite.type === `delete`
+              ? undefined
+              : pendingWrite.value
+          }
+          if (pendingTransaction?.truncate) {
+            return undefined
+          }
+          return this.state.syncedMetadata.get(key)
+        },
+        set: (key, metadata) => {
+          const pendingTransaction = this.getActivePendingSyncTransaction()
+          pendingTransaction.rowMetadataWrites.set(key, {
+            type: `set`,
+            value: metadata,
+          })
+        },
+        delete: (key) => {
+          const pendingTransaction = this.getActivePendingSyncTransaction()
+          pendingTransaction.rowMetadataWrites.set(key, {
+            type: `delete`,
+          })
+        },
+      },
+      collection: {
+        get: (key) => {
+          const pendingTransaction =
+            this.state.pendingSyncedTransactions[
+              this.state.pendingSyncedTransactions.length - 1
+            ]
+          const pendingWrite =
+            pendingTransaction?.collectionMetadataWrites.get(key)
+          if (pendingWrite) {
+            return pendingWrite.type === `delete`
+              ? undefined
+              : pendingWrite.value
+          }
+          return this.state.syncedCollectionMetadata.get(key)
+        },
+        set: (key, value) => {
+          const pendingTransaction = this.getActivePendingSyncTransaction()
+          pendingTransaction.collectionMetadataWrites.set(key, {
+            type: `set`,
+            value,
+          })
+        },
+        delete: (key) => {
+          const pendingTransaction = this.getActivePendingSyncTransaction()
+          pendingTransaction.collectionMetadataWrites.set(key, {
+            type: `delete`,
+          })
+        },
+        list: (prefix) => {
+          const merged = new Map(this.state.syncedCollectionMetadata)
+          const pendingTransaction =
+            this.state.pendingSyncedTransactions[
+              this.state.pendingSyncedTransactions.length - 1
+            ]
+          if (pendingTransaction) {
+            for (const [
+              key,
+              pendingWrite,
+            ] of pendingTransaction.collectionMetadataWrites) {
+              if (pendingWrite.type === `delete`) {
+                merged.delete(key)
+              } else {
+                merged.set(key, pendingWrite.value)
+              }
+            }
+          }
+
+          return Array.from(merged.entries())
+            .filter(([key]) => (prefix ? key.startsWith(prefix) : true))
+            .map(([key, value]) => ({
+              key,
+              value,
+            }))
+        },
+      },
     }
   }
 

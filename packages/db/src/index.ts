@@ -17,6 +17,15 @@ export { deepEquals } from './utils'
 export * from './paced-mutations'
 export * from './strategies/index.js'
 
+// Virtual properties exports
+export {
+  type VirtualRowProps,
+  type VirtualOrigin,
+  type WithVirtualProps,
+  type WithoutVirtualProps,
+  hasVirtualProps,
+} from './virtual-props.js'
+
 // Index system exports - types only from main entry
 // For BasicIndex, BTreeIndex and other index implementations, import from '@tanstack/db/indexing'
 export type {
@@ -40,6 +49,17 @@ export type {
 
 // Expression helpers
 export * from './query/expression-helpers.js'
+
+// Reactive effects
+export {
+  createEffect,
+  type DeltaEvent,
+  type DeltaType,
+  type EffectConfig,
+  type EffectContext,
+  type Effect,
+  type EffectQueryInput,
+} from './query/effect.js'
 
 // Re-export some stuff explicitly to ensure the type & value is exported
 export type { Collection } from './collection/index.js'

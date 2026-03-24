@@ -221,12 +221,36 @@ export class OfflineExecutor {
     this.unsubscribeOnline = this.onlineDetector.subscribe(() => {
       if (this.isOfflineEnabled && this.executor) {
         this.executor.resetRetryDelays()
-        this.executor.executeAll().catch((error) => {
-          console.warn(
-            `Failed to execute transactions on connectivity change:`,
-            error,
-          )
-        })
+
+        if (this.scheduler.getPendingCount() > 0) {
+          const barrierPromise = this.executor.executeAll()
+
+          for (const collection of Object.values(this.config.collections)) {
+            collection.deferDataRefresh = barrierPromise
+          }
+
+          barrierPromise
+            .catch((error) => {
+              console.warn(
+                `Failed to execute transactions on connectivity change:`,
+                error,
+              )
+            })
+            .finally(() => {
+              for (const collection of Object.values(this.config.collections)) {
+                if (collection.deferDataRefresh === barrierPromise) {
+                  collection.deferDataRefresh = null
+                }
+              }
+            })
+        } else {
+          this.executor.executeAll().catch((error) => {
+            console.warn(
+              `Failed to execute transactions on connectivity change:`,
+              error,
+            )
+          })
+        }
       }
     })
   }
@@ -568,6 +592,10 @@ export class OfflineExecutor {
   }
 
   dispose(): void {
+    for (const collection of Object.values(this.config.collections)) {
+      collection.deferDataRefresh = null
+    }
+
     if (this.unsubscribeOnline) {
       this.unsubscribeOnline()
       this.unsubscribeOnline = null

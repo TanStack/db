@@ -2,7 +2,8 @@ import { Aggregate, Func } from '../ir'
 import { toExpression } from './ref-proxy.js'
 import type { BasicExpression } from '../ir'
 import type { RefProxy } from './ref-proxy.js'
-import type { RefLeaf } from './types.js'
+import type { Context, GetResult, RefLeaf } from './types.js'
+import type { QueryBuilder } from './index.js'
 
 type StringRef =
   | RefLeaf<string>
@@ -285,11 +286,35 @@ export function concat(
   )
 }
 
-export function coalesce(...args: Array<ExpressionLike>): BasicExpression<any> {
+// Helper type for coalesce: extracts non-nullish value types from all args
+type CoalesceArgTypes<T extends Array<ExpressionLike>> = {
+  [K in keyof T]: NonNullable<ExtractType<T[K]>>
+}[number]
+
+// Whether any arg in the tuple is statically guaranteed non-null (i.e., does not include null | undefined)
+type HasGuaranteedNonNull<T extends Array<ExpressionLike>> = {
+  [K in keyof T]: null extends ExtractType<T[K]>
+    ? false
+    : undefined extends ExtractType<T[K]>
+      ? false
+      : true
+}[number] extends false
+  ? false
+  : true
+
+// coalesce() return type: union of all non-null arg types; null included unless a guaranteed non-null arg exists
+type CoalesceReturnType<T extends Array<ExpressionLike>> =
+  HasGuaranteedNonNull<T> extends true
+    ? BasicExpression<CoalesceArgTypes<T>>
+    : BasicExpression<CoalesceArgTypes<T> | null>
+
+export function coalesce<T extends [ExpressionLike, ...Array<ExpressionLike>]>(
+  ...args: T
+): CoalesceReturnType<T> {
   return new Func(
     `coalesce`,
     args.map((arg) => toExpression(arg)),
-  )
+  ) as CoalesceReturnType<T>
 }
 
 export function add<T1 extends ExpressionLike, T2 extends ExpressionLike>(
@@ -376,3 +401,14 @@ export const operators = [
 ] as const
 
 export type OperatorName = (typeof operators)[number]
+
+export class ToArrayWrapper<T = any> {
+  declare readonly _type: T
+  constructor(public readonly query: QueryBuilder<any>) {}
+}
+
+export function toArray<TContext extends Context>(
+  query: QueryBuilder<TContext>,
+): ToArrayWrapper<GetResult<TContext>> {
+  return new ToArrayWrapper(query)
+}

@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it } from 'vitest'
 import { createCollection } from '../../src/collection/index.js'
-import { mockSyncCollectionOptions } from '../utils.js'
+import { mockSyncCollectionOptions, stripVirtualProps } from '../utils.js'
 import { createLiveQueryCollection } from '../../src/query/live-query-collection.js'
 import {
   eq,
@@ -255,6 +255,10 @@ function createEmployeesWithNullableCollection(
 
 function createOrderByTests(autoIndex: `off` | `eager`): void {
   describe(`with autoIndex ${autoIndex}`, () => {
+    // Some tests require an index for incremental updates (loadMoreIfNeeded).
+    // These only work with autoIndex: 'eager' which auto-creates the needed indexes.
+    const itWhenAutoIndexEager = autoIndex === `eager` ? it : it.skip
+
     let employeesCollection: ReturnType<typeof createEmployeesCollection>
     let departmentsCollection: ReturnType<typeof createDepartmentsCollection>
 
@@ -557,7 +561,7 @@ function createOrderByTests(autoIndex: `off` | `eager`): void {
         ])
       })
 
-      it(`applies incremental insert of a new row inside the topK but after max sent value correctly`, async () => {
+      itWhenAutoIndexEager(`applies incremental insert of a new row inside the topK but after max sent value correctly`, async () => {
         const collection = createLiveQueryCollection((q) =>
           q
             .from({ employees: employeesCollection })
@@ -734,7 +738,7 @@ function createOrderByTests(autoIndex: `off` | `eager`): void {
         ])
       })
 
-      it(`handles deletion from partial page with limit larger than data`, async () => {
+      itWhenAutoIndexEager(`handles deletion from partial page with limit larger than data`, async () => {
         const collection = createLiveQueryCollection((q) =>
           q
             .from({ employees: employeesCollection })
@@ -843,7 +847,10 @@ function createOrderByTests(autoIndex: `off` | `eager`): void {
         })
 
         await liveQuery.stateWhenReady()
-        expect(liveQuery.toArray).toEqual([{ vin: `1` }, { vin: `2` }])
+        expect(liveQuery.toArray.map((row) => stripVirtualProps(row))).toEqual([
+          { vin: `1` },
+          { vin: `2` },
+        ])
 
         // Insert a vehicle document
         vehicleDocumentCollection.utils.begin()
@@ -857,7 +864,7 @@ function createOrderByTests(autoIndex: `off` | `eager`): void {
         })
         vehicleDocumentCollection.utils.commit()
 
-        expect(liveQuery.toArray).toEqual([
+        expect(liveQuery.toArray.map((row) => stripVirtualProps(row))).toEqual([
           { vin: `1` },
           { vin: `2` },
           { vin: `3` },
@@ -902,7 +909,7 @@ function createOrderByTests(autoIndex: `off` | `eager`): void {
         })
 
         await liveQuery.stateWhenReady()
-        expect(liveQuery.toArray).toEqual([
+        expect(liveQuery.toArray.map((row) => stripVirtualProps(row))).toEqual([
           { vin: `1`, updatedAt: new Date(`2023-01-05`).getTime() },
           { vin: `2`, updatedAt: new Date(`2023-01-02`).getTime() },
         ])
@@ -919,7 +926,7 @@ function createOrderByTests(autoIndex: `off` | `eager`): void {
         })
         vehicleDocumentCollection.utils.commit()
 
-        expect(liveQuery.toArray).toEqual([
+        expect(liveQuery.toArray.map((row) => stripVirtualProps(row))).toEqual([
           { vin: `1`, updatedAt: new Date(`2023-01-05`).getTime() },
           { vin: `3`, updatedAt: new Date(`2023-01-03`).getTime() },
           { vin: `2`, updatedAt: new Date(`2023-01-02`).getTime() },
@@ -2547,9 +2554,9 @@ describe(`OrderBy with duplicate values`, () => {
         await collection.preload()
 
         // First page should return items 1-5
-        let results = Array.from(collection.values()).sort(
-          (a, b) => a.id - b.id,
-        )
+        let results = Array.from(collection.values())
+          .map((value) => stripVirtualProps(value))
+          .sort((a, b) => a.id - b.id)
         expect(results).toEqual([
           { id: 1, a: 1, keep: true },
           { id: 2, a: 2, keep: true },
@@ -2563,7 +2570,9 @@ describe(`OrderBy with duplicate values`, () => {
         await collection.stateWhenReady()
 
         // Second page should return items 6-10 (all with value 5)
-        results = Array.from(collection.values()).sort((a, b) => a.id - b.id)
+        results = Array.from(collection.values())
+          .map((value) => stripVirtualProps(value))
+          .sort((a, b) => a.id - b.id)
         expect(results).toEqual([
           { id: 6, a: 5, keep: true },
           { id: 7, a: 5, keep: true },
@@ -2579,7 +2588,9 @@ describe(`OrderBy with duplicate values`, () => {
 
         // Third page should return items 11-13 (the items after the duplicate 5s)
         // The bug would cause this to stall and return empty or get stuck
-        results = Array.from(collection.values()).sort((a, b) => a.id - b.id)
+        results = Array.from(collection.values())
+          .map((value) => stripVirtualProps(value))
+          .sort((a, b) => a.id - b.id)
         expect(results).toEqual([
           { id: 11, a: 11, keep: true },
           { id: 12, a: 12, keep: true },
@@ -2593,7 +2604,9 @@ describe(`OrderBy with duplicate values`, () => {
         await collection.stateWhenReady()
 
         // Should be empty since we've exhausted all items
-        results = Array.from(collection.values())
+        results = Array.from(collection.values()).map((value) =>
+          stripVirtualProps(value),
+        )
         expect(results).toEqual([{ id: 16, a: 16, keep: true }])
       })
 
@@ -2762,9 +2775,9 @@ describe(`OrderBy with duplicate values`, () => {
         await collection.preload()
 
         // First page should return items 1-5 (all local data)
-        let results = Array.from(collection.values()).sort(
-          (a, b) => a.id - b.id,
-        )
+        let results = Array.from(collection.values())
+          .map((value) => stripVirtualProps(value))
+          .sort((a, b) => a.id - b.id)
         expect(results).toEqual([
           { id: 1, a: 1, keep: true },
           { id: 2, a: 2, keep: true },
@@ -2785,7 +2798,9 @@ describe(`OrderBy with duplicate values`, () => {
         await moveToSecondPage
 
         // Second page should return items 6-10 (all with value 5, loaded from sync layer)
-        results = Array.from(collection.values()).sort((a, b) => a.id - b.id)
+        results = Array.from(collection.values())
+          .map((value) => stripVirtualProps(value))
+          .sort((a, b) => a.id - b.id)
         expect(results).toEqual([
           { id: 6, a: 5, keep: true },
           { id: 7, a: 5, keep: true },
@@ -2815,7 +2830,9 @@ describe(`OrderBy with duplicate values`, () => {
 
         // Third page should return items 11-13 (the items after the duplicate 5s)
         // The bug would cause this to stall and return empty or get stuck
-        results = Array.from(collection.values()).sort((a, b) => a.id - b.id)
+        results = Array.from(collection.values())
+          .map((value) => stripVirtualProps(value))
+          .sort((a, b) => a.id - b.id)
         expect(results).toEqual([
           { id: 11, a: 11, keep: true },
           { id: 12, a: 12, keep: true },
@@ -2994,9 +3011,9 @@ describe(`OrderBy with duplicate values`, () => {
         await collection.preload()
 
         // First page should return items 1-5 (all local data)
-        let results = Array.from(collection.values()).sort(
-          (a, b) => a.id - b.id,
-        )
+        let results = Array.from(collection.values())
+          .map((value) => stripVirtualProps(value))
+          .sort((a, b) => a.id - b.id)
         expect(results).toEqual([
           { id: 1, a: 1, keep: true },
           { id: 2, a: 2, keep: true },
@@ -3017,7 +3034,9 @@ describe(`OrderBy with duplicate values`, () => {
         await moveToSecondPage
 
         // Second page should return items 6-10 (all with value 5, loaded from sync layer)
-        results = Array.from(collection.values()).sort((a, b) => a.id - b.id)
+        results = Array.from(collection.values())
+          .map((value) => stripVirtualProps(value))
+          .sort((a, b) => a.id - b.id)
         expect(results).toEqual([
           { id: 6, a: 5, keep: true },
           { id: 7, a: 5, keep: true },
@@ -3047,7 +3066,9 @@ describe(`OrderBy with duplicate values`, () => {
 
         // Third page should return items 11-13 (the items after the duplicate 5s)
         // The bug would cause this to stall and return empty or get stuck
-        results = Array.from(collection.values()).sort((a, b) => a.id - b.id)
+        results = Array.from(collection.values())
+          .map((value) => stripVirtualProps(value))
+          .sort((a, b) => a.id - b.id)
         expect(results).toEqual([
           { id: 11, a: 11, keep: true },
           { id: 12, a: 12, keep: true },

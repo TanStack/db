@@ -2,8 +2,10 @@ import type { AbstractPowerSyncDatabase, Table } from '@powersync/common'
 import type { StandardSchemaV1 } from '@standard-schema/spec'
 import type {
   BaseCollectionConfig,
+  CleanupFn,
   CollectionConfig,
   InferSchemaOutput,
+  LoadSubsetOptions,
 } from '@tanstack/db'
 import type {
   AnyTableColumnType,
@@ -162,12 +164,48 @@ export type ConfigWithArbitraryCollectionTypes<
     StandardSchemaV1.InferOutput<TSchema>
   >
 }
+/**
+ * Eager sync mode hooks.
+ * Called once when the collection sync starts and stops.
+ */
+export type EagerSyncHooks = {
+  syncMode?: 'eager'
+  /**
+   * Called when the collection sync starts.
+   * Use this to set up external data sources (e.g. subscribing to a sync stream).
+   *
+   * @returns A cleanup function that is called when the collection sync is cleaned up.
+   */
+  onLoad?: () => CleanupFn | void | Promise<CleanupFn | void>
+  onLoadSubset?: never
+}
+
+/**
+ * On-demand sync mode hooks.
+ * Called each time a subset is loaded or unloaded in response to live query changes.
+ */
+export type OnDemandSyncHooks = {
+  syncMode: 'on-demand'
+  onLoad?: never
+  /**
+   * Called when a subset of data is requested by a live query.
+   * Use this to set up external data sources for the requested subset
+   * (e.g. subscribing to a sync stream with parameters derived from the query predicate).
+   *
+   * @returns A cleanup function that is called when the subset is unloaded.
+   */
+
+  onLoadSubset?: (
+    options: LoadSubsetOptions,
+  ) => CleanupFn | void | Promise<CleanupFn | void>
+}
+
 export type BasePowerSyncCollectionConfig<
   TTable extends Table = Table,
   TSchema extends StandardSchemaV1 = never,
 > = Omit<
   BaseCollectionConfig<ExtractedTable<TTable>, string, TSchema>,
-  `onInsert` | `onUpdate` | `onDelete` | `getKey`
+  `onInsert` | `onUpdate` | `onDelete` | `getKey` | `syncMode`
 > & {
   /** The PowerSync schema Table definition */
   table: TTable
@@ -186,7 +224,7 @@ export type BasePowerSyncCollectionConfig<
    *   streaming of initial results, at the cost of more query calls.
    */
   syncBatchSize?: number
-}
+} & (EagerSyncHooks | OnDemandSyncHooks)
 
 /**
  * Configuration interface for PowerSync collection options.

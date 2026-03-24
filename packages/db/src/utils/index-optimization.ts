@@ -17,6 +17,7 @@
 
 import { DEFAULT_COMPARE_OPTIONS } from '../utils.js'
 import { ReverseIndex } from '../indexes/reverse-index.js'
+import { hasVirtualPropPath } from '../virtual-props.js'
 import type { CompareOptions } from '../query/builder/types.js'
 import type { IndexInterface, IndexOperation } from '../indexes/base-index.js'
 import type { BasicExpression } from '../query/ir.js'
@@ -38,6 +39,9 @@ export function findIndexForField<TKey extends string | number>(
   fieldPath: Array<string>,
   compareOptions?: CompareOptions,
 ): IndexInterface<TKey> | undefined {
+  if (hasVirtualPropPath(fieldPath)) {
+    return undefined
+  }
   const compareOpts = compareOptions ?? {
     ...DEFAULT_COMPARE_OPTIONS,
     ...collection.compareOptions,
