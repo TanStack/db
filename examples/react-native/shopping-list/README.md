@@ -7,6 +7,7 @@ This example uses:
 - `@tanstack/offline-transactions` for queued optimistic mutations and retry
 - A local Express + Postgres API that returns `txid` values for Electric mutation matching
 - Dedicated API shape proxy endpoints (`/api/shapes/*`) so Electric is not exposed directly to clients
+- In-app `Simulate offline` toggle to demo offline queue + persistence behavior without disabling device network
 
 ## Run
 

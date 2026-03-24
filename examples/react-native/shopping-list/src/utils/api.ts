@@ -1,4 +1,5 @@
 import { Platform } from 'react-native'
+import { createOfflineAwareFetch } from '../network/simulatedOffline'
 
 const SERVER_PORT = 3001
 export const API_URL = Platform.select({
@@ -6,6 +7,7 @@ export const API_URL = Platform.select({
   ios: `http://localhost:${SERVER_PORT}`,
   default: `http://localhost:${SERVER_PORT}`,
 })
+const offlineAwareFetch = createOfflineAwareFetch(fetch)
 
 // ─── Types ──────────────────────────────────────────────
 
@@ -29,7 +31,7 @@ type ApiTxResult<T> = { txid: number } & T
 
 export const listsApi = {
   async getAll(): Promise<Array<ShoppingList>> {
-    const response = await fetch(`${API_URL}/api/lists`)
+    const response = await offlineAwareFetch(`${API_URL}/api/lists`)
     if (!response.ok) {
       throw new Error(`Failed to fetch lists: ${response.status}`)
     }
@@ -41,7 +43,7 @@ export const listsApi = {
     name: string
     createdAt?: string
   }): Promise<ApiTxResult<{ list: ShoppingList }>> {
-    const response = await fetch(`${API_URL}/api/lists`, {
+    const response = await offlineAwareFetch(`${API_URL}/api/lists`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(data),
@@ -56,7 +58,7 @@ export const listsApi = {
     id: string,
     data: { name?: string },
   ): Promise<ApiTxResult<{ list: ShoppingList }> | null> {
-    const response = await fetch(`${API_URL}/api/lists/${id}`, {
+    const response = await offlineAwareFetch(`${API_URL}/api/lists/${id}`, {
       method: 'PUT',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(data),
@@ -69,7 +71,7 @@ export const listsApi = {
   },
 
   async delete(id: string): Promise<ApiTxResult<{ success: boolean }> | null> {
-    const response = await fetch(`${API_URL}/api/lists/${id}`, {
+    const response = await offlineAwareFetch(`${API_URL}/api/lists/${id}`, {
       method: 'DELETE',
     })
     if (response.status === 404) return null
@@ -84,7 +86,7 @@ export const listsApi = {
 
 export const itemsApi = {
   async getAll(): Promise<Array<ShoppingItem>> {
-    const response = await fetch(`${API_URL}/api/items`)
+    const response = await offlineAwareFetch(`${API_URL}/api/items`)
     if (!response.ok) {
       throw new Error(`Failed to fetch items: ${response.status}`)
     }
@@ -98,7 +100,7 @@ export const itemsApi = {
     checked?: boolean
     createdAt?: string
   }): Promise<ApiTxResult<{ item: ShoppingItem }>> {
-    const response = await fetch(`${API_URL}/api/items`, {
+    const response = await offlineAwareFetch(`${API_URL}/api/items`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(data),
@@ -113,7 +115,7 @@ export const itemsApi = {
     id: string,
     data: { text?: string; checked?: boolean },
   ): Promise<ApiTxResult<{ item: ShoppingItem }> | null> {
-    const response = await fetch(`${API_URL}/api/items/${id}`, {
+    const response = await offlineAwareFetch(`${API_URL}/api/items/${id}`, {
       method: 'PUT',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(data),
@@ -126,7 +128,7 @@ export const itemsApi = {
   },
 
   async delete(id: string): Promise<ApiTxResult<{ success: boolean }> | null> {
-    const response = await fetch(`${API_URL}/api/items/${id}`, {
+    const response = await offlineAwareFetch(`${API_URL}/api/items/${id}`, {
       method: 'DELETE',
     })
     if (response.status === 404) return null

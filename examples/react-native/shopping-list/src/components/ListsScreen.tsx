@@ -1,4 +1,4 @@
-import React, { useState } from 'react'
+import React, { useEffect, useState } from 'react'
 import {
   ActivityIndicator,
   Alert,
@@ -20,15 +20,47 @@ function ListCard({
   onPress,
   onDelete,
 }: {
-  list: { id: string; name: string; totalItems: any; checkedItems: any }
+  list: {
+    id: string
+    name: string
+    totalItems: any
+    checkedItems: any
+    uncheckedPreview: any
+    $synced?: boolean
+  }
   onPress: () => void
   onDelete: () => void
 }) {
   // Subscribe to the child collections — this is the "includes" pattern for React
   const { data: totalData } = useLiveQuery(list.totalItems)
   const { data: checkedData } = useLiveQuery(list.checkedItems)
+  const { data: uncheckedPreviewData } = useLiveQuery(list.uncheckedPreview)
   const totalCount = (totalData as any)?.[0]?.n ?? 0
   const checkedCount = (checkedData as any)?.[0]?.n ?? 0
+  const uncheckedPreview =
+    ((uncheckedPreviewData as any) as Array<{ text: string }> | undefined) ?? []
+  const uncheckedCount = Math.max(0, totalCount - checkedCount)
+  const remainingCount = Math.max(0, uncheckedCount - uncheckedPreview.length)
+  const previewText = uncheckedPreview
+    .map((item) => item.text.trim())
+    .filter((text) => text.length > 0)
+    .join(`, `)
+  const [showSavingBadge, setShowSavingBadge] = useState(false)
+
+  useEffect(() => {
+    if (list.$synced !== false) {
+      setShowSavingBadge(false)
+      return
+    }
+
+    setShowSavingBadge(false)
+    const timer = setTimeout(() => {
+      setShowSavingBadge(true)
+    }, 200)
+    return () => {
+      clearTimeout(timer)
+    }
+  }, [list.id, list.$synced])
 
   return (
     <TouchableOpacity
@@ -37,10 +69,25 @@ function ListCard({
       activeOpacity={0.7}
     >
       <View style={styles.listContent}>
-        <Text style={styles.listName}>{list.name}</Text>
+        <View style={styles.listHeaderRow}>
+          <Text style={styles.listName}>{list.name}</Text>
+          {showSavingBadge ? (
+            <View style={styles.savingBadge}>
+              <Text style={styles.savingBadgeText}>Saving</Text>
+            </View>
+          ) : null}
+        </View>
         <Text style={styles.listCount}>
           {checkedCount}/{totalCount} items
         </Text>
+        {uncheckedCount > 0 && previewText.length > 0 ? (
+          <Text style={styles.previewText}>
+            {previewText}
+            {remainingCount > 0 ? ` and ${remainingCount} more` : ``}
+          </Text>
+        ) : totalCount > 0 ? (
+          <Text style={styles.allDoneText}>All items checked</Text>
+        ) : null}
       </View>
       <TouchableOpacity
         style={styles.deleteButton}
@@ -56,8 +103,11 @@ function ListCard({
 export function ListsScreen() {
   const router = useRouter()
   const [newListName, setNewListName] = useState(``)
-  const { listActions, isOnline, pendingCount, isInitialized, initError } =
-    useShopping()
+  const {
+    listActions,
+    isInitialized,
+    initError,
+  } = useShopping()
 
   // ★ Includes query with aggregate subqueries: each list gets child collections
   // with computed counts. ListCard subscribes to them via useLiveQuery.
@@ -68,10 +118,22 @@ export function ListsScreen() {
         id: list.id,
         name: list.name,
         createdAt: list.createdAt,
+        $synced: list.$synced,
         totalItems: q
           .from({ item: itemsCollection })
           .where(({ item }) => eq(item.listId, list.id))
           .select(({ item }) => ({ n: count(item.id) })),
+        uncheckedPreview: q
+          .from({ item: itemsCollection })
+          .where(({ item }) => eq(item.listId, list.id))
+          .where(({ item }) => eq(item.checked, false))
+          .select(({ item }) => ({
+            id: item.id,
+            text: item.text,
+            createdAt: item.createdAt,
+          }))
+          .orderBy(({ item }) => item.createdAt, `asc`)
+          .limit(3),
         checkedItems: q
           .from({ item: itemsCollection })
           .where(({ item }) => eq(item.listId, list.id))
@@ -84,7 +146,9 @@ export function ListsScreen() {
     id: string
     name: string
     createdAt: string
+    $synced?: boolean
     totalItems: any
+    uncheckedPreview: any
     checkedItems: any
   }>
 
@@ -126,32 +190,6 @@ export function ListsScreen() {
 
   return (
     <View style={styles.container}>
-      {/* Status bar */}
-      <View style={styles.statusRow}>
-        <View
-          style={[
-            styles.statusBadge,
-            isOnline ? styles.online : styles.offline,
-          ]}
-        >
-          <View
-            style={[
-              styles.statusDot,
-              isOnline ? styles.onlineDot : styles.offlineDot,
-            ]}
-          />
-          <Text style={styles.statusText}>
-            {isOnline ? `Online` : `Offline`}
-          </Text>
-        </View>
-        {pendingCount > 0 && (
-          <View style={[styles.statusBadge, styles.pending]}>
-            <ActivityIndicator size="small" color="#b45309" />
-            <Text style={styles.statusText}>{pendingCount} pending</Text>
-          </View>
-        )}
-      </View>
-
       {/* Add list input */}
       <View style={styles.inputRow}>
         <TextInput
@@ -225,34 +263,6 @@ const styles = StyleSheet.create({
     alignItems: `center`,
     gap: 12,
   },
-  statusRow: {
-    flexDirection: `row`,
-    flexWrap: `wrap`,
-    gap: 8,
-    marginBottom: 16,
-  },
-  statusBadge: {
-    flexDirection: `row`,
-    alignItems: `center`,
-    paddingHorizontal: 12,
-    paddingVertical: 6,
-    borderRadius: 16,
-    gap: 6,
-  },
-  statusDot: {
-    width: 8,
-    height: 8,
-    borderRadius: 4,
-  },
-  statusText: {
-    fontSize: 12,
-    fontWeight: `500`,
-  },
-  online: { backgroundColor: `#dcfce7` },
-  onlineDot: { backgroundColor: `#22c55e` },
-  offline: { backgroundColor: `#fee2e2` },
-  offlineDot: { backgroundColor: `#ef4444` },
-  pending: { backgroundColor: `#fef3c7` },
   errorBox: {
     backgroundColor: `#fee2e2`,
     borderWidth: 1,
@@ -319,15 +329,42 @@ const styles = StyleSheet.create({
   listContent: {
     flex: 1,
   },
+  listHeaderRow: {
+    flexDirection: `row`,
+    alignItems: `center`,
+    gap: 8,
+  },
   listName: {
     fontSize: 18,
     fontWeight: `600`,
     color: `#111`,
   },
+  savingBadge: {
+    backgroundColor: `#fef3c7`,
+    borderRadius: 999,
+    paddingHorizontal: 8,
+    paddingVertical: 2,
+  },
+  savingBadgeText: {
+    color: `#92400e`,
+    fontSize: 11,
+    fontWeight: `700`,
+  },
   listCount: {
     fontSize: 14,
     color: `#666`,
     marginTop: 4,
+  },
+  previewText: {
+    marginTop: 4,
+    color: `#374151`,
+    fontSize: 13,
+  },
+  allDoneText: {
+    marginTop: 4,
+    color: `#15803d`,
+    fontSize: 12,
+    fontWeight: `600`,
   },
   deleteButton: {
     paddingHorizontal: 12,

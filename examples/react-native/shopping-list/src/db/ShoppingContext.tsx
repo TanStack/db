@@ -1,5 +1,6 @@
 import React, {
   createContext,
+  useCallback,
   useContext,
   useEffect,
   useMemo,
@@ -7,9 +8,16 @@ import React, {
 } from 'react'
 import NetInfo from '@react-native-community/netinfo'
 import {
-  createOfflineExecutor,
-  createListActions,
+  hydrateSimulatedOffline,
+  isSimulatedOffline,
+  setSimulatedOffline,
+  subscribeSimulatedOffline,
+} from '../network/simulatedOffline'
+import {
+  clearLocalState as clearCollectionsLocalState,
   createItemActions,
+  createListActions,
+  createOfflineExecutor,
 } from './collections'
 
 type OfflineExecutor = ReturnType<typeof createOfflineExecutor>
@@ -18,7 +26,11 @@ interface ShoppingContextValue {
   offline: OfflineExecutor | null
   listActions: ReturnType<typeof createListActions>
   itemActions: ReturnType<typeof createItemActions>
+  isNetworkOnline: boolean
+  isSimulatedOffline: boolean
   isOnline: boolean
+  setSimulateOffline: (enabled: boolean) => Promise<void>
+  clearLocalState: () => Promise<void>
   pendingCount: number
   isInitialized: boolean
   initError: string | null
@@ -28,7 +40,10 @@ const ShoppingContext = createContext<ShoppingContextValue | null>(null)
 
 export function ShoppingProvider({ children }: { children: React.ReactNode }) {
   const [offline, setOffline] = useState<OfflineExecutor | null>(null)
-  const [isOnline, setIsOnline] = useState(true)
+  const [isNetworkOnline, setIsNetworkOnline] = useState(true)
+  const [isSimulatedOfflineState, setIsSimulatedOfflineState] = useState(
+    isSimulatedOffline(),
+  )
   const [pendingCount, setPendingCount] = useState(0)
   const [isInitialized, setIsInitialized] = useState(false)
   const [initError, setInitError] = useState<string | null>(null)
@@ -52,10 +67,19 @@ export function ShoppingProvider({ children }: { children: React.ReactNode }) {
   // Monitor network status (for UI display only —
   // ReactNativeOnlineDetector in the executor handles retry automatically)
   useEffect(() => {
+    void hydrateSimulatedOffline().catch((err) => {
+      console.warn(`[Shopping] Failed to hydrate simulated offline state`, err)
+    })
+    return subscribeSimulatedOffline(() => {
+      setIsSimulatedOfflineState(isSimulatedOffline())
+    })
+  }, [])
+
+  useEffect(() => {
     const unsubscribe = NetInfo.addEventListener((state) => {
       const connected =
         state.isConnected === true && state.isInternetReachable !== false
-      setIsOnline(connected)
+      setIsNetworkOnline(connected)
     })
     return () => unsubscribe()
   }, [])
@@ -71,13 +95,25 @@ export function ShoppingProvider({ children }: { children: React.ReactNode }) {
 
   const listActions = useMemo(() => createListActions(offline), [offline])
   const itemActions = useMemo(() => createItemActions(offline), [offline])
+  const setSimulateOffline = useCallback((enabled: boolean) => {
+    return setSimulatedOffline(enabled)
+  }, [])
+  const clearLocalState = useCallback(async () => {
+    await setSimulatedOffline(false)
+    await clearCollectionsLocalState(offline)
+  }, [offline])
+  const isOnline = isNetworkOnline && !isSimulatedOfflineState
 
   const value = useMemo(
     () => ({
       offline,
       listActions,
       itemActions,
+      isNetworkOnline,
+      isSimulatedOffline: isSimulatedOfflineState,
       isOnline,
+      setSimulateOffline,
+      clearLocalState,
       pendingCount,
       isInitialized,
       initError,
@@ -86,7 +122,11 @@ export function ShoppingProvider({ children }: { children: React.ReactNode }) {
       offline,
       listActions,
       itemActions,
+      isNetworkOnline,
+      isSimulatedOfflineState,
       isOnline,
+      setSimulateOffline,
+      clearLocalState,
       pendingCount,
       isInitialized,
       initError,

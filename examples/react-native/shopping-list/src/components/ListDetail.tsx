@@ -1,4 +1,4 @@
-import React, { useState } from 'react'
+import React, { useEffect, useState } from 'react'
 import {
   FlatList,
   StyleSheet,
@@ -15,6 +15,76 @@ interface ListDetailProps {
   listId: string
 }
 
+type ListItemRow = {
+  id: string
+  listId: string
+  text: string
+  checked: boolean
+  createdAt: string
+  $synced?: boolean
+}
+
+function ItemRow({
+  item,
+  onToggle,
+  onDelete,
+}: {
+  item: ListItemRow
+  onToggle: () => void
+  onDelete: () => void
+}) {
+  const [showSavingBadge, setShowSavingBadge] = useState(false)
+
+  useEffect(() => {
+    if (item.$synced !== false) {
+      setShowSavingBadge(false)
+      return
+    }
+
+    setShowSavingBadge(false)
+    const timer = setTimeout(() => {
+      setShowSavingBadge(true)
+    }, 200)
+    return () => {
+      clearTimeout(timer)
+    }
+  }, [item.id, item.$synced])
+
+  return (
+    <View style={styles.itemRow}>
+      <TouchableOpacity
+        style={[
+          styles.checkbox,
+          item.checked && styles.checkboxChecked,
+        ]}
+        onPress={onToggle}
+      >
+        {item.checked && <Text style={styles.checkmark}>✓</Text>}
+      </TouchableOpacity>
+      <Text
+        style={[
+          styles.itemText,
+          item.checked && styles.itemTextChecked,
+        ]}
+      >
+        {item.text}
+      </Text>
+      {showSavingBadge ? (
+        <View style={styles.savingBadge}>
+          <Text style={styles.savingBadgeText}>Saving</Text>
+        </View>
+      ) : null}
+      <TouchableOpacity
+        style={styles.deleteButton}
+        onPress={onDelete}
+        hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
+      >
+        <Text style={styles.deleteButtonText}>Delete</Text>
+      </TouchableOpacity>
+    </View>
+  )
+}
+
 export function ListDetail({ listId }: ListDetailProps) {
   const [newItemText, setNewItemText] = useState(``)
   const { itemActions } = useShopping()
@@ -26,13 +96,7 @@ export function ListDetail({ listId }: ListDetailProps) {
       .where(({ item }) => eq(item.listId, listId))
       .orderBy(({ item }) => item.createdAt, `asc`),
   )
-  const items = itemsResult.data as Array<{
-    id: string
-    listId: string
-    text: string
-    checked: boolean
-    createdAt: string
-  }>
+  const items = itemsResult.data as Array<ListItemRow>
 
   const handleAddItem = async () => {
     if (!newItemText.trim() || !itemActions.addItem) return
@@ -89,32 +153,11 @@ export function ListDetail({ listId }: ListDetailProps) {
           keyExtractor={(item) => item.id}
           style={styles.list}
           renderItem={({ item }) => (
-            <View style={styles.itemRow}>
-              <TouchableOpacity
-                style={[
-                  styles.checkbox,
-                  item.checked && styles.checkboxChecked,
-                ]}
-                onPress={() => handleToggleItem(item.id)}
-              >
-                {item.checked && <Text style={styles.checkmark}>✓</Text>}
-              </TouchableOpacity>
-              <Text
-                style={[
-                  styles.itemText,
-                  item.checked && styles.itemTextChecked,
-                ]}
-              >
-                {item.text}
-              </Text>
-              <TouchableOpacity
-                style={styles.deleteButton}
-                onPress={() => handleDeleteItem(item.id)}
-                hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
-              >
-                <Text style={styles.deleteButtonText}>Delete</Text>
-              </TouchableOpacity>
-            </View>
+            <ItemRow
+              item={item}
+              onToggle={() => handleToggleItem(item.id)}
+              onDelete={() => handleDeleteItem(item.id)}
+            />
           )}
         />
       )}
@@ -216,6 +259,17 @@ const styles = StyleSheet.create({
   deleteButton: {
     paddingHorizontal: 12,
     paddingVertical: 6,
+  },
+  savingBadge: {
+    backgroundColor: `#fef3c7`,
+    borderRadius: 999,
+    paddingHorizontal: 8,
+    paddingVertical: 2,
+  },
+  savingBadgeText: {
+    color: `#92400e`,
+    fontSize: 11,
+    fontWeight: `700`,
   },
   deleteButtonText: {
     color: `#dc2626`,
