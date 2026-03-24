@@ -146,7 +146,7 @@ describe.each([
     return createCollection({
       ...options,
       startSync: true,
-      ...(autoIndex === `eager` ? { defaultIndexType: BasicIndex as any } : {}),
+      ...(autoIndex === `eager` ? { defaultIndexType: BasicIndex } : {}),
     }) as unknown as Collection<
       User,
       string | number,
@@ -354,7 +354,7 @@ describe.each([
       }),
       autoIndex,
       startSync: true,
-      ...(autoIndex === `eager` ? { defaultIndexType: BasicIndex as any } : {}),
+      ...(autoIndex === `eager` ? { defaultIndexType: BasicIndex } : {}),
     })
 
     // Send initial data but don't complete sync (no up-to-date)
@@ -509,7 +509,7 @@ describe.each([
           startSync: true,
           autoIndex: `eager` as const,
         }),
-        defaultIndexType: BasicIndex as any,
+        defaultIndexType: BasicIndex,
       })
 
       mockRequestSnapshot.mockResolvedValue({
@@ -679,7 +679,7 @@ describe(`Electric Collection with Live Query - syncMode integration`, () => {
       ...options,
       startSync: true,
       autoIndex: `eager` as const,
-      defaultIndexType: BasicIndex as any,
+      defaultIndexType: BasicIndex,
     })
   }
 
@@ -987,7 +987,7 @@ describe(`Electric Collection - loadSubset deduplication`, () => {
       ...options,
       startSync: true,
       autoIndex: `eager` as const,
-      defaultIndexType: BasicIndex as any,
+      defaultIndexType: BasicIndex,
     })
   }
 

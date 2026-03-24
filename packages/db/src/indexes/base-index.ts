@@ -26,7 +26,7 @@ export interface IndexStats {
 }
 
 export interface IndexInterface<
-  TKey extends string | number | undefined = string | number | undefined,
+  TKey extends string | number = string | number,
 > {
   add: (key: TKey, item: any) => void
   remove: (key: TKey, item: any) => void
@@ -79,7 +79,7 @@ export interface IndexInterface<
  * Base abstract class that all index types extend
  */
 export abstract class BaseIndex<
-  TKey extends string | number | undefined = string | number | undefined,
+  TKey extends string | number = string | number,
 > implements IndexInterface<TKey> {
   public readonly id: number
   public readonly name?: string

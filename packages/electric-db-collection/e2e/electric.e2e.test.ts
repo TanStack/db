@@ -292,7 +292,7 @@ describe(`Electric Collection E2E Tests`, () => {
         getKey: (item: any) => item.id,
         startSync: true,
         autoIndex: `eager`,
-        defaultIndexType: BasicIndex as any,
+        defaultIndexType: BasicIndex,
       }),
     )
 
@@ -309,7 +309,7 @@ describe(`Electric Collection E2E Tests`, () => {
         getKey: (item: any) => item.id,
         startSync: true,
         autoIndex: `eager`,
-        defaultIndexType: BasicIndex as any,
+        defaultIndexType: BasicIndex,
       }),
     )
 

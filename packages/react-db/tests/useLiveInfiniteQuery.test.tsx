@@ -51,7 +51,7 @@ function createOnDemandCollection(opts: OnDemandCollectionOptions) {
     syncMode: `on-demand`,
     startSync: true,
     autoIndex: autoIndex ?? `eager`,
-    defaultIndexType: BTreeIndex as any,
+    defaultIndexType: BTreeIndex,
     sync: {
       sync: ({ markReady, begin, write, commit }) => {
         markReady()
@@ -1304,7 +1304,7 @@ describe(`useLiveInfiniteQuery`, () => {
       syncMode: `on-demand`,
       startSync: true,
       autoIndex: `eager`,
-      defaultIndexType: BTreeIndex as any,
+      defaultIndexType: BTreeIndex,
       sync: {
         sync: ({ markReady, begin, write, commit }) => {
           // Provide initial data by slicing the first 15 elements

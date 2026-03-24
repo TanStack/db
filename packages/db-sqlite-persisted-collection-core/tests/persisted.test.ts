@@ -836,7 +836,7 @@ describe(`persistedCollectionOptions`, () => {
       persistedCollectionOptions<Todo, string>({
         id: `sync-present-indexes`,
         getKey: (item) => item.id,
-        defaultIndexType: BasicIndex as any,
+        defaultIndexType: BasicIndex,
         sync: {
           sync: ({ markReady }) => {
             markReady()
