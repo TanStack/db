@@ -1577,6 +1577,7 @@ export function queryCollectionOptions(
 
       if (
         effectivePersistedGcTime !== undefined &&
+        metadata &&
         persistedMetadata?.row.scanPersisted
       ) {
         begin()
