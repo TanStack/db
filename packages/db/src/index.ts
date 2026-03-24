@@ -38,7 +38,10 @@ export { type IndexOptions } from './indexes/index-options.js'
 
 // Index implementations
 export { BasicIndex } from './indexes/basic-index.js'
-export type { BasicIndexOptions, RangeQueryOptions } from './indexes/basic-index.js'
+export type {
+  BasicIndexOptions,
+  RangeQueryOptions,
+} from './indexes/basic-index.js'
 export { BTreeIndex } from './indexes/btree-index.js'
 export type { RangeQueryOptions as BTreeRangeQueryOptions } from './indexes/btree-index.js'
 export { ReverseIndex } from './indexes/reverse-index.js'

@@ -1,5 +1,10 @@
 import { describe, expect, it } from 'vitest'
-import { IR, createCollection, createTransaction, BasicIndex } from '@tanstack/db'
+import {
+  IR,
+  createCollection,
+  createTransaction,
+  BasicIndex,
+} from '@tanstack/db'
 import {
   InvalidPersistedCollectionCoordinatorError,
   InvalidPersistedStorageKeyEncodingError,
