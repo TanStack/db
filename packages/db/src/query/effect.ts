@@ -51,6 +51,10 @@ export type DeltaEvent<
       value: TRow
       /** Batch-level high-water cursor — the maximum cursor observed across all source changes in this batch. Use for checkpointing via startAfter. */
       cursor?: CollectionCursor
+      /** Per-source cursor map. Present when cursor gating (startAfter) is active. */
+      cursors?: Record<string, CollectionCursor>
+      /** Source alias whose changes triggered this batch. Present when cursor gating is active. */
+      triggeringSource?: string
       metadata?: Record<string, unknown>
     }
   | {
@@ -60,6 +64,10 @@ export type DeltaEvent<
       value: TRow
       /** Batch-level high-water cursor — the maximum cursor observed across all source changes in this batch. Use for checkpointing via startAfter. */
       cursor?: CollectionCursor
+      /** Per-source cursor map. Present when cursor gating (startAfter) is active. */
+      cursors?: Record<string, CollectionCursor>
+      /** Source alias whose changes triggered this batch. Present when cursor gating is active. */
+      triggeringSource?: string
       metadata?: Record<string, unknown>
     }
   | {
@@ -71,6 +79,10 @@ export type DeltaEvent<
       previousValue: TRow
       /** Batch-level high-water cursor — the maximum cursor observed across all source changes in this batch. Use for checkpointing via startAfter. */
       cursor?: CollectionCursor
+      /** Per-source cursor map. Present when cursor gating (startAfter) is active. */
+      cursors?: Record<string, CollectionCursor>
+      /** Source alias whose changes triggered this batch. Present when cursor gating is active. */
+      triggeringSource?: string
       metadata?: Record<string, unknown>
     }
 
@@ -145,9 +157,14 @@ export interface EffectConfig<
    * Historical changes at or before the cursor still update internal query state.
    *
    * Requires the sync source to provide a monotonic cursor on every
-   * `sync.write()` call. Only supported for single-source (non-join) effects.
+   * `sync.write()` call.
+   *
+   * - **Scalar value**: applies to the single source alias. Throws for
+   *   multi-source (join) effects.
+   * - **Record**: maps source aliases to their respective cursors, enabling
+   *   independent per-source gating for join queries.
    */
-  startAfter?: CollectionCursor
+  startAfter?: CollectionCursor | Record<string, CollectionCursor>
 }
 
 /** Handle returned by createEffect */
@@ -324,7 +341,7 @@ interface EffectPipelineRunnerConfig<
 > {
   query: EffectQueryInput<any>
   skipInitial: boolean
-  startAfter?: CollectionCursor
+  startAfter?: CollectionCursor | Record<string, CollectionCursor>
   onBatchProcessed: (events: Array<DeltaEvent<TRow, TKey>>) => void
   /** Called when a source collection enters error or cleaned-up state */
   onSourceError: (error: Error) => void
@@ -379,9 +396,13 @@ class EffectPipelineRunner<TRow extends object, TKey extends string | number> {
   // skipInitial state
   private readonly skipInitial: boolean
   private initialLoadComplete = false
-  private readonly startAfter: CollectionCursor | undefined
-  private cursorGateOpen: boolean
-  private pendingBatchCursor: CollectionCursor | undefined
+
+  // Per-alias cursor gating
+  private readonly startAfterByAlias: Map<string, CollectionCursor> = new Map()
+  private readonly cursorGateOpenByAlias: Map<string, boolean> = new Map()
+  private readonly pendingBatchCursorByAlias: Map<string, CollectionCursor> =
+    new Map()
+  private readonly liveAliasesInBatch: Set<string> = new Set()
 
   // Scheduler integration
   private subscribedToAllCollections = false
@@ -401,8 +422,6 @@ class EffectPipelineRunner<TRow extends object, TKey extends string | number> {
 
   constructor(config: EffectPipelineRunnerConfig<TRow, TKey>) {
     this.skipInitial = config.skipInitial
-    this.startAfter = config.startAfter
-    this.cursorGateOpen = config.startAfter === undefined
     this.onBatchProcessed = config.onBatchProcessed
     this.onSourceError = config.onSourceError
 
@@ -413,16 +432,6 @@ class EffectPipelineRunner<TRow extends object, TKey extends string | number> {
     this.collections = extractCollectionsFromQuery(this.query)
     const aliasesById = extractCollectionAliases(this.query)
 
-    if (
-      config.startAfter !== undefined &&
-      Object.keys(this.collections).length > 1
-    ) {
-      throw new Error(
-        `startAfter is only supported for single-source effects. ` +
-          `This effect queries ${Object.keys(this.collections).length} collections.`,
-      )
-    }
-
     // Build alias → collection map
     this.collectionByAlias = {}
     for (const [collectionId, aliases] of aliasesById.entries()) {
@@ -430,6 +439,29 @@ class EffectPipelineRunner<TRow extends object, TKey extends string | number> {
       if (!collection) continue
       for (const alias of aliases) {
         this.collectionByAlias[alias] = collection
+      }
+    }
+
+    // Normalize startAfter into per-alias map
+    if (config.startAfter !== undefined) {
+      if (typeof config.startAfter === `object`) {
+        // Record<string, CollectionCursor> — per-alias cursors
+        for (const [alias, cursor] of Object.entries(config.startAfter)) {
+          this.startAfterByAlias.set(alias, cursor)
+          this.cursorGateOpenByAlias.set(alias, false)
+        }
+      } else {
+        // Scalar — single-source shorthand
+        const aliases = Object.keys(this.collectionByAlias)
+        if (aliases.length !== 1) {
+          throw new Error(
+            `A scalar startAfter value is only supported for single-source effects. ` +
+              `Use a Record<string, CollectionCursor> to map cursors to source aliases. ` +
+              `This effect queries ${aliases.length} collections.`,
+          )
+        }
+        this.startAfterByAlias.set(aliases[0]!, config.startAfter)
+        this.cursorGateOpenByAlias.set(aliases[0]!, false)
       }
     }
 
@@ -650,10 +682,10 @@ class EffectPipelineRunner<TRow extends object, TKey extends string | number> {
         if (orderByInfo) {
           this.trackSentValues(alias, changes, orderByInfo.comparator)
           const split = [...splitUpdates(changes)]
-          this.recordPendingBatchCursor(split)
+          this.recordPendingBatchCursor(alias, split)
           this.sendChangesToD2(alias, split)
         } else {
-          this.recordPendingBatchCursor(changes)
+          this.recordPendingBatchCursor(alias, changes)
           this.sendChangesToD2(alias, changes)
         }
       }
@@ -681,12 +713,28 @@ class EffectPipelineRunner<TRow extends object, TKey extends string | number> {
       return
     }
 
-    if (!this.cursorGateOpen) {
+    // During a graph run, changes arrive from join tap operators (lazy source
+    // loads via requestSnapshot). These inherit the root batch's live status
+    // and must not affect cursor gates or live-source tracking.
+    if (this.isGraphRunning) {
+      this.sendChangesToD2(alias, changes)
+      return
+    }
+
+    // Check per-alias cursor gate
+    if (
+      this.startAfterByAlias.has(alias) &&
+      this.cursorGateOpenByAlias.get(alias) === false
+    ) {
       this.handleSourceChangesBeforeCursorGate(alias, changes)
       return
     }
 
-    this.recordPendingBatchCursor(changes)
+    // Gate is open or alias has no gate — mark as live
+    if (this.startAfterByAlias.size > 0) {
+      this.liveAliasesInBatch.add(alias)
+    }
+    this.recordPendingBatchCursor(alias, changes)
     this.sendChangesToD2(alias, changes)
     this.scheduleGraphRun(alias)
   }
@@ -699,9 +747,10 @@ class EffectPipelineRunner<TRow extends object, TKey extends string | number> {
     alias: string,
     changes: Array<ChangeMessage<any, string | number>>,
   ): void {
+    const startAfter = this.startAfterByAlias.get(alias)!
     let firstLiveIndex: number
     try {
-      firstLiveIndex = findFirstChangeAfterCursor(changes, this.startAfter!)
+      firstLiveIndex = findFirstChangeAfterCursor(changes, startAfter)
     } catch (error) {
       this.onSourceError(
         error instanceof Error ? error : new Error(String(error)),
@@ -724,15 +773,17 @@ class EffectPipelineRunner<TRow extends object, TKey extends string | number> {
       this.runGraph()
     }
 
-    this.cursorGateOpen = true
+    this.cursorGateOpenByAlias.set(alias, true)
+    this.liveAliasesInBatch.add(alias)
 
     const liveChanges = changes.slice(firstLiveIndex)
-    this.recordPendingBatchCursor(liveChanges)
+    this.recordPendingBatchCursor(alias, liveChanges)
     this.sendChangesToD2(alias, liveChanges)
     this.scheduleGraphRun(alias)
   }
 
   private recordPendingBatchCursor(
+    alias: string,
     changes: Array<ChangeMessage<any, string | number>>,
   ): void {
     for (const change of changes) {
@@ -741,18 +792,19 @@ class EffectPipelineRunner<TRow extends object, TKey extends string | number> {
         continue
       }
       try {
-        if (this.pendingBatchCursor === undefined) {
-          this.pendingBatchCursor = cursor
+        const current = this.pendingBatchCursorByAlias.get(alias)
+        if (current === undefined) {
+          this.pendingBatchCursorByAlias.set(alias, cursor)
         } else {
-          const cmp = compareCollectionCursors(cursor, this.pendingBatchCursor)
+          const cmp = compareCollectionCursors(cursor, current)
           if (cmp < 0) {
             throw new Error(
               `Cursors within a sync batch must be monotonically ordered. ` +
-                `Saw ${String(cursor)} after ${String(this.pendingBatchCursor)}.`,
+                `Saw ${String(cursor)} after ${String(current)}.`,
             )
           }
           if (cmp > 0) {
-            this.pendingBatchCursor = cursor
+            this.pendingBatchCursorByAlias.set(alias, cursor)
           }
         }
       } catch (error) {
@@ -885,20 +937,51 @@ class EffectPipelineRunner<TRow extends object, TKey extends string | number> {
   /** Classify accumulated changes into DeltaEvents and invoke the callback */
   private flushPendingChanges(): void {
     if (this.pendingChanges.size === 0) {
-      this.pendingBatchCursor = undefined
+      this.pendingBatchCursorByAlias.clear()
+      this.liveAliasesInBatch.clear()
       return
     }
 
-    const batchCursor = this.pendingBatchCursor
+    const hasCursorGating = this.startAfterByAlias.size > 0
 
-    // If skipInitial and initial load isn't complete yet, discard
+    // Discard if skipInitial isn't satisfied or no live sources contributed
     if (
       (this.skipInitial && !this.initialLoadComplete) ||
-      !this.cursorGateOpen
+      (hasCursorGating && this.liveAliasesInBatch.size === 0)
     ) {
       this.pendingChanges = new Map()
-      this.pendingBatchCursor = undefined
+      this.pendingBatchCursorByAlias.clear()
+      this.liveAliasesInBatch.clear()
       return
+    }
+
+    // Compute batch-level cursor (max across all per-alias cursors)
+    let batchCursor: CollectionCursor | undefined
+    for (const cursor of this.pendingBatchCursorByAlias.values()) {
+      if (batchCursor === undefined) {
+        batchCursor = cursor
+      } else {
+        try {
+          if (compareCollectionCursors(cursor, batchCursor) > 0) {
+            batchCursor = cursor
+          }
+        } catch {
+          // Type mismatch across sources — keep the first
+          break
+        }
+      }
+    }
+
+    // Build per-source cursor map and triggering source (only for gated effects)
+    let cursors: Record<string, CollectionCursor> | undefined
+    let triggeringSource: string | undefined
+    if (hasCursorGating) {
+      if (this.pendingBatchCursorByAlias.size > 0) {
+        cursors = Object.fromEntries(this.pendingBatchCursorByAlias)
+      }
+      if (this.liveAliasesInBatch.size > 0) {
+        triggeringSource = this.liveAliasesInBatch.values().next().value
+      }
     }
 
     const events: Array<DeltaEvent<TRow, TKey>> = []
@@ -906,12 +989,23 @@ class EffectPipelineRunner<TRow extends object, TKey extends string | number> {
     for (const [key, changes] of this.pendingChanges) {
       const event = classifyDelta<TRow, TKey>(key as TKey, changes)
       if (event) {
-        events.push(attachCursorToEvent(event, batchCursor))
+        let enriched: DeltaEvent<TRow, TKey> = event
+        if (batchCursor !== undefined) {
+          enriched = { ...enriched, cursor: batchCursor }
+        }
+        if (triggeringSource !== undefined) {
+          enriched = { ...enriched, triggeringSource }
+        }
+        if (cursors !== undefined) {
+          enriched = { ...enriched, cursors }
+        }
+        events.push(enriched)
       }
     }
 
     this.pendingChanges = new Map()
-    this.pendingBatchCursor = undefined
+    this.pendingBatchCursorByAlias.clear()
+    this.liveAliasesInBatch.clear()
 
     if (events.length > 0) {
       this.onBatchProcessed(events)
@@ -1101,6 +1195,8 @@ class EffectPipelineRunner<TRow extends object, TKey extends string | number> {
     this.unsubscribeCallbacks.clear()
     this.sentToD2KeysByAlias.clear()
     this.pendingChanges.clear()
+    this.pendingBatchCursorByAlias.clear()
+    this.liveAliasesInBatch.clear()
     this.lazySources.clear()
     this.builderDependencies.clear()
     this.biggestSentValue.clear()
@@ -1217,20 +1313,6 @@ function classifyDelta<TRow extends object, TKey extends string | number>(
 
   // inserts === 0 && deletes === 0 — no net change (should not happen)
   return undefined
-}
-
-function attachCursorToEvent<TRow extends object, TKey extends string | number>(
-  event: DeltaEvent<TRow, TKey>,
-  cursor: CollectionCursor | undefined,
-): DeltaEvent<TRow, TKey> {
-  if (cursor === undefined) {
-    return event
-  }
-
-  return {
-    ...event,
-    cursor,
-  }
 }
 
 function findFirstChangeAfterCursor(

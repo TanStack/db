@@ -614,7 +614,7 @@ describe(`createEffect`, () => {
       await effect.dispose()
     })
 
-    it(`should throw when startAfter is used with multi-source effects`, () => {
+    it(`should throw when a scalar startAfter is used with multi-source effects`, () => {
       const users = createUsersCollection()
       const issues = createIssuesCollection()
 
@@ -629,7 +629,206 @@ describe(`createEffect`, () => {
           onBatch: () => {},
           startAfter: 1,
         })
-      }).toThrow(/single-source/)
+      }).toThrow(/scalar startAfter/)
+    })
+
+    it(`should support per-source startAfter with Record for join queries`, async () => {
+      const users = createCollection(
+        mockSyncCollectionOptionsNoInitialState<User>({
+          id: `join-cursor-users`,
+          getKey: (user) => user.id,
+        }),
+      )
+      const issues = createCollection(
+        mockSyncCollectionOptionsNoInitialState<Issue>({
+          id: `join-cursor-issues`,
+          getKey: (issue) => issue.id,
+        }),
+      )
+      const events: Array<DeltaEvent<any, any>> = []
+
+      const effect = createEffect({
+        query: (q) =>
+          q
+            .from({ issue: issues })
+            .join({ user: users }, ({ issue, user }) =>
+              eq(issue.userId, user.id),
+            ),
+        onBatch: collectBatchEvents(events),
+        startAfter: { issue: 2, user: 3 },
+      })
+
+      users.utils.markReady()
+      issues.utils.markReady()
+      await flushPromises()
+
+      // Replay: both sources send data at or before their respective cursors
+      issues.utils.begin()
+      issues.utils.write({
+        type: `insert`,
+        value: { id: 1, title: `Bug report`, userId: 1 },
+        cursor: 1,
+      })
+      issues.utils.write({
+        type: `insert`,
+        value: { id: 2, title: `Feature request`, userId: 2 },
+        cursor: 2,
+      })
+      issues.utils.commit()
+      await flushPromises()
+
+      users.utils.begin()
+      users.utils.write({
+        type: `insert`,
+        value: { id: 1, name: `Alice`, active: true },
+        cursor: 2,
+      })
+      users.utils.write({
+        type: `insert`,
+        value: { id: 2, name: `Bob`, active: true },
+        cursor: 3,
+      })
+      users.utils.commit()
+      await flushPromises()
+
+      // No events yet — both gates are still closed
+      expect(events).toHaveLength(0)
+
+      // Now issue cursor 3 arrives (past issue gate boundary of 2)
+      issues.utils.begin()
+      issues.utils.write({
+        type: `insert`,
+        value: { id: 3, title: `New issue`, userId: 1 },
+        cursor: 3,
+      })
+      issues.utils.commit()
+      await flushPromises()
+
+      // Issue gate opened — events should fire (Alice is already hydrated via join)
+      expect(events.length).toBeGreaterThan(0)
+      const issueEvent = events.find(
+        (e) => e.type === `enter` && e.value?.issue?.title === `New issue`,
+      )
+      expect(issueEvent).toBeDefined()
+      expect(issueEvent!.triggeringSource).toBe(`issue`)
+      expect(issueEvent!.cursors).toBeDefined()
+      expect(issueEvent!.cursors!.issue).toBe(3)
+
+      await effect.dispose()
+    })
+
+    it(`should emit events from ungated source while gated source replays`, async () => {
+      const users = createCollection(
+        mockSyncCollectionOptionsNoInitialState<User>({
+          id: `partial-gate-users`,
+          getKey: (user) => user.id,
+        }),
+      )
+      const issues = createCollection(
+        mockSyncCollectionOptionsNoInitialState<Issue>({
+          id: `partial-gate-issues`,
+          getKey: (issue) => issue.id,
+        }),
+      )
+      const events: Array<DeltaEvent<any, any>> = []
+
+      // Only gate the issue source; user source has no gate
+      const effect = createEffect({
+        query: (q) =>
+          q
+            .from({ issue: issues })
+            .join({ user: users }, ({ issue, user }) =>
+              eq(issue.userId, user.id),
+            ),
+        onBatch: collectBatchEvents(events),
+        startAfter: { issue: 5 },
+      })
+
+      users.utils.markReady()
+      issues.utils.markReady()
+      await flushPromises()
+
+      // Hydrate user data (no gate on users — always live)
+      users.utils.begin()
+      users.utils.write({
+        type: `insert`,
+        value: { id: 1, name: `Alice`, active: true },
+      })
+      users.utils.commit()
+      await flushPromises()
+
+      // User has no gate, so changes from user source are live
+      // But there are no issues yet to join with, so no join results
+      events.length = 0
+
+      // Replay issues (gate closed — cursor <= 5)
+      issues.utils.begin()
+      issues.utils.write({
+        type: `insert`,
+        value: { id: 1, title: `Old issue`, userId: 1 },
+        cursor: 4,
+      })
+      issues.utils.commit()
+      await flushPromises()
+
+      // Issue gate is still closed — no events
+      expect(events).toHaveLength(0)
+
+      // Live issue arrives (cursor > 5)
+      issues.utils.begin()
+      issues.utils.write({
+        type: `insert`,
+        value: { id: 2, title: `New issue`, userId: 1 },
+        cursor: 6,
+      })
+      issues.utils.commit()
+      await flushPromises()
+
+      // Gate opens — should see the new issue joined with Alice
+      const enterEvents = events.filter((e) => e.type === `enter`)
+      expect(enterEvents.length).toBeGreaterThan(0)
+      const newIssueEvent = enterEvents.find(
+        (e) => e.value?.issue?.title === `New issue`,
+      )
+      expect(newIssueEvent).toBeDefined()
+
+      await effect.dispose()
+    })
+
+    it(`should include triggeringSource and cursors on DeltaEvents for gated effects`, async () => {
+      const users = createCollection(
+        mockSyncCollectionOptionsNoInitialState<User>({
+          id: `triggering-source-users`,
+          getKey: (user) => user.id,
+        }),
+      )
+      const events: Array<DeltaEvent<User, number>> = []
+
+      const effect = createEffect<User, number>({
+        query: (q) => q.from({ user: users }),
+        onBatch: collectBatchEvents(events),
+        startAfter: 0,
+      })
+
+      users.utils.markReady()
+      await flushPromises()
+
+      // Send a change past the gate
+      users.utils.begin()
+      users.utils.write({
+        type: `insert`,
+        value: { id: 1, name: `Alice`, active: true },
+        cursor: 1,
+      })
+      users.utils.commit()
+      await flushPromises()
+
+      expect(events).toHaveLength(1)
+      expect(events[0]!.triggeringSource).toBe(`user`)
+      expect(events[0]!.cursors).toEqual({ user: 1 })
+      expect(events[0]!.cursor).toBe(1)
+
+      await effect.dispose()
     })
   })
 
