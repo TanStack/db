@@ -688,10 +688,7 @@ class EffectPipelineRunner<TRow extends object, TKey extends string | number> {
   ): void {
     let firstLiveIndex: number
     try {
-      firstLiveIndex = findFirstChangeAfterCursor(
-        changes,
-        this.startAfter!,
-      )
+      firstLiveIndex = findFirstChangeAfterCursor(changes, this.startAfter!)
     } catch (error) {
       this.onSourceError(
         error instanceof Error ? error : new Error(String(error)),
@@ -1201,10 +1198,7 @@ function classifyDelta<TRow extends object, TKey extends string | number>(
   return undefined
 }
 
-function attachCursorToEvent<
-  TRow extends object,
-  TKey extends string | number,
->(
+function attachCursorToEvent<TRow extends object, TKey extends string | number>(
   event: DeltaEvent<TRow, TKey>,
   cursor: CollectionCursor | undefined,
 ): DeltaEvent<TRow, TKey> {
