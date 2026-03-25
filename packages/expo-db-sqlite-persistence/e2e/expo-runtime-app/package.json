@@ -1,7 +1,7 @@
 {
   "name": "@tanstack/expo-db-sqlite-persistence-e2e-app",
   "private": true,
-  "version": "0.0.0",
+  "version": "0.0.1",
   "main": "index.js",
   "scripts": {
     "start": "expo start",
