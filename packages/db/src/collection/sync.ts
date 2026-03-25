@@ -94,6 +94,7 @@ export class CollectionSyncManager<
               committed: false,
               operations: [],
               deletedKeys: new Set(),
+              rowCursorWrites: new Map(),
               rowMetadataWrites: new Map(),
               collectionMetadataWrites: new Map(),
               immediate: options?.immediate,
@@ -190,6 +191,13 @@ export class CollectionSyncManager<
                 value: message.metadata,
               })
             }
+
+            if (message.cursor !== undefined) {
+              pendingTransaction.rowCursorWrites.set(key, {
+                type: `set`,
+                value: message.cursor,
+              })
+            }
           },
           commit: () => {
             const pendingTransaction =
@@ -225,6 +233,7 @@ export class CollectionSyncManager<
             // Clear all operations from the current transaction
             pendingTransaction.operations = []
             pendingTransaction.deletedKeys.clear()
+            pendingTransaction.rowCursorWrites.clear()
             pendingTransaction.rowMetadataWrites.clear()
             // Intentionally preserve collectionMetadataWrites across truncate.
             // Collection-scoped metadata (for example persisted resume/reset

@@ -39,6 +39,7 @@ export function useLiveQueryEffect<
       id: config.id,
       query: config.query,
       skipInitial: config.skipInitial,
+      startAfter: config.startAfter,
       onEnter: (event, ctx) => configRef.current.onEnter?.(event, ctx),
       onUpdate: (event, ctx) => configRef.current.onUpdate?.(event, ctx),
       onExit: (event, ctx) => configRef.current.onExit?.(event, ctx),

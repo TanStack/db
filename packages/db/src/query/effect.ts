@@ -25,7 +25,12 @@ import type { InitialQueryBuilder, QueryBuilder } from './builder/index.js'
 import type { Context } from './builder/types.js'
 import type { BasicExpression, QueryIR } from './ir.js'
 import type { OrderByOptimizationInfo } from './compiler/order-by.js'
-import type { ChangeMessage, KeyedStream, ResultStream } from '../types.js'
+import type {
+  ChangeMessage,
+  CollectionCursor,
+  KeyedStream,
+  ResultStream,
+} from '../types.js'
 
 // ---------------------------------------------------------------------------
 // Public Types
@@ -44,6 +49,7 @@ export type DeltaEvent<
       key: TKey
       /** Current value for the entering row */
       value: TRow
+      cursor?: CollectionCursor
       metadata?: Record<string, unknown>
     }
   | {
@@ -51,6 +57,7 @@ export type DeltaEvent<
       key: TKey
       /** Current value for the exiting row */
       value: TRow
+      cursor?: CollectionCursor
       metadata?: Record<string, unknown>
     }
   | {
@@ -60,6 +67,7 @@ export type DeltaEvent<
       value: TRow
       /** Previous value before the batch */
       previousValue: TRow
+      cursor?: CollectionCursor
       metadata?: Record<string, unknown>
     }
 
@@ -128,6 +136,12 @@ export interface EffectConfig<
    * Set to true for effects that should only process new changes.
    */
   skipInitial?: boolean
+
+  /**
+   * Suppress callbacks until the source replay advances past this cursor.
+   * Historical changes at or before the cursor still update internal query state.
+   */
+  startAfter?: CollectionCursor
 }
 
 /** Handle returned by createEffect */
@@ -262,6 +276,7 @@ export function createEffect<
   const runner = new EffectPipelineRunner<TRow, TKey>({
     query: config.query,
     skipInitial: config.skipInitial ?? false,
+    startAfter: config.startAfter,
     onBatchProcessed,
     onSourceError: (error: Error) => {
       if (disposed) return
@@ -303,6 +318,7 @@ interface EffectPipelineRunnerConfig<
 > {
   query: EffectQueryInput<any>
   skipInitial: boolean
+  startAfter?: CollectionCursor
   onBatchProcessed: (events: Array<DeltaEvent<TRow, TKey>>) => void
   /** Called when a source collection enters error or cleaned-up state */
   onSourceError: (error: Error) => void
@@ -357,6 +373,9 @@ class EffectPipelineRunner<TRow extends object, TKey extends string | number> {
   // skipInitial state
   private readonly skipInitial: boolean
   private initialLoadComplete = false
+  private readonly startAfter: CollectionCursor | undefined
+  private cursorGateOpen: boolean
+  private pendingBatchCursor: CollectionCursor | undefined
 
   // Scheduler integration
   private subscribedToAllCollections = false
@@ -376,6 +395,8 @@ class EffectPipelineRunner<TRow extends object, TKey extends string | number> {
 
   constructor(config: EffectPipelineRunnerConfig<TRow, TKey>) {
     this.skipInitial = config.skipInitial
+    this.startAfter = config.startAfter
+    this.cursorGateOpen = config.startAfter === undefined
     this.onBatchProcessed = config.onBatchProcessed
     this.onSourceError = config.onSourceError
 
@@ -613,8 +634,10 @@ class EffectPipelineRunner<TRow extends object, TKey extends string | number> {
         if (orderByInfo) {
           this.trackSentValues(alias, changes, orderByInfo.comparator)
           const split = [...splitUpdates(changes)]
+          this.recordPendingBatchCursor(split)
           this.sendChangesToD2(alias, split)
         } else {
+          this.recordPendingBatchCursor(changes)
           this.sendChangesToD2(alias, changes)
         }
       }
@@ -638,8 +661,86 @@ class EffectPipelineRunner<TRow extends object, TKey extends string | number> {
     alias: string,
     changes: Array<ChangeMessage<any, string | number>>,
   ): void {
+    if (changes.length === 0) {
+      return
+    }
+
+    if (!this.cursorGateOpen) {
+      this.handleSourceChangesBeforeCursorGate(alias, changes)
+      return
+    }
+
+    this.recordPendingBatchCursor(changes)
     this.sendChangesToD2(alias, changes)
     this.scheduleGraphRun(alias)
+  }
+
+  /**
+   * Replay before startAfter must still hydrate query state, but callbacks stay
+   * muted until we observe a cursor greater than the configured boundary.
+   */
+  private handleSourceChangesBeforeCursorGate(
+    alias: string,
+    changes: Array<ChangeMessage<any, string | number>>,
+  ): void {
+    let firstLiveIndex: number
+    try {
+      firstLiveIndex = findFirstChangeAfterCursor(
+        changes,
+        this.startAfter!,
+      )
+    } catch (error) {
+      this.onSourceError(
+        error instanceof Error ? error : new Error(String(error)),
+      )
+      return
+    }
+
+    if (firstLiveIndex === -1) {
+      this.sendChangesToD2(alias, changes)
+      this.scheduleGraphRun(alias)
+      return
+    }
+
+    if (firstLiveIndex > 0) {
+      const replayChanges = changes.slice(0, firstLiveIndex)
+      this.sendChangesToD2(alias, replayChanges)
+      this.scheduleGraphRun(alias)
+    } else if (!getActiveTransaction() && this.graph?.pendingWork()) {
+      // Best-effort boundary preservation outside transaction-scoped flushes.
+      this.runGraph()
+    }
+
+    this.cursorGateOpen = true
+
+    const liveChanges = changes.slice(firstLiveIndex)
+    this.recordPendingBatchCursor(liveChanges)
+    this.sendChangesToD2(alias, liveChanges)
+    this.scheduleGraphRun(alias)
+  }
+
+  private recordPendingBatchCursor(
+    changes: Array<ChangeMessage<any, string | number>>,
+  ): void {
+    for (const change of changes) {
+      const { cursor } = change
+      if (cursor === undefined) {
+        continue
+      }
+      try {
+        if (
+          this.pendingBatchCursor === undefined ||
+          compareCollectionCursors(cursor, this.pendingBatchCursor) > 0
+        ) {
+          this.pendingBatchCursor = cursor
+        }
+      } catch (error) {
+        this.onSourceError(
+          error instanceof Error ? error : new Error(String(error)),
+        )
+        return
+      }
+    }
   }
 
   /**
@@ -762,11 +863,20 @@ class EffectPipelineRunner<TRow extends object, TKey extends string | number> {
 
   /** Classify accumulated changes into DeltaEvents and invoke the callback */
   private flushPendingChanges(): void {
-    if (this.pendingChanges.size === 0) return
+    if (this.pendingChanges.size === 0) {
+      this.pendingBatchCursor = undefined
+      return
+    }
+
+    const batchCursor = this.pendingBatchCursor
 
     // If skipInitial and initial load isn't complete yet, discard
-    if (this.skipInitial && !this.initialLoadComplete) {
+    if (
+      (this.skipInitial && !this.initialLoadComplete) ||
+      !this.cursorGateOpen
+    ) {
       this.pendingChanges = new Map()
+      this.pendingBatchCursor = undefined
       return
     }
 
@@ -775,11 +885,12 @@ class EffectPipelineRunner<TRow extends object, TKey extends string | number> {
     for (const [key, changes] of this.pendingChanges) {
       const event = classifyDelta<TRow, TKey>(key as TKey, changes)
       if (event) {
-        events.push(event)
+        events.push(attachCursorToEvent(event, batchCursor))
       }
     }
 
     this.pendingChanges = new Map()
+    this.pendingBatchCursor = undefined
 
     if (events.length > 0) {
       this.onBatchProcessed(events)
@@ -1085,6 +1196,72 @@ function classifyDelta<TRow extends object, TKey extends string | number>(
 
   // inserts === 0 && deletes === 0 — no net change (should not happen)
   return undefined
+}
+
+function attachCursorToEvent<
+  TRow extends object,
+  TKey extends string | number,
+>(
+  event: DeltaEvent<TRow, TKey>,
+  cursor: CollectionCursor | undefined,
+): DeltaEvent<TRow, TKey> {
+  if (cursor === undefined) {
+    return event
+  }
+
+  return {
+    ...event,
+    cursor,
+  }
+}
+
+function findFirstChangeAfterCursor(
+  changes: Array<ChangeMessage<any, string | number>>,
+  startAfter: CollectionCursor,
+): number {
+  let anyCursor = false
+  for (let index = 0; index < changes.length; index++) {
+    const cursor = changes[index]!.cursor
+    if (cursor === undefined) {
+      continue
+    }
+    anyCursor = true
+    if (compareCollectionCursors(cursor, startAfter) > 0) {
+      // Walk backwards to include any preceding uncursored changes —
+      // they have no position in cursor space and should not be
+      // assumed to be replay.
+      let liveStart = index
+      while (liveStart > 0 && changes[liveStart - 1]!.cursor === undefined) {
+        liveStart--
+      }
+      return liveStart
+    }
+  }
+
+  // If no change in this batch carries a cursor, treat the entire batch as
+  // live — the sync provider has moved past cursor-based replay.
+  if (!anyCursor) {
+    return 0
+  }
+
+  return -1
+}
+
+function compareCollectionCursors(
+  left: CollectionCursor,
+  right: CollectionCursor,
+): number {
+  if (typeof left !== typeof right) {
+    throw new Error(
+      `Collection cursors must use a consistent primitive type. Received ${typeof left} and ${typeof right}.`,
+    )
+  }
+
+  if (left === right) {
+    return 0
+  }
+
+  return left > right ? 1 : -1
 }
 
 /** Track a promise in the in-flight set, automatically removing on settlement */
