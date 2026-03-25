@@ -1,0 +1,276 @@
+import { BTreeIndex, createCollection } from '@tanstack/db'
+import { persistedCollectionOptions } from '../../src'
+import { generateSeedData } from '../../../db-collection-e2e/src/fixtures/seed-data'
+import type { Collection } from '@tanstack/db'
+import type {
+  Comment,
+  E2ETestConfig,
+  Post,
+  User,
+} from '../../../db-collection-e2e/src/types'
+import type { PersistedCollectionPersistence } from '@tanstack/db-sqlite-persistence-core'
+
+type PersistableRow = {
+  id: string
+}
+
+type PersistedCollectionHarness<T extends PersistableRow> = {
+  collection: Collection<T, string | number>
+  seedPersisted: (rows: Array<T>) => Promise<void>
+}
+
+type PersistedTransactionHandle = {
+  isPersisted: {
+    promise: Promise<unknown>
+  }
+}
+
+type PersistenceFactory<TDatabase> = <T extends PersistableRow>(
+  database: TDatabase,
+) => PersistedCollectionPersistence<T, string | number>
+
+type DatabaseLike = {
+  close?: () => Promise<unknown> | unknown
+}
+
+export type TauriPersistedCollectionHarnessConfig = E2ETestConfig
+
+function createPersistedCollection<T extends PersistableRow, TDatabase>(
+  database: TDatabase,
+  id: string,
+  syncMode: `eager` | `on-demand`,
+  createPersistence: PersistenceFactory<TDatabase>,
+): PersistedCollectionHarness<T> {
+  const persistence = createPersistence<T>(database)
+  let seedTxSequence = 0
+
+  const seedPersisted = async (rows: Array<T>): Promise<void> => {
+    if (rows.length === 0) {
+      return
+    }
+
+    seedTxSequence++
+    await persistence.adapter.applyCommittedTx(id, {
+      txId: `seed-${id}-${seedTxSequence}`,
+      term: 1,
+      seq: seedTxSequence,
+      rowVersion: seedTxSequence,
+      mutations: rows.map((row) => ({
+        type: `insert` as const,
+        key: row.id,
+        value: row,
+      })),
+    })
+  }
+
+  const collection = createCollection(
+    persistedCollectionOptions<T, string | number>({
+      id,
+      syncMode,
+      getKey: (item) => item.id,
+      persistence,
+      autoIndex: `eager`,
+      defaultIndexType: BTreeIndex,
+    }),
+  )
+
+  return {
+    collection,
+    seedPersisted,
+  }
+}
+
+async function waitForPersisted(
+  transaction: PersistedTransactionHandle,
+): Promise<void> {
+  await transaction.isPersisted.promise
+}
+
+async function seedCollection<T extends PersistableRow>(
+  collection: Collection<T, string | number>,
+  rows: Array<T>,
+): Promise<void> {
+  const tx = collection.insert(rows)
+  await waitForPersisted(tx)
+}
+
+async function insertRowIntoCollections<T extends PersistableRow>(
+  collections: ReadonlyArray<Collection<T, string | number>>,
+  row: T,
+): Promise<void> {
+  for (const collection of collections) {
+    const tx = collection.insert(row)
+    await waitForPersisted(tx)
+  }
+}
+
+async function updateRowAcrossCollections<T extends PersistableRow>(
+  collections: ReadonlyArray<Collection<T, string | number>>,
+  id: string,
+  updates: Partial<T>,
+): Promise<void> {
+  for (const collection of collections) {
+    if (!collection.has(id)) {
+      continue
+    }
+
+    const tx = collection.update(id, (draft) => {
+      Object.assign(draft, updates)
+    })
+    await waitForPersisted(tx)
+  }
+}
+
+async function deleteRowAcrossCollections<T extends PersistableRow>(
+  collections: ReadonlyArray<Collection<T, string | number>>,
+  id: string,
+): Promise<void> {
+  for (const collection of collections) {
+    if (!collection.has(id)) {
+      continue
+    }
+
+    const tx = collection.delete(id)
+    await waitForPersisted(tx)
+  }
+}
+
+export async function createTauriPersistedCollectionHarnessConfig<
+  TDatabase extends DatabaseLike,
+>(options: {
+  database: TDatabase
+  createPersistence: PersistenceFactory<TDatabase>
+  suiteId?: string
+  cleanup?: () => Promise<void>
+}): Promise<{
+  config: TauriPersistedCollectionHarnessConfig
+  teardown: () => Promise<void>
+}> {
+  const {
+    database,
+    createPersistence,
+    suiteId = Date.now().toString(36),
+    cleanup = () => Promise.resolve(),
+  } = options
+  const seedData = generateSeedData()
+
+  const eagerUsers = createPersistedCollection<User, TDatabase>(
+    database,
+    `tauri-persisted-users-eager-${suiteId}`,
+    `eager`,
+    createPersistence,
+  )
+  const eagerPosts = createPersistedCollection<Post, TDatabase>(
+    database,
+    `tauri-persisted-posts-eager-${suiteId}`,
+    `eager`,
+    createPersistence,
+  )
+  const eagerComments = createPersistedCollection<Comment, TDatabase>(
+    database,
+    `tauri-persisted-comments-eager-${suiteId}`,
+    `eager`,
+    createPersistence,
+  )
+
+  const onDemandUsers = createPersistedCollection<User, TDatabase>(
+    database,
+    `tauri-persisted-users-ondemand-${suiteId}`,
+    `on-demand`,
+    createPersistence,
+  )
+  const onDemandPosts = createPersistedCollection<Post, TDatabase>(
+    database,
+    `tauri-persisted-posts-ondemand-${suiteId}`,
+    `on-demand`,
+    createPersistence,
+  )
+  const onDemandComments = createPersistedCollection<Comment, TDatabase>(
+    database,
+    `tauri-persisted-comments-ondemand-${suiteId}`,
+    `on-demand`,
+    createPersistence,
+  )
+
+  await Promise.all([
+    eagerUsers.collection.preload(),
+    eagerPosts.collection.preload(),
+    eagerComments.collection.preload(),
+  ])
+
+  await seedCollection(eagerUsers.collection, seedData.users)
+  await seedCollection(eagerPosts.collection, seedData.posts)
+  await seedCollection(eagerComments.collection, seedData.comments)
+  await onDemandUsers.seedPersisted(seedData.users)
+  await onDemandPosts.seedPersisted(seedData.posts)
+  await onDemandComments.seedPersisted(seedData.comments)
+
+  const teardown = async (): Promise<void> => {
+    await Promise.all([
+      eagerUsers.collection.cleanup(),
+      eagerPosts.collection.cleanup(),
+      eagerComments.collection.cleanup(),
+      onDemandUsers.collection.cleanup(),
+      onDemandPosts.collection.cleanup(),
+      onDemandComments.collection.cleanup(),
+    ])
+    await Promise.resolve(database.close?.())
+    await cleanup()
+  }
+
+  const config: TauriPersistedCollectionHarnessConfig = {
+    collections: {
+      eager: {
+        users: eagerUsers.collection,
+        posts: eagerPosts.collection,
+        comments: eagerComments.collection,
+      },
+      onDemand: {
+        users: onDemandUsers.collection,
+        posts: onDemandPosts.collection,
+        comments: onDemandComments.collection,
+      },
+    },
+    mutations: {
+      insertUser: async (user: User) =>
+        insertRowIntoCollections(
+          [eagerUsers.collection, onDemandUsers.collection],
+          user,
+        ),
+      updateUser: async (id: string, updates: Partial<User>) =>
+        updateRowAcrossCollections(
+          [eagerUsers.collection, onDemandUsers.collection],
+          id,
+          updates,
+        ),
+      deleteUser: async (id: string) =>
+        deleteRowAcrossCollections(
+          [eagerUsers.collection, onDemandUsers.collection],
+          id,
+        ),
+      insertPost: async (post: Post) =>
+        insertRowIntoCollections(
+          [eagerPosts.collection, onDemandPosts.collection],
+          post,
+        ),
+    },
+    setup: async () => {},
+    afterEach: async () => {
+      await Promise.all([
+        onDemandUsers.collection.cleanup(),
+        onDemandPosts.collection.cleanup(),
+        onDemandComments.collection.cleanup(),
+      ])
+
+      onDemandUsers.collection.startSyncImmediate()
+      onDemandPosts.collection.startSyncImmediate()
+      onDemandComments.collection.startSyncImmediate()
+    },
+    teardown,
+  }
+
+  return {
+    config,
+    teardown,
+  }
+}

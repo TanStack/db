@@ -16,11 +16,11 @@ function watchWorkspacePackages() {
         path.resolve(__dirname, `../../../packages/offline-transactions/dist`),
         path.resolve(
           __dirname,
-          `../../../packages/db-browser-wa-sqlite-persisted-collection/src`,
+          `../../../packages/browser-db-sqlite-persistence/src`,
         ),
         path.resolve(
           __dirname,
-          `../../../packages/db-sqlite-persisted-collection-core/dist`,
+          `../../../packages/db-sqlite-persistence-core/dist`,
         ),
       ]
 
@@ -77,14 +77,14 @@ export default defineConfig({
   resolve: {
     alias: {
       // Resolve to source so Vite can process the ?worker import natively
-      '@tanstack/db-browser-wa-sqlite-persisted-collection': path.resolve(
+      '@tanstack/browser-db-sqlite-persistence': path.resolve(
         __dirname,
-        `../../../packages/db-browser-wa-sqlite-persisted-collection/src/index.ts`,
+        `../../../packages/browser-db-sqlite-persistence/src/index.ts`,
       ),
       // Required because the browser package's source re-exports from core
-      '@tanstack/db-sqlite-persisted-collection-core': path.resolve(
+      '@tanstack/db-sqlite-persistence-core': path.resolve(
         __dirname,
-        `../../../packages/db-sqlite-persisted-collection-core/src/index.ts`,
+        `../../../packages/db-sqlite-persistence-core/src/index.ts`,
       ),
     },
   },
@@ -92,8 +92,8 @@ export default defineConfig({
     exclude: [
       `@tanstack/db`,
       `@tanstack/offline-transactions`,
-      `@tanstack/db-browser-wa-sqlite-persisted-collection`,
-      `@tanstack/db-sqlite-persisted-collection-core`,
+      `@tanstack/browser-db-sqlite-persistence`,
+      `@tanstack/db-sqlite-persistence-core`,
       `@journeyapps/wa-sqlite`,
     ],
   },

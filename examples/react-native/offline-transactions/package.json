@@ -16,10 +16,10 @@
     "@react-native-async-storage/async-storage": "2.1.2",
     "@react-native-community/netinfo": "11.4.1",
     "@tanstack/db": "workspace:*",
-    "@tanstack/db-react-native-sqlite-persisted-collection": "workspace:*",
     "@tanstack/offline-transactions": "^1.0.24",
     "@tanstack/query-db-collection": "^1.0.30",
     "@tanstack/react-db": "^0.1.77",
+    "@tanstack/react-native-db-sqlite-persistence": "workspace:*",
     "@tanstack/react-query": "^5.90.20",
     "expo": "~53.0.26",
     "expo-constants": "~17.1.0",
@@ -31,6 +31,7 @@
     "react-native": "0.79.6",
     "react-native-safe-area-context": "5.4.0",
     "react-native-screens": "~4.11.1",
+    "use-latest-callback": "^0.3.3",
     "zod": "^3.25.76"
   },
   "devDependencies": {
