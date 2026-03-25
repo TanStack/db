@@ -738,11 +738,19 @@ class EffectPipelineRunner<TRow extends object, TKey extends string | number> {
         continue
       }
       try {
-        if (
-          this.pendingBatchCursor === undefined ||
-          compareCollectionCursors(cursor, this.pendingBatchCursor) > 0
-        ) {
+        if (this.pendingBatchCursor === undefined) {
           this.pendingBatchCursor = cursor
+        } else {
+          const cmp = compareCollectionCursors(cursor, this.pendingBatchCursor)
+          if (cmp < 0) {
+            throw new Error(
+              `Cursors within a sync batch must be monotonically ordered. ` +
+                `Saw ${String(cursor)} after ${String(this.pendingBatchCursor)}.`,
+            )
+          }
+          if (cmp > 0) {
+            this.pendingBatchCursor = cursor
+          }
         }
       } catch (error) {
         this.onSourceError(
@@ -1227,11 +1235,19 @@ function findFirstChangeAfterCursor(
   startAfter: CollectionCursor,
 ): number {
   let anyCursor = false
+  let lastCursor: CollectionCursor | undefined
   for (let index = 0; index < changes.length; index++) {
     const cursor = changes[index]!.cursor
     if (cursor === undefined) {
       continue
     }
+    if (lastCursor !== undefined && compareCollectionCursors(cursor, lastCursor) < 0) {
+      throw new Error(
+        `Cursors within a sync batch must be monotonically ordered. ` +
+          `Saw ${String(cursor)} after ${String(lastCursor)}.`,
+      )
+    }
+    lastCursor = cursor
     anyCursor = true
     if (compareCollectionCursors(cursor, startAfter) > 0) {
       // Walk backwards to include any preceding uncursored changes —
