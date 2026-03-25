@@ -9,8 +9,8 @@
     "start": "node .output/server/index.mjs"
   },
   "dependencies": {
-    "@tanstack/db": "workspace:*",
     "@tanstack/browser-db-sqlite-persistence": "workspace:*",
+    "@tanstack/db": "workspace:*",
     "@tanstack/offline-transactions": "^1.0.24",
     "@tanstack/query-db-collection": "^1.0.30",
     "@tanstack/react-db": "^0.1.77",
