@@ -1,5 +1,14 @@
 # @tanstack/expo-db-sqlite-persistence
 
+## 0.1.2
+
+### Patch Changes
+
+- Fix workspace: dependency links that were incorrectly published to npm ([#1406](https://github.com/TanStack/db/pull/1406))
+
+- Updated dependencies [[`99ad6b5`](https://github.com/TanStack/db/commit/99ad6b598729bd3bd7aef70b8f06dc4635c1f8ce)]:
+  - @tanstack/db-sqlite-persistence-core@0.1.2
+
 ## 0.1.1
 
 ### Patch Changes
