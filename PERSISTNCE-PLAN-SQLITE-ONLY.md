@@ -1005,12 +1005,12 @@ Driver adaptation note:
 
 ## Package Plan
 
-1. `@tanstack/db-persistence-core`
-2. `@tanstack/browser-db-persistence`
-3. `@tanstack/node-db-persistence`
-4. `@tanstack/react-native-db-persistence` (RN + Expo)
-5. `@tanstack/electron-db-persistence`
-6. `@tanstack/cloudflare-durable-objects-db-persistence`
+1. `@tanstack/db-sqlite-persistence-core`
+2. `@tanstack/browser-db-sqlite-persistence`
+3. `@tanstack/node-db-sqlite-persistence`
+4. `@tanstack/react-native-db-sqlite-persistence` (RN + Expo)
+5. `@tanstack/electron-db-sqlite-persistence`
+6. `@tanstack/cloudflare-durable-objects-db-sqlite-persistence`
 
 SQLite core package contents (combined):
 
@@ -1403,7 +1403,7 @@ These are mandatory rules for agents implementing this plan.
 
 Blocking-before-implementation:
 
-- none (runtime driver choices and package shape are fixed in this plan: Node/Electron `better-sqlite3`, `@tanstack/react-native-db-persistence` for RN/Expo via `op-sqlite`)
+- none (runtime driver choices and package shape are fixed in this plan: Node/Electron `better-sqlite3`, `@tanstack/react-native-db-sqlite-persistence` for RN/Expo via `op-sqlite`)
 
 Blocking-before-browser phases:
 

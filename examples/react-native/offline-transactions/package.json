@@ -16,7 +16,7 @@
     "@react-native-async-storage/async-storage": "2.1.2",
     "@react-native-community/netinfo": "11.4.1",
     "@tanstack/db": "workspace:*",
-    "@tanstack/react-native-db-persistence": "workspace:*",
+    "@tanstack/react-native-db-sqlite-persistence": "workspace:*",
     "@tanstack/offline-transactions": "^1.0.24",
     "@tanstack/query-db-collection": "^1.0.30",
     "@tanstack/react-db": "^0.1.77",

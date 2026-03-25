@@ -3,7 +3,7 @@ import { createCollection } from '@tanstack/react-db'
 import {
   createReactNativeSQLitePersistence,
   persistedCollectionOptions,
-} from '@tanstack/react-native-db-persistence'
+} from '@tanstack/react-native-db-sqlite-persistence'
 import { queryCollectionOptions } from '@tanstack/query-db-collection'
 import { startOfflineExecutor } from '@tanstack/offline-transactions/react-native'
 import { queryClient } from '../utils/queryClient'

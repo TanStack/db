@@ -5,7 +5,7 @@ import {
   ElectronCollectionCoordinator,
   createElectronSQLitePersistence,
   persistedCollectionOptions,
-} from '@tanstack/electron-db-persistence'
+} from '@tanstack/electron-db-sqlite-persistence'
 import { z } from 'zod'
 import { queryClient } from '../utils/queryClient'
 import type { StorageAdapter } from '@tanstack/offline-transactions'

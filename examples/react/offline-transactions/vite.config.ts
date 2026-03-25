@@ -14,8 +14,14 @@ function watchWorkspacePackages() {
       const watchPaths = [
         path.resolve(__dirname, `../../../packages/db/dist`),
         path.resolve(__dirname, `../../../packages/offline-transactions/dist`),
-        path.resolve(__dirname, `../../../packages/browser-db-persistence/src`),
-        path.resolve(__dirname, `../../../packages/db-persistence-core/dist`),
+        path.resolve(
+          __dirname,
+          `../../../packages/browser-db-sqlite-persistence/src`,
+        ),
+        path.resolve(
+          __dirname,
+          `../../../packages/db-sqlite-persistence-core/dist`,
+        ),
       ]
 
       console.log(`[watch-workspace] Starting to watch paths:`)
@@ -71,14 +77,14 @@ export default defineConfig({
   resolve: {
     alias: {
       // Resolve to source so Vite can process the ?worker import natively
-      '@tanstack/browser-db-persistence': path.resolve(
+      '@tanstack/browser-db-sqlite-persistence': path.resolve(
         __dirname,
-        `../../../packages/browser-db-persistence/src/index.ts`,
+        `../../../packages/browser-db-sqlite-persistence/src/index.ts`,
       ),
       // Required because the browser package's source re-exports from core
-      '@tanstack/db-persistence-core': path.resolve(
+      '@tanstack/db-sqlite-persistence-core': path.resolve(
         __dirname,
-        `../../../packages/db-persistence-core/src/index.ts`,
+        `../../../packages/db-sqlite-persistence-core/src/index.ts`,
       ),
     },
   },
@@ -86,8 +92,8 @@ export default defineConfig({
     exclude: [
       `@tanstack/db`,
       `@tanstack/offline-transactions`,
-      `@tanstack/browser-db-persistence`,
-      `@tanstack/db-persistence-core`,
+      `@tanstack/browser-db-sqlite-persistence`,
+      `@tanstack/db-sqlite-persistence-core`,
       `@journeyapps/wa-sqlite`,
     ],
   },

@@ -4,7 +4,7 @@ import {
   createCollection,
   createTransaction,
 } from '@tanstack/db'
-import { persistedCollectionOptions } from '../../db-persistence-core/src'
+import { persistedCollectionOptions } from '../../db-sqlite-persistence-core/src'
 import { electricCollectionOptions, isChangeMessage } from '../src/electric'
 import { stripVirtualProps } from '../../db/tests/utils'
 import type { ElectricCollectionUtils } from '../src/electric'

@@ -1,6 +1,6 @@
 ---
 '@tanstack/db': patch
-'@tanstack/db-persistence-core': patch
+'@tanstack/db-sqlite-persistence-core': patch
 '@tanstack/electric-db-collection': patch
 ---
 

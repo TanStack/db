@@ -10,7 +10,7 @@ import {
   or,
 } from '@tanstack/db'
 import { stripVirtualProps } from '../../db/tests/utils'
-import { persistedCollectionOptions } from '../../db-persistence-core/src'
+import { persistedCollectionOptions } from '../../db-sqlite-persistence-core/src'
 import { queryCollectionOptions } from '../src/query'
 import type { QueryFunctionContext } from '@tanstack/query-core'
 import type {

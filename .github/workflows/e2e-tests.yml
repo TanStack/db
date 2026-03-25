@@ -65,22 +65,22 @@ jobs:
 
       - name: Run Node SQLite persisted collection E2E tests
         run: |
-          cd packages/node-db-persistence
+          cd packages/node-db-sqlite-persistence
           pnpm test:e2e
 
       - name: Run Electron SQLite persisted collection E2E tests
         run: |
-          cd packages/electron-db-persistence
+          cd packages/electron-db-sqlite-persistence
           pnpm test:e2e
 
       - name: Run Cloudflare Durable Object persisted collection E2E tests
         run: |
-          cd packages/cloudflare-durable-objects-db-persistence
+          cd packages/cloudflare-durable-objects-db-sqlite-persistence
           pnpm test:e2e
 
       - name: Run React Native/Expo persisted collection E2E tests
         run: |
-          cd packages/react-native-db-persistence
+          cd packages/react-native-db-sqlite-persistence
           pnpm test:e2e
 
       - name: Run React Native/Expo runtime E2E lane
@@ -108,7 +108,7 @@ jobs:
             exit 0
           fi
 
-          cd packages/react-native-db-persistence
+          cd packages/react-native-db-sqlite-persistence
           pnpm test:e2e:runtime
         env:
           TANSTACK_DB_MOBILE_SQLITE_FACTORY_MODULE: ${{ vars.TANSTACK_DB_MOBILE_SQLITE_FACTORY_MODULE }}

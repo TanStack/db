@@ -56,7 +56,7 @@ Provide a unified mobile SQLite persistence package for both React Native and Ex
 
 ## Deliverables
 
-1. `@tanstack/react-native-db-persistence`
+1. `@tanstack/react-native-db-sqlite-persistence`
 2. RN and Expo entrypoint docs/examples
 3. Mobile-focused integration tests
 
