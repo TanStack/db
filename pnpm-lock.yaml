@@ -208,12 +208,12 @@ importers:
 
   examples/electron/offline-first:
     dependencies:
-      '@tanstack/electron-db-persistence':
+      '@tanstack/electron-db-sqlite-persistence':
         specifier: workspace:*
-        version: link:../../../packages/electron-db-persistence
-      '@tanstack/node-db-persistence':
+        version: link:../../../packages/electron-db-sqlite-persistence
+      '@tanstack/node-db-sqlite-persistence':
         specifier: workspace:*
-        version: link:../../../packages/node-db-persistence
+        version: link:../../../packages/node-db-sqlite-persistence
       '@tanstack/offline-transactions':
         specifier: workspace:*
         version: link:../../../packages/offline-transactions
@@ -311,9 +311,9 @@ importers:
       '@tanstack/react-db':
         specifier: ^0.1.77
         version: link:../../../packages/react-db
-      '@tanstack/react-native-db-persistence':
+      '@tanstack/react-native-db-sqlite-persistence':
         specifier: workspace:*
-        version: link:../../../packages/react-native-db-persistence
+        version: link:../../../packages/react-native-db-sqlite-persistence
       '@tanstack/react-query':
         specifier: ^5.90.20
         version: 5.90.21(react@19.0.0)
@@ -396,9 +396,6 @@ importers:
       '@tanstack/db':
         specifier: workspace:*
         version: link:../../../packages/db
-      '@tanstack/db-react-native-sqlite-persisted-collection':
-        specifier: workspace:*
-        version: link:../../../packages/db-react-native-sqlite-persisted-collection
       '@tanstack/electric-db-collection':
         specifier: workspace:*
         version: link:../../../packages/electric-db-collection
@@ -408,6 +405,9 @@ importers:
       '@tanstack/react-db':
         specifier: ^0.1.77
         version: link:../../../packages/react-db
+      '@tanstack/react-native-db-sqlite-persistence':
+        specifier: workspace:*
+        version: link:../../../packages/react-native-db-sqlite-persistence
       '@tanstack/react-query':
         specifier: ^5.90.20
         version: 5.90.21(react@19.0.0)
@@ -475,9 +475,9 @@ importers:
 
   examples/react/offline-transactions:
     dependencies:
-      '@tanstack/browser-db-persistence':
+      '@tanstack/browser-db-sqlite-persistence':
         specifier: workspace:*
-        version: link:../../../packages/browser-db-persistence
+        version: link:../../../packages/browser-db-sqlite-persistence
       '@tanstack/db':
         specifier: workspace:*
         version: link:../../../packages/db
@@ -977,11 +977,11 @@ importers:
         specifier: ~0.15.0
         version: 0.15.1
 
-  packages/browser-db-persistence:
+  packages/browser-db-sqlite-persistence:
     dependencies:
-      '@tanstack/db-persistence-core':
+      '@tanstack/db-sqlite-persistence-core':
         specifier: workspace:*
-        version: link:../db-persistence-core
+        version: link:../db-sqlite-persistence-core
       typescript:
         specifier: '>=4.7'
         version: 5.9.3
@@ -999,14 +999,14 @@ importers:
         specifier: ^12.6.2
         version: 12.8.0
 
-  packages/capacitor-db-persistence:
+  packages/capacitor-db-sqlite-persistence:
     dependencies:
       '@capacitor-community/sqlite':
         specifier: ^8.0.1
         version: 8.0.1(@capacitor/core@8.2.0)
-      '@tanstack/db-persistence-core':
+      '@tanstack/db-sqlite-persistence-core':
         specifier: workspace:*
-        version: link:../db-persistence-core
+        version: link:../db-sqlite-persistence-core
       typescript:
         specifier: '>=4.7'
         version: 5.9.3
@@ -1021,7 +1021,7 @@ importers:
         specifier: ^12.6.2
         version: 12.8.0
 
-  packages/capacitor-db-persistence/e2e/app:
+  packages/capacitor-db-sqlite-persistence/e2e/app:
     dependencies:
       '@capacitor-community/sqlite':
         specifier: ^8.0.1
@@ -1029,7 +1029,7 @@ importers:
       '@capacitor/core':
         specifier: ^8.2.0
         version: 8.2.0
-      '@tanstack/capacitor-db-persistence':
+      '@tanstack/capacitor-db-sqlite-persistence':
         specifier: workspace:*
         version: link:../..
       '@tanstack/db':
@@ -1055,11 +1055,11 @@ importers:
         specifier: ^7.3.1
         version: 7.3.1(@types/node@25.2.2)(jiti@2.6.1)(lightningcss@1.31.1)(sass@1.90.0)(terser@5.44.0)(tsx@4.21.0)(yaml@2.8.1)
 
-  packages/cloudflare-durable-objects-db-persistence:
+  packages/cloudflare-durable-objects-db-sqlite-persistence:
     dependencies:
-      '@tanstack/db-persistence-core':
+      '@tanstack/db-sqlite-persistence-core':
         specifier: workspace:*
-        version: link:../db-persistence-core
+        version: link:../db-sqlite-persistence-core
       typescript:
         specifier: '>=4.7'
         version: 5.9.3
@@ -1166,7 +1166,7 @@ importers:
         specifier: ^0.3.0
         version: 0.3.0
 
-  packages/db-persistence-core:
+  packages/db-sqlite-persistence-core:
     dependencies:
       '@standard-schema/spec':
         specifier: ^1.1.0
@@ -1213,11 +1213,11 @@ importers:
         specifier: ^8.20.0
         version: 8.20.0
 
-  packages/electron-db-persistence:
+  packages/electron-db-sqlite-persistence:
     dependencies:
-      '@tanstack/db-persistence-core':
+      '@tanstack/db-sqlite-persistence-core':
         specifier: workspace:*
-        version: link:../db-persistence-core
+        version: link:../db-sqlite-persistence-core
       typescript:
         specifier: '>=4.7'
         version: 5.9.3
@@ -1229,11 +1229,11 @@ importers:
         specifier: ^40.2.1
         version: 40.8.0
 
-  packages/expo-db-persistence:
+  packages/expo-db-sqlite-persistence:
     dependencies:
-      '@tanstack/db-persistence-core':
+      '@tanstack/db-sqlite-persistence-core':
         specifier: workspace:*
-        version: link:../db-persistence-core
+        version: link:../db-sqlite-persistence-core
       expo-sqlite:
         specifier: ^55.0.10
         version: 55.0.11(expo@55.0.8)(react-native@0.83.2(@babel/core@7.29.0)(@types/react@19.2.14)(react@19.2.4))(react@19.2.4)
@@ -1251,12 +1251,12 @@ importers:
         specifier: ^12.6.2
         version: 12.8.0
 
-  packages/expo-db-persistence/e2e/expo-runtime-app:
+  packages/expo-db-sqlite-persistence/e2e/expo-runtime-app:
     dependencies:
       '@tanstack/db':
         specifier: workspace:*
         version: link:../../../db
-      '@tanstack/expo-db-persistence':
+      '@tanstack/expo-db-sqlite-persistence':
         specifier: workspace:*
         version: link:../..
       expo:
@@ -1272,11 +1272,11 @@ importers:
         specifier: 0.83.2
         version: 0.83.2(@babel/core@7.29.0)(@types/react@19.2.14)(react@19.2.0)
 
-  packages/node-db-persistence:
+  packages/node-db-sqlite-persistence:
     dependencies:
-      '@tanstack/db-persistence-core':
+      '@tanstack/db-sqlite-persistence-core':
         specifier: workspace:*
-        version: link:../db-persistence-core
+        version: link:../db-sqlite-persistence-core
       better-sqlite3:
         specifier: ^12.6.2
         version: 12.8.0
@@ -1406,14 +1406,14 @@ importers:
         specifier: ^19.2.4
         version: 19.2.4(react@19.2.4)
 
-  packages/react-native-db-persistence:
+  packages/react-native-db-sqlite-persistence:
     dependencies:
       '@op-engineering/op-sqlite':
         specifier: ^15.2.5
         version: 15.2.7(react-native@0.83.2(@babel/core@7.29.0)(@types/react@19.2.14)(react@19.2.4))(react@19.2.4)
-      '@tanstack/db-persistence-core':
+      '@tanstack/db-sqlite-persistence-core':
         specifier: workspace:*
-        version: link:../db-persistence-core
+        version: link:../db-sqlite-persistence-core
       typescript:
         specifier: '>=4.7'
         version: 5.9.3
@@ -1515,11 +1515,11 @@ importers:
         specifier: ^4.3.6
         version: 4.4.4(picomatch@4.0.3)(svelte@5.53.6)(typescript@5.9.3)
 
-  packages/tauri-db-persistence:
+  packages/tauri-db-sqlite-persistence:
     dependencies:
-      '@tanstack/db-persistence-core':
+      '@tanstack/db-sqlite-persistence-core':
         specifier: workspace:*
-        version: link:../db-persistence-core
+        version: link:../db-sqlite-persistence-core
       typescript:
         specifier: '>=4.7'
         version: 5.9.3
@@ -1537,12 +1537,12 @@ importers:
         specifier: ^12.6.2
         version: 12.8.0
 
-  packages/tauri-db-persistence/e2e/app:
+  packages/tauri-db-sqlite-persistence/e2e/app:
     dependencies:
       '@tanstack/db':
         specifier: workspace:*
         version: link:../../../db
-      '@tanstack/tauri-db-persistence':
+      '@tanstack/tauri-db-sqlite-persistence':
         specifier: workspace:*
         version: link:../..
       '@tauri-apps/api':

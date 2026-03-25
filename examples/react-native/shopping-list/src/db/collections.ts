@@ -4,14 +4,14 @@ import { electricCollectionOptions } from '@tanstack/electric-db-collection'
 import {
   createReactNativeSQLitePersistence,
   persistedCollectionOptions,
-} from '@tanstack/db-react-native-sqlite-persisted-collection'
+} from '@tanstack/react-native-db-sqlite-persistence'
 import { startOfflineExecutor } from '@tanstack/offline-transactions/react-native'
 import { API_URL, itemsApi, listsApi } from '../utils/api'
 import { createOfflineAwareFetch } from '../network/simulatedOffline'
 import { simulatedOnlineDetector } from '../network/SimulatedOnlineDetector'
 import { AsyncStorageAdapter } from './AsyncStorageAdapter'
 import type { PendingMutation } from '@tanstack/db'
-import type { OpSQLiteDatabaseLike } from '@tanstack/db-react-native-sqlite-persisted-collection'
+import type { OpSQLiteDatabaseLike } from '@tanstack/react-native-db-sqlite-persistence'
 import type { ElectricCollectionUtils } from '@tanstack/electric-db-collection'
 
 export type ShoppingList = {

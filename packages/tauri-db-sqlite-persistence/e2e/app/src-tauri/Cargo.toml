@@ -1,5 +1,5 @@
 [package]
-name = "db-tauri-sqlite-persisted-collection-e2e-app"
+name = "tauri-db-sqlite-persistence-e2e-app"
 version = "0.0.0"
 description = "Repo-local Tauri e2e harness for TanStack DB SQLite persistence"
 authors = ["TanStack Team"]
