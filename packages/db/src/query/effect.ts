@@ -49,6 +49,7 @@ export type DeltaEvent<
       key: TKey
       /** Current value for the entering row */
       value: TRow
+      /** Batch-level high-water cursor — the maximum cursor observed across all source changes in this batch. Use for checkpointing via startAfter. */
       cursor?: CollectionCursor
       metadata?: Record<string, unknown>
     }
@@ -57,6 +58,7 @@ export type DeltaEvent<
       key: TKey
       /** Current value for the exiting row */
       value: TRow
+      /** Batch-level high-water cursor — the maximum cursor observed across all source changes in this batch. Use for checkpointing via startAfter. */
       cursor?: CollectionCursor
       metadata?: Record<string, unknown>
     }
@@ -67,6 +69,7 @@ export type DeltaEvent<
       value: TRow
       /** Previous value before the batch */
       previousValue: TRow
+      /** Batch-level high-water cursor — the maximum cursor observed across all source changes in this batch. Use for checkpointing via startAfter. */
       cursor?: CollectionCursor
       metadata?: Record<string, unknown>
     }
