@@ -1241,7 +1241,10 @@ function findFirstChangeAfterCursor(
     if (cursor === undefined) {
       continue
     }
-    if (lastCursor !== undefined && compareCollectionCursors(cursor, lastCursor) < 0) {
+    if (
+      lastCursor !== undefined &&
+      compareCollectionCursors(cursor, lastCursor) < 0
+    ) {
       throw new Error(
         `Cursors within a sync batch must be monotonically ordered. ` +
           `Saw ${String(cursor)} after ${String(lastCursor)}.`,
