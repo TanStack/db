@@ -9,7 +9,8 @@
   "type": "module",
   "pnpm": {
     "overrides": {
-      "metro": "0.82.5"
+      "metro": "0.82.5",
+      "metro-cache": "0.82.5"
     },
     "onlyBuiltDependencies": [
       "better-sqlite3",

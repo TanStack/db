@@ -6,6 +6,7 @@ settings:
 
 overrides:
   metro: 0.82.5
+  metro-cache: 0.82.5
 
 importers:
 
@@ -414,6 +415,9 @@ importers:
         specifier: ~2.2.0
         version: 2.2.3(react-native@0.79.6(@babel/core@7.29.0)(@types/react@19.2.14)(react@19.2.4))(react@19.2.4)
       metro:
+        specifier: 0.82.5
+        version: 0.82.5
+      metro-cache:
         specifier: 0.82.5
         version: 0.82.5
       react:
@@ -855,7 +859,7 @@ importers:
         version: 0.45.1(@op-engineering/op-sqlite@15.2.7(react-native@0.83.2(@babel/core@7.29.0)(@types/react@19.2.14)(react@19.2.4))(react@19.2.4))(@opentelemetry/api@1.9.0)(@types/better-sqlite3@7.6.13)(@types/pg@8.18.0)(better-sqlite3@12.8.0)(expo-sqlite@55.0.11(expo@55.0.8)(react-native@0.83.2(@babel/core@7.29.0)(@types/react@19.2.14)(react@19.2.4))(react@19.2.4))(gel@2.1.1)(kysely@0.28.11)(pg@8.20.0)(postgres@3.4.8)(sql.js@1.14.1)
       drizzle-zod:
         specifier: ^0.8.3
-        version: 0.8.3(drizzle-orm@0.45.1(@op-engineering/op-sqlite@15.2.7(react-native@0.83.2(@babel/core@7.29.0)(@types/react@19.2.14)(react@19.2.4))(react@19.2.4))(@opentelemetry/api@1.9.0)(@types/better-sqlite3@7.6.13)(@types/pg@8.18.0)(better-sqlite3@12.8.0)(expo-sqlite@55.0.11(expo@55.0.8)(react-native@0.83.2(@babel/core@7.29.0)(@types/react@19.2.14)(react@19.2.4))(react@19.2.4))(gel@2.1.1)(kysely@0.28.11)(pg@8.20.0)(postgres@3.4.8)(sql.js@1.14.1))(zod@3.25.76)
+        version: 0.8.3(drizzle-orm@0.45.1(@op-engineering/op-sqlite@15.2.7(react-native@0.83.2(@babel/core@7.29.0)(@types/react@19.2.14)(react@19.2.4))(react@19.2.4))(@opentelemetry/api@1.9.0)(@types/better-sqlite3@7.6.13)(@types/pg@8.18.0)(better-sqlite3@12.8.0)(expo-sqlite@55.0.11(expo@55.0.8)(react-native@0.83.2(@babel/core@7.29.0)(@types/react@19.2.14)(react@19.2.4))(react@19.2.4))(gel@2.1.1)(kysely@0.28.11)(pg@8.20.0)(postgres@3.4.8)(sql.js@1.14.1))(zod@4.3.6)
       express:
         specifier: ^5.2.1
         version: 5.2.1
@@ -9547,14 +9551,6 @@ packages:
     resolution: {integrity: sha512-AwHV9607xZpedu1NQcjUkua8v7HfOTKfftl6Vc9OGr/jbpiJX6Gpy8E/V9jo/U9UuVYX2PqSUcVNZmu+LTm71Q==}
     engines: {node: '>=18.18'}
 
-  metro-cache@0.83.3:
-    resolution: {integrity: sha512-3jo65X515mQJvKqK3vWRblxDEcgY55Sk3w4xa6LlfEXgQ9g1WgMh9m4qVZVwgcHoLy0a2HENTPCCX4Pk6s8c8Q==}
-    engines: {node: '>=20.19.4'}
-
-  metro-cache@0.83.5:
-    resolution: {integrity: sha512-oH+s4U+IfZyg8J42bne2Skc90rcuESIYf86dYittcdWQtPfcaFXWpByPyTuWk3rR1Zz3Eh5HOrcVImfEhhJLng==}
-    engines: {node: '>=20.19.4'}
-
   metro-config@0.82.5:
     resolution: {integrity: sha512-/r83VqE55l0WsBf8IhNmc/3z71y2zIPe5kRSuqA5tY/SL/ULzlHUJEMd1szztd0G45JozLwjvrhAzhDPJ/Qo/g==}
     engines: {node: '>=18.18'}
@@ -14701,7 +14697,7 @@ snapshots:
     dependencies:
       metro: 0.82.5
       metro-babel-transformer: 0.83.3
-      metro-cache: 0.83.3
+      metro-cache: 0.82.5
       metro-cache-key: 0.83.3
       metro-config: 0.83.3
       metro-core: 0.83.3
@@ -19591,11 +19587,6 @@ snapshots:
       postgres: 3.4.8
       sql.js: 1.14.1
 
-  drizzle-zod@0.8.3(drizzle-orm@0.45.1(@op-engineering/op-sqlite@15.2.7(react-native@0.83.2(@babel/core@7.29.0)(@types/react@19.2.14)(react@19.2.4))(react@19.2.4))(@opentelemetry/api@1.9.0)(@types/better-sqlite3@7.6.13)(@types/pg@8.18.0)(better-sqlite3@12.8.0)(expo-sqlite@55.0.11(expo@55.0.8)(react-native@0.83.2(@babel/core@7.29.0)(@types/react@19.2.14)(react@19.2.4))(react@19.2.4))(gel@2.1.1)(kysely@0.28.11)(pg@8.20.0)(postgres@3.4.8)(sql.js@1.14.1))(zod@3.25.76):
-    dependencies:
-      drizzle-orm: 0.45.1(@op-engineering/op-sqlite@15.2.7(react-native@0.83.2(@babel/core@7.29.0)(@types/react@19.2.14)(react@19.2.4))(react@19.2.4))(@opentelemetry/api@1.9.0)(@types/better-sqlite3@7.6.13)(@types/pg@8.18.0)(better-sqlite3@12.8.0)(expo-sqlite@55.0.11(expo@55.0.8)(react-native@0.83.2(@babel/core@7.29.0)(@types/react@19.2.14)(react@19.2.4))(react@19.2.4))(gel@2.1.1)(kysely@0.28.11)(pg@8.20.0)(postgres@3.4.8)(sql.js@1.14.1)
-      zod: 3.25.76
-
   drizzle-zod@0.8.3(drizzle-orm@0.45.1(@op-engineering/op-sqlite@15.2.7(react-native@0.83.2(@babel/core@7.29.0)(@types/react@19.2.14)(react@19.2.4))(react@19.2.4))(@opentelemetry/api@1.9.0)(@types/better-sqlite3@7.6.13)(@types/pg@8.18.0)(better-sqlite3@12.8.0)(expo-sqlite@55.0.11(expo@55.0.8)(react-native@0.83.2(@babel/core@7.29.0)(@types/react@19.2.14)(react@19.2.4))(react@19.2.4))(gel@2.1.1)(kysely@0.28.11)(pg@8.20.0)(postgres@3.4.8)(sql.js@1.14.1))(zod@4.3.6):
     dependencies:
       drizzle-orm: 0.45.1(@op-engineering/op-sqlite@15.2.7(react-native@0.83.2(@babel/core@7.29.0)(@types/react@19.2.14)(react@19.2.4))(react@19.2.4))(@opentelemetry/api@1.9.0)(@types/better-sqlite3@7.6.13)(@types/pg@8.18.0)(better-sqlite3@12.8.0)(expo-sqlite@55.0.11(expo@55.0.8)(react-native@0.83.2(@babel/core@7.29.0)(@types/react@19.2.14)(react@19.2.4))(react@19.2.4))(gel@2.1.1)(kysely@0.28.11)(pg@8.20.0)(postgres@3.4.8)(sql.js@1.14.1)
@@ -22450,24 +22441,6 @@ snapshots:
     transitivePeerDependencies:
       - supports-color
 
-  metro-cache@0.83.3:
-    dependencies:
-      exponential-backoff: 3.1.3
-      flow-enums-runtime: 0.0.6
-      https-proxy-agent: 7.0.6
-      metro-core: 0.83.3
-    transitivePeerDependencies:
-      - supports-color
-
-  metro-cache@0.83.5:
-    dependencies:
-      exponential-backoff: 3.1.3
-      flow-enums-runtime: 0.0.6
-      https-proxy-agent: 7.0.6
-      metro-core: 0.83.5
-    transitivePeerDependencies:
-      - supports-color
-
   metro-config@0.82.5:
     dependencies:
       connect: 3.7.0
@@ -22489,7 +22462,7 @@ snapshots:
       flow-enums-runtime: 0.0.6
       jest-validate: 29.7.0
       metro: 0.82.5
-      metro-cache: 0.83.3
+      metro-cache: 0.82.5
       metro-core: 0.83.3
       metro-runtime: 0.83.3
       yaml: 2.8.1
@@ -22504,7 +22477,7 @@ snapshots:
       flow-enums-runtime: 0.0.6
       jest-validate: 29.7.0
       metro: 0.82.5
-      metro-cache: 0.83.5
+      metro-cache: 0.82.5
       metro-core: 0.83.5
       metro-runtime: 0.83.5
       yaml: 2.8.1
@@ -22724,7 +22697,7 @@ snapshots:
       flow-enums-runtime: 0.0.6
       metro: 0.82.5
       metro-babel-transformer: 0.83.3
-      metro-cache: 0.83.3
+      metro-cache: 0.82.5
       metro-cache-key: 0.83.3
       metro-minify-terser: 0.83.3
       metro-source-map: 0.83.3

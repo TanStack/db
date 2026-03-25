@@ -302,6 +302,7 @@ app.post('/api/lists', async (req, res) => {
         ${name.trim()},
         COALESCE(${createdAt ?? null}, now())
       )
+      ON CONFLICT (id) DO UPDATE SET name = EXCLUDED.name
       RETURNING id, name, "createdAt"
     )
     SELECT tx.txid, inserted.id, inserted.name, inserted."createdAt"
@@ -424,6 +425,9 @@ app.post('/api/items', async (req, res) => {
         COALESCE(${checked ?? null}, false),
         COALESCE(${createdAt ?? null}, now())
       )
+      ON CONFLICT (id) DO UPDATE SET
+        text = EXCLUDED.text,
+        checked = EXCLUDED.checked
       RETURNING id, "listId", text, checked, "createdAt"
     )
     SELECT tx.txid, inserted.id, inserted."listId", inserted.text, inserted.checked, inserted."createdAt"
