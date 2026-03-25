@@ -1,0 +1,9 @@
+# @tanstack/capacitor-db-sqlite-persistence-e2e-app
+
+## 0.0.1
+
+### Patch Changes
+
+- Updated dependencies [[`f60384b`](https://github.com/TanStack/db/commit/f60384b0fbde019865cbac5a7af341ff8a46d483), [`b8abc02`](https://github.com/TanStack/db/commit/b8abc0230096900746f92c51496489460b4d75e1), [`09c7afc`](https://github.com/TanStack/db/commit/09c7afc47a5ef3f3415ae601b6b00155ab64650b), [`bb09eb1`](https://github.com/TanStack/db/commit/bb09eb1eecbf680bb95a0bb08639f337e9982043), [`179d666`](https://github.com/TanStack/db/commit/179d66685449bcdf9f785c8765bc57cc19c2f7bd), [`43ecbfa`](https://github.com/TanStack/db/commit/43ecbfae5be5e59ffdce6c545d90ca5a810159e6), [`055fd94`](https://github.com/TanStack/db/commit/055fd94bd4654d27d5366af12a90da4c0e670fc0), [`055fd94`](https://github.com/TanStack/db/commit/055fd94bd4654d27d5366af12a90da4c0e670fc0), [`055fd94`](https://github.com/TanStack/db/commit/055fd94bd4654d27d5366af12a90da4c0e670fc0), [`055fd94`](https://github.com/TanStack/db/commit/055fd94bd4654d27d5366af12a90da4c0e670fc0), [`85f5435`](https://github.com/TanStack/db/commit/85f54355a426baefc88ccc55179e0cfcb4dac168), [`b65d8f7`](https://github.com/TanStack/db/commit/b65d8f767dafb1aeede26766c644f9ef0694f20c), [`e0df07e`](https://github.com/TanStack/db/commit/e0df07e1eb2eefbc829407f337cee1d443a7e9b6), [`9952921`](https://github.com/TanStack/db/commit/9952921e02ed8bca5653f0afa64862fc22ffbf9d), [`d351c67`](https://github.com/TanStack/db/commit/d351c677d687e667450138f66ab3bd0e11e7e347)]:
+  - @tanstack/db@0.6.0
+  - @tanstack/capacitor-db-sqlite-persistence@0.1.1
