@@ -41,9 +41,8 @@ const ShoppingContext = createContext<ShoppingContextValue | null>(null)
 export function ShoppingProvider({ children }: { children: React.ReactNode }) {
   const [offline, setOffline] = useState<OfflineExecutor | null>(null)
   const [isNetworkOnline, setIsNetworkOnline] = useState(true)
-  const [isSimulatedOfflineState, setIsSimulatedOfflineState] = useState(
-    isSimulatedOffline(),
-  )
+  const [isSimulatedOfflineState, setIsSimulatedOfflineState] =
+    useState(isSimulatedOffline())
   const [pendingCount, setPendingCount] = useState(0)
   const [isInitialized, setIsInitialized] = useState(false)
   const [initError, setInitError] = useState<string | null>(null)

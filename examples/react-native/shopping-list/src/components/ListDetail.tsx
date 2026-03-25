@@ -7,7 +7,7 @@ import {
   TouchableOpacity,
   View,
 } from 'react-native'
-import { eq, useLiveQuery  } from '@tanstack/react-db'
+import { eq, useLiveQuery } from '@tanstack/react-db'
 import { itemsCollection } from '../db/collections'
 import { useShopping } from '../db/ShoppingContext'
 
@@ -53,20 +53,12 @@ function ItemRow({
   return (
     <View style={styles.itemRow}>
       <TouchableOpacity
-        style={[
-          styles.checkbox,
-          item.checked && styles.checkboxChecked,
-        ]}
+        style={[styles.checkbox, item.checked && styles.checkboxChecked]}
         onPress={onToggle}
       >
         {item.checked && <Text style={styles.checkmark}>✓</Text>}
       </TouchableOpacity>
-      <Text
-        style={[
-          styles.itemText,
-          item.checked && styles.itemTextChecked,
-        ]}
-      >
+      <Text style={[styles.itemText, item.checked && styles.itemTextChecked]}>
         {item.text}
       </Text>
       {showSavingBadge ? (

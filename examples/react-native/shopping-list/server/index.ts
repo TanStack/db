@@ -260,11 +260,13 @@ app.post('/api/shapes/items', async (req, res) => {
 })
 
 app.get('/api/lists', async (_req, res) => {
-  const rows = await sql<Array<{
-    id: string
-    name: string
-    createdAt: unknown
-  }>>`
+  const rows = await sql<
+    Array<{
+      id: string
+      name: string
+      createdAt: unknown
+    }>
+  >`
     SELECT id, name, "createdAt"
     FROM shopping_lists
     ORDER BY "createdAt" DESC
@@ -282,12 +284,14 @@ app.post('/api/lists', async (req, res) => {
     return res.status(400).json({ error: `List name is required` })
   }
 
-  const [inserted] = await sql<Array<{
-    txid: string
-    id: string
-    name: string
-    createdAt: unknown
-  }>>`
+  const [inserted] = await sql<
+    Array<{
+      txid: string
+      id: string
+      name: string
+      createdAt: unknown
+    }>
+  >`
     WITH tx AS (
       SELECT pg_current_xact_id()::xid::text as txid
     ),
@@ -369,13 +373,15 @@ app.delete('/api/lists/:id', async (req, res) => {
 })
 
 app.get('/api/items', async (_req, res) => {
-  const rows = await sql<Array<{
-    id: string
-    listId: string
-    text: string
-    checked: boolean
-    createdAt: unknown
-  }>>`
+  const rows = await sql<
+    Array<{
+      id: string
+      listId: string
+      text: string
+      checked: boolean
+      createdAt: unknown
+    }>
+  >`
     SELECT id, "listId", text, checked, "createdAt"
     FROM shopping_items
     ORDER BY "createdAt" ASC
@@ -396,14 +402,16 @@ app.post('/api/items', async (req, res) => {
     return res.status(400).json({ error: `listId and text are required` })
   }
 
-  const [inserted] = await sql<Array<{
-    txid: string
-    id: string
-    listId: string
-    text: string
-    checked: boolean
-    createdAt: unknown
-  }>>`
+  const [inserted] = await sql<
+    Array<{
+      txid: string
+      id: string
+      listId: string
+      text: string
+      checked: boolean
+      createdAt: unknown
+    }>
+  >`
     WITH tx AS (
       SELECT pg_current_xact_id()::xid::text as txid
     ),
@@ -507,7 +515,9 @@ async function start() {
     })
   } catch (error) {
     console.error(`Failed to start shopping-list server`, error)
-    console.error(`Did you run 'pnpm db:up' in examples/react-native/shopping-list?`)
+    console.error(
+      `Did you run 'pnpm db:up' in examples/react-native/shopping-list?`,
+    )
     process.exit(1)
   }
 }

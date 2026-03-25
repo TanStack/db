@@ -38,7 +38,7 @@ function ListCard({
   const totalCount = (totalData as any)?.[0]?.n ?? 0
   const checkedCount = (checkedData as any)?.[0]?.n ?? 0
   const uncheckedPreview =
-    ((uncheckedPreviewData as any) as Array<{ text: string }> | undefined) ?? []
+    (uncheckedPreviewData as any as Array<{ text: string }> | undefined) ?? []
   const uncheckedCount = Math.max(0, totalCount - checkedCount)
   const remainingCount = Math.max(0, uncheckedCount - uncheckedPreview.length)
   const previewText = uncheckedPreview
@@ -103,11 +103,7 @@ function ListCard({
 export function ListsScreen() {
   const router = useRouter()
   const [newListName, setNewListName] = useState(``)
-  const {
-    listActions,
-    isInitialized,
-    initError,
-  } = useShopping()
+  const { listActions, isInitialized, initError } = useShopping()
 
   // ★ Includes query with aggregate subqueries: each list gets child collections
   // with computed counts. ListCard subscribes to them via useLiveQuery.

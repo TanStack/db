@@ -6,7 +6,15 @@ import { Stack } from 'expo-router'
 import { QueryClientProvider } from '@tanstack/react-query'
 import { SafeAreaProvider } from 'react-native-safe-area-context'
 import { StatusBar } from 'expo-status-bar'
-import { Alert, Modal, Platform, Pressable, StyleSheet, Text, View } from 'react-native'
+import {
+  Alert,
+  Modal,
+  Platform,
+  Pressable,
+  StyleSheet,
+  Text,
+  View,
+} from 'react-native'
 import { queryClient } from '../src/utils/queryClient'
 import { ShoppingProvider, useShopping } from '../src/db/ShoppingContext'
 
@@ -103,7 +111,9 @@ function HeaderControls({ onAppRefresh }: { onAppRefresh: () => void }) {
         }}
         accessibilityLabel="Open demo menu"
       >
-        <Text style={{ fontSize: 16, fontWeight: `700`, color: `#111827` }}>☰</Text>
+        <Text style={{ fontSize: 16, fontWeight: `700`, color: `#111827` }}>
+          ☰
+        </Text>
       </Pressable>
       <Modal
         transparent
@@ -115,7 +125,10 @@ function HeaderControls({ onAppRefresh }: { onAppRefresh: () => void }) {
           <Pressable style={styles.backdrop} onPress={closeMenu} />
           <View style={styles.menuAnchor}>
             <View style={styles.menuCard}>
-              <Pressable style={styles.menuItem} onPress={toggleSimulatedOffline}>
+              <Pressable
+                style={styles.menuItem}
+                onPress={toggleSimulatedOffline}
+              >
                 <Text style={styles.menuText}>
                   {isSimulatedOffline
                     ? `Disable simulated offline mode`

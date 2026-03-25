@@ -1,12 +1,9 @@
-import {
-  
-  ReactNativeOnlineDetector
-} from '@tanstack/offline-transactions/react-native'
+import { ReactNativeOnlineDetector } from '@tanstack/offline-transactions/react-native'
 import {
   isSimulatedOffline,
   subscribeSimulatedOffline,
 } from './simulatedOffline'
-import type {OnlineDetector} from '@tanstack/offline-transactions/react-native';
+import type { OnlineDetector } from '@tanstack/offline-transactions/react-native'
 
 class SimulatedOnlineDetector implements OnlineDetector {
   private readonly baseDetector = new ReactNativeOnlineDetector()
