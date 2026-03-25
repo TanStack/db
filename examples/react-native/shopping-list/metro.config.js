@@ -12,6 +12,7 @@ config.watchFolders = [monorepoRoot]
 // Ensure symlinks are followed (important for pnpm)
 config.resolver.unstable_enableSymlinks = true
 config.resolver.unstable_enablePackageExports = true
+config.resolver.unstable_conditionNames = ['react-native']
 
 const localNodeModules = path.resolve(projectRoot, 'node_modules')
 
