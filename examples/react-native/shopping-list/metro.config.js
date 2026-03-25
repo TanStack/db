@@ -52,15 +52,9 @@ config.resolver.resolveRequest = (context, moduleName, platform) => {
   )
 }
 
-// Force singleton packages to resolve from the app's local node_modules
-config.resolver.extraNodeModules = new Proxy(singletonPaths, {
-  get: (target, name) => {
-    if (target[name]) {
-      return target[name]
-    }
-    return path.resolve(localNodeModules, name)
-  },
-})
+// Only singleton packages need explicit remapping. Let Metro resolve all other
+// transitive dependencies from the package that requested them.
+config.resolver.extraNodeModules = singletonPaths
 
 // Block react-native 0.83 from root node_modules
 const escMonorepoRoot = monorepoRoot.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
