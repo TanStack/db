@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import {
   and,
+  concat,
   count,
   createLiveQueryCollection,
   eq,
@@ -157,6 +158,138 @@ describe(`includes subqueries`, () => {
       })),
     )
   }
+
+  describe(`scalar includes materialization`, () => {
+    type Message = {
+      id: number
+      role: string
+    }
+
+    type Chunk = {
+      id: number
+      messageId: number
+      text: string
+      timestamp: number
+    }
+
+    const sampleMessages: Array<Message> = [
+      { id: 1, role: `assistant` },
+      { id: 2, role: `user` },
+    ]
+
+    const sampleChunks: Array<Chunk> = [
+      { id: 10, messageId: 1, text: `world`, timestamp: 3 },
+      { id: 11, messageId: 1, text: `Hello`, timestamp: 1 },
+      { id: 12, messageId: 1, text: ` `, timestamp: 2 },
+      { id: 20, messageId: 2, text: `Question`, timestamp: 1 },
+    ]
+
+    function createMessagesCollection() {
+      return createCollection(
+        mockSyncCollectionOptions<Message>({
+          id: `includes-messages`,
+          getKey: (message) => message.id,
+          initialData: sampleMessages,
+        }),
+      )
+    }
+
+    function createChunksCollection() {
+      return createCollection(
+        mockSyncCollectionOptions<Chunk>({
+          id: `includes-chunks`,
+          getKey: (chunk) => chunk.id,
+          initialData: sampleChunks,
+        }),
+      )
+    }
+
+    it(`toArray unwraps scalar child selects into scalar arrays`, async () => {
+      const messages = createMessagesCollection()
+      const chunks = createChunksCollection()
+
+      const collection = createLiveQueryCollection((q) =>
+        q.from({ m: messages }).select(({ m }) => ({
+          id: m.id,
+          contentParts: toArray(
+            q
+              .from({ c: chunks })
+              .where(({ c }) => eq(c.messageId, m.id))
+              .orderBy(({ c }) => c.timestamp)
+              .select(({ c }) => c.text),
+          ),
+        })),
+      )
+
+      await collection.preload()
+
+      expect((collection.get(1) as any).contentParts).toEqual([
+        `Hello`,
+        ` `,
+        `world`,
+      ])
+      expect((collection.get(2) as any).contentParts).toEqual([`Question`])
+    })
+
+    it(`concat(toArray(subquery.select(...))) materializes and re-emits a string`, async () => {
+      const messages = createMessagesCollection()
+      const chunks = createChunksCollection()
+
+      const collection = createLiveQueryCollection((q) =>
+        q.from({ m: messages }).select(({ m }) => ({
+          id: m.id,
+          role: m.role,
+          content: concat(
+            toArray(
+              q
+                .from({ c: chunks })
+                .where(({ c }) => eq(c.messageId, m.id))
+                .orderBy(({ c }) => c.timestamp)
+                .select(({ c }) => c.text),
+            ),
+          ),
+        })),
+      )
+
+      await collection.preload()
+
+      expect((collection.get(1) as any).content).toBe(`Hello world`)
+      expect((collection.get(2) as any).content).toBe(`Question`)
+
+      const changeCallback = vi.fn()
+      const subscription = collection.subscribeChanges(changeCallback, {
+        includeInitialState: false,
+      })
+      changeCallback.mockClear()
+
+      chunks.utils.begin()
+      chunks.utils.write({
+        type: `insert`,
+        value: { id: 13, messageId: 1, text: `!`, timestamp: 4 },
+      })
+      chunks.utils.commit()
+
+      await new Promise((resolve) => setTimeout(resolve, 10))
+
+      expect(changeCallback).toHaveBeenCalled()
+      expect((collection.get(1) as any).content).toBe(`Hello world!`)
+      expect((collection.get(2) as any).content).toBe(`Question`)
+
+      subscription.unsubscribe()
+    })
+
+    it(`top-level scalar select throws at root consumers`, () => {
+      const messages = createMessagesCollection()
+
+      expect(() =>
+        (createLiveQueryCollection as any)((q: any) =>
+          q.from({ m: messages }).select(({ m }: any) => m.role),
+        ),
+      ).toThrow(
+        `Top-level scalar select() is not supported by createLiveQueryCollection() or queryOnce().`,
+      )
+    })
+  })
 
   describe(`basic includes`, () => {
     it(`produces child Collections on parent rows`, async () => {

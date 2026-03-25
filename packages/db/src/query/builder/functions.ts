@@ -2,7 +2,12 @@ import { Aggregate, Func } from '../ir'
 import { toExpression } from './ref-proxy.js'
 import type { BasicExpression } from '../ir'
 import type { RefProxy } from './ref-proxy.js'
-import type { Context, GetResult, RefLeaf } from './types.js'
+import type {
+  Context,
+  GetRawResult,
+  RefLeaf,
+  StringifiableScalar,
+} from './types.js'
 import type { QueryBuilder } from './index.js'
 
 type StringRef =
@@ -38,8 +43,20 @@ type ComparisonOperandPrimitive<T extends string | number | boolean> =
   | undefined
   | null
 
-// Helper type for any expression-like value
-type ExpressionLike = BasicExpression | RefProxy<any> | RefLeaf<any> | any
+// Helper type for values that can be lowered to expressions.
+type ExpressionLike =
+  | Aggregate
+  | BasicExpression
+  | RefProxy<any>
+  | RefLeaf<any>
+  | string
+  | number
+  | boolean
+  | bigint
+  | Date
+  | null
+  | undefined
+  | Array<unknown>
 
 // Helper type to extract the underlying type from various expression types
 type ExtractType<T> =
@@ -277,9 +294,26 @@ export function length<T extends ExpressionLike>(
   return new Func(`length`, [toExpression(arg)]) as NumericFunctionReturnType<T>
 }
 
+export function concat<T extends StringifiableScalar>(
+  arg: ToArrayWrapper<T>,
+): ConcatToArrayWrapper<T>
+export function concat(...args: Array<ExpressionLike>): BasicExpression<string>
 export function concat(
-  ...args: Array<ExpressionLike>
-): BasicExpression<string> {
+  ...args: Array<ExpressionLike | ToArrayWrapper<any>>
+): BasicExpression<string> | ConcatToArrayWrapper<any> {
+  const toArrayArg = args.find(
+    (arg): arg is ToArrayWrapper<any> => arg instanceof ToArrayWrapper,
+  )
+
+  if (toArrayArg) {
+    if (args.length !== 1) {
+      throw new Error(
+        `concat(toArray(...)) currently supports only a single toArray(...) argument`,
+      )
+    }
+    return new ConcatToArrayWrapper(toArrayArg.query)
+  }
+
   return new Func(
     `concat`,
     args.map((arg) => toExpression(arg)),
@@ -402,13 +436,20 @@ export const operators = [
 
 export type OperatorName = (typeof operators)[number]
 
-export class ToArrayWrapper<T = any> {
-  declare readonly _type: T
+export class ToArrayWrapper<_T = unknown> {
+  declare readonly _type: `toArray`
+  declare readonly _result: _T
+  constructor(public readonly query: QueryBuilder<any>) {}
+}
+
+export class ConcatToArrayWrapper<_T = unknown> {
+  declare readonly _type: `concatToArray`
+  declare readonly _result: _T
   constructor(public readonly query: QueryBuilder<any>) {}
 }
 
 export function toArray<TContext extends Context>(
   query: QueryBuilder<TContext>,
-): ToArrayWrapper<GetResult<TContext>> {
+): ToArrayWrapper<GetRawResult<TContext>> {
   return new ToArrayWrapper(query)
 }
