@@ -14,12 +14,8 @@
     "paths": {
       "@tanstack/db": ["../db/src"],
       "@tanstack/db-ivm": ["../db-ivm/src"],
-      "@tanstack/node-db-persistence": [
-        "../node-db-persistence/src"
-      ],
-      "@tanstack/db-persistence-core": [
-        "../db-persistence-core/src"
-      ]
+      "@tanstack/node-db-persistence": ["../node-db-persistence/src"],
+      "@tanstack/db-persistence-core": ["../db-persistence-core/src"]
     }
   },
   "include": [

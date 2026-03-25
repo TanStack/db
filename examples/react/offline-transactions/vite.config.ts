@@ -14,14 +14,8 @@ function watchWorkspacePackages() {
       const watchPaths = [
         path.resolve(__dirname, `../../../packages/db/dist`),
         path.resolve(__dirname, `../../../packages/offline-transactions/dist`),
-        path.resolve(
-          __dirname,
-          `../../../packages/browser-db-persistence/src`,
-        ),
-        path.resolve(
-          __dirname,
-          `../../../packages/db-persistence-core/dist`,
-        ),
+        path.resolve(__dirname, `../../../packages/browser-db-persistence/src`),
+        path.resolve(__dirname, `../../../packages/db-persistence-core/dist`),
       ]
 
       console.log(`[watch-workspace] Starting to watch paths:`)
