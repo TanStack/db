@@ -1,16 +1,16 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { QueryClient, hashKey } from '@tanstack/query-core'
 import {
+  BTreeIndex,
   createCollection,
   createLiveQueryCollection,
   eq,
   ilike,
   inArray,
   or,
-  BTreeIndex,
 } from '@tanstack/db'
 import { stripVirtualProps } from '../../db/tests/utils'
-import { persistedCollectionOptions } from '../../db-sqlite-persisted-collection-core/src'
+import { persistedCollectionOptions } from '../../db-persistence-core/src'
 import { queryCollectionOptions } from '../src/query'
 import type { QueryFunctionContext } from '@tanstack/query-core'
 import type {

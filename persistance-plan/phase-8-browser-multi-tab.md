@@ -26,7 +26,7 @@ Implement robust multi-tab coordination using Web Locks, Visibility API, and Bro
 ## Implementation Status
 
 > **Overall: IMPLEMENTED** — `BrowserCollectionCoordinator` class implemented in
-> `packages/db-browser-wa-sqlite-persisted-collection/src/browser-coordinator.ts`.
+> `packages/browser-db-persistence/src/browser-coordinator.ts`.
 > Exported from package index. Unit tests with Web Locks and BroadcastChannel
 > mocks pass (15 tests). Remaining: hidden-tab stepdown, heartbeat timeout
 > detection, and Playwright multi-tab integration tests.

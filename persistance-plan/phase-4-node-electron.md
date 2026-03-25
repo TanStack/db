@@ -58,8 +58,8 @@ Ship production-ready Node and Electron adapters on top of the shared SQLite cor
 
 ## Deliverables
 
-1. `@tanstack/db-node-sqlite-persisted-collection`
-2. `@tanstack/db-electron-sqlite-persisted-collection`
+1. `@tanstack/node-db-persistence`
+2. `@tanstack/electron-db-persistence`
 3. Electron IPC bridge docs and example integration
 
 ## Test Plan

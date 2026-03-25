@@ -1,0 +1,15 @@
+{
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "paths": {
+      "@tanstack/db": ["../db/src"],
+      "@tanstack/node-db-persistence": [
+        "../node-db-persistence/src"
+      ],
+      "@tanstack/db-persistence-core": [
+        "../db-persistence-core/src"
+      ]
+    }
+  },
+  "include": ["src"]
+}

@@ -13,8 +13,8 @@
     "postinstall": "prebuild-install --runtime electron --target 40.2.1 --arch arm64 || echo 'prebuild-install failed, try: npx @electron/rebuild'"
   },
   "dependencies": {
-    "@tanstack/db-electron-sqlite-persisted-collection": "workspace:*",
-    "@tanstack/db-node-sqlite-persisted-collection": "workspace:*",
+    "@tanstack/electron-db-persistence": "workspace:*",
+    "@tanstack/node-db-persistence": "workspace:*",
     "@tanstack/offline-transactions": "workspace:*",
     "@tanstack/query-db-collection": "workspace:*",
     "@tanstack/react-db": "workspace:*",

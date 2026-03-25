@@ -4,7 +4,7 @@ import {
   createBrowserWASQLitePersistence,
   openBrowserWASQLiteOPFSDatabase,
   persistedCollectionOptions,
-} from '@tanstack/db-browser-wa-sqlite-persisted-collection'
+} from '@tanstack/browser-db-persistence'
 import type { Collection } from '@tanstack/db'
 
 export type PersistedTodo = {

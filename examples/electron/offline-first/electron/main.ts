@@ -2,8 +2,8 @@ import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { BrowserWindow, Menu, app, ipcMain } from 'electron'
 import Database from 'better-sqlite3'
-import { createNodeSQLitePersistence } from '@tanstack/db-node-sqlite-persisted-collection'
-import { exposeElectronSQLitePersistence } from '@tanstack/db-electron-sqlite-persisted-collection'
+import { createNodeSQLitePersistence } from '@tanstack/node-db-persistence'
+import { exposeElectronSQLitePersistence } from '@tanstack/electron-db-persistence'
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
 

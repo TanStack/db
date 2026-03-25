@@ -57,7 +57,7 @@ Implement Durable Object-native SQLite persistence using in-process execution (n
 
 ## Deliverables
 
-1. `@tanstack/db-cloudflare-do-sqlite-persisted-collection`
+1. `@tanstack/cloudflare-durable-objects-db-persistence`
 2. DO initialization helpers and usage docs
 3. DO integration test suite
 
