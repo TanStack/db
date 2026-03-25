@@ -410,6 +410,16 @@ class EffectPipelineRunner<TRow extends object, TKey extends string | number> {
     this.collections = extractCollectionsFromQuery(this.query)
     const aliasesById = extractCollectionAliases(this.query)
 
+    if (
+      config.startAfter !== undefined &&
+      Object.keys(this.collections).length > 1
+    ) {
+      throw new Error(
+        `startAfter is only supported for single-source effects. ` +
+          `This effect queries ${Object.keys(this.collections).length} collections.`,
+      )
+    }
+
     // Build alias → collection map
     this.collectionByAlias = {}
     for (const [collectionId, aliases] of aliasesById.entries()) {

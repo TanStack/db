@@ -568,6 +568,24 @@ describe(`createEffect`, () => {
 
       await effect.dispose()
     })
+
+    it(`should throw when startAfter is used with multi-source effects`, () => {
+      const users = createUsersCollection()
+      const issues = createIssuesCollection()
+
+      expect(() => {
+        createEffect({
+          query: (q) =>
+            q
+              .from({ issue: issues })
+              .join({ user: users }, ({ issue, user }) =>
+                eq(issue.userId, user.id),
+              ),
+          onBatch: () => {},
+          startAfter: 1,
+        })
+      }).toThrow(/single-source/)
+    })
   })
 
   describe(`filtered queries`, () => {
