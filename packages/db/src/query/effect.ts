@@ -143,6 +143,9 @@ export interface EffectConfig<
   /**
    * Suppress callbacks until the source replay advances past this cursor.
    * Historical changes at or before the cursor still update internal query state.
+   *
+   * Requires the sync source to provide a monotonic cursor on every
+   * `sync.write()` call. Only supported for single-source (non-join) effects.
    */
   startAfter?: CollectionCursor
 }
