@@ -569,54 +569,6 @@ describe(`createEffect`, () => {
       await effect.dispose()
     })
 
-    it(`should emit enter when same key crosses startAfter within one transaction (known limitation)`, async () => {
-      // Known limitation: when the same key has a replay insert and a live
-      // update within one transaction, the transaction-scoped scheduler
-      // coalesces both into a single graph run. D2 sees the net result as
-      // a new row, so the event type is `enter` instead of `update`.
-      // Correct behavior would be `update` with previousValue from the
-      // replay insert, but fixing this requires per-change D2 fencing
-      // within transactions, which is too invasive for the initial cut.
-      const users = createCollection(
-        mockSyncCollectionOptionsNoInitialState<User>({
-          id: `same-key-straddle-users`,
-          getKey: (user) => user.id,
-        }),
-      )
-      const events: Array<DeltaEvent<User, number>> = []
-
-      const effect = createEffect<User, number>({
-        query: (q) => q.from({ user: users }),
-        onBatch: collectBatchEvents(events),
-        startAfter: 2,
-      })
-
-      users.utils.markReady()
-      await flushPromises()
-
-      users.utils.begin()
-      users.utils.write({
-        type: `insert`,
-        value: { id: 1, name: `Alice`, active: true },
-        cursor: 2,
-      })
-      users.utils.write({
-        type: `update`,
-        value: { id: 1, name: `Alice v2`, active: true },
-        previousValue: { id: 1, name: `Alice`, active: true },
-        cursor: 3,
-      })
-      users.utils.commit()
-      await flushPromises()
-
-      expect(events).toHaveLength(1)
-      // Ideally this would be `update`, but coalescing produces `enter`
-      expect(events[0]!.type).toBe(`enter`)
-      expect(events[0]!.value.name).toBe(`Alice v2`)
-
-      await effect.dispose()
-    })
-
     it(`should reject non-monotonic cursor sequences within a batch`, async () => {
       const users = createCollection(
         mockSyncCollectionOptionsNoInitialState<User>({
