@@ -209,10 +209,10 @@ importers:
   examples/electron/offline-first:
     dependencies:
       '@tanstack/electron-db-sqlite-persistence':
-        specifier: ^0.1.3
+        specifier: ^0.1.4
         version: link:../../../packages/electron-db-sqlite-persistence
       '@tanstack/node-db-sqlite-persistence':
-        specifier: ^0.1.3
+        specifier: ^0.1.4
         version: link:../../../packages/node-db-sqlite-persistence
       '@tanstack/offline-transactions':
         specifier: ^1.0.25
@@ -312,7 +312,7 @@ importers:
         specifier: ^0.1.78
         version: link:../../../packages/react-db
       '@tanstack/react-native-db-sqlite-persistence':
-        specifier: ^0.1.3
+        specifier: ^0.1.4
         version: link:../../../packages/react-native-db-sqlite-persistence
       '@tanstack/react-query':
         specifier: ^5.90.20
@@ -409,7 +409,7 @@ importers:
         specifier: ^0.1.78
         version: link:../../../packages/react-db
       '@tanstack/react-native-db-sqlite-persistence':
-        specifier: ^0.1.3
+        specifier: ^0.1.4
         version: link:../../../packages/react-native-db-sqlite-persistence
       '@tanstack/react-query':
         specifier: ^5.90.20
@@ -482,7 +482,7 @@ importers:
   examples/react/offline-transactions:
     dependencies:
       '@tanstack/browser-db-sqlite-persistence':
-        specifier: ^0.1.3
+        specifier: ^0.1.4
         version: link:../../../packages/browser-db-sqlite-persistence
       '@tanstack/db':
         specifier: ^0.6.0
