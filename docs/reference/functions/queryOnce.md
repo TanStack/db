@@ -8,10 +8,10 @@ title: queryOnce
 ## Call Signature
 
 ```ts
-function queryOnce<TContext>(queryFn): Promise<InferResultType<TContext>>;
+function queryOnce<TQueryFn, TQuery>(queryFn): Promise<InferResultType<ExtractContext<TQuery>>>;
 ```
 
-Defined in: [packages/db/src/query/query-once.ts:47](https://github.com/TanStack/db/blob/main/packages/db/src/query/query-once.ts#L47)
+Defined in: [packages/db/src/query/query-once.ts:59](https://github.com/TanStack/db/blob/main/packages/db/src/query/query-once.ts#L59)
 
 Executes a one-shot query and returns the results as an array.
 
@@ -24,21 +24,25 @@ and automatically cleans up the collection. It's ideal for:
 
 ### Type Parameters
 
-#### TContext
+#### TQueryFn
 
-`TContext` *extends* [`Context`](../interfaces/Context.md)
+`TQueryFn` *extends* (`q`) => [`QueryBuilder`](../type-aliases/QueryBuilder.md)\<`any`\>
+
+#### TQuery
+
+`TQuery` *extends* [`QueryBuilder`](../type-aliases/QueryBuilder.md)\<`any`\> = `ReturnType`\<`TQueryFn`\>
 
 ### Parameters
 
 #### queryFn
 
-(`q`) => [`QueryBuilder`](../type-aliases/QueryBuilder.md)\<`TContext`\>
+`TQueryFn` & `RootQueryFn`\<`TQuery`\>
 
 A function that receives the query builder and returns a query
 
 ### Returns
 
-`Promise`\<[`InferResultType`](../type-aliases/InferResultType.md)\<`TContext`\>\>
+`Promise`\<[`InferResultType`](../type-aliases/InferResultType.md)\<[`ExtractContext`](../type-aliases/ExtractContext.md)\<`TQuery`\>\>\>
 
 A promise that resolves to an array of query results
 
@@ -61,30 +65,30 @@ const activeUserNames = await queryOnce((q) =>
 ## Call Signature
 
 ```ts
-function queryOnce<TContext>(config): Promise<InferResultType<TContext>>;
+function queryOnce<TQuery>(config): Promise<InferResultType<ExtractContext<TQuery>>>;
 ```
 
-Defined in: [packages/db/src/query/query-once.ts:68](https://github.com/TanStack/db/blob/main/packages/db/src/query/query-once.ts#L68)
+Defined in: [packages/db/src/query/query-once.ts:83](https://github.com/TanStack/db/blob/main/packages/db/src/query/query-once.ts#L83)
 
 Executes a one-shot query using a configuration object.
 
 ### Type Parameters
 
-#### TContext
+#### TQuery
 
-`TContext` *extends* [`Context`](../interfaces/Context.md)
+`TQuery` *extends* [`QueryBuilder`](../type-aliases/QueryBuilder.md)\<`any`\>
 
 ### Parameters
 
 #### config
 
-[`QueryOnceConfig`](../interfaces/QueryOnceConfig.md)\<`TContext`\>
+[`QueryOnceConfig`](../interfaces/QueryOnceConfig.md)\<[`ExtractContext`](../type-aliases/ExtractContext.md)\<`TQuery`\>\> & `object`
 
 Configuration object with the query function
 
 ### Returns
 
-`Promise`\<[`InferResultType`](../type-aliases/InferResultType.md)\<`TContext`\>\>
+`Promise`\<[`InferResultType`](../type-aliases/InferResultType.md)\<[`ExtractContext`](../type-aliases/ExtractContext.md)\<`TQuery`\>\>\>
 
 A promise that resolves to an array of query results
 

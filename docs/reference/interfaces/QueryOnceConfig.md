@@ -5,7 +5,7 @@ title: QueryOnceConfig
 
 # Interface: QueryOnceConfig\<TContext\>
 
-Defined in: [packages/db/src/query/query-once.ts:8](https://github.com/TanStack/db/blob/main/packages/db/src/query/query-once.ts#L8)
+Defined in: [packages/db/src/query/query-once.ts:18](https://github.com/TanStack/db/blob/main/packages/db/src/query/query-once.ts#L18)
 
 Configuration options for queryOnce
 
@@ -21,10 +21,10 @@ Configuration options for queryOnce
 
 ```ts
 query: 
-  | QueryBuilder<TContext>
-| (q) => QueryBuilder<TContext>;
+  | (q) => QueryBuilder<TContext> & RootObjectResultConstraint<TContext>
+| QueryBuilder<TContext> & RootObjectResultConstraint<TContext>;
 ```
 
-Defined in: [packages/db/src/query/query-once.ts:12](https://github.com/TanStack/db/blob/main/packages/db/src/query/query-once.ts#L12)
+Defined in: [packages/db/src/query/query-once.ts:22](https://github.com/TanStack/db/blob/main/packages/db/src/query/query-once.ts#L22)
 
 Query builder function that defines the query

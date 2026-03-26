@@ -3,27 +3,29 @@ id: IndexOptions
 title: IndexOptions
 ---
 
-# Interface: IndexOptions\<TResolver\>
+# Interface: IndexOptions\<TIndexType\>
 
 Defined in: [packages/db/src/indexes/index-options.ts:6](https://github.com/TanStack/db/blob/main/packages/db/src/indexes/index-options.ts#L6)
 
-Enhanced index options that support both sync and async resolvers
+Options for creating an index
 
 ## Type Parameters
 
-### TResolver
+### TIndexType
 
-`TResolver` *extends* [`IndexResolver`](../type-aliases/IndexResolver.md) = [`IndexResolver`](../type-aliases/IndexResolver.md)
+`TIndexType` *extends* [`IndexConstructor`](../type-aliases/IndexConstructor.md) = [`IndexConstructor`](../type-aliases/IndexConstructor.md)
 
 ## Properties
 
 ### indexType?
 
 ```ts
-optional indexType: TResolver;
+optional indexType: TIndexType;
 ```
 
-Defined in: [packages/db/src/indexes/index-options.ts:8](https://github.com/TanStack/db/blob/main/packages/db/src/indexes/index-options.ts#L8)
+Defined in: [packages/db/src/indexes/index-options.ts:12](https://github.com/TanStack/db/blob/main/packages/db/src/indexes/index-options.ts#L12)
+
+Index type to use (e.g., BasicIndex, BTreeIndex)
 
 ***
 
@@ -33,14 +35,18 @@ Defined in: [packages/db/src/indexes/index-options.ts:8](https://github.com/TanS
 optional name: string;
 ```
 
-Defined in: [packages/db/src/indexes/index-options.ts:7](https://github.com/TanStack/db/blob/main/packages/db/src/indexes/index-options.ts#L7)
+Defined in: [packages/db/src/indexes/index-options.ts:10](https://github.com/TanStack/db/blob/main/packages/db/src/indexes/index-options.ts#L10)
+
+Optional name for the index
 
 ***
 
 ### options?
 
 ```ts
-optional options: TResolver extends IndexConstructor<any> ? TResolver<TResolver> extends (id, expr, name?, options?) => any ? O : never : TResolver extends () => Promise<TCtor> ? TCtor extends (id, expr, name?, options?) => any ? O : never : never;
+optional options: TIndexType extends (id, expr, name?, options?) => any ? O : never;
 ```
 
-Defined in: [packages/db/src/indexes/index-options.ts:9](https://github.com/TanStack/db/blob/main/packages/db/src/indexes/index-options.ts#L9)
+Defined in: [packages/db/src/indexes/index-options.ts:14](https://github.com/TanStack/db/blob/main/packages/db/src/indexes/index-options.ts#L14)
+
+Options passed to the index constructor
