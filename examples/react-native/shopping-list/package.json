@@ -22,7 +22,7 @@
     "@tanstack/electric-db-collection": "^0.2.42",
     "@tanstack/offline-transactions": "^1.0.25",
     "@tanstack/react-db": "^0.1.78",
-    "@tanstack/react-native-db-sqlite-persistence": "^0.1.3",
+    "@tanstack/react-native-db-sqlite-persistence": "^0.1.4",
     "@tanstack/react-query": "^5.90.20",
     "expo": "~53.0.26",
     "expo-constants": "~17.1.0",

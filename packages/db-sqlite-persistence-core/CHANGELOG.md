@@ -1,5 +1,11 @@
 # @tanstack/db-sqlite-persistence-core
 
+## 0.1.4
+
+### Patch Changes
+
+- Fix workspace: dependency links that were incorrectly published to npm ([#1410](https://github.com/TanStack/db/pull/1410))
+
 ## 0.1.3
 
 ### Patch Changes

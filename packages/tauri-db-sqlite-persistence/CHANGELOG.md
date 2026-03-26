@@ -1,5 +1,14 @@
 # @tanstack/tauri-db-sqlite-persistence
 
+## 0.1.4
+
+### Patch Changes
+
+- Fix workspace: dependency links that were incorrectly published to npm ([#1410](https://github.com/TanStack/db/pull/1410))
+
+- Updated dependencies [[`b779b4e`](https://github.com/TanStack/db/commit/b779b4ec127dd3f6a2fef965c52d4ee876144d8b)]:
+  - @tanstack/db-sqlite-persistence-core@0.1.4
+
 ## 0.1.3
 
 ### Patch Changes
