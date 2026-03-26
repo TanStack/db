@@ -1,5 +1,14 @@
 # @tanstack/electron-db-sqlite-persistence
 
+## 0.1.3
+
+### Patch Changes
+
+- Fix workspace: dependency links that were incorrectly published to npm ([#1408](https://github.com/TanStack/db/pull/1408))
+
+- Updated dependencies [[`287673d`](https://github.com/TanStack/db/commit/287673da28a9b760fa3f3b7dd993297c9217c894)]:
+  - @tanstack/db-sqlite-persistence-core@0.1.3
+
 ## 0.1.2
 
 ### Patch Changes
