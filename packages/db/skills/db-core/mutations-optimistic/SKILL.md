@@ -9,7 +9,7 @@ description: >
   onInsert/onUpdate/onDelete handlers. PendingMutation type. Transaction.isPersisted.
 type: sub-skill
 library: db
-library_version: '0.5.30'
+library_version: '0.6.0'
 sources:
   - 'TanStack/db:docs/guides/mutations.md'
   - 'TanStack/db:packages/db/src/transactions.ts'

@@ -10,7 +10,7 @@ description: >
 type: framework
 library: db
 framework: solid
-library_version: '0.5.30'
+library_version: '0.6.0'
 requires:
   - db-core
 sources:
@@ -52,12 +52,12 @@ function TodoList() {
 
 ### useLiveQuery
 
-Returns an `Accessor<Array<T>>` with additional properties. Call it as a function to get data:
+Returns an `Accessor<Array<T>>` (or `Accessor<T | undefined>` with `findOne`) with additional properties. Call it as a function to get data:
 
 ```tsx
 // Query function — call result as function for data
 const query = useLiveQuery((q) => q.from({ todo: todoCollection }))
-// query()        → Array<T> (data)
+// query()        → Array<T> (data)  — or T | undefined when using findOne()
 // query.data     → DEPRECATED — use query() instead. Migrate any existing code.
 // query.status   → CollectionStatus
 // query.isLoading, query.isReady, query.isError
@@ -110,6 +110,22 @@ const cat = category() // read here loses tracking
 const query = useLiveQuery((q) =>
   q.from({ todo: todoCollection }).where(({ todo }) => eq(todo.category, cat)),
 )
+```
+
+### findOne (single result)
+
+When the query uses `.findOne()`, `useLiveQuery` returns a single object (or `undefined`) instead of an array:
+
+```tsx
+const userQuery = useLiveQuery((q) =>
+  q
+    .from({ user: usersCollection })
+    .where(({ user }) => eq(user.id, userId()))
+    .findOne(),
+)
+
+// userQuery() → T | undefined (not Array<T>)
+return <Show when={userQuery()}>{(user) => <div>{user().name}</div>}</Show>
 ```
 
 ### Suspense integration

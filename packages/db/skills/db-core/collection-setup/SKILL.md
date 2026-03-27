@@ -6,13 +6,14 @@ description: >
   (ElectricSQL real-time sync), powerSyncCollectionOptions (PowerSync SQLite),
   rxdbCollectionOptions (RxDB), trailbaseCollectionOptions (TrailBase),
   localOnlyCollectionOptions, localStorageCollectionOptions. CollectionConfig
-  options: getKey, schema, sync, gcTime, autoIndex, syncMode (eager/on-demand/
-  progressive). StandardSchema validation with Zod/Valibot/ArkType. Collection
-  lifecycle (idle/loading/ready/error). Adapter-specific sync patterns including
-  Electric txid tracking and Query direct writes.
+  options: getKey, schema, sync, gcTime, autoIndex (default off), defaultIndexType,
+  syncMode (eager/on-demand/progressive), virtualProps. StandardSchema validation
+  with Zod/Valibot/ArkType. Collection lifecycle (idle/loading/ready/error).
+  Adapter-specific sync patterns including Electric txid tracking, Query direct
+  writes, and PowerSync query-driven sync with onLoad/onLoadSubset hooks.
 type: sub-skill
 library: db
-library_version: '0.5.30'
+library_version: '0.6.0'
 sources:
   - 'TanStack/db:docs/overview.md'
   - 'TanStack/db:docs/guides/schemas.md'
@@ -103,6 +104,26 @@ queryCollectionOptions({
 | `eager`       | Mostly-static datasets                         | <10k rows |
 | `on-demand`   | Search, catalogs, large tables                 | >50k rows |
 | `progressive` | Collaborative apps needing instant first paint | Any       |
+
+PowerSync supports `on-demand` sync mode (query-driven sync), where only rows matching active live query predicates are loaded from SQLite into the collection. This can be combined with Sync Streams via `onLoad` (eager) or `onLoadSubset` (on-demand) hooks to also control which data the PowerSync Service syncs to the device. Use `extractSimpleComparisons` or `parseWhereExpression` to derive Sync Stream parameters dynamically from live query predicates.
+
+## Indexing
+
+Indexing is opt-in. The `autoIndex` option defaults to `"off"`. To enable automatic indexing, set `autoIndex: "eager"` and provide a `defaultIndexType`:
+
+```ts
+import { BasicIndex } from '@tanstack/db'
+
+createCollection(
+  queryCollectionOptions({
+    autoIndex: 'eager',
+    defaultIndexType: BasicIndex,
+    // ...
+  }),
+)
+```
+
+Without `defaultIndexType`, setting `autoIndex: "eager"` throws a `CollectionConfigurationError`. You can also create indexes manually with `collection.createIndex()` and remove them with `collection.removeIndex()`.
 
 ## Core Patterns
 
@@ -255,7 +276,7 @@ app.post('/api/todos', async (req, res) => {
 })
 ```
 
-`pg_current_xact_id()` must be queried inside the same SQL transaction as the mutation. Otherwise the txid doesn't match and `awaitTxId` stalls forever.
+`pg_current_xact_id()` must be queried inside the same SQL transaction as the mutation. Otherwise the txid doesn't match and `awaitTxId` times out (default 5 seconds).
 
 Source: docs/collections/electric-collection.md
 
@@ -390,6 +411,38 @@ createCollection(queryCollectionOptions({ schema: todoSchema, ... }))
 When a schema is provided, the collection infers types from it. An explicit generic creates conflicting type constraints.
 
 Source: docs/overview.md
+
+### HIGH Function-based queryKey without shared prefix
+
+Wrong:
+
+```ts
+queryCollectionOptions({
+  queryKey: (opts) => {
+    if (opts.where) {
+      return ['products-filtered', JSON.stringify(opts.where)]
+    }
+    return ['products-all']
+  },
+})
+```
+
+Correct:
+
+```ts
+queryCollectionOptions({
+  queryKey: (opts) => {
+    if (opts.where) {
+      return ['products', JSON.stringify(opts.where)]
+    }
+    return ['products']
+  },
+})
+```
+
+When using a function-based `queryKey`, all derived keys must share the base key (`queryKey({})`) as a prefix. TanStack Query uses prefix matching for cache operations; if derived keys don't share the base prefix, cache updates silently miss entries, leading to stale data.
+
+Source: docs/collections/query-collection.md
 
 ### MEDIUM Direct writes overridden by next query sync
 

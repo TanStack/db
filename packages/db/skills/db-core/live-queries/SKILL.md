@@ -7,10 +7,12 @@ description: >
   isUndefined, and, or, not. Aggregates: count, sum, avg, min, max. String
   functions: upper, lower, length, concat, coalesce. Math: add. $selected
   namespace. createLiveQueryCollection. Derived collections. Predicate push-down.
-  Incremental view maintenance via differential dataflow (d2ts).
+  Incremental view maintenance via differential dataflow (d2ts). Virtual
+  properties ($synced, $origin, $key, $collectionId). Includes subqueries
+  for hierarchical data. toArray and concat(toArray(...)) scalar includes.
 type: sub-skill
 library: db
-library_version: '0.5.30'
+library_version: '0.6.0'
 sources:
   - 'TanStack/db:docs/guides/live-queries.md'
   - 'TanStack/db:packages/db/src/query/builder/index.ts'
@@ -190,6 +192,101 @@ const activeUserPosts = createLiveQueryCollection((q) =>
 ```
 
 Create derived collections once at module scope and reuse them. Do not recreate on every render or navigation.
+
+## Virtual Properties
+
+Live query results include computed, read-only virtual properties on every row:
+
+- `$synced`: `true` when the row is confirmed by sync; `false` when it is still optimistic.
+- `$origin`: `"local"` if the last confirmed change came from this client, otherwise `"remote"`.
+- `$key`: the row key for the result.
+- `$collectionId`: the source collection ID.
+
+These props are added automatically and can be used in `where`, `select`, and `orderBy` clauses. Do not persist them back to storage.
+
+## Includes (Subqueries in Select)
+
+Embed a correlated subquery inside `select()` to produce hierarchical (nested) data. The subquery must contain a `where` with an `eq()` that correlates a parent field with a child field. Three materialization modes are available.
+
+### Collection includes (default)
+
+Return a child `Collection` on each parent row:
+
+```ts
+import { eq, createLiveQueryCollection } from '@tanstack/db'
+
+const projectsWithIssues = createLiveQueryCollection((q) =>
+  q.from({ p: projectsCollection }).select(({ p }) => ({
+    id: p.id,
+    name: p.name,
+    issues: q
+      .from({ i: issuesCollection })
+      .where(({ i }) => eq(i.projectId, p.id))
+      .select(({ i }) => ({
+        id: i.id,
+        title: i.title,
+      })),
+  })),
+)
+
+// Each row's `issues` is a live Collection
+for (const project of projectsWithIssues) {
+  console.log(project.name, project.issues.toArray)
+}
+```
+
+### Array includes with toArray()
+
+Wrap the subquery in `toArray()` to get a plain array of scalar values instead of a Collection:
+
+```ts
+import { eq, toArray, createLiveQueryCollection } from '@tanstack/db'
+
+const messagesWithParts = createLiveQueryCollection((q) =>
+  q.from({ m: messagesCollection }).select(({ m }) => ({
+    id: m.id,
+    contentParts: toArray(
+      q
+        .from({ c: chunksCollection })
+        .where(({ c }) => eq(c.messageId, m.id))
+        .orderBy(({ c }) => c.timestamp)
+        .select(({ c }) => c.text),
+    ),
+  })),
+)
+// row.contentParts is string[]
+```
+
+### Concatenated scalar with concat(toArray())
+
+Wrap `toArray()` in `concat()` to join the scalar results into a single string:
+
+```ts
+import { eq, toArray, concat, createLiveQueryCollection } from '@tanstack/db'
+
+const messagesWithContent = createLiveQueryCollection((q) =>
+  q.from({ m: messagesCollection }).select(({ m }) => ({
+    id: m.id,
+    content: concat(
+      toArray(
+        q
+          .from({ c: chunksCollection })
+          .where(({ c }) => eq(c.messageId, m.id))
+          .orderBy(({ c }) => c.timestamp)
+          .select(({ c }) => c.text),
+      ),
+    ),
+  })),
+)
+// row.content is a single concatenated string
+```
+
+### Includes rules
+
+- The subquery **must** have a `where` clause with an `eq()` correlating a parent alias with a child alias. The library extracts this automatically as the join condition.
+- `toArray()` and `concat(toArray())` require the subquery to use a **scalar** `select` (e.g., `select(({ c }) => c.text)`), not an object select.
+- Collection includes (bare subquery) require an **object** `select`.
+- Includes subqueries are compiled into the same incremental pipeline as the parent query -- they are not separate live queries.
 
 ## Common Mistakes
 
