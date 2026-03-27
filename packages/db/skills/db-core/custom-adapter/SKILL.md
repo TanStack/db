@@ -168,15 +168,15 @@ The `metadata` object is available as a property on the sync config argument alo
 ```ts
 sync: ({ begin, write, commit, markReady, metadata }) => {
   // Row metadata: store per-row state (e.g. server version, ETag)
-  metadata.row.get(key)              // => unknown | undefined
+  metadata.row.get(key) // => unknown | undefined
   metadata.row.set(key, { version: 3, etag: 'abc' })
   metadata.row.delete(key)
 
   // Collection metadata: store per-collection state (e.g. resume cursor)
-  metadata.collection.get('cursor')  // => unknown | undefined
+  metadata.collection.get('cursor') // => unknown | undefined
   metadata.collection.set('cursor', 'token_abc123')
   metadata.collection.delete('cursor')
-  metadata.collection.list()         // => [{ key: 'cursor', value: 'token_abc123' }]
+  metadata.collection.list() // => [{ key: 'cursor', value: 'token_abc123' }]
   metadata.collection.list('resume') // filter by prefix
 }
 ```

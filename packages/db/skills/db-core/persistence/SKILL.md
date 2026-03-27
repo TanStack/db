@@ -31,16 +31,16 @@ TanStack DB persistence adds a durable SQLite-backed layer to any collection. Da
 
 ## Choosing a Platform Package
 
-| Platform | Package | Create function |
-| --- | --- | --- |
-| Browser (OPFS) | `@tanstack/browser-db-sqlite-persistence` | `createBrowserWASQLitePersistence` |
-| React Native | `@tanstack/react-native-db-sqlite-persistence` | `createReactNativeSQLitePersistence` |
-| Expo | `@tanstack/expo-db-sqlite-persistence` | `createExpoSQLitePersistence` |
-| Electron | `@tanstack/electron-db-sqlite-persistence` | `createElectronSQLitePersistence` (renderer) |
-| Node.js | `@tanstack/node-db-sqlite-persistence` | `createNodeSQLitePersistence` |
-| Capacitor | `@tanstack/capacitor-db-sqlite-persistence` | `createCapacitorSQLitePersistence` |
-| Tauri | `@tanstack/tauri-db-sqlite-persistence` | `createTauriSQLitePersistence` |
-| Cloudflare DO | `@tanstack/cloudflare-durable-objects-db-sqlite-persistence` | `createCloudflareDOSQLitePersistence` |
+| Platform       | Package                                                      | Create function                              |
+| -------------- | ------------------------------------------------------------ | -------------------------------------------- |
+| Browser (OPFS) | `@tanstack/browser-db-sqlite-persistence`                    | `createBrowserWASQLitePersistence`           |
+| React Native   | `@tanstack/react-native-db-sqlite-persistence`               | `createReactNativeSQLitePersistence`         |
+| Expo           | `@tanstack/expo-db-sqlite-persistence`                       | `createExpoSQLitePersistence`                |
+| Electron       | `@tanstack/electron-db-sqlite-persistence`                   | `createElectronSQLitePersistence` (renderer) |
+| Node.js        | `@tanstack/node-db-sqlite-persistence`                       | `createNodeSQLitePersistence`                |
+| Capacitor      | `@tanstack/capacitor-db-sqlite-persistence`                  | `createCapacitorSQLitePersistence`           |
+| Tauri          | `@tanstack/tauri-db-sqlite-persistence`                      | `createTauriSQLitePersistence`               |
+| Cloudflare DO  | `@tanstack/cloudflare-durable-objects-db-sqlite-persistence` | `createCloudflareDOSQLitePersistence`        |
 
 All platform packages re-export `persistedCollectionOptions` from the core.
 
@@ -115,11 +115,11 @@ This works with any adapter: `electricCollectionOptions`, `queryCollectionOption
 
 Coordinators handle leader election and cross-instance communication so only one tab/process owns the database writer.
 
-| Platform | Coordinator | Mechanism |
-| --- | --- | --- |
-| Browser | `BrowserCollectionCoordinator` | BroadcastChannel + Web Locks |
-| Electron | `ElectronCollectionCoordinator` | IPC (main holds DB, renderer accesses via RPC) |
-| Single-process (RN, Expo, Node, etc.) | `SingleProcessCoordinator` | No-op (always leader) |
+| Platform                              | Coordinator                     | Mechanism                                      |
+| ------------------------------------- | ------------------------------- | ---------------------------------------------- |
+| Browser                               | `BrowserCollectionCoordinator`  | BroadcastChannel + Web Locks                   |
+| Electron                              | `ElectronCollectionCoordinator` | IPC (main holds DB, renderer accesses via RPC) |
+| Single-process (RN, Expo, Node, etc.) | `SingleProcessCoordinator`      | No-op (always leader)                          |
 
 Browser example:
 
@@ -169,11 +169,11 @@ There is no custom migration function -- a version mismatch triggers a full rese
 
 ## Key Options
 
-| Option | Type | Description |
-| --- | --- | --- |
-| `persistence` | `PersistedCollectionPersistence` | Platform adapter + coordinator |
-| `schemaVersion` | `number` | Data version (default 1). Bump on schema changes |
-| `id` | `string` | Required for local-only. Collection identifier in SQLite |
+| Option          | Type                             | Description                                              |
+| --------------- | -------------------------------- | -------------------------------------------------------- |
+| `persistence`   | `PersistedCollectionPersistence` | Platform adapter + coordinator                           |
+| `schemaVersion` | `number`                         | Data version (default 1). Bump on schema changes         |
+| `id`            | `string`                         | Required for local-only. Collection identifier in SQLite |
 
 ## Common Mistakes
 
