@@ -2680,6 +2680,7 @@ describe(`Virtual properties`, () => {
         $origin: `remote`,
         $key: `row-1`,
         $collectionId: `collection-1`,
+        $pendingOperation: null,
       }),
     ).toBe(true)
   })
