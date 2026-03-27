@@ -18,7 +18,7 @@ This maintains items in sorted order and provides efficient range operations
 
 ### TKey
 
-`TKey` *extends* `string` \| `number` \| `undefined` = `string` \| `number` \| `undefined`
+`TKey` *extends* `string` \| `number` = `string` \| `number`
 
 ## Constructors
 
@@ -384,7 +384,7 @@ Performs an equality lookup
 protected evaluateIndexExpression(item): any;
 ```
 
-Defined in: [packages/db/src/indexes/base-index.ts:195](https://github.com/TanStack/db/blob/main/packages/db/src/indexes/base-index.ts#L195)
+Defined in: [packages/db/src/indexes/base-index.ts:194](https://github.com/TanStack/db/blob/main/packages/db/src/indexes/base-index.ts#L194)
 
 #### Parameters
 
@@ -458,7 +458,7 @@ Defined in: [packages/db/src/indexes/btree-index.ts:78](https://github.com/TanSt
 
 ##### \_options?
 
-[`BTreeIndexOptions`](../interfaces/BTreeIndexOptions.md)
+`BTreeIndexOptions`
 
 #### Returns
 
@@ -592,7 +592,7 @@ This is more efficient for compound queries like "WHERE a > 5 AND a < 10"
 
 ##### options
 
-[`RangeQueryOptions`](../interfaces/RangeQueryOptions.md) = `{}`
+[`BTreeRangeQueryOptions`](../interfaces/BTreeRangeQueryOptions.md) = `{}`
 
 #### Returns
 
@@ -618,7 +618,7 @@ Performs a reversed range query
 
 ##### options
 
-[`RangeQueryOptions`](../interfaces/RangeQueryOptions.md) = `{}`
+[`BTreeRangeQueryOptions`](../interfaces/BTreeRangeQueryOptions.md) = `{}`
 
 #### Returns
 
@@ -848,7 +848,7 @@ The last n items
 protected trackLookup(startTime): void;
 ```
 
-Defined in: [packages/db/src/indexes/base-index.ts:200](https://github.com/TanStack/db/blob/main/packages/db/src/indexes/base-index.ts#L200)
+Defined in: [packages/db/src/indexes/base-index.ts:199](https://github.com/TanStack/db/blob/main/packages/db/src/indexes/base-index.ts#L199)
 
 #### Parameters
 
@@ -909,7 +909,7 @@ Updates a value in the index
 protected updateTimestamp(): void;
 ```
 
-Defined in: [packages/db/src/indexes/base-index.ts:206](https://github.com/TanStack/db/blob/main/packages/db/src/indexes/base-index.ts#L206)
+Defined in: [packages/db/src/indexes/base-index.ts:205](https://github.com/TanStack/db/blob/main/packages/db/src/indexes/base-index.ts#L205)
 
 #### Returns
 

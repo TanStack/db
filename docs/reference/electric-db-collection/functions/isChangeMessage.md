@@ -9,7 +9,7 @@ title: isChangeMessage
 function isChangeMessage<T>(message): message is ChangeMessage<T>;
 ```
 
-Defined in: node\_modules/.pnpm/@electric-sql+client@1.5.12/node\_modules/@electric-sql/client/dist/index.d.ts:886
+Defined in: node\_modules/.pnpm/@electric-sql+client@1.5.13/node\_modules/@electric-sql/client/dist/index.d.ts:886
 
 Type guard for checking Message is ChangeMessage.
 
