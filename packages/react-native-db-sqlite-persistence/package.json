@@ -1,6 +1,6 @@
 {
   "name": "@tanstack/react-native-db-sqlite-persistence",
-  "version": "0.1.4",
+  "version": "0.1.5",
   "description": "React Native and Expo SQLite persisted collection adapter for TanStack DB",
   "author": "TanStack Team",
   "license": "MIT",

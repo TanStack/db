@@ -1,6 +1,6 @@
 {
   "name": "@tanstack/browser-db-sqlite-persistence",
-  "version": "0.1.4",
+  "version": "0.1.5",
   "description": "Browser wa-sqlite persisted collection adapter for TanStack DB",
   "author": "TanStack Team",
   "license": "MIT",
