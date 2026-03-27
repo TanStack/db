@@ -176,6 +176,38 @@ const productsCollection = createCollection(
 )
 ```
 
+## Common Mistakes
+
+### HIGH Function-based queryKey without shared prefix
+
+Wrong:
+
+```ts
+queryCollectionOptions({
+  queryKey: (opts) => {
+    if (opts.where) {
+      return ['products-filtered', JSON.stringify(opts.where)]
+    }
+    return ['products-all']
+  },
+})
+```
+
+Correct:
+
+```ts
+queryCollectionOptions({
+  queryKey: (opts) => {
+    if (opts.where) {
+      return ['products', JSON.stringify(opts.where)]
+    }
+    return ['products']
+  },
+})
+```
+
+When using a function-based `queryKey`, all derived keys must share the base key (`queryKey({})`) as a prefix. TanStack Query uses prefix matching for cache operations; if derived keys don't share the base prefix, cache updates silently miss entries, leading to stale data.
+
 ## Key Behaviors
 
 - `queryFn` result is treated as **complete state** -- missing items are deleted

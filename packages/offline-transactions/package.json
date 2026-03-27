@@ -15,7 +15,8 @@
     "offline",
     "transactions",
     "persistence",
-    "sync"
+    "sync",
+    "tanstack-intent"
   ],
   "scripts": {
     "build": "vite build",

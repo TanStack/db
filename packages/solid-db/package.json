@@ -13,7 +13,8 @@
   "keywords": [
     "optimistic",
     "solid",
-    "typescript"
+    "typescript",
+    "tanstack-intent"
   ],
   "scripts": {
     "build": "vite build",
