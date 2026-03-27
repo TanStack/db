@@ -36,17 +36,20 @@ import type { VirtualOrigin } from '../../virtual-props.js'
 
 const VIRTUAL_SYNCED_KEY = `__virtual_synced__`
 const VIRTUAL_HAS_LOCAL_KEY = `__virtual_has_local__`
+const VIRTUAL_PENDING_OP_KEY = `__virtual_pending_op__`
 const GROUP_KEY_REF_PREFIX = `__group_key_`
 
 type RowVirtualMetadata = {
   synced: boolean
   hasLocal: boolean
+  pendingOperation: string | null
 }
 
 function getRowVirtualMetadata(row: NamespacedRow): RowVirtualMetadata {
   let found = false
   let allSynced = true
   let hasLocal = false
+  let pendingOperation: string | null = null
 
   for (const [alias, value] of Object.entries(row as Record<string, unknown>)) {
     if (alias === `$selected`) continue
@@ -64,11 +67,19 @@ function getRowVirtualMetadata(row: NamespacedRow): RowVirtualMetadata {
     if (asRecord.$origin === `local`) {
       hasLocal = true
     }
+    if (
+      pendingOperation === null &&
+      `$pendingOperation` in asRecord &&
+      asRecord.$pendingOperation != null
+    ) {
+      pendingOperation = asRecord.$pendingOperation as string
+    }
   }
 
   return {
     synced: found ? allSynced : true,
     hasLocal,
+    pendingOperation,
   }
 }
 
@@ -158,6 +169,19 @@ export function processGroupBy(
         return false
       },
     },
+    [VIRTUAL_PENDING_OP_KEY]: {
+      preMap: ([, row]: [string, NamespacedRow]) =>
+        getRowVirtualMetadata(row).pendingOperation,
+      reduce: (values: Array<[string | null, number]>) => {
+        // Return the first non-null pending operation, or null if all are null
+        for (const [op, multiplicity] of values) {
+          if (op != null && multiplicity > 0) {
+            return op
+          }
+        }
+        return null
+      },
+    },
   }
 
   // Handle empty GROUP BY (single-group aggregation)
@@ -245,10 +269,14 @@ export function processGroupBy(
         const groupHasLocal = (aggregatedRow as Record<string, any>)[
           VIRTUAL_HAS_LOCAL_KEY
         ]
+        const groupPendingOp = (aggregatedRow as Record<string, any>)[
+          VIRTUAL_PENDING_OP_KEY
+        ]
         resultRow.$synced = groupSynced ?? true
         resultRow.$origin = (
           groupHasLocal ? `local` : `remote`
         ) satisfies VirtualOrigin
+        resultRow.$pendingOperation = groupPendingOp ?? null
         resultRow.$key = resultKey
         resultRow.$collectionId =
           aggregateCollectionId ?? resultRow.$collectionId

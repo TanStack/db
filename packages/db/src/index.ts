@@ -21,6 +21,7 @@ export * from './strategies/index.js'
 export {
   type VirtualRowProps,
   type VirtualOrigin,
+  type PendingOperationType,
   type WithVirtualProps,
   type WithoutVirtualProps,
   hasVirtualProps,

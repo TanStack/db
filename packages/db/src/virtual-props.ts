@@ -22,6 +22,16 @@
 export type VirtualOrigin = 'local' | 'remote'
 
 /**
+ * The type of pending optimistic operation for a row.
+ *
+ * - `'insert'`: Row was inserted in a pending transaction
+ * - `'update'`: Row was updated in a pending transaction
+ * - `'delete'`: Row was deleted in a pending transaction
+ * - `null`: No pending optimistic operation
+ */
+export type PendingOperationType = 'insert' | 'update' | 'delete' | null
+
+/**
  * Virtual properties available on every row in TanStack DB collections.
  *
  * These properties are:
@@ -94,6 +104,19 @@ export interface VirtualRowProps<
    * For live query collections, this is the ID of the upstream collection.
    */
   readonly $collectionId: string
+
+  /**
+   * The type of pending optimistic operation for this row.
+   *
+   * - `'insert'`: Row was inserted in a pending transaction
+   * - `'update'`: Row was updated in a pending transaction
+   * - `'delete'`: Row was deleted in a pending transaction
+   * - `null`: No pending optimistic operation
+   *
+   * For local-only collections, this is always `null`.
+   * For live query collections, this is passed through from the source collection.
+   */
+  readonly $pendingOperation: PendingOperationType
 }
 
 /**
@@ -171,12 +194,14 @@ export function createVirtualProps<TKey extends string | number>(
   collectionId: string,
   isSynced: boolean,
   origin: VirtualOrigin,
+  pendingOperation: PendingOperationType = null,
 ): VirtualRowProps<TKey> {
   return {
     $synced: isSynced,
     $origin: origin,
     $key: key,
     $collectionId: collectionId,
+    $pendingOperation: pendingOperation,
   }
 }
 
@@ -218,6 +243,7 @@ export function enrichRowWithVirtualProps<
     $origin: existingRow.$origin ?? computeOrigin(),
     $key: existingRow.$key ?? key,
     $collectionId: existingRow.$collectionId ?? collectionId,
+    $pendingOperation: existingRow.$pendingOperation ?? null,
   } as WithVirtualProps<T, TKey>
 }
 
@@ -246,11 +272,16 @@ export function computeAggregateVirtualProps<TKey extends string | number>(
   // $origin = 'local' if ANY row is local (consistent with "local influence" semantics)
   const hasLocal = rows.some((row) => row.$origin === 'local')
 
+  // $pendingOperation = null if all rows are null, otherwise the first non-null value
+  const firstPendingOp =
+    rows.find((row) => row.$pendingOperation != null)?.$pendingOperation ?? null
+
   return {
     $synced: allSynced,
     $origin: hasLocal ? 'local' : 'remote',
     $key: groupKey,
     $collectionId: collectionId,
+    $pendingOperation: firstPendingOp,
   }
 }
 
@@ -263,6 +294,7 @@ export const VIRTUAL_PROP_NAMES = [
   '$origin',
   '$key',
   '$collectionId',
+  '$pendingOperation',
 ] as const
 
 /**
