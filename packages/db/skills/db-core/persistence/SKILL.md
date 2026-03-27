@@ -142,7 +142,7 @@ Electron requires setup in both processes:
 ```ts
 // Main process
 import { exposeElectronSQLitePersistence } from '@tanstack/electron-db-sqlite-persistence'
-exposeElectronSQLitePersistence({ databasePath: '/path/to/app.sqlite' })
+exposeElectronSQLitePersistence({ persistence, ipcMain })
 
 // Renderer process
 import {
@@ -151,7 +151,7 @@ import {
 } from '@tanstack/electron-db-sqlite-persistence'
 
 const coordinator = new ElectronCollectionCoordinator({ dbName: 'my-app' })
-const persistence = createElectronSQLitePersistence({ coordinator })
+const persistence = createElectronSQLitePersistence({ ipcRenderer: window.electron.ipcRenderer, coordinator })
 ```
 
 ## Schema Versioning
@@ -185,7 +185,7 @@ Wrong:
 persistedCollectionOptions({
   getKey: (d) => d.id,
   persistence,
-  // missing id — throws InvalidPersistedCollectionConfigError
+  // missing id — generates random UUID each session, data won't persist across reloads
 })
 ```
 
@@ -199,7 +199,7 @@ persistedCollectionOptions({
 })
 ```
 
-Local-only persisted collections require an explicit `id` to identify the collection in SQLite. Synced collections derive it from the adapter config.
+Without an explicit `id`, the code generates a random UUID each session, so persisted data is silently abandoned on every reload. Local-only persisted collections must always provide an `id`. Synced collections derive it from the adapter config.
 
 ### HIGH Forgetting the coordinator in multi-tab apps
 
@@ -233,6 +233,6 @@ await database.close?.()
 
 Failing to dispose leaks BroadcastChannel subscriptions and Web Lock handles.
 
-See also: db-core/collection-setup/SKILL.md -- for adapter selection and collection configuration.
+See also: db-core/collection-setup/SKILL.md — for adapter selection and collection configuration.
 
-See also: offline/SKILL.md -- for offline transaction queueing (complements persistence).
+See also: offline/SKILL.md — for offline transaction queueing (complements persistence).

@@ -177,7 +177,7 @@ Live query results include computed, read-only virtual properties on every row:
 - `$key`: the row key for the result.
 - `$collectionId`: the source collection ID.
 
-These props can be used in `where`, `select`, and `orderBy` clauses. They are added to query outputs automatically and should not be persisted back to storage.
+These props are added automatically and can be used in `where`, `select`, and `orderBy` clauses. Do not persist them back to storage.
 
 ```tsx
 const { data } = useLiveQuery(
@@ -306,7 +306,7 @@ If multiple versions appear, fix with one of:
 {
   "pnpm": {
     "overrides": {
-      "@tanstack/db": "^0.5.30"
+      "@tanstack/db": "^0.6.0"
     }
   }
 }

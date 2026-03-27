@@ -163,7 +163,7 @@ Mutation handlers must not resolve until server changes have synced back to the 
 
 The `metadata` API on the sync config allows adapters to store per-row and per-collection metadata that persists across sync transactions. This is useful for tracking resume tokens, cursors, LSNs, or other adapter-specific state.
 
-The `metadata` object is available as a property on the sync config argument alongside `begin`, `write`, `commit`, etc.
+The `metadata` object is available as a property on the sync config argument alongside `begin`, `write`, `commit`, etc. It is always provided, but without persistence the metadata is in-memory only and does not survive reloads. With persistence, metadata is durable across sessions.
 
 ```ts
 sync: ({ begin, write, commit, markReady, metadata }) => {
@@ -331,4 +331,4 @@ Source: packages/db/src/collection/sync.ts:110
 
 Getting-started simplicity (localOnly, eager mode) conflicts with production correctness (on-demand sync, race condition prevention, proper markReady handling). Agents optimizing for quick setup tend to skip buffering, markReady, and cleanup functions.
 
-See also: db-core/collection-setup/SKILL.md -- for built-in adapter patterns to model after.
+See also: db-core/collection-setup/SKILL.md — for built-in adapter patterns to model after.

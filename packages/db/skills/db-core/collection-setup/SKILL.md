@@ -7,7 +7,7 @@ description: >
   rxdbCollectionOptions (RxDB), trailbaseCollectionOptions (TrailBase),
   localOnlyCollectionOptions, localStorageCollectionOptions. CollectionConfig
   options: getKey, schema, sync, gcTime, autoIndex (default off), defaultIndexType,
-  syncMode (eager/on-demand/progressive), virtualProps. StandardSchema validation
+  syncMode (eager/on-demand, plus progressive for Electric). StandardSchema validation
   with Zod/Valibot/ArkType. Collection lifecycle (idle/loading/ready/error).
   Adapter-specific sync patterns including Electric txid tracking, Query direct
   writes, and PowerSync query-driven sync with onLoad/onLoadSubset hooks.
@@ -103,7 +103,7 @@ queryCollectionOptions({
 | ------------- | ---------------------------------------------- | --------- |
 | `eager`       | Mostly-static datasets                         | <10k rows |
 | `on-demand`   | Search, catalogs, large tables                 | >50k rows |
-| `progressive` | Collaborative apps needing instant first paint | Any       |
+| `progressive` | Collaborative apps needing instant first paint (Electric only) | Any       |
 
 PowerSync supports `on-demand` sync mode (query-driven sync), where only rows matching active live query predicates are loaded from SQLite into the collection. This can be combined with Sync Streams via `onLoad` (eager) or `onLoadSubset` (on-demand) hooks to also control which data the PowerSync Service syncs to the device. Use `extractSimpleComparisons` or `parseWhereExpression` to derive Sync Stream parameters dynamically from live query predicates.
 
