@@ -105,8 +105,6 @@ queryCollectionOptions({
 | `on-demand`   | Search, catalogs, large tables                                 | >50k rows |
 | `progressive` | Collaborative apps needing instant first paint (Electric only) | Any       |
 
-PowerSync supports `on-demand` sync mode (query-driven sync), where only rows matching active live query predicates are loaded from SQLite into the collection. This can be combined with Sync Streams via `onLoad` (eager) or `onLoadSubset` (on-demand) hooks to also control which data the PowerSync Service syncs to the device. Use `extractSimpleComparisons` or `parseWhereExpression` to derive Sync Stream parameters dynamically from live query predicates.
-
 ## Indexing
 
 Indexing is opt-in. The `autoIndex` option defaults to `"off"`. To enable automatic indexing, set `autoIndex: "eager"` and provide a `defaultIndexType`:
@@ -411,38 +409,6 @@ createCollection(queryCollectionOptions({ schema: todoSchema, ... }))
 When a schema is provided, the collection infers types from it. An explicit generic creates conflicting type constraints.
 
 Source: docs/overview.md
-
-### HIGH Function-based queryKey without shared prefix
-
-Wrong:
-
-```ts
-queryCollectionOptions({
-  queryKey: (opts) => {
-    if (opts.where) {
-      return ['products-filtered', JSON.stringify(opts.where)]
-    }
-    return ['products-all']
-  },
-})
-```
-
-Correct:
-
-```ts
-queryCollectionOptions({
-  queryKey: (opts) => {
-    if (opts.where) {
-      return ['products', JSON.stringify(opts.where)]
-    }
-    return ['products']
-  },
-})
-```
-
-When using a function-based `queryKey`, all derived keys must share the base key (`queryKey({})`) as a prefix. TanStack Query uses prefix matching for cache operations; if derived keys don't share the base prefix, cache updates silently miss entries, leading to stale data.
-
-Source: docs/collections/query-collection.md
 
 ### MEDIUM Direct writes overridden by next query sync
 

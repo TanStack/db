@@ -196,6 +196,10 @@ await tx.commit()
 await tx.isPersisted.promise
 ```
 
+## On-Demand Sync Mode
+
+PowerSync supports `on-demand` sync mode (query-driven sync), where only rows matching active live query predicates are loaded from SQLite into the collection. This can be combined with Sync Streams via `onLoad` (eager) or `onLoadSubset` (on-demand) hooks to also control which data the PowerSync Service syncs to the device. Use `extractSimpleComparisons` or `parseWhereExpression` to derive Sync Stream parameters dynamically from live query predicates.
+
 ## Complete Example
 
 ```typescript
