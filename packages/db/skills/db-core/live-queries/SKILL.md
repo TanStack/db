@@ -10,6 +10,8 @@ description: >
   Incremental view maintenance via differential dataflow (d2ts). Virtual
   properties ($synced, $origin, $key, $collectionId). Includes subqueries
   for hierarchical data. toArray and concat(toArray(...)) scalar includes.
+  queryOnce for one-shot queries. createEffect for reactive side effects
+  (onEnter, onUpdate, onExit, onBatch).
 type: sub-skill
 library: db
 library_version: '0.6.0'
@@ -287,6 +289,67 @@ const messagesWithContent = createLiveQueryCollection((q) =>
 - `toArray()` and `concat(toArray())` require the subquery to use a **scalar** `select` (e.g., `select(({ c }) => c.text)`), not an object select.
 - Collection includes (bare subquery) require an **object** `select`.
 - Includes subqueries are compiled into the same incremental pipeline as the parent query -- they are not separate live queries.
+
+## One-Shot Queries with queryOnce
+
+For non-reactive, one-time snapshots use `queryOnce`. It creates a live query collection, preloads it, extracts the results, and cleans up automatically.
+
+```ts
+import { eq, queryOnce } from '@tanstack/db'
+
+const activeUsers = await queryOnce((q) =>
+  q
+    .from({ user: usersCollection })
+    .where(({ user }) => eq(user.active, true))
+    .select(({ user }) => ({ id: user.id, name: user.name })),
+)
+
+// With findOne — resolves to T | undefined
+const user = await queryOnce((q) =>
+  q
+    .from({ user: usersCollection })
+    .where(({ user }) => eq(user.id, userId))
+    .findOne(),
+)
+```
+
+Use `queryOnce` for scripts, loaders, data export, tests, or AI/LLM context building. For UI bindings and reactive updates, use live queries instead.
+
+## Reactive Effects (createEffect)
+
+Reactive effects respond to query result *changes* without materializing the full result set. Effects fire callbacks when rows enter, exit, or update within a query result — like a database trigger on an arbitrary live query.
+
+```ts
+import { createEffect, eq } from '@tanstack/db'
+
+const effect = createEffect({
+  query: (q) =>
+    q
+      .from({ msg: messagesCollection })
+      .where(({ msg }) => eq(msg.role, 'user')),
+  skipInitial: true,
+  onEnter: async (event, ctx) => {
+    await processNewMessage(event.value, { signal: ctx.signal })
+  },
+  onExit: (event) => {
+    console.log('Message left result set:', event.key)
+  },
+  onError: (error, event) => {
+    console.error(`Failed to process ${event.key}:`, error)
+  },
+})
+
+// Dispose when no longer needed
+await effect.dispose()
+```
+
+| Use case | Approach |
+|----------|----------|
+| Display query results in UI | Live query collection + `useLiveQuery` |
+| React to changes (side effects) | `createEffect` with `onEnter` / `onUpdate` / `onExit` |
+| Inspect full batch of changes | `createEffect` with `onBatch` |
+
+Key options: `id` (optional), `query`, `skipInitial` (skip existing rows on init), `onEnter`, `onUpdate`, `onExit`, `onBatch`, `onError`, `onSourceError`. The `ctx.signal` aborts when the effect is disposed.
 
 ## Common Mistakes
 
