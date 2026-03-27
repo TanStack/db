@@ -13,7 +13,7 @@ description: >
 type: framework
 library: db
 framework: react
-library_version: '0.5.30'
+library_version: '0.6.0'
 requires:
   - db-core
 sources:
@@ -166,6 +166,28 @@ const mutate = usePacedMutations({
 
 // In handler:
 <textarea onChange={(e) => mutate(e.target.value)} />
+```
+
+## Virtual Properties
+
+Live query results include computed, read-only virtual properties on every row:
+
+- `$synced`: `true` when the row is confirmed by sync; `false` when it is still optimistic.
+- `$origin`: `"local"` if the last confirmed change came from this client, otherwise `"remote"`.
+- `$key`: the row key for the result.
+- `$collectionId`: the source collection ID.
+
+These props can be used in `where`, `select`, and `orderBy` clauses. They are added to query outputs automatically and should not be persisted back to storage.
+
+```tsx
+const { data } = useLiveQuery(
+  (q) =>
+    q
+      .from({ todo: todoCollection })
+      .where(({ todo }) => eq(todo.$synced, false)),
+  [],
+)
+// Shows only optimistic (unconfirmed) todos
 ```
 
 ## React-Specific Patterns
