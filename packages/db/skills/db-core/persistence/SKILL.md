@@ -151,7 +151,10 @@ import {
 } from '@tanstack/electron-db-sqlite-persistence'
 
 const coordinator = new ElectronCollectionCoordinator({ dbName: 'my-app' })
-const persistence = createElectronSQLitePersistence({ ipcRenderer: window.electron.ipcRenderer, coordinator })
+const persistence = createElectronSQLitePersistence({
+  ipcRenderer: window.electron.ipcRenderer,
+  coordinator,
+})
 ```
 
 ## Schema Versioning
