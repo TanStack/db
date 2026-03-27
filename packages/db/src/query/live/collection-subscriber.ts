@@ -208,6 +208,9 @@ export class CollectionSubscriber<
         }
       : undefined
 
+    const includePendingDeletes =
+      expressionReferencesPendingOperation(whereExpression)
+
     const subscription = this.collection.subscribeChanges(sendChanges, {
       ...(includeInitialState && { includeInitialState }),
       whereExpression,
@@ -215,6 +218,7 @@ export class CollectionSubscriber<
       orderBy: hints.orderBy,
       limit: hints.limit,
       onLoadSubsetResult,
+      ...(includePendingDeletes && { includePendingDeletes }),
     })
 
     return subscription
@@ -265,9 +269,13 @@ export class CollectionSubscriber<
 
     // Subscribe to changes with onStatusChange - listener is registered before any snapshot
     // values bigger than what we've sent don't need to be sent because they can't affect the topK
+    const includePendingDeletes =
+      expressionReferencesPendingOperation(whereExpression)
+
     const subscription = this.collection.subscribeChanges(sendChangesInRange, {
       whereExpression,
       onStatusChange,
+      ...(includePendingDeletes && { includePendingDeletes }),
     })
     subscriptionHolder.current = subscription
 
@@ -463,4 +471,26 @@ export class CollectionSubscriber<
       promise,
     )
   }
+}
+
+/**
+ * Checks if a BasicExpression tree references $pendingOperation.
+ * Used to auto-detect whether a query opts into seeing pending-delete items.
+ */
+function expressionReferencesPendingOperation(
+  expr: BasicExpression | undefined,
+): boolean {
+  if (!expr) return false
+
+  if (expr.type === `ref`) {
+    return expr.path.some((segment) => segment === `$pendingOperation`)
+  }
+
+  if (expr.type === `func`) {
+    return expr.args.some((arg) =>
+      expressionReferencesPendingOperation(arg),
+    )
+  }
+
+  return false
 }
