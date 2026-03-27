@@ -243,7 +243,10 @@ export function enrichRowWithVirtualProps<
     $origin: existingRow.$origin ?? computeOrigin(),
     $key: existingRow.$key ?? key,
     $collectionId: existingRow.$collectionId ?? collectionId,
-    $pendingOperation: existingRow.$pendingOperation ?? null,
+    $pendingOperation:
+      existingRow.$pendingOperation !== undefined
+        ? existingRow.$pendingOperation
+        : null,
   } as WithVirtualProps<T, TKey>
 }
 

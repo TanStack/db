@@ -51,6 +51,9 @@ type CollectionSubscriptionOptions = {
   whereExpression?: BasicExpression<boolean>
   /** Callback to call when the subscription is unsubscribed */
   onUnsubscribe?: (event: SubscriptionUnsubscribedEvent) => void
+  /** When true, optimistic delete events are converted to updates with $pendingOperation: 'delete'
+   *  instead of being passed through as deletes. This keeps deleted items visible in query results. */
+  includePendingDeletes?: boolean
 }
 
 export class CollectionSubscription
@@ -319,7 +322,15 @@ export class CollectionSubscription
   }
 
   emitEvents(changes: Array<ChangeMessage<any, any>>) {
-    const newChanges = this.filterAndFlipChanges(changes)
+    // When includePendingDeletes is enabled, convert optimistic delete events
+    // to updates BEFORE filterAndFlipChanges so that sentKeys correctly tracks
+    // the key as still present. This ensures the later sync-confirmed delete
+    // can properly remove the item.
+    const processedChanges = this.options.includePendingDeletes
+      ? this.convertPendingDeletes(changes)
+      : changes
+
+    const newChanges = this.filterAndFlipChanges(processedChanges)
 
     if (this.isBufferingForTruncate) {
       // Buffer the changes instead of emitting immediately
@@ -330,6 +341,50 @@ export class CollectionSubscription
     } else {
       this.filteredCallback(newChanges)
     }
+  }
+
+  /**
+   * Converts optimistic delete events to update events with $pendingOperation: 'delete'.
+   * Only converts deletes for keys that are still in optimisticDeletes or pendingOptimisticDeletes
+   * (i.e., pending deletes, not sync-confirmed ones).
+   */
+  private convertPendingDeletes(
+    changes: Array<ChangeMessage<any, any>>,
+  ): Array<ChangeMessage<any, any>> {
+    const state = this.collection._state
+    const result: Array<ChangeMessage<any, any>> = []
+
+    for (const change of changes) {
+      if (change.type === `delete`) {
+        // Check if this is an optimistic delete (key still pending) vs a sync-confirmed delete
+        const isPendingDelete =
+          state.optimisticDeletes.has(change.key) ||
+          state.pendingOptimisticDeletes.has(change.key)
+
+        if (isPendingDelete) {
+          // Convert to update — the delete event's value contains the pre-delete row data
+          // already enriched with virtual props. We need to add $pendingOperation: 'delete'.
+          const enrichedValue = {
+            ...change.value,
+            $pendingOperation: `delete` as const,
+          }
+          const previousValue = change.previousValue
+            ? { ...change.previousValue, $pendingOperation: null }
+            : { ...change.value, $pendingOperation: null }
+
+          result.push({
+            type: `update`,
+            key: change.key,
+            value: enrichedValue,
+            previousValue,
+          })
+          continue
+        }
+      }
+      result.push(change)
+    }
+
+    return result
   }
 
   /**
@@ -395,6 +450,31 @@ export class CollectionSubscription
     if (snapshot === undefined) {
       // Couldn't load from indexes
       return false
+    }
+
+    // When includePendingDeletes is enabled, also include items that are
+    // optimistically deleted — they won't appear in entries() but their
+    // data is still in syncedData.
+    if (this.options.includePendingDeletes) {
+      const state = this.collection._state
+      const pendingDeleteKeys = new Set([
+        ...state.optimisticDeletes,
+        ...state.pendingOptimisticDeletes,
+      ])
+      for (const key of pendingDeleteKeys) {
+        const syncedValue = state.syncedData.get(key)
+        if (syncedValue !== undefined) {
+          const enrichedValue = state.enrichWithVirtualProps(syncedValue, key)
+          snapshot.push({
+            type: `insert` as const,
+            key,
+            value: {
+              ...enrichedValue,
+              $pendingOperation: `delete` as const,
+            },
+          })
+        }
+      }
     }
 
     // Only send changes that have not been sent yet

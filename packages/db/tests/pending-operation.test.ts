@@ -3,6 +3,7 @@ import { createCollection } from '../src/collection/index.js'
 import { createLiveQueryCollection } from '../src/query/live-query-collection.js'
 import { localOnlyCollectionOptions } from '../src/local-only.js'
 import { createTransaction } from '../src/transactions'
+import { count, isNull, not, or } from '../src/query/builder/functions'
 import { mockSyncCollectionOptions, stripVirtualProps } from './utils'
 import type { ChangeMessage } from '../src/types'
 
@@ -642,7 +643,7 @@ describe(`$pendingOperation virtual property`, () => {
       ])
     })
 
-    it.fails(
+    it(
       `deleted items are visible in query when where clause references $pendingOperation`,
       async () => {
         const sourceCollection = createCollection(
@@ -664,7 +665,10 @@ describe(`$pendingOperation virtual property`, () => {
             q
               .from({ item: sourceCollection })
               .where(({ item }) =>
-                (item as any).$pendingOperation.neq(`no-match`),
+                or(
+                  isNull(item.$pendingOperation),
+                  not(isNull(item.$pendingOperation)),
+                ),
               ),
           getKey: (item: any) => item.id,
         })
@@ -693,7 +697,7 @@ describe(`$pendingOperation virtual property`, () => {
       },
     )
 
-    it.fails(
+    it(
       `pending-delete items appear in initial query snapshot when opted in`,
       async () => {
         const sourceCollection = createCollection(
@@ -728,7 +732,10 @@ describe(`$pendingOperation virtual property`, () => {
             q
               .from({ item: sourceCollection })
               .where(({ item }) =>
-                (item as any).$pendingOperation.neq(`no-match`),
+                or(
+                  isNull(item.$pendingOperation),
+                  not(isNull(item.$pendingOperation)),
+                ),
               ),
           getKey: (item: any) => item.id,
         })
@@ -744,7 +751,7 @@ describe(`$pendingOperation virtual property`, () => {
       },
     )
 
-    it.fails(
+    it(
       `sync-confirmed delete removes item from opted-in query results`,
       async () => {
         let syncFns: {
@@ -781,7 +788,10 @@ describe(`$pendingOperation virtual property`, () => {
             q
               .from({ item: sourceCollection })
               .where(({ item }) =>
-                (item as any).$pendingOperation.neq(`no-match`),
+                or(
+                  isNull(item.$pendingOperation),
+                  not(isNull(item.$pendingOperation)),
+                ),
               ),
           getKey: (item: any) => item.id,
         })
@@ -869,7 +879,7 @@ describe(`$pendingOperation virtual property`, () => {
       expect(ids).toEqual([`1`])
     })
 
-    it.fails(
+    it(
       `live query with $pendingOperation where clause shows deleted items inline`,
       async () => {
         const sourceCollection = createCollection(
@@ -891,7 +901,10 @@ describe(`$pendingOperation virtual property`, () => {
             q
               .from({ item: sourceCollection })
               .where(({ item }) =>
-                (item as any).$pendingOperation.neq(`no-match`),
+                or(
+                  isNull(item.$pendingOperation),
+                  not(isNull(item.$pendingOperation)),
+                ),
               ),
           getKey: (item: any) => item.id,
         })
@@ -924,5 +937,107 @@ describe(`$pendingOperation virtual property`, () => {
         expect((item2 as any).$pendingOperation).toBe(`delete`)
       },
     )
+  })
+
+  // ── GROUP BY ────────────────────────────────────────────────────────
+
+  describe(`GROUP BY`, () => {
+    type Task = { id: string; category: string; title: string }
+
+    it(`$pendingOperation is null when all rows in group are null`, async () => {
+      const sourceCollection = createCollection(
+        mockSyncCollectionOptions({
+          id: `pending-op-groupby-null`,
+          getKey: (item: Task) => item.id,
+          initialData: [
+            { id: `1`, category: `work`, title: `Task 1` },
+            { id: `2`, category: `work`, title: `Task 2` },
+            { id: `3`, category: `personal`, title: `Task 3` },
+          ],
+        }),
+      )
+
+      await sourceCollection.preload()
+
+      const liveQuery = createLiveQueryCollection({
+        query: (q: any) =>
+          q
+            .from({ task: sourceCollection })
+            .groupBy(({ task }: any) => task.category)
+            .select(({ task }: any) => ({
+              category: task.category,
+              count: count(task.id),
+            })),
+        getKey: (item: any) => item.category,
+      })
+
+      await liveQuery.preload()
+
+      const results = Array.from(liveQuery.values())
+      for (const row of results) {
+        expect((row).$pendingOperation).toBe(null)
+      }
+    })
+
+    it(`$pendingOperation is non-null when any row in group has pending operation`, async () => {
+      const sourceCollection = createCollection(
+        mockSyncCollectionOptions({
+          id: `pending-op-groupby-nonnull`,
+          getKey: (item: Task) => item.id,
+          initialData: [
+            { id: `1`, category: `work`, title: `Task 1` },
+            { id: `2`, category: `work`, title: `Task 2` },
+            { id: `3`, category: `personal`, title: `Task 3` },
+          ],
+        }),
+      )
+
+      await sourceCollection.preload()
+
+      const liveQuery = createLiveQueryCollection({
+        query: (q: any) =>
+          q
+            .from({ task: sourceCollection })
+            .groupBy(({ task }: any) => task.category)
+            .select(({ task }: any) => ({
+              category: task.category,
+              count: count(task.id),
+            })),
+        getKey: (item: any) => item.category,
+      })
+
+      await liveQuery.preload()
+
+      // Update one item in the 'work' group
+      const tx = createTransaction({
+        autoCommit: false,
+        mutationFn: async () => {
+          await new Promise(() => {})
+        },
+      })
+
+      tx.mutate(() => {
+        sourceCollection.update(`1`, (item) => {
+          item.title = `Updated`
+        })
+      })
+      await waitForChanges()
+
+      const results = Array.from(liveQuery.values())
+      const workGroup = results.find(
+        (r) => (r).category === `work`,
+      )
+      const personalGroup = results.find(
+        (r) => (r).category === `personal`,
+      )
+
+      // Work group has one updated item — $pendingOperation should be non-null
+      expect(workGroup).toBeDefined()
+      expect((workGroup).$pendingOperation).not.toBe(null)
+
+      // Personal group has no pending changes — $pendingOperation should be null
+      expect(personalGroup).toBeDefined()
+      expect((personalGroup).$pendingOperation).toBe(null)
+    })
   })
 })
