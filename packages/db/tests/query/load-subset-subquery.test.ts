@@ -603,7 +603,7 @@ describe(`loadSubset with on-demand sync`, () => {
     expect(chargeCall!.orderBy).toBeUndefined()
     expect(chargeCall!.limit).toBeUndefined()
 
-    expect(orderLoadSubsetCalls.length).toBe(2)
+    expect(orderLoadSubsetCalls.length).toBe(1)
     const firstOrderCall = orderLoadSubsetCalls[0]
     expect(firstOrderCall!.where).toEqual(
       and(
