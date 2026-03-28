@@ -1515,6 +1515,7 @@ function createChildCollectionEntry(
       },
     },
     startSync: true,
+    gcTime: 0,
   })
 
   const entry: ChildCollectionEntry = {
