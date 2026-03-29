@@ -3,7 +3,7 @@ import { createCollection } from '../src/collection/index.js'
 import { createLiveQueryCollection } from '../src/query/live-query-collection.js'
 import { localOnlyCollectionOptions } from '../src/local-only.js'
 import { createTransaction } from '../src/transactions'
-import { count, isNull, not, or } from '../src/query/builder/functions'
+import { and, count, eq, isNull, not, or } from '../src/query/builder/functions'
 import { mockSyncCollectionOptions, stripVirtualProps } from './utils'
 import type { ChangeMessage } from '../src/types'
 
@@ -1039,5 +1039,213 @@ describe(`$pendingOperation virtual property`, () => {
       expect(personalGroup).toBeDefined()
       expect((personalGroup).$pendingOperation).toBe(null)
     })
+  })
+
+  it(`$synced should be false when $pendingOperation is non-null (pendingOptimistic state)`, async () => {
+    let resolveDelete: (() => void) | undefined
+
+    const collection = createCollection<Item, string>({
+      id: `pending-op-synced-consistency`,
+      getKey: (item) => item.id,
+      sync: {
+        sync: ({ begin, write, commit, markReady }) => {
+          begin()
+          write({ type: `insert`, value: { id: `1`, title: `Item 1` } })
+          commit()
+          markReady()
+        },
+      },
+      onDelete: async () => {
+        await new Promise<void>((resolve) => {
+          resolveDelete = resolve
+        })
+      },
+    })
+
+    collection.subscribeChanges(() => {}, { includeInitialState: true })
+    await waitForChanges()
+
+    // Delete item — auto-commits via onDelete, holds in persisting state
+    collection.delete(`1`)
+    await waitForChanges()
+
+    // Resolve to move to 'completed' state (pending sync confirmation)
+    resolveDelete?.()
+    await waitForChanges()
+
+    // $synced and $pendingOperation should be consistent:
+    // if there's a pending operation, $synced should be false
+    const pendingOp = collection._state.getPendingOperation(`1`)
+    const synced = collection._state.isRowSynced(`1`)
+
+    expect(pendingOp).toBe(`delete`)
+    expect(synced).toBe(false)
+  })
+
+  it(`rollback of optimistic delete restores item in query with $pendingOperation`, async () => {
+    let syncFns: {
+      begin: () => void
+      write: (msg: any) => void
+      commit: () => void
+    }
+
+    const collection = createCollection<Item, string>({
+      id: `rollback-delete`,
+      getKey: (item) => item.id,
+      sync: {
+        sync: ({ begin, write, commit, markReady }) => {
+          syncFns = { begin, write, commit }
+          markReady()
+        },
+      },
+    })
+
+    // Live query with $pendingOperation tautology (enables includePendingDeletes)
+    const liveQuery = createLiveQueryCollection({
+      query: (q: any) =>
+        q
+          .from({ item: collection })
+          .where(({ item }: any) =>
+            or(
+              isNull(item.$pendingOperation),
+              not(isNull(item.$pendingOperation)),
+            ),
+          ),
+      getKey: (item: any) => item.id,
+    })
+
+    await liveQuery.preload()
+    await waitForChanges()
+
+    // Sync an item into the collection
+    syncFns!.begin()
+    syncFns!.write({
+      type: `insert`,
+      value: { id: `1`, title: `Existing` },
+    })
+    syncFns!.commit()
+    await waitForChanges()
+
+    // Item should be visible with $pendingOperation: null
+    let results = Array.from(liveQuery.values())
+    expect(results).toHaveLength(1)
+    expect((results[0]).$pendingOperation).toBe(null)
+
+    // Delete via a pending transaction
+    const tx = createTransaction({
+      autoCommit: false,
+      mutationFn: async () => {
+        await new Promise(() => {})
+      },
+    })
+    tx.mutate(() => {
+      collection.delete(`1`)
+    })
+    await waitForChanges()
+
+    // Item should still be visible with $pendingOperation: 'delete'
+    results = Array.from(liveQuery.values())
+    expect(results).toHaveLength(1)
+    expect((results[0]).$pendingOperation).toBe(`delete`)
+
+    // Rollback the delete
+    tx.rollback()
+    await waitForChanges()
+
+    // Item should be restored with $pendingOperation: null
+    results = Array.from(liveQuery.values())
+    expect(results).toHaveLength(1)
+    expect((results[0]).$pendingOperation).toBe(null)
+  })
+
+  // Lazy source (join) — test that pending-delete items in joined collections
+  // are visible via live events (not snapshot, since lazy sources skip initial state)
+  it(`pending-delete items in joined collection are visible via live events`, async () => {
+    type Parent = { id: string }
+    type Child = { id: string; parentId: string; name: string }
+
+    let parentSyncFns: {
+      begin: () => void
+      write: (msg: any) => void
+      commit: () => void
+    }
+    let childSyncFns: {
+      begin: () => void
+      write: (msg: any) => void
+      commit: () => void
+    }
+
+    const parents = createCollection<Parent, string>({
+      id: `lazy-parent`,
+      getKey: (item) => item.id,
+      sync: {
+        sync: ({ begin, write, commit, markReady }) => {
+          parentSyncFns = { begin, write, commit }
+          markReady()
+        },
+      },
+    })
+
+    const children = createCollection<Child, string>({
+      id: `lazy-child`,
+      getKey: (item) => item.id,
+      sync: {
+        sync: ({ begin, write, commit, markReady }) => {
+          childSyncFns = { begin, write, commit }
+          markReady()
+        },
+      },
+    })
+
+    const liveQuery = createLiveQueryCollection({
+      query: (q: any) =>
+        q
+          .from({ p: parents })
+          .select(({ p }: any) => ({
+            ...p,
+            children: q
+              .from({ c: children })
+              .where(({ c }: any) =>
+                and(
+                  eq(c.parentId, p.id),
+                  or(isNull(c.$pendingOperation), not(isNull(c.$pendingOperation))),
+                ),
+              ),
+          })),
+      getKey: (item: any) => item.id,
+    })
+
+    await liveQuery.preload()
+    await waitForChanges()
+
+    // Sync parent and child
+    parentSyncFns!.begin()
+    parentSyncFns!.write({ type: `insert`, value: { id: `p1` } })
+    parentSyncFns!.commit()
+
+    childSyncFns!.begin()
+    childSyncFns!.write({ type: `insert`, value: { id: `c1`, parentId: `p1`, name: `Child` } })
+    childSyncFns!.commit()
+    await waitForChanges()
+
+    // Delete the child via pending transaction
+    const tx = createTransaction({
+      autoCommit: false,
+      mutationFn: async () => {
+        await new Promise(() => {})
+      },
+    })
+    tx.mutate(() => {
+      children.delete(`c1`)
+    })
+    await waitForChanges()
+
+    // Child should be visible in the join with $pendingOperation: 'delete'
+    const results = Array.from(liveQuery.values())
+    const parent = results.find((r: any) => r.id === `p1`)
+    expect(parent).toBeDefined()
+    const childResults = Array.from((parent).children.values())
+    expect(childResults).toHaveLength(1)
+    expect((childResults[0] as any).$pendingOperation).toBe(`delete`)
   })
 })

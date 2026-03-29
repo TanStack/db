@@ -163,7 +163,12 @@ export class CollectionStateManager<
     if (this.isLocalOnly) {
       return true
     }
-    return !this.optimisticUpserts.has(key) && !this.optimisticDeletes.has(key)
+    return (
+      !this.optimisticUpserts.has(key) &&
+      !this.optimisticDeletes.has(key) &&
+      !this.pendingOptimisticUpserts.has(key) &&
+      !this.pendingOptimisticDeletes.has(key)
+    )
   }
 
   /**
@@ -1233,6 +1238,7 @@ export class CollectionStateManager<
                 this.collection.id,
                 () => previousVirtualProps.$synced,
                 () => previousVirtualProps.$origin,
+                () => previousVirtualProps.$pendingOperation,
               )
             : undefined
 
@@ -1280,6 +1286,7 @@ export class CollectionStateManager<
                 this.collection.id,
                 () => previousVirtualProps.$synced,
                 () => previousVirtualProps.$origin,
+                () => previousVirtualProps.$pendingOperation,
               )
             events.push({
               type: `update`,

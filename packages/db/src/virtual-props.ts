@@ -219,6 +219,7 @@ export function createVirtualProps<TKey extends string | number>(
  * @param collectionId - The collection's ID
  * @param computeSynced - Function to compute $synced if missing
  * @param computeOrigin - Function to compute $origin if missing
+ * @param computePendingOperation - Function to compute $pendingOperation if missing (defaults to null)
  * @returns The row with virtual properties (possibly the same object if already present)
  *
  * @internal
@@ -232,6 +233,7 @@ export function enrichRowWithVirtualProps<
   collectionId: string,
   computeSynced: () => boolean,
   computeOrigin: () => VirtualOrigin,
+  computePendingOperation?: () => PendingOperationType,
 ): WithVirtualProps<T, TKey> {
   // Use nullish coalescing to preserve existing virtual properties (pass-through)
   // This is the "add-if-missing" pattern described in the RFC
@@ -246,7 +248,7 @@ export function enrichRowWithVirtualProps<
     $pendingOperation:
       existingRow.$pendingOperation !== undefined
         ? existingRow.$pendingOperation
-        : null,
+        : (computePendingOperation?.() ?? null),
   } as WithVirtualProps<T, TKey>
 }
 
