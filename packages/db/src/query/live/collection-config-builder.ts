@@ -227,7 +227,8 @@ export class CollectionConfigBuilder<
       id: this.id,
       getKey:
         this.config.getKey ||
-        ((item) => this.resultKeys.get(item) as string | number),
+        ((item: any) =>
+          (this.resultKeys.get(item) ?? item.$key) as string | number),
       sync: this.getSyncConfig(),
       compare: this.compare,
       defaultStringCollation: this.compareOptions,
