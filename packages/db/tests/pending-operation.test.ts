@@ -162,9 +162,7 @@ describe(`$pendingOperation virtual property`, () => {
 
       await collection.preload()
 
-      const mutationFn = vi
-        .fn()
-        .mockRejectedValue(new Error(`Rollback test`))
+      const mutationFn = vi.fn().mockRejectedValue(new Error(`Rollback test`))
 
       const tx = createTransaction({
         autoCommit: false,
@@ -644,199 +642,190 @@ describe(`$pendingOperation virtual property`, () => {
       ])
     })
 
-    it(
-      `deleted items are visible in query when where clause references $pendingOperation`,
-      async () => {
-        const sourceCollection = createCollection(
-          mockSyncCollectionOptions({
-            id: `pending-op-query-optin`,
-            getKey: (item: Item) => item.id,
-            initialData: [
-              { id: `1`, title: `Keep` },
-              { id: `2`, title: `Delete me` },
-            ],
-          }),
-        )
+    it(`deleted items are visible in query when where clause references $pendingOperation`, async () => {
+      const sourceCollection = createCollection(
+        mockSyncCollectionOptions({
+          id: `pending-op-query-optin`,
+          getKey: (item: Item) => item.id,
+          initialData: [
+            { id: `1`, title: `Keep` },
+            { id: `2`, title: `Delete me` },
+          ],
+        }),
+      )
 
-        await sourceCollection.preload()
+      await sourceCollection.preload()
 
-        // Query that references $pendingOperation — should show pending deletes
-        const liveQuery = createLiveQueryCollection({
-          query: (q) =>
-            q
-              .from({ item: sourceCollection })
-              .where(({ item }) =>
-                or(
-                  isNull(item.$pendingOperation),
-                  not(isNull(item.$pendingOperation)),
-                ),
+      // Query that references $pendingOperation — should show pending deletes
+      const liveQuery = createLiveQueryCollection({
+        query: (q) =>
+          q
+            .from({ item: sourceCollection })
+            .where(({ item }) =>
+              or(
+                isNull(item.$pendingOperation),
+                not(isNull(item.$pendingOperation)),
               ),
-          getKey: (item: any) => item.id,
-        })
+            ),
+        getKey: (item: any) => item.id,
+      })
 
-        await liveQuery.preload()
+      await liveQuery.preload()
 
-        const tx = createTransaction({
-          autoCommit: false,
-          mutationFn: async () => {
-            await new Promise(() => {})
-          },
-        })
+      const tx = createTransaction({
+        autoCommit: false,
+        mutationFn: async () => {
+          await new Promise(() => {})
+        },
+      })
 
-        tx.mutate(() => {
-          sourceCollection.delete(`2`)
-        })
-        await waitForChanges()
+      tx.mutate(() => {
+        sourceCollection.delete(`2`)
+      })
+      await waitForChanges()
 
-        // With $pendingOperation in where, deleted items should be visible
-        const results = Array.from(liveQuery.values())
-        const item2 = results.find(
-          (r) => (stripVirtualProps(r) as unknown as Item).id === `2`,
-        )
-        expect(item2).toBeDefined()
-        expect((item2 as any).$pendingOperation).toBe(`delete`)
-      },
-    )
+      // With $pendingOperation in where, deleted items should be visible
+      const results = Array.from(liveQuery.values())
+      const item2 = results.find(
+        (r) => (stripVirtualProps(r) as unknown as Item).id === `2`,
+      )
+      expect(item2).toBeDefined()
+      expect((item2 as any).$pendingOperation).toBe(`delete`)
+    })
 
-    it(
-      `pending-delete items appear in initial query snapshot when opted in`,
-      async () => {
-        const sourceCollection = createCollection(
-          mockSyncCollectionOptions({
-            id: `pending-op-snapshot`,
-            getKey: (item: Item) => item.id,
-            initialData: [
-              { id: `1`, title: `Keep` },
-              { id: `2`, title: `Delete me` },
-            ],
-          }),
-        )
+    it(`pending-delete items appear in initial query snapshot when opted in`, async () => {
+      const sourceCollection = createCollection(
+        mockSyncCollectionOptions({
+          id: `pending-op-snapshot`,
+          getKey: (item: Item) => item.id,
+          initialData: [
+            { id: `1`, title: `Keep` },
+            { id: `2`, title: `Delete me` },
+          ],
+        }),
+      )
 
-        await sourceCollection.preload()
+      await sourceCollection.preload()
 
-        // Delete before creating the query
-        const tx = createTransaction({
-          autoCommit: false,
-          mutationFn: async () => {
-            await new Promise(() => {})
-          },
-        })
+      // Delete before creating the query
+      const tx = createTransaction({
+        autoCommit: false,
+        mutationFn: async () => {
+          await new Promise(() => {})
+        },
+      })
 
-        tx.mutate(() => {
-          sourceCollection.delete(`2`)
-        })
-        await waitForChanges()
+      tx.mutate(() => {
+        sourceCollection.delete(`2`)
+      })
+      await waitForChanges()
 
-        // Create a query AFTER the delete — initial snapshot should include the pending delete
-        const liveQuery = createLiveQueryCollection({
-          query: (q) =>
-            q
-              .from({ item: sourceCollection })
-              .where(({ item }) =>
-                or(
-                  isNull(item.$pendingOperation),
-                  not(isNull(item.$pendingOperation)),
-                ),
+      // Create a query AFTER the delete — initial snapshot should include the pending delete
+      const liveQuery = createLiveQueryCollection({
+        query: (q) =>
+          q
+            .from({ item: sourceCollection })
+            .where(({ item }) =>
+              or(
+                isNull(item.$pendingOperation),
+                not(isNull(item.$pendingOperation)),
               ),
-          getKey: (item: any) => item.id,
-        })
+            ),
+        getKey: (item: any) => item.id,
+      })
 
-        await liveQuery.preload()
-        await waitForChanges()
+      await liveQuery.preload()
+      await waitForChanges()
 
-        const results = Array.from(liveQuery.values())
-        const item2 = results.find(
-          (r) => (stripVirtualProps(r) as unknown as Item).id === `2`,
-        )
-        expect(item2).toBeDefined()
-      },
-    )
+      const results = Array.from(liveQuery.values())
+      const item2 = results.find(
+        (r) => (stripVirtualProps(r) as unknown as Item).id === `2`,
+      )
+      expect(item2).toBeDefined()
+    })
 
-    it(
-      `sync-confirmed delete removes item from opted-in query results`,
-      async () => {
-        let syncFns: {
-          begin: () => void
-          write: (msg: any) => void
-          commit: () => void
-        }
+    it(`sync-confirmed delete removes item from opted-in query results`, async () => {
+      let syncFns: {
+        begin: () => void
+        write: (msg: any) => void
+        commit: () => void
+      }
 
-        const sourceCollection = createCollection<Item, string>({
-          id: `pending-op-sync-delete`,
-          getKey: (item: any) => item.id,
-          sync: {
-            sync: ({ begin, write, commit, markReady }) => {
-              syncFns = { begin, write, commit }
-              begin()
-              write({
-                type: `insert`,
-                value: { id: `1`, title: `Item 1` },
-              })
-              write({
-                type: `insert`,
-                value: { id: `2`, title: `Item 2` },
-              })
-              commit()
-              markReady()
-            },
+      const sourceCollection = createCollection<Item, string>({
+        id: `pending-op-sync-delete`,
+        getKey: (item: any) => item.id,
+        sync: {
+          sync: ({ begin, write, commit, markReady }) => {
+            syncFns = { begin, write, commit }
+            begin()
+            write({
+              type: `insert`,
+              value: { id: `1`, title: `Item 1` },
+            })
+            write({
+              type: `insert`,
+              value: { id: `2`, title: `Item 2` },
+            })
+            commit()
+            markReady()
           },
-          onDelete: async () => {},
-        })
+        },
+        onDelete: async () => {},
+      })
 
-        // Query with $pendingOperation reference
-        const liveQuery = createLiveQueryCollection({
-          query: (q) =>
-            q
-              .from({ item: sourceCollection })
-              .where(({ item }) =>
-                or(
-                  isNull(item.$pendingOperation),
-                  not(isNull(item.$pendingOperation)),
-                ),
+      // Query with $pendingOperation reference
+      const liveQuery = createLiveQueryCollection({
+        query: (q) =>
+          q
+            .from({ item: sourceCollection })
+            .where(({ item }) =>
+              or(
+                isNull(item.$pendingOperation),
+                not(isNull(item.$pendingOperation)),
               ),
-          getKey: (item: any) => item.id,
-        })
+            ),
+        getKey: (item: any) => item.id,
+      })
 
-        await liveQuery.preload()
-        await waitForChanges()
+      await liveQuery.preload()
+      await waitForChanges()
 
-        // Optimistically delete item 2
-        const tx = createTransaction({
-          autoCommit: false,
-          mutationFn: async () => {},
-        })
+      // Optimistically delete item 2
+      const tx = createTransaction({
+        autoCommit: false,
+        mutationFn: async () => {},
+      })
 
-        tx.mutate(() => {
-          sourceCollection.delete(`2`)
-        })
-        await waitForChanges()
+      tx.mutate(() => {
+        sourceCollection.delete(`2`)
+      })
+      await waitForChanges()
 
-        // Item 2 should be visible with $pendingOperation: 'delete'
-        let results = Array.from(liveQuery.values())
-        let item2 = results.find(
-          (r) => (stripVirtualProps(r) as unknown as Item).id === `2`,
-        )
-        expect(item2).toBeDefined()
-        expect((item2 as any).$pendingOperation).toBe(`delete`)
+      // Item 2 should be visible with $pendingOperation: 'delete'
+      let results = Array.from(liveQuery.values())
+      let item2 = results.find(
+        (r) => (stripVirtualProps(r) as unknown as Item).id === `2`,
+      )
+      expect(item2).toBeDefined()
+      expect((item2 as any).$pendingOperation).toBe(`delete`)
 
-        // Commit the transaction
-        await tx.commit()
-        await waitForChanges()
+      // Commit the transaction
+      await tx.commit()
+      await waitForChanges()
 
-        // Sync confirms the delete
-        syncFns!.begin()
-        syncFns!.write({ type: `delete`, key: `2` })
-        syncFns!.commit()
-        await waitForChanges()
+      // Sync confirms the delete
+      syncFns!.begin()
+      syncFns!.write({ type: `delete`, key: `2` })
+      syncFns!.commit()
+      await waitForChanges()
 
-        // Item 2 should now be GONE (sync confirmed the delete)
-        results = Array.from(liveQuery.values())
-        item2 = results.find(
-          (r) => (stripVirtualProps(r) as unknown as Item).id === `2`,
-        )
-        expect(item2).toBeUndefined()
-      },
-    )
+      // Item 2 should now be GONE (sync confirmed the delete)
+      results = Array.from(liveQuery.values())
+      item2 = results.find(
+        (r) => (stripVirtualProps(r) as unknown as Item).id === `2`,
+      )
+      expect(item2).toBeUndefined()
+    })
   })
 
   // ── B5: Live query integration ──────────────────────────────────────
@@ -876,68 +865,69 @@ describe(`$pendingOperation virtual property`, () => {
       await waitForChanges()
 
       const results = Array.from(liveQuery.values())
-      const ids = results.map((r) => (stripVirtualProps(r) as unknown as Item).id)
+      const ids = results.map(
+        (r) => (stripVirtualProps(r) as unknown as Item).id,
+      )
       expect(ids).toEqual([`1`])
     })
 
-    it(
-      `live query with $pendingOperation where clause shows deleted items inline`,
-      async () => {
-        const sourceCollection = createCollection(
-          mockSyncCollectionOptions({
-            id: `pending-op-live-optin`,
-            getKey: (item: Item) => item.id,
-            initialData: [
-              { id: `1`, title: `Keep` },
-              { id: `2`, title: `Delete me` },
-              { id: `3`, title: `Also keep` },
-            ],
-          }),
-        )
+    it(`live query with $pendingOperation where clause shows deleted items inline`, async () => {
+      const sourceCollection = createCollection(
+        mockSyncCollectionOptions({
+          id: `pending-op-live-optin`,
+          getKey: (item: Item) => item.id,
+          initialData: [
+            { id: `1`, title: `Keep` },
+            { id: `2`, title: `Delete me` },
+            { id: `3`, title: `Also keep` },
+          ],
+        }),
+      )
 
-        await sourceCollection.preload()
+      await sourceCollection.preload()
 
-        const liveQuery = createLiveQueryCollection({
-          query: (q) =>
-            q
-              .from({ item: sourceCollection })
-              .where(({ item }) =>
-                or(
-                  isNull(item.$pendingOperation),
-                  not(isNull(item.$pendingOperation)),
-                ),
+      const liveQuery = createLiveQueryCollection({
+        query: (q) =>
+          q
+            .from({ item: sourceCollection })
+            .where(({ item }) =>
+              or(
+                isNull(item.$pendingOperation),
+                not(isNull(item.$pendingOperation)),
               ),
-          getKey: (item: any) => item.id,
-        })
+            ),
+        getKey: (item: any) => item.id,
+      })
 
-        await liveQuery.preload()
+      await liveQuery.preload()
 
-        const tx = createTransaction({
-          autoCommit: false,
-          mutationFn: async () => {
-            await new Promise(() => {})
-          },
-        })
+      const tx = createTransaction({
+        autoCommit: false,
+        mutationFn: async () => {
+          await new Promise(() => {})
+        },
+      })
 
-        tx.mutate(() => {
-          sourceCollection.delete(`2`)
-        })
-        await waitForChanges()
+      tx.mutate(() => {
+        sourceCollection.delete(`2`)
+      })
+      await waitForChanges()
 
-        const results = Array.from(liveQuery.values())
-        const ids = results.map((r) => (stripVirtualProps(r) as unknown as Item).id)
+      const results = Array.from(liveQuery.values())
+      const ids = results.map(
+        (r) => (stripVirtualProps(r) as unknown as Item).id,
+      )
 
-        // All 3 items should be present — item 2 with $pendingOperation: 'delete'
-        expect(ids).toContain(`1`)
-        expect(ids).toContain(`2`)
-        expect(ids).toContain(`3`)
+      // All 3 items should be present — item 2 with $pendingOperation: 'delete'
+      expect(ids).toContain(`1`)
+      expect(ids).toContain(`2`)
+      expect(ids).toContain(`3`)
 
-        const item2 = results.find(
-          (r) => (stripVirtualProps(r) as unknown as Item).id === `2`,
-        )
-        expect((item2 as any).$pendingOperation).toBe(`delete`)
-      },
-    )
+      const item2 = results.find(
+        (r) => (stripVirtualProps(r) as unknown as Item).id === `2`,
+      )
+      expect((item2 as any).$pendingOperation).toBe(`delete`)
+    })
   })
 
   // ── GROUP BY ────────────────────────────────────────────────────────
@@ -976,7 +966,7 @@ describe(`$pendingOperation virtual property`, () => {
 
       const results = Array.from(liveQuery.values())
       for (const row of results) {
-        expect((row).$pendingOperation).toBe(null)
+        expect(row.$pendingOperation).toBe(null)
       }
     })
 
@@ -1025,20 +1015,16 @@ describe(`$pendingOperation virtual property`, () => {
       await waitForChanges()
 
       const results = Array.from(liveQuery.values())
-      const workGroup = results.find(
-        (r) => (r).category === `work`,
-      )
-      const personalGroup = results.find(
-        (r) => (r).category === `personal`,
-      )
+      const workGroup = results.find((r) => r.category === `work`)
+      const personalGroup = results.find((r) => r.category === `personal`)
 
       // Work group has one updated item — $pendingOperation should be non-null
       expect(workGroup).toBeDefined()
-      expect((workGroup).$pendingOperation).not.toBe(null)
+      expect(workGroup.$pendingOperation).not.toBe(null)
 
       // Personal group has no pending changes — $pendingOperation should be null
       expect(personalGroup).toBeDefined()
-      expect((personalGroup).$pendingOperation).toBe(null)
+      expect(personalGroup.$pendingOperation).toBe(null)
     })
   })
 
@@ -1130,7 +1116,7 @@ describe(`$pendingOperation virtual property`, () => {
     // Item should be visible with $pendingOperation: null
     let results = Array.from(liveQuery.values())
     expect(results).toHaveLength(1)
-    expect((results[0]).$pendingOperation).toBe(null)
+    expect(results[0].$pendingOperation).toBe(null)
 
     // Delete via a pending transaction
     const tx = createTransaction({
@@ -1147,7 +1133,7 @@ describe(`$pendingOperation virtual property`, () => {
     // Item should still be visible with $pendingOperation: 'delete'
     results = Array.from(liveQuery.values())
     expect(results).toHaveLength(1)
-    expect((results[0]).$pendingOperation).toBe(`delete`)
+    expect(results[0].$pendingOperation).toBe(`delete`)
 
     // Rollback the delete
     tx.rollback()
@@ -1156,7 +1142,7 @@ describe(`$pendingOperation virtual property`, () => {
     // Item should be restored with $pendingOperation: null
     results = Array.from(liveQuery.values())
     expect(results).toHaveLength(1)
-    expect((results[0]).$pendingOperation).toBe(null)
+    expect(results[0].$pendingOperation).toBe(null)
   })
 
   // Lazy source (join) — test that pending-delete items in joined collections
@@ -1200,19 +1186,20 @@ describe(`$pendingOperation virtual property`, () => {
 
     const liveQuery = createLiveQueryCollection({
       query: (q: any) =>
-        q
-          .from({ p: parents })
-          .select(({ p }: any) => ({
-            ...p,
-            children: q
-              .from({ c: children })
-              .where(({ c }: any) =>
-                and(
-                  eq(c.parentId, p.id),
-                  or(isNull(c.$pendingOperation), not(isNull(c.$pendingOperation))),
+        q.from({ p: parents }).select(({ p }: any) => ({
+          ...p,
+          children: q
+            .from({ c: children })
+            .where(({ c }: any) =>
+              and(
+                eq(c.parentId, p.id),
+                or(
+                  isNull(c.$pendingOperation),
+                  not(isNull(c.$pendingOperation)),
                 ),
               ),
-          })),
+            ),
+        })),
       getKey: (item: any) => item.id,
     })
 
@@ -1225,7 +1212,10 @@ describe(`$pendingOperation virtual property`, () => {
     parentSyncFns!.commit()
 
     childSyncFns!.begin()
-    childSyncFns!.write({ type: `insert`, value: { id: `c1`, parentId: `p1`, name: `Child` } })
+    childSyncFns!.write({
+      type: `insert`,
+      value: { id: `c1`, parentId: `p1`, name: `Child` },
+    })
     childSyncFns!.commit()
     await waitForChanges()
 
@@ -1245,7 +1235,7 @@ describe(`$pendingOperation virtual property`, () => {
     const results = Array.from(liveQuery.values())
     const parent = results.find((r: any) => r.id === `p1`)
     expect(parent).toBeDefined()
-    const childResults = Array.from((parent).children.values())
+    const childResults = Array.from(parent.children.values())
     expect(childResults).toHaveLength(1)
     expect((childResults[0] as any).$pendingOperation).toBe(`delete`)
   })

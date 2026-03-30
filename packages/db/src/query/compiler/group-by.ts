@@ -32,7 +32,10 @@ import type {
   SelectValueExpression,
 } from '../ir.js'
 import type { NamespacedAndKeyedStream, NamespacedRow } from '../../types.js'
-import type { PendingOperationType, VirtualOrigin } from '../../virtual-props.js'
+import type {
+  PendingOperationType,
+  VirtualOrigin,
+} from '../../virtual-props.js'
 
 const VIRTUAL_SYNCED_KEY = `__virtual_synced__`
 const VIRTUAL_HAS_LOCAL_KEY = `__virtual_has_local__`

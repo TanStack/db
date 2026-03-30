@@ -487,9 +487,7 @@ export function expressionReferencesPendingOperation(
   }
 
   if (expr.type === `func`) {
-    return expr.args.some((arg) =>
-      expressionReferencesPendingOperation(arg),
-    )
+    return expr.args.some((arg) => expressionReferencesPendingOperation(arg))
   }
 
   return false
