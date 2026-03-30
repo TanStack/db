@@ -2638,9 +2638,8 @@ describe(`createLiveQueryCollection`, () => {
         query: (q) =>
           q
             .from({ team: teamsCollection })
-            .join(
-              { user: usersCollection },
-              ({ team, user }) => eq(team.lead_id, user.id),
+            .join({ user: usersCollection }, ({ team, user }) =>
+              eq(team.lead_id, user.id),
             )
             .select(({ team, user }) => ({
               teamName: team.name,
@@ -2658,9 +2657,7 @@ describe(`createLiveQueryCollection`, () => {
 
       // Should contain all 3 joined rows, not just 1
       expect(derived.size).toBe(3)
-      expect(
-        derived.toArray.map((row) => stripVirtualProps(row)),
-      ).toEqual(
+      expect(derived.toArray.map((row) => stripVirtualProps(row))).toEqual(
         expect.arrayContaining([
           expect.objectContaining({ teamName: `Alpha`, leadName: `Alice` }),
           expect.objectContaining({ teamName: `Beta`, leadName: `Bob` }),
@@ -2674,12 +2671,10 @@ describe(`createLiveQueryCollection`, () => {
       const intermediate = createLiveQueryCollection({
         id: `update-intermediate`,
         query: (q) =>
-          q
-            .from({ user: usersCollection })
-            .select(({ user }) => ({
-              id: user.id,
-              name: user.name,
-            })),
+          q.from({ user: usersCollection }).select(({ user }) => ({
+            id: user.id,
+            name: user.name,
+          })),
       })
 
       // Derived from the intermediate
