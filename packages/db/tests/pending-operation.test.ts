@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from 'vitest'
 import { createCollection } from '../src/collection/index.js'
 import { createLiveQueryCollection } from '../src/query/live-query-collection.js'
+import { createEffect } from '../src/index.js'
 import { localOnlyCollectionOptions } from '../src/local-only.js'
 import { createTransaction } from '../src/transactions'
 import { and, count, eq, isNull, not, or } from '../src/query/builder/functions'
@@ -1247,5 +1248,73 @@ describe(`$pendingOperation virtual property`, () => {
     const childResults = Array.from((parent).children.values())
     expect(childResults).toHaveLength(1)
     expect((childResults[0] as any).$pendingOperation).toBe(`delete`)
+  })
+
+  // createEffect support
+  it(`createEffect onEnter fires for pending-delete items when $pendingOperation is in where`, async () => {
+    let syncFns: {
+      begin: () => void
+      write: (msg: any) => void
+      commit: () => void
+    }
+
+    const collection = createCollection<Item, string>({
+      id: `effect-pending-delete`,
+      getKey: (item) => item.id,
+      sync: {
+        sync: ({ begin, write, commit, markReady }) => {
+          syncFns = { begin, write, commit }
+          markReady()
+        },
+      },
+    })
+
+    // Activate sync by subscribing
+    collection.subscribeChanges(() => {}, { includeInitialState: false })
+    await waitForChanges()
+
+    // Sync an item
+    syncFns!.begin()
+    syncFns!.write({ type: `insert`, value: { id: `1`, title: `Hello` } })
+    syncFns!.commit()
+    await waitForChanges()
+
+    // Delete via pending transaction
+    const tx = createTransaction({
+      autoCommit: false,
+      mutationFn: async () => {
+        await new Promise(() => {})
+      },
+    })
+    tx.mutate(() => {
+      collection.delete(`1`)
+    })
+    await waitForChanges()
+
+    // createEffect with $pendingOperation in where — should find the deleted item
+    const entered: Array<any> = []
+    const effect = createEffect({
+      query: (q: any) =>
+        q
+          .from({ item: collection })
+          .where(({ item }: any) =>
+            or(
+              isNull(item.$pendingOperation),
+              not(isNull(item.$pendingOperation)),
+            ),
+          ),
+      onEnter: (event: any) => {
+        entered.push(event.value)
+      },
+    })
+
+    await waitForChanges()
+
+    // The deleted item should have triggered onEnter with $pendingOperation: 'delete'
+    const deletedItem = entered.find((v: any) => v.id === `1`)
+    expect(deletedItem).toBeDefined()
+    expect(deletedItem.$pendingOperation).toBe(`delete`)
+
+    effect.dispose()
   })
 })
