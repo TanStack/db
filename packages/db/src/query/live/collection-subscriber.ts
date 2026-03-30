@@ -481,7 +481,7 @@ export class CollectionSubscriber<
  * Checks if a BasicExpression tree references $pendingOperation.
  * Used to auto-detect whether a query opts into seeing pending-delete items.
  */
-function expressionReferencesPendingOperation(
+export function expressionReferencesPendingOperation(
   expr: BasicExpression | undefined,
 ): boolean {
   if (!expr) return false
