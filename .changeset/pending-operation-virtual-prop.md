@@ -1,5 +1,5 @@
 ---
-"@tanstack/db": minor
+'@tanstack/db': minor
 ---
 
 Add `$pendingOperation` virtual property to track optimistic mutation type
