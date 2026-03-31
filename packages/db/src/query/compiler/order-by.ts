@@ -292,12 +292,16 @@ export function processOrderBy(
 
       // Set up lazy loading callback to track how much more data is needed
       // This is used by loadMoreIfNeeded to determine if more data should be loaded
-      setSizeCallback = (getSize: () => number) => {
-        optimizableOrderByCollections[targetCollectionId]![`dataNeeded`] =
-          () => {
-            const size = getSize()
-            return Math.max(0, orderByOptimizationInfo!.limit - size)
-          }
+      // Only enable when an index exists — without an index, lazy loading can't work
+      // and all data is loaded eagerly via requestSnapshot instead.
+      if (index) {
+        setSizeCallback = (getSize: () => number) => {
+          optimizableOrderByCollections[targetCollectionId]![`dataNeeded`] =
+            () => {
+              const size = getSize()
+              return Math.max(0, orderByOptimizationInfo!.limit - size)
+            }
+        }
       }
     }
   }
