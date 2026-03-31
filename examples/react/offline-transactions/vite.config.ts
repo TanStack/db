@@ -74,20 +74,21 @@ export default defineConfig({
       ignored: [`!**/node_modules/@tanstack/**`],
     },
   },
-  resolve: {
-    alias: {
-      // Resolve to source so Vite can process the ?worker import natively
-      '@tanstack/browser-db-sqlite-persistence': path.resolve(
-        __dirname,
-        `../../../packages/browser-db-sqlite-persistence/src/index.ts`,
-      ),
-      // Required because the browser package's source re-exports from core
-      '@tanstack/db-sqlite-persistence-core': path.resolve(
-        __dirname,
-        `../../../packages/db-sqlite-persistence-core/src/index.ts`,
-      ),
-    },
-  },
+  // resolve aliases commented out to test against built dist/ output
+  // resolve: {
+  //   alias: {
+  //     // Resolve to source so Vite can process the ?worker import natively
+  //     '@tanstack/browser-db-sqlite-persistence': path.resolve(
+  //       __dirname,
+  //       `../../../packages/browser-db-sqlite-persistence/src/index.ts`,
+  //     ),
+  //     // Required because the browser package's source re-exports from core
+  //     '@tanstack/db-sqlite-persistence-core': path.resolve(
+  //       __dirname,
+  //       `../../../packages/db-sqlite-persistence-core/src/index.ts`,
+  //     ),
+  //   },
+  // },
   optimizeDeps: {
     exclude: [
       `@tanstack/db`,

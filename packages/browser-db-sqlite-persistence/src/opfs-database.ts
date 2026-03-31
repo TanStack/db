@@ -2,7 +2,7 @@ import {
   InvalidPersistedCollectionConfigError,
   PersistenceUnavailableError,
 } from '@tanstack/db-sqlite-persistence-core'
-import OPFSWorkerConstructor from './opfs-worker?worker'
+import OPFSWorkerConstructor from './opfs-worker?worker&inline'
 import type { BrowserWASQLiteDatabase } from './wa-sqlite-driver'
 import type {
   BrowserOPFSWorkerErrorCode,
