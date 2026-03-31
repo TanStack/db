@@ -1191,8 +1191,8 @@ importers:
   packages/electric-db-collection:
     dependencies:
       '@electric-sql/client':
-        specifier: https://pkg.pr.new/@electric-sql/client@4043
-        version: https://pkg.pr.new/@electric-sql/client@4043
+        specifier: ^1.5.14
+        version: 1.5.14
       '@standard-schema/spec':
         specifier: ^1.1.0
         version: 1.1.0
@@ -2579,9 +2579,8 @@ packages:
     resolution: {integrity: sha512-cR5U/mDNUTRrdrZ8Fr3QPFKwTwDUZ2ux88mEvIxQq5PoyW3UrHkK/GIq3arHoeiXrUnieRIz2U+TBOaQKld8XA==}
     hasBin: true
 
-  '@electric-sql/client@https://pkg.pr.new/@electric-sql/client@4043':
-    resolution: {integrity: sha512-apitAcxKHey/RCBMI4RJsXyqrmXb/uZySfL4Agq7yxEYwAIsUEqmn+m6vlT3wv9YhJKV0VizN4CwgkE3PfBzEQ==, tarball: https://pkg.pr.new/@electric-sql/client@4043}
-    version: 1.5.13
+  '@electric-sql/client@1.5.14':
+    resolution: {integrity: sha512-/bT33y++WsX1McYZ0oa6NtnTfxTB8JgFdrGkSWtQnBNusDRNBEpF+Wn4Meg0Hjxj99gfAbQprqBz4U0KGG/EBA==}
     hasBin: true
 
   '@electron/get@2.0.3':
@@ -14160,7 +14159,7 @@ snapshots:
     optionalDependencies:
       '@rollup/rollup-darwin-arm64': 4.52.5
 
-  '@electric-sql/client@https://pkg.pr.new/@electric-sql/client@4043':
+  '@electric-sql/client@1.5.14':
     dependencies:
       '@microsoft/fetch-event-source': 2.0.1
     optionalDependencies:
