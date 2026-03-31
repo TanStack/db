@@ -16,7 +16,7 @@ function watchWorkspacePackages() {
         path.resolve(__dirname, `../../../packages/offline-transactions/dist`),
         path.resolve(
           __dirname,
-          `../../../packages/browser-db-sqlite-persistence/src`,
+          `../../../packages/browser-db-sqlite-persistence/dist`,
         ),
         path.resolve(
           __dirname,
