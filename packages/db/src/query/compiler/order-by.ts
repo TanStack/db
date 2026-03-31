@@ -191,6 +191,17 @@ export function processOrderBy(
           index = undefined
         }
 
+        if (!index) {
+          const collectionId = followRefCollection.id
+          const fieldPath = followRefResult.path.join(`.`)
+          console.warn(
+            `[TanStack DB]${collectionId ? ` [${collectionId}]` : ``} orderBy with limit requires an index on "${fieldPath}" for efficient lazy loading. ` +
+              `Falling back to loading all data. ` +
+              `Consider creating an index on the collection with collection.createIndex((row) => row.${fieldPath}) ` +
+              `or enable auto-indexing with autoIndex: 'eager' and a defaultIndexType.`,
+          )
+        }
+
         orderByAlias =
           firstOrderByExpression.path.length > 1
             ? String(firstOrderByExpression.path[0])
