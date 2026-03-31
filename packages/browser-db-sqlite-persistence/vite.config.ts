@@ -23,9 +23,7 @@ function workerImportMetaUrlPlugin(): Plugin {
       for (const chunk of Object.values(bundle)) {
         if (chunk.type !== `chunk`) continue
 
-        const workerUrlMatch = chunk.code.match(
-          /new Worker\(\s*"(\/[^"]+)"/,
-        )
+        const workerUrlMatch = chunk.code.match(/new Worker\(\s*"(\/[^"]+)"/)
         if (!workerUrlMatch?.[1]) continue
 
         const absolutePath = workerUrlMatch[1]
