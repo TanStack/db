@@ -561,6 +561,65 @@ function createOrderByTests(autoIndex: `off` | `eager`): void {
         ])
       })
 
+      it(`works with orderBy + limit when limit exceeds available data and no index exists`, async () => {
+        // When limit > number of rows, the topK operator is not full after
+        // the initial snapshot. The on-demand loader must not attempt
+        // cursor-based loading (requestLimitedSnapshot) when there is no index.
+        const collection = createLiveQueryCollection((q) =>
+          q
+            .from({ employees: employeesCollection })
+            .orderBy(({ employees }) => employees.salary, `desc`)
+            .limit(20) // Much larger than the 5 employees
+            .select(({ employees }) => ({
+              id: employees.id,
+              name: employees.name,
+              salary: employees.salary,
+            })),
+        )
+        await collection.preload()
+
+        const results = Array.from(collection.values())
+        expect(results).toHaveLength(5)
+        expect(results.map((r) => r.salary)).toEqual([
+          65_000, 60_000, 55_000, 52_000, 50_000,
+        ])
+      })
+
+      it(`handles delete from topK when limit exceeds available data and no index exists`, async () => {
+        // After a delete, the topK becomes even less full. The on-demand loader
+        // must gracefully handle this without attempting cursor-based loading.
+        const collection = createLiveQueryCollection((q) =>
+          q
+            .from({ employees: employeesCollection })
+            .orderBy(({ employees }) => employees.salary, `desc`)
+            .limit(20)
+            .select(({ employees }) => ({
+              id: employees.id,
+              name: employees.name,
+              salary: employees.salary,
+            })),
+        )
+        await collection.preload()
+
+        const results = Array.from(collection.values())
+        expect(results).toHaveLength(5)
+
+        // Delete Diana (highest salary) — topK shrinks, triggering loadMoreIfNeeded
+        const dianaData = employeeData.find((e) => e.id === 4)!
+        employeesCollection.utils.begin()
+        employeesCollection.utils.write({
+          type: `delete`,
+          value: dianaData,
+        })
+        employeesCollection.utils.commit()
+
+        const newResults = Array.from(collection.values())
+        expect(newResults).toHaveLength(4)
+        expect(newResults.map((r) => r.salary)).toEqual([
+          60_000, 55_000, 52_000, 50_000,
+        ])
+      })
+
       itWhenAutoIndexEager(
         `applies incremental insert of a new row inside the topK but after max sent value correctly`,
         async () => {
