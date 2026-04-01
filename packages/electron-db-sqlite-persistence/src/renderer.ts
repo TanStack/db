@@ -149,24 +149,31 @@ function createRendererRequestExecutor(options: {
   }
 }
 
-type ElectronRendererResolvedAdapter = PersistedCollectionPersistence[`adapter`] & {
-  loadCollectionMetadata: (
-    collectionId: string,
-  ) => Promise<Array<{ key: string; value: unknown }>>
-  scanRows: (
-    collectionId: string,
-    options?: { metadataOnly?: boolean },
-  ) => Promise<Array<{ key: string | number; value: Record<string, unknown>; metadata?: unknown }>>
-  pullSince: (
-    collectionId: string,
-    fromRowVersion: number,
-  ) => Promise<SQLitePullSinceResult<string | number>>
-  getStreamPosition: (collectionId: string) => Promise<{
-    latestTerm: number
-    latestSeq: number
-    latestRowVersion: number
-  }>
-}
+type ElectronRendererResolvedAdapter =
+  PersistedCollectionPersistence[`adapter`] & {
+    loadCollectionMetadata: (
+      collectionId: string,
+    ) => Promise<Array<{ key: string; value: unknown }>>
+    scanRows: (
+      collectionId: string,
+      options?: { metadataOnly?: boolean },
+    ) => Promise<
+      Array<{
+        key: string | number
+        value: Record<string, unknown>
+        metadata?: unknown
+      }>
+    >
+    pullSince: (
+      collectionId: string,
+      fromRowVersion: number,
+    ) => Promise<SQLitePullSinceResult<string | number>>
+    getStreamPosition: (collectionId: string) => Promise<{
+      latestTerm: number
+      latestSeq: number
+      latestRowVersion: number
+    }>
+  }
 
 function createResolvedRendererAdapter(
   executeRequest: RendererRequestExecutor,
@@ -188,7 +195,10 @@ function createResolvedRendererAdapter(
         resolution,
       )
 
-      return result as Array<{ key: string | number; value: Record<string, unknown> }>
+      return result as Array<{
+        key: string | number
+        value: Record<string, unknown>
+      }>
     },
     applyCommittedTx: async (
       collectionId: string,
@@ -216,14 +226,24 @@ function createResolvedRendererAdapter(
     scanRows: async (
       collectionId: string,
       options?: { metadataOnly?: boolean },
-    ): Promise<Array<{ key: string | number; value: Record<string, unknown>; metadata?: unknown }>> => {
+    ): Promise<
+      Array<{
+        key: string | number
+        value: Record<string, unknown>
+        metadata?: unknown
+      }>
+    > => {
       const result = await executeRequest(
         `scanRows`,
         collectionId,
         { options },
         resolution,
       )
-      return result as Array<{ key: string | number; value: Record<string, unknown>; metadata?: unknown }>
+      return result as Array<{
+        key: string | number
+        value: Record<string, unknown>
+        metadata?: unknown
+      }>
     },
     ensureIndex: async (
       collectionId: string,
@@ -320,10 +340,7 @@ export function createElectronSQLitePersistence(
     channel: options.channel,
     timeoutMs: options.timeoutMs,
   })
-  const adapterCache = new Map<
-    string,
-    ElectronRendererResolvedAdapter
-  >()
+  const adapterCache = new Map<string, ElectronRendererResolvedAdapter>()
 
   const getAdapterForCollection = (
     mode: PersistedCollectionMode,

@@ -142,7 +142,10 @@ function createRecordingAdapter(
         if (rowMetadataMutation.type === `delete`) {
           rowMetadata.delete(rowMetadataMutation.key as string)
         } else {
-          rowMetadata.set(rowMetadataMutation.key as string, rowMetadataMutation.value)
+          rowMetadata.set(
+            rowMetadataMutation.key as string,
+            rowMetadataMutation.value,
+          )
         }
       }
       for (const metadataMutation of tx.collectionMetadataMutations ?? []) {

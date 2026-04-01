@@ -4,7 +4,6 @@ import { registerPersistedCollectionConformanceSuite } from '../../shared/regist
 import type { PersistedCollectionPersistence } from '@tanstack/db-sqlite-persistence-core'
 import type { TauriSQLiteDatabaseLike } from '../../../src'
 
-
 export function registerTauriNativeE2ESuite(options: {
   suiteName: string
   database: TauriSQLiteDatabaseLike

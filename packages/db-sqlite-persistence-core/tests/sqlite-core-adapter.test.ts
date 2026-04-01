@@ -20,8 +20,6 @@ type Todo = {
   score: number
 }
 
-
-
 const execFileAsync = promisify(execFile)
 
 function toSqlLiteral(value: unknown): string {
@@ -1479,11 +1477,9 @@ export function runSQLiteCoreAdapterContractSuite(
 
     it(`falls back to in-memory filtering when SQL json path pushdown is unsupported`, async () => {
       const { driver } = registerContractHarness()
-      const adapter = new SQLiteCorePersistenceAdapter(
-        {
-          driver,
-        },
-      )
+      const adapter = new SQLiteCorePersistenceAdapter({
+        driver,
+      })
       const collectionId = `fallback-where`
 
       await adapter.applyCommittedTx(collectionId, {
@@ -1529,11 +1525,9 @@ export function runSQLiteCoreAdapterContractSuite(
 
     it(`supports alias-qualified refs during in-memory fallback filtering`, async () => {
       const { driver } = registerContractHarness()
-      const adapter = new SQLiteCorePersistenceAdapter(
-        {
-          driver,
-        },
-      )
+      const adapter = new SQLiteCorePersistenceAdapter({
+        driver,
+      })
       const collectionId = `fallback-alias-qualified-ref`
 
       await adapter.applyCommittedTx(collectionId, {

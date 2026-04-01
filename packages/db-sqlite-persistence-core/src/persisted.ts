@@ -247,12 +247,13 @@ export interface PersistenceAdapter {
     options: LoadSubsetOptions,
     ctx?: { requiredIndexSignatures?: ReadonlyArray<string> },
   ) => Promise<
-    Array<{ key: string | number; value: Record<string, unknown>; metadata?: unknown }>
+    Array<{
+      key: string | number
+      value: Record<string, unknown>
+      metadata?: unknown
+    }>
   >
-  applyCommittedTx: (
-    collectionId: string,
-    tx: PersistedTx,
-  ) => Promise<void>
+  applyCommittedTx: (collectionId: string, tx: PersistedTx) => Promise<void>
   loadCollectionMetadata?: (
     collectionId: string,
   ) => Promise<Array<{ key: string; value: unknown }>>
@@ -407,7 +408,10 @@ const REQUIRED_COORDINATOR_METHODS: ReadonlyArray<
 ]
 
 const REQUIRED_ADAPTER_METHODS: ReadonlyArray<
-  keyof Pick<PersistenceAdapter, `loadSubset` | `applyCommittedTx` | `ensureIndex`>
+  keyof Pick<
+    PersistenceAdapter,
+    `loadSubset` | `applyCommittedTx` | `ensureIndex`
+  >
 > = [`loadSubset`, `applyCommittedTx`, `ensureIndex`]
 
 const TARGETED_INVALIDATION_KEY_LIMIT = 128

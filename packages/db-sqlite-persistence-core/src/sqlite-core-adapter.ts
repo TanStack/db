@@ -608,16 +608,20 @@ function sanitizeExpressionSqlFragment(fragment: string): string {
   return fragment
 }
 
-type InMemoryRow<TKey extends string | number = string | number, T extends object = Record<string, unknown>> = {
+type InMemoryRow<
+  TKey extends string | number = string | number,
+  T extends object = Record<string, unknown>,
+> = {
   key: TKey
   value: T
   metadata?: unknown
   rowVersion: number
 }
 
-function decodeStoredSqliteRows<TKey extends string | number = string | number, T extends object = Record<string, unknown>>(
-  storedRows: ReadonlyArray<StoredSqliteRow>,
-): Array<InMemoryRow<TKey, T>> {
+function decodeStoredSqliteRows<
+  TKey extends string | number = string | number,
+  T extends object = Record<string, unknown>,
+>(storedRows: ReadonlyArray<StoredSqliteRow>): Array<InMemoryRow<TKey, T>> {
   return storedRows.map((row) => {
     const key = decodePersistedStorageKey(row.key) as TKey
     const value = deserializePersistedRowValue<T>(row.value)
@@ -1083,7 +1087,11 @@ export class SQLiteCorePersistenceAdapter implements PersistenceAdapter {
     options: LoadSubsetOptions,
     ctx?: { requiredIndexSignatures?: ReadonlyArray<string> },
   ): Promise<
-    Array<{ key: string | number; value: Record<string, unknown>; metadata?: unknown }>
+    Array<{
+      key: string | number
+      value: Record<string, unknown>
+      metadata?: unknown
+    }>
   > {
     const tableMapping = await this.ensureCollectionReady(collectionId)
     await this.touchRequiredIndexes(collectionId, ctx?.requiredIndexSignatures)
@@ -1136,10 +1144,7 @@ export class SQLiteCorePersistenceAdapter implements PersistenceAdapter {
     }))
   }
 
-  async applyCommittedTx(
-    collectionId: string,
-    tx: PersistedTx,
-  ): Promise<void> {
+  async applyCommittedTx(collectionId: string, tx: PersistedTx): Promise<void> {
     const tableMapping = await this.ensureCollectionReady(collectionId)
     const collectionTableSql = quoteIdentifier(tableMapping.tableName)
     const tombstoneTableSql = quoteIdentifier(tableMapping.tombstoneTableName)
@@ -1688,9 +1693,7 @@ export class SQLiteCorePersistenceAdapter implements PersistenceAdapter {
 
     const evaluator = compileRowExpressionEvaluator(where)
     return rows.filter((row) =>
-      toBooleanPredicate(
-        evaluator(row.value) as boolean | null,
-      ),
+      toBooleanPredicate(evaluator(row.value) as boolean | null),
     )
   }
 
@@ -1710,12 +1713,8 @@ export class SQLiteCorePersistenceAdapter implements PersistenceAdapter {
     const ordered = [...rows]
     ordered.sort((left, right) => {
       for (const clause of compiledClauses) {
-        const leftValue = clause.evaluator(
-          left.value,
-        )
-        const rightValue = clause.evaluator(
-          right.value,
-        )
+        const leftValue = clause.evaluator(left.value)
+        const rightValue = clause.evaluator(right.value)
 
         const comparison = compareOrderByValues(
           leftValue,

@@ -24,7 +24,6 @@ import type {
   ElectronPersistenceResponseEnvelope,
 } from '../src/protocol'
 
-
 type InvokeHarness = {
   invoke: ElectronPersistenceInvoke
   close: () => void
