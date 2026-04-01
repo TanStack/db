@@ -4,7 +4,7 @@ import type { TodoUpdate } from '~/utils/todos'
 import { todoService } from '~/utils/todos'
 
 export const ServerRoute = createServerFileRoute(`/api/todos/$todoId`).methods({
-  GET: async ({ params, request }) => {
+  GET: async ({ params, request }: { params: { todoId: string }; request: Request }) => {
     console.info(`GET /api/todos/${params.todoId} @`, request.url)
 
     try {
@@ -24,7 +24,7 @@ export const ServerRoute = createServerFileRoute(`/api/todos/$todoId`).methods({
     }
   },
 
-  PUT: async ({ params, request }) => {
+  PUT: async ({ params, request }: { params: { todoId: string }; request: Request }) => {
     console.info(`PUT /api/todos/${params.todoId} @`, request.url)
 
     try {
@@ -52,7 +52,7 @@ export const ServerRoute = createServerFileRoute(`/api/todos/$todoId`).methods({
     }
   },
 
-  DELETE: async ({ params, request }) => {
+  DELETE: async ({ params, request }: { params: { todoId: string }; request: Request }) => {
     console.info(`DELETE /api/todos/${params.todoId} @`, request.url)
 
     try {

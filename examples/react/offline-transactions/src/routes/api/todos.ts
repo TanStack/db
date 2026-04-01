@@ -4,7 +4,7 @@ import type { TodoInput } from '~/utils/todos'
 import { todoService } from '~/utils/todos'
 
 export const ServerRoute = createServerFileRoute(`/api/todos`).methods({
-  GET: async ({ request }) => {
+  GET: async ({ request }: { request: Request }) => {
     console.info(`GET /api/todos @`, request.url)
 
     try {
@@ -21,7 +21,7 @@ export const ServerRoute = createServerFileRoute(`/api/todos`).methods({
     }
   },
 
-  POST: async ({ request }) => {
+  POST: async ({ request }: { request: Request }) => {
     console.info(`POST /api/todos @`, request.url)
 
     try {

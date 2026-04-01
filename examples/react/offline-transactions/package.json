@@ -5,8 +5,7 @@
   "type": "module",
   "scripts": {
     "dev": "vite dev",
-    "build": "vite build && tsc --noEmit",
-    "start": "node .output/server/index.mjs"
+    "build": "vite build && tsc --noEmit"
   },
   "dependencies": {
     "@tanstack/browser-db-sqlite-persistence": "^0.1.5",
