@@ -24,21 +24,13 @@ import type {
   ElectronPersistenceResponseEnvelope,
 } from '../src/protocol'
 
-type Todo = {
-  id: string
-  title: string
-  score: number
-}
 
 type InvokeHarness = {
   invoke: ElectronPersistenceInvoke
   close: () => void
 }
 
-type ElectronMainPersistence = PersistedCollectionPersistence<
-  Record<string, unknown>,
-  string | number
->
+type ElectronMainPersistence = PersistedCollectionPersistence
 
 const electronRuntimeBridgeTimeoutMs = isElectronFullE2EEnabled()
   ? 45_000
@@ -111,10 +103,7 @@ function createInvokeHarness(
   }
 
   const driver = new BetterSqlite3SQLiteDriver({ filename: dbPath })
-  const persistence = createNodeSQLitePersistence<
-    Record<string, unknown>,
-    string | number
-  >({
+  const persistence = createNodeSQLitePersistence({
     database: driver.getDatabase(),
   })
   const filteredPersistence = createFilteredPersistence(
@@ -185,7 +174,7 @@ describe(`electron sqlite persistence bridge`, () => {
     const invokeHarness = createInvokeHarness(dbPath, `todos`)
     activeCleanupFns.push(() => invokeHarness.close())
 
-    const rendererPersistence = createElectronSQLitePersistence<Todo, string>({
+    const rendererPersistence = createElectronSQLitePersistence({
       invoke: async (channel, request) => {
         expect(channel).toBe(DEFAULT_ELECTRON_PERSISTENCE_CHANNEL)
         return invokeHarness.invoke(channel, request)
@@ -233,12 +222,10 @@ describe(`electron sqlite persistence bridge`, () => {
         collectionId: `todos`,
         timeoutMs: electronRuntimeBridgeTimeoutMs,
       })
-      const rendererPersistence = createElectronSQLitePersistence<Todo, string>(
-        {
-          invoke,
-          timeoutMs: electronRuntimeBridgeTimeoutMs,
-        },
-      )
+      const rendererPersistence = createElectronSQLitePersistence({
+        invoke,
+        timeoutMs: electronRuntimeBridgeTimeoutMs,
+      })
 
       await rendererPersistence.adapter.applyCommittedTx(`todos`, {
         txId: `tx-restart-1`,
@@ -264,7 +251,7 @@ describe(`electron sqlite persistence bridge`, () => {
     }
 
     const invokeHarnessA = createInvokeHarness(dbPath, `todos`)
-    const rendererPersistenceA = createElectronSQLitePersistence<Todo, string>({
+    const rendererPersistenceA = createElectronSQLitePersistence({
       invoke: invokeHarnessA.invoke,
       timeoutMs: electronRuntimeBridgeTimeoutMs,
     })
@@ -289,7 +276,7 @@ describe(`electron sqlite persistence bridge`, () => {
 
     const invokeHarnessB = createInvokeHarness(dbPath, `todos`)
     activeCleanupFns.push(() => invokeHarnessB.close())
-    const rendererPersistenceB = createElectronSQLitePersistence<Todo, string>({
+    const rendererPersistenceB = createElectronSQLitePersistence({
       invoke: invokeHarnessB.invoke,
       timeoutMs: electronRuntimeBridgeTimeoutMs,
     })
@@ -301,7 +288,7 @@ describe(`electron sqlite persistence bridge`, () => {
     const neverInvoke: ElectronPersistenceInvoke = async () =>
       await new Promise<ElectronPersistenceResponseEnvelope>(() => {})
 
-    const rendererPersistence = createElectronSQLitePersistence<Todo, string>({
+    const rendererPersistence = createElectronSQLitePersistence({
       invoke: neverInvoke,
       timeoutMs: 5,
     })
@@ -315,7 +302,7 @@ describe(`electron sqlite persistence bridge`, () => {
     const dbPath = createTempDbPath()
     const invokeHarness = createInvokeHarness(dbPath, `known`, false)
     activeCleanupFns.push(() => invokeHarness.close())
-    const rendererPersistence = createElectronSQLitePersistence<Todo, string>({
+    const rendererPersistence = createElectronSQLitePersistence({
       invoke: invokeHarness.invoke,
       timeoutMs: electronRuntimeBridgeTimeoutMs,
     })
@@ -355,10 +342,7 @@ describe(`electron sqlite persistence bridge`, () => {
       filename: createTempDbPath(),
     })
     activeCleanupFns.push(() => driver.close())
-    const persistence = createNodeSQLitePersistence<
-      Record<string, unknown>,
-      string | number
-    >({
+    const persistence = createNodeSQLitePersistence({
       database: driver.getDatabase(),
     })
 

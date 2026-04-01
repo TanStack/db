@@ -32,7 +32,7 @@ type Todo = {
   title: string
 }
 
-type RecordingAdapter = PersistenceAdapter<Todo, string> & {
+type RecordingAdapter = PersistenceAdapter & {
   applyCommittedTxCalls: Array<{
     collectionId: string
     tx: {
@@ -40,7 +40,10 @@ type RecordingAdapter = PersistenceAdapter<Todo, string> & {
       seq: number
       rowVersion: number
       truncate?: boolean
-      mutations: Array<{ type: `insert` | `update` | `delete`; key: string }>
+      mutations: Array<{
+        type: `insert` | `update` | `delete`
+        key: string | number
+      }>
     }
   }>
   ensureIndexCalls: Array<{ collectionId: string; signature: string }>
@@ -126,20 +129,20 @@ function createRecordingAdapter(
 
       for (const mutation of tx.mutations) {
         if (mutation.type === `delete`) {
-          rows.delete(mutation.key)
-          rowMetadata.delete(mutation.key)
+          rows.delete(mutation.key as string)
+          rowMetadata.delete(mutation.key as string)
         } else {
-          rows.set(mutation.key, mutation.value)
+          rows.set(mutation.key as string, mutation.value as Todo)
           if (mutation.metadataChanged) {
-            rowMetadata.set(mutation.key, mutation.metadata)
+            rowMetadata.set(mutation.key as string, mutation.metadata)
           }
         }
       }
       for (const rowMetadataMutation of tx.rowMetadataMutations ?? []) {
         if (rowMetadataMutation.type === `delete`) {
-          rowMetadata.delete(rowMetadataMutation.key)
+          rowMetadata.delete(rowMetadataMutation.key as string)
         } else {
-          rowMetadata.set(rowMetadataMutation.key, rowMetadataMutation.value)
+          rowMetadata.set(rowMetadataMutation.key as string, rowMetadataMutation.value)
         }
       }
       for (const metadataMutation of tx.collectionMetadataMutations ?? []) {
@@ -167,7 +170,7 @@ function createRecordingAdapter(
   return adapter
 }
 
-function createNoopAdapter(): PersistenceAdapter<Todo, string> {
+function createNoopAdapter(): PersistenceAdapter {
   return {
     loadSubset: () => Promise.resolve([]),
     applyCommittedTx: () => Promise.resolve(),
@@ -703,7 +706,7 @@ describe(`persistedCollectionOptions`, () => {
       schemaVersion?: number
     }> = []
 
-    const persistence: PersistedCollectionPersistence<Todo, string> = {
+    const persistence: PersistedCollectionPersistence = {
       adapter: baseAdapter,
       resolvePersistenceForCollection: (options) => {
         resolverCalls.push(options)

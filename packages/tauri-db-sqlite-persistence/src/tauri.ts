@@ -10,11 +10,8 @@ export type TauriSQLiteSchemaMismatchPolicy =
   TauriSQLiteSchemaMismatchPolicyBase
 export type { TauriSQLiteDatabaseLike } from './tauri-persistence'
 
-export function createTauriSQLitePersistence<
-  T extends object,
-  TKey extends string | number = string | number,
->(
+export function createTauriSQLitePersistence(
   options: TauriSQLitePersistenceOptions,
-): PersistedCollectionPersistence<T, TKey> {
-  return createPersistence<T, TKey>(options)
+): PersistedCollectionPersistence {
+  return createPersistence(options)
 }

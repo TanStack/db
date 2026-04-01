@@ -51,17 +51,11 @@ runRuntimePersistenceContractSuite(
   {
     createDatabaseHarness: createRuntimeDatabaseHarness,
     createAdapter: (driver) =>
-      createCloudflareDOSQLitePersistence<
-        RuntimePersistenceContractTodo,
-        string
-      >({
+      createCloudflareDOSQLitePersistence({
         storage: (driver as CloudflareDOSQLiteDriver).getStorage(),
       }).adapter,
     createPersistence: (driver, coordinator) =>
-      createCloudflareDOSQLitePersistence<
-        RuntimePersistenceContractTodo,
-        string
-      >({
+      createCloudflareDOSQLitePersistence({
         storage: (driver as CloudflareDOSQLiteDriver).getStorage(),
         coordinator,
       }),
@@ -91,10 +85,7 @@ describe(`cloudflare durable object persistence helpers`, () => {
     const firstStorageHarness = createBetterSqliteDoStorageHarness({
       filename: dbPath,
     })
-    const firstPersistence = createCloudflareDOSQLitePersistence<
-      RuntimePersistenceContractTodo,
-      string
-    >({
+    const firstPersistence = createCloudflareDOSQLitePersistence({
       storage: firstStorageHarness.storage,
     })
 
@@ -135,10 +126,7 @@ describe(`cloudflare durable object persistence helpers`, () => {
     const secondStorageHarness = createBetterSqliteDoStorageHarness({
       filename: dbPath,
     })
-    const secondPersistence = createCloudflareDOSQLitePersistence<
-      RuntimePersistenceContractTodo,
-      string
-    >({
+    const secondPersistence = createCloudflareDOSQLitePersistence({
       storage: secondStorageHarness.storage,
     })
     try {

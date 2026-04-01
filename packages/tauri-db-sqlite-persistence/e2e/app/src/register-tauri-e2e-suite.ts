@@ -4,9 +4,6 @@ import { registerPersistedCollectionConformanceSuite } from '../../shared/regist
 import type { PersistedCollectionPersistence } from '@tanstack/db-sqlite-persistence-core'
 import type { TauriSQLiteDatabaseLike } from '../../../src'
 
-type PersistableRow = {
-  id: string
-}
 
 export function registerTauriNativeE2ESuite(options: {
   suiteName: string
@@ -19,10 +16,10 @@ export function registerTauriNativeE2ESuite(options: {
       createTauriPersistedCollectionHarnessConfig({
         database: options.database,
         suiteId: options.runId,
-        createPersistence: <T extends PersistableRow>(
+        createPersistence: (
           database: TauriSQLiteDatabaseLike,
-        ): PersistedCollectionPersistence<T, string | number> =>
-          createTauriSQLitePersistence<T, string | number>({
+        ): PersistedCollectionPersistence =>
+          createTauriSQLitePersistence({
             database,
           }),
       }),

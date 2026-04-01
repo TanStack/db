@@ -608,14 +608,14 @@ function sanitizeExpressionSqlFragment(fragment: string): string {
   return fragment
 }
 
-type InMemoryRow<TKey extends string | number, T extends object> = {
+type InMemoryRow<TKey extends string | number = string | number, T extends object = Record<string, unknown>> = {
   key: TKey
   value: T
   metadata?: unknown
   rowVersion: number
 }
 
-function decodeStoredSqliteRows<TKey extends string | number, T extends object>(
+function decodeStoredSqliteRows<TKey extends string | number = string | number, T extends object = Record<string, unknown>>(
   storedRows: ReadonlyArray<StoredSqliteRow>,
 ): Array<InMemoryRow<TKey, T>> {
   return storedRows.map((row) => {
@@ -1002,10 +1002,7 @@ function buildIndexName(collectionId: string, signature: string): string {
   return `idx_${hashedPart}_${suffix}`
 }
 
-export class SQLiteCorePersistenceAdapter<
-  T extends object,
-  TKey extends string | number = string | number,
-> implements PersistenceAdapter<T, TKey> {
+export class SQLiteCorePersistenceAdapter implements PersistenceAdapter {
   private readonly driver: SQLiteDriver
   private readonly schemaVersion: number
   private readonly schemaMismatchPolicy: SQLiteCoreAdapterSchemaMismatchPolicy
@@ -1085,7 +1082,9 @@ export class SQLiteCorePersistenceAdapter<
     collectionId: string,
     options: LoadSubsetOptions,
     ctx?: { requiredIndexSignatures?: ReadonlyArray<string> },
-  ): Promise<Array<{ key: TKey; value: T; metadata?: unknown }>> {
+  ): Promise<
+    Array<{ key: string | number; value: Record<string, unknown>; metadata?: unknown }>
+  > {
     const tableMapping = await this.ensureCollectionReady(collectionId)
     await this.touchRequiredIndexes(collectionId, ctx?.requiredIndexSignatures)
 
@@ -1109,7 +1108,10 @@ export class SQLiteCorePersistenceAdapter<
         this.loadSubsetInternal(tableMapping, whereFromOptions),
       ])
 
-      const mergedRows = new Map<string, InMemoryRow<TKey, T>>()
+      const mergedRows = new Map<
+        string,
+        InMemoryRow<string | number, Record<string, unknown>>
+      >()
       for (const row of [...whereCurrentRows, ...whereFromRows]) {
         mergedRows.set(encodePersistedStorageKey(row.key), row)
       }
@@ -1136,7 +1138,7 @@ export class SQLiteCorePersistenceAdapter<
 
   async applyCommittedTx(
     collectionId: string,
-    tx: PersistedTx<T, TKey>,
+    tx: PersistedTx,
   ): Promise<void> {
     const tableMapping = await this.ensureCollectionReady(collectionId)
     const collectionTableSql = quoteIdentifier(tableMapping.tableName)
@@ -1166,10 +1168,7 @@ export class SQLiteCorePersistenceAdapter<
       )
       const currentRowVersion = versionRows[0]?.latest_row_version ?? 0
       const nextRowVersion = Math.max(currentRowVersion + 1, tx.rowVersion)
-      const replayDelta: ReplayableTxDelta<
-        Record<string, unknown>,
-        TKey
-      > | null = tx.truncate
+      const replayDelta: ReplayableTxDelta | null = tx.truncate
         ? null
         : {
             txId: tx.txId,
@@ -1178,7 +1177,7 @@ export class SQLiteCorePersistenceAdapter<
               .filter((mutation) => mutation.type !== `delete`)
               .map((mutation) => ({
                 key: mutation.key,
-                value: mutation.value as Record<string, unknown>,
+                value: mutation.value,
               })),
             deletedKeys: tx.mutations
               .filter((mutation) => mutation.type === `delete`)
@@ -1379,7 +1378,7 @@ export class SQLiteCorePersistenceAdapter<
   async scanRows(
     collectionId: string,
     options?: PersistedRowScanOptions,
-  ): Promise<Array<PersistedScannedRow<T, TKey>>> {
+  ): Promise<Array<PersistedScannedRow>> {
     const tableMapping = await this.ensureCollectionReady(collectionId)
     const collectionTableSql = quoteIdentifier(tableMapping.tableName)
 
@@ -1392,7 +1391,7 @@ export class SQLiteCorePersistenceAdapter<
            FROM ${collectionTableSql}`,
     )
 
-    return decodeStoredSqliteRows<TKey, T>(storedRows).map((row) => ({
+    return decodeStoredSqliteRows(storedRows).map((row) => ({
       key: row.key,
       value: row.value,
       metadata: row.metadata,
@@ -1531,7 +1530,7 @@ export class SQLiteCorePersistenceAdapter<
   async pullSince(
     collectionId: string,
     fromRowVersion: number,
-  ): Promise<SQLitePullSinceResult<TKey>> {
+  ): Promise<SQLitePullSinceResult<string | number>> {
     const tableMapping = await this.ensureCollectionReady(collectionId)
     const collectionTableSql = quoteIdentifier(tableMapping.tableName)
     const tombstoneTableSql = quoteIdentifier(tableMapping.tombstoneTableName)
@@ -1593,9 +1592,9 @@ export class SQLiteCorePersistenceAdapter<
       }
     }
 
-    const decodeKey = (encodedKey: string): TKey => {
+    const decodeKey = (encodedKey: string): string | number => {
       try {
-        return decodePersistedStorageKey(encodedKey) as TKey
+        return decodePersistedStorageKey(encodedKey)
       } catch (error) {
         throw new InvalidPersistedStorageKeyEncodingError(
           `${encodedKey}: ${(error as Error).message}`,
@@ -1604,10 +1603,9 @@ export class SQLiteCorePersistenceAdapter<
     }
 
     const deltas = replayRows.map((row) => {
-      const parsed = deserializePersistedRowValue<ReplayableTxDelta<
-        Record<string, unknown>,
-        TKey
-      > | null>(row.replay_json ?? `null`)
+      const parsed = deserializePersistedRowValue<ReplayableTxDelta | null>(
+        row.replay_json ?? `null`,
+      )
       if (!parsed) {
         throw new InvalidPersistedCollectionConfigError(
           `missing replay payload for applied_tx row`,
@@ -1645,7 +1643,7 @@ export class SQLiteCorePersistenceAdapter<
   private async loadSubsetInternal(
     tableMapping: CollectionTableMapping,
     options: LoadSubsetOptions,
-  ): Promise<Array<InMemoryRow<TKey, T>>> {
+  ): Promise<Array<InMemoryRow<string | number, Record<string, unknown>>>> {
     const collectionTableSql = quoteIdentifier(tableMapping.tableName)
     const whereCompiled = options.where
       ? compileSqlExpression(options.where)
@@ -1669,7 +1667,7 @@ export class SQLiteCorePersistenceAdapter<
       sql,
       queryParams,
     )
-    const parsedRows = decodeStoredSqliteRows<TKey, T>(storedRows)
+    const parsedRows = decodeStoredSqliteRows(storedRows)
 
     const filteredRows = this.applyInMemoryWhere(parsedRows, options.where)
     const orderedRows = this.applyInMemoryOrderBy(filteredRows, options.orderBy)
@@ -1681,9 +1679,9 @@ export class SQLiteCorePersistenceAdapter<
   }
 
   private applyInMemoryWhere(
-    rows: Array<InMemoryRow<TKey, T>>,
+    rows: Array<InMemoryRow<string | number, Record<string, unknown>>>,
     where: IR.BasicExpression<boolean> | undefined,
-  ): Array<InMemoryRow<TKey, T>> {
+  ): Array<InMemoryRow<string | number, Record<string, unknown>>> {
     if (!where) {
       return rows
     }
@@ -1691,15 +1689,15 @@ export class SQLiteCorePersistenceAdapter<
     const evaluator = compileRowExpressionEvaluator(where)
     return rows.filter((row) =>
       toBooleanPredicate(
-        evaluator(row.value as Record<string, unknown>) as boolean | null,
+        evaluator(row.value) as boolean | null,
       ),
     )
   }
 
   private applyInMemoryOrderBy(
-    rows: Array<InMemoryRow<TKey, T>>,
+    rows: Array<InMemoryRow<string | number, Record<string, unknown>>>,
     orderBy: IR.OrderBy | undefined,
-  ): Array<InMemoryRow<TKey, T>> {
+  ): Array<InMemoryRow<string | number, Record<string, unknown>>> {
     if (!orderBy || orderBy.length === 0) {
       return rows
     }
@@ -1713,10 +1711,10 @@ export class SQLiteCorePersistenceAdapter<
     ordered.sort((left, right) => {
       for (const clause of compiledClauses) {
         const leftValue = clause.evaluator(
-          left.value as Record<string, unknown>,
+          left.value,
         )
         const rightValue = clause.evaluator(
-          right.value as Record<string, unknown>,
+          right.value,
         )
 
         const comparison = compareOrderByValues(
@@ -1747,10 +1745,10 @@ export class SQLiteCorePersistenceAdapter<
   }
 
   private applyInMemoryPagination(
-    rows: Array<InMemoryRow<TKey, T>>,
+    rows: Array<InMemoryRow<string | number, Record<string, unknown>>>,
     limit: number | undefined,
     offset: number | undefined,
-  ): Array<InMemoryRow<TKey, T>> {
+  ): Array<InMemoryRow<string | number, Record<string, unknown>>> {
     const start = offset ?? 0
     if (limit === undefined) {
       return rows.slice(start)
@@ -2121,9 +2119,8 @@ export class SQLiteCorePersistenceAdapter<
   }
 }
 
-export function createSQLiteCorePersistenceAdapter<
-  T extends object,
-  TKey extends string | number = string | number,
->(options: SQLiteCoreAdapterOptions): PersistenceAdapter<T, TKey> {
-  return new SQLiteCorePersistenceAdapter<T, TKey>(options)
+export function createSQLiteCorePersistenceAdapter(
+  options: SQLiteCoreAdapterOptions,
+): PersistenceAdapter {
+  return new SQLiteCorePersistenceAdapter(options)
 }

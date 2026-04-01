@@ -12,11 +12,8 @@ export type CapacitorSQLiteSchemaMismatchPolicy =
 export type { CapacitorSQLiteDatabaseLike } from './capacitor-persistence'
 export type { SQLiteDBConnection } from './capacitor-persistence'
 
-export function createCapacitorSQLitePersistence<
-  T extends object,
-  TKey extends string | number = string | number,
->(
+export function createCapacitorSQLitePersistence(
   options: CapacitorSQLitePersistenceOptions,
-): PersistedCollectionPersistence<T, TKey> {
-  return createPersistence<T, TKey>(options)
+): PersistedCollectionPersistence {
+  return createPersistence(options)
 }

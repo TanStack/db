@@ -89,24 +89,16 @@ function resolveAdapterBaseOptions(
  * many collections on the same database. This is single-tab wiring using
  * SingleProcessCoordinator semantics (no election required).
  */
-export function createBrowserWASQLitePersistence<
-  T extends object,
-  TKey extends string | number = string | number,
->(
+export function createBrowserWASQLitePersistence(
   options: BrowserWASQLitePersistenceOptions,
-): PersistedCollectionPersistence<T, TKey> {
+): PersistedCollectionPersistence {
   const { coordinator, schemaMismatchPolicy } = options
   const driver = createInternalSQLiteDriver(options)
   const adapterBaseOptions = resolveAdapterBaseOptions(options)
   const resolvedCoordinator = coordinator ?? new SingleProcessCoordinator()
   const adapterCache = new Map<
     string,
-    ReturnType<
-      typeof createSQLiteCorePersistenceAdapter<
-        Record<string, unknown>,
-        string | number
-      >
-    >
+    ReturnType<typeof createSQLiteCorePersistenceAdapter>
   >()
 
   const getAdapterForCollection = (
@@ -126,10 +118,7 @@ export function createBrowserWASQLitePersistence<
       return cachedAdapter
     }
 
-    const adapter = createSQLiteCorePersistenceAdapter<
-      Record<string, unknown>,
-      string | number
-    >({
+    const adapter = createSQLiteCorePersistenceAdapter({
       ...adapterBaseOptions,
       driver,
       schemaMismatchPolicy: resolvedSchemaMismatchPolicy,
@@ -149,11 +138,8 @@ export function createBrowserWASQLitePersistence<
   const createCollectionPersistence = (
     mode: PersistedCollectionMode,
     schemaVersion: number | undefined,
-  ): PersistedCollectionPersistence<T, TKey> => ({
-    adapter: getAdapterForCollection(
-      mode,
-      schemaVersion,
-    ) as unknown as PersistedCollectionPersistence<T, TKey>[`adapter`],
+  ): PersistedCollectionPersistence => ({
+    adapter: getAdapterForCollection(mode, schemaVersion),
     coordinator: resolvedCoordinator,
   })
 

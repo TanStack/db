@@ -47,11 +47,11 @@ function createRuntimeDatabaseHarness(): RuntimePersistenceDatabaseHarness {
 runRuntimePersistenceContractSuite(`tauri runtime persistence helpers`, {
   createDatabaseHarness: createRuntimeDatabaseHarness,
   createAdapter: (driver) =>
-    createTauriSQLitePersistence<RuntimePersistenceContractTodo, string>({
+    createTauriSQLitePersistence({
       database: (driver as TauriSQLiteDriver).getDatabase(),
     }).adapter,
   createPersistence: (driver, coordinator) =>
-    createTauriSQLitePersistence<RuntimePersistenceContractTodo, string>({
+    createTauriSQLitePersistence({
       database: (driver as TauriSQLiteDriver).getDatabase(),
       coordinator,
     }),
@@ -63,10 +63,7 @@ describe(`tauri runtime persistence helpers`, () => {
     const runtimeHarness = createRuntimeDatabaseHarness()
     const driver = runtimeHarness.createDriver()
     try {
-      const persistence = createTauriSQLitePersistence<
-        RuntimePersistenceContractTodo,
-        string
-      >({
+      const persistence = createTauriSQLitePersistence({
         database: (driver as TauriSQLiteDriver).getDatabase(),
       })
       const resolvePersistenceForCollection =
@@ -150,10 +147,7 @@ describe(`tauri runtime persistence helpers`, () => {
     const firstDatabase = createTauriSQLiteTestDatabase({ filename: dbPath })
 
     try {
-      const firstPersistence = createTauriSQLitePersistence<
-        RuntimePersistenceContractTodo,
-        string
-      >({
+      const firstPersistence = createTauriSQLitePersistence({
         database: firstDatabase,
       })
       const firstCollectionOptions = persistedCollectionOptions<
@@ -192,10 +186,7 @@ describe(`tauri runtime persistence helpers`, () => {
 
     const secondDatabase = createTauriSQLiteTestDatabase({ filename: dbPath })
     try {
-      const secondPersistence = createTauriSQLitePersistence<
-        RuntimePersistenceContractTodo,
-        string
-      >({
+      const secondPersistence = createTauriSQLitePersistence({
         database: secondDatabase,
       })
       const syncAbsentOptions = persistedCollectionOptions<

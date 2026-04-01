@@ -199,7 +199,7 @@ export type ReplayableTxDelta<
 }
 
 export type PersistedScannedRow<
-  T extends object,
+  T extends object = Record<string, unknown>,
   TKey extends string | number = string | number,
 > = {
   key: TKey
@@ -212,7 +212,7 @@ export type PersistedRowScanOptions = {
 }
 
 export type PersistedTx<
-  T extends object,
+  T extends object = Record<string, unknown>,
   TKey extends string | number = string | number,
 > = {
   txId: string
@@ -241,18 +241,17 @@ export type PersistedTx<
   collectionMetadataMutations?: Array<PersistedCollectionMetadataMutation>
 }
 
-export interface PersistenceAdapter<
-  T extends object,
-  TKey extends string | number = string | number,
-> {
+export interface PersistenceAdapter {
   loadSubset: (
     collectionId: string,
     options: LoadSubsetOptions,
     ctx?: { requiredIndexSignatures?: ReadonlyArray<string> },
-  ) => Promise<Array<{ key: TKey; value: T; metadata?: unknown }>>
+  ) => Promise<
+    Array<{ key: string | number; value: Record<string, unknown>; metadata?: unknown }>
+  >
   applyCommittedTx: (
     collectionId: string,
-    tx: PersistedTx<T, TKey>,
+    tx: PersistedTx,
   ) => Promise<void>
   loadCollectionMetadata?: (
     collectionId: string,
@@ -260,7 +259,7 @@ export interface PersistenceAdapter<
   scanRows?: (
     collectionId: string,
     options?: PersistedRowScanOptions,
-  ) => Promise<Array<PersistedScannedRow<T, TKey>>>
+  ) => Promise<Array<PersistedScannedRow>>
   ensureIndex: (
     collectionId: string,
     signature: string,
@@ -317,26 +316,20 @@ export interface PersistedCollectionCoordinator {
   ) => Promise<PullSinceResponse>
 }
 
-export interface PersistedCollectionPersistence<
-  T extends object,
-  TKey extends string | number = string | number,
-> {
-  adapter: PersistenceAdapter<T, TKey>
+export interface PersistedCollectionPersistence {
+  adapter: PersistenceAdapter
   coordinator?: PersistedCollectionCoordinator
   resolvePersistenceForCollection?: (options: {
     collectionId: string
     mode: PersistedCollectionMode
     schemaVersion?: number
-  }) => PersistedCollectionPersistence<T, TKey>
+  }) => PersistedCollectionPersistence
   resolvePersistenceForMode?: (
     mode: PersistedCollectionMode,
-  ) => PersistedCollectionPersistence<T, TKey>
+  ) => PersistedCollectionPersistence
 }
 
-type PersistedResolvedPersistence<
-  T extends object,
-  TKey extends string | number,
-> = PersistedCollectionPersistence<T, TKey> & {
+type PersistedResolvedPersistence = PersistedCollectionPersistence & {
   coordinator: PersistedCollectionCoordinator
 }
 
@@ -360,7 +353,7 @@ export type PersistedSyncWrappedOptions<
   TUtils extends UtilsRecord = UtilsRecord,
 > = CollectionConfig<T, TKey, TSchema, TUtils> & {
   sync: SyncConfig<T, TKey>
-  persistence: PersistedCollectionPersistence<T, TKey>
+  persistence: PersistedCollectionPersistence
   schemaVersion?: number
 }
 
@@ -370,7 +363,7 @@ export type PersistedLocalOnlyOptions<
   TSchema extends StandardSchemaV1 = never,
   TUtils extends UtilsRecord = UtilsRecord,
 > = Omit<CollectionConfig<T, TKey, TSchema, TUtils>, `sync`> & {
-  persistence: PersistedCollectionPersistence<T, TKey>
+  persistence: PersistedCollectionPersistence
   schemaVersion?: number
 }
 
@@ -380,7 +373,7 @@ type PersistedSyncOptionsResult<
   TSchema extends StandardSchemaV1,
   TUtils extends UtilsRecord,
 > = CollectionConfig<T, TKey, TSchema, TUtils> & {
-  persistence: PersistedResolvedPersistence<T, TKey>
+  persistence: PersistedResolvedPersistence
 }
 
 type PersistedLocalOnlyOptionsResult<
@@ -390,7 +383,7 @@ type PersistedLocalOnlyOptionsResult<
   TUtils extends UtilsRecord,
 > = CollectionConfig<T, TKey, TSchema, TUtils & PersistedCollectionUtils> & {
   id: string
-  persistence: PersistedResolvedPersistence<T, TKey>
+  persistence: PersistedResolvedPersistence
   utils: TUtils & PersistedCollectionUtils
 }
 
@@ -414,10 +407,7 @@ const REQUIRED_COORDINATOR_METHODS: ReadonlyArray<
 ]
 
 const REQUIRED_ADAPTER_METHODS: ReadonlyArray<
-  keyof Pick<
-    PersistenceAdapter<object, string | number>,
-    `loadSubset` | `applyCommittedTx` | `ensureIndex`
-  >
+  keyof Pick<PersistenceAdapter, `loadSubset` | `applyCommittedTx` | `ensureIndex`>
 > = [`loadSubset`, `applyCommittedTx`, `ensureIndex`]
 
 const TARGETED_INVALIDATION_KEY_LIMIT = 128
@@ -496,10 +486,7 @@ export function validatePersistedCollectionCoordinator(
   }
 }
 
-function validatePersistenceAdapter<
-  T extends object,
-  TKey extends string | number,
->(adapter: PersistenceAdapter<T, TKey>): void {
+function validatePersistenceAdapter(adapter: PersistenceAdapter): void {
   for (const method of REQUIRED_ADAPTER_METHODS) {
     if (typeof adapter[method] !== `function`) {
       throw new InvalidPersistenceAdapterError(method)
@@ -507,9 +494,9 @@ function validatePersistenceAdapter<
   }
 }
 
-function resolvePersistence<T extends object, TKey extends string | number>(
-  persistence: PersistedCollectionPersistence<T, TKey>,
-): PersistedResolvedPersistence<T, TKey> {
+function resolvePersistence(
+  persistence: PersistedCollectionPersistence,
+): PersistedResolvedPersistence {
   validatePersistenceAdapter(persistence.adapter)
 
   const coordinator = persistence.coordinator ?? new SingleProcessCoordinator()
@@ -521,28 +508,22 @@ function resolvePersistence<T extends object, TKey extends string | number>(
   }
 }
 
-function resolvePersistenceForMode<
-  T extends object,
-  TKey extends string | number,
->(
-  persistence: PersistedCollectionPersistence<T, TKey>,
+function resolvePersistenceForMode(
+  persistence: PersistedCollectionPersistence,
   mode: PersistedCollectionMode,
-): PersistedResolvedPersistence<T, TKey> {
+): PersistedResolvedPersistence {
   const modeSpecificPersistence = persistence.resolvePersistenceForMode?.(mode)
   return resolvePersistence(modeSpecificPersistence ?? persistence)
 }
 
-function resolvePersistenceForCollection<
-  T extends object,
-  TKey extends string | number,
->(
-  persistence: PersistedCollectionPersistence<T, TKey>,
+function resolvePersistenceForCollection(
+  persistence: PersistedCollectionPersistence,
   options: {
     collectionId: string
     mode: PersistedCollectionMode
     schemaVersion?: number
   },
-): PersistedResolvedPersistence<T, TKey> {
+): PersistedResolvedPersistence {
   const collectionSpecificPersistence =
     persistence.resolvePersistenceForCollection?.(options)
   if (collectionSpecificPersistence) {
@@ -838,7 +819,7 @@ class PersistedCollectionRuntime<
   constructor(
     private readonly mode: PersistedMode,
     private readonly collectionId: string,
-    private readonly persistence: PersistedResolvedPersistence<T, TKey>,
+    private readonly persistence: PersistedResolvedPersistence,
     private readonly syncMode: `eager` | `on-demand`,
     private readonly dbName: string,
   ) {}
@@ -1195,7 +1176,7 @@ class PersistedCollectionRuntime<
   ): Promise<Array<{ key: TKey; value: T; metadata?: unknown }>> {
     return this.persistence.adapter.loadSubset(this.collectionId, options, {
       requiredIndexSignatures: this.getRequiredIndexSignatures(),
-    })
+    }) as Promise<Array<{ key: TKey; value: T; metadata?: unknown }>>
   }
 
   private async scanPersistedRowsUnsafe(
@@ -1205,7 +1186,10 @@ class PersistedCollectionRuntime<
       return []
     }
 
-    return this.persistence.adapter.scanRows(this.collectionId, options)
+    return this.persistence.adapter.scanRows(
+      this.collectionId,
+      options,
+    ) as Promise<Array<PersistedScannedRow<T, TKey>>>
   }
 
   async scanPersistedRows(
@@ -1421,7 +1405,10 @@ class PersistedCollectionRuntime<
         requiresFullReload: transaction.truncate,
         changedRows: transaction.operations
           .filter((operation) => operation.type === `update`)
-          .map((operation) => ({ key: operation.key, value: operation.value })),
+          .map((operation) => ({
+            key: operation.key,
+            value: operation.value as Record<string, unknown>,
+          })),
         deletedKeys: transaction.operations
           .filter((operation) => operation.type === `delete`)
           .map((operation) => operation.key),
@@ -1434,7 +1421,7 @@ class PersistedCollectionRuntime<
   private createPersistedTxFromOperations(
     transaction: BufferedSyncTransaction<T, TKey>,
     streamPosition: { term: number; seq: number; rowVersion: number },
-  ): PersistedTx<T, TKey> {
+  ): PersistedTx {
     return {
       txId: crypto.randomUUID(),
       term: streamPosition.term,
@@ -1444,22 +1431,26 @@ class PersistedCollectionRuntime<
       mutations: transaction.operations.map((operation) =>
         operation.type === `update`
           ? {
-              type: `update`,
+              type: `update` as const,
               key: operation.key,
-              value: operation.value,
+              value: operation.value as Record<string, unknown>,
             }
           : {
-              type: `delete`,
+              type: `delete` as const,
               key: operation.key,
-              value: operation.value,
+              value: operation.value as Record<string, unknown>,
             },
       ),
       rowMetadataMutations: Array.from(
         transaction.rowMetadataWrites.entries(),
       ).map(([key, metadataWrite]) =>
         metadataWrite.type === `delete`
-          ? { type: `delete`, key }
-          : { type: `set`, key, value: metadataWrite.value },
+          ? { type: `delete` as const, key: key }
+          : {
+              type: `set` as const,
+              key: key,
+              value: metadataWrite.value,
+            },
       ),
       collectionMetadataMutations: Array.from(
         transaction.collectionMetadataWrites.entries(),
@@ -1474,7 +1465,7 @@ class PersistedCollectionRuntime<
   private createPersistedTxFromMutations(
     mutations: Array<PendingMutation<T>>,
     streamPosition: { term: number; seq: number; rowVersion: number },
-  ): PersistedTx<T, TKey> {
+  ): PersistedTx {
     return {
       txId: crypto.randomUUID(),
       term: streamPosition.term,
@@ -1483,24 +1474,24 @@ class PersistedCollectionRuntime<
       mutations: mutations.map((mutation) => {
         if (mutation.type === `delete`) {
           return {
-            type: `delete`,
-            key: mutation.key as TKey,
-            value: mutation.original as T,
+            type: `delete` as const,
+            key: mutation.key as string | number,
+            value: mutation.original as Record<string, unknown>,
           }
         }
 
         if (mutation.type === `insert`) {
           return {
-            type: `insert`,
-            key: mutation.key as TKey,
-            value: mutation.modified,
+            type: `insert` as const,
+            key: mutation.key as string | number,
+            value: mutation.modified as Record<string, unknown>,
           }
         }
 
         return {
-          type: `update`,
-          key: mutation.key as TKey,
-          value: mutation.modified,
+          type: `update` as const,
+          key: mutation.key as string | number,
+          value: mutation.modified as Record<string, unknown>,
         }
       }),
     }
@@ -1618,12 +1609,12 @@ class PersistedCollectionRuntime<
         changedRows: mutations
           .filter((mutation) => mutation.type !== `delete`)
           .map((mutation) => ({
-            key: mutation.key as TKey,
-            value: mutation.modified,
+            key: mutation.key as string | number,
+            value: mutation.modified as Record<string, unknown>,
           })),
         deletedKeys: mutations
           .filter((mutation) => mutation.type === `delete`)
-          .map((mutation) => mutation.key as TKey),
+          .map((mutation) => mutation.key as string | number),
         rowMetadataMutations: tx.rowMetadataMutations,
         collectionMetadataMutations: tx.collectionMetadataMutations,
       }),
@@ -1637,9 +1628,9 @@ class PersistedCollectionRuntime<
     seq: number
     txId: string
     latestRowVersion: number
-    changedRows: Array<{ key: TKey; value: T }>
-    deletedKeys: Array<TKey>
-    rowMetadataMutations?: Array<PersistedRowMetadataMutation<TKey>>
+    changedRows: Array<{ key: string | number; value: Record<string, unknown> }>
+    deletedKeys: Array<string | number>
+    rowMetadataMutations?: Array<PersistedRowMetadataMutation>
     collectionMetadataMutations?: Array<PersistedCollectionMetadataMutation>
     hasMetadataChanges?: boolean
     requiresFullReload?: boolean
@@ -1672,14 +1663,9 @@ class PersistedCollectionRuntime<
       txId: args.txId,
       latestRowVersion: args.latestRowVersion,
       requiresFullReload: false,
-      changedRows: args.changedRows as Array<{
-        key: string | number
-        value: Record<string, unknown>
-      }>,
+      changedRows: args.changedRows,
       deletedKeys: args.deletedKeys,
-      rowMetadataMutations: rowMetadataMutations as Array<
-        PersistedRowMetadataMutation<string | number>
-      >,
+      rowMetadataMutations,
       collectionMetadataMutations,
     }
   }
