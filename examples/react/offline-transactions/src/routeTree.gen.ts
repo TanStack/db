@@ -13,6 +13,8 @@ import { Route as WaSqliteRouteImport } from './routes/wa-sqlite'
 import { Route as LocalstorageRouteImport } from './routes/localstorage'
 import { Route as IndexeddbRouteImport } from './routes/indexeddb'
 import { Route as IndexRouteImport } from './routes/index'
+import { Route as ApiTodosRouteImport } from './routes/api/todos'
+import { Route as ApiTodosTodoIdRouteImport } from './routes/api/todos.$todoId'
 
 const WaSqliteRoute = WaSqliteRouteImport.update({
   id: '/wa-sqlite',
@@ -34,18 +36,32 @@ const IndexRoute = IndexRouteImport.update({
   path: '/',
   getParentRoute: () => rootRouteImport,
 } as any)
+const ApiTodosRoute = ApiTodosRouteImport.update({
+  id: '/api/todos',
+  path: '/api/todos',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const ApiTodosTodoIdRoute = ApiTodosTodoIdRouteImport.update({
+  id: '/$todoId',
+  path: '/$todoId',
+  getParentRoute: () => ApiTodosRoute,
+} as any)
 
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
   '/indexeddb': typeof IndexeddbRoute
   '/localstorage': typeof LocalstorageRoute
   '/wa-sqlite': typeof WaSqliteRoute
+  '/api/todos': typeof ApiTodosRouteWithChildren
+  '/api/todos/$todoId': typeof ApiTodosTodoIdRoute
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
   '/indexeddb': typeof IndexeddbRoute
   '/localstorage': typeof LocalstorageRoute
   '/wa-sqlite': typeof WaSqliteRoute
+  '/api/todos': typeof ApiTodosRouteWithChildren
+  '/api/todos/$todoId': typeof ApiTodosTodoIdRoute
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
@@ -53,13 +69,34 @@ export interface FileRoutesById {
   '/indexeddb': typeof IndexeddbRoute
   '/localstorage': typeof LocalstorageRoute
   '/wa-sqlite': typeof WaSqliteRoute
+  '/api/todos': typeof ApiTodosRouteWithChildren
+  '/api/todos/$todoId': typeof ApiTodosTodoIdRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
-  fullPaths: '/' | '/indexeddb' | '/localstorage' | '/wa-sqlite'
+  fullPaths:
+    | '/'
+    | '/indexeddb'
+    | '/localstorage'
+    | '/wa-sqlite'
+    | '/api/todos'
+    | '/api/todos/$todoId'
   fileRoutesByTo: FileRoutesByTo
-  to: '/' | '/indexeddb' | '/localstorage' | '/wa-sqlite'
-  id: '__root__' | '/' | '/indexeddb' | '/localstorage' | '/wa-sqlite'
+  to:
+    | '/'
+    | '/indexeddb'
+    | '/localstorage'
+    | '/wa-sqlite'
+    | '/api/todos'
+    | '/api/todos/$todoId'
+  id:
+    | '__root__'
+    | '/'
+    | '/indexeddb'
+    | '/localstorage'
+    | '/wa-sqlite'
+    | '/api/todos'
+    | '/api/todos/$todoId'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
@@ -67,6 +104,7 @@ export interface RootRouteChildren {
   IndexeddbRoute: typeof IndexeddbRoute
   LocalstorageRoute: typeof LocalstorageRoute
   WaSqliteRoute: typeof WaSqliteRoute
+  ApiTodosRoute: typeof ApiTodosRouteWithChildren
 }
 
 declare module '@tanstack/react-router' {
@@ -99,14 +137,41 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof IndexRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/api/todos': {
+      id: '/api/todos'
+      path: '/api/todos'
+      fullPath: '/api/todos'
+      preLoaderRoute: typeof ApiTodosRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/api/todos/$todoId': {
+      id: '/api/todos/$todoId'
+      path: '/$todoId'
+      fullPath: '/api/todos/$todoId'
+      preLoaderRoute: typeof ApiTodosTodoIdRouteImport
+      parentRoute: typeof ApiTodosRoute
+    }
   }
 }
+
+interface ApiTodosRouteChildren {
+  ApiTodosTodoIdRoute: typeof ApiTodosTodoIdRoute
+}
+
+const ApiTodosRouteChildren: ApiTodosRouteChildren = {
+  ApiTodosTodoIdRoute: ApiTodosTodoIdRoute,
+}
+
+const ApiTodosRouteWithChildren = ApiTodosRoute._addFileChildren(
+  ApiTodosRouteChildren,
+)
 
 const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
   IndexeddbRoute: IndexeddbRoute,
   LocalstorageRoute: LocalstorageRoute,
   WaSqliteRoute: WaSqliteRoute,
+  ApiTodosRoute: ApiTodosRouteWithChildren,
 }
 export const routeTree = rootRouteImport
   ._addFileChildren(rootRouteChildren)
