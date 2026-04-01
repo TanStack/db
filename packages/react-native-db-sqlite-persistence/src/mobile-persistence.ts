@@ -85,24 +85,16 @@ function resolveAdapterBaseOptions(
   }
 }
 
-export function createMobileSQLitePersistence<
-  T extends object,
-  TKey extends string | number = string | number,
->(
+export function createMobileSQLitePersistence(
   options: MobileSQLitePersistenceOptions,
-): PersistedCollectionPersistence<T, TKey> {
+): PersistedCollectionPersistence {
   const { coordinator, schemaMismatchPolicy } = options
   const driver = createInternalSQLiteDriver(options)
   const adapterBaseOptions = resolveAdapterBaseOptions(options)
   const resolvedCoordinator = coordinator ?? new SingleProcessCoordinator()
   const adapterCache = new Map<
     string,
-    ReturnType<
-      typeof createSQLiteCorePersistenceAdapter<
-        Record<string, unknown>,
-        string | number
-      >
-    >
+    ReturnType<typeof createSQLiteCorePersistenceAdapter>
   >()
 
   const getAdapterForCollection = (
@@ -122,10 +114,7 @@ export function createMobileSQLitePersistence<
       return cachedAdapter
     }
 
-    const adapter = createSQLiteCorePersistenceAdapter<
-      Record<string, unknown>,
-      string | number
-    >({
+    const adapter = createSQLiteCorePersistenceAdapter({
       ...adapterBaseOptions,
       driver,
       schemaMismatchPolicy: resolvedSchemaMismatchPolicy,
@@ -138,11 +127,8 @@ export function createMobileSQLitePersistence<
   const createCollectionPersistence = (
     mode: PersistedCollectionMode,
     schemaVersion: number | undefined,
-  ): PersistedCollectionPersistence<T, TKey> => ({
-    adapter: getAdapterForCollection(
-      mode,
-      schemaVersion,
-    ) as unknown as PersistedCollectionPersistence<T, TKey>[`adapter`],
+  ): PersistedCollectionPersistence => ({
+    adapter: getAdapterForCollection(mode, schemaVersion),
     coordinator: resolvedCoordinator,
   })
 

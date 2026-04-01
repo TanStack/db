@@ -61,10 +61,7 @@ function createInvokeHarness(dbPath: string): InvokeHarness {
   }
 
   const driver = new BetterSqlite3SQLiteDriver({ filename: dbPath })
-  const persistence = createNodeSQLitePersistence<
-    Record<string, unknown>,
-    string | number
-  >({
+  const persistence = createNodeSQLitePersistence({
     database: driver.getDatabase(),
   })
   let handler:
@@ -120,7 +117,7 @@ function createPersistedCollection<T extends PersistableRow>(
   id: string,
   syncMode: `eager` | `on-demand`,
 ): PersistedCollectionHarness<T> {
-  const persistence = createElectronSQLitePersistence<T, string | number>({
+  const persistence = createElectronSQLitePersistence({
     invoke,
     timeoutMs: isElectronFullE2EEnabled() ? 90_000 : undefined,
   })

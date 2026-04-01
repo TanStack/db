@@ -5,10 +5,7 @@ import { runSQLiteCoreAdapterContractSuite } from '../../db-sqlite-persistence-c
 import { OpSQLiteDriver } from '../src/op-sqlite-driver'
 import { SQLiteCorePersistenceAdapter } from '../../db-sqlite-persistence-core/src'
 import { createOpSQLiteTestDatabase } from './helpers/op-sqlite-test-db'
-import type {
-  SQLiteCoreAdapterContractTodo,
-  SQLiteCoreAdapterHarnessFactory,
-} from '../../db-sqlite-persistence-core/tests/contracts/sqlite-core-adapter-contract'
+import type { SQLiteCoreAdapterHarnessFactory } from '../../db-sqlite-persistence-core/tests/contracts/sqlite-core-adapter-contract'
 
 const createHarness: SQLiteCoreAdapterHarnessFactory = (options) => {
   const tempDirectory = mkdtempSync(join(tmpdir(), `db-rn-sqlite-core-`))
@@ -19,10 +16,7 @@ const createHarness: SQLiteCoreAdapterHarnessFactory = (options) => {
   })
   const driver = new OpSQLiteDriver({ database })
 
-  const adapter = new SQLiteCorePersistenceAdapter<
-    SQLiteCoreAdapterContractTodo,
-    string
-  >({
+  const adapter = new SQLiteCorePersistenceAdapter({
     driver,
     ...options,
   })

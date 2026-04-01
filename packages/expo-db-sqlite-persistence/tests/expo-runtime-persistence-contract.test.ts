@@ -20,7 +20,7 @@ import type {
 type RuntimePersistenceFactory = (options: {
   database: ExpoSQLiteDatabaseLike
   coordinator?: PersistedCollectionCoordinator
-}) => PersistedCollectionPersistence<RuntimePersistenceContractTodo, string>
+}) => PersistedCollectionPersistence
 
 type SQLiteDriverWithDatabase = ReturnType<typeof createExpoSQLiteDriver> & {
   __tanstackDbDatabase: ExpoSQLiteDatabaseLike
@@ -118,10 +118,7 @@ describe(`expo runtime persistence helper parity`, () => {
     })
 
     try {
-      const firstPersistence = createExpoSQLitePersistence<
-        RuntimePersistenceContractTodo,
-        string
-      >({
+      const firstPersistence = createExpoSQLitePersistence({
         database: firstDatabase,
       })
       const firstCollectionOptions = persistedCollectionOptions<
@@ -161,10 +158,7 @@ describe(`expo runtime persistence helper parity`, () => {
       filename: dbPath,
     })
     try {
-      const secondPersistence = createExpoSQLitePersistence<
-        RuntimePersistenceContractTodo,
-        string
-      >({
+      const secondPersistence = createExpoSQLitePersistence({
         database: secondDatabase,
       })
 

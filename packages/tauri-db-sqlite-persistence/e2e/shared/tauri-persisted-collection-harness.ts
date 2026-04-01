@@ -25,9 +25,9 @@ type PersistedTransactionHandle = {
   }
 }
 
-type PersistenceFactory<TDatabase> = <T extends PersistableRow>(
+type PersistenceFactory<TDatabase> = (
   database: TDatabase,
-) => PersistedCollectionPersistence<T, string | number>
+) => PersistedCollectionPersistence
 
 type DatabaseLike = {
   close?: () => Promise<unknown> | unknown
@@ -41,7 +41,7 @@ function createPersistedCollection<T extends PersistableRow, TDatabase>(
   syncMode: `eager` | `on-demand`,
   createPersistence: PersistenceFactory<TDatabase>,
 ): PersistedCollectionHarness<T> {
-  const persistence = createPersistence<T>(database)
+  const persistence = createPersistence(database)
   let seedTxSequence = 0
 
   const seedPersisted = async (rows: Array<T>): Promise<void> => {
