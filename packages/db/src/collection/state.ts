@@ -123,6 +123,20 @@ export class CollectionStateManager<
   public recentlySyncedKeys = new Set<TKey>()
   public hasReceivedFirstCommit = false
   public isCommittingSyncTransactions = false
+
+  /**
+   * Collects previousValue from sync update operations within a single
+   * commitPendingTransactions call. When a sync source (e.g. a Yjs-backed
+   * collection using live-reading proxy objects) provides previousValue
+   * on an update message, it takes precedence over the captured
+   * currentVisibleState for the deepEquals comparison.
+   *
+   * This allows live-reading proxy objects to work correctly as collection
+   * values — the proxy always returns the current state, but the sync
+   * source knows the previous state from its own diff system (e.g. Yjs
+   * delta's SetAttrOp.prevValue).
+   */
+  private _syncPreviousValues: Map<TKey, TOutput> | null = null
   public isLocalOnly = false
 
   /**
@@ -967,6 +981,18 @@ export class CollectionStateManager<
           const key = operation.key as TKey
           this.syncedKeys.add(key)
 
+          // Collect sync-provided previousValue for live-proxy-aware diffing
+          if (
+            operation.type === `update` &&
+            `previousValue` in operation &&
+            operation.previousValue !== undefined
+          ) {
+            if (this._syncPreviousValues === null) {
+              this._syncPreviousValues = new Map()
+            }
+            this._syncPreviousValues.set(key, operation.previousValue)
+          }
+
           // Determine origin: 'local' for local-only collections or pending local changes
           const origin: VirtualOrigin =
             this.isLocalOnly ||
@@ -1160,9 +1186,19 @@ export class CollectionStateManager<
         }
       }
 
+      // Retrieve and clear sync-provided previousValues for this commit
+      const syncPreviousValues = this._syncPreviousValues
+      this._syncPreviousValues = null
+
       // Now check what actually changed in the final visible state
       for (const key of changedKeys) {
-        const previousVisibleValue = currentVisibleState.get(key)
+        // If the sync source provided a previousValue (e.g. from a Yjs delta),
+        // use it instead of the captured currentVisibleState. This is necessary
+        // when collection values are live-reading proxy objects — the proxy
+        // returns the current (post-mutation) state at capture time, making
+        // the before/after indistinguishable. The sync source's previousValue
+        // carries the actual pre-mutation state from its own diff system.
+        const previousVisibleValue = syncPreviousValues?.get(key) ?? currentVisibleState.get(key)
         const newVisibleValue = this.get(key) // This returns the new derived state
         const previousVirtualProps = this.getVirtualPropsSnapshotForState(key, {
           rowOrigins: previousRowOrigins,
