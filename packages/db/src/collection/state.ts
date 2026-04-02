@@ -981,7 +981,10 @@ export class CollectionStateManager<
           const key = operation.key as TKey
           this.syncedKeys.add(key)
 
-          // Collect sync-provided previousValue for live-proxy-aware diffing
+          // Collect sync-provided previousValue for live-proxy-aware diffing.
+          // Only store the first previousValue per key within a batch — for
+          // multi-step updates (A→B→C), the pre-batch value (A) is the
+          // correct previousValue, not the intermediate (B).
           if (
             operation.type === `update` &&
             `previousValue` in operation &&
@@ -990,7 +993,9 @@ export class CollectionStateManager<
             if (this._syncPreviousValues === null) {
               this._syncPreviousValues = new Map()
             }
-            this._syncPreviousValues.set(key, operation.previousValue)
+            if (!this._syncPreviousValues.has(key)) {
+              this._syncPreviousValues.set(key, operation.previousValue)
+            }
           }
 
           // Determine origin: 'local' for local-only collections or pending local changes
