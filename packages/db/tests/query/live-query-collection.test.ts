@@ -2779,21 +2779,9 @@ describe(`createLiveQueryCollection`, () => {
       await liveQuery.preload()
       await flushPromises()
 
-      // No loadSubset call should contain an inArray expression
+      // No loadSubset call should have been made for the lazy join
       // since all keys were null and filtered out
-      const findInArrayExpr = (expr: LoadSubsetOptions[`where`]): boolean => {
-        if (!(expr instanceof Func)) return false
-        if (expr.name === `in`) return true
-        if (expr.name === `and` || expr.name === `or`) {
-          return expr.args.some((arg) => findInArrayExpr(arg))
-        }
-        return false
-      }
-
-      const hasInArrayCall = capturedOptions.some((opt) =>
-        findInArrayExpr(opt.where),
-      )
-      expect(hasInArrayCall).toBe(false)
+      expect(capturedOptions).toHaveLength(0)
 
       // All tasks should still appear in results with null project
       expect(liveQuery.toArray).toHaveLength(3)
