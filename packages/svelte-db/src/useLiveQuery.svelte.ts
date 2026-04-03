@@ -59,9 +59,9 @@ export interface UseLiveQueryReturnWithCollection<
   isCleanedUp: boolean
 }
 
-type MaybeGetter<T> = T | (() => T)
+export type MaybeGetter<T> = T | (() => T)
 
-function toValue<T>(value: MaybeGetter<T>): T {
+export function toValue<T>(value: MaybeGetter<T>): T {
   if (typeof value === `function`) {
     return (value as () => T)()
   }
@@ -465,6 +465,7 @@ export function useLiveQuery(
         currentUnsubscribe()
         currentUnsubscribe = null
       }
+      status = `cleaned-up` as const
     }
   })
 
