@@ -40,11 +40,11 @@ function createRuntimeDatabaseHarness(): RuntimePersistenceDatabaseHarness {
 runRuntimePersistenceContractSuite(`node runtime persistence helpers`, {
   createDatabaseHarness: createRuntimeDatabaseHarness,
   createAdapter: (driver) =>
-    createNodeSQLitePersistence<RuntimePersistenceContractTodo, string>({
+    createNodeSQLitePersistence({
       database: (driver as BetterSqlite3SQLiteDriver).getDatabase(),
     }).adapter,
   createPersistence: (driver, coordinator) =>
-    createNodeSQLitePersistence<RuntimePersistenceContractTodo, string>({
+    createNodeSQLitePersistence({
       database: (driver as BetterSqlite3SQLiteDriver).getDatabase(),
       coordinator,
     }),
@@ -88,10 +88,7 @@ describe(`node persistence helpers`, () => {
     const database = new BetterSqlite3(dbPath)
 
     try {
-      const persistence = createNodeSQLitePersistence<
-        RuntimePersistenceContractTodo,
-        string
-      >({
+      const persistence = createNodeSQLitePersistence({
         database,
       })
 
@@ -137,10 +134,7 @@ describe(`node persistence helpers`, () => {
     const firstDatabase = new BetterSqlite3(dbPath)
 
     try {
-      const firstPersistence = createNodeSQLitePersistence<
-        RuntimePersistenceContractTodo,
-        string
-      >({
+      const firstPersistence = createNodeSQLitePersistence({
         database: firstDatabase,
       })
       const firstCollectionOptions = persistedCollectionOptions<
@@ -179,10 +173,7 @@ describe(`node persistence helpers`, () => {
 
     const secondDatabase = new BetterSqlite3(dbPath)
     try {
-      const secondPersistence = createNodeSQLitePersistence<
-        RuntimePersistenceContractTodo,
-        string
-      >({
+      const secondPersistence = createNodeSQLitePersistence({
         database: secondDatabase,
       })
       const syncAbsentOptions = persistedCollectionOptions<

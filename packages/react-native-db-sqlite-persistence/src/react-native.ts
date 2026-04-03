@@ -10,11 +10,8 @@ export type ReactNativeSQLiteSchemaMismatchPolicy =
   MobileSQLiteSchemaMismatchPolicy
 export type { OpSQLiteDatabaseLike } from './mobile-persistence'
 
-export function createReactNativeSQLitePersistence<
-  T extends object,
-  TKey extends string | number = string | number,
->(
+export function createReactNativeSQLitePersistence(
   options: ReactNativeSQLitePersistenceOptions,
-): PersistedCollectionPersistence<T, TKey> {
-  return createMobileSQLitePersistence<T, TKey>(options)
+): PersistedCollectionPersistence {
+  return createMobileSQLitePersistence(options)
 }

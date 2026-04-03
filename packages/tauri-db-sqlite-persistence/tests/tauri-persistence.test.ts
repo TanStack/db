@@ -41,7 +41,7 @@ it(`persists data across app restart (close and reopen)`, async () => {
   const collectionId = `todos-restart`
 
   const firstDatabase = createTauriSQLiteTestDatabase({ filename: dbPath })
-  const firstPersistence = createTauriPersistence<Todo, string>({
+  const firstPersistence = createTauriPersistence({
     database: firstDatabase,
   })
   const firstAdapter = firstPersistence.adapter
@@ -69,7 +69,7 @@ it(`persists data across app restart (close and reopen)`, async () => {
   activeCleanupFns.push(async () => {
     await Promise.resolve(secondDatabase.close())
   })
-  const secondPersistence = createTauriPersistence<Todo, string>({
+  const secondPersistence = createTauriPersistence({
     database: secondDatabase,
   })
   const secondAdapter = secondPersistence.adapter
@@ -95,8 +95,8 @@ it(`shares the same runtime behavior through index and tauri entrypoints`, async
     await Promise.resolve(database.close())
   })
 
-  const indexPersistence = createIndexPersistence<Todo, string>({ database })
-  const tauriPersistence = createTauriPersistence<Todo, string>({ database })
+  const indexPersistence = createIndexPersistence({ database })
+  const tauriPersistence = createTauriPersistence({ database })
 
   await indexPersistence.adapter.applyCommittedTx(collectionId, {
     txId: `tx-entrypoint-1`,
@@ -128,7 +128,7 @@ it(`resumes persisted sync after cleanup and restart`, async () => {
     await Promise.resolve(database.close())
   })
 
-  const persistence = createTauriPersistence<Todo, string>({
+  const persistence = createTauriPersistence({
     database,
   })
   const collection = createCollection(

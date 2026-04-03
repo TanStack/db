@@ -149,35 +149,36 @@ function createRendererRequestExecutor(options: {
   }
 }
 
-type ElectronRendererResolvedAdapter<
-  T extends object,
-  TKey extends string | number = string | number,
-> = PersistedCollectionPersistence<T, TKey>[`adapter`] & {
-  loadCollectionMetadata: (
-    collectionId: string,
-  ) => Promise<Array<{ key: string; value: unknown }>>
-  scanRows: (
-    collectionId: string,
-    options?: { metadataOnly?: boolean },
-  ) => Promise<Array<{ key: TKey; value: T; metadata?: unknown }>>
-  pullSince: (
-    collectionId: string,
-    fromRowVersion: number,
-  ) => Promise<SQLitePullSinceResult<TKey>>
-  getStreamPosition: (collectionId: string) => Promise<{
-    latestTerm: number
-    latestSeq: number
-    latestRowVersion: number
-  }>
-}
+type ElectronRendererResolvedAdapter =
+  PersistedCollectionPersistence[`adapter`] & {
+    loadCollectionMetadata: (
+      collectionId: string,
+    ) => Promise<Array<{ key: string; value: unknown }>>
+    scanRows: (
+      collectionId: string,
+      options?: { metadataOnly?: boolean },
+    ) => Promise<
+      Array<{
+        key: string | number
+        value: Record<string, unknown>
+        metadata?: unknown
+      }>
+    >
+    pullSince: (
+      collectionId: string,
+      fromRowVersion: number,
+    ) => Promise<SQLitePullSinceResult<string | number>>
+    getStreamPosition: (collectionId: string) => Promise<{
+      latestTerm: number
+      latestSeq: number
+      latestRowVersion: number
+    }>
+  }
 
-function createResolvedRendererAdapter<
-  T extends object,
-  TKey extends string | number = string | number,
->(
+function createResolvedRendererAdapter(
   executeRequest: RendererRequestExecutor,
   resolution?: ElectronPersistenceResolution,
-): ElectronRendererResolvedAdapter<T, TKey> {
+): ElectronRendererResolvedAdapter {
   return {
     loadSubset: async (
       collectionId: string,
@@ -194,11 +195,14 @@ function createResolvedRendererAdapter<
         resolution,
       )
 
-      return result as Array<{ key: TKey; value: T }>
+      return result as Array<{
+        key: string | number
+        value: Record<string, unknown>
+      }>
     },
     applyCommittedTx: async (
       collectionId: string,
-      tx: PersistedTx<T, TKey>,
+      tx: PersistedTx<Record<string, unknown>, string | number>,
     ): Promise<void> => {
       await executeRequest(
         `applyCommittedTx`,
@@ -222,14 +226,24 @@ function createResolvedRendererAdapter<
     scanRows: async (
       collectionId: string,
       options?: { metadataOnly?: boolean },
-    ): Promise<Array<{ key: TKey; value: T; metadata?: unknown }>> => {
+    ): Promise<
+      Array<{
+        key: string | number
+        value: Record<string, unknown>
+        metadata?: unknown
+      }>
+    > => {
       const result = await executeRequest(
         `scanRows`,
         collectionId,
         { options },
         resolution,
       )
-      return result as Array<{ key: TKey; value: T; metadata?: unknown }>
+      return result as Array<{
+        key: string | number
+        value: Record<string, unknown>
+        metadata?: unknown
+      }>
     },
     ensureIndex: async (
       collectionId: string,
@@ -262,7 +276,7 @@ function createResolvedRendererAdapter<
     pullSince: async (
       collectionId: string,
       fromRowVersion: number,
-    ): Promise<SQLitePullSinceResult<TKey>> => {
+    ): Promise<SQLitePullSinceResult<string | number>> => {
       const result = await executeRequest(
         `pullSince`,
         collectionId,
@@ -271,7 +285,7 @@ function createResolvedRendererAdapter<
         },
         resolution,
       )
-      return result as SQLitePullSinceResult<TKey>
+      return result as SQLitePullSinceResult<string | number>
     },
     getStreamPosition: async (
       collectionId: string,
@@ -316,12 +330,9 @@ function resolveInvoke(
   )
 }
 
-export function createElectronSQLitePersistence<
-  T extends object,
-  TKey extends string | number = string | number,
->(
+export function createElectronSQLitePersistence(
   options: ElectronSQLitePersistenceOptions,
-): PersistedCollectionPersistence<T, TKey> {
+): PersistedCollectionPersistence {
   const invoke = resolveInvoke(options)
   const coordinator = options.coordinator ?? new SingleProcessCoordinator()
   const executeRequest = createRendererRequestExecutor({
@@ -329,10 +340,7 @@ export function createElectronSQLitePersistence<
     channel: options.channel,
     timeoutMs: options.timeoutMs,
   })
-  const adapterCache = new Map<
-    string,
-    ElectronRendererResolvedAdapter<Record<string, unknown>, string | number>
-  >()
+  const adapterCache = new Map<string, ElectronRendererResolvedAdapter>()
 
   const getAdapterForCollection = (
     mode: PersistedCollectionMode,
@@ -346,10 +354,7 @@ export function createElectronSQLitePersistence<
       return cachedAdapter
     }
 
-    const adapter = createResolvedRendererAdapter<
-      Record<string, unknown>,
-      string | number
-    >(executeRequest, {
+    const adapter = createResolvedRendererAdapter(executeRequest, {
       mode,
       schemaVersion,
     })
@@ -367,11 +372,8 @@ export function createElectronSQLitePersistence<
   const createCollectionPersistence = (
     mode: PersistedCollectionMode,
     schemaVersion: number | undefined,
-  ): PersistedCollectionPersistence<T, TKey> => ({
-    adapter: getAdapterForCollection(
-      mode,
-      schemaVersion,
-    ) as unknown as PersistedCollectionPersistence<T, TKey>[`adapter`],
+  ): PersistedCollectionPersistence => ({
+    adapter: getAdapterForCollection(mode, schemaVersion),
     coordinator,
   })
 

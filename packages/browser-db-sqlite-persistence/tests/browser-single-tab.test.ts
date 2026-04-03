@@ -93,11 +93,7 @@ it(`works without browser election primitives`, async () => {
     }
   }
 
-  const persistence = createBrowserWASQLitePersistence<{
-    id: string
-    title: string
-    score: number
-  }>({
+  const persistence = createBrowserWASQLitePersistence({
     database,
   })
 

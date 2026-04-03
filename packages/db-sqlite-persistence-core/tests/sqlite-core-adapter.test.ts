@@ -20,22 +20,6 @@ type Todo = {
   score: number
 }
 
-export type SQLiteCoreAdapterContractTodo = Todo
-
-type MixedKeyTodo = {
-  id: string | number
-  title: string
-  createdAt: string
-  score: number
-}
-
-type FlexibleTodoRow = Record<string, unknown> & {
-  id: string
-  title: string
-  createdAt: string
-  score: number
-}
-
 const execFileAsync = promisify(execFile)
 
 function toSqlLiteral(value: unknown): string {
@@ -185,18 +169,18 @@ class SqliteCliDriver implements SQLiteDriver {
 }
 
 type AdapterHarness = {
-  adapter: SQLiteCorePersistenceAdapter<Todo, string>
+  adapter: SQLiteCorePersistenceAdapter
   driver: SqliteCliDriver
   dbPath: string
   cleanup: () => void | Promise<void>
 }
 
 export type SQLiteCoreAdapterContractHarness = {
-  adapter: PersistenceAdapter<Todo, string> & {
+  adapter: PersistenceAdapter & {
     pullSince: (
       collectionId: string,
       fromRowVersion: number,
-    ) => Promise<SQLitePullSinceResult<string>>
+    ) => Promise<SQLitePullSinceResult<string | number>>
   }
   driver: SQLiteDriver
   cleanup: () => void | Promise<void>
@@ -204,14 +188,14 @@ export type SQLiteCoreAdapterContractHarness = {
 
 function createHarness(
   options?: Omit<
-    ConstructorParameters<typeof SQLiteCorePersistenceAdapter<Todo, string>>[0],
+    ConstructorParameters<typeof SQLiteCorePersistenceAdapter>[0],
     `driver`
   >,
 ): AdapterHarness {
   const tempDirectory = mkdtempSync(join(tmpdir(), `db-sqlite-core-`))
   const dbPath = join(tempDirectory, `state.sqlite`)
   const driver = new SqliteCliDriver(dbPath)
-  const adapter = new SQLiteCorePersistenceAdapter<Todo, string>({
+  const adapter = new SQLiteCorePersistenceAdapter({
     driver,
     ...options,
   })
@@ -237,7 +221,7 @@ afterEach(async () => {
 
 function registerHarness(
   options?: Omit<
-    ConstructorParameters<typeof SQLiteCorePersistenceAdapter<Todo, string>>[0],
+    ConstructorParameters<typeof SQLiteCorePersistenceAdapter>[0],
     `driver`
   >,
 ): AdapterHarness {
@@ -248,7 +232,7 @@ function registerHarness(
 
 export type SQLiteCoreAdapterHarnessFactory = (
   options?: Omit<
-    ConstructorParameters<typeof SQLiteCorePersistenceAdapter<Todo, string>>[0],
+    ConstructorParameters<typeof SQLiteCorePersistenceAdapter>[0],
     `driver`
   >,
 ) => SQLiteCoreAdapterContractHarness
@@ -787,10 +771,7 @@ export function runSQLiteCoreAdapterContractSuite(
 
     it(`persists bigint/date values and evaluates typed predicates`, async () => {
       const { adapter } = registerContractHarness()
-      const typedAdapter = adapter as unknown as PersistenceAdapter<
-        Record<string, unknown>,
-        string
-      >
+      const typedAdapter = adapter as unknown as PersistenceAdapter
       const collectionId = `typed-values`
       const firstBigInt = BigInt(`9007199254740992`)
       const secondBigInt = BigInt(`9007199254740997`)
@@ -1008,7 +989,7 @@ export function runSQLiteCoreAdapterContractSuite(
         ],
       })
 
-      const strictAdapter = new SQLiteCorePersistenceAdapter<Todo, string>({
+      const strictAdapter = new SQLiteCorePersistenceAdapter({
         driver: baseHarness.driver,
         schemaVersion: 2,
         schemaMismatchPolicy: `sync-absent-error`,
@@ -1017,7 +998,7 @@ export function runSQLiteCoreAdapterContractSuite(
         /Schema version mismatch/,
       )
 
-      const resetAdapter = new SQLiteCorePersistenceAdapter<Todo, string>({
+      const resetAdapter = new SQLiteCorePersistenceAdapter({
         driver: baseHarness.driver,
         schemaVersion: 2,
         schemaMismatchPolicy: `sync-present-reset`,
@@ -1224,10 +1205,7 @@ export function runSQLiteCoreAdapterContractSuite(
 
     it(`keeps numeric and string keys distinct in storage`, async () => {
       const { driver } = registerContractHarness()
-      const adapter = new SQLiteCorePersistenceAdapter<
-        MixedKeyTodo,
-        string | number
-      >({
+      const adapter = new SQLiteCorePersistenceAdapter({
         driver,
       })
       const collectionId = `mixed-keys`
@@ -1499,11 +1477,9 @@ export function runSQLiteCoreAdapterContractSuite(
 
     it(`falls back to in-memory filtering when SQL json path pushdown is unsupported`, async () => {
       const { driver } = registerContractHarness()
-      const adapter = new SQLiteCorePersistenceAdapter<FlexibleTodoRow, string>(
-        {
-          driver,
-        },
-      )
+      const adapter = new SQLiteCorePersistenceAdapter({
+        driver,
+      })
       const collectionId = `fallback-where`
 
       await adapter.applyCommittedTx(collectionId, {
@@ -1549,11 +1525,9 @@ export function runSQLiteCoreAdapterContractSuite(
 
     it(`supports alias-qualified refs during in-memory fallback filtering`, async () => {
       const { driver } = registerContractHarness()
-      const adapter = new SQLiteCorePersistenceAdapter<FlexibleTodoRow, string>(
-        {
-          driver,
-        },
-      )
+      const adapter = new SQLiteCorePersistenceAdapter({
+        driver,
+      })
       const collectionId = `fallback-alias-qualified-ref`
 
       await adapter.applyCommittedTx(collectionId, {

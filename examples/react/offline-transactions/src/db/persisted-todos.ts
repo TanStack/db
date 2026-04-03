@@ -29,7 +29,7 @@ export async function createPersistedTodoCollection(): Promise<PersistedTodosHan
     dbName: `tanstack-db-demo`,
   })
 
-  const persistence = createBrowserWASQLitePersistence<PersistedTodo, string>({
+  const persistence = createBrowserWASQLitePersistence({
     database,
     coordinator,
   })

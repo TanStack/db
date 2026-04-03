@@ -35,7 +35,7 @@ it(`persists data across app restart (close and reopen)`, async () => {
   const collectionId = `todos-restart`
 
   const firstDatabase = createExpoSQLiteTestDatabase({ filename: dbPath })
-  const firstPersistence = createExpoSQLitePersistence<Todo, string>({
+  const firstPersistence = createExpoSQLitePersistence({
     database: firstDatabase,
   })
   const firstAdapter = firstPersistence.adapter
@@ -61,7 +61,7 @@ it(`persists data across app restart (close and reopen)`, async () => {
 
   const secondDatabase = createExpoSQLiteTestDatabase({ filename: dbPath })
   activeCleanupFns.push(() => secondDatabase.closeAsync())
-  const secondPersistence = createExpoSQLitePersistence<Todo, string>({
+  const secondPersistence = createExpoSQLitePersistence({
     database: secondDatabase,
   })
   const secondAdapter = secondPersistence.adapter
@@ -85,7 +85,7 @@ it(`keeps all committed rows under rapid mutation bursts`, async () => {
   const database = createExpoSQLiteTestDatabase({ filename: dbPath })
   activeCleanupFns.push(() => database.closeAsync())
 
-  const persistence = createExpoSQLitePersistence<Todo, string>({
+  const persistence = createExpoSQLitePersistence({
     database,
   })
   const adapter = persistence.adapter
@@ -122,7 +122,7 @@ it(`resumes persisted sync after simulated background/foreground transitions`, a
   const database = createExpoSQLiteTestDatabase({ filename: dbPath })
   activeCleanupFns.push(() => database.closeAsync())
 
-  const persistence = createExpoSQLitePersistence<Todo, string>({
+  const persistence = createExpoSQLitePersistence({
     database,
   })
   const collection = createCollection(

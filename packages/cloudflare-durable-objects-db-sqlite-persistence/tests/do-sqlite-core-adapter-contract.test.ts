@@ -5,10 +5,7 @@ import { runSQLiteCoreAdapterContractSuite } from '../../db-sqlite-persistence-c
 import { CloudflareDOSQLiteDriver } from '../src/do-driver'
 import { SQLiteCorePersistenceAdapter } from '../../db-sqlite-persistence-core/src'
 import { createBetterSqliteDoStorageHarness } from './helpers/better-sqlite-do-storage'
-import type {
-  SQLiteCoreAdapterContractTodo,
-  SQLiteCoreAdapterHarnessFactory,
-} from '../../db-sqlite-persistence-core/tests/contracts/sqlite-core-adapter-contract'
+import type { SQLiteCoreAdapterHarnessFactory } from '../../db-sqlite-persistence-core/tests/contracts/sqlite-core-adapter-contract'
 
 const createHarness: SQLiteCoreAdapterHarnessFactory = (options) => {
   const tempDirectory = mkdtempSync(join(tmpdir(), `db-cf-do-sql-core-`))
@@ -19,10 +16,7 @@ const createHarness: SQLiteCoreAdapterHarnessFactory = (options) => {
   const driver = new CloudflareDOSQLiteDriver({
     storage: storageHarness.storage,
   })
-  const adapter = new SQLiteCorePersistenceAdapter<
-    SQLiteCoreAdapterContractTodo,
-    string
-  >({
+  const adapter = new SQLiteCorePersistenceAdapter({
     driver,
     ...options,
   })

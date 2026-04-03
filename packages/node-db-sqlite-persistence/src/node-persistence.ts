@@ -92,24 +92,16 @@ function resolveAdapterBaseOptions(
  * collections on the same database. Collection-specific schema versions are
  * resolved by `persistedCollectionOptions` via `resolvePersistenceForCollection`.
  */
-export function createNodeSQLitePersistence<
-  T extends object,
-  TKey extends string | number = string | number,
->(
+export function createNodeSQLitePersistence(
   options: NodeSQLitePersistenceOptions,
-): PersistedCollectionPersistence<T, TKey> {
+): PersistedCollectionPersistence {
   const { coordinator, schemaMismatchPolicy } = options
   const driver = createInternalSQLiteDriver(options)
   const adapterBaseOptions = resolveAdapterBaseOptions(options)
   const resolvedCoordinator = coordinator ?? new SingleProcessCoordinator()
   const adapterCache = new Map<
     string,
-    ReturnType<
-      typeof createSQLiteCorePersistenceAdapter<
-        Record<string, unknown>,
-        string | number
-      >
-    >
+    ReturnType<typeof createSQLiteCorePersistenceAdapter>
   >()
 
   const getAdapterForCollection = (
@@ -129,10 +121,7 @@ export function createNodeSQLitePersistence<
       return cachedAdapter
     }
 
-    const adapter = createSQLiteCorePersistenceAdapter<
-      Record<string, unknown>,
-      string | number
-    >({
+    const adapter = createSQLiteCorePersistenceAdapter({
       ...adapterBaseOptions,
       driver,
       schemaMismatchPolicy: resolvedSchemaMismatchPolicy,
@@ -145,11 +134,8 @@ export function createNodeSQLitePersistence<
   const createCollectionPersistence = (
     mode: PersistedCollectionMode,
     schemaVersion: number | undefined,
-  ): PersistedCollectionPersistence<T, TKey> => ({
-    adapter: getAdapterForCollection(
-      mode,
-      schemaVersion,
-    ) as unknown as PersistedCollectionPersistence<T, TKey>[`adapter`],
+  ): PersistedCollectionPersistence => ({
+    adapter: getAdapterForCollection(mode, schemaVersion),
     coordinator: resolvedCoordinator,
   })
 

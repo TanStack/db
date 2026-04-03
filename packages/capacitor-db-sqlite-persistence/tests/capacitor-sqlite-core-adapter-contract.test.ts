@@ -5,10 +5,7 @@ import { runSQLiteCoreAdapterContractSuite } from '../../db-sqlite-persistence-c
 import { CapacitorSQLiteDriver } from '../src/capacitor-sqlite-driver'
 import { SQLiteCorePersistenceAdapter } from '../../db-sqlite-persistence-core/src'
 import { createCapacitorSQLiteTestDatabase } from './helpers/capacitor-sqlite-test-db'
-import type {
-  SQLiteCoreAdapterContractTodo,
-  SQLiteCoreAdapterHarnessFactory,
-} from '../../db-sqlite-persistence-core/tests/contracts/sqlite-core-adapter-contract'
+import type { SQLiteCoreAdapterHarnessFactory } from '../../db-sqlite-persistence-core/tests/contracts/sqlite-core-adapter-contract'
 
 const createHarness: SQLiteCoreAdapterHarnessFactory = (options) => {
   const tempDirectory = mkdtempSync(join(tmpdir(), `db-capacitor-core-`))
@@ -18,10 +15,7 @@ const createHarness: SQLiteCoreAdapterHarnessFactory = (options) => {
   })
   const driver = new CapacitorSQLiteDriver({ database })
 
-  const adapter = new SQLiteCorePersistenceAdapter<
-    SQLiteCoreAdapterContractTodo,
-    string
-  >({
+  const adapter = new SQLiteCorePersistenceAdapter({
     driver,
     ...options,
   })

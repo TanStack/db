@@ -32,7 +32,7 @@ function createPersistedCollection<T extends PersistableRow>(
   id: string,
   syncMode: `eager` | `on-demand`,
 ): PersistedCollectionHarness<T> {
-  const persistence = createNodeSQLitePersistence<T, string | number>({
+  const persistence = createNodeSQLitePersistence({
     database,
   })
   let seedTxSequence = 0
