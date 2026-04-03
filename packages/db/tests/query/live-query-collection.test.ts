@@ -2608,14 +2608,35 @@ describe(`createLiveQueryCollection`, () => {
           sync: ({ begin, write, commit, markReady }) => {
             begin()
             // Multiple tasks pointing to the same project (duplicates)
-            write({ type: `insert`, value: { id: 1, name: `Task 1`, project_id: 10 } })
-            write({ type: `insert`, value: { id: 2, name: `Task 2`, project_id: 10 } })
-            write({ type: `insert`, value: { id: 3, name: `Task 3`, project_id: 10 } })
-            write({ type: `insert`, value: { id: 4, name: `Task 4`, project_id: 20 } })
-            write({ type: `insert`, value: { id: 5, name: `Task 5`, project_id: 20 } })
+            write({
+              type: `insert`,
+              value: { id: 1, name: `Task 1`, project_id: 10 },
+            })
+            write({
+              type: `insert`,
+              value: { id: 2, name: `Task 2`, project_id: 10 },
+            })
+            write({
+              type: `insert`,
+              value: { id: 3, name: `Task 3`, project_id: 10 },
+            })
+            write({
+              type: `insert`,
+              value: { id: 4, name: `Task 4`, project_id: 20 },
+            })
+            write({
+              type: `insert`,
+              value: { id: 5, name: `Task 5`, project_id: 20 },
+            })
             // Tasks with null foreign key
-            write({ type: `insert`, value: { id: 6, name: `Task 6`, project_id: null } })
-            write({ type: `insert`, value: { id: 7, name: `Task 7`, project_id: null } })
+            write({
+              type: `insert`,
+              value: { id: 6, name: `Task 6`, project_id: null },
+            })
+            write({
+              type: `insert`,
+              value: { id: 7, name: `Task 7`, project_id: null },
+            })
             commit()
             markReady()
           },
@@ -2707,9 +2728,18 @@ describe(`createLiveQueryCollection`, () => {
         sync: {
           sync: ({ begin, write, commit, markReady }) => {
             begin()
-            write({ type: `insert`, value: { id: 1, name: `Task 1`, project_id: null } })
-            write({ type: `insert`, value: { id: 2, name: `Task 2`, project_id: null } })
-            write({ type: `insert`, value: { id: 3, name: `Task 3`, project_id: null } })
+            write({
+              type: `insert`,
+              value: { id: 1, name: `Task 1`, project_id: null },
+            })
+            write({
+              type: `insert`,
+              value: { id: 2, name: `Task 2`, project_id: null },
+            })
+            write({
+              type: `insert`,
+              value: { id: 3, name: `Task 3`, project_id: null },
+            })
             commit()
             markReady()
           },
@@ -2751,9 +2781,7 @@ describe(`createLiveQueryCollection`, () => {
 
       // No loadSubset call should contain an inArray expression
       // since all keys were null and filtered out
-      const findInArrayExpr = (
-        expr: LoadSubsetOptions[`where`],
-      ): boolean => {
+      const findInArrayExpr = (expr: LoadSubsetOptions[`where`]): boolean => {
         if (!(expr instanceof Func)) return false
         if (expr.name === `in`) return true
         if (expr.name === `and` || expr.name === `or`) {
@@ -2762,7 +2790,9 @@ describe(`createLiveQueryCollection`, () => {
         return false
       }
 
-      const hasInArrayCall = capturedOptions.some((opt) => findInArrayExpr(opt.where))
+      const hasInArrayCall = capturedOptions.some((opt) =>
+        findInArrayExpr(opt.where),
+      )
       expect(hasInArrayCall).toBe(false)
 
       // All tasks should still appear in results with null project
