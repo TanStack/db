@@ -9,11 +9,11 @@
     "start": "node .output/server/index.mjs"
   },
   "dependencies": {
-    "@tanstack/browser-db-sqlite-persistence": "^0.1.5",
-    "@tanstack/db": "^0.6.1",
-    "@tanstack/offline-transactions": "^1.0.26",
-    "@tanstack/query-db-collection": "^1.0.32",
-    "@tanstack/react-db": "^0.1.79",
+    "@tanstack/browser-db-sqlite-persistence": "^0.1.6",
+    "@tanstack/db": "^0.6.2",
+    "@tanstack/offline-transactions": "^1.0.27",
+    "@tanstack/query-db-collection": "^1.0.33",
+    "@tanstack/react-db": "^0.1.80",
     "@tanstack/react-query": "^5.90.20",
     "@tanstack/react-router": "^1.159.5",
     "@tanstack/react-router-devtools": "^1.159.5",

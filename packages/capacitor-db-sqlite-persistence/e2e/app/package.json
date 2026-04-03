@@ -1,7 +1,7 @@
 {
   "name": "@tanstack/capacitor-db-sqlite-persistence-e2e-app",
   "private": true,
-  "version": "0.0.5",
+  "version": "0.0.6",
   "type": "module",
   "scripts": {
     "build": "vite build",

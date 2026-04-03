@@ -1,5 +1,18 @@
 # @tanstack/electric-db-collection
 
+## 0.3.0
+
+### Minor Changes
+
+- feat: add DNF/active_conditions support for arbitrary boolean WHERE clauses ([#1270](https://github.com/TanStack/db/pull/1270))
+
+  Support the new Electric server wire protocol (electric-sql/electric#3791). Tags now use `/` delimiter with empty segments for non-participating positions. Shapes with subquery dependencies send `active_conditions` headers and use DNF evaluation for row visibility. Simple shapes without subqueries retain existing empty-tag-set deletion behavior.
+
+### Patch Changes
+
+- Updated dependencies [[`3fe689a`](https://github.com/TanStack/db/commit/3fe689a4444d53a075a0dbe6e2649f8852137fc8), [`c314c36`](https://github.com/TanStack/db/commit/c314c36b8bd02f8be86865c13f31f817ce21dc66)]:
+  - @tanstack/db@0.6.2
+
 ## 0.2.43
 
 ### Patch Changes

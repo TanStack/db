@@ -1,5 +1,14 @@
 # @tanstack/browser-db-sqlite-persistence
 
+## 0.1.6
+
+### Patch Changes
+
+- Fix absolute worker path in bundled output by setting `base: './'` in vite config, so the OPFS worker URL resolves relative to the module via `import.meta.url` instead of being hardcoded to `/assets/...` ([#1436](https://github.com/TanStack/db/pull/1436))
+
+- Updated dependencies []:
+  - @tanstack/db-sqlite-persistence-core@0.1.6
+
 ## 0.1.5
 
 ### Patch Changes
