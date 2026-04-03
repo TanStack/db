@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import {
   and,
   concat,
@@ -8,6 +8,7 @@ import {
   toArray,
 } from '../../src/query/index.js'
 import { createCollection } from '../../src/collection/index.js'
+import { CleanupQueue } from '../../src/collection/cleanup-queue.js'
 import { mockSyncCollectionOptions, stripVirtualProps } from '../utils.js'
 
 type Project = {
@@ -4010,6 +4011,54 @@ describe(`includes subqueries`, () => {
         const issue20 = beta.issues.get(20)
         expect(plainRows(issue20.commentCount)).toEqual([{ total: 1 }])
       })
+    })
+  })
+
+  describe(`child collection garbage collection`, () => {
+    beforeEach(() => {
+      vi.useFakeTimers()
+      CleanupQueue.resetInstance()
+    })
+
+    afterEach(() => {
+      vi.useRealTimers()
+      CleanupQueue.resetInstance()
+    })
+
+    it(`child collections should not be garbage collected when external subscribers unmount`, async () => {
+      const collection = buildIncludesQuery()
+      await collection.preload()
+
+      // Verify child data exists
+      const alpha = collection.get(1) as any
+      expect(childItems(alpha.issues)).toEqual([
+        { id: 10, title: `Bug in Alpha` },
+        { id: 11, title: `Feature for Alpha` },
+      ])
+
+      const beta = collection.get(2) as any
+      expect(childItems(beta.issues)).toEqual([
+        { id: 20, title: `Bug in Beta` },
+      ])
+
+      // Simulate what useLiveQuery does in React: subscribe to child collection,
+      // then unsubscribe when the component unmounts (e.g., virtual table scroll)
+      const childSub = alpha.issues.subscribeChanges(() => {})
+      childSub.unsubscribe()
+
+      // Advance well past the default gcTime (5 minutes = 300,000ms)
+      await vi.advanceTimersByTimeAsync(600_000)
+
+      // Child collection data should still be intact — the includes system
+      // owns these collections and manages their lifecycle via flushIncludesState.
+      // External GC must not destroy them.
+      expect(childItems(alpha.issues)).toEqual([
+        { id: 10, title: `Bug in Alpha` },
+        { id: 11, title: `Feature for Alpha` },
+      ])
+      expect(childItems(beta.issues)).toEqual([
+        { id: 20, title: `Bug in Beta` },
+      ])
     })
   })
 })

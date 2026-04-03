@@ -6,13 +6,14 @@ description: >
   (ElectricSQL real-time sync), powerSyncCollectionOptions (PowerSync SQLite),
   rxdbCollectionOptions (RxDB), trailbaseCollectionOptions (TrailBase),
   localOnlyCollectionOptions, localStorageCollectionOptions. CollectionConfig
-  options: getKey, schema, sync, gcTime, autoIndex, syncMode (eager/on-demand/
-  progressive). StandardSchema validation with Zod/Valibot/ArkType. Collection
-  lifecycle (idle/loading/ready/error). Adapter-specific sync patterns including
-  Electric txid tracking and Query direct writes.
+  options: getKey, schema, sync, gcTime, autoIndex (default off), defaultIndexType,
+  syncMode (eager/on-demand, plus progressive for Electric). StandardSchema validation
+  with Zod/Valibot/ArkType. Collection lifecycle (idle/loading/ready/error).
+  Adapter-specific sync patterns including Electric txid tracking, Query direct
+  writes, and PowerSync query-driven sync with onLoad/onLoadSubset hooks.
 type: sub-skill
 library: db
-library_version: '0.5.30'
+library_version: '0.6.0'
 sources:
   - 'TanStack/db:docs/overview.md'
   - 'TanStack/db:docs/guides/schemas.md'
@@ -98,11 +99,29 @@ queryCollectionOptions({
 })
 ```
 
-| Mode          | Best for                                       | Data size |
-| ------------- | ---------------------------------------------- | --------- |
-| `eager`       | Mostly-static datasets                         | <10k rows |
-| `on-demand`   | Search, catalogs, large tables                 | >50k rows |
-| `progressive` | Collaborative apps needing instant first paint | Any       |
+| Mode          | Best for                                                       | Data size |
+| ------------- | -------------------------------------------------------------- | --------- |
+| `eager`       | Mostly-static datasets                                         | <10k rows |
+| `on-demand`   | Search, catalogs, large tables                                 | >50k rows |
+| `progressive` | Collaborative apps needing instant first paint (Electric only) | Any       |
+
+## Indexing
+
+Indexing is opt-in. The `autoIndex` option defaults to `"off"`. To enable automatic indexing, set `autoIndex: "eager"` and provide a `defaultIndexType`:
+
+```ts
+import { BasicIndex } from '@tanstack/db'
+
+createCollection(
+  queryCollectionOptions({
+    autoIndex: 'eager',
+    defaultIndexType: BasicIndex,
+    // ...
+  }),
+)
+```
+
+Without `defaultIndexType`, setting `autoIndex: "eager"` throws a `CollectionConfigurationError`. You can also create indexes manually with `collection.createIndex()` and remove them with `collection.removeIndex()`.
 
 ## Core Patterns
 
@@ -255,7 +274,7 @@ app.post('/api/todos', async (req, res) => {
 })
 ```
 
-`pg_current_xact_id()` must be queried inside the same SQL transaction as the mutation. Otherwise the txid doesn't match and `awaitTxId` stalls forever.
+`pg_current_xact_id()` must be queried inside the same SQL transaction as the mutation. Otherwise the txid doesn't match and `awaitTxId` times out (default 5 seconds).
 
 Source: docs/collections/electric-collection.md
 

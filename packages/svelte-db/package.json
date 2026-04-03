@@ -1,6 +1,6 @@
 {
   "name": "@tanstack/svelte-db",
-  "version": "0.1.77",
+  "version": "0.1.78",
   "description": "Svelte integration for @tanstack/db",
   "author": "Kyle Mathews",
   "license": "MIT",
@@ -13,7 +13,8 @@
   "keywords": [
     "optimistic",
     "svelte",
-    "typescript"
+    "typescript",
+    "tanstack-intent"
   ],
   "scripts": {
     "build": "svelte-package --input ./src --output ./dist --tsconfig ./tsconfig.build.json",

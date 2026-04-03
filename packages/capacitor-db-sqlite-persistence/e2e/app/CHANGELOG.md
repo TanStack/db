@@ -1,5 +1,13 @@
 # @tanstack/capacitor-db-sqlite-persistence-e2e-app
 
+## 0.0.5
+
+### Patch Changes
+
+- Updated dependencies [[`8b7fb1a`](https://github.com/TanStack/db/commit/8b7fb1a18522b8d1c2adb46f5917305c7d99fc4a)]:
+  - @tanstack/db@0.6.1
+  - @tanstack/capacitor-db-sqlite-persistence@0.1.5
+
 ## 0.0.4
 
 ### Patch Changes

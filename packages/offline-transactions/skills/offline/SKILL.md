@@ -10,7 +10,7 @@ description: >
   React Native support via separate entry point.
 type: composition
 library: db
-library_version: '0.5.30'
+library_version: '0.6.0'
 requires:
   - db-core
   - db-core/mutations-optimistic

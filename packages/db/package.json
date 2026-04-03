@@ -1,6 +1,6 @@
 {
   "name": "@tanstack/db",
-  "version": "0.6.0",
+  "version": "0.6.1",
   "description": "A reactive client store for building super fast apps on sync",
   "author": "Kyle Mathews",
   "license": "MIT",
@@ -12,7 +12,8 @@
   "homepage": "https://tanstack.com/db",
   "keywords": [
     "optimistic",
-    "typescript"
+    "typescript",
+    "tanstack-intent"
   ],
   "scripts": {
     "build": "vite build",

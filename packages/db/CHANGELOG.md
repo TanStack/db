@@ -1,5 +1,11 @@
 # @tanstack/db
 
+## 0.6.1
+
+### Patch Changes
+
+- Update all SKILL.md files to v0.6.0 with new documentation for persistence, virtual properties, queryOnce, createEffect, includes, indexing, and sync metadata. Add tanstack-intent keyword to all packages with skills. ([#1421](https://github.com/TanStack/db/pull/1421))
+
 ## 0.6.0
 
 ### Minor Changes
