@@ -18,6 +18,7 @@ import {
 } from '../utils.js'
 import { createDeferred } from '../../src/deferred'
 import { BTreeIndex } from '../../src/indexes/btree-index'
+import { Func, Value } from '../../src/query/ir.js'
 import type { ChangeMessage, LoadSubsetOptions } from '../../src/types.js'
 
 // Sample user type for tests
@@ -2583,6 +2584,210 @@ describe(`createLiveQueryCollection`, () => {
       resolveLoadSubset!()
       await flushPromises()
       await preloadPromise
+    })
+  })
+
+  describe(`lazy join key deduplication`, () => {
+    it(`should deduplicate join keys and filter nulls when requesting snapshot for lazy joins`, async () => {
+      type Task = {
+        id: number
+        name: string
+        project_id: number | null
+      }
+
+      type Project = {
+        id: number
+        name: string
+      }
+
+      // Main collection with duplicate foreign keys and null foreign keys
+      const taskCollection = createCollection<Task>({
+        id: `tasks-dedup`,
+        getKey: (task) => task.id,
+        sync: {
+          sync: ({ begin, write, commit, markReady }) => {
+            begin()
+            // Multiple tasks pointing to the same project (duplicates)
+            write({
+              type: `insert`,
+              value: { id: 1, name: `Task 1`, project_id: 10 },
+            })
+            write({
+              type: `insert`,
+              value: { id: 2, name: `Task 2`, project_id: 10 },
+            })
+            write({
+              type: `insert`,
+              value: { id: 3, name: `Task 3`, project_id: 10 },
+            })
+            write({
+              type: `insert`,
+              value: { id: 4, name: `Task 4`, project_id: 20 },
+            })
+            write({
+              type: `insert`,
+              value: { id: 5, name: `Task 5`, project_id: 20 },
+            })
+            // Tasks with null foreign key
+            write({
+              type: `insert`,
+              value: { id: 6, name: `Task 6`, project_id: null },
+            })
+            write({
+              type: `insert`,
+              value: { id: 7, name: `Task 7`, project_id: null },
+            })
+            commit()
+            markReady()
+          },
+        },
+      })
+
+      // Lazy joined collection that tracks loadSubset calls
+      const capturedOptions: Array<LoadSubsetOptions> = []
+
+      const projectCollection = createCollection<Project>({
+        id: `projects-dedup`,
+        getKey: (project) => project.id,
+        syncMode: `on-demand`,
+        sync: {
+          sync: ({ begin, write, commit, markReady }) => {
+            begin()
+            write({ type: `insert`, value: { id: 10, name: `Project A` } })
+            write({ type: `insert`, value: { id: 20, name: `Project B` } })
+            commit()
+            markReady()
+            return {
+              loadSubset: (options: LoadSubsetOptions) => {
+                capturedOptions.push(options)
+                return true
+              },
+            }
+          },
+        },
+      })
+
+      const liveQuery = createLiveQueryCollection((q) =>
+        q
+          .from({ task: taskCollection })
+          .leftJoin({ project: projectCollection }, ({ task, project }) =>
+            eq(task.project_id, project.id),
+          ),
+      )
+
+      await liveQuery.preload()
+      await flushPromises()
+
+      // Find the inArray expression in loadSubset calls
+      // It may be wrapped in `and` since requestSnapshot combines expressions
+      const findInArrayExpr = (
+        expr: LoadSubsetOptions[`where`],
+      ): Func | undefined => {
+        if (!(expr instanceof Func)) return undefined
+        if (expr.name === `in`) return expr
+        if (expr.name === `and` || expr.name === `or`) {
+          for (const arg of expr.args) {
+            const found = findInArrayExpr(arg)
+            if (found) return found
+          }
+        }
+        return undefined
+      }
+
+      const inExpr = capturedOptions
+        .map((opt) => findInArrayExpr(opt.where))
+        .find((expr) => expr !== undefined)
+
+      expect(inExpr).toBeDefined()
+
+      // The second arg of inArray is the array of values
+      const arrayArg = inExpr!.args[1]
+      expect(arrayArg).toBeInstanceOf(Value)
+      const valuesArg = arrayArg as Value<Array<number>>
+      const values = valuesArg.value.slice().sort()
+
+      // Should contain only the 2 unique project IDs -- no nulls, no duplicates
+      expect(values).toEqual([10, 20])
+    })
+
+    it(`should skip loadSubset when all join keys are null`, async () => {
+      type Task = {
+        id: number
+        name: string
+        project_id: number | null
+      }
+
+      type Project = {
+        id: number
+        name: string
+      }
+
+      const taskCollection = createCollection<Task>({
+        id: `tasks-all-null`,
+        getKey: (task) => task.id,
+        sync: {
+          sync: ({ begin, write, commit, markReady }) => {
+            begin()
+            write({
+              type: `insert`,
+              value: { id: 1, name: `Task 1`, project_id: null },
+            })
+            write({
+              type: `insert`,
+              value: { id: 2, name: `Task 2`, project_id: null },
+            })
+            write({
+              type: `insert`,
+              value: { id: 3, name: `Task 3`, project_id: null },
+            })
+            commit()
+            markReady()
+          },
+        },
+      })
+
+      const capturedOptions: Array<LoadSubsetOptions> = []
+
+      const projectCollection = createCollection<Project>({
+        id: `projects-all-null`,
+        getKey: (project) => project.id,
+        syncMode: `on-demand`,
+        sync: {
+          sync: ({ begin, write, commit, markReady }) => {
+            begin()
+            write({ type: `insert`, value: { id: 10, name: `Project A` } })
+            commit()
+            markReady()
+            return {
+              loadSubset: (options: LoadSubsetOptions) => {
+                capturedOptions.push(options)
+                return true
+              },
+            }
+          },
+        },
+      })
+
+      const liveQuery = createLiveQueryCollection((q) =>
+        q
+          .from({ task: taskCollection })
+          .leftJoin({ project: projectCollection }, ({ task, project }) =>
+            eq(task.project_id, project.id),
+          ),
+      )
+
+      await liveQuery.preload()
+      await flushPromises()
+
+      // No loadSubset call should have been made for the lazy join
+      // since all keys were null and filtered out
+      expect(capturedOptions).toHaveLength(0)
+
+      // All tasks should still appear in results with null project
+      expect(liveQuery.toArray).toHaveLength(3)
+      for (const row of liveQuery.toArray) {
+        expect(row.project).toBeUndefined()
+      }
     })
   })
 
