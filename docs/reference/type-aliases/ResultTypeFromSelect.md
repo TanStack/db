@@ -6,10 +6,10 @@ title: ResultTypeFromSelect
 # Type Alias: ResultTypeFromSelect\<TSelectObject\>
 
 ```ts
-type ResultTypeFromSelect<TSelectObject> = WithoutRefBrand<Prettify<{ [K in keyof TSelectObject]: NeedsExtraction<TSelectObject[K]> extends true ? ExtractExpressionType<TSelectObject[K]> : TSelectObject[K] extends Ref<infer _T> ? ExtractRef<TSelectObject[K]> : TSelectObject[K] extends RefLeaf<infer T> ? IsNullableRef<TSelectObject[K]> extends true ? T | undefined : T : TSelectObject[K] extends RefLeaf<infer T> | undefined ? T | undefined : TSelectObject[K] extends RefLeaf<infer T> | null ? IsNullableRef<Exclude<(...), (...)>> extends true ? T | null | undefined : T | null : TSelectObject[K] extends Ref<(...)> | undefined ? ExtractRef<(...)> | undefined : (...)[(...)] extends (...) | (...) ? (...) | (...) : (...) extends (...) ? (...) : (...) }>>;
+type ResultTypeFromSelect<TSelectObject> = IsAny<TSelectObject> extends true ? any : WithoutRefBrand<Prettify<{ [K in keyof TSelectObject]: NeedsExtraction<TSelectObject[K]> extends true ? ExtractExpressionType<TSelectObject[K]> : TSelectObject[K] extends ToArrayWrapper<infer T> ? T[] : TSelectObject[K] extends ConcatToArrayWrapper<any> ? string : TSelectObject[K] extends QueryBuilder<infer TChildContext> ? Collection<GetResult<TChildContext>> : TSelectObject[K] extends Ref<infer _T> ? ExtractRef<(...)[(...)]> : (...)[(...)] extends RefLeaf<(...)> ? (...) extends (...) ? (...) : (...) : (...) extends (...) ? (...) : (...) }>>;
 ```
 
-Defined in: [packages/db/src/query/builder/types.ts:226](https://github.com/TanStack/db/blob/main/packages/db/src/query/builder/types.ts#L226)
+Defined in: [packages/db/src/query/builder/types.ts:309](https://github.com/TanStack/db/blob/main/packages/db/src/query/builder/types.ts#L309)
 
 ResultTypeFromSelect - Infers the result type from a select object
 

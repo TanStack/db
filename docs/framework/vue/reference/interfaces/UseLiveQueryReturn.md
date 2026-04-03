@@ -20,8 +20,8 @@ Return type for useLiveQuery hook
 ### collection
 
 ```ts
-collection: ComputedRef<Collection<{ [K in string | number | symbol]: (TContext["result"] extends object ? any[any] : TContext["hasJoins"] extends true ? TContext["schema"] : TContext["schema"][TContext["fromSourceName"]])[K] }, string | number, {
-}, StandardSchemaV1<unknown, unknown>, { [K in string | number | symbol]: (TContext["result"] extends object ? any[any] : TContext["hasJoins"] extends true ? TContext["schema"] : TContext["schema"][TContext["fromSourceName"]])[K] }>>;
+collection: ComputedRef<Collection<{ [K in string | number | symbol]: ResultValue<TContext>[K] }, string | number, {
+}, StandardSchemaV1<unknown, unknown>, { [K in string | number | symbol]: ResultValue<TContext>[K] }>>;
 ```
 
 Defined in: [useLiveQuery.ts:43](https://github.com/TanStack/db/blob/main/packages/vue-db/src/useLiveQuery.ts#L43)
@@ -105,7 +105,7 @@ True when query has received first data and is ready
 ### state
 
 ```ts
-state: ComputedRef<Map<string | number, { [K in string | number | symbol]: (TContext["result"] extends object ? any[any] : TContext["hasJoins"] extends true ? TContext["schema"] : TContext["schema"][TContext["fromSourceName"]])[K] }>>;
+state: ComputedRef<Map<string | number, { [K in string | number | symbol]: ResultValue<TContext>[K] }>>;
 ```
 
 Defined in: [useLiveQuery.ts:41](https://github.com/TanStack/db/blob/main/packages/vue-db/src/useLiveQuery.ts#L41)
