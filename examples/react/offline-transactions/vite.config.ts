@@ -129,8 +129,7 @@ export default defineConfig({
       projects: [`./tsconfig.json`],
     }),
     tanstackStart({
-      customViteReactPlugin: true,
-      mode: `spa`, // SPA mode for client-side only offline features
+      spa: { enabled: true },
     }),
     viteReact(),
     tailwindcss(),
