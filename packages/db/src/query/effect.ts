@@ -7,6 +7,7 @@ import {
   normalizeOrderByPaths,
 } from './compiler/expressions.js'
 import { getCollectionBuilder } from './live/collection-registry.js'
+import { expressionReferencesPendingOperation } from './live/collection-subscriber.js'
 import {
   buildQueryFromConfig,
   computeOrderedLoadCursor,
@@ -805,13 +806,21 @@ class EffectPipelineRunner<TRow extends object, TKey extends string | number> {
   ): {
     includeInitialState?: boolean
     whereExpression?: BasicExpression<boolean>
+    includePendingDeletes?: boolean
     orderBy?: any
     limit?: number
   } {
+    const includePendingDeletes =
+      expressionReferencesPendingOperation(whereExpression)
+
     // Ordered aliases explicitly disable initial state — data is loaded
     // via requestLimitedSnapshot/requestSnapshot after subscription setup.
     if (orderByInfo) {
-      return { includeInitialState: false, whereExpression }
+      return {
+        includeInitialState: false,
+        whereExpression,
+        ...(includePendingDeletes && { includePendingDeletes }),
+      }
     }
 
     const includeInitialState = !isLazy
@@ -823,6 +832,7 @@ class EffectPipelineRunner<TRow extends object, TKey extends string | number> {
     return {
       includeInitialState,
       whereExpression,
+      ...(includePendingDeletes && { includePendingDeletes }),
       ...(hints.orderBy ? { orderBy: hints.orderBy } : {}),
       ...(hints.limit !== undefined ? { limit: hints.limit } : {}),
     }

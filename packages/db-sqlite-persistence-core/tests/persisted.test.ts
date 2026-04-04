@@ -241,6 +241,7 @@ const stripVirtualProps = <T extends Record<string, any> | undefined>(
     $origin: _origin,
     $key: _key,
     $collectionId: _collectionId,
+    $pendingOperation: _pendingOperation,
     ...rest
   } = value as Record<string, unknown>
   return rest as T
