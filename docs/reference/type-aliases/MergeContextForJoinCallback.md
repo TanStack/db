@@ -6,10 +6,10 @@ title: MergeContextForJoinCallback
 # Type Alias: MergeContextForJoinCallback\<TContext, TNewSchema\>
 
 ```ts
-type MergeContextForJoinCallback<TContext, TNewSchema> = object;
+type MergeContextForJoinCallback<TContext, TNewSchema> = object & PreserveHasResultFlag<TContext["hasResult"]>;
 ```
 
-Defined in: [packages/db/src/query/builder/types.ts:821](https://github.com/TanStack/db/blob/main/packages/db/src/query/builder/types.ts#L821)
+Defined in: [packages/db/src/query/builder/types.ts:1005](https://github.com/TanStack/db/blob/main/packages/db/src/query/builder/types.ts#L1005)
 
 MergeContextForJoinCallback - Special context for join condition callbacks
 
@@ -37,6 +37,44 @@ Optionality is only applied to the result AFTER the join logic executes.
 
 The simple intersection (&) merges schemas without any optionality transformation.
 
+## Type Declaration
+
+### baseSchema
+
+```ts
+baseSchema: TContext["baseSchema"];
+```
+
+### fromSourceName
+
+```ts
+fromSourceName: TContext["fromSourceName"];
+```
+
+### hasJoins
+
+```ts
+hasJoins: true;
+```
+
+### joinTypes
+
+```ts
+joinTypes: TContext["joinTypes"] extends Record<string, any> ? TContext["joinTypes"] : object;
+```
+
+### result
+
+```ts
+result: TContext["result"];
+```
+
+### schema
+
+```ts
+schema: TContext["schema"] & TNewSchema;
+```
+
 ## Type Parameters
 
 ### TContext
@@ -46,63 +84,3 @@ The simple intersection (&) merges schemas without any optionality transformatio
 ### TNewSchema
 
 `TNewSchema` *extends* [`ContextSchema`](ContextSchema.md)
-
-## Properties
-
-### baseSchema
-
-```ts
-baseSchema: TContext["baseSchema"];
-```
-
-Defined in: [packages/db/src/query/builder/types.ts:825](https://github.com/TanStack/db/blob/main/packages/db/src/query/builder/types.ts#L825)
-
-***
-
-### fromSourceName
-
-```ts
-fromSourceName: TContext["fromSourceName"];
-```
-
-Defined in: [packages/db/src/query/builder/types.ts:828](https://github.com/TanStack/db/blob/main/packages/db/src/query/builder/types.ts#L828)
-
-***
-
-### hasJoins
-
-```ts
-hasJoins: true;
-```
-
-Defined in: [packages/db/src/query/builder/types.ts:829](https://github.com/TanStack/db/blob/main/packages/db/src/query/builder/types.ts#L829)
-
-***
-
-### joinTypes
-
-```ts
-joinTypes: TContext["joinTypes"] extends Record<string, any> ? TContext["joinTypes"] : object;
-```
-
-Defined in: [packages/db/src/query/builder/types.ts:830](https://github.com/TanStack/db/blob/main/packages/db/src/query/builder/types.ts#L830)
-
-***
-
-### result
-
-```ts
-result: TContext["result"];
-```
-
-Defined in: [packages/db/src/query/builder/types.ts:833](https://github.com/TanStack/db/blob/main/packages/db/src/query/builder/types.ts#L833)
-
-***
-
-### schema
-
-```ts
-schema: TContext["schema"] & TNewSchema;
-```
-
-Defined in: [packages/db/src/query/builder/types.ts:827](https://github.com/TanStack/db/blob/main/packages/db/src/query/builder/types.ts#L827)

@@ -9,13 +9,13 @@ title: upper
 function upper<T>(arg): StringFunctionReturnType<T>;
 ```
 
-Defined in: [packages/db/src/query/builder/functions.ts:261](https://github.com/TanStack/db/blob/main/packages/db/src/query/builder/functions.ts#L261)
+Defined in: [packages/db/src/query/builder/functions.ts:279](https://github.com/TanStack/db/blob/main/packages/db/src/query/builder/functions.ts#L279)
 
 ## Type Parameters
 
 ### T
 
-`T` *extends* `unknown`
+`T` *extends* `ExpressionLike`
 
 ## Parameters
 

@@ -11,7 +11,7 @@ Defined in: [packages/db/src/indexes/base-index.ts:28](https://github.com/TanSta
 
 ### TKey
 
-`TKey` *extends* `string` \| `number` \| `undefined` = `string` \| `number` \| `undefined`
+`TKey` *extends* `string` \| `number` = `string` \| `number`
 
 ## Properties
 
@@ -223,7 +223,7 @@ Defined in: [packages/db/src/indexes/base-index.ts:43](https://github.com/TanSta
 
 ##### options
 
-[`RangeQueryOptions`](RangeQueryOptions.md)
+[`BTreeRangeQueryOptions`](BTreeRangeQueryOptions.md)
 
 #### Returns
 
@@ -243,7 +243,7 @@ Defined in: [packages/db/src/indexes/base-index.ts:44](https://github.com/TanSta
 
 ##### options
 
-[`RangeQueryOptions`](RangeQueryOptions.md)
+[`BTreeRangeQueryOptions`](BTreeRangeQueryOptions.md)
 
 #### Returns
 

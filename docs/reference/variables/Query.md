@@ -9,4 +9,4 @@ title: Query
 const Query: InitialQueryBuilderConstructor = BaseQueryBuilder;
 ```
 
-Defined in: [packages/db/src/query/builder/index.ts:912](https://github.com/TanStack/db/blob/main/packages/db/src/query/builder/index.ts#L912)
+Defined in: [packages/db/src/query/builder/index.ts:1232](https://github.com/TanStack/db/blob/main/packages/db/src/query/builder/index.ts#L1232)

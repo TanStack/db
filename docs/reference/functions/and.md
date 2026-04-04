@@ -11,17 +11,17 @@ title: and
 function and(left, right): BasicExpression<boolean>;
 ```
 
-Defined in: [packages/db/src/query/builder/functions.ts:181](https://github.com/TanStack/db/blob/main/packages/db/src/query/builder/functions.ts#L181)
+Defined in: [packages/db/src/query/builder/functions.ts:199](https://github.com/TanStack/db/blob/main/packages/db/src/query/builder/functions.ts#L199)
 
 ### Parameters
 
 #### left
 
-`any`
+`ExpressionLike`
 
 #### right
 
-`any`
+`ExpressionLike`
 
 ### Returns
 
@@ -36,21 +36,21 @@ function and(
 rest): BasicExpression<boolean>;
 ```
 
-Defined in: [packages/db/src/query/builder/functions.ts:185](https://github.com/TanStack/db/blob/main/packages/db/src/query/builder/functions.ts#L185)
+Defined in: [packages/db/src/query/builder/functions.ts:203](https://github.com/TanStack/db/blob/main/packages/db/src/query/builder/functions.ts#L203)
 
 ### Parameters
 
 #### left
 
-`any`
+`ExpressionLike`
 
 #### right
 
-`any`
+`ExpressionLike`
 
 #### rest
 
-...`any`[]
+...`ExpressionLike`[]
 
 ### Returns
 
