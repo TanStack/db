@@ -142,8 +142,9 @@ export function extractCollectionAliases(
       if (typeof key === `string` && key.startsWith(`__SPREAD_SENTINEL__`)) {
         continue
       }
+      // Skip includes — their aliases are scoped independently via separate D2 inputs
       if (value instanceof IncludesSubquery) {
-        traverse(value.query)
+        continue
       } else if (isNestedSelectObject(value)) {
         traverseSelect(value)
       }

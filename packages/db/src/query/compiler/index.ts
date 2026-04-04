@@ -141,6 +141,9 @@ export function compileQuery(
   // For includes: parent key stream to inner-join with this query's FROM
   parentKeyStream?: KeyedStream,
   childCorrelationField?: PropRef,
+  // Factory to create a fresh D2 input for an includes subquery alias.
+  // Each sibling gets its own input to avoid alias collisions.
+  createInput?: (alias: string, collectionId: string) => KeyedStream,
 ): CompilationResult {
   // Check if the original raw query has already been compiled
   const cachedResult = cache.get(rawQuery)
@@ -391,10 +394,16 @@ export function compileQuery(
             }
           : subquery.query
 
+      // Give each includes child its own D2 inputs so that sibling
+      // subqueries using the same alias letter get independent streams.
+      const childInputs = createInput
+        ? createInputsForSources(childQuery, allInputs, createInput)
+        : allInputs
+
       // Recursively compile child query WITH the parent key stream
       const childResult = compileQuery(
         childQuery,
-        allInputs,
+        childInputs,
         collections,
         subscriptions,
         callbacks,
@@ -405,11 +414,8 @@ export function compileQuery(
         queryMapping,
         parentKeys,
         subquery.childCorrelationField,
+        createInput,
       )
-
-      // Merge child's alias metadata into parent's
-      Object.assign(aliasToCollectionId, childResult.aliasToCollectionId)
-      Object.assign(aliasRemapping, childResult.aliasRemapping)
 
       includesResults.push({
         pipeline: childResult.pipeline,
@@ -739,6 +745,39 @@ function collectDirectCollectionAliases(query: QueryIR): Set<string> {
   }
 
   return aliases
+}
+
+/**
+ * Creates fresh D2 inputs for all source aliases (FROM + JOINs) in a query,
+ * following FROM/JOIN subqueries recursively but skipping includes.
+ * Returns a copy of `parentInputs` with fresh inputs for the child's own aliases.
+ */
+function createInputsForSources(
+  query: QueryIR,
+  parentInputs: Record<string, KeyedStream>,
+  createInput: (alias: string, collectionId: string) => KeyedStream,
+): Record<string, KeyedStream> {
+  const inputs = { ...parentInputs }
+
+  function walkFrom(from: CollectionRef | QueryRef) {
+    if (from.type === `collectionRef`) {
+      inputs[from.alias] = createInput(from.alias, from.collection.id)
+    } else if (from.type === `queryRef`) {
+      walkQuery(from.query)
+    }
+  }
+
+  function walkQuery(q: QueryIR) {
+    walkFrom(q.from)
+    if (q.join) {
+      for (const join of q.join) {
+        walkFrom(join.from)
+      }
+    }
+  }
+
+  walkQuery(query)
+  return inputs
 }
 
 /**
