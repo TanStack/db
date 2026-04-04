@@ -680,6 +680,18 @@ export class CollectionConfigBuilder<
       ]),
     )
 
+    // Each includes subquery gets a fresh D2 input under a unique key so
+    // that sibling subqueries using the same alias don't share a stream.
+    let includesInputCounter = 0
+    const includesAliasById: Record<string, string> = {}
+    const createIncludesInput = (alias: string, collectionId: string) => {
+      const uniqueKey = `__inc_${includesInputCounter++}_${alias}`
+      const input = this.graphCache!.newInput<unknown>()
+      this.inputsCache![uniqueKey] = input
+      includesAliasById[uniqueKey] = collectionId
+      return input as KeyedStream
+    }
+
     const compilation = compileQuery(
       this.query,
       this.inputsCache as Record<string, KeyedStream>,
@@ -691,12 +703,18 @@ export class CollectionConfigBuilder<
       (windowFn: (options: WindowOptions) => void) => {
         this.windowFn = windowFn
       },
+      undefined, // cache
+      undefined, // queryMapping
+      undefined, // parentKeyStream
+      undefined, // childCorrelationField
+      createIncludesInput,
     )
 
     this.pipelineCache = compilation.pipeline
     this.sourceWhereClausesCache = compilation.sourceWhereClauses
     this.compiledAliasToCollectionId = compilation.aliasToCollectionId
     this.includesCache = compilation.includes
+    Object.assign(this.compiledAliasToCollectionId, includesAliasById)
 
     // Defensive check: verify all compiled aliases have corresponding inputs
     // This should never happen since all aliases come from user declarations,

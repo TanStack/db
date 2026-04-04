@@ -4061,4 +4061,79 @@ describe(`includes subqueries`, () => {
       ])
     })
   })
+
+  describe(`duplicate alias in sibling includes`, () => {
+    type Tag = {
+      id: number
+      projectId: number
+      label: string
+    }
+
+    const sampleTags: Array<Tag> = [
+      { id: 1, projectId: 1, label: `urgent` },
+      { id: 2, projectId: 1, label: `frontend` },
+      { id: 3, projectId: 2, label: `backend` },
+    ]
+
+    function createTagsCollection() {
+      return createCollection(
+        mockSyncCollectionOptions<Tag>({
+          id: `includes-tags`,
+          getKey: (t) => t.id,
+          initialData: sampleTags,
+        }),
+      )
+    }
+
+    it(`same alias in sibling includes does not break nested children`, async () => {
+      // Tags uses alias "i" — same as issues. Each sibling gets its own
+      // independent D2 input, so nested comments are still populated.
+      const tags = createTagsCollection()
+
+      const collection = createLiveQueryCollection((q) =>
+        q.from({ p: projects }).select(({ p }) => ({
+          id: p.id,
+          name: p.name,
+          issues: q
+            .from({ i: issues })
+            .where(({ i }) => eq(i.projectId, p.id))
+            .select(({ i }) => ({
+              id: i.id,
+              title: i.title,
+              comments: q
+                .from({ c: comments })
+                .where(({ c }) => eq(c.issueId, i.id))
+                .select(({ c }) => ({
+                  id: c.id,
+                  body: c.body,
+                })),
+            })),
+          tags: q
+            .from({ i: tags }) // same alias "i" as issues
+            .where(({ i }) => eq(i.projectId, p.id))
+            .select(({ i }) => ({
+              id: i.id,
+              label: i.label,
+            })),
+        })),
+      )
+
+      await collection.preload()
+
+      const alpha = collection.get(1) as any
+
+      // Tags should be populated
+      expect(childItems(alpha.tags)).toEqual([
+        { id: 1, label: `urgent` },
+        { id: 2, label: `frontend` },
+      ])
+
+      // Nested comments should also be populated despite the duplicate alias "i"
+      const issue10 = alpha.issues.get(10)
+      expect(childItems(issue10.comments)).toEqual([
+        { id: 100, body: `Looks bad` },
+        { id: 101, body: `Fixed it` },
+      ])
+    })
+  })
 })
