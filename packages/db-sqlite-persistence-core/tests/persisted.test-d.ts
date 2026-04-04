@@ -1,8 +1,16 @@
 import { describe, expectTypeOf, it } from 'vitest'
+import { z } from 'zod'
 import { createCollection } from '@tanstack/db'
 import { persistedCollectionOptions } from '../src'
 import type { PersistedCollectionUtils, PersistenceAdapter } from '../src'
-import type { SyncConfig, UtilsRecord } from '@tanstack/db'
+import type { SyncConfig, UtilsRecord, WithVirtualProps } from '@tanstack/db'
+
+type OutputWithVirtual<
+  T extends object,
+  TKey extends string | number = string | number,
+> = WithVirtualProps<T, TKey>
+
+type ItemOf<T> = T extends Array<infer U> ? U : T
 
 type Todo = {
   id: string
@@ -90,6 +98,11 @@ describe(`persisted collection types`, () => {
     // @ts-expect-error persistedCollectionOptions requires a persistence config
     persistedCollectionOptions({
       getKey: (item: Todo) => item.id,
+    })
+
+    persistedCollectionOptions({
+      getKey: (item: Todo) => item.id,
+      // @ts-expect-error persistedCollectionOptions requires a persistence config when sync is provided
       sync: {
         sync: ({ markReady }: { markReady: () => void }) => {
           markReady()
@@ -106,6 +119,184 @@ describe(`persisted collection types`, () => {
       persistence: {
         adapter,
       },
+    })
+  })
+
+  it(`should work with schema and infer correct types when saved to a variable in sync-absent mode`, () => {
+    const testSchema = z.object({
+      id: z.string(),
+      title: z.string(),
+      createdAt: z.date().optional().default(new Date()),
+    })
+
+    type ExpectedType = z.infer<typeof testSchema>
+    type ExpectedInput = z.input<typeof testSchema>
+
+    const schemaAdapter: PersistenceAdapter<ExpectedType, string> = {
+      loadSubset: () => Promise.resolve([]),
+      applyCommittedTx: () => Promise.resolve(),
+      ensureIndex: () => Promise.resolve(),
+    }
+
+    const options = persistedCollectionOptions({
+      id: `test-local-schema`,
+      schema: testSchema,
+      schemaVersion: 1,
+      getKey: (item) => item.id,
+      persistence: { adapter: schemaAdapter },
+    })
+
+    expectTypeOf(options.schema).toEqualTypeOf<typeof testSchema>()
+
+    const collection = createCollection(options)
+
+    // Test that the collection has the correct inferred type from schema
+    expectTypeOf(collection.toArray).toEqualTypeOf<
+      Array<OutputWithVirtual<ExpectedType, string>>
+    >()
+
+    // Test insert parameter type
+    type InsertParam = Parameters<typeof collection.insert>[0]
+    expectTypeOf<ItemOf<InsertParam>>().toEqualTypeOf<ExpectedInput>()
+
+    // Check that the update method accepts the expected input type
+    collection.update(`1`, (draft) => {
+      expectTypeOf(draft).toEqualTypeOf<ExpectedInput>()
+    })
+  })
+
+  it(`should work with schema and infer correct types when nested in createCollection in sync-absent mode`, () => {
+    const testSchema = z.object({
+      id: z.string(),
+      title: z.string(),
+      createdAt: z.date().optional().default(new Date()),
+    })
+
+    type ExpectedType = z.infer<typeof testSchema>
+    type ExpectedInput = z.input<typeof testSchema>
+
+    const schemaAdapter: PersistenceAdapter<ExpectedType, string> = {
+      loadSubset: () => Promise.resolve([]),
+      applyCommittedTx: () => Promise.resolve(),
+      ensureIndex: () => Promise.resolve(),
+    }
+
+    const collection = createCollection(
+      persistedCollectionOptions({
+        id: `test-local-schema-nested`,
+        schema: testSchema,
+        schemaVersion: 1,
+        getKey: (item) => item.id,
+        persistence: { adapter: schemaAdapter },
+      }),
+    )
+
+    // Test that the collection has the correct inferred type from schema
+    expectTypeOf(collection.toArray).toEqualTypeOf<
+      Array<OutputWithVirtual<ExpectedType, string>>
+    >()
+
+    // Test insert parameter type
+    type InsertParam = Parameters<typeof collection.insert>[0]
+    expectTypeOf<ItemOf<InsertParam>>().toEqualTypeOf<ExpectedInput>()
+
+    // Check that the update method accepts the expected input type
+    collection.update(`1`, (draft) => {
+      expectTypeOf(draft).toEqualTypeOf<ExpectedInput>()
+    })
+  })
+
+  it(`should work with schema and infer correct types when saved to a variable in sync-present mode`, () => {
+    const testSchema = z.object({
+      id: z.string(),
+      title: z.string(),
+      createdAt: z.date().optional().default(new Date()),
+    })
+
+    type ExpectedType = z.infer<typeof testSchema>
+    type ExpectedInput = z.input<typeof testSchema>
+
+    const schemaAdapter: PersistenceAdapter<ExpectedType, string> = {
+      loadSubset: () => Promise.resolve([]),
+      applyCommittedTx: () => Promise.resolve(),
+      ensureIndex: () => Promise.resolve(),
+    }
+
+    const options = persistedCollectionOptions({
+      id: `test-sync-schema`,
+      schema: testSchema,
+      schemaVersion: 1,
+      getKey: (item) => item.id,
+      sync: {
+        sync: ({ markReady }) => {
+          markReady()
+        },
+      },
+      persistence: { adapter: schemaAdapter },
+    })
+
+    expectTypeOf(options.schema).toEqualTypeOf<typeof testSchema>()
+
+    const collection = createCollection(options)
+
+    // Test that the collection has the correct inferred type from schema
+    expectTypeOf(collection.toArray).toEqualTypeOf<
+      Array<OutputWithVirtual<ExpectedType, string>>
+    >()
+
+    // Test insert parameter type
+    type InsertParam = Parameters<typeof collection.insert>[0]
+    expectTypeOf<ItemOf<InsertParam>>().toEqualTypeOf<ExpectedInput>()
+
+    // Check that the update method accepts the expected input type
+    collection.update(`1`, (draft) => {
+      expectTypeOf(draft).toEqualTypeOf<ExpectedInput>()
+    })
+  })
+
+  it(`should work with schema and infer correct types when nested in createCollection in sync-present mode`, () => {
+    const testSchema = z.object({
+      id: z.string(),
+      title: z.string(),
+      createdAt: z.date().optional().default(new Date()),
+    })
+
+    type ExpectedType = z.infer<typeof testSchema>
+    type ExpectedInput = z.input<typeof testSchema>
+
+    const schemaAdapter: PersistenceAdapter<ExpectedType, string> = {
+      loadSubset: () => Promise.resolve([]),
+      applyCommittedTx: () => Promise.resolve(),
+      ensureIndex: () => Promise.resolve(),
+    }
+
+    const collection = createCollection(
+      persistedCollectionOptions({
+        id: `test-sync-schema-nested`,
+        schema: testSchema,
+        schemaVersion: 1,
+        getKey: (item) => item.id,
+        sync: {
+          sync: ({ markReady }) => {
+            markReady()
+          },
+        },
+        persistence: { adapter: schemaAdapter },
+      }),
+    )
+
+    // Test that the collection has the correct inferred type from schema
+    expectTypeOf(collection.toArray).toEqualTypeOf<
+      Array<OutputWithVirtual<ExpectedType, string>>
+    >()
+
+    // Test insert parameter type
+    type InsertParam = Parameters<typeof collection.insert>[0]
+    expectTypeOf<ItemOf<InsertParam>>().toEqualTypeOf<ExpectedInput>()
+
+    // Check that the update method accepts the expected input type
+    collection.update(`1`, (draft) => {
+      expectTypeOf(draft).toEqualTypeOf<ExpectedInput>()
     })
   })
 })
