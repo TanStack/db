@@ -374,14 +374,23 @@ export type PersistedLocalOnlyOptions<
   schemaVersion?: number
 }
 
+type NormalizeSchema<TSchema extends StandardSchemaV1> =
+  [TSchema] extends [never]
+    ? never
+    : [TSchema] extends [StandardSchemaV1<unknown, unknown>]
+      ? never
+      : TSchema
+
 type PersistedSyncOptionsResult<
   T extends object,
   TKey extends string | number,
   TSchema extends StandardSchemaV1,
   TUtils extends UtilsRecord,
-> = CollectionConfig<T, TKey, TSchema, TUtils> & {
+> = CollectionConfig<T, TKey, NormalizeSchema<TSchema>, TUtils> & {
   persistence: PersistedResolvedPersistence<T, TKey>
-}
+} & ([NormalizeSchema<TSchema>] extends [never]
+  ? { schema?: never }
+  : { schema: NormalizeSchema<TSchema> })
 
 type PersistedLocalOnlyOptionsResult<
   T extends object,
