@@ -1586,6 +1586,57 @@ describe(`Collection`, () => {
     expect(collection._state.syncedMetadata.has(1)).toBe(false)
   })
 
+  it(`should emit sync cursors through change subscriptions`, async () => {
+    let testSyncFunctions: any = null
+
+    const collection = createCollection<{ id: number; value: string }>({
+      id: `sync-cursor-subscription-test`,
+      getKey: (item) => item.id,
+      startSync: true,
+      sync: {
+        sync: ({ begin, write, commit, markReady }) => {
+          begin()
+          write({
+            type: `insert`,
+            value: { id: 1, value: `initial` },
+          })
+          commit()
+          markReady()
+
+          testSyncFunctions = { begin, write, commit }
+        },
+      },
+    })
+
+    await collection.stateWhenReady()
+
+    const observedChanges: Array<ChangeMessage<{ id: number; value: string }>> =
+      []
+    const subscription = collection.subscribeChanges(
+      (changes) => {
+        observedChanges.push(
+          ...(changes as Array<ChangeMessage<{ id: number; value: string }>>),
+        )
+      },
+      { includeInitialState: false },
+    )
+
+    const { begin, write, commit } = testSyncFunctions
+    begin()
+    write({
+      type: `update`,
+      value: { id: 1, value: `updated` },
+      cursor: `002`,
+    })
+    commit()
+
+    expect(observedChanges).toHaveLength(1)
+    expect(observedChanges[0]!.type).toBe(`update`)
+    expect(observedChanges[0]!.cursor).toBe(`002`)
+
+    subscription.unsubscribe()
+  })
+
   it(`should treat row metadata as cleared after truncate within the same sync transaction`, async () => {
     let testSyncFunctions: any = null
 
