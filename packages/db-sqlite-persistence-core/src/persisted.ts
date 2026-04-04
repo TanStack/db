@@ -14,6 +14,7 @@ import type {
   CollectionConfig,
   CollectionIndexMetadata,
   DeleteMutationFnParams,
+  InferSchemaOutput,
   InsertMutationFnParams,
   LoadSubsetOptions,
   PendingMutation,
@@ -2572,22 +2573,76 @@ function createLoopbackSyncConfig<
   }
 }
 
+// Overload for when schema is provided and sync is present
+export function persistedCollectionOptions<
+  TSchema extends StandardSchemaV1,
+  TKey extends string | number,
+  TUtils extends UtilsRecord = UtilsRecord,
+>(
+  options: PersistedSyncWrappedOptions<
+    InferSchemaOutput<TSchema>,
+    TKey,
+    TSchema,
+    TUtils
+  > & {
+    schema: TSchema
+  },
+): PersistedSyncOptionsResult<
+  InferSchemaOutput<TSchema>,
+  TKey,
+  TSchema,
+  TUtils
+> & {
+  schema: TSchema
+}
+
+// Overload for when schema is provided and sync is absent
+export function persistedCollectionOptions<
+  TSchema extends StandardSchemaV1,
+  TKey extends string | number,
+  TUtils extends UtilsRecord = UtilsRecord,
+>(
+  options: PersistedLocalOnlyOptions<
+    InferSchemaOutput<TSchema>,
+    TKey,
+    TSchema,
+    TUtils
+  > & {
+    schema: TSchema
+  },
+): PersistedLocalOnlyOptionsResult<
+  InferSchemaOutput<TSchema>,
+  TKey,
+  TSchema,
+  TUtils
+> & {
+  schema: TSchema
+}
+
+// Overload for when no schema is provided and sync is present
+// the type T needs to be passed explicitly unless it can be inferred from the getKey function in the config
 export function persistedCollectionOptions<
   T extends object,
   TKey extends string | number,
   TSchema extends StandardSchemaV1 = never,
   TUtils extends UtilsRecord = UtilsRecord,
 >(
-  options: PersistedSyncWrappedOptions<T, TKey, TSchema, TUtils>,
+  options: PersistedSyncWrappedOptions<T, TKey, TSchema, TUtils> & {
+    schema?: never // prohibit schema
+  },
 ): PersistedSyncOptionsResult<T, TKey, TSchema, TUtils>
 
+// Overload for when no schema is provided and sync is absent
+// the type T needs to be passed explicitly unless it can be inferred from the getKey function in the config
 export function persistedCollectionOptions<
   T extends object,
   TKey extends string | number,
   TSchema extends StandardSchemaV1 = never,
   TUtils extends UtilsRecord = UtilsRecord,
 >(
-  options: PersistedLocalOnlyOptions<T, TKey, TSchema, TUtils>,
+  options: PersistedLocalOnlyOptions<T, TKey, TSchema, TUtils> & {
+    schema?: never // prohibit schema
+  },
 ): PersistedLocalOnlyOptionsResult<T, TKey, TSchema, TUtils>
 
 export function persistedCollectionOptions<
