@@ -191,6 +191,17 @@ export function processOrderBy(
           index = undefined
         }
 
+        if (!index) {
+          const collectionId = followRefCollection.id
+          const fieldPath = followRefResult.path.join(`.`)
+          console.warn(
+            `[TanStack DB]${collectionId ? ` [${collectionId}]` : ``} orderBy with limit requires an index on "${fieldPath}" for efficient lazy loading. ` +
+              `Falling back to loading all data. ` +
+              `Consider creating an index on the collection with collection.createIndex((row) => row.${fieldPath}) ` +
+              `or enable auto-indexing with autoIndex: 'eager' and a defaultIndexType.`,
+          )
+        }
+
         orderByAlias =
           firstOrderByExpression.path.length > 1
             ? String(firstOrderByExpression.path[0])
@@ -292,12 +303,16 @@ export function processOrderBy(
 
       // Set up lazy loading callback to track how much more data is needed
       // This is used by loadMoreIfNeeded to determine if more data should be loaded
-      setSizeCallback = (getSize: () => number) => {
-        optimizableOrderByCollections[targetCollectionId]![`dataNeeded`] =
-          () => {
-            const size = getSize()
-            return Math.max(0, orderByOptimizationInfo!.limit - size)
-          }
+      // Only enable when an index exists — without an index, lazy loading can't work
+      // and all data is loaded eagerly via requestSnapshot instead.
+      if (index) {
+        setSizeCallback = (getSize: () => number) => {
+          optimizableOrderByCollections[targetCollectionId]![`dataNeeded`] =
+            () => {
+              const size = getSize()
+              return Math.max(0, orderByOptimizationInfo!.limit - size)
+            }
+        }
       }
     }
   }
