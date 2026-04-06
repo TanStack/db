@@ -38,31 +38,28 @@ describe(`bug repro`, () => {
         mockSyncCollectionOptions<Chunk>({
           id: `bug1-chunks`,
           getKey: (c) => c.id,
-          initialData: [
-            { id: 10, messageId: 1, text: `Hello`, timestamp: 1 },
-          ],
+          initialData: [{ id: 10, messageId: 1, text: `Hello`, timestamp: 1 }],
         }),
       )
 
-      expect(
-        () =>
-          createLiveQueryCollection((q) =>
-            q.from({ m: messages }).select(({ m }) => ({
-              id: m.id,
-              content: coalesce(
-                concat(
-                  toArray(
-                    q
-                      .from({ c: chunks })
-                      .where(({ c }) => eq(c.messageId, m.id))
-                      .orderBy(({ c }) => c.timestamp)
-                      .select(({ c }) => c.text),
-                  ),
-                ) as any,
-                ``,
-              ),
-            })),
-          ),
+      expect(() =>
+        createLiveQueryCollection((q) =>
+          q.from({ m: messages }).select(({ m }) => ({
+            id: m.id,
+            content: coalesce(
+              concat(
+                toArray(
+                  q
+                    .from({ c: chunks })
+                    .where(({ c }) => eq(c.messageId, m.id))
+                    .orderBy(({ c }) => c.timestamp)
+                    .select(({ c }) => c.text),
+                ),
+              ) as any,
+              ``,
+            ),
+          })),
+        ),
       ).toThrow(`concat(toArray()) cannot be used inside expressions`)
     })
 
@@ -86,22 +83,21 @@ describe(`bug repro`, () => {
         }),
       )
 
-      expect(
-        () =>
-          createLiveQueryCollection((q) =>
-            q.from({ p: parents }).select(({ p }) => ({
-              id: p.id,
-              items: coalesce(
-                toArray(
-                  q
-                    .from({ c: children })
-                    .where(({ c }) => eq(c.parentId, p.id))
-                    .select(({ c }) => ({ id: c.id })),
-                ) as any,
-                [],
-              ),
-            })),
-          ),
+      expect(() =>
+        createLiveQueryCollection((q) =>
+          q.from({ p: parents }).select(({ p }) => ({
+            id: p.id,
+            items: coalesce(
+              toArray(
+                q
+                  .from({ c: children })
+                  .where(({ c }) => eq(c.parentId, p.id))
+                  .select(({ c }) => ({ id: c.id })),
+              ) as any,
+              [],
+            ),
+          })),
+        ),
       ).toThrow(`toArray() cannot be used inside expressions`)
     })
   })
@@ -359,7 +355,12 @@ describe(`bug repro`, () => {
       expect(data().deltas[0].delta).toBe(`Hello`)
 
       // Second insert — this is the critical path through chained collections
-      rawDeltas.insert({ key: `td-2`, text_id: `t-1`, delta: ` world`, _seq: 2 })
+      rawDeltas.insert({
+        key: `td-2`,
+        text_id: `t-1`,
+        delta: ` world`,
+        _seq: 2,
+      })
       await new Promise((r) => setTimeout(r, 100))
       expect(data().deltas).toHaveLength(2)
     })

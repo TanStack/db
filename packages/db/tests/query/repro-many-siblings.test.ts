@@ -72,31 +72,57 @@ describe(`many sibling toArray includes`, () => {
     // Raw source collections
     const runs = createSyncCollection<RawItem>(`raw-runs`, (r) => r.key)
     const texts = createSyncCollection<RawItem>(`raw-texts`, (r) => r.key)
-    const textDeltas = createSyncCollection<RawItem>(`raw-textDeltas`, (r) => r.key)
-    const toolCalls = createSyncCollection<RawItem>(`raw-toolCalls`, (r) => r.key)
+    const textDeltas = createSyncCollection<RawItem>(
+      `raw-textDeltas`,
+      (r) => r.key,
+    )
+    const toolCalls = createSyncCollection<RawItem>(
+      `raw-toolCalls`,
+      (r) => r.key,
+    )
     const steps = createSyncCollection<RawItem>(`raw-steps`, (r) => r.key)
 
     // Layer 1: derived collections
-    const derivedRuns = createDerivedCollection(`runs`, runs.collection, (d) => ({
-      status: d.status,
-    }))
-    const derivedTexts = createDerivedCollection(`texts`, texts.collection, (d) => ({
-      run_id: d.run_id,
-      status: d.status,
-    }))
-    const derivedTextDeltas = createDerivedCollection(`textDeltas`, textDeltas.collection, (d) => ({
-      text_id: d.text_id,
-      run_id: d.run_id,
-      delta: d.delta,
-    }))
-    const derivedToolCalls = createDerivedCollection(`toolCalls`, toolCalls.collection, (d) => ({
-      run_id: d.run_id,
-      tool_name: d.tool_name,
-    }))
-    const derivedSteps = createDerivedCollection(`steps`, steps.collection, (d) => ({
-      run_id: d.run_id,
-      step_number: d.step_number,
-    }))
+    const derivedRuns = createDerivedCollection(
+      `runs`,
+      runs.collection,
+      (d) => ({
+        status: d.status,
+      }),
+    )
+    const derivedTexts = createDerivedCollection(
+      `texts`,
+      texts.collection,
+      (d) => ({
+        run_id: d.run_id,
+        status: d.status,
+      }),
+    )
+    const derivedTextDeltas = createDerivedCollection(
+      `textDeltas`,
+      textDeltas.collection,
+      (d) => ({
+        text_id: d.text_id,
+        run_id: d.run_id,
+        delta: d.delta,
+      }),
+    )
+    const derivedToolCalls = createDerivedCollection(
+      `toolCalls`,
+      toolCalls.collection,
+      (d) => ({
+        run_id: d.run_id,
+        tool_name: d.tool_name,
+      }),
+    )
+    const derivedSteps = createDerivedCollection(
+      `steps`,
+      steps.collection,
+      (d) => ({
+        run_id: d.run_id,
+        step_number: d.step_number,
+      }),
+    )
 
     // Seed collection
     const seeds = createCollection({
@@ -132,7 +158,11 @@ describe(`many sibling toArray includes`, () => {
               .from({ t: derivedTexts })
               .where(({ t }: any) => eq(t.timelineKey, s.key))
               .orderBy(({ t }: any) => t.order)
-              .select(({ t }: any) => ({ key: t.key, run_id: t.run_id, status: t.status })),
+              .select(({ t }: any) => ({
+                key: t.key,
+                run_id: t.run_id,
+                status: t.status,
+              })),
           ),
           textDeltas: toArray(
             q
@@ -150,14 +180,20 @@ describe(`many sibling toArray includes`, () => {
               .from({ tc: derivedToolCalls })
               .where(({ tc }: any) => eq(tc.timelineKey, s.key))
               .orderBy(({ tc }: any) => tc.order)
-              .select(({ tc }: any) => ({ key: tc.key, tool_name: tc.tool_name })),
+              .select(({ tc }: any) => ({
+                key: tc.key,
+                tool_name: tc.tool_name,
+              })),
           ),
           steps: toArray(
             q
               .from({ st: derivedSteps })
               .where(({ st }: any) => eq(st.timelineKey, s.key))
               .orderBy(({ st }: any) => st.order)
-              .select(({ st }: any) => ({ key: st.key, step_number: st.step_number })),
+              .select(({ st }: any) => ({
+                key: st.key,
+                step_number: st.step_number,
+              })),
           ),
         })),
     })
@@ -168,7 +204,12 @@ describe(`many sibling toArray includes`, () => {
 
     // Insert run + text
     runs.insert({ key: `run-1`, status: `started`, _seq: 1 })
-    texts.insert({ key: `text-1`, run_id: `run-1`, status: `streaming`, _seq: 2 })
+    texts.insert({
+      key: `text-1`,
+      run_id: `run-1`,
+      status: `streaming`,
+      _seq: 2,
+    })
     await new Promise((r) => setTimeout(r, 100))
 
     expect(data().runs).toHaveLength(1)
@@ -176,13 +217,25 @@ describe(`many sibling toArray includes`, () => {
     expect(data().textDeltas).toHaveLength(0)
 
     // First textDelta
-    textDeltas.insert({ key: `td-1`, text_id: `text-1`, run_id: `run-1`, delta: `Hello`, _seq: 3 })
+    textDeltas.insert({
+      key: `td-1`,
+      text_id: `text-1`,
+      run_id: `run-1`,
+      delta: `Hello`,
+      _seq: 3,
+    })
     await new Promise((r) => setTimeout(r, 100))
     expect(data().textDeltas).toHaveLength(1)
     expect(data().textDeltas[0].delta).toBe(`Hello`)
 
     // Second textDelta — the critical test
-    textDeltas.insert({ key: `td-2`, text_id: `text-1`, run_id: `run-1`, delta: ` world`, _seq: 4 })
+    textDeltas.insert({
+      key: `td-2`,
+      text_id: `text-1`,
+      run_id: `run-1`,
+      delta: ` world`,
+      _seq: 4,
+    })
     await new Promise((r) => setTimeout(r, 100))
     expect(data().textDeltas).toHaveLength(2)
   })
