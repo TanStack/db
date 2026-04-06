@@ -1699,6 +1699,30 @@ function flushIncludesState(
         )
       }
     }
+    // Finally: entries with deep nested buffer changes (grandchild-or-deeper buffers
+    // have pending data, but neither this level nor the immediate child level changed).
+    // Without this pass, changes at depth 3+ are stranded because drainNestedBuffers
+    // only drains one level and Phase 4 only flushes entries dirty from Phase 2/3.
+    const deepBufferDirty = new Set<unknown>()
+    if (state.nestedSetups) {
+      for (const [correlationKey, entry] of state.childRegistry) {
+        if (entriesWithChildChanges.has(correlationKey)) continue
+        if (dirtyFromBuffers.has(correlationKey)) continue
+        if (
+          entry.includesStates &&
+          hasPendingIncludesChanges(entry.includesStates)
+        ) {
+          flushIncludesState(
+            entry.includesStates,
+            entry.collection,
+            entry.collection.id,
+            null,
+            entry.syncMethods,
+          )
+          deepBufferDirty.add(correlationKey)
+        }
+      }
+    }
 
     // For inline materializations: re-emit affected parents with updated snapshots.
     // We mutate items in-place (so collection.get() reflects changes immediately)
@@ -1707,7 +1731,11 @@ function flushIncludesState(
     // deepEquals, but in-place mutation means both sides reference the same
     // object, so the comparison always returns true and suppresses the event.
     const inlineReEmitKeys = materializesInline(state)
-      ? new Set([...(affectedCorrelationKeys || []), ...dirtyFromBuffers])
+      ? new Set([
+          ...(affectedCorrelationKeys || []),
+          ...dirtyFromBuffers,
+          ...deepBufferDirty,
+        ])
       : null
     if (parentSyncMethods && inlineReEmitKeys && inlineReEmitKeys.size > 0) {
       const events: Array<ChangeMessage<any>> = []
