@@ -48,11 +48,11 @@ runRuntimePersistenceContractSuite(
   {
     createDatabaseHarness: createRuntimeDatabaseHarness,
     createAdapter: (driver) =>
-      createBrowserWASQLitePersistence<RuntimePersistenceContractTodo, string>({
+      createBrowserWASQLitePersistence({
         database: (driver as BrowserWASQLiteDriver).getDatabase(),
       }).adapter,
     createPersistence: (driver, coordinator) =>
-      createBrowserWASQLitePersistence<RuntimePersistenceContractTodo, string>({
+      createBrowserWASQLitePersistence({
         database: (driver as BrowserWASQLiteDriver).getDatabase(),
         coordinator,
       }),
@@ -98,10 +98,7 @@ describe(`browser wa-sqlite persistence helpers`, () => {
     const firstDatabase = createWASQLiteTestDatabase({ filename: dbPath })
 
     try {
-      const firstPersistence = createBrowserWASQLitePersistence<
-        RuntimePersistenceContractTodo,
-        string
-      >({
+      const firstPersistence = createBrowserWASQLitePersistence({
         database: firstDatabase,
       })
 
@@ -141,10 +138,7 @@ describe(`browser wa-sqlite persistence helpers`, () => {
 
     const secondDatabase = createWASQLiteTestDatabase({ filename: dbPath })
     try {
-      const secondPersistence = createBrowserWASQLitePersistence<
-        RuntimePersistenceContractTodo,
-        string
-      >({
+      const secondPersistence = createBrowserWASQLitePersistence({
         database: secondDatabase,
       })
 

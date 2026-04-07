@@ -40,7 +40,7 @@ it(`persists data across app restart (close and reopen)`, async () => {
   const collectionId = `todos-restart`
 
   const firstDatabase = createCapacitorSQLiteTestDatabase({ filename: dbPath })
-  const firstPersistence = createCapacitorSQLitePersistence<Todo, string>({
+  const firstPersistence = createCapacitorSQLitePersistence({
     database: firstDatabase,
   })
   const firstAdapter = firstPersistence.adapter
@@ -66,7 +66,7 @@ it(`persists data across app restart (close and reopen)`, async () => {
 
   const secondDatabase = createCapacitorSQLiteTestDatabase({ filename: dbPath })
   activeCleanupFns.push(() => secondDatabase.close())
-  const secondPersistence = createCapacitorSQLitePersistence<Todo, string>({
+  const secondPersistence = createCapacitorSQLitePersistence({
     database: secondDatabase,
   })
   const secondAdapter = secondPersistence.adapter
@@ -90,7 +90,7 @@ it(`keeps all committed rows under rapid mutation bursts`, async () => {
   const database = createCapacitorSQLiteTestDatabase({ filename: dbPath })
   activeCleanupFns.push(() => database.close())
 
-  const persistence = createCapacitorSQLitePersistence<Todo, string>({
+  const persistence = createCapacitorSQLitePersistence({
     database,
   })
   const adapter = persistence.adapter
@@ -126,7 +126,7 @@ it(`shares persistence across multiple collections on one database`, async () =>
   const database = createCapacitorSQLiteTestDatabase({ filename: dbPath })
   activeCleanupFns.push(() => database.close())
 
-  const persistence = createCapacitorSQLitePersistence<Todo, string>({
+  const persistence = createCapacitorSQLitePersistence({
     database,
   })
 
@@ -179,7 +179,7 @@ it(`resumes persisted sync after simulated app lifecycle transitions`, async () 
   const database = createCapacitorSQLiteTestDatabase({ filename: dbPath })
   activeCleanupFns.push(() => database.close())
 
-  const persistence = createCapacitorSQLitePersistence<Todo, string>({
+  const persistence = createCapacitorSQLitePersistence({
     database,
   })
   const collection = createCollection(

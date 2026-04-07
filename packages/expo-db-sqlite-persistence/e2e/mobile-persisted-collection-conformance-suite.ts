@@ -26,9 +26,9 @@ type PersistedCollectionHarness<T extends PersistableRow> = {
   seedPersisted: (rows: Array<T>) => Promise<void>
 }
 
-type MobilePersistenceFactory = <T extends PersistableRow>(
+type MobilePersistenceFactory = (
   database: ReturnType<typeof createExpoSQLiteTestDatabase>,
-) => PersistedCollectionPersistence<T, string | number>
+) => PersistedCollectionPersistence
 
 function createPersistedCollection<T extends PersistableRow>(
   database: ReturnType<typeof createExpoSQLiteTestDatabase>,
@@ -36,7 +36,7 @@ function createPersistedCollection<T extends PersistableRow>(
   syncMode: `eager` | `on-demand`,
   createPersistence: MobilePersistenceFactory,
 ): PersistedCollectionHarness<T> {
-  const persistence = createPersistence<T>(database)
+  const persistence = createPersistence(database)
   let seedTxSequence = 0
   const seedPersisted = async (rows: Array<T>): Promise<void> => {
     if (rows.length === 0) {

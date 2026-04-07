@@ -17,7 +17,7 @@ interface SyncExtraUtils extends UtilsRecord {
   refetch: () => Promise<void>
 }
 
-const adapter: PersistenceAdapter<Todo, string> = {
+const adapter: PersistenceAdapter = {
   loadSubset: () => Promise.resolve([]),
   applyCommittedTx: () => Promise.resolve(),
   ensureIndex: () => Promise.resolve(),
