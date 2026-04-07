@@ -324,6 +324,14 @@ function processJoin(
 
           if (!loaded) {
             // Snapshot wasn't sent because it could not be loaded from the indexes
+            const collectionId = followRefCollection.id
+            const fieldPath = followRefResult.path.join(`.`)
+            console.warn(
+              `[TanStack DB]${collectionId ? ` [${collectionId}]` : ``} Join requires an index on "${fieldPath}" for efficient loading. ` +
+                `Falling back to loading all data. ` +
+                `Consider creating an index on the collection with collection.createIndex((row) => row.${fieldPath}) ` +
+                `or enable auto-indexing with autoIndex: 'eager' and a defaultIndexType.`,
+            )
             lazySourceSubscription.requestSnapshot()
           }
         }),

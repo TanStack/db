@@ -332,12 +332,12 @@ export class CollectionSubscriber<
       return true
     }
 
-    const { dataNeeded } = orderByInfo
+    const { dataNeeded, index } = orderByInfo
 
-    if (!dataNeeded) {
-      // dataNeeded is not set when there's no index (e.g., non-ref expression).
-      // In this case, we've already loaded all data via requestSnapshot
-      // and don't need to lazily load more.
+    if (!dataNeeded || !index) {
+      // dataNeeded is not set when there's no index (e.g., non-ref expression
+      // or auto-indexing is disabled). Without an index, lazy loading can't work —
+      // all data was already loaded eagerly via requestSnapshot.
       return true
     }
 

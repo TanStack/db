@@ -883,7 +883,7 @@ class EffectPipelineRunner<TRow extends object, TKey extends string | number> {
     for (const [, orderByInfo] of Object.entries(
       this.optimizableOrderByCollections,
     )) {
-      if (!orderByInfo.dataNeeded) continue
+      if (!orderByInfo.dataNeeded || !orderByInfo.index) continue
 
       if (this.pendingOrderedLoadPromise) {
         // Wait for in-flight loads to complete before requesting more
