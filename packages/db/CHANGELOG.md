@@ -1,5 +1,15 @@
 # @tanstack/db
 
+## 0.6.3
+
+### Patch Changes
+
+- Fix nested `toArray()` includes not propagating changes at depth 3+. When a query used nested includes like `toArray(runs) → toArray(texts) → concat(toArray(textDeltas))`, changes to the deepest level (e.g., inserting a textDelta) were silently lost because `flushIncludesState` only drained one level of nested buffers. Also throw a clear error when `toArray()` or `concat(toArray())` is used inside expressions like `coalesce()`, instead of silently producing incorrect results. ([#1457](https://github.com/TanStack/db/pull/1457))
+
+- fix: orderBy + limit queries crash when no index exists ([#1437](https://github.com/TanStack/db/pull/1437))
+
+  When auto-indexing is disabled (the default), queries with `orderBy` and `limit` where the limit exceeds the available data would crash with "Ordered snapshot was requested but no index was found". The on-demand loader now correctly skips cursor-based loading when no index is available.
+
 ## 0.6.2
 
 ### Patch Changes
