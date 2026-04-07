@@ -10,6 +10,10 @@ export default [
       `**/traildepot/**`,
       `examples/angular/**`,
       `packages/db-collection-e2e/vite.config.ts`,
+      `packages/capacitor-db-sqlite-persistence/e2e/app/android/**`,
+      `packages/capacitor-db-sqlite-persistence/e2e/app/ios/**`,
+      // Expo expects Metro config in CommonJS format.
+      `packages/expo-db-sqlite-persistence/e2e/expo-runtime-app/metro.config.js`,
     ],
   },
   {

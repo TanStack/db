@@ -2,6 +2,10 @@ import { describe, expect, it } from 'vitest'
 import { CollectionImpl } from '../../../src/collection/index.js'
 import { Query, getQueryIR } from '../../../src/query/builder/index.js'
 import {
+  INCLUDES_SCALAR_FIELD,
+  IncludesSubquery,
+} from '../../../src/query/ir.js'
+import {
   add,
   and,
   avg,
@@ -22,6 +26,7 @@ import {
   not,
   or,
   sum,
+  toArray,
   upper,
 } from '../../../src/query/builder/functions.js'
 
@@ -191,12 +196,42 @@ describe(`QueryBuilder Functions`, () => {
       expect((select.full_name as any).name).toBe(`concat`)
     })
 
+    it(`concat(toArray(subquery)) lowers to concat includes materialization`, () => {
+      const query = new Query()
+        .from({ manager: employeesCollection })
+        .select(({ manager }) => ({
+          report_names: concat(
+            toArray(
+              new Query()
+                .from({ employee: employeesCollection })
+                .where(({ employee }) => eq(employee.department_id, manager.id))
+                .select(({ employee }) => employee.name),
+            ),
+          ),
+        }))
+
+      const builtQuery = getQueryIR(query)
+      const select = builtQuery.select!
+      const reportNames = select.report_names
+
+      expect(reportNames).toBeInstanceOf(IncludesSubquery)
+      expect((reportNames as IncludesSubquery).materialization).toBe(`concat`)
+      expect((reportNames as IncludesSubquery).scalarField).toBe(
+        INCLUDES_SCALAR_FIELD,
+      )
+      expect((reportNames as IncludesSubquery).query.select).toEqual({
+        [INCLUDES_SCALAR_FIELD]: expect.objectContaining({
+          type: `ref`,
+        }),
+      })
+    })
+
     it(`coalesce function works`, () => {
       const query = new Query()
         .from({ employees: employeesCollection })
         .select(({ employees }) => ({
           id: employees.id,
-          name_or_default: coalesce([employees.name, `Unknown`]),
+          name_or_default: coalesce(employees.name, `Unknown`),
         }))
 
       const builtQuery = getQueryIR(query)

@@ -2,7 +2,13 @@ import { Aggregate, Func } from '../ir'
 import { toExpression } from './ref-proxy.js'
 import type { BasicExpression } from '../ir'
 import type { RefProxy } from './ref-proxy.js'
-import type { RefLeaf } from './types.js'
+import type {
+  Context,
+  GetRawResult,
+  RefLeaf,
+  StringifiableScalar,
+} from './types.js'
+import type { QueryBuilder } from './index.js'
 
 type StringRef =
   | RefLeaf<string>
@@ -37,8 +43,20 @@ type ComparisonOperandPrimitive<T extends string | number | boolean> =
   | undefined
   | null
 
-// Helper type for any expression-like value
-type ExpressionLike = BasicExpression | RefProxy<any> | RefLeaf<any> | any
+// Helper type for values that can be lowered to expressions.
+type ExpressionLike =
+  | Aggregate
+  | BasicExpression
+  | RefProxy<any>
+  | RefLeaf<any>
+  | string
+  | number
+  | boolean
+  | bigint
+  | Date
+  | null
+  | undefined
+  | Array<unknown>
 
 // Helper type to extract the underlying type from various expression types
 type ExtractType<T> =
@@ -276,20 +294,61 @@ export function length<T extends ExpressionLike>(
   return new Func(`length`, [toExpression(arg)]) as NumericFunctionReturnType<T>
 }
 
+export function concat<T extends StringifiableScalar>(
+  arg: ToArrayWrapper<T>,
+): ConcatToArrayWrapper<T>
+export function concat(...args: Array<ExpressionLike>): BasicExpression<string>
 export function concat(
-  ...args: Array<ExpressionLike>
-): BasicExpression<string> {
+  ...args: Array<ExpressionLike | ToArrayWrapper<any>>
+): BasicExpression<string> | ConcatToArrayWrapper<any> {
+  const toArrayArg = args.find(
+    (arg): arg is ToArrayWrapper<any> => arg instanceof ToArrayWrapper,
+  )
+
+  if (toArrayArg) {
+    if (args.length !== 1) {
+      throw new Error(
+        `concat(toArray(...)) currently supports only a single toArray(...) argument`,
+      )
+    }
+    return new ConcatToArrayWrapper(toArrayArg.query)
+  }
+
   return new Func(
     `concat`,
     args.map((arg) => toExpression(arg)),
   )
 }
 
-export function coalesce(...args: Array<ExpressionLike>): BasicExpression<any> {
+// Helper type for coalesce: extracts non-nullish value types from all args
+type CoalesceArgTypes<T extends Array<ExpressionLike>> = {
+  [K in keyof T]: NonNullable<ExtractType<T[K]>>
+}[number]
+
+// Whether any arg in the tuple is statically guaranteed non-null (i.e., does not include null | undefined)
+type HasGuaranteedNonNull<T extends Array<ExpressionLike>> = {
+  [K in keyof T]: null extends ExtractType<T[K]>
+    ? false
+    : undefined extends ExtractType<T[K]>
+      ? false
+      : true
+}[number] extends false
+  ? false
+  : true
+
+// coalesce() return type: union of all non-null arg types; null included unless a guaranteed non-null arg exists
+type CoalesceReturnType<T extends Array<ExpressionLike>> =
+  HasGuaranteedNonNull<T> extends true
+    ? BasicExpression<CoalesceArgTypes<T>>
+    : BasicExpression<CoalesceArgTypes<T> | null>
+
+export function coalesce<T extends [ExpressionLike, ...Array<ExpressionLike>]>(
+  ...args: T
+): CoalesceReturnType<T> {
   return new Func(
     `coalesce`,
     args.map((arg) => toExpression(arg)),
-  )
+  ) as CoalesceReturnType<T>
 }
 
 export function add<T1 extends ExpressionLike, T2 extends ExpressionLike>(
@@ -376,3 +435,23 @@ export const operators = [
 ] as const
 
 export type OperatorName = (typeof operators)[number]
+
+export class ToArrayWrapper<_T = unknown> {
+  readonly __brand = `ToArrayWrapper` as const
+  declare readonly _type: `toArray`
+  declare readonly _result: _T
+  constructor(public readonly query: QueryBuilder<any>) {}
+}
+
+export class ConcatToArrayWrapper<_T = unknown> {
+  readonly __brand = `ConcatToArrayWrapper` as const
+  declare readonly _type: `concatToArray`
+  declare readonly _result: _T
+  constructor(public readonly query: QueryBuilder<any>) {}
+}
+
+export function toArray<TContext extends Context>(
+  query: QueryBuilder<TContext>,
+): ToArrayWrapper<GetRawResult<TContext>> {
+  return new ToArrayWrapper(query)
+}

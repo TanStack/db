@@ -10,7 +10,7 @@ description: >
   createPacedMutations. Entry point for all TanStack DB skills.
 type: core
 library: db
-library_version: '0.5.30'
+library_version: '0.6.0'
 ---
 
 # TanStack DB — Core Concepts
@@ -33,6 +33,7 @@ hooks. In framework projects, import from the framework package directly.
 | Query data with where, join, groupBy, select     | db-core/live-queries/SKILL.md                        |
 | Insert, update, delete with optimistic UI        | db-core/mutations-optimistic/SKILL.md                |
 | Build a custom sync adapter                      | db-core/custom-adapter/SKILL.md                      |
+| Persist collections to SQLite (offline cache)    | db-core/persistence/SKILL.md                         |
 | Preload collections in route loaders             | meta-framework/SKILL.md                              |
 | Add offline transaction queueing                 | offline/SKILL.md (in @tanstack/offline-transactions) |
 
@@ -54,8 +55,9 @@ For framework-specific hooks:
 - Using React hooks? → react-db
 - Preloading in route loaders (Start, Next, Remix)? → meta-framework
 - Building an adapter for a new backend? → db-core/custom-adapter
+- Persisting collections to SQLite? → db-core/persistence
 - Need offline transaction persistence? → offline
 
 ## Version
 
-Targets @tanstack/db v0.5.30.
+Targets @tanstack/db v0.6.0.

@@ -49,7 +49,7 @@ The `queryCollectionOptions` function accepts the following options:
 
 ### Required Options
 
-- `queryKey`: The query key for TanStack Query
+- `queryKey`: The query key for TanStack Query. Can be a static array or a function that receives `LoadSubsetOptions` and returns a key. When using a function, all returned keys must share the base key (`queryKey({})`) as a prefix — see [Query Key Prefix Convention](#query-key-prefix-convention).
 - `queryFn`: Function that fetches data from the server
 - `queryClient`: TanStack Query client instance
 - `getKey`: Function to extract the unique key from an item
@@ -859,6 +859,30 @@ const productsCollection = createCollection(
     queryFn: async (ctx) => { /* ... */ },
   })
 )
+```
+
+#### Query Key Prefix Convention
+
+When using a function-based `queryKey`, all derived keys **must extend the base key as a prefix**. The base key is what your function returns when called with no options (`queryKey({})`).
+
+TanStack Query uses prefix matching for cache operations internally. The query collection relies on this to find all cache entries belonging to a collection — including stale entries from destroyed query observers that are still held in cache due to `gcTime`. If derived keys don't share the base prefix, cache updates may silently miss entries, leading to stale data.
+
+```typescript
+// ✅ Correct: base key ['products'] is a prefix of all derived keys
+queryKey: (opts) => {
+  if (opts.where) {
+    return ['products', JSON.stringify(opts.where)]
+  }
+  return ['products']
+}
+
+// ❌ Wrong: base key ['products-all'] is NOT a prefix of ['products-filtered', ...]
+queryKey: (opts) => {
+  if (opts.where) {
+    return ['products-filtered', JSON.stringify(opts.where)]
+  }
+  return ['products-all']
+}
 ```
 
 ### Tips

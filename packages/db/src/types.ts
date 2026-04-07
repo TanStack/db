@@ -4,7 +4,9 @@ import type { StandardSchemaV1 } from '@standard-schema/spec'
 import type { Transaction } from './transactions'
 import type { BasicExpression, OrderBy } from './query/ir.js'
 import type { EventEmitter } from './event-emitter.js'
+import type { IndexConstructor } from './indexes/base-index.js'
 import type { SingleRowRefProxy } from './query/builder/ref-proxy.js'
+import type { WithVirtualProps } from './virtual-props.js'
 
 /**
  * Interface for a collection-like object that provides the necessary methods
@@ -338,6 +340,7 @@ export interface SyncConfig<
     commit: () => void
     markReady: () => void
     truncate: () => void
+    metadata?: SyncMetadataApi<TKey>
   }) => void | CleanupFn | SyncConfigRes
 
   /**
@@ -354,6 +357,25 @@ export interface SyncConfig<
    * - `full`: Updates contain the entire row.
    */
   rowUpdateMode?: `partial` | `full`
+}
+
+export interface SyncMetadataApi<
+  TKey extends string | number = string | number,
+> {
+  row: {
+    get: (key: TKey) => unknown | undefined
+    set: (key: TKey, metadata: unknown) => void
+    delete: (key: TKey) => void
+  }
+  collection: {
+    get: (key: string) => unknown | undefined
+    set: (key: string, value: unknown) => void
+    delete: (key: string) => void
+    list: (prefix?: string) => ReadonlyArray<{
+      key: string
+      value: unknown
+    }>
+  }
 }
 
 export interface ChangeMessage<
@@ -540,12 +562,27 @@ export interface BaseCollectionConfig<
   /**
    * Auto-indexing mode for the collection.
    * When enabled, indexes will be automatically created for simple where expressions.
-   * @default "eager"
+   * @default "off"
    * @description
-   * - "off": No automatic indexing
-   * - "eager": Automatically create indexes for simple where expressions in subscribeChanges (default)
+   * - "off": No automatic indexing (default). Use explicit indexes for better bundle size.
+   * - "eager": Automatically create indexes for simple where expressions in subscribeChanges.
+   *            Requires setting defaultIndexType.
    */
   autoIndex?: `off` | `eager`
+  /**
+   * Default index type to use when creating indexes without an explicit type.
+   * Required for auto-indexing. Import from '@tanstack/db'.
+   * @example
+   * ```ts
+   * import { BasicIndex } from '@tanstack/db'
+   * const collection = createCollection({
+   *   defaultIndexType: BasicIndex,
+   *   autoIndex: 'eager',
+   *   // ...
+   * })
+   * ```
+   */
+  defaultIndexType?: IndexConstructor<TKey>
   /**
    * Optional function to compare two items.
    * This is used to order the items in the collection.
@@ -739,9 +776,10 @@ export type CollectionConfigSingleRowOption<
   TUtils extends UtilsRecord = {},
 > = CollectionConfig<T, TKey, TSchema, TUtils> & MaybeSingleResult
 
-export type ChangesPayload<T extends object = Record<string, unknown>> = Array<
-  ChangeMessage<T>
->
+export type ChangesPayload<
+  T extends object = Record<string, unknown>,
+  TKey extends string | number = string | number,
+> = Array<ChangeMessage<WithVirtualProps<T, TKey>, TKey>>
 
 /**
  * An input row from a collection
@@ -783,6 +821,7 @@ export type NamespacedAndKeyedStream = IStreamBuilder<KeyedNamespacedRow>
  */
 export interface SubscribeChangesOptions<
   T extends object = Record<string, unknown>,
+  TKey extends string | number = string | number,
 > {
   /** Whether to include the current state as initial changes */
   includeInitialState?: boolean
@@ -800,7 +839,7 @@ export interface SubscribeChangesOptions<
    * })
    * ```
    */
-  where?: (row: SingleRowRefProxy<T>) => any
+  where?: (row: SingleRowRefProxy<WithVirtualProps<T, TKey>>) => any
   /** Pre-compiled expression for filtering changes */
   whereExpression?: BasicExpression<boolean>
   /**
@@ -829,7 +868,8 @@ export interface SubscribeChangesOptions<
 
 export interface SubscribeChangesSnapshotOptions<
   T extends object = Record<string, unknown>,
-> extends Omit<SubscribeChangesOptions<T>, `includeInitialState`> {
+  TKey extends string | number = string | number,
+> extends Omit<SubscribeChangesOptions<T, TKey>, `includeInitialState`> {
   orderBy?: OrderBy
   limit?: number
 }
@@ -879,7 +919,7 @@ export interface CurrentStateAsChangesOptions {
 export type ChangeListener<
   T extends object = Record<string, unknown>,
   TKey extends string | number = string | number,
-> = (changes: Array<ChangeMessage<T, TKey>>) => void
+> = (changes: Array<ChangeMessage<WithVirtualProps<T, TKey>, TKey>>) => void
 
 // Adapted from https://github.com/sindresorhus/type-fest
 // MIT License Copyright (c) Sindre Sorhus

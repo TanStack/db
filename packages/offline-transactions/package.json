@@ -1,6 +1,6 @@
 {
   "name": "@tanstack/offline-transactions",
-  "version": "1.0.24",
+  "version": "1.0.27",
   "description": "Offline-first transaction capabilities for TanStack DB",
   "author": "TanStack",
   "license": "MIT",
@@ -15,7 +15,8 @@
     "offline",
     "transactions",
     "persistence",
-    "sync"
+    "sync",
+    "tanstack-intent"
   ],
   "scripts": {
     "build": "vite build",

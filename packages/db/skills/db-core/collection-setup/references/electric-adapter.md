@@ -78,7 +78,7 @@ onInsert: async ({ transaction }) => {
 
 ## Utility Methods (`collection.utils`)
 
-- `awaitTxId(txid, timeout?)` -- wait for txid in Electric stream; default timeout 30s
+- `awaitTxId(txid, timeout?)` -- wait for txid in Electric stream; default timeout 5s
 - `awaitMatch(matchFn, timeout?)` -- wait for message matching predicate; default timeout 3000ms
 
 ### Helper Exports

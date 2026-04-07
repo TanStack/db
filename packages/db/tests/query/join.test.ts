@@ -17,6 +17,7 @@ import {
   flushPromises,
   mockSyncCollectionOptions,
   mockSyncCollectionOptionsNoInitialState,
+  stripVirtualProps,
 } from '../utils.js'
 
 // Sample data types for join testing
@@ -1040,7 +1041,10 @@ function createJoinTests(autoIndex: `off` | `eager`): void {
         })
 
         expect(query.toArray).toHaveLength(1)
-        expect(query.toArray[0]).toEqual({ leftId: 1, rightId: 10 })
+        expect(stripVirtualProps(query.toArray[0])).toEqual({
+          leftId: 1,
+          rightId: 10,
+        })
       })
 
       test(`should update Date join matches when timestamp changes`, () => {
@@ -1102,7 +1106,10 @@ function createJoinTests(autoIndex: `off` | `eager`): void {
         rightCollection.utils.commit()
 
         expect(query.toArray).toHaveLength(1)
-        expect(query.toArray[0]).toEqual({ leftId: 1, rightId: 10 })
+        expect(stripVirtualProps(query.toArray[0])).toEqual({
+          leftId: 1,
+          rightId: 10,
+        })
       })
     })
 
@@ -1413,7 +1420,9 @@ function createJoinTests(autoIndex: `off` | `eager`): void {
             })),
       })
 
-      const forwardResults = forwardJoinQuery.toArray
+      const forwardResults = forwardJoinQuery.toArray.map((row) =>
+        stripVirtualProps(row),
+      )
       expect(forwardResults).toHaveLength(2) // Bob->Alice, Charlie->Alice
 
       // Test reverse direction: eq(parentUsers.id, users.parentId)
@@ -1433,7 +1442,9 @@ function createJoinTests(autoIndex: `off` | `eager`): void {
             })),
       })
 
-      const reverseResults = reverseJoinQuery.toArray
+      const reverseResults = reverseJoinQuery.toArray.map((row) =>
+        stripVirtualProps(row),
+      )
       expect(reverseResults).toHaveLength(2) // Bob->Alice, Charlie->Alice
 
       // Both should produce identical results
@@ -1893,7 +1904,10 @@ function createJoinTests(autoIndex: `off` | `eager`): void {
           .select(({ l, r }) => ({ leftId: l.id, right: r })),
     })
 
-    const data = lq.toArray
+    const data = lq.toArray.map((row) => ({
+      leftId: row.leftId,
+      right: stripVirtualProps(row.right),
+    }))
 
     // l1 joins r1 (payload='ok') → payload is defined → exclude
     // l2 joins r2 (payload=null) → payload is null, not undefined → exclude

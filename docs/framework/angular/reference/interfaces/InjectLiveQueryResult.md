@@ -22,8 +22,8 @@ Contains reactive signals for the query state and data.
 
 ```ts
 collection: Signal<
-  | Collection<{ [K in string | number | symbol]: (TContext["result"] extends object ? any[any] : TContext["hasJoins"] extends true ? TContext["schema"] : TContext["schema"][TContext["fromSourceName"]])[K] }, string | number, {
-}, StandardSchemaV1<unknown, unknown>, { [K in string | number | symbol]: (TContext["result"] extends object ? any[any] : TContext["hasJoins"] extends true ? TContext["schema"] : TContext["schema"][TContext["fromSourceName"]])[K] }>
+  | Collection<{ [K in string | number | symbol]: ResultValue<TContext>[K] }, string | number, {
+}, StandardSchemaV1<unknown, unknown>, { [K in string | number | symbol]: ResultValue<TContext>[K] }>
 | null>;
 ```
 
@@ -108,7 +108,7 @@ A signal indicating whether the collection is ready
 ### state
 
 ```ts
-state: Signal<Map<string | number, { [K in string | number | symbol]: (TContext["result"] extends object ? any[any] : TContext["hasJoins"] extends true ? TContext["schema"] : TContext["schema"][TContext["fromSourceName"]])[K] }>>;
+state: Signal<Map<string | number, { [K in string | number | symbol]: ResultValue<TContext>[K] }>>;
 ```
 
 Defined in: [index.ts:34](https://github.com/TanStack/db/blob/main/packages/angular-db/src/index.ts#L34)

@@ -1,6 +1,6 @@
 {
   "name": "@tanstack/angular-db",
-  "version": "0.1.59",
+  "version": "0.1.62",
   "description": "Angular integration for @tanstack/db",
   "author": "Ethan McDaniel",
   "license": "MIT",
@@ -13,7 +13,8 @@
   "keywords": [
     "optimistic",
     "angular",
-    "typescript"
+    "typescript",
+    "tanstack-intent"
   ],
   "scripts": {
     "build": "vite build",

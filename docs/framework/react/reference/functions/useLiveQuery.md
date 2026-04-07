@@ -44,7 +44,7 @@ Object with reactive data, state, and status information
 #### collection
 
 ```ts
-collection: Collection<{ [K in string | number | symbol]: (TContext["result"] extends object ? any[any] : TContext["hasJoins"] extends true ? TContext["schema"] : TContext["schema"][TContext["fromSourceName"]])[K] }, string | number, {
+collection: Collection<{ [K in string | number | symbol]: ResultValue<TContext>[K] }, string | number, {
 }>;
 ```
 
@@ -93,7 +93,7 @@ isReady: boolean;
 #### state
 
 ```ts
-state: Map<string | number, { [K in string | number | symbol]: (TContext["result"] extends object ? any[any] : TContext["hasJoins"] extends true ? TContext["schema"] : TContext["schema"][TContext["fromSourceName"]])[K] }>;
+state: Map<string | number, { [K in string | number | symbol]: ResultValue<TContext>[K] }>;
 ```
 
 #### status
@@ -202,8 +202,8 @@ Object with reactive data, state, and status information
 
 ```ts
 collection: 
-  | Collection<{ [K in string | number | symbol]: (TContext["result"] extends object ? any[any] : TContext["hasJoins"] extends true ? TContext["schema"] : TContext["schema"][TContext["fromSourceName"]])[K] }, string | number, {
-}, StandardSchemaV1<unknown, unknown>, { [K in string | number | symbol]: (TContext["result"] extends object ? any[any] : TContext["hasJoins"] extends true ? TContext["schema"] : TContext["schema"][TContext["fromSourceName"]])[K] }>
+  | Collection<{ [K in string | number | symbol]: ResultValue<TContext>[K] }, string | number, {
+}, StandardSchemaV1<unknown, unknown>, { [K in string | number | symbol]: ResultValue<TContext>[K] }>
   | undefined;
 ```
 
@@ -253,7 +253,7 @@ isReady: boolean;
 
 ```ts
 state: 
-  | Map<string | number, { [K in string | number | symbol]: (TContext["result"] extends object ? any[any] : TContext["hasJoins"] extends true ? TContext["schema"] : TContext["schema"][TContext["fromSourceName"]])[K] }>
+  | Map<string | number, { [K in string | number | symbol]: ResultValue<TContext>[K] }>
   | undefined;
 ```
 
@@ -344,7 +344,7 @@ Create a live query using a query function
 #### queryFn
 
 (`q`) => 
-  \| `LiveQueryCollectionConfig`\<`TContext`, \{ \[K in string \| number \| symbol\]: (TContext\["result"\] extends object ? any\[any\] : TContext\["hasJoins"\] extends true ? TContext\["schema"\] : TContext\["schema"\]\[TContext\["fromSourceName"\]\])\[K\] \} & `object`\>
+  \| `LiveQueryCollectionConfig`\<`TContext`, `RootQueryResult`\<`TContext`\>\>
   \| `null`
   \| `undefined`
 
@@ -366,8 +366,8 @@ Object with reactive data, state, and status information
 
 ```ts
 collection: 
-  | Collection<{ [K in string | number | symbol]: (TContext["result"] extends object ? any[any] : TContext["hasJoins"] extends true ? TContext["schema"] : TContext["schema"][TContext["fromSourceName"]])[K] }, string | number, {
-}, StandardSchemaV1<unknown, unknown>, { [K in string | number | symbol]: (TContext["result"] extends object ? any[any] : TContext["hasJoins"] extends true ? TContext["schema"] : TContext["schema"][TContext["fromSourceName"]])[K] }>
+  | Collection<{ [K in string | number | symbol]: ResultValue<TContext>[K] }, string | number, {
+}, StandardSchemaV1<unknown, unknown>, { [K in string | number | symbol]: ResultValue<TContext>[K] }>
   | undefined;
 ```
 
@@ -417,7 +417,7 @@ isReady: boolean;
 
 ```ts
 state: 
-  | Map<string | number, { [K in string | number | symbol]: (TContext["result"] extends object ? any[any] : TContext["hasJoins"] extends true ? TContext["schema"] : TContext["schema"][TContext["fromSourceName"]])[K] }>
+  | Map<string | number, { [K in string | number | symbol]: ResultValue<TContext>[K] }>
   | undefined;
 ```
 
@@ -690,7 +690,7 @@ Create a live query using a query function
 
 (`q`) => 
   \| `QueryBuilder`\<`TContext`\>
-  \| `LiveQueryCollectionConfig`\<`TContext`, \{ \[K in string \| number \| symbol\]: (TContext\["result"\] extends object ? any\[any\] : TContext\["hasJoins"\] extends true ? TContext\["schema"\] : TContext\["schema"\]\[TContext\["fromSourceName"\]\])\[K\] \} & `object`\>
+  \| `LiveQueryCollectionConfig`\<`TContext`, `RootQueryResult`\<`TContext`\>\>
   \| `Collection`\<`TResult`, `TKey`, `TUtils`, `StandardSchemaV1`\<`unknown`, `unknown`\>, `TResult`\>
   \| `null`
   \| `undefined`
@@ -714,8 +714,8 @@ Object with reactive data, state, and status information
 ```ts
 collection: 
   | Collection<TResult, TKey, TUtils, StandardSchemaV1<unknown, unknown>, TResult>
-  | Collection<{ [K in string | number | symbol]: (TContext["result"] extends object ? any[any] : TContext["hasJoins"] extends true ? TContext["schema"] : TContext["schema"][TContext["fromSourceName"]])[K] }, string | number, {
-}, StandardSchemaV1<unknown, unknown>, { [K in string | number | symbol]: (TContext["result"] extends object ? any[any] : TContext["hasJoins"] extends true ? TContext["schema"] : TContext["schema"][TContext["fromSourceName"]])[K] }>
+  | Collection<{ [K in string | number | symbol]: ResultValue<TContext>[K] }, string | number, {
+}, StandardSchemaV1<unknown, unknown>, { [K in string | number | symbol]: ResultValue<TContext>[K] }>
   | undefined;
 ```
 
@@ -765,7 +765,7 @@ isReady: boolean;
 
 ```ts
 state: 
-  | Map<string | number, { [K in string | number | symbol]: (TContext["result"] extends object ? any[any] : TContext["hasJoins"] extends true ? TContext["schema"] : TContext["schema"][TContext["fromSourceName"]])[K] }>
+  | Map<string | number, { [K in string | number | symbol]: ResultValue<TContext>[K] }>
   | Map<TKey, TResult>
   | undefined;
 ```
@@ -875,7 +875,7 @@ Object with reactive data, state, and status information
 #### collection
 
 ```ts
-collection: Collection<{ [K in string | number | symbol]: (TContext["result"] extends object ? any[any] : TContext["hasJoins"] extends true ? TContext["schema"] : TContext["schema"][TContext["fromSourceName"]])[K] }, string | number, {
+collection: Collection<{ [K in string | number | symbol]: ResultValue<TContext>[K] }, string | number, {
 }>;
 ```
 
@@ -924,7 +924,7 @@ isReady: boolean;
 #### state
 
 ```ts
-state: Map<string | number, { [K in string | number | symbol]: (TContext["result"] extends object ? any[any] : TContext["hasJoins"] extends true ? TContext["schema"] : TContext["schema"][TContext["fromSourceName"]])[K] }>;
+state: Map<string | number, { [K in string | number | symbol]: ResultValue<TContext>[K] }>;
 ```
 
 #### status

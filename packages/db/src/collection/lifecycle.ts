@@ -7,6 +7,7 @@ import {
   safeCancelIdleCallback,
   safeRequestIdleCallback,
 } from '../utils/browser-polyfills'
+import { CleanupQueue } from './cleanup-queue'
 import type { IdleCallbackDeadline } from '../utils/browser-polyfills'
 import type { StandardSchemaV1 } from '@standard-schema/spec'
 import type { CollectionConfig, CollectionStatus } from '../types'
@@ -34,7 +35,6 @@ export class CollectionLifecycleManager<
   public hasBeenReady = false
   public hasReceivedFirstCommit = false
   public onFirstReadyCallbacks: Array<() => void> = []
-  public gcTimeoutId: ReturnType<typeof setTimeout> | null = null
   private idleCallbackId: number | null = null
 
   /**
@@ -106,17 +106,6 @@ export class CollectionLifecycleManager<
     const previousStatus = this.status
     this.status = newStatus
 
-    // Resolve indexes when collection becomes ready
-    if (newStatus === `ready` && !this.indexes.isIndexesResolved) {
-      // Resolve indexes asynchronously without blocking
-      this.indexes.resolveAllIndexes().catch((error) => {
-        console.warn(
-          `${this.config.id ? `[${this.config.id}] ` : ``}Failed to resolve indexes:`,
-          error,
-        )
-      })
-    }
-
     // Emit event
     this.events.emitStatusChange(newStatus, previousStatus)
   }
@@ -174,10 +163,6 @@ export class CollectionLifecycleManager<
    * Called when the collection becomes inactive (no subscribers)
    */
   public startGCTimer(): void {
-    if (this.gcTimeoutId) {
-      clearTimeout(this.gcTimeoutId)
-    }
-
     const gcTime = this.config.gcTime ?? 300000 // 5 minutes default
 
     // If gcTime is 0, negative, or non-finite (Infinity, -Infinity, NaN), GC is disabled.
@@ -187,12 +172,12 @@ export class CollectionLifecycleManager<
       return
     }
 
-    this.gcTimeoutId = setTimeout(() => {
+    CleanupQueue.getInstance().schedule(this, gcTime, () => {
       if (this.changes.activeSubscribersCount === 0) {
         // Schedule cleanup during idle time to avoid blocking the UI thread
         this.scheduleIdleCleanup()
       }
-    }, gcTime)
+    })
   }
 
   /**
@@ -200,10 +185,7 @@ export class CollectionLifecycleManager<
    * Called when the collection becomes active again
    */
   public cancelGCTimer(): void {
-    if (this.gcTimeoutId) {
-      clearTimeout(this.gcTimeoutId)
-      this.gcTimeoutId = null
-    }
+    CleanupQueue.getInstance().cancel(this)
     // Also cancel any pending idle cleanup
     if (this.idleCallbackId !== null) {
       safeCancelIdleCallback(this.idleCallbackId)
@@ -258,10 +240,7 @@ export class CollectionLifecycleManager<
       this.changes.cleanup()
       this.indexes.cleanup()
 
-      if (this.gcTimeoutId) {
-        clearTimeout(this.gcTimeoutId)
-        this.gcTimeoutId = null
-      }
+      CleanupQueue.getInstance().cancel(this)
 
       this.hasBeenReady = false
 

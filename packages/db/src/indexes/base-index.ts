@@ -26,7 +26,7 @@ export interface IndexStats {
 }
 
 export interface IndexInterface<
-  TKey extends string | number | undefined = string | number | undefined,
+  TKey extends string | number = string | number,
 > {
   add: (key: TKey, item: any) => void
   remove: (key: TKey, item: any) => void
@@ -79,7 +79,7 @@ export interface IndexInterface<
  * Base abstract class that all index types extend
  */
 export abstract class BaseIndex<
-  TKey extends string | number | undefined = string | number | undefined,
+  TKey extends string | number = string | number,
 > implements IndexInterface<TKey> {
   public readonly id: number
   public readonly name?: string
@@ -189,7 +189,6 @@ export abstract class BaseIndex<
     }
   }
 
-  // Protected methods for subclasses
   protected abstract initialize(options?: any): void
 
   protected evaluateIndexExpression(item: any): any {
@@ -218,10 +217,3 @@ export type IndexConstructor<TKey extends string | number = string | number> =
     name?: string,
     options?: any,
   ) => BaseIndex<TKey>
-
-/**
- * Index resolver can be either a class constructor or async loader
- */
-export type IndexResolver<TKey extends string | number = string | number> =
-  | IndexConstructor<TKey>
-  | (() => Promise<IndexConstructor<TKey>>)

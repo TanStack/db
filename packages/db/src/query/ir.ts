@@ -25,10 +25,14 @@ export interface QueryIR {
   fnHaving?: Array<(row: NamespacedRow) => any>
 }
 
+export type IncludesMaterialization = `collection` | `array` | `concat`
+
+export const INCLUDES_SCALAR_FIELD = `__includes_scalar__`
+
 export type From = CollectionRef | QueryRef
 
 export type Select = {
-  [alias: string]: BasicExpression | Aggregate | Select
+  [alias: string]: BasicExpression | Aggregate | Select | IncludesSubquery
 }
 
 export type Join = Array<JoinClause>
@@ -132,6 +136,22 @@ export class Aggregate<T = any> extends BaseExpression<T> {
   }
 }
 
+export class IncludesSubquery extends BaseExpression {
+  public type = `includesSubquery` as const
+  constructor(
+    public query: QueryIR, // Child query (correlation WHERE removed)
+    public correlationField: PropRef, // Parent-side ref (e.g., project.id)
+    public childCorrelationField: PropRef, // Child-side ref (e.g., issue.projectId)
+    public fieldName: string, // Result field name (e.g., "issues")
+    public parentFilters?: Array<Where>, // WHERE clauses referencing parent aliases (applied post-join)
+    public parentProjection?: Array<PropRef>, // Parent field refs used by parentFilters
+    public materialization: IncludesMaterialization = `collection`,
+    public scalarField?: string,
+  ) {
+    super()
+  }
+}
+
 /**
  * Runtime helper to detect IR expression-like objects.
  * Prefer this over ad-hoc local implementations to keep behavior consistent.
@@ -141,7 +161,8 @@ export function isExpressionLike(value: any): boolean {
     value instanceof Aggregate ||
     value instanceof Func ||
     value instanceof PropRef ||
-    value instanceof Value
+    value instanceof Value ||
+    value instanceof IncludesSubquery
   )
 }
 

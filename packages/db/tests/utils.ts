@@ -1,10 +1,45 @@
 import { expect } from 'vitest'
+import { BTreeIndex } from '../src/indexes/btree-index'
 import type {
   CollectionConfig,
   MutationFnParams,
   StringCollationConfig,
   SyncConfig,
 } from '../src/index.js'
+import type { IndexConstructor } from '../src/indexes/base-index'
+import type { WithVirtualProps } from '../src/virtual-props.js'
+
+export type OutputWithVirtual<
+  T extends object,
+  TKey extends string | number = string | number,
+> = WithVirtualProps<T, TKey>
+
+export const stripVirtualProps = <T extends Record<string, any> | undefined>(
+  value: T,
+) => {
+  if (!value || typeof value !== `object`) return value
+  const {
+    $synced: _synced,
+    $origin: _origin,
+    $key: _key,
+    $collectionId: _collectionId,
+    ...rest
+  } = value as Record<string, unknown>
+  return rest as T
+}
+
+export const omitVirtualProps = <T extends Record<string, any>>(
+  value: T,
+): Omit<T, '$synced' | '$origin' | '$key' | '$collectionId'> => {
+  const {
+    $synced: _synced,
+    $origin: _origin,
+    $key: _key,
+    $collectionId: _collectionId,
+    ...rest
+  } = value as Record<string, unknown>
+  return rest as any
+}
 
 // Index usage tracking utilities
 export interface IndexUsageStats {
@@ -181,6 +216,7 @@ type MockSyncCollectionConfig<T extends object = Record<string, unknown>> = {
   sync?: SyncConfig<T>
   syncMode?: `eager` | `on-demand`
   defaultStringCollation?: StringCollationConfig
+  defaultIndexType?: IndexConstructor
 }
 
 export function mockSyncCollectionOptions<
@@ -262,6 +298,10 @@ export function mockSyncCollectionOptions<
     utils,
     ...config,
     autoIndex: config.autoIndex,
+    // When autoIndex is 'eager', we need a defaultIndexType
+    defaultIndexType:
+      config.defaultIndexType ??
+      (config.autoIndex === `eager` ? BTreeIndex : undefined),
   }
 
   return options
@@ -271,6 +311,7 @@ type MockSyncCollectionConfigNoInitialState<T> = {
   id: string
   getKey: (item: T) => string | number
   autoIndex?: `off` | `eager`
+  defaultIndexType?: IndexConstructor
 }
 
 export function mockSyncCollectionOptionsNoInitialState<
@@ -344,6 +385,10 @@ export function mockSyncCollectionOptionsNoInitialState<
     utils,
     ...config,
     autoIndex: config.autoIndex,
+    // When autoIndex is 'eager', we need a defaultIndexType
+    defaultIndexType:
+      config.defaultIndexType ??
+      (config.autoIndex === `eager` ? BTreeIndex : undefined),
   }
 
   return options

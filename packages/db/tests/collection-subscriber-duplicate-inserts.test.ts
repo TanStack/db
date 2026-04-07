@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { createCollection } from '../src/collection/index.js'
+import { BTreeIndex } from '../src/indexes/btree-index.js'
 import { createLiveQueryCollection, eq } from '../src/query/index.js'
 import { mockSyncCollectionOptions } from './utils.js'
 import type { ChangeMessage } from '../src/types.js'
@@ -279,6 +280,8 @@ describe(`CollectionSubscriber duplicate insert prevention`, () => {
         id: `duplicate-d2-mutation-during-setup`,
         getKey: (item: TestItem) => item.id,
         initialData,
+        autoIndex: `eager`,
+        defaultIndexType: BTreeIndex,
       }),
     )
 

@@ -1,10 +1,19 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { createTransaction } from '../src/transactions'
 import { createCollection } from '../src/collection/index.js'
+import { stripVirtualProps } from './utils'
 import type { CollectionImpl } from '../src/collection/index.js'
 import type { SyncConfig } from '../src/types'
 
 type Item = { id: string; name: string }
+
+const stripValues = <T extends object>(values: Array<T>): Array<T> =>
+  values.map((value) => stripVirtualProps(value))
+
+const stripEntries = <TKey extends string | number, T extends object>(
+  entries: Array<[TKey, T]>,
+): Array<[TKey, T]> =>
+  entries.map(([key, value]) => [key, stripVirtualProps(value)])
 
 describe(`Collection getters`, () => {
   let collection: CollectionImpl<Item>
@@ -42,11 +51,11 @@ describe(`Collection getters`, () => {
       const state = collection.state
       expect(state).toBeInstanceOf(Map)
       expect(state.size).toBe(2)
-      expect(state.get(`item1`)).toEqual({
+      expect(stripVirtualProps(state.get(`item1`))).toEqual({
         id: `item1`,
         name: `Item 1`,
       })
-      expect(state.get(`item2`)).toEqual({
+      expect(stripVirtualProps(state.get(`item2`))).toEqual({
         id: `item2`,
         name: `Item 2`,
       })
@@ -256,7 +265,7 @@ describe(`Collection getters`, () => {
 
   describe(`values method`, () => {
     it(`returns all values as an iterator`, () => {
-      const values = Array.from(collection.values())
+      const values = stripValues(Array.from(collection.values()))
       expect(values).toHaveLength(2)
       expect(values).toContainEqual({ id: `item1`, name: `Item 1` })
       expect(values).toContainEqual({ id: `item2`, name: `Item 2` })
@@ -268,7 +277,7 @@ describe(`Collection getters`, () => {
       const tx = createTransaction({ mutationFn })
       tx.mutate(() => collection.delete(`item1`))
 
-      const values = Array.from(collection.values())
+      const values = stripValues(Array.from(collection.values()))
       expect(values).toHaveLength(1)
       expect(values).toContainEqual({ id: `item2`, name: `Item 2` })
       expect(values).not.toContainEqual({ id: `item1`, name: `Item 1` })
@@ -280,7 +289,7 @@ describe(`Collection getters`, () => {
       const tx = createTransaction({ mutationFn })
       tx.mutate(() => collection.insert({ id: `item3`, name: `Item 3` }))
 
-      const values = Array.from(collection.values())
+      const values = stripValues(Array.from(collection.values()))
       expect(values).toHaveLength(3)
       expect(values).toContainEqual({ id: `item1`, name: `Item 1` })
       expect(values).toContainEqual({ id: `item2`, name: `Item 2` })
@@ -297,7 +306,7 @@ describe(`Collection getters`, () => {
         }),
       )
 
-      const values = Array.from(collection.values())
+      const values = stripValues(Array.from(collection.values()))
       expect(values).toHaveLength(2)
       expect(values).toContainEqual({ id: `item1`, name: `Updated Item 1` })
       expect(values).toContainEqual({ id: `item2`, name: `Item 2` })
@@ -306,7 +315,7 @@ describe(`Collection getters`, () => {
 
   describe(`entries method`, () => {
     it(`returns all entries as an iterator`, () => {
-      const entries = Array.from(collection.entries())
+      const entries = stripEntries(Array.from(collection.entries()))
       expect(entries).toHaveLength(2)
       expect(entries).toContainEqual([`item1`, { id: `item1`, name: `Item 1` }])
       expect(entries).toContainEqual([`item2`, { id: `item2`, name: `Item 2` }])
@@ -318,7 +327,7 @@ describe(`Collection getters`, () => {
       const tx = createTransaction({ mutationFn })
       tx.mutate(() => collection.delete(`item1`))
 
-      const entries = Array.from(collection.entries())
+      const entries = stripEntries(Array.from(collection.entries()))
       expect(entries).toHaveLength(1)
       expect(entries).toContainEqual([`item2`, { id: `item2`, name: `Item 2` }])
     })
@@ -329,7 +338,7 @@ describe(`Collection getters`, () => {
       const tx = createTransaction({ mutationFn })
       tx.mutate(() => collection.insert({ id: `item3`, name: `Item 3` }))
 
-      const entries = Array.from(collection.entries())
+      const entries = stripEntries(Array.from(collection.entries()))
       expect(entries).toHaveLength(3)
       expect(entries).toContainEqual([`item1`, { id: `item1`, name: `Item 1` }])
       expect(entries).toContainEqual([`item2`, { id: `item2`, name: `Item 2` }])
@@ -346,7 +355,7 @@ describe(`Collection getters`, () => {
         }),
       )
 
-      const entries = Array.from(collection.entries())
+      const entries = stripEntries(Array.from(collection.entries()))
       expect(entries).toHaveLength(2)
       expect(entries).toContainEqual([
         `item1`,
@@ -360,7 +369,7 @@ describe(`Collection getters`, () => {
     it(`returns the correct value for existing items`, () => {
       const key = `item1`
       const value = collection.get(key)
-      expect(value).toEqual({ id: `item1`, name: `Item 1` })
+      expect(stripVirtualProps(value)).toEqual({ id: `item1`, name: `Item 1` })
     })
 
     it(`returns undefined for non-existing items`, () => {
@@ -377,7 +386,7 @@ describe(`Collection getters`, () => {
 
       const key = `item3`
       const value = collection.get(key)
-      expect(value).toEqual({ id: `item3`, name: `Item 3` })
+      expect(stripVirtualProps(value)).toEqual({ id: `item3`, name: `Item 3` })
     })
 
     it(`returns undefined for optimistically deleted items`, () => {
@@ -403,7 +412,10 @@ describe(`Collection getters`, () => {
 
       const key = `item1`
       const value = collection.get(key)
-      expect(value).toEqual({ id: `item1`, name: `Updated Item 1` })
+      expect(stripVirtualProps(value)).toEqual({
+        id: `item1`,
+        name: `Updated Item 1`,
+      })
     })
   })
 
@@ -453,7 +465,7 @@ describe(`Collection getters`, () => {
       // Now the promise should resolve
       const state = await statePromise
       expect(state).toBeInstanceOf(Map)
-      expect(state.get(`delayed-item`)).toEqual({
+      expect(stripVirtualProps(state.get(`delayed-item`))).toEqual({
         id: `delayed-item`,
         name: `Delayed Item`,
       })
@@ -462,7 +474,7 @@ describe(`Collection getters`, () => {
 
   describe(`toArray getter`, () => {
     it(`returns the current state as an array`, () => {
-      const array = collection.toArray
+      const array = stripValues(collection.toArray)
       expect(Array.isArray(array)).toBe(true)
       expect(array.length).toBe(2)
       expect(array).toContainEqual({ id: `item1`, name: `Item 1` })
@@ -473,7 +485,7 @@ describe(`Collection getters`, () => {
   describe(`toArrayWhenReady`, () => {
     it(`resolves immediately if data is already available`, async () => {
       const arrayPromise = collection.toArrayWhenReady()
-      const array = await arrayPromise
+      const array = stripValues(await arrayPromise)
       expect(Array.isArray(array)).toBe(true)
       expect(array.length).toBe(2)
     })
@@ -517,7 +529,10 @@ describe(`Collection getters`, () => {
       // Now the promise should resolve
       const array = await arrayPromise
       expect(Array.isArray(array)).toBe(true)
-      expect(array).toContainEqual({ id: `delayed-item`, name: `Delayed Item` })
+      expect(array.map((row) => stripVirtualProps(row))).toContainEqual({
+        id: `delayed-item`,
+        name: `Delayed Item`,
+      })
     })
   })
 })

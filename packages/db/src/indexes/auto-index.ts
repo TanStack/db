@@ -1,5 +1,6 @@
 import { DEFAULT_COMPARE_OPTIONS } from '../utils'
-import { BTreeIndex } from './btree-index'
+import { checkCollectionSizeForIndex, isDevModeEnabled } from './index-registry'
+import { hasVirtualPropPath } from '../virtual-props'
 import type { CompareOptions } from '../query/builder/types'
 import type { BasicExpression } from '../query/ir'
 import type { CollectionImpl } from '../collection/index.js'
@@ -10,11 +11,9 @@ export interface AutoIndexConfig {
 
 function shouldAutoIndex(collection: CollectionImpl<any, any, any, any, any>) {
   // Only proceed if auto-indexing is enabled
-  if (collection.config.autoIndex !== `eager`) {
-    return false
-  }
-
-  return true
+  // Note: autoIndex: 'eager' without defaultIndexType is caught at construction time
+  // in CollectionImpl, so we don't need to check for it here.
+  return collection.config.autoIndex === `eager`
 }
 
 export function ensureIndexForField<
@@ -27,6 +26,9 @@ export function ensureIndexForField<
   compareOptions?: CompareOptions,
   compareFn?: (a: any, b: any) => number,
 ) {
+  if (hasVirtualPropPath(fieldPath)) {
+    return
+  }
   if (!shouldAutoIndex(collection)) {
     return
   }
@@ -46,9 +48,18 @@ export function ensureIndexForField<
     return // Index already exists
   }
 
+  // Dev mode: check if collection size warrants an index suggestion
+  if (isDevModeEnabled()) {
+    checkCollectionSizeForIndex(
+      collection.id || `unknown`,
+      collection.size,
+      fieldPath,
+    )
+  }
+
   // Create a new index for this field using the collection's createIndex method
+  // The collection will use its defaultIndexType
   try {
-    // Use the proxy-based approach to create the proper accessor for nested paths
     collection.createIndex(
       (row) => {
         // Navigate through the field path
@@ -60,7 +71,6 @@ export function ensureIndexForField<
       },
       {
         name: `auto:${fieldPath.join(`.`)}`,
-        indexType: BTreeIndex,
         options: compareFn ? { compareFn, compareOptions: compareOpts } : {},
       },
     )

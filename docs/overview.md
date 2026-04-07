@@ -86,7 +86,7 @@ Collections are typed sets of objects that can be populated with data. They're d
 Collections can be populated in many ways, including:
 
 - fetching data, for example [from API endpoints using TanStack Query](https://tanstack.com/query/latest)
-- syncing data, for example [using a sync engine like ElectricSQL](https://electric-sql.com/)
+- syncing data, for example [using a sync engine like ElectricSQL](https://electric-sql.com/) or [PowerSync](https://powersync.com)
 - storing local data, for example [using localStorage for user preferences and settings](./collections/local-storage-collection.md) or [in-memory client data or UI state](./collections/local-only-collection.md)
 - from live collection queries, creating [derived collections as materialised views](#using-live-queries)
 
@@ -256,7 +256,7 @@ The collection will use the schema for its type inference. If you provide a sche
 
 You can create your own collection types by implementing the `Collection` interface found in [`../packages/db/src/collection/index.ts`](https://github.com/TanStack/db/blob/main/packages/db/src/collection/index.ts).
 
-See the existing implementations in [`../packages/db`](https://github.com/TanStack/db/tree/main/packages/db), [`../packages/query-db-collection`](https://github.com/TanStack/db/tree/main/packages/query-db-collection), [`../packages/electric-db-collection`](https://github.com/TanStack/db/tree/main/packages/electric-db-collection) and [`../packages/trailbase-db-collection`](https://github.com/TanStack/db/tree/main/packages/trailbase-db-collection) for reference. Also see the [Collection Options Creator guide](./guides/collection-options-creator.md) for a pattern to create reusable collection configuration factories.
+See the existing implementations in [`../packages/db`](https://github.com/TanStack/db/tree/main/packages/db), [`../packages/query-db-collection`](https://github.com/TanStack/db/tree/main/packages/query-db-collection), [`../packages/electric-db-collection`](https://github.com/TanStack/db/tree/main/packages/electric-db-collection), [`../packages/trailbase-db-collection`](https://github.com/TanStack/db/tree/main/packages/trailbase-db-collection) and [`../packages/powersync-db-collection`](https://github.com/TanStack/db/tree/main/packages/powersync-db-collection) for reference. Also see the [Collection Options Creator guide](./guides/collection-options-creator.md) for a pattern to create reusable collection configuration factories.
 
 ### Live queries
 
@@ -382,7 +382,7 @@ See the [Mutations guide](./guides/mutations.md) for comprehensive documentation
 Here we illustrate two common ways of using TanStack DB:
 
 1. [using TanStack Query](#1-tanstack-query) with an existing REST API
-2. [using the ElectricSQL sync engine](#2-electricsql-sync) for real-time sync with your existing API
+2. [using a sync engine](#2-sync-engine) for real-time sync with your backend
 
 > [!TIP]
 > You can combine these patterns. One of the benefits of TanStack DB is that you can integrate different ways of loading data and handling mutations into the same app. Your components don't need to know where the data came from or goes.
@@ -459,7 +459,7 @@ const Todos = () => {
 
 This pattern allows you to extend an existing TanStack Query application, or any application built on a REST API, with blazing fast, cross-collection live queries and local optimistic mutations with automatically managed optimistic state.
 
-### 2. ElectricSQL sync
+### 2. Sync Engine
 
 One of the most powerful ways of using TanStack DB is with a sync engine, for a fully local-first experience with real-time sync. This allows you to incrementally adopt sync into an existing app, whilst still handling writes with your existing API.
 
@@ -473,7 +473,7 @@ While TanStack DB works great with REST APIs, sync engines provide powerful bene
 
 This pattern enables the "load everything once" approach that makes apps like Linear and Figma feel instant.
 
-Here, we illustrate this pattern using [ElectricSQL](https://electric-sql.com) as the sync engine.
+Here, we illustrate this pattern using [ElectricSQL](https://electric-sql.com) as the sync engine, but this pattern also works with other sync engines like [PowerSync](https://www.powersync.com/?utm_source=tanstack&utm_campaign=tanstack_partner), [RxDB](https://rxdb.info/), and [TrailBase](https://trailbase.io/).
 
 ```tsx
 import type { Collection } from "@tanstack/db"

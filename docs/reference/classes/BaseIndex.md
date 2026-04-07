@@ -11,13 +11,14 @@ Base abstract class that all index types extend
 
 ## Extended by
 
+- [`BasicIndex`](BasicIndex.md)
 - [`BTreeIndex`](BTreeIndex.md)
 
 ## Type Parameters
 
 ### TKey
 
-`TKey` *extends* `string` \| `number` \| `undefined` = `string` \| `number` \| `undefined`
+`TKey` *extends* `string` \| `number` = `string` \| `number`
 
 ## Implements
 
@@ -341,7 +342,7 @@ Defined in: [packages/db/src/indexes/base-index.ts:133](https://github.com/TanSt
 protected evaluateIndexExpression(item): any;
 ```
 
-Defined in: [packages/db/src/indexes/base-index.ts:195](https://github.com/TanStack/db/blob/main/packages/db/src/indexes/base-index.ts#L195)
+Defined in: [packages/db/src/indexes/base-index.ts:194](https://github.com/TanStack/db/blob/main/packages/db/src/indexes/base-index.ts#L194)
 
 #### Parameters
 
@@ -403,7 +404,7 @@ Defined in: [packages/db/src/indexes/base-index.ts:134](https://github.com/TanSt
 abstract protected initialize(options?): void;
 ```
 
-Defined in: [packages/db/src/indexes/base-index.ts:193](https://github.com/TanStack/db/blob/main/packages/db/src/indexes/base-index.ts#L193)
+Defined in: [packages/db/src/indexes/base-index.ts:192](https://github.com/TanStack/db/blob/main/packages/db/src/indexes/base-index.ts#L192)
 
 #### Parameters
 
@@ -534,7 +535,7 @@ Defined in: [packages/db/src/indexes/base-index.ts:135](https://github.com/TanSt
 
 ##### options
 
-[`RangeQueryOptions`](../interfaces/RangeQueryOptions.md)
+[`BTreeRangeQueryOptions`](../interfaces/BTreeRangeQueryOptions.md)
 
 #### Returns
 
@@ -558,7 +559,7 @@ Defined in: [packages/db/src/indexes/base-index.ts:136](https://github.com/TanSt
 
 ##### options
 
-[`RangeQueryOptions`](../interfaces/RangeQueryOptions.md)
+[`BTreeRangeQueryOptions`](../interfaces/BTreeRangeQueryOptions.md)
 
 #### Returns
 
@@ -754,7 +755,7 @@ Defined in: [packages/db/src/indexes/base-index.ts:128](https://github.com/TanSt
 protected trackLookup(startTime): void;
 ```
 
-Defined in: [packages/db/src/indexes/base-index.ts:200](https://github.com/TanStack/db/blob/main/packages/db/src/indexes/base-index.ts#L200)
+Defined in: [packages/db/src/indexes/base-index.ts:199](https://github.com/TanStack/db/blob/main/packages/db/src/indexes/base-index.ts#L199)
 
 #### Parameters
 
@@ -809,7 +810,7 @@ Defined in: [packages/db/src/indexes/base-index.ts:110](https://github.com/TanSt
 protected updateTimestamp(): void;
 ```
 
-Defined in: [packages/db/src/indexes/base-index.ts:206](https://github.com/TanStack/db/blob/main/packages/db/src/indexes/base-index.ts#L206)
+Defined in: [packages/db/src/indexes/base-index.ts:205](https://github.com/TanStack/db/blob/main/packages/db/src/indexes/base-index.ts#L205)
 
 #### Returns
 

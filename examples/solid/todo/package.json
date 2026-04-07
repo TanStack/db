@@ -1,15 +1,15 @@
 {
   "name": "@tanstack/db-example-solid-todo",
   "private": true,
-  "version": "0.0.34",
+  "version": "0.0.35",
   "dependencies": {
-    "@tanstack/electric-db-collection": "^0.2.41",
+    "@tanstack/electric-db-collection": "^0.3.0",
     "@tanstack/query-core": "^5.90.20",
-    "@tanstack/query-db-collection": "^1.0.30",
-    "@tanstack/solid-db": "^0.2.13",
+    "@tanstack/query-db-collection": "^1.0.33",
+    "@tanstack/solid-db": "^0.2.16",
     "@tanstack/solid-router": "^1.159.5",
     "@tanstack/solid-start": "^1.159.5",
-    "@tanstack/trailbase-db-collection": "^0.1.77",
+    "@tanstack/trailbase-db-collection": "^0.1.80",
     "cors": "^2.8.6",
     "drizzle-orm": "^0.45.1",
     "drizzle-zod": "^0.8.3",
@@ -17,7 +17,7 @@
     "postgres": "^3.4.8",
     "solid-js": "^1.9.11",
     "tailwindcss": "^4.1.18",
-    "trailbase": "^0.8.0",
+    "trailbase": "^0.10.0",
     "vite-tsconfig-paths": "^5.1.4"
   },
   "devDependencies": {
@@ -34,7 +34,7 @@
     "drizzle-kit": "^0.31.9",
     "eslint": "^9.39.2",
     "eslint-plugin-solid": "^0.14.5",
-    "pg": "^8.18.0",
+    "pg": "^8.20.0",
     "tsx": "^4.21.0",
     "typescript": "^5.9.2",
     "vite": "^7.3.0",

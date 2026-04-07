@@ -1,4 +1,7 @@
-import { orderByWithFractionalIndex } from '@tanstack/db-ivm'
+import {
+  groupedOrderByWithFractionalIndex,
+  orderByWithFractionalIndex,
+} from '@tanstack/db-ivm'
 import { defaultComparator, makeComparator } from '../../utils/comparison.js'
 import { PropRef, followRef } from '../ir.js'
 import { ensureIndexForField } from '../../indexes/auto-index.js'
@@ -51,6 +54,7 @@ export function processOrderBy(
   setWindowFn: (windowFn: (options: WindowOptions) => void) => void,
   limit?: number,
   offset?: number,
+  groupKeyFn?: (key: unknown, value: unknown) => unknown,
 ): IStreamBuilder<KeyValue<unknown, [NamespacedRow, string]>> {
   // Pre-compile all order by expressions
   const compiledOrderBy = orderByClause.map((clause) => {
@@ -126,7 +130,9 @@ export function processOrderBy(
   // to loadSubset so the sync layer can optimize the query.
   // We try to use an index on the FIRST orderBy column for lazy loading,
   // even for multi-column orderBy (using wider bounds on first column).
-  if (limit) {
+  // Skip this optimization when using grouped ordering (includes with limit),
+  // because the limit is per-group, not global — the child collection needs all data loaded.
+  if (limit && !groupKeyFn) {
     let index: IndexInterface<string | number> | undefined
     let followRefCollection: Collection | undefined
     let firstColumnValueExtractor: CompiledSingleRowExpression | undefined
@@ -152,12 +158,19 @@ export function processOrderBy(
         )
 
         if (fieldName) {
+          // Use a single-column comparator for the index, not the
+          // multi-column `compare` function. The multi-column comparator
+          // expects array values [col1, col2, ...] but the index stores
+          // individual field values. Passing `compare` here causes the
+          // BTree to treat all single values as equal (since number[0]
+          // === undefined for both sides of the comparison).
+          const firstColumnCompareFn = makeComparator(compareOpts)
           ensureIndexForField(
             fieldName,
             followRefResult.path,
             followRefCollection,
             compareOpts,
-            compare,
+            firstColumnCompareFn,
           )
         }
 
@@ -176,6 +189,17 @@ export function processOrderBy(
         // Only use the index if it supports range queries
         if (!index?.supports(`gt`)) {
           index = undefined
+        }
+
+        if (!index) {
+          const collectionId = followRefCollection.id
+          const fieldPath = followRefResult.path.join(`.`)
+          console.warn(
+            `[TanStack DB]${collectionId ? ` [${collectionId}]` : ``} orderBy with limit requires an index on "${fieldPath}" for efficient lazy loading. ` +
+              `Falling back to loading all data. ` +
+              `Consider creating an index on the collection with collection.createIndex((row) => row.${fieldPath}) ` +
+              `or enable auto-indexing with autoIndex: 'eager' and a defaultIndexType.`,
+          )
         }
 
         orderByAlias =
@@ -277,7 +301,10 @@ export function processOrderBy(
       optimizableOrderByCollections[targetCollectionId] =
         orderByOptimizationInfo
 
-      // Set up lazy loading callback if we have an index
+      // Set up lazy loading callback to track how much more data is needed
+      // This is used by loadMoreIfNeeded to determine if more data should be loaded
+      // Only enable when an index exists — without an index, lazy loading can't work
+      // and all data is loaded eagerly via requestSnapshot instead.
       if (index) {
         setSizeCallback = (getSize: () => number) => {
           optimizableOrderByCollections[targetCollectionId]![`dataNeeded`] =
@@ -288,6 +315,33 @@ export function processOrderBy(
         }
       }
     }
+  }
+
+  // Use grouped ordering when a groupKeyFn is provided (includes with limit/offset),
+  // otherwise use the standard global ordering operator.
+  if (groupKeyFn) {
+    return pipeline.pipe(
+      groupedOrderByWithFractionalIndex(valueExtractor, {
+        limit,
+        offset,
+        comparator: compare,
+        setSizeCallback,
+        groupKeyFn,
+        setWindowFn: (
+          windowFn: (options: { offset?: number; limit?: number }) => void,
+        ) => {
+          setWindowFn((options) => {
+            windowFn(options)
+            if (orderByOptimizationInfo) {
+              orderByOptimizationInfo.offset =
+                options.offset ?? orderByOptimizationInfo.offset
+              orderByOptimizationInfo.limit =
+                options.limit ?? orderByOptimizationInfo.limit
+            }
+          })
+        },
+      }),
+    )
   }
 
   // Use fractional indexing and return the tuple [value, index]

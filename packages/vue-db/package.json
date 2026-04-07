@@ -1,6 +1,6 @@
 {
   "name": "@tanstack/vue-db",
-  "version": "0.0.110",
+  "version": "0.0.113",
   "description": "Vue integration for @tanstack/db",
   "author": "Kyle Mathews",
   "license": "MIT",
@@ -13,7 +13,8 @@
   "keywords": [
     "optimistic",
     "vue",
-    "typescript"
+    "typescript",
+    "tanstack-intent"
   ],
   "scripts": {
     "build": "vite build",
@@ -51,7 +52,7 @@
     "vue": ">=3.3.0"
   },
   "devDependencies": {
-    "@electric-sql/client": "^1.5.12",
+    "@electric-sql/client": "^1.5.14",
     "@vitejs/plugin-vue": "^6.0.4",
     "@vitest/coverage-istanbul": "^3.2.4",
     "vue": "^3.5.28"

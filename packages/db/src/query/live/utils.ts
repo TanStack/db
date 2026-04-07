@@ -1,6 +1,8 @@
 import { MultiSet, serializeValue } from '@tanstack/db-ivm'
+import { UnsupportedRootScalarSelectError } from '../../errors.js'
 import { normalizeOrderByPaths } from '../compiler/expressions.js'
 import { buildQuery, getQueryIR } from '../builder/index.js'
+import { IncludesSubquery } from '../ir.js'
 import type { MultiSetArray, RootStreamBuilder } from '@tanstack/db-ivm'
 import type { Collection } from '../../collection/index.js'
 import type { ChangeMessage } from '../../types.js'
@@ -42,6 +44,24 @@ export function extractCollectionsFromQuery(
         if (joinClause.from) {
           extractFromSource(joinClause.from)
         }
+      }
+    }
+
+    // Extract from SELECT (for IncludesSubquery)
+    if (q.select) {
+      extractFromSelect(q.select)
+    }
+  }
+
+  function extractFromSelect(select: any) {
+    for (const [key, value] of Object.entries(select)) {
+      if (typeof key === `string` && key.startsWith(`__SPREAD_SENTINEL__`)) {
+        continue
+      }
+      if (value instanceof IncludesSubquery) {
+        extractFromQuery(value.query)
+      } else if (isNestedSelectObject(value)) {
+        extractFromSelect(value)
       }
     }
   }
@@ -117,6 +137,19 @@ export function extractCollectionAliases(
     }
   }
 
+  function traverseSelect(select: any) {
+    for (const [key, value] of Object.entries(select)) {
+      if (typeof key === `string` && key.startsWith(`__SPREAD_SENTINEL__`)) {
+        continue
+      }
+      if (value instanceof IncludesSubquery) {
+        traverse(value.query)
+      } else if (isNestedSelectObject(value)) {
+        traverseSelect(value)
+      }
+    }
+  }
+
   function traverse(q?: QueryIR) {
     if (!q) return
 
@@ -127,11 +160,28 @@ export function extractCollectionAliases(
         recordAlias(joinClause.from)
       }
     }
+
+    if (q.select) {
+      traverseSelect(q.select)
+    }
   }
 
   traverse(query)
 
   return aliasesById
+}
+
+/**
+ * Check if a value is a nested select object (plain object, not an expression)
+ */
+function isNestedSelectObject(obj: any): boolean {
+  if (obj === null || typeof obj !== `object`) return false
+  if (obj instanceof IncludesSubquery) return false
+  // Expression-like objects have a .type property
+  if (`type` in obj && typeof obj.type === `string`) return false
+  // Ref proxies from spread operations
+  if (obj.__refProxy) return false
+  return true
 }
 
 /**
@@ -142,12 +192,23 @@ export function buildQueryFromConfig<TContext extends Context>(config: {
   query:
     | ((q: InitialQueryBuilder) => QueryBuilder<TContext>)
     | QueryBuilder<TContext>
+  requireObjectResult?: boolean
 }): QueryIR {
   // Build the query using the provided query builder function or instance
-  if (typeof config.query === `function`) {
-    return buildQuery<TContext>(config.query)
+  const query =
+    typeof config.query === `function`
+      ? buildQuery<TContext>(config.query)
+      : getQueryIR(config.query)
+
+  if (
+    config.requireObjectResult &&
+    query.select &&
+    !isNestedSelectObject(query.select)
+  ) {
+    throw new UnsupportedRootScalarSelectError()
   }
-  return getQueryIR(config.query)
+
+  return query
 }
 
 /**
