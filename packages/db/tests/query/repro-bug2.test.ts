@@ -283,13 +283,6 @@ describe(`bug repro`, () => {
         delta: string
         _seq: number
       }
-      type DerivedDelta = {
-        key: string
-        text_id: string
-        timelineKey: string
-        order: number
-        delta: string
-      }
       type Seed = { key: string }
 
       const TIMELINE_KEY = `timeline-1`
@@ -304,10 +297,10 @@ describe(`bug repro`, () => {
       )
 
       // Layer 1: derived collection that adds timelineKey and renames _seq → order
-      const derivedDeltas = createLiveQueryCollection<DerivedDelta>({
+      const derivedDeltas = createLiveQueryCollection({
         id: `chained-derived-deltas`,
-        query: (q) =>
-          q.from({ d: rawDeltas }).select(({ d }) => ({
+        query: (q: any) =>
+          q.from({ d: rawDeltas }).select(({ d }: any) => ({
             key: d.key,
             text_id: d.text_id,
             timelineKey: TIMELINE_KEY,
@@ -327,15 +320,15 @@ describe(`bug repro`, () => {
 
       // Layer 2: main query with toArray() include from derived collection
       const collection = createLiveQueryCollection({
-        query: (q) =>
-          q.from({ s: seeds }).select(({ s }) => ({
+        query: (q: any) =>
+          q.from({ s: seeds }).select(({ s }: any) => ({
             key: s.key,
             deltas: toArray(
               q
                 .from({ d: derivedDeltas })
-                .where(({ d }) => eq(d.timelineKey, s.key))
-                .orderBy(({ d }) => d.order)
-                .select(({ d }) => ({
+                .where(({ d }: any) => eq(d.timelineKey, s.key))
+                .orderBy(({ d }: any) => d.order)
+                .select(({ d }: any) => ({
                   key: d.key,
                   delta: d.delta,
                 })),
@@ -344,7 +337,7 @@ describe(`bug repro`, () => {
       })
 
       await collection.preload()
-      const data = () => collection.get(TIMELINE_KEY) as any
+      const data = () => collection.get(TIMELINE_KEY)
 
       expect(data().deltas).toEqual([])
 
