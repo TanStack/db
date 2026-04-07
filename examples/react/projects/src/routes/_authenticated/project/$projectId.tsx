@@ -72,6 +72,7 @@ function ProjectPage() {
         project_id: parseInt(projectId),
         user_ids: [],
         created_at: new Date(),
+        updated_at: new Date(),
       })
       setNewTodoText(``)
     }
