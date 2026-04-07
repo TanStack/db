@@ -111,6 +111,72 @@ const { data, isLoading } = $derived(query)
 </script>
 ```
 
+## Includes (Hierarchical Data)
+
+When a query uses includes (subqueries in `select`), each child field is a live `Collection` by default. Subscribe to it with `useLiveQuery` in a subcomponent:
+
+```svelte
+<!-- ProjectList.svelte -->
+<script lang="ts">
+import { useLiveQuery, eq } from "@tanstack/svelte-db"
+import IssueList from "./IssueList.svelte"
+
+const projectsQuery = useLiveQuery((q) =>
+  q.from({ p: projectsCollection }).select(({ p }) => ({
+    id: p.id,
+    name: p.name,
+    issues: q
+      .from({ i: issuesCollection })
+      .where(({ i }) => eq(i.projectId, p.id))
+      .select(({ i }) => ({ id: i.id, title: i.title })),
+  }))
+)
+</script>
+
+{#each projectsQuery.data as project (project.id)}
+  <div>
+    {project.name}
+    <IssueList issuesCollection={project.issues} />
+  </div>
+{/each}
+```
+
+```svelte
+<!-- IssueList.svelte — subscribes to the child Collection -->
+<script lang="ts">
+import { useLiveQuery } from "@tanstack/svelte-db"
+
+let { issuesCollection } = $props()
+const issuesQuery = useLiveQuery(issuesCollection)
+</script>
+
+{#each issuesQuery.data as issue (issue.id)}
+  <li>{issue.title}</li>
+{/each}
+```
+
+With `toArray()`, child results are plain arrays and the parent re-emits on child changes:
+
+```ts
+import { toArray, eq } from "@tanstack/svelte-db"
+
+const projectsQuery = useLiveQuery((q) =>
+  q.from({ p: projectsCollection }).select(({ p }) => ({
+    id: p.id,
+    name: p.name,
+    issues: toArray(
+      q
+        .from({ i: issuesCollection })
+        .where(({ i }) => eq(i.projectId, p.id))
+        .select(({ i }) => ({ id: i.id, title: i.title })),
+    ),
+  }))
+)
+// project.issues is a plain array — no subcomponent needed
+```
+
+See db-core/live-queries/SKILL.md for full includes rules (correlation conditions, nested includes, aggregates).
+
 ## Common Mistakes
 
 ### CRITICAL Passing values instead of getter functions in deps

@@ -286,7 +286,8 @@ const messagesWithContent = createLiveQueryCollection((q) =>
 ### Includes rules
 
 - The subquery **must** have a `where` clause with an `eq()` correlating a parent alias with a child alias. The library extracts this automatically as the join condition.
-- `toArray()` and `concat(toArray())` require the subquery to use a **scalar** `select` (e.g., `select(({ c }) => c.text)`), not an object select.
+- `toArray()` works with both scalar selects (e.g., `select(({ c }) => c.text)` → `string[]`) and object selects (e.g., `select(({ c }) => ({ id: c.id, title: c.title }))` → `Array<{id, title}>`).
+- `concat(toArray())` requires a **scalar** `select` to concatenate into a string.
 - Collection includes (bare subquery) require an **object** `select`.
 - Includes subqueries are compiled into the same incremental pipeline as the parent query -- they are not separate live queries.
 
