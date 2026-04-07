@@ -170,11 +170,7 @@ function ProjectList() {
 // Child component subscribes to the child Collection
 function IssueList(props: { issuesCollection: Collection }) {
   const issuesQuery = useLiveQuery(() => props.issuesCollection)
-  return (
-    <For each={issuesQuery()}>
-      {(issue) => <div>{issue.title}</div>}
-    </For>
-  )
+  return <For each={issuesQuery()}>{(issue) => <div>{issue.title}</div>}</For>
 }
 ```
 

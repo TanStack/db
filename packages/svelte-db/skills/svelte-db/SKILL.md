@@ -158,7 +158,7 @@ const issuesQuery = useLiveQuery(issuesCollection)
 With `toArray()`, child results are plain arrays and the parent re-emits on child changes:
 
 ```ts
-import { toArray, eq } from "@tanstack/svelte-db"
+import { toArray, eq } from '@tanstack/svelte-db'
 
 const projectsQuery = useLiveQuery((q) =>
   q.from({ p: projectsCollection }).select(({ p }) => ({
@@ -170,7 +170,7 @@ const projectsQuery = useLiveQuery((q) =>
         .where(({ i }) => eq(i.projectId, p.id))
         .select(({ i }) => ({ id: i.id, title: i.title })),
     ),
-  }))
+  })),
 )
 // project.issues is a plain array — no subcomponent needed
 ```
