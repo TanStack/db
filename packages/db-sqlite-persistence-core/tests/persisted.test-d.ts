@@ -2,7 +2,8 @@ import { describe, expectTypeOf, it } from 'vitest'
 import { z } from 'zod'
 import { createCollection } from '@tanstack/db'
 import { persistedCollectionOptions } from '../src'
-import type { PersistedCollectionUtils, PersistenceAdapter } from '../src'
+import type { PersistedCollectionUtils } from '../src'
+import type { PersistenceAdapter } from '../src/persisted'
 import type { SyncConfig, UtilsRecord, WithVirtualProps } from '@tanstack/db'
 
 type OutputWithVirtual<
