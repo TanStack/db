@@ -1,5 +1,14 @@
 # @tanstack/react-db
 
+## 0.1.82
+
+### Patch Changes
+
+- Add includes (hierarchical data) documentation to all framework SKILL.md files and fix inaccurate toArray scalar select constraint in db-core/live-queries skill. ([#1361](https://github.com/TanStack/db/pull/1361))
+
+- Updated dependencies [[`1e69dd6`](https://github.com/TanStack/db/commit/1e69dd6fac7c9d8d7314af5ce18c33f2006c96b4)]:
+  - @tanstack/db@0.6.4
+
 ## 0.1.81
 
 ### Patch Changes

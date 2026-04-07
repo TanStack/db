@@ -1,5 +1,11 @@
 # @tanstack/db
 
+## 0.6.4
+
+### Patch Changes
+
+- Add includes (hierarchical data) documentation to all framework SKILL.md files and fix inaccurate toArray scalar select constraint in db-core/live-queries skill. ([#1361](https://github.com/TanStack/db/pull/1361))
+
 ## 0.6.3
 
 ### Patch Changes

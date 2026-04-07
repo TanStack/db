@@ -1,5 +1,12 @@
 # @tanstack/browser-db-sqlite-persistence
 
+## 0.1.8
+
+### Patch Changes
+
+- Updated dependencies []:
+  - @tanstack/db-sqlite-persistence-core@0.1.8
+
 ## 0.1.7
 
 ### Patch Changes
