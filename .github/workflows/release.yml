@@ -50,23 +50,28 @@ jobs:
             git config user.name "github-actions[bot]"
             git config user.email "github-actions[bot]@users.noreply.github.com"
 
-            EXISTING_PR=$(gh pr list --search "docs: regenerate API documentation" --state open --json number,headRefName --jq '.[0]')
+            EXISTING_BRANCH=$(gh pr list --author "app/github-actions" --search "docs: regenerate API documentation in:title" --state open --json headRefName --jq '.[0].headRefName' 2>/dev/null || echo "")
+            CREATE_PR=true
 
-            if [ -n "$EXISTING_PR" ] && [ "$EXISTING_PR" != "null" ]; then
-              BRANCH=$(echo "$EXISTING_PR" | jq -r '.headRefName')
+            if [ -n "$EXISTING_BRANCH" ] && [ "$EXISTING_BRANCH" != "null" ]; then
+              BRANCH="$EXISTING_BRANCH"
               echo "Found existing docs PR on branch $BRANCH, updating it"
-              git checkout "$BRANCH"
-              git pull origin "$BRANCH"
-              git add docs/
-              git commit -m "docs: regenerate API documentation"
-              git push origin "$BRANCH"
+              git checkout -B "$BRANCH"
+              CREATE_PR=false
             else
               BRANCH="docs/auto-update-$(date +%s)"
               git checkout -b "$BRANCH"
-              git add docs/
-              git commit -m "docs: regenerate API documentation"
-              git push origin "$BRANCH"
+            fi
 
+            git add docs/
+            if git diff --cached --quiet; then
+              echo "No new docs changes to commit"
+              exit 0
+            fi
+            git commit -m "docs: regenerate API documentation"
+            git push --force-with-lease origin "$BRANCH"
+
+            if [ "$CREATE_PR" = true ]; then
               gh pr create \
                 --title "docs: regenerate API documentation" \
                 --body "Automated documentation update from release" \
