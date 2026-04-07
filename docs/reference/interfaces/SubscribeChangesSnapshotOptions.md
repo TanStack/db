@@ -3,19 +3,23 @@ id: SubscribeChangesSnapshotOptions
 title: SubscribeChangesSnapshotOptions
 ---
 
-# Interface: SubscribeChangesSnapshotOptions\<T\>
+# Interface: SubscribeChangesSnapshotOptions\<T, TKey\>
 
-Defined in: [packages/db/src/types.ts:830](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L830)
+Defined in: [packages/db/src/types.ts:869](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L869)
 
 ## Extends
 
-- `Omit`\<[`SubscribeChangesOptions`](SubscribeChangesOptions.md)\<`T`\>, `"includeInitialState"`\>
+- `Omit`\<[`SubscribeChangesOptions`](SubscribeChangesOptions.md)\<`T`, `TKey`\>, `"includeInitialState"`\>
 
 ## Type Parameters
 
 ### T
 
 `T` *extends* `object` = `Record`\<`string`, `unknown`\>
+
+### TKey
+
+`TKey` *extends* `string` \| `number` = `string` \| `number`
 
 ## Properties
 
@@ -25,7 +29,7 @@ Defined in: [packages/db/src/types.ts:830](https://github.com/TanStack/db/blob/m
 optional limit: number;
 ```
 
-Defined in: [packages/db/src/types.ts:834](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L834)
+Defined in: [packages/db/src/types.ts:874](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L874)
 
 **`Internal`**
 
@@ -33,9 +37,7 @@ Optional limit to include in loadSubset for query-specific cache keys.
 
 #### Overrides
 
-```ts
-Omit.limit
-```
+[`SubscribeChangesOptions`](SubscribeChangesOptions.md).[`limit`](SubscribeChangesOptions.md#limit)
 
 ***
 
@@ -45,7 +47,7 @@ Omit.limit
 optional onLoadSubsetResult: (result) => void;
 ```
 
-Defined in: [packages/db/src/types.ts:827](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L827)
+Defined in: [packages/db/src/types.ts:866](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L866)
 
 **`Internal`**
 
@@ -76,7 +78,7 @@ Omit.onLoadSubsetResult
 optional onStatusChange: (event) => void;
 ```
 
-Defined in: [packages/db/src/types.ts:811](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L811)
+Defined in: [packages/db/src/types.ts:850](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L850)
 
 **`Internal`**
 
@@ -107,7 +109,7 @@ Omit.onStatusChange
 optional orderBy: OrderBy;
 ```
 
-Defined in: [packages/db/src/types.ts:833](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L833)
+Defined in: [packages/db/src/types.ts:873](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L873)
 
 **`Internal`**
 
@@ -115,9 +117,7 @@ Optional orderBy to include in loadSubset for query-specific cache keys.
 
 #### Overrides
 
-```ts
-Omit.orderBy
-```
+[`SubscribeChangesOptions`](SubscribeChangesOptions.md).[`orderBy`](SubscribeChangesOptions.md#orderby)
 
 ***
 
@@ -127,7 +127,7 @@ Omit.orderBy
 optional where: (row) => any;
 ```
 
-Defined in: [packages/db/src/types.ts:803](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L803)
+Defined in: [packages/db/src/types.ts:842](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L842)
 
 Callback function for filtering changes using a row proxy.
 The callback receives a proxy object that records property access,
@@ -137,7 +137,7 @@ allowing you to use query builder functions like `eq`, `gt`, etc.
 
 ##### row
 
-`SingleRowRefProxy`\<`T`\>
+`SingleRowRefProxy`\<[`WithVirtualProps`](../type-aliases/WithVirtualProps.md)\<`T`, `TKey`\>\>
 
 #### Returns
 
@@ -167,12 +167,10 @@ Omit.where
 optional whereExpression: BasicExpression<boolean>;
 ```
 
-Defined in: [packages/db/src/types.ts:805](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L805)
+Defined in: [packages/db/src/types.ts:844](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L844)
 
 Pre-compiled expression for filtering changes
 
 #### Inherited from
 
-```ts
-Omit.whereExpression
-```
+[`SubscribeChangesOptions`](SubscribeChangesOptions.md).[`whereExpression`](SubscribeChangesOptions.md#whereexpression)
