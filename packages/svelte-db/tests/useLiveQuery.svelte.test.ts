@@ -1474,6 +1474,121 @@ describe(`Query Collections`, () => {
     })
   })
 
+  describe(`SSR synchronous initialization`, () => {
+    it(`should have data available synchronously without flushSync for SSR`, () => {
+      // This test verifies the SSR fix: data should be available immediately
+      // after calling useLiveQuery, before any effects run (flushSync).
+      // In SSR, $effect doesn't run, so synchronous initialization is critical.
+      const collection = createCollection(
+        mockSyncCollectionOptions<Person>({
+          id: `ssr-sync-init-test`,
+          getKey: (person: Person) => person.id,
+          initialData: initialPersons,
+        }),
+      )
+
+      cleanup = $effect.root(() => {
+        const query = useLiveQuery((q) =>
+          q
+            .from({ persons: collection })
+            .where(({ persons }) => gt(persons.age, 30))
+            .select(({ persons }) => ({
+              id: persons.id,
+              name: persons.name,
+              age: persons.age,
+            })),
+        )
+
+        // IMPORTANT: Check data BEFORE flushSync - this simulates SSR behavior
+        // where $effect doesn't run. The data should already be available.
+        expect(query.state.size).toBe(1) // John Smith (age 35) should be present
+        expect(query.data).toHaveLength(1)
+        expect(query.data[0]).toMatchObject({
+          id: `3`,
+          name: `John Smith`,
+          age: 35,
+        })
+
+        // After flushSync, data should still be correct
+        flushSync()
+        expect(query.state.size).toBe(1)
+        expect(query.data).toHaveLength(1)
+      })
+    })
+
+    it(`should have data available synchronously with pre-created collection`, () => {
+      const collection = createCollection(
+        mockSyncCollectionOptions<Person>({
+          id: `ssr-pre-created-test`,
+          getKey: (person: Person) => person.id,
+          initialData: initialPersons,
+        }),
+      )
+
+      cleanup = $effect.root(() => {
+        // Create a live query collection beforehand
+        const liveQueryCollection = createLiveQueryCollection({
+          query: (q) =>
+            q.from({ persons: collection }).select(({ persons }) => ({
+              id: persons.id,
+              name: persons.name,
+            })),
+          startSync: true,
+        })
+
+        // Give it a moment to sync
+        flushSync()
+
+        // Now use it with useLiveQuery
+        const query = useLiveQuery(liveQueryCollection)
+
+        // Data should be available immediately (SSR scenario)
+        expect(query.state.size).toBe(3)
+        expect(query.data).toHaveLength(3)
+      })
+    })
+
+    it(`should have empty state for collection without initial data`, () => {
+      let syncMarkReady: (() => void) | undefined
+
+      const collection = createCollection<Person>({
+        id: `ssr-empty-collection-test`,
+        getKey: (person: Person) => person.id,
+        startSync: false,
+        sync: {
+          sync: ({ markReady }) => {
+            syncMarkReady = markReady
+          },
+        },
+        onInsert: () => Promise.resolve(),
+        onUpdate: () => Promise.resolve(),
+        onDelete: () => Promise.resolve(),
+      })
+
+      cleanup = $effect.root(() => {
+        const query = useLiveQuery((q) =>
+          q.from({ persons: collection }).select(({ persons }) => ({
+            id: persons.id,
+            name: persons.name,
+          })),
+        )
+
+        // Before sync, data should be empty (correct SSR behavior for unsynced collections)
+        expect(query.state.size).toBe(0)
+        expect(query.data).toHaveLength(0)
+
+        // Start sync and add data
+        collection.preload()
+        syncMarkReady!()
+
+        flushSync()
+
+        // Still empty because no data was added
+        expect(query.state.size).toBe(0)
+      })
+    })
+  })
+
   describe(`eager execution during sync`, () => {
     it(`should show state while isLoading is true during sync`, () => {
       let syncBegin: (() => void) | undefined
