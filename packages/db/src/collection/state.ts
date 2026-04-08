@@ -83,6 +83,8 @@ export class CollectionStateManager<
   public pendingOptimisticDeletes = new Set<TKey>()
   public pendingOptimisticDirectUpserts = new Set<TKey>()
   public pendingOptimisticDirectDeletes = new Set<TKey>()
+  public directTransactionsWithSyncWrites = new Set<string>()
+  public processedCompletedTransactions = new Set<string>()
 
   /**
    * Tracks the origin of confirmed changes for each row.
@@ -483,6 +485,17 @@ export class CollectionStateManager<
       const isDirectTransaction =
         transaction.metadata[DIRECT_TRANSACTION_METADATA_KEY] === true
       if (transaction.state === `completed`) {
+        // Add-once guard: only process direct transactions for pendingOptimisticDirect*
+        // on their first completion. This prevents re-adding keys that were already
+        // cleaned up by commitPendingTransactions (e.g., after writeInsert with same key).
+        const isFirstProcessing =
+          isDirectTransaction &&
+          !this.processedCompletedTransactions.has(transaction.id) &&
+          !this.directTransactionsWithSyncWrites.has(transaction.id)
+        if (isDirectTransaction && !this.processedCompletedTransactions.has(transaction.id)) {
+          this.processedCompletedTransactions.add(transaction.id)
+        }
+
         for (const mutation of transaction.mutations) {
           if (!this.isThisCollection(mutation.collection)) {
             continue
@@ -499,21 +512,26 @@ export class CollectionStateManager<
                 mutation.modified as TOutput,
               )
               this.pendingOptimisticDeletes.delete(mutation.key)
-              if (isDirectTransaction) {
+              if (isFirstProcessing) {
+                // First time seeing this direct transaction — seed the pending direct set
                 this.pendingOptimisticDirectUpserts.add(mutation.key)
                 this.pendingOptimisticDirectDeletes.delete(mutation.key)
-              } else {
+              } else if (!isDirectTransaction) {
+                // Non-direct completed transaction — clear pending direct state for this key
                 this.pendingOptimisticDirectUpserts.delete(mutation.key)
                 this.pendingOptimisticDirectDeletes.delete(mutation.key)
               }
+              // else: direct but already processed or had sync writes — leave
+              // pendingOptimisticDirect* unchanged to avoid clobbering entries
+              // from other concurrent direct transactions
               break
             case `delete`:
               this.pendingOptimisticUpserts.delete(mutation.key)
               this.pendingOptimisticDeletes.add(mutation.key)
-              if (isDirectTransaction) {
+              if (isFirstProcessing) {
                 this.pendingOptimisticDirectUpserts.delete(mutation.key)
                 this.pendingOptimisticDirectDeletes.add(mutation.key)
-              } else {
+              } else if (!isDirectTransaction) {
                 this.pendingOptimisticDirectUpserts.delete(mutation.key)
                 this.pendingOptimisticDirectDeletes.delete(mutation.key)
               }
@@ -854,6 +872,22 @@ export class CollectionStateManager<
     // non-immediate transactions would be applied later and could overwrite newer state.
     // Processing all committed transactions together preserves causal ordering.
     if (!hasPersistingTransaction || hasTruncateSync || hasImmediateSync) {
+      // Track which direct transactions had sync writes committed during their handler.
+      // When an immediate sync (from writeInsert/writeUpdate/writeDelete) is processed,
+      // mark all persisting direct transactions. This prevents recomputeOptimisticState
+      // from adding their mutation keys to pendingOptimisticDirectUpserts (via the
+      // isFirstProcessing guard), since the sync already confirmed the data.
+      if (hasImmediateSync) {
+        for (const tx of this.transactions.values()) {
+          if (
+            tx.state === `persisting` &&
+            tx.metadata[DIRECT_TRANSACTION_METADATA_KEY] === true
+          ) {
+            this.directTransactionsWithSyncWrites.add(tx.id)
+          }
+        }
+      }
+
       // Set flag to prevent redundant optimistic state recalculations
       this.isCommittingSyncTransactions = true
 
@@ -1288,6 +1322,58 @@ export class CollectionStateManager<
         this.recentlySyncedKeys.clear()
       })
 
+      // Clean up orphaned pendingOptimisticDirect entries after sync processing.
+      // A key is orphaned when it belongs to a completed direct transaction
+      // (handler has run) but the key is not in syncedData (sync confirmed it under
+      // a different key). This handles the refetch-with-different-key case where the
+      // handler called refetch() and the server returned the item under a new key.
+      if (committedSyncedTransactions.length > 0) {
+        for (const key of [...this.pendingOptimisticDirectUpserts]) {
+          if (!this.syncedData.has(key)) {
+            // Check if this key belongs to a completed direct transaction
+            let belongsToCompletedDirect = false
+            for (const tx of this.transactions.values()) {
+              if (
+                tx.state === `completed` &&
+                tx.metadata[DIRECT_TRANSACTION_METADATA_KEY] === true
+              ) {
+                for (const m of tx.mutations) {
+                  if (this.isThisCollection(m.collection) && m.key === key) {
+                    belongsToCompletedDirect = true
+                    break
+                  }
+                }
+              }
+              if (belongsToCompletedDirect) break
+            }
+            if (belongsToCompletedDirect) {
+              this.pendingOptimisticDirectUpserts.delete(key)
+            }
+          }
+        }
+        for (const key of [...this.pendingOptimisticDirectDeletes]) {
+          if (this.syncedData.has(key)) continue
+          let belongsToCompletedDirect = false
+          for (const tx of this.transactions.values()) {
+            if (
+              tx.state === `completed` &&
+              tx.metadata[DIRECT_TRANSACTION_METADATA_KEY] === true
+            ) {
+              for (const m of tx.mutations) {
+                if (this.isThisCollection(m.collection) && m.key === key) {
+                  belongsToCompletedDirect = true
+                  break
+                }
+              }
+            }
+            if (belongsToCompletedDirect) break
+          }
+          if (belongsToCompletedDirect) {
+            this.pendingOptimisticDirectDeletes.delete(key)
+          }
+        }
+      }
+
       // Mark that we've received the first commit (for tracking purposes)
       if (!this.hasReceivedFirstCommit) {
         this.hasReceivedFirstCommit = true
@@ -1308,13 +1394,28 @@ export class CollectionStateManager<
     // Schedule cleanup when the transaction completes
     transaction.isPersisted.promise
       .then(() => {
-        // Transaction completed successfully, remove it immediately
+        // Process any queued sync transactions BEFORE deleting the transaction.
+        // This ordering is critical: the orphan cleanup inside commitPendingTransactions
+        // needs to find this transaction (state=completed) in this.transactions to
+        // identify orphaned keys from the refetch-with-different-key case.
+        if (this.pendingSyncedTransactions.length > 0) {
+          this.commitPendingTransactions()
+        }
+
+        // Now remove the transaction and its tracking entries
         this.transactions.delete(transaction.id)
+        this.directTransactionsWithSyncWrites.delete(transaction.id)
+        this.processedCompletedTransactions.delete(transaction.id)
+
+        // Recompute to pick up any orphan cleanup done by commitPendingTransactions
+        // during touchCollection (before this cleanup ran) or above.
+        this.recomputeOptimisticState(false)
       })
       .catch(() => {
-        // Transaction failed, but we want to keep failed transactions for reference
-        // so don't remove it.
+        // Transaction failed — clean up tracking state.
         // Rollback already triggers state recomputation via touchCollection().
+        this.directTransactionsWithSyncWrites.delete(transaction.id)
+        this.processedCompletedTransactions.delete(transaction.id)
       })
   }
 
@@ -1380,6 +1481,8 @@ export class CollectionStateManager<
     this.pendingOptimisticDeletes.clear()
     this.pendingOptimisticDirectUpserts.clear()
     this.pendingOptimisticDirectDeletes.clear()
+    this.directTransactionsWithSyncWrites.clear()
+    this.processedCompletedTransactions.clear()
     this.clearOriginTrackingState()
     this.isLocalOnly = false
     this.size = 0

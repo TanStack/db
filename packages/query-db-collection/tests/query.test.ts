@@ -6342,4 +6342,298 @@ describe(`QueryCollection`, () => {
       customQueryClient.clear()
     })
   })
+
+  it(`should not duplicate items when writeInsert uses a different key than the optimistic insert`, async () => {
+    // Client inserts with a temp ID, server returns a different ID,
+    // writeInsert writes under the server ID. The optimistic insert
+    // under the client ID must be removed when the handler completes.
+    type Todo = { id: number; text: string; completed: boolean }
+
+    let nextServerId = 100
+    const serverTodos: Array<Todo> = []
+    const queryFn = vi.fn().mockImplementation(() => [...serverTodos])
+
+    const testQueryClient = new QueryClient({
+      defaultOptions: {
+        queries: { gcTime: 5 * 60 * 1000, staleTime: 0, retry: false },
+      },
+    })
+
+    const collection = createCollection(
+      queryCollectionOptions<Todo>({
+        id: `writeInsert-different-key`,
+        queryKey: [`writeInsert-different-key`],
+        queryFn,
+        queryClient: testQueryClient,
+        getKey: (todo) => todo.id,
+        startSync: true,
+        onInsert: async ({ transaction }) => {
+          const items = transaction.mutations.map((m) => m.modified)
+          await new Promise((r) => setTimeout(r, 10))
+          const saved = items.map((t) => ({ ...t, id: nextServerId++ }))
+          serverTodos.push(...saved)
+          collection.utils.writeInsert(saved)
+          return { refetch: false }
+        },
+      }),
+    )
+
+    const liveQuery = createLiveQueryCollection({
+      query: (q) => q.from({ todos: collection }),
+    })
+    await liveQuery.preload()
+    await vi.waitFor(() => expect(collection.status).toBe(`ready`))
+
+    const clientId = -999
+    const tx = collection.insert({ id: clientId, text: `Buy milk`, completed: false })
+    expect(collection.has(clientId)).toBe(true)
+
+    await tx.isPersisted.promise
+    await flushPromises()
+    await new Promise((r) => setTimeout(r, 200))
+    await flushPromises()
+
+    expect(collection._state.syncedData.has(100)).toBe(true)
+    expect(collection.has(clientId)).toBe(false)
+    expect(collection._state.pendingOptimisticDirectUpserts.has(clientId)).toBe(false)
+    expect(collection.size).toBe(1)
+
+    await liveQuery.cleanup()
+    testQueryClient.clear()
+  })
+
+  it(`should mark item as synced when writeInsert uses the same key as the optimistic insert`, async () => {
+    // Client and server use the same ID, but writeInsert adds
+    // server-computed fields. After the handler completes the item
+    // should be $synced: true and the server data should be visible.
+    type Todo = { id: number; text: string; completed: boolean; createdAt?: string }
+
+    const serverTodos: Array<Todo> = []
+    const queryFn = vi.fn().mockImplementation(() => [...serverTodos])
+
+    const testQueryClient = new QueryClient({
+      defaultOptions: {
+        queries: { gcTime: 5 * 60 * 1000, staleTime: 0, retry: false },
+      },
+    })
+
+    const collection = createCollection(
+      queryCollectionOptions<Todo>({
+        id: `writeInsert-same-key`,
+        queryKey: [`writeInsert-same-key`],
+        queryFn,
+        queryClient: testQueryClient,
+        getKey: (todo) => todo.id,
+        startSync: true,
+        onInsert: async ({ transaction }) => {
+          const items = transaction.mutations.map((m) => m.modified)
+          await new Promise((r) => setTimeout(r, 10))
+          const saved = items.map((t) => ({ ...t, createdAt: `2024-01-01T00:00:00Z` }))
+          serverTodos.push(...saved)
+          collection.utils.writeInsert(saved)
+          return { refetch: false }
+        },
+      }),
+    )
+
+    const liveQuery = createLiveQueryCollection({
+      query: (q) => q.from({ todos: collection }),
+    })
+    await liveQuery.preload()
+    await vi.waitFor(() => expect(collection.status).toBe(`ready`))
+
+    const tx = collection.insert({ id: 1, text: `Buy milk`, completed: false })
+    expect(collection.has(1)).toBe(true)
+
+    await tx.isPersisted.promise
+    await flushPromises()
+    await new Promise((r) => setTimeout(r, 200))
+    await flushPromises()
+
+    expect(collection._state.syncedData.has(1)).toBe(true)
+    expect(collection._state.syncedData.get(1)?.createdAt).toBe(`2024-01-01T00:00:00Z`)
+    expect(collection._state.optimisticUpserts.has(1)).toBe(false)
+    expect(collection._state.pendingOptimisticDirectUpserts.has(1)).toBe(false)
+    expect(collection.size).toBe(1)
+
+    await liveQuery.cleanup()
+    testQueryClient.clear()
+  })
+
+  it(`should not duplicate items when refetch returns a different key than the optimistic insert`, async () => {
+    // Client inserts with a temp ID, handler calls refetch(),
+    // server returns the item under a different ID.
+    // The optimistic insert under the client key must be removed.
+    type Todo = { id: number; text: string; completed: boolean }
+
+    let nextServerId = 500
+    const serverTodos: Array<Todo> = []
+    const queryFn = vi.fn().mockImplementation(() => [...serverTodos])
+
+    const testQueryClient = new QueryClient({
+      defaultOptions: {
+        queries: { gcTime: 5 * 60 * 1000, staleTime: Infinity, retry: false },
+      },
+    })
+
+    const collection = createCollection(
+      queryCollectionOptions<Todo>({
+        id: `refetch-different-key`,
+        queryKey: [`refetch-different-key`],
+        queryFn,
+        queryClient: testQueryClient,
+        getKey: (todo) => todo.id,
+        startSync: true,
+        onInsert: async ({ transaction, collection: col }) => {
+          const items = transaction.mutations.map((m) => m.modified)
+          await new Promise((r) => setTimeout(r, 10))
+          const saved = items.map((t) => ({ ...t, id: nextServerId++ }))
+          serverTodos.push(...saved)
+          await col.utils.refetch()
+        },
+      }),
+    )
+
+    const liveQuery = createLiveQueryCollection({
+      query: (q) => q.from({ todos: collection }),
+    })
+    await liveQuery.preload()
+    await vi.waitFor(() => expect(collection.status).toBe(`ready`))
+
+    const clientId = -777
+    const tx = collection.insert({ id: clientId, text: `Walk dog`, completed: false })
+    expect(collection.has(clientId)).toBe(true)
+
+    await tx.isPersisted.promise
+    await flushPromises()
+    await new Promise((r) => setTimeout(r, 100))
+    await flushPromises()
+
+    expect(collection._state.syncedData.has(500)).toBe(true)
+    expect(collection.has(clientId)).toBe(false)
+    expect(collection._state.pendingOptimisticDirectUpserts.has(clientId)).toBe(false)
+    expect(collection.size).toBe(1)
+
+    await liveQuery.cleanup()
+    testQueryClient.clear()
+  })
+
+  it(`should clean up optimistic state when writeUpdate is called in onUpdate handler`, async () => {
+    // When an onUpdate handler calls writeUpdate to sync the server response,
+    // the optimistic update should be removed and $synced should become true.
+    type Todo = { id: number; text: string; completed: boolean; updatedAt?: string }
+
+    const serverTodos: Array<Todo> = [{ id: 1, text: `Buy milk`, completed: false }]
+    const queryFn = vi.fn().mockImplementation(() => [...serverTodos])
+
+    const testQueryClient = new QueryClient({
+      defaultOptions: {
+        queries: { gcTime: 5 * 60 * 1000, staleTime: 0, retry: false },
+      },
+    })
+
+    const collection = createCollection(
+      queryCollectionOptions<Todo>({
+        id: `writeUpdate-same-key`,
+        queryKey: [`writeUpdate-same-key`],
+        queryFn,
+        queryClient: testQueryClient,
+        getKey: (todo) => todo.id,
+        startSync: true,
+        onUpdate: async ({ transaction }) => {
+          const items = transaction.mutations.map((m) => m.modified)
+          await new Promise((r) => setTimeout(r, 10))
+          const saved = items.map((t) => ({ ...t, updatedAt: `2024-06-01T00:00:00Z` }))
+          for (const s of saved) {
+            const idx = serverTodos.findIndex((t) => t.id === s.id)
+            if (idx >= 0) serverTodos[idx] = s as Todo
+          }
+          collection.utils.writeUpdate(saved)
+          return { refetch: false }
+        },
+      }),
+    )
+
+    const liveQuery = createLiveQueryCollection({
+      query: (q) => q.from({ todos: collection }),
+    })
+    await liveQuery.preload()
+    await vi.waitFor(() => expect(collection.status).toBe(`ready`))
+    expect(collection._state.syncedData.has(1)).toBe(true)
+
+    const tx = collection.update(1, (draft) => { draft.completed = true })
+
+    await tx.isPersisted.promise
+    await flushPromises()
+    await new Promise((r) => setTimeout(r, 200))
+    await flushPromises()
+
+    expect(collection._state.syncedData.get(1)?.updatedAt).toBe(`2024-06-01T00:00:00Z`)
+    expect(collection._state.optimisticUpserts.has(1)).toBe(false)
+    expect(collection._state.pendingOptimisticDirectUpserts.has(1)).toBe(false)
+    expect(collection.size).toBe(1)
+
+    await liveQuery.cleanup()
+    testQueryClient.clear()
+  })
+
+  it(`should not duplicate items when writeBatch uses different keys than the optimistic inserts`, async () => {
+    // When an onInsert handler uses writeBatch to insert multiple items under
+    // server-assigned IDs, all optimistic items under client IDs must be removed.
+    type Todo = { id: number; text: string; completed: boolean }
+
+    let nextServerId = 200
+    const serverTodos: Array<Todo> = []
+    const queryFn = vi.fn().mockImplementation(() => [...serverTodos])
+
+    const testQueryClient = new QueryClient({
+      defaultOptions: {
+        queries: { gcTime: 5 * 60 * 1000, staleTime: 0, retry: false },
+      },
+    })
+
+    const collection = createCollection(
+      queryCollectionOptions<Todo>({
+        id: `writeBatch-different-keys`,
+        queryKey: [`writeBatch-different-keys`],
+        queryFn,
+        queryClient: testQueryClient,
+        getKey: (todo) => todo.id,
+        startSync: true,
+        onInsert: async ({ transaction }) => {
+          const items = transaction.mutations.map((m) => m.modified)
+          await new Promise((r) => setTimeout(r, 10))
+          const saved = items.map((t) => ({ ...t, id: nextServerId++ }))
+          serverTodos.push(...saved)
+          collection.utils.writeBatch(() => {
+            collection.utils.writeInsert(saved)
+          })
+          return { refetch: false }
+        },
+      }),
+    )
+
+    const liveQuery = createLiveQueryCollection({
+      query: (q) => q.from({ todos: collection }),
+    })
+    await liveQuery.preload()
+    await vi.waitFor(() => expect(collection.status).toBe(`ready`))
+
+    const clientId = -888
+    const tx = collection.insert({ id: clientId, text: `Test batch`, completed: false })
+    expect(collection.has(clientId)).toBe(true)
+
+    await tx.isPersisted.promise
+    await flushPromises()
+    await new Promise((r) => setTimeout(r, 200))
+    await flushPromises()
+
+    expect(collection._state.syncedData.has(200)).toBe(true)
+    expect(collection.has(clientId)).toBe(false)
+    expect(collection._state.pendingOptimisticDirectUpserts.has(clientId)).toBe(false)
+    expect(collection.size).toBe(1)
+
+    await liveQuery.cleanup()
+    testQueryClient.clear()
+  })
 })
