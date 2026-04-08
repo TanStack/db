@@ -6385,7 +6385,11 @@ describe(`QueryCollection`, () => {
     await vi.waitFor(() => expect(collection.status).toBe(`ready`))
 
     const clientId = -999
-    const tx = collection.insert({ id: clientId, text: `Buy milk`, completed: false })
+    const tx = collection.insert({
+      id: clientId,
+      text: `Buy milk`,
+      completed: false,
+    })
     expect(collection.has(clientId)).toBe(true)
 
     await tx.isPersisted.promise
@@ -6395,7 +6399,9 @@ describe(`QueryCollection`, () => {
 
     expect(collection._state.syncedData.has(100)).toBe(true)
     expect(collection.has(clientId)).toBe(false)
-    expect(collection._state.pendingOptimisticDirectUpserts.has(clientId)).toBe(false)
+    expect(collection._state.pendingOptimisticDirectUpserts.has(clientId)).toBe(
+      false,
+    )
     expect(collection.size).toBe(1)
 
     await liveQuery.cleanup()
@@ -6406,7 +6412,12 @@ describe(`QueryCollection`, () => {
     // Client and server use the same ID, but writeInsert adds
     // server-computed fields. After the handler completes the item
     // should be $synced: true and the server data should be visible.
-    type Todo = { id: number; text: string; completed: boolean; createdAt?: string }
+    type Todo = {
+      id: number
+      text: string
+      completed: boolean
+      createdAt?: string
+    }
 
     const serverTodos: Array<Todo> = []
     const queryFn = vi.fn().mockImplementation(() => [...serverTodos])
@@ -6428,7 +6439,10 @@ describe(`QueryCollection`, () => {
         onInsert: async ({ transaction }) => {
           const items = transaction.mutations.map((m) => m.modified)
           await new Promise((r) => setTimeout(r, 10))
-          const saved = items.map((t) => ({ ...t, createdAt: `2024-01-01T00:00:00Z` }))
+          const saved = items.map((t) => ({
+            ...t,
+            createdAt: `2024-01-01T00:00:00Z`,
+          }))
           serverTodos.push(...saved)
           collection.utils.writeInsert(saved)
           return { refetch: false }
@@ -6451,7 +6465,9 @@ describe(`QueryCollection`, () => {
     await flushPromises()
 
     expect(collection._state.syncedData.has(1)).toBe(true)
-    expect(collection._state.syncedData.get(1)?.createdAt).toBe(`2024-01-01T00:00:00Z`)
+    expect(collection._state.syncedData.get(1)?.createdAt).toBe(
+      `2024-01-01T00:00:00Z`,
+    )
     expect(collection._state.optimisticUpserts.has(1)).toBe(false)
     expect(collection._state.pendingOptimisticDirectUpserts.has(1)).toBe(false)
     expect(collection.size).toBe(1)
@@ -6501,7 +6517,11 @@ describe(`QueryCollection`, () => {
     await vi.waitFor(() => expect(collection.status).toBe(`ready`))
 
     const clientId = -777
-    const tx = collection.insert({ id: clientId, text: `Walk dog`, completed: false })
+    const tx = collection.insert({
+      id: clientId,
+      text: `Walk dog`,
+      completed: false,
+    })
     expect(collection.has(clientId)).toBe(true)
 
     await tx.isPersisted.promise
@@ -6511,7 +6531,9 @@ describe(`QueryCollection`, () => {
 
     expect(collection._state.syncedData.has(500)).toBe(true)
     expect(collection.has(clientId)).toBe(false)
-    expect(collection._state.pendingOptimisticDirectUpserts.has(clientId)).toBe(false)
+    expect(collection._state.pendingOptimisticDirectUpserts.has(clientId)).toBe(
+      false,
+    )
     expect(collection.size).toBe(1)
 
     await liveQuery.cleanup()
@@ -6521,9 +6543,16 @@ describe(`QueryCollection`, () => {
   it(`should clean up optimistic state when writeUpdate is called in onUpdate handler`, async () => {
     // When an onUpdate handler calls writeUpdate to sync the server response,
     // the optimistic update should be removed and $synced should become true.
-    type Todo = { id: number; text: string; completed: boolean; updatedAt?: string }
+    type Todo = {
+      id: number
+      text: string
+      completed: boolean
+      updatedAt?: string
+    }
 
-    const serverTodos: Array<Todo> = [{ id: 1, text: `Buy milk`, completed: false }]
+    const serverTodos: Array<Todo> = [
+      { id: 1, text: `Buy milk`, completed: false },
+    ]
     const queryFn = vi.fn().mockImplementation(() => [...serverTodos])
 
     const testQueryClient = new QueryClient({
@@ -6543,7 +6572,10 @@ describe(`QueryCollection`, () => {
         onUpdate: async ({ transaction }) => {
           const items = transaction.mutations.map((m) => m.modified)
           await new Promise((r) => setTimeout(r, 10))
-          const saved = items.map((t) => ({ ...t, updatedAt: `2024-06-01T00:00:00Z` }))
+          const saved = items.map((t) => ({
+            ...t,
+            updatedAt: `2024-06-01T00:00:00Z`,
+          }))
           for (const s of saved) {
             const idx = serverTodos.findIndex((t) => t.id === s.id)
             if (idx >= 0) serverTodos[idx] = s as Todo
@@ -6561,14 +6593,18 @@ describe(`QueryCollection`, () => {
     await vi.waitFor(() => expect(collection.status).toBe(`ready`))
     expect(collection._state.syncedData.has(1)).toBe(true)
 
-    const tx = collection.update(1, (draft) => { draft.completed = true })
+    const tx = collection.update(1, (draft) => {
+      draft.completed = true
+    })
 
     await tx.isPersisted.promise
     await flushPromises()
     await new Promise((r) => setTimeout(r, 200))
     await flushPromises()
 
-    expect(collection._state.syncedData.get(1)?.updatedAt).toBe(`2024-06-01T00:00:00Z`)
+    expect(collection._state.syncedData.get(1)?.updatedAt).toBe(
+      `2024-06-01T00:00:00Z`,
+    )
     expect(collection._state.optimisticUpserts.has(1)).toBe(false)
     expect(collection._state.pendingOptimisticDirectUpserts.has(1)).toBe(false)
     expect(collection.size).toBe(1)
@@ -6620,7 +6656,11 @@ describe(`QueryCollection`, () => {
     await vi.waitFor(() => expect(collection.status).toBe(`ready`))
 
     const clientId = -888
-    const tx = collection.insert({ id: clientId, text: `Test batch`, completed: false })
+    const tx = collection.insert({
+      id: clientId,
+      text: `Test batch`,
+      completed: false,
+    })
     expect(collection.has(clientId)).toBe(true)
 
     await tx.isPersisted.promise
@@ -6630,7 +6670,9 @@ describe(`QueryCollection`, () => {
 
     expect(collection._state.syncedData.has(200)).toBe(true)
     expect(collection.has(clientId)).toBe(false)
-    expect(collection._state.pendingOptimisticDirectUpserts.has(clientId)).toBe(false)
+    expect(collection._state.pendingOptimisticDirectUpserts.has(clientId)).toBe(
+      false,
+    )
     expect(collection.size).toBe(1)
 
     await liveQuery.cleanup()

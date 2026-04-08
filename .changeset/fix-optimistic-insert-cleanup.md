@@ -1,5 +1,5 @@
 ---
-"@tanstack/db": patch
+'@tanstack/db': patch
 ---
 
 fix: clean up optimistic state when server returns a different key than the optimistic insert

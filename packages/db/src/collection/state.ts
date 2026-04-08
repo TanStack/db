@@ -492,7 +492,10 @@ export class CollectionStateManager<
           isDirectTransaction &&
           !this.processedCompletedTransactions.has(transaction.id) &&
           !this.directTransactionsWithSyncWrites.has(transaction.id)
-        if (isDirectTransaction && !this.processedCompletedTransactions.has(transaction.id)) {
+        if (
+          isDirectTransaction &&
+          !this.processedCompletedTransactions.has(transaction.id)
+        ) {
           this.processedCompletedTransactions.add(transaction.id)
         }
 
