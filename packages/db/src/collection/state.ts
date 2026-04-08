@@ -3,6 +3,7 @@ import { SortedMap } from '../SortedMap'
 import { enrichRowWithVirtualProps } from '../virtual-props.js'
 import { DIRECT_TRANSACTION_METADATA_KEY } from './transaction-metadata.js'
 import type {
+  PendingOperationType,
   VirtualOrigin,
   VirtualRowProps,
   WithVirtualProps,
@@ -110,6 +111,7 @@ export class CollectionStateManager<
       origin: VirtualOrigin
       key: TKey
       collectionId: string
+      pendingOperation: PendingOperationType
       enriched: WithVirtualProps<TOutput, TKey>
     }
   >()
@@ -161,7 +163,38 @@ export class CollectionStateManager<
     if (this.isLocalOnly) {
       return true
     }
-    return !this.optimisticUpserts.has(key) && !this.optimisticDeletes.has(key)
+    return (
+      !this.optimisticUpserts.has(key) &&
+      !this.optimisticDeletes.has(key) &&
+      !this.pendingOptimisticUpserts.has(key) &&
+      !this.pendingOptimisticDeletes.has(key)
+    )
+  }
+
+  /**
+   * Gets the pending operation type for a row.
+   * Returns the type of optimistic mutation pending for this key, or null if none.
+   * Used to compute the $pendingOperation virtual property.
+   */
+  public getPendingOperation(key: TKey): PendingOperationType {
+    if (this.isLocalOnly) {
+      return null
+    }
+    // Check active optimistic state
+    if (this.optimisticDeletes.has(key)) {
+      return 'delete'
+    }
+    if (this.optimisticUpserts.has(key)) {
+      return this.syncedData.has(key) ? 'update' : 'insert'
+    }
+    // Check completed-but-awaiting-sync state to avoid flicker
+    if (this.pendingOptimisticDeletes.has(key)) {
+      return 'delete'
+    }
+    if (this.pendingOptimisticUpserts.has(key)) {
+      return this.syncedData.has(key) ? 'update' : 'insert'
+    }
+    return null
   }
 
   /**
@@ -190,6 +223,10 @@ export class CollectionStateManager<
       $origin: overrides?.$origin ?? this.getRowOrigin(key),
       $key: overrides?.$key ?? key,
       $collectionId: overrides?.$collectionId ?? this.collection.id,
+      $pendingOperation:
+        overrides?.$pendingOperation !== undefined
+          ? overrides.$pendingOperation
+          : this.getPendingOperation(key),
     }
   }
 
@@ -206,6 +243,7 @@ export class CollectionStateManager<
       return this.createVirtualPropsSnapshot(key, {
         $synced: true,
         $origin: 'local',
+        $pendingOperation: null,
       })
     }
 
@@ -218,11 +256,20 @@ export class CollectionStateManager<
       optimisticDeletes.has(key) ||
       options?.completedOptimisticKeys?.has(key) === true
 
+    // Compute $pendingOperation from the provided or current state
+    let pendingOperation: PendingOperationType = null
+    if (optimisticDeletes.has(key)) {
+      pendingOperation = 'delete'
+    } else if (optimisticUpserts.has(key)) {
+      pendingOperation = this.syncedData.has(key) ? 'update' : 'insert'
+    }
+
     return this.createVirtualPropsSnapshot(key, {
       $synced: !hasOptimisticChange,
       $origin: hasOptimisticChange
         ? 'local'
         : ((options?.rowOrigins ?? this.rowOrigins).get(key) ?? 'remote'),
+      $pendingOperation: pendingOperation,
     })
   }
 
@@ -235,6 +282,10 @@ export class CollectionStateManager<
     const origin = existingRow.$origin ?? virtualProps.$origin
     const resolvedKey = existingRow.$key ?? virtualProps.$key
     const collectionId = existingRow.$collectionId ?? virtualProps.$collectionId
+    const pendingOperation =
+      existingRow.$pendingOperation !== undefined
+        ? existingRow.$pendingOperation
+        : virtualProps.$pendingOperation
 
     const cached = this.virtualPropsCache.get(row as object)
     if (
@@ -242,7 +293,8 @@ export class CollectionStateManager<
       cached.synced === synced &&
       cached.origin === origin &&
       cached.key === resolvedKey &&
-      cached.collectionId === collectionId
+      cached.collectionId === collectionId &&
+      cached.pendingOperation === pendingOperation
     ) {
       return cached.enriched
     }
@@ -253,6 +305,7 @@ export class CollectionStateManager<
       $origin: origin,
       $key: resolvedKey,
       $collectionId: collectionId,
+      $pendingOperation: pendingOperation,
     } as WithVirtualProps<TOutput, TKey>
 
     this.virtualPropsCache.set(row as object, {
@@ -260,6 +313,7 @@ export class CollectionStateManager<
       origin,
       key: resolvedKey,
       collectionId,
+      pendingOperation,
       enriched,
     })
 
@@ -1173,7 +1227,9 @@ export class CollectionStateManager<
         const nextVirtualProps = this.getVirtualPropsSnapshotForState(key)
         const virtualChanged =
           previousVirtualProps.$synced !== nextVirtualProps.$synced ||
-          previousVirtualProps.$origin !== nextVirtualProps.$origin
+          previousVirtualProps.$origin !== nextVirtualProps.$origin ||
+          previousVirtualProps.$pendingOperation !==
+            nextVirtualProps.$pendingOperation
         const previousValueWithVirtual =
           previousVisibleValue !== undefined
             ? enrichRowWithVirtualProps(
@@ -1182,6 +1238,7 @@ export class CollectionStateManager<
                 this.collection.id,
                 () => previousVirtualProps.$synced,
                 () => previousVirtualProps.$origin,
+                () => previousVirtualProps.$pendingOperation,
               )
             : undefined
 
@@ -1229,6 +1286,7 @@ export class CollectionStateManager<
                 this.collection.id,
                 () => previousVirtualProps.$synced,
                 () => previousVirtualProps.$origin,
+                () => previousVirtualProps.$pendingOperation,
               )
             events.push({
               type: `update`,
