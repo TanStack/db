@@ -1540,6 +1540,7 @@ function createElectricSync<T extends Row<unknown>>(
         write({
           type: isDuplicateInsert ? `update` : operation,
           value: changeMessage.value,
+          cursor: stream.lastOffset,
           // Include the primary key and relation info in the metadata
           metadata: {
             ...changeMessage.headers,

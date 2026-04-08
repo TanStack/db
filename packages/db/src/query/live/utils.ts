@@ -252,8 +252,8 @@ export function* splitUpdates<
 ): Generator<ChangeMessage<T, TKey>> {
   for (const change of changes) {
     if (change.type === `update`) {
-      yield { type: `delete`, key: change.key, value: change.previousValue! }
-      yield { type: `insert`, key: change.key, value: change.value }
+      yield { ...change, type: `delete`, value: change.previousValue! }
+      yield { ...change, type: `insert` }
     } else {
       yield change
     }
