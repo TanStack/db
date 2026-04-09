@@ -87,6 +87,8 @@ export { queryOnce, type QueryOnceConfig } from './query-once.js'
 export { type LiveQueryCollectionConfig } from './live/types.js'
 export { type LiveQueryCollectionUtils } from './live/collection-config-builder.js'
 
+export { union, unionFromLiveQuery } from './union.js'
+
 // Predicate utilities for predicate push-down
 export {
   isWhereSubset,
