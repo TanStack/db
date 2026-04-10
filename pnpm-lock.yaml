@@ -382,8 +382,8 @@ importers:
   examples/react-native/shopping-list:
     dependencies:
       '@electric-sql/client':
-        specifier: ^1.5.13
-        version: 1.5.13
+        specifier: ^1.5.15
+        version: 1.5.15
       '@expo/metro-runtime':
         specifier: ~5.0.5
         version: 5.0.5(react-native@0.79.6(@babel/core@7.29.0)(@types/react@19.2.13)(react@19.0.0))
@@ -1188,8 +1188,8 @@ importers:
   packages/electric-db-collection:
     dependencies:
       '@electric-sql/client':
-        specifier: ^1.5.14
-        version: 1.5.14
+        specifier: ^1.5.15
+        version: 1.5.15
       '@standard-schema/spec':
         specifier: ^1.1.0
         version: 1.1.0
@@ -1385,8 +1385,8 @@ importers:
         version: 1.6.0(react@19.2.4)
     devDependencies:
       '@electric-sql/client':
-        specifier: ^1.5.14
-        version: 1.5.14
+        specifier: ^1.5.15
+        version: 1.5.15
       '@testing-library/react':
         specifier: ^16.3.2
         version: 16.3.2(@testing-library/dom@10.4.1)(@types/react-dom@19.2.3(@types/react@19.2.13))(@types/react@19.2.13)(react-dom@19.2.4(react@19.2.4))(react@19.2.4)
@@ -1472,8 +1472,8 @@ importers:
         version: link:../db
     devDependencies:
       '@electric-sql/client':
-        specifier: ^1.5.14
-        version: 1.5.14
+        specifier: ^1.5.15
+        version: 1.5.15
       '@solidjs/testing-library':
         specifier: ^0.8.10
         version: 0.8.10(solid-js@1.9.11)
@@ -1606,8 +1606,8 @@ importers:
         version: link:../db
     devDependencies:
       '@electric-sql/client':
-        specifier: ^1.5.14
-        version: 1.5.14
+        specifier: ^1.5.15
+        version: 1.5.15
       '@vitejs/plugin-vue':
         specifier: ^6.0.4
         version: 6.0.4(vite@7.3.1(@types/node@25.2.2)(jiti@2.6.1)(lightningcss@1.30.2)(sass@1.90.0)(terser@5.44.0)(tsx@4.21.0)(yaml@2.8.1))(vue@3.5.28(typescript@5.9.3))
@@ -2572,12 +2572,8 @@ packages:
   '@drizzle-team/brocli@0.10.2':
     resolution: {integrity: sha512-z33Il7l5dKjUgGULTqBsQBQwckHh5AbIuxhdsIxDDiZAzBOrZO6q9ogcWC65kU382AfynTfgNumVcNIjuIua6w==}
 
-  '@electric-sql/client@1.5.13':
-    resolution: {integrity: sha512-cR5U/mDNUTRrdrZ8Fr3QPFKwTwDUZ2ux88mEvIxQq5PoyW3UrHkK/GIq3arHoeiXrUnieRIz2U+TBOaQKld8XA==}
-    hasBin: true
-
-  '@electric-sql/client@1.5.14':
-    resolution: {integrity: sha512-/bT33y++WsX1McYZ0oa6NtnTfxTB8JgFdrGkSWtQnBNusDRNBEpF+Wn4Meg0Hjxj99gfAbQprqBz4U0KGG/EBA==}
+  '@electric-sql/client@1.5.15':
+    resolution: {integrity: sha512-8C+mqZu6r68kU/jf63FLuc90M2ejyeTgB/68G0ufX4H2WepQw/NJXrIY3veE+sLrDGL+uyQB+fDStHH30fi8qg==}
     hasBin: true
 
   '@electron/get@2.0.3':
@@ -14147,13 +14143,7 @@ snapshots:
 
   '@drizzle-team/brocli@0.10.2': {}
 
-  '@electric-sql/client@1.5.13':
-    dependencies:
-      '@microsoft/fetch-event-source': 2.0.1
-    optionalDependencies:
-      '@rollup/rollup-darwin-arm64': 4.52.5
-
-  '@electric-sql/client@1.5.14':
+  '@electric-sql/client@1.5.15':
     dependencies:
       '@microsoft/fetch-event-source': 2.0.1
     optionalDependencies:
