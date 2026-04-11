@@ -13,7 +13,7 @@
     "db:down": "docker compose down"
   },
   "dependencies": {
-    "@electric-sql/client": "^1.5.13",
+    "@electric-sql/client": "^1.5.15",
     "@expo/metro-runtime": "~5.0.5",
     "@op-engineering/op-sqlite": "^15.2.5",
     "@react-native-async-storage/async-storage": "2.1.2",
