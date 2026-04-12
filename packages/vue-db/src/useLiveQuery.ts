@@ -40,7 +40,7 @@ import type { ComputedRef, MaybeRefOrGetter } from 'vue'
 export interface UseLiveQueryReturn<TContext extends Context> {
   state: ComputedRef<Map<string | number, GetResult<TContext>>>
   data: ComputedRef<InferResultType<TContext>>
-  collection: ComputedRef<Collection<GetResult<TContext>, string | number, {}>>
+  collection: ComputedRef<Collection<GetResult<TContext>, string | number, {}> | null>
   status: ComputedRef<CollectionStatus>
   isLoading: ComputedRef<boolean>
   isReady: ComputedRef<boolean>
@@ -56,7 +56,7 @@ export interface UseLiveQueryReturnWithCollection<
 > {
   state: ComputedRef<Map<TKey, T>>
   data: ComputedRef<Array<T>>
-  collection: ComputedRef<Collection<T, TKey, TUtils>>
+  collection: ComputedRef<Collection<T, TKey, TUtils> | null>
   status: ComputedRef<CollectionStatus>
   isLoading: ComputedRef<boolean>
   isReady: ComputedRef<boolean>
@@ -72,7 +72,7 @@ export interface UseLiveQueryReturnWithSingleResultCollection<
 > {
   state: ComputedRef<Map<TKey, T>>
   data: ComputedRef<T | undefined>
-  collection: ComputedRef<Collection<T, TKey, TUtils> & SingleResult>
+  collection: ComputedRef<(Collection<T, TKey, TUtils> & SingleResult) | null>
   status: ComputedRef<CollectionStatus>
   isLoading: ComputedRef<boolean>
   isReady: ComputedRef<boolean>
