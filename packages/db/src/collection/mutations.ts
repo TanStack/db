@@ -250,13 +250,16 @@ export class CollectionMutationsManager<
       // Apply mutations to the new transaction
       directOpTransaction.applyMutations(mutations)
       this.markPendingLocalOrigins(mutations)
-      // Errors still reject tx.isPersisted.promise; this catch only prevents global unhandled rejections
-      directOpTransaction.commit().catch(() => undefined)
 
-      // Add the transaction to the collection's transactions store
+      // Add the transaction and recompute optimistic state BEFORE commit.
+      // commit() synchronously enters mutationFn (onInsert) which may check
+      // collection.has(key). The item must be visible at that point (#1017).
       state.transactions.set(directOpTransaction.id, directOpTransaction)
       state.scheduleTransactionCleanup(directOpTransaction)
       state.recomputeOptimisticState(true)
+
+      // Errors still reject tx.isPersisted.promise; this catch only prevents global unhandled rejections
+      directOpTransaction.commit().catch(() => undefined)
 
       return directOpTransaction
     }
