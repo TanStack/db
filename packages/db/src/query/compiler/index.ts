@@ -4,6 +4,7 @@ import {
   join as joinOperator,
   map,
   reduce,
+  tap,
 } from '@tanstack/db-ivm'
 import { optimizeQuery } from '../optimizer.js'
 import {
@@ -22,6 +23,8 @@ import {
   Value as ValClass,
   getWhereExpression,
 } from '../ir.js'
+import { ensureIndexForField } from '../../indexes/auto-index.js'
+import { inArray } from '../builder/functions.js'
 import { compileExpression, toBooleanPredicate } from './evaluators.js'
 import { processJoins } from './joins.js'
 import { containsAggregate, processGroupBy } from './group-by.js'
@@ -378,6 +381,72 @@ export function compileQuery(
           values.map(([v, mult]) => [v, mult > 0 ? 1 : 0] as [any, number]),
         ),
       )
+
+      // --- Includes lazy loading (mirrors join lazy loading in joins.ts) ---
+      // Resolve the child correlation field to its underlying collection + field path
+      // so we can set up an index and targeted requestSnapshot calls.
+      const childCorrelationAlias = subquery.childCorrelationField.path[0]!
+      const childFromCollection =
+        subquery.query.from.type === `collectionRef`
+          ? subquery.query.from.collection
+          : (null as unknown as Collection)
+      const followRefResult = followRef(
+        subquery.query,
+        subquery.childCorrelationField,
+        childFromCollection,
+      )
+
+      if (followRefResult) {
+        const followRefCollection = followRefResult.collection
+        const fieldPath = followRefResult.path
+        const fieldName = fieldPath[0]
+
+        // 1. Mark child source as lazy so CollectionSubscriber skips initial full load
+        lazySources.add(childCorrelationAlias)
+
+        // 2. Ensure an index on the correlation field for efficient lookups
+        if (fieldName) {
+          ensureIndexForField(fieldName, fieldPath, followRefCollection)
+        }
+
+        // 3. Tap parent keys to intercept correlation values and request
+        //    matching child rows on-demand via the child's subscription
+        parentKeys = parentKeys.pipe(
+          tap((data: any) => {
+            const resolvedAlias =
+              aliasRemapping[childCorrelationAlias] || childCorrelationAlias
+            const lazySourceSubscription = subscriptions[resolvedAlias]
+
+            if (!lazySourceSubscription) {
+              return
+            }
+
+            if (lazySourceSubscription.hasLoadedInitialState()) {
+              return
+            }
+
+            const joinKeys = [
+              ...new Set(
+                data
+                  .getInner()
+                  .map(
+                    ([[correlationValue]]: any) => correlationValue as unknown,
+                  )
+                  .filter((key: unknown) => key != null),
+              ),
+            ]
+
+            if (joinKeys.length === 0) {
+              return
+            }
+
+            const lazyJoinRef = new PropRef(fieldPath)
+            lazySourceSubscription.requestSnapshot({
+              where: inArray(lazyJoinRef, joinKeys),
+            })
+          }),
+        )
+      }
 
       // If parent filters exist, append them to the child query's WHERE
       const childQuery =
