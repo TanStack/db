@@ -313,9 +313,7 @@ describe(`includes lazy loading`, () => {
       const filters = extractSimpleComparisons(call.where)
       return filters.some(
         (f) =>
-          f.operator === `in` &&
-          Array.isArray(f.value) &&
-          f.value.includes(2),
+          f.operator === `in` && Array.isArray(f.value) && f.value.includes(2),
       )
     })
     expect(hasNewKey).toBe(true)
