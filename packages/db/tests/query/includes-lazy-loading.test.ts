@@ -1,7 +1,9 @@
 import { describe, expect, it, vi } from 'vitest'
 import {
+  and,
   createLiveQueryCollection,
   eq,
+  gte,
   toArray,
 } from '../../src/query/index.js'
 import { createCollection } from '../../src/collection/index.js'
@@ -423,5 +425,260 @@ describe(`includes lazy loading`, () => {
         value: expect.arrayContaining([1, 2, 3]),
       },
     ])
+  })
+})
+
+describe(`includes child where clauses in loadSubset`, () => {
+  /**
+   * Tests that pure-child WHERE clauses (not the correlation) are passed
+   * through to the child collection's loadSubset/queryFn.
+   */
+
+  type Root = {
+    id: number
+    name: string
+  }
+
+  type Item = {
+    id: number
+    rootId: number
+    status: string
+    priority: number
+    title: string
+  }
+
+  const sampleRoots: Array<Root> = [
+    { id: 1, name: `Root A` },
+    { id: 2, name: `Root B` },
+  ]
+
+  const sampleItems: Array<Item> = [
+    { id: 10, rootId: 1, status: `active`, priority: 3, title: `A1 active` },
+    { id: 11, rootId: 1, status: `archived`, priority: 1, title: `A1 archived` },
+    { id: 20, rootId: 2, status: `active`, priority: 5, title: `B1 active` },
+    { id: 21, rootId: 2, status: `active`, priority: 2, title: `B1 active2` },
+  ]
+
+  function createRootsCollection() {
+    return createCollection<Root>({
+      id: `child-where-roots`,
+      getKey: (r) => r.id,
+      sync: {
+        sync: ({ begin, write, commit, markReady }) => {
+          begin()
+          for (const root of sampleRoots) {
+            write({ type: `insert`, value: root })
+          }
+          commit()
+          markReady()
+        },
+      },
+    })
+  }
+
+  function createItemsCollectionWithTracking(): {
+    collection: ReturnType<typeof createCollection<Item>>
+    loadSubsetCalls: Array<LoadSubsetOptions>
+  } {
+    const loadSubsetCalls: Array<LoadSubsetOptions> = []
+
+    const collection = createCollection<Item>({
+      id: `child-where-items`,
+      getKey: (item) => item.id,
+      syncMode: `on-demand`,
+      sync: {
+        sync: ({ begin, write, commit, markReady }) => {
+          begin()
+          for (const item of sampleItems) {
+            write({ type: `insert`, value: item })
+          }
+          commit()
+          markReady()
+          return {
+            loadSubset: vi.fn((options: LoadSubsetOptions) => {
+              loadSubsetCalls.push(options)
+              return Promise.resolve()
+            }),
+          }
+        },
+      },
+    })
+
+    return { collection, loadSubsetCalls }
+  }
+
+  it(`should include pure-child where clause in loadSubset along with correlation filter`, async () => {
+    const roots = createRootsCollection()
+    const { collection: items, loadSubsetCalls } =
+      createItemsCollectionWithTracking()
+
+    const liveQuery = createLiveQueryCollection((q) =>
+      q.from({ r: roots }).select(({ r }) => ({
+        id: r.id,
+        children: toArray(
+          q
+            .from({ item: items })
+            .where(({ item }) => eq(item.rootId, r.id))
+            .where(({ item }) => eq(item.status, `active`))
+            .select(({ item }) => ({
+              id: item.id,
+              title: item.title,
+            })),
+        ),
+      })),
+    )
+
+    await liveQuery.preload()
+
+    expect(loadSubsetCalls.length).toBeGreaterThan(0)
+
+    // The loadSubset call should contain BOTH the correlation filter (inArray)
+    // AND the pure-child filter (eq status 'active')
+    const lastCall = loadSubsetCalls[loadSubsetCalls.length - 1]!
+    expect(lastCall.where).toBeDefined()
+
+    const filters = extractSimpleComparisons(lastCall.where)
+    const hasCorrelationFilter = filters.some(
+      (f) => f.operator === `in` && f.field[0] === `rootId`,
+    )
+    const hasStatusFilter = filters.some(
+      (f) =>
+        f.operator === `eq` &&
+        f.field[0] === `status` &&
+        f.value === `active`,
+    )
+
+    expect(hasCorrelationFilter).toBe(true)
+    expect(hasStatusFilter).toBe(true)
+  })
+
+  it(`should include multiple pure-child where clauses in loadSubset`, async () => {
+    const roots = createRootsCollection()
+    const { collection: items, loadSubsetCalls } =
+      createItemsCollectionWithTracking()
+
+    const liveQuery = createLiveQueryCollection((q) =>
+      q.from({ r: roots }).select(({ r }) => ({
+        id: r.id,
+        children: toArray(
+          q
+            .from({ item: items })
+            .where(({ item }) => eq(item.rootId, r.id))
+            .where(({ item }) => eq(item.status, `active`))
+            .where(({ item }) => gte(item.priority, 3))
+            .select(({ item }) => ({
+              id: item.id,
+              title: item.title,
+            })),
+        ),
+      })),
+    )
+
+    await liveQuery.preload()
+
+    expect(loadSubsetCalls.length).toBeGreaterThan(0)
+
+    const lastCall = loadSubsetCalls[loadSubsetCalls.length - 1]!
+    expect(lastCall.where).toBeDefined()
+
+    const filters = extractSimpleComparisons(lastCall.where)
+    const hasCorrelationFilter = filters.some(
+      (f) => f.operator === `in` && f.field[0] === `rootId`,
+    )
+    const hasStatusFilter = filters.some(
+      (f) =>
+        f.operator === `eq` &&
+        f.field[0] === `status` &&
+        f.value === `active`,
+    )
+    const hasPriorityFilter = filters.some(
+      (f) =>
+        f.operator === `gte` &&
+        f.field[0] === `priority` &&
+        f.value === 3,
+    )
+
+    expect(hasCorrelationFilter).toBe(true)
+    expect(hasStatusFilter).toBe(true)
+    expect(hasPriorityFilter).toBe(true)
+  })
+
+  it(`should produce correct filtered results with child where clause`, async () => {
+    const roots = createRootsCollection()
+    const { collection: items } = createItemsCollectionWithTracking()
+
+    const liveQuery = createLiveQueryCollection((q) =>
+      q.from({ r: roots }).select(({ r }) => ({
+        id: r.id,
+        children: toArray(
+          q
+            .from({ item: items })
+            .where(({ item }) => eq(item.rootId, r.id))
+            .where(({ item }) => eq(item.status, `active`))
+            .select(({ item }) => ({
+              id: item.id,
+              title: item.title,
+            })),
+        ),
+      })),
+    )
+
+    await liveQuery.preload()
+
+    // Root A: only 1 active item (id 10), the archived one (id 11) should be filtered
+    const rootA = stripVirtualProps(liveQuery.get(1))
+    expect(rootA).toBeDefined()
+    expect((rootA as any).children).toHaveLength(1)
+    expect((rootA as any).children[0].id).toBe(10)
+
+    // Root B: 2 active items
+    const rootB = stripVirtualProps(liveQuery.get(2))
+    expect(rootB).toBeDefined()
+    expect((rootB as any).children).toHaveLength(2)
+  })
+
+  it(`should include child where clause combined with correlation in and() syntax`, async () => {
+    const roots = createRootsCollection()
+    const { collection: items, loadSubsetCalls } =
+      createItemsCollectionWithTracking()
+
+    // Use a single where with and() combining correlation + child filter
+    const liveQuery = createLiveQueryCollection((q) =>
+      q.from({ r: roots }).select(({ r }) => ({
+        id: r.id,
+        children: toArray(
+          q
+            .from({ item: items })
+            .where(({ item }) =>
+              and(eq(item.rootId, r.id), eq(item.status, `active`)),
+            )
+            .select(({ item }) => ({
+              id: item.id,
+              title: item.title,
+            })),
+        ),
+      })),
+    )
+
+    await liveQuery.preload()
+
+    expect(loadSubsetCalls.length).toBeGreaterThan(0)
+
+    const lastCall = loadSubsetCalls[loadSubsetCalls.length - 1]!
+    expect(lastCall.where).toBeDefined()
+
+    const filters = extractSimpleComparisons(lastCall.where)
+    const hasCorrelationFilter = filters.some(
+      (f) => f.operator === `in` && f.field[0] === `rootId`,
+    )
+    const hasStatusFilter = filters.some(
+      (f) =>
+        f.operator === `eq` &&
+        f.field[0] === `status` &&
+        f.value === `active`,
+    )
+
+    expect(hasCorrelationFilter).toBe(true)
+    expect(hasStatusFilter).toBe(true)
   })
 })
