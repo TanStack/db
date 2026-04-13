@@ -454,7 +454,13 @@ describe(`includes child where clauses in loadSubset`, () => {
 
   const sampleItems: Array<Item> = [
     { id: 10, rootId: 1, status: `active`, priority: 3, title: `A1 active` },
-    { id: 11, rootId: 1, status: `archived`, priority: 1, title: `A1 archived` },
+    {
+      id: 11,
+      rootId: 1,
+      status: `archived`,
+      priority: 1,
+      title: `A1 archived`,
+    },
     { id: 20, rootId: 2, status: `active`, priority: 5, title: `B1 active` },
     { id: 21, rootId: 2, status: `active`, priority: 2, title: `B1 active2` },
   ]
@@ -540,9 +546,7 @@ describe(`includes child where clauses in loadSubset`, () => {
     )
     const hasStatusFilter = filters.some(
       (f) =>
-        f.operator === `eq` &&
-        f.field[0] === `status` &&
-        f.value === `active`,
+        f.operator === `eq` && f.field[0] === `status` && f.value === `active`,
     )
 
     expect(hasCorrelationFilter).toBe(true)
@@ -584,15 +588,10 @@ describe(`includes child where clauses in loadSubset`, () => {
     )
     const hasStatusFilter = filters.some(
       (f) =>
-        f.operator === `eq` &&
-        f.field[0] === `status` &&
-        f.value === `active`,
+        f.operator === `eq` && f.field[0] === `status` && f.value === `active`,
     )
     const hasPriorityFilter = filters.some(
-      (f) =>
-        f.operator === `gte` &&
-        f.field[0] === `priority` &&
-        f.value === 3,
+      (f) => f.operator === `gte` && f.field[0] === `priority` && f.value === 3,
     )
 
     expect(hasCorrelationFilter).toBe(true)
@@ -670,9 +669,7 @@ describe(`includes child where clauses in loadSubset`, () => {
     )
     const hasStatusFilter = filters.some(
       (f) =>
-        f.operator === `eq` &&
-        f.field[0] === `status` &&
-        f.value === `active`,
+        f.operator === `eq` && f.field[0] === `status` && f.value === `active`,
     )
 
     expect(hasCorrelationFilter).toBe(true)
