@@ -95,7 +95,11 @@ function compileExpression(
         )
       }
       const columnName = exp.path[0]!
-      if (compileOptions?.jsonColumn && columnName !== `id`) {
+
+      if (compileOptions?.jsonColumn && columnName === `id`) {
+        const prefix = compileOptions.jsonColumn.split('.')[0]!
+        return `${prefix}.${quoteIdentifier(columnName)}`
+      } else if (compileOptions?.jsonColumn) {
         return `json_extract(${compileOptions.jsonColumn}, '$.${columnName}')`
       }
       return quoteIdentifier(columnName)
