@@ -56,10 +56,7 @@ describe(`includes lazy loading`, () => {
     })
   }
 
-  function createItemsCollectionWithTracking(): {
-    collection: ReturnType<typeof createCollection<Item>>
-    loadSubsetCalls: Array<LoadSubsetOptions>
-  } {
+  function createItemsCollectionWithTracking() {
     const loadSubsetCalls: Array<LoadSubsetOptions> = []
 
     const collection = createCollection<Item>({
