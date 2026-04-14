@@ -1073,6 +1073,64 @@ describe(`persistedCollectionOptions`, () => {
     ).toBe(true)
   })
 
+  it(`does not rewrite a mismatched persisted index when removal fails`, async () => {
+    const adapter = createRecordingAdapter()
+    const collection = createCollection(
+      persistedCollectionOptions<Todo, string>({
+        id: `sync-present-index-definition-removal-failure`,
+        getKey: (item) => item.id,
+        defaultIndexType: BasicIndex,
+        sync: {
+          sync: ({ markReady }) => {
+            markReady()
+          },
+        },
+        persistence: {
+          adapter,
+        },
+      }),
+    )
+
+    const index = collection.createIndex((row) => row.title, {
+      name: `title-index`,
+    })
+    const signature = collection
+      .getIndexMetadata()
+      .find((metadata) => metadata.indexId === index.id)?.signature
+
+    if (!signature) {
+      throw new Error(`Expected a signature for the title index`)
+    }
+
+    adapter.persistedIndexes.set(signature, {
+      signature,
+      expressionSql: [`{"type":"ref","path":["otherField"]}`],
+    })
+    adapter.markIndexRemoved = async (collectionId, staleSignature) => {
+      adapter.markIndexRemovedCalls.push({
+        collectionId,
+        signature: staleSignature,
+      })
+      throw new Error(`drop failed`)
+    }
+
+    await collection.preload()
+    await flushAsyncWork()
+
+    expect(
+      adapter.markIndexRemovedCalls.some(
+        (call) => call.signature === signature,
+      ),
+    ).toBe(true)
+    expect(
+      adapter.ensureIndexCalls.some((call) => call.signature === signature),
+    ).toBe(false)
+    expect(adapter.persistedIndexes.get(signature)).toEqual({
+      signature,
+      expressionSql: [`{"type":"ref","path":["otherField"]}`],
+    })
+  })
+
   it(`queues remote sync writes that arrive during hydration`, async () => {
     const adapter = createRecordingAdapter([
       {

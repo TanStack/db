@@ -2199,6 +2199,7 @@ class PersistedCollectionRuntime<
     const actualIndexMap = new Map(
       actualIndexes.map((indexState) => [indexState.signature, indexState]),
     )
+    const blockedSignatures = new Set<string>()
 
     for (const [signature, actualIndex] of actualIndexMap) {
       const desiredIndex = desiredIndexes.get(signature)
@@ -2209,13 +2210,20 @@ class PersistedCollectionRuntime<
 
       if (!arePersistedIndexStatesEqual(actualIndex, desiredIndex)) {
         const removed = await this.markPersistedIndexRemoved(signature)
-        if (removed) {
-          actualIndexMap.delete(signature)
+        if (!removed) {
+          blockedSignatures.add(signature)
+          continue
         }
+
+        actualIndexMap.delete(signature)
       }
     }
 
     for (const [signature, desiredIndex] of desiredIndexes) {
+      if (blockedSignatures.has(signature)) {
+        continue
+      }
+
       const actualIndex = actualIndexMap.get(signature)
       if (
         actualIndex &&
