@@ -1,5 +1,17 @@
 # @tanstack/db
 
+## 0.6.5
+
+### Patch Changes
+
+- fix: pass child where clauses to loadSubset in includes ([#1471](https://github.com/TanStack/db/pull/1471))
+
+  Pure-child WHERE clauses on includes subqueries (e.g., `.where(({ item }) => eq(item.status, 'active'))`) are now passed through to the child collection's `loadSubset`/`queryFn`, enabling server-side filtering. Previously only the correlation filter reached the sync layer; additional child filters were applied client-side only.
+
+- fix: lazy load includes child collections in on-demand sync mode ([#1471](https://github.com/TanStack/db/pull/1471))
+
+  Includes child collections now use the same lazy loading mechanism as regular joins. When a query uses includes with a correlation WHERE clause (e.g., `.where(({ item }) => eq(item.rootId, r.id))`), only matching child rows are loaded on-demand via `requestSnapshot({ where: inArray(field, keys) })` instead of loading all data upfront. This ensures the sync layer's `queryFn` receives the correlation filter in `loadSubsetOptions`, enabling efficient server-side filtering.
+
 ## 0.6.4
 
 ### Patch Changes

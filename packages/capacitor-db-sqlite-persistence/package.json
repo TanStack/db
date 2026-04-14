@@ -1,6 +1,6 @@
 {
   "name": "@tanstack/capacitor-db-sqlite-persistence",
-  "version": "0.1.8",
+  "version": "0.1.9",
   "description": "Capacitor SQLite persisted collection adapter for TanStack DB",
   "author": "TanStack Team",
   "license": "MIT",
