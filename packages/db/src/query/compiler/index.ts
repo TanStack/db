@@ -479,6 +479,9 @@ export function compileQuery(
       // Merge child's alias metadata into parent's
       Object.assign(aliasToCollectionId, childResult.aliasToCollectionId)
       Object.assign(aliasRemapping, childResult.aliasRemapping)
+      for (const [alias, whereClause] of childResult.sourceWhereClauses) {
+        sourceWhereClauses.set(alias, whereClause)
+      }
 
       includesResults.push({
         pipeline: childResult.pipeline,
