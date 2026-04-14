@@ -15,6 +15,7 @@ import {
 import type { LoadSubsetOptions } from '@tanstack/db'
 import type {
   PersistedIndexSpec,
+  PersistedIndexState,
   PersistedRowScanOptions,
   PersistedScannedRow,
   PersistedTx,
@@ -987,6 +988,20 @@ function normalizeIndexSqlFragment(fragment: string): string {
   return sanitizeExpressionSqlFragment(fragment)
 }
 
+function parsePersistedIndexExpressionSql(serialized: string): Array<string> {
+  const parsedValue: unknown = JSON.parse(serialized)
+  if (
+    Array.isArray(parsedValue) &&
+    parsedValue.every((entry) => typeof entry === `string`)
+  ) {
+    return [...parsedValue]
+  }
+
+  throw new InvalidPersistedCollectionConfigError(
+    `Persisted index registry contains invalid expression SQL`,
+  )
+}
+
 function mergeObjectRows<T extends object>(existing: unknown, incoming: T): T {
   if (typeof existing === `object` && existing !== null) {
     return Object.assign({}, existing as Record<string, unknown>, incoming) as T
@@ -1461,6 +1476,28 @@ export class SQLiteCorePersistenceAdapter implements PersistenceAdapter {
            ON ${collectionTableSql} (${expressionSql})`
       await transactionDriver.exec(createIndexSql)
     })
+  }
+
+  async listIndexes(collectionId: string): Promise<Array<PersistedIndexState>> {
+    await this.ensureCollectionReady(collectionId)
+
+    const rows = await this.driver.query<{
+      signature: string
+      expression_sql: string
+      where_sql: string | null
+    }>(
+      `SELECT signature, expression_sql, where_sql
+       FROM persisted_index_registry
+       WHERE collection_id = ? AND removed = 0
+       ORDER BY signature ASC`,
+      [collectionId],
+    )
+
+    return rows.map((row) => ({
+      signature: row.signature,
+      expressionSql: parsePersistedIndexExpressionSql(row.expression_sql),
+      ...(row.where_sql === null ? {} : { whereSql: row.where_sql }),
+    }))
   }
 
   async markIndexRemoved(

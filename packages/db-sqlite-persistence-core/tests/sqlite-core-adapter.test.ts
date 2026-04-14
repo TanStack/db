@@ -964,6 +964,44 @@ export function runSQLiteCoreAdapterContractSuite(
       expect(sqliteMasterAfter).toHaveLength(0)
     })
 
+    it(`lists active persisted indexes from the registry`, async () => {
+      const { adapter } = registerContractHarness()
+      const collectionId = `todos`
+
+      await adapter.ensureIndex(collectionId, `idx-title`, {
+        expressionSql: [`json_extract(value, '$.title')`],
+      })
+      await adapter.ensureIndex(collectionId, `idx-score`, {
+        expressionSql: [`json_extract(value, '$.score')`],
+        whereSql: `json_extract(value, '$.score') IS NOT NULL`,
+      })
+
+      if (!adapter.markIndexRemoved) {
+        throw new Error(
+          `Adapter must implement markIndexRemoved for this contract suite`,
+        )
+      }
+      await adapter.markIndexRemoved(collectionId, `idx-title`)
+
+      if (
+        !(`listIndexes` in adapter) ||
+        typeof adapter.listIndexes !== `function`
+      ) {
+        throw new Error(
+          `Adapter must implement listIndexes for this contract suite`,
+        )
+      }
+
+      const indexes = await adapter.listIndexes(collectionId)
+      expect(indexes).toEqual([
+        {
+          signature: `idx-score`,
+          expressionSql: [`json_extract(value, '$.score')`],
+          whereSql: `json_extract(value, '$.score') IS NOT NULL`,
+        },
+      ])
+    })
+
     it(`enforces schema mismatch policies`, async () => {
       const baseHarness = registerContractHarness({
         schemaVersion: 1,

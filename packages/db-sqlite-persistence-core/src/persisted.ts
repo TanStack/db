@@ -178,6 +178,12 @@ export interface PersistedIndexSpec {
   readonly metadata?: Readonly<Record<string, unknown>>
 }
 
+export type PersistedIndexState = {
+  readonly signature: string
+  readonly expressionSql: ReadonlyArray<string>
+  readonly whereSql?: string
+}
+
 export type PersistedRowMetadataMutation<
   TKey extends string | number = string | number,
 > = { type: `set`; key: TKey; value: unknown } | { type: `delete`; key: TKey }
@@ -261,6 +267,7 @@ export interface PersistenceAdapter {
     collectionId: string,
     options?: PersistedRowScanOptions,
   ) => Promise<Array<PersistedScannedRow>>
+  listIndexes?: (collectionId: string) => Promise<Array<PersistedIndexState>>
   ensureIndex: (
     collectionId: string,
     signature: string,
@@ -696,6 +703,33 @@ function stableSerialize(value: unknown): string {
   return JSON.stringify(toStableSerializable(value) ?? null)
 }
 
+function toPersistedIndexState(
+  signature: string,
+  spec: Pick<PersistedIndexSpec, `expressionSql` | `whereSql`>,
+): PersistedIndexState {
+  return {
+    signature,
+    expressionSql: [...spec.expressionSql],
+    ...(spec.whereSql === undefined ? {} : { whereSql: spec.whereSql }),
+  }
+}
+
+function arePersistedIndexStatesEqual(
+  left: Pick<PersistedIndexState, `expressionSql` | `whereSql`>,
+  right: Pick<PersistedIndexState, `expressionSql` | `whereSql`>,
+): boolean {
+  return (
+    stableSerialize({
+      expressionSql: left.expressionSql,
+      whereSql: left.whereSql ?? null,
+    }) ===
+    stableSerialize({
+      expressionSql: right.expressionSql,
+      whereSql: right.whereSql ?? null,
+    })
+  )
+}
+
 function normalizeSubsetOptionsForKey(
   options: LoadSubsetOptions,
 ): Record<string, unknown> {
@@ -811,6 +845,7 @@ class PersistedCollectionRuntime<
   private indexAddedUnsubscribe: (() => void) | null = null
   private indexRemovedUnsubscribe: (() => void) | null = null
   private remoteEnsureRetryTimer: ReturnType<typeof setTimeout> | null = null
+  private persistedIndexWork: Promise<void> = Promise.resolve()
   private nextSubscriptionId = 0
 
   private latestTerm = 0
@@ -897,7 +932,9 @@ class PersistedCollectionRuntime<
 
     const indexBootstrapSnapshot = this.collection?.getIndexMetadata() ?? []
     this.attachIndexLifecycleListeners()
-    await this.bootstrapPersistedIndexes(indexBootstrapSnapshot)
+    this.enqueuePersistedIndexWork(() =>
+      this.reconcilePersistedIndexes(indexBootstrapSnapshot),
+    )
 
     if (this.syncMode !== `on-demand`) {
       this.activeSubsets.set(this.getSubsetKey({}), {})
@@ -2109,17 +2146,27 @@ class PersistedCollectionRuntime<
     }
 
     this.indexAddedUnsubscribe = this.collection.on(`index:added`, (event) => {
-      void this.ensurePersistedIndex(event.index)
+      this.enqueuePersistedIndexWork(() =>
+        this.ensurePersistedIndex(event.index),
+      )
     })
     this.indexRemovedUnsubscribe = this.collection.on(
       `index:removed`,
       (event) => {
-        void this.markIndexRemoved(event.index)
+        this.enqueuePersistedIndexWork(() => this.markIndexRemoved(event.index))
       },
     )
   }
 
-  private async bootstrapPersistedIndexes(
+  private enqueuePersistedIndexWork(task: () => Promise<void>): void {
+    const queuedTask = this.persistedIndexWork.then(task, task)
+    this.persistedIndexWork = queuedTask.then(
+      () => undefined,
+      () => undefined,
+    )
+  }
+
+  private async reconcilePersistedIndexes(
     indexMetadataSnapshot?: Array<CollectionIndexMetadata>,
   ): Promise<void> {
     const collection = this.collection
@@ -2127,10 +2174,57 @@ class PersistedCollectionRuntime<
       return
     }
 
-    const indexMetadata =
-      indexMetadataSnapshot ?? collection?.getIndexMetadata() ?? []
-    for (const metadata of indexMetadata) {
-      await this.ensurePersistedIndex(metadata)
+    const desiredIndexes = new Map<string, PersistedIndexState>()
+    for (const metadata of indexMetadataSnapshot ??
+      collection?.getIndexMetadata() ??
+      []) {
+      desiredIndexes.set(
+        metadata.signature,
+        toPersistedIndexState(
+          metadata.signature,
+          this.buildPersistedIndexSpec(metadata),
+        ),
+      )
+    }
+
+    const listIndexes = this.persistence.adapter.listIndexes
+    if (!listIndexes) {
+      for (const [signature, desiredIndex] of desiredIndexes) {
+        await this.ensurePersistedIndexState(signature, desiredIndex)
+      }
+      return
+    }
+
+    const actualIndexes = await listIndexes(this.collectionId)
+    const actualIndexMap = new Map(
+      actualIndexes.map((indexState) => [indexState.signature, indexState]),
+    )
+
+    for (const [signature, actualIndex] of actualIndexMap) {
+      const desiredIndex = desiredIndexes.get(signature)
+      if (!desiredIndex) {
+        await this.markPersistedIndexRemoved(signature)
+        continue
+      }
+
+      if (!arePersistedIndexStatesEqual(actualIndex, desiredIndex)) {
+        const removed = await this.markPersistedIndexRemoved(signature)
+        if (removed) {
+          actualIndexMap.delete(signature)
+        }
+      }
+    }
+
+    for (const [signature, desiredIndex] of desiredIndexes) {
+      const actualIndex = actualIndexMap.get(signature)
+      if (
+        actualIndex &&
+        arePersistedIndexStatesEqual(actualIndex, desiredIndex)
+      ) {
+        continue
+      }
+
+      await this.ensurePersistedIndexState(signature, desiredIndex)
     }
   }
 
@@ -2150,25 +2244,43 @@ class PersistedCollectionRuntime<
   private async ensurePersistedIndex(
     indexMetadata: CollectionIndexMetadata,
   ): Promise<void> {
-    const spec = this.buildPersistedIndexSpec(indexMetadata)
+    await this.ensurePersistedIndexState(
+      indexMetadata.signature,
+      toPersistedIndexState(
+        indexMetadata.signature,
+        this.buildPersistedIndexSpec(indexMetadata),
+      ),
+    )
+  }
+
+  private async ensurePersistedIndexState(
+    signature: string,
+    indexState: PersistedIndexState,
+  ): Promise<void> {
+    const spec: PersistedIndexSpec = {
+      expressionSql: indexState.expressionSql,
+      ...(indexState.whereSql === undefined
+        ? {}
+        : { whereSql: indexState.whereSql }),
+    }
 
     try {
       await this.persistence.adapter.ensureIndex(
         this.collectionId,
-        indexMetadata.signature,
+        signature,
         spec,
       )
-    } catch (error) {
+    } catch (error: unknown) {
       console.warn(`Failed to ensure persisted index in adapter:`, error)
     }
 
     try {
       await this.persistence.coordinator.requestEnsurePersistedIndex(
         this.collectionId,
-        indexMetadata.signature,
+        signature,
         spec,
       )
-    } catch (error) {
+    } catch (error: unknown) {
       console.warn(
         `Failed to ensure persisted index through coordinator:`,
         error,
@@ -2179,17 +2291,23 @@ class PersistedCollectionRuntime<
   private async markIndexRemoved(
     indexMetadata: CollectionIndexMetadata,
   ): Promise<void> {
+    await this.markPersistedIndexRemoved(indexMetadata.signature)
+  }
+
+  private async markPersistedIndexRemoved(signature: string): Promise<boolean> {
     if (!this.persistence.adapter.markIndexRemoved) {
-      return
+      return false
     }
 
     try {
       await this.persistence.adapter.markIndexRemoved(
         this.collectionId,
-        indexMetadata.signature,
+        signature,
       )
-    } catch (error) {
+      return true
+    } catch (error: unknown) {
       console.warn(`Failed to mark persisted index removed:`, error)
+      return false
     }
   }
 }
