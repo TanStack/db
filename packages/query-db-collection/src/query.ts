@@ -830,19 +830,31 @@ export function queryCollectionOptions(
 
       const ownedRows = new Set<string | number>()
       for (const [rowKey] of collection._state.syncedData.entries()) {
-        const owners = getPersistedOwners(rowKey)
-        if (owners.size === 0) {
+        const persistedOwners = getPersistedOwners(rowKey)
+        if (persistedOwners.size === 0) {
           continue
         }
 
-        rowToQueries.set(rowKey, new Set(owners))
-        owners.forEach((owner) => {
+        // MERGE persisted owners into any existing in-memory owners. Never
+        // overwrite — other queries may have claimed ownership in-memory via
+        // `addRow` without a corresponding `setPersistedOwners` yet (e.g.
+        // when the collection runs without a SyncMetadataApi). Overwriting
+        // would desync `rowToQueries` from `queryToRows` and cause
+        // `cleanupQueryInternal` to later delete rows still needed by active
+        // queries.
+        const existingOwners = rowToQueries.get(rowKey)
+        if (existingOwners) {
+          persistedOwners.forEach((owner) => existingOwners.add(owner))
+        } else {
+          rowToQueries.set(rowKey, new Set(persistedOwners))
+        }
+        persistedOwners.forEach((owner) => {
           const queryToRowsSet = queryToRows.get(owner) || new Set()
           queryToRowsSet.add(rowKey)
           queryToRows.set(owner, queryToRowsSet)
         })
 
-        if (owners.has(hashedQueryKey)) {
+        if (persistedOwners.has(hashedQueryKey)) {
           ownedRows.add(rowKey)
         }
       }
@@ -926,7 +938,15 @@ export function queryCollectionOptions(
           return
         }
 
-        rowToQueries.set(row.key, new Set(ownerSet))
+        // MERGE into existing in-memory owners (see note in
+        // getHydratedOwnedRowsForQueryBaseline). Overwriting here would strip
+        // in-memory-only ownership registered by active queries.
+        const existingOwners = rowToQueries.get(row.key)
+        if (existingOwners) {
+          ownerSet.forEach((owner) => existingOwners.add(owner))
+        } else {
+          rowToQueries.set(row.key, new Set(ownerSet))
+        }
         ownerSet.forEach((owner) => {
           const queryToRowsSet = queryToRows.get(owner) || new Set()
           queryToRowsSet.add(row.key)
