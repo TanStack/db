@@ -5453,7 +5453,6 @@ describe(`QueryCollection`, () => {
       expect(collection.has(`1`)).toBe(true)
       expect(collection.size).toBeGreaterThan(0)
     })
-
   })
 
   describe(`Cache Persistence on Remount`, () => {
