@@ -5308,6 +5308,151 @@ describe(`QueryCollection`, () => {
         // Query was cancelled, this is expected
       }
     })
+
+    it(`hydration must not strip active in-memory query owners when persisted metadata is out of date`, async () => {
+      // Deterministic regression test for the desync that
+      // getHydratedOwnedRowsForQueryBaseline used to cause: it OVERWROTE
+      // rowToQueries[rowKey] with persisted owners, silently evicting any
+      // query that held ownership in-memory only. queryToRows was left
+      // untouched, so the two maps desynced and cleanupQueryInternal later
+      // deleted rows still needed by an active query.
+      //
+      // Reproduction:
+      //   1. Query A fetches a brand-new row. Inside its applySuccessfulResult
+      //      loop the row is inserted via ctx.write; that insert clobbers the
+      //      metadata entry that setPersistedOwners wrote earlier in the same
+      //      transaction (see sync.ts row insert path). Net result after A:
+      //        - in-memory  rowToQueries[row1] = { A }
+      //        - persisted  row1 metadata      = <empty>
+      //   2. Query B fetches the SAME row with a different predicate. Because
+      //      row1 already exists in syncedData, ctx.write runs an update
+      //      (which does NOT clobber metadata) and setPersistedOwners
+      //      survives. Net result after B:
+      //        - in-memory  rowToQueries[row1] = { A, B }
+      //        - persisted  row1 metadata      = { B }     (A was never persisted)
+      //   3. Query C subscribes with an unmatched predicate (0 results).
+      //      Because queryToRows.get(C) is undefined, its applySuccessfulResult
+      //      enters getHydratedOwnedRowsForQueryBaseline, which iterates
+      //      syncedData, sees row1's persisted owners = { B }, and (pre-fix)
+      //      rowToQueries.set(row1, new Set({ B })) — wiping A.
+      //   4. Tear down Query B. cleanupQueryInternal consults rowToQueries:
+      //      only B tracked → nextOwners is empty → row1 is deleted from
+      //      syncedData, even though Query A is still subscribed.
+      const baseQueryKey = [`hydration-strip-regression`]
+
+      type Row = CategorisedItem
+      // Pre-seed `server` with a row in each category so that
+      //   - predicate category='A' returns [row1]
+      //   - predicate category='AB' (query B) also returns [row1]  ← shared
+      //   - predicate category='C' returns []
+      const row1: Row = { id: `1`, name: `Shared row`, category: `A` }
+      const server: Array<Row & { extraTags?: Array<string> }> = [
+        { ...row1, extraTags: [`A`, `AB`] },
+      ]
+
+      const matchesA = (where: any) => isCategory(`A`, where)
+      const matchesAB = (where: any) =>
+        where?.type === `func` &&
+        where.name === `eq` &&
+        where.args?.[0]?.path?.[0] === `category` &&
+        where.args?.[1]?.value === `AB`
+      const matchesC = (where: any) => isCategory(`C`, where)
+
+      const queryFn = vi.fn().mockImplementation((context: any) => {
+        const where = context.meta?.loadSubsetOptions?.where
+        if (matchesA(where)) {
+          return Promise.resolve(
+            server
+              .filter((i) => i.extraTags?.includes(`A`))
+              .map(({ extraTags: _extraTags, ...r }) => r),
+          )
+        }
+        if (matchesAB(where)) {
+          return Promise.resolve(
+            server
+              .filter((i) => i.extraTags?.includes(`AB`))
+              .map(({ extraTags: _extraTags, ...r }) => r),
+          )
+        }
+        if (matchesC(where)) {
+          return Promise.resolve([])
+        }
+        return Promise.resolve(
+          server.map(({ extraTags: _extraTags, ...r }) => r),
+        )
+      })
+
+      const collection = createCollection(
+        queryCollectionOptions<Row>({
+          id: `hydration-strip-regression`,
+          queryClient,
+          queryKey: (ctx) => {
+            if (ctx.where) {
+              return [...baseQueryKey, ctx.where]
+            }
+            return baseQueryKey
+          },
+          queryFn,
+          getKey,
+          startSync: true,
+          syncMode: `on-demand`,
+        }),
+      ) as Collection<Row>
+
+      // Step 1 — Query A loads row1 (fresh insert → persisted metadata for
+      // row1 ends up empty because ctx.write({type:'insert'}) clobbers it).
+      const queryA = createLiveQueryCollection({
+        query: (q) =>
+          q
+            .from({ item: collection })
+            .where(({ item }) => eq(item.category, `A`))
+            .select(({ item }) => ({ id: item.id, name: item.name })),
+      })
+      await queryA.preload()
+      await vi.waitFor(() => expect(collection.has(`1`)).toBe(true))
+
+      // Step 2 — Query B also matches row1 via a different predicate. Because
+      // row1 already exists in syncedData, B's applySuccessfulResult takes
+      // the update path (not insert) and setPersistedOwners(row1, {B})
+      // survives the commit. In-memory ownership for row1 is now {A, B}.
+      const queryB = createLiveQueryCollection({
+        query: (q) =>
+          q
+            .from({ item: collection })
+            // Match row1 via a different predicate literal. The queryFn
+            // filters by the server-side tag so this matches row1 too.
+            .where(({ item }) => eq(item.category, `AB`))
+            .select(({ item }) => ({ id: item.id, name: item.name })),
+      })
+      await queryB.preload()
+      await flushPromises()
+
+      // Step 3 — Query C subscribes with an empty-result predicate. Its
+      // applySuccessfulResult must enter getHydratedOwnedRowsForQueryBaseline
+      // (because queryToRows has no entry for C yet). Pre-fix that function
+      // reads persisted row1 owners = {B} and overwrites rowToQueries[row1],
+      // stripping A.
+      const queryC = createLiveQueryCollection({
+        query: (q) =>
+          q
+            .from({ item: collection })
+            .where(({ item }) => eq(item.category, `C`))
+            .select(({ item }) => ({ id: item.id, name: item.name })),
+      })
+      await queryC.preload()
+      await flushPromises()
+
+      // Step 4 — Tear down Query B. Pre-fix, rowToQueries[row1] is now {B},
+      // so removing B leaves nextOwners empty and row1 is deleted from
+      // syncedData even though Query A still owns it in queryToRows[A].
+      // Post-fix, the merge in getHydratedOwnedRowsForQueryBaseline preserves
+      // A, so removing B leaves nextOwners = {A} and row1 survives.
+      await queryB.cleanup()
+      await flushPromises()
+
+      expect(collection.has(`1`)).toBe(true)
+      expect(collection.size).toBeGreaterThan(0)
+    })
   })
 
   describe(`Cache Persistence on Remount`, () => {
