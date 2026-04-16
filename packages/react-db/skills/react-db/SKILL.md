@@ -302,6 +302,57 @@ See meta-framework/SKILL.md for full preloading patterns.
 
 ## Common Mistakes
 
+### CRITICAL Using === instead of eq() in .where()
+
+Wrong — throws `InvalidWhereExpressionError` at runtime:
+
+```tsx
+const { data } = useLiveQuery(
+  (q) =>
+    q
+      .from({ todo: todoCollection })
+      .where(({ todo }) => todo.completed === true),
+  [],
+)
+```
+
+Correct — use expression functions from `@tanstack/react-db`:
+
+```tsx
+import { useLiveQuery, eq } from '@tanstack/react-db'
+
+const { data } = useLiveQuery(
+  (q) =>
+    q
+      .from({ todo: todoCollection })
+      .where(({ todo }) => eq(todo.completed, true)),
+  [],
+)
+```
+
+JavaScript `===`, `!==`, `<`, `>` return a boolean, not a query expression. Always use `eq`, `gt`, `gte`, `lt`, `lte`, `and`, `or`, `not`, `like`, `ilike`, `isNull`, `isUndefined`, `inArray`. See db-core/live-queries/SKILL.md for the full operator reference.
+
+### CRITICAL Assigning useLiveQuery result directly instead of destructuring
+
+Wrong — crashes with "map is not a function":
+
+```tsx
+const todos = useLiveQuery((q) => q.from({ todo: todoCollection }), [])
+return todos.map((t) => <li>{t.text}</li>) // TypeError: todos.map is not a function
+```
+
+Correct — destructure `{ data }` with a default:
+
+```tsx
+const { data: todos = [] } = useLiveQuery(
+  (q) => q.from({ todo: todoCollection }),
+  [],
+)
+return todos.map((t) => <li key={t.id}>{t.text}</li>)
+```
+
+`useLiveQuery` returns an object `{ data, isLoading, status, ... }`, not the array directly.
+
 ### CRITICAL Missing external values in dependency array
 
 Wrong:
