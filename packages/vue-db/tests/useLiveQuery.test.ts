@@ -489,7 +489,7 @@ describe(`Query Collections`, () => {
     // Grouped query derived from initial query
     const { state: groupedState } = useLiveQuery((q) =>
       q
-        .from({ queryResult: initialCollection.value })
+        .from({ queryResult: initialCollection.value! })
         .groupBy(({ queryResult }) => queryResult.team)
         .select(({ queryResult }) => ({
           team: queryResult.team,
@@ -813,7 +813,7 @@ describe(`Query Collections`, () => {
       id: `3`,
       name: `John Smith`,
     })
-    expect(returnedCollection.value.id).toBe(liveQueryCollection1.id)
+    expect(returnedCollection.value!.id).toBe(liveQueryCollection1.id)
 
     // Switch to the second collection by updating the reactive ref
     currentCollection.value = liveQueryCollection2 as any
@@ -830,7 +830,7 @@ describe(`Query Collections`, () => {
       id: `5`,
       name: `Bob Dylan`,
     })
-    expect(returnedCollection.value.id).toBe(liveQueryCollection2.id)
+    expect(returnedCollection.value!.id).toBe(liveQueryCollection2.id)
 
     // Verify we no longer have data from the first collection
     expect(state.value.get(`3`)).toBeUndefined()
