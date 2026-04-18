@@ -21,20 +21,26 @@ import type {
   Select,
 } from '../ir.js'
 import type { NamespacedAndKeyedStream, NamespacedRow } from '../../types.js'
-import type { VirtualOrigin } from '../../virtual-props.js'
+import type {
+  PendingOperationType,
+  VirtualOrigin,
+} from '../../virtual-props.js'
 
 const VIRTUAL_SYNCED_KEY = `__virtual_synced__`
 const VIRTUAL_HAS_LOCAL_KEY = `__virtual_has_local__`
+const VIRTUAL_PENDING_OP_KEY = `__virtual_pending_op__`
 
 type RowVirtualMetadata = {
   synced: boolean
   hasLocal: boolean
+  pendingOperation: PendingOperationType
 }
 
 function getRowVirtualMetadata(row: NamespacedRow): RowVirtualMetadata {
   let found = false
   let allSynced = true
   let hasLocal = false
+  let pendingOperation: PendingOperationType = null
 
   for (const [alias, value] of Object.entries(row)) {
     if (alias === `$selected`) continue
@@ -51,11 +57,19 @@ function getRowVirtualMetadata(row: NamespacedRow): RowVirtualMetadata {
     if (asRecord.$origin === `local`) {
       hasLocal = true
     }
+    if (
+      pendingOperation === null &&
+      `$pendingOperation` in asRecord &&
+      asRecord.$pendingOperation != null
+    ) {
+      pendingOperation = asRecord.$pendingOperation as PendingOperationType
+    }
   }
 
   return {
     synced: found ? allSynced : true,
     hasLocal,
+    pendingOperation,
   }
 }
 
@@ -145,6 +159,19 @@ export function processGroupBy(
         return false
       },
     },
+    [VIRTUAL_PENDING_OP_KEY]: {
+      preMap: ([, row]: [string, NamespacedRow]) =>
+        getRowVirtualMetadata(row).pendingOperation,
+      reduce: (values: Array<[PendingOperationType, number]>) => {
+        // Return the first non-null pending operation, or null if all are null
+        for (const [op, multiplicity] of values) {
+          if (op != null && multiplicity > 0) {
+            return op
+          }
+        }
+        return null
+      },
+    },
   }
 
   // Handle empty GROUP BY (single-group aggregation)
@@ -232,10 +259,14 @@ export function processGroupBy(
         const groupHasLocal = (aggregatedRow as Record<string, any>)[
           VIRTUAL_HAS_LOCAL_KEY
         ]
+        const groupPendingOp = (aggregatedRow as Record<string, any>)[
+          VIRTUAL_PENDING_OP_KEY
+        ]
         resultRow.$synced = groupSynced ?? true
         resultRow.$origin = (
           groupHasLocal ? `local` : `remote`
         ) satisfies VirtualOrigin
+        resultRow.$pendingOperation = groupPendingOp ?? null
         resultRow.$key = resultKey
         resultRow.$collectionId =
           aggregateCollectionId ?? resultRow.$collectionId
@@ -408,10 +439,14 @@ export function processGroupBy(
       const groupHasLocal = (aggregatedRow as Record<string, any>)[
         VIRTUAL_HAS_LOCAL_KEY
       ]
+      const groupPendingOp = (aggregatedRow as Record<string, any>)[
+        VIRTUAL_PENDING_OP_KEY
+      ]
       resultRow.$synced = groupSynced ?? true
       resultRow.$origin = (
         groupHasLocal ? `local` : `remote`
       ) satisfies VirtualOrigin
+      resultRow.$pendingOperation = groupPendingOp ?? null
       resultRow.$key = finalKey
       resultRow.$collectionId = aggregateCollectionId ?? resultRow.$collectionId
       if (mainSource && correlationKey !== undefined) {

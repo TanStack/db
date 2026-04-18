@@ -51,6 +51,9 @@ type CollectionSubscriptionOptions = {
   whereExpression?: BasicExpression<boolean>
   /** Callback to call when the subscription is unsubscribed */
   onUnsubscribe?: (event: SubscriptionUnsubscribedEvent) => void
+  /** When true, optimistic delete events are converted to updates with $pendingOperation: 'delete'
+   *  instead of being passed through as deletes. This keeps deleted items visible in query results. */
+  includePendingDeletes?: boolean
 }
 
 export class CollectionSubscription
@@ -76,6 +79,12 @@ export class CollectionSubscription
 
   // Keep track of the keys we've sent (needed for join and orderBy optimizations)
   private sentKeys = new Set<string | number>()
+
+  // Track keys where a delete was converted to an update by convertPendingDeletes,
+  // along with the enriched value that was sent to D2. When a rollback causes an insert
+  // for one of these keys, we convert it to an update with the correct previousValue
+  // so D2's multiplicity bookkeeping stays balanced.
+  private convertedDeleteValues = new Map<string | number, any>()
 
   // Track the count of rows sent via requestLimitedSnapshot for offset-based pagination
   private limitedSnapshotRowCount = 0
@@ -165,6 +174,7 @@ export class CollectionSubscription
       this.limitedSnapshotRowCount = 0
       this.lastSentKey = undefined
       this.loadedSubsets = []
+      this.convertedDeleteValues.clear()
       return
     }
 
@@ -181,6 +191,7 @@ export class CollectionSubscription
     this.loadedInitialState = false
     this.limitedSnapshotRowCount = 0
     this.lastSentKey = undefined
+    this.convertedDeleteValues.clear()
 
     // Clear the loadedSubsets array since we're re-requesting fresh
     this.loadedSubsets = []
@@ -319,7 +330,15 @@ export class CollectionSubscription
   }
 
   emitEvents(changes: Array<ChangeMessage<any, any>>) {
-    const newChanges = this.filterAndFlipChanges(changes)
+    // When includePendingDeletes is enabled, convert optimistic delete events
+    // to updates BEFORE filterAndFlipChanges so that sentKeys correctly tracks
+    // the key as still present. This ensures the later sync-confirmed delete
+    // can properly remove the item.
+    const processedChanges = this.options.includePendingDeletes
+      ? this.convertPendingDeletes(changes)
+      : changes
+
+    const newChanges = this.filterAndFlipChanges(processedChanges)
 
     if (this.isBufferingForTruncate) {
       // Buffer the changes instead of emitting immediately
@@ -329,6 +348,100 @@ export class CollectionSubscription
       }
     } else {
       this.filteredCallback(newChanges)
+    }
+  }
+
+  /**
+   * Converts optimistic delete events to update events with $pendingOperation: 'delete'.
+   * Only converts deletes for keys that are still in optimisticDeletes or pendingOptimisticDeletes
+   * (i.e., pending deletes, not sync-confirmed ones).
+   */
+  private convertPendingDeletes(
+    changes: Array<ChangeMessage<any, any>>,
+  ): Array<ChangeMessage<any, any>> {
+    const state = this.collection._state
+    const result: Array<ChangeMessage<any, any>> = []
+
+    for (const change of changes) {
+      if (change.type === `delete`) {
+        // Check if this is an optimistic delete (key still pending) vs a sync-confirmed delete
+        const isPendingDelete =
+          state.optimisticDeletes.has(change.key) ||
+          state.pendingOptimisticDeletes.has(change.key)
+
+        if (!isPendingDelete) {
+          // Sync-confirmed delete — clean up any stale converted value
+          this.convertedDeleteValues.delete(change.key)
+        } else {
+          // Convert to update — the delete event's value contains the pre-delete row data
+          // already enriched with virtual props. We need to add $pendingOperation: 'delete'.
+          const enrichedValue = {
+            ...change.value,
+            $pendingOperation: `delete` as const,
+          }
+          // Use the pre-delete value as previousValue. change.value on delete events
+          // carries the pre-delete virtual props (including the previous $pendingOperation,
+          // e.g., 'update' if the item was updated before being deleted).
+          const previousValue = change.previousValue ?? change.value
+
+          result.push({
+            type: `update`,
+            key: change.key,
+            value: enrichedValue,
+            previousValue,
+          })
+          this.convertedDeleteValues.set(change.key, enrichedValue)
+          continue
+        }
+      } else if (
+        change.type === `insert` &&
+        this.convertedDeleteValues.has(change.key)
+      ) {
+        // This insert is from a rollback of a previously-converted delete.
+        // Convert to update with the correct previousValue (the pending-delete value
+        // we sent to D2) so the multiplicity bookkeeping stays balanced.
+        const pendingDeleteValue = this.convertedDeleteValues.get(change.key)
+        this.convertedDeleteValues.delete(change.key)
+        result.push({
+          ...change,
+          type: `update`,
+          previousValue: pendingDeleteValue,
+        })
+        continue
+      }
+      result.push(change)
+    }
+
+    return result
+  }
+
+  /**
+   * Appends pending-delete items to a changes array.
+   * These items are in optimisticDeletes or pendingOptimisticDeletes but still
+   * have data in syncedData. They are added as inserts with $pendingOperation: 'delete'.
+   * Skips keys already in sentKeys to avoid duplicates.
+   */
+  private appendPendingDeleteItems(
+    changes: Array<ChangeMessage<any, any>>,
+  ): void {
+    const state = this.collection._state
+    const pendingDeleteKeys = new Set([
+      ...state.optimisticDeletes,
+      ...state.pendingOptimisticDeletes,
+    ])
+    for (const key of pendingDeleteKeys) {
+      if (this.sentKeys.has(key)) continue
+      const syncedValue = state.syncedData.get(key)
+      if (syncedValue !== undefined) {
+        // enrichWithVirtualProps computes $pendingOperation via getPendingOperation(key),
+        // which returns 'delete' for keys in optimisticDeletes/pendingOptimisticDeletes.
+        const enrichedValue = state.enrichWithVirtualProps(syncedValue, key)
+        changes.push({
+          type: `insert` as const,
+          key,
+          value: enrichedValue,
+        })
+      }
     }
   }
 
@@ -395,6 +508,13 @@ export class CollectionSubscription
     if (snapshot === undefined) {
       // Couldn't load from indexes
       return false
+    }
+
+    // When includePendingDeletes is enabled, also include items that are
+    // optimistically deleted — they won't appear in entries() but their
+    // data is still in syncedData.
+    if (this.options.includePendingDeletes) {
+      this.appendPendingDeleteItems(snapshot)
     }
 
     // Only send changes that have not been sent yet
@@ -541,6 +661,12 @@ export class CollectionSubscription
       }
 
       keys = index.take(valuesNeeded(), biggestObservedValue!, filterFn)
+    }
+
+    // When includePendingDeletes is enabled, also include pending-delete items
+    // that the index traversal missed (because collection.get() returns undefined for them).
+    if (this.options.includePendingDeletes) {
+      this.appendPendingDeleteItems(changes)
     }
 
     // Track row count for offset-based pagination (before sending to callback)
@@ -736,6 +862,7 @@ export class CollectionSubscription
       this.collection._sync.unloadSubset(options)
     }
     this.loadedSubsets = []
+    this.convertedDeleteValues.clear()
 
     this.emitInner(`unsubscribed`, {
       type: `unsubscribed`,
