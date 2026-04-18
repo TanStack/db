@@ -408,8 +408,20 @@ export class CollectionSyncManager<
         return
       }
 
+      // Subscribe to status changes to reject the promise when collection errors.
+      // This is necessary because onFirstReady only fires on success, but if the
+      // collection transitions to 'error' while the promise is pending it would
+      // hang forever and keep the Suspense boundary suspended indefinitely.
+      const unsubscribeError = this._events.on(`status:change`, (event) => {
+        if (event.status === `error`) {
+          unsubscribeError()
+          reject(new CollectionIsInErrorStateError())
+        }
+      })
+
       // Register callback BEFORE starting sync to avoid race condition
       this.lifecycle.onFirstReady(() => {
+        unsubscribeError()
         resolve()
       })
 
