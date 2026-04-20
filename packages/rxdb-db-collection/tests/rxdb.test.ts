@@ -238,7 +238,7 @@ describe(`RxDB Integration`, () => {
       await rxCollection.insert({ id: `3`, name: `Item 3` })
 
       // Access collection data to restart sync
-      const subscription = collection.subscribeChanges(() => { })
+      const subscription = collection.subscribeChanges(() => {})
 
       await collection.toArrayWhenReady()
       expect(stripVirtualProps(collection.get(`3`))?.name).toEqual(`Item 3`)
