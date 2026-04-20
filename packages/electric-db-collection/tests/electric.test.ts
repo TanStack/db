@@ -1917,6 +1917,46 @@ describe(`Electric Integration`, () => {
       expect(mockAbortController.abort).toHaveBeenCalledTimes(1)
     })
 
+    it(`should not throw CollectionStateError when onError fires after cleanup`, async () => {
+      // Regression test: cleanup() aborts the stream, but onError can still fire
+      // before the ShapeStream observes the abort signal. Without the guard,
+      // calling markReady() on a cleaned-up collection throws CollectionStateError
+      // ("cleaned-up" → "ready" is an invalid lifecycle transition).
+      const realAbortController = new AbortController()
+      mockAbortController = {
+        abort: vi.fn(() => realAbortController.abort()),
+        signal: realAbortController.signal,
+      }
+      global.AbortController = vi.fn().mockImplementation(() => mockAbortController)
+
+      let capturedOnError: ((params: unknown) => void) | undefined
+      const { ShapeStream } = await import(`@electric-sql/client`)
+      vi.mocked(ShapeStream).mockImplementation((options: any) => {
+        capturedOnError = options.onError
+        return mockStream as any
+      })
+
+      const config = {
+        id: `on-error-after-cleanup-test`,
+        shapeOptions: {
+          url: `http://test-url`,
+          params: { table: `test_table` },
+        },
+        getKey: (item: Row) => item.id as number,
+        startSync: true,
+      }
+
+      const testCollection = createCollection(electricCollectionOptions(config))
+      expect(capturedOnError).toBeDefined()
+
+      // Simulate cleanup (this aborts the controller)
+      await testCollection.cleanup()
+      expect(testCollection.status).toBe(`cleaned-up`)
+
+      // Simulate onError firing after cleanup — should not throw CollectionStateError
+      expect(() => capturedOnError!({ status: 500, json: {} })).not.toThrow()
+    })
+
     it(`should restart stream when collection is accessed after cleanup`, async () => {
       const config = {
         id: `restart-stream-test`,
