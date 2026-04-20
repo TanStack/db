@@ -295,7 +295,7 @@ describe(`RxDB Integration`, () => {
   })
 
   describe(`error handling`, () => {
-    it.skip(`should rollback the transaction on invalid data that does not match the RxCollection schema`, async () => {
+    it(`should rollback the transaction on invalid data that does not match the RxCollection schema`, async () => {
       const initialItems = getTestData(2)
       const { collection, db } = await createTestState(initialItems)
 
