@@ -1452,6 +1452,21 @@ try {
 }
 ```
 
+> [!IMPORTANT]
+> **Always use `tx.isPersisted.promise`, not `tx.isPersisted`.** The `isPersisted` property is a `Deferred` object, not a `Promise`. Since `Deferred` does not implement a `.then()` method, `await tx.isPersisted` resolves immediately to the `Deferred` object itself — it does **not** wait for the transaction to persist.
+>
+> This is a silent bug that TypeScript will not catch, because `await` accepts any value.
+>
+> ```typescript
+> // ❌ BUG: resolves immediately — does not wait for persistence
+> await tx.isPersisted
+>
+> // ✅ CORRECT: waits for the transaction to complete or fail
+> await tx.isPersisted.promise
+> ```
+>
+> If you forget `.promise`, your UI may clear forms, navigate, or show success messages before the server has confirmed the write. If the server then rejects the mutation, the optimistic state rolls back silently with no error handling.
+
 ### State Transitions
 
 The normal flow is: `pending` → `persisting` → `completed`
