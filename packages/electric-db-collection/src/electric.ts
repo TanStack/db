@@ -1422,7 +1422,11 @@ function createElectricSync<T extends Row<unknown>>(
           // Note that Electric sends a 409 error on a `must-refetch` message, but the
           // ShapeStream handled this and it will not reach this handler, therefor
           // this markReady will not be triggers by a `must-refetch`.
-          markReady()
+          // Guard against the race condition where collection.cleanup() aborts
+          // the stream but onError fires before the ShapeStream observes the
+          // abort signal. Calling markReady() on a cleaned-up collection throws
+          // CollectionStateError ("cleaned-up" → "ready" is invalid).
+          if (!abortController.signal.aborted) markReady()
 
           if (shapeOptions.onError) {
             return shapeOptions.onError(errorParams)
