@@ -238,7 +238,7 @@ describe(`RxDB Integration`, () => {
       await rxCollection.insert({ id: `3`, name: `Item 3` })
 
       // Access collection data to restart sync
-      const subscription = collection.subscribeChanges(() => {})
+      const subscription = collection.subscribeChanges(() => { })
 
       await collection.toArrayWhenReady()
       expect(stripVirtualProps(collection.get(`3`))?.name).toEqual(`Item 3`)
@@ -295,7 +295,7 @@ describe(`RxDB Integration`, () => {
   })
 
   describe(`error handling`, () => {
-    it.skip(`should rollback the transaction on invalid data that does not match the RxCollection schema`, async () => {
+    it(`should rollback the transaction on invalid data that does not match the RxCollection schema`, async () => {
       const initialItems = getTestData(2)
       const { collection, db } = await createTestState(initialItems)
 
