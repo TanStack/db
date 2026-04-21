@@ -230,6 +230,36 @@ function registerHarness(
   return harness
 }
 
+function createQueryObservingDriver(
+  inner: SQLiteDriver,
+  observeQuery: (
+    sql: string,
+    params: ReadonlyArray<unknown>,
+  ) => void | Promise<void>,
+): SQLiteDriver {
+  const wrap = (driver: SQLiteDriver): SQLiteDriver => {
+    const transactionWithDriver = driver.transactionWithDriver
+
+    return {
+      exec: async (sql) => driver.exec(sql),
+      query: async <T>(sql: string, params?: ReadonlyArray<unknown>) => {
+        await observeQuery(sql, params ?? [])
+        return driver.query<T>(sql, params)
+      },
+      run: async (sql, params) => driver.run(sql, params),
+      transaction: async <T>(
+        fn: (transactionDriver: SQLiteDriver) => Promise<T>,
+      ) => driver.transaction((transactionDriver) => fn(wrap(transactionDriver))),
+      transactionWithDriver: transactionWithDriver
+        ? async <T>(fn: (transactionDriver: SQLiteDriver) => Promise<T>) =>
+            transactionWithDriver((transactionDriver) => fn(wrap(transactionDriver)))
+        : undefined,
+    }
+  }
+
+  return wrap(inner)
+}
+
 export type SQLiteCoreAdapterHarnessFactory = (
   options?: Omit<
     ConstructorParameters<typeof SQLiteCorePersistenceAdapter>[0],
@@ -1607,6 +1637,94 @@ export function runSQLiteCoreAdapterContractSuite(
       expect(sqliteMasterRows[0]?.sql).toContain(
         `json_extract(value, '$.title')`,
       )
+    })
+
+    it(`inlines JSON-path refs in runtime subset filters while keeping values bound`, async () => {
+      const baseHarness = registerHarness()
+      const collectionId = `thread-messages`
+      let capturedSubsetSql: string | undefined
+      let capturedSubsetParams: ReadonlyArray<unknown> = []
+
+      const driver = createQueryObservingDriver(
+        baseHarness.driver,
+        (sql, params) => {
+          if (
+            sql.startsWith(`SELECT key, value, metadata, row_version FROM`) &&
+            sql.includes(`WHERE`)
+          ) {
+            capturedSubsetSql = sql
+            capturedSubsetParams = params
+          }
+        },
+      )
+      const adapter = new SQLiteCorePersistenceAdapter({ driver })
+
+      await adapter.applyCommittedTx(collectionId, {
+        txId: `thread-messages-seed`,
+        term: 1,
+        seq: 1,
+        rowVersion: 1,
+        mutations: [
+          {
+            type: `insert`,
+            key: `1`,
+            value: {
+              id: `1`,
+              threadId: `thread-1`,
+              title: `First`,
+              createdAt: `2026-01-01T00:00:00.000Z`,
+              score: 1,
+            },
+          },
+          {
+            type: `insert`,
+            key: `2`,
+            value: {
+              id: `2`,
+              threadId: `thread-1`,
+              title: `Second`,
+              createdAt: `2026-01-01T00:00:00.000Z`,
+              score: 2,
+            },
+          },
+          {
+            type: `insert`,
+            key: `3`,
+            value: {
+              id: `3`,
+              threadId: `thread-2`,
+              title: `Other thread`,
+              createdAt: `2026-01-01T00:00:00.000Z`,
+              score: 3,
+            },
+          },
+        ],
+      })
+
+      await adapter.ensureIndex(collectionId, `thread-id`, {
+        expressionSql: [
+          JSON.stringify({
+            type: `ref`,
+            path: [`threadId`],
+          }),
+        ],
+      })
+
+      const rows = await adapter.loadSubset(collectionId, {
+        where: new IR.Func(`eq`, [
+          new IR.PropRef([`threadId`]),
+          new IR.Value(`thread-1`),
+        ]),
+      })
+
+      expect(rows).toHaveLength(2)
+      expect(rows.map((row) => String(row.key)).sort()).toEqual([`1`, `2`])
+      expect(capturedSubsetSql).toContain(`WHERE`)
+      expect(capturedSubsetSql).toContain(
+        `json_extract(value, '$.threadId.__tanstack_db_persisted_type__')`,
+      )
+      expect(capturedSubsetSql).toContain(`json_extract(value, '$.threadId')`)
+      expect(capturedSubsetParams).toEqual([`thread-1`])
     })
 
     it(`rejects unsafe raw SQL fragments in index specs`, async () => {
