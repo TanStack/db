@@ -1441,7 +1441,11 @@ function createElectricSync<T extends Row<unknown>>(
       let transactionStarted = false
       const newTxids = new Set<Txid>()
       const newSnapshots: Array<PostgresSnapshot> = []
-      let hasReceivedUpToDate = false // Track if we've completed initial sync in progressive mode
+      // Track if we've completed initial sync in progressive mode. A persisted
+      // resume starts from an already-committed stream offset, so the next
+      // up-to-date message must not run the initial atomic swap again.
+      let hasReceivedUpToDate =
+        syncMode === `progressive` && canUsePersistedResume
 
       // Progressive mode state
       // Helper to determine if we're buffering the initial sync
