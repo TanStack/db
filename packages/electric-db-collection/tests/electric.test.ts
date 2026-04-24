@@ -95,16 +95,22 @@ describe(`Electric Integration`, () => {
 
   const createPersistedAdapter = (
     collectionMetadata?: Map<string, unknown>,
+    rows: Map<string | number, Row> = new Map(),
   ) => ({
-    loadSubset: async () => [],
-    loadCollectionMetadata: async () =>
-      Array.from((collectionMetadata ?? new Map()).entries()).map(
-        ([key, value]) => ({
-          key,
-          value,
-        }),
+    loadSubset: () =>
+      Promise.resolve(
+        Array.from(rows.entries()).map(([key, value]) => ({ key, value })),
       ),
-    applyCommittedTx: async (_collectionId: string, tx: any) => {
+    loadCollectionMetadata: () =>
+      Promise.resolve(
+        Array.from((collectionMetadata ?? new Map()).entries()).map(
+          ([key, value]) => ({
+            key,
+            value,
+          }),
+        ),
+      ),
+    applyCommittedTx: (_collectionId: string, tx: any) => {
       for (const mutation of tx.collectionMetadataMutations ?? []) {
         if (mutation.type === `delete`) {
           collectionMetadata?.delete(mutation.key)
@@ -112,8 +118,19 @@ describe(`Electric Integration`, () => {
           collectionMetadata?.set(mutation.key, mutation.value)
         }
       }
+      if (tx.truncate) {
+        rows.clear()
+      }
+      for (const mutation of tx.mutations ?? []) {
+        if (mutation.type === `delete`) {
+          rows.delete(mutation.key)
+        } else {
+          rows.set(mutation.key, mutation.value)
+        }
+      }
+      return Promise.resolve()
     },
-    ensureIndex: async () => {},
+    ensureIndex: () => Promise.resolve(),
   })
 
   beforeEach(() => {
@@ -3134,6 +3151,81 @@ describe(`Electric Integration`, () => {
           handle: undefined,
         }),
       )
+    })
+
+    it(`should keep hydrated persisted rows when progressive resume receives up-to-date without snapshot rows`, async () => {
+      vi.clearAllMocks()
+
+      const { ShapeStream } = await import(`@electric-sql/client`)
+      mockFetchSnapshot.mockResolvedValue({
+        metadata: {},
+        data: [],
+      })
+
+      const collectionMetadata = new Map<string, unknown>([
+        [
+          `electric:resume`,
+          {
+            kind: `resume`,
+            offset: `10_0`,
+            handle: `handle-1`,
+            shapeId: `{"params":{"table":"test_table"},"url":"http://test-url"}`,
+            updatedAt: 1,
+          },
+        ],
+      ])
+      const persistedRows = new Map<string | number, Row>([
+        [1, { id: 1, name: `Persisted User` }],
+      ])
+
+      const persistedCollection = createCollection(
+        persistedCollectionOptions({
+          ...(electricCollectionOptions({
+            id: `persisted-progressive-resume-test`,
+            shapeOptions: {
+              url: `http://test-url`,
+              params: {
+                table: `test_table`,
+              },
+            },
+            syncMode: `progressive` as const,
+            getKey: (item: Row) => item.id as number,
+            startSync: true,
+          }) as any),
+          persistence: {
+            adapter: createPersistedAdapter(collectionMetadata, persistedRows),
+          },
+        }) as any,
+      )
+
+      persistedCollection.startSyncImmediate()
+      await persistedCollection._sync.loadSubset({ limit: 10 })
+
+      expect(ShapeStream).toHaveBeenCalledWith(
+        expect.objectContaining({
+          offset: `10_0`,
+          handle: `handle-1`,
+        }),
+      )
+      expect(stripVirtualProps(persistedCollection.get(1))).toEqual({
+        id: 1,
+        name: `Persisted User`,
+      })
+
+      subscriber([
+        {
+          headers: { control: `up-to-date` },
+        },
+      ])
+
+      expect(stripVirtualProps(persistedCollection.get(1))).toEqual({
+        id: 1,
+        name: `Persisted User`,
+      })
+      expect(stripVirtualProps(persistedRows.get(1))).toEqual({
+        id: 1,
+        name: `Persisted User`,
+      })
     })
 
     it(`should not mix explicit handle with persisted offset`, async () => {
