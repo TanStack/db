@@ -877,6 +877,9 @@ export class CollectionConfigBuilder<
             } else if (multiplicity > 0) {
               existing.inserts += multiplicity
               existing.value = childResult
+              if (_orderByIndex !== undefined) {
+                existing.orderByIndex = _orderByIndex
+              }
             }
 
             byChild.set(childKey, existing)
@@ -1262,6 +1265,9 @@ function setupNestedPipelines(
           } else if (multiplicity > 0) {
             existing.inserts += multiplicity
             existing.value = childResult
+            if (_orderByIndex !== undefined) {
+              existing.orderByIndex = _orderByIndex
+            }
           }
 
           byChild.set(childKey, existing)

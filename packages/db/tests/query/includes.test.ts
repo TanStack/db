@@ -5124,4 +5124,86 @@ describe(`includes subqueries`, () => {
       expect(data().textDeltas).toHaveLength(2)
     })
   })
+
+  describe(`orderBy in includes after child collection update`, () => {
+    type Status = { id: number; name: string; position: number }
+    type Task = { id: number; statusId: number; name: string; position: number }
+
+    it(`preserves child orderBy after optimistic update on child collection`, async () => {
+      const statusesOptions = mockSyncCollectionOptions<Status>({
+        id: `orderby-includes-statuses`,
+        getKey: (s) => s.id,
+        initialData: [{ id: 1, name: `Todo`, position: 0 }],
+      })
+      const statuses = createCollection(statusesOptions)
+
+      const tasksOptions = mockSyncCollectionOptions<Task>({
+        id: `orderby-includes-tasks`,
+        getKey: (t) => t.id,
+        initialData: [
+          { id: 1, statusId: 1, name: `Hello`, position: 0 },
+          { id: 2, statusId: 1, name: `World`, position: 1 },
+        ],
+      })
+      const tasks = createCollection(tasksOptions)
+
+      const liveQuery = createLiveQueryCollection((q) =>
+        q
+          .from({ status: statuses })
+          .orderBy(({ status }) => status.position, `asc`)
+          .select(({ status }) => ({
+            id: status.id,
+            name: status.name,
+            position: status.position,
+            tasks: q
+              .from({ task: tasks })
+              .where(({ task }) => eq(task.statusId, status.id))
+              .orderBy(({ task }) => task.position, `asc`)
+              .select(({ task }) => ({
+                id: task.id,
+                name: task.name,
+                position: task.position,
+              })),
+          })),
+      )
+
+      await liveQuery.preload()
+
+      type TaskResult = { id: number; name: string; position: number }
+      type StatusResult = { tasks: { toArray: Array<TaskResult> } }
+      const getTaskOrder = () =>
+        [...(liveQuery.get(1) as unknown as StatusResult).tasks.toArray].map(
+          (t) => t.id,
+        )
+
+      // Initial order: task 1 (pos=0) before task 2 (pos=1)
+      expect(getTaskOrder()).toEqual([1, 2])
+
+      // Optimistic update: swap positions
+      tasks.update(1, (draft) => {
+        draft.position = 1
+      })
+      tasks.update(2, (draft) => {
+        draft.position = 0
+      })
+
+      // Immediately after optimistic update: task 2 (pos=0) should come first
+      expect(getTaskOrder()).toEqual([2, 1])
+
+      // Server confirms the same changes
+      tasksOptions.utils.begin()
+      tasksOptions.utils.write({
+        type: `update`,
+        value: { id: 1, statusId: 1, name: `Hello`, position: 1 },
+      })
+      tasksOptions.utils.write({
+        type: `update`,
+        value: { id: 2, statusId: 1, name: `World`, position: 0 },
+      })
+      tasksOptions.utils.commit()
+
+      // After server confirmation: order should still be correct
+      expect(getTaskOrder()).toEqual([2, 1])
+    })
+  })
 })
