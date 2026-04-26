@@ -9,6 +9,6 @@ edition = "2021"
 tauri-build = { version = "2.5.6", features = [] }
 
 [dependencies]
-serde_json = "1"
+serde_json = "1.0.149"
 tauri = { version = "2.10.3", features = [] }
-tauri-plugin-sql = { version = "2.3.2", features = ["sqlite"] }
+tauri-plugin-sql = { version = "2.4.0", features = ["sqlite"] }

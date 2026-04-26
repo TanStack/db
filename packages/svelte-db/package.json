@@ -50,8 +50,8 @@
     "@sveltejs/package": "^2.5.7",
     "@sveltejs/vite-plugin-svelte": "^6.2.4",
     "@vitest/coverage-istanbul": "^3.2.4",
-    "publint": "^0.3.17",
+    "publint": "^0.3.18",
     "svelte": "^5.50.0",
-    "svelte-check": "^4.3.6"
+    "svelte-check": "^4.4.6"
   }
 }

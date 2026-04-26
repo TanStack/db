@@ -63,9 +63,9 @@
     "typescript": ">=4.7"
   },
   "devDependencies": {
-    "@tauri-apps/plugin-sql": "^2.3.2",
+    "@tauri-apps/plugin-sql": "^2.4.0",
     "@types/better-sqlite3": "^7.6.13",
     "@vitest/coverage-istanbul": "^3.2.4",
-    "better-sqlite3": "^12.6.2"
+    "better-sqlite3": "^12.9.0"
   }
 }

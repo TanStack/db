@@ -18,27 +18,27 @@
     "@tanstack/offline-transactions": "^1.0.30",
     "@tanstack/query-db-collection": "^1.0.36",
     "@tanstack/react-db": "^0.1.83",
-    "@tanstack/react-query": "^5.90.20",
-    "better-sqlite3": "^12.6.2",
-    "react": "^19.2.4",
-    "react-dom": "^19.2.4",
+    "@tanstack/react-query": "^5.100.5",
+    "better-sqlite3": "^12.9.0",
+    "react": "^19.2.5",
+    "react-dom": "^19.2.5",
     "zod": "^3.25.76"
   },
   "devDependencies": {
-    "@electron/rebuild": "^3.7.1",
+    "@electron/rebuild": "^3.7.2",
     "@types/better-sqlite3": "^7.6.13",
     "@types/cors": "^2.8.19",
     "@types/express": "^5.0.6",
-    "@types/react": "^19.2.13",
+    "@types/react": "^19.2.14",
     "@types/react-dom": "^19.2.3",
-    "@vitejs/plugin-react": "^5.1.3",
+    "@vitejs/plugin-react": "^5.2.0",
     "concurrently": "^9.2.1",
     "cors": "^2.8.6",
-    "electron": "^40.2.1",
+    "electron": "^40.9.2",
     "express": "^5.2.1",
     "tsx": "^4.21.0",
     "typescript": "^5.9.2",
-    "vite": "^7.3.0",
-    "wait-on": "^8.0.3"
+    "vite": "^7.3.2",
+    "wait-on": "^8.0.5"
   }
 }
