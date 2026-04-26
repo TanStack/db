@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { QueryClient, hashKey } from '@tanstack/query-core'
 import {
   BTreeIndex,
+  compileSingleRowExpression,
   createCollection,
   createLiveQueryCollection,
   eq,
@@ -6339,6 +6340,174 @@ describe(`QueryCollection`, () => {
       workloadQuery.cleanup()
       taskQuery.cleanup()
       projectQuery.cleanup()
+      customQueryClient.clear()
+    })
+  })
+
+  describe(`Predicate-scoped cache invalidation on manual writes`, () => {
+    // Each cache entry under an on-demand collection's queryKey was originally
+    // produced by queryFn with a specific where predicate. A manual-sync write
+    // (writeInsert/writeUpdate/writeDelete/writeUpsert) used to overwrite every
+    // such entry with the full post-write syncedData snapshot, including rows
+    // that didn't satisfy the entry's predicate. After unsubscribe + re-subscribe
+    // within gcTime, the cache-hit re-applied those wrong rows, the per-
+    // subscription where filter discarded them, and the subscriber saw [].
+    //
+    // The fix invalidates stale (no-live-observer) cache entries on each write,
+    // forcing the next subscribe to re-run queryFn against the source of truth.
+
+    interface ScopedRow {
+      id: string
+      category: string
+    }
+
+    function makeQueryFn(getServerRows: () => Array<ScopedRow>) {
+      return async (ctx: QueryFunctionContext) => {
+        const where = (ctx.meta as { loadSubsetOptions?: { where?: any } })
+          .loadSubsetOptions?.where
+        if (!where) return getServerRows()
+        const evaluator = compileSingleRowExpression(where)
+        return getServerRows().filter((r) =>
+          evaluator(r as unknown as Record<string, unknown>),
+        )
+      }
+    }
+
+    function makeCollection(serverRows: Array<ScopedRow>) {
+      const customQueryClient = new QueryClient({
+        defaultOptions: {
+          queries: {
+            gcTime: 5 * 60 * 1000,
+            staleTime: Infinity,
+            retry: false,
+          },
+        },
+      })
+
+      const collection = createCollection(
+        queryCollectionOptions<ScopedRow>({
+          id: `predicate-cache-${Math.random()}`,
+          queryClient: customQueryClient,
+          queryKey: [`predicate-cache-test`],
+          syncMode: `on-demand`,
+          getKey: (r) => r.id,
+          queryFn: makeQueryFn(() => serverRows),
+          onInsert: async () => ({ refetch: false }),
+          onUpdate: async () => ({ refetch: false }),
+          onDelete: async () => ({ refetch: false }),
+        }),
+      )
+
+      return { collection, customQueryClient }
+    }
+
+    it(`should return correct rows on re-subscribe after an unrelated writeUpsert`, async () => {
+      const serverRows: Array<ScopedRow> = [
+        { id: `1`, category: `A` },
+        { id: `2`, category: `B` },
+      ]
+      const { collection, customQueryClient } = makeCollection(serverRows)
+
+      // Subscribe to category=A, then unsubscribe. Leaves a stale cache entry
+      // whose contents should be [{id:1}].
+      const wave1 = createLiveQueryCollection({
+        query: (q) =>
+          q
+            .from({ item: collection })
+            .where(({ item }) => eq(item.category, `A`)),
+      })
+      await wave1.preload()
+      expect(wave1.toArray.map((r) => r.id)).toEqual([`1`])
+      await wave1.cleanup()
+
+      // Manual write of a row outside the predicate. Before the fix, this
+      // overwrote every cache entry with the full snapshot, poisoning
+      // category=A's stale entry with [{id:1},{id:2},{id:99}].
+      collection.utils.writeUpsert({ id: `99`, category: `unrelated` })
+
+      // Re-subscribe to the same predicate. With the fix, the stale entry was
+      // invalidated and queryFn re-runs, returning only the matching row.
+      const wave2 = createLiveQueryCollection({
+        query: (q) =>
+          q
+            .from({ item: collection })
+            .where(({ item }) => eq(item.category, `A`)),
+      })
+      await wave2.preload()
+      expect(wave2.toArray.map((r) => r.id)).toEqual([`1`])
+
+      await wave2.cleanup()
+      customQueryClient.clear()
+    })
+
+    it(`should pick up newly inserted rows that match the predicate on re-subscribe`, async () => {
+      const serverRows: Array<ScopedRow> = [{ id: `1`, category: `A` }]
+      const { collection, customQueryClient } = makeCollection(serverRows)
+
+      const wave1 = createLiveQueryCollection({
+        query: (q) =>
+          q
+            .from({ item: collection })
+            .where(({ item }) => eq(item.category, `A`)),
+      })
+      await wave1.preload()
+      expect(wave1.toArray.map((r) => r.id)).toEqual([`1`])
+      await wave1.cleanup()
+
+      // Insert a new matching row both server-side and via writeInsert.
+      serverRows.push({ id: `2`, category: `A` })
+      collection.utils.writeInsert({ id: `2`, category: `A` })
+
+      const wave2 = createLiveQueryCollection({
+        query: (q) =>
+          q
+            .from({ item: collection })
+            .where(({ item }) => eq(item.category, `A`)),
+      })
+      await wave2.preload()
+      expect(wave2.toArray.map((r) => r.id).sort()).toEqual([`1`, `2`])
+
+      await wave2.cleanup()
+      customQueryClient.clear()
+    })
+
+    it(`should not poison a stale narrow predicate when a write lands in a broader active predicate`, async () => {
+      const serverRows: Array<ScopedRow> = [{ id: `1`, category: `A` }]
+      const { collection, customQueryClient } = makeCollection(serverRows)
+
+      // Narrow predicate (id=1) subscribes then unsubscribes — leaves a stale
+      // cache entry containing [{id:1}].
+      const narrow = createLiveQueryCollection({
+        query: (q) =>
+          q.from({ item: collection }).where(({ item }) => eq(item.id, `1`)),
+      })
+      await narrow.preload()
+      await narrow.cleanup()
+
+      // Broader predicate (category=A) becomes active.
+      const broad = createLiveQueryCollection({
+        query: (q) =>
+          q
+            .from({ item: collection })
+            .where(({ item }) => eq(item.category, `A`)),
+      })
+      await broad.preload()
+
+      // Insert a row in the broader scope but outside the narrow predicate.
+      serverRows.push({ id: `2`, category: `A` })
+      collection.utils.writeInsert({ id: `2`, category: `A` })
+
+      // Re-subscribing to the narrow predicate must still return only id=1, not
+      // be poisoned by id=2 from the active broader entry.
+      const narrow2 = createLiveQueryCollection({
+        query: (q) =>
+          q.from({ item: collection }).where(({ item }) => eq(item.id, `1`)),
+      })
+      await narrow2.preload()
+      expect(narrow2.toArray.map((r) => r.id)).toEqual([`1`])
+
+      await narrow2.cleanup()
+      await broad.cleanup()
       customQueryClient.clear()
     })
   })

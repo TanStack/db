@@ -1813,29 +1813,38 @@ export function queryCollectionOptions(
   }
 
   /**
-   * Updates the query cache with new items for ALL query keys matching this collection,
-   * including stale/inactive cache entries from destroyed observers.
+   * Updates the query cache after a manual-sync write.
    *
-   * This prevents ghost items: when an observer is destroyed but gcTime > 0, TanStack Query
-   * keeps the cached data. If syncedData changes (via writeDelete/writeInsert/writeUpdate)
-   * after the observer is destroyed, the stale cache becomes inconsistent. When a new observer
-   * later picks up this stale cache, makeQueryResultHandler would create spurious sync
-   * operations (re-inserting deleted items, reverting updated values, etc).
+   * Active entries (observer still subscribed): write the full syncedData
+   * snapshot back. Predicate scoping for the consumer is enforced downstream
+   * by the per-subscription `where` filter on `subscribeChanges`.
    *
-   * By updating all cache entries (active and stale), we ensure the cache always reflects
-   * the current syncedData state.
+   * Stale entries (no live observer): invalidate by removing the entry. Each
+   * entry was originally produced by `queryFn` for a specific predicate, so
+   * stamping it with the full snapshot would poison it — rows that don't
+   * satisfy the predicate end up in the cache, then a cache-hit re-subscribe
+   * within `gcTime` re-applies those wrong rows via `applySuccessfulResult`,
+   * the subscription's `where` filter discards them, and the subscriber sees
+   * `[]`. The next subscribe will re-run `queryFn` against the source of
+   * truth, which also preserves ghost-row protection (deleted rows won't
+   * reappear from a stale snapshot).
    */
   const updateCacheData = (items: Array<any>): void => {
     const allCached = queryClient.getQueryCache().findAll({ queryKey: baseKey })
 
-    if (allCached.length > 0) {
-      for (const query of allCached) {
-        updateCacheDataForKey(query.queryKey, items)
-      }
-    } else {
+    if (allCached.length === 0) {
       // Fallback: no queries in cache yet, seed the base query key.
       // This handles the case where updateCacheData is called before any queries are created.
       updateCacheDataForKey(baseKey, items)
+      return
+    }
+
+    for (const query of allCached) {
+      if (!state.observers.has(hashKey(query.queryKey))) {
+        queryClient.removeQueries({ queryKey: query.queryKey, exact: true })
+        continue
+      }
+      updateCacheDataForKey(query.queryKey, items)
     }
   }
 
