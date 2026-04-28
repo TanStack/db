@@ -25,8 +25,8 @@ import type {
   ChangeMessage,
   CollectionConfig,
   CollectionStatus,
-  CollectionUtils,
   CurrentStateAsChangesOptions,
+  Fn,
   InferSchemaInput,
   InferSchemaOutput,
   InsertConfig,
@@ -36,6 +36,7 @@ import type {
   StringCollationConfig,
   SubscribeChangesOptions,
   SubscribeTrackedSourceRecordsOptions,
+  TrackedSourceRecord,
   TrackedSourceRecordsChange,
   Transaction as TransactionType,
   UtilsRecord,
@@ -61,7 +62,7 @@ export interface Collection<
   TSchema extends StandardSchemaV1 = StandardSchemaV1,
   TInsertInput extends object = T,
 > extends CollectionImpl<T, TKey, TUtils, TSchema, TInsertInput> {
-  readonly utils: CollectionUtils<TUtils>
+  readonly utils: TUtils
   readonly singleResult?: true
 }
 
@@ -258,9 +259,24 @@ export function createCollection(
     schema?: StandardSchemaV1
   },
 ): Collection<any, string | number, UtilsRecord, any, any> {
-  return new CollectionImpl<any, string | number, any, any, any>(
+  const collection = new CollectionImpl<any, string | number, any, any, any>(
     options,
-  ) as unknown as Collection<any, string | number, UtilsRecord, any, any>
+  )
+
+  // Attach utils to collection
+  if (options.utils) {
+    collection.utils = options.utils
+  } else {
+    collection.utils = {}
+  }
+
+  return collection as unknown as Collection<
+    any,
+    string | number,
+    UtilsRecord,
+    any,
+    any
+  >
 }
 
 export class CollectionImpl<
@@ -273,10 +289,9 @@ export class CollectionImpl<
   public id: string
   public config: CollectionConfig<TOutput, TKey, TSchema>
 
-  // Utilities namespace. Initialized in the constructor from config.utils
-  // (if provided) with tracked-source helpers attached idempotently. Reference
-  // identity on user-supplied utils objects is preserved — we mutate in place.
-  public utils: CollectionUtils<TUtils>
+  // Utilities namespace
+  // This is populated by createCollection
+  public utils: Record<string, Fn> = {}
 
   // Managers
   private _events: CollectionEventsManager
@@ -298,6 +313,18 @@ export class CollectionImpl<
   // queries that depend on this collection. Public so live-query aggregators
   // can push deltas in.
   public _trackedSourceRecords: TrackedSourceRecordsManager<TKey>
+  // For live-query collections only: a live-query-local view of "source
+  // records this query is currently using." Set by the live-query path
+  // during construction; undefined on base collections. When present, the
+  // public `getTrackedSourceRecords` / `subscribeTrackedSourceRecords`
+  // methods route to this view instead of `_trackedSourceRecords`.
+  public _liveQueryTrackedSourceView?: {
+    snapshot: () => Array<TrackedSourceRecord>
+    subscribe: (
+      callback: (change: TrackedSourceRecordsChange) => void,
+      options?: SubscribeTrackedSourceRecordsOptions,
+    ) => () => void
+  }
 
   /**
    * When set, collection consumers should defer processing incoming data
@@ -354,22 +381,6 @@ export class CollectionImpl<
     this._state = new CollectionStateManager(config)
     this._sync = new CollectionSyncManager(config, this.id)
     this._trackedSourceRecords = new TrackedSourceRecordsManager<TKey>(this.id)
-
-    // Attach tracked-source helpers to the provided utils in place, so user
-    // class instances keep reference identity. Idempotent: if a helper is
-    // already set (e.g. a live query installed a query-local variant via
-    // `liveQueryCollectionOptions`), it is left alone.
-    const utils = config.utils ?? {}
-    if (typeof utils.getTrackedSourceRecords !== `function`) {
-      utils.getTrackedSourceRecords = () => this._trackedSourceRecords.get()
-    }
-    if (typeof utils.subscribeTrackedSourceRecords !== `function`) {
-      utils.subscribeTrackedSourceRecords = (
-        callback: (change: TrackedSourceRecordsChange) => void,
-        options?: SubscribeTrackedSourceRecordsOptions,
-      ) => this._trackedSourceRecords.subscribe(callback, options)
-    }
-    this.utils = utils as CollectionUtils<TUtils>
 
     this.comparisonOpts = buildCompareOptionsFromConfig(config)
 
@@ -955,6 +966,42 @@ export class CollectionImpl<
     options: SubscribeChangesOptions<TOutput, TKey> = {},
   ): CollectionSubscription {
     return this._changes.subscribeChanges(callback, options)
+  }
+
+  /**
+   * Snapshot of source records currently being tracked through this
+   * collection's data flow.
+   *
+   * On a base collection: the union of records OF this collection being
+   * used by any active live query. Each record appears once regardless
+   * of how many queries reference it.
+   *
+   * On a live query collection: the records FROM this query's source
+   * collections that the query is currently using.
+   *
+   * Both views answer "what source records are currently flowing through
+   * me," from opposite ends of the data-flow graph.
+   */
+  public getTrackedSourceRecords(): Array<TrackedSourceRecord> {
+    return (
+      this._liveQueryTrackedSourceView?.snapshot() ??
+      this._trackedSourceRecords.get()
+    )
+  }
+
+  /**
+   * Subscribe to changes in the set of source records tracked through this
+   * collection's data flow. See `getTrackedSourceRecords` for the per-
+   * collection-type semantics.
+   */
+  public subscribeTrackedSourceRecords(
+    callback: (change: TrackedSourceRecordsChange) => void,
+    options?: SubscribeTrackedSourceRecordsOptions,
+  ): () => void {
+    if (this._liveQueryTrackedSourceView) {
+      return this._liveQueryTrackedSourceView.subscribe(callback, options)
+    }
+    return this._trackedSourceRecords.subscribe(callback, options)
   }
 
   /**

@@ -292,9 +292,13 @@ export class CollectionSubscriber<
     })
     subscriptionHolder.current = subscription
 
-    // Listen for truncate events to reset cursor tracking state and sentToD2Keys
-    // This ensures that after a must-refetch/truncate, we don't use stale cursor data
-    // and allow re-inserts of previously sent keys
+    // Reset cursor-tracking state on truncate so a must-refetch doesn't use
+    // stale cursor data. We don't clear sentToD2Keys here: the truncate
+    // emits delete events for every visible key, which drain sentToD2Keys
+    // through filterDuplicateInserts, and the merged delete + re-insert
+    // batch nets to zero — clearing eagerly would cause spurious tracked-
+    // source removed/added churn for keys that stay tracked across the
+    // refetch.
     const truncateUnsubscribe = this.collection.on(`truncate`, () => {
       this.biggest = undefined
       this.lastLoadRequestKey = undefined

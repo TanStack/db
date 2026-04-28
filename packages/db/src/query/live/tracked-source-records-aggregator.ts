@@ -12,12 +12,20 @@ type Entry = { refCount: number }
  * Lives on a single sync session — dies with it. Refcounts over aliases
  * within one query (a self-join references the same base collection under
  * multiple aliases, so the same (collectionId, key) pair can be added
- * multiple times).
+ * multiple times). Net 0↔1 transitions are:
+ *   1. propagated to each source collection's `_trackedSourceRecords`
+ *      manager (so consumers reading the base-collection view see them)
+ *   2. fanned out to `listeners` (so consumers reading the per-query view
+ *      via `liveQuery.subscribeTrackedSourceRecords` see them)
  *
- * `exposed` gates whether net 0↔1 transitions are visible to the outside:
- * we only propagate to source collections and fan out to listeners while
- * the live query has subscribers. Flipping `exposed` replays the current
- * snapshot as added/removed so downstream views stay consistent.
+ * `listeners` is held by reference. The builder owns a long-lived listener
+ * Set that survives sync sessions; aggregator instances come and go but the
+ * Set persists, so external subscribers don't need to re-attach across
+ * session boundaries.
+ *
+ * `exposed` gates both propagation and listener fan-out: only emit while
+ * the live query has active subscribers. Flipping `exposed` replays the
+ * current snapshot as added/removed so downstream views stay consistent.
  */
 export class LiveQueryTrackedSourceRecordsAggregator {
   // Nested map avoids serializing (collectionId, key) composites. Outer key
@@ -25,12 +33,6 @@ export class LiveQueryTrackedSourceRecordsAggregator {
   private readonly entries = new Map<string, Map<string | number, Entry>>()
   private exposed = false
 
-  /**
-   * `listeners` is the live-query's long-lived external-subscriber set
-   * owned by CollectionConfigBuilder. Held by reference so the aggregator
-   * can (a) check `size` to skip allocation when nobody is listening and
-   * (b) iterate directly without an extra callback hop.
-   */
   constructor(
     private readonly sourceCollections: Record<
       string,

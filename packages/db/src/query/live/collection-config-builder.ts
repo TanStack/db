@@ -35,7 +35,6 @@ import type {
   StringCollationConfig,
   SubscribeTrackedSourceRecordsOptions,
   SyncConfig,
-  TrackedSourceCollectionUtils,
   TrackedSourceRecord,
   TrackedSourceRecordsChange,
   UtilsRecord,
@@ -56,7 +55,7 @@ import type {
 } from './types.js'
 import type { AllCollectionEvents } from '../../collection/events.js'
 
-export type LiveQueryBuiltInUtils = TrackedSourceCollectionUtils & {
+export type LiveQueryBuiltInUtils = {
   getRunCount: () => number
   /**
    * Sets the offset and limit of an ordered query.
@@ -147,12 +146,36 @@ export class CollectionConfigBuilder<
     PendingGraphRun
   >()
 
-  // Long-lived listeners for the live-query's tracked-source-records view.
-  // Survives sync sessions: we attach subscribers here, and each sync session
-  // hooks its aggregator up to forward events to this list.
+  // Long-lived listeners for the live-query-local tracked-source view.
+  // Survives sync sessions: each new session's aggregator reads this set
+  // by reference, so external subscribers don't need to re-attach across
+  // start/stop cycles.
   private readonly trackedSourceRecordListeners = new Set<
     (change: TrackedSourceRecordsChange) => void
   >()
+
+  // Adapter the live-query Collection's `_liveQueryTrackedSourceView` field
+  // points to. Routes through the current sync session's aggregator (which
+  // can come and go) but the adapter itself is stable across sessions.
+  public readonly liveQueryTrackedSourceView = {
+    snapshot: (): Array<TrackedSourceRecord> =>
+      this.currentSyncState?.trackedSourceRecordsAggregator.snapshot() ?? [],
+    subscribe: (
+      callback: (change: TrackedSourceRecordsChange) => void,
+      options?: SubscribeTrackedSourceRecordsOptions,
+    ): (() => void) => {
+      this.trackedSourceRecordListeners.add(callback)
+      if (options?.includeInitialState) {
+        const added =
+          this.currentSyncState?.trackedSourceRecordsAggregator.snapshot() ??
+          []
+        if (added.length > 0) callback({ added, removed: [] })
+      }
+      return () => {
+        this.trackedSourceRecordListeners.delete(callback)
+      }
+    },
+  }
 
   // Unsubscribe function for scheduler's onClear listener
   // Registered when sync starts, unregistered when sync stops
@@ -256,9 +279,6 @@ export class CollectionConfigBuilder<
       singleResult: this.query.singleResult,
       utils: {
         getRunCount: this.getRunCount.bind(this),
-        getTrackedSourceRecords: this.getTrackedSourceRecords.bind(this),
-        subscribeTrackedSourceRecords:
-          this.subscribeTrackedSourceRecords.bind(this),
         setWindow: this.setWindow.bind(this),
         getWindow: this.getWindow.bind(this),
         [LIVE_QUERY_INTERNAL]: {
@@ -595,34 +615,6 @@ export class CollectionConfigBuilder<
     return this.runCount
   }
 
-  /**
-   * Source records from the query's source collections that this live query
-   * is currently using. Delegates to the sync session's aggregator; returns
-   * `[]` when there's no active sync session or the live query has no
-   * subscribers.
-   */
-  getTrackedSourceRecords(): Array<TrackedSourceRecord> {
-    return (
-      this.currentSyncState?.trackedSourceRecordsAggregator.snapshot() ?? []
-    )
-  }
-
-  subscribeTrackedSourceRecords(
-    callback: (changes: TrackedSourceRecordsChange) => void,
-    options?: SubscribeTrackedSourceRecordsOptions,
-  ): () => void {
-    this.trackedSourceRecordListeners.add(callback)
-
-    if (options?.includeInitialState) {
-      const added = this.getTrackedSourceRecords()
-      if (added.length > 0) callback({ added, removed: [] })
-    }
-
-    return () => {
-      this.trackedSourceRecordListeners.delete(callback)
-    }
-  }
-
   private syncFn(config: SyncMethods<TResult>) {
     // Store reference to the live query collection for error state transitions
     this.liveQueryCollection = config.collection
@@ -630,10 +622,12 @@ export class CollectionConfigBuilder<
     this.currentSyncConfig = config
 
     // Session-scoped aggregator that dedupes tracked source records across
-    // aliases and fans net transitions out to (a) the builder's long-lived
-    // listeners and (b) each source collection's tracked-source manager.
-    // The listener set is passed by reference so the aggregator can iterate
-    // it directly and skip allocation when no one is listening.
+    // aliases (handles self-joins), propagates net transitions to each
+    // source collection's _trackedSourceRecords manager, and fans out to
+    // the builder's long-lived listener Set (so external subscribers reach
+    // the per-query view via the live-query Collection's
+    // `_liveQueryTrackedSourceView` adapter). Lives only for this sync
+    // session.
     const trackedSourceRecordsAggregator =
       new LiveQueryTrackedSourceRecordsAggregator(
         this.collections,

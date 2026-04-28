@@ -87,29 +87,6 @@ export type SubscribeTrackedSourceRecordsOptions = {
   includeInitialState?: boolean
 }
 
-export type TrackedSourceCollectionUtils = {
-  /**
-   * Gets the source records for this collection that are currently tracked by active live queries.
-   *
-   * Base collections expose the union across all active live queries that depend on them.
-   * Live query collections may override this with query-local behavior.
-   */
-  getTrackedSourceRecords: () => Array<TrackedSourceRecord>
-  /**
-   * Subscribes to tracked source record membership changes for this collection.
-   *
-   * Base collections emit aggregated membership deltas across all active live queries that
-   * depend on them. Live query collections may override this with query-local behavior.
-   */
-  subscribeTrackedSourceRecords: (
-    callback: (changes: TrackedSourceRecordsChange) => void,
-    options?: SubscribeTrackedSourceRecordsOptions,
-  ) => () => void
-}
-
-export type CollectionUtils<TUtils extends UtilsRecord = {}> = TUtils &
-  TrackedSourceCollectionUtils
-
 /**
  *
  * @remarks `update` and `insert` are both represented as `Partial<T>`, but changes for `insert` could me made more precise by inferring the schema input type. In practice, this has almost 0 real world impact so it's not worth the added type complexity.
