@@ -53,6 +53,18 @@ export class CollectionSubscriber<
   private orderedLoadSubsetResult?: (result: Promise<void> | true) => void
   private pendingOrderedLoadPromise: Promise<void> | undefined
 
+  /**
+   * Callback invoked with net membership changes in this subscriber's
+   * tracked-key set (i.e. transitions of `sentToD2Keys`). The builder wires
+   * this to the per-live-query aggregator. A stable-membership ordered
+   * update — where split delete+insert leaves `sentToD2Keys` unchanged —
+   * emits nothing.
+   */
+  public onTrackedKeysChange?: (change: {
+    added: Array<string | number>
+    removed: Array<string | number>
+  }) => void
+
   constructor(
     private alias: string,
     private collectionId: string,
@@ -131,6 +143,10 @@ export class CollectionSubscriber<
       this.ensureLoadingPromise(subscription)
     }
 
+    subscription.on(`unsubscribed`, () => {
+      this.clearTrackedSourceKeys()
+    })
+
     const unsubscribe = () => {
       // If subscription has a pending promise, resolve it before unsubscribing
       const deferred = this.subscriptionLoadingPromises.get(subscription)
@@ -168,6 +184,7 @@ export class CollectionSubscriber<
       filteredChanges,
       this.collection.config.getKey,
     )
+    this.emitTrackedKeyDelta(filteredChanges)
 
     // Do not provide the callback that loads more data
     // if there's no more data to load
@@ -282,7 +299,6 @@ export class CollectionSubscriber<
       this.biggest = undefined
       this.lastLoadRequestKey = undefined
       this.pendingOrderedLoadPromise = undefined
-      this.sentToD2Keys.clear()
     })
 
     // Clean up truncate listener when subscription is unsubscribed
@@ -466,5 +482,46 @@ export class CollectionSubscriber<
     this.collectionConfigBuilder.liveQueryCollection!._sync.trackLoadPromise(
       promise,
     )
+  }
+
+  /**
+   * Derive the net transitions of `sentToD2Keys` from the post-filter change
+   * stream. `filterDuplicateInserts` has already mutated `sentToD2Keys`:
+   * every surviving insert is a 0→1 transition for its key, every surviving
+   * delete is a 1→0 transition. We count insert/delete per key so that a
+   * stable-membership ordered update (where `splitUpdates` emits
+   * `delete K + insert K`) nets to zero and emits nothing. Cost is
+   * O(|changes|) — no dependency on the size of `sentToD2Keys`.
+   */
+  private emitTrackedKeyDelta(
+    changes: ReadonlyArray<ChangeMessage<any, string | number>>,
+  ): void {
+    if (!this.onTrackedKeysChange) return
+
+    const net = new Map<string | number, number>()
+    for (const change of changes) {
+      if (change.type === `insert`) {
+        net.set(change.key, (net.get(change.key) ?? 0) + 1)
+      } else if (change.type === `delete`) {
+        net.set(change.key, (net.get(change.key) ?? 0) - 1)
+      }
+    }
+
+    const added: Array<string | number> = []
+    const removed: Array<string | number> = []
+    for (const [key, delta] of net) {
+      if (delta > 0) added.push(key)
+      else if (delta < 0) removed.push(key)
+    }
+
+    if (added.length === 0 && removed.length === 0) return
+    this.onTrackedKeysChange({ added, removed })
+  }
+
+  private clearTrackedSourceKeys() {
+    if (this.sentToD2Keys.size === 0) return
+    const removed = Array.from(this.sentToD2Keys)
+    this.sentToD2Keys.clear()
+    this.onTrackedKeysChange?.({ added: [], removed })
   }
 }

@@ -4,7 +4,10 @@ import {
   getBuilderFromConfig,
   registerCollectionBuilder,
 } from './live/collection-registry.js'
-import type { LiveQueryCollectionUtils } from './live/collection-config-builder.js'
+import type {
+  LiveQueryBuiltInUtils,
+  LiveQueryCollectionUtils,
+} from './live/collection-config-builder.js'
 import type { LiveQueryCollectionConfig } from './live/types.js'
 import type {
   ExtractContext,
@@ -26,6 +29,8 @@ import type {
   RootQueryFn,
   RootQueryResult,
 } from './builder/types.js'
+
+export type { LiveQueryCollectionUtils } from './live/collection-config-builder.js'
 
 type CollectionConfigForContext<
   TContext extends Context,
@@ -78,7 +83,7 @@ export function liveQueryCollectionOptions<
     query: RootQueryFn<TQuery> | RootQueryBuilder<TQuery>
   },
 ): CollectionConfigForContext<TContext, TResult> & {
-  utils: LiveQueryCollectionUtils
+  utils: LiveQueryBuiltInUtils
 } {
   const collectionConfigBuilder = new CollectionConfigBuilder<
     TContext,
@@ -87,7 +92,7 @@ export function liveQueryCollectionOptions<
   return collectionConfigBuilder.getConfig() as CollectionConfigForContext<
     TContext,
     TResult
-  > & { utils: LiveQueryCollectionUtils }
+  > & { utils: LiveQueryBuiltInUtils }
 }
 
 /**
@@ -148,7 +153,7 @@ export function createLiveQueryCollection<
     utils?: TUtils
   },
 ): CollectionForContext<TContext, RootQueryResult<TContext>> & {
-  utils: LiveQueryCollectionUtils & TUtils
+  utils: LiveQueryCollectionUtils<TUtils>
 }
 
 // Implementation
@@ -163,7 +168,7 @@ export function createLiveQueryCollection<
         q: InitialQueryBuilder,
       ) => QueryBuilder<TContext> & RootObjectResultConstraint<TContext>),
 ): CollectionForContext<TContext, TResult> & {
-  utils: LiveQueryCollectionUtils & TUtils
+  utils: LiveQueryCollectionUtils<TUtils>
 } {
   // Determine if the argument is a function (query) or a config object
   if (typeof configOrQuery === `function`) {
@@ -179,43 +184,45 @@ export function createLiveQueryCollection<
     return bridgeToCreateCollection(options) as CollectionForContext<
       TContext,
       TResult
-    > & { utils: LiveQueryCollectionUtils & TUtils }
-  } else {
-    // Config object case
-    const config = configOrQuery as LiveQueryCollectionConfig<
-      TContext,
-      TResult
-    > & { utils?: TUtils }
-    // Same overload implementation limitation as above: the config has already
-    // been validated by the public signatures, but the branch loses that precision.
-    const options = liveQueryCollectionOptions(config as any)
-
-    // Merge custom utils if provided, preserving the getBuilder() method for dependency tracking
-    if (config.utils) {
-      options.utils = { ...options.utils, ...config.utils }
-    }
-
-    return bridgeToCreateCollection(options) as CollectionForContext<
-      TContext,
-      TResult
-    > & { utils: LiveQueryCollectionUtils & TUtils }
+    > & { utils: LiveQueryCollectionUtils<TUtils> }
   }
+
+  // Config object case. Same overload implementation limitation as above:
+  // the config has already been validated by the public signatures, but the
+  // branch loses that precision.
+  const config = configOrQuery as LiveQueryCollectionConfig<
+    TContext,
+    TResult
+  > & { utils?: TUtils }
+  const options = liveQueryCollectionOptions(config as any)
+
+  if (config.utils) {
+    // Merge the built-in live-query utils into the user's utils object in
+    // place so `liveQuery.utils === config.utils` (reference identity).
+    // createCollection will then idempotently attach the base tracked-source
+    // helpers on top — the query-local variants installed above win because
+    // the attach is a "only set if missing" check.
+    Object.assign(config.utils, options.utils)
+    options.utils = config.utils as unknown as LiveQueryBuiltInUtils
+  }
+
+  return bridgeToCreateCollection(options) as CollectionForContext<
+    TContext,
+    TResult
+  > & { utils: LiveQueryCollectionUtils<TUtils> }
 }
 
 /**
  * Bridge function that handles the type compatibility between query2's TResult
  * and core collection's output type without exposing ugly type assertions to users
  */
-function bridgeToCreateCollection<
-  TResult extends object,
-  TUtils extends UtilsRecord = {},
->(
-  options: CollectionConfig<TResult> & { utils: TUtils },
-): Collection<TResult, string | number, TUtils> {
+function bridgeToCreateCollection<TResult extends object>(
+  options: CollectionConfig<TResult> & { utils: LiveQueryBuiltInUtils },
+): Collection<TResult, string | number, LiveQueryBuiltInUtils> {
   const collection = createCollection(options as any) as unknown as Collection<
     TResult,
     string | number,
-    LiveQueryCollectionUtils
+    LiveQueryBuiltInUtils
   >
 
   const builder = getBuilderFromConfig(options)
@@ -223,5 +230,5 @@ function bridgeToCreateCollection<
     registerCollectionBuilder(collection, builder)
   }
 
-  return collection as unknown as Collection<TResult, string | number, TUtils>
+  return collection
 }

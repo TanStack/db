@@ -4,6 +4,7 @@ import {
   CollectionRequiresSyncConfigError,
 } from '../errors'
 import { currentStateAsChanges } from './change-events'
+import { TrackedSourceRecordsManager } from './tracked-source-records.js'
 
 import { CollectionStateManager } from './state'
 import { CollectionChangesManager } from './changes'
@@ -24,8 +25,8 @@ import type {
   ChangeMessage,
   CollectionConfig,
   CollectionStatus,
+  CollectionUtils,
   CurrentStateAsChangesOptions,
-  Fn,
   InferSchemaInput,
   InferSchemaOutput,
   InsertConfig,
@@ -34,6 +35,8 @@ import type {
   SingleResult,
   StringCollationConfig,
   SubscribeChangesOptions,
+  SubscribeTrackedSourceRecordsOptions,
+  TrackedSourceRecordsChange,
   Transaction as TransactionType,
   UtilsRecord,
   WritableDeep,
@@ -58,7 +61,7 @@ export interface Collection<
   TSchema extends StandardSchemaV1 = StandardSchemaV1,
   TInsertInput extends object = T,
 > extends CollectionImpl<T, TKey, TUtils, TSchema, TInsertInput> {
-  readonly utils: TUtils
+  readonly utils: CollectionUtils<TUtils>
   readonly singleResult?: true
 }
 
@@ -255,18 +258,9 @@ export function createCollection(
     schema?: StandardSchemaV1
   },
 ): Collection<any, string | number, UtilsRecord, any, any> {
-  const collection = new CollectionImpl<any, string | number, any, any, any>(
+  return new CollectionImpl<any, string | number, any, any, any>(
     options,
-  )
-
-  // Attach utils to collection
-  if (options.utils) {
-    collection.utils = options.utils
-  } else {
-    collection.utils = {}
-  }
-
-  return collection
+  ) as unknown as Collection<any, string | number, UtilsRecord, any, any>
 }
 
 export class CollectionImpl<
@@ -279,9 +273,10 @@ export class CollectionImpl<
   public id: string
   public config: CollectionConfig<TOutput, TKey, TSchema>
 
-  // Utilities namespace
-  // This is populated by createCollection
-  public utils: Record<string, Fn> = {}
+  // Utilities namespace. Initialized in the constructor from config.utils
+  // (if provided) with tracked-source helpers attached idempotently. Reference
+  // identity on user-supplied utils objects is preserved — we mutate in place.
+  public utils: CollectionUtils<TUtils>
 
   // Managers
   private _events: CollectionEventsManager
@@ -299,6 +294,10 @@ export class CollectionImpl<
   // The core state of the collection is "public" so that is accessible in tests
   // and for debugging
   public _state: CollectionStateManager<TOutput, TKey, TSchema, TInput>
+  // Aggregated view of source-records currently being used by active live
+  // queries that depend on this collection. Public so live-query aggregators
+  // can push deltas in.
+  public _trackedSourceRecords: TrackedSourceRecordsManager<TKey>
 
   /**
    * When set, collection consumers should defer processing incoming data
@@ -354,6 +353,23 @@ export class CollectionImpl<
     this._mutations = new CollectionMutationsManager(config, this.id)
     this._state = new CollectionStateManager(config)
     this._sync = new CollectionSyncManager(config, this.id)
+    this._trackedSourceRecords = new TrackedSourceRecordsManager<TKey>(this.id)
+
+    // Attach tracked-source helpers to the provided utils in place, so user
+    // class instances keep reference identity. Idempotent: if a helper is
+    // already set (e.g. a live query installed a query-local variant via
+    // `liveQueryCollectionOptions`), it is left alone.
+    const utils = config.utils ?? {}
+    if (typeof utils.getTrackedSourceRecords !== `function`) {
+      utils.getTrackedSourceRecords = () => this._trackedSourceRecords.get()
+    }
+    if (typeof utils.subscribeTrackedSourceRecords !== `function`) {
+      utils.subscribeTrackedSourceRecords = (
+        callback: (change: TrackedSourceRecordsChange) => void,
+        options?: SubscribeTrackedSourceRecordsOptions,
+      ) => this._trackedSourceRecords.subscribe(callback, options)
+    }
+    this.utils = utils as CollectionUtils<TUtils>
 
     this.comparisonOpts = buildCompareOptionsFromConfig(config)
 

@@ -19,7 +19,12 @@ import {
 import { createDeferred } from '../../src/deferred'
 import { BTreeIndex } from '../../src/indexes/btree-index'
 import { Func, Value } from '../../src/query/ir.js'
-import type { ChangeMessage, LoadSubsetOptions } from '../../src/types.js'
+import type {
+  ChangeMessage,
+  LoadSubsetOptions,
+  SyncConfig,
+  TrackedSourceRecordsChange,
+} from '../../src/types.js'
 
 // Sample user type for tests
 type User = {
@@ -43,6 +48,18 @@ function createUsersCollection() {
       initialData: sampleUsers,
     }),
   )
+}
+
+function sortTrackedSourceRecords(
+  records: ReadonlyArray<{ collectionId: string; key: string | number }>,
+) {
+  return [...records].sort((left, right) => {
+    if (left.collectionId !== right.collectionId) {
+      return left.collectionId.localeCompare(right.collectionId)
+    }
+
+    return String(left.key).localeCompare(String(right.key))
+  })
 }
 
 describe(`createLiveQueryCollection`, () => {
@@ -104,6 +121,460 @@ describe(`createLiveQueryCollection`, () => {
     expect(activeUsers2).toBeDefined()
     expect(activeUsers1.size).toBe(2)
     expect(activeUsers2.size).toBe(2)
+  })
+
+  it(`should expose tracked source records only while the live query has active subscribers`, async () => {
+    const activeUsers = createLiveQueryCollection((q) =>
+      q
+        .from({ user: usersCollection })
+        .where(({ user }) => eq(user.active, true)),
+    )
+
+    expect(activeUsers.utils.getTrackedSourceRecords()).toEqual([])
+
+    await activeUsers.preload()
+
+    expect(activeUsers.utils.getTrackedSourceRecords()).toEqual([])
+
+    const subscription = activeUsers.subscribeChanges(() => {})
+    await activeUsers.preload()
+
+    expect(
+      sortTrackedSourceRecords(activeUsers.utils.getTrackedSourceRecords()),
+    ).toEqual([
+      { collectionId: usersCollection.id, key: 1 },
+      { collectionId: usersCollection.id, key: 2 },
+    ])
+
+    subscription.unsubscribe()
+
+    expect(activeUsers.utils.getTrackedSourceRecords()).toEqual([])
+  })
+
+  it(`should emit tracked source record deltas for membership changes and clear when the last subscriber leaves`, async () => {
+    const activeUsers = createLiveQueryCollection((q) =>
+      q
+        .from({ user: usersCollection })
+        .where(({ user }) => eq(user.active, true)),
+    )
+    const trackingEvents: Array<{
+      added: Array<{ collectionId: string; key: string | number }>
+      removed: Array<{ collectionId: string; key: string | number }>
+    }> = []
+
+    const unsubscribeTracked = activeUsers.utils.subscribeTrackedSourceRecords(
+      (changes) => {
+        trackingEvents.push({
+          added: sortTrackedSourceRecords(changes.added),
+          removed: sortTrackedSourceRecords(changes.removed),
+        })
+      },
+      { includeInitialState: true },
+    )
+
+    const subscription = activeUsers.subscribeChanges(() => {})
+    await activeUsers.preload()
+
+    expect(trackingEvents).toEqual([
+      {
+        added: [
+          { collectionId: usersCollection.id, key: 1 },
+          { collectionId: usersCollection.id, key: 2 },
+        ],
+        removed: [],
+      },
+    ])
+
+    trackingEvents.length = 0
+
+    usersCollection.insert({ id: 4, name: `David`, active: true })
+    await flushPromises()
+
+    expect(trackingEvents).toEqual([
+      {
+        added: [{ collectionId: usersCollection.id, key: 4 }],
+        removed: [],
+      },
+    ])
+
+    trackingEvents.length = 0
+
+    usersCollection.update(2, (draft) => {
+      draft.active = false
+    })
+    await flushPromises()
+
+    expect(trackingEvents).toEqual([
+      {
+        added: [],
+        removed: [{ collectionId: usersCollection.id, key: 2 }],
+      },
+    ])
+
+    trackingEvents.length = 0
+
+    subscription.unsubscribe()
+
+    expect(trackingEvents).toEqual([
+      {
+        added: [],
+        removed: [
+          { collectionId: usersCollection.id, key: 1 },
+          { collectionId: usersCollection.id, key: 4 },
+        ],
+      },
+    ])
+    expect(activeUsers.utils.getTrackedSourceRecords()).toEqual([])
+
+    unsubscribeTracked()
+  })
+
+  it(`should expose tracked source records on base collections while dependent live queries have active subscribers`, async () => {
+    const activeUsers = createLiveQueryCollection((q) =>
+      q
+        .from({ user: usersCollection })
+        .where(({ user }) => eq(user.active, true)),
+    )
+    const trackingEvents: Array<{
+      added: Array<{ collectionId: string; key: string | number }>
+      removed: Array<{ collectionId: string; key: string | number }>
+    }> = []
+
+    expect(usersCollection.utils.getTrackedSourceRecords()).toEqual([])
+
+    const unsubscribeTracked =
+      usersCollection.utils.subscribeTrackedSourceRecords(
+        (changes) => {
+          trackingEvents.push({
+            added: sortTrackedSourceRecords(changes.added),
+            removed: sortTrackedSourceRecords(changes.removed),
+          })
+        },
+        { includeInitialState: true },
+      )
+
+    const subscription = activeUsers.subscribeChanges(() => {})
+    await activeUsers.preload()
+
+    expect(
+      sortTrackedSourceRecords(usersCollection.utils.getTrackedSourceRecords()),
+    ).toEqual([
+      { collectionId: usersCollection.id, key: 1 },
+      { collectionId: usersCollection.id, key: 2 },
+    ])
+    expect(trackingEvents).toEqual([
+      {
+        added: [
+          { collectionId: usersCollection.id, key: 1 },
+          { collectionId: usersCollection.id, key: 2 },
+        ],
+        removed: [],
+      },
+    ])
+
+    trackingEvents.length = 0
+    subscription.unsubscribe()
+
+    expect(usersCollection.utils.getTrackedSourceRecords()).toEqual([])
+    expect(trackingEvents).toEqual([
+      {
+        added: [],
+        removed: [
+          { collectionId: usersCollection.id, key: 1 },
+          { collectionId: usersCollection.id, key: 2 },
+        ],
+      },
+    ])
+
+    unsubscribeTracked()
+  })
+
+  it(`should ref-count tracked source records on base collections across overlapping live queries`, async () => {
+    const activeUsers = createLiveQueryCollection((q) =>
+      q
+        .from({ user: usersCollection })
+        .where(({ user }) => eq(user.active, true)),
+    )
+    const bobOnlyUsers = createLiveQueryCollection((q) =>
+      q.from({ user: usersCollection }).where(({ user }) => eq(user.id, 2)),
+    )
+    const trackingEvents: Array<{
+      added: Array<{ collectionId: string; key: string | number }>
+      removed: Array<{ collectionId: string; key: string | number }>
+    }> = []
+
+    const unsubscribeTracked =
+      usersCollection.utils.subscribeTrackedSourceRecords(
+        (changes) => {
+          trackingEvents.push({
+            added: sortTrackedSourceRecords(changes.added),
+            removed: sortTrackedSourceRecords(changes.removed),
+          })
+        },
+        { includeInitialState: true },
+      )
+
+    const activeUsersSubscription = activeUsers.subscribeChanges(() => {})
+    await activeUsers.preload()
+
+    expect(trackingEvents).toEqual([
+      {
+        added: [
+          { collectionId: usersCollection.id, key: 1 },
+          { collectionId: usersCollection.id, key: 2 },
+        ],
+        removed: [],
+      },
+    ])
+
+    trackingEvents.length = 0
+
+    const bobOnlySubscription = bobOnlyUsers.subscribeChanges(() => {})
+    await bobOnlyUsers.preload()
+
+    expect(
+      sortTrackedSourceRecords(usersCollection.utils.getTrackedSourceRecords()),
+    ).toEqual([
+      { collectionId: usersCollection.id, key: 1 },
+      { collectionId: usersCollection.id, key: 2 },
+    ])
+    expect(trackingEvents).toEqual([])
+
+    activeUsersSubscription.unsubscribe()
+
+    expect(
+      sortTrackedSourceRecords(usersCollection.utils.getTrackedSourceRecords()),
+    ).toEqual([{ collectionId: usersCollection.id, key: 2 }])
+    expect(trackingEvents).toEqual([
+      {
+        added: [],
+        removed: [{ collectionId: usersCollection.id, key: 1 }],
+      },
+    ])
+
+    trackingEvents.length = 0
+
+    bobOnlySubscription.unsubscribe()
+
+    expect(usersCollection.utils.getTrackedSourceRecords()).toEqual([])
+    expect(trackingEvents).toEqual([
+      {
+        added: [],
+        removed: [{ collectionId: usersCollection.id, key: 2 }],
+      },
+    ])
+
+    unsubscribeTracked()
+  })
+
+  it(`should not emit tracked source churn for ordered updates that keep the same keys in range`, async () => {
+    type Item = { id: number; value: number }
+    const sourceCollection = createCollection<Item>({
+      id: `tracked-ordered-update-source`,
+      getKey: (item) => item.id,
+      startSync: true,
+      autoIndex: `eager`,
+      defaultIndexType: BTreeIndex,
+      sync: {
+        sync: ({ begin, write, commit, markReady }) => {
+          begin()
+          ;[
+            { id: 1, value: 1 },
+            { id: 2, value: 2 },
+            { id: 3, value: 3 },
+          ].forEach((item) => {
+            write({ type: `insert`, value: item })
+          })
+          commit()
+          markReady()
+        },
+      },
+      onUpdate: async () => {},
+    })
+
+    const topItems = createLiveQueryCollection((q) =>
+      q
+        .from({ item: sourceCollection })
+        .orderBy(({ item }) => item.value, `asc`)
+        .limit(2),
+    )
+    const liveTrackingEvents: Array<TrackedSourceRecordsChange> = []
+    const baseTrackingEvents: Array<TrackedSourceRecordsChange> = []
+
+    const unsubscribeLiveTracked = topItems.utils.subscribeTrackedSourceRecords(
+      (changes) => {
+        liveTrackingEvents.push({
+          added: sortTrackedSourceRecords(changes.added),
+          removed: sortTrackedSourceRecords(changes.removed),
+        })
+      },
+    )
+    const unsubscribeBaseTracked =
+      sourceCollection.utils.subscribeTrackedSourceRecords((changes) => {
+        baseTrackingEvents.push({
+          added: sortTrackedSourceRecords(changes.added),
+          removed: sortTrackedSourceRecords(changes.removed),
+        })
+      })
+
+    const subscription = topItems.subscribeChanges(() => {})
+    await topItems.preload()
+
+    expect(
+      sortTrackedSourceRecords(topItems.utils.getTrackedSourceRecords()),
+    ).toEqual([
+      { collectionId: sourceCollection.id, key: 1 },
+      { collectionId: sourceCollection.id, key: 2 },
+    ])
+
+    liveTrackingEvents.length = 0
+    baseTrackingEvents.length = 0
+
+    sourceCollection.update(1, (draft) => {
+      draft.value = 1.5
+    })
+    await flushPromises()
+
+    expect(liveTrackingEvents).toEqual([])
+    expect(baseTrackingEvents).toEqual([])
+    expect(
+      sortTrackedSourceRecords(topItems.utils.getTrackedSourceRecords()),
+    ).toEqual([
+      { collectionId: sourceCollection.id, key: 1 },
+      { collectionId: sourceCollection.id, key: 2 },
+    ])
+    expect(
+      sortTrackedSourceRecords(
+        sourceCollection.utils.getTrackedSourceRecords(),
+      ),
+    ).toEqual([
+      { collectionId: sourceCollection.id, key: 1 },
+      { collectionId: sourceCollection.id, key: 2 },
+    ])
+
+    subscription.unsubscribe()
+    unsubscribeLiveTracked()
+    unsubscribeBaseTracked()
+  })
+
+  it(`should not emit tracked source churn across truncate refetch when ordered queries keep tracking the same keys`, async () => {
+    type Item = { id: number; value: string; rank: number }
+
+    let syncOps: Parameters<SyncConfig<Item>[`sync`]>[0] | undefined
+    let loadSubsetCallCount = 0
+    let loadSubsetResolver: (() => void) | undefined
+
+    const sourceCollection = createCollection<Item>({
+      id: `tracked-truncate-source`,
+      getKey: (item) => item.id,
+      startSync: true,
+      syncMode: `on-demand`,
+      autoIndex: `eager`,
+      defaultIndexType: BTreeIndex,
+      sync: {
+        sync: (cfg) => {
+          syncOps = cfg
+          cfg.markReady()
+
+          return {
+            loadSubset: (_options: LoadSubsetOptions) => {
+              loadSubsetCallCount++
+
+              return new Promise<void>((resolve) => {
+                loadSubsetResolver = () => {
+                  cfg.begin()
+                  cfg.write({
+                    type: `insert`,
+                    value: { id: 1, value: `refetched-1`, rank: 1 },
+                  })
+                  cfg.write({
+                    type: `insert`,
+                    value: { id: 2, value: `refetched-2`, rank: 2 },
+                  })
+                  cfg.commit()
+                  resolve()
+                }
+              })
+            },
+          }
+        },
+      },
+    })
+
+    const topItems = createLiveQueryCollection((q) =>
+      q
+        .from({ item: sourceCollection })
+        .orderBy(({ item }) => item.rank, `asc`)
+        .limit(2),
+    )
+    const liveTrackingEvents: Array<TrackedSourceRecordsChange> = []
+    const baseTrackingEvents: Array<TrackedSourceRecordsChange> = []
+
+    const unsubscribeLiveTracked = topItems.utils.subscribeTrackedSourceRecords(
+      (changes) => {
+        liveTrackingEvents.push({
+          added: sortTrackedSourceRecords(changes.added),
+          removed: sortTrackedSourceRecords(changes.removed),
+        })
+      },
+    )
+    const unsubscribeBaseTracked =
+      sourceCollection.utils.subscribeTrackedSourceRecords((changes) => {
+        baseTrackingEvents.push({
+          added: sortTrackedSourceRecords(changes.added),
+          removed: sortTrackedSourceRecords(changes.removed),
+        })
+      })
+
+    const subscription = topItems.subscribeChanges(() => {})
+    const preloadPromise = topItems.preload()
+
+    await vi.waitFor(() => expect(loadSubsetCallCount).toBe(1))
+    loadSubsetResolver?.()
+    await preloadPromise
+
+    expect(
+      sortTrackedSourceRecords(topItems.utils.getTrackedSourceRecords()),
+    ).toEqual([
+      { collectionId: sourceCollection.id, key: 1 },
+      { collectionId: sourceCollection.id, key: 2 },
+    ])
+
+    liveTrackingEvents.length = 0
+    baseTrackingEvents.length = 0
+    loadSubsetCallCount = 0
+
+    syncOps?.begin()
+    syncOps?.truncate()
+    syncOps?.commit()
+
+    await vi.waitFor(() => expect(loadSubsetCallCount).toBe(1))
+    expect(liveTrackingEvents).toEqual([])
+    expect(baseTrackingEvents).toEqual([])
+
+    loadSubsetResolver?.()
+    await flushPromises()
+
+    expect(liveTrackingEvents).toEqual([])
+    expect(baseTrackingEvents).toEqual([])
+    expect(
+      sortTrackedSourceRecords(topItems.utils.getTrackedSourceRecords()),
+    ).toEqual([
+      { collectionId: sourceCollection.id, key: 1 },
+      { collectionId: sourceCollection.id, key: 2 },
+    ])
+    expect(
+      sortTrackedSourceRecords(
+        sourceCollection.utils.getTrackedSourceRecords(),
+      ),
+    ).toEqual([
+      { collectionId: sourceCollection.id, key: 1 },
+      { collectionId: sourceCollection.id, key: 2 },
+    ])
+
+    subscription.unsubscribe()
+    unsubscribeLiveTracked()
+    unsubscribeBaseTracked()
   })
 
   describe(`compareOptions inheritance`, () => {
