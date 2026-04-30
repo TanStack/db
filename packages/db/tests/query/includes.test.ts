@@ -6,6 +6,7 @@ import {
   count,
   createLiveQueryCollection,
   eq,
+  materialize,
   toArray,
 } from '../../src/query/index.js'
 import { createCollection } from '../../src/collection/index.js'
@@ -5122,6 +5123,249 @@ describe(`includes subqueries`, () => {
       })
       await new Promise((r) => setTimeout(r, 100))
       expect(data().textDeltas).toHaveLength(2)
+    })
+  })
+
+  describe(`materialize`, () => {
+    // For singleton behavior we look up each issue's parent project.
+    // Each issue references exactly one project via projectId.
+    function buildSingletonQuery() {
+      return createLiveQueryCollection((q) =>
+        q.from({ i: issues }).select(({ i }) => ({
+          id: i.id,
+          title: i.title,
+          project: materialize(
+            q
+              .from({ p: projects })
+              .where(({ p }) => eq(p.id, i.projectId))
+              .select(({ p }) => ({
+                id: p.id,
+                name: p.name,
+              }))
+              .findOne(),
+          ),
+        })),
+      )
+    }
+
+    it(`findOne() materializes a single value, not an array`, async () => {
+      const collection = buildSingletonQuery()
+      await collection.preload()
+
+      const bug = collection.get(10) as any
+      expect(Array.isArray(bug.project)).toBe(false)
+      expect(stripVirtualPropsDeep(bug.project)).toEqual({
+        id: 1,
+        name: `Alpha`,
+      })
+
+      const betaBug = collection.get(20) as any
+      expect(stripVirtualPropsDeep(betaBug.project)).toEqual({
+        id: 2,
+        name: `Beta`,
+      })
+    })
+
+    it(`findOne() with no matching child yields undefined`, async () => {
+      // Issue referencing a non-existent project
+      issues.utils.begin()
+      issues.utils.write({
+        type: `insert`,
+        value: { id: 99, projectId: 999, title: `Orphan issue` },
+      })
+      issues.utils.commit()
+
+      const collection = buildSingletonQuery()
+      await collection.preload()
+
+      const orphan = collection.get(99) as any
+      expect(orphan.project).toBeUndefined()
+    })
+
+    it(`inserting the matching child re-emits parent with populated singleton`, async () => {
+      // Start with an issue whose project doesn't exist yet
+      issues.utils.begin()
+      issues.utils.write({
+        type: `insert`,
+        value: { id: 99, projectId: 999, title: `Orphan issue` },
+      })
+      issues.utils.commit()
+
+      const collection = buildSingletonQuery()
+      await collection.preload()
+
+      expect((collection.get(99) as any).project).toBeUndefined()
+
+      // Now create the matching project
+      projects.utils.begin()
+      projects.utils.write({
+        type: `insert`,
+        value: { id: 999, name: `Late Project` },
+      })
+      projects.utils.commit()
+
+      expect(stripVirtualPropsDeep((collection.get(99) as any).project)).toEqual(
+        { id: 999, name: `Late Project` },
+      )
+    })
+
+    it(`updating the matching child re-emits parent with updated singleton`, async () => {
+      const collection = buildSingletonQuery()
+      await collection.preload()
+
+      projects.utils.begin()
+      projects.utils.write({
+        type: `update`,
+        value: { id: 1, name: `Renamed Alpha` },
+      })
+      projects.utils.commit()
+
+      const bug = collection.get(10) as any
+      expect(stripVirtualPropsDeep(bug.project)).toEqual({
+        id: 1,
+        name: `Renamed Alpha`,
+      })
+    })
+
+    it(`deleting the matching child re-emits parent with undefined`, async () => {
+      const collection = buildSingletonQuery()
+      await collection.preload()
+
+      expect((collection.get(20) as any).project).toBeDefined()
+
+      projects.utils.begin()
+      projects.utils.write({
+        type: `delete`,
+        value: sampleProjects.find((p) => p.id === 2)!,
+      })
+      projects.utils.commit()
+
+      expect((collection.get(20) as any).project).toBeUndefined()
+    })
+
+    it(`two parents sharing a correlation key both see the singleton`, async () => {
+      const collection = buildSingletonQuery()
+      await collection.preload()
+
+      // Issues 10 and 11 both reference project 1
+      const bug = collection.get(10) as any
+      const feature = collection.get(11) as any
+      expect(stripVirtualPropsDeep(bug.project)).toEqual({
+        id: 1,
+        name: `Alpha`,
+      })
+      expect(stripVirtualPropsDeep(feature.project)).toEqual({
+        id: 1,
+        name: `Alpha`,
+      })
+
+      // Updating the shared project re-emits both parents
+      projects.utils.begin()
+      projects.utils.write({
+        type: `update`,
+        value: { id: 1, name: `Alpha v2` },
+      })
+      projects.utils.commit()
+
+      expect(stripVirtualPropsDeep((collection.get(10) as any).project)).toEqual(
+        { id: 1, name: `Alpha v2` },
+      )
+      expect(stripVirtualPropsDeep((collection.get(11) as any).project)).toEqual(
+        { id: 1, name: `Alpha v2` },
+      )
+    })
+
+    it(`materialize over a multi-row subquery still returns Array<T>`, async () => {
+      const collection = createLiveQueryCollection((q) =>
+        q.from({ p: projects }).select(({ p }) => ({
+          id: p.id,
+          name: p.name,
+          issues: materialize(
+            q
+              .from({ i: issues })
+              .where(({ i }) => eq(i.projectId, p.id))
+              .select(({ i }) => ({
+                id: i.id,
+                title: i.title,
+              })),
+          ),
+        })),
+      )
+      await collection.preload()
+
+      const alpha = collection.get(1) as any
+      expect(Array.isArray(alpha.issues)).toBe(true)
+      expect(sortedPlainRows(alpha.issues)).toEqual([
+        { id: 10, title: `Bug in Alpha` },
+        { id: 11, title: `Feature for Alpha` },
+      ])
+
+      const gamma = collection.get(3) as any
+      expect(Array.isArray(gamma.issues)).toBe(true)
+      expect(plainRows(gamma.issues)).toEqual([])
+    })
+
+    it(`materialize over a scalar findOne() returns the scalar value`, async () => {
+      const collection = createLiveQueryCollection((q) =>
+        q.from({ i: issues }).select(({ i }) => ({
+          id: i.id,
+          projectName: materialize(
+            q
+              .from({ p: projects })
+              .where(({ p }) => eq(p.id, i.projectId))
+              .select(({ p }) => p.name)
+              .findOne(),
+          ),
+        })),
+      )
+      await collection.preload()
+
+      expect((collection.get(10) as any).projectName).toBe(`Alpha`)
+      expect((collection.get(20) as any).projectName).toBe(`Beta`)
+    })
+
+    it(`nested materialize: array of issues with singleton first-comment lookup each`, async () => {
+      const collection = createLiveQueryCollection((q) =>
+        q.from({ p: projects }).select(({ p }) => ({
+          id: p.id,
+          name: p.name,
+          issues: materialize(
+            q
+              .from({ i: issues })
+              .where(({ i }) => eq(i.projectId, p.id))
+              .select(({ i }) => ({
+                id: i.id,
+                title: i.title,
+                firstComment: materialize(
+                  q
+                    .from({ c: comments })
+                    .where(({ c }) => eq(c.issueId, i.id))
+                    .orderBy(({ c }) => c.id, `asc`)
+                    .select(({ c }) => ({ id: c.id, body: c.body }))
+                    .findOne(),
+                ),
+              })),
+          ),
+        })),
+      )
+      await collection.preload()
+
+      const alpha = collection.get(1) as any
+      const issuesArr = stripVirtualPropsDeep(alpha.issues).sort(
+        (a: any, b: any) => a.id - b.id,
+      )
+      expect(issuesArr).toEqual([
+        {
+          id: 10,
+          title: `Bug in Alpha`,
+          firstComment: { id: 100, body: `Looks bad` },
+        },
+        {
+          id: 11,
+          title: `Feature for Alpha`,
+          firstComment: undefined,
+        },
+      ])
     })
   })
 })

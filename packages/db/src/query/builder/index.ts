@@ -25,7 +25,11 @@ import {
   isRefProxy,
   toExpression,
 } from './ref-proxy.js'
-import { ConcatToArrayWrapper, ToArrayWrapper } from './functions.js'
+import {
+  ConcatToArrayWrapper,
+  MaterializeWrapper,
+  ToArrayWrapper,
+} from './functions.js'
 import type { NamespacedRow, SingleResult } from '../../types.js'
 import type {
   Aggregate,
@@ -918,6 +922,17 @@ function buildNestedSelect(obj: any, parentAliases: Array<string> = []): any {
         throw new Error(`concat(toArray(...)) must wrap a subquery builder`)
       }
       out[k] = buildIncludesSubquery(v.query, k, parentAliases, `concat`)
+      continue
+    }
+    if (v instanceof MaterializeWrapper) {
+      if (!(v.query instanceof BaseQueryBuilder)) {
+        throw new Error(`materialize() must wrap a subquery builder`)
+      }
+      const childQuery = v.query._getQuery()
+      const materialization: IncludesMaterialization = childQuery.singleResult
+        ? `singleton`
+        : `array`
+      out[k] = buildIncludesSubquery(v.query, k, parentAliases, materialization)
       continue
     }
     out[k] = buildNestedSelect(v, parentAliases)

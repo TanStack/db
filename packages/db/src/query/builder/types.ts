@@ -10,7 +10,11 @@ import type {
 } from '../ir.js'
 import type { InitialQueryBuilder, QueryBuilder } from './index.js'
 import type { VirtualRowProps, WithVirtualProps } from '../../virtual-props.js'
-import type { ConcatToArrayWrapper, ToArrayWrapper } from './functions.js'
+import type {
+  ConcatToArrayWrapper,
+  MaterializeWrapper,
+  ToArrayWrapper,
+} from './functions.js'
 
 /**
  * Context - The central state container for query builder operations
@@ -182,6 +186,7 @@ type SelectValue =
   | Array<RefLeaf<any>>
   | ToArrayWrapper // toArray() wrapped subquery
   | ConcatToArrayWrapper // concat(toArray(...)) wrapped subquery
+  | MaterializeWrapper // materialize() wrapped subquery (Array<T> or T | undefined)
   | QueryBuilder<any> // includes subquery (produces a child Collection)
 
 // Recursive shape for select objects allowing nested projections
@@ -234,8 +239,12 @@ export type ResultTypeFromSelectValue<TSelectValue> =
             ? Array<T>
             : TSelectValue extends ConcatToArrayWrapper<any>
               ? string
-              : TSelectValue extends QueryBuilder<infer TChildContext>
-                ? Collection<GetResult<TChildContext>>
+              : TSelectValue extends MaterializeWrapper<infer T, infer IsSingle>
+                ? IsSingle extends true
+                  ? T | undefined
+                  : Array<T>
+                : TSelectValue extends QueryBuilder<infer TChildContext>
+                  ? Collection<GetResult<TChildContext>>
                 : TSelectValue extends Ref<infer _T>
                   ? ExtractRef<TSelectValue>
                   : TSelectValue extends RefLeaf<infer T>
@@ -319,9 +328,17 @@ export type ResultTypeFromSelect<TSelectObject> =
               ? Array<T>
               : TSelectObject[K] extends ConcatToArrayWrapper<any>
                 ? string
-                : // includes subquery (bare QueryBuilder) — produces a child Collection
-                  TSelectObject[K] extends QueryBuilder<infer TChildContext>
-                  ? Collection<GetResult<TChildContext>>
+                : // materialize() — Array<T> for multi-row, T | undefined for findOne()
+                  TSelectObject[K] extends MaterializeWrapper<
+                    infer T,
+                    infer IsSingle
+                  >
+                  ? IsSingle extends true
+                    ? T | undefined
+                    : Array<T>
+                  : // includes subquery (bare QueryBuilder) — produces a child Collection
+                    TSelectObject[K] extends QueryBuilder<infer TChildContext>
+                    ? Collection<GetResult<TChildContext>>
                   : // Ref (full object ref or spread with RefBrand) - recursively process properties
                     TSelectObject[K] extends Ref<infer _T>
                     ? ExtractRef<TSelectObject[K]>

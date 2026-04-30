@@ -1196,6 +1196,8 @@ function materializeIncludedValue(
     if (state.materialization === `concat`) {
       return ``
     }
+    // `singleton` and `collection` both fall through to undefined when no
+    // child entry exists for the parent's correlation key.
     return undefined
   }
 
@@ -1210,6 +1212,12 @@ function materializeIncludedValue(
 
   if (state.materialization === `array`) {
     return values
+  }
+
+  if (state.materialization === `singleton`) {
+    // findOne() doesn't currently push LIMIT 1 to the IR, so the child
+    // Collection may hold more than one row; pick the first deterministically.
+    return values[0]
   }
 
   return values.map((value) => String(value ?? ``)).join(``)

@@ -62,6 +62,7 @@ export {
   max,
   // Includes helpers
   toArray,
+  materialize,
 } from './builder/functions.js'
 
 // Ref proxy utilities
