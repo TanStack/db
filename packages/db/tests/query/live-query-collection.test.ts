@@ -260,6 +260,44 @@ describe(`createLiveQueryCollection`, () => {
     unsubscribeTracked()
   })
 
+  it(`should replay tracked source records as initial state for base collections after tracking starts`, async () => {
+    const activeUsers = createLiveQueryCollection((q) =>
+      q
+        .from({ user: usersCollection })
+        .where(({ user }) => eq(user.active, true)),
+    )
+    const trackingEvents: Array<{
+      added: Array<{ collectionId: string; key: string | number }>
+      removed: Array<{ collectionId: string; key: string | number }>
+    }> = []
+
+    const subscription = activeUsers.subscribeChanges(() => {})
+    await activeUsers.preload()
+
+    const unsubscribeTracked = usersCollection.subscribeTrackedSourceRecords(
+      (changes) => {
+        trackingEvents.push({
+          added: sortTrackedSourceRecords(changes.added),
+          removed: sortTrackedSourceRecords(changes.removed),
+        })
+      },
+      { includeInitialState: true },
+    )
+
+    expect(trackingEvents).toEqual([
+      {
+        added: [
+          { collectionId: usersCollection.id, key: 1 },
+          { collectionId: usersCollection.id, key: 2 },
+        ],
+        removed: [],
+      },
+    ])
+
+    unsubscribeTracked()
+    subscription.unsubscribe()
+  })
+
   it(`should ref-count tracked source records on base collections across overlapping live queries`, async () => {
     const activeUsers = createLiveQueryCollection((q) =>
       q
