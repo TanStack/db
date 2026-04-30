@@ -34,6 +34,10 @@ const createHarness: SQLiteCoreAdapterHarnessFactory = (options) => {
   }
 }
 
+type QueryPlanRow = {
+  detail: string
+}
+
 runSQLiteCoreAdapterContractSuite(
   `SQLiteCorePersistenceAdapter (better-sqlite3 node driver)`,
   createHarness,
@@ -179,6 +183,132 @@ describe(`SQLiteCorePersistenceAdapter planner behavior (better-sqlite3)`, () =>
       expect(
         planRows.some((row) => row.detail.startsWith(`SCAN ${tableName}`)),
       ).toBe(false)
+    } finally {
+      baseDriver.close()
+      rmSync(tempDirectory, { recursive: true, force: true })
+    }
+  })
+
+  it(`uses expression indexes for filters while sorting composite orderBy`, async () => {
+    const tempDirectory = mkdtempSync(join(tmpdir(), `db-node-sqlite-plan-`))
+    const dbPath = join(tempDirectory, `state.sqlite`)
+    const baseDriver = new BetterSqlite3SQLiteDriver({ filename: dbPath })
+    const collectionId = `thread-messages-composite-order`
+    const tableName = createPersistedTableName(collectionId, `c`)
+    let capturedSubsetSql: string | undefined
+    let capturedSubsetParams: ReadonlyArray<unknown> = []
+
+    const driver = createQueryObservingDriver(baseDriver, (sql, params) => {
+      if (
+        sql.startsWith(`SELECT key, value, metadata, row_version FROM`) &&
+        sql.includes(`WHERE`)
+      ) {
+        capturedSubsetSql = sql
+        capturedSubsetParams = params
+      }
+    })
+    const adapter = new SQLiteCorePersistenceAdapter({ driver })
+
+    try {
+      await adapter.applyCommittedTx(collectionId, {
+        txId: `thread-messages-composite-order-seed`,
+        term: 1,
+        seq: 1,
+        rowVersion: 1,
+        mutations: [
+          {
+            type: `insert`,
+            key: `1`,
+            value: {
+              id: `1`,
+              threadId: `thread-1`,
+              title: `First`,
+              createdAt: `2026-01-01T00:00:00.000Z`,
+              score: 1,
+            },
+          },
+          {
+            type: `insert`,
+            key: `2`,
+            value: {
+              id: `2`,
+              threadId: `thread-1`,
+              title: `Second`,
+              createdAt: `2026-01-01T00:00:00.000Z`,
+              score: 2,
+            },
+          },
+          {
+            type: `insert`,
+            key: `3`,
+            value: {
+              id: `3`,
+              threadId: `thread-2`,
+              title: `Other thread`,
+              createdAt: `2026-01-01T00:00:00.000Z`,
+              score: 3,
+            },
+          },
+        ],
+      })
+
+      await adapter.ensureIndex(collectionId, `thread-id`, {
+        expressionSql: [
+          JSON.stringify({
+            type: `ref`,
+            path: [`threadId`],
+          }),
+        ],
+      })
+
+      const rows = await adapter.loadSubset(collectionId, {
+        where: new IR.Func(`eq`, [
+          new IR.PropRef([`threadId`]),
+          new IR.Value(`thread-1`),
+        ]),
+        orderBy: [
+          {
+            expression: new IR.PropRef([`createdAt`]),
+            compareOptions: {
+              direction: `desc`,
+              nulls: `first`,
+            },
+          },
+          {
+            expression: new IR.PropRef([`id`]),
+            compareOptions: {
+              direction: `desc`,
+              nulls: `first`,
+            },
+          },
+        ],
+      })
+
+      if (capturedSubsetSql === undefined) {
+        throw new Error(`Expected subset SQL to be captured`)
+      }
+
+      expect(rows.map((row) => row.key)).toEqual([`2`, `1`])
+      expect(capturedSubsetSql).toContain(`WHERE`)
+      expect(capturedSubsetSql).toContain(`ORDER BY`)
+      expect(capturedSubsetParams).toEqual([`thread-1`])
+
+      const planRows = baseDriver
+        .getDatabase()
+        .prepare<Array<unknown>, QueryPlanRow>(
+          `EXPLAIN QUERY PLAN ${capturedSubsetSql}`,
+        )
+        .all(...capturedSubsetParams)
+      const indexedSearchPattern = new RegExp(
+        `\\bSEARCH ${tableName}\\b.*\\bUSING INDEX\\b`,
+      )
+
+      expect(planRows.length).toBeGreaterThan(0)
+      expect(
+        planRows.some((row) => indexedSearchPattern.test(row.detail)),
+      ).toBe(true)
+      const planDetails = planRows.map((row) => row.detail)
+      expect(planDetails).toContain(`USE TEMP B-TREE FOR ORDER BY`)
     } finally {
       baseDriver.close()
       rmSync(tempDirectory, { recursive: true, force: true })
