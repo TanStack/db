@@ -48,6 +48,9 @@ export class CollectionSubscriber<
   // can potentially send the same item to D2 multiple times.
   private sentToD2Keys = new Set<string | number>()
 
+  // Track keys currently reported as tracked source records for this subscriber.
+  private trackedSourceKeys = new Set<string | number>()
+
   // Direct load tracking callback for ordered path (set during subscribeToOrderedChanges,
   // used by loadNextItems for subsequent requestLimitedSnapshot calls)
   private orderedLoadSubsetResult?: (result: Promise<void> | true) => void
@@ -55,9 +58,9 @@ export class CollectionSubscriber<
 
   /**
    * Callback invoked with net membership changes in this subscriber's
-   * tracked-key set (i.e. transitions of `sentToD2Keys`). The builder wires
+   * tracked-source-key set. The builder wires
    * this to the per-live-query aggregator. A stable-membership ordered
-   * update — where split delete+insert leaves `sentToD2Keys` unchanged —
+   * update where split delete+insert leaves `trackedSourceKeys` unchanged
    * emits nothing.
    */
   public onTrackedKeysChange?: (change: {
@@ -184,7 +187,7 @@ export class CollectionSubscriber<
       filteredChanges,
       this.collection.config.getKey,
     )
-    this.emitTrackedKeyDelta(filteredChanges)
+    this.emitTrackedSourceKeyDelta(filteredChanges)
 
     // Do not provide the callback that loads more data
     // if there's no more data to load
@@ -292,17 +295,15 @@ export class CollectionSubscriber<
     })
     subscriptionHolder.current = subscription
 
-    // Reset cursor-tracking state on truncate so a must-refetch doesn't use
-    // stale cursor data. We don't clear sentToD2Keys here: the truncate
-    // emits delete events for every visible key, which drain sentToD2Keys
-    // through filterDuplicateInserts, and the merged delete + re-insert
-    // batch nets to zero — clearing eagerly would cause spurious tracked-
-    // source removed/added churn for keys that stay tracked across the
-    // refetch.
+    // Reset cursor/D2 duplicate state on truncate. Tracked-source membership
+    // is tracked separately in trackedSourceKeys and updated from the buffered
+    // delete/refetch change batch, so unsubscribe cleanup still has the right
+    // membership snapshot while truncate is in flight.
     const truncateUnsubscribe = this.collection.on(`truncate`, () => {
       this.biggest = undefined
       this.lastLoadRequestKey = undefined
       this.pendingOrderedLoadPromise = undefined
+      this.sentToD2Keys.clear()
     })
 
     // Clean up truncate listener when subscription is unsubscribed
@@ -488,34 +489,37 @@ export class CollectionSubscriber<
     )
   }
 
-  /**
-   * Derive the net transitions of `sentToD2Keys` from the post-filter change
-   * stream. `filterDuplicateInserts` has already mutated `sentToD2Keys`:
-   * every surviving insert is a 0→1 transition for its key, every surviving
-   * delete is a 1→0 transition. We count insert/delete per key so that a
-   * stable-membership ordered update (where `splitUpdates` emits
-   * `delete K + insert K`) nets to zero and emits nothing. Cost is
-   * O(|changes|) — no dependency on the size of `sentToD2Keys`.
-   */
-  private emitTrackedKeyDelta(
+  private emitTrackedSourceKeyDelta(
     changes: ReadonlyArray<ChangeMessage<any, string | number>>,
   ): void {
-    if (!this.onTrackedKeysChange) return
-
-    const net = new Map<string | number, number>()
+    const wasTracked = new Map<string | number, boolean>()
     for (const change of changes) {
+      if (change.type !== `insert` && change.type !== `delete`) {
+        continue
+      }
+
+      if (!wasTracked.has(change.key)) {
+        wasTracked.set(change.key, this.trackedSourceKeys.has(change.key))
+      }
+
       if (change.type === `insert`) {
-        net.set(change.key, (net.get(change.key) ?? 0) + 1)
-      } else if (change.type === `delete`) {
-        net.set(change.key, (net.get(change.key) ?? 0) - 1)
+        this.trackedSourceKeys.add(change.key)
+      } else {
+        this.trackedSourceKeys.delete(change.key)
       }
     }
 
+    if (!this.onTrackedKeysChange) return
+
     const added: Array<string | number> = []
     const removed: Array<string | number> = []
-    for (const [key, delta] of net) {
-      if (delta > 0) added.push(key)
-      else if (delta < 0) removed.push(key)
+    for (const [key, before] of wasTracked) {
+      const after = this.trackedSourceKeys.has(key)
+      if (!before && after) {
+        added.push(key)
+      } else if (before && !after) {
+        removed.push(key)
+      }
     }
 
     if (added.length === 0 && removed.length === 0) return
@@ -523,9 +527,10 @@ export class CollectionSubscriber<
   }
 
   private clearTrackedSourceKeys() {
-    if (this.sentToD2Keys.size === 0) return
-    const removed = Array.from(this.sentToD2Keys)
+    const removed = Array.from(this.trackedSourceKeys)
+    this.trackedSourceKeys.clear()
     this.sentToD2Keys.clear()
+    if (removed.length === 0) return
     this.onTrackedKeysChange?.({ added: [], removed })
   }
 }

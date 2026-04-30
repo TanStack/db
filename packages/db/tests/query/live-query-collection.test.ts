@@ -434,7 +434,21 @@ describe(`createLiveQueryCollection`, () => {
       { collectionId: sourceCollection.id, key: 2 },
     ])
 
+    baseTrackingEvents.length = 0
+
     subscription.unsubscribe()
+
+    expect(baseTrackingEvents).toEqual([
+      {
+        added: [],
+        removed: [
+          { collectionId: sourceCollection.id, key: 1 },
+          { collectionId: sourceCollection.id, key: 2 },
+        ],
+      },
+    ])
+    expect(sourceCollection.getTrackedSourceRecords()).toEqual([])
+
     unsubscribeBaseTracked()
   })
 
