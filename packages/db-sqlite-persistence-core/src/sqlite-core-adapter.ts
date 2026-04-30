@@ -579,6 +579,7 @@ function compileComparisonSql(
 function compileRefExpressionSql(jsonPath: string): CompiledSqlFragment {
   const typePath = `${jsonPath}.${PERSISTED_TYPE_TAG}`
   const taggedValuePath = `${jsonPath}.${PERSISTED_VALUE_TAG}`
+  // Inline JSON paths so SQLite can match runtime refs to expression-index SQL.
   const typePathSql = toSqliteLiteral(typePath)
   const taggedValuePathSql = toSqliteLiteral(taggedValuePath)
   const jsonPathSql = toSqliteLiteral(jsonPath)
