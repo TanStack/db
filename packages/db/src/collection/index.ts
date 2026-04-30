@@ -269,9 +269,7 @@ export function createCollection(
     schema?: StandardSchemaV1
   },
 ): Collection<any, string | number, UtilsRecord, any, any> {
-  const collection = new CollectionImpl<any, string | number, any, any, any>(
-    options,
-  )
+  const collection = new CollectionImpl(options)
 
   // Attach utils to collection
   if (options.utils) {
@@ -280,13 +278,7 @@ export function createCollection(
     collection.utils = {}
   }
 
-  return collection as unknown as Collection<
-    any,
-    string | number,
-    UtilsRecord,
-    any,
-    any
-  >
+  return collection
 }
 
 export class CollectionImpl<
