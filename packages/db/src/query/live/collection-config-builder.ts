@@ -621,7 +621,7 @@ export class CollectionConfigBuilder<
 
     // Session-scoped aggregator that dedupes tracked source records across
     // aliases (handles self-joins), propagates net transitions to each
-    // source collection's _trackedSourceRecords manager, and fans out to
+    // source collection's tracked-source-records manager, and fans out to
     // the builder's long-lived listener Set (so external subscribers reach
     // the per-query view via the live-query Collection). Lives only for this
     // sync session.

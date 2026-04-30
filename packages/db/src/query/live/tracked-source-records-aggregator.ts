@@ -1,3 +1,4 @@
+import { applyTrackedSourceRecordDelta } from '../../collection/tracked-source-records-store.js'
 import type { Collection } from '../../collection/index.js'
 import type {
   TrackedSourceRecord,
@@ -13,7 +14,7 @@ type Entry = { refCount: number }
  * within one query (a self-join references the same base collection under
  * multiple aliases, so the same (collectionId, key) pair can be added
  * multiple times). Net 0↔1 transitions are:
- *   1. propagated to each source collection's `_trackedSourceRecords`
+ *   1. propagated to each source collection's tracked-source-records
  *      manager (so consumers reading the base-collection view see them)
  *   2. fanned out to `listeners` (so consumers reading the per-query view
  *      via `liveQuery.subscribeTrackedSourceRecords` see them)
@@ -108,7 +109,8 @@ export class LiveQueryTrackedSourceRecordsAggregator {
     if (!this.exposed) return
     if (netAdded.length === 0 && netRemoved.length === 0) return
 
-    this.sourceCollections[collectionId]?._trackedSourceRecords.apply(
+    applyTrackedSourceRecordDelta(
+      this.sourceCollections[collectionId],
       netAdded,
       netRemoved,
     )
@@ -132,12 +134,12 @@ export class LiveQueryTrackedSourceRecordsAggregator {
       const keys = Array.from(byKey.keys())
       const collection = this.sourceCollections[collectionId]
       if (exposed) {
-        collection?._trackedSourceRecords.apply(keys, [])
+        applyTrackedSourceRecordDelta(collection, keys, [])
         if (hasListeners) {
           for (const key of keys) added.push({ collectionId, key })
         }
       } else {
-        collection?._trackedSourceRecords.apply([], keys)
+        applyTrackedSourceRecordDelta(collection, [], keys)
         if (hasListeners) {
           for (const key of keys) removed.push({ collectionId, key })
         }

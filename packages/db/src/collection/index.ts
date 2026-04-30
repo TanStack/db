@@ -6,6 +6,7 @@ import {
 import { getBuilderFromConfig } from '../query/live/collection-registry.js'
 import { currentStateAsChanges } from './change-events'
 import { TrackedSourceRecordsManager } from './tracked-source-records.js'
+import { registerTrackedSourceRecordsManager } from './tracked-source-records-store.js'
 
 import { CollectionStateManager } from './state'
 import { CollectionChangesManager } from './changes'
@@ -319,9 +320,8 @@ export class CollectionImpl<
   // and for debugging
   public _state: CollectionStateManager<TOutput, TKey, TSchema, TInput>
   // Aggregated view of source-records currently being used by active live
-  // queries that depend on this collection. Public so live-query aggregators
-  // can push deltas in.
-  public _trackedSourceRecords: TrackedSourceRecordsManager<TKey>
+  // queries that depend on this collection.
+  private readonly _trackedSourceRecords: TrackedSourceRecordsManager<TKey>
   // For live-query collections only: a live-query-local view of "source
   // records this query is currently using." Undefined on base collections.
   private readonly _liveQueryTrackedSourceView?: LiveQueryTrackedSourceView
@@ -381,6 +381,7 @@ export class CollectionImpl<
     this._state = new CollectionStateManager(config)
     this._sync = new CollectionSyncManager(config, this.id)
     this._trackedSourceRecords = new TrackedSourceRecordsManager<TKey>(this.id)
+    registerTrackedSourceRecordsManager(this, this._trackedSourceRecords)
     this._liveQueryTrackedSourceView =
       getBuilderFromConfig(config)?.liveQueryTrackedSourceView
 
