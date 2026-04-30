@@ -4,10 +4,7 @@ import {
   getBuilderFromConfig,
   registerCollectionBuilder,
 } from './live/collection-registry.js'
-import type {
-  LiveQueryBuiltInUtils,
-  LiveQueryCollectionUtils,
-} from './live/collection-config-builder.js'
+import type { LiveQueryCollectionUtils } from './live/collection-config-builder.js'
 import type { LiveQueryCollectionConfig } from './live/types.js'
 import type {
   ExtractContext,
@@ -83,7 +80,7 @@ export function liveQueryCollectionOptions<
     query: RootQueryFn<TQuery> | RootQueryBuilder<TQuery>
   },
 ): CollectionConfigForContext<TContext, TResult> & {
-  utils: LiveQueryBuiltInUtils
+  utils: LiveQueryCollectionUtils
 } {
   const collectionConfigBuilder = new CollectionConfigBuilder<
     TContext,
@@ -92,7 +89,7 @@ export function liveQueryCollectionOptions<
   return collectionConfigBuilder.getConfig() as CollectionConfigForContext<
     TContext,
     TResult
-  > & { utils: LiveQueryBuiltInUtils }
+  > & { utils: LiveQueryCollectionUtils }
 }
 
 /**

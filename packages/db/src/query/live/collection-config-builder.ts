@@ -55,7 +55,7 @@ import type {
 } from './types.js'
 import type { AllCollectionEvents } from '../../collection/events.js'
 
-export type LiveQueryBuiltInUtils = {
+export type LiveQueryCollectionUtils = UtilsRecord & {
   getRunCount: () => number
   /**
    * Sets the offset and limit of an ordered query.
@@ -72,8 +72,6 @@ export type LiveQueryBuiltInUtils = {
   getWindow: () => { offset: number; limit: number } | undefined
   [LIVE_QUERY_INTERNAL]: LiveQueryInternalUtils
 }
-
-export type LiveQueryCollectionUtils = UtilsRecord & LiveQueryBuiltInUtils
 
 type PendingGraphRun = {
   loadCallbacks: Set<() => boolean>
@@ -257,7 +255,7 @@ export class CollectionConfigBuilder<
   }
 
   getConfig(): CollectionConfigSingleRowOption<TResult> & {
-    utils: LiveQueryBuiltInUtils
+    utils: LiveQueryCollectionUtils
   } {
     return {
       id: this.id,
