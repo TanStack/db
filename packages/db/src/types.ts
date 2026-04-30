@@ -73,6 +73,20 @@ export type Fn = (...args: Array<any>) => any
  */
 export type UtilsRecord = Record<string, any>
 
+export type TrackedSourceRecord = {
+  collectionId: string
+  key: string | number
+}
+
+export type TrackedSourceRecordsChange = {
+  added: Array<TrackedSourceRecord>
+  removed: Array<TrackedSourceRecord>
+}
+
+export type SubscribeTrackedSourceRecordsOptions = {
+  includeInitialState?: boolean
+}
+
 /**
  *
  * @remarks `update` and `insert` are both represented as `Partial<T>`, but changes for `insert` could me made more precise by inferring the schema input type. In practice, this has almost 0 real world impact so it's not worth the added type complexity.
