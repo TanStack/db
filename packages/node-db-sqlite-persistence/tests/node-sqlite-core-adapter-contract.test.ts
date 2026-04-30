@@ -51,10 +51,7 @@ function createQueryObservingDriver(
       exec: async function (sql) {
         return driver.exec(sql)
       },
-      query: async function <T>(
-        sql: string,
-        params?: ReadonlyArray<unknown>,
-      ) {
+      query: async function <T>(sql: string, params?: ReadonlyArray<unknown>) {
         await observeQuery(sql, params ?? [])
         return driver.query<T>(sql, params)
       },
@@ -72,9 +69,7 @@ function createQueryObservingDriver(
         ? async function <T>(
             fn: (transactionDriver: SQLiteDriver) => Promise<T>,
           ) {
-            return driver.transactionWithDriver!((
-              transactionDriver,
-            ) =>
+            return driver.transactionWithDriver!((transactionDriver) =>
               fn(wrap(transactionDriver)),
             )
           }

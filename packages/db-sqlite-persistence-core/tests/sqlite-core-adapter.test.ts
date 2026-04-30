@@ -249,10 +249,13 @@ function createQueryObservingDriver(
       run: async (sql, params) => driver.run(sql, params),
       transaction: async <T>(
         fn: (transactionDriver: SQLiteDriver) => Promise<T>,
-      ) => driver.transaction((transactionDriver) => fn(wrap(transactionDriver))),
+      ) =>
+        driver.transaction((transactionDriver) => fn(wrap(transactionDriver))),
       transactionWithDriver: transactionWithDriver
         ? async <T>(fn: (transactionDriver: SQLiteDriver) => Promise<T>) =>
-            transactionWithDriver((transactionDriver) => fn(wrap(transactionDriver)))
+            transactionWithDriver((transactionDriver) =>
+              fn(wrap(transactionDriver)),
+            )
         : undefined,
     }
   }
