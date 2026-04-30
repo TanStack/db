@@ -153,8 +153,8 @@ export class CollectionConfigBuilder<
     (change: TrackedSourceRecordsChange) => void
   >()
 
-  // Adapter the live-query Collection's `_liveQueryTrackedSourceView` field
-  // points to. Routes through the current sync session's aggregator (which
+  // Adapter the live-query Collection routes through for its tracked-source
+  // record view. Routes through the current sync session's aggregator (which
   // can come and go) but the adapter itself is stable across sessions.
   public readonly liveQueryTrackedSourceView = {
     snapshot: (): Array<TrackedSourceRecord> =>
@@ -623,9 +623,8 @@ export class CollectionConfigBuilder<
     // aliases (handles self-joins), propagates net transitions to each
     // source collection's _trackedSourceRecords manager, and fans out to
     // the builder's long-lived listener Set (so external subscribers reach
-    // the per-query view via the live-query Collection's
-    // `_liveQueryTrackedSourceView` adapter). Lives only for this sync
-    // session.
+    // the per-query view via the live-query Collection). Lives only for this
+    // sync session.
     const trackedSourceRecordsAggregator =
       new LiveQueryTrackedSourceRecordsAggregator(
         this.collections,

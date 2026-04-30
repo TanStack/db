@@ -214,21 +214,15 @@ export function createLiveQueryCollection<
 function bridgeToCreateCollection<TResult extends object>(
   options: CollectionConfig<TResult> & { utils: LiveQueryBuiltInUtils },
 ): Collection<TResult, string | number, LiveQueryBuiltInUtils> {
+  const builder = getBuilderFromConfig(options)
   const collection = createCollection(options as any) as unknown as Collection<
     TResult,
     string | number,
     LiveQueryBuiltInUtils
   >
 
-  const builder = getBuilderFromConfig(options)
   if (builder) {
     registerCollectionBuilder(collection, builder)
-    // Route the Collection's tracked-source-records public methods through
-    // the live-query-local view (the source-records this query is using),
-    // not the base-collection refcount manager (which is "consumers of mine").
-    // The adapter is stable across sync sessions; the underlying aggregator
-    // is replaced each session.
-    collection._liveQueryTrackedSourceView = builder.liveQueryTrackedSourceView
   }
 
   return collection

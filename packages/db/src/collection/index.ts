@@ -3,6 +3,7 @@ import {
   CollectionRequiresConfigError,
   CollectionRequiresSyncConfigError,
 } from '../errors'
+import { getBuilderFromConfig } from '../query/live/collection-registry.js'
 import { currentStateAsChanges } from './change-events'
 import { TrackedSourceRecordsManager } from './tracked-source-records.js'
 
@@ -47,6 +48,14 @@ import type { StandardSchemaV1 } from '@standard-schema/spec'
 import type { WithVirtualProps } from '../virtual-props.js'
 
 export type { CollectionIndexMetadata } from './events.js'
+
+type LiveQueryTrackedSourceView = {
+  snapshot: () => Array<TrackedSourceRecord>
+  subscribe: (
+    callback: (change: TrackedSourceRecordsChange) => void,
+    options?: SubscribeTrackedSourceRecordsOptions,
+  ) => () => void
+}
 
 /**
  * Enhanced Collection interface that includes both data type T and utilities TUtils
@@ -314,17 +323,8 @@ export class CollectionImpl<
   // can push deltas in.
   public _trackedSourceRecords: TrackedSourceRecordsManager<TKey>
   // For live-query collections only: a live-query-local view of "source
-  // records this query is currently using." Set by the live-query path
-  // during construction; undefined on base collections. When present, the
-  // public `getTrackedSourceRecords` / `subscribeTrackedSourceRecords`
-  // methods route to this view instead of `_trackedSourceRecords`.
-  public _liveQueryTrackedSourceView?: {
-    snapshot: () => Array<TrackedSourceRecord>
-    subscribe: (
-      callback: (change: TrackedSourceRecordsChange) => void,
-      options?: SubscribeTrackedSourceRecordsOptions,
-    ) => () => void
-  }
+  // records this query is currently using." Undefined on base collections.
+  private readonly _liveQueryTrackedSourceView?: LiveQueryTrackedSourceView
 
   /**
    * When set, collection consumers should defer processing incoming data
@@ -381,6 +381,8 @@ export class CollectionImpl<
     this._state = new CollectionStateManager(config)
     this._sync = new CollectionSyncManager(config, this.id)
     this._trackedSourceRecords = new TrackedSourceRecordsManager<TKey>(this.id)
+    this._liveQueryTrackedSourceView =
+      getBuilderFromConfig(config)?.liveQueryTrackedSourceView
 
     this.comparisonOpts = buildCompareOptionsFromConfig(config)
 
