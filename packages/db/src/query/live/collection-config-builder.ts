@@ -73,8 +73,7 @@ export type LiveQueryBuiltInUtils = {
   [LIVE_QUERY_INTERNAL]: LiveQueryInternalUtils
 }
 
-export type LiveQueryCollectionUtils<TUtils extends UtilsRecord = {}> = TUtils &
-  LiveQueryBuiltInUtils
+export type LiveQueryCollectionUtils = UtilsRecord & LiveQueryBuiltInUtils
 
 type PendingGraphRun = {
   loadCallbacks: Set<() => boolean>

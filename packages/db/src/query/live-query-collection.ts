@@ -153,7 +153,7 @@ export function createLiveQueryCollection<
     utils?: TUtils
   },
 ): CollectionForContext<TContext, RootQueryResult<TContext>> & {
-  utils: LiveQueryCollectionUtils<TUtils>
+  utils: LiveQueryCollectionUtils & TUtils
 }
 
 // Implementation
@@ -168,7 +168,7 @@ export function createLiveQueryCollection<
         q: InitialQueryBuilder,
       ) => QueryBuilder<TContext> & RootObjectResultConstraint<TContext>),
 ): CollectionForContext<TContext, TResult> & {
-  utils: LiveQueryCollectionUtils<TUtils>
+  utils: LiveQueryCollectionUtils & TUtils
 } {
   // Determine if the argument is a function (query) or a config object
   if (typeof configOrQuery === `function`) {
@@ -184,7 +184,7 @@ export function createLiveQueryCollection<
     return bridgeToCreateCollection(options) as CollectionForContext<
       TContext,
       TResult
-    > & { utils: LiveQueryCollectionUtils<TUtils> }
+    > & { utils: LiveQueryCollectionUtils & TUtils }
   }
 
   // Config object case. Same overload implementation limitation as above:
@@ -204,7 +204,7 @@ export function createLiveQueryCollection<
   return bridgeToCreateCollection(options) as CollectionForContext<
     TContext,
     TResult
-  > & { utils: LiveQueryCollectionUtils<TUtils> }
+  > & { utils: LiveQueryCollectionUtils & TUtils }
 }
 
 /**
