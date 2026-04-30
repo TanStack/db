@@ -745,6 +745,82 @@ describe(`createLiveQueryCollection`, () => {
     subscription.unsubscribe()
   })
 
+  it(`should expose direct source records for nested live queries`, async () => {
+    const activeUsers = createLiveQueryCollection({
+      id: `tracked-active-users`,
+      query: (q) =>
+        q
+          .from({ user: usersCollection })
+          .where(({ user }) => eq(user.active, true)),
+    })
+    const activeUserNames = createLiveQueryCollection({
+      id: `tracked-active-user-names`,
+      query: (q) =>
+        q.from({ activeUser: activeUsers }).select(({ activeUser }) => ({
+          id: activeUser.id,
+          name: activeUser.name,
+        })),
+    })
+    const activeUsersEvents: Array<TrackedSourceRecordsChange> = []
+    const activeUserNamesEvents: Array<TrackedSourceRecordsChange> = []
+
+    const unsubscribeActiveUsersTracked =
+      activeUsers.subscribeTrackedSourceRecords((changes) => {
+        activeUsersEvents.push({
+          added: sortTrackedSourceRecords(changes.added),
+          removed: sortTrackedSourceRecords(changes.removed),
+        })
+      })
+    const unsubscribeActiveUserNamesTracked =
+      activeUserNames.subscribeTrackedSourceRecords((changes) => {
+        activeUserNamesEvents.push({
+          added: sortTrackedSourceRecords(changes.added),
+          removed: sortTrackedSourceRecords(changes.removed),
+        })
+      })
+
+    const activeUserNamesSubscription = activeUserNames.subscribeChanges(
+      () => {},
+    )
+    await activeUserNames.preload()
+
+    expect(activeUsersEvents).toEqual([
+      {
+        added: [
+          { collectionId: usersCollection.id, key: 1 },
+          { collectionId: usersCollection.id, key: 2 },
+        ],
+        removed: [],
+      },
+    ])
+    expect(activeUserNamesEvents).toEqual([
+      {
+        added: [
+          { collectionId: activeUsers.id, key: 1 },
+          { collectionId: activeUsers.id, key: 2 },
+        ],
+        removed: [],
+      },
+    ])
+
+    expect(
+      sortTrackedSourceRecords(activeUsers.getTrackedSourceRecords()),
+    ).toEqual([
+      { collectionId: usersCollection.id, key: 1 },
+      { collectionId: usersCollection.id, key: 2 },
+    ])
+    expect(
+      sortTrackedSourceRecords(activeUserNames.getTrackedSourceRecords()),
+    ).toEqual([
+      { collectionId: activeUsers.id, key: 1 },
+      { collectionId: activeUsers.id, key: 2 },
+    ])
+
+    activeUserNamesSubscription.unsubscribe()
+    unsubscribeActiveUserNamesTracked()
+    unsubscribeActiveUsersTracked()
+  })
+
   it(`should scope subscribeTrackedSourceRecords differently on base collection vs live query collection`, async () => {
     // Two live queries with disjoint where-clauses against the same base.
     // The base view sees the union of what each query is using; each
