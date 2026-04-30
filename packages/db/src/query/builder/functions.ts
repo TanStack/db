@@ -2,6 +2,7 @@ import { Aggregate, Func } from '../ir'
 import { toExpression } from './ref-proxy.js'
 import type { BasicExpression } from '../ir'
 import type { RefProxy } from './ref-proxy.js'
+import type { SingleResult } from '../../types.js'
 import type {
   Context,
   GetRawResult,
@@ -450,8 +451,58 @@ export class ConcatToArrayWrapper<_T = unknown> {
   constructor(public readonly query: QueryBuilder<any>) {}
 }
 
+export class MaterializeWrapper<
+  _T = unknown,
+  _IsSingle extends boolean = boolean,
+> {
+  readonly __brand = `MaterializeWrapper` as const
+  declare readonly _type: `materialize`
+  declare readonly _result: _T
+  declare readonly _isSingle: _IsSingle
+  constructor(public readonly query: QueryBuilder<any>) {}
+}
+
 export function toArray<TContext extends Context>(
   query: QueryBuilder<TContext>,
 ): ToArrayWrapper<GetRawResult<TContext>> {
   return new ToArrayWrapper(query)
+}
+
+/**
+ * Materialize an includes subquery into a plain value on the parent row.
+ *
+ * - For multi-row subqueries, the parent receives an `Array<T>` snapshot
+ *   (equivalent to `toArray()`).
+ * - For `findOne()` subqueries, the parent receives a single `T | undefined`
+ *   value — `undefined` when no child matches.
+ *
+ * The snapshot updates reactively: parent rows re-emit when the underlying
+ * children change.
+ *
+ * @example
+ * ```ts
+ * // Multi-row: produces Array<Issue> on each project
+ * select(({ p }) => ({
+ *   ...p,
+ *   issues: materialize(
+ *     q.from({ i: issues }).where(({ i }) => eq(i.projectId, p.id)),
+ *   ),
+ * }))
+ *
+ * // Singleton: produces Author | undefined on each post
+ * select(({ p }) => ({
+ *   ...p,
+ *   author: materialize(
+ *     q.from({ a: authors }).where(({ a }) => eq(a.id, p.authorId)).findOne(),
+ *   ),
+ * }))
+ * ```
+ */
+export function materialize<TContext extends Context>(
+  query: QueryBuilder<TContext>,
+): MaterializeWrapper<
+  GetRawResult<TContext>,
+  TContext extends SingleResult ? true : false
+> {
+  return new MaterializeWrapper(query)
 }
