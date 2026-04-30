@@ -530,6 +530,117 @@ describe(`createLiveQueryCollection`, () => {
     unsubscribeBaseTracked()
   })
 
+  it(`should emit tracked source changes across truncate refetch when ordered queries track different keys`, async () => {
+    type Item = { id: number; value: string; rank: number }
+
+    let syncOps: Parameters<SyncConfig<Item>[`sync`]>[0] | undefined
+    let loadSubsetCallCount = 0
+    let loadSubsetResolver: (() => void) | undefined
+    let refetchVersion = 0
+
+    const sourceCollection = createCollection<Item>({
+      id: `tracked-truncate-different-keys-source`,
+      getKey: (item) => item.id,
+      startSync: true,
+      syncMode: `on-demand`,
+      autoIndex: `eager`,
+      defaultIndexType: BTreeIndex,
+      sync: {
+        sync: (cfg) => {
+          syncOps = cfg
+          cfg.markReady()
+
+          return {
+            loadSubset: (_options: LoadSubsetOptions) => {
+              loadSubsetCallCount++
+
+              return new Promise<void>((resolve) => {
+                loadSubsetResolver = () => {
+                  refetchVersion++
+                  const items =
+                    refetchVersion === 1
+                      ? [
+                          { id: 1, value: `initial-1`, rank: 1 },
+                          { id: 2, value: `initial-2`, rank: 2 },
+                        ]
+                      : [
+                          { id: 3, value: `refetched-3`, rank: 1 },
+                          { id: 4, value: `refetched-4`, rank: 2 },
+                        ]
+
+                  cfg.begin()
+                  items.forEach((item) => {
+                    cfg.write({ type: `insert`, value: item })
+                  })
+                  cfg.commit()
+                  resolve()
+                }
+              })
+            },
+          }
+        },
+      },
+    })
+
+    const topItems = createLiveQueryCollection((q) =>
+      q
+        .from({ item: sourceCollection })
+        .orderBy(({ item }) => item.rank, `asc`)
+        .limit(2),
+    )
+    const baseTrackingEvents: Array<TrackedSourceRecordsChange> = []
+
+    const unsubscribeBaseTracked =
+      sourceCollection.subscribeTrackedSourceRecords((changes) => {
+        baseTrackingEvents.push({
+          added: sortTrackedSourceRecords(changes.added),
+          removed: sortTrackedSourceRecords(changes.removed),
+        })
+      })
+
+    const subscription = topItems.subscribeChanges(() => {})
+    const preloadPromise = topItems.preload()
+
+    await vi.waitFor(() => expect(loadSubsetCallCount).toBe(1))
+    loadSubsetResolver?.()
+    await preloadPromise
+
+    baseTrackingEvents.length = 0
+    loadSubsetCallCount = 0
+
+    syncOps?.begin()
+    syncOps?.truncate()
+    syncOps?.commit()
+
+    await vi.waitFor(() => expect(loadSubsetCallCount).toBe(1))
+    expect(baseTrackingEvents).toEqual([])
+
+    loadSubsetResolver?.()
+    await flushPromises()
+
+    expect(baseTrackingEvents).toEqual([
+      {
+        added: [
+          { collectionId: sourceCollection.id, key: 3 },
+          { collectionId: sourceCollection.id, key: 4 },
+        ],
+        removed: [
+          { collectionId: sourceCollection.id, key: 1 },
+          { collectionId: sourceCollection.id, key: 2 },
+        ],
+      },
+    ])
+    expect(
+      sortTrackedSourceRecords(sourceCollection.getTrackedSourceRecords()),
+    ).toEqual([
+      { collectionId: sourceCollection.id, key: 3 },
+      { collectionId: sourceCollection.id, key: 4 },
+    ])
+
+    subscription.unsubscribe()
+    unsubscribeBaseTracked()
+  })
+
   it(`should expose live-query-local tracked source records via subscribeTrackedSourceRecords on the live query collection`, async () => {
     const activeUsers = createLiveQueryCollection((q) =>
       q
