@@ -211,19 +211,22 @@ export function createLiveQueryCollection<
  * Bridge function that handles the type compatibility between query2's TResult
  * and core collection's output type without exposing ugly type assertions to users
  */
-function bridgeToCreateCollection<TResult extends object>(
-  options: CollectionConfig<TResult> & { utils: LiveQueryBuiltInUtils },
-): Collection<TResult, string | number, LiveQueryBuiltInUtils> {
+function bridgeToCreateCollection<
+  TResult extends object,
+  TUtils extends UtilsRecord = {},
+>(
+  options: CollectionConfig<TResult> & { utils: TUtils },
+): Collection<TResult, string | number, TUtils> {
   const builder = getBuilderFromConfig(options)
   const collection = createCollection(options as any) as unknown as Collection<
     TResult,
     string | number,
-    LiveQueryBuiltInUtils
+    LiveQueryCollectionUtils
   >
 
   if (builder) {
     registerCollectionBuilder(collection, builder)
   }
 
-  return collection
+  return collection as unknown as Collection<TResult, string | number, TUtils>
 }
