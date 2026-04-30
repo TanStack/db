@@ -26,27 +26,43 @@ export class TrackedSourceRecordsManager<
   constructor(private readonly collectionId: string) {}
 
   apply(added: Iterable<TKey>, removed: Iterable<TKey>): void {
+    const keyDeltas = new Map<TKey, number>()
+    for (const key of added) {
+      const currentDelta = keyDeltas.get(key) ?? 0
+      keyDeltas.set(key, currentDelta + 1)
+    }
+    for (const key of removed) {
+      const currentDelta = keyDeltas.get(key) ?? 0
+      keyDeltas.set(key, currentDelta - 1)
+    }
+
     const netAdded: Array<TKey> = []
     const netRemoved: Array<TKey> = []
 
-    for (const key of added) {
+    for (const [key, delta] of keyDeltas) {
+      if (delta === 0) continue
       const existing = this.entries.get(key)
-      if (existing) {
-        existing.refCount++
-      } else {
-        this.entries.set(key, { key, refCount: 1 })
-        netAdded.push(key)
-      }
-    }
 
-    for (const key of removed) {
-      const existing = this.entries.get(key)
-      if (!existing) continue
-      if (existing.refCount === 1) {
+      if (delta > 0) {
+        if (existing) {
+          existing.refCount += delta
+        } else {
+          this.entries.set(key, { key, refCount: delta })
+          netAdded.push(key)
+        }
+        continue
+      }
+
+      if (!existing) {
+        continue
+      }
+
+      const nextRefCount = existing.refCount + delta
+      if (nextRefCount <= 0) {
         this.entries.delete(key)
         netRemoved.push(existing.key)
       } else {
-        existing.refCount--
+        existing.refCount = nextRefCount
       }
     }
 

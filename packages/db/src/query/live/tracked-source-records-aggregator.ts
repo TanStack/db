@@ -53,6 +53,16 @@ export class LiveQueryTrackedSourceRecordsAggregator {
     added: Iterable<string | number>,
     removed: Iterable<string | number>,
   ): void {
+    const keyDeltas = new Map<string | number, number>()
+    for (const key of added) {
+      const currentDelta = keyDeltas.get(key) ?? 0
+      keyDeltas.set(key, currentDelta + 1)
+    }
+    for (const key of removed) {
+      const currentDelta = keyDeltas.get(key) ?? 0
+      keyDeltas.set(key, currentDelta - 1)
+    }
+
     let byKey = this.entries.get(collectionId)
     if (!byKey) {
       byKey = new Map()
@@ -62,24 +72,30 @@ export class LiveQueryTrackedSourceRecordsAggregator {
     const netAdded: Array<string | number> = []
     const netRemoved: Array<string | number> = []
 
-    for (const key of added) {
+    for (const [key, delta] of keyDeltas) {
+      if (delta === 0) continue
       const existing = byKey.get(key)
-      if (existing) {
-        existing.refCount++
-      } else {
-        byKey.set(key, { refCount: 1 })
-        netAdded.push(key)
-      }
-    }
 
-    for (const key of removed) {
-      const existing = byKey.get(key)
-      if (!existing) continue
-      if (existing.refCount === 1) {
+      if (delta > 0) {
+        if (existing) {
+          existing.refCount += delta
+        } else {
+          byKey.set(key, { refCount: delta })
+          netAdded.push(key)
+        }
+        continue
+      }
+
+      if (!existing) {
+        continue
+      }
+
+      const nextRefCount = existing.refCount + delta
+      if (nextRefCount <= 0) {
         byKey.delete(key)
         netRemoved.push(key)
       } else {
-        existing.refCount--
+        existing.refCount = nextRefCount
       }
     }
 
