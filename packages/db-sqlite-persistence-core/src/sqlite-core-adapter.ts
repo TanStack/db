@@ -579,18 +579,22 @@ function compileComparisonSql(
 function compileRefExpressionSql(jsonPath: string): CompiledSqlFragment {
   const typePath = `${jsonPath}.${PERSISTED_TYPE_TAG}`
   const taggedValuePath = `${jsonPath}.${PERSISTED_VALUE_TAG}`
+  // Inline JSON paths so SQLite can match runtime refs to expression-index SQL.
+  const typePathSql = toSqliteLiteral(typePath)
+  const taggedValuePathSql = toSqliteLiteral(taggedValuePath)
+  const jsonPathSql = toSqliteLiteral(jsonPath)
 
   return {
     supported: true,
-    sql: `(CASE json_extract(value, ?)
-      WHEN 'bigint' THEN CAST(json_extract(value, ?) AS NUMERIC)
-      WHEN 'date' THEN json_extract(value, ?)
+    sql: `(CASE json_extract(value, ${typePathSql})
+      WHEN 'bigint' THEN CAST(json_extract(value, ${taggedValuePathSql}) AS NUMERIC)
+      WHEN 'date' THEN json_extract(value, ${taggedValuePathSql})
       WHEN 'nan' THEN NULL
       WHEN 'infinity' THEN NULL
       WHEN '-infinity' THEN NULL
-      ELSE json_extract(value, ?)
+      ELSE json_extract(value, ${jsonPathSql})
     END)`,
-    params: [typePath, taggedValuePath, taggedValuePath, jsonPath],
+    params: [],
     valueKind: `unknown`,
   }
 }
