@@ -167,8 +167,7 @@ export class CollectionConfigBuilder<
       this.trackedSourceRecordListeners.add(callback)
       if (options?.includeInitialState) {
         const added =
-          this.currentSyncState?.trackedSourceRecordsAggregator.snapshot() ??
-          []
+          this.currentSyncState?.trackedSourceRecordsAggregator.snapshot() ?? []
         if (added.length > 0) callback({ added, removed: [] })
       }
       return () => {
