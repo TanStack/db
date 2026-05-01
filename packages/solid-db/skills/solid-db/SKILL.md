@@ -138,6 +138,66 @@ return <Show when={userQuery()}>{(user) => <div>{user().name}</div>}</Show>
 
 `useLiveQuery` integrates with Solid's `createResource` — wrap in `<Suspense>` for loading states.
 
+## Includes (Hierarchical Data)
+
+When a query uses includes (subqueries in `select`), each child field is a live `Collection` by default. Subscribe to it with `useLiveQuery` in a subcomponent:
+
+```tsx
+function ProjectList() {
+  const projectsQuery = useLiveQuery((q) =>
+    q.from({ p: projectsCollection }).select(({ p }) => ({
+      id: p.id,
+      name: p.name,
+      issues: q
+        .from({ i: issuesCollection })
+        .where(({ i }) => eq(i.projectId, p.id))
+        .select(({ i }) => ({ id: i.id, title: i.title })),
+    })),
+  )
+
+  return (
+    <For each={projectsQuery()}>
+      {(project) => (
+        <div>
+          {project.name}
+          <IssueList issuesCollection={project.issues} />
+        </div>
+      )}
+    </For>
+  )
+}
+
+// Child component subscribes to the child Collection
+function IssueList(props: { issuesCollection: Collection }) {
+  const issuesQuery = useLiveQuery(() => props.issuesCollection)
+  return <For each={issuesQuery()}>{(issue) => <div>{issue.title}</div>}</For>
+}
+```
+
+Note: wrap the child Collection in an Accessor (`() => props.issuesCollection`) to match the overload signature.
+
+With `toArray()`, child results are plain arrays and the parent re-emits on child changes:
+
+```tsx
+import { toArray, eq } from '@tanstack/solid-db'
+
+const projectsQuery = useLiveQuery((q) =>
+  q.from({ p: projectsCollection }).select(({ p }) => ({
+    id: p.id,
+    name: p.name,
+    issues: toArray(
+      q
+        .from({ i: issuesCollection })
+        .where(({ i }) => eq(i.projectId, p.id))
+        .select(({ i }) => ({ id: i.id, title: i.title })),
+    ),
+  })),
+)
+// project.issues is a plain array — no subcomponent needed
+```
+
+See db-core/live-queries/SKILL.md for full includes rules (correlation conditions, nested includes, aggregates).
+
 ## Common Mistakes
 
 ### HIGH Reading signals outside the query function

@@ -111,6 +111,74 @@ const handleToggle = (id: number) => {
 }
 ```
 
+## Includes (Hierarchical Data)
+
+When a query uses includes (subqueries in `select`), each child field is a live `Collection` by default. Subscribe to it with `useLiveQuery` in a subcomponent:
+
+```vue
+<!-- ProjectList.vue -->
+<script setup lang="ts">
+import { useLiveQuery, eq } from '@tanstack/vue-db'
+
+const { data: projects } = useLiveQuery((q) =>
+  q.from({ p: projectsCollection }).select(({ p }) => ({
+    id: p.id,
+    name: p.name,
+    issues: q
+      .from({ i: issuesCollection })
+      .where(({ i }) => eq(i.projectId, p.id))
+      .select(({ i }) => ({ id: i.id, title: i.title })),
+  })),
+)
+</script>
+
+<template>
+  <div v-for="project in projects" :key="project.id">
+    {{ project.name }}
+    <IssueList :issues-collection="project.issues" />
+  </div>
+</template>
+```
+
+```vue
+<!-- IssueList.vue — subscribes to the child Collection -->
+<script setup lang="ts">
+import { useLiveQuery } from '@tanstack/vue-db'
+import type { Collection } from '@tanstack/db'
+
+const props = defineProps<{ issuesCollection: Collection }>()
+const { data: issues } = useLiveQuery(() => props.issuesCollection)
+</script>
+
+<template>
+  <ul>
+    <li v-for="issue in issues" :key="issue.id">{{ issue.title }}</li>
+  </ul>
+</template>
+```
+
+With `toArray()`, child results are plain arrays and the parent re-emits on child changes:
+
+```ts
+import { toArray, eq } from '@tanstack/vue-db'
+
+const { data: projects } = useLiveQuery((q) =>
+  q.from({ p: projectsCollection }).select(({ p }) => ({
+    id: p.id,
+    name: p.name,
+    issues: toArray(
+      q
+        .from({ i: issuesCollection })
+        .where(({ i }) => eq(i.projectId, p.id))
+        .select(({ i }) => ({ id: i.id, title: i.title })),
+    ),
+  })),
+)
+// project.issues is a plain array — no subcomponent needed
+```
+
+See db-core/live-queries/SKILL.md for full includes rules (correlation conditions, nested includes, aggregates).
+
 ## Common Mistakes
 
 ### CRITICAL Missing reactive deps in dependency array

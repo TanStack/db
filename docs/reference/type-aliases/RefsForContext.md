@@ -6,10 +6,10 @@ title: RefsForContext
 # Type Alias: RefsForContext\<TContext\>
 
 ```ts
-type RefsForContext<TContext> = { [K in keyof TContext["schema"]]: IsNonExactOptional<TContext["schema"][K]> extends true ? IsNonExactNullable<TContext["schema"][K]> extends true ? Ref<NonNullable<TContext["schema"][K]>, true> : Ref<NonUndefined<TContext["schema"][K]>, true> : IsNonExactNullable<TContext["schema"][K]> extends true ? Ref<NonNull<TContext["schema"][K]>, true> : Ref<TContext["schema"][K]> } & TContext["result"] extends object ? object : object;
+type RefsForContext<TContext> = { [K in keyof TContext["schema"]]: IsNonExactOptional<TContext["schema"][K]> extends true ? IsNonExactNullable<TContext["schema"][K]> extends true ? Ref<NonNullable<TContext["schema"][K]>, true> : Ref<NonUndefined<TContext["schema"][K]>, true> : IsNonExactNullable<TContext["schema"][K]> extends true ? Ref<NonNull<TContext["schema"][K]>, true> : Ref<TContext["schema"][K]> } & TContext["hasResult"] extends true ? object : object;
 ```
 
-Defined in: [packages/db/src/query/builder/types.ts:394](https://github.com/TanStack/db/blob/main/packages/db/src/query/builder/types.ts#L394)
+Defined in: [packages/db/src/query/builder/types.ts:502](https://github.com/TanStack/db/blob/main/packages/db/src/query/builder/types.ts#L502)
 
 RefsForContext - Creates ref proxies for all tables/collections in a query context
 

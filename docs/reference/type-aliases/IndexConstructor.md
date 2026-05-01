@@ -9,7 +9,7 @@ title: IndexConstructor
 type IndexConstructor<TKey> = (id, expression, name?, options?) => BaseIndex<TKey>;
 ```
 
-Defined in: [packages/db/src/indexes/base-index.ts:214](https://github.com/TanStack/db/blob/main/packages/db/src/indexes/base-index.ts#L214)
+Defined in: [packages/db/src/indexes/base-index.ts:213](https://github.com/TanStack/db/blob/main/packages/db/src/indexes/base-index.ts#L213)
 
 Type for index constructor
 

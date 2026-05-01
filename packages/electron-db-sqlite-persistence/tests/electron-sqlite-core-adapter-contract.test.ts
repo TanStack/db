@@ -12,10 +12,7 @@ import {
   createElectronRuntimeBridgeInvoke,
   isElectronFullE2EEnabled,
 } from './e2e/electron-process-client'
-import type {
-  SQLiteCoreAdapterContractTodo,
-  SQLiteCoreAdapterHarnessFactory,
-} from '../../db-sqlite-persistence-core/tests/contracts/sqlite-core-adapter-contract'
+import type { SQLiteCoreAdapterHarnessFactory } from '../../db-sqlite-persistence-core/tests/contracts/sqlite-core-adapter-contract'
 import type {
   ElectronPersistenceInvoke,
   ElectronPersistenceResponseEnvelope,
@@ -44,10 +41,7 @@ const createHarness: SQLiteCoreAdapterHarnessFactory = (options) => {
       adapterOptions: options,
     })
   } else {
-    const mainAdapter = createSQLiteCorePersistenceAdapter<
-      Record<string, unknown>,
-      string | number
-    >({
+    const mainAdapter = createSQLiteCorePersistenceAdapter({
       driver,
       ...options,
     })
@@ -80,10 +74,7 @@ const createHarness: SQLiteCoreAdapterHarnessFactory = (options) => {
     cleanupInvoke = () => dispose()
   }
 
-  const rendererAdapter = createElectronSQLitePersistence<
-    SQLiteCoreAdapterContractTodo,
-    string
-  >({
+  const rendererAdapter = createElectronSQLitePersistence({
     invoke,
     timeoutMs: requestTimeoutMs,
   }).adapter as ReturnType<SQLiteCoreAdapterHarnessFactory>[`adapter`]

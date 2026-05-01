@@ -5,22 +5,20 @@
   "type": "module",
   "scripts": {
     "dev": "vite dev",
-    "build": "vite build && tsc --noEmit",
-    "start": "node .output/server/index.mjs"
+    "build": "vite build && tsc --noEmit"
   },
   "dependencies": {
-    "@tanstack/browser-db-sqlite-persistence": "^0.1.5",
-    "@tanstack/db": "^0.6.1",
-    "@tanstack/offline-transactions": "^1.0.26",
-    "@tanstack/query-db-collection": "^1.0.32",
-    "@tanstack/react-db": "^0.1.79",
+    "@tanstack/browser-db-sqlite-persistence": "^0.1.9",
+    "@tanstack/db": "^0.6.5",
+    "@tanstack/offline-transactions": "^1.0.30",
+    "@tanstack/query-db-collection": "^1.0.36",
+    "@tanstack/react-db": "^0.1.83",
     "@tanstack/react-query": "^5.90.20",
     "@tanstack/react-router": "^1.159.5",
     "@tanstack/react-router-devtools": "^1.159.5",
     "@tanstack/react-start": "^1.159.5",
     "react": "^19.2.4",
     "react-dom": "^19.2.4",
-    "tailwind-merge": "^2.6.1",
     "zod": "^3.25.76"
   },
   "devDependencies": {

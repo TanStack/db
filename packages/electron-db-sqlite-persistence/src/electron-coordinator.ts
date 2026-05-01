@@ -81,10 +81,7 @@ type CollectionState = {
 }
 
 // Adapter with pullSince support
-type AdapterWithPullSince = PersistenceAdapter<
-  Record<string, unknown>,
-  string | number
-> & {
+type AdapterWithPullSince = PersistenceAdapter & {
   pullSince?: (
     collectionId: string,
     fromRowVersion: number,

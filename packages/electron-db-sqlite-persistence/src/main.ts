@@ -16,10 +16,7 @@ import type {
   ElectronSerializedError,
 } from './protocol'
 
-type ElectronMainPersistenceAdapter = PersistenceAdapter<
-  ElectronPersistedRow,
-  ElectronPersistedKey
-> & {
+type ElectronMainPersistenceAdapter = PersistenceAdapter & {
   loadCollectionMetadata?: (
     collectionId: string,
   ) => Promise<Array<{ key: string; value: unknown }>>
@@ -241,12 +238,9 @@ async function executeRequestAgainstAdapter(
 }
 
 function resolveModeAwarePersistence(
-  persistence: PersistedCollectionPersistence<
-    ElectronPersistedRow,
-    ElectronPersistedKey
-  >,
+  persistence: PersistedCollectionPersistence,
   request: ElectronPersistenceRequestEnvelope,
-): PersistedCollectionPersistence<ElectronPersistedRow, ElectronPersistedKey> {
+): PersistedCollectionPersistence {
   const mode = request.resolution?.mode ?? `sync-absent`
   const schemaVersion = request.resolution?.schemaVersion
   const collectionAwarePersistence =
@@ -275,10 +269,7 @@ export type ElectronIpcMainLike = {
 }
 
 export type ElectronSQLiteMainProcessOptions = {
-  persistence: PersistedCollectionPersistence<
-    ElectronPersistedRow,
-    ElectronPersistedKey
-  >
+  persistence: PersistedCollectionPersistence
   ipcMain: ElectronIpcMainLike
   channel?: string
 }

@@ -21,13 +21,11 @@ export type RuntimePersistenceDatabaseHarness = {
 
 export type RuntimePersistenceContractFactory = {
   createDatabaseHarness: () => RuntimePersistenceDatabaseHarness
-  createAdapter: (
-    driver: SQLiteDriver,
-  ) => PersistenceAdapter<RuntimePersistenceContractTodo, string>
+  createAdapter: (driver: SQLiteDriver) => PersistenceAdapter
   createPersistence: (
     driver: SQLiteDriver,
     coordinator?: PersistedCollectionCoordinator,
-  ) => PersistedCollectionPersistence<RuntimePersistenceContractTodo, string>
+  ) => PersistedCollectionPersistence
   createCoordinator: () => PersistedCollectionCoordinator
 }
 

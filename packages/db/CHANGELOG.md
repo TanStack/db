@@ -1,5 +1,43 @@
 # @tanstack/db
 
+## 0.6.5
+
+### Patch Changes
+
+- fix: pass child where clauses to loadSubset in includes ([#1471](https://github.com/TanStack/db/pull/1471))
+
+  Pure-child WHERE clauses on includes subqueries (e.g., `.where(({ item }) => eq(item.status, 'active'))`) are now passed through to the child collection's `loadSubset`/`queryFn`, enabling server-side filtering. Previously only the correlation filter reached the sync layer; additional child filters were applied client-side only.
+
+- fix: lazy load includes child collections in on-demand sync mode ([#1471](https://github.com/TanStack/db/pull/1471))
+
+  Includes child collections now use the same lazy loading mechanism as regular joins. When a query uses includes with a correlation WHERE clause (e.g., `.where(({ item }) => eq(item.rootId, r.id))`), only matching child rows are loaded on-demand via `requestSnapshot({ where: inArray(field, keys) })` instead of loading all data upfront. This ensures the sync layer's `queryFn` receives the correlation filter in `loadSubsetOptions`, enabling efficient server-side filtering.
+
+## 0.6.4
+
+### Patch Changes
+
+- Add includes (hierarchical data) documentation to all framework SKILL.md files and fix inaccurate toArray scalar select constraint in db-core/live-queries skill. ([#1361](https://github.com/TanStack/db/pull/1361))
+
+## 0.6.3
+
+### Patch Changes
+
+- Fix nested `toArray()` includes not propagating changes at depth 3+. When a query used nested includes like `toArray(runs) → toArray(texts) → concat(toArray(textDeltas))`, changes to the deepest level (e.g., inserting a textDelta) were silently lost because `flushIncludesState` only drained one level of nested buffers. Also throw a clear error when `toArray()` or `concat(toArray())` is used inside expressions like `coalesce()`, instead of silently producing incorrect results. ([#1457](https://github.com/TanStack/db/pull/1457))
+
+- fix: orderBy + limit queries crash when no index exists ([#1437](https://github.com/TanStack/db/pull/1437))
+
+  When auto-indexing is disabled (the default), queries with `orderBy` and `limit` where the limit exceeds the available data would crash with "Ordered snapshot was requested but no index was found". The on-demand loader now correctly skips cursor-based loading when no index is available.
+
+## 0.6.2
+
+### Patch Changes
+
+- Deduplicate and filter null join keys in lazy join subset queries. Previously, when multiple rows referenced the same foreign key or had null foreign keys, the full unfiltered array was passed to `inArray()`, producing bloated `ANY()` SQL params with repeated IDs and NULLs. ([#1448](https://github.com/TanStack/db/pull/1448))
+
+- fix: default getKey on live query collections fails when used as a source in chained collections ([#1432](https://github.com/TanStack/db/pull/1432))
+
+  The default WeakMap-based getKey breaks when enriched change values (with virtual props like $synced, $origin, $key) are passed through chained live query collections. The enriched objects are new references not found in the WeakMap, causing all items to resolve to key `undefined` and collapse into a single item. Falls back to `item.$key` when the WeakMap lookup misses.
+
 ## 0.6.1
 
 ### Patch Changes

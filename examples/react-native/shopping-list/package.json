@@ -1,6 +1,6 @@
 {
   "name": "shopping-list-react-native",
-  "version": "1.0.1",
+  "version": "1.0.2",
   "private": true,
   "main": "expo-router/entry",
   "scripts": {
@@ -13,16 +13,16 @@
     "db:down": "docker compose down"
   },
   "dependencies": {
-    "@electric-sql/client": "^1.5.13",
+    "@electric-sql/client": "^1.5.15",
     "@expo/metro-runtime": "~5.0.5",
     "@op-engineering/op-sqlite": "^15.2.5",
     "@react-native-async-storage/async-storage": "2.1.2",
     "@react-native-community/netinfo": "11.4.1",
-    "@tanstack/db": "^0.6.1",
-    "@tanstack/electric-db-collection": "^0.2.43",
-    "@tanstack/offline-transactions": "^1.0.26",
-    "@tanstack/react-db": "^0.1.79",
-    "@tanstack/react-native-db-sqlite-persistence": "^0.1.5",
+    "@tanstack/db": "^0.6.5",
+    "@tanstack/electric-db-collection": "^0.3.3",
+    "@tanstack/offline-transactions": "^1.0.30",
+    "@tanstack/react-db": "^0.1.83",
+    "@tanstack/react-native-db-sqlite-persistence": "^0.1.9",
     "@tanstack/react-query": "^5.90.20",
     "expo": "~53.0.26",
     "expo-constants": "~17.1.0",

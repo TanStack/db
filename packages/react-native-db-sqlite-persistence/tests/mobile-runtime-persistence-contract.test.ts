@@ -23,7 +23,7 @@ import type {
 type RuntimePersistenceFactory = (options: {
   database: OpSQLiteDatabaseLike
   coordinator?: PersistedCollectionCoordinator
-}) => PersistedCollectionPersistence<RuntimePersistenceContractTodo, string>
+}) => PersistedCollectionPersistence
 
 function createRuntimeDatabaseHarness(): RuntimePersistenceDatabaseHarness {
   const tempDirectory = mkdtempSync(join(tmpdir(), `db-mobile-persistence-`))

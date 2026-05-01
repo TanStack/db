@@ -182,6 +182,76 @@ Angular 16 structural directives:
 <li *ngFor="let todo of query.data(); trackBy: trackById">{{ todo.text }}</li>
 ```
 
+## Includes (Hierarchical Data)
+
+When a query uses includes (subqueries in `select`), each child field is a live `Collection` by default. Subscribe to it with `injectLiveQuery` in a child component:
+
+```typescript
+@Component({
+  selector: 'app-project-list',
+  standalone: true,
+  imports: [IssueListComponent],
+  template: `
+    @for (project of query.data(); track project.id) {
+      <div>
+        {{ project.name }}
+        <app-issue-list [issuesCollection]="project.issues" />
+      </div>
+    }
+  `,
+})
+export class ProjectListComponent {
+  query = injectLiveQuery((q) =>
+    q.from({ p: projectsCollection }).select(({ p }) => ({
+      id: p.id,
+      name: p.name,
+      issues: q
+        .from({ i: issuesCollection })
+        .where(({ i }) => eq(i.projectId, p.id))
+        .select(({ i }) => ({ id: i.id, title: i.title })),
+    })),
+  )
+}
+
+// Child component subscribes to the child Collection
+@Component({
+  selector: 'app-issue-list',
+  standalone: true,
+  template: `
+    @for (issue of query.data(); track issue.id) {
+      <li>{{ issue.title }}</li>
+    }
+  `,
+})
+export class IssueListComponent {
+  issuesCollection = input.required<Collection>()
+
+  query = injectLiveQuery(this.issuesCollection())
+}
+```
+
+With `toArray()`, child results are plain arrays and the parent re-emits on child changes:
+
+```typescript
+import { toArray, eq } from '@tanstack/angular-db'
+
+query = injectLiveQuery((q) =>
+  q.from({ p: projectsCollection }).select(({ p }) => ({
+    id: p.id,
+    name: p.name,
+    issues: toArray(
+      q
+        .from({ i: issuesCollection })
+        .where(({ i }) => eq(i.projectId, p.id))
+        .select(({ i }) => ({ id: i.id, title: i.title })),
+    ),
+  })),
+)
+// project.issues is a plain array — no child component subscription needed
+```
+
+See db-core/live-queries/SKILL.md for full includes rules (correlation conditions, nested includes, aggregates).
+
 ## Common Mistakes
 
 ### CRITICAL Using injectLiveQuery outside injection context

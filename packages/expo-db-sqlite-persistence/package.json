@@ -1,6 +1,6 @@
 {
   "name": "@tanstack/expo-db-sqlite-persistence",
-  "version": "0.1.5",
+  "version": "0.1.9",
   "description": "Expo SQLite persisted collection adapter for TanStack DB",
   "author": "TanStack Team",
   "license": "MIT",

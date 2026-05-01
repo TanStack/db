@@ -36,7 +36,7 @@ function createPersistedCollection<T extends PersistableRow>(
   id: string,
   syncMode: `eager` | `on-demand`,
 ): PersistedCollectionHarness<T> {
-  const persistence = createBrowserWASQLitePersistence<T, string | number>({
+  const persistence = createBrowserWASQLitePersistence({
     database,
   })
   let seedTxSequence = 0

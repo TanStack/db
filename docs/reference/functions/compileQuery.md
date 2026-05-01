@@ -16,10 +16,12 @@ function compileQuery(
    optimizableOrderByCollections, 
    setWindowFn, 
    cache, 
-   queryMapping): CompilationResult;
+   queryMapping, 
+   parentKeyStream?, 
+   childCorrelationField?): CompilationResult;
 ```
 
-Defined in: [packages/db/src/query/compiler/index.ts:86](https://github.com/TanStack/db/blob/main/packages/db/src/query/compiler/index.ts#L86)
+Defined in: [packages/db/src/query/compiler/index.ts:130](https://github.com/TanStack/db/blob/main/packages/db/src/query/compiler/index.ts#L130)
 
 Compiles a query IR into a D2 pipeline
 
@@ -82,6 +84,14 @@ Optional cache for compiled subqueries (used internally for recursion)
 `QueryMapping` = `...`
 
 Optional mapping from optimized queries to original queries
+
+### parentKeyStream?
+
+[`KeyedStream`](../type-aliases/KeyedStream.md)
+
+### childCorrelationField?
+
+[`PropRef`](../@tanstack/namespaces/IR/classes/PropRef.md)\<`any`\>
 
 ## Returns
 

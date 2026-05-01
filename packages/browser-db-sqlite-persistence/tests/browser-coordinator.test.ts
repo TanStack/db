@@ -171,10 +171,7 @@ function cleanupGlobals(): void {
 // Adapter stub
 // ---------------------------------------------------------------------------
 
-function createStubAdapter(): PersistenceAdapter<
-  Record<string, unknown>,
-  string | number
-> & {
+function createStubAdapter(): PersistenceAdapter & {
   pullSince: (
     collectionId: string,
     fromRowVersion: number,

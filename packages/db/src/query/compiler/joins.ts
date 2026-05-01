@@ -302,8 +302,20 @@ function processJoin(
             return
           }
 
-          // Request filtered snapshot from lazy collection for matching join keys
-          const joinKeys = data.getInner().map(([[joinKey]]) => joinKey)
+          // Deduplicate and filter null keys before requesting snapshot
+          const joinKeys = [
+            ...new Set(
+              data
+                .getInner()
+                .map(([[joinKey]]) => joinKey)
+                .filter((key) => key != null),
+            ),
+          ]
+
+          if (joinKeys.length === 0) {
+            return
+          }
+
           const lazyJoinRef = new PropRef(followRefResult.path)
           const loaded = lazySourceSubscription.requestSnapshot({
             where: inArray(lazyJoinRef, joinKeys),
@@ -312,6 +324,14 @@ function processJoin(
 
           if (!loaded) {
             // Snapshot wasn't sent because it could not be loaded from the indexes
+            const collectionId = followRefCollection.id
+            const fieldPath = followRefResult.path.join(`.`)
+            console.warn(
+              `[TanStack DB]${collectionId ? ` [${collectionId}]` : ``} Join requires an index on "${fieldPath}" for efficient loading. ` +
+                `Falling back to loading all data. ` +
+                `Consider creating an index on the collection with collection.createIndex((row) => row.${fieldPath}) ` +
+                `or enable auto-indexing with autoIndex: 'eager' and a defaultIndexType.`,
+            )
             lazySourceSubscription.requestSnapshot()
           }
         }),

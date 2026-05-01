@@ -6,9 +6,9 @@ import { createCapacitorPersistedCollectionHarnessConfig } from './shared/capaci
 import { registerPersistedCollectionConformanceSuite } from './shared/register-persisted-collection-conformance-suite'
 import type { PersistedCollectionPersistence } from '@tanstack/db-sqlite-persistence-core'
 
-type CapacitorPersistenceFactory = <T extends { id: string }>(
+type CapacitorPersistenceFactory = (
   database: ReturnType<typeof createCapacitorSQLiteTestDatabase>,
-) => PersistedCollectionPersistence<T, string | number>
+) => PersistedCollectionPersistence
 
 export function runCapacitorPersistedCollectionConformanceSuite(
   suiteName: string,

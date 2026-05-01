@@ -437,12 +437,14 @@ export const operators = [
 export type OperatorName = (typeof operators)[number]
 
 export class ToArrayWrapper<_T = unknown> {
+  readonly __brand = `ToArrayWrapper` as const
   declare readonly _type: `toArray`
   declare readonly _result: _T
   constructor(public readonly query: QueryBuilder<any>) {}
 }
 
 export class ConcatToArrayWrapper<_T = unknown> {
+  readonly __brand = `ConcatToArrayWrapper` as const
   declare readonly _type: `concatToArray`
   declare readonly _result: _T
   constructor(public readonly query: QueryBuilder<any>) {}
