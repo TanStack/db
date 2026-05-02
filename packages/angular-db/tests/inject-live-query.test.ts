@@ -1,5 +1,15 @@
-import { ApplicationRef, DestroyRef, inject, signal } from '@angular/core'
+import {
+  ApplicationRef,
+  ChangeDetectionStrategy,
+  Component,
+  DestroyRef,
+  inject,
+  input,
+  inputBinding,
+  signal,
+} from '@angular/core'
 import { TestBed } from '@angular/core/testing'
+import { render } from '@testing-library/angular'
 import { describe, expect, it } from 'vitest'
 import {
   createCollection,
@@ -169,6 +179,50 @@ describe(`injectLiveQuery`, () => {
     }).toThrow(
       /NG0203:|injectLiveQuery\(\) can only be used within an injection context/i,
     )
+  })
+
+  it(`uses reactive params driven by a required signal input`, async () => {
+    const personsCollection = createCollection(
+      mockSyncCollectionOptions<Person>({
+        id: `test-persons-signal-input`,
+        getKey: (person: Person) => person.id,
+        initialData: initialPersons,
+      }),
+    )
+
+    @Component({
+      template: `<span>{{ live.data().length }}</span>`,
+      standalone: true,
+      changeDetection: ChangeDetectionStrategy.OnPush,
+    })
+    class LiveQueryFromInputCmp {
+      minAge = input.required<number>()
+      live = injectLiveQuery({
+        params: () => ({ minAge: this.minAge() }),
+        query: ({ params, q }) =>
+          q
+            .from({ persons: personsCollection })
+            .where(({ persons }) => gt(persons.age, params.minAge))
+            .select(({ persons }) => ({
+              id: persons.id,
+              name: persons.name,
+              age: persons.age,
+            })),
+      })
+    }
+
+    const minAge = signal(30)
+    const rendered = await render(LiveQueryFromInputCmp, {
+      bindings: [inputBinding(`minAge`, minAge.asReadonly())],
+    })
+
+    expect(rendered.fixture.nativeElement.textContent).toContain(`1`)
+
+    minAge.set(24)
+    rendered.fixture.detectChanges()
+    await waitForAngularUpdate()
+
+    expect(rendered.fixture.nativeElement.textContent).toContain(`3`)
   })
 
   it(`should work with basic collection and select`, async () => {
