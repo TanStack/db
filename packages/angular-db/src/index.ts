@@ -1,10 +1,10 @@
 import {
-  DestroyRef,
   assertInInjectionContext,
   computed,
   effect,
-  inject,
+  linkedSignal,
   signal,
+  untracked,
 } from '@angular/core'
 import { BaseQueryBuilder, createLiveQueryCollection } from '@tanstack/db'
 import type {
@@ -135,7 +135,6 @@ export function injectLiveQuery<
 ): InjectLiveQueryResultWithSingleResultCollection<TResult, TKey, TUtils>
 export function injectLiveQuery(opts: any) {
   assertInInjectionContext(injectLiveQuery)
-  const destroyRef = inject(DestroyRef)
 
   const collection = computed(() => {
     // Check if it's an existing collection
@@ -204,8 +203,8 @@ export function injectLiveQuery(opts: any) {
 
   const state = signal(new Map<string | number, any>())
   const internalData = signal<Array<any>>([])
-  const status = signal<CollectionStatus | `disabled`>(
-    collection() ? `idle` : `disabled`,
+  const status = linkedSignal<CollectionStatus | `disabled`>(
+    () => untracked(collection) ? untracked(collection).status : `disabled`,
   )
 
   // Returns single item for singleResult collections, array otherwise
@@ -231,12 +230,6 @@ export function injectLiveQuery(opts: any) {
     status.set(currentCollection.status)
   }
 
-  let unsub: (() => void) | null = null
-  const cleanup = () => {
-    unsub?.()
-    unsub = null
-  }
-
   effect((onCleanup) => {
     const currentCollection = collection()
 
@@ -245,11 +238,8 @@ export function injectLiveQuery(opts: any) {
       status.set(`disabled` as const)
       state.set(new Map())
       internalData.set([])
-      cleanup()
       return
     }
-
-    cleanup()
 
     // Initialize immediately with current state
     syncDataFromCollection(currentCollection)
@@ -267,17 +257,16 @@ export function injectLiveQuery(opts: any) {
         syncDataFromCollection(currentCollection)
       },
     )
-    unsub = subscription.unsubscribe.bind(subscription)
 
     // Handle ready state
     currentCollection.onFirstReady(() => {
       status.set(currentCollection.status)
     })
 
-    onCleanup(cleanup)
+    onCleanup(() => {
+      subscription.unsubscribe()
+    })
   })
-
-  destroyRef.onDestroy(cleanup)
 
   return {
     state,
