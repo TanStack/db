@@ -53,11 +53,16 @@
     "rxjs": ">=6.0.0"
   },
   "devDependencies": {
+    "@analogjs/vite-plugin-angular": "^2.4.5",
+    "@analogjs/vitest-angular": "^2.4.5",
     "@angular/common": "^20.3.16",
     "@angular/compiler": "^20.3.16",
+    "@angular/compiler-cli": "^20.3.16",
     "@angular/core": "^20.3.16",
     "@angular/platform-browser": "^20.3.16",
     "@angular/platform-browser-dynamic": "^20.3.16",
+    "@testing-library/angular": "^18.1.1",
+    "@testing-library/jest-dom": "^6.9.1",
     "@vitest/coverage-istanbul": "^3.2.4",
     "rxjs": "^7.8.2",
     "zone.js": "~0.15.0"

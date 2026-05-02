@@ -1,4 +1,4 @@
-import { DestroyRef, inject, signal } from '@angular/core'
+import { ApplicationRef, DestroyRef, inject, signal } from '@angular/core'
 import { TestBed } from '@angular/core/testing'
 import { describe, expect, it } from 'vitest'
 import {
@@ -56,12 +56,10 @@ const initialPersons: Array<Person> = [
   },
 ]
 
-// Helper function to wait for Angular effects and collection updates
+/** Waits until the app has no pending tasks (effects, CD, zone-patched timers). */
 async function waitForAngularUpdate() {
-  // Wait for Angular change detection
-  await new Promise((resolve) => setTimeout(resolve, 0))
-  // Additional delay for collection updates
-  await new Promise((resolve) => setTimeout(resolve, 50))
+  const appRef = TestBed.inject(ApplicationRef)
+  await appRef.whenStable()
 }
 
 function createMockCollection<T extends object, K extends string | number>(
@@ -496,7 +494,7 @@ describe(`injectLiveQuery`, () => {
 
       expect(res.state().get(2)).toEqual({ id: 2, name: `B` })
 
-      destroyRef.onDestroy(() => {})
+      destroyRef.onDestroy(() => { })
     })
 
     await TestBed.runInInjectionContext(async () => {

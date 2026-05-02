@@ -1,0 +1,10 @@
+{
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "noEmit": false,
+    "target": "ES2022",
+    "types": ["vitest/globals", "node"]
+  },
+  "files": ["tests/test-setup.ts"],
+  "include": ["tests/**/*.ts"]
+}
