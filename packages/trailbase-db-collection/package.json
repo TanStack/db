@@ -48,16 +48,16 @@
   "dependencies": {
     "@standard-schema/spec": "^1.1.0",
     "@tanstack/db": "workspace:*",
-    "@tanstack/store": "^0.9.2",
+    "@tanstack/store": "^0.11.0",
     "debug": "^4.4.3",
-    "trailbase": "^0.10.0"
+    "trailbase": "^0.12.1"
   },
   "peerDependencies": {
     "typescript": ">=4.7"
   },
   "devDependencies": {
-    "@types/debug": "^4.1.12",
+    "@types/debug": "^4.1.13",
     "@vitest/coverage-istanbul": "^3.2.4",
-    "uuid": "^13.0.0"
+    "uuid": "^13.0.1"
   }
 }

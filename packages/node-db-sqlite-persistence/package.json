@@ -48,7 +48,7 @@
   ],
   "dependencies": {
     "@tanstack/db-sqlite-persistence-core": "workspace:*",
-    "better-sqlite3": "^12.6.2"
+    "better-sqlite3": "^12.9.0"
   },
   "peerDependencies": {
     "typescript": ">=4.7"

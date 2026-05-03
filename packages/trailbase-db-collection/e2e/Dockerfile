@@ -1,4 +1,4 @@
-FROM trailbase/trailbase:0.25.1
+FROM trailbase/trailbase:0.26.8
 
 COPY traildepot /app/traildepot/
 EXPOSE 4000
