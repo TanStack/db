@@ -55,7 +55,7 @@
   },
   "devDependencies": {
     "@tanstack/offline-transactions": "workspace:*",
-    "@tanstack/query-core": "^5.90.20",
+    "@tanstack/query-core": "^5.100.9",
     "@vitest/coverage-istanbul": "^3.2.4"
   }
 }

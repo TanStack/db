@@ -75,6 +75,6 @@
   },
   "devDependencies": {
     "@vitest/coverage-istanbul": "^3.2.4",
-    "electron": "^40.2.1"
+    "electron": "^40.9.3"
   }
 }

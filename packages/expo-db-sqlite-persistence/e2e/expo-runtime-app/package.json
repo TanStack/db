@@ -11,9 +11,9 @@
   "dependencies": {
     "@tanstack/db": "workspace:*",
     "@tanstack/expo-db-sqlite-persistence": "workspace:*",
-    "expo": "~55.0.6",
-    "expo-sqlite": "^55.0.10",
-    "react": "19.2.0",
-    "react-native": "0.83.2"
+    "expo": "~55.0.19",
+    "expo-sqlite": "^55.0.15",
+    "react": "19.2.5",
+    "react-native": "0.85.2"
   }
 }

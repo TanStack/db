@@ -12,17 +12,17 @@
     "native:sync:ios": "cap sync ios"
   },
   "dependencies": {
-    "@capacitor-community/sqlite": "^8.0.1",
-    "@capacitor/core": "^8.2.0",
+    "@capacitor-community/sqlite": "^8.1.0",
+    "@capacitor/core": "^8.3.1",
     "@tanstack/db": "workspace:*",
     "@tanstack/capacitor-db-sqlite-persistence": "workspace:*"
   },
   "devDependencies": {
-    "@capacitor/android": "^8.2.0",
-    "@capacitor/cli": "^8.2.0",
-    "@capacitor/ios": "^8.2.0",
+    "@capacitor/android": "^8.3.1",
+    "@capacitor/cli": "^8.3.1",
+    "@capacitor/ios": "^8.3.1",
     "@types/node": "^25.2.2",
     "typescript": "^5.9.3",
-    "vite": "^7.3.1"
+    "vite": "^7.3.2"
   }
 }

@@ -9,15 +9,15 @@
     "tauri": "tauri"
   },
   "dependencies": {
-    "@tauri-apps/api": "^2.10.1",
-    "@tauri-apps/plugin-sql": "^2.3.2",
+    "@tauri-apps/api": "^2.11.0",
+    "@tauri-apps/plugin-sql": "^2.4.0",
     "@tanstack/db": "workspace:*",
     "@tanstack/tauri-db-sqlite-persistence": "workspace:*"
   },
   "devDependencies": {
-    "@tauri-apps/cli": "^2.10.1",
+    "@tauri-apps/cli": "^2.11.0",
     "@types/node": "^25.2.2",
     "typescript": "^5.9.3",
-    "vite": "^7.3.1"
+    "vite": "^7.3.2"
   }
 }
