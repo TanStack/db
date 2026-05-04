@@ -1038,9 +1038,18 @@ export class CollectionConfigBuilder<
   }
 
   private allCollectionsReady() {
-    return Object.values(this.collections).every((collection) =>
-      collection.isReady(),
-    )
+    // Skip lazy aliases: they load per outer row via per-row taps, so an
+    // empty outer never fires loadSubset on a cold on-demand inner. The
+    // live query's isLoadingSubset gate still waits for in-flight per-row
+    // loads when the outer is non-empty.
+    for (const [alias, collectionId] of Object.entries(
+      this.compiledAliasToCollectionId,
+    )) {
+      if (this.lazySources.has(alias)) continue
+      const collection = this.collections[collectionId]
+      if (collection && !collection.isReady()) return false
+    }
+    return true
   }
 
   /**
