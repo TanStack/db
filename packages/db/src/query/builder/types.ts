@@ -322,9 +322,16 @@ export type ResultTypeFromSelect<TSelectObject> =
                 : // includes subquery (bare QueryBuilder) — produces a child Collection
                   TSelectObject[K] extends QueryBuilder<infer TChildContext>
                   ? Collection<GetResult<TChildContext>>
-                  : // Ref (full object ref or spread with RefBrand) - recursively process properties
+                  : // Ref (full object ref or spread with RefBrand)
                     TSelectObject[K] extends Ref<infer _T>
-                    ? ExtractRef<TSelectObject[K]>
+                    ? // When the branded type is a union, extract it directly to
+                      // preserve the discriminated union. ExtractRef would collapse
+                      // it via keyof/Prettify which only yield common keys.
+                      true extends IsUnion<ExtractRefBrand<TSelectObject[K]>>
+                      ? IsNullableRef<TSelectObject[K]> extends true
+                        ? ExtractRefBrand<TSelectObject[K]> | undefined
+                        : ExtractRefBrand<TSelectObject[K]>
+                      : ExtractRef<TSelectObject[K]>
                     : // RefLeaf (simple property ref like user.name)
                       TSelectObject[K] extends RefLeaf<infer T>
                       ? IsNullableRef<TSelectObject[K]> extends true
@@ -371,6 +378,9 @@ export type SelectResult<TSelect> =
   IsPlainObject<TSelect> extends true
     ? ResultTypeFromSelect<TSelect>
     : ResultTypeFromSelectValue<TSelect>
+
+// Extract the raw type stored in a RefLeaf's brand
+type ExtractRefBrand<T> = T extends RefLeaf<infer U> ? U : never
 
 // Extract Ref or subobject with a spread or a Ref
 type ExtractRef<T> = Prettify<ResultTypeFromSelect<WithoutRefBrand<T>>>
@@ -1067,6 +1077,14 @@ type IsPlainObject<T> = T extends unknown
   : false
 
 type IsAny<T> = 0 extends 1 & T ? true : false
+
+// Detects whether T is a union type (e.g., A | B | C returns true, A returns false)
+type IsUnion<T, U = T> = T extends unknown
+  ? [U] extends [T]
+    ? false
+    : true
+  : false
+
 
 /**
  * JsBuiltIns - List of JavaScript built-ins

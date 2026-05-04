@@ -1,6 +1,6 @@
 import { describe, expectTypeOf, test } from 'vitest'
 import { createCollection } from '../../src/collection/index.js'
-import { createLiveQueryCollection } from '../../src/query/index.js'
+import { createLiveQueryCollection, eq } from '../../src/query/index.js'
 import { mockSyncCollectionOptions } from '../utils.js'
 import { upper } from '../../src/query/builder/functions.js'
 import type { OutputWithVirtual } from '../utils.js'
@@ -107,6 +107,67 @@ describe(`select types`, () => {
     const results = col.toArray[0]!
 
     expectTypeOf(results).toMatchTypeOf<OutputWithVirtualKeyed<Expected>>()
+  })
+
+  test(`select preserves union types and where works on common keys`, () => {
+    type ItemDocument =
+      | { type: 'pdf'; url: string; pages: number }
+      | { type: 'image'; url: string; width: number; height: number }
+      | { type: 'legacy'; path: string }
+
+    type Item = { id: number; name: string; document: ItemDocument }
+
+    const items = createCollection(
+      mockSyncCollectionOptions<Item>({
+        id: `union-field-items`,
+        getKey: (i) => i.id,
+        initialData: [],
+      }),
+    )
+
+    // Filtering by a common key of the union should compile,
+    // and the result should preserve the full discriminated union
+    const col = createLiveQueryCollection((q) =>
+      q
+        .from({ i: items })
+        .where(({ i }) => eq(i.document.type, `pdf`))
+        .select(({ i }) => ({
+          id: i.id,
+          document: i.document,
+        })),
+    )
+
+    const result = col.toArray[0]!
+    expectTypeOf(result.document).toEqualTypeOf<ItemDocument>()
+  })
+
+  test(`select preserves union when collection type is a union`, () => {
+    type DocV1 = { version: 1; title: string }
+    type DocV2 = { version: 2; title: string; subtitle: string }
+    type Doc = DocV1 | DocV2
+
+    const docs = createCollection(
+      mockSyncCollectionOptions<Doc>({
+        id: `union-collection`,
+        getKey: (d) => d.title,
+        initialData: [],
+      }),
+    )
+
+    // Without select — union preserved
+    const col1 = createLiveQueryCollection((q) => q.from({ d: docs }))
+    const r1 = col1.toArray[0]!
+    expectTypeOf(r1).toMatchTypeOf<Doc>()
+
+    // With select on individual fields — per-field unions (not top-level union)
+    const col2 = createLiveQueryCollection((q) =>
+      q.from({ d: docs }).select(({ d }) => ({
+        version: d.version,
+        title: d.title,
+      })),
+    )
+    const r2 = col2.toArray[0]!
+    expectTypeOf(r2).toMatchTypeOf<{ version: 1 | 2; title: string }>()
   })
 
   test(`nested spread preserves object structure types`, () => {
