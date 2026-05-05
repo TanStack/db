@@ -1570,7 +1570,7 @@ describe(`Query Collections`, () => {
 
       const collection = createCollection<TestRow>({
         id: `loading-subscribe-snapshot-refresh`,
-        getKey: row => row.id,
+        getKey: (row) => row.id,
         startSync: false,
         sync: {
           sync: ({ begin, write, commit }) => {
@@ -1603,9 +1603,9 @@ describe(`Query Collections`, () => {
       })
 
       await waitFor(() => {
-        expect(result.current.data.map(row => stripVirtualProps(row))).toEqual([
-          { id: `1`, value: 1 },
-        ])
+        expect(
+          result.current.data.map((row) => stripVirtualProps(row)),
+        ).toEqual([{ id: `1`, value: 1 }])
       })
       expect(result.current.isLoading).toBe(true)
     })
