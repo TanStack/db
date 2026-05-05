@@ -27,6 +27,7 @@ export class CollectionChangesManager<
 
   public activeSubscribersCount = 0
   public changeSubscriptions = new Set<CollectionSubscription>()
+  private keyChangeSubscriptions = new Map<TKey, Set<CollectionSubscription>>()
   public batchedEvents: Array<ChangeMessage<TOutput, TKey>> = []
   public shouldBatchEvents = false
 
@@ -112,6 +113,39 @@ export class CollectionChangesManager<
     for (const subscription of this.changeSubscriptions) {
       subscription.emitEvents(enrichedEvents)
     }
+
+    this.emitKeyChangeEvents(enrichedEvents)
+  }
+
+  private emitKeyChangeEvents(
+    enrichedEvents: Array<ChangeMessage<WithVirtualProps<TOutput, TKey>, TKey>>,
+  ): void {
+    const changesBySubscription = new Map<
+      CollectionSubscription,
+      Array<ChangeMessage<WithVirtualProps<TOutput, TKey>, TKey>>
+    >()
+
+    for (const change of enrichedEvents) {
+      const subscriptions = this.keyChangeSubscriptions.get(change.key)
+
+      if (!subscriptions) {
+        continue
+      }
+
+      for (const subscription of subscriptions) {
+        const existingChanges = changesBySubscription.get(subscription)
+
+        if (existingChanges) {
+          existingChanges.push(change)
+        } else {
+          changesBySubscription.set(subscription, [change])
+        }
+      }
+    }
+
+    for (const [subscription, changes] of changesBySubscription) {
+      subscription.emitEvents(changes)
+    }
   }
 
   /**
@@ -172,6 +206,45 @@ export class CollectionChangesManager<
 
     // Add to batched listeners
     this.changeSubscriptions.add(subscription)
+
+    return subscription
+  }
+
+  /**
+   * Subscribe to future changes for a single collection key.
+   */
+  public subscribeKeyChanges(
+    key: TKey,
+    callback: (
+      changes: Array<ChangeMessage<WithVirtualProps<TOutput, TKey>, TKey>>,
+    ) => void,
+  ): CollectionSubscription {
+    const subscription = new CollectionSubscription(this.collection, callback, {
+      onUnsubscribe: () => {
+        this.removeSubscriber()
+
+        const subscriptions = this.keyChangeSubscriptions.get(key)
+        if (!subscriptions) {
+          return
+        }
+
+        subscriptions.delete(subscription)
+
+        if (subscriptions.size === 0) {
+          this.keyChangeSubscriptions.delete(key)
+        }
+      },
+    })
+
+    // Key subscriptions do not request a snapshot. Callers can read the current
+    // row with collection.get(key), then use this method for future row changes.
+    subscription.markAllStateAsSeen()
+
+    const subscriptions = this.keyChangeSubscriptions.get(key) ?? new Set()
+    subscriptions.add(subscription)
+    this.keyChangeSubscriptions.set(key, subscriptions)
+
+    this.addSubscriber()
 
     return subscription
   }

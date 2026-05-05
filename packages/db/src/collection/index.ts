@@ -942,6 +942,33 @@ export class CollectionImpl<
   }
 
   /**
+   * Subscribe to future changes for a single collection key.
+   *
+   * This does not emit the current row. Use collection.get(key) to read the
+   * current value, then subscribeKeyChanges(key, callback) to react to future
+   * inserts, updates, and deletes for that key.
+   *
+   * @example
+   * const currentTodo = todos.get("todo-1")
+   *
+   * const subscription = todos.subscribeKeyChanges("todo-1", (changes) => {
+   *   for (const change of changes) {
+   *     console.log(change.type, change.value)
+   *   }
+   * })
+   *
+   * // Later: subscription.unsubscribe()
+   */
+  public subscribeKeyChanges(
+    key: TKey,
+    callback: (
+      changes: Array<ChangeMessage<WithVirtualProps<TOutput, TKey>, TKey>>,
+    ) => void,
+  ): CollectionSubscription {
+    return this._changes.subscribeKeyChanges(key, callback)
+  }
+
+  /**
    * Subscribe to a collection event
    */
   public on<T extends keyof AllCollectionEvents>(
