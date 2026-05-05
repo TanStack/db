@@ -18,6 +18,7 @@ import {
   mockSyncCollectionOptions,
   stripVirtualProps,
 } from '../../db/tests/utils'
+import type { SyncConfig } from '@tanstack/db'
 
 type Person = {
   id: string
@@ -1559,6 +1560,56 @@ describe(`Query Collections`, () => {
   })
 
   describe(`eager execution during sync`, () => {
+    it(`refreshes the snapshot after subscribing while the collection is still loading`, async () => {
+      type TestRow = { id: string; value: number }
+
+      let syncBegin: (() => void) | undefined
+      let syncWrite: Parameters<SyncConfig<TestRow>[`sync`]>[0][`write`]
+      let syncCommit: (() => void) | undefined
+      let didWriteAfterSnapshot = false
+
+      const collection = createCollection<TestRow>({
+        id: `loading-subscribe-snapshot-refresh`,
+        getKey: row => row.id,
+        startSync: false,
+        sync: {
+          sync: ({ begin, write, commit }) => {
+            syncBegin = begin
+            syncWrite = write
+            syncCommit = commit
+          },
+        },
+      })
+
+      const { result } = renderHook(() => {
+        const queryResult = useLiveQuery(collection)
+
+        if (!didWriteAfterSnapshot) {
+          didWriteAfterSnapshot = true
+          // Simulate a collection receiving rows after useLiveQuery read its
+          // render-time snapshot, but before React attached the external-store
+          // subscription. The collection intentionally stays loading because
+          // the missed update should still be visible before remote sync
+          // finishes.
+          syncBegin!()
+          syncWrite({
+            type: `insert`,
+            value: { id: `1`, value: 1 },
+          })
+          syncCommit!()
+        }
+
+        return queryResult
+      })
+
+      await waitFor(() => {
+        expect(result.current.data.map(row => stripVirtualProps(row))).toEqual([
+          { id: `1`, value: 1 },
+        ])
+      })
+      expect(result.current.isLoading).toBe(true)
+    })
+
     it(`should show state while isLoading is true during sync`, async () => {
       let syncBegin: (() => void) | undefined
       let syncWrite: ((op: any) => void) | undefined

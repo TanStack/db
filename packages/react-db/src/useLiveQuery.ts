@@ -439,11 +439,13 @@ export function useLiveQuery(
         versionRef.current += 1
         onStoreChange()
       })
-      // Collection may be ready and will not receive initial `subscribeChanges()`
-      if (collectionRef.current.status === `ready`) {
-        versionRef.current += 1
-        onStoreChange()
-      }
+      // The collection may have changed between render-time getSnapshot() and
+      // this subscription being attached. This is common when an on-demand query
+      // hydrates local rows immediately but keeps the collection loading while
+      // remote sync finishes. Force one post-subscribe snapshot refresh
+      // regardless of status so React sees those rows.
+      versionRef.current += 1
+      onStoreChange()
       return () => {
         subscription.unsubscribe()
       }
