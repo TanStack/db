@@ -54,6 +54,11 @@ export class BasicIndex<
   private sortedValues: Array<any> = []
   // Set of all indexed PKs
   private indexedKeys = new Set<TKey>()
+  // Reverse map: key -> currently indexed value. Lets `remove`/`update`
+  // find the bucket a key actually lives in instead of trusting the
+  // caller-supplied old item, which can be stale across optimistic→synced
+  // lifecycle races.
+  private keyToValue = new Map<TKey, any>()
   // Comparator function
   private compareFn: (a: any, b: any) => number = defaultComparator
 
@@ -88,6 +93,13 @@ export class BasicIndex<
 
     const normalizedValue = normalizeValue(indexedValue)
 
+    // If the key is already indexed, drop it from its current bucket first so
+    // an `add` after a stale or missed `remove` can't leave the key in two
+    // buckets at once.
+    if (this.indexedKeys.has(key)) {
+      this.removeFromBucket(key, this.keyToValue.get(key))
+    }
+
     if (this.valueMap.has(normalizedValue)) {
       // Value already exists, just add the key to the set
       this.valueMap.get(normalizedValue)!.add(key)
@@ -105,40 +117,49 @@ export class BasicIndex<
     }
 
     this.indexedKeys.add(key)
+    this.keyToValue.set(key, normalizedValue)
     this.updateTimestamp()
+  }
+
+  private removeFromBucket(key: TKey, normalizedValue: any): void {
+    if (normalizedValue === undefined && !this.valueMap.has(undefined)) {
+      // Key wasn't tracked yet; nothing to remove from valueMap.
+      return
+    }
+    const keySet = this.valueMap.get(normalizedValue)
+    if (!keySet) return
+    keySet.delete(key)
+    if (keySet.size === 0) {
+      this.valueMap.delete(normalizedValue)
+      deleteInSortedArray(this.sortedValues, normalizedValue, this.compareFn)
+    }
   }
 
   /**
    * Removes a value from the index
    */
   remove(key: TKey, item: any): void {
-    let indexedValue: any
-    try {
-      indexedValue = this.evaluateIndexExpression(item)
-    } catch (error) {
-      console.warn(
-        `Failed to evaluate index expression for key ${key} during removal:`,
-        error,
-      )
-      this.indexedKeys.delete(key)
-      this.updateTimestamp()
-      return
-    }
-
-    const normalizedValue = normalizeValue(indexedValue)
-
-    if (this.valueMap.has(normalizedValue)) {
-      const keySet = this.valueMap.get(normalizedValue)!
-      keySet.delete(key)
-
-      if (keySet.size === 0) {
-        // No more keys for this value, remove from map and sorted array
-        this.valueMap.delete(normalizedValue)
-        deleteInSortedArray(this.sortedValues, normalizedValue, this.compareFn)
+    // Use the tracked bucket for this key. We intentionally do NOT trust
+    // the caller-supplied `item`: across optimistic→synced lifecycle races
+    // the previousValue passed in can disagree with the value we actually
+    // indexed, which would silently leave the key in a stale bucket.
+    if (this.keyToValue.has(key)) {
+      this.removeFromBucket(key, this.keyToValue.get(key))
+    } else {
+      // Fall back to evaluating the supplied item (covers the case where
+      // the key was never indexed but caller still asks to remove it).
+      try {
+        const indexedValue = this.evaluateIndexExpression(item)
+        this.removeFromBucket(key, normalizeValue(indexedValue))
+      } catch (error) {
+        console.warn(
+          `Failed to evaluate index expression for key ${key} during removal:`,
+          error,
+        )
       }
     }
-
     this.indexedKeys.delete(key)
+    this.keyToValue.delete(key)
     this.updateTimestamp()
   }
 
@@ -168,8 +189,10 @@ export class BasicIndex<
           { cause: error },
         )
       }
-      entriesArray.push({ key, value: normalizeValue(indexedValue) })
+      const normalizedValue = normalizeValue(indexedValue)
+      entriesArray.push({ key, value: normalizedValue })
       this.indexedKeys.add(key)
+      this.keyToValue.set(key, normalizedValue)
     }
 
     // Group by value
@@ -194,6 +217,7 @@ export class BasicIndex<
     this.valueMap.clear()
     this.sortedValues = []
     this.indexedKeys.clear()
+    this.keyToValue.clear()
     this.updateTimestamp()
   }
 

@@ -50,6 +50,11 @@ export class BTreeIndex<
   private orderedEntries: BTree<any, undefined> // we don't associate values with the keys of the B+ tree (the keys are indexed values)
   private valueMap = new Map<any, Set<TKey>>() // instead we store a mapping of indexed values to a set of PKs
   private indexedKeys = new Set<TKey>()
+  // Reverse map: key -> currently indexed value. Lets `remove`/`update`
+  // find the bucket a key actually lives in instead of trusting the
+  // caller-supplied old item, which can be stale across optimistic→synced
+  // lifecycle races.
+  private keyToValue = new Map<TKey, any>()
   private compareFn: (a: any, b: any) => number = defaultComparator
 
   constructor(
@@ -93,6 +98,13 @@ export class BTreeIndex<
     // Normalize the value for Map key usage
     const normalizedValue = normalizeForBTree(indexedValue)
 
+    // If the key is already indexed, drop it from its current bucket first so
+    // an `add` after a stale or missed `remove` can't leave the key in two
+    // buckets at once.
+    if (this.indexedKeys.has(key)) {
+      this.removeFromBucket(key, this.keyToValue.get(key))
+    }
+
     // Check if this value already exists
     if (this.valueMap.has(normalizedValue)) {
       // Add to existing set
@@ -105,41 +117,45 @@ export class BTreeIndex<
     }
 
     this.indexedKeys.add(key)
+    this.keyToValue.set(key, normalizedValue)
     this.updateTimestamp()
+  }
+
+  private removeFromBucket(key: TKey, normalizedValue: any): void {
+    const keySet = this.valueMap.get(normalizedValue)
+    if (!keySet) return
+    keySet.delete(key)
+    if (keySet.size === 0) {
+      this.valueMap.delete(normalizedValue)
+      this.orderedEntries.delete(normalizedValue)
+    }
   }
 
   /**
    * Removes a value from the index
    */
   remove(key: TKey, item: any): void {
-    let indexedValue: any
-    try {
-      indexedValue = this.evaluateIndexExpression(item)
-    } catch (error) {
-      console.warn(
-        `Failed to evaluate index expression for key ${key} during removal:`,
-        error,
-      )
-      return
-    }
-
-    // Normalize the value for Map key usage
-    const normalizedValue = normalizeForBTree(indexedValue)
-
-    if (this.valueMap.has(normalizedValue)) {
-      const keySet = this.valueMap.get(normalizedValue)!
-      keySet.delete(key)
-
-      // If set is now empty, remove the entry entirely
-      if (keySet.size === 0) {
-        this.valueMap.delete(normalizedValue)
-
-        // Remove from ordered entries
-        this.orderedEntries.delete(normalizedValue)
+    // Use the tracked bucket for this key. We intentionally do NOT trust
+    // the caller-supplied `item`: across optimistic→synced lifecycle races
+    // the previousValue passed in can disagree with the value we actually
+    // indexed, which would silently leave the key in a stale bucket.
+    if (this.keyToValue.has(key)) {
+      this.removeFromBucket(key, this.keyToValue.get(key))
+    } else {
+      // Fall back to evaluating the supplied item (covers the case where
+      // the key was never indexed but caller still asks to remove it).
+      try {
+        const indexedValue = this.evaluateIndexExpression(item)
+        this.removeFromBucket(key, normalizeForBTree(indexedValue))
+      } catch (error) {
+        console.warn(
+          `Failed to evaluate index expression for key ${key} during removal:`,
+          error,
+        )
       }
     }
-
     this.indexedKeys.delete(key)
+    this.keyToValue.delete(key)
     this.updateTimestamp()
   }
 
@@ -169,6 +185,7 @@ export class BTreeIndex<
     this.orderedEntries.clear()
     this.valueMap.clear()
     this.indexedKeys.clear()
+    this.keyToValue.clear()
     this.updateTimestamp()
   }
 
