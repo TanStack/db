@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest'
+import { Temporal } from 'temporal-polyfill'
 import { compileExpression } from '../../../src/query/compiler/evaluators.js'
 import { Func, PropRef, Value } from '../../../src/query/ir.js'
 import type { NamespacedRow } from '../../../src/types.js'
@@ -809,6 +810,258 @@ describe(`evaluators`, () => {
               new Value([NaN, 1, 2]),
             ])
             expect(compileExpression(func)({})).toBe(true)
+          })
+        })
+
+        describe(`Temporal objects`, () => {
+          const evalOp = (op: string, left: any, right: any) =>
+            compileExpression(
+              new Func(op, [new Value(left), new Value(right)]),
+            )({})
+
+          describe(`Instant`, () => {
+            const earlier = Temporal.Instant.from(`2024-01-15T10:00:00Z`)
+            const later = Temporal.Instant.from(`2024-01-15T11:00:00Z`)
+
+            it(`orders chronologically`, () => {
+              expect(evalOp(`gt`, later, earlier)).toBe(true)
+              expect(evalOp(`gt`, earlier, later)).toBe(false)
+              expect(evalOp(`gt`, earlier, earlier)).toBe(false)
+              expect(evalOp(`gte`, earlier, earlier)).toBe(true)
+              expect(evalOp(`lt`, earlier, later)).toBe(true)
+              expect(evalOp(`lte`, earlier, earlier)).toBe(true)
+            })
+
+            it(`eq returns true for distinct instances with the same instant`, () => {
+              const earlierCopy = Temporal.Instant.from(earlier)
+              expect(earlier).not.toBe(earlierCopy)
+              expect(evalOp(`eq`, earlier, earlierCopy)).toBe(true)
+            })
+          })
+
+          describe(`PlainDate`, () => {
+            const jan15 = Temporal.PlainDate.from(`2024-01-15`)
+            const jan16 = Temporal.PlainDate.from(`2024-01-16`)
+
+            it(`orders chronologically`, () => {
+              expect(evalOp(`gt`, jan16, jan15)).toBe(true)
+              expect(evalOp(`gt`, jan15, jan16)).toBe(false)
+              expect(evalOp(`gt`, jan15, jan15)).toBe(false)
+              expect(evalOp(`gte`, jan15, jan15)).toBe(true)
+              expect(evalOp(`lt`, jan15, jan16)).toBe(true)
+              expect(evalOp(`lte`, jan15, jan15)).toBe(true)
+            })
+
+            it(`eq returns true for distinct instances with the same date`, () => {
+              const jan15Copy = Temporal.PlainDate.from(jan15)
+              expect(jan15).not.toBe(jan15Copy)
+              expect(evalOp(`eq`, jan15, jan15Copy)).toBe(true)
+            })
+
+            it(`eq returns false for different dates`, () => {
+              expect(evalOp(`eq`, jan15, jan16)).toBe(false)
+            })
+          })
+
+          describe(`PlainDateTime`, () => {
+            const a = Temporal.PlainDateTime.from(`2024-01-15T10:30:00`)
+            const b = Temporal.PlainDateTime.from(`2024-01-15T10:30:01`)
+
+            it(`orders chronologically`, () => {
+              expect(evalOp(`gt`, b, a)).toBe(true)
+              expect(evalOp(`gt`, a, b)).toBe(false)
+              expect(evalOp(`gt`, a, a)).toBe(false)
+              expect(evalOp(`gte`, a, a)).toBe(true)
+              expect(evalOp(`lt`, a, b)).toBe(true)
+              expect(evalOp(`lte`, a, a)).toBe(true)
+            })
+
+            it(`eq returns true for distinct instances with the same value`, () => {
+              const aCopy = Temporal.PlainDateTime.from(a)
+              expect(a).not.toBe(aCopy)
+              expect(evalOp(`eq`, a, aCopy)).toBe(true)
+            })
+          })
+
+          describe(`PlainTime`, () => {
+            const morning = Temporal.PlainTime.from(`08:00:00`)
+            const evening = Temporal.PlainTime.from(`20:00:00`)
+
+            it(`orders by time of day`, () => {
+              expect(evalOp(`gt`, evening, morning)).toBe(true)
+              expect(evalOp(`gt`, morning, evening)).toBe(false)
+              expect(evalOp(`gt`, morning, morning)).toBe(false)
+              expect(evalOp(`gte`, morning, morning)).toBe(true)
+              expect(evalOp(`lt`, morning, evening)).toBe(true)
+              expect(evalOp(`lte`, morning, morning)).toBe(true)
+            })
+
+            it(`eq returns true for distinct instances with the same time`, () => {
+              const morningCopy = Temporal.PlainTime.from(morning)
+              expect(morning).not.toBe(morningCopy)
+              expect(evalOp(`eq`, morning, morningCopy)).toBe(true)
+            })
+
+            it(`eq returns false for different times`, () => {
+              expect(evalOp(`eq`, morning, evening)).toBe(false)
+            })
+          })
+
+          describe(`PlainYearMonth`, () => {
+            const feb = Temporal.PlainYearMonth.from(`2024-02`)
+            const mar = Temporal.PlainYearMonth.from(`2024-03`)
+
+            it(`orders chronologically`, () => {
+              expect(evalOp(`gt`, mar, feb)).toBe(true)
+              expect(evalOp(`gt`, feb, mar)).toBe(false)
+              expect(evalOp(`gt`, feb, feb)).toBe(false)
+              expect(evalOp(`gte`, feb, feb)).toBe(true)
+              expect(evalOp(`lt`, feb, mar)).toBe(true)
+              expect(evalOp(`lte`, feb, feb)).toBe(true)
+            })
+
+            it(`eq returns true for distinct instances with the same year/month`, () => {
+              const febCopy = Temporal.PlainYearMonth.from(feb)
+              expect(feb).not.toBe(febCopy)
+              expect(evalOp(`eq`, feb, febCopy)).toBe(true)
+            })
+
+            it(`eq returns false for different year/month pairs`, () => {
+              expect(evalOp(`eq`, feb, mar)).toBe(false)
+            })
+          })
+
+          describe(`PlainMonthDay`, () => {
+            // PlainMonthDay has no static .compare() — there is no canonical ordering
+            // without a year (e.g. Feb 29 only sometimes follows Feb 28). Equality is
+            // still well-defined.
+            const md1 = Temporal.PlainMonthDay.from(`--03-15`)
+            const md2 = Temporal.PlainMonthDay.from(`--04-15`)
+
+            it(`eq returns true for distinct instances with the same month/day`, () => {
+              const md1Copy = Temporal.PlainMonthDay.from(md1)
+              expect(md1).not.toBe(md1Copy)
+              expect(evalOp(`eq`, md1, md1Copy)).toBe(true)
+            })
+
+            it(`eq returns false for different month/day pairs`, () => {
+              expect(evalOp(`eq`, md1, md2)).toBe(false)
+            })
+
+            it(`gt throws since PlainMonthDay has no defined ordering`, () => {
+              expect(() => evalOp(`gt`, md1, md2)).toThrow(
+                /no defined ordering/,
+              )
+            })
+          })
+
+          describe(`ZonedDateTime`, () => {
+            // Same wall-clock noon in two zones is a different instant.
+            // Tokyo is ahead of New York, so noon Tokyo precedes noon NY by ~14h.
+            const tokyoNoon = Temporal.ZonedDateTime.from(
+              `2024-01-15T12:00:00[Asia/Tokyo]`,
+            )
+            const nyNoon = Temporal.ZonedDateTime.from(
+              `2024-01-15T12:00:00[America/New_York]`,
+            )
+
+            it(`orders by underlying instant across time zones`, () => {
+              expect(evalOp(`gt`, nyNoon, tokyoNoon)).toBe(true)
+              expect(evalOp(`gt`, tokyoNoon, nyNoon)).toBe(false)
+              expect(evalOp(`gt`, tokyoNoon, tokyoNoon)).toBe(false)
+              expect(evalOp(`gte`, tokyoNoon, tokyoNoon)).toBe(true)
+              expect(evalOp(`lt`, tokyoNoon, nyNoon)).toBe(true)
+              expect(evalOp(`lte`, tokyoNoon, tokyoNoon)).toBe(true)
+            })
+
+            it(`eq returns true for distinct instances with same instant AND zone`, () => {
+              const tokyoNoonCopy = Temporal.ZonedDateTime.from(tokyoNoon)
+              expect(tokyoNoon).not.toBe(tokyoNoonCopy)
+              expect(evalOp(`eq`, tokyoNoon, tokyoNoonCopy)).toBe(true)
+            })
+
+            it(`eq returns false for same instant in different zones`, () => {
+              // ZonedDateTime.equals treats the time zone as part of identity, so two
+              // ZonedDateTimes for the same instant in different zones are not equal —
+              // even though .compare() returns 0 for them.
+              const inTokyo = nyNoon.withTimeZone(`Asia/Tokyo`)
+              expect(evalOp(`eq`, nyNoon, inTokyo)).toBe(false)
+            })
+
+            it(`ranks same-instant-different-zone as positionally equal`, () => {
+              // .compare() ranks by underlying instant, so two ZonedDateTimes for
+              // the same instant in different zones are positionally equal — even
+              // though .equals() returns false (see the eq test above). This
+              // verifies we dispatch to .compare() rather than lex-comparing
+              // toString output, which would order by zone name.
+              const inTokyo = nyNoon.withTimeZone(`Asia/Tokyo`)
+              expect(evalOp(`gt`, nyNoon, inTokyo)).toBe(false)
+              expect(evalOp(`lt`, nyNoon, inTokyo)).toBe(false)
+              expect(evalOp(`gte`, nyNoon, inTokyo)).toBe(true)
+              expect(evalOp(`lte`, nyNoon, inTokyo)).toBe(true)
+            })
+          })
+
+          describe(`Duration`, () => {
+            // Without a relativeTo, Duration ordering is only well-defined when both
+            // values are time/day-only. Calendar-affected fields (years/months/weeks)
+            // are not exercised here.
+            const oneHour = Temporal.Duration.from(`PT1H`)
+            const twoHours = Temporal.Duration.from(`PT2H`)
+
+            it(`orders time-only durations by length`, () => {
+              expect(evalOp(`gt`, twoHours, oneHour)).toBe(true)
+              expect(evalOp(`gt`, oneHour, twoHours)).toBe(false)
+              expect(evalOp(`gt`, oneHour, oneHour)).toBe(false)
+              expect(evalOp(`gte`, oneHour, oneHour)).toBe(true)
+              expect(evalOp(`lt`, oneHour, twoHours)).toBe(true)
+              expect(evalOp(`lte`, oneHour, oneHour)).toBe(true)
+            })
+
+            it(`eq returns true for distinct instances with the same value`, () => {
+              const oneHourCopy = Temporal.Duration.from(oneHour)
+              expect(oneHour).not.toBe(oneHourCopy)
+              expect(evalOp(`eq`, oneHour, oneHourCopy)).toBe(true)
+            })
+
+            it(`eq returns false for different durations`, () => {
+              expect(evalOp(`eq`, oneHour, twoHours)).toBe(false)
+            })
+
+            it(`equivalent forms compare equal but eq returns false`, () => {
+              // PT60M and PT1H represent the same duration. .compare() ranks them
+              // as equal, but .equals() (structural, field-by-field) does not, so
+              // eq returns false. This pins the asymmetry — and verifies we
+              // dispatch to .compare() rather than lex-comparing toString output,
+              // which would say "PT1H" < "PT60M".
+              const sixtyMinutes = Temporal.Duration.from(`PT60M`)
+              const oneHourLit = Temporal.Duration.from(`PT1H`)
+              expect(evalOp(`gt`, sixtyMinutes, oneHourLit)).toBe(false)
+              expect(evalOp(`lt`, sixtyMinutes, oneHourLit)).toBe(false)
+              expect(evalOp(`gte`, sixtyMinutes, oneHourLit)).toBe(true)
+              expect(evalOp(`lte`, sixtyMinutes, oneHourLit)).toBe(true)
+              expect(evalOp(`eq`, sixtyMinutes, oneHourLit)).toBe(false)
+            })
+          })
+
+          it(`eq returns false for different Temporal types with overlapping string forms`, () => {
+            // PlainDate and PlainDateTime can both stringify to "2024-01-15..." but
+            // should compare unequal because the types differ.
+            const date = Temporal.PlainDate.from(`2024-01-15`)
+            const dateTime = Temporal.PlainDateTime.from(`2024-01-15`)
+            // sanity-check the strings share a prefix
+            expect(dateTime.toString().startsWith(date.toString())).toBe(true)
+            expect(evalOp(`eq`, date, dateTime)).toBe(false)
+          })
+
+          it(`gt throws when comparing different Temporal types`, () => {
+            // Mixed-type ordering is undefined; surfacing a TypeError beats the
+            // string-lex pseudo-comparison Temporal explicitly designs against.
+            const date = Temporal.PlainDate.from(`2024-01-15`)
+            const dateTime = Temporal.PlainDateTime.from(`2024-01-15T00:00:00`)
+            expect(() => evalOp(`gt`, date, dateTime)).toThrow(
+              /different types/,
+            )
           })
         })
       })

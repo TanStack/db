@@ -238,6 +238,41 @@ export function denormalizeUndefined(value: any): any {
 }
 
 /**
+ * Order two non-null values, returning -1, 0, or 1.
+ *
+ * Temporal types intentionally throw from `valueOf` to prevent silent
+ * miscomparison via the native relational operators. When both operands
+ * share a Temporal type that exposes a static `compare`, dispatch through
+ * it. Mixed Temporal types and types without a defined ordering (notably
+ * `PlainMonthDay`) throw rather than fall back to a string-based pseudo-
+ * comparison, matching Temporal's design intent. For everything else
+ * (numbers, strings, Dates via `valueOf`, etc.) the native operators do
+ * the right thing.
+ *
+ * Callers must handle null/undefined themselves — this helper assumes both
+ * arguments are non-null.
+ */
+export function compareValues(a: any, b: any): number {
+  if (isTemporal(a) && isTemporal(b)) {
+    const aTag = a[Symbol.toStringTag]
+    const bTag = b[Symbol.toStringTag]
+    if (aTag !== bTag) {
+      throw new TypeError(
+        `Cannot order Temporal values of different types: ${aTag} vs ${bTag}`,
+      )
+    }
+    const compare = (
+      a.constructor as { compare?: (x: unknown, y: unknown) => number }
+    ).compare
+    if (typeof compare !== `function`) {
+      throw new TypeError(`${aTag} has no defined ordering`)
+    }
+    return compare(a, b)
+  }
+  return a < b ? -1 : a > b ? 1 : 0
+}
+
+/**
  * Compare two values for equality, with special handling for Uint8Arrays and Buffers
  */
 export function areValuesEqual(a: any, b: any): boolean {
