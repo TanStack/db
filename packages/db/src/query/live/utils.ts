@@ -2,7 +2,7 @@ import { MultiSet, serializeValue } from '@tanstack/db-ivm'
 import { UnsupportedRootScalarSelectError } from '../../errors.js'
 import { normalizeOrderByPaths } from '../compiler/expressions.js'
 import { buildQuery, getQueryIR } from '../builder/index.js'
-import { IncludesSubquery } from '../ir.js'
+import { IncludesSubquery, followRef } from '../ir.js'
 import type { MultiSetArray, RootStreamBuilder } from '@tanstack/db-ivm'
 import type { Collection } from '../../collection/index.js'
 import type { ChangeMessage } from '../../types.js'
@@ -334,7 +334,7 @@ export function trackBiggestSentValue(
  * be scoped to the given alias (e.g. cross-collection refs or aggregates).
  */
 export function computeSubscriptionOrderByHints(
-  query: { orderBy?: OrderBy; limit?: number; offset?: number },
+  query: QueryIR,
   alias: string,
 ): { orderBy: OrderBy | undefined; limit: number | undefined } {
   const { orderBy, limit, offset } = query
@@ -345,14 +345,21 @@ export function computeSubscriptionOrderByHints(
     ? normalizeOrderByPaths(orderBy, alias)
     : undefined
 
-  // Only pass orderBy when it is scoped to this alias and uses simple refs,
-  // to avoid leaking cross-collection paths into backend-specific compilers.
+  // Only pass orderBy when:
+  // 1) it is scoped to this alias and uses simple refs, and
+  // 2) each ref can be traced to a raw source field (not a computed alias).
+  const rootCollection = extractCollectionFromSource(query)
   const canPassOrderBy =
-    normalizedOrderBy?.every((clause) => {
+    normalizedOrderBy?.every((clause, index) => {
       const exp = clause.expression
       if (exp.type !== `ref`) return false
       const path = exp.path
-      return Array.isArray(path) && path.length === 1
+      if (!(Array.isArray(path) && path.length === 1)) return false
+
+      const originalExp = orderBy?.[index]?.expression
+      if (!originalExp || originalExp.type !== `ref`) return false
+
+      return !!followRef(query, originalExp, rootCollection)
     }) ?? false
 
   return {

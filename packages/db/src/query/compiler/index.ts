@@ -1107,15 +1107,17 @@ export function followRef(
     // is it part of the select clause?
     if (query.select) {
       const selectedField = query.select[field]
-      if (selectedField && selectedField.type === `ref`) {
-        return followRef(query, selectedField, collection)
+      if (selectedField) {
+        // Only pass-through refs can be followed to a raw collection field.
+        // Computed select expressions do not map to a source column.
+        if (selectedField.type === `ref`) {
+          return followRef(query, selectedField, collection)
+        }
+        return
       }
     }
 
-    // Either this field is not part of the select clause
-    // and thus it must be part of the collection itself
-    // or it is part of the select but is not a reference
-    // so we can stop here and don't have to follow it
+    // Field is not projected by select, so it belongs to the collection itself.
     return { collection, path: [field] }
   }
 

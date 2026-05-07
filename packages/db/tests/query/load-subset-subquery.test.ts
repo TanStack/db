@@ -2,6 +2,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { createCollection } from '../../src/collection/index.js'
 import {
   and,
+  coalesce,
   createLiveQueryCollection,
   eq,
   gte,
@@ -264,5 +265,35 @@ describe(`loadSubset with subqueries`, () => {
     ]
 
     expect(lastCall!.orderBy).toEqual(expectedOrderBy)
+  })
+
+  it(`does not pass orderBy/limit to loadSubset for computed subquery orderBy`, async () => {
+    const { collection: ordersCollection, loadSubsetCalls } =
+      createOrdersCollectionWithTracking()
+
+    const subqueryQuery = createLiveQueryCollection((q) => {
+      const prepaidOrderQ = q
+        .from({ prepaidOrder: ordersCollection })
+        .select(({ prepaidOrder }) => ({
+          address_id: prepaidOrder.address_id,
+          sortKey: coalesce(prepaidOrder.scheduled_at, `1970-01-01`),
+        }))
+        .orderBy(({ $selected }) => $selected.sortKey, `desc`)
+        .limit(2)
+
+      return q
+        .from({ charge: chargesCollection })
+        .fullJoin({ prepaidOrder: prepaidOrderQ }, ({ charge, prepaidOrder }) =>
+          eq(charge.address_id, prepaidOrder.address_id),
+        )
+    })
+
+    await subqueryQuery.preload()
+
+    expect(loadSubsetCalls.length).toBeGreaterThan(0)
+    const lastCall = loadSubsetCalls[loadSubsetCalls.length - 1]
+    expect(lastCall).toBeDefined()
+    expect(lastCall!.orderBy).toBeUndefined()
+    expect(lastCall!.limit).toBeUndefined()
   })
 })
