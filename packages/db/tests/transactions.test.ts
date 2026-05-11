@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 import { createTransaction } from '../src/transactions'
 import { createCollection } from '../src/collection/index.js'
 import {
@@ -83,6 +83,35 @@ describe(`Transactions`, () => {
     expect(transaction.mutations).toHaveLength(2)
 
     transaction.commit()
+  })
+  // Asserts the docstring on Transaction#mutate: "If the callback returns a
+  // Promise, the transaction context will remain active until the promise
+  // settles, allowing optimistic writes after `await` boundaries."
+  it(`should keep the ambient transaction active across awaits inside mutate()`, async () => {
+    const onInsert = vi.fn(async () => {})
+    const collection = createCollection<{ id: number; value: string }>({
+      id: `ambient-tx-across-await`,
+      getKey: (item) => item.id,
+      onInsert,
+      sync: { sync: () => {} },
+    })
+
+    const transaction = createTransaction({
+      mutationFn: async () => Promise.resolve(),
+      autoCommit: false,
+    })
+
+    transaction.mutate(async () => {
+      collection.insert({ id: 1, value: `before-await` })
+      await Promise.resolve()
+      collection.insert({ id: 2, value: `after-await` })
+    })
+
+    // Let the async callback's microtasks drain.
+    await new Promise((resolve) => setTimeout(resolve, 0))
+
+    expect(transaction.mutations).toHaveLength(2)
+    expect(onInsert).not.toHaveBeenCalled()
   })
   it(`should allow mutating multiple collections`, () => {
     const transaction = createTransaction({
