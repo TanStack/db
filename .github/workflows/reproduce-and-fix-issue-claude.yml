@@ -34,7 +34,7 @@ jobs:
           persist-credentials: false
 
       - name: Run Claude Code (auto issue handler)
-        uses: anthropics/claude-code-action@b112a167ee1f4aa7ad2e3adae255c8c8c69e740b # v1
+        uses: anthropics/claude-code-action@f4fb5c6cdccc1ee7af63692f5d08d56efaa64cc8 # v1
         with:
           anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
           claude_args: |
