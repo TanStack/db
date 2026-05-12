@@ -42,19 +42,19 @@
     "skills"
   ],
   "dependencies": {
-    "@solid-primitives/map": "^0.7.2",
+    "@solid-primitives/map": "^0.7.3",
     "@tanstack/db": "workspace:*"
   },
   "peerDependencies": {
     "solid-js": ">=1.9.0"
   },
   "devDependencies": {
-    "@electric-sql/client": "^1.5.15",
+    "@electric-sql/client": "^1.5.16",
     "@solidjs/testing-library": "^0.8.10",
     "@vitest/coverage-istanbul": "^3.2.4",
     "jsdom": "^27.4.0",
-    "solid-js": "^1.9.11",
-    "vite-plugin-solid": "^2.11.10",
+    "solid-js": "^1.9.12",
+    "vite-plugin-solid": "^2.11.12",
     "vitest": "^3.2.4"
   }
 }
