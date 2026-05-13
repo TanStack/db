@@ -74,7 +74,7 @@ jobs:
           comment-key: 'db-package-size'
           build-script: 'build:minified'
       - name: Compressed Size Action - React DB Package
-        uses: preactjs/compressed-size-action@66325aad6443cb7cf89c4bfcd414aea2367cda94 # v2
+        uses: preactjs/compressed-size-action@66325aad6443cb7cf89c4bfcd414aea2367cda94 # v2.9.1
         with:
           repo-token: '${{ secrets.GITHUB_TOKEN }}'
           pattern: './packages/react-db/dist/**/*.{js,mjs}'
