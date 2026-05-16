@@ -10,6 +10,7 @@ import { getActiveTransaction } from '../../transactions.js'
 import { CollectionSubscriber } from './collection-subscriber.js'
 import { getCollectionBuilder } from './collection-registry.js'
 import { LIVE_QUERY_INTERNAL } from './internal.js'
+import { LiveQueryTrackedSourceRecordsAggregator } from './tracked-source-records-aggregator.js'
 import {
   buildQueryFromConfig,
   extractCollectionAliases,
@@ -32,7 +33,10 @@ import type {
   KeyedStream,
   ResultStream,
   StringCollationConfig,
+  SubscribeTrackedSourceRecordsOptions,
   SyncConfig,
+  TrackedSourceRecord,
+  TrackedSourceRecordsChange,
   UtilsRecord,
 } from '../../types.js'
 import type { Context, GetResult } from '../builder/types.js'
@@ -138,6 +142,36 @@ export class CollectionConfigBuilder<
     SchedulerContextId,
     PendingGraphRun
   >()
+
+  // Long-lived listeners for the live-query-local tracked-source view.
+  // Survives sync sessions: each new session's aggregator reads this set
+  // by reference, so external subscribers don't need to re-attach across
+  // start/stop cycles.
+  private readonly trackedSourceRecordListeners = new Set<
+    (change: TrackedSourceRecordsChange) => void
+  >()
+
+  // Adapter the live-query Collection routes through for its tracked-source
+  // record view. Routes through the current sync session's aggregator (which
+  // can come and go) but the adapter itself is stable across sessions.
+  public readonly liveQueryTrackedSourceView = {
+    snapshot: (): Array<TrackedSourceRecord> =>
+      this.currentSyncState?.trackedSourceRecordsAggregator.snapshot() ?? [],
+    subscribe: (
+      callback: (change: TrackedSourceRecordsChange) => void,
+      options?: SubscribeTrackedSourceRecordsOptions,
+    ): (() => void) => {
+      this.trackedSourceRecordListeners.add(callback)
+      if (options?.includeInitialState) {
+        const added =
+          this.currentSyncState?.trackedSourceRecordsAggregator.snapshot() ?? []
+        if (added.length > 0) callback({ added, removed: [] })
+      }
+      return () => {
+        this.trackedSourceRecordListeners.delete(callback)
+      }
+    },
+  }
 
   // Unsubscribe function for scheduler's onClear listener
   // Registered when sync starts, unregistered when sync stops
@@ -583,10 +617,22 @@ export class CollectionConfigBuilder<
     // Store config and syncState as instance properties for the duration of this sync session
     this.currentSyncConfig = config
 
+    // Session-scoped aggregator that dedupes tracked source records across
+    // aliases (handles self-joins), propagates net transitions to each
+    // source collection's tracked-source-records manager, and fans out to
+    // the builder's long-lived listener Set (so external subscribers reach
+    // the per-query view via the live-query Collection). Lives only for this
+    // sync session.
+    const trackedSourceRecordsAggregator =
+      new LiveQueryTrackedSourceRecordsAggregator(
+        this.collections,
+        this.trackedSourceRecordListeners,
+      )
     const syncState: SyncState = {
       messagesCount: 0,
       subscribedToAllCollections: false,
       unsubscribeCallbacks: new Set<() => void>(),
+      trackedSourceRecordsAggregator,
     }
 
     // Extend the pipeline such that it applies the incoming changes to the collection
@@ -618,6 +664,17 @@ export class CollectionConfigBuilder<
       },
     )
     syncState.unsubscribeCallbacks.add(loadingSubsetUnsubscribe)
+
+    // Expose tracked source records only while the live query has active
+    // subscribers. The aggregator replays snapshot-as-added on 0→1 and
+    // snapshot-as-removed on 1→0.
+    const trackedSubscribersUnsubscribe = config.collection.on(
+      `subscribers:change`,
+      (event) => {
+        trackedSourceRecordsAggregator.setExposed(event.subscriberCount > 0)
+      },
+    )
+    syncState.unsubscribeCallbacks.add(trackedSubscribersUnsubscribe)
 
     const loadSubsetDataCallbacks = this.subscribeToAllCollections(
       config,
@@ -1067,6 +1124,18 @@ export class CollectionConfigBuilder<
         collection,
         this,
       )
+
+      // Forward net membership changes from this subscriber into the
+      // per-live-query aggregator. One subscriber per alias — self-joins
+      // emit independently and the aggregator dedupes. Direct assignment
+      // (not a listener list) since this is 1:1.
+      collectionSubscriber.onTrackedKeysChange = ({ added, removed }) => {
+        syncState.trackedSourceRecordsAggregator.apply(
+          collectionId,
+          added,
+          removed,
+        )
+      }
 
       // Subscribe to status changes for status flow
       const statusUnsubscribe = collection.on(`status:change`, (event) => {

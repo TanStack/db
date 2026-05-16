@@ -10,6 +10,7 @@ import type {
   RootObjectResultConstraint,
   RootQueryResult,
 } from '../builder/types.js'
+import type { LiveQueryTrackedSourceRecordsAggregator } from './tracked-source-records-aggregator.js'
 
 export type Changes<T> = {
   deletes: number
@@ -22,6 +23,12 @@ export type SyncState = {
   messagesCount: number
   subscribedToAllCollections: boolean
   unsubscribeCallbacks: Set<() => void>
+  /**
+   * Session-scoped aggregator that dedupes tracked source records across
+   * aliases and forwards transitions to source collections. Dies with the
+   * sync session.
+   */
+  trackedSourceRecordsAggregator: LiveQueryTrackedSourceRecordsAggregator
 
   graph?: D2
   inputs?: Record<string, RootStreamBuilder<unknown>>

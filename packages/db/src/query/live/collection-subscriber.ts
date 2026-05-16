@@ -48,10 +48,25 @@ export class CollectionSubscriber<
   // can potentially send the same item to D2 multiple times.
   private sentToD2Keys = new Set<string | number>()
 
+  // Track keys currently reported as tracked source records for this subscriber.
+  private trackedSourceKeys = new Set<string | number>()
+
   // Direct load tracking callback for ordered path (set during subscribeToOrderedChanges,
   // used by loadNextItems for subsequent requestLimitedSnapshot calls)
   private orderedLoadSubsetResult?: (result: Promise<void> | true) => void
   private pendingOrderedLoadPromise: Promise<void> | undefined
+
+  /**
+   * Callback invoked with net membership changes in this subscriber's
+   * tracked-source-key set. The builder wires
+   * this to the per-live-query aggregator. A stable-membership ordered
+   * update where split delete+insert leaves `trackedSourceKeys` unchanged
+   * emits nothing.
+   */
+  public onTrackedKeysChange?: (change: {
+    added: Array<string | number>
+    removed: Array<string | number>
+  }) => void
 
   constructor(
     private alias: string,
@@ -131,6 +146,10 @@ export class CollectionSubscriber<
       this.ensureLoadingPromise(subscription)
     }
 
+    subscription.on(`unsubscribed`, () => {
+      this.clearTrackedSourceKeys()
+    })
+
     const unsubscribe = () => {
       // If subscription has a pending promise, resolve it before unsubscribing
       const deferred = this.subscriptionLoadingPromises.get(subscription)
@@ -168,6 +187,7 @@ export class CollectionSubscriber<
       filteredChanges,
       this.collection.config.getKey,
     )
+    this.emitTrackedSourceKeyDelta(filteredChanges)
 
     // Do not provide the callback that loads more data
     // if there's no more data to load
@@ -275,9 +295,10 @@ export class CollectionSubscriber<
     })
     subscriptionHolder.current = subscription
 
-    // Listen for truncate events to reset cursor tracking state and sentToD2Keys
-    // This ensures that after a must-refetch/truncate, we don't use stale cursor data
-    // and allow re-inserts of previously sent keys
+    // Reset cursor/D2 duplicate state on truncate. Tracked-source membership
+    // is tracked separately in trackedSourceKeys and updated from the buffered
+    // delete/refetch change batch, so unsubscribe cleanup still has the right
+    // membership snapshot while truncate is in flight.
     const truncateUnsubscribe = this.collection.on(`truncate`, () => {
       this.biggest = undefined
       this.lastLoadRequestKey = undefined
@@ -466,5 +487,50 @@ export class CollectionSubscriber<
     this.collectionConfigBuilder.liveQueryCollection!._sync.trackLoadPromise(
       promise,
     )
+  }
+
+  private emitTrackedSourceKeyDelta(
+    changes: ReadonlyArray<ChangeMessage<any, string | number>>,
+  ): void {
+    const wasTracked = new Map<string | number, boolean>()
+    for (const change of changes) {
+      if (change.type !== `insert` && change.type !== `delete`) {
+        continue
+      }
+
+      if (!wasTracked.has(change.key)) {
+        wasTracked.set(change.key, this.trackedSourceKeys.has(change.key))
+      }
+
+      if (change.type === `insert`) {
+        this.trackedSourceKeys.add(change.key)
+      } else {
+        this.trackedSourceKeys.delete(change.key)
+      }
+    }
+
+    if (!this.onTrackedKeysChange) return
+
+    const added: Array<string | number> = []
+    const removed: Array<string | number> = []
+    for (const [key, before] of wasTracked) {
+      const after = this.trackedSourceKeys.has(key)
+      if (!before && after) {
+        added.push(key)
+      } else if (before && !after) {
+        removed.push(key)
+      }
+    }
+
+    if (added.length === 0 && removed.length === 0) return
+    this.onTrackedKeysChange({ added, removed })
+  }
+
+  private clearTrackedSourceKeys() {
+    const removed = Array.from(this.trackedSourceKeys)
+    this.trackedSourceKeys.clear()
+    this.sentToD2Keys.clear()
+    if (removed.length === 0) return
+    this.onTrackedKeysChange?.({ added: [], removed })
   }
 }

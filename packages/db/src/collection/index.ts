@@ -3,7 +3,10 @@ import {
   CollectionRequiresConfigError,
   CollectionRequiresSyncConfigError,
 } from '../errors'
+import { getBuilderFromConfig } from '../query/live/collection-registry.js'
 import { currentStateAsChanges } from './change-events'
+import { TrackedSourceRecordsManager } from './tracked-source-records.js'
+import { registerTrackedSourceRecordsManager } from './tracked-source-records-store.js'
 
 import { CollectionStateManager } from './state'
 import { CollectionChangesManager } from './changes'
@@ -34,6 +37,9 @@ import type {
   SingleResult,
   StringCollationConfig,
   SubscribeChangesOptions,
+  SubscribeTrackedSourceRecordsOptions,
+  TrackedSourceRecord,
+  TrackedSourceRecordsChange,
   Transaction as TransactionType,
   UtilsRecord,
   WritableDeep,
@@ -43,6 +49,14 @@ import type { StandardSchemaV1 } from '@standard-schema/spec'
 import type { WithVirtualProps } from '../virtual-props.js'
 
 export type { CollectionIndexMetadata } from './events.js'
+
+type LiveQueryTrackedSourceView = {
+  snapshot: () => Array<TrackedSourceRecord>
+  subscribe: (
+    callback: (change: TrackedSourceRecordsChange) => void,
+    options?: SubscribeTrackedSourceRecordsOptions,
+  ) => () => void
+}
 
 /**
  * Enhanced Collection interface that includes both data type T and utilities TUtils
@@ -255,9 +269,7 @@ export function createCollection(
     schema?: StandardSchemaV1
   },
 ): Collection<any, string | number, UtilsRecord, any, any> {
-  const collection = new CollectionImpl<any, string | number, any, any, any>(
-    options,
-  )
+  const collection = new CollectionImpl(options)
 
   // Attach utils to collection
   if (options.utils) {
@@ -299,6 +311,12 @@ export class CollectionImpl<
   // The core state of the collection is "public" so that is accessible in tests
   // and for debugging
   public _state: CollectionStateManager<TOutput, TKey, TSchema, TInput>
+  // Aggregated view of source-records currently being used by active live
+  // queries that depend on this collection.
+  private readonly _trackedSourceRecords: TrackedSourceRecordsManager<TKey>
+  // For live-query collections only: a live-query-local view of "source
+  // records this query is currently using." Undefined on base collections.
+  private readonly _liveQueryTrackedSourceView?: LiveQueryTrackedSourceView
 
   /**
    * When set, collection consumers should defer processing incoming data
@@ -354,6 +372,10 @@ export class CollectionImpl<
     this._mutations = new CollectionMutationsManager(config, this.id)
     this._state = new CollectionStateManager(config)
     this._sync = new CollectionSyncManager(config, this.id)
+    this._trackedSourceRecords = new TrackedSourceRecordsManager<TKey>(this.id)
+    registerTrackedSourceRecordsManager(this, this._trackedSourceRecords)
+    this._liveQueryTrackedSourceView =
+      getBuilderFromConfig(config)?.liveQueryTrackedSourceView
 
     this.comparisonOpts = buildCompareOptionsFromConfig(config)
 
@@ -939,6 +961,42 @@ export class CollectionImpl<
     options: SubscribeChangesOptions<TOutput, TKey> = {},
   ): CollectionSubscription {
     return this._changes.subscribeChanges(callback, options)
+  }
+
+  /**
+   * Snapshot of source records currently being tracked through this
+   * collection's data flow.
+   *
+   * On a base collection: the union of records OF this collection being
+   * used by any active live query. Each record appears once regardless
+   * of how many queries reference it.
+   *
+   * On a live query collection: the records FROM this query's source
+   * collections that the query is currently using.
+   *
+   * Both views answer "what source records are currently flowing through
+   * me," from opposite ends of the data-flow graph.
+   */
+  public getTrackedSourceRecords(): Array<TrackedSourceRecord> {
+    return (
+      this._liveQueryTrackedSourceView?.snapshot() ??
+      this._trackedSourceRecords.get()
+    )
+  }
+
+  /**
+   * Subscribe to changes in the set of source records tracked through this
+   * collection's data flow. See `getTrackedSourceRecords` for the per-
+   * collection-type semantics.
+   */
+  public subscribeTrackedSourceRecords(
+    callback: (change: TrackedSourceRecordsChange) => void,
+    options?: SubscribeTrackedSourceRecordsOptions,
+  ): () => void {
+    if (this._liveQueryTrackedSourceView) {
+      return this._liveQueryTrackedSourceView.subscribe(callback, options)
+    }
+    return this._trackedSourceRecords.subscribe(callback, options)
   }
 
   /**

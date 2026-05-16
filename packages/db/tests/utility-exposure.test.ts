@@ -1,5 +1,6 @@
 import { describe, expect, test } from 'vitest'
 import { createCollection } from '../src/collection/index.js'
+import { createLiveQueryCollection } from '../src/query/index.js'
 import type { CollectionConfig, SyncConfig, UtilsRecord } from '../src/types'
 
 // Mock utility functions for testing
@@ -98,5 +99,25 @@ describe(`Utility exposure pattern`, () => {
     // TypeScript knows the collection is for TestItem type
     // This is a compile-time check that we can't verify at runtime directly
     // But we've verified the utilities work
+  })
+
+  test(`user-supplied utils override built-in helpers on name collision`, () => {
+    const source = createCollection({
+      getKey: (item: { id: string }) => item.id,
+      sync: {
+        sync: () => {},
+      },
+    })
+
+    // User deliberately overrides getRunCount; their version should win.
+    const userGetRunCount = () => 42
+    const utils = { getRunCount: userGetRunCount }
+    const liveQuery = createLiveQueryCollection({
+      query: (q) => q.from({ source }),
+      utils,
+    })
+
+    expect(liveQuery.utils.getRunCount).toBe(userGetRunCount)
+    expect(liveQuery.utils.getRunCount()).toBe(42)
   })
 })

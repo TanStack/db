@@ -27,6 +27,8 @@ import type {
   RootQueryResult,
 } from './builder/types.js'
 
+export type { LiveQueryCollectionUtils } from './live/collection-config-builder.js'
+
 type CollectionConfigForContext<
   TContext extends Context,
   TResult extends object,
@@ -180,26 +182,26 @@ export function createLiveQueryCollection<
       TContext,
       TResult
     > & { utils: LiveQueryCollectionUtils & TUtils }
-  } else {
-    // Config object case
-    const config = configOrQuery as LiveQueryCollectionConfig<
-      TContext,
-      TResult
-    > & { utils?: TUtils }
-    // Same overload implementation limitation as above: the config has already
-    // been validated by the public signatures, but the branch loses that precision.
-    const options = liveQueryCollectionOptions(config as any)
-
-    // Merge custom utils if provided, preserving the getBuilder() method for dependency tracking
-    if (config.utils) {
-      options.utils = { ...options.utils, ...config.utils }
-    }
-
-    return bridgeToCreateCollection(options) as CollectionForContext<
-      TContext,
-      TResult
-    > & { utils: LiveQueryCollectionUtils & TUtils }
   }
+
+  // Config object case. Same overload implementation limitation as above:
+  // the config has already been validated by the public signatures, but the
+  // branch loses that precision.
+  const config = configOrQuery as LiveQueryCollectionConfig<
+    TContext,
+    TResult
+  > & { utils?: TUtils }
+  const options = liveQueryCollectionOptions(config as any)
+
+  // Merge custom utils if provided, preserving the getBuilder() method for dependency tracking
+  if (config.utils) {
+    options.utils = { ...options.utils, ...config.utils }
+  }
+
+  return bridgeToCreateCollection(options) as CollectionForContext<
+    TContext,
+    TResult
+  > & { utils: LiveQueryCollectionUtils & TUtils }
 }
 
 /**
@@ -212,13 +214,13 @@ function bridgeToCreateCollection<
 >(
   options: CollectionConfig<TResult> & { utils: TUtils },
 ): Collection<TResult, string | number, TUtils> {
+  const builder = getBuilderFromConfig(options)
   const collection = createCollection(options as any) as unknown as Collection<
     TResult,
     string | number,
     LiveQueryCollectionUtils
   >
 
-  const builder = getBuilderFromConfig(options)
   if (builder) {
     registerCollectionBuilder(collection, builder)
   }
