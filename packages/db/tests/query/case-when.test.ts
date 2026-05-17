@@ -136,6 +136,35 @@ describe(`caseWhen`, () => {
     ])
   })
 
+  test(`short-circuits scalar branches at the first matching condition`, async () => {
+    const users = createUsersCollection()
+    const query = createLiveQueryCollection((q) =>
+      q
+        .from({ user: users })
+        .select(({ user }) => ({
+          id: user.id,
+          label: caseWhen(
+            gt(user.age, 10),
+            `first`,
+            gt(user.age, 20),
+            `second`,
+            `fallback`,
+          ),
+        }))
+        .orderBy(({ user }) => user.id),
+    )
+
+    await query.preload()
+
+    expect(
+      query.toArray.map((row) => stripVirtualPropsAndSymbols(row)),
+    ).toEqual([
+      { id: 1, label: `first` },
+      { id: 2, label: `first` },
+      { id: 3, label: `first` },
+    ])
+  })
+
   test(`works in where and orderBy expressions`, async () => {
     const users = createUsersCollection()
     const query = createLiveQueryCollection((q) =>
@@ -292,6 +321,65 @@ describe(`caseWhen`, () => {
       { id: 1, title: `Alice post`, postProfile: { title: `Alice post` } },
       { id: 4, title: `none`, postProfile: undefined },
     ])
+  })
+
+  test(`uses scalar caseWhen inside join conditions`, async () => {
+    const users = createUsersCollection()
+    const posts = createPostsCollection()
+    const query = createLiveQueryCollection((q) =>
+      q
+        .from({ user: users })
+        .join(
+          { post: posts },
+          ({ user, post }) =>
+            eq(
+              caseWhen(eq(user.active, true), user.id, -1),
+              post.userId,
+            ),
+          `inner`,
+        )
+        .select(({ user, post }) => ({
+          userId: user.id,
+          title: post.title,
+        }))
+        .orderBy(({ post }) => post.id),
+    )
+
+    await query.preload()
+
+    expect(
+      query.toArray.map((row) => stripVirtualPropsAndSymbols(row)),
+    ).toEqual([
+      { userId: 1, title: `Alice post A` },
+      { userId: 1, title: `Alice post B` },
+      { userId: 3, title: `Charlie post` },
+    ])
+  })
+
+  test(`rejects projection caseWhen in expression contexts`, () => {
+    const users = createUsersCollection()
+
+    expect(() =>
+      createLiveQueryCollection((q) =>
+        q.from({ user: users }).where(({ user }) =>
+          caseWhen(gt(user.age, 18), {
+            id: user.id,
+          }),
+        ),
+      ),
+    ).toThrow(/Invalid where\(\) expression/)
+
+    expect(() =>
+      createLiveQueryCollection((q) =>
+        q
+          .from({ user: users })
+          .orderBy(({ user }) =>
+            caseWhen(gt(user.age, 18), {
+              id: user.id,
+            }),
+          ),
+      ),
+    ).toThrow(/caseWhen\(\) cannot be used inside expressions/)
   })
 
   test(`materializes includes inside conditional projection branches`, async () => {
