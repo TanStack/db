@@ -135,6 +135,51 @@ describe(`multi-source from types`, () => {
     expectTypeOf(toolCallCanBeUndefined).toEqualTypeOf<undefined>()
   })
 
+  test(`subquery source branches preserve joined projection types`, () => {
+    const messages = createMessages()
+    const toolCalls = createToolCalls()
+    const users = createUsers()
+
+    const collection = createLiveQueryCollection((q) => {
+      const messagesWithUsers = q
+        .from({ message: messages })
+        .join(
+          { user: users },
+          ({ message, user }) => eq(message.userId, user.id),
+          `inner`,
+        )
+        .select(({ message, user }) => ({
+          id: message.id,
+          timestamp: message.timestamp,
+          userName: user.name,
+        }))
+
+      return q.from({
+        message: messagesWithUsers,
+        toolCall: toolCalls,
+      })
+    })
+
+    expectTypeOf(collection.toArray).toMatchTypeOf<
+      Array<
+        OutputWithVirtual<
+          | {
+              message: OutputWithVirtual<{
+                id: number
+                timestamp: number
+                userName: string
+              }>
+              toolCall?: undefined
+            }
+          | {
+              message?: undefined
+              toolCall: ToolCallRow
+            }
+        >
+      >
+    >()
+  })
+
   test(`no-select left joins include joined aliases in each union branch`, () => {
     const messages = createMessages()
     const toolCalls = createToolCalls()

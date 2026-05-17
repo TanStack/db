@@ -228,6 +228,61 @@ describe(`multi-source from`, () => {
     ).toEqual([`message:1`, `tool:1`, `tool:3`])
   })
 
+  it(`supports subquery branches with joins and projections`, async () => {
+    const messages = createMessagesCollection(
+      `multi-source-messages-subquery-join`,
+    )
+    const toolCalls = createToolCallsCollection(
+      `multi-source-tools-subquery-join`,
+    )
+    const users = createUsersCollection(`multi-source-users-subquery-join`)
+
+    const collection = createLiveQueryCollection((q) => {
+      const visibleMessagesWithUsers = q
+        .from({ message: messages })
+        .join(
+          { user: users },
+          ({ message, user }) => eq(message.userId, user.id),
+          `inner`,
+        )
+        .where(({ message }) => eq(message.kind, `visible`))
+        .select(({ message, user }) => ({
+          id: message.id,
+          text: message.text,
+          timestamp: message.timestamp,
+          userName: user.name,
+        }))
+
+      return q
+        .from({
+          message: visibleMessagesWithUsers,
+          toolCall: toolCalls,
+        })
+        .orderBy(({ message, toolCall }) =>
+          coalesce(message.timestamp, toolCall.timestamp),
+        )
+    })
+
+    await collection.preload()
+
+    expect(collection.toArray.map((row) => stripVirtualPropsDeep(row))).toEqual([
+      {
+        message: {
+          id: 1,
+          text: `hello`,
+          timestamp: 10,
+          userName: `Alice`,
+        },
+      },
+      {
+        toolCall: expect.objectContaining({ id: 1, name: `search` }),
+      },
+      {
+        toolCall: expect.objectContaining({ id: 3, name: `write` }),
+      },
+    ])
+  })
+
   it(`supports joins after multi-source from with branch-dependent keys`, async () => {
     const messages = createMessagesCollection(`multi-source-messages-join`)
     const toolCalls = createToolCallsCollection(`multi-source-tools-join`)
