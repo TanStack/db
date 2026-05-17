@@ -135,6 +135,8 @@ For `from({ a, b })`, set:
 
 - `baseSchema`: `{ a: A; b: B }`
 - `schema`: refs visible to callbacks, likely `{ a: A | undefined; b: B | undefined }`
+- `fromSourceName`: a compatibility value only, used by legacy code paths that
+  have not yet been union-aware. New logic should prefer `fromSourceNames`.
 - `fromSourceNames`: `[`a`, `b`]`
 - `hasUnionFrom`: `true`
 
@@ -152,7 +154,11 @@ property access and selected field extraction.
 For `GetResult`:
 
 - If `hasResult` is true, keep returning the selected result type.
-- Else if `hasUnionFrom` is true, return a union over the source aliases.
+- Else if `hasUnionFrom` is true and there are no joins, return a union over
+  the source aliases.
+- Else if `hasUnionFrom` is true and there are joins, return a union over the
+  active source aliases with joined aliases merged in according to the existing
+  join optionality rules.
 - Else preserve existing join and single-source behavior.
 
 Potential helper:
@@ -171,6 +177,28 @@ type UnionFromResult<TSchema extends ContextSchema> = {
 
 The exact helper may need to account for virtual props and existing `Ref`
 nullable extraction rules.
+
+For joined multi-source queries, the helper should distinguish union branch
+aliases from joined aliases. A left join should produce a result like:
+
+```ts
+type Result =
+  | { message: Message; toolCall?: undefined; user: User | undefined }
+  | { message?: undefined; toolCall: ToolCall; user: User | undefined }
+```
+
+An inner join should keep only rows that match at runtime and type the joined
+alias as required. Right and full joins should apply the existing outer-join
+optionality rules, with the multi-source branch aliases treated together as the
+left side of the join.
+
+Join optionality also needs a union-aware path. The existing join type helpers
+use one `fromSourceName` to decide which source becomes optional for right and
+full joins. For multi-source `from`, right and full joins should apply that
+"left side" optionality to every active branch alias from `fromSourceNames`, not
+only one compatibility alias. Left joins should keep all union branch aliases as
+they were and make the joined alias optional. Inner joins should not add
+optionality beyond the existing union branch exclusivity.
 
 ## Compiler Design
 
@@ -198,6 +226,9 @@ Important details:
   for default result selection.
 - The final no-select `$selected` should be the exclusive namespaced row, not a
   single raw collection row.
+- If the query has joins, no-select `$selected` should include the active union
+  branch plus joined aliases according to normal join semantics. It must not
+  drop joined data just because the root came from `UnionFrom`.
 
 ## Joins
 
@@ -210,11 +241,23 @@ For example:
 - A left join preserves the multi-source rows and attaches the joined source
   when there is a match.
 - Right and full joins should follow the existing join behavior, including the
-  usual optionality implications.
+  usual optionality implications. For multi-source `from`, the current union
+  branch aliases collectively form the left side of the join.
 
 Leave responsibility for choosing meaningful join conditions to the user. The
 builder should still require each individual `join({ ... })` call to contain a
 single source alias.
+
+Branch-dependent join keys should be supported through normal expressions. For
+example, a join condition can use `coalesce(message.userId, toolCall.userId)` or
+`caseWhen(...)` to produce one join key across source branches. This keeps joins
+composable with the same expression tools used by `where` and `orderBy`.
+
+Lazy join optimization should be conservative at first. If a join key can be
+traced to exactly one direct source alias, existing lazy loading optimizations
+can apply. If the join key is branch-dependent, computed, or references multiple
+union aliases, fall back to the correct eager/general join path rather than
+trying to infer a per-branch lazy loading strategy.
 
 ## Includes
 
@@ -259,6 +302,17 @@ The multi-source implementation can assume `caseWhen` exists and use its
 conditional include routing behavior for guarded includes under source-specific
 branches.
 
+Guard propagation is required compiler behavior, not just output routing. For
+includes nested under a `caseWhen` branch:
+
+- the inactive branch must not evaluate parent refs such as `message.id`
+- the inactive branch must not emit parent routing keys for child pipelines
+- include extraction must preserve the full `caseWhen` guard chain
+- nested guarded includes must combine parent guards with their own guards
+
+This allows source-specific includes to run only for rows where the referenced
+source alias exists.
+
 ## Optimizer
 
 The optimizer frequently assumes `query.from.alias`. Update it to understand
@@ -267,7 +321,13 @@ The optimizer frequently assumes `query.from.alias`. Update it to understand
 First-pass conservative behavior:
 
 - Continue predicate extraction for direct source aliases where safe.
-- Allow single-source `where` clauses to push down to the matching branch.
+- Treat `where` clauses as global post-union filters semantically. A predicate
+  like `.where(({ message }) => eq(message.kind, 'x'))` should filter out
+  non-message rows because `message.kind` is `undefined` there.
+- Allow single-source `where` clauses to push down to the matching branch only
+  as an optimization while preserving the global residual filter, or when the
+  optimizer can prove the rewritten plan drops non-matching branches with the
+  same semantics.
 - Keep multi-source predicates as residual filters after concat.
 - Avoid pushdown through union branch subqueries unless the existing subquery
   machinery can prove it is safe.
@@ -313,12 +373,18 @@ Add runtime tests:
 - result keys do not collide when branches share source keys
 - insert/update/delete from each branch updates the live query
 - `where` after concat can filter on branch-specific refs
+- branch-specific `where` filters remove non-matching branches unless the user
+  explicitly keeps them with a multi-source predicate such as `or(...)`
 - `orderBy` with `coalesce` sorts across branches
 - `select()` after multi-source `from` still works with combined refs
 - subquery source branches work
 - `.distinct()` behavior is documented by tests
 - joins after multi-source `from` behave with normal join semantics
+- branch-dependent join keys using `coalesce` or `caseWhen` work correctly
+- branch-dependent joins fall back safely when lazy optimization is not valid
 - includes materialize only for rows with the matching source alias
+- guarded includes do not evaluate refs or emit parent keys for inactive
+  `caseWhen` branches
 
 Add type tests:
 
@@ -328,6 +394,9 @@ Add type tests:
 - branch refs in callbacks allow property access with nullable extraction
 - `select()` returns the selected object type, even if not correlated as a union
 - joins after multi-source `from` preserve the existing join optionality model
+- right/full joins after multi-source `from` apply left-side optionality to all
+  union branch aliases
+- no-select multi-source joins include joined aliases in the result type
 - multi-source inputs inside one `join({ ... })` call remain rejected
 
 ## Suggested Implementation Phases
