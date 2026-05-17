@@ -14,7 +14,8 @@ import {
 import { normalizeValue } from '../../utils/comparison.js'
 import { ensureIndexForField } from '../../indexes/auto-index.js'
 import { PropRef, followRef } from '../ir.js'
-import { inArray } from '../builder/functions.js'
+import { and, inArray } from '../builder/functions.js'
+import { extractEqualityKeys } from '../expression-helpers.js'
 import { compileExpression } from './evaluators.js'
 import type { CompileQueryFn } from './index.js'
 import type { OrderByOptimizationInfo } from './order-by.js'
@@ -221,7 +222,35 @@ function processJoin(
     throw new UnsupportedJoinTypeError(joinClause.type)
   }
 
-  if (activeSource) {
+  // When the query statically constrains the main side of the join condition
+  // to known keys, filter the joined side to the same keys so it loads only
+  // the matching subset eagerly. This avoids deferring it behind a
+  // lazy-loading tap, which would miss a progressive collection's fast-path
+  // window. Sound only for inner/left joins (see deriveStaticJoinFilter).
+  const canFilterJoinedSide =
+    joinClause.type === `inner` || joinClause.type === `left`
+  const staticJoinFilter = canFilterJoinedSide
+    ? deriveStaticJoinFilter(
+        mainExpr,
+        joinedExpr,
+        joinedSource,
+        isCollectionRef,
+        sourceWhereClauses,
+      )
+    : null
+  if (staticJoinFilter) {
+    const existing = sourceWhereClauses.get(staticJoinFilter.alias)
+    sourceWhereClauses.set(
+      staticJoinFilter.alias,
+      existing
+        ? and(existing, staticJoinFilter.filter)
+        : staticJoinFilter.filter,
+    )
+  }
+
+  // Skip lazy loading when the joined side is already statically filtered —
+  // it now loads its subset eagerly via the normal subscription path.
+  if (activeSource && !staticJoinFilter) {
     // If the lazy collection comes from a subquery that has a limit and/or an offset clause
     // then we need to deoptimize the join because we don't know which rows are in the result set
     // since we simply lookup matching keys in the index but the index contains all rows
@@ -659,4 +688,48 @@ function getActiveAndLazySources(
     default:
       return { activeSource: undefined, lazySource: undefined }
   }
+}
+
+/**
+ * When the query statically constrains the main side of an inner/left join to
+ * a known set of keys (e.g. `.where(eq(group.id, 5))`), derives an equality
+ * filter for the joined side of the join condition.
+ *
+ * Applying that filter lets the joined collection load only the matching
+ * subset eagerly, instead of being deferred behind a lazy-loading tap (which
+ * misses a progressive collection's fast-path window) or loaded in full as the
+ * join's "active" side.
+ *
+ * Only sound for `inner` and `left` joins, where a joined row is needed solely
+ * when it matches a main row — `right`/`full` joins keep unmatched joined rows.
+ * Only plain collection join sources are filtered; subquery sources keep the
+ * existing lazy-loading behaviour.
+ *
+ * @returns The joined alias and the derived predicate, or `null` when the main
+ *   side is not statically constrained.
+ */
+function deriveStaticJoinFilter(
+  mainExpr: BasicExpression,
+  joinedExpr: BasicExpression,
+  joinedSource: string,
+  joinedSideIsCollection: boolean,
+  sourceWhereClauses: Map<string, BasicExpression<boolean>>,
+): { alias: string; filter: BasicExpression<boolean> } | null {
+  if (
+    !joinedSideIsCollection ||
+    mainExpr.type !== `ref` ||
+    joinedExpr.type !== `ref`
+  ) {
+    return null
+  }
+
+  const mainKeys = extractEqualityKeys(
+    sourceWhereClauses.get(mainExpr.path[0]!),
+    mainExpr.path,
+  )
+  if (mainKeys && mainKeys.length > 0) {
+    return { alias: joinedSource, filter: inArray(joinedExpr, mainKeys) }
+  }
+
+  return null
 }

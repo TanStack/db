@@ -520,3 +520,78 @@ export function parseLoadSubsetOptions(
     limit: options.limit,
   }
 }
+
+/**
+ * Determines whether a WHERE expression constrains the field at `fieldPath` to
+ * a fixed, statically-known set of literal values.
+ *
+ * Recognises a top-level `eq` or `in` comparison against the field — possibly
+ * nested inside `and` — and returns the literal value set. Returns `null` when
+ * the field is not statically constrained (for example it is compared against
+ * another column, or the predicate uses `or`).
+ *
+ * Used to push correlation predicates eagerly onto lazily-loaded join/includes
+ * children: when the parent side is filtered to known keys, the child subset
+ * can be loaded immediately instead of waiting for the parent query to resolve.
+ *
+ * @param where - The WHERE expression to inspect
+ * @param fieldPath - The full path of the field (alias included, e.g. `['user', 'id']`)
+ * @returns The literal value set, or `null` when not statically constrained
+ *
+ * @example
+ * ```typescript
+ * // eq(user.id, 5)            -> [5]
+ * // in(user.id, [1, 2, 3])    -> [1, 2, 3]
+ * // and(eq(user.id, 5), ...)  -> [5]
+ * // or(...) / eq(user.id, x)  -> null
+ * ```
+ */
+export function extractEqualityKeys(
+  where: BasicExpression<boolean> | undefined,
+  fieldPath: ReadonlyArray<string>,
+): Array<unknown> | null {
+  if (!where || where.type !== `func`) {
+    return null
+  }
+
+  const matchesField = (expr: BasicExpression): boolean =>
+    expr.type === `ref` &&
+    expr.path.length === fieldPath.length &&
+    expr.path.every((segment, index) => segment === fieldPath[index])
+
+  const { name, args } = where
+
+  if (name === `and`) {
+    for (const arg of args) {
+      const keys = extractEqualityKeys(
+        arg as BasicExpression<boolean>,
+        fieldPath,
+      )
+      if (keys) {
+        return keys
+      }
+    }
+    return null
+  }
+
+  if (name === `eq` && args.length === 2) {
+    const [lhs, rhs] = args as [BasicExpression, BasicExpression]
+    if (matchesField(lhs) && rhs.type === `val`) {
+      return [rhs.value]
+    }
+    if (matchesField(rhs) && lhs.type === `val`) {
+      return [lhs.value]
+    }
+    return null
+  }
+
+  if (name === `in` && args.length === 2) {
+    const [lhs, rhs] = args as [BasicExpression, BasicExpression]
+    if (matchesField(lhs) && rhs.type === `val` && Array.isArray(rhs.value)) {
+      return [...rhs.value]
+    }
+    return null
+  }
+
+  return null
+}

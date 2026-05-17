@@ -25,6 +25,7 @@ import {
 } from '../ir.js'
 import { ensureIndexForField } from '../../indexes/auto-index.js'
 import { inArray } from '../builder/functions.js'
+import { extractEqualityKeys } from '../expression-helpers.js'
 import { compileExpression, toBooleanPredicate } from './evaluators.js'
 import { processJoins } from './joins.js'
 import { containsAggregate, processGroupBy } from './group-by.js'
@@ -38,6 +39,7 @@ import type {
   IncludesMaterialization,
   QueryIR,
   QueryRef,
+  Where,
 } from '../ir.js'
 import type { LazyCollectionCallbacks } from './joins.js'
 import type { Collection } from '../../collection/index.js'
@@ -396,67 +398,98 @@ export function compileQuery(
         childFromCollection,
       )
 
+      // When the parent query statically constrains the correlation field to
+      // known keys (e.g. `.where(eq(parent.id, 5))`), the child subset can be
+      // loaded eagerly — in parallel with the parent — instead of being
+      // deferred behind the parent pipeline. Deferring it makes the child
+      // loadSubset miss a progressive collection's fast-path window.
+      const parentCorrelationAlias = subquery.correlationField.path[0]
+      const staticCorrelationKeys = parentCorrelationAlias
+        ? extractEqualityKeys(
+            sourceWhereClauses.get(parentCorrelationAlias),
+            subquery.correlationField.path,
+          )
+        : null
+      // Non-empty key set => load the child eagerly; otherwise lazy-load it.
+      const eagerChildKeys =
+        staticCorrelationKeys && staticCorrelationKeys.length > 0
+          ? staticCorrelationKeys
+          : null
+
       if (followRefResult) {
         const followRefCollection = followRefResult.collection
         const fieldPath = followRefResult.path
         const fieldName = fieldPath[0]
 
-        // 1. Mark child source as lazy so CollectionSubscriber skips initial full load
-        lazySources.add(childCorrelationAlias)
-
-        // 2. Ensure an index on the correlation field for efficient lookups
+        // Ensure an index on the correlation field for efficient lookups
         if (fieldName) {
           ensureIndexForField(fieldName, fieldPath, followRefCollection)
         }
 
-        // 3. Tap parent keys to intercept correlation values and request
-        //    matching child rows on-demand via the child's subscription
-        parentKeys = parentKeys.pipe(
-          tap((data: any) => {
-            const resolvedAlias =
-              aliasRemapping[childCorrelationAlias] || childCorrelationAlias
-            const lazySourceSubscription = subscriptions[resolvedAlias]
+        // When the keys aren't statically known, fall back to lazy loading:
+        // mark the child source lazy so its CollectionSubscriber skips the
+        // initial full load, and tap the parent keys to request matching
+        // child rows on-demand once the parent pipeline produces them.
+        if (!eagerChildKeys) {
+          lazySources.add(childCorrelationAlias)
 
-            if (!lazySourceSubscription) {
-              return
-            }
+          parentKeys = parentKeys.pipe(
+            tap((data: any) => {
+              const resolvedAlias =
+                aliasRemapping[childCorrelationAlias] || childCorrelationAlias
+              const lazySourceSubscription = subscriptions[resolvedAlias]
 
-            if (lazySourceSubscription.hasLoadedInitialState()) {
-              return
-            }
+              if (!lazySourceSubscription) {
+                return
+              }
 
-            const joinKeys = [
-              ...new Set(
-                data
-                  .getInner()
-                  .map(
-                    ([[correlationValue]]: any) => correlationValue as unknown,
-                  )
-                  .filter((key: unknown) => key != null),
-              ),
-            ]
+              if (lazySourceSubscription.hasLoadedInitialState()) {
+                return
+              }
 
-            if (joinKeys.length === 0) {
-              return
-            }
+              const joinKeys = [
+                ...new Set(
+                  data
+                    .getInner()
+                    .map(
+                      ([[correlationValue]]: any) =>
+                        correlationValue as unknown,
+                    )
+                    .filter((joinKey: unknown) => joinKey != null),
+                ),
+              ]
 
-            const lazyJoinRef = new PropRef(fieldPath)
-            lazySourceSubscription.requestSnapshot({
-              where: inArray(lazyJoinRef, joinKeys),
-            })
-          }),
-        )
+              if (joinKeys.length === 0) {
+                return
+              }
+
+              const lazyJoinRef = new PropRef(fieldPath)
+              lazySourceSubscription.requestSnapshot({
+                where: inArray(lazyJoinRef, joinKeys),
+              })
+            }),
+          )
+        }
       }
 
-      // If parent filters exist, append them to the child query's WHERE
+      // Extra WHERE clauses appended to the child query: parent-referencing
+      // filters (applied post-join) and, when the parent keys are statically
+      // known, an eager correlation predicate so the child loads its subset
+      // immediately via the normal (non-lazy) subscription path.
+      const extraChildWhere: Array<Where> = []
+      if (subquery.parentFilters && subquery.parentFilters.length > 0) {
+        extraChildWhere.push(...subquery.parentFilters)
+      }
+      if (eagerChildKeys) {
+        extraChildWhere.push(
+          inArray(subquery.childCorrelationField, eagerChildKeys),
+        )
+      }
       const childQuery =
-        subquery.parentFilters && subquery.parentFilters.length > 0
+        extraChildWhere.length > 0
           ? {
               ...subquery.query,
-              where: [
-                ...(subquery.query.where || []),
-                ...subquery.parentFilters,
-              ],
+              where: [...(subquery.query.where || []), ...extraChildWhere],
             }
           : subquery.query
 
