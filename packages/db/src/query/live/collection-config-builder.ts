@@ -832,6 +832,7 @@ export class CollectionConfigBuilder<
     return includesEntries.map((entry) => {
       const state: IncludesOutputState = {
         fieldName: entry.fieldName,
+        resultPath: entry.resultPath,
         childCorrelationField: entry.childCorrelationField,
         hasOrderBy: entry.hasOrderBy,
         materialization: entry.materialization,
@@ -1151,6 +1152,7 @@ type NestedIncludesSetup = {
  */
 type IncludesOutputState = {
   fieldName: string
+  resultPath: Array<string>
   childCorrelationField: PropRef
   /** Whether the child query has an ORDER BY clause */
   hasOrderBy: boolean
@@ -1296,6 +1298,7 @@ function createPerEntryIncludesStates(
   return setups.map((setup) => {
     const state: IncludesOutputState = {
       fieldName: setup.compilationResult.fieldName,
+      resultPath: setup.compilationResult.resultPath,
       childCorrelationField: setup.compilationResult.childCorrelationField,
       hasOrderBy: setup.compilationResult.hasOrderBy,
       materialization: setup.compilationResult.materialization,
@@ -1587,13 +1590,13 @@ function flushIncludesState(
               state,
               state.childRegistry.get(routingKey),
             )
-            parentResult[state.fieldName] = childValue
+            setNestedValue(parentResult, state.resultPath, childValue)
 
             // Parent rows may already be materialized in the live collection by the
             // time includes state is flushed, so update the stored row as well.
             const storedParent = parentCollection.get(parentKey as any)
             if (storedParent && storedParent !== parentResult) {
-              storedParent[state.fieldName] = childValue
+              setNestedValue(storedParent, state.resultPath, childValue)
             }
           }
         }
@@ -1629,7 +1632,7 @@ function flushIncludesState(
         if (state.materialization === `collection`) {
           attachChildCollectionToParent(
             parentCollection,
-            state.fieldName,
+            state.resultPath,
             correlationKey,
             state.correlationToParentKeys,
             entry.collection,
@@ -1749,7 +1752,11 @@ function flushIncludesState(
             const key = parentSyncMethods.collection.getKeyFromItem(item)
             // Capture previous value before in-place mutation
             const previousValue = { ...item }
-            item[state.fieldName] = materializeIncludedValue(state, entry)
+            setNestedValue(
+              item,
+              state.resultPath,
+              materializeIncludedValue(state, entry),
+            )
             events.push({
               type: `update`,
               key,
@@ -1827,7 +1834,7 @@ function hasPendingIncludesChanges(
  */
 function attachChildCollectionToParent(
   parentCollection: Collection<any, any, any>,
-  fieldName: string,
+  resultPath: Array<string>,
   correlationKey: unknown,
   correlationToParentKeys: Map<unknown, Set<unknown>>,
   childCollection: Collection<any, any, any>,
@@ -1838,9 +1845,30 @@ function attachChildCollectionToParent(
   for (const parentKey of parentKeys) {
     const item = parentCollection.get(parentKey as any)
     if (item) {
-      item[fieldName] = childCollection
+      setNestedValue(item, resultPath, childCollection)
     }
   }
+}
+
+function setNestedValue(
+  target: Record<string, any>,
+  path: Array<string>,
+  value: unknown,
+): void {
+  if (path.length === 0) {
+    return
+  }
+
+  let cursor = target
+  for (let i = 0; i < path.length - 1; i++) {
+    const segment = path[i]!
+    const next = cursor[segment]
+    if (next == null || typeof next !== `object`) {
+      cursor[segment] = {}
+    }
+    cursor = cursor[segment]
+  }
+  cursor[path[path.length - 1]!] = value
 }
 
 function accumulateChanges<T>(

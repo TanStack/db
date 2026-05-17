@@ -18,6 +18,7 @@ import {
 } from '../../errors.js'
 import { VIRTUAL_PROP_NAMES } from '../../virtual-props.js'
 import {
+  ConditionalSelect,
   IncludesSubquery,
   PropRef,
   Value as ValClass,
@@ -52,6 +53,12 @@ export type { WindowOptions } from './types.js'
 
 /** Symbol used to tag parent $selected with routing metadata for includes */
 export const INCLUDES_ROUTING = Symbol(`includesRouting`)
+const SKIP_INCLUDE = Symbol(`skipInclude`)
+
+type ConditionalSelectGuard = {
+  condition: BasicExpression
+  expected: boolean
+}
 
 /**
  * Result of compiling an includes subquery, including the child pipeline
@@ -62,6 +69,8 @@ export interface IncludesCompilationResult {
   pipeline: ResultStream
   /** Result field name on parent (e.g., "issues") */
   fieldName: string
+  /** Path where the included value is written in the parent result */
+  resultPath: Array<string>
   /** Parent-side correlation ref (e.g., project.id) */
   correlationField: PropRef
   /** Child-side correlation ref (e.g., issue.projectId) */
@@ -333,10 +342,14 @@ export function compileQuery(
     if (includesEntries.length > 0) {
       query = { ...query, select: { ...query.select } }
     }
-    for (const { key, subquery } of includesEntries) {
+    for (const { key, path, subquery, guards } of includesEntries) {
       // Branch parent pipeline: map to [correlationValue, parentContext]
       // When parentProjection exists, project referenced parent fields; otherwise null (zero overhead)
       const compiledCorrelation = compileExpression(subquery.correlationField)
+      const compiledGuards = guards.map((guard) => ({
+        condition: compileExpression(guard.condition),
+        expected: guard.expected,
+      }))
       let parentKeys: any
       if (subquery.parentProjection && subquery.parentProjection.length > 0) {
         const compiledProjections = subquery.parentProjection.map((ref) => ({
@@ -362,16 +375,25 @@ export function compileQuery(
               }
               target[proj.field[proj.field.length - 1]!] = value
             }
+            if (!matchesConditionalSelectGuards(compiledGuards, nsRow)) {
+              return [SKIP_INCLUDE, null] as any
+            }
             return [compiledCorrelation(nsRow), parentContext] as any
           }),
         )
       } else {
         parentKeys = pipeline.pipe(
-          map(
-            ([_key, nsRow]: any) => [compiledCorrelation(nsRow), null] as any,
-          ),
+          map(([_key, nsRow]: any) => {
+            if (!matchesConditionalSelectGuards(compiledGuards, nsRow)) {
+              return [SKIP_INCLUDE, null] as any
+            }
+            return [compiledCorrelation(nsRow), null] as any
+          }),
         )
       }
+      parentKeys = parentKeys.pipe(
+        filter(([correlationValue]: any) => correlationValue !== SKIP_INCLUDE),
+      )
 
       // Deduplicate: when multiple parents share the same correlation key (and
       // parentContext), clamp multiplicity to 1 so the inner join doesn't
@@ -432,7 +454,7 @@ export function compileQuery(
                   .map(
                     ([[correlationValue]]: any) => correlationValue as unknown,
                   )
-                  .filter((key: unknown) => key != null),
+                  .filter((joinKey: unknown) => joinKey != null),
               ),
             ]
 
@@ -485,7 +507,8 @@ export function compileQuery(
 
       includesResults.push({
         pipeline: childResult.pipeline,
-        fieldName: subquery.fieldName,
+        fieldName: key,
+        resultPath: path,
         correlationField: subquery.correlationField,
         childCorrelationField: subquery.childCorrelationField,
         hasOrderBy: !!(
@@ -505,9 +528,15 @@ export function compileQuery(
           compiled: compileExpression(ref),
         }))
         const compiledCorr = compiledCorrelation
+        const compiledRoutingGuards = compiledGuards
         includesRoutingFns.push({
-          fieldName: subquery.fieldName,
+          fieldName: key,
           getRouting: (nsRow: any) => {
+            if (
+              !matchesConditionalSelectGuards(compiledRoutingGuards, nsRow)
+            ) {
+              return { correlationKey: null, parentContext: null }
+            }
             const parentContext: Record<string, Record<string, any>> = {}
             for (const proj of compiledProjs) {
               if (!parentContext[proj.alias]) {
@@ -527,17 +556,25 @@ export function compileQuery(
           },
         })
       } else {
+        const compiledRoutingGuards = compiledGuards
         includesRoutingFns.push({
-          fieldName: subquery.fieldName,
-          getRouting: (nsRow: any) => ({
-            correlationKey: compiledCorrelation(nsRow),
-            parentContext: null,
-          }),
+          fieldName: key,
+          getRouting: (nsRow: any) => {
+            if (
+              !matchesConditionalSelectGuards(compiledRoutingGuards, nsRow)
+            ) {
+              return { correlationKey: null, parentContext: null }
+            }
+            return {
+              correlationKey: compiledCorrelation(nsRow),
+              parentContext: null,
+            }
+          },
         })
       }
 
       // Replace includes entry in select with a null placeholder
-      replaceIncludesInSelect(query.select!, key)
+      replaceIncludesInSelect(query.select!, path)
     }
   }
 
@@ -1139,24 +1176,129 @@ export function followRef(
 }
 
 /**
- * Walks a Select object to find IncludesSubquery entries at the top level.
- * Throws if an IncludesSubquery is found nested inside a sub-object, since
- * the compiler only supports includes at the top level of a select.
+ * Walks a Select object to find IncludesSubquery entries.
+ * Plain nested objects still reject includes, but ConditionalSelect branches can
+ * contain guarded nested includes that are only materialized when the branch
+ * condition is true.
  */
 function extractIncludesFromSelect(
   select: Record<string, any>,
-): Array<{ key: string; subquery: IncludesSubquery }> {
-  const results: Array<{ key: string; subquery: IncludesSubquery }> = []
+): Array<{
+  key: string
+  path: Array<string>
+  subquery: IncludesSubquery
+  guards: Array<ConditionalSelectGuard>
+}> {
+  const results: Array<{
+    key: string
+    path: Array<string>
+    subquery: IncludesSubquery
+    guards: Array<ConditionalSelectGuard>
+  }> = []
   for (const [key, value] of Object.entries(select)) {
     if (key.startsWith(`__SPREAD_SENTINEL__`)) continue
     if (value instanceof IncludesSubquery) {
-      results.push({ key, subquery: value })
+      results.push({
+        key: getIncludesRoutingKey([key], results),
+        path: [key],
+        subquery: value,
+        guards: [],
+      })
+    } else if (value instanceof ConditionalSelect) {
+      collectIncludesFromConditionalSelect(value, [key], [], results)
     } else if (isNestedSelectObject(value)) {
       // Check nested objects for IncludesSubquery — not supported yet
       assertNoNestedIncludes(value, key)
     }
   }
   return results
+}
+
+function collectIncludesFromConditionalSelect(
+  conditional: ConditionalSelect,
+  prefixPath: Array<string>,
+  guards: Array<ConditionalSelectGuard>,
+  results: Array<{
+    key: string
+    path: Array<string>
+    subquery: IncludesSubquery
+    guards: Array<ConditionalSelectGuard>
+  }>,
+): void {
+  const previousBranchGuards: Array<ConditionalSelectGuard> = []
+  for (const branch of conditional.branches) {
+    collectIncludesFromSelectValue(
+      branch.value,
+      prefixPath,
+      [
+        ...guards,
+        ...previousBranchGuards,
+        { condition: branch.condition, expected: true },
+      ],
+      results,
+    )
+    previousBranchGuards.push({
+      condition: branch.condition,
+      expected: false,
+    })
+  }
+
+  if (conditional.defaultValue) {
+    collectIncludesFromSelectValue(
+      conditional.defaultValue,
+      prefixPath,
+      [...guards, ...previousBranchGuards],
+      results,
+    )
+  }
+}
+
+function collectIncludesFromSelectValue(
+  value: any,
+  prefixPath: Array<string>,
+  guards: Array<ConditionalSelectGuard>,
+  results: Array<{
+    key: string
+    path: Array<string>
+    subquery: IncludesSubquery
+    guards: Array<ConditionalSelectGuard>
+  }>,
+): void {
+  if (value instanceof IncludesSubquery) {
+    const key = getIncludesRoutingKey(prefixPath, results)
+    results.push({ key, path: prefixPath, subquery: value, guards })
+    return
+  }
+
+  if (value instanceof ConditionalSelect) {
+    collectIncludesFromConditionalSelect(value, prefixPath, guards, results)
+    return
+  }
+
+  if (!isNestedSelectObject(value)) {
+    return
+  }
+
+  for (const [key, child] of Object.entries(value)) {
+    if (key.startsWith(`__SPREAD_SENTINEL__`)) continue
+    collectIncludesFromSelectValue(
+      child,
+      [...prefixPath, key],
+      guards,
+      results,
+    )
+  }
+}
+
+function getIncludesRoutingKey(
+  path: Array<string>,
+  entries: Array<{ key: string }>,
+): string {
+  const baseKey = path.join(`.`)
+  if (!entries.some((entry) => entry.key === baseKey)) {
+    return baseKey
+  }
+  return `${baseKey}#${entries.length}`
 }
 
 /** Check if a value is a nested plain object in a select (not an IR expression node) */
@@ -1193,9 +1335,59 @@ function assertNoNestedIncludes(
  */
 function replaceIncludesInSelect(
   select: Record<string, any>,
-  key: string,
+  path: Array<string>,
 ): void {
-  select[key] = new ValClass(null)
+  replaceIncludesInSelectValue(select, path, new ValClass(null))
+}
+
+function replaceIncludesInSelectValue(
+  value: any,
+  path: Array<string>,
+  replacement: ValClass,
+): boolean {
+  if (path.length === 0) {
+    return false
+  }
+
+  if (path.length === 1) {
+    if (value instanceof ConditionalSelect) {
+      return replaceIncludesInConditionalSelect(value, path, replacement)
+    }
+    if (!(value[path[0]!] instanceof IncludesSubquery)) {
+      return false
+    }
+    value[path[0]!] = replacement
+    return true
+  }
+
+  if (value instanceof ConditionalSelect) {
+    return replaceIncludesInConditionalSelect(value, path, replacement)
+  }
+
+  const [head, ...rest] = path
+  return replaceIncludesInSelectValue(value[head!], rest, replacement)
+}
+
+function replaceIncludesInConditionalSelect(
+  conditional: ConditionalSelect,
+  path: Array<string>,
+  replacement: ValClass,
+): boolean {
+  for (const branch of conditional.branches) {
+    if (replaceIncludesInSelectValue(branch.value, path, replacement)) {
+      return true
+    }
+  }
+
+  if (conditional.defaultValue) {
+    return replaceIncludesInSelectValue(
+      conditional.defaultValue,
+      path,
+      replacement,
+    )
+  }
+
+  return false
 }
 
 /**
@@ -1209,6 +1401,38 @@ function getNestedValue(obj: any, path: Array<string>): any {
     value = value[segment]
   }
   return value
+}
+
+function isCaseWhenConditionTrue(value: any): boolean {
+  if (value == null || value === false) {
+    return false
+  }
+
+  if (value === true) {
+    return true
+  }
+
+  if (typeof value === `number`) {
+    return value !== 0 && !Number.isNaN(value)
+  }
+
+  if (typeof value === `bigint`) {
+    return value !== 0n
+  }
+
+  return Boolean(value)
+}
+
+function matchesConditionalSelectGuards(
+  guards: Array<{
+    condition: (row: any) => any
+    expected: boolean
+  }>,
+  row: any,
+): boolean {
+  return guards.every(
+    (guard) => isCaseWhenConditionTrue(guard.condition(row)) === guard.expected,
+  )
 }
 
 export type CompileQueryFn = typeof compileQuery

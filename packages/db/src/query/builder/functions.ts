@@ -79,6 +79,9 @@ type ProjectionCaseWhenResult2<TValue> = CaseWhenWrapper<
 type ProjectionCaseWhenResult3<TThen, TElse> = CaseWhenWrapper<
   ExtractCaseWhenValue<TThen> | ExtractCaseWhenValue<TElse>
 >
+type ProjectionCaseWhenResult4<TFirst, TSecond> = CaseWhenWrapper<
+  ExtractCaseWhenValue<TFirst> | ExtractCaseWhenValue<TSecond> | undefined
+>
 
 // Helper type to extract the underlying type from various expression types
 type ExtractType<T> =
@@ -398,6 +401,17 @@ export function caseWhen<
   thenValue: TThen,
   elseValue: TElse,
 ): ProjectionCaseWhenResult3<TThen, TElse>
+export function caseWhen<
+  TCondition1 extends ExpressionLike,
+  TFirst extends Record<string, any>,
+  TCondition2 extends ExpressionLike,
+  TSecond extends Record<string, any>,
+>(
+  condition1: TCondition1,
+  firstValue: TFirst,
+  condition2: TCondition2,
+  secondValue: TSecond,
+): ProjectionCaseWhenResult4<TFirst, TSecond>
 export function caseWhen<TCondition extends ExpressionLike, TValue>(
   condition: TCondition,
   value: TValue,

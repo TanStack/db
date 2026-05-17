@@ -5,6 +5,7 @@ import {
   createLiveQueryCollection,
   eq,
   gt,
+  toArray,
 } from '../../src/query/index.js'
 import { mockSyncCollectionOptions, stripVirtualProps } from '../utils.js'
 
@@ -15,10 +16,23 @@ type User = {
   active: boolean
 }
 
+type Post = {
+  id: number
+  userId: number
+  title: string
+}
+
 const sampleUsers: Array<User> = [
   { id: 1, name: `Alice`, age: 30, active: true },
   { id: 2, name: `Bob`, age: 17, active: false },
   { id: 3, name: `Charlie`, age: 22, active: true },
+]
+
+const samplePosts: Array<Post> = [
+  { id: 1, userId: 1, title: `Alice post A` },
+  { id: 2, userId: 1, title: `Alice post B` },
+  { id: 3, userId: 2, title: `Bob post` },
+  { id: 4, userId: 3, title: `Charlie post` },
 ]
 
 function createUsersCollection() {
@@ -29,6 +43,32 @@ function createUsersCollection() {
       initialData: sampleUsers,
     }),
   )
+}
+
+function createPostsCollection() {
+  return createCollection(
+    mockSyncCollectionOptions<Post>({
+      id: `case-when-posts`,
+      getKey: (post) => post.id,
+      initialData: samplePosts,
+    }),
+  )
+}
+
+function stripVirtualPropsAndSymbols(value: any): any {
+  if (Array.isArray(value)) {
+    return value.map((entry) => stripVirtualPropsAndSymbols(entry))
+  }
+
+  if (value && typeof value === `object`) {
+    const out: Record<string, any> = {}
+    for (const [key, entry] of Object.entries(stripVirtualProps(value))) {
+      out[key] = stripVirtualPropsAndSymbols(entry)
+    }
+    return out
+  }
+
+  return value
 }
 
 describe(`caseWhen`, () => {
@@ -47,7 +87,9 @@ describe(`caseWhen`, () => {
 
     await query.preload()
 
-    expect(query.toArray.map((row) => stripVirtualProps(row))).toEqual([
+    expect(
+      query.toArray.map((row) => stripVirtualPropsAndSymbols(row)),
+    ).toEqual([
       { id: 1, category: `adult`, maybeActive: `active` },
       { id: 2, category: `minor`, maybeActive: null },
       { id: 3, category: `adult`, maybeActive: `active` },
@@ -69,7 +111,9 @@ describe(`caseWhen`, () => {
 
     await query.preload()
 
-    expect(query.toArray.map((row) => stripVirtualProps(row))).toEqual([
+    expect(
+      query.toArray.map((row) => stripVirtualPropsAndSymbols(row)),
+    ).toEqual([
       { id: 1, name: `Alice` },
       { id: 3, name: `Charlie` },
     ])
@@ -93,10 +137,87 @@ describe(`caseWhen`, () => {
 
     await query.preload()
 
-    expect(query.toArray.map((row) => stripVirtualProps(row))).toEqual([
+    expect(
+      query.toArray.map((row) => stripVirtualPropsAndSymbols(row)),
+    ).toEqual([
       { id: 1, adultProfile: { id: 1, name: `Alice`, label: `adult` } },
       { id: 2, adultProfile: undefined },
       { id: 3, adultProfile: { id: 3, name: `Charlie`, label: `adult` } },
+    ])
+  })
+
+  test(`materializes includes inside conditional projection branches`, async () => {
+    const users = createUsersCollection()
+    const posts = createPostsCollection()
+    const query = createLiveQueryCollection((q) =>
+      q
+        .from({ user: users })
+        .select(({ user }) => ({
+          id: user.id,
+          profile: caseWhen(
+            gt(user.age, 18),
+            {
+              id: user.id,
+              name: user.name,
+              label: `adult`,
+              postTitles: toArray(
+                q
+                  .from({ post: posts })
+                  .where(({ post }) => eq(post.userId, user.id))
+                  .orderBy(({ post }) => post.id)
+                  .select(({ post }) => post.title),
+              ),
+            },
+            eq(user.name, `Bob`),
+            {
+              id: user.id,
+              name: user.name,
+              label: `minor`,
+              postTitles: toArray(
+                q
+                  .from({ post: posts })
+                  .where(({ post }) => eq(post.userId, user.id))
+                  .orderBy(({ post }) => post.id)
+                  .select(({ post }) => post.title),
+              ),
+            },
+          ),
+        }))
+        .orderBy(({ user }) => user.id),
+    )
+
+    await query.preload()
+
+    expect(
+      query.toArray.map((row) => stripVirtualPropsAndSymbols(row)),
+    ).toEqual([
+      {
+        id: 1,
+        profile: {
+          id: 1,
+          name: `Alice`,
+          label: `adult`,
+          postTitles: [`Alice post A`, `Alice post B`],
+        },
+      },
+      {
+        id: 2,
+        profile: {
+          id: 2,
+          name: `Bob`,
+          label: `minor`,
+          postTitles: [`Bob post`],
+        },
+      },
+      {
+        id: 3,
+        profile: {
+          id: 3,
+          name: `Charlie`,
+          label: `adult`,
+          postTitles: [`Charlie post`],
+        },
+      },
     ])
   })
 })
