@@ -61,7 +61,7 @@ describe(`caseWhen types`, () => {
 
     const result = query.toArray[0]!
 
-    expectTypeOf(result).toMatchTypeOf<
+    expectTypeOf(result).toExtend<
       OutputWithVirtualKeyed<{
         id: number
         category: `adult` | `minor`
@@ -93,7 +93,7 @@ describe(`caseWhen types`, () => {
 
     const result = query.toArray[0]!
 
-    expectTypeOf(result).toMatchTypeOf<
+    expectTypeOf(result).toExtend<
       OutputWithVirtualKeyed<{
         id: number
         withDefault: `senior` | `adult` | `minor`
@@ -119,7 +119,7 @@ describe(`caseWhen types`, () => {
 
     const result = query.toArray[0]!
 
-    expectTypeOf(result).toMatchTypeOf<
+    expectTypeOf(result).toExtend<
       OutputWithVirtualKeyed<{
         id: number
         adultProfile:
@@ -152,7 +152,7 @@ describe(`caseWhen types`, () => {
 
     const result = query.toArray[0]!
 
-    expectTypeOf(result).toMatchTypeOf<
+    expectTypeOf(result).toExtend<
       OutputWithVirtualKeyed<{
         id: number
         adultProfile:
@@ -203,7 +203,7 @@ describe(`caseWhen types`, () => {
 
     const result = query.toArray[0]!
 
-    expectTypeOf(result).toMatchTypeOf<
+    expectTypeOf(result).toExtend<
       OutputWithVirtualKeyed<{
         id: number
         profile:
@@ -255,7 +255,7 @@ describe(`caseWhen types`, () => {
 
     const result = query.toArray[0]!
 
-    expectTypeOf(result).toMatchTypeOf<
+    expectTypeOf(result).toExtend<
       OutputWithVirtualKeyed<{
         id: number
         postStatus: string
