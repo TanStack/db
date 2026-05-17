@@ -16,8 +16,9 @@ The core form should be usable anywhere a normal query expression can be used:
 - join conditions, when it produces a valid comparison operand
 
 In `select()` it should also be able to conditionally return objects, ref
-spreads, and includes. That select projection support is what makes multi-source
-`from` results easy to shape when only one source alias exists on a row.
+spreads, and includes. That select projection support should work independently
+of multi-source `from`; multi-source can use it later, but must not be a
+prerequisite for implementing or testing `caseWhen`.
 
 ## SQLite Reference
 
@@ -47,31 +48,25 @@ Target example:
 ```ts
 const query = createLiveQueryCollection((q) =>
   q
-    .from({
-      message: messagesCollection,
-      toolCall: toolCallsCollection,
-    })
-    .orderBy(({ message, toolCall }) =>
-      coalesce(message.timestamp, toolCall.timestamp),
-      `asc`,
-    )
-    .select(({ message, toolCall }) => ({
-      message: caseWhen(message, {
-        ...message,
-        chunks: q
-          .from({ c: chunksCollection })
-          .where(({ c }) => eq(c.messageId, message.id))
-          .orderBy(({ c }) => c.timestamp)
-          .select(({ c }) => c.text),
+    .from({ user: usersCollection })
+    .select(({ user }) => ({
+      id: user.id,
+      adultProfile: caseWhen(gt(user.age, 18), {
+        ...user,
+        posts: q
+          .from({ post: postsCollection })
+          .where(({ post }) => eq(post.userId, user.id))
+          .orderBy(({ post }) => post.createdAt)
+          .select(({ post }) => post.title),
       }),
-      toolCall,
     })),
 )
 ```
 
-When the active row is a `message`, the `message` projection should exist and
-include `chunks`. When the active row is a `toolCall`, the entire `message`
-projection should be `undefined`.
+When `user.age > 18`, `adultProfile` should exist and include `posts`. When the
+condition is false, `adultProfile` should be `undefined`. This exercises
+conditional projection, ref spreads, and includes without relying on
+multi-source `from`.
 
 ## Why This Needs Its Own Design
 
@@ -158,12 +153,12 @@ caseWhen(condition, thenObject) // ThenResult | undefined
 caseWhen(condition, thenObject, elseObject) // ThenResult | ElseResult
 ```
 
-For the target multi-source example:
+For the target projection example:
 
 ```ts
-message: caseWhen(message, {
-  ...message,
-  chunks: q.from(...),
+adultProfile: caseWhen(gt(user.age, 18), {
+  ...user,
+  posts: q.from(...),
 })
 ```
 
@@ -171,12 +166,12 @@ the selected result should be approximately:
 
 ```ts
 {
-  message:
-    | (Message & {
-        chunks: Collection<string>
+  id: number
+  adultProfile:
+    | (User & {
+        posts: Collection<string>
       })
     | undefined
-  toolCall: ToolCall | undefined
 }
 ```
 
@@ -326,8 +321,6 @@ conditional on a parent row shape.
 
 Add runtime tests:
 
-- `caseWhen(alias, object)` returns the object when the alias exists.
-- `caseWhen(alias, object)` returns `undefined` when the alias is absent.
 - scalar `caseWhen(condition, thenValue)` returns `thenValue` or `null`.
 - scalar `caseWhen(condition, thenValue, elseValue)` returns the expected branch.
 - variadic scalar `caseWhen(c1, v1, c2, v2, fallback)` returns the first matching
@@ -340,9 +333,14 @@ Add runtime tests:
 - `caseWhen` works with scalar then/else values.
 - scalar `caseWhen` works in `where`, `orderBy`, `groupBy`, `having`, and
   selected expressions.
-- Includes inside `caseWhen` only materialize for matching parent rows.
-- Multi-source `from` with `caseWhen(message, { ...message, chunks })` behaves
-  as expected.
+- projection-valued `caseWhen` works in `select()` for a normal single-source
+  query.
+- projection-valued `caseWhen` works in `select()` with a normal joined query,
+  such as conditionally projecting the optional side of a left join.
+- includes inside `caseWhen` only materialize for rows where the guard is true.
+- future integration: multi-source `from` with
+  `caseWhen(message, { ...message, chunks })` behaves as expected once
+  multi-source `from` exists.
 
 Add type tests:
 
@@ -374,9 +372,9 @@ Add type tests:
 7. Teach select result typing about projection `CaseWhenWrapper`.
 8. Compile `ConditionalSelect` for ordinary select objects.
 9. Add explicit errors for projection-valued `caseWhen` in expression contexts.
-10. Add object projection tests.
+10. Add object projection tests using ordinary single-source and joined queries.
 11. Add include extraction/routing support for guarded includes.
-12. Add multi-source `from` integration tests once that feature exists.
+12. Add multi-source `from` integration tests later, once that feature exists.
 
 ## Open Questions
 
