@@ -373,6 +373,47 @@ export function coalesce<T extends [ExpressionLike, ...Array<ExpressionLike>]>(
   ) as CoalesceReturnType<T>
 }
 
+/**
+ * Returns the value for the first matching condition, similar to SQL
+ * `CASE WHEN`.
+ *
+ * Arguments are evaluated as condition/value pairs followed by an optional
+ * default value. Scalar branch values return a query expression and can be used
+ * in expression contexts like `select`, `where`, `orderBy`, `groupBy`,
+ * `having`, and equality join operands. If no scalar branch matches and no
+ * default is provided, the result is `null`.
+ *
+ * When a branch value is a projection object, `caseWhen` becomes a select-only
+ * projection value. Projection branches can include nested fields, ref spreads,
+ * and includes. If no projection branch matches and no default is provided, the
+ * result is `undefined`.
+ *
+ * @example
+ * ```ts
+ * caseWhen(gt(user.age, 18), `adult`, `minor`)
+ * ```
+ *
+ * @example
+ * ```ts
+ * caseWhen(
+ *   gt(user.age, 65),
+ *   `senior`,
+ *   gt(user.age, 18),
+ *   `adult`,
+ *   `minor`,
+ * )
+ * ```
+ *
+ * @example
+ * ```ts
+ * caseWhen(gt(user.age, 18), {
+ *   ...user,
+ *   posts: q
+ *     .from({ post: postsCollection })
+ *     .where(({ post }) => eq(post.userId, user.id)),
+ * })
+ * ```
+ */
 export function caseWhen<C1 extends ExpressionLike, V1 extends CaseWhenValue>(
   condition1: C1,
   value1: V1,
@@ -895,6 +936,8 @@ export function caseWhen(...args: Array<CaseWhenValue>): any {
     throw new Error(`caseWhen() requires at least two arguments`)
   }
 
+  validateCaseWhenConditions(args)
+
   if (caseWhenHasOnlyExpressionValues(args)) {
     return new Func(
       `caseWhen`,
@@ -903,6 +946,17 @@ export function caseWhen(...args: Array<CaseWhenValue>): any {
   }
 
   return new CaseWhenWrapper(args)
+}
+
+function validateCaseWhenConditions(args: Array<CaseWhenValue>): void {
+  const pairCount = Math.floor(args.length / 2)
+
+  for (let i = 0; i < pairCount; i++) {
+    const condition = args[i * 2]
+    if (!isConditionValue(condition)) {
+      throw new Error(`caseWhen() conditions must be expression-like values`)
+    }
+  }
 }
 
 export function add<T1 extends ExpressionLike, T2 extends ExpressionLike>(
@@ -1061,4 +1115,8 @@ function isExpressionValue(value: CaseWhenValue | undefined): boolean {
     )
   }
   return false
+}
+
+function isConditionValue(value: CaseWhenValue | undefined): boolean {
+  return isExpressionValue(value) && !Array.isArray(value)
 }

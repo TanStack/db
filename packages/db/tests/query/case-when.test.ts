@@ -281,6 +281,40 @@ describe(`caseWhen`, () => {
     )
   })
 
+  test(`selects conditional projection objects with aggregates in grouped queries`, async () => {
+    const users = createUsersCollection()
+    const query = createLiveQueryCollection((q) =>
+      q
+        .from({ user: users })
+        .groupBy(({ user }) => user.active)
+        .select(({ user }) => ({
+          active: user.active,
+          profile: caseWhen(
+            gt(count(user.id), 1),
+            {
+              kind: `many`,
+              total: count(user.id),
+            },
+            {
+              kind: `few`,
+              total: count(user.id),
+            },
+          ),
+        })),
+    )
+
+    await query.preload()
+
+    const rows = query.toArray
+      .map((row) => stripVirtualPropsAndSymbols(row))
+      .sort((a, b) => Number(a.active) - Number(b.active))
+
+    expect(rows).toEqual([
+      { active: false, profile: { kind: `few`, total: 1 } },
+      { active: true, profile: { kind: `many`, total: 2 } },
+    ])
+  })
+
   test(`uses source alias refs as conditions after a left join`, async () => {
     const users = createCollection(
       mockSyncCollectionOptions<User>({
@@ -358,6 +392,14 @@ describe(`caseWhen`, () => {
 
   test(`rejects projection caseWhen in expression contexts`, () => {
     const users = createUsersCollection()
+
+    expect(() => caseWhen({ id: 1 } as any, `bad`)).toThrow(
+      /caseWhen\(\) conditions must be expression-like values/,
+    )
+
+    expect(() => caseWhen([true] as any, `bad`)).toThrow(
+      /caseWhen\(\) conditions must be expression-like values/,
+    )
 
     expect(() =>
       createLiveQueryCollection((q) =>

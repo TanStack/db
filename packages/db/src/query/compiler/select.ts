@@ -328,6 +328,15 @@ function addFromObject(
       expression instanceof ConditionalSelect ||
       expression?.type === `conditionalSelect`
     ) {
+      if (containsAggregate(expression)) {
+        ops.push({
+          kind: `field`,
+          alias: [...prefixPath, key].join(`.`),
+          compiled: () => null,
+        })
+        continue
+      }
+
       ops.push({
         kind: `field`,
         alias: [...prefixPath, key].join(`.`),

@@ -48,6 +48,7 @@ query outputs automatically and should not be persisted back to storage.
 - [From Clause](#from-clause)
 - [Where Clauses](#where-clauses)
 - [Select Projections](#select)
+- [Conditional Expressions with caseWhen](#conditional-expressions-with-casewhen)
 - [Joins](#joins)
 - [Subqueries](#subqueries)
 - [Includes](#includes)
@@ -718,6 +719,65 @@ const userStats = createLiveQueryCollection((q) =>
     }))
 )
 ```
+
+### Conditional Expressions with caseWhen
+
+Use `caseWhen` to choose the first value whose condition matches. It works like
+SQL `CASE WHEN`: pass condition/value pairs from left to right, followed by an
+optional default value.
+
+```ts
+import { caseWhen, gt } from '@tanstack/db'
+
+const userCategories = createLiveQueryCollection((q) =>
+  q
+    .from({ user: usersCollection })
+    .select(({ user }) => ({
+      id: user.id,
+      category: caseWhen(
+        gt(user.age, 65),
+        'senior',
+        gt(user.age, 18),
+        'adult',
+        'minor',
+      ),
+    }))
+)
+```
+
+When every branch value is a scalar expression, `caseWhen` can be used anywhere
+normal query expressions are accepted, including `where`, `orderBy`, `groupBy`,
+`having`, selected fields, and equality join operands. If no default is supplied
+and no condition matches, scalar `caseWhen` returns `null`.
+
+Inside `select()`, branch values can also be projection objects. Projection
+branches are useful when a whole object should only exist for matching rows:
+
+```ts
+import { caseWhen, gt, eq } from '@tanstack/db'
+
+const adultProfiles = createLiveQueryCollection((q) =>
+  q
+    .from({ user: usersCollection })
+    .select(({ user }) => ({
+      id: user.id,
+      adultProfile: caseWhen(gt(user.age, 18), {
+        ...user,
+        posts: q
+          .from({ post: postsCollection })
+          .where(({ post }) => eq(post.userId, user.id))
+          .select(({ post }) => ({
+            title: post.title,
+          })),
+      }),
+    }))
+)
+```
+
+In this projection form, `adultProfile` is the projected object when the
+condition matches and `undefined` when no branch matches. Includes inside
+inactive branches are guarded, so child queries only materialize for rows where
+their branch is active.
 
 ### Using Functions and Including All Fields
 
@@ -2440,6 +2500,18 @@ Return the first non-null value:
 ```ts
 coalesce(user.displayName, user.name, 'Unknown')
 ```
+
+#### `caseWhen(condition, value, ..., defaultValue?)`
+Return the value for the first matching condition:
+```ts
+caseWhen(gt(user.age, 18), 'adult', 'minor')
+caseWhen(gt(user.age, 65), 'senior', gt(user.age, 18), 'adult', 'minor')
+```
+
+If no default value is provided, scalar `caseWhen` returns `null` when no
+condition matches. In `select()` projections, object-valued branches return the
+matching projection object, or `undefined` when no branch matches and there is
+no default.
 
 ### Aggregate Functions
 
