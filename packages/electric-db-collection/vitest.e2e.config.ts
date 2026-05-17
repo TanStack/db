@@ -6,6 +6,6 @@ export default defineConfig({
     globalSetup: `../db-collection-e2e/support/global-setup.ts`,
     fileParallelism: false, // Critical for shared database
     testTimeout: 30000,
-    environment: `jsdom`,
+    environment: `node`,
   },
 })
