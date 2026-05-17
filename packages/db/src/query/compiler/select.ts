@@ -1,9 +1,19 @@
 import { map } from '@tanstack/db-ivm'
-import { PropRef, Value as ValClass, isExpressionLike } from '../ir.js'
+import {
+  ConditionalSelect,
+  PropRef,
+  Value as ValClass,
+  isExpressionLike,
+} from '../ir.js'
 import { AggregateNotSupportedError } from '../../errors.js'
 import { compileExpression } from './evaluators.js'
 import { containsAggregate } from './group-by.js'
-import type { Aggregate, BasicExpression, Select } from '../ir.js'
+import type {
+  Aggregate,
+  BasicExpression,
+  Select,
+  SelectValueExpression,
+} from '../ir.js'
 import type {
   KeyedStream,
   NamespacedAndKeyedStream,
@@ -139,6 +149,99 @@ export function processSelect(
   return pipeline.pipe(map((row) => processRow(row, ops)))
 }
 
+function compileSelectObject(obj: Record<string, any>): (row: NamespacedRow) => any {
+  const ops: Array<SelectOp> = []
+  addFromObject([], obj, ops)
+
+  return (row) => {
+    const selectResults: Record<string, any> = {}
+    for (const op of ops) {
+      if (op.kind === `merge`) {
+        processMerge(op, row, selectResults)
+      } else {
+        processNonMergeOp(op, row, selectResults)
+      }
+    }
+    return selectResults
+  }
+}
+
+function compileSelectValue(
+  value: SelectValueExpression,
+): (row: NamespacedRow) => any {
+  if (value instanceof ConditionalSelect) {
+    return compileConditionalSelect(value)
+  }
+
+  if (value instanceof ValClass) {
+    return () => value.value
+  }
+
+  if (value.type === `includesSubquery`) {
+    return () => null
+  }
+
+  if (isNestedSelectObject(value)) {
+    return compileSelectObject(value)
+  }
+
+  if (
+    isAggregateExpression(value as BasicExpression | Aggregate) ||
+    containsAggregate(value as BasicExpression | Aggregate)
+  ) {
+    return () => null
+  }
+
+  if (!isExpressionLike(value)) {
+    return () => value
+  }
+
+  return compileExpression(value as BasicExpression)
+}
+
+function compileConditionalSelect(
+  conditional: ConditionalSelect,
+): (row: NamespacedRow) => any {
+  const branches = conditional.branches.map((branch) => ({
+    condition: compileExpression(branch.condition),
+    value: compileSelectValue(branch.value),
+  }))
+  const defaultValue =
+    conditional.defaultValue === undefined
+      ? undefined
+      : compileSelectValue(conditional.defaultValue)
+
+  return (row) => {
+    for (const branch of branches) {
+      if (isCaseWhenConditionTrue(branch.condition(row))) {
+        return branch.value(row)
+      }
+    }
+
+    return defaultValue ? defaultValue(row) : undefined
+  }
+}
+
+function isCaseWhenConditionTrue(value: any): boolean {
+  if (value == null || value === false) {
+    return false
+  }
+
+  if (value === true) {
+    return true
+  }
+
+  if (typeof value === `number`) {
+    return value !== 0 && !Number.isNaN(value)
+  }
+
+  if (typeof value === `bigint`) {
+    return value !== 0n
+  }
+
+  return Boolean(value)
+}
+
 /**
  * Helper function to check if an expression is an aggregate
  */
@@ -221,6 +324,18 @@ function addFromObject(
     }
 
     const expression = value as any
+    if (
+      expression instanceof ConditionalSelect ||
+      expression?.type === `conditionalSelect`
+    ) {
+      ops.push({
+        kind: `field`,
+        alias: [...prefixPath, key].join(`.`),
+        compiled: compileConditionalSelect(expression),
+      })
+      continue
+    }
+
     if (expression && expression.type === `includesSubquery`) {
       // Placeholder — field will be set to a child Collection by the output layer
       ops.push({

@@ -653,6 +653,17 @@ export function containsAggregate(
       (arg: BasicExpression | Aggregate) => containsAggregate(arg),
     )
   }
+  if (expr.type === `conditionalSelect` && `branches` in expr) {
+    return (
+      expr.branches as Array<{
+        condition: BasicExpression
+        value: BasicExpression | Aggregate | Select | { type: string }
+      }>
+    ).some(
+      (branch) =>
+        containsAggregate(branch.condition) || containsAggregate(branch.value),
+    )
+  }
   return false
 }
 

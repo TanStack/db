@@ -286,8 +286,8 @@ export function createRefProxyWithSelected<T extends Record<string, any>>(
 /**
  * Converts a value to an Expression.
  * If it's a RefProxy, creates a PropRef. Throws if the value is a
- * ToArrayWrapper or ConcatToArrayWrapper (these must be used as direct
- * select fields). Otherwise wraps it as a Value.
+ * ToArrayWrapper, ConcatToArrayWrapper, or CaseWhenWrapper (these must be used
+ * as direct select fields). Otherwise wraps it as a Value.
  */
 export function toExpression<T = any>(value: T): BasicExpression<T>
 export function toExpression(value: RefProxy<any>): BasicExpression<any>
@@ -300,10 +300,15 @@ export function toExpression(value: any): BasicExpression<any> {
     value &&
     typeof value === `object` &&
     (value.__brand === `ToArrayWrapper` ||
-      value.__brand === `ConcatToArrayWrapper`)
+      value.__brand === `ConcatToArrayWrapper` ||
+      value.__brand === `CaseWhenWrapper`)
   ) {
     const name =
-      value.__brand === `ToArrayWrapper` ? `toArray()` : `concat(toArray())`
+      value.__brand === `ToArrayWrapper`
+        ? `toArray()`
+        : value.__brand === `ConcatToArrayWrapper`
+          ? `concat(toArray())`
+          : `caseWhen()`
     throw new Error(
       `${name} cannot be used inside expressions (e.g., coalesce(), eq(), not()). ` +
         `Use ${name} directly as a select field value instead.`,

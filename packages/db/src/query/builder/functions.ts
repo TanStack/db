@@ -1,5 +1,5 @@
 import { Aggregate, Func } from '../ir'
-import { toExpression } from './ref-proxy.js'
+import { isRefProxy, toExpression } from './ref-proxy.js'
 import type { BasicExpression } from '../ir'
 import type { RefProxy } from './ref-proxy.js'
 import type {
@@ -57,6 +57,28 @@ type ExpressionLike =
   | null
   | undefined
   | Array<unknown>
+
+type CaseWhenValue =
+  | ExpressionLike
+  | QueryBuilder<any>
+  | ToArrayWrapper<any>
+  | ConcatToArrayWrapper<any>
+  | Record<string, any>
+
+type ExtractCaseWhenValue<T> =
+  T extends CaseWhenWrapper<infer TResult> ? TResult : T
+
+type CaseWhenResult2<TValue> = BasicExpression<ExtractType<TValue> | null>
+type CaseWhenResult3<TThen, TElse> = BasicExpression<
+  ExtractType<TThen> | ExtractType<TElse>
+>
+
+type ProjectionCaseWhenResult2<TValue> = CaseWhenWrapper<
+  ExtractCaseWhenValue<TValue> | undefined
+>
+type ProjectionCaseWhenResult3<TThen, TElse> = CaseWhenWrapper<
+  ExtractCaseWhenValue<TThen> | ExtractCaseWhenValue<TElse>
+>
 
 // Helper type to extract the underlying type from various expression types
 type ExtractType<T> =
@@ -351,6 +373,65 @@ export function coalesce<T extends [ExpressionLike, ...Array<ExpressionLike>]>(
   ) as CoalesceReturnType<T>
 }
 
+export function caseWhen<
+  TCondition extends ExpressionLike,
+  TValue extends Record<string, any>,
+>(
+  condition: TCondition,
+  value: TValue,
+): ProjectionCaseWhenResult2<TValue>
+export function caseWhen<
+  TCondition extends ExpressionLike,
+  TThen extends Record<string, any>,
+  TElse,
+>(
+  condition: TCondition,
+  thenValue: TThen,
+  elseValue: TElse,
+): ProjectionCaseWhenResult3<TThen, TElse>
+export function caseWhen<
+  TCondition extends ExpressionLike,
+  TThen,
+  TElse extends Record<string, any>,
+>(
+  condition: TCondition,
+  thenValue: TThen,
+  elseValue: TElse,
+): ProjectionCaseWhenResult3<TThen, TElse>
+export function caseWhen<TCondition extends ExpressionLike, TValue>(
+  condition: TCondition,
+  value: TValue,
+): TValue extends ExpressionLike
+  ? CaseWhenResult2<TValue>
+  : ProjectionCaseWhenResult2<TValue>
+export function caseWhen<
+  TCondition extends ExpressionLike,
+  TThen,
+  TElse,
+>(
+  condition: TCondition,
+  thenValue: TThen,
+  elseValue: TElse,
+): TThen extends ExpressionLike
+  ? TElse extends ExpressionLike
+    ? CaseWhenResult3<TThen, TElse>
+    : ProjectionCaseWhenResult3<TThen, TElse>
+  : ProjectionCaseWhenResult3<TThen, TElse>
+export function caseWhen(...args: Array<CaseWhenValue>): any {
+  if (args.length < 2) {
+    throw new Error(`caseWhen() requires at least two arguments`)
+  }
+
+  if (caseWhenHasOnlyExpressionValues(args)) {
+    return new Func(
+      `caseWhen`,
+      args.map((arg) => toExpression(arg)),
+    )
+  }
+
+  return new CaseWhenWrapper(args)
+}
+
 export function add<T1 extends ExpressionLike, T2 extends ExpressionLike>(
   left: T1,
   right: T2,
@@ -426,6 +507,7 @@ export const operators = [
   `add`,
   // Utility functions
   `coalesce`,
+  `caseWhen`,
   // Aggregate functions
   `count`,
   `avg`,
@@ -450,8 +532,60 @@ export class ConcatToArrayWrapper<_T = unknown> {
   constructor(public readonly query: QueryBuilder<any>) {}
 }
 
+export class CaseWhenWrapper<_T = any> {
+  readonly __brand = `CaseWhenWrapper` as const
+  declare readonly _type: `caseWhen`
+  readonly _result?: _T
+  constructor(public readonly args: Array<CaseWhenValue>) {}
+}
+
 export function toArray<TContext extends Context>(
   query: QueryBuilder<TContext>,
 ): ToArrayWrapper<GetRawResult<TContext>> {
   return new ToArrayWrapper(query)
+}
+
+function caseWhenHasOnlyExpressionValues(args: Array<CaseWhenValue>): boolean {
+  const valueIndexes = getCaseWhenValueIndexes(args.length)
+  return valueIndexes.every((index) => isExpressionValue(args[index]))
+}
+
+function getCaseWhenValueIndexes(argCount: number): Array<number> {
+  const valueIndexes: Array<number> = []
+  const hasDefaultValue = argCount % 2 === 1
+  const pairCount = Math.floor(argCount / 2)
+
+  for (let i = 0; i < pairCount; i++) {
+    valueIndexes.push(i * 2 + 1)
+  }
+
+  if (hasDefaultValue) {
+    valueIndexes.push(argCount - 1)
+  }
+
+  return valueIndexes
+}
+
+function isExpressionValue(value: CaseWhenValue | undefined): boolean {
+  if (isRefProxy(value)) return true
+  if (value instanceof Aggregate || value instanceof Func) return true
+  if (value == null) return true
+  if (
+    typeof value === `string` ||
+    typeof value === `number` ||
+    typeof value === `boolean` ||
+    typeof value === `bigint`
+  ) {
+    return true
+  }
+  if (value instanceof Date || Array.isArray(value)) return true
+  if (typeof value === `object` && `type` in value) {
+    return (
+      value.type === `agg` ||
+      value.type === `func` ||
+      value.type === `ref` ||
+      value.type === `val`
+    )
+  }
+  return false
 }

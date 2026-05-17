@@ -2,6 +2,7 @@ import { CollectionImpl } from '../../collection/index.js'
 import {
   Aggregate as AggregateExpr,
   CollectionRef,
+  ConditionalSelect,
   Func as FuncExpr,
   INCLUDES_SCALAR_FIELD,
   IncludesSubquery,
@@ -25,7 +26,11 @@ import {
   isRefProxy,
   toExpression,
 } from './ref-proxy.js'
-import { ConcatToArrayWrapper, ToArrayWrapper } from './functions.js'
+import {
+  CaseWhenWrapper,
+  ConcatToArrayWrapper,
+  ToArrayWrapper,
+} from './functions.js'
 import type { NamespacedRow, SingleResult } from '../../types.js'
 import type {
   Aggregate,
@@ -894,6 +899,9 @@ function isPlainObject(value: any): value is Record<string, any> {
 }
 
 function buildNestedSelect(obj: any, parentAliases: Array<string> = []): any {
+  if (obj instanceof CaseWhenWrapper) {
+    return buildConditionalSelect(obj, parentAliases)
+  }
   if (!isPlainObject(obj)) return toExpr(obj)
   const out: Record<string, any> = {}
   for (const [k, v] of Object.entries(obj)) {
@@ -920,9 +928,40 @@ function buildNestedSelect(obj: any, parentAliases: Array<string> = []): any {
       out[k] = buildIncludesSubquery(v.query, k, parentAliases, `concat`)
       continue
     }
+    if (v instanceof CaseWhenWrapper) {
+      out[k] = buildConditionalSelect(v, parentAliases)
+      continue
+    }
     out[k] = buildNestedSelect(v, parentAliases)
   }
   return out
+}
+
+function buildConditionalSelect(
+  wrapper: CaseWhenWrapper,
+  parentAliases: Array<string>,
+): ConditionalSelect {
+  const args = wrapper.args
+  if (args.length < 2) {
+    throw new Error(`caseWhen() requires at least two arguments`)
+  }
+
+  const hasDefaultValue = args.length % 2 === 1
+  const pairCount = Math.floor(args.length / 2)
+  const branches = []
+
+  for (let i = 0; i < pairCount; i++) {
+    branches.push({
+      condition: toExpression(args[i * 2]),
+      value: buildNestedSelect(args[i * 2 + 1], parentAliases),
+    })
+  }
+
+  const defaultValue = hasDefaultValue
+    ? buildNestedSelect(args[args.length - 1], parentAliases)
+    : undefined
+
+  return new ConditionalSelect(branches, defaultValue)
 }
 
 /**
