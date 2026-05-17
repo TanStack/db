@@ -2,6 +2,7 @@ import { describe, expect, test } from 'vitest'
 import { createCollection } from '../../src/collection/index.js'
 import {
   caseWhen,
+  count,
   createLiveQueryCollection,
   eq,
   gt,
@@ -96,6 +97,41 @@ describe(`caseWhen`, () => {
     ])
   })
 
+  test(`returns scalar variadic branch values`, async () => {
+    const users = createUsersCollection()
+    const query = createLiveQueryCollection((q) =>
+      q
+        .from({ user: users })
+        .select(({ user }) => ({
+          id: user.id,
+          tier: caseWhen(
+            gt(user.age, 25),
+            `senior`,
+            gt(user.age, 18),
+            `adult`,
+            `minor`,
+          ),
+          unmatched: caseWhen(
+            eq(user.name, `Nobody`),
+            `nobody`,
+            eq(user.age, 99),
+            `ancient`,
+          ),
+        }))
+        .orderBy(({ user }) => user.id),
+    )
+
+    await query.preload()
+
+    expect(
+      query.toArray.map((row) => stripVirtualPropsAndSymbols(row)),
+    ).toEqual([
+      { id: 1, tier: `senior`, unmatched: null },
+      { id: 2, tier: `minor`, unmatched: null },
+      { id: 3, tier: `adult`, unmatched: null },
+    ])
+  })
+
   test(`works in where and orderBy expressions`, async () => {
     const users = createUsersCollection()
     const query = createLiveQueryCollection((q) =>
@@ -143,6 +179,111 @@ describe(`caseWhen`, () => {
       { id: 1, adultProfile: { id: 1, name: `Alice`, label: `adult` } },
       { id: 2, adultProfile: undefined },
       { id: 3, adultProfile: { id: 3, name: `Charlie`, label: `adult` } },
+    ])
+  })
+
+  test(`selects conditional projection objects with ref spreads`, async () => {
+    const users = createUsersCollection()
+    const query = createLiveQueryCollection((q) =>
+      q
+        .from({ user: users })
+        .select(({ user }) => ({
+          id: user.id,
+          adultProfile: caseWhen(gt(user.age, 18), {
+            ...user,
+            label: `adult`,
+          }),
+        }))
+        .orderBy(({ user }) => user.id),
+    )
+
+    await query.preload()
+
+    expect(
+      query.toArray.map((row) => stripVirtualPropsAndSymbols(row)),
+    ).toEqual([
+      {
+        id: 1,
+        adultProfile: {
+          id: 1,
+          name: `Alice`,
+          age: 30,
+          active: true,
+          label: `adult`,
+        },
+      },
+      { id: 2, adultProfile: undefined },
+      {
+        id: 3,
+        adultProfile: {
+          id: 3,
+          name: `Charlie`,
+          age: 22,
+          active: true,
+          label: `adult`,
+        },
+      },
+    ])
+  })
+
+  test(`works in groupBy and having expressions`, async () => {
+    const users = createUsersCollection()
+    const query = createLiveQueryCollection((q) =>
+      q
+        .from({ user: users })
+        .groupBy(({ user }) =>
+          caseWhen(eq(user.active, true), `active`, `inactive`),
+        )
+        .having(({ user }) => caseWhen(gt(count(user.id), 1), true, false))
+        .select(({ user }) => ({
+          status: caseWhen(eq(user.active, true), `active`, `inactive`),
+          total: count(user.id),
+        })),
+    )
+
+    await query.preload()
+
+    expect(query.toArray.map((row) => stripVirtualPropsAndSymbols(row))).toEqual(
+      [{ status: `active`, total: 2 }],
+    )
+  })
+
+  test(`uses source alias refs as conditions after a left join`, async () => {
+    const users = createCollection(
+      mockSyncCollectionOptions<User>({
+        id: `case-when-source-alias-users`,
+        getKey: (user) => user.id,
+        initialData: [
+          { id: 1, name: `Alice`, age: 30, active: true },
+          { id: 4, name: `Dana`, age: 16, active: false },
+        ],
+      }),
+    )
+    const posts = createCollection(
+      mockSyncCollectionOptions<Post>({
+        id: `case-when-source-alias-posts`,
+        getKey: (post) => post.id,
+        initialData: [{ id: 1, userId: 1, title: `Alice post` }],
+      }),
+    )
+    const query = createLiveQueryCollection((q) =>
+      q
+        .from({ user: users })
+        .join({ post: posts }, ({ user, post }) => eq(user.id, post.userId), `left`)
+        .select(({ user, post }) => ({
+          id: user.id,
+          title: caseWhen(post, post.title, `none`),
+        }))
+        .orderBy(({ user }) => user.id),
+    )
+
+    await query.preload()
+
+    expect(
+      query.toArray.map((row) => stripVirtualPropsAndSymbols(row)),
+    ).toEqual([
+      { id: 1, title: `Alice post` },
+      { id: 4, title: `none` },
     ])
   })
 
@@ -215,6 +356,61 @@ describe(`caseWhen`, () => {
           id: 3,
           name: `Charlie`,
           label: `adult`,
+          postTitles: [`Charlie post`],
+        },
+      },
+    ])
+  })
+
+  test(`materializes includes inside default conditional projection branches`, async () => {
+    const users = createUsersCollection()
+    const posts = createPostsCollection()
+    const query = createLiveQueryCollection((q) =>
+      q
+        .from({ user: users })
+        .select(({ user }) => ({
+          id: user.id,
+          fallbackProfile: caseWhen(gt(user.age, 100), { kind: `ancient` }, {
+            id: user.id,
+            name: user.name,
+            postTitles: toArray(
+              q
+                .from({ post: posts })
+                .where(({ post }) => eq(post.userId, user.id))
+                .orderBy(({ post }) => post.id)
+                .select(({ post }) => post.title),
+            ),
+          }),
+        }))
+        .orderBy(({ user }) => user.id),
+    )
+
+    await query.preload()
+
+    expect(
+      query.toArray.map((row) => stripVirtualPropsAndSymbols(row)),
+    ).toEqual([
+      {
+        id: 1,
+        fallbackProfile: {
+          id: 1,
+          name: `Alice`,
+          postTitles: [`Alice post A`, `Alice post B`],
+        },
+      },
+      {
+        id: 2,
+        fallbackProfile: {
+          id: 2,
+          name: `Bob`,
+          postTitles: [`Bob post`],
+        },
+      },
+      {
+        id: 3,
+        fallbackProfile: {
+          id: 3,
+          name: `Charlie`,
           postTitles: [`Charlie post`],
         },
       },

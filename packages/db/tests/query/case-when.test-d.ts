@@ -70,6 +70,38 @@ describe(`caseWhen types`, () => {
     >()
   })
 
+  test(`infers scalar variadic branch values`, () => {
+    const users = createUsers()
+    const query = createLiveQueryCollection((q) =>
+      q.from({ user: users }).select(({ user }) => ({
+        id: user.id,
+        withDefault: caseWhen(
+          gt(user.age, 25),
+          `senior`,
+          gt(user.age, 18),
+          `adult`,
+          `minor`,
+        ),
+        withoutDefault: caseWhen(
+          gt(user.age, 25),
+          `senior`,
+          gt(user.age, 18),
+          `adult`,
+        ),
+      })),
+    )
+
+    const result = query.toArray[0]!
+
+    expectTypeOf(result).toMatchTypeOf<
+      OutputWithVirtualKeyed<{
+        id: number
+        withDefault: string
+        withoutDefault: string | null
+      }>
+    >()
+  })
+
   test(`infers conditional projection values`, () => {
     const users = createUsers()
     const query = createLiveQueryCollection((q) =>
@@ -129,6 +161,101 @@ describe(`caseWhen types`, () => {
               postTitles: Array<string>
             }
           | undefined
+      }>
+    >()
+  })
+
+  test(`infers projection variadic branch values`, () => {
+    const users = createUsers()
+    const query = createLiveQueryCollection((q) =>
+      q.from({ user: users }).select(({ user }) => ({
+        id: user.id,
+        profile: caseWhen(
+          gt(user.age, 25),
+          {
+            kind: `senior`,
+            id: user.id,
+          },
+          gt(user.age, 18),
+          {
+            kind: `adult`,
+            name: user.name,
+          },
+          {
+            kind: `minor`,
+            active: user.active,
+          },
+        ),
+        maybeProfile: caseWhen(
+          gt(user.age, 25),
+          {
+            kind: `senior`,
+            id: user.id,
+          },
+          gt(user.age, 18),
+          {
+            kind: `adult`,
+            name: user.name,
+          },
+        ),
+      })),
+    )
+
+    const result = query.toArray[0]!
+
+    expectTypeOf(result).toMatchTypeOf<
+      OutputWithVirtualKeyed<{
+        id: number
+        profile:
+          | {
+              kind: string
+              id: number
+            }
+          | {
+              kind: string
+              name: string
+            }
+          | {
+              kind: string
+              active: boolean
+            }
+        maybeProfile:
+          | {
+              kind: string
+              id: number
+            }
+          | {
+              kind: string
+              name: string
+            }
+          | undefined
+      }>
+    >()
+  })
+
+  test(`accepts source alias conditions`, () => {
+    const users = createUsers()
+    const posts = createPosts()
+    const query = createLiveQueryCollection((q) =>
+      q
+        .from({ user: users })
+        .join(
+          { post: posts },
+          ({ user, post }) => eq(user.id, post.userId),
+          `left`,
+        )
+        .select(({ user, post }) => ({
+          id: user.id,
+          postStatus: caseWhen(post, `has-post`, `no-post`),
+        })),
+    )
+
+    const result = query.toArray[0]!
+
+    expectTypeOf(result).toMatchTypeOf<
+      OutputWithVirtualKeyed<{
+        id: number
+        postStatus: string
       }>
     >()
   })

@@ -68,20 +68,17 @@ type CaseWhenValue =
 type ExtractCaseWhenValue<T> =
   T extends CaseWhenWrapper<infer TResult> ? TResult : T
 
-type CaseWhenResult2<TValue> = BasicExpression<ExtractType<TValue> | null>
-type CaseWhenResult3<TThen, TElse> = BasicExpression<
-  ExtractType<TThen> | ExtractType<TElse>
->
-
-type ProjectionCaseWhenResult2<TValue> = CaseWhenWrapper<
-  ExtractCaseWhenValue<TValue> | undefined
->
-type ProjectionCaseWhenResult3<TThen, TElse> = CaseWhenWrapper<
-  ExtractCaseWhenValue<TThen> | ExtractCaseWhenValue<TElse>
->
-type ProjectionCaseWhenResult4<TFirst, TSecond> = CaseWhenWrapper<
-  ExtractCaseWhenValue<TFirst> | ExtractCaseWhenValue<TSecond> | undefined
->
+type CaseWhenResult<
+  TValues extends Array<CaseWhenValue>,
+  THasDefault extends boolean,
+> = TValues[number] extends ExpressionLike
+  ? BasicExpression<
+      ExtractType<TValues[number]> | (THasDefault extends true ? never : null)
+    >
+  : CaseWhenWrapper<
+      | ExtractCaseWhenValue<TValues[number]>
+      | (THasDefault extends true ? never : undefined)
+    >
 
 // Helper type to extract the underlying type from various expression types
 type ExtractType<T> =
@@ -376,61 +373,163 @@ export function coalesce<T extends [ExpressionLike, ...Array<ExpressionLike>]>(
   ) as CoalesceReturnType<T>
 }
 
+export function caseWhen<C1 extends ExpressionLike, V1 extends CaseWhenValue>(
+  condition1: C1,
+  value1: V1,
+): CaseWhenResult<[V1], false>
 export function caseWhen<
-  TCondition extends ExpressionLike,
-  TValue extends Record<string, any>,
+  C1 extends ExpressionLike,
+  V1 extends CaseWhenValue,
+  D extends CaseWhenValue,
 >(
-  condition: TCondition,
-  value: TValue,
-): ProjectionCaseWhenResult2<TValue>
+  condition1: C1,
+  value1: V1,
+  defaultValue: D,
+): CaseWhenResult<[V1, D], true>
 export function caseWhen<
-  TCondition extends ExpressionLike,
-  TThen extends Record<string, any>,
-  TElse,
+  C1 extends ExpressionLike,
+  V1 extends CaseWhenValue,
+  C2 extends ExpressionLike,
+  V2 extends CaseWhenValue,
 >(
-  condition: TCondition,
-  thenValue: TThen,
-  elseValue: TElse,
-): ProjectionCaseWhenResult3<TThen, TElse>
+  condition1: C1,
+  value1: V1,
+  condition2: C2,
+  value2: V2,
+): CaseWhenResult<[V1, V2], false>
 export function caseWhen<
-  TCondition extends ExpressionLike,
-  TThen,
-  TElse extends Record<string, any>,
+  C1 extends ExpressionLike,
+  V1 extends CaseWhenValue,
+  C2 extends ExpressionLike,
+  V2 extends CaseWhenValue,
+  D extends CaseWhenValue,
 >(
-  condition: TCondition,
-  thenValue: TThen,
-  elseValue: TElse,
-): ProjectionCaseWhenResult3<TThen, TElse>
+  condition1: C1,
+  value1: V1,
+  condition2: C2,
+  value2: V2,
+  defaultValue: D,
+): CaseWhenResult<[V1, V2, D], true>
 export function caseWhen<
-  TCondition1 extends ExpressionLike,
-  TFirst extends Record<string, any>,
-  TCondition2 extends ExpressionLike,
-  TSecond extends Record<string, any>,
+  C1 extends ExpressionLike,
+  V1 extends CaseWhenValue,
+  C2 extends ExpressionLike,
+  V2 extends CaseWhenValue,
+  C3 extends ExpressionLike,
+  V3 extends CaseWhenValue,
 >(
-  condition1: TCondition1,
-  firstValue: TFirst,
-  condition2: TCondition2,
-  secondValue: TSecond,
-): ProjectionCaseWhenResult4<TFirst, TSecond>
-export function caseWhen<TCondition extends ExpressionLike, TValue>(
-  condition: TCondition,
-  value: TValue,
-): TValue extends ExpressionLike
-  ? CaseWhenResult2<TValue>
-  : ProjectionCaseWhenResult2<TValue>
+  condition1: C1,
+  value1: V1,
+  condition2: C2,
+  value2: V2,
+  condition3: C3,
+  value3: V3,
+): CaseWhenResult<[V1, V2, V3], false>
 export function caseWhen<
-  TCondition extends ExpressionLike,
-  TThen,
-  TElse,
+  C1 extends ExpressionLike,
+  V1 extends CaseWhenValue,
+  C2 extends ExpressionLike,
+  V2 extends CaseWhenValue,
+  C3 extends ExpressionLike,
+  V3 extends CaseWhenValue,
+  D extends CaseWhenValue,
 >(
-  condition: TCondition,
-  thenValue: TThen,
-  elseValue: TElse,
-): TThen extends ExpressionLike
-  ? TElse extends ExpressionLike
-    ? CaseWhenResult3<TThen, TElse>
-    : ProjectionCaseWhenResult3<TThen, TElse>
-  : ProjectionCaseWhenResult3<TThen, TElse>
+  condition1: C1,
+  value1: V1,
+  condition2: C2,
+  value2: V2,
+  condition3: C3,
+  value3: V3,
+  defaultValue: D,
+): CaseWhenResult<[V1, V2, V3, D], true>
+export function caseWhen<
+  C1 extends ExpressionLike,
+  V1 extends CaseWhenValue,
+  C2 extends ExpressionLike,
+  V2 extends CaseWhenValue,
+  C3 extends ExpressionLike,
+  V3 extends CaseWhenValue,
+  C4 extends ExpressionLike,
+  V4 extends CaseWhenValue,
+>(
+  condition1: C1,
+  value1: V1,
+  condition2: C2,
+  value2: V2,
+  condition3: C3,
+  value3: V3,
+  condition4: C4,
+  value4: V4,
+): CaseWhenResult<[V1, V2, V3, V4], false>
+export function caseWhen<
+  C1 extends ExpressionLike,
+  V1 extends CaseWhenValue,
+  C2 extends ExpressionLike,
+  V2 extends CaseWhenValue,
+  C3 extends ExpressionLike,
+  V3 extends CaseWhenValue,
+  C4 extends ExpressionLike,
+  V4 extends CaseWhenValue,
+  D extends CaseWhenValue,
+>(
+  condition1: C1,
+  value1: V1,
+  condition2: C2,
+  value2: V2,
+  condition3: C3,
+  value3: V3,
+  condition4: C4,
+  value4: V4,
+  defaultValue: D,
+): CaseWhenResult<[V1, V2, V3, V4, D], true>
+export function caseWhen<
+  C1 extends ExpressionLike,
+  V1 extends CaseWhenValue,
+  C2 extends ExpressionLike,
+  V2 extends CaseWhenValue,
+  C3 extends ExpressionLike,
+  V3 extends CaseWhenValue,
+  C4 extends ExpressionLike,
+  V4 extends CaseWhenValue,
+  C5 extends ExpressionLike,
+  V5 extends CaseWhenValue,
+>(
+  condition1: C1,
+  value1: V1,
+  condition2: C2,
+  value2: V2,
+  condition3: C3,
+  value3: V3,
+  condition4: C4,
+  value4: V4,
+  condition5: C5,
+  value5: V5,
+): CaseWhenResult<[V1, V2, V3, V4, V5], false>
+export function caseWhen<
+  C1 extends ExpressionLike,
+  V1 extends CaseWhenValue,
+  C2 extends ExpressionLike,
+  V2 extends CaseWhenValue,
+  C3 extends ExpressionLike,
+  V3 extends CaseWhenValue,
+  C4 extends ExpressionLike,
+  V4 extends CaseWhenValue,
+  C5 extends ExpressionLike,
+  V5 extends CaseWhenValue,
+  D extends CaseWhenValue,
+>(
+  condition1: C1,
+  value1: V1,
+  condition2: C2,
+  value2: V2,
+  condition3: C3,
+  value3: V3,
+  condition4: C4,
+  value4: V4,
+  condition5: C5,
+  value5: V5,
+  defaultValue: D,
+): CaseWhenResult<[V1, V2, V3, V4, V5, D], true>
 export function caseWhen(...args: Array<CaseWhenValue>): any {
   if (args.length < 2) {
     throw new Error(`caseWhen() requires at least two arguments`)
