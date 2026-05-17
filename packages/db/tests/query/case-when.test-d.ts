@@ -165,6 +165,41 @@ describe(`caseWhen types`, () => {
     >()
   })
 
+  test(`infers Collection includes inside conditional projection values`, () => {
+    const users = createUsers()
+    const posts = createPosts()
+    const query = createLiveQueryCollection((q) =>
+      q.from({ user: users }).select(({ user }) => ({
+        id: user.id,
+        adultProfile: caseWhen(gt(user.age, 18), {
+          id: user.id,
+          posts: q
+            .from({ post: posts })
+            .where(({ post }) => eq(post.userId, user.id))
+            .select(({ post }) => ({
+              title: post.title,
+            })),
+        }),
+      })),
+    )
+
+    const result = query.toArray[0]!
+
+    expectTypeOf(result).toExtend<
+      OutputWithVirtualKeyed<{
+        id: number
+        adultProfile:
+          | {
+              id: number
+              posts: {
+                toArray: Array<OutputWithVirtual<{ title: string }>>
+              }
+            }
+          | undefined
+      }>
+    >()
+  })
+
   test(`infers projection variadic branch values`, () => {
     const users = createUsers()
     const query = createLiveQueryCollection((q) =>

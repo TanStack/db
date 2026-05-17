@@ -72,6 +72,10 @@ function stripVirtualPropsAndSymbols(value: any): any {
   return value
 }
 
+function childRows(collection: any): Array<any> {
+  return [...collection.toArray].map((row) => stripVirtualPropsAndSymbols(row))
+}
+
 describe(`caseWhen`, () => {
   test(`returns scalar branch values`, async () => {
     const users = createUsersCollection()
@@ -362,6 +366,72 @@ describe(`caseWhen`, () => {
           postTitles: [`Charlie post`],
         },
       },
+    ])
+  })
+
+  test(`materializes Collection includes inside conditional projection branches`, async () => {
+    const users = createUsersCollection()
+    const posts = createPostsCollection()
+    const query = createLiveQueryCollection((q) =>
+      q
+        .from({ user: users })
+        .select(({ user }) => {
+          const profile = {
+            id: user.id,
+            name: user.name,
+            label: `adult`,
+            posts: q
+              .from({ post: posts })
+              .where(({ post }) => eq(post.userId, user.id))
+              .orderBy(({ post }) => post.id)
+              .select(({ post }) => ({
+                title: post.title,
+              })),
+          }
+
+          return {
+            id: user.id,
+            profile: caseWhen(gt(user.age, 18), profile, `none`),
+          }
+        })
+        .orderBy(({ user }) => user.id),
+    )
+
+    await query.preload()
+
+    const alice = query.toArray[0]!
+    const bob = query.toArray[1]!
+    const charlie = query.toArray[2]!
+    expect(alice.profile).not.toBe(`none`)
+    expect(charlie.profile).not.toBe(`none`)
+    if (alice.profile === `none` || charlie.profile === `none`) {
+      throw new Error(`Expected adult profiles to be projected objects`)
+    }
+    expect({
+      id: alice.profile.id,
+      name: alice.profile.name,
+      label: alice.profile.label,
+    }).toEqual({
+      id: 1,
+      name: `Alice`,
+      label: `adult`,
+    })
+    expect(childRows(alice.profile.posts)).toEqual([
+      { title: `Alice post A` },
+      { title: `Alice post B` },
+    ])
+    expect(bob.profile).toBe(`none`)
+    expect({
+      id: charlie.profile.id,
+      name: charlie.profile.name,
+      label: charlie.profile.label,
+    }).toEqual({
+      id: 3,
+      name: `Charlie`,
+      label: `adult`,
+    })
+    expect(childRows(charlie.profile.posts)).toEqual([
+      { title: `Charlie post` },
     ])
   })
 
