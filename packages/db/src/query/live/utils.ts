@@ -28,6 +28,10 @@ export function extractCollectionsFromQuery(
     } else if (source.type === `queryRef`) {
       // Recursively extract from subquery
       extractFromQuery(source.query)
+    } else if (source.type === `unionFrom`) {
+      for (const childSource of source.sources) {
+        extractFromSource(childSource)
+      }
     }
   }
 
@@ -107,6 +111,8 @@ export function extractCollectionFromSource(
   } else if (from.type === `queryRef`) {
     // Recursively extract from subquery
     return extractCollectionFromSource(from.query)
+  } else if (from.type === `unionFrom`) {
+    return extractCollectionFromSource({ from: from.sources[0] })
   }
 
   throw new Error(
@@ -155,6 +161,10 @@ export function extractCollectionAliases(
       }
     } else if (source.type === `queryRef`) {
       traverse(source.query)
+    } else if (source.type === `unionFrom`) {
+      for (const childSource of source.sources) {
+        recordAlias(childSource)
+      }
     }
   }
 

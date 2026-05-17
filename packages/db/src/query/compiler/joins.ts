@@ -221,7 +221,7 @@ function processJoin(
     throw new UnsupportedJoinTypeError(joinClause.type)
   }
 
-  if (activeSource) {
+  if (activeSource && rawQuery.from.type !== `unionFrom`) {
     // If the lazy collection comes from a subquery that has a limit and/or an offset clause
     // then we need to deoptimize the join because we don't know which rows are in the result set
     // since we simply lookup matching keys in the index but the index contains all rows
@@ -366,46 +366,60 @@ function analyzeJoinExpressions(
     (alias) => alias !== joinedSource,
   )
 
-  const leftSourceAlias = getSourceAliasFromExpression(left)
-  const rightSourceAlias = getSourceAliasFromExpression(right)
+  const leftSourceAliases = getSourceAliasesFromExpression(left)
+  const rightSourceAliases = getSourceAliasesFromExpression(right)
+  const leftReferencesJoined = leftSourceAliases.has(joinedSource)
+  const rightReferencesJoined = rightSourceAliases.has(joinedSource)
+  const leftAvailableAliases = [...leftSourceAliases].filter((alias) =>
+    availableSources.includes(alias),
+  )
+  const rightAvailableAliases = [...rightSourceAliases].filter((alias) =>
+    availableSources.includes(alias),
+  )
 
   // If left expression refers to an available source and right refers to joined source, keep as is
   if (
-    leftSourceAlias &&
-    availableSources.includes(leftSourceAlias) &&
-    rightSourceAlias === joinedSource
+    leftAvailableAliases.length > 0 &&
+    !leftReferencesJoined &&
+    rightReferencesJoined &&
+    rightAvailableAliases.length === 0
   ) {
     return { mainExpr: left, joinedExpr: right }
   }
 
   // If left expression refers to joined source and right refers to an available source, swap them
   if (
-    leftSourceAlias === joinedSource &&
-    rightSourceAlias &&
-    availableSources.includes(rightSourceAlias)
+    leftReferencesJoined &&
+    leftAvailableAliases.length === 0 &&
+    rightAvailableAliases.length > 0 &&
+    !rightReferencesJoined
   ) {
     return { mainExpr: right, joinedExpr: left }
   }
 
   // If one expression doesn't refer to any source, this is an invalid join
-  if (!leftSourceAlias || !rightSourceAlias) {
+  if (leftSourceAliases.size === 0 || rightSourceAliases.size === 0) {
     throw new InvalidJoinConditionSourceMismatchError()
   }
 
   // If both expressions refer to the same alias, this is an invalid join
-  if (leftSourceAlias === rightSourceAlias) {
-    throw new InvalidJoinConditionSameSourceError(leftSourceAlias)
+  if (
+    leftSourceAliases.size === 1 &&
+    rightSourceAliases.size === 1 &&
+    [...leftSourceAliases][0] === [...rightSourceAliases][0]
+  ) {
+    throw new InvalidJoinConditionSameSourceError([...leftSourceAliases][0]!)
   }
 
   // Left side must refer to an available source
   // This cannot happen with the query builder as there is no way to build a ref
   // to an unavailable source, but just in case, but could happen with the IR
-  if (!availableSources.includes(leftSourceAlias)) {
-    throw new InvalidJoinConditionLeftSourceError(leftSourceAlias)
+  if (leftAvailableAliases.length === 0) {
+    throw new InvalidJoinConditionLeftSourceError([...leftSourceAliases][0]!)
   }
 
   // Right side must refer to the joined source
-  if (rightSourceAlias !== joinedSource) {
+  if (!rightReferencesJoined) {
     throw new InvalidJoinConditionRightSourceError(joinedSource)
   }
 
@@ -416,26 +430,24 @@ function analyzeJoinExpressions(
 /**
  * Extracts the source alias from a join expression
  */
-function getSourceAliasFromExpression(expr: BasicExpression): string | null {
+function getSourceAliasesFromExpression(expr: BasicExpression): Set<string> {
   switch (expr.type) {
     case `ref`:
       // PropRef path has the source alias as the first element
-      return expr.path[0] || null
+      return new Set(expr.path[0] ? [expr.path[0]] : [])
     case `func`: {
       // For function expressions, we need to check if all arguments refer to the same source
       const sourceAliases = new Set<string>()
       for (const arg of expr.args) {
-        const alias = getSourceAliasFromExpression(arg)
-        if (alias) {
+        for (const alias of getSourceAliasesFromExpression(arg)) {
           sourceAliases.add(alias)
         }
       }
-      // If all arguments refer to the same source, return that source alias
-      return sourceAliases.size === 1 ? Array.from(sourceAliases)[0]! : null
+      return sourceAliases
     }
     default:
       // Values (type='val') don't reference any source
-      return null
+      return new Set()
   }
 }
 
@@ -505,7 +517,7 @@ function processJoinSource(
       // For optimizer-created subqueries, the parent already has the sourceWhereClauses
       // extracted from the original raw query, so pulling up would be redundant.
       const isUserDefinedSubquery = queryMapping.has(from.query)
-      const fromInnerAlias = from.query.from.alias
+      const fromInnerAlias = getFirstFromAlias(from.query)
       const isOptimizerCreated =
         !isUserDefinedSubquery && from.alias === fromInnerAlias
 
@@ -556,6 +568,12 @@ function processJoinSource(
     default:
       throw new UnsupportedJoinSourceTypeError((from as any).type)
   }
+}
+
+function getFirstFromAlias(query: QueryIR): string {
+  return query.from.type === `unionFrom`
+    ? query.from.sources[0]!.alias
+    : query.from.alias
 }
 
 /**
