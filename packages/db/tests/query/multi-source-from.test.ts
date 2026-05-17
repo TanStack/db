@@ -7,7 +7,12 @@ import {
   eq,
   toArray,
 } from '../../src/query/index.js'
-import { mockSyncCollectionOptions, stripVirtualProps } from '../utils.js'
+import {
+  flushPromises,
+  mockSyncCollectionOptions,
+  stripVirtualProps,
+} from '../utils.js'
+import { OnlyOneSourceAllowedError } from '../../src/errors.js'
 
 type Message = {
   id: number
@@ -87,6 +92,7 @@ function createUsersCollection(id: string) {
       initialData: [
         { id: 1, name: `Alice` },
         { id: 2, name: `Bob` },
+        { id: 4, name: `Unmatched` },
       ],
     }),
   )
@@ -257,6 +263,135 @@ describe(`multi-source from`, () => {
       { messageId: undefined, toolCallId: 1, userName: `Alice`, timestamp: 20 },
       { messageId: 2, toolCallId: undefined, userName: `Bob`, timestamp: 30 },
     ])
+  })
+
+  it(`supports right joins after multi-source from`, async () => {
+    const messages = createMessagesCollection(`multi-source-messages-right-join`)
+    const toolCalls = createToolCallsCollection(`multi-source-tools-right-join`)
+    const users = createUsersCollection(`multi-source-users-right-join`)
+
+    const collection = createLiveQueryCollection((q) =>
+      q
+        .from({
+          message: messages,
+          toolCall: toolCalls,
+        })
+        .rightJoin(
+          { user: users },
+          ({ message, toolCall, user }) =>
+            eq(coalesce(message.userId, toolCall.userId), user.id),
+        )
+        .orderBy(({ user }) => user.id),
+    )
+
+    await collection.preload()
+
+    expect(collection.toArray.map((row) => stripVirtualPropsDeep(row))).toEqual([
+      {
+        message: expect.objectContaining({ id: 1 }),
+        user: expect.objectContaining({ id: 1, name: `Alice` }),
+      },
+      {
+        toolCall: expect.objectContaining({ id: 1 }),
+        user: expect.objectContaining({ id: 1, name: `Alice` }),
+      },
+      {
+        message: expect.objectContaining({ id: 2 }),
+        user: expect.objectContaining({ id: 2, name: `Bob` }),
+      },
+      {
+        user: expect.objectContaining({ id: 4, name: `Unmatched` }),
+      },
+    ])
+  })
+
+  it(`supports distinct over selected multi-source rows`, async () => {
+    const messages = createMessagesCollection(`multi-source-messages-distinct`)
+    const toolCalls = createToolCallsCollection(`multi-source-tools-distinct`)
+
+    const collection = createLiveQueryCollection((q) =>
+      q
+        .from({
+          message: messages,
+          toolCall: toolCalls,
+        })
+        .select(({ message, toolCall }) => ({
+          id: coalesce(message.id, toolCall.id),
+        }))
+        .distinct()
+        .orderBy(({ $selected }) => $selected.id),
+    )
+
+    await collection.preload()
+
+    expect(collection.toArray.map((row) => stripVirtualProps(row))).toEqual([
+      { id: 1 },
+      { id: 2 },
+      { id: 3 },
+    ])
+  })
+
+  it(`reacts to insert, update, and delete changes from each branch`, async () => {
+    const messages = createMessagesCollection(`multi-source-messages-live`)
+    const toolCalls = createToolCallsCollection(`multi-source-tools-live`)
+
+    const collection = createLiveQueryCollection((q) =>
+      q
+        .from({
+          message: messages,
+          toolCall: toolCalls,
+        })
+        .orderBy(({ message, toolCall }) =>
+          coalesce(message.timestamp, toolCall.timestamp),
+        ),
+    )
+
+    await collection.preload()
+    expect(collection.size).toBe(4)
+
+    messages.insert({
+      id: 4,
+      text: `new`,
+      kind: `visible`,
+      timestamp: 50,
+      userId: 1,
+    })
+    toolCalls.insert({ id: 5, name: `read`, timestamp: 60, userId: 2 })
+    await flushPromises()
+    expect(collection.size).toBe(6)
+
+    toolCalls.update(3, (draft) => {
+      draft.name = `updated`
+    })
+    await flushPromises()
+    expect(
+      collection.toArray.some((row: any) => row.toolCall?.name === `updated`),
+    ).toBe(true)
+
+    messages.delete(2)
+    toolCalls.delete(1)
+    await flushPromises()
+    expect(collection.size).toBe(4)
+    expect(
+      collection.toArray.some(
+        (row: any) => row.message?.id === 2 || row.toolCall?.id === 1,
+      ),
+    ).toBe(false)
+  })
+
+  it(`rejects multiple sources in one join call`, () => {
+    const messages = createMessagesCollection(`multi-source-messages-join-error`)
+    const toolCalls = createToolCallsCollection(`multi-source-tools-join-error`)
+    const users = createUsersCollection(`multi-source-users-join-error`)
+
+    expect(() =>
+      createLiveQueryCollection((q) =>
+        q.from({ message: messages }).join(
+          { toolCall: toolCalls, user: users },
+          ({ message, toolCall }) => eq(message.id, toolCall.id),
+        ),
+      ),
+    ).toThrow(OnlyOneSourceAllowedError)
   })
 
   it(`materializes guarded includes only for matching union branches`, async () => {

@@ -489,12 +489,13 @@ The foundation of every query is the `from` method, which specifies the source c
 
 ```ts
 from({
-  [alias]: Collection | Query,
+  [alias]: Collection | Query
+  // Additional aliases may be provided for multi-source queries.
 }): Query
 ```
 
 **Parameters:**
-- `[alias]` - A Collection or Query instance. Note that only a single aliased collection or subquery is allowed in the `from` clause.
+- `[alias]` - A Collection or Query instance. Provide one alias for a normal single-source query, or multiple aliases to combine independent sources into one live collection.
 
 ### Basic Usage
 
@@ -537,6 +538,39 @@ const userNames = createCollection(liveQueryCollectionOptions({
       }))
 }))
 ```
+
+### Multi-Source `from`
+
+You can pass multiple aliases to `from()` to combine independent collections or
+subqueries without a join. Conceptually, this behaves like `UNION ALL`: each
+result row comes from exactly one source alias, and inactive aliases are
+`undefined`.
+
+```ts
+import { coalesce } from '@tanstack/db'
+
+const timeline = createLiveQueryCollection((q) =>
+  q
+    .from({
+      message: messagesCollection,
+      toolCall: toolCallsCollection,
+    })
+    .orderBy(({ message, toolCall }) =>
+      coalesce(message.timestamp, toolCall.timestamp),
+    )
+)
+```
+
+Without `select()`, the result type is an exclusive union:
+
+```ts
+type TimelineRow =
+  | { message: Message; toolCall?: undefined }
+  | { message?: undefined; toolCall: ToolCall }
+```
+
+Use subqueries when each branch needs its own filtering or shaping before the
+sources are combined.
 
 ## Where Clauses
 
@@ -1660,6 +1694,29 @@ const sortedUsers = createLiveQueryCollection((q) =>
     }))
 )
 ```
+
+### Multi-Source Ordering
+
+When ordering a multi-source `from` query, use a combined expression such as
+`coalesce()` to produce one comparable value across branches:
+
+```ts
+const timeline = createLiveQueryCollection((q) =>
+  q
+    .from({
+      message: messagesCollection,
+      toolCall: toolCallsCollection,
+    })
+    .orderBy(({ message, toolCall }) =>
+      coalesce(message.timestamp, toolCall.timestamp),
+    )
+)
+```
+
+If the order expression sorts strings and the branch collections have different
+default string collation settings, TanStack DB uses the first source collection's
+collation as the default. Pass explicit `orderBy` compare options when you need
+a specific string collation for the combined ordering.
 
 ### Ordering by SELECT Fields
 

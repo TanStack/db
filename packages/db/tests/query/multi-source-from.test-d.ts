@@ -3,6 +3,7 @@ import { createCollection } from '../../src/collection/index.js'
 import {
   coalesce,
   createLiveQueryCollection,
+  eq,
 } from '../../src/query/index.js'
 import { mockSyncCollectionOptions } from '../utils.js'
 import type { OutputWithVirtual } from '../utils.js'
@@ -11,16 +12,24 @@ type Message = {
   id: number
   text: string
   timestamp: number
+  userId: number
 }
 
 type ToolCall = {
   id: number
   name: string
   timestamp: number
+  userId: number
+}
+
+type User = {
+  id: number
+  name: string
 }
 
 type MessageRow = OutputWithVirtual<Message>
 type ToolCallRow = OutputWithVirtual<ToolCall>
+type UserRow = OutputWithVirtual<User>
 
 function createMessages() {
   return createCollection(
@@ -37,6 +46,16 @@ function createToolCalls() {
     mockSyncCollectionOptions<ToolCall>({
       id: `multi-source-type-tools`,
       getKey: (toolCall) => toolCall.id,
+      initialData: [],
+    }),
+  )
+}
+
+function createUsers() {
+  return createCollection(
+    mockSyncCollectionOptions<User>({
+      id: `multi-source-type-users`,
+      getKey: (user) => user.id,
       initialData: [],
     }),
   )
@@ -114,5 +133,111 @@ describe(`multi-source from types`, () => {
     expectTypeOf(row.timestamp).toEqualTypeOf<number>()
     expectTypeOf(messageCanBeUndefined).toEqualTypeOf<undefined>()
     expectTypeOf(toolCallCanBeUndefined).toEqualTypeOf<undefined>()
+  })
+
+  test(`no-select left joins include joined aliases in each union branch`, () => {
+    const messages = createMessages()
+    const toolCalls = createToolCalls()
+    const users = createUsers()
+
+    const collection = createLiveQueryCollection((q) =>
+      q
+        .from({
+          message: messages,
+          toolCall: toolCalls,
+        })
+        .leftJoin(
+          { user: users },
+          ({ message, toolCall, user }) =>
+            eq(coalesce(message.userId, toolCall.userId), user.id),
+        ),
+    )
+
+    expectTypeOf(collection.toArray).toMatchTypeOf<
+      Array<
+        OutputWithVirtual<
+          | {
+              message: MessageRow
+              toolCall?: undefined
+              user: UserRow | undefined
+            }
+          | {
+              message?: undefined
+              toolCall: ToolCallRow
+              user: UserRow | undefined
+            }
+        >
+      >
+    >()
+  })
+
+  test(`right joins allow rows with only the joined side`, () => {
+    const messages = createMessages()
+    const toolCalls = createToolCalls()
+    const users = createUsers()
+
+    const collection = createLiveQueryCollection((q) =>
+      q
+        .from({
+          message: messages,
+          toolCall: toolCalls,
+        })
+        .rightJoin(
+          { user: users },
+          ({ message, toolCall, user }) =>
+            eq(coalesce(message.userId, toolCall.userId), user.id),
+        ),
+    )
+
+    expectTypeOf(collection.toArray).toMatchTypeOf<
+      Array<
+        OutputWithVirtual<
+          | { message: MessageRow; toolCall?: undefined; user: UserRow }
+          | { message?: undefined; toolCall: ToolCallRow; user: UserRow }
+          | { message?: undefined; toolCall?: undefined; user: UserRow }
+        >
+      >
+    >()
+  })
+
+  test(`full joins apply left-side optionality to all union branches`, () => {
+    const messages = createMessages()
+    const toolCalls = createToolCalls()
+    const users = createUsers()
+
+    const collection = createLiveQueryCollection((q) =>
+      q
+        .from({
+          message: messages,
+          toolCall: toolCalls,
+        })
+        .fullJoin(
+          { user: users },
+          ({ message, toolCall, user }) =>
+            eq(coalesce(message.userId, toolCall.userId), user.id),
+        ),
+    )
+
+    expectTypeOf(collection.toArray).toMatchTypeOf<
+      Array<
+        OutputWithVirtual<
+          | {
+              message: MessageRow
+              toolCall?: undefined
+              user: UserRow | undefined
+            }
+          | {
+              message?: undefined
+              toolCall: ToolCallRow
+              user: UserRow | undefined
+            }
+          | {
+              message?: undefined
+              toolCall?: undefined
+              user: UserRow | undefined
+            }
+        >
+      >
+    >()
   })
 })
