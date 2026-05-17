@@ -796,7 +796,7 @@ export type MergeContextWithJoinType<
     TContext[`schema`],
     TNewSchema,
     TJoinType,
-    TContext[`fromSourceName`]
+    FromSourceNamesForOptionality<TContext>
   >
   fromSourceName: TContext[`fromSourceName`]
   hasJoins: true
@@ -841,10 +841,10 @@ export type ApplyJoinOptionalityToMergedSchema<
   TExistingSchema extends ContextSchema,
   TNewSchema extends ContextSchema,
   TJoinType extends `inner` | `left` | `right` | `full` | `outer` | `cross`,
-  TFromSourceName extends string,
+  TFromSourceNames extends string,
 > = {
   // Apply optionality to existing schema based on new join type
-  [K in keyof TExistingSchema]: K extends TFromSourceName
+  [K in keyof TExistingSchema]: K extends TFromSourceNames
     ? // Main table becomes optional if the new join is a right or full join
       TJoinType extends `right` | `full`
       ? TExistingSchema[K] | undefined
@@ -873,24 +873,53 @@ type WithVirtualPropsIfObject<TResult> = TResult extends object
   : TResult
 
 type PrettifyIfPlainObject<T> = IsPlainObject<T> extends true ? Prettify<T> : T
+type FromSourceNamesForOptionality<TContext extends Context> =
+  TContext[`fromSourceNames`] extends ReadonlyArray<infer TName>
+    ? TName & string
+    : TContext[`fromSourceName`]
+type HasRightOrFullJoin<TContext extends Context> =
+  TContext[`joinTypes`] extends Record<string, infer TJoinType>
+    ? Extract<TJoinType, `right` | `full`> extends never
+      ? false
+      : true
+    : false
+type JoinedOnlyUnionFromResult<
+  TBaseSchema extends ContextSchema,
+  TSchema extends ContextSchema,
+> = Prettify<
+  {
+    [P in keyof TBaseSchema]?: undefined
+  } & {
+    [P in Exclude<keyof TSchema, keyof TBaseSchema>]: TSchema[P]
+  }
+>
 type UnionFromResult<
   TBaseSchema extends ContextSchema,
   TSchema extends ContextSchema,
-> = {
-  [K in keyof TBaseSchema]: Prettify<
-    {
-      [P in K]: NonUndefined<TSchema[Extract<P, keyof TSchema>]>
-    } & {
-      [P in Exclude<keyof TBaseSchema, K>]?: undefined
-    } & {
-      [P in Exclude<keyof TSchema, keyof TBaseSchema>]: TSchema[P]
-    }
-  >
-}[keyof TBaseSchema]
+  THasJoinedOnlyBranch extends boolean = false,
+> =
+  | {
+      [K in keyof TBaseSchema]: Prettify<
+        {
+          [P in K]: NonUndefined<TSchema[Extract<P, keyof TSchema>]>
+        } & {
+          [P in Exclude<keyof TBaseSchema, K>]?: undefined
+        } & {
+          [P in Exclude<keyof TSchema, keyof TBaseSchema>]: TSchema[P]
+        }
+      >
+    }[keyof TBaseSchema]
+  | (THasJoinedOnlyBranch extends true
+      ? JoinedOnlyUnionFromResult<TBaseSchema, TSchema>
+      : never)
 type ResultValue<TContext extends Context> = TContext[`hasResult`] extends true
   ? WithVirtualPropsIfObject<TContext[`result`]>
   : TContext[`hasUnionFrom`] extends true
-    ? UnionFromResult<TContext[`baseSchema`], TContext[`schema`]>
+    ? UnionFromResult<
+        TContext[`baseSchema`],
+        TContext[`schema`],
+        HasRightOrFullJoin<TContext>
+      >
     : TContext[`hasJoins`] extends true
     ? TContext[`schema`]
     : TContext[`schema`][TContext[`fromSourceName`]]

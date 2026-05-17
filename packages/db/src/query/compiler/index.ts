@@ -350,6 +350,9 @@ export function compileQuery(
         }))
         parentKeys = pipeline.pipe(
           map(([_key, nsRow]: any) => {
+            if (!matchesConditionalSelectGuards(compiledGuards, nsRow)) {
+              return [SKIP_INCLUDE, null] as any
+            }
             const parentContext: Record<string, Record<string, any>> = {}
             for (const proj of compiledProjections) {
               if (!parentContext[proj.alias]) {
@@ -365,9 +368,6 @@ export function compileQuery(
                 target = target[proj.field[i]!]
               }
               target[proj.field[proj.field.length - 1]!] = value
-            }
-            if (!matchesConditionalSelectGuards(compiledGuards, nsRow)) {
-              return [SKIP_INCLUDE, null] as any
             }
             return [compiledCorrelation(nsRow), parentContext] as any
           }),

@@ -376,6 +376,9 @@ export function processOrderBy(
 /**
  * Builds a comparison configuration object that uses the values provided in the orderBy clause.
  * If no string sort configuration is provided it defaults to the collection's string sort configuration.
+ * Multi-source FROM queries pass their first source collection here as the
+ * documented default. Use explicit orderBy compare options when branches need
+ * different string collation behavior.
  */
 export function buildCompareOptions(
   clause: OrderByClause,
