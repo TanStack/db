@@ -1,8 +1,10 @@
 import { describe, expect, it } from 'vitest'
 import { createCollection } from '../../src/collection/index.js'
+import { BTreeIndex } from '../../src/indexes/btree-index.js'
 import {
   caseWhen,
   coalesce,
+  concat,
   createLiveQueryCollection,
   eq,
   toArray,
@@ -13,6 +15,7 @@ import {
   stripVirtualProps,
 } from '../utils.js'
 import { OnlyOneSourceAllowedError } from '../../src/errors.js'
+import type { LoadSubsetOptions } from '../../src/types.js'
 
 type Message = {
   id: number
@@ -38,6 +41,11 @@ type Chunk = {
 type User = {
   id: number
   name: string
+}
+
+type LabelRow = {
+  id: number
+  label: string
 }
 
 const messagesData: Array<Message> = [
@@ -95,6 +103,53 @@ function createUsersCollection(id: string) {
         { id: 4, name: `Unmatched` },
       ],
     }),
+  )
+}
+
+function createCollectionWithLoadSubsetTracking<T extends object>(
+  id: string,
+  getKey: (row: T) => string | number,
+  initialData: Array<T>,
+) {
+  const loadSubsetCalls: Array<LoadSubsetOptions> = []
+
+  const collection = createCollection<T>({
+    id,
+    getKey,
+    autoIndex: `eager`,
+    defaultIndexType: BTreeIndex,
+    syncMode: `on-demand`,
+    sync: {
+      sync: ({ begin, write, commit, markReady }) => {
+        begin()
+        for (const row of initialData) {
+          write({ type: `insert`, value: row })
+        }
+        commit()
+        markReady()
+
+        return {
+          loadSubset: (options: LoadSubsetOptions) => {
+            loadSubsetCalls.push(options)
+            return Promise.resolve()
+          },
+        }
+      },
+    },
+  })
+
+  return { collection, loadSubsetCalls }
+}
+
+function createUsersCollectionWithLoadSubsetTracking(id: string) {
+  return createCollectionWithLoadSubsetTracking<User>(
+    id,
+    (user) => user.id,
+    [
+      { id: 1, name: `Alice` },
+      { id: 2, name: `Bob` },
+      { id: 4, name: `Unmatched` },
+    ],
   )
 }
 
@@ -178,6 +233,52 @@ describe(`multi-source from`, () => {
         row.message ? `message:${row.message.id}` : `tool:${row.toolCall.id}`,
       ),
     ).toEqual([`message:1`, `tool:1`, `message:2`, `tool:3`])
+  })
+
+  it(`uses the first source collation when ordering mixed string branches`, async () => {
+    const messages = createCollection(
+      mockSyncCollectionOptions<LabelRow>({
+        id: `multi-source-messages-string-collation`,
+        getKey: (row) => row.id,
+        initialData: [{ id: 1, label: `Charlie` }],
+        defaultStringCollation: {
+          stringSort: `lexical`,
+        },
+      }),
+    )
+    const toolCalls = createCollection(
+      mockSyncCollectionOptions<LabelRow>({
+        id: `multi-source-tools-string-collation`,
+        getKey: (row) => row.id,
+        initialData: [
+          { id: 1, label: `alice` },
+          { id: 2, label: `bob` },
+        ],
+        defaultStringCollation: {
+          stringSort: `locale`,
+        },
+      }),
+    )
+
+    const collection = createLiveQueryCollection((q) =>
+      q
+        .from({
+          message: messages,
+          toolCall: toolCalls,
+        })
+        .select(({ message, toolCall }) => ({
+          label: coalesce(message.label, toolCall.label),
+        }))
+        .orderBy(({ $selected }) => $selected.label),
+    )
+
+    await collection.preload()
+
+    expect(collection.toArray.map((row) => row.label)).toEqual([
+      `Charlie`,
+      `alice`,
+      `bob`,
+    ])
   })
 
   it(`keeps where semantics global after union`, async () => {
@@ -358,6 +459,237 @@ describe(`multi-source from`, () => {
         user: expect.objectContaining({ id: 4, name: `Unmatched` }),
       },
     ])
+  })
+
+  it(`supports full joins after multi-source from`, async () => {
+    const messages = createMessagesCollection(`multi-source-messages-full-join`)
+    const toolCalls = createToolCallsCollection(`multi-source-tools-full-join`)
+    const users = createUsersCollection(`multi-source-users-full-join`)
+
+    const collection = createLiveQueryCollection((q) =>
+      q
+        .from({
+          message: messages,
+          toolCall: toolCalls,
+        })
+        .fullJoin(
+          { user: users },
+          ({ message, toolCall, user }) =>
+            eq(coalesce(message.userId, toolCall.userId), user.id),
+        )
+        .orderBy(({ message, toolCall, user }) =>
+          coalesce(message.timestamp, toolCall.timestamp, user.id),
+        ),
+    )
+
+    await collection.preload()
+
+    expect(collection.toArray.map((row) => stripVirtualPropsDeep(row))).toEqual([
+      {
+        user: expect.objectContaining({ id: 4, name: `Unmatched` }),
+      },
+      {
+        message: expect.objectContaining({ id: 1 }),
+        user: expect.objectContaining({ id: 1, name: `Alice` }),
+      },
+      {
+        toolCall: expect.objectContaining({ id: 1 }),
+        user: expect.objectContaining({ id: 1, name: `Alice` }),
+      },
+      {
+        message: expect.objectContaining({ id: 2 }),
+        user: expect.objectContaining({ id: 2, name: `Bob` }),
+      },
+      {
+        toolCall: expect.objectContaining({ id: 3 }),
+      },
+    ])
+  })
+
+  it(`does not lazy-load branch-dependent joins after multi-source from`, async () => {
+    const messages = createMessagesCollection(`multi-source-messages-no-lazy`)
+    const toolCalls = createToolCallsCollection(`multi-source-tools-no-lazy`)
+    const { collection: users, loadSubsetCalls } =
+      createUsersCollectionWithLoadSubsetTracking(`multi-source-users-no-lazy`)
+
+    const collection = createLiveQueryCollection((q) =>
+      q
+        .from({
+          message: messages,
+          toolCall: toolCalls,
+        })
+        .join(
+          { user: users },
+          ({ message, toolCall, user }) =>
+            eq(coalesce(message.userId, toolCall.userId), user.id),
+          `inner`,
+        )
+        .select(({ message, toolCall, user }) => ({
+          id: coalesce(message.id, toolCall.id),
+          userName: user.name,
+        })),
+    )
+
+    await collection.preload()
+
+    expect(collection.size).toBe(3)
+    expect(loadSubsetCalls.every((call) => call.where === undefined)).toBe(true)
+  })
+
+  it(`lazy-loads each branch when joining to a multi-source subquery`, async () => {
+    const { collection: messages, loadSubsetCalls: messageLoadSubsetCalls } =
+      createCollectionWithLoadSubsetTracking<Message>(
+        `multi-source-messages-lazy-subquery-join`,
+        (message) => message.id,
+        messagesData,
+      )
+    const { collection: toolCalls, loadSubsetCalls: toolLoadSubsetCalls } =
+      createCollectionWithLoadSubsetTracking<ToolCall>(
+        `multi-source-tools-lazy-subquery-join`,
+        (toolCall) => toolCall.id,
+        toolCallsData,
+      )
+    const users = createUsersCollection(`multi-source-users-lazy-subquery-join`)
+
+    const collection = createLiveQueryCollection((q) => {
+      const events = q
+        .from({
+          message: messages,
+          toolCall: toolCalls,
+        })
+        .select(({ message, toolCall }) => ({
+          userId: coalesce(message.userId, toolCall.userId),
+          timestamp: coalesce(message.timestamp, toolCall.timestamp),
+        }))
+
+      return q
+        .from({ user: users })
+        .leftJoin({ event: events }, ({ user, event }) =>
+          eq(user.id, event.userId),
+        )
+        .select(({ user, event }) => ({
+          userId: user.id,
+          eventTimestamp: event.timestamp,
+        }))
+        .orderBy(({ user, event }) => coalesce(event.timestamp, user.id))
+    })
+
+    await collection.preload()
+
+    expect(collection.toArray.map((row) => stripVirtualProps(row))).toEqual([
+      { userId: 4, eventTimestamp: undefined },
+      { userId: 1, eventTimestamp: 10 },
+      { userId: 1, eventTimestamp: 20 },
+      { userId: 2, eventTimestamp: 30 },
+    ])
+    expect(messageLoadSubsetCalls.length).toBeGreaterThan(0)
+    expect(toolLoadSubsetCalls.length).toBeGreaterThan(0)
+    expect(messageLoadSubsetCalls.every((call) => call.where)).toBe(true)
+    expect(toolLoadSubsetCalls.every((call) => call.where)).toBe(true)
+  })
+
+  it(`does not lazy-load computed multi-source subquery join projections`, async () => {
+    const { collection: messages, loadSubsetCalls: messageLoadSubsetCalls } =
+      createCollectionWithLoadSubsetTracking<Message>(
+        `multi-source-messages-computed-lazy-subquery-join`,
+        (message) => message.id,
+        messagesData,
+      )
+    const { collection: toolCalls, loadSubsetCalls: toolLoadSubsetCalls } =
+      createCollectionWithLoadSubsetTracking<ToolCall>(
+        `multi-source-tools-computed-lazy-subquery-join`,
+        (toolCall) => toolCall.id,
+        toolCallsData,
+      )
+    const users = createUsersCollection(
+      `multi-source-users-computed-lazy-subquery-join`,
+    )
+
+    const collection = createLiveQueryCollection((q) => {
+      const events = q
+        .from({
+          message: messages,
+          toolCall: toolCalls,
+        })
+        .select(({ message, toolCall }) => ({
+          label: concat(coalesce(message.text, toolCall.name), `!`),
+        }))
+
+      return q
+        .from({ user: users })
+        .leftJoin({ event: events }, ({ user, event }) =>
+          eq(user.name, event.label),
+        )
+        .select(({ user, event }) => ({
+          userId: user.id,
+          label: event.label,
+        }))
+    })
+
+    await collection.preload()
+
+    expect(collection.size).toBe(3)
+    expect(messageLoadSubsetCalls.length).toBeGreaterThan(0)
+    expect(toolLoadSubsetCalls.length).toBeGreaterThan(0)
+    expect(messageLoadSubsetCalls.every((call) => call.where === undefined)).toBe(
+      true,
+    )
+    expect(toolLoadSubsetCalls.every((call) => call.where === undefined)).toBe(
+      true,
+    )
+  })
+
+  it(`does not lazy-load limited multi-source subquery branches`, async () => {
+    const { collection: messages, loadSubsetCalls: messageLoadSubsetCalls } =
+      createCollectionWithLoadSubsetTracking<Message>(
+        `multi-source-messages-limited-lazy-subquery-join`,
+        (message) => message.id,
+        messagesData,
+      )
+    const { collection: toolCalls, loadSubsetCalls: toolLoadSubsetCalls } =
+      createCollectionWithLoadSubsetTracking<ToolCall>(
+        `multi-source-tools-limited-lazy-subquery-join`,
+        (toolCall) => toolCall.id,
+        toolCallsData,
+      )
+    const users = createUsersCollection(`multi-source-users-limited-subquery-join`)
+
+    const collection = createLiveQueryCollection((q) => {
+      const firstMessage = q
+        .from({ message: messages })
+        .orderBy(({ message }) => message.timestamp)
+        .limit(1)
+
+      const events = q
+        .from({
+          message: firstMessage,
+          toolCall: toolCalls,
+        })
+        .select(({ message, toolCall }) => ({
+          userId: coalesce(message.userId, toolCall.userId),
+          timestamp: coalesce(message.timestamp, toolCall.timestamp),
+        }))
+
+      return q
+        .from({ user: users })
+        .leftJoin({ event: events }, ({ user, event }) =>
+          eq(user.id, event.userId),
+        )
+        .select(({ user, event }) => ({
+          userId: user.id,
+          eventTimestamp: event.timestamp,
+        }))
+    })
+
+    await collection.preload()
+
+    expect(collection.size).toBe(4)
+    expect(messageLoadSubsetCalls.length).toBeGreaterThan(0)
+    expect(toolLoadSubsetCalls.length).toBeGreaterThan(0)
+    expect(messageLoadSubsetCalls.every((call) => call.where === undefined)).toBe(
+      true,
+    )
+    expect(toolLoadSubsetCalls.some((call) => call.where)).toBe(true)
   })
 
   it(`supports distinct over selected multi-source rows`, async () => {

@@ -21,6 +21,7 @@ import type { OrderByOptimizationInfo } from './order-by.js'
 import type {
   BasicExpression,
   CollectionRef,
+  From,
   JoinClause,
   QueryIR,
   QueryRef,
@@ -42,6 +43,12 @@ export type LoadKeysFn = (key: Set<string | number>) => void
 export type LazyCollectionCallbacks = {
   loadKeys: LoadKeysFn
   loadInitialState: () => void
+}
+
+type LazyJoinTarget = {
+  alias: string
+  collection: Collection
+  path: Array<string>
 }
 
 /**
@@ -221,7 +228,7 @@ function processJoin(
     throw new UnsupportedJoinTypeError(joinClause.type)
   }
 
-  if (activeSource && rawQuery.from.type !== `unionFrom`) {
+  if (activeSource) {
     // If the lazy collection comes from a subquery that has a limit and/or an offset clause
     // then we need to deoptimize the join because we don't know which rows are in the result set
     // since we simply lookup matching keys in the index but the index contains all rows
@@ -236,41 +243,42 @@ function processJoin(
     const hasComputedJoinExpr =
       mainExpr.type === `func` || joinedExpr.type === `func`
 
-    if (!limitedSubquery && !hasComputedJoinExpr) {
+    const lazySourceJoinExpr =
+      activeSource === `main` ? (joinedExpr as PropRef) : (mainExpr as PropRef)
+    const lazyAlias = activeSource === `main` ? joinedSource : mainSource
+    const lazyTargets = hasComputedJoinExpr
+      ? []
+      : getLazyJoinTargets(
+          rawQuery,
+          lazyFrom,
+          lazyAlias,
+          lazySourceJoinExpr,
+          lazySource,
+          aliasRemapping,
+        )
+
+    if (!limitedSubquery && lazyTargets.length > 0) {
       // This join can be optimized by having the active collection
       // dynamically load keys into the lazy collection
       // based on the value of the joinKey and by looking up
       // matching rows in the index of the lazy collection
 
-      // Mark the lazy source alias as lazy
+      // Mark the lazy source aliases as lazy
       // this Set is passed by the liveQueryCollection to the compiler
       // such that the liveQueryCollection can check it after compilation
       // to know which source aliases should load data lazily (not initially)
-      const lazyAlias = activeSource === `main` ? joinedSource : mainSource
-      lazySources.add(lazyAlias)
+      for (const target of lazyTargets) {
+        lazySources.add(target.alias)
+      }
 
       const activePipeline =
         activeSource === `main` ? mainPipeline : joinedPipeline
 
-      const lazySourceJoinExpr =
-        activeSource === `main`
-          ? (joinedExpr as PropRef)
-          : (mainExpr as PropRef)
-
-      const followRefResult = followRef(
-        rawQuery,
-        lazySourceJoinExpr,
-        lazySource,
-      )!
-      const followRefCollection = followRefResult.collection
-
-      const fieldName = followRefResult.path[0]
-      if (fieldName) {
-        ensureIndexForField(
-          fieldName,
-          followRefResult.path,
-          followRefCollection,
-        )
+      for (const target of lazyTargets) {
+        const fieldName = target.path[0]
+        if (fieldName) {
+          ensureIndexForField(fieldName, target.path, target.collection)
+        }
       }
 
       // Set up lazy loading: intercept active side's stream and dynamically load
@@ -279,29 +287,6 @@ function processJoin(
         [key: unknown, [originalKey: string, namespacedRow: NamespacedRow]]
       > = activePipeline.pipe(
         tap((data) => {
-          // Find the subscription for lazy loading.
-          // Subscriptions are keyed by the innermost alias (where the collection subscription
-          // was actually created). For subqueries, the join alias may differ from the inner alias.
-          // aliasRemapping provides a flattened one-hop lookup from outer → innermost alias.
-          // Example: .join({ activeUser: subquery }) where subquery uses .from({ user: collection })
-          // → aliasRemapping['activeUser'] = 'user' (always maps directly to innermost, never recursive)
-          const resolvedAlias = aliasRemapping[lazyAlias] || lazyAlias
-          const lazySourceSubscription = subscriptions[resolvedAlias]
-
-          if (!lazySourceSubscription) {
-            throw new SubscriptionNotFoundError(
-              resolvedAlias,
-              lazyAlias,
-              lazySource.id,
-              Object.keys(subscriptions),
-            )
-          }
-
-          if (lazySourceSubscription.hasLoadedInitialState()) {
-            // Entire state was already loaded because we deoptimized the join
-            return
-          }
-
           // Deduplicate and filter null keys before requesting snapshot
           const joinKeys = [
             ...new Set(
@@ -316,23 +301,41 @@ function processJoin(
             return
           }
 
-          const lazyJoinRef = new PropRef(followRefResult.path)
-          const loaded = lazySourceSubscription.requestSnapshot({
-            where: inArray(lazyJoinRef, joinKeys),
-            optimizedOnly: true,
-          })
+          for (const target of lazyTargets) {
+            const lazySourceSubscription = subscriptions[target.alias]
 
-          if (!loaded) {
-            // Snapshot wasn't sent because it could not be loaded from the indexes
-            const collectionId = followRefCollection.id
-            const fieldPath = followRefResult.path.join(`.`)
-            console.warn(
-              `[TanStack DB]${collectionId ? ` [${collectionId}]` : ``} Join requires an index on "${fieldPath}" for efficient loading. ` +
-                `Falling back to loading all data. ` +
-                `Consider creating an index on the collection with collection.createIndex((row) => row.${fieldPath}) ` +
-                `or enable auto-indexing with autoIndex: 'eager' and a defaultIndexType.`,
-            )
-            lazySourceSubscription.requestSnapshot()
+            if (!lazySourceSubscription) {
+              throw new SubscriptionNotFoundError(
+                target.alias,
+                lazyAlias,
+                target.collection.id,
+                Object.keys(subscriptions),
+              )
+            }
+
+            if (lazySourceSubscription.hasLoadedInitialState()) {
+              // Entire state was already loaded because we deoptimized the join
+              continue
+            }
+
+            const lazyJoinRef = new PropRef(target.path)
+            const loaded = lazySourceSubscription.requestSnapshot({
+              where: inArray(lazyJoinRef, joinKeys),
+              optimizedOnly: true,
+            })
+
+            if (!loaded) {
+              // Snapshot wasn't sent because it could not be loaded from the indexes
+              const collectionId = target.collection.id
+              const fieldPath = target.path.join(`.`)
+              console.warn(
+                `[TanStack DB]${collectionId ? ` [${collectionId}]` : ``} Join requires an index on "${fieldPath}" for efficient loading. ` +
+                  `Falling back to loading all data. ` +
+                  `Consider creating an index on the collection with collection.createIndex((row) => row.${fieldPath}) ` +
+                  `or enable auto-indexing with autoIndex: 'eager' and a defaultIndexType.`,
+              )
+              lazySourceSubscription.requestSnapshot()
+            }
           }
         }),
       )
@@ -349,6 +352,142 @@ function processJoin(
     joinOperator(joinedPipeline, joinClause.type as JoinType),
     processJoinResults(joinClause.type),
   )
+}
+
+function getLazyJoinTargets(
+  rawQuery: QueryIR,
+  lazyFrom: From,
+  lazyAlias: string,
+  lazySourceJoinExpr: PropRef,
+  lazySource: Collection,
+  aliasRemapping: Record<string, string>,
+): Array<LazyJoinTarget> {
+  if (lazyFrom.type === `unionFrom`) {
+    return getTargetsFromExpression(rawQuery, lazySourceJoinExpr)
+  }
+
+  if (lazyFrom.type === `queryRef` && containsUnionFrom(lazyFrom.query.from)) {
+    const targets = getTargetsFromQueryRef(
+      lazyFrom.query,
+      lazyAlias,
+      lazySourceJoinExpr,
+    )
+    return dedupeLazyJoinTargets(targets)
+  }
+
+  const followRefResult = followRef(rawQuery, lazySourceJoinExpr, lazySource)
+  if (!followRefResult) {
+    return []
+  }
+
+  return [
+    {
+      alias: aliasRemapping[lazyAlias] || lazyAlias,
+      collection: followRefResult.collection,
+      path: followRefResult.path,
+    },
+  ]
+}
+
+function containsUnionFrom(from: From): boolean {
+  if (from.type === `unionFrom`) {
+    return true
+  }
+  if (from.type === `queryRef`) {
+    return containsUnionFrom(from.query.from)
+  }
+  return false
+}
+
+function getTargetsFromQueryRef(
+  query: QueryIR,
+  outerAlias: string,
+  expr: PropRef,
+): Array<LazyJoinTarget> {
+  if (expr.path[0] !== outerAlias) {
+    return []
+  }
+
+  return getTargetsFromPropRef(query, new PropRef(expr.path.slice(1)))
+}
+
+function getTargetsFromExpression(
+  query: QueryIR,
+  expr: unknown,
+): Array<LazyJoinTarget> {
+  if (!expr || typeof expr !== `object` || !(`type` in expr)) {
+    return []
+  }
+
+  const expression = expr as BasicExpression
+  if (expression.type === `ref`) {
+    return getTargetsFromPropRef(query, expression)
+  }
+
+  if (expression.type === `func` && expression.name === `coalesce`) {
+    return dedupeLazyJoinTargets(
+      expression.args.flatMap((arg) => getTargetsFromExpression(query, arg)),
+    )
+  }
+
+  return []
+}
+
+function getTargetsFromPropRef(
+  query: QueryIR,
+  ref: PropRef,
+): Array<LazyJoinTarget> {
+  if (ref.path.length === 0) {
+    return []
+  }
+
+  if (ref.path.length === 1) {
+    const field = ref.path[0]!
+    const selectedField = query.select?.[field]
+    if (selectedField) {
+      return getTargetsFromExpression(query, selectedField)
+    }
+    return []
+  }
+
+  const [alias, ...path] = ref.path
+  const source = getSourceFromAlias(query.from, alias!)
+  if (!source) {
+    return []
+  }
+
+  if (source.type === `collectionRef`) {
+    return [{ alias: source.alias, collection: source.collection, path }]
+  }
+
+  if (source.query.limit || source.query.offset) {
+    return []
+  }
+
+  return getTargetsFromQueryRef(source.query, source.alias, ref)
+}
+
+function getSourceFromAlias(
+  from: From,
+  alias: string,
+): CollectionRef | QueryRef | undefined {
+  const sources = from.type === `unionFrom` ? from.sources : [from]
+  return sources.find((source) => source.alias === alias)
+}
+
+function dedupeLazyJoinTargets(
+  targets: Array<LazyJoinTarget>,
+): Array<LazyJoinTarget> {
+  const seen = new Set<string>()
+  const deduped: Array<LazyJoinTarget> = []
+  for (const target of targets) {
+    const key = `${target.alias}:${target.path.join(`.`)}`
+    if (!seen.has(key)) {
+      seen.add(key)
+      deduped.push(target)
+    }
+  }
+  return deduped
 }
 
 /**
