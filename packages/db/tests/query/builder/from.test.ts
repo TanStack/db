@@ -4,7 +4,6 @@ import { Query, getQueryIR } from '../../../src/query/builder/index.js'
 import { eq } from '../../../src/query/builder/functions.js'
 import {
   InvalidSourceTypeError,
-  OnlyOneSourceAllowedError,
   QueryMustHaveFromClauseError,
 } from '../../../src/errors'
 
@@ -99,15 +98,20 @@ describe(`QueryBuilder.from`, () => {
     }).toThrow(QueryMustHaveFromClauseError)
   })
 
-  it(`throws error with multiple sources`, () => {
+  it(`supports multiple sources`, () => {
     const builder = new Query()
 
-    expect(() => {
-      builder.from({
-        employees: employeesCollection,
-        departments: departmentsCollection,
-      } as any)
-    }).toThrow(OnlyOneSourceAllowedError)
+    const query = builder.from({
+      employees: employeesCollection,
+      departments: departmentsCollection,
+    })
+    const builtQuery = getQueryIR(query)
+
+    expect(builtQuery.from).toBeDefined()
+    expect(builtQuery.from.type).toBe(`unionFrom`)
+    expect(builtQuery.from.alias).toBe(`employees`)
+    expect((builtQuery.from as any).sources.map((source: any) => source.alias))
+      .toEqual([`employees`, `departments`])
   })
 
   it(`throws helpful error when passing a string instead of an object`, () => {

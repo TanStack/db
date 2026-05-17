@@ -1,4 +1,5 @@
 import {
+  concat as concatOperator,
   distinct,
   filter,
   join as joinOperator,
@@ -39,6 +40,7 @@ import type {
   IncludesMaterialization,
   QueryIR,
   QueryRef,
+  UnionFrom,
 } from '../ir.js'
 import type { LazyCollectionCallbacks } from './joins.js'
 import type { Collection } from '../../collection/index.js'
@@ -192,12 +194,14 @@ export function compileQuery(
   // of the same collection (e.g., self-joins) maintain independent filtered streams.
   const sources: Record<string, KeyedStream> = {}
 
-  // Process the FROM clause to get the main source
+  // Process the FROM clause to get the source stream.
   const {
     alias: mainSource,
-    input: mainInput,
     collectionId: mainCollectionId,
-  } = processFrom(
+    pipeline: initialPipeline,
+    sources: fromSources,
+    isUnionFrom,
+  } = processFromClause(
     query.from,
     allInputs,
     collections,
@@ -212,14 +216,16 @@ export function compileQuery(
     aliasRemapping,
     sourceWhereClauses,
   )
-  sources[mainSource] = mainInput
+  Object.assign(sources, fromSources)
 
   // If this is an includes child query, inner-join the raw input with parent keys.
   // This filters the child collection to only rows matching parents in the result set.
   // The inner join happens BEFORE namespace wrapping / WHERE / SELECT / ORDER BY,
   // so the child pipeline only processes rows that match parents.
-  let filteredMainInput = mainInput
-  if (parentKeyStream && childCorrelationField) {
+  let pipeline: NamespacedAndKeyedStream = initialPipeline
+  if (!isUnionFrom && parentKeyStream && childCorrelationField) {
+    const mainInput = sources[mainSource]!
+    let filteredMainInput = mainInput
     // Re-key child input by correlation field: [correlationValue, [childKey, childRow]]
     const childFieldPath = childCorrelationField.path.slice(1) // remove alias prefix
     const childRekeyed = mainInput.pipe(
@@ -255,24 +261,9 @@ export function compileQuery(
 
     // Update sources so the rest of the pipeline uses the filtered input
     sources[mainSource] = filteredMainInput
-  }
 
-  // Prepare the initial pipeline with the main source wrapped in its alias
-  let pipeline: NamespacedAndKeyedStream = filteredMainInput.pipe(
-    map(([key, row]) => {
-      // Initialize the record with a nested structure
-      // If __parentContext exists (from parent-referencing includes), merge parent
-      // aliases into the namespaced row so WHERE can resolve parent refs
-      const { __parentContext, ...cleanRow } = row as any
-      const nsRow: Record<string, any> = { [mainSource]: cleanRow }
-      if (__parentContext) {
-        Object.assign(nsRow, __parentContext)
-        ;(nsRow as any).__parentContext = __parentContext
-      }
-      const ret = [key, nsRow] as [string, Record<string, typeof row>]
-      return ret
-    }),
-  )
+    pipeline = wrapInputWithAlias(filteredMainInput, mainSource)
+  }
 
   // Process JOIN clauses if they exist
   if (query.join && query.join.length > 0) {
@@ -609,7 +600,7 @@ export function compileQuery(
     pipeline = pipeline.pipe(
       map(([key, namespacedRow]) => {
         const selectResults =
-          !query.join && !query.groupBy
+          !isUnionFrom && !query.join && !query.groupBy
             ? namespacedRow[mainSource]
             : namespacedRow
 
@@ -834,8 +825,10 @@ function collectDirectCollectionAliases(query: QueryIR): Set<string> {
   const aliases = new Set<string>()
 
   // Collect FROM alias only if it's a direct collection reference
-  if (query.from.type === `collectionRef`) {
-    aliases.add(query.from.alias)
+  for (const source of getFromSources(query.from)) {
+    if (source.type === `collectionRef`) {
+      aliases.add(source.alias)
+    }
   }
 
   // Collect JOIN aliases only for direct collection references
@@ -878,9 +871,11 @@ function validateQueryStructure(
     ...currentLevelAliases,
   ])
 
-  // Recursively validate FROM subquery
-  if (query.from.type === `queryRef`) {
-    validateQueryStructure(query.from.query, combinedAliases)
+  // Recursively validate FROM subqueries
+  for (const source of getFromSources(query.from)) {
+    if (source.type === `queryRef`) {
+      validateQueryStructure(source.query, combinedAliases)
+    }
   }
 
   // Recursively validate JOIN subqueries
@@ -897,6 +892,126 @@ function validateQueryStructure(
  * Processes the FROM clause, handling direct collection references and subqueries.
  * Populates `aliasToCollectionId` and `aliasRemapping` for per-alias subscription tracking.
  */
+function processFromClause(
+  from: CollectionRef | QueryRef | UnionFrom,
+  allInputs: Record<string, KeyedStream>,
+  collections: Record<string, Collection>,
+  subscriptions: Record<string, CollectionSubscription>,
+  callbacks: Record<string, LazyCollectionCallbacks>,
+  lazySources: Set<string>,
+  optimizableOrderByCollections: Record<string, OrderByOptimizationInfo>,
+  setWindowFn: (windowFn: (options: WindowOptions) => void) => void,
+  cache: QueryCache,
+  queryMapping: QueryMapping,
+  aliasToCollectionId: Record<string, string>,
+  aliasRemapping: Record<string, string>,
+  sourceWhereClauses: Map<string, BasicExpression<boolean>>,
+): {
+  alias: string
+  pipeline: NamespacedAndKeyedStream
+  collectionId: string
+  sources: Record<string, KeyedStream>
+  isUnionFrom: boolean
+} {
+  if (from.type !== `unionFrom`) {
+    const { alias, input, collectionId } = processFrom(
+      from,
+      allInputs,
+      collections,
+      subscriptions,
+      callbacks,
+      lazySources,
+      optimizableOrderByCollections,
+      setWindowFn,
+      cache,
+      queryMapping,
+      aliasToCollectionId,
+      aliasRemapping,
+      sourceWhereClauses,
+    )
+
+    return {
+      alias,
+      pipeline: wrapInputWithAlias(input, alias),
+      collectionId,
+      sources: { [alias]: input },
+      isUnionFrom: false,
+    }
+  }
+
+  if (from.sources.length === 0) {
+    throw new UnsupportedFromTypeError(`empty unionFrom`)
+  }
+
+  const sources: Record<string, KeyedStream> = {}
+  let pipeline: NamespacedAndKeyedStream | undefined
+  let mainAlias = ``
+  let mainCollectionId = ``
+
+  for (const source of from.sources) {
+    const { alias, input, collectionId } = processFrom(
+      source,
+      allInputs,
+      collections,
+      subscriptions,
+      callbacks,
+      lazySources,
+      optimizableOrderByCollections,
+      setWindowFn,
+      cache,
+      queryMapping,
+      aliasToCollectionId,
+      aliasRemapping,
+      sourceWhereClauses,
+    )
+
+    if (!mainAlias) {
+      mainAlias = alias
+      mainCollectionId = collectionId
+    }
+    sources[alias] = input
+
+    const branch = wrapInputWithAlias(input, alias).pipe(
+      map(([key, row]) => {
+        return [
+          `${alias}:${String(key)}`,
+          row,
+        ] as [string, typeof row]
+      }),
+    )
+
+    pipeline = pipeline ? pipeline.pipe(concatOperator(branch)) : branch
+  }
+
+  return {
+    alias: mainAlias,
+    pipeline: pipeline!,
+    collectionId: mainCollectionId,
+    sources,
+    isUnionFrom: true,
+  }
+}
+
+function wrapInputWithAlias(
+  input: KeyedStream,
+  alias: string,
+): NamespacedAndKeyedStream {
+  return input.pipe(
+    map(([key, row]) => {
+      // Initialize the record with a nested structure.
+      // If __parentContext exists (from parent-referencing includes), merge parent
+      // aliases into the namespaced row so WHERE can resolve parent refs.
+      const { __parentContext, ...cleanRow } = row as any
+      const nsRow: Record<string, any> = { [alias]: cleanRow }
+      if (__parentContext) {
+        Object.assign(nsRow, __parentContext)
+        ;(nsRow as any).__parentContext = __parentContext
+      }
+      return [key, nsRow] as [unknown, Record<string, typeof row>]
+    }),
+  )
+}
+
 function processFrom(
   from: CollectionRef | QueryRef,
   allInputs: Record<string, KeyedStream>,
@@ -961,7 +1076,7 @@ function processFrom(
       // More importantly, pulling up for optimizer-created subqueries can cause issues
       // when the optimizer has restructured the query.
       const isUserDefinedSubquery = queryMapping.has(from.query)
-      const subqueryFromAlias = from.query.from.alias
+      const subqueryFromAlias = getFirstFromAlias(from.query.from)
       const isOptimizerCreated =
         !isUserDefinedSubquery && from.alias === subqueryFromAlias
 
@@ -1069,19 +1184,7 @@ function mapNestedQueries(
   originalQuery: QueryIR,
   queryMapping: QueryMapping,
 ): void {
-  // Map the FROM clause if it's a QueryRef
-  if (
-    optimizedQuery.from.type === `queryRef` &&
-    originalQuery.from.type === `queryRef`
-  ) {
-    queryMapping.set(optimizedQuery.from.query, originalQuery.from.query)
-    // Recursively map nested queries
-    mapNestedQueries(
-      optimizedQuery.from.query,
-      originalQuery.from.query,
-      queryMapping,
-    )
-  }
+  mapNestedFromQueries(optimizedQuery.from, originalQuery.from, queryMapping)
 
   // Map JOIN clauses if they exist
   if (optimizedQuery.join && originalQuery.join) {
@@ -1113,13 +1216,44 @@ function getRefFromAlias(
   query: QueryIR,
   alias: string,
 ): CollectionRef | QueryRef | void {
-  if (query.from.alias === alias) {
-    return query.from
+  for (const source of getFromSources(query.from)) {
+    if (source.alias === alias) {
+      return source
+    }
   }
 
   for (const join of query.join || []) {
     if (join.from.alias === alias) {
       return join.from
+    }
+  }
+}
+
+function getFromSources(from: QueryIR[`from`]): Array<CollectionRef | QueryRef> {
+  return from.type === `unionFrom` ? from.sources : [from]
+}
+
+function getFirstFromAlias(from: QueryIR[`from`]): string {
+  return getFromSources(from)[0]!.alias
+}
+
+function mapNestedFromQueries(
+  optimizedFrom: QueryIR[`from`],
+  originalFrom: QueryIR[`from`],
+  queryMapping: QueryMapping,
+): void {
+  const optimizedSources = getFromSources(optimizedFrom)
+  const originalSources = getFromSources(originalFrom)
+
+  for (let i = 0; i < optimizedSources.length && i < originalSources.length; i++) {
+    const optimizedSource = optimizedSources[i]!
+    const originalSource = originalSources[i]!
+    if (
+      optimizedSource.type === `queryRef` &&
+      originalSource.type === `queryRef`
+    ) {
+      queryMapping.set(optimizedSource.query, originalSource.query)
+      mapNestedQueries(optimizedSource.query, originalSource.query, queryMapping)
     }
   }
 }

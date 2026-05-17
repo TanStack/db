@@ -45,6 +45,10 @@ export interface Context {
   schema: ContextSchema
   // the name of the source that was used in the from clause
   fromSourceName: string
+  // the source names used in a multi-source from clause
+  fromSourceNames?: ReadonlyArray<string>
+  // Whether this query started with a multi-source from
+  hasUnionFrom?: true
   // Whether this query has joins
   hasJoins?: boolean
   // Mapping of table alias to join type for easy lookup
@@ -112,6 +116,34 @@ export type SchemaFromSource<T extends Source> = Prettify<{
       ? GetResult<TContext>
       : never
 }>
+
+export type UnionRefsSchema<TSchema extends ContextSchema> = Prettify<{
+  [K in keyof TSchema]: TSchema[K] | undefined
+}>
+
+type IsUnion<T, U = T> = T extends unknown
+  ? [U] extends [T]
+    ? false
+    : true
+  : false
+
+export type ContextFromSource<TSource extends Source> = IsUnion<
+  keyof TSource & string
+> extends true
+  ? {
+      baseSchema: SchemaFromSource<TSource>
+      schema: UnionRefsSchema<SchemaFromSource<TSource>>
+      fromSourceName: keyof TSource & string
+      fromSourceNames: ReadonlyArray<keyof TSource & string>
+      hasUnionFrom: true
+      hasJoins: false
+    }
+  : {
+      baseSchema: SchemaFromSource<TSource>
+      schema: SchemaFromSource<TSource>
+      fromSourceName: keyof TSource & string
+      hasJoins: false
+    }
 
 /**
  * GetAliases - Extracts all table aliases available in a query context
@@ -339,7 +371,7 @@ export type ResultTypeFromSelect<TSelectObject> =
                     ? Collection<GetResult<TChildContext>>
                     : // Ref (full object ref or spread with RefBrand) - recursively process properties
                       TSelectObject[K] extends Ref<infer _T>
-                      ? ExtractRef<TSelectObject[K]>
+                    ? ExtractRef<TSelectObject[K]>
                       : // RefLeaf (simple property ref like user.name)
                         TSelectObject[K] extends RefLeaf<infer T>
                         ? IsNullableRef<TSelectObject[K]> extends true
@@ -722,6 +754,14 @@ type PreserveHasResultFlag<TFlag> = [TFlag] extends [true]
   ? { hasResult: true }
   : {}
 
+type PreserveUnionFromFlag<TFlag> = [TFlag] extends [true]
+  ? { hasUnionFrom: true }
+  : {}
+
+type PreserveFromSourceNames<TNames> = [TNames] extends [ReadonlyArray<string>]
+  ? { fromSourceNames: TNames }
+  : {}
+
 /**
  * MergeContextWithJoinType - Creates a new context after a join operation
  *
@@ -768,7 +808,9 @@ export type MergeContextWithJoinType<
   }
   result: TContext[`result`]
 } & PreserveSingleResultFlag<TContext[`singleResult`]> &
-  PreserveHasResultFlag<TContext[`hasResult`]>
+  PreserveHasResultFlag<TContext[`hasResult`]> &
+  PreserveUnionFromFlag<TContext[`hasUnionFrom`]> &
+  PreserveFromSourceNames<TContext[`fromSourceNames`]>
 
 /**
  * ApplyJoinOptionalityToMergedSchema - Applies optionality rules when merging schemas
@@ -831,9 +873,25 @@ type WithVirtualPropsIfObject<TResult> = TResult extends object
   : TResult
 
 type PrettifyIfPlainObject<T> = IsPlainObject<T> extends true ? Prettify<T> : T
+type UnionFromResult<
+  TBaseSchema extends ContextSchema,
+  TSchema extends ContextSchema,
+> = {
+  [K in keyof TBaseSchema]: Prettify<
+    {
+      [P in K]: NonUndefined<TSchema[Extract<P, keyof TSchema>]>
+    } & {
+      [P in Exclude<keyof TBaseSchema, K>]?: undefined
+    } & {
+      [P in Exclude<keyof TSchema, keyof TBaseSchema>]: TSchema[P]
+    }
+  >
+}[keyof TBaseSchema]
 type ResultValue<TContext extends Context> = TContext[`hasResult`] extends true
   ? WithVirtualPropsIfObject<TContext[`result`]>
-  : TContext[`hasJoins`] extends true
+  : TContext[`hasUnionFrom`] extends true
+    ? UnionFromResult<TContext[`baseSchema`], TContext[`schema`]>
+    : TContext[`hasJoins`] extends true
     ? TContext[`schema`]
     : TContext[`schema`][TContext[`fromSourceName`]]
 
@@ -1034,7 +1092,9 @@ export type MergeContextForJoinCallback<
     ? TContext[`joinTypes`]
     : {}
   result: TContext[`result`]
-} & PreserveHasResultFlag<TContext[`hasResult`]>
+} & PreserveHasResultFlag<TContext[`hasResult`]> &
+  PreserveUnionFromFlag<TContext[`hasUnionFrom`]> &
+  PreserveFromSourceNames<TContext[`fromSourceNames`]>
 
 /**
  * WithResult - Updates a context with a new result type after select()

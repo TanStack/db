@@ -8,6 +8,7 @@ import {
   IncludesSubquery,
   PropRef,
   QueryRef,
+  UnionFrom,
   Value as ValueExpr,
   isExpressionLike,
 } from '../ir.js'
@@ -45,6 +46,7 @@ import type {
 import type {
   CompareOptions,
   Context,
+  ContextFromSource,
   FunctionalHavingRow,
   GetResult,
   GroupByCallback,
@@ -82,6 +84,17 @@ export class BaseQueryBuilder<TContext extends Context = Context> {
     source: TSource,
     context: string,
   ): [string, CollectionRef | QueryRef] {
+    const refs = this._createRefsForSource(source, context)
+    if (refs.length !== 1) {
+      throw new OnlyOneSourceAllowedError(context)
+    }
+    return refs[0]!
+  }
+
+  private _createRefsForSource<TSource extends Source>(
+    source: TSource,
+    context: string,
+  ): Array<[string, CollectionRef | QueryRef]> {
     // Validate source is a plain object (not null, array, string, etc.)
     // We use try-catch to handle null/undefined gracefully
     let keys: Array<string>
@@ -98,37 +111,46 @@ export class BaseQueryBuilder<TContext extends Context = Context> {
       throw new InvalidSourceTypeError(context, `array`)
     }
 
-    // Validate exactly one key
-    if (keys.length !== 1) {
+    if (keys.length === 0) {
+      throw new InvalidSourceTypeError(context, `empty object`)
+    }
+
+    // Check if it looks like a string was passed (has numeric keys).
+    // This applies to multi-source from as well as single-source joins.
+    if (keys.every((k) => !isNaN(Number(k)))) {
+      throw new InvalidSourceTypeError(context, `string`)
+    }
+
+    if (context !== `from clause` && keys.length !== 1) {
       if (keys.length === 0) {
         throw new InvalidSourceTypeError(context, `empty object`)
-      }
-      // Check if it looks like a string was passed (has numeric keys)
-      if (keys.every((k) => !isNaN(Number(k)))) {
-        throw new InvalidSourceTypeError(context, `string`)
       }
       throw new OnlyOneSourceAllowedError(context)
     }
 
-    const alias = keys[0]!
-    const sourceValue = source[alias]
+    const refs: Array<[string, CollectionRef | QueryRef]> = []
+    for (const alias of keys) {
+      const sourceValue = source[alias]
 
-    // Validate the value is a Collection or QueryBuilder
-    let ref: CollectionRef | QueryRef
+      // Validate the value is a Collection or QueryBuilder
+      let ref: CollectionRef | QueryRef
 
-    if (sourceValue instanceof CollectionImpl) {
-      ref = new CollectionRef(sourceValue, alias)
-    } else if (sourceValue instanceof BaseQueryBuilder) {
-      const subQuery = sourceValue._getQuery()
-      if (!(subQuery as Partial<QueryIR>).from) {
-        throw new SubQueryMustHaveFromClauseError(context)
+      if (sourceValue instanceof CollectionImpl) {
+        ref = new CollectionRef(sourceValue, alias)
+      } else if (sourceValue instanceof BaseQueryBuilder) {
+        const subQuery = sourceValue._getQuery()
+        if (!(subQuery as Partial<QueryIR>).from) {
+          throw new SubQueryMustHaveFromClauseError(context)
+        }
+        ref = new QueryRef(subQuery, alias)
+      } else {
+        throw new InvalidSourceError(alias)
       }
-      ref = new QueryRef(subQuery, alias)
-    } else {
-      throw new InvalidSourceError(alias)
+
+      refs.push([alias, ref])
     }
 
-    return [alias, ref]
+    return refs
   }
 
   /**
@@ -149,13 +171,9 @@ export class BaseQueryBuilder<TContext extends Context = Context> {
    */
   from<TSource extends Source>(
     source: TSource,
-  ): QueryBuilder<{
-    baseSchema: SchemaFromSource<TSource>
-    schema: SchemaFromSource<TSource>
-    fromSourceName: keyof TSource & string
-    hasJoins: false
-  }> {
-    const [, from] = this._createRefForSource(source, `from clause`)
+  ): QueryBuilder<ContextFromSource<TSource>> {
+    const refs = this._createRefsForSource(source, `from clause`)
+    const from = refs.length === 1 ? refs[0]![1] : new UnionFrom(refs.map((r) => r[1]))
 
     return new BaseQueryBuilder({
       ...this.query,
@@ -746,7 +764,11 @@ export class BaseQueryBuilder<TContext extends Context = Context> {
 
     // Add the from alias
     if (this.query.from) {
-      aliases.push(this.query.from.alias)
+      if (this.query.from.type === `unionFrom`) {
+        aliases.push(...this.query.from.sources.map((source) => source.alias))
+      } else {
+        aliases.push(this.query.from.alias)
+      }
     }
 
     // Add join aliases
@@ -1011,7 +1033,10 @@ function buildIncludesSubquery(
   const childQuery = childBuilder._getQuery()
 
   // Collect child's own aliases
-  const childAliases: Array<string> = [childQuery.from.alias]
+  const childAliases: Array<string> =
+    childQuery.from.type === `unionFrom`
+      ? childQuery.from.sources.map((source) => source.alias)
+      : [childQuery.from.alias]
   if (childQuery.join) {
     for (const j of childQuery.join) {
       childAliases.push(j.from.alias)
@@ -1285,6 +1310,7 @@ export type QueryResult<T> = GetResult<ExtractContext<T>>
 export type {
   Context,
   ContextSchema,
+  ContextFromSource,
   Source,
   GetResult,
   RefLeaf as Ref,

@@ -215,6 +215,12 @@ export class CollectionConfigBuilder<
       if (this.hasJoins(query.from.query)) {
         return true
       }
+    } else if (query.from.type === `unionFrom`) {
+      for (const source of query.from.sources) {
+        if (source.type === `queryRef` && this.hasJoins(source.query)) {
+          return true
+        }
+      }
     }
 
     return false
