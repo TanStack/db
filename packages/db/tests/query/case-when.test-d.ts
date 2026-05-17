@@ -64,8 +64,8 @@ describe(`caseWhen types`, () => {
     expectTypeOf(result).toMatchTypeOf<
       OutputWithVirtualKeyed<{
         id: number
-        category: string
-        maybeAdult: string | null
+        category: `adult` | `minor`
+        maybeAdult: `adult` | null
       }>
     >()
   })
@@ -96,8 +96,8 @@ describe(`caseWhen types`, () => {
     expectTypeOf(result).toMatchTypeOf<
       OutputWithVirtualKeyed<{
         id: number
-        withDefault: string
-        withoutDefault: string | null
+        withDefault: `senior` | `adult` | `minor`
+        withoutDefault: `senior` | `adult` | null
       }>
     >()
   })
