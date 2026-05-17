@@ -247,6 +247,9 @@ describe(`caseWhen types`, () => {
         .select(({ user, post }) => ({
           id: user.id,
           postStatus: caseWhen(post, `has-post`, `no-post`),
+          postProfile: caseWhen(post, {
+            hasPost: true,
+          }),
         })),
     )
 
@@ -256,6 +259,11 @@ describe(`caseWhen types`, () => {
       OutputWithVirtualKeyed<{
         id: number
         postStatus: string
+        postProfile:
+          | {
+              hasPost: boolean
+            }
+          | undefined
       }>
     >()
   })

@@ -273,6 +273,9 @@ describe(`caseWhen`, () => {
         .select(({ user, post }) => ({
           id: user.id,
           title: caseWhen(post, post.title, `none`),
+          postProfile: caseWhen(post, {
+            title: post.title,
+          }),
         }))
         .orderBy(({ user }) => user.id),
     )
@@ -282,8 +285,8 @@ describe(`caseWhen`, () => {
     expect(
       query.toArray.map((row) => stripVirtualPropsAndSymbols(row)),
     ).toEqual([
-      { id: 1, title: `Alice post` },
-      { id: 4, title: `none` },
+      { id: 1, title: `Alice post`, postProfile: { title: `Alice post` } },
+      { id: 4, title: `none`, postProfile: undefined },
     ])
   })
 
