@@ -13,15 +13,15 @@ import {
 } from '../../errors.js'
 import { normalizeValue } from '../../utils/comparison.js'
 import { ensureIndexForField } from '../../indexes/auto-index.js'
-import { PropRef, followRef } from '../ir.js'
+import { PropRef } from '../ir.js'
 import { inArray } from '../builder/functions.js'
 import { compileExpression } from './evaluators.js'
+import { getLazyLoadTargets } from './lazy-targets.js'
 import type { CompileQueryFn } from './index.js'
 import type { OrderByOptimizationInfo } from './order-by.js'
 import type {
   BasicExpression,
   CollectionRef,
-  From,
   JoinClause,
   QueryIR,
   QueryRef,
@@ -43,12 +43,6 @@ export type LoadKeysFn = (key: Set<string | number>) => void
 export type LazyCollectionCallbacks = {
   loadKeys: LoadKeysFn
   loadInitialState: () => void
-}
-
-type LazyJoinTarget = {
-  alias: string
-  collection: Collection
-  path: Array<string>
 }
 
 /**
@@ -248,7 +242,7 @@ function processJoin(
     const lazyAlias = activeSource === `main` ? joinedSource : mainSource
     const lazyTargets = hasComputedJoinExpr
       ? []
-      : getLazyJoinTargets(
+      : getLazyLoadTargets(
           rawQuery,
           lazyFrom,
           lazyAlias,
@@ -352,142 +346,6 @@ function processJoin(
     joinOperator(joinedPipeline, joinClause.type as JoinType),
     processJoinResults(joinClause.type),
   )
-}
-
-function getLazyJoinTargets(
-  rawQuery: QueryIR,
-  lazyFrom: From,
-  lazyAlias: string,
-  lazySourceJoinExpr: PropRef,
-  lazySource: Collection,
-  aliasRemapping: Record<string, string>,
-): Array<LazyJoinTarget> {
-  if (lazyFrom.type === `unionFrom`) {
-    return getTargetsFromExpression(rawQuery, lazySourceJoinExpr)
-  }
-
-  if (lazyFrom.type === `queryRef` && containsUnionFrom(lazyFrom.query.from)) {
-    const targets = getTargetsFromQueryRef(
-      lazyFrom.query,
-      lazyAlias,
-      lazySourceJoinExpr,
-    )
-    return dedupeLazyJoinTargets(targets)
-  }
-
-  const followRefResult = followRef(rawQuery, lazySourceJoinExpr, lazySource)
-  if (!followRefResult) {
-    return []
-  }
-
-  return [
-    {
-      alias: aliasRemapping[lazyAlias] || lazyAlias,
-      collection: followRefResult.collection,
-      path: followRefResult.path,
-    },
-  ]
-}
-
-function containsUnionFrom(from: From): boolean {
-  if (from.type === `unionFrom`) {
-    return true
-  }
-  if (from.type === `queryRef`) {
-    return containsUnionFrom(from.query.from)
-  }
-  return false
-}
-
-function getTargetsFromQueryRef(
-  query: QueryIR,
-  outerAlias: string,
-  expr: PropRef,
-): Array<LazyJoinTarget> {
-  if (expr.path[0] !== outerAlias) {
-    return []
-  }
-
-  return getTargetsFromPropRef(query, new PropRef(expr.path.slice(1)))
-}
-
-function getTargetsFromExpression(
-  query: QueryIR,
-  expr: unknown,
-): Array<LazyJoinTarget> {
-  if (!expr || typeof expr !== `object` || !(`type` in expr)) {
-    return []
-  }
-
-  const expression = expr as BasicExpression
-  if (expression.type === `ref`) {
-    return getTargetsFromPropRef(query, expression)
-  }
-
-  if (expression.type === `func` && expression.name === `coalesce`) {
-    return dedupeLazyJoinTargets(
-      expression.args.flatMap((arg) => getTargetsFromExpression(query, arg)),
-    )
-  }
-
-  return []
-}
-
-function getTargetsFromPropRef(
-  query: QueryIR,
-  ref: PropRef,
-): Array<LazyJoinTarget> {
-  if (ref.path.length === 0) {
-    return []
-  }
-
-  if (ref.path.length === 1) {
-    const field = ref.path[0]!
-    const selectedField = query.select?.[field]
-    if (selectedField) {
-      return getTargetsFromExpression(query, selectedField)
-    }
-    return []
-  }
-
-  const [alias, ...path] = ref.path
-  const source = getSourceFromAlias(query.from, alias!)
-  if (!source) {
-    return []
-  }
-
-  if (source.type === `collectionRef`) {
-    return [{ alias: source.alias, collection: source.collection, path }]
-  }
-
-  if (source.query.limit || source.query.offset) {
-    return []
-  }
-
-  return getTargetsFromQueryRef(source.query, source.alias, ref)
-}
-
-function getSourceFromAlias(
-  from: From,
-  alias: string,
-): CollectionRef | QueryRef | undefined {
-  const sources = from.type === `unionFrom` ? from.sources : [from]
-  return sources.find((source) => source.alias === alias)
-}
-
-function dedupeLazyJoinTargets(
-  targets: Array<LazyJoinTarget>,
-): Array<LazyJoinTarget> {
-  const seen = new Set<string>()
-  const deduped: Array<LazyJoinTarget> = []
-  for (const target of targets) {
-    const key = `${target.alias}:${target.path.join(`.`)}`
-    if (!seen.has(key)) {
-      seen.add(key)
-      deduped.push(target)
-    }
-  }
-  return deduped
 }
 
 /**

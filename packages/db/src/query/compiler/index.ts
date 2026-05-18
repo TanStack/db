@@ -30,6 +30,7 @@ import { inArray } from '../builder/functions.js'
 import { compileExpression, toBooleanPredicate } from './evaluators.js'
 import { processJoins } from './joins.js'
 import { containsAggregate, processGroupBy } from './group-by.js'
+import { getLazyLoadTargets } from './lazy-targets.js'
 import { processOrderBy } from './order-by.js'
 import { processSelect } from './select.js'
 import type { CollectionSubscription } from '../../collection/subscription.js'
@@ -396,48 +397,40 @@ export function compileQuery(
       )
 
       // --- Includes lazy loading (mirrors join lazy loading in joins.ts) ---
-      // Resolve the child correlation field to its underlying collection + field path
-      // so we can set up an index and targeted requestSnapshot calls.
+      // Resolve the child correlation field to concrete collection targets so
+      // subquery and union child sources can load by branch when it is safe.
       const childCorrelationAlias = subquery.childCorrelationField.path[0]!
-      const childFromCollection =
+      const directChildCollection =
         subquery.query.from.type === `collectionRef`
           ? subquery.query.from.collection
-          : (null as unknown as Collection)
-      const followRefResult = followRef(
+          : undefined
+      const lazyTargets = getLazyLoadTargets(
         subquery.query,
+        subquery.query.from,
+        childCorrelationAlias,
         subquery.childCorrelationField,
-        childFromCollection,
+        directChildCollection,
+        aliasRemapping,
       )
 
-      if (followRefResult) {
-        const followRefCollection = followRefResult.collection
-        const fieldPath = followRefResult.path
-        const fieldName = fieldPath[0]
-
+      if (lazyTargets.length > 0) {
         // 1. Mark child source as lazy so CollectionSubscriber skips initial full load
-        lazySources.add(childCorrelationAlias)
+        for (const target of lazyTargets) {
+          lazySources.add(target.alias)
+        }
 
         // 2. Ensure an index on the correlation field for efficient lookups
-        if (fieldName) {
-          ensureIndexForField(fieldName, fieldPath, followRefCollection)
+        for (const target of lazyTargets) {
+          const fieldName = target.path[0]
+          if (fieldName) {
+            ensureIndexForField(fieldName, target.path, target.collection)
+          }
         }
 
         // 3. Tap parent keys to intercept correlation values and request
         //    matching child rows on-demand via the child's subscription
         parentKeys = parentKeys.pipe(
           tap((data: any) => {
-            const resolvedAlias =
-              aliasRemapping[childCorrelationAlias] || childCorrelationAlias
-            const lazySourceSubscription = subscriptions[resolvedAlias]
-
-            if (!lazySourceSubscription) {
-              return
-            }
-
-            if (lazySourceSubscription.hasLoadedInitialState()) {
-              return
-            }
-
             const joinKeys = [
               ...new Set(
                 data
@@ -453,10 +446,22 @@ export function compileQuery(
               return
             }
 
-            const lazyJoinRef = new PropRef(fieldPath)
-            lazySourceSubscription.requestSnapshot({
-              where: inArray(lazyJoinRef, joinKeys),
-            })
+            for (const target of lazyTargets) {
+              const lazySourceSubscription = subscriptions[target.alias]
+
+              if (!lazySourceSubscription) {
+                continue
+              }
+
+              if (lazySourceSubscription.hasLoadedInitialState()) {
+                continue
+              }
+
+              const lazyJoinRef = new PropRef(target.path)
+              lazySourceSubscription.requestSnapshot({
+                where: inArray(lazyJoinRef, joinKeys),
+              })
+            }
           }),
         )
       }
