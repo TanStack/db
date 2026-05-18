@@ -149,7 +149,9 @@ export function processSelect(
   return pipeline.pipe(map((row) => processRow(row, ops)))
 }
 
-function compileSelectObject(obj: Record<string, any>): (row: NamespacedRow) => any {
+function compileSelectObject(
+  obj: Record<string, any>,
+): (row: NamespacedRow) => any {
   const ops: Array<SelectOp> = []
   addFromObject([], obj, ops)
 

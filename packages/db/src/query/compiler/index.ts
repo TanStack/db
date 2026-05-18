@@ -532,9 +532,7 @@ export function compileQuery(
         includesRoutingFns.push({
           fieldName: key,
           getRouting: (nsRow: any) => {
-            if (
-              !matchesConditionalSelectGuards(compiledRoutingGuards, nsRow)
-            ) {
+            if (!matchesConditionalSelectGuards(compiledRoutingGuards, nsRow)) {
               return { correlationKey: null, parentContext: null }
             }
             const parentContext: Record<string, Record<string, any>> = {}
@@ -560,9 +558,7 @@ export function compileQuery(
         includesRoutingFns.push({
           fieldName: key,
           getRouting: (nsRow: any) => {
-            if (
-              !matchesConditionalSelectGuards(compiledRoutingGuards, nsRow)
-            ) {
+            if (!matchesConditionalSelectGuards(compiledRoutingGuards, nsRow)) {
               return { correlationKey: null, parentContext: null }
             }
             return {
@@ -1181,9 +1177,7 @@ export function followRef(
  * contain guarded nested includes that are only materialized when the branch
  * condition is true.
  */
-function extractIncludesFromSelect(
-  select: Record<string, any>,
-): Array<{
+function extractIncludesFromSelect(select: Record<string, any>): Array<{
   key: string
   path: Array<string>
   subquery: IncludesSubquery
@@ -1281,12 +1275,7 @@ function collectIncludesFromSelectValue(
 
   for (const [key, child] of Object.entries(value)) {
     if (key.startsWith(`__SPREAD_SENTINEL__`)) continue
-    collectIncludesFromSelectValue(
-      child,
-      [...prefixPath, key],
-      guards,
-      results,
-    )
+    collectIncludesFromSelectValue(child, [...prefixPath, key], guards, results)
   }
 }
 

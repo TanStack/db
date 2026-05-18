@@ -376,7 +376,10 @@ export type ResultTypeFromSelect<TSelectObject> =
                                         | null
                                         | undefined
                                     ? TSelectObject[K]
-                                    : TSelectObject[K] extends Record<string, any>
+                                    : TSelectObject[K] extends Record<
+                                          string,
+                                          any
+                                        >
                                       ? ResultTypeFromSelect<TSelectObject[K]>
                                       : never
         }>
