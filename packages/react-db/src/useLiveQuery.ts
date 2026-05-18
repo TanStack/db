@@ -20,6 +20,11 @@ import type {
 
 const DEFAULT_GC_TIME_MS = 1 // Live queries created by useLiveQuery are cleaned up immediately (0 disables GC)
 
+// Module-level constant so React 19 receives a stable object reference for the
+// server snapshot. Creating this inside the hook would produce a new reference
+// on every render, causing an infinite loop during SSR/hydration.
+const SERVER_SNAPSHOT = { collection: null, version: 0 } as const
+
 export type UseLiveQueryStatus = CollectionStatus | `disabled`
 
 /**
@@ -483,6 +488,7 @@ export function useLiveQuery(
   const snapshot = useSyncExternalStore(
     subscribeRef.current,
     getSnapshotRef.current,
+    () => SERVER_SNAPSHOT,
   )
 
   // Track last snapshot (from useSyncExternalStore) and the returned value separately
