@@ -167,6 +167,10 @@ function stripVirtualPropsDeep(value: any): any {
   return value
 }
 
+function childRows(collection: any): Array<any> {
+  return [...collection.toArray].map((row) => stripVirtualPropsDeep(row))
+}
+
 describe(`multi-source from`, () => {
   it(`combines multiple sources into exclusive namespaced rows`, async () => {
     const messages = createMessagesCollection(`multi-source-messages-basic`)
@@ -838,6 +842,75 @@ describe(`multi-source from`, () => {
         toolCall: { id: 3, name: `write` },
         timestamp: 40,
       },
+    ])
+  })
+
+  it(`materializes correlated collection includes from multi-source subquery children`, async () => {
+    const { collection: messages, loadSubsetCalls: messageLoadSubsetCalls } =
+      createCollectionWithLoadSubsetTracking<Message>(
+        `multi-source-messages-collection-includes`,
+        (message) => message.id,
+        messagesData,
+      )
+    const { collection: toolCalls, loadSubsetCalls: toolLoadSubsetCalls } =
+      createCollectionWithLoadSubsetTracking<ToolCall>(
+        `multi-source-tools-collection-includes`,
+        (toolCall) => toolCall.id,
+        toolCallsData,
+      )
+    const users = createUsersCollection(`multi-source-users-collection-includes`)
+
+    const collection = createLiveQueryCollection((q) => {
+      const events = q
+        .from({
+          message: messages,
+          toolCall: toolCalls,
+        })
+        .select(({ message, toolCall }) => ({
+          userId: coalesce(message.userId, toolCall.userId),
+          timestamp: coalesce(message.timestamp, toolCall.timestamp),
+          label: coalesce(message.text, toolCall.name),
+        }))
+
+      return q
+        .from({ user: users })
+        .select(({ user }) => ({
+          id: user.id,
+          profile: caseWhen(user.id, {
+            id: user.id,
+            items: q
+              .from({ item: events })
+              .where(({ item }) => eq(item.userId, user.id))
+              .orderBy(({ item }) => item.timestamp)
+              .select(({ item }) => ({
+                label: item.label,
+                timestamp: item.timestamp,
+              })),
+          }),
+        }))
+        .orderBy(({ user }) => user.id)
+    })
+
+    await collection.preload()
+
+    const rows = collection.toArray
+    expect(childRows(rows[0]!.profile.items)).toEqual([
+      { label: `hello`, timestamp: 10 },
+      { label: `search`, timestamp: 20 },
+    ])
+    expect(childRows(rows[1]!.profile.items)).toEqual([
+      { label: `secret`, timestamp: 30 },
+    ])
+    expect(childRows(rows[2]!.profile.items)).toEqual([])
+    expect(messageLoadSubsetCalls.some((call) => call.where)).toBe(true)
+    expect(toolLoadSubsetCalls.some((call) => call.where)).toBe(true)
+
+    users.insert({ id: 3, name: `Cara` })
+    await flushPromises()
+
+    const inserted = collection.toArray.find((row) => row.id === 3)!
+    expect(childRows(inserted.profile.items)).toEqual([
+      { label: `write`, timestamp: 40 },
     ])
   })
 })
