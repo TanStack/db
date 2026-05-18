@@ -5,7 +5,13 @@ import {
   map,
   serializeValue,
 } from '@tanstack/db-ivm'
-import { Func, PropRef, getHavingExpression, isExpressionLike } from '../ir.js'
+import {
+  ConditionalSelect,
+  Func,
+  PropRef,
+  getHavingExpression,
+  isExpressionLike,
+} from '../ir.js'
 import {
   AggregateFunctionNotInSelectError,
   NonAggregateExpressionNotInGroupByError,
@@ -19,6 +25,7 @@ import type {
   GroupBy,
   Having,
   Select,
+  SelectValueExpression,
 } from '../ir.js'
 import type { NamespacedAndKeyedStream, NamespacedRow } from '../../types.js'
 import type { VirtualOrigin } from '../../virtual-props.js'
@@ -165,13 +172,13 @@ export function processGroupBy(
           aggregates[alias] = getAggregateFunction(expr)
         } else if (containsAggregate(expr)) {
           const { transformed, extracted } = extractAndReplaceAggregates(
-            expr as BasicExpression | Aggregate,
+            expr as SelectValueExpression,
             aggCounter,
           )
           for (const [syntheticAlias, aggExpr] of Object.entries(extracted)) {
             aggregates[syntheticAlias] = getAggregateFunction(aggExpr)
           }
-          wrappedAggExprs[alias] = compileExpression(transformed)
+          wrappedAggExprs[alias] = compileGroupedSelectValue(transformed)
         }
       }
     }
@@ -331,13 +338,13 @@ export function processGroupBy(
         aggregates[alias] = getAggregateFunction(expr)
       } else if (containsAggregate(expr)) {
         const { transformed, extracted } = extractAndReplaceAggregates(
-          expr as BasicExpression | Aggregate,
+          expr as SelectValueExpression,
           aggCounter,
         )
         for (const [syntheticAlias, aggExpr] of Object.entries(extracted)) {
           aggregates[syntheticAlias] = getAggregateFunction(aggExpr)
         }
-        wrappedAggExprs[alias] = compileExpression(transformed)
+        wrappedAggExprs[alias] = compileGroupedSelectValue(transformed)
       }
     }
   }
@@ -642,26 +649,34 @@ function evaluateWrappedAggregates(
 export function containsAggregate(
   expr: BasicExpression | Aggregate | Select | { type: string },
 ): boolean {
+  if (isConditionalSelect(expr)) {
+    const branchHasAggregate = expr.branches.some(
+      (branch) =>
+        containsAggregate(branch.condition) || containsAggregate(branch.value),
+    )
+
+    return (
+      branchHasAggregate ||
+      (expr.defaultValue !== undefined && containsAggregate(expr.defaultValue))
+    )
+  }
+
+  if (isNestedSelectObject(expr)) {
+    return Object.values(expr).some((value) =>
+      containsAggregate(value as BasicExpression | Aggregate | Select),
+    )
+  }
+
   if (!isExpressionLike(expr)) {
     return false
   }
+
   if (expr.type === `agg`) {
     return true
   }
   if (expr.type === `func` && `args` in expr) {
     return (expr.args as Array<BasicExpression | Aggregate>).some(
       (arg: BasicExpression | Aggregate) => containsAggregate(arg),
-    )
-  }
-  if (expr.type === `conditionalSelect` && `branches` in expr) {
-    return (
-      expr.branches as Array<{
-        condition: BasicExpression
-        value: BasicExpression | Aggregate | Select | { type: string }
-      }>
-    ).some(
-      (branch) =>
-        containsAggregate(branch.condition) || containsAggregate(branch.value),
     )
   }
   return false
@@ -675,10 +690,10 @@ export function containsAggregate(
  * populates the synthetic values.
  */
 function extractAndReplaceAggregates(
-  expr: BasicExpression | Aggregate,
+  expr: SelectValueExpression,
   counter: { value: number },
 ): {
-  transformed: BasicExpression
+  transformed: SelectValueExpression
   extracted: Record<string, Aggregate>
 } {
   if (expr.type === `agg`) {
@@ -694,7 +709,7 @@ function extractAndReplaceAggregates(
     const newArgs = expr.args.map((arg: BasicExpression | Aggregate) => {
       const result = extractAndReplaceAggregates(arg, counter)
       Object.assign(allExtracted, result.extracted)
-      return result.transformed
+      return result.transformed as BasicExpression
     })
     return {
       transformed: new Func(expr.name, newArgs),
@@ -702,8 +717,180 @@ function extractAndReplaceAggregates(
     }
   }
 
+  if (isConditionalSelect(expr)) {
+    const allExtracted: Record<string, Aggregate> = {}
+    const branches = expr.branches.map((branch) => {
+      const condition = extractAndReplaceAggregates(branch.condition, counter)
+      const value = extractAndReplaceAggregates(branch.value, counter)
+      Object.assign(allExtracted, condition.extracted, value.extracted)
+      return {
+        condition: condition.transformed as BasicExpression,
+        value: value.transformed,
+      }
+    })
+    const defaultValue =
+      expr.defaultValue === undefined
+        ? undefined
+        : extractAndReplaceAggregates(expr.defaultValue, counter)
+
+    if (defaultValue) {
+      Object.assign(allExtracted, defaultValue.extracted)
+    }
+
+    return {
+      transformed: new ConditionalSelect(branches, defaultValue?.transformed),
+      extracted: allExtracted,
+    }
+  }
+
+  if (isNestedSelectObject(expr)) {
+    const allExtracted: Record<string, Aggregate> = {}
+    const transformed: Select = {}
+
+    for (const [key, value] of Object.entries(expr)) {
+      const result = extractAndReplaceAggregates(
+        value as SelectValueExpression,
+        counter,
+      )
+      Object.assign(allExtracted, result.extracted)
+      transformed[key] = result.transformed
+    }
+
+    return { transformed, extracted: allExtracted }
+  }
+
   // ref / val – pass through unchanged
-  return { transformed: expr as BasicExpression, extracted: {} }
+  return { transformed: expr, extracted: {} }
+}
+
+function compileGroupedSelectValue(
+  value: SelectValueExpression,
+): (row: NamespacedRow) => any {
+  if (isConditionalSelect(value)) {
+    return compileGroupedConditionalSelect(value)
+  }
+
+  if (value.type === `includesSubquery`) {
+    return () => null
+  }
+
+  if (isNestedSelectObject(value)) {
+    return compileGroupedSelectObject(value)
+  }
+
+  if (!isExpressionLike(value)) {
+    return () => value
+  }
+
+  return compileExpression(value as BasicExpression)
+}
+
+function compileGroupedSelectObject(
+  obj: Select,
+): (row: NamespacedRow) => Record<string, any> {
+  const entries = Object.entries(obj).map(([key, value]) => {
+    if (key.startsWith(`__SPREAD_SENTINEL__`)) {
+      const rest = key.slice(`__SPREAD_SENTINEL__`.length)
+      const splitIndex = rest.lastIndexOf(`__`)
+      const pathStr = splitIndex >= 0 ? rest.slice(0, splitIndex) : rest
+      const isRefExpr =
+        typeof value === `object` &&
+        `type` in value &&
+        value.type === `ref`
+      const expression = isRefExpr
+        ? (value as BasicExpression)
+        : (new PropRef(pathStr.split(`.`)) as BasicExpression)
+
+      return {
+        key,
+        spread: true,
+        value: compileExpression(expression),
+      }
+    }
+
+    return {
+      key,
+      spread: false,
+      value: compileGroupedSelectValue(value as SelectValueExpression),
+    }
+  })
+
+  return (row) => {
+    const result: Record<string, any> = {}
+    for (const entry of entries) {
+      const value = entry.value(row)
+      if (entry.spread) {
+        if (value && typeof value === `object`) {
+          Object.assign(result, value)
+        }
+      } else {
+        result[entry.key] = value
+      }
+    }
+    return result
+  }
+}
+
+function compileGroupedConditionalSelect(
+  conditional: ConditionalSelect,
+): (row: NamespacedRow) => any {
+  const branches = conditional.branches.map((branch) => ({
+    condition: compileExpression(branch.condition),
+    value: compileGroupedSelectValue(branch.value),
+  }))
+  const defaultValue =
+    conditional.defaultValue === undefined
+      ? undefined
+      : compileGroupedSelectValue(conditional.defaultValue)
+
+  return (row) => {
+    for (const branch of branches) {
+      if (isCaseWhenConditionTrue(branch.condition(row))) {
+        return branch.value(row)
+      }
+    }
+
+    return defaultValue ? defaultValue(row) : undefined
+  }
+}
+
+function isNestedSelectObject(value: unknown): value is Select {
+  return (
+    value != null &&
+    typeof value === `object` &&
+    !Array.isArray(value) &&
+    !(value as any).__refProxy &&
+    !isExpressionLike(value)
+  )
+}
+
+function isConditionalSelect(value: unknown): value is ConditionalSelect {
+  return (
+    value instanceof ConditionalSelect ||
+    (value != null &&
+      typeof value === `object` &&
+      (value as { type?: string }).type === `conditionalSelect`)
+  )
+}
+
+function isCaseWhenConditionTrue(value: any): boolean {
+  if (value == null || value === false) {
+    return false
+  }
+
+  if (value === true) {
+    return true
+  }
+
+  if (typeof value === `number`) {
+    return value !== 0 && !Number.isNaN(value)
+  }
+
+  if (typeof value === `bigint`) {
+    return value !== 0n
+  }
+
+  return Boolean(value)
 }
 
 /**

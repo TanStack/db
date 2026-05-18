@@ -898,9 +898,39 @@ function isPlainObject(value: any): value is Record<string, any> {
   )
 }
 
-function buildNestedSelect(obj: any, parentAliases: Array<string> = []): any {
+function buildNestedSelect(
+  obj: any,
+  parentAliases: Array<string> = [],
+  fieldName?: string,
+): any {
+  if (obj instanceof BaseQueryBuilder) {
+    if (!fieldName) {
+      throw new Error(`Conditional include branch is missing a field name`)
+    }
+    return buildIncludesSubquery(obj, fieldName, parentAliases, `collection`)
+  }
+  if (obj instanceof ToArrayWrapper) {
+    if (!(obj.query instanceof BaseQueryBuilder)) {
+      throw new Error(`toArray() must wrap a subquery builder`)
+    }
+    if (!fieldName) {
+      throw new Error(`Conditional toArray() branch is missing a field name`)
+    }
+    return buildIncludesSubquery(obj.query, fieldName, parentAliases, `array`)
+  }
+  if (obj instanceof ConcatToArrayWrapper) {
+    if (!(obj.query instanceof BaseQueryBuilder)) {
+      throw new Error(`concat(toArray(...)) must wrap a subquery builder`)
+    }
+    if (!fieldName) {
+      throw new Error(
+        `Conditional concat(toArray(...)) branch is missing a field name`,
+      )
+    }
+    return buildIncludesSubquery(obj.query, fieldName, parentAliases, `concat`)
+  }
   if (obj instanceof CaseWhenWrapper) {
-    return buildConditionalSelect(obj, parentAliases)
+    return buildConditionalSelect(obj, parentAliases, fieldName)
   }
   if (!isPlainObject(obj)) return toExpr(obj)
   const out: Record<string, any> = {}
@@ -929,10 +959,10 @@ function buildNestedSelect(obj: any, parentAliases: Array<string> = []): any {
       continue
     }
     if (v instanceof CaseWhenWrapper) {
-      out[k] = buildConditionalSelect(v, parentAliases)
+      out[k] = buildConditionalSelect(v, parentAliases, k)
       continue
     }
-    out[k] = buildNestedSelect(v, parentAliases)
+    out[k] = buildNestedSelect(v, parentAliases, k)
   }
   return out
 }
@@ -940,6 +970,7 @@ function buildNestedSelect(obj: any, parentAliases: Array<string> = []): any {
 function buildConditionalSelect(
   wrapper: CaseWhenWrapper,
   parentAliases: Array<string>,
+  fieldName?: string,
 ): ConditionalSelect {
   const args = wrapper.args
   if (args.length < 2) {
@@ -953,12 +984,12 @@ function buildConditionalSelect(
   for (let i = 0; i < pairCount; i++) {
     branches.push({
       condition: toExpression(args[i * 2]),
-      value: buildNestedSelect(args[i * 2 + 1], parentAliases),
+      value: buildNestedSelect(args[i * 2 + 1], parentAliases, fieldName),
     })
   }
 
   const defaultValue = hasDefaultValue
-    ? buildNestedSelect(args[args.length - 1], parentAliases)
+    ? buildNestedSelect(args[args.length - 1], parentAliases, fieldName)
     : undefined
 
   return new ConditionalSelect(branches, defaultValue)

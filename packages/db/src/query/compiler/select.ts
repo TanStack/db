@@ -149,9 +149,7 @@ export function processSelect(
   return pipeline.pipe(map((row) => processRow(row, ops)))
 }
 
-function compileSelectObject(
-  obj: Record<string, any>,
-): (row: NamespacedRow) => any {
+function compileSelectObject(obj: Record<string, any>): (row: NamespacedRow) => any {
   const ops: Array<SelectOp> = []
   addFromObject([], obj, ops)
 
@@ -172,6 +170,10 @@ function compileSelectValue(
   value: SelectValueExpression,
 ): (row: NamespacedRow) => any {
   if (value instanceof ConditionalSelect) {
+    if (containsAggregate(value)) {
+      return () => null
+    }
+
     return compileConditionalSelect(value)
   }
 
@@ -330,6 +332,15 @@ function addFromObject(
       expression instanceof ConditionalSelect ||
       expression?.type === `conditionalSelect`
     ) {
+      if (containsAggregate(expression)) {
+        ops.push({
+          kind: `field`,
+          alias: [...prefixPath, key].join(`.`),
+          compiled: () => null,
+        })
+        continue
+      }
+
       ops.push({
         kind: `field`,
         alias: [...prefixPath, key].join(`.`),
