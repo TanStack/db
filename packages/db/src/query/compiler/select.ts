@@ -206,7 +206,7 @@ function compileConditionalSelect(
     condition: compileExpression(branch.condition),
     value: compileSelectValue(branch.value),
   }))
-  const defaultValue =
+  const defaultFn =
     conditional.defaultValue === undefined
       ? undefined
       : compileSelectValue(conditional.defaultValue)
@@ -218,7 +218,7 @@ function compileConditionalSelect(
       }
     }
 
-    return defaultValue ? defaultValue(row) : undefined
+    return defaultFn !== undefined ? defaultFn(row) : null
   }
 }
 

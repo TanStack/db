@@ -852,21 +852,21 @@ describe(`multi-source from`, () => {
     expect(collection.toArray.map((row) => stripVirtualPropsDeep(row))).toEqual([
       {
         message: { id: 1, text: `hello`, chunks: [`hello`, `world`] },
-        toolCall: undefined,
+        toolCall: null,
         timestamp: 10,
       },
       {
-        message: undefined,
+        message: null,
         toolCall: { id: 1, name: `search` },
         timestamp: 20,
       },
       {
         message: { id: 2, text: `secret`, chunks: [`hidden`] },
-        toolCall: undefined,
+        toolCall: null,
         timestamp: 30,
       },
       {
-        message: undefined,
+        message: null,
         toolCall: { id: 3, name: `write` },
         timestamp: 40,
       },
@@ -1052,8 +1052,8 @@ describe(`multi-source from`, () => {
           status: `streaming`,
           content: `Hello world`,
         },
-        inactiveText: undefined,
-        toolCall: undefined,
+        inactiveText: null,
+        toolCall: null,
       },
     ])
 
@@ -1101,9 +1101,9 @@ describe(`multi-source from`, () => {
     await flushPromises()
 
     expect(childRows(run.items)[0]!.text.content).toBe(`Hello world!`)
-    expect(childRows(run.items)[0]!.inactiveText).toBeUndefined()
+    expect(childRows(run.items)[0]!.inactiveText).toBeNull()
     expect(itemLiveQuery.toArray[0]!.text.content).toBe(`Hello world!`)
-    expect(itemLiveQuery.toArray[0]!.inactiveText).toBeUndefined()
+    expect(itemLiveQuery.toArray[0]!.inactiveText).toBeNull()
     directItemChanges.length = 0
     liveItemChanges.length = 0
 
@@ -1117,9 +1117,9 @@ describe(`multi-source from`, () => {
     await flushPromises()
 
     expect(childRows(run.items)[0]!.text.content).toBe(`Hello world! Again`)
-    expect(childRows(run.items)[0]!.inactiveText).toBeUndefined()
+    expect(childRows(run.items)[0]!.inactiveText).toBeNull()
     expect(itemLiveQuery.toArray[0]!.text.content).toBe(`Hello world! Again`)
-    expect(itemLiveQuery.toArray[0]!.inactiveText).toBeUndefined()
+    expect(itemLiveQuery.toArray[0]!.inactiveText).toBeNull()
 
     textDeltas.insert({
       key: `delta-5`,
@@ -1133,14 +1133,14 @@ describe(`multi-source from`, () => {
     expect(childRows(run.items)[0]!.text.content).toBe(
       `Hello world! Again Done`,
     )
-    expect(childRows(run.items)[0]!.inactiveText).toBeUndefined()
+    expect(childRows(run.items)[0]!.inactiveText).toBeNull()
     expect(itemLiveQuery.toArray[0]!.text.content).toBe(
       `Hello world! Again Done`,
     )
-    expect(itemLiveQuery.toArray[0]!.inactiveText).toBeUndefined()
+    expect(itemLiveQuery.toArray[0]!.inactiveText).toBeNull()
     expect(directItemChanges.map((change) => change.key)).toEqual([
-      `text:text-1`,
-      `text:text-1`,
+      `text:string:text-1`,
+      `text:string:text-1`,
     ])
     expect(directItemChanges.map((change) => change.content)).toEqual([
       `Hello world! Again`,

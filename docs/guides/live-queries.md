@@ -548,7 +548,7 @@ result row comes from exactly one source alias, and inactive aliases are
 `undefined`.
 
 ```ts
-import { coalesce } from '@tanstack/db'
+import { coalesce, createLiveQueryCollection } from '@tanstack/db'
 
 const timeline = createLiveQueryCollection((q) =>
   q

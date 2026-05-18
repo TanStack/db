@@ -12,7 +12,7 @@ export function getLazyLoadTargets(
   rawQuery: QueryIR,
   lazyFrom: From,
   lazyAlias: string,
-  lazySourceExpr: PropRef,
+  lazySourceExpr: BasicExpression,
   lazySource: Collection | undefined,
   aliasRemapping: Record<string, string>,
 ): Array<LazyLoadTarget> {
@@ -33,7 +33,12 @@ export function getLazyLoadTargets(
     return []
   }
 
-  const followRefResult = followRef(rawQuery, lazySourceExpr, lazySource)
+  const lazySourceRef = toPropRef(lazySourceExpr)
+  if (!lazySourceRef) {
+    return []
+  }
+
+  const followRefResult = followRef(rawQuery, lazySourceRef, lazySource)
   if (!followRefResult) {
     return []
   }
@@ -60,13 +65,27 @@ export function containsUnionFrom(from: From): boolean {
 function getTargetsFromQueryRef(
   query: QueryIR,
   outerAlias: string,
-  expr: PropRef,
+  expr: unknown,
 ): Array<LazyLoadTarget> {
-  if (expr.path[0] !== outerAlias) {
+  if (!expr || typeof expr !== `object` || !(`type` in expr)) {
     return []
   }
 
-  return getTargetsFromPropRef(query, new PropRef(expr.path.slice(1)))
+  const expression = expr as BasicExpression
+  if (expression.type === `func` && expression.name === `coalesce`) {
+    return dedupeLazyLoadTargets(
+      expression.args.flatMap((arg) =>
+        getTargetsFromQueryRef(query, outerAlias, arg),
+      ),
+    )
+  }
+
+  const ref = toPropRef(expression)
+  if (!ref || ref.path[0] !== outerAlias) {
+    return []
+  }
+
+  return getTargetsFromPropRef(query, new PropRef(ref.path.slice(1)))
 }
 
 function getTargetsFromExpression(
@@ -146,4 +165,20 @@ function dedupeLazyLoadTargets(
     }
   }
   return deduped
+}
+
+function toPropRef(expr: unknown): PropRef | undefined {
+  if (expr instanceof PropRef) {
+    return expr
+  }
+  if (
+    expr &&
+    typeof expr === `object` &&
+    `type` in expr &&
+    (expr as { type?: string }).type === `ref` &&
+    Array.isArray((expr as { path?: unknown }).path)
+  ) {
+    return new PropRef((expr as unknown as { path: Array<string> }).path)
+  }
+  return undefined
 }

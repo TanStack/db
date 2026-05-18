@@ -174,6 +174,7 @@ export function processGroupBy(
           const { transformed, extracted } = extractAndReplaceAggregates(
             expr as SelectValueExpression,
             aggCounter,
+            groupByClause,
           )
           for (const [syntheticAlias, aggExpr] of Object.entries(extracted)) {
             aggregates[syntheticAlias] = getAggregateFunction(aggExpr)
@@ -216,6 +217,7 @@ export function processGroupBy(
             finalResults,
             aggregatedRow as Record<string, any>,
             wrappedAggExprs,
+            groupByClause,
           )
         }
 
@@ -340,6 +342,7 @@ export function processGroupBy(
         const { transformed, extracted } = extractAndReplaceAggregates(
           expr as SelectValueExpression,
           aggCounter,
+          groupByClause,
         )
         for (const [syntheticAlias, aggExpr] of Object.entries(extracted)) {
           aggregates[syntheticAlias] = getAggregateFunction(aggExpr)
@@ -379,6 +382,7 @@ export function processGroupBy(
           finalResults,
           aggregatedRow as Record<string, any>,
           wrappedAggExprs,
+          groupByClause,
         )
       } else {
         // No SELECT clause - just use the group keys
@@ -627,7 +631,11 @@ function evaluateWrappedAggregates(
   finalResults: Record<string, any>,
   aggregatedRow: Record<string, any>,
   wrappedAggExprs: Record<string, (data: any) => any>,
+  groupByClause: GroupBy,
 ): void {
+  for (let i = 0; i < groupByClause.length; i++) {
+    finalResults[`__group_${i}`] = aggregatedRow[`__key_${i}`]
+  }
   for (const key of Object.keys(aggregatedRow)) {
     if (key.startsWith(`__agg_`)) {
       finalResults[key] = aggregatedRow[key]
@@ -637,7 +645,9 @@ function evaluateWrappedAggregates(
     finalResults[alias] = evaluator({ $selected: finalResults })
   }
   for (const key of Object.keys(finalResults)) {
-    if (key.startsWith(`__agg_`)) delete finalResults[key]
+    if (key.startsWith(`__agg_`) || key.startsWith(`__group_`)) {
+      delete finalResults[key]
+    }
   }
 }
 
@@ -700,6 +710,7 @@ export function containsAggregate(
 function extractAndReplaceAggregates(
   expr: SelectValueExpression,
   counter: { value: number },
+  groupByClause: GroupBy,
 ): {
   transformed: SelectValueExpression
   extracted: Record<string, Aggregate>
@@ -715,7 +726,7 @@ function extractAndReplaceAggregates(
   if (expr.type === `func`) {
     const allExtracted: Record<string, Aggregate> = {}
     const newArgs = expr.args.map((arg: BasicExpression | Aggregate) => {
-      const result = extractAndReplaceAggregates(arg, counter)
+      const result = extractAndReplaceAggregates(arg, counter, groupByClause)
       Object.assign(allExtracted, result.extracted)
       return result.transformed as BasicExpression
     })
@@ -728,8 +739,16 @@ function extractAndReplaceAggregates(
   if (isConditionalSelect(expr)) {
     const allExtracted: Record<string, Aggregate> = {}
     const branches = expr.branches.map((branch) => {
-      const condition = extractAndReplaceAggregates(branch.condition, counter)
-      const value = extractAndReplaceAggregates(branch.value, counter)
+      const condition = extractAndReplaceAggregates(
+        branch.condition,
+        counter,
+        groupByClause,
+      )
+      const value = extractAndReplaceAggregates(
+        branch.value,
+        counter,
+        groupByClause,
+      )
       Object.assign(allExtracted, condition.extracted, value.extracted)
       return {
         condition: condition.transformed as BasicExpression,
@@ -739,7 +758,7 @@ function extractAndReplaceAggregates(
     const defaultValue =
       expr.defaultValue === undefined
         ? undefined
-        : extractAndReplaceAggregates(expr.defaultValue, counter)
+        : extractAndReplaceAggregates(expr.defaultValue, counter, groupByClause)
 
     if (defaultValue) {
       Object.assign(allExtracted, defaultValue.extracted)
@@ -759,12 +778,25 @@ function extractAndReplaceAggregates(
       const result = extractAndReplaceAggregates(
         value as SelectValueExpression,
         counter,
+        groupByClause,
       )
       Object.assign(allExtracted, result.extracted)
       transformed[key] = result.transformed
     }
 
     return { transformed, extracted: allExtracted }
+  }
+
+  if (expr.type === `ref`) {
+    const groupIndex = groupByClause.findIndex((groupExpr) =>
+      expressionsEqual(expr, groupExpr),
+    )
+    if (groupIndex !== -1) {
+      return {
+        transformed: new PropRef([`$selected`, `__group_${groupIndex}`]),
+        extracted: {},
+      }
+    }
   }
 
   // ref / val – pass through unchanged

@@ -314,17 +314,20 @@ function isCollectionReference(query: QueryIR, sourceAlias: string): boolean {
 function getNullableJoinSources(query: QueryIR): Set<string> {
   const nullable = new Set<string>()
   if (query.join) {
-    const mainAliases = getFromSources(query.from).map((source) => source.alias)
+    const leftAliases = new Set(
+      getFromSources(query.from).map((source) => source.alias),
+    )
     for (const join of query.join) {
       const joinedAlias = join.from.alias
       if (join.type === `left` || join.type === `full`) {
         nullable.add(joinedAlias)
       }
       if (join.type === `right` || join.type === `full`) {
-        for (const mainAlias of mainAliases) {
-          nullable.add(mainAlias)
+        for (const leftAlias of leftAliases) {
+          nullable.add(leftAlias)
         }
       }
+      leftAliases.add(joinedAlias)
     }
   }
   return nullable
