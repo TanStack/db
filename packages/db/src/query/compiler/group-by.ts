@@ -794,9 +794,7 @@ function compileGroupedSelectObject(
       const splitIndex = rest.lastIndexOf(`__`)
       const pathStr = splitIndex >= 0 ? rest.slice(0, splitIndex) : rest
       const isRefExpr =
-        typeof value === `object` &&
-        `type` in value &&
-        value.type === `ref`
+        typeof value === `object` && `type` in value && value.type === `ref`
       const expression = isRefExpr
         ? (value as BasicExpression)
         : (new PropRef(pathStr.split(`.`)) as BasicExpression)

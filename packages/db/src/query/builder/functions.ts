@@ -422,11 +422,7 @@ export function caseWhen<
   C1 extends ExpressionLike,
   V1 extends CaseWhenValue,
   D extends CaseWhenValue,
->(
-  condition1: C1,
-  value1: V1,
-  defaultValue: D,
-): CaseWhenResult<[V1, D], true>
+>(condition1: C1, value1: V1, defaultValue: D): CaseWhenResult<[V1, D], true>
 export function caseWhen<
   C1 extends ExpressionLike,
   V1 extends CaseWhenValue,

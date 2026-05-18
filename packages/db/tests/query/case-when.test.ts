@@ -276,9 +276,9 @@ describe(`caseWhen`, () => {
 
     await query.preload()
 
-    expect(query.toArray.map((row) => stripVirtualPropsAndSymbols(row))).toEqual(
-      [{ status: `active`, total: 2 }],
-    )
+    expect(
+      query.toArray.map((row) => stripVirtualPropsAndSymbols(row)),
+    ).toEqual([{ status: `active`, total: 2 }])
   })
 
   test(`selects conditional projection objects with aggregates in grouped queries`, async () => {
@@ -336,7 +336,11 @@ describe(`caseWhen`, () => {
     const query = createLiveQueryCollection((q) =>
       q
         .from({ user: users })
-        .join({ post: posts }, ({ user, post }) => eq(user.id, post.userId), `left`)
+        .join(
+          { post: posts },
+          ({ user, post }) => eq(user.id, post.userId),
+          `left`,
+        )
         .select(({ user, post }) => ({
           id: user.id,
           title: caseWhen(post, post.title, `none`),
@@ -366,10 +370,7 @@ describe(`caseWhen`, () => {
         .join(
           { post: posts },
           ({ user, post }) =>
-            eq(
-              caseWhen(eq(user.active, true), user.id, -1),
-              post.userId,
-            ),
+            eq(caseWhen(eq(user.active, true), user.id, -1), post.userId),
           `inner`,
         )
         .select(({ user, post }) => ({
@@ -413,13 +414,11 @@ describe(`caseWhen`, () => {
 
     expect(() =>
       createLiveQueryCollection((q) =>
-        q
-          .from({ user: users })
-          .orderBy(({ user }) =>
-            caseWhen(gt(user.age, 18), {
-              id: user.id,
-            }),
-          ),
+        q.from({ user: users }).orderBy(({ user }) =>
+          caseWhen(gt(user.age, 18), {
+            id: user.id,
+          }),
+        ),
       ),
     ).toThrow(/caseWhen\(\) cannot be used inside expressions/)
   })
@@ -616,17 +615,21 @@ describe(`caseWhen`, () => {
         .from({ user: users })
         .select(({ user }) => ({
           id: user.id,
-          fallbackProfile: caseWhen(gt(user.age, 100), { kind: `ancient` }, {
-            id: user.id,
-            name: user.name,
-            postTitles: toArray(
-              q
-                .from({ post: posts })
-                .where(({ post }) => eq(post.userId, user.id))
-                .orderBy(({ post }) => post.id)
-                .select(({ post }) => post.title),
-            ),
-          }),
+          fallbackProfile: caseWhen(
+            gt(user.age, 100),
+            { kind: `ancient` },
+            {
+              id: user.id,
+              name: user.name,
+              postTitles: toArray(
+                q
+                  .from({ post: posts })
+                  .where(({ post }) => eq(post.userId, user.id))
+                  .orderBy(({ post }) => post.id)
+                  .select(({ post }) => post.title),
+              ),
+            },
+          ),
         }))
         .orderBy(({ user }) => user.id),
     )
