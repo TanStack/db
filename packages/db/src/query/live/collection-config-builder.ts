@@ -1756,7 +1756,7 @@ function flushIncludesState(
           const item = parentCollection.get(parentKey as any)
           if (item) {
             // Capture previous value before in-place mutation
-            const previousValue = { ...item }
+            const previousValue = clonePathForUpdate(item, state.resultPath)
             setNestedValue(
               item,
               state.resultPath,
@@ -1875,6 +1875,32 @@ function setNestedValue(
     cursor = cursor[segment]
   }
   cursor[path[path.length - 1]!] = value
+}
+
+function clonePathForUpdate<T extends Record<string, any>>(
+  target: T,
+  path: Array<string>,
+): T {
+  const root = { ...target }
+  let sourceCursor: any = target
+  let cloneCursor: any = root
+
+  for (let i = 0; i < path.length - 1; i++) {
+    const segment = path[i]!
+    const sourceValue = sourceCursor?.[segment]
+    if (sourceValue == null || typeof sourceValue !== `object`) {
+      return root
+    }
+
+    const clonedValue = Array.isArray(sourceValue)
+      ? [...sourceValue]
+      : { ...sourceValue }
+    cloneCursor[segment] = clonedValue
+    sourceCursor = sourceValue
+    cloneCursor = clonedValue
+  }
+
+  return root
 }
 
 function accumulateChanges<T>(
