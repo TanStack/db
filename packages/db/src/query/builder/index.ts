@@ -173,7 +173,8 @@ export class BaseQueryBuilder<TContext extends Context = Context> {
     source: TSource,
   ): QueryBuilder<ContextFromSource<TSource>> {
     const refs = this._createRefsForSource(source, `from clause`)
-    const from = refs.length === 1 ? refs[0]![1] : new UnionFrom(refs.map((r) => r[1]))
+    const from =
+      refs.length === 1 ? refs[0]![1] : new UnionFrom(refs.map((r) => r[1]))
 
     return new BaseQueryBuilder({
       ...this.query,

@@ -170,15 +170,11 @@ function createCollectionWithLoadSubsetTracking<T extends object>(
 }
 
 function createUsersCollectionWithLoadSubsetTracking(id: string) {
-  return createCollectionWithLoadSubsetTracking<User>(
-    id,
-    (user) => user.id,
-    [
-      { id: 1, name: `Alice` },
-      { id: 2, name: `Bob` },
-      { id: 4, name: `Unmatched` },
-    ],
-  )
+  return createCollectionWithLoadSubsetTracking<User>(id, (user) => user.id, [
+    { id: 1, name: `Alice` },
+    { id: 2, name: `Bob` },
+    { id: 4, name: `Unmatched` },
+  ])
 }
 
 function stripVirtualPropsDeep(value: any): any {
@@ -398,22 +394,24 @@ describe(`multi-source from`, () => {
 
     await collection.preload()
 
-    expect(collection.toArray.map((row) => stripVirtualPropsDeep(row))).toEqual([
-      {
-        message: {
-          id: 1,
-          text: `hello`,
-          timestamp: 10,
-          userName: `Alice`,
+    expect(collection.toArray.map((row) => stripVirtualPropsDeep(row))).toEqual(
+      [
+        {
+          message: {
+            id: 1,
+            text: `hello`,
+            timestamp: 10,
+            userName: `Alice`,
+          },
         },
-      },
-      {
-        toolCall: expect.objectContaining({ id: 1, name: `search` }),
-      },
-      {
-        toolCall: expect.objectContaining({ id: 3, name: `write` }),
-      },
-    ])
+        {
+          toolCall: expect.objectContaining({ id: 1, name: `search` }),
+        },
+        {
+          toolCall: expect.objectContaining({ id: 3, name: `write` }),
+        },
+      ],
+    )
   })
 
   it(`supports joins after multi-source from with branch-dependent keys`, async () => {
@@ -454,7 +452,9 @@ describe(`multi-source from`, () => {
   })
 
   it(`supports right joins after multi-source from`, async () => {
-    const messages = createMessagesCollection(`multi-source-messages-right-join`)
+    const messages = createMessagesCollection(
+      `multi-source-messages-right-join`,
+    )
     const toolCalls = createToolCallsCollection(`multi-source-tools-right-join`)
     const users = createUsersCollection(`multi-source-users-right-join`)
 
@@ -464,33 +464,33 @@ describe(`multi-source from`, () => {
           message: messages,
           toolCall: toolCalls,
         })
-        .rightJoin(
-          { user: users },
-          ({ message, toolCall, user }) =>
-            eq(coalesce(message.userId, toolCall.userId), user.id),
+        .rightJoin({ user: users }, ({ message, toolCall, user }) =>
+          eq(coalesce(message.userId, toolCall.userId), user.id),
         )
         .orderBy(({ user }) => user.id),
     )
 
     await collection.preload()
 
-    expect(collection.toArray.map((row) => stripVirtualPropsDeep(row))).toEqual([
-      {
-        message: expect.objectContaining({ id: 1 }),
-        user: expect.objectContaining({ id: 1, name: `Alice` }),
-      },
-      {
-        toolCall: expect.objectContaining({ id: 1 }),
-        user: expect.objectContaining({ id: 1, name: `Alice` }),
-      },
-      {
-        message: expect.objectContaining({ id: 2 }),
-        user: expect.objectContaining({ id: 2, name: `Bob` }),
-      },
-      {
-        user: expect.objectContaining({ id: 4, name: `Unmatched` }),
-      },
-    ])
+    expect(collection.toArray.map((row) => stripVirtualPropsDeep(row))).toEqual(
+      [
+        {
+          message: expect.objectContaining({ id: 1 }),
+          user: expect.objectContaining({ id: 1, name: `Alice` }),
+        },
+        {
+          toolCall: expect.objectContaining({ id: 1 }),
+          user: expect.objectContaining({ id: 1, name: `Alice` }),
+        },
+        {
+          message: expect.objectContaining({ id: 2 }),
+          user: expect.objectContaining({ id: 2, name: `Bob` }),
+        },
+        {
+          user: expect.objectContaining({ id: 4, name: `Unmatched` }),
+        },
+      ],
+    )
   })
 
   it(`supports full joins after multi-source from`, async () => {
@@ -504,10 +504,8 @@ describe(`multi-source from`, () => {
           message: messages,
           toolCall: toolCalls,
         })
-        .fullJoin(
-          { user: users },
-          ({ message, toolCall, user }) =>
-            eq(coalesce(message.userId, toolCall.userId), user.id),
+        .fullJoin({ user: users }, ({ message, toolCall, user }) =>
+          eq(coalesce(message.userId, toolCall.userId), user.id),
         )
         .orderBy(({ message, toolCall, user }) =>
           coalesce(message.timestamp, toolCall.timestamp, user.id),
@@ -516,26 +514,28 @@ describe(`multi-source from`, () => {
 
     await collection.preload()
 
-    expect(collection.toArray.map((row) => stripVirtualPropsDeep(row))).toEqual([
-      {
-        user: expect.objectContaining({ id: 4, name: `Unmatched` }),
-      },
-      {
-        message: expect.objectContaining({ id: 1 }),
-        user: expect.objectContaining({ id: 1, name: `Alice` }),
-      },
-      {
-        toolCall: expect.objectContaining({ id: 1 }),
-        user: expect.objectContaining({ id: 1, name: `Alice` }),
-      },
-      {
-        message: expect.objectContaining({ id: 2 }),
-        user: expect.objectContaining({ id: 2, name: `Bob` }),
-      },
-      {
-        toolCall: expect.objectContaining({ id: 3 }),
-      },
-    ])
+    expect(collection.toArray.map((row) => stripVirtualPropsDeep(row))).toEqual(
+      [
+        {
+          user: expect.objectContaining({ id: 4, name: `Unmatched` }),
+        },
+        {
+          message: expect.objectContaining({ id: 1 }),
+          user: expect.objectContaining({ id: 1, name: `Alice` }),
+        },
+        {
+          toolCall: expect.objectContaining({ id: 1 }),
+          user: expect.objectContaining({ id: 1, name: `Alice` }),
+        },
+        {
+          message: expect.objectContaining({ id: 2 }),
+          user: expect.objectContaining({ id: 2, name: `Bob` }),
+        },
+        {
+          toolCall: expect.objectContaining({ id: 3 }),
+        },
+      ],
+    )
   })
 
   it(`does not lazy-load branch-dependent joins after multi-source from`, async () => {
@@ -663,9 +663,9 @@ describe(`multi-source from`, () => {
     expect(collection.size).toBe(3)
     expect(messageLoadSubsetCalls.length).toBeGreaterThan(0)
     expect(toolLoadSubsetCalls.length).toBeGreaterThan(0)
-    expect(messageLoadSubsetCalls.every((call) => call.where === undefined)).toBe(
-      true,
-    )
+    expect(
+      messageLoadSubsetCalls.every((call) => call.where === undefined),
+    ).toBe(true)
     expect(toolLoadSubsetCalls.every((call) => call.where === undefined)).toBe(
       true,
     )
@@ -684,7 +684,9 @@ describe(`multi-source from`, () => {
         (toolCall) => toolCall.id,
         toolCallsData,
       )
-    const users = createUsersCollection(`multi-source-users-limited-subquery-join`)
+    const users = createUsersCollection(
+      `multi-source-users-limited-subquery-join`,
+    )
 
     const collection = createLiveQueryCollection((q) => {
       const firstMessage = q
@@ -718,9 +720,9 @@ describe(`multi-source from`, () => {
     expect(collection.size).toBe(4)
     expect(messageLoadSubsetCalls.length).toBeGreaterThan(0)
     expect(toolLoadSubsetCalls.length).toBeGreaterThan(0)
-    expect(messageLoadSubsetCalls.every((call) => call.where === undefined)).toBe(
-      true,
-    )
+    expect(
+      messageLoadSubsetCalls.every((call) => call.where === undefined),
+    ).toBe(true)
     expect(toolLoadSubsetCalls.some((call) => call.where)).toBe(true)
   })
 
@@ -799,16 +801,19 @@ describe(`multi-source from`, () => {
   })
 
   it(`rejects multiple sources in one join call`, () => {
-    const messages = createMessagesCollection(`multi-source-messages-join-error`)
+    const messages = createMessagesCollection(
+      `multi-source-messages-join-error`,
+    )
     const toolCalls = createToolCallsCollection(`multi-source-tools-join-error`)
     const users = createUsersCollection(`multi-source-users-join-error`)
 
     expect(() =>
       createLiveQueryCollection((q) =>
-        q.from({ message: messages }).join(
-          { toolCall: toolCalls, user: users },
-          ({ message, toolCall }) => eq(message.id, toolCall.id),
-        ),
+        q
+          .from({ message: messages })
+          .join({ toolCall: toolCalls, user: users }, ({ message, toolCall }) =>
+            eq(message.id, toolCall.id),
+          ),
       ),
     ).toThrow(OnlyOneSourceAllowedError)
   })
@@ -849,28 +854,30 @@ describe(`multi-source from`, () => {
 
     await collection.preload()
 
-    expect(collection.toArray.map((row) => stripVirtualPropsDeep(row))).toEqual([
-      {
-        message: { id: 1, text: `hello`, chunks: [`hello`, `world`] },
-        toolCall: null,
-        timestamp: 10,
-      },
-      {
-        message: null,
-        toolCall: { id: 1, name: `search` },
-        timestamp: 20,
-      },
-      {
-        message: { id: 2, text: `secret`, chunks: [`hidden`] },
-        toolCall: null,
-        timestamp: 30,
-      },
-      {
-        message: null,
-        toolCall: { id: 3, name: `write` },
-        timestamp: 40,
-      },
-    ])
+    expect(collection.toArray.map((row) => stripVirtualPropsDeep(row))).toEqual(
+      [
+        {
+          message: { id: 1, text: `hello`, chunks: [`hello`, `world`] },
+          toolCall: null,
+          timestamp: 10,
+        },
+        {
+          message: null,
+          toolCall: { id: 1, name: `search` },
+          timestamp: 20,
+        },
+        {
+          message: { id: 2, text: `secret`, chunks: [`hidden`] },
+          toolCall: null,
+          timestamp: 30,
+        },
+        {
+          message: null,
+          toolCall: { id: 3, name: `write` },
+          timestamp: 40,
+        },
+      ],
+    )
   })
 
   it(`materializes correlated collection includes from multi-source subquery children`, async () => {
@@ -886,7 +893,9 @@ describe(`multi-source from`, () => {
         (toolCall) => toolCall.id,
         toolCallsData,
       )
-    const users = createUsersCollection(`multi-source-users-collection-includes`)
+    const users = createUsersCollection(
+      `multi-source-users-collection-includes`,
+    )
 
     const collection = createLiveQueryCollection((q) => {
       const events = q
@@ -1010,32 +1019,30 @@ describe(`multi-source from`, () => {
           }),
         }))
 
-      return q
-        .from({ run: runs })
-        .select(({ run }) => ({
-          run: caseWhen(run.key, {
-            key: run.key,
-            order: run.order,
-            status: run.status,
-            items: q
-              .from({ item: runItemsSource })
-              .where(({ item }) => eq(item.runId, run.key))
-              .orderBy(({ item }) => item.order)
-              .select(({ item }) => ({
-                text: caseWhen(item.text.key, {
-                  key: item.text.key,
-                  runId: item.text.runId,
-                  order: item.text.order,
-                  status: item.text.status,
-                  content: item.textContent,
-                }),
-                inactiveText: caseWhen(item.toolCall.key, {
-                  content: item.textContent,
-                }),
-                toolCall: item.toolCall,
-              })),
-          }),
-        }))
+      return q.from({ run: runs }).select(({ run }) => ({
+        run: caseWhen(run.key, {
+          key: run.key,
+          order: run.order,
+          status: run.status,
+          items: q
+            .from({ item: runItemsSource })
+            .where(({ item }) => eq(item.runId, run.key))
+            .orderBy(({ item }) => item.order)
+            .select(({ item }) => ({
+              text: caseWhen(item.text.key, {
+                key: item.text.key,
+                runId: item.text.runId,
+                order: item.text.order,
+                status: item.text.status,
+                content: item.textContent,
+              }),
+              inactiveText: caseWhen(item.toolCall.key, {
+                content: item.textContent,
+              }),
+              toolCall: item.toolCall,
+            })),
+        }),
+      }))
     })
 
     await timeline.preload()

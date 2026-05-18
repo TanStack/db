@@ -232,8 +232,7 @@ function processJoin(
       lazyFrom.type === `queryRef` &&
       (lazyFrom.query.limit || lazyFrom.query.offset)
 
-    const lazySourceJoinExpr =
-      activeSource === `main` ? joinedExpr : mainExpr
+    const lazySourceJoinExpr = activeSource === `main` ? joinedExpr : mainExpr
     const lazyAlias = activeSource === `main` ? joinedSource : mainSource
     const lazyTargets = getLazyLoadTargets(
       rawQuery,

@@ -1051,10 +1051,10 @@ function processFromClause(
 
     const branch = wrapInputWithAlias(input, alias).pipe(
       map(([key, row]) => {
-        return [
-          `${alias}:${encodeKeyForUnionBranch(key)}`,
-          row,
-        ] as [string, typeof row]
+        return [`${alias}:${encodeKeyForUnionBranch(key)}`, row] as [
+          string,
+          typeof row,
+        ]
       }),
     )
 
@@ -1336,7 +1336,9 @@ function getRefFromAlias(
   }
 }
 
-function getFromSources(from: QueryIR[`from`]): Array<CollectionRef | QueryRef> {
+function getFromSources(
+  from: QueryIR[`from`],
+): Array<CollectionRef | QueryRef> {
   return from.type === `unionFrom` ? from.sources : [from]
 }
 
@@ -1409,8 +1411,7 @@ function findProjectedSourceIncludePaths(
 
 function pathStartsWith(path: Array<string>, prefix: Array<string>): boolean {
   return (
-    prefix.length <= path.length &&
-    prefix.every((part, i) => path[i] === part)
+    prefix.length <= path.length && prefix.every((part, i) => path[i] === part)
   )
 }
 
@@ -1422,7 +1423,11 @@ function mapNestedFromQueries(
   const optimizedSources = getFromSources(optimizedFrom)
   const originalSources = getFromSources(originalFrom)
 
-  for (let i = 0; i < optimizedSources.length && i < originalSources.length; i++) {
+  for (
+    let i = 0;
+    i < optimizedSources.length && i < originalSources.length;
+    i++
+  ) {
     const optimizedSource = optimizedSources[i]!
     const originalSource = originalSources[i]!
     if (
@@ -1430,7 +1435,11 @@ function mapNestedFromQueries(
       originalSource.type === `queryRef`
     ) {
       queryMapping.set(optimizedSource.query, originalSource.query)
-      mapNestedQueries(optimizedSource.query, originalSource.query, queryMapping)
+      mapNestedQueries(
+        optimizedSource.query,
+        originalSource.query,
+        queryMapping,
+      )
     }
   }
 }

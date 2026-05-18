@@ -191,10 +191,8 @@ describe(`multi-source from types`, () => {
           message: messages,
           toolCall: toolCalls,
         })
-        .leftJoin(
-          { user: users },
-          ({ message, toolCall, user }) =>
-            eq(coalesce(message.userId, toolCall.userId), user.id),
+        .leftJoin({ user: users }, ({ message, toolCall, user }) =>
+          eq(coalesce(message.userId, toolCall.userId), user.id),
         ),
     )
 
@@ -227,10 +225,8 @@ describe(`multi-source from types`, () => {
           message: messages,
           toolCall: toolCalls,
         })
-        .rightJoin(
-          { user: users },
-          ({ message, toolCall, user }) =>
-            eq(coalesce(message.userId, toolCall.userId), user.id),
+        .rightJoin({ user: users }, ({ message, toolCall, user }) =>
+          eq(coalesce(message.userId, toolCall.userId), user.id),
         ),
     )
 
@@ -256,10 +252,8 @@ describe(`multi-source from types`, () => {
           message: messages,
           toolCall: toolCalls,
         })
-        .fullJoin(
-          { user: users },
-          ({ message, toolCall, user }) =>
-            eq(coalesce(message.userId, toolCall.userId), user.id),
+        .fullJoin({ user: users }, ({ message, toolCall, user }) =>
+          eq(coalesce(message.userId, toolCall.userId), user.id),
         ),
     )
 

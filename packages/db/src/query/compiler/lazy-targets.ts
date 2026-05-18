@@ -1,5 +1,11 @@
 import { PropRef, followRef } from '../ir.js'
-import type { BasicExpression, CollectionRef, From, QueryIR, QueryRef } from '../ir.js'
+import type {
+  BasicExpression,
+  CollectionRef,
+  From,
+  QueryIR,
+  QueryRef,
+} from '../ir.js'
 import type { Collection } from '../../collection/index.js'
 
 export type LazyLoadTarget = {

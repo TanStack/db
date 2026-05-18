@@ -110,8 +110,9 @@ describe(`QueryBuilder.from`, () => {
     expect(builtQuery.from).toBeDefined()
     expect(builtQuery.from.type).toBe(`unionFrom`)
     expect(builtQuery.from.alias).toBe(`employees`)
-    expect((builtQuery.from as any).sources.map((source: any) => source.alias))
-      .toEqual([`employees`, `departments`])
+    expect(
+      (builtQuery.from as any).sources.map((source: any) => source.alias),
+    ).toEqual([`employees`, `departments`])
   })
 
   it(`throws helpful error when passing a string instead of an object`, () => {

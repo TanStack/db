@@ -127,23 +127,22 @@ type IsUnion<T, U = T> = T extends unknown
     : true
   : false
 
-export type ContextFromSource<TSource extends Source> = IsUnion<
-  keyof TSource & string
-> extends true
-  ? {
-      baseSchema: SchemaFromSource<TSource>
-      schema: UnionRefsSchema<SchemaFromSource<TSource>>
-      fromSourceName: keyof TSource & string
-      fromSourceNames: ReadonlyArray<keyof TSource & string>
-      hasUnionFrom: true
-      hasJoins: false
-    }
-  : {
-      baseSchema: SchemaFromSource<TSource>
-      schema: SchemaFromSource<TSource>
-      fromSourceName: keyof TSource & string
-      hasJoins: false
-    }
+export type ContextFromSource<TSource extends Source> =
+  IsUnion<keyof TSource & string> extends true
+    ? {
+        baseSchema: SchemaFromSource<TSource>
+        schema: UnionRefsSchema<SchemaFromSource<TSource>>
+        fromSourceName: keyof TSource & string
+        fromSourceNames: ReadonlyArray<keyof TSource & string>
+        hasUnionFrom: true
+        hasJoins: false
+      }
+    : {
+        baseSchema: SchemaFromSource<TSource>
+        schema: SchemaFromSource<TSource>
+        fromSourceName: keyof TSource & string
+        hasJoins: false
+      }
 
 /**
  * GetAliases - Extracts all table aliases available in a query context
@@ -371,7 +370,7 @@ export type ResultTypeFromSelect<TSelectObject> =
                     ? Collection<GetResult<TChildContext>>
                     : // Ref (full object ref or spread with RefBrand) - recursively process properties
                       TSelectObject[K] extends Ref<infer _T>
-                    ? ExtractRef<TSelectObject[K]>
+                      ? ExtractRef<TSelectObject[K]>
                       : // RefLeaf (simple property ref like user.name)
                         TSelectObject[K] extends RefLeaf<infer T>
                         ? IsNullableRef<TSelectObject[K]> extends true
@@ -926,8 +925,8 @@ type ResultValue<TContext extends Context> = TContext[`hasResult`] extends true
         HasRightOrFullJoin<TContext>
       >
     : TContext[`hasJoins`] extends true
-    ? TContext[`schema`]
-    : TContext[`schema`][TContext[`fromSourceName`]]
+      ? TContext[`schema`]
+      : TContext[`schema`][TContext[`fromSourceName`]]
 
 /**
  * GetResult - Determines the final result type of a query

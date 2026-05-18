@@ -839,7 +839,9 @@ function deepCopyFrom(from: From): From {
     return new QueryRefClass(deepCopyQuery(from.query), from.alias)
   }
 
-  return new UnionFromClass(from.sources.map((source) => deepCopyFrom(source) as any))
+  return new UnionFromClass(
+    from.sources.map((source) => deepCopyFrom(source) as any),
+  )
 }
 
 function deepCopyJoinFrom(
@@ -1148,7 +1150,10 @@ function referencesAliasWithRemappedSelect(
 
     // Safe only when the projection points straight back to the same alias or the
     // underlying source alias and preserves the field name.
-    if (innerAlias !== outerAlias && innerAlias !== getFirstFromAlias(subquery)) {
+    if (
+      innerAlias !== outerAlias &&
+      innerAlias !== getFirstFromAlias(subquery)
+    ) {
       return true
     }
 
