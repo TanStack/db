@@ -166,7 +166,6 @@ export class CollectionSubscriber<
     const sentChanges = sendChangesToInput(
       input,
       filteredChanges,
-      this.collection.config.getKey,
     )
 
     // Do not provide the callback that loads more data

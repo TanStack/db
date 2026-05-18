@@ -63,6 +63,16 @@ type ConditionalSelectGuard = {
   expected: boolean
 }
 
+type SourceInclude = {
+  sourceAlias: string
+  include: IncludesCompilationResult
+}
+
+type ProjectedSourceIncludePath = {
+  path: Array<string>
+  guards: Array<ConditionalSelectGuard>
+}
+
 /**
  * Result of compiling an includes subquery, including the child pipeline
  * and metadata needed to route child results to parent-scoped Collections.
@@ -201,6 +211,7 @@ export function compileQuery(
     collectionId: mainCollectionId,
     pipeline: initialPipeline,
     sources: fromSources,
+    sourceIncludes,
     isUnionFrom,
   } = processFromClause(
     query.from,
@@ -327,6 +338,58 @@ export function compileQuery(
       parentContext: Record<string, any> | null
     }
   }> = []
+  for (const { sourceAlias, include } of sourceIncludes) {
+    const projectedPaths =
+      query.select != null
+        ? findProjectedSourceIncludePaths(
+            query.select,
+            sourceAlias,
+            include.resultPath,
+          )
+        : query.fnSelect
+          ? []
+          : [
+              {
+                path: [sourceAlias, ...include.resultPath],
+                guards: [],
+              },
+            ]
+
+    if (projectedPaths.length === 0) {
+      continue
+    }
+
+    for (const { path: resultPath, guards } of projectedPaths) {
+      const fieldName = getUniqueIncludesRoutingKey(
+        `${sourceAlias}.${resultPath.join(`.`)}`,
+        includesRoutingFns,
+      )
+      const compiledGuards = guards.map((guard) => ({
+        condition: compileExpression(guard.condition),
+        expected: guard.expected,
+      }))
+      includesResults.push({
+        ...include,
+        fieldName,
+        resultPath,
+      })
+
+      includesRoutingFns.push({
+        fieldName,
+        getRouting: (nsRow: any) => {
+          if (!matchesConditionalSelectGuards(compiledGuards, nsRow)) {
+            return { correlationKey: null, parentContext: null }
+          }
+          return (
+            nsRow[sourceAlias]?.[INCLUDES_ROUTING]?.[include.fieldName] ?? {
+              correlationKey: null,
+              parentContext: null,
+            }
+          )
+        },
+      })
+    }
+  }
   if (query.select) {
     const includesEntries = extractIncludesFromSelect(query.select)
     // Shallow-clone select before mutating so we don't modify the shared IR
@@ -335,6 +398,7 @@ export function compileQuery(
       query = { ...query, select: { ...query.select } }
     }
     for (const { key, path, subquery, guards } of includesEntries) {
+      const fieldName = getUniqueIncludesRoutingKey(key, includesRoutingFns)
       // Branch parent pipeline: map to [correlationValue, parentContext]
       // When parentProjection exists, project referenced parent fields; otherwise null (zero overhead)
       const compiledCorrelation = compileExpression(subquery.correlationField)
@@ -503,7 +567,7 @@ export function compileQuery(
 
       includesResults.push({
         pipeline: childResult.pipeline,
-        fieldName: key,
+        fieldName,
         resultPath: path,
         correlationField: subquery.correlationField,
         childCorrelationField: subquery.childCorrelationField,
@@ -526,7 +590,7 @@ export function compileQuery(
         const compiledCorr = compiledCorrelation
         const compiledRoutingGuards = compiledGuards
         includesRoutingFns.push({
-          fieldName: key,
+          fieldName,
           getRouting: (nsRow: any) => {
             if (
               !matchesConditionalSelectGuards(compiledRoutingGuards, nsRow)
@@ -554,7 +618,7 @@ export function compileQuery(
       } else {
         const compiledRoutingGuards = compiledGuards
         includesRoutingFns.push({
-          fieldName: key,
+          fieldName,
           getRouting: (nsRow: any) => {
             if (
               !matchesConditionalSelectGuards(compiledRoutingGuards, nsRow)
@@ -916,10 +980,11 @@ function processFromClause(
   pipeline: NamespacedAndKeyedStream
   collectionId: string
   sources: Record<string, KeyedStream>
+  sourceIncludes: Array<SourceInclude>
   isUnionFrom: boolean
 } {
   if (from.type !== `unionFrom`) {
-    const { alias, input, collectionId } = processFrom(
+    const { alias, input, collectionId, sourceIncludes } = processFrom(
       from,
       allInputs,
       collections,
@@ -940,6 +1005,7 @@ function processFromClause(
       pipeline: wrapInputWithAlias(input, alias),
       collectionId,
       sources: { [alias]: input },
+      sourceIncludes,
       isUnionFrom: false,
     }
   }
@@ -949,12 +1015,18 @@ function processFromClause(
   }
 
   const sources: Record<string, KeyedStream> = {}
+  const sourceIncludes: Array<SourceInclude> = []
   let pipeline: NamespacedAndKeyedStream | undefined
   let mainAlias = ``
   let mainCollectionId = ``
 
   for (const source of from.sources) {
-    const { alias, input, collectionId } = processFrom(
+    const {
+      alias,
+      input,
+      collectionId,
+      sourceIncludes: childSourceIncludes,
+    } = processFrom(
       source,
       allInputs,
       collections,
@@ -975,6 +1047,7 @@ function processFromClause(
       mainCollectionId = collectionId
     }
     sources[alias] = input
+    sourceIncludes.push(...childSourceIncludes)
 
     const branch = wrapInputWithAlias(input, alias).pipe(
       map(([key, row]) => {
@@ -993,6 +1066,7 @@ function processFromClause(
     pipeline: pipeline!,
     collectionId: mainCollectionId,
     sources,
+    sourceIncludes,
     isUnionFrom: true,
   }
 }
@@ -1031,7 +1105,12 @@ function processFrom(
   aliasToCollectionId: Record<string, string>,
   aliasRemapping: Record<string, string>,
   sourceWhereClauses: Map<string, BasicExpression<boolean>>,
-): { alias: string; input: KeyedStream; collectionId: string } {
+): {
+  alias: string
+  input: KeyedStream
+  collectionId: string
+  sourceIncludes: Array<SourceInclude>
+} {
   switch (from.type) {
     case `collectionRef`: {
       const input = allInputs[from.alias]
@@ -1043,7 +1122,12 @@ function processFrom(
         )
       }
       aliasToCollectionId[from.alias] = from.collection.id
-      return { alias: from.alias, input, collectionId: from.collection.id }
+      return {
+        alias: from.alias,
+        input,
+        collectionId: from.collection.id,
+        sourceIncludes: [],
+      }
     }
     case `queryRef`: {
       // Find the original query for caching purposes
@@ -1130,6 +1214,11 @@ function processFrom(
         alias: from.alias,
         input: extractedInput,
         collectionId: subQueryResult.collectionId,
+        sourceIncludes:
+          subQueryResult.includes?.map((include) => ({
+            sourceAlias: from.alias,
+            include,
+          })) ?? [],
       }
     }
     default:
@@ -1240,6 +1329,76 @@ function getFromSources(from: QueryIR[`from`]): Array<CollectionRef | QueryRef> 
 
 function getFirstFromAlias(from: QueryIR[`from`]): string {
   return getFromSources(from)[0]!.alias
+}
+
+function findProjectedSourceIncludePaths(
+  select: Record<string, any>,
+  sourceAlias: string,
+  sourcePath: Array<string>,
+): Array<ProjectedSourceIncludePath> {
+  const targetPath = [sourceAlias, ...sourcePath]
+  const resultPaths: Array<ProjectedSourceIncludePath> = []
+
+  const visitSelectObject = (
+    obj: Record<string, any>,
+    prefix: Array<string>,
+    guards: Array<ConditionalSelectGuard>,
+  ) => {
+    for (const [key, value] of Object.entries(obj)) {
+      if (key.startsWith(`__SPREAD_SENTINEL__`)) continue
+      visitSelectValue(value, [...prefix, key], guards)
+    }
+  }
+
+  const visitSelectValue = (
+    value: any,
+    path: Array<string>,
+    guards: Array<ConditionalSelectGuard>,
+  ) => {
+    if (value instanceof PropRef && pathStartsWith(targetPath, value.path)) {
+      resultPaths.push({
+        path: [...path, ...targetPath.slice(value.path.length)],
+        guards,
+      })
+      return
+    }
+
+    if (value instanceof ConditionalSelect) {
+      const previousBranchGuards: Array<ConditionalSelectGuard> = []
+      for (const branch of value.branches) {
+        visitSelectValue(branch.value, path, [
+          ...guards,
+          ...previousBranchGuards,
+          { condition: branch.condition, expected: true },
+        ])
+        previousBranchGuards.push({
+          condition: branch.condition,
+          expected: false,
+        })
+      }
+      if (value.defaultValue !== undefined) {
+        visitSelectValue(value.defaultValue, path, [
+          ...guards,
+          ...previousBranchGuards,
+        ])
+      }
+      return
+    }
+
+    if (isNestedSelectObject(value)) {
+      visitSelectObject(value, path, guards)
+    }
+  }
+
+  visitSelectObject(select, [], [])
+  return resultPaths
+}
+
+function pathStartsWith(path: Array<string>, prefix: Array<string>): boolean {
+  return (
+    prefix.length <= path.length &&
+    prefix.every((part, i) => path[i] === part)
+  )
 }
 
 function mapNestedFromQueries(
@@ -1433,11 +1592,27 @@ function getIncludesRoutingKey(
   path: Array<string>,
   entries: Array<{ key: string }>,
 ): string {
-  const baseKey = path.join(`.`)
-  if (!entries.some((entry) => entry.key === baseKey)) {
+  return getUniqueIncludesRoutingKey(path.join(`.`), entries)
+}
+
+function getUniqueIncludesRoutingKey(
+  baseKey: string,
+  entries: Array<{ key?: string; fieldName?: string }>,
+): string {
+  const hasKey = (key: string) =>
+    entries.some((entry) => (entry.key ?? entry.fieldName) === key)
+
+  if (!hasKey(baseKey)) {
     return baseKey
   }
-  return `${baseKey}#${entries.length}`
+
+  let suffix = entries.length
+  let key = `${baseKey}#${suffix}`
+  while (hasKey(key)) {
+    suffix++
+    key = `${baseKey}#${suffix}`
+  }
+  return key
 }
 
 /** Check if a value is a nested plain object in a select (not an IR expression node) */
