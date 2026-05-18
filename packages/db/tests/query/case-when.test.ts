@@ -210,7 +210,7 @@ describe(`caseWhen`, () => {
       query.toArray.map((row) => stripVirtualPropsAndSymbols(row)),
     ).toEqual([
       { id: 1, adultProfile: { id: 1, name: `Alice`, label: `adult` } },
-      { id: 2, adultProfile: undefined },
+      { id: 2, adultProfile: null },
       { id: 3, adultProfile: { id: 3, name: `Charlie`, label: `adult` } },
     ])
   })
@@ -304,7 +304,7 @@ describe(`caseWhen`, () => {
           label: `adult`,
         },
       },
-      { id: 2, adultProfile: undefined },
+      { id: 2, adultProfile: null },
       {
         id: 3,
         adultProfile: {
@@ -458,7 +458,7 @@ describe(`caseWhen`, () => {
       query.toArray.map((row) => stripVirtualPropsAndSymbols(row)),
     ).toEqual([
       { id: 1, title: `Alice post`, postProfile: { title: `Alice post` } },
-      { id: 4, title: `none`, postProfile: undefined },
+      { id: 4, title: `none`, postProfile: null },
     ])
   })
 

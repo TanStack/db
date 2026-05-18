@@ -232,24 +232,17 @@ function processJoin(
       lazyFrom.type === `queryRef` &&
       (lazyFrom.query.limit || lazyFrom.query.offset)
 
-    // If join expressions contain computed values (like concat functions)
-    // we don't optimize the join because we don't have an index over the computed values
-    const hasComputedJoinExpr =
-      mainExpr.type === `func` || joinedExpr.type === `func`
-
     const lazySourceJoinExpr =
-      activeSource === `main` ? (joinedExpr as PropRef) : (mainExpr as PropRef)
+      activeSource === `main` ? joinedExpr : mainExpr
     const lazyAlias = activeSource === `main` ? joinedSource : mainSource
-    const lazyTargets = hasComputedJoinExpr
-      ? []
-      : getLazyLoadTargets(
-          rawQuery,
-          lazyFrom,
-          lazyAlias,
-          lazySourceJoinExpr,
-          lazySource,
-          aliasRemapping,
-        )
+    const lazyTargets = getLazyLoadTargets(
+      rawQuery,
+      lazyFrom,
+      lazyAlias,
+      lazySourceJoinExpr,
+      lazySource,
+      aliasRemapping,
+    )
 
     if (!limitedSubquery && lazyTargets.length > 0) {
       // This join can be optimized by having the active collection

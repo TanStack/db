@@ -1052,7 +1052,7 @@ function processFromClause(
     const branch = wrapInputWithAlias(input, alias).pipe(
       map(([key, row]) => {
         return [
-          `${alias}:${String(key)}`,
+          `${alias}:${encodeKeyForUnionBranch(key)}`,
           row,
         ] as [string, typeof row]
       }),
@@ -1089,6 +1089,19 @@ function wrapInputWithAlias(
       return [key, nsRow] as [unknown, Record<string, typeof row>]
     }),
   )
+}
+
+function encodeKeyForUnionBranch(key: unknown): string {
+  if (typeof key === `string`) {
+    return `string:${key}`
+  }
+  if (typeof key === `number`) {
+    return `number:${String(key)}`
+  }
+  if (typeof key === `bigint`) {
+    return `bigint:${String(key)}`
+  }
+  return `${typeof key}:${JSON.stringify(key)}`
 }
 
 function processFrom(
