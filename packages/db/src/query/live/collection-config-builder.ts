@@ -1755,7 +1755,6 @@ function flushIncludesState(
         for (const parentKey of parentKeys) {
           const item = parentCollection.get(parentKey as any)
           if (item) {
-            const key = parentSyncMethods.collection.getKeyFromItem(item)
             // Capture previous value before in-place mutation
             const previousValue = { ...item }
             setNestedValue(
@@ -1763,10 +1762,11 @@ function flushIncludesState(
               state.resultPath,
               materializeIncludedValue(state, entry),
             )
+            const nextValue = clonePathForUpdate(item, state.resultPath)
             events.push({
               type: `update`,
-              key,
-              value: item,
+              key: parentKey as any,
+              value: nextValue,
               previousValue,
             })
           }

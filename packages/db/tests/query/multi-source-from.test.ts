@@ -48,6 +48,34 @@ type LabelRow = {
   label: string
 }
 
+type RunRow = {
+  key: string
+  order: string
+  status: string
+}
+
+type TextRow = {
+  key: string
+  runId: string
+  order: string
+  status: string
+}
+
+type ToolCallRow = {
+  key: string
+  runId: string
+  order: string
+  name: string
+  status: string
+}
+
+type TextDeltaRow = {
+  key: string
+  textId: string
+  order: string
+  delta: string
+}
+
 const messagesData: Array<Message> = [
   { id: 1, text: `hello`, kind: `visible`, timestamp: 10, userId: 1 },
   { id: 2, text: `secret`, kind: `hidden`, timestamp: 30, userId: 2 },
@@ -911,6 +939,216 @@ describe(`multi-source from`, () => {
     const inserted = collection.toArray.find((row) => row.id === 3)!
     expect(childRows(inserted.profile.items)).toEqual([
       { label: `write`, timestamp: 40 },
+    ])
+  })
+
+  it(`materializes nested concat includes inside multi-source subquery child rows`, async () => {
+    const runs = createCollection(
+      mockSyncCollectionOptions<RunRow>({
+        id: `multi-source-nested-concat-runs`,
+        getKey: (run) => run.key,
+        initialData: [{ key: `run-1`, order: `1`, status: `running` }],
+      }),
+    )
+    const texts = createCollection(
+      mockSyncCollectionOptions<TextRow>({
+        id: `multi-source-nested-concat-texts`,
+        getKey: (text) => text.key,
+        initialData: [
+          { key: `text-1`, runId: `run-1`, order: `1`, status: `streaming` },
+        ],
+      }),
+    )
+    const toolCalls = createCollection(
+      mockSyncCollectionOptions<ToolCallRow>({
+        id: `multi-source-nested-concat-tool-calls`,
+        getKey: (toolCall) => toolCall.key,
+        initialData: [],
+      }),
+    )
+    const textDeltas = createCollection(
+      mockSyncCollectionOptions<TextDeltaRow>({
+        id: `multi-source-nested-concat-text-deltas`,
+        getKey: (delta) => delta.key,
+        initialData: [
+          { key: `delta-1`, textId: `text-1`, order: `1`, delta: `Hello` },
+          { key: `delta-2`, textId: `text-1`, order: `2`, delta: ` world` },
+        ],
+      }),
+    )
+
+    const timeline = createLiveQueryCollection((q) => {
+      const runItemsSource = q
+        .from({
+          text: texts,
+          toolCall: toolCalls,
+        })
+        .select(({ text, toolCall }) => ({
+          order: coalesce(text.order, toolCall.order, `~`),
+          runId: coalesce(text.runId, toolCall.runId, ``),
+          text: caseWhen(text.key, {
+            key: text.key,
+            runId: text.runId,
+            order: text.order,
+            status: text.status,
+          }),
+          textContent: concat(
+            toArray(
+              q
+                .from({ chunk: textDeltas })
+                .where(({ chunk }) => eq(chunk.textId, text.key))
+                .orderBy(({ chunk }) => chunk.order)
+                .select(({ chunk }) => chunk.delta),
+            ),
+          ),
+          toolCall: caseWhen(toolCall.key, {
+            key: toolCall.key,
+            runId: toolCall.runId,
+            order: toolCall.order,
+            name: toolCall.name,
+            status: toolCall.status,
+          }),
+        }))
+
+      return q
+        .from({ run: runs })
+        .select(({ run }) => ({
+          run: caseWhen(run.key, {
+            key: run.key,
+            order: run.order,
+            status: run.status,
+            items: q
+              .from({ item: runItemsSource })
+              .where(({ item }) => eq(item.runId, run.key))
+              .orderBy(({ item }) => item.order)
+              .select(({ item }) => ({
+                text: caseWhen(item.text.key, {
+                  key: item.text.key,
+                  runId: item.text.runId,
+                  order: item.text.order,
+                  status: item.text.status,
+                  content: item.textContent,
+                }),
+                inactiveText: caseWhen(item.toolCall.key, {
+                  content: item.textContent,
+                }),
+                toolCall: item.toolCall,
+              })),
+          }),
+        }))
+    })
+
+    await timeline.preload()
+
+    const run = timeline.toArray[0]!.run
+    expect(run).toBeDefined()
+    const items = childRows(run.items)
+    expect(items).toEqual([
+      {
+        text: {
+          key: `text-1`,
+          runId: `run-1`,
+          order: `1`,
+          status: `streaming`,
+          content: `Hello world`,
+        },
+        inactiveText: undefined,
+        toolCall: undefined,
+      },
+    ])
+
+    const directItemChanges: Array<{
+      type: string
+      key: unknown
+      content: string | null
+    }> = []
+    run.items.subscribeChanges((changes: Array<any>) => {
+      for (const change of changes) {
+        if (change.type !== `delete`) {
+          directItemChanges.push({
+            type: change.type,
+            key: change.key,
+            content: change.value.text.content,
+          })
+        }
+      }
+    })
+
+    const itemLiveQuery = createLiveQueryCollection({
+      query: (q) => q.from({ item: run.items }),
+      startSync: true,
+    })
+
+    const liveItemChanges: Array<string | null> = []
+    itemLiveQuery.subscribeChanges((changes: Array<any>) => {
+      for (const change of changes) {
+        if (change.type !== `delete`) {
+          liveItemChanges.push(change.value.text.content)
+        }
+      }
+    })
+    for (let i = 0; i < 10 && itemLiveQuery.size === 0; i++) {
+      await flushPromises()
+    }
+    expect(itemLiveQuery.toArray[0]!.text.content).toBe(`Hello world`)
+
+    textDeltas.insert({
+      key: `delta-3`,
+      textId: `text-1`,
+      order: `3`,
+      delta: `!`,
+    })
+    await flushPromises()
+
+    expect(childRows(run.items)[0]!.text.content).toBe(`Hello world!`)
+    expect(childRows(run.items)[0]!.inactiveText).toBeUndefined()
+    expect(itemLiveQuery.toArray[0]!.text.content).toBe(`Hello world!`)
+    expect(itemLiveQuery.toArray[0]!.inactiveText).toBeUndefined()
+    directItemChanges.length = 0
+    liveItemChanges.length = 0
+
+    textDeltas.insert({
+      key: `delta-4`,
+      textId: `text-1`,
+      order: `4`,
+      delta: ` Again`,
+    })
+    await flushPromises()
+    await flushPromises()
+
+    expect(childRows(run.items)[0]!.text.content).toBe(`Hello world! Again`)
+    expect(childRows(run.items)[0]!.inactiveText).toBeUndefined()
+    expect(itemLiveQuery.toArray[0]!.text.content).toBe(`Hello world! Again`)
+    expect(itemLiveQuery.toArray[0]!.inactiveText).toBeUndefined()
+
+    textDeltas.insert({
+      key: `delta-5`,
+      textId: `text-1`,
+      order: `5`,
+      delta: ` Done`,
+    })
+    await flushPromises()
+    await flushPromises()
+
+    expect(childRows(run.items)[0]!.text.content).toBe(
+      `Hello world! Again Done`,
+    )
+    expect(childRows(run.items)[0]!.inactiveText).toBeUndefined()
+    expect(itemLiveQuery.toArray[0]!.text.content).toBe(
+      `Hello world! Again Done`,
+    )
+    expect(itemLiveQuery.toArray[0]!.inactiveText).toBeUndefined()
+    expect(directItemChanges.map((change) => change.key)).toEqual([
+      `text:text-1`,
+      `text:text-1`,
+    ])
+    expect(directItemChanges.map((change) => change.content)).toEqual([
+      `Hello world! Again`,
+      `Hello world! Again Done`,
+    ])
+    expect(liveItemChanges).toEqual([
+      `Hello world! Again`,
+      `Hello world! Again Done`,
     ])
   })
 })

@@ -272,11 +272,10 @@ export function buildQueryFromConfig<TContext extends Context>(config: {
 export function sendChangesToInput(
   input: RootStreamBuilder<unknown>,
   changes: Iterable<ChangeMessage>,
-  getKey: (item: ChangeMessage[`value`]) => any,
 ): number {
   const multiSetArray: MultiSetArray<unknown> = []
   for (const change of changes) {
-    const key = getKey(change.value)
+    const key = change.key
     if (change.type === `insert`) {
       multiSetArray.push([[key, change.value], 1])
     } else if (change.type === `update`) {
