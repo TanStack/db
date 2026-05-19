@@ -16,7 +16,8 @@
       "@tanstack/store": ["../store/src"],
       "@tanstack/db-ivm": ["../db-ivm/src"],
       "@tanstack/db": ["../db/src"],
-      "@tanstack/db-collection-e2e": ["../db-collection-e2e/src"]
+      "@tanstack/db-collection-e2e": ["../db-collection-e2e/src"],
+      "@tanstack/electric-db-collection": ["../electric-db-collection/src"]
     }
   },
   "include": ["src", "tests", "e2e", "vite.config.ts", "vitest.e2e.config.ts"],
