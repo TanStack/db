@@ -700,6 +700,10 @@ function extractAndReplaceAggregates(
   transformed: SelectValueExpression
   extracted: Record<string, Aggregate>
 } {
+  if (expr.type === `includesSubquery`) {
+    return { transformed: expr, extracted: {} }
+  }
+
   if (expr.type === `agg`) {
     const alias = `__agg_${counter.value++}`
     return {

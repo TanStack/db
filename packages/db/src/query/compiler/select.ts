@@ -169,9 +169,13 @@ function compileSelectObject(
 }
 
 function compileSelectValue(
-  value: SelectValueExpression,
+  value: SelectValueExpression | null | undefined,
 ): (row: NamespacedRow) => any {
-  if (value instanceof ConditionalSelect) {
+  if (value == null) {
+    return () => value
+  }
+
+  if (isConditionalSelectValue(value)) {
     if (containsAggregate(value)) {
       return () => null
     }
@@ -310,10 +314,7 @@ function addFromObject(
     }
 
     const expression = value as any
-    if (
-      expression instanceof ConditionalSelect ||
-      expression?.type === `conditionalSelect`
-    ) {
+    if (isConditionalSelectValue(expression)) {
       if (containsAggregate(expression)) {
         ops.push({
           kind: `field`,
@@ -381,4 +382,14 @@ function addFromObject(
       }
     }
   }
+}
+
+function isConditionalSelectValue(value: unknown): value is ConditionalSelect {
+  return (
+    value instanceof ConditionalSelect ||
+    (value != null &&
+      typeof value === `object` &&
+      (value as { type?: unknown }).type === `conditionalSelect` &&
+      Array.isArray((value as { branches?: unknown }).branches))
+  )
 }

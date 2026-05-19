@@ -215,6 +215,32 @@ describe(`caseWhen`, () => {
     ])
   })
 
+  test(`selects null conditional projection branch values`, async () => {
+    const users = createUsersCollection()
+    const query = createLiveQueryCollection((q) =>
+      q
+        .from({ user: users })
+        .select(({ user }) => ({
+          id: user.id,
+          nullableProfile: caseWhen(gt(user.age, 18), null, {
+            id: user.id,
+            label: `minor`,
+          }),
+        }))
+        .orderBy(({ user }) => user.id),
+    )
+
+    await query.preload()
+
+    expect(
+      query.toArray.map((row) => stripVirtualPropsAndSymbols(row)),
+    ).toEqual([
+      { id: 1, nullableProfile: null },
+      { id: 2, nullableProfile: { id: 2, label: `minor` } },
+      { id: 3, nullableProfile: null },
+    ])
+  })
+
   test(`selects conditional projection objects with ref spreads`, async () => {
     const users = createUsersCollection()
     const query = createLiveQueryCollection((q) =>
