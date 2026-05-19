@@ -763,13 +763,24 @@ function isExpressionValue(value: CaseWhenValue | undefined): boolean {
     return true
   }
   if (value instanceof Date || Array.isArray(value)) return true
-  if (typeof value === `object` && `type` in value) {
-    return (
-      value.type === `agg` ||
-      value.type === `func` ||
-      value.type === `ref` ||
-      value.type === `val`
-    )
+  if (typeof value === `object`) {
+    const candidate = value as {
+      type?: unknown
+      args?: unknown
+      name?: unknown
+      path?: unknown
+      value?: unknown
+    }
+
+    if (
+      (candidate.type === `agg` || candidate.type === `func`) &&
+      typeof candidate.name === `string` &&
+      Array.isArray(candidate.args)
+    ) {
+      return true
+    }
+    if (candidate.type === `ref` && Array.isArray(candidate.path)) return true
+    if (candidate.type === `val` && `value` in candidate) return true
   }
   return false
 }

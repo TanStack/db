@@ -184,22 +184,42 @@ export class ConditionalSelect extends BaseExpression {
  * Prefer this over ad-hoc local implementations to keep behavior consistent.
  */
 export function isExpressionLike(value: any): boolean {
-  return (
+  if (
     value instanceof Aggregate ||
     value instanceof ConditionalSelect ||
     value instanceof Func ||
     value instanceof PropRef ||
     value instanceof Value ||
-    value instanceof IncludesSubquery ||
-    (value &&
-      typeof value === `object` &&
-      (value.type === `conditionalSelect` ||
-        value.type === `agg` ||
-        value.type === `func` ||
-        value.type === `ref` ||
-        value.type === `val` ||
-        value.type === `includesSubquery`))
-  )
+    value instanceof IncludesSubquery
+  ) {
+    return true
+  }
+
+  if (!value || typeof value !== `object`) {
+    return false
+  }
+
+  if (value.type === `conditionalSelect`) {
+    return Array.isArray(value.branches)
+  }
+
+  if (value.type === `agg` || value.type === `func`) {
+    return typeof value.name === `string` && Array.isArray(value.args)
+  }
+
+  if (value.type === `ref`) {
+    return Array.isArray(value.path)
+  }
+
+  if (value.type === `val`) {
+    return `value` in value
+  }
+
+  if (value.type === `includesSubquery`) {
+    return `query` in value && `fieldName` in value
+  }
+
+  return false
 }
 
 /**
