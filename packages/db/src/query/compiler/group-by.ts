@@ -18,7 +18,11 @@ import {
   UnknownHavingExpressionTypeError,
   UnsupportedAggregateFunctionError,
 } from '../../errors.js'
-import { compileExpression, toBooleanPredicate } from './evaluators.js'
+import {
+  compileExpression,
+  isCaseWhenConditionTrue,
+  toBooleanPredicate,
+} from './evaluators.js'
 import type {
   Aggregate,
   BasicExpression,
@@ -869,26 +873,6 @@ function isConditionalSelect(value: unknown): value is ConditionalSelect {
       typeof value === `object` &&
       (value as { type?: string }).type === `conditionalSelect`)
   )
-}
-
-function isCaseWhenConditionTrue(value: any): boolean {
-  if (value == null || value === false) {
-    return false
-  }
-
-  if (value === true) {
-    return true
-  }
-
-  if (typeof value === `number`) {
-    return value !== 0 && !Number.isNaN(value)
-  }
-
-  if (typeof value === `bigint`) {
-    return value !== 0n
-  }
-
-  return Boolean(value)
 }
 
 /**

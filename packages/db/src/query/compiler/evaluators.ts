@@ -574,7 +574,7 @@ function compileFunction(func: Func, isSingleRow: boolean): (data: any) => any {
   }
 }
 
-function isCaseWhenConditionTrue(value: any): boolean {
+export function isCaseWhenConditionTrue(value: any): boolean {
   if (value == null || value === false) {
     return false
   }

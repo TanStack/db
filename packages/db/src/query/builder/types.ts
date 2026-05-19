@@ -390,6 +390,8 @@ export type SelectResult<TSelect> =
     ? ResultTypeFromSelect<TSelect>
     : ResultTypeFromSelectValue<TSelect>
 
+// Distribute over caseWhen branch unions so projection branches remain a union
+// of branch result shapes instead of being merged as one object type.
 type ResultTypeFromCaseWhen<T> = T extends unknown
   ? ResultTypeFromSelectValue<T>
   : never

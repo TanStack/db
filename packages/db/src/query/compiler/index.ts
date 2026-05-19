@@ -26,7 +26,11 @@ import {
 } from '../ir.js'
 import { ensureIndexForField } from '../../indexes/auto-index.js'
 import { inArray } from '../builder/functions.js'
-import { compileExpression, toBooleanPredicate } from './evaluators.js'
+import {
+  compileExpression,
+  isCaseWhenConditionTrue,
+  toBooleanPredicate,
+} from './evaluators.js'
 import { processJoins } from './joins.js'
 import { containsAggregate, processGroupBy } from './group-by.js'
 import { processOrderBy } from './order-by.js'
@@ -1390,26 +1394,6 @@ function getNestedValue(obj: any, path: Array<string>): any {
     value = value[segment]
   }
   return value
-}
-
-function isCaseWhenConditionTrue(value: any): boolean {
-  if (value == null || value === false) {
-    return false
-  }
-
-  if (value === true) {
-    return true
-  }
-
-  if (typeof value === `number`) {
-    return value !== 0 && !Number.isNaN(value)
-  }
-
-  if (typeof value === `bigint`) {
-    return value !== 0n
-  }
-
-  return Boolean(value)
 }
 
 function matchesConditionalSelectGuards(

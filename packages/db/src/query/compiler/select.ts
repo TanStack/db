@@ -6,7 +6,7 @@ import {
   isExpressionLike,
 } from '../ir.js'
 import { AggregateNotSupportedError } from '../../errors.js'
-import { compileExpression } from './evaluators.js'
+import { compileExpression, isCaseWhenConditionTrue } from './evaluators.js'
 import { containsAggregate } from './group-by.js'
 import type {
   Aggregate,
@@ -226,26 +226,6 @@ function compileConditionalSelect(
 
     return defaultValue ? defaultValue(row) : undefined
   }
-}
-
-function isCaseWhenConditionTrue(value: any): boolean {
-  if (value == null || value === false) {
-    return false
-  }
-
-  if (value === true) {
-    return true
-  }
-
-  if (typeof value === `number`) {
-    return value !== 0 && !Number.isNaN(value)
-  }
-
-  if (typeof value === `bigint`) {
-    return value !== 0n
-  }
-
-  return Boolean(value)
 }
 
 /**
