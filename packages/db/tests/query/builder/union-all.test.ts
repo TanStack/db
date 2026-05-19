@@ -57,4 +57,27 @@ describe(`QueryBuilder.unionAll`, () => {
     expect(builtQuery.from.type).toBe(`collectionRef`)
     expect(builtQuery.from.alias).toBe(`employees`)
   })
+
+  it(`sets a result union from query branches`, () => {
+    const builder = new Query()
+    const employeeRows = builder
+      .from({ employees: employeesCollection })
+      .select(({ employees }) => ({
+        id: employees.id,
+        label: employees.name,
+      }))
+    const departmentRows = builder
+      .from({ departments: departmentsCollection })
+      .select(({ departments }) => ({
+        id: departments.id,
+        label: departments.name,
+      }))
+
+    const query = builder.unionAll(employeeRows, departmentRows)
+    const builtQuery = getQueryIR(query)
+
+    expect(builtQuery.from).toBeDefined()
+    expect(builtQuery.from.type).toBe(`unionAll`)
+    expect((builtQuery.from as any).queries).toHaveLength(2)
+  })
 })

@@ -32,6 +32,10 @@ export function extractCollectionsFromQuery(
       for (const childSource of source.sources) {
         extractFromSource(childSource)
       }
+    } else if (source.type === `unionAll`) {
+      for (const branch of source.queries) {
+        extractFromQuery(branch)
+      }
     }
   }
 
@@ -113,6 +117,8 @@ export function extractCollectionFromSource(
     return extractCollectionFromSource(from.query)
   } else if (from.type === `unionFrom`) {
     return extractCollectionFromSource({ from: from.sources[0] })
+  } else if (from.type === `unionAll`) {
+    return extractCollectionFromSource(from.queries[0])
   }
 
   throw new Error(
@@ -164,6 +170,10 @@ export function extractCollectionAliases(
     } else if (source.type === `unionFrom`) {
       for (const childSource of source.sources) {
         recordAlias(childSource)
+      }
+    } else if (source.type === `unionAll`) {
+      for (const branch of source.queries) {
+        traverse(branch)
       }
     }
   }

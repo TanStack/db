@@ -65,6 +65,9 @@ export function containsUnionFrom(from: From): boolean {
   if (from.type === `queryRef`) {
     return containsUnionFrom(from.query.from)
   }
+  if (from.type === `unionAll`) {
+    return from.queries.some((query) => containsUnionFrom(query.from))
+  }
   return false
 }
 
@@ -154,7 +157,12 @@ function getSourceFromAlias(
   from: From,
   alias: string,
 ): CollectionRef | QueryRef | undefined {
-  const sources = from.type === `unionFrom` ? from.sources : [from]
+  const sources =
+    from.type === `unionFrom`
+      ? from.sources
+      : from.type === `unionAll`
+        ? []
+        : [from]
   return sources.find((source) => source.alias === alias)
 }
 

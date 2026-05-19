@@ -132,7 +132,12 @@ export function processOrderBy(
   // even for multi-column orderBy (using wider bounds on first column).
   // Skip this optimization when using grouped ordering (includes with limit),
   // because the limit is per-group, not global — the child collection needs all data loaded.
-  if (limit && !groupKeyFn && rawQuery.from.type !== `unionFrom`) {
+  if (
+    limit &&
+    !groupKeyFn &&
+    rawQuery.from.type !== `unionFrom` &&
+    rawQuery.from.type !== `unionAll`
+  ) {
     let index: IndexInterface<string | number> | undefined
     let followRefCollection: Collection | undefined
     let firstColumnValueExtractor: CompiledSingleRowExpression | undefined

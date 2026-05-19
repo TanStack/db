@@ -127,6 +127,7 @@ import {
   Func,
   PropRef,
   QueryRef as QueryRefClass,
+  UnionAll as UnionAllClass,
   UnionFrom as UnionFromClass,
   createResidualWhere,
   getWhereExpression,
@@ -190,6 +191,18 @@ export interface OptimizationResult {
  * ```
  */
 export function optimizeQuery(query: QueryIR): OptimizationResult {
+  if (query.from.type === `unionAll`) {
+    return {
+      optimizedQuery: {
+        ...query,
+        from: new UnionAllClass(
+          query.from.queries.map((branch) => optimizeQuery(branch).optimizedQuery),
+        ),
+      },
+      sourceWhereClauses: new Map(),
+    }
+  }
+
   // First, extract source WHERE clauses before optimization
   const sourceWhereClauses = extractSourceWhereClauses(query)
 
@@ -457,6 +470,12 @@ function removeRedundantFromClause(from: From): From {
   if (from.type === `unionFrom`) {
     return new UnionFromClass(
       from.sources.map((source) => removeRedundantFromClause(source) as any),
+    )
+  }
+
+  if (from.type === `unionAll`) {
+    return new UnionAllClass(
+      from.queries.map((branch) => removeRedundantSubqueries(branch)),
     )
   }
 
@@ -839,8 +858,14 @@ function deepCopyFrom(from: From): From {
     return new QueryRefClass(deepCopyQuery(from.query), from.alias)
   }
 
+  if (from.type === `unionAll`) {
+    return new UnionAllClass(from.queries.map((branch) => deepCopyQuery(branch)))
+  }
+
   return new UnionFromClass(
-    from.sources.map((source) => deepCopyFrom(source) as any),
+    from.sources.map((source: CollectionRefClass | QueryRefClass) =>
+      deepCopyFrom(source) as any,
+    ),
   )
 }
 
@@ -861,11 +886,23 @@ function optimizeNestedFrom(from: From): From {
     )
   }
 
+  if (from.type === `unionAll`) {
+    return new UnionAllClass(
+      from.queries.map((branch) => applyRecursiveOptimization(branch)),
+    )
+  }
+
   return from
 }
 
 function getFromSources(from: From): Array<CollectionRefClass | QueryRefClass> {
-  return from.type === `unionFrom` ? from.sources : [from]
+  if (from.type === `unionFrom`) {
+    return from.sources
+  }
+  if (from.type === `unionAll`) {
+    return []
+  }
+  return [from]
 }
 
 function getFirstFromAlias(query: QueryIR): string {
@@ -895,6 +932,10 @@ function optimizeFromWithTracking(
         ),
       ),
     )
+  }
+
+  if (from.type === `unionAll`) {
+    return new UnionAllClass(from.queries.map((branch) => deepCopyQuery(branch)))
   }
 
   const whereClause = singleSourceClauses.get(from.alias)

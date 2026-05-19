@@ -8,6 +8,7 @@ import {
   IncludesSubquery,
   PropRef,
   QueryRef,
+  UnionAll,
   UnionFrom,
   Value as ValueExpr,
   isExpressionLike,
@@ -47,6 +48,7 @@ import type {
   CompareOptions,
   Context,
   ContextFromSource,
+  ContextFromUnionBranches,
   ContextFromUnionSource,
   FunctionalHavingRow,
   GetResult,
@@ -199,8 +201,34 @@ export class BaseQueryBuilder<TContext extends Context = Context> {
    */
   unionAll<TSource extends Source>(
     source: TSource,
-  ): QueryBuilder<ContextFromUnionSource<TSource>> {
-    const refs = this._createRefsForSource(source, `unionAll clause`)
+  ): QueryBuilder<ContextFromUnionSource<TSource>>
+  unionAll<
+    TBranches extends readonly [
+      QueryBuilder<any>,
+      ...Array<QueryBuilder<any>>,
+    ],
+  >(
+    ...branches: TBranches
+  ): QueryBuilder<ContextFromUnionBranches<TBranches>>
+  unionAll(
+    sourceOrBranch: Source | QueryBuilder<any>,
+    ...branches: Array<QueryBuilder<any>>
+  ): QueryBuilder<any> {
+    if (sourceOrBranch instanceof BaseQueryBuilder) {
+      return new BaseQueryBuilder({
+        ...this.query,
+        from: new UnionAll(
+          [sourceOrBranch, ...branches].map((branch) =>
+            (branch as unknown as BaseQueryBuilder)._getQuery(),
+          ),
+        ),
+      }) as any
+    }
+
+    const refs = this._createRefsForSource(
+      sourceOrBranch as Source,
+      `unionAll clause`,
+    )
     const from =
       refs.length === 1 ? refs[0]![1] : new UnionFrom(refs.map((r) => r[1]))
 
@@ -795,6 +823,8 @@ export class BaseQueryBuilder<TContext extends Context = Context> {
     if (this.query.from) {
       if (this.query.from.type === `unionFrom`) {
         aliases.push(...this.query.from.sources.map((source) => source.alias))
+      } else if (this.query.from.type === `unionAll`) {
+        aliases.push(`*`)
       } else {
         aliases.push(this.query.from.alias)
       }
@@ -1374,6 +1404,7 @@ export type {
   Context,
   ContextSchema,
   ContextFromSource,
+  ContextFromUnionBranches,
   ContextFromUnionSource,
   Source,
   GetResult,

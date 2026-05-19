@@ -29,7 +29,7 @@ export type IncludesMaterialization = `collection` | `array` | `concat`
 
 export const INCLUDES_SCALAR_FIELD = `__includes_scalar__`
 
-export type From = CollectionRef | QueryRef | UnionFrom
+export type From = CollectionRef | QueryRef | UnionFrom | UnionAll
 
 export type Select = {
   [alias: string]:
@@ -106,6 +106,17 @@ export class UnionFrom extends BaseExpression {
 
   get alias(): string {
     return this.sources[0]?.alias ?? ``
+  }
+}
+
+export class UnionAll extends BaseExpression {
+  public type = `unionAll` as const
+  constructor(public queries: Array<QueryIR>) {
+    super()
+  }
+
+  get alias(): string {
+    return ``
   }
 }
 
@@ -288,7 +299,7 @@ function getRefFromAlias(
         return source
       }
     }
-  } else if (query.from.alias === alias) {
+  } else if (query.from.type !== `unionAll` && query.from.alias === alias) {
     return query.from
   }
 

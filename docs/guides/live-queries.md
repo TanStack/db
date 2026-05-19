@@ -570,6 +570,36 @@ type TimelineRow =
 Use subqueries when each branch needs its own filtering or shaping before the
 sources are combined.
 
+You can also pass built queries directly. This form unions each branch result
+row, so a branch without `select()` keeps its normal query result shape. For
+example, a joined branch enters the union as a namespaced row.
+
+```ts
+const timeline = createLiveQueryCollection((q) => {
+  const messageRows = q
+    .from({ message: messagesCollection })
+    .select(({ message }) => ({
+      type: `message` as const,
+      id: message.id,
+      body: message.text,
+      timestamp: message.timestamp,
+    }))
+
+  const toolCallRows = q
+    .from({ toolCall: toolCallsCollection })
+    .select(({ toolCall }) => ({
+      type: `toolCall` as const,
+      id: toolCall.id,
+      body: toolCall.name,
+      timestamp: toolCall.timestamp,
+    }))
+
+  return q
+    .unionAll(messageRows, toolCallRows)
+    .orderBy(({ timestamp }) => timestamp)
+})
+```
+
 ## Where Clauses
 
 Use `where` clauses to filter your data based on conditions. You can chain multiple `where` calls - they are combined with `and` logic.

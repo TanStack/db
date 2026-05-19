@@ -221,6 +221,12 @@ export class CollectionConfigBuilder<
           return true
         }
       }
+    } else if (query.from.type === `unionAll`) {
+      for (const branch of query.from.queries) {
+        if (this.hasJoins(branch)) {
+          return true
+        }
+      }
     }
 
     return false

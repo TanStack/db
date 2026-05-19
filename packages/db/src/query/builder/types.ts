@@ -150,6 +150,29 @@ export type ContextFromUnionSource<TSource extends Source> =
       }
     : ContextFromSource<TSource>
 
+type UnionBranchResult<TBranches extends ReadonlyArray<QueryBuilder<any>>> =
+  TBranches[number] extends QueryBuilder<infer TContext>
+    ? GetResult<TContext>
+    : never
+
+type UnionBranchSchema<TBranches extends ReadonlyArray<QueryBuilder<any>>> =
+  UnionBranchResult<TBranches> extends infer TResult
+    ? {
+        [K in KeysOfUnion<TResult>]: ValueOfUnion<TResult, K>
+      }
+    : never
+
+export type ContextFromUnionBranches<
+  TBranches extends readonly [QueryBuilder<any>, ...Array<QueryBuilder<any>>],
+> = {
+  baseSchema: UnionBranchSchema<TBranches> & ContextSchema
+  schema: UnionBranchSchema<TBranches> & ContextSchema
+  fromSourceName: keyof UnionBranchSchema<TBranches> & string
+  hasJoins: false
+  result: PrettifyIfPlainObject<UnionBranchResult<TBranches>>
+  hasResult: true
+}
+
 /**
  * GetAliases - Extracts all table aliases available in a query context
  *
@@ -560,24 +583,39 @@ export type FunctionalHavingRow<TContext extends Context> = TContext[`schema`] &
  * After `select()` is called, this type also includes `$selected` which provides access
  * to the SELECT result fields via `$selected.fieldName` syntax.
  */
+type KeysOfUnion<T> = T extends unknown ? keyof T : never
+type ValueOfUnion<T, K extends PropertyKey> = T extends unknown
+  ? K extends keyof T
+    ? T[K]
+    : never
+  : never
+type RefForContextValue<T, Nullable extends boolean = false> =
+  IsPlainObject<T> extends true ? Ref<T, Nullable> : RefLeaf<T, Nullable>
+
 export type RefsForContext<TContext extends Context> = {
-  [K in keyof TContext[`schema`]]: IsNonExactOptional<
-    TContext[`schema`][K]
+  [K in KeysOfUnion<TContext[`schema`]>]: IsNonExactOptional<
+    ValueOfUnion<TContext[`schema`], K>
   > extends true
-    ? IsNonExactNullable<TContext[`schema`][K]> extends true
+    ? IsNonExactNullable<ValueOfUnion<TContext[`schema`], K>> extends true
       ? // T is both non-exact optional and non-exact nullable (e.g., string | null | undefined)
         // Extract the non-undefined and non-null part, mark as nullable ref
-        Ref<NonNullable<TContext[`schema`][K]>, true>
+        RefForContextValue<
+          NonNullable<ValueOfUnion<TContext[`schema`], K>>,
+          true
+        >
       : // T is optional (T | undefined) but not exactly undefined, and not nullable
         // Extract the non-undefined part, mark as nullable ref
-        Ref<NonUndefined<TContext[`schema`][K]>, true>
-    : IsNonExactNullable<TContext[`schema`][K]> extends true
+        RefForContextValue<
+          NonUndefined<ValueOfUnion<TContext[`schema`], K>>,
+          true
+        >
+    : IsNonExactNullable<ValueOfUnion<TContext[`schema`], K>> extends true
       ? // T is nullable (T | null) but not exactly null, and not optional
         // Extract the non-null part, mark as nullable ref
-        Ref<NonNull<TContext[`schema`][K]>, true>
+        RefForContextValue<NonNull<ValueOfUnion<TContext[`schema`], K>>, true>
       : // T is exactly undefined, exactly null, or neither optional nor nullable
         // Wrap in Ref as-is (includes exact undefined, exact null, and normal types)
-        Ref<TContext[`schema`][K]>
+        RefForContextValue<ValueOfUnion<TContext[`schema`], K>>
 } & (TContext[`hasResult`] extends true
   ? { $selected: Ref<TContext[`result`]> }
   : {})

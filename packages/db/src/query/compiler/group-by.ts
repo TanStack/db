@@ -48,9 +48,12 @@ function getRowVirtualMetadata(row: NamespacedRow): RowVirtualMetadata {
   let allSynced = true
   let hasLocal = false
 
-  for (const [alias, value] of Object.entries(row)) {
+  for (const [alias, value] of Object.entries(
+    row as Record<string, unknown>,
+  )) {
     if (alias === `$selected`) continue
-    const asRecord = value
+    if (value === null || typeof value !== `object`) continue
+    const asRecord = value as Record<string, unknown>
     const hasSyncedProp = `$synced` in asRecord
     const hasOriginProp = `$origin` in asRecord
     if (!hasSyncedProp && !hasOriginProp) {

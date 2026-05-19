@@ -161,7 +161,7 @@ export function createRefProxy<T extends Record<string, any>>(
       if (typeof prop === `symbol`) return Reflect.get(target, prop, receiver)
 
       const propStr = String(prop)
-      if (aliases.includes(propStr)) {
+      if (aliases.includes(propStr) || aliases.includes(`*`)) {
         return createProxy([propStr])
       }
 

@@ -45,6 +45,7 @@ import type {
   IncludesMaterialization,
   QueryIR,
   QueryRef,
+  UnionAll,
   UnionFrom,
 } from '../ir.js'
 import type { LazyCollectionCallbacks } from './joins.js'
@@ -638,7 +639,12 @@ export function compileQuery(
     }
   }
 
-  if (query.distinct && !query.fnSelect && !query.select) {
+  if (
+    query.distinct &&
+    !query.fnSelect &&
+    !query.select &&
+    query.from.type !== `unionAll`
+  ) {
     throw new DistinctRequiresSelectError()
   }
 
@@ -941,9 +947,15 @@ function validateQueryStructure(
   ])
 
   // Recursively validate FROM subqueries
-  for (const source of getFromSources(query.from)) {
-    if (source.type === `queryRef`) {
-      validateQueryStructure(source.query, combinedAliases)
+  if (query.from.type === `unionAll`) {
+    for (const branch of query.from.queries) {
+      validateQueryStructure(branch, combinedAliases)
+    }
+  } else {
+    for (const source of getFromSources(query.from)) {
+      if (source.type === `queryRef`) {
+        validateQueryStructure(source.query, combinedAliases)
+      }
     }
   }
 
@@ -962,7 +974,7 @@ function validateQueryStructure(
  * Populates `aliasToCollectionId` and `aliasRemapping` for per-alias subscription tracking.
  */
 function processFromClause(
-  from: CollectionRef | QueryRef | UnionFrom,
+  from: CollectionRef | QueryRef | UnionFrom | UnionAll,
   allInputs: Record<string, KeyedStream>,
   collections: Record<string, Collection>,
   subscriptions: Record<string, CollectionSubscription>,
@@ -983,6 +995,24 @@ function processFromClause(
   sourceIncludes: Array<SourceInclude>
   isUnionFrom: boolean
 } {
+  if (from.type === `unionAll`) {
+    return processUnionAll(
+      from,
+      allInputs,
+      collections,
+      subscriptions,
+      callbacks,
+      lazySources,
+      optimizableOrderByCollections,
+      setWindowFn,
+      cache,
+      queryMapping,
+      aliasToCollectionId,
+      aliasRemapping,
+      sourceWhereClauses,
+    )
+  }
+
   if (from.type !== `unionFrom`) {
     const { alias, input, collectionId, sourceIncludes } = processFrom(
       from,
@@ -1063,6 +1093,86 @@ function processFromClause(
 
   return {
     alias: mainAlias,
+    pipeline: pipeline!,
+    collectionId: mainCollectionId,
+    sources,
+    sourceIncludes,
+    isUnionFrom: true,
+  }
+}
+
+function processUnionAll(
+  from: UnionAll,
+  allInputs: Record<string, KeyedStream>,
+  collections: Record<string, Collection>,
+  subscriptions: Record<string, CollectionSubscription>,
+  callbacks: Record<string, LazyCollectionCallbacks>,
+  lazySources: Set<string>,
+  optimizableOrderByCollections: Record<string, OrderByOptimizationInfo>,
+  setWindowFn: (windowFn: (options: WindowOptions) => void) => void,
+  cache: QueryCache,
+  queryMapping: QueryMapping,
+  aliasToCollectionId: Record<string, string>,
+  aliasRemapping: Record<string, string>,
+  sourceWhereClauses: Map<string, BasicExpression<boolean>>,
+): {
+  alias: string
+  pipeline: NamespacedAndKeyedStream
+  collectionId: string
+  sources: Record<string, KeyedStream>
+  sourceIncludes: Array<SourceInclude>
+  isUnionFrom: boolean
+} {
+  if (from.queries.length === 0) {
+    throw new UnsupportedFromTypeError(`empty unionAll`)
+  }
+
+  const sources: Record<string, KeyedStream> = {}
+  const sourceIncludes: Array<SourceInclude> = []
+  let pipeline: NamespacedAndKeyedStream | undefined
+  let mainCollectionId = ``
+
+  for (let index = 0; index < from.queries.length; index++) {
+    const branch = from.queries[index]!
+    const branchResult = compileQuery(
+      branch,
+      allInputs,
+      collections,
+      subscriptions,
+      callbacks,
+      lazySources,
+      optimizableOrderByCollections,
+      setWindowFn,
+      cache,
+      queryMapping,
+    )
+
+    if (!mainCollectionId) {
+      mainCollectionId = branchResult.collectionId
+    }
+    Object.assign(aliasToCollectionId, branchResult.aliasToCollectionId)
+    Object.assign(aliasRemapping, branchResult.aliasRemapping)
+    Object.assign(sources, allInputs)
+    for (const [alias, where] of branchResult.sourceWhereClauses) {
+      sourceWhereClauses.set(alias, where)
+    }
+
+    const branchPipeline = branchResult.pipeline.pipe(
+      map(([key, [row]]) => {
+        return [`${index}:${encodeKeyForUnionBranch(key)}`, row] as [
+          string,
+          Record<string, any>,
+        ]
+      }),
+    )
+
+    pipeline = pipeline
+      ? pipeline.pipe(concatOperator(branchPipeline))
+      : branchPipeline
+  }
+
+  return {
+    alias: ``,
     pipeline: pipeline!,
     collectionId: mainCollectionId,
     sources,
@@ -1339,11 +1449,17 @@ function getRefFromAlias(
 function getFromSources(
   from: QueryIR[`from`],
 ): Array<CollectionRef | QueryRef> {
-  return from.type === `unionFrom` ? from.sources : [from]
+  if (from.type === `unionFrom`) {
+    return from.sources
+  }
+  if (from.type === `unionAll`) {
+    return []
+  }
+  return [from]
 }
 
 function getFirstFromAlias(from: QueryIR[`from`]): string {
-  return getFromSources(from)[0]!.alias
+  return getFromSources(from)[0]?.alias ?? ``
 }
 
 function findProjectedSourceIncludePaths(
@@ -1420,6 +1536,23 @@ function mapNestedFromQueries(
   originalFrom: QueryIR[`from`],
   queryMapping: QueryMapping,
 ): void {
+  if (
+    optimizedFrom.type === `unionAll` &&
+    originalFrom.type === `unionAll`
+  ) {
+    for (
+      let i = 0;
+      i < optimizedFrom.queries.length && i < originalFrom.queries.length;
+      i++
+    ) {
+      const optimizedBranch = optimizedFrom.queries[i]!
+      const originalBranch = originalFrom.queries[i]!
+      queryMapping.set(optimizedBranch, originalBranch)
+      mapNestedQueries(optimizedBranch, originalBranch, queryMapping)
+    }
+    return
+  }
+
   const optimizedSources = getFromSources(optimizedFrom)
   const originalSources = getFromSources(originalFrom)
 

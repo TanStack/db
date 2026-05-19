@@ -5,8 +5,10 @@ import {
   caseWhen,
   coalesce,
   concat,
+  count,
   createLiveQueryCollection,
   eq,
+  gt,
   toArray,
 } from '../../src/query/index.js'
 import {
@@ -196,6 +198,136 @@ function childRows(collection: any): Array<any> {
 }
 
 describe(`unionAll`, () => {
+  it(`combines query branches into result rows with branch-prefixed keys`, async () => {
+    const messages = createMessagesCollection(`union-all-query-messages-basic`)
+    const toolCalls = createToolCallsCollection(`union-all-query-tools-basic`)
+
+    const collection = createLiveQueryCollection((q) => {
+      const messageRows = q
+        .from({ message: messages })
+        .select(({ message }) => ({
+          kind: `message` as const,
+          id: message.id,
+          body: message.text,
+          timestamp: message.timestamp,
+        }))
+      const toolCallRows = q
+        .from({ toolCall: toolCalls })
+        .select(({ toolCall }) => ({
+          kind: `toolCall` as const,
+          id: toolCall.id,
+          body: toolCall.name,
+          timestamp: toolCall.timestamp,
+        }))
+
+      return q.unionAll(messageRows, toolCallRows).orderBy(({ timestamp }) => timestamp)
+    })
+
+    await collection.preload()
+
+    expect(collection.size).toBe(4)
+    expect(collection.toArray.map(stripVirtualProps)).toEqual([
+      { kind: `message`, id: 1, body: `hello`, timestamp: 10 },
+      { kind: `toolCall`, id: 1, body: `search`, timestamp: 20 },
+      { kind: `message`, id: 2, body: `secret`, timestamp: 30 },
+      { kind: `toolCall`, id: 3, body: `write`, timestamp: 40 },
+    ])
+  })
+
+  it(`supports where and select after query branch unionAll`, async () => {
+    const messages = createMessagesCollection(`union-all-query-messages-where`)
+    const toolCalls = createToolCallsCollection(`union-all-query-tools-where`)
+
+    const collection = createLiveQueryCollection((q) => {
+      const messageRows = q
+        .from({ message: messages })
+        .select(({ message }) => ({
+          kind: `message` as const,
+          id: message.id,
+          body: message.text,
+          timestamp: message.timestamp,
+        }))
+      const toolCallRows = q
+        .from({ toolCall: toolCalls })
+        .select(({ toolCall }) => ({
+          kind: `toolCall` as const,
+          id: toolCall.id,
+          body: toolCall.name,
+          timestamp: toolCall.timestamp,
+        }))
+
+      return q
+        .unionAll(messageRows, toolCallRows)
+        .where(({ kind }) => eq(kind, `message`))
+        .select(({ id, body }) => ({ id, body }))
+        .orderBy(({ $selected }) => $selected.id)
+    })
+
+    await collection.preload()
+
+    expect(collection.toArray.map(stripVirtualProps)).toEqual([
+      { id: 1, body: `hello` },
+      { id: 2, body: `secret` },
+    ])
+  })
+
+  it(`supports distinct, limit, and offset after query branch unionAll`, async () => {
+    const messages = createMessagesCollection(`union-all-query-messages-window`)
+    const toolCalls = createToolCallsCollection(`union-all-query-tools-window`)
+
+    const collection = createLiveQueryCollection((q) => {
+      const messageIds = q
+        .from({ message: messages })
+        .select(({ message }) => ({ id: message.id }))
+      const toolCallIds = q
+        .from({ toolCall: toolCalls })
+        .select(({ toolCall }) => ({ id: toolCall.id }))
+
+      return q
+        .unionAll(messageIds, toolCallIds)
+        .distinct()
+        .orderBy(({ id }) => id)
+        .offset(1)
+        .limit(2)
+    })
+
+    await collection.preload()
+
+    expect(collection.toArray.map(stripVirtualProps)).toEqual([
+      { id: 2 },
+      { id: 3 },
+    ])
+  })
+
+  it(`supports groupBy and having after query branch unionAll`, async () => {
+    const messages = createMessagesCollection(`union-all-query-messages-group`)
+    const toolCalls = createToolCallsCollection(`union-all-query-tools-group`)
+
+    const collection = createLiveQueryCollection((q) => {
+      const messageRows = q
+        .from({ message: messages })
+        .select(() => ({ kind: `event` as const }))
+      const toolCallRows = q
+        .from({ toolCall: toolCalls })
+        .select(() => ({ kind: `event` as const }))
+
+      return q
+        .unionAll(messageRows, toolCallRows)
+        .groupBy(({ kind }) => kind)
+        .select(({ kind }) => ({
+          kind,
+          rowCount: count(kind),
+        }))
+        .having(({ kind }) => gt(count(kind), 3))
+    })
+
+    await collection.preload()
+
+    expect(collection.toArray.map(stripVirtualProps)).toEqual([
+      { kind: `event`, rowCount: 4 },
+    ])
+  })
+
   it(`combines multiple sources into exclusive namespaced rows`, async () => {
     const messages = createMessagesCollection(`multi-source-messages-basic`)
     const toolCalls = createToolCallsCollection(`multi-source-tools-basic`)
