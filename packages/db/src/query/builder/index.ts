@@ -2,6 +2,7 @@ import { CollectionImpl } from '../../collection/index.js'
 import {
   Aggregate as AggregateExpr,
   CollectionRef,
+  ConditionalSelect,
   Func as FuncExpr,
   INCLUDES_SCALAR_FIELD,
   IncludesSubquery,
@@ -25,7 +26,11 @@ import {
   isRefProxy,
   toExpression,
 } from './ref-proxy.js'
-import { ConcatToArrayWrapper, ToArrayWrapper } from './functions.js'
+import {
+  CaseWhenWrapper,
+  ConcatToArrayWrapper,
+  ToArrayWrapper,
+} from './functions.js'
 import type { NamespacedRow, SingleResult } from '../../types.js'
 import type {
   Aggregate,
@@ -893,7 +898,40 @@ function isPlainObject(value: any): value is Record<string, any> {
   )
 }
 
-function buildNestedSelect(obj: any, parentAliases: Array<string> = []): any {
+function buildNestedSelect(
+  obj: any,
+  parentAliases: Array<string> = [],
+  fieldName?: string,
+): any {
+  if (obj instanceof BaseQueryBuilder) {
+    if (!fieldName) {
+      throw new Error(`Conditional include branch is missing a field name`)
+    }
+    return buildIncludesSubquery(obj, fieldName, parentAliases, `collection`)
+  }
+  if (obj instanceof ToArrayWrapper) {
+    if (!(obj.query instanceof BaseQueryBuilder)) {
+      throw new Error(`toArray() must wrap a subquery builder`)
+    }
+    if (!fieldName) {
+      throw new Error(`Conditional toArray() branch is missing a field name`)
+    }
+    return buildIncludesSubquery(obj.query, fieldName, parentAliases, `array`)
+  }
+  if (obj instanceof ConcatToArrayWrapper) {
+    if (!(obj.query instanceof BaseQueryBuilder)) {
+      throw new Error(`concat(toArray(...)) must wrap a subquery builder`)
+    }
+    if (!fieldName) {
+      throw new Error(
+        `Conditional concat(toArray(...)) branch is missing a field name`,
+      )
+    }
+    return buildIncludesSubquery(obj.query, fieldName, parentAliases, `concat`)
+  }
+  if (obj instanceof CaseWhenWrapper) {
+    return buildConditionalSelect(obj, parentAliases, fieldName)
+  }
   if (!isPlainObject(obj)) return toExpr(obj)
   const out: Record<string, any> = {}
   for (const [k, v] of Object.entries(obj)) {
@@ -920,9 +958,41 @@ function buildNestedSelect(obj: any, parentAliases: Array<string> = []): any {
       out[k] = buildIncludesSubquery(v.query, k, parentAliases, `concat`)
       continue
     }
-    out[k] = buildNestedSelect(v, parentAliases)
+    if (v instanceof CaseWhenWrapper) {
+      out[k] = buildConditionalSelect(v, parentAliases, k)
+      continue
+    }
+    out[k] = buildNestedSelect(v, parentAliases, k)
   }
   return out
+}
+
+function buildConditionalSelect(
+  wrapper: CaseWhenWrapper,
+  parentAliases: Array<string>,
+  fieldName?: string,
+): ConditionalSelect {
+  const args = wrapper.args
+  if (args.length < 2) {
+    throw new Error(`caseWhen() requires at least two arguments`)
+  }
+
+  const hasDefaultValue = args.length % 2 === 1
+  const pairCount = Math.floor(args.length / 2)
+  const branches = []
+
+  for (let i = 0; i < pairCount; i++) {
+    branches.push({
+      condition: toExpression(args[i * 2]),
+      value: buildNestedSelect(args[i * 2 + 1], parentAliases, fieldName),
+    })
+  }
+
+  const defaultValue = hasDefaultValue
+    ? buildNestedSelect(args[args.length - 1], parentAliases, fieldName)
+    : undefined
+
+  return new ConditionalSelect(branches, defaultValue)
 }
 
 /**

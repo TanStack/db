@@ -53,6 +53,7 @@ export {
   length,
   concat,
   coalesce,
+  caseWhen,
   add,
   // Aggregates
   count,

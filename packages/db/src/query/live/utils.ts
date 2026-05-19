@@ -2,7 +2,7 @@ import { MultiSet, serializeValue } from '@tanstack/db-ivm'
 import { UnsupportedRootScalarSelectError } from '../../errors.js'
 import { normalizeOrderByPaths } from '../compiler/expressions.js'
 import { buildQuery, getQueryIR } from '../builder/index.js'
-import { IncludesSubquery } from '../ir.js'
+import { ConditionalSelect, IncludesSubquery } from '../ir.js'
 import type { MultiSetArray, RootStreamBuilder } from '@tanstack/db-ivm'
 import type { Collection } from '../../collection/index.js'
 import type { ChangeMessage } from '../../types.js'
@@ -60,9 +60,30 @@ export function extractCollectionsFromQuery(
       }
       if (value instanceof IncludesSubquery) {
         extractFromQuery(value.query)
+      } else if (value instanceof ConditionalSelect) {
+        extractFromConditionalSelect(value)
       } else if (isNestedSelectObject(value)) {
         extractFromSelect(value)
       }
+    }
+  }
+
+  function extractFromConditionalSelect(conditional: ConditionalSelect) {
+    for (const branch of conditional.branches) {
+      extractFromSelectValue(branch.value)
+    }
+    if (conditional.defaultValue) {
+      extractFromSelectValue(conditional.defaultValue)
+    }
+  }
+
+  function extractFromSelectValue(value: any) {
+    if (value instanceof IncludesSubquery) {
+      extractFromQuery(value.query)
+    } else if (value instanceof ConditionalSelect) {
+      extractFromConditionalSelect(value)
+    } else if (isNestedSelectObject(value)) {
+      extractFromSelect(value)
     }
   }
 
@@ -144,9 +165,30 @@ export function extractCollectionAliases(
       }
       if (value instanceof IncludesSubquery) {
         traverse(value.query)
+      } else if (value instanceof ConditionalSelect) {
+        traverseConditionalSelect(value)
       } else if (isNestedSelectObject(value)) {
         traverseSelect(value)
       }
+    }
+  }
+
+  function traverseConditionalSelect(conditional: ConditionalSelect) {
+    for (const branch of conditional.branches) {
+      traverseSelectValue(branch.value)
+    }
+    if (conditional.defaultValue) {
+      traverseSelectValue(conditional.defaultValue)
+    }
+  }
+
+  function traverseSelectValue(value: any) {
+    if (value instanceof IncludesSubquery) {
+      traverse(value.query)
+    } else if (value instanceof ConditionalSelect) {
+      traverseConditionalSelect(value)
+    } else if (isNestedSelectObject(value)) {
+      traverseSelect(value)
     }
   }
 
