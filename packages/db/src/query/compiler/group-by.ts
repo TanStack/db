@@ -838,7 +838,9 @@ function replaceGroupByRefsInExpression(
   if (expr.type === `func`) {
     return new Func(
       expr.name,
-      expr.args.map((arg) => replaceGroupByRefsInExpression(arg, groupByClause)),
+      expr.args.map((arg) =>
+        replaceGroupByRefsInExpression(arg, groupByClause),
+      ),
     )
   }
 
