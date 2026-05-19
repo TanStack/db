@@ -44,6 +44,8 @@ export interface Context {
   baseSchema: ContextSchema
   // The current schema available (includes joined collections)
   schema: ContextSchema
+  // Optional exact schema for ref callbacks when `schema` must be widened for compatibility
+  refsSchema?: ContextSchema
   // the name of the source that was used in the from clause
   fromSourceName: string
   // the source names used in a source-level unionAll clause
@@ -150,10 +152,11 @@ export type ContextFromUnionSource<TSource extends Source> =
       }
     : ContextFromSource<TSource>
 
+type ResultFromBranch<TBranch> =
+  TBranch extends QueryBuilder<infer TContext> ? GetResult<TContext> : never
+
 type UnionBranchResult<TBranches extends ReadonlyArray<QueryBuilder<any>>> =
-  TBranches[number] extends QueryBuilder<infer TContext>
-    ? GetResult<TContext>
-    : never
+  ResultFromBranch<TBranches[number]>
 
 type UnionBranchSchema<TBranches extends ReadonlyArray<QueryBuilder<any>>> =
   UnionBranchResult<TBranches> extends infer TResult
@@ -167,6 +170,7 @@ export type ContextFromUnionBranches<
 > = {
   baseSchema: UnionBranchSchema<TBranches> & ContextSchema
   schema: UnionBranchSchema<TBranches> & ContextSchema
+  refsSchema: UnionBranchSchema<TBranches>
   fromSourceName: keyof UnionBranchSchema<TBranches> & string
   hasJoins: false
   result: PrettifyIfPlainObject<UnionBranchResult<TBranches>>
@@ -591,31 +595,44 @@ type ValueOfUnion<T, K extends PropertyKey> = T extends unknown
   : never
 type RefForContextValue<T, Nullable extends boolean = false> =
   IsPlainObject<T> extends true ? Ref<T, Nullable> : RefLeaf<T, Nullable>
+type RefsSchemaForContext<TContext extends Context> =
+  IsExactlyUndefined<TContext[`refsSchema`]> extends true
+    ? TContext[`schema`]
+    : NonUndefined<TContext[`refsSchema`]> extends ContextSchema
+      ? NonUndefined<TContext[`refsSchema`]>
+      : TContext[`schema`]
 
 export type RefsForContext<TContext extends Context> = {
-  [K in KeysOfUnion<TContext[`schema`]>]: IsNonExactOptional<
-    ValueOfUnion<TContext[`schema`], K>
+  [K in KeysOfUnion<RefsSchemaForContext<TContext>>]: IsNonExactOptional<
+    ValueOfUnion<RefsSchemaForContext<TContext>, K>
   > extends true
-    ? IsNonExactNullable<ValueOfUnion<TContext[`schema`], K>> extends true
+    ? IsNonExactNullable<
+        ValueOfUnion<RefsSchemaForContext<TContext>, K>
+      > extends true
       ? // T is both non-exact optional and non-exact nullable (e.g., string | null | undefined)
         // Extract the non-undefined and non-null part, mark as nullable ref
         RefForContextValue<
-          NonNullable<ValueOfUnion<TContext[`schema`], K>>,
+          NonNullable<ValueOfUnion<RefsSchemaForContext<TContext>, K>>,
           true
         >
       : // T is optional (T | undefined) but not exactly undefined, and not nullable
         // Extract the non-undefined part, mark as nullable ref
         RefForContextValue<
-          NonUndefined<ValueOfUnion<TContext[`schema`], K>>,
+          NonUndefined<ValueOfUnion<RefsSchemaForContext<TContext>, K>>,
           true
         >
-    : IsNonExactNullable<ValueOfUnion<TContext[`schema`], K>> extends true
+    : IsNonExactNullable<
+          ValueOfUnion<RefsSchemaForContext<TContext>, K>
+        > extends true
       ? // T is nullable (T | null) but not exactly null, and not optional
         // Extract the non-null part, mark as nullable ref
-        RefForContextValue<NonNull<ValueOfUnion<TContext[`schema`], K>>, true>
+        RefForContextValue<
+          NonNull<ValueOfUnion<RefsSchemaForContext<TContext>, K>>,
+          true
+        >
       : // T is exactly undefined, exactly null, or neither optional nor nullable
         // Wrap in Ref as-is (includes exact undefined, exact null, and normal types)
-        RefForContextValue<ValueOfUnion<TContext[`schema`], K>>
+        RefForContextValue<ValueOfUnion<RefsSchemaForContext<TContext>, K>>
 } & (TContext[`hasResult`] extends true
   ? { $selected: Ref<TContext[`result`]> }
   : {})
@@ -842,6 +859,12 @@ export type MergeContextWithJoinType<
   // Apply optionality immediately to the schema
   schema: ApplyJoinOptionalityToMergedSchema<
     TContext[`schema`],
+    TNewSchema,
+    TJoinType,
+    FromSourceNamesForOptionality<TContext>
+  >
+  refsSchema: ApplyJoinOptionalityToMergedSchema<
+    RefsSchemaForContext<TContext>,
     TNewSchema,
     TJoinType,
     FromSourceNamesForOptionality<TContext>
@@ -1163,6 +1186,7 @@ export type MergeContextForJoinCallback<
   baseSchema: TContext[`baseSchema`]
   // Merge schemas without applying join optionality - both are non-optional in join condition
   schema: TContext[`schema`] & TNewSchema
+  refsSchema: RefsSchemaForContext<TContext> & TNewSchema
   fromSourceName: TContext[`fromSourceName`]
   hasJoins: true
   joinTypes: TContext[`joinTypes`] extends Record<string, any>

@@ -278,6 +278,55 @@ describe(`unionAll types`, () => {
     expectTypeOf(row.rowCount).toEqualTypeOf<number>()
   })
 
+  test(`query branches support typed joins after unionAll`, () => {
+    const messages = createMessages()
+    const toolCalls = createToolCalls()
+    const users = createUsers()
+
+    const collection = createLiveQueryCollection((q) => {
+      const messageRows = q
+        .from({ message: messages })
+        .select(({ message }) => ({
+          kind: `message` as const,
+          id: message.id,
+          userId: message.userId,
+        }))
+      const toolCallRows = q
+        .from({ toolCall: toolCalls })
+        .select(({ toolCall }) => ({
+          kind: `toolCall` as const,
+          id: toolCall.id,
+          userId: toolCall.userId,
+        }))
+
+      return q
+        .unionAll(messageRows, toolCallRows)
+        .join({ user: users }, ({ userId, user }) => eq(userId, user.id), `inner`)
+        .select(({ kind, id, user }) => ({
+          kind,
+          id,
+          userName: user.name,
+        }))
+    })
+
+    expectTypeOf(collection.toArray).toMatchTypeOf<
+      Array<
+        OutputWithVirtual<
+          | {
+              kind: `message`
+              id: number
+              userName: string
+            }
+          | {
+              kind: `toolCall`
+              id: number
+              userName: string
+            }
+        >
+      >
+    >()
+  })
+
   test(`query branches keep joined namespaces when not selected`, () => {
     const messages = createMessages()
     const toolCalls = createToolCalls()

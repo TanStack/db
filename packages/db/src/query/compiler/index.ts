@@ -217,6 +217,7 @@ export function compileQuery(
     pipeline: initialPipeline,
     sources: fromSources,
     sourceIncludes,
+    directIncludes,
     isUnionFrom,
   } = processFromClause(
     query.from,
@@ -335,7 +336,8 @@ export function compileQuery(
   // Extract includes from SELECT, compile child pipelines, and replace with placeholders.
   // This must happen AFTER WHERE (so parent pipeline is filtered) but BEFORE processSelect
   // (so IncludesSubquery nodes are stripped before select compilation).
-  const includesResults: Array<IncludesCompilationResult> = []
+  const includesResults: Array<IncludesCompilationResult> =
+    !query.select && !query.fnSelect ? [...directIncludes] : []
   const includesRoutingFns: Array<{
     fieldName: string
     getRouting: (nsRow: any) => {
@@ -490,9 +492,9 @@ export function compileQuery(
 
         // 2. Ensure an index on the correlation field for efficient lookups
         for (const target of lazyTargets) {
-          const fieldName = target.path[0]
-          if (fieldName) {
-            ensureIndexForField(fieldName, target.path, target.collection)
+          const targetFieldName = target.path[0]
+          if (targetFieldName) {
+            ensureIndexForField(targetFieldName, target.path, target.collection)
           }
         }
 
@@ -993,6 +995,7 @@ function processFromClause(
   collectionId: string
   sources: Record<string, KeyedStream>
   sourceIncludes: Array<SourceInclude>
+  directIncludes: Array<IncludesCompilationResult>
   isUnionFrom: boolean
 } {
   if (from.type === `unionAll`) {
@@ -1036,6 +1039,7 @@ function processFromClause(
       collectionId,
       sources: { [alias]: input },
       sourceIncludes,
+      directIncludes: [],
       isUnionFrom: false,
     }
   }
@@ -1097,6 +1101,7 @@ function processFromClause(
     collectionId: mainCollectionId,
     sources,
     sourceIncludes,
+    directIncludes: [],
     isUnionFrom: true,
   }
 }
@@ -1121,6 +1126,7 @@ function processUnionAll(
   collectionId: string
   sources: Record<string, KeyedStream>
   sourceIncludes: Array<SourceInclude>
+  directIncludes: Array<IncludesCompilationResult>
   isUnionFrom: boolean
 } {
   if (from.queries.length === 0) {
@@ -1129,11 +1135,22 @@ function processUnionAll(
 
   const sources: Record<string, KeyedStream> = {}
   const sourceIncludes: Array<SourceInclude> = []
+  const directIncludes: Array<IncludesCompilationResult> = []
   let pipeline: NamespacedAndKeyedStream | undefined
   let mainCollectionId = ``
+  const branchAliases = new Set<string>()
 
   for (let index = 0; index < from.queries.length; index++) {
     const branch = from.queries[index]!
+    for (const source of getAllSources(branch)) {
+      if (branchAliases.has(source.alias)) {
+        throw new Error(
+          `Duplicate source alias "${source.alias}" in unionAll query branches. ` +
+            `Use distinct aliases in each branch before passing them to unionAll().`,
+        )
+      }
+      branchAliases.add(source.alias)
+    }
     const branchResult = compileQuery(
       branch,
       allInputs,
@@ -1152,6 +1169,7 @@ function processUnionAll(
     }
     Object.assign(aliasToCollectionId, branchResult.aliasToCollectionId)
     Object.assign(aliasRemapping, branchResult.aliasRemapping)
+    directIncludes.push(...(branchResult.includes ?? []))
     Object.assign(sources, allInputs)
     for (const [alias, where] of branchResult.sourceWhereClauses) {
       sourceWhereClauses.set(alias, where)
@@ -1177,6 +1195,7 @@ function processUnionAll(
     collectionId: mainCollectionId,
     sources,
     sourceIncludes,
+    directIncludes,
     isUnionFrom: true,
   }
 }
@@ -1456,6 +1475,13 @@ function getFromSources(
     return []
   }
   return [from]
+}
+
+function getAllSources(query: QueryIR): Array<CollectionRef | QueryRef> {
+  return [
+    ...getFromSources(query.from),
+    ...(query.join?.map((join) => join.from) ?? []),
+  ]
 }
 
 function getFirstFromAlias(from: QueryIR[`from`]): string {

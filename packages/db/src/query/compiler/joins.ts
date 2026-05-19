@@ -180,6 +180,7 @@ function processJoin(
     joinClause.right,
     availableSources,
     joinedSource,
+    rawQuery.from.type === `unionAll`,
   )
 
   // Pre-compile the join expressions
@@ -349,6 +350,7 @@ function analyzeJoinExpressions(
   right: BasicExpression,
   allAvailableSourceAliases: Array<string>,
   joinedSource: string,
+  allowResultFields: boolean = false,
 ): { mainExpr: BasicExpression; joinedExpr: BasicExpression } {
   // Filter out the joined source alias from the available source aliases
   const availableSources = allAvailableSourceAliases.filter(
@@ -359,11 +361,15 @@ function analyzeJoinExpressions(
   const rightSourceAliases = getSourceAliasesFromExpression(right)
   const leftReferencesJoined = leftSourceAliases.has(joinedSource)
   const rightReferencesJoined = rightSourceAliases.has(joinedSource)
-  const leftAvailableAliases = [...leftSourceAliases].filter((alias) =>
-    availableSources.includes(alias),
+  const leftAvailableAliases = [...leftSourceAliases].filter(
+    (alias) =>
+      availableSources.includes(alias) ||
+      (allowResultFields && alias !== joinedSource),
   )
-  const rightAvailableAliases = [...rightSourceAliases].filter((alias) =>
-    availableSources.includes(alias),
+  const rightAvailableAliases = [...rightSourceAliases].filter(
+    (alias) =>
+      availableSources.includes(alias) ||
+      (allowResultFields && alias !== joinedSource),
   )
 
   // If left expression refers to an available source and right refers to joined source, keep as is

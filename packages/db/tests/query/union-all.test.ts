@@ -328,6 +328,112 @@ describe(`unionAll`, () => {
     ])
   })
 
+  it(`supports joins after query branch unionAll`, async () => {
+    const messages = createMessagesCollection(`union-all-query-messages-join`)
+    const toolCalls = createToolCallsCollection(`union-all-query-tools-join`)
+    const users = createUsersCollection(`union-all-query-users-join`)
+
+    const collection = createLiveQueryCollection((q) => {
+      const messageRows = q
+        .from({ message: messages })
+        .select(({ message }) => ({
+          kind: `message` as const,
+          id: message.id,
+          userId: message.userId,
+          timestamp: message.timestamp,
+        }))
+      const toolCallRows = q
+        .from({ toolCall: toolCalls })
+        .select(({ toolCall }) => ({
+          kind: `toolCall` as const,
+          id: toolCall.id,
+          userId: toolCall.userId,
+          timestamp: toolCall.timestamp,
+        }))
+
+      return q
+        .unionAll(messageRows, toolCallRows)
+        .join(
+          { user: users },
+          ({ userId, user }) => eq(userId, user.id),
+          `inner`,
+        )
+        .select(({ kind, id, user }) => ({
+          kind,
+          id,
+          userName: user.name,
+        }))
+        .orderBy(({ $selected }) => $selected.id)
+    })
+
+    await collection.preload()
+
+    expect(collection.toArray.map(stripVirtualProps)).toEqual([
+      { kind: `message`, id: 1, userName: `Alice` },
+      { kind: `toolCall`, id: 1, userName: `Alice` },
+      { kind: `message`, id: 2, userName: `Bob` },
+    ])
+  })
+
+  it(`materializes includes inside query branch unionAll results`, async () => {
+    const messages = createMessagesCollection(`union-all-query-messages-includes`)
+    const toolCalls = createToolCallsCollection(`union-all-query-tools-includes`)
+    const chunks = createChunksCollection(`union-all-query-chunks-includes`)
+
+    const collection = createLiveQueryCollection((q) => {
+      const messageRows = q
+        .from({ message: messages })
+        .select(({ message }) => ({
+          kind: `message` as const,
+          id: message.id,
+          timestamp: message.timestamp,
+          chunks: toArray(
+            q
+              .from({ chunk: chunks })
+              .where(({ chunk }) => eq(chunk.messageId, message.id))
+              .orderBy(({ chunk }) => chunk.id)
+              .select(({ chunk }) => chunk.text),
+          ),
+        }))
+      const toolCallRows = q
+        .from({ toolCall: toolCalls })
+        .select(({ toolCall }) => ({
+          kind: `toolCall` as const,
+          id: toolCall.id,
+          timestamp: toolCall.timestamp,
+        }))
+
+      return q.unionAll(messageRows, toolCallRows).orderBy(({ timestamp }) => timestamp)
+    })
+
+    await collection.preload()
+
+    expect(collection.toArray.map(stripVirtualPropsDeep)).toEqual([
+      { kind: `message`, id: 1, timestamp: 10, chunks: [`hello`, `world`] },
+      { kind: `toolCall`, id: 1, timestamp: 20 },
+      { kind: `message`, id: 2, timestamp: 30, chunks: [`hidden`] },
+      { kind: `toolCall`, id: 3, timestamp: 40 },
+    ])
+  })
+
+  it(`rejects repeated source aliases across query branch unionAll inputs`, () => {
+    const messages = createMessagesCollection(
+      `union-all-query-messages-duplicate-alias`,
+    )
+    const toolCalls = createToolCallsCollection(
+      `union-all-query-tools-duplicate-alias`,
+    )
+
+    expect(() =>
+      createLiveQueryCollection((q) => {
+        const messageRows = q.from({ row: messages })
+        const toolCallRows = q.from({ row: toolCalls })
+
+        return q.unionAll(messageRows, toolCallRows)
+      }),
+    ).toThrow(/Duplicate source alias "row"/)
+  })
+
   it(`combines multiple sources into exclusive namespaced rows`, async () => {
     const messages = createMessagesCollection(`multi-source-messages-basic`)
     const toolCalls = createToolCallsCollection(`multi-source-tools-basic`)
