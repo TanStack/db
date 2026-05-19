@@ -375,6 +375,54 @@ describe(`unionAll`, () => {
     ])
   })
 
+  it(`deoptimizes lazy joins when query branch unionAll is the lazy side`, async () => {
+    const messages = createMessagesCollection(`union-all-query-messages-lazy-main`)
+    const toolCalls = createToolCallsCollection(`union-all-query-tools-lazy-main`)
+    const users = createCollection(
+      mockSyncCollectionOptions<User>({
+        id: `union-all-query-users-lazy-main`,
+        getKey: (user) => user.id,
+        initialData: [{ id: 1, name: `Alice` }],
+      }),
+    )
+
+    const collection = createLiveQueryCollection((q) => {
+      const messageRows = q
+        .from({ message: messages })
+        .select(({ message }) => ({
+          kind: `message` as const,
+          id: message.id,
+          userId: message.userId,
+          timestamp: message.timestamp,
+        }))
+      const toolCallRows = q
+        .from({ toolCall: toolCalls })
+        .select(({ toolCall }) => ({
+          kind: `toolCall` as const,
+          id: toolCall.id,
+          userId: toolCall.userId,
+          timestamp: toolCall.timestamp,
+        }))
+
+      return q
+        .unionAll(messageRows, toolCallRows)
+        .join({ user: users }, ({ userId, user }) => eq(userId, user.id), `inner`)
+        .select(({ kind, id, user }) => ({
+          kind,
+          id,
+          userName: user.name,
+        }))
+        .orderBy(({ $selected }) => $selected.id)
+    })
+
+    await collection.preload()
+
+    expect(collection.toArray.map(stripVirtualProps)).toEqual([
+      { kind: `message`, id: 1, userName: `Alice` },
+      { kind: `toolCall`, id: 1, userName: `Alice` },
+    ])
+  })
+
   it(`materializes includes inside query branch unionAll results`, async () => {
     const messages = createMessagesCollection(`union-all-query-messages-includes`)
     const toolCalls = createToolCallsCollection(`union-all-query-tools-includes`)
@@ -413,6 +461,79 @@ describe(`unionAll`, () => {
       { kind: `toolCall`, id: 1, timestamp: 20 },
       { kind: `message`, id: 2, timestamp: 30, chunks: [`hidden`] },
       { kind: `toolCall`, id: 3, timestamp: 40 },
+    ])
+  })
+
+  it(`materializes query branch unionAll includes through an outer select`, async () => {
+    const messages = createMessagesCollection(
+      `union-all-query-messages-includes-select`,
+    )
+    const toolCalls = createToolCallsCollection(
+      `union-all-query-tools-includes-select`,
+    )
+    const chunks = createChunksCollection(`union-all-query-chunks-includes-select`)
+
+    const collection = createLiveQueryCollection((q) => {
+      const messageRows = q
+        .from({ message: messages })
+        .select(({ message }) => ({
+          kind: `message` as const,
+          id: message.id,
+          timestamp: message.timestamp,
+          chunks: toArray(
+            q
+              .from({ chunk: chunks })
+              .where(({ chunk }) => eq(chunk.messageId, message.id))
+              .orderBy(({ chunk }) => chunk.id)
+              .select(({ chunk }) => chunk.text),
+          ),
+        }))
+      const toolCallRows = q
+        .from({ toolCall: toolCalls })
+        .select(({ toolCall }) => ({
+          kind: `toolCall` as const,
+          id: toolCall.id,
+          timestamp: toolCall.timestamp,
+        }))
+
+      return q
+        .unionAll(messageRows, toolCallRows)
+        .select(({ kind, id, timestamp, chunks: branchChunks }) => ({
+          kind,
+          id,
+          timestamp,
+          messageChunks: branchChunks,
+        }))
+        .orderBy(({ $selected }) => $selected.timestamp)
+    })
+
+    await collection.preload()
+
+    expect(collection.toArray.map(stripVirtualPropsDeep)).toEqual([
+      {
+        kind: `message`,
+        id: 1,
+        timestamp: 10,
+        messageChunks: [`hello`, `world`],
+      },
+      {
+        kind: `toolCall`,
+        id: 1,
+        timestamp: 20,
+        messageChunks: undefined,
+      },
+      {
+        kind: `message`,
+        id: 2,
+        timestamp: 30,
+        messageChunks: [`hidden`],
+      },
+      {
+        kind: `toolCall`,
+        id: 3,
+        timestamp: 40,
+        messageChunks: undefined,
+      },
     ])
   })
 

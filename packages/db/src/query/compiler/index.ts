@@ -397,6 +397,46 @@ export function compileQuery(
       })
     }
   }
+  if (query.select && directIncludes.length > 0) {
+    for (const include of directIncludes) {
+      const projectedPaths = findProjectedResultIncludePaths(
+        query.select,
+        include.resultPath,
+      )
+
+      for (const { path: resultPath, guards } of projectedPaths) {
+        const fieldName = getUniqueIncludesRoutingKey(
+          resultPath.join(`.`),
+          includesRoutingFns,
+        )
+        const compiledGuards = guards.map((guard) => ({
+          condition: compileExpression(guard.condition),
+          expected: guard.expected,
+        }))
+
+        includesResults.push({
+          ...include,
+          fieldName,
+          resultPath,
+        })
+
+        includesRoutingFns.push({
+          fieldName,
+          getRouting: (nsRow: any) => {
+            if (!matchesConditionalSelectGuards(compiledGuards, nsRow)) {
+              return { correlationKey: null, parentContext: null }
+            }
+            return (
+              nsRow[INCLUDES_ROUTING]?.[include.fieldName] ?? {
+                correlationKey: null,
+                parentContext: null,
+              }
+            )
+          },
+        })
+      }
+    }
+  }
   if (query.select) {
     const includesEntries = extractIncludesFromSelect(query.select)
     // Shallow-clone select before mutating so we don't modify the shared IR
@@ -1494,6 +1534,20 @@ function findProjectedSourceIncludePaths(
   sourcePath: Array<string>,
 ): Array<ProjectedSourceIncludePath> {
   const targetPath = [sourceAlias, ...sourcePath]
+  return findProjectedIncludePaths(select, targetPath)
+}
+
+function findProjectedResultIncludePaths(
+  select: Record<string, any>,
+  resultPath: Array<string>,
+): Array<ProjectedSourceIncludePath> {
+  return findProjectedIncludePaths(select, resultPath)
+}
+
+function findProjectedIncludePaths(
+  select: Record<string, any>,
+  targetPath: Array<string>,
+): Array<ProjectedSourceIncludePath> {
   const resultPaths: Array<ProjectedSourceIncludePath> = []
 
   const visitSelectObject = (

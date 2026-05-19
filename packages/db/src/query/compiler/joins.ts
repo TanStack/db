@@ -232,17 +232,20 @@ function processJoin(
     const limitedSubquery =
       lazyFrom.type === `queryRef` &&
       (lazyFrom.query.limit || lazyFrom.query.offset)
+    const resultUnionLazySide = lazyFrom.type === `unionAll`
 
     const lazySourceJoinExpr = activeSource === `main` ? joinedExpr : mainExpr
     const lazyAlias = activeSource === `main` ? joinedSource : mainSource
-    const lazyTargets = getLazyLoadTargets(
-      rawQuery,
-      lazyFrom,
-      lazyAlias,
-      lazySourceJoinExpr,
-      lazySource,
-      aliasRemapping,
-    )
+    const lazyTargets = resultUnionLazySide
+      ? []
+      : getLazyLoadTargets(
+          rawQuery,
+          lazyFrom,
+          lazyAlias,
+          lazySourceJoinExpr,
+          lazySource,
+          aliasRemapping,
+        )
 
     if (!limitedSubquery && lazyTargets.length > 0) {
       // This join can be optimized by having the active collection

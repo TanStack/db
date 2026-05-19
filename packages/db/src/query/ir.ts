@@ -111,6 +111,12 @@ export class UnionFrom extends BaseExpression {
 
 export class UnionAll extends BaseExpression {
   public type = `unionAll` as const
+  /**
+   * Result-level UNION ALL. Downstream query clauses see the union result row
+   * shape, not the branch source aliases. Optimizers may push safe operations
+   * into branches, but compiler phases should treat this as a derived relation
+   * unless they are explicitly handling branch lowering.
+   */
   constructor(public queries: Array<QueryIR>) {
     super()
   }
