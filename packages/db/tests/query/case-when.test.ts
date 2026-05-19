@@ -341,6 +341,48 @@ describe(`caseWhen`, () => {
     ])
   })
 
+  test(`uses grouped refs inside conditional aggregate projections`, async () => {
+    const users = createUsersCollection()
+    const query = createLiveQueryCollection((q) =>
+      q
+        .from({ user: users })
+        .groupBy(({ user }) => user.active)
+        .select(({ user }) => ({
+          active: user.active,
+          profile: caseWhen(
+            eq(user.active, true),
+            {
+              kind: `active`,
+              groupedActive: user.active,
+              total: count(user.id),
+            },
+            {
+              kind: `inactive`,
+              groupedActive: user.active,
+              total: count(user.id),
+            },
+          ),
+        })),
+    )
+
+    await query.preload()
+
+    const rows = query.toArray
+      .map((row) => stripVirtualPropsAndSymbols(row))
+      .sort((a, b) => Number(a.active) - Number(b.active))
+
+    expect(rows).toEqual([
+      {
+        active: false,
+        profile: { kind: `inactive`, groupedActive: false, total: 1 },
+      },
+      {
+        active: true,
+        profile: { kind: `active`, groupedActive: true, total: 2 },
+      },
+    ])
+  })
+
   test(`uses source alias refs as conditions after a left join`, async () => {
     const users = createCollection(
       mockSyncCollectionOptions<User>({

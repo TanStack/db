@@ -36,6 +36,7 @@ import type { VirtualOrigin } from '../../virtual-props.js'
 
 const VIRTUAL_SYNCED_KEY = `__virtual_synced__`
 const VIRTUAL_HAS_LOCAL_KEY = `__virtual_has_local__`
+const GROUP_KEY_REF_PREFIX = `__group_key_`
 
 type RowVirtualMetadata = {
   synced: boolean
@@ -348,7 +349,9 @@ export function processGroupBy(
         for (const [syntheticAlias, aggExpr] of Object.entries(extracted)) {
           aggregates[syntheticAlias] = getAggregateFunction(aggExpr)
         }
-        wrappedAggExprs[alias] = compileGroupedSelectValue(transformed)
+        wrappedAggExprs[alias] = compileGroupedSelectValue(
+          replaceGroupByRefsInSelectValue(transformed, groupByClause),
+        )
       }
     }
   }
@@ -383,6 +386,7 @@ export function processGroupBy(
           finalResults,
           aggregatedRow as Record<string, any>,
           wrappedAggExprs,
+          groupByClause.length,
         )
       } else {
         // No SELECT clause - just use the group keys
@@ -631,17 +635,23 @@ function evaluateWrappedAggregates(
   finalResults: Record<string, any>,
   aggregatedRow: Record<string, any>,
   wrappedAggExprs: Record<string, (data: any) => any>,
+  groupKeyCount: number = 0,
 ): void {
   for (const key of Object.keys(aggregatedRow)) {
     if (key.startsWith(`__agg_`)) {
       finalResults[key] = aggregatedRow[key]
     }
   }
+  for (let i = 0; i < groupKeyCount; i++) {
+    finalResults[`${GROUP_KEY_REF_PREFIX}${i}`] = aggregatedRow[`__key_${i}`]
+  }
   for (const [alias, evaluator] of Object.entries(wrappedAggExprs)) {
     finalResults[alias] = evaluator({ $selected: finalResults })
   }
   for (const key of Object.keys(finalResults)) {
-    if (key.startsWith(`__agg_`)) delete finalResults[key]
+    if (key.startsWith(`__agg_`) || key.startsWith(GROUP_KEY_REF_PREFIX)) {
+      delete finalResults[key]
+    }
   }
 }
 
@@ -769,6 +779,70 @@ function extractAndReplaceAggregates(
 
   // ref / val – pass through unchanged
   return { transformed: expr, extracted: {} }
+}
+
+function replaceGroupByRefsInSelectValue(
+  value: SelectValueExpression,
+  groupByClause: GroupBy,
+): SelectValueExpression {
+  if (isConditionalSelect(value)) {
+    return new ConditionalSelect(
+      value.branches.map((branch) => ({
+        condition: replaceGroupByRefsInExpression(
+          branch.condition,
+          groupByClause,
+        ),
+        value: replaceGroupByRefsInSelectValue(branch.value, groupByClause),
+      })),
+      value.defaultValue === undefined
+        ? undefined
+        : replaceGroupByRefsInSelectValue(value.defaultValue, groupByClause),
+    )
+  }
+
+  if (isNestedSelectObject(value)) {
+    const transformed: Select = {}
+    for (const [key, entry] of Object.entries(value)) {
+      transformed[key] = replaceGroupByRefsInSelectValue(
+        entry as SelectValueExpression,
+        groupByClause,
+      )
+    }
+    return transformed
+  }
+
+  if (!isExpressionLike(value)) {
+    return value
+  }
+
+  if (value.type === `includesSubquery` || value.type === `agg`) {
+    return value
+  }
+
+  return replaceGroupByRefsInExpression(value, groupByClause)
+}
+
+function replaceGroupByRefsInExpression(
+  expr: BasicExpression,
+  groupByClause: GroupBy,
+): BasicExpression {
+  if (expr.type === `ref`) {
+    const groupIndex = groupByClause.findIndex((groupExpr) =>
+      expressionsEqual(expr, groupExpr),
+    )
+    return groupIndex === -1
+      ? expr
+      : new PropRef([`$selected`, `${GROUP_KEY_REF_PREFIX}${groupIndex}`])
+  }
+
+  if (expr.type === `func`) {
+    return new Func(
+      expr.name,
+      expr.args.map((arg) => replaceGroupByRefsInExpression(arg, groupByClause)),
+    )
+  }
+
+  return expr
 }
 
 function compileGroupedSelectValue(
