@@ -26,7 +26,8 @@ import type {
  * - `schema`: Current available tables (expands with joins, contracts with subqueries)
  *
  * **Query State**:
- * - `fromSourceName`: Which table was used in `from()` - needed for optionality logic
+ * - `fromSourceName`: Which table was used in `from()` or the first
+ *   `unionAll()` source - needed for optionality logic
  * - `hasJoins`: Whether any joins have been added (affects result type inference)
  * - `joinTypes`: Maps table aliases to their join types for optionality calculations
  *
@@ -45,9 +46,9 @@ export interface Context {
   schema: ContextSchema
   // the name of the source that was used in the from clause
   fromSourceName: string
-  // the source names used in a multi-source from clause
+  // the source names used in a source-level unionAll clause
   fromSourceNames?: ReadonlyArray<string>
-  // Whether this query started with a multi-source from
+  // Whether this query started with a source-level unionAll
   hasUnionFrom?: true
   // Whether this query has joins
   hasJoins?: boolean
@@ -76,13 +77,13 @@ export interface Context {
 export type ContextSchema = Record<string, unknown>
 
 /**
- * Source - Input definition for query builder `from()` clause
+ * Source - Input definition for query builder `from()` and `unionAll()` clauses
  *
  * Maps table aliases to either:
  * - `CollectionImpl`: A database collection/table
  * - `QueryBuilder`: A subquery that can be used as a table
  *
- * Example: `{ users: usersCollection, orders: ordersCollection }`
+ * Example: `{ users: usersCollection }`
  */
 export type Source = {
   [alias: string]: CollectionImpl<any, any> | QueryBuilder<Context>
@@ -127,7 +128,17 @@ type IsUnion<T, U = T> = T extends unknown
     : true
   : false
 
-export type ContextFromSource<TSource extends Source> =
+export type SingleSource<TSource extends Source> =
+  IsUnion<keyof TSource & string> extends true ? never : TSource
+
+export type ContextFromSource<TSource extends Source> = {
+  baseSchema: SchemaFromSource<TSource>
+  schema: SchemaFromSource<TSource>
+  fromSourceName: keyof TSource & string
+  hasJoins: false
+}
+
+export type ContextFromUnionSource<TSource extends Source> =
   IsUnion<keyof TSource & string> extends true
     ? {
         baseSchema: SchemaFromSource<TSource>
@@ -137,12 +148,7 @@ export type ContextFromSource<TSource extends Source> =
         hasUnionFrom: true
         hasJoins: false
       }
-    : {
-        baseSchema: SchemaFromSource<TSource>
-        schema: SchemaFromSource<TSource>
-        fromSourceName: keyof TSource & string
-        hasJoins: false
-      }
+    : ContextFromSource<TSource>
 
 /**
  * GetAliases - Extracts all table aliases available in a query context

@@ -61,13 +61,38 @@ function createUsers() {
   )
 }
 
-describe(`multi-source from types`, () => {
+describe(`unionAll types`, () => {
+  test(`from rejects multiple sources`, () => {
+    const messages = createMessages()
+    const toolCalls = createToolCalls()
+
+    createLiveQueryCollection((q) =>
+      // @ts-expect-error Use unionAll() to combine multiple independent sources.
+      q.from({
+        message: messages,
+        toolCall: toolCalls,
+      }),
+    )
+  })
+
+  test(`unionAll is only available as a start method`, () => {
+    const messages = createMessages()
+    const toolCalls = createToolCalls()
+
+    createLiveQueryCollection((q) =>
+      q
+        .from({ message: messages })
+        // @ts-expect-error unionAll is a start method, like from().
+        .unionAll({ toolCall: toolCalls }),
+    )
+  })
+
   test(`no select returns an exclusive union`, () => {
     const messages = createMessages()
     const toolCalls = createToolCalls()
 
     const collection = createLiveQueryCollection((q) =>
-      q.from({
+      q.unionAll({
         message: messages,
         toolCall: toolCalls,
       }),
@@ -89,7 +114,7 @@ describe(`multi-source from types`, () => {
 
     const collection = createLiveQueryCollection((q) =>
       q
-        .from({
+        .unionAll({
           message: messages,
           toolCall: toolCalls,
         })
@@ -114,7 +139,7 @@ describe(`multi-source from types`, () => {
 
     const collection = createLiveQueryCollection((q) =>
       q
-        .from({
+        .unionAll({
           message: messages,
           toolCall: toolCalls,
         })
@@ -154,7 +179,7 @@ describe(`multi-source from types`, () => {
           userName: user.name,
         }))
 
-      return q.from({
+      return q.unionAll({
         message: messagesWithUsers,
         toolCall: toolCalls,
       })
@@ -187,7 +212,7 @@ describe(`multi-source from types`, () => {
 
     const collection = createLiveQueryCollection((q) =>
       q
-        .from({
+        .unionAll({
           message: messages,
           toolCall: toolCalls,
         })
@@ -221,7 +246,7 @@ describe(`multi-source from types`, () => {
 
     const collection = createLiveQueryCollection((q) =>
       q
-        .from({
+        .unionAll({
           message: messages,
           toolCall: toolCalls,
         })
@@ -248,7 +273,7 @@ describe(`multi-source from types`, () => {
 
     const collection = createLiveQueryCollection((q) =>
       q
-        .from({
+        .unionAll({
           message: messages,
           toolCall: toolCalls,
         })

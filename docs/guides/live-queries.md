@@ -490,12 +490,11 @@ The foundation of every query is the `from` method, which specifies the source c
 ```ts
 from({
   [alias]: Collection | Query
-  // Additional aliases may be provided for multi-source queries.
 }): Query
 ```
 
 **Parameters:**
-- `[alias]` - A Collection or Query instance. Provide one alias for a normal single-source query, or multiple aliases to combine independent sources into one live collection.
+- `[alias]` - A Collection or Query instance.
 
 ### Basic Usage
 
@@ -539,19 +538,18 @@ const userNames = createCollection(liveQueryCollectionOptions({
 }))
 ```
 
-### Multi-Source `from`
+### Source-Level `unionAll`
 
-You can pass multiple aliases to `from()` to combine independent collections or
-subqueries without a join. Conceptually, this behaves like `UNION ALL`: each
-result row comes from exactly one source alias, and inactive aliases are
-`undefined`.
+Use `unionAll()` to combine independent collections or subqueries without a
+join. Conceptually, this behaves like `UNION ALL`: each result row comes from
+exactly one source alias, and inactive aliases are `undefined`.
 
 ```ts
 import { coalesce, createLiveQueryCollection } from '@tanstack/db'
 
 const timeline = createLiveQueryCollection((q) =>
   q
-    .from({
+    .unionAll({
       message: messagesCollection,
       toolCall: toolCallsCollection,
     })
@@ -1695,15 +1693,15 @@ const sortedUsers = createLiveQueryCollection((q) =>
 )
 ```
 
-### Multi-Source Ordering
+### `unionAll` Ordering
 
-When ordering a multi-source `from` query, use a combined expression such as
+When ordering a source-level `unionAll` query, use a combined expression such as
 `coalesce()` to produce one comparable value across branches:
 
 ```ts
 const timeline = createLiveQueryCollection((q) =>
   q
-    .from({
+    .unionAll({
       message: messagesCollection,
       toolCall: toolCallsCollection,
     })

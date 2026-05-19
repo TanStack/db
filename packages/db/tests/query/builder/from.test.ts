@@ -4,6 +4,7 @@ import { Query, getQueryIR } from '../../../src/query/builder/index.js'
 import { eq } from '../../../src/query/builder/functions.js'
 import {
   InvalidSourceTypeError,
+  OnlyOneSourceAllowedError,
   QueryMustHaveFromClauseError,
 } from '../../../src/errors'
 
@@ -16,22 +17,9 @@ interface Employee {
   active: boolean
 }
 
-interface Department {
-  id: number
-  name: string
-  budget: number
-  location: string
-}
-
 // Test collections
 const employeesCollection = new CollectionImpl<Employee>({
   id: `employees`,
-  getKey: (item) => item.id,
-  sync: { sync: () => {} },
-})
-
-const departmentsCollection = new CollectionImpl<Department>({
-  id: `departments`,
   getKey: (item) => item.id,
   sync: { sync: () => {} },
 })
@@ -98,21 +86,15 @@ describe(`QueryBuilder.from`, () => {
     }).toThrow(QueryMustHaveFromClauseError)
   })
 
-  it(`supports multiple sources`, () => {
+  it(`rejects multiple sources`, () => {
     const builder = new Query()
 
-    const query = builder.from({
-      employees: employeesCollection,
-      departments: departmentsCollection,
-    })
-    const builtQuery = getQueryIR(query)
-
-    expect(builtQuery.from).toBeDefined()
-    expect(builtQuery.from.type).toBe(`unionFrom`)
-    expect(builtQuery.from.alias).toBe(`employees`)
-    expect(
-      (builtQuery.from as any).sources.map((source: any) => source.alias),
-    ).toEqual([`employees`, `departments`])
+    expect(() => {
+      builder.from({
+        employees: employeesCollection,
+        otherEmployees: employeesCollection,
+      } as any)
+    }).toThrow(OnlyOneSourceAllowedError)
   })
 
   it(`throws helpful error when passing a string instead of an object`, () => {

@@ -195,13 +195,13 @@ function childRows(collection: any): Array<any> {
   return [...collection.toArray].map((row) => stripVirtualPropsDeep(row))
 }
 
-describe(`multi-source from`, () => {
+describe(`unionAll`, () => {
   it(`combines multiple sources into exclusive namespaced rows`, async () => {
     const messages = createMessagesCollection(`multi-source-messages-basic`)
     const toolCalls = createToolCallsCollection(`multi-source-tools-basic`)
 
     const collection = createLiveQueryCollection((q) =>
-      q.from({
+      q.unionAll({
         message: messages,
         toolCall: toolCalls,
       }),
@@ -225,7 +225,7 @@ describe(`multi-source from`, () => {
     const toolCalls = createToolCallsCollection(`multi-source-tools-keys`)
 
     const collection = createLiveQueryCollection((q) =>
-      q.from({
+      q.unionAll({
         message: messages,
         toolCall: toolCalls,
       }),
@@ -245,7 +245,7 @@ describe(`multi-source from`, () => {
 
     const collection = createLiveQueryCollection((q) =>
       q
-        .from({
+        .unionAll({
           message: messages,
           toolCall: toolCalls,
         })
@@ -290,7 +290,7 @@ describe(`multi-source from`, () => {
 
     const collection = createLiveQueryCollection((q) =>
       q
-        .from({
+        .unionAll({
           message: messages,
           toolCall: toolCalls,
         })
@@ -315,7 +315,7 @@ describe(`multi-source from`, () => {
 
     const collection = createLiveQueryCollection((q) =>
       q
-        .from({
+        .unionAll({
           message: messages,
           toolCall: toolCalls,
         })
@@ -339,7 +339,7 @@ describe(`multi-source from`, () => {
         .where(({ message }) => eq(message.kind, `visible`))
 
       return q
-        .from({
+        .unionAll({
           message: visibleMessages,
           toolCall: toolCalls,
         })
@@ -383,7 +383,7 @@ describe(`multi-source from`, () => {
         }))
 
       return q
-        .from({
+        .unionAll({
           message: visibleMessagesWithUsers,
           toolCall: toolCalls,
         })
@@ -414,14 +414,14 @@ describe(`multi-source from`, () => {
     )
   })
 
-  it(`supports joins after multi-source from with branch-dependent keys`, async () => {
+  it(`supports joins after unionAll with branch-dependent keys`, async () => {
     const messages = createMessagesCollection(`multi-source-messages-join`)
     const toolCalls = createToolCallsCollection(`multi-source-tools-join`)
     const users = createUsersCollection(`multi-source-users-join`)
 
     const collection = createLiveQueryCollection((q) =>
       q
-        .from({
+        .unionAll({
           message: messages,
           toolCall: toolCalls,
         })
@@ -451,7 +451,7 @@ describe(`multi-source from`, () => {
     ])
   })
 
-  it(`supports right joins after multi-source from`, async () => {
+  it(`supports right joins after unionAll`, async () => {
     const messages = createMessagesCollection(
       `multi-source-messages-right-join`,
     )
@@ -460,7 +460,7 @@ describe(`multi-source from`, () => {
 
     const collection = createLiveQueryCollection((q) =>
       q
-        .from({
+        .unionAll({
           message: messages,
           toolCall: toolCalls,
         })
@@ -493,14 +493,14 @@ describe(`multi-source from`, () => {
     )
   })
 
-  it(`supports full joins after multi-source from`, async () => {
+  it(`supports full joins after unionAll`, async () => {
     const messages = createMessagesCollection(`multi-source-messages-full-join`)
     const toolCalls = createToolCallsCollection(`multi-source-tools-full-join`)
     const users = createUsersCollection(`multi-source-users-full-join`)
 
     const collection = createLiveQueryCollection((q) =>
       q
-        .from({
+        .unionAll({
           message: messages,
           toolCall: toolCalls,
         })
@@ -538,7 +538,7 @@ describe(`multi-source from`, () => {
     )
   })
 
-  it(`does not lazy-load branch-dependent joins after multi-source from`, async () => {
+  it(`does not lazy-load branch-dependent joins after unionAll`, async () => {
     const messages = createMessagesCollection(`multi-source-messages-no-lazy`)
     const toolCalls = createToolCallsCollection(`multi-source-tools-no-lazy`)
     const { collection: users, loadSubsetCalls } =
@@ -546,7 +546,7 @@ describe(`multi-source from`, () => {
 
     const collection = createLiveQueryCollection((q) =>
       q
-        .from({
+        .unionAll({
           message: messages,
           toolCall: toolCalls,
         })
@@ -568,7 +568,7 @@ describe(`multi-source from`, () => {
     expect(loadSubsetCalls.every((call) => call.where === undefined)).toBe(true)
   })
 
-  it(`lazy-loads each branch when joining to a multi-source subquery`, async () => {
+  it(`lazy-loads each branch when joining to a unionAll subquery`, async () => {
     const { collection: messages, loadSubsetCalls: messageLoadSubsetCalls } =
       createCollectionWithLoadSubsetTracking<Message>(
         `multi-source-messages-lazy-subquery-join`,
@@ -585,7 +585,7 @@ describe(`multi-source from`, () => {
 
     const collection = createLiveQueryCollection((q) => {
       const events = q
-        .from({
+        .unionAll({
           message: messages,
           toolCall: toolCalls,
         })
@@ -620,7 +620,7 @@ describe(`multi-source from`, () => {
     expect(toolLoadSubsetCalls.every((call) => call.where)).toBe(true)
   })
 
-  it(`does not lazy-load computed multi-source subquery join projections`, async () => {
+  it(`does not lazy-load computed unionAll subquery join projections`, async () => {
     const { collection: messages, loadSubsetCalls: messageLoadSubsetCalls } =
       createCollectionWithLoadSubsetTracking<Message>(
         `multi-source-messages-computed-lazy-subquery-join`,
@@ -639,7 +639,7 @@ describe(`multi-source from`, () => {
 
     const collection = createLiveQueryCollection((q) => {
       const events = q
-        .from({
+        .unionAll({
           message: messages,
           toolCall: toolCalls,
         })
@@ -671,7 +671,7 @@ describe(`multi-source from`, () => {
     )
   })
 
-  it(`does not lazy-load limited multi-source subquery branches`, async () => {
+  it(`does not lazy-load limited unionAll subquery branches`, async () => {
     const { collection: messages, loadSubsetCalls: messageLoadSubsetCalls } =
       createCollectionWithLoadSubsetTracking<Message>(
         `multi-source-messages-limited-lazy-subquery-join`,
@@ -695,7 +695,7 @@ describe(`multi-source from`, () => {
         .limit(1)
 
       const events = q
-        .from({
+        .unionAll({
           message: firstMessage,
           toolCall: toolCalls,
         })
@@ -726,13 +726,13 @@ describe(`multi-source from`, () => {
     expect(toolLoadSubsetCalls.some((call) => call.where)).toBe(true)
   })
 
-  it(`supports distinct over selected multi-source rows`, async () => {
+  it(`supports distinct over selected unionAll rows`, async () => {
     const messages = createMessagesCollection(`multi-source-messages-distinct`)
     const toolCalls = createToolCallsCollection(`multi-source-tools-distinct`)
 
     const collection = createLiveQueryCollection((q) =>
       q
-        .from({
+        .unionAll({
           message: messages,
           toolCall: toolCalls,
         })
@@ -758,7 +758,7 @@ describe(`multi-source from`, () => {
 
     const collection = createLiveQueryCollection((q) =>
       q
-        .from({
+        .unionAll({
           message: messages,
           toolCall: toolCalls,
         })
@@ -825,7 +825,7 @@ describe(`multi-source from`, () => {
 
     const collection = createLiveQueryCollection((q) =>
       q
-        .from({
+        .unionAll({
           message: messages,
           toolCall: toolCalls,
         })
@@ -880,7 +880,7 @@ describe(`multi-source from`, () => {
     )
   })
 
-  it(`materializes correlated collection includes from multi-source subquery children`, async () => {
+  it(`materializes correlated collection includes from unionAll subquery children`, async () => {
     const { collection: messages, loadSubsetCalls: messageLoadSubsetCalls } =
       createCollectionWithLoadSubsetTracking<Message>(
         `multi-source-messages-collection-includes`,
@@ -899,7 +899,7 @@ describe(`multi-source from`, () => {
 
     const collection = createLiveQueryCollection((q) => {
       const events = q
-        .from({
+        .unionAll({
           message: messages,
           toolCall: toolCalls,
         })
@@ -951,7 +951,7 @@ describe(`multi-source from`, () => {
     ])
   })
 
-  it(`materializes nested concat includes inside multi-source subquery child rows`, async () => {
+  it(`materializes nested concat includes inside unionAll subquery child rows`, async () => {
     const runs = createCollection(
       mockSyncCollectionOptions<RunRow>({
         id: `multi-source-nested-concat-runs`,
@@ -988,7 +988,7 @@ describe(`multi-source from`, () => {
 
     const timeline = createLiveQueryCollection((q) => {
       const runItemsSource = q
-        .from({
+        .unionAll({
           text: texts,
           toolCall: toolCalls,
         })

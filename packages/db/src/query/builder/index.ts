@@ -47,6 +47,7 @@ import type {
   CompareOptions,
   Context,
   ContextFromSource,
+  ContextFromUnionSource,
   FunctionalHavingRow,
   GetResult,
   GroupByCallback,
@@ -62,6 +63,7 @@ import type {
   ScalarSelectValue,
   SchemaFromSource,
   SelectObject,
+  SingleSource,
   Source,
   WhereCallback,
   WithResult,
@@ -116,12 +118,12 @@ export class BaseQueryBuilder<TContext extends Context = Context> {
     }
 
     // Check if it looks like a string was passed (has numeric keys).
-    // This applies to multi-source from as well as single-source joins.
+    // This applies to source-level unionAll as well as single-source clauses.
     if (keys.every((k) => !isNaN(Number(k)))) {
       throw new InvalidSourceTypeError(context, `string`)
     }
 
-    if (context !== `from clause` && keys.length !== 1) {
+    if (context !== `unionAll clause` && keys.length !== 1) {
       if (keys.length === 0) {
         throw new InvalidSourceTypeError(context, `empty object`)
       }
@@ -170,9 +172,35 @@ export class BaseQueryBuilder<TContext extends Context = Context> {
    * ```
    */
   from<TSource extends Source>(
-    source: TSource,
+    source: SingleSource<TSource>,
   ): QueryBuilder<ContextFromSource<TSource>> {
-    const refs = this._createRefsForSource(source, `from clause`)
+    const [, from] = this._createRefForSource(source, `from clause`)
+
+    return new BaseQueryBuilder({
+      ...this.query,
+      from,
+    }) as any
+  }
+
+  /**
+   * Union multiple independent source streams in one query.
+   *
+   * @param source - An object with one or more aliases mapped to collections or subqueries
+   * @returns A QueryBuilder with the unioned sources available
+   *
+   * @example
+   * ```ts
+   * query
+   *   .unionAll({ message: messagesCollection, toolCall: toolCallsCollection })
+   *   .orderBy(({ message, toolCall }) =>
+   *     coalesce(message.timestamp, toolCall.timestamp)
+   *   )
+   * ```
+   */
+  unionAll<TSource extends Source>(
+    source: TSource,
+  ): QueryBuilder<ContextFromUnionSource<TSource>> {
+    const refs = this._createRefsForSource(source, `unionAll clause`)
     const from =
       refs.length === 1 ? refs[0]![1] : new UnionFrom(refs.map((r) => r[1]))
 
@@ -1314,13 +1342,16 @@ export function getQueryIR(
 }
 
 // Type-only exports for the query builder
-export type InitialQueryBuilder = Pick<BaseQueryBuilder<Context>, `from`>
+export type InitialQueryBuilder = Pick<
+  BaseQueryBuilder<Context>,
+  `from` | `unionAll`
+>
 
 export type InitialQueryBuilderConstructor = new () => InitialQueryBuilder
 
 export type QueryBuilder<TContext extends Context> = Omit<
   BaseQueryBuilder<TContext>,
-  `from` | `_getQuery`
+  `from` | `unionAll` | `_getQuery`
 >
 
 // Main query builder class alias with the constructor type modified to hide all
@@ -1343,6 +1374,7 @@ export type {
   Context,
   ContextSchema,
   ContextFromSource,
+  ContextFromUnionSource,
   Source,
   GetResult,
   RefLeaf as Ref,
@@ -1350,6 +1382,7 @@ export type {
   // Types used in public method signatures that must be exported
   // for declaration emit to work (see https://github.com/TanStack/db/issues/1012)
   SchemaFromSource,
+  SingleSource,
   InferCollectionType,
   MergeContextWithJoinType,
   MergeContextForJoinCallback,
