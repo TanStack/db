@@ -567,6 +567,32 @@ export function caseWhen<
   value5: V5,
   defaultValue: D,
 ): CaseWhenResult<[V1, V2, V3, V4, V5, D], true>
+export function caseWhen<
+  C1 extends ExpressionLike,
+  V1 extends CaseWhenValue,
+  C2 extends ExpressionLike,
+  V2 extends CaseWhenValue,
+  C3 extends ExpressionLike,
+  V3 extends CaseWhenValue,
+  C4 extends ExpressionLike,
+  V4 extends CaseWhenValue,
+  C5 extends ExpressionLike,
+  V5 extends CaseWhenValue,
+>(
+  condition1: C1,
+  value1: V1,
+  condition2: C2,
+  value2: V2,
+  condition3: C3,
+  value3: V3,
+  condition4: C4,
+  value4: V4,
+  condition5: C5,
+  value5: V5,
+  condition6: ExpressionLike,
+  value6: CaseWhenValue,
+  ...rest: Array<CaseWhenValue>
+): any
 export function caseWhen(...args: Array<CaseWhenValue>): any {
   if (args.length < 2) {
     throw new Error(`caseWhen() requires at least two arguments`)

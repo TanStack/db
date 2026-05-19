@@ -88,6 +88,20 @@ describe(`caseWhen types`, () => {
           gt(user.age, 18),
           `adult`,
         ),
+        fallbackOverload: caseWhen(
+          gt(user.age, 90),
+          `one`,
+          gt(user.age, 80),
+          `two`,
+          gt(user.age, 70),
+          `three`,
+          gt(user.age, 60),
+          `four`,
+          gt(user.age, 50),
+          `five`,
+          gt(user.age, 40),
+          `six`,
+        ),
       })),
     )
 
@@ -98,6 +112,7 @@ describe(`caseWhen types`, () => {
         id: number
         withDefault: `senior` | `adult` | `minor`
         withoutDefault: `senior` | `adult` | null
+        fallbackOverload: `one` | `two` | `three` | `four` | `five` | `six` | null
       }>
     >()
   })
