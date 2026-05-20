@@ -203,13 +203,8 @@ export class BaseQueryBuilder<TContext extends Context = Context> {
     source: TSource,
   ): QueryBuilder<ContextFromUnionSource<TSource>>
   unionAll<
-    TBranches extends readonly [
-      QueryBuilder<any>,
-      ...Array<QueryBuilder<any>>,
-    ],
-  >(
-    ...branches: TBranches
-  ): QueryBuilder<ContextFromUnionBranches<TBranches>>
+    TBranches extends readonly [QueryBuilder<any>, ...Array<QueryBuilder<any>>],
+  >(...branches: TBranches): QueryBuilder<ContextFromUnionBranches<TBranches>>
   unionAll(
     sourceOrBranch: Source | QueryBuilder<any>,
     ...branches: Array<QueryBuilder<any>>

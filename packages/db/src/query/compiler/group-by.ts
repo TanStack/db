@@ -48,9 +48,7 @@ function getRowVirtualMetadata(row: NamespacedRow): RowVirtualMetadata {
   let allSynced = true
   let hasLocal = false
 
-  for (const [alias, value] of Object.entries(
-    row as Record<string, unknown>,
-  )) {
+  for (const [alias, value] of Object.entries(row as Record<string, unknown>)) {
     if (alias === `$selected`) continue
     if (value === null || typeof value !== `object`) continue
     const asRecord = value as Record<string, unknown>

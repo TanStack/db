@@ -196,7 +196,9 @@ export function optimizeQuery(query: QueryIR): OptimizationResult {
       optimizedQuery: {
         ...query,
         from: new UnionAllClass(
-          query.from.queries.map((branch) => optimizeQuery(branch).optimizedQuery),
+          query.from.queries.map(
+            (branch) => optimizeQuery(branch).optimizedQuery,
+          ),
         ),
       },
       sourceWhereClauses: new Map(),
@@ -859,12 +861,15 @@ function deepCopyFrom(from: From): From {
   }
 
   if (from.type === `unionAll`) {
-    return new UnionAllClass(from.queries.map((branch) => deepCopyQuery(branch)))
+    return new UnionAllClass(
+      from.queries.map((branch) => deepCopyQuery(branch)),
+    )
   }
 
   return new UnionFromClass(
-    from.sources.map((source: CollectionRefClass | QueryRefClass) =>
-      deepCopyFrom(source) as any,
+    from.sources.map(
+      (source: CollectionRefClass | QueryRefClass) =>
+        deepCopyFrom(source) as any,
     ),
   )
 }
@@ -935,7 +940,9 @@ function optimizeFromWithTracking(
   }
 
   if (from.type === `unionAll`) {
-    return new UnionAllClass(from.queries.map((branch) => deepCopyQuery(branch)))
+    return new UnionAllClass(
+      from.queries.map((branch) => deepCopyQuery(branch)),
+    )
   }
 
   const whereClause = singleSourceClauses.get(from.alias)

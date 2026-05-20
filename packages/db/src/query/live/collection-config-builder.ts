@@ -1884,7 +1884,10 @@ function setIncludedValue(
 function getFnSelectState(
   target: Record<string, any>,
 ):
-  | { sourceRow: Record<string, any>; fnSelect: (row: Record<string, any>) => any }
+  | {
+      sourceRow: Record<string, any>
+      fnSelect: (row: Record<string, any>) => any
+    }
   | undefined {
   return (target as Record<PropertyKey, any>)[FN_SELECT_STATE] as
     | {
@@ -1903,7 +1906,8 @@ function refreshFnSelectResult(
 ): void {
   const targetRecord = target as Record<PropertyKey, any>
   const sourceRecord = state.sourceRow as Record<PropertyKey, any>
-  const routing = targetRecord[INCLUDES_ROUTING] ?? sourceRecord[INCLUDES_ROUTING]
+  const routing =
+    targetRecord[INCLUDES_ROUTING] ?? sourceRecord[INCLUDES_ROUTING]
   const nextValue = state.fnSelect(state.sourceRow)
   if (!nextValue || typeof nextValue !== `object`) {
     return
@@ -1949,7 +1953,9 @@ function cloneForIncludesUpdate<T extends Record<string, any>>(
   target: T,
   path: Array<string>,
 ): T {
-  return getFnSelectState(target) ? { ...target } : clonePathForUpdate(target, path)
+  return getFnSelectState(target)
+    ? { ...target }
+    : clonePathForUpdate(target, path)
 }
 
 function clonePathForUpdate<T extends Record<string, any>>(

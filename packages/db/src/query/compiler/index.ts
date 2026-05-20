@@ -1634,10 +1634,7 @@ function mapNestedFromQueries(
   originalFrom: QueryIR[`from`],
   queryMapping: QueryMapping,
 ): void {
-  if (
-    optimizedFrom.type === `unionAll` &&
-    originalFrom.type === `unionAll`
-  ) {
+  if (optimizedFrom.type === `unionAll` && originalFrom.type === `unionAll`) {
     for (
       let i = 0;
       i < optimizedFrom.queries.length && i < originalFrom.queries.length;

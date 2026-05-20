@@ -184,7 +184,9 @@ describe(`unionAll types`, () => {
           timestamp: toolCall.timestamp,
         }))
 
-      return q.unionAll(messageRows, toolCallRows).orderBy(({ timestamp }) => timestamp)
+      return q
+        .unionAll(messageRows, toolCallRows)
+        .orderBy(({ timestamp }) => timestamp)
     })
 
     expectTypeOf(collection.toArray).toMatchTypeOf<
@@ -301,7 +303,11 @@ describe(`unionAll types`, () => {
 
       return q
         .unionAll(messageRows, toolCallRows)
-        .join({ user: users }, ({ userId, user }) => eq(userId, user.id), `inner`)
+        .join(
+          { user: users },
+          ({ userId, user }) => eq(userId, user.id),
+          `inner`,
+        )
         .select(({ kind, id, user }) => ({
           kind,
           id,

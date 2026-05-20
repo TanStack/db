@@ -220,7 +220,9 @@ describe(`unionAll`, () => {
           timestamp: toolCall.timestamp,
         }))
 
-      return q.unionAll(messageRows, toolCallRows).orderBy(({ timestamp }) => timestamp)
+      return q
+        .unionAll(messageRows, toolCallRows)
+        .orderBy(({ timestamp }) => timestamp)
     })
 
     await collection.preload()
@@ -376,8 +378,12 @@ describe(`unionAll`, () => {
   })
 
   it(`deoptimizes lazy joins when query branch unionAll is the lazy side`, async () => {
-    const messages = createMessagesCollection(`union-all-query-messages-lazy-main`)
-    const toolCalls = createToolCallsCollection(`union-all-query-tools-lazy-main`)
+    const messages = createMessagesCollection(
+      `union-all-query-messages-lazy-main`,
+    )
+    const toolCalls = createToolCallsCollection(
+      `union-all-query-tools-lazy-main`,
+    )
     const users = createCollection(
       mockSyncCollectionOptions<User>({
         id: `union-all-query-users-lazy-main`,
@@ -406,7 +412,11 @@ describe(`unionAll`, () => {
 
       return q
         .unionAll(messageRows, toolCallRows)
-        .join({ user: users }, ({ userId, user }) => eq(userId, user.id), `inner`)
+        .join(
+          { user: users },
+          ({ userId, user }) => eq(userId, user.id),
+          `inner`,
+        )
         .select(({ kind, id, user }) => ({
           kind,
           id,
@@ -424,8 +434,12 @@ describe(`unionAll`, () => {
   })
 
   it(`materializes includes inside query branch unionAll results`, async () => {
-    const messages = createMessagesCollection(`union-all-query-messages-includes`)
-    const toolCalls = createToolCallsCollection(`union-all-query-tools-includes`)
+    const messages = createMessagesCollection(
+      `union-all-query-messages-includes`,
+    )
+    const toolCalls = createToolCallsCollection(
+      `union-all-query-tools-includes`,
+    )
     const chunks = createChunksCollection(`union-all-query-chunks-includes`)
 
     const collection = createLiveQueryCollection((q) => {
@@ -451,7 +465,9 @@ describe(`unionAll`, () => {
           timestamp: toolCall.timestamp,
         }))
 
-      return q.unionAll(messageRows, toolCallRows).orderBy(({ timestamp }) => timestamp)
+      return q
+        .unionAll(messageRows, toolCallRows)
+        .orderBy(({ timestamp }) => timestamp)
     })
 
     await collection.preload()
@@ -471,7 +487,9 @@ describe(`unionAll`, () => {
     const toolCalls = createToolCallsCollection(
       `union-all-query-tools-includes-select`,
     )
-    const chunks = createChunksCollection(`union-all-query-chunks-includes-select`)
+    const chunks = createChunksCollection(
+      `union-all-query-chunks-includes-select`,
+    )
 
     const collection = createLiveQueryCollection((q) => {
       const messageRows = q
@@ -544,7 +562,9 @@ describe(`unionAll`, () => {
     const toolCalls = createToolCallsCollection(
       `union-all-query-tools-includes-fn-select`,
     )
-    const chunks = createChunksCollection(`union-all-query-chunks-includes-fn-select`)
+    const chunks = createChunksCollection(
+      `union-all-query-chunks-includes-fn-select`,
+    )
 
     const collection = createLiveQueryCollection((q) => {
       const messageRows = q
