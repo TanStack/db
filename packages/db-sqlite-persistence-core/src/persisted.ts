@@ -649,15 +649,15 @@ function toStableSerializable(value: unknown): unknown {
     return Array.from(value)
       .map((entry) => toStableSerializable(entry))
       .filter((entry) => entry !== undefined)
-      .sort((left, right) => {
-        const leftSerialized = JSON.stringify(left)
-        const rightSerialized = JSON.stringify(right)
-        return leftSerialized < rightSerialized
+      .map((entry) => ({ entry, serialized: JSON.stringify(entry) }))
+      .sort((left, right) =>
+        left.serialized < right.serialized
           ? -1
-          : leftSerialized > rightSerialized
+          : left.serialized > right.serialized
             ? 1
-            : 0
-      })
+            : 0,
+      )
+      .map(({ entry }) => entry)
   }
 
   if (value instanceof Map) {
@@ -667,15 +667,18 @@ function toStableSerializable(value: unknown): unknown {
         value: toStableSerializable(mapValue),
       }))
       .filter((entry) => entry.key !== undefined && entry.value !== undefined)
-      .sort((left, right) => {
-        const leftSerialized = JSON.stringify(left.key)
-        const rightSerialized = JSON.stringify(right.key)
-        return leftSerialized < rightSerialized
+      .map((entry) => ({
+        entry,
+        serializedKey: JSON.stringify(entry.key),
+      }))
+      .sort((left, right) =>
+        left.serializedKey < right.serializedKey
           ? -1
-          : leftSerialized > rightSerialized
+          : left.serializedKey > right.serializedKey
             ? 1
-            : 0
-      })
+            : 0,
+      )
+      .map(({ entry }) => entry)
   }
 
   const record = value as Record<string, unknown>
@@ -1298,11 +1301,9 @@ class PersistedCollectionRuntime<
   }
 
   private async flushQueuedHydrationTransactionsUnsafe(): Promise<void> {
-    while (this.queuedHydrationTransactions.length > 0) {
-      const transaction = this.queuedHydrationTransactions.shift()
-      if (!transaction) {
-        continue
-      }
+    const queuedTransactions = this.queuedHydrationTransactions.splice(0)
+
+    for (const transaction of queuedTransactions) {
       await this.applyBufferedSyncTransactionUnsafe(transaction)
     }
   }
@@ -1867,11 +1868,9 @@ class PersistedCollectionRuntime<
   }
 
   private async flushQueuedTxCommittedUnsafe(): Promise<void> {
-    while (this.queuedTxCommitted.length > 0) {
-      const queued = this.queuedTxCommitted.shift()
-      if (!queued) {
-        continue
-      }
+    const queuedTransactions = this.queuedTxCommitted.splice(0)
+
+    for (const queued of queuedTransactions) {
       await this.processCommittedTxUnsafe(queued)
     }
   }

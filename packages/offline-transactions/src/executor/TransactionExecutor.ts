@@ -247,8 +247,11 @@ export class TransactionExecutor {
     // Schedule retry timer for loaded transactions
     this.scheduleNextRetry()
 
+    const filteredTransactionIds = new Set(
+      filteredTransactions.map((transaction) => transaction.id),
+    )
     const removedTransactions = transactions.filter(
-      (tx) => !filteredTransactions.some((filtered) => filtered.id === tx.id),
+      (transaction) => !filteredTransactionIds.has(transaction.id),
     )
 
     if (removedTransactions.length > 0) {
@@ -355,13 +358,7 @@ export class TransactionExecutor {
   }
 
   private getEarliestRetryTime(): number | null {
-    const allTransactions = this.scheduler.getAllPendingTransactions()
-
-    if (allTransactions.length === 0) {
-      return null
-    }
-
-    return Math.min(...allTransactions.map((tx) => tx.nextAttemptAt))
+    return this.scheduler.getEarliestRetryTime()
   }
 
   private clearRetryTimer(): void {
@@ -380,10 +377,11 @@ export class TransactionExecutor {
   }
 
   resetRetryDelays(): void {
+    const nextAttemptAt = Date.now()
     const allTransactions = this.scheduler.getAllPendingTransactions()
     const updatedTransactions = allTransactions.map((transaction) => ({
       ...transaction,
-      nextAttemptAt: Date.now(),
+      nextAttemptAt,
     }))
 
     this.scheduler.updateTransactions(updatedTransactions)

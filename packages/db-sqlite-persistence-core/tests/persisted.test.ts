@@ -1266,6 +1266,78 @@ describe(`persistedCollectionOptions`, () => {
     })
   })
 
+  it(`processes tx:committed messages queued during a reload flush`, async () => {
+    const adapter = createRecordingAdapter([{ id: `1`, title: `Initial` }])
+    const coordinator = createCoordinatorHarness()
+
+    const collection = createCollection(
+      persistedCollectionOptions<Todo, string>({
+        id: `sync-present`,
+        getKey: (item) => item.id,
+        sync: {
+          sync: ({ markReady }) => {
+            markReady()
+          },
+        },
+        persistence: {
+          adapter,
+          coordinator,
+        },
+      }),
+    )
+
+    await collection.preload()
+    await flushAsyncWork()
+
+    const originalLoadSubset = adapter.loadSubset
+    let emittedDuringReload = false
+    adapter.loadSubset = async (collectionId, options, ctx) => {
+      const rows = await originalLoadSubset(collectionId, options, ctx)
+
+      if (!emittedDuringReload) {
+        emittedDuringReload = true
+        coordinator.emit({
+          type: `tx:committed`,
+          term: 1,
+          seq: 2,
+          txId: `tx-during-reload`,
+          latestRowVersion: 2,
+          requiresFullReload: false,
+          changedRows: [
+            { key: `2`, value: { id: `2`, title: `Queued during reload` } },
+          ],
+          deletedKeys: [],
+        })
+      }
+
+      return rows
+    }
+
+    adapter.rows.set(`2`, {
+      id: `2`,
+      title: `Queued during reload`,
+    })
+
+    coordinator.emit({
+      type: `tx:committed`,
+      term: 1,
+      seq: 1,
+      txId: `tx-reload`,
+      latestRowVersion: 1,
+      requiresFullReload: true,
+    })
+
+    await flushAsyncWork()
+    await flushAsyncWork()
+    await flushAsyncWork()
+
+    expect(emittedDuringReload).toBe(true)
+    expect(stripVirtualProps(collection.get(`2`))).toEqual({
+      id: `2`,
+      title: `Queued during reload`,
+    })
+  })
+
   it(`removes deleted rows after tx:committed invalidation reload`, async () => {
     const adapter = createRecordingAdapter([
       { id: `1`, title: `Keep` },
@@ -1511,6 +1583,60 @@ describe(`persistedCollectionOptions`, () => {
 
     // Row no longer matches WHERE — should be removed from collection
     expect(collection.get(`2`)).toBeUndefined()
+  })
+
+  it(`dedupes active subsets with stable Map and Set option serialization`, async () => {
+    const adapter = createRecordingAdapter([{ id: `1`, title: `Row 1` }])
+    const coordinator = createCoordinatorHarness()
+
+    const collection = createCollection(
+      persistedCollectionOptions<Todo, string>({
+        id: `sync-present`,
+        syncMode: `on-demand`,
+        getKey: (item) => item.id,
+        sync: {
+          sync: ({ markReady }) => {
+            markReady()
+          },
+        },
+        persistence: {
+          adapter,
+          coordinator,
+        },
+      }),
+    )
+
+    collection.startSyncImmediate()
+    await flushAsyncWork()
+
+    const firstCursor = new Map<unknown, unknown>([
+      [`set`, new Set([`b`, `a`])],
+      [`nested`, new Map([[`z`, 1]])],
+    ])
+    const secondCursor = new Map<unknown, unknown>([
+      [`nested`, new Map([[`z`, 1]])],
+      [`set`, new Set([`a`, `b`])],
+    ])
+
+    await (collection as any)._sync.loadSubset({ cursor: firstCursor })
+    await (collection as any)._sync.loadSubset({ cursor: secondCursor })
+    await flushAsyncWork()
+
+    const loadSubsetCallsBeforeReload = adapter.loadSubsetCalls.length
+
+    coordinator.emit({
+      type: `tx:committed`,
+      term: 1,
+      seq: 1,
+      txId: `tx-reload-stable-key`,
+      latestRowVersion: 1,
+      requiresFullReload: true,
+    })
+
+    await flushAsyncWork()
+    await flushAsyncWork()
+
+    expect(adapter.loadSubsetCalls.length).toBe(loadSubsetCallsBeforeReload + 1)
   })
 
   it(`paginated subset falls back to full reload`, async () => {

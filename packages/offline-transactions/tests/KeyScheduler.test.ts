@@ -258,6 +258,155 @@ describe(`KeyScheduler`, () => {
     expect(scheduler.getNext()).toBeUndefined()
   })
 
+  it(`updates many pending transactions in one call`, () => {
+    const now = Date.now()
+    const scheduler = new KeyScheduler()
+    const first = createTransaction({
+      id: `first`,
+      createdAt: new Date(now),
+      nextAttemptAt: now,
+    })
+    const second = createTransaction({
+      id: `second`,
+      createdAt: new Date(now + 1),
+      nextAttemptAt: now,
+    })
+
+    scheduler.schedule(first)
+    scheduler.schedule(second)
+
+    scheduler.updateTransactions([
+      { ...first, retryCount: 1, nextAttemptAt: now + 1000 },
+      { ...second, retryCount: 2, nextAttemptAt: now + 2000 },
+    ])
+
+    const pending = scheduler.getAllPendingTransactions()
+    expect(pending.find((tx) => tx.id === `first`)).toMatchObject({
+      retryCount: 1,
+      nextAttemptAt: now + 1000,
+    })
+    expect(pending.find((tx) => tx.id === `second`)).toMatchObject({
+      retryCount: 2,
+      nextAttemptAt: now + 2000,
+    })
+  })
+
+  it(`ignores unknown transaction ids when updating many transactions`, () => {
+    const now = Date.now()
+    const scheduler = new KeyScheduler()
+    const existing = createTransaction({
+      id: `existing`,
+      createdAt: new Date(now),
+      nextAttemptAt: now,
+    })
+    const unknown = createTransaction({
+      id: `unknown`,
+      createdAt: new Date(now + 1),
+      nextAttemptAt: now + 1000,
+    })
+
+    scheduler.schedule(existing)
+    scheduler.updateTransactions([unknown])
+
+    expect(scheduler.getAllPendingTransactions()).toEqual([existing])
+  })
+
+  it(`preserves pending transactions not included in bulk updates`, () => {
+    const now = Date.now()
+    const scheduler = new KeyScheduler()
+    const updated = createTransaction({
+      id: `updated`,
+      createdAt: new Date(now),
+      nextAttemptAt: now,
+    })
+    const untouched = createTransaction({
+      id: `untouched`,
+      createdAt: new Date(now + 1),
+      nextAttemptAt: now,
+    })
+
+    scheduler.schedule(updated)
+    scheduler.schedule(untouched)
+    scheduler.updateTransactions([{ ...updated, retryCount: 3 }])
+
+    const pending = scheduler.getAllPendingTransactions()
+    expect(pending.find((tx) => tx.id === `updated`)?.retryCount).toBe(3)
+    expect(pending.find((tx) => tx.id === `untouched`)).toBe(untouched)
+  })
+
+  it(`uses the last duplicate id when bulk updating transactions`, () => {
+    const now = Date.now()
+    const scheduler = new KeyScheduler()
+    const transaction = createTransaction({
+      id: `duplicate`,
+      createdAt: new Date(now),
+      nextAttemptAt: now,
+    })
+
+    scheduler.schedule(transaction)
+    scheduler.updateTransactions([
+      { ...transaction, retryCount: 1 },
+      { ...transaction, retryCount: 2 },
+    ])
+
+    expect(scheduler.getAllPendingTransactions()[0]?.retryCount).toBe(2)
+  })
+
+  it(`keeps FIFO order after bulk updates`, () => {
+    vi.useFakeTimers()
+
+    const now = new Date(`2026-01-01T00:00:00.000Z`)
+    vi.setSystemTime(now)
+
+    const scheduler = new KeyScheduler()
+    const first = createTransaction({
+      id: `first`,
+      createdAt: new Date(now.getTime()),
+      nextAttemptAt: now.getTime(),
+    })
+    const second = createTransaction({
+      id: `second`,
+      createdAt: new Date(now.getTime() + 1),
+      nextAttemptAt: now.getTime(),
+    })
+
+    scheduler.schedule(first)
+    scheduler.schedule(second)
+    scheduler.updateTransactions([
+      { ...second, retryCount: 1 },
+      { ...first, retryCount: 1 },
+    ])
+
+    expect(scheduler.getNext()?.id).toBe(`first`)
+  })
+
+  it(`returns null for earliest retry time when empty`, () => {
+    const scheduler = new KeyScheduler()
+    expect(scheduler.getEarliestRetryTime()).toBeNull()
+  })
+
+  it(`returns the minimum nextAttemptAt as the earliest retry time`, () => {
+    const now = Date.now()
+    const scheduler = new KeyScheduler()
+
+    scheduler.schedule(
+      createTransaction({
+        id: `later`,
+        createdAt: new Date(now),
+        nextAttemptAt: now + 5000,
+      }),
+    )
+    scheduler.schedule(
+      createTransaction({
+        id: `earlier`,
+        createdAt: new Date(now + 1),
+        nextAttemptAt: now - 1000,
+      }),
+    )
+
+    expect(scheduler.getEarliestRetryTime()).toBe(now - 1000)
+  })
+
   it(`processes transactions with identical createdAt in scheduling order`, () => {
     vi.useFakeTimers()
 

@@ -19,6 +19,7 @@
     "prepare": "husky",
     "test": "pnpm --filter \"./packages/**\" test",
     "test:docs": "node scripts/verify-links.ts",
+    "bench:perf": "tsx scripts/perf-bench.ts",
     "test:sherif": "sherif -i zod -p offline-transactions-react-native -p shopping-list-react-native",
     "generate-docs": "node scripts/generate-docs.ts"
   },
