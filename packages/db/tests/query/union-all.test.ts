@@ -537,6 +537,94 @@ describe(`unionAll`, () => {
     ])
   })
 
+  it(`materializes query branch unionAll includes before outer fnSelect`, async () => {
+    const messages = createMessagesCollection(
+      `union-all-query-messages-includes-fn-select`,
+    )
+    const toolCalls = createToolCallsCollection(
+      `union-all-query-tools-includes-fn-select`,
+    )
+    const chunks = createChunksCollection(`union-all-query-chunks-includes-fn-select`)
+
+    const collection = createLiveQueryCollection((q) => {
+      const messageRows = q
+        .from({ message: messages })
+        .select(({ message }) => ({
+          kind: `message` as const,
+          id: message.id,
+          timestamp: message.timestamp,
+          chunks: toArray(
+            q
+              .from({ chunk: chunks })
+              .where(({ chunk }) => eq(chunk.messageId, message.id))
+              .orderBy(({ chunk }) => chunk.id)
+              .select(({ chunk }) => chunk.text),
+          ),
+        }))
+      const toolCallRows = q
+        .from({ toolCall: toolCalls })
+        .select(({ toolCall }) => ({
+          kind: `toolCall` as const,
+          id: toolCall.id,
+          timestamp: toolCall.timestamp,
+        }))
+
+      return q
+        .unionAll(messageRows, toolCallRows)
+        .fn.select((row) => ({
+          kind: row.kind,
+          id: row.id,
+          timestamp: row.timestamp,
+          messageChunks: row.chunks,
+        }))
+        .orderBy(({ $selected }) => $selected.timestamp)
+    })
+
+    await collection.preload()
+
+    expect(collection.toArray.map(stripVirtualPropsDeep)).toEqual([
+      {
+        kind: `message`,
+        id: 1,
+        timestamp: 10,
+        messageChunks: [`hello`, `world`],
+      },
+      {
+        kind: `toolCall`,
+        id: 1,
+        timestamp: 20,
+        messageChunks: undefined,
+      },
+      {
+        kind: `message`,
+        id: 2,
+        timestamp: 30,
+        messageChunks: [`hidden`],
+      },
+      {
+        kind: `toolCall`,
+        id: 3,
+        timestamp: 40,
+        messageChunks: undefined,
+      },
+    ])
+
+    chunks.utils.begin()
+    chunks.utils.write({
+      type: `insert`,
+      value: { id: 4, messageId: 1, text: `again` },
+    })
+    chunks.utils.commit()
+    await flushPromises()
+
+    expect(collection.toArray.map(stripVirtualPropsDeep)[0]).toEqual({
+      kind: `message`,
+      id: 1,
+      timestamp: 10,
+      messageChunks: [`hello`, `world`, `again`],
+    })
+  })
+
   it(`rejects repeated source aliases across query branch unionAll inputs`, () => {
     const messages = createMessagesCollection(
       `union-all-query-messages-duplicate-alias`,

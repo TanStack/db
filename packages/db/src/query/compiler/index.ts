@@ -61,6 +61,7 @@ export type { WindowOptions } from './types.js'
 
 /** Symbol used to tag parent $selected with routing metadata for includes */
 export const INCLUDES_ROUTING = Symbol(`includesRouting`)
+export const FN_SELECT_STATE = Symbol(`fnSelectState`)
 const SKIP_INCLUDE = Symbol(`skipInclude`)
 
 type ConditionalSelectGuard = {
@@ -336,8 +337,9 @@ export function compileQuery(
   // Extract includes from SELECT, compile child pipelines, and replace with placeholders.
   // This must happen AFTER WHERE (so parent pipeline is filtered) but BEFORE processSelect
   // (so IncludesSubquery nodes are stripped before select compilation).
-  const includesResults: Array<IncludesCompilationResult> =
-    !query.select && !query.fnSelect ? [...directIncludes] : []
+  const includesResults: Array<IncludesCompilationResult> = !query.select
+    ? [...directIncludes]
+    : []
   const includesRoutingFns: Array<{
     fieldName: string
     getRouting: (nsRow: any) => {
@@ -701,6 +703,22 @@ export function compileQuery(
     pipeline = pipeline.pipe(
       map(([key, namespacedRow]) => {
         const selectResults = query.fnSelect!(namespacedRow)
+        if (selectResults && typeof selectResults === `object`) {
+          const routing = (namespacedRow as any)[INCLUDES_ROUTING]
+          if (routing) {
+            selectResults[INCLUDES_ROUTING] = routing
+          }
+          if (directIncludes.length > 0) {
+            Object.defineProperty(selectResults, FN_SELECT_STATE, {
+              value: {
+                sourceRow: namespacedRow,
+                fnSelect: query.fnSelect!,
+              },
+              enumerable: true,
+              configurable: true,
+            })
+          }
+        }
         return [
           key,
           {
