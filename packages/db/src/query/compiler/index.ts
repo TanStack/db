@@ -441,8 +441,6 @@ export function compileQuery(
   }
   if (query.select) {
     const includesEntries = extractIncludesFromSelect(query.select)
-    // Shallow-clone select before mutating so we don't modify the shared IR
-    // (the optimizer copies select by reference, so rawQuery.select === query.select)
     if (includesEntries.length > 0) {
       query = { ...query, select: { ...query.select } }
     }
@@ -679,7 +677,10 @@ export function compileQuery(
       }
 
       // Replace includes entry in select with a null placeholder
-      replaceIncludesInSelect(query.select!, path)
+      query = {
+        ...query,
+        select: replaceIncludesInSelect(query.select!, path),
+      }
     }
   }
 
@@ -1893,58 +1894,109 @@ function assertNoNestedIncludes(
 function replaceIncludesInSelect(
   select: Record<string, any>,
   path: Array<string>,
-): void {
-  replaceIncludesInSelectValue(select, path, new ValClass(null))
+): Record<string, any> {
+  return replaceIncludesInSelectValue(select, path, new ValClass(null)).value
 }
 
 function replaceIncludesInSelectValue(
   value: any,
   path: Array<string>,
   replacement: ValClass,
-): boolean {
+): { value: any; replaced: boolean } {
   if (path.length === 0) {
-    return false
-  }
-
-  if (path.length === 1) {
-    if (value instanceof ConditionalSelect) {
-      return replaceIncludesInConditionalSelect(value, path, replacement)
-    }
-    if (!(value[path[0]!] instanceof IncludesSubquery)) {
-      return false
-    }
-    value[path[0]!] = replacement
-    return true
+    return replaceIncludesValue(value, replacement)
   }
 
   if (value instanceof ConditionalSelect) {
     return replaceIncludesInConditionalSelect(value, path, replacement)
   }
 
+  if (!isNestedSelectObject(value)) {
+    return { value, replaced: false }
+  }
+
+  if (path.length === 1) {
+    const field = path[0]!
+    const result = replaceIncludesValue(value[field], replacement)
+    if (!result.replaced) {
+      return { value, replaced: false }
+    }
+    return {
+      value: {
+        ...value,
+        [field]: result.value,
+      },
+      replaced: true,
+    }
+  }
+
   const [head, ...rest] = path
-  return replaceIncludesInSelectValue(value[head!], rest, replacement)
+  const result = replaceIncludesInSelectValue(value[head!], rest, replacement)
+  if (!result.replaced) {
+    return { value, replaced: false }
+  }
+  return {
+    value: {
+      ...value,
+      [head!]: result.value,
+    },
+    replaced: true,
+  }
+}
+
+function replaceIncludesValue(
+  value: any,
+  replacement: ValClass,
+): { value: any; replaced: boolean } {
+  if (value instanceof IncludesSubquery) {
+    return { value: replacement, replaced: true }
+  }
+
+  if (value instanceof ConditionalSelect) {
+    return replaceIncludesInConditionalSelect(value, [], replacement)
+  }
+
+  return { value, replaced: false }
 }
 
 function replaceIncludesInConditionalSelect(
   conditional: ConditionalSelect,
   path: Array<string>,
   replacement: ValClass,
-): boolean {
-  for (const branch of conditional.branches) {
-    if (replaceIncludesInSelectValue(branch.value, path, replacement)) {
-      return true
+): { value: ConditionalSelect; replaced: boolean } {
+  let replaced = false
+  const branches = conditional.branches.map((branch) => {
+    const result =
+      path.length === 0
+        ? replaceIncludesValue(branch.value, replacement)
+        : replaceIncludesInSelectValue(branch.value, path, replacement)
+    if (!result.replaced) {
+      return branch
+    }
+    replaced = true
+    return { ...branch, value: result.value }
+  })
+
+  let defaultValue = conditional.defaultValue
+  if (conditional.defaultValue) {
+    const result =
+      path.length === 0
+        ? replaceIncludesValue(conditional.defaultValue, replacement)
+        : replaceIncludesInSelectValue(conditional.defaultValue, path, replacement)
+    if (result.replaced) {
+      replaced = true
+      defaultValue = result.value
     }
   }
 
-  if (conditional.defaultValue) {
-    return replaceIncludesInSelectValue(
-      conditional.defaultValue,
-      path,
-      replacement,
-    )
+  if (!replaced) {
+    return { value: conditional, replaced: false }
   }
 
-  return false
+  return {
+    value: new ConditionalSelect(branches, defaultValue),
+    replaced: true,
+  }
 }
 
 /**

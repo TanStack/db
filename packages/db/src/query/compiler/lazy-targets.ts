@@ -137,7 +137,7 @@ function getTargetsFromPropRef(
   }
 
   const [alias, ...path] = ref.path
-  const source = getSourceFromAlias(query.from, alias!)
+  const source = getSourceFromAlias(query, alias!)
   if (!source) {
     return []
   }
@@ -154,9 +154,18 @@ function getTargetsFromPropRef(
 }
 
 function getSourceFromAlias(
-  from: From,
+  query: QueryIR,
   alias: string,
 ): CollectionRef | QueryRef | undefined {
+  if (query.join) {
+    for (const join of query.join) {
+      if (join.from.alias === alias) {
+        return join.from
+      }
+    }
+  }
+
+  const from = query.from
   const sources =
     from.type === `unionFrom`
       ? from.sources

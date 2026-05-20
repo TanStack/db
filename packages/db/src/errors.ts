@@ -385,8 +385,10 @@ export class InvalidSourceError extends QueryBuilderError {
   }
 }
 
+export type SourceClauseContext = `from clause` | `unionAll clause` | `join clause`
+
 export class InvalidSourceTypeError extends QueryBuilderError {
-  constructor(context: string, type: string) {
+  constructor(context: SourceClauseContext, type: string) {
     const expected =
       context === `unionAll clause`
         ? `an object with one or more key-value pairs like { alias: collection }`

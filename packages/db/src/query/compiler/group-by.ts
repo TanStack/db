@@ -933,7 +933,7 @@ function compileGroupedConditionalSelect(
       }
     }
 
-    return defaultValue ? defaultValue(row) : undefined
+    return defaultValue !== undefined ? defaultValue(row) : null
   }
 }
 

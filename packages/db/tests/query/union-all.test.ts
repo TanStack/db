@@ -179,13 +179,14 @@ function createUsersCollectionWithLoadSubsetTracking(id: string) {
   ])
 }
 
-function stripVirtualPropsDeep(value: any): any {
+function stripVirtualPropsDeep(value: unknown): any {
   if (Array.isArray(value)) {
     return value.map((entry) => stripVirtualPropsDeep(entry))
   }
   if (value && typeof value === `object`) {
-    const out: Record<string, any> = {}
-    for (const [key, entry] of Object.entries(stripVirtualProps(value))) {
+    const out: Record<string, unknown> = {}
+    const stripped = stripVirtualProps(value as Record<string, unknown>)
+    for (const [key, entry] of Object.entries(stripped)) {
       out[key] = stripVirtualPropsDeep(entry)
     }
     return out
@@ -193,7 +194,7 @@ function stripVirtualPropsDeep(value: any): any {
   return value
 }
 
-function childRows(collection: any): Array<any> {
+function childRows(collection: { toArray: ReadonlyArray<unknown> }): Array<any> {
   return [...collection.toArray].map((row) => stripVirtualPropsDeep(row))
 }
 

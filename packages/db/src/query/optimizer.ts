@@ -910,8 +910,8 @@ function getFromSources(from: From): Array<CollectionRefClass | QueryRefClass> {
   return [from]
 }
 
-function getFirstFromAlias(query: QueryIR): string {
-  return getFromSources(query.from)[0]!.alias
+function getFirstFromAlias(query: QueryIR): string | undefined {
+  return getFromSources(query.from)[0]?.alias
 }
 
 /**
@@ -1198,10 +1198,8 @@ function referencesAliasWithRemappedSelect(
 
     // Safe only when the projection points straight back to the same alias or the
     // underlying source alias and preserves the field name.
-    if (
-      innerAlias !== outerAlias &&
-      innerAlias !== getFirstFromAlias(subquery)
-    ) {
+    const firstFromAlias = getFirstFromAlias(subquery)
+    if (innerAlias !== outerAlias && innerAlias !== firstFromAlias) {
       return true
     }
 

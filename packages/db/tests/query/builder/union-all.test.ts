@@ -42,9 +42,13 @@ describe(`QueryBuilder.unionAll`, () => {
     expect(builtQuery.from).toBeDefined()
     expect(builtQuery.from.type).toBe(`unionFrom`)
     expect(builtQuery.from.alias).toBe(`employees`)
-    expect(
-      (builtQuery.from as any).sources.map((source: any) => source.alias),
-    ).toEqual([`employees`, `departments`])
+    if (builtQuery.from.type !== `unionFrom`) {
+      throw new Error(`Expected unionFrom`)
+    }
+    expect(builtQuery.from.sources.map((source) => source.alias)).toEqual([
+      `employees`,
+      `departments`,
+    ])
   })
 
   it(`allows a single source`, () => {
@@ -78,6 +82,9 @@ describe(`QueryBuilder.unionAll`, () => {
 
     expect(builtQuery.from).toBeDefined()
     expect(builtQuery.from.type).toBe(`unionAll`)
-    expect((builtQuery.from as any).queries).toHaveLength(2)
+    if (builtQuery.from.type !== `unionAll`) {
+      throw new Error(`Expected unionAll`)
+    }
+    expect(builtQuery.from.queries).toHaveLength(2)
   })
 })

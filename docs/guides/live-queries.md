@@ -485,6 +485,9 @@ This is particularly useful when you need to:
 
 The foundation of every query is the `from` method, which specifies the source collection or subquery. You can alias the source using object syntax.
 
+Use `from()` with a single source. To combine multiple independent sources
+without a join, use [`unionAll()`](#source-level-unionall) instead.
+
 ### Method Signature
 
 ```ts

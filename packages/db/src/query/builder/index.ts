@@ -33,6 +33,7 @@ import {
   ConcatToArrayWrapper,
   ToArrayWrapper,
 } from './functions.js'
+import type { SourceClauseContext } from '../../errors.js'
 import type { NamespacedRow, SingleResult } from '../../types.js'
 import type {
   Aggregate,
@@ -86,7 +87,7 @@ export class BaseQueryBuilder<TContext extends Context = Context> {
    */
   private _createRefForSource<TSource extends Source>(
     source: TSource,
-    context: string,
+    context: SourceClauseContext,
   ): [string, CollectionRef | QueryRef] {
     const refs = this._createRefsForSource(source, context)
     if (refs.length !== 1) {
@@ -97,7 +98,7 @@ export class BaseQueryBuilder<TContext extends Context = Context> {
 
   private _createRefsForSource<TSource extends Source>(
     source: TSource,
-    context: string,
+    context: SourceClauseContext,
   ): Array<[string, CollectionRef | QueryRef]> {
     // Validate source is a plain object (not null, array, string, etc.)
     // We use try-catch to handle null/undefined gracefully
@@ -1118,15 +1119,7 @@ function buildIncludesSubquery(
   const childQuery = childBuilder._getQuery()
 
   // Collect child's own aliases
-  const childAliases: Array<string> =
-    childQuery.from.type === `unionFrom`
-      ? childQuery.from.sources.map((source) => source.alias)
-      : [childQuery.from.alias]
-  if (childQuery.join) {
-    for (const j of childQuery.join) {
-      childAliases.push(j.from.alias)
-    }
-  }
+  const childAliases = collectQueryAliases(childQuery)
 
   // Walk child's WHERE clauses to find the correlation condition.
   // The correlation eq() may be a standalone WHERE or nested inside a top-level and().
@@ -1312,6 +1305,28 @@ function buildIncludesSubquery(
     materialization,
     scalarField,
   )
+}
+
+function collectQueryAliases(query: QueryIR): Array<string> {
+  const aliases = new Set<string>(collectFromAliases(query.from))
+  if (query.join) {
+    for (const join of query.join) {
+      aliases.add(join.from.alias)
+    }
+  }
+  return [...aliases]
+}
+
+function collectFromAliases(from: QueryIR[`from`]): Array<string> {
+  if (from.type === `unionFrom`) {
+    return from.sources.map((source) => source.alias)
+  }
+
+  if (from.type === `unionAll`) {
+    return from.queries.flatMap((branch) => collectQueryAliases(branch))
+  }
+
+  return [from.alias]
 }
 
 /**
