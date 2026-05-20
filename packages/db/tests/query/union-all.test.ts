@@ -194,7 +194,9 @@ function stripVirtualPropsDeep(value: unknown): any {
   return value
 }
 
-function childRows(collection: { toArray: ReadonlyArray<unknown> }): Array<any> {
+function childRows(collection: {
+  toArray: ReadonlyArray<unknown>
+}): Array<any> {
   return [...collection.toArray].map((row) => stripVirtualPropsDeep(row))
 }
 

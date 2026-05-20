@@ -1982,7 +1982,11 @@ function replaceIncludesInConditionalSelect(
     const result =
       path.length === 0
         ? replaceIncludesValue(conditional.defaultValue, replacement)
-        : replaceIncludesInSelectValue(conditional.defaultValue, path, replacement)
+        : replaceIncludesInSelectValue(
+            conditional.defaultValue,
+            path,
+            replacement,
+          )
     if (result.replaced) {
       replaced = true
       defaultValue = result.value
