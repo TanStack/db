@@ -152,4 +152,14 @@ describe(`QueryBuilder.from`, () => {
       /Invalid source for from clause: Expected an object with a single key-value pair/,
     )
   })
+
+  it(`throws helpful join example when passing invalid join source`, () => {
+    const builder = new Query().from({ employees: employeesCollection })
+
+    expect(() => {
+      builder.join(`departments` as any, () => eq(1, 1))
+    }).toThrow(
+      /Invalid source for join clause: Expected an object with a single key-value pair.*For example: \.join/,
+    )
+  })
 })

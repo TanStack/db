@@ -399,7 +399,9 @@ export class InvalidSourceTypeError extends QueryBuilderError {
     const example =
       context === `unionAll clause`
         ? `.unionAll({ todos: todosCollection, events: eventsCollection })`
-        : `.from({ todos: todosCollection })`
+        : context === `join clause`
+          ? `.join({ todos: todosCollection }, ({ todo, todos }) => eq(todo.id, todos.id))`
+          : `.from({ todos: todosCollection })`
     super(
       `Invalid source for ${context}: Expected ${expected}. ` +
         `For example: ${example}. Got: ${type}`,

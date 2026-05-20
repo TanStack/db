@@ -517,7 +517,9 @@ function processJoinSource(
       const isUserDefinedSubquery = queryMapping.has(from.query)
       const fromInnerAlias = getFirstFromAlias(from.query)
       const isOptimizerCreated =
-        !isUserDefinedSubquery && from.alias === fromInnerAlias
+        !isUserDefinedSubquery &&
+        fromInnerAlias !== undefined &&
+        from.alias === fromInnerAlias
 
       if (!isOptimizerCreated) {
         for (const [alias, whereClause] of subQueryResult.sourceWhereClauses) {
@@ -568,10 +570,16 @@ function processJoinSource(
   }
 }
 
-function getFirstFromAlias(query: QueryIR): string {
-  return query.from.type === `unionFrom`
-    ? query.from.sources[0]!.alias
-    : query.from.alias
+function getFirstFromAlias(query: QueryIR): string | undefined {
+  if (query.from.type === `unionFrom`) {
+    return query.from.sources[0]?.alias
+  }
+
+  if (query.from.type === `unionAll`) {
+    return undefined
+  }
+
+  return query.from.alias
 }
 
 /**
