@@ -1881,9 +1881,7 @@ function setIncludedValue(
   refreshFnSelectResult(target, state)
 }
 
-function getFnSelectState(
-  target: Record<string, any>,
-):
+function getFnSelectState(target: Record<string, any>):
   | {
       sourceRow: Record<string, any>
       fnSelect: (row: Record<string, any>) => any
