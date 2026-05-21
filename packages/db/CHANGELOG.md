@@ -1,5 +1,12 @@
 # @tanstack/db
 
+## 0.6.6
+
+### Patch Changes
+
+- Added the `caseWhen` query operator for scalar conditional expressions and conditional select projections with guarded includes. ([#1536](https://github.com/TanStack/db/pull/1536))
+  Added `unionAll()` support to combine independent sources or built query branches in a single query.
+
 ## 0.6.5
 
 ### Patch Changes
