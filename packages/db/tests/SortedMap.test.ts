@@ -35,6 +35,24 @@ describe(`SortedMap`, () => {
     expect(values).toEqual([2, 3])
   })
 
+  it(`reorders entries when a custom comparator observes an updated value`, () => {
+    const map = new SortedMap<string, { priority: number }>(
+      (a, b) => a.priority - b.priority,
+    )
+
+    map.set(`a`, { priority: 1 })
+    map.set(`b`, { priority: 3 })
+    map.set(`c`, { priority: 2 })
+    map.set(`b`, { priority: 0 })
+
+    expect(Array.from(map.keys())).toEqual([`b`, `a`, `c`])
+    expect(Array.from(map.values())).toEqual([
+      { priority: 0 },
+      { priority: 1 },
+      { priority: 2 },
+    ])
+  })
+
   it(`correctly handles deletions`, () => {
     const map = new SortedMap<string, number>()
     map.set(`a`, 1)
@@ -100,6 +118,19 @@ describe(`SortedMap`, () => {
 
     const keys = Array.from(map.keys())
     expect(keys).toEqual([`a`, `b`, `c`])
+  })
+
+  it(`keeps deterministic key order for equal comparator values after updates`, () => {
+    const map = new SortedMap<string, { priority: number }>(
+      (a, b) => a.priority - b.priority,
+    )
+
+    map.set(`c`, { priority: 1 })
+    map.set(`a`, { priority: 1 })
+    map.set(`b`, { priority: 2 })
+    map.set(`b`, { priority: 1 })
+
+    expect(Array.from(map.keys())).toEqual([`a`, `b`, `c`])
   })
 
   // Test for Symbol.iterator implementation
