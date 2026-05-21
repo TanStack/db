@@ -457,6 +457,30 @@ function compileFunction(func: Func, isSingleRow: boolean): (data: any) => any {
         }
         return null
       }
+    case `caseWhen`: {
+      const hasDefaultValue = compiledArgs.length % 2 === 1
+      const pairCount = Math.floor(compiledArgs.length / 2)
+
+      if (compiledArgs.length < 2) {
+        throw new Error(`caseWhen() requires at least two arguments`)
+      }
+
+      return (data) => {
+        for (let i = 0; i < pairCount; i++) {
+          const condition = compiledArgs[i * 2]!
+          if (isCaseWhenConditionTrue(condition(data))) {
+            const value = compiledArgs[i * 2 + 1]!
+            return value(data)
+          }
+        }
+
+        if (hasDefaultValue) {
+          return compiledArgs[compiledArgs.length - 1]!(data)
+        }
+
+        return null
+      }
+    }
 
     // Math functions
     case `add`: {
@@ -548,6 +572,26 @@ function compileFunction(func: Func, isSingleRow: boolean): (data: any) => any {
     default:
       throw new UnknownFunctionError(func.name)
   }
+}
+
+export function isCaseWhenConditionTrue(value: any): boolean {
+  if (value == null || value === false) {
+    return false
+  }
+
+  if (value === true) {
+    return true
+  }
+
+  if (typeof value === `number`) {
+    return value !== 0 && !Number.isNaN(value)
+  }
+
+  if (typeof value === `bigint`) {
+    return value !== 0n
+  }
+
+  return Boolean(value)
 }
 
 /**

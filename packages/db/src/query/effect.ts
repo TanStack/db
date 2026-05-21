@@ -711,14 +711,11 @@ class EffectPipelineRunner<TRow extends object, TKey extends string | number> {
     const input = this.inputs[alias]
     if (!input) return 0
 
-    const collection = this.collectionByAlias[alias]
-    if (!collection) return 0
-
     // Filter duplicates per alias
     const sentKeys = this.sentToD2KeysByAlias.get(alias)!
     const filtered = filterDuplicateInserts(changes, sentKeys)
 
-    return sendChangesToInput(input, filtered, collection.config.getKey)
+    return sendChangesToInput(input, filtered)
   }
 
   /**

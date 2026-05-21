@@ -163,11 +163,7 @@ export class CollectionSubscriber<
     // (only called from active subscriptions during a sync session)
     const input =
       this.collectionConfigBuilder.currentSyncState!.inputs[this.alias]!
-    const sentChanges = sendChangesToInput(
-      input,
-      filteredChanges,
-      this.collection.config.getKey,
-    )
+    const sentChanges = sendChangesToInput(input, filteredChanges)
 
     // Do not provide the callback that loads more data
     // if there's no more data to load
