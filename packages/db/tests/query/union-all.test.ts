@@ -680,14 +680,24 @@ describe(`unionAll`, () => {
     await collection.preload()
 
     expect(collection.size).toBe(4)
-    expect(collection.toArray.map(stripVirtualProps)).toEqual(
-      expect.arrayContaining([
-        { message: expect.objectContaining({ id: 1, text: `hello` }) },
-        { message: expect.objectContaining({ id: 2, text: `secret` }) },
-        { toolCall: expect.objectContaining({ id: 1, name: `search` }) },
-        { toolCall: expect.objectContaining({ id: 3, name: `write` }) },
-      ]),
-    )
+    expect(collection.toArray.map(stripVirtualProps)).toEqual([
+      {
+        message: expect.objectContaining({ id: 1, text: `hello` }),
+        toolCall: undefined,
+      },
+      {
+        message: expect.objectContaining({ id: 2, text: `secret` }),
+        toolCall: undefined,
+      },
+      {
+        message: undefined,
+        toolCall: expect.objectContaining({ id: 1, name: `search` }),
+      },
+      {
+        message: undefined,
+        toolCall: expect.objectContaining({ id: 3, name: `write` }),
+      },
+    ])
   })
 
   it(`namespaces result keys across sources with overlapping source keys`, async () => {
@@ -731,6 +741,62 @@ describe(`unionAll`, () => {
         row.message ? `message:${row.message.id}` : `tool:${row.toolCall.id}`,
       ),
     ).toEqual([`message:1`, `tool:1`, `message:2`, `tool:3`])
+  })
+
+  it(`supports source-level limit and offset after ordering`, async () => {
+    const messages = createMessagesCollection(`multi-source-messages-window`)
+    const toolCalls = createToolCallsCollection(`multi-source-tools-window`)
+
+    const collection = createLiveQueryCollection((q) =>
+      q
+        .unionAll({
+          message: messages,
+          toolCall: toolCalls,
+        })
+        .orderBy(({ message, toolCall }) =>
+          coalesce(message.timestamp, toolCall.timestamp),
+        )
+        .offset(1)
+        .limit(2),
+    )
+
+    await collection.preload()
+
+    expect(
+      collection.toArray.map((row: any) =>
+        row.message ? `message:${row.message.id}` : `tool:${row.toolCall.id}`,
+      ),
+    ).toEqual([`tool:1`, `message:2`])
+  })
+
+  it(`supports source-level groupBy and having after unionAll`, async () => {
+    const messages = createMessagesCollection(`multi-source-messages-group`)
+    const toolCalls = createToolCallsCollection(`multi-source-tools-group`)
+
+    const collection = createLiveQueryCollection((q) =>
+      q
+        .unionAll({
+          message: messages,
+          toolCall: toolCalls,
+        })
+        .groupBy(({ message, toolCall }) =>
+          coalesce(message.userId, toolCall.userId),
+        )
+        .select(({ message, toolCall }) => ({
+          userId: coalesce(message.userId, toolCall.userId),
+          rowCount: count(coalesce(message.id, toolCall.id)),
+        }))
+        .having(({ message, toolCall }) =>
+          gt(count(coalesce(message.id, toolCall.id)), 1),
+        )
+        .orderBy(({ $selected }) => $selected.userId),
+    )
+
+    await collection.preload()
+
+    expect(collection.toArray.map((row) => stripVirtualProps(row))).toEqual([
+      { userId: 1, rowCount: 2 },
+    ])
   })
 
   it(`uses the first source collation when ordering mixed string branches`, async () => {
@@ -918,6 +984,40 @@ describe(`unionAll`, () => {
       { messageId: 1, toolCallId: undefined, userName: `Alice`, timestamp: 10 },
       { messageId: undefined, toolCallId: 1, userName: `Alice`, timestamp: 20 },
       { messageId: 2, toolCallId: undefined, userName: `Bob`, timestamp: 30 },
+    ])
+  })
+
+  it(`supports left joins after unionAll`, async () => {
+    const messages = createMessagesCollection(`multi-source-messages-left-join`)
+    const toolCalls = createToolCallsCollection(`multi-source-tools-left-join`)
+    const users = createUsersCollection(`multi-source-users-left-join`)
+
+    const collection = createLiveQueryCollection((q) =>
+      q
+        .unionAll({
+          message: messages,
+          toolCall: toolCalls,
+        })
+        .leftJoin({ user: users }, ({ message, toolCall, user }) =>
+          eq(coalesce(message.userId, toolCall.userId), user.id),
+        )
+        .select(({ message, toolCall, user }) => ({
+          eventId: coalesce(message.id, toolCall.id),
+          userName: user.name,
+          timestamp: coalesce(message.timestamp, toolCall.timestamp),
+        }))
+        .orderBy(({ message, toolCall }) =>
+          coalesce(message.timestamp, toolCall.timestamp),
+        ),
+    )
+
+    await collection.preload()
+
+    expect(collection.toArray.map((row) => stripVirtualProps(row))).toEqual([
+      { eventId: 1, userName: `Alice`, timestamp: 10 },
+      { eventId: 1, userName: `Alice`, timestamp: 20 },
+      { eventId: 2, userName: `Bob`, timestamp: 30 },
+      { eventId: 3, userName: undefined, timestamp: 40 },
     ])
   })
 
@@ -1344,6 +1444,92 @@ describe(`unionAll`, () => {
         {
           message: null,
           toolCall: { id: 3, name: `write` },
+          timestamp: 40,
+        },
+      ],
+    )
+  })
+
+  it(`materializes source includes projected through spreads and type fields`, async () => {
+    const messages = createMessagesCollection(
+      `multi-source-messages-spread-includes`,
+    )
+    const toolCalls = createToolCallsCollection(
+      `multi-source-tools-spread-includes`,
+    )
+    const chunks = createChunksCollection(`multi-source-chunks-spread-includes`)
+
+    const collection = createLiveQueryCollection((q) => {
+      const messagesWithChunks = q
+        .from({ message: messages })
+        .select(({ message }) => ({
+          ...message,
+          chunks: toArray(
+            q
+              .from({ chunk: chunks })
+              .where(({ chunk }) => eq(chunk.messageId, message.id))
+              .orderBy(({ chunk }) => chunk.id)
+              .select(({ chunk }) => chunk.text),
+          ),
+        }))
+
+      return q
+        .unionAll({
+          message: messagesWithChunks,
+          toolCall: toolCalls,
+        })
+        .select(({ message, toolCall }) => ({
+          event: caseWhen(
+            message.id,
+            {
+              type: `message`,
+              ...message,
+            },
+            {
+              type: `toolCall`,
+              id: toolCall.id,
+              name: toolCall.name,
+            },
+          ),
+          timestamp: coalesce(message.timestamp, toolCall.timestamp),
+        }))
+        .orderBy(({ $selected }) => $selected.timestamp)
+    })
+
+    await collection.preload()
+
+    expect(collection.toArray.map((row) => stripVirtualPropsDeep(row))).toEqual(
+      [
+        {
+          event: {
+            type: `message`,
+            id: 1,
+            text: `hello`,
+            kind: `visible`,
+            timestamp: 10,
+            userId: 1,
+            chunks: [`hello`, `world`],
+          },
+          timestamp: 10,
+        },
+        {
+          event: { type: `toolCall`, id: 1, name: `search` },
+          timestamp: 20,
+        },
+        {
+          event: {
+            type: `message`,
+            id: 2,
+            text: `secret`,
+            kind: `hidden`,
+            timestamp: 30,
+            userId: 2,
+            chunks: [`hidden`],
+          },
+          timestamp: 30,
+        },
+        {
+          event: { type: `toolCall`, id: 3, name: `write` },
           timestamp: 40,
         },
       ],

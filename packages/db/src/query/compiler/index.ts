@@ -24,6 +24,7 @@ import {
   PropRef,
   Value as ValClass,
   getWhereExpression,
+  isExpressionLike,
 } from '../ir.js'
 import { ensureIndexForField } from '../../indexes/auto-index.js'
 import { inArray } from '../builder/functions.js'
@@ -1575,8 +1576,37 @@ function findProjectedIncludePaths(
     guards: Array<ConditionalSelectGuard>,
   ) => {
     for (const [key, value] of Object.entries(obj)) {
-      if (key.startsWith(`__SPREAD_SENTINEL__`)) continue
+      if (key.startsWith(`__SPREAD_SENTINEL__`)) {
+        visitSpreadSentinel(key, value, prefix, guards)
+        continue
+      }
       visitSelectValue(value, [...prefix, key], guards)
+    }
+  }
+
+  const visitSpreadSentinel = (
+    key: string,
+    value: any,
+    path: Array<string>,
+    guards: Array<ConditionalSelectGuard>,
+  ) => {
+    const rest = key.slice(`__SPREAD_SENTINEL__`.length)
+    const splitIndex = rest.lastIndexOf(`__`)
+    const pathStr = splitIndex >= 0 ? rest.slice(0, splitIndex) : rest
+    const isRefExpr =
+      value &&
+      typeof value === `object` &&
+      `type` in value &&
+      value.type === `ref`
+    const sourcePath = isRefExpr
+      ? (value as PropRef).path
+      : pathStr.split(`.`).filter(Boolean)
+
+    if (pathStartsWith(targetPath, sourcePath)) {
+      resultPaths.push({
+        path: [...path, ...targetPath.slice(sourcePath.length)],
+        guards,
+      })
     }
   }
 
@@ -1790,7 +1820,7 @@ function collectIncludesFromConditionalSelect(
     })
   }
 
-  if (conditional.defaultValue) {
+  if (conditional.defaultValue !== undefined) {
     collectIncludesFromSelectValue(
       conditional.defaultValue,
       prefixPath,
@@ -1865,7 +1895,7 @@ function isNestedSelectObject(value: any): value is Record<string, any> {
     value != null &&
     typeof value === `object` &&
     !Array.isArray(value) &&
-    typeof value.type !== `string`
+    !isExpressionLike(value)
   )
 }
 
@@ -1978,7 +2008,7 @@ function replaceIncludesInConditionalSelect(
   })
 
   let defaultValue = conditional.defaultValue
-  if (conditional.defaultValue) {
+  if (conditional.defaultValue !== undefined) {
     const result =
       path.length === 0
         ? replaceIncludesValue(conditional.defaultValue, replacement)

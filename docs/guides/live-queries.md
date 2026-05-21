@@ -541,11 +541,25 @@ const userNames = createCollection(liveQueryCollectionOptions({
 }))
 ```
 
-### Source-Level `unionAll`
+### `unionAll`
 
-Use `unionAll()` to combine independent collections or subqueries without a
-join. Conceptually, this behaves like `UNION ALL`: each result row comes from
-exactly one source alias, and inactive aliases are `undefined`.
+Use `unionAll()` as a start method, in the same place you would use `from()`,
+to combine independent sources without a join. It has two forms:
+
+```ts
+unionAll({
+  [alias]: Collection | Query,
+  [alias2]: Collection | Query
+}): Query
+
+unionAll(branchQuery, branchQuery2, ...branchQueries): Query
+```
+
+#### Source-Level `unionAll`
+
+The object form combines collection or subquery sources. Conceptually, this
+behaves like `UNION ALL`: each raw result row comes from exactly one source
+alias, and inactive aliases are `undefined`.
 
 ```ts
 import { coalesce, createLiveQueryCollection } from '@tanstack/db'
@@ -573,9 +587,17 @@ type TimelineRow =
 Use subqueries when each branch needs its own filtering or shaping before the
 sources are combined.
 
-You can also pass built queries directly. This form unions each branch result
-row, so a branch without `select()` keeps its normal query result shape. For
-example, a joined branch enters the union as a namespaced row.
+If you project branch values with `select()`, you control the inactive branch
+shape. For example, `caseWhen()` projections use `null` when no branch matches
+unless you provide a default value.
+
+#### Query-Branch `unionAll`
+
+You can also pass built queries directly. This form unions the result rows from
+each branch query. Downstream clauses operate on that shared result shape, so
+ordering can reference shared fields directly instead of using `coalesce()`.
+A branch without `select()` keeps its normal query result shape; for example, a
+joined branch enters the union as a namespaced row.
 
 ```ts
 const timeline = createLiveQueryCollection((q) => {
@@ -1729,7 +1751,14 @@ const sortedUsers = createLiveQueryCollection((q) =>
 ### `unionAll` Ordering
 
 When ordering a source-level `unionAll` query, use a combined expression such as
-`coalesce()` to produce one comparable value across branches:
+`coalesce()` to produce one comparable value across branches. Query-branch
+`unionAll()` can instead order by shared selected fields, as shown in the
+[`unionAll()` examples](#unionall).
+
+If the order expression sorts strings and the branch collections have different
+default string collation settings, TanStack DB uses the first source collection's
+collation as the default. Pass explicit `orderBy` compare options when you need
+a specific string collation for the combined ordering:
 
 ```ts
 const timeline = createLiveQueryCollection((q) =>
@@ -1738,16 +1767,15 @@ const timeline = createLiveQueryCollection((q) =>
       message: messagesCollection,
       toolCall: toolCallsCollection,
     })
-    .orderBy(({ message, toolCall }) =>
-      coalesce(message.timestamp, toolCall.timestamp),
-    )
+    .select(({ message, toolCall }) => ({
+      label: coalesce(message.title, toolCall.name),
+    }))
+    .orderBy(({ $selected }) => $selected.label, {
+      stringSort: `locale`,
+      locale: `en-US`,
+    })
 )
 ```
-
-If the order expression sorts strings and the branch collections have different
-default string collation settings, TanStack DB uses the first source collection's
-collation as the default. Pass explicit `orderBy` compare options when you need
-a specific string collation for the combined ordering.
 
 ### Ordering by SELECT Fields
 

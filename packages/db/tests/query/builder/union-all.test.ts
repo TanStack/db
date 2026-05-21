@@ -1,5 +1,10 @@
 import { describe, expect, it } from 'vitest'
 import { CollectionImpl } from '../../../src/collection/index.js'
+import {
+  InvalidSourceError,
+  InvalidSourceTypeError,
+  QueryMustHaveFromClauseError,
+} from '../../../src/errors.js'
 import { Query, getQueryIR } from '../../../src/query/builder/index.js'
 
 interface Employee {
@@ -86,5 +91,28 @@ describe(`QueryBuilder.unionAll`, () => {
       throw new Error(`Expected unionAll`)
     }
     expect(builtQuery.from.queries).toHaveLength(2)
+  })
+
+  it(`throws helpful errors for invalid source inputs`, () => {
+    const builder = new Query()
+
+    expect(() => builder.unionAll(`employees` as any)).toThrow(
+      InvalidSourceTypeError,
+    )
+    expect(() => builder.unionAll(null as any)).toThrow(InvalidSourceTypeError)
+    expect(() => builder.unionAll([employeesCollection] as any)).toThrow(
+      InvalidSourceTypeError,
+    )
+    expect(() => builder.unionAll({ employees: [] } as any)).toThrow(
+      InvalidSourceError,
+    )
+  })
+
+  it(`rejects subqueries without a from clause`, () => {
+    const builder = new Query()
+
+    expect(() => builder.unionAll({ employees: new Query() as any })).toThrow(
+      QueryMustHaveFromClauseError,
+    )
   })
 })

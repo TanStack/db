@@ -2,7 +2,7 @@ import { MultiSet, serializeValue } from '@tanstack/db-ivm'
 import { UnsupportedRootScalarSelectError } from '../../errors.js'
 import { normalizeOrderByPaths } from '../compiler/expressions.js'
 import { buildQuery, getQueryIR } from '../builder/index.js'
-import { ConditionalSelect, IncludesSubquery } from '../ir.js'
+import { ConditionalSelect, IncludesSubquery, isExpressionLike } from '../ir.js'
 import type { MultiSetArray, RootStreamBuilder } from '@tanstack/db-ivm'
 import type { Collection } from '../../collection/index.js'
 import type { ChangeMessage } from '../../types.js'
@@ -80,7 +80,7 @@ export function extractCollectionsFromQuery(
     for (const branch of conditional.branches) {
       extractFromSelectValue(branch.value)
     }
-    if (conditional.defaultValue) {
+    if (conditional.defaultValue !== undefined) {
       extractFromSelectValue(conditional.defaultValue)
     }
   }
@@ -197,7 +197,7 @@ export function extractCollectionAliases(
     for (const branch of conditional.branches) {
       traverseSelectValue(branch.value)
     }
-    if (conditional.defaultValue) {
+    if (conditional.defaultValue !== undefined) {
       traverseSelectValue(conditional.defaultValue)
     }
   }
@@ -239,8 +239,7 @@ export function extractCollectionAliases(
 function isNestedSelectObject(obj: any): boolean {
   if (obj === null || typeof obj !== `object`) return false
   if (obj instanceof IncludesSubquery) return false
-  // Expression-like objects have a .type property
-  if (`type` in obj && typeof obj.type === `string`) return false
+  if (isExpressionLike(obj)) return false
   // Ref proxies from spread operations
   if (obj.__refProxy) return false
   return true

@@ -9,6 +9,13 @@ import {
 } from '../../src/query/index.js'
 import { mockSyncCollectionOptions } from '../utils.js'
 import type { OutputWithVirtual } from '../utils.js'
+import type {
+  ContextFromSource,
+  ContextFromUnionBranches,
+  ContextFromUnionSource,
+  QueryBuilder,
+  SingleSource,
+} from '../../src/query/index.js'
 
 type Message = {
   id: number
@@ -64,6 +71,28 @@ function createUsers() {
 }
 
 describe(`unionAll types`, () => {
+  test(`exports declaration helper types used by public signatures`, () => {
+    type MessageSource = { message: ReturnType<typeof createMessages> }
+    type ToolCallSource = { toolCall: ReturnType<typeof createToolCalls> }
+    type UnionSource = {
+      message: ReturnType<typeof createMessages>
+      toolCall: ReturnType<typeof createToolCalls>
+    }
+    type Branches = readonly [
+      QueryBuilder<ContextFromSource<MessageSource>>,
+      QueryBuilder<ContextFromSource<ToolCallSource>>,
+    ]
+
+    expectTypeOf<SingleSource<MessageSource>>().toEqualTypeOf<MessageSource>()
+    expectTypeOf<ContextFromSource<MessageSource>>().toHaveProperty(
+      `fromSourceName`,
+    )
+    expectTypeOf<ContextFromUnionSource<UnionSource>>().toHaveProperty(
+      `fromSourceNames`,
+    )
+    expectTypeOf<ContextFromUnionBranches<Branches>>().toHaveProperty(`result`)
+  })
+
   test(`from rejects multiple sources`, () => {
     const messages = createMessages()
     const toolCalls = createToolCalls()
@@ -505,6 +534,92 @@ describe(`unionAll types`, () => {
               user: UserRow | undefined
             }
         >
+      >
+    >()
+  })
+
+  test(`query branch right joins allow rows with only the joined side`, () => {
+    const messages = createMessages()
+    const toolCalls = createToolCalls()
+    const users = createUsers()
+
+    const collection = createLiveQueryCollection((q) => {
+      const messageRows = q
+        .from({ message: messages })
+        .select(({ message }) => ({
+          kind: `message` as const,
+          id: message.id,
+          userId: message.userId,
+        }))
+      const toolCallRows = q
+        .from({ toolCall: toolCalls })
+        .select(({ toolCall }) => ({
+          kind: `toolCall` as const,
+          id: toolCall.id,
+          userId: toolCall.userId,
+        }))
+
+      return q
+        .unionAll(messageRows, toolCallRows)
+        .rightJoin({ user: users }, ({ userId, user }) =>
+          eq(userId, user.id),
+        )
+        .select(({ kind, id, user }) => ({
+          kind,
+          id,
+          userName: user.name,
+        }))
+    })
+
+    expectTypeOf(collection.toArray).toMatchTypeOf<
+      Array<
+        OutputWithVirtual<{
+          kind: `message` | `toolCall` | undefined
+          id: number | undefined
+          userName: string
+        }>
+      >
+    >()
+  })
+
+  test(`query branch full joins make joined and union fields optional`, () => {
+    const messages = createMessages()
+    const toolCalls = createToolCalls()
+    const users = createUsers()
+
+    const collection = createLiveQueryCollection((q) => {
+      const messageRows = q
+        .from({ message: messages })
+        .select(({ message }) => ({
+          kind: `message` as const,
+          id: message.id,
+          userId: message.userId,
+        }))
+      const toolCallRows = q
+        .from({ toolCall: toolCalls })
+        .select(({ toolCall }) => ({
+          kind: `toolCall` as const,
+          id: toolCall.id,
+          userId: toolCall.userId,
+        }))
+
+      return q
+        .unionAll(messageRows, toolCallRows)
+        .fullJoin({ user: users }, ({ userId, user }) => eq(userId, user.id))
+        .select(({ kind, id, user }) => ({
+          kind,
+          id,
+          userName: user.name,
+        }))
+    })
+
+    expectTypeOf(collection.toArray).toMatchTypeOf<
+      Array<
+        OutputWithVirtual<{
+          kind: `message` | `toolCall` | undefined
+          id: number | undefined
+          userName: string | undefined
+        }>
       >
     >()
   })
