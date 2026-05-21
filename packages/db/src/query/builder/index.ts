@@ -72,6 +72,8 @@ import type {
   WithResult,
 } from './types.js'
 
+const UNION_ALL_SOURCE_CONTEXT = `unionAll clause` satisfies SourceClauseContext
+
 export class BaseQueryBuilder<TContext extends Context = Context> {
   private readonly query: Partial<QueryIR> = {}
 
@@ -100,6 +102,10 @@ export class BaseQueryBuilder<TContext extends Context = Context> {
     source: TSource,
     context: SourceClauseContext,
   ): Array<[string, CollectionRef | QueryRef]> {
+    if (typeof source === `string`) {
+      throw new InvalidSourceTypeError(context, `string`)
+    }
+
     // Validate source is a plain object (not null, array, string, etc.)
     // We use try-catch to handle null/undefined gracefully
     let keys: Array<string>
@@ -120,16 +126,7 @@ export class BaseQueryBuilder<TContext extends Context = Context> {
       throw new InvalidSourceTypeError(context, `empty object`)
     }
 
-    // Check if it looks like a string was passed (has numeric keys).
-    // This applies to source-level unionAll as well as single-source clauses.
-    if (keys.every((k) => !isNaN(Number(k)))) {
-      throw new InvalidSourceTypeError(context, `string`)
-    }
-
-    if (context !== `unionAll clause` && keys.length !== 1) {
-      if (keys.length === 0) {
-        throw new InvalidSourceTypeError(context, `empty object`)
-      }
+    if (context !== UNION_ALL_SOURCE_CONTEXT && keys.length !== 1) {
       throw new OnlyOneSourceAllowedError(context)
     }
 
@@ -223,7 +220,7 @@ export class BaseQueryBuilder<TContext extends Context = Context> {
 
     const refs = this._createRefsForSource(
       sourceOrBranch as Source,
-      `unionAll clause`,
+      UNION_ALL_SOURCE_CONTEXT,
     )
     const from =
       refs.length === 1 ? refs[0]![1] : new UnionFrom(refs.map((r) => r[1]))
