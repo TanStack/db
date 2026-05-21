@@ -29,7 +29,7 @@ export type IncludesMaterialization = `collection` | `array` | `concat`
 
 export const INCLUDES_SCALAR_FIELD = `__includes_scalar__`
 
-export type From = CollectionRef | QueryRef
+export type From = CollectionRef | QueryRef | UnionFrom | UnionAll
 
 export type Select = {
   [alias: string]:
@@ -95,6 +95,34 @@ export class QueryRef extends BaseExpression {
     public alias: string,
   ) {
     super()
+  }
+}
+
+export class UnionFrom extends BaseExpression {
+  public type = `unionFrom` as const
+  constructor(public sources: Array<CollectionRef | QueryRef>) {
+    super()
+  }
+
+  get alias(): string {
+    return this.sources[0]?.alias ?? ``
+  }
+}
+
+export class UnionAll extends BaseExpression {
+  public type = `unionAll` as const
+  /**
+   * Result-level UNION ALL. Downstream query clauses see the union result row
+   * shape, not the branch source aliases. Optimizers may push safe operations
+   * into branches, but compiler phases should treat this as a derived relation
+   * unless they are explicitly handling branch lowering.
+   */
+  constructor(public queries: Array<QueryIR>) {
+    super()
+  }
+
+  get alias(): string {
+    return ``
   }
 }
 
@@ -271,7 +299,13 @@ function getRefFromAlias(
   query: QueryIR,
   alias: string,
 ): CollectionRef | QueryRef | void {
-  if (query.from.alias === alias) {
+  if (query.from.type === `unionFrom`) {
+    for (const source of query.from.sources) {
+      if (source.alias === alias) {
+        return source
+      }
+    }
+  } else if (query.from.type !== `unionAll` && query.from.alias === alias) {
     return query.from
   }
 

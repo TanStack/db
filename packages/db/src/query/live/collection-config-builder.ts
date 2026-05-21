@@ -1,5 +1,9 @@
 import { D2, output, serializeValue } from '@tanstack/db-ivm'
-import { INCLUDES_ROUTING, compileQuery } from '../compiler/index.js'
+import {
+  FN_SELECT_STATE,
+  INCLUDES_ROUTING,
+  compileQuery,
+} from '../compiler/index.js'
 import { createCollection } from '../../collection/index.js'
 import {
   MissingAliasInputsError,
@@ -214,6 +218,18 @@ export class CollectionConfigBuilder<
     if (query.from.type === `queryRef`) {
       if (this.hasJoins(query.from.query)) {
         return true
+      }
+    } else if (query.from.type === `unionFrom`) {
+      for (const source of query.from.sources) {
+        if (source.type === `queryRef` && this.hasJoins(source.query)) {
+          return true
+        }
+      }
+    } else if (query.from.type === `unionAll`) {
+      for (const branch of query.from.queries) {
+        if (this.hasJoins(branch)) {
+          return true
+        }
       }
     }
 
@@ -1590,13 +1606,13 @@ function flushIncludesState(
               state,
               state.childRegistry.get(routingKey),
             )
-            setNestedValue(parentResult, state.resultPath, childValue)
+            setIncludedValue(parentResult, state.resultPath, childValue)
 
             // Parent rows may already be materialized in the live collection by the
             // time includes state is flushed, so update the stored row as well.
             const storedParent = parentCollection.get(parentKey as any)
             if (storedParent && storedParent !== parentResult) {
-              setNestedValue(storedParent, state.resultPath, childValue)
+              setIncludedValue(storedParent, state.resultPath, childValue)
             }
           }
         }
@@ -1749,18 +1765,18 @@ function flushIncludesState(
         for (const parentKey of parentKeys) {
           const item = parentCollection.get(parentKey as any)
           if (item) {
-            const key = parentSyncMethods.collection.getKeyFromItem(item)
             // Capture previous value before in-place mutation
-            const previousValue = { ...item }
-            setNestedValue(
+            const previousValue = cloneForIncludesUpdate(item, state.resultPath)
+            setIncludedValue(
               item,
               state.resultPath,
               materializeIncludedValue(state, entry),
             )
+            const nextValue = cloneForIncludesUpdate(item, state.resultPath)
             events.push({
               type: `update`,
-              key,
-              value: item,
+              key: parentKey as any,
+              value: nextValue,
               previousValue,
             })
           }
@@ -1845,9 +1861,69 @@ function attachChildCollectionToParent(
   for (const parentKey of parentKeys) {
     const item = parentCollection.get(parentKey as any)
     if (item) {
-      setNestedValue(item, resultPath, childCollection)
+      setIncludedValue(item, resultPath, childCollection)
     }
   }
+}
+
+function setIncludedValue(
+  target: Record<string, any>,
+  path: Array<string>,
+  value: unknown,
+): void {
+  const state = getFnSelectState(target)
+  if (!state) {
+    setNestedValue(target, path, value)
+    return
+  }
+
+  setNestedValue(state.sourceRow, path, value)
+  refreshFnSelectResult(target, state)
+}
+
+function getFnSelectState(target: Record<string, any>):
+  | {
+      sourceRow: Record<string, any>
+      fnSelect: (row: Record<string, any>) => any
+    }
+  | undefined {
+  return (target as Record<PropertyKey, any>)[FN_SELECT_STATE] as
+    | {
+        sourceRow: Record<string, any>
+        fnSelect: (row: Record<string, any>) => any
+      }
+    | undefined
+}
+
+function refreshFnSelectResult(
+  target: Record<string, any>,
+  state: {
+    sourceRow: Record<string, any>
+    fnSelect: (row: Record<string, any>) => any
+  },
+): void {
+  const targetRecord = target as Record<PropertyKey, any>
+  const sourceRecord = state.sourceRow as Record<PropertyKey, any>
+  const routing =
+    targetRecord[INCLUDES_ROUTING] ?? sourceRecord[INCLUDES_ROUTING]
+  const nextValue = state.fnSelect(state.sourceRow)
+  if (!nextValue || typeof nextValue !== `object`) {
+    return
+  }
+
+  for (const key of Object.keys(target)) {
+    delete target[key]
+  }
+  Object.assign(target, nextValue)
+
+  if (routing) {
+    targetRecord[INCLUDES_ROUTING] = routing
+  }
+  Object.defineProperty(target, FN_SELECT_STATE, {
+    value: state,
+    enumerable: true,
+    configurable: true,
+  })
 }
 
 function setNestedValue(
@@ -1869,6 +1945,41 @@ function setNestedValue(
     cursor = cursor[segment]
   }
   cursor[path[path.length - 1]!] = value
+}
+
+function cloneForIncludesUpdate<T extends Record<string, any>>(
+  target: T,
+  path: Array<string>,
+): T {
+  return getFnSelectState(target)
+    ? { ...target }
+    : clonePathForUpdate(target, path)
+}
+
+function clonePathForUpdate<T extends Record<string, any>>(
+  target: T,
+  path: Array<string>,
+): T {
+  const root = { ...target }
+  let sourceCursor: any = target
+  let cloneCursor: any = root
+
+  for (let i = 0; i < path.length - 1; i++) {
+    const segment = path[i]!
+    const sourceValue = sourceCursor?.[segment]
+    if (sourceValue == null || typeof sourceValue !== `object`) {
+      return root
+    }
+
+    const clonedValue = Array.isArray(sourceValue)
+      ? [...sourceValue]
+      : { ...sourceValue }
+    cloneCursor[segment] = clonedValue
+    sourceCursor = sourceValue
+    cloneCursor = clonedValue
+  }
+
+  return root
 }
 
 function accumulateChanges<T>(

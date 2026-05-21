@@ -14,7 +14,11 @@ export {
   type ExtractContext,
   type QueryResult,
   // Types needed for declaration emit (https://github.com/TanStack/db/issues/1012)
+  type ContextFromSource,
+  type ContextFromUnionBranches,
+  type ContextFromUnionSource,
   type SchemaFromSource,
+  type SingleSource,
   type InferCollectionType,
   type MergeContextWithJoinType,
   type MergeContextForJoinCallback,

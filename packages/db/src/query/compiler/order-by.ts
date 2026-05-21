@@ -132,7 +132,12 @@ export function processOrderBy(
   // even for multi-column orderBy (using wider bounds on first column).
   // Skip this optimization when using grouped ordering (includes with limit),
   // because the limit is per-group, not global — the child collection needs all data loaded.
-  if (limit && !groupKeyFn) {
+  if (
+    limit &&
+    !groupKeyFn &&
+    rawQuery.from.type !== `unionFrom` &&
+    rawQuery.from.type !== `unionAll`
+  ) {
     let index: IndexInterface<string | number> | undefined
     let followRefCollection: Collection | undefined
     let firstColumnValueExtractor: CompiledSingleRowExpression | undefined
@@ -376,6 +381,9 @@ export function processOrderBy(
 /**
  * Builds a comparison configuration object that uses the values provided in the orderBy clause.
  * If no string sort configuration is provided it defaults to the collection's string sort configuration.
+ * Multi-source FROM queries pass their first source collection here as the
+ * documented default. Use explicit orderBy compare options when branches need
+ * different string collation behavior.
  */
 export function buildCompareOptions(
   clause: OrderByClause,

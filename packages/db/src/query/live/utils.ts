@@ -2,7 +2,7 @@ import { MultiSet, serializeValue } from '@tanstack/db-ivm'
 import { UnsupportedRootScalarSelectError } from '../../errors.js'
 import { normalizeOrderByPaths } from '../compiler/expressions.js'
 import { buildQuery, getQueryIR } from '../builder/index.js'
-import { ConditionalSelect, IncludesSubquery } from '../ir.js'
+import { ConditionalSelect, IncludesSubquery, isExpressionLike } from '../ir.js'
 import type { MultiSetArray, RootStreamBuilder } from '@tanstack/db-ivm'
 import type { Collection } from '../../collection/index.js'
 import type { ChangeMessage } from '../../types.js'
@@ -28,6 +28,14 @@ export function extractCollectionsFromQuery(
     } else if (source.type === `queryRef`) {
       // Recursively extract from subquery
       extractFromQuery(source.query)
+    } else if (source.type === `unionFrom`) {
+      for (const childSource of source.sources) {
+        extractFromSource(childSource)
+      }
+    } else if (source.type === `unionAll`) {
+      for (const branch of source.queries) {
+        extractFromQuery(branch)
+      }
     }
   }
 
@@ -72,7 +80,7 @@ export function extractCollectionsFromQuery(
     for (const branch of conditional.branches) {
       extractFromSelectValue(branch.value)
     }
-    if (conditional.defaultValue) {
+    if (conditional.defaultValue !== undefined) {
       extractFromSelectValue(conditional.defaultValue)
     }
   }
@@ -107,6 +115,10 @@ export function extractCollectionFromSource(
   } else if (from.type === `queryRef`) {
     // Recursively extract from subquery
     return extractCollectionFromSource(from.query)
+  } else if (from.type === `unionFrom`) {
+    return extractCollectionFromSource({ from: from.sources[0] })
+  } else if (from.type === `unionAll`) {
+    return extractCollectionFromSource(from.queries[0])
   }
 
   throw new Error(
@@ -155,6 +167,14 @@ export function extractCollectionAliases(
       }
     } else if (source.type === `queryRef`) {
       traverse(source.query)
+    } else if (source.type === `unionFrom`) {
+      for (const childSource of source.sources) {
+        recordAlias(childSource)
+      }
+    } else if (source.type === `unionAll`) {
+      for (const branch of source.queries) {
+        traverse(branch)
+      }
     }
   }
 
@@ -177,7 +197,7 @@ export function extractCollectionAliases(
     for (const branch of conditional.branches) {
       traverseSelectValue(branch.value)
     }
-    if (conditional.defaultValue) {
+    if (conditional.defaultValue !== undefined) {
       traverseSelectValue(conditional.defaultValue)
     }
   }
@@ -219,8 +239,7 @@ export function extractCollectionAliases(
 function isNestedSelectObject(obj: any): boolean {
   if (obj === null || typeof obj !== `object`) return false
   if (obj instanceof IncludesSubquery) return false
-  // Expression-like objects have a .type property
-  if (`type` in obj && typeof obj.type === `string`) return false
+  if (isExpressionLike(obj)) return false
   // Ref proxies from spread operations
   if (obj.__refProxy) return false
   return true
@@ -262,11 +281,10 @@ export function buildQueryFromConfig<TContext extends Context>(config: {
 export function sendChangesToInput(
   input: RootStreamBuilder<unknown>,
   changes: Iterable<ChangeMessage>,
-  getKey: (item: ChangeMessage[`value`]) => any,
 ): number {
   const multiSetArray: MultiSetArray<unknown> = []
   for (const change of changes) {
-    const key = getKey(change.value)
+    const key = change.key
     if (change.type === `insert`) {
       multiSetArray.push([[key, change.value], 1])
     } else if (change.type === `update`) {

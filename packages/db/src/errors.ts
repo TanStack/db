@@ -385,11 +385,26 @@ export class InvalidSourceError extends QueryBuilderError {
   }
 }
 
+export type SourceClauseContext =
+  | `from clause`
+  | `unionAll clause`
+  | `join clause`
+
 export class InvalidSourceTypeError extends QueryBuilderError {
-  constructor(context: string, type: string) {
+  constructor(context: SourceClauseContext, type: string) {
+    const expected =
+      context === `unionAll clause`
+        ? `an object with one or more key-value pairs like { alias: collection }`
+        : `an object with a single key-value pair like { alias: collection }`
+    const example =
+      context === `unionAll clause`
+        ? `.unionAll({ todos: todosCollection, events: eventsCollection })`
+        : context === `join clause`
+          ? `.join({ todos: todosCollection }, ({ todo, todos }) => eq(todo.id, todos.id))`
+          : `.from({ todos: todosCollection })`
     super(
-      `Invalid source for ${context}: Expected an object with a single key-value pair like { alias: collection }. ` +
-        `For example: .from({ todos: todosCollection }). Got: ${type}`,
+      `Invalid source for ${context}: Expected ${expected}. ` +
+        `For example: ${example}. Got: ${type}`,
     )
   }
 }
