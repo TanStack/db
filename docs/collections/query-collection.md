@@ -486,7 +486,8 @@ matches your API semantics:
   and `offset`) are passed to your `queryFn` via `ctx.meta.loadSubsetOptions`,
   letting you translate them into API parameters.
 - Use separate Query Collections when endpoints represent distinct server scopes
-  whose results should not replace each other.
+  whose results should not replace each other. Use `unionAll` to combine them
+  into a single query when you need a unified view across endpoints.
 - Use direct writes such as `writeUpsert`/`writeBatch` for lower-level
   incremental loading when you intentionally want to merge server responses into
   the synced store yourself.
