@@ -561,9 +561,7 @@ describe(`unionAll types`, () => {
 
       return q
         .unionAll(messageRows, toolCallRows)
-        .rightJoin({ user: users }, ({ userId, user }) =>
-          eq(userId, user.id),
-        )
+        .rightJoin({ user: users }, ({ userId, user }) => eq(userId, user.id))
         .select(({ kind, id, user }) => ({
           kind,
           id,
