@@ -2551,11 +2551,56 @@ Add two numbers:
 add(user.salary, user.bonus)
 ```
 
+### Utility Functions
+
 #### `coalesce(...values)`
-Return the first non-null value:
+Return the first non-null/undefined value:
 ```ts
 coalesce(user.displayName, user.name, 'Unknown')
 ```
+
+This is useful for display fallbacks when the stored value is `null` or
+`undefined`:
+
+```ts
+.select(({ document }) => ({
+  ...document,
+  displayTitle: coalesce(document.title, 'Untitled document'),
+}))
+```
+
+If you also need to treat another value, such as an empty string, as missing,
+use `caseWhen` to express that condition explicitly.
+
+#### `caseWhen(condition, value, ...)`
+Return the value for the first matching condition, similar to SQL `CASE WHEN`.
+Arguments are provided as condition/value pairs followed by an optional default
+value:
+
+```ts
+caseWhen(gt(user.age, 65), 'senior', gt(user.age, 18), 'adult', 'minor')
+```
+
+If no condition matches and no default value is provided, scalar expressions
+return `null`.
+
+Use `caseWhen` when a computed field needs conditional logic that cannot be
+represented with `coalesce` alone. For example, to display a fallback for both
+`null`/`undefined` and empty-string titles:
+
+```ts
+.select(({ document }) => ({
+  ...document,
+  displayTitle: caseWhen(
+    eq(coalesce(document.title, ''), ''),
+    'Untitled document',
+    document.title,
+  ),
+}))
+```
+
+`caseWhen` can also be used in expression contexts such as `select`, `where`,
+`orderBy`, `groupBy`, `having`, and equality join operands.
 
 ### Aggregate Functions
 
