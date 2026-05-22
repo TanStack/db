@@ -796,34 +796,11 @@ manual transaction's `mutationFn` is responsible for persisting
 
 This makes manual transactions a good fit for draft-style workflows where local
 state should update immediately, but persistence should wait for a later user
-action such as Save or Blur:
-
-```ts
-const editTx = createTransaction({
-  autoCommit: false,
-  mutationFn: async ({ transaction }) => {
-    await api.updateTodos(
-      transaction.mutations.map((mutation) => ({
-        id: mutation.key,
-        changes: mutation.changes,
-      }))
-    )
-  },
-})
-
-// Update local optimistic state while the user edits.
-editTx.mutate(() => {
-  todoCollection.update(todoId, (draft) => {
-    draft.text = nextText
-  })
-})
-
-// Later, when the user saves or the input blurs:
-await editTx.commit()
-
-// Or discard the local optimistic changes:
-// editTx.rollback()
-```
+action such as Save or Blur. Each `tx.mutate()` call updates the optimistic
+state instantly, so the UI reflects changes as the user types. When the user
+triggers Save, `tx.commit()` fires the `mutationFn` to persist all accumulated
+mutations in a single batch. If the user cancels instead, `tx.rollback()`
+discards the optimistic changes and reverts the UI.
 
 ### Multi-Step Workflows
 
