@@ -527,29 +527,11 @@ export class CollectionStateManager<
         pendingSyncKeys.add(operation.key as TKey)
       }
     }
-    const staleOptimisticUpserts: Array<TKey> = []
     for (const [key, value] of this.pendingOptimisticUpserts) {
-      if (pendingSyncKeys.has(key)) {
-        this.optimisticUpserts.set(key, value)
-      } else {
-        staleOptimisticUpserts.push(key)
-      }
+      this.optimisticUpserts.set(key, value)
     }
-    for (const key of staleOptimisticUpserts) {
-      this.pendingOptimisticUpserts.delete(key)
-      this.pendingLocalOrigins.delete(key)
-    }
-    const staleOptimisticDeletes: Array<TKey> = []
     for (const key of this.pendingOptimisticDeletes) {
-      if (pendingSyncKeys.has(key)) {
-        this.optimisticDeletes.add(key)
-      } else {
-        staleOptimisticDeletes.push(key)
-      }
-    }
-    for (const key of staleOptimisticDeletes) {
-      this.pendingOptimisticDeletes.delete(key)
-      this.pendingLocalOrigins.delete(key)
+      this.optimisticDeletes.add(key)
     }
 
     const activeTransactions: Array<Transaction<any>> = []
@@ -1125,6 +1107,28 @@ export class CollectionStateManager<
             }
           }
         }
+      }
+
+      // A completed optimistic insert may have used a temporary client key while
+      // the sync confirmation used a different server-generated key. Once a
+      // sync commit has been applied, stop retaining completed optimistic keys
+      // that were not confirmed by this commit so the temporary row is removed.
+      for (const [key, previousValue] of this.pendingOptimisticUpserts) {
+        if (!changedKeys.has(key)) {
+          changedKeys.add(key)
+          if (!currentVisibleState.has(key)) {
+            currentVisibleState.set(key, previousValue)
+          }
+          this.pendingOptimisticUpserts.delete(key)
+          this.pendingLocalOrigins.delete(key)
+        }
+      }
+      for (const key of this.pendingOptimisticDeletes) {
+        if (!changedKeys.has(key)) {
+          changedKeys.add(key)
+        }
+        this.pendingOptimisticDeletes.delete(key)
+        this.pendingLocalOrigins.delete(key)
       }
 
       // Now check what actually changed in the final visible state
