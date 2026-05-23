@@ -265,6 +265,7 @@ title: "@tanstack/db"
 - [add](functions/add.md)
 - [and](functions/and.md)
 - [avg](functions/avg.md)
+- [caseWhen](functions/caseWhen.md)
 - [clearQueryPatterns](functions/clearQueryPatterns.md)
 - [coalesce](functions/coalesce.md)
 - [compileExpression](functions/compileExpression.md)

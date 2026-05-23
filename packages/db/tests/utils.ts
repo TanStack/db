@@ -311,6 +311,7 @@ type MockSyncCollectionConfigNoInitialState<T> = {
   id: string
   getKey: (item: T) => string | number
   autoIndex?: `off` | `eager`
+  startSync?: boolean
   defaultIndexType?: IndexConstructor
 }
 
