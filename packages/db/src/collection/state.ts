@@ -1160,6 +1160,33 @@ export class CollectionStateManager<
         }
       }
 
+      // A completed optimistic insert may have used a temporary client key while
+      // the sync confirmation used a different server-generated key. Once a
+      // sync commit has been applied, stop retaining completed optimistic keys
+      // that were not confirmed by this commit so the temporary row is removed.
+      for (const key of this.pendingOptimisticDirectUpserts) {
+        if (!changedKeys.has(key)) {
+          changedKeys.add(key)
+          if (!currentVisibleState.has(key)) {
+            const previousValue = previousOptimisticUpserts.get(key)
+            if (previousValue !== undefined) {
+              currentVisibleState.set(key, previousValue)
+            }
+          }
+          this.pendingOptimisticUpserts.delete(key)
+          this.pendingLocalOrigins.delete(key)
+        }
+      }
+      for (const key of this.pendingOptimisticDirectDeletes) {
+        if (!changedKeys.has(key)) {
+          changedKeys.add(key)
+        }
+        this.pendingOptimisticDeletes.delete(key)
+        this.pendingLocalOrigins.delete(key)
+      }
+      this.pendingOptimisticDirectUpserts.clear()
+      this.pendingOptimisticDirectDeletes.clear()
+
       // Now check what actually changed in the final visible state
       for (const key of changedKeys) {
         const previousVisibleValue = currentVisibleState.get(key)

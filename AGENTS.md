@@ -14,6 +14,7 @@ This guide provides principles and patterns for AI agents contributing to the Ta
 8. [Function Design](#function-design)
 9. [Modern JavaScript Patterns](#modern-javascript-patterns)
 10. [Edge Cases and Corner Cases](#edge-cases-and-corner-cases)
+11. [Git and PR Hygiene](#git-and-pr-hygiene)
 
 ## Type Safety
 
@@ -562,6 +563,37 @@ const filtered = items.filter((item) => item.value > 0)
    // But snapshot resolves after up-to-date arrives
    // Should ignore the stale snapshot
    ```
+
+## Git and PR Hygiene
+
+### Never Rewrite Published Branch History
+
+**Do not amend, rebase, squash, or force-push a branch after it has been pushed or has an open PR.** This includes `git push --force` and `git push --force-with-lease`.
+
+Once a branch is visible to others, treat its history as shared. If CI fails or follow-up changes are needed, add a normal follow-up commit and push normally.
+
+**❌ Bad:**
+
+```bash
+git commit --amend --no-edit
+git push --force-with-lease
+```
+
+**✅ Good:**
+
+```bash
+git add <files>
+git commit -m "fix: address CI failure"
+git push
+```
+
+**Key Principles:**
+
+- Never force-push unless the user explicitly asks for it in that moment.
+- Do not assume `--force-with-lease` is acceptable; it still rewrites shared history.
+- Prefer small follow-up commits over rewritten history on PR branches.
+- If a clean history is desired, let the human maintainer squash or rebase during merge.
+- If you think history rewriting is necessary, stop and ask for explicit confirmation before running any command.
 
 ## Package Versioning
 
