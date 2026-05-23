@@ -788,6 +788,20 @@ await tx.commit()
 tx.rollback()
 ```
 
+When you call collection methods inside `tx.mutate()`, the mutations are
+captured by the manual transaction. The collection's `onInsert`, `onUpdate`, and
+`onDelete` handlers are not invoked for those mutations; the
+manual transaction's `mutationFn` is responsible for persisting
+`transaction.mutations`.
+
+This makes manual transactions a good fit for draft-style workflows where local
+state should update immediately, but persistence should wait for a later user
+action such as Save or Blur. Each `tx.mutate()` call updates the optimistic
+state instantly, so the UI reflects changes as the user types. When the user
+triggers Save, `tx.commit()` fires the `mutationFn` to persist all accumulated
+mutations in a single batch. If the user cancels instead, `tx.rollback()`
+discards the optimistic changes and reverts the UI.
+
 ### Multi-Step Workflows
 
 Manual transactions excel at complex workflows:
