@@ -151,4 +151,143 @@ describe(`Boundary expansion for multi-column orderBy`, () => {
     expect(results).toHaveLength(3)
     expect(results.map((r) => r.id)).toEqual([`a3`, `a1`, `b2`])
   })
+
+  it(`should return only the first item when limit is 1`, async () => {
+    const initialData: Array<Item> = [
+      { id: `a1`, category: `A`, name: `Zeta` },
+      { id: `a2`, category: `A`, name: `Alpha` },
+      { id: `b1`, category: `B`, name: `Gamma` },
+    ]
+
+    const sourceCollection = createCollection(
+      mockSyncCollectionOptions({
+        id: `boundary-limit-1`,
+        getKey: (item: Item) => item.id,
+        initialData,
+        autoIndex: `eager`,
+      }),
+    )
+
+    await sourceCollection.preload()
+
+    const liveQuery = createLiveQueryCollection((q) =>
+      q
+        .from({ items: sourceCollection })
+        .orderBy(({ items }) => items.category, `asc`)
+        .orderBy(({ items }) => items.name, `asc`)
+        .limit(1)
+        .select(({ items }) => ({
+          id: items.id,
+          category: items.category,
+          name: items.name,
+        })),
+    )
+
+    await liveQuery.preload()
+    await flushPromises()
+
+    const results = Array.from(liveQuery.values())
+
+    // Full sort (category asc, name asc): A-Alpha (a2), A-Zeta (a1), B-Gamma (b1)
+    // limit(1) → only A-Alpha
+    expect(results).toHaveLength(1)
+    expect(results.map((r) => r.id)).toEqual([`a2`])
+  })
+
+  it(`should return all rows when limit equals total row count`, async () => {
+    const initialData: Array<Item> = [
+      { id: `b1`, category: `B`, name: `Gamma` },
+      { id: `a2`, category: `A`, name: `Alpha` },
+      { id: `a1`, category: `A`, name: `Zeta` },
+    ]
+
+    const sourceCollection = createCollection(
+      mockSyncCollectionOptions({
+        id: `boundary-limit-equals-total`,
+        getKey: (item: Item) => item.id,
+        initialData,
+        autoIndex: `eager`,
+      }),
+    )
+
+    await sourceCollection.preload()
+
+    const liveQuery = createLiveQueryCollection((q) =>
+      q
+        .from({ items: sourceCollection })
+        .orderBy(({ items }) => items.category, `asc`)
+        .orderBy(({ items }) => items.name, `asc`)
+        .limit(3)
+        .select(({ items }) => ({
+          id: items.id,
+          category: items.category,
+          name: items.name,
+        })),
+    )
+
+    await liveQuery.preload()
+    await flushPromises()
+
+    const results = Array.from(liveQuery.values())
+
+    // All 3 rows in sorted order: A-Alpha (a2), A-Zeta (a1), B-Gamma (b1)
+    expect(results).toHaveLength(3)
+    expect(results.map((r) => r.id)).toEqual([`a2`, `a1`, `b1`])
+  })
+
+  it(`should update top-K after dynamic insert via sync`, async () => {
+    const initialData: Array<Item> = [
+      { id: `a1`, category: `A`, name: `Zeta` },
+      { id: `b1`, category: `B`, name: `Gamma` },
+      { id: `c1`, category: `C`, name: `Epsilon` },
+    ]
+
+    const options = mockSyncCollectionOptions({
+      id: `boundary-dynamic-insert`,
+      getKey: (item: Item) => item.id,
+      initialData,
+      autoIndex: `eager`,
+    })
+
+    const sourceCollection = createCollection(options)
+
+    await sourceCollection.preload()
+
+    const liveQuery = createLiveQueryCollection((q) =>
+      q
+        .from({ items: sourceCollection })
+        .orderBy(({ items }) => items.category, `asc`)
+        .orderBy(({ items }) => items.name, `asc`)
+        .limit(2)
+        .select(({ items }) => ({
+          id: items.id,
+          category: items.category,
+          name: items.name,
+        })),
+    )
+
+    await liveQuery.preload()
+    await flushPromises()
+
+    // Before insert — sorted: A-Zeta (a1), B-Gamma (b1), C-Epsilon (c1)
+    // Top 2: A-Zeta, B-Gamma
+    let results = Array.from(liveQuery.values())
+    expect(results).toHaveLength(2)
+    expect(results.map((r) => r.id)).toEqual([`a1`, `b1`])
+
+    // Insert a new item that should land in the top-2
+    options.utils.begin()
+    options.utils.write({
+      type: `insert`,
+      value: { id: `a2`, category: `A`, name: `Alpha` },
+    })
+    options.utils.commit()
+    await flushPromises()
+
+    // After insert — sorted: A-Alpha (a2), A-Zeta (a1), B-Gamma (b1), C-Epsilon (c1)
+    // Top 2: A-Alpha, A-Zeta
+    results = Array.from(liveQuery.values())
+    expect(results).toHaveLength(2)
+    expect(results.map((r) => r.id)).toEqual([`a2`, `a1`])
+  })
 })
