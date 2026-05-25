@@ -114,6 +114,10 @@ describe(`loadedSubsets deduplication`, () => {
       },
     ])
 
+    // Trigger a second preload — this re-runs the pipeline with the same
+    // predicates, so the dedup layer should prevent any new loadSubset calls.
+    await liveQuery.preload()
+
     expect(loadSubsetCalls.length).toBe(initialCallCount)
   })
 
