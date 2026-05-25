@@ -1,9 +1,13 @@
 import { describe, expect, it, vi } from 'vitest'
 import { createLiveQueryCollection, eq } from '../../src/query/index.js'
 import { createCollection } from '../../src/collection/index.js'
+import { BasicIndex } from '../../src/indexes/basic-index.js'
 import { extractSimpleComparisons } from '../../src/query/expression-helpers.js'
 import { flushPromises } from '../utils.js'
-import type { LoadSubsetOptions } from '../../src/types.js'
+import type {
+  ChangeMessageOrDeleteKeyMessage,
+  LoadSubsetOptions,
+} from '../../src/types.js'
 
 type Parent = {
   id: number
@@ -53,6 +57,8 @@ describe(`loadedSubsets deduplication`, () => {
       id: `dedup-children`,
       getKey: (child) => child.id,
       syncMode: `on-demand`,
+      autoIndex: `eager`,
+      defaultIndexType: BasicIndex,
       sync: {
         sync: ({ begin, write, commit, markReady }) => {
           begin()
@@ -113,7 +119,7 @@ describe(`loadedSubsets deduplication`, () => {
 
   it(`should deduplicate join key requests across pipeline batches`, async () => {
     let parentBegin: () => void
-    let parentWrite: (msg: { type: string; value: Parent }) => void
+    let parentWrite: (msg: ChangeMessageOrDeleteKeyMessage<Parent, number>) => void
     let parentCommit: () => void
 
     const parents = createCollection<Parent>({
@@ -122,7 +128,7 @@ describe(`loadedSubsets deduplication`, () => {
       sync: {
         sync: ({ begin, write, commit, markReady }) => {
           parentBegin = begin
-          parentWrite = write as any
+          parentWrite = write
           parentCommit = commit
 
           begin()
@@ -160,12 +166,15 @@ describe(`loadedSubsets deduplication`, () => {
     await flushPromises()
 
     const newCalls = loadSubsetCalls.slice(callCountAfterPreload)
+    expect(newCalls.length).toBeGreaterThan(0)
 
+    let inFilterCount = 0
     for (const call of newCalls) {
       if (!call.where) continue
       const filters = extractSimpleComparisons(call.where)
       for (const filter of filters) {
         if (filter.operator === `in`) {
+          inFilterCount++
           const values = filter.value as Array<number>
           expect(values).toContain(4)
           expect(values).not.toContain(1)
@@ -174,5 +183,6 @@ describe(`loadedSubsets deduplication`, () => {
         }
       }
     }
+    expect(inFilterCount).toBeGreaterThan(0)
   })
 })

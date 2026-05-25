@@ -377,22 +377,19 @@ export class CollectionSubscription
       orderBy: opts?.orderBy,
       limit: opts?.limit,
     }
-    const syncResult = this.collection._sync.loadSubset(loadOptions)
-
-    // Pass the raw loadSubset result to the caller for external tracking
-    opts?.onLoadSubsetResult?.(syncResult)
-
-    // Track this loadSubset call so we can unload it later
+    // Check dedup BEFORE calling loadSubset to avoid sending duplicate requests
     const isAlreadyCovered = this.loadedSubsets.some((existing) =>
       isPredicateSubset(loadOptions, existing),
     )
-    if (!isAlreadyCovered) {
-      this.loadedSubsets.push(loadOptions)
-    }
 
-    const trackLoadSubsetPromise = opts?.trackLoadSubsetPromise ?? true
-    if (trackLoadSubsetPromise) {
-      this.trackLoadSubsetPromise(syncResult)
+    if (!isAlreadyCovered) {
+      const syncResult = this.collection._sync.loadSubset(loadOptions)
+      opts?.onLoadSubsetResult?.(syncResult)
+      this.loadedSubsets.push(loadOptions)
+      const trackLoadSubsetPromise = opts?.trackLoadSubsetPromise ?? true
+      if (trackLoadSubsetPromise) {
+        this.trackLoadSubsetPromise(syncResult)
+      }
     }
 
     // Also load data immediately from the collection
@@ -620,20 +617,18 @@ export class CollectionSubscription
       offset: offset ?? currentOffset, // Use provided offset, or auto-tracked offset
       subscription: this,
     }
-    const syncResult = this.collection._sync.loadSubset(loadOptions)
-
-    // Pass the raw loadSubset result to the caller for external tracking
-    onLoadSubsetResult?.(syncResult)
-
-    // Track this loadSubset call
+    // Check dedup BEFORE calling loadSubset to avoid sending duplicate requests
     const isAlreadyCovered = this.loadedSubsets.some((existing) =>
       isPredicateSubset(loadOptions, existing),
     )
+
     if (!isAlreadyCovered) {
+      const syncResult = this.collection._sync.loadSubset(loadOptions)
+      onLoadSubsetResult?.(syncResult)
       this.loadedSubsets.push(loadOptions)
-    }
-    if (shouldTrackLoadSubsetPromise) {
-      this.trackLoadSubsetPromise(syncResult)
+      if (shouldTrackLoadSubsetPromise) {
+        this.trackLoadSubsetPromise(syncResult)
+      }
     }
   }
 

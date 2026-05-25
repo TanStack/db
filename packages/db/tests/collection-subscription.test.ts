@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { createCollection } from '../src/collection/index.js'
+import { Func, PropRef, Value } from '../src/query/ir.js'
 import { flushPromises } from './utils'
 
 describe(`CollectionSubscription status tracking`, () => {
@@ -130,12 +131,18 @@ describe(`CollectionSubscription status tracking`, () => {
       includeInitialState: false,
     })
 
-    // Trigger first load
-    subscription.requestSnapshot({ optimizedOnly: false })
+    // Trigger first load with a distinct where expression
+    subscription.requestSnapshot({
+      optimizedOnly: false,
+      where: new Func(`eq`, [new PropRef([`id`]), new Value(`a`)]),
+    })
     expect(subscription.status).toBe(`loadingSubset`)
 
-    // Trigger second load
-    subscription.requestSnapshot({ optimizedOnly: false })
+    // Trigger second load with a different where expression so dedup doesn't skip it
+    subscription.requestSnapshot({
+      optimizedOnly: false,
+      where: new Func(`eq`, [new PropRef([`id`]), new Value(`b`)]),
+    })
     expect(subscription.status).toBe(`loadingSubset`)
 
     // Resolve first promise
