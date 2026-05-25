@@ -273,12 +273,13 @@ function processJoin(
 
       // Set up lazy loading: intercept active side's stream and dynamically load
       // matching rows from lazy side based on join keys.
+      const loadedJoinKeys = new Set<unknown>()
       const activePipelineWithLoading: IStreamBuilder<
         [key: unknown, [originalKey: string, namespacedRow: NamespacedRow]]
       > = activePipeline.pipe(
         tap((data) => {
           // Deduplicate and filter null keys before requesting snapshot
-          const joinKeys = [
+          const allJoinKeys = [
             ...new Set(
               data
                 .getInner()
@@ -286,6 +287,9 @@ function processJoin(
                 .filter((key) => key != null),
             ),
           ]
+          const joinKeys = allJoinKeys.filter(
+            (key) => !loadedJoinKeys.has(key),
+          )
 
           if (joinKeys.length === 0) {
             return
@@ -314,7 +318,11 @@ function processJoin(
               optimizedOnly: true,
             })
 
-            if (!loaded) {
+            if (loaded) {
+              for (const key of joinKeys) {
+                loadedJoinKeys.add(key)
+              }
+            } else {
               // Snapshot wasn't sent because it could not be loaded from the indexes
               const collectionId = target.collection.id
               const fieldPath = target.path.join(`.`)
