@@ -290,4 +290,84 @@ describe(`Boundary expansion for multi-column orderBy`, () => {
     expect(results).toHaveLength(2)
     expect(results.map((r) => r.id)).toEqual([`a2`, `a1`])
   })
+
+  it(`should return empty results when limit is 0`, async () => {
+    const initialData: Array<Item> = [
+      { id: `a1`, category: `A`, name: `Zeta` },
+      { id: `a2`, category: `A`, name: `Alpha` },
+      { id: `b1`, category: `B`, name: `Gamma` },
+    ]
+
+    const sourceCollection = createCollection(
+      mockSyncCollectionOptions({
+        id: `boundary-limit-0`,
+        getKey: (item: Item) => item.id,
+        initialData,
+        autoIndex: `eager`,
+      }),
+    )
+
+    await sourceCollection.preload()
+
+    const liveQuery = createLiveQueryCollection((q) =>
+      q
+        .from({ items: sourceCollection })
+        .orderBy(({ items }) => items.category, `asc`)
+        .orderBy(({ items }) => items.name, `asc`)
+        .limit(0)
+        .select(({ items }) => ({
+          id: items.id,
+          category: items.category,
+          name: items.name,
+        })),
+    )
+
+    await liveQuery.preload()
+    await flushPromises()
+
+    const results = Array.from(liveQuery.values())
+
+    expect(results).toHaveLength(0)
+  })
+
+  it(`should return empty results when offset exceeds available rows`, async () => {
+    const initialData: Array<Item> = [
+      { id: `a1`, category: `A`, name: `Zeta` },
+      { id: `a2`, category: `A`, name: `Alpha` },
+      { id: `b1`, category: `B`, name: `Gamma` },
+    ]
+
+    const sourceCollection = createCollection(
+      mockSyncCollectionOptions({
+        id: `boundary-offset-beyond`,
+        getKey: (item: Item) => item.id,
+        initialData,
+        autoIndex: `eager`,
+      }),
+    )
+
+    await sourceCollection.preload()
+
+    const liveQuery = createLiveQueryCollection((q) =>
+      q
+        .from({ items: sourceCollection })
+        .orderBy(({ items }) => items.category, `asc`)
+        .orderBy(({ items }) => items.name, `asc`)
+        .offset(100)
+        .limit(3)
+        .select(({ items }) => ({
+          id: items.id,
+          category: items.category,
+          name: items.name,
+        })),
+    )
+
+    await liveQuery.preload()
+    await flushPromises()
+
+    const results = Array.from(liveQuery.values())
+
+    // Only 3 items exist; offset(100) skips past all of them
+    expect(results).toHaveLength(0)
+  })
 })
