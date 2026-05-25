@@ -455,6 +455,16 @@ describe(`CollectionSubscriber duplicate insert prevention`, () => {
   })
 
   describe(`filterDuplicateInserts`, () => {
+    it(`should return empty output for empty changes and empty sentKeys`, () => {
+      const sentKeys = new Set<string | number>()
+      const changes: Array<ChangeMessage<TestItem, string>> = []
+
+      const result = filterDuplicateInserts(changes, sentKeys)
+
+      expect(result).toEqual([])
+      expect(sentKeys.size).toBe(0)
+    })
+
     it(`should skip deletes for keys never sent to D2`, () => {
       const sentKeys = new Set<string | number>([`1`, `2`])
 
