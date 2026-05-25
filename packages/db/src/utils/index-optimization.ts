@@ -477,7 +477,7 @@ function optimizeOrExpression<T extends object, TKey extends string | number>(
     }
   }
 
-  if (results.length > 0) {
+  if (results.length === expression.args.length) {
     // Use unionSets utility for OR logic
     const allMatchingSets = results.map((r) => r.matchingKeys)
     const unionedKeys = unionSets(allMatchingSets)
