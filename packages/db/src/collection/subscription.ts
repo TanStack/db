@@ -543,6 +543,26 @@ export class CollectionSubscription
       keys = index.take(valuesNeeded(), biggestObservedValue!, filterFn)
     }
 
+    // Boundary expansion for multi-column orderBy:
+    // BTree orders by (first_col, _id) only. Items sharing the same first-column
+    // value as biggestObservedValue but not selected by BTree may rank higher by
+    // the full comparator. Send all of them so D2 picks the correct top-K.
+    if (orderBy.length > 1 && biggestObservedValue !== undefined && valueExtractor) {
+      const alreadyAddedKeys = new Set(changes.map((c) => c.key))
+      const boundaryChanges = this.collection.currentStateAsChanges({
+        where: eq(orderByExpression, new Value(biggestObservedValue)),
+      })
+      if (boundaryChanges) {
+        for (const { key, value } of boundaryChanges) {
+          if (!alreadyAddedKeys.has(key) && !this.sentKeys.has(key)) {
+            if (value !== undefined && (whereFilterFn?.(value) ?? true)) {
+              changes.push({ type: `insert`, key, value })
+            }
+          }
+        }
+      }
+    }
+
     // Track row count for offset-based pagination (before sending to callback)
     // Use the current count as the offset for this load
     const currentOffset = this.limitedSnapshotRowCount
