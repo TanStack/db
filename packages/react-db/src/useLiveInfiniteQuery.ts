@@ -195,18 +195,11 @@ export function useLiveInfiniteQuery<TContext extends Context>(
     }
   }, [isCollection, queryFnOrCollection, depsKey])
 
-  // Create a live query with initial limit and offset
+  // Create a live query without limit/offset — setWindow() is the sole authority
   // Either pass collection directly or wrap query function
-  // Use pageSize + 1 for peek-ahead detection (to know if there are more pages)
   const queryResult = isCollection
     ? useLiveQuery(queryFnOrCollection)
-    : useLiveQuery(
-        (q) =>
-          queryFnOrCollection(q)
-            .limit(pageSize + 1)
-            .offset(0),
-        deps,
-      )
+    : useLiveQuery((q) => queryFnOrCollection(q), deps)
 
   // Adjust window when pagination changes
   useEffect(() => {

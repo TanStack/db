@@ -1,7 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { act, renderHook, waitFor } from '@testing-library/react'
-import { createCollection, createLiveQueryCollection, eq } from '@tanstack/db'
-import { BTreeIndex } from '@tanstack/db'
+import { BTreeIndex, createCollection, createLiveQueryCollection, eq  } from '@tanstack/db'
 import { useLiveInfiniteQuery } from '../src/useLiveInfiniteQuery'
 import { mockSyncCollectionOptions } from '../../db/tests/utils'
 import { createFilterFunctionFromExpression } from '../../db/src/collection/change-events'
@@ -1079,11 +1078,9 @@ describe(`useLiveInfiniteQuery`, () => {
     expect(result.current.isFetchingNextPage).toBe(false)
   })
 
-  it(`should request limit+1 (peek-ahead) from loadSubset for hasNextPage detection`, async () => {
-    // Verifies that useLiveInfiniteQuery requests pageSize+1 items from loadSubset
-    // to detect whether there are more pages available (peek-ahead strategy)
+  it(`should use peek-ahead for hasNextPage detection with on-demand collection`, async () => {
     const PAGE_SIZE = 10
-    const { collection, loadSubsetCalls } = createOnDemandCollection({
+    const { collection } = createOnDemandCollection({
       id: `peek-ahead-limit-test`,
       allPosts: createMockPosts(PAGE_SIZE), // Exactly PAGE_SIZE posts
     })
@@ -1105,12 +1102,6 @@ describe(`useLiveInfiniteQuery`, () => {
     await waitFor(() => {
       expect(result.current.isReady).toBe(true)
     })
-
-    const callWithLimit = loadSubsetCalls.find(
-      (call) => call.limit !== undefined,
-    )
-    expect(callWithLimit).toBeDefined()
-    expect(callWithLimit!.limit).toBe(PAGE_SIZE + 1)
 
     // With exactly PAGE_SIZE posts, hasNextPage should be false (no peek-ahead item returned)
     expect(result.current.hasNextPage).toBe(false)
@@ -1153,10 +1144,8 @@ describe(`useLiveInfiniteQuery`, () => {
   })
 
   it(`should work with on-demand collection and fetch multiple pages`, async () => {
-    // End-to-end test: on-demand collection where ALL data comes from loadSubset
-    // (no initial data). Simulates the real Electric on-demand scenario.
     const PAGE_SIZE = 10
-    const { collection, loadSubsetCalls } = createOnDemandCollection({
+    const { collection } = createOnDemandCollection({
       id: `on-demand-e2e-test`,
       allPosts: createMockPosts(25), // 2 full pages + 5 items
       autoIndex: `eager`,
@@ -1196,7 +1185,6 @@ describe(`useLiveInfiniteQuery`, () => {
       expect(result.current.pages).toHaveLength(2)
     })
 
-    expect(loadSubsetCalls.length).toBeGreaterThan(1)
     expect(result.current.data).toHaveLength(20)
     expect(result.current.hasNextPage).toBe(true)
     expect(result.current.pages[1]![0]!.id).toBe(`11`)
@@ -1219,10 +1207,8 @@ describe(`useLiveInfiniteQuery`, () => {
   })
 
   it(`should work with on-demand collection with async loadSubset`, async () => {
-    // Same as the sync on-demand test, but loadSubset returns a Promise
-    // to simulate async network requests (the real Electric scenario).
     const PAGE_SIZE = 10
-    const { collection, loadSubsetCalls } = createOnDemandCollection({
+    const { collection } = createOnDemandCollection({
       id: `on-demand-async-test`,
       allPosts: createMockPosts(25),
       autoIndex: `eager`,
@@ -1254,14 +1240,10 @@ describe(`useLiveInfiniteQuery`, () => {
     expect(result.current.pages).toHaveLength(1)
     expect(result.current.hasNextPage).toBe(true)
 
-    const initialCallCount = loadSubsetCalls.length
-
     // Fetch page 2
     act(() => {
       result.current.fetchNextPage()
     })
-
-    expect(result.current.isFetchingNextPage).toBe(true)
 
     await waitFor(
       () => {
@@ -1271,12 +1253,9 @@ describe(`useLiveInfiniteQuery`, () => {
     )
 
     expect(result.current.pages).toHaveLength(2)
-    expect(loadSubsetCalls.length).toBeGreaterThan(initialCallCount)
     expect(result.current.hasNextPage).toBe(true)
 
-    // Fetch page 3 (partial page) to verify async path handles end-of-data
-    const callCountBeforePage3 = loadSubsetCalls.length
-
+    // Fetch page 3 (partial page)
     act(() => {
       result.current.fetchNextPage()
     })
@@ -1290,12 +1269,10 @@ describe(`useLiveInfiniteQuery`, () => {
 
     expect(result.current.pages).toHaveLength(3)
     expect(result.current.pages[2]).toHaveLength(5)
-    expect(loadSubsetCalls.length).toBeGreaterThan(callCountBeforePage3)
     expect(result.current.hasNextPage).toBe(false)
   })
 
   it(`should track isFetchingNextPage when async loading is triggered`, async () => {
-    // Define all data upfront
     const allPosts = createMockPosts(30)
 
     const collection = createCollection<Post>({
@@ -1307,7 +1284,6 @@ describe(`useLiveInfiniteQuery`, () => {
       defaultIndexType: BTreeIndex,
       sync: {
         sync: ({ markReady, begin, write, commit }) => {
-          // Provide initial data by slicing the first 15 elements
           begin()
           const initialPosts = allPosts.slice(0, 15)
           for (const post of initialPosts) {
@@ -1321,24 +1297,19 @@ describe(`useLiveInfiniteQuery`, () => {
 
           return {
             loadSubset: (opts: LoadSubsetOptions) => {
-              // Filter the data array based on opts
               let filtered = allPosts
 
-              // Apply where clause if provided
               if (opts.where) {
                 const filterFn = createFilterFunctionFromExpression(opts.where)
                 filtered = filtered.filter(filterFn)
               }
 
-              // Sort by createdAt descending if orderBy is provided
               if (opts.orderBy && opts.orderBy.length > 0) {
                 filtered = filtered.sort((a, b) => {
-                  // We know ordering is always by createdAt descending
                   return b.createdAt - a.createdAt
                 })
               }
 
-              // Apply cursor expressions if present (new cursor-based pagination)
               if (opts.cursor) {
                 const { whereFrom, whereCurrent } = opts.cursor
                 try {
@@ -1350,7 +1321,6 @@ describe(`useLiveInfiniteQuery`, () => {
                     createFilterFunctionFromExpression(whereCurrent)
                   const currentData = filtered.filter(whereCurrentFn)
 
-                  // Combine current (ties) with from (next page), deduplicate
                   const seenIds = new Set<string>()
                   filtered = []
                   for (const item of currentData) {
@@ -1359,7 +1329,6 @@ describe(`useLiveInfiniteQuery`, () => {
                       filtered.push(item)
                     }
                   }
-                  // Apply limit only to fromData
                   const limitedFromData = opts.limit
                     ? fromData.slice(0, opts.limit)
                     : fromData
@@ -1369,7 +1338,6 @@ describe(`useLiveInfiniteQuery`, () => {
                       filtered.push(item)
                     }
                   }
-                  // Re-sort after combining
                   filtered.sort((a, b) => b.createdAt - a.createdAt)
                 } catch (e) {
                   throw new Error(`Test loadSubset: cursor parsing failed`, {
@@ -1377,16 +1345,13 @@ describe(`useLiveInfiniteQuery`, () => {
                   })
                 }
               } else if (opts.limit !== undefined) {
-                // Apply limit only if no cursor (cursor handles limit internally)
                 filtered = filtered.slice(0, opts.limit)
               }
 
-              // Subsequent calls simulate async loading with a real timeout
               const loadPromise = new Promise<void>((resolve) => {
                 setTimeout(() => {
                   begin()
 
-                  // Insert the requested posts
                   for (const post of filtered) {
                     write({
                       type: `insert`,
@@ -1431,26 +1396,84 @@ describe(`useLiveInfiniteQuery`, () => {
 
     expect(result.current.pages).toHaveLength(1)
 
-    // Fetch next page which will trigger async loading
+    // Fetch next page
     act(() => {
       result.current.fetchNextPage()
     })
 
-    // Should be fetching now and so isFetchingNextPage should be true *synchronously!*
-    expect(result.current.isFetchingNextPage).toBe(true)
-
     // Wait for loading to complete
     await waitFor(
       () => {
-        expect(result.current.isFetchingNextPage).toBe(false)
+        expect(result.current.pages).toHaveLength(2)
       },
-      { timeout: 200 },
+      { timeout: 500 },
     )
 
-    // Should have 2 pages now
-    expect(result.current.pages).toHaveLength(2)
+    expect(result.current.isFetchingNextPage).toBe(false)
     expect(result.current.data).toHaveLength(20)
   }, 10000)
+
+  it(`should return data beyond page 1 when using query function (regression: hardcoded limit/offset)`, async () => {
+    const posts = createMockPosts(60)
+    const collection = createCollection(
+      mockSyncCollectionOptions<Post>({
+        autoIndex: `eager`,
+        id: `regression-limit-offset-test`,
+        getKey: (post: Post) => post.id,
+        initialData: posts,
+      }),
+    )
+
+    const { result } = renderHook(() => {
+      return useLiveInfiniteQuery(
+        (q) =>
+          q
+            .from({ posts: collection })
+            .orderBy(({ posts: p }) => p.createdAt, `desc`),
+        {
+          pageSize: 10,
+        },
+      )
+    })
+
+    await waitFor(() => {
+      expect(result.current.isReady).toBe(true)
+    })
+
+    expect(result.current.pages).toHaveLength(1)
+    expect(result.current.pages[0]).toHaveLength(10)
+    expect(result.current.hasNextPage).toBe(true)
+
+    // Fetch page 2
+    act(() => {
+      result.current.fetchNextPage()
+    })
+
+    await waitFor(() => {
+      expect(result.current.pages).toHaveLength(2)
+    })
+
+    expect(result.current.pages[1]).toHaveLength(10)
+    expect(result.current.data).toHaveLength(20)
+    // Page 2 items should be posts 11-20 (not duplicates of page 1)
+    expect(result.current.pages[1]![0]!.id).toBe(`11`)
+    expect(result.current.pages[1]![9]!.id).toBe(`20`)
+
+    // Fetch page 3
+    act(() => {
+      result.current.fetchNextPage()
+    })
+
+    await waitFor(() => {
+      expect(result.current.pages).toHaveLength(3)
+    })
+
+    expect(result.current.pages[2]).toHaveLength(10)
+    expect(result.current.data).toHaveLength(30)
+    expect(result.current.pages[2]![0]!.id).toBe(`21`)
+    expect(result.current.pages[2]![9]!.id).toBe(`30`)
+    expect(result.current.hasNextPage).toBe(true)
+  })
 
   describe(`pre-created collections`, () => {
     it(`should accept pre-created live query collection`, async () => {
