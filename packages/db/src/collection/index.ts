@@ -3,6 +3,7 @@ import {
   CollectionRequiresConfigError,
   CollectionRequiresSyncConfigError,
 } from '../errors'
+import { safeRandomUUID } from '../utils'
 import { currentStateAsChanges } from './change-events'
 
 import { CollectionStateManager } from './state'
@@ -329,7 +330,7 @@ export class CollectionImpl<
     if (config.id) {
       this.id = config.id
     } else {
-      this.id = crypto.randomUUID()
+      this.id = safeRandomUUID()
     }
 
     // Set default values for optional config properties

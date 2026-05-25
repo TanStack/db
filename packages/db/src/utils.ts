@@ -240,3 +240,53 @@ export const DEFAULT_COMPARE_OPTIONS: CompareOptions = {
   nulls: `first`,
   stringSort: `locale`,
 }
+
+/**
+ * Returns a UUID v4 string. Prefers `crypto.randomUUID()` when available and
+ * falls back to RFC 4122 v4 generation via `crypto.getRandomValues()` when it
+ * is not.
+ *
+ * Background: `crypto.randomUUID()` is restricted to secure contexts in
+ * browsers, so it is unavailable on pages served over plain HTTP from a
+ * non-localhost host (e.g. a dev server reached via a LAN IP). In those
+ * environments `crypto.getRandomValues()` remains available and is enough to
+ * produce a spec-compliant UUID v4.
+ *
+ * @throws Error when neither `crypto.randomUUID()` nor
+ *   `crypto.getRandomValues()` is available.
+ */
+export function safeRandomUUID(): string {
+  const c = globalThis.crypto as
+    | (Crypto & { randomUUID?: () => string })
+    | undefined
+  if (c?.randomUUID) {
+    return c.randomUUID()
+  }
+  if (c?.getRandomValues) {
+    const bytes = new Uint8Array(16)
+    c.getRandomValues(bytes)
+    // RFC 4122 §4.4: set the four most significant bits of the 7th byte to
+    // 0100 (version 4) and the two most significant bits of the 9th byte to
+    // 10 (variant 10xx).
+    bytes[6] = (bytes[6]! & 0x0f) | 0x40
+    bytes[8] = (bytes[8]! & 0x3f) | 0x80
+    const hex: Array<string> = []
+    for (let i = 0; i < bytes.length; i++) {
+      hex.push(bytes[i]!.toString(16).padStart(2, `0`))
+    }
+    return (
+      hex.slice(0, 4).join(``) +
+      `-` +
+      hex.slice(4, 6).join(``) +
+      `-` +
+      hex.slice(6, 8).join(``) +
+      `-` +
+      hex.slice(8, 10).join(``) +
+      `-` +
+      hex.slice(10, 16).join(``)
+    )
+  }
+  throw new Error(
+    `@tanstack/db: UUID generation requires Web Crypto (crypto.randomUUID or crypto.getRandomValues)`,
+  )
+}

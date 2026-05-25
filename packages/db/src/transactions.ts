@@ -7,6 +7,7 @@ import {
   TransactionNotPendingMutateError,
 } from './errors'
 import { transactionScopedScheduler } from './scheduler.js'
+import { safeRandomUUID } from './utils'
 import type { Deferred } from './deferred'
 import type {
   MutationFn,
@@ -224,7 +225,7 @@ class Transaction<T extends object = Record<string, unknown>> {
     if (typeof config.mutationFn === `undefined`) {
       throw new MissingMutationFunctionError()
     }
-    this.id = config.id ?? crypto.randomUUID()
+    this.id = config.id ?? safeRandomUUID()
     this.mutationFn = config.mutationFn
     this.state = `pending`
     this.mutations = []

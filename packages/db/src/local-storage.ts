@@ -4,6 +4,7 @@ import {
   SerializationError,
   StorageKeyRequiredError,
 } from './errors'
+import { safeRandomUUID } from './utils'
 import type {
   BaseCollectionConfig,
   CollectionConfig,
@@ -149,7 +150,7 @@ function validateJsonSerializable(
  * @returns A unique identifier string for tracking data versions
  */
 function generateUuid(): string {
-  return crypto.randomUUID()
+  return safeRandomUUID()
 }
 
 /**
