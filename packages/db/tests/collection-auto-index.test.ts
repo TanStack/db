@@ -1010,6 +1010,29 @@ describe(`Collection Auto-Indexing`, () => {
     expect(Object.keys(opts).sort()).toEqual([`locale`, `localeOptions`, `stringSort`])
   })
 
+  it(`should include locale fields when stringSort is omitted but locale values are provided`, () => {
+    const collection = createCollection<TestItem, string>({
+      getKey: (item) => item.id,
+      defaultStringCollation: {
+        locale: `en-US`,
+        localeOptions: { sensitivity: `base` },
+      },
+      startSync: true,
+      sync: {
+        sync: ({ begin, commit, markReady }) => {
+          begin()
+          commit()
+          markReady()
+        },
+      },
+    })
+
+    const opts = collection.compareOptions
+    expect(opts.stringSort).toBe(`locale`)
+    expect(opts.locale).toBe(`en-US`)
+    expect(opts.localeOptions).toEqual({ sensitivity: `base` })
+  })
+
   it(`should not create duplicate auto-indexes when defaultStringCollation matches defaults`, async () => {
     const collection = createCollection<TestItem, string>({
       getKey: (item) => item.id,

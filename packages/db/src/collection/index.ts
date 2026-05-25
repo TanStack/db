@@ -996,9 +996,10 @@ function buildCompareOptionsFromConfig(
 ): StringCollationConfig {
   if (config.defaultStringCollation) {
     const options = config.defaultStringCollation
-    const localeMode = options.stringSort === `locale`
+    const stringSortEffective = options.stringSort ?? `locale`
+    const localeMode = stringSortEffective === `locale`
     return {
-      stringSort: options.stringSort ?? `locale`,
+      stringSort: stringSortEffective,
       ...(localeMode && options.locale !== undefined && { locale: options.locale }),
       ...(localeMode && options.localeOptions !== undefined && { localeOptions: options.localeOptions }),
     }
