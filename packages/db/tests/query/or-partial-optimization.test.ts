@@ -36,13 +36,13 @@ describe(`or() with partially indexed branches`, () => {
     })
 
     const liveQuery = createLiveQueryCollection({
-      query: (q: any) =>
+      query: (q) =>
         q
           .from({ item: collection })
-          .where(({ item }: any) =>
+          .where(({ item }) =>
             or(eq(item.category, `A`), eq(item.tag, `x`)),
           )
-          .select(({ item }: any) => ({
+          .select(({ item }) => ({
             id: item.id,
             category: item.category,
             tag: item.tag,
