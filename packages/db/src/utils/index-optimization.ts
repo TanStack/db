@@ -498,8 +498,8 @@ function canOptimizeOrExpression<
     return false
   }
 
-  // If any argument can be optimized, we can gain some speedup
-  return expression.args.some((arg) => canOptimizeExpression(arg, collection))
+  // All branches must be optimizable — partial OR optimization is unsound
+  return expression.args.every((arg) => canOptimizeExpression(arg, collection))
 }
 
 /**
