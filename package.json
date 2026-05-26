@@ -23,10 +23,10 @@
     "generate-docs": "node scripts/generate-docs.ts"
   },
   "devDependencies": {
+    "@changesets/changelog-github": "^0.7.0",
     "@changesets/cli": "^2.29.8",
     "@eslint/js": "^9.39.2",
     "@fast-check/vitest": "^0.2.0",
-    "@svitejs/changesets-changelog-github-compact": "^1.2.0",
     "@tanstack/eslint-config": "0.3.4",
     "@tanstack/typedoc-config": "0.3.3",
     "@tanstack/vite-config": "0.4.3",
