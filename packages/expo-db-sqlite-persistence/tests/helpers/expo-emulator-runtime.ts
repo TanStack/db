@@ -198,7 +198,9 @@ function normalizeRuntimeSqliteValue(
   value: SQLiteBindValue,
 ): ExpoRuntimeSQLiteBindValue {
   if (value instanceof Uint8Array) {
-    throw new TypeError(`Expo runtime bridge does not support binary SQLite params`)
+    throw new TypeError(
+      `Expo runtime bridge does not support binary SQLite params`,
+    )
   }
 
   return value

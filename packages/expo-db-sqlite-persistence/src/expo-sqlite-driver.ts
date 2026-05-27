@@ -12,10 +12,7 @@ export type ExpoSQLiteQueryable = {
     sql: string,
     params?: SQLiteBindParams,
   ) => Promise<ReadonlyArray<T>>
-  runAsync: (
-    sql: string,
-    params?: SQLiteBindParams,
-  ) => Promise<SQLiteRunResult>
+  runAsync: (sql: string, params?: SQLiteBindParams) => Promise<SQLiteRunResult>
 }
 
 export type ExpoSQLiteTransaction = ExpoSQLiteQueryable

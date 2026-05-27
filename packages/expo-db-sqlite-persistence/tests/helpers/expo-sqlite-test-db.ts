@@ -24,9 +24,7 @@ declare global {
     | undefined
 }
 
-function normalizeRunResult(
-  result: BetterSqlite3.RunResult,
-): SQLiteRunResult {
+function normalizeRunResult(result: BetterSqlite3.RunResult): SQLiteRunResult {
   return {
     changes: result.changes,
     lastInsertRowId:
