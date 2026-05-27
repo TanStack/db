@@ -1,6 +1,6 @@
 export type ExpoRuntimeSQLiteBindValue = string | number | boolean | null
 export type ExpoRuntimeSQLiteBindParams =
-  | ReadonlyArray<ExpoRuntimeSQLiteBindValue>
+  | Array<ExpoRuntimeSQLiteBindValue>
   | Record<string, ExpoRuntimeSQLiteBindValue>
 
 export type ExpoRuntimeCommand =

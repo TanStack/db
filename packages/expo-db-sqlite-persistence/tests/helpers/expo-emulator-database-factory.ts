@@ -45,9 +45,13 @@ export function createMobileSQLiteTestDatabaseFactory(): ExpoSQLiteTestDatabaseF
         await (await getDatabase()).execAsync(sql)
       },
       getAllAsync: async <T>(sql: string, params?: SQLiteBindParams) =>
-        (await getDatabase()).getAllAsync<T>(sql, params),
+        params !== undefined
+          ? (await getDatabase()).getAllAsync<T>(sql, params)
+          : (await getDatabase()).getAllAsync<T>(sql),
       runAsync: async (sql: string, params?: SQLiteBindParams) =>
-        (await getDatabase()).runAsync(sql, params),
+        params !== undefined
+          ? (await getDatabase()).runAsync(sql, params)
+          : (await getDatabase()).runAsync(sql),
       withExclusiveTransactionAsync: async (
         task: (transaction: ExpoSQLiteTransaction) => Promise<void>,
       ): Promise<void> =>
