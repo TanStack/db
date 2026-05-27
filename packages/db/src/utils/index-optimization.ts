@@ -469,22 +469,17 @@ function optimizeOrExpression<T extends object, TKey extends string | number>(
 
   const results: Array<OptimizationResult<TKey>> = []
 
-  // Try to optimize each part, keep the optimizable ones
   for (const arg of expression.args) {
     const result = optimizeQueryRecursive(arg, collection)
-    if (result.canOptimize) {
-      results.push(result)
+    if (!result.canOptimize) {
+      return { canOptimize: false, matchingKeys: new Set() }
     }
+    results.push(result)
   }
 
-  if (results.length === expression.args.length) {
-    // Use unionSets utility for OR logic
-    const allMatchingSets = results.map((r) => r.matchingKeys)
-    const unionedKeys = unionSets(allMatchingSets)
-    return { canOptimize: true, matchingKeys: unionedKeys }
-  }
-
-  return { canOptimize: false, matchingKeys: new Set() }
+  const allMatchingSets = results.map((r) => r.matchingKeys)
+  const unionedKeys = unionSets(allMatchingSets)
+  return { canOptimize: true, matchingKeys: unionedKeys }
 }
 
 /**
