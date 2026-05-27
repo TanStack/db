@@ -1,3 +1,8 @@
+export type ExpoRuntimeSQLiteBindValue = string | number | boolean | null
+export type ExpoRuntimeSQLiteBindParams =
+  | ReadonlyArray<ExpoRuntimeSQLiteBindValue>
+  | Record<string, ExpoRuntimeSQLiteBindValue>
+
 export type ExpoRuntimeCommand =
   | {
       id: string
@@ -12,7 +17,7 @@ export type ExpoRuntimeCommand =
       databaseId: string
       databaseName: string
       sql: string
-      params?: ReadonlyArray<unknown> | Record<string, unknown>
+      params?: ExpoRuntimeSQLiteBindParams
     }
   | {
       id: string
@@ -20,7 +25,7 @@ export type ExpoRuntimeCommand =
       databaseId: string
       databaseName: string
       sql: string
-      params?: ReadonlyArray<unknown> | Record<string, unknown>
+      params?: ExpoRuntimeSQLiteBindParams
     }
   | {
       id: string
@@ -46,14 +51,14 @@ export type ExpoRuntimeCommand =
       type: `tx:getAll`
       transactionId: string
       sql: string
-      params?: ReadonlyArray<unknown> | Record<string, unknown>
+      params?: ExpoRuntimeSQLiteBindParams
     }
   | {
       id: string
       type: `tx:run`
       transactionId: string
       sql: string
-      params?: ReadonlyArray<unknown> | Record<string, unknown>
+      params?: ExpoRuntimeSQLiteBindParams
     }
   | {
       id: string

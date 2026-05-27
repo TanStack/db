@@ -1,8 +1,11 @@
 import BetterSqlite3 from 'better-sqlite3'
 import type {
-  ExpoSQLiteBindParams,
+  SQLiteBindParams,
+  SQLiteBindValue,
+  SQLiteRunResult,
+} from 'expo-sqlite'
+import type {
   ExpoSQLiteDatabaseLike,
-  ExpoSQLiteRunResult,
   ExpoSQLiteTransaction,
 } from '../../src/expo-sqlite-driver'
 
@@ -23,7 +26,7 @@ declare global {
 
 function normalizeRunResult(
   result: BetterSqlite3.RunResult,
-): ExpoSQLiteRunResult {
+): SQLiteRunResult {
   return {
     changes: result.changes,
     lastInsertRowId:
@@ -34,15 +37,15 @@ function normalizeRunResult(
 }
 
 function hasNamedParameters(
-  params: ExpoSQLiteBindParams | undefined,
-): params is Record<string, unknown> {
+  params: SQLiteBindParams | undefined,
+): params is Record<string, SQLiteBindValue> {
   return params !== undefined && !Array.isArray(params)
 }
 
 function executeAll<T>(
   database: InstanceType<typeof BetterSqlite3>,
   sql: string,
-  params?: ExpoSQLiteBindParams,
+  params?: SQLiteBindParams,
 ): ReadonlyArray<T> {
   const statement = database.prepare(sql)
 
@@ -60,8 +63,8 @@ function executeAll<T>(
 function executeRun(
   database: InstanceType<typeof BetterSqlite3>,
   sql: string,
-  params?: ExpoSQLiteBindParams,
-): ExpoSQLiteRunResult {
+  params?: SQLiteBindParams,
+): SQLiteRunResult {
   const statement = database.prepare(sql)
   const result =
     params === undefined
@@ -83,13 +86,13 @@ function createTransactionHandle(
     },
     getAllAsync: <T>(
       sql: string,
-      params?: ExpoSQLiteBindParams,
+      params?: SQLiteBindParams,
     ): Promise<ReadonlyArray<T>> =>
       Promise.resolve(executeAll<T>(database, sql, params)),
     runAsync: (
       sql: string,
-      params?: ExpoSQLiteBindParams,
-    ): Promise<ExpoSQLiteRunResult> =>
+      params?: SQLiteBindParams,
+    ): Promise<SQLiteRunResult> =>
       Promise.resolve(executeRun(database, sql, params)),
   }
 }
@@ -123,13 +126,13 @@ export function createExpoSQLiteTestDatabase(options: {
     },
     getAllAsync: async <T>(
       sql: string,
-      params?: ExpoSQLiteBindParams,
+      params?: SQLiteBindParams,
     ): Promise<ReadonlyArray<T>> =>
       enqueue(() => executeAll<T>(nativeDatabase, sql, params)),
     runAsync: async (
       sql: string,
-      params?: ExpoSQLiteBindParams,
-    ): Promise<ExpoSQLiteRunResult> =>
+      params?: SQLiteBindParams,
+    ): Promise<SQLiteRunResult> =>
       enqueue(() => executeRun(nativeDatabase, sql, params)),
     withExclusiveTransactionAsync: async <T>(
       task: (transaction: ExpoSQLiteTransaction) => Promise<T>,
