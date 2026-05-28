@@ -18,6 +18,7 @@
 import { DEFAULT_COMPARE_OPTIONS } from '../utils.js'
 import { ReverseIndex } from '../indexes/reverse-index.js'
 import { hasVirtualPropPath } from '../virtual-props.js'
+import { Func } from '../query/ir.js'
 import type { CompareOptions } from '../query/builder/types.js'
 import type { IndexInterface, IndexOperation } from '../indexes/base-index.js'
 import type { BasicExpression } from '../query/ir.js'
@@ -25,10 +26,18 @@ import type { CollectionLike } from '../types.js'
 
 /**
  * Result of index-based query optimization
+ *
+ * When `residualPredicate` is set, the caller MUST evaluate it against each
+ * value in `matchingKeys` and drop rows that fail. This supports partial
+ * optimization of AND expressions where some branches are indexed and the
+ * rest must be re-checked against the candidate set.
+ *
+ * When `residualPredicate` is `undefined`, `matchingKeys` is exact.
  */
 export interface OptimizationResult<TKey> {
   canOptimize: boolean
   matchingKeys: Set<TKey>
+  residualPredicate?: BasicExpression
 }
 
 /**
@@ -138,7 +147,7 @@ function optimizeQueryRecursive<T extends object, TKey extends string | number>(
 }
 
 /**
- * Checks if an expression can be optimized
+ * Checks if an expression can be optimized (possibly with a residual predicate)
  */
 export function canOptimizeExpression<
   T extends object,
@@ -168,26 +177,70 @@ export function canOptimizeExpression<
 }
 
 /**
+ * Checks if an expression can be fully optimized — i.e. matched entirely by
+ * index lookups with no residual predicate. AND children must satisfy this
+ * recursively; partial AND optimization (which produces a residual) does not
+ * count. This is the predicate the strict-OR contract uses to decide whether
+ * an OR branch is safe to union by index alone.
+ */
+function canFullyOptimizeExpression<
+  T extends object,
+  TKey extends string | number,
+>(expression: BasicExpression, collection: CollectionLike<T, TKey>): boolean {
+  if (expression.type !== `func`) return false
+
+  switch (expression.name) {
+    case `eq`:
+    case `gt`:
+    case `gte`:
+    case `lt`:
+    case `lte`:
+      return canOptimizeSimpleComparison(expression, collection)
+    case `in`:
+      return canOptimizeInArrayExpression(expression, collection)
+    case `and`:
+      return (
+        expression.args.length >= 2 &&
+        expression.args.every((arg) =>
+          canFullyOptimizeExpression(arg, collection),
+        )
+      )
+    case `or`:
+      // OR is already strict; reuse the OR predicate, which itself recurses.
+      return canOptimizeOrExpression(expression, collection)
+    default:
+      return false
+  }
+}
+
+/**
  * Optimizes compound range queries on the same field
  * Example: WHERE age > 5 AND age < 10
  */
+interface CompoundRangeQueryResult<TKey> {
+  matchingKeys: Set<TKey>
+  consumedArgs: Set<BasicExpression>
+}
+
 function optimizeCompoundRangeQuery<
   T extends object,
   TKey extends string | number,
 >(
   expression: BasicExpression,
   collection: CollectionLike<T, TKey>,
-): OptimizationResult<TKey> {
+): CompoundRangeQueryResult<TKey> | undefined {
   if (expression.type !== `func` || expression.args.length < 2) {
-    return { canOptimize: false, matchingKeys: new Set() }
+    return undefined
   }
 
-  // Group range operations by field
+  // Group range operations by field, tracking which arg produced each entry so
+  // we can report back exactly which branches the compound range consumed.
   const fieldOperations = new Map<
     string,
     Array<{
       operation: `gt` | `gte` | `lt` | `lte`
       value: any
+      arg: BasicExpression
     }>
   >()
 
@@ -238,7 +291,7 @@ function optimizeCompoundRangeQuery<
           if (!fieldOperations.has(fieldKey)) {
             fieldOperations.set(fieldKey, [])
           }
-          fieldOperations.get(fieldKey)!.push({ operation, value })
+          fieldOperations.get(fieldKey)!.push({ operation, value, arg })
         }
       }
     }
@@ -293,12 +346,15 @@ function optimizeCompoundRangeQuery<
           toInclusive,
         })
 
-        return { canOptimize: true, matchingKeys }
+        const consumedArgs = new Set<BasicExpression>(
+          operations.map((op) => op.arg),
+        )
+        return { matchingKeys, consumedArgs }
       }
     }
   }
 
-  return { canOptimize: false, matchingKeys: new Set() }
+  return undefined
 }
 
 /**
@@ -415,30 +471,52 @@ function optimizeAndExpression<T extends object, TKey extends string | number>(
     return { canOptimize: false, matchingKeys: new Set() }
   }
 
-  // First, try to optimize compound range queries on the same field
+  // Compound range queries fuse multiple range ops on the same field into a
+  // single index lookup. When present, treat the fused result as one optimized
+  // branch and run the normal partition over the remaining args, so any
+  // non-range siblings (indexed or not) still participate in the residual.
   const compoundRangeResult = optimizeCompoundRangeQuery(expression, collection)
-  if (compoundRangeResult.canOptimize) {
-    return compoundRangeResult
+
+  const optimizedResults: Array<OptimizationResult<TKey>> = []
+  const residualBranches: Array<BasicExpression> = []
+
+  if (compoundRangeResult) {
+    optimizedResults.push({
+      canOptimize: true,
+      matchingKeys: compoundRangeResult.matchingKeys,
+    })
   }
 
-  const results: Array<OptimizationResult<TKey>> = []
-
-  // Try to optimize each part, keep the optimizable ones
+  // Partition branches into ones we can use indexes for, and ones that need to
+  // be re-evaluated as a residual predicate on the resulting candidate set.
   for (const arg of expression.args) {
+    if (compoundRangeResult?.consumedArgs.has(arg)) continue
     const result = optimizeQueryRecursive(arg, collection)
     if (result.canOptimize) {
-      results.push(result)
+      optimizedResults.push(result)
+      // A partially-optimized child carries its own residual; fold it in.
+      if (result.residualPredicate) {
+        residualBranches.push(result.residualPredicate)
+      }
+    } else {
+      residualBranches.push(arg)
     }
   }
 
-  if (results.length > 0) {
-    // Use intersectSets utility for AND logic
-    const allMatchingSets = results.map((r) => r.matchingKeys)
-    const intersectedKeys = intersectSets(allMatchingSets)
-    return { canOptimize: true, matchingKeys: intersectedKeys }
+  if (optimizedResults.length === 0) {
+    return { canOptimize: false, matchingKeys: new Set() }
   }
 
-  return { canOptimize: false, matchingKeys: new Set() }
+  const allMatchingSets = optimizedResults.map((r) => r.matchingKeys)
+  const intersectedKeys = intersectSets(allMatchingSets)
+  const residualPredicate =
+    residualBranches.length === 0
+      ? undefined
+      : residualBranches.length === 1
+        ? residualBranches[0]
+        : new Func(`and`, residualBranches)
+
+  return { canOptimize: true, matchingKeys: intersectedKeys, residualPredicate }
 }
 
 /**
@@ -467,11 +545,26 @@ function optimizeOrExpression<T extends object, TKey extends string | number>(
     return { canOptimize: false, matchingKeys: new Set() }
   }
 
-  const results: Array<OptimizationResult<TKey>> = []
+  // Strict-OR: every branch must be fully optimizable (no residual). A residual
+  // on any branch would mean some rows match only via re-evaluation against a
+  // candidate set, and candidates from OR siblings don't include those. Check
+  // up front using the cheap predicate so we don't run wasted index lookups on
+  // earlier branches before discovering a later one cannot be optimized.
+  if (
+    !expression.args.every((arg) =>
+      canFullyOptimizeExpression(arg, collection),
+    )
+  ) {
+    return { canOptimize: false, matchingKeys: new Set() }
+  }
 
+  const results: Array<OptimizationResult<TKey>> = []
   for (const arg of expression.args) {
     const result = optimizeQueryRecursive(arg, collection)
-    if (!result.canOptimize) {
+    // Defensive: canFullyOptimizeExpression guarantees both invariants above,
+    // but assert here so any future divergence between the two paths surfaces
+    // as a soft fallback rather than an unsound union.
+    if (!result.canOptimize || result.residualPredicate !== undefined) {
       return { canOptimize: false, matchingKeys: new Set() }
     }
     results.push(result)
@@ -493,8 +586,12 @@ function canOptimizeOrExpression<
     return false
   }
 
-  // All branches must be optimizable — partial OR optimization is unsound
-  return expression.args.every((arg) => canOptimizeExpression(arg, collection))
+  // Strict OR: every branch must be FULLY optimizable (no residual). Using
+  // canOptimizeExpression here would let partial-AND children slip through,
+  // disagreeing with optimizeOrExpression's runtime contract.
+  return expression.args.every((arg) =>
+    canFullyOptimizeExpression(arg, collection),
+  )
 }
 
 /**

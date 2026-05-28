@@ -1048,6 +1048,172 @@ describe(`Collection Indexes`, () => {
       })
     })
 
+    it(`should narrow via multiple indexed AND branches and re-filter unindexed`, () => {
+      // status='active' matches Alice, Charlie, Eve (3 rows).
+      // age>=25 matches Alice, Bob, Charlie, Diana (4 rows).
+      // Intersection of indexed branches: Alice, Charlie.
+      // name='Alice' residual filters to: Alice.
+      withIndexTracking(collection, (tracker) => {
+        const result = collection.currentStateAsChanges({
+          where: and(
+            eq(new PropRef([`status`]), `active`),
+            gte(new PropRef([`age`]), 25),
+            eq(new PropRef([`name`]), `Alice`),
+          ),
+        })!
+
+        expect(result).toHaveLength(1)
+        expect(result[0]?.value.name).toBe(`Alice`)
+
+        // Both indexed branches used; name re-filtered.
+        expectIndexUsage(tracker.stats, {
+          shouldUseIndex: true,
+          shouldUseFullScan: false,
+          indexCallCount: 2,
+          fullScanCallCount: 0,
+        })
+      })
+    })
+
+    it(`should hoist nested-OR result into AND with unindexed residual`, () => {
+      // or(status='active', status='pending') is fully indexed → 4 candidates.
+      // name='Alice' is the AND residual, narrows to Alice only.
+      const result = collection.currentStateAsChanges({
+        where: and(
+          or(
+            eq(new PropRef([`status`]), `active`),
+            eq(new PropRef([`status`]), `pending`),
+          ),
+          eq(new PropRef([`name`]), `Alice`),
+        ),
+      })!
+
+      expect(result).toHaveLength(1)
+      expect(result[0]?.value.name).toBe(`Alice`)
+    })
+
+    it(`should reject OR when a child AND would return a residual (strict OR)`, () => {
+      // and(status='active', name='Alice') is partially optimizable — produces
+      // canOptimize:true with a residual on name. OR must reject children with
+      // residuals: a candidate set narrowed by partial AND would be incomplete
+      // for the OR's union semantics, so the whole OR falls back to full scan.
+      withIndexTracking(collection, (tracker) => {
+        const result = collection.currentStateAsChanges({
+          where: or(
+            and(
+              eq(new PropRef([`status`]), `active`),
+              eq(new PropRef([`name`]), `Alice`),
+            ),
+            eq(new PropRef([`age`]), 30),
+          ),
+        })!
+
+        // Alice (active+Alice) ∪ Bob (age=30) = 2 rows
+        expect(result).toHaveLength(2)
+        const names = result.map((r) => r.value.name).sort()
+        expect(names).toEqual([`Alice`, `Bob`])
+
+        // Strict OR rejects up front — no index lookups should run.
+        expectIndexUsage(tracker.stats, {
+          shouldUseIndex: false,
+          shouldUseFullScan: true,
+          indexCallCount: 0,
+          fullScanCallCount: 1,
+        })
+      })
+    })
+
+    it(`should reject partial optimization inside OR (strict OR)`, () => {
+      // or(status='active', name='Alice'): name has no index. OR cannot be
+      // partially optimized — must fall back to full scan to remain sound.
+      withIndexTracking(collection, (tracker) => {
+        const result = collection.currentStateAsChanges({
+          where: or(
+            eq(new PropRef([`status`]), `active`),
+            eq(new PropRef([`name`]), `Alice`),
+          ),
+        })!
+
+        // 3 active rows ∪ {Alice} = 3 (Alice is already active)
+        expect(result).toHaveLength(3)
+        const names = result.map((r) => r.value.name).sort()
+        expect(names).toEqual([`Alice`, `Charlie`, `Eve`])
+
+        expectIndexUsage(tracker.stats, {
+          shouldUseIndex: false,
+          shouldUseFullScan: true,
+          indexCallCount: 0,
+          fullScanCallCount: 1,
+        })
+      })
+    })
+
+    it(`should not produce a residual when all AND branches are indexed`, () => {
+      // Regression guard: fully indexed AND must not trigger unnecessary
+      // residual composition or re-evaluation.
+      withIndexTracking(collection, (tracker) => {
+        const result = collection.currentStateAsChanges({
+          where: and(
+            eq(new PropRef([`status`]), `active`),
+            eq(new PropRef([`age`]), 25),
+          ),
+        })!
+
+        expect(result).toHaveLength(1)
+        expect(result[0]?.value.name).toBe(`Alice`)
+
+        expectIndexUsage(tracker.stats, {
+          shouldUseIndex: true,
+          shouldUseFullScan: false,
+          indexCallCount: 2,
+          fullScanCallCount: 0,
+        })
+      })
+    })
+
+    it(`should re-filter candidates after compound-range optimization (soundness)`, () => {
+      // age in [25, 35] matches Alice(25), Bob(30), Charlie(35), Diana(28) — 4 rows.
+      // name='Alice' should narrow to 1 row.
+      // Bug: optimizeCompoundRangeQuery short-circuits in optimizeAndExpression
+      // and returns the age-range candidates with no residual on name.
+      const result = collection.currentStateAsChanges({
+        where: and(
+          gte(new PropRef([`age`]), 25),
+          lte(new PropRef([`age`]), 35),
+          eq(new PropRef([`name`]), `Alice`),
+        ),
+      })!
+
+      expect(result).toHaveLength(1)
+      expect(result[0]?.value.name).toBe(`Alice`)
+    })
+
+    it(`should re-filter candidates against unindexed AND branch (soundness)`, () => {
+      // status='active' matches 3 rows: Alice, Charlie, Eve.
+      // name='Alice' matches 1 row: Alice. No index on name.
+      // Pre-fix: returns all 3 active rows (intersected only the indexed branch).
+      // Post-fix: returns only Alice (residual predicate re-checked on candidates).
+      withIndexTracking(collection, (tracker) => {
+        const result = collection.currentStateAsChanges({
+          where: and(
+            eq(new PropRef([`status`]), `active`),
+            eq(new PropRef([`name`]), `Alice`),
+          ),
+        })!
+
+        expect(result).toHaveLength(1)
+        expect(result[0]?.value.name).toBe(`Alice`)
+
+        // Index used once on status; name re-filtered in JS against candidates.
+        expectIndexUsage(tracker.stats, {
+          shouldUseIndex: true,
+          shouldUseFullScan: false,
+          indexCallCount: 1,
+          fullScanCallCount: 0,
+        })
+      })
+    })
+
     it(`should fall back to full scan when no conditions can be optimized`, () => {
       withIndexTracking(collection, (tracker) => {
         // Only complex expressions that can't be optimized
