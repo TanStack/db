@@ -766,6 +766,7 @@ export function useLiveQuery(
   const snapshot = useSyncExternalStore(
     subscribeRef.current,
     getSnapshotRef.current,
+    getSnapshotRef.current,
   )
 
   // Track last snapshot (from useSyncExternalStore) and the returned value separately
