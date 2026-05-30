@@ -155,6 +155,26 @@ function canonicalizeSource(
     }
   }
 
+  if (source.type === `unionFrom`) {
+    return {
+      type: `unionFrom`,
+      sources: [...source.sources]
+        .sort((a, b) => a.alias.localeCompare(b.alias))
+        .map((unionSource, index) =>
+          canonicalizeSource(unionSource, `${path}.sources[${index}]`, seen),
+        ),
+    }
+  }
+
+  if (source.type === `unionAll`) {
+    return {
+      type: `unionAll`,
+      queries: source.queries.map((query, index) =>
+        canonicalizeQuery(query, `${path}.queries[${index}]`, seen),
+      ),
+    }
+  }
+
   return {
     type: `queryRef`,
     alias: source.alias,
