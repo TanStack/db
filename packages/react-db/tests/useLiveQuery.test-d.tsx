@@ -12,7 +12,7 @@ import { useLiveQuery } from '../src/useLiveQuery'
 import { useLiveInfiniteQuery } from '../src/useLiveInfiniteQuery'
 import { useLiveSuspenseQuery } from '../src/useLiveSuspenseQuery'
 import { useDbClient } from '../src/DbProvider'
-import type { DbClient} from '../../db/src/index';
+import type { DbClient } from '../../db/src/index'
 import type { OutputWithVirtual } from '../../db/tests/utils'
 import type { SingleResult } from '../../db/src/types'
 
