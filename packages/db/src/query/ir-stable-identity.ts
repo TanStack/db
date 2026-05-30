@@ -3,6 +3,7 @@ import { getQueryIR } from './builder/index.js'
 import type {
   Aggregate,
   BasicExpression,
+  ConditionalSelect,
   From,
   Having,
   IncludesSubquery,
@@ -261,7 +262,11 @@ function canonicalizeOrderBy(
 }
 
 function canonicalizeExpression(
-  expression: BasicExpression | Aggregate | IncludesSubquery,
+  expression:
+    | BasicExpression
+    | Aggregate
+    | IncludesSubquery
+    | ConditionalSelect,
   path: string,
   seen: WeakSet<object>,
 ): StableIdentityValue {
@@ -299,6 +304,34 @@ function canonicalizeExpression(
         canonicalizeExpression(arg, `${path}.args[${index}]`, seen),
       ),
     }
+  }
+
+  if (expression.type === `conditionalSelect`) {
+    const result: Record<string, StableIdentityValue> = {
+      type: `conditionalSelect`,
+      branches: expression.branches.map((branch, index) => ({
+        condition: canonicalizeExpression(
+          branch.condition,
+          `${path}.branches[${index}].condition`,
+          seen,
+        ),
+        value: canonicalizeSelectValue(
+          branch.value,
+          `${path}.branches[${index}].value`,
+          seen,
+        ),
+      })),
+    }
+
+    if (expression.defaultValue !== undefined) {
+      result.defaultValue = canonicalizeSelectValue(
+        expression.defaultValue,
+        `${path}.defaultValue`,
+        seen,
+      )
+    }
+
+    return result
   }
 
   const result: Record<string, StableIdentityValue> = {
@@ -483,6 +516,7 @@ function isExpression(
   const expressionType = (value as { type?: unknown }).type
   return (
     expressionType === `agg` ||
+    expressionType === `conditionalSelect` ||
     expressionType === `func` ||
     expressionType === `ref` ||
     expressionType === `val` ||

@@ -5,6 +5,7 @@ import {
   add,
   and,
   avg,
+  caseWhen,
   coalesce,
   concat,
   count,
@@ -159,6 +160,26 @@ const structuredQueries: Array<[string, () => QueryIR]> = [
       ),
   ],
   [
+    `conditional projection select`,
+    () =>
+      getQueryIR(
+        new Query().from({ user: usersCollection }).select(({ user }) => ({
+          id: user.id,
+          profile: caseWhen(
+            gt(user.age, 18),
+            {
+              label: `adult`,
+              email: user.email,
+            },
+            {
+              label: `minor`,
+              email: null,
+            },
+          ),
+        })),
+      ),
+  ],
+  [
     `top-level alias spread select`,
     () =>
       getQueryIR(
@@ -292,7 +313,7 @@ const structuredQueries: Array<[string, () => QueryIR]> = [
 
 describe(`stable QueryIR identity smoke test`, () => {
   it(`can derive identity for representative structured query shapes`, () => {
-    expect(structuredQueries).toHaveLength(16)
+    expect(structuredQueries).toHaveLength(17)
 
     const hashes = structuredQueries.map(([name, createQuery]) => {
       const hash = getStableQueryIRHash(createQuery())

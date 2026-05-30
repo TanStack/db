@@ -34,7 +34,6 @@ export type DehydratedCollectionRow<
   key: TKey
   value: T
   metadata?: unknown
-  updatedAt?: number
 }
 
 export type DehydratedCollectionChunk<
@@ -165,10 +164,16 @@ export class DbClient {
     }
 
     const collection = createCollection(options as any)
+    if (this.collectionsById.has(collection.id)) {
+      throw new Error(
+        `Cannot materialize collection "${collection.id}" because this DbClient already has a different collection with that id. SSR hydration requires collection ids to be unique per DbClient.`,
+      )
+    }
+
     this.collectionsByOptions.set(options, collection)
     this.collectionsById.set(collection.id, {
       collection,
-      hasExplicitId: options.id !== undefined,
+      hasExplicitId: options.id === collection.id,
     })
 
     if (materializeOptions?.initialData?.length) {

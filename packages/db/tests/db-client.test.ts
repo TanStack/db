@@ -117,10 +117,51 @@ describe(`DbClient`, () => {
     ).toEqual([`people`])
   })
 
+  it(`requires collection ids to be unique per client`, () => {
+    const firstDescriptor = collectionOptions(
+      mockSyncCollectionOptions<Person>({
+        id: `people`,
+        getKey: (person) => person.id,
+        initialData: [people[0]!],
+      }),
+    )
+    const secondDescriptor = collectionOptions(
+      mockSyncCollectionOptions<Person>({
+        id: `people`,
+        getKey: (person) => person.id,
+        initialData: [people[1]!],
+      }),
+    )
+
+    const client = new DbClient()
+    client.collection(firstDescriptor)
+
+    expect(() => client.collection(secondDescriptor)).toThrow(
+      /collection ids to be unique per DbClient/,
+    )
+  })
+
   it(`requires stable explicit collection ids for dehydration`, () => {
     const descriptor = collectionOptions(
       mockSyncCollectionOptions<Person>({
         id: undefined as unknown as string,
+        getKey: (person) => person.id,
+        initialData: people,
+      }),
+    )
+
+    const client = new DbClient()
+    client.collection(descriptor)
+
+    expect(() => client.dehydrate()).toThrow(
+      /SSR hydration requires stable collection ids/,
+    )
+  })
+
+  it(`does not treat an empty collection id as stable for dehydration`, () => {
+    const descriptor = collectionOptions(
+      mockSyncCollectionOptions<Person>({
+        id: ``,
         getKey: (person) => person.id,
         initialData: people,
       }),
