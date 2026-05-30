@@ -1,5 +1,20 @@
 # @tanstack/db
 
+## 0.6.7
+
+### Patch Changes
+
+- Clarify documentation for caseWhen, coalesce, manual transactions, and multi-endpoint Query Collection behavior. Add utility function categorization and fix reference index ordering. ([#1544](https://github.com/TanStack/db/pull/1544))
+
+- Fix stale optimistic rows persisting when sync confirms a different server-generated key. Previously, direct transactions (from `collection.insert()` etc.) had their optimistic rows exempted from stale-row cleanup, which prevented temp-key rows from being removed when the server returned a different primary key. ([#1547](https://github.com/TanStack/db/pull/1547))
+
+## 0.6.6
+
+### Patch Changes
+
+- Added the `caseWhen` query operator for scalar conditional expressions and conditional select projections with guarded includes. ([#1536](https://github.com/TanStack/db/pull/1536))
+  Added `unionAll()` support to combine independent sources or built query branches in a single query.
+
 ## 0.6.5
 
 ### Patch Changes

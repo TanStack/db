@@ -245,9 +245,12 @@ class Transaction<T extends object = Record<string, unknown>> {
 
   /**
    * Execute collection operations within this transaction
-   * @param callback - Function containing collection operations to group together. If the
-   * callback returns a Promise, the transaction context will remain active until the promise
-   * settles, allowing optimistic writes after `await` boundaries.
+   * @param callback - Synchronous function containing collection operations to group together.
+   * The transaction context is active only for the synchronous duration of this callback.
+   * Async work should happen in `mutationFn`; collection operations after `await` boundaries
+   * inside this callback will not be part of this transaction. For manual transactions, call
+   * `mutate` multiple times before committing to add more synchronous operations to the same
+   * transaction.
    * @returns This transaction for chaining
    * @example
    * // Group multiple operations
@@ -279,6 +282,11 @@ class Transaction<T extends object = Record<string, unknown>> {
    *
    * tx.mutate(() => {
    *   collection.insert({ id: "1", text: "Item" })
+   * })
+   *
+   * // Add more synchronous mutations to the same transaction
+   * tx.mutate(() => {
+   *   collection.update("1", draft => { draft.text = "Updated item" })
    * })
    *
    * // Commit later when ready

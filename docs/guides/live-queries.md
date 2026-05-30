@@ -501,16 +501,19 @@ This is particularly useful when you need to:
 
 The foundation of every query is the `from` method, which specifies the source collection or subquery. You can alias the source using object syntax.
 
+Use `from()` with a single source. To combine multiple independent sources
+without a join, use [`unionAll()`](#source-level-unionall) instead.
+
 ### Method Signature
 
 ```ts
 from({
-  [alias]: Collection | Query,
+  [alias]: Collection | Query
 }): Query
 ```
 
 **Parameters:**
-- `[alias]` - A Collection or Query instance. Note that only a single aliased collection or subquery is allowed in the `from` clause.
+- `[alias]` - A Collection or Query instance.
 
 ### Basic Usage
 
@@ -552,6 +555,90 @@ const userNames = createCollection(liveQueryCollectionOptions({
         email: u.email,
       }))
 }))
+```
+
+### `unionAll`
+
+Use `unionAll()` as a start method, in the same place you would use `from()`,
+to combine independent sources without a join. It has two forms:
+
+```ts
+unionAll({
+  [alias]: Collection | Query,
+  [alias2]: Collection | Query
+}): Query
+
+unionAll(branchQuery, branchQuery2, ...branchQueries): Query
+```
+
+#### Source-Level `unionAll`
+
+The object form combines collection or subquery sources. Conceptually, this
+behaves like `UNION ALL`: each raw result row comes from exactly one source
+alias, and inactive aliases are `undefined`.
+
+```ts
+import { coalesce, createLiveQueryCollection } from '@tanstack/db'
+
+const timeline = createLiveQueryCollection((q) =>
+  q
+    .unionAll({
+      message: messagesCollection,
+      toolCall: toolCallsCollection,
+    })
+    .orderBy(({ message, toolCall }) =>
+      coalesce(message.timestamp, toolCall.timestamp),
+    )
+)
+```
+
+Without `select()`, the result type is an exclusive union:
+
+```ts
+type TimelineRow =
+  | { message: Message; toolCall?: undefined }
+  | { message?: undefined; toolCall: ToolCall }
+```
+
+Use subqueries when each branch needs its own filtering or shaping before the
+sources are combined.
+
+If you project branch values with `select()`, you control the inactive branch
+shape. For example, `caseWhen()` projections use `null` when no branch matches
+unless you provide a default value.
+
+#### Query-Branch `unionAll`
+
+You can also pass built queries directly. This form unions the result rows from
+each branch query. Downstream clauses operate on that shared result shape, so
+ordering can reference shared fields directly instead of using `coalesce()`.
+A branch without `select()` keeps its normal query result shape; for example, a
+joined branch enters the union as a namespaced row.
+
+```ts
+const timeline = createLiveQueryCollection((q) => {
+  const messageRows = q
+    .from({ message: messagesCollection })
+    .select(({ message }) => ({
+      type: `message` as const,
+      id: message.id,
+      body: message.text,
+      timestamp: message.timestamp,
+    }))
+
+  const toolCallRows = q
+    .from({ toolCall: toolCallsCollection })
+    .select(({ toolCall }) => ({
+      type: `toolCall` as const,
+      id: toolCall.id,
+      body: toolCall.name,
+      timestamp: toolCall.timestamp,
+    }))
+
+  return q
+    .unionAll(messageRows, toolCallRows)
+    .orderBy(({ timestamp }) => timestamp)
+})
 ```
 
 ## Where Clauses
@@ -1679,6 +1766,35 @@ const sortedUsers = createLiveQueryCollection((q) =>
 )
 ```
 
+### `unionAll` Ordering
+
+When ordering a source-level `unionAll` query, use a combined expression such as
+`coalesce()` to produce one comparable value across branches. Query-branch
+`unionAll()` can instead order by shared selected fields, as shown in the
+[`unionAll()` examples](#unionall).
+
+If the order expression sorts strings and the branch collections have different
+default string collation settings, TanStack DB uses the first source collection's
+collation as the default. Pass explicit `orderBy` compare options when you need
+a specific string collation for the combined ordering:
+
+```ts
+const timeline = createLiveQueryCollection((q) =>
+  q
+    .unionAll({
+      message: messagesCollection,
+      toolCall: toolCallsCollection,
+    })
+    .select(({ message, toolCall }) => ({
+      label: coalesce(message.title, toolCall.name),
+    }))
+    .orderBy(({ $selected }) => $selected.label, {
+      stringSort: `locale`,
+      locale: `en-US`,
+    })
+)
+```
+
 ### Ordering by SELECT Fields
 
 When you use `select()` with aggregates or computed values, you can order by those fields using the `$selected` namespace:
@@ -2454,11 +2570,56 @@ Add two numbers:
 add(user.salary, user.bonus)
 ```
 
+### Utility Functions
+
 #### `coalesce(...values)`
-Return the first non-null value:
+Return the first non-null/undefined value:
 ```ts
 coalesce(user.displayName, user.name, 'Unknown')
 ```
+
+This is useful for display fallbacks when the stored value is `null` or
+`undefined`:
+
+```ts
+.select(({ document }) => ({
+  ...document,
+  displayTitle: coalesce(document.title, 'Untitled document'),
+}))
+```
+
+If you also need to treat another value, such as an empty string, as missing,
+use `caseWhen` to express that condition explicitly.
+
+#### `caseWhen(condition, value, ...)`
+Return the value for the first matching condition, similar to SQL `CASE WHEN`.
+Arguments are provided as condition/value pairs followed by an optional default
+value:
+
+```ts
+caseWhen(gt(user.age, 65), 'senior', gt(user.age, 18), 'adult', 'minor')
+```
+
+If no condition matches and no default value is provided, scalar expressions
+return `null`.
+
+Use `caseWhen` when a computed field needs conditional logic that cannot be
+represented with `coalesce` alone. For example, to display a fallback for both
+`null`/`undefined` and empty-string titles:
+
+```ts
+.select(({ document }) => ({
+  ...document,
+  displayTitle: caseWhen(
+    eq(coalesce(document.title, ''), ''),
+    'Untitled document',
+    document.title,
+  ),
+}))
+```
+
+`caseWhen` can also be used in expression contexts such as `select`, `where`,
+`orderBy`, `groupBy`, `having`, and equality join operands.
 
 ### Aggregate Functions
 

@@ -479,6 +479,27 @@ The query collection treats the `queryFn` result as the **complete state** of th
 - Items in the query result but not in the collection will be inserted
 - Items present in both will be updated if they differ
 
+This is important when the same entity type can be loaded from multiple REST
+endpoints. For example, do not point the same Query Collection at
+`/api/documents/preview` for one load and `/api/documents/deleted` for another
+unless each result represents the complete state for that collection
+scope. A narrower endpoint can otherwise remove rows that were loaded from a
+different endpoint.
+
+For multiple endpoint or subset-loading use cases, choose the pattern that
+matches your API semantics:
+
+- Use `syncMode: 'on-demand'` when one logical collection can serve different
+  subsets of data. In this mode, query predicates (`where`, `orderBy`, `limit`,
+  and `offset`) are passed to your `queryFn` via `ctx.meta.loadSubsetOptions`,
+  letting you translate them into API parameters.
+- Use separate Query Collections when endpoints represent distinct server scopes
+  whose results should not replace each other. Use `unionAll` to combine them
+  into a single query when you need a unified view across endpoints.
+- Use direct writes such as `writeUpsert`/`writeBatch` for lower-level
+  incremental loading when you intentionally want to merge server responses into
+  the synced store yourself.
+
 ### Empty Array Behavior
 
 When `queryFn` returns an empty array, **all items in the collection will be deleted**. This is because the collection interprets an empty array as "the server has no items".

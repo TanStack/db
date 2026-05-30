@@ -29,10 +29,15 @@ export type IncludesMaterialization = `collection` | `array` | `concat`
 
 export const INCLUDES_SCALAR_FIELD = `__includes_scalar__`
 
-export type From = CollectionRef | QueryRef
+export type From = CollectionRef | QueryRef | UnionFrom | UnionAll
 
 export type Select = {
-  [alias: string]: BasicExpression | Aggregate | Select | IncludesSubquery
+  [alias: string]:
+    | BasicExpression
+    | Aggregate
+    | Select
+    | IncludesSubquery
+    | ConditionalSelect
 }
 
 export type Join = Array<JoinClause>
@@ -90,6 +95,34 @@ export class QueryRef extends BaseExpression {
     public alias: string,
   ) {
     super()
+  }
+}
+
+export class UnionFrom extends BaseExpression {
+  public type = `unionFrom` as const
+  constructor(public sources: Array<CollectionRef | QueryRef>) {
+    super()
+  }
+
+  get alias(): string {
+    return this.sources[0]?.alias ?? ``
+  }
+}
+
+export class UnionAll extends BaseExpression {
+  public type = `unionAll` as const
+  /**
+   * Result-level UNION ALL. Downstream query clauses see the union result row
+   * shape, not the branch source aliases. Optimizers may push safe operations
+   * into branches, but compiler phases should treat this as a derived relation
+   * unless they are explicitly handling branch lowering.
+   */
+  constructor(public queries: Array<QueryIR>) {
+    super()
+  }
+
+  get alias(): string {
+    return ``
   }
 }
 
@@ -152,18 +185,69 @@ export class IncludesSubquery extends BaseExpression {
   }
 }
 
+export type ConditionalSelectBranch = {
+  condition: BasicExpression
+  value: SelectValueExpression
+}
+
+export type SelectValueExpression =
+  | BasicExpression
+  | Aggregate
+  | Select
+  | IncludesSubquery
+  | ConditionalSelect
+
+export class ConditionalSelect extends BaseExpression {
+  public type = `conditionalSelect` as const
+  constructor(
+    public branches: Array<ConditionalSelectBranch>,
+    public defaultValue?: SelectValueExpression,
+  ) {
+    super()
+  }
+}
+
 /**
  * Runtime helper to detect IR expression-like objects.
  * Prefer this over ad-hoc local implementations to keep behavior consistent.
  */
 export function isExpressionLike(value: any): boolean {
-  return (
+  if (
     value instanceof Aggregate ||
+    value instanceof ConditionalSelect ||
     value instanceof Func ||
     value instanceof PropRef ||
     value instanceof Value ||
     value instanceof IncludesSubquery
-  )
+  ) {
+    return true
+  }
+
+  if (!value || typeof value !== `object`) {
+    return false
+  }
+
+  if (value.type === `conditionalSelect`) {
+    return Array.isArray(value.branches)
+  }
+
+  if (value.type === `agg` || value.type === `func`) {
+    return typeof value.name === `string` && Array.isArray(value.args)
+  }
+
+  if (value.type === `ref`) {
+    return Array.isArray(value.path)
+  }
+
+  if (value.type === `val`) {
+    return `value` in value
+  }
+
+  if (value.type === `includesSubquery`) {
+    return `query` in value && `fieldName` in value
+  }
+
+  return false
 }
 
 /**
@@ -215,7 +299,13 @@ function getRefFromAlias(
   query: QueryIR,
   alias: string,
 ): CollectionRef | QueryRef | void {
-  if (query.from.alias === alias) {
+  if (query.from.type === `unionFrom`) {
+    for (const source of query.from.sources) {
+      if (source.alias === alias) {
+        return source
+      }
+    }
+  } else if (query.from.type !== `unionAll` && query.from.alias === alias) {
     return query.from
   }
 

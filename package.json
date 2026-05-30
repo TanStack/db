@@ -5,30 +5,8 @@
     "type": "git",
     "url": "git+https://github.com/TanStack/db.git"
   },
-  "packageManager": "pnpm@10.27.0",
+  "packageManager": "pnpm@11.1.0",
   "type": "module",
-  "pnpm": {
-    "overrides": {
-      "metro": "0.82.5",
-      "metro-babel-transformer": "0.82.5",
-      "metro-cache": "0.82.5",
-      "metro-cache-key": "0.82.5",
-      "metro-config": "0.82.5",
-      "metro-core": "0.82.5",
-      "metro-file-map": "0.82.5",
-      "metro-minify-terser": "0.82.5",
-      "metro-resolver": "0.82.5",
-      "metro-runtime": "0.82.5",
-      "metro-source-map": "0.82.5",
-      "metro-symbolicate": "0.82.5",
-      "metro-transform-plugins": "0.82.5",
-      "metro-transform-worker": "0.82.5"
-    },
-    "onlyBuiltDependencies": [
-      "better-sqlite3",
-      "electron"
-    ]
-  },
   "scripts": {
     "build": "pnpm --filter \"./packages/**\" build",
     "build:minified": "pnpm --filter \"./packages/**\" build:minified",

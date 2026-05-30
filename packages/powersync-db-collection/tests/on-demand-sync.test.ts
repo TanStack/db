@@ -1012,7 +1012,9 @@ describe(`On-Demand Sync Mode`, () => {
       const productA = electronicsQuery.toArray.find(
         (p) => p.name === `Product A`,
       )
-      await db.execute(`DELETE FROM products WHERE id = ?`, [productA!.id])
+
+      const tx = collection.delete(productA!.id)
+      await tx.isPersisted.promise
 
       await vi.waitFor(
         () => {
@@ -1023,6 +1025,351 @@ describe(`On-Demand Sync Mode`, () => {
 
       const names = electronicsQuery.toArray.map((p) => p.name).sort()
       expect(names).toEqual([`Product B`, `Product D`])
+
+      // Verify the delete operation was recorded in the ps_crud table
+      const crud = await db.getAll<{ id: number; data: string; tx_id: number }>(
+        `SELECT * FROM ps_crud`,
+      )
+
+      const lastEntry = crud[crud.length - 1]!
+      const parsed = JSON.parse(lastEntry.data)
+      expect(parsed.op).toBe(`DELETE`)
+      expect(parsed.id).toBe(productA!.id)
+    })
+
+    it(`should handle INSERT of a matching row`, async () => {
+      const db = await createDatabase()
+      await createTestProducts(db)
+
+      const collection = createCollection(
+        powerSyncCollectionOptions({
+          database: db,
+          table: APP_SCHEMA.props.products,
+          syncMode: `on-demand`,
+        }),
+      )
+      onTestFinished(() => collection.cleanup())
+      await collection.stateWhenReady()
+
+      const electronicsQuery = createLiveQueryCollection({
+        query: (q) =>
+          q
+            .from({ product: collection })
+            .where(({ product }) => eq(product.category, `electronics`))
+            .select(({ product }) => ({
+              id: product.id,
+              name: product.name,
+              price: product.price,
+              category: product.category,
+            })),
+      })
+      onTestFinished(() => electronicsQuery.cleanup())
+
+      await electronicsQuery.preload()
+
+      await vi.waitFor(
+        () => {
+          expect(electronicsQuery.size).toBe(3)
+        },
+        { timeout: 2000 },
+      )
+
+      // Insert a new electronics product via the collection
+      const newId = randomUUID()
+      const tx = collection.insert({
+        id: newId,
+        name: `New Gadget`,
+        price: 99,
+        category: `electronics`,
+      })
+      await tx.isPersisted.promise
+
+      await vi.waitFor(
+        () => {
+          expect(electronicsQuery.size).toBe(4)
+        },
+        { timeout: 2000 },
+      )
+
+      const names = electronicsQuery.toArray.map((p) => p.name).sort()
+      expect(names).toContain(`New Gadget`)
+
+      // Verify the insert operation was recorded in the ps_crud table
+      const crud = await db.getAll<{ id: number; data: string; tx_id: number }>(
+        `SELECT * FROM ps_crud`,
+      )
+
+      const lastEntry = crud[crud.length - 1]!
+      const parsed = JSON.parse(lastEntry.data)
+      expect(parsed.op).toBe(`PUT`)
+      expect(parsed.id).toBe(newId)
+    })
+
+    it(`should handle UPDATE of a matching row`, async () => {
+      const db = await createDatabase()
+      await createTestProducts(db)
+
+      const collection = createCollection(
+        powerSyncCollectionOptions({
+          database: db,
+          table: APP_SCHEMA.props.products,
+          syncMode: `on-demand`,
+        }),
+      )
+      onTestFinished(() => collection.cleanup())
+      await collection.stateWhenReady()
+
+      const electronicsQuery = createLiveQueryCollection({
+        query: (q) =>
+          q
+            .from({ product: collection })
+            .where(({ product }) => eq(product.category, `electronics`))
+            .select(({ product }) => ({
+              id: product.id,
+              name: product.name,
+              price: product.price,
+              category: product.category,
+            })),
+      })
+      onTestFinished(() => electronicsQuery.cleanup())
+
+      await electronicsQuery.preload()
+
+      await vi.waitFor(
+        () => {
+          expect(electronicsQuery.size).toBe(3)
+        },
+        { timeout: 2000 },
+      )
+
+      // Update Product A via the collection
+      const productA = electronicsQuery.toArray.find(
+        (p) => p.name === `Product A`,
+      )
+
+      const tx = collection.update(productA!.id, (d) => {
+        d.price = 999
+      })
+      await tx.isPersisted.promise
+
+      await vi.waitFor(
+        () => {
+          const product = electronicsQuery.toArray.find(
+            (p) => p.name === `Product A`,
+          )
+          expect(product).toBeDefined()
+          expect(product!.price).toBe(999)
+        },
+        { timeout: 2000 },
+      )
+
+      // Verify the update operation was recorded in the ps_crud table
+      const crud = await db.getAll<{ id: number; data: string; tx_id: number }>(
+        `SELECT * FROM ps_crud`,
+      )
+
+      const lastEntry = crud[crud.length - 1]!
+      const parsed = JSON.parse(lastEntry.data)
+      expect(parsed.op).toBe(`PATCH`)
+      expect(parsed.id).toBe(productA!.id)
+    })
+
+    it(`should handle DELETE when read from collection by id`, async () => {
+      const db = await createDatabase()
+      await createTestProducts(db)
+
+      const collection = createCollection(
+        powerSyncCollectionOptions({
+          database: db,
+          table: APP_SCHEMA.props.products,
+          syncMode: `on-demand`,
+        }),
+      )
+      onTestFinished(() => collection.cleanup())
+      await collection.stateWhenReady()
+
+      const productA = await db.get<{ id: string }>(
+        `SELECT id FROM products WHERE name = 'Product A'`,
+      )
+
+      const electronicsQuery = createLiveQueryCollection({
+        query: (q) =>
+          q
+            .from({ product: collection })
+            .where(({ product }) => eq(product.id, productA.id))
+            .select(({ product }) => ({
+              id: product.id,
+              name: product.name,
+              price: product.price,
+              category: product.category,
+            })),
+      })
+      onTestFinished(() => electronicsQuery.cleanup())
+
+      await electronicsQuery.preload()
+
+      await vi.waitFor(
+        () => {
+          expect(electronicsQuery.size).toBe(1)
+        },
+        { timeout: 2000 },
+      )
+
+      // Delete Product A
+      const tx = collection.delete(productA.id)
+      await tx.isPersisted.promise
+
+      await vi.waitFor(
+        () => {
+          expect(electronicsQuery.size).toBe(0)
+        },
+        { timeout: 2000 },
+      )
+
+      const names = electronicsQuery.toArray.map((p) => p.name).sort()
+      expect(names).toEqual([])
+
+      // Verify the delete operation was recorded in the ps_crud table
+      const crud = await db.getAll<{ id: number; data: string; tx_id: number }>(
+        `SELECT * FROM ps_crud`,
+      )
+
+      const lastEntry = crud[crud.length - 1]!
+      const parsed = JSON.parse(lastEntry.data)
+      expect(parsed.op).toBe(`DELETE`)
+      expect(parsed.id).toBe(productA.id)
+    })
+
+    it(`should handle INSERT when loaded by id`, async () => {
+      const db = await createDatabase()
+
+      const collection = createCollection(
+        powerSyncCollectionOptions({
+          database: db,
+          table: APP_SCHEMA.props.products,
+          syncMode: `on-demand`,
+        }),
+      )
+      onTestFinished(() => collection.cleanup())
+      await collection.stateWhenReady()
+
+      const newId = randomUUID()
+
+      const idQuery = createLiveQueryCollection({
+        query: (q) =>
+          q
+            .from({ product: collection })
+            .where(({ product }) => eq(product.id, newId))
+            .select(({ product }) => ({
+              id: product.id,
+              name: product.name,
+              price: product.price,
+              category: product.category,
+            })),
+      })
+      onTestFinished(() => idQuery.cleanup())
+
+      await idQuery.preload()
+
+      await vi.waitFor(
+        () => {
+          expect(idQuery.size).toBe(0)
+        },
+        { timeout: 2000 },
+      )
+
+      // Insert a new product via the collection
+      const tx = collection.insert({
+        id: newId,
+        name: `New Product`,
+        price: 99,
+        category: `electronics`,
+      })
+      await tx.isPersisted.promise
+
+      await vi.waitFor(
+        () => {
+          expect(idQuery.size).toBe(1)
+        },
+        { timeout: 2000 },
+      )
+
+      // Verify the insert operation was recorded in the ps_crud table
+      const crud = await db.getAll<{ id: number; data: string; tx_id: number }>(
+        `SELECT * FROM ps_crud`,
+      )
+
+      const lastEntry = crud[crud.length - 1]!
+      const parsed = JSON.parse(lastEntry.data)
+      expect(parsed.op).toBe(`PUT`)
+      expect(parsed.id).toBe(newId)
+    })
+
+    it(`should handle UPDATE when read from collection by id`, async () => {
+      const db = await createDatabase()
+      await createTestProducts(db)
+
+      const collection = createCollection(
+        powerSyncCollectionOptions({
+          database: db,
+          table: APP_SCHEMA.props.products,
+          syncMode: `on-demand`,
+        }),
+      )
+      onTestFinished(() => collection.cleanup())
+      await collection.stateWhenReady()
+
+      const productA = await db.get<{ id: string }>(
+        `SELECT id FROM products WHERE name = 'Product A'`,
+      )
+
+      const idQuery = createLiveQueryCollection({
+        query: (q) =>
+          q
+            .from({ product: collection })
+            .where(({ product }) => eq(product.id, productA.id))
+            .select(({ product }) => ({
+              id: product.id,
+              name: product.name,
+              price: product.price,
+              category: product.category,
+            })),
+      })
+      onTestFinished(() => idQuery.cleanup())
+
+      await idQuery.preload()
+
+      await vi.waitFor(
+        () => {
+          expect(idQuery.size).toBe(1)
+        },
+        { timeout: 2000 },
+      )
+
+      // Update Product A via the collection
+      const tx = collection.update(productA.id, (d) => {
+        d.price = 999
+      })
+      await tx.isPersisted.promise
+
+      await vi.waitFor(
+        () => {
+          const product = idQuery.toArray[0]
+          expect(product).toBeDefined()
+          expect(product!.price).toBe(999)
+        },
+        { timeout: 2000 },
+      )
+
+      // Verify the update operation was recorded in the ps_crud table
+      const crud = await db.getAll<{ id: number; data: string; tx_id: number }>(
+        `SELECT * FROM ps_crud`,
+      )
+
+      const lastEntry = crud[crud.length - 1]!
+      const parsed = JSON.parse(lastEntry.data)
+      expect(parsed.op).toBe(`PATCH`)
+      expect(parsed.id).toBe(productA.id)
     })
   })
 
