@@ -21,6 +21,7 @@ import {
   mockSyncCollectionOptions,
   stripVirtualProps,
 } from '../../db/tests/utils'
+import type { DehydratedDbState } from '@tanstack/db'
 import type { ReactNode } from 'react'
 
 type Person = {
@@ -2600,6 +2601,107 @@ describe(`Query Collections`, () => {
           expect.objectContaining({ id: `i4`, title: `New Alpha issue` }),
         ]),
       )
+    })
+  })
+
+  describe(`SSR hydration`, () => {
+    it(`round-trips collection rows into React and applies streamed chunks incrementally`, async () => {
+      const peopleCollectionId = `ssr-react-people`
+      const peopleCollection = collectionOptions<Person, string>({
+        id: peopleCollectionId,
+        getKey: (person) => person.id,
+        syncMode: `on-demand`,
+        sync: {
+          sync: ({ begin, write, commit, markReady }) => {
+            markReady()
+
+            return {
+              loadSubset: () => {
+                begin({ immediate: true })
+                for (const person of initialPersons) {
+                  write({
+                    type: `insert`,
+                    value: person,
+                  })
+                }
+                commit()
+                return true
+              },
+            }
+          },
+        },
+      })
+      const serverClient = new DbClient()
+      const serverPeople = serverClient.collection(peopleCollection)
+      const serverLiveQuery = createLiveQueryCollection((q) =>
+        q
+          .from({ people: serverPeople })
+          .where(({ people }) => eq(people.team, `team1`)),
+      )
+
+      await serverLiveQuery.preload()
+
+      expect(serverLiveQuery.toArray.map((person) => person.id)).toEqual([
+        `1`,
+        `3`,
+      ])
+      const dehydratedState = serverClient.dehydrate()
+      expect(
+        dehydratedState.collections
+          .flatMap((collection) => collection.rows.map((row) => row.key))
+          .sort(),
+      ).toEqual([`1`, `2`, `3`])
+
+      const transferredState = JSON.parse(
+        JSON.stringify(dehydratedState),
+      ) as DehydratedDbState
+      const clientClient = new DbClient()
+      clientClient.hydrate(transferredState)
+      const wrapper = ({ children }: { children: ReactNode }) => (
+        <DbProvider client={clientClient}>{children}</DbProvider>
+      )
+
+      const { result } = renderHook(
+        () =>
+          useLiveQuery({
+            query: (q) =>
+              q
+                .from({ people: peopleCollection })
+                .where(({ people }) => eq(people.team, `team1`)),
+          }),
+        { wrapper },
+      )
+
+      const resultIds = () => result.current.data.map((person) => person.id)
+
+      await waitFor(() => {
+        expect(resultIds()).toEqual([`1`, `3`])
+      })
+      const hydratedLiveQuery = result.current.collection
+
+      act(() => {
+        clientClient.applyCollectionChunk({
+          collectionId: peopleCollectionId,
+          rows: [
+            {
+              key: `4`,
+              value: {
+                id: `4`,
+                name: `Kyle Doe`,
+                age: 40,
+                email: `kyle.doe@example.com`,
+                isActive: true,
+                team: `team1`,
+              },
+            },
+          ],
+        })
+      })
+
+      await waitFor(() => {
+        expect(resultIds()).toEqual([`1`, `3`, `4`])
+      })
+      expect(result.current.collection).toBe(hydratedLiveQuery)
     })
   })
 
