@@ -1,6 +1,6 @@
 import { Stack, useLocalSearchParams } from 'expo-router'
 import { SafeAreaView } from 'react-native-safe-area-context'
-import { eq, useLiveQuery  } from '@tanstack/react-db'
+import { eq, useLiveQuery } from '@tanstack/react-db'
 import { listsCollection } from '../../src/db/collections'
 import { ListDetail } from '../../src/components/ListDetail'
 
@@ -15,9 +15,7 @@ export default function ListScreen() {
         .where(({ list }) => eq(list.id, id))
         .select(({ list }) => ({ id: list.id, name: list.name })),
   })
-  const list = listResult.data[0] as
-    | { id: string; name: string }
-    | undefined
+  const list = listResult.data[0] as { id: string; name: string } | undefined
 
   return (
     <>

@@ -76,7 +76,8 @@ function shouldWarnInDevelopment(disableEnvVar: string): boolean {
 }
 
 function getCurrentTime(): number {
-  return typeof performance !== `undefined` && typeof performance.now === `function`
+  return typeof performance !== `undefined` &&
+    typeof performance.now === `function`
     ? performance.now()
     : Date.now()
 }
