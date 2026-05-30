@@ -192,10 +192,12 @@ export const modalStateCollection = createCollection(
 
 // Use in component
 function UserProfileModal() {
-  const { data: modals } = useLiveQuery((q) =>
-    q.from({ modal: modalStateCollection })
-      .where(({ modal }) => eq(modal.id, 'user-profile'))
-  )
+  const { data: modals } = useLiveQuery({
+    query: (q) =>
+      q
+        .from({ modal: modalStateCollection })
+        .where(({ modal }) => eq(modal.id, 'user-profile')),
+  })
 
   const modalState = modals[0]
 
@@ -248,10 +250,12 @@ export const formDraftsCollection = createCollection(
 
 // Use in component
 function CreatePostForm() {
-  const { data: drafts } = useLiveQuery((q) =>
-    q.from({ draft: formDraftsCollection })
-      .where(({ draft }) => eq(draft.id, 'new-post'))
-  )
+  const { data: drafts } = useLiveQuery({
+    query: (q) =>
+      q
+        .from({ draft: formDraftsCollection })
+        .where(({ draft }) => eq(draft.id, 'new-post')),
+  })
 
   const currentDraft = drafts[0]
 

@@ -82,12 +82,13 @@ export function ListDetail({ listId }: ListDetailProps) {
   const { itemActions } = useShopping()
 
   // Get items for this list
-  const itemsResult = useLiveQuery((q) =>
-    q
-      .from({ item: itemsCollection })
-      .where(({ item }) => eq(item.listId, listId))
-      .orderBy(({ item }) => item.createdAt, `asc`),
-  )
+  const itemsResult = useLiveQuery({
+    query: (q) =>
+      q
+        .from({ item: itemsCollection })
+        .where(({ item }) => eq(item.listId, listId))
+        .orderBy(({ item }) => item.createdAt, `asc`),
+  })
   const items = itemsResult.data as Array<ListItemRow>
 
   const handleAddItem = async () => {

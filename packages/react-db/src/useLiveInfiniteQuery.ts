@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { CollectionImpl } from '@tanstack/db'
 import { useLiveQuery } from './useLiveQuery'
+import type { LiveQueryKey } from './useLiveQuery'
 import type {
   Collection,
   Context,
@@ -21,6 +22,12 @@ function isLiveQueryCollectionUtils(
 }
 
 export type UseLiveInfiniteQueryConfig<TContext extends Context> = {
+  /**
+   * Explicit identity for queries that contain opaque functional variants or
+   * are hot enough that deriving identity from structured IR is too expensive.
+   * Structured queries should omit this so DB can derive identity directly.
+   */
+  queryKey?: LiveQueryKey
   pageSize?: number
   initialPageParam?: number
   /**
@@ -56,7 +63,7 @@ export type UseLiveInfiniteQueryReturn<TContext extends Context> = Omit<
  *
  * @param queryFn - Query function that defines what data to fetch. Must include `.orderBy()` for setWindow to work.
  * @param config - Configuration including pageSize and getNextPageParam
- * @param deps - Array of dependencies that trigger query re-execution when changed
+ * @param deps - Deprecated array of dependencies that trigger query re-execution when changed
  * @returns Object with pages, data, and pagination controls
  *
  * @example
@@ -77,7 +84,7 @@ export type UseLiveInfiniteQueryReturn<TContext extends Context> = Omit<
  * )
  *
  * @example
- * // With dependencies
+ * // With values that recreate the query
  * const { pages, fetchNextPage } = useLiveInfiniteQuery(
  *   (q) => q
  *     .from({ posts: postsCollection })
@@ -87,8 +94,7 @@ export type UseLiveInfiniteQueryReturn<TContext extends Context> = Omit<
  *     pageSize: 10,
  *     getNextPageParam: (lastPage) =>
  *       lastPage.length === 10 ? lastPage.length : undefined
- *   },
- *   [category]
+ *   }
  * )
  *
  * @example
@@ -135,10 +141,11 @@ export function useLiveInfiniteQuery<TContext extends Context>(
 export function useLiveInfiniteQuery<TContext extends Context>(
   queryFnOrCollection: any,
   config: UseLiveInfiniteQueryConfig<TContext>,
-  deps: Array<unknown> = [],
+  deps?: Array<unknown>,
 ): UseLiveInfiniteQueryReturn<TContext> {
   const pageSize = config.pageSize || 20
   const initialPageParam = config.initialPageParam ?? 0
+  const identityDeps = config.queryKey ?? deps ?? []
 
   // Detect if input is a collection or query function
   const isCollection = queryFnOrCollection instanceof CollectionImpl
@@ -159,17 +166,44 @@ export function useLiveInfiniteQuery<TContext extends Context>(
   const collectionRef = useRef(isCollection ? queryFnOrCollection : null)
   const hasValidatedCollectionRef = useRef(false)
 
-  // Track deps for query functions (stringify for comparison)
+  // Track query identity for query functions (stringify for comparison)
   let depsKey: string
   try {
-    depsKey = JSON.stringify(deps)
+    depsKey = JSON.stringify(identityDeps)
   } catch {
     throw new Error(
-      `useLiveInfiniteQuery: dependency array contains values that cannot be serialized (e.g. circular references). ` +
-        `Ensure all dependency values are JSON-serializable.`,
+      `useLiveInfiniteQuery: queryKey/dependency array contains values that cannot be serialized (e.g. circular references). ` +
+        `Ensure all identity values are JSON-serializable.`,
     )
   }
   const prevDepsKeyRef = useRef(depsKey)
+
+  // Create a live query with initial limit and offset
+  // Either pass collection directly or wrap query function
+  // Use pageSize + 1 for peek-ahead detection (to know if there are more pages)
+  const queryResult = isCollection
+    ? useLiveQuery(queryFnOrCollection)
+    : config.queryKey
+      ? useLiveQuery({
+          queryKey: config.queryKey,
+          query: (q) =>
+            queryFnOrCollection(q)
+              .limit(pageSize + 1)
+              .offset(0),
+        })
+      : deps === undefined
+        ? useLiveQuery((q) =>
+            queryFnOrCollection(q)
+              .limit(pageSize + 1)
+              .offset(0),
+          )
+        : useLiveQuery(
+            (q) =>
+              queryFnOrCollection(q)
+                .limit(pageSize + 1)
+                .offset(0),
+            deps,
+          )
 
   // Reset pagination when inputs change
   useEffect(() => {
@@ -183,9 +217,15 @@ export function useLiveInfiniteQuery<TContext extends Context>(
         shouldReset = true
       }
     } else {
-      // Reset if deps changed (for query functions)
+      // Reset if explicit identity changed
       if (prevDepsKeyRef.current !== depsKey) {
         prevDepsKeyRef.current = depsKey
+        shouldReset = true
+      }
+
+      // Reset if derived query identity changed and useLiveQuery rebuilt the collection
+      if (collectionRef.current !== queryResult.collection) {
+        collectionRef.current = queryResult.collection
         shouldReset = true
       }
     }
@@ -193,20 +233,7 @@ export function useLiveInfiniteQuery<TContext extends Context>(
     if (shouldReset) {
       setLoadedPageCount(1)
     }
-  }, [isCollection, queryFnOrCollection, depsKey])
-
-  // Create a live query with initial limit and offset
-  // Either pass collection directly or wrap query function
-  // Use pageSize + 1 for peek-ahead detection (to know if there are more pages)
-  const queryResult = isCollection
-    ? useLiveQuery(queryFnOrCollection)
-    : useLiveQuery(
-        (q) =>
-          queryFnOrCollection(q)
-            .limit(pageSize + 1)
-            .offset(0),
-        deps,
-      )
+  }, [isCollection, queryFnOrCollection, depsKey, queryResult.collection])
 
   // Adjust window when pagination changes
   useEffect(() => {

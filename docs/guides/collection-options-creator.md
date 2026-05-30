@@ -709,17 +709,22 @@ export function webSocketCollectionOptions<TItem extends object>(
 ## Usage Example
 
 ```typescript
-import { createCollection } from '@tanstack/react-db'
+import { DbClient, collectionOptions } from '@tanstack/react-db'
 import { webSocketCollectionOptions } from './websocket-collection'
 
-const todos = createCollection(
+const db = new DbClient()
+
+const todosCollection = collectionOptions(
   webSocketCollectionOptions({
+    id: 'todos',
     url: 'ws://localhost:8080/todos',
     getKey: (todo) => todo.id,
     schema: todoSchema
     // Note: No onInsert/onUpdate/onDelete - handled by WebSocket automatically
   })
 )
+
+const todos = db.collection(todosCollection)
 
 // Use the collection
 todos.insert({ id: '1', text: 'Buy milk', completed: false })

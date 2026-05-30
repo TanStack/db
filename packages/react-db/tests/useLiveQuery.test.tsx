@@ -1,8 +1,10 @@
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 import { act, renderHook, waitFor } from '@testing-library/react'
 import {
+  DbClient,
   Query,
   coalesce,
+  collectionOptions,
   count,
   createCollection,
   createLiveQueryCollection,
@@ -14,10 +16,12 @@ import {
 } from '@tanstack/db'
 import { useEffect } from 'react'
 import { useLiveQuery } from '../src/useLiveQuery'
+import { DbProvider } from '../src/DbProvider'
 import {
   mockSyncCollectionOptions,
   stripVirtualProps,
 } from '../../db/tests/utils'
+import type { ReactNode } from 'react'
 
 type Person = {
   id: string
@@ -1976,7 +1980,7 @@ describe(`Query Collections`, () => {
   })
 
   describe(`callback variants with conditional returns`, () => {
-    it(`should handle callback returning undefined with proper state`, async () => {
+    it(`should handle callback returning undefined without a dependency array`, async () => {
       const collection = createCollection(
         mockSyncCollectionOptions<Person>({
           id: `undefined-callback-test`,
@@ -1987,20 +1991,17 @@ describe(`Query Collections`, () => {
 
       const { result, rerender } = renderHook(
         ({ enabled }: { enabled: boolean }) => {
-          return useLiveQuery(
-            (q) => {
-              if (!enabled) return undefined
-              return q
-                .from({ persons: collection })
-                .where(({ persons }) => gt(persons.age, 30))
-                .select(({ persons }) => ({
-                  id: persons.id,
-                  name: persons.name,
-                  age: persons.age,
-                }))
-            },
-            [enabled],
-          )
+          return useLiveQuery((q) => {
+            if (!enabled) return undefined
+            return q
+              .from({ persons: collection })
+              .where(({ persons }) => gt(persons.age, 30))
+              .select(({ persons }) => ({
+                id: persons.id,
+                name: persons.name,
+                age: persons.age,
+              }))
+          })
         },
         { initialProps: { enabled: false } },
       )
@@ -2056,7 +2057,7 @@ describe(`Query Collections`, () => {
       expect(result.current.isCleanedUp).toBe(false)
     })
 
-    it(`should handle callback returning null with proper state`, async () => {
+    it(`should handle callback returning null without a dependency array`, async () => {
       const collection = createCollection(
         mockSyncCollectionOptions<Person>({
           id: `null-callback-test`,
@@ -2067,20 +2068,17 @@ describe(`Query Collections`, () => {
 
       const { result, rerender } = renderHook(
         ({ enabled }: { enabled: boolean }) => {
-          return useLiveQuery(
-            (q) => {
-              if (!enabled) return null
-              return q
-                .from({ persons: collection })
-                .where(({ persons }) => gt(persons.age, 30))
-                .select(({ persons }) => ({
-                  id: persons.id,
-                  name: persons.name,
-                  age: persons.age,
-                }))
-            },
-            [enabled],
-          )
+          return useLiveQuery((q) => {
+            if (!enabled) return null
+            return q
+              .from({ persons: collection })
+              .where(({ persons }) => gt(persons.age, 30))
+              .select(({ persons }) => ({
+                id: persons.id,
+                name: persons.name,
+                age: persons.age,
+              }))
+          })
         },
         { initialProps: { enabled: false } },
       )
@@ -2602,6 +2600,333 @@ describe(`Query Collections`, () => {
           expect.objectContaining({ id: `i4`, title: `New Alpha issue` }),
         ]),
       )
+    })
+  })
+
+  describe(`derived query identity`, () => {
+    it(`resolves collection descriptors from DbProvider`, async () => {
+      const dbClient = new DbClient()
+      const peopleCollection = collectionOptions(
+        mockSyncCollectionOptions<Person>({
+          id: `descriptor-people`,
+          getKey: (person: Person) => person.id,
+          initialData: initialPersons,
+        }),
+      )
+      const wrapper = ({ children }: { children: ReactNode }) => (
+        <DbProvider client={dbClient}>{children}</DbProvider>
+      )
+
+      const { result } = renderHook(
+        () =>
+          useLiveQuery({
+            query: (q) =>
+              q
+                .from({ people: peopleCollection })
+                .where(({ people }) => eq(people.team, `team1`)),
+          }),
+        { wrapper },
+      )
+
+      await waitFor(() => {
+        expect(result.current.data).toHaveLength(2)
+      })
+
+      const people = dbClient.collection(peopleCollection)
+
+      act(() => {
+        people.insert({
+          id: `4`,
+          name: `Kyle Doe`,
+          age: 40,
+          email: `kyle.doe@example.com`,
+          isActive: true,
+          team: `team1`,
+        })
+      })
+
+      await waitFor(() => {
+        expect(result.current.data).toHaveLength(3)
+      })
+    })
+
+    it(`keeps the same live query collection when derived identity is stable`, async () => {
+      const collection = createCollection(
+        mockSyncCollectionOptions<Person>({
+          id: `query-key-stable`,
+          getKey: (person: Person) => person.id,
+          initialData: initialPersons,
+        }),
+      )
+
+      const { result, rerender } = renderHook(
+        ({ minAge }) =>
+          useLiveQuery({
+            query: (q) =>
+              q
+                .from({ people: collection })
+                .where(({ people }) => gt(people.age, minAge)),
+          }),
+        { initialProps: { minAge: 30 } },
+      )
+
+      await waitFor(() => {
+        expect(result.current.data).toHaveLength(1)
+      })
+      const firstCollection = result.current.collection
+
+      rerender({ minAge: 30 })
+
+      expect(result.current.collection).toBe(firstCollection)
+    })
+
+    it(`recreates the live query collection when derived identity changes`, async () => {
+      const collection = createCollection(
+        mockSyncCollectionOptions<Person>({
+          id: `query-key-change`,
+          getKey: (person: Person) => person.id,
+          initialData: initialPersons,
+        }),
+      )
+
+      const { result, rerender } = renderHook(
+        ({ minAge }) =>
+          useLiveQuery({
+            query: (q) =>
+              q
+                .from({ people: collection })
+                .where(({ people }) => gt(people.age, minAge)),
+          }),
+        { initialProps: { minAge: 25 } },
+      )
+
+      await waitFor(() => {
+        expect(result.current.data).toHaveLength(2)
+      })
+      const firstCollection = result.current.collection
+
+      rerender({ minAge: 30 })
+
+      await waitFor(() => {
+        expect(result.current.data).toHaveLength(1)
+      })
+      expect(result.current.collection).not.toBe(firstCollection)
+    })
+
+    it(`throws when a functional query variant cannot derive identity`, () => {
+      const collection = createCollection(
+        mockSyncCollectionOptions<Person>({
+          id: `derived-identity-functional-missing-key`,
+          getKey: (person: Person) => person.id,
+          initialData: initialPersons,
+        }),
+      )
+
+      expect(() =>
+        renderHook(
+          ({ minAge }) =>
+            useLiveQuery({
+              query: (q) =>
+                q
+                  .from({ people: collection })
+                  .fn.where(({ people }) => people.age > minAge),
+            }),
+          { initialProps: { minAge: 25 } },
+        ),
+      ).toThrow(/function where at query\.fnWhere/)
+    })
+
+    it(`throws when a structured query captures an opaque runtime value without queryKey`, () => {
+      const collection = createCollection(
+        mockSyncCollectionOptions<Person>({
+          id: `derived-identity-opaque-value`,
+          getKey: (person: Person) => person.id,
+          initialData: initialPersons,
+        }),
+      )
+
+      expect(() =>
+        renderHook(() =>
+          useLiveQuery({
+            query: (q) =>
+              q
+                .from({ people: collection })
+                .where(({ people }) =>
+                  eq(people.name, (() => `John Doe`) as never),
+                ),
+          }),
+        ),
+      ).toThrow(/function value at query\.where\[0\]\.args\[1\]\.value/)
+    })
+
+    it(`uses explicit queryKey for functional query variants`, async () => {
+      const collection = createCollection(
+        mockSyncCollectionOptions<Person>({
+          id: `derived-identity-functional-explicit-key`,
+          getKey: (person: Person) => person.id,
+          initialData: initialPersons,
+        }),
+      )
+
+      const { result, rerender } = renderHook(
+        ({ minAge }) =>
+          useLiveQuery({
+            queryKey: [collection.id, `fn`, minAge],
+            query: (q) =>
+              q
+                .from({ people: collection })
+                .fn.where(({ people }) => people.age > minAge),
+          }),
+        { initialProps: { minAge: 25 } },
+      )
+
+      await waitFor(() => {
+        expect(result.current.data).toHaveLength(2)
+      })
+      const firstCollection = result.current.collection
+
+      rerender({ minAge: 30 })
+
+      await waitFor(() => {
+        expect(result.current.data).toHaveLength(1)
+      })
+      expect(result.current.collection).not.toBe(firstCollection)
+    })
+
+    it(`warns when derived query identity is slow enough to need queryKey`, () => {
+      const warnSpy = vi.spyOn(console, `warn`).mockImplementation(() => {})
+      const nowSpy = vi.spyOn(globalThis.performance, `now`)
+      let currentTime = 0
+      nowSpy.mockImplementation(() => {
+        const value = currentTime
+        currentTime += 20
+        return value
+      })
+
+      const collection = createCollection(
+        mockSyncCollectionOptions<Person>({
+          id: `derived-identity-slow-warning`,
+          getKey: (person: Person) => person.id,
+          initialData: initialPersons,
+        }),
+      )
+
+      const { rerender } = renderHook(() =>
+        useLiveQuery({
+          query: (q) =>
+            q
+              .from({ people: collection })
+              .where(({ people }) => gt(people.age, 25)),
+        }),
+      )
+
+      rerender()
+
+      const hotPathWarnings = warnSpy.mock.calls.filter(([message]) =>
+        String(message).includes(`hot render path`),
+      )
+      expect(hotPathWarnings).toHaveLength(1)
+      expect(hotPathWarnings[0]![0]).toContain(`queryKey`)
+
+      nowSpy.mockRestore()
+      warnSpy.mockRestore()
+    })
+
+    it(`warns when repeated derived query identity work accumulates on a hot render path`, () => {
+      const warnSpy = vi.spyOn(console, `warn`).mockImplementation(() => {})
+      const nowSpy = vi.spyOn(globalThis.performance, `now`)
+      let currentTime = 0
+      nowSpy.mockImplementation(() => {
+        const value = currentTime
+        currentTime += 6
+        return value
+      })
+
+      const collection = createCollection(
+        mockSyncCollectionOptions<Person>({
+          id: `derived-identity-accumulated-warning`,
+          getKey: (person: Person) => person.id,
+          initialData: initialPersons,
+        }),
+      )
+
+      const { rerender } = renderHook(
+        ({ renderCount }) => {
+          void renderCount
+          return useLiveQuery({
+            query: (q) =>
+              q
+                .from({ people: collection })
+                .where(({ people }) => gt(people.age, 25)),
+          })
+        },
+        { initialProps: { renderCount: 0 } },
+      )
+
+      for (let renderCount = 1; renderCount < 10; renderCount++) {
+        rerender({ renderCount })
+      }
+
+      const hotPathWarnings = warnSpy.mock.calls.filter(([message]) =>
+        String(message).includes(`renders took`),
+      )
+      expect(hotPathWarnings).toHaveLength(1)
+      expect(hotPathWarnings[0]![0]).toContain(`queryKey`)
+
+      nowSpy.mockRestore()
+      warnSpy.mockRestore()
+    })
+
+    it(`warns once for the deprecated dependency-array form`, () => {
+      const warnSpy = vi.spyOn(console, `warn`).mockImplementation(() => {})
+      const collection = createCollection(
+        mockSyncCollectionOptions<Person>({
+          id: `deps-warning`,
+          getKey: (person: Person) => person.id,
+          initialData: initialPersons,
+        }),
+      )
+
+      const { rerender } = renderHook(
+        ({ minAge }) =>
+          useLiveQuery(
+            (q) =>
+              q
+                .from({ people: collection })
+                .where(({ people }) => gt(people.age, minAge)),
+            [minAge],
+          ),
+        { initialProps: { minAge: 25 } },
+      )
+
+      rerender({ minAge: 30 })
+      rerender({ minAge: 30 })
+
+      expect(warnSpy).toHaveBeenCalledTimes(1)
+      expect(warnSpy).toHaveBeenCalledWith(
+        expect.stringContaining(`will be removed in 1.0`),
+      )
+
+      warnSpy.mockRestore()
+    })
+
+    it(`warns for an explicitly passed empty dependency array`, () => {
+      const warnSpy = vi.spyOn(console, `warn`).mockImplementation(() => {})
+      const collection = createCollection(
+        mockSyncCollectionOptions<Person>({
+          id: `empty-deps-warning`,
+          getKey: (person: Person) => person.id,
+          initialData: initialPersons,
+        }),
+      )
+
+      renderHook(() => useLiveQuery((q) => q.from({ people: collection }), []))
+
+      expect(warnSpy).toHaveBeenCalledWith(
+        expect.stringContaining(`useLiveQuery({ query })`),
+      )
+
+      warnSpy.mockRestore()
     })
   })
 })

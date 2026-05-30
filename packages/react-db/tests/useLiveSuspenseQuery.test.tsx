@@ -185,7 +185,7 @@ describe(`useLiveSuspenseQuery`, () => {
     })
   })
 
-  it(`should re-suspend when deps change`, async () => {
+  it(`should re-suspend when derived query identity changes`, async () => {
     const collection = createCollection(
       mockSyncCollectionOptions<Person>({
         id: `test-persons-suspense-5`,
@@ -196,13 +196,12 @@ describe(`useLiveSuspenseQuery`, () => {
 
     const { result, rerender } = renderHook(
       ({ minAge }) => {
-        return useLiveSuspenseQuery(
-          (q) =>
+        return useLiveSuspenseQuery({
+          query: (q) =>
             q
               .from({ persons: collection })
               .where(({ persons }) => gt(persons.age, minAge)),
-          [minAge],
-        )
+        })
       },
       {
         wrapper: SuspenseWrapper,
@@ -216,7 +215,7 @@ describe(`useLiveSuspenseQuery`, () => {
     })
     expect(result.current.data[0]?.age).toBe(35)
 
-    // Change deps - age > 20
+    // Change derived identity - age > 20
     rerender({ minAge: 20 })
 
     // Should re-suspend and load new data
