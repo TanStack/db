@@ -238,6 +238,29 @@ const structuredQueries: Array<[string, () => QueryIR]> = [
       ),
   ],
   [
+    `unioned source object`,
+    () =>
+      getQueryIR(
+        new Query().unionAll({ user: usersCollection, post: postsCollection }),
+      ),
+  ],
+  [
+    `unioned query branches`,
+    () =>
+      getQueryIR(
+        new Query().unionAll(
+          new Query().from({ user: usersCollection }).select(({ user }) => ({
+            id: user.id,
+            label: user.name,
+          })),
+          new Query().from({ post: postsCollection }).select(({ post }) => ({
+            id: post.id,
+            label: post.title,
+          })),
+        ),
+      ),
+  ],
+  [
     `includes subquery`,
     () =>
       getQueryIR(
@@ -269,7 +292,7 @@ const structuredQueries: Array<[string, () => QueryIR]> = [
 
 describe(`stable QueryIR identity smoke test`, () => {
   it(`can derive identity for representative structured query shapes`, () => {
-    expect(structuredQueries).toHaveLength(14)
+    expect(structuredQueries).toHaveLength(16)
 
     const hashes = structuredQueries.map(([name, createQuery]) => {
       const hash = getStableQueryIRHash(createQuery())
