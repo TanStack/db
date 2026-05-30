@@ -263,10 +263,12 @@ export const userPreferencesCollection = createCollection(
 
 // Use in component
 function SettingsPanel() {
-  const { data: prefs } = useLiveQuery((q) =>
-    q.from({ pref: userPreferencesCollection })
-      .where(({ pref }) => eq(pref.id, 'current-user'))
-  )
+  const { data: prefs } = useLiveQuery({
+    query: (q) =>
+      q
+        .from({ pref: userPreferencesCollection })
+        .where(({ pref }) => eq(pref.id, 'current-user')),
+  })
 
   const currentPrefs = prefs[0]
 

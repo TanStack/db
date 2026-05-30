@@ -164,14 +164,15 @@ bindings and reactive updates, use live queries instead.
 In React, you can use the `useLiveQuery` hook:
 
 ```tsx
-import { useLiveQuery } from '@tanstack/react-db'
+import { eq, useLiveQuery } from '@tanstack/react-db'
 
 function UserList() {
-  const activeUsers = useLiveQuery((q) =>
-    q
-      .from({ user: usersCollection })
-      .where(({ user }) => eq(user.active, true))
-  )
+  const { data: activeUsers } = useLiveQuery({
+    query: (q) =>
+      q
+        .from({ user: usersCollection })
+        .where(({ user }) => eq(user.active, true)),
+  })
 
   return (
     <ul>
@@ -206,7 +207,31 @@ export class UserListComponent {
 }
 ```
 
-> **Note:** React hooks (`useLiveQuery`, `useLiveInfiniteQuery`, `useLiveSuspenseQuery`) accept an optional dependency array parameter to re-execute queries when values change, similar to React's `useEffect`. See the [React Adapter documentation](../framework/react/overview#dependency-arrays) for details on when and how to use dependency arrays.
+> **Note:** React hooks derive query identity from structured query IR by default. Dependency arrays are still accepted for backwards compatibility, but warn in development and will be removed in 1.0. See the [React Adapter documentation](../framework/react/overview#query-identity) for details.
+
+#### When React Needs a Query Key
+
+Use `queryKey` when the query contains opaque runtime logic that cannot be represented in structured IR, such as `.fn.where`, `.fn.select`, or `.fn.having`. The key becomes the explicit identity for that query:
+
+```tsx
+function UserSearch({ search }: { search: string }) {
+  const { data } = useLiveQuery({
+    queryKey: [usersCollection.id, 'search', search],
+    query: (q) =>
+      q
+        .from({ user: usersCollection })
+        .fn.where(({ user }) =>
+          user.name.toLowerCase().includes(search.toLowerCase())
+        ),
+  })
+
+  return <div>{data.length} users</div>
+}
+```
+
+You can also provide a `queryKey` as a performance escape hatch for a very hot render path, but normal structured queries should omit it.
+
+React development builds detect both cases: opaque, unhashable query IR throws with a path-specific error, and repeated expensive identity derivation warns once with the same `queryKey` escape hatch.
 
 For more details on framework integration, see the [React](../framework/react/overview), [Vue](../framework/vue/overview), and [Angular](../framework/angular/overview) adapter documentation.
 
@@ -220,11 +245,12 @@ import { Suspense } from 'react'
 
 function UserList() {
   // This will suspend until data is ready
-  const { data } = useLiveSuspenseQuery((q) =>
-    q
-      .from({ user: usersCollection })
-      .where(({ user }) => eq(user.active, true))
-  )
+  const { data } = useLiveSuspenseQuery({
+    query: (q) =>
+      q
+        .from({ user: usersCollection })
+        .where(({ user }) => eq(user.active, true)),
+  })
 
   // data is always defined - no need for optional chaining
   return (
@@ -251,9 +277,9 @@ The key difference from `useLiveQuery` is that `data` is always defined (never `
 
 ```tsx
 function UserStats() {
-  const { data } = useLiveSuspenseQuery((q) =>
-    q.from({ user: usersCollection })
-  )
+  const { data } = useLiveSuspenseQuery({
+    query: (q) => q.from({ user: usersCollection }),
+  })
 
   // TypeScript knows data is Array<User>, not Array<User> | undefined
   return <div>Total users: {data.length}</div>
@@ -284,9 +310,9 @@ After the initial load, data updates stream in without re-suspending:
 
 ```tsx
 function UserList() {
-  const { data } = useLiveSuspenseQuery((q) =>
-    q.from({ user: usersCollection })
-  )
+  const { data } = useLiveSuspenseQuery({
+    query: (q) => q.from({ user: usersCollection }),
+  })
 
   // Suspends once during initial load
   // After that, data updates automatically when users change
@@ -301,19 +327,18 @@ function UserList() {
 }
 ```
 
-#### Re-suspending on Dependency Changes
+#### Re-suspending on Query Identity Changes
 
-When dependencies change, the hook re-suspends to load new data:
+When the derived query identity changes, the hook re-suspends to load new data:
 
 ```tsx
 function FilteredUsers({ minAge }: { minAge: number }) {
-  const { data } = useLiveSuspenseQuery(
-    (q) =>
+  const { data } = useLiveSuspenseQuery({
+    query: (q) =>
       q
         .from({ user: usersCollection })
         .where(({ user }) => gt(user.age, minAge)),
-    [minAge] // Re-suspend when minAge changes
-  )
+  })
 
   return (
     <ul>
@@ -334,7 +359,7 @@ function FilteredUsers({ minAge }: { minAge: number }) {
   - The query always needs to run (not conditional)
 
 - **Use `useLiveQuery`** when:
-  - You need conditional/disabled queries
+  - You prefer conditional rendering for optional query inputs
   - You prefer handling loading/error states within your component
   - You want to show loading states inline without Suspense
   - You need access to `status` and `isLoading` flags
@@ -343,9 +368,9 @@ function FilteredUsers({ minAge }: { minAge: number }) {
 ```tsx
 // useLiveQuery - handle states in component
 function UserList() {
-  const { data, status, isLoading } = useLiveQuery((q) =>
-    q.from({ user: usersCollection })
-  )
+  const { data, status, isLoading } = useLiveQuery({
+    query: (q) => q.from({ user: usersCollection }),
+  })
 
   if (isLoading) return <div>Loading...</div>
   if (status === 'error') return <div>Error loading users</div>
@@ -355,9 +380,9 @@ function UserList() {
 
 // useLiveSuspenseQuery - handle states with Suspense/ErrorBoundary
 function UserList() {
-  const { data } = useLiveSuspenseQuery((q) =>
-    q.from({ user: usersCollection })
-  )
+  const { data } = useLiveSuspenseQuery({
+    query: (q) => q.from({ user: usersCollection }),
+  })
 
   return <ul>{data.map(user => <li key={user.id}>{user.name}</li>)}</ul>
 }
@@ -377,9 +402,9 @@ const route = {
 // In your component:
 function UserList() {
   // Collection is already loaded, so data is immediately available
-  const { data } = useLiveQuery((q) =>
-    q.from({ user: usersCollection })
-  )
+  const { data } = useLiveQuery({
+    query: (q) => q.from({ user: usersCollection }),
+  })
 
   return <ul>{data?.map(user => <li key={user.id}>{user.name}</li>)}</ul>
 }
@@ -387,28 +412,28 @@ function UserList() {
 
 ### Conditional Queries
 
-In React, you can conditionally disable a query by returning `undefined` or `null` from the `useLiveQuery` callback. When disabled, the hook returns a special state indicating the query is not active.
+For optional inputs, prefer rendering the query component only after the inputs exist. That avoids creating a live query before all required values exist.
 
 ```tsx
 import { useLiveQuery } from '@tanstack/react-db'
 
-function TodoList({ userId }: { userId?: string }) {
-  const { data, isEnabled, status } = useLiveQuery((q) => {
-    // Disable the query when userId is not available
-    if (!userId) return undefined
+function TodosPanel({ userId }: { userId?: string }) {
+  if (!userId) return <div>Please select a user</div>
 
-    return q
-      .from({ todos: todosCollection })
-      .where(({ todos }) => eq(todos.userId, userId))
-  }, [userId])
+  return <TodoList userId={userId} />
+}
 
-  if (!isEnabled) {
-    return <div>Please select a user</div>
-  }
+function TodoList({ userId }: { userId: string }) {
+  const { data } = useLiveQuery({
+    query: (q) =>
+      q
+        .from({ todos: todosCollection })
+        .where(({ todos }) => eq(todos.userId, userId)),
+  })
 
   return (
     <ul>
-      {data?.map(todo => (
+      {data.map(todo => (
         <li key={todo.id}>{todo.text}</li>
       ))}
     </ul>
@@ -416,32 +441,29 @@ function TodoList({ userId }: { userId?: string }) {
 }
 ```
 
-When the query is disabled (callback returns `undefined` or `null`):
+The callback form can also return `undefined` or `null` to disable a query. This still uses derived identity, so captured structured values do not need a dependency array. When the query is disabled:
 - `status` is `'disabled'`
 - `data`, `state`, and `collection` are `undefined`
 - `isEnabled` is `false`
 - `isLoading`, `isReady`, `isIdle`, and `isError` are all `false`
 
-This pattern is useful for "wait until inputs exist" flows without needing to conditionally render the hook itself or manage an external enabled flag.
-
-### Alternative Callback Return Types
-
-The `useLiveQuery` callback can return different types depending on your use case:
+### Alternative Input Forms
 
 #### Returning a Query Builder (Standard)
 
-The most common pattern is to return a query builder:
+The standard React pattern is an object with a query builder. For structured queries, React derives the identity from the query IR:
 
 ```tsx
-const { data } = useLiveQuery((q) =>
-  q.from({ todos: todosCollection })
-   .where(({ todos }) => eq(todos.completed, false))
-)
+const { data } = useLiveQuery({
+  query: (q) =>
+    q.from({ todos: todosCollection })
+     .where(({ todos }) => eq(todos.completed, false)),
+})
 ```
 
 #### Returning a Pre-created Collection
 
-You can return an existing collection directly:
+You can also subscribe to an existing collection directly:
 
 ```tsx
 const activeUsersCollection = createLiveQueryCollection((q) =>
@@ -449,15 +471,10 @@ const activeUsersCollection = createLiveQueryCollection((q) =>
    .where(({ users }) => eq(users.active, true))
 )
 
-function UserList({ usePrebuilt }: { usePrebuilt: boolean }) {
-  const { data } = useLiveQuery((q) => {
-    // Toggle between pre-created collection and ad-hoc query
-    if (usePrebuilt) return activeUsersCollection
+function UserList() {
+  const { data } = useLiveQuery(activeUsersCollection)
 
-    return q.from({ users: usersCollection })
-  }, [usePrebuilt])
-
-  return <ul>{data?.map(user => <li key={user.id}>{user.name}</li>)}</ul>
+  return <ul>{data.map(user => <li key={user.id}>{user.name}</li>)}</ul>
 }
 ```
 
@@ -466,13 +483,12 @@ function UserList({ usePrebuilt }: { usePrebuilt: boolean }) {
 You can return a configuration object to specify additional options like a custom ID:
 
 ```tsx
-const { data } = useLiveQuery((q) => {
-  return {
-    query: q.from({ items: itemsCollection })
-             .select(({ items }) => ({ id: items.id })),
-    id: 'items-view', // Custom ID for debugging
-    gcTime: 10000 // Custom garbage collection time
-  }
+const { data } = useLiveQuery({
+  query: (q) =>
+    q.from({ items: itemsCollection })
+     .select(({ items }) => ({ id: items.id })),
+  id: 'items-view', // Custom ID for debugging
+  gcTime: 10000 // Custom garbage collection time
 })
 ```
 
@@ -1224,19 +1240,20 @@ import { useLiveQuery } from '@tanstack/react-db'
 import { eq } from '@tanstack/db'
 
 function ProjectList() {
-  const { data: projects } = useLiveQuery((q) =>
-    q.from({ p: projectsCollection }).select(({ p }) => ({
-      id: p.id,
-      name: p.name,
-      issues: q
-        .from({ i: issuesCollection })
-        .where(({ i }) => eq(i.projectId, p.id))
-        .select(({ i }) => ({
-          id: i.id,
-          title: i.title,
-        })),
-    })),
-  )
+  const { data: projects } = useLiveQuery({
+    query: (q) =>
+      q.from({ p: projectsCollection }).select(({ p }) => ({
+        id: p.id,
+        name: p.name,
+        issues: q
+          .from({ i: issuesCollection })
+          .where(({ i }) => eq(i.projectId, p.id))
+          .select(({ i }) => ({
+            id: i.id,
+            title: i.title,
+          })),
+      })),
+  })
 
   return (
     <ul>
@@ -1477,12 +1494,13 @@ import { useLiveQuery } from '@tanstack/react-db'
 import { eq } from '@tanstack/db'
 
 function UserProfile({ userId }: { userId: string }) {
-  const { data: user, isLoading } = useLiveQuery((q) =>
-    q
-      .from({ users: usersCollection })
-      .where(({ users }) => eq(users.id, userId))
-      .findOne()
-  , [userId])
+  const { data: user, isLoading } = useLiveQuery({
+    query: (q) =>
+      q
+        .from({ users: usersCollection })
+        .where(({ users }) => eq(users.id, userId))
+        .findOne(),
+  })
 
   if (isLoading) return <div>Loading...</div>
   if (!user) return <div>User not found</div>
@@ -1849,14 +1867,15 @@ You can chain multiple reusable filters:
 ```tsx
 import { useLiveQuery } from '@tanstack/react-db'
 
-const { data } = useLiveQuery((q) => {
-  return q
-    .from({ item: itemsCollection })
-    .where(({ item }) => eq(item.id, 1))
-    .where(activeItemFilter)      // Reusable filter 1
-    .where(verifiedItemFilter)     // Reusable filter 2
-    .select(({ item }) => ({ ...item }))
-}, [])
+const { data } = useLiveQuery({
+  query: (q) =>
+    q
+      .from({ item: itemsCollection })
+      .where(({ item }) => eq(item.id, 1))
+      .where(activeItemFilter)      // Reusable filter 1
+      .where(verifiedItemFilter)     // Reusable filter 2
+      .select(({ item }) => ({ ...item })),
+})
 ```
 
 #### Using with Different Aliases

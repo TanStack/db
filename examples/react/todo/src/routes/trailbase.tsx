@@ -22,15 +22,16 @@ export const Route = createFileRoute(`/trailbase`)({
 
 function TrailBasePage() {
   // Get data using live queries with TrailBase collections
-  const { data: todos } = useLiveQuery((q) =>
-    q
-      .from({ todo: trailBaseTodoCollection })
-      .orderBy(({ todo }) => todo.created_at, `asc`),
-  )
+  const { data: todos } = useLiveQuery({
+    query: (q) =>
+      q
+        .from({ todo: trailBaseTodoCollection })
+        .orderBy(({ todo }) => todo.created_at, `asc`),
+  })
 
-  const { data: configData } = useLiveQuery((q) =>
-    q.from({ config: trailBaseConfigCollection }),
-  )
+  const { data: configData } = useLiveQuery({
+    query: (q) => q.from({ config: trailBaseConfigCollection }),
+  })
 
   // Note: TrailBase collections use recordApi internally, which is not exposed
   // as a collection utility. For this example, we're not using serialized

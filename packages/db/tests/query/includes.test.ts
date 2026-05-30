@@ -2261,7 +2261,7 @@ describe(`includes subqueries`, () => {
       projectsWC.utils.write({
         type: `update`,
         value: { id: 1, name: `Alpha`, createdBy: `bob` },
-        oldValue: sampleProjectsWithCreator[0]!,
+        previousValue: sampleProjectsWithCreator[0]!,
       })
       projectsWC.utils.commit()
 
@@ -2306,7 +2306,7 @@ describe(`includes subqueries`, () => {
           title: `Feature for Alpha`,
           createdBy: `alice`,
         },
-        oldValue: sampleIssuesWithCreator[1]!,
+        previousValue: sampleIssuesWithCreator[1]!,
       })
       issuesWC.utils.commit()
 
@@ -2418,7 +2418,7 @@ describe(`includes subqueries`, () => {
       projectsWC.utils.write({
         type: `update`,
         value: { id: 1, name: `Alpha`, createdBy: `bob` },
-        oldValue: sampleProjectsWithCreator[0]!,
+        previousValue: sampleProjectsWithCreator[0]!,
       })
       projectsWC.utils.commit()
 

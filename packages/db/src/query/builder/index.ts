@@ -1,4 +1,5 @@
 import { CollectionImpl } from '../../collection/index.js'
+import { isCollectionOptions } from '../../client.js'
 import {
   Aggregate as AggregateExpr,
   CollectionRef,
@@ -27,6 +28,7 @@ import {
 } from './ref-proxy.js'
 import { ConcatToArrayWrapper, ToArrayWrapper } from './functions.js'
 import type { NamespacedRow, SingleResult } from '../../types.js'
+import type { CollectionOptions } from '../../client.js'
 import type {
   Aggregate,
   BasicExpression,
@@ -60,11 +62,24 @@ import type {
   WithResult,
 } from './types.js'
 
+type CollectionResolver = (
+  options: CollectionOptions<any, string | number, any, any>,
+) => CollectionImpl<any, string | number, any, any, any>
+
 export class BaseQueryBuilder<TContext extends Context = Context> {
   private readonly query: Partial<QueryIR> = {}
 
-  constructor(query: Partial<QueryIR> = {}) {
+  constructor(
+    query: Partial<QueryIR> = {},
+    private readonly resolveCollection?: CollectionResolver,
+  ) {
     this.query = { ...query }
+  }
+
+  private _clone<TNextContext extends Context = Context>(
+    query: Partial<QueryIR>,
+  ): BaseQueryBuilder<TNextContext> {
+    return new BaseQueryBuilder<TNextContext>(query, this.resolveCollection)
   }
 
   /**
@@ -113,6 +128,13 @@ export class BaseQueryBuilder<TContext extends Context = Context> {
 
     if (sourceValue instanceof CollectionImpl) {
       ref = new CollectionRef(sourceValue, alias)
+    } else if (isCollectionOptions(sourceValue)) {
+      if (!this.resolveCollection) {
+        throw new Error(
+          `Cannot use collection descriptor "${alias}" as a query source without a DbClient resolver. In React, wrap your tree in <DbProvider>.`,
+        )
+      }
+      ref = new CollectionRef(this.resolveCollection(sourceValue), alias)
     } else if (sourceValue instanceof BaseQueryBuilder) {
       const subQuery = sourceValue._getQuery()
       if (!(subQuery as Partial<QueryIR>).from) {
@@ -152,7 +174,7 @@ export class BaseQueryBuilder<TContext extends Context = Context> {
   }> {
     const [, from] = this._createRefForSource(source, `from clause`)
 
-    return new BaseQueryBuilder({
+    return this._clone({
       ...this.query,
       from,
     }) as any
@@ -234,7 +256,7 @@ export class BaseQueryBuilder<TContext extends Context = Context> {
 
     const existingJoins = this.query.join || []
 
-    return new BaseQueryBuilder({
+    return this._clone({
       ...this.query,
       join: [...existingJoins, joinClause],
     }) as any
@@ -393,7 +415,7 @@ export class BaseQueryBuilder<TContext extends Context = Context> {
 
     const existingWhere = this.query.where || []
 
-    return new BaseQueryBuilder({
+    return this._clone({
       ...this.query,
       where: [...existingWhere, expression],
     }) as any
@@ -453,7 +475,7 @@ export class BaseQueryBuilder<TContext extends Context = Context> {
 
     const existingHaving = this.query.having || []
 
-    return new BaseQueryBuilder({
+    return this._clone({
       ...this.query,
       having: [...existingHaving, expression],
     }) as any
@@ -519,7 +541,7 @@ export class BaseQueryBuilder<TContext extends Context = Context> {
 
     const select = buildNestedSelect(selectObject, aliases)
 
-    return new BaseQueryBuilder({
+    return this._clone({
       ...this.query,
       select: select,
       fnSelect: undefined, // remove the fnSelect clause if it exists
@@ -594,7 +616,7 @@ export class BaseQueryBuilder<TContext extends Context = Context> {
 
     const existingOrderBy: OrderBy = this.query.orderBy || []
 
-    return new BaseQueryBuilder({
+    return this._clone({
       ...this.query,
       orderBy: [...existingOrderBy, ...orderByClauses],
     }) as any
@@ -639,7 +661,7 @@ export class BaseQueryBuilder<TContext extends Context = Context> {
 
     // Extend existing groupBy expressions (multiple groupBy calls should accumulate)
     const existingGroupBy = this.query.groupBy || []
-    return new BaseQueryBuilder({
+    return this._clone({
       ...this.query,
       groupBy: [...existingGroupBy, ...newExpressions],
     }) as any
@@ -662,7 +684,7 @@ export class BaseQueryBuilder<TContext extends Context = Context> {
    * ```
    */
   limit(count: number): QueryBuilder<TContext> {
-    return new BaseQueryBuilder({
+    return this._clone({
       ...this.query,
       limit: count,
     }) as any
@@ -686,7 +708,7 @@ export class BaseQueryBuilder<TContext extends Context = Context> {
    * ```
    */
   offset(count: number): QueryBuilder<TContext> {
-    return new BaseQueryBuilder({
+    return this._clone({
       ...this.query,
       offset: count,
     }) as any
@@ -707,7 +729,7 @@ export class BaseQueryBuilder<TContext extends Context = Context> {
    * ```
    */
   distinct(): QueryBuilder<TContext> {
-    return new BaseQueryBuilder({
+    return this._clone({
       ...this.query,
       distinct: true,
     }) as any
@@ -727,7 +749,7 @@ export class BaseQueryBuilder<TContext extends Context = Context> {
    *```
    */
   findOne(): QueryBuilder<TContext & SingleResult> {
-    return new BaseQueryBuilder({
+    return this._clone({
       ...this.query,
       // TODO: enforcing return only one result with also a default orderBy if none is specified
       // limit: 1,
@@ -791,7 +813,7 @@ export class BaseQueryBuilder<TContext extends Context = Context> {
       select<TFuncSelectResult>(
         callback: (row: TContext[`schema`]) => TFuncSelectResult,
       ): QueryBuilder<WithResult<TContext, TFuncSelectResult>> {
-        return new BaseQueryBuilder({
+        return builder._clone({
           ...builder.query,
           select: undefined, // remove the select clause if it exists
           fnSelect: callback,
@@ -815,7 +837,7 @@ export class BaseQueryBuilder<TContext extends Context = Context> {
       where(
         callback: (row: TContext[`schema`]) => any,
       ): QueryBuilder<TContext> {
-        return new BaseQueryBuilder({
+        return builder._clone({
           ...builder.query,
           fnWhere: [
             ...(builder.query.fnWhere || []),
@@ -843,7 +865,7 @@ export class BaseQueryBuilder<TContext extends Context = Context> {
       having(
         callback: (row: FunctionalHavingRow<TContext>) => any,
       ): QueryBuilder<TContext> {
-        return new BaseQueryBuilder({
+        return builder._clone({
           ...builder.query,
           fnHaving: [
             ...(builder.query.fnHaving || []),

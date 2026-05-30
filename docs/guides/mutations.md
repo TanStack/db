@@ -1639,9 +1639,9 @@ todoCollection.insert({
 
 // Use view key for rendering
 const TodoList = () => {
-  const { data: todos } = useLiveQuery((q) =>
-    q.from({ todo: todoCollection })
-  )
+  const { data: todos } = useLiveQuery({
+    query: (q) => q.from({ todo: todoCollection }),
+  })
 
   return (
     <ul>

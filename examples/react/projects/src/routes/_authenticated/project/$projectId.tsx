@@ -1,13 +1,13 @@
-import { createFileRoute, notFound } from '@tanstack/react-router'
-import { eq, useLiveQuery } from '@tanstack/react-db'
-import { useState } from 'react'
-import type { Todo } from '@/db/schema'
-import { authClient } from '@/lib/auth-client'
+import { createFileRoute, notFound } from "@tanstack/react-router"
+import { eq, useLiveQuery } from "@tanstack/react-db"
+import { useState } from "react"
+import type { Todo } from "@/db/schema"
+import { authClient } from "@/lib/auth-client"
 import {
   projectCollection,
   todoCollection,
   usersCollection,
-} from '@/lib/collections'
+} from "@/lib/collections"
 
 export const Route = createFileRoute(`/_authenticated/project/$projectId`)({
   component: ProjectPage,
@@ -25,41 +25,40 @@ export const Route = createFileRoute(`/_authenticated/project/$projectId`)({
 
 function ProjectPage() {
   const { projectId } = Route.useParams()
+  const projectIdNumber = parseInt(projectId, 10)
   const { data: session } = authClient.useSession()
   const [newTodoText, setNewTodoText] = useState(``)
 
-  const { data: todos } = useLiveQuery(
-    (q) =>
+  const { data: todos } = useLiveQuery({
+    query: (q) =>
       q
         .from({ todo: todoCollection })
-        .where(({ todo }) => eq(todo.project_id, parseInt(projectId, 10)))
+        .where(({ todo }) => eq(todo.project_id, projectIdNumber))
         .orderBy(({ todo }) => todo.created_at),
-    [projectId]
-  )
+  })
 
-  const { data: users } = useLiveQuery((q) =>
-    q.from({ users: usersCollection })
-  )
-  const { data: usersInProjects } = useLiveQuery(
-    (q) =>
+  const { data: users } = useLiveQuery({
+    query: (q) => q.from({ users: usersCollection }),
+  })
+  const { data: usersInProjects } = useLiveQuery({
+    queryKey: [projectCollection.id, `users-in-project`, projectIdNumber],
+    query: (q) =>
       q
         .from({ projects: projectCollection })
-        .where(({ projects }) => eq(projects.id, parseInt(projectId, 10)))
+        .where(({ projects }) => eq(projects.id, projectIdNumber))
         .fn.select(({ projects }) => ({
           users: projects.shared_user_ids.concat(projects.owner_id),
           owner: projects.owner_id,
         })),
-    [projectId]
-  )
+  })
   const usersInProject = usersInProjects[0]
 
-  const { data: projects } = useLiveQuery(
-    (q) =>
+  const { data: projects } = useLiveQuery({
+    query: (q) =>
       q
         .from({ p: projectCollection })
-        .where(({ p }) => eq(p.id, parseInt(projectId, 10))),
-    [projectId]
-  )
+        .where(({ p }) => eq(p.id, projectIdNumber)),
+  })
   const project = projects[0]
 
   const addTodo = () => {
@@ -69,7 +68,7 @@ function ProjectPage() {
         id: Math.floor(Math.random() * 100000),
         text: newTodoText.trim(),
         completed: false,
-        project_id: parseInt(projectId),
+        project_id: projectIdNumber,
         user_ids: [],
         created_at: new Date(),
       })

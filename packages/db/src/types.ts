@@ -350,6 +350,22 @@ export interface SyncConfig<
   getSyncMetadata?: () => Record<string, unknown>
 
   /**
+   * Export adapter-specific metadata that lets hydration/persistence resume sync.
+   * The payload shape is owned by the adapter.
+   */
+  exportSyncMeta?: () => unknown
+
+  /**
+   * Import adapter-specific metadata produced by exportSyncMeta.
+   */
+  importSyncMeta?: (meta: unknown) => void
+
+  /**
+   * Merge two adapter-specific metadata payloads during hydration.
+   */
+  mergeSyncMeta?: (current: unknown, incoming: unknown) => unknown
+
+  /**
    * The row update mode used to sync to the collection.
    * @default `partial`
    * @description
