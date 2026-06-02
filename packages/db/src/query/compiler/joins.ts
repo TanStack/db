@@ -16,6 +16,7 @@ import { ensureIndexForField } from '../../indexes/auto-index.js'
 import { PropRef } from '../ir.js'
 import { inArray } from '../builder/functions.js'
 import { compileExpression } from './evaluators.js'
+import { normalizeExpressionPaths } from './expressions.js'
 import { getLazyLoadTargets } from './lazy-targets.js'
 import type { CompileQueryFn } from './index.js'
 import type { OrderByOptimizationInfo } from './order-by.js'
@@ -310,7 +311,10 @@ function processJoin(
 
             const lazyJoinRef = new PropRef(target.path)
             const loaded = lazySourceSubscription.requestSnapshot({
-              where: inArray(lazyJoinRef, joinKeys),
+              where: normalizeExpressionPaths(
+                inArray(lazyJoinRef, joinKeys),
+                target.alias,
+              ),
               optimizedOnly: true,
             })
 

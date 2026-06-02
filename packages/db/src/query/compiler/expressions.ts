@@ -1,18 +1,21 @@
 import { Func, PropRef, Value } from '../ir.js'
+import { defaultComparator } from '../../utils/comparison.js'
 import type { BasicExpression, OrderBy } from '../ir.js'
 
 /**
- * Normalizes a WHERE clause expression by removing table aliases from property references.
+ * Normalizes a WHERE clause expression into a canonical form.
  *
- * This function recursively traverses an expression tree and creates new BasicExpression
- * instances with normalized paths. The main transformation is removing the collection alias
- * from property reference paths (e.g., `['user', 'id']` becomes `['id']` when `collectionAlias`
- * is `'user'`), which is needed when converting query-level expressions to collection-level
- * expressions for subscriptions.
+ * Recursively traverses an expression tree and creates new BasicExpression instances with:
+ * - **Normalized paths** — the collection alias is removed from property reference paths
+ *   (e.g. `['user', 'id']` becomes `['id']` when `collectionAlias` is `'user'`), needed when
+ *   converting query-level expressions to collection-level expressions for subscriptions.
+ * - **Canonical set-membership order** — `in` value arrays are sorted. `in` is unordered, so
+ *   without this the same value set in a different order produces a distinct serialized
+ *   predicate (and `loadSubset` queryKey / cache key) and refetches identical data.
  *
  * @param whereClause - The WHERE clause expression to normalize
  * @param collectionAlias - The alias of the collection being filtered (to strip from paths)
- * @returns A new BasicExpression with normalized paths
+ * @returns A new, canonicalized BasicExpression
  *
  * @example
  * // Input: ref with path ['user', 'id'] where collectionAlias is 'user'
@@ -47,6 +50,14 @@ export function normalizeExpressionPaths(
         collectionAlias,
       )
       args.push(convertedArg)
+    }
+    if (
+      whereClause.name === `in` &&
+      args.length === 2 &&
+      args[1]?.type === `val` &&
+      Array.isArray(args[1].value)
+    ) {
+      args[1] = new Value([...args[1].value].sort(defaultComparator))
     }
     return new Func(whereClause.name, args)
   }
