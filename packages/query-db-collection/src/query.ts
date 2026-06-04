@@ -119,6 +119,13 @@ export interface QueryCollectionConfig<
     TQueryData,
     TQueryKey
   >[`staleTime`]
+  gcTime?: QueryObserverOptions<
+    TQueryData,
+    TError,
+    Array<T>,
+    TQueryData,
+    TQueryKey
+  >[`gcTime`]
   persistedGcTime?: number
 
   /**
@@ -578,6 +585,7 @@ export function queryCollectionOptions(
     retry,
     retryDelay,
     staleTime,
+    gcTime,
     persistedGcTime,
     getKey,
     onInsert,
@@ -1163,6 +1171,7 @@ export function queryCollectionOptions(
         ...(retry !== undefined && { retry }),
         ...(retryDelay !== undefined && { retryDelay }),
         ...(staleTime !== undefined && { staleTime }),
+        ...(gcTime !== undefined && { gcTime }),
       }
 
       const localObserver = new QueryObserver<
