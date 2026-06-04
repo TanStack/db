@@ -25,7 +25,11 @@ export interface QueryIR {
   fnHaving?: Array<(row: NamespacedRow) => any>
 }
 
-export type IncludesMaterialization = `collection` | `array` | `concat`
+export type IncludesMaterialization =
+  | `collection`
+  | `array`
+  | `singleton`
+  | `concat`
 
 export const INCLUDES_SCALAR_FIELD = `__includes_scalar__`
 

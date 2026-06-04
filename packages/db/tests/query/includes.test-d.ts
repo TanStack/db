@@ -4,6 +4,7 @@ import {
   concat,
   createLiveQueryCollection,
   eq,
+  materialize,
   queryOnce,
   toArray,
 } from '../../src/query/index.js'
@@ -419,6 +420,132 @@ describe(`includes subquery types`, () => {
 
       // @ts-expect-error - top-level scalar select is not supported for queryOnce
       queryOnce({ query: scalarRootQuery })
+    })
+  })
+
+  describe(`materialize`, () => {
+    test(`materialize over a multi-row subquery infers Array<T>`, () => {
+      const collection = createLiveQueryCollection((q) =>
+        q.from({ p: projects }).select(({ p }) => ({
+          id: p.id,
+          name: p.name,
+          issues: materialize(
+            q
+              .from({ i: issues })
+              .where(({ i }) => eq(i.projectId, p.id))
+              .select(({ i }) => ({
+                id: i.id,
+                title: i.title,
+              })),
+          ),
+        })),
+      )
+
+      const result = collection.toArray[0]!
+      expectTypeOf(result.id).toEqualTypeOf<number>()
+      expectTypeOf(result.name).toEqualTypeOf<string>()
+      expectTypeOf(result.issues).toMatchTypeOf<
+        Array<WithVirtualProps<{ id: number; title: string }>>
+      >()
+    })
+
+    test(`materialize over a findOne() subquery infers T | undefined`, () => {
+      const collection = createLiveQueryCollection((q) =>
+        q.from({ i: issues }).select(({ i }) => ({
+          id: i.id,
+          title: i.title,
+          project: materialize(
+            q
+              .from({ p: projects })
+              .where(({ p }) => eq(p.id, i.projectId))
+              .select(({ p }) => ({
+                id: p.id,
+                name: p.name,
+              }))
+              .findOne(),
+          ),
+        })),
+      )
+
+      const result = collection.toArray[0]!
+      expectTypeOf(result.id).toEqualTypeOf<number>()
+      expectTypeOf(result.title).toEqualTypeOf<string>()
+      expectTypeOf(result.project).toMatchTypeOf<
+        WithVirtualProps<{ id: number; name: string }> | undefined
+      >()
+    })
+
+    test(`materialize without select on findOne() infers full row | undefined`, () => {
+      const collection = createLiveQueryCollection((q) =>
+        q.from({ i: issues }).select(({ i }) => ({
+          id: i.id,
+          project: materialize(
+            q
+              .from({ p: projects })
+              .where(({ p }) => eq(p.id, i.projectId))
+              .findOne(),
+          ),
+        })),
+      )
+
+      const result = collection.toArray[0]!
+      expectTypeOf(result.project).toMatchTypeOf<
+        WithVirtualProps<Project> | undefined
+      >()
+    })
+
+    test(`materialize over a scalar findOne() infers value | undefined`, () => {
+      const collection = createLiveQueryCollection((q) =>
+        q.from({ m: messages }).select(({ m }) => ({
+          id: m.id,
+          firstChunk: materialize(
+            q
+              .from({ c: chunks })
+              .where(({ c }) => eq(c.messageId, m.id))
+              .orderBy(({ c }) => c.timestamp)
+              .select(({ c }) => c.text)
+              .findOne(),
+          ),
+        })),
+      )
+
+      const result = collection.toArray[0]!
+      expectTypeOf(result.firstChunk).toEqualTypeOf<string | undefined>()
+    })
+
+    test(`nested materialize: array of singletons`, () => {
+      const collection = createLiveQueryCollection((q) =>
+        q.from({ p: projects }).select(({ p }) => ({
+          id: p.id,
+          issues: materialize(
+            q
+              .from({ i: issues })
+              .where(({ i }) => eq(i.projectId, p.id))
+              .select(({ i }) => ({
+                id: i.id,
+                title: i.title,
+                firstComment: materialize(
+                  q
+                    .from({ c: comments })
+                    .where(({ c }) => eq(c.issueId, i.id))
+                    .select(({ c }) => ({ id: c.id, body: c.body }))
+                    .findOne(),
+                ),
+              })),
+          ),
+        })),
+      )
+
+      const result = collection.toArray[0]!
+      expectTypeOf(result.issues[0]!).toMatchTypeOf<
+        WithVirtualProps<{
+          id: number
+          title: string
+          firstComment:
+            | WithVirtualProps<{ id: number; body: string }>
+            | undefined
+        }>
+      >()
     })
   })
 })
