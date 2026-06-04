@@ -5204,9 +5204,9 @@ describe(`includes subqueries`, () => {
       })
       projects.utils.commit()
 
-      expect(stripVirtualPropsDeep((collection.get(99) as any).project)).toEqual(
-        { id: 999, name: `Late Project` },
-      )
+      expect(
+        stripVirtualPropsDeep((collection.get(99) as any).project),
+      ).toEqual({ id: 999, name: `Late Project` })
     })
 
     it(`updating the matching child re-emits parent with updated singleton`, async () => {
@@ -5267,12 +5267,12 @@ describe(`includes subqueries`, () => {
       })
       projects.utils.commit()
 
-      expect(stripVirtualPropsDeep((collection.get(10) as any).project)).toEqual(
-        { id: 1, name: `Alpha v2` },
-      )
-      expect(stripVirtualPropsDeep((collection.get(11) as any).project)).toEqual(
-        { id: 1, name: `Alpha v2` },
-      )
+      expect(
+        stripVirtualPropsDeep((collection.get(10) as any).project),
+      ).toEqual({ id: 1, name: `Alpha v2` })
+      expect(
+        stripVirtualPropsDeep((collection.get(11) as any).project),
+      ).toEqual({ id: 1, name: `Alpha v2` })
     })
 
     it(`materialize over a multi-row subquery still returns Array<T>`, async () => {
