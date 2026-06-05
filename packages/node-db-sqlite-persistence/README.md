@@ -47,3 +47,27 @@ export const todosCollection = createCollection(
   mode-specific behavior (`sync-present` vs `sync-absent`) automatically.
 - `schemaVersion` is specified per collection via `persistedCollectionOptions`.
 - Call `database.close()` when your app shuts down.
+
+## Applied transaction pruning
+
+The `applied_tx` log is a replayable cache, so it is pruned by default to keep
+the SQLite file from growing without bound. When you don't pass prune options,
+the node driver applies:
+
+- `appliedTxPruneMaxRows: 1_000` (per-collection row cap)
+- `appliedTxPruneMaxAgeSeconds: 86_400` (24h age backstop)
+
+Pruning runs inside each write transaction, so every collection self-trims on
+its next sync. Override either value to tune retention, or pass `0` to disable
+that limit:
+
+```ts
+const persistence = createNodeSQLitePersistence({
+  database,
+  appliedTxPruneMaxRows: 5_000, // higher row cap
+  appliedTxPruneMaxAgeSeconds: 0, // disable the age backstop
+})
+```
+
+The defaults are exported as `DEFAULT_APPLIED_TX_PRUNE_MAX_ROWS` and
+`DEFAULT_APPLIED_TX_PRUNE_MAX_AGE_SECONDS`.
