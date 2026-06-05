@@ -185,7 +185,9 @@ describe(`node persistence helpers`, () => {
   })
 
   it(`forces full reload when pullSince starts before pruned replay rows`, async () => {
-    const tempDirectory = mkdtempSync(join(tmpdir(), `db-node-pruned-pull-since-`))
+    const tempDirectory = mkdtempSync(
+      join(tmpdir(), `db-node-pruned-pull-since-`),
+    )
     const dbPath = join(tempDirectory, `state.sqlite`)
     const collectionId = `pruned-pull-since`
     const database = new BetterSqlite3(dbPath)

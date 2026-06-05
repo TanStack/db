@@ -1547,44 +1547,44 @@ export class SQLiteCorePersistenceAdapter implements PersistenceAdapter {
       replayRows,
       replayAvailabilityRows,
     ] = await Promise.all([
-        this.driver.query<{ key: string }>(
-          `SELECT key
+      this.driver.query<{ key: string }>(
+        `SELECT key
          FROM ${collectionTableSql}
          WHERE row_version > ?`,
-          [fromRowVersion],
-        ),
-        this.driver.query<{ key: string }>(
-          `SELECT key
+        [fromRowVersion],
+      ),
+      this.driver.query<{ key: string }>(
+        `SELECT key
          FROM ${tombstoneTableSql}
          WHERE row_version > ?`,
-          [fromRowVersion],
-        ),
-        this.driver.query<{ latest_row_version: number }>(
-          `SELECT latest_row_version
+        [fromRowVersion],
+      ),
+      this.driver.query<{ latest_row_version: number }>(
+        `SELECT latest_row_version
          FROM collection_version
          WHERE collection_id = ?
          LIMIT 1`,
-          [collectionId],
-        ),
-        this.driver.query<{
-          tx_id: string
-          row_version: number
-          replay_json: string | null
-          replay_requires_full_reload: number
-        }>(
-          `SELECT tx_id, row_version, replay_json, replay_requires_full_reload
+        [collectionId],
+      ),
+      this.driver.query<{
+        tx_id: string
+        row_version: number
+        replay_json: string | null
+        replay_requires_full_reload: number
+      }>(
+        `SELECT tx_id, row_version, replay_json, replay_requires_full_reload
          FROM applied_tx
          WHERE collection_id = ? AND row_version > ?
          ORDER BY term ASC, seq ASC`,
-          [collectionId, fromRowVersion],
-        ),
-        this.driver.query<{ min_row_version: number | null }>(
-          `SELECT MIN(row_version) AS min_row_version
+        [collectionId, fromRowVersion],
+      ),
+      this.driver.query<{ min_row_version: number | null }>(
+        `SELECT MIN(row_version) AS min_row_version
          FROM applied_tx
          WHERE collection_id = ?`,
-          [collectionId],
-        ),
-      ])
+        [collectionId],
+      ),
+    ])
 
     const latestRowVersion = latestVersionRows[0]?.latest_row_version ?? 0
     const replayFloor = replayAvailabilityRows[0]?.min_row_version
