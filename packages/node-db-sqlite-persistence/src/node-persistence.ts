@@ -1,4 +1,6 @@
 import {
+  DEFAULT_APPLIED_TX_PRUNE_MAX_AGE_SECONDS as CORE_DEFAULT_APPLIED_TX_PRUNE_MAX_AGE_SECONDS,
+  DEFAULT_APPLIED_TX_PRUNE_MAX_ROWS as CORE_DEFAULT_APPLIED_TX_PRUNE_MAX_ROWS,
   SingleProcessCoordinator,
   createSQLiteCorePersistenceAdapter,
 } from '@tanstack/db-sqlite-persistence-core'
@@ -37,17 +39,19 @@ export type NodeSQLitePersistenceOptions = NodeSQLitePersistenceBaseOptions
 
 /**
  * Default cap on retained `applied_tx` rows per collection. The log is a
- * replayable cache, so a bounded row count keeps the SQLite file from growing
+ * replayable cache, so a bounded row count keeps SQLite files from growing
  * without limit. Pass `appliedTxPruneMaxRows: 0` to disable the row cap.
  */
-export const DEFAULT_APPLIED_TX_PRUNE_MAX_ROWS = 1_000
+export const DEFAULT_APPLIED_TX_PRUNE_MAX_ROWS =
+  CORE_DEFAULT_APPLIED_TX_PRUNE_MAX_ROWS
 
 /**
  * Default age backstop for retained `applied_tx` rows, in seconds (24h). Rows
  * older than this are pruned on the next write. Pass
  * `appliedTxPruneMaxAgeSeconds: 0` to disable the age backstop.
  */
-export const DEFAULT_APPLIED_TX_PRUNE_MAX_AGE_SECONDS = 24 * 60 * 60
+export const DEFAULT_APPLIED_TX_PRUNE_MAX_AGE_SECONDS =
+  CORE_DEFAULT_APPLIED_TX_PRUNE_MAX_AGE_SECONDS
 
 function normalizeSchemaMismatchPolicy(
   policy: NodeSQLiteSchemaMismatchPolicy,
@@ -96,10 +100,10 @@ function resolveAdapterBaseOptions(
 > {
   return {
     appliedTxPruneMaxRows:
-      options.appliedTxPruneMaxRows ?? DEFAULT_APPLIED_TX_PRUNE_MAX_ROWS,
+      options.appliedTxPruneMaxRows ?? CORE_DEFAULT_APPLIED_TX_PRUNE_MAX_ROWS,
     appliedTxPruneMaxAgeSeconds:
       options.appliedTxPruneMaxAgeSeconds ??
-      DEFAULT_APPLIED_TX_PRUNE_MAX_AGE_SECONDS,
+      CORE_DEFAULT_APPLIED_TX_PRUNE_MAX_AGE_SECONDS,
     pullSinceReloadThreshold: options.pullSinceReloadThreshold,
   }
 }

@@ -73,6 +73,21 @@ export type SQLitePullSinceResult<TKey extends string | number> =
 
 const DEFAULT_SCHEMA_VERSION = 1
 const DEFAULT_PULL_SINCE_RELOAD_THRESHOLD = 128
+
+/**
+ * Default cap on retained `applied_tx` rows per collection. The log is a
+ * replayable cache, so a bounded row count keeps SQLite files from growing
+ * without limit. Pass `appliedTxPruneMaxRows: 0` to disable the row cap.
+ */
+export const DEFAULT_APPLIED_TX_PRUNE_MAX_ROWS = 1_000
+
+/**
+ * Default age backstop for retained `applied_tx` rows, in seconds (24h). Rows
+ * older than this are pruned on the next write. Pass
+ * `appliedTxPruneMaxAgeSeconds: 0` to disable the age backstop.
+ */
+export const DEFAULT_APPLIED_TX_PRUNE_MAX_AGE_SECONDS = 24 * 60 * 60
+
 const SQLITE_MAX_IN_BATCH_SIZE = 900
 const SAFE_IDENTIFIER_PATTERN = /^[a-zA-Z_][a-zA-Z0-9_]*$/
 const FORBIDDEN_SQL_FRAGMENT_PATTERN = /(;|--|\/\*)/
