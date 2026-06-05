@@ -8,7 +8,11 @@ export type {
 } from './browser-persistence'
 export type { OpenBrowserWASQLiteOPFSDatabaseOptions } from './opfs-database'
 export type { BrowserCollectionCoordinatorOptions } from './browser-coordinator'
-export { persistedCollectionOptions } from '@tanstack/db-sqlite-persistence-core'
+export {
+  DEFAULT_APPLIED_TX_PRUNE_MAX_AGE_SECONDS,
+  DEFAULT_APPLIED_TX_PRUNE_MAX_ROWS,
+  persistedCollectionOptions,
+} from '@tanstack/db-sqlite-persistence-core'
 export type {
   PersistedCollectionCoordinator,
   PersistedCollectionPersistence,
