@@ -7,6 +7,7 @@ import { createNodeSQLitePersistence, persistedCollectionOptions } from '../src'
 import { BetterSqlite3SQLiteDriver } from '../src/node-driver'
 import { SingleProcessCoordinator } from '../../db-sqlite-persistence-core/src'
 import { runRuntimePersistenceContractSuite } from '../../db-sqlite-persistence-core/tests/contracts/runtime-persistence-contract'
+import type { SQLitePullSinceResult } from '../../db-sqlite-persistence-core/src'
 import type {
   RuntimePersistenceContractTodo,
   RuntimePersistenceDatabaseHarness,
@@ -177,6 +178,91 @@ describe(`node persistence helpers`, () => {
         )
         .all(collectionId) as Array<{ seq: number }>
       expect(appliedRows.map((row) => row.seq)).toEqual([2])
+    } finally {
+      database.close()
+      rmSync(tempDirectory, { recursive: true, force: true })
+    }
+  })
+
+  it(`forces full reload when pullSince starts before pruned replay rows`, async () => {
+    const tempDirectory = mkdtempSync(join(tmpdir(), `db-node-pruned-pull-since-`))
+    const dbPath = join(tempDirectory, `state.sqlite`)
+    const collectionId = `pruned-pull-since`
+    const database = new BetterSqlite3(dbPath)
+
+    try {
+      const persistence = createNodeSQLitePersistence({
+        database,
+        appliedTxPruneMaxRows: 2,
+        appliedTxPruneMaxAgeSeconds: 0,
+      })
+
+      for (const seq of [1, 2, 3]) {
+        await persistence.adapter.applyCommittedTx(collectionId, {
+          txId: `tx-${seq}`,
+          term: 1,
+          seq,
+          rowVersion: seq,
+          mutations: [
+            {
+              type: `insert`,
+              key: String(seq),
+              value: { id: String(seq), title: `todo-${seq}`, score: seq },
+            },
+          ],
+        })
+      }
+
+      const adapter = persistence.adapter as typeof persistence.adapter & {
+        pullSince: (
+          collectionId: string,
+          fromRowVersion: number,
+        ) => Promise<SQLitePullSinceResult<string | number>>
+      }
+      const result = await adapter.pullSince(collectionId, 0)
+
+      expect(result.requiresFullReload).toBe(true)
+    } finally {
+      database.close()
+      rmSync(tempDirectory, { recursive: true, force: true })
+    }
+  })
+
+  it(`prunes applied_tx rows past explicit row cap`, async () => {
+    const tempDirectory = mkdtempSync(join(tmpdir(), `db-node-row-prune-`))
+    const dbPath = join(tempDirectory, `state.sqlite`)
+    const collectionId = `row-prune`
+    const database = new BetterSqlite3(dbPath)
+
+    try {
+      const persistence = createNodeSQLitePersistence({
+        database,
+        appliedTxPruneMaxRows: 2,
+        appliedTxPruneMaxAgeSeconds: 0,
+      })
+
+      for (const seq of [1, 2, 3]) {
+        await persistence.adapter.applyCommittedTx(collectionId, {
+          txId: `tx-${seq}`,
+          term: 1,
+          seq,
+          rowVersion: seq,
+          mutations: [
+            {
+              type: `insert`,
+              key: String(seq),
+              value: { id: String(seq), title: `todo-${seq}`, score: seq },
+            },
+          ],
+        })
+      }
+
+      const appliedRows = database
+        .prepare(
+          `SELECT seq FROM applied_tx WHERE collection_id = ? ORDER BY seq ASC`,
+        )
+        .all(collectionId) as Array<{ seq: number }>
+      expect(appliedRows.map((row) => row.seq)).toEqual([2, 3])
     } finally {
       database.close()
       rmSync(tempDirectory, { recursive: true, force: true })

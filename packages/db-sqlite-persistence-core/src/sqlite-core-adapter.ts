@@ -1540,8 +1540,13 @@ export class SQLiteCorePersistenceAdapter implements PersistenceAdapter {
     const collectionTableSql = quoteIdentifier(tableMapping.tableName)
     const tombstoneTableSql = quoteIdentifier(tableMapping.tombstoneTableName)
 
-    const [changedRows, deletedRows, latestVersionRows, replayRows] =
-      await Promise.all([
+    const [
+      changedRows,
+      deletedRows,
+      latestVersionRows,
+      replayRows,
+      replayAvailabilityRows,
+    ] = await Promise.all([
         this.driver.query<{ key: string }>(
           `SELECT key
          FROM ${collectionTableSql}
@@ -1573,9 +1578,26 @@ export class SQLiteCorePersistenceAdapter implements PersistenceAdapter {
          ORDER BY term ASC, seq ASC`,
           [collectionId, fromRowVersion],
         ),
+        this.driver.query<{ min_row_version: number | null }>(
+          `SELECT MIN(row_version) AS min_row_version
+         FROM applied_tx
+         WHERE collection_id = ?`,
+          [collectionId],
+        ),
       ])
 
     const latestRowVersion = latestVersionRows[0]?.latest_row_version ?? 0
+    const replayFloor = replayAvailabilityRows[0]?.min_row_version
+    if (
+      latestRowVersion > fromRowVersion &&
+      (replayFloor == null || replayFloor > fromRowVersion + 1)
+    ) {
+      return {
+        latestRowVersion,
+        requiresFullReload: true,
+      }
+    }
+
     const changedKeyCount = changedRows.length + deletedRows.length
 
     if (changedKeyCount > this.pullSinceReloadThreshold) {

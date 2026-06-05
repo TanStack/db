@@ -58,8 +58,9 @@ the node driver applies:
 - `appliedTxPruneMaxAgeSeconds: 86_400` (24h age backstop)
 
 Pruning runs inside each write transaction, so every collection self-trims on
-its next sync. Override either value to tune retention, or pass `0` to disable
-that limit:
+its next sync. If a process asks to recover from a point older than the retained
+replay window, recovery falls back to a full reload. Override either value to
+tune retention, or pass `0` to disable that limit:
 
 ```ts
 const persistence = createNodeSQLitePersistence({
@@ -68,6 +69,10 @@ const persistence = createNodeSQLitePersistence({
   appliedTxPruneMaxAgeSeconds: 0, // disable the age backstop
 })
 ```
+
+Pruning removes rows from `applied_tx`, but SQLite may not immediately shrink
+the database file on disk. Use `VACUUM`, `auto_vacuum`, or your own maintenance
+process if you need to reclaim disk space.
 
 The defaults are exported as `DEFAULT_APPLIED_TX_PRUNE_MAX_ROWS` and
 `DEFAULT_APPLIED_TX_PRUNE_MAX_AGE_SECONDS`.
