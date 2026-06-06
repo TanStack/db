@@ -209,6 +209,14 @@ Inside `tx.mutate(() => { ... })`, the transaction is pushed onto an ambient
 stack. Any `collection.insert/update/delete` call joins the ambient transaction
 automatically via `getActiveTransaction()`.
 
+For mutations captured by a manual transaction, collection-level
+`onInsert`/`onUpdate`/`onDelete` handlers are not invoked automatically. The
+manual transaction's `mutationFn` is responsible for persisting
+`transaction.mutations`. This makes `createTransaction({ autoCommit: false })`
+a good fit for draft-style flows where local state updates immediately but the
+server call waits for Save/Blur; call `tx.rollback()` to discard the optimistic
+changes.
+
 ### 4. Mutation handler with refetch (QueryCollection pattern)
 
 ```ts

@@ -5,8 +5,8 @@ description: >
   fullJoin, select, fn.select, groupBy, having, orderBy, limit, offset, distinct,
   findOne. Operators: eq, gt, gte, lt, lte, like, ilike, inArray, isNull,
   isUndefined, and, or, not. Aggregates: count, sum, avg, min, max. String
-  functions: upper, lower, length, concat, coalesce. Math: add. $selected
-  namespace. createLiveQueryCollection. Derived collections. Predicate push-down.
+  functions: upper, lower, length, concat. Utility: coalesce, caseWhen. Math: add.
+  $selected namespace. createLiveQueryCollection. Derived collections. Predicate push-down.
   Incremental view maintenance via differential dataflow (d2ts). Virtual
   properties ($synced, $origin, $key, $collectionId). Includes subqueries
   for hierarchical data. toArray and concat(toArray(...)) scalar includes.
@@ -385,7 +385,7 @@ const { data } = useLiveQuery((q) =>
 
 ### HIGH: Not using the full operator set
 
-The library provides string functions (`upper`, `lower`, `length`, `concat`), math (`add`), utility (`coalesce`), and aggregates (`count`, `sum`, `avg`, `min`, `max`). All are incrementally maintained. Prefer them over JS equivalents.
+The library provides string functions (`upper`, `lower`, `length`, `concat`), math (`add`), utility functions (`coalesce`, `caseWhen`), and aggregates (`count`, `sum`, `avg`, `min`, `max`). All are incrementally maintained. Prefer them over JS equivalents.
 
 ```ts
 // WRONG
@@ -398,8 +398,39 @@ The library provides string functions (`upper`, `lower`, `length`, `concat`), ma
 .select(({ user, order }) => ({
   name: upper(user.name),
   total: add(order.price, order.tax),
+  displayName: coalesce(user.displayName, user.name, 'Unknown'),
 }))
 ```
+
+### HIGH: Missing conditional expression helpers
+
+Use `coalesce()` for null/undefined fallbacks and `caseWhen()` for conditional
+computed fields. JavaScript operators like `||` or ternaries do not build query
+expressions inside standard `.select()` callbacks.
+
+```ts
+// WRONG -- document.title is a query ref, not a runtime string
+.select(({ document }) => ({
+  displayTitle: document.title || 'Untitled document',
+}))
+
+// CORRECT -- fallback for null/undefined
+.select(({ document }) => ({
+  displayTitle: coalesce(document.title, 'Untitled document'),
+}))
+
+// CORRECT -- fallback for null/undefined and empty string
+.select(({ document }) => ({
+  displayTitle: caseWhen(
+    eq(coalesce(document.title, ''), ''),
+    'Untitled document',
+    document.title,
+  ),
+}))
+```
+
+Use `fn.select()` only when you genuinely need arbitrary JavaScript; it cannot
+be optimized like expression-based `.select()`.
 
 ### HIGH: .distinct() without .select()
 

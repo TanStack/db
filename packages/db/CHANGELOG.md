@@ -1,5 +1,19 @@
 # @tanstack/db
 
+## 0.6.8
+
+### Patch Changes
+
+- Added the `materialize()` helper for includes subqueries. Multi-row subqueries produce an `Array<T>` snapshot on the parent row (equivalent to `toArray()`), and `findOne()` subqueries produce a single `T | undefined` value. The snapshot updates reactively as the underlying children change. ([#1569](https://github.com/TanStack/db/pull/1569))
+
+## 0.6.7
+
+### Patch Changes
+
+- Clarify documentation for caseWhen, coalesce, manual transactions, and multi-endpoint Query Collection behavior. Add utility function categorization and fix reference index ordering. ([#1544](https://github.com/TanStack/db/pull/1544))
+
+- Fix stale optimistic rows persisting when sync confirms a different server-generated key. Previously, direct transactions (from `collection.insert()` etc.) had their optimistic rows exempted from stale-row cleanup, which prevented temp-key rows from being removed when the server returned a different primary key. ([#1547](https://github.com/TanStack/db/pull/1547))
+
 ## 0.6.6
 
 ### Patch Changes

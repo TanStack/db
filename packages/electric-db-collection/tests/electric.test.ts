@@ -756,6 +756,49 @@ describe(`Electric Integration`, () => {
       expect(testCollection._state.syncedData.size).toEqual(1)
     })
 
+    it(`should remove optimistic insert when txid sync confirms a different server-generated key`, async () => {
+      const txid = 1234
+      const onInsert = vi.fn().mockResolvedValue({ txid })
+
+      const testCollection = createCollection(
+        electricCollectionOptions({
+          id: `test-server-generated-key-txid`,
+          shapeOptions: {
+            url: `http://test-url`,
+            params: { table: `test_table` },
+          },
+          startSync: true,
+          getKey: (item: Row) => item.id as number,
+          onInsert,
+        }),
+      )
+
+      const tx = testCollection.insert({ id: 4733, text: `two` })
+
+      expect(stripVirtualProps(testCollection.get(4733))).toEqual({
+        id: 4733,
+        text: `two`,
+      })
+
+      subscriber([
+        {
+          key: `24`,
+          value: { id: 24, text: `two` },
+          headers: { operation: `insert`, txids: [txid] },
+        },
+        { headers: { control: `up-to-date` } },
+      ])
+
+      await tx.isPersisted.promise
+
+      expect(testCollection.has(4733)).toBe(false)
+      expect(stripVirtualProps(testCollection.get(24))).toEqual({
+        id: 24,
+        text: `two`,
+      })
+      expect(Array.from(testCollection.state.keys())).toEqual([24])
+    })
+
     it(`should support void strategy when handler returns nothing`, async () => {
       const onInsert = vi.fn().mockResolvedValue(undefined)
 

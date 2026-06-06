@@ -1,5 +1,25 @@
 # @tanstack/db-sqlite-persistence-core
 
+## 0.2.0
+
+### Minor Changes
+
+- SQLite persistence wrappers now prune the `applied_tx` replay log by default so SQLite files no longer grow without bound. When prune options are omitted, wrappers that construct the shared SQLite core adapter apply `appliedTxPruneMaxRows: 1_000` and `appliedTxPruneMaxAgeSeconds: 86_400` (24h). Both remain overridable, and passing `0` disables that limit. The defaults are exported as `DEFAULT_APPLIED_TX_PRUNE_MAX_ROWS` and `DEFAULT_APPLIED_TX_PRUNE_MAX_AGE_SECONDS` from the shared SQLite core package and re-exported by wrapper packages. ([#1572](https://github.com/TanStack/db/pull/1572))
+
+  The shared SQLite core adapter now treats `applied_tx` as a bounded replay cache during `pullSince` recovery. If a recovery request starts before the retained replay window, `pullSince` returns `requiresFullReload: true` instead of returning partial deltas.
+
+### Patch Changes
+
+- Updated dependencies [[`3827b62`](https://github.com/TanStack/db/commit/3827b62604bbfc970d80b57479c8da063d78e69d)]:
+  - @tanstack/db@0.6.8
+
+## 0.1.11
+
+### Patch Changes
+
+- Updated dependencies [[`ec59984`](https://github.com/TanStack/db/commit/ec59984dcd8610ad9651c2d32e1361143d44d3c9), [`6238a2d`](https://github.com/TanStack/db/commit/6238a2d80caf4d1cdecaf889fb66bd6ebcc7386a)]:
+  - @tanstack/db@0.6.7
+
 ## 0.1.10
 
 ### Patch Changes

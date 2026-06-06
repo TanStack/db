@@ -31,6 +31,7 @@ import {
 import {
   CaseWhenWrapper,
   ConcatToArrayWrapper,
+  MaterializeWrapper,
   ToArrayWrapper,
 } from './functions.js'
 import type { SourceClauseContext } from '../../errors.js'
@@ -1030,6 +1031,17 @@ function buildNestedSelect(
         throw new Error(`concat(toArray(...)) must wrap a subquery builder`)
       }
       out[k] = buildIncludesSubquery(v.query, k, parentAliases, `concat`)
+      continue
+    }
+    if (v instanceof MaterializeWrapper) {
+      if (!(v.query instanceof BaseQueryBuilder)) {
+        throw new Error(`materialize() must wrap a subquery builder`)
+      }
+      const childQuery = v.query._getQuery()
+      const materialization: IncludesMaterialization = childQuery.singleResult
+        ? `singleton`
+        : `array`
+      out[k] = buildIncludesSubquery(v.query, k, parentAliases, materialization)
       continue
     }
     if (v instanceof CaseWhenWrapper) {
