@@ -157,6 +157,56 @@ describe(`evaluators`, () => {
 
           expect(compiled({})).toBe(`first`)
         })
+
+        // upper/lower must NOT use JavaScript's locale-aware, length-changing
+        // case fold. SQLite's default upper()/lower() is ASCII-only. When a
+        // TanStack DB collection is fed by a server-side filter (e.g. a query
+        // collection backed by PostgreSQL or a sync engine over SQLite), the
+        // two ends must agree on the case-fold of the bucket key. JavaScript's
+        // .toUpperCase() length-changes on `ß`, ligatures, Turkish dotted-i,
+        // and the row silently drops out of the matching collection.
+        it(`upper folds ASCII without length-changing on the German sharp s`, () => {
+          const func = new Func(`upper`, [new Value(`straße`)])
+          const compiled = compileExpression(func)
+
+          expect(compiled({})).toBe(`STRAßE`)
+        })
+
+        it(`upper folds ASCII without length-changing on the fi ligature`, () => {
+          const func = new Func(`upper`, [new Value(`ﬁle`)])
+          const compiled = compileExpression(func)
+
+          expect(compiled({})).toBe(`ﬁLE`)
+        })
+
+        it(`upper folds ASCII without length-changing on Turkish dotted-i`, () => {
+          const func = new Func(`upper`, [new Value(`istanbul`)])
+          const compiled = compileExpression(func)
+
+          // JS .toUpperCase() returns `ISTANBUL` in en-US locale but in Turkish
+          // locale-aware folds give `İSTANBUL`. ASCII fold deterministically
+          // yields `ISTANBUL` regardless of locale.
+          expect(compiled({})).toBe(`ISTANBUL`)
+        })
+
+        it(`lower folds ASCII without length-changing on the German sharp s`, () => {
+          const func = new Func(`lower`, [new Value(`STRAßE`)])
+          const compiled = compileExpression(func)
+
+          // ASCII fold leaves `ß` (already lowercase form) unchanged. JS
+          // .toLowerCase() also returns `straße` here so this is a control;
+          // the real divergence is on `İ → i̇` (combining dot above).
+          expect(compiled({})).toBe(`straße`)
+        })
+
+        it(`lower folds ASCII without combining-mark expansion on Turkish capital I-dot`, () => {
+          const func = new Func(`lower`, [new Value(`İ`)])
+          const compiled = compileExpression(func)
+
+          // JS .toLowerCase('İ') === 'i̇' (two code points). ASCII fold
+          // leaves it as-is, deterministically.
+          expect(compiled({})).toBe(`İ`)
+        })
       })
 
       describe(`array functions`, () => {
@@ -367,6 +417,45 @@ describe(`evaluators`, () => {
           const func = new Func(`ilike`, [
             new Value(`HELLO WORLD`),
             new Value(`hello%`),
+          ])
+          const compiled = compileExpression(func)
+
+          expect(compiled({})).toBe(true)
+        })
+
+        // ilike must use the same ASCII-only case fold as upper()/lower().
+        // JavaScript's String.prototype.toLowerCase() is length-changing on
+        // Turkish dotted-i (`İ → i̇` adds a combining mark) and locale-aware
+        // on `I → ı` under tr-TR. Using it for ilike means a row written as
+        // `'İstanbul'` server-side and `'ISTANBUL'` in the query pattern
+        // silently mismatches.
+        it(`ilike does not length-change Turkish capital I-dot during case fold`, () => {
+          const func = new Func(`ilike`, [
+            new Value(`İstanbul`),
+            new Value(`istanbul`),
+          ])
+          const compiled = compileExpression(func)
+
+          // Under JS .toLowerCase(), 'İstanbul' → 'i̇stanbul' (9 code units)
+          // and 'istanbul' → 'istanbul' (8 code units) - regex anchored
+          // ^...$ does NOT match. ASCII fold leaves the non-ASCII `İ`
+          // untouched, and the regex still doesn't match (correctly: the
+          // strings differ in their first character). Test asserts the
+          // result is deterministic across JS locales.
+          expect(compiled({})).toBe(false)
+        })
+
+        it(`ilike does not length-change the German sharp s during case fold`, () => {
+          // 'straße' ilike 'STRA%E' should match deterministically.
+          // Under JS .toLowerCase(), 'STRA%E' → 'stra%e' (good) and 'straße'
+          // → 'straße' (no change). Under .toUpperCase(), 'straße' → 'STRASSE'
+          // (length-changes from 6 to 7) and 'STRA%E' → 'STRA%E' - the regex
+          // 'STRA.*E' DOES match 'STRASSE'. So .toUpperCase() would match while
+          // .toLowerCase() also matches, but the two folds disagree on the
+          // string they compare. ASCII-only fold keeps both consistent.
+          const func = new Func(`ilike`, [
+            new Value(`straße`),
+            new Value(`STRA%E`),
           ])
           const compiled = compileExpression(func)
 

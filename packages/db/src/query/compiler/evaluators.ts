@@ -14,6 +14,36 @@ function isUnknown(value: any): boolean {
   return value === null || value === undefined
 }
 
+/**
+ * ASCII-only upper-case fold. Matches SQLite's default `upper()` rather than
+ * JavaScript's locale-aware `String.prototype.toUpperCase()`, which is
+ * length-changing on `ß`, ligatures like `ﬁ`, and Turkish dotted-i. Using
+ * `.toUpperCase()` directly causes the silent-row-loss class where a sync-back
+ * collection's server-side filter and the client-side filter disagree on the
+ * same string (`'straße' → 'STRASSE'` server-side via the SQL engine,
+ * `'STRAßE'` client-side via JS).
+ */
+function asciiToUpper(s: string): string {
+  let out = ``
+  for (let i = 0; i < s.length; i++) {
+    const c = s.charCodeAt(i)
+    out += c >= 0x61 && c <= 0x7a ? String.fromCharCode(c - 32) : s.charAt(i)
+  }
+  return out
+}
+
+/**
+ * ASCII-only lower-case fold. See `asciiToUpper` for rationale.
+ */
+function asciiToLower(s: string): string {
+  let out = ``
+  for (let i = 0; i < s.length; i++) {
+    const c = s.charCodeAt(i)
+    out += c >= 0x41 && c <= 0x5a ? String.fromCharCode(c + 32) : s.charAt(i)
+  }
+  return out
+}
+
 function toDateValue(value: any): Date | null {
   if (value instanceof Date) {
     return Number.isNaN(value.getTime()) ? null : value
@@ -407,14 +437,14 @@ function compileFunction(func: Func, isSingleRow: boolean): (data: any) => any {
       const arg = compiledArgs[0]!
       return (data) => {
         const value = arg(data)
-        return typeof value === `string` ? value.toUpperCase() : value
+        return typeof value === `string` ? asciiToUpper(value) : value
       }
     }
     case `lower`: {
       const arg = compiledArgs[0]!
       return (data) => {
         const value = arg(data)
-        return typeof value === `string` ? value.toLowerCase() : value
+        return typeof value === `string` ? asciiToLower(value) : value
       }
     }
     case `length`: {
@@ -606,8 +636,8 @@ function evaluateLike(
     return false
   }
 
-  const searchValue = caseInsensitive ? value.toLowerCase() : value
-  const searchPattern = caseInsensitive ? pattern.toLowerCase() : pattern
+  const searchValue = caseInsensitive ? asciiToLower(value) : value
+  const searchPattern = caseInsensitive ? asciiToLower(pattern) : pattern
 
   // Convert SQL LIKE pattern to regex
   // First escape all regex special chars except % and _
