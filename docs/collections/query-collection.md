@@ -64,6 +64,27 @@ The `queryCollectionOptions` function accepts the following options:
 - `staleTime`: How long data is considered fresh
 - `meta`: Optional metadata that will be passed to the query function context
 
+### Query Function Context
+
+`queryFn` receives TanStack Query's `QueryFunctionContext`, including `signal` and `meta`. Query Collections cancel idle on-demand requests during cleanup, so pass `ctx.signal` to abortable request clients:
+
+```typescript
+const todosCollection = createCollection(
+  queryCollectionOptions({
+    queryKey: ["todos"],
+    syncMode: "on-demand",
+    queryFn: async (ctx) => {
+      const response = await fetch("/api/todos", {
+        signal: ctx.signal,
+      })
+      return response.json()
+    },
+    queryClient,
+    getKey: (item) => item.id,
+  })
+)
+```
+
 ### Using with `queryOptions(...)`
 
 If your app already uses TanStack Query's `queryOptions` helper (e.g. from `@tanstack/react-query`), you can spread those options into `queryCollectionOptions`. Note that `queryFn` must be explicitly provided since query collections require it both in types and at runtime:

@@ -1475,12 +1475,32 @@ export function queryCollectionOptions(
     })
 
     /**
+     * Cancel an in-flight TanStack Query request for a tracked query.
+     * This aborts the QueryFunctionContext signal for queryFns that pass it
+     * through to fetch, GraphQL clients, or other abortable request APIs.
+     */
+    const cancelQueryByHash = (hashedQueryKey: string) => {
+      const key = hashToQueryKey.get(hashedQueryKey)
+      if (!key) {
+        return
+      }
+
+      void queryClient.cancelQueries({ queryKey: key, exact: true })
+    }
+
+    /**
      * Perform row-level cleanup and remove all tracking for a query.
      * Callers are responsible for ensuring the query is safe to cleanup.
      */
-    const cleanupQueryInternal = (hashedQueryKey: string) => {
+    const cleanupQueryInternal = (
+      hashedQueryKey: string,
+      options: { cancel?: boolean } = {},
+    ) => {
       unsubscribes.get(hashedQueryKey)?.()
       unsubscribes.delete(hashedQueryKey)
+      if (options.cancel !== false) {
+        cancelQueryByHash(hashedQueryKey)
+      }
       cancelPersistedRetentionExpiry(hashedQueryKey)
       retainedQueriesPendingRevalidation.delete(hashedQueryKey)
 
@@ -1559,6 +1579,11 @@ export function queryCollectionOptions(
       const hasListeners = observer?.hasListeners() ?? false
 
       if (hasListeners) {
+        // Refcount is zero, so this query is no longer needed by a live query.
+        // The remaining listener may be the loadSubset promise waiter; canceling
+        // here aborts its QueryFunctionContext signal while keeping the observer
+        // around for invalidateQueries unsubscribe/resubscribe cycles.
+        cancelQueryByHash(hashedQueryKey)
         // During invalidateQueries, TanStack Query keeps internal listeners alive.
         // Leave refcount at 0 but keep observer so it can resubscribe.
         queryRefCounts.set(hashedQueryKey, 0)
@@ -1604,6 +1629,7 @@ export function queryCollectionOptions(
         }
         unsubscribes.get(hashedQueryKey)?.()
         unsubscribes.delete(hashedQueryKey)
+        cancelQueryByHash(hashedQueryKey)
         state.observers.delete(hashedQueryKey)
         hashToQueryKey.delete(hashedQueryKey)
         queryRefCounts.set(hashedQueryKey, 0)
@@ -1618,7 +1644,7 @@ export function queryCollectionOptions(
      * Ignores refcounts/hasListeners and removes everything.
      */
     const forceCleanupQuery = (hashedQueryKey: string) => {
-      cleanupQueryInternal(hashedQueryKey)
+      cleanupQueryInternal(hashedQueryKey, { cancel: false })
     }
 
     // Subscribe to the query client's cache to handle queries that are GCed by tanstack query
@@ -1685,9 +1711,8 @@ export function queryCollectionOptions(
      * - But observer.hasListeners() is still true (TanStack Query's internal listeners)
      * - We skip cleanup and reset refcount, allowing resubscribe to succeed
      *
-     * We don't cancel in-flight requests. Unsubscribing from the observer is sufficient
-     * to prevent late-arriving data from being processed. The request completes and is cached
-     * by TanStack Query, allowing quick remounts to restore data without refetching.
+     * When the query is no longer referenced, cleanup cancels in-flight requests
+     * so the queryFn's AbortSignal is triggered and unnecessary network work stops.
      */
     const unloadSubset = (options: LoadSubsetOptions) => {
       // 1. Same predicates → 2. Same queryKey
