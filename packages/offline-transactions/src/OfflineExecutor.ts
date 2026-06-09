@@ -7,6 +7,7 @@ import { LocalStorageAdapter } from './storage/LocalStorageAdapter'
 import { OutboxManager } from './outbox/OutboxManager'
 import { KeyScheduler } from './executor/KeyScheduler'
 import { TransactionExecutor } from './executor/TransactionExecutor'
+import { MissingTemporalConstructorError } from './outbox/TransactionSerializer'
 
 // Coordination
 import { WebLocksLeader } from './coordination/WebLocksLeader'
@@ -337,6 +338,10 @@ export class OfflineExecutor {
         console.warn(`Failed to execute transactions:`, error)
       })
     } catch (error) {
+      if (error instanceof MissingTemporalConstructorError) {
+        throw error
+      }
+
       console.warn(`Failed to load and replay transactions:`, error)
     }
   }
