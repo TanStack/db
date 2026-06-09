@@ -1,27 +1,10 @@
-import { afterAll, beforeAll, describe, expect, it } from 'vitest'
+import { describe, expect, it } from 'vitest'
 import { Temporal } from 'temporal-polyfill'
 import { TransactionSerializer } from '../src/outbox/TransactionSerializer'
 import type { OfflineTransaction } from '../src/types'
 import type { PendingMutation } from '@tanstack/db'
 
 describe(`TransactionSerializer`, () => {
-  const globalWithTemporal = globalThis as { Temporal?: unknown }
-  let originalTemporal: unknown
-
-  beforeAll(() => {
-    originalTemporal = globalWithTemporal.Temporal
-    globalWithTemporal.Temporal = Temporal
-  })
-
-  afterAll(() => {
-    if (originalTemporal === undefined) {
-      delete globalWithTemporal.Temporal
-      return
-    }
-
-    globalWithTemporal.Temporal = originalTemporal
-  })
-
   const mockCollection = {
     id: `test-collection`,
     getKeyFromItem: (item: any) => item.id,
@@ -30,7 +13,7 @@ describe(`TransactionSerializer`, () => {
   const createSerializer = () => {
     return new TransactionSerializer({
       'test-collection': mockCollection as any,
-    })
+    }, Temporal)
   }
 
   const createTransaction = ({
@@ -342,6 +325,16 @@ describe(`TransactionSerializer`, () => {
       expect(restoredOriginal.toString()).toBe(
         temporalValues.plainDate.toString(),
       )
+
+      const restoredChanges =
+        deserialized.mutations[0]!.changes.temporalValues
+      for (const [key, originalValue] of Object.entries(temporalValues)) {
+        const restoredValue = restoredChanges[key]
+        expect(restoredValue[Symbol.toStringTag]).toBe(
+          originalValue[Symbol.toStringTag],
+        )
+        expect(restoredValue.toString()).toBe(originalValue.toString())
+      }
     })
 
     it(`should restore Temporal values in transaction metadata`, () => {
