@@ -105,8 +105,10 @@ describe(`OfflineExecutor`, () => {
       version: 1,
     })
 
+    let executor: ReturnType<typeof startOfflineExecutor> | undefined
+
     try {
-      const executor = startOfflineExecutor({
+      executor = startOfflineExecutor({
         ...config,
         storage: {
           get: async (key) =>
@@ -127,8 +129,9 @@ describe(`OfflineExecutor`, () => {
       await expect(executor.waitForInit()).rejects.toBeInstanceOf(
         MissingTemporalConstructorError,
       )
-      executor.dispose()
     } finally {
+      executor?.dispose()
+
       if (originalTemporal !== undefined) {
         globalWithTemporal.Temporal = originalTemporal
       }
