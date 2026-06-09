@@ -1,5 +1,11 @@
 # @tanstack/query-db-collection
 
+## 1.0.40
+
+### Patch Changes
+
+- Forward `gcTime` from `queryCollectionOptions` to the underlying TanStack Query observer. The `gcTime` option was previously documented in the config shape but silently dropped before reaching the observer, leaving consumers stuck on the `queryClient` default. Closes #1546. ([#1568](https://github.com/TanStack/db/pull/1568))
+
 ## 1.0.39
 
 ### Patch Changes
