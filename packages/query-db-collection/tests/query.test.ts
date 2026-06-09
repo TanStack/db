@@ -3594,6 +3594,107 @@ describe(`QueryCollection`, () => {
       customQueryClient.clear()
     })
 
+    it(`should forward gcTime from queryCollectionOptions to the underlying query`, async () => {
+      const customQueryClient = new QueryClient({
+        defaultOptions: {
+          queries: {
+            gcTime: 60000,
+          },
+        },
+      })
+
+      const queryKey = [`gcTimeForwardTest`]
+      const items: Array<TestItem> = [{ id: `1`, name: `Item 1` }]
+      const queryFn = vi.fn().mockResolvedValue(items)
+
+      const config: QueryCollectionConfig<TestItem> = {
+        id: `gcTimeForwardTest`,
+        queryClient: customQueryClient,
+        queryKey,
+        queryFn,
+        getKey,
+        startSync: true,
+        gcTime: 100000,
+      }
+
+      const options = queryCollectionOptions(config)
+      const collection = createCollection(options)
+
+      await vi.waitFor(() => {
+        expect(collection.status).toBe(`ready`)
+      })
+
+      const query = customQueryClient.getQueryCache().find({ queryKey })
+      expect((query?.options as any).gcTime).toBe(100000)
+
+      customQueryClient.clear()
+    })
+
+    it(`should fall back to QueryClient default gcTime when omitted`, async () => {
+      const customQueryClient = new QueryClient({
+        defaultOptions: {
+          queries: {
+            gcTime: 45000,
+          },
+        },
+      })
+
+      const queryKey = [`gcTimeFallbackTest`]
+      const items: Array<TestItem> = [{ id: `1`, name: `Item 1` }]
+      const queryFn = vi.fn().mockResolvedValue(items)
+
+      const config: QueryCollectionConfig<TestItem> = {
+        id: `gcTimeFallbackTest`,
+        queryClient: customQueryClient,
+        queryKey,
+        queryFn,
+        getKey,
+        startSync: true,
+      }
+
+      const options = queryCollectionOptions(config)
+      const collection = createCollection(options)
+
+      await vi.waitFor(() => {
+        expect(collection.status).toBe(`ready`)
+      })
+
+      const query = customQueryClient.getQueryCache().find({ queryKey })
+      expect((query?.options as any).gcTime).toBe(45000)
+
+      customQueryClient.clear()
+    })
+
+    it(`should accept Infinity as gcTime to disable garbage collection`, async () => {
+      const customQueryClient = new QueryClient()
+
+      const queryKey = [`gcTimeInfinityTest`]
+      const items: Array<TestItem> = [{ id: `1`, name: `Item 1` }]
+      const queryFn = vi.fn().mockResolvedValue(items)
+
+      const config: QueryCollectionConfig<TestItem> = {
+        id: `gcTimeInfinityTest`,
+        queryClient: customQueryClient,
+        queryKey,
+        queryFn,
+        getKey,
+        startSync: true,
+        gcTime: Infinity,
+      }
+
+      const options = queryCollectionOptions(config)
+      const collection = createCollection(options)
+
+      await vi.waitFor(() => {
+        expect(collection.status).toBe(`ready`)
+      })
+
+      const query = customQueryClient.getQueryCache().find({ queryKey })
+      expect((query?.options as any).gcTime).toBe(Infinity)
+
+      customQueryClient.clear()
+    })
+
     it(`should use retry from QueryClient defaultOptions when not overridden`, async () => {
       let callCount = 0
       // Create a QueryClient with custom retry defaultOption
