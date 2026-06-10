@@ -625,6 +625,19 @@ describe(`Collection Indexes`, () => {
       })
     })
 
+    it(`should exclude the boundary value from greater than queries on dates`, () => {
+      // gt must be strict for date fields: Bob was created exactly on
+      // 2023-01-02, so only rows created strictly later may be returned.
+      collection.createIndex((row) => row.createdAt)
+
+      const result = collection.currentStateAsChanges({
+        where: gt(new PropRef([`createdAt`]), new Date(`2023-01-02`)),
+      })!
+
+      const names = result.map((r) => r.value.name).sort()
+      expect(names).toEqual([`Charlie`, `Diana`, `Eve`])
+    })
+
     it(`should perform greater than or equal queries`, () => {
       withIndexTracking(collection, (tracker) => {
         const result = collection.currentStateAsChanges({
@@ -1214,6 +1227,48 @@ describe(`Collection Indexes`, () => {
 
       const names = result.map((r) => r.value.name).sort()
       expect(names).toEqual([`Charlie`])
+    })
+
+    it(`should apply the strictest lower bound when range conditions share the same value`, () => {
+      // gte(age, 25) AND gt(age, 25) reduces to age > 25: the strict
+      // comparison wins at the shared boundary, so Alice (age 25) must be
+      // excluded regardless of the order the conditions appear in.
+      const result = collection.currentStateAsChanges({
+        where: and(gte(new PropRef([`age`]), 25), gt(new PropRef([`age`]), 25)),
+      })!
+
+      const names = result.map((r) => r.value.name).sort()
+      expect(names).toEqual([`Bob`, `Charlie`, `Diana`])
+    })
+
+    it(`should apply the strictest upper bound when range conditions share the same value`, () => {
+      // lte(age, 30) AND lt(age, 30) reduces to age < 30: the strict
+      // comparison wins at the shared boundary, so Bob (age 30) must be
+      // excluded.
+      const result = collection.currentStateAsChanges({
+        where: and(lte(new PropRef([`age`]), 30), lt(new PropRef([`age`]), 30)),
+      })!
+
+      const names = result.map((r) => r.value.name).sort()
+      expect(names).toEqual([`Alice`, `Diana`, `Eve`])
+    })
+
+    it(`should apply the strictest bound for date ranges sharing the same value`, () => {
+      // Distinct Date instances representing the same point in time must be
+      // treated as equal values: gte(createdAt, jan2) AND gt(createdAt, jan2)
+      // reduces to createdAt > jan2, so Bob (created 2023-01-02) must be
+      // excluded.
+      collection.createIndex((row) => row.createdAt)
+
+      const result = collection.currentStateAsChanges({
+        where: and(
+          gte(new PropRef([`createdAt`]), new Date(`2023-01-02`)),
+          gt(new PropRef([`createdAt`]), new Date(`2023-01-02`)),
+        ),
+      })!
+
+      const names = result.map((r) => r.value.name).sort()
+      expect(names).toEqual([`Charlie`, `Diana`, `Eve`])
     })
 
     it(`should enforce every AND condition when a range on one field is combined with conditions on other fields`, () => {
