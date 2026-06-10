@@ -247,7 +247,10 @@ export class BTreeIndex<
       toKey,
       toInclusive,
       (indexedValue, _) => {
-        if (!fromInclusive && this.compareFn(indexedValue, from) === 0) {
+        // Compare against the normalized key: indexed values are stored
+        // normalized (e.g. dates as timestamps), the raw `from` would
+        // never compare equal to them
+        if (!fromInclusive && this.compareFn(indexedValue, fromKey) === 0) {
           // the B+ tree `forRange` method does not support exclusive lower bounds
           // so we need to exclude it manually
           return

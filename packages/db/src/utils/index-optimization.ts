@@ -18,6 +18,7 @@
 import { DEFAULT_COMPARE_OPTIONS } from '../utils.js'
 import { ReverseIndex } from '../indexes/reverse-index.js'
 import { hasVirtualPropPath } from '../virtual-props.js'
+import { makeComparator } from './comparison.js'
 import type { CompareOptions } from '../query/builder/types.js'
 import type { IndexInterface, IndexOperation } from '../indexes/base-index.js'
 import type { BasicExpression } from '../query/ir.js'
@@ -272,7 +273,18 @@ function optimizeCompoundRangeQuery<
       const index = findIndexForField(collection, fieldPath)
 
       if (index && index.supports(`gt`) && index.supports(`lt`)) {
-        // Build range query options
+        // Compare values with the same semantics the index uses (dates,
+        // locale strings, ...), in ascending order since bounds are about
+        // value order regardless of the index direction
+        const compare = makeComparator({
+          ...DEFAULT_COMPARE_OPTIONS,
+          ...collection.compareOptions,
+          direction: `asc`,
+        })
+
+        // Build range query options, keeping the strictest bound on each
+        // side: a larger lower bound (or smaller upper bound) wins, and at
+        // equal values the exclusive operation wins over the inclusive one
         let from: any = undefined
         let to: any = undefined
         let fromInclusive = true
@@ -281,38 +293,42 @@ function optimizeCompoundRangeQuery<
         for (const { operation, value } of operations) {
           switch (operation) {
             case `gt`:
-              if (from === undefined || value > from) {
+            case `gte`: {
+              const cmp = from === undefined ? 1 : compare(value, from)
+              if (cmp > 0) {
                 from = value
+                fromInclusive = operation === `gte`
+              } else if (cmp === 0 && operation === `gt`) {
                 fromInclusive = false
               }
               break
-            case `gte`:
-              if (from === undefined || value > from) {
-                from = value
-                fromInclusive = true
-              }
-              break
+            }
             case `lt`:
-              if (to === undefined || value < to) {
+            case `lte`: {
+              const cmp = to === undefined ? -1 : compare(value, to)
+              if (cmp < 0) {
                 to = value
+                toInclusive = operation === `lte`
+              } else if (cmp === 0 && operation === `lt`) {
                 toInclusive = false
               }
               break
-            case `lte`:
-              if (to === undefined || value < to) {
-                to = value
-                toInclusive = true
-              }
-              break
+            }
           }
         }
 
-        const matchingKeys = (index as any).rangeQuery({
-          from,
-          to,
-          fromInclusive,
-          toInclusive,
-        })
+        // Only pass the bounds that exist: rangeQuery distinguishes an
+        // absent bound (open-ended) from an explicit undefined value
+        const rangeOptions: Record<string, any> = {}
+        if (from !== undefined) {
+          rangeOptions.from = from
+          rangeOptions.fromInclusive = fromInclusive
+        }
+        if (to !== undefined) {
+          rangeOptions.to = to
+          rangeOptions.toInclusive = toInclusive
+        }
+        const matchingKeys = (index as any).rangeQuery(rangeOptions)
 
         return {
           canOptimize: true,
