@@ -29,6 +29,13 @@ import type { CollectionLike } from '../types.js'
 export interface OptimizationResult<TKey> {
   canOptimize: boolean
   matchingKeys: Set<TKey>
+  /**
+   * Whether `matchingKeys` is exactly the set of keys matching the expression.
+   * When `false`, the keys are a superset of the true result (some conditions
+   * could not be served by an index) and each row must be re-checked against
+   * the full expression before being included in the result.
+   */
+  isExact: boolean
 }
 
 /**
@@ -134,7 +141,7 @@ function optimizeQueryRecursive<T extends object, TKey extends string | number>(
     }
   }
 
-  return { canOptimize: false, matchingKeys: new Set() }
+  return { canOptimize: false, matchingKeys: new Set(), isExact: false }
 }
 
 /**
@@ -168,6 +175,14 @@ export function canOptimizeExpression<
 }
 
 /**
+ * Result of compound range optimization, including which AND arguments
+ * were covered by the range query so the caller can process the rest.
+ */
+interface CompoundRangeResult<TKey> extends OptimizationResult<TKey> {
+  coveredArgIndices: Set<number>
+}
+
+/**
  * Optimizes compound range queries on the same field
  * Example: WHERE age > 5 AND age < 10
  */
@@ -177,9 +192,14 @@ function optimizeCompoundRangeQuery<
 >(
   expression: BasicExpression,
   collection: CollectionLike<T, TKey>,
-): OptimizationResult<TKey> {
+): CompoundRangeResult<TKey> {
   if (expression.type !== `func` || expression.args.length < 2) {
-    return { canOptimize: false, matchingKeys: new Set() }
+    return {
+      canOptimize: false,
+      matchingKeys: new Set(),
+      isExact: false,
+      coveredArgIndices: new Set(),
+    }
   }
 
   // Group range operations by field
@@ -188,11 +208,12 @@ function optimizeCompoundRangeQuery<
     Array<{
       operation: `gt` | `gte` | `lt` | `lte`
       value: any
+      argIndex: number
     }>
   >()
 
   // Collect all range operations from AND arguments
-  for (const arg of expression.args) {
+  for (const [argIndex, arg] of expression.args.entries()) {
     if (arg.type === `func` && [`gt`, `gte`, `lt`, `lte`].includes(arg.name)) {
       const rangeOp = arg as any
       if (rangeOp.args.length === 2) {
@@ -238,7 +259,7 @@ function optimizeCompoundRangeQuery<
           if (!fieldOperations.has(fieldKey)) {
             fieldOperations.set(fieldKey, [])
           }
-          fieldOperations.get(fieldKey)!.push({ operation, value })
+          fieldOperations.get(fieldKey)!.push({ operation, value, argIndex })
         }
       }
     }
@@ -293,12 +314,22 @@ function optimizeCompoundRangeQuery<
           toInclusive,
         })
 
-        return { canOptimize: true, matchingKeys }
+        return {
+          canOptimize: true,
+          matchingKeys,
+          isExact: true,
+          coveredArgIndices: new Set(operations.map((op) => op.argIndex)),
+        }
       }
     }
   }
 
-  return { canOptimize: false, matchingKeys: new Set() }
+  return {
+    canOptimize: false,
+    matchingKeys: new Set(),
+    isExact: false,
+    coveredArgIndices: new Set(),
+  }
 }
 
 /**
@@ -312,7 +343,7 @@ function optimizeSimpleComparison<
   collection: CollectionLike<T, TKey>,
 ): OptimizationResult<TKey> {
   if (expression.type !== `func` || expression.args.length !== 2) {
-    return { canOptimize: false, matchingKeys: new Set() }
+    return { canOptimize: false, matchingKeys: new Set(), isExact: false }
   }
 
   const leftArg = expression.args[0]!
@@ -362,15 +393,15 @@ function optimizeSimpleComparison<
 
       // Check if the index supports this operation
       if (!index.supports(indexOperation)) {
-        return { canOptimize: false, matchingKeys: new Set() }
+        return { canOptimize: false, matchingKeys: new Set(), isExact: false }
       }
 
       const matchingKeys = index.lookup(indexOperation, queryValue)
-      return { canOptimize: true, matchingKeys }
+      return { canOptimize: true, matchingKeys, isExact: true }
     }
   }
 
-  return { canOptimize: false, matchingKeys: new Set() }
+  return { canOptimize: false, matchingKeys: new Set(), isExact: false }
 }
 
 /**
@@ -412,22 +443,38 @@ function optimizeAndExpression<T extends object, TKey extends string | number>(
   collection: CollectionLike<T, TKey>,
 ): OptimizationResult<TKey> {
   if (expression.type !== `func` || expression.args.length < 2) {
-    return { canOptimize: false, matchingKeys: new Set() }
+    return { canOptimize: false, matchingKeys: new Set(), isExact: false }
   }
 
   // First, try to optimize compound range queries on the same field
+  // (e.g. age > 5 AND age < 10 becomes a single range query)
   const compoundRangeResult = optimizeCompoundRangeQuery(expression, collection)
-  if (compoundRangeResult.canOptimize) {
-    return compoundRangeResult
-  }
+  const coveredArgIndices = compoundRangeResult.canOptimize
+    ? compoundRangeResult.coveredArgIndices
+    : new Set<number>()
 
   const results: Array<OptimizationResult<TKey>> = []
+  if (compoundRangeResult.canOptimize) {
+    results.push(compoundRangeResult)
+  }
 
-  // Try to optimize each part, keep the optimizable ones
-  for (const arg of expression.args) {
+  // Try to optimize the remaining conjuncts, keep the optimizable ones.
+  // Conjuncts that cannot use an index make the result inexact: the
+  // intersection is then a superset of the true result and must be
+  // re-filtered against the full expression by the caller.
+  let allConjunctsExact = true
+  for (const [argIndex, arg] of expression.args.entries()) {
+    if (coveredArgIndices.has(argIndex)) {
+      continue
+    }
     const result = optimizeQueryRecursive(arg, collection)
     if (result.canOptimize) {
       results.push(result)
+      if (!result.isExact) {
+        allConjunctsExact = false
+      }
+    } else {
+      allConjunctsExact = false
     }
   }
 
@@ -435,10 +482,14 @@ function optimizeAndExpression<T extends object, TKey extends string | number>(
     // Use intersectSets utility for AND logic
     const allMatchingSets = results.map((r) => r.matchingKeys)
     const intersectedKeys = intersectSets(allMatchingSets)
-    return { canOptimize: true, matchingKeys: intersectedKeys }
+    return {
+      canOptimize: true,
+      matchingKeys: intersectedKeys,
+      isExact: allConjunctsExact,
+    }
   }
 
-  return { canOptimize: false, matchingKeys: new Set() }
+  return { canOptimize: false, matchingKeys: new Set(), isExact: false }
 }
 
 /**
@@ -464,27 +515,31 @@ function optimizeOrExpression<T extends object, TKey extends string | number>(
   collection: CollectionLike<T, TKey>,
 ): OptimizationResult<TKey> {
   if (expression.type !== `func` || expression.args.length < 2) {
-    return { canOptimize: false, matchingKeys: new Set() }
+    return { canOptimize: false, matchingKeys: new Set(), isExact: false }
   }
 
   const results: Array<OptimizationResult<TKey>> = []
 
-  // Try to optimize each part, keep the optimizable ones
+  // Every disjunct must be optimizable: rows matched only by a disjunct
+  // that cannot use an index would be missing from the union, and no
+  // post-filtering can recover them. In that case fall back to a full scan.
   for (const arg of expression.args) {
     const result = optimizeQueryRecursive(arg, collection)
-    if (result.canOptimize) {
-      results.push(result)
+    if (!result.canOptimize) {
+      return { canOptimize: false, matchingKeys: new Set(), isExact: false }
     }
+    results.push(result)
   }
 
-  if (results.length > 0) {
-    // Use unionSets utility for OR logic
-    const allMatchingSets = results.map((r) => r.matchingKeys)
-    const unionedKeys = unionSets(allMatchingSets)
-    return { canOptimize: true, matchingKeys: unionedKeys }
+  // Use unionSets utility for OR logic
+  const allMatchingSets = results.map((r) => r.matchingKeys)
+  const unionedKeys = unionSets(allMatchingSets)
+  return {
+    canOptimize: true,
+    matchingKeys: unionedKeys,
+    // An inexact (superset) disjunct makes the union a superset as well
+    isExact: results.every((r) => r.isExact),
   }
-
-  return { canOptimize: false, matchingKeys: new Set() }
 }
 
 /**
@@ -498,8 +553,9 @@ function canOptimizeOrExpression<
     return false
   }
 
-  // If any argument can be optimized, we can gain some speedup
-  return expression.args.some((arg) => canOptimizeExpression(arg, collection))
+  // Every disjunct must be optimizable, otherwise the union would miss
+  // rows matched only by the non-optimizable disjuncts
+  return expression.args.every((arg) => canOptimizeExpression(arg, collection))
 }
 
 /**
@@ -513,7 +569,7 @@ function optimizeInArrayExpression<
   collection: CollectionLike<T, TKey>,
 ): OptimizationResult<TKey> {
   if (expression.type !== `func` || expression.args.length !== 2) {
-    return { canOptimize: false, matchingKeys: new Set() }
+    return { canOptimize: false, matchingKeys: new Set(), isExact: false }
   }
 
   const fieldArg = expression.args[0]!
@@ -532,7 +588,7 @@ function optimizeInArrayExpression<
       // Check if the index supports IN operation
       if (index.supports(`in`)) {
         const matchingKeys = index.lookup(`in`, values)
-        return { canOptimize: true, matchingKeys }
+        return { canOptimize: true, matchingKeys, isExact: true }
       } else if (index.supports(`eq`)) {
         // Fallback to multiple equality lookups
         const matchingKeys = new Set<TKey>()
@@ -542,12 +598,12 @@ function optimizeInArrayExpression<
             matchingKeys.add(key)
           }
         }
-        return { canOptimize: true, matchingKeys }
+        return { canOptimize: true, matchingKeys, isExact: true }
       }
     }
   }
 
-  return { canOptimize: false, matchingKeys: new Set() }
+  return { canOptimize: false, matchingKeys: new Set(), isExact: false }
 }
 
 /**
