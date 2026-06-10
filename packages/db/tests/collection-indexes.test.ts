@@ -1179,6 +1179,61 @@ describe(`Collection Indexes`, () => {
         })
       })
     })
+
+    it(`should include rows matched by any OR condition when conditions mix indexed and non-indexed expressions`, () => {
+      // An OR query must return the union of rows matching each condition:
+      //   eq(age, 25)           matches Alice (age 25)
+      //   gt(length(name), 6)   matches Charlie (name length 7)
+      // `age` has an index while `length(name)` is a computed expression
+      // without one, but the chosen execution strategy must not change the
+      // result: both Alice and Charlie satisfy the OR and must be returned.
+      const result = collection.currentStateAsChanges({
+        where: or(
+          eq(new PropRef([`age`]), 25),
+          gt(length(new PropRef([`name`])), 6),
+        ),
+      })!
+
+      const names = result.map((r) => r.value.name).sort()
+      expect(names).toEqual([`Alice`, `Charlie`])
+    })
+
+    it(`should only return rows matching every AND condition when conditions mix indexed and non-indexed expressions`, () => {
+      // An AND query must return only the rows matching all conditions:
+      //   eq(status, 'active')  matches Alice, Charlie and Eve
+      //   gt(length(name), 6)   matches only Charlie (name length 7)
+      // `status` has an index while `length(name)` is a computed expression
+      // without one, but every condition must still be enforced: only
+      // Charlie satisfies both.
+      const result = collection.currentStateAsChanges({
+        where: and(
+          eq(new PropRef([`status`]), `active`),
+          gt(length(new PropRef([`name`])), 6),
+        ),
+      })!
+
+      const names = result.map((r) => r.value.name).sort()
+      expect(names).toEqual([`Charlie`])
+    })
+
+    it(`should enforce every AND condition when a range on one field is combined with conditions on other fields`, () => {
+      // An AND query that contains a compound range on one field plus a
+      // condition on another field must enforce all of them:
+      //   gt(age, 24) AND lt(age, 36)  matches Alice (25), Bob (30),
+      //                                Charlie (35) and Diana (28)
+      //   eq(status, 'active')         matches Alice, Charlie and Eve
+      // Only Alice and Charlie satisfy the full conjunction.
+      const result = collection.currentStateAsChanges({
+        where: and(
+          gt(new PropRef([`age`]), 24),
+          lt(new PropRef([`age`]), 36),
+          eq(new PropRef([`status`]), `active`),
+        ),
+      })!
+
+      const names = result.map((r) => r.value.name).sort()
+      expect(names).toEqual([`Alice`, `Charlie`])
+    })
   })
 
   describe(`Index Usage Verification`, () => {
