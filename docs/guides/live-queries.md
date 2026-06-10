@@ -1252,6 +1252,48 @@ const projectsWithIssues = createLiveQueryCollection((q) =>
 
 With `toArray()`, the project row is re-emitted whenever its issues change. Without it, the child `Collection` updates independently.
 
+### materialize
+
+`materialize()` is a single helper that covers both multi-row and single-row includes:
+
+- When the wrapped subquery returns multiple rows, the parent receives `Array<T>` — same shape as `toArray()`.
+- When the wrapped subquery ends in `.findOne()`, the parent receives `T | undefined` — a single object, or `undefined` when no child matches.
+
+This spares callers from unwrapping a singleton array whenever they know the child query yields at most one row. Reactive semantics match `toArray()`: the parent row is re-emitted whenever the underlying children change, including insert / update / delete transitions and rows moving in or out of a match.
+
+```ts
+import { createLiveQueryCollection, eq, materialize } from '@tanstack/db'
+
+// Multi-row → issues: Array<Issue>
+const projectsWithIssues = createLiveQueryCollection((q) =>
+  q.from({ p: projectsCollection }).select(({ p }) => ({
+    ...p,
+    issues: materialize(
+      q
+        .from({ i: issuesCollection })
+        .where(({ i }) => eq(i.projectId, p.id)),
+    ),
+  })),
+)
+
+// Singleton → project: Project | undefined
+const issuesWithProject = createLiveQueryCollection((q) =>
+  q.from({ i: issuesCollection }).select(({ i }) => ({
+    ...i,
+    project: materialize(
+      q
+        .from({ p: projectsCollection })
+        .where(({ p }) => eq(p.id, i.projectId))
+        .findOne(),
+    ),
+  })),
+)
+```
+
+The singleton vs. array result type is inferred from whether the wrapped query ends in `.findOne()` — no extra type annotation is required.
+
+Like `toArray()`, `materialize()` is only valid as a top-level value in `.select()` — it cannot be nested inside expression helpers such as `coalesce()` or `eq()`.
+
 ### Aggregates
 
 You can use aggregate functions in child queries. Aggregates are computed per parent:
