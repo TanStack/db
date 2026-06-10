@@ -186,6 +186,34 @@ describe(`sql-compiler`, () => {
           '2': `{"active","pending"}`,
         })
       })
+
+      it(`should compile membership in an empty value list`, () => {
+        const result = compileSQL({
+          where: func(`in`, [ref(`status`), val([])]),
+        })
+        expect(result.where).toBe(`"status" = ANY($1)`)
+        expect(result.params).toEqual({ '1': `{}` })
+      })
+
+      it(`should compile membership in a single-element value list`, () => {
+        const result = compileSQL({
+          where: func(`in`, [ref(`status`), val([`active`])]),
+        })
+        expect(result.where).toBe(`"status" = ANY($1)`)
+        expect(result.params).toEqual({ '1': `{"active"}` })
+      })
+
+      it(`should throw for a null operand`, () => {
+        expect(() =>
+          compileSQL({ where: func(`in`, [val(null), ref(`roles`)]) }),
+        ).toThrow(`Cannot use null/undefined value with 'in' operator`)
+      })
+
+      it(`should throw for an undefined operand`, () => {
+        expect(() =>
+          compileSQL({ where: func(`in`, [val(undefined), ref(`roles`)]) }),
+        ).toThrow(`Cannot use null/undefined value with 'in' operator`)
+      })
     })
 
     describe(`null/undefined value handling`, () => {

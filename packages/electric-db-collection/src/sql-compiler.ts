@@ -393,7 +393,7 @@ function isBinaryOp(name: string): boolean {
  * (null comparisons in SQL always evaluate to UNKNOWN)
  */
 function isComparisonOp(name: string): boolean {
-  const comparisonOps = [`eq`, `gt`, `gte`, `lt`, `lte`, `like`, `ilike`]
+  const comparisonOps = [`eq`, `gt`, `gte`, `lt`, `lte`, `like`, `ilike`, `in`]
   return comparisonOps.includes(name)
 }
 
