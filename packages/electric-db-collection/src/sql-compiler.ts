@@ -356,8 +356,13 @@ function compileFunction(
       }
     }
 
-    // Special case for = ANY operator which needs parentheses around the array parameter
     if (name === `in`) {
+      // `value = ANY(arrayColumn)` and `arrayColumn @> ARRAY[value]` are
+      // equivalent, but only containment can use a GIN index. Emit @> when the
+      // array operand is a column; keep = ANY for a literal value list.
+      if (args[1]?.type === `ref`) {
+        return `${rhs} @> ARRAY[${lhs}]`
+      }
       return `${lhs} ${opName}(${rhs})`
     }
     return `${lhs} ${opName} ${rhs}`
