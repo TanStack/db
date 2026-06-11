@@ -1,5 +1,5 @@
-version: "3.3"
-name: "tanstack-start-db-projects"
+version: '3.3'
+name: 'tanstack-start-db-projects'
 
 services:
   postgres:

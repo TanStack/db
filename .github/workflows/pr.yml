@@ -15,7 +15,6 @@ env:
 
 permissions:
   contents: read
-  pull-requests: write
 
 jobs:
   test:
@@ -23,51 +22,74 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
-        uses: actions/checkout@v5.0.0
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
           fetch-depth: 0
+          persist-credentials: false
       - name: Setup Tools
-        uses: tanstack/config/.github/setup@main
+        uses: tanstack/config/.github/setup@e4b48f16568324f76f467aa4c2aac2f05db632c3
       - name: Get base and head commits for `nx affected`
-        uses: nrwl/nx-set-shas@v4.3.3
+        uses: nrwl/nx-set-shas@3e9ad7370203c1e93d109be57f3b72eb0eb511b1 # v4.4.0
         with:
           main-branch-name: main
       - name: Run Checks
-        run: pnpm run lint && pnpm run build && pnpm run test
+        run: pnpm run build && pnpm run test
+      - name: Check dependency versions
+        run: |
+          if ! pnpm run test:sherif; then
+            echo ""
+            echo "=========================================="
+            echo "❌ Sherif found dependency version mismatches"
+            echo ""
+            echo "To fix this locally, run:"
+            echo "  pnpm exec sherif --fix -i zod"
+            echo ""
+            echo "Then commit the changes to package.json files."
+            echo "=========================================="
+            exit 1
+          fi
   preview:
     name: Preview
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: write
     steps:
       - name: Checkout
-        uses: actions/checkout@v5.0.0
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
           fetch-depth: 0
+          persist-credentials: false
       - name: Setup Tools
-        uses: tanstack/config/.github/setup@main
+        uses: tanstack/config/.github/setup@e4b48f16568324f76f467aa4c2aac2f05db632c3
       - name: Build Packages
         run: pnpm run build
       - name: Publish Previews
         run: pnpx pkg-pr-new publish --pnpm --compact './packages/*' --template './examples/*/*'
       - name: Compressed Size Action - DB Package
-        uses: preactjs/compressed-size-action@v2
+        uses: preactjs/compressed-size-action@66325aad6443cb7cf89c4bfcd414aea2367cda94 # 2.9.1
         with:
-          repo-token: "${{ secrets.GITHUB_TOKEN }}"
-          pattern: "./packages/db/dist/**/*.{js,mjs}"
-          comment-key: "db-package-size"
+          repo-token: '${{ secrets.GITHUB_TOKEN }}'
+          pattern: './packages/db/dist/**/*.{js,mjs}'
+          comment-key: 'db-package-size'
+          build-script: 'build:minified'
       - name: Compressed Size Action - React DB Package
-        uses: preactjs/compressed-size-action@v2
+        uses: preactjs/compressed-size-action@66325aad6443cb7cf89c4bfcd414aea2367cda94 # 2.9.1
         with:
-          repo-token: "${{ secrets.GITHUB_TOKEN }}"
-          pattern: "./packages/react-db/dist/**/*.{js,mjs}"
-          comment-key: "react-db-package-size"
+          repo-token: '${{ secrets.GITHUB_TOKEN }}'
+          pattern: './packages/react-db/dist/**/*.{js,mjs}'
+          comment-key: 'react-db-package-size'
+          build-script: 'build:minified'
   build-example:
     name: Build Example Site
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
-        uses: actions/checkout@v5.0.0
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          persist-credentials: false
       - name: Setup Tools
-        uses: tanstack/config/.github/setup@main
+        uses: tanstack/config/.github/setup@e4b48f16568324f76f467aa4c2aac2f05db632c3
       - name: Build Packages
         run: pnpm run build
       - name: Build Example Site
@@ -79,12 +101,15 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
-        uses: actions/checkout@v5.0.0
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          persist-credentials: false
       - name: Setup Tools
-        uses: tanstack/config/.github/setup@main
+        uses: tanstack/config/.github/setup@e4b48f16568324f76f467aa4c2aac2f05db632c3
       - name: Build Packages
         run: pnpm run build
       - name: Build Starter Site
         run: |
           cd examples/react/projects
+          cp .env.example .env
           pnpm build

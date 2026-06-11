@@ -1,23 +1,27 @@
 // eslint-disable-next-line import/no-duplicates -- See https://github.com/un-ts/eslint-plugin-import-x/issues/308
-import { flushSync, untrack } from "svelte"
+import { untrack } from 'svelte'
 // eslint-disable-next-line import/no-duplicates -- See https://github.com/un-ts/eslint-plugin-import-x/issues/308
-import { SvelteMap } from "svelte/reactivity"
-import { createLiveQueryCollection } from "@tanstack/db"
+import { SvelteMap } from 'svelte/reactivity'
+import { BaseQueryBuilder, createLiveQueryCollection } from '@tanstack/db'
 import type {
   ChangeMessage,
   Collection,
+  CollectionConfigSingleRowOption,
   CollectionStatus,
   Context,
   GetResult,
+  InferResultType,
   InitialQueryBuilder,
   LiveQueryCollectionConfig,
+  NonSingleResult,
   QueryBuilder,
-} from "@tanstack/db"
+  SingleResult,
+} from '@tanstack/db'
 
 /**
  * Return type for useLiveQuery hook
  * @property state - Reactive Map of query results (key → item)
- * @property data - Reactive array of query results in order
+ * @property data - Reactive array of query results in order, or single item when using findOne()
  * @property collection - The underlying query collection instance
  * @property status - Current query status
  * @property isLoading - True while initial query data is loading
@@ -26,9 +30,9 @@ import type {
  * @property isError - True when query encountered an error
  * @property isCleanedUp - True when query has been cleaned up
  */
-export interface UseLiveQueryReturn<T extends object> {
+export interface UseLiveQueryReturn<T extends object, TData = Array<T>> {
   state: Map<string | number, T>
-  data: Array<T>
+  data: TData
   collection: Collection<T, string | number, {}>
   status: CollectionStatus
   isLoading: boolean
@@ -42,9 +46,10 @@ export interface UseLiveQueryReturnWithCollection<
   T extends object,
   TKey extends string | number,
   TUtils extends Record<string, any>,
+  TData = Array<T>,
 > {
   state: Map<TKey, T>
-  data: Array<T>
+  data: TData
   collection: Collection<T, TKey, TUtils>
   status: CollectionStatus
   isLoading: boolean
@@ -68,13 +73,38 @@ function toValue<T>(value: MaybeGetter<T>): T {
  * @param queryFn - Query function that defines what data to fetch
  * @param deps - Array of reactive dependencies that trigger query re-execution when changed
  * @returns Reactive object with query data, state, and status information
+ *
+ * @remarks
+ * **IMPORTANT - Destructuring in Svelte 5:**
+ * Direct destructuring breaks reactivity. To destructure, wrap with `$derived`:
+ *
+ * ❌ **Incorrect** - Loses reactivity:
+ * ```ts
+ * const { data, isLoading } = useLiveQuery(...)
+ * ```
+ *
+ * ✅ **Correct** - Maintains reactivity:
+ * ```ts
+ * // Option 1: Use dot notation (recommended)
+ * const query = useLiveQuery(...)
+ * // Access: query.data, query.isLoading
+ *
+ * // Option 2: Wrap with $derived for destructuring
+ * const query = useLiveQuery(...)
+ * const { data, isLoading } = $derived(query)
+ * ```
+ *
+ * This is a fundamental Svelte 5 limitation, not a library bug. See:
+ * https://github.com/sveltejs/svelte/issues/11002
+ *
  * @example
- * // Basic query with object syntax
+ * // Basic query with object syntax (recommended pattern)
  * const todosQuery = useLiveQuery((q) =>
  *   q.from({ todos: todosCollection })
  *    .where(({ todos }) => eq(todos.completed, false))
  *    .select(({ todos }) => ({ id: todos.id, text: todos.text }))
  * )
+ * // Access via: todosQuery.data, todosQuery.isLoading, etc.
  *
  * @example
  * // With reactive dependencies
@@ -84,6 +114,14 @@ function toValue<T>(value: MaybeGetter<T>): T {
  *          .where(({ todos }) => gt(todos.priority, minPriority)),
  *   [() => minPriority] // Re-run when minPriority changes
  * )
+ *
+ * @example
+ * // Destructuring with $derived (if needed)
+ * const query = useLiveQuery((q) =>
+ *   q.from({ todos: todosCollection })
+ * )
+ * const { data, isLoading, isError } = $derived(query)
+ * // Now data, isLoading, and isError maintain reactivity
  *
  * @example
  * // Join pattern
@@ -118,11 +156,22 @@ function toValue<T>(value: MaybeGetter<T>): T {
  * //   </ul>
  * // {/if}
  */
-// Overload 1: Accept just the query function
+// Overload 1: Accept query function that always returns QueryBuilder
 export function useLiveQuery<TContext extends Context>(
   queryFn: (q: InitialQueryBuilder) => QueryBuilder<TContext>,
-  deps?: Array<() => unknown>
-): UseLiveQueryReturn<GetResult<TContext>>
+  deps?: Array<() => unknown>,
+): UseLiveQueryReturn<GetResult<TContext>, InferResultType<TContext>>
+
+// Overload 1b: Accept query function that can return undefined/null
+export function useLiveQuery<TContext extends Context>(
+  queryFn: (
+    q: InitialQueryBuilder,
+  ) => QueryBuilder<TContext> | undefined | null,
+  deps?: Array<() => unknown>,
+): UseLiveQueryReturn<
+  GetResult<TContext>,
+  InferResultType<TContext> | undefined
+>
 
 /**
  * Create a live query using configuration object
@@ -164,8 +213,8 @@ export function useLiveQuery<TContext extends Context>(
 // Overload 2: Accept config object
 export function useLiveQuery<TContext extends Context>(
   config: LiveQueryCollectionConfig<TContext>,
-  deps?: Array<() => unknown>
-): UseLiveQueryReturn<GetResult<TContext>>
+  deps?: Array<() => unknown>,
+): UseLiveQueryReturn<GetResult<TContext>, InferResultType<TContext>>
 
 /**
  * Subscribe to an existing query collection (can be reactive)
@@ -210,19 +259,32 @@ export function useLiveQuery<TContext extends Context>(
  * //   {/each}
  * // {/if}
  */
-// Overload 3: Accept pre-created live query collection (can be reactive)
+// Overload 3: Accept pre-created live query collection WITHOUT SingleResult (returns array)
 export function useLiveQuery<
   TResult extends object,
   TKey extends string | number,
   TUtils extends Record<string, any>,
 >(
-  liveQueryCollection: MaybeGetter<Collection<TResult, TKey, TUtils>>
-): UseLiveQueryReturnWithCollection<TResult, TKey, TUtils>
+  liveQueryCollection: MaybeGetter<
+    Collection<TResult, TKey, TUtils> & NonSingleResult
+  >,
+): UseLiveQueryReturnWithCollection<TResult, TKey, TUtils, Array<TResult>>
+
+// Overload 4: Accept pre-created live query collection WITH SingleResult (returns single item)
+export function useLiveQuery<
+  TResult extends object,
+  TKey extends string | number,
+  TUtils extends Record<string, any>,
+>(
+  liveQueryCollection: MaybeGetter<
+    Collection<TResult, TKey, TUtils> & SingleResult
+  >,
+): UseLiveQueryReturnWithCollection<TResult, TKey, TUtils, TResult | undefined>
 
 // Implementation
 export function useLiveQuery(
   configOrQueryOrCollection: any,
-  deps: Array<() => unknown> = []
+  deps: Array<() => unknown> = [],
 ): UseLiveQueryReturn<any> | UseLiveQueryReturnWithCollection<any, any, any> {
   const collection = $derived.by(() => {
     // First check if the original parameter might be a getter
@@ -247,6 +309,20 @@ export function useLiveQuery(
       typeof unwrappedParam.id === `string`
 
     if (isCollection) {
+      // Warn when passing a collection directly with on-demand sync mode
+      // In on-demand mode, data is only loaded when queries with predicates request it
+      // Passing the collection directly doesn't provide any predicates, so no data loads
+      const syncMode = (unwrappedParam as { config?: { syncMode?: string } })
+        .config?.syncMode
+      if (syncMode === `on-demand`) {
+        console.warn(
+          `[useLiveQuery] Warning: Passing a collection with syncMode "on-demand" directly to useLiveQuery ` +
+            `will not load any data. In on-demand mode, data is only loaded when queries with predicates request it.\n\n` +
+            `Instead, use a query builder function:\n` +
+            `  const { data } = useLiveQuery((q) => q.from({ c: myCollection }).select(({ c }) => c))\n\n` +
+            `Or switch to syncMode "eager" if you want all data to sync automatically.`,
+        )
+      }
       // It's already a collection, ensure sync is started for Svelte helpers
       // Only start sync if the collection is in idle state
       if (unwrappedParam.status === `idle`) {
@@ -260,6 +336,15 @@ export function useLiveQuery(
 
     // Ensure we always start sync for Svelte helpers
     if (typeof unwrappedParam === `function`) {
+      // Check if query function returns null/undefined (disabled query)
+      const queryBuilder = new BaseQueryBuilder() as InitialQueryBuilder
+      const result = unwrappedParam(queryBuilder)
+
+      if (result === undefined || result === null) {
+        // Disabled query - return null
+        return null
+      }
+
       return createLiveQueryCollection({
         query: unwrappedParam,
         startSync: true,
@@ -279,11 +364,11 @@ export function useLiveQuery(
   let internalData = $state<Array<any>>([])
 
   // Track collection status reactively
-  let status = $state(collection.status)
+  let status = $state(collection ? collection.status : (`disabled` as const))
 
   // Helper to sync data array from collection in correct order
   const syncDataFromCollection = (
-    currentCollection: Collection<any, any, any>
+    currentCollection: Collection<any, any, any>,
   ) => {
     untrack(() => {
       internalData = []
@@ -297,6 +382,20 @@ export function useLiveQuery(
   // Watch for collection changes and subscribe to updates
   $effect(() => {
     const currentCollection = collection
+
+    // Handle null collection (disabled query)
+    if (!currentCollection) {
+      status = `disabled` as const
+      untrack(() => {
+        state.clear()
+        internalData = []
+      })
+      if (currentUnsubscribe) {
+        currentUnsubscribe()
+        currentUnsubscribe = null
+      }
+      return
+    }
 
     // Update status state whenever the effect runs
     status = currentCollection.status
@@ -320,10 +419,9 @@ export function useLiveQuery(
     // Listen for the first ready event to catch status transitions
     // that might not trigger change events (fixes async status transition bug)
     currentCollection.onFirstReady(() => {
-      // Use flushSync to ensure Svelte reactivity updates properly
-      flushSync(() => {
-        status = currentCollection.status
-      })
+      // Update status directly - Svelte's reactivity system handles the update automatically
+      // Note: We cannot use flushSync here as it's disallowed inside effects in async mode
+      status = currentCollection.status
     })
 
     // Subscribe to collection changes with granular updates
@@ -351,7 +449,7 @@ export function useLiveQuery(
       },
       {
         includeInitialState: true,
-      }
+      },
     )
 
     currentUnsubscribe = subscription.unsubscribe.bind(subscription)
@@ -375,6 +473,18 @@ export function useLiveQuery(
       return state
     },
     get data() {
+      const currentCollection = collection
+      if (currentCollection) {
+        const config =
+          currentCollection.config as CollectionConfigSingleRowOption<
+            any,
+            any,
+            any
+          >
+        if (config.singleResult) {
+          return internalData[0]
+        }
+      }
       return internalData
     },
     get collection() {
@@ -387,7 +497,7 @@ export function useLiveQuery(
       return status === `loading`
     },
     get isReady() {
-      return status === `ready`
+      return status === `ready` || status === `disabled`
     },
     get isIdle() {
       return status === `idle`

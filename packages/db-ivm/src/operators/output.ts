@@ -1,8 +1,8 @@
-import { DifferenceStreamWriter, UnaryOperator } from "../graph.js"
-import { StreamBuilder } from "../d2.js"
-import type { IStreamBuilder, PipedOperator } from "../types.js"
-import type { DifferenceStreamReader } from "../graph.js"
-import type { MultiSet } from "../multiset.js"
+import { DifferenceStreamWriter, UnaryOperator } from '../graph.js'
+import { StreamBuilder } from '../d2.js'
+import type { IStreamBuilder, PipedOperator } from '../types.js'
+import type { DifferenceStreamReader } from '../graph.js'
+import type { MultiSet } from '../multiset.js'
 
 /**
  * Operator that outputs the messages in the stream
@@ -14,7 +14,7 @@ export class OutputOperator<T> extends UnaryOperator<T> {
     id: number,
     inputA: DifferenceStreamReader<T>,
     outputWriter: DifferenceStreamWriter<T>,
-    fn: (data: MultiSet<T>) => void
+    fn: (data: MultiSet<T>) => void,
   ) {
     super(id, inputA, outputWriter)
     this.#fn = fn
@@ -33,18 +33,18 @@ export class OutputOperator<T> extends UnaryOperator<T> {
  * @param fn - The function to call with each message
  */
 export function output<T>(
-  fn: (data: MultiSet<T>) => void
+  fn: (data: MultiSet<T>) => void,
 ): PipedOperator<T, T> {
   return (stream: IStreamBuilder<T>): IStreamBuilder<T> => {
     const outputStream = new StreamBuilder<T>(
       stream.graph,
-      new DifferenceStreamWriter<T>()
+      new DifferenceStreamWriter<T>(),
     )
     const operator = new OutputOperator<T>(
       stream.graph.getNextOperatorId(),
       stream.connectReader(),
       outputStream.writer,
-      fn
+      fn,
     )
     stream.graph.addOperator(operator)
     return outputStream

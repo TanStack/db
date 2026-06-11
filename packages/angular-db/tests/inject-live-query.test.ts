@@ -1,21 +1,22 @@
-import { DestroyRef, inject, signal } from "@angular/core"
-import { TestBed } from "@angular/core/testing"
-import { describe, expect, it } from "vitest"
+import { DestroyRef, inject, signal } from '@angular/core'
+import { TestBed } from '@angular/core/testing'
+import { describe, expect, it } from 'vitest'
 import {
   createCollection,
   createLiveQueryCollection,
   eq,
   gt,
-} from "@tanstack/db"
-import { injectLiveQuery } from "../src/index"
-import { mockSyncCollectionOptions } from "../../db/tests/utils"
+} from '@tanstack/db'
+import { injectLiveQuery } from '../src/index'
+import { mockSyncCollectionOptions } from '../../db/tests/utils'
 import type {
   Collection,
   CollectionStatus,
   Context,
   LiveQueryCollectionConfig,
+  NonSingleResult,
   QueryBuilder,
-} from "@tanstack/db"
+} from '@tanstack/db'
 
 // Import the same test utilities as Vue
 
@@ -65,13 +66,14 @@ async function waitForAngularUpdate() {
 
 function createMockCollection<T extends object, K extends string | number>(
   initial: Array<T & Record<`id`, K>> = [],
-  initialStatus: CollectionStatus = `ready`
-): Collection<T, K, Record<string, never>> & {
-  __setStatus: (s: CollectionStatus) => void
-  __replaceAll: (rows: Array<T & Record<`id`, K>>) => void
-  __upsert: (row: T & Record<`id`, K>) => void
-  __delete: (key: K) => void
-} {
+  initialStatus: CollectionStatus = `ready`,
+): Collection<T, K, Record<string, never>> &
+  NonSingleResult & {
+    __setStatus: (s: CollectionStatus) => void
+    __replaceAll: (rows: Array<T & Record<`id`, K>>) => void
+    __upsert: (row: T & Record<`id`, K>) => void
+    __delete: (key: K) => void
+  } {
   const map = new Map<K, T>()
   for (const r of initial) {
     map.set(r.id, r)
@@ -167,7 +169,7 @@ describe(`injectLiveQuery`, () => {
     expect(() => {
       injectLiveQuery(() => ({}) as unknown as QueryBuilder<Context>)
     }).toThrow(
-      /NG0203:|injectLiveQuery\(\) can only be used within an injection context/i
+      /NG0203:|injectLiveQuery\(\) can only be used within an injection context/i,
     )
   })
 
@@ -178,7 +180,7 @@ describe(`injectLiveQuery`, () => {
           id: `test-persons-angular`,
           getKey: (person: Person) => person.id,
           initialData: initialPersons,
-        })
+        }),
       )
 
       const { state, data } = injectLiveQuery((q) =>
@@ -189,7 +191,7 @@ describe(`injectLiveQuery`, () => {
             id: persons.id,
             name: persons.name,
             age: persons.age,
-          }))
+          })),
       )
 
       await waitForAngularUpdate()
@@ -210,7 +212,7 @@ describe(`injectLiveQuery`, () => {
     await TestBed.runInInjectionContext(async () => {
       const col = createMockCollection<{ id: number; name: string }, number>(
         [{ id: 1, name: `A` }],
-        `ready`
+        `ready`,
       )
 
       const result = injectLiveQuery(col)
@@ -233,7 +235,7 @@ describe(`injectLiveQuery`, () => {
     await TestBed.runInInjectionContext(async () => {
       const col = createMockCollection<{ id: number; name: string }, number>(
         [{ id: 1, name: `A` }],
-        `ready`
+        `ready`,
       )
       const result = injectLiveQuery(col)
 
@@ -266,7 +268,7 @@ describe(`injectLiveQuery`, () => {
     await TestBed.runInInjectionContext(async () => {
       const col = createMockCollection<{ id: number; name: string }, number>(
         [],
-        `idle`
+        `idle`,
       )
       const { status, isReady, isLoading, isError, isCleanedUp } =
         injectLiveQuery(col)
@@ -303,7 +305,7 @@ describe(`injectLiveQuery`, () => {
           id: `test-persons-2-angular`,
           getKey: (person: Person) => person.id,
           initialData: initialPersons,
-        })
+        }),
       )
 
       const { state, data } = injectLiveQuery((q) =>
@@ -314,7 +316,7 @@ describe(`injectLiveQuery`, () => {
             id: c.id,
             name: c.name,
           }))
-          .orderBy(({ collection: c }) => c.id, `asc`)
+          .orderBy(({ collection: c }) => c.id, `asc`),
       )
 
       await waitForAngularUpdate()
@@ -369,7 +371,7 @@ describe(`injectLiveQuery`, () => {
             id: `4`,
             name: `Kyle Doe`,
           }),
-        ])
+        ]),
       )
     })
   })
@@ -382,7 +384,7 @@ describe(`injectLiveQuery`, () => {
           id: `reuse-test-angular`,
           getKey: (person: Person) => person.id,
           initialData: initialPersons,
-        })
+        }),
       )
 
       const config: LiveQueryCollectionConfig<Context> = {
@@ -414,7 +416,7 @@ describe(`injectLiveQuery`, () => {
       })
 
       expect(col2).toBe(col1)
-    }
+    },
   )
 
   it(`creates a new collection when deps change`, async () => {
@@ -423,7 +425,7 @@ describe(`injectLiveQuery`, () => {
         id: `deps-change-test-angular`,
         getKey: (person: Person) => person.id,
         initialData: initialPersons,
-      })
+      }),
     )
 
     const config: LiveQueryCollectionConfig<Context> = {
@@ -464,7 +466,7 @@ describe(`injectLiveQuery`, () => {
     await TestBed.runInInjectionContext(async () => {
       const col = createMockCollection<{ id: number; name: string }, number>(
         [],
-        `ready`
+        `ready`,
       )
 
       const a = injectLiveQuery(col)
@@ -481,7 +483,7 @@ describe(`injectLiveQuery`, () => {
     await TestBed.runInInjectionContext(async () => {
       const col = createMockCollection<{ id: number; name: string }, number>(
         [{ id: 1, name: `A` }],
-        `ready`
+        `ready`,
       )
 
       const destroyRef = inject(DestroyRef)
@@ -500,7 +502,7 @@ describe(`injectLiveQuery`, () => {
     await TestBed.runInInjectionContext(async () => {
       const col = createMockCollection<{ id: number; name: string }, number>(
         [],
-        `ready`
+        `ready`,
       )
       const res = injectLiveQuery(col)
 
@@ -517,7 +519,7 @@ describe(`injectLiveQuery`, () => {
           id: `query-fn-test-angular`,
           getKey: (person: Person) => person.id,
           initialData: initialPersons,
-        })
+        }),
       )
 
       const res = injectLiveQuery((q) =>
@@ -527,12 +529,12 @@ describe(`injectLiveQuery`, () => {
           .select(({ persons }) => ({
             id: persons.id,
             name: persons.name,
-          }))
+          })),
       )
 
       await waitForAngularUpdate()
 
-      expect(res.collection().id).toEqual(expect.any(String))
+      expect(res.collection()!.id).toEqual(expect.any(String))
       expect(res.status()).toBe(`ready`)
       expect(Array.isArray(res.data())).toBe(true)
       expect(res.state() instanceof Map).toBe(true)
@@ -546,7 +548,7 @@ describe(`injectLiveQuery`, () => {
           id: `config-test-angular`,
           getKey: (person: Person) => person.id,
           initialData: initialPersons,
-        })
+        }),
       )
 
       const config: LiveQueryCollectionConfig<Context> = {
@@ -565,7 +567,7 @@ describe(`injectLiveQuery`, () => {
       const res = injectLiveQuery(config)
       await waitForAngularUpdate()
 
-      expect(res.collection().id).toEqual(expect.any(String))
+      expect(res.collection()!.id).toEqual(expect.any(String))
       expect(res.isReady()).toBe(true)
     })
   })
@@ -574,7 +576,7 @@ describe(`injectLiveQuery`, () => {
     await TestBed.runInInjectionContext(async () => {
       const col = createMockCollection<{ id: number; name: string }, number>(
         [],
-        `ready`
+        `ready`,
       )
       const res = injectLiveQuery(col)
 
@@ -591,7 +593,7 @@ describe(`injectLiveQuery`, () => {
           id: `reactive-params-test-angular`,
           getKey: (person: Person) => person.id,
           initialData: initialPersons,
-        })
+        }),
       )
 
       const projectId = signal(1)
@@ -611,7 +613,7 @@ describe(`injectLiveQuery`, () => {
 
       await waitForAngularUpdate()
 
-      expect(res.collection().id).toEqual(expect.any(String))
+      expect(res.collection()!.id).toEqual(expect.any(String))
       expect(res.status()).toBe(`ready`)
       expect(Array.isArray(res.data())).toBe(true)
       expect(res.state() instanceof Map).toBe(true)
@@ -630,7 +632,7 @@ describe(`injectLiveQuery`, () => {
             name: `John Smith`,
             team: `team1`,
           }),
-        ])
+        ]),
       )
 
       projectId.set(2)
@@ -653,7 +655,7 @@ describe(`injectLiveQuery`, () => {
           id: `reactive-update-test-angular`,
           getKey: (person: Person) => person.id,
           initialData: initialPersons,
-        })
+        }),
       )
 
       const selectedProjectId = signal(2)
@@ -700,7 +702,7 @@ describe(`injectLiveQuery`, () => {
             name: `John Smith`,
             team: `team1`,
           }),
-        ])
+        ]),
       )
     })
   })
@@ -712,7 +714,7 @@ describe(`injectLiveQuery`, () => {
           id: `pre-created-collection-test-angular`,
           getKey: (person: Person) => person.id,
           initialData: initialPersons,
-        })
+        }),
       )
 
       // Create a live query collection beforehand
@@ -749,6 +751,40 @@ describe(`injectLiveQuery`, () => {
 
       // Verify that the returned collection is the same instance
       expect(returnedCollection()).toBe(liveQueryCollection)
+    })
+  })
+
+  it(`should return a single object for findOne query`, async () => {
+    await TestBed.runInInjectionContext(async () => {
+      const collection = createCollection(
+        mockSyncCollectionOptions<Person>({
+          id: `test-persons-findone-angular`,
+          getKey: (person: Person) => person.id,
+          initialData: initialPersons,
+        }),
+      )
+
+      const { state, data } = injectLiveQuery((q) =>
+        q
+          .from({ collection })
+          .where(({ collection: c }) => eq(c.id, `3`))
+          .findOne(),
+      )
+
+      await waitForAngularUpdate()
+
+      expect(state().size).toBe(1)
+      expect(state().get(`3`)).toMatchObject({
+        id: `3`,
+        name: `John Smith`,
+      })
+
+      // findOne should return a single object, not an array
+      expect(Array.isArray(data())).toBe(false)
+      expect(data()).toMatchObject({
+        id: `3`,
+        name: `John Smith`,
+      })
     })
   })
 
@@ -795,7 +831,7 @@ describe(`injectLiveQuery`, () => {
         })
 
         // Start the live query sync manually
-        liveQueryCollection().preload()
+        liveQueryCollection()!.preload()
 
         await waitForAngularUpdate()
 
@@ -907,7 +943,7 @@ describe(`injectLiveQuery`, () => {
         })
 
         // Start the live query sync manually
-        liveQueryCollection().preload()
+        liveQueryCollection()!.preload()
 
         await waitForAngularUpdate()
 
@@ -1007,7 +1043,7 @@ describe(`injectLiveQuery`, () => {
         })
 
         // Start the live query sync manually
-        liveQueryCollection().preload()
+        liveQueryCollection()!.preload()
 
         await waitForAngularUpdate()
 
@@ -1028,6 +1064,121 @@ describe(`injectLiveQuery`, () => {
         expect(state().size).toBe(0) // Still no data
         expect(data()).toEqual([]) // Empty array
         expect(status()).toBe(`ready`)
+      })
+    })
+  })
+
+  describe(`disabled queries`, () => {
+    it(`should handle query function returning undefined with proper state`, async () => {
+      await TestBed.runInInjectionContext(async () => {
+        const collection = createCollection(
+          mockSyncCollectionOptions<Person>({
+            id: `disabled-test-undefined-angular`,
+            getKey: (person: Person) => person.id,
+            initialData: initialPersons,
+          }),
+        )
+
+        const enabled = signal(false)
+
+        const result = injectLiveQuery({
+          params: () => ({ enabled: enabled() }),
+          query: ({ params, q }) => {
+            if (!params.enabled) return undefined
+            return q
+              .from({ persons: collection })
+              .where(({ persons }) => eq(persons.isActive, true))
+              .select(({ persons }) => ({
+                id: persons.id,
+                name: persons.name,
+              }))
+          },
+        })
+
+        await waitForAngularUpdate()
+
+        // When disabled, status should be 'disabled' and isReady should be true
+        expect(result.status()).toBe(`disabled`)
+        expect(result.isReady()).toBe(true)
+        expect(result.isLoading()).toBe(false)
+        expect(result.isIdle()).toBe(false)
+        expect(result.isError()).toBe(false)
+        expect(result.collection()).toBeNull()
+        expect(result.data()).toEqual([])
+        expect(result.state().size).toBe(0)
+
+        // Enable the query
+        enabled.set(true)
+        await waitForAngularUpdate()
+
+        // Should now be ready with data
+        expect(result.status()).toBe(`ready`)
+        expect(result.isReady()).toBe(true)
+        expect(result.isLoading()).toBe(false)
+        expect(result.collection()).not.toBeNull()
+        expect(result.data().length).toBeGreaterThan(0)
+      })
+    })
+
+    it(`should handle query function returning null with proper state`, async () => {
+      await TestBed.runInInjectionContext(async () => {
+        const collection = createCollection(
+          mockSyncCollectionOptions<Person>({
+            id: `disabled-test-null-angular`,
+            getKey: (person: Person) => person.id,
+            initialData: initialPersons,
+          }),
+        )
+
+        const enabled = signal(false)
+
+        const result = injectLiveQuery({
+          params: () => ({ enabled: enabled() }),
+          query: ({ params, q }) => {
+            if (!params.enabled) return null
+            return q
+              .from({ persons: collection })
+              .where(({ persons }) => gt(persons.age, 25))
+              .select(({ persons }) => ({
+                id: persons.id,
+                name: persons.name,
+                age: persons.age,
+              }))
+          },
+        })
+
+        await waitForAngularUpdate()
+
+        // When disabled, status should be 'disabled' and isReady should be true
+        expect(result.status()).toBe(`disabled`)
+        expect(result.isReady()).toBe(true)
+        expect(result.isLoading()).toBe(false)
+        expect(result.isIdle()).toBe(false)
+        expect(result.isError()).toBe(false)
+        expect(result.collection()).toBeNull()
+        expect(result.data()).toEqual([])
+        expect(result.state().size).toBe(0)
+
+        // Enable the query
+        enabled.set(true)
+        await waitForAngularUpdate()
+
+        // Should now be ready with data
+        expect(result.status()).toBe(`ready`)
+        expect(result.isReady()).toBe(true)
+        expect(result.isLoading()).toBe(false)
+        expect(result.collection()).not.toBeNull()
+        expect(result.data().length).toBeGreaterThan(0)
+
+        // Disable again
+        enabled.set(false)
+        await waitForAngularUpdate()
+
+        // Should go back to disabled state
+        expect(result.status()).toBe(`disabled`)
+        expect(result.isReady()).toBe(true)
+        expect(result.collection()).toBeNull()
+        expect(result.data()).toEqual([])
       })
     })
   })

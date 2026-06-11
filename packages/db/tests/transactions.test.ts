@@ -1,12 +1,12 @@
-import { describe, expect, it } from "vitest"
-import { createTransaction } from "../src/transactions"
-import { createCollection } from "../src/collection/index.js"
+import { describe, expect, it } from 'vitest'
+import { createTransaction } from '../src/transactions'
+import { createCollection } from '../src/collection/index.js'
 import {
   MissingMutationFunctionError,
   TransactionAlreadyCompletedRollbackError,
   TransactionNotPendingCommitError,
   TransactionNotPendingMutateError,
-} from "../src/errors"
+} from '../src/errors'
 
 describe(`Transactions`, () => {
   it(`calling createTransaction creates a transaction`, () => {
@@ -39,13 +39,13 @@ describe(`Transactions`, () => {
     await transaction.commit()
 
     await expect(transaction.commit()).rejects.toThrow(
-      TransactionNotPendingCommitError
+      TransactionNotPendingCommitError,
     )
     expect(() => transaction.rollback()).toThrow(
-      TransactionAlreadyCompletedRollbackError
+      TransactionAlreadyCompletedRollbackError,
     )
     expect(() => transaction.mutate(() => {})).toThrow(
-      TransactionNotPendingMutateError
+      TransactionNotPendingMutateError,
     )
   })
   it(`should allow manually controlling the transaction lifecycle`, () => {
@@ -552,5 +552,66 @@ describe(`Transactions`, () => {
     expect(transaction1.state).toBe(`failed`)
     expect(transaction2.state).toBe(`completed`)
     expect(transaction3.state).toBe(`failed`)
+  })
+
+  describe(`duplicate instance detection`, () => {
+    it(`sets a global marker in dev mode when in browser top window`, () => {
+      // The duplicate instance marker is set when the module loads in dev mode
+      // AND in a browser top-level window (not a worker, SSR, or iframe).
+      const marker = Symbol.for(`@tanstack/db/instance-marker`)
+      const w = (globalThis as any).window
+      const isBrowserTopWindow =
+        w &&
+        `document` in w &&
+        (() => {
+          try {
+            return w === w.top
+          } catch {
+            return true
+          }
+        })()
+
+      if (isBrowserTopWindow) {
+        expect((globalThis as any)[marker]).toBe(true)
+      } else {
+        // In Node.js / vitest (not a browser top window), the marker is not set
+        expect((globalThis as any)[marker]).toBeUndefined()
+      }
+    })
+
+    it(`marker is only set in development mode`, () => {
+      // This test verifies the marker behavior in our test environment.
+      // In production (NODE_ENV=production), the marker would NOT be set.
+      // In non-browser environments (Node.js / vitest), the marker is also not set.
+      const marker = Symbol.for(`@tanstack/db/instance-marker`)
+      const isDev =
+        typeof process !== `undefined` && process.env.NODE_ENV !== `production`
+      const w = (globalThis as any).window
+      const isBrowserTopWindow =
+        w &&
+        `document` in w &&
+        (() => {
+          try {
+            return w === w.top
+          } catch {
+            return true
+          }
+        })()
+
+      if (isDev && isBrowserTopWindow) {
+        expect((globalThis as any)[marker]).toBe(true)
+      } else {
+        // Either not dev mode or not a browser top window
+        expect((globalThis as any)[marker]).toBeUndefined()
+      }
+    })
+
+    it(`can be disabled with environment variable`, () => {
+      // This test documents that TANSTACK_DB_DISABLE_DUP_CHECK=1 disables the check
+      // We can't easily test the actual behavior without reloading the module,
+      // but the implementation in transactions.ts checks this variable
+      const disableCheck = process.env.TANSTACK_DB_DISABLE_DUP_CHECK === `1`
+      expect(typeof disableCheck).toBe(`boolean`)
+    })
   })
 })

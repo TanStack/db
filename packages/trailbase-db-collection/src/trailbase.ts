@@ -1,22 +1,25 @@
 /* eslint-disable @typescript-eslint/no-unnecessary-condition */
-import { Store } from "@tanstack/store"
+import { Store } from '@tanstack/store'
 import {
   ExpectedDeleteTypeError,
   ExpectedInsertTypeError,
   ExpectedUpdateTypeError,
   TimeoutWaitingForIdsError,
-} from "./errors"
-import type { Event, RecordApi } from "trailbase"
+} from './errors'
+import type { OrderByClause } from '../../db/dist/esm/query/ir'
+import type { CompareOp, Event, FilterOrComposite, RecordApi } from 'trailbase'
 
 import type {
   BaseCollectionConfig,
   CollectionConfig,
   DeleteMutationFnParams,
   InsertMutationFnParams,
+  LoadSubsetOptions,
   SyncConfig,
+  SyncMode,
   UpdateMutationFnParams,
   UtilsRecord,
-} from "@tanstack/db"
+} from '@tanstack/db'
 
 type ShapeOf<T> = Record<keyof T, unknown>
 type Conversion<I, O> = (value: I) => O
@@ -52,7 +55,7 @@ function convert<
   OutputType extends ShapeOf<InputType>,
 >(
   conversions: Conversions<InputType, OutputType>,
-  input: InputType
+  input: InputType,
 ): OutputType {
   const c = conversions as Record<string, Conversion<InputType, OutputType>>
 
@@ -60,7 +63,7 @@ function convert<
     Object.keys(input).map((k: string) => {
       const value = input[k]
       return [k, c[k]?.(value as any) ?? value]
-    })
+    }),
   ) as OutputType
 }
 
@@ -69,7 +72,7 @@ function convertPartial<
   OutputType extends ShapeOf<InputType>,
 >(
   conversions: Conversions<InputType, OutputType>,
-  input: Partial<InputType>
+  input: Partial<InputType>,
 ): Partial<OutputType> {
   const c = conversions as Record<string, Conversion<InputType, OutputType>>
 
@@ -77,9 +80,11 @@ function convertPartial<
     Object.keys(input).map((k: string) => {
       const value = input[k]
       return [k, c[k]?.(value as any) ?? value]
-    })
+    }),
   ) as OutputType
 }
+
+export type TrailBaseSyncMode = SyncMode
 
 /**
  * Configuration interface for Trailbase Collection
@@ -89,13 +94,19 @@ export interface TrailBaseCollectionConfig<
   TRecord extends ShapeOf<TItem> = TItem,
   TKey extends string | number = string | number,
 > extends Omit<
-    BaseCollectionConfig<TItem, TKey>,
-    `onInsert` | `onUpdate` | `onDelete`
-  > {
+  BaseCollectionConfig<TItem, TKey>,
+  `onInsert` | `onUpdate` | `onDelete` | `syncMode`
+> {
   /**
    * Record API name
    */
   recordApi: RecordApi<TRecord>
+
+  /**
+   * The mode of sync to use for the collection.
+   * @default `eager`
+   */
+  syncMode?: TrailBaseSyncMode
 
   parse: Conversions<TRecord, TItem>
   serialize: Conversions<TItem, TRecord>
@@ -112,8 +123,10 @@ export function trailBaseCollectionOptions<
   TRecord extends ShapeOf<TItem> = TItem,
   TKey extends string | number = string | number,
 >(
-  config: TrailBaseCollectionConfig<TItem, TRecord, TKey>
-): CollectionConfig<TItem, TKey> & { utils: TrailBaseCollectionUtils } {
+  config: TrailBaseCollectionConfig<TItem, TRecord, TKey>,
+): CollectionConfig<TItem, TKey, never, TrailBaseCollectionUtils> & {
+  utils: TrailBaseCollectionUtils
+} {
   const getKey = config.getKey
 
   const parse = (record: TRecord) =>
@@ -125,9 +138,12 @@ export function trailBaseCollectionOptions<
 
   const seenIds = new Store(new Map<string, number>())
 
+  const internalSyncMode = config.syncMode ?? `eager`
+  let fullSyncCompleted = false
+
   const awaitIds = (
     ids: Array<string>,
-    timeout: number = 120 * 1000
+    timeout: number = 120 * 1000,
   ): Promise<void> => {
     const completed = (value: Map<string, number>) =>
       ids.every((id) => value.has(id))
@@ -137,14 +153,14 @@ export function trailBaseCollectionOptions<
 
     return new Promise<void>((resolve, reject) => {
       const timeoutId = setTimeout(() => {
-        unsubscribe()
+        sub.unsubscribe()
         reject(new TimeoutWaitingForIdsError(ids.toString()))
       }, timeout)
 
-      const unsubscribe = seenIds.subscribe((value) => {
-        if (completed(value.currentVal)) {
+      const sub = seenIds.subscribe((value) => {
+        if (completed(value)) {
           clearTimeout(timeoutId)
-          unsubscribe()
+          sub.unsubscribe()
           resolve()
         }
       })
@@ -165,44 +181,79 @@ export function trailBaseCollectionOptions<
     sync: (params: SyncParams) => {
       const { begin, write, commit, markReady } = params
 
-      // Initial fetch.
-      async function initialFetch() {
-        const limit = 256
-        let response = await config.recordApi.list({
-          pagination: {
-            limit,
-          },
-        })
-        let cursor = response.cursor
-        let got = 0
+      // NOTE: We cache cursors from prior fetches. TanStack/db expects that
+      // cursors can be derived from a key, which is not true for TB, since
+      // cursors are encrypted. This is leaky and therefore not ideal.
+      const cursors = new Map<string | number, string>()
 
-        begin()
+      // Load (more) data.
+      async function load(opts: LoadSubsetOptions) {
+        const lastKey = opts.cursor?.lastKey
+        let cursor: string | undefined =
+          lastKey !== undefined ? cursors.get(lastKey) : undefined
+        let offset: number | undefined =
+          (opts.offset ?? 0) > 0 ? opts.offset : undefined
+
+        const order: Array<string> | undefined = buildOrder(opts)
+        const filters: Array<FilterOrComposite> | undefined = buildFilters(
+          opts,
+          config,
+        )
+
+        let remaining: number = opts.limit ?? Number.MAX_VALUE
+        if (remaining <= 0) {
+          return
+        }
 
         while (true) {
-          const length = response.records.length
-          if (length === 0) break
+          const limit = Math.min(remaining, 256)
+          const response = await config.recordApi.list({
+            pagination: {
+              limit,
+              offset,
+              cursor,
+            },
+            order,
+            filters,
+          })
 
-          got = got + length
-          for (const item of response.records) {
+          const length = response.records.length
+          if (length === 0) {
+            // Drained - read everything.
+            break
+          }
+
+          begin()
+
+          for (let i = 0; i < Math.min(length, remaining); ++i) {
             write({
               type: `insert`,
-              value: parse(item),
+              value: parse(response.records[i]!),
             })
           }
 
-          if (length < limit) break
+          commit()
 
-          response = await config.recordApi.list({
-            pagination: {
-              limit,
-              cursor,
-              offset: cursor === undefined ? got : undefined,
-            },
-          })
-          cursor = response.cursor
+          remaining -= length
+
+          // Drained or read enough.
+          if (length < limit || remaining <= 0) {
+            if (response.cursor) {
+              cursors.set(
+                getKey(parse(response.records.at(-1)!)),
+                response.cursor,
+              )
+            }
+            break
+          }
+
+          // Update params for next iteration.
+          if (offset !== undefined) {
+            offset += length
+          } else {
+            cursor = response.cursor
+          }
         }
-
-        commit()
       }
 
       // Afterwards subscribe.
@@ -251,7 +302,12 @@ export function trailBaseCollectionOptions<
         listen(reader)
 
         try {
-          await initialFetch()
+          // Eager mode: perform initial fetch to populate everything
+          if (internalSyncMode === `eager`) {
+            // Load everything on initial load.
+            await load({})
+            fullSyncCompleted = true
+          }
         } catch (e) {
           cancelEventReader()
           throw e
@@ -285,9 +341,26 @@ export function trailBaseCollectionOptions<
       }
 
       start()
+
+      // Eager mode doesn't need subset loading
+      if (internalSyncMode === `eager`) {
+        return
+      }
+
+      return {
+        loadSubset: load,
+        getSyncMetadata: () =>
+          ({
+            syncMode: internalSyncMode,
+          }) as const,
+      }
     },
     // Expose the getSyncMetadata function
-    getSyncMetadata: undefined,
+    getSyncMetadata: () =>
+      ({
+        syncMode: internalSyncMode,
+        fullSyncComplete: fullSyncCompleted,
+      }) as const,
   }
 
   return {
@@ -295,7 +368,7 @@ export function trailBaseCollectionOptions<
     sync,
     getKey,
     onInsert: async (
-      params: InsertMutationFnParams<TItem, TKey>
+      params: InsertMutationFnParams<TItem, TKey>,
     ): Promise<Array<number | string>> => {
       const ids = await config.recordApi.createBulk(
         params.transaction.mutations.map((tx) => {
@@ -304,7 +377,7 @@ export function trailBaseCollectionOptions<
             throw new ExpectedInsertTypeError(type)
           }
           return serialIns(modified)
-        })
+        }),
       )
 
       // The optimistic mutation overlay is removed on return, so at this point
@@ -325,7 +398,7 @@ export function trailBaseCollectionOptions<
           await config.recordApi.update(key, serialUpd(changes))
 
           return String(key)
-        })
+        }),
       )
 
       // The optimistic mutation overlay is removed on return, so at this point
@@ -343,7 +416,7 @@ export function trailBaseCollectionOptions<
 
           await config.recordApi.delete(key)
           return String(key)
-        })
+        }),
       )
 
       // The optimistic mutation overlay is removed on return, so at this point
@@ -355,4 +428,108 @@ export function trailBaseCollectionOptions<
       cancel: cancelEventReader,
     },
   }
+}
+
+function buildOrder(opts: LoadSubsetOptions): undefined | Array<string> {
+  return opts.orderBy
+    ?.map((o: OrderByClause) => {
+      switch (o.expression.type) {
+        case 'ref': {
+          const field = o.expression.path[0]
+          if (o.compareOptions.direction == 'asc') {
+            return `+${field}`
+          }
+          return `-${field}`
+        }
+        default: {
+          console.warn(
+            'Skipping unsupported order clause:',
+            JSON.stringify(o.expression),
+          )
+          return undefined
+        }
+      }
+    })
+    .filter((f: string | undefined) => f !== undefined)
+}
+
+function buildCompareOp(name: string): CompareOp | undefined {
+  switch (name) {
+    case 'eq':
+      return 'equal'
+    case 'ne':
+      return 'notEqual'
+    case 'gt':
+      return 'greaterThan'
+    case 'gte':
+      return 'greaterThanEqual'
+    case 'lt':
+      return 'lessThan'
+    case 'lte':
+      return 'lessThanEqual'
+    default:
+      return undefined
+  }
+}
+
+function buildFilters<
+  TItem extends ShapeOf<TRecord>,
+  TRecord extends ShapeOf<TItem> = TItem,
+  TKey extends string | number = string | number,
+>(
+  opts: LoadSubsetOptions,
+  config: TrailBaseCollectionConfig<TItem, TRecord, TKey>,
+): undefined | Array<FilterOrComposite> {
+  const where = opts.where
+  if (where === undefined) {
+    return undefined
+  }
+
+  function serializeValue<T = any>(column: string, value: T): string {
+    const conv = (config.serialize as any)[column]
+    if (conv) {
+      return `${conv(value)}`
+    }
+
+    if (typeof value === 'boolean') {
+      return value ? '1' : '0'
+    }
+
+    return `${value}`
+  }
+
+  switch (where.type) {
+    case 'func': {
+      const field = where.args[0]
+      const val = where.args[1]
+
+      const op = buildCompareOp(where.name)
+      if (op === undefined) {
+        break
+      }
+
+      if (field?.type === 'ref' && val?.type === 'val') {
+        const column = field.path.at(0)
+        if (column) {
+          const f = [
+            {
+              column: field.path.at(0) ?? '',
+              op,
+              value: serializeValue(column, val.value),
+            },
+          ]
+
+          return f
+        }
+      }
+      break
+    }
+    case 'ref':
+    case 'val':
+      break
+  }
+
+  console.warn('where clause which is not (yet) supported', opts.where)
+
+  return undefined
 }

@@ -1,11 +1,11 @@
-import { describe, expect, it } from "vitest"
-import type { Collection } from "../src/collection/index.js"
+import { describe, expect, it } from 'vitest'
+import type { Collection } from '../src/collection/index.js'
 import type {
   MutationFn,
   PendingMutation,
   Transaction,
   TransactionConfig,
-} from "../src/types"
+} from '../src/types'
 
 describe(`Transaction Types`, () => {
   it(`should validate PendingMutation structure with collection`, () => {

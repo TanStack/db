@@ -1,11 +1,14 @@
-import { afterEach, describe, expect, it, vi } from "vitest"
-import { createCollection } from "../../src/collection/index.js"
-import { createLiveQueryCollection, eq } from "../../src/query/index.js"
-import { createTransaction } from "../../src/transactions.js"
-import { transactionScopedScheduler } from "../../src/scheduler.js"
-import { CollectionConfigBuilder } from "../../src/query/live/collection-config-builder.js"
-import type { FullSyncState } from "../../src/query/live/types.js"
-import type { SyncConfig } from "../../src/types.js"
+import { afterEach, describe, expect, it, vi } from 'vitest'
+import { createCollection } from '../../src/collection/index.js'
+import { createLiveQueryCollection, eq, isNull } from '../../src/query/index.js'
+import { createTransaction } from '../../src/transactions.js'
+import { createOptimisticAction } from '../../src/optimistic-action.js'
+import { transactionScopedScheduler } from '../../src/scheduler.js'
+import { CollectionConfigBuilder } from '../../src/query/live/collection-config-builder.js'
+import { mockSyncCollectionOptions, stripVirtualProps } from '../utils.js'
+import type { OutputWithVirtual } from '../utils.js'
+import type { FullSyncState } from '../../src/query/live/types.js'
+import type { SyncConfig } from '../../src/types.js'
 
 interface ChangeMessageLike {
   type: string
@@ -16,6 +19,8 @@ interface User {
   id: number
   name: string
 }
+
+type UserWithVirtual = OutputWithVirtual<User, string | number>
 
 interface Task {
   id: number
@@ -59,8 +64,8 @@ function setupLiveQueryCollections(id: string) {
         .join({ task: tasks }, ({ user, task }) => eq(user.id, task.userId))
         .select(({ user, task }) => ({
           userId: user.id,
-          taskId: task?.id,
-          title: task?.title,
+          taskId: task.id,
+          title: task.title,
         })),
   })
 
@@ -272,11 +277,11 @@ describe(`live query scheduler`, () => {
           .join(
             { right: liveQueryB },
             ({ left, right }) => eq(left.id, right.id),
-            `full`
+            `full`,
           )
           .select(({ left, right }) => ({
-            left: left?.value,
-            right: right?.value,
+            left: left.value,
+            right: right.value,
           })),
     })
 
@@ -297,7 +302,9 @@ describe(`live query scheduler`, () => {
       collectionB.insert({ id: 1, value: `B1` })
     })
 
-    expect(liveQueryJoin.toArray).toEqual([{ left: `A1`, right: `B1` }])
+    expect(liveQueryJoin.toArray.map((row) => stripVirtualProps(row))).toEqual([
+      { left: `A1`, right: `B1` },
+    ])
     expect(liveQueryJoin.utils.getRunCount()).toBe(baseRunCount + 1)
 
     tx.mutate(() => {
@@ -309,7 +316,9 @@ describe(`live query scheduler`, () => {
       })
     })
 
-    expect(liveQueryJoin.toArray).toEqual([{ left: `A1b`, right: `B1b` }])
+    expect(liveQueryJoin.toArray.map((row) => stripVirtualProps(row))).toEqual([
+      { left: `A1b`, right: `B1b` },
+    ])
     expect(liveQueryJoin.utils.getRunCount()).toBe(baseRunCount + 2)
     tx.rollback()
   })
@@ -359,11 +368,11 @@ describe(`live query scheduler`, () => {
           .join(
             { right: collectionB },
             ({ left, right }) => eq(left.id, right.id),
-            `full`
+            `full`,
           )
           .select(({ left, right }) => ({
-            left: left?.value,
-            right: right?.value,
+            left: left.value,
+            right: right.value,
           })),
     })
 
@@ -380,7 +389,9 @@ describe(`live query scheduler`, () => {
       collectionB.insert({ id: 7, value: `B7` })
     })
 
-    expect(hybridJoin.toArray).toEqual([{ left: `A7`, right: `B7` }])
+    expect(hybridJoin.toArray.map((row) => stripVirtualProps(row))).toEqual([
+      { left: `A7`, right: `B7` },
+    ])
     expect(hybridJoin.utils.getRunCount()).toBe(baseRunCount + 1)
 
     tx.mutate(() => {
@@ -392,7 +403,9 @@ describe(`live query scheduler`, () => {
       })
     })
 
-    expect(hybridJoin.toArray).toEqual([{ left: `A7b`, right: `B7b` }])
+    expect(hybridJoin.toArray.map((row) => stripVirtualProps(row))).toEqual([
+      { left: `A7b`, right: `B7b` },
+    ])
     expect(hybridJoin.utils.getRunCount()).toBe(baseRunCount + 2)
     tx.rollback()
   })
@@ -442,11 +455,11 @@ describe(`live query scheduler`, () => {
           .join(
             { right: collectionB },
             ({ left, right }) => eq(left.id, right.id),
-            `full`
+            `full`,
           )
           .select(({ left, right }) => ({
-            left: left?.value,
-            right: right?.value,
+            left: left.value,
+            right: right.value,
           })),
     })
 
@@ -463,7 +476,9 @@ describe(`live query scheduler`, () => {
       collectionA.insert({ id: 42, value: `left-later` })
     })
 
-    expect(join.toArray).toEqual([{ left: `left-later`, right: `right-first` }])
+    expect(join.toArray.map((row) => stripVirtualProps(row))).toEqual([
+      { left: `left-later`, right: `right-first` },
+    ])
     expect(join.utils.getRunCount()).toBe(baseRunCount + 1)
     tx.rollback()
   })
@@ -490,7 +505,7 @@ describe(`live query scheduler`, () => {
       commit: vi.fn(),
       markReady: vi.fn(),
       truncate: vi.fn(),
-    } as unknown as Parameters<SyncConfig<User>[`sync`]>[0]
+    } as unknown as Parameters<SyncConfig<UserWithVirtual>[`sync`]>[0]
 
     const syncState = {
       messagesCount: 0,
@@ -523,5 +538,238 @@ describe(`live query scheduler`, () => {
     expect(maybeRunGraphSpy).toHaveBeenCalledTimes(1)
 
     maybeRunGraphSpy.mockRestore()
+  })
+
+  it(`should handle optimistic mutations with nested left joins without scheduler errors`, async () => {
+    // This test verifies that optimistic mutations on collections with nested live query
+    // collections using left joins complete successfully without scheduler errors.
+    //
+    // Expected behavior:
+    // 1. Collections are pre-populated with initialData (via mockSyncCollectionOptions)
+    // 2. Nested live query collections use left joins
+    // 3. An optimistic action updates an existing item using draft mutations
+    // 4. The scheduler should flush the transaction successfully without detecting unresolved dependencies
+
+    interface Account {
+      id: string
+      user_id: string
+      name: string
+    }
+
+    interface UserProfile {
+      id: string
+      profile: string
+    }
+
+    interface Team {
+      id: string
+      account_id: string
+      deleted_ts: string | null
+    }
+
+    // Use mockSyncCollectionOptions with initialData to match the failing test
+    // Note: mockSyncCollectionOptions already sets startSync: true internally
+    const accounts = createCollection<Account>(
+      mockSyncCollectionOptions({
+        id: `left-join-bug-accounts`,
+        getKey: (account) => account.id,
+        initialData: [
+          { id: `account-1`, user_id: `user-1`, name: `Account 1` },
+        ],
+      }),
+    )
+
+    const users = createCollection<UserProfile>(
+      mockSyncCollectionOptions({
+        id: `left-join-bug-users`,
+        getKey: (user) => user.id,
+        initialData: [{ id: `user-1`, profile: `Profile 1` }],
+      }),
+    )
+
+    const teams = createCollection<Team>(
+      mockSyncCollectionOptions({
+        id: `left-join-bug-teams`,
+        getKey: (team) => team.id,
+        initialData: [
+          {
+            id: `team-1`,
+            account_id: `account-1`,
+            deleted_ts: null as string | null,
+          },
+        ],
+      }),
+    )
+
+    // Create nested live query collections similar to the bug report
+    const accountsWithUsers = createLiveQueryCollection({
+      id: `left-join-bug-accounts-with-users`,
+      startSync: true,
+      query: (q) =>
+        q
+          .from({ account: accounts })
+          .join({ user: users }, ({ user, account }) =>
+            eq(user.id, account.user_id),
+          )
+          .select(({ account, user }) => ({
+            account: account,
+            profile: user.profile,
+          })),
+    })
+
+    const activeTeams = createLiveQueryCollection({
+      id: `left-join-bug-active-teams`,
+      startSync: true,
+      query: (q) =>
+        q
+          .from({ team: teams })
+          .where(({ team }) => isNull(team.deleted_ts))
+          .select(({ team }) => ({ team })),
+    })
+
+    const accountsWithTeams = createLiveQueryCollection({
+      id: `left-join-bug-accounts-with-teams`,
+      startSync: true,
+      query: (q) =>
+        q
+          .from({ accountWithUser: accountsWithUsers })
+          .leftJoin({ team: activeTeams }, ({ accountWithUser, team }) =>
+            eq(team.team.account_id, accountWithUser.account.id),
+          )
+          .select(({ accountWithUser, team }) => ({
+            account: accountWithUser.account,
+            profile: accountWithUser.profile,
+            team: team.team,
+          })),
+    })
+
+    // Wait for all queries to be ready
+    await Promise.all([
+      accountsWithUsers.preload(),
+      activeTeams.preload(),
+      accountsWithTeams.preload(),
+    ])
+
+    // Create an optimistic action that mutates using draft
+    const testAction = createOptimisticAction<string>({
+      onMutate: (id) => {
+        // Update existing data using draft mutation
+        accounts.update(id, (draft) => {
+          draft.name = `new name here`
+        })
+      },
+      mutationFn: (_id, _params) => {
+        return Promise.resolve({ txid: 0 })
+      },
+    })
+
+    // Execute the optimistic action and flush - this should complete without scheduler errors
+    let error: Error | undefined
+    let transaction: any
+
+    try {
+      transaction = testAction(`account-1`)
+
+      // Wait for the transaction to process
+      await new Promise((resolve) => setTimeout(resolve, 10))
+
+      // The scheduler should flush successfully without detecting unresolved dependencies
+      transactionScopedScheduler.flushAll()
+    } catch (e) {
+      error = e as Error
+    }
+
+    // The scheduler should not throw unresolved dependency errors
+    expect(error).toBeUndefined()
+
+    // Verify the transaction was created successfully
+    expect(transaction).toBeDefined()
+  })
+
+  it(`should prevent stale data when lazy source also depends on modified collection`, async () => {
+    interface BaseItem {
+      id: string
+      value: number
+    }
+
+    // Base collection
+    const baseCollection = createCollection<BaseItem>(
+      mockSyncCollectionOptions({
+        id: `race-base`,
+        getKey: (item) => item.id,
+        initialData: [{ id: `1`, value: 10 }],
+      }),
+    )
+
+    // QueryA: depends on base
+    const queryA = createLiveQueryCollection({
+      id: `race-queryA`,
+      startSync: true,
+      query: (q) =>
+        q.from({ item: baseCollection }).select(({ item }) => ({
+          id: item.id,
+          value: item.value,
+        })),
+    })
+
+    // QueryB: also depends on base (independent from queryA)
+    const queryB = createLiveQueryCollection({
+      id: `race-queryB`,
+      startSync: true,
+      query: (q) =>
+        q.from({ item: baseCollection }).select(({ item }) => ({
+          id: item.id,
+          value: item.value,
+        })),
+    })
+
+    // QueryC: depends on queryA, left joins queryB (lazy)
+    const queryC = createLiveQueryCollection({
+      id: `race-queryC`,
+      startSync: true,
+      query: (q) =>
+        q
+          .from({ a: queryA })
+          .leftJoin({ b: queryB }, ({ a, b }) => eq(a.id, b.id))
+          .select(({ a, b }) => ({
+            id: a.id,
+            aValue: a.value,
+            bValue: b.value,
+          })),
+    })
+
+    // Wait for initial sync
+    await Promise.all([queryA.preload(), queryB.preload(), queryC.preload()])
+
+    // Verify initial state
+    const initialC = [...queryC.values()][0]
+    expect(initialC?.aValue).toBe(10)
+    expect(initialC?.bValue).toBe(10)
+
+    // Mutate the base collection
+    const action = createOptimisticAction<string>({
+      autoCommit: false,
+      onMutate: (id) => {
+        baseCollection.update(id, (draft) => {
+          draft.value = 100
+        })
+      },
+      mutationFn: (_id) => Promise.resolve({ txid: 0 }),
+    })
+
+    let error: Error | undefined
+    try {
+      action(`1`)
+      await new Promise((resolve) => setTimeout(resolve, 10))
+      transactionScopedScheduler.flushAll()
+    } catch (e) {
+      error = e as Error
+    }
+
+    expect(error).toBeUndefined()
+
+    const finalC = [...queryC.values()][0]
+    expect(finalC?.aValue).toBe(100)
+    expect(finalC?.bValue).toBe(100)
   })
 })

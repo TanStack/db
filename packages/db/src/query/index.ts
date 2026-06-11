@@ -7,10 +7,33 @@ export {
   type InitialQueryBuilder,
   type QueryBuilder,
   type Context,
+  type ContextSchema,
   type Source,
   type GetResult,
   type InferResultType,
-} from "./builder/index.js"
+  type ExtractContext,
+  type QueryResult,
+  // Types needed for declaration emit (https://github.com/TanStack/db/issues/1012)
+  type ContextFromSource,
+  type ContextFromUnionBranches,
+  type ContextFromUnionSource,
+  type SchemaFromSource,
+  type SingleSource,
+  type InferCollectionType,
+  type MergeContextWithJoinType,
+  type MergeContextForJoinCallback,
+  type ApplyJoinOptionalityToMergedSchema,
+  type ResultTypeFromSelect,
+  type WithResult,
+  type JoinOnCallback,
+  type RefsForContext,
+  type WhereCallback,
+  type OrderByCallback,
+  type GroupByCallback,
+  type SelectObject,
+  type FunctionalHavingRow,
+  type Prettify,
+} from './builder/index.js'
 
 // Expression functions exports
 export {
@@ -34,6 +57,7 @@ export {
   length,
   concat,
   coalesce,
+  caseWhen,
   add,
   // Aggregates
   count,
@@ -41,19 +65,43 @@ export {
   sum,
   min,
   max,
-} from "./builder/functions.js"
+  // Includes helpers
+  toArray,
+  materialize,
+} from './builder/functions.js'
 
 // Ref proxy utilities
-export type { Ref } from "./builder/types.js"
+export type { Ref } from './builder/types.js'
 
 // Compiler
-export { compileQuery } from "./compiler/index.js"
+export { compileQuery } from './compiler/index.js'
+export {
+  compileExpression,
+  compileSingleRowExpression,
+  toBooleanPredicate,
+} from './compiler/evaluators.js'
 
 // Live query collection utilities
 export {
   createLiveQueryCollection,
   liveQueryCollectionOptions,
-} from "./live-query-collection.js"
+} from './live-query-collection.js'
 
-export { type LiveQueryCollectionConfig } from "./live/types.js"
-export { type LiveQueryCollectionUtils } from "./live/collection-config-builder.js"
+// One-shot query execution
+export { queryOnce, type QueryOnceConfig } from './query-once.js'
+
+export { type LiveQueryCollectionConfig } from './live/types.js'
+export { type LiveQueryCollectionUtils } from './live/collection-config-builder.js'
+
+// Predicate utilities for predicate push-down
+export {
+  isWhereSubset,
+  unionWherePredicates,
+  minusWherePredicates,
+  isOrderBySubset,
+  isLimitSubset,
+  isOffsetLimitSubset,
+  isPredicateSubset,
+} from './predicate-utils.js'
+
+export { DeduplicatedLoadSubset } from './subset-dedupe.js'

@@ -1,5 +1,5 @@
-import { describe, expect, it } from "vitest"
-import { SortedMap } from "../src/SortedMap"
+import { describe, expect, it } from 'vitest'
+import { SortedMap } from '../src/SortedMap'
 
 describe(`SortedMap`, () => {
   it(`maintains sorted order by values`, () => {

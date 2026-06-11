@@ -16,7 +16,7 @@ export class EventEmitter<TEvents extends Record<string, any>> {
    */
   on<T extends keyof TEvents>(
     event: T,
-    callback: (event: TEvents[T]) => void
+    callback: (event: TEvents[T]) => void,
   ): () => void {
     if (!this.listeners.has(event)) {
       this.listeners.set(event, new Set())
@@ -36,7 +36,7 @@ export class EventEmitter<TEvents extends Record<string, any>> {
    */
   once<T extends keyof TEvents>(
     event: T,
-    callback: (event: TEvents[T]) => void
+    callback: (event: TEvents[T]) => void,
   ): () => void {
     const unsubscribe = this.on(event, (eventPayload) => {
       callback(eventPayload)
@@ -52,7 +52,7 @@ export class EventEmitter<TEvents extends Record<string, any>> {
    */
   off<T extends keyof TEvents>(
     event: T,
-    callback: (event: TEvents[T]) => void
+    callback: (event: TEvents[T]) => void,
   ): void {
     this.listeners.get(event)?.delete(callback as (event: any) => void)
   }
@@ -65,7 +65,7 @@ export class EventEmitter<TEvents extends Record<string, any>> {
    */
   waitFor<T extends keyof TEvents>(
     event: T,
-    timeout?: number
+    timeout?: number,
   ): Promise<TEvents[T]> {
     return new Promise((resolve, reject) => {
       let timeoutId: NodeJS.Timeout | undefined
@@ -95,7 +95,7 @@ export class EventEmitter<TEvents extends Record<string, any>> {
    */
   protected emitInner<T extends keyof TEvents>(
     event: T,
-    eventPayload: TEvents[T]
+    eventPayload: TEvents[T],
   ): void {
     this.listeners.get(event)?.forEach((listener) => {
       try {

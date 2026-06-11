@@ -2,9 +2,9 @@
 This is the intermediate representation of the query.
 */
 
-import type { CompareOptions } from "./builder/types"
-import type { Collection, CollectionImpl } from "../collection/index.js"
-import type { NamespacedRow } from "../types"
+import type { CompareOptions } from './builder/types'
+import type { Collection, CollectionImpl } from '../collection/index.js'
+import type { NamespacedRow } from '../types'
 
 export interface QueryIR {
   from: From
@@ -25,10 +25,23 @@ export interface QueryIR {
   fnHaving?: Array<(row: NamespacedRow) => any>
 }
 
-export type From = CollectionRef | QueryRef
+export type IncludesMaterialization =
+  | `collection`
+  | `array`
+  | `singleton`
+  | `concat`
+
+export const INCLUDES_SCALAR_FIELD = `__includes_scalar__`
+
+export type From = CollectionRef | QueryRef | UnionFrom | UnionAll
 
 export type Select = {
-  [alias: string]: BasicExpression | Aggregate | Select
+  [alias: string]:
+    | BasicExpression
+    | Aggregate
+    | Select
+    | IncludesSubquery
+    | ConditionalSelect
 }
 
 export type Join = Array<JoinClause>
@@ -73,7 +86,7 @@ export class CollectionRef extends BaseExpression {
   public type = `collectionRef` as const
   constructor(
     public collection: CollectionImpl,
-    public alias: string
+    public alias: string,
   ) {
     super()
   }
@@ -83,16 +96,44 @@ export class QueryRef extends BaseExpression {
   public type = `queryRef` as const
   constructor(
     public query: QueryIR,
-    public alias: string
+    public alias: string,
   ) {
     super()
+  }
+}
+
+export class UnionFrom extends BaseExpression {
+  public type = `unionFrom` as const
+  constructor(public sources: Array<CollectionRef | QueryRef>) {
+    super()
+  }
+
+  get alias(): string {
+    return this.sources[0]?.alias ?? ``
+  }
+}
+
+export class UnionAll extends BaseExpression {
+  public type = `unionAll` as const
+  /**
+   * Result-level UNION ALL. Downstream query clauses see the union result row
+   * shape, not the branch source aliases. Optimizers may push safe operations
+   * into branches, but compiler phases should treat this as a derived relation
+   * unless they are explicitly handling branch lowering.
+   */
+  constructor(public queries: Array<QueryIR>) {
+    super()
+  }
+
+  get alias(): string {
+    return ``
   }
 }
 
 export class PropRef<T = any> extends BaseExpression<T> {
   public type = `ref` as const
   constructor(
-    public path: Array<string> // path to the property in the collection, with the alias as the first element
+    public path: Array<string>, // path to the property in the collection, with the alias as the first element
   ) {
     super()
   }
@@ -101,7 +142,7 @@ export class PropRef<T = any> extends BaseExpression<T> {
 export class Value<T = any> extends BaseExpression<T> {
   public type = `val` as const
   constructor(
-    public value: T // any js value
+    public value: T, // any js value
   ) {
     super()
   }
@@ -111,7 +152,7 @@ export class Func<T = any> extends BaseExpression<T> {
   public type = `func` as const
   constructor(
     public name: string, // such as eq, gt, lt, upper, lower, etc.
-    public args: Array<BasicExpression>
+    public args: Array<BasicExpression>,
   ) {
     super()
   }
@@ -126,7 +167,45 @@ export class Aggregate<T = any> extends BaseExpression<T> {
   public type = `agg` as const
   constructor(
     public name: string, // such as count, avg, sum, min, max, etc.
-    public args: Array<BasicExpression>
+    public args: Array<BasicExpression>,
+  ) {
+    super()
+  }
+}
+
+export class IncludesSubquery extends BaseExpression {
+  public type = `includesSubquery` as const
+  constructor(
+    public query: QueryIR, // Child query (correlation WHERE removed)
+    public correlationField: PropRef, // Parent-side ref (e.g., project.id)
+    public childCorrelationField: PropRef, // Child-side ref (e.g., issue.projectId)
+    public fieldName: string, // Result field name (e.g., "issues")
+    public parentFilters?: Array<Where>, // WHERE clauses referencing parent aliases (applied post-join)
+    public parentProjection?: Array<PropRef>, // Parent field refs used by parentFilters
+    public materialization: IncludesMaterialization = `collection`,
+    public scalarField?: string,
+  ) {
+    super()
+  }
+}
+
+export type ConditionalSelectBranch = {
+  condition: BasicExpression
+  value: SelectValueExpression
+}
+
+export type SelectValueExpression =
+  | BasicExpression
+  | Aggregate
+  | Select
+  | IncludesSubquery
+  | ConditionalSelect
+
+export class ConditionalSelect extends BaseExpression {
+  public type = `conditionalSelect` as const
+  constructor(
+    public branches: Array<ConditionalSelectBranch>,
+    public defaultValue?: SelectValueExpression,
   ) {
     super()
   }
@@ -137,12 +216,42 @@ export class Aggregate<T = any> extends BaseExpression<T> {
  * Prefer this over ad-hoc local implementations to keep behavior consistent.
  */
 export function isExpressionLike(value: any): boolean {
-  return (
+  if (
     value instanceof Aggregate ||
+    value instanceof ConditionalSelect ||
     value instanceof Func ||
     value instanceof PropRef ||
-    value instanceof Value
-  )
+    value instanceof Value ||
+    value instanceof IncludesSubquery
+  ) {
+    return true
+  }
+
+  if (!value || typeof value !== `object`) {
+    return false
+  }
+
+  if (value.type === `conditionalSelect`) {
+    return Array.isArray(value.branches)
+  }
+
+  if (value.type === `agg` || value.type === `func`) {
+    return typeof value.name === `string` && Array.isArray(value.args)
+  }
+
+  if (value.type === `ref`) {
+    return Array.isArray(value.path)
+  }
+
+  if (value.type === `val`) {
+    return `value` in value
+  }
+
+  if (value.type === `includesSubquery`) {
+    return `query` in value && `fieldName` in value
+  }
+
+  return false
 }
 
 /**
@@ -163,7 +272,7 @@ export function getWhereExpression(where: Where): BasicExpression<boolean> {
  * HAVING clauses can contain aggregates, unlike regular WHERE clauses
  */
 export function getHavingExpression(
-  having: Having
+  having: Having,
 ): BasicExpression | Aggregate {
   return typeof having === `object` && `expression` in having
     ? having.expression
@@ -185,16 +294,22 @@ export function isResidualWhere(where: Where): boolean {
  * Create a residual Where clause from an expression
  */
 export function createResidualWhere(
-  expression: BasicExpression<boolean>
+  expression: BasicExpression<boolean>,
 ): Where {
   return { expression, residual: true }
 }
 
 function getRefFromAlias(
   query: QueryIR,
-  alias: string
+  alias: string,
 ): CollectionRef | QueryRef | void {
-  if (query.from.alias === alias) {
+  if (query.from.type === `unionFrom`) {
+    for (const source of query.from.sources) {
+      if (source.alias === alias) {
+        return source
+      }
+    }
+  } else if (query.from.type !== `unionAll` && query.from.alias === alias) {
     return query.from
   }
 
@@ -213,7 +328,7 @@ function getRefFromAlias(
 export function followRef(
   query: QueryIR,
   ref: PropRef<any>,
-  collection: Collection
+  collection: Collection,
 ): { collection: Collection; path: Array<string> } | void {
   if (ref.path.length === 0) {
     return

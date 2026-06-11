@@ -1,14 +1,14 @@
-import { type } from "arktype"
-import { describe, expect, expectTypeOf, it } from "vitest"
-import { z } from "zod"
-import { createCollection } from "../src/collection/index.js"
-import { SchemaValidationError } from "../src/errors"
-import { createTransaction } from "../src/transactions"
+import { type } from 'arktype'
+import { describe, expect, expectTypeOf, it } from 'vitest'
+import { z } from 'zod'
+import { createCollection } from '../src/collection/index.js'
+import { SchemaValidationError } from '../src/errors'
+import { createTransaction } from '../src/transactions'
 import type {
   OperationType,
   PendingMutation,
   ResolveTransactionChanges,
-} from "../src/types"
+} from '../src/types'
 
 describe(`Collection Schema Validation`, () => {
   it(`should apply transformations for both insert and update operations`, () => {
@@ -75,7 +75,7 @@ describe(`Collection Schema Validation`, () => {
     const validatedUpdate = updateCollection.validateData(
       updateData,
       `update`,
-      `1`
+      `1`,
     )
 
     // Verify that the updated data has been transformed
@@ -199,7 +199,7 @@ describe(`Collection Schema Validation`, () => {
     const validatedUpdateWithTimestamp = collection.validateData(
       updateDataWithTimestamp,
       `update`,
-      `1`
+      `1`,
     )
 
     // Verify that both modified fields are returned with transformations applied
@@ -276,7 +276,7 @@ describe(`Collection with schema validation`, () => {
     const userSchema = type({
       name: `string > 0`,
       age: `number.integer > 0`,
-      "email?": `string.email`,
+      'email?': `string.email`,
     })
 
     // Create a collection with the schema
@@ -323,13 +323,13 @@ describe(`Collection with schema validation`, () => {
         expect(error.issues.length).toBeGreaterThan(0)
         // Check that we have validation errors for each invalid field
         expect(error.issues.some((issue) => issue.path?.includes(`name`))).toBe(
-          true
+          true,
         )
         expect(error.issues.some((issue) => issue.path?.includes(`age`))).toBe(
-          true
+          true,
         )
         expect(
-          error.issues.some((issue) => issue.path?.includes(`email`))
+          error.issues.some((issue) => issue.path?.includes(`email`)),
         ).toBe(true)
       }
     }
@@ -339,7 +339,7 @@ describe(`Collection with schema validation`, () => {
     tx3.mutate(() =>
       collection.update(`Alice`, (draft) => {
         draft.age = 31
-      })
+      }),
     )
 
     // Partial updates should fail with invalid data
@@ -348,7 +348,7 @@ describe(`Collection with schema validation`, () => {
       tx4.mutate(() =>
         collection.update(`Alice`, (draft) => {
           draft.age = -1
-        })
+        }),
       )
       // Should not reach here
       expect(true).toBe(false)
@@ -358,7 +358,7 @@ describe(`Collection with schema validation`, () => {
         expect(error.type).toBe(`update`)
         expect(error.issues.length).toBeGreaterThan(0)
         expect(error.issues.some((issue) => issue.path?.includes(`age`))).toBe(
-          true
+          true,
         )
       }
     }
@@ -416,13 +416,13 @@ describe(`Collection with schema validation`, () => {
         expect(error.issues.length).toBeGreaterThan(0)
         // Check that we have validation errors for each invalid field
         expect(error.issues.some((issue) => issue.path?.includes(`name`))).toBe(
-          true
+          true,
         )
         expect(error.issues.some((issue) => issue.path?.includes(`age`))).toBe(
-          true
+          true,
         )
         expect(
-          error.issues.some((issue) => issue.path?.includes(`email`))
+          error.issues.some((issue) => issue.path?.includes(`email`)),
         ).toBe(true)
       }
     }
@@ -432,7 +432,7 @@ describe(`Collection with schema validation`, () => {
     tx3.mutate(() =>
       collection.update(`Alice`, (draft) => {
         draft.age = 31
-      })
+      }),
     )
 
     // Partial updates should fail with invalid data
@@ -441,7 +441,7 @@ describe(`Collection with schema validation`, () => {
       tx4.mutate(() =>
         collection.update(`Alice`, (draft) => {
           draft.age = -1
-        })
+        }),
       )
       // Should not reach here
       expect(true).toBe(false)
@@ -451,7 +451,7 @@ describe(`Collection with schema validation`, () => {
         expect(error.type).toBe(`update`)
         expect(error.issues.length).toBeGreaterThan(0)
         expect(error.issues.some((issue) => issue.path?.includes(`age`))).toBe(
-          true
+          true,
         )
       }
     }
@@ -555,7 +555,7 @@ describe(`Collection with schema validation`, () => {
         completed: true,
         createdAt: new Date(`2023-01-01T00:00:00Z`),
         updatedAt: new Date(`2023-01-01T00:00:00Z`),
-      })
+      }),
     )
     insertedItems = Array.from(collection.state.values())
     expect(insertedItems).toHaveLength(3)
@@ -702,7 +702,7 @@ describe(`Collection with schema validation`, () => {
         draft.updated_at = `2023-01-02T00:00:00.000Z`
         draft.tags = [`IMPORTANT`, `ADMIN`]
         draft.metadata = { role: `admin` } as Record<string, string>
-      })
+      }),
     )
 
     // Verify that transformations were applied and only modified fields are returned
@@ -798,7 +798,7 @@ describe(`Collection with schema validation`, () => {
     expect((insertMutation.modified as any).preferences.theme).toBe(`dark`)
     expect((insertMutation.modified as any).preferences.version).toBe(`1.0`)
     expect((insertMutation.modified as any).preferences.notifications).toBe(
-      true
+      true,
     )
 
     // Now test update with the same schema that can handle existing transformed data
@@ -813,7 +813,7 @@ describe(`Collection with schema validation`, () => {
             city: z.string(),
             country: z.string().transform((val) => val.toUpperCase()),
             normalized: z.boolean().optional(),
-          })
+          }),
         )
         .transform((val) => val.map((addr) => ({ ...addr, normalized: true }))),
       preferences: z
@@ -859,7 +859,7 @@ describe(`Collection with schema validation`, () => {
           theme: `LIGHT`,
           notifications: false,
         }
-      })
+      }),
     )
 
     // Verify update transformations
@@ -878,7 +878,7 @@ describe(`Collection with schema validation`, () => {
     expect((updateMutation.changes as any).preferences.theme).toBe(`light`)
     expect((updateMutation.changes as any).preferences.version).toBe(`1.0`)
     expect((updateMutation.changes as any).preferences.notifications).toBe(
-      false
+      false,
     )
   })
 })

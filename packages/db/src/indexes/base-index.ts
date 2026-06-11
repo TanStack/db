@@ -1,9 +1,9 @@
-import { compileSingleRowExpression } from "../query/compiler/evaluators.js"
-import { comparisonFunctions } from "../query/builder/functions.js"
-import { DEFAULT_COMPARE_OPTIONS, deepEquals } from "../utils.js"
-import type { RangeQueryOptions } from "./btree-index.js"
-import type { CompareOptions } from "../query/builder/types.js"
-import type { BasicExpression, OrderByDirection } from "../query/ir.js"
+import { compileSingleRowExpression } from '../query/compiler/evaluators.js'
+import { comparisonFunctions } from '../query/builder/functions.js'
+import { DEFAULT_COMPARE_OPTIONS, deepEquals } from '../utils.js'
+import type { RangeQueryOptions } from './btree-index.js'
+import type { CompareOptions } from '../query/builder/types.js'
+import type { BasicExpression, OrderByDirection } from '../query/ir.js'
 
 /**
  * Operations that indexes can support, imported from available comparison functions
@@ -45,13 +45,18 @@ export interface IndexInterface<
 
   take: (
     n: number,
-    from?: TKey,
-    filterFn?: (key: TKey) => boolean
+    from: TKey,
+    filterFn?: (key: TKey) => boolean,
   ) => Array<TKey>
+  takeFromStart: (n: number, filterFn?: (key: TKey) => boolean) => Array<TKey>
   takeReversed: (
     n: number,
-    from?: TKey,
-    filterFn?: (key: TKey) => boolean
+    from: TKey,
+    filterFn?: (key: TKey) => boolean,
+  ) => Array<TKey>
+  takeReversedFromEnd: (
+    n: number,
+    filterFn?: (key: TKey) => boolean,
   ) => Array<TKey>
 
   get keyCount(): number
@@ -73,9 +78,9 @@ export interface IndexInterface<
 /**
  * Base abstract class that all index types extend
  */
-export abstract class BaseIndex<TKey extends string | number = string | number>
-  implements IndexInterface<TKey>
-{
+export abstract class BaseIndex<
+  TKey extends string | number = string | number,
+> implements IndexInterface<TKey> {
   public readonly id: number
   public readonly name?: string
   public readonly expression: BasicExpression
@@ -90,7 +95,7 @@ export abstract class BaseIndex<TKey extends string | number = string | number>
     id: number,
     expression: BasicExpression,
     name?: string,
-    options?: any
+    options?: any,
   ) {
     this.id = id
     this.expression = expression
@@ -108,13 +113,21 @@ export abstract class BaseIndex<TKey extends string | number = string | number>
   abstract lookup(operation: IndexOperation, value: any): Set<TKey>
   abstract take(
     n: number,
-    from?: TKey,
-    filterFn?: (key: TKey) => boolean
+    from: TKey,
+    filterFn?: (key: TKey) => boolean,
+  ): Array<TKey>
+  abstract takeFromStart(
+    n: number,
+    filterFn?: (key: TKey) => boolean,
   ): Array<TKey>
   abstract takeReversed(
     n: number,
-    from?: TKey,
-    filterFn?: (key: TKey) => boolean
+    from: TKey,
+    filterFn?: (key: TKey) => boolean,
+  ): Array<TKey>
+  abstract takeReversedFromEnd(
+    n: number,
+    filterFn?: (key: TKey) => boolean,
   ): Array<TKey>
   abstract get keyCount(): number
   abstract equalityLookup(value: any): Set<TKey>
@@ -155,7 +168,7 @@ export abstract class BaseIndex<TKey extends string | number = string | number>
 
     return deepEquals(
       thisCompareOptionsWithoutDirection,
-      compareOptionsWithoutDirection
+      compareOptionsWithoutDirection,
     )
   }
 
@@ -176,7 +189,6 @@ export abstract class BaseIndex<TKey extends string | number = string | number>
     }
   }
 
-  // Protected methods for subclasses
   protected abstract initialize(options?: any): void
 
   protected evaluateIndexExpression(item: any): any {
@@ -203,12 +215,5 @@ export type IndexConstructor<TKey extends string | number = string | number> =
     id: number,
     expression: BasicExpression,
     name?: string,
-    options?: any
+    options?: any,
   ) => BaseIndex<TKey>
-
-/**
- * Index resolver can be either a class constructor or async loader
- */
-export type IndexResolver<TKey extends string | number = string | number> =
-  | IndexConstructor<TKey>
-  | (() => Promise<IndexConstructor<TKey>>)

@@ -1,8 +1,8 @@
-import { createFileRoute } from "@tanstack/react-router"
-import { json } from "@tanstack/react-start"
-import { sql } from "../../db/postgres"
-import { validateInsertTodo } from "../../db/validation"
-import type { Txid } from "@tanstack/electric-db-collection"
+import { createFileRoute } from '@tanstack/react-router'
+import { json } from '@tanstack/react-start'
+import { sql } from '../../db/postgres'
+import { validateInsertTodo } from '../../db/validation'
+import type { Txid } from '@tanstack/electric-db-collection'
 
 // Generate a transaction ID
 async function generateTxId(tx: any): Promise<Txid> {
@@ -34,7 +34,7 @@ export const Route = createFileRoute(`/api/todos`)({
               error: `Failed to fetch todos`,
               details: error instanceof Error ? error.message : String(error),
             },
-            { status: 500 }
+            { status: 500 },
           )
         }
       },
@@ -62,7 +62,7 @@ export const Route = createFileRoute(`/api/todos`)({
               error: `Failed to create todo`,
               details: error instanceof Error ? error.message : String(error),
             },
-            { status: 500 }
+            { status: 500 },
           )
         }
       },

@@ -1,5 +1,6 @@
-import { describe, expect, it } from "vitest"
-import { createCollection } from "../src/collection/index.js"
+import { describe, expect, it } from 'vitest'
+import { CollectionConfigurationError } from '../src/errors'
+import { createCollection } from '../src/collection/index.js'
 import {
   and,
   eq,
@@ -8,15 +9,16 @@ import {
   lte,
   not,
   or,
-} from "../src/query/builder/functions"
-import { createSingleRowRefProxy } from "../src/query/builder/ref-proxy"
-import { createLiveQueryCollection } from "../src"
-import { PropRef } from "../src/query/ir"
+} from '../src/query/builder/functions'
+import { createSingleRowRefProxy } from '../src/query/builder/ref-proxy'
+import { createLiveQueryCollection } from '../src'
+import { PropRef } from '../src/query/ir'
+import { BTreeIndex } from '../src/indexes/btree-index'
 import {
   createIndexUsageTracker,
   expectIndexUsage,
   withIndexTracking,
-} from "./utils"
+} from './utils'
 
 // Global row proxy for expressions
 const row = createSingleRowRefProxy<TestItem>()
@@ -112,7 +114,7 @@ describe(`Collection Auto-Indexing`, () => {
       {
         includeInitialState: true,
         whereExpression: eq(row.status, `active`),
-      }
+      },
     )
 
     // Should still have no indexes after subscription
@@ -121,7 +123,7 @@ describe(`Collection Auto-Indexing`, () => {
     subscription.unsubscribe()
   })
 
-  it(`should create auto-indexes by default when autoIndex is not specified`, async () => {
+  it(`should NOT create auto-indexes by default when autoIndex is not specified`, async () => {
     const autoIndexCollection = createCollection<TestItem, string>({
       getKey: (item) => item.id,
       startSync: true,
@@ -154,23 +156,57 @@ describe(`Collection Auto-Indexing`, () => {
       {
         includeInitialState: true,
         whereExpression: eq(row.status, `active`),
-      }
+      },
     )
 
-    // Should have created an auto-index for the status field (default is eager)
-    expect(autoIndexCollection.indexes.size).toBe(1)
-
-    const autoIndex = Array.from(autoIndexCollection.indexes.values())[0]!
-    expect(autoIndex.expression.type).toBe(`ref`)
-    expect((autoIndex.expression as any).path).toEqual([`status`])
+    // Should NOT have created an auto-index (default is off)
+    expect(autoIndexCollection.indexes.size).toBe(0)
 
     subscription.unsubscribe()
+  })
+
+  it(`should throw CollectionConfigurationError when autoIndex is "eager" without defaultIndexType`, () => {
+    expect(() =>
+      createCollection<TestItem, string>({
+        getKey: (item) => item.id,
+        autoIndex: `eager`,
+        startSync: true,
+        sync: {
+          sync: ({ begin, commit, markReady }) => {
+            begin()
+            commit()
+            markReady()
+          },
+        },
+      }),
+    ).toThrow(CollectionConfigurationError)
+  })
+
+  it(`should throw CollectionConfigurationError when createIndex is called without indexType or defaultIndexType`, async () => {
+    const collection = createCollection<TestItem, string>({
+      getKey: (item) => item.id,
+      startSync: true,
+      sync: {
+        sync: ({ begin, commit, markReady }) => {
+          begin()
+          commit()
+          markReady()
+        },
+      },
+    })
+
+    await collection.stateWhenReady()
+
+    expect(() => collection.createIndex((row) => row.age)).toThrow(
+      CollectionConfigurationError,
+    )
   })
 
   it(`should create auto-indexes for simple where expressions when autoIndex is "eager"`, async () => {
     const autoIndexCollection = createCollection<TestItem, string>({
       getKey: (item) => item.id,
       autoIndex: `eager`,
+      defaultIndexType: BTreeIndex,
       startSync: true,
       sync: {
         sync: ({ begin, write, commit, markReady }) => {
@@ -201,7 +237,7 @@ describe(`Collection Auto-Indexing`, () => {
       {
         includeInitialState: true,
         whereExpression: eq(row.status, `active`),
-      }
+      },
     )
 
     // Should have created an auto-index for the status field
@@ -220,6 +256,7 @@ describe(`Collection Auto-Indexing`, () => {
     const autoIndexCollection = createCollection<TestItem, string>({
       getKey: (item) => item.id,
       autoIndex: `eager`,
+      defaultIndexType: BTreeIndex,
       startSync: true,
       sync: {
         sync: ({ begin, write, commit, markReady }) => {
@@ -267,6 +304,7 @@ describe(`Collection Auto-Indexing`, () => {
     const autoIndexCollection = createCollection<TestItem, string>({
       getKey: (item) => item.id,
       autoIndex: `eager`,
+      defaultIndexType: BTreeIndex,
       startSync: true,
       sync: {
         sync: ({ begin, write, commit, markReady }) => {
@@ -302,7 +340,7 @@ describe(`Collection Auto-Indexing`, () => {
     expect(autoIndexCollection.indexes.size).toBe(3)
 
     const indexPaths = Array.from(autoIndexCollection.indexes.values()).map(
-      (index) => (index.expression as any).path
+      (index) => (index.expression as any).path,
     )
 
     expect(indexPaths).toContainEqual([`status`])
@@ -318,6 +356,7 @@ describe(`Collection Auto-Indexing`, () => {
     const autoIndexCollection = createCollection<TestItem, string>({
       getKey: (item) => item.id,
       autoIndex: `eager`,
+      defaultIndexType: BTreeIndex,
       startSync: true,
       sync: {
         sync: ({ begin, write, commit, markReady }) => {
@@ -345,7 +384,7 @@ describe(`Collection Auto-Indexing`, () => {
     expect(autoIndexCollection.indexes.size).toBe(2)
 
     const indexPaths = Array.from(autoIndexCollection.indexes.values()).map(
-      (index) => (index.expression as any).path
+      (index) => (index.expression as any).path,
     )
 
     expect(indexPaths).toContainEqual([`status`])
@@ -358,6 +397,7 @@ describe(`Collection Auto-Indexing`, () => {
     const autoIndexCollection = createCollection<TestItem, string>({
       getKey: (item) => item.id,
       autoIndex: `eager`,
+      defaultIndexType: BTreeIndex,
       startSync: true,
       sync: {
         sync: ({ begin, write, commit, markReady }) => {
@@ -391,6 +431,7 @@ describe(`Collection Auto-Indexing`, () => {
     const autoIndexCollection = createCollection<TestItem, string>({
       getKey: (item) => item.id,
       autoIndex: `eager`,
+      defaultIndexType: BTreeIndex,
       startSync: true,
       sync: {
         sync: ({ begin, write, commit, markReady }) => {
@@ -414,7 +455,7 @@ describe(`Collection Auto-Indexing`, () => {
       whereExpression: and(
         eq(row.status, `active`),
         gt(row.age, 25),
-        lte(row.score, 90)
+        lte(row.score, 90),
       ),
     })
 
@@ -422,7 +463,7 @@ describe(`Collection Auto-Indexing`, () => {
     expect(autoIndexCollection.indexes.size).toBe(3)
 
     const indexPaths = Array.from(autoIndexCollection.indexes.values()).map(
-      (index) => (index.expression as any).path
+      (index) => (index.expression as any).path,
     )
 
     expect(indexPaths).toContainEqual([`status`])
@@ -436,6 +477,7 @@ describe(`Collection Auto-Indexing`, () => {
     const leftCollection = createCollection<TestItem, string>({
       getKey: (item) => item.id,
       autoIndex: `eager`,
+      defaultIndexType: BTreeIndex,
       startSync: true,
       sync: {
         sync: ({ begin, write, commit, markReady }) => {
@@ -456,6 +498,7 @@ describe(`Collection Auto-Indexing`, () => {
     const rightCollection = createCollection<TestItem2, string>({
       getKey: (item) => item.id2,
       autoIndex: `eager`,
+      defaultIndexType: BTreeIndex,
       startSync: true,
       sync: {
         sync: ({ begin, write, commit, markReady }) => {
@@ -495,7 +538,7 @@ describe(`Collection Auto-Indexing`, () => {
           .join(
             { other: rightCollection },
             ({ item, other }: any) => eq(item.id, other.id2),
-            `left`
+            `left`,
           )
           .select(({ item, other }: any) => ({
             id: item.id,
@@ -548,6 +591,7 @@ describe(`Collection Auto-Indexing`, () => {
     const leftCollection = createCollection<TestItem, string>({
       getKey: (item) => item.id,
       autoIndex: `eager`,
+      defaultIndexType: BTreeIndex,
       startSync: true,
       sync: {
         sync: ({ begin, write, commit, markReady }) => {
@@ -568,6 +612,7 @@ describe(`Collection Auto-Indexing`, () => {
     const rightCollection = createCollection<TestItem2, string>({
       getKey: (item) => item.id2,
       autoIndex: `eager`,
+      defaultIndexType: BTreeIndex,
       startSync: true,
       sync: {
         sync: ({ begin, write, commit, markReady }) => {
@@ -614,7 +659,7 @@ describe(`Collection Auto-Indexing`, () => {
                 })),
             },
             ({ item, other }: any) => eq(item.id, other.id2),
-            `left`
+            `left`,
           )
           .select(({ item, other }: any) => ({
             id: item.id,
@@ -667,6 +712,7 @@ describe(`Collection Auto-Indexing`, () => {
     const autoIndexCollection = createCollection<TestItem, string>({
       getKey: (item) => item.id,
       autoIndex: `eager`,
+      defaultIndexType: BTreeIndex,
       startSync: true,
       sync: {
         sync: ({ begin, write, commit, markReady }) => {
@@ -705,6 +751,7 @@ describe(`Collection Auto-Indexing`, () => {
     const autoIndexCollection = createCollection<TestItem, string>({
       getKey: (item) => item.id,
       autoIndex: `eager`,
+      defaultIndexType: BTreeIndex,
       startSync: true,
       sync: {
         sync: ({ begin, write, commit, markReady }) => {
@@ -749,5 +796,150 @@ describe(`Collection Auto-Indexing`, () => {
     })
 
     subscription.unsubscribe()
+  })
+
+  it(`should create auto-indexes for nested field paths`, async () => {
+    interface NestedTestItem {
+      id: string
+      name: string
+      profile?: {
+        score: number
+        bio: string
+      }
+      metadata?: {
+        tags: Array<string>
+        stats: {
+          views: number
+          likes: number
+        }
+      }
+    }
+
+    const nestedTestData: Array<NestedTestItem> = [
+      {
+        id: `1`,
+        name: `Alice`,
+        profile: { score: 85, bio: `Developer` },
+        metadata: {
+          tags: [`tech`, `coding`],
+          stats: { views: 100, likes: 50 },
+        },
+      },
+      {
+        id: `2`,
+        name: `Bob`,
+        profile: { score: 92, bio: `Designer` },
+        metadata: {
+          tags: [`design`, `ui`],
+          stats: { views: 200, likes: 75 },
+        },
+      },
+      {
+        id: `3`,
+        name: `Charlie`,
+        profile: { score: 78, bio: `Manager` },
+        metadata: {
+          tags: [`management`, `leadership`],
+          stats: { views: 150, likes: 60 },
+        },
+      },
+    ]
+
+    const collection = createCollection<NestedTestItem, string>({
+      getKey: (item) => item.id,
+      autoIndex: `eager`,
+      defaultIndexType: BTreeIndex,
+      startSync: true,
+      sync: {
+        sync: ({ begin, write, commit, markReady }) => {
+          begin()
+          for (const item of nestedTestData) {
+            write({
+              type: `insert`,
+              value: item,
+            })
+          }
+          commit()
+          markReady()
+        },
+      },
+    })
+
+    await collection.stateWhenReady()
+
+    // Should have no indexes initially
+    expect(collection.indexes.size).toBe(0)
+
+    // Test 1: Nested field one level deep (profile.score)
+    const changes1: Array<any> = []
+    const subscription1 = collection.subscribeChanges(
+      (items) => {
+        changes1.push(...items)
+      },
+      {
+        includeInitialState: true,
+        whereExpression: gt(new PropRef([`profile`, `score`]), 80),
+      },
+    )
+
+    // Should have created an auto-index for profile.score
+    const profileScoreIndex = Array.from(collection.indexes.values()).find(
+      (index) =>
+        index.expression.type === `ref` &&
+        (index.expression as any).path.length === 2 &&
+        (index.expression as any).path[0] === `profile` &&
+        (index.expression as any).path[1] === `score`,
+    )
+    expect(profileScoreIndex).toBeDefined()
+
+    // Verify the filtered results are correct
+    expect(changes1.filter((c) => c.type === `insert`).length).toBe(2) // Alice (85) and Bob (92)
+
+    subscription1.unsubscribe()
+
+    // Test 2: Deeply nested field (metadata.stats.views)
+    const changes2: Array<any> = []
+    const subscription2 = collection.subscribeChanges(
+      (items) => {
+        changes2.push(...items)
+      },
+      {
+        includeInitialState: true,
+        whereExpression: eq(new PropRef([`metadata`, `stats`, `views`]), 200),
+      },
+    )
+
+    // Should have created an auto-index for metadata.stats.views
+    const viewsIndex = Array.from(collection.indexes.values()).find(
+      (index) =>
+        index.expression.type === `ref` &&
+        (index.expression as any).path.length === 3 &&
+        (index.expression as any).path[0] === `metadata` &&
+        (index.expression as any).path[1] === `stats` &&
+        (index.expression as any).path[2] === `views`,
+    )
+    expect(viewsIndex).toBeDefined()
+
+    // Verify the filtered results are correct
+    expect(changes2.filter((c) => c.type === `insert`).length).toBe(1) // Only Bob has 200 views
+
+    subscription2.unsubscribe()
+
+    // Test 3: Index usage verification with tracker
+    withIndexTracking(collection, (tracker) => {
+      const result = collection.currentStateAsChanges({
+        where: gt(new PropRef([`profile`, `score`]), 80),
+      })!
+
+      expect(result.length).toBe(2) // Alice and Bob
+
+      // Verify it used the auto-created index
+      expectIndexUsage(tracker.stats, {
+        shouldUseIndex: true,
+        shouldUseFullScan: false,
+        indexCallCount: 1,
+        fullScanCallCount: 0,
+      })
+    })
   })
 })

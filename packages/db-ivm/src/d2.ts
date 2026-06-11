@@ -1,11 +1,11 @@
-import { DifferenceStreamWriter } from "./graph.js"
+import { DifferenceStreamWriter } from './graph.js'
 import type {
   BinaryOperator,
   DifferenceStreamReader,
   UnaryOperator,
-} from "./graph.js"
-import type { MultiSet, MultiSetArray } from "./multiset.js"
-import type { ID2, IStreamBuilder, PipedOperator } from "./types.js"
+} from './graph.js'
+import type { MultiSet, MultiSetArray } from './multiset.js'
+import type { ID2, IStreamBuilder, PipedOperator } from './types.js'
 
 export class D2 implements ID2 {
   #operators: Array<UnaryOperator<any> | BinaryOperator<any>> = []

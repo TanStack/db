@@ -1,9 +1,9 @@
 ---
 name: 🐛 Bug Report
 about: Create a report to help us improve
-title: ""
-labels: ""
-assignees: ""
+title: ''
+labels: ''
+assignees: ''
 ---
 
 - [ ] I've validated the bug against the latest version of DB packages

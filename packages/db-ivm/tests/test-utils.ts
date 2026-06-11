@@ -1,5 +1,5 @@
-import { expect } from "vitest"
-import { MultiSet } from "../src/multiset.js"
+import { expect } from 'vitest'
+import { MultiSet } from '../src/multiset.js'
 
 // Enable detailed logging of test results when LOG_RESULTS is set
 const LOG_RESULTS =
@@ -10,7 +10,7 @@ const LOG_RESULTS =
  * Takes an array of messages and consolidates them into a final result set
  */
 export function materializeResults<T>(
-  messages: Array<[T, number]>
+  messages: Array<[T, number]>,
 ): Map<string, T> {
   const multiSet = new MultiSet(messages)
   const consolidated = multiSet.consolidate()
@@ -32,7 +32,7 @@ export function materializeResults<T>(
  * Takes an array of keyed messages and consolidates them per key
  */
 export function materializeKeyedResults<K, V>(
-  messages: Array<[[K, V], number]>
+  messages: Array<[[K, V], number]>,
 ): Map<K, V> {
   const result = new Map<K, Map<string, { value: V; multiplicity: number }>>()
 
@@ -59,14 +59,14 @@ export function materializeKeyedResults<K, V>(
   for (const [key, valueMap] of result.entries()) {
     // Filter to only positive multiplicities
     const positiveValues = Array.from(valueMap.values()).filter(
-      (entry) => entry.multiplicity > 0
+      (entry) => entry.multiplicity > 0,
     )
 
     if (positiveValues.length === 1) {
       finalResult.set(key, positiveValues[0].value)
     } else if (positiveValues.length > 1) {
       throw new Error(
-        `Key ${key} has multiple final values: ${positiveValues.map((v) => JSON.stringify(v.value)).join(`, `)}`
+        `Key ${key} has multiple final values: ${positiveValues.map((v) => JSON.stringify(v.value)).join(`, `)}`,
       )
     }
     // If no positive values, key was completely removed
@@ -80,7 +80,7 @@ export function materializeKeyedResults<K, V>(
  */
 export function mapToSortedArray<T>(
   map: Map<string, T>,
-  compare?: (a: T, b: T) => number
+  compare?: (a: T, b: T) => number,
 ): Array<T> {
   const compareFn =
     compare ??
@@ -157,7 +157,7 @@ export class KeyedMessageTracker<K, V> {
       (a, b) => {
         // Sort by key for consistent ordering
         return JSON.stringify(a[0]).localeCompare(JSON.stringify(b[0]))
-      }
+      },
     )
 
     return {
@@ -180,14 +180,14 @@ export function assertResults<T>(
   testName: string,
   actual: TestResult<T>,
   expected: Array<T>,
-  maxExpectedMessages?: number
+  maxExpectedMessages?: number,
 ) {
   const expectedMap = createExpectedResults(expected)
   const expectedSorted = mapToSortedArray(expectedMap)
 
   if (LOG_RESULTS) {
     console.log(
-      `${testName}: ${actual.messageCount} messages, ${actual.sortedResults.length} final results`
+      `${testName}: ${actual.messageCount} messages, ${actual.sortedResults.length} final results`,
     )
     console.log(`  Messages:`, actual.messages)
     console.log(`  Final results:`, actual.sortedResults)
@@ -207,7 +207,7 @@ export function assertResults<T>(
   const reasonableThreshold = expected.length === 0 ? 2 : expected.length * 3
   if (actual.messageCount > reasonableThreshold) {
     console.warn(
-      `⚠️  ${testName}: High message count (${actual.messageCount} messages for ${expected.length} expected results)`
+      `⚠️  ${testName}: High message count (${actual.messageCount} messages for ${expected.length} expected results)`,
     )
   }
 }
@@ -219,7 +219,7 @@ export function assertKeyedResults<K, V>(
   testName: string,
   actual: KeyedTestResult<K, V>,
   expected: Array<[K, V]>,
-  maxExpectedMessages?: number
+  maxExpectedMessages?: number,
 ) {
   const expectedSorted = expected.sort((a, b) => {
     return JSON.stringify(a[0]).localeCompare(JSON.stringify(b[0]))
@@ -227,7 +227,7 @@ export function assertKeyedResults<K, V>(
 
   if (LOG_RESULTS) {
     console.log(
-      `${testName}: ${actual.messageCount} messages, ${actual.sortedResults.length} final results per key`
+      `${testName}: ${actual.messageCount} messages, ${actual.sortedResults.length} final results per key`,
     )
     console.log(`  Messages:`, actual.messages)
     console.log(`  Final results:`, actual.sortedResults)
@@ -247,17 +247,17 @@ export function assertKeyedResults<K, V>(
   const reasonableThreshold = Math.max(expected.length * 4, 2)
   if (actual.messageCount > reasonableThreshold) {
     console.warn(
-      `⚠️  ${testName}: High message count (${actual.messageCount} messages for ${expected.length} expected key-value pairs)`
+      `⚠️  ${testName}: High message count (${actual.messageCount} messages for ${expected.length} expected key-value pairs)`,
     )
   }
 
   // Log key insights
   const affectedKeys = new Set(
-    actual.messages.map(([[key, _value], _mult]) => key)
+    actual.messages.map(([[key, _value], _mult]) => key),
   )
   if (LOG_RESULTS) {
     console.log(
-      `${testName}: ✅ ${affectedKeys.size} keys affected, ${actual.sortedResults.length} final keys`
+      `${testName}: ✅ ${affectedKeys.size} keys affected, ${actual.sortedResults.length} final keys`,
     )
   }
 }
@@ -266,7 +266,7 @@ export function assertKeyedResults<K, V>(
  * Extract unique keys from messages to verify incremental behavior
  */
 export function extractMessageKeys<K, V>(
-  messages: Array<[[K, V], number]>
+  messages: Array<[[K, V], number]>,
 ): Set<K> {
   const keys = new Set<K>()
   for (const [[key, _value], _multiplicity] of messages) {
@@ -281,7 +281,7 @@ export function extractMessageKeys<K, V>(
 export function assertOnlyKeysAffected<K, V>(
   testName: string,
   messages: Array<[[K, V], number]>,
-  expectedKeys: Array<K>
+  expectedKeys: Array<K>,
 ) {
   const actualKeys = extractMessageKeys(messages)
   const expectedKeySet = new Set(expectedKeys)
@@ -295,14 +295,14 @@ export function assertOnlyKeysAffected<K, V>(
 
   if (LOG_RESULTS) {
     console.log(
-      `${testName}: ✅ Only expected keys affected: ${Array.from(actualKeys).join(`, `)}`
+      `${testName}: ✅ Only expected keys affected: ${Array.from(actualKeys).join(`, `)}`,
     )
   }
 }
 
 export const compareFractionalIndex = (
   r1: [unknown, [unknown, string]],
-  r2: [unknown, [unknown, string]]
+  r2: [unknown, [unknown, string]],
 ) => {
   const [_key1, [_value1, index1]] = r1
   const [_key2, [_value2, index2]] = r2

@@ -1,0 +1,25 @@
+{
+  "name": "@tanstack/db-example-paced-mutations-demo",
+  "version": "0.0.8",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "preview": "vite preview"
+  },
+  "dependencies": {
+    "@tanstack/db": "^0.6.8",
+    "@tanstack/react-db": "^0.1.86",
+    "mitt": "^3.0.1",
+    "react": "^19.2.4",
+    "react-dom": "^19.2.4"
+  },
+  "devDependencies": {
+    "@types/react": "^19.2.13",
+    "@types/react-dom": "^19.2.3",
+    "@vitejs/plugin-react": "^5.1.3",
+    "typescript": "^5.9.2",
+    "vite": "^7.3.0"
+  }
+}

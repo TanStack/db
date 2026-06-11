@@ -1,9 +1,9 @@
-import { describe, expect, it } from "vitest"
-import { D2 } from "@tanstack/db-ivm"
-import { compileQuery } from "../../../src/query/compiler/index.js"
-import { CollectionRef, PropRef, QueryRef } from "../../../src/query/ir.js"
-import type { QueryIR } from "../../../src/query/ir.js"
-import type { CollectionImpl } from "../../../src/collection/index.js"
+import { describe, expect, it } from 'vitest'
+import { D2 } from '@tanstack/db-ivm'
+import { compileQuery } from '../../../src/query/compiler/index.js'
+import { CollectionRef, PropRef, QueryRef } from '../../../src/query/ir.js'
+import type { QueryIR } from '../../../src/query/ir.js'
+import type { CollectionImpl } from '../../../src/collection/index.js'
 
 // Helper to create a minimal mock collection for compiler tests
 function createMockCollection(id: string): CollectionImpl {
@@ -70,7 +70,7 @@ describe(`Subquery Caching`, () => {
       {},
       () => {},
       cache1,
-      queryMapping1
+      queryMapping1,
     )
 
     // Verify subquery is in first cache
@@ -90,7 +90,7 @@ describe(`Subquery Caching`, () => {
       {},
       () => {},
       cache2,
-      queryMapping2
+      queryMapping2,
     )
 
     // Results should be different objects (different compilation)
@@ -111,7 +111,7 @@ describe(`Subquery Caching`, () => {
       {},
       () => {},
       cache2,
-      new WeakMap()
+      new WeakMap(),
     )
 
     // Result should be the same object as #2 (reused from cache)
@@ -132,7 +132,7 @@ describe(`Subquery Caching`, () => {
       {},
       () => {},
       cache2,
-      new WeakMap()
+      new WeakMap(),
     )
     const subqueryResult2 = compileQuery(
       subquery,
@@ -144,7 +144,7 @@ describe(`Subquery Caching`, () => {
       {},
       () => {},
       cache2,
-      new WeakMap()
+      new WeakMap(),
     )
 
     // Both subquery compilations should return the same cached result
@@ -180,7 +180,7 @@ describe(`Subquery Caching`, () => {
       {},
       () => {},
       sharedCache,
-      new WeakMap()
+      new WeakMap(),
     )
     expect(sharedCache.has(subquery)).toBe(true)
 
@@ -195,7 +195,7 @@ describe(`Subquery Caching`, () => {
       {},
       () => {},
       sharedCache,
-      new WeakMap()
+      new WeakMap(),
     )
     expect(result1).toBe(result2) // Should be the exact same object reference
   })
@@ -240,7 +240,7 @@ describe(`Subquery Caching`, () => {
       {},
       () => {},
       sharedCache,
-      new WeakMap()
+      new WeakMap(),
     )
     const result2 = compileQuery(
       subquery,
@@ -252,7 +252,7 @@ describe(`Subquery Caching`, () => {
       {},
       () => {},
       sharedCache,
-      new WeakMap()
+      new WeakMap(),
     )
 
     // Should have different results since they are different objects
@@ -315,7 +315,7 @@ describe(`Subquery Caching`, () => {
       {},
       () => {},
       sharedCache,
-      new WeakMap()
+      new WeakMap(),
     )
     expect(result).toBeDefined()
 

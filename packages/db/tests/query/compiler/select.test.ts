@@ -1,6 +1,6 @@
-import { describe, expect, it } from "vitest"
-import { processArgument } from "../../../src/query/compiler/select.js"
-import { Aggregate, Func, PropRef, Value } from "../../../src/query/ir.js"
+import { describe, expect, it } from 'vitest'
+import { processArgument } from '../../../src/query/compiler/select.js'
+import { Aggregate, Func, PropRef, Value } from '../../../src/query/ir.js'
 
 describe(`select compiler`, () => {
   // Note: Most of the select compilation logic is tested through the full integration
@@ -39,7 +39,7 @@ describe(`select compiler`, () => {
       expect(() => {
         processArgument(arg, namespacedRow)
       }).toThrow(
-        `Aggregate expressions are not supported in this context. Use GROUP BY clause for aggregates.`
+        `Aggregate expressions are not supported in this context. Use GROUP BY clause for aggregates.`,
       )
     })
 

@@ -1,20 +1,25 @@
 import {
+  CollectionConfigurationError,
   CollectionRequiresConfigError,
   CollectionRequiresSyncConfigError,
-} from "../errors"
-import { currentStateAsChanges } from "./change-events"
+} from '../errors'
+import { currentStateAsChanges } from './change-events'
 
-import { CollectionStateManager } from "./state"
-import { CollectionChangesManager } from "./changes"
-import { CollectionLifecycleManager } from "./lifecycle.js"
-import { CollectionSyncManager } from "./sync"
-import { CollectionIndexesManager } from "./indexes"
-import { CollectionMutationsManager } from "./mutations"
-import { CollectionEventsManager } from "./events.js"
-import type { CollectionSubscription } from "./subscription"
-import type { AllCollectionEvents, CollectionEventHandler } from "./events.js"
-import type { BaseIndex, IndexResolver } from "../indexes/base-index.js"
-import type { IndexOptions } from "../indexes/index-options.js"
+import { CollectionStateManager } from './state'
+import { CollectionChangesManager } from './changes'
+import { CollectionLifecycleManager } from './lifecycle.js'
+import { CollectionSyncManager } from './sync'
+import { CollectionIndexesManager } from './indexes'
+import { CollectionMutationsManager } from './mutations'
+import { CollectionEventsManager } from './events.js'
+import type { CollectionSubscription } from './subscription'
+import type {
+  AllCollectionEvents,
+  CollectionEventHandler,
+  CollectionIndexMetadata,
+} from './events.js'
+import type { BaseIndex, IndexConstructor } from '../indexes/base-index.js'
+import type { IndexOptions } from '../indexes/index-options.js'
 import type {
   ChangeMessage,
   CollectionConfig,
@@ -27,15 +32,17 @@ import type {
   NonSingleResult,
   OperationConfig,
   SingleResult,
+  StringCollationConfig,
   SubscribeChangesOptions,
   Transaction as TransactionType,
   UtilsRecord,
   WritableDeep,
-} from "../types"
-import type { SingleRowRefProxy } from "../query/builder/ref-proxy"
-import type { StandardSchemaV1 } from "@standard-schema/spec"
-import type { BTreeIndex } from "../indexes/btree-index.js"
-import type { IndexProxy } from "../indexes/lazy-index.js"
+} from '../types'
+import type { SingleRowRefProxy } from '../query/builder/ref-proxy'
+import type { StandardSchemaV1 } from '@standard-schema/spec'
+import type { WithVirtualProps } from '../virtual-props.js'
+
+export type { CollectionIndexMetadata } from './events.js'
 
 /**
  * Enhanced Collection interface that includes both data type T and utilities TUtils
@@ -126,31 +133,84 @@ export interface Collection<
  *
  */
 
-// Overload for when schema is provided
+// Overload for when schema is provided and utils is required (not optional)
+// We can't infer the Utils type from the CollectionConfig because it will always be optional
+// So we omit it from that type and instead infer it from the extension `& { utils: TUtils }`
+// such that we have the real, non-optional Utils type
 export function createCollection<
   T extends StandardSchemaV1,
-  TKey extends string | number = string | number,
-  TUtils extends UtilsRecord = UtilsRecord,
+  TKey extends string | number,
+  TUtils extends UtilsRecord,
 >(
-  options: CollectionConfig<InferSchemaOutput<T>, TKey, T> & {
+  options: Omit<
+    CollectionConfig<InferSchemaOutput<T>, TKey, T, TUtils>,
+    `utils`
+  > & {
     schema: T
-    utils?: TUtils
-  } & NonSingleResult
+    utils: TUtils // Required utils
+  } & NonSingleResult,
 ): Collection<InferSchemaOutput<T>, TKey, TUtils, T, InferSchemaInput<T>> &
   NonSingleResult
+
+// Overload for when schema is provided and utils is optional
+// In this case we can simply infer the Utils type from the CollectionConfig type
+export function createCollection<
+  T extends StandardSchemaV1,
+  TKey extends string | number,
+  TUtils extends UtilsRecord,
+>(
+  options: CollectionConfig<InferSchemaOutput<T>, TKey, T, TUtils> & {
+    schema: T
+  } & NonSingleResult,
+): Collection<
+  InferSchemaOutput<T>,
+  TKey,
+  Exclude<TUtils, undefined>,
+  T,
+  InferSchemaInput<T>
+> &
+  NonSingleResult
+
+// Overload for when schema is provided, singleResult is true, and utils is required
+export function createCollection<
+  T extends StandardSchemaV1,
+  TKey extends string | number,
+  TUtils extends UtilsRecord,
+>(
+  options: Omit<
+    CollectionConfig<InferSchemaOutput<T>, TKey, T, TUtils>,
+    `utils`
+  > & {
+    schema: T
+    utils: TUtils // Required utils
+  } & SingleResult,
+): Collection<InferSchemaOutput<T>, TKey, TUtils, T, InferSchemaInput<T>> &
+  SingleResult
 
 // Overload for when schema is provided and singleResult is true
 export function createCollection<
   T extends StandardSchemaV1,
-  TKey extends string | number = string | number,
-  TUtils extends UtilsRecord = UtilsRecord,
+  TKey extends string | number,
+  TUtils extends UtilsRecord,
 >(
-  options: CollectionConfig<InferSchemaOutput<T>, TKey, T> & {
+  options: CollectionConfig<InferSchemaOutput<T>, TKey, T, TUtils> & {
     schema: T
-    utils?: TUtils
-  } & SingleResult
+  } & SingleResult,
 ): Collection<InferSchemaOutput<T>, TKey, TUtils, T, InferSchemaInput<T>> &
   SingleResult
+
+// Overload for when no schema is provided and utils is required
+// the type T needs to be passed explicitly unless it can be inferred from the getKey function in the config
+export function createCollection<
+  T extends object,
+  TKey extends string | number,
+  TUtils extends UtilsRecord,
+>(
+  options: Omit<CollectionConfig<T, TKey, never, TUtils>, `utils`> & {
+    schema?: never // prohibit schema if an explicit type is provided
+    utils: TUtils // Required utils
+  } & NonSingleResult,
+): Collection<T, TKey, TUtils, never, T> & NonSingleResult
 
 // Overload for when no schema is provided
 // the type T needs to be passed explicitly unless it can be inferred from the getKey function in the config
@@ -159,11 +219,23 @@ export function createCollection<
   TKey extends string | number = string | number,
   TUtils extends UtilsRecord = UtilsRecord,
 >(
-  options: CollectionConfig<T, TKey, never> & {
+  options: CollectionConfig<T, TKey, never, TUtils> & {
     schema?: never // prohibit schema if an explicit type is provided
-    utils?: TUtils
-  } & NonSingleResult
+  } & NonSingleResult,
 ): Collection<T, TKey, TUtils, never, T> & NonSingleResult
+
+// Overload for when no schema is provided, singleResult is true, and utils is required
+// the type T needs to be passed explicitly unless it can be inferred from the getKey function in the config
+export function createCollection<
+  T extends object,
+  TKey extends string | number = string | number,
+  TUtils extends UtilsRecord = UtilsRecord,
+>(
+  options: Omit<CollectionConfig<T, TKey, never, TUtils>, `utils`> & {
+    schema?: never // prohibit schema if an explicit type is provided
+    utils: TUtils // Required utils
+  } & SingleResult,
+): Collection<T, TKey, TUtils, never, T> & SingleResult
 
 // Overload for when no schema is provided and singleResult is true
 // the type T needs to be passed explicitly unless it can be inferred from the getKey function in the config
@@ -172,26 +244,24 @@ export function createCollection<
   TKey extends string | number = string | number,
   TUtils extends UtilsRecord = UtilsRecord,
 >(
-  options: CollectionConfig<T, TKey, never> & {
+  options: CollectionConfig<T, TKey, never, TUtils> & {
     schema?: never // prohibit schema if an explicit type is provided
-    utils?: TUtils
-  } & SingleResult
+  } & SingleResult,
 ): Collection<T, TKey, TUtils, never, T> & SingleResult
 
 // Implementation
 export function createCollection(
-  options: CollectionConfig<any, string | number, any> & {
+  options: CollectionConfig<any, string | number, any, UtilsRecord> & {
     schema?: StandardSchemaV1
-    utils?: UtilsRecord
-  }
+  },
 ): Collection<any, string | number, UtilsRecord, any, any> {
   const collection = new CollectionImpl<any, string | number, any, any, any>(
-    options
+    options,
   )
 
-  // Copy utils to both top level and .utils namespace
+  // Attach utils to collection
   if (options.utils) {
-    collection.utils = { ...options.utils }
+    collection.utils = options.utils
   } else {
     collection.utils = {}
   }
@@ -231,6 +301,15 @@ export class CollectionImpl<
   public _state: CollectionStateManager<TOutput, TKey, TSchema, TInput>
 
   /**
+   * When set, collection consumers should defer processing incoming data
+   * refreshes until this promise resolves. This prevents stale data from
+   * overwriting optimistic state while pending writes are being applied.
+   */
+  public deferDataRefresh: Promise<void> | null = null
+
+  private comparisonOpts: StringCollationConfig
+
+  /**
    * Creates a new Collection instance
    *
    * @param config - Configuration object for the collection
@@ -256,7 +335,16 @@ export class CollectionImpl<
     // Set default values for optional config properties
     this.config = {
       ...config,
-      autoIndex: config.autoIndex ?? `eager`,
+      autoIndex: config.autoIndex ?? `off`,
+    }
+
+    if (this.config.autoIndex === `eager` && !config.defaultIndexType) {
+      throw new CollectionConfigurationError(
+        `autoIndex: 'eager' requires defaultIndexType to be set. ` +
+          `Import an index type and set it:\n` +
+          `  import { BasicIndex } from '@tanstack/db'\n` +
+          `  createCollection({ defaultIndexType: BasicIndex, autoIndex: 'eager', ... })`,
+      )
     }
 
     this._changes = new CollectionChangesManager()
@@ -267,11 +355,14 @@ export class CollectionImpl<
     this._state = new CollectionStateManager(config)
     this._sync = new CollectionSyncManager(config, this.id)
 
+    this.comparisonOpts = buildCompareOptionsFromConfig(config)
+
     this._changes.setDeps({
       collection: this, // Required for passing to CollectionSubscription
       lifecycle: this._lifecycle,
       sync: this._sync,
       events: this._events,
+      state: this._state, // Required for enriching changes with virtual properties
     })
     this._events.setDeps({
       collection: this, // Required for adding to emitted events
@@ -279,6 +370,8 @@ export class CollectionImpl<
     this._indexes.setDeps({
       state: this._state,
       lifecycle: this._lifecycle,
+      defaultIndexType: config.defaultIndexType,
+      events: this._events,
     })
     this._lifecycle.setDeps({
       changes: this._changes,
@@ -297,6 +390,7 @@ export class CollectionImpl<
       lifecycle: this._lifecycle,
       changes: this._changes,
       indexes: this._indexes,
+      events: this._events,
     })
     this._sync.setDeps({
       collection: this, // Required for passing to config.sync callback
@@ -382,8 +476,8 @@ export class CollectionImpl<
   /**
    * Get the current value for a key (virtual derived state)
    */
-  public get(key: TKey): TOutput | undefined {
-    return this._state.get(key)
+  public get(key: TKey): WithVirtualProps<TOutput, TKey> | undefined {
+    return this._state.getWithVirtualProps(key)
   }
 
   /**
@@ -410,40 +504,68 @@ export class CollectionImpl<
   /**
    * Get all values (virtual derived state)
    */
-  public *values(): IterableIterator<TOutput> {
-    yield* this._state.values()
+  public *values(): IterableIterator<WithVirtualProps<TOutput, TKey>> {
+    for (const key of this._state.keys()) {
+      const value = this.get(key)
+      if (value !== undefined) {
+        yield value
+      }
+    }
   }
 
   /**
    * Get all entries (virtual derived state)
    */
-  public *entries(): IterableIterator<[TKey, TOutput]> {
-    yield* this._state.entries()
+  public *entries(): IterableIterator<[TKey, WithVirtualProps<TOutput, TKey>]> {
+    for (const key of this._state.keys()) {
+      const value = this.get(key)
+      if (value !== undefined) {
+        yield [key, value]
+      }
+    }
   }
 
   /**
    * Get all entries (virtual derived state)
    */
-  public *[Symbol.iterator](): IterableIterator<[TKey, TOutput]> {
-    yield* this._state[Symbol.iterator]()
+  public *[Symbol.iterator](): IterableIterator<
+    [TKey, WithVirtualProps<TOutput, TKey>]
+  > {
+    yield* this.entries()
   }
 
   /**
    * Execute a callback for each entry in the collection
    */
   public forEach(
-    callbackfn: (value: TOutput, key: TKey, index: number) => void
+    callbackfn: (
+      value: WithVirtualProps<TOutput, TKey>,
+      key: TKey,
+      index: number,
+    ) => void,
   ): void {
-    return this._state.forEach(callbackfn)
+    let index = 0
+    for (const [key, value] of this.entries()) {
+      callbackfn(value, key, index++)
+    }
   }
 
   /**
    * Create a new array with the results of calling a function for each entry in the collection
    */
   public map<U>(
-    callbackfn: (value: TOutput, key: TKey, index: number) => U
+    callbackfn: (
+      value: WithVirtualProps<TOutput, TKey>,
+      key: TKey,
+      index: number,
+    ) => U,
   ): Array<U> {
-    return this._state.map(callbackfn)
+    const result: Array<U> = []
+    let index = 0
+    for (const [key, value] of this.entries()) {
+      result.push(callbackfn(value, key, index++))
+    }
+    return result
   }
 
   public getKeyFromItem(item: TOutput): TKey {
@@ -455,39 +577,49 @@ export class CollectionImpl<
    * Indexes significantly improve query performance by allowing constant time lookups
    * and logarithmic time range queries instead of full scans.
    *
-   * @template TResolver - The type of the index resolver (constructor or async loader)
    * @param indexCallback - Function that extracts the indexed value from each item
    * @param config - Configuration including index type and type-specific options
-   * @returns An index proxy that provides access to the index when ready
+   * @returns The created index
    *
    * @example
-   * // Create a default B+ tree index
-   * const ageIndex = collection.createIndex((row) => row.age)
+   * ```ts
+   * import { BasicIndex } from '@tanstack/db'
    *
-   * // Create a ordered index with custom options
+   * // Create an index with explicit type
    * const ageIndex = collection.createIndex((row) => row.age, {
-   *   indexType: BTreeIndex,
-   *   options: {
-   *     compareFn: customComparator,
-   *     compareOptions: { direction: 'asc', nulls: 'first', stringSort: 'lexical' }
-   *   },
-   *   name: 'age_btree'
+   *   indexType: BasicIndex
    * })
    *
-   * // Create an async-loaded index
-   * const textIndex = collection.createIndex((row) => row.content, {
-   *   indexType: async () => {
-   *     const { FullTextIndex } = await import('./indexes/fulltext.js')
-   *     return FullTextIndex
-   *   },
-   *   options: { language: 'en' }
-   * })
+   * // Create an index with collection's default type
+   * const nameIndex = collection.createIndex((row) => row.name)
+   * ```
    */
-  public createIndex<TResolver extends IndexResolver<TKey> = typeof BTreeIndex>(
+  public createIndex<TIndexType extends IndexConstructor<TKey>>(
     indexCallback: (row: SingleRowRefProxy<TOutput>) => any,
-    config: IndexOptions<TResolver> = {}
-  ): IndexProxy<TKey> {
+    config: IndexOptions<TIndexType> = {},
+  ): BaseIndex<TKey> {
     return this._indexes.createIndex(indexCallback, config)
+  }
+
+  /**
+   * Removes an index created with createIndex.
+   * Returns true when an index existed and was removed.
+   *
+   * Best-effort semantics: removing an index guarantees it is detached from
+   * collection query planning. Existing index proxy references should be treated
+   * as invalid after removal.
+   */
+  public removeIndex(indexOrId: BaseIndex<TKey> | number): boolean {
+    return this._indexes.removeIndex(indexOrId)
+  }
+
+  /**
+   * Returns a snapshot of current index metadata sorted by indexId.
+   * Persistence wrappers can use this to bootstrap index state if indexes were
+   * created before event listeners were attached.
+   */
+  public getIndexMetadata(): Array<CollectionIndexMetadata> {
+    return this._indexes.getIndexMetadataSnapshot()
   }
 
   /**
@@ -503,9 +635,14 @@ export class CollectionImpl<
   public validateData(
     data: unknown,
     type: `insert` | `update`,
-    key?: TKey
+    key?: TKey,
   ): TOutput | never {
     return this._mutations.validateData(data, type, key)
+  }
+
+  get compareOptions(): StringCollationConfig {
+    // return a copy such that no one can mutate the internal comparison object
+    return { ...this.comparisonOpts }
   }
 
   /**
@@ -591,27 +728,27 @@ export class CollectionImpl<
   // Overload 1: Update multiple items with a callback
   update(
     key: Array<TKey | unknown>,
-    callback: (drafts: Array<WritableDeep<TInput>>) => void
+    callback: (drafts: Array<WritableDeep<TInput>>) => void,
   ): TransactionType
 
   // Overload 2: Update multiple items with config and a callback
   update(
     keys: Array<TKey | unknown>,
     config: OperationConfig,
-    callback: (drafts: Array<WritableDeep<TInput>>) => void
+    callback: (drafts: Array<WritableDeep<TInput>>) => void,
   ): TransactionType
 
   // Overload 3: Update a single item with a callback
   update(
     id: TKey | unknown,
-    callback: (draft: WritableDeep<TInput>) => void
+    callback: (draft: WritableDeep<TInput>) => void,
   ): TransactionType
 
   // Overload 4: Update a single item with config and a callback
   update(
     id: TKey | unknown,
     config: OperationConfig,
-    callback: (draft: WritableDeep<TInput>) => void
+    callback: (draft: WritableDeep<TInput>) => void,
   ): TransactionType
 
   update(
@@ -622,7 +759,7 @@ export class CollectionImpl<
       | OperationConfig,
     maybeCallback?:
       | ((draft: WritableDeep<TInput>) => void)
-      | ((drafts: Array<WritableDeep<TInput>>) => void)
+      | ((drafts: Array<WritableDeep<TInput>>) => void),
   ) {
     return this._mutations.update(keys, configOrCallback, maybeCallback)
   }
@@ -659,7 +796,7 @@ export class CollectionImpl<
    */
   delete = (
     keys: Array<TKey> | TKey,
-    config?: OperationConfig
+    config?: OperationConfig,
   ): TransactionType<any> => {
     return this._mutations.delete(keys, config)
   }
@@ -681,7 +818,7 @@ export class CollectionImpl<
    * }
    */
   get state() {
-    const result = new Map<TKey, TOutput>()
+    const result = new Map<TKey, WithVirtualProps<TOutput, TKey>>()
     for (const [key, value] of this.entries()) {
       result.set(key, value)
     }
@@ -694,7 +831,7 @@ export class CollectionImpl<
    *
    * @returns Promise that resolves to a Map containing all items in the collection
    */
-  stateWhenReady(): Promise<Map<TKey, TOutput>> {
+  stateWhenReady(): Promise<Map<TKey, WithVirtualProps<TOutput, TKey>>> {
     // If we already have data or collection is ready, resolve immediately
     if (this.size > 0 || this.isReady()) {
       return Promise.resolve(this.state)
@@ -719,7 +856,7 @@ export class CollectionImpl<
    *
    * @returns Promise that resolves to an Array containing all items in the collection
    */
-  toArrayWhenReady(): Promise<Array<TOutput>> {
+  toArrayWhenReady(): Promise<Array<WithVirtualProps<TOutput, TKey>>> {
     // If we already have data or collection is ready, resolve immediately
     if (this.size > 0 || this.isReady()) {
       return Promise.resolve(this.toArray)
@@ -748,8 +885,8 @@ export class CollectionImpl<
    * })
    */
   public currentStateAsChanges(
-    options: CurrentStateAsChangesOptions = {}
-  ): Array<ChangeMessage<TOutput>> | void {
+    options: CurrentStateAsChangesOptions = {},
+  ): Array<ChangeMessage<WithVirtualProps<TOutput, TKey>>> | void {
     return currentStateAsChanges(this, options)
   }
 
@@ -775,26 +912,31 @@ export class CollectionImpl<
    * }, { includeInitialState: true })
    *
    * @example
-   * // Subscribe only to changes matching a condition
+   * // Subscribe only to changes matching a condition using where callback
+   * import { eq } from "@tanstack/db"
+   *
    * const subscription = collection.subscribeChanges((changes) => {
    *   updateUI(changes)
    * }, {
    *   includeInitialState: true,
-   *   where: (row) => row.status === 'active'
+   *   where: (row) => eq(row.status, "active")
    * })
    *
    * @example
-   * // Subscribe using a pre-compiled expression
+   * // Using multiple conditions with and()
+   * import { and, eq, gt } from "@tanstack/db"
+   *
    * const subscription = collection.subscribeChanges((changes) => {
    *   updateUI(changes)
    * }, {
-   *   includeInitialState: true,
-   *   whereExpression: eq(row.status, 'active')
+   *   where: (row) => and(eq(row.status, "active"), gt(row.priority, 5))
    * })
    */
   public subscribeChanges(
-    callback: (changes: Array<ChangeMessage<TOutput>>) => void,
-    options: SubscribeChangesOptions = {}
+    callback: (
+      changes: Array<ChangeMessage<WithVirtualProps<TOutput, TKey>>>,
+    ) => void,
+    options: SubscribeChangesOptions<TOutput, TKey> = {},
   ): CollectionSubscription {
     return this._changes.subscribeChanges(callback, options)
   }
@@ -804,7 +946,7 @@ export class CollectionImpl<
    */
   public on<T extends keyof AllCollectionEvents>(
     event: T,
-    callback: CollectionEventHandler<T>
+    callback: CollectionEventHandler<T>,
   ) {
     return this._events.on(event, callback)
   }
@@ -814,7 +956,7 @@ export class CollectionImpl<
    */
   public once<T extends keyof AllCollectionEvents>(
     event: T,
-    callback: CollectionEventHandler<T>
+    callback: CollectionEventHandler<T>,
   ) {
     return this._events.once(event, callback)
   }
@@ -824,7 +966,7 @@ export class CollectionImpl<
    */
   public off<T extends keyof AllCollectionEvents>(
     event: T,
-    callback: CollectionEventHandler<T>
+    callback: CollectionEventHandler<T>,
   ) {
     this._events.off(event, callback)
   }
@@ -834,7 +976,7 @@ export class CollectionImpl<
    */
   public waitFor<T extends keyof AllCollectionEvents>(
     event: T,
-    timeout?: number
+    timeout?: number,
   ) {
     return this._events.waitFor(event, timeout)
   }
@@ -846,5 +988,23 @@ export class CollectionImpl<
   public async cleanup(): Promise<void> {
     this._lifecycle.cleanup()
     return Promise.resolve()
+  }
+}
+
+function buildCompareOptionsFromConfig(
+  config: CollectionConfig<any, any, any>,
+): StringCollationConfig {
+  if (config.defaultStringCollation) {
+    const options = config.defaultStringCollation
+    return {
+      stringSort: options.stringSort ?? `locale`,
+      locale: options.stringSort === `locale` ? options.locale : undefined,
+      localeOptions:
+        options.stringSort === `locale` ? options.localeOptions : undefined,
+    }
+  } else {
+    return {
+      stringSort: `locale`,
+    }
   }
 }

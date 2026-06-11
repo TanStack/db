@@ -2,19 +2,20 @@ import {
   CollectionInErrorStateError,
   CollectionStateError,
   InvalidCollectionStatusTransitionError,
-} from "../errors"
+} from '../errors'
 import {
   safeCancelIdleCallback,
   safeRequestIdleCallback,
-} from "../utils/browser-polyfills"
-import type { IdleCallbackDeadline } from "../utils/browser-polyfills"
-import type { StandardSchemaV1 } from "@standard-schema/spec"
-import type { CollectionConfig, CollectionStatus } from "../types"
-import type { CollectionEventsManager } from "./events"
-import type { CollectionIndexesManager } from "./indexes"
-import type { CollectionChangesManager } from "./changes"
-import type { CollectionSyncManager } from "./sync"
-import type { CollectionStateManager } from "./state"
+} from '../utils/browser-polyfills'
+import { CleanupQueue } from './cleanup-queue'
+import type { IdleCallbackDeadline } from '../utils/browser-polyfills'
+import type { StandardSchemaV1 } from '@standard-schema/spec'
+import type { CollectionConfig, CollectionStatus } from '../types'
+import type { CollectionEventsManager } from './events'
+import type { CollectionIndexesManager } from './indexes'
+import type { CollectionChangesManager } from './changes'
+import type { CollectionSyncManager } from './sync'
+import type { CollectionStateManager } from './state'
 
 export class CollectionLifecycleManager<
   TOutput extends object = Record<string, unknown>,
@@ -34,7 +35,6 @@ export class CollectionLifecycleManager<
   public hasBeenReady = false
   public hasReceivedFirstCommit = false
   public onFirstReadyCallbacks: Array<() => void> = []
-  public gcTimeoutId: ReturnType<typeof setTimeout> | null = null
   private idleCallbackId: number | null = null
 
   /**
@@ -64,7 +64,7 @@ export class CollectionLifecycleManager<
    */
   public validateStatusTransition(
     from: CollectionStatus,
-    to: CollectionStatus
+    to: CollectionStatus,
   ): void {
     if (from === to) {
       // Allow same state transitions
@@ -78,7 +78,7 @@ export class CollectionLifecycleManager<
       loading: [`ready`, `error`, `cleaned-up`],
       ready: [`cleaned-up`, `error`],
       error: [`cleaned-up`, `idle`],
-      "cleaned-up": [`loading`, `error`],
+      'cleaned-up': [`loading`, `error`],
     }
 
     if (!validTransitions[from].includes(to)) {
@@ -92,30 +92,19 @@ export class CollectionLifecycleManager<
    */
   public setStatus(
     newStatus: CollectionStatus,
-    allowReady: boolean = false
+    allowReady: boolean = false,
   ): void {
     if (newStatus === `ready` && !allowReady) {
       // setStatus('ready') is an internal method that should not be called directly
       // Instead, use markReady to transition to ready triggering the necessary events
       // and side effects.
       throw new CollectionStateError(
-        `You can't directly call "setStatus('ready'). You must use markReady instead.`
+        `You can't directly call "setStatus('ready'). You must use markReady instead.`,
       )
     }
     this.validateStatusTransition(this.status, newStatus)
     const previousStatus = this.status
     this.status = newStatus
-
-    // Resolve indexes when collection becomes ready
-    if (newStatus === `ready` && !this.indexes.isIndexesResolved) {
-      // Resolve indexes asynchronously without blocking
-      this.indexes.resolveAllIndexes().catch((error) => {
-        console.warn(
-          `${this.config.id ? `[${this.config.id}] ` : ``}Failed to resolve indexes:`,
-          error
-        )
-      })
-    }
 
     // Emit event
     this.events.emitStatusChange(newStatus, previousStatus)
@@ -174,23 +163,21 @@ export class CollectionLifecycleManager<
    * Called when the collection becomes inactive (no subscribers)
    */
   public startGCTimer(): void {
-    if (this.gcTimeoutId) {
-      clearTimeout(this.gcTimeoutId)
-    }
-
     const gcTime = this.config.gcTime ?? 300000 // 5 minutes default
 
-    // If gcTime is 0, GC is disabled
-    if (gcTime === 0) {
+    // If gcTime is 0, negative, or non-finite (Infinity, -Infinity, NaN), GC is disabled.
+    // Note: setTimeout with Infinity coerces to 0 via ToInt32, causing immediate GC,
+    // so we must explicitly check for non-finite values here.
+    if (gcTime <= 0 || !Number.isFinite(gcTime)) {
       return
     }
 
-    this.gcTimeoutId = setTimeout(() => {
+    CleanupQueue.getInstance().schedule(this, gcTime, () => {
       if (this.changes.activeSubscribersCount === 0) {
         // Schedule cleanup during idle time to avoid blocking the UI thread
         this.scheduleIdleCleanup()
       }
-    }, gcTime)
+    })
   }
 
   /**
@@ -198,10 +185,7 @@ export class CollectionLifecycleManager<
    * Called when the collection becomes active again
    */
   public cancelGCTimer(): void {
-    if (this.gcTimeoutId) {
-      clearTimeout(this.gcTimeoutId)
-      this.gcTimeoutId = null
-    }
+    CleanupQueue.getInstance().cancel(this)
     // Also cancel any pending idle cleanup
     if (this.idleCallbackId !== null) {
       safeCancelIdleCallback(this.idleCallbackId)
@@ -235,7 +219,7 @@ export class CollectionLifecycleManager<
           this.idleCallbackId = null
         }
       },
-      { timeout: 1000 }
+      { timeout: 1000 },
     )
   }
 
@@ -250,23 +234,38 @@ export class CollectionLifecycleManager<
       !deadline || deadline.timeRemaining() > 0 || deadline.didTimeout
 
     if (hasTime) {
-      // Perform all cleanup operations
-      this.events.cleanup()
+      // Perform all cleanup operations except events
       this.sync.cleanup()
       this.state.cleanup()
       this.changes.cleanup()
       this.indexes.cleanup()
 
-      if (this.gcTimeoutId) {
-        clearTimeout(this.gcTimeoutId)
-        this.gcTimeoutId = null
-      }
+      CleanupQueue.getInstance().cancel(this)
 
       this.hasBeenReady = false
-      this.onFirstReadyCallbacks = []
 
-      // Set status to cleaned-up
+      // Call any pending onFirstReady callbacks before clearing them.
+      // This ensures preload() promises resolve during cleanup instead of hanging.
+      const callbacks = [...this.onFirstReadyCallbacks]
+      this.onFirstReadyCallbacks = []
+      callbacks.forEach((callback) => {
+        try {
+          callback()
+        } catch (error) {
+          console.error(
+            `${this.config.id ? `[${this.config.id}] ` : ``}Error in onFirstReady callback during cleanup:`,
+            error,
+          )
+        }
+      })
+
+      // Set status to cleaned-up after everything is cleaned up
+      // This fires the status:change event to notify listeners
       this.setStatus(`cleaned-up`)
+
+      // Finally, cleanup event handlers after the event has been fired
+      this.events.cleanup()
+
       return true
     } else {
       // If we don't have time, reschedule for the next idle period

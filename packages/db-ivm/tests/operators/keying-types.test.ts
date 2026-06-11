@@ -1,8 +1,8 @@
-import { describe, expectTypeOf, it } from "vitest"
-import { D2 } from "../../src/d2.js"
-import { keyBy, rekey, unkey } from "../../src/operators/keying.js"
-import type { Keyed } from "../../src/operators/keying.js"
-import type { IStreamBuilder } from "../../src/types.js"
+import { describe, expectTypeOf, it } from 'vitest'
+import { D2 } from '../../src/d2.js'
+import { keyBy, rekey, unkey } from '../../src/operators/keying.js'
+import type { Keyed } from '../../src/operators/keying.js'
+import type { IStreamBuilder } from '../../src/types.js'
 
 interface TestItem {
   id: number

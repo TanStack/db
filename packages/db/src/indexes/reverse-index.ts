@@ -1,11 +1,11 @@
-import type { CompareOptions } from "../query/builder/types"
-import type { OrderByDirection } from "../query/ir"
-import type { IndexInterface, IndexOperation, IndexStats } from "./base-index"
-import type { RangeQueryOptions } from "./btree-index"
+import type { CompareOptions } from '../query/builder/types'
+import type { OrderByDirection } from '../query/ir'
+import type { IndexInterface, IndexOperation, IndexStats } from './base-index'
+import type { RangeQueryOptions } from './btree-index'
 
-export class ReverseIndex<TKey extends string | number>
-  implements IndexInterface<TKey>
-{
+export class ReverseIndex<
+  TKey extends string | number,
+> implements IndexInterface<TKey> {
   private originalIndex: IndexInterface<TKey>
 
   constructor(index: IndexInterface<TKey>) {
@@ -36,16 +36,27 @@ export class ReverseIndex<TKey extends string | number>
     return this.originalIndex.rangeQuery(options)
   }
 
-  take(n: number, from?: any, filterFn?: (key: TKey) => boolean): Array<TKey> {
+  take(n: number, from: any, filterFn?: (key: TKey) => boolean): Array<TKey> {
     return this.originalIndex.takeReversed(n, from, filterFn)
+  }
+
+  takeFromStart(n: number, filterFn?: (key: TKey) => boolean): Array<TKey> {
+    return this.originalIndex.takeReversedFromEnd(n, filterFn)
   }
 
   takeReversed(
     n: number,
-    from?: any,
-    filterFn?: (key: TKey) => boolean
+    from: any,
+    filterFn?: (key: TKey) => boolean,
   ): Array<TKey> {
     return this.originalIndex.take(n, from, filterFn)
+  }
+
+  takeReversedFromEnd(
+    n: number,
+    filterFn?: (key: TKey) => boolean,
+  ): Array<TKey> {
+    return this.originalIndex.takeFromStart(n, filterFn)
   }
 
   get orderedEntriesArray(): Array<[any, Set<TKey>]> {

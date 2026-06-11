@@ -1,8 +1,8 @@
-import { beforeEach, describe, expect, it } from "vitest"
-import { createCollection } from "../../src/collection/index.js"
-import { createLiveQueryCollection } from "../../src/query/index.js"
-import { mockSyncCollectionOptions } from "../utils.js"
-import { upper } from "../../src/query/builder/functions.js"
+import { beforeEach, describe, expect, it } from 'vitest'
+import { createCollection } from '../../src/collection/index.js'
+import { createLiveQueryCollection } from '../../src/query/index.js'
+import { mockSyncCollectionOptions } from '../utils.js'
+import { upper } from '../../src/query/builder/functions.js'
 
 type User = {
   id: number
@@ -49,7 +49,7 @@ function createUsers() {
       id: `nested-select-users`,
       getKey: (u) => u.id,
       initialData: data,
-    })
+    }),
   )
 }
 
@@ -68,7 +68,7 @@ describe(`nested select projections`, () => {
           city: u.address?.city,
           coords: u.address?.coordinates,
         },
-      }))
+      })),
     )
 
     await collection.preload()
@@ -93,7 +93,7 @@ describe(`nested select projections`, () => {
           // spread all preference fields under preferences
           ...u.profile.preferences,
         },
-      }))
+      })),
     )
 
     await collection.preload()
@@ -115,7 +115,7 @@ describe(`nested select projections`, () => {
             ...u.profile,
           },
         },
-      }))
+      })),
     )
 
     await collection.preload()

@@ -1,6 +1,6 @@
-import { describe, expect, it } from "vitest"
-import { createTransaction } from "../src/transactions"
-import { createCollection } from "../src/collection"
+import { describe, expect, it } from 'vitest'
+import { createTransaction } from '../src/transactions'
+import { createCollection } from '../src/collection'
 
 describe(`applyMutations merge logic`, () => {
   // Create a shared collection for all tests

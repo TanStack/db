@@ -1,6 +1,7 @@
-import { describe, expect, it } from "vitest"
-import { DefaultMap } from "../src/utils.js"
-import { hash } from "../src/hashing/index.js"
+import { describe, expect, it } from 'vitest'
+import { Temporal } from 'temporal-polyfill'
+import { DefaultMap } from '../src/utils.js'
+import { hash } from '../src/hashing/index.js'
 
 describe(`DefaultMap`, () => {
   it(`should return default value for missing keys`, () => {
@@ -170,6 +171,41 @@ describe(`hash`, () => {
       expect(hash1).not.toBe(hash3) // Different dates should have different hash
     })
 
+    it(`should hash Temporal objects by value`, () => {
+      const date1 = Temporal.PlainDate.from(`2024-01-15`)
+      const date2 = Temporal.PlainDate.from(`2024-01-15`)
+      const date3 = Temporal.PlainDate.from(`2024-06-15`)
+
+      const hash1 = hash(date1)
+      const hash2 = hash(date2)
+      const hash3 = hash(date3)
+
+      expect(typeof hash1).toBe(hashType)
+      expect(hash1).toBe(hash2) // Same Temporal date should have same hash
+      expect(hash1).not.toBe(hash3) // Different Temporal dates should have different hash
+
+      // Different Temporal types with overlapping string representations should differ
+      const plainDate = Temporal.PlainDate.from(`2024-01-15`)
+      const plainDateTime = Temporal.PlainDateTime.from(`2024-01-15T00:00:00`)
+
+      expect(hash(plainDate)).not.toBe(hash(plainDateTime))
+
+      // Other Temporal types should also hash correctly
+      const time1 = Temporal.PlainTime.from(`10:30:00`)
+      const time2 = Temporal.PlainTime.from(`10:30:00`)
+      const time3 = Temporal.PlainTime.from(`14:00:00`)
+
+      expect(hash(time1)).toBe(hash(time2))
+      expect(hash(time1)).not.toBe(hash(time3))
+
+      const instant1 = Temporal.Instant.from(`2024-01-15T00:00:00Z`)
+      const instant2 = Temporal.Instant.from(`2024-01-15T00:00:00Z`)
+      const instant3 = Temporal.Instant.from(`2024-06-15T00:00:00Z`)
+
+      expect(hash(instant1)).toBe(hash(instant2))
+      expect(hash(instant1)).not.toBe(hash(instant3))
+    })
+
     it(`should hash RegExp objects`, () => {
       const regex1 = /test/g
       const regex2 = /test/g
@@ -299,7 +335,8 @@ describe(`hash`, () => {
       expect(hash4).not.toBe(hash6) // Different Symbol content should have different hash
     })
 
-    it(`should hash Buffers, Uint8Arrays and File objects by reference`, () => {
+    it(`should hash small Buffers and Uint8Arrays by content`, () => {
+      // Small buffers (≤128 bytes) are hashed by content for proper equality comparisons
       const buffer1 = Buffer.from([1, 2, 3])
       const buffer2 = Buffer.from([1, 2, 3])
       const buffer3 = Buffer.from([1, 2, 3, 4])
@@ -309,7 +346,7 @@ describe(`hash`, () => {
       const hash3 = hash(buffer3)
 
       expect(typeof hash1).toBe(hashType)
-      expect(hash1).not.toBe(hash2) // Same content but different buffer instances have a different hash because it would be too costly to deeply hash buffers
+      expect(hash1).toBe(hash2) // Same content = same hash for small buffers
       expect(hash1).not.toBe(hash3) // Different Buffer content should have different hash
       expect(hash1).toBe(hash(buffer1)) // Hashing same buffer should return same hash
 
@@ -322,10 +359,46 @@ describe(`hash`, () => {
       const hash6 = hash(uint8Array3)
 
       expect(typeof hash4).toBe(hashType)
-      expect(hash4).not.toBe(hash5) // Same content but different uint8Array instances have a different hash because it would be too costly to deeply hash uint8Arrays
+      expect(hash4).toBe(hash5) // Same content = same hash for small Uint8Arrays
       expect(hash4).not.toBe(hash6) // Different uint8Array content should have different hash
       expect(hash4).toBe(hash(uint8Array1)) // Hashing same uint8Array should return same hash
+    })
 
+    it(`should hash large Buffers, Uint8Arrays and File objects by reference`, () => {
+      // Large buffers (>128 bytes) are hashed by reference to avoid performance costs
+      const largeBuffer1 = Buffer.alloc(300)
+      const largeBuffer2 = Buffer.alloc(300)
+
+      // Fill with same content
+      for (let i = 0; i < 300; i++) {
+        largeBuffer1[i] = i % 256
+        largeBuffer2[i] = i % 256
+      }
+
+      const hash1 = hash(largeBuffer1)
+      const hash2 = hash(largeBuffer2)
+
+      expect(typeof hash1).toBe(hashType)
+      expect(hash1).not.toBe(hash2) // Same content but different instances = different hash for large buffers
+      expect(hash1).toBe(hash(largeBuffer1)) // Hashing same buffer should return same hash
+
+      const largeUint8Array1 = new Uint8Array(300)
+      const largeUint8Array2 = new Uint8Array(300)
+
+      // Fill with same content
+      for (let i = 0; i < 300; i++) {
+        largeUint8Array1[i] = i % 256
+        largeUint8Array2[i] = i % 256
+      }
+
+      const hash3 = hash(largeUint8Array1)
+      const hash4 = hash(largeUint8Array2)
+
+      expect(typeof hash3).toBe(hashType)
+      expect(hash3).not.toBe(hash4) // Same content but different instances = different hash for large Uint8Arrays
+      expect(hash3).toBe(hash(largeUint8Array1)) // Hashing same uint8Array should return same hash
+
+      // Files are always hashed by reference regardless of size
       const file1 = new File([`Hello, world!`], `test.txt`)
       const file2 = new File([`Hello, world!`], `test.txt`)
       const file3 = new File([`Hello, world!`], `test.txt`)
