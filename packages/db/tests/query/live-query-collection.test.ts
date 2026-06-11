@@ -1,19 +1,25 @@
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
-import { Temporal } from "temporal-polyfill"
-import { createCollection } from "../../src/collection/index.js"
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { Temporal } from 'temporal-polyfill'
+import { createCollection } from '../../src/collection/index.js'
 import {
   and,
+  coalesce,
   createLiveQueryCollection,
   eq,
+  ilike,
   liveQueryCollectionOptions,
-} from "../../src/query/index.js"
-import { Query } from "../../src/query/builder/index.js"
+} from '../../src/query/index.js'
+import { Query } from '../../src/query/builder/index.js'
 import {
+  flushPromises,
   mockSyncCollectionOptions,
   mockSyncCollectionOptionsNoInitialState,
-} from "../utils.js"
-import { createDeferred } from "../../src/deferred"
-import type { ChangeMessage } from "../../src/types.js"
+  stripVirtualProps,
+} from '../utils.js'
+import { createDeferred } from '../../src/deferred'
+import { BTreeIndex } from '../../src/indexes/btree-index'
+import { Func, Value } from '../../src/query/ir.js'
+import type { ChangeMessage, LoadSubsetOptions } from '../../src/types.js'
 
 // Sample user type for tests
 type User = {
@@ -35,7 +41,7 @@ function createUsersCollection() {
       id: `test-users`,
       getKey: (user) => user.id,
       initialData: sampleUsers,
-    })
+    }),
   )
 }
 
@@ -50,7 +56,7 @@ describe(`createLiveQueryCollection`, () => {
     const activeUsers = createLiveQueryCollection((q) =>
       q
         .from({ user: usersCollection })
-        .where(({ user }) => eq(user.active, true))
+        .where(({ user }) => eq(user.active, true)),
     )
 
     await activeUsers.preload()
@@ -79,7 +85,7 @@ describe(`createLiveQueryCollection`, () => {
     const activeUsers1 = createLiveQueryCollection((q) =>
       q
         .from({ user: usersCollection })
-        .where(({ user }) => eq(user.active, true))
+        .where(({ user }) => eq(user.active, true)),
     )
 
     // Test with QueryBuilder instance via config
@@ -100,6 +106,139 @@ describe(`createLiveQueryCollection`, () => {
     expect(activeUsers2.size).toBe(2)
   })
 
+  describe(`compareOptions inheritance`, () => {
+    it(`should inherit compareOptions from FROM collection`, () => {
+      // Create a collection with non-default compareOptions
+      const sourceCollection = createCollection(
+        mockSyncCollectionOptions<User>({
+          id: `source-with-lexical`,
+          getKey: (user) => user.id,
+          initialData: sampleUsers,
+          defaultStringCollation: {
+            stringSort: `lexical`,
+          },
+        }),
+      )
+
+      // Create a live query collection from the source collection
+      const liveQuery = createLiveQueryCollection((q) =>
+        q.from({ user: sourceCollection }),
+      )
+
+      // The live query should inherit the compareOptions from the source collection
+      expect(liveQuery.compareOptions).toEqual({
+        stringSort: `lexical`,
+      })
+      expect(sourceCollection.compareOptions).toEqual({
+        stringSort: `lexical`,
+      })
+    })
+
+    it(`should inherit compareOptions from FROM collection via subquery`, () => {
+      // Create a collection with non-default compareOptions
+      const sourceCollection = createCollection(
+        mockSyncCollectionOptions<User>({
+          id: `source-with-locale`,
+          getKey: (user) => user.id,
+          initialData: sampleUsers,
+          defaultStringCollation: {
+            stringSort: `locale`,
+            locale: `de-DE`,
+          },
+        }),
+      )
+
+      // Create a live query collection with a subquery
+      const liveQuery = createLiveQueryCollection((q) => {
+        // Build the subquery first
+        const filteredUsers = q
+          .from({ user: sourceCollection })
+          .where(({ user }) => eq(user.active, true))
+
+        // Use the subquery in the main query
+        return q.from({ filteredUser: filteredUsers })
+      })
+
+      // The live query should inherit the compareOptions from the source collection
+      // (which is the FROM collection of the subquery)
+      expect(liveQuery.compareOptions).toEqual({
+        stringSort: `locale`,
+        locale: `de-DE`,
+      })
+      expect(sourceCollection.compareOptions).toEqual({
+        stringSort: `locale`,
+        locale: `de-DE`,
+      })
+    })
+
+    it(`should use default compareOptions when FROM collection has no compareOptions`, () => {
+      // Create a collection without compareOptions (uses defaults)
+      const sourceCollection = createCollection(
+        mockSyncCollectionOptions<User>({
+          id: `source-with-defaults`,
+          getKey: (user) => user.id,
+          initialData: sampleUsers,
+          // No compareOptions specified - uses defaults
+        }),
+      )
+
+      // Create a live query collection with a subquery
+      const liveQuery = createLiveQueryCollection((q) => {
+        // Build the subquery first
+        const filteredUsers = q
+          .from({ user: sourceCollection })
+          .where(({ user }) => eq(user.active, true))
+
+        // Use the subquery in the main query
+        return q.from({ filteredUser: filteredUsers })
+      })
+
+      // The live query should use default compareOptions (locale)
+      // when the source collection doesn't specify compareOptions
+      expect(liveQuery.compareOptions).toEqual({
+        stringSort: `locale`,
+      })
+      expect(sourceCollection.compareOptions).toEqual({
+        stringSort: `locale`,
+      })
+    })
+
+    it(`should use explicitly provided compareOptions instead of inheriting from FROM collection`, () => {
+      // Create a collection with non-default compareOptions
+      const sourceCollection = createCollection(
+        mockSyncCollectionOptions<User>({
+          id: `source-with-lexical`,
+          getKey: (user) => user.id,
+          initialData: sampleUsers,
+          defaultStringCollation: {
+            stringSort: `lexical`,
+          },
+        }),
+      )
+
+      // Create a live query collection with explicitly provided compareOptions
+      // that differ from the source collection's compareOptions
+      const liveQuery = createLiveQueryCollection({
+        query: (q) => q.from({ user: sourceCollection }),
+        defaultStringCollation: {
+          stringSort: `locale`,
+          locale: `en-US`,
+        },
+      })
+
+      // The live query should use the explicitly provided compareOptions,
+      // not the inherited ones from the source collection
+      expect(liveQuery.compareOptions).toEqual({
+        stringSort: `locale`,
+        locale: `en-US`,
+      })
+      // The source collection should still have its original compareOptions
+      expect(sourceCollection.compareOptions).toEqual({
+        stringSort: `lexical`,
+      })
+    })
+  })
+
   it(`should call markReady when source collection returns empty array`, async () => {
     // Create an empty source collection using the mock sync options
     const emptyUsersCollection = createCollection(
@@ -107,14 +246,14 @@ describe(`createLiveQueryCollection`, () => {
         id: `empty-test-users`,
         getKey: (user) => user.id,
         initialData: [], // Empty initial data
-      })
+      }),
     )
 
     // Create a live query collection that depends on the empty source collection
     const liveQuery = createLiveQueryCollection((q) =>
       q
         .from({ user: emptyUsersCollection })
-        .where(({ user }) => eq(user.active, true))
+        .where(({ user }) => eq(user.active, true)),
     )
 
     // This should resolve and not hang, even though the source collection is empty
@@ -142,7 +281,7 @@ describe(`createLiveQueryCollection`, () => {
 
     // Create a live query collection that depends on the problematic source collection
     const liveQuery = createLiveQueryCollection((q) =>
-      q.from({ user: problemCollection })
+      q.from({ user: problemCollection }),
     )
 
     // This should resolve and not hang, even though the source collection doesn't commit data
@@ -172,7 +311,7 @@ describe(`createLiveQueryCollection`, () => {
     const liveQuery = createLiveQueryCollection((q) =>
       q
         .from({ user: problemCollection })
-        .where(({ user }) => eq(user.active, true))
+        .where(({ user }) => eq(user.active, true)),
     )
 
     // This should resolve and not hang, even though the source collection doesn't commit data
@@ -244,7 +383,7 @@ describe(`createLiveQueryCollection`, () => {
     const liveQuery = createLiveQueryCollection((q) =>
       q
         .from({ user: sourceCollection })
-        .where(({ user }) => eq(user.active, true))
+        .where(({ user }) => eq(user.active, true)),
     )
 
     // Initially, the live query should be in idle state (default startSync: false)
@@ -282,8 +421,16 @@ describe(`createLiveQueryCollection`, () => {
 
     // The live query should be ready and have the initial data
     expect(liveQuery.size).toBe(2) // Alice and Charlie are active
-    expect(liveQuery.get(1)).toEqual({ id: 1, name: `Alice`, active: true })
-    expect(liveQuery.get(3)).toEqual({ id: 3, name: `Charlie`, active: true })
+    expect(stripVirtualProps(liveQuery.get(1))).toEqual({
+      id: 1,
+      name: `Alice`,
+      active: true,
+    })
+    expect(stripVirtualProps(liveQuery.get(3))).toEqual({
+      id: 3,
+      name: `Charlie`,
+      active: true,
+    })
     expect(liveQuery.get(2)).toBeUndefined() // Bob is not active
     expect(liveQuery.status).toBe(`ready`)
 
@@ -295,7 +442,11 @@ describe(`createLiveQueryCollection`, () => {
 
     // The live query should update to include the new data
     expect(liveQuery.size).toBe(3) // Alice, Charlie, and David are active
-    expect(liveQuery.get(4)).toEqual({ id: 4, name: `David`, active: true })
+    expect(stripVirtualProps(liveQuery.get(4))).toEqual({
+      id: 4,
+      name: `David`,
+      active: true,
+    })
   })
 
   it(`should not reuse finalized graph after GC cleanup (resubscribe is safe)`, async () => {
@@ -335,7 +486,7 @@ describe(`createLiveQueryCollection`, () => {
           { id: `t1`, last_email_id: `e1`, last_sent_at: 3 },
           { id: `t2`, last_email_id: `e2`, last_sent_at: 2 },
         ],
-      })
+      }),
     )
 
     const labelsByEmail = createCollection(
@@ -346,7 +497,7 @@ describe(`createLiveQueryCollection`, () => {
           { email_id: `e1`, label: `inbox` },
           { email_id: `e2`, label: `work` },
         ],
-      })
+      }),
     )
 
     // Source live query (pre-created)
@@ -374,7 +525,7 @@ describe(`createLiveQueryCollection`, () => {
               { label: labelsByEmail },
               ({ thread, label }: any) =>
                 eq(thread.last_email_id, label.email_id),
-              `inner`
+              `inner`,
             )
             .orderBy(({ thread }: any) => thread.last_sent_at, {
               direction: `desc`,
@@ -464,12 +615,12 @@ describe(`createLiveQueryCollection`, () => {
         id: `test-tasks`,
         getKey: (task) => task.id,
         initialData: [initialTask],
-      })
+      }),
     )
 
     // Create a live query collection that includes the temporal value
     const liveQuery = createLiveQueryCollection((q) =>
-      q.from({ task: taskCollection })
+      q.from({ task: taskCollection }),
     )
 
     await liveQuery.preload()
@@ -514,7 +665,7 @@ describe(`createLiveQueryCollection`, () => {
           id: `player`,
           getKey: (post) => post.id,
           autoIndex,
-        })
+        }),
       )
 
       const challenge1Collection = createCollection(
@@ -522,7 +673,7 @@ describe(`createLiveQueryCollection`, () => {
           id: `challenge1`,
           getKey: (post) => post.id,
           autoIndex,
-        })
+        }),
       )
 
       const challenge2Collection = createCollection(
@@ -530,7 +681,7 @@ describe(`createLiveQueryCollection`, () => {
           id: `challenge2`,
           getKey: (post) => post.id,
           autoIndex,
-        })
+        }),
       )
 
       const liveQuery = createLiveQueryCollection((q) =>
@@ -538,12 +689,12 @@ describe(`createLiveQueryCollection`, () => {
           .from({ player: playerCollection })
           .leftJoin(
             { challenge1: challenge1Collection },
-            ({ player, challenge1 }) => eq(player.id, challenge1.id)
+            ({ player, challenge1 }) => eq(player.id, challenge1.id),
           )
           .leftJoin(
             { challenge2: challenge2Collection },
-            ({ player, challenge2 }) => eq(player.id, challenge2.id)
-          )
+            ({ player, challenge2 }) => eq(player.id, challenge2.id),
+          ),
       )
 
       // Start the query, but don't wait it, we are doing to write the data to the
@@ -608,7 +759,7 @@ describe(`createLiveQueryCollection`, () => {
         id: `test-tasks`,
         getKey: (task) => `source:${task.id}`,
         initialData: [initialTask],
-      })
+      }),
     )
 
     const liveQuery = createLiveQueryCollection({
@@ -767,7 +918,7 @@ describe(`createLiveQueryCollection`, () => {
           base.insert({
             id: `${index + 1}`,
             created_at: Date.now() + index,
-          })
+          }),
         )
 
         await vi.advanceTimersByTimeAsync(5000)
@@ -812,7 +963,7 @@ describe(`createLiveQueryCollection`, () => {
                 write({
                   type: `insert`,
                   value: todo,
-                })
+                }),
               )
               commit()
               markReady()
@@ -940,6 +1091,153 @@ describe(`createLiveQueryCollection`, () => {
   })
 
   describe(`isLoadingSubset integration`, () => {
+    it(`should not mark live query ready while isLoadingSubset is true`, async () => {
+      // This test demonstrates the bug where live query is marked ready
+      // before isLoadingSubset becomes false, causing "ready" status with no data
+
+      let resolveLoadSubset: () => void
+      const loadSubsetPromise = new Promise<void>((resolve) => {
+        resolveLoadSubset = resolve
+      })
+
+      // Track whether loadSubset was called
+      let loadSubsetCalled = false
+
+      const sourceCollection = createCollection<{ id: number; value: number }>({
+        id: `source-delayed-subset`,
+        getKey: (item) => item.id,
+        syncMode: `on-demand`,
+        startSync: true,
+        sync: {
+          sync: ({ markReady, begin, write, commit }) => {
+            // Mark source ready immediately with some initial data
+            begin()
+            write({ type: `insert`, value: { id: 1, value: 10 } })
+            write({ type: `insert`, value: { id: 2, value: 20 } })
+            write({ type: `insert`, value: { id: 3, value: 30 } })
+            commit()
+            markReady()
+
+            return {
+              loadSubset: () => {
+                loadSubsetCalled = true
+                // Return a promise that we control to delay the subset loading
+                return loadSubsetPromise
+              },
+            }
+          },
+        },
+      })
+
+      // Create a live query with orderBy + limit that triggers lazy loading
+      const liveQuery = createLiveQueryCollection({
+        query: (q) =>
+          q
+            .from({ item: sourceCollection })
+            .orderBy(({ item }) => item.value, `asc`)
+            .limit(2),
+        startSync: true,
+      })
+
+      // Wait a bit for the subscription to start and trigger loadSubset
+      await flushPromises()
+      await new Promise((resolve) => setTimeout(resolve, 10))
+
+      // Source should be ready
+      expect(sourceCollection.isReady()).toBe(true)
+
+      // loadSubset should have been called (verifying our test setup is correct)
+      expect(loadSubsetCalled).toBe(true)
+
+      // Live query should have isLoadingSubset = true
+      expect(liveQuery.isLoadingSubset).toBe(true)
+
+      // KEY ASSERTION: Live query should NOT be ready while isLoadingSubset is true
+      // This is the bug we're fixing - without the fix, status would be 'ready' here
+      expect(liveQuery.status).not.toBe(`ready`)
+
+      // Status should be 'loading', which means useLiveQuery would return isLoading=true
+      expect(liveQuery.status).toBe(`loading`)
+
+      // Now resolve the loadSubset promise
+      resolveLoadSubset!()
+      await flushPromises()
+      await new Promise((resolve) => setTimeout(resolve, 10))
+
+      // Now isLoadingSubset should be false
+      expect(liveQuery.isLoadingSubset).toBe(false)
+
+      // Now the live query should be ready
+      expect(liveQuery.status).toBe(`ready`)
+    })
+
+    it(`should handle synchronously resolving loadSubset without race condition`, async () => {
+      // This test specifically targets the race condition where loadSubset resolves
+      // synchronously (or extremely fast). The fix must ensure we don't miss the
+      // transient loadingSubset -> ready transition even in this case.
+
+      // Track whether loadSubset was called
+      let loadSubsetCalled = false
+
+      const sourceCollection = createCollection<{ id: number; value: number }>({
+        id: `source-sync-subset`,
+        getKey: (item) => item.id,
+        syncMode: `on-demand`,
+        startSync: true,
+        sync: {
+          sync: ({ markReady, begin, write, commit }) => {
+            // Mark source ready immediately with some initial data
+            begin()
+            write({ type: `insert`, value: { id: 1, value: 10 } })
+            write({ type: `insert`, value: { id: 2, value: 20 } })
+            write({ type: `insert`, value: { id: 3, value: 30 } })
+            commit()
+            markReady()
+
+            return {
+              loadSubset: () => {
+                loadSubsetCalled = true
+                // Return an IMMEDIATELY resolving promise - this is the tricky case
+                // where the status transition could be missed if listener registration
+                // happens after snapshot triggering
+                return Promise.resolve()
+              },
+            }
+          },
+        },
+      })
+
+      // Create a live query with orderBy + limit that triggers lazy loading
+      const liveQuery = createLiveQueryCollection({
+        query: (q) =>
+          q
+            .from({ item: sourceCollection })
+            .orderBy(({ item }) => item.value, `asc`)
+            .limit(2),
+        startSync: true,
+      })
+
+      // Wait for everything to settle
+      await flushPromises()
+      await new Promise((resolve) => setTimeout(resolve, 10))
+
+      // Source should be ready
+      expect(sourceCollection.isReady()).toBe(true)
+
+      // loadSubset should have been called
+      expect(loadSubsetCalled).toBe(true)
+
+      // KEY ASSERTION: Even with sync resolution, isLoadingSubset should now be false
+      // (the promise resolved immediately)
+      expect(liveQuery.isLoadingSubset).toBe(false)
+
+      // And the live query should be ready (not stuck in loading)
+      expect(liveQuery.status).toBe(`ready`)
+
+      // Verify we have data (not empty due to race condition)
+      expect(liveQuery.size).toBeGreaterThan(0)
+    })
+
     it(`live query result collection has isLoadingSubset property`, async () => {
       const sourceCollection = createCollection<{ id: string; value: string }>({
         id: `source`,
@@ -952,7 +1250,7 @@ describe(`createLiveQueryCollection`, () => {
       })
 
       const liveQuery = createLiveQueryCollection((q) =>
-        q.from({ item: sourceCollection })
+        q.from({ item: sourceCollection }),
       )
 
       await liveQuery.preload()
@@ -982,11 +1280,15 @@ describe(`createLiveQueryCollection`, () => {
       expect(liveQuery.isLoadingSubset).toBe(false)
     })
 
-    it(`source collection isLoadingSubset is independent`, async () => {
-      let resolveLoadSubset: () => void
-      const loadSubsetPromise = new Promise<void>((resolve) => {
-        resolveLoadSubset = resolve
+    it(`source collection isLoadingSubset is independent from direct calls`, async () => {
+      // Create a pending promise for tracking direct loadSubset calls (not the initial subscription load)
+      let resolveDirectLoadSubset: () => void
+      const directLoadSubsetPromise = new Promise<void>((resolve) => {
+        resolveDirectLoadSubset = resolve
       })
+
+      // Track how many times loadSubset is called
+      let loadSubsetCallCount = 0
 
       const sourceCollection = createCollection<{ id: string; value: number }>({
         id: `source`,
@@ -999,7 +1301,15 @@ describe(`createLiveQueryCollection`, () => {
             commit()
             markReady()
             return {
-              loadSubset: () => loadSubsetPromise,
+              loadSubset: () => {
+                loadSubsetCallCount++
+                // First call is from the subscription's initial load - complete synchronously
+                // Subsequent calls (direct calls) use the pending promise
+                if (loadSubsetCallCount === 1) {
+                  return true // synchronous completion
+                }
+                return directLoadSubsetPromise
+              },
             }
           },
         },
@@ -1012,19 +1322,140 @@ describe(`createLiveQueryCollection`, () => {
 
       await liveQuery.preload()
 
+      // After preload, both should have isLoadingSubset = false
+      expect(sourceCollection.isLoadingSubset).toBe(false)
+      expect(liveQuery.isLoadingSubset).toBe(false)
+
       // Calling loadSubset directly on source collection sets its own isLoadingSubset
       sourceCollection._sync.loadSubset({})
       expect(sourceCollection.isLoadingSubset).toBe(true)
 
       // But live query isLoadingSubset tracks subscription-driven loads, not direct loadSubset calls
-      // so it remains false unless subscriptions trigger loads via predicate pushdown
+      // so it remains false when loadSubset is called directly on the source collection
       expect(liveQuery.isLoadingSubset).toBe(false)
 
-      resolveLoadSubset!()
+      resolveDirectLoadSubset!()
       await new Promise((resolve) => setTimeout(resolve, 10))
 
       expect(sourceCollection.isLoadingSubset).toBe(false)
       expect(liveQuery.isLoadingSubset).toBe(false)
+    })
+
+    it(`status listener is registered before triggering snapshot to prevent race condition`, async () => {
+      // This test verifies the fix for the race condition where the subscription
+      // status could transition to 'loadingSubset' and back to 'ready' before
+      // the status listener was registered, causing the live query to miss
+      // tracking the loadSubset promise.
+      //
+      // The fix ensures the status listener is registered BEFORE calling
+      // triggerSnapshot() (which calls requestSnapshot/requestLimitedSnapshot).
+
+      // Track the order of events
+      const events: Array<string> = []
+
+      // Create a source collection where loadSubset synchronously calls the tracking
+      const sourceCollection = createCollection<{ id: number; name: string }>({
+        id: `race-condition-source`,
+        getKey: (item) => item.id,
+        syncMode: `on-demand`,
+        sync: {
+          sync: ({ markReady }) => {
+            markReady()
+            return {
+              loadSubset: () => {
+                events.push(`loadSubset called`)
+                // Return a synchronously resolved promise to simulate the race condition
+                return Promise.resolve().then(() => {
+                  events.push(`loadSubset resolved`)
+                })
+              },
+            }
+          },
+        },
+      })
+
+      const liveQuery = createLiveQueryCollection({
+        query: (q) => q.from({ item: sourceCollection }),
+        startSync: true,
+      })
+
+      // Wait for the live query to be ready
+      await liveQuery.preload()
+
+      // Verify the events occurred
+      expect(events).toContain(`loadSubset called`)
+      expect(events).toContain(`loadSubset resolved`)
+
+      // The key assertion: the live query should be ready after preload
+      // This proves that even with a synchronously-resolved promise,
+      // the code path works correctly
+      expect(liveQuery.status).toBe(`ready`)
+      expect(liveQuery.isLoadingSubset).toBe(false)
+    })
+
+    it(`concurrent live queries should each track loading state independently`, async () => {
+      // This tests the fix for the !wasLoadingBefore bug:
+      // When multiple live queries subscribe to the same source collection,
+      // each must independently track when loading finishes.
+      // Previously, only the first live query would track loading because
+      // wasLoadingBefore was true for subsequent queries.
+
+      let resolveLoadSubset: () => void
+      const loadSubsetPromise = new Promise<void>((resolve) => {
+        resolveLoadSubset = resolve
+      })
+
+      const sourceCollection = createCollection<{ id: number; value: number }>({
+        id: `source-concurrent-lq`,
+        getKey: (item) => item.id,
+        syncMode: `on-demand`,
+        startSync: true,
+        sync: {
+          sync: ({ markReady, begin, write, commit }) => {
+            begin()
+            write({ type: `insert`, value: { id: 1, value: 10 } })
+            commit()
+            markReady()
+
+            return {
+              loadSubset: () => loadSubsetPromise,
+            }
+          },
+        },
+      })
+
+      // Create TWO live queries that subscribe to the same source collection
+      const liveQuery1 = createLiveQueryCollection({
+        query: (q) => q.from({ item: sourceCollection }),
+        startSync: true,
+      })
+
+      const liveQuery2 = createLiveQueryCollection({
+        query: (q) => q.from({ item: sourceCollection }),
+        startSync: true,
+      })
+
+      // Wait for both subscriptions to start and trigger loadSubset
+      await flushPromises()
+      await new Promise((resolve) => setTimeout(resolve, 10))
+
+      // Source should be ready
+      expect(sourceCollection.isReady()).toBe(true)
+
+      // Both live queries should be loading (not ready yet)
+      // KEY ASSERTION: Without the fix, liveQuery2 would be 'ready' here
+      // because it skipped tracking when wasLoadingBefore was true
+      expect(liveQuery1.status).toBe(`loading`)
+      expect(liveQuery2.status).toBe(`loading`)
+
+      // Resolve the loadSubset promise
+      resolveLoadSubset!()
+      await flushPromises()
+      await new Promise((resolve) => setTimeout(resolve, 10))
+
+      // Now both should be ready
+      expect(liveQuery1.status).toBe(`ready`)
+      expect(liveQuery2.status).toBe(`ready`)
     })
   })
 
@@ -1043,7 +1474,7 @@ describe(`createLiveQueryCollection`, () => {
             { id: 5, name: `Eve`, active: true },
             { id: 6, name: `Frank`, active: true },
           ],
-        })
+        }),
       )
 
       const activeUsers = createLiveQueryCollection((q) =>
@@ -1052,7 +1483,7 @@ describe(`createLiveQueryCollection`, () => {
           .where(({ user }) => eq(user.active, true))
           .orderBy(({ user }) => user.name, `desc`)
           .limit(3)
-          .offset(0)
+          .offset(0),
       )
 
       await activeUsers.preload()
@@ -1093,7 +1524,7 @@ describe(`createLiveQueryCollection`, () => {
             { id: 5, name: `Eve`, active: true },
             { id: 6, name: `Frank`, active: true },
           ],
-        })
+        }),
       )
 
       const activeUsers = createLiveQueryCollection((q) =>
@@ -1102,7 +1533,7 @@ describe(`createLiveQueryCollection`, () => {
           .where(({ user }) => eq(user.active, true))
           .orderBy(({ user }) => user.name, `asc`)
           .limit(3)
-          .offset(3)
+          .offset(3),
       )
 
       await activeUsers.preload()
@@ -1142,7 +1573,7 @@ describe(`createLiveQueryCollection`, () => {
             { id: 4, name: `David`, active: true },
             { id: 5, name: `Eve`, active: true },
           ],
-        })
+        }),
       )
 
       const activeUsers = createLiveQueryCollection((q) =>
@@ -1151,7 +1582,7 @@ describe(`createLiveQueryCollection`, () => {
           .where(({ user }) => eq(user.active, true))
           .orderBy(({ user }) => user.name, `asc`)
           .limit(2)
-          .offset(0)
+          .offset(0),
       )
 
       await activeUsers.preload()
@@ -1202,7 +1633,7 @@ describe(`createLiveQueryCollection`, () => {
             { id: 5, name: `Eve`, active: true },
             { id: 6, name: `Frank`, active: true },
           ],
-        })
+        }),
       )
 
       const activeUsers = createLiveQueryCollection((q) =>
@@ -1211,7 +1642,7 @@ describe(`createLiveQueryCollection`, () => {
           .where(({ user }) => eq(user.active, true))
           .orderBy(({ user }) => user.name, `asc`)
           .limit(2)
-          .offset(1)
+          .offset(1),
       )
 
       await activeUsers.preload()
@@ -1256,7 +1687,7 @@ describe(`createLiveQueryCollection`, () => {
             { id: 4, name: `David`, active: true },
             { id: 5, name: `Eve`, active: true },
           ],
-        })
+        }),
       )
 
       const activeUsers = createLiveQueryCollection((q) =>
@@ -1265,7 +1696,7 @@ describe(`createLiveQueryCollection`, () => {
           .where(({ user }) => eq(user.active, true))
           .orderBy(({ user }) => user.name, `asc`)
           .limit(2)
-          .offset(0)
+          .offset(0),
       )
 
       await activeUsers.preload()
@@ -1307,7 +1738,7 @@ describe(`createLiveQueryCollection`, () => {
             { id: 5, name: `Eve`, active: true },
             { id: 6, name: `Frank`, active: true },
           ],
-        })
+        }),
       )
 
       const activeUsers = createLiveQueryCollection((q) =>
@@ -1316,7 +1747,7 @@ describe(`createLiveQueryCollection`, () => {
           .where(({ user }) => eq(user.active, true))
           .orderBy(({ user }) => user.name, `asc`)
           .limit(2)
-          .offset(1)
+          .offset(1),
       )
 
       await activeUsers.preload()
@@ -1355,12 +1786,13 @@ describe(`createLiveQueryCollection`, () => {
         mockSyncCollectionOptions<User>({
           id: `limited-users`,
           getKey: (user) => user.id,
+          autoIndex: `eager`,
           initialData: [
             { id: 1, name: `Alice`, active: true },
             { id: 2, name: `Bob`, active: true },
             { id: 3, name: `Charlie`, active: true },
           ],
-        })
+        }),
       )
 
       const activeUsers = createLiveQueryCollection((q) =>
@@ -1369,7 +1801,7 @@ describe(`createLiveQueryCollection`, () => {
           .where(({ user }) => eq(user.active, true))
           .orderBy(({ user }) => user.name, `asc`)
           .limit(2)
-          .offset(0)
+          .offset(0),
       )
 
       await activeUsers.preload()
@@ -1429,7 +1861,7 @@ describe(`createLiveQueryCollection`, () => {
             { id: 5, name: `Eve`, active: true },
             { id: 6, name: `Frank`, active: true },
           ],
-        })
+        }),
       )
 
       const activeUsers = createLiveQueryCollection((q) =>
@@ -1438,7 +1870,7 @@ describe(`createLiveQueryCollection`, () => {
           .where(({ user }) => eq(user.active, true))
           .orderBy(({ user }) => user.name, `desc`)
           .limit(3)
-          .offset(0)
+          .offset(0),
       )
 
       await activeUsers.preload()
@@ -1471,7 +1903,7 @@ describe(`createLiveQueryCollection`, () => {
         (q) =>
           q
             .from({ user: usersCollection })
-            .where(({ user }) => eq(user.active, true))
+            .where(({ user }) => eq(user.active, true)),
         // No orderBy clause
       )
 
@@ -1484,7 +1916,7 @@ describe(`createLiveQueryCollection`, () => {
       expect(() => {
         activeUsers.utils.setWindow({ offset: 1, limit: 1 })
       }).toThrow(
-        /setWindow\(\) can only be called on collections with an ORDER BY clause/
+        /setWindow\(\) can only be called on collections with an ORDER BY clause/,
       )
     })
 
@@ -1508,7 +1940,7 @@ describe(`createLiveQueryCollection`, () => {
             { id: 5, title: `Post E`, authorId: 1, published: true },
             { id: 6, title: `Post F`, authorId: 2, published: true },
           ],
-        })
+        }),
       )
 
       const userPosts = createLiveQueryCollection((q) =>
@@ -1517,14 +1949,14 @@ describe(`createLiveQueryCollection`, () => {
           .join(
             { post: posts },
             ({ user, post }) => eq(user.id, post.authorId),
-            `inner`
+            `inner`,
           )
           .where(({ user, post }) =>
-            and(eq(user.active, true), eq(post.published, true))
+            and(eq(user.active, true), eq(post.published, true)),
           )
           .orderBy(({ post }) => post.title, `asc`)
           .limit(3)
-          .offset(0)
+          .offset(0),
       )
 
       await userPosts.preload()
@@ -1562,7 +1994,7 @@ describe(`createLiveQueryCollection`, () => {
             { id: 2, name: `Bob`, active: true },
             { id: 3, name: `Charlie`, active: true },
           ],
-        })
+        }),
       )
 
       const activeUsers = createLiveQueryCollection((q) =>
@@ -1570,7 +2002,7 @@ describe(`createLiveQueryCollection`, () => {
           .from({ user: extendedUsers })
           .where(({ user }) => eq(user.active, true))
           .orderBy(({ user }) => user.name, `asc`)
-          .limit(2)
+          .limit(2),
       )
 
       await activeUsers.preload()
@@ -1600,6 +2032,8 @@ describe(`createLiveQueryCollection`, () => {
           getKey: (item) => item.id,
           syncMode: `on-demand`,
           startSync: true,
+          autoIndex: `eager`, // Enable auto-indexing for orderBy optimization
+          defaultIndexType: BTreeIndex,
           sync: {
             sync: ({ markReady, begin, write, commit }) => {
               // Provide minimal initial data
@@ -1704,6 +2138,773 @@ describe(`createLiveQueryCollection`, () => {
       } finally {
         vi.useRealTimers()
       }
+    })
+
+    it(`advances offset when async loadSubset fills an initially empty window`, async () => {
+      type Item = { id: number; value: number }
+      const remoteData: Array<Item> = [
+        { id: 1, value: 1 },
+        { id: 2, value: 2 },
+        { id: 3, value: 3 },
+        { id: 4, value: 4 },
+      ]
+      const loadOffsets: Array<number | undefined> = []
+
+      const sourceCollection = createCollection<Item>({
+        id: `offset-advances-async`,
+        getKey: (item) => item.id,
+        syncMode: `on-demand`,
+        startSync: true,
+        defaultIndexType: BTreeIndex,
+        autoIndex: `eager`,
+        sync: {
+          sync: ({ begin, write, commit, markReady }) => {
+            markReady()
+            return {
+              loadSubset: (options: LoadSubsetOptions) => {
+                loadOffsets.push(options.offset)
+                return new Promise<void>((resolve) => {
+                  setTimeout(() => {
+                    begin()
+                    const start = options.offset ?? 0
+                    const end = options.limit
+                      ? start + options.limit
+                      : remoteData.length
+                    remoteData.slice(start, end).forEach((item) => {
+                      write({ type: `insert`, value: item })
+                    })
+                    commit()
+                    resolve()
+                  }, 0)
+                })
+              },
+            }
+          },
+        },
+      })
+
+      const liveQuery = createLiveQueryCollection((q) =>
+        q
+          .from({ item: sourceCollection })
+          .orderBy(({ item }) => item.value, `asc`)
+          .limit(2)
+          .offset(0),
+      )
+
+      await liveQuery.preload()
+      expect(liveQuery.toArray.map((item) => item.value)).toEqual([1, 2])
+      expect(loadOffsets[0]).toBe(0)
+
+      const moveResult = liveQuery.utils.setWindow({ offset: 2, limit: 2 })
+      if (moveResult !== true) {
+        await moveResult
+      }
+
+      expect(loadOffsets).toEqual([0, 2])
+      expect(liveQuery.toArray.map((item) => item.value)).toEqual([3, 4])
+    })
+
+    it(`requests new offsets when window moves across identical orderBy values`, async () => {
+      type Item = { id: number; rank: number }
+      const remoteData: Array<Item> = [
+        { id: 1, rank: 1 },
+        { id: 2, rank: 1 },
+        { id: 3, rank: 1 },
+        { id: 4, rank: 1 },
+        { id: 5, rank: 1 },
+        { id: 6, rank: 1 },
+      ]
+      const loadOffsets: Array<number | undefined> = []
+
+      const sourceCollection = createCollection<Item>({
+        id: `offset-moves-constant-orderby`,
+        getKey: (item) => item.id,
+        syncMode: `on-demand`,
+        startSync: true,
+        defaultIndexType: BTreeIndex,
+        autoIndex: `eager`,
+        sync: {
+          sync: ({ begin, write, commit, markReady }) => {
+            markReady()
+            return {
+              loadSubset: (options: LoadSubsetOptions) => {
+                loadOffsets.push(options.offset)
+                const start = options.offset ?? 0
+                const end = options.limit
+                  ? start + options.limit
+                  : remoteData.length
+                begin()
+                remoteData.slice(start, end).forEach((item) => {
+                  write({ type: `insert`, value: item })
+                })
+                commit()
+                return true
+              },
+            }
+          },
+        },
+      })
+
+      const liveQuery = createLiveQueryCollection((q) =>
+        q
+          .from({ item: sourceCollection })
+          .orderBy(({ item }) => item.rank, `asc`)
+          .limit(2)
+          .offset(0),
+      )
+
+      await liveQuery.preload()
+      await flushPromises()
+      expect(loadOffsets[0]).toBe(0)
+      expect(liveQuery.toArray.map((item) => item.id)).toEqual([1, 2])
+
+      const moveFirst = liveQuery.utils.setWindow({ offset: 2, limit: 2 })
+      if (moveFirst !== true) {
+        await moveFirst
+      }
+      await flushPromises()
+      expect(loadOffsets).toEqual([0, 2])
+      expect(liveQuery.toArray.map((item) => item.id)).toEqual([3, 4])
+
+      const moveSecond = liveQuery.utils.setWindow({ offset: 4, limit: 2 })
+      if (moveSecond !== true) {
+        await moveSecond
+      }
+      await flushPromises()
+      expect(loadOffsets).toEqual([0, 2, 4])
+      expect(liveQuery.toArray.map((item) => item.id)).toEqual([5, 6])
+    })
+  })
+
+  describe(`custom getKey with joins error handling`, () => {
+    it(`should allow custom getKey with joins (1:1 relationships)`, async () => {
+      // Custom getKey with joins is allowed for 1:1 relationships
+      // where the join produces unique keys per row
+      const base = createCollection(
+        mockSyncCollectionOptions<{ id: string; name: string }>({
+          id: `base-with-custom-key`,
+          getKey: (item) => item.id,
+          initialData: [{ id: `1`, name: `Item 1` }],
+        }),
+      )
+
+      const related = createCollection(
+        mockSyncCollectionOptions<{ id: string; value: number }>({
+          id: `related-with-custom-key`,
+          getKey: (item) => item.id,
+          initialData: [{ id: `1`, value: 100 }],
+        }),
+      )
+
+      // Custom getKey is allowed - error only occurs if actual duplicates happen
+      const liveQuery = createLiveQueryCollection({
+        query: (q) =>
+          q
+            .from({ base })
+            .join({ related }, ({ base: b, related: r }) => eq(b.id, r.id))
+            .select(({ base: b, related: r }) => ({
+              id: b.id,
+              name: b.name,
+              value: r.value,
+            })),
+        getKey: (item) => item.id, // Valid for 1:1 joins with unique keys
+      })
+
+      await liveQuery.preload()
+      expect(liveQuery.size).toBe(1)
+    })
+
+    it(`should throw enhanced error when duplicate keys occur with custom getKey + joins`, async () => {
+      const usersOptions = mockSyncCollectionOptions<{
+        id: string
+        name: string
+      }>({
+        id: `users-duplicate-test`,
+        getKey: (item) => item.id,
+        initialData: [{ id: `user1`, name: `User 1` }],
+      })
+      const users = createCollection(usersOptions)
+
+      const commentsOptions = mockSyncCollectionOptions<{
+        id: string
+        userId: string
+        text: string
+      }>({
+        id: `comments-duplicate-test`,
+        getKey: (item) => item.id,
+        initialData: [
+          { id: `comment1`, userId: `user1`, text: `First comment` },
+        ],
+      })
+      const comments = createCollection(commentsOptions)
+
+      const liveQuery = createLiveQueryCollection({
+        query: (q) =>
+          q
+            .from({ comments })
+            .join({ users }, ({ comments: c, users: u }) => eq(c.userId, u.id))
+            .select(({ comments: c, users: u }) => ({
+              id: c.id,
+              userId: coalesce(u.id, c.userId),
+              text: c.text,
+              userName: u.name,
+            })),
+        getKey: (item) => item.userId,
+        startSync: true,
+      })
+
+      await liveQuery.preload()
+      expect(liveQuery.size).toBe(1)
+
+      try {
+        commentsOptions.utils.begin()
+        commentsOptions.utils.write({
+          type: `insert`,
+          value: { id: `comment2`, userId: `user1`, text: `Second comment` },
+        })
+        commentsOptions.utils.commit()
+        await new Promise((resolve) => setTimeout(resolve, 10))
+      } catch (error: any) {
+        expect(error.message).toContain(`already exists in the collection`)
+        expect(error.message).toContain(`custom getKey`)
+        expect(error.message).toContain(`joined queries`)
+        expect(error.message).toContain(`composite key`)
+        return
+      }
+
+      throw new Error(`Expected DuplicateKeySyncError to be thrown`)
+    })
+  })
+
+  describe(`where clauses passed to loadSubset`, () => {
+    it(`passes eq where clause to loadSubset`, async () => {
+      const capturedOptions: Array<LoadSubsetOptions> = []
+
+      const baseCollection = createCollection<{ id: number; name: string }>({
+        id: `test-base`,
+        getKey: (item) => item.id,
+        syncMode: `on-demand`,
+        sync: {
+          sync: ({ markReady }) => {
+            markReady()
+            return {
+              loadSubset: (options: LoadSubsetOptions) => {
+                capturedOptions.push(options)
+                // Return true to indicate sync is complete (no async loading)
+                return true
+              },
+            }
+          },
+        },
+      })
+
+      // Create a live query collection with a where clause
+      // This will go through convertToBasicExpression
+      const liveQueryCollection = createLiveQueryCollection((q) =>
+        q.from({ item: baseCollection }).where(({ item }) => eq(item.id, 2)),
+      )
+
+      // Trigger sync which will call loadSubset
+      await liveQueryCollection.preload()
+      await flushPromises()
+
+      expect(capturedOptions.length).toBeGreaterThan(0)
+      const lastCall = capturedOptions[capturedOptions.length - 1]
+      expect(lastCall?.where).toBeDefined()
+      // The where clause should be normalized (alias removed), so it should be eq(ref(['id']), 2)
+      expect(lastCall?.where?.type).toBe(`func`)
+      if (lastCall?.where?.type === `func`) {
+        expect(lastCall.where.name).toBe(`eq`)
+      }
+    })
+
+    it(`passes ilike where clause to loadSubset`, async () => {
+      const capturedOptions: Array<LoadSubsetOptions> = []
+
+      const baseCollection = createCollection<{ id: number; name: string }>({
+        id: `test-base`,
+        getKey: (item) => item.id,
+        syncMode: `on-demand`,
+        sync: {
+          sync: ({ markReady }) => {
+            markReady()
+            return {
+              loadSubset: (options: LoadSubsetOptions) => {
+                capturedOptions.push(options)
+                // Return true to indicate sync is complete (no async loading)
+                return true
+              },
+            }
+          },
+        },
+      })
+
+      // Create a live query collection with an ilike where clause
+      // This will go through convertToBasicExpression
+      const liveQueryCollection = createLiveQueryCollection((q) =>
+        q
+          .from({ item: baseCollection })
+          .where(({ item }) => ilike(item.name, `%test%`)),
+      )
+
+      // Trigger sync which will call loadSubset
+      await liveQueryCollection.preload()
+      await flushPromises()
+
+      expect(capturedOptions.length).toBeGreaterThan(0)
+      const lastCall = capturedOptions[capturedOptions.length - 1]
+      // Without the fix: where would be undefined/null
+      // With the fix: where should be defined with the ilike expression
+      expect(lastCall?.where).toBeDefined()
+      expect(lastCall?.where).not.toBeNull()
+      // The where clause should be normalized (alias removed), so it should be ilike(ref(['name']), '%test%')
+      expect(lastCall?.where?.type).toBe(`func`)
+      if (lastCall?.where?.type === `func`) {
+        expect(lastCall.where.name).toBe(`ilike`)
+      }
+    })
+
+    it(`passes single orderBy clause to loadSubset when using limit`, async () => {
+      const capturedOptions: Array<LoadSubsetOptions> = []
+      let resolveLoadSubset: () => void
+      const loadSubsetPromise = new Promise<void>((resolve) => {
+        resolveLoadSubset = resolve
+      })
+
+      const baseCollection = createCollection<{
+        id: number
+        name: string
+        age: number
+      }>({
+        id: `test-base-orderby`,
+        getKey: (item) => item.id,
+        syncMode: `on-demand`,
+        sync: {
+          sync: ({ markReady }) => {
+            markReady()
+            return {
+              loadSubset: (options: LoadSubsetOptions) => {
+                capturedOptions.push(options)
+                return loadSubsetPromise
+              },
+            }
+          },
+        },
+      })
+
+      // Create a live query collection with orderBy and limit
+      const liveQueryCollection = createLiveQueryCollection((q) =>
+        q
+          .from({ item: baseCollection })
+          .orderBy(({ item }) => item.age, `asc`)
+          .limit(10),
+      )
+
+      // Start preload (don't await yet - it won't resolve until loadSubset completes)
+      const preloadPromise = liveQueryCollection.preload()
+      await flushPromises()
+
+      // Verify loadSubset was called with the correct options
+      expect(capturedOptions.length).toBeGreaterThan(0)
+
+      // Find the call that has orderBy (the limited snapshot request)
+      const callWithOrderBy = capturedOptions.find(
+        (opt) => opt.orderBy !== undefined,
+      )
+      expect(callWithOrderBy).toBeDefined()
+      expect(callWithOrderBy?.orderBy).toHaveLength(1)
+      expect(callWithOrderBy?.orderBy?.[0]?.expression.type).toBe(`ref`)
+      expect(callWithOrderBy?.limit).toBe(10)
+
+      // Resolve the loadSubset promise so preload can complete
+      resolveLoadSubset!()
+      await flushPromises()
+      await preloadPromise
+    })
+
+    it(`passes multiple orderBy columns to loadSubset when using limit`, async () => {
+      const capturedOptions: Array<LoadSubsetOptions> = []
+      let resolveLoadSubset: () => void
+      const loadSubsetPromise = new Promise<void>((resolve) => {
+        resolveLoadSubset = resolve
+      })
+
+      const baseCollection = createCollection<{
+        id: number
+        name: string
+        age: number
+        department: string
+      }>({
+        id: `test-base-multi-orderby`,
+        getKey: (item) => item.id,
+        syncMode: `on-demand`,
+        sync: {
+          sync: ({ markReady }) => {
+            markReady()
+            return {
+              loadSubset: (options: LoadSubsetOptions) => {
+                capturedOptions.push(options)
+                return loadSubsetPromise
+              },
+            }
+          },
+        },
+      })
+
+      // Create a live query collection with multiple orderBy columns and limit
+      const liveQueryCollection = createLiveQueryCollection((q) =>
+        q
+          .from({ item: baseCollection })
+          .orderBy(({ item }) => item.department, `asc`)
+          .orderBy(({ item }) => item.age, `desc`)
+          .limit(10),
+      )
+
+      // Start preload (don't await yet - it won't resolve until loadSubset completes)
+      const preloadPromise = liveQueryCollection.preload()
+      await flushPromises()
+
+      // Verify loadSubset was called with the correct options
+      expect(capturedOptions.length).toBeGreaterThan(0)
+
+      // Find the call that has orderBy with multiple columns
+      const callWithMultiOrderBy = capturedOptions.find(
+        (opt) => opt.orderBy !== undefined && opt.orderBy.length > 1,
+      )
+
+      // Multi-column orderBy should be passed to loadSubset so the sync layer
+      // can optimize the query if the backend supports composite ordering
+      expect(callWithMultiOrderBy).toBeDefined()
+      expect(callWithMultiOrderBy?.orderBy).toHaveLength(2)
+      expect(callWithMultiOrderBy?.orderBy?.[0]?.expression.type).toBe(`ref`)
+      expect(callWithMultiOrderBy?.orderBy?.[1]?.expression.type).toBe(`ref`)
+      expect(callWithMultiOrderBy?.limit).toBe(10)
+
+      // Resolve the loadSubset promise so preload can complete
+      resolveLoadSubset!()
+      await flushPromises()
+      await preloadPromise
+    })
+  })
+
+  describe(`lazy join key deduplication`, () => {
+    it(`should deduplicate join keys and filter nulls when requesting snapshot for lazy joins`, async () => {
+      type Task = {
+        id: number
+        name: string
+        project_id: number | null
+      }
+
+      type Project = {
+        id: number
+        name: string
+      }
+
+      // Main collection with duplicate foreign keys and null foreign keys
+      const taskCollection = createCollection<Task>({
+        id: `tasks-dedup`,
+        getKey: (task) => task.id,
+        sync: {
+          sync: ({ begin, write, commit, markReady }) => {
+            begin()
+            // Multiple tasks pointing to the same project (duplicates)
+            write({
+              type: `insert`,
+              value: { id: 1, name: `Task 1`, project_id: 10 },
+            })
+            write({
+              type: `insert`,
+              value: { id: 2, name: `Task 2`, project_id: 10 },
+            })
+            write({
+              type: `insert`,
+              value: { id: 3, name: `Task 3`, project_id: 10 },
+            })
+            write({
+              type: `insert`,
+              value: { id: 4, name: `Task 4`, project_id: 20 },
+            })
+            write({
+              type: `insert`,
+              value: { id: 5, name: `Task 5`, project_id: 20 },
+            })
+            // Tasks with null foreign key
+            write({
+              type: `insert`,
+              value: { id: 6, name: `Task 6`, project_id: null },
+            })
+            write({
+              type: `insert`,
+              value: { id: 7, name: `Task 7`, project_id: null },
+            })
+            commit()
+            markReady()
+          },
+        },
+      })
+
+      // Lazy joined collection that tracks loadSubset calls
+      const capturedOptions: Array<LoadSubsetOptions> = []
+
+      const projectCollection = createCollection<Project>({
+        id: `projects-dedup`,
+        getKey: (project) => project.id,
+        syncMode: `on-demand`,
+        sync: {
+          sync: ({ begin, write, commit, markReady }) => {
+            begin()
+            write({ type: `insert`, value: { id: 10, name: `Project A` } })
+            write({ type: `insert`, value: { id: 20, name: `Project B` } })
+            commit()
+            markReady()
+            return {
+              loadSubset: (options: LoadSubsetOptions) => {
+                capturedOptions.push(options)
+                return true
+              },
+            }
+          },
+        },
+      })
+
+      const liveQuery = createLiveQueryCollection((q) =>
+        q
+          .from({ task: taskCollection })
+          .leftJoin({ project: projectCollection }, ({ task, project }) =>
+            eq(task.project_id, project.id),
+          ),
+      )
+
+      await liveQuery.preload()
+      await flushPromises()
+
+      // Find the inArray expression in loadSubset calls
+      // It may be wrapped in `and` since requestSnapshot combines expressions
+      const findInArrayExpr = (
+        expr: LoadSubsetOptions[`where`],
+      ): Func | undefined => {
+        if (!(expr instanceof Func)) return undefined
+        if (expr.name === `in`) return expr
+        if (expr.name === `and` || expr.name === `or`) {
+          for (const arg of expr.args) {
+            const found = findInArrayExpr(arg)
+            if (found) return found
+          }
+        }
+        return undefined
+      }
+
+      const inExpr = capturedOptions
+        .map((opt) => findInArrayExpr(opt.where))
+        .find((expr) => expr !== undefined)
+
+      expect(inExpr).toBeDefined()
+
+      // The second arg of inArray is the array of values
+      const arrayArg = inExpr!.args[1]
+      expect(arrayArg).toBeInstanceOf(Value)
+      const valuesArg = arrayArg as Value<Array<number>>
+      const values = valuesArg.value.slice().sort()
+
+      // Should contain only the 2 unique project IDs -- no nulls, no duplicates
+      expect(values).toEqual([10, 20])
+    })
+
+    it(`should skip loadSubset when all join keys are null`, async () => {
+      type Task = {
+        id: number
+        name: string
+        project_id: number | null
+      }
+
+      type Project = {
+        id: number
+        name: string
+      }
+
+      const taskCollection = createCollection<Task>({
+        id: `tasks-all-null`,
+        getKey: (task) => task.id,
+        sync: {
+          sync: ({ begin, write, commit, markReady }) => {
+            begin()
+            write({
+              type: `insert`,
+              value: { id: 1, name: `Task 1`, project_id: null },
+            })
+            write({
+              type: `insert`,
+              value: { id: 2, name: `Task 2`, project_id: null },
+            })
+            write({
+              type: `insert`,
+              value: { id: 3, name: `Task 3`, project_id: null },
+            })
+            commit()
+            markReady()
+          },
+        },
+      })
+
+      const capturedOptions: Array<LoadSubsetOptions> = []
+
+      const projectCollection = createCollection<Project>({
+        id: `projects-all-null`,
+        getKey: (project) => project.id,
+        syncMode: `on-demand`,
+        sync: {
+          sync: ({ begin, write, commit, markReady }) => {
+            begin()
+            write({ type: `insert`, value: { id: 10, name: `Project A` } })
+            commit()
+            markReady()
+            return {
+              loadSubset: (options: LoadSubsetOptions) => {
+                capturedOptions.push(options)
+                return true
+              },
+            }
+          },
+        },
+      })
+
+      const liveQuery = createLiveQueryCollection((q) =>
+        q
+          .from({ task: taskCollection })
+          .leftJoin({ project: projectCollection }, ({ task, project }) =>
+            eq(task.project_id, project.id),
+          ),
+      )
+
+      await liveQuery.preload()
+      await flushPromises()
+
+      // No loadSubset call should have been made for the lazy join
+      // since all keys were null and filtered out
+      expect(capturedOptions).toHaveLength(0)
+
+      // All tasks should still appear in results with null project
+      expect(liveQuery.toArray).toHaveLength(3)
+      for (const row of liveQuery.toArray) {
+        expect(row.project).toBeUndefined()
+      }
+    })
+  })
+
+  describe(`chained live query collections without custom getKey`, () => {
+    it(`should return all items when a live query collection without getKey is used as a source`, async () => {
+      // Create a live query collection with the default (internal) getKey
+      const filteredUsers = createLiveQueryCollection({
+        id: `filtered-users`,
+        query: (q) =>
+          q
+            .from({ user: usersCollection })
+            .where(({ user }) => eq(user.active, true))
+            .select(({ user }) => ({
+              id: user.id,
+              name: user.name,
+            })),
+      })
+
+      // Use the live query collection as a source in another live query collection
+      const derived = createLiveQueryCollection({
+        id: `derived-from-live-query`,
+        query: (q) => q.from({ u: filteredUsers }),
+      })
+
+      await derived.preload()
+
+      // Should contain all active users (Alice and Bob), not just 1
+      expect(derived.size).toBe(2)
+    })
+
+    it(`should return all items when a live query collection with a join and no getKey is used as a source`, async () => {
+      type Team = {
+        id: number
+        name: string
+        lead_id: number
+      }
+
+      const teamsCollection = createCollection(
+        mockSyncCollectionOptions<Team>({
+          id: `test-teams`,
+          getKey: (team) => team.id,
+          initialData: [
+            { id: 1, name: `Alpha`, lead_id: 1 },
+            { id: 2, name: `Beta`, lead_id: 2 },
+            { id: 3, name: `Gamma`, lead_id: 1 },
+          ],
+        }),
+      )
+
+      // Join teams with users — no custom getKey
+      const teamsWithLeads = createLiveQueryCollection({
+        id: `teams-with-leads`,
+        query: (q) =>
+          q
+            .from({ team: teamsCollection })
+            .join({ user: usersCollection }, ({ team, user }) =>
+              eq(team.lead_id, user.id),
+            )
+            .select(({ team, user }) => ({
+              teamName: team.name,
+              leadName: user.name,
+            })),
+      })
+
+      // Use the joined live query collection as a source
+      const derived = createLiveQueryCollection({
+        id: `derived-from-join`,
+        query: (q) => q.from({ t: teamsWithLeads }),
+      })
+
+      await derived.preload()
+
+      // Should contain all 3 joined rows, not just 1
+      expect(derived.size).toBe(3)
+      expect(derived.toArray.map((row) => stripVirtualProps(row))).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({ teamName: `Alpha`, leadName: `Alice` }),
+          expect.objectContaining({ teamName: `Beta`, leadName: `Bob` }),
+          expect.objectContaining({ teamName: `Gamma`, leadName: `Alice` }),
+        ]),
+      )
+    })
+
+    it(`should propagate updates through chained live query collections without custom getKey`, async () => {
+      // Intermediate live query collection — no custom getKey
+      const intermediate = createLiveQueryCollection({
+        id: `update-intermediate`,
+        query: (q) =>
+          q.from({ user: usersCollection }).select(({ user }) => ({
+            id: user.id,
+            name: user.name,
+          })),
+      })
+
+      // Derived from the intermediate
+      const derived = createLiveQueryCollection({
+        id: `update-derived`,
+        query: (q) => q.from({ u: intermediate }),
+      })
+
+      await derived.preload()
+
+      // Should have all 3 users from sampleUsers, not just 1
+      expect(derived.size).toBe(3)
+
+      // Sync a new user into the source collection
+      usersCollection.utils.begin()
+      usersCollection.utils.write({
+        type: `insert`,
+        value: { id: 4, name: `Diana`, active: true },
+      })
+      usersCollection.utils.commit()
+
+      await flushPromises()
+
+      // The derived collection should see all 4 items
+      expect(derived.size).toBe(4)
     })
   })
 })

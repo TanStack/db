@@ -1,6 +1,7 @@
-import { EventEmitter } from "../event-emitter.js"
-import type { Collection } from "./index.js"
-import type { CollectionStatus } from "../types.js"
+import { EventEmitter } from '../event-emitter.js'
+import type { Collection } from './index.js'
+import type { CollectionStatus } from '../types.js'
+import type { BasicExpression } from '../query/ir.js'
 
 /**
  * Event emitted when the collection status changes
@@ -43,10 +44,65 @@ export interface CollectionLoadingSubsetChangeEvent {
   loadingSubsetTransition: `start` | `end`
 }
 
+/**
+ * Event emitted when the collection is truncated (all data cleared)
+ */
+export interface CollectionTruncateEvent {
+  type: `truncate`
+  collection: Collection<any, any, any, any, any>
+}
+
+export type CollectionIndexSerializableValue =
+  | string
+  | number
+  | boolean
+  | null
+  | Array<CollectionIndexSerializableValue>
+  | {
+      [key: string]: CollectionIndexSerializableValue
+    }
+
+export interface CollectionIndexResolverMetadata {
+  kind: `constructor` | `async`
+  name?: string
+}
+
+export interface CollectionIndexMetadata {
+  /**
+   * Version for the signature serialization contract.
+   */
+  signatureVersion: 1
+  /**
+   * Stable signature derived from expression + serializable options.
+   * Non-serializable option fields are intentionally omitted.
+   */
+  signature: string
+  indexId: number
+  name?: string
+  expression: BasicExpression
+  resolver: CollectionIndexResolverMetadata
+  options?: CollectionIndexSerializableValue
+}
+
+export interface CollectionIndexAddedEvent {
+  type: `index:added`
+  collection: Collection<any, any, any, any, any>
+  index: CollectionIndexMetadata
+}
+
+export interface CollectionIndexRemovedEvent {
+  type: `index:removed`
+  collection: Collection<any, any, any, any, any>
+  index: CollectionIndexMetadata
+}
+
 export type AllCollectionEvents = {
-  "status:change": CollectionStatusChangeEvent
-  "subscribers:change": CollectionSubscribersChangeEvent
-  "loadingSubset:change": CollectionLoadingSubsetChangeEvent
+  'status:change': CollectionStatusChangeEvent
+  'subscribers:change': CollectionSubscribersChangeEvent
+  'loadingSubset:change': CollectionLoadingSubsetChangeEvent
+  truncate: CollectionTruncateEvent
+  'index:added': CollectionIndexAddedEvent
+  'index:removed': CollectionIndexRemovedEvent
 } & {
   [K in CollectionStatus as `status:${K}`]: CollectionStatusEvent<K>
 }
@@ -56,9 +112,12 @@ export type CollectionEvent =
   | CollectionStatusChangeEvent
   | CollectionSubscribersChangeEvent
   | CollectionLoadingSubsetChangeEvent
+  | CollectionTruncateEvent
+  | CollectionIndexAddedEvent
+  | CollectionIndexRemovedEvent
 
 export type CollectionEventHandler<T extends keyof AllCollectionEvents> = (
-  event: AllCollectionEvents[T]
+  event: AllCollectionEvents[T],
 ) => void
 
 export class CollectionEventsManager extends EventEmitter<AllCollectionEvents> {
@@ -78,14 +137,14 @@ export class CollectionEventsManager extends EventEmitter<AllCollectionEvents> {
    */
   emit<T extends keyof AllCollectionEvents>(
     event: T,
-    eventPayload: AllCollectionEvents[T]
+    eventPayload: AllCollectionEvents[T],
   ): void {
     this.emitInner(event, eventPayload)
   }
 
   emitStatusChange<T extends CollectionStatus>(
     status: T,
-    previousStatus: CollectionStatus
+    previousStatus: CollectionStatus,
   ) {
     this.emit(`status:change`, {
       type: `status:change`,
@@ -106,13 +165,29 @@ export class CollectionEventsManager extends EventEmitter<AllCollectionEvents> {
 
   emitSubscribersChange(
     subscriberCount: number,
-    previousSubscriberCount: number
+    previousSubscriberCount: number,
   ) {
     this.emit(`subscribers:change`, {
       type: `subscribers:change`,
       collection: this.collection,
       previousSubscriberCount,
       subscriberCount,
+    })
+  }
+
+  emitIndexAdded(index: CollectionIndexMetadata) {
+    this.emit(`index:added`, {
+      type: `index:added`,
+      collection: this.collection,
+      index,
+    })
+  }
+
+  emitIndexRemoved(index: CollectionIndexMetadata) {
+    this.emit(`index:removed`, {
+      type: `index:removed`,
+      collection: this.collection,
+      index,
     })
   }
 

@@ -1,14 +1,14 @@
-import express from "express"
-import cors from "cors"
-import { sql } from "../db/postgres"
+import express from 'express'
+import cors from 'cors'
+import { sql } from '../db/postgres'
 import {
   validateInsertConfig,
   validateInsertTodo,
   validateUpdateConfig,
   validateUpdateTodo,
-} from "../db/validation"
-import type { Express } from "express"
-import type { Txid } from "@tanstack/electric-db-collection"
+} from '../db/validation'
+import type { Express } from 'express'
+import type { Txid } from '@tanstack/electric-db-collection'
 
 // Create Express app
 const app: Express = express()

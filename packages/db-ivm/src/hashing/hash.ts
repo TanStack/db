@@ -1,5 +1,5 @@
-import { MurmurHashStream, randomHash } from "./murmur.js"
-import type { Hasher } from "./murmur.js"
+import { MurmurHashStream, randomHash } from './murmur.js'
+import type { Hasher } from './murmur.js'
 
 /*
  * Implementation of structural hashing based on the Composites polyfill implementation:
@@ -17,6 +17,34 @@ const OBJECT_MARKER = randomHash()
 const ARRAY_MARKER = randomHash()
 const MAP_MARKER = randomHash()
 const SET_MARKER = randomHash()
+const UINT8ARRAY_MARKER = randomHash()
+const TEMPORAL_MARKER = randomHash()
+
+const temporalTypes = new Set([
+  `Temporal.Duration`,
+  `Temporal.Instant`,
+  `Temporal.PlainDate`,
+  `Temporal.PlainDateTime`,
+  `Temporal.PlainMonthDay`,
+  `Temporal.PlainTime`,
+  `Temporal.PlainYearMonth`,
+  `Temporal.ZonedDateTime`,
+])
+
+interface TemporalLike {
+  [Symbol.toStringTag]: string
+  toString: () => string
+}
+
+function isTemporal(input: object): input is TemporalLike {
+  const tag = (input as Record<symbol, unknown>)[Symbol.toStringTag]
+  return typeof tag === `string` && temporalTypes.has(tag)
+}
+
+// Maximum byte length for Uint8Arrays to hash by content instead of reference
+// Arrays smaller than this will be hashed by content, allowing proper equality comparisons
+// for small arrays like ULIDs (16 bytes) while still avoiding performance costs for large arrays
+const UINT8ARRAY_CONTENT_HASH_THRESHOLD = 128
 
 const hashCache = new WeakMap<object, number>()
 
@@ -35,6 +63,26 @@ function hashObject(input: object): number {
   let valueHash: number | undefined
   if (input instanceof Date) {
     valueHash = hashDate(input)
+  } else if (
+    // Check if input is a Uint8Array or Buffer
+    (typeof Buffer !== `undefined` && input instanceof Buffer) ||
+    input instanceof Uint8Array
+  ) {
+    // For small Uint8Arrays/Buffers (e.g., ULIDs, UUIDs), hash by content
+    // to enable proper equality comparisons. For large arrays, hash by reference
+    // to avoid performance costs.
+    if (input.byteLength <= UINT8ARRAY_CONTENT_HASH_THRESHOLD) {
+      valueHash = hashUint8Array(input)
+    } else {
+      // Deeply hashing large arrays would be too costly
+      // so we track them by reference and cache them in a weak map
+      return cachedReferenceHash(input)
+    }
+  } else if (input instanceof File) {
+    // Files are always hashed by reference due to their potentially large size
+    return cachedReferenceHash(input)
+  } else if (isTemporal(input)) {
+    valueHash = hashTemporal(input)
   } else {
     let plainObjectInput = input
     let marker = OBJECT_MARKER
@@ -53,17 +101,6 @@ function hashObject(input: object): number {
       plainObjectInput = [...input.entries()]
     }
 
-    if (
-      (typeof Buffer !== `undefined` && input instanceof Buffer) ||
-      input instanceof Uint8Array ||
-      input instanceof File
-    ) {
-      // Deeply hashing these objects would be too costly
-      // but we also don't want to ignore them
-      // so we track them by reference and cache them in a weak map
-      return cachedReferenceHash(input)
-    }
-
     valueHash = hashPlainObject(plainObjectInput, marker)
   }
 
@@ -75,6 +112,26 @@ function hashDate(input: Date): number {
   const hasher = new MurmurHashStream()
   hasher.update(DATE_MARKER)
   hasher.update(input.getTime())
+  return hasher.digest()
+}
+
+function hashUint8Array(input: Uint8Array): number {
+  const hasher = new MurmurHashStream()
+  hasher.update(UINT8ARRAY_MARKER)
+  // Hash the byte length first to differentiate arrays of different sizes
+  hasher.update(input.byteLength)
+  // Hash each byte in the array
+  for (let i = 0; i < input.byteLength; i++) {
+    hasher.writeByte(input[i]!)
+  }
+  return hasher.digest()
+}
+
+function hashTemporal(input: TemporalLike): number {
+  const hasher = new MurmurHashStream()
+  hasher.update(TEMPORAL_MARKER)
+  hasher.update(input[Symbol.toStringTag])
+  hasher.update(input.toString())
   return hasher.digest()
 }
 
@@ -125,7 +182,7 @@ function updateHasher(hasher: Hasher, input: unknown): void {
       return
     default:
       console.warn(
-        `Ignored input during hashing because it is of type ${typeof input} which is not supported`
+        `Ignored input during hashing because it is of type ${typeof input} which is not supported`,
       )
   }
 }

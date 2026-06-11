@@ -1,19 +1,29 @@
-import { describe, expectTypeOf, it } from "vitest"
+/* eslint-disable @typescript-eslint/require-await */
+import { describe, expectTypeOf, it } from 'vitest'
 import {
   and,
   createCollection,
   createLiveQueryCollection,
   eq,
   gt,
-} from "@tanstack/db"
-import { QueryClient } from "@tanstack/query-core"
-import { z } from "zod"
-import { queryCollectionOptions } from "../src/query"
+  parseLoadSubsetOptions,
+} from '@tanstack/db'
+import { QueryClient } from '@tanstack/query-core'
+import { z } from 'zod'
+import { queryCollectionOptions } from '../src/query'
+import type {
+  DataTag,
+  QueryFunctionContext,
+  QueryObserverOptions,
+} from '@tanstack/query-core'
+import type { QueryCollectionConfig, QueryCollectionUtils } from '../src/query'
 import type {
   DeleteMutationFnParams,
   InsertMutationFnParams,
+  LoadSubsetOptions,
   UpdateMutationFnParams,
-} from "@tanstack/db"
+} from '@tanstack/db'
+import type { OutputWithVirtual } from '../../db/tests/utils'
 
 describe(`Query collection type resolution tests`, () => {
   // Define test types
@@ -45,21 +55,21 @@ describe(`Query collection type resolution tests`, () => {
       onInsert: (params) => {
         // Verify that the mutation value has the correct type
         expectTypeOf(
-          params.transaction.mutations[0].modified
+          params.transaction.mutations[0].modified,
         ).toEqualTypeOf<ExplicitType>()
         return Promise.resolve()
       },
       onUpdate: (params) => {
         // Verify that the mutation value has the correct type
         expectTypeOf(
-          params.transaction.mutations[0].modified
+          params.transaction.mutations[0].modified,
         ).toEqualTypeOf<ExplicitType>()
         return Promise.resolve()
       },
       onDelete: (params) => {
         // Verify that the mutation value has the correct type
         expectTypeOf(
-          params.transaction.mutations[0].original
+          params.transaction.mutations[0].original,
         ).toEqualTypeOf<ExplicitType>()
         return Promise.resolve()
       },
@@ -67,15 +77,33 @@ describe(`Query collection type resolution tests`, () => {
 
     // Verify that the handlers are properly typed
     expectTypeOf(options.onInsert).parameters.toEqualTypeOf<
-      [InsertMutationFnParams<ExplicitType>]
+      [
+        InsertMutationFnParams<
+          ExplicitType,
+          string | number,
+          QueryCollectionUtils<ExplicitType>
+        >,
+      ]
     >()
 
     expectTypeOf(options.onUpdate).parameters.toEqualTypeOf<
-      [UpdateMutationFnParams<ExplicitType>]
+      [
+        UpdateMutationFnParams<
+          ExplicitType,
+          string | number,
+          QueryCollectionUtils<ExplicitType>
+        >,
+      ]
     >()
 
     expectTypeOf(options.onDelete).parameters.toEqualTypeOf<
-      [DeleteMutationFnParams<ExplicitType>]
+      [
+        DeleteMutationFnParams<
+          ExplicitType,
+          string | number,
+          QueryCollectionUtils<ExplicitType>
+        >,
+      ]
     >()
   })
 
@@ -102,7 +130,9 @@ describe(`Query collection type resolution tests`, () => {
     const usersCollection = createCollection(queryOptions)
 
     // Test that the collection itself has the correct type
-    expectTypeOf(usersCollection.toArray).toEqualTypeOf<Array<UserType>>()
+    expectTypeOf(usersCollection.toArray).toMatchTypeOf<
+      Array<OutputWithVirtual<UserType>>
+    >()
 
     // Test that the getKey function has the correct parameter type
     expectTypeOf(queryOptions.getKey).parameters.toEqualTypeOf<[UserType]>()
@@ -149,18 +179,22 @@ describe(`Query collection type resolution tests`, () => {
 
     // Test that the query results have the correct inferred types
     const results = activeUsersQuery.toArray
-    expectTypeOf(results).toEqualTypeOf<
-      Array<{
-        id: string
-        name: string
-        age: number
-        email: string
-        isActive: boolean
-      }>
+    expectTypeOf(results).toMatchTypeOf<
+      Array<
+        OutputWithVirtual<{
+          id: string
+          name: string
+          age: number
+          email: string
+          isActive: boolean
+        }>
+      >
     >()
 
     // Test that the collection itself has the correct type
-    expectTypeOf(usersCollection.toArray).toEqualTypeOf<Array<UserType>>()
+    expectTypeOf(usersCollection.toArray).toMatchTypeOf<
+      Array<OutputWithVirtual<UserType>>
+    >()
 
     // Test that we can access schema-inferred fields in the query with WHERE conditions
     const ageFilterQuery = createLiveQueryCollection({
@@ -176,12 +210,14 @@ describe(`Query collection type resolution tests`, () => {
     })
 
     const ageFilterResults = ageFilterQuery.toArray
-    expectTypeOf(ageFilterResults).toEqualTypeOf<
-      Array<{
-        id: string
-        name: string
-        age: number
-      }>
+    expectTypeOf(ageFilterResults).toMatchTypeOf<
+      Array<
+        OutputWithVirtual<{
+          id: string
+          name: string
+          age: number
+        }>
+      >
     >()
 
     // Test that the getKey function has the correct parameter type
@@ -298,7 +334,9 @@ describe(`Query collection type resolution tests`, () => {
       })
 
       const collection = createCollection(options)
-      expectTypeOf(collection.toArray).toEqualTypeOf<Array<TodoType>>()
+      expectTypeOf(collection.toArray).toEqualTypeOf<
+        Array<OutputWithVirtual<TodoType, string>>
+      >()
     })
   })
 
@@ -402,5 +440,317 @@ describe(`Query collection type resolution tests`, () => {
       // Should infer ResponseType as select parameter type
       expectTypeOf(selectUserData).parameters.toEqualTypeOf<[ResponseType]>()
     })
+  })
+
+  describe(`loadSubsetOptions type inference`, () => {
+    interface TestItem {
+      id: string
+      name: string
+    }
+
+    it(`should type loadSubsetOptions as LoadSubsetOptions in queryFn`, () => {
+      const config: QueryCollectionConfig<TestItem> = {
+        id: `loadSubsetTest`,
+        queryClient,
+        queryKey: [`loadSubsetTest`],
+        queryFn: (ctx) => {
+          // Verify that loadSubsetOptions is assignable to LoadSubsetOptions
+          // This ensures it can be used where LoadSubsetOptions is expected
+          expectTypeOf(
+            ctx.meta!.loadSubsetOptions!,
+          ).toExtend<LoadSubsetOptions>()
+          // so that parseLoadSubsetOptions can be called without type errors
+          parseLoadSubsetOptions(ctx.meta?.loadSubsetOptions)
+          // The fact that this call compiles without errors verifies that
+          // ctx.meta.loadSubsetOptions is typed correctly as LoadSubsetOptions
+          return Promise.resolve([])
+        },
+        getKey: (item) => item.id,
+        syncMode: `on-demand`,
+      }
+
+      const options = queryCollectionOptions(config)
+      createCollection(options)
+    })
+
+    it(`should allow meta to contain additional properties beyond loadSubsetOptions`, () => {
+      const config: QueryCollectionConfig<TestItem> = {
+        id: `loadSubsetTest`,
+        queryClient,
+        queryKey: [`loadSubsetTest`],
+        queryFn: (ctx) => {
+          // Verify that an object with loadSubsetOptions plus other properties
+          // can be assigned to ctx.meta's type. This ensures the type is not too restrictive.
+          const metaWithExtra = {
+            loadSubsetOptions: ctx.meta!.loadSubsetOptions!,
+            customProperty: `test`,
+            anotherProperty: 123,
+          }
+
+          // Test that this object can be assigned to ctx.meta's type
+          // This verifies that ctx.meta allows additional properties beyond loadSubsetOptions
+          const typedMeta: typeof ctx.meta = metaWithExtra
+
+          // Verify the assignment worked (this will fail at compile time if types don't match)
+          expectTypeOf(
+            typedMeta.loadSubsetOptions!,
+          ).toExtend<LoadSubsetOptions>()
+
+          return Promise.resolve([])
+        },
+        getKey: (item) => item.id,
+        syncMode: `on-demand`,
+      }
+
+      const options = queryCollectionOptions(config)
+      createCollection(options)
+    })
+
+    it(`should have loadSubsetOptions typed automatically without explicit QueryCollectionMeta import`, () => {
+      // This test validates that the module augmentation works automatically
+      // Note: We are NOT importing QueryCollectionMeta, yet ctx.meta.loadSubsetOptions
+      // should still be properly typed as LoadSubsetOptions
+      const config: QueryCollectionConfig<TestItem> = {
+        id: `autoTypeTest`,
+        queryClient,
+        queryKey: [`autoTypeTest`],
+        queryFn: (ctx) => {
+          // This should compile without errors because the module augmentation
+          // in global.d.ts is automatically loaded via the triple-slash reference
+          // in index.ts
+          const options = ctx.meta?.loadSubsetOptions
+
+          // Verify the type is correct
+          expectTypeOf(options).toMatchTypeOf<LoadSubsetOptions | undefined>()
+
+          // Verify it can be passed to parseLoadSubsetOptions without type errors
+          const parsed = parseLoadSubsetOptions(options)
+          expectTypeOf(parsed).toMatchTypeOf<{
+            filters: Array<any>
+            sorts: Array<any>
+            limit?: number
+          }>()
+
+          return Promise.resolve([])
+        },
+        getKey: (item) => item.id,
+        syncMode: `on-demand`,
+      }
+
+      const options = queryCollectionOptions(config)
+      createCollection(options)
+    })
+
+    it(`should allow users to extend QueryCollectionMeta via module augmentation`, () => {
+      // This test validates that users can extend QueryCollectionMeta to add custom properties
+      // by augmenting the @tanstack/query-db-collection module
+
+      // In reality, users would do:
+      // declare module "@tanstack/query-db-collection" {
+      //   interface QueryCollectionMeta {
+      //     customUserId: number
+      //     customContext?: string
+      //   }
+      // }
+
+      const config: QueryCollectionConfig<TestItem> = {
+        id: `extendMetaTest`,
+        queryClient,
+        queryKey: [`extendMetaTest`],
+        queryFn: (ctx) => {
+          // ctx.meta still has loadSubsetOptions
+          expectTypeOf(ctx.meta?.loadSubsetOptions).toMatchTypeOf<
+            LoadSubsetOptions | undefined
+          >()
+
+          // This test documents the extension pattern even though we can't
+          // actually augment QueryCollectionMeta in a test file (it would
+          // affect all other tests in the same compilation unit)
+
+          return Promise.resolve([])
+        },
+        getKey: (item) => item.id,
+        syncMode: `on-demand`,
+      }
+
+      const options = queryCollectionOptions(config)
+      createCollection(options)
+    })
+  })
+
+  describe(`queryOptions interoperability`, () => {
+    type NumberItem = {
+      id: number
+      value: string
+    }
+    type TaggedNumbersKey = DataTag<Array<string>, Array<NumberItem>, Error>
+    type NumberQueryObserverOptions = QueryObserverOptions<
+      Array<NumberItem>,
+      Error,
+      Array<NumberItem>,
+      Array<NumberItem>,
+      TaggedNumbersKey
+    >
+    const taggedNumbersQueryKey = [
+      `query-options-numbers`,
+    ] as unknown as TaggedNumbersKey
+
+    it(`should accept queryOptions-like spread config with tagged queryKey`, () => {
+      const queryOptionsLike = {
+        queryKey: taggedNumbersQueryKey,
+        queryFn: () =>
+          Promise.resolve([
+            { id: 1, value: `one` },
+            { id: 2, value: `two` },
+          ]),
+      } satisfies {
+        queryKey: TaggedNumbersKey
+        queryFn?: NumberQueryObserverOptions[`queryFn`]
+      }
+
+      const options = queryCollectionOptions({
+        ...queryOptionsLike,
+        queryClient,
+        getKey: (item) => item.id,
+      })
+
+      expectTypeOf(options.getKey).parameters.toEqualTypeOf<[NumberItem]>()
+    })
+
+    it(`should accept enabled from queryOptions-like config`, () => {
+      const queryOptionsLike = {
+        queryKey: taggedNumbersQueryKey,
+        queryFn: () => Promise.resolve([{ id: 1, value: `one` }]),
+        enabled: (_query) => true,
+      } satisfies {
+        queryKey: TaggedNumbersKey
+        queryFn?: NumberQueryObserverOptions[`queryFn`]
+        enabled?: NumberQueryObserverOptions[`enabled`]
+      }
+
+      const options = queryCollectionOptions({
+        ...queryOptionsLike,
+        queryClient,
+        getKey: (item) => item.id,
+      })
+
+      expectTypeOf(options.getKey).parameters.toEqualTypeOf<[NumberItem]>()
+    })
+
+    it(`should require explicit queryFn when source type marks queryFn optional`, () => {
+      const queryOptionsLike: {
+        queryKey: TaggedNumbersKey
+        queryFn?: (
+          context: QueryFunctionContext<TaggedNumbersKey>,
+        ) => Array<NumberItem> | Promise<Array<NumberItem>>
+      } = {
+        queryKey: taggedNumbersQueryKey,
+        queryFn: () => Promise.resolve([{ id: 1, value: `one` }]),
+      }
+
+      // @ts-expect-error - interop configs require queryFn even when source type marks it optional
+      queryCollectionOptions({
+        ...queryOptionsLike,
+        queryClient,
+        getKey: (item) => item.id,
+      })
+
+      const options = queryCollectionOptions({
+        ...queryOptionsLike,
+        queryFn: (context) => queryOptionsLike.queryFn!(context),
+        queryClient,
+        getKey: (item) => item.id,
+      })
+
+      expectTypeOf(options.getKey).parameters.toEqualTypeOf<[NumberItem]>()
+    })
+
+    it(`should require select for wrapped queryOptions-like responses`, () => {
+      type WrappedResponse = {
+        total: number
+        items: Array<NumberItem>
+      }
+      type TaggedWrappedKey = DataTag<Array<string>, WrappedResponse, Error>
+      type WrappedObserverOptions = QueryObserverOptions<
+        WrappedResponse,
+        Error,
+        WrappedResponse,
+        WrappedResponse,
+        TaggedWrappedKey
+      >
+      const taggedWrappedQueryKey = [
+        `query-options-wrapped`,
+      ] as unknown as TaggedWrappedKey
+
+      const wrappedQueryOptionsLike = {
+        queryKey: taggedWrappedQueryKey,
+        queryFn: () =>
+          Promise.resolve({
+            total: 1,
+            items: [{ id: 1, value: `one` }],
+          }),
+      } satisfies {
+        queryKey: TaggedWrappedKey
+        queryFn?: WrappedObserverOptions[`queryFn`]
+      }
+
+      // @ts-expect-error - wrapped response requires select to extract the item array
+      queryCollectionOptions({
+        ...wrappedQueryOptionsLike,
+        queryClient,
+        getKey: () => 1,
+      })
+
+      const options = queryCollectionOptions({
+        ...wrappedQueryOptionsLike,
+        select: (response) => response.items,
+        queryClient,
+        getKey: (item) => item.id,
+      })
+
+      expectTypeOf(options.getKey).parameters.toEqualTypeOf<[NumberItem]>()
+    })
+
+    it(`should still require queryFn for plain configs`, () => {
+      // @ts-expect-error - queryFn is required for plain configs
+      queryCollectionOptions<NumberItem>({
+        queryClient,
+        queryKey: [`query-options-missing-query-fn`],
+        getKey: (item) => item.id,
+      })
+    })
+
+    it(`should accept synchronous queryFn return values`, () => {
+      const options = queryCollectionOptions<NumberItem>({
+        queryClient,
+        queryKey: [`query-options-sync-query-fn`],
+        queryFn: () => [{ id: 1, value: `one` }],
+        getKey: (item) => item.id,
+      })
+
+      expectTypeOf(options.getKey).parameters.toEqualTypeOf<[NumberItem]>()
+    })
+  })
+
+  it(`should type collection.utils as QueryCollectionUtils after createCollection`, () => {
+    const collection = createCollection(
+      queryCollectionOptions<ExplicitType>({
+        id: `test-utils-typing`,
+        queryClient,
+        queryKey: [`test-utils`],
+        queryFn: () => Promise.resolve([]),
+        getKey: (item) => item.id,
+      }),
+    )
+
+    // Verify that collection.utils is typed as QueryCollectionUtils, not UtilsRecord
+    const utils: QueryCollectionUtils<ExplicitType> = collection.utils
+    expectTypeOf(utils.refetch).toBeFunction()
+    expectTypeOf(collection.utils.refetch).toBeFunction()
+    expectTypeOf(collection.utils.writeInsert).toBeFunction()
+    expectTypeOf(collection.utils.writeUpdate).toBeFunction()
+    expectTypeOf(collection.utils.writeDelete).toBeFunction()
+    expectTypeOf(collection.utils.isFetching).toBeBoolean()
+    expectTypeOf(collection.utils.isLoading).toBeBoolean()
   })
 })

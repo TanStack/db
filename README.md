@@ -37,12 +37,15 @@
 
 > Tanstack DB is currently in BETA. See [the release post](https://tanstack.com/blog/tanstack-db-0.1-the-embedded-client-database-for-tanstack-query) for more details.
 
-A reactive client store that lets you build fast, sync‑driven apps with a backend‑agnostic real‑time data layer:
+The reactive client store for your API.
 
-- Blazing‑fast query engine for sub‑millisecond live queries, joins & aggregates
-- Fine‑grained reactivity to minimize component re‑rendering
-- Robust transaction primitives for optimistic mutations with sync & lifecycle support
-- Normalized data model that keeps backends simple and consistent
+TanStack DB solves the problems of building fast, modern apps, helping you:
+
+- Avoid endpoint sprawl and network waterfalls by loading data into normalized collections
+- Optimise client performance with sub-millisecond live queries and real-time reactivity
+- Take the network off the interaction path with instant optimistic writes
+
+Data loading is optimized. Interactions feel instantaneous. Your backend stays simple and your app stays blazing fast. No matter how much data you load.
 
 <a href="https://tanstack.com/db" style="font-weight:bold" >Read the docs →</a>
 <br />
@@ -61,18 +64,18 @@ A reactive client store that lets you build fast, sync‑driven apps with a back
 <td>
 <a href="https://www.coderabbit.ai/?via=tanstack&dub_id=aCcEEdAOqqutX6OS" >
 <picture>
-  <source media="(prefers-color-scheme: dark)" srcset="https://tanstack.com/assets/coderabbit-dark-CMcuvjEy.svg" height="40" />
-  <source media="(prefers-color-scheme: light)" srcset="https://tanstack.com/assets/coderabbit-light-DVMJ2jHi.svg" height="40" />
-  <img src="https://tanstack.com/assets/coderabbit-light-DVMJ2jHi.svg" height="40" alt="CodeRabbit" />
+  <source media="(prefers-color-scheme: dark)" srcset="https://tanstack.com/assets/coderabbit-dark-D643Zkrv.svg" height="40" />
+  <source media="(prefers-color-scheme: light)" srcset="https://tanstack.com/assets/coderabbit-light-CIzGLYU_.svg" height="40" />
+  <img src="https://tanstack.com/assets/coderabbit-light-CIzGLYU_.svg" height="40" alt="CodeRabbit" />
 </picture>
 </a>
 </td>
 <td>
 <a href="https://www.cloudflare.com?utm_source=tanstack">
 <picture>
-  <source media="(prefers-color-scheme: dark)" srcset="https://tanstack.com/assets/cloudflare-white-DQDB7UaL.svg" height="60" />
-  <source media="(prefers-color-scheme: light)" srcset="https://tanstack.com/assets/cloudflare-black-CPufaW0B.svg" height="60" />
-  <img src="https://tanstack.com/assets/cloudflare-black-CPufaW0B.svg" height="60" alt="Cloudflare" />
+  <source media="(prefers-color-scheme: dark)" srcset="https://tanstack.com/assets/cloudflare-white-Co-Tyjbl.svg" height="60" />
+  <source media="(prefers-color-scheme: light)" srcset="https://tanstack.com/assets/cloudflare-black-6Ojsn8yh.svg" height="60" />
+  <img src="https://tanstack.com/assets/cloudflare-black-6Ojsn8yh.svg" height="60" alt="Cloudflare" />
 </picture>
 </a>
 </td>

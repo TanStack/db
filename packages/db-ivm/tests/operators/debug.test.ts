@@ -1,7 +1,7 @@
-import { describe, expect, test, vi } from "vitest"
-import { D2 } from "../../src/d2.js"
-import { MultiSet } from "../../src/multiset.js"
-import { debug } from "../../src/operators/index.js"
+import { describe, expect, test, vi } from 'vitest'
+import { D2 } from '../../src/d2.js'
+import { MultiSet } from '../../src/multiset.js'
+import { debug } from '../../src/operators/index.js'
 
 describe(`Operators`, () => {
   describe(`Debug operation`, () => {
@@ -19,13 +19,13 @@ describe(`Operators`, () => {
           [1, 1],
           [2, 1],
           [3, 1],
-        ])
+        ]),
       )
 
       graph.run()
 
       expect(consoleSpy).toHaveBeenCalledWith(
-        `debug test data: MultiSet([[1,1],[2,1],[3,1]])`
+        `debug test data: MultiSet([[1,1],[2,1],[3,1]])`,
       )
     })
 
@@ -43,13 +43,13 @@ describe(`Operators`, () => {
           [1, 1],
           [2, 1],
           [3, 1],
-        ])
+        ]),
       )
 
       graph.run()
 
       expect(consoleSpy).toHaveBeenCalledWith(
-        `debug test data: MultiSet([\n  [\n    1,\n    1\n  ],\n  [\n    2,\n    1\n  ],\n  [\n    3,\n    1\n  ]\n])`
+        `debug test data: MultiSet([\n  [\n    1,\n    1\n  ],\n  [\n    2,\n    1\n  ],\n  [\n    3,\n    1\n  ]\n])`,
       )
     })
 
@@ -67,13 +67,13 @@ describe(`Operators`, () => {
           [1, -1],
           [2, -2],
           [3, 1],
-        ])
+        ]),
       )
 
       graph.run()
 
       expect(consoleSpy).toHaveBeenCalledWith(
-        `debug test data: MultiSet([[1,-1],[2,-2],[3,1]])`
+        `debug test data: MultiSet([[1,-1],[2,-2],[3,1]])`,
       )
     })
   })

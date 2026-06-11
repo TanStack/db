@@ -7,7 +7,7 @@ export type IdleCallbackDeadline = {
 export type IdleCallbackFunction = (deadline: IdleCallbackDeadline) => void
 
 const requestIdleCallbackPolyfill = (
-  callback: IdleCallbackFunction
+  callback: IdleCallbackFunction,
 ): number => {
   // Use a very small timeout for the polyfill to simulate idle time
   const timeout = 0
@@ -26,7 +26,7 @@ const cancelIdleCallbackPolyfill = (id: number): void => {
 
 export const safeRequestIdleCallback: (
   callback: IdleCallbackFunction,
-  options?: { timeout?: number }
+  options?: { timeout?: number },
 ) => number =
   typeof window !== `undefined` && `requestIdleCallback` in window
     ? (callback, options) =>

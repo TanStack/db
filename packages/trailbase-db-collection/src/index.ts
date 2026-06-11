@@ -2,6 +2,6 @@ export {
   trailBaseCollectionOptions,
   type TrailBaseCollectionConfig,
   type TrailBaseCollectionUtils,
-} from "./trailbase"
+} from './trailbase'
 
-export * from "./errors"
+export * from './errors'

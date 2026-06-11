@@ -1,4 +1,4 @@
-import { Link } from "@tanstack/solid-router"
+import { Link } from '@tanstack/solid-router'
 
 export function NotFound() {
   return (

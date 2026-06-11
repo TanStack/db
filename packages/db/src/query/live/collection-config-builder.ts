@@ -1,41 +1,62 @@
-import { D2, output } from "@tanstack/db-ivm"
-import { compileQuery } from "../compiler/index.js"
-import { buildQuery, getQueryIR } from "../builder/index.js"
+import { D2, output, serializeValue } from '@tanstack/db-ivm'
+import {
+  FN_SELECT_STATE,
+  INCLUDES_ROUTING,
+  compileQuery,
+} from '../compiler/index.js'
+import { createCollection } from '../../collection/index.js'
 import {
   MissingAliasInputsError,
   SetWindowRequiresOrderByError,
-} from "../../errors.js"
-import { transactionScopedScheduler } from "../../scheduler.js"
-import { getActiveTransaction } from "../../transactions.js"
-import { CollectionSubscriber } from "./collection-subscriber.js"
-import { getCollectionBuilder } from "./collection-registry.js"
-import type { WindowOptions } from "../compiler/index.js"
-import type { SchedulerContextId } from "../../scheduler.js"
-import type { CollectionSubscription } from "../../collection/subscription.js"
-import type { RootStreamBuilder } from "@tanstack/db-ivm"
-import type { OrderByOptimizationInfo } from "../compiler/order-by.js"
-import type { Collection } from "../../collection/index.js"
+} from '../../errors.js'
+import { transactionScopedScheduler } from '../../scheduler.js'
+import { getActiveTransaction } from '../../transactions.js'
+import { CollectionSubscriber } from './collection-subscriber.js'
+import { getCollectionBuilder } from './collection-registry.js'
+import { LIVE_QUERY_INTERNAL } from './internal.js'
+import {
+  buildQueryFromConfig,
+  extractCollectionAliases,
+  extractCollectionFromSource,
+  extractCollectionsFromQuery,
+} from './utils.js'
+import type { LiveQueryInternalUtils } from './internal.js'
 import type {
+  IncludesCompilationResult,
+  WindowOptions,
+} from '../compiler/index.js'
+import type { SchedulerContextId } from '../../scheduler.js'
+import type { CollectionSubscription } from '../../collection/subscription.js'
+import type { RootStreamBuilder } from '@tanstack/db-ivm'
+import type { OrderByOptimizationInfo } from '../compiler/order-by.js'
+import type { Collection } from '../../collection/index.js'
+import type {
+  ChangeMessage,
   CollectionConfigSingleRowOption,
   KeyedStream,
   ResultStream,
+  StringCollationConfig,
   SyncConfig,
   UtilsRecord,
-} from "../../types.js"
-import type { Context, GetResult } from "../builder/types.js"
-import type { BasicExpression, QueryIR } from "../ir.js"
-import type { LazyCollectionCallbacks } from "../compiler/joins.js"
+} from '../../types.js'
+import type { Context, GetResult } from '../builder/types.js'
+import type {
+  BasicExpression,
+  IncludesMaterialization,
+  PropRef,
+  QueryIR,
+} from '../ir.js'
+import type { LazyCollectionCallbacks } from '../compiler/joins.js'
 import type {
   Changes,
   FullSyncState,
   LiveQueryCollectionConfig,
   SyncState,
-} from "./types.js"
-import type { AllCollectionEvents } from "../../collection/events.js"
+} from './types.js'
+import type { AllCollectionEvents } from '../../collection/events.js'
 
 export type LiveQueryCollectionUtils = UtilsRecord & {
   getRunCount: () => number
-  getBuilder: () => CollectionConfigBuilder<any, any>
   /**
    * Sets the offset and limit of an ordered query.
    * Is a no-op if the query is not ordered.
@@ -49,6 +70,7 @@ export type LiveQueryCollectionUtils = UtilsRecord & {
    * @returns The current window settings, or `undefined` if the query is not windowed
    */
   getWindow: () => { offset: number; limit: number } | undefined
+  [LIVE_QUERY_INTERNAL]: LiveQueryInternalUtils
 }
 
 type PendingGraphRun = {
@@ -81,6 +103,7 @@ export class CollectionConfigBuilder<
   private readonly orderByIndices = new WeakMap<object, string>()
 
   private readonly compare?: (val1: TResult, val2: TResult) => number
+  private readonly compareOptions?: StringCollationConfig
 
   private isGraphRunning = false
   private runCount = 0
@@ -131,6 +154,7 @@ export class CollectionConfigBuilder<
   public sourceWhereClausesCache:
     | Map<string, BasicExpression<boolean>>
     | undefined
+  private includesCache: Array<IncludesCompilationResult> | undefined
 
   // Map of source alias to subscription
   readonly subscriptions: Record<string, CollectionSubscription> = {}
@@ -142,12 +166,15 @@ export class CollectionConfigBuilder<
   optimizableOrderByCollections: Record<string, OrderByOptimizationInfo> = {}
 
   constructor(
-    private readonly config: LiveQueryCollectionConfig<TContext, TResult>
+    private readonly config: LiveQueryCollectionConfig<TContext, TResult>,
   ) {
     // Generate a unique ID if not provided
     this.id = config.id || `live-query-${++liveQueryCollectionCounter}`
 
-    this.query = buildQueryFromConfig(config)
+    this.query = buildQueryFromConfig({
+      query: config.query,
+      requireObjectResult: true,
+    })
     this.collections = extractCollectionsFromQuery(this.query)
     const collectionAliasesById = extractCollectionAliases(this.query)
 
@@ -168,9 +195,45 @@ export class CollectionConfigBuilder<
       this.compare = createOrderByComparator<TResult>(this.orderByIndices)
     }
 
+    // Use explicitly provided compareOptions if available, otherwise inherit from FROM collection
+    this.compareOptions =
+      this.config.defaultStringCollation ??
+      extractCollectionFromSource(this.query).compareOptions
+
     // Compile the base pipeline once initially
     // This is done to ensure that any errors are thrown immediately and synchronously
     this.compileBasePipeline()
+  }
+
+  /**
+   * Recursively checks if a query or any of its subqueries contains joins
+   */
+  private hasJoins(query: QueryIR): boolean {
+    // Check if this query has joins
+    if (query.join && query.join.length > 0) {
+      return true
+    }
+
+    // Recursively check subqueries in the from clause
+    if (query.from.type === `queryRef`) {
+      if (this.hasJoins(query.from.query)) {
+        return true
+      }
+    } else if (query.from.type === `unionFrom`) {
+      for (const source of query.from.sources) {
+        if (source.type === `queryRef` && this.hasJoins(source.query)) {
+          return true
+        }
+      }
+    } else if (query.from.type === `unionAll`) {
+      for (const branch of query.from.queries) {
+        if (this.hasJoins(branch)) {
+          return true
+        }
+      }
+    }
+
+    return false
   }
 
   getConfig(): CollectionConfigSingleRowOption<TResult> & {
@@ -180,9 +243,11 @@ export class CollectionConfigBuilder<
       id: this.id,
       getKey:
         this.config.getKey ||
-        ((item) => this.resultKeys.get(item) as string | number),
+        ((item: any) =>
+          (this.resultKeys.get(item) ?? item.$key) as string | number),
       sync: this.getSyncConfig(),
       compare: this.compare,
+      defaultStringCollation: this.compareOptions,
       gcTime: this.config.gcTime || 5000, // 5 seconds by default for live queries
       schema: this.config.schema,
       onInsert: this.config.onInsert,
@@ -192,9 +257,14 @@ export class CollectionConfigBuilder<
       singleResult: this.query.singleResult,
       utils: {
         getRunCount: this.getRunCount.bind(this),
-        getBuilder: () => this,
         setWindow: this.setWindow.bind(this),
         getWindow: this.getWindow.bind(this),
+        [LIVE_QUERY_INTERNAL]: {
+          getBuilder: () => this,
+          hasCustomGetKey: !!this.config.getKey,
+          hasJoins: this.hasJoins(this.query),
+          hasDistinct: !!this.query.distinct,
+        },
       },
     }
   }
@@ -219,7 +289,7 @@ export class CollectionConfigBuilder<
               unsubscribe()
               resolve()
             }
-          }
+          },
         )
       })
     }
@@ -285,7 +355,7 @@ export class CollectionConfigBuilder<
     // Should only be called when sync is active
     if (!this.currentSyncConfig || !this.currentSyncState) {
       throw new Error(
-        `maybeRunGraph called without active sync session. This should not happen.`
+        `maybeRunGraph called without active sync session. This should not happen.`,
       )
     }
 
@@ -302,8 +372,21 @@ export class CollectionConfigBuilder<
 
       // Always run the graph if subscribed (eager execution)
       if (syncState.subscribedToAllCollections) {
+        let callbackCalled = false
         while (syncState.graph.pendingWork()) {
           syncState.graph.run()
+          // Flush accumulated changes after each graph step to commit them as one transaction.
+          // This ensures intermediate join states (like null on one side) don't cause
+          // duplicate key errors when the full join result arrives in the same step.
+          syncState.flushPendingChanges?.()
+          callback?.()
+          callbackCalled = true
+        }
+
+        // Ensure the callback runs at least once even when the graph has no pending work.
+        // This handles lazy loading scenarios where setWindow() increases the limit or
+        // an async loadSubset completes and we need to re-check if more data is needed.
+        if (!callbackCalled) {
           callback?.()
         }
 
@@ -312,10 +395,14 @@ export class CollectionConfigBuilder<
         if (syncState.messagesCount === 0) {
           begin()
           commit()
-          // After initial commit, check if we should mark ready
-          // (in case all sources were already ready before we subscribed)
-          this.updateLiveQueryStatus(this.currentSyncConfig)
         }
+
+        // After graph processing completes, check if we should mark ready.
+        // This is the canonical place to transition to ready state because:
+        // 1. All data has been processed through the graph
+        // 2. All source collections have had a chance to send their initial data
+        // This prevents marking ready before data is processed (fixes isReady=true with empty data)
+        this.updateLiveQueryStatus(this.currentSyncConfig)
       }
     } finally {
       this.isGraphRunning = false
@@ -347,7 +434,7 @@ export class CollectionConfigBuilder<
       jobId?: unknown
       alias?: string
       dependencies?: Array<CollectionConfigBuilder<any, any>>
-    }
+    },
   ) {
     const contextId = options?.contextId ?? getActiveTransaction()?.id
     // Use the builder instance as the job ID for deduplication. This is memory-safe
@@ -373,13 +460,23 @@ export class CollectionConfigBuilder<
       return Array.from(deps)
     })()
 
+    // Ensure dependent builders are actually scheduled in this context so that
+    // dependency edges always point to a real job (or a deduped no-op if already scheduled).
+    if (contextId) {
+      for (const dep of dependentBuilders) {
+        if (typeof dep.scheduleGraphRun === `function`) {
+          dep.scheduleGraphRun(undefined, { contextId })
+        }
+      }
+    }
+
     // We intentionally scope deduplication to the builder instance. Each instance
     // owns caches and compiled pipelines, so sharing work across instances that
     // merely reuse the same string id would execute the wrong builder's graph.
 
     if (!this.currentSyncConfig || !this.currentSyncState) {
       throw new Error(
-        `scheduleGraphRun called without active sync session. This should not happen.`
+        `scheduleGraphRun called without active sync session. This should not happen.`,
       )
     }
 
@@ -419,6 +516,13 @@ export class CollectionConfigBuilder<
   }
 
   /**
+   * Returns true if this builder has a pending graph run for the given context.
+   */
+  hasPendingGraphRun(contextId: SchedulerContextId): boolean {
+    return this.pendingGraphRuns.has(contextId)
+  }
+
+  /**
    * Executes a pending graph run. Called by the scheduler when dependencies are satisfied.
    * Clears the pending state BEFORE execution so that any re-schedules during the run
    * create fresh state and don't interfere with the current execution.
@@ -429,7 +533,7 @@ export class CollectionConfigBuilder<
    */
   private executeGraphRun(
     contextId?: SchedulerContextId,
-    pendingParam?: PendingGraphRun
+    pendingParam?: PendingGraphRun,
   ): void {
     // Get pending state: either from parameter (no context) or from map (with context)
     // Remove from map BEFORE checking sync state to prevent leaking entries when sync ends
@@ -504,7 +608,7 @@ export class CollectionConfigBuilder<
     // Extend the pipeline such that it applies the incoming changes to the collection
     const fullSyncState = this.extendPipelineWithChangeProcessing(
       config,
-      syncState
+      syncState,
     )
     this.currentSyncState = fullSyncState
 
@@ -513,12 +617,27 @@ export class CollectionConfigBuilder<
     this.unsubscribeFromSchedulerClears = transactionScopedScheduler.onClear(
       (contextId) => {
         this.clearPendingGraphRun(contextId)
-      }
+      },
     )
+
+    // Listen for loadingSubset changes on the live query collection BEFORE subscribing.
+    // This ensures we don't miss the event if subset loading completes synchronously.
+    // When isLoadingSubset becomes false, we may need to mark the collection as ready
+    // (if all source collections are already ready but we were waiting for subset load to complete)
+    const loadingSubsetUnsubscribe = config.collection.on(
+      `loadingSubset:change`,
+      (event) => {
+        if (!event.isLoadingSubset) {
+          // Subset loading finished, check if we can now mark ready
+          this.updateLiveQueryStatus(config)
+        }
+      },
+    )
+    syncState.unsubscribeCallbacks.add(loadingSubsetUnsubscribe)
 
     const loadSubsetDataCallbacks = this.subscribeToAllCollections(
       config,
-      fullSyncState
+      fullSyncState,
     )
 
     this.maybeRunGraphFn = () => this.scheduleGraphRun(loadSubsetDataCallbacks)
@@ -544,6 +663,7 @@ export class CollectionConfigBuilder<
       this.inputsCache = undefined
       this.pipelineCache = undefined
       this.sourceWhereClausesCache = undefined
+      this.includesCache = undefined
 
       // Reset lazy source alias state
       this.lazySources.clear()
@@ -553,7 +673,7 @@ export class CollectionConfigBuilder<
       // Clear subscription references to prevent memory leaks
       // Note: Individual subscriptions are already unsubscribed via unsubscribeCallbacks
       Object.keys(this.subscriptions).forEach(
-        (key) => delete this.subscriptions[key]
+        (key) => delete this.subscriptions[key],
       )
       this.compiledAliasToCollectionId = {}
 
@@ -573,7 +693,7 @@ export class CollectionConfigBuilder<
       Object.keys(this.collectionByAlias).map((alias) => [
         alias,
         this.graphCache!.newInput<any>(),
-      ])
+      ]),
     )
 
     const compilation = compileQuery(
@@ -586,18 +706,19 @@ export class CollectionConfigBuilder<
       this.optimizableOrderByCollections,
       (windowFn: (options: WindowOptions) => void) => {
         this.windowFn = windowFn
-      }
+      },
     )
 
     this.pipelineCache = compilation.pipeline
     this.sourceWhereClausesCache = compilation.sourceWhereClauses
     this.compiledAliasToCollectionId = compilation.aliasToCollectionId
+    this.includesCache = compilation.includes
 
     // Defensive check: verify all compiled aliases have corresponding inputs
     // This should never happen since all aliases come from user declarations,
     // but catch it early if the assumption is violated in the future.
     const missingAliases = Object.keys(this.compiledAliasToCollectionId).filter(
-      (alias) => !Object.hasOwn(this.inputsCache!, alias)
+      (alias) => !Object.hasOwn(this.inputsCache!, alias),
     )
     if (missingAliases.length > 0) {
       throw new MissingAliasInputsError(missingAliases)
@@ -617,26 +738,89 @@ export class CollectionConfigBuilder<
 
   private extendPipelineWithChangeProcessing(
     config: SyncMethods<TResult>,
-    syncState: SyncState
+    syncState: SyncState,
   ): FullSyncState {
     const { begin, commit } = config
     const { graph, inputs, pipeline } = this.maybeCompileBasePipeline()
+
+    // Accumulator for changes across all output callbacks within a single graph run.
+    // This allows us to batch all changes from intermediate join states into a single
+    // transaction, avoiding duplicate key errors when joins produce multiple outputs
+    // for the same key (e.g., first output with null, then output with joined data).
+    let pendingChanges: Map<unknown, Changes<TResult>> = new Map()
 
     pipeline.pipe(
       output((data) => {
         const messages = data.getInner()
         syncState.messagesCount += messages.length
 
-        begin()
-        messages
-          .reduce(
-            accumulateChanges<TResult>,
-            new Map<unknown, Changes<TResult>>()
-          )
-          .forEach(this.applyChanges.bind(this, config))
-        commit()
-      })
+        // Accumulate changes from this output callback into the pending changes map.
+        // Changes for the same key are merged (inserts/deletes are added together).
+        messages.reduce(accumulateChanges<TResult>, pendingChanges)
+      }),
     )
+
+    // Set up includes output routing and child collection lifecycle
+    const includesState = this.setupIncludesOutput(
+      this.includesCache,
+      syncState,
+    )
+
+    // Flush pending changes and reset the accumulator.
+    // Called at the end of each graph run to commit all accumulated changes.
+    syncState.flushPendingChanges = () => {
+      const hasParentChanges = pendingChanges.size > 0
+      const hasChildChanges = hasPendingIncludesChanges(includesState)
+
+      if (!hasParentChanges && !hasChildChanges) {
+        return
+      }
+
+      let changesToApply = pendingChanges
+
+      // When a custom getKey is provided, multiple D2 internal keys may map
+      // to the same user-visible key. Re-accumulate by custom key so that a
+      // retract + insert for the same logical row merges into an UPDATE
+      // instead of a separate DELETE and INSERT that can race.
+      if (this.config.getKey) {
+        const merged = new Map<unknown, Changes<TResult>>()
+        for (const [, changes] of pendingChanges) {
+          const customKey = this.config.getKey(changes.value)
+          const existing = merged.get(customKey)
+          if (existing) {
+            existing.inserts += changes.inserts
+            existing.deletes += changes.deletes
+            // Keep the value from the insert side (the new value)
+            if (changes.inserts > 0) {
+              existing.value = changes.value
+              if (changes.orderByIndex !== undefined) {
+                existing.orderByIndex = changes.orderByIndex
+              }
+            }
+          } else {
+            merged.set(customKey, { ...changes })
+          }
+        }
+        changesToApply = merged
+      }
+
+      // 1. Flush parent changes
+      if (hasParentChanges) {
+        begin()
+        changesToApply.forEach(this.applyChanges.bind(this, config))
+        commit()
+      }
+      pendingChanges = new Map()
+
+      // 2. Process includes: create/dispose child Collections, route child changes
+      flushIncludesState(
+        includesState,
+        config.collection,
+        this.id,
+        hasParentChanges ? changesToApply : null,
+        config,
+      )
+    }
 
     graph.finalize()
 
@@ -648,6 +832,89 @@ export class CollectionConfigBuilder<
     return syncState as FullSyncState
   }
 
+  /**
+   * Sets up output callbacks for includes child pipelines.
+   * Each includes entry gets its own output callback that accumulates child changes,
+   * and a child registry that maps correlation key → child Collection.
+   */
+  private setupIncludesOutput(
+    includesEntries: Array<IncludesCompilationResult> | undefined,
+    syncState: SyncState,
+  ): Array<IncludesOutputState> {
+    if (!includesEntries || includesEntries.length === 0) {
+      return []
+    }
+
+    return includesEntries.map((entry) => {
+      const state: IncludesOutputState = {
+        fieldName: entry.fieldName,
+        resultPath: entry.resultPath,
+        childCorrelationField: entry.childCorrelationField,
+        hasOrderBy: entry.hasOrderBy,
+        materialization: entry.materialization,
+        scalarField: entry.scalarField,
+        childRegistry: new Map(),
+        pendingChildChanges: new Map(),
+        correlationToParentKeys: new Map(),
+      }
+
+      // Attach output callback on the child pipeline
+      entry.pipeline.pipe(
+        output((data) => {
+          const messages = data.getInner()
+          syncState.messagesCount += messages.length
+
+          for (const [[childKey, tupleData], multiplicity] of messages) {
+            const [childResult, _orderByIndex, correlationKey, parentContext] =
+              tupleData as unknown as [
+                any,
+                string | undefined,
+                unknown,
+                Record<string, any> | null,
+              ]
+
+            const routingKey = computeRoutingKey(correlationKey, parentContext)
+
+            // Accumulate by [routingKey, childKey]
+            let byChild = state.pendingChildChanges.get(routingKey)
+            if (!byChild) {
+              byChild = new Map()
+              state.pendingChildChanges.set(routingKey, byChild)
+            }
+
+            const existing = byChild.get(childKey) || {
+              deletes: 0,
+              inserts: 0,
+              value: childResult,
+              orderByIndex: _orderByIndex,
+            }
+
+            if (multiplicity < 0) {
+              existing.deletes += Math.abs(multiplicity)
+            } else if (multiplicity > 0) {
+              existing.inserts += multiplicity
+              existing.value = childResult
+            }
+
+            byChild.set(childKey, existing)
+          }
+        }),
+      )
+
+      // Set up shared buffers for nested includes (e.g., comments inside issues)
+      if (entry.childCompilationResult.includes) {
+        state.nestedSetups = setupNestedPipelines(
+          entry.childCompilationResult.includes,
+          syncState,
+        )
+        state.nestedRoutingIndex = new Map()
+        state.nestedRoutingReverseIndex = new Map()
+      }
+
+      return state
+    })
+  }
+
   private applyChanges(
     config: SyncMethods<TResult>,
     changes: {
@@ -656,7 +923,7 @@ export class CollectionConfigBuilder<
       value: TResult
       orderByIndex: string | undefined
     },
-    key: unknown
+    key: unknown,
   ) {
     const { write, collection } = config
     const { deletes, inserts, value, orderByIndex } = changes
@@ -695,7 +962,7 @@ export class CollectionConfigBuilder<
       })
     } else {
       throw new Error(
-        `Could not apply changes: ${JSON.stringify(changes)}. This should never happen.`
+        `Could not apply changes: ${JSON.stringify(changes)}. This should never happen.`,
       )
     }
   }
@@ -706,14 +973,14 @@ export class CollectionConfigBuilder<
   private handleSourceStatusChange(
     config: SyncMethods<TResult>,
     collectionId: string,
-    event: AllCollectionEvents[`status:change`]
+    event: AllCollectionEvents[`status:change`],
   ) {
     const { status } = event
 
     // Handle error state - any source collection in error puts live query in error
     if (status === `error`) {
       this.transitionToError(
-        `Source collection '${collectionId}' entered error state`
+        `Source collection '${collectionId}' entered error state`,
       )
       return
     }
@@ -723,7 +990,7 @@ export class CollectionConfigBuilder<
     if (status === `cleaned-up`) {
       this.transitionToError(
         `Source collection '${collectionId}' was manually cleaned up while live query '${this.id}' depends on it. ` +
-          `Live queries prevent automatic GC, so this was likely a manual cleanup() call.`
+          `Live queries prevent automatic GC, so this was likely a manual cleanup() call.`,
       )
       return
     }
@@ -743,8 +1010,16 @@ export class CollectionConfigBuilder<
       return
     }
 
-    // Mark ready when all source collections are ready
-    if (this.allCollectionsReady()) {
+    const subscribedToAll = this.currentSyncState?.subscribedToAllCollections
+    const allReady = this.allCollectionsReady()
+    const isLoading = this.liveQueryCollection?.isLoadingSubset
+    // Mark ready when:
+    // 1. All subscriptions are set up (subscribedToAllCollections)
+    // 2. All source collections are ready
+    // 3. The live query collection is not loading subset data
+    // This prevents marking the live query ready before its data is processed
+    // (fixes issue where useLiveQuery returns isReady=true with empty data)
+    if (subscribedToAll && allReady && !isLoading) {
       markReady()
     }
   }
@@ -764,7 +1039,7 @@ export class CollectionConfigBuilder<
 
   private allCollectionsReady() {
     return Object.values(this.collections).every((collection) =>
-      collection.isReady()
+      collection.isReady(),
     )
   }
 
@@ -775,14 +1050,14 @@ export class CollectionConfigBuilder<
    */
   private subscribeToAllCollections(
     config: SyncMethods<TResult>,
-    syncState: FullSyncState
+    syncState: FullSyncState,
   ) {
     // Use compiled aliases as the source of truth - these include all aliases from the query
     // including those from subqueries, which may not be in collectionByAlias
     const compiledAliases = Object.entries(this.compiledAliasToCollectionId)
     if (compiledAliases.length === 0) {
       throw new Error(
-        `Compiler returned no alias metadata for query '${this.id}'. This should not happen; please report.`
+        `Compiler returned no alias metadata for query '${this.id}'. This should not happen; please report.`,
       )
     }
 
@@ -807,7 +1082,7 @@ export class CollectionConfigBuilder<
         alias,
         collectionId,
         collection,
-        this
+        this,
       )
 
       // Subscribe to status changes for status flow
@@ -824,7 +1099,7 @@ export class CollectionConfigBuilder<
       // Create a callback for loading more data if needed (used by OrderBy optimization)
       const loadMore = collectionSubscriber.loadMoreIfNeeded.bind(
         collectionSubscriber,
-        subscription
+        subscription,
       )
 
       return loadMore
@@ -842,25 +1117,17 @@ export class CollectionConfigBuilder<
     // (graph only runs when all collections are subscribed)
     syncState.subscribedToAllCollections = true
 
-    // Initial status check after all subscriptions are set up
-    this.updateLiveQueryStatus(config)
+    // Note: We intentionally don't call updateLiveQueryStatus() here.
+    // The graph hasn't run yet, so marking ready would be premature.
+    // The canonical place to mark ready is after the graph processes data
+    // in maybeRunGraph(), which ensures data has been processed first.
 
     return loadSubsetDataCallbacks
   }
 }
 
-function buildQueryFromConfig<TContext extends Context>(
-  config: LiveQueryCollectionConfig<any, any>
-) {
-  // Build the query using the provided query builder function or instance
-  if (typeof config.query === `function`) {
-    return buildQuery<TContext>(config.query)
-  }
-  return getQueryIR(config.query)
-}
-
 function createOrderByComparator<T extends object>(
-  orderByIndices: WeakMap<object, string>
+  orderByIndices: WeakMap<object, string>,
 ) {
   return (val1: T, val2: T): number => {
     // Use the orderBy index stored in the WeakMap
@@ -884,105 +1151,843 @@ function createOrderByComparator<T extends object>(
 }
 
 /**
- * Helper function to extract collections from a compiled query
- * Traverses the query IR to find all collection references
- * Maps collections by their ID (not alias) as expected by the compiler
+ * Shared buffer setup for a single nested includes level.
+ * Pipeline output writes into the buffer; during flush the buffer is drained
+ * into per-entry states via the routing index.
  */
-function extractCollectionsFromQuery(
-  query: any
-): Record<string, Collection<any, any, any>> {
-  const collections: Record<string, any> = {}
+type NestedIncludesSetup = {
+  compilationResult: IncludesCompilationResult
+  /** Shared buffer: nestedCorrelationKey → Map<childKey, Changes> */
+  buffer: Map<unknown, Map<unknown, Changes<any>>>
+  /** For 3+ levels of nesting */
+  nestedSetups?: Array<NestedIncludesSetup>
+}
 
-  // Helper function to recursively extract collections from a query or source
-  function extractFromSource(source: any) {
-    if (source.type === `collectionRef`) {
-      collections[source.collection.id] = source.collection
-    } else if (source.type === `queryRef`) {
-      // Recursively extract from subquery
-      extractFromQuery(source.query)
+/**
+ * State tracked per includes entry for output routing and child lifecycle
+ */
+type IncludesOutputState = {
+  fieldName: string
+  resultPath: Array<string>
+  childCorrelationField: PropRef
+  /** Whether the child query has an ORDER BY clause */
+  hasOrderBy: boolean
+  /** How the child result is materialized on the parent row */
+  materialization: IncludesMaterialization
+  /** Internal field used to unwrap scalar child selects */
+  scalarField?: string
+  /** Maps correlation key value → child Collection entry */
+  childRegistry: Map<unknown, ChildCollectionEntry>
+  /** Pending child changes: correlationKey → Map<childKey, Changes> */
+  pendingChildChanges: Map<unknown, Map<unknown, Changes<any>>>
+  /** Reverse index: correlation key → Set of parent collection keys */
+  correlationToParentKeys: Map<unknown, Set<unknown>>
+  /** Shared nested pipeline setups (one per nested includes level) */
+  nestedSetups?: Array<NestedIncludesSetup>
+  /** nestedCorrelationKey → parentCorrelationKey */
+  nestedRoutingIndex?: Map<unknown, unknown>
+  /** parentCorrelationKey → Set<nestedCorrelationKeys> */
+  nestedRoutingReverseIndex?: Map<unknown, Set<unknown>>
+}
+
+type ChildCollectionEntry = {
+  collection: Collection<any, any, any>
+  syncMethods: SyncMethods<any> | null
+  resultKeys: WeakMap<object, unknown>
+  orderByIndices: WeakMap<object, string> | null
+  /** Per-entry nested includes states (one per nested includes level) */
+  includesStates?: Array<IncludesOutputState>
+}
+
+function materializesInline(state: IncludesOutputState): boolean {
+  return state.materialization !== `collection`
+}
+
+function materializeIncludedValue(
+  state: IncludesOutputState,
+  entry: ChildCollectionEntry | undefined,
+): unknown {
+  if (!entry) {
+    if (state.materialization === `array`) {
+      return []
+    }
+    if (state.materialization === `concat`) {
+      return ``
+    }
+    // `singleton` and `collection` both fall through to undefined when no
+    // child entry exists for the parent's correlation key.
+    return undefined
+  }
+
+  if (state.materialization === `collection`) {
+    return entry.collection
+  }
+
+  const rows = [...entry.collection.toArray]
+  const values = state.scalarField
+    ? rows.map((row) => row?.[state.scalarField!])
+    : rows
+
+  if (state.materialization === `array`) {
+    return values
+  }
+
+  if (state.materialization === `singleton`) {
+    // findOne() doesn't currently push LIMIT 1 to the IR, so the child
+    // Collection may hold more than one row; pick the first deterministically.
+    return values[0]
+  }
+
+  return values.map((value) => String(value ?? ``)).join(``)
+}
+
+/**
+ * Sets up shared buffers for nested includes pipelines.
+ * Instead of writing directly into a single shared IncludesOutputState,
+ * each nested pipeline writes into a buffer that is later drained per-entry.
+ */
+function setupNestedPipelines(
+  includes: Array<IncludesCompilationResult>,
+  syncState: SyncState,
+): Array<NestedIncludesSetup> {
+  return includes.map((entry) => {
+    const buffer: Map<unknown, Map<unknown, Changes<any>>> = new Map()
+
+    // Attach output callback that writes into the shared buffer
+    entry.pipeline.pipe(
+      output((data) => {
+        const messages = data.getInner()
+        syncState.messagesCount += messages.length
+
+        for (const [[childKey, tupleData], multiplicity] of messages) {
+          const [childResult, _orderByIndex, correlationKey, parentContext] =
+            tupleData as unknown as [
+              any,
+              string | undefined,
+              unknown,
+              Record<string, any> | null,
+            ]
+
+          const routingKey = computeRoutingKey(correlationKey, parentContext)
+
+          let byChild = buffer.get(routingKey)
+          if (!byChild) {
+            byChild = new Map()
+            buffer.set(routingKey, byChild)
+          }
+
+          const existing = byChild.get(childKey) || {
+            deletes: 0,
+            inserts: 0,
+            value: childResult,
+            orderByIndex: _orderByIndex,
+          }
+
+          if (multiplicity < 0) {
+            existing.deletes += Math.abs(multiplicity)
+          } else if (multiplicity > 0) {
+            existing.inserts += multiplicity
+            existing.value = childResult
+          }
+
+          byChild.set(childKey, existing)
+        }
+      }),
+    )
+
+    const setup: NestedIncludesSetup = {
+      compilationResult: entry,
+      buffer,
+    }
+
+    // Recursively set up deeper levels
+    if (entry.childCompilationResult.includes) {
+      setup.nestedSetups = setupNestedPipelines(
+        entry.childCompilationResult.includes,
+        syncState,
+      )
+    }
+
+    return setup
+  })
+}
+
+/**
+ * Creates fresh per-entry IncludesOutputState array from NestedIncludesSetup array.
+ * Each entry gets its own isolated state for nested includes.
+ */
+function createPerEntryIncludesStates(
+  setups: Array<NestedIncludesSetup>,
+): Array<IncludesOutputState> {
+  return setups.map((setup) => {
+    const state: IncludesOutputState = {
+      fieldName: setup.compilationResult.fieldName,
+      resultPath: setup.compilationResult.resultPath,
+      childCorrelationField: setup.compilationResult.childCorrelationField,
+      hasOrderBy: setup.compilationResult.hasOrderBy,
+      materialization: setup.compilationResult.materialization,
+      scalarField: setup.compilationResult.scalarField,
+      childRegistry: new Map(),
+      pendingChildChanges: new Map(),
+      correlationToParentKeys: new Map(),
+    }
+
+    if (setup.nestedSetups) {
+      state.nestedSetups = setup.nestedSetups
+      state.nestedRoutingIndex = new Map()
+      state.nestedRoutingReverseIndex = new Map()
+    }
+
+    return state
+  })
+}
+
+/**
+ * Drains shared buffers into per-entry states using the routing index.
+ * Returns the set of parent correlation keys that had changes routed to them.
+ */
+function drainNestedBuffers(state: IncludesOutputState): Set<unknown> {
+  const dirtyCorrelationKeys = new Set<unknown>()
+
+  if (!state.nestedSetups) return dirtyCorrelationKeys
+
+  for (let i = 0; i < state.nestedSetups.length; i++) {
+    const setup = state.nestedSetups[i]!
+    const toDelete: Array<unknown> = []
+
+    for (const [nestedCorrelationKey, childChanges] of setup.buffer) {
+      const parentCorrelationKey =
+        state.nestedRoutingIndex!.get(nestedCorrelationKey)
+      if (parentCorrelationKey === undefined) {
+        // Unroutable — parent not yet seen; keep in buffer
+        continue
+      }
+
+      const entry = state.childRegistry.get(parentCorrelationKey)
+      if (!entry || !entry.includesStates) {
+        continue
+      }
+
+      // Route changes into this entry's per-entry state at position i
+      const entryState = entry.includesStates[i]!
+      for (const [childKey, changes] of childChanges) {
+        let byChild = entryState.pendingChildChanges.get(nestedCorrelationKey)
+        if (!byChild) {
+          byChild = new Map()
+          entryState.pendingChildChanges.set(nestedCorrelationKey, byChild)
+        }
+        const existing = byChild.get(childKey)
+        if (existing) {
+          existing.inserts += changes.inserts
+          existing.deletes += changes.deletes
+          if (changes.inserts > 0) {
+            existing.value = changes.value
+            if (changes.orderByIndex !== undefined) {
+              existing.orderByIndex = changes.orderByIndex
+            }
+          }
+        } else {
+          byChild.set(childKey, { ...changes })
+        }
+      }
+
+      dirtyCorrelationKeys.add(parentCorrelationKey)
+      toDelete.push(nestedCorrelationKey)
+    }
+
+    for (const key of toDelete) {
+      setup.buffer.delete(key)
     }
   }
 
-  // Helper function to recursively extract collections from a query
-  function extractFromQuery(q: any) {
-    // Extract from FROM clause
-    if (q.from) {
-      extractFromSource(q.from)
+  return dirtyCorrelationKeys
+}
+
+/**
+ * Updates the routing index after processing child changes.
+ * Maps nested correlation keys to parent correlation keys so that
+ * grandchild changes can be routed to the correct per-entry state.
+ */
+function updateRoutingIndex(
+  state: IncludesOutputState,
+  correlationKey: unknown,
+  childChanges: Map<unknown, Changes<any>>,
+): void {
+  if (!state.nestedSetups) return
+
+  for (const setup of state.nestedSetups) {
+    for (const [, change] of childChanges) {
+      if (change.inserts > 0) {
+        // Read the nested routing key from the INCLUDES_ROUTING stamp.
+        // Must use the composite routing key (not raw correlationKey) to match
+        // how nested buffers are keyed by computeRoutingKey.
+        const nestedRouting =
+          change.value[INCLUDES_ROUTING]?.[setup.compilationResult.fieldName]
+        const nestedCorrelationKey = nestedRouting?.correlationKey
+        const nestedParentContext = nestedRouting?.parentContext ?? null
+        const nestedRoutingKey = computeRoutingKey(
+          nestedCorrelationKey,
+          nestedParentContext,
+        )
+
+        if (nestedCorrelationKey != null) {
+          state.nestedRoutingIndex!.set(nestedRoutingKey, correlationKey)
+          let reverseSet = state.nestedRoutingReverseIndex!.get(correlationKey)
+          if (!reverseSet) {
+            reverseSet = new Set()
+            state.nestedRoutingReverseIndex!.set(correlationKey, reverseSet)
+          }
+          reverseSet.add(nestedRoutingKey)
+        }
+      } else if (change.deletes > 0 && change.inserts === 0) {
+        // Remove from routing index
+        const nestedRouting2 =
+          change.value[INCLUDES_ROUTING]?.[setup.compilationResult.fieldName]
+        const nestedCorrelationKey = nestedRouting2?.correlationKey
+        const nestedParentContext2 = nestedRouting2?.parentContext ?? null
+        const nestedRoutingKey = computeRoutingKey(
+          nestedCorrelationKey,
+          nestedParentContext2,
+        )
+
+        if (nestedCorrelationKey != null) {
+          state.nestedRoutingIndex!.delete(nestedRoutingKey)
+          const reverseSet =
+            state.nestedRoutingReverseIndex!.get(correlationKey)
+          if (reverseSet) {
+            reverseSet.delete(nestedRoutingKey)
+            if (reverseSet.size === 0) {
+              state.nestedRoutingReverseIndex!.delete(correlationKey)
+            }
+          }
+        }
+      }
+    }
+  }
+}
+
+/**
+ * Cleans routing index entries when a parent is deleted.
+ * Uses the reverse index to find and remove all nested routing entries.
+ */
+function cleanRoutingIndexOnDelete(
+  state: IncludesOutputState,
+  correlationKey: unknown,
+): void {
+  if (!state.nestedRoutingReverseIndex) return
+
+  const nestedKeys = state.nestedRoutingReverseIndex.get(correlationKey)
+  if (nestedKeys) {
+    for (const nestedKey of nestedKeys) {
+      state.nestedRoutingIndex!.delete(nestedKey)
+    }
+    state.nestedRoutingReverseIndex.delete(correlationKey)
+  }
+}
+
+/**
+ * Recursively checks whether any nested buffer has pending changes.
+ */
+function hasNestedBufferChanges(setups: Array<NestedIncludesSetup>): boolean {
+  for (const setup of setups) {
+    if (setup.buffer.size > 0) return true
+    if (setup.nestedSetups && hasNestedBufferChanges(setup.nestedSetups))
+      return true
+  }
+  return false
+}
+
+/**
+ * Computes a composite routing key from correlation key and parent context.
+ * When parentContext is null (no parent filters), returns the raw correlationKey
+ * for zero behavioral change on existing queries.
+ */
+function computeRoutingKey(
+  correlationKey: unknown,
+  parentContext: Record<string, any> | null,
+): unknown {
+  if (parentContext == null) return correlationKey
+  return JSON.stringify([correlationKey, parentContext])
+}
+
+/**
+ * Creates a child Collection entry for includes subqueries.
+ * The child Collection is a full-fledged Collection instance that starts syncing immediately.
+ */
+function createChildCollectionEntry(
+  parentId: string,
+  fieldName: string,
+  correlationKey: unknown,
+  hasOrderBy: boolean,
+  nestedSetups?: Array<NestedIncludesSetup>,
+): ChildCollectionEntry {
+  const resultKeys = new WeakMap<object, unknown>()
+  const orderByIndices = hasOrderBy ? new WeakMap<object, string>() : null
+  let syncMethods: SyncMethods<any> | null = null
+
+  const compare = orderByIndices
+    ? createOrderByComparator(orderByIndices)
+    : undefined
+
+  const collection = createCollection<any, string | number>({
+    id: `__child-collection:${parentId}-${fieldName}-${serializeValue(correlationKey)}`,
+    getKey: (item: any) => resultKeys.get(item) as string | number,
+    compare,
+    sync: {
+      rowUpdateMode: `full`,
+      sync: (methods) => {
+        syncMethods = methods
+        return () => {
+          syncMethods = null
+        }
+      },
+    },
+    startSync: true,
+    gcTime: 0,
+  })
+
+  const entry: ChildCollectionEntry = {
+    collection,
+    get syncMethods() {
+      return syncMethods
+    },
+    resultKeys,
+    orderByIndices,
+  }
+
+  if (nestedSetups) {
+    entry.includesStates = createPerEntryIncludesStates(nestedSetups)
+  }
+
+  return entry
+}
+
+/**
+ * Flushes includes state using a bottom-up per-entry approach.
+ * Five phases ensure correct ordering:
+ *   1. Parent INSERTs — create child entries with per-entry nested states
+ *   2. Child changes — apply to child Collections, update routing index
+ *   3. Drain nested buffers — route buffered grandchild changes to per-entry states
+ *   4. Flush per-entry states — recursively flush nested includes on each entry
+ *   5. Parent DELETEs — clean up child entries and routing index
+ */
+function flushIncludesState(
+  includesState: Array<IncludesOutputState>,
+  parentCollection: Collection<any, any, any>,
+  parentId: string,
+  parentChanges: Map<unknown, Changes<any>> | null,
+  parentSyncMethods: SyncMethods<any> | null,
+): void {
+  for (const state of includesState) {
+    // Phase 1: Parent INSERTs — ensure a child Collection exists for every parent
+    if (parentChanges) {
+      for (const [parentKey, changes] of parentChanges) {
+        if (changes.inserts > 0) {
+          const parentResult = changes.value
+          // Extract routing info from INCLUDES_ROUTING symbol (set by compiler)
+          const routing = parentResult[INCLUDES_ROUTING]?.[state.fieldName]
+          const correlationKey = routing?.correlationKey
+          const parentContext = routing?.parentContext ?? null
+          const routingKey = computeRoutingKey(correlationKey, parentContext)
+
+          if (correlationKey != null) {
+            // Ensure child Collection exists for this routing key
+            if (!state.childRegistry.has(routingKey)) {
+              const entry = createChildCollectionEntry(
+                parentId,
+                state.fieldName,
+                routingKey,
+                state.hasOrderBy,
+                state.nestedSetups,
+              )
+              state.childRegistry.set(routingKey, entry)
+            }
+            // Update reverse index: routing key → parent keys
+            let parentKeys = state.correlationToParentKeys.get(routingKey)
+            if (!parentKeys) {
+              parentKeys = new Set()
+              state.correlationToParentKeys.set(routingKey, parentKeys)
+            }
+            parentKeys.add(parentKey)
+
+            const childValue = materializeIncludedValue(
+              state,
+              state.childRegistry.get(routingKey),
+            )
+            setIncludedValue(parentResult, state.resultPath, childValue)
+
+            // Parent rows may already be materialized in the live collection by the
+            // time includes state is flushed, so update the stored row as well.
+            const storedParent = parentCollection.get(parentKey as any)
+            if (storedParent && storedParent !== parentResult) {
+              setIncludedValue(storedParent, state.resultPath, childValue)
+            }
+          }
+        }
+      }
     }
 
-    // Extract from JOIN clauses
-    if (q.join && Array.isArray(q.join)) {
-      for (const joinClause of q.join) {
-        if (joinClause.from) {
-          extractFromSource(joinClause.from)
+    // Track affected correlation keys for inline materializations before clearing child changes.
+    const affectedCorrelationKeys = materializesInline(state)
+      ? new Set<unknown>(state.pendingChildChanges.keys())
+      : null
+
+    // Phase 2: Child changes — apply to child Collections
+    // Track which entries had child changes and capture their childChanges maps
+    const entriesWithChildChanges = new Map<
+      unknown,
+      { entry: ChildCollectionEntry; childChanges: Map<unknown, Changes<any>> }
+    >()
+    if (state.pendingChildChanges.size > 0) {
+      for (const [correlationKey, childChanges] of state.pendingChildChanges) {
+        // Ensure child Collection exists for this correlation key
+        let entry = state.childRegistry.get(correlationKey)
+        if (!entry) {
+          entry = createChildCollectionEntry(
+            parentId,
+            state.fieldName,
+            correlationKey,
+            state.hasOrderBy,
+            state.nestedSetups,
+          )
+          state.childRegistry.set(correlationKey, entry)
+        }
+
+        if (state.materialization === `collection`) {
+          attachChildCollectionToParent(
+            parentCollection,
+            state.resultPath,
+            correlationKey,
+            state.correlationToParentKeys,
+            entry.collection,
+          )
+        }
+
+        // Apply child changes to the child Collection
+        if (entry.syncMethods) {
+          entry.syncMethods.begin()
+          for (const [childKey, change] of childChanges) {
+            entry.resultKeys.set(change.value, childKey)
+            if (entry.orderByIndices && change.orderByIndex !== undefined) {
+              entry.orderByIndices.set(change.value, change.orderByIndex)
+            }
+            if (change.inserts > 0 && change.deletes === 0) {
+              entry.syncMethods.write({ value: change.value, type: `insert` })
+            } else if (
+              change.inserts > change.deletes ||
+              (change.inserts === change.deletes &&
+                entry.syncMethods.collection.has(
+                  entry.syncMethods.collection.getKeyFromItem(change.value),
+                ))
+            ) {
+              entry.syncMethods.write({ value: change.value, type: `update` })
+            } else if (change.deletes > 0) {
+              entry.syncMethods.write({ value: change.value, type: `delete` })
+            }
+          }
+          entry.syncMethods.commit()
+        }
+
+        // Update routing index for nested includes
+        updateRoutingIndex(state, correlationKey, childChanges)
+
+        entriesWithChildChanges.set(correlationKey, { entry, childChanges })
+      }
+      state.pendingChildChanges.clear()
+    }
+
+    // Phase 3: Drain nested buffers — route buffered grandchild changes to per-entry states
+    const dirtyFromBuffers = drainNestedBuffers(state)
+
+    // Phase 4: Flush per-entry states
+    // First: entries that had child changes in Phase 2
+    for (const [, { entry, childChanges }] of entriesWithChildChanges) {
+      if (entry.includesStates) {
+        flushIncludesState(
+          entry.includesStates,
+          entry.collection,
+          entry.collection.id,
+          childChanges,
+          entry.syncMethods,
+        )
+      }
+    }
+    // Then: entries that only had buffer-routed changes (no child changes at this level)
+    for (const correlationKey of dirtyFromBuffers) {
+      if (entriesWithChildChanges.has(correlationKey)) continue
+      const entry = state.childRegistry.get(correlationKey)
+      if (entry?.includesStates) {
+        flushIncludesState(
+          entry.includesStates,
+          entry.collection,
+          entry.collection.id,
+          null,
+          entry.syncMethods,
+        )
+      }
+    }
+    // Finally: entries with deep nested buffer changes (grandchild-or-deeper buffers
+    // have pending data, but neither this level nor the immediate child level changed).
+    // Without this pass, changes at depth 3+ are stranded because drainNestedBuffers
+    // only drains one level and Phase 4 only flushes entries dirty from Phase 2/3.
+    const deepBufferDirty = new Set<unknown>()
+    if (state.nestedSetups) {
+      for (const [correlationKey, entry] of state.childRegistry) {
+        if (entriesWithChildChanges.has(correlationKey)) continue
+        if (dirtyFromBuffers.has(correlationKey)) continue
+        if (
+          entry.includesStates &&
+          hasPendingIncludesChanges(entry.includesStates)
+        ) {
+          flushIncludesState(
+            entry.includesStates,
+            entry.collection,
+            entry.collection.id,
+            null,
+            entry.syncMethods,
+          )
+          deepBufferDirty.add(correlationKey)
+        }
+      }
+    }
+
+    // For inline materializations: re-emit affected parents with updated snapshots.
+    // We mutate items in-place (so collection.get() reflects changes immediately)
+    // and emit UPDATE events directly. We bypass the sync methods because
+    // commitPendingTransactions compares previous vs new visible state using
+    // deepEquals, but in-place mutation means both sides reference the same
+    // object, so the comparison always returns true and suppresses the event.
+    const inlineReEmitKeys = materializesInline(state)
+      ? new Set([
+          ...(affectedCorrelationKeys || []),
+          ...dirtyFromBuffers,
+          ...deepBufferDirty,
+        ])
+      : null
+    if (parentSyncMethods && inlineReEmitKeys && inlineReEmitKeys.size > 0) {
+      const events: Array<ChangeMessage<any>> = []
+      for (const correlationKey of inlineReEmitKeys) {
+        const parentKeys = state.correlationToParentKeys.get(correlationKey)
+        if (!parentKeys) continue
+        const entry = state.childRegistry.get(correlationKey)
+        for (const parentKey of parentKeys) {
+          const item = parentCollection.get(parentKey as any)
+          if (item) {
+            // Capture previous value before in-place mutation
+            const previousValue = cloneForIncludesUpdate(item, state.resultPath)
+            setIncludedValue(
+              item,
+              state.resultPath,
+              materializeIncludedValue(state, entry),
+            )
+            const nextValue = cloneForIncludesUpdate(item, state.resultPath)
+            events.push({
+              type: `update`,
+              key: parentKey as any,
+              value: nextValue,
+              previousValue,
+            })
+          }
+        }
+      }
+      if (events.length > 0) {
+        // Emit directly — the in-place mutation already updated the data in
+        // syncedData, so we only need to notify subscribers.
+        const changesManager = (parentCollection as any)._changes as {
+          emitEvents: (
+            changes: Array<ChangeMessage<any>>,
+            forceEmit?: boolean,
+          ) => void
+        }
+        changesManager.emitEvents(events, true)
+      }
+    }
+
+    // Phase 5: Parent DELETEs — dispose child Collections and clean up
+    if (parentChanges) {
+      for (const [parentKey, changes] of parentChanges) {
+        if (changes.deletes > 0 && changes.inserts === 0) {
+          const routing = changes.value[INCLUDES_ROUTING]?.[state.fieldName]
+          const correlationKey = routing?.correlationKey
+          const parentContext = routing?.parentContext ?? null
+          const routingKey = computeRoutingKey(correlationKey, parentContext)
+          if (correlationKey != null) {
+            // Clean up reverse index first, only delete child collection
+            // when the last parent referencing it is removed
+            const parentKeys = state.correlationToParentKeys.get(routingKey)
+            if (parentKeys) {
+              parentKeys.delete(parentKey)
+              if (parentKeys.size === 0) {
+                cleanRoutingIndexOnDelete(state, routingKey)
+                state.childRegistry.delete(routingKey)
+                state.correlationToParentKeys.delete(routingKey)
+              }
+            }
+          }
         }
       }
     }
   }
 
-  // Start extraction from the root query
-  extractFromQuery(query)
-
-  return collections
+  // Clean up the internal routing stamp from parent/child results
+  if (parentChanges) {
+    for (const [, changes] of parentChanges) {
+      delete changes.value[INCLUDES_ROUTING]
+    }
+  }
 }
 
 /**
- * Extracts all aliases used for each collection across the entire query tree.
- *
- * Traverses the QueryIR recursively to build a map from collection ID to all aliases
- * that reference that collection. This is essential for self-join support, where the
- * same collection may be referenced multiple times with different aliases.
- *
- * For example, given a query like:
- * ```ts
- * q.from({ employee: employeesCollection })
- *   .join({ manager: employeesCollection }, ({ employee, manager }) =>
- *     eq(employee.managerId, manager.id)
- *   )
- * ```
- *
- * This function would return:
- * ```
- * Map { "employees" => Set { "employee", "manager" } }
- * ```
- *
- * @param query - The query IR to extract aliases from
- * @returns A map from collection ID to the set of all aliases referencing that collection
+ * Checks whether any includes state has pending changes that need to be flushed.
+ * Checks direct pending child changes and shared nested buffers.
  */
-function extractCollectionAliases(query: QueryIR): Map<string, Set<string>> {
-  const aliasesById = new Map<string, Set<string>>()
+function hasPendingIncludesChanges(
+  states: Array<IncludesOutputState>,
+): boolean {
+  for (const state of states) {
+    if (state.pendingChildChanges.size > 0) return true
+    if (state.nestedSetups && hasNestedBufferChanges(state.nestedSetups))
+      return true
+  }
+  return false
+}
 
-  function recordAlias(source: any) {
-    if (!source) return
+/**
+ * Attaches a child Collection to parent rows that match a given correlation key.
+ * Uses the reverse index to look up parent keys directly instead of scanning.
+ */
+function attachChildCollectionToParent(
+  parentCollection: Collection<any, any, any>,
+  resultPath: Array<string>,
+  correlationKey: unknown,
+  correlationToParentKeys: Map<unknown, Set<unknown>>,
+  childCollection: Collection<any, any, any>,
+): void {
+  const parentKeys = correlationToParentKeys.get(correlationKey)
+  if (!parentKeys) return
 
-    if (source.type === `collectionRef`) {
-      const { id } = source.collection
-      const existing = aliasesById.get(id)
-      if (existing) {
-        existing.add(source.alias)
-      } else {
-        aliasesById.set(id, new Set([source.alias]))
-      }
-    } else if (source.type === `queryRef`) {
-      traverse(source.query)
+  for (const parentKey of parentKeys) {
+    const item = parentCollection.get(parentKey as any)
+    if (item) {
+      setIncludedValue(item, resultPath, childCollection)
     }
   }
+}
 
-  function traverse(q?: QueryIR) {
-    if (!q) return
-
-    recordAlias(q.from)
-
-    if (q.join) {
-      for (const joinClause of q.join) {
-        recordAlias(joinClause.from)
-      }
-    }
+function setIncludedValue(
+  target: Record<string, any>,
+  path: Array<string>,
+  value: unknown,
+): void {
+  const state = getFnSelectState(target)
+  if (!state) {
+    setNestedValue(target, path, value)
+    return
   }
 
-  traverse(query)
+  setNestedValue(state.sourceRow, path, value)
+  refreshFnSelectResult(target, state)
+}
 
-  return aliasesById
+function getFnSelectState(target: Record<string, any>):
+  | {
+      sourceRow: Record<string, any>
+      fnSelect: (row: Record<string, any>) => any
+    }
+  | undefined {
+  return (target as Record<PropertyKey, any>)[FN_SELECT_STATE] as
+    | {
+        sourceRow: Record<string, any>
+        fnSelect: (row: Record<string, any>) => any
+      }
+    | undefined
+}
+
+function refreshFnSelectResult(
+  target: Record<string, any>,
+  state: {
+    sourceRow: Record<string, any>
+    fnSelect: (row: Record<string, any>) => any
+  },
+): void {
+  const targetRecord = target as Record<PropertyKey, any>
+  const sourceRecord = state.sourceRow as Record<PropertyKey, any>
+  const routing =
+    targetRecord[INCLUDES_ROUTING] ?? sourceRecord[INCLUDES_ROUTING]
+  const nextValue = state.fnSelect(state.sourceRow)
+  if (!nextValue || typeof nextValue !== `object`) {
+    return
+  }
+
+  for (const key of Object.keys(target)) {
+    delete target[key]
+  }
+  Object.assign(target, nextValue)
+
+  if (routing) {
+    targetRecord[INCLUDES_ROUTING] = routing
+  }
+  Object.defineProperty(target, FN_SELECT_STATE, {
+    value: state,
+    enumerable: true,
+    configurable: true,
+  })
+}
+
+function setNestedValue(
+  target: Record<string, any>,
+  path: Array<string>,
+  value: unknown,
+): void {
+  if (path.length === 0) {
+    return
+  }
+
+  let cursor = target
+  for (let i = 0; i < path.length - 1; i++) {
+    const segment = path[i]!
+    const next = cursor[segment]
+    if (next == null || typeof next !== `object`) {
+      cursor[segment] = {}
+    }
+    cursor = cursor[segment]
+  }
+  cursor[path[path.length - 1]!] = value
+}
+
+function cloneForIncludesUpdate<T extends Record<string, any>>(
+  target: T,
+  path: Array<string>,
+): T {
+  return getFnSelectState(target)
+    ? { ...target }
+    : clonePathForUpdate(target, path)
+}
+
+function clonePathForUpdate<T extends Record<string, any>>(
+  target: T,
+  path: Array<string>,
+): T {
+  const root = { ...target }
+  let sourceCursor: any = target
+  let cloneCursor: any = root
+
+  for (let i = 0; i < path.length - 1; i++) {
+    const segment = path[i]!
+    const sourceValue = sourceCursor?.[segment]
+    if (sourceValue == null || typeof sourceValue !== `object`) {
+      return root
+    }
+
+    const clonedValue = Array.isArray(sourceValue)
+      ? [...sourceValue]
+      : { ...sourceValue }
+    cloneCursor[segment] = clonedValue
+    sourceCursor = sourceValue
+    cloneCursor = clonedValue
+  }
+
+  return root
 }
 
 function accumulateChanges<T>(
@@ -990,7 +1995,7 @@ function accumulateChanges<T>(
   [[key, tupleData], multiplicity]: [
     [unknown, [any, string | undefined]],
     number,
-  ]
+  ],
 ) {
   // All queries now consistently return [value, orderByIndex] format
   // where orderByIndex is undefined for queries without ORDER BY
@@ -1006,8 +2011,11 @@ function accumulateChanges<T>(
     changes.deletes += Math.abs(multiplicity)
   } else if (multiplicity > 0) {
     changes.inserts += multiplicity
+    // Update value to the latest version for this key
     changes.value = value
-    changes.orderByIndex = orderByIndex
+    if (orderByIndex !== undefined) {
+      changes.orderByIndex = orderByIndex
+    }
   }
   acc.set(key, changes)
   return acc

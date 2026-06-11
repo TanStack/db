@@ -7,20 +7,24 @@ import {
   SyncCleanupError,
   SyncTransactionAlreadyCommittedError,
   SyncTransactionAlreadyCommittedWriteError,
-} from "../errors"
-import { deepEquals } from "../utils"
-import type { StandardSchemaV1 } from "@standard-schema/spec"
+} from '../errors'
+import { deepEquals } from '../utils'
+import { LIVE_QUERY_INTERNAL } from '../query/live/internal.js'
+import type { StandardSchemaV1 } from '@standard-schema/spec'
 import type {
-  ChangeMessage,
+  ChangeMessageOrDeleteKeyMessage,
   CleanupFn,
   CollectionConfig,
   LoadSubsetOptions,
+  OptimisticChangeMessage,
   SyncConfigRes,
-} from "../types"
-import type { CollectionImpl } from "./index.js"
-import type { CollectionStateManager } from "./state"
-import type { CollectionLifecycleManager } from "./lifecycle"
-import type { CollectionEventsManager } from "./events.js"
+  SyncMetadataApi,
+} from '../types'
+import type { CollectionImpl } from './index.js'
+import type { CollectionStateManager } from './state'
+import type { CollectionLifecycleManager } from './lifecycle'
+import type { CollectionEventsManager } from './events.js'
+import type { LiveQueryCollectionUtils } from '../query/live/collection-config-builder.js'
 
 export class CollectionSyncManager<
   TOutput extends object = Record<string, unknown>,
@@ -41,6 +45,8 @@ export class CollectionSyncManager<
   public syncLoadSubsetFn:
     | ((options: LoadSubsetOptions) => true | Promise<void>)
     | null = null
+  public syncUnloadSubsetFn: ((options: LoadSubsetOptions) => void) | null =
+    null
 
   private pendingLoadSubsetPromises: Set<Promise<void>> = new Set()
 
@@ -83,14 +89,22 @@ export class CollectionSyncManager<
       const syncRes = normalizeSyncFnResult(
         this.config.sync.sync({
           collection: this.collection,
-          begin: () => {
+          begin: (options?: { immediate?: boolean }) => {
             this.state.pendingSyncedTransactions.push({
               committed: false,
               operations: [],
               deletedKeys: new Set(),
+              rowMetadataWrites: new Map(),
+              collectionMetadataWrites: new Map(),
+              immediate: options?.immediate,
             })
           },
-          write: (messageWithoutKey: Omit<ChangeMessage<TOutput>, `key`>) => {
+          write: (
+            messageWithOptionalKey: ChangeMessageOrDeleteKeyMessage<
+              TOutput,
+              TKey
+            >,
+          ) => {
             const pendingTransaction =
               this.state.pendingSyncedTransactions[
                 this.state.pendingSyncedTransactions.length - 1
@@ -101,12 +115,22 @@ export class CollectionSyncManager<
             if (pendingTransaction.committed) {
               throw new SyncTransactionAlreadyCommittedWriteError()
             }
-            const key = this.config.getKey(messageWithoutKey.value)
 
-            let messageType = messageWithoutKey.type
+            let key: TKey | undefined = undefined
+            if (`key` in messageWithOptionalKey) {
+              key = messageWithOptionalKey.key
+            } else {
+              key = this.config.getKey(messageWithOptionalKey.value)
+            }
+
+            if (this.state.pendingLocalChanges.has(key)) {
+              this.state.pendingLocalOrigins.add(key)
+            }
+
+            let messageType = messageWithOptionalKey.type
 
             // Check if an item with this key already exists when inserting
-            if (messageWithoutKey.type === `insert`) {
+            if (messageWithOptionalKey.type === `insert`) {
               const insertingIntoExistingSynced = this.state.syncedData.has(key)
               const hasPendingDeleteForKey =
                 pendingTransaction.deletedKeys.has(key)
@@ -118,29 +142,53 @@ export class CollectionSyncManager<
                 !isTruncateTransaction
               ) {
                 const existingValue = this.state.syncedData.get(key)
-                if (
+                const valuesEqual =
                   existingValue !== undefined &&
-                  deepEquals(existingValue, messageWithoutKey.value)
-                ) {
+                  deepEquals(existingValue, messageWithOptionalKey.value)
+                if (valuesEqual) {
                   // The "insert" is an echo of a value we already have locally.
                   // Treat it as an update so we preserve optimistic intent without
                   // throwing a duplicate-key error during reconciliation.
                   messageType = `update`
                 } else {
-                  throw new DuplicateKeySyncError(key, this.id)
+                  const utils = this.config
+                    .utils as Partial<LiveQueryCollectionUtils>
+                  const internal = utils[LIVE_QUERY_INTERNAL]
+                  throw new DuplicateKeySyncError(key, this.id, {
+                    hasCustomGetKey: internal?.hasCustomGetKey ?? false,
+                    hasJoins: internal?.hasJoins ?? false,
+                    hasDistinct: internal?.hasDistinct ?? false,
+                  })
                 }
               }
             }
 
-            const message: ChangeMessage<TOutput> = {
-              ...messageWithoutKey,
+            const message = {
+              ...messageWithOptionalKey,
               type: messageType,
               key,
-            }
+            } as OptimisticChangeMessage<TOutput, TKey>
             pendingTransaction.operations.push(message)
 
             if (messageType === `delete`) {
               pendingTransaction.deletedKeys.add(key)
+              pendingTransaction.rowMetadataWrites.set(key, { type: `delete` })
+            } else if (messageType === `insert`) {
+              if (message.metadata !== undefined) {
+                pendingTransaction.rowMetadataWrites.set(key, {
+                  type: `set`,
+                  value: message.metadata,
+                })
+              } else {
+                pendingTransaction.rowMetadataWrites.set(key, {
+                  type: `delete`,
+                })
+              }
+            } else if (message.metadata !== undefined) {
+              pendingTransaction.rowMetadataWrites.set(key, {
+                type: `set`,
+                value: message.metadata,
+              })
             }
           },
           commit: () => {
@@ -177,6 +225,11 @@ export class CollectionSyncManager<
             // Clear all operations from the current transaction
             pendingTransaction.operations = []
             pendingTransaction.deletedKeys.clear()
+            pendingTransaction.rowMetadataWrites.clear()
+            // Intentionally preserve collectionMetadataWrites across truncate.
+            // Collection-scoped metadata (for example persisted resume/reset
+            // state) can be staged before truncate and should commit atomically
+            // with the truncate transaction.
 
             // Mark the transaction as a truncate operation. During commit, this triggers:
             // - Delete events for all previously synced keys (excluding optimistic-deleted keys)
@@ -192,7 +245,8 @@ export class CollectionSyncManager<
               deletes: new Set(this.state.optimisticDeletes),
             }
           },
-        })
+          metadata: this.createSyncMetadataApi(),
+        }),
       )
 
       // Store cleanup function if provided
@@ -201,16 +255,126 @@ export class CollectionSyncManager<
       // Store loadSubset function if provided
       this.syncLoadSubsetFn = syncRes?.loadSubset ?? null
 
+      // Store unloadSubset function if provided
+      this.syncUnloadSubsetFn = syncRes?.unloadSubset ?? null
+
       // Validate: on-demand mode requires a loadSubset function
       if (this.syncMode === `on-demand` && !this.syncLoadSubsetFn) {
         throw new CollectionConfigurationError(
           `Collection "${this.id}" is configured with syncMode "on-demand" but the sync function did not return a loadSubset handler. ` +
-            `Either provide a loadSubset handler or use syncMode "eager".`
+            `Either provide a loadSubset handler or use syncMode "eager".`,
         )
       }
     } catch (error) {
       this.lifecycle.setStatus(`error`)
       throw error
+    }
+  }
+
+  private getActivePendingSyncTransaction() {
+    const pendingTransaction =
+      this.state.pendingSyncedTransactions[
+        this.state.pendingSyncedTransactions.length - 1
+      ]
+
+    if (!pendingTransaction) {
+      throw new NoPendingSyncTransactionWriteError()
+    }
+    if (pendingTransaction.committed) {
+      throw new SyncTransactionAlreadyCommittedWriteError()
+    }
+
+    return pendingTransaction
+  }
+
+  private createSyncMetadataApi(): SyncMetadataApi<TKey> {
+    return {
+      row: {
+        get: (key) => {
+          const pendingTransaction =
+            this.state.pendingSyncedTransactions[
+              this.state.pendingSyncedTransactions.length - 1
+            ]
+          const pendingWrite = pendingTransaction?.rowMetadataWrites.get(key)
+          if (pendingWrite) {
+            return pendingWrite.type === `delete`
+              ? undefined
+              : pendingWrite.value
+          }
+          if (pendingTransaction?.truncate) {
+            return undefined
+          }
+          return this.state.syncedMetadata.get(key)
+        },
+        set: (key, metadata) => {
+          const pendingTransaction = this.getActivePendingSyncTransaction()
+          pendingTransaction.rowMetadataWrites.set(key, {
+            type: `set`,
+            value: metadata,
+          })
+        },
+        delete: (key) => {
+          const pendingTransaction = this.getActivePendingSyncTransaction()
+          pendingTransaction.rowMetadataWrites.set(key, {
+            type: `delete`,
+          })
+        },
+      },
+      collection: {
+        get: (key) => {
+          const pendingTransaction =
+            this.state.pendingSyncedTransactions[
+              this.state.pendingSyncedTransactions.length - 1
+            ]
+          const pendingWrite =
+            pendingTransaction?.collectionMetadataWrites.get(key)
+          if (pendingWrite) {
+            return pendingWrite.type === `delete`
+              ? undefined
+              : pendingWrite.value
+          }
+          return this.state.syncedCollectionMetadata.get(key)
+        },
+        set: (key, value) => {
+          const pendingTransaction = this.getActivePendingSyncTransaction()
+          pendingTransaction.collectionMetadataWrites.set(key, {
+            type: `set`,
+            value,
+          })
+        },
+        delete: (key) => {
+          const pendingTransaction = this.getActivePendingSyncTransaction()
+          pendingTransaction.collectionMetadataWrites.set(key, {
+            type: `delete`,
+          })
+        },
+        list: (prefix) => {
+          const merged = new Map(this.state.syncedCollectionMetadata)
+          const pendingTransaction =
+            this.state.pendingSyncedTransactions[
+              this.state.pendingSyncedTransactions.length - 1
+            ]
+          if (pendingTransaction) {
+            for (const [
+              key,
+              pendingWrite,
+            ] of pendingTransaction.collectionMetadataWrites) {
+              if (pendingWrite.type === `delete`) {
+                merged.delete(key)
+              } else {
+                merged.set(key, pendingWrite.value)
+              }
+            }
+          }
+
+          return Array.from(merged.entries())
+            .filter(([key]) => (prefix ? key.startsWith(prefix) : true))
+            .map(([key, value]) => ({
+              key,
+              value,
+            }))
+        },
+      },
     }
   }
 
@@ -221,6 +385,16 @@ export class CollectionSyncManager<
   public preload(): Promise<void> {
     if (this.preloadPromise) {
       return this.preloadPromise
+    }
+
+    // Warn when calling preload on an on-demand collection
+    if (this.syncMode === `on-demand`) {
+      console.warn(
+        `${this.id ? `[${this.id}] ` : ``}Calling .preload() on a collection with syncMode "on-demand" is a no-op. ` +
+          `In on-demand mode, data is only loaded when queries request it. ` +
+          `Instead, create a live query and call .preload() on that to load the specific data you need. ` +
+          `See https://tanstack.com/blog/tanstack-db-0.5-query-driven-sync for more details.`,
+      )
     }
 
     this.preloadPromise = new Promise<void>((resolve, reject) => {
@@ -321,6 +495,16 @@ export class CollectionSyncManager<
     }
 
     return true
+  }
+
+  /**
+   * Notifies the sync layer that a subset is no longer needed.
+   * @param options Options that identify what data is being unloaded
+   */
+  public unloadSubset(options: LoadSubsetOptions): void {
+    if (this.syncUnloadSubsetFn) {
+      this.syncUnloadSubsetFn(options)
+    }
   }
 
   public cleanup(): void {

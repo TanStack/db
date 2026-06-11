@@ -1,15 +1,15 @@
-import { describe, expect, test } from "vitest"
-import { D2 } from "../../src/d2.js"
-import { MultiSet } from "../../src/multiset.js"
-import { join } from "../../src/operators/join.js"
-import { output } from "../../src/operators/output.js"
-import { consolidate } from "../../src/operators/consolidate.js"
+import { describe, expect, test } from 'vitest'
+import { D2 } from '../../src/d2.js'
+import { MultiSet } from '../../src/multiset.js'
+import { join } from '../../src/operators/join.js'
+import { output } from '../../src/operators/output.js'
+import { consolidate } from '../../src/operators/consolidate.js'
 import {
   KeyedMessageTracker,
   assertKeyedResults,
   assertOnlyKeysAffected,
-} from "../test-utils.js"
-import type { JoinType } from "../../src/operators/join.js"
+} from '../test-utils.js'
+import type { JoinType } from '../../src/operators/join.js'
 
 /**
  * Sort results by multiplicity and then key
@@ -18,11 +18,11 @@ function sortResults(results: Array<any>) {
   return results
     .sort(
       ([[_aKey, _aValue], aMultiplicity], [[_bKey, _bValue], bMultiplicity]) =>
-        aMultiplicity - bMultiplicity
+        aMultiplicity - bMultiplicity,
     )
     .sort(
       ([[aKey, _aValue], _aMultiplicity], [[bKey, _bValue], _bMultiplicity]) =>
-        aKey - bKey
+        aKey - bKey,
     )
 }
 
@@ -52,7 +52,7 @@ describe(`Operators`, () => {
             consolidate(),
             output((message) => {
               tracker.addMessage(message)
-            })
+            }),
           )
 
           graph.finalize()
@@ -62,7 +62,7 @@ describe(`Operators`, () => {
             new MultiSet([
               [[`batch1_item1`, `a1`], 1],
               [[`batch1_item2`, `a2`], 1],
-            ])
+            ]),
           )
 
           inputA.sendData(new MultiSet([[[`batch2_item1`, `a3`], 1]]))
@@ -71,7 +71,7 @@ describe(`Operators`, () => {
             new MultiSet([
               [[`batch3_item1`, `a4`], 1],
               [[`batch3_item2`, `a5`], 1],
-            ])
+            ]),
           )
 
           // Send corresponding data to inputB (some matches, some don't)
@@ -81,7 +81,7 @@ describe(`Operators`, () => {
               [[`batch2_item1`, `x2`], 1], // matches
               [[`batch3_item2`, `x3`], 1], // matches
               [[`non_matching`, `x4`], 1], // doesn't match any inputA
-            ])
+            ]),
           )
 
           // Run the graph - should process all batches
@@ -131,7 +131,7 @@ describe(`Operators`, () => {
           assertOnlyKeysAffected(
             `${joinType} join with multiple batches`,
             result.messages,
-            expectedKeys
+            expectedKeys,
           )
 
           // Verify that we actually got some results
@@ -157,7 +157,7 @@ function testJoin(joinType: JoinType) {
       consolidate(),
       output((message) => {
         tracker.addMessage(message)
-      })
+      }),
     )
 
     graph.finalize()
@@ -166,13 +166,13 @@ function testJoin(joinType: JoinType) {
       new MultiSet([
         [[1, `A`], 1],
         [[2, `B`], 1],
-      ])
+      ]),
     )
     inputB.sendData(
       new MultiSet([
         [[2, `X`], 1],
         [[3, `Y`], 1],
-      ])
+      ]),
     )
     graph.run()
 
@@ -210,7 +210,7 @@ function testJoin(joinType: JoinType) {
       `${joinType} join - initial join with missing rows`,
       result,
       expectedResults[joinType],
-      6 // Max expected messages (generous upper bound)
+      6, // Max expected messages (generous upper bound)
     )
   })
 
@@ -228,7 +228,7 @@ function testJoin(joinType: JoinType) {
       consolidate(),
       output((message) => {
         tracker.addMessage(message)
-      })
+      }),
     )
 
     graph.finalize()
@@ -239,7 +239,7 @@ function testJoin(joinType: JoinType) {
       new MultiSet([
         [[1, `X`], 1],
         [[2, `Y`], 1],
-      ])
+      ]),
     )
     graph.run()
 
@@ -288,7 +288,7 @@ function testJoin(joinType: JoinType) {
       `${joinType} join - insert left (initial)`,
       initialResult,
       initialExpectedResults[joinType],
-      4 // Max expected messages for initial join
+      4, // Max expected messages for initial join
     )
 
     // Clear results after initial join
@@ -341,14 +341,14 @@ function testJoin(joinType: JoinType) {
       `${joinType} join - insert left`,
       result,
       expectedResults[joinType],
-      4 // Max expected messages for incremental update
+      4, // Max expected messages for incremental update
     )
 
     // Verify only affected keys produced messages
     assertOnlyKeysAffected(
       `${joinType} join - insert left`,
       result.messages,
-      [2] // Only key 2 should be affected
+      [2], // Only key 2 should be affected
     )
   })
 
@@ -363,7 +363,7 @@ function testJoin(joinType: JoinType) {
       consolidate(),
       output((message) => {
         results.push(...message.getInner())
-      })
+      }),
     )
 
     graph.finalize()
@@ -373,7 +373,7 @@ function testJoin(joinType: JoinType) {
       new MultiSet([
         [[1, `A`], 1],
         [[3, `C`], 1],
-      ])
+      ]),
     )
     inputB.sendData(new MultiSet([[[1, `X`], 1]]))
     graph.run()
@@ -475,7 +475,7 @@ function testJoin(joinType: JoinType) {
       consolidate(),
       output((message) => {
         results.push(...message.getInner())
-      })
+      }),
     )
 
     graph.finalize()
@@ -485,13 +485,13 @@ function testJoin(joinType: JoinType) {
       new MultiSet([
         [[1, `A`], 1],
         [[2, `B`], 1],
-      ])
+      ]),
     )
     inputB.sendData(
       new MultiSet([
         [[1, `X`], 1],
         [[2, `Y`], 1],
-      ])
+      ]),
     )
     graph.run()
 
@@ -586,7 +586,7 @@ function testJoin(joinType: JoinType) {
       consolidate(),
       output((message) => {
         results.push(...message.getInner())
-      })
+      }),
     )
 
     graph.finalize()
@@ -596,13 +596,13 @@ function testJoin(joinType: JoinType) {
       new MultiSet([
         [[1, `A`], 1],
         [[2, `B`], 1],
-      ])
+      ]),
     )
     inputB.sendData(
       new MultiSet([
         [[1, `X`], 1],
         [[2, `Y`], 1],
-      ])
+      ]),
     )
     graph.run()
 
@@ -698,7 +698,7 @@ function testJoin(joinType: JoinType) {
       consolidate(),
       output((message) => {
         results.push(...message.getInner())
-      })
+      }),
     )
 
     graph.finalize()
@@ -738,7 +738,7 @@ function testJoin(joinType: JoinType) {
       new MultiSet([
         [[1, `A`], -1],
         [[1, `A-updated`], 1],
-      ])
+      ]),
     )
     graph.run()
 
@@ -791,7 +791,7 @@ function testJoin(joinType: JoinType) {
       consolidate(),
       output((message) => {
         results.push(...message.getInner())
-      })
+      }),
     )
 
     graph.finalize()
@@ -831,7 +831,7 @@ function testJoin(joinType: JoinType) {
       new MultiSet([
         [[1, `X`], -1],
         [[1, `X-updated`], 1],
-      ])
+      ]),
     )
     graph.run()
 
@@ -887,7 +887,7 @@ function testJoin(joinType: JoinType) {
       consolidate(),
       output((message) => {
         results.push(...message.getInner())
-      })
+      }),
     )
 
     graph.finalize()
@@ -897,13 +897,13 @@ function testJoin(joinType: JoinType) {
       new MultiSet([
         [[1, `A`], 1],
         [[2, `B`], 1],
-      ])
+      ]),
     )
     inputB.sendData(
       new MultiSet([
         [[1, `X`], 1],
         [[2, `Y`], 1],
-      ])
+      ]),
     )
     graph.run()
 
@@ -988,7 +988,7 @@ function testJoin(joinType: JoinType) {
       consolidate(),
       output((message) => {
         results.push(...message.getInner())
-      })
+      }),
     )
 
     graph.finalize()
@@ -998,13 +998,13 @@ function testJoin(joinType: JoinType) {
       new MultiSet([
         [[1, `A`], 1],
         [[2, `B`], 1],
-      ])
+      ]),
     )
     inputB.sendData(
       new MultiSet([
         [[1, `X`], 1],
         [[2, `Y`], 1],
-      ])
+      ]),
     )
     graph.run()
 
@@ -1052,7 +1052,7 @@ function testJoin(joinType: JoinType) {
       new MultiSet([
         [[1, `A`], -1],
         [[1, `A-updated`], 1],
-      ])
+      ]),
     )
     graph.run()
 
@@ -1092,7 +1092,7 @@ function testJoin(joinType: JoinType) {
     }
 
     expect(sortResults(results)).toEqual(
-      sortResults(expectedResults2[joinType])
+      sortResults(expectedResults2[joinType]),
     )
 
     results.length = 0
@@ -1136,7 +1136,7 @@ function testJoin(joinType: JoinType) {
       consolidate(),
       output((message) => {
         results.push(...message.getInner())
-      })
+      }),
     )
 
     graph.finalize()

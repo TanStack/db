@@ -1,0 +1,15 @@
+{
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "paths": {
+      "@tanstack/db": ["../db/src"],
+      "@tanstack/node-db-sqlite-persistence": [
+        "../node-db-sqlite-persistence/src"
+      ],
+      "@tanstack/db-sqlite-persistence-core": [
+        "../db-sqlite-persistence-core/src"
+      ]
+    }
+  },
+  "include": ["src"]
+}

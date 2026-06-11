@@ -1,10 +1,11 @@
-import { describe, expect, expectTypeOf, it, vi } from "vitest"
-import { createCollection, createOptimisticAction } from "../src"
+import { describe, expect, expectTypeOf, it, vi } from 'vitest'
+import { createCollection, createOptimisticAction } from '../src'
+import { stripVirtualProps } from './utils'
 import type {
   MutationFnParams,
   Transaction,
   TransactionWithMutations,
-} from "../src"
+} from '../src'
 
 describe(`createOptimisticAction`, () => {
   // Runtime tests
@@ -47,7 +48,10 @@ describe(`createOptimisticAction`, () => {
     expect(onMutateMock).toHaveBeenCalledWith(`Test Todo`)
 
     // Verify the optimistic update was applied to the collection
-    expect(collection.get(`1`)).toEqual({ id: `1`, text: `Test Todo` })
+    expect(stripVirtualProps(collection.get(`1`))).toEqual({
+      id: `1`,
+      text: `Test Todo`,
+    })
 
     // Wait for the mutation to complete
     await transaction.isPersisted.promise
@@ -56,6 +60,32 @@ describe(`createOptimisticAction`, () => {
     expect(mutationFnMock).toHaveBeenCalledTimes(1)
     expect(mutationFnMock.mock.calls[0]?.[0]).toBe(`Test Todo`)
     expect(mutationFnMock.mock.calls[0]?.[1]).toHaveProperty(`transaction`)
+  })
+
+  it(`should throw if onMutate returns a promise`, () => {
+    const collection = createCollection<{ id: string; text: string }>({
+      id: `async-on-mutate-collection`,
+      getKey: (item) => item.id,
+      sync: {
+        sync: () => {
+          // No-op sync for testing
+        },
+      },
+    })
+
+    const addTodo = createOptimisticAction<string>({
+      // eslint-disable-next-line @typescript-eslint/require-await
+      onMutate: async (text) => {
+        collection.insert({ id: `1`, text })
+      },
+      mutationFn: async () => {
+        return Promise.resolve()
+      },
+    })
+
+    expect(() => addTodo(`Async Todo`)).toThrowError(
+      `onMutate must be synchronous`,
+    )
   })
 
   // Test with complex object variables
@@ -116,7 +146,7 @@ describe(`createOptimisticAction`, () => {
     expect(onMutateMock).toHaveBeenCalledWith(todoData)
 
     // Verify the optimistic update was applied to the collection
-    expect(collection.get(`2`)).toEqual(todoData)
+    expect(stripVirtualProps(collection.get(`2`))).toEqual(todoData)
 
     // Wait for the mutation to complete
     await transaction.isPersisted.promise
@@ -140,7 +170,7 @@ describe(`createOptimisticAction`, () => {
         expectTypeOf(text).toBeString()
         expectTypeOf(params).toEqualTypeOf<MutationFnParams>()
         expectTypeOf(
-          params.transaction
+          params.transaction,
         ).toEqualTypeOf<TransactionWithMutations>()
         return Promise.resolve({ success: true })
       },
@@ -171,7 +201,7 @@ describe(`createOptimisticAction`, () => {
         expectTypeOf(user.id).toBeNumber()
         expectTypeOf(params).toEqualTypeOf<MutationFnParams>()
         expectTypeOf(
-          params.transaction
+          params.transaction,
         ).toEqualTypeOf<TransactionWithMutations>()
         return Promise.resolve({ success: true })
       },
@@ -209,7 +239,10 @@ describe(`createOptimisticAction`, () => {
     const transaction = failingAction(`Will Fail`)
 
     // Verify the optimistic update was applied
-    expect(collection.get(`3`)).toEqual({ id: `3`, text: `Will Fail` })
+    expect(stripVirtualProps(collection.get(`3`))).toEqual({
+      id: `3`,
+      text: `Will Fail`,
+    })
 
     // Wait for the transaction to complete (it will fail)
     try {

@@ -1,13 +1,24 @@
-import { map } from "@tanstack/db-ivm"
-import { PropRef, Value as ValClass, isExpressionLike } from "../ir.js"
-import { AggregateNotSupportedError } from "../../errors.js"
-import { compileExpression } from "./evaluators.js"
-import type { Aggregate, BasicExpression, Select } from "../ir.js"
+import { map } from '@tanstack/db-ivm'
+import {
+  ConditionalSelect,
+  PropRef,
+  Value as ValClass,
+  isExpressionLike,
+} from '../ir.js'
+import { AggregateNotSupportedError } from '../../errors.js'
+import { compileExpression, isCaseWhenConditionTrue } from './evaluators.js'
+import { containsAggregate } from './group-by.js'
+import type {
+  Aggregate,
+  BasicExpression,
+  Select,
+  SelectValueExpression,
+} from '../ir.js'
 import type {
   KeyedStream,
   NamespacedAndKeyedStream,
   NamespacedRow,
-} from "../../types.js"
+} from '../../types.js'
 
 /**
  * Type for operations array used in select processing
@@ -34,7 +45,7 @@ function unwrapVal(input: any): any {
 function processMerge(
   op: Extract<SelectOp, { kind: `merge` }>,
   namespacedRow: NamespacedRow,
-  selectResults: Record<string, any>
+  selectResults: Record<string, any>,
 ): void {
   const value = op.source(namespacedRow)
   if (value && typeof value === `object`) {
@@ -74,7 +85,7 @@ function processMerge(
 function processNonMergeOp(
   op: Extract<SelectOp, { kind: `field` }>,
   namespacedRow: NamespacedRow,
-  selectResults: Record<string, any>
+  selectResults: Record<string, any>,
 ): void {
   // Support nested alias paths like "meta.author.name"
   const path = op.alias.split(`.`)
@@ -99,8 +110,8 @@ function processNonMergeOp(
  */
 function processRow(
   [key, namespacedRow]: [unknown, NamespacedRow],
-  ops: Array<SelectOp>
-): [unknown, typeof namespacedRow & { __select_results: any }] {
+  ops: Array<SelectOp>,
+): [unknown, typeof namespacedRow & { $selected: any }] {
   const selectResults: Record<string, any> = {}
 
   for (const op of ops) {
@@ -111,27 +122,24 @@ function processRow(
     }
   }
 
-  // Return the namespaced row with __select_results added
+  // Return the namespaced row with $selected added
   return [
     key,
     {
       ...namespacedRow,
-      __select_results: selectResults,
+      $selected: selectResults,
     },
-  ] as [
-    unknown,
-    typeof namespacedRow & { __select_results: typeof selectResults },
-  ]
+  ] as [unknown, typeof namespacedRow & { $selected: typeof selectResults }]
 }
 
 /**
- * Processes the SELECT clause and places results in __select_results
+ * Processes the SELECT clause and places results in $selected
  * while preserving the original namespaced row for ORDER BY access
  */
 export function processSelect(
   pipeline: NamespacedAndKeyedStream,
   select: Select,
-  _allInputs: Record<string, KeyedStream>
+  _allInputs: Record<string, KeyedStream>,
 ): NamespacedAndKeyedStream {
   // Build ordered operations to preserve authoring order (spreads and fields)
   const ops: Array<SelectOp> = []
@@ -141,11 +149,94 @@ export function processSelect(
   return pipeline.pipe(map((row) => processRow(row, ops)))
 }
 
+function compileSelectObject(
+  obj: Record<string, any>,
+): (row: NamespacedRow) => any {
+  const ops: Array<SelectOp> = []
+  addFromObject([], obj, ops)
+
+  return (row) => {
+    const selectResults: Record<string, any> = {}
+    for (const op of ops) {
+      if (op.kind === `merge`) {
+        processMerge(op, row, selectResults)
+      } else {
+        processNonMergeOp(op, row, selectResults)
+      }
+    }
+    return selectResults
+  }
+}
+
+function compileSelectValue(
+  value: SelectValueExpression | null | undefined,
+): (row: NamespacedRow) => any {
+  if (value == null) {
+    return () => value
+  }
+
+  if (isConditionalSelectValue(value)) {
+    if (containsAggregate(value)) {
+      return () => null
+    }
+
+    return compileConditionalSelect(value)
+  }
+
+  if (value instanceof ValClass) {
+    return () => value.value
+  }
+
+  if (value.type === `includesSubquery`) {
+    return () => null
+  }
+
+  if (isNestedSelectObject(value)) {
+    return compileSelectObject(value)
+  }
+
+  if (
+    isAggregateExpression(value as BasicExpression | Aggregate) ||
+    containsAggregate(value as BasicExpression | Aggregate)
+  ) {
+    return () => null
+  }
+
+  if (!isExpressionLike(value)) {
+    return () => value
+  }
+
+  return compileExpression(value as BasicExpression)
+}
+
+function compileConditionalSelect(
+  conditional: ConditionalSelect,
+): (row: NamespacedRow) => any {
+  const branches = conditional.branches.map((branch) => ({
+    condition: compileExpression(branch.condition),
+    value: compileSelectValue(branch.value),
+  }))
+  const defaultFn =
+    conditional.defaultValue === undefined
+      ? undefined
+      : compileSelectValue(conditional.defaultValue)
+
+  return (row) => {
+    for (const branch of branches) {
+      if (isCaseWhenConditionTrue(branch.condition(row))) {
+        return branch.value(row)
+      }
+    }
+
+    return defaultFn !== undefined ? defaultFn(row) : null
+  }
+}
+
 /**
  * Helper function to check if an expression is an aggregate
  */
 function isAggregateExpression(
-  expr: BasicExpression | Aggregate
+  expr: BasicExpression | Aggregate,
 ): expr is Aggregate {
   return expr.type === `agg`
 }
@@ -155,7 +246,7 @@ function isAggregateExpression(
  */
 export function processArgument(
   arg: BasicExpression | Aggregate,
-  namespacedRow: NamespacedRow
+  namespacedRow: NamespacedRow,
 ): any {
   if (isAggregateExpression(arg)) {
     throw new AggregateNotSupportedError()
@@ -189,7 +280,7 @@ function isNestedSelectObject(obj: any): boolean {
 function addFromObject(
   prefixPath: Array<string>,
   obj: any,
-  ops: Array<SelectOp>
+  ops: Array<SelectOp>,
 ) {
   for (const [key, value] of Object.entries(obj)) {
     if (key.startsWith(`__SPREAD_SENTINEL__`)) {
@@ -223,14 +314,43 @@ function addFromObject(
     }
 
     const expression = value as any
+    if (isConditionalSelectValue(expression)) {
+      if (containsAggregate(expression)) {
+        ops.push({
+          kind: `field`,
+          alias: [...prefixPath, key].join(`.`),
+          compiled: () => null,
+        })
+        continue
+      }
+
+      ops.push({
+        kind: `field`,
+        alias: [...prefixPath, key].join(`.`),
+        compiled: compileConditionalSelect(expression),
+      })
+      continue
+    }
+
+    if (expression && expression.type === `includesSubquery`) {
+      // Placeholder — field will be set to a child Collection by the output layer
+      ops.push({
+        kind: `field`,
+        alias: [...prefixPath, key].join(`.`),
+        compiled: () => null,
+      })
+      continue
+    }
     if (isNestedSelectObject(expression)) {
       // Nested selection object
       addFromObject([...prefixPath, key], expression, ops)
       continue
     }
 
-    if (isAggregateExpression(expression)) {
-      // Placeholder for group-by processing later
+    if (isAggregateExpression(expression) || containsAggregate(expression)) {
+      // Placeholder for group-by processing later.
+      // Both plain aggregates (count(...)) and expressions wrapping
+      // aggregates (coalesce(count(...), 0)) are deferred to processGroupBy.
       ops.push({
         kind: `field`,
         alias: [...prefixPath, key].join(`.`),
@@ -262,4 +382,14 @@ function addFromObject(
       }
     }
   }
+}
+
+function isConditionalSelectValue(value: unknown): value is ConditionalSelect {
+  return (
+    value instanceof ConditionalSelect ||
+    (value != null &&
+      typeof value === `object` &&
+      (value as { type?: unknown }).type === `conditionalSelect` &&
+      Array.isArray((value as { branches?: unknown }).branches))
+  )
 }

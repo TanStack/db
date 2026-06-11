@@ -1,6 +1,7 @@
-import { PropRef, Value } from "../ir.js"
-import type { BasicExpression } from "../ir.js"
-import type { RefLeaf } from "./types.js"
+import { PropRef, Value } from '../ir.js'
+import type { BasicExpression } from '../ir.js'
+import type { RefLeaf } from './types.js'
+import type { VirtualRowProps } from '../../virtual-props.js'
 
 export interface RefProxy<T = any> {
   /** @internal */
@@ -12,17 +13,34 @@ export interface RefProxy<T = any> {
 }
 
 /**
+ * Virtual properties available on all row ref proxies.
+ * These allow querying on sync status, origin, key, and collection ID.
+ */
+export type VirtualPropsRefProxy<
+  TKey extends string | number = string | number,
+> = {
+  readonly [K in keyof VirtualRowProps<TKey>]: RefLeaf<VirtualRowProps<TKey>[K]>
+}
+
+/**
  * Type for creating a RefProxy for a single row/type without namespacing
  * Used in collection indexes and where clauses
+ *
+ * Includes virtual properties ($synced, $origin, $key, $collectionId) for
+ * querying on sync status and row metadata.
  */
-export type SingleRowRefProxy<T> =
+export type SingleRowRefProxy<
+  T,
+  TKey extends string | number = string | number,
+> =
   T extends Record<string, any>
     ? {
         [K in keyof T]: T[K] extends Record<string, any>
-          ? SingleRowRefProxy<T[K]> & RefProxy<T[K]>
+          ? SingleRowRefProxy<T[K], TKey> & RefProxy<T[K]>
           : RefLeaf<T[K]>
-      } & RefProxy<T>
-    : RefProxy<T>
+      } & RefProxy<T> &
+        VirtualPropsRefProxy<TKey>
+    : RefProxy<T> & VirtualPropsRefProxy<TKey>
 
 /**
  * Creates a proxy object that records property access paths for a single row
@@ -81,7 +99,7 @@ export function createSingleRowRefProxy<
  * Used in callbacks like where, select, etc. to create type-safe references
  */
 export function createRefProxy<T extends Record<string, any>>(
-  aliases: Array<string>
+  aliases: Array<string>,
 ): RefProxy<T> & T {
   const cache = new Map<string, any>()
   let accessId = 0 // Monotonic counter to record evaluation order
@@ -143,7 +161,7 @@ export function createRefProxy<T extends Record<string, any>>(
       if (typeof prop === `symbol`) return Reflect.get(target, prop, receiver)
 
       const propStr = String(prop)
-      if (aliases.includes(propStr)) {
+      if (aliases.includes(propStr) || aliases.includes(`*`)) {
         return createProxy([propStr])
       }
 
@@ -176,14 +194,129 @@ export function createRefProxy<T extends Record<string, any>>(
 }
 
 /**
- * Converts a value to an Expression
- * If it's a RefProxy, creates a Ref, otherwise creates a Value
+ * Creates a ref proxy with $selected namespace for SELECT fields
+ *
+ * Adds a $selected property that allows accessing SELECT fields via $selected.fieldName syntax.
+ * The $selected proxy creates paths like ['$selected', 'fieldName'] which directly reference
+ * the $selected property on the namespaced row.
+ *
+ * @param aliases - Array of table aliases to create proxies for
+ * @returns A ref proxy with table aliases and $selected namespace
+ */
+export function createRefProxyWithSelected<T extends Record<string, any>>(
+  aliases: Array<string>,
+): RefProxy<T> & T & { $selected: SingleRowRefProxy<any> } {
+  const baseProxy = createRefProxy(aliases)
+
+  // Create a proxy for $selected that prefixes all paths with '$selected'
+  const cache = new Map<string, any>()
+
+  function createSelectedProxy(path: Array<string>): any {
+    const pathKey = path.join(`.`)
+    if (cache.has(pathKey)) {
+      return cache.get(pathKey)
+    }
+
+    const proxy = new Proxy({} as any, {
+      get(target, prop, receiver) {
+        if (prop === `__refProxy`) return true
+        if (prop === `__path`) return [`$selected`, ...path]
+        if (prop === `__type`) return undefined
+        if (typeof prop === `symbol`) return Reflect.get(target, prop, receiver)
+
+        const newPath = [...path, String(prop)]
+        return createSelectedProxy(newPath)
+      },
+
+      has(target, prop) {
+        if (prop === `__refProxy` || prop === `__path` || prop === `__type`)
+          return true
+        return Reflect.has(target, prop)
+      },
+
+      ownKeys(target) {
+        return Reflect.ownKeys(target)
+      },
+
+      getOwnPropertyDescriptor(target, prop) {
+        if (prop === `__refProxy` || prop === `__path` || prop === `__type`) {
+          return { enumerable: false, configurable: true }
+        }
+        return Reflect.getOwnPropertyDescriptor(target, prop)
+      },
+    })
+
+    cache.set(pathKey, proxy)
+    return proxy
+  }
+
+  const wrappedSelectedProxy = createSelectedProxy([])
+
+  // Wrap the base proxy to also handle $selected access
+  return new Proxy(baseProxy, {
+    get(target, prop, receiver) {
+      if (prop === `$selected`) {
+        return wrappedSelectedProxy
+      }
+      return Reflect.get(target, prop, receiver)
+    },
+
+    has(target, prop) {
+      if (prop === `$selected`) return true
+      return Reflect.has(target, prop)
+    },
+
+    ownKeys(target) {
+      return [...Reflect.ownKeys(target), `$selected`]
+    },
+
+    getOwnPropertyDescriptor(target, prop) {
+      if (prop === `$selected`) {
+        return {
+          enumerable: true,
+          configurable: true,
+          value: wrappedSelectedProxy,
+        }
+      }
+      return Reflect.getOwnPropertyDescriptor(target, prop)
+    },
+  }) as RefProxy<T> & T & { $selected: SingleRowRefProxy<any> }
+}
+
+/**
+ * Converts a value to an Expression.
+ * If it's a RefProxy, creates a PropRef. Throws if the value is a
+ * ToArrayWrapper, ConcatToArrayWrapper, CaseWhenWrapper, or MaterializeWrapper
+ * (these must be used as direct select fields). Otherwise wraps it as a Value.
  */
 export function toExpression<T = any>(value: T): BasicExpression<T>
 export function toExpression(value: RefProxy<any>): BasicExpression<any>
 export function toExpression(value: any): BasicExpression<any> {
   if (isRefProxy(value)) {
     return new PropRef(value.__path)
+  }
+  // toArray(), concat(toArray()), and materialize() must be used as direct
+  // select fields, not inside expressions
+  if (
+    value &&
+    typeof value === `object` &&
+    (value.__brand === `ToArrayWrapper` ||
+      value.__brand === `ConcatToArrayWrapper` ||
+      value.__brand === `CaseWhenWrapper` ||
+      value.__brand === `MaterializeWrapper`)
+  ) {
+    const name =
+      value.__brand === `ToArrayWrapper`
+        ? `toArray()`
+        : value.__brand === `ConcatToArrayWrapper`
+          ? `concat(toArray())`
+          : value.__brand === `CaseWhenWrapper`
+            ? `caseWhen()`
+            : `materialize()`
+    throw new Error(
+      `${name} cannot be used inside expressions (e.g., coalesce(), eq(), not()). ` +
+        `Use ${name} directly as a select field value instead.`,
+    )
   }
   // If it's already an Expression (Func, Ref, Value) or Agg, return it directly
   if (

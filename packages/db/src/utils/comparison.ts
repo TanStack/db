@@ -1,4 +1,5 @@
-import type { CompareOptions } from "../query/builder/types"
+import { isTemporal } from '../utils'
+import type { CompareOptions } from '../query/builder/types'
 
 // WeakMap to store stable IDs for objects
 const objectIds = new WeakMap<object, number>()
@@ -54,6 +55,15 @@ export const ascComparator = (a: any, b: any, opts: CompareOptions): number => {
     return a.getTime() - b.getTime()
   }
 
+  // If both are Temporal objects of the same type, compare by string representation
+  if (isTemporal(a) && isTemporal(b)) {
+    const aStr = a.toString()
+    const bStr = b.toString()
+    if (aStr < bStr) return -1
+    if (aStr > bStr) return 1
+    return 0
+  }
+
   // If at least one of the values is an object, use stable IDs for comparison
   const aIsObject = typeof a === `object`
   const bIsObject = typeof b === `object`
@@ -84,7 +94,7 @@ export const ascComparator = (a: any, b: any, opts: CompareOptions): number => {
 export const descComparator = (
   a: unknown,
   b: unknown,
-  opts: CompareOptions
+  opts: CompareOptions,
 ): number => {
   return ascComparator(b, a, {
     ...opts,
@@ -93,7 +103,7 @@ export const descComparator = (
 }
 
 export function makeComparator(
-  opts: CompareOptions
+  opts: CompareOptions,
 ): (a: any, b: any) => number {
   return (a, b) => {
     if (opts.direction === `asc`) {
@@ -112,11 +122,118 @@ export const defaultComparator = makeComparator({
 })
 
 /**
- * Normalize a value for comparison
+ * Compare two Uint8Arrays for content equality
+ */
+function areUint8ArraysEqual(a: Uint8Array, b: Uint8Array): boolean {
+  if (a.byteLength !== b.byteLength) {
+    return false
+  }
+  for (let i = 0; i < a.byteLength; i++) {
+    if (a[i] !== b[i]) {
+      return false
+    }
+  }
+  return true
+}
+
+/**
+ * Threshold for normalizing Uint8Arrays to string representations.
+ * Arrays larger than this will use reference equality to avoid memory overhead.
+ * 128 bytes is enough for common ID formats (ULIDs are 16 bytes, UUIDs are 16 bytes)
+ * while avoiding excessive string allocation for large binary data.
+ */
+const UINT8ARRAY_NORMALIZE_THRESHOLD = 128
+
+/**
+ * Sentinel value representing undefined in normalized form.
+ * This allows distinguishing between "start from beginning" (undefined parameter)
+ * and "start from the key undefined" (actual undefined value in the tree).
+ */
+export const UNDEFINED_SENTINEL = `__TS_DB_BTREE_UNDEFINED_VALUE__`
+
+/**
+ * Normalize a value for comparison and Map key usage
+ * Converts values that can't be directly compared or used as Map keys
+ * into comparable primitive representations
+ *
+ * Note: This does NOT convert undefined to a sentinel. Use normalizeForBTree
+ * for BTree index operations that need to distinguish undefined values.
  */
 export function normalizeValue(value: any): any {
   if (value instanceof Date) {
     return value.getTime()
   }
+
+  if (isTemporal(value)) {
+    return `__temporal__${value[Symbol.toStringTag]}__${value.toString()}`
+  }
+
+  // Normalize Uint8Arrays/Buffers to a string representation for Map key usage
+  // This enables content-based equality for binary data like ULIDs
+  const isUint8Array =
+    (typeof Buffer !== `undefined` && value instanceof Buffer) ||
+    value instanceof Uint8Array
+
+  if (isUint8Array) {
+    // Only normalize small arrays to avoid memory overhead for large binary data
+    if (value.byteLength <= UINT8ARRAY_NORMALIZE_THRESHOLD) {
+      // Convert to a string representation that can be used as a Map key
+      // Use a special prefix to avoid collisions with user strings
+      return `__u8__${Array.from(value).join(`,`)}`
+    }
+    // For large arrays, fall back to reference equality
+    // Users working with large binary data should use a derived key if needed
+  }
+
   return value
+}
+
+/**
+ * Normalize a value for BTree index usage.
+ * Extends normalizeValue to also convert undefined to a sentinel value.
+ * This is needed because the BTree does not properly support `undefined` as a key
+ * (it interprets undefined as "start from beginning" in nextHigherPair/nextLowerPair).
+ */
+export function normalizeForBTree(value: any): any {
+  if (value === undefined) {
+    return UNDEFINED_SENTINEL
+  }
+  return normalizeValue(value)
+}
+
+/**
+ * Converts the `UNDEFINED_SENTINEL` back to `undefined`.
+ * Needed such that the sentinel is converted back to `undefined` before comparison.
+ */
+export function denormalizeUndefined(value: any): any {
+  if (value === UNDEFINED_SENTINEL) {
+    return undefined
+  }
+  return value
+}
+
+/**
+ * Compare two values for equality, with special handling for Uint8Arrays and Buffers
+ */
+export function areValuesEqual(a: any, b: any): boolean {
+  // Fast path for reference equality
+  if (a === b) {
+    return true
+  }
+
+  // Check for Uint8Array/Buffer comparison
+  const aIsUint8Array =
+    (typeof Buffer !== `undefined` && a instanceof Buffer) ||
+    a instanceof Uint8Array
+  const bIsUint8Array =
+    (typeof Buffer !== `undefined` && b instanceof Buffer) ||
+    b instanceof Uint8Array
+
+  // If both are Uint8Arrays, compare by content
+  if (aIsUint8Array && bIsUint8Array) {
+    return areUint8ArraysEqual(a, b)
+  }
+
+  // Different types or not Uint8Arrays
+  return false
 }

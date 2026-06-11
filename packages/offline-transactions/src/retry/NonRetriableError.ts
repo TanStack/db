@@ -1,0 +1,1 @@
+export { NonRetriableError } from '../types'

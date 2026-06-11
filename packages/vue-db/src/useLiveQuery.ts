@@ -7,24 +7,28 @@ import {
   ref,
   toValue,
   watchEffect,
-} from "vue"
-import { createLiveQueryCollection } from "@tanstack/db"
+} from 'vue'
+import { createLiveQueryCollection } from '@tanstack/db'
 import type {
   ChangeMessage,
   Collection,
+  CollectionConfigSingleRowOption,
   CollectionStatus,
   Context,
   GetResult,
+  InferResultType,
   InitialQueryBuilder,
   LiveQueryCollectionConfig,
+  NonSingleResult,
   QueryBuilder,
-} from "@tanstack/db"
-import type { ComputedRef, MaybeRefOrGetter } from "vue"
+  SingleResult,
+} from '@tanstack/db'
+import type { ComputedRef, MaybeRefOrGetter } from 'vue'
 
 /**
  * Return type for useLiveQuery hook
  * @property state - Reactive Map of query results (key → item)
- * @property data - Reactive array of query results in order
+ * @property data - Reactive array of query results in order, or single result for findOne queries
  * @property collection - The underlying query collection instance
  * @property status - Current query status
  * @property isLoading - True while initial query data is loading
@@ -33,10 +37,10 @@ import type { ComputedRef, MaybeRefOrGetter } from "vue"
  * @property isError - True when query encountered an error
  * @property isCleanedUp - True when query has been cleaned up
  */
-export interface UseLiveQueryReturn<T extends object> {
-  state: ComputedRef<Map<string | number, T>>
-  data: ComputedRef<Array<T>>
-  collection: ComputedRef<Collection<T, string | number, {}>>
+export interface UseLiveQueryReturn<TContext extends Context> {
+  state: ComputedRef<Map<string | number, GetResult<TContext>>>
+  data: ComputedRef<InferResultType<TContext>>
+  collection: ComputedRef<Collection<GetResult<TContext>, string | number, {}>>
   status: ComputedRef<CollectionStatus>
   isLoading: ComputedRef<boolean>
   isReady: ComputedRef<boolean>
@@ -53,6 +57,22 @@ export interface UseLiveQueryReturnWithCollection<
   state: ComputedRef<Map<TKey, T>>
   data: ComputedRef<Array<T>>
   collection: ComputedRef<Collection<T, TKey, TUtils>>
+  status: ComputedRef<CollectionStatus>
+  isLoading: ComputedRef<boolean>
+  isReady: ComputedRef<boolean>
+  isIdle: ComputedRef<boolean>
+  isError: ComputedRef<boolean>
+  isCleanedUp: ComputedRef<boolean>
+}
+
+export interface UseLiveQueryReturnWithSingleResultCollection<
+  T extends object,
+  TKey extends string | number,
+  TUtils extends Record<string, any>,
+> {
+  state: ComputedRef<Map<TKey, T>>
+  data: ComputedRef<T | undefined>
+  collection: ComputedRef<Collection<T, TKey, TUtils> & SingleResult>
   status: ComputedRef<CollectionStatus>
   isLoading: ComputedRef<boolean>
   isReady: ComputedRef<boolean>
@@ -110,11 +130,19 @@ export interface UseLiveQueryReturnWithCollection<
  * //   <li v-for="todo in data" :key="todo.id">{{ todo.text }}</li>
  * // </ul>
  */
-// Overload 1: Accept just the query function
+// Overload 1: Accept query function that always returns QueryBuilder
 export function useLiveQuery<TContext extends Context>(
   queryFn: (q: InitialQueryBuilder) => QueryBuilder<TContext>,
-  deps?: Array<MaybeRefOrGetter<unknown>>
-): UseLiveQueryReturn<GetResult<TContext>>
+  deps?: Array<MaybeRefOrGetter<unknown>>,
+): UseLiveQueryReturn<TContext>
+
+// Overload 1b: Accept query function that can return undefined/null
+export function useLiveQuery<TContext extends Context>(
+  queryFn: (
+    q: InitialQueryBuilder,
+  ) => QueryBuilder<TContext> | undefined | null,
+  deps?: Array<MaybeRefOrGetter<unknown>>,
+): UseLiveQueryReturn<TContext>
 
 /**
  * Create a live query using configuration object
@@ -151,8 +179,8 @@ export function useLiveQuery<TContext extends Context>(
 // Overload 2: Accept config object
 export function useLiveQuery<TContext extends Context>(
   config: LiveQueryCollectionConfig<TContext>,
-  deps?: Array<MaybeRefOrGetter<unknown>>
-): UseLiveQueryReturn<GetResult<TContext>>
+  deps?: Array<MaybeRefOrGetter<unknown>>,
+): UseLiveQueryReturn<TContext>
 
 /**
  * Subscribe to an existing query collection (can be reactive)
@@ -193,32 +221,48 @@ export function useLiveQuery<TContext extends Context>(
  * //   <Item v-for="item in data" :key="item.id" v-bind="item" />
  * // </div>
  */
-// Overload 3: Accept pre-created live query collection (can be reactive)
+// Overload 3: Accept pre-created live query collection (can be reactive) - non-single result
 export function useLiveQuery<
   TResult extends object,
   TKey extends string | number,
   TUtils extends Record<string, any>,
 >(
-  liveQueryCollection: MaybeRefOrGetter<Collection<TResult, TKey, TUtils>>
+  liveQueryCollection: MaybeRefOrGetter<
+    Collection<TResult, TKey, TUtils> & NonSingleResult
+  >,
 ): UseLiveQueryReturnWithCollection<TResult, TKey, TUtils>
+
+// Overload 4: Accept pre-created live query collection with singleResult: true
+export function useLiveQuery<
+  TResult extends object,
+  TKey extends string | number,
+  TUtils extends Record<string, any>,
+>(
+  liveQueryCollection: MaybeRefOrGetter<
+    Collection<TResult, TKey, TUtils> & SingleResult
+  >,
+): UseLiveQueryReturnWithSingleResultCollection<TResult, TKey, TUtils>
 
 // Implementation
 export function useLiveQuery(
   configOrQueryOrCollection: any,
-  deps: Array<MaybeRefOrGetter<unknown>> = []
+  deps: Array<MaybeRefOrGetter<unknown>> = [],
 ): UseLiveQueryReturn<any> | UseLiveQueryReturnWithCollection<any, any, any> {
   const collection = computed(() => {
     // First check if the original parameter might be a ref/getter
     // by seeing if toValue returns something different than the original
+    // NOTE: Don't call toValue on functions - toValue treats functions as getters and calls them!
     let unwrappedParam = configOrQueryOrCollection
-    try {
-      const potentiallyUnwrapped = toValue(configOrQueryOrCollection)
-      if (potentiallyUnwrapped !== configOrQueryOrCollection) {
-        unwrappedParam = potentiallyUnwrapped
+    if (typeof configOrQueryOrCollection !== `function`) {
+      try {
+        const potentiallyUnwrapped = toValue(configOrQueryOrCollection)
+        if (potentiallyUnwrapped !== configOrQueryOrCollection) {
+          unwrappedParam = potentiallyUnwrapped
+        }
+      } catch {
+        // If toValue fails, use original parameter
+        unwrappedParam = configOrQueryOrCollection
       }
-    } catch {
-      // If toValue fails, use original parameter
-      unwrappedParam = configOrQueryOrCollection
     }
 
     // Check if it's already a collection by checking for specific collection methods
@@ -230,6 +274,20 @@ export function useLiveQuery(
       typeof unwrappedParam.id === `string`
 
     if (isCollection) {
+      // Warn when passing a collection directly with on-demand sync mode
+      // In on-demand mode, data is only loaded when queries with predicates request it
+      // Passing the collection directly doesn't provide any predicates, so no data loads
+      const syncMode = (unwrappedParam as { config?: { syncMode?: string } })
+        .config?.syncMode
+      if (syncMode === `on-demand`) {
+        console.warn(
+          `[useLiveQuery] Warning: Passing a collection with syncMode "on-demand" directly to useLiveQuery ` +
+            `will not load any data. In on-demand mode, data is only loaded when queries with predicates request it.\n\n` +
+            `Instead, use a query builder function:\n` +
+            `  const { data } = useLiveQuery((q) => q.from({ c: myCollection }).select(({ c }) => c))\n\n` +
+            `Or switch to syncMode "eager" if you want all data to sync automatically.`,
+        )
+      }
       // It's already a collection, ensure sync is started for Vue hooks
       // Only start sync if the collection is in idle state
       if (unwrappedParam.status === `idle`) {
@@ -243,10 +301,31 @@ export function useLiveQuery(
 
     // Ensure we always start sync for Vue hooks
     if (typeof unwrappedParam === `function`) {
-      return createLiveQueryCollection({
-        query: unwrappedParam,
-        startSync: true,
-      })
+      // To avoid calling the query function twice, we wrap it to handle null/undefined returns
+      // The wrapper will be called once by createLiveQueryCollection
+      const wrappedQuery = (q: InitialQueryBuilder) => {
+        const result = unwrappedParam(q)
+        // If the query function returns null/undefined, throw a special error
+        // that we'll catch to return null collection
+        if (result === undefined || result === null) {
+          throw new Error(`__DISABLED_QUERY__`)
+        }
+        return result
+      }
+
+      try {
+        return createLiveQueryCollection({
+          query: wrappedQuery,
+          startSync: true,
+        })
+      } catch (error) {
+        // Check if this is our special disabled query marker
+        if (error instanceof Error && error.message === `__DISABLED_QUERY__`) {
+          return null
+        }
+        // Re-throw other errors
+        throw error
+      }
     } else {
       return createLiveQueryCollection({
         ...unwrappedParam,
@@ -262,14 +341,25 @@ export function useLiveQuery(
   const internalData = reactive<Array<any>>([])
 
   // Computed wrapper for the data to match expected return type
-  const data = computed(() => internalData)
+  // Returns single item for singleResult collections, array otherwise
+  const data = computed(() => {
+    const currentCollection = collection.value
+    if (!currentCollection) {
+      return internalData
+    }
+    const config: CollectionConfigSingleRowOption<any, any, any> =
+      currentCollection.config
+    return config.singleResult ? internalData[0] : internalData
+  })
 
   // Track collection status reactively
-  const status = ref(collection.value.status)
+  const status = ref(
+    collection.value ? collection.value.status : (`disabled` as const),
+  )
 
   // Helper to sync data array from collection in correct order
   const syncDataFromCollection = (
-    currentCollection: Collection<any, any, any>
+    currentCollection: Collection<any, any, any>,
   ) => {
     internalData.length = 0
     internalData.push(...Array.from(currentCollection.values()))
@@ -281,6 +371,18 @@ export function useLiveQuery(
   // Watch for collection changes and subscribe to updates
   watchEffect((onInvalidate) => {
     const currentCollection = collection.value
+
+    // Handle null collection (disabled query)
+    if (!currentCollection) {
+      status.value = `disabled` as const
+      state.clear()
+      internalData.length = 0
+      if (currentUnsubscribe) {
+        currentUnsubscribe()
+        currentUnsubscribe = null
+      }
+      return
+    }
 
     // Update status ref whenever the effect runs
     status.value = currentCollection.status
@@ -331,7 +433,7 @@ export function useLiveQuery(
       },
       {
         includeInitialState: true,
-      }
+      },
     )
 
     currentUnsubscribe = subscription.unsubscribe.bind(subscription)
@@ -366,7 +468,9 @@ export function useLiveQuery(
     collection: computed(() => collection.value),
     status: computed(() => status.value),
     isLoading: computed(() => status.value === `loading`),
-    isReady: computed(() => status.value === `ready`),
+    isReady: computed(
+      () => status.value === `ready` || status.value === `disabled`,
+    ),
     isIdle: computed(() => status.value === `idle`),
     isError: computed(() => status.value === `error`),
     isCleanedUp: computed(() => status.value === `cleaned-up`),

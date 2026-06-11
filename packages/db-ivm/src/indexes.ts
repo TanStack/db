@@ -33,9 +33,9 @@
  * Prefixes extracted from array values: `['prefix', 'suffix']` → prefix='prefix'
  */
 
-import { MultiSet } from "./multiset.js"
-import { hash } from "./hashing/index.js"
-import type { Hash } from "./hashing/index.js"
+import { MultiSet } from './multiset.js'
+import { hash } from './hashing/index.js'
+import type { Hash } from './hashing/index.js'
 
 // We use a symbol to represent the absence of a prefix, unprefixed values a stored
 // against this key.
@@ -183,7 +183,7 @@ export class Index<TKey, TValue, TPrefix = any> {
     return `Index(${JSON.stringify(
       [...this.entries()],
       undefined,
-      indent ? 2 : undefined
+      indent ? 2 : undefined,
     )})`
   }
 
@@ -325,7 +325,7 @@ export class Index<TKey, TValue, TPrefix = any> {
         key,
         mapOrSingleValue,
         value,
-        multiplicity
+        multiplicity,
       )
       return
     }
@@ -362,7 +362,7 @@ export class Index<TKey, TValue, TPrefix = any> {
     key: TKey,
     currentSingleValue: SingleValue<TValue>,
     newValue: TValue,
-    multiplicity: number
+    multiplicity: number,
   ) {
     const [currentValue, currentMultiplicity] = currentSingleValue
 
@@ -438,7 +438,7 @@ export class Index<TKey, TValue, TPrefix = any> {
    * @returns A multiset of the joined values.
    */
   join<TValue2>(
-    other: Index<TKey, TValue2>
+    other: Index<TKey, TValue2>,
   ): MultiSet<[TKey, [TValue, TValue2]]> {
     const result: Array<[[TKey, [TValue, TValue2]], number]> = []
     // We want to iterate over the smaller of the two indexes to reduce the
@@ -499,7 +499,7 @@ function getPrefix<TValue, TPrefix>(value: TValue): TPrefix | NO_PREFIX {
  * @returns True if the value is a single value, false otherwise.
  */
 function isSingleValue<TValue>(
-  value: SingleValue<TValue> | unknown
+  value: SingleValue<TValue> | unknown,
 ): value is SingleValue<TValue> {
   return Array.isArray(value)
 }

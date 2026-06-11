@@ -1,6 +1,6 @@
-import { describe, expect, test } from "vitest"
-import { D2 } from "../../src/d2.js"
-import { MultiSet } from "../../src/multiset.js"
+import { describe, expect, test } from 'vitest'
+import { D2 } from '../../src/d2.js'
+import { MultiSet } from '../../src/multiset.js'
 import {
   avg,
   count,
@@ -10,8 +10,8 @@ import {
   min,
   mode,
   sum,
-} from "../../src/operators/groupBy.js"
-import { output } from "../../src/operators/index.js"
+} from '../../src/operators/groupBy.js'
+import { output } from '../../src/operators/index.js'
 
 describe(`Operators`, () => {
   describe(`GroupBy operation`, () => {
@@ -27,7 +27,7 @@ describe(`Operators`, () => {
         groupBy((data) => ({ category: data.category })),
         output((message) => {
           latestMessage = message
-        })
+        }),
       )
 
       graph.finalize()
@@ -38,7 +38,7 @@ describe(`Operators`, () => {
           [{ category: `A`, amount: 10 }, 1],
           [{ category: `A`, amount: 20 }, 1],
           [{ category: `B`, amount: 30 }, 1],
-        ])
+        ]),
       )
       graph.run()
 
@@ -85,7 +85,7 @@ describe(`Operators`, () => {
         }),
         output((message) => {
           latestMessage = message
-        })
+        }),
       )
 
       graph.finalize()
@@ -96,7 +96,7 @@ describe(`Operators`, () => {
           [{ category: `A`, amount: 10 }, 1],
           [{ category: `A`, amount: 20 }, 1],
           [{ category: `B`, amount: 30 }, 1],
-        ])
+        ]),
       )
       graph.run()
 
@@ -150,12 +150,12 @@ describe(`Operators`, () => {
           {
             total: sum((data) => data.amount),
             count: count(),
-          }
+          },
         ),
         output((message) => {
           latestMessage = message
           messages.push(message)
-        })
+        }),
       )
 
       graph.finalize()
@@ -167,7 +167,7 @@ describe(`Operators`, () => {
           [{ category: `A`, region: `East`, amount: 20 }, 1],
           [{ category: `A`, region: `West`, amount: 30 }, 1],
           [{ category: `B`, region: `East`, amount: 40 }, 1],
-        ])
+        ]),
       )
       graph.run()
 
@@ -220,7 +220,7 @@ describe(`Operators`, () => {
         new MultiSet([
           [{ category: `A`, region: `East`, amount: 15 }, 1],
           [{ category: `B`, region: `West`, amount: 25 }, 1],
-        ])
+        ]),
       )
 
       graph.run()
@@ -270,7 +270,7 @@ describe(`Operators`, () => {
       input.sendData(
         new MultiSet([
           [{ category: `A`, region: `East`, amount: 20 }, -1], // Remove one of the A/East records
-        ])
+        ]),
       )
       graph.run()
 
@@ -321,12 +321,12 @@ describe(`Operators`, () => {
           {
             countNotNull: count((data) => data.amount),
             count: count(),
-          }
+          },
         ),
         output((message) => {
           latestMessage = message
           messages.push(message)
-        })
+        }),
       )
 
       graph.finalize()
@@ -338,7 +338,7 @@ describe(`Operators`, () => {
           [{ category: `B`, amount: 10 }, 1],
           [{ category: `A`, amount: null }, 1],
           [{ category: `B`, amount: null }, 1],
-        ])
+        ]),
       )
 
       graph.run()
@@ -391,7 +391,7 @@ describe(`Operators`, () => {
         output((message) => {
           latestMessage = message
           messages.push(message)
-        })
+        }),
       )
 
       graph.finalize()
@@ -402,7 +402,7 @@ describe(`Operators`, () => {
           [{ category: `A`, amount: 10 }, 1],
           [{ category: `A`, amount: 20 }, 1],
           [{ category: `B`, amount: 30 }, 1],
-        ])
+        ]),
       )
       graph.run()
 
@@ -441,7 +441,7 @@ describe(`Operators`, () => {
         new MultiSet([
           [{ category: `A`, amount: 30 }, 1],
           [{ category: `C`, amount: 50 }, 1],
-        ])
+        ]),
       )
       graph.run()
 
@@ -487,7 +487,7 @@ describe(`Operators`, () => {
       input.sendData(
         new MultiSet([
           [{ category: `A`, amount: 10 }, -1], // Remove the first A record
-        ])
+        ]),
       )
       graph.run()
 
@@ -537,7 +537,7 @@ describe(`Operators`, () => {
         }),
         output((message) => {
           latestMessage = message
-        })
+        }),
       )
 
       graph.finalize()
@@ -550,7 +550,7 @@ describe(`Operators`, () => {
           [{ category: `A`, amount: 5, date: new Date(`2025/12/12`) }, 1],
           [{ category: `B`, amount: 30, date: new Date(`2025/12/12`) }, 1],
           [{ category: `B`, amount: 15, date: new Date(`2025/12/13`) }, 1],
-        ])
+        ]),
       )
 
       // Run the graph to process all messages
@@ -605,7 +605,7 @@ describe(`Operators`, () => {
         }),
         output((message) => {
           latestMessage = message
-        })
+        }),
       )
 
       graph.finalize()
@@ -626,7 +626,7 @@ describe(`Operators`, () => {
           [{ category: `B`, amount: 10 }, 1],
           [{ category: `B`, amount: 15 }, 1],
           [{ category: `B`, amount: 20 }, 1],
-        ])
+        ]),
       )
 
       // Run the graph to process all messages
@@ -676,7 +676,7 @@ describe(`Operators`, () => {
         }),
         output((message) => {
           latestMessage = message
-        })
+        }),
       )
 
       graph.finalize()
@@ -688,7 +688,7 @@ describe(`Operators`, () => {
           [{ category: `A`, amount: 20 }, 1],
           [{ category: `B`, amount: 30 }, 1],
           [{ category: `C`, amount: 40 }, 1],
-        ])
+        ]),
       )
       graph.run()
 
@@ -699,7 +699,7 @@ describe(`Operators`, () => {
 
       // Find the group for category A
       const categoryAGroup = result.find(
-        ([key]: any) => key[0] === `{"category":"A"}`
+        ([key]: any) => key[0] === `{"category":"A"}`,
       )
       expect(categoryAGroup).toBeDefined()
       expect(categoryAGroup[0][1].total).toBe(30) // Sum of 10 + 20
@@ -709,7 +709,7 @@ describe(`Operators`, () => {
         new MultiSet([
           [{ category: `A`, amount: 10 }, -1],
           [{ category: `A`, amount: 20 }, -1],
-        ])
+        ]),
       )
       graph.run()
 
@@ -737,7 +737,7 @@ describe(`Operators`, () => {
       // Verify no new group with total: 0 was created by checking that
       // we don't have any positive weight entries for category A
       const positiveCategoryAEntries = result.filter(
-        ([key, , weight]: any) => key[0] === `{"category":"A"}` && weight > 0
+        ([key, , weight]: any) => key[0] === `{"category":"A"}` && weight > 0,
       )
       expect(positiveCategoryAEntries).toHaveLength(0)
     })
@@ -761,11 +761,11 @@ describe(`Operators`, () => {
             total: sum((data) => data.amount),
             count: count(),
             average: avg((data) => data.amount),
-          }
+          },
         ),
         output((message) => {
           latestMessage = message
-        })
+        }),
       )
 
       graph.finalize()
@@ -777,7 +777,7 @@ describe(`Operators`, () => {
           [{ category: `A`, region: `East`, amount: 20 }, 1],
           [{ category: `A`, region: `West`, amount: 30 }, 1],
           [{ category: `B`, region: `East`, amount: 40 }, 1],
-        ])
+        ]),
       )
       graph.run()
 
@@ -788,7 +788,7 @@ describe(`Operators`, () => {
 
       // Find the group for category A, region East
       const categoryAEastGroup = result.find(
-        ([key]: any) => key[0] === `{"category":"A","region":"East"}`
+        ([key]: any) => key[0] === `{"category":"A","region":"East"}`,
       )
       expect(categoryAEastGroup).toBeDefined()
       expect(categoryAEastGroup[0][1]).toEqual({
@@ -804,7 +804,7 @@ describe(`Operators`, () => {
         new MultiSet([
           [{ category: `A`, region: `East`, amount: 10 }, -1],
           [{ category: `A`, region: `East`, amount: 20 }, -1],
-        ])
+        ]),
       )
       graph.run()
 
@@ -834,7 +834,7 @@ describe(`Operators`, () => {
       // Verify no new group with zero/empty values was created
       const positiveCategoryAEastEntries = result.filter(
         ([key, , weight]: any) =>
-          key[0] === `{"category":"A","region":"East"}` && weight > 0
+          key[0] === `{"category":"A","region":"East"}` && weight > 0,
       )
       expect(positiveCategoryAEastEntries).toHaveLength(0)
     })
@@ -853,7 +853,7 @@ describe(`Operators`, () => {
         }),
         output((message) => {
           latestMessage = message
-        })
+        }),
       )
 
       graph.finalize()
@@ -864,7 +864,7 @@ describe(`Operators`, () => {
           [{ category: `A`, amount: 10 }, 1],
           [{ category: `A`, amount: 20 }, 1],
           [{ category: `B`, amount: 30 }, 1],
-        ])
+        ]),
       )
       graph.run()
 
@@ -875,7 +875,7 @@ describe(`Operators`, () => {
 
       // Find the group for category A
       const categoryAGroup = result.find(
-        ([key]: any) => key[0] === `{"category":"A"}`
+        ([key]: any) => key[0] === `{"category":"A"}`,
       )
       expect(categoryAGroup).toBeDefined()
       expect(categoryAGroup[0][1].total).toBe(30) // Sum of 10 + 20
@@ -885,7 +885,7 @@ describe(`Operators`, () => {
         new MultiSet([
           [{ category: `A`, amount: 10 }, -1],
           [{ category: `A`, amount: 20 }, -1],
-        ])
+        ]),
       )
       graph.run()
 
@@ -910,7 +910,7 @@ describe(`Operators`, () => {
         new MultiSet([
           [{ category: `A`, amount: 50 }, 1],
           [{ category: `A`, amount: 25 }, 1],
-        ])
+        ]),
       )
       graph.run()
 
@@ -982,11 +982,11 @@ describe(`Operators`, () => {
             average: avg((data) => data.amount),
             minimum: min((data) => data.amount),
             maximum: max((data) => data.amount),
-          }
+          },
         ),
         output((message) => {
           latestMessage = message
-        })
+        }),
       )
 
       graph.finalize()
@@ -998,7 +998,7 @@ describe(`Operators`, () => {
           [{ category: `A`, region: `East`, amount: 20 }, 1],
           [{ category: `A`, region: `East`, amount: 30 }, 1],
           [{ category: `B`, region: `West`, amount: 100 }, 1],
-        ])
+        ]),
       )
       graph.run()
 
@@ -1009,7 +1009,7 @@ describe(`Operators`, () => {
 
       // Find the group for category A, region East
       const categoryAEastGroup = result.find(
-        ([key]: any) => key[0] === `{"category":"A","region":"East"}`
+        ([key]: any) => key[0] === `{"category":"A","region":"East"}`,
       )
       expect(categoryAEastGroup).toBeDefined()
       expect(categoryAEastGroup[0][1]).toEqual({
@@ -1028,7 +1028,7 @@ describe(`Operators`, () => {
           [{ category: `A`, region: `East`, amount: 10 }, -1],
           [{ category: `A`, region: `East`, amount: 20 }, -1],
           [{ category: `A`, region: `East`, amount: 30 }, -1],
-        ])
+        ]),
       )
       graph.run()
 
@@ -1060,7 +1060,7 @@ describe(`Operators`, () => {
           [{ category: `A`, region: `East`, amount: 15 }, 1],
           [{ category: `A`, region: `East`, amount: 40 }, 1],
           [{ category: `A`, region: `East`, amount: 40 }, 1], // Duplicate to test aggregates properly
-        ])
+        ]),
       )
       graph.run()
 
@@ -1089,7 +1089,7 @@ describe(`Operators`, () => {
       input.sendData(
         new MultiSet([
           [{ category: `A`, region: `East`, amount: 40 }, -1], // Remove one of the 40s
-        ])
+        ]),
       )
       graph.run()
 

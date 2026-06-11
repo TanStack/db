@@ -1,12 +1,12 @@
-import { router, authedProcedure } from "@/lib/trpc"
-import { z } from "zod"
-import { TRPCError } from "@trpc/server"
-import { eq, and, sql } from "drizzle-orm"
+import { router, authedProcedure } from '@/lib/trpc'
+import { z } from 'zod'
+import { TRPCError } from '@trpc/server'
+import { eq, and, sql } from 'drizzle-orm'
 import {
   projectsTable,
   createProjectSchema,
   updateProjectSchema,
-} from "@/db/schema"
+} from '@/db/schema'
 
 export const projectsRouter = router({
   getAll: authedProcedure.query(async ({ ctx }) => {
@@ -24,8 +24,8 @@ export const projectsRouter = router({
     .mutation(async ({ ctx, input }) => {
       if (input.owner_id !== ctx.session.user.id) {
         throw new TRPCError({
-          code: "FORBIDDEN",
-          message: "You can only create projects you own",
+          code: 'FORBIDDEN',
+          message: 'You can only create projects you own',
         })
       }
 
@@ -58,9 +58,9 @@ export const projectsRouter = router({
 
       if (!updatedItem) {
         throw new TRPCError({
-          code: "NOT_FOUND",
+          code: 'NOT_FOUND',
           message:
-            "Project not found or you do not have permission to update it",
+            'Project not found or you do not have permission to update it',
         })
       }
 
@@ -82,9 +82,9 @@ export const projectsRouter = router({
 
       if (!deletedItem) {
         throw new TRPCError({
-          code: "NOT_FOUND",
+          code: 'NOT_FOUND',
           message:
-            "Project not found or you do not have permission to delete it",
+            'Project not found or you do not have permission to delete it',
         })
       }
 

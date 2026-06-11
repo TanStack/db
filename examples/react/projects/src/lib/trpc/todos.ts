@@ -1,8 +1,8 @@
-import { router, authedProcedure } from "@/lib/trpc"
-import { z } from "zod"
-import { TRPCError } from "@trpc/server"
-import { eq, and, arrayContains } from "drizzle-orm"
-import { todosTable, createTodoSchema, updateTodoSchema } from "@/db/schema"
+import { router, authedProcedure } from '@/lib/trpc'
+import { z } from 'zod'
+import { TRPCError } from '@trpc/server'
+import { eq, and, arrayContains } from 'drizzle-orm'
+import { todosTable, createTodoSchema, updateTodoSchema } from '@/db/schema'
 
 export const todosRouter = router({
   getAll: authedProcedure.query(async ({ ctx }) => {
@@ -44,8 +44,8 @@ export const todosRouter = router({
 
       if (!updatedItem) {
         throw new TRPCError({
-          code: "NOT_FOUND",
-          message: "Todo not found or you do not have permission to update it",
+          code: 'NOT_FOUND',
+          message: 'Todo not found or you do not have permission to update it',
         })
       }
 
@@ -67,8 +67,8 @@ export const todosRouter = router({
 
       if (!deletedItem) {
         throw new TRPCError({
-          code: "NOT_FOUND",
-          message: "Todo not found or you do not have permission to delete it",
+          code: 'NOT_FOUND',
+          message: 'Todo not found or you do not have permission to delete it',
         })
       }
 

@@ -1,19 +1,19 @@
-import js from "@eslint/js"
-import tsParser from "@typescript-eslint/parser"
-import tsPlugin from "@typescript-eslint/eslint-plugin"
-import reactPlugin from "eslint-plugin-react"
-import prettierPlugin from "eslint-plugin-prettier"
-import prettierConfig from "eslint-config-prettier"
-import globals from "globals"
-import { includeIgnoreFile } from "@eslint/compat"
-import { fileURLToPath } from "url"
+import js from '@eslint/js'
+import tsParser from '@typescript-eslint/parser'
+import tsPlugin from '@typescript-eslint/eslint-plugin'
+import reactPlugin from 'eslint-plugin-react'
+import prettierPlugin from 'eslint-plugin-prettier'
+import prettierConfig from 'eslint-config-prettier'
+import globals from 'globals'
+import { includeIgnoreFile } from '@eslint/compat'
+import { fileURLToPath } from 'url'
 
-const gitignorePath = fileURLToPath(new URL(".gitignore", import.meta.url))
+const gitignorePath = fileURLToPath(new URL('.gitignore', import.meta.url))
 
 export default [
-  includeIgnoreFile(gitignorePath, "Imported .gitignore patterns"),
+  includeIgnoreFile(gitignorePath, 'Imported .gitignore patterns'),
   {
-    files: ["src/**/*.{js,jsx,ts,tsx,mjs}"],
+    files: ['src/**/*.{js,jsx,ts,tsx,mjs}'],
     languageOptions: {
       ecmaVersion: 2022,
       sourceType: `module`,
@@ -35,7 +35,7 @@ export default [
       },
     },
     plugins: {
-      "@typescript-eslint": tsPlugin,
+      '@typescript-eslint': tsPlugin,
       react: reactPlugin,
       prettier: prettierPlugin,
     },
@@ -44,12 +44,12 @@ export default [
       ...tsPlugin.configs.recommended.rules,
       ...reactPlugin.configs.recommended.rules,
       ...prettierConfig.rules,
-      "prettier/prettier": `error`,
-      "react/react-in-jsx-scope": `off`,
-      "react/jsx-uses-react": `off`,
-      "no-undef": `off`,
-      "@typescript-eslint/no-undef": "off",
-      "@typescript-eslint/no-unused-vars": [
+      'prettier/prettier': `error`,
+      'react/react-in-jsx-scope': `off`,
+      'react/jsx-uses-react': `off`,
+      'no-undef': `off`,
+      '@typescript-eslint/no-undef': 'off',
+      '@typescript-eslint/no-unused-vars': [
         `error`,
         {
           argsIgnorePattern: `^_`,

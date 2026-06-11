@@ -1,7 +1,8 @@
-import { describe, expectTypeOf, test } from "vitest"
-import { createLiveQueryCollection, eq, gt } from "../../src/query/index.js"
-import { createCollection } from "../../src/collection/index.js"
-import { mockSyncCollectionOptions } from "../utils.js"
+import { describe, expectTypeOf, test } from 'vitest'
+import { createLiveQueryCollection, eq, gt } from '../../src/query/index.js'
+import { createCollection } from '../../src/collection/index.js'
+import { mockSyncCollectionOptions } from '../utils.js'
+import type { OutputWithVirtual } from '../utils.js'
 
 // Test types with optional fields
 type UserWithOptional = {
@@ -18,13 +19,18 @@ type Department = {
   budget: number
 }
 
+type OutputWithVirtualKeyed<T extends object> = OutputWithVirtual<
+  T,
+  string | number
+>
+
 function createUsersCollection() {
   return createCollection(
     mockSyncCollectionOptions<UserWithOptional>({
       id: `test-users`,
       getKey: (user) => user.id,
       initialData: [],
-    })
+    }),
   )
 }
 
@@ -34,7 +40,7 @@ function createDepartmentsCollection() {
       id: `test-departments`,
       getKey: (dept) => dept.id,
       initialData: [],
-    })
+    }),
   )
 }
 
@@ -51,7 +57,9 @@ describe(`Optional Fields - Type Safety Tests`, () => {
     })
 
     // The query should be typed correctly
-    expectTypeOf(query.toArray).toEqualTypeOf<Array<UserWithOptional>>()
+    expectTypeOf(query.toArray).toMatchTypeOf<
+      Array<OutputWithVirtualKeyed<UserWithOptional>>
+    >()
   })
 
   test(`should allow using optional fields in comparisons with proper type inference`, () => {
@@ -65,7 +73,9 @@ describe(`Optional Fields - Type Safety Tests`, () => {
         }),
     })
 
-    expectTypeOf(query.toArray).toEqualTypeOf<Array<UserWithOptional>>()
+    expectTypeOf(query.toArray).toMatchTypeOf<
+      Array<OutputWithVirtualKeyed<UserWithOptional>>
+    >()
   })
 
   test(`should allow using optional fields in join conditions with proper type inference`, () => {
@@ -80,15 +90,17 @@ describe(`Optional Fields - Type Safety Tests`, () => {
             // This should work correctly - department_id is optional but can be used in join
             return eq(user.department_id, dept.id)
           },
-          `inner`
+          `inner`,
         ),
     })
 
-    expectTypeOf(query.toArray).toEqualTypeOf<
-      Array<{
-        user: UserWithOptional
-        dept: Department
-      }>
+    expectTypeOf(query.toArray).toMatchTypeOf<
+      Array<
+        OutputWithVirtualKeyed<{
+          user: OutputWithVirtualKeyed<UserWithOptional>
+          dept: OutputWithVirtualKeyed<Department>
+        }>
+      >
     >()
   })
 
@@ -105,12 +117,14 @@ describe(`Optional Fields - Type Safety Tests`, () => {
         })),
     })
 
-    expectTypeOf(query.toArray).toEqualTypeOf<
-      Array<{
-        id: string
-        name: string
-        email: string | undefined
-      }>
+    expectTypeOf(query.toArray).toMatchTypeOf<
+      Array<
+        OutputWithVirtualKeyed<{
+          id: string
+          name: string
+          email: string | undefined
+        }>
+      >
     >()
   })
 
@@ -131,10 +145,12 @@ describe(`Optional Fields - Type Safety Tests`, () => {
           })),
     })
 
-    expectTypeOf(query.toArray).toEqualTypeOf<
-      Array<{
-        name: string
-      }>
+    expectTypeOf(query.toArray).toMatchTypeOf<
+      Array<
+        OutputWithVirtualKeyed<{
+          name: string
+        }>
+      >
     >()
   })
 
@@ -149,20 +165,22 @@ describe(`Optional Fields - Type Safety Tests`, () => {
           .join(
             { dept: departmentsCollection },
             ({ user, dept }) => eq(user.department_id, dept.id),
-            `left`
+            `left`,
           )
           .select(({ user, dept }) => ({
             user_name: user.name,
 
-            dept_name: dept?.name, // Should be string | undefined due to left join
+            dept_name: dept.name, // Should be string | undefined due to left join
           })),
     })
 
-    expectTypeOf(query.toArray).toEqualTypeOf<
-      Array<{
-        user_name: string
-        dept_name: string | undefined
-      }>
+    expectTypeOf(query.toArray).toMatchTypeOf<
+      Array<
+        OutputWithVirtualKeyed<{
+          user_name: string
+          dept_name: string | undefined
+        }>
+      >
     >()
   })
 })

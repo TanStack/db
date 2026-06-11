@@ -1,10 +1,11 @@
-import { beforeEach, describe, expect, it, vi } from "vitest"
-import { createCollection, liveQueryCollectionOptions } from "../src/index"
-import { sum } from "../src/query/builder/functions"
-import { localOnlyCollectionOptions } from "../src/local-only"
-import { createTransaction } from "../src/transactions"
-import type { LocalOnlyCollectionUtils } from "../src/local-only"
-import type { Collection } from "../src/index"
+import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { createCollection, liveQueryCollectionOptions } from '../src/index'
+import { sum } from '../src/query/builder/functions'
+import { localOnlyCollectionOptions } from '../src/local-only'
+import { createTransaction } from '../src/transactions'
+import { stripVirtualProps } from './utils'
+import type { LocalOnlyCollectionUtils } from '../src/local-only'
+import type { Collection } from '../src/index'
 
 interface TestItem extends Record<string, unknown> {
   id: number
@@ -22,7 +23,7 @@ describe(`LocalOnly Collection`, () => {
       localOnlyCollectionOptions({
         id: `test-local-only`,
         getKey: (item: TestItem) => item.id,
-      })
+      }),
     )
   })
 
@@ -37,7 +38,10 @@ describe(`LocalOnly Collection`, () => {
 
     // The item should be immediately available in the collection
     expect(collection.has(1)).toBe(true)
-    expect(collection.get(1)).toEqual({ id: 1, name: `Test Item` })
+    expect(stripVirtualProps(collection.get(1))).toEqual({
+      id: 1,
+      name: `Test Item`,
+    })
     expect(collection.size).toBe(1)
   })
 
@@ -51,9 +55,18 @@ describe(`LocalOnly Collection`, () => {
 
     // All items should be immediately available
     expect(collection.size).toBe(3)
-    expect(collection.get(1)).toEqual({ id: 1, name: `Item 1` })
-    expect(collection.get(2)).toEqual({ id: 2, name: `Item 2` })
-    expect(collection.get(3)).toEqual({ id: 3, name: `Item 3` })
+    expect(stripVirtualProps(collection.get(1))).toEqual({
+      id: 1,
+      name: `Item 1`,
+    })
+    expect(stripVirtualProps(collection.get(2))).toEqual({
+      id: 2,
+      name: `Item 2`,
+    })
+    expect(stripVirtualProps(collection.get(3))).toEqual({
+      id: 3,
+      name: `Item 3`,
+    })
   })
 
   it(`should handle update operations optimistically`, () => {
@@ -67,7 +80,7 @@ describe(`LocalOnly Collection`, () => {
     })
 
     // The update should be immediately reflected
-    expect(collection.get(1)).toEqual({
+    expect(stripVirtualProps(collection.get(1))).toEqual({
       id: 1,
       name: `Updated Item`,
       completed: true,
@@ -112,13 +125,16 @@ describe(`LocalOnly Collection`, () => {
 
     // Check final state
     expect(collection.size).toBe(2)
-    expect(collection.get(1)).toEqual({
+    expect(stripVirtualProps(collection.get(1))).toEqual({
       id: 1,
       name: `Item 1`,
       completed: true,
     })
     expect(collection.has(2)).toBe(false)
-    expect(collection.get(3)).toEqual({ id: 3, name: `Item 3` })
+    expect(stripVirtualProps(collection.get(3))).toEqual({
+      id: 3,
+      name: `Item 3`,
+    })
   })
 
   it(`should support change subscriptions`, () => {
@@ -132,11 +148,17 @@ describe(`LocalOnly Collection`, () => {
 
     // The change handler should have been called
     expect(changeHandler).toHaveBeenCalledTimes(1)
-    expect(changeHandler).toHaveBeenCalledWith([
+    const [changes] = changeHandler.mock.calls[0] as [Array<any>]
+    const normalizedChanges = changes.map((change) => ({
+      ...change,
+      value: stripVirtualProps(change.value),
+    }))
+    expect(normalizedChanges).toEqual([
       {
         type: `insert`,
         key: 1,
         value: { id: 1, name: `Test Item` },
+        previousValue: undefined,
       },
     ])
 
@@ -152,7 +174,7 @@ describe(`LocalOnly Collection`, () => {
       { id: 2, name: `Item 2` },
     ])
 
-    const array = collection.toArray
+    const array = collection.toArray.map((row) => stripVirtualProps(row))
 
     // Should contain all items
     expect(array).toHaveLength(3)
@@ -161,7 +183,7 @@ describe(`LocalOnly Collection`, () => {
         { id: 1, name: `Item 1` },
         { id: 2, name: `Item 2` },
         { id: 3, name: `Item 3` },
-      ])
+      ]),
     )
   })
 
@@ -173,13 +195,16 @@ describe(`LocalOnly Collection`, () => {
     ])
 
     // Test entries
-    const entries = Array.from(collection.entries())
+    const entries = Array.from(collection.entries()).map(([key, value]) => [
+      key,
+      stripVirtualProps(value),
+    ])
     expect(entries).toHaveLength(2)
     expect(entries).toEqual(
       expect.arrayContaining([
         [1, { id: 1, name: `Item 1` }],
         [2, { id: 2, name: `Item 2` }],
-      ])
+      ]),
     )
 
     // Test values iteration
@@ -197,7 +222,10 @@ describe(`LocalOnly Collection`, () => {
 
       // The item should be available in the collection
       expect(collection.has(1)).toBe(true)
-      expect(collection.get(1)).toEqual({ id: 1, name: `Test Item` })
+      expect(stripVirtualProps(collection.get(1))).toEqual({
+        id: 1,
+        name: `Test Item`,
+      })
     })
 
     it(`should handle update operations optimistically`, () => {
@@ -210,7 +238,10 @@ describe(`LocalOnly Collection`, () => {
       })
 
       // The update should be reflected in the collection
-      expect(collection.get(1)).toEqual({ id: 1, name: `Updated Item` })
+      expect(stripVirtualProps(collection.get(1))).toEqual({
+        id: 1,
+        name: `Updated Item`,
+      })
     })
 
     it(`should handle delete operations optimistically`, () => {
@@ -234,12 +265,15 @@ describe(`LocalOnly Collection`, () => {
         localOnlyCollectionOptions({
           id: `test-schema`,
           getKey: (item: TestItem) => item.id,
-        })
+        }),
       )
 
       // Basic operations should still work
       testCollection.insert({ id: 1, name: `Test with Schema` })
-      expect(testCollection.get(1)).toEqual({ id: 1, name: `Test with Schema` })
+      expect(stripVirtualProps(testCollection.get(1))).toEqual({
+        id: 1,
+        name: `Test with Schema`,
+      })
     })
   })
 
@@ -259,7 +293,7 @@ describe(`LocalOnly Collection`, () => {
           id: `test-custom-callbacks`,
           getKey: (item: TestItem) => item.id,
           onInsert: onInsertSpy,
-        })
+        }),
       )
 
       testCollection.insert({ id: 1, name: `Test Item` })
@@ -275,11 +309,14 @@ describe(`LocalOnly Collection`, () => {
               }),
             ]),
           }),
-        })
+        }),
       )
 
       // Collection should still work normally
-      expect(testCollection.get(1)).toEqual({ id: 1, name: `Test Item` })
+      expect(stripVirtualProps(testCollection.get(1))).toEqual({
+        id: 1,
+        name: `Test Item`,
+      })
     })
 
     it(`should call custom onUpdate callback when provided`, () => {
@@ -290,7 +327,7 @@ describe(`LocalOnly Collection`, () => {
           id: `test-custom-update`,
           getKey: (item: TestItem) => item.id,
           onUpdate: onUpdateSpy,
-        })
+        }),
       )
 
       testCollection.insert({ id: 1, name: `Test Item` })
@@ -309,11 +346,14 @@ describe(`LocalOnly Collection`, () => {
               }),
             ]),
           }),
-        })
+        }),
       )
 
       // Collection should still work normally
-      expect(testCollection.get(1)).toEqual({ id: 1, name: `Updated Item` })
+      expect(stripVirtualProps(testCollection.get(1))).toEqual({
+        id: 1,
+        name: `Updated Item`,
+      })
     })
 
     it(`should call custom onDelete callback when provided`, () => {
@@ -324,7 +364,7 @@ describe(`LocalOnly Collection`, () => {
           id: `test-custom-delete`,
           getKey: (item: TestItem) => item.id,
           onDelete: onDeleteSpy,
-        })
+        }),
       )
 
       testCollection.insert({ id: 1, name: `Test Item` })
@@ -341,7 +381,7 @@ describe(`LocalOnly Collection`, () => {
               }),
             ]),
           }),
-        })
+        }),
       )
 
       // Collection should still work normally
@@ -353,7 +393,7 @@ describe(`LocalOnly Collection`, () => {
         localOnlyCollectionOptions({
           id: `test-no-callbacks`,
           getKey: (item: TestItem) => item.id,
-        })
+        }),
       )
 
       // Should work normally without callbacks
@@ -380,14 +420,23 @@ describe(`LocalOnly Collection`, () => {
           id: `test-initial-data`,
           getKey: (item: TestItem) => item.id,
           initialData: initialItems,
-        })
+        }),
       )
 
       // Collection should be populated with initial data
       expect(testCollection.size).toBe(3)
-      expect(testCollection.get(10)).toEqual({ id: 10, name: `Initial Item 1` })
-      expect(testCollection.get(20)).toEqual({ id: 20, name: `Initial Item 2` })
-      expect(testCollection.get(30)).toEqual({ id: 30, name: `Initial Item 3` })
+      expect(stripVirtualProps(testCollection.get(10))).toEqual({
+        id: 10,
+        name: `Initial Item 1`,
+      })
+      expect(stripVirtualProps(testCollection.get(20))).toEqual({
+        id: 20,
+        name: `Initial Item 2`,
+      })
+      expect(stripVirtualProps(testCollection.get(30))).toEqual({
+        id: 30,
+        name: `Initial Item 3`,
+      })
     })
 
     it(`should work with empty initial data array`, () => {
@@ -396,7 +445,7 @@ describe(`LocalOnly Collection`, () => {
           id: `test-empty-initial-data`,
           getKey: (item: TestItem) => item.id,
           initialData: [],
-        })
+        }),
       )
 
       // Collection should be empty
@@ -408,7 +457,7 @@ describe(`LocalOnly Collection`, () => {
         localOnlyCollectionOptions({
           id: `test-no-initial-data`,
           getKey: (item: TestItem) => item.id,
-        })
+        }),
       )
 
       // Collection should be empty
@@ -418,24 +467,33 @@ describe(`LocalOnly Collection`, () => {
     it(`should allow adding more items after initial data`, () => {
       const initialItems: Array<TestItem> = [{ id: 100, name: `Initial Item` }]
 
-      const testCollection = createCollection<TestItem, number>(
+      const testCollection = createCollection(
         localOnlyCollectionOptions({
           id: `test-initial-plus-more`,
           getKey: (item: TestItem) => item.id,
           initialData: initialItems,
-        })
+        }),
       )
 
       // Should start with initial data
       expect(testCollection.size).toBe(1)
-      expect(testCollection.get(100)).toEqual({ id: 100, name: `Initial Item` })
+      expect(stripVirtualProps(testCollection.get(100))).toEqual({
+        id: 100,
+        name: `Initial Item`,
+      })
 
       // Should be able to add more items
       testCollection.insert({ id: 200, name: `Added Item` })
 
       expect(testCollection.size).toBe(2)
-      expect(testCollection.get(100)).toEqual({ id: 100, name: `Initial Item` })
-      expect(testCollection.get(200)).toEqual({ id: 200, name: `Added Item` })
+      expect(stripVirtualProps(testCollection.get(100))).toEqual({
+        id: 100,
+        name: `Initial Item`,
+      })
+      expect(stripVirtualProps(testCollection.get(200))).toEqual({
+        id: 200,
+        name: `Added Item`,
+      })
     })
   })
 
@@ -446,7 +504,7 @@ describe(`LocalOnly Collection`, () => {
       // mutation is triggered from inside an mutation handler callback after a short
       // delay" test in collection-subscribe-changes.test.ts
 
-      const testCollection = createCollection<TestItem, number>(
+      const testCollection = createCollection(
         localOnlyCollectionOptions({
           id: `numbers`,
           getKey: (item) => item.id,
@@ -459,7 +517,7 @@ describe(`LocalOnly Collection`, () => {
             return Promise.resolve()
           },
           autoIndex: `off`,
-        })
+        }),
       )
 
       const query = createCollection(
@@ -469,19 +527,21 @@ describe(`LocalOnly Collection`, () => {
             q.from({ numbers: testCollection }).select(({ numbers }) => ({
               totalNumber: sum(numbers.number),
             })),
-        })
+        }),
       )
 
       testCollection.delete(0)
 
       await new Promise((resolve) => setTimeout(resolve, 10))
 
-      expect(query.toArray).toEqual([{ totalNumber: 30 }])
+      expect(query.toArray.map((row) => stripVirtualProps(row))).toEqual([
+        { totalNumber: 30 },
+      ])
     })
   })
 
   describe(`Manual transactions with acceptMutations`, () => {
-    it(`should accept and persist mutations from manual transactions`, () => {
+    it(`should accept and persist mutations from manual transactions`, async () => {
       const tx = createTransaction({
         mutationFn: async ({ transaction }: any) => {
           // Simulate API call success
@@ -505,19 +565,62 @@ describe(`LocalOnly Collection`, () => {
       tx.commit()
 
       // Items should still be in collection after commit
-      expect(collection.get(100)).toEqual({ id: 100, name: `Manual Tx Insert` })
-      expect(collection.get(101)).toEqual({
+      expect(stripVirtualProps(collection.get(100))).toEqual({
+        id: 100,
+        name: `Manual Tx Insert`,
+      })
+      expect(stripVirtualProps(collection.get(101))).toEqual({
         id: 101,
         name: `Manual Tx Insert 2`,
+      })
+
+      // Verify that the item is still present after async operations complete
+      await new Promise((resolve) => setTimeout(resolve, 1))
+      expect(stripVirtualProps(collection.get(100))).toEqual({
+        id: 100,
+        name: `Manual Tx Insert`,
+      })
+    })
+
+    it(`should work without explicit collection ID`, async () => {
+      // Create a collection without an explicit ID
+      const noIdCollection = createCollection<
+        TestItem,
+        number,
+        LocalOnlyCollectionUtils
+      >(
+        localOnlyCollectionOptions({
+          getKey: (item) => item.id,
+        }),
+      )
+
+      const tx = createTransaction({
+        // eslint-disable-next-line @typescript-eslint/require-await
+        mutationFn: async ({ transaction }: any) => {
+          noIdCollection.utils.acceptMutations(transaction)
+        },
+        autoCommit: false,
+      })
+
+      tx.mutate(() => {
+        noIdCollection.insert({ id: 999, name: `No ID Test` })
+      })
+
+      await tx.commit()
+
+      // Data should persist even without explicit ID
+      expect(stripVirtualProps(noIdCollection.get(999))).toEqual({
+        id: 999,
+        name: `No ID Test`,
       })
     })
 
     it(`should only accept mutations for the specific collection`, () => {
-      const otherCollection = createCollection<TestItem, number>(
+      const otherCollection = createCollection(
         localOnlyCollectionOptions({
           id: `other-collection`,
-          getKey: (item) => item.id,
-        })
+          getKey: (item: TestItem) => item.id,
+        }),
       )
 
       const tx = createTransaction({
@@ -589,7 +692,10 @@ describe(`LocalOnly Collection`, () => {
 
       tx.commit()
 
-      expect(collection.get(500)).toEqual({ id: 500, name: `Before API` })
+      expect(stripVirtualProps(collection.get(500))).toEqual({
+        id: 500,
+        name: `Before API`,
+      })
     })
 
     it(`should work when called after API operations`, () => {
@@ -609,7 +715,10 @@ describe(`LocalOnly Collection`, () => {
 
       tx.commit()
 
-      expect(collection.get(600)).toEqual({ id: 600, name: `After API` })
+      expect(stripVirtualProps(collection.get(600))).toEqual({
+        id: 600,
+        name: `After API`,
+      })
     })
 
     it(`should rollback mutations when transaction fails`, async () => {

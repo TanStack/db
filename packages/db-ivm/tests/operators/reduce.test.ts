@@ -1,13 +1,13 @@
-import { describe, expect, test } from "vitest"
-import { D2 } from "../../src/d2.js"
-import { MultiSet } from "../../src/multiset.js"
-import { reduce } from "../../src/operators/reduce.js"
-import { output } from "../../src/operators/output.js"
+import { describe, expect, test } from 'vitest'
+import { D2 } from '../../src/d2.js'
+import { MultiSet } from '../../src/multiset.js'
+import { reduce } from '../../src/operators/reduce.js'
+import { output } from '../../src/operators/output.js'
 import {
   KeyedMessageTracker,
   assertKeyedResults,
   assertOnlyKeysAffected,
-} from "../test-utils.js"
+} from '../test-utils.js'
 
 describe(`Operators`, () => {
   describe(`Reduce operation`, () => {
@@ -26,7 +26,7 @@ describe(`Operators`, () => {
         }),
         output((message) => {
           tracker.addMessage(message)
-        })
+        }),
       )
 
       graph.finalize()
@@ -37,7 +37,7 @@ describe(`Operators`, () => {
           [[`a`, 2], 1],
           [[`a`, 3], 1],
           [[`b`, 4], 1],
-        ])
+        ]),
       )
       input.sendData(new MultiSet([[[`b`, 5], 1]]))
       graph.run()
@@ -58,7 +58,7 @@ describe(`Operators`, () => {
           [`a`, 7], // 1*2 + 2*1 + 3*1 = 7
           [`b`, 9], // 4*1 + 5*1 = 9
         ],
-        4 // Expected message count
+        4, // Expected message count
       )
     })
 
@@ -77,7 +77,7 @@ describe(`Operators`, () => {
         }),
         output((message) => {
           tracker.addMessage(message)
-        })
+        }),
       )
 
       graph.finalize()
@@ -87,7 +87,7 @@ describe(`Operators`, () => {
           [[`a`, 1], -1],
           [[`a`, 2], 2],
           [[`b`, 3], -2],
-        ])
+        ]),
       )
       graph.run()
 
@@ -97,7 +97,7 @@ describe(`Operators`, () => {
       assertOnlyKeysAffected(
         `reduce with negative multiplicities`,
         result.messages,
-        [`a`, `b`]
+        [`a`, `b`],
       )
 
       // Assert the final materialized results are correct
@@ -108,7 +108,7 @@ describe(`Operators`, () => {
           [`a`, 3], // 1*(-1) + 2*2 = 3
           [`b`, -6], // 3*(-2) = -6
         ],
-        4 // Expected message count
+        4, // Expected message count
       )
     })
 
@@ -127,7 +127,7 @@ describe(`Operators`, () => {
         }),
         output((message) => {
           tracker.addMessage(message)
-        })
+        }),
       )
 
       graph.finalize()
@@ -137,7 +137,7 @@ describe(`Operators`, () => {
         new MultiSet([
           [[`a`, 1], 1],
           [[`b`, 2], 1],
-        ])
+        ]),
       )
       graph.run()
 
@@ -153,7 +153,7 @@ describe(`Operators`, () => {
           [`a`, 1],
           [`b`, 2],
         ],
-        4 // Expected message count
+        4, // Expected message count
       )
 
       tracker.reset()
@@ -163,7 +163,7 @@ describe(`Operators`, () => {
         new MultiSet([
           [[`a`, 3], 1],
           [[`b`, 4], 1],
-        ])
+        ]),
       )
       graph.run()
 
@@ -179,7 +179,7 @@ describe(`Operators`, () => {
           [`a`, 4], // 1+3
           [`b`, 6], // 2+4
         ],
-        6 // Expected message count (old removed, new added for both keys)
+        6, // Expected message count (old removed, new added for both keys)
       )
 
       tracker.reset()
@@ -197,7 +197,7 @@ describe(`Operators`, () => {
         [
           [`a`, 3], // 4-1=3
         ],
-        3 // Expected message count (old removed, new added for key a)
+        3, // Expected message count (old removed, new added for key a)
       )
     })
 
@@ -216,7 +216,7 @@ describe(`Operators`, () => {
         }),
         output((message) => {
           tracker.addMessage(message)
-        })
+        }),
       )
 
       graph.finalize()
@@ -227,7 +227,7 @@ describe(`Operators`, () => {
           [[`a`, 5], 1],
           [[`a`, 3], 1],
           [[`b`, 10], 1],
-        ])
+        ]),
       )
       graph.run()
 
@@ -236,7 +236,7 @@ describe(`Operators`, () => {
         new MultiSet([
           [[`a`, 5], -1],
           [[`a`, 3], -1],
-        ])
+        ]),
       )
       graph.run()
 
@@ -246,7 +246,7 @@ describe(`Operators`, () => {
       assertOnlyKeysAffected(
         `updates that cancel out completely`,
         result.messages,
-        [`a`, `b`]
+        [`a`, `b`],
       )
 
       // Assert the final materialized results are correct
@@ -257,7 +257,7 @@ describe(`Operators`, () => {
           [`a`, 0], // 5+3-5-3 = 0
           [`b`, 10], // 10 (unchanged)
         ],
-        6 // Expected message count
+        6, // Expected message count
       )
     })
 
@@ -276,7 +276,7 @@ describe(`Operators`, () => {
         }),
         output((message) => {
           tracker.addMessage(message)
-        })
+        }),
       )
 
       graph.finalize()
@@ -287,7 +287,7 @@ describe(`Operators`, () => {
           [[`a`, 10], 1],
           [[`a`, 5], 2],
           [[`b`, 20], 1],
-        ])
+        ]),
       )
       graph.run()
 
@@ -299,7 +299,7 @@ describe(`Operators`, () => {
           [[`b`, 20], -1], // Remove the 20
           [[`b`, 15], 1], // Add a 15
           [[`c`, 100], 1], // Add new key
-        ])
+        ]),
       )
       graph.run()
 
@@ -309,7 +309,7 @@ describe(`Operators`, () => {
       assertOnlyKeysAffected(
         `mixed positive and negative updates`,
         result.messages,
-        [`a`, `b`, `c`]
+        [`a`, `b`, `c`],
       )
 
       // Assert the final materialized results are correct
@@ -321,7 +321,7 @@ describe(`Operators`, () => {
           [`b`, 15], // 20-20+15 = 15
           [`c`, 100], // 100
         ],
-        8 // Expected message count
+        8, // Expected message count
       )
     })
 
@@ -346,7 +346,7 @@ describe(`Operators`, () => {
         }),
         output((message) => {
           tracker.addMessage(message)
-        })
+        }),
       )
 
       graph.finalize()
@@ -356,7 +356,7 @@ describe(`Operators`, () => {
         new MultiSet([
           [[`a`, { value: 10, count: 2 }], 1], // 2 values of 10
           [[`a`, { value: 20, count: 1 }], 1], // 1 value of 20
-        ])
+        ]),
       )
       graph.run()
 
@@ -365,7 +365,7 @@ describe(`Operators`, () => {
         new MultiSet([
           [[`a`, { value: 30, count: 1 }], 1], // 1 value of 30
           [[`b`, { value: 50, count: 3 }], 1], // 3 values of 50
-        ])
+        ]),
       )
       graph.run()
 
@@ -373,7 +373,7 @@ describe(`Operators`, () => {
       input.sendData(
         new MultiSet([
           [[`a`, { value: 10, count: 2 }], -1], // Remove the 2 values of 10
-        ])
+        ]),
       )
       graph.run()
 
@@ -383,7 +383,7 @@ describe(`Operators`, () => {
       assertOnlyKeysAffected(
         `complex aggregation with multiple updates`,
         result.messages,
-        [`a`, `b`]
+        [`a`, `b`],
       )
 
       // Assert the final materialized results are correct
@@ -394,7 +394,7 @@ describe(`Operators`, () => {
           [`a`, { avg: 25, total: 50 }], // Final: (20*1+30*1)/(1+1) = 50/2 = 25
           [`b`, { avg: 50, total: 150 }], // Final: 50*3 = 150
         ],
-        6 // Expected message count
+        6, // Expected message count
       )
     })
 
@@ -414,7 +414,7 @@ describe(`Operators`, () => {
         }),
         output((message) => {
           tracker.addMessage(message)
-        })
+        }),
       )
 
       graph.finalize()
@@ -425,7 +425,7 @@ describe(`Operators`, () => {
           [[`a`, 5], 1],
           [[`a`, -3], 1],
           [[`b`, 10], 1],
-        ])
+        ]),
       )
       graph.run()
 
@@ -443,7 +443,7 @@ describe(`Operators`, () => {
       assertOnlyKeysAffected(
         `updates with zero-multiplicity results`,
         result.messages,
-        [`a`, `b`]
+        [`a`, `b`],
       )
 
       // Assert the final materialized results are correct
@@ -454,7 +454,7 @@ describe(`Operators`, () => {
           [`a`, 7], // Final: 5-3-2+7 = 7
           [`b`, 10], // Final: 10 (unchanged)
         ],
-        5 // Expected message count
+        5, // Expected message count
       )
     })
 
@@ -473,7 +473,7 @@ describe(`Operators`, () => {
         }),
         output((message) => {
           tracker.addMessage(message)
-        })
+        }),
       )
 
       graph.finalize()
@@ -487,7 +487,7 @@ describe(`Operators`, () => {
           [[`y`, 15], 1],
           [[`y`, 25], 1],
           [[`z`, 100], 1],
-        ])
+        ]),
       )
       graph.run()
 
@@ -499,7 +499,7 @@ describe(`Operators`, () => {
         new MultiSet([
           [[`x`, 30], 1], // Add to 'x' (30 -> 60)
           [[`z`, 100], -1], // Remove from 'z' (100 -> 0)
-        ])
+        ]),
       )
       graph.run()
 
@@ -519,7 +519,7 @@ describe(`Operators`, () => {
           [`x`, 60], // Sum increased from 30 to 60
           [`z`, 0], // Sum decreased from 100 to 0
         ],
-        4 // Expected message count: remove old 'x', add new 'x', remove old 'z', add new 'z'
+        4, // Expected message count: remove old 'x', add new 'x', remove old 'z', add new 'z'
       )
     })
 
@@ -539,7 +539,7 @@ describe(`Operators`, () => {
         }),
         output((message) => {
           tracker.addMessage(message)
-        })
+        }),
       )
 
       graph.finalize()
@@ -552,7 +552,7 @@ describe(`Operators`, () => {
           [[`b`, { id: 3, value: 100 }], 1],
           [[`c`, { id: 4, value: 5 }], 1],
           [[`c`, { id: 5, value: 15 }], 1],
-        ])
+        ]),
       )
       graph.run()
 
@@ -565,7 +565,7 @@ describe(`Operators`, () => {
           [[`a`, { id: 1, value: 10 }], -1], // Remove 10
           [[`a`, { id: 6, value: 10 }], 1], // Add 10 (same value, different object)
           [[`b`, { id: 3, value: 100 }], -1], // Remove from 'b' (100 -> 0)
-        ])
+        ]),
       )
       graph.run()
 
@@ -574,7 +574,7 @@ describe(`Operators`, () => {
       // With object identity: 'a' produces messages even though content is identical
       // This demonstrates the object identity issue, but keysTodo should still limit processing
       const aMessages = result.messages.filter(
-        ([[key, _value], _mult]) => key === `a`
+        ([[key, _value], _mult]) => key === `a`,
       )
       expect(aMessages.length).toBe(2) // Object identity causes 2 messages (remove + add)
 
@@ -585,7 +585,7 @@ describe(`Operators`, () => {
         [
           [`b`, { result: 0 }], // Changed from 100 to 0
         ],
-        4 // With object identity: 4 messages total (2 for 'a', 2 for 'b')
+        4, // With object identity: 4 messages total (2 for 'a', 2 for 'b')
       )
     })
   })

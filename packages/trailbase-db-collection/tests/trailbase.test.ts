@@ -1,19 +1,37 @@
-import { describe, expect, it, vi } from "vitest"
-import { createCollection } from "@tanstack/db"
-import { trailBaseCollectionOptions } from "../src/trailbase"
+import { describe, expect, it, vi } from 'vitest'
+import { createCollection } from '@tanstack/db'
+import { trailBaseCollectionOptions } from '../src/trailbase'
+import { stripVirtualProps } from '../../db/tests/utils'
 import type {
+  CreateOperation,
+  DeleteOperation,
   Event,
   FilterOrComposite,
+  ListOperation,
+  ListOpts,
   ListResponse,
   Pagination,
+  ReadOperation,
+  ReadOpts,
   RecordApi,
-} from "trailbase"
+  RecordId,
+  SubscribeOpts,
+  UpdateOperation,
+} from 'trailbase'
 
 type Data = {
   id: number | null
   updated: number | null
   data: string
 }
+
+const stripState = (state: Map<number | string | null, Data>) =>
+  new Map(
+    Array.from(state.entries(), ([key, value]) => [
+      key,
+      stripVirtualProps(value),
+    ]),
+  )
 
 class MockRecordApi<T> implements RecordApi<T> {
   list = vi.fn(
@@ -25,19 +43,28 @@ class MockRecordApi<T> implements RecordApi<T> {
       expand?: Array<string>
     }): Promise<ListResponse<T>> => {
       return Promise.resolve({ records: [] })
-    }
+    },
   )
+  listOp = vi.fn((_opts?: ListOpts): ListOperation<T> => {
+    throw `listOp`
+  })
+  listGeoOp = vi.fn((_geometryColumn: string, _opts?: ListOpts) => {
+    throw `listGeoOp`
+  })
 
   read = vi.fn(
     (
       _id: string | number,
       _opt?: {
         expand?: Array<string>
-      }
+      },
     ): Promise<T> => {
       throw `read`
-    }
+    },
   )
+  readOp = vi.fn((_id: RecordId, _opt?: ReadOpts): ReadOperation<T> => {
+    throw `readOp`
+  })
 
   create = vi.fn((_record: T): Promise<string | number> => {
     throw `create`
@@ -45,22 +72,38 @@ class MockRecordApi<T> implements RecordApi<T> {
   createBulk = vi.fn((_records: Array<T>): Promise<Array<string | number>> => {
     throw `createBulk`
   })
+  createOp = vi.fn((_record: T): CreateOperation<T> => {
+    throw `createOp`
+  })
 
   update = vi.fn((_id: string | number, _record: Partial<T>): Promise<void> => {
     throw `update`
   })
+  updateOp = vi.fn((_id: RecordId, _record: Partial<T>): UpdateOperation => {
+    throw `updateOp`
+  })
+
   delete = vi.fn((_id: string | number): Promise<void> => {
     throw `delete`
   })
+  deleteOp = vi.fn((_id: RecordId): DeleteOperation => {
+    throw `deleteOp`
+  })
+
   subscribe = vi.fn((_id: string | number): Promise<ReadableStream<Event>> => {
     return Promise.resolve(
       new ReadableStream({
         start: (controller: ReadableStreamDefaultController<Event>) => {
           controller.close()
         },
-      })
+      }),
     )
   })
+  subscribeAll = vi.fn(
+    (_opts?: SubscribeOpts): Promise<ReadableStream<Event>> => {
+      throw `subscribeAll`
+    },
+  )
 }
 
 function setUp(recordApi: MockRecordApi<Data>) {
@@ -113,7 +156,9 @@ describe(`TrailBase Integration`, () => {
 
     // Await initial fetch and assert state.
     await listPromise
-    expect(collection.state).toEqual(new Map(records.map((d) => [d.id, d])))
+    expect(stripState(collection.state)).toEqual(
+      new Map(records.map((d) => [d.id, d])),
+    )
 
     // Inject an update event and assert state.
     const updatedRecord: Data = {
@@ -123,8 +168,8 @@ describe(`TrailBase Integration`, () => {
 
     await injectEvent({ Update: updatedRecord })
 
-    expect(collection.state).toEqual(
-      new Map([updatedRecord].map((d) => [d.id, d]))
+    expect(stripState(collection.state)).toEqual(
+      new Map([updatedRecord].map((d) => [d.id, d])),
     )
 
     // Await cancellation.
@@ -152,7 +197,7 @@ describe(`TrailBase Integration`, () => {
     const collection = createCollection(options)
 
     // Await initial fetch and assert state.
-    expect(collection.state).toEqual(new Map([]))
+    expect(stripState(collection.state)).toEqual(new Map([]))
 
     // Inject an update event and assert state.
     const data: Data = {
@@ -165,13 +210,15 @@ describe(`TrailBase Integration`, () => {
       Insert: data,
     })
 
-    expect(collection.state).toEqual(new Map([data].map((d) => [d.id, d])))
+    expect(stripState(collection.state)).toEqual(
+      new Map([data].map((d) => [d.id, d])),
+    )
 
     await injectEvent({
       Delete: data,
     })
 
-    expect(collection.state).toEqual(new Map([]))
+    expect(stripState(collection.state)).toEqual(new Map([]))
 
     stream.writable.close()
   })
@@ -196,14 +243,14 @@ describe(`TrailBase Integration`, () => {
         }, 1)
 
         return Promise.resolve(records.map((r) => r.id ?? 0))
-      }
+      },
     )
 
     const options = setUp(recordApi)
     const collection = createCollection(options)
 
     // Await initial fetch and assert state.
-    expect(collection.state).toEqual(new Map([]))
+    expect(stripState(collection.state)).toEqual(new Map([]))
 
     const data: Data = {
       id: 42,
@@ -215,7 +262,7 @@ describe(`TrailBase Integration`, () => {
 
     expect(createBulkMock).toHaveBeenCalledOnce()
 
-    expect(collection.state).toEqual(new Map([[data.id, data]]))
+    expect(stripState(collection.state)).toEqual(new Map([[data.id, data]]))
 
     const updatedData: Data = {
       ...data,
@@ -231,7 +278,7 @@ describe(`TrailBase Integration`, () => {
         })
         writer.releaseLock()
         return Promise.resolve()
-      }
+      },
     )
 
     collection.update(data.id, (old: Data) => {
@@ -240,7 +287,9 @@ describe(`TrailBase Integration`, () => {
 
     expect(updateMock).toHaveBeenCalledOnce()
 
-    expect(collection.state).toEqual(new Map([[updatedData.id, updatedData]]))
+    expect(stripState(collection.state)).toEqual(
+      new Map([[updatedData.id, updatedData]]),
+    )
 
     const deleteMock = recordApi.delete.mockImplementation(
       (_id: string | number) => {
@@ -250,13 +299,13 @@ describe(`TrailBase Integration`, () => {
         })
         writer.releaseLock()
         return Promise.resolve()
-      }
+      },
     )
 
     collection.delete(updatedData.id!)
 
     expect(deleteMock).toHaveBeenCalledOnce()
 
-    expect(collection.state).toEqual(new Map([]))
+    expect(stripState(collection.state)).toEqual(new Map([]))
   })
 })

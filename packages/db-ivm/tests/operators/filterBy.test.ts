@@ -1,8 +1,8 @@
-import { describe, expect, test } from "vitest"
-import { D2 } from "../../src/d2.js"
-import { MultiSet } from "../../src/multiset.js"
-import { filterBy, output } from "../../src/operators/index.js"
-import type { KeyValue } from "../../src/types.js"
+import { describe, expect, test } from 'vitest'
+import { D2 } from '../../src/d2.js'
+import { MultiSet } from '../../src/multiset.js'
+import { filterBy, output } from '../../src/operators/index.js'
+import type { KeyValue } from '../../src/types.js'
 
 describe(`Operators`, () => {
   describe(`FilterBy operation`, () => {
@@ -21,7 +21,7 @@ describe(`Operators`, () => {
         filterBy(inputB),
         output((message) => {
           messages.push(message)
-        })
+        }),
       )
 
       graph.finalize()
@@ -31,7 +31,7 @@ describe(`Operators`, () => {
         new MultiSet<KeyValue<number, string>>([
           [[1, `apple`], 1],
           [[2, `banana`], 1],
-        ])
+        ]),
       )
 
       // Send filter keys to the filter stream
@@ -54,7 +54,7 @@ describe(`Operators`, () => {
         filterBy(inputB),
         output((message) => {
           messages.push(message)
-        })
+        }),
       )
 
       graph.finalize()
@@ -64,7 +64,7 @@ describe(`Operators`, () => {
         new MultiSet<KeyValue<number, string>>([
           [[1, `apple`], 1],
           [[2, `banana`], 1],
-        ])
+        ]),
       )
 
       // Send empty filter data
@@ -86,7 +86,7 @@ describe(`Operators`, () => {
         filterBy(inputB),
         output((message) => {
           messages.push(message)
-        })
+        }),
       )
 
       graph.finalize()
@@ -97,7 +97,7 @@ describe(`Operators`, () => {
           [[1, `apple`], 1],
           [[2, `banana`], 1],
           [[3, `cherry`], 1],
-        ])
+        ]),
       )
 
       // Send filter keys
@@ -105,7 +105,7 @@ describe(`Operators`, () => {
         new MultiSet<KeyValue<number, boolean>>([
           [[2, true], 1],
           [[3, false], 1], // Value doesn't matter, only key presence
-        ])
+        ]),
       )
 
       graph.run()
@@ -129,7 +129,7 @@ describe(`Operators`, () => {
         filterBy(inputB),
         output((message) => {
           messages.push(message)
-        })
+        }),
       )
 
       graph.finalize()
@@ -141,7 +141,7 @@ describe(`Operators`, () => {
           [[2, `banana`], 1],
           [[3, `cherry`], 1],
           [[4, `date`], 1],
-        ])
+        ]),
       )
 
       // Send initial filter keys
@@ -149,7 +149,7 @@ describe(`Operators`, () => {
         new MultiSet<KeyValue<number, boolean>>([
           [[1, true], 1],
           [[3, true], 1],
-        ])
+        ]),
       )
 
       graph.run()
@@ -167,7 +167,7 @@ describe(`Operators`, () => {
         new MultiSet<KeyValue<number, boolean>>([
           [[2, true], 1],
           [[4, true], 1],
-        ])
+        ]),
       )
 
       graph.run()
@@ -191,7 +191,7 @@ describe(`Operators`, () => {
         filterBy(inputB),
         output((message) => {
           messages.push(message)
-        })
+        }),
       )
 
       graph.finalize()
@@ -202,7 +202,7 @@ describe(`Operators`, () => {
           [[1, `apple`], 1],
           [[2, `banana`], -1],
           [[3, `cherry`], 1],
-        ])
+        ]),
       )
 
       // Send filter keys
@@ -211,7 +211,7 @@ describe(`Operators`, () => {
           [[1, true], 1],
           [[2, true], 1],
           [[3, true], 1],
-        ])
+        ]),
       )
 
       graph.run()
@@ -236,7 +236,7 @@ describe(`Operators`, () => {
         filterBy(inputB),
         output((message) => {
           messages.push(message)
-        })
+        }),
       )
 
       graph.finalize()
@@ -247,7 +247,7 @@ describe(`Operators`, () => {
           [[1, `apple`], 1],
           [[2, `banana`], 1],
           [[3, `cherry`], 1],
-        ])
+        ]),
       )
 
       graph.run()
@@ -260,7 +260,7 @@ describe(`Operators`, () => {
         new MultiSet<KeyValue<number, boolean>>([
           [[2, true], 1],
           [[3, false], 1],
-        ])
+        ]),
       )
 
       graph.run()

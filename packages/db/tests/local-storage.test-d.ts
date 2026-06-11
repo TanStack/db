@@ -1,14 +1,17 @@
-import { describe, expectTypeOf, it } from "vitest"
-import { z } from "zod"
-import { createCollection } from "../src/index"
-import { localStorageCollectionOptions } from "../src/local-storage"
+import { describe, expectTypeOf, it } from 'vitest'
+import { z } from 'zod'
+import { createCollection } from '../src/index'
+import { localStorageCollectionOptions } from '../src/local-storage'
 import type {
   LocalStorageCollectionConfig,
+  LocalStorageCollectionUtils,
   StorageApi,
   StorageEventApi,
-} from "../src/local-storage"
+} from '../src/local-storage'
+import type { OutputWithVirtual } from './utils'
 
 type ItemOf<T> = T extends Array<infer U> ? U : T
+type OutputWithVirtualString<T extends object> = OutputWithVirtual<T, string>
 
 describe(`LocalStorage collection type resolution tests`, () => {
   // Define test types
@@ -173,21 +176,21 @@ describe(`LocalStorage collection type resolution tests`, () => {
       onInsert: (params) => {
         // Verify that the mutation value has the correct type
         expectTypeOf(
-          params.transaction.mutations[0].modified
+          params.transaction.mutations[0].modified,
         ).toEqualTypeOf<ExplicitType>()
         return Promise.resolve({ success: true })
       },
       onUpdate: (params) => {
         // Verify that the mutation value has the correct type
         expectTypeOf(
-          params.transaction.mutations[0].modified
+          params.transaction.mutations[0].modified,
         ).toEqualTypeOf<ExplicitType>()
         return Promise.resolve({ success: true })
       },
       onDelete: (params) => {
         // Verify that the mutation value has the correct type
         expectTypeOf(
-          params.transaction.mutations[0].original
+          params.transaction.mutations[0].original,
         ).toEqualTypeOf<ExplicitType>()
         return Promise.resolve({ success: true })
       },
@@ -286,11 +289,11 @@ describe(`LocalStorage collection type resolution tests`, () => {
     const windowEventApi: {
       addEventListener: (
         type: `storage`,
-        listener: (event: StorageEvent) => void
+        listener: (event: StorageEvent) => void,
       ) => void
       removeEventListener: (
         type: `storage`,
-        listener: (event: StorageEvent) => void
+        listener: (event: StorageEvent) => void,
       ) => void
     } = {
       addEventListener: () => {},
@@ -315,31 +318,31 @@ describe(`LocalStorage collection type resolution tests`, () => {
     type ExpectedInput = z.input<typeof testSchemaWithSchema>
 
     const collection = createCollection(
-      localStorageCollectionOptions({
+      localStorageCollectionOptions<typeof testSchemaWithSchema, string>({
         storageKey: `test-with-schema`,
         storage: mockStorage,
         storageEventApi: mockStorageEventApi,
-        getKey: (item: any) => item.id,
+        getKey: (item: ExpectedType) => item.id,
         schema: testSchemaWithSchema,
         onInsert: (params) => {
           expectTypeOf(
-            params.transaction.mutations[0].modified
+            params.transaction.mutations[0].modified,
           ).toEqualTypeOf<ExpectedType>()
           return Promise.resolve()
         },
         onUpdate: (params) => {
           expectTypeOf(
-            params.transaction.mutations[0].modified
+            params.transaction.mutations[0].modified,
           ).toEqualTypeOf<ExpectedType>()
           return Promise.resolve()
         },
         onDelete: (params) => {
           expectTypeOf(
-            params.transaction.mutations[0].modified
+            params.transaction.mutations[0].modified,
           ).toEqualTypeOf<ExpectedType>()
           return Promise.resolve()
         },
-      })
+      }),
     )
 
     collection.insert({
@@ -358,7 +361,9 @@ describe(`LocalStorage collection type resolution tests`, () => {
     })
 
     // Test that the collection has the correct inferred type from schema
-    expectTypeOf(collection.toArray).toEqualTypeOf<Array<ExpectedType>>()
+    expectTypeOf(collection.toArray).toEqualTypeOf<
+      Array<OutputWithVirtualString<ExpectedType>>
+    >()
   })
 
   it(`should work with explicit type for URL scenario`, () => {
@@ -369,11 +374,11 @@ describe(`LocalStorage collection type resolution tests`, () => {
       createdAt: Date
     }
 
-    const options = localStorageCollectionOptions<SelectUrlType>({
+    const options = localStorageCollectionOptions<SelectUrlType, string>({
       storageKey: `test-with-url-type`,
       storage: mockStorage,
       storageEventApi: mockStorageEventApi,
-      getKey: (url) => url.id,
+      getKey: (url: SelectUrlType) => url.id,
     })
 
     const collection = createCollection(options)
@@ -381,9 +386,11 @@ describe(`LocalStorage collection type resolution tests`, () => {
     // Test that the collection has the expected methods
     expectTypeOf(collection.insert).toBeFunction()
     expectTypeOf(collection.get).returns.toEqualTypeOf<
-      SelectUrlType | undefined
+      OutputWithVirtualString<SelectUrlType> | undefined
     >()
-    expectTypeOf(collection.toArray).toEqualTypeOf<Array<SelectUrlType>>()
+    expectTypeOf(collection.toArray).toEqualTypeOf<
+      Array<OutputWithVirtualString<SelectUrlType>>
+    >()
 
     // Test insert parameter type
     type InsertParam = Parameters<typeof collection.insert>[0]
@@ -393,5 +400,24 @@ describe(`LocalStorage collection type resolution tests`, () => {
     collection.update(`test-id`, (draft) => {
       expectTypeOf(draft).toEqualTypeOf<SelectUrlType>()
     })
+  })
+
+  it(`should type collection.utils as LocalStorageCollectionUtils after createCollection`, () => {
+    const collection = createCollection(
+      localStorageCollectionOptions<ExplicitType>({
+        storageKey: `test-utils-typing`,
+        storage: mockStorage,
+        storageEventApi: mockStorageEventApi,
+        getKey: (item) => item.id,
+      }),
+    )
+
+    // Verify that collection.utils is typed as LocalStorageCollectionUtils, not UtilsRecord
+    const utils: LocalStorageCollectionUtils = collection.utils
+    expectTypeOf(utils.clearStorage).toBeFunction()
+    expectTypeOf(utils.getStorageSize).toBeFunction()
+    expectTypeOf(utils.acceptMutations).toBeFunction()
+    expectTypeOf(collection.utils.clearStorage).toBeFunction()
+    expectTypeOf(collection.utils.getStorageSize).toBeFunction()
   })
 })

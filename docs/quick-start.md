@@ -3,10 +3,10 @@ title: Quick Start
 id: quick-start
 ---
 
-TanStack DB is a reactive client store for building super fast apps. This example will show you how to:
+TanStack DB is the reactive client-first store for your API. Stop building custom endpoints for every view—query your data however your components need it. This example will show you how to:
 
 - **Load data** into collections using TanStack Query
-- **Query data** with blazing fast live queries
+- **Query data** with blazing-fast live queries
 - **Mutate data** with instant optimistic updates
 
 ```tsx
@@ -178,6 +178,6 @@ You now understand the basics of TanStack DB! The collection loads and persists 
 
 Explore the docs to learn more about:
 
-- **[Installation](../installation.md)** - All framework and collection packages
-- **[Overview](../overview.md)** - Complete feature overview and examples
-- **[Live Queries](../guides/live-queries.md)** - Advanced querying, joins, and aggregations
+- **[Installation](./installation.md)** - All framework and collection packages
+- **[Overview](./overview.md)** - Complete feature overview and examples
+- **[Live Queries](./guides/live-queries.md)** - Advanced querying, joins, and aggregations
