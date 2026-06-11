@@ -214,6 +214,14 @@ describe(`sql-compiler`, () => {
           compileSQL({ where: func(`in`, [val(undefined), ref(`roles`)]) }),
         ).toThrow(`Cannot use null/undefined value with 'in' operator`)
       })
+
+      it(`should throw for an array left operand against an array column`, () => {
+        expect(() =>
+          compileSQL({
+            where: func(`in`, [val([`admin`, `user`]), ref(`roles`)]),
+          }),
+        ).toThrow(`Cannot use an array value as the left operand of 'in'`)
+      })
     })
 
     describe(`null/undefined value handling`, () => {
