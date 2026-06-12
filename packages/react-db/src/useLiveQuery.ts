@@ -434,17 +434,36 @@ export function useLiveQuery(
         return () => {}
       }
 
+      let unsubscribed = false
+
       const subscription = collectionRef.current.subscribeChanges(() => {
+        // The subscription can outlive the React subscription window when an
+        // already-queued change arrives between `unsubscribed = true` and the
+        // underlying `subscription.unsubscribe()`. Drop the late notify so
+        // React never sees a state update post-unsubscribe.
+        if (unsubscribed) return
         // Bump version on any change; getSnapshot will rebuild next time
         versionRef.current += 1
         onStoreChange()
       })
-      // Collection may be ready and will not receive initial `subscribeChanges()`
+      // Collection may be ready and will not receive initial `subscribeChanges()`.
+      // We must notify React so it picks up the ready state — but doing it
+      // synchronously here lands during the render-to-commit window when
+      // `useSyncExternalStore`'s subscribe runs in StrictMode double-render
+      // or under cold/throttled loads, which React surfaces as:
+      //   "Can't perform a React state update on a component that hasn't
+      //    mounted yet. ... Move this work to useEffect instead."
+      // Defer to a microtask so the notify lands AFTER the current commit.
+      // See #1587 for the Lighthouse-cold-load repro.
       if (collectionRef.current.status === `ready`) {
-        versionRef.current += 1
-        onStoreChange()
+        queueMicrotask(() => {
+          if (unsubscribed) return
+          versionRef.current += 1
+          onStoreChange()
+        })
       }
       return () => {
+        unsubscribed = true
         subscription.unsubscribe()
       }
     }
