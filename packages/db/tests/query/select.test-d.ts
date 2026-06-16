@@ -3,6 +3,7 @@ import { createCollection } from '../../src/collection/index.js'
 import { createLiveQueryCollection } from '../../src/query/index.js'
 import { mockSyncCollectionOptions } from '../utils.js'
 import { upper } from '../../src/query/builder/functions.js'
+import type { OutputWithVirtual } from '../utils.js'
 
 type User = {
   id: number
@@ -24,6 +25,11 @@ type User = {
     }
   }
 }
+
+type OutputWithVirtualKeyed<T extends object> = OutputWithVirtual<
+  T,
+  string | number
+>
 
 function createUsers() {
   return createCollection(
@@ -52,7 +58,7 @@ describe(`select types`, () => {
 
     const results = col.toArray[0]!
 
-    expectTypeOf(results).toEqualTypeOf<Expected>()
+    expectTypeOf(results).toMatchTypeOf<OutputWithVirtualKeyed<Expected>>()
   })
 
   test(`works with js built-ins objects`, () => {
@@ -75,7 +81,7 @@ describe(`select types`, () => {
 
     const results = col.toArray[0]!
 
-    expectTypeOf(results).toEqualTypeOf<Expected>()
+    expectTypeOf(results).toMatchTypeOf<OutputWithVirtualKeyed<Expected>>()
   })
 
   test(`nested object selection infers nested result type`, () => {
@@ -100,7 +106,7 @@ describe(`select types`, () => {
 
     const results = col.toArray[0]!
 
-    expectTypeOf(results).toEqualTypeOf<Expected>()
+    expectTypeOf(results).toMatchTypeOf<OutputWithVirtualKeyed<Expected>>()
   })
 
   test(`nested spread preserves object structure types`, () => {
@@ -133,6 +139,6 @@ describe(`select types`, () => {
 
     const results = col.toArray[0]!
 
-    expectTypeOf(results).toEqualTypeOf<Expected>()
+    expectTypeOf(results).toMatchTypeOf<OutputWithVirtualKeyed<Expected>>()
   })
 })

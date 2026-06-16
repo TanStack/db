@@ -73,6 +73,43 @@ function Home() {
           </Link>
         </div>
 
+        <div className="mb-8">
+          <Link to="/wa-sqlite">
+            <div className="bg-white rounded-lg shadow-lg p-6 hover:shadow-xl transition-shadow cursor-pointer group border-2 border-emerald-200">
+              <div className="flex items-center mb-4">
+                <span className="text-3xl mr-3">🗃️</span>
+                <div>
+                  <h2 className="text-2xl font-bold text-gray-900 group-hover:text-emerald-600">
+                    wa-sqlite OPFS Persistence
+                  </h2>
+                  <span className="text-xs px-2 py-0.5 bg-emerald-100 text-emerald-700 rounded-full">
+                    NEW
+                  </span>
+                </div>
+              </div>
+              <p className="text-gray-600 mb-4">
+                Collection-level persistence using wa-sqlite with OPFS. Data is
+                stored in a real SQLite database in the browser via a Web
+                Worker. Survives page reloads without server sync.
+              </p>
+              <div className="flex flex-wrap gap-2">
+                <span className="px-2 py-1 bg-emerald-100 text-emerald-800 text-xs rounded">
+                  SQLite in Browser
+                </span>
+                <span className="px-2 py-1 bg-blue-100 text-blue-800 text-xs rounded">
+                  OPFS Storage
+                </span>
+                <span className="px-2 py-1 bg-purple-100 text-purple-800 text-xs rounded">
+                  Web Worker
+                </span>
+                <span className="px-2 py-1 bg-orange-100 text-orange-800 text-xs rounded">
+                  Local-only
+                </span>
+              </div>
+            </div>
+          </Link>
+        </div>
+
         <div className="bg-white rounded-lg shadow-lg p-8">
           <h2 className="text-2xl font-bold text-gray-900 mb-6">
             Features Demonstrated

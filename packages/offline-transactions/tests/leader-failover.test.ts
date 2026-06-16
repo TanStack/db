@@ -430,7 +430,7 @@ describe(`leader failover`, () => {
       private listeners = new Set<(isLeader: boolean) => void>()
       private leader = false
 
-      async requestLeadership(): Promise<boolean> {
+      requestLeadership(): Promise<boolean> {
         // Simulate: lock is available, will return true immediately
         // but the actual lock acquisition (and callback) happens async
         setTimeout(() => {
@@ -441,7 +441,7 @@ describe(`leader failover`, () => {
           }
         }, 10)
 
-        return true // Returns immediately before callback fires
+        return Promise.resolve(true) // Returns immediately before callback fires
       }
 
       releaseLeadership(): void {
@@ -480,13 +480,13 @@ describe(`leader failover`, () => {
     let replayCount = 0
     const env = createTestOfflineEnvironment({
       storage: sharedStorage,
-      mutationFn: async (params) => {
+      mutationFn: (params) => {
         replayCount++
         const mutations = params.transaction.mutations as Array<
           PendingMutation<TestItem>
         >
         env.applyMutations(mutations)
-        return { ok: true, mutations }
+        return Promise.resolve({ ok: true, mutations })
       },
       config: {
         leaderElection: new AsyncLeaderElection(),

@@ -1,5 +1,17 @@
 # @tanstack/db-ivm
 
+## 0.1.18
+
+### Patch Changes
+
+- Fix Temporal objects breaking live query updates when used with joins. Temporal objects (e.g. `Temporal.PlainDate`) have no enumerable properties, so the structural hash function produced identical hashes for all Temporal values, causing join index updates to be silently swallowed. Also add Temporal support to value normalization for join key matching and to the comparator for correct sort ordering. ([#1370](https://github.com/TanStack/db/pull/1370))
+
+## 0.1.17
+
+### Patch Changes
+
+- Add string support to `min()` and `max()` aggregate functions. These functions now work with strings using lexicographic comparison, matching standard SQL behavior. ([#1120](https://github.com/TanStack/db/pull/1120))
+
 ## 0.1.16
 
 ### Patch Changes

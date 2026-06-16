@@ -2,6 +2,7 @@ import type {
   Collection,
   MutationFnParams,
   PendingMutation,
+  Transaction,
 } from '@tanstack/db'
 
 // Extended mutation function that includes idempotency key
@@ -21,6 +22,7 @@ export interface SerializedMutation {
   type: string
   modified: any
   original: any
+  changes: any
   collectionId: string
 }
 
@@ -60,7 +62,7 @@ export interface SerializedOfflineTransaction {
   mutations: Array<SerializedMutation>
   keys: Array<string>
   idempotencyKey: string
-  createdAt: Date
+  createdAt: string
   retryCount: number
   nextAttemptAt: number
   lastError?: SerializedError
@@ -88,7 +90,6 @@ export interface StorageDiagnostic {
 }
 
 export interface OfflineConfig {
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   collections: Record<string, Collection<any, any, any, any, any>>
   mutationFns: Record<string, OfflineMutationFn>
   storage?: StorageAdapter
@@ -101,6 +102,12 @@ export interface OfflineConfig {
   onLeadershipChange?: (isLeader: boolean) => void
   onStorageFailure?: (diagnostic: StorageDiagnostic) => void
   leaderElection?: LeaderElection
+  /**
+   * Custom online detector implementation.
+   * Defaults to WebOnlineDetector for browser environments.
+   * The '@tanstack/offline-transactions/react-native' entry point uses ReactNativeOnlineDetector automatically.
+   */
+  onlineDetector?: OnlineDetector
 }
 
 export interface StorageAdapter {
@@ -123,9 +130,21 @@ export interface LeaderElection {
   onLeadershipChange: (callback: (isLeader: boolean) => void) => () => void
 }
 
+export interface TransactionSignaler {
+  resolveTransaction: (transactionId: string, result: any) => void
+  rejectTransaction: (transactionId: string, error: Error) => void
+  registerRestorationTransaction: (
+    offlineTransactionId: string,
+    restorationTransaction: Transaction,
+  ) => void
+  isOnline: () => boolean
+}
+
 export interface OnlineDetector {
   subscribe: (callback: () => void) => () => void
   notifyOnline: () => void
+  isOnline: () => boolean
+  dispose: () => void
 }
 
 export interface CreateOfflineTransactionOptions {

@@ -1,4 +1,4 @@
-import { createFileRoute } from '@tanstack/react-router'
+import { createFileRoute, notFound } from '@tanstack/react-router'
 import { eq, useLiveQuery } from '@tanstack/react-db'
 import { useState } from 'react'
 import type { Todo } from '@/db/schema'
@@ -12,9 +12,13 @@ import {
 export const Route = createFileRoute(`/_authenticated/project/$projectId`)({
   component: ProjectPage,
   ssr: false,
-  loader: async () => {
+  loader: async ({ params }) => {
     await projectCollection.preload()
     await todoCollection.preload()
+    const projectId = parseInt(params.projectId, 10)
+    if (isNaN(projectId) || !projectCollection.has(projectId)) {
+      throw notFound()
+    }
     return null
   },
 })
@@ -81,6 +85,11 @@ function ProjectPage() {
 
   const deleteTodo = (id: number) => {
     todoCollection.delete(id)
+  }
+
+  // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition
+  if (!project || !usersInProject) {
+    return null
   }
 
   return (

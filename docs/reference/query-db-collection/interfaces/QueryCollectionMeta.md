@@ -34,10 +34,10 @@ declare module "@tanstack/query-db-collection" {
 
 ## Properties
 
-### loadSubsetOptions
+### loadSubsetOptions?
 
 ```ts
-loadSubsetOptions: LoadSubsetOptions;
+optional loadSubsetOptions: LoadSubsetOptions;
 ```
 
 Defined in: [packages/query-db-collection/src/global.ts:31](https://github.com/TanStack/db/blob/main/packages/query-db-collection/src/global.ts#L31)

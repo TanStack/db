@@ -5,7 +5,7 @@
  */
 
 import { afterAll, afterEach, beforeAll, describe } from 'vitest'
-import { createCollection } from '@tanstack/db'
+import { createCollection, BTreeIndex } from '@tanstack/db'
 import { QueryClient } from '@tanstack/query-core'
 import { queryCollectionOptions } from '../src/query'
 import {
@@ -55,6 +55,8 @@ describe(`Query Collection E2E Tests`, () => {
         },
         getKey: (item: E2EUser) => item.id,
         startSync: true,
+        autoIndex: `eager`,
+        defaultIndexType: BTreeIndex,
       }),
     )
 
@@ -68,6 +70,8 @@ describe(`Query Collection E2E Tests`, () => {
         },
         getKey: (item: E2EPost) => item.id,
         startSync: true,
+        autoIndex: `eager`,
+        defaultIndexType: BTreeIndex,
       }),
     )
 
@@ -81,6 +85,8 @@ describe(`Query Collection E2E Tests`, () => {
         },
         getKey: (item: E2EComment) => item.id,
         startSync: true,
+        autoIndex: `eager`,
+        defaultIndexType: BTreeIndex,
       }),
     )
 
@@ -99,6 +105,8 @@ describe(`Query Collection E2E Tests`, () => {
         },
         getKey: (item: E2EUser) => item.id,
         startSync: false,
+        autoIndex: `eager`,
+        defaultIndexType: BTreeIndex,
       }),
     )
 
@@ -115,6 +123,8 @@ describe(`Query Collection E2E Tests`, () => {
         },
         getKey: (item: E2EPost) => item.id,
         startSync: false,
+        autoIndex: `eager`,
+        defaultIndexType: BTreeIndex,
       }),
     )
 
@@ -131,6 +141,8 @@ describe(`Query Collection E2E Tests`, () => {
         },
         getKey: (item: E2EComment) => item.id,
         startSync: false,
+        autoIndex: `eager`,
+        defaultIndexType: BTreeIndex,
       }),
     )
 

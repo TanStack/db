@@ -170,12 +170,6 @@ export function useLiveSuspenseQuery(
     hasBeenReadyRef.current = false
   }
 
-  // Track when we reach ready state
-  if (result.status === `ready`) {
-    hasBeenReadyRef.current = true
-    promiseRef.current = null
-  }
-
   // SUSPENSE LOGIC: Throw promise or error based on collection status
   // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition
   if (!result.isEnabled) {
@@ -189,16 +183,26 @@ export function useLiveSuspenseQuery(
     )
   }
 
+  // It’s not recommended to suspend a render based on a store value returned by useSyncExternalStore.
+  // result.status is the snapshot from syncExternalStore. We read the fresh status from the collection reference instead.
+  const collectionStatus = result.collection.status
+
+  // Track when we reach ready state
+  if (collectionStatus === `ready`) {
+    hasBeenReadyRef.current = true
+    promiseRef.current = null
+  }
+
   // Only throw errors during initial load (before first ready)
   // After success, errors surface as stale data (matches TanStack Query behavior)
-  if (result.status === `error` && !hasBeenReadyRef.current) {
+  if (collectionStatus === `error` && !hasBeenReadyRef.current) {
     promiseRef.current = null
     // TODO: Once collections hold a reference to their last error object (#671),
     // we should rethrow that actual error instead of creating a generic message
     throw new Error(`Collection "${result.collection.id}" failed to load`)
   }
 
-  if (result.status === `loading` || result.status === `idle`) {
+  if (collectionStatus === `loading` || collectionStatus === `idle`) {
     // Create or reuse promise for current collection
     if (!promiseRef.current) {
       promiseRef.current = result.collection.preload()

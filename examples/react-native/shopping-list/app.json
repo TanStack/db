@@ -1,0 +1,19 @@
+{
+  "expo": {
+    "name": "Shopping List Demo",
+    "slug": "shopping-list-demo",
+    "version": "1.0.0",
+    "orientation": "portrait",
+    "userInterfaceStyle": "light",
+    "newArchEnabled": true,
+    "ios": {
+      "supportsTablet": true,
+      "bundleIdentifier": "com.tanstack.shoppinglist"
+    },
+    "android": {
+      "package": "com.tanstack.shoppinglist"
+    },
+    "scheme": "shopping-list",
+    "plugins": ["expo-router"]
+  }
+}

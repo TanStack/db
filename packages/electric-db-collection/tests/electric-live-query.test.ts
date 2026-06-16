@@ -5,6 +5,7 @@ import {
   eq,
   gt,
   lt,
+  BasicIndex,
 } from '@tanstack/db'
 import { electricCollectionOptions } from '../src/electric'
 import type { ElectricCollectionUtils } from '../src/electric'
@@ -145,6 +146,7 @@ describe.each([
     return createCollection({
       ...options,
       startSync: true,
+      ...(autoIndex === `eager` ? { defaultIndexType: BasicIndex } : {}),
     }) as unknown as Collection<
       User,
       string | number,
@@ -352,6 +354,7 @@ describe.each([
       }),
       autoIndex,
       startSync: true,
+      ...(autoIndex === `eager` ? { defaultIndexType: BasicIndex } : {}),
     })
 
     // Send initial data but don't complete sync (no up-to-date)
@@ -494,8 +497,8 @@ describe.each([
         return () => {}
       })
 
-      const testElectricCollection = createCollection(
-        electricCollectionOptions({
+      const testElectricCollection = createCollection({
+        ...electricCollectionOptions({
           id: `test-incremental-loading`,
           shapeOptions: {
             url: `http://test-url`,
@@ -506,7 +509,8 @@ describe.each([
           startSync: true,
           autoIndex: `eager` as const,
         }),
-      )
+        defaultIndexType: BasicIndex,
+      })
 
       mockRequestSnapshot.mockResolvedValue({
         data: [],
@@ -675,6 +679,7 @@ describe(`Electric Collection with Live Query - syncMode integration`, () => {
       ...options,
       startSync: true,
       autoIndex: `eager` as const,
+      defaultIndexType: BasicIndex,
     })
   }
 
@@ -982,6 +987,7 @@ describe(`Electric Collection - loadSubset deduplication`, () => {
       ...options,
       startSync: true,
       autoIndex: `eager` as const,
+      defaultIndexType: BasicIndex,
     })
   }
 

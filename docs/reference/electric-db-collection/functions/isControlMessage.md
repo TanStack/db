@@ -9,7 +9,7 @@ title: isControlMessage
 function isControlMessage<T>(message): message is ControlMessage;
 ```
 
-Defined in: node\_modules/.pnpm/@electric-sql+client@1.3.1/node\_modules/@electric-sql/client/dist/index.d.ts:834
+Defined in: node\_modules/.pnpm/@electric-sql+client@1.5.14/node\_modules/@electric-sql/client/dist/index.d.ts:907
 
 Type guard for checking Message is ControlMessage.
 

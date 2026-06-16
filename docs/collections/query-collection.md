@@ -49,7 +49,7 @@ The `queryCollectionOptions` function accepts the following options:
 
 ### Required Options
 
-- `queryKey`: The query key for TanStack Query
+- `queryKey`: The query key for TanStack Query. Can be a static array or a function that receives `LoadSubsetOptions` and returns a key. When using a function, all returned keys must share the base key (`queryKey({})`) as a prefix — see [Query Key Prefix Convention](#query-key-prefix-convention).
 - `queryFn`: Function that fetches data from the server
 - `queryClient`: TanStack Query client instance
 - `getKey`: Function to extract the unique key from an item
@@ -63,6 +63,38 @@ The `queryCollectionOptions` function accepts the following options:
 - `retryDelay`: Delay between retries
 - `staleTime`: How long data is considered fresh
 - `meta`: Optional metadata that will be passed to the query function context
+
+### Using with `queryOptions(...)`
+
+If your app already uses TanStack Query's `queryOptions` helper (e.g. from `@tanstack/react-query`), you can spread those options into `queryCollectionOptions`. Note that `queryFn` must be explicitly provided since query collections require it both in types and at runtime:
+
+```typescript
+import { QueryClient } from "@tanstack/query-core"
+import { createCollection } from "@tanstack/db"
+import { queryCollectionOptions } from "@tanstack/query-db-collection"
+import { queryOptions } from "@tanstack/react-query"
+
+const queryClient = new QueryClient()
+
+const listOptions = queryOptions({
+  queryKey: ["todos"],
+  queryFn: async () => {
+    const response = await fetch("/api/todos")
+    return response.json() as Promise<Array<{ id: string; title: string }>>
+  },
+})
+
+const todosCollection = createCollection(
+  queryCollectionOptions({
+    ...listOptions,
+    queryFn: (context) => listOptions.queryFn!(context),
+    queryClient,
+    getKey: (item) => item.id,
+  }),
+)
+```
+
+If `queryFn` is missing at runtime, `queryCollectionOptions` throws `QueryFnRequiredError`.
 
 ### Collection Options
 
@@ -438,6 +470,27 @@ The query collection treats the `queryFn` result as the **complete state** of th
 - Items present in the collection but not in the query result will be deleted
 - Items in the query result but not in the collection will be inserted
 - Items present in both will be updated if they differ
+
+This is important when the same entity type can be loaded from multiple REST
+endpoints. For example, do not point the same Query Collection at
+`/api/documents/preview` for one load and `/api/documents/deleted` for another
+unless each result represents the complete state for that collection
+scope. A narrower endpoint can otherwise remove rows that were loaded from a
+different endpoint.
+
+For multiple endpoint or subset-loading use cases, choose the pattern that
+matches your API semantics:
+
+- Use `syncMode: 'on-demand'` when one logical collection can serve different
+  subsets of data. In this mode, query predicates (`where`, `orderBy`, `limit`,
+  and `offset`) are passed to your `queryFn` via `ctx.meta.loadSubsetOptions`,
+  letting you translate them into API parameters.
+- Use separate Query Collections when endpoints represent distinct server scopes
+  whose results should not replace each other. Use `unionAll` to combine them
+  into a single query when you need a unified view across endpoints.
+- Use direct writes such as `writeUpsert`/`writeBatch` for lower-level
+  incremental loading when you intentionally want to merge server responses into
+  the synced store yourself.
 
 ### Empty Array Behavior
 
@@ -827,6 +880,30 @@ const productsCollection = createCollection(
     queryFn: async (ctx) => { /* ... */ },
   })
 )
+```
+
+#### Query Key Prefix Convention
+
+When using a function-based `queryKey`, all derived keys **must extend the base key as a prefix**. The base key is what your function returns when called with no options (`queryKey({})`).
+
+TanStack Query uses prefix matching for cache operations internally. The query collection relies on this to find all cache entries belonging to a collection — including stale entries from destroyed query observers that are still held in cache due to `gcTime`. If derived keys don't share the base prefix, cache updates may silently miss entries, leading to stale data.
+
+```typescript
+// ✅ Correct: base key ['products'] is a prefix of all derived keys
+queryKey: (opts) => {
+  if (opts.where) {
+    return ['products', JSON.stringify(opts.where)]
+  }
+  return ['products']
+}
+
+// ❌ Wrong: base key ['products-all'] is NOT a prefix of ['products-filtered', ...]
+queryKey: (opts) => {
+  if (opts.where) {
+    return ['products-filtered', JSON.stringify(opts.where)]
+  }
+  return ['products-all']
+}
 ```
 
 ### Tips

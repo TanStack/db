@@ -2,8 +2,13 @@ import { describe, expect, it } from 'vitest'
 import { SortedMap } from '../src/SortedMap'
 import { BTreeIndex } from '../src/indexes/btree-index'
 import { createCollection } from '../src/collection/index.js'
+import { createLiveQueryCollection } from '../src/query/live-query-collection.js'
+import { eq } from '../src/query/builder/functions.js'
 import { PropRef } from '../src/query/ir'
+import { makeComparator } from '../src/utils/comparison.js'
+import { DEFAULT_COMPARE_OPTIONS } from '../src/utils.js'
 import { mockSyncCollectionOptions } from './utils'
+import type { Collection } from '../src/collection/index.js'
 
 /**
  * These tests verify deterministic ordering behavior when values compare as equal.
@@ -122,7 +127,7 @@ describe(`Deterministic Ordering`, () => {
       index.add(`b`, { priority: 1 })
 
       // take() should return keys in key-sorted order when priorities are equal
-      const keys = index.take(3)
+      const keys = index.takeFromStart(3)
       expect(keys).toEqual([`a`, `b`, `c`])
     })
 
@@ -140,7 +145,7 @@ describe(`Deterministic Ordering`, () => {
       index.add(`b`, { priority: 1 })
 
       // take() should return priority 1 keys sorted by key, then priority 2 keys sorted by key
-      const keys = index.take(5)
+      const keys = index.takeFromStart(5)
       expect(keys).toEqual([`a`, `b`, `c`, `d`, `e`])
     })
 
@@ -155,7 +160,7 @@ describe(`Deterministic Ordering`, () => {
       index.add(10, { priority: 1 })
       index.add(20, { priority: 1 })
 
-      const keys = index.take(3)
+      const keys = index.takeFromStart(3)
       expect(keys).toEqual([10, 20, 30])
     })
 
@@ -171,7 +176,7 @@ describe(`Deterministic Ordering`, () => {
       index.add(`b`, { priority: 1 })
 
       // takeReversed should return keys in reverse key order when priorities are equal
-      const keys = index.takeReversed(3)
+      const keys = index.takeReversedFromEnd(3)
       expect(keys).toEqual([`c`, `b`, `a`])
     })
 
@@ -189,7 +194,7 @@ describe(`Deterministic Ordering`, () => {
       index.remove(`b`, { priority: 1 })
       index.add(`b`, { priority: 1 })
 
-      const keys = index.take(3)
+      const keys = index.takeFromStart(3)
       expect(keys).toEqual([`a`, `b`, `c`])
     })
 
@@ -209,12 +214,102 @@ describe(`Deterministic Ordering`, () => {
       index.add(`b`, { priority: 1 })
 
       // First batch - should get priority 1 keys in key order
-      const firstBatch = index.take(3)
+      const firstBatch = index.takeFromStart(3)
       expect(firstBatch).toEqual([`a`, `b`, `c`])
 
       // Continue from cursor value 1 (exclusive) - should get priority 2 keys in key order
       const secondBatch = index.take(3, 1)
       expect(secondBatch).toEqual([`d`, `e`, `f`])
+    })
+
+    it(`should use single-column comparator correctly with desc direction`, () => {
+      const singleColumnCompare = makeComparator({
+        ...DEFAULT_COMPARE_OPTIONS,
+        direction: `desc`,
+      })
+
+      const index = new BTreeIndex(
+        1,
+        new PropRef([`createdAt`]),
+        `createdAt_desc`,
+        { compareFn: singleColumnCompare },
+      )
+
+      for (let i = 0; i < 26; i++) {
+        index.add(`item-${i}` as any, {
+          createdAt: 1735689600000 + i * 1000,
+        })
+      }
+
+      expect(index.keyCount).toBe(26)
+      expect(index.takeFromStart(30, () => true).length).toBe(26)
+    })
+
+    it(`should correctly index all items when using a multi-column orderBy query`, async () => {
+      interface Msg {
+        id: string
+        threadId: string
+        createdAt: number
+      }
+
+      let beginFn: () => void
+      let writeFn: (msg: { type: string; value: Msg }) => void
+      let commitFn: () => void
+
+      const collection: Collection<Msg, string> = createCollection<Msg, string>(
+        {
+          id: `multi-col-orderby-messages`,
+          getKey: (item) => item.id,
+          autoIndex: `eager`,
+          defaultIndexType: BTreeIndex,
+          startSync: true,
+          sync: {
+            sync: ({ begin, write, commit, markReady }) => {
+              beginFn = begin
+              writeFn = write as any
+              commitFn = commit
+              begin()
+              commit()
+              markReady()
+            },
+          },
+        },
+      )
+
+      await collection.stateWhenReady()
+
+      const thread1 = Array.from({ length: 26 }, (_, i) => ({
+        id: `t1-${i}`,
+        threadId: `t1`,
+        createdAt: 1735689600000 + i * 1000,
+      }))
+      const thread2 = Array.from({ length: 6 }, (_, i) => ({
+        id: `t2-${i}`,
+        threadId: `t2`,
+        createdAt: 1735689700000 + i * 1000,
+      }))
+
+      beginFn!()
+      for (const msg of [...thread1, ...thread2]) {
+        writeFn!({ type: `insert`, value: msg })
+      }
+      commitFn!()
+      expect(collection.size).toBe(32)
+
+      // Multi-column orderBy with where and limit
+      const liveQuery = createLiveQueryCollection({
+        query: (q: any) =>
+          q
+            .from({ msg: collection })
+            .where(({ msg }: any) => eq(msg.threadId, `t2`))
+            .orderBy(({ msg }: any) => msg.createdAt, `desc`)
+            .orderBy(({ msg }: any) => msg.id, `desc`)
+            .limit(30),
+      })
+
+      await liveQuery.preload()
+      const results = Array.from(liveQuery)
+      expect(results.length).toBe(6)
     })
   })
 

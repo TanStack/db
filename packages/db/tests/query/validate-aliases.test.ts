@@ -74,7 +74,7 @@ describe(`Alias validation in subqueries`, () => {
             )
             .select(({ vote, lock }) => ({
               voteId: vote._id,
-              lockName: lock!.lockName,
+              lockName: lock.lockName,
             }))
         },
       })
@@ -103,7 +103,7 @@ describe(`Alias validation in subqueries`, () => {
           )
           .select(({ vote, lock }) => ({
             voteId: vote._id,
-            lockName: lock!.lockName,
+            lockName: lock.lockName,
           }))
       },
     })

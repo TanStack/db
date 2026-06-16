@@ -144,8 +144,8 @@ function deepEqualsInternal(
   // Handle Temporal objects
   // Check if both are Temporal objects of the same type
   if (isTemporal(a) && isTemporal(b)) {
-    const aTag = getStringTag(a)
-    const bTag = getStringTag(b)
+    const aTag = a[Symbol.toStringTag]
+    const bTag = b[Symbol.toStringTag]
 
     // If they're different Temporal types, they're not equal
     if (aTag !== bTag) return false
@@ -211,7 +211,7 @@ function deepEqualsInternal(
   return false
 }
 
-const temporalTypes = [
+const temporalTypes = new Set([
   `Temporal.Duration`,
   `Temporal.Instant`,
   `Temporal.PlainDate`,
@@ -220,16 +220,19 @@ const temporalTypes = [
   `Temporal.PlainTime`,
   `Temporal.PlainYearMonth`,
   `Temporal.ZonedDateTime`,
-]
+])
 
-function getStringTag(a: any): any {
-  return a[Symbol.toStringTag]
+export interface TemporalLike {
+  [Symbol.toStringTag]: string
+  toString: () => string
+  equals?: (other: unknown) => boolean
 }
 
 /** Checks if the value is a Temporal object by checking for the Temporal brand */
-export function isTemporal(a: any): boolean {
-  const tag = getStringTag(a)
-  return typeof tag === `string` && temporalTypes.includes(tag)
+export function isTemporal(a: unknown): a is TemporalLike {
+  if (a == null || typeof a !== `object`) return false
+  const tag = (a as Record<symbol, unknown>)[Symbol.toStringTag]
+  return typeof tag === `string` && temporalTypes.has(tag)
 }
 
 export const DEFAULT_COMPARE_OPTIONS: CompareOptions = {

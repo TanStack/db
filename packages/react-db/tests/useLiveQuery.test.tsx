@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest'
 import { act, renderHook, waitFor } from '@testing-library/react'
 import {
   Query,
+  coalesce,
   count,
   createCollection,
   createLiveQueryCollection,
@@ -9,10 +10,14 @@ import {
   eq,
   gt,
   lte,
+  sum,
 } from '@tanstack/db'
 import { useEffect } from 'react'
 import { useLiveQuery } from '../src/useLiveQuery'
-import { mockSyncCollectionOptions } from '../../db/tests/utils'
+import {
+  mockSyncCollectionOptions,
+  stripVirtualProps,
+} from '../../db/tests/utils'
 
 type Person = {
   id: string
@@ -440,7 +445,7 @@ describe(`Query Collections`, () => {
           .select(({ issues, persons }) => ({
             id: issues.id,
             title: issues.title,
-            name: persons?.name,
+            name: persons.name,
           })),
       )
     })
@@ -815,7 +820,7 @@ describe(`Query Collections`, () => {
           .select(({ issues, persons }) => ({
             id: issues.id,
             title: issues.title,
-            name: persons?.name,
+            name: persons.name,
           })),
       )
 
@@ -1404,7 +1409,7 @@ describe(`Query Collections`, () => {
             .select(({ issues, persons }) => ({
               id: issues.id,
               title: issues.title,
-              name: persons?.name,
+              name: persons.name,
             })),
         )
       })
@@ -1830,7 +1835,7 @@ describe(`Query Collections`, () => {
             .select(({ issues, persons }) => ({
               id: issues.id,
               title: issues.title,
-              userName: persons?.name,
+              userName: persons.name,
             })),
         )
       })
@@ -2349,6 +2354,254 @@ describe(`Query Collections`, () => {
       expect(result.current.data).toBeUndefined()
       expect(result.current.status).toBe(`disabled`)
       expect(result.current.isEnabled).toBe(false)
+    })
+  })
+
+  describe(`aggregates nested inside expressions`, () => {
+    it(`coalesce(count(...), 0) in groupBy select returns count per group`, async () => {
+      const collection = createCollection(
+        mockSyncCollectionOptions<Person>({
+          id: `nested-agg-test`,
+          getKey: (person: Person) => person.id,
+          initialData: initialPersons,
+        }),
+      )
+
+      const { result } = renderHook(() => {
+        return useLiveQuery((q) =>
+          q
+            .from({ persons: collection })
+            .groupBy(({ persons }) => persons.team)
+            .select(({ persons }) => ({
+              team: persons.team,
+              memberCount: coalesce(count(persons.id), 0),
+            })),
+        )
+      })
+
+      await waitFor(() => {
+        expect(result.current.state.size).toBe(2) // team1 and team2
+      })
+
+      const results = result.current.data
+      expect(
+        stripVirtualProps(results.find((r) => r.team === `team1`)),
+      ).toEqual({
+        team: `team1`,
+        memberCount: 2, // John Doe + John Smith
+      })
+      expect(
+        stripVirtualProps(results.find((r) => r.team === `team2`)),
+      ).toEqual({
+        team: `team2`,
+        memberCount: 1, // Jane Doe
+      })
+    })
+
+    it(`subquery with coalesce(count(...)) can be left-joined as a source`, async () => {
+      const personCollection = createCollection(
+        mockSyncCollectionOptions<Person>({
+          id: `nested-agg-join-persons`,
+          getKey: (person: Person) => person.id,
+          initialData: initialPersons,
+        }),
+      )
+
+      const issueCollection = createCollection(
+        mockSyncCollectionOptions<Issue>({
+          id: `nested-agg-join-issues`,
+          getKey: (issue: Issue) => issue.id,
+          initialData: initialIssues,
+        }),
+      )
+
+      const { result } = renderHook(() => {
+        return useLiveQuery((q) => {
+          const issueCountSubquery = q
+            .from({ issues: issueCollection })
+            .groupBy(({ issues }) => issues.userId)
+            .select(({ issues }) => ({
+              userId: issues.userId,
+              issueCount: coalesce(count(issues.id), 0),
+            }))
+
+          return q
+            .from({ persons: personCollection })
+            .leftJoin({ ic: issueCountSubquery }, ({ persons, ic }) =>
+              eq(persons.id, ic.userId),
+            )
+            .select(({ persons, ic }) => ({
+              name: persons.name,
+              issueCount: ic.issueCount,
+            }))
+        }, [])
+      })
+
+      await waitFor(() => {
+        expect(result.current.state.size).toBeGreaterThan(0)
+      })
+
+      const results = result.current.data
+      expect(
+        stripVirtualProps(results.find((r) => r.name === `John Doe`)),
+      ).toEqual({
+        name: `John Doe`,
+        issueCount: 2, // Issues 1 and 3
+      })
+      expect(
+        stripVirtualProps(results.find((r) => r.name === `Jane Doe`)),
+      ).toEqual({
+        name: `Jane Doe`,
+        issueCount: 1, // Issue 2
+      })
+    })
+
+    it(`coalesce(sum(...), 0) in groupBy select returns sum per group`, async () => {
+      const collection = createCollection(
+        mockSyncCollectionOptions<Person>({
+          id: `nested-agg-sum-test`,
+          getKey: (person: Person) => person.id,
+          initialData: initialPersons,
+        }),
+      )
+
+      const { result } = renderHook(() => {
+        return useLiveQuery((q) =>
+          q
+            .from({ persons: collection })
+            .groupBy(({ persons }) => persons.team)
+            .select(({ persons }) => ({
+              team: persons.team,
+              totalAge: coalesce(sum(persons.age), 0),
+            })),
+        )
+      })
+
+      await waitFor(() => {
+        expect(result.current.state.size).toBe(2)
+      })
+
+      const results = result.current.data
+      expect(
+        stripVirtualProps(results.find((r) => r.team === `team1`)),
+      ).toEqual({
+        team: `team1`,
+        totalAge: 65, // 30 + 35
+      })
+      expect(
+        stripVirtualProps(results.find((r) => r.team === `team2`)),
+      ).toEqual({
+        team: `team2`,
+        totalAge: 25,
+      })
+    })
+  })
+
+  describe(`includes subqueries`, () => {
+    type Project = {
+      id: string
+      name: string
+    }
+
+    type ProjectIssue = {
+      id: string
+      title: string
+      projectId: string
+    }
+
+    const sampleProjects: Array<Project> = [
+      { id: `p1`, name: `Alpha` },
+      { id: `p2`, name: `Beta` },
+    ]
+
+    const sampleProjectIssues: Array<ProjectIssue> = [
+      { id: `i1`, title: `Bug in Alpha`, projectId: `p1` },
+      { id: `i2`, title: `Feature for Alpha`, projectId: `p1` },
+      { id: `i3`, title: `Bug in Beta`, projectId: `p2` },
+    ]
+
+    it(`should render includes results and reactively update child collections`, async () => {
+      const projectsCollection = createCollection(
+        mockSyncCollectionOptions<Project>({
+          id: `includes-react-projects`,
+          getKey: (p) => p.id,
+          initialData: sampleProjects,
+        }),
+      )
+
+      const issuesCollection = createCollection(
+        mockSyncCollectionOptions<ProjectIssue>({
+          id: `includes-react-issues`,
+          getKey: (i) => i.id,
+          initialData: sampleProjectIssues,
+        }),
+      )
+
+      // Parent hook: runs includes query that produces child Collections
+      const { result: parentResult } = renderHook(() =>
+        useLiveQuery((q) =>
+          q.from({ p: projectsCollection }).select(({ p }) => ({
+            id: p.id,
+            name: p.name,
+            issues: q
+              .from({ i: issuesCollection })
+              .where(({ i }) => eq(i.projectId, p.id))
+              .select(({ i }) => ({
+                id: i.id,
+                title: i.title,
+              })),
+          })),
+        ),
+      )
+
+      // Wait for parent to be ready
+      await waitFor(() => {
+        expect(parentResult.current.data).toHaveLength(2)
+      })
+
+      const alphaProject = parentResult.current.data.find(
+        (p: any) => p.id === `p1`,
+      )!
+      expect(alphaProject.name).toBe(`Alpha`)
+
+      // Child hook: subscribes to the child Collection from the parent row,
+      // simulating a subcomponent using useLiveQuery(project.issues)
+      const { result: childResult } = renderHook(() =>
+        useLiveQuery((alphaProject as any).issues),
+      )
+
+      await waitFor(() => {
+        expect(childResult.current.data).toHaveLength(2)
+      })
+
+      expect(childResult.current.data).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({ id: `i1`, title: `Bug in Alpha` }),
+          expect.objectContaining({ id: `i2`, title: `Feature for Alpha` }),
+        ]),
+      )
+
+      // Add a new issue to Alpha — the child hook should reactively update
+      act(() => {
+        issuesCollection.utils.begin()
+        issuesCollection.utils.write({
+          type: `insert`,
+          value: { id: `i4`, title: `New Alpha issue`, projectId: `p1` },
+        })
+        issuesCollection.utils.commit()
+      })
+
+      await waitFor(() => {
+        expect(childResult.current.data).toHaveLength(3)
+      })
+
+      expect(childResult.current.data).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({ id: `i1`, title: `Bug in Alpha` }),
+          expect.objectContaining({ id: `i2`, title: `Feature for Alpha` }),
+          expect.objectContaining({ id: `i4`, title: `New Alpha issue` }),
+        ]),
+      )
     })
   })
 })

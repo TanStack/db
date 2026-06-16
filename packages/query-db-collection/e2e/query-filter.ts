@@ -556,7 +556,7 @@ function evaluateLike(
   regexPattern = regexPattern.replace(/%/g, `.*`) // % matches any sequence
   regexPattern = regexPattern.replace(/_/g, `.`) // _ matches any single char
 
-  const regex = new RegExp(`^${regexPattern}$`)
+  const regex = new RegExp(`^${regexPattern}$`, 's')
   return regex.test(searchValue)
 }
 

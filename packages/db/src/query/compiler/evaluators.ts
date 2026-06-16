@@ -14,6 +14,31 @@ function isUnknown(value: any): boolean {
   return value === null || value === undefined
 }
 
+function toDateValue(value: any): Date | null {
+  if (value instanceof Date) {
+    return Number.isNaN(value.getTime()) ? null : value
+  }
+
+  if (typeof value === `string` || typeof value === `number`) {
+    const parsed = new Date(value)
+    return Number.isNaN(parsed.getTime()) ? null : parsed
+  }
+
+  return null
+}
+
+function evaluateStrftime(format: string, date: Date): string {
+  if (format === `%Y-%m-%d`) {
+    return date.toISOString().slice(0, 10)
+  }
+
+  if (format === `%Y-%m-%dT%H:%M:%fZ`) {
+    return date.toISOString()
+  }
+
+  return date.toISOString()
+}
+
 /**
  * Converts a 3-valued logic result to a boolean for use in WHERE/HAVING filters.
  * In SQL, UNKNOWN (null) values in WHERE clauses exclude rows, matching false behavior.
@@ -336,7 +361,7 @@ function compileFunction(func: Func, isSingleRow: boolean): (data: any) => any {
       const valueEvaluator = compiledArgs[0]!
       const arrayEvaluator = compiledArgs[1]!
       return (data) => {
-        const value = valueEvaluator(data)
+        const value = normalizeValue(valueEvaluator(data))
         const array = arrayEvaluator(data)
         // In 3-valued logic, if the value is null/undefined, return UNKNOWN
         if (isUnknown(value)) {
@@ -345,7 +370,7 @@ function compileFunction(func: Func, isSingleRow: boolean): (data: any) => any {
         if (!Array.isArray(array)) {
           return false
         }
-        return array.includes(value)
+        return array.some((item) => normalizeValue(item) === value)
       }
     }
 
@@ -432,6 +457,30 @@ function compileFunction(func: Func, isSingleRow: boolean): (data: any) => any {
         }
         return null
       }
+    case `caseWhen`: {
+      const hasDefaultValue = compiledArgs.length % 2 === 1
+      const pairCount = Math.floor(compiledArgs.length / 2)
+
+      if (compiledArgs.length < 2) {
+        throw new Error(`caseWhen() requires at least two arguments`)
+      }
+
+      return (data) => {
+        for (let i = 0; i < pairCount; i++) {
+          const condition = compiledArgs[i * 2]!
+          if (isCaseWhenConditionTrue(condition(data))) {
+            const value = compiledArgs[i * 2 + 1]!
+            return value(data)
+          }
+        }
+
+        if (hasDefaultValue) {
+          return compiledArgs[compiledArgs.length - 1]!(data)
+        }
+
+        return null
+      }
+    }
 
     // Math functions
     case `add`: {
@@ -471,6 +520,38 @@ function compileFunction(func: Func, isSingleRow: boolean): (data: any) => any {
         return divisor !== 0 ? (a ?? 0) / divisor : null
       }
     }
+    case `date`: {
+      const arg = compiledArgs[0]!
+      return (data) => {
+        const value = arg(data)
+        const dateValue = toDateValue(value)
+        return dateValue ? dateValue.toISOString().slice(0, 10) : null
+      }
+    }
+    case `datetime`: {
+      const arg = compiledArgs[0]!
+      return (data) => {
+        const value = arg(data)
+        const dateValue = toDateValue(value)
+        return dateValue ? dateValue.toISOString() : null
+      }
+    }
+    case `strftime`: {
+      const formatArg = compiledArgs[0]!
+      const sourceArg = compiledArgs[1]!
+      return (data) => {
+        const format = formatArg(data)
+        if (typeof format !== `string`) {
+          return null
+        }
+        const sourceValue = sourceArg(data)
+        const dateValue = toDateValue(sourceValue)
+        if (!dateValue) {
+          return null
+        }
+        return evaluateStrftime(format, dateValue)
+      }
+    }
 
     // Null/undefined checking functions
     case `isUndefined`: {
@@ -491,6 +572,26 @@ function compileFunction(func: Func, isSingleRow: boolean): (data: any) => any {
     default:
       throw new UnknownFunctionError(func.name)
   }
+}
+
+export function isCaseWhenConditionTrue(value: any): boolean {
+  if (value == null || value === false) {
+    return false
+  }
+
+  if (value === true) {
+    return true
+  }
+
+  if (typeof value === `number`) {
+    return value !== 0 && !Number.isNaN(value)
+  }
+
+  if (typeof value === `bigint`) {
+    return value !== 0n
+  }
+
+  return Boolean(value)
 }
 
 /**
@@ -516,6 +617,7 @@ function evaluateLike(
   regexPattern = regexPattern.replace(/%/g, `.*`) // % matches any sequence
   regexPattern = regexPattern.replace(/_/g, `.`) // _ matches any single char
 
-  const regex = new RegExp(`^${regexPattern}$`)
+  // 's' (dotAll flag) makes '.' match all characters including line terminations
+  const regex = new RegExp(`^${regexPattern}$`, 's')
   return regex.test(searchValue)
 }

@@ -1,5 +1,6 @@
 import { beforeEach, describe, expect, it } from 'vitest'
 import { createCollection } from '../../src/collection/index.js'
+import { BTreeIndex } from '../../src/indexes/btree-index'
 
 import { createLiveQueryCollection } from '../../src/query/live-query-collection'
 import {
@@ -12,7 +13,7 @@ import {
   length,
   or,
 } from '../../src/query/builder/functions'
-import { mockSyncCollectionOptions } from '../utils'
+import { mockSyncCollectionOptions, stripVirtualProps } from '../utils'
 
 interface TestItem {
   id: string
@@ -234,6 +235,7 @@ function createTestItemCollection(autoIndex: `off` | `eager` = `off`) {
       getKey: (item) => item.id,
       initialData: testData,
       autoIndex,
+      defaultIndexType: BTreeIndex,
     }),
   )
 }
@@ -600,6 +602,7 @@ describe(`Query Index Optimization`, () => {
       const secondCollection = createCollection<TestItem, string>({
         getKey: (item) => item.id,
         autoIndex: `off`,
+        defaultIndexType: BTreeIndex,
         startSync: true,
         sync: {
           sync: ({ begin, write, commit }) => {
@@ -679,13 +682,14 @@ describe(`Query Index Optimization`, () => {
           ],
         }
 
-        // Should use index optimization for both WHERE clauses
-        // since they each touch only a single source and both sources are indexed
+        // The WHERE clause on the non-nullable (left) side uses its index.
+        // The WHERE clause on the nullable (right) side of the LEFT JOIN is NOT
+        // pushed down to avoid changing join semantics, so the right side does a full scan.
         expectIndexUsage(combinedStats, {
           shouldUseIndex: true,
-          shouldUseFullScan: false,
-          indexCallCount: 2, // Both item.status='active' and other.status='active' can use indexes
-          fullScanCallCount: 0,
+          shouldUseFullScan: true,
+          indexCallCount: 1, // Only item.status='active' uses index (non-nullable side)
+          fullScanCallCount: 1, // other collection does full scan (nullable side)
         })
       } finally {
         tracker1.restore()
@@ -765,7 +769,7 @@ describe(`Query Index Optimization`, () => {
         await liveQuery.stateWhenReady()
 
         // Should have found results where both items are active
-        expect(liveQuery.toArray).toEqual([
+        expect(liveQuery.toArray.map((row) => stripVirtualProps(row))).toEqual([
           { id: `1`, name: `Alice`, otherName: `Other Active Item` },
         ])
 
@@ -894,6 +898,7 @@ describe(`Query Index Optimization`, () => {
       const secondCollection = createCollection<TestItem2, string>({
         getKey: (item) => item.id2,
         autoIndex: `off`,
+        defaultIndexType: BTreeIndex,
         startSync: true,
         sync: {
           sync: ({ begin, write, commit }) => {
@@ -959,7 +964,7 @@ describe(`Query Index Optimization`, () => {
         // Should only include results where both sides match the WHERE condition
         // Charlie and Eve are filtered out because they have no matching 'other' records
         // and the WHERE clause requires other.status = 'active' (can't be NULL)
-        expect(liveQuery.toArray).toEqual([
+        expect(liveQuery.toArray.map((row) => stripVirtualProps(row))).toEqual([
           { id: `1`, name: `Alice`, otherName: `Other Active Item` },
         ])
 
@@ -1078,7 +1083,7 @@ describe(`Query Index Optimization`, () => {
         // Should only include results where both sides match the WHERE condition
         // Charlie and Eve are filtered out because they have no matching 'other' records
         // and the WHERE clause requires other.status = 'active' (can't be NULL)
-        expect(liveQuery.toArray).toEqual([
+        expect(liveQuery.toArray.map((row) => stripVirtualProps(row))).toEqual([
           { id: `1`, name: `Alice`, otherName: `Other Active Item` },
         ])
 
@@ -1173,25 +1178,22 @@ describe(`Query Index Optimization`, () => {
         await liveQuery.stateWhenReady()
 
         // Should include all results from the first collection
-        expect(liveQuery.toArray).toEqual([
+        expect(liveQuery.toArray.map((row) => stripVirtualProps(row))).toEqual([
           { id: `1`, name: `Alice`, otherName: `Other Active Item` },
         ])
 
-        // We should have done a full scan of the right collection
+        // The right collection does a full scan (no index on status)
         expect(tracker2.stats.queriesExecuted).toEqual([
           {
             type: `fullScan`,
           },
         ])
 
-        // We should have done an index lookup on the 1st collection to find active items
+        // In a RIGHT join, the left (from) side is nullable. The WHERE clause
+        // eq(item.status, 'active') is NOT pushed down to avoid changing join
+        // semantics, so the left collection does NOT do an index lookup for status.
+        // It only does the index lookup for the join key (id) used by lazy loading.
         expect(tracker1.stats.queriesExecuted).toEqual([
-          {
-            field: `status`,
-            operation: `eq`,
-            type: `index`,
-            value: `active`,
-          },
           {
             type: `index`,
             operation: `in`,
@@ -1269,7 +1271,7 @@ describe(`Query Index Optimization`, () => {
         await liveQuery.stateWhenReady()
 
         // Should have found results where both items are active
-        expect(liveQuery.toArray).toEqual([
+        expect(liveQuery.toArray.map((row) => stripVirtualProps(row))).toEqual([
           { id: `1`, name: `Alice`, otherName: `Other Active Item` },
         ])
 
@@ -1281,14 +1283,12 @@ describe(`Query Index Optimization`, () => {
           },
         ])
 
-        // We should have done an index lookup on the left collection to find active items
-        // because it has an index on the join key
+        // In a RIGHT join, the left (from) side is nullable. The WHERE clause
+        // eq(item.status, 'active') is NOT pushed down to avoid changing join
+        // semantics, so the left collection does a full scan.
         expect(tracker1.stats.queriesExecuted).toEqual([
           {
-            type: `index`,
-            operation: `eq`,
-            field: `status`,
-            value: `active`,
+            type: `fullScan`,
           },
         ])
       } finally {
@@ -1320,7 +1320,7 @@ describe(`Query Index Optimization`, () => {
       // Should have found limited results
       expect(liveQuery.size).toBe(2)
 
-      expect(liveQuery.toArray).toEqual([
+      expect(liveQuery.toArray.map((row) => stripVirtualProps(row))).toEqual([
         { id: `5`, name: `Eve`, age: 22 },
         { id: `1`, name: `Alice`, age: 25 },
       ])
@@ -1341,7 +1341,7 @@ describe(`Query Index Optimization`, () => {
 
       expect(liveQuery.size).toBe(2)
 
-      expect(liveQuery.toArray).toEqual([
+      expect(liveQuery.toArray.map((row) => stripVirtualProps(row))).toEqual([
         { id: `6`, name: `Dave`, age: 20 },
         { id: `5`, name: `Eve`, age: 22 },
       ])
@@ -1385,7 +1385,7 @@ describe(`Query Index Optimization`, () => {
 
       expect(liveQuery.size).toBe(6)
 
-      expect(liveQuery.toArray).toEqual([
+      expect(liveQuery.toArray.map((row) => stripVirtualProps(row))).toEqual([
         { id: `5`, name: `Eve`, age: 22 },
         { id: `1`, name: `Alice`, age: 25 },
         { id: `4`, name: `Diana`, age: 28 },

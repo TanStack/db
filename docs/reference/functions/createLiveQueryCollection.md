@@ -8,33 +8,33 @@ title: createLiveQueryCollection
 ## Call Signature
 
 ```ts
-function createLiveQueryCollection<TContext, TResult>(query): CollectionForContext<TContext, TResult, {
+function createLiveQueryCollection<TQueryFn, TQuery>(query): CollectionForContext<ExtractContext<TQuery>, RootQueryResult<ExtractContext<TQuery>>, {
 }> & object;
 ```
 
-Defined in: [packages/db/src/query/live-query-collection.ts:115](https://github.com/TanStack/db/blob/main/packages/db/src/query/live-query-collection.ts#L115)
+Defined in: [packages/db/src/query/live-query-collection.ts:128](https://github.com/TanStack/db/blob/main/packages/db/src/query/live-query-collection.ts#L128)
 
 Creates a live query collection directly
 
 ### Type Parameters
 
-#### TContext
+#### TQueryFn
 
-`TContext` *extends* [`Context`](../interfaces/Context.md)
+`TQueryFn` *extends* (`q`) => [`QueryBuilder`](../type-aliases/QueryBuilder.md)\<`any`\>
 
-#### TResult
+#### TQuery
 
-`TResult` *extends* `object` = \{ \[K in string \| number \| symbol\]: (TContext\["result"\] extends object ? any\[any\] : TContext\["hasJoins"\] extends true ? TContext\["schema"\] : TContext\["schema"\]\[TContext\["fromSourceName"\]\])\[K\] \}
+`TQuery` *extends* [`QueryBuilder`](../type-aliases/QueryBuilder.md)\<`any`\> = `ReturnType`\<`TQueryFn`\>
 
 ### Parameters
 
 #### query
 
-(`q`) => [`QueryBuilder`](../type-aliases/QueryBuilder.md)\<`TContext`\>
+`TQueryFn` & `RootQueryFn`\<`TQuery`\>
 
 ### Returns
 
-`CollectionForContext`\<`TContext`, `TResult`, \{
+`CollectionForContext`\<[`ExtractContext`](../type-aliases/ExtractContext.md)\<`TQuery`\>, `RootQueryResult`\<[`ExtractContext`](../type-aliases/ExtractContext.md)\<`TQuery`\>\>, \{
 \}\> & `object`
 
 ### Example
@@ -71,23 +71,23 @@ const searchResults = createLiveQueryCollection({
 ## Call Signature
 
 ```ts
-function createLiveQueryCollection<TContext, TResult, TUtils>(config): CollectionForContext<TContext, TResult, {
+function createLiveQueryCollection<TQuery, TContext, TUtils>(config): CollectionForContext<TContext, RootQueryResult<TContext>, {
 }> & object;
 ```
 
-Defined in: [packages/db/src/query/live-query-collection.ts:125](https://github.com/TanStack/db/blob/main/packages/db/src/query/live-query-collection.ts#L125)
+Defined in: [packages/db/src/query/live-query-collection.ts:141](https://github.com/TanStack/db/blob/main/packages/db/src/query/live-query-collection.ts#L141)
 
 Creates a live query collection directly
 
 ### Type Parameters
 
+#### TQuery
+
+`TQuery` *extends* [`QueryBuilder`](../type-aliases/QueryBuilder.md)\<`any`\>
+
 #### TContext
 
-`TContext` *extends* [`Context`](../interfaces/Context.md)
-
-#### TResult
-
-`TResult` *extends* `object` = \{ \[K in string \| number \| symbol\]: (TContext\["result"\] extends object ? any\[any\] : TContext\["hasJoins"\] extends true ? TContext\["schema"\] : TContext\["schema"\]\[TContext\["fromSourceName"\]\])\[K\] \}
+`TContext` *extends* [`Context`](../interfaces/Context.md) = [`ExtractContext`](../type-aliases/ExtractContext.md)\<`TQuery`\>
 
 #### TUtils
 
@@ -98,11 +98,11 @@ Creates a live query collection directly
 
 #### config
 
-[`LiveQueryCollectionConfig`](../interfaces/LiveQueryCollectionConfig.md)\<`TContext`, `TResult`\> & `object`
+[`LiveQueryCollectionConfig`](../interfaces/LiveQueryCollectionConfig.md)\<`TContext`, `RootQueryResult`\<`TContext`\>\> & `object`
 
 ### Returns
 
-`CollectionForContext`\<`TContext`, `TResult`, \{
+`CollectionForContext`\<`TContext`, `RootQueryResult`\<`TContext`\>, \{
 \}\> & `object`
 
 ### Example

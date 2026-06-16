@@ -5,6 +5,7 @@ import { SchemaValidationError, createCollection } from '@tanstack/db'
 import { describe, expect, it, onTestFinished, vi } from 'vitest'
 import { z } from 'zod'
 import { powerSyncCollectionOptions } from '../src'
+import { TEST_DATABASE_IMPLEMENTATION } from './test-db-implementation'
 import type { StandardSchemaV1 } from '@standard-schema/spec'
 
 const APP_SCHEMA = new Schema({
@@ -16,13 +17,17 @@ const APP_SCHEMA = new Schema({
   }),
 })
 
-describe(`PowerSync Schema Integration`, () => {
+const describePowerSyncSchema = TEST_DATABASE_IMPLEMENTATION
+  ? describe
+  : describe.skip
+
+describePowerSyncSchema(`PowerSync Schema Integration`, () => {
   async function createDatabase() {
     const db = new PowerSyncDatabase({
       database: {
         dbFilename: `test.sqlite`,
         dbLocation: tmpdir(),
-        implementation: { type: `node:sqlite` },
+        implementation: TEST_DATABASE_IMPLEMENTATION,
       },
       schema: APP_SCHEMA,
     })

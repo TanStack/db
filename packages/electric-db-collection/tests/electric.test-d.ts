@@ -17,6 +17,7 @@ import type {
   InsertMutationFnParams,
   UpdateMutationFnParams,
 } from '@tanstack/db'
+import type { OutputWithVirtual } from '../../db/tests/utils'
 
 describe(`Electric collection type resolution tests`, () => {
   // Define test types
@@ -154,13 +155,50 @@ describe(`Electric collection type resolution tests`, () => {
     // but ElectricCollectionUtils extends UtilsRecord which is Record<string, any> (no number index signature).
     // This causes a constraint error instead of a type mismatch error.
     // Instead, we test via type assignment which will show a proper type error if the types don't match.
-    // Currently this shows that todosCollection.utils is typed as UtilsRecord, not ElectricCollectionUtils<TodoType>
     const testTodosUtils: ElectricCollectionUtils<TodoType> =
       todosCollection.utils
 
     expectTypeOf(testTodosUtils.awaitTxId).toBeFunction
 
     // Verify the specific properties that define ElectricCollectionUtils exist and are functions
+    expectTypeOf(todosCollection.utils.awaitTxId).toBeFunction
+    expectTypeOf(todosCollection.utils.awaitMatch).toBeFunction
+  })
+
+  it(`should preserve ElectricCollectionUtils type on collection.utils after createCollection with handlers`, () => {
+    const todoSchema = z.object({
+      id: z.string(),
+      title: z.string(),
+      completed: z.boolean(),
+    })
+
+    type TodoType = z.infer<typeof todoSchema>
+
+    const options = electricCollectionOptions({
+      shapeOptions: {
+        url: `/api/todos`,
+      },
+      schema: todoSchema,
+      getKey: (item) => item.id,
+      onInsert: async () => {
+        return Promise.resolve({ txid: 1 })
+      },
+      onUpdate: async () => {
+        return Promise.resolve({ txid: 1 })
+      },
+      onDelete: async () => {
+        return Promise.resolve({ txid: 1 })
+      },
+    })
+
+    const todosCollection = createCollection(options)
+
+    // After createCollection, utils should be typed as ElectricCollectionUtils<TodoType>
+    // and not widened to UtilsRecord
+    const testUtils: ElectricCollectionUtils<TodoType> = todosCollection.utils
+
+    expectTypeOf(testUtils.awaitTxId).toBeFunction
+    expectTypeOf(testUtils.awaitMatch).toBeFunction
     expectTypeOf(todosCollection.utils.awaitTxId).toBeFunction
     expectTypeOf(todosCollection.utils.awaitMatch).toBeFunction
   })
@@ -195,17 +233,35 @@ describe(`Electric collection type resolution tests`, () => {
       },
     })
 
-    // Verify that the handlers are properly typed
+    // Verify that the handlers are properly typed with ElectricCollectionUtils
     expectTypeOf(options.onInsert).parameters.toEqualTypeOf<
-      [InsertMutationFnParams<ExplicitType>]
+      [
+        InsertMutationFnParams<
+          ExplicitType,
+          string | number,
+          ElectricCollectionUtils<ExplicitType>
+        >,
+      ]
     >()
 
     expectTypeOf(options.onUpdate).parameters.toEqualTypeOf<
-      [UpdateMutationFnParams<ExplicitType>]
+      [
+        UpdateMutationFnParams<
+          ExplicitType,
+          string | number,
+          ElectricCollectionUtils<ExplicitType>
+        >,
+      ]
     >()
 
     expectTypeOf(options.onDelete).parameters.toEqualTypeOf<
-      [DeleteMutationFnParams<ExplicitType>]
+      [
+        DeleteMutationFnParams<
+          ExplicitType,
+          string | number,
+          ElectricCollectionUtils<ExplicitType>
+        >,
+      ]
     >()
   })
 
@@ -279,15 +335,33 @@ describe(`Electric collection type resolution tests`, () => {
       },
     })
 
-    // Verify that the handlers are properly typed
+    // Verify that the handlers are properly typed with ElectricCollectionUtils
     expectTypeOf(options.onDelete).parameters.toEqualTypeOf<
-      [DeleteMutationFnParams<TodoType>]
+      [
+        DeleteMutationFnParams<
+          TodoType,
+          string | number,
+          ElectricCollectionUtils<TodoType>
+        >,
+      ]
     >()
     expectTypeOf(options.onInsert).parameters.toEqualTypeOf<
-      [InsertMutationFnParams<TodoType>]
+      [
+        InsertMutationFnParams<
+          TodoType,
+          string | number,
+          ElectricCollectionUtils<TodoType>
+        >,
+      ]
     >()
     expectTypeOf(options.onUpdate).parameters.toEqualTypeOf<
-      [UpdateMutationFnParams<TodoType>]
+      [
+        UpdateMutationFnParams<
+          TodoType,
+          string | number,
+          ElectricCollectionUtils<TodoType>
+        >,
+      ]
     >()
   })
 
@@ -333,18 +407,22 @@ describe(`Electric collection type resolution tests`, () => {
 
     // Test that the query results have the correct inferred types
     const results = activeUsersQuery.toArray
-    expectTypeOf(results).toEqualTypeOf<
-      Array<{
-        id: string
-        name: string
-        age: number
-        email: string
-        isActive: boolean
-      }>
+    expectTypeOf(results).toMatchTypeOf<
+      Array<
+        OutputWithVirtual<{
+          id: string
+          name: string
+          age: number
+          email: string
+          isActive: boolean
+        }>
+      >
     >()
 
     // Test that the collection itself has the correct type
-    expectTypeOf(usersCollection.toArray).toEqualTypeOf<Array<UserType>>()
+    expectTypeOf(usersCollection.toArray).toMatchTypeOf<
+      Array<OutputWithVirtual<UserType>>
+    >()
 
     // Test that we can access schema-inferred fields in the query with WHERE conditions
     const ageFilterQuery = createLiveQueryCollection({
@@ -360,12 +438,14 @@ describe(`Electric collection type resolution tests`, () => {
     })
 
     const ageFilterResults = ageFilterQuery.toArray
-    expectTypeOf(ageFilterResults).toEqualTypeOf<
-      Array<{
-        id: string
-        name: string
-        age: number
-      }>
+    expectTypeOf(ageFilterResults).toMatchTypeOf<
+      Array<
+        OutputWithVirtual<{
+          id: string
+          name: string
+          age: number
+        }>
+      >
     >()
 
     // Test that the getKey function has the correct parameter type
@@ -421,16 +501,20 @@ describe(`Electric collection type resolution tests`, () => {
     })
 
     const electricResults = electricQuery.toArray
-    expectTypeOf(electricResults).toEqualTypeOf<
-      Array<{
-        id: string
-        name: string
-        age: number
-      }>
+    expectTypeOf(electricResults).toMatchTypeOf<
+      Array<
+        OutputWithVirtual<{
+          id: string
+          name: string
+          age: number
+        }>
+      >
     >()
 
     // Test that direct collection has the correct type
-    expectTypeOf(directCollection.toArray).toEqualTypeOf<Array<UserType>>()
+    expectTypeOf(directCollection.toArray).toMatchTypeOf<
+      Array<OutputWithVirtual<UserType>>
+    >()
 
     // The key insight: electric collection options properly resolve schema types
     // while direct createCollection with schema doesn't work in query builder

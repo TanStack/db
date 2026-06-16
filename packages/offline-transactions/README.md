@@ -5,7 +5,7 @@ Offline-first transaction capabilities for TanStack DB that provides durable per
 ## Features
 
 - **Outbox Pattern**: Persist mutations before dispatch for zero data loss
-- **Automatic Retry**: Exponential backoff with jitter for failed transactions
+- **Automatic Retry**: Configurable retry behavior with exponential backoff + jitter by default
 - **Multi-tab Coordination**: Leader election ensures safe storage access
 - **FIFO Sequential Processing**: Transactions execute one at a time in creation order
 - **Flexible Storage**: IndexedDB with localStorage fallback
@@ -13,15 +13,46 @@ Offline-first transaction capabilities for TanStack DB that provides durable per
 
 ## Installation
 
+### Web
+
 ```bash
 npm install @tanstack/offline-transactions
 ```
 
+### React Native / Expo
+
+```bash
+npm install @tanstack/offline-transactions @react-native-community/netinfo
+```
+
+The React Native implementation requires the `@react-native-community/netinfo` peer dependency for network connectivity detection.
+
+## Platform Support
+
+This package provides platform-specific implementations for web and React Native environments:
+
+- **Web**: Uses browser APIs (`window.online/offline` events, `document.visibilitychange`)
+- **React Native**: Uses React Native primitives (`@react-native-community/netinfo` for network status, `AppState` for foreground/background detection)
+
 ## Quick Start
+
+Using offline transactions on web and React Native/Expo is identical except for the import. Choose the appropriate import based on your target platform:
+
+**Web:**
 
 ```typescript
 import { startOfflineExecutor } from '@tanstack/offline-transactions'
+```
 
+**React Native / Expo:**
+
+```typescript
+import { startOfflineExecutor } from '@tanstack/offline-transactions/react-native'
+```
+
+**Usage (same for both platforms):**
+
+```typescript
 // Setup offline executor
 const offline = startOfflineExecutor({
   collections: { todos: todoCollection },
@@ -98,6 +129,7 @@ interface OfflineConfig {
   beforeRetry?: (transactions: OfflineTransaction[]) => OfflineTransaction[]
   onUnknownMutationFn?: (name: string, tx: OfflineTransaction) => void
   onLeadershipChange?: (isLeader: boolean) => void
+  onlineDetector?: OnlineDetector
 }
 ```
 
@@ -113,7 +145,6 @@ interface OfflineConfig {
 - `waitForTransactionCompletion(id)` - Wait for a specific transaction to complete
 - `removeFromOutbox(id)` - Manually remove transaction from outbox
 - `peekOutbox()` - View all pending transactions
-- `notifyOnline()` - Manually trigger retry execution
 - `dispose()` - Clean up resources
 
 ### Error Handling
@@ -148,21 +179,6 @@ import {
 const executor = startOfflineExecutor({
   // Use custom storage
   storage: new IndexedDBAdapter('my-app', 'transactions'),
-  // ... other config
-})
-```
-
-### Custom Retry Policy
-
-```typescript
-const executor = startOfflineExecutor({
-  maxConcurrency: 5,
-  jitter: true,
-  beforeRetry: (transactions) => {
-    // Filter out old transactions
-    const cutoff = Date.now() - 24 * 60 * 60 * 1000 // 24 hours
-    return transactions.filter((tx) => tx.createdAt.getTime() > cutoff)
-  },
   // ... other config
 })
 ```
@@ -207,12 +223,21 @@ tx.mutate(() => todoCollection.insert({ id: '1', text: 'Buy milk' }))
 await tx.commit() // Works offline!
 ```
 
-## Browser Support
+## Platform Support
+
+### Web Browsers
 
 - **IndexedDB**: Modern browsers (primary storage)
 - **localStorage**: Fallback for limited environments
 - **Web Locks API**: Chrome 69+, Firefox 96+ (preferred leader election)
 - **BroadcastChannel**: All modern browsers (fallback leader election)
+
+### React Native
+
+- **React Native**: 0.60+ (tested with latest versions)
+- **Expo**: SDK 40+ (tested with latest versions)
+- **Required peer dependency**: `@react-native-community/netinfo` for network connectivity detection
+- **Storage**: Uses AsyncStorage or custom storage adapters
 
 ## License
 

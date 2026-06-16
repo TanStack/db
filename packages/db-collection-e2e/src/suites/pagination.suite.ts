@@ -264,6 +264,110 @@ export function createPaginationTestSuite(
         await query2.cleanup()
       })
 
+      it(`should load distinct windows across multiple live queries with multi-column orderBy`, async () => {
+        const config = await getConfig()
+        const usersCollection = config.collections.onDemand.users
+
+        const page1 = createLiveQueryCollection((q) =>
+          q
+            .from({ user: usersCollection })
+            .orderBy(({ user }) => user.isActive, `desc`)
+            .orderBy(({ user }) => user.age, `asc`)
+            .limit(10)
+            .offset(0),
+        )
+
+        const page2 = createLiveQueryCollection((q) =>
+          q
+            .from({ user: usersCollection })
+            .orderBy(({ user }) => user.isActive, `desc`)
+            .orderBy(({ user }) => user.age, `asc`)
+            .limit(10)
+            .offset(10),
+        )
+
+        await page1.preload()
+        await waitForQueryData(page1, { minSize: 10 })
+        await page2.preload()
+        await waitForQueryData(page2, { minSize: 10 })
+
+        const page1Results = Array.from(page1.state.values())
+        const page2Results = Array.from(page2.state.values())
+
+        expect(page1Results).toHaveLength(10)
+        expect(page2Results).toHaveLength(10)
+
+        const page1Ids = new Set(page1Results.map((user) => user.id))
+        for (const user of page2Results) {
+          expect(page1Ids.has(user.id)).toBe(false)
+        }
+
+        for (const page of [page1Results, page2Results]) {
+          for (let i = 1; i < page.length; i++) {
+            const prev = page[i - 1]!
+            const curr = page[i]!
+
+            if (prev.isActive !== curr.isActive) {
+              expect(prev.isActive ? 1 : 0).toBeGreaterThanOrEqual(
+                curr.isActive ? 1 : 0,
+              )
+            } else {
+              expect(prev.age).toBeLessThanOrEqual(curr.age)
+            }
+          }
+        }
+
+        await page1.cleanup()
+        await page2.cleanup()
+      })
+
+      it(`should allow paging a second live query without affecting the first`, async () => {
+        const config = await getConfig()
+        const usersCollection = config.collections.onDemand.users
+
+        const baseQuery = createLiveQueryCollection((q) =>
+          q
+            .from({ user: usersCollection })
+            .orderBy(({ user }) => user.isActive, `desc`)
+            .orderBy(({ user }) => user.age, `asc`)
+            .limit(10)
+            .offset(0),
+        )
+
+        const pagedQuery = createLiveQueryCollection((q) =>
+          q
+            .from({ user: usersCollection })
+            .orderBy(({ user }) => user.isActive, `desc`)
+            .orderBy(({ user }) => user.age, `asc`)
+            .limit(10)
+            .offset(0),
+        )
+
+        await baseQuery.preload()
+        await waitForQueryData(baseQuery, { minSize: 10 })
+        await pagedQuery.preload()
+        await waitForQueryData(pagedQuery, { minSize: 10 })
+
+        const baseIds = new Set(
+          Array.from(baseQuery.state.values()).map((user) => user.id),
+        )
+
+        const moveResult = pagedQuery.utils.setWindow({ offset: 10, limit: 10 })
+        if (moveResult !== true) {
+          await moveResult
+        }
+        await waitForQueryData(pagedQuery, { minSize: 10 })
+
+        const pagedResults = Array.from(pagedQuery.state.values())
+        expect(pagedResults).toHaveLength(10)
+        for (const user of pagedResults) {
+          expect(baseIds.has(user.id)).toBe(false)
+        }
+
+        await baseQuery.cleanup()
+        await pagedQuery.cleanup()
+      })
+
       it(`should handle multi-column orderBy with duplicate values in first column`, async () => {
         const config = await getConfig()
         const usersCollection = config.collections.onDemand.users

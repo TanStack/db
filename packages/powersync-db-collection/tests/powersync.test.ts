@@ -16,6 +16,7 @@ import {
 import { describe, expect, it, onTestFinished, vi } from 'vitest'
 import { powerSyncCollectionOptions } from '../src'
 import { PowerSyncTransactor } from '../src/PowerSyncTransactor'
+import { TEST_DATABASE_IMPLEMENTATION } from './test-db-implementation'
 import type { AbstractPowerSyncDatabase } from '@powersync/node'
 
 const APP_SCHEMA = new Schema({
@@ -35,13 +36,17 @@ const APP_SCHEMA = new Schema({
   ),
 })
 
-describe(`PowerSync Integration`, () => {
+const describePowerSync = TEST_DATABASE_IMPLEMENTATION
+  ? describe
+  : describe.skip
+
+describePowerSync(`PowerSync Integration`, () => {
   async function createDatabase() {
     const db = new PowerSyncDatabase({
       database: {
         dbFilename: `test-${randomUUID()}.sqlite`,
         dbLocation: tmpdir(),
-        implementation: { type: `node:sqlite` },
+        implementation: TEST_DATABASE_IMPLEMENTATION,
       },
       schema: APP_SCHEMA,
     })
@@ -203,7 +208,9 @@ describe(`PowerSync Integration`, () => {
       const _crudEntries = await db.getAll(`
         SELECT * FROM ps_crud ORDER BY id`)
 
-      const crudEntries = _crudEntries.map((r) => CrudEntry.fromRow(r))
+      const crudEntries = _crudEntries.map((r) =>
+        CrudEntry.fromRow(r as Parameters<typeof CrudEntry.fromRow>[0]),
+      )
 
       expect(crudEntries.length).toBe(6)
       // We can only group transactions for similar operations
@@ -250,7 +257,9 @@ describe(`PowerSync Integration`, () => {
       // There should be a crud entries for this
       const _crudEntries = await db.getAll(`
         SELECT * FROM ps_crud ORDER BY id`)
-      const crudEntries = _crudEntries.map((r) => CrudEntry.fromRow(r))
+      const crudEntries = _crudEntries.map((r) =>
+        CrudEntry.fromRow(r as Parameters<typeof CrudEntry.fromRow>[0]),
+      )
 
       const lastTransactionId =
         crudEntries[crudEntries.length - 1]?.transactionId
@@ -312,7 +321,9 @@ describe(`PowerSync Integration`, () => {
       // There should be a crud entries for this
       const _crudEntries = await db.getAll(`
         SELECT * FROM ps_crud ORDER BY id`)
-      const crudEntries = _crudEntries.map((r) => CrudEntry.fromRow(r))
+      const crudEntries = _crudEntries.map((r) =>
+        CrudEntry.fromRow(r as Parameters<typeof CrudEntry.fromRow>[0]),
+      )
 
       const lastTransactionId =
         crudEntries[crudEntries.length - 1]?.transactionId
@@ -464,6 +475,7 @@ describe(`PowerSync Integration`, () => {
       liveDocuments.subscribeChanges((changes) => {
         changes
           .map((change) => change.value.name)
+          .filter((name): name is string => name !== undefined)
           .forEach((change) => bookNames.add(change))
       })
 

@@ -18,6 +18,28 @@ const ARRAY_MARKER = randomHash()
 const MAP_MARKER = randomHash()
 const SET_MARKER = randomHash()
 const UINT8ARRAY_MARKER = randomHash()
+const TEMPORAL_MARKER = randomHash()
+
+const temporalTypes = new Set([
+  `Temporal.Duration`,
+  `Temporal.Instant`,
+  `Temporal.PlainDate`,
+  `Temporal.PlainDateTime`,
+  `Temporal.PlainMonthDay`,
+  `Temporal.PlainTime`,
+  `Temporal.PlainYearMonth`,
+  `Temporal.ZonedDateTime`,
+])
+
+interface TemporalLike {
+  [Symbol.toStringTag]: string
+  toString: () => string
+}
+
+function isTemporal(input: object): input is TemporalLike {
+  const tag = (input as Record<symbol, unknown>)[Symbol.toStringTag]
+  return typeof tag === `string` && temporalTypes.has(tag)
+}
 
 // Maximum byte length for Uint8Arrays to hash by content instead of reference
 // Arrays smaller than this will be hashed by content, allowing proper equality comparisons
@@ -59,6 +81,8 @@ function hashObject(input: object): number {
   } else if (input instanceof File) {
     // Files are always hashed by reference due to their potentially large size
     return cachedReferenceHash(input)
+  } else if (isTemporal(input)) {
+    valueHash = hashTemporal(input)
   } else {
     let plainObjectInput = input
     let marker = OBJECT_MARKER
@@ -100,6 +124,14 @@ function hashUint8Array(input: Uint8Array): number {
   for (let i = 0; i < input.byteLength; i++) {
     hasher.writeByte(input[i]!)
   }
+  return hasher.digest()
+}
+
+function hashTemporal(input: TemporalLike): number {
+  const hasher = new MurmurHashStream()
+  hasher.update(TEMPORAL_MARKER)
+  hasher.update(input[Symbol.toStringTag])
+  hasher.update(input.toString())
   return hasher.digest()
 }
 

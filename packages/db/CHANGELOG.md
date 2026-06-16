@@ -1,5 +1,344 @@
 # @tanstack/db
 
+## 0.6.8
+
+### Patch Changes
+
+- Added the `materialize()` helper for includes subqueries. Multi-row subqueries produce an `Array<T>` snapshot on the parent row (equivalent to `toArray()`), and `findOne()` subqueries produce a single `T | undefined` value. The snapshot updates reactively as the underlying children change. ([#1569](https://github.com/TanStack/db/pull/1569))
+
+## 0.6.7
+
+### Patch Changes
+
+- Clarify documentation for caseWhen, coalesce, manual transactions, and multi-endpoint Query Collection behavior. Add utility function categorization and fix reference index ordering. ([#1544](https://github.com/TanStack/db/pull/1544))
+
+- Fix stale optimistic rows persisting when sync confirms a different server-generated key. Previously, direct transactions (from `collection.insert()` etc.) had their optimistic rows exempted from stale-row cleanup, which prevented temp-key rows from being removed when the server returned a different primary key. ([#1547](https://github.com/TanStack/db/pull/1547))
+
+## 0.6.6
+
+### Patch Changes
+
+- Added the `caseWhen` query operator for scalar conditional expressions and conditional select projections with guarded includes. ([#1536](https://github.com/TanStack/db/pull/1536))
+  Added `unionAll()` support to combine independent sources or built query branches in a single query.
+
+## 0.6.5
+
+### Patch Changes
+
+- fix: pass child where clauses to loadSubset in includes ([#1471](https://github.com/TanStack/db/pull/1471))
+
+  Pure-child WHERE clauses on includes subqueries (e.g., `.where(({ item }) => eq(item.status, 'active'))`) are now passed through to the child collection's `loadSubset`/`queryFn`, enabling server-side filtering. Previously only the correlation filter reached the sync layer; additional child filters were applied client-side only.
+
+- fix: lazy load includes child collections in on-demand sync mode ([#1471](https://github.com/TanStack/db/pull/1471))
+
+  Includes child collections now use the same lazy loading mechanism as regular joins. When a query uses includes with a correlation WHERE clause (e.g., `.where(({ item }) => eq(item.rootId, r.id))`), only matching child rows are loaded on-demand via `requestSnapshot({ where: inArray(field, keys) })` instead of loading all data upfront. This ensures the sync layer's `queryFn` receives the correlation filter in `loadSubsetOptions`, enabling efficient server-side filtering.
+
+## 0.6.4
+
+### Patch Changes
+
+- Add includes (hierarchical data) documentation to all framework SKILL.md files and fix inaccurate toArray scalar select constraint in db-core/live-queries skill. ([#1361](https://github.com/TanStack/db/pull/1361))
+
+## 0.6.3
+
+### Patch Changes
+
+- Fix nested `toArray()` includes not propagating changes at depth 3+. When a query used nested includes like `toArray(runs) → toArray(texts) → concat(toArray(textDeltas))`, changes to the deepest level (e.g., inserting a textDelta) were silently lost because `flushIncludesState` only drained one level of nested buffers. Also throw a clear error when `toArray()` or `concat(toArray())` is used inside expressions like `coalesce()`, instead of silently producing incorrect results. ([#1457](https://github.com/TanStack/db/pull/1457))
+
+- fix: orderBy + limit queries crash when no index exists ([#1437](https://github.com/TanStack/db/pull/1437))
+
+  When auto-indexing is disabled (the default), queries with `orderBy` and `limit` where the limit exceeds the available data would crash with "Ordered snapshot was requested but no index was found". The on-demand loader now correctly skips cursor-based loading when no index is available.
+
+## 0.6.2
+
+### Patch Changes
+
+- Deduplicate and filter null join keys in lazy join subset queries. Previously, when multiple rows referenced the same foreign key or had null foreign keys, the full unfiltered array was passed to `inArray()`, producing bloated `ANY()` SQL params with repeated IDs and NULLs. ([#1448](https://github.com/TanStack/db/pull/1448))
+
+- fix: default getKey on live query collections fails when used as a source in chained collections ([#1432](https://github.com/TanStack/db/pull/1432))
+
+  The default WeakMap-based getKey breaks when enriched change values (with virtual props like $synced, $origin, $key) are passed through chained live query collections. The enriched objects are new references not found in the WeakMap, causing all items to resolve to key `undefined` and collapse into a single item. Falls back to `item.$key` when the WeakMap lookup misses.
+
+## 0.6.1
+
+### Patch Changes
+
+- Update all SKILL.md files to v0.6.0 with new documentation for persistence, virtual properties, queryOnce, createEffect, includes, indexing, and sync metadata. Add tanstack-intent keyword to all packages with skills. ([#1421](https://github.com/TanStack/db/pull/1421))
+
+## 0.6.0
+
+### Minor Changes
+
+- Make indexing explicit with two index types for different use cases ([#1353](https://github.com/TanStack/db/pull/1353))
+
+  **Breaking Changes:**
+  - `autoIndex` now defaults to `off` instead of `eager`
+  - `BTreeIndex` is no longer exported from `@tanstack/db` main entry point
+  - To use `createIndex()` or `autoIndex: 'eager'`, you must set `defaultIndexType` on the collection
+
+  **Changes:**
+  - New `@tanstack/db/indexing` entry point for tree-shakeable indexing
+  - **BasicIndex** - Lightweight index using Map + sorted Array for both equality and range queries (`eq`, `in`, `gt`, `gte`, `lt`, `lte`). O(n) updates but fast reads.
+  - **BTreeIndex** - Full-featured index with O(log n) updates and sorted iteration for ORDER BY optimization on large collections (10k+ items)
+  - Dev mode suggestions (ON by default) warn when indexes would help
+
+  **Migration:**
+
+  If you were relying on auto-indexing, set `defaultIndexType` on your collections:
+  1. **Lightweight indexing** (good for most use cases):
+
+  ```ts
+  import { BasicIndex } from '@tanstack/db/indexing'
+
+  const collection = createCollection({
+    defaultIndexType: BasicIndex,
+    autoIndex: 'eager',
+    // ...
+  })
+  ```
+
+  2. **Full BTree indexing** (for ORDER BY optimization on large collections):
+
+  ```ts
+  import { BTreeIndex } from '@tanstack/db/indexing'
+
+  const collection = createCollection({
+    defaultIndexType: BTreeIndex,
+    autoIndex: 'eager',
+    // ...
+  })
+  ```
+
+  3. **Per-index explicit type** (mix index types):
+
+  ```ts
+  import { BasicIndex, BTreeIndex } from '@tanstack/db/indexing'
+
+  const collection = createCollection({
+    defaultIndexType: BasicIndex, // Default for createIndex()
+    // ...
+  })
+
+  // Override for specific indexes
+  collection.createIndex((row) => row.date, { indexType: BTreeIndex })
+  ```
+
+  **Bundle Size Impact:**
+  - No indexing: ~30% smaller bundle
+  - BasicIndex: ~5 KB (~1.3 KB gzipped)
+  - BTreeIndex: ~33 KB (~7.8 KB gzipped)
+
+### Patch Changes
+
+- Fix BTree index receiving the wrong comparator when a query uses multiple `orderBy` columns. The multi-column array comparator was passed to `ensureIndexForField` to create a single-column index, causing the BTree to treat all indexed values as equal. This collapsed the index to a single entry, making `takeFromStart()` return at most 1 key and breaking live query subscriptions that relied on the index for pagination (e.g. `useLiveInfiniteQuery` with `.orderBy(col1).orderBy(col2).limit(n)`). The fix passes a proper single-column comparator built from the first `orderBy` column's compare options. ([#1401](https://github.com/TanStack/db/pull/1401))
+
+- fix(db): preserve null in coalesce() return type when no guaranteed non-null arg is present ([#1342](https://github.com/TanStack/db/pull/1342))
+
+  `coalesce()` was typed as returning `BasicExpression<any>`, losing all type information. The signature now infers types from all arguments via tuple generics, returns the union of non-null arg types, and only removes nullability when at least one argument is statically guaranteed non-null.
+
+- fix(db): treat objects with `Symbol.toStringTag` as leaf values in `IsPlainObject` ([#1373](https://github.com/TanStack/db/pull/1373))
+
+  Temporal types (e.g. `Temporal.PlainDate`, `Temporal.ZonedDateTime`) have `Symbol.toStringTag` set to a string. Previously, `IsPlainObject` would return `true` for these types because they are objects and not in the `JsBuiltIns` union. This caused the `Ref<T>` mapped type to recursively walk Temporal methods, mangling them to `{}`.
+
+  The fix adds a `T extends { readonly [Symbol.toStringTag]: string }` check before returning `true`, causing all class instances with `Symbol.toStringTag` (Temporal types, etc.) to be treated as leaf values with their types fully preserved.
+
+  Fixes #1372
+
+- Fix Temporal objects breaking live query updates when used with joins. Temporal objects (e.g. `Temporal.PlainDate`) have no enumerable properties, so the structural hash function produced identical hashes for all Temporal values, causing join index updates to be silently swallowed. Also add Temporal support to value normalization for join key matching and to the comparator for correct sort ordering. ([#1370](https://github.com/TanStack/db/pull/1370))
+
+- Fix `loadSubset` dedupe follow-up edge cases and add regression coverage. ([#1352](https://github.com/TanStack/db/pull/1352))
+
+- fix: Optimized unmount performance by batching cleanup tasks in a central queue. ([#1326](https://github.com/TanStack/db/pull/1326))
+
+- fix: support aggregates (e.g. count) in child/includes subqueries with per-parent scoping ([#1294](https://github.com/TanStack/db/pull/1294))
+
+- feat: support parent-referencing WHERE filters in includes child queries ([#1294](https://github.com/TanStack/db/pull/1294))
+
+- feat: support for subqueries for including hierarchical data in live queries ([#1294](https://github.com/TanStack/db/pull/1294))
+
+- feat: add `toArray()` wrapper for includes subqueries to materialize child results as plain arrays instead of live Collections ([#1294](https://github.com/TanStack/db/pull/1294))
+
+- fix: prevent stale query refreshes from overwriting optimistic offline changes on reconnect ([#1390](https://github.com/TanStack/db/pull/1390))
+
+  When reconnecting with pending offline transactions, query-backed collections now defer processing query refreshes until queued writes finish replaying, avoiding temporary reverts to stale server data.
+
+- fix(persistence): harden persisted startup, truncate metadata semantics, and resume identity matching ([#1380](https://github.com/TanStack/db/pull/1380))
+  - Restore persisted wrapper `markReady` fallback behavior so startup failures do not leave collections stuck in loading state
+  - Replace load cancellation reference identity tracking with deterministic load keys for `loadSubset` / `unloadSubset`
+  - Document intentional truncate behavior where collection-scoped metadata writes are preserved across truncate transactions
+  - Tighten SQLite `applied_tx` migration handling to only ignore duplicate-column add errors
+  - Stabilize Electric shape identity serialization so persisted resume compatibility does not depend on object key insertion order
+
+- Implement virtual properties end-to-end, including live query behavior and ([#1213](https://github.com/TanStack/db/pull/1213))
+  typing support for virtual metadata on rows.
+
+- feat(persistence): add SQLite-based offline persistence for collections ([#1358](https://github.com/TanStack/db/pull/1358))
+
+  Adds a new persistence layer that durably stores collection data in SQLite, enabling applications to survive page reloads and app restarts across browser, Node, mobile, desktop, and edge runtimes.
+
+  **Core persistence (`@tanstack/db-sqlite-persistence-core`)**
+  - New package providing the shared SQLite persistence runtime: hydration, streaming, transaction tracking, and applied-tx pruning
+  - SQLite core adapter with full query compilation, index management, and schema migration support
+  - Portable conformance test contracts for runtime-specific adapters
+
+  **Browser (`@tanstack/browser-db-sqlite-persistence`)**
+  - New package for browser persistence via wa-sqlite backed by OPFS
+  - Single-tab persistence with OPFS-based SQLite storage
+  - `BrowserCollectionCoordinator` for multi-tab leader-election and cross-tab sync
+
+  **Cloudflare Durable Objects (`@tanstack/cloudflare-durable-objects-db-sqlite-persistence`)**
+  - New package for SQLite persistence in Cloudflare Durable Objects runtimes
+
+  **Node (`@tanstack/node-db-sqlite-persistence`)**
+  - New package for Node persistence via SQLite
+
+  **Electron (`@tanstack/electron-db-sqlite-persistence`)**
+  - New package providing Electron main and renderer persistence bridge helpers
+
+  **Expo (`@tanstack/expo-db-sqlite-persistence`)**
+  - New package for Expo persistence via `expo-sqlite`
+
+  **React Native (`@tanstack/react-native-db-sqlite-persistence`)**
+  - New package for React Native persistence via op-sqlite
+  - Adapter with transaction deadlock prevention and runtime parity coverage
+
+  **Capacitor (`@tanstack/capacitor-db-sqlite-persistence`)**
+  - New package for Capacitor persistence via `@capacitor-community/sqlite`
+
+  **Tauri (`@tanstack/tauri-db-sqlite-persistence`)**
+  - New package for Tauri persistence via `@tauri-apps/plugin-sql`
+
+- Updated dependencies [[`bb09eb1`](https://github.com/TanStack/db/commit/bb09eb1eecbf680bb95a0bb08639f337e9982043)]:
+  - @tanstack/db-ivm@0.1.18
+
+## 0.5.33
+
+### Patch Changes
+
+- Add `createEffect` API for reactive delta-driven effects and `useLiveQueryEffect` React hook. ([#1221](https://github.com/TanStack/db/pull/1221))
+
+  `createEffect` attaches callbacks to a live query's delta stream — firing `onEnter`, `onExit`, and `onUpdate` for row-level query-result transitions and `onBatch` for the full delta batch from each graph run — without materialising the full result set. Supports `skipInitial`, `orderBy` + `limit` (top-K window), joins, lazy loading, transaction coalescing, async disposal with `AbortSignal`, and `onSourceError` / `onError` callbacks.
+
+  `useLiveQueryEffect` is the React hook wrapper that manages the effect lifecycle (create on mount, dispose on unmount, recreate on dependency change).
+
+## 0.5.32
+
+### Patch Changes
+
+- fix(db): use `Ref<T, Nullable>` brand instead of `Ref<T> | undefined` for nullable join refs in declarative select ([#1262](https://github.com/TanStack/db/pull/1262))
+
+  The declarative `select()` callback receives proxy objects that record property accesses. These proxies are always truthy at build time, but nullable join sides (left/right/full) were typed as `Ref<T> | undefined`, misleading users into using `?.` and `??` operators that have no effect at runtime. Nullable join refs are now typed as `Ref<T, true>`, which allows direct property access without optional chaining while correctly producing `T | undefined` in the result type.
+
+- Fix unbounded WHERE expression growth in `DeduplicatedLoadSubset` when loading all data after accumulating specific predicates. The deduplication layer now correctly tracks the original request predicate (e.g., `where: undefined` for "load all") instead of the optimized difference query sent to the backend, ensuring `hasLoadedAllData` is properly set and subsequent requests are deduplicated. ([#1348](https://github.com/TanStack/db/pull/1348))
+
+- fix(db): throw error when fn.select() is used with groupBy() ([#1324](https://github.com/TanStack/db/pull/1324))
+
+- Add `queryOnce` helper for one-shot query execution, including `findOne()` support and optional QueryBuilder configs. ([#1211](https://github.com/TanStack/db/pull/1211))
+
+## 0.5.31
+
+### Patch Changes
+
+- Add Intent agent skills (SKILL.md files) to guide AI coding agents. Include skills for core DB concepts, all 5 framework bindings, meta-framework integration, and offline transactions. Also add `export * from '@tanstack/db'` to angular-db for consistency with other framework packages. ([#1330](https://github.com/TanStack/db/pull/1330))
+
+## 0.5.30
+
+### Patch Changes
+
+- Support bare boolean column references in `where()` and `having()` clauses. Previously, filtering on a boolean column required `eq(col.active, true)`. Now you can write `.where(({ u }) => u.active)` and `.where(({ u }) => not(u.active))` directly. ([#1304](https://github.com/TanStack/db/pull/1304))
+
+## 0.5.29
+
+### Patch Changes
+
+- fix: avoid DuplicateKeySyncError in join live queries when custom getKey only considers the identity of one of the joined collections ([#1290](https://github.com/TanStack/db/pull/1290))
+
+- fix: support aggregates nested inside expressions (e.g. `coalesce(count(...), 0)`) ([#1274](https://github.com/TanStack/db/pull/1274))
+
+## 0.5.28
+
+### Patch Changes
+
+- Fix isNull predicate causing LiveQuery to never become ready when offline. Reorder predicate checks in `isWhereSubsetInternal` so OR superset handling runs before AND subset decomposition, allowing `and(eq, isNull)` to match structurally equal disjuncts. Also separate `forceDisconnectAndRefresh` error handling into its own try-catch with correct error attribution. ([#1275](https://github.com/TanStack/db/pull/1275))
+
+## 0.5.27
+
+### Patch Changes
+
+- fix(db): don't push WHERE clauses to nullable side of outer joins ([#1254](https://github.com/TanStack/db/pull/1254))
+
+  The query optimizer incorrectly pushed single-source WHERE clauses into subqueries and collection index optimization for the nullable side of outer joins. This pre-filtered the data before the join, converting rows that should have been excluded by the WHERE into unmatched outer-join rows that incorrectly survived the residual filter.
+
+- Fixed `acceptMutations` not persisting data in local-only collections with manual transactions. The mutation filter was comparing against a stale `null` collection reference instead of using the collection ID, causing all mutations to be silently dropped after the transaction's `mutationFn` resolved. ([#1253](https://github.com/TanStack/db/pull/1253))
+
+- Fix like/ilike `%` and `_` not matching newline characters ([#1263](https://github.com/TanStack/db/pull/1263))
+
+- Make type of collection utils more precise for localOnly, PowerSync, Trailbase, and Electric collections ([#1236](https://github.com/TanStack/db/pull/1236))
+
+## 0.5.26
+
+### Patch Changes
+
+- fix: export types used in public API signatures for declaration emit compatibility ([#1231](https://github.com/TanStack/db/pull/1231))
+
+  Types like `SchemaFromSource`, `MergeContextWithJoinType`, `WithResult`, `ResultTypeFromSelect`, and others
+  are used in the public method signatures of `BaseQueryBuilder` (e.g. `from()`, `join()`, `select()`) but
+  were not re-exported from the package's public API. This caused TypeScript error TS2742 when consumers used
+  `declaration: true` in their tsconfig, as TypeScript could not name the inferred types in generated `.d.ts` files.
+
+  Fixes #1012
+
+- Fix `useLiveInfiniteQuery` peek-ahead detection for `hasNextPage`. The initial query now correctly requests `pageSize + 1` items to detect whether additional pages exist, matching the behavior of subsequent page loads. ([#1209](https://github.com/TanStack/db/pull/1209))
+
+  Fix async on-demand pagination by ensuring the graph callback fires at least once even when there is no pending graph work, so that `loadMoreIfNeeded` is triggered after `setWindow()` increases the limit.
+
+- Fix `eq()` with Date objects in join conditions and `inArray()` with Date values in WHERE clauses by normalizing values via `normalizeValue` (#934) ([#1229](https://github.com/TanStack/db/pull/1229))
+
+## 0.5.25
+
+### Patch Changes
+
+- Fixed infinite loop in `BTreeIndex.takeInternal` when indexed values are `undefined`. ([#1198](https://github.com/TanStack/db/pull/1198))
+
+  The BTree uses `undefined` as a special parameter meaning "start from beginning/end", which caused an infinite loop when the actual indexed value was `undefined`.
+
+  Added `takeFromStart` and `takeReversedFromEnd` methods to explicitly start from the beginning/end, and introduced a sentinel value for storing `undefined` in the BTree.
+
+- Fix `isReady` tracking for on-demand live queries without orderBy. Previously, non-ordered live queries using `syncMode: 'on-demand'` were incorrectly marked as ready before data finished loading. Also fix `preload()` promises hanging when cleanup occurs before the collection becomes ready. Additionally, fix concurrent live queries subscribing to the same source collection - each now independently tracks loading state. ([#1192](https://github.com/TanStack/db/pull/1192))
+
+## 0.5.24
+
+### Patch Changes
+
+- Fix `$selected` namespace availability in `orderBy`, `having`, and `fn.having` when using `fn.select`. Previously, the `$selected` namespace was only available when using regular `.select()`, not functional `fn.select()`. ([#1183](https://github.com/TanStack/db/pull/1183))
+
+## 0.5.23
+
+### Patch Changes
+
+- Fix bug that caused the WHERE clause of a subquery not to be passed to the `loadSubset` function ([#1097](https://github.com/TanStack/db/pull/1097))
+
+## 0.5.22
+
+### Patch Changes
+
+- Fix `gcTime: Infinity` causing immediate garbage collection instead of disabling GC. JavaScript's `setTimeout` coerces `Infinity` to `0` via ToInt32, so we now explicitly check for non-finite values. ([#1135](https://github.com/TanStack/db/pull/1135))
+
+## 0.5.21
+
+### Patch Changes
+
+- Clarify queueStrategy error handling behavior in documentation. Changed "guaranteed to persist" to "guaranteed to be attempted" and added explicit documentation about how failed mutations are handled (not retried, queue continues). Added new Retry Behavior section with example code for implementing custom retry logic. ([#1107](https://github.com/TanStack/db/pull/1107))
+
+- Improve DuplicateKeySyncError message when using `.distinct()` with custom `getKey`. The error now explains that `.distinct()` deduplicates by the entire selected object, and provides actionable guidance to fix the issue. ([#1119](https://github.com/TanStack/db/pull/1119))
+
+- Fix syncedData not updating when manual write operations (writeUpsert, writeInsert, etc.) are called after async operations in mutation handlers. Previously, the sync transaction would be blocked by the persisting user transaction, leaving syncedData stale until the next sync cycle. ([#1130](https://github.com/TanStack/db/pull/1130))
+
+- Add string support to `min()` and `max()` aggregate functions. These functions now work with strings using lexicographic comparison, matching standard SQL behavior. ([#1120](https://github.com/TanStack/db/pull/1120))
+
+- Updated dependencies [[`bdf9405`](https://github.com/TanStack/db/commit/bdf94059e7ab98b5181e0df7d8d25cd1dbb5ae58)]:
+  - @tanstack/db-ivm@0.1.17
+
 ## 0.5.20
 
 ### Patch Changes

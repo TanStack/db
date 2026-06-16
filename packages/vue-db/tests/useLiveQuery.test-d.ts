@@ -7,6 +7,7 @@ import {
   liveQueryCollectionOptions,
 } from '../../db/src/query/index'
 import { useLiveQuery } from '../src/useLiveQuery'
+import type { OutputWithVirtual } from '../../db/tests/utils'
 import type { SingleResult } from '../../db/src/types'
 
 type Person = {
@@ -36,7 +37,9 @@ describe(`useLiveQuery type assertions`, () => {
     )
 
     // BUG: Currently returns ComputedRef<Array<Person>> but should be ComputedRef<Person | undefined>
-    expectTypeOf(data.value).toEqualTypeOf<Person | undefined>()
+    expectTypeOf(data.value).toMatchTypeOf<
+      OutputWithVirtual<Person> | undefined
+    >()
   })
 
   it(`should type findOne config object to return a single row`, () => {
@@ -57,7 +60,9 @@ describe(`useLiveQuery type assertions`, () => {
     })
 
     // BUG: Currently returns ComputedRef<Array<Person>> but should be ComputedRef<Person | undefined>
-    expectTypeOf(data.value).toEqualTypeOf<Person | undefined>()
+    expectTypeOf(data.value).toMatchTypeOf<
+      OutputWithVirtual<Person> | undefined
+    >()
   })
 
   it(`should type findOne collection using liveQueryCollectionOptions to return a single row`, () => {
@@ -84,7 +89,9 @@ describe(`useLiveQuery type assertions`, () => {
     const { data } = useLiveQuery(liveQueryCollection)
 
     // BUG: Currently returns ComputedRef<Array<Person>> but should be ComputedRef<Person | undefined>
-    expectTypeOf(data.value).toEqualTypeOf<Person | undefined>()
+    expectTypeOf(data.value).toMatchTypeOf<
+      OutputWithVirtual<Person> | undefined
+    >()
   })
 
   it(`should type findOne collection using createLiveQueryCollection to return a single row`, () => {
@@ -109,7 +116,9 @@ describe(`useLiveQuery type assertions`, () => {
     const { data } = useLiveQuery(liveQueryCollection)
 
     // BUG: Currently returns ComputedRef<Array<Person>> but should be ComputedRef<Person | undefined>
-    expectTypeOf(data.value).toEqualTypeOf<Person | undefined>()
+    expectTypeOf(data.value).toMatchTypeOf<
+      OutputWithVirtual<Person> | undefined
+    >()
   })
 
   it(`should type regular query to return an array`, () => {
@@ -132,8 +141,8 @@ describe(`useLiveQuery type assertions`, () => {
     )
 
     // Regular queries should return an array
-    expectTypeOf(data.value).toEqualTypeOf<
-      Array<{ id: string; name: string }>
+    expectTypeOf(data.value).toMatchTypeOf<
+      Array<OutputWithVirtual<{ id: string; name: string }>>
     >()
   })
 })

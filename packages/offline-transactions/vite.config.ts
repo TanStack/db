@@ -15,7 +15,8 @@ const config = defineConfig({
 export default mergeConfig(
   config,
   tanstackViteConfig({
-    entry: `./src/index.ts`,
+    entry: [`./src/index.ts`, `./src/react-native/index.ts`],
     srcDir: `./src`,
+    externalDeps: [`react-native`, `@react-native-community/netinfo`],
   }),
 )

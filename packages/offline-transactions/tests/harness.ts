@@ -228,6 +228,7 @@ export function createTestOfflineEnvironment(
   }
 
   const config: OfflineConfig = {
+    ...options.config,
     collections: {
       ...(options.config?.collections ?? {}),
       [collection.id]: collection,
@@ -237,23 +238,16 @@ export function createTestOfflineEnvironment(
       [mutationFnName]: wrappedMutation,
     },
     storage,
-    maxConcurrency: options.config?.maxConcurrency,
-    jitter: options.config?.jitter,
-    beforeRetry: options.config?.beforeRetry,
-    onUnknownMutationFn: options.config?.onUnknownMutationFn,
-    onLeadershipChange: options.config?.onLeadershipChange,
     leaderElection: options.config?.leaderElection ?? leader,
   }
 
   const executor = startOfflineExecutor(config)
 
   const waitForLeader = async () => {
-    const start = Date.now()
-    while (!executor.isOfflineEnabled) {
-      if (Date.now() - start > 1000) {
-        throw new Error(`Executor did not become leader within timeout`)
-      }
-      await new Promise((resolve) => setTimeout(resolve, 10))
+    // Wait for full initialization including loading pending transactions
+    await executor.waitForInit()
+    if (!executor.isOfflineEnabled) {
+      throw new Error(`Executor did not become leader`)
     }
   }
 

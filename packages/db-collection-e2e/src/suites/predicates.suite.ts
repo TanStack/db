@@ -42,7 +42,6 @@ export function createPredicatesTestSuite(
         )
 
         await query.preload()
-
         await waitForQueryData(query, { minSize: 1 })
 
         const results = Array.from(query.state.values())
@@ -409,6 +408,27 @@ export function createPredicatesTestSuite(
           query,
           (u) => (u.email?.match(/^user.*0@example\.com$/) ?? null) !== null,
         )
+
+        await query.cleanup()
+      })
+
+      it(`should filter with like() with wildcard pattern matching newline`, async () => {
+        const config = await getConfig()
+        const usersCollection = config.collections.onDemand.users
+
+        const query = createLiveQueryCollection((q) =>
+          q
+            .from({ user: usersCollection })
+            .where(({ user }) => like(user.name, `Ursula%`)),
+        )
+
+        await query.preload()
+        await waitForQueryData(query, { minSize: 1 })
+
+        const results = Array.from(query.state.values())
+        expect(results.length).toBeGreaterThan(0)
+        // should match names starting with "Ursula" even if it contains a newline character
+        assertAllItemsMatch(query, (u) => u.name.startsWith(`Ursula`))
 
         await query.cleanup()
       })

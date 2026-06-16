@@ -10,6 +10,7 @@ title: IR
 - [Aggregate](classes/Aggregate.md)
 - [CollectionRef](classes/CollectionRef.md)
 - [Func](classes/Func.md)
+- [IncludesSubquery](classes/IncludesSubquery.md)
 - [PropRef](classes/PropRef.md)
 - [QueryRef](classes/QueryRef.md)
 - [Value](classes/Value.md)
@@ -25,6 +26,7 @@ title: IR
 - [From](type-aliases/From.md)
 - [GroupBy](type-aliases/GroupBy.md)
 - [Having](type-aliases/Having.md)
+- [IncludesMaterialization](type-aliases/IncludesMaterialization.md)
 - [Join](type-aliases/Join.md)
 - [Limit](type-aliases/Limit.md)
 - [Offset](type-aliases/Offset.md)
@@ -33,6 +35,10 @@ title: IR
 - [OrderByDirection](type-aliases/OrderByDirection.md)
 - [Select](type-aliases/Select.md)
 - [Where](type-aliases/Where.md)
+
+## Variables
+
+- [INCLUDES\_SCALAR\_FIELD](variables/INCLUDES_SCALAR_FIELD.md)
 
 ## Functions
 

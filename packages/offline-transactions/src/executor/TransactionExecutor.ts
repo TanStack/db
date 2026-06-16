@@ -1,9 +1,14 @@
+import { createTransaction } from '@tanstack/db'
 import { DefaultRetryPolicy } from '../retry/RetryPolicy'
 import { NonRetriableError } from '../types'
 import { withNestedSpan } from '../telemetry/tracer'
 import type { KeyScheduler } from './KeyScheduler'
 import type { OutboxManager } from '../outbox/OutboxManager'
-import type { OfflineConfig, OfflineTransaction } from '../types'
+import type {
+  OfflineConfig,
+  OfflineTransaction,
+  TransactionSignaler,
+} from '../types'
 
 const HANDLED_EXECUTION_ERROR = Symbol(`HandledExecutionError`)
 
@@ -14,19 +19,22 @@ export class TransactionExecutor {
   private retryPolicy: DefaultRetryPolicy
   private isExecuting = false
   private executionPromise: Promise<void> | null = null
-  private offlineExecutor: any // Reference to OfflineExecutor for signaling
+  private offlineExecutor: TransactionSignaler
   private retryTimer: ReturnType<typeof setTimeout> | null = null
 
   constructor(
     scheduler: KeyScheduler,
     outbox: OutboxManager,
     config: OfflineConfig,
-    offlineExecutor: any,
+    offlineExecutor: TransactionSignaler,
   ) {
     this.scheduler = scheduler
     this.outbox = outbox
     this.config = config
-    this.retryPolicy = new DefaultRetryPolicy(10, config.jitter ?? true)
+    this.retryPolicy = new DefaultRetryPolicy(
+      Number.POSITIVE_INFINITY,
+      config.jitter ?? true,
+    )
     this.offlineExecutor = offlineExecutor
   }
 
@@ -52,19 +60,18 @@ export class TransactionExecutor {
   }
 
   private async runExecution(): Promise<void> {
-    const maxConcurrency = this.config.maxConcurrency ?? 3
-
     while (this.scheduler.getPendingCount() > 0) {
-      const batch = this.scheduler.getNextBatch(maxConcurrency)
-
-      if (batch.length === 0) {
+      if (!this.isOnline()) {
         break
       }
 
-      const executions = batch.map((transaction) =>
-        this.executeTransaction(transaction),
-      )
-      await Promise.allSettled(executions)
+      const transaction = this.scheduler.getNext()
+
+      if (!transaction) {
+        break
+      }
+
+      await this.executeTransaction(transaction)
     }
 
     // Schedule next retry after execution completes
@@ -182,7 +189,10 @@ export class TransactionExecutor {
           return
         }
 
-        const delay = this.retryPolicy.calculateDelay(transaction.retryCount)
+        const delay = Math.max(
+          0,
+          this.retryPolicy.calculateDelay(transaction.retryCount),
+        )
         const updatedTransaction: OfflineTransaction = {
           ...transaction,
           retryCount: transaction.retryCount + 1,
@@ -227,6 +237,10 @@ export class TransactionExecutor {
       this.scheduler.schedule(transaction)
     }
 
+    // Restore optimistic state for loaded transactions
+    // This ensures the UI shows the optimistic data while transactions are pending
+    this.restoreOptimisticState(filteredTransactions)
+
     // Reset retry delays for all loaded transactions so they can run immediately
     this.resetRetryDelays()
 
@@ -242,6 +256,71 @@ export class TransactionExecutor {
     }
   }
 
+  /**
+   * Restore optimistic state from loaded transactions.
+   * Creates internal transactions to hold the mutations so the collection's
+   * state manager can show optimistic data while waiting for sync.
+   */
+  private restoreOptimisticState(
+    transactions: Array<OfflineTransaction>,
+  ): void {
+    for (const offlineTx of transactions) {
+      if (offlineTx.mutations.length === 0) {
+        continue
+      }
+
+      try {
+        // Create a restoration transaction that holds mutations for optimistic state display.
+        // It will never commit - the real mutation is handled by the offline executor.
+        const restorationTx = createTransaction({
+          id: offlineTx.id,
+          autoCommit: false,
+          mutationFn: async () => {},
+        })
+
+        // Prevent unhandled promise rejection when cleanup calls rollback()
+        // We don't care about this promise - it's just for holding mutations
+        restorationTx.isPersisted.promise.catch(() => {
+          // Intentionally ignored - restoration transactions are cleaned up
+          // via cleanupRestorationTransaction, not through normal commit flow
+        })
+
+        restorationTx.applyMutations(offlineTx.mutations)
+
+        // Register with each affected collection's state manager
+        const touchedCollections = new Set<string>()
+        for (const mutation of offlineTx.mutations) {
+          // Defensive check for corrupted deserialized data
+          // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition
+          if (!mutation.collection) {
+            continue
+          }
+          const collectionId = mutation.collection.id
+          if (touchedCollections.has(collectionId)) {
+            continue
+          }
+          touchedCollections.add(collectionId)
+
+          mutation.collection._state.transactions.set(
+            restorationTx.id,
+            restorationTx,
+          )
+          mutation.collection._state.recomputeOptimisticState(true)
+        }
+
+        this.offlineExecutor.registerRestorationTransaction(
+          offlineTx.id,
+          restorationTx,
+        )
+      } catch (error) {
+        console.warn(
+          `Failed to restore optimistic state for transaction ${offlineTx.id}:`,
+          error,
+        )
+      }
+    }
+  }
+
   clear(): void {
     this.scheduler.clear()
     this.clearRetryTimer()
@@ -254,6 +333,10 @@ export class TransactionExecutor {
   private scheduleNextRetry(): void {
     // Clear existing timer
     this.clearRetryTimer()
+
+    if (!this.isOnline()) {
+      return
+    }
 
     // Find the earliest retry time among pending transactions
     const earliestRetryTime = this.getEarliestRetryTime()
@@ -286,6 +369,10 @@ export class TransactionExecutor {
       clearTimeout(this.retryTimer)
       this.retryTimer = null
     }
+  }
+
+  private isOnline(): boolean {
+    return this.offlineExecutor.isOnline()
   }
 
   getRunningCount(): number {

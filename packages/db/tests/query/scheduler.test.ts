@@ -5,7 +5,8 @@ import { createTransaction } from '../../src/transactions.js'
 import { createOptimisticAction } from '../../src/optimistic-action.js'
 import { transactionScopedScheduler } from '../../src/scheduler.js'
 import { CollectionConfigBuilder } from '../../src/query/live/collection-config-builder.js'
-import { mockSyncCollectionOptions } from '../utils.js'
+import { mockSyncCollectionOptions, stripVirtualProps } from '../utils.js'
+import type { OutputWithVirtual } from '../utils.js'
 import type { FullSyncState } from '../../src/query/live/types.js'
 import type { SyncConfig } from '../../src/types.js'
 
@@ -18,6 +19,8 @@ interface User {
   id: number
   name: string
 }
+
+type UserWithVirtual = OutputWithVirtual<User, string | number>
 
 interface Task {
   id: number
@@ -61,8 +64,8 @@ function setupLiveQueryCollections(id: string) {
         .join({ task: tasks }, ({ user, task }) => eq(user.id, task.userId))
         .select(({ user, task }) => ({
           userId: user.id,
-          taskId: task?.id,
-          title: task?.title,
+          taskId: task.id,
+          title: task.title,
         })),
   })
 
@@ -277,8 +280,8 @@ describe(`live query scheduler`, () => {
             `full`,
           )
           .select(({ left, right }) => ({
-            left: left?.value,
-            right: right?.value,
+            left: left.value,
+            right: right.value,
           })),
     })
 
@@ -299,7 +302,9 @@ describe(`live query scheduler`, () => {
       collectionB.insert({ id: 1, value: `B1` })
     })
 
-    expect(liveQueryJoin.toArray).toEqual([{ left: `A1`, right: `B1` }])
+    expect(liveQueryJoin.toArray.map((row) => stripVirtualProps(row))).toEqual([
+      { left: `A1`, right: `B1` },
+    ])
     expect(liveQueryJoin.utils.getRunCount()).toBe(baseRunCount + 1)
 
     tx.mutate(() => {
@@ -311,7 +316,9 @@ describe(`live query scheduler`, () => {
       })
     })
 
-    expect(liveQueryJoin.toArray).toEqual([{ left: `A1b`, right: `B1b` }])
+    expect(liveQueryJoin.toArray.map((row) => stripVirtualProps(row))).toEqual([
+      { left: `A1b`, right: `B1b` },
+    ])
     expect(liveQueryJoin.utils.getRunCount()).toBe(baseRunCount + 2)
     tx.rollback()
   })
@@ -364,8 +371,8 @@ describe(`live query scheduler`, () => {
             `full`,
           )
           .select(({ left, right }) => ({
-            left: left?.value,
-            right: right?.value,
+            left: left.value,
+            right: right.value,
           })),
     })
 
@@ -382,7 +389,9 @@ describe(`live query scheduler`, () => {
       collectionB.insert({ id: 7, value: `B7` })
     })
 
-    expect(hybridJoin.toArray).toEqual([{ left: `A7`, right: `B7` }])
+    expect(hybridJoin.toArray.map((row) => stripVirtualProps(row))).toEqual([
+      { left: `A7`, right: `B7` },
+    ])
     expect(hybridJoin.utils.getRunCount()).toBe(baseRunCount + 1)
 
     tx.mutate(() => {
@@ -394,7 +403,9 @@ describe(`live query scheduler`, () => {
       })
     })
 
-    expect(hybridJoin.toArray).toEqual([{ left: `A7b`, right: `B7b` }])
+    expect(hybridJoin.toArray.map((row) => stripVirtualProps(row))).toEqual([
+      { left: `A7b`, right: `B7b` },
+    ])
     expect(hybridJoin.utils.getRunCount()).toBe(baseRunCount + 2)
     tx.rollback()
   })
@@ -447,8 +458,8 @@ describe(`live query scheduler`, () => {
             `full`,
           )
           .select(({ left, right }) => ({
-            left: left?.value,
-            right: right?.value,
+            left: left.value,
+            right: right.value,
           })),
     })
 
@@ -465,7 +476,9 @@ describe(`live query scheduler`, () => {
       collectionA.insert({ id: 42, value: `left-later` })
     })
 
-    expect(join.toArray).toEqual([{ left: `left-later`, right: `right-first` }])
+    expect(join.toArray.map((row) => stripVirtualProps(row))).toEqual([
+      { left: `left-later`, right: `right-first` },
+    ])
     expect(join.utils.getRunCount()).toBe(baseRunCount + 1)
     tx.rollback()
   })
@@ -492,7 +505,7 @@ describe(`live query scheduler`, () => {
       commit: vi.fn(),
       markReady: vi.fn(),
       truncate: vi.fn(),
-    } as unknown as Parameters<SyncConfig<User>[`sync`]>[0]
+    } as unknown as Parameters<SyncConfig<UserWithVirtual>[`sync`]>[0]
 
     const syncState = {
       messagesCount: 0,
@@ -600,7 +613,7 @@ describe(`live query scheduler`, () => {
           )
           .select(({ account, user }) => ({
             account: account,
-            profile: user?.profile,
+            profile: user.profile,
           })),
     })
 
@@ -626,7 +639,7 @@ describe(`live query scheduler`, () => {
           .select(({ accountWithUser, team }) => ({
             account: accountWithUser.account,
             profile: accountWithUser.profile,
-            team: team?.team,
+            team: team.team,
           })),
     })
 
@@ -721,7 +734,7 @@ describe(`live query scheduler`, () => {
           .select(({ a, b }) => ({
             id: a.id,
             aValue: a.value,
-            bValue: b?.value ?? null,
+            bValue: b.value,
           })),
     })
 

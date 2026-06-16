@@ -12,6 +12,7 @@ The `@tanstack/powersync-db-collection` package allows you to create collections
 
 - Automatically mirror the state of an underlying PowerSync SQLite database
 - Reactively update when PowerSync records change
+- Support query-driven sync, loading only the data relevant to active live queries
 - Support optimistic mutations with rollback on error
 - Provide persistence handlers to keep PowerSync in sync with TanStack DB transactions
 - Use PowerSync's efficient SQLite-based storage engine
@@ -174,7 +175,7 @@ type DocumentCollectionOutput = DocumentCollectionInput
 
 You can transform SQLite types to richer types (like Date objects) while keeping SQLite-compatible input types:
 
-Note: The Transformed types are provided by TanStackDB to the PowerSync SQLite persister. These types need to be serialized in
+Note: The Transformed types are provided by TanStack DB to the PowerSync SQLite persister. These types need to be serialized in
 order to be persisted to SQLite. Most types are converted by default. For custom types, override the serialization by providing a
 `serializer` param.
 
@@ -300,6 +301,9 @@ When connected to a PowerSync backend, changes are automatically synchronized in
 - Conflict resolution
 - Queue management for offline changes
 - Automatic retries on connection loss
+
+### Query-Driven Sync
+Collections support an optional `on-demand` sync mode that loads only the rows your active live queries need, rather than syncing the full table into memory upfront. Useful for large datasets where most rows won't be accessed at a given time.
 
 ### Working with Rich JavaScript Types
 
@@ -576,3 +580,523 @@ This approach allows you to:
 - Ensure all operations are atomic
 - Wait for persistence confirmation
 - Handle complex transaction scenarios
+
+## On-demand Sync Mode (Query-Driven Sync)
+
+By default the PowerSync collection uses the `eager` sync mode, but you can opt to use `on-demand` sync mode instead. In on-demand mode, the collection is query-driven - it only loads data from SQLite that satisfies the predicates of your active live queries, rather than syncing everything and filtering afterwards.
+
+To understand how data flows under the hood, it helps to know that there are two independent dimensions at play:
+
+- **Sync mode** (`eager` vs `on-demand`) - controls how data moves from SQLite into the TanStack DB collection
+- **Sync Streams** (optional) - controls how data moves from the PowerSync Service into SQLite, using the `onLoad` or `onLoadSubset` hooks
+
+These dimensions compose independently, giving you six combinations covered below:
+
+| Example | Sync mode | Sync Streams | Parameters |
+|---|---|---|---|
+| 1 | Eager | No | - |
+| 2 | On-demand | No | - |
+| 3 | Eager | Yes | Hardcoded |
+| 4 | On-demand | Yes | Hardcoded |
+| 5 | On-demand | Yes | Dynamic - `extractSimpleComparisons` |
+| 6 | On-demand | Yes | Dynamic - `parseWhereExpression` |
+
+Examples 1 and 2 assume SQLite is already fully populated by PowerSync's sync mechanism. Examples 3–6 add Sync Streams, which let you control which data from the PowerSync Service reaches SQLite in the first place - useful when you only want a subset of data on-device.
+
+In examples 3 and 4, Sync Stream subscription parameters are hardcoded. Examples 5 and 6 show how to derive those parameters dynamically from the live query's predicates, so the subscription automatically adjusts as the query changes.
+
+
+### 1. Eager Mode
+
+In `eager` mode, all data from the SQLite database is synced into the TanStack DB collection. The live query then filters this full dataset to produce the final result. This means the collection holds all rows regardless of whether they match any active query.
+
+**SQLite**
+
+| id | list_id | completed |
+|:--:|:-------:|:---------:|
+| 1  | list_1  |     0     |
+| 2  | list_1  |     1     |
+| 3  | list_2  |     0     |
+| 4  | list_2  |     1     |
+
+*Eager mode syncs all SQLite data to TanStack DB Collection*
+
+**Collection**
+
+| id | list_id | completed |
+|:--:|:-------:|:---------:|
+| 1  | list_1  |     0     |
+| 2  | list_1  |     1     |
+| 3  | list_2  |     0     |
+| 4  | list_2  |     1     |
+
+*TanStack DB Query filters for list_id = 'list_1'*
+
+**Result**
+
+| id | list_id | completed |
+|:--:|:-------:|:---------:|
+| 1  | list_1  |     0     |
+| 2  | list_1  |     1     |
+
+```typescript
+const collection = createCollection(
+  powerSyncCollectionOptions({
+    database: db,
+    table: AppSchema.props.todos,
+    syncMode: 'eager'
+  }),
+)
+
+const liveQuery = createLiveQueryCollection({
+  query: (q) =>
+    q
+      .from({ todo: collection })
+      .where(
+        ({ todo }) => eq(todo.list_id, 'list_id'),
+      )
+      .select(({ todo }) => ({
+        id: todo.id,
+        completed: todo.completed,
+      })),
+})
+```
+
+### 2. On-Demand Mode
+
+In `on-demand` mode, only data from the SQLite database that satisfies the predicates of active TanStack DB live queries is synced into the TanStack DB collection. This reduces the amount of data held in memory, since the collection only contains rows that are relevant to the queries currently registered against it.
+
+**SQLite**
+
+| id | list_id | completed |
+|:--:|:-------:|:---------:|
+| 1  | list_1  |     0     |
+| 2  | list_1  |     1     |
+| 3  | list_2  |     0     |
+| 4  | list_2  |     1     |
+
+*On-demand mode only syncs data from SQLite to the TanStack DB collection if they satisfy any of the live queries: list_id = 'list_1'*
+
+**Collection**
+
+| id | list_id | completed |
+|:--:|:-------:|:---------:|
+| 1  | list_1  |     0     |
+| 2  | list_1  |     1     |
+
+*TanStack DB Query filters for list_id = 'list_1'*
+
+**Result**
+
+| id | list_id | completed |
+|:--:|:-------:|:---------:|
+| 1  | list_1  |     0     |
+| 2  | list_1  |     1     |
+
+```typescript
+const collection = createCollection(
+  powerSyncCollectionOptions({
+    database: db,
+    table: AppSchema.props.todos,
+    syncMode: 'on-demand'
+  }),
+)
+
+// live query that tells the collection what the data domain is
+const liveQuery = createLiveQueryCollection({
+  query: (q) =>
+    q
+      .from({ todo: collection })
+      .where(
+        ({ todo }) => eq(todo.list_id, 'list_id'),
+      )
+      .select(({ todo }) => ({
+        id: todo.id,
+        completed: todo.completed,
+      })),
+})
+```
+
+## Incorporating Sync Streams With OnLoad/OnLoadSubset Hooks
+Sync Streams can be used through the data loading hooks for both `eager` and `on-demand` sync modes that allow a user to call Sync Streams when a collection is defined (eager mode) or when a collection's data boundary changes based on the live queries predicates (on-demand).
+
+These examples assume the following Sync Stream definition exists:
+```
+config:
+  edition: 3
+
+streams:
+  lists:
+    query: SELECT * FROM lists WHERE owner_id = auth.user_id()
+    auto_subscribe: true
+  todos:
+    query: SELECT * FROM todos WHERE list_id = subscription.parameter('list') AND list_id IN (SELECT id FROM lists WHERE owner_id = auth.user_id())
+```
+
+### 3. Eager Mode with Sync Streams
+
+Use the `onLoad` hook to subscribe to a Sync Stream when the collection first loads, so SQLite is populated before the collection starts serving queries. In `eager` mode, all rows in SQLite are synced into the TanStack DB collection; live query filtering then runs against that full dataset. 
+The hook can optionally return a cleanup function where you can unsubscribe from the Sync Stream.
+
+This example starts with 4 todos in the PowerSync Service, only 2 of which get synced via the Sync Stream to the SQLite database. Because it's eager mode, both get synced from the SQLite database to the collection. Finally the TanStack DB query only returns the single todo that matches the live query predicate.
+
+**PS Service**
+
+| id | list_id | completed |
+|:--:|:-------:|:---------:|
+| 1  | list_1  |     0     |
+| 2  | list_1  |     1     |
+| 3  | list_2  |     0     |
+| 4  | list_2  |     1     |
+
+*Subscribe to Sync Stream, only sync where list_id = 'list_1'*
+
+**SQLite**
+
+| id | list_id | completed |
+|:--:|:-------:|:---------:|
+| 1  | list_1  |     0     |
+| 2  | list_1  |     1     |
+
+*Eager mode syncs all SQLite data to TanStack DB Collection*
+
+**Collection**
+
+| id | list_id | completed |
+|:--:|:-------:|:---------:|
+| 1  | list_1  |     0     |
+| 2  | list_1  |     1     |
+
+*TanStack DB Query filters for completed = 1*
+
+**Result**
+
+| id | list_id | completed |
+|:--:|:-------:|:---------:|
+| 2  | list_1  |     1     |
+
+```typescript
+const collection = createCollection(
+  powerSyncCollectionOptions({
+    database: db,
+    table: AppSchema.props.todos,
+    syncMode: 'eager',
+    onLoad: async () => {
+      console.log('onLoad')
+      const subscription = await db
+        .syncStream('todos', { list: 'list_1' })
+        .subscribe()
+
+      await subscription.waitForFirstSync()
+
+      return () => {
+        console.log('onUnload')
+        subscription.unsubscribe()
+      }
+    },
+  }),
+) 
+
+// A live query that filters by the `completed` state.
+const liveQuery = createLiveQueryCollection({
+  query: (q) =>
+    q
+      .from({ todo: collection })
+      .where(({ todo }) => eq(todo.completed, 1))
+      .select(({ todo }) => ({
+        id: todo.id,
+        completed: todo.completed,
+      })),
+})
+```
+
+### 4. On-Demand Mode with Sync Streams
+
+Use the `onLoadSubset` hook to subscribe to a Sync Stream whenever the collection's data boundary changes (i.e. when the set of active live queries changes). In `on-demand` mode, only rows that satisfy the active live query predicates are synced from SQLite into the TanStack DB collection. 
+The hook can optionally return a cleanup function where you can unsubscribe from the Sync Stream when that subset is no longer needed.
+
+This example starts with 4 todos in the PowerSync Service, only 2 of which get synced via the Sync Stream to the SQLite database. Because it's on-demand mode, only 1 todo matches gets synced from the SQLite database to the collection. Finally the TanStack DB query only returns the single todo that matches the live query predicate.
+
+**PS Service**
+
+| id | list_id | completed |
+|:--:|:-------:|:---------:|
+| 1  | list_1  |     0     |
+| 2  | list_1  |     1     |
+| 3  | list_2  |     0     |
+| 4  | list_2  |     1     |
+
+*Subscribe to Sync Stream, only sync where list_id = 'list_1'*
+
+**SQLite**
+
+| id | list_id | completed |
+|:--:|:-------:|:---------:|
+| 1  | list_1  |     0     |
+| 2  | list_1  |     1     |
+
+*On-demand mode only syncs data from SQLite to the TanStack DB collection if they satisfy any of the live queries: completed = 1*
+
+**Collection**
+
+| id | list_id | completed |
+|:--:|:-------:|:---------:|
+| 2  | list_1  |     1     |
+
+*TanStack DB Query filters for completed = 1*
+
+**Result**
+
+| id | list_id | completed |
+|:--:|:-------:|:---------:|
+| 2  | list_1  |     1     |
+
+```typescript
+const collection = createCollection(
+  powerSyncCollectionOptions({
+    database: db,
+    table: AppSchema.props.todos,
+    syncMode: 'on-demand',
+    onLoadSubset: async (options) => {
+      console.log('onLoadSubset')
+      const subscription = await db
+        .syncStream('todos', { list: 'list_1' })
+        .subscribe()
+
+      await subscription.waitForFirstSync()
+
+      return () => {
+        console.log('onUnloadSubset')
+        subscription.unsubscribe()
+      }
+    },
+  }),
+)
+
+// A live query that filters by the `completed` state.
+const liveQuery = createLiveQueryCollection({
+  query: (q) =>
+    q
+      .from({ todo: collection })
+      .where(({ todo }) => eq(todo.completed, 1))
+      .select(({ todo }) => ({
+        id: todo.id,
+        completed: todo.completed,
+      })),
+})
+```
+
+### 5. On-Demand Mode with Simple Predicates
+
+In the previous example, the Sync Stream subscription parameters were hardcoded. In practice, you'll often want to derive those parameters dynamically from the live query's where clause. That way, changing the query automatically adjusts which data is synced from the PowerSync Service. `extractSimpleComparisons` is a convenience helper that parses the expression tree from `onLoadSubset` into a flat list of `{ field, operator, value }` objects. 
+
+Given a live query like:
+
+```
+.where(({ todo }) => eq(todo.list_id, selectedListId))
+```
+
+`onLoadSubset` receives options.where as an expression tree `for eq(list_id, '<uuid>')`.
+The `list_id` value is parsed from the expression tree and passed to `syncStream()`.
+
+Note: This example slightly differs from the previous two as it aims to illustrate `extractSimpleComparisons` usage.
+
+This example starts with 4 todos in the PowerSync Service, the Sync Stream subscription criteria (`list_id = "list_1"`) is derived from the live query registered against the collection. Only 2 todos get synced via the Sync Stream to the SQLite database. Two todos get synced from the SQLite database to the collection. Finally the TanStack DB query returns both todos as they both match `eq(todo.list_id, 'list_id')`.
+
+**PS Service**
+
+| id | list_id | completed |
+|:--:|:-------:|:---------:|
+| 1  | list_1  |     0     |
+| 2  | list_1  |     1     |
+| 3  | list_2  |     0     |
+| 4  | list_2  |     1     |
+
+*Derive the list_id criteria from live query, subscribe to Sync Stream, only sync where list = 'list_1'*
+
+**SQLite**
+
+| id | list_id | completed |
+|:--:|:-------:|:---------:|
+| 1  | list_1  |     0     |
+| 2  | list_1  |     1     |
+
+*On-demand mode only syncs data from SQLite to the TanStack DB collection if they satisfy any of the live queries: list_id = 'list_1'*
+
+**Collection**
+
+| id | list_id | completed |
+|:--:|:-------:|:---------:|
+| 1  | list_1  |     0     |
+| 2  | list_1  |     1     |
+
+*TanStack DB Query filters for list_id = 'list_1'*
+
+**Result**
+
+| id | list_id | completed |
+|:--:|:-------:|:---------:|
+| 1  | list_1  |     0     |
+| 2  | list_1  |     1     |
+
+```typescript
+const collection = createCollection(
+  powerSyncCollectionOptions({
+    database: db,
+    table: AppSchema.props.todos,
+    syncMode: 'on-demand',
+    onLoadSubset: async (options) => {
+      // Extract simple comparisons from the where expression
+      const comparisons = extractSimpleComparisons(options.where)
+      // comparisons = [{ field: ['todo', 'list_id'], operator: 'eq', value: '<uuid>' }]
+
+      // Find the list_id filter
+      const listIdFilter = comparisons.find(
+        (c) => c.field.includes('list_id') && c.operator === 'eq',
+      )
+
+      if (!listIdFilter) {
+        console.warn('No list_id filter found, skipping Sync Stream')
+        return
+      }
+
+      console.log(`Subscribing to todos for list: ${listIdFilter.value}`)
+
+      const subscription = await db
+        .syncStream('todos', { list: listIdFilter.value })
+        .subscribe()
+
+      await subscription.waitForFirstSync()
+
+      return () => {
+        console.log(`Unsubscribing from todos for list: ${listIdFilter.value}`)
+        subscription.unsubscribe()
+      }
+    },
+  }),
+)
+
+// Simple filter -> triggers `onLoadSubset` with `eq(list_id, '...')`
+const liveQuery = createLiveQueryCollection({
+  query: (q) =>
+    q
+      .from({ todo: collection })
+      .where(
+        ({ todo }) => eq(todo.list_id, 'list_id'), // or some listId variable
+      )
+      .select(({ todo }) => ({
+        id: todo.id,
+        completed: todo.completed,
+      })),
+})
+```
+
+### 6. On-Demand Mode with Complex Predicates
+
+While `extractSimpleComparisons` works well for simple, single-condition filters, live queries often combine multiple conditions using `and`, `or`, or other nested expressions. `parseWhereExpression` lets you provide custom handler functions for each operator (`eq`, `and`, etc.). This gives you full control over how a compound expression tree is unpacked and transformed into the parameters object passed to `syncStream()`. It's useful when your Sync Stream accepts multiple parameters and you need to extract all of them from a single composite where clause - for example, filtering by both `list_id` and `completed` status simultaneously.
+
+Assume a small adjustment to the Sync Stream definition of todos (adding the `completed` subscription parameter):
+```
+todos:
+    query: SELECT * FROM todos WHERE list_id = subscription.parameter('list') AND completed = subscription.parameter("completed") AND list_id IN (SELECT id FROM lists WHERE owner_id = auth.user_id())
+```
+
+The `list` parameter name is kept as-is (consistent with most examples), but must be mapped to `list_id` to work with the following example. Alternatively, it can be named `list_id` in the Sync Stream definition to skip the programmatic mapping step.
+
+This example starts with 4 todos in the PowerSync Service, the Sync Stream subscription criteria (`list_id = "list_1" and completed = 1`) is derived from the live query registered against the collection. Only 1 todo gets synced via the Sync Stream to the SQLite database. One todo gets synced from the SQLite database to the collection. Finally the TanStack DB query returns 1 todo that matches `eq(todo.list_id, 'list_id') and eq(todo.completed, 1)`.
+
+**PS Service**
+
+| id | list_id | completed |
+|:--:|:-------:|:---------:|
+| 1  | list_1  |     0     |
+| 2  | list_1  |     1     |
+| 3  | list_2  |     0     |
+| 4  | list_2  |     1     |
+
+*Derive the list_id and completed criteria from live query, subscribe to Sync Stream where list = 'list_1' AND completed = 1*
+
+**SQLite**
+
+| id | list_id | completed |
+|:--:|:-------:|:---------:|
+| 2  | list_1  |     1     |
+
+*On-demand mode only syncs data from SQLite to the TanStack DB collection if they satisfy any of the live queries: list = 'list_1' AND completed = 1*
+
+**Collection**
+
+| id | list_id | completed |
+|:--:|:-------:|:---------:|
+| 2  | list_1  |     1     |
+
+*TanStack DB Query filters for list = 'list_1' AND completed = 1*
+
+**Result**
+
+| id | list_id | completed |
+|:--:|:-------:|:---------:|
+| 2  | list_1  |     1     |
+
+```typescript
+const collection = createCollection(
+  powerSyncCollectionOptions({
+    database: db,
+    table: AppSchema.props.todos,
+    syncMode: 'on-demand',
+    onLoadSubset: async (options) => {
+      // Parse the where into a flat params record using custom handlers
+      const streamParams = parseWhereExpression(options.where, {
+        handlers: {
+          eq: (field: Array<string>, value: unknown) => {
+            const mappedField = mapFields(field[field.length - 1]!)
+
+            return {
+              [mappedField]: value,
+            }
+          },
+          and: (...filters: Array<Record<string, unknown>>) =>
+            Object.assign({}, ...filters),
+        },
+        onUnknownOperator: (op, _args) => {
+          console.warn(`Ignoring unsupported operator in stream params: ${op}`)
+          return {}
+        },
+      })
+      // For a query like: where(({ todo }) => and(eq(todo.list_id, 'abc'), eq(todo.completed, 0)))
+      // streamParams = { list: 'abc', completed: 0 }
+
+      if (!streamParams || Object.keys(streamParams).length === 0) {
+        console.warn('No stream params extracted, skipping Sync Stream')
+        return
+      }
+
+      console.log(
+        `Subscribing to todos with params: ${JSON.stringify(streamParams)}`,
+      )
+
+      const subscription = await db
+        .syncStream('todos', streamParams)
+        .subscribe()
+
+      await subscription.waitForFirstSync()
+
+      return () => subscription.unsubscribe()
+    },
+  }),
+)
+
+// Compound filter -> triggers `onLoadSubset` with `and(eq(list_id, '...'), eq(completed, 1))`
+const liveQuery = createLiveQueryCollection({
+  query: (q) =>
+    q
+      .from({ todo: collection })
+      .where(({ todo }) =>
+        and(eq(todo.list_id, 'list_1'), eq(todo.completed, 1)),
+      )
+      .select(({ todo }) => ({
+        id: todo.id,
+        completed: todo.completed,
+      })),
+})
+```

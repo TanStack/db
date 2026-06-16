@@ -45,12 +45,17 @@ export interface IndexInterface<
 
   take: (
     n: number,
-    from?: TKey,
+    from: TKey,
     filterFn?: (key: TKey) => boolean,
   ) => Array<TKey>
+  takeFromStart: (n: number, filterFn?: (key: TKey) => boolean) => Array<TKey>
   takeReversed: (
     n: number,
-    from?: TKey,
+    from: TKey,
+    filterFn?: (key: TKey) => boolean,
+  ) => Array<TKey>
+  takeReversedFromEnd: (
+    n: number,
     filterFn?: (key: TKey) => boolean,
   ) => Array<TKey>
 
@@ -108,12 +113,20 @@ export abstract class BaseIndex<
   abstract lookup(operation: IndexOperation, value: any): Set<TKey>
   abstract take(
     n: number,
-    from?: TKey,
+    from: TKey,
+    filterFn?: (key: TKey) => boolean,
+  ): Array<TKey>
+  abstract takeFromStart(
+    n: number,
     filterFn?: (key: TKey) => boolean,
   ): Array<TKey>
   abstract takeReversed(
     n: number,
-    from?: TKey,
+    from: TKey,
+    filterFn?: (key: TKey) => boolean,
+  ): Array<TKey>
+  abstract takeReversedFromEnd(
+    n: number,
     filterFn?: (key: TKey) => boolean,
   ): Array<TKey>
   abstract get keyCount(): number
@@ -176,7 +189,6 @@ export abstract class BaseIndex<
     }
   }
 
-  // Protected methods for subclasses
   protected abstract initialize(options?: any): void
 
   protected evaluateIndexExpression(item: any): any {
@@ -205,10 +217,3 @@ export type IndexConstructor<TKey extends string | number = string | number> =
     name?: string,
     options?: any,
   ) => BaseIndex<TKey>
-
-/**
- * Index resolver can be either a class constructor or async loader
- */
-export type IndexResolver<TKey extends string | number = string | number> =
-  | IndexConstructor<TKey>
-  | (() => Promise<IndexConstructor<TKey>>)

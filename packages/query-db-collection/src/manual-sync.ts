@@ -35,7 +35,12 @@ export interface SyncContext<
   queryClient: QueryClient
   queryKey: Array<unknown>
   getKey: (item: TRow) => TKey
-  begin: () => void
+  /**
+   * Begin a new sync transaction.
+   * @param options.immediate - When true, the transaction will be processed immediately
+   *   even if there are persisting user transactions. Used by manual write operations.
+   */
+  begin: (options?: { immediate?: boolean }) => void
   write: (message: Omit<ChangeMessage<TRow>, `key`>) => void
   commit: () => void
   /**
@@ -144,7 +149,9 @@ export function performWriteOperations<
   const normalized = normalizeOperations(operations, ctx)
   validateOperations(normalized, ctx)
 
-  ctx.begin()
+  // Use immediate: true to ensure syncedData is updated synchronously,
+  // even when called from within a mutationFn with an active persisting transaction
+  ctx.begin({ immediate: true })
 
   for (const op of normalized) {
     switch (op.type) {

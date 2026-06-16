@@ -234,6 +234,42 @@ describe(`evaluators`, () => {
         })
       })
 
+      describe(`date/time functions`, () => {
+        it(`handles date by normalizing to YYYY-MM-DD`, () => {
+          const func = new Func(`date`, [new Value(`2026-01-02T05:06:07.000Z`)])
+          const compiled = compileExpression(func)
+
+          expect(compiled({})).toBe(`2026-01-02`)
+        })
+
+        it(`handles datetime by normalizing to ISO string`, () => {
+          const func = new Func(`datetime`, [new Value(1767225600000)])
+          const compiled = compileExpression(func)
+
+          expect(compiled({})).toBe(`2026-01-01T00:00:00.000Z`)
+        })
+
+        it(`handles strftime with supported date format`, () => {
+          const func = new Func(`strftime`, [
+            new Value(`%Y-%m-%d`),
+            new Value(`2026-01-02T05:06:07.000Z`),
+          ])
+          const compiled = compileExpression(func)
+
+          expect(compiled({})).toBe(`2026-01-02`)
+        })
+
+        it(`returns null for strftime with non-string format`, () => {
+          const func = new Func(`strftime`, [
+            new Value(123),
+            new Value(`2026-01-02T05:06:07.000Z`),
+          ])
+          const compiled = compileExpression(func)
+
+          expect(compiled({})).toBeNull()
+        })
+      })
+
       describe(`like/ilike functions`, () => {
         it(`handles like with non-string value`, () => {
           const func = new Func(`like`, [new Value(42), new Value(`%2%`)])
@@ -373,6 +409,23 @@ describe(`evaluators`, () => {
 
           // In 3-valued logic, ilike with undefined pattern returns UNKNOWN (null)
           expect(compiled({})).toBe(null)
+        })
+
+        it(`like % wildcard matches across newline characters`, () => {
+          const func = new Func(`like`, [
+            new Value(`hello\nworld`),
+            new Value(`%world`),
+          ])
+          const compiled = compileExpression(func)
+
+          expect(compiled({})).toBe(true)
+        })
+
+        it(`like _ wildcard matches a newline character`, () => {
+          const func = new Func(`like`, [new Value(`a\nb`), new Value(`a_b`)])
+          const compiled = compileExpression(func)
+
+          expect(compiled({})).toBe(true)
         })
       })
 

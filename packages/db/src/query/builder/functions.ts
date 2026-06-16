@@ -1,8 +1,15 @@
 import { Aggregate, Func } from '../ir'
-import { toExpression } from './ref-proxy.js'
+import { isRefProxy, toExpression } from './ref-proxy.js'
 import type { BasicExpression } from '../ir'
 import type { RefProxy } from './ref-proxy.js'
-import type { RefLeaf } from './types.js'
+import type { SingleResult } from '../../types.js'
+import type {
+  Context,
+  GetRawResult,
+  RefLeaf,
+  StringifiableScalar,
+} from './types.js'
+import type { QueryBuilder } from './index.js'
 
 type StringRef =
   | RefLeaf<string>
@@ -37,8 +44,42 @@ type ComparisonOperandPrimitive<T extends string | number | boolean> =
   | undefined
   | null
 
-// Helper type for any expression-like value
-type ExpressionLike = BasicExpression | RefProxy<any> | RefLeaf<any> | any
+// Helper type for values that can be lowered to expressions.
+type ExpressionLike =
+  | Aggregate
+  | BasicExpression
+  | RefProxy<any>
+  | RefLeaf<any>
+  | string
+  | number
+  | boolean
+  | bigint
+  | Date
+  | null
+  | undefined
+  | Array<unknown>
+
+type CaseWhenValue =
+  | ExpressionLike
+  | QueryBuilder<any>
+  | ToArrayWrapper<any>
+  | ConcatToArrayWrapper<any>
+  | Record<string, any>
+
+type ExtractCaseWhenValue<T> =
+  T extends CaseWhenWrapper<infer TResult> ? TResult : T
+
+type CaseWhenResult<
+  TValues extends Array<CaseWhenValue>,
+  THasDefault extends boolean,
+> = TValues[number] extends ExpressionLike
+  ? BasicExpression<
+      ExtractType<TValues[number]> | (THasDefault extends true ? never : null)
+    >
+  : CaseWhenWrapper<
+      | ExtractCaseWhenValue<TValues[number]>
+      | (THasDefault extends true ? never : undefined)
+    >
 
 // Helper type to extract the underlying type from various expression types
 type ExtractType<T> =
@@ -53,10 +94,10 @@ type ExtractType<T> =
 // Helper type to determine aggregate return type based on input nullability
 type AggregateReturnType<T> =
   ExtractType<T> extends infer U
-    ? U extends number | undefined | null | Date | bigint
+    ? U extends number | undefined | null | Date | bigint | string
       ? Aggregate<U>
-      : Aggregate<number | undefined | null | Date | bigint>
-    : Aggregate<number | undefined | null | Date | bigint>
+      : Aggregate<number | undefined | null | Date | bigint | string>
+    : Aggregate<number | undefined | null | Date | bigint | string>
 
 // Helper type to determine string function return type based on input nullability
 type StringFunctionReturnType<T> =
@@ -276,20 +317,304 @@ export function length<T extends ExpressionLike>(
   return new Func(`length`, [toExpression(arg)]) as NumericFunctionReturnType<T>
 }
 
+export function concat<T extends StringifiableScalar>(
+  arg: ToArrayWrapper<T>,
+): ConcatToArrayWrapper<T>
+export function concat(...args: Array<ExpressionLike>): BasicExpression<string>
 export function concat(
-  ...args: Array<ExpressionLike>
-): BasicExpression<string> {
+  ...args: Array<ExpressionLike | ToArrayWrapper<any>>
+): BasicExpression<string> | ConcatToArrayWrapper<any> {
+  const toArrayArg = args.find(
+    (arg): arg is ToArrayWrapper<any> => arg instanceof ToArrayWrapper,
+  )
+
+  if (toArrayArg) {
+    if (args.length !== 1) {
+      throw new Error(
+        `concat(toArray(...)) currently supports only a single toArray(...) argument`,
+      )
+    }
+    return new ConcatToArrayWrapper(toArrayArg.query)
+  }
+
   return new Func(
     `concat`,
     args.map((arg) => toExpression(arg)),
   )
 }
 
-export function coalesce(...args: Array<ExpressionLike>): BasicExpression<any> {
+// Helper type for coalesce: extracts non-nullish value types from all args
+type CoalesceArgTypes<T extends Array<ExpressionLike>> = {
+  [K in keyof T]: NonNullable<ExtractType<T[K]>>
+}[number]
+
+// Whether any arg in the tuple is statically guaranteed non-null (i.e., does not include null | undefined)
+type HasGuaranteedNonNull<T extends Array<ExpressionLike>> = {
+  [K in keyof T]: null extends ExtractType<T[K]>
+    ? false
+    : undefined extends ExtractType<T[K]>
+      ? false
+      : true
+}[number] extends false
+  ? false
+  : true
+
+// coalesce() return type: union of all non-null arg types; null included unless a guaranteed non-null arg exists
+type CoalesceReturnType<T extends Array<ExpressionLike>> =
+  HasGuaranteedNonNull<T> extends true
+    ? BasicExpression<CoalesceArgTypes<T>>
+    : BasicExpression<CoalesceArgTypes<T> | null>
+
+export function coalesce<T extends [ExpressionLike, ...Array<ExpressionLike>]>(
+  ...args: T
+): CoalesceReturnType<T> {
   return new Func(
     `coalesce`,
     args.map((arg) => toExpression(arg)),
-  )
+  ) as CoalesceReturnType<T>
+}
+
+/**
+ * Returns the value for the first matching condition, similar to SQL
+ * `CASE WHEN`.
+ *
+ * Arguments are evaluated as condition/value pairs followed by an optional
+ * default value. Scalar branch values return a query expression and can be used
+ * in expression contexts like `select`, `where`, `orderBy`, `groupBy`,
+ * `having`, and equality join operands. If no scalar branch matches and no
+ * default is provided, the result is `null`.
+ *
+ * When a branch value is a projection object, `caseWhen` becomes a select-only
+ * projection value. Projection branches can include nested fields, ref spreads,
+ * and includes. If no projection branch matches and no default is provided, the
+ * result is `undefined`.
+ *
+ * @example
+ * ```ts
+ * caseWhen(gt(user.age, 18), `adult`, `minor`)
+ * ```
+ *
+ * @example
+ * ```ts
+ * caseWhen(
+ *   gt(user.age, 65),
+ *   `senior`,
+ *   gt(user.age, 18),
+ *   `adult`,
+ *   `minor`,
+ * )
+ * ```
+ *
+ * @example
+ * ```ts
+ * caseWhen(gt(user.age, 18), {
+ *   ...user,
+ *   posts: q
+ *     .from({ post: postsCollection })
+ *     .where(({ post }) => eq(post.userId, user.id)),
+ * })
+ * ```
+ */
+export function caseWhen<C1 extends ExpressionLike, V1 extends CaseWhenValue>(
+  condition1: C1,
+  value1: V1,
+): CaseWhenResult<[V1], false>
+export function caseWhen<
+  C1 extends ExpressionLike,
+  V1 extends CaseWhenValue,
+  D extends CaseWhenValue,
+>(condition1: C1, value1: V1, defaultValue: D): CaseWhenResult<[V1, D], true>
+export function caseWhen<
+  C1 extends ExpressionLike,
+  V1 extends CaseWhenValue,
+  C2 extends ExpressionLike,
+  V2 extends CaseWhenValue,
+>(
+  condition1: C1,
+  value1: V1,
+  condition2: C2,
+  value2: V2,
+): CaseWhenResult<[V1, V2], false>
+export function caseWhen<
+  C1 extends ExpressionLike,
+  V1 extends CaseWhenValue,
+  C2 extends ExpressionLike,
+  V2 extends CaseWhenValue,
+  D extends CaseWhenValue,
+>(
+  condition1: C1,
+  value1: V1,
+  condition2: C2,
+  value2: V2,
+  defaultValue: D,
+): CaseWhenResult<[V1, V2, D], true>
+export function caseWhen<
+  C1 extends ExpressionLike,
+  V1 extends CaseWhenValue,
+  C2 extends ExpressionLike,
+  V2 extends CaseWhenValue,
+  C3 extends ExpressionLike,
+  V3 extends CaseWhenValue,
+>(
+  condition1: C1,
+  value1: V1,
+  condition2: C2,
+  value2: V2,
+  condition3: C3,
+  value3: V3,
+): CaseWhenResult<[V1, V2, V3], false>
+export function caseWhen<
+  C1 extends ExpressionLike,
+  V1 extends CaseWhenValue,
+  C2 extends ExpressionLike,
+  V2 extends CaseWhenValue,
+  C3 extends ExpressionLike,
+  V3 extends CaseWhenValue,
+  D extends CaseWhenValue,
+>(
+  condition1: C1,
+  value1: V1,
+  condition2: C2,
+  value2: V2,
+  condition3: C3,
+  value3: V3,
+  defaultValue: D,
+): CaseWhenResult<[V1, V2, V3, D], true>
+export function caseWhen<
+  C1 extends ExpressionLike,
+  V1 extends CaseWhenValue,
+  C2 extends ExpressionLike,
+  V2 extends CaseWhenValue,
+  C3 extends ExpressionLike,
+  V3 extends CaseWhenValue,
+  C4 extends ExpressionLike,
+  V4 extends CaseWhenValue,
+>(
+  condition1: C1,
+  value1: V1,
+  condition2: C2,
+  value2: V2,
+  condition3: C3,
+  value3: V3,
+  condition4: C4,
+  value4: V4,
+): CaseWhenResult<[V1, V2, V3, V4], false>
+export function caseWhen<
+  C1 extends ExpressionLike,
+  V1 extends CaseWhenValue,
+  C2 extends ExpressionLike,
+  V2 extends CaseWhenValue,
+  C3 extends ExpressionLike,
+  V3 extends CaseWhenValue,
+  C4 extends ExpressionLike,
+  V4 extends CaseWhenValue,
+  D extends CaseWhenValue,
+>(
+  condition1: C1,
+  value1: V1,
+  condition2: C2,
+  value2: V2,
+  condition3: C3,
+  value3: V3,
+  condition4: C4,
+  value4: V4,
+  defaultValue: D,
+): CaseWhenResult<[V1, V2, V3, V4, D], true>
+export function caseWhen<
+  C1 extends ExpressionLike,
+  V1 extends CaseWhenValue,
+  C2 extends ExpressionLike,
+  V2 extends CaseWhenValue,
+  C3 extends ExpressionLike,
+  V3 extends CaseWhenValue,
+  C4 extends ExpressionLike,
+  V4 extends CaseWhenValue,
+  C5 extends ExpressionLike,
+  V5 extends CaseWhenValue,
+>(
+  condition1: C1,
+  value1: V1,
+  condition2: C2,
+  value2: V2,
+  condition3: C3,
+  value3: V3,
+  condition4: C4,
+  value4: V4,
+  condition5: C5,
+  value5: V5,
+): CaseWhenResult<[V1, V2, V3, V4, V5], false>
+export function caseWhen<
+  C1 extends ExpressionLike,
+  V1 extends CaseWhenValue,
+  C2 extends ExpressionLike,
+  V2 extends CaseWhenValue,
+  C3 extends ExpressionLike,
+  V3 extends CaseWhenValue,
+  C4 extends ExpressionLike,
+  V4 extends CaseWhenValue,
+  C5 extends ExpressionLike,
+  V5 extends CaseWhenValue,
+  D extends CaseWhenValue,
+>(
+  condition1: C1,
+  value1: V1,
+  condition2: C2,
+  value2: V2,
+  condition3: C3,
+  value3: V3,
+  condition4: C4,
+  value4: V4,
+  condition5: C5,
+  value5: V5,
+  defaultValue: D,
+): CaseWhenResult<[V1, V2, V3, V4, V5, D], true>
+export function caseWhen<
+  C1 extends ExpressionLike,
+  V1 extends CaseWhenValue,
+  C2 extends ExpressionLike,
+  V2 extends CaseWhenValue,
+  C3 extends ExpressionLike,
+  V3 extends CaseWhenValue,
+  C4 extends ExpressionLike,
+  V4 extends CaseWhenValue,
+  C5 extends ExpressionLike,
+  V5 extends CaseWhenValue,
+>(
+  condition1: C1,
+  value1: V1,
+  condition2: C2,
+  value2: V2,
+  condition3: C3,
+  value3: V3,
+  condition4: C4,
+  value4: V4,
+  condition5: C5,
+  value5: V5,
+  condition6: ExpressionLike,
+  value6: CaseWhenValue,
+  ...rest: Array<CaseWhenValue>
+): any
+export function caseWhen(...args: Array<CaseWhenValue>): any {
+  if (args.length < 2) {
+    throw new Error(`caseWhen() requires at least two arguments`)
+  }
+
+  const pairCount = Math.floor(args.length / 2)
+  for (let i = 0; i < pairCount; i++) {
+    const condition = args[i * 2]
+    if (!isConditionValue(condition)) {
+      throw new Error(`caseWhen() conditions must be expression-like values`)
+    }
+  }
+
+  if (caseWhenHasOnlyExpressionValues(args)) {
+    return new Func(
+      `caseWhen`,
+      args.map((arg) => toExpression(arg)),
+    )
+  }
+
+  return new CaseWhenWrapper(args)
 }
 
 export function add<T1 extends ExpressionLike, T2 extends ExpressionLike>(
@@ -400,6 +725,7 @@ export const operators = [
   `divide`,
   // Utility functions
   `coalesce`,
+  `caseWhen`,
   // Aggregate functions
   `count`,
   `avg`,
@@ -409,3 +735,140 @@ export const operators = [
 ] as const
 
 export type OperatorName = (typeof operators)[number]
+
+export class ToArrayWrapper<_T = unknown> {
+  readonly __brand = `ToArrayWrapper` as const
+  declare readonly _type: `toArray`
+  declare readonly _result: _T
+  constructor(public readonly query: QueryBuilder<any>) {}
+}
+
+export class ConcatToArrayWrapper<_T = unknown> {
+  readonly __brand = `ConcatToArrayWrapper` as const
+  declare readonly _type: `concatToArray`
+  declare readonly _result: _T
+  constructor(public readonly query: QueryBuilder<any>) {}
+}
+
+export class CaseWhenWrapper<_T = any> {
+  readonly __brand = `CaseWhenWrapper` as const
+  declare readonly _type: `caseWhen`
+  readonly _result?: _T
+  constructor(public readonly args: Array<CaseWhenValue>) {}
+}
+
+export class MaterializeWrapper<
+  _T = unknown,
+  _IsSingle extends boolean = boolean,
+> {
+  readonly __brand = `MaterializeWrapper` as const
+  declare readonly _type: `materialize`
+  declare readonly _result: _T
+  declare readonly _isSingle: _IsSingle
+  constructor(public readonly query: QueryBuilder<any>) {}
+}
+
+export function toArray<TContext extends Context>(
+  query: QueryBuilder<TContext>,
+): ToArrayWrapper<GetRawResult<TContext>> {
+  return new ToArrayWrapper(query)
+}
+
+function caseWhenHasOnlyExpressionValues(args: Array<CaseWhenValue>): boolean {
+  const valueIndexes = getCaseWhenValueIndexes(args.length)
+  return valueIndexes.every((index) => isExpressionValue(args[index]))
+}
+
+function getCaseWhenValueIndexes(argCount: number): Array<number> {
+  const valueIndexes: Array<number> = []
+  const hasDefaultValue = argCount % 2 === 1
+  const pairCount = Math.floor(argCount / 2)
+
+  for (let i = 0; i < pairCount; i++) {
+    valueIndexes.push(i * 2 + 1)
+  }
+
+  if (hasDefaultValue) {
+    valueIndexes.push(argCount - 1)
+  }
+
+  return valueIndexes
+}
+
+function isExpressionValue(value: CaseWhenValue | undefined): boolean {
+  if (isRefProxy(value)) return true
+  if (value instanceof Aggregate || value instanceof Func) return true
+  if (value == null) return true
+  if (
+    typeof value === `string` ||
+    typeof value === `number` ||
+    typeof value === `boolean` ||
+    typeof value === `bigint`
+  ) {
+    return true
+  }
+  if (value instanceof Date || Array.isArray(value)) return true
+  if (typeof value === `object`) {
+    const candidate = value as {
+      type?: unknown
+      args?: unknown
+      name?: unknown
+      path?: unknown
+      value?: unknown
+    }
+
+    if (
+      (candidate.type === `agg` || candidate.type === `func`) &&
+      typeof candidate.name === `string` &&
+      Array.isArray(candidate.args)
+    ) {
+      return true
+    }
+    if (candidate.type === `ref` && Array.isArray(candidate.path)) return true
+    if (candidate.type === `val` && `value` in candidate) return true
+  }
+  return false
+}
+
+function isConditionValue(value: CaseWhenValue | undefined): boolean {
+  return isExpressionValue(value) && !Array.isArray(value)
+}
+
+/**
+ * Materialize an includes subquery into a plain value on the parent row.
+ *
+ * - For multi-row subqueries, the parent receives an `Array<T>` snapshot
+ *   (equivalent to `toArray()`).
+ * - For `findOne()` subqueries, the parent receives a single `T | undefined`
+ *   value — `undefined` when no child matches.
+ *
+ * The snapshot updates reactively: parent rows re-emit when the underlying
+ * children change.
+ *
+ * @example
+ * ```ts
+ * // Multi-row: produces Array<Issue> on each project
+ * select(({ p }) => ({
+ *   ...p,
+ *   issues: materialize(
+ *     q.from({ i: issues }).where(({ i }) => eq(i.projectId, p.id)),
+ *   ),
+ * }))
+ *
+ * // Singleton: produces Author | undefined on each post
+ * select(({ p }) => ({
+ *   ...p,
+ *   author: materialize(
+ *     q.from({ a: authors }).where(({ a }) => eq(a.id, p.authorId)).findOne(),
+ *   ),
+ * }))
+ * ```
+ */
+export function materialize<TContext extends Context>(
+  query: QueryBuilder<TContext>,
+): MaterializeWrapper<
+  GetRawResult<TContext>,
+  TContext extends SingleResult ? true : false
+> {
+  return new MaterializeWrapper(query)
+}

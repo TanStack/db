@@ -556,25 +556,54 @@ describe(`Transactions`, () => {
 
   describe(`duplicate instance detection`, () => {
     it(`sets a global marker in dev mode when in browser top window`, () => {
-      // The duplicate instance marker should be set when the module loads in dev mode
+      // The duplicate instance marker is set when the module loads in dev mode
+      // AND in a browser top-level window (not a worker, SSR, or iframe).
       const marker = Symbol.for(`@tanstack/db/instance-marker`)
-      // This will only be true if we're in dev mode AND in a browser top window
-      // In test environment (vitest), we should have these conditions met
-      expect((globalThis as any)[marker]).toBe(true)
+      const w = (globalThis as any).window
+      const isBrowserTopWindow =
+        w &&
+        `document` in w &&
+        (() => {
+          try {
+            return w === w.top
+          } catch {
+            return true
+          }
+        })()
+
+      if (isBrowserTopWindow) {
+        expect((globalThis as any)[marker]).toBe(true)
+      } else {
+        // In Node.js / vitest (not a browser top window), the marker is not set
+        expect((globalThis as any)[marker]).toBeUndefined()
+      }
     })
 
     it(`marker is only set in development mode`, () => {
-      // This test verifies the marker exists in our test environment
-      // In production (NODE_ENV=production), the marker would NOT be set
+      // This test verifies the marker behavior in our test environment.
+      // In production (NODE_ENV=production), the marker would NOT be set.
+      // In non-browser environments (Node.js / vitest), the marker is also not set.
       const marker = Symbol.for(`@tanstack/db/instance-marker`)
       const isDev =
         typeof process !== `undefined` && process.env.NODE_ENV !== `production`
+      const w = (globalThis as any).window
+      const isBrowserTopWindow =
+        w &&
+        `document` in w &&
+        (() => {
+          try {
+            return w === w.top
+          } catch {
+            return true
+          }
+        })()
 
-      if (isDev) {
+      if (isDev && isBrowserTopWindow) {
         expect((globalThis as any)[marker]).toBe(true)
+      } else {
+        // Either not dev mode or not a browser top window
+        expect((globalThis as any)[marker]).toBeUndefined()
       }
-      // Note: We can't easily test the production case without changing NODE_ENV
-      // which would affect the entire test suite
     })
 
     it(`can be disabled with environment variable`, () => {

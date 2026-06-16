@@ -172,12 +172,28 @@ export class DuplicateKeySyncError extends CollectionOperationError {
   constructor(
     key: string | number,
     collectionId: string,
-    options?: { hasCustomGetKey?: boolean; hasJoins?: boolean },
+    options?: {
+      hasCustomGetKey?: boolean
+      hasJoins?: boolean
+      hasDistinct?: boolean
+    },
   ) {
     const baseMessage = `Cannot insert document with key "${key}" from sync because it already exists in the collection "${collectionId}"`
 
-    // Provide enhanced guidance when custom getKey is used with joins
-    if (options?.hasCustomGetKey && options.hasJoins) {
+    // Provide enhanced guidance when custom getKey is used with distinct
+    if (options?.hasCustomGetKey && options.hasDistinct) {
+      super(
+        `${baseMessage}. ` +
+          `This collection uses a custom getKey with .distinct(). ` +
+          `The .distinct() operator deduplicates by the ENTIRE selected object (standard SQL behavior), ` +
+          `but your custom getKey extracts only a subset of fields. This causes multiple distinct rows ` +
+          `(with different values in non-key fields) to receive the same key. ` +
+          `To fix this, either: (1) ensure your SELECT only includes fields that uniquely identify each row, ` +
+          `(2) use .groupBy() with min()/max() aggregates to select one value per group, or ` +
+          `(3) remove the custom getKey to use the default key behavior.`,
+      )
+    } else if (options?.hasCustomGetKey && options.hasJoins) {
+      // Provide enhanced guidance when custom getKey is used with joins
       super(
         `${baseMessage}. ` +
           `This collection uses a custom getKey with joined queries. ` +
@@ -369,11 +385,26 @@ export class InvalidSourceError extends QueryBuilderError {
   }
 }
 
+export type SourceClauseContext =
+  | `from clause`
+  | `unionAll clause`
+  | `join clause`
+
 export class InvalidSourceTypeError extends QueryBuilderError {
-  constructor(context: string, type: string) {
+  constructor(context: SourceClauseContext, type: string) {
+    const expected =
+      context === `unionAll clause`
+        ? `an object with one or more key-value pairs like { alias: collection }`
+        : `an object with a single key-value pair like { alias: collection }`
+    const example =
+      context === `unionAll clause`
+        ? `.unionAll({ todos: todosCollection, events: eventsCollection })`
+        : context === `join clause`
+          ? `.join({ todos: todosCollection }, ({ todo, todos }) => eq(todo.id, todos.id))`
+          : `.from({ todos: todosCollection })`
     super(
-      `Invalid source for ${context}: Expected an object with a single key-value pair like { alias: collection }. ` +
-        `For example: .from({ todos: todosCollection }). Got: ${type}`,
+      `Invalid source for ${context}: Expected ${expected}. ` +
+        `For example: ${example}. Got: ${type}`,
     )
   }
 }
@@ -414,6 +445,26 @@ export class QueryCompilationError extends TanStackDBError {
 export class DistinctRequiresSelectError extends QueryCompilationError {
   constructor() {
     super(`DISTINCT requires a SELECT clause.`)
+  }
+}
+
+export class FnSelectWithGroupByError extends QueryCompilationError {
+  constructor() {
+    super(
+      `fn.select() cannot be used with groupBy(). ` +
+        `groupBy requires the compiler to statically analyze aggregate functions (count, sum, max, etc.) in the SELECT clause, ` +
+        `which is not possible with fn.select() since it is an opaque function. ` +
+        `Use .select() instead of .fn.select() when combining with groupBy().`,
+    )
+  }
+}
+
+export class UnsupportedRootScalarSelectError extends QueryCompilationError {
+  constructor() {
+    super(
+      `Top-level scalar select() is not supported by createLiveQueryCollection() or queryOnce(). ` +
+        `Return an object from .select(), or use the scalar query inside toArray(...) or concat(toArray(...)).`,
+    )
   }
 }
 

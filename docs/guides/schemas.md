@@ -832,6 +832,7 @@ A complete todo application demonstrating validation, transformations, and defau
 ```typescript
 import { z } from 'zod'
 import { createCollection } from '@tanstack/react-db'
+import { not } from '@tanstack/db'
 import { queryCollectionOptions } from '@tanstack/query-db-collection'
 
 // Schema with validation, transformations, and defaults
@@ -921,7 +922,7 @@ const todoCollection = createCollection(
 function TodoApp() {
   const { data: todos } = useLiveQuery(q =>
     q.from({ todo: todoCollection })
-      .where(({ todo }) => !todo.completed)
+      .where(({ todo }) => not(todo.completed))
       .orderBy(({ todo }) => todo.created_at, 'desc')
   )
 

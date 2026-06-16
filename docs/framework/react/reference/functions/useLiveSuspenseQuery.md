@@ -44,7 +44,7 @@ Object with reactive data and state - data is guaranteed to be defined
 #### collection
 
 ```ts
-collection: Collection<{ [K in string | number | symbol]: (TContext["result"] extends object ? any[any] : TContext["hasJoins"] extends true ? TContext["schema"] : TContext["schema"][TContext["fromSourceName"]])[K] }, string | number, {
+collection: Collection<{ [K in string | number | symbol]: ResultValue<TContext>[K] }, string | number, {
 }>;
 ```
 
@@ -57,7 +57,7 @@ data: InferResultType<TContext>;
 #### state
 
 ```ts
-state: Map<string | number, { [K in string | number | symbol]: (TContext["result"] extends object ? any[any] : TContext["hasJoins"] extends true ? TContext["schema"] : TContext["schema"][TContext["fromSourceName"]])[K] }>;
+state: Map<string | number, { [K in string | number | symbol]: ResultValue<TContext>[K] }>;
 ```
 
 ### Throws
@@ -198,7 +198,7 @@ Object with reactive data and state - data is guaranteed to be defined
 #### collection
 
 ```ts
-collection: Collection<{ [K in string | number | symbol]: (TContext["result"] extends object ? any[any] : TContext["hasJoins"] extends true ? TContext["schema"] : TContext["schema"][TContext["fromSourceName"]])[K] }, string | number, {
+collection: Collection<{ [K in string | number | symbol]: ResultValue<TContext>[K] }, string | number, {
 }>;
 ```
 
@@ -211,7 +211,7 @@ data: InferResultType<TContext>;
 #### state
 
 ```ts
-state: Map<string | number, { [K in string | number | symbol]: (TContext["result"] extends object ? any[any] : TContext["hasJoins"] extends true ? TContext["schema"] : TContext["schema"][TContext["fromSourceName"]])[K] }>;
+state: Map<string | number, { [K in string | number | symbol]: ResultValue<TContext>[K] }>;
 ```
 
 ### Throws

@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest'
+import { Temporal } from 'temporal-polyfill'
 import { DefaultMap } from '../src/utils.js'
 import { hash } from '../src/hashing/index.js'
 
@@ -168,6 +169,41 @@ describe(`hash`, () => {
       expect(typeof hash1).toBe(hashType)
       expect(hash1).toBe(hash2) // Same date should have same hash
       expect(hash1).not.toBe(hash3) // Different dates should have different hash
+    })
+
+    it(`should hash Temporal objects by value`, () => {
+      const date1 = Temporal.PlainDate.from(`2024-01-15`)
+      const date2 = Temporal.PlainDate.from(`2024-01-15`)
+      const date3 = Temporal.PlainDate.from(`2024-06-15`)
+
+      const hash1 = hash(date1)
+      const hash2 = hash(date2)
+      const hash3 = hash(date3)
+
+      expect(typeof hash1).toBe(hashType)
+      expect(hash1).toBe(hash2) // Same Temporal date should have same hash
+      expect(hash1).not.toBe(hash3) // Different Temporal dates should have different hash
+
+      // Different Temporal types with overlapping string representations should differ
+      const plainDate = Temporal.PlainDate.from(`2024-01-15`)
+      const plainDateTime = Temporal.PlainDateTime.from(`2024-01-15T00:00:00`)
+
+      expect(hash(plainDate)).not.toBe(hash(plainDateTime))
+
+      // Other Temporal types should also hash correctly
+      const time1 = Temporal.PlainTime.from(`10:30:00`)
+      const time2 = Temporal.PlainTime.from(`10:30:00`)
+      const time3 = Temporal.PlainTime.from(`14:00:00`)
+
+      expect(hash(time1)).toBe(hash(time2))
+      expect(hash(time1)).not.toBe(hash(time3))
+
+      const instant1 = Temporal.Instant.from(`2024-01-15T00:00:00Z`)
+      const instant2 = Temporal.Instant.from(`2024-01-15T00:00:00Z`)
+      const instant3 = Temporal.Instant.from(`2024-06-15T00:00:00Z`)
+
+      expect(hash(instant1)).toBe(hash(instant2))
+      expect(hash(instant1)).not.toBe(hash(instant3))
     })
 
     it(`should hash RegExp objects`, () => {

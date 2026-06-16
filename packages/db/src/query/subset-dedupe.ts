@@ -126,28 +126,26 @@ export class DeduplicatedLoadSubset {
       return prom
     }
 
-    // Not fully covered by existing data
-    // Compute the subset of data that is not covered by the existing data
-    // such that we only have to load that subset of missing data
-    const clonedOptions = cloneOptions(options)
+    // Preserve the original request for tracking and in-flight dedupe, but allow
+    // the backend request to be narrowed to only the missing subset.
+    const trackingOptions = cloneOptions(options)
+    const loadOptions = cloneOptions(options)
     if (this.unlimitedWhere !== undefined && options.limit === undefined) {
       // Compute difference to get only the missing data
       // We can only do this for unlimited queries
       // and we can only remove data that was loaded from unlimited queries
       // because with limited queries we have no way to express that we already loaded part of the matching data
-      clonedOptions.where =
-        minusWherePredicates(clonedOptions.where, this.unlimitedWhere) ??
-        clonedOptions.where
+      loadOptions.where =
+        minusWherePredicates(loadOptions.where, this.unlimitedWhere) ??
+        loadOptions.where
     }
 
     // Call underlying loadSubset to load the missing data
-    const resultPromise = this._loadSubset(clonedOptions)
+    const resultPromise = this._loadSubset(loadOptions)
 
     // Handle both sync (true) and async (Promise<void>) return values
     if (resultPromise === true) {
-      // Sync return - update tracking synchronously
-      // Clone options before storing to protect against caller mutation
-      this.updateTracking(clonedOptions)
+      this.updateTracking(trackingOptions)
       return true
     } else {
       // Async return - track the promise and update tracking after it resolves
@@ -158,16 +156,14 @@ export class DeduplicatedLoadSubset {
 
       // We need to create a reference to the in-flight entry so we can remove it later
       const inflightEntry = {
-        options: clonedOptions, // Store cloned options for subset matching
+        options: trackingOptions,
         promise: resultPromise
           .then((result) => {
             // Only update tracking if this request is still from the current generation
             // If reset() was called, the generation will have incremented and we should
             // not repopulate the state that was just cleared
             if (capturedGeneration === this.generation) {
-              // Use the cloned options that we captured before any caller mutations
-              // This ensures we track exactly what was loaded, not what the caller changed
-              this.updateTracking(clonedOptions)
+              this.updateTracking(trackingOptions)
             }
             return result
           })
@@ -239,5 +235,12 @@ export class DeduplicatedLoadSubset {
  * would reflect the mutated values rather than what was actually loaded.
  */
 export function cloneOptions(options: LoadSubsetOptions): LoadSubsetOptions {
-  return { ...options }
+  return {
+    ...options,
+    orderBy: options.orderBy?.map((clause) => ({
+      ...clause,
+      compareOptions: { ...clause.compareOptions },
+    })),
+    cursor: options.cursor ? { ...options.cursor } : undefined,
+  }
 }

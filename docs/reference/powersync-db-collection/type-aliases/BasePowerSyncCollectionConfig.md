@@ -6,10 +6,12 @@ title: BasePowerSyncCollectionConfig
 # Type Alias: BasePowerSyncCollectionConfig\<TTable, TSchema\>
 
 ```ts
-type BasePowerSyncCollectionConfig<TTable, TSchema> = Omit<BaseCollectionConfig<ExtractedTable<TTable>, string, TSchema>, "onInsert" | "onUpdate" | "onDelete" | "getKey"> & object;
+type BasePowerSyncCollectionConfig<TTable, TSchema> = Omit<BaseCollectionConfig<ExtractedTable<TTable>, string, TSchema>, "onInsert" | "onUpdate" | "onDelete" | "getKey" | "syncMode"> & object & 
+  | EagerSyncHooks
+  | OnDemandSyncHooks;
 ```
 
-Defined in: [definitions.ts:165](https://github.com/TanStack/db/blob/main/packages/powersync-db-collection/src/definitions.ts#L165)
+Defined in: [definitions.ts:203](https://github.com/TanStack/db/blob/main/packages/powersync-db-collection/src/definitions.ts#L203)
 
 ## Type Declaration
 

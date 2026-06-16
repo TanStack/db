@@ -7,11 +7,32 @@ export {
   type InitialQueryBuilder,
   type QueryBuilder,
   type Context,
+  type ContextSchema,
   type Source,
   type GetResult,
   type InferResultType,
   type ExtractContext,
   type QueryResult,
+  // Types needed for declaration emit (https://github.com/TanStack/db/issues/1012)
+  type ContextFromSource,
+  type ContextFromUnionBranches,
+  type ContextFromUnionSource,
+  type SchemaFromSource,
+  type SingleSource,
+  type InferCollectionType,
+  type MergeContextWithJoinType,
+  type MergeContextForJoinCallback,
+  type ApplyJoinOptionalityToMergedSchema,
+  type ResultTypeFromSelect,
+  type WithResult,
+  type JoinOnCallback,
+  type RefsForContext,
+  type WhereCallback,
+  type OrderByCallback,
+  type GroupByCallback,
+  type SelectObject,
+  type FunctionalHavingRow,
+  type Prettify,
 } from './builder/index.js'
 
 // Expression functions exports
@@ -36,6 +57,7 @@ export {
   length,
   concat,
   coalesce,
+  caseWhen,
   add,
   subtract,
   multiply,
@@ -46,6 +68,9 @@ export {
   sum,
   min,
   max,
+  // Includes helpers
+  toArray,
+  materialize,
 } from './builder/functions.js'
 
 // Ref proxy utilities
@@ -53,12 +78,20 @@ export type { Ref } from './builder/types.js'
 
 // Compiler
 export { compileQuery } from './compiler/index.js'
+export {
+  compileExpression,
+  compileSingleRowExpression,
+  toBooleanPredicate,
+} from './compiler/evaluators.js'
 
 // Live query collection utilities
 export {
   createLiveQueryCollection,
   liveQueryCollectionOptions,
 } from './live-query-collection.js'
+
+// One-shot query execution
+export { queryOnce, type QueryOnceConfig } from './query-once.js'
 
 export { type LiveQueryCollectionConfig } from './live/types.js'
 export { type LiveQueryCollectionUtils } from './live/collection-config-builder.js'

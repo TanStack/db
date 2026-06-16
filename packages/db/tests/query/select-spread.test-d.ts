@@ -3,6 +3,7 @@ import { createCollection } from '../../src/collection/index.js'
 import { createLiveQueryCollection } from '../../src/query/index.js'
 import { mockSyncCollectionOptions } from '../utils.js'
 import { add, length, upper } from '../../src/query/builder/functions.js'
+import type { OutputWithVirtual } from '../utils.js'
 
 // Base type used in bug report
 type Message = {
@@ -10,6 +11,12 @@ type Message = {
   text: string
   user: string
 }
+
+type OutputWithVirtualKeyed<T extends object> = OutputWithVirtual<
+  T,
+  string | number
+>
+type MessageWithVirtual = OutputWithVirtualKeyed<Message>
 
 const initialMessages: Array<Message> = [
   { id: 1, text: `hello`, user: `sam` },
@@ -39,11 +46,15 @@ describe(`Select spread typing`, () => {
     })
 
     const results = collection.toArray
-    expectTypeOf(results).toEqualTypeOf<Array<Message>>()
+    expectTypeOf(results).toMatchTypeOf<
+      Array<OutputWithVirtualKeyed<MessageWithVirtual>>
+    >()
 
     // Accessors should also be correctly typed
     const first = collection.get(1)
-    expectTypeOf(first).toEqualTypeOf<Message | undefined>()
+    expectTypeOf(first).toMatchTypeOf<
+      OutputWithVirtualKeyed<MessageWithVirtual> | undefined
+    >()
   })
 
   test(`spreading and adding computed fields merges types`, () => {
@@ -60,8 +71,12 @@ describe(`Select spread typing`, () => {
     })
 
     const results = collection.toArray
-    expectTypeOf(results).toEqualTypeOf<
-      Array<Message & { idPlusOne: number; upperText: string }>
+    expectTypeOf(results).toMatchTypeOf<
+      Array<
+        OutputWithVirtualKeyed<
+          MessageWithVirtual & { idPlusOne: number; upperText: string }
+        >
+      >
     >(undefined as any)
   })
 
@@ -79,8 +94,12 @@ describe(`Select spread typing`, () => {
     })
 
     const results = collection.toArray
-    expectTypeOf(results).toEqualTypeOf<
-      Array<Omit<Message, `user`> & { user: number }>
+    expectTypeOf(results).toMatchTypeOf<
+      Array<
+        OutputWithVirtualKeyed<
+          Omit<MessageWithVirtual, `user`> & { user: number }
+        >
+      >
     >(undefined as any)
   })
 
@@ -106,19 +125,15 @@ describe(`Select spread typing`, () => {
       },
     })
 
-    type Expected = {
-      id: number
-      user: string
-      text: string
-      theMessage: {
+    type Expected = MessageWithVirtual & {
+      theMessage: MessageWithVirtual & {
         spam: string
-        id: number
-        user: string
-        text: string
       }
     }
 
     const results = collection.toArray
-    expectTypeOf(results).toEqualTypeOf<Array<Expected>>(undefined as any)
+    expectTypeOf(results).toMatchTypeOf<
+      Array<OutputWithVirtualKeyed<Expected>>
+    >(undefined as any)
   })
 })

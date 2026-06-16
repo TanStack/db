@@ -68,6 +68,7 @@ export function generateSeedData(): SeedDataResult {
       `Rose ${i}`,
       `sam ${i}`,
       `Tina ${i}`,
+      `Ursula ${i}\nNewline`,
     ]
     const name = names[i % names.length]
 

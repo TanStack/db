@@ -9,7 +9,7 @@ title: unionWherePredicates
 function unionWherePredicates(predicates): BasicExpression<boolean>;
 ```
 
-Defined in: [packages/db/src/query/predicate-utils.ts:295](https://github.com/TanStack/db/blob/main/packages/db/src/query/predicate-utils.ts#L295)
+Defined in: [packages/db/src/query/predicate-utils.ts:297](https://github.com/TanStack/db/blob/main/packages/db/src/query/predicate-utils.ts#L297)
 
 Combine multiple where predicates with OR logic (union).
 Returns a predicate that is satisfied when any input predicate is satisfied.
