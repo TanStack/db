@@ -1,3 +1,4 @@
+import { randomUUID } from "../utils/uuid"
 import {
   CollectionConfigurationError,
   CollectionRequiresConfigError,
@@ -329,7 +330,7 @@ export class CollectionImpl<
     if (config.id) {
       this.id = config.id
     } else {
-      this.id = crypto.randomUUID()
+      this.id = randomUUID()
     }
 
     // Set default values for optional config properties

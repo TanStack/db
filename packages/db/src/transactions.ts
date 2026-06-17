@@ -1,4 +1,5 @@
 import { createDeferred } from './deferred'
+import { randomUUID } from './utils/uuid'
 import './duplicate-instance-check'
 import {
   MissingMutationFunctionError,
@@ -224,7 +225,7 @@ class Transaction<T extends object = Record<string, unknown>> {
     if (typeof config.mutationFn === `undefined`) {
       throw new MissingMutationFunctionError()
     }
-    this.id = config.id ?? crypto.randomUUID()
+    this.id = config.id ?? randomUUID()
     this.mutationFn = config.mutationFn
     this.state = `pending`
     this.mutations = []
