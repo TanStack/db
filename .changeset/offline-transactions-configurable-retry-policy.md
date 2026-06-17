@@ -1,5 +1,5 @@
 ---
-"@tanstack/offline-transactions": minor
+'@tanstack/offline-transactions': minor
 ---
 
 Allow overriding the retry policy via `OfflineConfig.retryPolicy`.
