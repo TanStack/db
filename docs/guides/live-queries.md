@@ -2577,6 +2577,8 @@ You can use math functions directly in `orderBy` to sort by computed values. Thi
 import { subtract, multiply, divide } from '@tanstack/db'
 
 // HN-style ranking: balance rating with recency
+// Date.now() is captured when this query is created. Recreate the query if
+// you need the recency score to advance as time passes.
 const rankedRecipes = createLiveQueryCollection((q) =>
   q
     .from({ r: recipesCollection })
