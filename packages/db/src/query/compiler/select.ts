@@ -5,7 +5,10 @@ import {
   Value as ValClass,
   isExpressionLike,
 } from '../ir.js'
-import { AggregateNotSupportedError, UnsafeAliasPathError } from '../../errors.js'
+import {
+  AggregateNotSupportedError,
+  UnsafeAliasPathError,
+} from '../../errors.js'
 import { compileExpression, isCaseWhenConditionTrue } from './evaluators.js'
 import { containsAggregate } from './group-by.js'
 import type {
@@ -38,7 +41,6 @@ function unwrapVal(input: any): any {
   if (input instanceof ValClass) return input.value
   return input
 }
-
 
 const UNSAFE_ALIAS_SEGMENTS = new Set([`__proto__`, `prototype`, `constructor`])
 
