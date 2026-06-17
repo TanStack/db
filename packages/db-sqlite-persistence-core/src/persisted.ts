@@ -1,4 +1,8 @@
-import { compileSingleRowExpression, randomUUID, toBooleanPredicate } from '@tanstack/db'
+import {
+  compileSingleRowExpression,
+  randomUUID,
+  toBooleanPredicate,
+} from '@tanstack/db'
 import {
   InvalidPersistedCollectionConfigError,
   InvalidPersistedCollectionCoordinatorError,

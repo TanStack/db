@@ -1,5 +1,5 @@
-import { afterEach, describe, expect, it, vi } from "vitest"
-import { randomUUID } from "../src/utils/uuid"
+import { afterEach, describe, expect, it, vi } from 'vitest'
+import { randomUUID } from '../src/utils/uuid'
 
 const UUID_V4_REGEX =
   /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/

@@ -40,6 +40,6 @@ export function randomUUID(): string {
   }
 
   throw new Error(
-    `No secure random number generator available: neither crypto.randomUUID nor crypto.getRandomValues is defined in this environment.`
+    `No secure random number generator available: neither crypto.randomUUID nor crypto.getRandomValues is defined in this environment.`,
   )
 }

@@ -1,4 +1,4 @@
-import { randomUUID } from "./utils/uuid"
+import { randomUUID } from './utils/uuid'
 import type {
   BaseCollectionConfig,
   CollectionConfig,

@@ -1,5 +1,9 @@
 // Storage adapters
-import { createOptimisticAction, createTransaction, randomUUID } from '@tanstack/db'
+import {
+  createOptimisticAction,
+  createTransaction,
+  randomUUID,
+} from '@tanstack/db'
 import { IndexedDBAdapter } from './storage/IndexedDBAdapter'
 import { LocalStorageAdapter } from './storage/LocalStorageAdapter'
 
