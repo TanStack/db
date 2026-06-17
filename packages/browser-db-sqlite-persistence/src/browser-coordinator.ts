@@ -1,3 +1,4 @@
+import { randomUUID } from '@tanstack/db-sqlite-persistence-core'
 import type {
   ApplyLocalMutationsResponse,
   PersistedCollectionCoordinator,
@@ -118,7 +119,7 @@ export type BrowserCollectionCoordinatorOptions = {
 // ---------------------------------------------------------------------------
 
 export class BrowserCollectionCoordinator implements PersistedCollectionCoordinator {
-  private readonly nodeId = crypto.randomUUID()
+  private readonly nodeId = randomUUID()
   private readonly dbName: string
   private adapter: AdapterWithPullSince | null
   private readonly channel: BroadcastChannel
@@ -205,7 +206,7 @@ export class BrowserCollectionCoordinator implements PersistedCollectionCoordina
       error?: string
     }>(collectionId, {
       type: `rpc:ensureRemoteSubset:req`,
-      rpcId: crypto.randomUUID(),
+      rpcId: randomUUID(),
       options,
     })
 
@@ -233,7 +234,7 @@ export class BrowserCollectionCoordinator implements PersistedCollectionCoordina
       error?: string
     }>(collectionId, {
       type: `rpc:ensurePersistedIndex:req`,
-      rpcId: crypto.randomUUID(),
+      rpcId: randomUUID(),
       signature,
       spec,
     })
@@ -252,16 +253,16 @@ export class BrowserCollectionCoordinator implements PersistedCollectionCoordina
     if (this.isLeader(collectionId)) {
       return this.handleApplyLocalMutations(collectionId, {
         type: `rpc:applyLocalMutations:req`,
-        rpcId: crypto.randomUUID(),
-        envelopeId: crypto.randomUUID(),
+        rpcId: randomUUID(),
+        envelopeId: randomUUID(),
         mutations,
       })
     }
 
     return this.sendRPC<ApplyLocalMutationsResponse>(collectionId, {
       type: `rpc:applyLocalMutations:req`,
-      rpcId: crypto.randomUUID(),
-      envelopeId: crypto.randomUUID(),
+      rpcId: randomUUID(),
+      envelopeId: randomUUID(),
       mutations,
     })
   }
@@ -273,14 +274,14 @@ export class BrowserCollectionCoordinator implements PersistedCollectionCoordina
     if (this.isLeader(collectionId)) {
       return this.handlePullSince(collectionId, {
         type: `rpc:pullSince:req`,
-        rpcId: crypto.randomUUID(),
+        rpcId: randomUUID(),
         fromRowVersion,
       })
     }
 
     return this.sendRPC<PullSinceResponse>(collectionId, {
       type: `rpc:pullSince:req`,
-      rpcId: crypto.randomUUID(),
+      rpcId: randomUUID(),
       fromRowVersion,
     })
   }
@@ -663,7 +664,7 @@ export class BrowserCollectionCoordinator implements PersistedCollectionCoordina
 
     // Build and apply the persisted transaction
     const tx = {
-      txId: crypto.randomUUID(),
+      txId: randomUUID(),
       term,
       seq,
       rowVersion,
