@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest'
+import { describe, expect, expectTypeOf, it } from 'vitest'
 import { CollectionImpl } from '../../../src/collection/index.js'
 import { Query, getQueryIR } from '../../../src/query/builder/index.js'
 import {
@@ -32,6 +32,8 @@ import {
   toArray,
   upper,
 } from '../../../src/query/builder/functions.js'
+import { compileSingleRowExpression } from '../../../src/query/compiler/evaluators.js'
+import type { BasicExpression } from '../../../src/query/ir.js'
 
 // Test schema
 interface Employee {
@@ -379,6 +381,22 @@ describe(`QueryBuilder Functions`, () => {
       const builtQuery = getQueryIR(query)
       const select = builtQuery.select!
       expect((select.adjusted_salary as any).name).toBe(`subtract`)
+    })
+
+    it(`RED review: nullish operands are coalesced to 0 at runtime but widen types`, () => {
+      const subtractExpression = subtract(10, null)
+      expectTypeOf(subtractExpression).toEqualTypeOf<BasicExpression<number>>()
+
+      const subtractResult = compileSingleRowExpression(subtractExpression)({})
+      expect(subtractResult).toBe(10)
+    })
+
+    it(`RED review: divide can return null for non-null operand types`, () => {
+      const divideExpression = divide(10, 0)
+      expectTypeOf(divideExpression).toEqualTypeOf<BasicExpression<number | null>>()
+
+      const divideResult = compileSingleRowExpression(divideExpression)({})
+      expect(divideResult).toBeNull()
     })
 
     it(`math functions can be used in orderBy`, () => {
