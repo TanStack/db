@@ -5,7 +5,7 @@ import {
   Value as ValClass,
   isExpressionLike,
 } from '../ir.js'
-import { AggregateNotSupportedError } from '../../errors.js'
+import { AggregateNotSupportedError, UnsafeAliasPathError } from '../../errors.js'
 import { compileExpression, isCaseWhenConditionTrue } from './evaluators.js'
 import { containsAggregate } from './group-by.js'
 import type {
@@ -39,6 +39,17 @@ function unwrapVal(input: any): any {
   return input
 }
 
+
+const UNSAFE_ALIAS_SEGMENTS = new Set([`__proto__`, `prototype`, `constructor`])
+
+function assertSafeAliasSegments(segments: ReadonlyArray<string>): void {
+  for (const seg of segments) {
+    if (UNSAFE_ALIAS_SEGMENTS.has(seg)) {
+      throw new UnsafeAliasPathError(seg)
+    }
+  }
+}
+
 /**
  * Processes a merge operation by merging source values into the target path
  */
@@ -47,6 +58,7 @@ function processMerge(
   namespacedRow: NamespacedRow,
   selectResults: Record<string, any>,
 ): void {
+  assertSafeAliasSegments(op.targetPath)
   const value = op.source(namespacedRow)
   if (value && typeof value === `object`) {
     // Ensure target object exists
@@ -89,6 +101,7 @@ function processNonMergeOp(
 ): void {
   // Support nested alias paths like "meta.author.name"
   const path = op.alias.split(`.`)
+  assertSafeAliasSegments(path)
   if (path.length === 1) {
     selectResults[op.alias] = op.compiled(namespacedRow)
   } else {
@@ -283,6 +296,9 @@ function addFromObject(
   ops: Array<SelectOp>,
 ) {
   for (const [key, value] of Object.entries(obj)) {
+    if (!key.startsWith(`__SPREAD_SENTINEL__`)) {
+      assertSafeAliasSegments(key.split(`.`))
+    }
     if (key.startsWith(`__SPREAD_SENTINEL__`)) {
       const rest = key.slice(`__SPREAD_SENTINEL__`.length)
       const splitIndex = rest.lastIndexOf(`__`)
