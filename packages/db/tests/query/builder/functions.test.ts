@@ -393,7 +393,9 @@ describe(`QueryBuilder Functions`, () => {
 
     it(`RED review: divide can return null for non-null operand types`, () => {
       const divideExpression = divide(10, 0)
-      expectTypeOf(divideExpression).toEqualTypeOf<BasicExpression<number | null>>()
+      expectTypeOf(divideExpression).toEqualTypeOf<
+        BasicExpression<number | null>
+      >()
 
       const divideResult = compileSingleRowExpression(divideExpression)({})
       expect(divideResult).toBeNull()
