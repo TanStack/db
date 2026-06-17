@@ -95,6 +95,17 @@ export interface OfflineConfig {
   storage?: StorageAdapter
   maxConcurrency?: number
   jitter?: boolean
+  /**
+   * Custom retry policy controlling whether a failed transaction is retried and
+   * how long to back off between attempts.
+   *
+   * Defaults to {@link DefaultRetryPolicy} (infinite retries with exponential
+   * backoff; `jitter` is forwarded to it). Provide your own implementation — or
+   * subclass `DefaultRetryPolicy` and override `shouldRetry` — to customize the
+   * classification of non-retryable errors (e.g. treat a 401 as transient and
+   * keep retrying instead of dropping the transaction).
+   */
+  retryPolicy?: RetryPolicy
   beforeRetry?: (
     transactions: Array<OfflineTransaction>,
   ) => Array<OfflineTransaction>
