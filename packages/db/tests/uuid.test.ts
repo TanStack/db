@@ -1,10 +1,10 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { randomUUID } from '../src/utils/uuid'
+import { safeRandomUUID } from '../src/utils/uuid'
 
 const UUID_V4_REGEX =
   /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/
 
-describe(`randomUUID helper`, () => {
+describe(`safeRandomUUID helper`, () => {
   afterEach(() => {
     vi.restoreAllMocks()
     vi.unstubAllGlobals()
@@ -14,13 +14,13 @@ describe(`randomUUID helper`, () => {
     const spy = vi
       .spyOn(globalThis.crypto, `randomUUID`)
       .mockReturnValue(`11111111-2222-4333-8444-555555555555`)
-    const id = randomUUID()
+    const id = safeRandomUUID()
     expect(spy).toHaveBeenCalledTimes(1)
     expect(id).toBe(`11111111-2222-4333-8444-555555555555`)
   })
 
   it(`falls back to getRandomValues when crypto.randomUUID is undefined (non-secure context)`, () => {
-    // Simulate a non-secure browser context where randomUUID is unavailable
+    // Simulate a non-secure browser context where crypto.randomUUID is unavailable
     // but getRandomValues remains.
     vi.stubGlobal(`crypto`, {
       randomUUID: undefined,
@@ -32,7 +32,7 @@ describe(`randomUUID helper`, () => {
       },
     })
 
-    const id = randomUUID()
+    const id = safeRandomUUID()
     expect(id).toMatch(UUID_V4_REGEX)
 
     // Verify version nibble == 4 and variant nibble in [8,9,a,b]
@@ -57,7 +57,7 @@ describe(`randomUUID helper`, () => {
 
     const seen = new Set<string>()
     for (let i = 0; i < 200; i++) {
-      const id = randomUUID()
+      const id = safeRandomUUID()
       expect(id).toMatch(UUID_V4_REGEX)
       seen.add(id)
     }
@@ -66,6 +66,11 @@ describe(`randomUUID helper`, () => {
 
   it(`throws when neither crypto.randomUUID nor crypto.getRandomValues is available`, () => {
     vi.stubGlobal(`crypto`, {})
-    expect(() => randomUUID()).toThrow(/No secure random number generator/)
+    expect(() => safeRandomUUID()).toThrow(/No secure random number generator/)
+  })
+
+  it(`throws when globalThis.crypto is undefined`, () => {
+    vi.stubGlobal(`crypto`, undefined)
+    expect(() => safeRandomUUID()).toThrow(/No secure random number generator/)
   })
 })

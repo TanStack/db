@@ -1,4 +1,4 @@
-import { randomUUID } from './utils/uuid'
+import { safeRandomUUID } from './utils/uuid'
 import {
   InvalidStorageDataFormatError,
   InvalidStorageObjectFormatError,
@@ -150,7 +150,7 @@ function validateJsonSerializable(
  * @returns A unique identifier string for tracking data versions
  */
 function generateUuid(): string {
-  return randomUUID()
+  return safeRandomUUID()
 }
 
 /**

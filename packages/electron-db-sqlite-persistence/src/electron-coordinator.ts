@@ -1,4 +1,4 @@
-import { randomUUID } from '@tanstack/db-sqlite-persistence-core'
+import { safeRandomUUID } from '@tanstack/db-sqlite-persistence-core'
 import type {
   ApplyLocalMutationsResponse,
   PersistedCollectionCoordinator,
@@ -119,7 +119,7 @@ export type ElectronCollectionCoordinatorOptions = {
 // ---------------------------------------------------------------------------
 
 export class ElectronCollectionCoordinator implements PersistedCollectionCoordinator {
-  private readonly nodeId = randomUUID()
+  private readonly nodeId = safeRandomUUID()
   private readonly dbName: string
   private adapter: AdapterWithPullSince | null
   private readonly channel: BroadcastChannel
@@ -206,7 +206,7 @@ export class ElectronCollectionCoordinator implements PersistedCollectionCoordin
       error?: string
     }>(collectionId, {
       type: `rpc:ensureRemoteSubset:req`,
-      rpcId: randomUUID(),
+      rpcId: safeRandomUUID(),
       options,
     })
 
@@ -234,7 +234,7 @@ export class ElectronCollectionCoordinator implements PersistedCollectionCoordin
       error?: string
     }>(collectionId, {
       type: `rpc:ensurePersistedIndex:req`,
-      rpcId: randomUUID(),
+      rpcId: safeRandomUUID(),
       signature,
       spec,
     })
@@ -253,16 +253,16 @@ export class ElectronCollectionCoordinator implements PersistedCollectionCoordin
     if (this.isLeader(collectionId)) {
       return this.handleApplyLocalMutations(collectionId, {
         type: `rpc:applyLocalMutations:req`,
-        rpcId: randomUUID(),
-        envelopeId: randomUUID(),
+        rpcId: safeRandomUUID(),
+        envelopeId: safeRandomUUID(),
         mutations,
       })
     }
 
     return this.sendRPC<ApplyLocalMutationsResponse>(collectionId, {
       type: `rpc:applyLocalMutations:req`,
-      rpcId: randomUUID(),
-      envelopeId: randomUUID(),
+      rpcId: safeRandomUUID(),
+      envelopeId: safeRandomUUID(),
       mutations,
     })
   }
@@ -274,14 +274,14 @@ export class ElectronCollectionCoordinator implements PersistedCollectionCoordin
     if (this.isLeader(collectionId)) {
       return this.handlePullSince(collectionId, {
         type: `rpc:pullSince:req`,
-        rpcId: randomUUID(),
+        rpcId: safeRandomUUID(),
         fromRowVersion,
       })
     }
 
     return this.sendRPC<PullSinceResponse>(collectionId, {
       type: `rpc:pullSince:req`,
-      rpcId: randomUUID(),
+      rpcId: safeRandomUUID(),
       fromRowVersion,
     })
   }
@@ -664,7 +664,7 @@ export class ElectronCollectionCoordinator implements PersistedCollectionCoordin
 
     // Build and apply the persisted transaction
     const tx = {
-      txId: randomUUID(),
+      txId: safeRandomUUID(),
       term,
       seq,
       rowVersion,

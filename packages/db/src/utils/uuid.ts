@@ -8,7 +8,7 @@
  *
  * See https://github.com/TanStack/db/issues/1541.
  */
-export function randomUUID(): string {
+export function safeRandomUUID(): string {
   const c: Crypto | undefined =
     typeof globalThis !== `undefined` ? (globalThis as any).crypto : undefined
 
