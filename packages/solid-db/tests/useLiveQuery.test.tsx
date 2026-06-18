@@ -2606,14 +2606,19 @@ it(`should keep all existing items when using a custom id field and reordering`,
     }),
   )
 
-    const query = useLiveQuery((q) =>
+  const rendered = renderHook(() => useLiveQuery((q) =>
       q
         .from({ items: collection })
         .orderBy(({ items }) => items.name, `asc`),
-    )
+    ),
+  )
+
+  await waitFor(() => {
+    expect(rendered.result.isReady).toBe(true) 
+  });
 
   expect(
-    Array.from(query()).map((item) => item.name),
+    Array.from(rendered.result()).map((item) => item.name),
   ).toEqual([`Bob`, `Kevin`, `Stuart`])
 
   collection.utils.begin()
@@ -2627,7 +2632,7 @@ it(`should keep all existing items when using a custom id field and reordering`,
   collection.utils.commit()
 
     expect(
-      Array.from(query()).map((item) => item.name),
+      Array.from(rendered.result()).map((item) => item.name),
     ).toEqual([`Alvin`, `Bob`, `Kevin`])
 })
   })
