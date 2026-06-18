@@ -2588,7 +2588,7 @@ describe(`Query Collections`, () => {
     })
   })
   describe(`custom id field`, () => {
-it(`should render correctly when using a custom id field and reordering`, async () => {
+it(`should keep all existing items when using a custom id field and reordering`, async () => {
   type Item = {
     _id: string
     name: string
@@ -2606,32 +2606,19 @@ it(`should render correctly when using a custom id field and reordering`, async 
     }),
   )
 
-  function TestComponent() {
     const query = useLiveQuery((q) =>
       q
         .from({ items: collection })
         .orderBy(({ items }) => items.name, `asc`),
     )
 
-    return (
-      <ol data-testid="list">
-        <For each={query()}>
-          {(item) => <li>{item.name}</li>}
-        </For>
-      </ol>
-    )
-  }
 
-  const { findByTestId } = render(() => <TestComponent />)
+   await waitFor(() => {
+     expect(query.isReady).toBe(true)
+   })
 
-  await waitFor(async () => {
-    const list = await findByTestId(`list`)
-    expect(list.children).toHaveLength(3)
-  })
-
-  let list = await findByTestId(`list`)
   expect(
-    Array.from(list.children).map((el) => el.textContent),
+    Array.from(query()).map((item) => item.name),
   ).toEqual([`Bob`, `Kevin`, `Stuart`])
 
   collection.utils.begin()
@@ -2644,11 +2631,9 @@ it(`should render correctly when using a custom id field and reordering`, async 
   })
   collection.utils.commit()
 
-  await waitFor(async () => {
-    list = await findByTestId(`list`)
-
+  await waitFor(() => {
     expect(
-      Array.from(list.children).map((el) => el.textContent),
+      Array.from(query()).map((item) => item.name),
     ).toEqual([`Alvin`, `Bob`, `Kevin`])
   })
 })
