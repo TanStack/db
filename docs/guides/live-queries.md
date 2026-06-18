@@ -2551,6 +2551,54 @@ Add two numbers:
 add(user.salary, user.bonus)
 ```
 
+#### `subtract(left, right)`
+Subtract two numbers:
+```ts
+subtract(user.salary, user.deductions)
+```
+
+#### `multiply(left, right)`
+Multiply two numbers:
+```ts
+multiply(item.price, item.quantity)
+```
+
+#### `divide(left, right)`
+Divide two numbers (returns `null` on divide-by-zero):
+```ts
+divide(order.total, order.itemCount)
+```
+
+#### Computed Columns in orderBy
+
+You can use math functions directly in `orderBy` to sort by computed values. This is useful for ranking algorithms that combine multiple factors:
+
+```ts
+import { subtract, multiply, divide } from '@tanstack/db'
+
+// HN-style ranking: balance rating with recency
+// Date.now() is captured when this query is created. Recreate the query if
+// you need the recency score to advance as time passes.
+const rankedRecipes = createLiveQueryCollection((q) =>
+  q
+    .from({ r: recipesCollection })
+    .orderBy(
+      ({ r }) =>
+        subtract(
+          multiply(r.rating, r.timesMade), // weighted rating
+          divide(
+            subtract(Date.now(), r.lastMadeAt), // time since last made
+            3600000 * 24 // convert ms to days
+          )
+        ),
+      'desc'
+    )
+    .limit(20)
+)
+```
+
+> **Note:** When using computed expressions in `orderBy` with `limit()`, lazy loading optimization is skipped (all matching data is loaded first, then sorted). For large collections where this matters, consider pre-computing the ranking score as a stored field.
+
 ### Utility Functions
 
 #### `coalesce(...values)`
