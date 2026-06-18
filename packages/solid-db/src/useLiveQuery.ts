@@ -346,7 +346,9 @@ export function useLiveQuery(
     currentCollection: Collection<any, any, any>,
   ) => {
     setData((prev) =>
-      reconcile(Array.from(currentCollection.values()), { key: "$key" })(prev).filter(Boolean),
+      reconcile(Array.from(currentCollection.values()), { key: '$key' })(
+        prev,
+      ).filter(Boolean),
     )
   }
 

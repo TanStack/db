@@ -3,4 +3,3 @@
 ---
 
 Fix reconcile usage in useLiveQuery by setting the key field to "$key" so that items are matched correctly during reconciliation. Fixes #1524.
-

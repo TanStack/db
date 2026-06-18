@@ -2588,52 +2588,57 @@ describe(`Query Collections`, () => {
     })
   })
   describe(`custom id field`, () => {
-it(`should keep all existing items when using a custom id field and reordering`, async () => {
-  type Item = {
-    _id: string
-    name: string
-  }
+    it(`should keep all existing items when using a custom id field and reordering`, async () => {
+      type Item = {
+        _id: string
+        name: string
+      }
 
-  const collection = createCollection(
-    mockSyncCollectionOptions<Item>({
-      id: `custom-key-reorder-test`,
-      getKey: (item) => item._id,
-      initialData: [
-        { _id: `bob1`, name: `Bob` },
-        { _id: `kevin1`, name: `Kevin` },
-        { _id: `stuart1`, name: `Stuart` },
-      ],
-    }),
-  )
+      const collection = createCollection(
+        mockSyncCollectionOptions<Item>({
+          id: `custom-key-reorder-test`,
+          getKey: (item) => item._id,
+          initialData: [
+            { _id: `bob1`, name: `Bob` },
+            { _id: `kevin1`, name: `Kevin` },
+            { _id: `stuart1`, name: `Stuart` },
+          ],
+        }),
+      )
 
-  const rendered = renderHook(() => useLiveQuery((q) =>
-      q
-        .from({ items: collection })
-        .orderBy(({ items }) => items.name, `asc`),
-    ),
-  )
+      const rendered = renderHook(() =>
+        useLiveQuery((q) =>
+          q
+            .from({ items: collection })
+            .orderBy(({ items }) => items.name, `asc`),
+        ),
+      )
 
-  await waitFor(() => {
-    expect(rendered.result.isReady).toBe(true) 
-  });
+      await waitFor(() => {
+        expect(rendered.result.isReady).toBe(true)
+      })
 
-  expect(
-    Array.from(rendered.result()).map((item) => item.name),
-  ).toEqual([`Bob`, `Kevin`, `Stuart`])
+      expect(Array.from(rendered.result()).map((item) => item.name)).toEqual([
+        `Bob`,
+        `Kevin`,
+        `Stuart`,
+      ])
 
-  collection.utils.begin()
-  collection.utils.write({
-    type: `update`,
-    value: {
-      _id: `stuart1`,
-      name: `Alvin`,
-    },
-  })
-  collection.utils.commit()
+      collection.utils.begin()
+      collection.utils.write({
+        type: `update`,
+        value: {
+          _id: `stuart1`,
+          name: `Alvin`,
+        },
+      })
+      collection.utils.commit()
 
-    expect(
-      Array.from(rendered.result()).map((item) => item.name),
-    ).toEqual([`Alvin`, `Bob`, `Kevin`])
-})
+      expect(Array.from(rendered.result()).map((item) => item.name)).toEqual([
+        `Alvin`,
+        `Bob`,
+        `Kevin`,
+      ])
+    })
   })
 })
