@@ -1,5 +1,14 @@
 # @tanstack/db-sqlite-persistence-core
 
+## 0.2.1
+
+### Patch Changes
+
+- Use a safe `randomUUID` helper that falls back to `crypto.getRandomValues` when `crypto.randomUUID` is unavailable (non-secure browser contexts such as dev servers reached via a LAN IP over HTTP). Fixes #1541. ([#1593](https://github.com/TanStack/db/pull/1593))
+
+- Updated dependencies [[`2147345`](https://github.com/TanStack/db/commit/2147345236ceee6e73d9fc6c0cdc2385833199fc), [`00389a4`](https://github.com/TanStack/db/commit/00389a47b258ad58fc3a03c5cc6f66957b9bd2d1)]:
+  - @tanstack/db@0.6.9
+
 ## 0.2.0
 
 ### Minor Changes
