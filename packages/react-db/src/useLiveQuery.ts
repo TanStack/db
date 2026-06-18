@@ -446,7 +446,7 @@ export function useLiveQuery(
       // Already-ready collections won't emit an initial change. Notify React
       // ourselves, but defer to a microtask — calling onStoreChange synchronously
       // here lands during the render-to-commit window and trips React's
-      // "state update on a component that hasn't mounted yet" warning (#1587).
+      // "state update on a component that hasn't mounted yet" warning.
       if (collectionRef.current.status === `ready`) {
         queueMicrotask(() => {
           if (unsubscribed) return
