@@ -1338,11 +1338,11 @@ importers:
         version: 4.0.1
     devDependencies:
       '@powersync/common':
-        specifier: 1.54.0
-        version: 1.54.0
+        specifier: 1.55.0
+        version: 1.55.0
       '@powersync/node':
         specifier: 0.18.1
-        version: 0.18.1(@powersync/common@1.54.0)(better-sqlite3@12.8.0)
+        version: 0.18.1(@powersync/common@1.55.0)(better-sqlite3@12.8.0)
       '@types/debug':
         specifier: ^4.1.12
         version: 4.1.12
@@ -4831,8 +4831,8 @@ packages:
   '@poppinss/exception@1.2.3':
     resolution: {integrity: sha512-dCED+QRChTVatE9ibtoaxc+WkdzOSjYTKi/+uacHWIsfodVfpsueo3+DKpgU5Px8qXjgmXkSvhXvSCz3fnP9lw==}
 
-  '@powersync/common@1.54.0':
-    resolution: {integrity: sha512-/gzitw4iQL4UI7ILf7TUzCy/cfbDJGU3/aiN/ciaLtDd2Uts3wYARVKclSW0OJhPPisKCX0E8Ev/iZGQPbTgDA==}
+  '@powersync/common@1.55.0':
+    resolution: {integrity: sha512-c9K2Gac9wOB4ijVnQT388g7Yeuh6VrfJZFXaL6Rag9Fp7F8JzAYcrWaULLTdMnzm7VW6b6XT5M2ip5yLS8oSBg==}
 
   '@powersync/node@0.18.1':
     resolution: {integrity: sha512-fcTICgs61CAEb39xiC7pedYsPgbjUInJ/47dr7RIdnEHpAgjWH8bW95/b70qK1fQUANy9lKBBF3PcmfswVgfCw==}
@@ -8172,9 +8172,6 @@ packages:
   etag@1.8.1:
     resolution: {integrity: sha512-aIL5Fx7mawVa300al2BnEE4iNvo1qETxLrPI/o05L7z6go7fCw1J6EQmbK4FmJ2AS7kgVF/KEZWufBfdClMcPg==}
     engines: {node: '>= 0.6'}
-
-  event-iterator@2.0.0:
-    resolution: {integrity: sha512-KGft0ldl31BZVV//jj+IAIGCxkvvUkkON+ScH6zfoX+l+omX6001ggyRSpI0Io2Hlro0ThXotswCtfzS8UkIiQ==}
 
   event-reduce-js@5.2.7:
     resolution: {integrity: sha512-Vi6aIiAmakzx81JAwhw8L988aSX5a3ZqqVjHyZa9xFU6P4oT1IotoDreWtjNlS+fvEnASvyIQT565nmkOtns/Q==}
@@ -16483,14 +16480,13 @@ snapshots:
 
   '@poppinss/exception@1.2.3': {}
 
-  '@powersync/common@1.54.0':
+  '@powersync/common@1.55.0':
     dependencies:
-      event-iterator: 2.0.0
       js-logger: 1.6.1
 
-  '@powersync/node@0.18.1(@powersync/common@1.54.0)(better-sqlite3@12.8.0)':
+  '@powersync/node@0.18.1(@powersync/common@1.55.0)(better-sqlite3@12.8.0)':
     dependencies:
-      '@powersync/common': 1.54.0
+      '@powersync/common': 1.55.0
       async-mutex: 0.5.0
       bson: 6.10.4
       comlink: 4.4.2
@@ -20579,8 +20575,6 @@ snapshots:
   esutils@2.0.3: {}
 
   etag@1.8.1: {}
-
-  event-iterator@2.0.0: {}
 
   event-reduce-js@5.2.7:
     dependencies:

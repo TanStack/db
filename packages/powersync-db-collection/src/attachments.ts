@@ -10,44 +10,22 @@ import { PowerSyncTransactor } from './PowerSyncTransactor'
 import type {
   AbstractPowerSyncDatabase,
   AttachmentData,
-  AttachmentErrorHandler,
-  ILogger,
-  LocalStorageAdapter,
-  RemoteStorageAdapter,
-  WatchedAttachmentItem,
+  AttachmentQueueOptions,
 } from '@powersync/common'
 import type { Collection } from '@tanstack/db'
 
-type AttachmentQueueRow = (typeof _tmpSchema)['types']['attachments']
+export type AttachmentQueueRow = (typeof _tmpSchema)['types']['attachments']
 
-/**
- * This extends the default AttachmentQueue constructor params
- * FIXME(powersync) we should export this type from the common SDK.
- */
-type TanStackDBAttachmentQueueOptions = {
-  db: AbstractPowerSyncDatabase
+export type TanStackDBAttachmentQueueOptions = AttachmentQueueOptions & {
   /**
    * For TanStack, we want access to the synced TanStackDB collection.
    * In order to have the same relational data be set in a single transaction.
    * This also allows for joining both TanStackDB collections.
    */
-  attachmentsCollection: Collection<AttachmentQueueRow>
-  remoteStorage: RemoteStorageAdapter
-  localStorage: LocalStorageAdapter
-  watchAttachments: (
-    onUpdate: (attachment: Array<WatchedAttachmentItem>) => Promise<void>,
-    signal: AbortSignal,
-  ) => void
-  tableName?: string
-  logger?: ILogger
-  syncIntervalMs?: number
-  syncThrottleDuration?: number
-  downloadAttachments?: boolean
-  archivedCacheLimit?: number
-  errorHandler?: AttachmentErrorHandler
+  attachmentsCollection: Collection<AttachmentQueueRow, string>
 }
 
-interface SaveFileTanStackOptions {
+export interface SaveFileTanStackOptions {
   data: AttachmentData
   fileExtension: string
   mediaType?: string
@@ -60,7 +38,7 @@ interface SaveFileTanStackOptions {
   updateHook?: (attachment: AttachmentQueueRow) => Promise<void>
 }
 
-interface DeleteFileTanStackOptions {
+export interface DeleteFileTanStackOptions {
   id: string
   updateHook?: (attachment: AttachmentQueueRow) => Promise<void>
 }
@@ -74,7 +52,7 @@ const _tmpSchema = new Schema({
  */
 export class TanStackDBAttachmentQueue extends AttachmentQueue {
   readonly powersync: AbstractPowerSyncDatabase
-  readonly collection: Collection<AttachmentQueueRow>
+  readonly collection: Collection<AttachmentQueueRow, string>
 
   constructor(params: TanStackDBAttachmentQueueOptions) {
     super(params)

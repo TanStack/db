@@ -59,10 +59,10 @@
     "p-defer": "^4.0.1"
   },
   "peerDependencies": {
-    "@powersync/common": "^1.54.0"
+    "@powersync/common": "^1.55.0"
   },
   "devDependencies": {
-    "@powersync/common": "1.54.0",
+    "@powersync/common": "1.55.0",
     "@powersync/node": "0.18.1",
     "@types/debug": "^4.1.12",
     "@vitest/coverage-istanbul": "^3.2.4",
