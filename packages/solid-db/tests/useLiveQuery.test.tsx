@@ -2587,6 +2587,7 @@ describe(`Query Collections`, () => {
       expect(rendered.result()).toBeUndefined()
     })
   })
+  describe(`custom id field`, () => {
 it(`should render correctly when using a custom key field and reordering`, async () => {
   type Item = {
     _id: string
@@ -2651,4 +2652,5 @@ it(`should render correctly when using a custom key field and reordering`, async
     ).toEqual([`Alvin`, `Bob`, `Kevin`])
   })
 })
+  })
 })
