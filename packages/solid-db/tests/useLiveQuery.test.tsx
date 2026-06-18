@@ -2588,7 +2588,7 @@ describe(`Query Collections`, () => {
     })
   })
   describe(`custom id field`, () => {
-it(`should render correctly when using a custom key field and reordering`, async () => {
+it(`should render correctly when using a custom id field and reordering`, async () => {
   type Item = {
     _id: string
     name: string
