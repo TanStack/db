@@ -247,10 +247,16 @@ export class BTreeIndex<
       toKey,
       toInclusive,
       (indexedValue, _) => {
-        // Compare against the normalized key: indexed values are stored
-        // normalized (e.g. dates as timestamps), the raw `from` would
-        // never compare equal to them
-        if (!fromInclusive && this.compareFn(indexedValue, fromKey) === 0) {
+        // Only exclude the boundary when an exclusive lower bound was
+        // actually provided. Without a `from` bound, `fromKey` defaults to
+        // the minimum key and must not be dropped. Compare against the
+        // normalized key since indexed values are stored normalized
+        // (e.g. dates as timestamps), so the raw `from` would never match.
+        if (
+          hasFrom &&
+          !fromInclusive &&
+          this.compareFn(indexedValue, fromKey) === 0
+        ) {
           // the B+ tree `forRange` method does not support exclusive lower bounds
           // so we need to exclude it manually
           return
