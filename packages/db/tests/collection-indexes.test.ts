@@ -1289,6 +1289,23 @@ describe(`Collection Indexes`, () => {
       const names = result.map((r) => r.value.name).sort()
       expect(names).toEqual([`Alice`, `Charlie`])
     })
+
+    it(`should match a full scan when a range condition uses an undefined bound`, () => {
+      // A comparison against `undefined` matches no rows (a comparison with
+      // null/undefined is never true), so `gt(score, undefined)` excludes
+      // every row and the whole AND must return nothing. The index-optimized
+      // path must agree with a plain full scan and not leak rows.
+      collection.createIndex((row) => row.score)
+
+      const result = collection.currentStateAsChanges({
+        where: and(
+          gt(new PropRef([`score`]), undefined),
+          lt(new PropRef([`score`]), 90),
+        ),
+      })!
+
+      expect(result).toEqual([])
+    })
   })
 
   describe(`Index Usage Verification`, () => {
