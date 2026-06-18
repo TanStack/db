@@ -284,19 +284,33 @@ function optimizeCompoundRangeQuery<
 
         // Build range query options, keeping the strictest bound on each
         // side: a larger lower bound (or smaller upper bound) wins, and at
-        // equal values the exclusive operation wins over the inclusive one
+        // equal values the exclusive operation wins over the inclusive one.
+        // `hasFromBound`/`hasToBound` track whether a bound was selected,
+        // separately from the bound value (which may legitimately be falsy).
         let from: any = undefined
         let to: any = undefined
+        let hasFromBound = false
+        let hasToBound = false
         let fromInclusive = true
         let toInclusive = true
+        // A comparison against null/undefined is never true, but in an index
+        // those values sort as the smallest key, so a range query cannot
+        // represent such a bound. Track it and force a re-filter instead of
+        // claiming the result is exact.
+        let hasNullBound = false
 
         for (const { operation, value } of operations) {
+          if (value == null) {
+            hasNullBound = true
+            continue
+          }
           switch (operation) {
             case `gt`:
             case `gte`: {
-              const cmp = from === undefined ? 1 : compare(value, from)
+              const cmp = hasFromBound ? compare(value, from) : 1
               if (cmp > 0) {
                 from = value
+                hasFromBound = true
                 fromInclusive = operation === `gte`
               } else if (cmp === 0 && operation === `gt`) {
                 fromInclusive = false
@@ -305,9 +319,10 @@ function optimizeCompoundRangeQuery<
             }
             case `lt`:
             case `lte`: {
-              const cmp = to === undefined ? -1 : compare(value, to)
+              const cmp = hasToBound ? compare(value, to) : -1
               if (cmp < 0) {
                 to = value
+                hasToBound = true
                 toInclusive = operation === `lte`
               } else if (cmp === 0 && operation === `lt`) {
                 toInclusive = false
@@ -317,14 +332,14 @@ function optimizeCompoundRangeQuery<
           }
         }
 
-        // Only pass the bounds that exist: rangeQuery distinguishes an
-        // absent bound (open-ended) from an explicit undefined value
+        // Only pass the bounds that were selected: rangeQuery distinguishes
+        // an absent bound (open-ended) from an explicitly provided one
         const rangeOptions: Record<string, any> = {}
-        if (from !== undefined) {
+        if (hasFromBound) {
           rangeOptions.from = from
           rangeOptions.fromInclusive = fromInclusive
         }
-        if (to !== undefined) {
+        if (hasToBound) {
           rangeOptions.to = to
           rangeOptions.toInclusive = toInclusive
         }
@@ -333,7 +348,9 @@ function optimizeCompoundRangeQuery<
         return {
           canOptimize: true,
           matchingKeys,
-          isExact: true,
+          // If a null/undefined bound was present, the range query result is
+          // a superset of the real matches and must be re-filtered
+          isExact: !hasNullBound,
           coveredArgIndices: new Set(operations.map((op) => op.argIndex)),
         }
       }
@@ -477,8 +494,11 @@ function optimizeAndExpression<T extends object, TKey extends string | number>(
   // Try to optimize the remaining conjuncts, keep the optimizable ones.
   // Conjuncts that cannot use an index make the result inexact: the
   // intersection is then a superset of the true result and must be
-  // re-filtered against the full expression by the caller.
-  let allConjunctsExact = true
+  // re-filtered against the full expression by the caller. The compound
+  // range result may itself be inexact (e.g. a null/undefined bound).
+  let allConjunctsExact = !compoundRangeResult.canOptimize
+    ? true
+    : compoundRangeResult.isExact
   for (const [argIndex, arg] of expression.args.entries()) {
     if (coveredArgIndices.has(argIndex)) {
       continue
