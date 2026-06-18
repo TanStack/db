@@ -494,18 +494,28 @@ type ExtractRef<T> = T extends unknown
 // no extra keys from a spread were merged in). When extra keys are present
 // (the case for spread-produced inline objects that pick up the RefBrand
 // symbol from spreading a Ref), we fall through to the recursive projection.
-type IsTrueRef<T> = T extends RefLeaf<infer U>
-  ? [Exclude<keyof T, typeof RefBrand | typeof NullableBrand | keyof VirtualRowProps | keyof U>] extends [never]
-    ? true
+type IsTrueRef<T> =
+  T extends RefLeaf<infer U>
+    ? [
+        Exclude<
+          keyof T,
+          | typeof RefBrand
+          | typeof NullableBrand
+          | keyof VirtualRowProps
+          | keyof U
+        >,
+      ] extends [never]
+      ? true
+      : false
     : false
-  : false
 
 // Propagate nullable-join semantics into the user-data shape.
-type DeepNullable<T> = T extends Record<string, any>
-  ? IsPlainObject<T> extends true
-    ? { [K in keyof T]: DeepNullable<T[K]> }
+type DeepNullable<T> =
+  T extends Record<string, any>
+    ? IsPlainObject<T> extends true
+      ? { [K in keyof T]: DeepNullable<T[K]> }
+      : T | undefined
     : T | undefined
-  : T | undefined
 
 // Helper type to extract the underlying type from various expression types
 type ExtractExpressionType<T> =

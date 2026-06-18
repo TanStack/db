@@ -1,5 +1,5 @@
 ---
-"@tanstack/db": patch
+'@tanstack/db': patch
 ---
 
 Fix `.select()` collapsing discriminated-union fields to the intersection of common keys (#1511). `Ref<T>` now distributes over `T` so `keyof (A | B | C)` no longer reduces the union to its common keys, and `ExtractRef<T>` now distinguishes a real branded `Ref` (where the underlying user type `U` can be returned directly) from a spread-produced inline object (which still needs to be projected through `ResultTypeFromSelect`). This preserves discriminated unions both when the field is selected at the top level and when the field is nested inside another selected object.
