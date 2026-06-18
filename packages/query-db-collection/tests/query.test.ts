@@ -290,7 +290,9 @@ describe(`QueryCollection`, () => {
     }).not.toThrow()
 
     await vi.waitFor(() => {
-      expect(stripVirtualProps(products.get(`product-1`) as any)).toEqual({
+      expect(
+        stripVirtualProps((collection.get(`line-1`) as any).product.toArray[0]),
+      ).toEqual({
         id: `product-1`,
         categoryId: 2,
         name: `Widget`,

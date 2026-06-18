@@ -614,11 +614,11 @@ describe(`includes subqueries`, () => {
       }).not.toThrow()
       lineItems.utils.commit()
 
-      await new Promise((resolve) => setTimeout(resolve, 10))
-
-      expect(childItems((collection.get(1) as any).product)).toEqual([
-        { id: 10, categoryId: 1, name: `Widget` },
-      ])
+      await vi.waitFor(() => {
+        expect(childItems((collection.get(1) as any).product)).toEqual([
+          { id: 10, categoryId: 1, name: `Widget` },
+        ])
+      })
     })
 
     it(`Collection includes: child change does not re-emit the parent row`, async () => {
