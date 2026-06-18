@@ -567,6 +567,60 @@ describe(`includes subqueries`, () => {
   })
 
   describe(`change propagation`, () => {
+    it(`Collection includes: joined child update does not duplicate insert into child collection`, async () => {
+      type LineItem = { id: number; productId: number; qty: number }
+      type Product = { id: number; categoryId: number; name: string }
+
+      const lineItems = createCollection(
+        mockSyncCollectionOptions<LineItem>({
+          id: `includes-line-items`,
+          getKey: (lineItem) => lineItem.id,
+          initialData: [{ id: 1, productId: 10, qty: 1 }],
+        }),
+      )
+      const products = createCollection(
+        mockSyncCollectionOptions<Product>({
+          id: `includes-products`,
+          getKey: (product) => product.id,
+          initialData: [{ id: 10, categoryId: 1, name: `Widget` }],
+        }),
+      )
+
+      const collection = createLiveQueryCollection((q) =>
+        q.from({ lineItem: lineItems }).select(({ lineItem }) => ({
+          id: lineItem.id,
+          product: q
+            .from({ product: products })
+            .where(({ product }) => eq(product.id, lineItem.productId))
+            .select(({ product }) => ({
+              id: product.id,
+              categoryId: product.categoryId,
+              name: product.name,
+            })),
+        })),
+      )
+      await collection.preload()
+
+      lineItems.utils.begin()
+      expect(() => {
+        lineItems.utils.write({
+          type: `delete`,
+          value: { id: 1, productId: 10, qty: 1 },
+        })
+        lineItems.utils.write({
+          type: `insert`,
+          value: { id: 1, productId: 10, qty: 2 },
+        })
+      }).not.toThrow()
+      lineItems.utils.commit()
+
+      await new Promise((resolve) => setTimeout(resolve, 10))
+
+      expect(childItems((collection.get(1) as any).product)).toEqual([
+        { id: 10, categoryId: 1, name: `Widget` },
+      ])
+    })
+
     it(`Collection includes: child change does not re-emit the parent row`, async () => {
       const collection = buildIncludesQuery()
       await collection.preload()

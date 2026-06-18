@@ -9,7 +9,10 @@ import {
   inArray,
   or,
 } from '@tanstack/db'
-import { stripVirtualProps } from '../../db/tests/utils'
+import {
+  mockSyncCollectionOptions,
+  stripVirtualProps,
+} from '../../db/tests/utils'
 import { persistedCollectionOptions } from '../../db-sqlite-persistence-core/src'
 import { queryCollectionOptions } from '../src/query'
 import type { QueryFunctionContext } from '@tanstack/query-core'
@@ -226,6 +229,75 @@ describe(`QueryCollection`, () => {
     expect(collection._state.syncedData.size).toBe(initialItems.length)
     expect(collection._state.syncedData.get(`1`)).toEqual(initialItems[0])
     expect(collection._state.syncedData.get(`2`)).toEqual(initialItems[1])
+  })
+
+  it(`should not duplicate insert into includes child collection after update refetch`, async () => {
+    type LineItem = { id: string; productId: string }
+    type Product = { id: string; categoryId: number; name: string }
+
+    const lineItems = createCollection(
+      mockSyncCollectionOptions<LineItem>({
+        id: `query-collection-line-items`,
+        getKey: (lineItem) => lineItem.id,
+        initialData: [{ id: `line-1`, productId: `product-1` }],
+      }),
+    )
+
+    let productsData: Array<Product> = [
+      { id: `product-1`, categoryId: 1, name: `Widget` },
+    ]
+
+    const products = createCollection(
+      queryCollectionOptions<Product>({
+        id: `query-collection-products`,
+        queryClient,
+        queryKey: [`products`],
+        queryFn: vi
+          .fn()
+          .mockImplementation(() => Promise.resolve(productsData)),
+        getKey: (product) => product.id,
+        startSync: true,
+        onUpdate: async ({ transaction }) => {
+          for (const mutation of transaction.mutations) {
+            productsData = productsData.map((product) =>
+              product.id === mutation.key
+                ? (mutation.modified)
+                : product,
+            )
+          }
+        },
+      }),
+    )
+
+    const collection = createLiveQueryCollection((q) =>
+      q.from({ lineItem: lineItems }).select(({ lineItem }) => ({
+        id: lineItem.id,
+        product: q
+          .from({ product: products })
+          .where(({ product }) => eq(product.id, lineItem.productId))
+          .select(({ product }) => ({
+            id: product.id,
+            categoryId: product.categoryId,
+            name: product.name,
+          })),
+      })),
+    )
+
+    await collection.preload()
+
+    expect(() => {
+      products.update(`product-1`, (draft) => {
+        draft.categoryId = 2
+      })
+    }).not.toThrow()
+
+    await vi.waitFor(() => {
+      expect(stripVirtualProps(products.get(`product-1`) as any)).toEqual({
+        id: `product-1`,
+        categoryId: 2,
+        name: `Widget`,
+      })
+    })
   })
 
   it(`should update collection when query data changes`, async () => {

@@ -1671,14 +1671,19 @@ function flushIncludesState(
             if (entry.orderByIndices && change.orderByIndex !== undefined) {
               entry.orderByIndices.set(change.value, change.orderByIndex)
             }
+            const key = entry.syncMethods.collection.getKeyFromItem(
+              change.value,
+            )
+            const childAlreadyExists = entry.syncMethods.collection.has(key)
+
             if (change.inserts > 0 && change.deletes === 0) {
-              entry.syncMethods.write({ value: change.value, type: `insert` })
+              entry.syncMethods.write({
+                value: change.value,
+                type: childAlreadyExists ? `update` : `insert`,
+              })
             } else if (
               change.inserts > change.deletes ||
-              (change.inserts === change.deletes &&
-                entry.syncMethods.collection.has(
-                  entry.syncMethods.collection.getKeyFromItem(change.value),
-                ))
+              (change.inserts === change.deletes && childAlreadyExists)
             ) {
               entry.syncMethods.write({ value: change.value, type: `update` })
             } else if (change.deletes > 0) {

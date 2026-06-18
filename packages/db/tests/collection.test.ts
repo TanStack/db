@@ -51,7 +51,7 @@ describe(`Collection`, () => {
   it(`throws DuplicateKeySyncError instead of TypeError when config has no utils`, async () => {
     let begin!: () => void
     let write!: Parameters<
-      SyncConfig<{ id: number; text: string }>[`sync`]
+      SyncConfig<{ id: number; text: string }, number>[`sync`]
     >[0][`write`]
 
     const collection = createCollection<{ id: number; text: string }, number>({
