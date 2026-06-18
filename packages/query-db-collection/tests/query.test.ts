@@ -260,9 +260,7 @@ describe(`QueryCollection`, () => {
         onUpdate: async ({ transaction }) => {
           for (const mutation of transaction.mutations) {
             productsData = productsData.map((product) =>
-              product.id === mutation.key
-                ? (mutation.modified)
-                : product,
+              product.id === mutation.key ? mutation.modified : product,
             )
           }
         },
