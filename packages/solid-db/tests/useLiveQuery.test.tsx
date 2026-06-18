@@ -2612,11 +2612,6 @@ it(`should keep all existing items when using a custom id field and reordering`,
         .orderBy(({ items }) => items.name, `asc`),
     )
 
-
-   await waitFor(() => {
-     expect(query.isReady).toBe(true)
-   })
-
   expect(
     Array.from(query()).map((item) => item.name),
   ).toEqual([`Bob`, `Kevin`, `Stuart`])
@@ -2631,11 +2626,9 @@ it(`should keep all existing items when using a custom id field and reordering`,
   })
   collection.utils.commit()
 
-  await waitFor(() => {
     expect(
       Array.from(query()).map((item) => item.name),
     ).toEqual([`Alvin`, `Bob`, `Kevin`])
-  })
 })
   })
 })
