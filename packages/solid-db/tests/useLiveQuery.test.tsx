@@ -2587,4 +2587,68 @@ describe(`Query Collections`, () => {
       expect(rendered.result()).toBeUndefined()
     })
   })
+it(`should render correctly when using a custom key field and reordering`, async () => {
+  type Item = {
+    _id: string
+    name: string
+  }
+
+  const collection = createCollection(
+    mockSyncCollectionOptions<Item>({
+      id: `custom-key-reorder-test`,
+      getKey: (item) => item._id,
+      initialData: [
+        { _id: `bob1`, name: `Bob` },
+        { _id: `kevin1`, name: `Kevin` },
+        { _id: `stuart1`, name: `Stuart` },
+      ],
+    }),
+  )
+
+  function TestComponent() {
+    const query = useLiveQuery((q) =>
+      q
+        .from({ items: collection })
+        .orderBy(({ items }) => items.name, `asc`),
+    )
+
+    return (
+      <ol data-testid="list">
+        <For each={query()}>
+          {(item) => <li>{item.name}</li>}
+        </For>
+      </ol>
+    )
+  }
+
+  const { findByTestId } = render(() => <TestComponent />)
+
+  await waitFor(async () => {
+    const list = await findByTestId(`list`)
+    expect(list.children).toHaveLength(3)
+  })
+
+  let list = await findByTestId(`list`)
+  expect(
+    Array.from(list.children).map((el) => el.textContent),
+  ).toEqual([`Bob`, `Kevin`, `Stuart`])
+
+  collection.utils.begin()
+  collection.utils.write({
+    type: `update`,
+    value: {
+      _id: `stuart1`,
+      name: `Alvin`,
+    },
+  })
+  collection.utils.commit()
+
+  await waitFor(async () => {
+    list = await findByTestId(`list`)
+
+    expect(
+      Array.from(list.children).map((el) => el.textContent),
+    ).toEqual([`Alvin`, `Bob`, `Kevin`])
+  })
+})
 })
