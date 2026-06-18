@@ -7,9 +7,8 @@ import { mockSyncCollectionOptions } from '../../db/tests/utils'
 import type * as ReactNS from 'react'
 
 // Intercept React.useSyncExternalStore so we can capture the `subscribe`
-// callback that `useLiveQuery` registers and observe whether it invokes
-// `onStoreChange` synchronously (the bug in #1587) or defers it (the fix
-// in #1588).
+// callback that `useLiveQuery` registers and assert that it does not invoke
+// `onStoreChange` synchronously when the collection is already ready.
 let capturedSubscribe: ((cb: () => void) => () => void) | null = null
 
 vi.mock('react', async () => {
@@ -31,11 +30,11 @@ const initialPersons: Array<Person> = [
   { id: `2`, name: `B`, age: 20 },
 ]
 
-describe(`issue #1587: eager onStoreChange must not fire synchronously during subscribe`, () => {
+describe(`useLiveQuery: eager onStoreChange must not fire synchronously during subscribe`, () => {
   it(`defers the initial ready-state onStoreChange to a microtask`, async () => {
     const base = createCollection(
       mockSyncCollectionOptions<Person>({
-        id: `issue-1587-persons`,
+        id: `eager-onstorechange-persons`,
         getKey: (p) => p.id,
         initialData: initialPersons,
       }),
@@ -55,8 +54,8 @@ describe(`issue #1587: eager onStoreChange must not fire synchronously during su
     const onStoreChange = vi.fn()
     const unsub = capturedSubscribe!(onStoreChange)
 
-    // BUG (main): onStoreChange is called synchronously here because the
-    // collection is already ready. FIX (#1588): defers via queueMicrotask.
+    // onStoreChange must not be invoked synchronously inside subscribe;
+    // it should be deferred to a microtask so it lands after React commits.
     expect(onStoreChange).not.toHaveBeenCalled()
 
     await Promise.resolve()
