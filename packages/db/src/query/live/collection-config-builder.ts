@@ -5,6 +5,7 @@ import {
   compileQuery,
 } from '../compiler/index.js'
 import { createCollection } from '../../collection/index.js'
+import { deepEquals } from '../../utils.js'
 import {
   MissingAliasInputsError,
   SetWindowRequiresOrderByError,
@@ -797,6 +798,11 @@ export class CollectionConfigBuilder<
                 existing.orderByIndex = changes.orderByIndex
               }
             }
+            // Keep the previous value/index from the retract side (the old row)
+            if (changes.deletes > 0 && changes.previousValue !== undefined) {
+              existing.previousValue = changes.previousValue
+              existing.previousOrderByIndex = changes.previousOrderByIndex
+            }
           } else {
             merged.set(customKey, { ...changes })
           }
@@ -809,6 +815,9 @@ export class CollectionConfigBuilder<
         begin()
         changesToApply.forEach(this.applyChanges.bind(this, config))
         commit()
+        // Order-only moves (same value, new orderByIndex) are suppressed by the
+        // collection's value-diff; emit them directly so ordered consumers update.
+        this.emitOrderOnlyMoves(config, changesToApply)
       }
       pendingChanges = new Map()
 
@@ -964,6 +973,61 @@ export class CollectionConfigBuilder<
       throw new Error(
         `Could not apply changes: ${JSON.stringify(changes)}. This should never happen.`,
       )
+    }
+  }
+
+  /**
+   * Emit `update` events for rows whose position changed but whose value did
+   * not. The collection's synced commit diffs by value (deepEquals), so a pure
+   * reorder — same projected value, new orderByIndex — is silently swallowed
+   * even though the sorted output order changed. We detect those moves from the
+   * retract/insert pair the orderBy operator already streams and emit directly,
+   * mirroring the includes-materialization direct-emit pattern.
+   *
+   * The gate (index changed AND value unchanged) is mutually exclusive with the
+   * collection's own emit (which fires only when the value changed), so this can
+   * never double-emit, and it is a no-op for collections without orderBy.
+   */
+  private emitOrderOnlyMoves(
+    config: SyncMethods<TResult>,
+    changesToApply: Map<unknown, Changes<TResult>>,
+  ): void {
+    const moves: Array<ChangeMessage<TResult>> = []
+    for (const changes of changesToApply.values()) {
+      const {
+        deletes,
+        inserts,
+        value,
+        orderByIndex,
+        previousValue,
+        previousOrderByIndex,
+      } = changes
+      if (
+        inserts > 0 &&
+        deletes > 0 &&
+        orderByIndex !== undefined &&
+        previousOrderByIndex !== undefined &&
+        orderByIndex !== previousOrderByIndex &&
+        previousValue !== undefined &&
+        deepEquals(previousValue, value)
+      ) {
+        moves.push({
+          type: `update`,
+          key: config.collection.getKeyFromItem(value),
+          value,
+          previousValue,
+        })
+      }
+    }
+
+    if (moves.length > 0) {
+      const changesManager = (config.collection as any)._changes as {
+        emitEvents: (
+          changes: Array<ChangeMessage<TResult>>,
+          forceEmit?: boolean,
+        ) => void
+      }
+      changesManager.emitEvents(moves, true)
     }
   }
 
@@ -2009,6 +2073,10 @@ function accumulateChanges<T>(
   }
   if (multiplicity < 0) {
     changes.deletes += Math.abs(multiplicity)
+    // Capture the retracted (old) value/index so an order-only move can be
+    // detected later, even when the retract and insert arrive in either order.
+    changes.previousValue = value
+    changes.previousOrderByIndex = orderByIndex
   } else if (multiplicity > 0) {
     changes.inserts += multiplicity
     // Update value to the latest version for this key
