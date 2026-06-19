@@ -209,6 +209,9 @@ export class UserListComponent {
 
 > **Note:** React hooks derive query identity from structured query IR by default. Dependency arrays are still accepted for backwards compatibility, but warn in development and will be removed in 1.0. See the [React Adapter documentation](../framework/react/overview#query-identity) for details.
 
+For server rendering and hydration, live query preloading feeds source collection
+rows into the `DbClient` payload. See the [SSR and Hydration guide](./ssr.md).
+
 #### When React Needs a Query Key
 
 Use `queryKey` when the query contains opaque runtime logic that cannot be represented in structured IR, such as `.fn.where`, `.fn.select`, or `.fn.having`. The key becomes the explicit identity for that query:
@@ -2369,7 +2372,9 @@ createEffect({
 
 ### Using with React
 
-The `useLiveQueryEffect` hook manages the effect lifecycle automatically — creating on mount, disposing on unmount, and recreating when dependencies change:
+The `useLiveQueryEffect` hook manages the effect lifecycle automatically —
+creating on mount, disposing on unmount, and recreating when effect dependencies
+change:
 
 ```tsx
 import { useLiveQueryEffect } from '@tanstack/react-db'
@@ -2394,7 +2399,10 @@ function ChatComponent({ channelId }: { channelId: string }) {
 }
 ```
 
-The second argument is a dependency array (like `useEffect`). When dependencies change, the old effect is disposed and a new one is created with the updated config.
+The second argument is still a React-style dependency array for the effect
+lifecycle. This is separate from `useLiveQuery` identity: React live query hooks
+derive identity from structured IR by default and use `queryKey` only for opaque
+or hot-path queries.
 
 ### Complete Example
 

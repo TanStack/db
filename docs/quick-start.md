@@ -89,6 +89,12 @@ function App() {
 
 You now have collections, live queries, and optimistic mutations! Let's break this down further.
 
+If you are building with SSR, see the [SSR and Hydration guide](./guides/ssr.md)
+after this quick start. The short version is that SSR apps use stable
+`collectionOptions(...)` descriptors, materialize them through a request-scoped
+`DbClient` on the server, then hydrate a browser `DbClient` before React hooks
+read from DB.
+
 ## Installation
 
 ```bash
@@ -132,6 +138,9 @@ const todoCollection = collectionOptions(
   })
 )
 ```
+
+The `queryKey` above is TanStack Query's cache key for loading the collection.
+React live queries below derive their own identity from structured query IR.
 
 ## 2. Materialize the Collection
 
