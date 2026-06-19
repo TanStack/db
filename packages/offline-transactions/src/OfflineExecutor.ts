@@ -587,6 +587,17 @@ export class OfflineExecutor {
     return this.executor.getRunningCount()
   }
 
+  /**
+   * Number of optimistic holds currently kept alive by `confirmWrite` (see
+   * `OfflineConfig.confirmWrite`). Returns 0 when the hook is unused.
+   */
+  getActiveConfirmationHoldCount(): number {
+    if (!this.executor) {
+      return 0
+    }
+    return this.executor.getActiveConfirmationHoldCount()
+  }
+
   getOnlineDetector(): OnlineDetector {
     return this.onlineDetector
   }
@@ -596,6 +607,12 @@ export class OfflineExecutor {
   }
 
   dispose(): void {
+    // Drop any optimistic holds still waiting on confirmation so they don't
+    // outlive the executor.
+    if (this.executor) {
+      this.executor.releaseConfirmationHolds()
+    }
+
     for (const collection of Object.values(this.config.collections)) {
       collection.deferDataRefresh = null
     }

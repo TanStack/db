@@ -1,7 +1,8 @@
-import { createTransaction } from '@tanstack/db'
 import { DefaultRetryPolicy } from '../retry/RetryPolicy'
 import { NonRetriableError } from '../types'
 import { withNestedSpan } from '../telemetry/tracer'
+import { createOptimisticHold } from './OptimisticHold'
+import type { OptimisticHold } from './OptimisticHold'
 import type { KeyScheduler } from './KeyScheduler'
 import type { OutboxManager } from '../outbox/OutboxManager'
 import type {
@@ -9,8 +10,14 @@ import type {
   OfflineTransaction,
   TransactionSignaler,
 } from '../types'
+import type { PendingMutation } from '@tanstack/db'
 
 const HANDLED_EXECUTION_ERROR = Symbol(`HandledExecutionError`)
+
+// Default safety cap for `OfflineConfig.confirmWrite` holds. See the field's
+// docs in types.ts: each hold adds O(transactions) recompute cost, so a large,
+// fast drain is bounded to avoid O(n^2) churn.
+const DEFAULT_MAX_CONFIRMATION_HOLDS = 1000
 
 export class TransactionExecutor {
   private scheduler: KeyScheduler
@@ -21,6 +28,10 @@ export class TransactionExecutor {
   private executionPromise: Promise<void> | null = null
   private offlineExecutor: TransactionSignaler
   private retryTimer: ReturnType<typeof setTimeout> | null = null
+  // Optimistic holds kept alive across the post-commit confirmation window
+  // (see `OfflineConfig.confirmWrite`). Tracked so they can all be released on
+  // `clear()` (logout / outbox clear / company-switch).
+  private confirmationHolds = new Set<OptimisticHold>()
 
   constructor(
     scheduler: KeyScheduler,
@@ -104,7 +115,10 @@ export class TransactionExecutor {
             await this.outbox.remove(transaction.id)
 
             span.setAttribute(`result`, `success`)
-            this.offlineExecutor.resolveTransaction(transaction.id, result)
+            // Resolve the waiting transaction and, if `confirmWrite` is set, hold
+            // its optimistic state until confirmation completes — OFF this serial
+            // path, so it never blocks the next transaction below.
+            this.resolveWithOptionalConfirmation(transaction, result)
           } catch (error) {
             const err =
               error instanceof Error ? error : new Error(String(error))
@@ -129,7 +143,9 @@ export class TransactionExecutor {
     }
   }
 
-  private async runMutationFn(transaction: OfflineTransaction): Promise<void> {
+  private async runMutationFn(
+    transaction: OfflineTransaction,
+  ): Promise<unknown> {
     const mutationFn = this.config.mutationFns[transaction.mutationFnName]
 
     if (!mutationFn) {
@@ -150,10 +166,124 @@ export class TransactionExecutor {
       metadata: transaction.metadata ?? {},
     }
 
-    await mutationFn({
+    // Return the result so it can be surfaced to the waiting transaction and to
+    // `confirmWrite` (e.g. a server-assigned txid). Previously this value was
+    // awaited and discarded.
+    return await mutationFn({
       transaction: transactionWithMutations as any,
       idempotencyKey: transaction.idempotencyKey,
     })
+  }
+
+  /**
+   * Resolve the waiting transaction, then — if `confirmWrite` is configured —
+   * keep its optimistic state painted until confirmation completes.
+   *
+   * The confirmation runs OFF the serial drain path: this method returns
+   * immediately so the executor can move on to the next transaction. The hold is
+   * created BEFORE `resolveTransaction` so the optimistic overlay is owned
+   * continuously (resolveTransaction drops the original/restoration transaction's
+   * overlay; the hold keeps the rows painted across that boundary, no flicker).
+   */
+  private resolveWithOptionalConfirmation(
+    transaction: OfflineTransaction,
+    result: unknown,
+  ): void {
+    const confirmWrite = this.config.confirmWrite
+
+    // No hook, or nothing to hold: behave exactly as before the hook existed.
+    if (!confirmWrite || transaction.mutations.length === 0) {
+      this.offlineExecutor.resolveTransaction(transaction.id, result)
+      return
+    }
+
+    const maxHolds =
+      this.config.maxConfirmationHolds ?? DEFAULT_MAX_CONFIRMATION_HOLDS
+    if (this.confirmationHolds.size >= maxHolds) {
+      // Safety valve: too many concurrent holds. Skip the hold — the optimistic
+      // overlay drops at resolve as it would without the hook. The write is
+      // already durably committed, so correctness is unaffected.
+      this.offlineExecutor.resolveTransaction(transaction.id, result)
+      return
+    }
+
+    const hold = this.createConfirmationHold(transaction.mutations)
+    this.offlineExecutor.resolveTransaction(transaction.id, result)
+
+    if (!hold) {
+      // Hold creation failed (already logged). The write is committed; just let
+      // the optimistic state drop as it did before the hook existed.
+      return
+    }
+
+    this.runConfirmation(confirmWrite, transaction, result, hold)
+  }
+
+  // Never throws: a throw here would propagate into the serial drain and make
+  // the executor treat an already-committed write as failed.
+  private createConfirmationHold(
+    mutations: Array<PendingMutation>,
+  ): OptimisticHold | null {
+    try {
+      const hold = createOptimisticHold(mutations)
+      this.confirmationHolds.add(hold)
+      return hold
+    } catch (error) {
+      console.warn(`Failed to create confirmation hold:`, error)
+      return null
+    }
+  }
+
+  private runConfirmation(
+    confirmWrite: NonNullable<OfflineConfig[`confirmWrite`]>,
+    transaction: OfflineTransaction,
+    result: unknown,
+    hold: OptimisticHold,
+  ): void {
+    const release = (): void => {
+      this.confirmationHolds.delete(hold)
+      try {
+        hold.release()
+      } catch (error) {
+        console.warn(`Failed to release confirmation hold:`, error)
+      }
+    }
+
+    // Off the serial drain: `confirmWrite` must never block the next
+    // transaction, and a rejection must never surface as an unhandled rejection
+    // (the write already committed). Whatever happens, release exactly once.
+    void Promise.resolve()
+      .then(() =>
+        confirmWrite({
+          transactionId: transaction.id,
+          mutations: transaction.mutations,
+          result,
+          metadata: transaction.metadata,
+        }),
+      )
+      .catch((error) => {
+        // The write is durably committed; a failed confirmation only means we
+        // stop holding the optimistic overlay (a possible brief flicker).
+        console.warn(`confirmWrite rejected for ${transaction.id}:`, error)
+      })
+      .finally(release)
+  }
+
+  /** Release every active confirmation hold immediately. */
+  releaseConfirmationHolds(): void {
+    for (const hold of [...this.confirmationHolds]) {
+      this.confirmationHolds.delete(hold)
+      try {
+        hold.release()
+      } catch (error) {
+        console.warn(`Failed to release confirmation hold:`, error)
+      }
+    }
+  }
+
+  /** Diagnostics / tests: holds currently keeping optimistic state painted. */
+  getActiveConfirmationHoldCount(): number {
+    return this.confirmationHolds.size
   }
 
   private async handleError(
@@ -270,47 +400,17 @@ export class TransactionExecutor {
       }
 
       try {
-        // Create a restoration transaction that holds mutations for optimistic state display.
-        // It will never commit - the real mutation is handled by the offline executor.
-        const restorationTx = createTransaction({
+        // Hold the mutations for optimistic display while the write is pending.
+        // It will never commit - the real mutation is handled by the offline
+        // executor, which tears the hold down via cleanupRestorationTransaction
+        // (keyed by the offline transaction id) once the write resolves.
+        const hold = createOptimisticHold(offlineTx.mutations, {
           id: offlineTx.id,
-          autoCommit: false,
-          mutationFn: async () => {},
         })
-
-        // Prevent unhandled promise rejection when cleanup calls rollback()
-        // We don't care about this promise - it's just for holding mutations
-        restorationTx.isPersisted.promise.catch(() => {
-          // Intentionally ignored - restoration transactions are cleaned up
-          // via cleanupRestorationTransaction, not through normal commit flow
-        })
-
-        restorationTx.applyMutations(offlineTx.mutations)
-
-        // Register with each affected collection's state manager
-        const touchedCollections = new Set<string>()
-        for (const mutation of offlineTx.mutations) {
-          // Defensive check for corrupted deserialized data
-          // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition
-          if (!mutation.collection) {
-            continue
-          }
-          const collectionId = mutation.collection.id
-          if (touchedCollections.has(collectionId)) {
-            continue
-          }
-          touchedCollections.add(collectionId)
-
-          mutation.collection._state.transactions.set(
-            restorationTx.id,
-            restorationTx,
-          )
-          mutation.collection._state.recomputeOptimisticState(true)
-        }
 
         this.offlineExecutor.registerRestorationTransaction(
           offlineTx.id,
-          restorationTx,
+          hold.transaction,
         )
       } catch (error) {
         console.warn(
@@ -324,6 +424,7 @@ export class TransactionExecutor {
   clear(): void {
     this.scheduler.clear()
     this.clearRetryTimer()
+    this.releaseConfirmationHolds()
   }
 
   getPendingCount(): number {
