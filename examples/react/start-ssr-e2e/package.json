@@ -6,7 +6,8 @@
   "scripts": {
     "build": "vite build",
     "dev": "vite dev",
-    "test:e2e": "pnpm --filter @tanstack/db build && pnpm --filter @tanstack/react-db build && playwright test"
+    "test:e2e": "pnpm --filter @tanstack/db build && pnpm --filter @tanstack/react-db build && playwright test",
+    "test:e2e:hosted": "playwright test"
   },
   "dependencies": {
     "@tanstack/react-db": "^0.1.85",

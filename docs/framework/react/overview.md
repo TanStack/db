@@ -58,7 +58,7 @@ function TodoList() {
 
 ### Query Identity
 
-React query hooks derive the live query identity from structured query IR by default. The hook runs the query builder, normalizes the resulting IR, and uses that as the identity. When the derived identity changes, the old live query collection is cleaned up and a new one is created.
+React live query hooks derive the live query identity from structured query IR by default. The hook runs the query builder, normalizes the resulting IR, and uses that as the identity. When the derived identity changes, the old live query collection is cleaned up and a new one is created.
 
 That means normal structured queries do not need a separate `queryKey`. Collection descriptors provide stable collection IDs, and captured values inside structured expressions become part of the derived identity:
 
@@ -145,6 +145,8 @@ const { data } = useLiveQuery({
 ```
 
 Dependency arrays are still accepted for backwards compatibility, but they warn in development and will be removed in 1.0.
+
+For SSR setup, collection hydration, and migration details, see the [SSR and Hydration guide](../../guides/ssr.md).
 
 ### useLiveInfiniteQuery
 

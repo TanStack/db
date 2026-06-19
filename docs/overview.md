@@ -35,6 +35,7 @@ It extends TanStack Query with collections, live queries and optimistic mutation
 ## Contents
 
 - [How it works](#how-it-works) &mdash; understand the TanStack DB development model and how the pieces fit together
+- [SSR and hydration](./guides/ssr.md) &mdash; use `DbClient` to dehydrate collection rows on the server and hydrate them in the browser
 - [API reference](#api-reference) &mdash; for the primitives and function interfaces
 - [Usage examples](#usage-examples) &mdash; examples of common usage patterns
 - [More info](#more-info) &mdash; where to find support and more information
