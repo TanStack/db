@@ -8,6 +8,7 @@ import {
   createOptimisticAction,
   eq,
   gt,
+  toArray,
 } from '@tanstack/db'
 import {
   For,
@@ -2451,6 +2452,97 @@ describe(`Query Collections`, () => {
       // Verify ordering
       const finalIds = rendered.result().map((p: any) => p.id)
       expect(finalIds).toEqual([`1`, `2`, `3`, `4`])
+    })
+  })
+
+  /**
+   * @see https://github.com/TanStack/db/issues/1571
+   *
+   * Regression: when an include (e.g. `toArray`) is updated, the parent row
+   * held by the collection is mutated in place. Solid's `reconcile`
+   * short-circuits on `next === target`, so without a clone-on-sync the
+   * `data` array never reflected the new child rows even though the
+   * underlying collection had them.
+   */
+  describe(`toArray include reactivity (#1571)`, () => {
+    type IncludeProject = { id: number; name: string }
+    type IncludeIssue = { id: number; projectId: number; title: string }
+
+    const initialIncludeProjects: Array<IncludeProject> = [
+      { id: 1, name: `Alpha` },
+      { id: 2, name: `Beta` },
+    ]
+    const initialIncludeIssues: Array<IncludeIssue> = [
+      { id: 10, projectId: 1, title: `Bug in Alpha` },
+      { id: 20, projectId: 2, title: `Bug in Beta` },
+    ]
+
+    it(`should reflect child inserts in the parent row's toArray include`, async () => {
+      const projects = createCollection(
+        mockSyncCollectionOptions<IncludeProject>({
+          id: `toarray-include-projects`,
+          getKey: (p) => p.id,
+          initialData: initialIncludeProjects,
+        }),
+      )
+      const issues = createCollection(
+        mockSyncCollectionOptions<IncludeIssue>({
+          id: `toarray-include-issues`,
+          getKey: (i) => i.id,
+          initialData: initialIncludeIssues,
+        }),
+      )
+
+      const rendered = renderHook(() => {
+        return useLiveQuery((q) =>
+          q.from({ p: projects }).select(({ p }) => ({
+            id: p.id,
+            name: p.name,
+            issueTitles: toArray(
+              q
+                .from({ i: issues })
+                .where(({ i }) => eq(i.projectId, p.id))
+                .select(({ i }) => i.title),
+            ),
+          })),
+        )
+      })
+
+      await waitFor(() => {
+        expect(rendered.result().length).toBe(2)
+      })
+
+      const alphaBefore = rendered
+        .result()
+        .find((r: any) => r.id === 1) as { issueTitles: Array<string> }
+      expect(alphaBefore.issueTitles).toEqual([`Bug in Alpha`])
+
+      // Insert a child issue tied to project Alpha. Upstream mutates the
+      // parent row's `issueTitles` field in place; without the clone-on-sync
+      // fix the parent row reference stays stable and reconcile bails before
+      // recursing into the array.
+      issues.utils.begin()
+      issues.utils.write({
+        type: `insert`,
+        value: { id: 11, projectId: 1, title: `Feature for Alpha` },
+      })
+      issues.utils.commit()
+
+      await waitFor(() => {
+        const alphaAfter = rendered
+          .result()
+          .find((r: any) => r.id === 1) as { issueTitles: Array<string> }
+        expect(alphaAfter.issueTitles).toEqual(
+          expect.arrayContaining([`Bug in Alpha`, `Feature for Alpha`]),
+        )
+        expect(alphaAfter.issueTitles.length).toBe(2)
+      })
+
+      // Beta is untouched.
+      const beta = rendered.result().find((r: any) => r.id === 2) as {
+        issueTitles: Array<string>
+      }
+      expect(beta.issueTitles).toEqual([`Bug in Beta`])
     })
   })
 
