@@ -4902,6 +4902,122 @@ describe(`includes subqueries`, () => {
 
       expect(data().runs[0].texts).toBe(run1TextsBefore)
     })
+
+    // Reproduction for https://github.com/TanStack/db/issues/1501
+    //
+    // 3 collection levels: products -> priceRanges -> region.
+    // Two priceRanges in DIFFERENT parent groups share the same deepest
+    // correlation key (regionId === 1):
+    //   - priceRange 1 belongs to product 1 (T-Shirt), regionId 1
+    //   - priceRange 3 belongs to product 2 (Hoodie),  regionId 1
+    // Both should resolve their nested `region` to [{ id: 1, name: 'Europe' }].
+    //
+    // Observed bug: the nested region pipeline buffer is shared by reference
+    // across per-parent-group states (createPerEntryIncludesStates) and
+    // drainNestedBuffers deletes a buffer entry after routing it to the first
+    // matching parent group. The sibling that drains second finds nothing, so
+    // one of the two `region` arrays comes back empty.
+    it(`resolves nested grandchildren for sibling groups sharing a correlation key`, async () => {
+      type Product = { id: number; title: string }
+      type PriceRange = { id: number; productId: number; regionId: number }
+      type Region = { id: number; name: string }
+
+      const products = createCollection(
+        localOnlyCollectionOptions<Product>({
+          id: `repro-1501-products`,
+          getKey: (p) => p.id,
+          initialData: [
+            { id: 1, title: `T-Shirt` },
+            { id: 2, title: `Hoodie` },
+          ],
+        }),
+      )
+
+      const priceRanges = createCollection(
+        localOnlyCollectionOptions<PriceRange>({
+          id: `repro-1501-price-ranges`,
+          getKey: (r) => r.id,
+          initialData: [
+            { id: 1, productId: 1, regionId: 1 },
+            { id: 2, productId: 1, regionId: 2 },
+            { id: 3, productId: 2, regionId: 1 }, // same regionId as priceRange 1
+          ],
+        }),
+      )
+
+      const regions = createCollection(
+        localOnlyCollectionOptions<Region>({
+          id: `repro-1501-regions`,
+          getKey: (r) => r.id,
+          initialData: [
+            { id: 1, name: `Europe` },
+            { id: 2, name: `North America` },
+          ],
+        }),
+      )
+
+      await Promise.all([
+        products.preload(),
+        priceRanges.preload(),
+        regions.preload(),
+      ])
+
+      const collection = createLiveQueryCollection({
+        id: `repro-1501-live`,
+        query: (q) =>
+          q.from({ p: products }).select(({ p }) => ({
+            id: p.id,
+            title: p.title,
+            priceRanges: toArray(
+              q
+                .from({ pr: priceRanges })
+                .where(({ pr }) => eq(pr.productId, p.id))
+                .select(({ pr }) => ({
+                  id: pr.id,
+                  regionId: pr.regionId,
+                  region: toArray(
+                    q
+                      .from({ r: regions })
+                      .where(({ r }) => eq(r.id, pr.regionId))
+                      .select(({ r }) => ({ id: r.id, name: r.name })),
+                  ),
+                })),
+            ),
+          })),
+      })
+
+      await collection.preload()
+
+      expect(toTree(collection)).toEqual([
+        {
+          id: 1,
+          title: `T-Shirt`,
+          priceRanges: [
+            {
+              id: 1,
+              regionId: 1,
+              region: [{ id: 1, name: `Europe` }],
+            },
+            {
+              id: 2,
+              regionId: 2,
+              region: [{ id: 2, name: `North America` }],
+            },
+          ],
+        },
+        {
+          id: 2,
+          title: `Hoodie`,
+          priceRanges: [
+            {
+              id: 3,
+              regionId: 1,
+              region: [{ id: 1, name: `Europe` }],
+            },
+          ],
+        },
+      ])
+    })
   })
 
   describe(`many sibling toArray includes with chained derived collections`, () => {
