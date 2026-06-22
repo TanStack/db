@@ -203,4 +203,63 @@ describe(`live query orderBy: order-only reorder must emit a change`, () => {
     expect(idsOf(live)).toEqual([])
     sub.unsubscribe()
   })
+
+  it(`single-element collection: sort-field change cannot reorder and stays silent`, () => {
+    const { collection: source, write } = manualCollection(`single`, [seed[0]!])
+    const live = createLiveQueryCollection({
+      startSync: true,
+      query: (q) =>
+        q
+          .from({ s: source })
+          .orderBy(({ s }) => s.value)
+          .select(({ s }) => ({ id: s.id })),
+    })
+    expect(idsOf(live)).toEqual([`a`])
+
+    let emitted = 0
+    const sub = live.subscribeChanges(() => {
+      emitted++
+    })
+
+    // The only row's sort value changes, but with one element there is no move
+    // and the projected value is unchanged — nothing should be emitted.
+    write(`update`, { id: `a`, name: `Alice`, value: 99 })
+
+    expect(emitted).toBe(0)
+    expect(idsOf(live)).toEqual([`a`])
+    sub.unsubscribe()
+  })
+
+  it(`back-to-back opposite reorders settle to the correct final order`, () => {
+    const { collection: source, write } = manualCollection(`back-to-back`, [
+      seed[0]!,
+      seed[1]!,
+    ])
+    const live = createLiveQueryCollection({
+      startSync: true,
+      query: (q) =>
+        q
+          .from({ s: source })
+          .orderBy(({ s }) => s.value)
+          .select(({ s }) => ({ id: s.id })),
+    })
+    expect(idsOf(live)).toEqual([`b`, `a`]) // a=2, b=1
+
+    let emitted = 0
+    const sub = live.subscribeChanges(() => {
+      emitted++
+    })
+
+    // move a to the front (2 -> 0)
+    write(`update`, { id: `a`, name: `Alice`, value: 0 })
+    expect(idsOf(live)).toEqual([`a`, `b`])
+
+    // push a back behind b (0 -> 5)
+    write(`update`, { id: `a`, name: `Alice`, value: 5 })
+    expect(idsOf(live)).toEqual([`b`, `a`])
+
+    // each reorder is observed; no stale/missing final state
+    expect(emitted).toBeGreaterThanOrEqual(2)
+    sub.unsubscribe()
+  })
 })
