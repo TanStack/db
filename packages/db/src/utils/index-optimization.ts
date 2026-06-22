@@ -348,9 +348,13 @@ function optimizeCompoundRangeQuery<
         return {
           canOptimize: true,
           matchingKeys,
-          // If a null/undefined bound was present, the range query result is
-          // a superset of the real matches and must be re-filtered
-          isExact: !hasNullBound,
+          // The range result is exact only when it cannot include rows with a
+          // nullish indexed value (which a comparison would reject but the
+          // index returns, as they sort as the smallest key). That requires a
+          // non-nullish lower bound to exclude them: without `hasFromBound`
+          // the range is open at the bottom and captures those rows, and a
+          // nullish bound value (`hasNullBound`) can never bound them out.
+          isExact: hasFromBound && !hasNullBound,
           coveredArgIndices: new Set(operations.map((op) => op.argIndex)),
         }
       }
@@ -430,7 +434,23 @@ function optimizeSimpleComparison<
       }
 
       const matchingKeys = index.lookup(indexOperation, queryValue)
-      return { canOptimize: true, matchingKeys, isExact: true }
+
+      // A comparison against null/undefined is never true, but BTree indexes
+      // store and return rows with a nullish indexed value (they sort as the
+      // smallest key). Determine whether the index result is exact or a
+      // superset that the caller must re-filter:
+      // - eq/gt/gte: a nullish query value matches nothing, while the index
+      //   would still return nullish-keyed rows -> inexact when nullish. A
+      //   non-nullish lower bound (gt/gte) excludes the bottom-sorted nullish
+      //   rows, so those stay exact.
+      // - lt/lte: the open lower bound always includes nullish-keyed rows,
+      //   so the result is conservatively inexact.
+      const isExact =
+        operation === `lt` || operation === `lte`
+          ? false
+          : queryValue != null
+
+      return { canOptimize: true, matchingKeys, isExact }
     }
   }
 
@@ -620,11 +640,17 @@ function optimizeInArrayExpression<
     const values = (arrayArg as any).value
     const index = findIndexForField(collection, fieldPath)
 
+    // A nullish member can never be matched by `IN` (a comparison against
+    // null/undefined is never true), but the index would still return rows
+    // with a nullish indexed value. When the list contains a nullish member
+    // the result is a superset that the caller must re-filter.
+    const isExact = !values.some((value: any) => value == null)
+
     if (index) {
       // Check if the index supports IN operation
       if (index.supports(`in`)) {
         const matchingKeys = index.lookup(`in`, values)
-        return { canOptimize: true, matchingKeys, isExact: true }
+        return { canOptimize: true, matchingKeys, isExact }
       } else if (index.supports(`eq`)) {
         // Fallback to multiple equality lookups
         const matchingKeys = new Set<TKey>()
@@ -634,7 +660,7 @@ function optimizeInArrayExpression<
             matchingKeys.add(key)
           }
         }
-        return { canOptimize: true, matchingKeys, isExact: true }
+        return { canOptimize: true, matchingKeys, isExact }
       }
     }
   }
