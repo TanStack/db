@@ -446,9 +446,7 @@ function optimizeSimpleComparison<
       // - lt/lte: the open lower bound always includes nullish-keyed rows,
       //   so the result is conservatively inexact.
       const isExact =
-        operation === `lt` || operation === `lte`
-          ? false
-          : queryValue != null
+        operation === `lt` || operation === `lte` ? false : queryValue != null
 
       return { canOptimize: true, matchingKeys, isExact }
     }
