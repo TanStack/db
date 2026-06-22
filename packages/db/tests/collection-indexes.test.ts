@@ -1306,6 +1306,67 @@ describe(`Collection Indexes`, () => {
 
       expect(result).toEqual([])
     })
+
+    it(`should not match rows with a missing value for an equality on undefined`, () => {
+      // An equality comparison against `undefined` is never true, so
+      // `eq(score, undefined)` must return no rows even though Eve has an
+      // undefined score. The index-optimized path must agree with a full
+      // predicate scan.
+      collection.createIndex((row) => row.score)
+
+      const result = collection.currentStateAsChanges({
+        where: eq(new PropRef([`score`]), undefined),
+      })!
+
+      expect(result).toEqual([])
+    })
+
+    it(`should ignore an undefined member when matching an IN list`, () => {
+      // A row only matches `IN` when its value equals one of the listed
+      // values; a comparison with `undefined` is never true. So
+      // `inArray(score, [undefined, 80])` must match only Bob (score 80)
+      // and must not match Eve (undefined score).
+      collection.createIndex((row) => row.score)
+
+      const result = collection.currentStateAsChanges({
+        where: inArray(new PropRef([`score`]), [undefined, 80]),
+      })!
+
+      const names = result.map((r) => r.value.name).sort()
+      expect(names).toEqual([`Bob`])
+    })
+
+    it(`should not match rows with a missing value for a range comparison`, () => {
+      // A range comparison against a row with an undefined value is never
+      // true, so `lt(score, 85)` must match only Bob (score 80) and must
+      // not match Eve (undefined score).
+      collection.createIndex((row) => row.score)
+
+      const result = collection.currentStateAsChanges({
+        where: lt(new PropRef([`score`]), 85),
+      })!
+
+      const names = result.map((r) => r.value.name).sort()
+      expect(names).toEqual([`Bob`])
+    })
+
+    it(`should not match rows with a missing value for an upper-bounded compound range`, () => {
+      // A compound range with only upper bounds (e.g. score <= 90) must not
+      // match a row with an undefined value, since a comparison against
+      // undefined is never true. Only Bob (80), Charlie (90) and Diana (85)
+      // satisfy `score <= 90`; Eve (undefined) must be excluded.
+      collection.createIndex((row) => row.score)
+
+      const result = collection.currentStateAsChanges({
+        where: and(
+          lte(new PropRef([`score`]), 90),
+          lte(new PropRef([`score`]), 95),
+        ),
+      })!
+
+      const names = result.map((r) => r.value.name).sort()
+      expect(names).toEqual([`Bob`, `Charlie`, `Diana`])
+    })
   })
 
   describe(`Index Usage Verification`, () => {
