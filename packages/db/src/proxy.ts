@@ -603,6 +603,8 @@ function deepClone<T extends unknown>(
 
   const symbolProps = Object.getOwnPropertySymbols(obj)
   for (const sym of symbolProps) {
+    if (!Object.prototype.propertyIsEnumerable.call(obj, sym)) continue
+
     clone[sym] = deepClone(
       (obj as Record<string | symbol, unknown>)[sym],
       visited,

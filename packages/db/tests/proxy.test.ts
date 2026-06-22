@@ -101,6 +101,34 @@ describe(`Proxy Library`, () => {
       })
     })
 
+    it(`should not clone non-enumerable symbol metatdata into nested changes`, () => {
+      const metadata = Symbol(`metadata`)
+      const domainSymbol = Symbol(`domain`)
+
+      const obj = {
+        user: {
+          name: `John`,
+          age: 30,
+          [domainSymbol]: `preserved`,
+        },
+      }
+
+      Object.defineProperty(obj.user, metadata, {
+        value: `internal`,
+        enumerable: false,
+      })
+
+      const changes = withChangeTracking(obj, (draft) => {
+        draft.user.age = 31
+      })
+
+      const changedUser = changes.user as Record<string | symbol, unknown>
+
+      expect(changedUser.age).toBe(31)
+      expect(changedUser[domainSymbol]).toBe(`preserved`)
+      expect(Object.getOwnPropertySymbols(changedUser)).not.toContain(metadata)
+    })
+
     it(`should track when properties are deleted from objects`, () => {
       const obj: { name: string; age: number; role?: string } = {
         name: `John`,
