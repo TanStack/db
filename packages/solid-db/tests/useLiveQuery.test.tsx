@@ -2544,6 +2544,62 @@ describe(`Query Collections`, () => {
       }
       expect(beta.issueTitles).toEqual([`Bug in Beta`])
     })
+
+    it(`should update when a toArray include starts empty and gets first child`, async () => {
+      // Empty-include variant — the parent's `issueTitles` array starts at
+      // `[]` and must reflect a first child insert. The clone-on-sync path
+      // has to widen the existing empty array to a new one so reconcile sees
+      // the change.
+      const projects = createCollection(
+        mockSyncCollectionOptions<IncludeProject>({
+          id: `toarray-include-projects-empty`,
+          getKey: (p) => p.id,
+          initialData: [{ id: 3, name: `Gamma` }],
+        }),
+      )
+      const issues = createCollection(
+        mockSyncCollectionOptions<IncludeIssue>({
+          id: `toarray-include-issues-empty`,
+          getKey: (i) => i.id,
+          initialData: [],
+        }),
+      )
+
+      const rendered = renderHook(() => {
+        return useLiveQuery((q) =>
+          q.from({ p: projects }).select(({ p }) => ({
+            id: p.id,
+            issueTitles: toArray(
+              q
+                .from({ i: issues })
+                .where(({ i }) => eq(i.projectId, p.id))
+                .select(({ i }) => i.title),
+            ),
+          })),
+        )
+      })
+
+      await waitFor(() => {
+        const gamma = rendered.result().find((r: any) => r.id === 3) as
+          | { issueTitles: Array<string> }
+          | undefined
+        expect(gamma?.issueTitles).toEqual([])
+      })
+
+      issues.utils.begin()
+      issues.utils.write({
+        type: `insert`,
+        value: { id: 30, projectId: 3, title: `First Gamma issue` },
+      })
+      issues.utils.commit()
+
+      await waitFor(() => {
+        const gamma = rendered.result().find((r: any) => r.id === 3) as {
+          issueTitles: Array<string>
+        }
+        expect(gamma.issueTitles).toEqual([`First Gamma issue`])
+      })
+    })
   })
 
   describe(`findOne`, () => {
