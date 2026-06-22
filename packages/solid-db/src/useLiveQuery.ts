@@ -1,3 +1,10 @@
+import { ReactiveMap } from '@solid-primitives/map'
+import {
+  BaseQueryBuilder,
+  createLiveQueryCollection,
+  createLiveQueryObserver,
+  isCollection,
+} from '@tanstack/db'
 import {
   batch,
   createEffect,
@@ -5,21 +12,8 @@ import {
   createResource,
   createSignal,
   onCleanup,
-  untrack,
 } from 'solid-js'
-import { ReactiveMap } from '@solid-primitives/map'
-import {
-  createLiveQueryObserver,
-  getLiveQueryStatusFlags,
-  getPublicCollection,
-  isCollection,
-  isSingleResultCollection,
-  prepareLiveQueryValue,
-  resolveLiveQueryValue,
-  toBoundaryError,
-} from '@tanstack/db'
 import { createStore, reconcile } from 'solid-js/store'
-import { createRowStore, createStoreReadView } from './store-materialization'
 import type { Accessor } from 'solid-js'
 import type {
   ChangeMessage,
@@ -27,23 +21,21 @@ import type {
   CollectionStatus,
   Context,
   GetResult,
-  HealthNode,
   InferResultType,
   InitialQueryBuilder,
-  LiveQueryHookConfig,
-  LiveQueryObserver,
-  LiveQueryStatusFlags,
+  LiveQueryCollectionConfig,
   NonSingleResult,
   QueryBuilder,
   SingleResult,
+  WithVirtualProps,
 } from '@tanstack/db'
 
-const DEFAULT_GC_TIME_MS = 1
+const RECONCILE_KEY = { key: `$key` } as const
 
-type InferConditionalResultType<TContext extends Context> =
-  TContext extends SingleResult
-    ? InferResultType<TContext> | []
-    : InferResultType<TContext>
+const RECONCILE_DEEP = { merge: true } as const
+
+type AnyCollection = Collection<any, any, any>
+type AnyChange = ChangeMessage<any, string | number>
 
 /**
  * Create a live query using a query function
@@ -89,7 +81,7 @@ type InferConditionalResultType<TContext extends Context> =
  *     <Match when={todosQuery.isLoading}>
  *       <div>Loading...</div>
  *     </Match>
- *     <Match when={todosQuery.isLoadingError}>
+ *     <Match when={todosQuery.isError}>
  *       <div>Error: {todosQuery.status}</div>
  *     </Match>
  *     <Match when={todosQuery.isReady}>
@@ -114,26 +106,45 @@ type InferConditionalResultType<TContext extends Context> =
  *   </Suspense>
  * )
  */
-
 // Overload 1: Accept query function that always returns QueryBuilder
 export function useLiveQuery<TContext extends Context>(
   queryFn: (q: InitialQueryBuilder) => QueryBuilder<TContext>,
 ): Accessor<InferResultType<TContext>> & {
+  /**
+   * @deprecated use function result instead
+   * query.data -> query()
+   */
+  data: InferResultType<TContext>
   state: ReactiveMap<string | number, GetResult<TContext>>
   collection: Collection<GetResult<TContext>, string | number, {}>
   status: CollectionStatus
-} & LiveQueryStatusFlags
+  isLoading: boolean
+  isReady: boolean
+  isIdle: boolean
+  isError: boolean
+  isCleanedUp: boolean
+}
 
 // Overload 1b: Accept query function that can return undefined/null
 export function useLiveQuery<TContext extends Context>(
   queryFn: (
     q: InitialQueryBuilder,
   ) => QueryBuilder<TContext> | undefined | null,
-): Accessor<InferConditionalResultType<TContext>> & {
+): Accessor<InferResultType<TContext>> & {
+  /**
+   * @deprecated use function result instead
+   * query.data -> query()
+   */
+  data: InferResultType<TContext>
   state: ReactiveMap<string | number, GetResult<TContext>>
   collection: Collection<GetResult<TContext>, string | number, {}> | null
   status: CollectionStatus | `disabled`
-} & LiveQueryStatusFlags
+  isLoading: boolean
+  isReady: boolean
+  isIdle: boolean
+  isError: boolean
+  isCleanedUp: boolean
+}
 
 /**
  * Create a live query using configuration object
@@ -166,7 +177,7 @@ export function useLiveQuery<TContext extends Context>(
  *     <Match when={itemsQuery.isLoading}>
  *       <div>Loading...</div>
  *     </Match>
- *     <Match when={itemsQuery.isLoadingError}>
+ *     <Match when={itemsQuery.isError}>
  *       <div>Something went wrong</div>
  *     </Match>
  *     <Match when={!itemsQuery.isReady}>
@@ -177,12 +188,22 @@ export function useLiveQuery<TContext extends Context>(
  */
 // Overload 2: Accept config object
 export function useLiveQuery<TContext extends Context>(
-  config: Accessor<LiveQueryHookConfig<TContext>>,
+  config: Accessor<LiveQueryCollectionConfig<TContext>>,
 ): Accessor<InferResultType<TContext>> & {
+  /**
+   * @deprecated use function result instead
+   * query.data -> query()
+   */
+  data: InferResultType<TContext>
   state: ReactiveMap<string | number, GetResult<TContext>>
   collection: Collection<GetResult<TContext>, string | number, {}>
   status: CollectionStatus
-} & LiveQueryStatusFlags
+  isLoading: boolean
+  isReady: boolean
+  isIdle: boolean
+  isError: boolean
+  isCleanedUp: boolean
+}
 
 /**
  * Subscribe to an existing live query collection
@@ -213,7 +234,7 @@ export function useLiveQuery<TContext extends Context>(
  *    <Match when={sharedQuery.isLoading}>
  *      <div>Loading...</div>
  *    </Match>
- *    <Match when={sharedQuery.isLoadingError}>
+ *    <Match when={sharedQuery.isError}>
  *      <div>Error loading data</div>
  *    </Match>
  *  </Switch>
@@ -229,10 +250,20 @@ export function useLiveQuery<
     Collection<TResult, TKey, TUtils> & NonSingleResult
   >,
 ): Accessor<Array<TResult>> & {
+  /**
+   * @deprecated use function result instead
+   * query.data -> query()
+   */
+  data: Array<TResult>
   state: ReactiveMap<TKey, TResult>
   collection: Collection<TResult, TKey, TUtils>
   status: CollectionStatus
-} & LiveQueryStatusFlags
+  isLoading: boolean
+  isReady: boolean
+  isIdle: boolean
+  isError: boolean
+  isCleanedUp: boolean
+}
 
 // Overload 3b: Accept pre-created live query collection with singleResult: true
 export function useLiveQuery<
@@ -244,38 +275,58 @@ export function useLiveQuery<
     Collection<TResult, TKey, TUtils> & SingleResult
   >,
 ): Accessor<TResult | undefined> & {
+  /**
+   * @deprecated use function result instead
+   * query.data -> query()
+   */
+  data: TResult | undefined
   state: ReactiveMap<TKey, TResult>
   collection: Collection<TResult, TKey, TUtils> & SingleResult
   status: CollectionStatus
-} & LiveQueryStatusFlags
+  isLoading: boolean
+  isReady: boolean
+  isIdle: boolean
+  isError: boolean
+  isCleanedUp: boolean
+}
 
 // Implementation - use function overloads to infer the actual collection type
 export function useLiveQuery(
   configOrQueryOrCollection: (queryFn?: any) => any,
 ) {
-  let previousCollection: ReturnType<typeof resolveLiveQueryValue> = null
-  const resolveNext = (value: unknown) =>
-    (previousCollection = resolveLiveQueryValue(value, {
-      gcTime: DEFAULT_GC_TIME_MS,
-      previousCollection,
-      windowOwner: resolveNext,
-    }))
   const collection = createMemo(
     () => {
-      const value =
-        configOrQueryOrCollection.length === 1
-          ? configOrQueryOrCollection
-          : configOrQueryOrCollection()
-      // Query-input reads define binding dependencies. Compilation can drain
-      // source rows synchronously; those reads belong to the result instead.
-      const prepared = prepareLiveQueryValue(value, undefined)
-      return untrack(() => {
-        if (isCollection(prepared)) {
-          prepared.startSyncImmediate()
-          previousCollection = null
-          return prepared as Collection
+      if (configOrQueryOrCollection.length === 1) {
+        // This is a query function - check if it returns null/undefined
+        const queryBuilder = new BaseQueryBuilder() as InitialQueryBuilder
+        const result = configOrQueryOrCollection(queryBuilder)
+
+        if (result === undefined || result === null) {
+          // Disabled query - return null
+          return null
         }
-        return resolveNext(prepared)
+
+        return createLiveQueryCollection({
+          query: configOrQueryOrCollection,
+          startSync: true,
+        })
+      }
+
+      const innerCollection = configOrQueryOrCollection()
+
+      if (innerCollection === undefined || innerCollection === null) {
+        // Disabled query - return null
+        return null
+      }
+
+      if (isCollection(innerCollection)) {
+        innerCollection.startSyncImmediate()
+        return innerCollection as Collection
+      }
+
+      return createLiveQueryCollection({
+        ...innerCollection,
+        startSync: true,
       })
     },
     undefined,
@@ -285,19 +336,48 @@ export function useLiveQuery(
   // Reactive state that gets updated granularly through change events
   const state = new ReactiveMap<string | number, any>()
 
-  // Keep the live Collection's result keys private while preserving one stable
-  // Solid store per logical row. A row's public $key can belong to an upstream
-  // Collection and is therefore not necessarily unique in this result.
-  const rowsByKey = new Map<
-    string | number,
-    { value: any; update: (value: any) => void }
-  >()
-  let rowsCollection: Collection<any, any, any> | undefined
+  // Reactive data array that maintains sorted order
   const [data, setData] = createStore<Array<any>>([], {
     name: `TanstackDBData`,
   })
 
-  const readData = createStoreReadView(data)
+  const rowIndex = new Map<string | number, number>()
+  const syncRows: Array<any> = []
+
+  // The collection currently reflected by `data`.
+  let syncedCollection: AnyCollection | null = null
+
+  // `.state` is maintained lazily and can lag behind `data` until accessed.
+  let stateSyncedCollection: AnyCollection | null = null
+  let stateAccessed = false
+
+  // The row currently exposed by findOne-style queries.
+  let singleRowKey: string | number | undefined
+
+  // Read the collection config once at call sites that need single-row behavior.
+  const isSingleResult = (currentCollection: AnyCollection) => {
+    const config = currentCollection.config
+    return 'singleResult' in config && config.singleResult === true
+  }
+
+  // Patch an existing store row instead of replacing the array. This keeps
+  // Solid's per-field subscriptions alive for rows that did not change.
+  const patchStoreRow = (index: number, row: WithVirtualProps<any>) => {
+    if (index >= data.length) return false
+
+    setData(index, reconcile(row, RECONCILE_DEEP))
+    return true
+  }
+
+  // Public `.state` is lazy. Most consumers only use the accessor result, so we
+  // avoid maintaining a second reactive map until `.state` is actually read.
+  const syncStateFromCollection = (currentCollection: AnyCollection) => {
+    state.clear()
+    for (const value of currentCollection.values()) {
+      state.set(value.$key, value)
+    }
+    stateSyncedCollection = currentCollection
+  }
 
   // Track collection status reactively
   const [status, setStatus] = createSignal(
@@ -306,49 +386,146 @@ export function useLiveQuery(
       name: `TanstackDBStatus`,
     },
   )
-  const [health, setHealth] = createSignal<HealthNode | undefined>(undefined)
-  const syncStatus = (view: {
-    status: CollectionStatus | `disabled`
-    health: HealthNode | undefined
-  }) => {
-    setStatus(view.status)
-    setHealth(view.health)
-  }
-  const syncState = (entries: Iterable<[string | number, any]>) => {
-    state.clear()
-    for (const [key, value] of entries) state.set(key, value)
-  }
-  // Every status flag comes from the shared rule; a disabled query is ready.
-  const flags = createMemo(() =>
-    getLiveQueryStatusFlags(status() as CollectionStatus, health()),
-  )
 
-  // Helper to sync data array from collection in correct order
+  // Sync the ordered result array from the collection, reusing scratch storage.
   const syncDataFromCollection = (
-    currentCollection: Collection<any, any, any>,
+    currentCollection: AnyCollection,
+    stateTarget = stateAccessed ? state : undefined,
   ) => {
-    const nextRows: Array<any> = []
-    const retainedKeys = new Set<string | number>()
+    syncedCollection = currentCollection
 
-    for (const [key, value] of currentCollection.entries()) {
-      retainedKeys.add(key)
+    // Unsorted result collections keep stable positions by key; sorted queries
+    // may move rows, so they always resync instead of using rowIndex patches.
+    const shouldTrackIndex = currentCollection.config.compare === undefined
+    if (shouldTrackIndex) rowIndex.clear()
 
-      const existing = rowsByKey.get(key)
-      if (existing) {
-        existing.update(value)
-        nextRows.push(existing.value)
-      } else {
-        const row = createRowStore(value)
-        rowsByKey.set(key, row)
-        nextRows.push(row.value)
+    stateTarget?.clear()
+
+    if (isSingleResult(currentCollection)) {
+      const value = currentCollection.values().next().value
+      if (!value) {
+        singleRowKey = undefined
+        syncRows.length = 0
+        if (stateTarget) stateSyncedCollection = currentCollection
+        setData(reconcile(syncRows, RECONCILE_KEY))
+        return
+      }
+
+      const row = value
+      singleRowKey = row.$key
+      if (stateTarget) {
+        stateTarget.set(row.$key, row)
+        stateSyncedCollection = currentCollection
+      }
+      syncRows[0] = row
+      syncRows.length = 1
+      setData(reconcile(syncRows, RECONCILE_KEY))
+      return
+    }
+
+    syncRows.length = 0
+
+    let index = 0
+    for (const value of currentCollection.values()) {
+      const row = value
+      syncRows[index] = row
+      if (shouldTrackIndex) rowIndex.set(row.$key, index)
+      if (stateTarget) stateTarget.set(row.$key, row)
+      index++
+    }
+    syncRows.length = index
+    if (stateTarget) stateSyncedCollection = currentCollection
+
+    setData(reconcile(syncRows, RECONCILE_KEY))
+  }
+
+  const syncDataOnlyFromCollection = (currentCollection: AnyCollection) => {
+    // Used after `.state` has already been incrementally updated while `data`
+    // still needs an authoritative rebuild for ordering/membership.
+    syncDataFromCollection(currentCollection, undefined)
+  }
+
+  // Fast path for update-only batches. Inserts/deletes or sorted queries can
+  // change membership/order, so those fall back to a collection resync.
+  const patchArrayChanges = (
+    currentCollection: AnyCollection,
+    changes: Array<AnyChange>,
+  ) => {
+    let needsResync = false
+
+    for (const change of changes) {
+      if (change.type !== `update`) {
+        // Inserts/deletes can change membership; update `.state` while we are
+        // here, then rebuild `data` once after the loop.
+        needsResync = true
+        if (stateAccessed) {
+          if (change.type === `delete`) {
+            state.delete(change.key)
+          } else {
+            state.set(change.key, change.value)
+          }
+        }
+        continue
+      }
+
+      const row = change.value
+
+      if (stateAccessed) state.set(change.key, row)
+
+      // Once a batch needs a resync, avoid doing wasted row-level patches for
+      // later updates in the same batch.
+      if (needsResync) continue
+
+      const index = rowIndex.get(change.key)
+      if (index === undefined || !patchStoreRow(index, row)) {
+        needsResync = true
       }
     }
 
-    for (const key of rowsByKey.keys()) {
-      if (!retainedKeys.has(key)) rowsByKey.delete(key)
+    if (needsResync) {
+      syncDataOnlyFromCollection(currentCollection)
     }
 
-    setData((previous) => reconcile(nextRows, { key: null })(previous))
+    return !needsResync
+  }
+
+  const patchSingleResultChanges = (
+    currentCollection: AnyCollection,
+    changes: Array<AnyChange>,
+  ) => {
+    let needsResync = false
+
+    for (const change of changes) {
+      if (change.type !== `update`) {
+        // Non-update changes can replace/remove the single result; update the
+        // lazy state map now and rebuild `data` after this pass.
+        needsResync = true
+        if (stateAccessed) {
+          if (change.type === `delete`) {
+            state.delete(change.key)
+          } else {
+            state.set(change.key, change.value)
+          }
+        }
+        continue
+      }
+
+      // Updates for non-matching rows do not affect the exposed single result.
+      if (change.key !== singleRowKey) continue
+
+      const row = change.value
+      if (stateAccessed) state.set(change.key, row)
+
+      // If the batch already needs a resync, defer the visible update to the
+      // final rebuild so ordering/membership stays authoritative.
+      if (!needsResync) setData(0, reconcile(row))
+    }
+
+    if (needsResync) {
+      syncDataOnlyFromCollection(currentCollection)
+    }
+
+    return !needsResync
   }
 
   // Generation guard for the resource's async continuations: Solid discards a
@@ -356,78 +533,25 @@ export function useLiveQuery(
   // into hook-scoped state and would still run — resurrecting rows/status from
   // a collection that has already been replaced.
   let resourceGeneration = 0
-  let localWait:
-    | {
-        observer: LiveQueryObserver<any, any>
-        collection: Collection<any, any, any>
-        ready: boolean
-      }
-    | undefined
-  let subscribedCollection: Collection<any, any, any> | undefined
-  const releaseLocalWait = () => {
-    localWait?.observer.dispose()
-    localWait = undefined
-  }
-  onCleanup(() => {
-    resourceGeneration++
-    releaseLocalWait()
-  })
 
   const [getDataResource] = createResource(
-    () => ({ currentCollection: collection() }),
-    async ({ currentCollection }) => {
+    collection,
+    async (currentCollection) => {
       const generation = ++resourceGeneration
-      releaseLocalWait()
-      if (!currentCollection) {
-        return []
-      }
-      syncStatus(currentCollection)
+      setStatus(currentCollection.status)
       try {
-        const observer = createLiveQueryObserver(currentCollection)
-        localWait = {
-          observer,
-          collection: currentCollection,
-          ready: false,
-        }
-        try {
-          await observer.preload()
-        } catch (error) {
-          if (generation === resourceGeneration) releaseLocalWait()
-          throw error
-        }
-        if (generation !== resourceGeneration) return data
-        localWait.ready = true
-        // `preload` waits for readiness but does not itself
-        // retain the Collection after it settles. Hold one observer
-        // subscription across Solid's ready-before-commit Suspense gap.
-        observer.subscribe(() => {})
-        // Solid disposes a provisional effect only after the resource settles
-        // and Suspense re-evaluates the branch. Check on the next turn: a real
-        // commit still owns the Collection, while a suspended branch keeps the
-        // preload observer until its later commit or root cleanup.
-        setTimeout(() => {
-          if (
-            localWait?.observer === observer &&
-            subscribedCollection === currentCollection
-          ) {
-            releaseLocalWait()
-          }
-        }, 0)
+        await currentCollection.toArrayWhenReady()
       } catch (error) {
-        if (generation !== resourceGeneration) return data
-        // A crashed Collection also rejects preload; keep its crash visible.
-        setStatus(currentCollection.status === `crashed` ? `crashed` : `error`)
-        throw toBoundaryError(error)
+        if (generation === resourceGeneration) setStatus(`error`)
+        throw error
       }
       if (generation !== resourceGeneration) {
         return data
       }
-      // Initialize state with current collection data
-      batch(() => {
-        syncState(currentCollection.entries())
+      if (syncedCollection !== currentCollection) {
         syncDataFromCollection(currentCollection)
-        syncStatus(currentCollection)
-      })
+      }
+      setStatus(currentCollection.status)
       return data
     },
     {
@@ -441,66 +565,56 @@ export function useLiveQuery(
     const currentCollection = collection()
     if (!currentCollection) {
       setStatus(`disabled` as const)
-      setHealth(undefined)
-      state.clear()
-      rowsByKey.clear()
-      rowsCollection = undefined
-      setData([])
+      syncedCollection = null
+      stateSyncedCollection = null
+      singleRowKey = undefined
+      rowIndex.clear()
+      if (stateAccessed) state.clear()
+      syncRows.length = 0
+      setData(reconcile(syncRows, RECONCILE_KEY))
       return
     }
-
-    if (rowsCollection !== currentCollection) {
-      rowsByKey.clear()
-      rowsCollection = currentCollection
-    }
-
-    // The shared observer owns subscription, the ready-race, and status; Solid
-    // materializes into its keyed ReactiveMap (granular) + reconciled store.
+    const singleResult = isSingleResult(currentCollection)
+    const canPatchUpdates = currentCollection.config.compare === undefined
+    // The shared observer owns the subscription, the ready-race, and status;
+    // Solid materializes the delivered deltas into the keyed store, patching
+    // rows granularly when membership and order cannot change.
     const observer = createLiveQueryObserver(currentCollection)
-    // Clear any keys carried over from a previous collection before the new
-    // observer re-seeds via `includeInitialState` (which only inserts current
-    // rows, never deletes stale ones). Without this, switching collections
-    // leaves the dropped keys in `state` until the async resource reconciles.
-    state.clear()
-    observer.subscribe((changes: Array<ChangeMessage<any>> | undefined) => {
-      batch(() => {
-        if (changes) {
-          for (const change of changes) {
-            switch (change.type) {
-              case `insert`:
-              case `update`:
-                state.set(change.key, change.value)
-                break
-              case `delete`:
-                state.delete(change.key)
-                break
+    const unsubscribe = observer.subscribe(
+      (changes: Array<ChangeMessage<any>> | undefined) => {
+        batch(() => {
+          if (syncedCollection !== currentCollection) {
+            // The observer replays the initial state on attach, which can win
+            // the race against the resource. Do one authoritative sync instead
+            // of patching stale row indices from the previous collection.
+            syncDataFromCollection(currentCollection)
+          } else if (changes !== undefined && canPatchUpdates) {
+            if (singleResult) {
+              patchSingleResultChanges(currentCollection, changes)
+            } else {
+              patchArrayChanges(currentCollection, changes)
             }
+          } else {
+            // Synthetic status notifies carry no change set, and sorted
+            // queries can reorder rows on any delta; both need a full resync.
+            syncDataFromCollection(currentCollection)
           }
-        } else {
-          // Cleanup and other status-only publications carry no row deltas.
-          // Rebuild the keyed view so it cannot diverge from ordered data.
-          syncState(observer.getSnapshot().state ?? [])
-        }
-        syncDataFromCollection(currentCollection)
-        syncStatus(observer.getSnapshot())
-      })
-    })
-    subscribedCollection = currentCollection
-    if (localWait?.ready && localWait.collection === currentCollection) {
-      releaseLocalWait()
-    }
+
+          // Update status ref on every change
+          setStatus(observer.getSnapshot().status)
+        })
+      },
+    )
     // An already-ready empty collection produces no initial row batch. Bring
     // ordered data and status in line synchronously instead of waiting for the
     // resource continuation to correct the previous collection's rows.
     batch(() => {
       syncDataFromCollection(currentCollection)
-      syncStatus(observer.getSnapshot())
+      setStatus(observer.getSnapshot().status)
     })
 
     onCleanup(() => {
-      if (subscribedCollection === currentCollection) {
-        subscribedCollection = undefined
-      }
+      unsubscribe()
       observer.dispose()
     })
   })
@@ -508,16 +622,20 @@ export function useLiveQuery(
   // We have to remove getters from the resource function so we wrap it
   function getData() {
     const currentCollection = collection()
-    if (currentCollection && isSingleResultCollection(currentCollection)) {
-      // Force resource tracking so Suspense works
-      getDataResource()
-      return readData[0]
+    if (currentCollection && isSingleResult(currentCollection)) {
+      // Force resource tracking so Suspense works before the collection is ready.
+      if (status() !== `ready`) getDataResource()
+      return data[0]
     }
-    const result = getDataResource()
-    return result === data ? readData : result
+    return getDataResource()
   }
 
   Object.defineProperties(getData, {
+    data: {
+      get() {
+        return getData()
+      },
+    },
     status: {
       get() {
         return status()
@@ -525,52 +643,47 @@ export function useLiveQuery(
     },
     collection: {
       get() {
-        return getPublicCollection(collection())
+        return collection()
       },
     },
     state: {
       get() {
+        stateAccessed = true
+        const currentCollection = collection()
+        if (!currentCollection) {
+          if (stateSyncedCollection !== null) {
+            state.clear()
+            stateSyncedCollection = null
+          }
+        } else if (stateSyncedCollection !== currentCollection) {
+          syncStateFromCollection(currentCollection)
+        }
         return state
       },
     },
     isLoading: {
       get() {
-        return flags().isLoading
+        return status() === `loading`
       },
     },
     isReady: {
       get() {
-        return flags().isReady || status() === `disabled`
+        return status() === `ready` || status() === `disabled`
       },
     },
     isIdle: {
       get() {
-        return flags().isIdle
+        return status() === `idle`
       },
     },
-    isLoadingError: {
+    isError: {
       get() {
-        return flags().isLoadingError
-      },
-    },
-    isCrashed: {
-      get() {
-        return flags().isCrashed
+        return status() === `error`
       },
     },
     isCleanedUp: {
       get() {
-        return flags().isCleanedUp
-      },
-    },
-    isSyncError: {
-      get() {
-        return flags().isSyncError
-      },
-    },
-    health: {
-      get() {
-        return health()
+        return status() === `cleaned-up`
       },
     },
   })
