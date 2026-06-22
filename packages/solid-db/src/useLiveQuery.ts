@@ -1,3 +1,10 @@
+import { ReactiveMap } from '@solid-primitives/map'
+import {
+  BaseQueryBuilder,
+  createLiveQueryCollection,
+  createLiveQueryObserver,
+  isCollection,
+} from '@tanstack/db'
 import {
   batch,
   createEffect,
@@ -6,16 +13,6 @@ import {
   createSignal,
   onCleanup,
 } from 'solid-js'
-import { ReactiveMap } from '@solid-primitives/map'
-import {
-  BaseQueryBuilder,
-  createLiveQueryCollection,
-  createLiveQueryObserver,
-  getPublicCollection,
-  isCollection,
-  isSingleResultCollection,
-  resolveLiveQueryValue,
-} from '@tanstack/db'
 import { createStore, reconcile } from 'solid-js/store'
 import type { Accessor } from 'solid-js'
 import type {
@@ -27,17 +24,18 @@ import type {
   InferResultType,
   InitialQueryBuilder,
   LiveQueryCollectionConfig,
-  LiveQueryObserver,
-  LiveQueryPersistedStatus,
   NonSingleResult,
   QueryBuilder,
   SingleResult,
+  WithVirtualProps,
 } from '@tanstack/db'
 
-type InferConditionalResultType<TContext extends Context> =
-  TContext extends SingleResult
-    ? InferResultType<TContext> | []
-    : InferResultType<TContext>
+const RECONCILE_KEY = { key: `$key` } as const
+
+const RECONCILE_DEEP = { merge: true } as const
+
+type AnyCollection = Collection<any, any, any>
+type AnyChange = ChangeMessage<any, string | number>
 
 /**
  * Create a live query using a query function
@@ -122,9 +120,6 @@ export function useLiveQuery<TContext extends Context>(
   status: CollectionStatus
   isLoading: boolean
   isReady: boolean
-  persistedStatus: LiveQueryPersistedStatus
-  isPersistedReady: boolean
-  persistedError: unknown | undefined
   isIdle: boolean
   isError: boolean
   isCleanedUp: boolean
@@ -135,20 +130,17 @@ export function useLiveQuery<TContext extends Context>(
   queryFn: (
     q: InitialQueryBuilder,
   ) => QueryBuilder<TContext> | undefined | null,
-): Accessor<InferConditionalResultType<TContext>> & {
+): Accessor<InferResultType<TContext>> & {
   /**
    * @deprecated use function result instead
    * query.data -> query()
    */
-  data: InferConditionalResultType<TContext>
+  data: InferResultType<TContext>
   state: ReactiveMap<string | number, GetResult<TContext>>
   collection: Collection<GetResult<TContext>, string | number, {}> | null
   status: CollectionStatus | `disabled`
   isLoading: boolean
   isReady: boolean
-  persistedStatus: LiveQueryPersistedStatus
-  isPersistedReady: boolean
-  persistedError: unknown | undefined
   isIdle: boolean
   isError: boolean
   isCleanedUp: boolean
@@ -208,9 +200,6 @@ export function useLiveQuery<TContext extends Context>(
   status: CollectionStatus
   isLoading: boolean
   isReady: boolean
-  persistedStatus: LiveQueryPersistedStatus
-  isPersistedReady: boolean
-  persistedError: unknown | undefined
   isIdle: boolean
   isError: boolean
   isCleanedUp: boolean
@@ -271,9 +260,6 @@ export function useLiveQuery<
   status: CollectionStatus
   isLoading: boolean
   isReady: boolean
-  persistedStatus: LiveQueryPersistedStatus
-  isPersistedReady: boolean
-  persistedError: unknown | undefined
   isIdle: boolean
   isError: boolean
   isCleanedUp: boolean
@@ -299,9 +285,6 @@ export function useLiveQuery<
   status: CollectionStatus
   isLoading: boolean
   isReady: boolean
-  persistedStatus: LiveQueryPersistedStatus
-  isPersistedReady: boolean
-  persistedError: unknown | undefined
   isIdle: boolean
   isError: boolean
   isCleanedUp: boolean
@@ -323,7 +306,10 @@ export function useLiveQuery(
           return null
         }
 
-        return resolveLiveQueryValue(result)
+        return createLiveQueryCollection({
+          query: configOrQueryOrCollection,
+          startSync: true,
+        })
       }
 
       const innerCollection = configOrQueryOrCollection()
@@ -350,17 +336,48 @@ export function useLiveQuery(
   // Reactive state that gets updated granularly through change events
   const state = new ReactiveMap<string | number, any>()
 
-  // Keep the live Collection's result keys private while preserving one stable
-  // Solid store per logical row. A row's public $key can belong to an upstream
-  // Collection and is therefore not necessarily unique in this result.
-  const rowsByKey = new Map<
-    string | number,
-    { value: any; update: (value: any) => void }
-  >()
-  let rowsCollection: Collection<any, any, any> | undefined
+  // Reactive data array that maintains sorted order
   const [data, setData] = createStore<Array<any>>([], {
     name: `TanstackDBData`,
   })
+
+  const rowIndex = new Map<string | number, number>()
+  const syncRows: Array<any> = []
+
+  // The collection currently reflected by `data`.
+  let syncedCollection: AnyCollection | null = null
+
+  // `.state` is maintained lazily and can lag behind `data` until accessed.
+  let stateSyncedCollection: AnyCollection | null = null
+  let stateAccessed = false
+
+  // The row currently exposed by findOne-style queries.
+  let singleRowKey: string | number | undefined
+
+  // Read the collection config once at call sites that need single-row behavior.
+  const isSingleResult = (currentCollection: AnyCollection) => {
+    const config = currentCollection.config
+    return 'singleResult' in config && config.singleResult === true
+  }
+
+  // Patch an existing store row instead of replacing the array. This keeps
+  // Solid's per-field subscriptions alive for rows that did not change.
+  const patchStoreRow = (index: number, row: WithVirtualProps<any>) => {
+    if (index >= data.length) return false
+
+    setData(index, reconcile(row, RECONCILE_DEEP))
+    return true
+  }
+
+  // Public `.state` is lazy. Most consumers only use the accessor result, so we
+  // avoid maintaining a second reactive map until `.state` is actually read.
+  const syncStateFromCollection = (currentCollection: AnyCollection) => {
+    state.clear()
+    for (const value of currentCollection.values()) {
+      state.set(value.$key, value)
+    }
+    stateSyncedCollection = currentCollection
+  }
 
   // Track collection status reactively
   const [status, setStatus] = createSignal(
@@ -369,39 +386,146 @@ export function useLiveQuery(
       name: `TanstackDBStatus`,
     },
   )
-  const [persistedStatus, setLocalStatus] =
-    createSignal<LiveQueryPersistedStatus>(`unavailable`)
-  const [persistedError, setLocalError] = createSignal<unknown>(undefined)
 
-  // Helper to sync data array from collection in correct order
+  // Sync the ordered result array from the collection, reusing scratch storage.
   const syncDataFromCollection = (
-    currentCollection: Collection<any, any, any>,
+    currentCollection: AnyCollection,
+    stateTarget = stateAccessed ? state : undefined,
   ) => {
-    const nextRows: Array<any> = []
-    const retainedKeys = new Set<string | number>()
+    syncedCollection = currentCollection
 
-    for (const [key, value] of currentCollection.entries()) {
-      retainedKeys.add(key)
+    // Unsorted result collections keep stable positions by key; sorted queries
+    // may move rows, so they always resync instead of using rowIndex patches.
+    const shouldTrackIndex = currentCollection.config.compare === undefined
+    if (shouldTrackIndex) rowIndex.clear()
 
-      const existing = rowsByKey.get(key)
-      if (existing) {
-        existing.update(value)
-        nextRows.push(existing.value)
-      } else {
-        const [row, setRow] = createStore(value)
-        rowsByKey.set(key, {
-          value: row,
-          update: (nextValue) => setRow(reconcile(nextValue, { key: null })),
-        })
-        nextRows.push(row)
+    stateTarget?.clear()
+
+    if (isSingleResult(currentCollection)) {
+      const value = currentCollection.values().next().value
+      if (!value) {
+        singleRowKey = undefined
+        syncRows.length = 0
+        if (stateTarget) stateSyncedCollection = currentCollection
+        setData(reconcile(syncRows, RECONCILE_KEY))
+        return
+      }
+
+      const row = value
+      singleRowKey = row.$key
+      if (stateTarget) {
+        stateTarget.set(row.$key, row)
+        stateSyncedCollection = currentCollection
+      }
+      syncRows[0] = row
+      syncRows.length = 1
+      setData(reconcile(syncRows, RECONCILE_KEY))
+      return
+    }
+
+    syncRows.length = 0
+
+    let index = 0
+    for (const value of currentCollection.values()) {
+      const row = value
+      syncRows[index] = row
+      if (shouldTrackIndex) rowIndex.set(row.$key, index)
+      if (stateTarget) stateTarget.set(row.$key, row)
+      index++
+    }
+    syncRows.length = index
+    if (stateTarget) stateSyncedCollection = currentCollection
+
+    setData(reconcile(syncRows, RECONCILE_KEY))
+  }
+
+  const syncDataOnlyFromCollection = (currentCollection: AnyCollection) => {
+    // Used after `.state` has already been incrementally updated while `data`
+    // still needs an authoritative rebuild for ordering/membership.
+    syncDataFromCollection(currentCollection, undefined)
+  }
+
+  // Fast path for update-only batches. Inserts/deletes or sorted queries can
+  // change membership/order, so those fall back to a collection resync.
+  const patchArrayChanges = (
+    currentCollection: AnyCollection,
+    changes: Array<AnyChange>,
+  ) => {
+    let needsResync = false
+
+    for (const change of changes) {
+      if (change.type !== `update`) {
+        // Inserts/deletes can change membership; update `.state` while we are
+        // here, then rebuild `data` once after the loop.
+        needsResync = true
+        if (stateAccessed) {
+          if (change.type === `delete`) {
+            state.delete(change.key)
+          } else {
+            state.set(change.key, change.value)
+          }
+        }
+        continue
+      }
+
+      const row = change.value
+
+      if (stateAccessed) state.set(change.key, row)
+
+      // Once a batch needs a resync, avoid doing wasted row-level patches for
+      // later updates in the same batch.
+      if (needsResync) continue
+
+      const index = rowIndex.get(change.key)
+      if (index === undefined || !patchStoreRow(index, row)) {
+        needsResync = true
       }
     }
 
-    for (const key of rowsByKey.keys()) {
-      if (!retainedKeys.has(key)) rowsByKey.delete(key)
+    if (needsResync) {
+      syncDataOnlyFromCollection(currentCollection)
     }
 
-    setData((previous) => reconcile(nextRows, { key: null })(previous))
+    return !needsResync
+  }
+
+  const patchSingleResultChanges = (
+    currentCollection: AnyCollection,
+    changes: Array<AnyChange>,
+  ) => {
+    let needsResync = false
+
+    for (const change of changes) {
+      if (change.type !== `update`) {
+        // Non-update changes can replace/remove the single result; update the
+        // lazy state map now and rebuild `data` after this pass.
+        needsResync = true
+        if (stateAccessed) {
+          if (change.type === `delete`) {
+            state.delete(change.key)
+          } else {
+            state.set(change.key, change.value)
+          }
+        }
+        continue
+      }
+
+      // Updates for non-matching rows do not affect the exposed single result.
+      if (change.key !== singleRowKey) continue
+
+      const row = change.value
+      if (stateAccessed) state.set(change.key, row)
+
+      // If the batch already needs a resync, defer the visible update to the
+      // final rebuild so ordering/membership stays authoritative.
+      if (!needsResync) setData(0, reconcile(row))
+    }
+
+    if (needsResync) {
+      syncDataOnlyFromCollection(currentCollection)
+    }
+
+    return !needsResync
   }
 
   // Generation guard for the resource's async continuations: Solid discards a
@@ -409,45 +533,25 @@ export function useLiveQuery(
   // into hook-scoped state and would still run — resurrecting rows/status from
   // a collection that has already been replaced.
   let resourceGeneration = 0
-  let localWaitObserver: LiveQueryObserver<any, any> | undefined
-  onCleanup(() => localWaitObserver?.dispose())
 
   const [getDataResource] = createResource(
-    () => ({ currentCollection: collection() }),
-    async ({ currentCollection }) => {
+    collection,
+    async (currentCollection) => {
       const generation = ++resourceGeneration
-      localWaitObserver?.dispose()
-      localWaitObserver = undefined
-      if (!currentCollection) {
-        return []
-      }
       setStatus(currentCollection.status)
       try {
-        const observer = createLiveQueryObserver(currentCollection)
-        localWaitObserver = observer
-        try {
-          await observer.preloadForInitialRender()
-        } finally {
-          observer.dispose()
-          if (localWaitObserver === observer) localWaitObserver = undefined
-        }
+        await currentCollection.toArrayWhenReady()
       } catch (error) {
-        if (generation !== resourceGeneration) return data
-        setStatus(`error`)
+        if (generation === resourceGeneration) setStatus(`error`)
         throw error
       }
       if (generation !== resourceGeneration) {
         return data
       }
-      // Initialize state with current collection data
-      batch(() => {
-        state.clear()
-        for (const [key, value] of currentCollection.entries()) {
-          state.set(key, value)
-        }
+      if (syncedCollection !== currentCollection) {
         syncDataFromCollection(currentCollection)
-        setStatus(currentCollection.status)
-      })
+      }
+      setStatus(currentCollection.status)
       return data
     },
     {
@@ -461,56 +565,43 @@ export function useLiveQuery(
     const currentCollection = collection()
     if (!currentCollection) {
       setStatus(`disabled` as const)
-      setLocalStatus(`unavailable`)
-      setLocalError(undefined)
-      state.clear()
-      rowsByKey.clear()
-      rowsCollection = undefined
-      setData([])
+      syncedCollection = null
+      stateSyncedCollection = null
+      singleRowKey = undefined
+      rowIndex.clear()
+      if (stateAccessed) state.clear()
+      syncRows.length = 0
+      setData(reconcile(syncRows, RECONCILE_KEY))
       return
     }
-
-    if (rowsCollection !== currentCollection) {
-      rowsByKey.clear()
-      rowsCollection = currentCollection
-    }
-
-    // The shared observer owns subscription, the ready-race, and status; Solid
-    // materializes into its keyed ReactiveMap (granular) + reconciled store.
+    const singleResult = isSingleResult(currentCollection)
+    const canPatchUpdates = currentCollection.config.compare === undefined
+    // The shared observer owns the subscription, the ready-race, and status;
+    // Solid materializes the delivered deltas into the keyed store, patching
+    // rows granularly when membership and order cannot change.
     const observer = createLiveQueryObserver(currentCollection)
-    // Clear any keys carried over from a previous collection before the new
-    // observer re-seeds via `includeInitialState` (which only inserts current
-    // rows, never deletes stale ones). Without this, switching collections
-    // leaves the dropped keys in `state` until the async resource reconciles.
-    state.clear()
     const unsubscribe = observer.subscribe(
       (changes: Array<ChangeMessage<any>> | undefined) => {
         batch(() => {
-          if (changes) {
-            for (const change of changes) {
-              switch (change.type) {
-                case `insert`:
-                case `update`:
-                  state.set(change.key, change.value)
-                  break
-                case `delete`:
-                  state.delete(change.key)
-                  break
-              }
+          if (syncedCollection !== currentCollection) {
+            // The observer replays the initial state on attach, which can win
+            // the race against the resource. Do one authoritative sync instead
+            // of patching stale row indices from the previous collection.
+            syncDataFromCollection(currentCollection)
+          } else if (changes !== undefined && canPatchUpdates) {
+            if (singleResult) {
+              patchSingleResultChanges(currentCollection, changes)
+            } else {
+              patchArrayChanges(currentCollection, changes)
             }
           } else {
-            // Cleanup and other status-only publications carry no row deltas.
-            // Rebuild the keyed view so it cannot diverge from ordered data.
-            state.clear()
-            for (const [key, value] of observer.getSnapshot().state ?? []) {
-              state.set(key, value)
-            }
+            // Synthetic status notifies carry no change set, and sorted
+            // queries can reorder rows on any delta; both need a full resync.
+            syncDataFromCollection(currentCollection)
           }
-          syncDataFromCollection(currentCollection)
-          const snapshot = observer.getSnapshot()
-          setStatus(snapshot.status)
-          setLocalStatus(snapshot.persistedStatus)
-          setLocalError(snapshot.persistedError)
+
+          // Update status ref on every change
+          setStatus(observer.getSnapshot().status)
         })
       },
     )
@@ -519,10 +610,7 @@ export function useLiveQuery(
     // resource continuation to correct the previous collection's rows.
     batch(() => {
       syncDataFromCollection(currentCollection)
-      const snapshot = observer.getSnapshot()
-      setStatus(snapshot.status)
-      setLocalStatus(snapshot.persistedStatus)
-      setLocalError(snapshot.persistedError)
+      setStatus(observer.getSnapshot().status)
     })
 
     onCleanup(() => {
@@ -534,12 +622,10 @@ export function useLiveQuery(
   // We have to remove getters from the resource function so we wrap it
   function getData() {
     const currentCollection = collection()
-    if (currentCollection) {
-      if (isSingleResultCollection(currentCollection)) {
-        // Force resource tracking so Suspense works
-        getDataResource()
-        return data[0]
-      }
+    if (currentCollection && isSingleResult(currentCollection)) {
+      // Force resource tracking so Suspense works before the collection is ready.
+      if (status() !== `ready`) getDataResource()
+      return data[0]
     }
     return getDataResource()
   }
@@ -557,11 +643,21 @@ export function useLiveQuery(
     },
     collection: {
       get() {
-        return getPublicCollection(collection())
+        return collection()
       },
     },
     state: {
       get() {
+        stateAccessed = true
+        const currentCollection = collection()
+        if (!currentCollection) {
+          if (stateSyncedCollection !== null) {
+            state.clear()
+            stateSyncedCollection = null
+          }
+        } else if (stateSyncedCollection !== currentCollection) {
+          syncStateFromCollection(currentCollection)
+        }
         return state
       },
     },
@@ -573,21 +669,6 @@ export function useLiveQuery(
     isReady: {
       get() {
         return status() === `ready` || status() === `disabled`
-      },
-    },
-    persistedStatus: {
-      get() {
-        return persistedStatus()
-      },
-    },
-    isPersistedReady: {
-      get() {
-        return persistedStatus() === `ready`
-      },
-    },
-    persistedError: {
-      get() {
-        return persistedError()
       },
     },
     isIdle: {
