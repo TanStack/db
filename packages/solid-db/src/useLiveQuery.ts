@@ -516,9 +516,7 @@ export function useLiveQuery(
       const row = change.value
       if (stateAccessed) state.set(change.key, row)
 
-      // If the batch already needs a resync, defer the visible update to the
-      // final rebuild so ordering/membership stays authoritative.
-      if (!needsResync) setData(0, reconcile(row))
+      if (!needsResync) setData(0, reconcile(row, RECONCILE_DEEP))
     }
 
     if (needsResync) {
