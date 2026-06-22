@@ -253,13 +253,14 @@ describe(`live query orderBy: order-only reorder must emit a change`, () => {
     // move a to the front (2 -> 0)
     write(`update`, { id: `a`, name: `Alice`, value: 0 })
     expect(idsOf(live)).toEqual([`a`, `b`])
+    expect(emitted).toBe(1) // exactly one emit for the reorder, no double-emit
 
     // push a back behind b (0 -> 5)
     write(`update`, { id: `a`, name: `Alice`, value: 5 })
     expect(idsOf(live)).toEqual([`b`, `a`])
 
-    // each reorder is observed; no stale/missing final state
-    expect(emitted).toBeGreaterThanOrEqual(2)
+    // exactly one emit per reorder — catches duplicate-emission regressions
+    expect(emitted).toBe(2)
     sub.unsubscribe()
   })
 })
