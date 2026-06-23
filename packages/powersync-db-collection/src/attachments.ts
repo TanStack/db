@@ -40,6 +40,10 @@ export interface SaveFileTanStackOptions {
 
 export interface DeleteFileTanStackOptions {
   id: string
+  /** *
+   * Note that this is called inside a synchronous TanStackDB transaction,
+   * any mutations made to other collections will be in the same transaction.
+   */
   updateHook?: (attachment: AttachmentQueueRow) => Promise<void>
 }
 
