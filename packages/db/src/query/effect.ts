@@ -7,7 +7,10 @@ import {
   normalizeOrderByPaths,
 } from './compiler/expressions.js'
 import { getCollectionBuilder } from './live/collection-registry.js'
-import { expressionReferencesPendingOperation } from './live/collection-subscriber.js'
+import {
+  expressionReferencesPendingOperation,
+  queryWhereReferencesPendingOperationForAlias,
+} from './live/collection-subscriber.js'
 import {
   buildQueryFromConfig,
   computeOrderedLoadCursor,
@@ -808,7 +811,8 @@ class EffectPipelineRunner<TRow extends object, TKey extends string | number> {
     limit?: number
   } {
     const includePendingDeletes =
-      expressionReferencesPendingOperation(whereExpression)
+      expressionReferencesPendingOperation(whereExpression) ||
+      queryWhereReferencesPendingOperationForAlias(this.query.where, alias)
 
     // Ordered aliases explicitly disable initial state — data is loaded
     // via requestLimitedSnapshot/requestSnapshot after subscription setup.

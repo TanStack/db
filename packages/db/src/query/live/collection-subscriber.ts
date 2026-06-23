@@ -16,7 +16,7 @@ import type {
   SubscriptionStatusChangeEvent,
 } from '../../types.js'
 import type { Context, GetResult } from '../builder/types.js'
-import type { BasicExpression } from '../ir.js'
+import type { BasicExpression, Where } from '../ir.js'
 import type { OrderByOptimizationInfo } from '../compiler/order-by.js'
 import type { CollectionConfigBuilder } from './collection-config-builder.js'
 import type { CollectionSubscription } from '../../collection/subscription.js'
@@ -209,7 +209,11 @@ export class CollectionSubscriber<
       : undefined
 
     const includePendingDeletes =
-      expressionReferencesPendingOperation(whereExpression)
+      expressionReferencesPendingOperation(whereExpression) ||
+      queryWhereReferencesPendingOperationForAlias(
+        this.collectionConfigBuilder.query.where,
+        this.alias,
+      )
 
     const subscription = this.collection.subscribeChanges(sendChanges, {
       ...(includeInitialState && { includeInitialState }),
@@ -270,7 +274,11 @@ export class CollectionSubscriber<
     // Subscribe to changes with onStatusChange - listener is registered before any snapshot
     // values bigger than what we've sent don't need to be sent because they can't affect the topK
     const includePendingDeletes =
-      expressionReferencesPendingOperation(whereExpression)
+      expressionReferencesPendingOperation(whereExpression) ||
+      queryWhereReferencesPendingOperationForAlias(
+        this.collectionConfigBuilder.query.where,
+        this.alias,
+      )
 
     const subscription = this.collection.subscribeChanges(sendChangesInRange, {
       whereExpression,
@@ -474,21 +482,50 @@ export class CollectionSubscriber<
 }
 
 /**
- * Checks if a BasicExpression tree references $pendingOperation.
- * Used to auto-detect whether a query opts into seeing pending-delete items.
+ * Checks if a (normalized, alias-relative) expression references
+ * $pendingOperation. Used against the optimizer's pushed-down per-alias clause,
+ * which already covers single-source filters and correlated subqueries.
  */
 export function expressionReferencesPendingOperation(
   expr: BasicExpression | undefined,
 ): boolean {
+  return refMatchesInExpression(expr, (path) =>
+    path.includes(`$pendingOperation`),
+  )
+}
+
+/**
+ * Returns true if the query's top-level WHERE references `$pendingOperation` for
+ * the given alias. Complements expressionReferencesPendingOperation (which runs
+ * on the pushed-down clause) by scanning the original WHERE, so the opt-in still
+ * fires when the reference sits in a clause the optimizer can't push to one
+ * source — a multi-source predicate or an outer-join nullable-side filter.
+ * Scoped to the alias (path[0] === alias) so a filter on one source doesn't opt
+ * in another. Not covered: a JOIN `on` condition (not part of query.where).
+ */
+export function queryWhereReferencesPendingOperationForAlias(
+  whereClauses: Array<Where> | undefined,
+  alias: string,
+): boolean {
+  if (!whereClauses) return false
+  return whereClauses.some((clause) => {
+    const expr = `expression` in clause ? clause.expression : clause
+    return refMatchesInExpression(
+      expr,
+      (path) => path[0] === alias && path.includes(`$pendingOperation`),
+    )
+  })
+}
+
+/** Walks a BasicExpression tree (ref/func) for a ref whose path matches. */
+function refMatchesInExpression(
+  expr: BasicExpression | undefined,
+  predicate: (path: Array<string>) => boolean,
+): boolean {
   if (!expr) return false
-
-  if (expr.type === `ref`) {
-    return expr.path.some((segment) => segment === `$pendingOperation`)
-  }
-
+  if (expr.type === `ref`) return predicate(expr.path)
   if (expr.type === `func`) {
-    return expr.args.some((arg) => expressionReferencesPendingOperation(arg))
+    return expr.args.some((arg) => refMatchesInExpression(arg, predicate))
   }
-
   return false
 }

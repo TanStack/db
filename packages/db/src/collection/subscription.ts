@@ -441,6 +441,11 @@ export class CollectionSubscription
           key,
           value: enrichedValue,
         })
+        // Record it so a later rollback (arriving as an insert for this key) is
+        // converted back to an update, mirroring the live convertPendingDeletes
+        // path. Otherwise the rollback insert is dropped as already-sent and the
+        // row stays stuck showing $pendingOperation: 'delete'.
+        this.convertedDeleteValues.set(key, enrichedValue)
       }
     }
   }
@@ -664,7 +669,14 @@ export class CollectionSubscription
     }
 
     // When includePendingDeletes is enabled, also include pending-delete items
-    // that the index traversal missed (because collection.get() returns undefined for them).
+    // that the index traversal missed (collection.get() returns undefined for them).
+    //
+    // KNOWN LIMITATION: this appends ALL pending deletes, not just in-window ones,
+    // and counts them into the offset (limitedSnapshotRowCount / sentKeys). An
+    // out-of-window pending delete therefore inflates the auto-tracked offset used
+    // by the next incremental load and can skip a genuine row on an offset-based
+    // backend. In-window deletes count correctly, so the fix must be window-scoped.
+    // Deferred; cursor-based backends are unaffected.
     if (this.options.includePendingDeletes) {
       this.appendPendingDeleteItems(changes)
     }

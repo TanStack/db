@@ -826,6 +826,191 @@ describe(`$pendingOperation virtual property`, () => {
       )
       expect(item2).toBeUndefined()
     })
+
+    it(`rollback of a pending delete that entered via the initial snapshot restores the item`, async () => {
+      // Regression: deleting BEFORE the query exists routes the pending delete
+      // through the initial snapshot (appendPendingDeleteItems) instead of the
+      // live path (convertPendingDeletes). Rollback must still restore the item
+      // to $pendingOperation: null — previously it stayed stuck on 'delete'.
+      const sourceCollection = createCollection(
+        mockSyncCollectionOptions({
+          id: `pending-op-snapshot-rollback`,
+          getKey: (item: Item) => item.id,
+          initialData: [
+            { id: `1`, title: `Keep` },
+            { id: `2`, title: `Delete me` },
+          ],
+        }),
+      )
+
+      await sourceCollection.preload()
+
+      // Delete BEFORE creating the query so the pending delete is only ever
+      // observed through the initial snapshot.
+      const tx = createTransaction({
+        autoCommit: false,
+        mutationFn: async () => {
+          await new Promise(() => {})
+        },
+      })
+
+      tx.mutate(() => {
+        sourceCollection.delete(`2`)
+      })
+      await waitForChanges()
+
+      const liveQuery = createLiveQueryCollection({
+        query: (q) =>
+          q
+            .from({ item: sourceCollection })
+            .where(({ item }) =>
+              or(
+                isNull(item.$pendingOperation),
+                not(isNull(item.$pendingOperation)),
+              ),
+            ),
+        getKey: (item: any) => item.id,
+      })
+
+      await liveQuery.preload()
+      await waitForChanges()
+
+      // Pending delete is visible via the snapshot with $pendingOperation: 'delete'.
+      let results = Array.from(liveQuery.values())
+      let item2 = results.find(
+        (r) => (stripVirtualProps(r) as unknown as Item).id === `2`,
+      )
+      expect(item2).toBeDefined()
+      expect((item2 as any).$pendingOperation).toBe(`delete`)
+
+      // Rollback — the row was never actually deleted from synced data, so it
+      // must return to its normal synced state.
+      tx.rollback()
+      await waitForChanges()
+
+      results = Array.from(liveQuery.values())
+      // No duplicate rows.
+      expect(results).toHaveLength(2)
+      item2 = results.find(
+        (r) => (stripVirtualProps(r) as unknown as Item).id === `2`,
+      )
+      expect(item2).toBeDefined()
+      expect((item2 as any).$pendingOperation).toBe(null)
+    })
+
+    it(`opts in when $pendingOperation is entangled in a multi-source where clause`, async () => {
+      // The opt-in detector must consider the full query where, not just the
+      // optimizer's pushed-down single-source clause. A $pendingOperation ref
+      // OR'd with a condition on another source is routed to multiSource and
+      // would otherwise be missed, hiding the pending delete.
+      type Row = { id: string; cat: string; name: string }
+      type Cat = { id: string; label: string }
+
+      const items = createCollection(
+        mockSyncCollectionOptions<Row>({
+          id: `det-multi-items`,
+          getKey: (i) => i.id,
+          initialData: [
+            { id: `1`, cat: `a`, name: `Keep` },
+            { id: `2`, cat: `a`, name: `Delete me` },
+          ],
+        }),
+      )
+      const cats = createCollection(
+        mockSyncCollectionOptions<Cat>({
+          id: `det-multi-cats`,
+          getKey: (c) => c.id,
+          initialData: [{ id: `a`, label: `Cat A` }],
+        }),
+      )
+      await items.preload()
+      await cats.preload()
+
+      const liveQuery = createLiveQueryCollection({
+        query: (q: any) =>
+          q
+            .from({ item: items })
+            .join({ cat: cats }, ({ item, cat }: any) => eq(item.cat, cat.id))
+            .where(({ item, cat }: any) =>
+              or(not(isNull(item.$pendingOperation)), eq(cat.label, `never`)),
+            )
+            .select(({ item }: any) => ({ ...item })),
+        getKey: (r: any) => r.id,
+      })
+
+      await liveQuery.preload()
+      await waitForChanges()
+
+      const tx = createTransaction({
+        autoCommit: false,
+        mutationFn: async () => {
+          await new Promise(() => {})
+        },
+      })
+      tx.mutate(() => items.delete(`2`))
+      await waitForChanges()
+
+      const item2 = Array.from(liveQuery.values()).find(
+        (r: any) => r.id === `2`,
+      )
+      expect(item2).toBeDefined()
+      expect((item2).$pendingOperation).toBe(`delete`)
+    })
+
+    it(`opts in for an outer-join nullable-side $pendingOperation filter`, async () => {
+      // The nullable side of a left join is excluded from the optimizer's
+      // push-down, so its $pendingOperation filter is only found by scanning the
+      // full query where. Without the opt-in, deleting the child would drop the
+      // row entirely instead of keeping it visible as a pending delete.
+      type Parent = { id: string; name: string }
+      type Child = { id: string; parentId: string; label: string }
+
+      const parents = createCollection(
+        mockSyncCollectionOptions<Parent>({
+          id: `det-oj-parents`,
+          getKey: (p) => p.id,
+          initialData: [{ id: `p1`, name: `Parent 1` }],
+        }),
+      )
+      const children = createCollection(
+        mockSyncCollectionOptions<Child>({
+          id: `det-oj-children`,
+          getKey: (c) => c.id,
+          initialData: [{ id: `c1`, parentId: `p1`, label: `Child 1` }],
+        }),
+      )
+      await parents.preload()
+      await children.preload()
+
+      const liveQuery = createLiveQueryCollection({
+        query: (q: any) =>
+          q
+            .from({ p: parents })
+            .leftJoin({ c: children }, ({ p, c }: any) => eq(c.parentId, p.id))
+            .where(({ c }: any) => not(isNull(c.$pendingOperation)))
+            .select(({ p, c }: any) => ({ id: p.id, childId: c.id })),
+        getKey: (r: any) => r.id,
+      })
+      await liveQuery.preload()
+      await waitForChanges()
+
+      // No child is pending-deleted yet, so the filter matches nothing.
+      expect(Array.from(liveQuery.values())).toHaveLength(0)
+
+      const tx = createTransaction({
+        autoCommit: false,
+        mutationFn: async () => {
+          await new Promise(() => {})
+        },
+      })
+      tx.mutate(() => children.delete(`c1`))
+      await waitForChanges()
+
+      // The pending-deleted child now matches the filter and the row appears.
+      const rows = Array.from(liveQuery.values())
+      expect(rows).toHaveLength(1)
+      expect((rows[0]).childId).toBe(`c1`)
+    })
   })
 
   // ── B5: Live query integration ──────────────────────────────────────
