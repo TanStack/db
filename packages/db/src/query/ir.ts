@@ -323,13 +323,17 @@ function getRefFromAlias(
 /**
  * Follows the given reference in a query
  * until its finds the root field the reference points to.
- * @returns The collection, its alias, and the path to the root field in this collection
+ * @returns The collection, its alias, and the path to the root field in this collection.
+ * `alias` is the alias under which the resolved collection is referenced in the
+ * query it was reached from (when the ref crosses into a joined source). It is
+ * left undefined when the ref simply resolves to a field on the passed-in
+ * `collection`, in which case the caller already knows the alias.
  */
 export function followRef(
   query: QueryIR,
   ref: PropRef<any>,
   collection: Collection,
-): { collection: Collection; path: Array<string> } | void {
+): { collection: Collection; path: Array<string>; alias?: string } | void {
   if (ref.path.length === 0) {
     return
   }
@@ -365,8 +369,10 @@ export function followRef(
     } else {
       // This is a reference to a collection
       // we can't follow it further
-      // so the field must be on the collection itself
-      return { collection: aliasRef.collection, path: rest }
+      // so the field must be on the collection itself.
+      // Report the alias too: when the ref crossed a join, this is the source
+      // that actually holds the field (which may differ from the from clause).
+      return { collection: aliasRef.collection, path: rest, alias }
     }
   }
 }
