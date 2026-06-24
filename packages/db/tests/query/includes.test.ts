@@ -5167,6 +5167,190 @@ describe(`includes subqueries`, () => {
       ])
       expect(hoodie.priceRanges).toEqual([])
     })
+
+    // The shared-correlation-key routing is independent of how each level is
+    // materialized, so the same guarantee must hold when the nested levels are
+    // left as live Collections (no toArray/materialize wrapper).
+    it(`resolves nested grandchildren for sibling groups when levels stay Collections`, async () => {
+      type Product = { id: number; title: string }
+      type PriceRange = { id: number; productId: number; regionId: number }
+      type Region = { id: number; name: string }
+
+      const products = createCollection(
+        localOnlyCollectionOptions<Product>({
+          id: `shared-corr-collection-products`,
+          getKey: (p) => p.id,
+          initialData: [
+            { id: 1, title: `T-Shirt` },
+            { id: 2, title: `Hoodie` },
+          ],
+        }),
+      )
+      const priceRanges = createCollection(
+        localOnlyCollectionOptions<PriceRange>({
+          id: `shared-corr-collection-price-ranges`,
+          getKey: (r) => r.id,
+          initialData: [
+            { id: 1, productId: 1, regionId: 1 },
+            { id: 2, productId: 1, regionId: 2 },
+            { id: 3, productId: 2, regionId: 1 },
+          ],
+        }),
+      )
+      const regions = createCollection(
+        localOnlyCollectionOptions<Region>({
+          id: `shared-corr-collection-regions`,
+          getKey: (r) => r.id,
+          initialData: [
+            { id: 1, name: `Europe` },
+            { id: 2, name: `North America` },
+          ],
+        }),
+      )
+
+      await Promise.all([
+        products.preload(),
+        priceRanges.preload(),
+        regions.preload(),
+      ])
+
+      const collection = createLiveQueryCollection({
+        id: `shared-corr-collection-live`,
+        query: (q) =>
+          q.from({ p: products }).select(({ p }) => ({
+            id: p.id,
+            title: p.title,
+            priceRanges: q
+              .from({ pr: priceRanges })
+              .where(({ pr }) => eq(pr.productId, p.id))
+              .select(({ pr }) => ({
+                id: pr.id,
+                regionId: pr.regionId,
+                region: q
+                  .from({ r: regions })
+                  .where(({ r }) => eq(r.id, pr.regionId))
+                  .select(({ r }) => ({ id: r.id, name: r.name })),
+              })),
+          })),
+      })
+      await collection.preload()
+
+      // toTree recursively unwraps the nested live Collections into arrays.
+      expect(toTree(collection)).toEqual([
+        {
+          id: 1,
+          title: `T-Shirt`,
+          priceRanges: [
+            { id: 1, regionId: 1, region: [{ id: 1, name: `Europe` }] },
+            {
+              id: 2,
+              regionId: 2,
+              region: [{ id: 2, name: `North America` }],
+            },
+          ],
+        },
+        {
+          id: 2,
+          title: `Hoodie`,
+          priceRanges: [
+            { id: 3, regionId: 1, region: [{ id: 1, name: `Europe` }] },
+          ],
+        },
+      ])
+    })
+
+    // Same guarantee for materialize(), which produces array/singleton
+    // snapshots through the same nested-includes routing.
+    it(`resolves nested grandchildren for sibling groups with materialize()`, async () => {
+      type Product = { id: number; title: string }
+      type PriceRange = { id: number; productId: number; regionId: number }
+      type Region = { id: number; name: string }
+
+      const products = createCollection(
+        localOnlyCollectionOptions<Product>({
+          id: `shared-corr-materialize-products`,
+          getKey: (p) => p.id,
+          initialData: [
+            { id: 1, title: `T-Shirt` },
+            { id: 2, title: `Hoodie` },
+          ],
+        }),
+      )
+      const priceRanges = createCollection(
+        localOnlyCollectionOptions<PriceRange>({
+          id: `shared-corr-materialize-price-ranges`,
+          getKey: (r) => r.id,
+          initialData: [
+            { id: 1, productId: 1, regionId: 1 },
+            { id: 2, productId: 1, regionId: 2 },
+            { id: 3, productId: 2, regionId: 1 },
+          ],
+        }),
+      )
+      const regions = createCollection(
+        localOnlyCollectionOptions<Region>({
+          id: `shared-corr-materialize-regions`,
+          getKey: (r) => r.id,
+          initialData: [
+            { id: 1, name: `Europe` },
+            { id: 2, name: `North America` },
+          ],
+        }),
+      )
+
+      await Promise.all([
+        products.preload(),
+        priceRanges.preload(),
+        regions.preload(),
+      ])
+
+      const collection = createLiveQueryCollection({
+        id: `shared-corr-materialize-live`,
+        query: (q) =>
+          q.from({ p: products }).select(({ p }) => ({
+            id: p.id,
+            title: p.title,
+            priceRanges: materialize(
+              q
+                .from({ pr: priceRanges })
+                .where(({ pr }) => eq(pr.productId, p.id))
+                .select(({ pr }) => ({
+                  id: pr.id,
+                  regionId: pr.regionId,
+                  region: materialize(
+                    q
+                      .from({ r: regions })
+                      .where(({ r }) => eq(r.id, pr.regionId))
+                      .select(({ r }) => ({ id: r.id, name: r.name })),
+                  ),
+                })),
+            ),
+          })),
+      })
+      await collection.preload()
+
+      expect(toTree(collection)).toEqual([
+        {
+          id: 1,
+          title: `T-Shirt`,
+          priceRanges: [
+            { id: 1, regionId: 1, region: [{ id: 1, name: `Europe` }] },
+            {
+              id: 2,
+              regionId: 2,
+              region: [{ id: 2, name: `North America` }],
+            },
+          ],
+        },
+        {
+          id: 2,
+          title: `Hoodie`,
+          priceRanges: [
+            { id: 3, regionId: 1, region: [{ id: 1, name: `Europe` }] },
+          ],
+        },
+      ])
+    })
   })
 
   describe(`many sibling toArray includes with chained derived collections`, () => {
