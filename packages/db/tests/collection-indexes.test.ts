@@ -1367,6 +1367,105 @@ describe(`Collection Indexes`, () => {
       const names = result.map((r) => r.value.name).sort()
       expect(names).toEqual([`Bob`, `Charlie`, `Diana`])
     })
+
+    it(`should match a string range predicate using the same ordering as a full scan`, async () => {
+      // String comparisons in the WHERE evaluator use JS relational operators
+      // (code-point order), where `'ö' > 'z'` is true. A row named `ö` must
+      // therefore be returned by `name > 'z'`, even though a locale-collated
+      // index orders `ö` before `z`. The index-optimized result must agree
+      // with a full predicate scan.
+      const stringCollection = createCollection<
+        { id: string; name: string },
+        string
+      >({
+        getKey: (row) => row.id,
+        startSync: true,
+        autoIndex: `eager`,
+        defaultIndexType: BTreeIndex,
+        sync: {
+          sync: ({ begin, write, commit, markReady }) => {
+            begin()
+            write({ type: `insert`, value: { id: `1`, name: `apple` } })
+            write({ type: `insert`, value: { id: `2`, name: `ö` } })
+            commit()
+            markReady()
+          },
+        },
+      })
+      await stringCollection.stateWhenReady()
+      stringCollection.createIndex((row) => row.name)
+
+      const result = stringCollection.currentStateAsChanges({
+        where: gt(new PropRef([`name`]), `z`),
+      })!
+
+      const names = result.map((r) => r.value.name).sort()
+      expect(names).toEqual([`ö`])
+    })
+
+    it(`should not match a row with a NaN value for an equality on NaN`, async () => {
+      // NaN is never equal to itself, so `eq(score, NaN)` must return no rows
+      // even though the index stores and can return the NaN-valued row.
+      const nanCollection = createCollection<
+        { id: string; score: number },
+        string
+      >({
+        getKey: (row) => row.id,
+        startSync: true,
+        autoIndex: `eager`,
+        defaultIndexType: BTreeIndex,
+        sync: {
+          sync: ({ begin, write, commit, markReady }) => {
+            begin()
+            write({ type: `insert`, value: { id: `1`, score: 5 } })
+            write({ type: `insert`, value: { id: `2`, score: NaN } })
+            commit()
+            markReady()
+          },
+        },
+      })
+      await nanCollection.stateWhenReady()
+      nanCollection.createIndex((row) => row.score)
+
+      const result = nanCollection.currentStateAsChanges({
+        where: eq(new PropRef([`score`]), NaN),
+      })!
+
+      expect(result).toEqual([])
+    })
+
+    it(`should not match a row with a NaN value for an IN list containing NaN`, async () => {
+      // A row only matches `IN` when its value equals a listed value, and NaN
+      // is never equal to itself. So `inArray(score, [NaN, 5])` must match
+      // only the row with score 5 and never the NaN-valued row.
+      const nanCollection = createCollection<
+        { id: string; score: number },
+        string
+      >({
+        getKey: (row) => row.id,
+        startSync: true,
+        autoIndex: `eager`,
+        defaultIndexType: BTreeIndex,
+        sync: {
+          sync: ({ begin, write, commit, markReady }) => {
+            begin()
+            write({ type: `insert`, value: { id: `1`, score: 5 } })
+            write({ type: `insert`, value: { id: `2`, score: NaN } })
+            commit()
+            markReady()
+          },
+        },
+      })
+      await nanCollection.stateWhenReady()
+      nanCollection.createIndex((row) => row.score)
+
+      const result = nanCollection.currentStateAsChanges({
+        where: inArray(new PropRef([`score`]), [NaN, 5]),
+      })!
+
+      const ids = result.map((r) => r.value.id).sort()
+      expect(ids).toEqual([`1`])
+    })
   })
 
   describe(`Index Usage Verification`, () => {
