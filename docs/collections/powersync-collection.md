@@ -1212,10 +1212,10 @@ const watchAttachments = async (onUpdate, abortSignal) => {
 
 ### 4. Save an attachment atomically with related data
 
-`saveFileTanStack` writes the file, inserts the attachment record into your collection, and runs your `updateHook` mutations in the same transaction. Use the hook to insert or update the row that references the new attachment, so both land together or not at all.
+`save` writes the file, inserts the attachment record into your collection, and runs your `updateHook` mutations in the same transaction. Use the hook to insert or update the row that references the new attachment, so both land together or not at all.
 
 ```ts
-await attachmentQueue.saveFileTanStack({
+await attachmentQueue.save({
   data, // file bytes (ArrayBuffer / base64, per your local adapter)
   fileExtension: "jpg",
   updateHook: async (attachmentRecord) => {
@@ -1233,10 +1233,10 @@ await attachmentQueue.saveFileTanStack({
 
 ### 5. Delete an attachment and detach it from the row
 
-`deleteFileTanStack` queues the file for deletion and runs your `updateHook` in the same transaction. Clear the foreign key so the row and the attachment stay consistent.
+`delete` queues the file for deletion and runs your `updateHook` in the same transaction. Clear the foreign key so the row and the attachment stay consistent.
 
 ```ts
-await attachmentQueue.deleteFileTanStack({
+await attachmentQueue.delete({
   id: photo_id,
   updateHook: async () => {
     listsCollection.update(listId, (draft) => {

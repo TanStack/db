@@ -25,7 +25,7 @@ export type TanStackDBAttachmentQueueOptions = AttachmentQueueOptions & {
   attachmentsCollection: Collection<AttachmentQueueRow, string>
 }
 
-export interface SaveFileTanStackOptions {
+export interface SaveOptions {
   data: AttachmentData
   fileExtension: string
   mediaType?: string
@@ -38,7 +38,7 @@ export interface SaveFileTanStackOptions {
   updateHook?: (attachment: AttachmentQueueRow) => Promise<void>
 }
 
-export interface DeleteFileTanStackOptions {
+export interface DeleteOptions {
   id: string
   /** *
    * Note that this is called inside a synchronous TanStackDB transaction,
@@ -70,14 +70,14 @@ export class TanStackDBAttachmentQueue extends AttachmentQueue {
    * Exposes an `updateHook` option which is called inside a TanStackDB transaction,
    * relational associations with the provided attachment ID should be made in this hook.
    */
-  async saveFileTanStack({
+  async save({
     data,
     fileExtension,
     mediaType,
     metaData,
     id,
     updateHook,
-  }: SaveFileTanStackOptions): Promise<AttachmentQueueRow> {
+  }: SaveOptions): Promise<AttachmentQueueRow> {
     const resolvedId = id ?? (await this.generateAttachmentId())
     const filename = `${resolvedId}.${fileExtension}`
     const localUri = this.localStorage.getLocalUri(filename)
@@ -128,10 +128,7 @@ export class TanStackDBAttachmentQueue extends AttachmentQueue {
    * Exposes an `updateHook` option which is called inside a TanStackDB transaction,
    * relational associations with the provided attachment ID should be cleaned up in this hook.
    */
-  async deleteFileTanStack({
-    id,
-    updateHook,
-  }: DeleteFileTanStackOptions): Promise<void> {
+  async delete({ id, updateHook }: DeleteOptions): Promise<void> {
     await this.withAttachmentContext(async (ctx) => {
       const tanStackDBTransaction = createTransaction({
         autoCommit: false,

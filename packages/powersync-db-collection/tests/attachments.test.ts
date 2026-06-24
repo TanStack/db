@@ -210,13 +210,13 @@ describePowerSync(`PowerSync AttachmentQueue (TanStackDB)`, () => {
     )
   }
 
-  describe(`saveFileTanStack`, () => {
+  describe(`save`, () => {
     it(`writes the local file and inserts a QUEUED_UPLOAD row into the collection`, async () => {
       const { createQueue, attachmentsCollection, localStorage } = await setup()
       const queue = createQueue()
 
       const data = new Uint8Array(123).fill(42).buffer
-      const record = await queue.saveFileTanStack({
+      const record = await queue.save({
         data,
         fileExtension: `jpg`,
         mediaType: `image/jpeg`,
@@ -245,7 +245,7 @@ describePowerSync(`PowerSync AttachmentQueue (TanStackDB)`, () => {
       const queue = createQueue()
 
       const userId = randomUUID()
-      const record = await queue.saveFileTanStack({
+      const record = await queue.save({
         data: createMockJpegBuffer(),
         fileExtension: `jpg`,
         updateHook: async (attachment) => {
@@ -284,7 +284,7 @@ describePowerSync(`PowerSync AttachmentQueue (TanStackDB)`, () => {
       await queue.startSync()
 
       const userId = randomUUID()
-      const record = await queue.saveFileTanStack({
+      const record = await queue.save({
         data: createMockJpegBuffer(),
         fileExtension: `jpg`,
         updateHook: async (attachment) => {
@@ -313,7 +313,7 @@ describePowerSync(`PowerSync AttachmentQueue (TanStackDB)`, () => {
       const queue = createQueue()
 
       const id = `my-custom-id`
-      const record = await queue.saveFileTanStack({
+      const record = await queue.save({
         id,
         data: createMockJpegBuffer(),
         fileExtension: `png`,
@@ -324,7 +324,7 @@ describePowerSync(`PowerSync AttachmentQueue (TanStackDB)`, () => {
     })
   })
 
-  describe(`deleteFileTanStack`, () => {
+  describe(`delete file`, () => {
     it(`queues an existing attachment for deletion and removes the local file`, async () => {
       const {
         createQueue,
@@ -336,7 +336,7 @@ describePowerSync(`PowerSync AttachmentQueue (TanStackDB)`, () => {
       await queue.startSync()
 
       const userId = randomUUID()
-      const record = await queue.saveFileTanStack({
+      const record = await queue.save({
         data: createMockJpegBuffer(),
         fileExtension: `jpg`,
         updateHook: async (attachment) => {
@@ -355,7 +355,7 @@ describePowerSync(`PowerSync AttachmentQueue (TanStackDB)`, () => {
         AttachmentState.SYNCED,
       )
 
-      await queue.deleteFileTanStack({
+      await queue.delete({
         id: record.id,
         updateHook: async (attachment) => {
           usersCollection.update(userId, (draft) => {
@@ -389,7 +389,7 @@ describePowerSync(`PowerSync AttachmentQueue (TanStackDB)`, () => {
 
       const hook = vi.fn()
       await expect(
-        queue.deleteFileTanStack({ id: `does-not-exist`, updateHook: hook }),
+        queue.delete({ id: `does-not-exist`, updateHook: hook }),
       ).rejects.toThrow(/not found/i)
 
       // The failing transaction must not have run the hook or touched state.
