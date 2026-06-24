@@ -942,8 +942,8 @@ describe(`Lazy join: subquery whose join key resolves to an indexed collection`,
       .filter((m) => m.includes(`Join requires an index`))
 
     // `teams.id` is already indexed, so no warning should advise indexing it.
-    expect(
-      indexWarnings.filter((m) => m.includes(`lazy-join-teams`)),
-    ).toEqual([])
+    expect(indexWarnings.filter((m) => m.includes(`lazy-join-teams`))).toEqual(
+      [],
+    )
   })
 })
