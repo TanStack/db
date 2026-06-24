@@ -229,7 +229,7 @@ describePowerSync(`PowerSync AttachmentQueue (TanStackDB)`, () => {
       expect(record.has_synced).toBe(0)
 
       // The file should exist on disk at the returned local_uri.
-      expect(await localStorage.fileExists(record.local_uri)).toBe(true)
+      expect(await localStorage.fileExists(record.local_uri!)).toBe(true)
 
       // The row should be reflected in the collection once it syncs back.
       await waitForState(
@@ -379,7 +379,7 @@ describePowerSync(`PowerSync AttachmentQueue (TanStackDB)`, () => {
         () => expect(attachmentsCollection.get(record.id)).toBeUndefined(),
         { timeout: WAIT_TIMEOUT, interval: 50 },
       )
-      expect(await localStorage.fileExists(record.local_uri)).toBe(false)
+      expect(await localStorage.fileExists(record.local_uri!)).toBe(false)
     })
 
     it(`throws for an unknown id and commits nothing`, async () => {

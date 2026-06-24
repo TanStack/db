@@ -1,8 +1,6 @@
 import {
   AttachmentQueue,
-  AttachmentState,
-  AttachmentTable,
-  Schema,
+  AttachmentState
 } from '@powersync/common'
 import { createTransaction } from '@tanstack/db'
 import { PowerSyncTransactor } from './PowerSyncTransactor'
@@ -11,10 +9,10 @@ import type {
   AbstractPowerSyncDatabase,
   AttachmentData,
   AttachmentQueueOptions,
-} from '@powersync/common'
-import type { Collection } from '@tanstack/db'
 
-export type AttachmentQueueRow = (typeof _tmpSchema)['types']['attachments']
+  AttachmentTable} from '@powersync/common'
+import type { Collection } from '@tanstack/db'
+import type { OptionalExtractedTable } from './helpers'
 
 export type TanStackDBAttachmentQueueOptions = AttachmentQueueOptions & {
   /**
@@ -32,24 +30,22 @@ export interface SaveOptions {
   metaData?: string
   id?: string
   /**
-   * Note that this is called inside a synchronous TanStackDB transaction,
-   * any mutations made to other collections will be in the same transaction.
+   * Called within the same TanStackDB transaction as the attachment write,
+   * so any mutations made to other collections are committed atomically with it.
    */
-  updateHook?: (attachment: AttachmentQueueRow) => Promise<void>
+  updateHook?: (attachment: AttachmentQueueRow) => void
 }
 
 export interface DeleteOptions {
   id: string
-  /** *
-   * Note that this is called inside a synchronous TanStackDB transaction,
-   * any mutations made to other collections will be in the same transaction.
+  /**
+   * Called within the same TanStackDB transaction as the attachment write,
+   * so any mutations made to other collections are committed atomically with it.
    */
-  updateHook?: (attachment: AttachmentQueueRow) => Promise<void>
+  updateHook?: (attachment: AttachmentQueueRow) => void
 }
 
-const _tmpSchema = new Schema({
-  attachments: new AttachmentTable(),
-})
+export type AttachmentQueueRow = OptionalExtractedTable<AttachmentTable>
 
 /**
  * A custom extension of the PowerSyncAttachmentQueue for TanStackDB.
