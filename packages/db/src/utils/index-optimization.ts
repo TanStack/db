@@ -103,6 +103,59 @@ export function unionSets<T>(sets: Array<Set<T>>): Set<T> {
 }
 
 /**
+ * Whether a value can be matched exactly by an index lookup, i.e. the index
+ * result for it is not a superset that the caller must re-filter.
+ *
+ * The WHERE evaluator uses three-valued logic: a comparison against
+ * `null`/`undefined` yields UNKNOWN, and `NaN` is never equal to itself. BTree
+ * indexes, however, store and return rows with such values (nullish keys sort
+ * as the smallest key; `NaN` keys are found via SameValueZero map equality), so
+ * any result that could include them must be treated as inexact.
+ */
+function isExactComparisonValue(value: unknown): boolean {
+  if (value == null) return false
+  if (typeof value === `number` && Number.isNaN(value)) return false
+  return true
+}
+
+/**
+ * Whether the collection orders strings using locale collation.
+ *
+ * Under `stringSort: 'locale'` a BTree string index orders values with
+ * `localeCompare`, but the WHERE evaluator compares strings with JS relational
+ * operators (code-point order). For range predicates these orders disagree
+ * (e.g. `'ö' > 'z'` is true in JS but `'ö'` sorts before `'z'` under locale
+ * `en`), so an index range lookup can omit matching rows. Such omissions cannot
+ * be recovered by re-filtering, so locale-backed string range predicates must
+ * not be index-optimized.
+ */
+function usesLocaleStringSort(collection: CollectionLike<any, any>): boolean {
+  const opts = { ...DEFAULT_COMPARE_OPTIONS, ...collection.compareOptions }
+  return opts.stringSort === `locale`
+}
+
+/**
+ * Whether a range predicate cannot be safely served by an index because the
+ * index orders strings with locale collation while the WHERE evaluator uses JS
+ * relational operators. See {@link usesLocaleStringSort}.
+ */
+function isLocaleStringRangeUnsafe(
+  operation: string,
+  value: unknown,
+  collection: CollectionLike<any, any>,
+): boolean {
+  if (
+    operation !== `gt` &&
+    operation !== `gte` &&
+    operation !== `lt` &&
+    operation !== `lte`
+  ) {
+    return false
+  }
+  return typeof value === `string` && usesLocaleStringSort(collection)
+}
+
+/**
  * Optimizes a query expression using available indexes to find matching keys
  */
 export function optimizeExpressionWithIndexes<
@@ -272,6 +325,17 @@ function optimizeCompoundRangeQuery<
       const fieldPath = fieldKey.split(`.`)
       const index = findIndexForField(collection, fieldPath)
 
+      // A locale-backed string range cannot be served by the index (it may
+      // omit matching rows that re-filtering cannot recover), so leave this
+      // field for a full scan instead of collapsing it into a range query.
+      if (
+        operations.some((op) =>
+          isLocaleStringRangeUnsafe(op.operation, op.value, collection),
+        )
+      ) {
+        continue
+      }
+
       if (index && index.supports(`gt`) && index.supports(`lt`)) {
         // Compare values with the same semantics the index uses (dates,
         // locale strings, ...), in ascending order since bounds are about
@@ -293,15 +357,15 @@ function optimizeCompoundRangeQuery<
         let hasToBound = false
         let fromInclusive = true
         let toInclusive = true
-        // A comparison against null/undefined is never true, but in an index
-        // those values sort as the smallest key, so a range query cannot
-        // represent such a bound. Track it and force a re-filter instead of
-        // claiming the result is exact.
-        let hasNullBound = false
+        // A comparison against null/undefined/NaN is never true, but in an
+        // index nullish values sort as the smallest key (and NaN is retained),
+        // so a range query cannot represent such a bound. Track it and force a
+        // re-filter instead of claiming the result is exact.
+        let hasNonComparableBound = false
 
         for (const { operation, value } of operations) {
-          if (value == null) {
-            hasNullBound = true
+          if (!isExactComparisonValue(value)) {
+            hasNonComparableBound = true
             continue
           }
           switch (operation) {
@@ -353,8 +417,9 @@ function optimizeCompoundRangeQuery<
           // index returns, as they sort as the smallest key). That requires a
           // non-nullish lower bound to exclude them: without `hasFromBound`
           // the range is open at the bottom and captures those rows, and a
-          // nullish bound value (`hasNullBound`) can never bound them out.
-          isExact: hasFromBound && !hasNullBound,
+          // non-comparable bound value (`hasNonComparableBound`) can never
+          // bound them out.
+          isExact: hasFromBound && !hasNonComparableBound,
           coveredArgIndices: new Set(operations.map((op) => op.argIndex)),
         }
       }
@@ -433,20 +498,29 @@ function optimizeSimpleComparison<
         return { canOptimize: false, matchingKeys: new Set(), isExact: false }
       }
 
+      // A locale-backed string range cannot be served by the index: it may
+      // omit matching rows, which re-filtering cannot recover. Fall back to a
+      // full scan instead.
+      if (isLocaleStringRangeUnsafe(operation, queryValue, collection)) {
+        return { canOptimize: false, matchingKeys: new Set(), isExact: false }
+      }
+
       const matchingKeys = index.lookup(indexOperation, queryValue)
 
-      // A comparison against null/undefined is never true, but BTree indexes
-      // store and return rows with a nullish indexed value (they sort as the
-      // smallest key). Determine whether the index result is exact or a
-      // superset that the caller must re-filter:
-      // - eq/gt/gte: a nullish query value matches nothing, while the index
-      //   would still return nullish-keyed rows -> inexact when nullish. A
-      //   non-nullish lower bound (gt/gte) excludes the bottom-sorted nullish
-      //   rows, so those stay exact.
+      // A comparison against a nullish or NaN value is never true, but BTree
+      // indexes store and return rows with such values (nullish keys sort as
+      // the smallest key; NaN keys match via SameValueZero map equality).
+      // Determine whether the index result is exact or a superset that the
+      // caller must re-filter:
+      // - eq/gt/gte: such a query value matches nothing while the index still
+      //   returns those rows -> inexact. A non-nullish lower bound (gt/gte)
+      //   excludes the bottom-sorted nullish rows, so those stay exact.
       // - lt/lte: the open lower bound always includes nullish-keyed rows,
       //   so the result is conservatively inexact.
       const isExact =
-        operation === `lt` || operation === `lte` ? false : queryValue != null
+        operation === `lt` || operation === `lte`
+          ? false
+          : isExactComparisonValue(queryValue)
 
       return { canOptimize: true, matchingKeys, isExact }
     }
@@ -638,11 +712,11 @@ function optimizeInArrayExpression<
     const values = (arrayArg as any).value
     const index = findIndexForField(collection, fieldPath)
 
-    // A nullish member can never be matched by `IN` (a comparison against
-    // null/undefined is never true), but the index would still return rows
-    // with a nullish indexed value. When the list contains a nullish member
-    // the result is a superset that the caller must re-filter.
-    const isExact = !values.some((value: any) => value == null)
+    // A nullish or NaN member can never be matched by `IN` (a comparison
+    // against null/undefined/NaN is never true), but the index would still
+    // return rows with such an indexed value. When the list contains one of
+    // those the result is a superset that the caller must re-filter.
+    const isExact = values.every((value: any) => isExactComparisonValue(value))
 
     if (index) {
       // Check if the index supports IN operation
