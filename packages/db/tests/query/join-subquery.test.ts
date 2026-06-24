@@ -1,6 +1,6 @@
-import { beforeEach, describe, expect, test } from 'vitest'
+import { afterEach, beforeEach, describe, expect, test, vi } from 'vitest'
 import { createLiveQueryCollection, eq, gt } from '../../src/query/index.js'
-import { createCollection } from '../../src/collection/index.js'
+import { BTreeIndex, createCollection } from '../../src/collection/index.js'
 import { mockSyncCollectionOptions, stripVirtualProps } from '../utils.js'
 
 // Sample data types for join-subquery testing
@@ -872,4 +872,78 @@ function createJoinSubqueryTests(autoIndex: `off` | `eager`): void {
 describe(`Join with Subqueries`, () => {
   createJoinSubqueryTests(`off`)
   createJoinSubqueryTests(`eager`)
+})
+
+describe(`Lazy join: subquery whose join key resolves to an indexed collection`, () => {
+  type Team = { id: string }
+  type Member = { id: string; teamId: string }
+
+  let teams: ReturnType<typeof createCollection<Team>>
+  let members: ReturnType<typeof createCollection<Member>>
+  let warnSpy: ReturnType<typeof vi.spyOn>
+
+  beforeEach(() => {
+    // `teams.id` is indexed; `members` has no index.
+    teams = createCollection(
+      mockSyncCollectionOptions<Team>({
+        id: `lazy-join-teams`,
+        getKey: (r) => r.id,
+        autoIndex: `eager`,
+        defaultIndexType: BTreeIndex,
+        initialData: [{ id: `t1` }],
+      }),
+    )
+    members = createCollection(
+      mockSyncCollectionOptions<Member>({
+        id: `lazy-join-members`,
+        getKey: (r) => r.id,
+        autoIndex: `off`,
+        initialData: [{ id: `m1`, teamId: `t1` }],
+      }),
+    )
+    warnSpy = vi.spyOn(console, `warn`).mockImplementation(() => {})
+  })
+
+  afterEach(() => {
+    warnSpy.mockRestore()
+  })
+
+  // When a subquery used in a JOIN clause selects its join key from the
+  // *joined* side of the subquery (here `team.id`) rather than from its own
+  // FROM side (`member`), the outer join key resolves to `teams.id`, which is
+  // indexed. The lazy-join loader should therefore load through that index and
+  // must not emit a "Join requires an index" warning that points at the
+  // already-indexed `teams` collection.
+  test(`does not warn about an index that the resolved collection already has`, () => {
+    const joinQuery = createLiveQueryCollection({
+      startSync: true,
+      query: (q) => {
+        const teamByMember = q
+          .from({ member: members })
+          .leftJoin({ team: teams }, ({ team, member }) =>
+            eq(team.id, member.teamId),
+          )
+          .select(({ team }) => ({ teamId: team.id }))
+
+        return q
+          .from({ m: members })
+          .leftJoin({ memberTeam: teamByMember }, ({ m, memberTeam }) =>
+            eq(memberTeam.teamId, m.teamId),
+          )
+          .select(({ m }) => ({ id: m.id }))
+      },
+    })
+
+    // Data flows correctly regardless (via fallback full-load today).
+    expect(joinQuery.toArray.map((r) => r.id)).toEqual([`m1`])
+
+    const indexWarnings = warnSpy.mock.calls
+      .map((c) => String(c[0]))
+      .filter((m) => m.includes(`Join requires an index`))
+
+    // `teams.id` is already indexed, so no warning should advise indexing it.
+    expect(
+      indexWarnings.filter((m) => m.includes(`lazy-join-teams`)),
+    ).toEqual([])
+  })
 })
