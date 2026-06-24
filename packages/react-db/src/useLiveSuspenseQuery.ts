@@ -1,5 +1,6 @@
 import { useRef } from 'react'
 import { useLiveQuery } from './useLiveQuery'
+import type { UseLiveQueryConfig } from './useLiveQuery'
 import type {
   Collection,
   Context,
@@ -15,18 +16,19 @@ import type {
 /**
  * Create a live query with React Suspense support
  * @param queryFn - Query function that defines what data to fetch
- * @param deps - Array of dependencies that trigger query re-execution when changed
+ * @param deps - Deprecated array of dependencies that trigger query re-execution when changed
  * @returns Object with reactive data and state - data is guaranteed to be defined
  * @throws Promise when data is loading (caught by Suspense boundary)
  * @throws Error when collection fails (caught by Error boundary)
  * @example
  * // Basic usage with Suspense
  * function TodoList() {
- *   const { data } = useLiveSuspenseQuery((q) =>
- *     q.from({ todos: todosCollection })
- *      .where(({ todos }) => eq(todos.completed, false))
- *      .select(({ todos }) => ({ id: todos.id, text: todos.text }))
- *   )
+ *   const { data } = useLiveSuspenseQuery({
+ *     query: (q) =>
+ *       q.from({ todos: todosCollection })
+ *        .where(({ todos }) => eq(todos.completed, false))
+ *        .select(({ todos }) => ({ id: todos.id, text: todos.text }))
+ *   })
  *
  *   return (
  *     <ul>
@@ -53,12 +55,11 @@ import type {
  * // data is guaranteed to be the single item (or undefined if not found)
  *
  * @example
- * // With dependencies that trigger re-suspension
- * const { data } = useLiveSuspenseQuery(
- *   (q) => q.from({ todos: todosCollection })
+ * // Structured captured values are included in derived query identity and trigger re-suspension
+ * const { data } = useLiveSuspenseQuery({
+ *   query: (q) => q.from({ todos: todosCollection })
  *          .where(({ todos }) => gt(todos.priority, minPriority)),
- *   [minPriority] // Re-suspends when minPriority changes
- * )
+ * })
  *
  * @example
  * // With Error boundary
@@ -87,9 +88,9 @@ import type {
  * ✅ **Use conditional rendering instead:**
  * ```ts
  * function Profile({ userId }: { userId: string }) {
- *   const { data } = useLiveSuspenseQuery(
- *     (q) => q.from({ users }).where(({ users }) => eq(users.id, userId))
- *   )
+ *   const { data } = useLiveSuspenseQuery({
+ *     query: (q) => q.from({ users }).where(({ users }) => eq(users.id, userId)),
+ *   })
  *   return <div>{data.name}</div>
  * }
  *
@@ -97,12 +98,9 @@ import type {
  * {userId ? <Profile userId={userId} /> : <div>No user</div>}
  * ```
  *
- * ✅ **Or use useLiveQuery for conditional queries:**
+ * ✅ **For optional inputs, conditionally render a component with complete query inputs:**
  * ```ts
- * const { data, isEnabled } = useLiveQuery(
- *   (q) => userId ? q.from({ users }) : undefined,  // ✅ Supported!
- *   [userId]
- * )
+ * {userId ? <Profile userId={userId} /> : <div>No user</div>}
  * ```
  */
 // Overload 1: Accept query function that always returns QueryBuilder
@@ -117,6 +115,15 @@ export function useLiveSuspenseQuery<TContext extends Context>(
 
 // Overload 2: Accept config object
 export function useLiveSuspenseQuery<TContext extends Context>(
+  config: UseLiveQueryConfig<TContext>,
+): {
+  state: Map<string | number, GetResult<TContext>>
+  data: InferResultType<TContext>
+  collection: Collection<GetResult<TContext>, string | number, {}>
+}
+
+// Overload 3: Accept legacy config object
+export function useLiveSuspenseQuery<TContext extends Context>(
   config: LiveQueryCollectionConfig<TContext>,
   deps?: Array<unknown>,
 ): {
@@ -125,7 +132,7 @@ export function useLiveSuspenseQuery<TContext extends Context>(
   collection: Collection<GetResult<TContext>, string | number, {}>
 }
 
-// Overload 3: Accept pre-created live query collection
+// Overload 4: Accept pre-created live query collection
 export function useLiveSuspenseQuery<
   TResult extends object,
   TKey extends string | number,
@@ -138,7 +145,7 @@ export function useLiveSuspenseQuery<
   collection: Collection<TResult, TKey, TUtils>
 }
 
-// Overload 4: Accept pre-created live query collection with singleResult: true
+// Overload 5: Accept pre-created live query collection with singleResult: true
 export function useLiveSuspenseQuery<
   TResult extends object,
   TKey extends string | number,
@@ -154,16 +161,19 @@ export function useLiveSuspenseQuery<
 // Implementation - uses useLiveQuery internally and adds Suspense logic
 export function useLiveSuspenseQuery(
   configOrQueryOrCollection: any,
-  deps: Array<unknown> = [],
+  deps?: Array<unknown>,
 ) {
   const promiseRef = useRef<Promise<void> | null>(null)
   const collectionRef = useRef<Collection<any, any, any> | null>(null)
   const hasBeenReadyRef = useRef(false)
 
   // Use useLiveQuery to handle collection management and reactivity
-  const result = useLiveQuery(configOrQueryOrCollection, deps)
+  const result =
+    deps === undefined
+      ? useLiveQuery(configOrQueryOrCollection)
+      : useLiveQuery(configOrQueryOrCollection, deps)
 
-  // Reset promise and ready state when collection changes (deps changed)
+  // Reset promise and ready state when query identity changes
   if (collectionRef.current !== result.collection) {
     promiseRef.current = null
     collectionRef.current = result.collection

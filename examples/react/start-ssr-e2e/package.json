@@ -1,0 +1,29 @@
+{
+  "name": "@tanstack/db-example-react-start-ssr-e2e",
+  "private": true,
+  "version": "0.0.0",
+  "type": "module",
+  "scripts": {
+    "build": "vite build",
+    "dev": "vite dev",
+    "test:e2e": "pnpm --filter @tanstack/db build && pnpm --filter @tanstack/react-db build && playwright test",
+    "test:e2e:hosted": "playwright test"
+  },
+  "dependencies": {
+    "@tanstack/react-db": "^0.1.85",
+    "@tanstack/react-router": "^1.159.5",
+    "@tanstack/react-start": "^1.159.5",
+    "react": "^19.2.4",
+    "react-dom": "^19.2.4",
+    "vite-tsconfig-paths": "^5.1.4"
+  },
+  "devDependencies": {
+    "@playwright/test": "^1.60.0",
+    "@types/node": "^25.2.2",
+    "@types/react": "^19.2.13",
+    "@types/react-dom": "^19.2.3",
+    "@vitejs/plugin-react": "^5.1.3",
+    "typescript": "^5.9.2",
+    "vite": "^7.3.0"
+  }
+}

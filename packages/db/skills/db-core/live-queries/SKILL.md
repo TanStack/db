@@ -372,15 +372,18 @@ JS `.filter()` / `.map()` on the result array throws away incremental maintenanc
 
 ```ts
 // WRONG -- re-runs filter on every change
-const { data } = useLiveQuery((q) => q.from({ todos: todosCollection }))
+const { data } = useLiveQuery({
+  query: (q) => q.from({ todos: todosCollection }),
+})
 const active = data.filter((t) => t.completed === false)
 
 // CORRECT -- incrementally maintained
-const { data } = useLiveQuery((q) =>
-  q
-    .from({ todos: todosCollection })
-    .where(({ todos }) => eq(todos.completed, false)),
-)
+const { data } = useLiveQuery({
+  query: (q) =>
+    q
+      .from({ todos: todosCollection })
+      .where(({ todos }) => eq(todos.completed, false)),
+})
 ```
 
 ### HIGH: Not using the full operator set

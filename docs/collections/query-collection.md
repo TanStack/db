@@ -25,13 +25,15 @@ npm install @tanstack/query-db-collection @tanstack/query-core @tanstack/db
 
 ```typescript
 import { QueryClient } from "@tanstack/query-core"
-import { createCollection } from "@tanstack/db"
+import { DbClient, collectionOptions } from "@tanstack/db"
 import { queryCollectionOptions } from "@tanstack/query-db-collection"
 
 const queryClient = new QueryClient()
+const db = new DbClient()
 
-const todosCollection = createCollection(
+const todosCollection = collectionOptions(
   queryCollectionOptions({
+    id: "todos",
     queryKey: ["todos"],
     queryFn: async () => {
       const response = await fetch("/api/todos")
@@ -41,6 +43,8 @@ const todosCollection = createCollection(
     getKey: (item) => item.id,
   })
 )
+
+const todos = db.collection(todosCollection)
 ```
 
 ## Configuration Options
@@ -70,11 +74,12 @@ If your app already uses TanStack Query's `queryOptions` helper (e.g. from `@tan
 
 ```typescript
 import { QueryClient } from "@tanstack/query-core"
-import { createCollection } from "@tanstack/db"
+import { DbClient, collectionOptions } from "@tanstack/db"
 import { queryCollectionOptions } from "@tanstack/query-db-collection"
 import { queryOptions } from "@tanstack/react-query"
 
 const queryClient = new QueryClient()
+const db = new DbClient()
 
 const listOptions = queryOptions({
   queryKey: ["todos"],
@@ -84,14 +89,17 @@ const listOptions = queryOptions({
   },
 })
 
-const todosCollection = createCollection(
+const todosCollection = collectionOptions(
   queryCollectionOptions({
+    id: "todos",
     ...listOptions,
     queryFn: (context) => listOptions.queryFn!(context),
     queryClient,
     getKey: (item) => item.id,
   }),
 )
+
+const todos = db.collection(todosCollection)
 ```
 
 If `queryFn` is missing at runtime, `queryCollectionOptions` throws `QueryFnRequiredError`.

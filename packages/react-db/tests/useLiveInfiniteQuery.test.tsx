@@ -1,7 +1,11 @@
 import { describe, expect, it } from 'vitest'
 import { act, renderHook, waitFor } from '@testing-library/react'
-import { createCollection, createLiveQueryCollection, eq } from '@tanstack/db'
-import { BTreeIndex } from '@tanstack/db'
+import {
+  BTreeIndex,
+  createCollection,
+  createLiveQueryCollection,
+  eq,
+} from '@tanstack/db'
 import { useLiveInfiniteQuery } from '../src/useLiveInfiniteQuery'
 import { mockSyncCollectionOptions } from '../../db/tests/utils'
 import { createFilterFunctionFromExpression } from '../../db/src/collection/change-events'
@@ -690,6 +694,60 @@ describe(`useLiveInfiniteQuery`, () => {
     })
 
     // All items should be life category
+    result.current.pages[0]!.forEach((post) => {
+      expect(post.category).toBe(`life`)
+    })
+  })
+
+  it(`should derive query identity from structured captured values`, async () => {
+    const posts = createMockPosts(50)
+    const collection = createCollection(
+      mockSyncCollectionOptions<Post>({
+        autoIndex: `eager`,
+        id: `derived-identity-change-test`,
+        getKey: (post: Post) => post.id,
+        initialData: posts,
+      }),
+    )
+
+    const { result, rerender } = renderHook(
+      ({ category }: { category: string }) => {
+        return useLiveInfiniteQuery(
+          (q) =>
+            q
+              .from({ posts: collection })
+              .where(({ posts: p }) => eq(p.category, category))
+              .orderBy(({ posts: p }) => p.createdAt, `desc`),
+          {
+            pageSize: 5,
+            getNextPageParam: (lastPage) =>
+              lastPage.length === 5 ? lastPage.length : undefined,
+          },
+        )
+      },
+      { initialProps: { category: `tech` } },
+    )
+
+    await waitFor(() => {
+      expect(result.current.isReady).toBe(true)
+    })
+
+    act(() => {
+      result.current.fetchNextPage()
+    })
+
+    await waitFor(() => {
+      expect(result.current.pages).toHaveLength(2)
+    })
+
+    act(() => {
+      rerender({ category: `life` })
+    })
+
+    await waitFor(() => {
+      expect(result.current.pages).toHaveLength(1)
+    })
+
     result.current.pages[0]!.forEach((post) => {
       expect(post.category).toBe(`life`)
     })

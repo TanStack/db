@@ -91,7 +91,9 @@ const syncedCollection = createCollection(
 
 // Component can check error state
 function DataList() {
-  const { data } = useLiveQuery((q) => q.from({ item: syncedCollection }))
+  const { data } = useLiveQuery({
+    query: (q) => q.from({ item: syncedCollection }),
+  })
   const isError = syncedCollection.utils.isError
   const errorCount = syncedCollection.utils.errorCount
   

@@ -17,19 +17,34 @@ For comprehensive documentation on writing queries (filtering, joins, aggregatio
 
 ## Basic Usage
 
+Create a `DbClient` and provide it to your React tree:
+
+```tsx
+import { DbClient, DbProvider } from '@tanstack/react-db'
+
+const dbClient = new DbClient()
+
+root.render(
+  <DbProvider client={dbClient}>
+    <App />
+  </DbProvider>
+)
+```
+
 ### useLiveQuery
 
 The `useLiveQuery` hook creates a live query that automatically updates your component when data changes:
 
 ```tsx
-import { useLiveQuery, eq } from '@tanstack/react-db'
+import { and, eq, gt, useDbClient, useLiveQuery } from '@tanstack/react-db'
 
 function TodoList() {
-  const { data, isLoading } = useLiveQuery((q) =>
-    q.from({ todos: todosCollection })
-     .where(({ todos }) => eq(todos.completed, false))
-     .select(({ todos }) => ({ id: todos.id, text: todos.text }))
-  )
+  const { data, isLoading } = useLiveQuery({
+    query: (q) =>
+      q.from({ todos: todoCollection })
+       .where(({ todos }) => eq(todos.completed, false))
+       .select(({ todos }) => ({ id: todos.id, text: todos.text })),
+  })
 
   if (isLoading) return <div>Loading...</div>
 
@@ -41,29 +56,56 @@ function TodoList() {
 }
 ```
 
-### Dependency Arrays
+### Query Identity
 
-All query hooks (`useLiveQuery`, `useLiveInfiniteQuery`, `useLiveSuspenseQuery`) accept an optional dependency array as their last parameter. This array works similarly to React's `useEffect` dependencies - when any value in the array changes, the query is recreated and re-executed.
+React live query hooks derive the live query identity from structured query IR by default. The hook runs the query builder, normalizes the resulting IR, and uses that as the identity. When the derived identity changes, the old live query collection is cleaned up and a new one is created.
 
-#### When to Use Dependency Arrays
-
-Use dependency arrays when your query depends on external reactive values (props, state, or other hooks):
+That means normal structured queries do not need a separate `queryKey`. Collection descriptors provide stable collection IDs, and captured values inside structured expressions become part of the derived identity:
 
 ```tsx
 function FilteredTodos({ minPriority }: { minPriority: number }) {
-  const { data } = useLiveQuery(
-    (q) => q.from({ todos: todosCollection })
+  const { data } = useLiveQuery({
+    query: (q) => q.from({ todos: todoCollection })
            .where(({ todos }) => gt(todos.priority, minPriority)),
-    [minPriority] // Re-run when minPriority changes
-  )
+  })
 
   return <div>{data.length} high-priority todos</div>
 }
 ```
 
-#### What Happens When Dependencies Change
+#### Collection Hooks
 
-When a dependency value changes:
+`useLiveQuery` resolves collection descriptors from `DbProvider` automatically. Create small collection hooks when components need imperative collection methods like `insert`, `update`, `delete`, or `preload`:
+
+```tsx
+function useTodoCollection() {
+  return useDbClient().collection(todoCollection)
+}
+```
+
+#### When to Use Query Keys
+
+Use `queryKey` only when DB cannot derive identity from structured IR, or when you intentionally want to avoid deriving identity on a hot render path. The common case is a functional query variant such as `.fn.where`, `.fn.select`, or `.fn.having`:
+
+```tsx
+function SearchTodos({ search }: { search: string }) {
+  const { data } = useLiveQuery({
+    queryKey: [todoCollection.id, 'search', search],
+    query: (q) => q.from({ todos: todoCollection })
+           .fn.where(({ todos }) =>
+             todos.text.toLowerCase().includes(search.toLowerCase())
+           ),
+  })
+
+  return <div>{data.length} matching todos</div>
+}
+```
+
+In development, `useLiveQuery` enforces this boundary. If the structured IR contains opaque values that cannot be hashed, it throws and points at the path that needs an explicit `queryKey`. If deriving identity becomes expensive across renders, it warns once and suggests adding a `queryKey` as a performance escape hatch.
+
+#### What Happens When Identity Changes
+
+When the derived identity or explicit query key changes:
 1. The previous live query collection is cleaned up
 2. A new query is created with the updated values
 3. The component re-renders with the new data
@@ -71,45 +113,40 @@ When a dependency value changes:
 
 #### Best Practices
 
-**Include all external values used in the query:**
+**Use structured expressions when possible:**
 
 ```tsx
-// Good - all external values in deps
-const { data } = useLiveQuery(
-  (q) => q.from({ todos: todosCollection })
+// Good - DB can derive identity from this structured IR
+const { data } = useLiveQuery({
+  query: (q) => q.from({ todos: todoCollection })
          .where(({ todos }) => and(
            eq(todos.userId, userId),
            eq(todos.status, status)
          )),
-  [userId, status]
-)
-
-// Bad - missing dependencies
-const { data } = useLiveQuery(
-  (q) => q.from({ todos: todosCollection })
-         .where(({ todos }) => eq(todos.userId, userId)),
-  [] // Missing userId!
-)
+})
 ```
 
-**Empty array for static queries:**
+**Add a query key for opaque runtime logic:**
 
 ```tsx
-// No external dependencies - query never changes
-const { data } = useLiveQuery(
-  (q) => q.from({ todos: todosCollection }),
-  []
-)
+const { data } = useLiveQuery({
+  queryKey: [todoCollection.id, 'by-user-fn', userId],
+  query: (q) => q.from({ todos: todoCollection })
+         .fn.where(({ todos }) => todos.userId === userId),
+})
 ```
 
-**Omit the array for queries with no external dependencies:**
+**Omit query keys for static structured queries:**
 
 ```tsx
-// Same as above - no deps needed
-const { data } = useLiveQuery(
-  (q) => q.from({ todos: todosCollection })
-)
+const { data } = useLiveQuery({
+  query: (q) => q.from({ todos: todoCollection }),
+})
 ```
+
+Dependency arrays are still accepted for backwards compatibility, but they warn in development and will be removed in 1.0.
+
+For SSR setup, collection hydration, and migration details, see the [SSR and Hydration guide](../../guides/ssr.md).
 
 ### useLiveInfiniteQuery
 
@@ -125,12 +162,9 @@ const { data, pages, fetchNextPage, hasNextPage } = useLiveInfiniteQuery(
     pageSize: 20,
     getNextPageParam: (lastPage, allPages) =>
       lastPage.length === 20 ? allPages.length : undefined
-  },
-  [category] // Re-run when category changes
+  }
 )
 ```
-
-**Note:** The dependency array is only available when using the query function variant, not when passing a pre-created collection.
 
 ### useLiveSuspenseQuery
 
@@ -138,11 +172,10 @@ For React Suspense integration, use `useLiveSuspenseQuery`:
 
 ```tsx
 function TodoList({ filter }: { filter: string }) {
-  const { data } = useLiveSuspenseQuery(
-    (q) => q.from({ todos: todosCollection })
+  const { data } = useLiveSuspenseQuery({
+    query: (q) => q.from({ todos: todoCollection })
            .where(({ todos }) => eq(todos.filter, filter)),
-    [filter] // Re-suspends when filter changes
-  )
+  })
 
   return (
     <ul>
@@ -160,4 +193,4 @@ function App() {
 }
 ```
 
-When dependencies change, `useLiveSuspenseQuery` will re-suspend, showing your Suspense fallback until the new data is ready.
+When the derived identity or explicit `queryKey` changes, `useLiveSuspenseQuery` will re-suspend, showing your Suspense fallback until the new data is ready.
