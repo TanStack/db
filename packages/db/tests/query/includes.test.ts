@@ -5081,12 +5081,12 @@ describe(`includes subqueries`, () => {
       const tree = toTree(collection)
       const tshirt = tree.find((p: any) => p.title === `T-Shirt`)
       const hoodie = tree.find((p: any) => p.title === `Hoodie`)
-      expect(
-        tshirt.priceRanges.find((pr: any) => pr.id === 1).region,
-      ).toEqual([{ id: 1, name: `Europe` }])
-      expect(
-        hoodie.priceRanges.find((pr: any) => pr.id === 3).region,
-      ).toEqual([{ id: 1, name: `Europe` }])
+      expect(tshirt.priceRanges.find((pr: any) => pr.id === 1).region).toEqual([
+        { id: 1, name: `Europe` },
+      ])
+      expect(hoodie.priceRanges.find((pr: any) => pr.id === 3).region).toEqual([
+        { id: 1, name: `Europe` },
+      ])
     })
 
     // When two parent groups share a deepest correlation key and one of them is
@@ -5162,9 +5162,9 @@ describe(`includes subqueries`, () => {
       const tree = toTree(collection)
       const tshirt = tree.find((p: any) => p.title === `T-Shirt`)
       const hoodie = tree.find((p: any) => p.title === `Hoodie`)
-      expect(
-        tshirt.priceRanges.find((pr: any) => pr.id === 1).region,
-      ).toEqual([{ id: 1, name: `Europe` }])
+      expect(tshirt.priceRanges.find((pr: any) => pr.id === 1).region).toEqual([
+        { id: 1, name: `Europe` },
+      ])
       expect(hoodie.priceRanges).toEqual([])
     })
   })

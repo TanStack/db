@@ -1384,7 +1384,11 @@ function accumulateSnapshot(
   for (const [childKey, changes] of childChanges) {
     let row = snap.get(childKey)
     if (!row) {
-      row = { value: changes.value, orderByIndex: changes.orderByIndex, count: 0 }
+      row = {
+        value: changes.value,
+        orderByIndex: changes.orderByIndex,
+        count: 0,
+      }
       snap.set(childKey, row)
     }
     row.count += changes.inserts - changes.deletes
@@ -1456,7 +1460,10 @@ function drainNestedBuffers(state: IncludesOutputState): Set<unknown> {
     for (const [nestedCorrelationKey, childChanges] of setup.buffer) {
       const parentCorrelationKeys =
         state.nestedRoutingIndex!.get(nestedCorrelationKey)
-      if (parentCorrelationKeys === undefined || parentCorrelationKeys.size === 0) {
+      if (
+        parentCorrelationKeys === undefined ||
+        parentCorrelationKeys.size === 0
+      ) {
         // Unroutable — parent not yet seen; keep in buffer
         continue
       }
@@ -1564,12 +1571,7 @@ function updateRoutingIndex(
           // from the cumulative snapshot so it receives the same rows its
           // siblings already have.
           if (isNewParent) {
-            seedParentFromSnapshot(
-              state,
-              i,
-              correlationKey,
-              nestedRoutingKey,
-            )
+            seedParentFromSnapshot(state, i, correlationKey, nestedRoutingKey)
           }
         }
       } else if (change.deletes > 0 && change.inserts === 0) {
