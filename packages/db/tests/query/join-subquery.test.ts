@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, test, vi } from 'vitest'
 import { createLiveQueryCollection, eq, gt } from '../../src/query/index.js'
-import { BTreeIndex, createCollection } from '../../src/collection/index.js'
+import { createCollection } from '../../src/collection/index.js'
+import { BTreeIndex } from '../../src/indexes/btree-index.js'
 import { mockSyncCollectionOptions, stripVirtualProps } from '../utils.js'
 
 // Sample data types for join-subquery testing
@@ -878,13 +879,9 @@ describe(`Lazy join: subquery whose join key resolves to an indexed collection`,
   type Team = { id: string }
   type Member = { id: string; teamId: string }
 
-  let teams: ReturnType<typeof createCollection<Team>>
-  let members: ReturnType<typeof createCollection<Member>>
-  let warnSpy: ReturnType<typeof vi.spyOn>
-
-  beforeEach(() => {
-    // `teams.id` is indexed; `members` has no index.
-    teams = createCollection(
+  // `teams.id` is indexed; `members` has no index.
+  const makeTeamsCollection = () =>
+    createCollection(
       mockSyncCollectionOptions<Team>({
         id: `lazy-join-teams`,
         getKey: (r) => r.id,
@@ -893,7 +890,8 @@ describe(`Lazy join: subquery whose join key resolves to an indexed collection`,
         initialData: [{ id: `t1` }],
       }),
     )
-    members = createCollection(
+  const makeMembersCollection = () =>
+    createCollection(
       mockSyncCollectionOptions<Member>({
         id: `lazy-join-members`,
         getKey: (r) => r.id,
@@ -901,6 +899,14 @@ describe(`Lazy join: subquery whose join key resolves to an indexed collection`,
         initialData: [{ id: `m1`, teamId: `t1` }],
       }),
     )
+
+  let teams: ReturnType<typeof makeTeamsCollection>
+  let members: ReturnType<typeof makeMembersCollection>
+  let warnSpy: ReturnType<typeof vi.spyOn>
+
+  beforeEach(() => {
+    teams = makeTeamsCollection()
+    members = makeMembersCollection()
     warnSpy = vi.spyOn(console, `warn`).mockImplementation(() => {})
   })
 
