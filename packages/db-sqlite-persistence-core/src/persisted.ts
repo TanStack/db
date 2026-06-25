@@ -2560,17 +2560,22 @@ function createLoopbackSyncConfig<
         params.collection as Collection<T, TKey, PersistedCollectionUtils>,
       )
 
+      let cleanedUp = false
+
       void runtime
         .ensureStarted()
         .catch((error) => {
           console.warn(`Failed persisted loopback startup:`, error)
         })
         .finally(() => {
-          params.markReady()
+          if (!cleanedUp) {
+            params.markReady()
+          }
         })
 
       return {
         cleanup: () => {
+          cleanedUp = true
           runtime.cleanup()
           runtime.clearSyncControls()
         },
