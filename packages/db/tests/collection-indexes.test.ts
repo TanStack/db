@@ -1570,6 +1570,49 @@ describe(`Collection Indexes`, () => {
       const ids = result.map((r) => r.value.id).sort()
       expect(ids).toEqual([`five`, `seven`, `three`])
     })
+
+    it(`should use the index for a range query on a field that also contains NaN`, async () => {
+      // A NaN value has a well-defined sort position (with nulls), so a range
+      // query on the field can still be served by the index and does not need
+      // to fall back to a full scan.
+      const nanCollection = createCollection<
+        { id: string; score: number },
+        string
+      >({
+        getKey: (row) => row.id,
+        startSync: true,
+        autoIndex: `off`,
+        defaultIndexType: BTreeIndex,
+        sync: {
+          sync: ({ begin, write, commit, markReady }) => {
+            begin()
+            write({ type: `insert`, value: { id: `nan`, score: NaN } })
+            write({ type: `insert`, value: { id: `one`, score: 1 } })
+            write({ type: `insert`, value: { id: `three`, score: 3 } })
+            write({ type: `insert`, value: { id: `five`, score: 5 } })
+            write({ type: `insert`, value: { id: `seven`, score: 7 } })
+            commit()
+            markReady()
+          },
+        },
+      })
+      await nanCollection.stateWhenReady()
+      nanCollection.createIndex((row) => row.score)
+
+      withIndexTracking(nanCollection, (tracker) => {
+        const result = nanCollection.currentStateAsChanges({
+          where: gt(new PropRef([`score`]), 2),
+        })!
+
+        const ids = result.map((r) => r.value.id).sort()
+        expect(ids).toEqual([`five`, `seven`, `three`])
+
+        expectIndexUsage(tracker.stats, {
+          shouldUseIndex: true,
+          shouldUseFullScan: false,
+        })
+      })
+    })
   })
 
   describe(`Index Usage Verification`, () => {
