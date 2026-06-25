@@ -11,7 +11,7 @@ title: eq
 function eq<T>(left, right): BasicExpression<boolean>;
 ```
 
-Defined in: [packages/db/src/query/builder/functions.ts:133](https://github.com/TanStack/db/blob/main/packages/db/src/query/builder/functions.ts#L133)
+Defined in: [packages/db/src/query/builder/functions.ts:137](https://github.com/TanStack/db/blob/main/packages/db/src/query/builder/functions.ts#L137)
 
 ### Type Parameters
 
@@ -39,7 +39,7 @@ Defined in: [packages/db/src/query/builder/functions.ts:133](https://github.com/
 function eq<T>(left, right): BasicExpression<boolean>;
 ```
 
-Defined in: [packages/db/src/query/builder/functions.ts:137](https://github.com/TanStack/db/blob/main/packages/db/src/query/builder/functions.ts#L137)
+Defined in: [packages/db/src/query/builder/functions.ts:141](https://github.com/TanStack/db/blob/main/packages/db/src/query/builder/functions.ts#L141)
 
 ### Type Parameters
 
@@ -67,7 +67,7 @@ Defined in: [packages/db/src/query/builder/functions.ts:137](https://github.com/
 function eq<T>(left, right): BasicExpression<boolean>;
 ```
 
-Defined in: [packages/db/src/query/builder/functions.ts:141](https://github.com/TanStack/db/blob/main/packages/db/src/query/builder/functions.ts#L141)
+Defined in: [packages/db/src/query/builder/functions.ts:145](https://github.com/TanStack/db/blob/main/packages/db/src/query/builder/functions.ts#L145)
 
 ### Type Parameters
 

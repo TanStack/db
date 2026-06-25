@@ -9,7 +9,7 @@ title: avg
 function avg<T>(arg): AggregateReturnType<T>;
 ```
 
-Defined in: [packages/db/src/query/builder/functions.ts:370](https://github.com/TanStack/db/blob/main/packages/db/src/query/builder/functions.ts#L370)
+Defined in: [packages/db/src/query/builder/functions.ts:647](https://github.com/TanStack/db/blob/main/packages/db/src/query/builder/functions.ts#L647)
 
 ## Type Parameters
 
