@@ -62,6 +62,7 @@ export class BTreeIndex<
 
     // Get the base compare function
     const baseCompareFn = options?.compareFn ?? defaultComparator
+    this.hasCustomComparator = options?.compareFn != null
 
     // Wrap it to denormalize sentinels before comparison
     // This ensures UNDEFINED_SENTINEL is converted back to undefined
@@ -76,6 +77,12 @@ export class BTreeIndex<
   }
 
   protected initialize(_options?: BTreeIndexOptions): void {}
+
+  protected containsUnorderedIndexedValue(): boolean {
+    // NaN and invalid Dates both normalize to NaN, which collapses to a single
+    // map bucket (SameValueZero), so a single O(1) check suffices.
+    return this.valueMap.has(NaN)
+  }
 
   /**
    * Adds a value to the index

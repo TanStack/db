@@ -135,24 +135,55 @@ function usesLocaleStringSort(collection: CollectionLike<any, any>): boolean {
 }
 
 /**
- * Whether a range predicate cannot be safely served by an index because the
- * index orders strings with locale collation while the WHERE evaluator uses JS
- * relational operators. See {@link usesLocaleStringSort}.
+ * Whether a range predicate on this operand would use an index ordering that
+ * differs from the WHERE evaluator's relational operators, so an index range
+ * lookup could omit genuine matches that re-filtering cannot recover.
+ *
+ * The evaluator compares with JS relational operators. That order matches the
+ * index comparator only for numbers, booleans, bigints, lexically-sorted
+ * strings and valid Dates. It diverges for locale-sorted strings (localeCompare
+ * vs code-point order) and for arrays, plain objects, Temporal values, typed
+ * arrays and invalid Dates (recursive/identity ordering vs string coercion).
+ *
+ * Note: `null`/`undefined`/`NaN` operands are not handled here — those are
+ * superset cases handled by re-filtering ({@link isExactComparisonValue}).
  */
-function isLocaleStringRangeUnsafe(
-  operation: string,
+function isRangeOrderingDivergent(
   value: unknown,
   collection: CollectionLike<any, any>,
 ): boolean {
-  if (
-    operation !== `gt` &&
-    operation !== `gte` &&
-    operation !== `lt` &&
-    operation !== `lte`
-  ) {
-    return false
+  switch (typeof value) {
+    case `number`:
+    case `bigint`:
+    case `boolean`:
+      return false
+    case `string`:
+      return usesLocaleStringSort(collection)
+    case `object`: {
+      if (value === null) return false
+      // Only valid Date instances order consistently with the evaluator
+      return !(value instanceof Date) || Number.isNaN(value.getTime())
+    }
+    default:
+      return false
   }
-  return typeof value === `string` && usesLocaleStringSort(collection)
+}
+
+/**
+ * Whether a range predicate (gt/gte/lt/lte) on this operand can be safely
+ * served by the given index: the operand's domain must order the same way the
+ * index does, and the index itself must support trustworthy range traversal
+ * (no custom comparator, no stored unorderable value).
+ */
+function canRangeOptimize(
+  value: unknown,
+  index: IndexInterface<any>,
+  collection: CollectionLike<any, any>,
+): boolean {
+  return (
+    !isRangeOrderingDivergent(value, collection) &&
+    index.supportsRangeOptimization
+  )
 }
 
 /**
@@ -325,12 +356,14 @@ function optimizeCompoundRangeQuery<
       const fieldPath = fieldKey.split(`.`)
       const index = findIndexForField(collection, fieldPath)
 
-      // A locale-backed string range cannot be served by the index (it may
-      // omit matching rows that re-filtering cannot recover), so leave this
-      // field for a full scan instead of collapsing it into a range query.
+      // Only collapse this field into a range query when every bound's domain
+      // orders the same way the index does and the index supports trustworthy
+      // range traversal. Otherwise the index may omit matching rows that
+      // re-filtering cannot recover, so leave the field for a full scan.
       if (
-        operations.some((op) =>
-          isLocaleStringRangeUnsafe(op.operation, op.value, collection),
+        index &&
+        operations.some(
+          (op) => !canRangeOptimize(op.value, index, collection),
         )
       ) {
         continue
@@ -498,10 +531,17 @@ function optimizeSimpleComparison<
         return { canOptimize: false, matchingKeys: new Set(), isExact: false }
       }
 
-      // A locale-backed string range cannot be served by the index: it may
-      // omit matching rows, which re-filtering cannot recover. Fall back to a
-      // full scan instead.
-      if (isLocaleStringRangeUnsafe(operation, queryValue, collection)) {
+      // A range op can only use the index when the operand's domain orders the
+      // same way the index does and the index supports trustworthy traversal.
+      // Otherwise the index may omit matching rows, which re-filtering cannot
+      // recover, so fall back to a full scan.
+      if (
+        (operation === `gt` ||
+          operation === `gte` ||
+          operation === `lt` ||
+          operation === `lte`) &&
+        !canRangeOptimize(queryValue, index, collection)
+      ) {
         return { canOptimize: false, matchingKeys: new Set(), isExact: false }
       }
 
