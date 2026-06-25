@@ -751,43 +751,55 @@ describe(`evaluators`, () => {
 
           it(`treats NaN as greater than every number`, () => {
             expect(
-              compileExpression(new Func(`gt`, [new Value(NaN), new Value(5)]))({}),
-            ).toBe(true)
-            expect(
-              compileExpression(new Func(`gt`, [new Value(5), new Value(NaN)]))({}),
-            ).toBe(false)
-            expect(
-              compileExpression(new Func(`gt`, [new Value(NaN), new Value(NaN)]))(
+              compileExpression(new Func(`gt`, [new Value(NaN), new Value(5)]))(
                 {},
               ),
+            ).toBe(true)
+            expect(
+              compileExpression(new Func(`gt`, [new Value(5), new Value(NaN)]))(
+                {},
+              ),
+            ).toBe(false)
+            expect(
+              compileExpression(
+                new Func(`gt`, [new Value(NaN), new Value(NaN)]),
+              )({}),
             ).toBe(false)
           })
 
           it(`orders NaN with gte/lt/lte consistently`, () => {
             // NaN >= anything (including NaN); nothing finite >= NaN
             expect(
-              compileExpression(new Func(`gte`, [new Value(NaN), new Value(5)]))({}),
+              compileExpression(
+                new Func(`gte`, [new Value(NaN), new Value(5)]),
+              )({}),
             ).toBe(true)
             expect(
-              compileExpression(new Func(`gte`, [new Value(NaN), new Value(NaN)]))(
-                {},
-              ),
+              compileExpression(
+                new Func(`gte`, [new Value(NaN), new Value(NaN)]),
+              )({}),
             ).toBe(true)
             // NaN < nothing; a finite value < NaN
             expect(
-              compileExpression(new Func(`lt`, [new Value(NaN), new Value(5)]))({}),
+              compileExpression(new Func(`lt`, [new Value(NaN), new Value(5)]))(
+                {},
+              ),
             ).toBe(false)
             expect(
-              compileExpression(new Func(`lt`, [new Value(5), new Value(NaN)]))({}),
-            ).toBe(true)
-            // NaN <= NaN; a finite value <= NaN
-            expect(
-              compileExpression(new Func(`lte`, [new Value(NaN), new Value(NaN)]))(
+              compileExpression(new Func(`lt`, [new Value(5), new Value(NaN)]))(
                 {},
               ),
             ).toBe(true)
+            // NaN <= NaN; a finite value <= NaN
             expect(
-              compileExpression(new Func(`lte`, [new Value(5), new Value(NaN)]))({}),
+              compileExpression(
+                new Func(`lte`, [new Value(NaN), new Value(NaN)]),
+              )({}),
+            ).toBe(true)
+            expect(
+              compileExpression(
+                new Func(`lte`, [new Value(5), new Value(NaN)]),
+              )({}),
             ).toBe(true)
           })
 

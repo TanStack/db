@@ -1,5 +1,5 @@
 ---
-"@tanstack/db": minor
+'@tanstack/db': minor
 ---
 
 Adopt PostgreSQL float semantics for `NaN` in `where` clauses and ordering.

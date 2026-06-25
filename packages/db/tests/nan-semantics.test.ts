@@ -66,7 +66,9 @@ async function queryBothPaths(where: BasicExpression<boolean>) {
 
 describe(`NaN query semantics (PostgreSQL float semantics)`, () => {
   it(`matches NaN rows for equality on NaN`, async () => {
-    expect(await queryBothPaths(eq(new PropRef([`score`]), NaN))).toEqual([`nan`])
+    expect(await queryBothPaths(eq(new PropRef([`score`]), NaN))).toEqual([
+      `nan`,
+    ])
   })
 
   it(`treats NaN as greater than every number in a range query`, async () => {
