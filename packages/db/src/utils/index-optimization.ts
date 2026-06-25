@@ -362,9 +362,7 @@ function optimizeCompoundRangeQuery<
       // re-filtering cannot recover, so leave the field for a full scan.
       if (
         index &&
-        operations.some(
-          (op) => !canRangeOptimize(op.value, index, collection),
-        )
+        operations.some((op) => !canRangeOptimize(op.value, index, collection))
       ) {
         continue
       }
