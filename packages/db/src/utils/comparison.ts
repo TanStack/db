@@ -18,6 +18,19 @@ function getObjectId(obj: object): number {
 }
 
 /**
+ * Whether a value has no natural order: `NaN`, or an invalid Date (whose
+ * timestamp is `NaN`). Such values cannot participate in a total order, so the
+ * comparator handles them explicitly instead of letting them compare equal to
+ * everything (`NaN`) or produce a `NaN` result (invalid Date subtraction).
+ */
+function isUnorderable(value: any): boolean {
+  return (
+    (typeof value === `number` && Number.isNaN(value)) ||
+    (value instanceof Date && Number.isNaN(value.getTime()))
+  )
+}
+
+/**
  * Universal comparison function for all data types
  * Handles null/undefined, strings, arrays, dates, objects, and primitives
  * Always sorts null/undefined values first
@@ -29,6 +42,17 @@ export const ascComparator = (a: any, b: any, opts: CompareOptions): number => {
   if (a == null && b == null) return 0
   if (a == null) return nulls === `first` ? -1 : 1
   if (b == null) return nulls === `first` ? 1 : -1
+
+  // Handle values with no natural order (NaN, invalid Dates). They would
+  // otherwise compare equal to everything (NaN) or yield NaN from the date
+  // subtraction below, breaking the total order the rest of the system relies
+  // on (e.g. B-tree range traversal). Give them a stable position alongside
+  // nulls so the ordering stays well-defined.
+  const aUnordered = isUnorderable(a)
+  const bUnordered = isUnorderable(b)
+  if (aUnordered && bUnordered) return 0
+  if (aUnordered) return nulls === `first` ? -1 : 1
+  if (bUnordered) return nulls === `first` ? 1 : -1
 
   // if a and b are both strings, compare them based on locale
   if (typeof a === `string` && typeof b === `string`) {

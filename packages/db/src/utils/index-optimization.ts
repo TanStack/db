@@ -173,7 +173,7 @@ function isRangeOrderingDivergent(
  * Whether a range predicate (gt/gte/lt/lte) on this operand can be safely
  * served by the given index: the operand's domain must order the same way the
  * index does, and the index itself must support trustworthy range traversal
- * (no custom comparator, no stored unorderable value).
+ * (no custom comparator).
  */
 function canRangeOptimize(
   value: unknown,

@@ -71,11 +71,9 @@ export interface IndexInterface<
   /**
    * Whether range lookups (gt/gte/lt/lte) on this index can be trusted to
    * return every matching key. Range traversal relies on the index ordering, so
-   * it is unsafe when the index uses a custom comparator (whose order may differ
-   * from the WHERE evaluator's relational operators) or currently contains a
-   * value that has no well-defined order (NaN or an invalid Date, which compare
-   * equal to every value and break the strict-weak-ordering traversal assumes).
-   * Callers must fall back to a full scan when this is `false`.
+   * it is unsafe when the index uses a custom comparator, whose order may not
+   * match the WHERE evaluator's relational operators. Callers must fall back to
+   * a full scan when this is `false`.
    */
   get supportsRangeOptimization(): boolean
 
@@ -161,16 +159,8 @@ export abstract class BaseIndex<
   }
 
   get supportsRangeOptimization(): boolean {
-    return !this.hasCustomComparator && !this.containsUnorderedIndexedValue()
+    return !this.hasCustomComparator
   }
-
-  /**
-   * Whether the index currently holds a value with no well-defined order
-   * (NaN, or an invalid Date — both normalize to NaN). Such a value compares
-   * equal to every other value, breaking the strict-weak-ordering that range
-   * traversal relies on.
-   */
-  protected abstract containsUnorderedIndexedValue(): boolean
 
   matchesField(fieldPath: Array<string>): boolean {
     return (

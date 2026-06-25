@@ -73,12 +73,6 @@ export class BasicIndex<
 
   protected initialize(_options?: BasicIndexOptions): void {}
 
-  protected containsUnorderedIndexedValue(): boolean {
-    // NaN and invalid Dates both normalize to NaN, which collapses to a single
-    // map bucket (SameValueZero), so a single O(1) check suffices.
-    return this.valueMap.has(NaN)
-  }
-
   /**
    * Adds a value to the index
    */
