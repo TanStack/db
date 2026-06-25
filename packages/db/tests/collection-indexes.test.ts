@@ -1466,6 +1466,110 @@ describe(`Collection Indexes`, () => {
       const ids = result.map((r) => r.value.id).sort()
       expect(ids).toEqual([`1`])
     })
+
+    it(`should return array-valued rows for a range predicate consistently with a full scan`, async () => {
+      // Range predicates are evaluated with standard relational comparison,
+      // under which `[2] > [10]` is true (arrays compare as their string
+      // form). An index on an array-valued field must return the same rows as
+      // a full scan and must not drop this match.
+      const arrayCollection = createCollection<
+        { id: string; value: Array<number> },
+        string
+      >({
+        getKey: (row) => row.id,
+        startSync: true,
+        autoIndex: `off`,
+        defaultIndexType: BTreeIndex,
+        sync: {
+          sync: ({ begin, write, commit, markReady }) => {
+            begin()
+            write({ type: `insert`, value: { id: `1`, value: [2] } })
+            commit()
+            markReady()
+          },
+        },
+      })
+      await arrayCollection.stateWhenReady()
+      arrayCollection.createIndex((row) => row.value)
+
+      const result = arrayCollection.currentStateAsChanges({
+        where: gt(new PropRef([`value`]), [10]),
+      })!
+
+      const ids = result.map((r) => r.value.id).sort()
+      expect(ids).toEqual([`1`])
+    })
+
+    it(`should return all matching rows for a range predicate on a custom-comparator index`, async () => {
+      // A range predicate must return every row that satisfies it regardless
+      // of the comparator the index was created with. With scores 5 and 20,
+      // `score > 10` matches only the row with score 20.
+      const customCollection = createCollection<
+        { id: string; score: number },
+        string
+      >({
+        getKey: (row) => row.id,
+        startSync: true,
+        autoIndex: `off`,
+        defaultIndexType: BTreeIndex,
+        sync: {
+          sync: ({ begin, write, commit, markReady }) => {
+            begin()
+            write({ type: `insert`, value: { id: `low`, score: 5 } })
+            write({ type: `insert`, value: { id: `high`, score: 20 } })
+            commit()
+            markReady()
+          },
+        },
+      })
+      await customCollection.stateWhenReady()
+      customCollection.createIndex((row) => row.score, {
+        options: { compareFn: (a: number, b: number) => b - a },
+      })
+
+      const result = customCollection.currentStateAsChanges({
+        where: gt(new PropRef([`score`]), 10),
+      })!
+
+      const ids = result.map((r) => r.value.id).sort()
+      expect(ids).toEqual([`high`])
+    })
+
+    it(`should return all matching rows for a range predicate when the field also contains NaN`, async () => {
+      // A range predicate must return every matching row even when other rows
+      // hold a NaN value for the field. With scores NaN, 1, 3, 5 and 7,
+      // `score > 2` matches the rows with scores 3, 5 and 7.
+      const nanCollection = createCollection<
+        { id: string; score: number },
+        string
+      >({
+        getKey: (row) => row.id,
+        startSync: true,
+        autoIndex: `off`,
+        defaultIndexType: BTreeIndex,
+        sync: {
+          sync: ({ begin, write, commit, markReady }) => {
+            begin()
+            write({ type: `insert`, value: { id: `nan`, score: NaN } })
+            write({ type: `insert`, value: { id: `one`, score: 1 } })
+            write({ type: `insert`, value: { id: `three`, score: 3 } })
+            write({ type: `insert`, value: { id: `five`, score: 5 } })
+            write({ type: `insert`, value: { id: `seven`, score: 7 } })
+            commit()
+            markReady()
+          },
+        },
+      })
+      await nanCollection.stateWhenReady()
+      nanCollection.createIndex((row) => row.score)
+
+      const result = nanCollection.currentStateAsChanges({
+        where: gt(new PropRef([`score`]), 2),
+      })!
+
+      const ids = result.map((r) => r.value.id).sort()
+      expect(ids).toEqual([`five`, `seven`, `three`])
+    })
   })
 
   describe(`Index Usage Verification`, () => {
