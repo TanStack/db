@@ -1,4 +1,8 @@
-import { compileSingleRowExpression, toBooleanPredicate } from '@tanstack/db'
+import {
+  compileSingleRowExpression,
+  safeRandomUUID,
+  toBooleanPredicate,
+} from '@tanstack/db'
 import {
   InvalidPersistedCollectionConfigError,
   InvalidPersistedCollectionCoordinatorError,
@@ -440,7 +444,7 @@ type SyncControlFns<T extends object, TKey extends string | number> = {
 export class SingleProcessCoordinator implements PersistedCollectionCoordinator {
   private readonly nodeId: string
 
-  constructor(nodeId: string = crypto.randomUUID()) {
+  constructor(nodeId: string = safeRandomUUID()) {
     this.nodeId = nodeId
   }
 
@@ -467,7 +471,7 @@ export class SingleProcessCoordinator implements PersistedCollectionCoordinator 
   public pullSince(): Promise<PullSinceResponse> {
     return Promise.resolve({
       type: `rpc:pullSince:res`,
-      rpcId: crypto.randomUUID(),
+      rpcId: safeRandomUUID(),
       ok: true,
       latestTerm: 1,
       latestSeq: 0,
@@ -1387,7 +1391,7 @@ class PersistedCollectionRuntime<
         this.createTxCommittedPayload({
           term: streamPosition.term,
           seq: streamPosition.seq,
-          txId: crypto.randomUUID(),
+          txId: safeRandomUUID(),
           latestRowVersion: streamPosition.rowVersion,
           changedRows: [],
           deletedKeys: [],
@@ -1427,7 +1431,7 @@ class PersistedCollectionRuntime<
     streamPosition: { term: number; seq: number; rowVersion: number },
   ): PersistedTx {
     return {
-      txId: crypto.randomUUID(),
+      txId: safeRandomUUID(),
       term: streamPosition.term,
       seq: streamPosition.seq,
       rowVersion: streamPosition.rowVersion,
@@ -1471,7 +1475,7 @@ class PersistedCollectionRuntime<
     streamPosition: { term: number; seq: number; rowVersion: number },
   ): PersistedTx {
     return {
-      txId: crypto.randomUUID(),
+      txId: safeRandomUUID(),
       term: streamPosition.term,
       seq: streamPosition.seq,
       rowVersion: streamPosition.rowVersion,
@@ -2607,7 +2611,7 @@ export function persistedCollectionOptions<
 
     const { schemaVersion, ...syncOptions } = options
     const collectionId =
-      syncOptions.id ?? `persisted-collection:${crypto.randomUUID()}`
+      syncOptions.id ?? `persisted-collection:${safeRandomUUID()}`
     const persistence = resolvePersistenceForCollection(
       syncOptions.persistence,
       {
@@ -2635,7 +2639,7 @@ export function persistedCollectionOptions<
 
   const { schemaVersion, ...localOnlyOptions } = options
   const collectionId =
-    localOnlyOptions.id ?? `persisted-collection:${crypto.randomUUID()}`
+    localOnlyOptions.id ?? `persisted-collection:${safeRandomUUID()}`
   const persistence = resolvePersistenceForCollection(
     localOnlyOptions.persistence,
     {
