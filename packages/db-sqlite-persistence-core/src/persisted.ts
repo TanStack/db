@@ -828,7 +828,7 @@ class PersistedCollectionRuntime<
     private readonly mode: PersistedMode,
     private readonly collectionId: string,
     private readonly persistence: PersistedResolvedPersistence,
-    private readonly syncMode: `eager` | `on-demand`,
+    readonly syncMode: `eager` | `on-demand`,
     private readonly dbName: string,
   ) {}
 
@@ -2245,15 +2245,16 @@ function createWrappedSyncConfig<
         ...params,
         markReady: () => {
           void (fullStartPromise ?? runtime.ensureStarted())
-            .then(() => {
-              params.markReady()
-            })
             .catch((error) => {
               console.warn(
                 `Failed persisted sync startup before markReady:`,
                 error,
               )
-              params.markReady()
+            })
+            .finally(() => {
+              if (!startupState.cleanedUp) {
+                params.markReady()
+              }
             })
         },
         begin: (options?: { immediate?: boolean }) => {
@@ -2484,6 +2485,25 @@ function createWrappedSyncConfig<
       let sourceResult: SyncConfigRes = {}
       const startupState = { cleanedUp: false }
       fullStartPromise = runtime.ensureStarted()
+
+      // Mark ready after SQLite hydration so preload() resolves from local data
+      // even if the upstream never calls markReady() (e.g. query paused offline).
+      // Skipped in on-demand mode -- no rows load at startup, so the upstream sync
+      // owns readiness there. On failure, mark ready to avoid blocking consumers.
+      void fullStartPromise.then(
+        () => {
+          if (!startupState.cleanedUp && runtime.syncMode !== `on-demand`) {
+            params.markReady()
+          }
+        },
+        (error) => {
+          console.warn(`Failed persisted sync startup:`, error)
+          if (!startupState.cleanedUp) {
+            params.markReady()
+          }
+        },
+      )
+
       const sourceResultPromise = (async () => {
         await runtime.ensureStartupMetadataLoaded()
 
@@ -2542,11 +2562,10 @@ function createLoopbackSyncConfig<
 
       void runtime
         .ensureStarted()
-        .then(() => {
-          params.markReady()
-        })
         .catch((error) => {
           console.warn(`Failed persisted loopback startup:`, error)
+        })
+        .finally(() => {
           params.markReady()
         })
 
