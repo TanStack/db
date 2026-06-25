@@ -26,7 +26,7 @@ If you have been assigned to fix an issue or develop a new feature, please follo
   - We use [pnpm](https://pnpm.io/) for package management. Please use the version mentioned in `package.json`.
 
     ```bash
-    corepack enable && corepack prepare
+    corepack enable && corepack prepare pnpm@11.1.0 --activate
     ```
 
   - We use [nvm](https://github.com/nvm-sh/nvm) to manage Node.js versions. Please use the version mentioned in `.nvmrc`.
@@ -89,7 +89,7 @@ git clone git@github.com:TanStack/tanstack.com.git --depth=1 --single-branch --b
 > [!NOTE]
 > Your `tanstack` directory should look like this:
 >
-> ```
+> ```text
 > tanstack/
 >    |
 >    +-- db/ (<-- this directory cannot be called anything else!)
