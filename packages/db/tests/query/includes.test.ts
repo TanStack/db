@@ -5350,6 +5350,24 @@ describe(`includes subqueries`, () => {
           ],
         },
       ])
+
+      // Post-load: insert a price range under Hoodie that references regionId 2,
+      // a correlation key already materialized for T-Shirt at load. This drives
+      // the late-arrival snapshot re-emit path through materialize() — the new
+      // sibling group must be seeded with the already-drained North America row
+      // without disturbing T-Shirt's existing nested rows.
+      priceRanges.insert({ id: 4, productId: 2, regionId: 2 })
+      await new Promise((r) => setTimeout(r, 50))
+
+      const tree = toTree(collection)
+      const tshirt = tree.find((p: any) => p.title === `T-Shirt`)
+      const hoodie = tree.find((p: any) => p.title === `Hoodie`)
+      expect(tshirt.priceRanges.find((pr: any) => pr.id === 2).region).toEqual([
+        { id: 2, name: `North America` },
+      ])
+      expect(hoodie.priceRanges.find((pr: any) => pr.id === 4).region).toEqual([
+        { id: 2, name: `North America` },
+      ])
     })
   })
 
