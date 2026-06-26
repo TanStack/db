@@ -1,5 +1,39 @@
 # @tanstack/db
 
+## 0.6.11
+
+### Patch Changes
+
+- Fix incorrect results from index-optimized `where` clauses that combine indexed and non-indexed conditions. ([#1582](https://github.com/TanStack/db/pull/1582))
+  - `OR` expressions are now only served from indexes when every disjunct can use an index; otherwise the query falls back to a full scan. Previously, rows matched only by a non-indexed disjunct were missing from the result.
+  - `AND` expressions still use indexes for the conditions that have them, but the remaining conditions are now enforced by re-checking each candidate row against the full expression. Previously, non-indexed conditions were silently dropped, returning rows that did not match the query.
+  - Compound range conditions (e.g. `age > 5 AND age < 10`) combined with conditions on other fields no longer ignore those other conditions.
+  - Compound range conditions sharing the same boundary value (e.g. `age >= 5 AND age > 5`) now apply the strictest bound regardless of the order the conditions appear in, using the same value comparison semantics as the indexes (dates, locale strings, ...).
+  - Compound range conditions that only bound one side (e.g. `age > 5 AND age >= 8`) no longer return an empty result.
+  - Strict range comparisons (`gt`/`lt`) on BTree-indexed fields holding normalized values such as dates now correctly exclude the boundary value.
+  - Compound range conditions with a `null`/`undefined` bound (e.g. `gt(score, undefined)`) now re-filter against the full expression instead of returning index-ordered rows, matching the semantics of a full scan (a comparison against `null`/`undefined` is never true).
+  - Index-optimized `eq`, `IN`, and range queries on a field that has rows with `null`/`undefined` values no longer leak those rows into results. BTree indexes store and return such rows (they sort as the smallest key), but a comparison against `null`/`undefined` is never true, so these results are now re-filtered against the full expression to stay equivalent to a full scan.
+  - String range conditions (`gt`/`gte`/`lt`/`lte`) on a collection using locale string collation (the default) are no longer served by the index. The index orders strings with `localeCompare` while the `where` evaluator compares them with standard relational operators, so an index range lookup could omit matching rows; these conditions now fall back to a full scan.
+  - Range conditions whose operand is not ordered the same way by the index and the `where` evaluator (arrays, plain objects, Temporal values) now fall back to a full scan instead of using the index, which could otherwise omit matching rows.
+  - Range conditions on an index created with a custom comparator now fall back to a full scan, since the comparator's ordering may not match the `where` evaluator's relational operators.
+
+- fix(query): drive lazy-join loading through the collection the join key resolves to ([#1614](https://github.com/TanStack/db/pull/1614))
+
+  When a subquery used in a JOIN clause selects its join key from a _joined_ source rather than from its own `from` clause, the lazy-join loader subscribed to the wrong inner source: it used the subquery's `from` alias while computing the index requirement against the collection the key actually resolves to. This produced a misleading `Join requires an index` warning naming an already-indexed collection and an unnecessary full-load fallback. `followRef` now reports the resolved source alias, so lazy loading subscribes to the correct collection and loads through its index.
+
+- Adopt PostgreSQL float semantics for `NaN` in `where` clauses and ordering. ([#1582](https://github.com/TanStack/db/pull/1582))
+
+  `NaN` (and invalid `Date` values, whose timestamp is `NaN`) previously had no consistent order — `NaN === NaN` is `false` in JavaScript, so `NaN` compared unequal to everything and could not be sorted or indexed deterministically. Following PostgreSQL, `NaN` is now treated as **equal to itself** and **greater than every other non-null value**:
+  - `eq(row.value, NaN)` matches rows whose value is `NaN`; `inArray(row.value, [NaN, ...])` matches them too.
+  - Range comparisons treat `NaN` as the greatest value: `gt`/`gte` include it, `lt`/`lte` exclude it.
+  - Ordering by a field containing `NaN` is now deterministic, with `NaN` sorting last (and `null` still ordered by `NULLS FIRST`/`NULLS LAST`).
+
+  `null`/`undefined` are unaffected: they continue to use three-valued logic (a comparison with `null` yields `UNKNOWN`).
+
+  This makes results independent of whether a query is served from an index or a full scan.
+
+- Fix prototype pollution via `select()` alias paths. Aliases were split on `.` and walked into the result object without sanitization, so a query like `select(() => ({ ['__proto__.polluted']: ... }))` (or any segment matching `__proto__`, `prototype`, or `constructor`) could mutate `Object.prototype`. The select compiler now rejects unsafe alias path segments with a new `UnsafeAliasPathError`. Fixes #1584. ([#1595](https://github.com/TanStack/db/pull/1595))
+
 ## 0.6.10
 
 ### Patch Changes

@@ -1,6 +1,6 @@
 {
   "name": "@tanstack/electric-db-collection",
-  "version": "0.3.8",
+  "version": "0.3.9",
   "description": "ElectricSQL collection for TanStack DB",
   "author": "Kyle Mathews",
   "license": "MIT",
