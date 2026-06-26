@@ -135,7 +135,7 @@ function prototypeHasOwn(prop: string): boolean {
   return Object.prototype.hasOwnProperty.call(Object.prototype, prop)
 }
 
-describe(`select() alias prototype pollution (issue #1584)`, () => {
+describe(`select() alias prototype pollution`, () => {
   let users: ReturnType<typeof createUsers>
 
   beforeEach(() => {
