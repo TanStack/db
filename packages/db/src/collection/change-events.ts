@@ -138,17 +138,24 @@ export function currentStateAsChanges<
     )
 
     if (optimizationResult.canOptimize) {
-      // Use index optimization
+      // Use index optimization. When the optimizer returns a residualPredicate
+      // the candidate set is a superset — re-evaluate the residual on each
+      // candidate to confirm the match.
+      const validateResidual = optimizationResult.residualPredicate
+        ? createFilterFunctionFromExpression(
+            optimizationResult.residualPredicate,
+          )
+        : undefined
       const result: Array<ChangeMessage<WithVirtualProps<T, TKey>, TKey>> = []
       for (const key of optimizationResult.matchingKeys) {
         const value = collection.get(key)
-        if (value !== undefined) {
-          result.push({
-            type: `insert`,
-            key,
-            value,
-          })
-        }
+        if (value === undefined) continue
+        if (validateResidual && !validateResidual(value)) continue
+        result.push({
+          type: `insert`,
+          key,
+          value,
+        })
       }
       return result
     } else {
