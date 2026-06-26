@@ -238,9 +238,9 @@ The Operation Journal does not change how derived collections choose their input
 
 The core fix is inside each collection: authoritative base state keeps advancing, and optimistic operations are projected over it. Derived collections then receive correct upstream state through the existing propagation model.
 
-## Transport confirmation vs core settlement
+## Transport confirmation and core settlement
 
-Adapter authors often naturally model writes in three stages:
+Adapter authors often naturally model writes in transport-specific stages:
 
 ```txt
 write    -> optimistic operation is applied and the transport request starts
@@ -248,16 +248,16 @@ confirm  -> the server accepts the write, for example with HTTP 200
 echo     -> the authoritative sync/read path delivers the corresponding change
 ```
 
-This RFC does not make `confirm` or `echo` first-class core operation statuses. Core settlement remains controlled by the mutation handler: if an adapter wants to hold the optimistic overlay until the sync echo arrives, it should keep the mutation handler pending until then. If an adapter resolves on the server 200, core will settle then and any post-confirmation flicker is the adapter's responsibility.
-
-So the core model stays small:
+Core intentionally does **not** model these as separate lifecycle states. TanStack DB's mutation handler boundary combines the adapter's notion of confirmation and settlement into one completion point:
 
 ```txt
 pending -> mutation handler still owns the optimistic operation
 settled -> mutation handler completed successfully and core can drop the optimistic operation
 ```
 
-Transport-specific libraries may expose finer-grained events from inside their mutation handlers. A later RFC can promote transport confirmation or read-path observation into common APIs if there is enough demand, but this RFC intentionally avoids making those stages part of the 1.0 core lifecycle.
+That is the intended contract. If an adapter requires the sync echo to avoid flicker, its mutation handler should await that echo before resolving. If a transport considers HTTP 200 sufficient, it can resolve there. In either case, core only sees the mutation handler as pending or complete.
+
+This RFC preserves that semantic boundary. It does not add first-class core statuses for HTTP confirmation, sync echo, or read-path observation.
 
 ## Public status APIs
 
@@ -315,7 +315,7 @@ For this RFC:
 settled = mutationFn completed successfully and core can remove the optimistic operation
 ```
 
-Adapters that need to avoid flicker can keep the mutation function pending until their sync/read path has echoed the write. Core does not need a separate `accepted` or `observed` status to support that pattern.
+Adapters that need sync/read-path echo before considering a write complete should keep the mutation function pending until that echo arrives. Core does not need a separate `accepted` or `observed` status because the mutation function completion boundary is the settlement boundary.
 
 ### Queryable operation records
 
