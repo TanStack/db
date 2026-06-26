@@ -728,6 +728,13 @@ not(condition)
 
 For a complete reference of all available functions, see the [Expression Functions Reference](#expression-functions-reference) section.
 
+### Comparison semantics
+
+Comparisons follow SQL/PostgreSQL conventions rather than raw JavaScript:
+
+- **`null` / `undefined` use three-valued logic.** Any comparison involving `null` or `undefined` evaluates to `UNKNOWN`, so the row is not matched. For example `eq(user.score, null)` matches nothing — use a dedicated null check (e.g. `isUndefined`) to match missing values.
+- **`NaN` follows PostgreSQL float semantics.** `NaN` is treated as equal to itself and greater than every other (non-null) value. So `eq(row.value, NaN)` matches `NaN` rows, `gt(row.value, x)` includes `NaN`, and ordering by such a field places `NaN` last. (Invalid `Date` values, whose timestamp is `NaN`, behave the same way.) This differs from JavaScript, where `NaN === NaN` is `false`, and matches how PostgreSQL orders and indexes floating-point values.
+
 ## Select
 
 Use `select` to specify which fields to include in your results and transform your data. Without `select`, you get the full schema.

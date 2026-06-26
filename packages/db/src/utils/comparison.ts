@@ -18,12 +18,14 @@ function getObjectId(obj: object): number {
 }
 
 /**
- * Whether a value has no natural order: `NaN`, or an invalid Date (whose
- * timestamp is `NaN`). Such values cannot participate in a total order, so the
- * comparator handles them explicitly instead of letting them compare equal to
- * everything (`NaN`) or produce a `NaN` result (invalid Date subtraction).
+ * Whether a value has no IEEE-754 natural order: `NaN`, or an invalid Date
+ * (whose timestamp is `NaN`). The query engine follows PostgreSQL float
+ * semantics for these values — they are all equal to one another and greater
+ * than every other (non-null) value — so the comparator and the WHERE
+ * evaluator treat them explicitly instead of letting `NaN` compare unequal to
+ * everything (which has no consistent order and cannot be indexed or sorted).
  */
-function isUnorderable(value: any): boolean {
+export function isUnorderable(value: any): boolean {
   return (
     (typeof value === `number` && Number.isNaN(value)) ||
     (value instanceof Date && Number.isNaN(value.getTime()))
@@ -43,16 +45,15 @@ export const ascComparator = (a: any, b: any, opts: CompareOptions): number => {
   if (a == null) return nulls === `first` ? -1 : 1
   if (b == null) return nulls === `first` ? 1 : -1
 
-  // Handle values with no natural order (NaN, invalid Dates). They would
-  // otherwise compare equal to everything (NaN) or yield NaN from the date
-  // subtraction below, breaking the total order the rest of the system relies
-  // on (e.g. B-tree range traversal). Give them a stable position alongside
-  // nulls so the ordering stays well-defined.
+  // Handle NaN / invalid Dates. Following PostgreSQL float semantics, they are
+  // all equal and sort greater than every other non-null value. This keeps the
+  // order total (NaN would otherwise compare equal to everything), so such
+  // values can be sorted and stored in tree-based indexes.
   const aUnordered = isUnorderable(a)
   const bUnordered = isUnorderable(b)
   if (aUnordered && bUnordered) return 0
-  if (aUnordered) return nulls === `first` ? -1 : 1
-  if (bUnordered) return nulls === `first` ? 1 : -1
+  if (aUnordered) return 1
+  if (bUnordered) return -1
 
   // if a and b are both strings, compare them based on locale
   if (typeof a === `string` && typeof b === `string`) {

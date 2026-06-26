@@ -1403,9 +1403,10 @@ describe(`Collection Indexes`, () => {
       expect(names).toEqual([`ö`])
     })
 
-    it(`should not match a row with a NaN value for an equality on NaN`, async () => {
-      // NaN is never equal to itself, so `eq(score, NaN)` must return no rows
-      // even though the index stores and can return the NaN-valued row.
+    it(`should match a row with a NaN value for an equality on NaN`, async () => {
+      // Under PostgreSQL float semantics NaN is equal to itself, so
+      // `eq(score, NaN)` matches the NaN-valued row (and the index, which
+      // stores and returns it, agrees with a full scan).
       const nanCollection = createCollection<
         { id: string; score: number },
         string
@@ -1431,13 +1432,15 @@ describe(`Collection Indexes`, () => {
         where: eq(new PropRef([`score`]), NaN),
       })!
 
-      expect(result).toEqual([])
+      const ids = result.map((r) => r.value.id).sort()
+      expect(ids).toEqual([`2`])
     })
 
-    it(`should not match a row with a NaN value for an IN list containing NaN`, async () => {
-      // A row only matches `IN` when its value equals a listed value, and NaN
-      // is never equal to itself. So `inArray(score, [NaN, 5])` must match
-      // only the row with score 5 and never the NaN-valued row.
+    it(`should match a row with a NaN value for an IN list containing NaN`, async () => {
+      // A row matches `IN` when its value equals a listed value. Under
+      // PostgreSQL float semantics NaN is equal to itself, so
+      // `inArray(score, [NaN, 5])` matches both the score-5 row and the
+      // NaN-valued row.
       const nanCollection = createCollection<
         { id: string; score: number },
         string
@@ -1464,7 +1467,7 @@ describe(`Collection Indexes`, () => {
       })!
 
       const ids = result.map((r) => r.value.id).sort()
-      expect(ids).toEqual([`1`])
+      expect(ids).toEqual([`1`, `2`])
     })
 
     it(`should return array-valued rows for a range predicate consistently with a full scan`, async () => {
@@ -1537,8 +1540,9 @@ describe(`Collection Indexes`, () => {
 
     it(`should return all matching rows for a range predicate when the field also contains NaN`, async () => {
       // A range predicate must return every matching row even when other rows
-      // hold a NaN value for the field. With scores NaN, 1, 3, 5 and 7,
-      // `score > 2` matches the rows with scores 3, 5 and 7.
+      // hold a NaN value for the field. Under PostgreSQL float semantics NaN is
+      // the greatest value, so with scores NaN, 1, 3, 5 and 7, `score > 2`
+      // matches the rows with scores 3, 5, 7 and NaN.
       const nanCollection = createCollection<
         { id: string; score: number },
         string
@@ -1568,13 +1572,13 @@ describe(`Collection Indexes`, () => {
       })!
 
       const ids = result.map((r) => r.value.id).sort()
-      expect(ids).toEqual([`five`, `seven`, `three`])
+      expect(ids).toEqual([`five`, `nan`, `seven`, `three`])
     })
 
     it(`should use the index for a range query on a field that also contains NaN`, async () => {
-      // A NaN value has a well-defined sort position (with nulls), so a range
-      // query on the field can still be served by the index and does not need
-      // to fall back to a full scan.
+      // A NaN value has a well-defined sort position (greatest, under
+      // PostgreSQL float semantics), so a range query on the field can still be
+      // served by the index and does not need to fall back to a full scan.
       const nanCollection = createCollection<
         { id: string; score: number },
         string
@@ -1605,7 +1609,7 @@ describe(`Collection Indexes`, () => {
         })!
 
         const ids = result.map((r) => r.value.id).sort()
-        expect(ids).toEqual([`five`, `seven`, `three`])
+        expect(ids).toEqual([`five`, `nan`, `seven`, `three`])
 
         expectIndexUsage(tracker.stats, {
           shouldUseIndex: true,

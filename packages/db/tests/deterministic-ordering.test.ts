@@ -517,10 +517,10 @@ describe(`Deterministic Ordering`, () => {
         ],
       })
 
-      // NaN has no natural order; it sorts with nulls (first), then the
-      // numbers ascending.
+      // Under PostgreSQL float semantics NaN is the greatest value, so the
+      // numbers sort ascending first and NaN sorts last.
       const keys = changes?.map((c) => c.key)
-      expect(keys).toEqual([`nan`, `b`, `c`, `a`])
+      expect(keys).toEqual([`b`, `c`, `a`, `nan`])
     })
   })
 })

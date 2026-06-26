@@ -106,16 +106,17 @@ export function unionSets<T>(sets: Array<Set<T>>): Set<T> {
  * Whether a value can be matched exactly by an index lookup, i.e. the index
  * result for it is not a superset that the caller must re-filter.
  *
- * The WHERE evaluator uses three-valued logic: a comparison against
- * `null`/`undefined` yields UNKNOWN, and `NaN` is never equal to itself. BTree
- * indexes, however, store and return rows with such values (nullish keys sort
- * as the smallest key; `NaN` keys are found via SameValueZero map equality), so
- * any result that could include them must be treated as inexact.
+ * Only `null`/`undefined` are inexact: the WHERE evaluator's three-valued logic
+ * makes any comparison against them UNKNOWN, yet a BTree index stores and
+ * returns rows with nullish keys (they sort to the nulls end), so a result that
+ * could include such rows must be re-filtered.
+ *
+ * `NaN` and invalid Dates are exact: under the engine's PostgreSQL float
+ * semantics they are equal to themselves and ordered (greatest non-null value),
+ * so the evaluator and the index agree on them and no re-filtering is needed.
  */
 function isExactComparisonValue(value: unknown): boolean {
-  if (value == null) return false
-  if (typeof value === `number` && Number.isNaN(value)) return false
-  return true
+  return value != null
 }
 
 /**
@@ -139,14 +140,16 @@ function usesLocaleStringSort(collection: CollectionLike<any, any>): boolean {
  * differs from the WHERE evaluator's relational operators, so an index range
  * lookup could omit genuine matches that re-filtering cannot recover.
  *
- * The evaluator compares with JS relational operators. That order matches the
- * index comparator only for numbers, booleans, bigints, lexically-sorted
- * strings and valid Dates. It diverges for locale-sorted strings (localeCompare
- * vs code-point order) and for arrays, plain objects, Temporal values, typed
- * arrays and invalid Dates (recursive/identity ordering vs string coercion).
+ * The evaluator compares with JS relational operators (extended with
+ * PostgreSQL float semantics for `NaN`/invalid Dates). That order matches the
+ * index comparator for numbers, booleans, bigints, lexically-sorted strings,
+ * Dates (valid, ordered by time; invalid, ordered as the greatest value) and
+ * `NaN`. It diverges for locale-sorted strings (localeCompare vs code-point
+ * order) and for arrays, plain objects, Temporal values and typed arrays
+ * (recursive/identity ordering vs string coercion).
  *
- * Note: `null`/`undefined`/`NaN` operands are not handled here — those are
- * superset cases handled by re-filtering ({@link isExactComparisonValue}).
+ * Note: `null`/`undefined` operands are not handled here — those are superset
+ * cases handled by re-filtering ({@link isExactComparisonValue}).
  */
 function isRangeOrderingDivergent(
   value: unknown,
@@ -161,8 +164,9 @@ function isRangeOrderingDivergent(
       return usesLocaleStringSort(collection)
     case `object`: {
       if (value === null) return false
-      // Only valid Date instances order consistently with the evaluator
-      return !(value instanceof Date) || Number.isNaN(value.getTime())
+      // Dates order consistently with the evaluator: valid Dates by time, and
+      // invalid Dates as the greatest value under PostgreSQL float semantics.
+      return !(value instanceof Date)
     }
     default:
       return false
@@ -388,10 +392,11 @@ function optimizeCompoundRangeQuery<
         let hasToBound = false
         let fromInclusive = true
         let toInclusive = true
-        // A comparison against null/undefined/NaN is never true, but in an
-        // index nullish values sort as the smallest key (and NaN is retained),
-        // so a range query cannot represent such a bound. Track it and force a
-        // re-filter instead of claiming the result is exact.
+        // A comparison against null/undefined is never true, but in an index
+        // nullish values sort to the nulls end, so a range query cannot
+        // represent such a bound. Track it and force a re-filter instead of
+        // claiming the result is exact. (NaN/invalid Dates are ordered and
+        // comparable under PostgreSQL semantics, so they are real bounds.)
         let hasNonComparableBound = false
 
         for (const { operation, value } of operations) {
@@ -545,16 +550,17 @@ function optimizeSimpleComparison<
 
       const matchingKeys = index.lookup(indexOperation, queryValue)
 
-      // A comparison against a nullish or NaN value is never true, but BTree
-      // indexes store and return rows with such values (nullish keys sort as
-      // the smallest key; NaN keys match via SameValueZero map equality).
+      // A comparison against a nullish value is never true, but BTree indexes
+      // store and return rows with nullish keys (they sort to the nulls end).
       // Determine whether the index result is exact or a superset that the
       // caller must re-filter:
-      // - eq/gt/gte: such a query value matches nothing while the index still
-      //   returns those rows -> inexact. A non-nullish lower bound (gt/gte)
-      //   excludes the bottom-sorted nullish rows, so those stay exact.
+      // - eq/gt/gte: a nullish query value matches nothing while the index
+      //   still returns nullish-keyed rows -> inexact. A non-nullish lower
+      //   bound (gt/gte) excludes those bottom-sorted rows, so they stay exact.
       // - lt/lte: the open lower bound always includes nullish-keyed rows,
       //   so the result is conservatively inexact.
+      // NaN/invalid Dates are exact here: under PostgreSQL float semantics the
+      // evaluator and the index agree on them (equal to self, greatest).
       const isExact =
         operation === `lt` || operation === `lte`
           ? false
