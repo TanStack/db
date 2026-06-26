@@ -442,6 +442,16 @@ export class QueryCompilationError extends TanStackDBError {
   }
 }
 
+export class UnsafeAliasPathError extends QueryCompilationError {
+  constructor(segment: string) {
+    super(
+      `Unsafe alias path segment "${segment}" is not allowed in .select(). ` +
+        `Aliases must not contain "__proto__", "prototype", or "constructor".`,
+    )
+    this.name = `UnsafeAliasPathError`
+  }
+}
+
 export class DistinctRequiresSelectError extends QueryCompilationError {
   constructor() {
     super(`DISTINCT requires a SELECT clause.`)

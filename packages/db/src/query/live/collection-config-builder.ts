@@ -596,6 +596,8 @@ export class CollectionConfigBuilder<
   private syncFn(config: SyncMethods<TResult>) {
     // Store reference to the live query collection for error state transitions
     this.liveQueryCollection = config.collection
+    // Reset error state from any previous sync session so a restarted sync can become ready again.
+    this.isInErrorState = false
     // Store config and syncState as instance properties for the duration of this sync session
     this.currentSyncConfig = config
 

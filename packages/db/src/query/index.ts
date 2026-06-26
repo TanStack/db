@@ -59,6 +59,9 @@ export {
   coalesce,
   caseWhen,
   add,
+  subtract,
+  multiply,
+  divide,
   // Aggregates
   count,
   avg,

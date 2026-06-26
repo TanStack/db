@@ -5,7 +5,7 @@ title: InvalidStorageObjectFormatError
 
 # Class: InvalidStorageObjectFormatError
 
-Defined in: [packages/db/src/errors.ts:666](https://github.com/TanStack/db/blob/main/packages/db/src/errors.ts#L666)
+Defined in: [packages/db/src/errors.ts:681](https://github.com/TanStack/db/blob/main/packages/db/src/errors.ts#L681)
 
 ## Extends
 
@@ -19,7 +19,7 @@ Defined in: [packages/db/src/errors.ts:666](https://github.com/TanStack/db/blob/
 new InvalidStorageObjectFormatError(storageKey): InvalidStorageObjectFormatError;
 ```
 
-Defined in: [packages/db/src/errors.ts:667](https://github.com/TanStack/db/blob/main/packages/db/src/errors.ts#L667)
+Defined in: [packages/db/src/errors.ts:682](https://github.com/TanStack/db/blob/main/packages/db/src/errors.ts#L682)
 
 #### Parameters
 
