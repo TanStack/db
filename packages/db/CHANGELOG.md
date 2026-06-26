@@ -1,5 +1,11 @@
 # @tanstack/db
 
+## 0.6.12
+
+### Patch Changes
+
+- Fix live query includes reconciliation so updates that re-emit existing child rows update internal child collections instead of attempting duplicate inserts, and ensure duplicate-key sync errors handle collection configs without live query internals. ([#1600](https://github.com/TanStack/db/pull/1600))
+
 ## 0.6.11
 
 ### Patch Changes

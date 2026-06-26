@@ -1,5 +1,13 @@
 # @tanstack/expo-db-sqlite-persistence-e2e-app
 
+## 0.0.16
+
+### Patch Changes
+
+- Updated dependencies [[`2b27dd1`](https://github.com/TanStack/db/commit/2b27dd1448da71c78a48e2390cb71b0ada1b1488)]:
+  - @tanstack/db@0.6.12
+  - @tanstack/expo-db-sqlite-persistence@0.2.4
+
 ## 0.0.15
 
 ### Patch Changes
