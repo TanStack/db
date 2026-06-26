@@ -1617,7 +1617,12 @@ function updateRoutingIndex(
         const perParent = childToNested.get(correlationKey)
         const prevNestedKey = perParent?.get(childKey)
         if (prevNestedKey !== undefined && prevNestedKey !== nestedRoutingKey) {
-          removeChildKeyFromRoute(state, correlationKey, prevNestedKey, childKey)
+          removeChildKeyFromRoute(
+            state,
+            correlationKey,
+            prevNestedKey,
+            childKey,
+          )
           perParent!.delete(childKey)
         }
 
