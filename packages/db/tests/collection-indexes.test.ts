@@ -1617,6 +1617,113 @@ describe(`Collection Indexes`, () => {
         })
       })
     })
+
+    it(`should exclude NaN from a less-than range query`, async () => {
+      // Under PostgreSQL float semantics NaN is the greatest value, so
+      // `score < 4` matches the rows with scores 1 and 3 but never the
+      // NaN-valued row.
+      const nanCollection = createCollection<
+        { id: string; score: number },
+        string
+      >({
+        getKey: (row) => row.id,
+        startSync: true,
+        autoIndex: `off`,
+        defaultIndexType: BTreeIndex,
+        sync: {
+          sync: ({ begin, write, commit, markReady }) => {
+            begin()
+            write({ type: `insert`, value: { id: `nan`, score: NaN } })
+            write({ type: `insert`, value: { id: `one`, score: 1 } })
+            write({ type: `insert`, value: { id: `three`, score: 3 } })
+            write({ type: `insert`, value: { id: `five`, score: 5 } })
+            write({ type: `insert`, value: { id: `seven`, score: 7 } })
+            commit()
+            markReady()
+          },
+        },
+      })
+      await nanCollection.stateWhenReady()
+      nanCollection.createIndex((row) => row.score)
+
+      const result = nanCollection.currentStateAsChanges({
+        where: lt(new PropRef([`score`]), 4),
+      })!
+
+      const ids = result.map((r) => r.value.id).sort()
+      expect(ids).toEqual([`one`, `three`])
+    })
+
+    // Invalid Dates have a NaN timestamp, so they follow the same PostgreSQL
+    // float semantics as NaN: equal to one another and greater than every valid
+    // Date. The index-served and full-scan results must agree.
+    const makeInvalidDateCollection = async () => {
+      const dateCollection = createCollection<
+        { id: string; createdAt: Date },
+        string
+      >({
+        getKey: (row) => row.id,
+        startSync: true,
+        autoIndex: `off`,
+        defaultIndexType: BTreeIndex,
+        sync: {
+          sync: ({ begin, write, commit, markReady }) => {
+            begin()
+            write({
+              type: `insert`,
+              value: { id: `invalid`, createdAt: new Date(`not a date`) },
+            })
+            write({
+              type: `insert`,
+              value: { id: `valid`, createdAt: new Date(`2023-01-01`) },
+            })
+            commit()
+            markReady()
+          },
+        },
+      })
+      await dateCollection.stateWhenReady()
+      dateCollection.createIndex((row) => row.createdAt)
+      return dateCollection
+    }
+
+    it(`should match an invalid-Date row for an equality on an invalid Date`, async () => {
+      const dateCollection = await makeInvalidDateCollection()
+
+      const result = dateCollection.currentStateAsChanges({
+        where: eq(new PropRef([`createdAt`]), new Date(`not a date`)),
+      })!
+
+      const ids = result.map((r) => r.value.id).sort()
+      expect(ids).toEqual([`invalid`])
+    })
+
+    it(`should match an invalid-Date member of an IN list`, async () => {
+      const dateCollection = await makeInvalidDateCollection()
+
+      const result = dateCollection.currentStateAsChanges({
+        where: inArray(new PropRef([`createdAt`]), [
+          new Date(`not a date`),
+          new Date(`2023-01-01`),
+        ]),
+      })!
+
+      const ids = result.map((r) => r.value.id).sort()
+      expect(ids).toEqual([`invalid`, `valid`])
+    })
+
+    it(`should treat an invalid Date as greater than valid Dates in a range query`, async () => {
+      // `createdAt > 2022` matches the valid Date and the invalid Date (which
+      // is the greatest value under PostgreSQL float semantics).
+      const dateCollection = await makeInvalidDateCollection()
+
+      const result = dateCollection.currentStateAsChanges({
+        where: gt(new PropRef([`createdAt`]), new Date(`2022-01-01`)),
+      })!
+
+      const ids = result.map((r) => r.value.id).sort()
+      expect(ids).toEqual([`invalid`, `valid`])
+    })
   })
 
   describe(`Index Usage Verification`, () => {
