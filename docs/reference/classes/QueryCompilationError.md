@@ -13,6 +13,7 @@ Defined in: [packages/db/src/errors.ts:438](https://github.com/TanStack/db/blob/
 
 ## Extended by
 
+- [`UnsafeAliasPathError`](UnsafeAliasPathError.md)
 - [`DistinctRequiresSelectError`](DistinctRequiresSelectError.md)
 - [`FnSelectWithGroupByError`](FnSelectWithGroupByError.md)
 - [`UnsupportedRootScalarSelectError`](UnsupportedRootScalarSelectError.md)

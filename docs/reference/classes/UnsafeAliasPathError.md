@@ -1,39 +1,39 @@
 ---
-id: UnsupportedJoinSourceTypeError
-title: UnsupportedJoinSourceTypeError
+id: UnsafeAliasPathError
+title: UnsafeAliasPathError
 ---
 
-# Class: UnsupportedJoinSourceTypeError
+# Class: UnsafeAliasPathError
 
-Defined in: [packages/db/src/errors.ts:611](https://github.com/TanStack/db/blob/main/packages/db/src/errors.ts#L611)
+Defined in: [packages/db/src/errors.ts:445](https://github.com/TanStack/db/blob/main/packages/db/src/errors.ts#L445)
 
 ## Extends
 
-- [`JoinError`](JoinError.md)
+- [`QueryCompilationError`](QueryCompilationError.md)
 
 ## Constructors
 
 ### Constructor
 
 ```ts
-new UnsupportedJoinSourceTypeError(type): UnsupportedJoinSourceTypeError;
+new UnsafeAliasPathError(segment): UnsafeAliasPathError;
 ```
 
-Defined in: [packages/db/src/errors.ts:612](https://github.com/TanStack/db/blob/main/packages/db/src/errors.ts#L612)
+Defined in: [packages/db/src/errors.ts:446](https://github.com/TanStack/db/blob/main/packages/db/src/errors.ts#L446)
 
 #### Parameters
 
-##### type
+##### segment
 
 `string`
 
 #### Returns
 
-`UnsupportedJoinSourceTypeError`
+`UnsafeAliasPathError`
 
 #### Overrides
 
-[`JoinError`](JoinError.md).[`constructor`](JoinError.md#constructor)
+[`QueryCompilationError`](QueryCompilationError.md).[`constructor`](QueryCompilationError.md#constructor)
 
 ## Properties
 
@@ -47,7 +47,7 @@ Defined in: node\_modules/.pnpm/typescript@5.9.3/node\_modules/typescript/lib/li
 
 #### Inherited from
 
-[`JoinError`](JoinError.md).[`cause`](JoinError.md#cause)
+[`QueryCompilationError`](QueryCompilationError.md).[`cause`](QueryCompilationError.md#cause)
 
 ***
 
@@ -61,7 +61,7 @@ Defined in: node\_modules/.pnpm/typescript@5.9.3/node\_modules/typescript/lib/li
 
 #### Inherited from
 
-[`JoinError`](JoinError.md).[`message`](JoinError.md#message)
+[`QueryCompilationError`](QueryCompilationError.md).[`message`](QueryCompilationError.md#message)
 
 ***
 
@@ -75,7 +75,7 @@ Defined in: node\_modules/.pnpm/typescript@5.9.3/node\_modules/typescript/lib/li
 
 #### Inherited from
 
-[`JoinError`](JoinError.md).[`name`](JoinError.md#name)
+[`QueryCompilationError`](QueryCompilationError.md).[`name`](QueryCompilationError.md#name)
 
 ***
 
@@ -89,7 +89,7 @@ Defined in: node\_modules/.pnpm/typescript@5.9.3/node\_modules/typescript/lib/li
 
 #### Inherited from
 
-[`JoinError`](JoinError.md).[`stack`](JoinError.md#stack)
+[`QueryCompilationError`](QueryCompilationError.md).[`stack`](QueryCompilationError.md#stack)
 
 ***
 
@@ -113,7 +113,7 @@ not capture any frames.
 
 #### Inherited from
 
-[`JoinError`](JoinError.md).[`stackTraceLimit`](JoinError.md#stacktracelimit)
+[`QueryCompilationError`](QueryCompilationError.md).[`stackTraceLimit`](QueryCompilationError.md#stacktracelimit)
 
 ## Methods
 
@@ -185,7 +185,7 @@ a();
 
 #### Inherited from
 
-[`JoinError`](JoinError.md).[`captureStackTrace`](JoinError.md#capturestacktrace)
+[`QueryCompilationError`](QueryCompilationError.md).[`captureStackTrace`](QueryCompilationError.md#capturestacktrace)
 
 ***
 
@@ -217,4 +217,4 @@ https://v8.dev/docs/stack-trace-api#customizing-stack-traces
 
 #### Inherited from
 
-[`JoinError`](JoinError.md).[`prepareStackTrace`](JoinError.md#preparestacktrace)
+[`QueryCompilationError`](QueryCompilationError.md).[`prepareStackTrace`](QueryCompilationError.md#preparestacktrace)
