@@ -489,24 +489,39 @@ type ExtractRef<T> = T extends unknown
     : Prettify<ResultTypeFromSelect<WithoutRefBrand<T>>>
   : never
 
-// A "true" Ref is one whose own keys are exactly the brand+virtual props
-// plus the keys of its underlying user type U (after distribution this means
-// no extra keys from a spread were merged in). When extra keys are present
-// (the case for spread-produced inline objects that pick up the RefBrand
-// symbol from spreading a Ref), we fall through to the recursive projection.
+// A "true" Ref is one that is structurally equivalent to the canonical
+// `Ref<U>` shape the query builder produces for its underlying user type
+// `U` (taking the ref's own nullability into account). When `T` is a true
+// ref, `ExtractRef` can safely return `U` directly; otherwise it must fall
+// through to the recursive projection.
+//
+// Checking only that `T` has "no extra keys" beyond `keyof U` (plus the
+// brand/virtual props) is not sufficient. A spread-derived object can keep
+// exactly the keys of `U` while:
+//   - changing a field's type, e.g. `{ ...u, code: u.slug }`, or
+//   - dropping an optional key, e.g. `const { nickname, ...rest } = u`.
+// Both must be recursively projected, not collapsed back to `U`. We
+// therefore require strict structural equivalence against the canonical ref
+// shape rather than a one-directional key-subset check.
 type IsTrueRef<T> =
   T extends RefLeaf<infer U>
-    ? [
-        Exclude<
-          keyof T,
-          | typeof RefBrand
-          | typeof NullableBrand
-          | keyof VirtualRowProps
-          | keyof U
-        >,
-      ] extends [never]
+    ? RefShapeMatches<T, Ref<U, IsNullableRef<T>>> extends true
       ? true
       : false
+    : false
+
+// Strict structural equivalence between two ref shapes. Unlike plain
+// bidirectional assignability, this is sensitive to *key presence* — an
+// object that drops an optional key (e.g. `const { nickname, ...rest } = u`)
+// is not considered equal to one that keeps `nickname?`, even though the two
+// remain mutually assignable. A direct ref (`u.document`, a union member,
+// etc.) is exactly the canonical `Ref` shape and matches here, so it returns
+// `U` via the fast path; any spread-derived object differs (changed field
+// types, dropped keys, or stripped `readonly` modifiers) and instead falls
+// through to the recursive projection, which reconstructs the correct type.
+type RefShapeMatches<A, B> =
+  (<G>() => G extends A ? 1 : 2) extends <G>() => G extends B ? 1 : 2
+    ? true
     : false
 
 // Propagate nullable-join semantics into the user-data shape.

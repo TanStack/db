@@ -169,6 +169,66 @@ describe(`select types`, () => {
     expectTypeOf(r.payload.inner).toEqualTypeOf<Payload>()
   })
 
+  test(`spread with a same-key narrower override projects the override type`, () => {
+    type SpreadUser = {
+      id: number
+      code: string | number
+      slug: string
+      nickname?: string
+    }
+
+    const spreadUsers = createCollection(
+      mockSyncCollectionOptions<SpreadUser>({
+        id: `spread-override-users`,
+        getKey: (u) => u.id,
+        initialData: [],
+      }),
+    )
+
+    const col = createLiveQueryCollection((q) =>
+      q.from({ u: spreadUsers }).select(({ u }) => ({
+        narrowed: { ...u, code: u.slug },
+      })),
+    )
+
+    const result = col.toArray[0]!
+    // `code` was overridden with `u.slug` (string), so the projected
+    // field must be `string`, not the original `string | number`.
+    expectTypeOf(result.narrowed.code).toEqualTypeOf<string>()
+  })
+
+  test(`spread that omits an optional property drops the key`, () => {
+    type SpreadUser = {
+      id: number
+      code: string | number
+      slug: string
+      nickname?: string
+    }
+
+    const spreadUsers = createCollection(
+      mockSyncCollectionOptions<SpreadUser>({
+        id: `spread-omit-users`,
+        getKey: (u) => u.id,
+        initialData: [],
+      }),
+    )
+
+    const col = createLiveQueryCollection((q) =>
+      q.from({ u: spreadUsers }).select(({ u }) => {
+        const { nickname, ...withoutNickname } = u
+        return { trimmed: withoutNickname }
+      }),
+    )
+
+    const result = col.toArray[0]!
+    // `nickname` was destructured out, so the projected object must
+    // not reintroduce the key.
+    type HasNickname = `nickname` extends keyof typeof result.trimmed
+      ? true
+      : false
+    expectTypeOf<HasNickname>().toEqualTypeOf<false>()
+  })
+
   test(`nested spread preserves object structure types`, () => {
     const users = createUsers()
     const col = createLiveQueryCollection((q) => {
