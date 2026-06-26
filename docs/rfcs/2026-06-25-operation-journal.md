@@ -91,7 +91,7 @@ The desired 1.0 semantics should be simpler:
 
 This RFC does not design:
 
-- backend observation/read-path confirmation;
+- first-class core statuses for transport confirmation or read-path echo;
 - `accepted` or `observed` milestones;
 - `awaitTxId` replacement;
 - PowerSync upload/read-back confirmation;
@@ -238,6 +238,27 @@ The Operation Journal does not change how derived collections choose their input
 
 The core fix is inside each collection: authoritative base state keeps advancing, and optimistic operations are projected over it. Derived collections then receive correct upstream state through the existing propagation model.
 
+## Transport confirmation vs core settlement
+
+Adapter authors often naturally model writes in three stages:
+
+```txt
+write    -> optimistic operation is applied and the transport request starts
+confirm  -> the server accepts the write, for example with HTTP 200
+echo     -> the authoritative sync/read path delivers the corresponding change
+```
+
+This RFC does not make `confirm` or `echo` first-class core operation statuses. Core settlement remains controlled by the mutation handler: if an adapter wants to hold the optimistic overlay until the sync echo arrives, it should keep the mutation handler pending until then. If an adapter resolves on the server 200, core will settle then and any post-confirmation flicker is the adapter's responsibility.
+
+So the core model stays small:
+
+```txt
+pending -> mutation handler still owns the optimistic operation
+settled -> mutation handler completed successfully and core can drop the optimistic operation
+```
+
+Transport-specific libraries may expose finer-grained events from inside their mutation handlers. A later RFC can promote transport confirmation or read-path observation into common APIs if there is enough demand, but this RFC intentionally avoids making those stages part of the 1.0 core lifecycle.
+
 ## Public status APIs
 
 TanStack DB is pre-1.0, so 1.0 should remove or replace ambiguous APIs instead of preserving confusing compatibility.
@@ -294,7 +315,7 @@ For this RFC:
 settled = mutationFn completed successfully and core can remove the optimistic operation
 ```
 
-Read-path observation and sync confirmation are explicitly out of scope.
+Adapters that need to avoid flicker can keep the mutation function pending until their sync/read path has echoed the write. Core does not need a separate `accepted` or `observed` status to support that pattern.
 
 ### Queryable operation records
 
@@ -439,7 +460,7 @@ These should be separate RFCs or PR series:
 - mutation receipts for key mapping and server defaults (#456, #465, #900, #1465);
 - stronger patch/intention replay for long-lived optimistic writes (#25);
 - `$pendingOperation` and pending-delete query semantics (#1431);
-- backend observation/read-path confirmation and `awaitTxId` integration;
+- first-class transport confirmation/read-path echo APIs and `awaitTxId` integration;
 - effect/query/sync error journals;
 - advanced scheduling/dependency strategies;
 - nested transactions/savepoints, if still needed.
