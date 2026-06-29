@@ -663,13 +663,7 @@ export class CollectionStateManager<
       this.pendingLocalOrigins.delete(key)
     }
 
-    const activeTransactions: Array<Transaction<any>> = []
-
-    for (const transaction of this.transactions.values()) {
-      if (![`completed`, `failed`].includes(transaction.state)) {
-        activeTransactions.push(transaction)
-      }
-    }
+    const activeTransactions = this.collectActiveTransactions()
 
     // Apply active transactions only (completed transactions are handled by sync operations)
     for (const transaction of activeTransactions) {
@@ -682,19 +676,25 @@ export class CollectionStateManager<
         this.pendingLocalChanges.add(mutation.key)
 
         if (mutation.optimistic) {
-          switch (mutation.type) {
-            case `insert`:
-            case `update`:
-              this.optimisticUpserts.set(
-                mutation.key,
-                mutation.modified as TOutput,
-              )
+          const projected = new Map<TKey, TOutput>()
+          for (const [key, value] of this.optimisticUpserts) {
+            projected.set(key, value)
+          }
+          for (const key of this.optimisticDeletes) {
+            projected.delete(key)
+          }
+
+          this.projectMutationOntoVisibleState(projected, mutation)
+
+          if (mutation.type === `delete`) {
+            this.optimisticUpserts.delete(mutation.key)
+            this.optimisticDeletes.add(mutation.key)
+          } else {
+            const projectedValue = projected.get(mutation.key)
+            if (projectedValue !== undefined) {
+              this.optimisticUpserts.set(mutation.key, projectedValue)
               this.optimisticDeletes.delete(mutation.key)
-              break
-            case `delete`:
-              this.optimisticUpserts.delete(mutation.key)
-              this.optimisticDeletes.add(mutation.key)
-              break
+            }
           }
         }
       }
