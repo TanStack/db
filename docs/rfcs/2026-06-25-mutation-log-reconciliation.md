@@ -22,6 +22,7 @@ This RFC focuses on the core design needed for 1.0:
 - Introduce a Mutation Log as a refinement of current transaction/mutation state.
 - Always apply committed authoritative sync/base changes immediately.
 - Reproject unsettled optimistic mutations over the latest base state.
+- Preserve a stable materialized change stream for subscriptions and live queries.
 - Replace ambiguous `$synced` / `isPersisted` concepts with clearer local write state.
 - Expose queryable logged mutations joined with transaction state for write status and write errors.
 - Add a `needs-resolution` transaction state for explicit recoverable validation/business-rule failures.
@@ -36,7 +37,7 @@ These issues are not independent. They mostly come from the same architectural g
 
 | Symptom group | Representative issues / PRs | Architectural cause | RFC response |
 | --- | --- | --- | --- |
-| Sync delayed or inconsistently visible while optimistic writes are pending | #1017, #1048, #1060, #1122, #1166, #1167, #1497, historical #37 | Core currently delays normal committed sync transactions while a user transaction is `persisting`, except truncate/immediate/manual writes. This prevents collection state and derived live queries from consistently reflecting authoritative data. | Always apply authoritative sync/base updates immediately. Keep optimistic writes in the Mutation Log and reproject them over the updated base. |
+| Sync delayed or inconsistently visible while optimistic writes are pending | #1017, #1048, #1060, #1122, #1166, #1167, #1497, historical #37 | Core currently delays normal committed sync transactions while a user transaction is `persisting`, except truncate/immediate/manual writes. This prevents collection state and derived live queries from consistently reflecting authoritative data, and forces complex branches in the change-event pipeline. | Always apply authoritative sync/base updates immediately. Keep optimistic writes in the Mutation Log and reproject them over the updated base. |
 | Ambiguous or missing local write status | #20, #661, #1215, #1219, #1322, #1431, #1526 | `$synced` and `isPersisted` attempt to answer too many questions: local optimistic state, local durability, mutation completion, backend upload, and sync observation. | Remove/replace `$synced` and `isPersisted` for 1.0. Add local-write-specific row props such as `$hasPendingWrites` / `$writeStatus` and queryable logged mutations joined with transaction state. |
 | Write errors and recoverable failures are not first-class | #22, #487, #672 | Errors are thrown, logged, or stored inconsistently. A single collection error slot is too coarse for per-write failures, validation state, or notification after navigation. | Store write errors on transaction/mutation records. Add `needs-resolution` for explicit recoverable failures. Retain failed transaction/mutation records briefly with bounded automatic GC. |
 | Offline/persistence duplicates transaction state | #1064, #1065, #1483, #1490, #1579, #1592, #1602, #1603 | `@tanstack/offline-transactions` currently has to persist, restore, schedule, and recreate optimistic state as a second species of transaction. | Core owns the in-memory log and projection. `@tanstack/offline-transactions` persists/restores logged mutations and executes them, dramatically reducing parallel state machinery. |
@@ -79,11 +80,12 @@ The desired 1.0 semantics should be simpler:
 
 1. **Make local write state first-class.** Track unsettled optimistic mutations in one log/index, not as scattered maps and transaction side effects.
 2. **Always advance authoritative base state.** A pending local write must not block unrelated authoritative sync data from entering the collection.
-3. **Use precise 1.0 status names.** Replace `$synced` and `isPersisted` with names that describe local write state, not backend observation.
-4. **Represent write errors on transactions/mutations.** Write failures and recoverable validation state belong to the transaction/mutation that caused them, not primarily to a single collection error slot.
-5. **Support recoverable validation.** A mutation function can explicitly signal `needs-resolution` to preserve optimistic state and expose resolution metadata.
-6. **Keep mutation history bounded.** Failed transaction/mutation records are useful after navigation, but long-lived apps must not accumulate unbounded transaction history.
-7. **Make offline persistence a layer over the log.** Without `@tanstack/offline-transactions`, optimistic mutations are in-memory. With it, they become durable and executable across reloads.
+3. **Preserve stable materialized changes.** Subscriptions and live queries need a stable stream of inserts, updates, deletes, and truncates from each collection's visible state.
+4. **Use precise 1.0 status names.** Replace `$synced` and `isPersisted` with names that describe local write state, not backend observation.
+5. **Represent write errors on transactions/mutations.** Write failures and recoverable validation state belong to the transaction/mutation that caused them, not primarily to a single collection error slot.
+6. **Support recoverable validation.** A mutation function can explicitly signal `needs-resolution` to preserve optimistic state and expose resolution metadata.
+7. **Keep mutation history bounded.** Failed transaction/mutation records are useful after navigation, but long-lived apps must not accumulate unbounded transaction history.
+8. **Make offline persistence a layer over the log.** Without `@tanstack/offline-transactions`, optimistic mutations are in-memory. With it, they become durable and executable across reloads.
 
 ## Non-goals
 
@@ -223,6 +225,36 @@ visible state projects pending local mutation:
 This should be treated as an internal correctness fix / clarified 1.0 semantics, not as a behavior to preserve behind an option.
 
 The RFC does not require changing the existing sync writer API (`begin` / `write` / `commit`). If that API proves insufficient during implementation, a targeted follow-up can address it. The core requirement is semantic: committed authoritative changes advance base state immediately.
+
+## Stable materialized change stream
+
+The collection is not only a way to compute the current visible row for a key. It is also the source of a stable materialized change stream consumed by `subscribeChanges`, framework adapters, and live-query collections.
+
+This is the hardest part of the refactor. The current implementation grew much of its complexity to preserve this stream while optimistic mutations are added, completed, rolled back, or temporarily held while sync is pending. Any mutation-log design must preserve this event contract.
+
+The required invariant is:
+
+```txt
+previous materialized visible state
++ transition to synced/base state and/or active mutation log
+= next materialized visible state
++ stable change events
+```
+
+The emitted events must be correct across at least these transitions:
+
+- optimistic mutation added;
+- transaction enters `persisting`;
+- authoritative sync arrives while a local transaction is pending or persisting;
+- transaction completes and its mutations leave active projection;
+- transaction fails and rolls back;
+- transaction enters `needs-resolution`;
+- multiple transactions affect the same key;
+- unrelated sync changes arrive while local mutations are pending.
+
+The design should therefore be framed around transitions from one visible materialized state to the next, not only around computing `get(key)` from base plus mutations. A simple first implementation may recompute and diff more than the current code does. That is acceptable if it makes the invariants clear. Later implementations can optimize the same model with dirty-key sets, per-key mutation indexes, cached projections, or batched diffs.
+
+The important simplification is to remove the branch where committed sync is skipped because a local transaction is persisting. If sync always advances the authoritative base, then the change stream can be generated from one reconciliation path instead of separate paths for immediate sync, delayed sync, optimistic recomputation, and pending-sync replay.
 
 ## Live-query and derived collections
 
@@ -422,6 +454,7 @@ Prove the model in `@tanstack/db` core first:
 - apply committed sync/base updates immediately;
 - keep current mutation/transaction APIs working;
 - expose minimal transaction-derived row/mutation write state internally or experimentally;
+- generate stable change events by diffing previous visible materialized state against next visible materialized state;
 - add tests for pending optimistic write + incoming sync + derived live-query updates;
 - preserve current settlement semantics: mutationFn success settles mutations.
 
@@ -465,13 +498,14 @@ Core invariants:
 
 1. A pending local optimistic write does not prevent unrelated authoritative sync data from entering base state.
 2. Derived/live-query collections see source collection state changes while optimistic writes are pending.
-3. A row affected by an active transaction mutation has `$hasPendingWrites = true`.
-4. Successful `mutationFn` completion completes the transaction and removes its mutations from active projection by default.
-5. Ordinary `mutationFn` failure rolls back and records bounded failed transaction/mutation history.
-6. Typed resolution errors keep optimistic state visible and set the transaction to `needs-resolution`.
-7. Failed transaction/mutation history is bounded by automatic retention.
-8. Without offline-transactions, mutation log state is in-memory only.
-9. With offline-transactions, pending mutations can be restored without inventing a second optimistic transaction model.
+3. Change events are emitted from visible-state transitions, not from split optimistic/sync special cases.
+4. A row affected by an active transaction mutation has `$hasPendingWrites = true`.
+5. Successful `mutationFn` completion completes the transaction and removes its mutations from active projection by default.
+6. Ordinary `mutationFn` failure rolls back and records bounded failed transaction/mutation history.
+7. Typed resolution errors keep optimistic state visible and set the transaction to `needs-resolution`.
+8. Failed transaction/mutation history is bounded by automatic retention.
+9. Without offline-transactions, mutation log state is in-memory only.
+10. With offline-transactions, pending mutations can be restored without inventing a second optimistic transaction model.
 
 Representative regression scenario:
 
@@ -495,6 +529,7 @@ These should be answered during implementation, not over-specified in the RFC:
 - Exact failed mutation retention defaults.
 - Exact typed error API for `needs-resolution`.
 - How much Phase 1 can safely use `modified` snapshots before switching update projection toward `changes`.
+- How to implement visible-state diffing efficiently enough without reintroducing split sync/optimistic branches.
 - Whether failed mutations should be visible in row aggregate status after rollback, or only in mutation history.
 
 ## Conclusion
