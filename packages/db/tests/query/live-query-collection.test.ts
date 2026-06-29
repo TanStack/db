@@ -17,6 +17,7 @@ import {
   stripVirtualProps,
 } from '../utils.js'
 import { createDeferred } from '../../src/deferred'
+import { createTransaction } from '../../src/transactions'
 import { BTreeIndex } from '../../src/indexes/btree-index'
 import { Func, Value } from '../../src/query/ir.js'
 import type { ChangeMessage, LoadSubsetOptions } from '../../src/types.js'
@@ -2933,5 +2934,88 @@ describe(`createLiveQueryCollection`, () => {
       // The derived collection should see all 4 items
       expect(derived.size).toBe(4)
     })
+  })
+
+  it(`shows unrelated synced source rows in a live query while a source mutation is persisting`, async () => {
+    type Todo = { id: number; text: string; projectId: number }
+    type SyncPayload = { type: `insert` | `update` | `delete`; value?: Todo; key?: number }
+
+    const syncListeners: Array<(payload: SyncPayload) => void> = []
+
+    const todos = createCollection<Todo, number>({
+      id: `live-query-sync-while-persisting-source`,
+      getKey: (todo) => todo.id,
+      startSync: true,
+      sync: {
+        sync: ({ begin, write, commit, markReady }) => {
+          begin()
+          write({ type: `insert`, value: { id: 1, text: `one`, projectId: 1 } })
+          commit()
+          markReady()
+
+          syncListeners.push((payload) => {
+            begin()
+            if (payload.type === `delete`) {
+              write({ type: `delete`, key: payload.key! })
+            } else {
+              write({ type: payload.type, value: payload.value! })
+            }
+            commit()
+          })
+        },
+      },
+    })
+
+    const projectTodos = createLiveQueryCollection((q) =>
+      q.from({ todo: todos }).where(({ todo }) => eq(todo.projectId, 1)),
+    )
+
+    await projectTodos.preload()
+
+    expect(
+      Array.from(projectTodos.state.values()).map((row) => stripVirtualProps(row)),
+    ).toEqual([{ id: 1, text: `one`, projectId: 1 }])
+
+    let resolveMutation!: () => void
+    const mutationSettled = new Promise<void>((resolve) => {
+      resolveMutation = resolve
+    })
+
+    const tx = createTransaction<Todo>({
+      mutationFn: () => {
+        syncListeners[0]!({
+          type: `insert`,
+          value: { id: 2, text: `two`, projectId: 1 },
+        })
+
+        expect(
+          Array.from(projectTodos.state.values()).map((row) => stripVirtualProps(row)),
+        ).toEqual([
+          { id: 1, text: `one optimistic`, projectId: 1 },
+          { id: 2, text: `two`, projectId: 1 },
+        ])
+
+        return mutationSettled
+      },
+    })
+
+    tx.mutate(() =>
+      todos.update(1, (draft) => {
+        draft.text = `one optimistic`
+      }),
+    )
+
+    await flushPromises()
+
+    resolveMutation()
+    await tx.isPersisted.promise
+    await flushPromises()
+
+    expect(
+      Array.from(projectTodos.state.values()).map((row) => stripVirtualProps(row)),
+    ).toEqual([
+      { id: 1, text: `one optimistic`, projectId: 1 },
+      { id: 2, text: `two`, projectId: 1 },
+    ])
   })
 })
