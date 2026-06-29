@@ -2,8 +2,8 @@
 '@tanstack/db': patch
 ---
 
-fix(db): nested `toArray` includes dropping children when sibling parent groups share a correlation key
+fix(db): keep deeply nested includes in sync when sibling groups share nested correlation keys
 
-With three (or more) levels of nested `toArray` includes, when two children in different parent groups shared the same deepest correlation key, only one of them received the nested rows and the other came back as an empty array. The nested-pipeline routing index mapped each nested correlation key to a single parent group and the shared buffer entry was deleted after routing to the first match, so sibling groups sharing the key were dropped.
+Deeply nested includes could drop or stop updating nested rows when sibling parent groups shared the same nested correlation key, especially when one sibling group was inserted after the initial load. Shared nested pipeline buffers were being drained through route state that was scoped too narrowly, so one branch could consume a buffered update before other branches that referenced the same nested row received it.
 
-The routing index now maps a nested correlation key to all parent groups that reference it and fans buffered grandchild changes out to each. A per-level snapshot of already-materialized rows also seeds parent groups that start referencing an existing correlation key after the rows were drained (e.g. inserted after the initial load), since the pipeline does not re-emit them.
+Nested route state is now shared at the same scope as the nested buffer and routes updates to every concrete destination branch before clearing the buffer. Snapshot replay still seeds late-arriving sibling groups with already-materialized rows, and recursive pending-change detection ensures deeper routed updates are flushed back up through the result tree.
