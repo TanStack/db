@@ -13,6 +13,7 @@ import type {
   ChangeMessage,
   CollectionConfig,
   OptimisticChangeMessage,
+  PendingMutation,
 } from '../types'
 import type { CollectionImpl } from './index.js'
 import type { CollectionLifecycleManager } from './lifecycle'
@@ -457,6 +458,89 @@ export class CollectionStateManager<
     collection: CollectionImpl<any, any, any, any, any>,
   ): boolean {
     return collection === this.collection
+  }
+
+  private collectActiveTransactions(): Array<Transaction<any>> {
+    const activeTransactions: Array<Transaction<any>> = []
+
+    for (const transaction of this.transactions.values()) {
+      if (![`completed`, `failed`].includes(transaction.state)) {
+        activeTransactions.push(transaction)
+      }
+    }
+
+    return activeTransactions
+  }
+
+  private projectMutationOntoVisibleState(
+    visible: Map<TKey, TOutput>,
+    mutation: PendingMutation<any>,
+  ): void {
+    if (!this.isThisCollection(mutation.collection) || !mutation.optimistic) {
+      return
+    }
+
+    switch (mutation.type) {
+      case `insert`:
+      case `update`:
+        visible.set(mutation.key, mutation.modified as TOutput)
+        break
+      case `delete`:
+        visible.delete(mutation.key)
+        break
+    }
+  }
+
+  private captureVisibleStateForKeys(keys: Set<TKey>): Map<TKey, TOutput> {
+    const visible = new Map<TKey, TOutput>()
+
+    for (const key of keys) {
+      const value = this.syncedData.get(key)
+      if (value !== undefined) {
+        visible.set(key, value)
+      }
+    }
+
+    for (const transaction of this.collectActiveTransactions()) {
+      for (const mutation of transaction.mutations) {
+        if (keys.has(mutation.key as TKey)) {
+          this.projectMutationOntoVisibleState(visible, mutation)
+        }
+      }
+    }
+
+    return visible
+  }
+
+  private diffVisibleStateForKeys(
+    previousVisibleState: Map<TKey, TOutput>,
+    keys: Set<TKey>,
+  ): Array<InternalChangeMessage<TOutput, TKey>> {
+    const events: Array<InternalChangeMessage<TOutput, TKey>> = []
+
+    for (const key of keys) {
+      const previousValue = previousVisibleState.get(key)
+      const nextValue = this.get(key)
+
+      if (previousValue === undefined && nextValue !== undefined) {
+        events.push({ type: `insert`, key, value: nextValue })
+      } else if (previousValue !== undefined && nextValue === undefined) {
+        events.push({ type: `delete`, key, value: previousValue })
+      } else if (
+        previousValue !== undefined &&
+        nextValue !== undefined &&
+        !deepEquals(previousValue, nextValue)
+      ) {
+        events.push({
+          type: `update`,
+          key,
+          value: nextValue,
+          previousValue,
+        })
+      }
+    }
+
+    return events
   }
 
   /**
