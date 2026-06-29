@@ -12,7 +12,11 @@ import {
 import { createCollection } from '../../src/collection/index.js'
 import { CleanupQueue } from '../../src/collection/cleanup-queue.js'
 import { localOnlyCollectionOptions } from '../../src/local-only.js'
-import { mockSyncCollectionOptions, stripVirtualProps } from '../utils.js'
+import {
+  flushPromises,
+  mockSyncCollectionOptions,
+  stripVirtualProps,
+} from '../utils.js'
 import type { SyncConfig } from '../../src/types.js'
 
 type Project = {
@@ -5086,6 +5090,122 @@ describe(`includes subqueries`, () => {
       ])
       expect(hoodie.priceRanges.find((pr: any) => pr.id === 3).region).toEqual([
         { id: 1, name: `Europe` },
+      ])
+    })
+
+    it(`keeps deeper nested includes reactive for a sibling group added after load`, async () => {
+      type Product = { id: number; title: string }
+      type PriceRange = { id: number; productId: number; regionId: number }
+      type Region = { id: number; name: string; countryId: number }
+      type Country = { id: number; name: string }
+
+      const products = createCollection(
+        localOnlyCollectionOptions<Product>({
+          id: `shared-corr-late-sibling-products`,
+          getKey: (p) => p.id,
+          initialData: [
+            { id: 1, title: `T-Shirt` },
+            { id: 2, title: `Hoodie` },
+          ],
+        }),
+      )
+      const priceRanges = createCollection(
+        localOnlyCollectionOptions<PriceRange>({
+          id: `shared-corr-late-sibling-price-ranges`,
+          getKey: (r) => r.id,
+          initialData: [{ id: 1, productId: 1, regionId: 1 }],
+        }),
+      )
+      const regions = createCollection(
+        localOnlyCollectionOptions<Region>({
+          id: `shared-corr-late-sibling-regions`,
+          getKey: (r) => r.id,
+          initialData: [{ id: 1, name: `Europe`, countryId: 1 }],
+        }),
+      )
+      const countries = createCollection(
+        localOnlyCollectionOptions<Country>({
+          id: `shared-corr-late-sibling-countries`,
+          getKey: (c) => c.id,
+          initialData: [{ id: 1, name: `France` }],
+        }),
+      )
+
+      await Promise.all([
+        products.preload(),
+        priceRanges.preload(),
+        regions.preload(),
+        countries.preload(),
+      ])
+
+      const collection = createLiveQueryCollection({
+        id: `shared-corr-late-sibling-live`,
+        query: (q) =>
+          q.from({ p: products }).select(({ p }) => ({
+            id: p.id,
+            title: p.title,
+            priceRanges: toArray(
+              q
+                .from({ pr: priceRanges })
+                .where(({ pr }) => eq(pr.productId, p.id))
+                .select(({ pr }) => ({
+                  id: pr.id,
+                  regionId: pr.regionId,
+                  region: toArray(
+                    q
+                      .from({ r: regions })
+                      .where(({ r }) => eq(r.id, pr.regionId))
+                      .select(({ r }) => ({
+                        id: r.id,
+                        name: r.name,
+                        country: toArray(
+                          q
+                            .from({ c: countries })
+                            .where(({ c }) => eq(c.id, r.countryId))
+                            .select(({ c }) => ({ id: c.id, name: c.name })),
+                        ),
+                      })),
+                  ),
+                })),
+            ),
+          })),
+      })
+      await collection.preload()
+
+      priceRanges.insert({ id: 2, productId: 2, regionId: 1 })
+      await flushPromises()
+
+      priceRanges.delete(1)
+      await flushPromises()
+
+      countries.update(1, (draft) => {
+        draft.name = `Renamed France`
+      })
+      await flushPromises()
+
+      expect(toTree(collection)).toEqual([
+        {
+          id: 1,
+          title: `T-Shirt`,
+          priceRanges: [],
+        },
+        {
+          id: 2,
+          title: `Hoodie`,
+          priceRanges: [
+            {
+              id: 2,
+              regionId: 1,
+              region: [
+                {
+                  id: 1,
+                  name: `Europe`,
+                  country: [{ id: 1, name: `Renamed France` }],
+                },
+              ],
+            },
+          ],
+        },
       ])
     })
 
