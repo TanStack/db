@@ -1386,6 +1386,14 @@ function createPerEntryIncludesStates(
   })
 }
 
+function cloneSnapshotValue<T>(value: T): T {
+  if (value == null || typeof value !== `object`) {
+    return value
+  }
+
+  return (Array.isArray(value) ? [...value] : { ...value }) as T
+}
+
 /**
  * Folds a drained delta into a nested setup's cumulative snapshot, tracking the
  * net multiplicity per child row and dropping rows (and empty keys) once their
@@ -1406,7 +1414,7 @@ function accumulateSnapshot(
     let row = snap.get(childKey)
     if (!row) {
       row = {
-        value: changes.value,
+        value: cloneSnapshotValue(changes.value),
         orderByIndex: changes.orderByIndex,
         count: 0,
       }
@@ -1414,7 +1422,7 @@ function accumulateSnapshot(
     }
     row.count += changes.inserts - changes.deletes
     if (changes.inserts > 0) {
-      row.value = changes.value
+      row.value = cloneSnapshotValue(changes.value)
       if (changes.orderByIndex !== undefined) {
         row.orderByIndex = changes.orderByIndex
       }
@@ -1459,7 +1467,7 @@ function seedParentFromSnapshot(
     byChild.set(childKey, {
       deletes: 0,
       inserts: row.count,
-      value: row.value,
+      value: cloneSnapshotValue(row.value),
       orderByIndex: row.orderByIndex,
     })
   }
