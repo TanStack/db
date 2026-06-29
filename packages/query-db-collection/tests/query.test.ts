@@ -5021,13 +5021,20 @@ describe(`QueryCollection`, () => {
         rowMetadata: adapter.rowMetadata,
         collectionMetadata: adapter.collectionMetadata,
       })
+      let releaseSecondFetch!: () => void
+      const secondFetchReleased = new Promise<void>((resolve) => {
+        releaseSecondFetch = resolve
+      })
       const collection2 = createCollection(
         persistedCollectionOptions({
           ...(queryCollectionOptions<CategorisedItem>({
             id: `reload-insert-cleanup`,
             queryClient: secondQueryClient,
             queryKey,
-            queryFn: async () => serverRows,
+            queryFn: async () => {
+              await secondFetchReleased
+              return serverRows
+            },
             getKey: (item: CategorisedItem): string => item.id,
             syncMode: `eager`,
             startSync: true,
@@ -5036,20 +5043,25 @@ describe(`QueryCollection`, () => {
         }) as any,
       )
 
-      await collection2.stateWhenReady()
+      await vi.waitFor(() => {
+        expect(collection2.has(`1`)).toBe(true)
+        expect(adapter2.rows.has(`1`)).toBe(true)
+      })
+
       const liveQuery = createLiveQueryCollection({
         query: (q) => q.from({ item: collection2 }),
       })
+      releaseSecondFetch()
       await liveQuery.preload()
-      await flushPromises()
       // The query responds on launch (after persisted rows have hydrated).
-      await secondQueryClient.invalidateQueries({ queryKey })
       await flushPromises()
       await flushPromises()
 
-      expect(collection2.has(`1`)).toBe(false)
-      expect(adapter2.rows.has(`1`)).toBe(false)
-      expect(liveQuery.size).toBe(0)
+      await vi.waitFor(() => {
+        expect(collection2.has(`1`)).toBe(false)
+        expect(adapter2.rows.has(`1`)).toBe(false)
+        expect(liveQuery.size).toBe(0)
+      })
 
       firstQueryClient.clear()
       secondQueryClient.clear()
