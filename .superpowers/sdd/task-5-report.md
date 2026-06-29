@@ -68,3 +68,36 @@ Commands run:
 ### Remaining concern
 
 - The unrelated synced insert regression still loses the optimistic insert by the post-`mutate()` assertion, despite the same-key sync/update timing now being fixed and typecheck/live-query regression passing. This appears to be a remaining transaction completion/confirmation timing issue for optimistic inserts and should be followed up.
+
+## Second fix follow-up
+
+Status: DONE
+
+### Diagnosis
+
+The remaining focused regression was not a persistence-settlement problem: during the unrelated sync commit, the optimistic insert was still present in `_state.optimisticUpserts` and visible through `_state.keys()`. The post-`mutate()` assertion failed because visible iteration order was rebuilt as authoritative `syncedData` first and optimistic-only rows second, so an unrelated synced insert that arrived after the optimistic insert appeared before it in `collection.state` iteration. The target model requires visible collection state to be authoritative synced/base state overlaid with unsettled optimistic mutations owned by the collection, without reordering the existing optimistic-only row behind later unrelated sync rows.
+
+### Changes made
+
+- Updated `CollectionState.keys()` to yield optimistic-only upsert keys before authoritative synced keys, while preserving synced-key positions for optimistic updates to existing synced rows.
+- Left public APIs and mutationFn settlement semantics unchanged.
+
+### Validation
+
+Commands run:
+
+1. `cd packages/db && pnpm vitest --run tests/collection.test.ts -t "applies unrelated synced inserts while a transaction is persisting"`
+   - Initially reproduced the remaining failure.
+
+2. `pnpm --filter @tanstack/db exec tsc --noEmit`
+   - Passed.
+
+3. `cd packages/db && pnpm vitest --run tests/collection.test.ts -t "applies unrelated|keeps optimistic"`
+   - Passed: 2 tests passed, 96 skipped, no type errors.
+
+4. `cd packages/db && pnpm vitest --run tests/query/live-query-collection.test.ts -t "unrelated synced source rows"`
+   - Passed: 1 test passed, 55 skipped, no type errors.
+
+### Commit
+
+- `1c9bbfe1 fix: preserve optimistic insert iteration during sync`

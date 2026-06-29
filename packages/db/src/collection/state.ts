@@ -374,17 +374,20 @@ export class CollectionStateManager<
    */
   public *keys(): IterableIterator<TKey> {
     const { syncedData, optimisticDeletes, optimisticUpserts } = this
-    // Yield keys from synced data, skipping any that are deleted.
-    for (const key of syncedData.keys()) {
-      if (!optimisticDeletes.has(key)) {
+    // Yield optimistic inserts that are not yet in synced data first. These
+    // rows entered the visible collection before later unrelated sync inserts,
+    // so preserving them ahead of the authoritative base keeps visible-state
+    // iteration stable while a transaction is persisting.
+    for (const key of optimisticUpserts.keys()) {
+      if (!syncedData.has(key) && !optimisticDeletes.has(key)) {
         yield key
       }
     }
-    // Yield keys from upserts that were not already in synced data.
-    for (const key of optimisticUpserts.keys()) {
-      if (!syncedData.has(key) && !optimisticDeletes.has(key)) {
-        // The optimisticDeletes check is technically redundant if inserts/updates always remove from deletes,
-        // but it's safer to keep it.
+    // Yield keys from synced data, skipping any that are deleted. If a synced
+    // key also has an optimistic upsert, get(key) will still return the
+    // optimistic value at the synced key's original position.
+    for (const key of syncedData.keys()) {
+      if (!optimisticDeletes.has(key)) {
         yield key
       }
     }
