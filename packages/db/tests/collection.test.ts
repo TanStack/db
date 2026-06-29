@@ -545,15 +545,12 @@ describe(`Collection`, () => {
     await tx9.isPersisted.promise
   })
 
-  it(`synced updates should *not* be applied while there's a persisting transaction`, async () => {
+  it(`applies unrelated synced inserts while a transaction is persisting`, async () => {
     const emitter = mitt()
 
-    // new collection w/ mock sync/mutation
     const collection = createCollection<{ id: number; value: string }>({
-      id: `mock`,
-      getKey: (item) => {
-        return item.id
-      },
+      id: `sync-while-persisting-unrelated`,
+      getKey: (item) => item.id,
       startSync: true,
       sync: {
         sync: ({ begin, write, commit }) => {
@@ -563,7 +560,7 @@ describe(`Collection`, () => {
             changes.forEach((change) => {
               write({
                 type: change.type,
-                // @ts-expect-error TODO type changes
+                // @ts-expect-error test intentionally emits partial sync payloads
                 value: change.changes,
               })
             })
@@ -574,56 +571,103 @@ describe(`Collection`, () => {
     })
 
     const mutationFn: MutationFn = ({ transaction }) => {
-      // Sync something and check that that it isn't applied because
-      // we're still in the middle of persisting a transaction.
       emitter.emit(`update`, [
-        // This update is ignored because the optimistic update overrides it.
-        { type: `insert`, changes: { id: 2, bar: `value2` } },
+        { type: `insert`, changes: { id: 2, value: `synced value` } },
       ])
+
       expect(getStateEntries(collection)).toEqual([
-        [1, { id: 1, value: `bar` }],
+        [1, { id: 1, value: `optimistic value` }],
+        [2, { id: 2, value: `synced value` }],
       ])
-      // Remove it so we don't have to assert against it below
-      emitter.emit(`update`, [{ changes: { id: 2 }, type: `delete` }])
 
       emitter.emit(`update`, transaction.mutations)
       return Promise.resolve()
     }
 
-    const tx1 = createTransaction({ mutationFn })
+    const tx = createTransaction({ mutationFn })
 
-    // insert
-    tx1.mutate(() =>
+    tx.mutate(() =>
       collection.insert({
         id: 1,
-        value: `bar`,
+        value: `optimistic value`,
       }),
     )
 
-    // The merged value should immediately contain the new insert
-    expect(getStateEntries(collection)).toEqual([[1, { id: 1, value: `bar` }]])
+    expect(getStateEntries(collection)).toEqual([
+      [1, { id: 1, value: `optimistic value` }],
+      [2, { id: 2, value: `synced value` }],
+    ])
 
-    // check there's a transaction in peristing state
-    expect(
-      // @ts-expect-error possibly undefined is ok in test
-      Array.from(collection._state.transactions.values())[0].mutations[0]
-        .changes,
-    ).toEqual({
-      id: 1,
-      value: `bar`,
+    await tx.isPersisted.promise
+
+    expect(getStateEntries(collection)).toEqual([
+      [1, { id: 1, value: `optimistic value` }],
+      [2, { id: 2, value: `synced value` }],
+    ])
+  })
+
+  it(`keeps optimistic visible value when synced update for the same key arrives while persisting`, async () => {
+    const emitter = mitt()
+
+    const collection = createCollection<{ id: number; value: string }>({
+      id: `sync-while-persisting-same-key`,
+      getKey: (item) => item.id,
+      startSync: true,
+      sync: {
+        sync: ({ begin, write, commit }) => {
+          begin()
+          write({ type: `insert`, value: { id: 1, value: `base value` } })
+          commit()
+
+          // @ts-expect-error don't trust Mitt's typing and this works.
+          emitter.on(`*`, (_, changes: Array<PendingMutation>) => {
+            begin()
+            changes.forEach((change) => {
+              write({
+                type: change.type,
+                // @ts-expect-error test intentionally emits partial sync payloads
+                value: change.changes,
+              })
+            })
+            commit()
+          })
+        },
+      },
     })
 
-    // Check the optimistic operation is there
-    const insertKey = 1
-    expect(collection._state.optimisticUpserts.has(insertKey)).toBe(true)
-    expect(collection._state.optimisticUpserts.get(insertKey)).toEqual({
-      id: 1,
-      value: `bar`,
-    })
+    const mutationFn: MutationFn = ({ transaction }) => {
+      emitter.emit(`update`, [
+        { type: `update`, changes: { id: 1, value: `server value` } },
+      ])
 
-    await tx1.isPersisted.promise
+      expect(getStateEntries(collection)).toEqual([
+        [1, { id: 1, value: `optimistic value` }],
+      ])
+      expect(collection._state.syncedData.get(1)).toEqual({
+        id: 1,
+        value: `server value`,
+      })
 
-    expect(getStateEntries(collection)).toEqual([[1, { id: 1, value: `bar` }]])
+      emitter.emit(`update`, transaction.mutations)
+      return Promise.resolve()
+    }
+
+    const tx = createTransaction({ mutationFn })
+    tx.mutate(() =>
+      collection.update(1, (draft) => {
+        draft.value = `optimistic value`
+      }),
+    )
+
+    expect(getStateEntries(collection)).toEqual([
+      [1, { id: 1, value: `optimistic value` }],
+    ])
+
+    await tx.isPersisted.promise
+
+    expect(getStateEntries(collection)).toEqual([
+      [1, { id: 1, value: `optimistic value` }],
+    ])
   })
 
   it(`should throw errors when deleting items not in the collection`, () => {
