@@ -480,13 +480,18 @@ export class CollectionStateManager<
       return
     }
 
+    const mutationKey =
+      mutation.key === undefined
+        ? this.config.getKey(mutation.modified as TOutput)
+        : (mutation.key as TKey)
+
     switch (mutation.type) {
       case `insert`:
       case `update`:
-        visible.set(mutation.key, mutation.modified as TOutput)
+        visible.set(mutationKey, mutation.modified as TOutput)
         break
       case `delete`:
-        visible.delete(mutation.key)
+        visible.delete(mutationKey)
         break
     }
   }
@@ -510,37 +515,6 @@ export class CollectionStateManager<
     }
 
     return visible
-  }
-
-  private diffVisibleStateForKeys(
-    previousVisibleState: Map<TKey, TOutput>,
-    keys: Set<TKey>,
-  ): Array<InternalChangeMessage<TOutput, TKey>> {
-    const events: Array<InternalChangeMessage<TOutput, TKey>> = []
-
-    for (const key of keys) {
-      const previousValue = previousVisibleState.get(key)
-      const nextValue = this.get(key)
-
-      if (previousValue === undefined && nextValue !== undefined) {
-        events.push({ type: `insert`, key, value: nextValue })
-      } else if (previousValue !== undefined && nextValue === undefined) {
-        events.push({ type: `delete`, key, value: previousValue })
-      } else if (
-        previousValue !== undefined &&
-        nextValue !== undefined &&
-        !deepEquals(previousValue, nextValue)
-      ) {
-        events.push({
-          type: `update`,
-          key,
-          value: nextValue,
-          previousValue,
-        })
-      }
-    }
-
-    return events
   }
 
   /**
@@ -625,42 +599,12 @@ export class CollectionStateManager<
     this.optimisticDeletes.clear()
     this.pendingLocalChanges.clear()
 
-    // Seed optimistic state with pending optimistic mutations only when a sync is pending
-    const pendingSyncKeys = new Set<TKey>()
-    for (const transaction of this.pendingSyncedTransactions) {
-      for (const operation of transaction.operations) {
-        pendingSyncKeys.add(operation.key as TKey)
-      }
-    }
-    const staleOptimisticUpserts: Array<TKey> = []
+    // Seed optimistic state with completed optimistic mutations until sync confirms them.
     for (const [key, value] of this.pendingOptimisticUpserts) {
-      if (
-        pendingSyncKeys.has(key) ||
-        this.pendingOptimisticDirectUpserts.has(key)
-      ) {
-        this.optimisticUpserts.set(key, value)
-      } else {
-        staleOptimisticUpserts.push(key)
-      }
+      this.optimisticUpserts.set(key, value)
     }
-    for (const key of staleOptimisticUpserts) {
-      this.pendingOptimisticUpserts.delete(key)
-      this.pendingLocalOrigins.delete(key)
-    }
-    const staleOptimisticDeletes: Array<TKey> = []
     for (const key of this.pendingOptimisticDeletes) {
-      if (
-        pendingSyncKeys.has(key) ||
-        this.pendingOptimisticDirectDeletes.has(key)
-      ) {
-        this.optimisticDeletes.add(key)
-      } else {
-        staleOptimisticDeletes.push(key)
-      }
-    }
-    for (const key of staleOptimisticDeletes) {
-      this.pendingOptimisticDeletes.delete(key)
-      this.pendingLocalOrigins.delete(key)
+      this.optimisticDeletes.add(key)
     }
 
     const activeTransactions = this.collectActiveTransactions()
@@ -1167,11 +1111,12 @@ export class CollectionStateManager<
         }
       }
 
-      // Maintain optimistic state appropriately
-      // Clear optimistic state since sync operations will now provide the authoritative data.
-      // Any still-active user transactions will be re-applied below in recompute.
-      this.optimisticUpserts.clear()
-      this.optimisticDeletes.clear()
+      // Maintain optimistic state appropriately. Start from the optimistic
+      // overlay that was visible before the sync commit, then let confirmed
+      // direct writes and still-active transactions below adjust it. This keeps
+      // in-flight optimistic mutations projected while the synced base updates.
+      this.optimisticUpserts = new Map(previousOptimisticUpserts)
+      this.optimisticDeletes = new Set(previousOptimisticDeletes)
 
       // Reset flag and recompute optimistic state for any remaining active transactions
       this.isCommittingSyncTransactions = false
@@ -1196,18 +1141,22 @@ export class CollectionStateManager<
               this.isThisCollection(mutation.collection) &&
               mutation.optimistic
             ) {
+              const mutationKey =
+                mutation.key === undefined
+                  ? this.config.getKey(mutation.modified as TOutput)
+                  : (mutation.key as TKey)
               switch (mutation.type) {
                 case `insert`:
                 case `update`:
                   this.optimisticUpserts.set(
-                    mutation.key,
+                    mutationKey,
                     mutation.modified as TOutput,
                   )
-                  this.optimisticDeletes.delete(mutation.key)
+                  this.optimisticDeletes.delete(mutationKey)
                   break
                 case `delete`:
-                  this.optimisticUpserts.delete(mutation.key)
-                  this.optimisticDeletes.add(mutation.key)
+                  this.optimisticUpserts.delete(mutationKey)
+                  this.optimisticDeletes.add(mutationKey)
                   break
               }
             }
