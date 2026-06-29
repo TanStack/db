@@ -884,31 +884,18 @@ export class CollectionStateManager<
    * This method processes operations from pending transactions and applies them to the synced data
    */
   commitPendingTransactions = () => {
-    // Check if there are any persisting transaction
-    let hasPersistingTransaction = false
-    for (const transaction of this.transactions.values()) {
-      if (transaction.state === `persisting`) {
-        hasPersistingTransaction = true
-        break
-      }
-    }
-
     // pending synced transactions could be either `committed` or still open.
     // we only want to process `committed` transactions here
     const {
       committedSyncedTransactions,
       uncommittedSyncedTransactions,
       hasTruncateSync,
-      hasImmediateSync,
     } = this.pendingSyncedTransactions.reduce(
       (acc, t) => {
         if (t.committed) {
           acc.committedSyncedTransactions.push(t)
           if (t.truncate) {
             acc.hasTruncateSync = true
-          }
-          if (t.immediate) {
-            acc.hasImmediateSync = true
           }
         } else {
           acc.uncommittedSyncedTransactions.push(t)
@@ -923,21 +910,10 @@ export class CollectionStateManager<
           PendingSyncedTransaction<TOutput, TKey>
         >,
         hasTruncateSync: false,
-        hasImmediateSync: false,
       },
     )
 
-    // Process committed transactions if:
-    // 1. No persisting user transaction (normal sync flow), OR
-    // 2. There's a truncate operation (must be processed immediately), OR
-    // 3. There's an immediate transaction (manual writes must be processed synchronously)
-    //
-    // Note: When hasImmediateSync or hasTruncateSync is true, we process ALL committed
-    // sync transactions (not just the immediate/truncate ones). This is intentional for
-    // ordering correctness: if we only processed the immediate transaction, earlier
-    // non-immediate transactions would be applied later and could overwrite newer state.
-    // Processing all committed transactions together preserves causal ordering.
-    if (!hasPersistingTransaction || hasTruncateSync || hasImmediateSync) {
+    if (committedSyncedTransactions.length > 0) {
       // Set flag to prevent redundant optimistic state recalculations
       this.isCommittingSyncTransactions = true
 
@@ -964,19 +940,14 @@ export class CollectionStateManager<
         }
       }
 
+      const previousVisibleState = this.captureVisibleStateForKeys(changedKeys)
+
       // Use pre-captured state if available (from optimistic scenarios),
-      // otherwise capture current state (for pure sync scenarios)
-      let currentVisibleState = this.preSyncVisibleState
-      if (currentVisibleState.size === 0) {
-        // No pre-captured state, capture it now for pure sync operations
-        currentVisibleState = new Map<TKey, TOutput>()
-        for (const key of changedKeys) {
-          const currentValue = this.get(key)
-          if (currentValue !== undefined) {
-            currentVisibleState.set(key, currentValue)
-          }
-        }
-      }
+      // otherwise use the visible state captured before applying sync operations.
+      const currentVisibleState =
+        this.preSyncVisibleState.size > 0
+          ? this.preSyncVisibleState
+          : previousVisibleState
 
       const events: Array<ChangeMessage<TOutput, TKey>> = []
       const rowUpdateMode = this.config.sync.rowUpdateMode || `partial`
