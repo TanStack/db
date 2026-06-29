@@ -5209,6 +5209,369 @@ describe(`includes subqueries`, () => {
       ])
     })
 
+    it(`keeps shared nested includes reactive for sibling groups added after load at depth 3`, async () => {
+      type Product = { id: number; title: string }
+      type PriceRange = { id: number; productId: number; regionId: number }
+      type Region = { id: number; name: string }
+
+      const products = createCollection(
+        localOnlyCollectionOptions<Product>({
+          id: `shared-corr-depth-3-products`,
+          getKey: (p) => p.id,
+          initialData: [
+            { id: 1, title: `T-Shirt` },
+            { id: 2, title: `Hoodie` },
+          ],
+        }),
+      )
+      const priceRanges = createCollection(
+        localOnlyCollectionOptions<PriceRange>({
+          id: `shared-corr-depth-3-price-ranges`,
+          getKey: (r) => r.id,
+          initialData: [{ id: 1, productId: 1, regionId: 1 }],
+        }),
+      )
+      const regions = createCollection(
+        localOnlyCollectionOptions<Region>({
+          id: `shared-corr-depth-3-regions`,
+          getKey: (r) => r.id,
+          initialData: [{ id: 1, name: `Europe` }],
+        }),
+      )
+
+      await Promise.all([
+        products.preload(),
+        priceRanges.preload(),
+        regions.preload(),
+      ])
+
+      const collection = createLiveQueryCollection({
+        id: `shared-corr-depth-3-live`,
+        query: (q) =>
+          q.from({ p: products }).select(({ p }) => ({
+            id: p.id,
+            title: p.title,
+            priceRanges: toArray(
+              q
+                .from({ pr: priceRanges })
+                .where(({ pr }) => eq(pr.productId, p.id))
+                .select(({ pr }) => ({
+                  id: pr.id,
+                  region: toArray(
+                    q
+                      .from({ r: regions })
+                      .where(({ r }) => eq(r.id, pr.regionId))
+                      .select(({ r }) => ({ id: r.id, name: r.name })),
+                  ),
+                })),
+            ),
+          })),
+      })
+      await collection.preload()
+
+      priceRanges.insert({ id: 2, productId: 2, regionId: 1 })
+      await flushPromises()
+
+      regions.update(1, (draft) => {
+        draft.name = `Renamed Europe`
+      })
+      await flushPromises()
+
+      expect(toTree(collection)).toEqual([
+        {
+          id: 1,
+          title: `T-Shirt`,
+          priceRanges: [
+            { id: 1, region: [{ id: 1, name: `Renamed Europe` }] },
+          ],
+        },
+        {
+          id: 2,
+          title: `Hoodie`,
+          priceRanges: [
+            { id: 2, region: [{ id: 1, name: `Renamed Europe` }] },
+          ],
+        },
+      ])
+    })
+
+    it(`keeps shared nested includes reactive for sibling groups added after load at depth 4`, async () => {
+      type Product = { id: number; title: string }
+      type PriceRange = { id: number; productId: number; regionId: number }
+      type Region = { id: number; name: string; countryId: number }
+      type Country = { id: number; name: string }
+
+      const products = createCollection(
+        localOnlyCollectionOptions<Product>({
+          id: `shared-corr-depth-4-products`,
+          getKey: (p) => p.id,
+          initialData: [
+            { id: 1, title: `T-Shirt` },
+            { id: 2, title: `Hoodie` },
+          ],
+        }),
+      )
+      const priceRanges = createCollection(
+        localOnlyCollectionOptions<PriceRange>({
+          id: `shared-corr-depth-4-price-ranges`,
+          getKey: (r) => r.id,
+          initialData: [{ id: 1, productId: 1, regionId: 1 }],
+        }),
+      )
+      const regions = createCollection(
+        localOnlyCollectionOptions<Region>({
+          id: `shared-corr-depth-4-regions`,
+          getKey: (r) => r.id,
+          initialData: [{ id: 1, name: `Europe`, countryId: 1 }],
+        }),
+      )
+      const countries = createCollection(
+        localOnlyCollectionOptions<Country>({
+          id: `shared-corr-depth-4-countries`,
+          getKey: (c) => c.id,
+          initialData: [{ id: 1, name: `France` }],
+        }),
+      )
+
+      await Promise.all([
+        products.preload(),
+        priceRanges.preload(),
+        regions.preload(),
+        countries.preload(),
+      ])
+
+      const collection = createLiveQueryCollection({
+        id: `shared-corr-depth-4-live`,
+        query: (q) =>
+          q.from({ p: products }).select(({ p }) => ({
+            id: p.id,
+            title: p.title,
+            priceRanges: toArray(
+              q
+                .from({ pr: priceRanges })
+                .where(({ pr }) => eq(pr.productId, p.id))
+                .select(({ pr }) => ({
+                  id: pr.id,
+                  region: toArray(
+                    q
+                      .from({ r: regions })
+                      .where(({ r }) => eq(r.id, pr.regionId))
+                      .select(({ r }) => ({
+                        id: r.id,
+                        name: r.name,
+                        country: toArray(
+                          q
+                            .from({ c: countries })
+                            .where(({ c }) => eq(c.id, r.countryId))
+                            .select(({ c }) => ({ id: c.id, name: c.name })),
+                        ),
+                      })),
+                  ),
+                })),
+            ),
+          })),
+      })
+      await collection.preload()
+
+      priceRanges.insert({ id: 2, productId: 2, regionId: 1 })
+      await flushPromises()
+
+      countries.update(1, (draft) => {
+        draft.name = `Renamed France`
+      })
+      await flushPromises()
+
+      expect(toTree(collection)).toEqual([
+        {
+          id: 1,
+          title: `T-Shirt`,
+          priceRanges: [
+            {
+              id: 1,
+              region: [
+                {
+                  id: 1,
+                  name: `Europe`,
+                  country: [{ id: 1, name: `Renamed France` }],
+                },
+              ],
+            },
+          ],
+        },
+        {
+          id: 2,
+          title: `Hoodie`,
+          priceRanges: [
+            {
+              id: 2,
+              region: [
+                {
+                  id: 1,
+                  name: `Europe`,
+                  country: [{ id: 1, name: `Renamed France` }],
+                },
+              ],
+            },
+          ],
+        },
+      ])
+    })
+
+    it(`keeps shared nested includes reactive for sibling groups added after load at depth 5`, async () => {
+      type Product = { id: number; title: string }
+      type PriceRange = { id: number; productId: number; regionId: number }
+      type Region = { id: number; name: string; countryId: number }
+      type Country = { id: number; name: string; zoneId: number }
+      type Zone = { id: number; name: string }
+
+      const products = createCollection(
+        localOnlyCollectionOptions<Product>({
+          id: `shared-corr-depth-5-products`,
+          getKey: (p) => p.id,
+          initialData: [
+            { id: 1, title: `T-Shirt` },
+            { id: 2, title: `Hoodie` },
+          ],
+        }),
+      )
+      const priceRanges = createCollection(
+        localOnlyCollectionOptions<PriceRange>({
+          id: `shared-corr-depth-5-price-ranges`,
+          getKey: (r) => r.id,
+          initialData: [{ id: 1, productId: 1, regionId: 1 }],
+        }),
+      )
+      const regions = createCollection(
+        localOnlyCollectionOptions<Region>({
+          id: `shared-corr-depth-5-regions`,
+          getKey: (r) => r.id,
+          initialData: [{ id: 1, name: `Europe`, countryId: 1 }],
+        }),
+      )
+      const countries = createCollection(
+        localOnlyCollectionOptions<Country>({
+          id: `shared-corr-depth-5-countries`,
+          getKey: (c) => c.id,
+          initialData: [{ id: 1, name: `France`, zoneId: 1 }],
+        }),
+      )
+      const zones = createCollection(
+        localOnlyCollectionOptions<Zone>({
+          id: `shared-corr-depth-5-zones`,
+          getKey: (z) => z.id,
+          initialData: [{ id: 1, name: `Eurozone` }],
+        }),
+      )
+
+      await Promise.all([
+        products.preload(),
+        priceRanges.preload(),
+        regions.preload(),
+        countries.preload(),
+        zones.preload(),
+      ])
+
+      const collection = createLiveQueryCollection({
+        id: `shared-corr-depth-5-live`,
+        query: (q) =>
+          q.from({ p: products }).select(({ p }) => ({
+            id: p.id,
+            title: p.title,
+            priceRanges: toArray(
+              q
+                .from({ pr: priceRanges })
+                .where(({ pr }) => eq(pr.productId, p.id))
+                .select(({ pr }) => ({
+                  id: pr.id,
+                  region: toArray(
+                    q
+                      .from({ r: regions })
+                      .where(({ r }) => eq(r.id, pr.regionId))
+                      .select(({ r }) => ({
+                        id: r.id,
+                        name: r.name,
+                        country: toArray(
+                          q
+                            .from({ c: countries })
+                            .where(({ c }) => eq(c.id, r.countryId))
+                            .select(({ c }) => ({
+                              id: c.id,
+                              name: c.name,
+                              zone: toArray(
+                                q
+                                  .from({ z: zones })
+                                  .where(({ z }) => eq(z.id, c.zoneId))
+                                  .select(({ z }) => ({
+                                    id: z.id,
+                                    name: z.name,
+                                  })),
+                              ),
+                            })),
+                        ),
+                      })),
+                  ),
+                })),
+            ),
+          })),
+      })
+      await collection.preload()
+
+      priceRanges.insert({ id: 2, productId: 2, regionId: 1 })
+      await flushPromises()
+
+      zones.update(1, (draft) => {
+        draft.name = `Renamed Eurozone`
+      })
+      await flushPromises()
+
+      expect(toTree(collection)).toEqual([
+        {
+          id: 1,
+          title: `T-Shirt`,
+          priceRanges: [
+            {
+              id: 1,
+              region: [
+                {
+                  id: 1,
+                  name: `Europe`,
+                  country: [
+                    {
+                      id: 1,
+                      name: `France`,
+                      zone: [{ id: 1, name: `Renamed Eurozone` }],
+                    },
+                  ],
+                },
+              ],
+            },
+          ],
+        },
+        {
+          id: 2,
+          title: `Hoodie`,
+          priceRanges: [
+            {
+              id: 2,
+              region: [
+                {
+                  id: 1,
+                  name: `Europe`,
+                  country: [
+                    {
+                      id: 1,
+                      name: `France`,
+                      zone: [{ id: 1, name: `Renamed Eurozone` }],
+                    },
+                  ],
+                },
+              ],
+            },
+          ],
+        },
+      ])
+    })
+
     // When two parent groups share a deepest correlation key and one of them is
     // deleted, the surviving group must keep its nested grandchildren.
     it(`resolves two nested includes on the same child independently when they share a correlation value`, async () => {
