@@ -2141,7 +2141,10 @@ function hasPendingIncludesChanges(
     if (state.nestedSetups && hasNestedBufferChanges(state.nestedSetups))
       return true
     for (const entry of state.childRegistry.values()) {
-      if (entry.includesStates && hasPendingIncludesChanges(entry.includesStates))
+      if (
+        entry.includesStates &&
+        hasPendingIncludesChanges(entry.includesStates)
+      )
         return true
     }
   }
