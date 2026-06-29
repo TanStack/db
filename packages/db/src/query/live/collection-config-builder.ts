@@ -907,8 +907,8 @@ export class CollectionConfigBuilder<
           entry.childCompilationResult.includes,
           syncState,
         )
-        state.nestedRoutingIndex = new Map()
-        state.nestedRoutingReverseIndex = new Map()
+        state.nestedRoutingIndex = state.nestedSetups.map(() => new Map())
+        state.nestedRoutingReverseIndex = state.nestedSetups.map(() => new Map())
       }
 
       return state
@@ -1201,7 +1201,7 @@ type IncludesOutputState = {
   /** Shared nested pipeline setups (one per nested includes level) */
   nestedSetups?: Array<NestedIncludesSetup>
   /**
-   * nestedCorrelationKey → (parentCorrelationKey → Set<childKey>).
+   * Per nested setup: nestedCorrelationKey → (parentCorrelationKey → Set<childKey>).
    * One nested correlation key can map to multiple parent groups when sibling
    * parents share the same correlation value (e.g. two price ranges that
    * reference the same region), so buffered grandchild changes must fan out to
@@ -1212,10 +1212,14 @@ type IncludesOutputState = {
    * region 1). We track the referencing child keys so the parent group is only
    * dropped from the route once its *last* referencing child row is removed —
    * deleting one sibling must not strand the survivor.
+   *
+   * Keyed per-setup (one map per nested include field): two sibling includes can
+   * resolve the same correlation value (regionId === currencyId), so a shared
+   * store would let one include's cleanup drop the route the other still needs.
    */
-  nestedRoutingIndex?: Map<unknown, Map<unknown, Set<unknown>>>
-  /** parentCorrelationKey → Set<nestedCorrelationKeys> */
-  nestedRoutingReverseIndex?: Map<unknown, Set<unknown>>
+  nestedRoutingIndex?: Array<Map<unknown, Map<unknown, Set<unknown>>>>
+  /** Per nested setup: parentCorrelationKey → Set<nestedCorrelationKeys>. */
+  nestedRoutingReverseIndex?: Array<Map<unknown, Set<unknown>>>
   /**
    * Per nested setup: parentCorrelationKey → (childKey → current nestedKey).
    * Records which nested key each child row currently routes to, so an update
@@ -1372,8 +1376,8 @@ function createPerEntryIncludesStates(
 
     if (setup.nestedSetups) {
       state.nestedSetups = setup.nestedSetups
-      state.nestedRoutingIndex = new Map()
-      state.nestedRoutingReverseIndex = new Map()
+      state.nestedRoutingIndex = setup.nestedSetups.map(() => new Map())
+      state.nestedRoutingReverseIndex = setup.nestedSetups.map(() => new Map())
     }
 
     return state
@@ -1470,10 +1474,11 @@ function drainNestedBuffers(state: IncludesOutputState): Set<unknown> {
 
   for (let i = 0; i < state.nestedSetups.length; i++) {
     const setup = state.nestedSetups[i]!
+    const routeIndex = state.nestedRoutingIndex![i]!
     const toDelete: Array<unknown> = []
 
     for (const [nestedCorrelationKey, childChanges] of setup.buffer) {
-      const parentRoutes = state.nestedRoutingIndex!.get(nestedCorrelationKey)
+      const parentRoutes = routeIndex.get(nestedCorrelationKey)
       if (parentRoutes === undefined || parentRoutes.size === 0) {
         // Unroutable — parent not yet seen; keep in buffer
         continue
@@ -1544,12 +1549,13 @@ function drainNestedBuffers(state: IncludesOutputState): Set<unknown> {
  * entry) once no child row in the group references the key anymore.
  */
 function removeChildKeyFromRoute(
-  state: IncludesOutputState,
+  routeIndex: Map<unknown, Map<unknown, Set<unknown>>>,
+  reverseIndex: Map<unknown, Set<unknown>>,
   correlationKey: unknown,
   nestedRoutingKey: unknown,
   childKey: unknown,
 ): void {
-  const parents = state.nestedRoutingIndex!.get(nestedRoutingKey)
+  const parents = routeIndex.get(nestedRoutingKey)
   const childKeys = parents?.get(correlationKey)
   if (!parents || !childKeys) return
 
@@ -1560,16 +1566,16 @@ function removeChildKeyFromRoute(
   if (childKeys.size === 0) {
     parents.delete(correlationKey)
     if (parents.size === 0) {
-      state.nestedRoutingIndex!.delete(nestedRoutingKey)
+      routeIndex.delete(nestedRoutingKey)
     }
     // The reverse index tracks parent → nested keys at group granularity, so
     // only drop the entry when no child row in this parent group references the
     // nested key anymore.
-    const reverseSet = state.nestedRoutingReverseIndex!.get(correlationKey)
+    const reverseSet = reverseIndex.get(correlationKey)
     if (reverseSet) {
       reverseSet.delete(nestedRoutingKey)
       if (reverseSet.size === 0) {
-        state.nestedRoutingReverseIndex!.delete(correlationKey)
+        reverseIndex.delete(correlationKey)
       }
     }
   }
@@ -1590,6 +1596,8 @@ function updateRoutingIndex(
   for (let i = 0; i < state.nestedSetups.length; i++) {
     const setup = state.nestedSetups[i]!
     const childToNested = state.nestedRoutingChildToNested[i]!
+    const routeIndex = state.nestedRoutingIndex![i]!
+    const reverseIndex = state.nestedRoutingReverseIndex![i]!
     for (const [childKey, change] of childChanges) {
       if (change.inserts > 0) {
         // Read the nested routing key from the INCLUDES_ROUTING stamp.
@@ -1618,7 +1626,8 @@ function updateRoutingIndex(
         const prevNestedKey = perParent?.get(childKey)
         if (prevNestedKey !== undefined && prevNestedKey !== nestedRoutingKey) {
           removeChildKeyFromRoute(
-            state,
+            routeIndex,
+            reverseIndex,
             correlationKey,
             prevNestedKey,
             childKey,
@@ -1627,10 +1636,10 @@ function updateRoutingIndex(
         }
 
         if (nestedCorrelationKey != null) {
-          let parents = state.nestedRoutingIndex!.get(nestedRoutingKey)
+          let parents = routeIndex.get(nestedRoutingKey)
           if (!parents) {
             parents = new Map()
-            state.nestedRoutingIndex!.set(nestedRoutingKey, parents)
+            routeIndex.set(nestedRoutingKey, parents)
           }
           let childKeys = parents.get(correlationKey)
           // The parent group is "new" for this nested key only when no child row
@@ -1641,10 +1650,10 @@ function updateRoutingIndex(
             parents.set(correlationKey, childKeys)
           }
           childKeys.add(childKey)
-          let reverseSet = state.nestedRoutingReverseIndex!.get(correlationKey)
+          let reverseSet = reverseIndex.get(correlationKey)
           if (!reverseSet) {
             reverseSet = new Set()
-            state.nestedRoutingReverseIndex!.set(correlationKey, reverseSet)
+            reverseIndex.set(correlationKey, reverseSet)
           }
           reverseSet.add(nestedRoutingKey)
 
@@ -1684,7 +1693,8 @@ function updateRoutingIndex(
 
         if (nestedCorrelationKey != null) {
           removeChildKeyFromRoute(
-            state,
+            routeIndex,
+            reverseIndex,
             correlationKey,
             nestedRoutingKey,
             childKey,
@@ -1710,21 +1720,24 @@ function cleanRoutingIndexOnDelete(
 ): void {
   if (!state.nestedRoutingReverseIndex) return
 
-  const nestedKeys = state.nestedRoutingReverseIndex.get(correlationKey)
-  if (nestedKeys) {
+  // The whole parent group is gone, so drop it from every nested setup's route
+  // (along with all the child keys it tracked); other sibling parent groups may
+  // still reference the same nested correlation key.
+  for (let i = 0; i < state.nestedRoutingReverseIndex.length; i++) {
+    const reverseIndex = state.nestedRoutingReverseIndex[i]!
+    const routeIndex = state.nestedRoutingIndex![i]!
+    const nestedKeys = reverseIndex.get(correlationKey)
+    if (!nestedKeys) continue
     for (const nestedKey of nestedKeys) {
-      // The whole parent group is gone, so drop it from the nested key's route
-      // (along with all the child keys it tracked); other sibling parent groups
-      // may still reference the same nested correlation key.
-      const parents = state.nestedRoutingIndex!.get(nestedKey)
+      const parents = routeIndex.get(nestedKey)
       if (parents) {
         parents.delete(correlationKey)
         if (parents.size === 0) {
-          state.nestedRoutingIndex!.delete(nestedKey)
+          routeIndex.delete(nestedKey)
         }
       }
     }
-    state.nestedRoutingReverseIndex.delete(correlationKey)
+    reverseIndex.delete(correlationKey)
   }
 
   // Drop the per-setup childKey → nestedKey records for this parent group.
