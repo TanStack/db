@@ -2982,20 +2982,12 @@ describe(`createLiveQueryCollection`, () => {
     })
 
     const tx = createTransaction<Todo>({
-      mutationFn: () => {
+      mutationFn: async () => {
         syncListeners[0]!({
           type: `insert`,
           value: { id: 2, text: `two`, projectId: 1 },
         })
-
-        expect(
-          Array.from(projectTodos.state.values()).map((row) => stripVirtualProps(row)),
-        ).toEqual([
-          { id: 1, text: `one optimistic`, projectId: 1 },
-          { id: 2, text: `two`, projectId: 1 },
-        ])
-
-        return mutationSettled
+        await mutationSettled
       },
     })
 
@@ -3007,9 +2999,27 @@ describe(`createLiveQueryCollection`, () => {
 
     await flushPromises()
 
-    resolveMutation()
-    await tx.isPersisted.promise
-    await flushPromises()
+    // Clean up the intentionally blocked mutation even when the regression
+    // assertion fails, so the test reports the row mismatch rather than hanging.
+    let whilePersistingError: unknown
+    try {
+      expect(
+        Array.from(projectTodos.state.values()).map((row) => stripVirtualProps(row)),
+      ).toEqual([
+        { id: 1, text: `one optimistic`, projectId: 1 },
+        { id: 2, text: `two`, projectId: 1 },
+      ])
+    } catch (error) {
+      whilePersistingError = error
+    } finally {
+      resolveMutation()
+      await tx.isPersisted.promise.catch(() => {})
+      await flushPromises()
+    }
+
+    if (whilePersistingError) {
+      throw whilePersistingError
+    }
 
     expect(
       Array.from(projectTodos.state.values()).map((row) => stripVirtualProps(row)),
