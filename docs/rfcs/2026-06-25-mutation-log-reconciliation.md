@@ -279,7 +279,7 @@ pending -> mutation handler still owns the optimistic mutations
 completed/settled -> mutation handler completed successfully and core can drop those optimistic mutations
 ```
 
-That is the intended contract. If an adapter requires the sync echo to avoid flicker, its mutation handler should await that echo before resolving. If a transport considers HTTP 200 sufficient, it can resolve there. In either case, core only sees the mutation handler as pending or complete.
+That is the intended contract. If an adapter requires the sync echo to avoid flicker, its mutation handler should await that echo before resolving. If a transport considers HTTP 200 sufficient for TanStack DB settlement, it can resolve there. In either case, core only sees the mutation handler as pending or complete; any earlier acknowledgement is outside the core transaction state machine.
 
 This RFC preserves that semantic boundary. It does not add first-class core transaction states for HTTP confirmation, sync echo, or read-path observation.
 
@@ -339,7 +339,7 @@ For this RFC:
 settled = mutationFn completed successfully and core can remove the optimistic mutation
 ```
 
-Adapters that need sync/read-path echo before considering a write complete should keep the mutation function pending until that echo arrives. Core does not need a separate `accepted` or `observed` status because the mutation function completion boundary is the settlement boundary.
+Adapters that need sync/read-path echo before TanStack DB should consider a write complete should keep the mutation function pending until that echo arrives. In this RFC, an initial transport acknowledgement is adapter-internal information, not a TanStack DB completed transaction. Core does not need a separate `accepted` or `observed` status because the mutation function completion boundary is the settlement boundary.
 
 ### Queryable mutation records
 
@@ -416,7 +416,7 @@ Requirements:
 
 - Mutations belonging to active transactions (`pending`, `persisting`, `needs-resolution`) are retained while active.
 - Historical failed transaction/mutation records are retained for a bounded recent-history window/count.
-- Completed transactions can leave the active log immediately; retaining successful history is not required by this RFC.
+- Once TanStack DB considers a transaction complete/settled, its mutations do not need to remain in the active projection log solely for successful-history retention. This is a retention statement, not a requirement that adapters must treat an initial transport acknowledgement as completion.
 - Exact TTL/count defaults are implementation details.
 - Defaults should be high enough for normal toast/error-after-navigation UX.
 - Applications needing long-term audit/history should subscribe/copy mutation records elsewhere.
