@@ -5091,6 +5091,115 @@ describe(`includes subqueries`, () => {
 
     // When two parent groups share a deepest correlation key and one of them is
     // deleted, the surviving group must keep its nested grandchildren.
+    it(`resolves two nested includes on the same child independently when they share a correlation value`, async () => {
+      type Product = { id: number; title: string }
+      type PriceRange = {
+        id: number
+        productId: number
+        regionId: number
+        currencyId: number
+      }
+      type Region = { id: number; name: string }
+      type Currency = { id: number; code: string }
+
+      const products = createCollection(
+        localOnlyCollectionOptions<Product>({
+          id: `shared-corr-value-products`,
+          getKey: (p) => p.id,
+          initialData: [{ id: 1, title: `T-Shirt` }],
+        }),
+      )
+      // The price range points at region 1 and currency 1: both nested includes
+      // correlate on the same value.
+      const priceRanges = createCollection(
+        localOnlyCollectionOptions<PriceRange>({
+          id: `shared-corr-value-price-ranges`,
+          getKey: (r) => r.id,
+          initialData: [{ id: 1, productId: 1, regionId: 1, currencyId: 1 }],
+        }),
+      )
+      const regions = createCollection(
+        localOnlyCollectionOptions<Region>({
+          id: `shared-corr-value-regions`,
+          getKey: (r) => r.id,
+          initialData: [
+            { id: 1, name: `Europe` },
+            { id: 2, name: `North America` },
+          ],
+        }),
+      )
+      const currencies = createCollection(
+        localOnlyCollectionOptions<Currency>({
+          id: `shared-corr-value-currencies`,
+          getKey: (c) => c.id,
+          initialData: [{ id: 1, code: `EUR` }],
+        }),
+      )
+
+      await Promise.all([
+        products.preload(),
+        priceRanges.preload(),
+        regions.preload(),
+        currencies.preload(),
+      ])
+
+      const collection = createLiveQueryCollection({
+        id: `shared-corr-value-live`,
+        query: (q) =>
+          q.from({ p: products }).select(({ p }) => ({
+            id: p.id,
+            title: p.title,
+            priceRanges: toArray(
+              q
+                .from({ pr: priceRanges })
+                .where(({ pr }) => eq(pr.productId, p.id))
+                .select(({ pr }) => ({
+                  id: pr.id,
+                  currency: toArray(
+                    q
+                      .from({ c: currencies })
+                      .where(({ c }) => eq(c.id, pr.currencyId))
+                      .select(({ c }) => ({ id: c.id, code: c.code })),
+                  ),
+                  region: toArray(
+                    q
+                      .from({ r: regions })
+                      .where(({ r }) => eq(r.id, pr.regionId))
+                      .select(({ r }) => ({ id: r.id, name: r.name })),
+                  ),
+                })),
+            ),
+          })),
+      })
+      await collection.preload()
+
+      // Re-point only the region include; the currency include still resolves 1.
+      priceRanges.update(1, (draft) => {
+        draft.regionId = 2
+      })
+      await new Promise((r) => setTimeout(r, 50))
+
+      // A later currency change must still reach the currency include.
+      currencies.update(1, (draft) => {
+        draft.code = `USD`
+      })
+      await new Promise((r) => setTimeout(r, 50))
+
+      expect(toTree(collection)).toEqual([
+        {
+          id: 1,
+          title: `T-Shirt`,
+          priceRanges: [
+            {
+              id: 1,
+              currency: [{ id: 1, code: `USD` }],
+              region: [{ id: 2, name: `North America` }],
+            },
+          ],
+        },
+      ])
+    })
+
     it(`isolates a nested correlation-key update from a second nested include on the same child`, async () => {
       type Product = { id: number; title: string }
       type PriceRange = {
