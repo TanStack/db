@@ -5281,16 +5281,12 @@ describe(`includes subqueries`, () => {
         {
           id: 1,
           title: `T-Shirt`,
-          priceRanges: [
-            { id: 1, region: [{ id: 1, name: `Renamed Europe` }] },
-          ],
+          priceRanges: [{ id: 1, region: [{ id: 1, name: `Renamed Europe` }] }],
         },
         {
           id: 2,
           title: `Hoodie`,
-          priceRanges: [
-            { id: 2, region: [{ id: 1, name: `Renamed Europe` }] },
-          ],
+          priceRanges: [{ id: 2, region: [{ id: 1, name: `Renamed Europe` }] }],
         },
       ])
     })
