@@ -908,7 +908,9 @@ export class CollectionConfigBuilder<
           syncState,
         )
         state.nestedRoutingIndex = state.nestedSetups.map(() => new Map())
-        state.nestedRoutingReverseIndex = state.nestedSetups.map(() => new Map())
+        state.nestedRoutingReverseIndex = state.nestedSetups.map(
+          () => new Map(),
+        )
       }
 
       return state
