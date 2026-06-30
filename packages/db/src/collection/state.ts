@@ -129,6 +129,16 @@ export class CollectionStateManager<
   // State used for computing the change events
   public syncedKeys = new Set<TKey>()
   public preSyncVisibleState = new Map<TKey, TOutput>()
+  /**
+   * Whether each to-be-synced key was acknowledged in the visible state captured
+   * before the sync recompute, keyed alongside {@link preSyncVisibleState}. The
+   * recompute rebuilds `acknowledgedKeys` from active transactions only, so by
+   * the time a settle event is emitted the now-completed transaction's ack is
+   * gone; this preserves it so the settle event's `previousValue.$acknowledged`
+   * reflects what was actually emitted before (e.g. `false` when ack and settle
+   * coincide, `true` when the row was acknowledged first).
+   */
+  public preSyncAcknowledged = new Map<TKey, boolean>()
   public recentlySyncedKeys = new Set<TKey>()
   public hasReceivedFirstCommit = false
   public isCommittingSyncTransactions = false
@@ -174,10 +184,9 @@ export class CollectionStateManager<
   }
 
   /**
-   * Whether the backend has acknowledged the pending write for a row (accepted
-   * it), independent of whether it has synced back. Used for `$acknowledged`.
-   * A synced row, or a row from a completed (settled) transaction, is always
-   * acknowledged.
+   * Whether the backend has acknowledged the pending write for a row without
+	* errors, independent of whether it has synced back. Used for `$acknowledged`.
+   * A synced row from a completed (settled) transaction, is always acknowledged.
    */
   public isRowAcknowledged(key: TKey): boolean {
     if (this.isLocalOnly) {
@@ -247,8 +256,11 @@ export class CollectionStateManager<
       options?.optimisticUpserts ?? this.optimisticUpserts
     const optimisticDeletes =
       options?.optimisticDeletes ?? this.optimisticDeletes
-    // A completed (settled) optimistic op still shows an overlay but is
-    // acknowledged. An active op is acknowledged only once acknowledge() runs.
+    // `completedOptimisticKeys` are optimistic ops whose transaction has reached
+    // the `completed` state (its mutationFn returned) but whose overlay is still
+    // up while this cycle's sync is applied — so the row is not yet $synced.
+    // Whether it counts as $acknowledged is decided by the captured ack state
+    // below, not by the mere fact that the transaction completed.
     const isCompletedOptimistic =
       options?.completedOptimisticKeys?.has(key) === true
     const hasOptimisticChange =
@@ -259,10 +271,7 @@ export class CollectionStateManager<
 
     return this.createVirtualPropsSnapshot(key, {
       $synced: !hasOptimisticChange,
-      $acknowledged:
-        !hasOptimisticChange ||
-        isCompletedOptimistic ||
-        acknowledgedKeys.has(key),
+      $acknowledged: !hasOptimisticChange || acknowledgedKeys.has(key),
       $origin: hasOptimisticChange
         ? 'local'
         : ((options?.rowOrigins ?? this.rowOrigins).get(key) ?? 'remote'),
@@ -275,8 +284,7 @@ export class CollectionStateManager<
   ): WithVirtualProps<TOutput, TKey> {
     const existingRow = row as Partial<WithVirtualProps<TOutput, TKey>>
     const synced = existingRow.$synced ?? virtualProps.$synced
-    const acknowledged =
-      existingRow.$acknowledged ?? virtualProps.$acknowledged
+    const acknowledged = existingRow.$acknowledged ?? virtualProps.$acknowledged
     const origin = existingRow.$origin ?? virtualProps.$origin
     const resolvedKey = existingRow.$key ?? virtualProps.$key
     const collectionId = existingRow.$collectionId ?? virtualProps.$collectionId
@@ -663,8 +671,6 @@ export class CollectionStateManager<
               break
           }
 
-          // A row is acknowledged while still optimistic once its transaction
-          // has been acknowledged by the server.
           if (transaction.acknowledged) {
             this.acknowledgedKeys.add(mutation.key)
           }
@@ -1243,6 +1249,15 @@ export class CollectionStateManager<
       this.pendingOptimisticDirectUpserts.clear()
       this.pendingOptimisticDirectDeletes.clear()
 
+      // The acknowledged state captured before the recompute (the recompute
+      // drops the now-completed transaction's ack), so each "previous" snapshot
+      // below reflects what was actually emitted before the settle — `false`
+      // when ack and settle coincide, `true` when the row was acknowledged
+      // first. Stable across the batch, so build the lookup once.
+      const preSyncAcknowledgedKeys = {
+        has: (k: TKey) => this.preSyncAcknowledged.get(k) === true,
+      }
+
       // Now check what actually changed in the final visible state
       for (const key of changedKeys) {
         const previousVisibleValue = currentVisibleState.get(key)
@@ -1252,6 +1267,7 @@ export class CollectionStateManager<
           optimisticUpserts: previousOptimisticUpserts,
           optimisticDeletes: previousOptimisticDeletes,
           completedOptimisticKeys: completedOptimisticOps,
+          acknowledgedKeys: preSyncAcknowledgedKeys,
         })
         const nextVirtualProps = this.getVirtualPropsSnapshotForState(key)
         const virtualChanged =
@@ -1369,6 +1385,7 @@ export class CollectionStateManager<
 
       // Clear the pre-sync state since sync operations are complete
       this.preSyncVisibleState.clear()
+      this.preSyncAcknowledged.clear()
 
       // Clear recently synced keys after a microtask to allow recomputeOptimisticState to see them
       Promise.resolve().then(() => {
@@ -1435,13 +1452,18 @@ export class CollectionStateManager<
           this.preSyncVisibleState.set(key, currentValue)
         }
       }
+      // Capture the acknowledged state too, before the recompute clears
+      // acknowledgedKeys. Match the emitted $acknowledged: a still-optimistic
+      // row is acknowledged only if it was explicitly acknowledged or synced.
+      if (!this.preSyncAcknowledged.has(key)) {
+        this.preSyncAcknowledged.set(
+          key,
+          this.acknowledgedKeys.has(key) || this.isRowSynced(key),
+        )
+      }
     }
   }
 
-  /**
-   * Trigger a recomputation when transactions change
-   * This method should be called by the Transaction class when state changes
-   */
   /**
    * Called when a transaction is acknowledged by the server (via
    * `Transaction.acknowledge()`). Flips `$acknowledged` to true for the
@@ -1470,7 +1492,9 @@ export class CollectionStateManager<
       }
 
       const nextVirtualProps = this.getVirtualPropsSnapshotForState(key)
-      if (previousVirtualProps.$acknowledged === nextVirtualProps.$acknowledged) {
+      if (
+        previousVirtualProps.$acknowledged === nextVirtualProps.$acknowledged
+      ) {
         continue
       }
 
@@ -1493,6 +1517,10 @@ export class CollectionStateManager<
     }
   }
 
+   /**
+   * Trigger a recomputation when transactions change
+   * This method should be called by the Transaction class when state changes
+   */
   public onTransactionStateChange(): void {
     // Check if commitPendingTransactions will be called after this
     // by checking if there are pending sync transactions (same logic as in transactions.ts)
@@ -1519,6 +1547,8 @@ export class CollectionStateManager<
     this.pendingOptimisticDirectUpserts.clear()
     this.pendingOptimisticDirectDeletes.clear()
     this.clearOriginTrackingState()
+    this.acknowledgedKeys.clear()
+    this.preSyncAcknowledged.clear()
     this.isLocalOnly = false
     this.size = 0
     this.pendingSyncedTransactions = []
