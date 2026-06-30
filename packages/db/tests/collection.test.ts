@@ -42,7 +42,7 @@ describe(`Collection`, () => {
     expect(() => createCollection()).toThrow(CollectionRequiresConfigError)
   })
 
-  it(`removes optimistic insert when sync confirms with a different server-generated key`, async () => {
+  it(`does not infer confirmation when a remote insert has matching non-key fields`, async () => {
     const options = mockSyncCollectionOptionsNoInitialState<{
       id: number
       text: string
@@ -76,10 +76,13 @@ describe(`Collection`, () => {
     await tx.isPersisted.promise
     await flushPromises()
 
-    expect(getStateEntries(collection)).toEqual([[24, { id: 24, text: `two` }]])
+    expect(getStateEntries(collection)).toEqual([
+      [24, { id: 24, text: `two` }],
+      [4733, { id: 4733, text: `two` }],
+    ])
   })
 
-  it(`updates live queries when an optimistic insert is replaced by a different server key`, async () => {
+  it(`keeps live-query optimistic rows when a remote insert has matching non-key fields`, async () => {
     const options = mockSyncCollectionOptionsNoInitialState<{
       id: number
       text: string
@@ -129,7 +132,10 @@ describe(`Collection`, () => {
         origin: todo.$origin,
         key: todo.$key,
       })),
-    ).toEqual([{ id: 24, synced: true, origin: `remote`, key: 24 }])
+    ).toEqual([
+      { id: 24, synced: true, origin: `remote`, key: 24 },
+      { id: 4733, synced: false, origin: `local`, key: 4733 },
+    ])
   })
 
   it(`should throw an error when trying to use mutation operations outside of a transaction`, async () => {

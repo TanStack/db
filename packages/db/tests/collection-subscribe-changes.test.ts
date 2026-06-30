@@ -1708,7 +1708,8 @@ describe(`Collection.subscribeChanges`, () => {
 
       // Expected: 2 optimistic inserts. The delayed sync writes confirm the same
       // optimistic rows while the local overlay is still active, so no duplicate
-      // visible-state events are emitted.
+      // user-data insert events are emitted. A virtual-only `$synced` confirmation
+      // update may still be materialized where applicable.
       expect(insertEvents.length).toBe(2)
       expect(updateEvents.length).toBe(1)
     } finally {
@@ -1764,7 +1765,8 @@ describe(`Collection.subscribeChanges`, () => {
 
       // Should have the optimistic insert only; the delayed sync confirmation is
       // applied to base while the local overlay is active and does not produce a
-      // duplicate visible-state event.
+      // duplicate user-data event. Tests that project virtual props cover any
+      // virtual-only `$synced` confirmation update separately.
       expect(changeEvents).toHaveLength(1)
       expect(changeEvents[0]).toMatchObject({
         type: `insert`,

@@ -84,7 +84,6 @@ export class CollectionStateManager<
   public pendingOptimisticDeletes = new Set<TKey>()
   public pendingOptimisticDirectUpserts = new Set<TKey>()
   public pendingOptimisticDirectDeletes = new Set<TKey>()
-  private confirmedOptimisticDirectUpsertsWithServerKey = new Set<TKey>()
 
   /**
    * Tracks the origin of confirmed changes for each row.
@@ -571,16 +570,7 @@ export class CollectionStateManager<
               )
               this.pendingOptimisticDeletes.delete(mutation.key)
               if (isDirectTransaction) {
-                if (
-                  this.confirmedOptimisticDirectUpsertsWithServerKey.has(
-                    mutation.key,
-                  )
-                ) {
-                  this.pendingOptimisticUpserts.delete(mutation.key)
-                  this.optimisticUpserts.delete(mutation.key)
-                } else {
-                  this.pendingOptimisticDirectUpserts.add(mutation.key)
-                }
+                this.pendingOptimisticDirectUpserts.add(mutation.key)
                 this.pendingOptimisticDirectDeletes.delete(mutation.key)
               } else {
                 this.pendingOptimisticDirectUpserts.delete(mutation.key)
@@ -845,37 +835,6 @@ export class CollectionStateManager<
     return this.syncedData.get(key)
   }
 
-  private valuesMatchExceptKeys(
-    localValue: TOutput,
-    serverValue: TOutput,
-    localKey: TKey,
-    serverKey: TKey,
-  ): boolean {
-    const localRecord = localValue as Record<string, unknown>
-    const serverRecord = serverValue as Record<string, unknown>
-    const fields = new Set([
-      ...Object.keys(localRecord),
-      ...Object.keys(serverRecord),
-    ])
-
-    for (const field of fields) {
-      const localFieldValue = localRecord[field]
-      const serverFieldValue = serverRecord[field]
-      if (Object.is(localFieldValue, serverFieldValue)) {
-        continue
-      }
-      if (
-        Object.is(localFieldValue, localKey) &&
-        Object.is(serverFieldValue, serverKey)
-      ) {
-        continue
-      }
-      return false
-    }
-
-    return true
-  }
-
   /**
    * Commits pending synced transactions that have been marked committed.
    * This method processes operations from pending transactions and applies them to the synced data.
@@ -1029,36 +988,6 @@ export class CollectionStateManager<
               ? 'local'
               : 'remote'
 
-          if (operation.type === `insert` || operation.type === `update`) {
-            for (const localTransaction of this.transactions.values()) {
-              const isDirectTransaction =
-                localTransaction.metadata[DIRECT_TRANSACTION_METADATA_KEY] === true
-              if (!isDirectTransaction || localTransaction.state === `failed`) {
-                continue
-              }
-              for (const mutation of localTransaction.mutations) {
-                if (
-                  mutation.type === `insert` &&
-                  mutation.optimistic &&
-                  mutation.key !== key &&
-                  this.isThisCollection(mutation.collection) &&
-                  this.valuesMatchExceptKeys(
-                    mutation.modified as TOutput,
-                    operation.value,
-                    mutation.key,
-                    key,
-                  )
-                ) {
-                  this.confirmedOptimisticDirectUpsertsWithServerKey.add(
-                    mutation.key as TKey,
-                  )
-                  this.optimisticUpserts.delete(mutation.key as TKey)
-                  this.pendingOptimisticUpserts.delete(mutation.key as TKey)
-                  changedKeys.add(mutation.key as TKey)
-                }
-              }
-            }
-          }
 
           // Update synced data
           switch (operation.type) {

@@ -1085,7 +1085,7 @@ describe(`Query while syncing`, () => {
 
         // The optimistic mutation should be visible immediately (before mutationFn resolves)
         expect(usersCollection.size).toBe(3)
-        expect([2, 3]).toContain(liveQuery.size)
+        expect(liveQuery.size).toBe(2)
         expect(liveQuery.get(5)?.name).toBe(`Eve`)
 
         // Resolve the mutation WITHOUT syncing the data back
@@ -1095,7 +1095,7 @@ describe(`Query while syncing`, () => {
         // The mutation remains visible after mutationFn settlement; Phase 1 does
         // not use mutationFn settlement as a transport-confirmation/rollback API.
         expect(usersCollection.size).toBe(3)
-        expect([2, 3]).toContain(liveQuery.size)
+        expect(liveQuery.size).toBe(2)
         expect(liveQuery.get(5)?.name).toBe(`Eve`)
 
         // Now sync the data to persist it
@@ -1110,7 +1110,7 @@ describe(`Query while syncing`, () => {
         expect(usersCollection.size).toBe(3)
         // Immediate-base semantics expose the synced base row as soon as it is
         // committed, before the source collection is marked ready.
-        expect([2, 3]).toContain(liveQuery.size)
+        expect(liveQuery.size).toBe(2)
         expect(liveQuery.get(5)?.name).toBe(`Eve`)
 
         // Test update with controlled resolution

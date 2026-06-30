@@ -29,6 +29,8 @@ This RFC focuses on the core design needed for 1.0:
 - Retain failed transaction/mutation records with bounded automatic GC.
 - Slim `@tanstack/offline-transactions` into durability/execution over the log.
 
+Implementation scope note: Phase 1 is limited to internal reconciliation and test coverage. Public API ideas discussed below—`$hasPendingWrites`, `$writeStatus`, `tx.when(...)`, `db.mutations`, replacing `$synced`, replacing `isPersisted.promise`, and `needs-resolution`—are future/non-Phase-1 design directions and must not be read as part of the Phase 1 binding contract.
+
 This RFC intentionally does **not** design backend observation/confirmation semantics, stable view keys, sync batch API changes, dependency-aware rollback, nested transactions, or full patch/conflict semantics. Those become easier once pending mutations are centralized and indexed, but they should be separate focused work.
 
 ## Motivation: issue cluster
@@ -283,9 +285,9 @@ That is the intended contract. If an adapter requires the sync echo to avoid fli
 
 This RFC preserves that semantic boundary. It does not add first-class core transaction states for HTTP confirmation, sync echo, or read-path observation.
 
-## Public status APIs
+## Public status APIs (future / out of Phase 1)
 
-TanStack DB is pre-1.0, so 1.0 should remove or replace ambiguous APIs instead of preserving confusing compatibility.
+The APIs in this section are not added by Phase 1. TanStack DB is pre-1.0, so 1.0 should remove or replace ambiguous APIs instead of preserving confusing compatibility.
 
 ### Replace `$synced`
 
@@ -460,7 +462,7 @@ Prove the model in `@tanstack/db` core first:
 
 This phase should not require Electric, PowerSync, or offline-transactions changes beyond test adjustments unless current adapter code assumes delayed sync.
 
-### Phase 2: 1.0 local write status APIs
+### Phase 2: 1.0 local write status APIs (future / out of Phase 1)
 
 - remove/replace `$synced`;
 - remove/replace `isPersisted.promise`;
