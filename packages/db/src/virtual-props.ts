@@ -70,7 +70,7 @@ export interface VirtualRowProps<
 
   /**
    * Whether this row has either been affirmatively marked as acknowledged, or it
-	* is $synced.
+   * is $synced.
    *
    * - `true`: row is $synced, or `transaction.acknowledge() has been called
    * - `false`: the write is still in flight; no confirmation yet.

@@ -451,12 +451,12 @@ class Transaction<T extends object = Record<string, unknown>> {
 
   /**
    * Mark this transaction as having received some acknowledgement and
-	* confirmation from the server, so the UI can move ahead without waiting
+   * confirmation from the server, so the UI can move ahead without waiting
    * for the transaction to sync back ("settle"). @returns This transaction.
-	*
-	* @example:
+   *
+   * @example:
    * // Acknowledge before full sync/settle
-	* const wrappedOnInsert = async (params) => {
+   * const wrappedOnInsert = async (params) => {
    *   const result = await config.onInsert!(params)
    *
    *   params.transaction.acknowledge()      // 🥳 UI can move on
@@ -464,9 +464,9 @@ class Transaction<T extends object = Record<string, unknown>> {
    *
    *   return result
    * }
-	*
+   *
    * Resolves {@link Transaction.isAcknowledged} and flips the `$acknowledged`
-	* virtual property on the affected rows.
+   * virtual property on the affected rows.
    */
   acknowledge(): Transaction<T> {
     if (

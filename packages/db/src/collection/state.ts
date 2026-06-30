@@ -185,7 +185,7 @@ export class CollectionStateManager<
 
   /**
    * Whether the backend has acknowledged the pending write for a row without
-	* errors, independent of whether it has synced back. Used for `$acknowledged`.
+   * errors, independent of whether it has synced back. Used for `$acknowledged`.
    * A synced row from a completed (settled) transaction, is always acknowledged.
    */
   public isRowAcknowledged(key: TKey): boolean {
@@ -1517,7 +1517,7 @@ export class CollectionStateManager<
     }
   }
 
-   /**
+  /**
    * Trigger a recomputation when transactions change
    * This method should be called by the Transaction class when state changes
    */
