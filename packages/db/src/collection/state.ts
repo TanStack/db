@@ -913,7 +913,10 @@ export class CollectionStateManager<
       >()
 
       for (const transaction of this.transactions.values()) {
-        if (transaction.state === `completed` || transaction.state === `persisting`) {
+        if (
+          transaction.state === `completed` ||
+          transaction.state === `persisting`
+        ) {
           for (const mutation of transaction.mutations) {
             if (this.isThisCollection(mutation.collection)) {
               if (mutation.optimistic) {
@@ -987,7 +990,6 @@ export class CollectionStateManager<
             truncatePendingLocalOrigins?.has(key) === true
               ? 'local'
               : 'remote'
-
 
           // Update synced data
           switch (operation.type) {
@@ -1129,20 +1131,20 @@ export class CollectionStateManager<
       // direct writes and still-active transactions below adjust it. This keeps
       // in-flight optimistic mutations projected while the synced base updates.
       this.optimisticUpserts = new Map(
-        Array.from(
-          new Map([
+        [
+          ...new Map([
             ...previousOptimisticUpserts,
             ...this.pendingOptimisticUpserts,
           ]),
-        ).filter(([key]) => !changedKeys.has(key)),
+        ].filter(([key]) => !changedKeys.has(key)),
       )
       this.optimisticDeletes = new Set(
-        Array.from(
-          new Set([
+        [
+          ...new Set([
             ...previousOptimisticDeletes,
             ...this.pendingOptimisticDeletes,
           ]),
-        ).filter((key) => !changedKeys.has(key)),
+        ].filter((key) => !changedKeys.has(key)),
       )
 
       // Reset flag and recompute optimistic state for any remaining active transactions
