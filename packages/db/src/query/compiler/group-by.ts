@@ -35,17 +35,20 @@ import type { NamespacedAndKeyedStream, NamespacedRow } from '../../types.js'
 import type { VirtualOrigin } from '../../virtual-props.js'
 
 const VIRTUAL_SYNCED_KEY = `__virtual_synced__`
+const VIRTUAL_ACKNOWLEDGED_KEY = `__virtual_acknowledged__`
 const VIRTUAL_HAS_LOCAL_KEY = `__virtual_has_local__`
 const GROUP_KEY_REF_PREFIX = `__group_key_`
 
 type RowVirtualMetadata = {
   synced: boolean
+  acknowledged: boolean
   hasLocal: boolean
 }
 
 function getRowVirtualMetadata(row: NamespacedRow): RowVirtualMetadata {
   let found = false
   let allSynced = true
+  let allAcknowledged = true
   let hasLocal = false
 
   for (const [alias, value] of Object.entries(row as Record<string, unknown>)) {
@@ -61,6 +64,14 @@ function getRowVirtualMetadata(row: NamespacedRow): RowVirtualMetadata {
     if (asRecord.$synced === false) {
       allSynced = false
     }
+    // If absent, $acknowledged falls back to $synced
+    const rowAcknowledged =
+      `$acknowledged` in asRecord
+        ? asRecord.$acknowledged !== false
+        : asRecord.$synced !== false
+    if (!rowAcknowledged) {
+      allAcknowledged = false
+    }
     if (asRecord.$origin === `local`) {
       hasLocal = true
     }
@@ -68,6 +79,7 @@ function getRowVirtualMetadata(row: NamespacedRow): RowVirtualMetadata {
 
   return {
     synced: found ? allSynced : true,
+    acknowledged: found ? allAcknowledged : true,
     hasLocal,
   }
 }
@@ -140,6 +152,18 @@ export function processGroupBy(
       reduce: (values: Array<[boolean, number]>) => {
         for (const [isSynced, multiplicity] of values) {
           if (!isSynced && multiplicity > 0) {
+            return false
+          }
+        }
+        return true
+      },
+    },
+    [VIRTUAL_ACKNOWLEDGED_KEY]: {
+      preMap: ([, row]: [string, NamespacedRow]) =>
+        getRowVirtualMetadata(row).acknowledged,
+      reduce: (values: Array<[boolean, number]>) => {
+        for (const [isAcknowledged, multiplicity] of values) {
+          if (!isAcknowledged && multiplicity > 0) {
             return false
           }
         }
@@ -242,10 +266,14 @@ export function processGroupBy(
         const groupSynced = (aggregatedRow as Record<string, any>)[
           VIRTUAL_SYNCED_KEY
         ]
+        const groupAcknowledged = (aggregatedRow as Record<string, any>)[
+          VIRTUAL_ACKNOWLEDGED_KEY
+        ]
         const groupHasLocal = (aggregatedRow as Record<string, any>)[
           VIRTUAL_HAS_LOCAL_KEY
         ]
         resultRow.$synced = groupSynced ?? true
+        resultRow.$acknowledged = groupAcknowledged ?? groupSynced ?? true
         resultRow.$origin = (
           groupHasLocal ? `local` : `remote`
         ) satisfies VirtualOrigin
@@ -421,10 +449,14 @@ export function processGroupBy(
       const groupSynced = (aggregatedRow as Record<string, any>)[
         VIRTUAL_SYNCED_KEY
       ]
+      const groupAcknowledged = (aggregatedRow as Record<string, any>)[
+        VIRTUAL_ACKNOWLEDGED_KEY
+      ]
       const groupHasLocal = (aggregatedRow as Record<string, any>)[
         VIRTUAL_HAS_LOCAL_KEY
       ]
       resultRow.$synced = groupSynced ?? true
+      resultRow.$acknowledged = groupAcknowledged ?? groupSynced ?? true
       resultRow.$origin = (
         groupHasLocal ? `local` : `remote`
       ) satisfies VirtualOrigin
