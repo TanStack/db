@@ -374,20 +374,17 @@ export class CollectionStateManager<
    */
   public *keys(): IterableIterator<TKey> {
     const { syncedData, optimisticDeletes, optimisticUpserts } = this
-    // Yield optimistic inserts that are not yet in synced data first. These
-    // rows entered the visible collection before later unrelated sync inserts,
-    // so preserving them ahead of the authoritative base keeps visible-state
-    // iteration stable while a transaction is persisting.
-    for (const key of optimisticUpserts.keys()) {
-      if (!syncedData.has(key) && !optimisticDeletes.has(key)) {
-        yield key
-      }
-    }
-    // Yield keys from synced data, skipping any that are deleted. If a synced
-    // key also has an optimistic upsert, get(key) will still return the
+    // Yield keys from synced data first, skipping any that are deleted. If a
+    // synced key also has an optimistic upsert, get(key) will still return the
     // optimistic value at the synced key's original position.
     for (const key of syncedData.keys()) {
       if (!optimisticDeletes.has(key)) {
+        yield key
+      }
+    }
+    // Then yield optimistic inserts that are not yet in synced data.
+    for (const key of optimisticUpserts.keys()) {
+      if (!syncedData.has(key) && !optimisticDeletes.has(key)) {
         yield key
       }
     }
@@ -483,18 +480,13 @@ export class CollectionStateManager<
       return
     }
 
-    const mutationKey =
-      mutation.key === undefined
-        ? this.config.getKey(mutation.modified as TOutput)
-        : (mutation.key as TKey)
-
     switch (mutation.type) {
       case `insert`:
       case `update`:
-        visible.set(mutationKey, mutation.modified as TOutput)
+        visible.set(mutation.key as TKey, mutation.modified as TOutput)
         break
       case `delete`:
-        visible.delete(mutationKey)
+        visible.delete(mutation.key as TKey)
         break
     }
   }
@@ -1118,8 +1110,22 @@ export class CollectionStateManager<
       // overlay that was visible before the sync commit, then let confirmed
       // direct writes and still-active transactions below adjust it. This keeps
       // in-flight optimistic mutations projected while the synced base updates.
-      this.optimisticUpserts = new Map(previousOptimisticUpserts)
-      this.optimisticDeletes = new Set(previousOptimisticDeletes)
+      this.optimisticUpserts = new Map(
+        Array.from(
+          new Map([
+            ...previousOptimisticUpserts,
+            ...this.pendingOptimisticUpserts,
+          ]),
+        ).filter(([key]) => !changedKeys.has(key)),
+      )
+      this.optimisticDeletes = new Set(
+        Array.from(
+          new Set([
+            ...previousOptimisticDeletes,
+            ...this.pendingOptimisticDeletes,
+          ]),
+        ).filter((key) => !changedKeys.has(key)),
+      )
 
       // Reset flag and recompute optimistic state for any remaining active transactions
       this.isCommittingSyncTransactions = false
@@ -1144,22 +1150,18 @@ export class CollectionStateManager<
               this.isThisCollection(mutation.collection) &&
               mutation.optimistic
             ) {
-              const mutationKey =
-                mutation.key === undefined
-                  ? this.config.getKey(mutation.modified as TOutput)
-                  : (mutation.key as TKey)
               switch (mutation.type) {
                 case `insert`:
                 case `update`:
                   this.optimisticUpserts.set(
-                    mutationKey,
+                    mutation.key as TKey,
                     mutation.modified as TOutput,
                   )
-                  this.optimisticDeletes.delete(mutationKey)
+                  this.optimisticDeletes.delete(mutation.key as TKey)
                   break
                 case `delete`:
-                  this.optimisticUpserts.delete(mutationKey)
-                  this.optimisticDeletes.add(mutationKey)
+                  this.optimisticUpserts.delete(mutation.key as TKey)
+                  this.optimisticDeletes.add(mutation.key as TKey)
                   break
               }
             }

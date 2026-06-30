@@ -101,3 +101,64 @@ Commands run:
 ### Commit
 
 - `1c9bbfe1 fix: preserve optimistic insert iteration during sync`
+
+## Review findings fix attempt
+
+Status: BLOCKED
+
+### Changes attempted (not committed)
+
+- Reverted the out-of-scope global `CollectionState.keys()` ordering change so synced/base keys are yielded first and optimistic-only keys are appended as before.
+- Removed the out-of-scope sync-layer fallback that inferred a key from a single pending local mutation, along with its silent `return` when the key remained `undefined`.
+- Removed undefined-key derivation from active optimistic projection and `captureVisibleStateForKeys()` projection paths; projection again uses normal `PendingMutation.key` values consistently.
+- Updated the stale `commitPendingTransactions()` comment.
+- Adjusted sync commit overlay restoration to preserve previous optimistic overlays only for keys not changed/confirmed by the sync commit, so confirmed keys do not retain stale optimistic values over authoritative synced data.
+
+### Validation
+
+Commands run:
+
+1. `pnpm --filter @tanstack/db exec tsc --noEmit`
+   - Passed.
+
+2. `cd packages/db && pnpm vitest --run tests/collection.test.ts -t "applies unrelated|keeps optimistic"`
+   - Failed: 2 focused tests failed.
+   - `applies unrelated synced inserts while a transaction is persisting` observed only the unrelated synced row after removing the sync fallback.
+   - `keeps optimistic visible value when synced update for the same key arrives while persisting` observed an extra row keyed by `undefined` after removing the sync fallback.
+
+3. `cd packages/db && pnpm vitest --run tests/query/live-query-collection.test.ts -t "unrelated synced source rows"`
+   - Passed: 1 test passed, 55 skipped, no type errors.
+
+### Blocking concern
+
+The review requires removing the out-of-scope undefined-key fallback in `packages/db/src/collection/sync.ts`, but the required focused collection regressions currently rely on partial sync payloads that omit `key` and, for optimistic update confirmation, omit the row id from `value`. Removing that fallback causes the targeted collection tests to fail (including an `undefined` keyed row). Keeping the fallback would violate Important finding 3. I stopped without committing rather than guessing between conflicting requirements.
+
+## Review fix completion
+
+Status: DONE
+
+### Changes made
+
+- Removed the out-of-scope global `CollectionState.keys()` optimistic-first ordering change; synced/base keys are yielded first and optimistic-only keys append afterward again.
+- Removed the `sync.ts` undefined-key fallback that inferred a sync key from pending local mutations, including the silent return for missing keys.
+- Removed undefined-key derivation from optimistic projection/capture paths; projection now uses `PendingMutation.key` rather than inferring from `modified`.
+- Constrained sync overlay restoration so previous/pending optimistic overlays are only restored for keys not changed by the authoritative sync commit, preventing stale optimistic overlays from winning over confirmations.
+- Updated the focused collection regressions to model normal keyed authoritative sync rows:
+  - Local sync echo writes now pass `key: change.key` and a full row value from `change.modified ?? value ?? changes` instead of writing partial `change.changes` payloads without keys.
+  - The unrelated server insert now emits `{ type: 'insert', key: 2, value: { id: 2, value: 'synced value' } }`.
+  - The local insert confirmation now emits `{ type: 'insert', key: 1, value: { id: 1, value: 'optimistic value' } }` while the transaction is still persisting.
+  - The same-key server update now emits `{ type: 'update', key: 1, value: { id: 1, value: 'server value' } }`.
+- Restructured the unrelated-insert regression so persistence remains pending while the keyed authoritative sync rows are emitted, preserving the Task 5 assertion that base sync applies immediately while the optimistic row remains visible.
+
+### Validation
+
+Commands run:
+
+1. `pnpm --filter @tanstack/db exec tsc --noEmit`
+   - Passed.
+
+2. `cd packages/db && pnpm vitest --run tests/collection.test.ts -t "applies unrelated|keeps optimistic"`
+   - Passed: 2 tests passed, 96 skipped, no type errors.
+
+3. `cd packages/db && pnpm vitest --run tests/query/live-query-collection.test.ts -t "unrelated synced source rows"`
+   - Passed: 1 test passed, 55 skipped, no type errors.

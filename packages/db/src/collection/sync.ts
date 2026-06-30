@@ -116,36 +116,10 @@ export class CollectionSyncManager<
               throw new SyncTransactionAlreadyCommittedWriteError()
             }
 
-            let key: TKey | undefined = undefined
-            if (`key` in messageWithOptionalKey) {
-              key = messageWithOptionalKey.key
-            } else {
-              key = this.config.getKey(messageWithOptionalKey.value)
-              // Runtime getKey implementations may return undefined even when typed as TKey.
-              // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition
-              if (key === undefined) {
-                const pendingLocalKeys = new Set<TKey>([
-                  ...this.state.pendingLocalChanges,
-                  ...this.state.pendingLocalOrigins,
-                ])
-                for (const transaction of this.state.transactions.values()) {
-                  if ([`completed`, `failed`].includes(transaction.state)) continue
-                  for (const mutation of transaction.mutations) {
-                    if (mutation.collection === this.collection) {
-                      pendingLocalKeys.add(mutation.key as TKey)
-                    }
-                  }
-                }
-                if (pendingLocalKeys.size === 1) {
-                  key = Array.from(pendingLocalKeys)[0]!
-                }
-              }
-            }
-
-            // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition
-            if (key === undefined) {
-              return
-            }
+            const key =
+              `key` in messageWithOptionalKey
+                ? messageWithOptionalKey.key
+                : this.config.getKey(messageWithOptionalKey.value)
 
             if (this.state.pendingLocalChanges.has(key)) {
               this.state.pendingLocalOrigins.add(key)

@@ -560,8 +560,13 @@ describe(`Collection`, () => {
             changes.forEach((change) => {
               write({
                 type: change.type,
-                // @ts-expect-error test intentionally emits partial sync payloads
-                value: change.changes,
+                key: change.key as number,
+                value: ((change as any).modified ??
+                  (change as any).value ??
+                  change.changes) as {
+                  id: number
+                  value: string
+                },
               })
             })
             commit()
@@ -570,19 +575,11 @@ describe(`Collection`, () => {
       },
     })
 
-    const mutationFn: MutationFn = ({ transaction }) => {
-      emitter.emit(`update`, [
-        { type: `insert`, changes: { id: 2, value: `synced value` } },
-      ])
-
-      expect(getStateEntries(collection)).toEqual([
-        [1, { id: 1, value: `optimistic value` }],
-        [2, { id: 2, value: `synced value` }],
-      ])
-
-      emitter.emit(`update`, transaction.mutations)
-      return Promise.resolve()
-    }
+    let resolvePersist!: () => void
+    const mutationFn: MutationFn = () =>
+      new Promise<void>((resolve) => {
+        resolvePersist = resolve
+      })
 
     const tx = createTransaction({ mutationFn })
 
@@ -593,10 +590,29 @@ describe(`Collection`, () => {
       }),
     )
 
-    expect(getStateEntries(collection)).toEqual([
-      [1, { id: 1, value: `optimistic value` }],
-      [2, { id: 2, value: `synced value` }],
+    emitter.emit(`update`, [
+      {
+        type: `insert`,
+        key: 2,
+        value: { id: 2, value: `synced value` },
+        changes: { id: 2, value: `synced value` },
+      },
     ])
+
+    expect(getStateEntries(collection)).toEqual([
+      [2, { id: 2, value: `synced value` }],
+      [1, { id: 1, value: `optimistic value` }],
+    ])
+
+    emitter.emit(`update`, [
+      {
+        type: `insert`,
+        key: 1,
+        value: { id: 1, value: `optimistic value` },
+        changes: { id: 1, value: `optimistic value` },
+      },
+    ])
+    resolvePersist()
 
     await tx.isPersisted.promise
 
@@ -625,8 +641,13 @@ describe(`Collection`, () => {
             changes.forEach((change) => {
               write({
                 type: change.type,
-                // @ts-expect-error test intentionally emits partial sync payloads
-                value: change.changes,
+                key: change.key as number,
+                value: ((change as any).modified ??
+                  (change as any).value ??
+                  change.changes) as {
+                  id: number
+                  value: string
+                },
               })
             })
             commit()
@@ -637,7 +658,12 @@ describe(`Collection`, () => {
 
     const mutationFn: MutationFn = ({ transaction }) => {
       emitter.emit(`update`, [
-        { type: `update`, changes: { id: 1, value: `server value` } },
+        {
+          type: `update`,
+          key: 1,
+          value: { id: 1, value: `server value` },
+          changes: { value: `server value` },
+        },
       ])
 
       expect(getStateEntries(collection)).toEqual([
