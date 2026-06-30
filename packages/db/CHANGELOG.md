@@ -1,5 +1,17 @@
 # @tanstack/db
 
+## 0.6.13
+
+### Patch Changes
+
+- Fix `.select()` collapsing discriminated-union fields to the intersection of common keys (#1511). `Ref<T>` now distributes over `T` so `keyof (A | B | C)` no longer reduces the union to its common keys, and `ExtractRef<T>` now distinguishes a real branded `Ref` (where the underlying user type `U` can be returned directly) from a spread-produced inline object (which still needs to be projected through `ResultTypeFromSelect`). This preserves discriminated unions both when the field is selected at the top level and when the field is nested inside another selected object. The real-`Ref` detection uses a strict structural equivalence against the canonical `Ref<U>` shape, so spread-derived objects that keep the same keys but change a field's type (e.g. `{ ...u, code: u.slug }`) or drop an optional key (e.g. `const { nickname, ...rest } = u`) are projected through `ResultTypeFromSelect` instead of being collapsed back to `U`. ([#1597](https://github.com/TanStack/db/pull/1597))
+
+- fix(db): keep deeply nested includes in sync when sibling groups share nested correlation keys ([#1607](https://github.com/TanStack/db/pull/1607))
+
+  Deeply nested includes could drop or stop updating nested rows when sibling parent groups shared the same nested correlation key, especially when one sibling group was inserted after the initial load. Shared nested pipeline buffers were being drained through route state that was scoped too narrowly, so one branch could consume a buffered update before other branches that referenced the same nested row received it.
+
+  Nested route state is now shared at the same scope as the nested buffer and routes updates to every concrete destination branch before clearing the buffer. Snapshot replay still seeds late-arriving sibling groups with already-materialized rows, and recursive pending-change detection ensures deeper routed updates are flushed back up through the result tree.
+
 ## 0.6.12
 
 ### Patch Changes
