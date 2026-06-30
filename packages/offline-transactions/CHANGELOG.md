@@ -1,5 +1,12 @@
 # @tanstack/offline-transactions
 
+## 1.0.38
+
+### Patch Changes
+
+- Updated dependencies [[`99e9afe`](https://github.com/TanStack/db/commit/99e9afed46ab4083d66609a3e37ee44103c2177f), [`816b667`](https://github.com/TanStack/db/commit/816b6671c2cc9806715f6e6ed4410b3f4efb5afb)]:
+  - @tanstack/db@0.6.13
+
 ## 1.0.37
 
 ### Patch Changes
