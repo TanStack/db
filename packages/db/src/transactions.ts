@@ -212,6 +212,8 @@ class Transaction<T extends object = Record<string, unknown>> {
   public mutationFn: MutationFn<T>
   public mutations: Array<PendingMutation<T>>
   public isPersisted: Deferred<Transaction<T>>
+  public isAcknowledged: Deferred<Transaction<T>>
+  public acknowledged: boolean
   public autoCommit: boolean
   public createdAt: Date
   public sequenceNumber: number
@@ -230,6 +232,11 @@ class Transaction<T extends object = Record<string, unknown>> {
     this.state = `pending`
     this.mutations = []
     this.isPersisted = createDeferred<Transaction<T>>()
+    this.isAcknowledged = createDeferred<Transaction<T>>()
+    this.acknowledged = false
+    // Prevent unhandled-rejection noise when nobody awaits isAcknowledged on a
+    // failing transaction; explicit awaiters still observe the rejection.
+    void this.isAcknowledged.promise.catch(() => {})
     this.autoCommit = config.autoCommit ?? true
     this.createdAt = new Date()
     this.sequenceNumber = sequenceNumber++
@@ -415,7 +422,10 @@ class Transaction<T extends object = Record<string, unknown>> {
       }
     }
 
-    // Reject the promise
+    // Reject the promises
+    if (this.isAcknowledged.isPending()) {
+      this.isAcknowledged.reject(this.error?.error)
+    }
     this.isPersisted.reject(this.error?.error)
     this.touchCollection()
 
@@ -437,6 +447,50 @@ class Transaction<T extends object = Record<string, unknown>> {
         hasCalled.add(mutation.collection.id)
       }
     }
+  }
+
+  /**
+   * Mark this transaction as having received some acknowledgement and
+	* confirmation from the server, so the UI can move ahead without waiting
+   * for the transaction to sync back ("settle"). @returns This transaction.
+	*
+	* @example:
+   * // Acknowledge before full sync/settle
+	* const wrappedOnInsert = async (params) => {
+   *   const result = await config.onInsert!(params)
+   *
+   *   params.transaction.acknowledge()      // 🥳 UI can move on
+   *   await processMatchingStrategy(result) // overlay stays open
+   *
+   *   return result
+   * }
+	*
+   * Resolves {@link Transaction.isAcknowledged} and flips the `$acknowledged`
+	* virtual property on the affected rows.
+   */
+  acknowledge(): Transaction<T> {
+    if (
+      this.acknowledged ||
+      this.state === `completed` ||
+      this.state === `failed`
+    ) {
+      return this
+    }
+
+    this.acknowledged = true
+    this.isAcknowledged.resolve(this)
+
+    // Notify each affected collection so it flips $acknowledged and emits updates.
+    const notified = new Set<string>()
+    for (const mutation of this.mutations) {
+      if (notified.has(mutation.collection.id)) {
+        continue
+      }
+      notified.add(mutation.collection.id)
+      mutation.collection._state.onTransactionAcknowledged(this)
+    }
+
+    return this
   }
 
   /**
@@ -487,6 +541,10 @@ class Transaction<T extends object = Record<string, unknown>> {
 
     if (this.mutations.length === 0) {
       this.setState(`completed`)
+      if (this.isAcknowledged.isPending()) {
+        this.acknowledged = true
+        this.isAcknowledged.resolve(this)
+      }
       this.isPersisted.resolve(this)
 
       return this
@@ -504,6 +562,11 @@ class Transaction<T extends object = Record<string, unknown>> {
       this.setState(`completed`)
       this.touchCollection()
 
+      // A settling a transaction always flips acknowledged, if it wasn't already done
+      if (this.isAcknowledged.isPending()) {
+        this.acknowledged = true
+        this.isAcknowledged.resolve(this)
+      }
       this.isPersisted.resolve(this)
     } catch (error) {
       // Preserve the original error for rethrowing

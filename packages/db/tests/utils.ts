@@ -20,6 +20,7 @@ export const stripVirtualProps = <T extends Record<string, any> | undefined>(
   if (!value || typeof value !== `object`) return value
   const {
     $synced: _synced,
+    $acknowledged: _acknowledged,
     $origin: _origin,
     $key: _key,
     $collectionId: _collectionId,
@@ -30,9 +31,13 @@ export const stripVirtualProps = <T extends Record<string, any> | undefined>(
 
 export const omitVirtualProps = <T extends Record<string, any>>(
   value: T,
-): Omit<T, '$synced' | '$origin' | '$key' | '$collectionId'> => {
+): Omit<
+  T,
+  '$synced' | '$acknowledged' | '$origin' | '$key' | '$collectionId'
+> => {
   const {
     $synced: _synced,
+    $acknowledged: _acknowledged,
     $origin: _origin,
     $key: _key,
     $collectionId: _collectionId,

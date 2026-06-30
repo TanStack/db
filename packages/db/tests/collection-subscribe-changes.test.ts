@@ -2677,6 +2677,7 @@ describe(`Virtual properties`, () => {
     expect(
       hasVirtualProps({
         $synced: true,
+        $acknowledged: true,
         $origin: `remote`,
         $key: `row-1`,
         $collectionId: `collection-1`,
