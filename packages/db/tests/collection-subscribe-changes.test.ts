@@ -8,6 +8,7 @@ import { and, count, eq, gt } from '../src/query/builder/functions'
 import { PropRef } from '../src/query/ir'
 import { hasVirtualProps } from '../src/virtual-props.js'
 import { stripVirtualProps } from './utils'
+import type { WithVirtualProps } from '../src/virtual-props.js'
 import type { OutputWithVirtual } from './utils'
 import type {
   ChangeMessage,
@@ -1799,7 +1800,7 @@ describe(`Collection.subscribeChanges`, () => {
       },
     })
 
-    const received: Array<ChangeMessage<{ id: number; value: string }, number>> = []
+    const received: Array<ChangeMessage<WithVirtualProps<{ id: number; value: string }>>> = []
     collection.subscribeChanges((changes) => {
       received.push(...changes)
     })

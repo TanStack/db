@@ -545,6 +545,23 @@ export class CollectionStateManager<
           if (!mutation.optimistic) {
             continue
           }
+          const mutationAlreadyConfirmed =
+            mutation.type === `delete`
+              ? !this.syncedData.has(mutation.key as TKey)
+              : deepEquals(
+                  this.syncedData.get(mutation.key as TKey),
+                  mutation.modified as TOutput,
+                )
+
+          if (mutationAlreadyConfirmed) {
+            this.pendingOptimisticUpserts.delete(mutation.key)
+            this.pendingOptimisticDeletes.delete(mutation.key)
+            this.pendingOptimisticDirectUpserts.delete(mutation.key)
+            this.pendingOptimisticDirectDeletes.delete(mutation.key)
+            this.pendingLocalOrigins.delete(mutation.key)
+            continue
+          }
+
           switch (mutation.type) {
             case `insert`:
             case `update`:
@@ -937,7 +954,7 @@ export class CollectionStateManager<
       >()
 
       for (const transaction of this.transactions.values()) {
-        if (transaction.state === `completed`) {
+        if (transaction.state === `completed` || transaction.state === `persisting`) {
           for (const mutation of transaction.mutations) {
             if (this.isThisCollection(mutation.collection)) {
               if (mutation.optimistic) {
@@ -1246,6 +1263,9 @@ export class CollectionStateManager<
       // sync commit has been applied, stop retaining completed optimistic keys
       // that were not confirmed by this commit so the temporary row is removed.
       for (const key of this.pendingOptimisticDirectUpserts) {
+        if (hasTruncateSync && truncateOptimisticSnapshot?.upserts.has(key)) {
+          continue
+        }
         if (!changedKeys.has(key)) {
           changedKeys.add(key)
           if (!currentVisibleState.has(key)) {
