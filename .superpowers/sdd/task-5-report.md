@@ -162,3 +162,33 @@ Commands run:
 
 3. `cd packages/db && pnpm vitest --run tests/query/live-query-collection.test.ts -t "unrelated synced source rows"`
    - Passed: 1 test passed, 55 skipped, no type errors.
+
+## Task 5 re-review critical/important fix
+
+Status: DONE
+
+### Changes made
+
+- Updated the stale `commitPendingTransactions()` method comment so it no longer says sync commits only happen when there are no active transactions.
+- Fixed stale optimistic overlay cleanup for confirmed optimistic direct upserts:
+  - Pending direct optimistic upsert keys that are cleaned up during sync commit now also remove their `optimisticUpserts` overlay.
+  - Added focused handling for direct optimistic inserts confirmed by an authoritative sync insert/update under a different server key, so the temporary/client-key row is removed after persistence completes instead of being re-seeded from completed optimistic state.
+- Updated the existing different-server-key regression's intermediate expectation to match Task 5 immediate sync semantics: authoritative sync rows are visible while the local transaction is still persisting.
+
+### Validation
+
+Commands run:
+
+1. `pnpm --filter @tanstack/db exec tsc --noEmit`
+   - Passed.
+
+2. `cd packages/db && pnpm vitest --run tests/collection.test.ts -t "applies unrelated|keeps optimistic"`
+   - Passed: 2 tests passed, 96 skipped, no type errors.
+
+3. Existing focused server-generated/different-key optimistic insert confirmation test found and run:
+   - `cd packages/db && pnpm vitest --run tests/collection.test.ts -t "server-generated|different server key"`
+   - Passed: 2 tests passed, 96 skipped, no type errors.
+
+### Concerns
+
+- None.

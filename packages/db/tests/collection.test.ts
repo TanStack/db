@@ -66,8 +66,9 @@ describe(`Collection`, () => {
     options.utils.write({ type: `insert`, value: { id: 24, text: `two` } })
     options.utils.commit()
 
-    // The sync commit is held while the local insert transaction is persisting.
+    // The sync commit applies immediately while the local insert transaction is persisting.
     expect(getStateEntries(collection)).toEqual([
+      [24, { id: 24, text: `two` }],
       [4733, { id: 4733, text: `two` }],
     ])
 
