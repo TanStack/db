@@ -215,15 +215,15 @@ describe(`select types`, () => {
 
     const col = createLiveQueryCollection((q) =>
       q.from({ u: spreadUsers }).select(({ u }) => {
-        const { nickname, ...withoutNickname } = u
+        const { nickname: _nickname, ...withoutNickname } = u
         return { trimmed: withoutNickname }
       }),
     )
 
-    const result = col.toArray[0]!
+    const _result = col.toArray[0]!
     // `nickname` was destructured out, so the projected object must
     // not reintroduce the key.
-    type HasNickname = `nickname` extends keyof typeof result.trimmed
+    type HasNickname = `nickname` extends keyof typeof _result.trimmed
       ? true
       : false
     expectTypeOf<HasNickname>().toEqualTypeOf<false>()
