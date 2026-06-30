@@ -992,6 +992,27 @@ tx.isPersisted.promise.then(() => {
 console.log(tx.state) // 'pending', 'persisting', 'completed', or 'failed'
 ```
 
+### Reacting to acknowledgement vs. sync
+
+When a mutation handler acknowledges a server write before the sync comes back, the UI can choose to fire transitions or drop state based on this signal, either `transaction.isAcknowledged` or the `row.$acknowledged`
+
+```typescript
+const tx = todoCollection.insert(draft)
+
+await tx.isAcknowledged.promise  // resolves at acknowledgement — never later than isPersisted
+toast.success("Profile created") // server has the write now; sync may still be catching up
+router.navigate('/welcome')
+```
+
+Reactively, `$acknowledged` lets you show an intermediate "saved, syncing…" state:
+
+```tsx
+const rowState =
+  !row.$acknowledged ? 'pending-spinner'   // in flight
+  : !row.$synced     ? 'saved'         // server has it; sync catching up
+  :                    'saved'        // fully settled
+```
+
 ## Paced Mutations
 
 Paced mutations provide fine-grained control over **when and how** mutations are persisted to your backend. Instead of persisting every mutation immediately, you can use timing strategies to batch, delay, or queue mutations based on your application's needs.

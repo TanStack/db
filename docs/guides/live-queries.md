@@ -34,6 +34,7 @@ The result types are automatically inferred from your query structure, providing
 Live query results include computed, read-only virtual properties on every row:
 
 - `$synced`: `true` when the row is confirmed by sync; `false` when it is still optimistic.
+- `$acknowledged`: `false` at the start of an optimistic update; flips to `true` when `$synced` is flipped, or earlier if the mutation handler calls `tx.acknowledge()`
 - `$origin`: `"local"` if the last confirmed change came from this client, otherwise `"remote"`.
 - `$key`: the row key for the result.
 - `$collectionId`: the source collection ID.
