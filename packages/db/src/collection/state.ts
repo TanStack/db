@@ -1234,11 +1234,28 @@ export class CollectionStateManager<
       // after the truncate snapshot are preserved.
       for (const transaction of this.transactions.values()) {
         if (![`completed`, `failed`].includes(transaction.state)) {
+          const isDirectTransaction =
+            transaction.metadata[DIRECT_TRANSACTION_METADATA_KEY] === true
           for (const mutation of transaction.mutations) {
             if (
               this.isThisCollection(mutation.collection) &&
               mutation.optimistic
             ) {
+              const mutationKey = mutation.key as TKey
+              const directMutationConfirmed =
+                isDirectTransaction &&
+                changedKeys.has(mutationKey) &&
+                (mutation.type === `delete`
+                  ? !this.syncedData.has(mutationKey)
+                  : deepEquals(
+                      this.syncedData.get(mutationKey),
+                      mutation.modified as TOutput,
+                    ))
+
+              if (directMutationConfirmed) {
+                continue
+              }
+
               switch (mutation.type) {
                 case `insert`:
                 case `update`:
@@ -1349,11 +1366,13 @@ export class CollectionStateManager<
           newVisibleValue !== undefined
         ) {
           const completedOptimisticOp = completedOptimisticOps.get(key)
-          if (completedOptimisticOp) {
-            const previousValueFromCompleted = completedOptimisticOp.value
-            const previousValueWithVirtualFromCompleted =
+          const previousOptimisticValue = previousOptimisticUpserts.get(key)
+          if (completedOptimisticOp || previousOptimisticValue !== undefined) {
+            const previousValueFromOptimistic =
+              completedOptimisticOp?.value ?? previousOptimisticValue!
+            const previousValueWithVirtualFromOptimistic =
               enrichRowWithVirtualProps(
-                previousValueFromCompleted,
+                previousValueFromOptimistic,
                 key,
                 this.collection.id,
                 () => previousVirtualProps.$synced,
@@ -1363,7 +1382,7 @@ export class CollectionStateManager<
               type: `update`,
               key,
               value: newVisibleValue,
-              previousValue: previousValueWithVirtualFromCompleted,
+              previousValue: previousValueWithVirtualFromOptimistic,
             })
           } else {
             events.push({

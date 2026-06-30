@@ -136,3 +136,19 @@ Validation:
 
 Concerns:
 - The query-while-syncing test uses `[2, 3]` for live query size at intermediate pre-ready checkpoints because the package runner and isolated vitest run observe different pre-ready materialization counts, but both preserve the required row visibility and Phase 1 immediate-base semantics.
+
+## Task 8 review fix: virtual-prop confirmation events
+
+Diagnosis:
+- The review finding was valid: `subscribeChanges` materializes rows with virtual props, so a confirmation that flips `$synced` from `false` to `true` is a visible-state transition even when user data is identical.
+- The broken case occurred when an optimistic direct insert was still in-flight/batched while the sync confirmation arrived. Reconciliation could suppress the user-data duplicate but fail to preserve an explicit virtual-only update event for subscribers.
+
+Changes:
+- Restored the virtual-prop test expectation to require an update when `$synced` flips on confirmation.
+- Adjusted sync reconciliation so direct optimistic mutations that are confirmed by the same-key synced base are not re-overlaid as local optimistic state, while still preserving active unrelated optimistic overlays.
+- When the previous visible snapshot is missing but a previous optimistic upsert exists, confirmation diffing now emits an update with the optimistic value as `previousValue`, preserving `$synced: false -> true` for `subscribeChanges` materialized values.
+- Kept duplicate identical confirmation events suppressed for user data; no public APIs or fallback behavior were added.
+
+Validation:
+- `pnpm --filter @tanstack/db exec tsc --noEmit`: PASS.
+- `cd packages/db && pnpm vitest --run tests/collection-subscribe-changes.test.ts -t "Virtual properties|duplicate insert|async persistence sync|both synced and optimistic|only emit differences" --reporter=dot`: PASS (1 file passed; 18 tests passed, 24 skipped; type errors: none).

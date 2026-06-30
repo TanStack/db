@@ -2271,7 +2271,7 @@ describe(`Virtual properties`, () => {
     subscription.unsubscribe()
   })
 
-  it(`should not emit a user-data update for identical confirmation`, async () => {
+  it(`should emit an update when $synced flips on confirmation`, async () => {
     const changes: Array<
       ChangeMessage<OutputWithVirtual<{ id: string; value: string }, string>>
     > = []
@@ -2337,7 +2337,9 @@ describe(`Virtual properties`, () => {
     const confirmedUpdate = changes.find(
       (change) => change.type === `update` && change.key === `row-1`,
     )
-    expect(confirmedUpdate).toBeUndefined()
+    expect(confirmedUpdate).toBeDefined()
+    expect(confirmedUpdate!.value.$synced).toBe(true)
+    expect(confirmedUpdate!.previousValue?.$synced).toBe(false)
 
     subscription.unsubscribe()
   })
