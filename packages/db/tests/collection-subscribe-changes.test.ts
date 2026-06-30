@@ -1718,7 +1718,7 @@ describe(`Collection.subscribeChanges`, () => {
     }
   })
 
-  it(`should handle single insert with delayed sync correctly`, async () => {
+  it(`should handle single insert with async persistence sync correctly`, async () => {
     vi.useFakeTimers()
 
     try {
@@ -1733,7 +1733,7 @@ describe(`Collection.subscribeChanges`, () => {
         { id: string; n: number; foo?: string },
         string
       >({
-        id: `single-insert-delayed-sync-test`,
+        id: `single-insert-async-persistence-sync-test`,
         getKey: (item) => item.id,
         sync: {
           sync: (cfg) => {

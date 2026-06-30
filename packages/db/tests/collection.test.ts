@@ -1819,7 +1819,7 @@ describe(`Collection`, () => {
     commit()
   })
 
-  it(`open sync transaction isn't applied when optimistic mutation is resolved/rejected`, async () => {
+  it(`keeps open sync transaction isolated when optimistic mutation is resolved/rejected`, async () => {
     type Row = { id: number; name: string }
 
     const collection = createCollection(
@@ -1856,7 +1856,7 @@ describe(`Collection`, () => {
 
     // we now reject the sync, this should trigger a rollback of the open transaction
     // and the optimistic state should be removed
-    // it should *not* trigger the open sync transaction to be applied to the synced state
+    // the still-open sync transaction remains isolated until it is committed
     await withExpectedRejection(`trigger rollback`, () => {
       collection.utils.rejectSync(new Error(`trigger rollback`))
       return flushPromises()
