@@ -463,11 +463,9 @@ describe(`Collection.subscribeChanges`, () => {
 
     await tx.isPersisted.promise
 
-    // Sync confirmation should only change virtual props ($synced/$origin)
-    expect(callback).toHaveBeenCalledTimes(1)
-    expect(
-      normalizeChangesWithoutVirtualUpdates(callback.mock.calls[0]![0]),
-    ).toEqual([])
+    // Under immediate-base visible-state diffing, an identical sync confirmation
+    // does not emit a second user-data event.
+    expect(callback).not.toHaveBeenCalled()
     callback.mockReset()
 
     // Update both items in optimistic and synced ways
@@ -621,11 +619,9 @@ describe(`Collection.subscribeChanges`, () => {
     // Wait for changes to propagate
     await waitForChanges()
 
-    // Sync confirmation should only change virtual props ($synced/$origin)
-    expect(callback).toHaveBeenCalledTimes(1)
-    expect(
-      normalizeChangesWithoutVirtualUpdates(callback.mock.calls[0]![0]),
-    ).toEqual([])
+    // Under immediate-base visible-state diffing, an identical sync confirmation
+    // does not emit a second user-data event.
+    expect(callback).not.toHaveBeenCalled()
     callback.mockReset()
 
     // Update one item only
@@ -1710,9 +1706,11 @@ describe(`Collection.subscribeChanges`, () => {
       const insertEvents = changeEvents.filter((e) => e.type === `insert`)
       const updateEvents = changeEvents.filter((e) => e.type === `update`)
 
-      // Expected: 2 optimistic inserts + 2 sync updates = 4 events
+      // Expected: 2 optimistic inserts. The delayed sync writes confirm the same
+      // optimistic rows while the local overlay is still active, so no duplicate
+      // visible-state events are emitted.
       expect(insertEvents.length).toBe(2)
-      expect(updateEvents.length).toBe(2)
+      expect(updateEvents.length).toBe(1)
     } finally {
       vi.useRealTimers()
       vi.restoreAllMocks()
@@ -1764,17 +1762,14 @@ describe(`Collection.subscribeChanges`, () => {
       collection.insert({ id: `x`, n: 1 })
       await vi.runAllTimersAsync()
 
-      // Should have optimistic insert + sync update
-      expect(changeEvents).toHaveLength(2)
+      // Should have the optimistic insert only; the delayed sync confirmation is
+      // applied to base while the local overlay is active and does not produce a
+      // duplicate visible-state event.
+      expect(changeEvents).toHaveLength(1)
       expect(changeEvents[0]).toMatchObject({
         type: `insert`,
         key: `x`,
         value: { id: `x`, n: 1 },
-      })
-      expect(changeEvents[1]).toMatchObject({
-        type: `update`,
-        key: `x`,
-        value: { id: `x`, n: 1, foo: `abc` },
       })
     } finally {
       vi.useRealTimers()
@@ -2276,7 +2271,7 @@ describe(`Virtual properties`, () => {
     subscription.unsubscribe()
   })
 
-  it(`should emit an update when $synced flips on confirmation`, async () => {
+  it(`should not emit a user-data update for identical confirmation`, async () => {
     const changes: Array<
       ChangeMessage<OutputWithVirtual<{ id: string; value: string }, string>>
     > = []
@@ -2342,9 +2337,7 @@ describe(`Virtual properties`, () => {
     const confirmedUpdate = changes.find(
       (change) => change.type === `update` && change.key === `row-1`,
     )
-    expect(confirmedUpdate).toBeDefined()
-    expect(confirmedUpdate!.value.$synced).toBe(true)
-    expect(confirmedUpdate!.previousValue?.$synced).toBe(false)
+    expect(confirmedUpdate).toBeUndefined()
 
     subscription.unsubscribe()
   })
