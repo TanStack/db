@@ -1780,7 +1780,8 @@ describe(`Collection.subscribeChanges`, () => {
   })
 
   it(`emits visible-state changes for unrelated sync while a mutation is persisting`, async () => {
-    const syncListeners: Array<(value: { id: number; value: string }) => void> = []
+    const syncListeners: Array<(value: { id: number; value: string }) => void> =
+      []
 
     const collection = createCollection<{ id: number; value: string }>({
       id: `subscribe-sync-while-persisting`,
@@ -1797,7 +1798,9 @@ describe(`Collection.subscribeChanges`, () => {
       },
     })
 
-    const received: Array<ChangeMessage<WithVirtualProps<{ id: number; value: string }>>> = []
+    const received: Array<
+      ChangeMessage<WithVirtualProps<{ id: number; value: string }>>
+    > = []
     collection.subscribeChanges((changes) => {
       received.push(...changes)
     })
@@ -1816,7 +1819,9 @@ describe(`Collection.subscribeChanges`, () => {
 
     tx.mutate(() => collection.insert({ id: 1, value: `optimistic` }))
 
-    expect(received.map((event) => ({ type: event.type, key: event.key }))).toEqual([
+    expect(
+      received.map((event) => ({ type: event.type, key: event.key })),
+    ).toEqual([
       { type: `insert`, key: 1 },
       { type: `insert`, key: 2 },
     ])
