@@ -4,6 +4,7 @@ import { createCollection } from '../src/collection/index.js'
 import {
   CollectionRequiresConfigError,
   DuplicateKeyError,
+  DuplicateKeySyncError,
   InvalidKeyError,
   KeyUpdateNotAllowedError,
   MissingDeleteHandlerError,
@@ -18,7 +19,12 @@ import {
   stripVirtualProps,
   withExpectedRejection,
 } from './utils'
-import type { ChangeMessage, MutationFn, PendingMutation } from '../src/types'
+import type {
+  ChangeMessage,
+  MutationFn,
+  PendingMutation,
+  SyncConfig,
+} from '../src/types'
 
 const getStateValue = <T extends object, TKey extends string | number>(
   collection: { state: Map<TKey, T> },
@@ -40,6 +46,35 @@ describe(`Collection`, () => {
   it(`should throw if there's no sync config`, () => {
     // @ts-expect-error we're testing for throwing when there's no config passed in
     expect(() => createCollection()).toThrow(CollectionRequiresConfigError)
+  })
+
+  it(`throws DuplicateKeySyncError instead of TypeError when config has no utils`, async () => {
+    let begin!: () => void
+    let write!: Parameters<
+      SyncConfig<{ id: number; text: string }, number>[`sync`]
+    >[0][`write`]
+
+    const collection = createCollection<{ id: number; text: string }, number>({
+      id: `duplicate-key-no-utils-test`,
+      getKey: (item) => item.id,
+      sync: {
+        sync: (params) => {
+          begin = params.begin
+          write = params.write
+          params.begin()
+          params.write({ type: `insert`, value: { id: 1, text: `one` } })
+          params.commit()
+          params.markReady()
+        },
+      },
+    })
+
+    await collection.stateWhenReady()
+
+    begin()
+    expect(() =>
+      write({ type: `insert`, value: { id: 1, text: `changed` } }),
+    ).toThrow(DuplicateKeySyncError)
   })
 
   it(`does not infer confirmation when a remote insert has matching non-key fields`, async () => {

@@ -99,6 +99,7 @@ title: "@tanstack/db"
 - [UnknownExpressionTypeError](classes/UnknownExpressionTypeError.md)
 - [UnknownFunctionError](classes/UnknownFunctionError.md)
 - [UnknownHavingExpressionTypeError](classes/UnknownHavingExpressionTypeError.md)
+- [UnsafeAliasPathError](classes/UnsafeAliasPathError.md)
 - [UnsupportedAggregateFunctionError](classes/UnsupportedAggregateFunctionError.md)
 - [UnsupportedFromTypeError](classes/UnsupportedFromTypeError.md)
 - [UnsupportedJoinSourceTypeError](classes/UnsupportedJoinSourceTypeError.md)

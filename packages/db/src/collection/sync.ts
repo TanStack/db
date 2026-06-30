@@ -149,9 +149,10 @@ export class CollectionSyncManager<
                   // throwing a duplicate-key error during reconciliation.
                   messageType = `update`
                 } else {
-                  const utils = this.config
-                    .utils as Partial<LiveQueryCollectionUtils>
-                  const internal = utils[LIVE_QUERY_INTERNAL]
+                  const utils = this.config.utils as
+                    | Partial<LiveQueryCollectionUtils>
+                    | undefined
+                  const internal = utils?.[LIVE_QUERY_INTERNAL]
                   throw new DuplicateKeySyncError(key, this.id, {
                     hasCustomGetKey: internal?.hasCustomGetKey ?? false,
                     hasJoins: internal?.hasJoins ?? false,
