@@ -244,6 +244,7 @@ const stripVirtualProps = <T extends Record<string, any> | undefined>(
   if (!value || typeof value !== `object`) return value
   const {
     $synced: _synced,
+    $acknowledged: _acknowledged,
     $origin: _origin,
     $key: _key,
     $collectionId: _collectionId,
