@@ -1781,6 +1781,52 @@ describe(`Collection.subscribeChanges`, () => {
     }
   })
 
+  it(`emits visible-state changes for unrelated sync while a mutation is persisting`, async () => {
+    const syncListeners: Array<(value: { id: number; value: string }) => void> = []
+
+    const collection = createCollection<{ id: number; value: string }>({
+      id: `subscribe-sync-while-persisting`,
+      getKey: (item) => item.id,
+      startSync: true,
+      sync: {
+        sync: ({ begin, write, commit }) => {
+          syncListeners.push((value) => {
+            begin()
+            write({ type: `insert`, value })
+            commit()
+          })
+        },
+      },
+    })
+
+    const received: Array<ChangeMessage<{ id: number; value: string }, number>> = []
+    collection.subscribeChanges((changes) => {
+      received.push(...changes)
+    })
+
+    let resolveMutation!: () => void
+    const mutationSettled = new Promise<void>((resolve) => {
+      resolveMutation = resolve
+    })
+
+    const tx = createTransaction<{ id: number; value: string }>({
+      mutationFn: async () => {
+        syncListeners[0]!({ id: 2, value: `synced` })
+        await mutationSettled
+      },
+    })
+
+    tx.mutate(() => collection.insert({ id: 1, value: `optimistic` }))
+
+    expect(received.map((event) => ({ type: event.type, key: event.key }))).toEqual([
+      { type: `insert`, key: 1 },
+      { type: `insert`, key: 2 },
+    ])
+
+    resolveMutation()
+    await tx.isPersisted.promise
+  })
+
   it(`should emit change events for multiple sync transactions before marking ready`, () => {
     const changeEvents: Array<any> = []
     let testSyncFunctions: any = null
