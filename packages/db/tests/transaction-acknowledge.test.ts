@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { createCollection } from '../src/collection/index.js'
-import type { ChangeMessage } from '../src/types'
+import type { ChangeMessage, SyncConfig } from '../src/types'
 import type { OutputWithVirtual } from './utils'
 
 const waitForChanges = () => new Promise((resolve) => setTimeout(resolve, 10))
@@ -192,5 +192,137 @@ describe(`Transaction.acknowledge() — the ack layer`, () => {
     // No-op after completion, returns the transaction for chaining.
     expect(tx.acknowledge()).toBe(tx)
     expect(tx.acknowledged).toBe(true)
+  })
+
+  // The emission contract: a single state transition that flips both
+  // $acknowledged and $synced is delivered as ONE update event carrying both;
+  // two flips at two different times produce two events.
+  it(`emits a single combined update when ack and settle coincide (pending -> synced)`, async () => {
+    const changes: Array<Change> = []
+    const settleGate = createGate()
+    let syncOps: Parameters<SyncConfig<Row, string>[`sync`]>[0] | undefined
+
+    const collection = createCollection<Row, string>({
+      id: `ack-emit-coincide`,
+      getKey: (item) => item.id,
+      sync: {
+        sync: (cfg) => {
+          syncOps = cfg
+          cfg.markReady()
+        },
+      },
+      onInsert: async ({ transaction }) => {
+        // No acknowledge(): the ack coincides with settle. When released, echo
+        // the write back through sync so the overlay drops and $synced flips.
+        await settleGate.promise
+        syncOps!.begin()
+        for (const mutation of transaction.mutations) {
+          syncOps!.write({ type: `insert`, value: mutation.modified })
+        }
+        syncOps!.commit()
+      },
+    })
+
+    const subscription = collection.subscribeChanges(
+      (events) => changes.push(...events),
+      { includeInitialState: false },
+    )
+
+    const tx = collection.insert({ id: `r1`, value: `v` })
+    await waitForChanges()
+
+    // Optimistic insert: neither acknowledged nor synced.
+    expect(changes.length).toBe(1)
+    expect(changes[0]!.type).toBe(`insert`)
+    expect(changes[0]!.value.$acknowledged).toBe(false)
+    expect(changes[0]!.value.$synced).toBe(false)
+
+    // Settle: $acknowledged and $synced flip together in ONE update — not two.
+    settleGate.release()
+    await tx.isPersisted.promise
+    await waitForChanges()
+
+    const updates = changes.filter((c) => c.type === `update`)
+    expect(updates.length).toBe(1)
+    expect(updates[0]!.value.$acknowledged).toBe(true)
+    expect(updates[0]!.value.$synced).toBe(true)
+    expect(changes.length).toBe(2)
+    // previousValue is coherent with what was actually emitted before: the row
+    // was never acknowledged separately, so its previous $acknowledged is false.
+    expect(updates[0]!.previousValue?.$acknowledged).toBe(false)
+    expect(updates[0]!.previousValue?.$synced).toBe(false)
+
+    subscription.unsubscribe()
+  })
+
+  it(`emits two distinct updates when ack precedes settle (pending -> acked -> synced)`, async () => {
+    const changes: Array<Change> = []
+    const ackGate = createGate()
+    const settleGate = createGate()
+    let syncOps: Parameters<SyncConfig<Row, string>[`sync`]>[0] | undefined
+
+    const collection = createCollection<Row, string>({
+      id: `ack-emit-separate`,
+      getKey: (item) => item.id,
+      sync: {
+        sync: (cfg) => {
+          syncOps = cfg
+          cfg.markReady()
+        },
+      },
+      onInsert: async ({ transaction }) => {
+        await ackGate.promise
+        transaction.acknowledge()
+        await settleGate.promise
+        syncOps!.begin()
+        for (const mutation of transaction.mutations) {
+          syncOps!.write({ type: `insert`, value: mutation.modified })
+        }
+        syncOps!.commit()
+      },
+    })
+
+    const subscription = collection.subscribeChanges(
+      (events) => changes.push(...events),
+      { includeInitialState: false },
+    )
+
+    const tx = collection.insert({ id: `r1`, value: `v` })
+    await waitForChanges()
+
+    // 1) Optimistic insert.
+    expect(changes.length).toBe(1)
+    expect(changes[0]!.type).toBe(`insert`)
+    expect(changes[0]!.value.$acknowledged).toBe(false)
+    expect(changes[0]!.value.$synced).toBe(false)
+
+    // 2) Ack: a virtual-prop-only update — $acknowledged flips, $synced does not.
+    ackGate.release()
+    await tx.isAcknowledged.promise
+    await waitForChanges()
+
+    expect(changes.length).toBe(2)
+    const ackUpdate = changes[1]!
+    expect(ackUpdate.type).toBe(`update`)
+    expect(ackUpdate.value.$acknowledged).toBe(true)
+    expect(ackUpdate.value.$synced).toBe(false)
+    expect(ackUpdate.previousValue?.$acknowledged).toBe(false)
+
+    // 3) Settle: a second, separate update — now $synced flips too.
+    settleGate.release()
+    await tx.isPersisted.promise
+    await waitForChanges()
+
+    expect(changes.length).toBe(3)
+    const settleUpdate = changes[2]!
+    expect(settleUpdate.type).toBe(`update`)
+    expect(settleUpdate.value.$acknowledged).toBe(true)
+    expect(settleUpdate.value.$synced).toBe(true)
+    // The row was acknowledged before it settled, so previousValue reflects
+    // that: $acknowledged was already true, only $synced flips here.
+    expect(settleUpdate.previousValue?.$acknowledged).toBe(true)
+    expect(settleUpdate.previousValue?.$synced).toBe(false)
+
+    subscription.unsubscribe()
   })
 })
