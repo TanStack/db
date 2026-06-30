@@ -899,6 +899,8 @@ git commit -m "test: verify stable changes during sync reconciliation"
 
 ### Task 7: Update stale tests/comments that encode delayed sync semantics
 
+User-requested addition: explicitly survey the existing test structure for stale old-behavior assumptions before editing. Prefer tweaking existing tests that already cover the scenario over adding redundant new coverage. Look especially for tests/comments/names around delayed sync while transactions are pending/persisting, including `collection.test.ts`, `collection-subscribe-changes.test.ts`, live-query collection tests, and related helpers. Update stale expectations only when they conflict with the new Mutation Log reconciliation behavior; preserve unrelated coverage.
+
 **Files:**
 - Modify: `packages/db/tests/collection.test.ts`
 - Modify: `packages/db/tests/collection-subscribe-changes.test.ts`

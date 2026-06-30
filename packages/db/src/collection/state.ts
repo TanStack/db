@@ -1254,10 +1254,10 @@ export class CollectionStateManager<
               currentVisibleState.set(key, previousValue)
             }
           }
-          this.pendingOptimisticUpserts.delete(key)
-          this.optimisticUpserts.delete(key)
-          this.pendingLocalOrigins.delete(key)
         }
+        this.pendingOptimisticUpserts.delete(key)
+        this.optimisticUpserts.delete(key)
+        this.pendingLocalOrigins.delete(key)
       }
       for (const key of this.pendingOptimisticDirectDeletes) {
         if (!changedKeys.has(key)) {
