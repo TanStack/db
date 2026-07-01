@@ -80,13 +80,9 @@ export const ascComparator = (a: any, b: any, opts: CompareOptions): number => {
     return a.getTime() - b.getTime()
   }
 
-  // If both are Temporal objects of the same type, compare by string representation
+  // If both are Temporal objects, use compareTemporalValues for correct semantic ordering
   if (isTemporal(a) && isTemporal(b)) {
-    const aStr = a.toString()
-    const bStr = b.toString()
-    if (aStr < bStr) return -1
-    if (aStr > bStr) return 1
-    return 0
+    return compareTemporalValues(a, b)
   }
 
   // If at least one of the values is an object, use stable IDs for comparison
