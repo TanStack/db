@@ -2290,9 +2290,21 @@ function createWrappedSyncConfig<
             message.type === `insert` &&
             normalization.operation.metadata === undefined
           ) {
-            openTransaction.rowMetadataWrites.set(normalization.operation.key, {
-              type: `delete`,
-            })
+            // Reset stale metadata for a fresh insert, but don't clobber an
+            // explicit metadata write already queued for this key in the same
+            // transaction (e.g. query reconcile stamps owners, then inserts).
+            if (
+              !openTransaction.rowMetadataWrites.has(
+                normalization.operation.key,
+              )
+            ) {
+              openTransaction.rowMetadataWrites.set(
+                normalization.operation.key,
+                {
+                  type: `delete`,
+                },
+              )
+            }
           } else if (normalization.operation.metadata !== undefined) {
             openTransaction.rowMetadataWrites.set(normalization.operation.key, {
               type: `set`,

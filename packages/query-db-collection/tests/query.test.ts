@@ -4960,6 +4960,113 @@ describe(`QueryCollection`, () => {
       ).toBe(false)
     })
 
+    it(`should clean up an inserted row dropped by the query after a reload`, async () => {
+      // A row inserted while the collection is mounted is persisted. After the
+      // app reloads, if the query no longer returns that row, it must be removed
+      // from both the live collection and the persisted store.
+      const queryKey = [`reload-insert-cleanup`]
+      const makeQueryClient = () =>
+        new QueryClient({
+          defaultOptions: {
+            queries: { staleTime: 0, gcTime: 5 * 60 * 1000, retry: false },
+          },
+        })
+
+      // The shared on-device store, surviving across the two sessions.
+      const adapter = createPersistedQueryAdapter<CategorisedItem>({})
+
+      // ---- First session: insert an item that the server then returns ----
+      let serverRows: Array<CategorisedItem> = []
+      const firstQueryClient = makeQueryClient()
+      const collection1 = createCollection(
+        persistedCollectionOptions({
+          ...(queryCollectionOptions<CategorisedItem>({
+            id: `reload-insert-cleanup`,
+            queryClient: firstQueryClient,
+            queryKey,
+            queryFn: async () => serverRows,
+            getKey: (item: CategorisedItem): string => item.id,
+            syncMode: `eager`,
+            startSync: true,
+            onInsert: async ({ transaction }) => {
+              // The mutation reaches the server: the item now appears in the
+              // API response for subsequent fetches.
+              for (const mutation of transaction.mutations) {
+                serverRows = [...serverRows, mutation.modified]
+              }
+            },
+          }) as any),
+          persistence: { adapter },
+        }) as any,
+      )
+
+      await collection1.stateWhenReady()
+      await flushPromises()
+
+      await collection1.insert({ id: `1`, name: `Buy milk`, category: `A` })
+      // The query refetches and sees the now-synced row.
+      await firstQueryClient.invalidateQueries({ queryKey })
+      await flushPromises()
+      await flushPromises()
+
+      expect(adapter.rows.has(`1`)).toBe(true)
+
+      // ---- App closes; the row is removed on the server out of band ----
+      serverRows = []
+
+      // ---- Second session: reload from the persisted store ----
+      const secondQueryClient = makeQueryClient()
+      const adapter2 = createPersistedQueryAdapter<CategorisedItem>({
+        rows: adapter.rows,
+        rowMetadata: adapter.rowMetadata,
+        collectionMetadata: adapter.collectionMetadata,
+      })
+      let releaseSecondFetch!: () => void
+      const secondFetchReleased = new Promise<void>((resolve) => {
+        releaseSecondFetch = resolve
+      })
+      const collection2 = createCollection(
+        persistedCollectionOptions({
+          ...(queryCollectionOptions<CategorisedItem>({
+            id: `reload-insert-cleanup`,
+            queryClient: secondQueryClient,
+            queryKey,
+            queryFn: async () => {
+              await secondFetchReleased
+              return serverRows
+            },
+            getKey: (item: CategorisedItem): string => item.id,
+            syncMode: `eager`,
+            startSync: true,
+          }) as any),
+          persistence: { adapter: adapter2 },
+        }) as any,
+      )
+
+      await vi.waitFor(() => {
+        expect(collection2.has(`1`)).toBe(true)
+        expect(adapter2.rows.has(`1`)).toBe(true)
+      })
+
+      const liveQuery = createLiveQueryCollection({
+        query: (q) => q.from({ item: collection2 }),
+      })
+      releaseSecondFetch()
+      await liveQuery.preload()
+      // The query responds on launch (after persisted rows have hydrated).
+      await flushPromises()
+      await flushPromises()
+
+      await vi.waitFor(() => {
+        expect(collection2.has(`1`)).toBe(false)
+        expect(adapter2.rows.has(`1`)).toBe(false)
+        expect(liveQuery.size).toBe(0)
+      })
+
+      firstQueryClient.clear()
+      secondQueryClient.clear()
+    })
+
     it(`should expire retained ttl placeholders while the app stays open`, async () => {
       vi.useFakeTimers()
       try {
