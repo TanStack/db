@@ -253,9 +253,9 @@ const temporalCompareByTag = new Map<
  *
  * Callers must ensure both arguments are Temporal objects; mixed types throw.
  */
-export function compareTemporalValues(a: any, b: any): number {
-  const aTag = a[Symbol.toStringTag] as string
-  const bTag = b[Symbol.toStringTag] as string
+export function compareTemporalValues(a: unknown, b: unknown): number {
+  const aTag = (a as Record<symbol, unknown>)[Symbol.toStringTag] as string
+  const bTag = (b as Record<symbol, unknown>)[Symbol.toStringTag] as string
   if (aTag !== bTag) {
     throw new TypeError(
       `Cannot order Temporal values of different types: ${aTag} vs ${bTag}`,
@@ -263,7 +263,7 @@ export function compareTemporalValues(a: any, b: any): number {
   }
   let compare = temporalCompareByTag.get(aTag)
   if (compare === undefined) {
-    const fn = (a.constructor as { compare?: (x: unknown, y: unknown) => number })
+    const fn = ((a as { constructor: unknown }).constructor as { compare?: (x: unknown, y: unknown) => number })
       .compare
     compare = typeof fn === `function` ? fn : null
     temporalCompareByTag.set(aTag, compare)
@@ -285,11 +285,11 @@ export function compareTemporalValues(a: any, b: any): number {
  * Callers must handle null/undefined themselves — this helper assumes both
  * arguments are non-null.
  */
-export function compareValues(a: any, b: any): number {
+export function compareValues(a: unknown, b: unknown): number {
   if (isTemporal(a) && isTemporal(b)) {
     return compareTemporalValues(a, b)
   }
-  return a < b ? -1 : a > b ? 1 : 0
+  return (a as any) < (b as any) ? -1 : (a as any) > (b as any) ? 1 : 0
 }
 
 /**
