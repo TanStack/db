@@ -1,5 +1,9 @@
 import { describe, expect, it } from 'vitest'
-import { ascComparator, defaultComparator } from '../src/utils/comparison'
+import {
+  ascComparator,
+  compareValues,
+  defaultComparator,
+} from '../src/utils/comparison'
 import { DEFAULT_COMPARE_OPTIONS } from '../src/utils'
 
 describe(`ascComparator - PostgreSQL float semantics for NaN`, () => {
@@ -37,5 +41,18 @@ describe(`ascComparator - PostgreSQL float semantics for NaN`, () => {
 
     expect(ascComparator(invalid, valid, opts)).toBeGreaterThan(0)
     expect(ascComparator(valid, invalid, opts)).toBeLessThan(0)
+  })
+})
+
+describe(`compareValues - NaN behavior`, () => {
+  // NaN satisfies neither < nor >, so the fallback returns 0. In practice
+  // gt/gte/lt/lte catch NaN via isUnorderable before reaching compareValues.
+  it(`treats NaN as equal to NaN`, () => {
+    expect(compareValues(NaN, NaN)).toBe(0)
+  })
+
+  it(`returns 0 for NaN vs a finite number — neither < nor > holds for NaN`, () => {
+    expect(compareValues(NaN, 5)).toBe(0)
+    expect(compareValues(5, NaN)).toBe(0)
   })
 })
