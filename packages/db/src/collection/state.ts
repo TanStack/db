@@ -898,12 +898,16 @@ export class CollectionStateManager<
 
       const previousVisibleState = this.captureVisibleStateForKeys(changedKeys)
 
-      // Use pre-captured state if available (from optimistic scenarios),
-      // otherwise use the visible state captured before applying sync operations.
-      const currentVisibleState =
-        this.preSyncVisibleState.size > 0
-          ? this.preSyncVisibleState
-          : previousVisibleState
+      // Use the visible state captured before applying sync operations for all
+      // changed keys, then overlay any pre-captured optimistic states. The
+      // pre-captured map only contains operation keys, while changedKeys can
+      // also include metadata-only writes.
+      const currentVisibleState = new Map(previousVisibleState)
+      for (const [key, value] of this.preSyncVisibleState) {
+        if (changedKeys.has(key)) {
+          currentVisibleState.set(key, value)
+        }
+      }
 
       const events: Array<ChangeMessage<TOutput, TKey>> = []
       const rowUpdateMode = this.config.sync.rowUpdateMode || `partial`
@@ -1163,44 +1167,42 @@ export class CollectionStateManager<
 
       // Always overlay any still-active optimistic transactions so mutations that started
       // after the truncate snapshot are preserved.
-      for (const transaction of this.transactions.values()) {
-        if (![`completed`, `failed`].includes(transaction.state)) {
-          const isDirectTransaction =
-            transaction.metadata[DIRECT_TRANSACTION_METADATA_KEY] === true
-          for (const mutation of transaction.mutations) {
-            if (
-              this.isThisCollection(mutation.collection) &&
-              mutation.optimistic
-            ) {
-              const mutationKey = mutation.key as TKey
-              const directMutationConfirmed =
-                isDirectTransaction &&
-                changedKeys.has(mutationKey) &&
-                (mutation.type === `delete`
-                  ? !this.syncedData.has(mutationKey)
-                  : deepEquals(
-                      this.syncedData.get(mutationKey),
-                      mutation.modified as TOutput,
-                    ))
-
-              if (directMutationConfirmed) {
-                continue
-              }
-
-              switch (mutation.type) {
-                case `insert`:
-                case `update`:
-                  this.optimisticUpserts.set(
-                    mutation.key as TKey,
+      for (const transaction of this.collectActiveTransactions()) {
+        const isDirectTransaction =
+          transaction.metadata[DIRECT_TRANSACTION_METADATA_KEY] === true
+        for (const mutation of transaction.mutations) {
+          if (
+            this.isThisCollection(mutation.collection) &&
+            mutation.optimistic
+          ) {
+            const mutationKey = mutation.key as TKey
+            const directMutationConfirmed =
+              isDirectTransaction &&
+              changedKeys.has(mutationKey) &&
+              (mutation.type === `delete`
+                ? !this.syncedData.has(mutationKey)
+                : deepEquals(
+                    this.syncedData.get(mutationKey),
                     mutation.modified as TOutput,
-                  )
-                  this.optimisticDeletes.delete(mutation.key as TKey)
-                  break
-                case `delete`:
-                  this.optimisticUpserts.delete(mutation.key as TKey)
-                  this.optimisticDeletes.add(mutation.key as TKey)
-                  break
-              }
+                  ))
+
+            if (directMutationConfirmed) {
+              continue
+            }
+
+            switch (mutation.type) {
+              case `insert`:
+              case `update`:
+                this.optimisticUpserts.set(
+                  mutation.key as TKey,
+                  mutation.modified as TOutput,
+                )
+                this.optimisticDeletes.delete(mutation.key as TKey)
+                break
+              case `delete`:
+                this.optimisticUpserts.delete(mutation.key as TKey)
+                this.optimisticDeletes.add(mutation.key as TKey)
+                break
             }
           }
         }

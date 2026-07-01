@@ -44,3 +44,6 @@ examples/react-native/shopping-list/ios/
 vite.config.js.timestamp-*
 vite.config.ts.timestamp-*
 tsconfig.vitest-temp.json
+
+# Agent workflow scratch files
+.superpowers/sdd/

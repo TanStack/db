@@ -382,6 +382,83 @@ describe(`Collection.subscribeChanges`, () => {
     subscription.unsubscribe()
   })
 
+  it(`does not emit metadata-only rows as inserts in mixed sync commits`, async () => {
+    const callback = vi.fn()
+    type TestSyncParams = Parameters<
+      SyncConfig<{ id: number; value: string }, number>[`sync`]
+    >[0]
+    let begin!: TestSyncParams[`begin`]
+    let write!: TestSyncParams[`write`]
+    let commit!: TestSyncParams[`commit`]
+    let setRowMetadata!: NonNullable<
+      TestSyncParams[`metadata`]
+    >[`row`][`set`]
+
+    const collection = createCollection<{ id: number; value: string }, number>({
+      id: `mixed-operation-metadata-diff-test`,
+      getKey: (item) => item.id,
+      sync: {
+        sync: (params) => {
+          begin = params.begin
+          write = params.write
+          commit = params.commit
+          setRowMetadata = params.metadata!.row.set
+
+          begin()
+          write({ type: `insert`, value: { id: 1, value: `synced value` } })
+          commit()
+          params.markReady()
+        },
+      },
+    })
+
+    await collection.stateWhenReady()
+
+    const mutationFn: MutationFn = async ({ transaction }) => {
+      begin()
+      for (const mutation of transaction.mutations) {
+        write({
+          type: mutation.type,
+          key: mutation.key as number,
+          value: mutation.modified as { id: number; value: string },
+        })
+      }
+      setRowMetadata(1, { seen: true })
+    }
+
+    const subscription = collection.subscribeChanges(callback)
+    callback.mockReset()
+
+    const tx = createTransaction({ mutationFn })
+    tx.mutate(() => collection.insert({ id: 2, value: `optimistic value` }))
+
+    expect(normalizeChanges(callback.mock.calls[0]![0])).toEqual([
+      {
+        type: `insert`,
+        key: 2,
+        value: { id: 2, value: `optimistic value` },
+      },
+    ])
+    callback.mockReset()
+
+    await tx.isPersisted.promise
+    callback.mockReset()
+
+    commit()
+    await waitForChanges()
+
+    const emittedChanges = callback.mock.calls.flatMap((call) =>
+      normalizeChanges(call[0]),
+    )
+    expect(emittedChanges).not.toContainEqual({
+      type: `insert`,
+      key: 1,
+      value: { id: 1, value: `synced value` },
+    })
+
+    subscription.unsubscribe()
+  })
+
   it(`should handle both synced and optimistic changes together`, async () => {
     const emitter = mitt()
     const callback = vi.fn()
