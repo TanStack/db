@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest'
+import { Temporal } from 'temporal-polyfill'
 import {
   ascComparator,
   compareValues,
@@ -41,6 +42,26 @@ describe(`ascComparator - PostgreSQL float semantics for NaN`, () => {
 
     expect(ascComparator(invalid, valid, opts)).toBeGreaterThan(0)
     expect(ascComparator(valid, invalid, opts)).toBeLessThan(0)
+  })
+})
+
+describe(`ascComparator - Temporal values`, () => {
+  const opts = DEFAULT_COMPARE_OPTIONS
+
+  it(`orders PlainDate values by calendar date`, () => {
+    const earlier = new Temporal.PlainDate(2024, 1, 1)
+    const later = new Temporal.PlainDate(2024, 6, 1)
+    expect(ascComparator(earlier, later, opts)).toBeLessThan(0)
+    expect(ascComparator(later, earlier, opts)).toBeGreaterThan(0)
+    expect(ascComparator(earlier, new Temporal.PlainDate(2024, 1, 1), opts)).toBe(0)
+  })
+
+  it(`treats ZonedDateTime values at the same instant as equal regardless of zone`, () => {
+    // 2024-01-15T06:30Z and 2024-01-15T12:00+05:30 are the same instant;
+    // lexicographic toString comparison would order them differently.
+    const utc = Temporal.ZonedDateTime.from(`2024-01-15T06:30:00+00:00[+00:00]`)
+    const ist = Temporal.ZonedDateTime.from(`2024-01-15T12:00:00+05:30[+05:30]`)
+    expect(ascComparator(utc, ist, opts)).toBe(0)
   })
 })
 
