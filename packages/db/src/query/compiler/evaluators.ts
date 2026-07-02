@@ -244,8 +244,22 @@ function compileFunction(func: Func, isSingleRow: boolean): (data: any) => any {
       const argA = compiledArgs[0]!
       const argB = compiledArgs[1]!
       return (data) => {
-        const a = normalizeValue(argA(data))
-        const b = normalizeValue(argB(data))
+        const rawA = argA(data)
+        const rawB = argB(data)
+        // Fast paths for same-type primitives, which need no normalization
+        const typeA = typeof rawA
+        if (typeA === typeof rawB) {
+          if (typeA === `string` || typeA === `boolean` || typeA === `bigint`) {
+            return rawA === rawB
+          }
+          if (typeA === `number`) {
+            return (
+              rawA === rawB || (Number.isNaN(rawA) && Number.isNaN(rawB))
+            )
+          }
+        }
+        const a = normalizeValue(rawA)
+        const b = normalizeValue(rawB)
         // In 3-valued logic, any comparison with null/undefined returns UNKNOWN
         if (isUnknown(a) || isUnknown(b)) {
           return null
@@ -392,6 +406,35 @@ function compileFunction(func: Func, isSingleRow: boolean): (data: any) => any {
     case `in`: {
       const valueEvaluator = compiledArgs[0]!
       const arrayEvaluator = compiledArgs[1]!
+
+      // Fast path: a constant array of simple primitives can be probed with a
+      // Set instead of a linear scan with deep equality per element.
+      const arrayArg = func.args[1]
+      if (arrayArg?.type === `val` && Array.isArray(arrayArg.value)) {
+        const values = arrayArg.value
+        const allSimple = values.every((item: any) => {
+          const t = typeof item
+          return (
+            (t === `string` ||
+              t === `boolean` ||
+              t === `bigint` ||
+              (t === `number` && !Number.isNaN(item))) &&
+            item !== null
+          )
+        })
+        if (allSimple) {
+          const set = new Set(values)
+          return (data) => {
+            const value = normalizeValue(valueEvaluator(data))
+            // In 3-valued logic, if the value is null/undefined, return UNKNOWN
+            if (isUnknown(value)) {
+              return null
+            }
+            return set.has(value)
+          }
+        }
+      }
+
       return (data) => {
         const value = normalizeValue(valueEvaluator(data))
         const array = arrayEvaluator(data)

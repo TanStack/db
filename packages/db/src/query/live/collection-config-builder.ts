@@ -1258,7 +1258,8 @@ function materializeIncludedValue(
     return entry.collection
   }
 
-  const rows = [...entry.collection.toArray]
+  // `toArray` already returns a fresh array, no defensive copy needed
+  const rows = entry.collection.toArray
   const values = state.scalarField
     ? rows.map((row) => row?.[state.scalarField!])
     : rows
@@ -1804,49 +1805,165 @@ function computeRoutingKey(
   return JSON.stringify([correlationKey, parentContext])
 }
 
+const EMPTY_CHANGE_SUBSCRIPTIONS = new Set<never>()
+
+/**
+ * Minimal in-memory store standing in for a full Collection in includes
+ * entries with inline materializations (`array` / `singleton` / `concat`).
+ * These child stores are never exposed to users (only their materialized
+ * arrays/values are), so the full Collection machinery — state manager,
+ * transactions, change events, lifecycle — is pure overhead. This class
+ * implements exactly the surface the includes flush machinery touches.
+ */
+class LightweightChildCollection {
+  readonly id: string
+  #data = new Map<unknown, any>()
+  #resultKeys: WeakMap<object, unknown>
+  #compare: ((a: any, b: any) => number) | null
+  #sorted: Array<any> | null = null
+
+  // Facade so flushIncludesState's subscriber check and event emission are
+  // no-ops for lightweight stores (they can have no subscribers).
+  readonly _changes = {
+    changeSubscriptions: EMPTY_CHANGE_SUBSCRIPTIONS,
+    emitEvents(): void {},
+  }
+
+  constructor(
+    id: string,
+    resultKeys: WeakMap<object, unknown>,
+    compare: ((a: any, b: any) => number) | null,
+  ) {
+    this.id = id
+    this.#resultKeys = resultKeys
+    this.#compare = compare
+  }
+
+  getKeyFromItem(item: any): unknown {
+    return this.#resultKeys.get(item)
+  }
+
+  has(key: unknown): boolean {
+    return this.#data.has(key)
+  }
+
+  get(key: unknown): any {
+    return this.#data.get(key)
+  }
+
+  get size(): number {
+    return this.#data.size
+  }
+
+  write(value: any, type: `insert` | `update` | `delete`): void {
+    const key = this.#resultKeys.get(value)
+    if (type === `delete`) {
+      this.#data.delete(key)
+    } else {
+      // Add-if-missing virtual props, in place. Rows written here are
+      // exclusively owned per-row pipeline outputs, so mutation is safe and
+      // matches what a full child Collection exposes on read.
+      if (value !== null && typeof value === `object`) {
+        if (value.$key === undefined) value.$key = key
+        if (value.$synced === undefined) value.$synced = true
+        if (value.$origin === undefined) value.$origin = `remote`
+        if (value.$collectionId === undefined) value.$collectionId = this.id
+      }
+      this.#data.set(key, value)
+    }
+    this.#sorted = null
+  }
+
+  get toArray(): Array<any> {
+    if (this.#sorted) {
+      return this.#sorted
+    }
+    const rows = [...this.#data.values()]
+    if (this.#compare) {
+      rows.sort(this.#compare)
+    }
+    this.#sorted = rows
+    return rows
+  }
+
+  cleanup(): Promise<void> {
+    this.#data.clear()
+    this.#sorted = null
+    return Promise.resolve()
+  }
+}
+
 /**
  * Creates a child Collection entry for includes subqueries.
- * The child Collection is a full-fledged Collection instance that starts syncing immediately.
+ * Inline materializations (`array` / `singleton` / `concat`) get a
+ * LightweightChildCollection; only the `collection` materialization — which
+ * hands the Collection instance itself to the user — pays for a full
+ * Collection instance that starts syncing immediately.
  */
 function createChildCollectionEntry(
   parentId: string,
   fieldName: string,
   correlationKey: unknown,
   hasOrderBy: boolean,
+  materialization: IncludesMaterialization,
   nestedSetups?: Array<NestedIncludesSetup>,
 ): ChildCollectionEntry {
   const resultKeys = new WeakMap<object, unknown>()
   const orderByIndices = hasOrderBy ? new WeakMap<object, string>() : null
-  let syncMethods: SyncMethods<any> | null = null
 
   const compare = orderByIndices
     ? createOrderByComparator(orderByIndices)
     : undefined
 
-  const collection = createCollection<any, string | number>({
-    id: `__child-collection:${parentId}-${fieldName}-${serializeValue(correlationKey)}`,
-    getKey: (item: any) => resultKeys.get(item) as string | number,
-    compare,
-    sync: {
-      rowUpdateMode: `full`,
-      sync: (methods) => {
-        syncMethods = methods
-        return () => {
-          syncMethods = null
-        }
-      },
-    },
-    startSync: true,
-    gcTime: 0,
-  })
+  let entry: ChildCollectionEntry
 
-  const entry: ChildCollectionEntry = {
-    collection,
-    get syncMethods() {
-      return syncMethods
-    },
-    resultKeys,
-    orderByIndices,
+  if (materialization !== `collection`) {
+    const store = new LightweightChildCollection(
+      `__child-collection:${parentId}-${fieldName}-${serializeValue(correlationKey)}`,
+      resultKeys,
+      compare ?? null,
+    )
+    const syncMethods = {
+      collection: store,
+      begin(): void {},
+      write(op: { value: any; type: `insert` | `update` | `delete` }): void {
+        store.write(op.value, op.type)
+      },
+      commit(): void {},
+    } as unknown as SyncMethods<any>
+    entry = {
+      collection: store as unknown as Collection<any, any, any>,
+      syncMethods,
+      resultKeys,
+      orderByIndices,
+    }
+  } else {
+    let syncMethods: SyncMethods<any> | null = null
+    const collection = createCollection<any, string | number>({
+      id: `__child-collection:${parentId}-${fieldName}-${serializeValue(correlationKey)}`,
+      getKey: (item: any) => resultKeys.get(item) as string | number,
+      compare,
+      sync: {
+        rowUpdateMode: `full`,
+        sync: (methods) => {
+          syncMethods = methods
+          return () => {
+            syncMethods = null
+          }
+        },
+      },
+      startSync: true,
+      gcTime: 0,
+    })
+
+    entry = {
+      collection,
+      get syncMethods() {
+        return syncMethods
+      },
+      resultKeys,
+      orderByIndices,
+    }
   }
 
   if (nestedSetups) {
@@ -1892,6 +2009,7 @@ function flushIncludesState(
                 state.fieldName,
                 routingKey,
                 state.hasOrderBy,
+                state.materialization,
                 state.nestedSetups,
               )
               state.childRegistry.set(routingKey, entry)
@@ -1942,6 +2060,7 @@ function flushIncludesState(
             state.fieldName,
             correlationKey,
             state.hasOrderBy,
+            state.materialization,
             state.nestedSetups,
           )
           state.childRegistry.set(correlationKey, entry)
@@ -2064,6 +2183,18 @@ function flushIncludesState(
         ])
       : null
     if (parentSyncMethods && inlineReEmitKeys && inlineReEmitKeys.size > 0) {
+      // The clones exist only to build UPDATE event payloads. Without change
+      // subscriptions (always the case during initial hydrate, which runs
+      // synchronously inside createCollection) only the in-place mutation is
+      // needed and the clones + events can be skipped entirely.
+      const changesManager = (parentCollection as any)._changes as {
+        changeSubscriptions: Set<unknown>
+        emitEvents: (
+          changes: Array<ChangeMessage<any>>,
+          forceEmit?: boolean,
+        ) => void
+      }
+      const hasSubscribers = changesManager.changeSubscriptions.size > 0
       const events: Array<ChangeMessage<any>> = []
       for (const correlationKey of inlineReEmitKeys) {
         const parentKeys = state.correlationToParentKeys.get(correlationKey)
@@ -2072,6 +2203,14 @@ function flushIncludesState(
         for (const parentKey of parentKeys) {
           const item = parentCollection.get(parentKey as any)
           if (item) {
+            if (!hasSubscribers) {
+              setIncludedValue(
+                item,
+                state.resultPath,
+                materializeIncludedValue(state, entry),
+              )
+              continue
+            }
             // Capture previous value before in-place mutation
             const previousValue = cloneForIncludesUpdate(item, state.resultPath)
             setIncludedValue(
@@ -2092,12 +2231,6 @@ function flushIncludesState(
       if (events.length > 0) {
         // Emit directly — the in-place mutation already updated the data in
         // syncedData, so we only need to notify subscribers.
-        const changesManager = (parentCollection as any)._changes as {
-          emitEvents: (
-            changes: Array<ChangeMessage<any>>,
-            forceEmit?: boolean,
-          ) => void
-        }
         changesManager.emitEvents(events, true)
       }
     }

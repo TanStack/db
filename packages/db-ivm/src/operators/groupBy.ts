@@ -58,13 +58,24 @@ export function groupBy<
     ),
   ) as Record<string, PipedAggregateFunction<T, any>>
 
+  // Hoist the aggregate entries so per-row processing doesn't re-enumerate them
+  const aggregateEntries = Object.entries(basicAggregates)
+
   return (
     stream: IStreamBuilder<T>,
   ): IStreamBuilder<KeyValue<string, ResultType>> => {
     // Special key to store the original key object
     const KEY_SENTINEL = `__original_key__`
 
-    // First map to extract keys and pre-aggregate values
+    // First map to extract keys and pre-aggregate values.
+    //
+    // When every pre-aggregated value is a simple primitive, the values are
+    // wrapped as a `[discriminant, values]` tuple where the discriminant is a
+    // cheap string encoding of the pre-aggregated values. The reduce
+    // operator's internal Index consolidates equal values by prefix when
+    // given such a tuple, avoiding a structural hash of the values object for
+    // every row. Rows within one group share the same key object content, so
+    // the discriminant only needs to encode the aggregate pre-values.
     const withKeysAndValues = stream.pipe(
       map((data) => {
         const key = keyExtractor(data)
@@ -76,16 +87,49 @@ export function groupBy<
         // Store the original key object
         values[KEY_SENTINEL] = key
 
-        // Add pre-aggregated values
-        for (const [name, aggregate] of Object.entries(basicAggregates)) {
-          values[name] = aggregate.preMap(data)
+        // Add pre-aggregated values, building the discriminant as we go
+        let disc: string | null = ``
+        for (const [name, aggregate] of aggregateEntries) {
+          const v = aggregate.preMap(data)
+          values[name] = v
+          if (disc !== null) {
+            switch (typeof v) {
+              case `number`:
+                disc += `n${v}|`
+                break
+              case `boolean`:
+                disc += v ? `T|` : `F|`
+                break
+              case `string`:
+                disc += `s${v.length}:${v}|`
+                break
+              case `bigint`:
+                disc += `b${v}|`
+                break
+              case `undefined`:
+                disc += `u|`
+                break
+              default:
+                disc = v === null ? disc + `z|` : null
+            }
+          }
         }
 
-        return [keyString, values] as KeyValue<string, Record<string, unknown>>
+        const wrapped = disc !== null ? [disc, values] : values
+        return [keyString, wrapped] as KeyValue<string, unknown>
       }),
     )
 
-    // Then reduce to compute aggregates
+    // A stored value is either the raw values object or a [disc, values] tuple
+    const unwrapValues = (stored: unknown): Record<string, unknown> =>
+      Array.isArray(stored)
+        ? (stored[1] as Record<string, unknown>)
+        : (stored as Record<string, unknown>)
+
+    // Then reduce to compute aggregates. `prefixIdentity` tells the reduce
+    // index that the [disc, values] tuples emitted above are fully
+    // discriminated by their prefix, so equal-prefix values merge without
+    // structural hashing.
     const reduced = withKeysAndValues.pipe(
       reduce((values) => {
         // Calculate total multiplicity to check if the group should exist
@@ -102,19 +146,25 @@ export function groupBy<
         const result: Record<string, unknown> = {}
 
         // Get the original key from first value in group
-        const originalKey = values[0]?.[0]?.[KEY_SENTINEL]
+        const originalKey =
+          values[0] !== undefined
+            ? unwrapValues(values[0][0])[KEY_SENTINEL]
+            : undefined
         result[KEY_SENTINEL] = originalKey
 
-        // Apply each aggregate function
-        for (const [name, aggregate] of Object.entries(basicAggregates)) {
-          const preValues = values.map(
-            ([v, m]) => [v[name], m] as [any, number],
-          )
+        // Apply each aggregate function, reusing one scratch array for the
+        // per-aggregate pre-mapped values to avoid an allocation per aggregate
+        const preValues: Array<[any, number]> = new Array(values.length)
+        for (const [name, aggregate] of aggregateEntries) {
+          for (let i = 0; i < values.length; i++) {
+            const entry = values[i]!
+            preValues[i] = [unwrapValues(entry[0])[name], entry[1]]
+          }
           result[name] = aggregate.reduce(preValues)
         }
 
         return [[result, 1]]
-      }),
+      }, { prefixIdentity: true }),
     )
 
     // Finally map to extract the key and include all values
@@ -130,7 +180,7 @@ export function groupBy<
         Object.assign(result, key)
 
         // Apply postMap if provided
-        for (const [name, aggregate] of Object.entries(basicAggregates)) {
+        for (const [name, aggregate] of aggregateEntries) {
           if (aggregate.postMap) {
             result[name] = aggregate.postMap(values[name])
           } else {

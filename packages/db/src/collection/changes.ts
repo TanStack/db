@@ -102,6 +102,11 @@ export class CollectionChangesManager<
       return
     }
 
+    // Without subscribers there is no one to deliver enriched events to
+    if (this.changeSubscriptions.size === 0) {
+      return
+    }
+
     // Enrich all change messages with virtual properties
     // This uses the "add-if-missing" pattern to preserve pass-through semantics
     const enrichedEvents: Array<

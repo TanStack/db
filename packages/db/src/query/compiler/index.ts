@@ -881,8 +881,10 @@ export function compileQuery(
           const correlationKey = (row as any)[mainSource]?.__correlationKey
           const parentContext = (row as any).__parentContext ?? null
           // Strip internal routing properties that may leak via spread selects
-          delete finalResults.__correlationKey
-          delete finalResults.__parentContext
+          if (`__correlationKey` in finalResults)
+            delete finalResults.__correlationKey
+          if (`__parentContext` in finalResults)
+            delete finalResults.__parentContext
           return [
             key,
             [finalResults, orderByIndex, correlationKey, parentContext],
@@ -924,8 +926,10 @@ export function compileQuery(
         const correlationKey = (row as any)[mainSource]?.__correlationKey
         const parentContext = (row as any).__parentContext ?? null
         // Strip internal routing properties that may leak via spread selects
-        delete finalResults.__correlationKey
-        delete finalResults.__parentContext
+        if (`__correlationKey` in finalResults)
+          delete finalResults.__correlationKey
+        if (`__parentContext` in finalResults)
+          delete finalResults.__parentContext
         return [
           key,
           [finalResults, undefined, correlationKey, parentContext],
@@ -1269,12 +1273,14 @@ function wrapInputWithAlias(
       // Initialize the record with a nested structure.
       // If __parentContext exists (from parent-referencing includes), merge parent
       // aliases into the namespaced row so WHERE can resolve parent refs.
+      // The common case has no __parentContext, so avoid the rest-spread copy.
+      if ((row as any).__parentContext === undefined) {
+        return [key, { [alias]: row }] as [unknown, Record<string, typeof row>]
+      }
       const { __parentContext, ...cleanRow } = row as any
       const nsRow: Record<string, any> = { [alias]: cleanRow }
-      if (__parentContext) {
-        Object.assign(nsRow, __parentContext)
-        ;(nsRow as any).__parentContext = __parentContext
-      }
+      Object.assign(nsRow, __parentContext)
+      ;(nsRow as any).__parentContext = __parentContext
       return [key, nsRow] as [unknown, Record<string, typeof row>]
     }),
   )

@@ -246,6 +246,16 @@ export class CollectionStateManager<
     virtualProps: VirtualRowProps<TKey>,
   ): WithVirtualProps<TOutput, TKey> {
     const existingRow = row as Partial<WithVirtualProps<TOutput, TKey>>
+    // Rows that already carry all virtual props (e.g. live query results)
+    // are returned as-is: copying them would produce an identical object.
+    if (
+      existingRow.$synced != null &&
+      existingRow.$origin != null &&
+      existingRow.$key != null &&
+      existingRow.$collectionId != null
+    ) {
+      return existingRow as WithVirtualProps<TOutput, TKey>
+    }
     const synced = existingRow.$synced ?? virtualProps.$synced
     const origin = existingRow.$origin ?? virtualProps.$origin
     const resolvedKey = existingRow.$key ?? virtualProps.$key
@@ -1214,6 +1224,23 @@ export class CollectionStateManager<
       for (const key of changedKeys) {
         const previousVisibleValue = currentVisibleState.get(key)
         const newVisibleValue = this.get(key) // This returns the new derived state
+
+        // Fast path: plain insert with no completed optimistic op involved.
+        // The virtual-props snapshots below are only consumed by the
+        // update/delete/redundancy logic, so skip their allocation here.
+        if (
+          previousVisibleValue === undefined &&
+          newVisibleValue !== undefined &&
+          !completedOptimisticOps.has(key)
+        ) {
+          events.push({
+            type: `insert`,
+            key,
+            value: newVisibleValue,
+          })
+          continue
+        }
+
         const previousVirtualProps = this.getVirtualPropsSnapshotForState(key, {
           rowOrigins: previousRowOrigins,
           optimisticUpserts: previousOptimisticUpserts,
