@@ -525,34 +525,47 @@ export function useLiveQuery(
         isEnabled: false,
       }
     } else {
-      // Capture a stable view of entries for this snapshot to avoid tearing
-      const entries = Array.from(snapshot.collection.entries())
+      const collection = snapshot.collection
       const config: CollectionConfigSingleRowOption<any, any, any> =
-        snapshot.collection.config
+        collection.config
       const singleResult = config.singleResult
+      let entriesCache: Array<[string | number, unknown]> | null = null
       let stateCache: Map<string | number, unknown> | null = null
       let dataCache: Array<unknown> | null = null
+      let singleResultCache: unknown = undefined
+      let hasSingleResultCache = false
+
+      const getEntries = () => {
+        entriesCache ??= Array.from(collection.entries())
+        return entriesCache
+      }
 
       returnedRef.current = {
         get state() {
-          if (!stateCache) {
-            stateCache = new Map(entries)
-          }
+          stateCache ??= new Map(getEntries())
           return stateCache
         },
         get data() {
-          if (!dataCache) {
-            dataCache = entries.map(([, value]) => value)
+          if (singleResult) {
+            if (!hasSingleResultCache) {
+              const entries = getEntries()
+              singleResultCache =
+                entries.length > 0 ? entries[0]![1] : undefined
+              hasSingleResultCache = true
+            }
+            return singleResultCache
           }
-          return singleResult ? dataCache[0] : dataCache
+
+          dataCache ??= getEntries().map(([, value]) => value)
+          return dataCache
         },
-        collection: snapshot.collection,
-        status: snapshot.collection.status,
-        isLoading: snapshot.collection.status === `loading`,
-        isReady: snapshot.collection.status === `ready`,
-        isIdle: snapshot.collection.status === `idle`,
-        isError: snapshot.collection.status === `error`,
-        isCleanedUp: snapshot.collection.status === `cleaned-up`,
+        collection,
+        status: collection.status,
+        isLoading: collection.status === `loading`,
+        isReady: collection.status === `ready`,
+        isIdle: collection.status === `idle`,
+        isError: collection.status === `error`,
+        isCleanedUp: collection.status === `cleaned-up`,
         isEnabled: true,
       }
     }

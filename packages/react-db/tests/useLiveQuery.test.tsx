@@ -2357,6 +2357,198 @@ describe(`Query Collections`, () => {
     })
   })
 
+  describe(`performance-sensitive lazy access`, () => {
+    it(`does not materialize collection entries when only status flags are read`, async () => {
+      const collection = createCollection(
+        mockSyncCollectionOptions<Person>({
+          id: `lazy-status-only-test`,
+          getKey: (person: Person) => person.id,
+          initialData: initialPersons,
+        }),
+      )
+
+      let entriesCalls = 0
+      let valuesCalls = 0
+      const originalEntries = collection.entries.bind(collection)
+      const originalValues = collection.values.bind(collection)
+      collection.entries = function* () {
+        entriesCalls++
+        yield* originalEntries()
+      }
+      collection.values = function* () {
+        valuesCalls++
+        yield* originalValues()
+      }
+
+      const { result } = renderHook(() => {
+        const query = useLiveQuery(collection)
+        return {
+          isReady: query.isReady,
+          status: query.status,
+        }
+      })
+
+      await waitFor(() => {
+        expect(result.current.isReady).toBe(true)
+      })
+
+      expect(result.current.status).toBe(`ready`)
+      expect(entriesCalls).toBe(0)
+      expect(valuesCalls).toBe(0)
+    })
+
+    it(`materializes entries lazily when data is read`, async () => {
+      const collection = createCollection(
+        mockSyncCollectionOptions<Person>({
+          id: `lazy-data-test`,
+          getKey: (person: Person) => person.id,
+          initialData: initialPersons,
+        }),
+      )
+
+      let entriesCalls = 0
+      let valuesCalls = 0
+      const originalEntries = collection.entries.bind(collection)
+      const originalValues = collection.values.bind(collection)
+      collection.entries = function* () {
+        entriesCalls++
+        yield* originalEntries()
+      }
+      collection.values = function* () {
+        valuesCalls++
+        yield* originalValues()
+      }
+
+      const { result } = renderHook(() => {
+        const query = useLiveQuery(collection)
+        return {
+          data: query.data,
+          isReady: query.isReady,
+        }
+      })
+
+      await waitFor(() => {
+        expect(result.current.isReady).toBe(true)
+        expect(result.current.data).toHaveLength(initialPersons.length)
+      })
+
+      expect(entriesCalls).toBeGreaterThan(0)
+      expect(valuesCalls).toBe(0)
+    })
+
+    it(`materializes entries lazily when state is read`, async () => {
+      const collection = createCollection(
+        mockSyncCollectionOptions<Person>({
+          id: `lazy-state-test`,
+          getKey: (person: Person) => person.id,
+          initialData: initialPersons,
+        }),
+      )
+
+      let entriesCalls = 0
+      let valuesCalls = 0
+      const originalEntries = collection.entries.bind(collection)
+      const originalValues = collection.values.bind(collection)
+      collection.entries = function* () {
+        entriesCalls++
+        yield* originalEntries()
+      }
+      collection.values = function* () {
+        valuesCalls++
+        yield* originalValues()
+      }
+
+      const { result } = renderHook(() => {
+        const query = useLiveQuery(collection)
+        return {
+          isReady: query.isReady,
+          state: query.state,
+        }
+      })
+
+      await waitFor(() => {
+        expect(result.current.isReady).toBe(true)
+        expect(result.current.state.size).toBe(initialPersons.length)
+      })
+
+      expect(entriesCalls).toBeGreaterThan(0)
+      expect(valuesCalls).toBe(0)
+    })
+
+    it(`returns singleResult data from the shared entries snapshot`, async () => {
+      const collection = createCollection(
+        mockSyncCollectionOptions<Person>({
+          id: `lazy-single-result-test`,
+          getKey: (person: Person) => person.id,
+          initialData: initialPersons,
+        }),
+      )
+      const liveQueryCollection = createLiveQueryCollection({
+        query: (q) => q.from({ collection }).findOne(),
+        startSync: true,
+      })
+
+      let entriesCalls = 0
+      let valuesCalls = 0
+      const originalEntries =
+        liveQueryCollection.entries.bind(liveQueryCollection)
+      const originalValues =
+        liveQueryCollection.values.bind(liveQueryCollection)
+      liveQueryCollection.entries = function* () {
+        entriesCalls++
+        yield* originalEntries()
+      }
+      liveQueryCollection.values = function* () {
+        valuesCalls++
+        yield* originalValues()
+      }
+
+      const { result } = renderHook(() => {
+        const query = useLiveQuery(liveQueryCollection)
+        return {
+          data: query.data,
+          isReady: query.isReady,
+        }
+      })
+
+      await waitFor(() => {
+        expect(result.current.isReady).toBe(true)
+        expect(result.current.data).toMatchObject({ id: `1` })
+      })
+
+      expect(entriesCalls).toBeGreaterThan(0)
+      expect(valuesCalls).toBe(0)
+    })
+
+    it(`returns undefined for empty singleResult data`, async () => {
+      const collection = createCollection(
+        mockSyncCollectionOptions<Person>({
+          id: `lazy-empty-single-result-test`,
+          getKey: (person: Person) => person.id,
+          initialData: [],
+        }),
+      )
+      const liveQueryCollection = createLiveQueryCollection({
+        query: (q) => q.from({ collection }).findOne(),
+        startSync: true,
+      })
+
+      const { result } = renderHook(() => {
+        const query = useLiveQuery(liveQueryCollection)
+        return {
+          data: query.data,
+          isReady: query.isReady,
+        }
+      })
+
+      await waitFor(() => {
+        expect(result.current.isReady).toBe(true)
+      })
+
+      expect(result.current.data).toBeUndefined()
+    })
+  })
+
   describe(`aggregates nested inside expressions`, () => {
     it(`coalesce(count(...), 0) in groupBy select returns count per group`, async () => {
       const collection = createCollection(

@@ -103,15 +103,37 @@ export class KeyScheduler {
     return [...this.pendingTransactions]
   }
 
+  getEarliestRetryTime(): number | null {
+    let earliestRetryTime: number | null = null
+
+    for (const transaction of this.pendingTransactions) {
+      earliestRetryTime =
+        earliestRetryTime === null
+          ? transaction.nextAttemptAt
+          : Math.min(earliestRetryTime, transaction.nextAttemptAt)
+    }
+
+    return earliestRetryTime
+  }
+
   updateTransactions(updatedTransactions: Array<OfflineTransaction>): void {
-    for (const updatedTx of updatedTransactions) {
-      const index = this.pendingTransactions.findIndex(
-        (tx) => tx.id === updatedTx.id,
+    if (updatedTransactions.length === 0) {
+      return
+    }
+
+    const updatedById = new Map(
+      updatedTransactions.map((transaction) => [transaction.id, transaction]),
+    )
+
+    for (let index = 0; index < this.pendingTransactions.length; index++) {
+      const updatedTransaction = updatedById.get(
+        this.pendingTransactions[index]!.id,
       )
-      if (index >= 0) {
-        this.pendingTransactions[index] = updatedTx
+      if (updatedTransaction) {
+        this.pendingTransactions[index] = updatedTransaction
       }
     }
+
     // Re-sort to maintain FIFO order after updates
     this.pendingTransactions.sort(
       (a, b) => a.createdAt.getTime() - b.createdAt.getTime(),
