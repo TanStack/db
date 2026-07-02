@@ -1,6 +1,7 @@
 import { DifferenceStreamWriter, UnaryOperator } from '../graph.js'
 import { StreamBuilder } from '../d2.js'
 import { MultiSet } from '../multiset.js'
+import { isPerfEnabled, recordPerfCount, startPerfSpan } from '../perf.js'
 import { TopKState, handleMoveIn, handleMoveOut } from './topKState.js'
 import { TopKArray, createKeyedComparator } from './topKArray.js'
 import type { IndexedValue, TopK } from './topKArray.js'
@@ -97,6 +98,16 @@ export class GroupedTopKWithFractionalIndexOperator<
    * Any changes to the topK are sent to the output.
    */
   #moveTopK({ offset, limit }: { offset?: number; limit?: number }): void {
+    const shouldTrace = isPerfEnabled()
+    const tags = shouldTrace
+      ? {
+          operatorId: this.id,
+          operator: this.constructor.name,
+        }
+      : undefined
+    const span = shouldTrace
+      ? startPerfSpan(`operator.groupedTopK.moveWindow`, tags)
+      : undefined
     if (offset !== undefined) {
       this.#offset = offset
     }
@@ -121,12 +132,38 @@ export class GroupedTopKWithFractionalIndexOperator<
     if (hasChanges) {
       this.output.sendData(new MultiSet(result))
     }
+    if (shouldTrace) {
+      recordPerfCount(
+        `operator.groupedTopK.groups`,
+        this.#groupStates.size,
+        tags,
+      )
+      recordPerfCount(`operator.groupedTopK.outputRows`, result.length, tags)
+      recordPerfCount(
+        `operator.groupedTopK.stateSize`,
+        this.#getTotalSize(),
+        tags,
+      )
+      span?.end({ outputRows: result.length })
+    }
   }
 
   run(): void {
+    const shouldTrace = isPerfEnabled()
+    const tags = shouldTrace
+      ? {
+          operatorId: this.id,
+          operator: this.constructor.name,
+        }
+      : undefined
+    const span = shouldTrace
+      ? startPerfSpan(`operator.groupedTopK.run`, tags)
+      : undefined
     const result: Array<[[K, IndexedValue<T>], number]> = []
+    let inputRows = 0
     for (const message of this.inputMessages()) {
       for (const [item, multiplicity] of message.getInner()) {
+        inputRows++
         const [key, value] = item
         this.#processElement(key, value, multiplicity, result)
       }
@@ -134,6 +171,21 @@ export class GroupedTopKWithFractionalIndexOperator<
 
     if (result.length > 0) {
       this.output.sendData(new MultiSet(result))
+    }
+    if (shouldTrace) {
+      recordPerfCount(`operator.groupedTopK.inputRows`, inputRows, tags)
+      recordPerfCount(`operator.groupedTopK.outputRows`, result.length, tags)
+      recordPerfCount(
+        `operator.groupedTopK.groups`,
+        this.#groupStates.size,
+        tags,
+      )
+      recordPerfCount(
+        `operator.groupedTopK.stateSize`,
+        this.#getTotalSize(),
+        tags,
+      )
+      span?.end({ outputRows: result.length })
     }
   }
 

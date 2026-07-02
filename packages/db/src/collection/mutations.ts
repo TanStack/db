@@ -1,6 +1,7 @@
 import { withArrayChangeTracking, withChangeTracking } from '../proxy'
 import { safeRandomUUID } from '../utils/uuid'
 import { createTransaction, getActiveTransaction } from '../transactions'
+import { isPerfEnabled, startPerfSpan } from '../query/live/perf.js'
 import {
   DeleteKeyNotFoundError,
   DuplicateKeyError,
@@ -177,6 +178,13 @@ export class CollectionMutationsManager<
     }
 
     const items = Array.isArray(data) ? data : [data]
+    const span = isPerfEnabled()
+      ? startPerfSpan(`collection.mutations.insert`, {
+          collectionId: this.id,
+          items: items.length,
+          ambientTransaction: ambientTransaction !== undefined,
+        })
+      : undefined
     const mutations: Array<PendingMutation<TOutput>> = []
     const keysInCurrentBatch = new Set<TKey>()
 
@@ -228,6 +236,7 @@ export class CollectionMutationsManager<
       state.scheduleTransactionCleanup(ambientTransaction)
       state.recomputeOptimisticState(true)
 
+      span?.end({ mutations: mutations.length })
       return ambientTransaction
     } else {
       // Create a new transaction with a mutation function that calls the onInsert handler
@@ -257,6 +266,7 @@ export class CollectionMutationsManager<
       state.scheduleTransactionCleanup(directOpTransaction)
       state.recomputeOptimisticState(true)
 
+      span?.end({ mutations: mutations.length })
       return directOpTransaction
     }
   }
@@ -290,6 +300,13 @@ export class CollectionMutationsManager<
 
     const isArray = Array.isArray(keys)
     const keysArray = isArray ? keys : [keys]
+    const span = isPerfEnabled()
+      ? startPerfSpan(`collection.mutations.update`, {
+          collectionId: this.id,
+          keys: keysArray.length,
+          ambientTransaction: ambientTransaction !== undefined,
+        })
+      : undefined
 
     if (isArray && keysArray.length === 0) {
       throw new NoKeysPassedToUpdateError()
@@ -411,6 +428,7 @@ export class CollectionMutationsManager<
       emptyTransaction.commit().catch(() => undefined)
       // Schedule cleanup for empty transaction
       state.scheduleTransactionCleanup(emptyTransaction)
+      span?.end({ mutations: 0 })
       return emptyTransaction
     }
 
@@ -422,6 +440,7 @@ export class CollectionMutationsManager<
       state.scheduleTransactionCleanup(ambientTransaction)
       state.recomputeOptimisticState(true)
 
+      span?.end({ mutations: mutations.length })
       return ambientTransaction
     }
 
@@ -455,6 +474,7 @@ export class CollectionMutationsManager<
     state.scheduleTransactionCleanup(directOpTransaction)
     state.recomputeOptimisticState(true)
 
+    span?.end({ mutations: mutations.length })
     return directOpTransaction
   }
 
@@ -480,6 +500,13 @@ export class CollectionMutationsManager<
     }
 
     const keysArray = Array.isArray(keys) ? keys : [keys]
+    const span = isPerfEnabled()
+      ? startPerfSpan(`collection.mutations.delete`, {
+          collectionId: this.id,
+          keys: keysArray.length,
+          ambientTransaction: ambientTransaction !== undefined,
+        })
+      : undefined
     const mutations: Array<
       PendingMutation<
         TOutput,
@@ -527,6 +554,7 @@ export class CollectionMutationsManager<
       state.scheduleTransactionCleanup(ambientTransaction)
       state.recomputeOptimisticState(true)
 
+      span?.end({ mutations: mutations.length })
       return ambientTransaction
     }
 
@@ -557,6 +585,7 @@ export class CollectionMutationsManager<
     state.scheduleTransactionCleanup(directOpTransaction)
     state.recomputeOptimisticState(true)
 
+    span?.end({ mutations: mutations.length })
     return directOpTransaction
   }
 }

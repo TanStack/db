@@ -1,4 +1,10 @@
 import { DifferenceStreamWriter } from './graph.js'
+import {
+  isPerfEnabled,
+  recordPerfCount,
+  startPerfSpan,
+  withPerfSpan,
+} from './perf.js'
 import type {
   BinaryOperator,
   DifferenceStreamReader,
@@ -47,19 +53,67 @@ export class D2 implements ID2 {
     if (!this.#finalized) {
       throw new Error(`Graph not finalized`)
     }
-    for (const op of this.#operators) {
-      op.run()
+
+    if (!isPerfEnabled()) {
+      for (const op of this.#operators) {
+        op.run()
+      }
+      return
     }
+
+    recordPerfCount(`d2.step.operatorsVisited`, this.#operators.length)
+
+    withPerfSpan(
+      `d2.step`,
+      {
+        operators: this.#operators.length,
+      },
+      () => {
+        for (const op of this.#operators) {
+          const inputStats = op.getPendingInputStats()
+          const tags = {
+            operatorId: op.id,
+            operator: op.constructor.name,
+          }
+
+          recordPerfCount(
+            `d2.operator.inputMessages`,
+            inputStats.messageCount,
+            tags,
+          )
+          recordPerfCount(`d2.operator.inputRows`, inputStats.rowCount, tags)
+
+          withPerfSpan(`d2.operator.run`, tags, () => {
+            op.run()
+          })
+        }
+      },
+    )
   }
 
   pendingWork(): boolean {
+    if (isPerfEnabled()) {
+      recordPerfCount(`d2.pendingWork.calls`)
+    }
     return this.#operators.some((op) => op.hasPendingWork())
   }
 
   run(): void {
+    if (!isPerfEnabled()) {
+      while (this.pendingWork()) {
+        this.step()
+      }
+      return
+    }
+
+    const span = startPerfSpan(`d2.run`)
+    let steps = 0
     while (this.pendingWork()) {
+      steps++
       this.step()
     }
+    recordPerfCount(`d2.run.steps`, steps)
+    span.end({ steps })
   }
 }
 

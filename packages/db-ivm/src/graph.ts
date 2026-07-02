@@ -1,4 +1,5 @@
 import { MultiSet } from './multiset.js'
+import { isPerfEnabled, recordPerfCount } from './perf.js'
 import type { MultiSetArray } from './multiset.js'
 import type {
   IDifferenceStreamReader,
@@ -24,6 +25,18 @@ export class DifferenceStreamReader<T> implements IDifferenceStreamReader<T> {
 
   isEmpty(): boolean {
     return this.#queue.length === 0
+  }
+
+  pendingMessageCount(): number {
+    return this.#queue.length
+  }
+
+  pendingRowCount(): number {
+    let count = 0
+    for (const message of this.#queue) {
+      count += message.getInner().length
+    }
+    return count
   }
 }
 
@@ -71,6 +84,26 @@ export abstract class Operator<T> implements IOperator<T> {
 
   hasPendingWork(): boolean {
     return this.inputs.some((input) => !input.isEmpty())
+  }
+
+  getPendingInputStats(): {
+    inputCount: number
+    messageCount: number
+    rowCount: number
+  } {
+    let messageCount = 0
+    let rowCount = 0
+
+    for (const input of this.inputs) {
+      messageCount += input.pendingMessageCount()
+      rowCount += input.pendingRowCount()
+    }
+
+    return {
+      inputCount: this.inputs.length,
+      messageCount,
+      rowCount,
+    }
   }
 }
 
@@ -124,8 +157,25 @@ export abstract class LinearUnaryOperator<T, U> extends UnaryOperator<T | U> {
   abstract inner(collection: MultiSet<T | U>): MultiSet<U>
 
   run(): void {
+    const shouldTrace = isPerfEnabled()
+    const tags = shouldTrace
+      ? {
+          operatorId: this.id,
+          operator: this.constructor.name,
+        }
+      : undefined
+
     for (const message of this.inputMessages()) {
-      this.output.sendData(this.inner(message))
+      const result = this.inner(message)
+      if (shouldTrace) {
+        recordPerfCount(
+          `d2.operator.outputRows`,
+          result.getInner().length,
+          tags,
+        )
+        recordPerfCount(`d2.operator.outputMessages`, 1, tags)
+      }
+      this.output.sendData(result)
     }
   }
 }

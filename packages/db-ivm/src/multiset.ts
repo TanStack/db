@@ -4,6 +4,7 @@ import {
   globalObjectIdGenerator,
 } from './utils.js'
 import { hash } from './hashing/index.js'
+import { isPerfEnabled, recordPerfCount, startPerfSpan } from './perf.js'
 
 export type MultiSetArray<T> = Array<[T, number]>
 export type KeyedData<T> = [key: string, value: T]
@@ -71,16 +72,40 @@ export class MultiSet<T> {
    * (record, multiplicity) pair.
    */
   consolidate(): MultiSet<T> {
-    // Check if this looks like a keyed multiset (first item is a tuple of length 2)
-    if (this.#inner.length > 0) {
-      const firstItem = this.#inner[0]?.[0]
-      if (Array.isArray(firstItem) && firstItem.length === 2) {
-        return this.#consolidateKeyed()
+    if (!isPerfEnabled()) {
+      // Check if this looks like a keyed multiset (first item is a tuple of length 2)
+      if (this.#inner.length > 0) {
+        const firstItem = this.#inner[0]?.[0]
+        if (Array.isArray(firstItem) && firstItem.length === 2) {
+          return this.#consolidateKeyed()
+        }
       }
+
+      // Fall back to original method for unkeyed data
+      return this.#consolidateUnkeyed()
     }
 
-    // Fall back to original method for unkeyed data
-    return this.#consolidateUnkeyed()
+    const firstItem = this.#inner[0]?.[0]
+    const keyedCandidate = Array.isArray(firstItem) && firstItem.length === 2
+    const path = keyedCandidate ? `keyedCandidate` : `unkeyed`
+    const span = startPerfSpan(`multiset.consolidate`, { path })
+    recordPerfCount(`multiset.consolidate.inputRows`, this.#inner.length, {
+      path,
+    })
+
+    try {
+      const result = keyedCandidate
+        ? this.#consolidateKeyed()
+        : this.#consolidateUnkeyed()
+      recordPerfCount(
+        `multiset.consolidate.outputRows`,
+        result.getInner().length,
+        { path },
+      )
+      return result
+    } finally {
+      span.end()
+    }
   }
 
   /**
@@ -94,6 +119,10 @@ export class MultiSet<T> {
    * we unpack them and compare each element individually to maintain proper equality semantics.
    */
   #consolidateKeyed(): MultiSet<T> {
+    const shouldTrace = isPerfEnabled()
+    const span = shouldTrace
+      ? startPerfSpan(`multiset.consolidate.keyed`)
+      : undefined
     const consolidated = new Map<string, number>()
     const values = new Map<string, T>()
 
@@ -117,6 +146,12 @@ export class MultiSet<T> {
       // Verify this is still a keyed item (should be [key, value] pair)
       if (!Array.isArray(data) || data.length !== 2) {
         // Found non-keyed item, fall back to unkeyed consolidation
+        if (shouldTrace) {
+          recordPerfCount(`multiset.consolidate.keyedFallbacks`, 1, {
+            reason: `shape`,
+          })
+          span?.end()
+        }
         return this.#consolidateUnkeyed()
       }
 
@@ -125,6 +160,12 @@ export class MultiSet<T> {
       // Verify key is string or number as expected for keyed multisets
       if (typeof key !== `string` && typeof key !== `number`) {
         // Found non-string/number key, fall back to unkeyed consolidation
+        if (shouldTrace) {
+          recordPerfCount(`multiset.consolidate.keyedFallbacks`, 1, {
+            reason: `keyType`,
+          })
+          span?.end()
+        }
         return this.#consolidateUnkeyed()
       }
 
@@ -159,6 +200,10 @@ export class MultiSet<T> {
       }
     }
 
+    if (shouldTrace) {
+      recordPerfCount(`multiset.consolidate.keyedOutputRows`, result.length)
+      span?.end()
+    }
     return new MultiSet(result)
   }
 
@@ -166,6 +211,10 @@ export class MultiSet<T> {
    * Private method for consolidating unkeyed multisets using the original approach.
    */
   #consolidateUnkeyed(): MultiSet<T> {
+    const shouldTrace = isPerfEnabled()
+    const span = shouldTrace
+      ? startPerfSpan(`multiset.consolidate.unkeyed`)
+      : undefined
     const consolidated = new DefaultMap<string | number, number>(() => 0)
     const values = new Map<string, any>()
 
@@ -184,9 +233,17 @@ export class MultiSet<T> {
     }
 
     const requireJson = hasOther || (hasString && hasNumber)
+    if (shouldTrace) {
+      recordPerfCount(`multiset.consolidate.unkeyedCalls`, 1, {
+        hashPath: requireJson,
+      })
+    }
 
     for (const [data, multiplicity] of this.#inner) {
       const key = requireJson ? hash(data) : (data as string | number)
+      if (shouldTrace && requireJson) {
+        recordPerfCount(`multiset.consolidate.unkeyedHashRows`)
+      }
       if (requireJson && !values.has(key as string)) {
         values.set(key as string, data)
       }
@@ -201,6 +258,12 @@ export class MultiSet<T> {
       }
     }
 
+    if (shouldTrace) {
+      recordPerfCount(`multiset.consolidate.unkeyedOutputRows`, result.length, {
+        hashPath: requireJson,
+      })
+      span?.end()
+    }
     return new MultiSet(result)
   }
 

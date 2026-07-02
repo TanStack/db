@@ -35,6 +35,7 @@
 
 import { MultiSet } from './multiset.js'
 import { hash } from './hashing/index.js'
+import { isPerfEnabled, recordPerfCount, startPerfSpan } from './perf.js'
 import type { Hash } from './hashing/index.js'
 
 // We use a symbol to represent the absence of a prefix, unprefixed values a stored
@@ -62,6 +63,10 @@ class PrefixMap<TValue, TPrefix> extends Map<
   addValue(value: TValue, multiplicity: number): boolean {
     if (multiplicity === 0) return this.size === 0
 
+    const shouldTrace = isPerfEnabled()
+    const span = shouldTrace
+      ? startPerfSpan(`index.prefixMap.addValue`)
+      : undefined
     const prefix = getPrefix<TValue, TPrefix>(value)
     const valueMapOrSingleValue = this.get(prefix)
 
@@ -73,7 +78,13 @@ class PrefixMap<TValue, TPrefix> extends Map<
         throw new Error(`Mismatching prefixes, this should never happen`)
       }
 
-      if (currentValue === value || hash(currentValue) === hash(value)) {
+      const sameValue =
+        currentValue === value || hash(currentValue) === hash(value)
+      if (shouldTrace && currentValue !== value) {
+        recordPerfCount(`index.prefixMap.hashComparisons`, 2)
+      }
+
+      if (sameValue) {
         // Same value, update multiplicity
         const newMultiplicity = currentMultiplicity + multiplicity
         if (newMultiplicity === 0) {
@@ -83,6 +94,10 @@ class PrefixMap<TValue, TPrefix> extends Map<
         }
       } else {
         // Different suffixes, need to create ValueMap
+        if (shouldTrace) {
+          recordPerfCount(`index.prefixMap.valueMapTransitions`)
+          recordPerfCount(`index.prefixMap.hashComparisons`, 2)
+        }
         const valueMap = new ValueMap<TValue>()
         valueMap.set(hash(currentValue), valueMapOrSingleValue)
         valueMap.set(hash(value), [value, multiplicity])
@@ -99,6 +114,7 @@ class PrefixMap<TValue, TPrefix> extends Map<
       }
     }
 
+    span?.end({ empty: this.size === 0 })
     return this.size === 0
   }
 }
@@ -114,6 +130,14 @@ class ValueMap<TValue> extends Map<Hash, [TValue, number]> {
   addValue(value: TValue, multiplicity: number): boolean {
     if (multiplicity === 0) return this.size === 0
 
+    const shouldTrace = isPerfEnabled()
+    const span = shouldTrace
+      ? startPerfSpan(`index.valueMap.addValue`)
+      : undefined
+    if (shouldTrace) {
+      recordPerfCount(`index.valueMap.addValue.calls`)
+      recordPerfCount(`index.valueMap.hashCalls`)
+    }
     const key = hash(value)
     const currentValue = this.get(key)
 
@@ -129,6 +153,7 @@ class ValueMap<TValue> extends Map<Hash, [TValue, number]> {
       this.set(key, [value, multiplicity])
     }
 
+    span?.end({ empty: this.size === 0 })
     return this.size === 0
   }
 }
@@ -162,15 +187,27 @@ export class Index<TKey, TValue, TPrefix = any> {
    * @returns A new Index containing all the data from the messages.
    */
   static fromMultiSets<K, V>(messages: Array<MultiSet<[K, V]>>): Index<K, V> {
+    const shouldTrace = isPerfEnabled()
+    const span = shouldTrace
+      ? startPerfSpan(`index.fromMultiSets`, {
+          messageCount: messages.length,
+        })
+      : undefined
     const index = new Index<K, V>()
 
+    let rowCount = 0
     for (const message of messages) {
       for (const [item, multiplicity] of message.getInner()) {
+        rowCount++
         const [key, value] = item
         index.addValue(key, [value, multiplicity])
       }
     }
 
+    if (shouldTrace) {
+      recordPerfCount(`index.fromMultiSets.rows`, rowCount)
+      span?.end({ keys: index.size })
+    }
     return index
   }
 
@@ -301,6 +338,9 @@ export class Index<TKey, TValue, TPrefix = any> {
     const [value, multiplicity] = valueTuple
     // If the multiplicity is 0, do nothing
     if (multiplicity === 0) return
+    if (isPerfEnabled()) {
+      recordPerfCount(`index.addValue.calls`)
+    }
 
     // Update consolidated multiplicity tracking
     const newConsolidatedMultiplicity =
@@ -364,6 +404,10 @@ export class Index<TKey, TValue, TPrefix = any> {
     newValue: TValue,
     multiplicity: number,
   ) {
+    const shouldTrace = isPerfEnabled()
+    if (shouldTrace) {
+      recordPerfCount(`index.singleValueTransitions`)
+    }
     const [currentValue, currentMultiplicity] = currentSingleValue
 
     // Check for exact same value (reference equality)
@@ -382,10 +426,18 @@ export class Index<TKey, TValue, TPrefix = any> {
     const currentPrefix = getPrefix<TValue, TPrefix>(currentValue)
 
     // Check if they're the same value by prefix/suffix comparison
-    if (
+    const samePrefixedValue =
       currentPrefix === newPrefix &&
       (currentValue === newValue || hash(currentValue) === hash(newValue))
+    if (
+      shouldTrace &&
+      currentPrefix === newPrefix &&
+      currentValue !== newValue
     ) {
+      recordPerfCount(`index.singleValueTransition.hashComparisons`, 2)
+    }
+
+    if (samePrefixedValue) {
       const newMultiplicity = currentMultiplicity + multiplicity
       if (newMultiplicity === 0) {
         this.#inner.delete(key)
@@ -398,6 +450,10 @@ export class Index<TKey, TValue, TPrefix = any> {
     // Different values - choose appropriate map type
     if (currentPrefix === NO_PREFIX && newPrefix === NO_PREFIX) {
       // Both have NO_PREFIX, use ValueMap directly
+      if (shouldTrace) {
+        recordPerfCount(`index.singleValueTransition.valueMapTransitions`)
+        recordPerfCount(`index.singleValueTransition.hashComparisons`, 2)
+      }
       const valueMap = new ValueMap<TValue>()
       valueMap.set(hash(currentValue), currentSingleValue)
       valueMap.set(hash(newValue), [newValue, multiplicity])
@@ -408,6 +464,12 @@ export class Index<TKey, TValue, TPrefix = any> {
 
       if (currentPrefix === newPrefix) {
         // Same prefix, different suffixes - need ValueMap within PrefixMap
+        if (shouldTrace) {
+          recordPerfCount(
+            `index.singleValueTransition.prefixValueMapTransitions`,
+          )
+          recordPerfCount(`index.singleValueTransition.hashComparisons`, 2)
+        }
         const valueMap = new ValueMap<TValue>()
         valueMap.set(hash(currentValue), currentSingleValue)
         valueMap.set(hash(newValue), [newValue, multiplicity])
@@ -427,8 +489,20 @@ export class Index<TKey, TValue, TPrefix = any> {
    * @param other - The index to append to the current index.
    */
   append(other: Index<TKey, TValue>): void {
+    const shouldTrace = isPerfEnabled()
+    const span = shouldTrace
+      ? startPerfSpan(`index.append`, {
+          keys: other.size,
+        })
+      : undefined
+    let rows = 0
     for (const [key, value] of other.entries()) {
+      rows++
       this.addValue(key, value)
+    }
+    if (shouldTrace) {
+      recordPerfCount(`index.append.rows`, rows)
+      span?.end()
     }
   }
 
@@ -440,6 +514,13 @@ export class Index<TKey, TValue, TPrefix = any> {
   join<TValue2>(
     other: Index<TKey, TValue2>,
   ): MultiSet<[TKey, [TValue, TValue2]]> {
+    const shouldTrace = isPerfEnabled()
+    const span = shouldTrace
+      ? startPerfSpan(`index.join`, {
+          leftKeys: this.size,
+          rightKeys: other.size,
+        })
+      : undefined
     const result: Array<[[TKey, [TValue, TValue2]], number]> = []
     // We want to iterate over the smaller of the two indexes to reduce the
     // number of operations we need to do.
@@ -469,6 +550,10 @@ export class Index<TKey, TValue, TPrefix = any> {
       }
     }
 
+    if (shouldTrace) {
+      recordPerfCount(`index.join.outputRows`, result.length)
+      span?.end({ outputRows: result.length })
+    }
     return new MultiSet(result)
   }
 }

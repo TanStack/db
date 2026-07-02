@@ -2,6 +2,7 @@ import {
   normalizeExpressionPaths,
   normalizeOrderByPaths,
 } from '../compiler/expressions.js'
+import { isPerfEnabled, recordPerfCount, startPerfSpan } from './perf.js'
 import {
   computeOrderedLoadCursor,
   computeSubscriptionOrderByHints,
@@ -153,6 +154,13 @@ export class CollectionSubscriber<
     changes: Iterable<ChangeMessage<any, string | number>>,
     callback?: () => boolean,
   ) {
+    const shouldTrace = isPerfEnabled()
+    const span = shouldTrace
+      ? startPerfSpan(`collectionSubscriber.sendChangesToPipeline`, {
+          alias: this.alias,
+          collectionId: this.collectionId,
+        })
+      : undefined
     const changesArray = Array.isArray(changes) ? changes : [...changes]
     const filteredChanges = filterDuplicateInserts(
       changesArray,
@@ -164,6 +172,23 @@ export class CollectionSubscriber<
     const input =
       this.collectionConfigBuilder.currentSyncState!.inputs[this.alias]!
     const sentChanges = sendChangesToInput(input, filteredChanges)
+    if (shouldTrace) {
+      const tags = {
+        alias: this.alias,
+        collectionId: this.collectionId,
+      }
+      recordPerfCount(
+        `collectionSubscriber.sourceChanges`,
+        changesArray.length,
+        tags,
+      )
+      recordPerfCount(
+        `collectionSubscriber.filteredChanges`,
+        filteredChanges.length,
+        tags,
+      )
+      recordPerfCount(`collectionSubscriber.sentChanges`, sentChanges, tags)
+    }
 
     // Do not provide the callback that loads more data
     // if there's no more data to load
@@ -176,6 +201,7 @@ export class CollectionSubscriber<
     this.collectionConfigBuilder.scheduleGraphRun(dataLoader, {
       alias: this.alias,
     })
+    span?.end({ sentChanges })
   }
 
   private subscribeToMatchingChanges(

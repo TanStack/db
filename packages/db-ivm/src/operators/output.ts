@@ -1,5 +1,6 @@
 import { DifferenceStreamWriter, UnaryOperator } from '../graph.js'
 import { StreamBuilder } from '../d2.js'
+import { isPerfEnabled, recordPerfCount, startPerfSpan } from '../perf.js'
 import type { IStreamBuilder, PipedOperator } from '../types.js'
 import type { DifferenceStreamReader } from '../graph.js'
 import type { MultiSet } from '../multiset.js'
@@ -21,8 +22,27 @@ export class OutputOperator<T> extends UnaryOperator<T> {
   }
 
   run(): void {
+    const shouldTrace = isPerfEnabled()
+    const tags = shouldTrace
+      ? {
+          operatorId: this.id,
+          operator: this.constructor.name,
+        }
+      : undefined
     for (const message of this.inputMessages()) {
+      if (shouldTrace) {
+        recordPerfCount(`operator.output.messages`, 1, tags)
+        recordPerfCount(
+          `operator.output.inputRows`,
+          message.getInner().length,
+          tags,
+        )
+      }
+      const span = shouldTrace
+        ? startPerfSpan(`operator.output.callback`, tags)
+        : undefined
       this.#fn(message)
+      span?.end()
       this.output.sendData(message)
     }
   }

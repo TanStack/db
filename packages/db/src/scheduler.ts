@@ -1,3 +1,9 @@
+import {
+  isPerfEnabled,
+  recordPerfCount,
+  startPerfSpan,
+} from './query/live/perf.js'
+
 /**
  * Identifier used to scope scheduled work. Maps to a transaction id for live queries.
  */
@@ -76,14 +82,35 @@ export class Scheduler {
    */
   schedule({ contextId, jobId, dependencies, run }: ScheduleOptions): void {
     if (typeof contextId === `undefined`) {
-      run()
+      if (!isPerfEnabled()) {
+        run()
+        return
+      }
+
+      recordPerfCount(`scheduler.schedule`, 1, {
+        context: false,
+        deduped: false,
+      })
+      const span = startPerfSpan(`scheduler.schedule.immediate`)
+      try {
+        run()
+      } finally {
+        span.end()
+      }
       return
     }
 
     const context = this.getOrCreateContext(contextId)
+    const isNewJob = !context.jobs.has(jobId)
+    if (isPerfEnabled()) {
+      recordPerfCount(`scheduler.schedule`, 1, {
+        context: true,
+        deduped: !isNewJob,
+      })
+    }
 
     // If this is a new job, add it to the queue
-    if (!context.jobs.has(jobId)) {
+    if (isNewJob) {
       context.queue.push(jobId)
     }
 
@@ -112,67 +139,87 @@ export class Scheduler {
     if (!context) return
 
     const { queue, jobs, dependencies, completed } = context
+    const shouldTrace = isPerfEnabled()
+    const span = shouldTrace ? startPerfSpan(`scheduler.flush`) : undefined
+    let passes = 0
+    let jobsRun = 0
+    let blockedDependencies = 0
 
-    while (queue.length > 0) {
-      let ranThisPass = false
-      const jobsThisPass = queue.length
+    try {
+      while (queue.length > 0) {
+        passes++
+        let ranThisPass = false
+        const jobsThisPass = queue.length
 
-      for (let i = 0; i < jobsThisPass; i++) {
-        const jobId = queue.shift()!
-        const run = jobs.get(jobId)
-        if (!run) {
-          dependencies.delete(jobId)
-          completed.delete(jobId)
-          continue
-        }
+        for (let i = 0; i < jobsThisPass; i++) {
+          const jobId = queue.shift()!
+          const run = jobs.get(jobId)
+          if (!run) {
+            dependencies.delete(jobId)
+            completed.delete(jobId)
+            continue
+          }
 
-        const deps = dependencies.get(jobId)
-        let ready = !deps
-        if (deps) {
-          ready = true
-          for (const dep of deps) {
-            if (dep === jobId) continue
+          const deps = dependencies.get(jobId)
+          let ready = !deps
+          if (deps) {
+            ready = true
+            for (const dep of deps) {
+              if (dep === jobId) continue
 
-            const depHasPending =
-              isPendingAwareJob(dep) && dep.hasPendingGraphRun(contextId)
+              const depHasPending =
+                isPendingAwareJob(dep) && dep.hasPendingGraphRun(contextId)
 
-            // Treat dependencies as blocking if the dep has a pending run in this
-            // context or if it's enqueued and not yet complete. If the dep is
-            // neither pending nor enqueued, consider it satisfied to avoid deadlocks
-            // on lazy sources that never schedule work.
-            if (
-              (jobs.has(dep) && !completed.has(dep)) ||
-              (!jobs.has(dep) && depHasPending)
-            ) {
-              ready = false
-              break
+              // Treat dependencies as blocking if the dep has a pending run in this
+              // context or if it's enqueued and not yet complete. If the dep is
+              // neither pending nor enqueued, consider it satisfied to avoid deadlocks
+              // on lazy sources that never schedule work.
+              if (
+                (jobs.has(dep) && !completed.has(dep)) ||
+                (!jobs.has(dep) && depHasPending)
+              ) {
+                ready = false
+                blockedDependencies++
+                break
+              }
             }
+          }
+
+          if (ready) {
+            jobs.delete(jobId)
+            dependencies.delete(jobId)
+            // Run the job. If it throws, we don't mark it complete, allowing the
+            // error to propagate while maintaining scheduler state consistency.
+            run()
+            completed.add(jobId)
+            ranThisPass = true
+            jobsRun++
+          } else {
+            queue.push(jobId)
           }
         }
 
-        if (ready) {
-          jobs.delete(jobId)
-          dependencies.delete(jobId)
-          // Run the job. If it throws, we don't mark it complete, allowing the
-          // error to propagate while maintaining scheduler state consistency.
-          run()
-          completed.add(jobId)
-          ranThisPass = true
-        } else {
-          queue.push(jobId)
+        if (!ranThisPass) {
+          throw new Error(
+            `Scheduler detected unresolved dependencies for context ${String(
+              contextId,
+            )}.`,
+          )
         }
       }
 
-      if (!ranThisPass) {
-        throw new Error(
-          `Scheduler detected unresolved dependencies for context ${String(
-            contextId,
-          )}.`,
+      this.contexts.delete(contextId)
+    } finally {
+      if (shouldTrace) {
+        recordPerfCount(`scheduler.flush.passes`, passes)
+        recordPerfCount(`scheduler.flush.jobsRun`, jobsRun)
+        recordPerfCount(
+          `scheduler.flush.blockedDependencies`,
+          blockedDependencies,
         )
+        span?.end({ jobsRun })
       }
     }
-
-    this.contexts.delete(contextId)
   }
 
   /**

@@ -3,6 +3,11 @@ import {
   createSingleRowRefProxy,
   toExpression,
 } from '../query/builder/ref-proxy.js'
+import {
+  isPerfEnabled,
+  recordPerfCount,
+  startPerfSpan,
+} from '../query/live/perf.js'
 import { CollectionSubscription } from './subscription.js'
 import type { StandardSchemaV1 } from '@standard-schema/spec'
 import type { ChangeMessage, SubscribeChangesOptions } from '../types'
@@ -77,10 +82,23 @@ export class CollectionChangesManager<
     changes: Array<ChangeMessage<TOutput, TKey>>,
     forceEmit = false,
   ): void {
+    const shouldTrace = isPerfEnabled()
+    const span = shouldTrace
+      ? startPerfSpan(`collection.changes.emitEvents`, {
+          collectionId: this.collection.id,
+          forceEmit,
+        })
+      : undefined
     // Skip batching for user actions (forceEmit=true) to keep UI responsive
     if (this.shouldBatchEvents && !forceEmit) {
       // Add events to the batch
       this.batchedEvents.push(...changes)
+      if (shouldTrace) {
+        recordPerfCount(`collection.changes.batchedEvents`, changes.length, {
+          collectionId: this.collection.id,
+        })
+        span?.end({ batched: true })
+      }
       return
     }
 
@@ -99,18 +117,48 @@ export class CollectionChangesManager<
     }
 
     if (rawEvents.length === 0) {
+      span?.end({ rawEvents: 0 })
       return
     }
 
     // Enrich all change messages with virtual properties
     // This uses the "add-if-missing" pattern to preserve pass-through semantics
+    const enrichSpan = shouldTrace
+      ? startPerfSpan(`collection.changes.enrichVirtualProps`, {
+          collectionId: this.collection.id,
+        })
+      : undefined
     const enrichedEvents: Array<
       ChangeMessage<WithVirtualProps<TOutput, TKey>, TKey>
     > = rawEvents.map((change) => this.enrichChangeWithVirtualProps(change))
+    enrichSpan?.end()
 
     // Emit to all listeners
+    const deliverySpan = shouldTrace
+      ? startPerfSpan(`collection.changes.subscriberDelivery`, {
+          collectionId: this.collection.id,
+          subscriberCount: this.changeSubscriptions.size,
+        })
+      : undefined
     for (const subscription of this.changeSubscriptions) {
       subscription.emitEvents(enrichedEvents)
+    }
+    if (shouldTrace) {
+      recordPerfCount(`collection.changes.rawEvents`, rawEvents.length, {
+        collectionId: this.collection.id,
+      })
+      recordPerfCount(
+        `collection.changes.enrichedEvents`,
+        enrichedEvents.length,
+        { collectionId: this.collection.id },
+      )
+      recordPerfCount(
+        `collection.changes.subscriberDeliveries`,
+        this.changeSubscriptions.size,
+        { collectionId: this.collection.id },
+      )
+      deliverySpan?.end()
+      span?.end({ rawEvents: rawEvents.length })
     }
   }
 

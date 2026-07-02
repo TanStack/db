@@ -5,6 +5,11 @@ import { EventEmitter } from '../event-emitter.js'
 import { compileExpression } from '../query/compiler/evaluators.js'
 import { buildCursor } from '../utils/cursor.js'
 import {
+  isPerfEnabled,
+  recordPerfCount,
+  startPerfSpan,
+} from '../query/live/perf.js'
+import {
   createFilterFunctionFromExpression,
   createFilteredCallback,
 } from './change-events.js'
@@ -319,7 +324,21 @@ export class CollectionSubscription
   }
 
   emitEvents(changes: Array<ChangeMessage<any, any>>) {
+    const shouldTrace = isPerfEnabled()
+    const span = shouldTrace
+      ? startPerfSpan(`collection.subscription.emitEvents`, {
+          collectionId: this.collection.id,
+        })
+      : undefined
     const newChanges = this.filterAndFlipChanges(changes)
+    if (shouldTrace) {
+      recordPerfCount(`collection.subscription.eventsIn`, changes.length, {
+        collectionId: this.collection.id,
+      })
+      recordPerfCount(`collection.subscription.eventsOut`, newChanges.length, {
+        collectionId: this.collection.id,
+      })
+    }
 
     if (this.isBufferingForTruncate) {
       // Buffer the changes instead of emitting immediately
@@ -330,6 +349,7 @@ export class CollectionSubscription
     } else {
       this.filteredCallback(newChanges)
     }
+    span?.end({ outputRows: newChanges.length })
   }
 
   /**
@@ -340,8 +360,16 @@ export class CollectionSubscription
    * or, the entire state was already loaded.
    */
   requestSnapshot(opts?: RequestSnapshotOptions): boolean {
+    const shouldTrace = isPerfEnabled()
+    const span = shouldTrace
+      ? startPerfSpan(`collection.subscription.requestSnapshot`, {
+          collectionId: this.collection.id,
+          optimizedOnly: opts?.optimizedOnly === true,
+        })
+      : undefined
     if (this.loadedInitialState) {
       // Subscription was deoptimized so we already sent the entire initial state
+      span?.end({ skipped: true })
       return false
     }
 
@@ -394,6 +422,7 @@ export class CollectionSubscription
 
     if (snapshot === undefined) {
       // Couldn't load from indexes
+      span?.end({ optimized: false })
       return false
     }
 
@@ -411,6 +440,14 @@ export class CollectionSubscription
 
     this.snapshotSent = true
     this.callback(filteredSnapshot)
+    if (shouldTrace) {
+      recordPerfCount(
+        `collection.subscription.snapshotRows`,
+        filteredSnapshot.length,
+        { collectionId: this.collection.id },
+      )
+      span?.end({ rows: filteredSnapshot.length })
+    }
     return true
   }
 
@@ -442,6 +479,14 @@ export class CollectionSubscription
         `Ordered snapshot was requested but no index was found. You have to call setOrderByIndex before requesting an ordered snapshot.`,
       )
     }
+    const shouldTrace = isPerfEnabled()
+    const span = shouldTrace
+      ? startPerfSpan(`collection.subscription.requestLimitedSnapshot`, {
+          collectionId: this.collection.id,
+          limit,
+          hasMinValues: minValues !== undefined && minValues.length > 0,
+        })
+      : undefined
 
     // Check if minValues has a first element (regardless of its value)
     // This distinguishes between "no min value provided" vs "min value is undefined"
@@ -623,6 +668,14 @@ export class CollectionSubscription
     this.loadedSubsets.push(loadOptions)
     if (shouldTrackLoadSubsetPromise) {
       this.trackLoadSubsetPromise(syncResult)
+    }
+    if (shouldTrace) {
+      recordPerfCount(
+        `collection.subscription.limitedSnapshotRows`,
+        changes.length,
+        { collectionId: this.collection.id },
+      )
+      span?.end({ rows: changes.length })
     }
   }
 

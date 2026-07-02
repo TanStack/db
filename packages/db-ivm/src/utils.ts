@@ -1,3 +1,5 @@
+import { isPerfEnabled, recordPerfCount, startPerfSpan } from './perf.js'
+
 /**
  * Simple assertion function for runtime checks.
  * Throws an error if the condition is false.
@@ -91,9 +93,19 @@ export class ObjectIdGenerator {
    * - Objects: Uses WeakMap for reference-based identity
    * - Primitives: Uses consistent string-based hashing
    */
-  getId(value: any): number {
+  getId(value: unknown): number {
+    const shouldTrace = isPerfEnabled()
+    const span = shouldTrace
+      ? startPerfSpan(`objectIdGenerator.getId`, {
+          kind: value === null ? `null` : typeof value,
+        })
+      : undefined
+
     // For primitives, use a simple hash of their string representation
     if (typeof value !== `object` || value === null) {
+      if (shouldTrace) {
+        recordPerfCount(`objectIdGenerator.primitiveCalls`)
+      }
       const str = String(value)
       let hashValue = 0
       for (let i = 0; i < str.length; i++) {
@@ -101,25 +113,46 @@ export class ObjectIdGenerator {
         hashValue = (hashValue << 5) - hashValue + char
         hashValue = hashValue & hashValue // Convert to 32-bit integer
       }
+      span?.end()
       return hashValue
     }
 
     // For objects, use WeakMap to assign unique IDs
     if (!this.objectIds.has(value)) {
+      if (shouldTrace) {
+        recordPerfCount(`objectIdGenerator.objectMisses`)
+      }
       this.objectIds.set(value, this.nextId++)
+    } else if (shouldTrace) {
+      recordPerfCount(`objectIdGenerator.objectHits`)
     }
+    span?.end()
     return this.objectIds.get(value)!
   }
 
   /**
    * Get a string representation of the ID for use in composite keys.
    */
-  getStringId(value: any): string {
-    if (value === null) return `null`
-    if (value === undefined) return `undefined`
-    if (typeof value !== `object`) return `str_${String(value)}`
+  getStringId(value: unknown): string {
+    const shouldTrace = isPerfEnabled()
+    const span = shouldTrace
+      ? startPerfSpan(`objectIdGenerator.getStringId`, {
+          kind: value === null ? `null` : typeof value,
+        })
+      : undefined
 
-    return `obj_${this.getId(value)}`
+    try {
+      if (shouldTrace) {
+        recordPerfCount(`objectIdGenerator.getStringId.calls`)
+      }
+      if (value === null) return `null`
+      if (value === undefined) return `undefined`
+      if (typeof value !== `object`) return `str_${String(value)}`
+
+      return `obj_${this.getId(value)}`
+    } finally {
+      span?.end()
+    }
   }
 }
 
@@ -199,13 +232,31 @@ export function compareKeys(a: string | number, b: string | number): number {
  * This is used for creating string keys in groupBy operations.
  */
 export function serializeValue(value: unknown): string {
-  return JSON.stringify(value, (_, val) => {
-    if (typeof val === 'bigint') {
-      return val.toString()
-    }
-    if (val instanceof Date) {
-      return val.toISOString()
-    }
-    return val
-  })
+  if (!isPerfEnabled()) {
+    return JSON.stringify(value, (_, val) => {
+      if (typeof val === 'bigint') {
+        return val.toString()
+      }
+      if (val instanceof Date) {
+        return val.toISOString()
+      }
+      return val
+    })
+  }
+
+  recordPerfCount(`serializeValue.calls`)
+  const span = startPerfSpan(`serializeValue`)
+  try {
+    return JSON.stringify(value, (_, val) => {
+      if (typeof val === 'bigint') {
+        return val.toString()
+      }
+      if (val instanceof Date) {
+        return val.toISOString()
+      }
+      return val
+    })
+  } finally {
+    span.end()
+  }
 }

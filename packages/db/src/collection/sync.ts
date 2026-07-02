@@ -10,6 +10,11 @@ import {
 } from '../errors'
 import { deepEquals } from '../utils'
 import { LIVE_QUERY_INTERNAL } from '../query/live/internal.js'
+import {
+  isPerfEnabled,
+  recordPerfCount,
+  startPerfSpan,
+} from '../query/live/perf.js'
 import type { StandardSchemaV1 } from '@standard-schema/spec'
 import type {
   ChangeMessageOrDeleteKeyMessage,
@@ -90,14 +95,30 @@ export class CollectionSyncManager<
         this.config.sync.sync({
           collection: this.collection,
           begin: (options?: { immediate?: boolean }) => {
-            this.state.pendingSyncedTransactions.push({
-              committed: false,
-              operations: [],
-              deletedKeys: new Set(),
-              rowMetadataWrites: new Map(),
-              collectionMetadataWrites: new Map(),
-              immediate: options?.immediate,
-            })
+            const shouldTrace = isPerfEnabled()
+            const span = shouldTrace
+              ? startPerfSpan(`collection.sync.begin`, {
+                  collectionId: this.id,
+                  immediate: options?.immediate === true,
+                })
+              : undefined
+            try {
+              this.state.pendingSyncedTransactions.push({
+                committed: false,
+                operations: [],
+                deletedKeys: new Set(),
+                rowMetadataWrites: new Map(),
+                collectionMetadataWrites: new Map(),
+                immediate: options?.immediate,
+              })
+            } finally {
+              if (shouldTrace) {
+                recordPerfCount(`collection.sync.begin.calls`, 1, {
+                  collectionId: this.id,
+                })
+                span?.end()
+              }
+            }
           },
           write: (
             messageWithOptionalKey: ChangeMessageOrDeleteKeyMessage<
@@ -105,113 +126,161 @@ export class CollectionSyncManager<
               TKey
             >,
           ) => {
-            const pendingTransaction =
-              this.state.pendingSyncedTransactions[
-                this.state.pendingSyncedTransactions.length - 1
-              ]
-            if (!pendingTransaction) {
-              throw new NoPendingSyncTransactionWriteError()
-            }
-            if (pendingTransaction.committed) {
-              throw new SyncTransactionAlreadyCommittedWriteError()
-            }
+            const shouldTrace = isPerfEnabled()
+            const span = shouldTrace
+              ? startPerfSpan(`collection.sync.write`, {
+                  collectionId: this.id,
+                  type: messageWithOptionalKey.type,
+                })
+              : undefined
+            try {
+              const pendingTransaction =
+                this.state.pendingSyncedTransactions[
+                  this.state.pendingSyncedTransactions.length - 1
+                ]
+              if (!pendingTransaction) {
+                throw new NoPendingSyncTransactionWriteError()
+              }
+              if (pendingTransaction.committed) {
+                throw new SyncTransactionAlreadyCommittedWriteError()
+              }
 
-            let key: TKey | undefined = undefined
-            if (`key` in messageWithOptionalKey) {
-              key = messageWithOptionalKey.key
-            } else {
-              key = this.config.getKey(messageWithOptionalKey.value)
-            }
+              let key: TKey | undefined = undefined
+              if (`key` in messageWithOptionalKey) {
+                key = messageWithOptionalKey.key
+              } else {
+                key = this.config.getKey(messageWithOptionalKey.value)
+              }
 
-            if (this.state.pendingLocalChanges.has(key)) {
-              this.state.pendingLocalOrigins.add(key)
-            }
+              if (this.state.pendingLocalChanges.has(key)) {
+                this.state.pendingLocalOrigins.add(key)
+              }
 
-            let messageType = messageWithOptionalKey.type
+              let messageType = messageWithOptionalKey.type
 
-            // Check if an item with this key already exists when inserting
-            if (messageWithOptionalKey.type === `insert`) {
-              const insertingIntoExistingSynced = this.state.syncedData.has(key)
-              const hasPendingDeleteForKey =
-                pendingTransaction.deletedKeys.has(key)
-              const isTruncateTransaction = pendingTransaction.truncate === true
-              // Allow insert after truncate in the same transaction even if it existed in syncedData
-              if (
-                insertingIntoExistingSynced &&
-                !hasPendingDeleteForKey &&
-                !isTruncateTransaction
-              ) {
-                const existingValue = this.state.syncedData.get(key)
-                const valuesEqual =
-                  existingValue !== undefined &&
-                  deepEquals(existingValue, messageWithOptionalKey.value)
-                if (valuesEqual) {
-                  // The "insert" is an echo of a value we already have locally.
-                  // Treat it as an update so we preserve optimistic intent without
-                  // throwing a duplicate-key error during reconciliation.
-                  messageType = `update`
-                } else {
-                  const utils = this.config.utils as
-                    | Partial<LiveQueryCollectionUtils>
-                    | undefined
-                  const internal = utils?.[LIVE_QUERY_INTERNAL]
-                  throw new DuplicateKeySyncError(key, this.id, {
-                    hasCustomGetKey: internal?.hasCustomGetKey ?? false,
-                    hasJoins: internal?.hasJoins ?? false,
-                    hasDistinct: internal?.hasDistinct ?? false,
-                  })
+              // Check if an item with this key already exists when inserting
+              if (messageWithOptionalKey.type === `insert`) {
+                const insertingIntoExistingSynced =
+                  this.state.syncedData.has(key)
+                const hasPendingDeleteForKey =
+                  pendingTransaction.deletedKeys.has(key)
+                const isTruncateTransaction =
+                  pendingTransaction.truncate === true
+                // Allow insert after truncate in the same transaction even if it existed in syncedData
+                if (
+                  insertingIntoExistingSynced &&
+                  !hasPendingDeleteForKey &&
+                  !isTruncateTransaction
+                ) {
+                  const existingValue = this.state.syncedData.get(key)
+                  const valuesEqual =
+                    existingValue !== undefined &&
+                    deepEquals(existingValue, messageWithOptionalKey.value)
+                  if (valuesEqual) {
+                    // The "insert" is an echo of a value we already have locally.
+                    // Treat it as an update so we preserve optimistic intent without
+                    // throwing a duplicate-key error during reconciliation.
+                    messageType = `update`
+                  } else {
+                    const utils = this.config.utils as
+                      | Partial<LiveQueryCollectionUtils>
+                      | undefined
+                    const internal = utils?.[LIVE_QUERY_INTERNAL]
+                    throw new DuplicateKeySyncError(key, this.id, {
+                      hasCustomGetKey: internal?.hasCustomGetKey ?? false,
+                      hasJoins: internal?.hasJoins ?? false,
+                      hasDistinct: internal?.hasDistinct ?? false,
+                    })
+                  }
                 }
               }
-            }
 
-            const message = {
-              ...messageWithOptionalKey,
-              type: messageType,
-              key,
-            } as OptimisticChangeMessage<TOutput, TKey>
-            pendingTransaction.operations.push(message)
+              const message = {
+                ...messageWithOptionalKey,
+                type: messageType,
+                key,
+              } as OptimisticChangeMessage<TOutput, TKey>
+              pendingTransaction.operations.push(message)
 
-            if (messageType === `delete`) {
-              pendingTransaction.deletedKeys.add(key)
-              pendingTransaction.rowMetadataWrites.set(key, { type: `delete` })
-            } else if (messageType === `insert`) {
-              if (message.metadata !== undefined) {
+              if (messageType === `delete`) {
+                pendingTransaction.deletedKeys.add(key)
+                pendingTransaction.rowMetadataWrites.set(key, {
+                  type: `delete`,
+                })
+              } else if (messageType === `insert`) {
+                if (message.metadata !== undefined) {
+                  pendingTransaction.rowMetadataWrites.set(key, {
+                    type: `set`,
+                    value: message.metadata,
+                  })
+                } else {
+                  pendingTransaction.rowMetadataWrites.set(key, {
+                    type: `delete`,
+                  })
+                }
+              } else if (message.metadata !== undefined) {
                 pendingTransaction.rowMetadataWrites.set(key, {
                   type: `set`,
                   value: message.metadata,
                 })
-              } else {
-                pendingTransaction.rowMetadataWrites.set(key, {
-                  type: `delete`,
-                })
               }
-            } else if (message.metadata !== undefined) {
-              pendingTransaction.rowMetadataWrites.set(key, {
-                type: `set`,
-                value: message.metadata,
-              })
+            } finally {
+              if (shouldTrace) {
+                recordPerfCount(`collection.sync.write.calls`, 1, {
+                  collectionId: this.id,
+                  type: messageWithOptionalKey.type,
+                })
+                span?.end()
+              }
             }
           },
           commit: () => {
-            const pendingTransaction =
-              this.state.pendingSyncedTransactions[
-                this.state.pendingSyncedTransactions.length - 1
-              ]
-            if (!pendingTransaction) {
-              throw new NoPendingSyncTransactionCommitError()
-            }
-            if (pendingTransaction.committed) {
-              throw new SyncTransactionAlreadyCommittedError()
-            }
+            const shouldTrace = isPerfEnabled()
+            const span = shouldTrace
+              ? startPerfSpan(`collection.sync.commit`, {
+                  collectionId: this.id,
+                })
+              : undefined
+            try {
+              const pendingTransaction =
+                this.state.pendingSyncedTransactions[
+                  this.state.pendingSyncedTransactions.length - 1
+                ]
+              if (!pendingTransaction) {
+                throw new NoPendingSyncTransactionCommitError()
+              }
+              if (pendingTransaction.committed) {
+                throw new SyncTransactionAlreadyCommittedError()
+              }
 
-            pendingTransaction.committed = true
+              pendingTransaction.committed = true
+              if (shouldTrace) {
+                recordPerfCount(
+                  `collection.sync.commit.operations`,
+                  pendingTransaction.operations.length,
+                  { collectionId: this.id },
+                )
+              }
 
-            this.state.commitPendingTransactions()
+              this.state.commitPendingTransactions()
+            } finally {
+              if (shouldTrace) {
+                recordPerfCount(`collection.sync.commit.calls`, 1, {
+                  collectionId: this.id,
+                })
+                span?.end()
+              }
+            }
           },
           markReady: () => {
             this.lifecycle.markReady()
           },
           truncate: () => {
+            if (isPerfEnabled()) {
+              recordPerfCount(`collection.sync.truncate.calls`, 1, {
+                collectionId: this.id,
+              })
+            }
             const pendingTransaction =
               this.state.pendingSyncedTransactions[
                 this.state.pendingSyncedTransactions.length - 1

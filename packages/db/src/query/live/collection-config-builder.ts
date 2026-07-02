@@ -15,6 +15,12 @@ import { CollectionSubscriber } from './collection-subscriber.js'
 import { getCollectionBuilder } from './collection-registry.js'
 import { LIVE_QUERY_INTERNAL } from './internal.js'
 import {
+  isPerfEnabled,
+  recordPerfCount,
+  startPerfSpan,
+  withPerfSpan,
+} from './perf.js'
+import {
   buildQueryFromConfig,
   extractCollectionAliases,
   extractCollectionFromSource,
@@ -349,6 +355,11 @@ export class CollectionConfigBuilder<
       // no nested runs of the graph
       // which is possible if the `callback`
       // would call `maybeRunGraph` e.g. after it has loaded some more data
+      if (isPerfEnabled()) {
+        recordPerfCount(`liveQuery.maybeRunGraph.nestedSkips`, 1, {
+          builderId: this.id,
+        })
+      }
       return
     }
 
@@ -360,6 +371,15 @@ export class CollectionConfigBuilder<
     }
 
     this.isGraphRunning = true
+    const shouldTrace = isPerfEnabled()
+    const span = shouldTrace
+      ? startPerfSpan(`liveQuery.maybeRunGraph`, {
+          builderId: this.id,
+        })
+      : undefined
+    let graphRuns = 0
+    let flushes = 0
+    let callbacks = 0
 
     try {
       const { begin, commit } = this.currentSyncConfig
@@ -374,12 +394,23 @@ export class CollectionConfigBuilder<
       if (syncState.subscribedToAllCollections) {
         let callbackCalled = false
         while (syncState.graph.pendingWork()) {
-          syncState.graph.run()
+          graphRuns++
+          withPerfSpan(
+            `liveQuery.graph.run`,
+            {
+              builderId: this.id,
+            },
+            () => {
+              syncState.graph.run()
+            },
+          )
           // Flush accumulated changes after each graph step to commit them as one transaction.
           // This ensures intermediate join states (like null on one side) don't cause
           // duplicate key errors when the full join result arrives in the same step.
           syncState.flushPendingChanges?.()
+          flushes++
           callback?.()
+          callbacks++
           callbackCalled = true
         }
 
@@ -388,6 +419,7 @@ export class CollectionConfigBuilder<
         // an async loadSubset completes and we need to re-check if more data is needed.
         if (!callbackCalled) {
           callback?.()
+          callbacks++
         }
 
         // On the initial run, we may need to do an empty commit to ensure that
@@ -405,6 +437,18 @@ export class CollectionConfigBuilder<
         this.updateLiveQueryStatus(this.currentSyncConfig)
       }
     } finally {
+      if (shouldTrace) {
+        recordPerfCount(`liveQuery.maybeRunGraph.graphRuns`, graphRuns, {
+          builderId: this.id,
+        })
+        recordPerfCount(`liveQuery.maybeRunGraph.flushes`, flushes, {
+          builderId: this.id,
+        })
+        recordPerfCount(`liveQuery.maybeRunGraph.callbacks`, callbacks, {
+          builderId: this.id,
+        })
+        span?.end({ graphRuns })
+      }
       this.isGraphRunning = false
     }
   }
@@ -437,6 +481,14 @@ export class CollectionConfigBuilder<
     },
   ) {
     const contextId = options?.contextId ?? getActiveTransaction()?.id
+    if (isPerfEnabled()) {
+      recordPerfCount(`liveQuery.scheduleGraphRun`, 1, {
+        builderId: this.id,
+        alias: options?.alias,
+        context: contextId !== undefined,
+        hasCallback: callback !== undefined,
+      })
+    }
     // Use the builder instance as the job ID for deduplication. This is memory-safe
     // because the scheduler's context Map is deleted after flushing (no long-term retention).
     const jobId = options?.jobId ?? this
@@ -494,6 +546,11 @@ export class CollectionConfigBuilder<
     // Add callback if provided (this is what accumulates between schedules)
     if (callback) {
       pending.loadCallbacks.add(callback)
+      if (isPerfEnabled()) {
+        recordPerfCount(`liveQuery.scheduleGraphRun.callbacks`, 1, {
+          builderId: this.id,
+        })
+      }
     }
 
     // Schedule execution (scheduler just orchestrates order, we manage state)
@@ -547,27 +604,63 @@ export class CollectionConfigBuilder<
 
     // If no pending state, nothing to execute (context was cleared)
     if (!pending) {
+      if (isPerfEnabled()) {
+        recordPerfCount(`liveQuery.executeGraphRun.skips`, 1, {
+          builderId: this.id,
+          reason: `missingPending`,
+        })
+      }
       return
     }
 
     // If sync session has ended, don't execute (graph is finalized, subscriptions cleared)
     if (!this.currentSyncConfig || !this.currentSyncState) {
+      if (isPerfEnabled()) {
+        recordPerfCount(`liveQuery.executeGraphRun.skips`, 1, {
+          builderId: this.id,
+          reason: `inactiveSync`,
+        })
+      }
       return
     }
 
+    const shouldTrace = isPerfEnabled()
+    const span = shouldTrace
+      ? startPerfSpan(`liveQuery.executeGraphRun`, {
+          builderId: this.id,
+          callbackCount: pending.loadCallbacks.size,
+          context: contextId !== undefined,
+        })
+      : undefined
+    if (shouldTrace) {
+      recordPerfCount(
+        `liveQuery.executeGraphRun.callbacks`,
+        pending.loadCallbacks.size,
+        { builderId: this.id },
+      )
+    }
     this.incrementRunCount()
 
     const combinedLoader = () => {
       let allDone = true
       let firstError: unknown
-      pending.loadCallbacks.forEach((loader) => {
-        try {
-          allDone = loader() && allDone
-        } catch (error) {
-          allDone = false
-          firstError ??= error
-        }
-      })
+      withPerfSpan(
+        `liveQuery.executeGraphRun.loadCallbacks`,
+        {
+          builderId: this.id,
+          callbackCount: pending.loadCallbacks.size,
+        },
+        () => {
+          pending.loadCallbacks.forEach((loader) => {
+            try {
+              allDone = loader() && allDone
+            } catch (error) {
+              allDone = false
+              firstError ??= error
+            }
+          })
+        },
+      )
       if (firstError) {
         throw firstError
       }
@@ -575,7 +668,11 @@ export class CollectionConfigBuilder<
       return allDone
     }
 
-    this.maybeRunGraph(combinedLoader)
+    try {
+      this.maybeRunGraph(combinedLoader)
+    } finally {
+      span?.end()
+    }
   }
 
   private getSyncConfig(): SyncConfig<TResult> {
@@ -753,12 +850,24 @@ export class CollectionConfigBuilder<
 
     pipeline.pipe(
       output((data) => {
+        const shouldTrace = isPerfEnabled()
+        const span = shouldTrace
+          ? startPerfSpan(`liveQuery.output.parent`, {
+              builderId: this.id,
+            })
+          : undefined
         const messages = data.getInner()
         syncState.messagesCount += messages.length
+        if (shouldTrace) {
+          recordPerfCount(`liveQuery.output.parentRows`, messages.length, {
+            builderId: this.id,
+          })
+        }
 
         // Accumulate changes from this output callback into the pending changes map.
         // Changes for the same key are merged (inserts/deletes are added together).
         messages.reduce(accumulateChanges<TResult>, pendingChanges)
+        span?.end()
       }),
     )
 
@@ -771,57 +880,83 @@ export class CollectionConfigBuilder<
     // Flush pending changes and reset the accumulator.
     // Called at the end of each graph run to commit all accumulated changes.
     syncState.flushPendingChanges = () => {
+      const shouldTrace = isPerfEnabled()
+      const span = shouldTrace
+        ? startPerfSpan(`liveQuery.flushPendingChanges`, {
+            builderId: this.id,
+          })
+        : undefined
       const hasParentChanges = pendingChanges.size > 0
       const hasChildChanges = hasPendingIncludesChanges(includesState)
+      const pendingParentChangeCount = pendingChanges.size
 
-      if (!hasParentChanges && !hasChildChanges) {
-        return
-      }
-
-      let changesToApply = pendingChanges
-
-      // When a custom getKey is provided, multiple D2 internal keys may map
-      // to the same user-visible key. Re-accumulate by custom key so that a
-      // retract + insert for the same logical row merges into an UPDATE
-      // instead of a separate DELETE and INSERT that can race.
-      if (this.config.getKey) {
-        const merged = new Map<unknown, Changes<TResult>>()
-        for (const [, changes] of pendingChanges) {
-          const customKey = this.config.getKey(changes.value)
-          const existing = merged.get(customKey)
-          if (existing) {
-            existing.inserts += changes.inserts
-            existing.deletes += changes.deletes
-            // Keep the value from the insert side (the new value)
-            if (changes.inserts > 0) {
-              existing.value = changes.value
-              if (changes.orderByIndex !== undefined) {
-                existing.orderByIndex = changes.orderByIndex
-              }
-            }
-          } else {
-            merged.set(customKey, { ...changes })
-          }
+      try {
+        if (!hasParentChanges && !hasChildChanges) {
+          return
         }
-        changesToApply = merged
-      }
 
-      // 1. Flush parent changes
-      if (hasParentChanges) {
-        begin()
-        changesToApply.forEach(this.applyChanges.bind(this, config))
-        commit()
-      }
-      pendingChanges = new Map()
+        let changesToApply = pendingChanges
 
-      // 2. Process includes: create/dispose child Collections, route child changes
-      flushIncludesState(
-        includesState,
-        config.collection,
-        this.id,
-        hasParentChanges ? changesToApply : null,
-        config,
-      )
+        // When a custom getKey is provided, multiple D2 internal keys may map
+        // to the same user-visible key. Re-accumulate by custom key so that a
+        // retract + insert for the same logical row merges into an UPDATE
+        // instead of a separate DELETE and INSERT that can race.
+        if (this.config.getKey) {
+          const merged = new Map<unknown, Changes<TResult>>()
+          for (const [, changes] of pendingChanges) {
+            const customKey = this.config.getKey(changes.value)
+            const existing = merged.get(customKey)
+            if (existing) {
+              existing.inserts += changes.inserts
+              existing.deletes += changes.deletes
+              // Keep the value from the insert side (the new value)
+              if (changes.inserts > 0) {
+                existing.value = changes.value
+                if (changes.orderByIndex !== undefined) {
+                  existing.orderByIndex = changes.orderByIndex
+                }
+              }
+            } else {
+              merged.set(customKey, { ...changes })
+            }
+          }
+          changesToApply = merged
+        }
+
+        // 1. Flush parent changes
+        if (hasParentChanges) {
+          begin()
+          changesToApply.forEach(this.applyChanges.bind(this, config))
+          commit()
+        }
+        pendingChanges = new Map()
+
+        // 2. Process includes: create/dispose child Collections, route child changes
+        flushIncludesState(
+          includesState,
+          config.collection,
+          this.id,
+          hasParentChanges ? changesToApply : null,
+          config,
+        )
+      } finally {
+        if (shouldTrace) {
+          recordPerfCount(
+            `liveQuery.flushPendingChanges.parentChanges`,
+            pendingParentChangeCount,
+            { builderId: this.id },
+          )
+          recordPerfCount(
+            `liveQuery.flushPendingChanges.includesStates`,
+            includesState.length,
+            { builderId: this.id },
+          )
+          span?.end({
+            hasParentChanges,
+            hasChildChanges,
+          })
+        }
+      }
     }
 
     graph.finalize()
@@ -863,8 +998,23 @@ export class CollectionConfigBuilder<
       // Attach output callback on the child pipeline
       entry.pipeline.pipe(
         output((data) => {
+          const shouldTrace = isPerfEnabled()
+          const span = shouldTrace
+            ? startPerfSpan(`liveQuery.output.includes`, {
+                builderId: this.id,
+                fieldName: state.fieldName,
+                materialization: state.materialization,
+              })
+            : undefined
           const messages = data.getInner()
           syncState.messagesCount += messages.length
+          if (shouldTrace) {
+            recordPerfCount(`liveQuery.output.includesRows`, messages.length, {
+              builderId: this.id,
+              fieldName: state.fieldName,
+              materialization: state.materialization,
+            })
+          }
 
           for (const [[childKey, tupleData], multiplicity] of messages) {
             const [childResult, _orderByIndex, correlationKey, parentContext] =
@@ -900,6 +1050,7 @@ export class CollectionConfigBuilder<
 
             byChild.set(childKey, existing)
           }
+          span?.end()
         }),
       )
 
@@ -1872,172 +2023,182 @@ function flushIncludesState(
   parentChanges: Map<unknown, Changes<any>> | null,
   parentSyncMethods: SyncMethods<any> | null,
 ): void {
-  for (const state of includesState) {
-    // Phase 1: Parent INSERTs — ensure a child Collection exists for every parent
-    if (parentChanges) {
-      for (const [parentKey, changes] of parentChanges) {
-        if (changes.inserts > 0) {
-          const parentResult = changes.value
-          // Extract routing info from INCLUDES_ROUTING symbol (set by compiler)
-          const routing = parentResult[INCLUDES_ROUTING]?.[state.fieldName]
-          const correlationKey = routing?.correlationKey
-          const parentContext = routing?.parentContext ?? null
-          const routingKey = computeRoutingKey(correlationKey, parentContext)
+  const shouldTrace = isPerfEnabled()
+  const span = shouldTrace
+    ? startPerfSpan(`includes.flushState`, {
+        parentId,
+        stateCount: includesState.length,
+      })
+    : undefined
+  let parentInsertCount = 0
+  let parentDeleteCount = 0
+  let childChangeGroups = 0
+  let childChangeRows = 0
+  let childCollectionsCreated = 0
+  let nestedBufferDirtyCount = 0
+  let recursiveFlushes = 0
+  let inlineReEmitEvents = 0
+  let childCollectionsDeleted = 0
 
-          if (correlationKey != null) {
-            // Ensure child Collection exists for this routing key
-            if (!state.childRegistry.has(routingKey)) {
-              const entry = createChildCollectionEntry(
-                parentId,
-                state.fieldName,
-                routingKey,
-                state.hasOrderBy,
-                state.nestedSetups,
+  try {
+    for (const state of includesState) {
+      // Phase 1: Parent INSERTs — ensure a child Collection exists for every parent
+      if (parentChanges) {
+        for (const [parentKey, changes] of parentChanges) {
+          if (changes.inserts > 0) {
+            parentInsertCount++
+            const parentResult = changes.value
+            // Extract routing info from INCLUDES_ROUTING symbol (set by compiler)
+            const routing = parentResult[INCLUDES_ROUTING]?.[state.fieldName]
+            const correlationKey = routing?.correlationKey
+            const parentContext = routing?.parentContext ?? null
+            const routingKey = computeRoutingKey(correlationKey, parentContext)
+
+            if (correlationKey != null) {
+              // Ensure child Collection exists for this routing key
+              if (!state.childRegistry.has(routingKey)) {
+                const entry = createChildCollectionEntry(
+                  parentId,
+                  state.fieldName,
+                  routingKey,
+                  state.hasOrderBy,
+                  state.nestedSetups,
+                )
+                state.childRegistry.set(routingKey, entry)
+                childCollectionsCreated++
+              }
+              // Update reverse index: routing key → parent keys
+              let parentKeys = state.correlationToParentKeys.get(routingKey)
+              if (!parentKeys) {
+                parentKeys = new Set()
+                state.correlationToParentKeys.set(routingKey, parentKeys)
+              }
+              parentKeys.add(parentKey)
+
+              const childValue = materializeIncludedValue(
+                state,
+                state.childRegistry.get(routingKey),
               )
-              state.childRegistry.set(routingKey, entry)
-            }
-            // Update reverse index: routing key → parent keys
-            let parentKeys = state.correlationToParentKeys.get(routingKey)
-            if (!parentKeys) {
-              parentKeys = new Set()
-              state.correlationToParentKeys.set(routingKey, parentKeys)
-            }
-            parentKeys.add(parentKey)
+              setIncludedValue(parentResult, state.resultPath, childValue)
 
-            const childValue = materializeIncludedValue(
-              state,
-              state.childRegistry.get(routingKey),
-            )
-            setIncludedValue(parentResult, state.resultPath, childValue)
-
-            // Parent rows may already be materialized in the live collection by the
-            // time includes state is flushed, so update the stored row as well.
-            const storedParent = parentCollection.get(parentKey as any)
-            if (storedParent && storedParent !== parentResult) {
-              setIncludedValue(storedParent, state.resultPath, childValue)
+              // Parent rows may already be materialized in the live collection by the
+              // time includes state is flushed, so update the stored row as well.
+              const storedParent = parentCollection.get(parentKey as any)
+              if (storedParent && storedParent !== parentResult) {
+                setIncludedValue(storedParent, state.resultPath, childValue)
+              }
             }
           }
         }
       }
-    }
 
-    // Track affected correlation keys for inline materializations before clearing child changes.
-    const affectedCorrelationKeys = materializesInline(state)
-      ? new Set<unknown>(state.pendingChildChanges.keys())
-      : null
+      // Track affected correlation keys for inline materializations before clearing child changes.
+      const affectedCorrelationKeys = materializesInline(state)
+        ? new Set<unknown>(state.pendingChildChanges.keys())
+        : null
 
-    // Phase 2: Child changes — apply to child Collections
-    // Track which entries had child changes and capture their childChanges maps
-    const entriesWithChildChanges = new Map<
-      unknown,
-      { entry: ChildCollectionEntry; childChanges: Map<unknown, Changes<any>> }
-    >()
-    if (state.pendingChildChanges.size > 0) {
-      for (const [correlationKey, childChanges] of state.pendingChildChanges) {
-        // Ensure child Collection exists for this correlation key
-        let entry = state.childRegistry.get(correlationKey)
-        if (!entry) {
-          entry = createChildCollectionEntry(
-            parentId,
-            state.fieldName,
-            correlationKey,
-            state.hasOrderBy,
-            state.nestedSetups,
-          )
-          state.childRegistry.set(correlationKey, entry)
+      // Phase 2: Child changes — apply to child Collections
+      // Track which entries had child changes and capture their childChanges maps
+      const entriesWithChildChanges = new Map<
+        unknown,
+        {
+          entry: ChildCollectionEntry
+          childChanges: Map<unknown, Changes<any>>
         }
-
-        if (state.materialization === `collection`) {
-          attachChildCollectionToParent(
-            parentCollection,
-            state.resultPath,
-            correlationKey,
-            state.correlationToParentKeys,
-            entry.collection,
-          )
-        }
-
-        // Apply child changes to the child Collection
-        if (entry.syncMethods) {
-          entry.syncMethods.begin()
-          for (const [childKey, change] of childChanges) {
-            entry.resultKeys.set(change.value, childKey)
-            if (entry.orderByIndices && change.orderByIndex !== undefined) {
-              entry.orderByIndices.set(change.value, change.orderByIndex)
-            }
-            const key = entry.syncMethods.collection.getKeyFromItem(
-              change.value,
-            )
-            const childAlreadyExists = entry.syncMethods.collection.has(key)
-
-            if (change.inserts > 0 && change.deletes === 0) {
-              entry.syncMethods.write({
-                value: change.value,
-                type: childAlreadyExists ? `update` : `insert`,
-              })
-            } else if (
-              change.inserts > change.deletes ||
-              (change.inserts === change.deletes && childAlreadyExists)
-            ) {
-              entry.syncMethods.write({ value: change.value, type: `update` })
-            } else if (change.deletes > 0) {
-              entry.syncMethods.write({ value: change.value, type: `delete` })
-            }
-          }
-          entry.syncMethods.commit()
-        }
-
-        // Update routing index for nested includes
-        updateRoutingIndex(state, correlationKey, childChanges)
-
-        entriesWithChildChanges.set(correlationKey, { entry, childChanges })
-      }
-      state.pendingChildChanges.clear()
-    }
-
-    // Phase 3: Drain nested buffers — route buffered grandchild changes to per-entry states
-    const dirtyFromBuffers = drainNestedBuffers(state)
-
-    // Phase 4: Flush per-entry states
-    // First: entries that had child changes in Phase 2
-    for (const [, { entry, childChanges }] of entriesWithChildChanges) {
-      if (entry.includesStates) {
-        flushIncludesState(
-          entry.includesStates,
-          entry.collection,
-          entry.collection.id,
+      >()
+      if (state.pendingChildChanges.size > 0) {
+        childChangeGroups += state.pendingChildChanges.size
+        for (const [
+          correlationKey,
           childChanges,
-          entry.syncMethods,
-        )
+        ] of state.pendingChildChanges) {
+          childChangeRows += childChanges.size
+          // Ensure child Collection exists for this correlation key
+          let entry = state.childRegistry.get(correlationKey)
+          if (!entry) {
+            entry = createChildCollectionEntry(
+              parentId,
+              state.fieldName,
+              correlationKey,
+              state.hasOrderBy,
+              state.nestedSetups,
+            )
+            state.childRegistry.set(correlationKey, entry)
+            childCollectionsCreated++
+          }
+
+          if (state.materialization === `collection`) {
+            attachChildCollectionToParent(
+              parentCollection,
+              state.resultPath,
+              correlationKey,
+              state.correlationToParentKeys,
+              entry.collection,
+            )
+          }
+
+          // Apply child changes to the child Collection
+          if (entry.syncMethods) {
+            entry.syncMethods.begin()
+            for (const [childKey, change] of childChanges) {
+              entry.resultKeys.set(change.value, childKey)
+              if (entry.orderByIndices && change.orderByIndex !== undefined) {
+                entry.orderByIndices.set(change.value, change.orderByIndex)
+              }
+              const key = entry.syncMethods.collection.getKeyFromItem(
+                change.value,
+              )
+              const childAlreadyExists = entry.syncMethods.collection.has(key)
+
+              if (change.inserts > 0 && change.deletes === 0) {
+                entry.syncMethods.write({
+                  value: change.value,
+                  type: childAlreadyExists ? `update` : `insert`,
+                })
+              } else if (
+                change.inserts > change.deletes ||
+                (change.inserts === change.deletes && childAlreadyExists)
+              ) {
+                entry.syncMethods.write({ value: change.value, type: `update` })
+              } else if (change.deletes > 0) {
+                entry.syncMethods.write({ value: change.value, type: `delete` })
+              }
+            }
+            entry.syncMethods.commit()
+          }
+
+          // Update routing index for nested includes
+          updateRoutingIndex(state, correlationKey, childChanges)
+
+          entriesWithChildChanges.set(correlationKey, { entry, childChanges })
+        }
+        state.pendingChildChanges.clear()
       }
-    }
-    // Then: entries that only had buffer-routed changes (no child changes at this level)
-    for (const correlationKey of dirtyFromBuffers) {
-      if (entriesWithChildChanges.has(correlationKey)) continue
-      const entry = state.childRegistry.get(correlationKey)
-      if (entry?.includesStates) {
-        flushIncludesState(
-          entry.includesStates,
-          entry.collection,
-          entry.collection.id,
-          null,
-          entry.syncMethods,
-        )
+
+      // Phase 3: Drain nested buffers — route buffered grandchild changes to per-entry states
+      const dirtyFromBuffers = drainNestedBuffers(state)
+      nestedBufferDirtyCount += dirtyFromBuffers.size
+
+      // Phase 4: Flush per-entry states
+      // First: entries that had child changes in Phase 2
+      for (const [, { entry, childChanges }] of entriesWithChildChanges) {
+        if (entry.includesStates) {
+          recursiveFlushes++
+          flushIncludesState(
+            entry.includesStates,
+            entry.collection,
+            entry.collection.id,
+            childChanges,
+            entry.syncMethods,
+          )
+        }
       }
-    }
-    // Finally: entries with deep nested buffer changes (grandchild-or-deeper buffers
-    // have pending data, but neither this level nor the immediate child level changed).
-    // Without this pass, changes at depth 3+ are stranded because drainNestedBuffers
-    // only drains one level and Phase 4 only flushes entries dirty from Phase 2/3.
-    const deepBufferDirty = new Set<unknown>()
-    if (state.nestedSetups) {
-      for (const [correlationKey, entry] of state.childRegistry) {
+      // Then: entries that only had buffer-routed changes (no child changes at this level)
+      for (const correlationKey of dirtyFromBuffers) {
         if (entriesWithChildChanges.has(correlationKey)) continue
-        if (dirtyFromBuffers.has(correlationKey)) continue
-        if (
-          entry.includesStates &&
-          hasPendingIncludesChanges(entry.includesStates)
-        ) {
+        const entry = state.childRegistry.get(correlationKey)
+        if (entry?.includesStates) {
+          recursiveFlushes++
           flushIncludesState(
             entry.includesStates,
             entry.collection,
@@ -2045,86 +2206,155 @@ function flushIncludesState(
             null,
             entry.syncMethods,
           )
-          deepBufferDirty.add(correlationKey)
         }
       }
-    }
-
-    // For inline materializations: re-emit affected parents with updated snapshots.
-    // We mutate items in-place (so collection.get() reflects changes immediately)
-    // and emit UPDATE events directly. We bypass the sync methods because
-    // commitPendingTransactions compares previous vs new visible state using
-    // deepEquals, but in-place mutation means both sides reference the same
-    // object, so the comparison always returns true and suppresses the event.
-    const inlineReEmitKeys = materializesInline(state)
-      ? new Set([
-          ...(affectedCorrelationKeys || []),
-          ...dirtyFromBuffers,
-          ...deepBufferDirty,
-        ])
-      : null
-    if (parentSyncMethods && inlineReEmitKeys && inlineReEmitKeys.size > 0) {
-      const events: Array<ChangeMessage<any>> = []
-      for (const correlationKey of inlineReEmitKeys) {
-        const parentKeys = state.correlationToParentKeys.get(correlationKey)
-        if (!parentKeys) continue
-        const entry = state.childRegistry.get(correlationKey)
-        for (const parentKey of parentKeys) {
-          const item = parentCollection.get(parentKey as any)
-          if (item) {
-            // Capture previous value before in-place mutation
-            const previousValue = cloneForIncludesUpdate(item, state.resultPath)
-            setIncludedValue(
-              item,
-              state.resultPath,
-              materializeIncludedValue(state, entry),
+      // Finally: entries with deep nested buffer changes (grandchild-or-deeper buffers
+      // have pending data, but neither this level nor the immediate child level changed).
+      // Without this pass, changes at depth 3+ are stranded because drainNestedBuffers
+      // only drains one level and Phase 4 only flushes entries dirty from Phase 2/3.
+      const deepBufferDirty = new Set<unknown>()
+      if (state.nestedSetups) {
+        for (const [correlationKey, entry] of state.childRegistry) {
+          if (entriesWithChildChanges.has(correlationKey)) continue
+          if (dirtyFromBuffers.has(correlationKey)) continue
+          if (
+            entry.includesStates &&
+            hasPendingIncludesChanges(entry.includesStates)
+          ) {
+            recursiveFlushes++
+            flushIncludesState(
+              entry.includesStates,
+              entry.collection,
+              entry.collection.id,
+              null,
+              entry.syncMethods,
             )
-            const nextValue = cloneForIncludesUpdate(item, state.resultPath)
-            events.push({
-              type: `update`,
-              key: parentKey as any,
-              value: nextValue,
-              previousValue,
-            })
+            deepBufferDirty.add(correlationKey)
           }
         }
       }
-      if (events.length > 0) {
-        // Emit directly — the in-place mutation already updated the data in
-        // syncedData, so we only need to notify subscribers.
-        const changesManager = (parentCollection as any)._changes as {
-          emitEvents: (
-            changes: Array<ChangeMessage<any>>,
-            forceEmit?: boolean,
-          ) => void
-        }
-        changesManager.emitEvents(events, true)
-      }
-    }
 
-    // Phase 5: Parent DELETEs — dispose child Collections and clean up
-    if (parentChanges) {
-      for (const [parentKey, changes] of parentChanges) {
-        if (changes.deletes > 0 && changes.inserts === 0) {
-          const routing = changes.value[INCLUDES_ROUTING]?.[state.fieldName]
-          const correlationKey = routing?.correlationKey
-          const parentContext = routing?.parentContext ?? null
-          const routingKey = computeRoutingKey(correlationKey, parentContext)
-          if (correlationKey != null) {
-            // Clean up reverse index first, only delete child collection
-            // when the last parent referencing it is removed
-            const parentKeys = state.correlationToParentKeys.get(routingKey)
-            if (parentKeys) {
-              parentKeys.delete(parentKey)
-              if (parentKeys.size === 0) {
-                cleanRoutingIndexOnDelete(state, routingKey)
-                state.childRegistry.delete(routingKey)
-                state.correlationToParentKeys.delete(routingKey)
+      // For inline materializations: re-emit affected parents with updated snapshots.
+      // We mutate items in-place (so collection.get() reflects changes immediately)
+      // and emit UPDATE events directly. We bypass the sync methods because
+      // commitPendingTransactions compares previous vs new visible state using
+      // deepEquals, but in-place mutation means both sides reference the same
+      // object, so the comparison always returns true and suppresses the event.
+      const inlineReEmitKeys = materializesInline(state)
+        ? new Set([
+            ...(affectedCorrelationKeys || []),
+            ...dirtyFromBuffers,
+            ...deepBufferDirty,
+          ])
+        : null
+      if (parentSyncMethods && inlineReEmitKeys && inlineReEmitKeys.size > 0) {
+        const events: Array<ChangeMessage<any>> = []
+        for (const correlationKey of inlineReEmitKeys) {
+          const parentKeys = state.correlationToParentKeys.get(correlationKey)
+          if (!parentKeys) continue
+          const entry = state.childRegistry.get(correlationKey)
+          for (const parentKey of parentKeys) {
+            const item = parentCollection.get(parentKey as any)
+            if (item) {
+              // Capture previous value before in-place mutation
+              const previousValue = cloneForIncludesUpdate(
+                item,
+                state.resultPath,
+              )
+              setIncludedValue(
+                item,
+                state.resultPath,
+                materializeIncludedValue(state, entry),
+              )
+              const nextValue = cloneForIncludesUpdate(item, state.resultPath)
+              events.push({
+                type: `update`,
+                key: parentKey as any,
+                value: nextValue,
+                previousValue,
+              })
+              inlineReEmitEvents++
+            }
+          }
+        }
+        if (events.length > 0) {
+          // Emit directly — the in-place mutation already updated the data in
+          // syncedData, so we only need to notify subscribers.
+          const changesManager = (parentCollection as any)._changes as {
+            emitEvents: (
+              changes: Array<ChangeMessage<any>>,
+              forceEmit?: boolean,
+            ) => void
+          }
+          changesManager.emitEvents(events, true)
+        }
+      }
+
+      // Phase 5: Parent DELETEs — dispose child Collections and clean up
+      if (parentChanges) {
+        for (const [parentKey, changes] of parentChanges) {
+          if (changes.deletes > 0 && changes.inserts === 0) {
+            parentDeleteCount++
+            const routing = changes.value[INCLUDES_ROUTING]?.[state.fieldName]
+            const correlationKey = routing?.correlationKey
+            const parentContext = routing?.parentContext ?? null
+            const routingKey = computeRoutingKey(correlationKey, parentContext)
+            if (correlationKey != null) {
+              // Clean up reverse index first, only delete child collection
+              // when the last parent referencing it is removed
+              const parentKeys = state.correlationToParentKeys.get(routingKey)
+              if (parentKeys) {
+                parentKeys.delete(parentKey)
+                if (parentKeys.size === 0) {
+                  cleanRoutingIndexOnDelete(state, routingKey)
+                  state.childRegistry.delete(routingKey)
+                  state.correlationToParentKeys.delete(routingKey)
+                  childCollectionsDeleted++
+                }
               }
             }
           }
         }
       }
+    }
+  } finally {
+    if (shouldTrace) {
+      recordPerfCount(`includes.flush.parentInserts`, parentInsertCount, {
+        parentId,
+      })
+      recordPerfCount(`includes.flush.parentDeletes`, parentDeleteCount, {
+        parentId,
+      })
+      recordPerfCount(`includes.flush.childChangeGroups`, childChangeGroups, {
+        parentId,
+      })
+      recordPerfCount(`includes.flush.childChangeRows`, childChangeRows, {
+        parentId,
+      })
+      recordPerfCount(
+        `includes.flush.childCollectionsCreated`,
+        childCollectionsCreated,
+        { parentId },
+      )
+      recordPerfCount(
+        `includes.flush.childCollectionsDeleted`,
+        childCollectionsDeleted,
+        { parentId },
+      )
+      recordPerfCount(
+        `includes.flush.nestedBufferDirty`,
+        nestedBufferDirtyCount,
+        {
+          parentId,
+        },
+      )
+      recordPerfCount(`includes.flush.recursiveFlushes`, recursiveFlushes, {
+        parentId,
+      })
+      recordPerfCount(`includes.flush.inlineReEmitEvents`, inlineReEmitEvents, {
+        parentId,
+      })
+      span?.end()
     }
   }
 

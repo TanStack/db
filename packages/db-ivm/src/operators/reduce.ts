@@ -2,6 +2,7 @@ import { DifferenceStreamWriter, UnaryOperator } from '../graph.js'
 import { StreamBuilder } from '../d2.js'
 import { MultiSet } from '../multiset.js'
 import { Index } from '../indexes.js'
+import { isPerfEnabled, recordPerfCount, startPerfSpan } from '../perf.js'
 import type { DifferenceStreamReader } from '../graph.js'
 import type { IStreamBuilder, KeyValue } from '../types.js'
 
@@ -24,10 +25,22 @@ export class ReduceOperator<K, V1, V2> extends UnaryOperator<[K, V1], [K, V2]> {
   }
 
   run(): void {
+    const shouldTrace = isPerfEnabled()
+    const tags = shouldTrace
+      ? {
+          operatorId: this.id,
+          operator: this.constructor.name,
+        }
+      : undefined
+    const span = shouldTrace
+      ? startPerfSpan(`operator.reduce.run`, tags)
+      : undefined
     // Collect all input messages and update the index
     const keysTodo = new Set<K>()
+    let inputRows = 0
     for (const message of this.inputMessages()) {
       for (const [item, multiplicity] of message.getInner()) {
+        inputRows++
         const [key, value] = item
         this.#index.addValue(key, [value, multiplicity])
         keysTodo.add(key)
@@ -36,9 +49,11 @@ export class ReduceOperator<K, V1, V2> extends UnaryOperator<[K, V1], [K, V2]> {
 
     // For each key, compute the reduction and delta
     const result: Array<[[K, V2], number]> = []
+    let valuesScanned = 0
     for (const key of keysTodo) {
       const curr = this.#index.get(key)
       const currOut = this.#indexOut.get(key)
+      valuesScanned += curr.length
       const out = this.#f(curr)
 
       // Create maps for current and previous outputs using values directly as keys
@@ -93,6 +108,13 @@ export class ReduceOperator<K, V1, V2> extends UnaryOperator<[K, V1], [K, V2]> {
 
     if (result.length > 0) {
       this.output.sendData(new MultiSet(result))
+    }
+    if (shouldTrace) {
+      recordPerfCount(`operator.reduce.inputRows`, inputRows, tags)
+      recordPerfCount(`operator.reduce.changedKeys`, keysTodo.size, tags)
+      recordPerfCount(`operator.reduce.valuesScanned`, valuesScanned, tags)
+      recordPerfCount(`operator.reduce.outputRows`, result.length, tags)
+      span?.end({ outputRows: result.length })
     }
   }
 }

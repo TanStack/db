@@ -1,5 +1,6 @@
 import { DifferenceStreamWriter, LinearUnaryOperator } from '../graph.js'
 import { StreamBuilder } from '../d2.js'
+import { isPerfEnabled, recordPerfCount, startPerfSpan } from '../perf.js'
 import type { IStreamBuilder, PipedOperator } from '../types.js'
 import type { DifferenceStreamReader } from '../graph.js'
 import type { MultiSet } from '../multiset.js'
@@ -21,7 +22,26 @@ export class FilterOperator<T> extends LinearUnaryOperator<T, T> {
   }
 
   inner(collection: MultiSet<T>): MultiSet<T> {
-    return collection.filter(this.#f)
+    if (!isPerfEnabled()) {
+      return collection.filter(this.#f)
+    }
+
+    const tags = {
+      operatorId: this.id,
+      operator: this.constructor.name,
+    }
+    let rowsPassed = 0
+    const rowsIn = collection.getInner().length
+    const span = startPerfSpan(`operator.filter.predicate`, tags)
+    const result = collection.filter((data) => {
+      const passed = this.#f(data)
+      if (passed) rowsPassed++
+      return passed
+    })
+    span.end()
+    recordPerfCount(`operator.filter.rowsIn`, rowsIn, tags)
+    recordPerfCount(`operator.filter.rowsPassed`, rowsPassed, tags)
+    return result
   }
 }
 

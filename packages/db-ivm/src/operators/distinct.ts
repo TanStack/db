@@ -2,6 +2,7 @@ import { DifferenceStreamWriter, UnaryOperator } from '../graph.js'
 import { StreamBuilder } from '../d2.js'
 import { hash } from '../hashing/index.js'
 import { MultiSet } from '../multiset.js'
+import { isPerfEnabled, recordPerfCount, startPerfSpan } from '../perf.js'
 import type { Hash } from '../hashing/index.js'
 import type { DifferenceStreamReader } from '../graph.js'
 import type { IStreamBuilder, KeyValue } from '../types.js'
@@ -31,11 +32,23 @@ export class DistinctOperator<
   }
 
   run(): void {
+    const shouldTrace = isPerfEnabled()
+    const tags = shouldTrace
+      ? {
+          operatorId: this.id,
+          operator: this.constructor.name,
+        }
+      : undefined
+    const span = shouldTrace
+      ? startPerfSpan(`operator.distinct.run`, tags)
+      : undefined
     const updatedValues = new Map<Hash, [Multiplicity, T]>()
+    let inputRows = 0
 
     // Compute the new multiplicity for each value
     for (const message of this.inputMessages()) {
       for (const [value, diff] of message.getInner()) {
+        inputRows++
         const hashedValue = hash(this.#by(value))
 
         const oldMultiplicity =
@@ -75,6 +88,12 @@ export class DistinctOperator<
 
     if (result.length > 0) {
       this.output.sendData(new MultiSet(result))
+    }
+    if (shouldTrace) {
+      recordPerfCount(`operator.distinct.inputRows`, inputRows, tags)
+      recordPerfCount(`operator.distinct.keysTouched`, updatedValues.size, tags)
+      recordPerfCount(`operator.distinct.outputRows`, result.length, tags)
+      span?.end()
     }
   }
 }

@@ -52,6 +52,7 @@ import { BinaryOperator, DifferenceStreamWriter } from '../graph.js'
 import { StreamBuilder } from '../d2.js'
 import { MultiSet } from '../multiset.js'
 import { Index } from '../indexes.js'
+import { isPerfEnabled, recordPerfCount, startPerfSpan } from '../perf.js'
 import type { DifferenceStreamReader } from '../graph.js'
 import type { IStreamBuilder, KeyValue, PipedOperator } from '../types.js'
 
@@ -82,16 +83,34 @@ export class JoinOperator<K, V1, V2> extends BinaryOperator<
   }
 
   run(): void {
+    const shouldTrace = isPerfEnabled()
+    const tags = shouldTrace
+      ? {
+          operatorId: this.id,
+          operator: this.constructor.name,
+          mode: this.#mode,
+        }
+      : undefined
+    const span = shouldTrace
+      ? startPerfSpan(`operator.join.run`, tags)
+      : undefined
     // Build deltas from input messages
-    const deltaA = Index.fromMultiSets<K, V1>(
-      this.inputAMessages() as Array<MultiSet<[K, V1]>>,
-    )
-    const deltaB = Index.fromMultiSets<K, V2>(
-      this.inputBMessages() as Array<MultiSet<[K, V2]>>,
-    )
+    const inputAMessages = this.inputAMessages() as Array<MultiSet<[K, V1]>>
+    const inputBMessages = this.inputBMessages() as Array<MultiSet<[K, V2]>>
+    const deltaARows = countMultiSetRows(inputAMessages)
+    const deltaBRows = countMultiSetRows(inputBMessages)
+    const deltaA = Index.fromMultiSets<K, V1>(inputAMessages)
+    const deltaB = Index.fromMultiSets<K, V2>(inputBMessages)
 
     // Early-out if nothing changed
-    if (deltaA.size === 0 && deltaB.size === 0) return
+    if (deltaA.size === 0 && deltaB.size === 0) {
+      if (shouldTrace) {
+        recordPerfCount(`operator.join.deltaRowsA`, deltaARows, tags)
+        recordPerfCount(`operator.join.deltaRowsB`, deltaBRows, tags)
+        span?.end({ outputRows: 0 })
+      }
+      return
+    }
 
     const results = new MultiSet<any>()
 
@@ -124,6 +143,18 @@ export class JoinOperator<K, V1, V2> extends BinaryOperator<
     // Send results
     if (results.getInner().length > 0) {
       this.output.sendData(results)
+    }
+    if (shouldTrace) {
+      recordPerfCount(`operator.join.deltaRowsA`, deltaARows, tags)
+      recordPerfCount(`operator.join.deltaRowsB`, deltaBRows, tags)
+      recordPerfCount(`operator.join.deltaKeysA`, deltaA.size, tags)
+      recordPerfCount(`operator.join.deltaKeysB`, deltaB.size, tags)
+      recordPerfCount(
+        `operator.join.outputRows`,
+        results.getInner().length,
+        tags,
+      )
+      span?.end({ outputRows: results.getInner().length })
     }
   }
 
@@ -245,6 +276,14 @@ export class JoinOperator<K, V1, V2> extends BinaryOperator<
       }
     }
   }
+}
+
+function countMultiSetRows<T>(messages: Array<MultiSet<T>>): number {
+  let rows = 0
+  for (const message of messages) {
+    rows += message.getInner().length
+  }
+  return rows
 }
 
 /**

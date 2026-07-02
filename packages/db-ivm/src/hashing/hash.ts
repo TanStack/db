@@ -1,3 +1,4 @@
+import { isPerfEnabled, recordPerfCount, startPerfSpan } from '../perf.js'
 import { MurmurHashStream, randomHash } from './murmur.js'
 import type { Hasher } from './murmur.js'
 
@@ -48,10 +49,23 @@ const UINT8ARRAY_CONTENT_HASH_THRESHOLD = 128
 
 const hashCache = new WeakMap<object, number>()
 
-export function hash(input: any): number {
-  const hasher = new MurmurHashStream()
-  updateHasher(hasher, input)
-  return hasher.digest()
+export function hash(input: unknown): number {
+  if (!isPerfEnabled()) {
+    const hasher = new MurmurHashStream()
+    updateHasher(hasher, input)
+    return hasher.digest()
+  }
+
+  const tags = { kind: getHashInputKind(input) }
+  recordPerfCount(`hash.public.calls`, 1, tags)
+  const span = startPerfSpan(`hash.public`, tags)
+  try {
+    const hasher = new MurmurHashStream()
+    updateHasher(hasher, input)
+    return hasher.digest()
+  } finally {
+    span.end()
+  }
 }
 
 function hashObject(input: object): number {
@@ -60,6 +74,9 @@ function hashObject(input: object): number {
     return cachedHash
   }
 
+  const shouldTrace = isPerfEnabled()
+  const tags = shouldTrace ? { kind: getHashInputKind(input) } : undefined
+  const span = shouldTrace ? startPerfSpan(`hash.structural`, tags) : undefined
   let valueHash: number | undefined
   if (input instanceof Date) {
     valueHash = hashDate(input)
@@ -76,11 +93,11 @@ function hashObject(input: object): number {
     } else {
       // Deeply hashing large arrays would be too costly
       // so we track them by reference and cache them in a weak map
-      return cachedReferenceHash(input)
+      valueHash = cachedReferenceHash(input)
     }
-  } else if (input instanceof File) {
+  } else if (typeof File !== `undefined` && input instanceof File) {
     // Files are always hashed by reference due to their potentially large size
-    return cachedReferenceHash(input)
+    valueHash = cachedReferenceHash(input)
   } else if (isTemporal(input)) {
     valueHash = hashTemporal(input)
   } else {
@@ -105,6 +122,7 @@ function hashObject(input: object): number {
   }
 
   hashCache.set(input, valueHash)
+  span?.end()
   return valueHash
 }
 
@@ -116,6 +134,12 @@ function hashDate(input: Date): number {
 }
 
 function hashUint8Array(input: Uint8Array): number {
+  if (isPerfEnabled()) {
+    recordPerfCount(`hash.uint8Array.calls`)
+    recordPerfCount(`hash.uint8Array.bytes`, input.byteLength, {
+      bucket: byteLengthBucket(input.byteLength),
+    })
+  }
   const hasher = new MurmurHashStream()
   hasher.update(UINT8ARRAY_MARKER)
   // Hash the byte length first to differentiate arrays of different sizes
@@ -141,10 +165,22 @@ function hashPlainObject(input: object, marker: number): number {
   // Mark the type of the input
   hasher.update(marker)
   const keys = Object.keys(input)
+  const sortSpan = isPerfEnabled()
+    ? startPerfSpan(`hash.plainObject.keySort`, {
+        keyCount: keys.length,
+      })
+    : undefined
   keys.sort(keySort)
+  sortSpan?.end()
+  if (isPerfEnabled()) {
+    recordPerfCount(`hash.plainObject.keys`, keys.length)
+  }
   for (const key of keys) {
     hasher.update(KEY)
     hasher.update(key)
+    if (isPerfEnabled()) {
+      recordPerfCount(`hash.plainObject.nestedValues`)
+    }
     updateHasher(hasher, input[key as keyof typeof input])
   }
 
@@ -152,24 +188,40 @@ function hashPlainObject(input: object, marker: number): number {
 }
 
 function updateHasher(hasher: Hasher, input: unknown): void {
+  const shouldTrace = isPerfEnabled()
   if (input === null) {
+    if (shouldTrace) {
+      recordPerfCount(`hash.primitive.calls`, 1, { kind: `null` })
+    }
     hasher.update(NULL)
     return
   }
   switch (typeof input) {
     case `undefined`:
+      if (shouldTrace) {
+        recordPerfCount(`hash.primitive.calls`, 1, { kind: `undefined` })
+      }
       hasher.update(UNDEFINED)
       return
     case `boolean`:
+      if (shouldTrace) {
+        recordPerfCount(`hash.primitive.calls`, 1, { kind: `boolean` })
+      }
       hasher.update(input ? TRUE : FALSE)
       return
     case `number`:
+      if (shouldTrace) {
+        recordPerfCount(`hash.primitive.calls`, 1, { kind: `number` })
+      }
       // Normalize NaNs and -0
       hasher.update(isNaN(input) ? NaN : input === 0 ? 0 : input)
       return
     case `bigint`:
     case `string`:
     case `symbol`:
+      if (shouldTrace) {
+        recordPerfCount(`hash.primitive.calls`, 1, { kind: typeof input })
+      }
       hasher.update(input)
       return
     case `object`:
@@ -190,7 +242,16 @@ function updateHasher(hasher: Hasher, input: unknown): void {
 function getCachedHash(input: object): number {
   let valueHash = hashCache.get(input)
   if (valueHash === undefined) {
+    if (isPerfEnabled()) {
+      recordPerfCount(`hash.objectCache.misses`, 1, {
+        kind: getHashInputKind(input),
+      })
+    }
     valueHash = hashObject(input)
+  } else if (isPerfEnabled()) {
+    recordPerfCount(`hash.objectCache.hits`, 1, {
+      kind: getHashInputKind(input),
+    })
   }
   return valueHash
 }
@@ -199,9 +260,23 @@ let nextRefId = 1
 function cachedReferenceHash(fn: object): number {
   let valueHash = hashCache.get(fn)
   if (valueHash === undefined) {
+    if (isPerfEnabled()) {
+      recordPerfCount(`hash.reference.misses`, 1, {
+        kind: getHashInputKind(fn),
+      })
+    }
     valueHash = nextRefId ^ FUNCTIONS
     nextRefId++
     hashCache.set(fn, valueHash)
+  } else if (isPerfEnabled()) {
+    recordPerfCount(`hash.reference.hits`, 1, {
+      kind: getHashInputKind(fn),
+    })
+  }
+  if (isPerfEnabled()) {
+    recordPerfCount(`hash.reference.calls`, 1, {
+      kind: getHashInputKind(fn),
+    })
   }
   return valueHash
 }
@@ -211,4 +286,29 @@ function cachedReferenceHash(fn: object): number {
  */
 function keySort(a: string, b: string): number {
   return a.localeCompare(b)
+}
+
+function getHashInputKind(input: unknown): string {
+  if (input === null) return `null`
+  if (typeof input !== `object`) return typeof input
+  if (input instanceof Date) return `date`
+  if (
+    (typeof Buffer !== `undefined` && input instanceof Buffer) ||
+    input instanceof Uint8Array
+  ) {
+    return `uint8Array`
+  }
+  if (typeof File !== `undefined` && input instanceof File) return `file`
+  if (isTemporal(input)) return `temporal`
+  if (Array.isArray(input)) return `array`
+  if (input instanceof Map) return `map`
+  if (input instanceof Set) return `set`
+  return `plainObject`
+}
+
+function byteLengthBucket(byteLength: number): string {
+  if (byteLength <= 16) return `0-16`
+  if (byteLength <= 128) return `17-128`
+  if (byteLength <= 1024) return `129-1024`
+  return `1025+`
 }
