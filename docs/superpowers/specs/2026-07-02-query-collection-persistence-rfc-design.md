@@ -68,40 +68,65 @@ The only new contract is that adapter-owned metadata must be persistence-safe pl
 
 ## RFC Issue Design
 
-The RFC issue should be roadmap-style rather than a full API specification.
+The RFC issue should be roadmap-style rather than a full API specification. It must not assume readers already know the issue cluster. It should open by explaining that we analyzed the repository's open issues and related closed PRs/issues, and that query-db-collection's TanStack Query integration emerged as one coherent cluster.
 
 Suggested title:
 
-> RFC: clarify query-db-collection as a Query projection and lease bridge
+> RFC: roadmap for query-db-collection / TanStack Query integration
 
 Suggested structure:
 
-1. Problem statement
-   - `query-db-collection` bridges TanStack Query document cache semantics and TanStack DB normalized row semantics.
-   - Open issues around option surface, invalidation, persistence, QueryClient scoping, parameterized query functions, lifecycle/cancellation, and row projection are symptoms of this boundary.
+1. Background: why this RFC exists
+   - State that this RFC comes from an analysis of open issues and related historical fixes across the repository.
+   - Explain that one identified cluster concerns the boundary between query-db-collection, TanStack Query, and TanStack DB row materialization.
+   - Say the goal is to summarize the cluster and propose a sequence of small, non-breaking PRs.
 
-2. Ownership boundary
+2. Cluster summary with links
+   - Active issues:
+     - [#183 Deepen the integration with Query](https://github.com/TanStack/db/issues/183): broad request to evaluate TanStack Query behaviors such as refresh on mount/window focus.
+     - [#344 Add Query Invalidation Support to query-db-collection](https://github.com/TanStack/db/issues/344): clarify how collection invalidation should relate to `queryClient.invalidateQueries`.
+     - [#345 Add select Option to query-db-collection](https://github.com/TanStack/db/issues/345): wrapped API responses and row extraction; appears largely implemented on current main, but raises projection semantics for future work.
+     - [#346 Add Initial Data and Query Options Support to query-db-collection](https://github.com/TanStack/db/issues/346): pressure to expose more of TanStack Query's option surface.
+     - [#350 Expose QueryFunctionContext properties (signal, meta) in query-db-collection](https://github.com/TanStack/db/issues/350): context typing/meta is partly addressed, while cancellation/lifecycle behavior remains relevant.
+     - [#436 Error `[QueryCollection] queryClient must be provided` on TanStack Start's beforeLoad](https://github.com/TanStack/db/issues/436): runtime QueryClient scoping and SSR/request-local binding.
+     - [#652 Ability to create collections with parameterized query functions](https://github.com/TanStack/db/issues/652): business scope parameters such as tenant/project/account should be distinct from query-driven subset predicates.
+     - [#901 Using a syncMode: "on-demand" collection breaks @tanstack/react-query-persist-client persister](https://github.com/TanStack/db/issues/901): persistence/structured-clone safety for on-demand metadata.
+   - Related historical fixes that show recurring symptoms:
+     - [#1568 fix(query-db-collection): forward gcTime from queryCollectionOptions to the underlying query](https://github.com/TanStack/db/pull/1568): an exposed Query option did not reach the underlying observer.
+     - [#707 fix(query-db-collection): respect QueryClient defaultOptions when not overridden](https://github.com/TanStack/db/pull/707): explicitly passing undefined suppressed QueryClient defaults.
+     - [#870 fix(query-db-collection): implement reference counting for QueryObserver lifecycle](https://github.com/TanStack/db/pull/870): observer lifecycle required adapter-managed reference counting.
+     - [#712 feat(query-db-collection): expose query state from QueryObserver](https://github.com/TanStack/db/pull/712): users need visibility into Query state through the collection adapter.
+     - [#381 feat(query-db-collection): support automatic refetch on query invalidation](https://github.com/TanStack/db/pull/381): invalidation behavior has already needed special handling.
+     - [#1287 fix(query-db-collection): align queryOptions interop types](https://github.com/TanStack/db/pull/1287): Query option interop has needed type-level correction.
+     - [#998 staleTime is ignored for syncMode: "on-demand" collections](https://github.com/TanStack/db/issues/998): on-demand Query staleness semantics have been a correctness concern.
+
+3. Problem statement
+   - The cluster is not just a list of missing flags. It points to an integration-boundary question: query-db-collection bridges TanStack Query's document cache semantics and TanStack DB's normalized row semantics.
+   - Option pass-through, invalidation, persistence, QueryClient scoping, parameterized query functions, lifecycle/cancellation, and row projection all become difficult when the adapter shadows Query behavior rather than clearly delegating to it.
+
+4. Ownership boundary
    - TanStack Query owns fetching, retries, staleness, invalidation, focus/reconnect behavior, cancellation, hydration, persistence, and remote-response caching.
    - TanStack DB owns row identity, materialization, local queries, optimistic transactions, and normalized row state.
    - The adapter owns projection between Query results and DB rows, plus leases that track which query/subset currently owns which rows.
 
-3. Proposed PR sequence
-   - PR 1: persistence/metadata cloneability contract for on-demand collections (#901).
-   - PR 2: invalidation behavior matrix for active, inactive, prefix, exact, and on-demand subset queries (#344).
-   - PR 3: Query option pass-through and compatibility table (#183, #346).
-   - PR 4: clarify row projection semantics; evolve `select` toward `rows.read` and optional `rows.write` without breaking existing users (#345 follow-up).
-   - PR 5: runtime binding / request-local QueryClient scope for SSR and TanStack Start (#436).
-   - PR 6: collection-family / business scope versus relational subset parameterization (#652).
-   - PR 7: internal query lease manager for lifecycle, cancellation, retention, and query-specific status correctness (#350 lifecycle portion and related historical bugs).
+5. Proposed PR sequence
+   - PR 1: persistence/metadata cloneability contract for on-demand collections ([#901](https://github.com/TanStack/db/issues/901)).
+   - PR 2: invalidation behavior matrix for active, inactive, prefix, exact, and on-demand subset queries ([#344](https://github.com/TanStack/db/issues/344)).
+   - PR 3: Query option pass-through and compatibility table ([#183](https://github.com/TanStack/db/issues/183), [#346](https://github.com/TanStack/db/issues/346)).
+   - PR 4: clarify row projection semantics; evolve `select` toward `rows.read` and optional `rows.write` without breaking existing users ([#345](https://github.com/TanStack/db/issues/345) follow-up).
+   - PR 5: runtime binding / request-local QueryClient scope for SSR and TanStack Start ([#436](https://github.com/TanStack/db/issues/436)).
+   - PR 6: collection-family / business scope versus relational subset parameterization ([#652](https://github.com/TanStack/db/issues/652)).
+   - PR 7: internal query lease manager for lifecycle, cancellation, retention, and query-specific status correctness ([#350](https://github.com/TanStack/db/issues/350) lifecycle portion and related historical bugs).
 
-4. Non-goals
+6. Non-goals
    - no immediate breaking changes;
    - no one-shot rewrite;
    - no separate invalidation system;
    - no removal of existing `select` or `meta` behavior without migration.
 
-5. Maintainer questions
+7. Maintainer questions
    - Is this the right integration boundary?
+   - Does the cluster summary miss any issues or PRs maintainers consider part of this theme?
    - Which P0 items should be prioritized?
    - Should API evolution be additive first, with deprecations later?
    - Are there SSR or persistence constraints missing from the roadmap?
