@@ -49,6 +49,7 @@ export function groupBy<
       ([_, aggregate]) => !isPipedAggregateFunction(aggregate),
     ),
   ) as Record<string, BasicAggregateFunction<T, any, any>>
+  const basicAggregateEntries = Object.entries(basicAggregates)
 
   // @ts-expect-error - TODO: we don't use this yet, but we will
   // eslint-disable-next-line @typescript-eslint/no-unused-vars
@@ -77,7 +78,7 @@ export function groupBy<
         values[KEY_SENTINEL] = key
 
         // Add pre-aggregated values
-        for (const [name, aggregate] of Object.entries(basicAggregates)) {
+        for (const [name, aggregate] of basicAggregateEntries) {
           values[name] = aggregate.preMap(data)
         }
 
@@ -106,7 +107,7 @@ export function groupBy<
         result[KEY_SENTINEL] = originalKey
 
         // Apply each aggregate function
-        for (const [name, aggregate] of Object.entries(basicAggregates)) {
+        for (const [name, aggregate] of basicAggregateEntries) {
           const preValues = values.map(
             ([v, m]) => [v[name], m] as [any, number],
           )
@@ -130,7 +131,7 @@ export function groupBy<
         Object.assign(result, key)
 
         // Apply postMap if provided
-        for (const [name, aggregate] of Object.entries(basicAggregates)) {
+        for (const [name, aggregate] of basicAggregateEntries) {
           if (aggregate.postMap) {
             result[name] = aggregate.postMap(values[name])
           } else {
