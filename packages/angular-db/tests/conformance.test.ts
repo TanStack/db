@@ -214,13 +214,7 @@ const angularDriver: LiveQueryDriver = {
   mountCollection,
   mountConfig,
   mountDisabled,
-  // Divergence the suite surfaced: angular-db's plain `{ query }` config-object
-  // path calls createLiveQueryCollection(opts) as-is, without injecting
-  // startSync:true the way the query-fn path does — so a bare `{ query }` never
-  // syncs and returns empty. React/Vue/Svelte/Solid all auto-start a config
-  // object; Angular requires an explicit `startSync: true` (its own config test
-  // passes it). Recorded until angular-db aligns.
-  knownGaps: [`config-object-input`],
+  knownGaps: [],
   features: { serverSnapshot: false, suspense: false },
 }
 
