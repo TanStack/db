@@ -349,6 +349,13 @@ class QueryCollectionUtilsImpl {
   }
 }
 
+function getLoadSubsetOptionsForMeta(
+  opts: LoadSubsetOptions,
+): Omit<LoadSubsetOptions, `subscription`> {
+  const { subscription: _subscription, ...serializableOptions } = opts
+  return serializableOptions
+}
+
 /**
  * Creates query collection options for use with a standard Collection.
  * This integrates TanStack Query with TanStack DB for automatic synchronization.
@@ -434,13 +441,6 @@ class QueryCollectionUtilsImpl {
  *   })
  * )
  */
-function getSerializableLoadSubsetOptions(
-  opts: LoadSubsetOptions,
-): LoadSubsetOptions {
-  const { subscription: _subscription, ...serializableOptions } = opts
-  return serializableOptions
-}
-
 // Overload for when schema is provided and select present
 export function queryCollectionOptions<
   T extends StandardSchemaV1,
@@ -1101,7 +1101,7 @@ export function queryCollectionOptions(
       const hashedQueryKey = hashKey(key)
       const extendedMeta = {
         ...meta,
-        loadSubsetOptions: getSerializableLoadSubsetOptions(opts),
+        loadSubsetOptions: getLoadSubsetOptionsForMeta(opts),
       }
       const retainedEntry = metadata?.collection.get(
         `${QUERY_COLLECTION_GC_PREFIX}${hashedQueryKey}`,

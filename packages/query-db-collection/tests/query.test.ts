@@ -5910,31 +5910,35 @@ describe(`QueryCollection`, () => {
         }),
       )
 
-      await collection._sync.loadSubset({
-        where: eq(`category`, `A`),
-        subscription: {
-          options: {
-            onUnsubscribe: () => {},
-          },
-        } as unknown as NonNullable<LoadSubsetOptions[`subscription`]>,
-      })
+      try {
+        await collection._sync.loadSubset({
+          where: eq(`category`, `A`),
+          subscription: {
+            options: {
+              onUnsubscribe: () => {},
+            },
+          } as unknown as NonNullable<LoadSubsetOptions[`subscription`]>,
+        })
 
-      const cachedQuery = queryClient.getQueryCache().findAll()[0]
-      expect(cachedQuery?.meta?.loadSubsetOptions).toBeDefined()
-      expect(cachedQuery?.meta?.loadSubsetOptions?.subscription).toBeUndefined()
-
-      const dehydrated = dehydrate(queryClient)
-      expect(dehydrated.queries.length).toBeGreaterThan(0)
-      expect(() => structuredClone(dehydrated)).not.toThrow()
-
-      for (const query of dehydrated.queries) {
-        expect(containsFunction(query.meta)).toBe(false)
+        const cachedQuery = queryClient.getQueryCache().findAll()[0]
+        expect(cachedQuery?.meta?.loadSubsetOptions).toBeDefined()
         expect(
-          containsFunction(query.state.data as Record<string, unknown>),
-        ).toBe(false)
-      }
+          cachedQuery?.meta?.loadSubsetOptions?.subscription,
+        ).toBeUndefined()
 
-      queryClient.clear()
+        const dehydrated = dehydrate(queryClient)
+        expect(dehydrated.queries.length).toBeGreaterThan(0)
+        expect(() => structuredClone(dehydrated)).not.toThrow()
+
+        for (const query of dehydrated.queries) {
+          expect(containsFunction(query.meta)).toBe(false)
+          expect(
+            containsFunction(query.state.data as Record<string, unknown>),
+          ).toBe(false)
+        }
+      } finally {
+        queryClient.clear()
+      }
     })
   })
 
