@@ -26,6 +26,7 @@ import {
 } from '../../db/tests/utils'
 import { useLiveQuery } from '../src/useLiveQuery'
 import { runSuite } from '../../db/tests/conformance/suite'
+import type { RenderHookResult } from '@testing-library/react'
 import type {
   ConformanceResult,
   ControllableHandle,
@@ -162,7 +163,7 @@ function mountControllable<P>(
   }
 }
 
-function makeHandle(hook: ReturnType<typeof renderHook>) {
+function makeHandle(hook: RenderHookResult<any, any>) {
   return {
     current(): ConformanceResult {
       const r: any = hook.result.current
