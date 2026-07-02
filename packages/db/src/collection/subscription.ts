@@ -346,7 +346,9 @@ export class CollectionSubscription
       if (newChanges.length > 0) {
         this.truncateBuffer.push(newChanges)
       }
-    } else {
+    } else if (newChanges.length > 0 || changes.length === 0) {
+      // Empty input is an explicit readiness signal. Non-empty input that
+      // filtered to an empty delta has no subscriber-visible work to deliver.
       this.filteredCallback(newChanges)
     }
     span?.end({ outputRows: newChanges.length })

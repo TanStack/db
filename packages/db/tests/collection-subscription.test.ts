@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { createCollection } from '../src/collection/index.js'
-import { flushPromises } from './utils'
+import { flushPromises, mockSyncCollectionOptions } from './utils'
 
 describe(`CollectionSubscription status tracking`, () => {
   it(`subscription starts with status 'ready'`, () => {
@@ -272,5 +272,30 @@ describe(`CollectionSubscription status tracking`, () => {
     // We can't easily verify this without accessing private members,
     // but we can at least verify unsubscribe doesn't throw
     expect(eventCount).toBe(0)
+  })
+})
+
+describe(`CollectionSubscription event filtering`, () => {
+  it(`does not emit when a non-empty batch filters to an empty delta`, () => {
+    type Row = { id: string; value: string }
+    const initialRow: Row = { id: `row-1`, value: `one` }
+    const options = mockSyncCollectionOptions<Row>({
+      id: `filtered-empty-delta-test`,
+      initialData: [initialRow],
+      getKey: (item) => item.id,
+    })
+    const collection = createCollection(options)
+    const batches: Array<Array<unknown>> = []
+
+    const subscription = collection.subscribeChanges((changes) => {
+      batches.push(changes)
+    })
+
+    options.utils.begin()
+    options.utils.write({ type: `delete`, value: initialRow })
+    options.utils.commit()
+
+    expect(batches).toHaveLength(0)
+    subscription.unsubscribe()
   })
 })
