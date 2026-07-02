@@ -858,6 +858,7 @@ export class CollectionConfigBuilder<
         childRegistry: new Map(),
         pendingChildChanges: new Map(),
         correlationToParentKeys: new Map(),
+        deepDirtyKeys: new Set(),
       }
 
       // Attach output callback on the child pipeline
@@ -1223,6 +1224,18 @@ type IncludesOutputState = {
   correlationToParentKeys: Map<unknown, Set<unknown>>
   /** Shared nested pipeline setups (one per nested includes level) */
   nestedSetups?: Array<NestedIncludesSetup>
+  /**
+   * Correlation keys of child entries whose per-entry nested states received
+   * pending changes that have not been flushed yet. Lets the deep flush pass
+   * visit only implicated entries instead of scanning the whole registry.
+   */
+  deepDirtyKeys: Set<unknown>
+  /**
+   * For per-entry nested states: the state and correlation key of the child
+   * entry that owns this state. Used to resolve which top-level entry a deep
+   * buffered change belongs to without scanning.
+   */
+  owner?: { state: IncludesOutputState; key: unknown }
 }
 
 type ChildCollectionEntry = {
@@ -1370,6 +1383,7 @@ function createPerEntryIncludesStates(
       childRegistry: new Map(),
       pendingChildChanges: new Map(),
       correlationToParentKeys: new Map(),
+      deepDirtyKeys: new Set(),
     }
 
     if (setup.nestedSetups) {
@@ -1456,6 +1470,7 @@ function seedParentFromSnapshot(
     byChild = new Map()
     entryState.pendingChildChanges.set(nestedCorrelationKey, byChild)
   }
+  let seeded = false
   for (const [childKey, row] of snap) {
     if (byChild.has(childKey)) continue
     byChild.set(childKey, {
@@ -1464,6 +1479,10 @@ function seedParentFromSnapshot(
       value: cloneSnapshotValue(row.value),
       orderByIndex: row.orderByIndex,
     })
+    seeded = true
+  }
+  if (seeded) {
+    state.deepDirtyKeys.add(parentCorrelationKey)
   }
 }
 
@@ -1527,6 +1546,16 @@ function drainNestedBuffers(state: IncludesOutputState): Set<unknown> {
 
           if (targetState === state) {
             dirtyCorrelationKeys.add(parentCorrelationKey)
+          } else {
+            // Routed into another state's entry — record it there, and mark
+            // the whole owner chain so every ancestor's deep flush pass knows
+            // to descend into exactly this branch.
+            targetState.deepDirtyKeys.add(parentCorrelationKey)
+            let cursor: IncludesOutputState = targetState
+            while (cursor.owner) {
+              cursor.owner.state.deepDirtyKeys.add(cursor.owner.key)
+              cursor = cursor.owner.state
+            }
           }
           routedToAny = true
         }
@@ -2012,6 +2041,11 @@ function flushIncludesState(
                 state.materialization,
                 state.nestedSetups,
               )
+              if (entry.includesStates) {
+                for (const nestedState of entry.includesStates) {
+                  nestedState.owner = { state, key: routingKey }
+                }
+              }
               state.childRegistry.set(routingKey, entry)
             }
             // Update reverse index: routing key → parent keys
@@ -2063,6 +2097,11 @@ function flushIncludesState(
             state.materialization,
             state.nestedSetups,
           )
+          if (entry.includesStates) {
+            for (const nestedState of entry.includesStates) {
+              nestedState.owner = { state, key: correlationKey }
+            }
+          }
           state.childRegistry.set(correlationKey, entry)
         }
 
@@ -2148,13 +2187,25 @@ function flushIncludesState(
     // have pending data, but neither this level nor the immediate child level changed).
     // Without this pass, changes at depth 3+ are stranded because drainNestedBuffers
     // only drains one level and Phase 4 only flushes entries dirty from Phase 2/3.
+    // Candidates come from dirty-key tracking plus routing lookups on raw
+    // buffered data — proportional to pending work, not registry size.
     const deepBufferDirty = new Set<unknown>()
     if (state.nestedSetups) {
-      for (const [correlationKey, entry] of state.childRegistry) {
-        if (entriesWithChildChanges.has(correlationKey)) continue
-        if (dirtyFromBuffers.has(correlationKey)) continue
+      const deepCandidates = new Set(state.deepDirtyKeys)
+      collectBufferImplicatedKeys(state, state.nestedSetups, deepCandidates)
+      for (const correlationKey of deepCandidates) {
         if (
-          entry.includesStates &&
+          entriesWithChildChanges.has(correlationKey) ||
+          dirtyFromBuffers.has(correlationKey)
+        ) {
+          // Flushed earlier in Phase 4 — nothing pending remains
+          state.deepDirtyKeys.delete(correlationKey)
+          continue
+        }
+        const entry = state.childRegistry.get(correlationKey)
+        state.deepDirtyKeys.delete(correlationKey)
+        if (
+          entry?.includesStates &&
           hasPendingIncludesChanges(entry.includesStates)
         ) {
           flushIncludesState(
@@ -2270,23 +2321,53 @@ function flushIncludesState(
 }
 
 /**
+ * Collects correlation keys of `state`'s child entries implicated by data
+ * sitting in (recursively) nested shared buffers, by following each buffered
+ * key's routes and walking the target state's owner chain back up to `state`.
+ * Cost is proportional to buffered data, not registry size. Unroutable rows
+ * (no routes yet) contribute nothing — they cannot be flushed anywhere until
+ * a route is established, which happens during a child-change flush of the
+ * exact entry involved.
+ */
+function collectBufferImplicatedKeys(
+  state: IncludesOutputState,
+  setups: Array<NestedIncludesSetup>,
+  out: Set<unknown>,
+): void {
+  for (const setup of setups) {
+    for (const nestedCorrelationKey of setup.buffer.keys()) {
+      const stateRoutes = setup.routingIndex.get(nestedCorrelationKey)
+      if (!stateRoutes) continue
+      for (const targetState of stateRoutes.keys()) {
+        let cursor: IncludesOutputState | undefined = targetState
+        while (cursor) {
+          if (cursor.owner?.state === state) {
+            out.add(cursor.owner.key)
+            break
+          }
+          cursor = cursor.owner?.state
+        }
+      }
+    }
+    if (setup.nestedSetups) {
+      collectBufferImplicatedKeys(state, setup.nestedSetups, out)
+    }
+  }
+}
+
+/**
  * Checks whether any includes state has pending changes that need to be flushed.
- * Checks direct pending child changes and shared nested buffers.
+ * Uses dirty-key tracking and shared-buffer checks so the cost stays constant
+ * per state instead of scanning child registries.
  */
 function hasPendingIncludesChanges(
   states: Array<IncludesOutputState>,
 ): boolean {
   for (const state of states) {
     if (state.pendingChildChanges.size > 0) return true
+    if (state.deepDirtyKeys.size > 0) return true
     if (state.nestedSetups && hasNestedBufferChanges(state.nestedSetups))
       return true
-    for (const entry of state.childRegistry.values()) {
-      if (
-        entry.includesStates &&
-        hasPendingIncludesChanges(entry.includesStates)
-      )
-        return true
-    }
   }
   return false
 }
