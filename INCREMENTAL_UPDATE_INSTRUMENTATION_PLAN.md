@@ -67,12 +67,12 @@ Queries:
 
 4. List plus 3 recent comments
    - Same base list, with newest 3 comments per issue.
-   - Measures grouped top-k, nested includes, and parent re-emission.
+   - Measures grouped top-k, nested includes, and child collection updates.
 
 5. Issue detail plus comments
    - Single issue detail with comments.
-   - Measures the non-list path and whether comment-only writes avoid list-level
-     overhead.
+   - Measures the non-list path and whether comment-only writes update only the
+     issue's child collection.
 
 For each query, measure:
 
@@ -85,6 +85,11 @@ For each query, measure:
 
 Use sketches like these as the starting point, then adjust to exact QueryBuilder
 syntax during implementation.
+
+For included comment shapes, intentionally leave nested queries as plain
+subqueries. Do not wrap them with `toArray()` for these benchmarks: plain
+subqueries materialize child collections and should stay fully incremental,
+whereas inline arrays force parent-row re-materialization.
 
 ```ts
 // 1. list: newest 50 open
@@ -122,12 +127,11 @@ q.from({ issue: issues })
   .limit(50)
   .select(({ issue }) => ({
     issue,
-    recentComments: toArray(
-      q.from({ comment: comments })
-        .where(({ comment }) => eq(comment.issueId, issue.id))
-        .orderBy(({ comment }) => comment.createdAt, `desc`)
-        .limit(3),
-    ),
+    recentComments: q
+      .from({ comment: comments })
+      .where(({ comment }) => eq(comment.issueId, issue.id))
+      .orderBy(({ comment }) => comment.createdAt, `desc`)
+      .limit(3),
   }))
 
 // 5. issue detail + comments
@@ -135,11 +139,10 @@ q.from({ issue: issues })
   .where(({ issue }) => eq(issue.id, selectedIssueId))
   .select(({ issue }) => ({
     issue,
-    comments: toArray(
-      q.from({ comment: comments })
-        .where(({ comment }) => eq(comment.issueId, issue.id))
-        .orderBy(({ comment }) => comment.createdAt, `desc`),
-    ),
+    comments: q
+      .from({ comment: comments })
+      .where(({ comment }) => eq(comment.issueId, issue.id))
+      .orderBy(({ comment }) => comment.createdAt, `desc`),
   }))
 ```
 
@@ -495,7 +498,8 @@ operator cardinality:
 - Is filter/order/limit applied before joins and aggregates where possible?
 - Does `comment count` scan all comments for an issue, all comments globally, or
   only the changed delta?
-- Does `3 recent comments` re-emit all 50 parent rows or only affected parents?
+- Does `3 recent comments` update only affected child collections and avoid
+  parent row re-emission?
 - Is hashing time material, and if so, is it structural hash, identity key
   generation, `serializeValue`, or `Index` fallback hashing?
 - Are repeated `deepEquals` calls or virtual prop enrichment dominating after
