@@ -390,9 +390,7 @@ describe(`Collection.subscribeChanges`, () => {
     let begin!: TestSyncParams[`begin`]
     let write!: TestSyncParams[`write`]
     let commit!: TestSyncParams[`commit`]
-    let setRowMetadata!: NonNullable<
-      TestSyncParams[`metadata`]
-    >[`row`][`set`]
+    let setRowMetadata!: NonNullable<TestSyncParams[`metadata`]>[`row`][`set`]
 
     const collection = createCollection<{ id: number; value: string }, number>({
       id: `mixed-operation-metadata-diff-test`,
