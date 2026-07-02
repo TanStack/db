@@ -739,7 +739,7 @@ describe(`Electric Integration`, () => {
       expect(testCollection._state.syncedData.size).toEqual(1)
     })
 
-    it(`should keep optimistic insert when txid sync confirms a different server-generated key`, async () => {
+    it(`should remove optimistic insert when txid sync confirms a different server-generated key`, async () => {
       const txid = 1234
       const onInsert = vi.fn().mockResolvedValue({ txid })
 
@@ -774,15 +774,12 @@ describe(`Electric Integration`, () => {
 
       await tx.isPersisted.promise
 
-      expect(stripVirtualProps(testCollection.get(4733))).toEqual({
-        id: 4733,
-        text: `two`,
-      })
+      expect(testCollection.has(4733)).toBe(false)
       expect(stripVirtualProps(testCollection.get(24))).toEqual({
         id: 24,
         text: `two`,
       })
-      expect(Array.from(testCollection.state.keys())).toEqual([24, 4733])
+      expect(Array.from(testCollection.state.keys())).toEqual([24])
     })
 
     it(`should support void strategy when handler returns nothing`, async () => {
