@@ -73,7 +73,10 @@ export function runSuite(driver: LiveQueryDriver) {
         await h.flush()
 
         expect(h.current().data).toHaveLength(1)
-        expect(h.current().data[0]).toMatchObject({ id: `3`, name: `John Smith` })
+        expect(h.current().data[0]).toMatchObject({
+          id: `3`,
+          name: `John Smith`,
+        })
         h.unmount()
       },
     )
@@ -95,21 +98,25 @@ export function runSuite(driver: LiveQueryDriver) {
       h.unmount()
     })
 
-    scenario(`live-delete`, `a sync delete removes from the result`, async () => {
-      const source = driver.makeSource(SEED)
-      const h = driver.mount((q) =>
-        q
-          .from({ items: source.collection })
-          .select(({ items }: any) => ({ id: items.id })),
-      )
-      await h.flush()
+    scenario(
+      `live-delete`,
+      `a sync delete removes from the result`,
+      async () => {
+        const source = driver.makeSource(SEED)
+        const h = driver.mount((q) =>
+          q
+            .from({ items: source.collection })
+            .select(({ items }: any) => ({ id: items.id })),
+        )
+        await h.flush()
 
-      source.remove(SEED[0]!)
-      await h.flush()
+        source.remove(SEED[0]!)
+        await h.flush()
 
-      expect(h.current().data).toHaveLength(SEED.length - 1)
-      h.unmount()
-    })
+        expect(h.current().data).toHaveLength(SEED.length - 1)
+        h.unmount()
+      },
+    )
 
     scenario(`orderby`, `orderBy yields rows in sorted order`, async () => {
       const source = driver.makeSource(SEED)
@@ -204,9 +211,10 @@ export function runSuite(driver: LiveQueryDriver) {
       await h.flush()
 
       expect(h.current().data).toHaveLength(ISSUES.length)
-      expect(
-        h.current().data.find((r: any) => r.id === `i1`),
-      ).toMatchObject({ title: `Issue 1`, name: `John Doe` })
+      expect(h.current().data.find((r: any) => r.id === `i1`)).toMatchObject({
+        title: `Issue 1`,
+        name: `John Doe`,
+      })
       h.unmount()
     })
 
@@ -506,7 +514,9 @@ export function runSuite(driver: LiveQueryDriver) {
         await tx.isPersisted.promise
         await h.flush()
         // Reconciled: temp replaced by the permanent key.
-        expect(h.current().data.find((r: any) => r.id === `temp`)).toBeUndefined()
+        expect(
+          h.current().data.find((r: any) => r.id === `temp`),
+        ).toBeUndefined()
         expect(h.current().data.find((r: any) => r.id === `p9`)).toBeDefined()
         h.unmount()
       },

@@ -44,8 +44,9 @@ export interface SourceHandle<T extends { id: string } = Row> {
  * transitions. Starts in `loading` (synced, not ready) so scenarios can `emit`
  * rows while still loading and then `markReady`.
  */
-export interface DeferredSourceHandle<T extends { id: string } = Row>
-  extends SourceHandle<T> {
+export interface DeferredSourceHandle<
+  T extends { id: string } = Row,
+> extends SourceHandle<T> {
   /** Write rows without marking ready — exercises the eager (visible-while-loading) path. */
   emit: (rows: ReadonlyArray<T>) => void
   /** Transition the source from `loading` to `ready`. */

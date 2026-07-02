@@ -64,7 +64,9 @@ function makeSource<T extends { id: string }>(
   }
 }
 
-function makeDeferredSource<T extends { id: string }>(): DeferredSourceHandle<T> {
+function makeDeferredSource<
+  T extends { id: string },
+>(): DeferredSourceHandle<T> {
   const collection = createCollection(
     mockSyncCollectionOptionsNoInitialState<T>({
       id: `conformance-vue-${sourceSeq++}`,
@@ -142,7 +144,10 @@ function makeHandle(result: any, scope: ReturnType<typeof effectScope>) {
   return handle
 }
 
-function runInScope<R>(fn: () => R): { result: R; scope: ReturnType<typeof effectScope> } {
+function runInScope<R>(fn: () => R): {
+  result: R
+  scope: ReturnType<typeof effectScope>
+} {
   const scope = effectScope()
   let result!: R
   scope.run(() => {
