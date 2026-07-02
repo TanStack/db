@@ -90,7 +90,7 @@ Suggested structure:
      - [#350 Expose QueryFunctionContext properties (signal, meta) in query-db-collection](https://github.com/TanStack/db/issues/350): context typing/meta is partly addressed, while cancellation/lifecycle behavior remains relevant.
      - [#436 Error `[QueryCollection] queryClient must be provided` on TanStack Start's beforeLoad](https://github.com/TanStack/db/issues/436): runtime QueryClient scoping and SSR/request-local binding.
      - [#652 Ability to create collections with parameterized query functions](https://github.com/TanStack/db/issues/652): business scope parameters such as tenant/project/account should be distinct from query-driven subset predicates.
-     - [#901 Using a syncMode: "on-demand" collection breaks @tanstack/react-query-persist-client persister](https://github.com/TanStack/db/issues/901): persistence/structured-clone safety for on-demand metadata.
+     - [#901 Using a syncMode: "on-demand" collection breaks the TanStack Query persist-client persister](https://github.com/TanStack/db/issues/901): persistence/structured-clone safety for on-demand metadata.
    - Related historical fixes that show recurring symptoms:
      - [#1568 fix(query-db-collection): forward gcTime from queryCollectionOptions to the underlying query](https://github.com/TanStack/db/pull/1568): an exposed Query option did not reach the underlying observer.
      - [#707 fix(query-db-collection): respect QueryClient defaultOptions when not overridden](https://github.com/TanStack/db/pull/707): explicitly passing undefined suppressed QueryClient defaults.
