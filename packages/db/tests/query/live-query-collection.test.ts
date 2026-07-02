@@ -2938,7 +2938,11 @@ describe(`createLiveQueryCollection`, () => {
 
   it(`shows unrelated synced source rows in a live query while a source mutation is persisting`, async () => {
     type Todo = { id: number; text: string; projectId: number }
-    type SyncPayload = { type: `insert` | `update` | `delete`; value?: Todo; key?: number }
+    type SyncPayload = {
+      type: `insert` | `update` | `delete`
+      value?: Todo
+      key?: number
+    }
 
     const syncListeners: Array<(payload: SyncPayload) => void> = []
 
@@ -2973,7 +2977,9 @@ describe(`createLiveQueryCollection`, () => {
     await projectTodos.preload()
 
     expect(
-      Array.from(projectTodos.state.values()).map((row) => stripVirtualProps(row)),
+      Array.from(projectTodos.state.values()).map((row) =>
+        stripVirtualProps(row),
+      ),
     ).toEqual([{ id: 1, text: `one`, projectId: 1 }])
 
     let resolveMutation!: () => void
@@ -3004,7 +3010,9 @@ describe(`createLiveQueryCollection`, () => {
     let whilePersistingError: unknown
     try {
       expect(
-        Array.from(projectTodos.state.values()).map((row) => stripVirtualProps(row)),
+        Array.from(projectTodos.state.values()).map((row) =>
+          stripVirtualProps(row),
+        ),
       ).toEqual([
         { id: 1, text: `one optimistic`, projectId: 1 },
         { id: 2, text: `two`, projectId: 1 },
@@ -3022,7 +3030,9 @@ describe(`createLiveQueryCollection`, () => {
     }
 
     expect(
-      Array.from(projectTodos.state.values()).map((row) => stripVirtualProps(row)),
+      Array.from(projectTodos.state.values()).map((row) =>
+        stripVirtualProps(row),
+      ),
     ).toEqual([
       { id: 1, text: `one optimistic`, projectId: 1 },
       { id: 2, text: `two`, projectId: 1 },
