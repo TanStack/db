@@ -210,13 +210,7 @@ const svelteDriver: LiveQueryDriver = {
   mountCollection,
   mountConfig,
   mountDisabled,
-  // Real bug the suite caught: svelte-db's `toValue()` unwrapping (added for the
-  // reactive `() => collection` form) CALLS a disabled query fn like `() => null`
-  // as if it were a getter, unwraps it to null, and falls through to
-  // createLiveQueryCollection({...null}) → crash in getQueryIR. The disabled
-  // short-circuit is unreachable for this case, and svelte-db has no disabled
-  // tests. Both disabled scenarios fail until this is fixed.
-  knownGaps: [`disabled-explicit`, `disabled-transition`],
+  knownGaps: [],
   features: { serverSnapshot: false, suspense: false },
 }
 
