@@ -1009,8 +1009,8 @@ Reactively, `$acknowledged` lets you show an intermediate "saved, syncing…" st
 ```tsx
 const rowState =
   !row.$acknowledged ? 'pending-spinner'   // in flight
-  : !row.$synced     ? 'saved'         // server has it; sync catching up
-  :                    'saved'        // fully settled
+  : !row.$synced     ? 'saved-unsettled'   // server has it; sync catching up
+  :                    'saved'             // fully settled
 ```
 
 ## Paced Mutations
