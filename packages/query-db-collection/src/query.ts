@@ -434,6 +434,13 @@ class QueryCollectionUtilsImpl {
  *   })
  * )
  */
+function getSerializableLoadSubsetOptions(
+  opts: LoadSubsetOptions,
+): LoadSubsetOptions {
+  const { subscription: _subscription, ...serializableOptions } = opts
+  return serializableOptions
+}
+
 // Overload for when schema is provided and select present
 export function queryCollectionOptions<
   T extends StandardSchemaV1,
@@ -1092,7 +1099,10 @@ export function queryCollectionOptions(
       // Generate key using common function
       const key = generateQueryKeyFromOptions(opts)
       const hashedQueryKey = hashKey(key)
-      const extendedMeta = { ...meta, loadSubsetOptions: opts }
+      const extendedMeta = {
+        ...meta,
+        loadSubsetOptions: getSerializableLoadSubsetOptions(opts),
+      }
       const retainedEntry = metadata?.collection.get(
         `${QUERY_COLLECTION_GC_PREFIX}${hashedQueryKey}`,
       )

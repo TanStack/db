@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { QueryClient, hashKey } from '@tanstack/query-core'
+import { QueryClient, dehydrate, hashKey } from '@tanstack/query-core'
 import {
   BTreeIndex,
   createCollection,
@@ -20,6 +20,7 @@ import type {
   Collection,
   DeleteMutationFnParams,
   InsertMutationFnParams,
+  LoadSubsetOptions,
   SyncMetadataApi,
   TransactionWithMutations,
   UpdateMutationFnParams,
@@ -5868,6 +5869,72 @@ describe(`QueryCollection`, () => {
 
       // Cleanup
       testQueryClient.clear()
+    })
+  })
+
+  describe(`On-demand query persistence`, () => {
+    const containsFunction = (value: unknown): boolean => {
+      if (typeof value === `function`) {
+        return true
+      }
+
+      if (Array.isArray(value)) {
+        return value.some(containsFunction)
+      }
+
+      if (value && typeof value === `object`) {
+        return Object.values(value as Record<string, unknown>).some(
+          containsFunction,
+        )
+      }
+
+      return false
+    }
+
+    it(`should keep dehydrated query state structured-clone safe after loading an on-demand subset with subscription state`, async () => {
+      const queryClient = new QueryClient()
+      const items: Array<CategorisedItem> = [
+        { id: `1`, name: `Item 1`, category: `A` },
+        { id: `2`, name: `Item 2`, category: `B` },
+      ]
+
+      const collection = createCollection(
+        queryCollectionOptions<CategorisedItem>({
+          id: `on-demand-persistence-clone-safe-test`,
+          queryClient,
+          queryKey: [`on-demand-persistence-clone-safe-test`],
+          queryFn: vi.fn().mockResolvedValue(items),
+          getKey: (item) => item.id,
+          syncMode: `on-demand`,
+          startSync: true,
+        }),
+      )
+
+      await collection._sync.loadSubset({
+        where: eq(`category`, `A`),
+        subscription: {
+          options: {
+            onUnsubscribe: () => {},
+          },
+        } as unknown as NonNullable<LoadSubsetOptions[`subscription`]>,
+      })
+
+      const cachedQuery = queryClient.getQueryCache().findAll()[0]
+      expect(cachedQuery?.meta?.loadSubsetOptions).toBeDefined()
+      expect(cachedQuery?.meta?.loadSubsetOptions?.subscription).toBeUndefined()
+
+      const dehydrated = dehydrate(queryClient)
+      expect(dehydrated.queries.length).toBeGreaterThan(0)
+      expect(() => structuredClone(dehydrated)).not.toThrow()
+
+      for (const query of dehydrated.queries) {
+        expect(containsFunction(query.meta)).toBe(false)
+        expect(
+          containsFunction(query.state.data as Record<string, unknown>),
+        ).toBe(false)
+      }
+
+      queryClient.clear()
     })
   })
 
