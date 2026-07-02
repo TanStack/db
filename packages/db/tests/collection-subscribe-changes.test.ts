@@ -2475,6 +2475,118 @@ describe(`Virtual properties`, () => {
     subscription.unsubscribe()
   })
 
+  it(`should diff sync confirmation from completed optimistic update`, async () => {
+    const changes: Array<ChangeMessage<{ id: string; title: string }>> = []
+    let syncFns:
+      | {
+          begin: () => void
+          write: (change: {
+            type: `update`
+            value: { id: string; title: string }
+          }) => void
+          commit: () => void
+        }
+      | undefined
+
+    const collection = createCollection<{ id: string; title: string }, string>({
+      id: `completed-optimistic-sync-diff-canonical`,
+      getKey: (item) => item.id,
+      sync: {
+        sync: ({ begin, write, commit, markReady }) => {
+          syncFns = { begin, write, commit }
+          begin()
+          write({ type: `insert`, value: { id: `row-1`, title: `old` } })
+          commit()
+          markReady()
+        },
+      },
+      onUpdate: () => Promise.resolve(),
+    })
+
+    await collection.stateWhenReady()
+
+    const subscription = collection.subscribeChanges(
+      (events) => changes.push(...events),
+      { includeInitialState: false },
+    )
+
+    const tx = collection.update(`row-1`, (draft) => {
+      draft.title = `optimistic`
+    })
+    await tx.isPersisted.promise
+    expect(collection.get(`row-1`)?.title).toBe(`optimistic`)
+
+    changes.length = 0
+    syncFns!.begin()
+    syncFns!.write({ type: `update`, value: { id: `row-1`, title: `server` } })
+    syncFns!.commit()
+
+    const updateChange = changes.find(
+      (change) => change.type === `update` && change.key === `row-1`,
+    )
+    expect(updateChange).toBeDefined()
+    expect(updateChange!.previousValue?.title).toBe(`optimistic`)
+    expect(updateChange!.value.title).toBe(`server`)
+
+    subscription.unsubscribe()
+  })
+
+  it(`should diff sync revert from completed optimistic update`, async () => {
+    const changes: Array<ChangeMessage<{ id: string; title: string }>> = []
+    let syncFns:
+      | {
+          begin: () => void
+          write: (change: {
+            type: `update`
+            value: { id: string; title: string }
+          }) => void
+          commit: () => void
+        }
+      | undefined
+
+    const collection = createCollection<{ id: string; title: string }, string>({
+      id: `completed-optimistic-sync-diff-revert`,
+      getKey: (item) => item.id,
+      sync: {
+        sync: ({ begin, write, commit, markReady }) => {
+          syncFns = { begin, write, commit }
+          begin()
+          write({ type: `insert`, value: { id: `row-1`, title: `old` } })
+          commit()
+          markReady()
+        },
+      },
+      onUpdate: () => Promise.resolve(),
+    })
+
+    await collection.stateWhenReady()
+
+    const subscription = collection.subscribeChanges(
+      (events) => changes.push(...events),
+      { includeInitialState: false },
+    )
+
+    const tx = collection.update(`row-1`, (draft) => {
+      draft.title = `optimistic`
+    })
+    await tx.isPersisted.promise
+    expect(collection.get(`row-1`)?.title).toBe(`optimistic`)
+
+    changes.length = 0
+    syncFns!.begin()
+    syncFns!.write({ type: `update`, value: { id: `row-1`, title: `old` } })
+    syncFns!.commit()
+
+    const updateChange = changes.find(
+      (change) => change.type === `update` && change.key === `row-1`,
+    )
+    expect(updateChange).toBeDefined()
+    expect(updateChange!.previousValue?.title).toBe(`optimistic`)
+    expect(updateChange!.value.title).toBe(`old`)
+
+    subscription.unsubscribe()
+  })
+
   it(`should set $origin local for non-optimistic inserts`, async () => {
     const changes: Array<ChangeMessage<{ id: string; value: string }>> = []
     let syncFns:
