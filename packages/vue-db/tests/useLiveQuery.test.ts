@@ -685,9 +685,14 @@ describe(`Query Collections`, () => {
 
     await waitForVueUpdate()
 
-    // Verify the temporary key is replaced by the permanent one
-    expect(state.value.size).toBe(4)
-    expect(state.value.get(`[temp-key,1]`)).toBeUndefined()
+    // Without server-key matching, the optimistic temp row stays visible
+    // alongside the canonical server row until same-key sync confirmation arrives.
+    expect(state.value.size).toBe(5)
+    expect(state.value.get(`[temp-key,1]`)).toMatchObject({
+      id: `temp-key`,
+      name: `John Doe`,
+      title: `New Issue`,
+    })
     expect(state.value.get(`[4,1]`)).toMatchObject({
       id: `4`,
       name: `John Doe`,
