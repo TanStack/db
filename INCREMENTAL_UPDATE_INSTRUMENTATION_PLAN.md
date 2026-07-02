@@ -81,6 +81,110 @@ For each query, measure:
 - Irrelevant write: write a row that should not affect the result.
 - Boundary write: write a row that enters or exits the top 50 or top 3 window.
 
+### Concrete Query Sketches
+
+Use sketches like these as the starting point, then adjust to exact QueryBuilder
+syntax during implementation.
+
+```ts
+// 1. list: newest 50 open
+q.from({ issue: issues })
+  .where(({ issue }) => eq(issue.status, `open`))
+  .orderBy(({ issue }) => issue.createdAt, `desc`)
+  .limit(50)
+
+// 2. list + author
+q.from({ issue: issues })
+  .where(({ issue }) => eq(issue.status, `open`))
+  .orderBy(({ issue }) => issue.createdAt, `desc`)
+  .limit(50)
+  .join({ author: users }, ({ issue, author }) =>
+    eq(issue.authorId, author.id),
+  )
+
+// 3. list + comment count
+q.from({ issue: issues })
+  .where(({ issue }) => eq(issue.status, `open`))
+  .orderBy(({ issue }) => issue.createdAt, `desc`)
+  .limit(50)
+  .select(({ issue }) => ({
+    issue,
+    commentCount: q
+      .from({ comment: comments })
+      .where(({ comment }) => eq(comment.issueId, issue.id))
+      .select(({ comment }) => count(comment.id)),
+  }))
+
+// 4. list + 3 recent comments
+q.from({ issue: issues })
+  .where(({ issue }) => eq(issue.status, `open`))
+  .orderBy(({ issue }) => issue.createdAt, `desc`)
+  .limit(50)
+  .select(({ issue }) => ({
+    issue,
+    recentComments: toArray(
+      q.from({ comment: comments })
+        .where(({ comment }) => eq(comment.issueId, issue.id))
+        .orderBy(({ comment }) => comment.createdAt, `desc`)
+        .limit(3),
+    ),
+  }))
+
+// 5. issue detail + comments
+q.from({ issue: issues })
+  .where(({ issue }) => eq(issue.id, selectedIssueId))
+  .select(({ issue }) => ({
+    issue,
+    comments: toArray(
+      q.from({ comment: comments })
+        .where(({ comment }) => eq(comment.issueId, issue.id))
+        .orderBy(({ comment }) => comment.createdAt, `desc`),
+    ),
+  }))
+```
+
+### Write Scenarios
+
+Run each scenario against every query where it is relevant:
+
+- Issue insert outside the open/top-50 window.
+- Issue insert that enters the open/top-50 window.
+- Issue update that changes non-query fields on a visible issue.
+- Issue update that changes `status` so a row enters or exits the list.
+- Issue update that changes `createdAt` across the top-50 boundary.
+- Issue delete for a visible issue.
+- Author update for the author of a visible issue.
+- Author update for a user with no visible issues.
+- Comment insert on a visible issue.
+- Comment insert on a non-visible issue.
+- Comment update that does not affect comment count or ordering.
+- Comment update that changes `createdAt` across the top-3 boundary.
+- Comment delete from a visible issue.
+- Comment insert/delete on the selected issue detail row.
+- Comment insert/delete on a different issue while the detail query is active.
+
+### Benchmark Protocol
+
+The benchmark runner should be a standalone `tsx` script first, with small
+Vitest unit tests for trace aggregation behavior. A standalone runner makes it
+easier to control warmup, iteration count, output files, and Node flags without
+turning normal test runs into noisy performance tests.
+
+For every benchmark case:
+
+- Use a fixed fixture seed and print it in the report.
+- Print Node version, package manager version, platform, CPU model when
+  available, and git SHA.
+- Run warmup iterations before measured iterations.
+- Run enough measured iterations to report median, p75, p95, min, max, and
+  standard deviation.
+- Run with tracing disabled and enabled on the same fixture to estimate trace
+  overhead.
+- Optionally run with `--expose-gc` and call `global.gc()` between measured
+  cases when available; report whether GC control was active.
+- Keep JSON output outside committed source by default, for example under
+  `.tmp/perf/`, unless the team explicitly wants checked-in snapshots.
+
 ## Trace Architecture
 
 Add an internal, opt-in trace recorder with two levels:
@@ -92,11 +196,15 @@ Suggested files:
 
 - `packages/db-ivm/src/perf.ts`
 - `packages/db/src/query/live/perf.ts`
-- `packages/db/tests/query/perf/incremental-update.bench.ts`
+- `scripts/bench/incremental-update.ts`
+- `packages/db/tests/query/perf/trace-aggregation.test.ts`
 
 The recorder should support:
 
 - `span(name, tags, fn)` for sync work.
+- `spanAsync(name, tags, fn)` for promise-returning work.
+- `startSpan(name, tags)` returning an explicit `end(extraTags?)` handle for
+  work that crosses callback or subscription boundaries.
 - `record(name, value, tags)` for counters and gauges.
 - `reset()` and `snapshot()` for tests/benchmarks.
 - A global symbol-backed sink so both packages can aggregate in the same report
@@ -138,6 +246,17 @@ Record per operator:
 - Input row count.
 - Output message count where visible.
 - Output row count where visible.
+
+Output attribution must be explicit. The preferred first implementation is:
+
+- Each operator that already builds a `MultiSet` or result array records output
+  row count immediately before `output.sendData(...)`.
+- Generic `D2` operator timing records class name and input counts only.
+- Do not infer per-operator output rows from `DifferenceStreamWriter` unless the
+  writer is extended with producer metadata; otherwise downstream readers make
+  attribution ambiguous.
+- Operators that stream through messages, such as `output`, should record
+  callback input rows and callback duration separately from forwarded rows.
 
 ### Query Operators
 
@@ -246,8 +365,12 @@ Files:
 
 Measure:
 
-- `hash`: total calls, total time, max single-call time.
-- Hash cache hits and misses.
+- `hash`: public call count, total time, max single-call time.
+- Structural hash calls, total time, and max single-call time.
+- Object hash cache hits and misses. These should only count object-like values
+  that consult the WeakMap, not primitives.
+- Primitive hash calls. These are deterministic but not cache-backed.
+- Reference identity hash calls for functions, large binary values, and files.
 - Hash calls by input kind:
   - primitive
   - plain object
@@ -258,9 +381,10 @@ Measure:
   - Uint8Array or Buffer
   - Temporal
   - function or reference hash
-- `hashPlainObject`: key count and sort time.
+- `hashPlainObject`: key count, nested value count, and key sort time.
 - `hashUint8Array`: byte length buckets.
-- `ObjectIdGenerator.getStringId`: calls and time.
+- `ObjectIdGenerator.getStringId`: calls, time, object WeakMap hits/misses,
+  and primitive calls.
 - `MultiSet.consolidate`: keyed fast path vs unkeyed hash path.
 - `Index` fallback hashing:
   - `ValueMap.addValue` calls.
@@ -268,16 +392,31 @@ Measure:
   - prefix map value hashing.
 - `serializeValue`: calls, total time, max single-call time.
 
+The cache counters need clear denominators. A report that says `cacheHits=1000`
+must also make clear whether those hits are from `hashObject`, reference identity
+hashing, or `ObjectIdGenerator`; primitives should not be counted as misses just
+because they do not use a WeakMap.
+
 Example report section:
 
 ```text
 hash:
-  calls: 12450
+  publicCalls: 12450
+  structuralCalls: 3430
   totalMs: 8.42
   maxMs: 0.31
-  cacheHits: 11020
-  cacheMisses: 1430
+  objectCacheHits: 2010
+  objectCacheMisses: 520
+  referenceHashCalls: 12
+  primitiveCalls: 9020
   byKind: primitive=9020 object=3100 array=180 map=0 set=0 uint8=0
+
+objectIdGenerator:
+  calls: 9000
+  totalMs: 1.33
+  objectHits: 7200
+  objectMisses: 400
+  primitiveCalls: 1400
 
 multisetConsolidate:
   calls: 412
@@ -297,7 +436,13 @@ Each benchmark run should emit:
 
 - Query name.
 - Phase: cold hydrate or incremental write.
-- Wall-clock duration.
+- Write scenario name.
+- Fixture seed and scale.
+- Runtime metadata: Node version, platform, git SHA, tracing enabled/disabled.
+- Wall-clock duration summary: median, p75, p95, min, max, standard deviation,
+  and iteration count.
+- Trace overhead summary comparing tracing disabled vs enabled for the same
+  case.
 - Top spans by total time.
 - Top spans by call count.
 - Hashing summary.
@@ -309,7 +454,11 @@ Example:
 ```text
 query: list + comment count
 phase: comment insert
-wallMs: 25.12
+scenario: visible issue comment insert
+iterations: 100
+medianMs: 25.12
+p95Ms: 29.48
+traceOverheadMs: 0.82
 
 top spans:
   collection.commitPendingTransactions  11.40ms  calls=1
@@ -326,16 +475,19 @@ operator cardinality:
 ## Implementation Steps
 
 1. Add the disabled-by-default trace recorder.
-2. Add D2 graph and operator-level spans.
-3. Add hash, serialize, multiset, and index fallback counters.
-4. Add live query scheduling and flush spans.
-5. Add collection commit, event, and includes spans.
-6. Add the deterministic benchmark fixture and runner.
-7. Run baseline on current branch and save JSON output outside committed source
+2. Add unit tests for trace aggregation, disabled-mode behavior, and async span
+   completion.
+3. Add D2 graph and operator-level spans.
+4. Add hash, serialize, multiset, and index fallback counters.
+5. Add live query scheduling and flush spans.
+6. Add collection commit, event, and includes spans.
+7. Add the deterministic standalone benchmark fixture and runner.
+8. Run benchmark cases with tracing disabled and enabled to estimate overhead.
+9. Run baseline on current branch and save JSON output outside committed source
    unless the team wants checked-in snapshots.
-8. Inspect the highest cost spans and cardinality blowups.
-9. Add focused regression tests for any discovered bug or accidental fanout.
-10. Implement optimizations in separate commits after instrumentation is trusted.
+10. Inspect the highest cost spans and cardinality blowups.
+11. Add focused regression tests for any discovered bug or accidental fanout.
+12. Implement optimizations in separate commits after instrumentation is trusted.
 
 ## Questions The Data Should Answer
 
@@ -357,9 +509,18 @@ operator cardinality:
   readable JSON report.
 - For each query shape, the report shows cold hydrate and at least one
   steady-state write case.
+- Each measured case reports warmup count, measured iteration count, median,
+  p95, min, max, standard deviation, fixture seed, fixture scale, runtime
+  metadata, and git SHA.
+- Each measured case reports tracing disabled vs enabled overhead.
 - Hashing appears as its own aggregate section with call counts and timing.
+- Hashing cache metrics separate object WeakMap hits/misses, primitive calls,
+  and reference identity hashing.
 - D2 operator timing can be separated from collection commit/event timing.
+- Operator output cardinality is explicitly recorded by operators that emit
+  data, not inferred ambiguously from downstream readers.
+- Async work such as preload, loadSubset, and first visible result can be timed
+  with async spans or explicit start/end spans.
 - The report includes enough cardinality data to explain why a slow span is
   slow.
 - Normal test runs have negligible overhead with tracing disabled.
-
