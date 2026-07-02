@@ -992,6 +992,7 @@ export class CollectionConfigBuilder<
         scalarField: entry.scalarField,
         childRegistry: new Map(),
         pendingChildChanges: new Map(),
+        dirtyChildEntries: new Set(),
         correlationToParentKeys: new Map(),
       }
 
@@ -1370,10 +1371,14 @@ type IncludesOutputState = {
   childRegistry: Map<unknown, ChildCollectionEntry>
   /** Pending child changes: correlationKey → Map<childKey, Changes> */
   pendingChildChanges: Map<unknown, Map<unknown, Changes<any>>>
+  /** Child entries whose nested include state has pending work */
+  dirtyChildEntries: Set<unknown>
   /** Reverse index: correlation key → Set of parent collection keys */
   correlationToParentKeys: Map<unknown, Set<unknown>>
   /** Shared nested pipeline setups (one per nested includes level) */
   nestedSetups?: Array<NestedIncludesSetup>
+  parentState?: IncludesOutputState
+  parentCorrelationKey?: unknown
 }
 
 type ChildCollectionEntry = {
@@ -1387,6 +1392,33 @@ type ChildCollectionEntry = {
 
 function materializesInline(state: IncludesOutputState): boolean {
   return state.materialization !== `collection`
+}
+
+function markIncludesStateDirty(state: IncludesOutputState): void {
+  let current = state
+  while (current.parentState) {
+    current.parentState.dirtyChildEntries.add(current.parentCorrelationKey)
+    current = current.parentState
+  }
+}
+
+function markNestedBufferRoutesDirty(
+  setup: NestedIncludesSetup,
+  nestedRoutingKey: unknown,
+): void {
+  const stateRoutes = setup.routingIndex.get(nestedRoutingKey)
+  if (!stateRoutes) return
+
+  for (const [targetState, parentRoutes] of stateRoutes) {
+    const targetSetupIndex = targetState.nestedSetups?.indexOf(setup) ?? -1
+    if (targetSetupIndex < 0) continue
+
+    for (const parentCorrelationKey of parentRoutes.keys()) {
+      const entry = targetState.childRegistry.get(parentCorrelationKey)
+      const entryState = entry?.includesStates?.[targetSetupIndex]
+      if (entryState) markIncludesStateDirty(entryState)
+    }
+  }
 }
 
 function materializeIncludedValue(
@@ -1444,6 +1476,7 @@ function setupNestedPipelines(
       output((data) => {
         const messages = data.getInner()
         syncState.messagesCount += messages.length
+        const touchedRoutingKeys = new Set<unknown>()
 
         for (const [[childKey, tupleData], multiplicity] of messages) {
           const [childResult, _orderByIndex, correlationKey, parentContext] =
@@ -1477,6 +1510,11 @@ function setupNestedPipelines(
           }
 
           byChild.set(childKey, existing)
+          touchedRoutingKeys.add(routingKey)
+        }
+
+        for (const routingKey of touchedRoutingKeys) {
+          markNestedBufferRoutesDirty(setup, routingKey)
         }
       }),
     )
@@ -1508,6 +1546,8 @@ function setupNestedPipelines(
  */
 function createPerEntryIncludesStates(
   setups: Array<NestedIncludesSetup>,
+  parentState?: IncludesOutputState,
+  parentCorrelationKey?: unknown,
 ): Array<IncludesOutputState> {
   return setups.map((setup) => {
     const state: IncludesOutputState = {
@@ -1519,7 +1559,13 @@ function createPerEntryIncludesStates(
       scalarField: setup.compilationResult.scalarField,
       childRegistry: new Map(),
       pendingChildChanges: new Map(),
+      dirtyChildEntries: new Set(),
       correlationToParentKeys: new Map(),
+    }
+
+    if (parentState) {
+      state.parentState = parentState
+      state.parentCorrelationKey = parentCorrelationKey
     }
 
     if (setup.nestedSetups) {
@@ -1615,6 +1661,7 @@ function seedParentFromSnapshot(
       orderByIndex: row.orderByIndex,
     })
   }
+  markIncludesStateDirty(entryState)
 }
 
 /**
@@ -1674,6 +1721,7 @@ function drainNestedBuffers(state: IncludesOutputState): Set<unknown> {
               byChild.set(childKey, { ...changes })
             }
           }
+          markIncludesStateDirty(entryState)
 
           if (targetState === state) {
             dirtyCorrelationKeys.add(parentCorrelationKey)
@@ -1965,6 +2013,7 @@ function createChildCollectionEntry(
   correlationKey: unknown,
   hasOrderBy: boolean,
   nestedSetups?: Array<NestedIncludesSetup>,
+  parentState?: IncludesOutputState,
 ): ChildCollectionEntry {
   const resultKeys = new WeakMap<object, unknown>()
   const orderByIndices = hasOrderBy ? new WeakMap<object, string>() : null
@@ -2001,7 +2050,11 @@ function createChildCollectionEntry(
   }
 
   if (nestedSetups) {
-    entry.includesStates = createPerEntryIncludesStates(nestedSetups)
+    entry.includesStates = createPerEntryIncludesStates(
+      nestedSetups,
+      parentState,
+      correlationKey,
+    )
   }
 
   return entry
@@ -2063,6 +2116,7 @@ function flushIncludesState(
                   routingKey,
                   state.hasOrderBy,
                   state.nestedSetups,
+                  state,
                 )
                 state.childRegistry.set(routingKey, entry)
                 childCollectionsCreated++
@@ -2122,6 +2176,7 @@ function flushIncludesState(
               correlationKey,
               state.hasOrderBy,
               state.nestedSetups,
+              state,
             )
             state.childRegistry.set(correlationKey, entry)
             childCollectionsCreated++
@@ -2210,28 +2265,34 @@ function flushIncludesState(
       }
       // Finally: entries with deep nested buffer changes (grandchild-or-deeper buffers
       // have pending data, but neither this level nor the immediate child level changed).
-      // Without this pass, changes at depth 3+ are stranded because drainNestedBuffers
-      // only drains one level and Phase 4 only flushes entries dirty from Phase 2/3.
+      // Dirty entries are marked when nested buffers route into per-entry state, so this
+      // remains proportional to changed routes instead of scanning every child entry.
       const deepBufferDirty = new Set<unknown>()
-      if (state.nestedSetups) {
-        for (const [correlationKey, entry] of state.childRegistry) {
-          if (entriesWithChildChanges.has(correlationKey)) continue
-          if (dirtyFromBuffers.has(correlationKey)) continue
-          if (
-            entry.includesStates &&
-            hasPendingIncludesChanges(entry.includesStates)
-          ) {
-            recursiveFlushes++
-            flushIncludesState(
-              entry.includesStates,
-              entry.collection,
-              entry.collection.id,
-              null,
-              entry.syncMethods,
-            )
-            deepBufferDirty.add(correlationKey)
-          }
+      for (const correlationKey of state.dirtyChildEntries) {
+        if (entriesWithChildChanges.has(correlationKey)) {
+          state.dirtyChildEntries.delete(correlationKey)
+          continue
         }
+        if (dirtyFromBuffers.has(correlationKey)) {
+          state.dirtyChildEntries.delete(correlationKey)
+          continue
+        }
+        const entry = state.childRegistry.get(correlationKey)
+        if (
+          entry?.includesStates &&
+          hasPendingIncludesChanges(entry.includesStates)
+        ) {
+          recursiveFlushes++
+          flushIncludesState(
+            entry.includesStates,
+            entry.collection,
+            entry.collection.id,
+            null,
+            entry.syncMethods,
+          )
+          deepBufferDirty.add(correlationKey)
+        }
+        state.dirtyChildEntries.delete(correlationKey)
       }
 
       // For inline materializations: re-emit affected parents with updated snapshots.
@@ -2377,13 +2438,7 @@ function hasPendingIncludesChanges(
     if (state.pendingChildChanges.size > 0) return true
     if (state.nestedSetups && hasNestedBufferChanges(state.nestedSetups))
       return true
-    for (const entry of state.childRegistry.values()) {
-      if (
-        entry.includesStates &&
-        hasPendingIncludesChanges(entry.includesStates)
-      )
-        return true
-    }
+    if (state.dirtyChildEntries.size > 0) return true
   }
   return false
 }

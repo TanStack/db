@@ -170,7 +170,7 @@ function hashPlainObject(input: object, marker: number): number {
         keyCount: keys.length,
       })
     : undefined
-  keys.sort(keySort)
+  keys.sort()
   sortSpan?.end()
   if (isPerfEnabled()) {
     recordPerfCount(`hash.plainObject.keys`, keys.length)
@@ -279,13 +279,6 @@ function cachedReferenceHash(fn: object): number {
     })
   }
   return valueHash
-}
-
-/**
- * Strings sorted lexicographically.
- */
-function keySort(a: string, b: string): number {
-  return a.localeCompare(b)
 }
 
 function getHashInputKind(input: unknown): string {
