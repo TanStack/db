@@ -84,6 +84,7 @@ export class CollectionStateManager<
   public pendingOptimisticDeletes = new Set<TKey>()
   public pendingOptimisticDirectUpserts = new Set<TKey>()
   public pendingOptimisticDirectDeletes = new Set<TKey>()
+  private confirmedOptimisticKeys = new Set<TKey>()
 
   /**
    * Tracks the origin of confirmed changes for each row.
@@ -510,9 +511,21 @@ export class CollectionStateManager<
     const visible = new Map<TKey, TOutput>()
 
     for (const key of keys) {
-      const value = this.get(key)
+      const value = this.syncedData.get(key)
       if (value !== undefined) {
         visible.set(key, value)
+      }
+    }
+
+    for (const key of keys) {
+      if (this.optimisticDeletes.has(key)) {
+        visible.delete(key)
+        continue
+      }
+
+      const optimisticValue = this.optimisticUpserts.get(key)
+      if (optimisticValue !== undefined) {
+        visible.set(key, optimisticValue)
       }
     }
 
@@ -551,15 +564,18 @@ export class CollectionStateManager<
           if (!mutation.optimistic) {
             continue
           }
+          const mutationKey = mutation.key as TKey
           const mutationAlreadyConfirmed =
-            mutation.type === `delete`
-              ? !this.syncedData.has(mutation.key as TKey)
+            this.confirmedOptimisticKeys.has(mutationKey) ||
+            (mutation.type === `delete`
+              ? !this.syncedData.has(mutationKey)
               : deepEquals(
-                  this.syncedData.get(mutation.key as TKey),
+                  this.syncedData.get(mutationKey),
                   mutation.modified as TOutput,
-                )
+                ))
 
           if (mutationAlreadyConfirmed) {
+            this.confirmedOptimisticKeys.delete(mutationKey)
             this.pendingOptimisticUpserts.delete(mutation.key)
             this.pendingOptimisticDeletes.delete(mutation.key)
             this.pendingOptimisticDirectUpserts.delete(mutation.key)
@@ -634,6 +650,9 @@ export class CollectionStateManager<
         if (!this.isThisCollection(mutation.collection)) {
           continue
         }
+
+        const mutationKey = mutation.key as TKey
+        this.confirmedOptimisticKeys.delete(mutationKey)
 
         // Track that this key has pending local changes for $origin tracking
         this.pendingLocalChanges.add(mutation.key)
@@ -890,12 +909,20 @@ export class CollectionStateManager<
 
       // First collect all keys that will be affected by sync operations
       const changedKeys = new Set<TKey>()
+      const immediateSyncedKeys = new Set<TKey>()
       for (const transaction of committedSyncedTransactions) {
         for (const operation of transaction.operations) {
-          changedKeys.add(operation.key as TKey)
+          const key = operation.key as TKey
+          changedKeys.add(key)
+          if (transaction.immediate) {
+            immediateSyncedKeys.add(key)
+          }
         }
         for (const [key] of transaction.rowMetadataWrites) {
           changedKeys.add(key)
+          if (transaction.immediate) {
+            immediateSyncedKeys.add(key)
+          }
         }
       }
 
@@ -1009,6 +1036,10 @@ export class CollectionStateManager<
             truncatePendingLocalOrigins?.has(key) === true
               ? 'local'
               : 'remote'
+
+          if (transaction.immediate || this.pendingLocalOrigins.has(key)) {
+            this.confirmedOptimisticKeys.add(key)
+          }
 
           // Update synced data
           switch (operation.type) {
@@ -1192,14 +1223,15 @@ export class CollectionStateManager<
           ) {
             const mutationKey = mutation.key as TKey
             const directMutationConfirmed =
-              isDirectTransaction &&
-              changedKeys.has(mutationKey) &&
-              (mutation.type === `delete`
-                ? !this.syncedData.has(mutationKey)
-                : deepEquals(
-                    this.syncedData.get(mutationKey),
-                    mutation.modified as TOutput,
-                  ))
+              (isDirectTransaction &&
+                changedKeys.has(mutationKey) &&
+                (mutation.type === `delete`
+                  ? !this.syncedData.has(mutationKey)
+                  : deepEquals(
+                      this.syncedData.get(mutationKey),
+                      mutation.modified as TOutput,
+                    ))) ||
+              immediateSyncedKeys.has(mutationKey)
 
             if (directMutationConfirmed) {
               continue
@@ -1476,6 +1508,7 @@ export class CollectionStateManager<
     this.pendingOptimisticDeletes.clear()
     this.pendingOptimisticDirectUpserts.clear()
     this.pendingOptimisticDirectDeletes.clear()
+    this.confirmedOptimisticKeys.clear()
     this.clearOriginTrackingState()
     this.isLocalOnly = false
     this.size = 0

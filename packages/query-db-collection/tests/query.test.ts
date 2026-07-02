@@ -4566,10 +4566,12 @@ describe(`QueryCollection`, () => {
         expect(collection.has(`4`)).toBe(true)
       })
 
-      // Now cleanup query2
+      // Now cleanup query2. Query-owned rows are cleaned up, while the local
+      // optimistic insert remains visible until a sync confirmation arrives.
       await query2.cleanup()
       await vi.waitFor(() => {
-        expect(collection.size).toBe(0) // NOW it should be cleaned up
+        expect(collection.size).toBe(1)
+        expect(collection.has(`4`)).toBe(true)
       })
     })
 
@@ -6608,13 +6610,15 @@ describe(`QueryCollection`, () => {
       // The new item (id=101) should exist
       expect(collection.has(101)).toBe(true)
 
-      // Only one assignment with resource_id=4
+      // The stale deleted server row must not reappear. Without server-key
+      // matching, the local temporary row remains alongside the canonical row
+      // until a same-key sync confirmation arrives.
       const allItems = Array.from(collection.values())
       const carolAssignments = allItems.filter((a) => a.resource_id === 4)
-      expect(carolAssignments).toHaveLength(1)
-      expect(carolAssignments[0]?.id).toBe(101)
+      expect(carolAssignments.map((a) => a.id).sort()).toEqual([-2, 101])
+      expect(carolAssignments.some((a) => a.id === carolId)).toBe(false)
 
-      expect(collection.size).toBe(4)
+      expect(collection.size).toBe(5)
 
       workloadQuery.cleanup()
       taskQuery.cleanup()

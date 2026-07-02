@@ -1782,11 +1782,10 @@ describe(`Collection.subscribeChanges`, () => {
       const updateEvents = changeEvents.filter((e) => e.type === `update`)
 
       // Expected: 2 optimistic inserts. The delayed sync writes confirm the same
-      // optimistic rows while the local overlay is still active, so no duplicate
-      // user-data insert events are emitted. A virtual-only `$synced` confirmation
-      // update may still be materialized where applicable.
+      // optimistic rows with canonical server data, so each row receives an update
+      // from the optimistic value to the server value.
       expect(insertEvents.length).toBe(2)
-      expect(updateEvents.length).toBe(1)
+      expect(updateEvents.length).toBe(2)
     } finally {
       vi.useRealTimers()
       vi.restoreAllMocks()
@@ -1838,15 +1837,19 @@ describe(`Collection.subscribeChanges`, () => {
       collection.insert({ id: `x`, n: 1 })
       await vi.runAllTimersAsync()
 
-      // Should have the optimistic insert only; the delayed sync confirmation is
-      // applied to base while the local overlay is active and does not produce a
-      // duplicate user-data event. Tests that project virtual props cover any
-      // virtual-only `$synced` confirmation update separately.
-      expect(changeEvents).toHaveLength(1)
+      // Should have the optimistic insert followed by an update to the canonical
+      // server value.
+      expect(changeEvents).toHaveLength(2)
       expect(changeEvents[0]).toMatchObject({
         type: `insert`,
         key: `x`,
         value: { id: `x`, n: 1 },
+      })
+      expect(changeEvents[1]).toMatchObject({
+        type: `update`,
+        key: `x`,
+        value: { id: `x`, n: 1, foo: `abc` },
+        previousValue: { id: `x`, n: 1 },
       })
     } finally {
       vi.useRealTimers()
