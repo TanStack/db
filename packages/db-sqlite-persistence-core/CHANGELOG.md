@@ -1,5 +1,14 @@
 # @tanstack/db-sqlite-persistence-core
 
+## 0.2.6
+
+### Patch Changes
+
+- Fixed bug where internal metadata would get reset on insert causing stale items to remain ([#1626](https://github.com/TanStack/db/pull/1626))
+
+- Updated dependencies [[`397e12a`](https://github.com/TanStack/db/commit/397e12a1224ad563e20a331eebcbe904cd4af948)]:
+  - @tanstack/db@0.6.14
+
 ## 0.2.5
 
 ### Patch Changes

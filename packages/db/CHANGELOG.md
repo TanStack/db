@@ -1,5 +1,11 @@
 # @tanstack/db
 
+## 0.6.14
+
+### Patch Changes
+
+- Avoid full row origin snapshots during incremental collection updates and make bulk mutation merging linear. ([#1640](https://github.com/TanStack/db/pull/1640))
+
 ## 0.6.13
 
 ### Patch Changes
