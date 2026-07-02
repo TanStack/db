@@ -510,9 +510,17 @@ export class CollectionStateManager<
     const visible = new Map<TKey, TOutput>()
 
     for (const key of keys) {
-      const value = this.get(key)
+      const value = this.syncedData.get(key)
       if (value !== undefined) {
         visible.set(key, value)
+      }
+    }
+
+    for (const transaction of this.collectActiveTransactions()) {
+      for (const mutation of transaction.mutations) {
+        if (keys.has(mutation.key as TKey)) {
+          this.projectMutationOntoVisibleState(visible, mutation)
+        }
       }
     }
 

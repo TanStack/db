@@ -932,14 +932,9 @@ describe(`Query Collections`, () => {
 
     expect(hadFlicker).toBe(false)
 
-    // Without server-key matching, the optimistic temp row stays visible
-    // alongside the canonical server row until same-key sync confirmation arrives.
-    expect(result.current.state.size).toBe(5)
-    expect(result.current.state.get(`[temp-key,1]`)).toMatchObject({
-      id: `temp-key`,
-      name: `John Doe`,
-      title: `New Issue`,
-    })
+    // Verify the temporary key is replaced by the permanent one
+    expect(result.current.state.size).toBe(4)
+    expect(result.current.state.get(`[temp-key,1]`)).toBeUndefined()
     expect(result.current.state.get(`[4,1]`)).toMatchObject({
       id: `4`,
       name: `John Doe`,
