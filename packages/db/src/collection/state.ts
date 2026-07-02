@@ -121,6 +121,16 @@ export class CollectionStateManager<
   public syncedKeys = new Set<TKey>()
   public preSyncVisibleState = new Map<TKey, TOutput>()
   public recentlySyncedKeys = new Set<TKey>()
+
+  /**
+   * Terminal (completed/failed) transactions whose optimistic state has
+   * already been migrated by recomputeOptimisticState. Terminal states are
+   * final, and cleanup of these transactions is deferred to a microtask, so
+   * without this guard a synchronous burst of mutations re-processes every
+   * lingering transaction on each mutation (quadratic work) and can re-add
+   * pending optimistic state that a sync commit already consumed.
+   */
+  private processedTerminalTransactions = new WeakSet<object>()
   public hasReceivedFirstCommit = false
   public isCommittingSyncTransactions = false
   public isLocalOnly = false
@@ -503,11 +513,20 @@ export class CollectionStateManager<
     const previousDeletes = new Set(this.optimisticDeletes)
     const previousRowOrigins = this.rowOrigins
 
-    // Update pending optimistic state for completed/failed transactions
+    // Update pending optimistic state for completed/failed transactions.
+    // Each terminal transaction is migrated exactly once — see
+    // processedTerminalTransactions.
     for (const transaction of this.transactions.values()) {
+      if (
+        (transaction.state === `completed` || transaction.state === `failed`) &&
+        this.processedTerminalTransactions.has(transaction)
+      ) {
+        continue
+      }
       const isDirectTransaction =
         transaction.metadata[DIRECT_TRANSACTION_METADATA_KEY] === true
       if (transaction.state === `completed`) {
+        this.processedTerminalTransactions.add(transaction)
         for (const mutation of transaction.mutations) {
           if (!this.isThisCollection(mutation.collection)) {
             continue
@@ -546,6 +565,7 @@ export class CollectionStateManager<
           }
         }
       } else if (transaction.state === `failed`) {
+        this.processedTerminalTransactions.add(transaction)
         for (const mutation of transaction.mutations) {
           if (!this.isThisCollection(mutation.collection)) {
             continue
@@ -1368,6 +1388,26 @@ export class CollectionStateManager<
       // Mark that we've received the first commit (for tracking purposes)
       if (!this.hasReceivedFirstCommit) {
         this.hasReceivedFirstCommit = true
+      }
+
+      // Prune completed transactions that have been fully consumed: their
+      // optimistic state was migrated by recomputeOptimisticState and this
+      // commit has taken them into account for redundancy detection. Their
+      // scheduled microtask cleanup only runs after the current synchronous
+      // burst, so without eager pruning a burst of mutations iterates an
+      // ever-growing transaction list (quadratic work). Failed transactions
+      // are intentionally retained for reference.
+      const transactionsToPrune: Array<Transaction<any>> = []
+      for (const transaction of this.transactions.values()) {
+        if (
+          transaction.state === `completed` &&
+          this.processedTerminalTransactions.has(transaction)
+        ) {
+          transactionsToPrune.push(transaction)
+        }
+      }
+      for (const transaction of transactionsToPrune) {
+        this.transactions.delete(transaction.id)
       }
     }
   }

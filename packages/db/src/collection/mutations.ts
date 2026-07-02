@@ -230,12 +230,14 @@ export class CollectionMutationsManager<
 
       return ambientTransaction
     } else {
-      // Create a new transaction with a mutation function that calls the onInsert handler
+      // Create a new transaction with a mutation function that calls the onInsert handler.
+      // Kept non-async so synchronous handlers (e.g. local-only collections)
+      // let the transaction complete synchronously.
       const directOpTransaction = createTransaction<TOutput>({
         metadata: { [DIRECT_TRANSACTION_METADATA_KEY]: true },
-        mutationFn: async (params) => {
+        mutationFn: (params) => {
           // Call the onInsert handler with the transaction and collection
-          return await this.config.onInsert!({
+          return this.config.onInsert!({
             transaction:
               params.transaction as unknown as TransactionWithMutations<
                 TOutput,
@@ -427,10 +429,12 @@ export class CollectionMutationsManager<
 
     // No need to check for onUpdate handler here as we've already checked at the beginning
 
-    // Create a new transaction with a mutation function that calls the onUpdate handler
+    // Create a new transaction with a mutation function that calls the onUpdate handler.
+    // Kept non-async so synchronous handlers (e.g. local-only collections)
+    // let the transaction complete synchronously.
     const directOpTransaction = createTransaction<TOutput>({
       metadata: { [DIRECT_TRANSACTION_METADATA_KEY]: true },
-      mutationFn: async (params) => {
+      mutationFn: (params) => {
         // Call the onUpdate handler with the transaction and collection
         return this.config.onUpdate!({
           transaction:
@@ -450,7 +454,6 @@ export class CollectionMutationsManager<
     directOpTransaction.commit().catch(() => undefined)
 
     // Add the transaction to the collection's transactions store
-
     state.transactions.set(directOpTransaction.id, directOpTransaction)
     state.scheduleTransactionCleanup(directOpTransaction)
     state.recomputeOptimisticState(true)
@@ -530,11 +533,13 @@ export class CollectionMutationsManager<
       return ambientTransaction
     }
 
-    // Create a new transaction with a mutation function that calls the onDelete handler
+    // Create a new transaction with a mutation function that calls the onDelete handler.
+    // Kept non-async so synchronous handlers (e.g. local-only collections)
+    // let the transaction complete synchronously.
     const directOpTransaction = createTransaction<TOutput>({
       autoCommit: true,
       metadata: { [DIRECT_TRANSACTION_METADATA_KEY]: true },
-      mutationFn: async (params) => {
+      mutationFn: (params) => {
         // Call the onDelete handler with the transaction and collection
         return this.config.onDelete!({
           transaction:

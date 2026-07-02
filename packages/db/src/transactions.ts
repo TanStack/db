@@ -490,9 +490,9 @@ class Transaction<T extends object = Record<string, unknown>> {
    * await tx.commit()
    * console.log(tx.state) // "completed" or "failed"
    */
-  async commit(): Promise<Transaction<T>> {
+  commit(): Promise<Transaction<T>> {
     if (this.state !== `pending`) {
-      throw new TransactionNotPendingCommitError()
+      return Promise.reject(new TransactionNotPendingCommitError())
     }
 
     this.setState(`persisting`)
@@ -501,23 +501,17 @@ class Transaction<T extends object = Record<string, unknown>> {
       this.setState(`completed`)
       this.isPersisted.resolve(this)
 
+      return Promise.resolve(this)
+    }
+
+    const complete = (): Transaction<T> => {
+      this.setState(`completed`)
+      this.touchCollection()
+      this.isPersisted.resolve(this)
       return this
     }
 
-    // Run mutationFn
-    try {
-      // At this point we know there's at least one mutation
-      // We've already verified mutations is non-empty, so this cast is safe
-      // Use a direct type assertion instead of object spreading to preserve the original type
-      await this.mutationFn({
-        transaction: this as unknown as TransactionWithMutations<T>,
-      })
-
-      this.setState(`completed`)
-      this.touchCollection()
-
-      this.isPersisted.resolve(this)
-    } catch (error) {
+    const fail = (error: unknown): never => {
       // Preserve the original error for rethrowing
       const originalError =
         error instanceof Error ? error : new Error(String(error))
@@ -535,7 +529,39 @@ class Transaction<T extends object = Record<string, unknown>> {
       throw originalError
     }
 
-    return this
+    // Run mutationFn
+    try {
+      // At this point we know there's at least one mutation
+      // We've already verified mutations is non-empty, so this cast is safe
+      // Use a direct type assertion instead of object spreading to preserve the original type
+      // Typed as unknown: MutationFn is declared to return a promise, but
+      // internal synchronous handlers (e.g. local-only) may return a plain
+      // value, which is what enables synchronous completion.
+      const result: unknown = this.mutationFn({
+        transaction: this as unknown as TransactionWithMutations<T>,
+      })
+
+      if (
+        result !== null &&
+        typeof result === `object` &&
+        typeof (result as PromiseLike<unknown>).then === `function`
+      ) {
+        return Promise.resolve(result).then(complete, fail)
+      }
+
+      // The mutation function finished synchronously — complete the
+      // transaction synchronously so bursts of local mutations don't
+      // accumulate persisting transactions across microtasks.
+      return Promise.resolve(complete())
+    } catch (error) {
+      try {
+        fail(error)
+      } catch (rethrown) {
+        return Promise.reject(rethrown)
+      }
+      // Unreachable — fail always throws
+      return Promise.reject(error)
+    }
   }
 
   /**

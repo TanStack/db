@@ -192,55 +192,61 @@ export function localOnlyCollectionOptions<
    * Create wrapper handlers that call user handlers first, then confirm transactions
    * Wraps the user's onInsert handler to also confirm the transaction immediately
    */
-  const wrappedOnInsert = async (
+  // The wrappers below stay synchronous when the user handler is absent (the
+  // common case), so Transaction.commit can complete synchronously and bursts
+  // of local mutations don't accumulate persisting transactions.
+  const wrappedOnInsert = (
     params: InsertMutationFnParams<T, TKey, LocalOnlyCollectionUtils>,
   ) => {
     // Call user handler first if provided
-    let handlerResult
     if (onInsert) {
-      handlerResult = (await onInsert(params)) ?? {}
+      return Promise.resolve(onInsert(params)).then((handlerResult) => {
+        // Then synchronously confirm the transaction by looping through mutations
+        syncResult.confirmOperationsSync(params.transaction.mutations)
+        return handlerResult ?? {}
+      })
     }
 
-    // Then synchronously confirm the transaction by looping through mutations
     syncResult.confirmOperationsSync(params.transaction.mutations)
-
-    return handlerResult
+    return undefined
   }
 
   /**
    * Wrapper for onUpdate handler that also confirms the transaction immediately
    */
-  const wrappedOnUpdate = async (
+  const wrappedOnUpdate = (
     params: UpdateMutationFnParams<T, TKey, LocalOnlyCollectionUtils>,
   ) => {
     // Call user handler first if provided
-    let handlerResult
     if (onUpdate) {
-      handlerResult = (await onUpdate(params)) ?? {}
+      return Promise.resolve(onUpdate(params)).then((handlerResult) => {
+        // Then synchronously confirm the transaction by looping through mutations
+        syncResult.confirmOperationsSync(params.transaction.mutations)
+        return handlerResult ?? {}
+      })
     }
 
-    // Then synchronously confirm the transaction by looping through mutations
     syncResult.confirmOperationsSync(params.transaction.mutations)
-
-    return handlerResult
+    return undefined
   }
 
   /**
    * Wrapper for onDelete handler that also confirms the transaction immediately
    */
-  const wrappedOnDelete = async (
+  const wrappedOnDelete = (
     params: DeleteMutationFnParams<T, TKey, LocalOnlyCollectionUtils>,
   ) => {
     // Call user handler first if provided
-    let handlerResult
     if (onDelete) {
-      handlerResult = (await onDelete(params)) ?? {}
+      return Promise.resolve(onDelete(params)).then((handlerResult) => {
+        // Then synchronously confirm the transaction by looping through mutations
+        syncResult.confirmOperationsSync(params.transaction.mutations)
+        return handlerResult ?? {}
+      })
     }
 
-    // Then synchronously confirm the transaction by looping through mutations
     syncResult.confirmOperationsSync(params.transaction.mutations)
-
-    return handlerResult
+    return undefined
   }
 
   /**
