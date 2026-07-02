@@ -99,7 +99,21 @@ export class D2 implements ID2 {
   }
 
   run(): void {
+    this.#run(false)
+  }
+
+  /**
+   * Drains the graph when the caller has already confirmed pending work.
+   */
+  runWithPendingWork(): void {
+    this.#run(true)
+  }
+
+  #run(hasPendingWork: boolean): void {
     if (!isPerfEnabled()) {
+      if (hasPendingWork) {
+        this.step()
+      }
       while (this.pendingWork()) {
         this.step()
       }
@@ -108,6 +122,10 @@ export class D2 implements ID2 {
 
     const span = startPerfSpan(`d2.run`)
     let steps = 0
+    if (hasPendingWork) {
+      this.step()
+      steps++
+    }
     while (this.pendingWork()) {
       steps++
       this.step()

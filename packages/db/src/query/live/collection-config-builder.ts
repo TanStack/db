@@ -401,7 +401,7 @@ export class CollectionConfigBuilder<
               builderId: this.id,
             },
             () => {
-              syncState.graph.run()
+              syncState.graph.runWithPendingWork()
             },
           )
           // Flush accumulated changes after each graph step to commit them as one transaction.

@@ -1,6 +1,8 @@
 import { beforeEach, describe, expect, test } from 'vitest'
+import { D2 } from '../src/d2.js'
 import { DifferenceStreamWriter } from '../src/graph.js'
 import { MultiSet } from '../src/multiset.js'
+import { output } from '../src/operators/index.js'
 import type { DifferenceStreamReader } from '../src/graph.js'
 
 describe(`DifferenceStreamReader and DifferenceStreamWriter`, () => {
@@ -56,5 +58,24 @@ describe(`DifferenceStreamReader and DifferenceStreamWriter`, () => {
     expect(reader.isEmpty()).toBe(false)
     reader.drain()
     expect(reader.isEmpty()).toBe(true)
+  })
+})
+
+describe(`D2`, () => {
+  test(`runWithPendingWork drains pending input after an explicit pending check`, () => {
+    const graph = new D2()
+    const input = graph.newInput<number>()
+    const messages: Array<MultiSet<number>> = []
+
+    input.pipe(output((message) => messages.push(message)))
+    graph.finalize()
+
+    input.sendData(new MultiSet([[1, 1]]))
+
+    expect(graph.pendingWork()).toBe(true)
+    graph.runWithPendingWork()
+
+    expect(graph.pendingWork()).toBe(false)
+    expect(messages).toEqual([new MultiSet([[1, 1]])])
   })
 })

@@ -731,7 +731,7 @@ class EffectPipelineRunner<TRow extends object, TKey extends string | number> {
     this.isGraphRunning = true
     try {
       while (this.graph.pendingWork()) {
-        this.graph.run()
+        this.graph.runWithPendingWork()
         // A handler (via onBatchProcessed) or source error callback may have
         // called dispose() during graph.run(). Stop early to avoid operating
         // on stale state. TS narrows disposed to false from the guard above
