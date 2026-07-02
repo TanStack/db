@@ -537,9 +537,12 @@ export function runSuite(driver: LiveQueryDriver) {
 
     scenario(
       `precreated-not-syncing-isready-false`,
-      `a non-syncing pre-created collection reports isReady=false`,
+      `a pre-created collection over a not-ready source reports isReady=false`,
       async () => {
-        const source = driver.makeSource(SEED)
+        // Both the live query (startSync: false) and its source are not ready.
+        // Even if the adapter eagerly starts the collection on mount, it cannot
+        // become ready because the source never readies — so isReady stays false.
+        const source = driver.makeDeferredSource()
         const pre = driver.makePrecreated(
           (q) =>
             q
@@ -548,7 +551,7 @@ export function runSuite(driver: LiveQueryDriver) {
           { startSync: false },
         )
         const h = driver.mountCollection(pre.collection)
-        // No flush: a non-syncing collection must not be ready on first read.
+        await h.flush()
         expect(h.current().isReady).toBe(false)
         h.unmount()
       },

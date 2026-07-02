@@ -1,15 +1,13 @@
 /**
- * React reference driver for the shared live-query conformance suite (#1623).
+ * Vue driver for the shared live-query conformance suite (#1623).
  *
- * Everything realm-sensitive — collection creation and query operators — is
- * imported here (React package's `@tanstack/db`) and handed to the shared
- * scenarios, so instances match what this package's `useLiveQuery` expects.
+ * Realm-sensitive pieces (collection factories, query operators) are imported
+ * from Vue's `@tanstack/db` and handed to the shared scenarios. Vue composables
+ * run inside an `effectScope` so `unmount` can dispose them via `scope.stop()`,
+ * which triggers the `watchEffect` `onInvalidate` cleanup.
  *
- * `knownGaps` is populated empirically from the run below, NOT from the coverage
- * matrix: only keys that actually fail belong here. Today that's just the
- * universal #1601 case (handled by the shared suite), so the list is empty.
+ * `knownGaps` is populated empirically from the run below.
  */
-import { act, renderHook } from '@testing-library/react'
 import {
   coalesce,
   count,
@@ -20,6 +18,7 @@ import {
   gt,
   sum,
 } from '@tanstack/db'
+import { effectScope, nextTick, ref } from 'vue'
 import {
   mockSyncCollectionOptions,
   mockSyncCollectionOptionsNoInitialState,
@@ -31,6 +30,7 @@ import type {
   ControllableHandle,
   DeferredSourceHandle,
   LiveQueryDriver,
+  LiveQueryHandle,
   QueryBuild,
   SourceHandle,
 } from '../../db/tests/conformance/contract'
@@ -50,7 +50,7 @@ function makeSource<T extends { id: string }>(
 ): SourceHandle<T> {
   const collection = createCollection(
     mockSyncCollectionOptions<T>({
-      id: `conformance-react-${sourceSeq++}`,
+      id: `conformance-vue-${sourceSeq++}`,
       getKey: (r) => r.id,
       initialData: [...initialData],
     }),
@@ -67,12 +67,10 @@ function makeSource<T extends { id: string }>(
 function makeDeferredSource<T extends { id: string }>(): DeferredSourceHandle<T> {
   const collection = createCollection(
     mockSyncCollectionOptionsNoInitialState<T>({
-      id: `conformance-react-${sourceSeq++}`,
+      id: `conformance-vue-${sourceSeq++}`,
       getKey: (r) => r.id,
     }),
   )
-  // Start sync so the sync fn binds utils and the collection sits in `loading`
-  // (NoInitialState never calls markReady on its own).
   collection.startSyncImmediate()
   const write = writer<T>(collection)
   return {
@@ -99,7 +97,7 @@ function makePrecreated(build: QueryBuild, opts?: { startSync?: boolean }) {
 
 function makeErrorSource() {
   const collection = createCollection<{ id: string }>({
-    id: `conformance-react-err-${sourceSeq++}`,
+    id: `conformance-vue-err-${sourceSeq++}`,
     getKey: (r) => r.id,
     startSync: false,
     sync: {
@@ -108,89 +106,96 @@ function makeErrorSource() {
       },
     },
   })
-  // Starting sync throws → engine catches and sets status to `error`.
   try {
     collection.startSyncImmediate()
   } catch {
-    // expected: the rethrown sync error; status is already `error`
+    // expected: engine catches the sync error and sets status to `error`
   }
   return { collection }
 }
 
+async function settle() {
+  await nextTick()
+  await new Promise((resolve) => setTimeout(resolve, 10))
+}
+
+function makeHandle(result: any, scope: ReturnType<typeof effectScope>) {
+  const handle: LiveQueryHandle = {
+    current(): ConformanceResult {
+      return {
+        data: result.data?.value,
+        status: result.status?.value ?? `idle`,
+        isReady: Boolean(result.isReady?.value),
+        isError: Boolean(result.isError?.value),
+        isEnabled: result.status?.value !== `disabled`,
+      }
+    },
+    flush: settle,
+    async apply(fn: () => void) {
+      fn()
+      await settle()
+    },
+    unmount() {
+      scope.stop()
+    },
+  }
+  return handle
+}
+
+function runInScope<R>(fn: () => R): { result: R; scope: ReturnType<typeof effectScope> } {
+  const scope = effectScope()
+  let result!: R
+  scope.run(() => {
+    result = fn()
+  })
+  return { result, scope }
+}
+
 function mount(build: QueryBuild) {
-  const hook = renderHook(() => useLiveQuery(build as any))
-  return makeHandle(hook)
+  const { result, scope } = runInScope(() => useLiveQuery(build as any))
+  return makeHandle(result, scope)
 }
 
 function mountCollection(collection: any) {
-  const hook = renderHook(() => useLiveQuery(collection))
-  return makeHandle(hook)
+  const { result, scope } = runInScope(() => useLiveQuery(collection))
+  return makeHandle(result, scope)
 }
 
 function mountConfig(build: QueryBuild) {
-  const hook = renderHook(() => useLiveQuery({ query: build as any }))
-  return makeHandle(hook)
+  const { result, scope } = runInScope(() =>
+    useLiveQuery({ query: build } as any),
+  )
+  return makeHandle(result, scope)
 }
 
 function mountDisabled() {
-  // React's disabled convention: the query callback returns null.
-  const hook = renderHook(() => useLiveQuery(() => null as any))
-  return makeHandle(hook)
+  // Vue's disabled convention: the query callback returns undefined.
+  const { result, scope } = runInScope(() =>
+    useLiveQuery(() => undefined as any),
+  )
+  return makeHandle(result, scope)
 }
 
 function mountControllable<P>(
   build: (q: any, param: P) => any,
   initial: P,
 ): ControllableHandle<P> {
-  const hook = renderHook(
-    ({ param }: { param: P }) =>
-      // Param goes in the dependency list so the hook recompiles when it changes.
-      useLiveQuery((q: any) => build(q, param), [param]),
-    { initialProps: { param: initial } },
+  const param = ref(initial) as { value: P }
+  const { result, scope } = runInScope(() =>
+    useLiveQuery((q: any) => build(q, param.value), [() => param.value]),
   )
-  const handle = makeHandle(hook)
+  const handle = makeHandle(result, scope)
   return {
     ...handle,
-    async setParam(param: P) {
-      await act(async () => {
-        hook.rerender({ param })
-      })
-      await handle.flush()
+    async setParam(next: P) {
+      param.value = next
+      await settle()
     },
   }
 }
 
-function makeHandle(hook: ReturnType<typeof renderHook>) {
-  return {
-    current(): ConformanceResult {
-      const r: any = hook.result.current
-      return {
-        data: r?.data,
-        status: r?.status ?? `idle`,
-        isReady: Boolean(r?.isReady),
-        isError: Boolean(r?.isError),
-        isEnabled: r?.status !== `disabled`,
-      }
-    },
-    async flush() {
-      await act(async () => {
-        await new Promise((resolve) => setTimeout(resolve, 0))
-      })
-    },
-    async apply(fn: () => void) {
-      await act(async () => {
-        fn()
-        await new Promise((resolve) => setTimeout(resolve, 0))
-      })
-    },
-    unmount() {
-      hook.unmount()
-    },
-  }
-}
-
-const reactDriver: LiveQueryDriver = {
-  name: `react`,
+const vueDriver: LiveQueryDriver = {
+  name: `vue`,
   ops: { eq, gt, count, sum, coalesce, createOptimisticAction },
   makeSource,
   makeDeferredSource,
@@ -202,7 +207,7 @@ const reactDriver: LiveQueryDriver = {
   mountConfig,
   mountDisabled,
   knownGaps: [],
-  features: { serverSnapshot: true, suspense: true },
+  features: { serverSnapshot: false, suspense: false },
 }
 
-runSuite(reactDriver)
+runSuite(vueDriver)
