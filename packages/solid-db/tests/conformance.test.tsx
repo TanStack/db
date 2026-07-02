@@ -65,7 +65,9 @@ function makeSource<T extends { id: string }>(
   }
 }
 
-function makeDeferredSource<T extends { id: string }>(): DeferredSourceHandle<T> {
+function makeDeferredSource<
+  T extends { id: string },
+>(): DeferredSourceHandle<T> {
   const collection = createCollection(
     mockSyncCollectionOptionsNoInitialState<T>({
       id: `conformance-solid-${sourceSeq++}`,
@@ -119,7 +121,10 @@ async function settle() {
   await new Promise((resolve) => setTimeout(resolve, 10))
 }
 
-function makeHandle(getResult: () => any, dispose: () => void): LiveQueryHandle {
+function makeHandle(
+  getResult: () => any,
+  dispose: () => void,
+): LiveQueryHandle {
   return {
     current(): ConformanceResult {
       const result = getResult()

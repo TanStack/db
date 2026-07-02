@@ -64,7 +64,9 @@ function makeSource<T extends { id: string }>(
   }
 }
 
-function makeDeferredSource<T extends { id: string }>(): DeferredSourceHandle<T> {
+function makeDeferredSource<
+  T extends { id: string },
+>(): DeferredSourceHandle<T> {
   const collection = createCollection(
     mockSyncCollectionOptionsNoInitialState<T>({
       id: `conformance-svelte-${sourceSeq++}`,
