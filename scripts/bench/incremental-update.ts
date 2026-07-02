@@ -77,6 +77,7 @@ type Fixture = {
 type BenchmarkOptions = {
   seed: number
   levels: Array<number>
+  sourceIndexModes: Array<SourceIndexMode>
   mutationModes: Array<MutationMode>
   issueCount?: number
   userCount?: number
@@ -99,6 +100,7 @@ type BenchmarkRunOptions = {
   issueCount: number
   userCount: number
   commentCount: number
+  sourceIndexMode: SourceIndexMode
   warmup: number
   iterations: number
 }
@@ -117,6 +119,7 @@ type RunResult = {
   query: string
   scenario: string
   scale: FixtureScale
+  sourceIndexMode: SourceIndexMode
   mutationMode: MutationMode
   tracing: boolean
   coldHydrateMs: number
@@ -125,6 +128,7 @@ type RunResult = {
 }
 
 type MutationMode = `synced` | `optimistic`
+type SourceIndexMode = `none` | `manual` | `auto`
 
 type WriteCleanup = () => void | Promise<void>
 
@@ -144,6 +148,7 @@ type QueryCase = {
 const defaultOptions: BenchmarkOptions = {
   seed: 42,
   levels: [100, 1_000, 10_000],
+  sourceIndexModes: [`none`, `manual`],
   mutationModes: [`synced`, `optimistic`],
   warmup: 10,
   iterations: 50,
@@ -280,12 +285,19 @@ const queryCases: Array<QueryCase> = [
 const scales = resolveScales(options)
 const results: Array<RunResult> = []
 for (const scale of scales) {
-  const runOptions = createRunOptions(options, scale)
-  for (const mutationMode of options.mutationModes) {
-    for (const queryCase of queryCases) {
-      const disabled = await runCase(queryCase, mutationMode, false, runOptions)
-      const enabled = await runCase(queryCase, mutationMode, true, runOptions)
-      results.push(disabled, enabled)
+  for (const sourceIndexMode of options.sourceIndexModes) {
+    const runOptions = createRunOptions(options, scale, sourceIndexMode)
+    for (const mutationMode of options.mutationModes) {
+      for (const queryCase of queryCases) {
+        const disabled = await runCase(
+          queryCase,
+          mutationMode,
+          false,
+          runOptions,
+        )
+        const enabled = await runCase(queryCase, mutationMode, true, runOptions)
+        results.push(disabled, enabled)
+      }
     }
   }
 }
@@ -346,6 +358,7 @@ async function runCase(
     query: queryCase.name,
     scenario: queryCase.scenario,
     scale: options.scale,
+    sourceIndexMode: options.sourceIndexMode,
     mutationMode,
     tracing,
     coldHydrateMs,
@@ -358,6 +371,7 @@ function createManualCollection<T extends object, TKey extends string | number>(
   id: string,
   initialData: Array<T>,
   getKey: (item: T) => TKey,
+  sourceIndexMode: SourceIndexMode,
 ): ManualCollection<T, TKey> {
   let begin: Parameters<SyncConfig<T, TKey>[`sync`]>[0][`begin`] | undefined
   let write: Parameters<SyncConfig<T, TKey>[`sync`]>[0][`write`] | undefined
@@ -374,7 +388,7 @@ function createManualCollection<T extends object, TKey extends string | number>(
     getKey,
     utils,
     startSync: true,
-    autoIndex: `eager`,
+    autoIndex: sourceIndexMode === `auto` ? `eager` : `off`,
     defaultIndexType: BTreeIndex,
     sync: {
       rowUpdateMode: `full`,
@@ -445,18 +459,25 @@ function createFixture(options: BenchmarkRunOptions): Fixture {
     })
   }
 
-  return {
+  const fixture = {
     seed: options.seed,
     issues: createManualCollection(
       `bench-issues`,
       issuesData,
       (issue) => issue.id,
+      options.sourceIndexMode,
     ),
-    users: createManualCollection(`bench-users`, usersData, (user) => user.id),
+    users: createManualCollection(
+      `bench-users`,
+      usersData,
+      (user) => user.id,
+      options.sourceIndexMode,
+    ),
     comments: createManualCollection(
       `bench-comments`,
       commentsData,
       (comment) => comment.id,
+      options.sourceIndexMode,
     ),
     issueById: new Map(issuesData.map((issue) => [issue.id, issue])),
     userById: new Map(usersData.map((user) => [user.id, user])),
@@ -465,6 +486,25 @@ function createFixture(options: BenchmarkRunOptions): Fixture {
     selectedIssueId,
     nextCommentId: options.commentCount + 1,
   }
+
+  applySourceIndexes(fixture, options.sourceIndexMode)
+
+  return fixture
+}
+
+function applySourceIndexes(
+  fixture: Fixture,
+  sourceIndexMode: SourceIndexMode,
+): void {
+  if (sourceIndexMode !== `manual`) return
+
+  fixture.issues.createIndex((issue) => issue.id)
+  fixture.issues.createIndex((issue) => issue.status)
+  fixture.issues.createIndex((issue) => issue.authorId)
+  fixture.issues.createIndex((issue) => issue.createdAt)
+  fixture.users.createIndex((user) => user.id)
+  fixture.comments.createIndex((comment) => comment.issueId)
+  fixture.comments.createIndex((comment) => comment.createdAt)
 }
 
 function updateVisibleIssue(
@@ -679,6 +719,7 @@ function computeOverhead(results: Array<RunResult>) {
     query: string
     scenario: string
     scale: FixtureScale
+    sourceIndexMode: SourceIndexMode
     mutationMode: MutationMode
     medianOverheadMs: number
     p95OverheadMs: number
@@ -690,6 +731,7 @@ function computeOverhead(results: Array<RunResult>) {
         result.tracing &&
         result.query === disabled.query &&
         result.scenario === disabled.scenario &&
+        result.sourceIndexMode === disabled.sourceIndexMode &&
         result.mutationMode === disabled.mutationMode &&
         scaleKey(result.scale) === scaleKey(disabled.scale),
     )
@@ -698,6 +740,7 @@ function computeOverhead(results: Array<RunResult>) {
       query: disabled.query,
       scenario: disabled.scenario,
       scale: disabled.scale,
+      sourceIndexMode: disabled.sourceIndexMode,
       mutationMode: disabled.mutationMode,
       medianOverheadMs:
         enabled.writeSummary.medianMs - disabled.writeSummary.medianMs,
@@ -716,6 +759,7 @@ function runtimeMetadata(
     seed: options.seed,
     levels: options.levels,
     scales,
+    sourceIndexModes: options.sourceIndexModes,
     mutationModes: options.mutationModes,
     warmup: options.warmup,
     iterations: options.iterations,
@@ -739,6 +783,7 @@ function formatTextReport(
   lines.push(`Incremental update benchmark`)
   lines.push(`seed=${report.metadata.seed}`)
   lines.push(`scales=${report.metadata.scales.map(formatScale).join(`; `)}`)
+  lines.push(`sourceIndexModes=${report.metadata.sourceIndexModes.join(`,`)}`)
   lines.push(`mutationModes=${report.metadata.mutationModes.join(`,`)}`)
   lines.push(
     `runtime=node ${report.metadata.node} ${report.metadata.platform} ${report.metadata.cpu}`,
@@ -749,54 +794,58 @@ function formatTextReport(
 
   for (const scale of uniqueScales(report.results)) {
     lines.push(`scale=${formatScale(scale)}`)
-    for (const mutationMode of report.metadata.mutationModes) {
-      lines.push(`mutationMode=${mutationMode}`)
-      for (const result of report.results.filter(
-        (item) =>
-          scaleKey(item.scale) === scaleKey(scale) &&
-          item.mutationMode === mutationMode,
-      )) {
-        lines.push(
-          `${result.query} | ${result.scenario} | tracing=${result.tracing}`,
-        )
-        lines.push(
-          `  cold=${formatMs(result.coldHydrateMs)} median=${formatMs(
-            result.writeSummary.medianMs,
-          )} p95=${formatMs(result.writeSummary.p95Ms)} min=${formatMs(
-            result.writeSummary.minMs,
-          )} max=${formatMs(result.writeSummary.maxMs)} stddev=${formatMs(
-            result.writeSummary.stddevMs,
-          )}`,
-        )
-        if (result.tracing) {
-          lines.push(`  top spans:`)
-          for (const metric of topMetrics(result.trace, `span`, 5)) {
-            lines.push(
-              `    ${metric.name} total=${formatMs(metric.total)} calls=${
-                metric.calls
-              } max=${formatMs(metric.max)}`,
-            )
-          }
-          lines.push(`  hash:`)
-          for (const metric of hashMetrics(result.trace, 6)) {
-            lines.push(
-              `    ${metric.name} total=${formatNumber(metric.total)} calls=${
-                metric.calls
-              } tags=${JSON.stringify(metric.tags)}`,
-            )
+    for (const sourceIndexMode of report.metadata.sourceIndexModes) {
+      lines.push(`sourceIndexMode=${sourceIndexMode}`)
+      for (const mutationMode of report.metadata.mutationModes) {
+        lines.push(`mutationMode=${mutationMode}`)
+        for (const result of report.results.filter(
+          (item) =>
+            scaleKey(item.scale) === scaleKey(scale) &&
+            item.sourceIndexMode === sourceIndexMode &&
+            item.mutationMode === mutationMode,
+        )) {
+          lines.push(
+            `${result.query} | ${result.scenario} | tracing=${result.tracing}`,
+          )
+          lines.push(
+            `  cold=${formatMs(result.coldHydrateMs)} median=${formatMs(
+              result.writeSummary.medianMs,
+            )} p95=${formatMs(result.writeSummary.p95Ms)} min=${formatMs(
+              result.writeSummary.minMs,
+            )} max=${formatMs(result.writeSummary.maxMs)} stddev=${formatMs(
+              result.writeSummary.stddevMs,
+            )}`,
+          )
+          if (result.tracing) {
+            lines.push(`  top spans:`)
+            for (const metric of topMetrics(result.trace, `span`, 5)) {
+              lines.push(
+                `    ${metric.name} total=${formatMs(metric.total)} calls=${
+                  metric.calls
+                } max=${formatMs(metric.max)}`,
+              )
+            }
+            lines.push(`  hash:`)
+            for (const metric of hashMetrics(result.trace, 6)) {
+              lines.push(
+                `    ${metric.name} total=${formatNumber(metric.total)} calls=${
+                  metric.calls
+                } tags=${JSON.stringify(metric.tags)}`,
+              )
+            }
           }
         }
+        lines.push(``)
       }
-      lines.push(``)
     }
   }
 
   lines.push(`trace overhead:`)
   for (const overhead of report.overhead) {
     lines.push(
-      `  ${formatScale(overhead.scale)} | ${
-        overhead.mutationMode
-      } | ${overhead.query}: median=${formatMs(
+      `  ${formatScale(overhead.scale)} | sourceIndexMode=${
+        overhead.sourceIndexMode
+      } | ${overhead.mutationMode} | ${overhead.query}: median=${formatMs(
         overhead.medianOverheadMs,
       )} p95=${formatMs(overhead.p95OverheadMs)}`,
     )
@@ -833,6 +882,7 @@ function resolveScales(options: BenchmarkOptions): Array<FixtureScale> {
 function createRunOptions(
   options: BenchmarkOptions,
   scale: FixtureScale,
+  sourceIndexMode: SourceIndexMode,
 ): BenchmarkRunOptions {
   return {
     seed: options.seed,
@@ -840,6 +890,7 @@ function createRunOptions(
     issueCount: scale.issueCount,
     userCount: scale.userCount,
     commentCount: scale.commentCount,
+    sourceIndexMode,
     warmup: options.warmup,
     iterations: options.iterations,
   }
@@ -907,6 +958,7 @@ function parseArgs(
   const parsed = {
     ...defaults,
     levels: [...defaults.levels],
+    sourceIndexModes: [...defaults.sourceIndexModes],
     mutationModes: [...defaults.mutationModes],
   }
 
@@ -920,6 +972,10 @@ function parseArgs(
         break
       case `levels`:
         parsed.levels = parseLevels(value)
+        break
+      case `sourceIndexes`:
+      case `sourceIndexModes`:
+        parsed.sourceIndexModes = parseSourceIndexModes(value)
         break
       case `mutationModes`:
         parsed.mutationModes = parseMutationModes(value)
@@ -975,6 +1031,25 @@ function parseMutationModes(value: string): Array<MutationMode> {
   for (const mode of modes) {
     if (mode !== `synced` && mode !== `optimistic`) {
       throw new Error(`--mutationModes must contain synced and/or optimistic`)
+    }
+  }
+
+  return modes
+}
+
+function parseSourceIndexModes(value: string): Array<SourceIndexMode> {
+  const modes = value
+    .split(`,`)
+    .map((part) => part.trim())
+    .filter((part) => part.length > 0)
+
+  if (modes.length === 0) {
+    throw new Error(`--sourceIndexes must contain at least one mode`)
+  }
+
+  for (const mode of modes) {
+    if (mode !== `none` && mode !== `manual` && mode !== `auto`) {
+      throw new Error(`--sourceIndexes must contain none, manual, and/or auto`)
     }
   }
 
