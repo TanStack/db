@@ -45,6 +45,18 @@ type RowVirtualMetadata = {
   hasLocal: boolean
 }
 
+/**
+ * Aggregates the virtual-property metadata for a namespaced group-by row.
+ *
+ * Scans each source object on the row and folds their virtual props into a
+ * single summary for the group: `synced`/`acknowledged` are true only if every
+ * source is (with `$acknowledged` falling back to `$synced` when absent), and
+ * `hasLocal` is true if any source has a `local` origin. Rows with no
+ * virtual-prop-bearing sources are treated as synced and acknowledged.
+ *
+ * @param row - The namespaced row whose source objects carry virtual props
+ * @returns The aggregated `{ synced, acknowledged, hasLocal }` metadata
+ */
 function getRowVirtualMetadata(row: NamespacedRow): RowVirtualMetadata {
   let found = false
   let allSynced = true
