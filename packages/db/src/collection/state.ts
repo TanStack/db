@@ -84,6 +84,7 @@ export class CollectionStateManager<
   public pendingOptimisticDeletes = new Set<TKey>()
   public pendingOptimisticDirectUpserts = new Set<TKey>()
   public pendingOptimisticDirectDeletes = new Set<TKey>()
+  public releasedOptimisticDirectKeys = new Set<TKey>()
 
   /**
    * Tracks the origin of confirmed changes for each row.
@@ -546,6 +547,13 @@ export class CollectionStateManager<
     const previousDeletes = new Set(this.optimisticDeletes)
     const previousRowOrigins = this.rowOrigins
 
+    const pendingSyncKeys = new Set<TKey>()
+    for (const transaction of this.pendingSyncedTransactions) {
+      for (const operation of transaction.operations) {
+        pendingSyncKeys.add(operation.key as TKey)
+      }
+    }
+
     // Update pending optimistic state for completed/failed transactions
     for (const transaction of this.transactions.values()) {
       const isDirectTransaction =
@@ -556,6 +564,14 @@ export class CollectionStateManager<
             continue
           }
           this.pendingLocalOrigins.add(mutation.key)
+          if (this.releasedOptimisticDirectKeys.has(mutation.key as TKey)) {
+            this.pendingOptimisticUpserts.delete(mutation.key)
+            this.pendingOptimisticDeletes.delete(mutation.key)
+            this.pendingOptimisticDirectUpserts.delete(mutation.key)
+            this.pendingOptimisticDirectDeletes.delete(mutation.key)
+            this.pendingLocalOrigins.delete(mutation.key)
+            continue
+          }
           if (!mutation.optimistic) {
             continue
           }
@@ -626,15 +642,45 @@ export class CollectionStateManager<
     this.optimisticDeletes.clear()
     this.pendingLocalChanges.clear()
 
-    // Seed optimistic state with completed optimistic mutations until sync confirms them.
+    const activeTransactions = this.collectActiveTransactions()
+    const shouldRetainCompletedOptimism = activeTransactions.length > 0
+
+    // Seed optimistic state with completed optimistic mutations only while a sync
+    // or another transaction is still in flight. Once mutationFns settle without
+    // authoritative writes, the optimistic state is dropped.
+    const staleOptimisticUpserts: Array<TKey> = []
     for (const [key, value] of this.pendingOptimisticUpserts) {
-      this.optimisticUpserts.set(key, value)
+      if (
+        shouldRetainCompletedOptimism ||
+        pendingSyncKeys.has(key) ||
+        this.pendingOptimisticDirectUpserts.has(key)
+      ) {
+        this.optimisticUpserts.set(key, value)
+      } else {
+        staleOptimisticUpserts.push(key)
+      }
     }
-    for (const key of this.pendingOptimisticDeletes) {
-      this.optimisticDeletes.add(key)
+    for (const key of staleOptimisticUpserts) {
+      this.pendingOptimisticUpserts.delete(key)
+      this.pendingLocalOrigins.delete(key)
     }
 
-    const activeTransactions = this.collectActiveTransactions()
+    const staleOptimisticDeletes: Array<TKey> = []
+    for (const key of this.pendingOptimisticDeletes) {
+      if (
+        shouldRetainCompletedOptimism ||
+        pendingSyncKeys.has(key) ||
+        this.pendingOptimisticDirectDeletes.has(key)
+      ) {
+        this.optimisticDeletes.add(key)
+      } else {
+        staleOptimisticDeletes.push(key)
+      }
+    }
+    for (const key of staleOptimisticDeletes) {
+      this.pendingOptimisticDeletes.delete(key)
+      this.pendingLocalOrigins.delete(key)
+    }
 
     // Apply active transactions only (completed transactions are handled by sync operations)
     for (const transaction of activeTransactions) {
@@ -904,6 +950,38 @@ export class CollectionStateManager<
         }
         for (const [key] of transaction.rowMetadataWrites) {
           changedKeys.add(key)
+        }
+      }
+
+      const hasTxidSyncCommit = committedSyncedTransactions.some((t) =>
+        t.operations.some((op) => Array.isArray(op.metadata?.txids)),
+      )
+      const txidConfirmedDirectUpserts = new Set<TKey>()
+      const txidConfirmedDirectDeletes = new Set<TKey>()
+      if (hasTxidSyncCommit) {
+        for (const transaction of this.transactions.values()) {
+          const isDirectTransaction =
+            transaction.metadata[DIRECT_TRANSACTION_METADATA_KEY] === true
+          if (
+            !isDirectTransaction ||
+            (transaction.state !== `completed` &&
+              transaction.state !== `persisting`)
+          ) {
+            continue
+          }
+          for (const mutation of transaction.mutations) {
+            if (
+              !this.isThisCollection(mutation.collection) ||
+              !mutation.optimistic
+            ) {
+              continue
+            }
+            if (mutation.type === `delete`) {
+              txidConfirmedDirectDeletes.add(mutation.key as TKey)
+            } else {
+              txidConfirmedDirectUpserts.add(mutation.key as TKey)
+            }
+          }
         }
       }
 
@@ -1235,7 +1313,16 @@ export class CollectionStateManager<
       // the sync confirmation used a different server-generated key. Once a
       // sync commit has been applied, stop retaining completed optimistic keys
       // that were not confirmed by this commit so the temporary row is removed.
-      for (const key of this.pendingOptimisticDirectUpserts) {
+      const directUpsertsToRelease = new Set([
+        ...this.pendingOptimisticDirectUpserts,
+        ...txidConfirmedDirectUpserts,
+      ])
+      const directDeletesToRelease = new Set([
+        ...this.pendingOptimisticDirectDeletes,
+        ...txidConfirmedDirectDeletes,
+      ])
+
+      for (const key of directUpsertsToRelease) {
         if (hasTruncateSync && truncateOptimisticSnapshot?.upserts.has(key)) {
           continue
         }
@@ -1251,13 +1338,15 @@ export class CollectionStateManager<
         this.pendingOptimisticUpserts.delete(key)
         this.optimisticUpserts.delete(key)
         this.pendingLocalOrigins.delete(key)
+        this.releasedOptimisticDirectKeys.add(key)
       }
-      for (const key of this.pendingOptimisticDirectDeletes) {
+      for (const key of directDeletesToRelease) {
         if (!changedKeys.has(key)) {
           changedKeys.add(key)
         }
         this.pendingOptimisticDeletes.delete(key)
         this.pendingLocalOrigins.delete(key)
+        this.releasedOptimisticDirectKeys.add(key)
       }
       this.pendingOptimisticDirectUpserts.clear()
       this.pendingOptimisticDirectDeletes.clear()
@@ -1484,6 +1573,7 @@ export class CollectionStateManager<
     this.pendingOptimisticDeletes.clear()
     this.pendingOptimisticDirectUpserts.clear()
     this.pendingOptimisticDirectDeletes.clear()
+    this.releasedOptimisticDirectKeys.clear()
     this.clearOriginTrackingState()
     this.isLocalOnly = false
     this.size = 0

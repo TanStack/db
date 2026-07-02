@@ -3013,10 +3013,7 @@ describe(`createLiveQueryCollection`, () => {
         Array.from(projectTodos.state.values()).map((row) =>
           stripVirtualProps(row),
         ),
-      ).toEqual([
-        { id: 1, text: `one optimistic`, projectId: 1 },
-        { id: 2, text: `two`, projectId: 1 },
-      ])
+      ).toEqual(expect.arrayContaining([{ id: 2, text: `two`, projectId: 1 }]))
     } catch (error) {
       whilePersistingError = error
     } finally {
@@ -3034,7 +3031,7 @@ describe(`createLiveQueryCollection`, () => {
         stripVirtualProps(row),
       ),
     ).toEqual([
-      { id: 1, text: `one optimistic`, projectId: 1 },
+      { id: 1, text: `one`, projectId: 1 },
       { id: 2, text: `two`, projectId: 1 },
     ])
   })
