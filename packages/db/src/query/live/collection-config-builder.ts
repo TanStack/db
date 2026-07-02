@@ -489,6 +489,12 @@ export class CollectionConfigBuilder<
         hasCallback: callback !== undefined,
       })
     }
+
+    if (typeof contextId === `undefined`) {
+      this.executeImmediateGraphRun(callback)
+      return
+    }
+
     // Use the builder instance as the job ID for deduplication. This is memory-safe
     // because the scheduler's context Map is deleted after flushing (no long-term retention).
     const jobId = options?.jobId ?? this
@@ -514,11 +520,9 @@ export class CollectionConfigBuilder<
 
     // Ensure dependent builders are actually scheduled in this context so that
     // dependency edges always point to a real job (or a deduped no-op if already scheduled).
-    if (contextId) {
-      for (const dep of dependentBuilders) {
-        if (typeof dep.scheduleGraphRun === `function`) {
-          dep.scheduleGraphRun(undefined, { contextId })
-        }
+    for (const dep of dependentBuilders) {
+      if (typeof dep.scheduleGraphRun === `function`) {
+        dep.scheduleGraphRun(undefined, { contextId })
       }
     }
 
@@ -538,9 +542,7 @@ export class CollectionConfigBuilder<
       pending = {
         loadCallbacks: new Set(),
       }
-      if (contextId) {
-        this.pendingGraphRuns.set(contextId, pending)
-      }
+      this.pendingGraphRuns.set(contextId, pending)
     }
 
     // Add callback if provided (this is what accumulates between schedules)
@@ -554,14 +556,42 @@ export class CollectionConfigBuilder<
     }
 
     // Schedule execution (scheduler just orchestrates order, we manage state)
-    // For immediate execution (no contextId), pass pending directly since it won't be in the map
-    const pendingToPass = contextId ? undefined : pending
     transactionScopedScheduler.schedule({
       contextId,
       jobId,
       dependencies: dependentBuilders,
-      run: () => this.executeGraphRun(contextId, pendingToPass),
+      run: () => this.executeGraphRun(contextId),
     })
+  }
+
+  private executeImmediateGraphRun(callback?: () => boolean): void {
+    if (!this.currentSyncConfig || !this.currentSyncState) {
+      throw new Error(
+        `scheduleGraphRun called without active sync session. This should not happen.`,
+      )
+    }
+
+    const shouldTrace = isPerfEnabled()
+    const callbackCount = callback ? 1 : 0
+    const span = shouldTrace
+      ? startPerfSpan(`liveQuery.executeGraphRun`, {
+          builderId: this.id,
+          callbackCount,
+          context: false,
+        })
+      : undefined
+    if (shouldTrace) {
+      recordPerfCount(`liveQuery.executeGraphRun.callbacks`, callbackCount, {
+        builderId: this.id,
+      })
+    }
+
+    this.incrementRunCount()
+    try {
+      this.maybeRunGraph(callback)
+    } finally {
+      span?.end()
+    }
   }
 
   /**
@@ -585,22 +615,13 @@ export class CollectionConfigBuilder<
    * create fresh state and don't interfere with the current execution.
    * Uses instance sync state - if sync has ended, gracefully returns without executing.
    *
-   * @param contextId - Optional context ID to look up pending state
-   * @param pendingParam - For immediate execution (no context), pending state is passed directly
+   * @param contextId - Context ID used to look up pending state
    */
-  private executeGraphRun(
-    contextId?: SchedulerContextId,
-    pendingParam?: PendingGraphRun,
-  ): void {
-    // Get pending state: either from parameter (no context) or from map (with context)
+  private executeGraphRun(contextId: SchedulerContextId): void {
     // Remove from map BEFORE checking sync state to prevent leaking entries when sync ends
     // before the transaction flushes (e.g., unsubscribe during in-flight transaction)
-    const pending =
-      pendingParam ??
-      (contextId ? this.pendingGraphRuns.get(contextId) : undefined)
-    if (contextId) {
-      this.pendingGraphRuns.delete(contextId)
-    }
+    const pending = this.pendingGraphRuns.get(contextId)
+    this.pendingGraphRuns.delete(contextId)
 
     // If no pending state, nothing to execute (context was cleared)
     if (!pending) {
@@ -629,7 +650,7 @@ export class CollectionConfigBuilder<
       ? startPerfSpan(`liveQuery.executeGraphRun`, {
           builderId: this.id,
           callbackCount: pending.loadCallbacks.size,
-          context: contextId !== undefined,
+          context: true,
         })
       : undefined
     if (shouldTrace) {
