@@ -684,12 +684,13 @@ describe(`Query Index Optimization`, () => {
 
         // The WHERE clause on the non-nullable (left) side uses its index.
         // The WHERE clause on the nullable (right) side of the LEFT JOIN is NOT
-        // pushed down to avoid changing join semantics, so the right side does a full scan.
+        // pushed down to avoid changing join semantics. The right side's join
+        // load targets its key field (`other.id`), which is served by direct
+        // key lookups — neither an index scan nor a full scan.
         expectIndexUsage(combinedStats, {
           shouldUseIndex: true,
-          shouldUseFullScan: true,
+          shouldUseFullScan: false,
           indexCallCount: 1, // Only item.status='active' uses index (non-nullable side)
-          fullScanCallCount: 1, // other collection does full scan (nullable side)
         })
       } finally {
         tracker1.restore()
@@ -781,21 +782,15 @@ describe(`Query Index Optimization`, () => {
           },
         ])
 
-        // We should have done 2 index lookups:
-        // 1. to find active items
-        // 2. to find items with matching IDs
+        // We should have done an index lookup to find active items. The
+        // matching-IDs load targets the collection's key field (`id`), which
+        // is served by direct key lookups instead of an index.
         expect(tracker1.stats.queriesExecuted).toEqual([
           {
             type: `index`,
             operation: `eq`,
             field: `status`,
             value: `active`,
-          },
-          {
-            type: `index`,
-            operation: `in`,
-            field: `id`,
-            value: [`1`],
           },
         ])
       } finally {
@@ -994,21 +989,14 @@ describe(`Query Index Optimization`, () => {
           },
         ])
 
-        // For each active item from the first collection
-        // we must have done an index lookup on the 2nd collection to find matching items
-        expect(tracker2.stats.queriesExecuted).toEqual([
-          {
-            type: `index`,
-            operation: `in`,
-            field: `id2`,
-            value: [`1`, `3`, `5`],
-          },
-        ])
+        // The matching-items load on the 2nd collection targets its key field
+        // (`id2`), which is served by direct key lookups instead of an index.
+        expect(tracker2.stats.queriesExecuted).toEqual([])
 
         expectIndexUsage(combinedStats, {
           shouldUseIndex: true,
           shouldUseFullScan: false,
-          indexCallCount: 2,
+          indexCallCount: 1,
           fullScanCallCount: 0,
         })
       } finally {
@@ -1097,13 +1085,10 @@ describe(`Query Index Optimization`, () => {
           },
         ])
 
-        // We should have done a full scanof the right collection
-        // because it doesn't have any indexes
-        expect(tracker2.stats.queriesExecuted).toEqual([
-          {
-            type: `fullScan`,
-          },
-        ])
+        // Even without indexes on the right collection, its join load targets
+        // the key field (`id2`) and is served by direct key lookups —
+        // no full scan needed.
+        expect(tracker2.stats.queriesExecuted).toEqual([])
       } finally {
         tracker1.restore()
         tracker2.restore()
@@ -1192,15 +1177,9 @@ describe(`Query Index Optimization`, () => {
         // In a RIGHT join, the left (from) side is nullable. The WHERE clause
         // eq(item.status, 'active') is NOT pushed down to avoid changing join
         // semantics, so the left collection does NOT do an index lookup for status.
-        // It only does the index lookup for the join key (id) used by lazy loading.
-        expect(tracker1.stats.queriesExecuted).toEqual([
-          {
-            type: `index`,
-            operation: `in`,
-            field: `id`,
-            value: [`1`],
-          },
-        ])
+        // Its lazy join load targets the key field (`id`) and is served by
+        // direct key lookups instead of an index.
+        expect(tracker1.stats.queriesExecuted).toEqual([])
       } finally {
         tracker1.restore()
         tracker2.restore()
@@ -1285,12 +1264,10 @@ describe(`Query Index Optimization`, () => {
 
         // In a RIGHT join, the left (from) side is nullable. The WHERE clause
         // eq(item.status, 'active') is NOT pushed down to avoid changing join
-        // semantics, so the left collection does a full scan.
-        expect(tracker1.stats.queriesExecuted).toEqual([
-          {
-            type: `fullScan`,
-          },
-        ])
+        // semantics. Even without indexes, the left collection's join load
+        // targets its key field (`id`) and is served by direct key lookups —
+        // no full scan needed.
+        expect(tracker1.stats.queriesExecuted).toEqual([])
       } finally {
         tracker1.restore()
         tracker2.restore()

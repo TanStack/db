@@ -574,6 +574,16 @@ export class CollectionImpl<
   }
 
   /**
+   * The row field path that mirrors the collection key (e.g. ['id'] when
+   * `getKey` is `(r) => r.id`) — or null when unknown or when any stored row
+   * has violated the invariant. Enables serving eq/in queries on the key
+   * field via direct key lookups instead of a scan.
+   */
+  public get validatedKeyFieldPath(): Array<string> | null {
+    return this._state.keyFieldPathValid ? this._state.keyFieldPath : null
+  }
+
+  /**
    * Creates an index on a collection for faster queries.
    * Indexes significantly improve query performance by allowing constant time lookups
    * and logarithmic time range queries instead of full scans.

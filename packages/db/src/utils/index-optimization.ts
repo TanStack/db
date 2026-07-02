@@ -40,6 +40,28 @@ export interface OptimizationResult<TKey> {
 }
 
 /**
+ * Whether a field path is the collection's validated key field, so eq/in
+ * lookups on it can be served by direct key lookups instead of an index or
+ * scan. The invariant `row[keyField] === key` is verified on every write
+ * (see CollectionStateManager.verifyKeyFieldInvariant), which makes a key
+ * lookup miss authoritative: no row can match the predicate.
+ */
+function isKeyFieldPath(
+  collection: CollectionLike<any, any>,
+  fieldPath: Array<string>,
+): boolean {
+  const keyFieldPath = (
+    collection as { validatedKeyFieldPath?: Array<string> | null }
+  ).validatedKeyFieldPath
+  return (
+    !!keyFieldPath &&
+    keyFieldPath.length === 1 &&
+    fieldPath.length === 1 &&
+    fieldPath[0] === keyFieldPath[0]
+  )
+}
+
+/**
  * Finds an index that matches a given field path
  */
 export function findIndexForField<TKey extends string | number>(
@@ -521,6 +543,23 @@ function optimizeSimpleComparison<
 
   if (fieldArg && valueArg) {
     const fieldPath = (fieldArg as any).path
+
+    // Key-field fast path: an eq on the collection's validated key field is a
+    // direct key lookup. The result is marked inexact so the single candidate
+    // row is re-checked against the expression, guarding value-coercion edge
+    // cases at negligible cost.
+    if (operation === `eq` && isKeyFieldPath(collection, fieldPath)) {
+      const queryValue = (valueArg as any).value
+      const matchingKeys = new Set<TKey>()
+      if (
+        (typeof queryValue === `string` || typeof queryValue === `number`) &&
+        collection.has(queryValue as TKey)
+      ) {
+        matchingKeys.add(queryValue as TKey)
+      }
+      return { canOptimize: true, matchingKeys, isExact: false }
+    }
+
     const index = findIndexForField(collection, fieldPath)
 
     if (index) {
@@ -597,6 +636,12 @@ function canOptimizeSimpleComparison<
   }
 
   if (fieldPath) {
+    if (
+      expression.name === `eq` &&
+      isKeyFieldPath(collection, fieldPath)
+    ) {
+      return true
+    }
     const index = findIndexForField(collection, fieldPath)
     return index !== undefined
   }
@@ -754,6 +799,23 @@ function optimizeInArrayExpression<
   ) {
     const fieldPath = (fieldArg as any).path
     const values = (arrayArg as any).value
+
+    // Key-field fast path: IN on the collection's validated key field is a
+    // batch of direct key lookups. Marked inexact so candidate rows are
+    // re-checked against the expression.
+    if (isKeyFieldPath(collection, fieldPath)) {
+      const matchingKeys = new Set<TKey>()
+      for (const value of values) {
+        if (
+          (typeof value === `string` || typeof value === `number`) &&
+          collection.has(value as TKey)
+        ) {
+          matchingKeys.add(value as TKey)
+        }
+      }
+      return { canOptimize: true, matchingKeys, isExact: false }
+    }
+
     const index = findIndexForField(collection, fieldPath)
 
     // A nullish or NaN member can never be matched by `IN` (a comparison
@@ -804,6 +866,9 @@ function canOptimizeInArrayExpression<
     Array.isArray((arrayArg as any).value)
   ) {
     const fieldPath = (fieldArg as any).path
+    if (isKeyFieldPath(collection, fieldPath)) {
+      return true
+    }
     const index = findIndexForField(collection, fieldPath)
     return index !== undefined
   }

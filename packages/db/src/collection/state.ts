@@ -136,6 +136,19 @@ export class CollectionStateManager<
   public isLocalOnly = false
 
   /**
+   * The row field that `getKey` passes through unchanged, discovered by
+   * probing (e.g. `(r) => r.id` → ['id']). Null when getKey is not a simple
+   * single-property pass-through.
+   */
+  public keyFieldPath: Array<string> | null = null
+  /**
+   * True while every row written so far satisfies `row[keyField] === key`.
+   * Verified on each write; the first violation permanently disables the
+   * primary-key query fast path for this collection.
+   */
+  public keyFieldPathValid = true
+
+  /**
    * Creates a new CollectionState manager
    */
   constructor(config: CollectionConfig<TOutput, TKey, TSchema>) {
@@ -147,6 +160,22 @@ export class CollectionStateManager<
     // Set up data storage - always use SortedMap for deterministic iteration.
     // If a custom compare function is provided, use it; otherwise entries are sorted by key only.
     this.syncedData = new SortedMap<TKey, TOutput>(config.compare)
+
+    this.keyFieldPath = probeKeyField(config.getKey)
+  }
+
+  /**
+   * Verify the key-field invariant for a row being written. Called on every
+   * visible-row write; O(1).
+   */
+  public verifyKeyFieldInvariant(key: TKey, row: TOutput): void {
+    if (this.keyFieldPath === null || !this.keyFieldPathValid) return
+    if (
+      (row as Record<string, unknown>)[this.keyFieldPath[0]!] !==
+      (key as unknown)
+    ) {
+      this.keyFieldPathValid = false
+    }
   }
 
   setDeps(deps: {
@@ -599,6 +628,7 @@ export class CollectionStateManager<
         pendingSyncKeys.has(key) ||
         this.pendingOptimisticDirectUpserts.has(key)
       ) {
+        this.verifyKeyFieldInvariant(key, value)
         this.optimisticUpserts.set(key, value)
       } else {
         staleOptimisticUpserts.push(key)
@@ -646,6 +676,10 @@ export class CollectionStateManager<
           switch (mutation.type) {
             case `insert`:
             case `update`:
+              this.verifyKeyFieldInvariant(
+                mutation.key,
+                mutation.modified as TOutput,
+              )
               this.optimisticUpserts.set(
                 mutation.key,
                 mutation.modified as TOutput,
@@ -1033,6 +1067,7 @@ export class CollectionStateManager<
           // Update synced data
           switch (operation.type) {
             case `insert`:
+              this.verifyKeyFieldInvariant(key, operation.value)
               this.syncedData.set(key, operation.value)
               this.rowOrigins.set(key, origin)
               // Clear pending local changes now that sync has confirmed
@@ -1050,8 +1085,10 @@ export class CollectionStateManager<
                   this.syncedData.get(key),
                   operation.value,
                 )
+                this.verifyKeyFieldInvariant(key, updatedValue)
                 this.syncedData.set(key, updatedValue)
               } else {
+                this.verifyKeyFieldInvariant(key, operation.value)
                 this.syncedData.set(key, operation.value)
               }
               this.rowOrigins.set(key, origin)
@@ -1178,7 +1215,8 @@ export class CollectionStateManager<
       // This includes items from transactions that may have completed during processing
       if (hasTruncateSync && truncateOptimisticSnapshot) {
         for (const [key, value] of truncateOptimisticSnapshot.upserts) {
-          this.optimisticUpserts.set(key, value)
+          this.verifyKeyFieldInvariant(key, value)
+        this.optimisticUpserts.set(key, value)
         }
         for (const key of truncateOptimisticSnapshot.deletes) {
           this.optimisticDeletes.add(key)
@@ -1197,6 +1235,10 @@ export class CollectionStateManager<
               switch (mutation.type) {
                 case `insert`:
                 case `update`:
+                  this.verifyKeyFieldInvariant(
+                    mutation.key,
+                    mutation.modified as TOutput,
+                  )
                   this.optimisticUpserts.set(
                     mutation.key,
                     mutation.modified as TOutput,
@@ -1504,4 +1546,44 @@ export class CollectionStateManager<
     this.syncedKeys.clear()
     this.hasReceivedFirstCommit = false
   }
+}
+
+/**
+ * Probes a getKey function to discover whether it is a simple single-property
+ * pass-through (e.g. `(r) => r.id`). Returns the property path when exactly
+ * one string property is read and its value is returned unchanged; otherwise
+ * null. Combined with per-write invariant verification this enables serving
+ * eq/in queries on the key field via direct map lookups.
+ */
+function probeKeyField(
+  getKey: (row: any) => unknown,
+): Array<string> | null {
+  try {
+    // Tracked via an object property so the closure mutation is visible to
+    // the type checker after the getKey call.
+    const probe: { prop: string | null; count: number } = {
+      prop: null,
+      count: 0,
+    }
+    const sentinel = Symbol(`keyFieldProbe`)
+    const proxy = new Proxy(
+      {},
+      {
+        get(_target, prop) {
+          if (typeof prop === `string`) {
+            probe.count++
+            probe.prop = prop
+          }
+          return sentinel
+        },
+      },
+    )
+    const result = getKey(proxy)
+    if (probe.count === 1 && result === sentinel && probe.prop !== null) {
+      return [probe.prop]
+    }
+  } catch {
+    // getKey did something the probe cannot model — no fast path
+  }
+  return null
 }

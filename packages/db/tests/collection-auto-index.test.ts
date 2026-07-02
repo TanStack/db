@@ -573,14 +573,9 @@ describe(`Collection Auto-Indexing`, () => {
       createdAt: new Date(),
     })
 
-    expect(tracker.stats.queriesExecuted).toEqual([
-      {
-        type: `index`,
-        operation: `in`,
-        field: `id2`,
-        value: [`other2`],
-      },
-    ])
+    // The join load targets the collection's key field (`id2`), which is
+    // served by direct key lookups instead of the auto-created index.
+    expect(tracker.stats.queriesExecuted).toEqual([])
 
     expect(liveQuery.size).toBe(testData.length + 1)
 
@@ -694,14 +689,9 @@ describe(`Collection Auto-Indexing`, () => {
       createdAt: new Date(),
     })
 
-    expect(tracker.stats.queriesExecuted).toEqual([
-      {
-        type: `index`,
-        operation: `in`,
-        field: `id2`,
-        value: [`other2`],
-      },
-    ])
+    // The join load targets the collection's key field (`id2`), which is
+    // served by direct key lookups instead of the auto-created index.
+    expect(tracker.stats.queriesExecuted).toEqual([])
 
     expect(liveQuery.size).toBe(testData.length + 1)
 
