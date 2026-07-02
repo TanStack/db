@@ -89,7 +89,11 @@ syntax during implementation.
 For included comment shapes, intentionally leave nested queries as plain
 subqueries. Do not wrap them with `toArray()` for these benchmarks: plain
 subqueries materialize child collections and should stay fully incremental,
-whereas inline arrays force parent-row re-materialization.
+whereas inline arrays force parent-row re-materialization. Do not reshape these
+benchmarks into lower-level workaround queries just to help the current compiler:
+the point is to measure the optimal user-facing DX. If the trace shows child
+include work is driven by all filtered parents before the parent `orderBy/limit`
+window is applied, treat that as a likely issue exposed by the benchmark.
 
 ```ts
 // 1. list: newest 50 open
@@ -101,11 +105,11 @@ q.from({ issue: issues })
 // 2. list + author
 q.from({ issue: issues })
   .where(({ issue }) => eq(issue.status, `open`))
-  .orderBy(({ issue }) => issue.createdAt, `desc`)
-  .limit(50)
   .join({ author: users }, ({ issue, author }) =>
     eq(issue.authorId, author.id),
   )
+  .orderBy(({ issue }) => issue.createdAt, `desc`)
+  .limit(50)
 
 // 3. list + comment count
 q.from({ issue: issues })
@@ -114,10 +118,13 @@ q.from({ issue: issues })
   .limit(50)
   .select(({ issue }) => ({
     issue,
-    commentCount: q
-      .from({ comment: comments })
-      .where(({ comment }) => eq(comment.issueId, issue.id))
-      .select(({ comment }) => count(comment.id)),
+    commentCount: materialize(
+      q
+        .from({ comment: comments })
+        .where(({ comment }) => eq(comment.issueId, issue.id))
+        .select(({ comment }) => count(comment.id))
+        .findOne(),
+    ),
   }))
 
 // 4. list + 3 recent comments
@@ -500,6 +507,8 @@ operator cardinality:
   only the changed delta?
 - Does `3 recent comments` update only affected child collections and avoid
   parent row re-emission?
+- Does an included child query for a limited parent list run only for the visible
+  parent window, or for every parent that passes the pre-limit filter?
 - Is hashing time material, and if so, is it structural hash, identity key
   generation, `serializeValue`, or `Index` fallback hashing?
 - Are repeated `deepEquals` calls or virtual prop enrichment dominating after
@@ -527,4 +536,5 @@ operator cardinality:
   with async spans or explicit start/end spans.
 - The report includes enough cardinality data to explain why a slow span is
   slow.
-- Normal test runs have negligible overhead with tracing disabled.
+- Disabled tracing adds no hot-loop allocations and only a cheap enabled-check
+  branch; any enabled-tracing overhead is reported rather than hidden.
