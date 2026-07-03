@@ -112,10 +112,20 @@ export class SortedMap<TKey extends string | number, TValue> {
    */
   delete(key: TKey): boolean {
     // Lazy ordering (both modes): leave the stale key in sortedKeys; the
-    // next ordered read rebuilds from the map
+    // next ordered read rebuilds from the map. Deleting the current tail of
+    // a clean array pops it instead, keeping insert-then-delete cycles (a
+    // common probe/undo pattern) allocation- and staleness-free.
     const had = this.map.delete(key)
     if (had) {
-      this.dirty = true
+      if (
+        !this.dirty &&
+        this.sortedKeys.length > 0 &&
+        this.sortedKeys[this.sortedKeys.length - 1] === key
+      ) {
+        this.sortedKeys.pop()
+      } else {
+        this.dirty = true
+      }
     }
     return had
   }
