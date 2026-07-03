@@ -10,7 +10,7 @@ import type { IStreamBuilder, KeyValue } from '../types.js'
  */
 export class ReduceOperator<K, V1, V2> extends UnaryOperator<[K, V1], [K, V2]> {
   #index: Index<K, V1>
-  #indexOut = new Index<K, V2>()
+  #indexOut: Index<K, V2>
   #f: (values: Array<[V1, number]>) => Array<[V2, number]>
 
   constructor(
@@ -21,7 +21,12 @@ export class ReduceOperator<K, V1, V2> extends UnaryOperator<[K, V1], [K, V2]> {
     options?: { prefixIdentity?: boolean },
   ) {
     super(id, inputA, output)
-    this.#index = new Index<K, V1>(options)
+    // Reduce never consults join-presence tracking on its indexes
+    this.#index = new Index<K, V1>({
+      prefixIdentity: options?.prefixIdentity,
+      trackConsolidated: false,
+    })
+    this.#indexOut = new Index<K, V2>({ trackConsolidated: false })
     this.#f = f
   }
 

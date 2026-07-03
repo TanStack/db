@@ -167,10 +167,21 @@ export class Index<TKey, TValue, TPrefix = any> {
    * multiplicities merge without structural hash comparisons.
    */
   #prefixIdentity: boolean
+  /**
+   * When false, the per-key consolidated multiplicity map is not maintained.
+   * Only join operators consume hasPresence/getConsolidatedMultiplicity/
+   * getPresenceKeys; reduce-style consumers can skip the two map operations
+   * per addValue.
+   */
+  #trackConsolidated: boolean
 
-  constructor(options?: { prefixIdentity?: boolean }) {
+  constructor(options?: {
+    prefixIdentity?: boolean
+    trackConsolidated?: boolean
+  }) {
     this.#inner = new Map()
     this.#prefixIdentity = options?.prefixIdentity ?? false
+    this.#trackConsolidated = options?.trackConsolidated ?? true
   }
 
   /**
@@ -365,13 +376,15 @@ export class Index<TKey, TValue, TPrefix = any> {
     // If the multiplicity is 0, do nothing
     if (multiplicity === 0) return
 
-    // Update consolidated multiplicity tracking
-    const newConsolidatedMultiplicity =
-      (this.#consolidatedMultiplicity.get(key) || 0) + multiplicity
-    if (newConsolidatedMultiplicity === 0) {
-      this.#consolidatedMultiplicity.delete(key)
-    } else {
-      this.#consolidatedMultiplicity.set(key, newConsolidatedMultiplicity)
+    // Update consolidated multiplicity tracking (join presence checks)
+    if (this.#trackConsolidated) {
+      const newConsolidatedMultiplicity =
+        (this.#consolidatedMultiplicity.get(key) || 0) + multiplicity
+      if (newConsolidatedMultiplicity === 0) {
+        this.#consolidatedMultiplicity.delete(key)
+      } else {
+        this.#consolidatedMultiplicity.set(key, newConsolidatedMultiplicity)
+      }
     }
 
     const mapOrSingleValue = this.#inner.get(key)
@@ -506,9 +519,11 @@ export class Index<TKey, TValue, TPrefix = any> {
         }
       } else {
         this.#inner.set(key, bucket)
-        const multiplicity = other.#consolidatedMultiplicity.get(key)
-        if (multiplicity !== undefined) {
-          this.#consolidatedMultiplicity.set(key, multiplicity)
+        if (this.#trackConsolidated) {
+          const multiplicity = other.#consolidatedMultiplicity.get(key)
+          if (multiplicity !== undefined) {
+            this.#consolidatedMultiplicity.set(key, multiplicity)
+          }
         }
       }
     }
