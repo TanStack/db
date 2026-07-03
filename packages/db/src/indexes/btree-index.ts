@@ -419,12 +419,16 @@ export class BTreeIndex<
   }
 
   get orderedEntriesArray(): Array<[any, Set<TKey>]> {
-    return this.orderedEntries
-      .keysArray()
-      .map((key) => [
-        denormalizeUndefined(key),
-        this.valueMap.get(key) ?? new Set(),
-      ])
+    // Tombstoned (emptied) values are an internal detail — filter them so
+    // snapshot APIs stay consistent with take*/valueMapData
+    const result: Array<[any, Set<TKey>]> = []
+    for (const key of this.orderedEntries.keysArray()) {
+      const keySet = this.valueMap.get(key)
+      if (keySet !== undefined && keySet.size > 0) {
+        result.push([denormalizeUndefined(key), keySet])
+      }
+    }
+    return result
   }
 
   get orderedEntriesArrayReversed(): Array<[any, Set<TKey>]> {
