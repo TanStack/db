@@ -1071,10 +1071,7 @@ export class CollectionStateManager<
         this.syncedMetadata.set(key, metadataWrite.value)
       }
 
-      for (const [
-        key,
-        metadataWrite,
-      ] of transaction.collectionMetadataWrites) {
+      for (const [key, metadataWrite] of transaction.collectionMetadataWrites) {
         if (metadataWrite.type === `delete`) {
           this.syncedCollectionMetadata.delete(key)
           continue
@@ -1492,7 +1489,7 @@ export class CollectionStateManager<
       if (hasTruncateSync && truncateOptimisticSnapshot) {
         for (const [key, value] of truncateOptimisticSnapshot.upserts) {
           this.verifyKeyFieldInvariant(key, value)
-        this.optimisticUpserts.set(key, value)
+          this.optimisticUpserts.set(key, value)
         }
         for (const key of truncateOptimisticSnapshot.deletes) {
           this.optimisticDeletes.add(key)
@@ -1831,9 +1828,7 @@ export class CollectionStateManager<
  * null. Combined with per-write invariant verification this enables serving
  * eq/in queries on the key field via direct map lookups.
  */
-function probeKeyField(
-  getKey: (row: any) => unknown,
-): Array<string> | null {
+function probeKeyField(getKey: (row: any) => unknown): Array<string> | null {
   try {
     // Tracked via an object property so the closure mutation is visible to
     // the type checker after the getKey call.

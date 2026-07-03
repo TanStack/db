@@ -102,7 +102,7 @@ const EXPRESSION_CACHE_MAX_KEY_LENGTH = 2048
 function serializeExpressionForCache(expr: BasicExpression): string | null {
   switch (expr.type) {
     case `ref`:
-      return `r:${(expr).path.join(`.`)}`
+      return `r:${expr.path.join(`.`)}`
     case `val`: {
       const value = (expr as { value: unknown }).value
       switch (typeof value) {
@@ -351,9 +351,7 @@ function compileFunction(func: Func, isSingleRow: boolean): (data: any) => any {
             return rawA === rawB
           }
           if (typeA === `number`) {
-            return (
-              rawA === rawB || (Number.isNaN(rawA) && Number.isNaN(rawB))
-            )
+            return rawA === rawB || (Number.isNaN(rawA) && Number.isNaN(rawB))
           }
         }
         const a = normalizeValue(rawA)

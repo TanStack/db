@@ -375,9 +375,7 @@ export function processGroupBy(
       : undefined
 
   // Apply the groupBy operator
-  pipeline = pipeline.pipe(
-    groupBy(keyExtractor, aggregates, { keySerializer }),
-  )
+  pipeline = pipeline.pipe(groupBy(keyExtractor, aggregates, { keySerializer }))
 
   // Update $selected to handle GROUP BY results
   pipeline = pipeline.pipe(

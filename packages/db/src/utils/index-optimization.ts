@@ -636,10 +636,7 @@ function canOptimizeSimpleComparison<
   }
 
   if (fieldPath) {
-    if (
-      expression.name === `eq` &&
-      isKeyFieldPath(collection, fieldPath)
-    ) {
+    if (expression.name === `eq` && isKeyFieldPath(collection, fieldPath)) {
       return true
     }
     const index = findIndexForField(collection, fieldPath)

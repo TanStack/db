@@ -218,7 +218,7 @@ export class CollectionMutationsManager<
                 validatedData[k as keyof typeof validatedData],
               ]),
             ) as TInput)
-          : (item),
+          : item,
         globalKey,
         key,
         metadata: config?.metadata as unknown,

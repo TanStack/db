@@ -324,7 +324,11 @@ export function splitUpdatesArray<
   const out: Array<ChangeMessage<T, TKey>> = []
   for (const change of changes) {
     if (change.type === `update`) {
-      out.push({ type: `delete`, key: change.key, value: change.previousValue! })
+      out.push({
+        type: `delete`,
+        key: change.key,
+        value: change.previousValue!,
+      })
       out.push({ type: `insert`, key: change.key, value: change.value })
     } else {
       out.push(change)

@@ -1173,7 +1173,10 @@ describe(`GroupBy property-based tests`, () => {
     const messages: Array<MultiSet<any>> = []
 
     input.pipe(
-      groupBy(([, data]: KeyedRow) => ({ category: data.category }), aggregates),
+      groupBy(
+        ([, data]: KeyedRow) => ({ category: data.category }),
+        aggregates,
+      ),
       output((message) => {
         messages.push(message)
       }),

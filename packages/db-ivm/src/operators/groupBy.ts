@@ -143,40 +143,43 @@ export function groupBy<
     // discriminated by their prefix, so equal-prefix values merge without
     // structural hashing.
     const reduced = withKeysAndValues.pipe(
-      reduce((values) => {
-        // Calculate total multiplicity to check if the group should exist
-        let totalMultiplicity = 0
-        for (const [_, multiplicity] of values) {
-          totalMultiplicity += multiplicity
-        }
-
-        // If total multiplicity is 0 or negative, the group should be removed completely
-        if (totalMultiplicity <= 0) {
-          return []
-        }
-
-        const result: Record<string, unknown> = {}
-
-        // Get the original key from first value in group
-        const originalKey =
-          values[0] !== undefined
-            ? unwrapValues(values[0][0])[KEY_SENTINEL]
-            : undefined
-        result[KEY_SENTINEL] = originalKey
-
-        // Apply each aggregate function, reusing one scratch array for the
-        // per-aggregate pre-mapped values to avoid an allocation per aggregate
-        const preValues: Array<[any, number]> = new Array(values.length)
-        for (const [name, aggregate] of aggregateEntries) {
-          for (let i = 0; i < values.length; i++) {
-            const entry = values[i]!
-            preValues[i] = [unwrapValues(entry[0])[name], entry[1]]
+      reduce(
+        (values) => {
+          // Calculate total multiplicity to check if the group should exist
+          let totalMultiplicity = 0
+          for (const [_, multiplicity] of values) {
+            totalMultiplicity += multiplicity
           }
-          result[name] = aggregate.reduce(preValues)
-        }
 
-        return [[result, 1]]
-      }, { prefixIdentity: true }),
+          // If total multiplicity is 0 or negative, the group should be removed completely
+          if (totalMultiplicity <= 0) {
+            return []
+          }
+
+          const result: Record<string, unknown> = {}
+
+          // Get the original key from first value in group
+          const originalKey =
+            values[0] !== undefined
+              ? unwrapValues(values[0][0])[KEY_SENTINEL]
+              : undefined
+          result[KEY_SENTINEL] = originalKey
+
+          // Apply each aggregate function, reusing one scratch array for the
+          // per-aggregate pre-mapped values to avoid an allocation per aggregate
+          const preValues: Array<[any, number]> = new Array(values.length)
+          for (const [name, aggregate] of aggregateEntries) {
+            for (let i = 0; i < values.length; i++) {
+              const entry = values[i]!
+              preValues[i] = [unwrapValues(entry[0])[name], entry[1]]
+            }
+            result[name] = aggregate.reduce(preValues)
+          }
+
+          return [[result, 1]]
+        },
+        { prefixIdentity: true },
+      ),
     )
 
     // Finally map to extract the key and include all values
