@@ -364,6 +364,13 @@ class Transaction<T extends object = Record<string, unknown>> {
    * @param mutations - Array of new mutations to apply
    */
   applyMutations(mutations: Array<PendingMutation<any>>): void {
+    // Dominant case: a fresh direct-op transaction applying one mutation —
+    // nothing to merge, so skip the Map entirely.
+    if (this.mutations.length === 0 && mutations.length === 1) {
+      this.mutations.push(mutations[0]!)
+      return
+    }
+
     // Merge via a globalKey-keyed map rather than a findIndex scan per
     // mutation, which is O(n²) for bulk operations (e.g. inserting many rows
     // in one call). Map preserves insertion order, matching the previous

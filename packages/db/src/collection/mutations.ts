@@ -344,6 +344,7 @@ export class CollectionMutationsManager<
     }
 
     // Create mutations for each object that has changes
+    const updateBatchTimestamp = new Date()
     const mutations: Array<
       PendingMutation<
         TOutput,
@@ -407,8 +408,8 @@ export class CollectionMutationsManager<
           >,
           optimistic: config.optimistic ?? true,
           type: `update`,
-          createdAt: new Date(),
-          updatedAt: new Date(),
+          createdAt: updateBatchTimestamp,
+          updatedAt: updateBatchTimestamp,
           collection: this.collection,
         }
       })
@@ -507,6 +508,7 @@ export class CollectionMutationsManager<
       >
     > = []
 
+    const batchTimestamp = new Date()
     for (const key of keysArray) {
       if (!this.state.has(key)) {
         throw new DeleteKeyNotFoundError(key)
@@ -530,8 +532,8 @@ export class CollectionMutationsManager<
         >,
         optimistic: config?.optimistic ?? true,
         type: `delete`,
-        createdAt: new Date(),
-        updatedAt: new Date(),
+        createdAt: batchTimestamp,
+        updatedAt: batchTimestamp,
         collection: this.collection,
       }
 
