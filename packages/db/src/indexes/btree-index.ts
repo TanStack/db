@@ -94,14 +94,14 @@ export class BTreeIndex<
     // Normalize the value for Map key usage
     const normalizedValue = normalizeForBTree(indexedValue)
 
-    // Check if this value already exists
-    if (this.valueMap.has(normalizedValue)) {
+    const keySet = this.valueMap.get(normalizedValue)
+    if (keySet) {
       // Add to existing set
-      this.valueMap.get(normalizedValue)!.add(key)
+      keySet.add(key)
     } else {
       // Create new set for this value
-      const keySet = new Set<TKey>([key])
-      this.valueMap.set(normalizedValue, keySet)
+      const newKeySet = new Set<TKey>([key])
+      this.valueMap.set(normalizedValue, newKeySet)
       this.orderedEntries.set(normalizedValue, undefined)
     }
 
@@ -127,8 +127,8 @@ export class BTreeIndex<
     // Normalize the value for Map key usage
     const normalizedValue = normalizeForBTree(indexedValue)
 
-    if (this.valueMap.has(normalizedValue)) {
-      const keySet = this.valueMap.get(normalizedValue)!
+    const keySet = this.valueMap.get(normalizedValue)
+    if (keySet) {
       keySet.delete(key)
 
       // If set is now empty, remove the entry entirely
