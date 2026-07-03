@@ -371,3 +371,9 @@ incr rows. R50/noGC: page2 h 1.0, +author h 1.2, agg h 1.1, count i 1.4.
 ## Iteration 27 — cached index evaluators + numeric timestamps · KEEP ✅
 Creator pair 230→165µs profiled. Defaults: author i 1.8, count i 1.8, all
 gates ✅. R50/noGC: worst remaining row 2.1× (author i), most ≤1.6×.
+
+## Iterations 28-29 — splitUpdatesArray fast path; SortedMap pop-if-tail · KEEP ✅
+Both green (db 2456). The concurrent scoreboard runs were contaminated by
+profiling on the same box (detail i printed 3.7 vs 1.7-1.8 steady) —
+discard; clean re-run follows. Lesson recorded: never overlap head-to-head
+runs with profiling.
