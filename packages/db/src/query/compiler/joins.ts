@@ -300,9 +300,34 @@ function processJoin(
               continue
             }
 
+            // When the join field IS the collection's validated key field,
+            // keys already delivered cannot produce new rows — skip them
+            let keysToLoad = joinKeys
+            const keyFieldPath = (
+              target.collection as {
+                validatedKeyFieldPath?: Array<string> | null
+              }
+            ).validatedKeyFieldPath
+            if (
+              keyFieldPath &&
+              keyFieldPath.length === 1 &&
+              target.path.length === 1 &&
+              target.path[0] === keyFieldPath[0]
+            ) {
+              keysToLoad = joinKeys.filter(
+                (joinKey) =>
+                  !lazySourceSubscription.hasSentKey(
+                    joinKey as string | number,
+                  ),
+              )
+              if (keysToLoad.length === 0) {
+                continue
+              }
+            }
+
             const lazyJoinRef = new PropRef(target.path)
             const loaded = lazySourceSubscription.requestSnapshot({
-              where: inArray(lazyJoinRef, joinKeys),
+              where: inArray(lazyJoinRef, keysToLoad),
               optimizedOnly: true,
             })
 

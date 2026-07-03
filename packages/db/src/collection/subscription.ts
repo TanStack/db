@@ -314,6 +314,16 @@ export class CollectionSubscription
     return this.loadedInitialState
   }
 
+  /**
+   * Whether a row with this collection key has already been delivered to the
+   * subscriber. Lets lazy join loaders skip snapshot requests for keys that
+   * are already in the pipeline (only valid when the join key IS the
+   * collection key field).
+   */
+  hasSentKey(key: string | number): boolean {
+    return this.sentKeys.has(key)
+  }
+
   hasSentAtLeastOneSnapshot() {
     return this.snapshotSent
   }
