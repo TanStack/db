@@ -54,7 +54,11 @@ export class BTreeIndex<
   // churn; read paths skip empty sets. Compacted beyond a bound.
   private emptyValueTombstones = 0
   private static readonly MAX_VALUE_TOMBSTONES = 1024
-  private indexedKeys = new Set<TKey>()
+  // Number of distinct keys in the index. Kept as a counter instead of a
+  // Set: V8 hash tables degrade badly under repeated delete+re-add of the
+  // same key (each cycle appends to the data table and forces rehashes),
+  // which is exactly the churn incremental row updates produce.
+  private indexedKeyCount = 0
   private compareFn: (a: any, b: any) => number = defaultComparator
 
   constructor(
@@ -99,18 +103,25 @@ export class BTreeIndex<
     // Normalize the value for Map key usage
     const normalizedValue = normalizeForBTree(indexedValue)
 
-    // Check if this value already exists
-    if (this.valueMap.has(normalizedValue)) {
-      // Add to existing set
-      this.valueMap.get(normalizedValue)!.add(key)
+    const existingKeySet = this.valueMap.get(normalizedValue)
+    if (existingKeySet !== undefined) {
+      // Value already exists (possibly as a tombstone), reuse the entry
+      if (existingKeySet.size === 0) {
+        this.emptyValueTombstones--
+      }
+      const sizeBefore = existingKeySet.size
+      existingKeySet.add(key)
+      if (existingKeySet.size !== sizeBefore) {
+        this.indexedKeyCount++
+      }
     } else {
       // Create new set for this value
       const keySet = new Set<TKey>([key])
       this.valueMap.set(normalizedValue, keySet)
       this.orderedEntries.set(normalizedValue, undefined)
+      this.indexedKeyCount++
     }
 
-    this.indexedKeys.add(key)
     this.updateTimestamp()
   }
 
@@ -133,8 +144,8 @@ export class BTreeIndex<
     const normalizedValue = normalizeForBTree(indexedValue)
 
     const keySet = this.valueMap.get(normalizedValue)
-    if (keySet !== undefined) {
-      keySet.delete(key)
+    if (keySet !== undefined && keySet.delete(key)) {
+      this.indexedKeyCount--
 
       // Keep the emptied entry as a tombstone (read paths skip empty sets)
       // so a re-add of the same value avoids tree churn; compact when the
@@ -147,7 +158,6 @@ export class BTreeIndex<
       }
     }
 
-    this.indexedKeys.delete(key)
     this.updateTimestamp()
   }
 
@@ -176,7 +186,8 @@ export class BTreeIndex<
   clear(): void {
     this.orderedEntries.clear()
     this.valueMap.clear()
-    this.indexedKeys.clear()
+    this.indexedKeyCount = 0
+    this.emptyValueTombstones = 0
     this.updateTimestamp()
   }
 
@@ -219,7 +230,7 @@ export class BTreeIndex<
    * Gets the number of indexed keys
    */
   get keyCount(): number {
-    return this.indexedKeys.size
+    return this.indexedKeyCount
   }
 
   // Public methods for backward compatibility (used by tests)
@@ -415,7 +426,13 @@ export class BTreeIndex<
 
   // Getter methods for testing compatibility
   get indexedKeysSet(): Set<TKey> {
-    return this.indexedKeys
+    const keys = new Set<TKey>()
+    for (const keySet of this.valueMap.values()) {
+      for (const key of keySet) {
+        keys.add(key)
+      }
+    }
+    return keys
   }
 
   get orderedEntriesArray(): Array<[any, Set<TKey>]> {

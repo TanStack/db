@@ -54,8 +54,11 @@ export class BasicIndex<
   // skip empty sets. Compacted beyond a bound.
   private emptyValueTombstones = 0
   private static readonly MAX_VALUE_TOMBSTONES = 1024
-  // Set of all indexed PKs
-  private indexedKeys = new Set<TKey>()
+  // Number of distinct keys in the index. Kept as a counter instead of a
+  // Set: V8 hash tables degrade badly under repeated delete+re-add of the
+  // same key (each cycle appends to the data table and forces rehashes),
+  // which is exactly the churn incremental row updates produce.
+  private indexedKeyCount = 0
   // Comparator function
   private compareFn: (a: any, b: any) => number = defaultComparator
 
@@ -97,7 +100,11 @@ export class BasicIndex<
       if (existingKeySet.size === 0) {
         this.emptyValueTombstones--
       }
+      const sizeBefore = existingKeySet.size
       existingKeySet.add(key)
+      if (existingKeySet.size !== sizeBefore) {
+        this.indexedKeyCount++
+      }
     } else {
       // New value - add to map and insert into sorted array
       this.valueMap.set(normalizedValue, new Set([key]))
@@ -109,9 +116,9 @@ export class BasicIndex<
         this.compareFn,
       )
       this.sortedValues.splice(insertIdx, 0, normalizedValue)
+      this.indexedKeyCount++
     }
 
-    this.indexedKeys.add(key)
     this.updateTimestamp()
   }
 
@@ -127,7 +134,6 @@ export class BasicIndex<
         `Failed to evaluate index expression for key ${key} during removal:`,
         error,
       )
-      this.indexedKeys.delete(key)
       this.updateTimestamp()
       return
     }
@@ -135,8 +141,8 @@ export class BasicIndex<
     const normalizedValue = normalizeValue(indexedValue)
 
     const keySet = this.valueMap.get(normalizedValue)
-    if (keySet !== undefined) {
-      keySet.delete(key)
+    if (keySet !== undefined && keySet.delete(key)) {
+      this.indexedKeyCount--
 
       // Keep the emptied entry as a tombstone (read paths skip empty sets)
       // so a re-add of the same value avoids the sorted-array splice;
@@ -149,7 +155,6 @@ export class BasicIndex<
       }
     }
 
-    this.indexedKeys.delete(key)
     this.updateTimestamp()
   }
 
@@ -180,8 +185,8 @@ export class BasicIndex<
         )
       }
       entriesArray.push({ key, value: normalizeValue(indexedValue) })
-      this.indexedKeys.add(key)
     }
+    this.indexedKeyCount = entriesArray.length
 
     // Group by value
     for (const { key, value } of entriesArray) {
@@ -204,7 +209,7 @@ export class BasicIndex<
   clear(): void {
     this.valueMap.clear()
     this.sortedValues = []
-    this.indexedKeys.clear()
+    this.indexedKeyCount = 0
     this.emptyValueTombstones = 0
     this.updateTimestamp()
   }
@@ -248,7 +253,7 @@ export class BasicIndex<
    * Gets the number of indexed keys
    */
   get keyCount(): number {
-    return this.indexedKeys.size
+    return this.indexedKeyCount
   }
 
   /**
@@ -504,7 +509,13 @@ export class BasicIndex<
 
   // Getter methods for testing/compatibility
   get indexedKeysSet(): Set<TKey> {
-    return this.indexedKeys
+    const keys = new Set<TKey>()
+    for (const keySet of this.valueMap.values()) {
+      for (const key of keySet) {
+        keys.add(key)
+      }
+    }
+    return keys
   }
 
   get orderedEntriesArray(): Array<[any, Set<TKey>]> {
