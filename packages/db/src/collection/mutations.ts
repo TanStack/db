@@ -181,6 +181,7 @@ export class CollectionMutationsManager<
     const keysInCurrentBatch = new Set<TKey>()
 
     // Create mutations for each item
+    const batchTimestamp = new Date()
     items.forEach((item) => {
       // Validate the data against the schema if one exists
       const validatedData = this.validateData(item, `insert`)
@@ -200,20 +201,24 @@ export class CollectionMutationsManager<
         // Pick the values from validatedData based on what's passed in - this is for cases
         // where a schema has default values. The validated data has the extra default
         // values but for changes, we just want to show the data that was actually passed in.
-        changes: Object.fromEntries(
-          Object.keys(item).map((k) => [
-            k,
-            validatedData[k as keyof typeof validatedData],
-          ]),
-        ) as TInput,
+        // Without a schema, validation is the identity, so the item itself is
+        // exactly "the data that was actually passed in".
+        changes: this.config.schema
+          ? (Object.fromEntries(
+              Object.keys(item).map((k) => [
+                k,
+                validatedData[k as keyof typeof validatedData],
+              ]),
+            ) as TInput)
+          : (item),
         globalKey,
         key,
         metadata: config?.metadata as unknown,
         syncMetadata: this.config.sync.getSyncMetadata?.() || {},
         optimistic: config?.optimistic ?? true,
         type: `insert`,
-        createdAt: new Date(),
-        updatedAt: new Date(),
+        createdAt: batchTimestamp,
+        updatedAt: batchTimestamp,
         collection: this.collection,
       }
 

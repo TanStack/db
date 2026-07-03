@@ -913,6 +913,89 @@ export class CollectionStateManager<
     this.isCommittingSyncTransactions = true
 
     const rowUpdateMode = this.config.sync.rowUpdateMode || `partial`
+
+    // Ultra path for the dominant mutation case: one transaction with one
+    // operation — no per-batch tracking maps needed.
+    if (
+      committedSyncedTransactions.length === 1 &&
+      committedSyncedTransactions[0]!.operations.length === 1 &&
+      committedSyncedTransactions[0]!.rowMetadataWrites.size === 0 &&
+      committedSyncedTransactions[0]!.collectionMetadataWrites.size === 0
+    ) {
+      const operation = committedSyncedTransactions[0]!.operations[0]!
+      const key = operation.key as TKey
+      this.syncedKeys.add(key)
+      const previousValue = this.syncedData.get(key)
+      const previousOrigin = this.rowOrigins.get(key)
+      const origin: VirtualOrigin =
+        this.isLocalOnly ||
+        this.pendingLocalChanges.has(key) ||
+        this.pendingLocalOrigins.has(key)
+          ? 'local'
+          : 'remote'
+
+      const events: Array<ChangeMessage<TOutput, TKey>> = []
+      switch (operation.type) {
+        case `insert`:
+        case `update`: {
+          let newValue = operation.value
+          if (operation.type === `update` && rowUpdateMode === `partial`) {
+            newValue = Object.assign({}, previousValue, newValue)
+          }
+          this.verifyKeyFieldInvariant(key, newValue)
+          this.syncedData.set(key, newValue)
+          this.rowOrigins.set(key, origin)
+          this.pendingLocalChanges.delete(key)
+          this.pendingLocalOrigins.delete(key)
+          if (previousValue === undefined) {
+            events.push({ type: `insert`, key, value: newValue })
+          } else {
+            const originChanged =
+              previousOrigin !== undefined && previousOrigin !== origin
+            if (originChanged || !deepEquals(previousValue, newValue)) {
+              events.push({
+                type: `update`,
+                key,
+                value: newValue,
+                previousValue: originChanged
+                  ? enrichRowWithVirtualProps(
+                      previousValue,
+                      key,
+                      this.collection.id,
+                      () => true,
+                      () => previousOrigin,
+                    )
+                  : previousValue,
+              })
+            }
+          }
+          break
+        }
+        case `delete`:
+          this.syncedData.delete(key)
+          this.syncedMetadata.delete(key)
+          this.rowOrigins.delete(key)
+          this.pendingLocalChanges.delete(key)
+          this.pendingLocalOrigins.delete(key)
+          if (previousValue !== undefined) {
+            events.push({ type: `delete`, key, value: previousValue })
+          }
+          break
+      }
+
+      this.isCommittingSyncTransactions = false
+      this.size = this.syncedData.size
+      if (events.length > 0) {
+        this.indexes.updateIndexes(events)
+      }
+      this.changes.emitEvents(events, true)
+      this.pendingSyncedTransactions = uncommittedSyncedTransactions
+      if (!this.hasReceivedFirstCommit) {
+        this.hasReceivedFirstCommit = true
+      }
+      return
+    }
+
     // First previous value and origin per touched key (captured before the
     // first write to that key in this batch)
     const previousValues = new Map<TKey, TOutput | undefined>()
