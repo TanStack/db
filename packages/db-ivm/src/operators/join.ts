@@ -158,10 +158,12 @@ export class JoinOperator<K, V1, V2> extends BinaryOperator<
     deltaB: Index<K, V2>,
     results: MultiSet<any>,
   ): void {
-    // Emit the three standard delta terms: ΔA⋈B_old, A_old⋈ΔB, ΔA⋈ΔB
-    if (deltaA.size > 0) results.extend(deltaA.join(this.#indexB))
-    if (deltaB.size > 0) results.extend(this.#indexA.join(deltaB))
-    if (deltaA.size > 0 && deltaB.size > 0) results.extend(deltaA.join(deltaB))
+    // Emit the three standard delta terms: ΔA⋈B_old, A_old⋈ΔB, ΔA⋈ΔB —
+    // appended directly into the shared results multiset (no intermediate
+    // arrays + copies per term)
+    if (deltaA.size > 0) deltaA.join(this.#indexB, results)
+    if (deltaB.size > 0) this.#indexA.join(deltaB, results as any)
+    if (deltaA.size > 0 && deltaB.size > 0) deltaA.join(deltaB, results)
   }
 
   private emitLeftOuterResults(

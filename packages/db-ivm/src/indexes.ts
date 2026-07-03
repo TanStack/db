@@ -532,12 +532,16 @@ export class Index<TKey, TValue, TPrefix = any> {
   /**
    * This method joins two indexes.
    * @param other - The index to join with the current index.
-   * @returns A multiset of the joined values.
+   * @param into - Optional multiset to append results into (avoids an
+   * intermediate array + copy when accumulating multiple join terms).
+   * @returns The multiset holding the joined values.
    */
   join<TValue2>(
     other: Index<TKey, TValue2>,
+    into?: MultiSet<[TKey, [TValue, TValue2]]>,
   ): MultiSet<[TKey, [TValue, TValue2]]> {
-    const result: Array<[[TKey, [TValue, TValue2]], number]> = []
+    const target = into ?? new MultiSet<[TKey, [TValue, TValue2]]>()
+    const result = target.getInner()
     // We want to iterate over the smaller of the two indexes to reduce the
     // number of operations we need to do.
     if (this.size <= other.size) {
@@ -566,7 +570,7 @@ export class Index<TKey, TValue, TPrefix = any> {
       }
     }
 
-    return new MultiSet(result)
+    return target
   }
 }
 
