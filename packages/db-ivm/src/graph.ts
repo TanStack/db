@@ -17,8 +17,12 @@ export class DifferenceStreamReader<T> implements IDifferenceStreamReader<T> {
   }
 
   drain(): Array<MultiSet<T>> {
-    const out = [...this.#queue].reverse()
-    this.#queue.length = 0
+    // Queue is unshift-fed (newest first); popping from the end yields
+    // oldest-first without the copy + reverse
+    const out: Array<MultiSet<T>> = []
+    while (this.#queue.length > 0) {
+      out.push(this.#queue.pop()!)
+    }
     return out
   }
 

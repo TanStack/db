@@ -57,8 +57,19 @@ export class D2 implements ID2 {
   }
 
   run(): void {
-    while (this.pendingWork()) {
-      this.step()
+    // Only run operators that actually have pending input; running idle
+    // operators drains empty queues and allocates for nothing. Operators are
+    // registered upstream-first, so one pass usually settles the graph and
+    // the final pass is a cheap no-work scan.
+    let anyRan = true
+    while (anyRan) {
+      anyRan = false
+      for (const op of this.#operators) {
+        if (op.hasPendingWork()) {
+          op.run()
+          anyRan = true
+        }
+      }
     }
   }
 }
