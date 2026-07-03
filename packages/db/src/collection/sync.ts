@@ -164,10 +164,17 @@ export class CollectionSyncManager<
               }
             }
 
+            // Built as a literal (not a spread) — commit consumers only read
+            // type/key/value/metadata, and this runs once per written row
             const message = {
-              ...messageWithOptionalKey,
               type: messageType,
               key,
+              value: (messageWithOptionalKey as { value?: TOutput }).value,
+              metadata: (messageWithOptionalKey as { metadata?: unknown })
+                .metadata,
+              previousValue: (
+                messageWithOptionalKey as { previousValue?: TOutput }
+              ).previousValue,
             } as OptimisticChangeMessage<TOutput, TKey>
             pendingTransaction.operations.push(message)
 
