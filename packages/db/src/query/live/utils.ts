@@ -331,19 +331,23 @@ export function filterDuplicateInserts(
   changes: Array<ChangeMessage<any, string | number>>,
   sentKeys: Set<string | number>,
 ): Array<ChangeMessage<any, string | number>> {
-  const filtered: Array<ChangeMessage<any, string | number>> = []
-  for (const change of changes) {
+  let filtered: Array<ChangeMessage<any, string | number>> | undefined
+
+  for (let i = 0; i < changes.length; i++) {
+    const change = changes[i]!
     if (change.type === `insert`) {
       if (sentKeys.has(change.key)) {
+        filtered ??= changes.slice(0, i)
         continue // Skip duplicate
       }
       sentKeys.add(change.key)
     } else if (change.type === `delete`) {
       sentKeys.delete(change.key)
     }
-    filtered.push(change)
+    filtered?.push(change)
   }
-  return filtered
+
+  return filtered ?? changes
 }
 
 /**

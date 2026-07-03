@@ -947,7 +947,9 @@ export class CollectionConfigBuilder<
         // 1. Flush parent changes
         if (hasParentChanges) {
           begin()
-          changesToApply.forEach(this.applyChanges.bind(this, config))
+          for (const [key, changes] of changesToApply) {
+            this.applyChanges(config, changes, key)
+          }
           commit()
         }
         pendingChanges = new Map()

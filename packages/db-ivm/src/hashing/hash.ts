@@ -105,20 +105,22 @@ function hashObject(input: object): number {
     let marker = OBJECT_MARKER
 
     if (input instanceof Array) {
-      marker = ARRAY_MARKER
-    }
-
-    if (input instanceof Map) {
-      marker = MAP_MARKER
-      plainObjectInput = [...input.entries()]
-    }
-
-    if (input instanceof Set) {
+      valueHash = canHashDenseArrayByIndex(input)
+        ? hashDenseArray(input)
+        : hashPlainObject(input, ARRAY_MARKER)
+    } else if (input instanceof Set) {
       marker = SET_MARKER
       plainObjectInput = [...input.entries()]
-    }
 
-    valueHash = hashPlainObject(plainObjectInput, marker)
+      valueHash = hashPlainObject(plainObjectInput, marker)
+    } else {
+      if (input instanceof Map) {
+        marker = MAP_MARKER
+        plainObjectInput = [...input.entries()]
+      }
+
+      valueHash = hashPlainObject(plainObjectInput, marker)
+    }
   }
 
   hashCache.set(input, valueHash)
@@ -148,6 +150,37 @@ function hashUint8Array(input: Uint8Array): number {
   for (let i = 0; i < input.byteLength; i++) {
     hasher.writeByte(input[i]!)
   }
+  return hasher.digest()
+}
+
+function canHashDenseArrayByIndex(input: Array<unknown>): boolean {
+  const keys = Object.keys(input)
+  if (keys.length !== input.length) return false
+
+  for (let i = 0; i < keys.length; i++) {
+    if (keys[i] !== String(i)) return false
+  }
+
+  return true
+}
+
+function hashDenseArray(input: Array<unknown>): number {
+  const hasher = new MurmurHashStream()
+  hasher.update(ARRAY_MARKER)
+
+  if (isPerfEnabled()) {
+    recordPerfCount(`hash.denseArray.keys`, input.length)
+  }
+
+  for (let i = 0; i < input.length; i++) {
+    hasher.update(KEY)
+    hasher.update(String(i))
+    if (isPerfEnabled()) {
+      recordPerfCount(`hash.denseArray.nestedValues`)
+    }
+    updateHasher(hasher, input[i])
+  }
+
   return hasher.digest()
 }
 

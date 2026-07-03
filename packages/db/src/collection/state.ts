@@ -270,6 +270,15 @@ export class CollectionStateManager<
     const resolvedKey = existingRow.$key ?? virtualProps.$key
     const collectionId = existingRow.$collectionId ?? virtualProps.$collectionId
 
+    if (
+      existingRow.$synced === synced &&
+      existingRow.$origin === origin &&
+      existingRow.$key === resolvedKey &&
+      existingRow.$collectionId === collectionId
+    ) {
+      return row as WithVirtualProps<TOutput, TKey>
+    }
+
     const cached = this.virtualPropsCache.get(row as object)
     if (
       cached &&
