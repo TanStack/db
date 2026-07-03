@@ -89,9 +89,10 @@ export class BasicIndex<
 
     const normalizedValue = normalizeValue(indexedValue)
 
-    if (this.valueMap.has(normalizedValue)) {
+    const keySet = this.valueMap.get(normalizedValue)
+    if (keySet) {
       // Value already exists, just add the key to the set
-      this.valueMap.get(normalizedValue)!.add(key)
+      keySet.add(key)
     } else {
       // New value - add to map and insert into sorted array
       this.valueMap.set(normalizedValue, new Set([key]))
@@ -128,8 +129,8 @@ export class BasicIndex<
 
     const normalizedValue = normalizeValue(indexedValue)
 
-    if (this.valueMap.has(normalizedValue)) {
-      const keySet = this.valueMap.get(normalizedValue)!
+    const keySet = this.valueMap.get(normalizedValue)
+    if (keySet) {
       keySet.delete(key)
 
       if (keySet.size === 0) {
@@ -175,8 +176,9 @@ export class BasicIndex<
 
     // Group by value
     for (const { key, value } of entriesArray) {
-      if (this.valueMap.has(value)) {
-        this.valueMap.get(value)!.add(key)
+      const keySet = this.valueMap.get(value)
+      if (keySet) {
+        keySet.add(key)
       } else {
         this.valueMap.set(value, new Set([key]))
       }
