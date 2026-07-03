@@ -64,6 +64,26 @@ type SimpleSyncCommitResult = {
   eventCount: number
 }
 
+function hasResolvedVirtualProps<TKey extends string | number>(
+  row: unknown,
+): row is WithVirtualProps<object, TKey> {
+  if (typeof row !== 'object' || row === null) {
+    return false
+  }
+
+  const virtualRow = row as Record<string, unknown>
+  return (
+    virtualRow.$synced !== undefined &&
+    virtualRow.$synced !== null &&
+    virtualRow.$origin !== undefined &&
+    virtualRow.$origin !== null &&
+    virtualRow.$key !== undefined &&
+    virtualRow.$key !== null &&
+    virtualRow.$collectionId !== undefined &&
+    virtualRow.$collectionId !== null
+  )
+}
+
 function perfDeepEquals(a: unknown, b: unknown): boolean {
   if (!isPerfEnabled()) {
     return deepEquals(a, b)
@@ -346,6 +366,8 @@ export class CollectionStateManager<
     const { __virtualProps } = change as InternalChangeMessage<TOutput, TKey>
     const enrichedValue = __virtualProps?.value
       ? this.enrichWithVirtualPropsSnapshot(change.value, __virtualProps.value)
+      : hasResolvedVirtualProps<TKey>(change.value)
+        ? (change.value as WithVirtualProps<TOutput, TKey>)
       : this.enrichWithVirtualProps(change.value, change.key)
     const enrichedPreviousValue = change.previousValue
       ? __virtualProps?.previousValue
@@ -353,6 +375,8 @@ export class CollectionStateManager<
             change.previousValue,
             __virtualProps.previousValue,
           )
+        : hasResolvedVirtualProps<TKey>(change.previousValue)
+          ? (change.previousValue as WithVirtualProps<TOutput, TKey>)
         : this.enrichWithVirtualProps(change.previousValue, change.key)
       : undefined
 
