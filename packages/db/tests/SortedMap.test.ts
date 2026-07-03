@@ -35,6 +35,21 @@ describe(`SortedMap`, () => {
     expect(values).toEqual([2, 3])
   })
 
+  it(`keeps key order when updating values without a comparator`, () => {
+    const map = new SortedMap<string, number>()
+    map.set(`a`, 1)
+    map.set(`b`, 2)
+    map.set(`c`, 3)
+
+    map.set(`b`, 20)
+
+    expect(Array.from(map.entries())).toEqual([
+      [`a`, 1],
+      [`b`, 20],
+      [`c`, 3],
+    ])
+  })
+
   it(`correctly handles deletions`, () => {
     const map = new SortedMap<string, number>()
     map.set(`a`, 1)
@@ -45,6 +60,22 @@ describe(`SortedMap`, () => {
     expect(map.size).toBe(2)
     const values = Array.from(map.values())
     expect(values).toEqual([1, 3])
+  })
+
+  it(`handles edge inserts and deletes without a comparator`, () => {
+    const map = new SortedMap<number, string>()
+    map.set(20, `twenty`)
+    map.set(30, `thirty`)
+    map.set(10, `ten`)
+    map.set(40, `forty`)
+
+    expect(Array.from(map.keys())).toEqual([10, 20, 30, 40])
+    expect(map.delete(40)).toBe(true)
+    expect(map.delete(10)).toBe(true)
+    expect(Array.from(map.entries())).toEqual([
+      [20, `twenty`],
+      [30, `thirty`],
+    ])
   })
 
   it(`implements iteration methods correctly`, () => {

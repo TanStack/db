@@ -90,6 +90,34 @@ export class SortedMap<TKey extends string | number, TValue> {
    * @returns This SortedMap instance for chaining
    */
   set(key: TKey, value: TValue): this {
+    if (!this.comparator) {
+      if (this.map.has(key)) {
+        this.map.set(key, value)
+        return this
+      }
+
+      const length = this.sortedKeys.length
+      if (length === 0) {
+        this.sortedKeys.push(key)
+      } else {
+        const lastKey = this.sortedKeys[length - 1]!
+        if (compareKeys(key, lastKey) > 0) {
+          this.sortedKeys.push(key)
+        } else {
+          const firstKey = this.sortedKeys[0]!
+          if (compareKeys(key, firstKey) < 0) {
+            this.sortedKeys.unshift(key)
+          } else {
+            const index = this.indexOf(key, value)
+            this.sortedKeys.splice(index, 0, key)
+          }
+        }
+      }
+
+      this.map.set(key, value)
+      return this
+    }
+
     if (this.map.has(key)) {
       // Need to remove the old key from the sorted keys array
       const oldValue = this.map.get(key)!
@@ -124,6 +152,18 @@ export class SortedMap<TKey extends string | number, TValue> {
    */
   delete(key: TKey): boolean {
     if (this.map.has(key)) {
+      if (!this.comparator) {
+        const lastIndex = this.sortedKeys.length - 1
+        if (this.sortedKeys[lastIndex] === key) {
+          this.sortedKeys.pop()
+          return this.map.delete(key)
+        }
+        if (this.sortedKeys[0] === key) {
+          this.sortedKeys.shift()
+          return this.map.delete(key)
+        }
+      }
+
       const oldValue = this.map.get(key)
       const index = this.indexOf(key, oldValue!)
       this.sortedKeys.splice(index, 1)
