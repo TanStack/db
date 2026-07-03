@@ -1,5 +1,6 @@
 import { deepEquals } from '../utils'
 import { SortedMap } from '../SortedMap'
+import { TombstoneMap } from '../TombstoneMap'
 import { enrichRowWithVirtualProps } from '../virtual-props.js'
 import { DIRECT_TRANSACTION_METADATA_KEY } from './transaction-metadata.js'
 import type {
@@ -73,7 +74,7 @@ export class CollectionStateManager<
     PendingSyncedTransaction<TOutput, TKey>
   > = []
   public syncedData: SortedMap<TKey, TOutput>
-  public syncedMetadata = new Map<TKey, unknown>()
+  public syncedMetadata = new TombstoneMap<TKey, unknown>()
   public syncedCollectionMetadata = new Map<string, unknown>()
 
   // Optimistic state tracking - make public for testing
@@ -93,7 +94,7 @@ export class CollectionStateManager<
    * Note: This only tracks *confirmed* changes, not optimistic ones.
    * Optimistic changes are always considered 'local' for $origin.
    */
-  public rowOrigins = new Map<TKey, VirtualOrigin>()
+  public rowOrigins = new TombstoneMap<TKey, VirtualOrigin>()
 
   /**
    * Tracks keys that have pending local changes.
@@ -235,7 +236,7 @@ export class CollectionStateManager<
   private getVirtualPropsSnapshotForState(
     key: TKey,
     options?: {
-      rowOrigins?: ReadonlyMap<TKey, VirtualOrigin>
+      rowOrigins?: Pick<ReadonlyMap<TKey, VirtualOrigin>, 'get'>
       optimisticUpserts?: Pick<Map<TKey, unknown>, 'has'>
       optimisticDeletes?: Pick<Set<TKey>, 'has'>
       completedOptimisticKeys?: Pick<Map<TKey, unknown>, 'has'>
@@ -814,7 +815,7 @@ export class CollectionStateManager<
   private collectOptimisticChanges(
     previousUpserts: Map<TKey, TOutput>,
     previousDeletes: Set<TKey>,
-    previousRowOrigins: ReadonlyMap<TKey, VirtualOrigin>,
+    previousRowOrigins: Pick<ReadonlyMap<TKey, VirtualOrigin>, 'get'>,
     events: Array<InternalChangeMessage<TOutput, TKey>>,
   ): void {
     const allKeys = new Set([
