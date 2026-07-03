@@ -97,8 +97,47 @@ export class JoinOperator<K, V1, V2> extends BinaryOperator<
     // Build deltas from input messages
     const inputAMessages = this.inputAMessages() as Array<MultiSet<[K, V1]>>
     const inputBMessages = this.inputBMessages() as Array<MultiSet<[K, V2]>>
-    const deltaARows = countMultiSetRows(inputAMessages)
-    const deltaBRows = countMultiSetRows(inputBMessages)
+    const deltaASummary = summarizeDelta(inputAMessages)
+    const deltaBSummary = summarizeDelta(inputBMessages)
+    const deltaARows = deltaASummary.rowCount
+    const deltaBRows = deltaBSummary.rowCount
+
+    if (deltaASummary.single && deltaBRows === 0) {
+      const outputRows = this.runSingleDeltaA(deltaASummary.single)
+      if (shouldTrace) {
+        recordPerfCount(`operator.join.deltaRowsA`, deltaARows, tags)
+        recordPerfCount(`operator.join.deltaRowsB`, deltaBRows, tags)
+        recordPerfCount(
+          `operator.join.deltaKeysA`,
+          deltaASummary.single.multiplicity === 0 ? 0 : 1,
+          tags,
+        )
+        recordPerfCount(`operator.join.deltaKeysB`, 0, tags)
+        recordPerfCount(`operator.join.outputRows`, outputRows, tags)
+        recordPerfCount(`operator.join.singleDeltaA`, 1, tags)
+        span?.end({ outputRows })
+      }
+      return
+    }
+
+    if (deltaBSummary.single && deltaARows === 0) {
+      const outputRows = this.runSingleDeltaB(deltaBSummary.single)
+      if (shouldTrace) {
+        recordPerfCount(`operator.join.deltaRowsA`, deltaARows, tags)
+        recordPerfCount(`operator.join.deltaRowsB`, deltaBRows, tags)
+        recordPerfCount(`operator.join.deltaKeysA`, 0, tags)
+        recordPerfCount(
+          `operator.join.deltaKeysB`,
+          deltaBSummary.single.multiplicity === 0 ? 0 : 1,
+          tags,
+        )
+        recordPerfCount(`operator.join.outputRows`, outputRows, tags)
+        recordPerfCount(`operator.join.singleDeltaB`, 1, tags)
+        span?.end({ outputRows })
+      }
+      return
+    }
+
     const deltaA = Index.fromMultiSets<K, V1>(inputAMessages)
     const deltaB = Index.fromMultiSets<K, V2>(inputBMessages)
 
@@ -167,6 +206,120 @@ export class JoinOperator<K, V1, V2> extends BinaryOperator<
     if (deltaA.size > 0) results.extend(deltaA.join(this.#indexB))
     if (deltaB.size > 0) results.extend(this.#indexA.join(deltaB))
     if (deltaA.size > 0 && deltaB.size > 0) results.extend(deltaA.join(deltaB))
+  }
+
+  private runSingleDeltaA(change: DeltaChange<K, V1>): number {
+    const { key, value, multiplicity } = change
+    if (multiplicity === 0) return 0
+
+    const results = new MultiSet<any>()
+
+    if (this.#mode !== `anti`) {
+      for (const [rightValue, rightMultiplicity] of this.#indexB.getIterator(
+        key,
+      )) {
+        if (rightMultiplicity !== 0) {
+          results.add(
+            [key, [value, rightValue]],
+            multiplicity * rightMultiplicity,
+          )
+        }
+      }
+    }
+
+    if (
+      this.#mode === `left` ||
+      this.#mode === `full` ||
+      this.#mode === `anti`
+    ) {
+      const finalMultiplicityB = this.#indexB.getConsolidatedMultiplicity(key)
+      if (finalMultiplicityB === 0) {
+        results.add([key, [value, null]], multiplicity)
+      }
+    }
+
+    if (this.#mode === `right` || this.#mode === `full`) {
+      const before = this.#indexA.getConsolidatedMultiplicity(key)
+      const after = before + multiplicity
+      if ((before === 0) !== (after === 0)) {
+        const transitioningToMatched = before === 0
+
+        for (const [rightValue, rightMultiplicity] of this.#indexB.getIterator(
+          key,
+        )) {
+          if (rightMultiplicity !== 0) {
+            results.add(
+              [key, [null, rightValue]],
+              transitioningToMatched ? -rightMultiplicity : +rightMultiplicity,
+            )
+          }
+        }
+      }
+    }
+
+    this.#indexA.addValue(key, [value, multiplicity])
+    const outputRows = results.getInner().length
+    if (outputRows > 0) {
+      this.output.sendData(results)
+    }
+    return outputRows
+  }
+
+  private runSingleDeltaB(change: DeltaChange<K, V2>): number {
+    const { key, value, multiplicity } = change
+    if (multiplicity === 0) return 0
+
+    const results = new MultiSet<any>()
+
+    if (this.#mode !== `anti`) {
+      for (const [leftValue, leftMultiplicity] of this.#indexA.getIterator(
+        key,
+      )) {
+        if (leftMultiplicity !== 0) {
+          results.add(
+            [key, [leftValue, value]],
+            leftMultiplicity * multiplicity,
+          )
+        }
+      }
+    }
+
+    if (
+      this.#mode === `left` ||
+      this.#mode === `full` ||
+      this.#mode === `anti`
+    ) {
+      const before = this.#indexB.getConsolidatedMultiplicity(key)
+      const after = before + multiplicity
+      if ((before === 0) !== (after === 0)) {
+        const transitioningToMatched = before === 0
+
+        for (const [leftValue, leftMultiplicity] of this.#indexA.getIterator(
+          key,
+        )) {
+          if (leftMultiplicity !== 0) {
+            results.add(
+              [key, [leftValue, null]],
+              transitioningToMatched ? -leftMultiplicity : +leftMultiplicity,
+            )
+          }
+        }
+      }
+    }
+
+    if (this.#mode === `right` || this.#mode === `full`) {
+      const finalMultiplicityA = this.#indexA.getConsolidatedMultiplicity(key)
+      if (finalMultiplicityA === 0) {
+        results.add([key, [null, value]], multiplicity)
+      }
+    }
+
+    this.#indexB.addValue(key, [value, multiplicity])
+    const outputRows = results.getInner().length
+    if (outputRows > 0) {
+      this.output.sendData(results)
+    }
+    return outputRows
   }
 
   private emitLeftOuterResults(
@@ -278,12 +431,35 @@ export class JoinOperator<K, V1, V2> extends BinaryOperator<
   }
 }
 
-function countMultiSetRows<T>(messages: Array<MultiSet<T>>): number {
-  let rows = 0
+type DeltaChange<K, V> = {
+  key: K
+  value: V
+  multiplicity: number
+}
+
+type DeltaSummary<K, V> = {
+  rowCount: number
+  single?: DeltaChange<K, V>
+}
+
+function summarizeDelta<K, V>(
+  messages: Array<MultiSet<[K, V]>>,
+): DeltaSummary<K, V> {
+  let rowCount = 0
+  let single: DeltaChange<K, V> | undefined
+
   for (const message of messages) {
-    rows += message.getInner().length
+    for (const [[key, value], multiplicity] of message.getInner()) {
+      rowCount++
+      if (rowCount === 1) {
+        single = { key, value, multiplicity }
+      } else {
+        single = undefined
+      }
+    }
   }
-  return rows
+
+  return single ? { rowCount, single } : { rowCount }
 }
 
 /**
