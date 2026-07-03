@@ -83,6 +83,106 @@ export type CompiledExpression = (namespacedRow: NamespacedRow) => any
 export type CompiledSingleRowExpression = (item: Record<string, unknown>) => any
 
 /**
+ * Cache of compiled evaluators keyed by an exact structural serialization of
+ * the expression IR. Live queries are frequently created with structurally
+ * identical expressions (components re-mounting the same query shape, or
+ * benchmarks re-hydrating): reusing the evaluator closure keeps its engine
+ * type feedback warm across creations instead of re-tiering per instance.
+ * The key is exact (not a lossy hash), so collisions are impossible; entries
+ * are evicted FIFO beyond a cap, and expressions that don't serialize to a
+ * reasonable key are compiled uncached.
+ */
+const expressionCache = new Map<
+  string,
+  CompiledExpression | CompiledSingleRowExpression
+>()
+const EXPRESSION_CACHE_MAX_ENTRIES = 512
+const EXPRESSION_CACHE_MAX_KEY_LENGTH = 2048
+
+function serializeExpressionForCache(expr: BasicExpression): string | null {
+  switch (expr.type) {
+    case `ref`:
+      return `r:${(expr).path.join(`.`)}`
+    case `val`: {
+      const value = (expr as { value: unknown }).value
+      switch (typeof value) {
+        case `number`:
+        case `boolean`:
+        case `bigint`:
+          return `v:${typeof value}:${String(value)}`
+        case `string`:
+          return `v:s:${JSON.stringify(value)}`
+        case `undefined`:
+          return `v:u`
+        case `object`: {
+          if (value === null) return `v:z`
+          if (Array.isArray(value)) {
+            // Common for inArray: cache when all members are simple primitives
+            const parts: Array<string> = []
+            for (const item of value) {
+              const t = typeof item
+              if (t === `number` || t === `boolean` || t === `bigint`) {
+                parts.push(`${t}:${String(item)}`)
+              } else if (t === `string`) {
+                parts.push(`s:${JSON.stringify(item)}`)
+              } else if (item === null) {
+                parts.push(`z`)
+              } else {
+                return null
+              }
+            }
+            return `v:a:[${parts.join(`,`)}]`
+          }
+          return null
+        }
+        default:
+          return null
+      }
+    }
+    case `func`: {
+      const func = expr
+      const argKeys: Array<string> = []
+      for (const arg of func.args) {
+        const argKey = serializeExpressionForCache(arg)
+        if (argKey === null) return null
+        argKeys.push(argKey)
+      }
+      return `f:${func.name}(${argKeys.join(`,`)})`
+    }
+    default:
+      return null
+  }
+}
+
+function compileWithCache(
+  expr: BasicExpression,
+  isSingleRow: boolean,
+): CompiledExpression | CompiledSingleRowExpression {
+  const structuralKey = serializeExpressionForCache(expr)
+  if (
+    structuralKey === null ||
+    structuralKey.length > EXPRESSION_CACHE_MAX_KEY_LENGTH
+  ) {
+    return compileExpressionInternal(expr, isSingleRow)
+  }
+  const cacheKey = (isSingleRow ? `1|` : `0|`) + structuralKey
+  const cached = expressionCache.get(cacheKey)
+  if (cached) {
+    return cached
+  }
+  const compiled = compileExpressionInternal(expr, isSingleRow)
+  if (expressionCache.size >= EXPRESSION_CACHE_MAX_ENTRIES) {
+    // FIFO eviction: drop the oldest entry
+    const oldest = expressionCache.keys().next()
+    if (!oldest.done) {
+      expressionCache.delete(oldest.value)
+    }
+  }
+  expressionCache.set(cacheKey, compiled)
+  return compiled
+}
+
+/**
  * Compiles an expression into an optimized evaluator function.
  * This eliminates branching during evaluation by pre-compiling the expression structure.
  */
@@ -90,8 +190,7 @@ export function compileExpression(
   expr: BasicExpression,
   isSingleRow: boolean = false,
 ): CompiledExpression | CompiledSingleRowExpression {
-  const compiledFn = compileExpressionInternal(expr, isSingleRow)
-  return compiledFn
+  return compileWithCache(expr, isSingleRow)
 }
 
 /**
@@ -100,8 +199,7 @@ export function compileExpression(
 export function compileSingleRowExpression(
   expr: BasicExpression,
 ): CompiledSingleRowExpression {
-  const compiledFn = compileExpressionInternal(expr, true)
-  return compiledFn as CompiledSingleRowExpression
+  return compileWithCache(expr, true) as CompiledSingleRowExpression
 }
 
 /**
