@@ -1027,7 +1027,6 @@ export class CollectionStateManager<
       hadPreviousVisibleValue
         ? this.getVirtualPropsSnapshotForState(key)
         : undefined
-    const rowUpdateMode = this.config.sync.rowUpdateMode || `partial`
 
     this.isCommittingSyncTransactions = true
     let newVisibleValue: TOutput | undefined
@@ -1053,6 +1052,7 @@ export class CollectionStateManager<
           if (!(`value` in operation)) {
             return undefined
           }
+          const rowUpdateMode = this.config.sync.rowUpdateMode || `partial`
           if (rowUpdateMode === `partial`) {
             const updatedValue = Object.assign(
               {},
