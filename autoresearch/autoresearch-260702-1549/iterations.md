@@ -345,3 +345,10 @@ view_list incr 1.5.
 Pair 145→142µs; all ticks benefit. Regime (c): +comments incr flipped 0.9×,
 page2 h 0.9×, ~15-16 won. Remaining reds: incrs author 2.0/detail 1.9/count
 1.6/folq 1.5/list 1.4; hydrates 1.2-1.5 band. Both suites ✅.
+
+## Iteration 24 — single-op commit ultra path + cheaper insert mutations · KEEP ✅
+All suites + 3 dependents ✅. Our-bench view incrementals 0.068-0.15ms.
+DEFAULTS regime: +comments h 1.0×, detail i 1.1×, list i 1.2× — parity band
+reaches the default regime. ROUNDS=50 no-GC: page2 1.0/1.1, +comments
+1.3/1.0, folq 0.6/1.4, agg 1.1; stubbornest: author i 2.3, detail i 2.0,
+hydrates 1.3-1.4 band.
