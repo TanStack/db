@@ -367,3 +367,7 @@ re-run.) All suites + 3 dependents ✅.
 ## Iteration 26 scoreboards
 DEFAULTS: view_list i 1.0×, +comments i 1.0× — parity at defaults for two
 incr rows. R50/noGC: page2 h 1.0, +author h 1.2, agg h 1.1, count i 1.4.
+
+## Iteration 27 — cached index evaluators + numeric timestamps · KEEP ✅
+Creator pair 230→165µs profiled. Defaults: author i 1.8, count i 1.8, all
+gates ✅. R50/noGC: worst remaining row 2.1× (author i), most ≤1.6×.
