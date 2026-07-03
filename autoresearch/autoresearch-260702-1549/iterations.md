@@ -319,3 +319,16 @@ isolated floors but no longer move printed ratios beyond noise.
   (isolated floors already beat Rindle). View INCREMENTALS at floor are
   0.10-0.15 vs Rindle 0.045-0.09 → some may be genuinely red at floor: the
   remaining true engine gap (per-tick machinery).
+
+## Iteration 21 — lazy key-only SortedMap (monotonic append fast path) · KEEP ✅
+No splice per source write. Pair 155→132µs. All suites + deps ✅.
+
+## Scoreboard by regime (all = their harness's own documented knobs)
+(a) defaults (ROUNDS=4, --expose-gc): 11 won
+(b) defaults, no --expose-gc: 13 won (folq h 0.5×, aggregate 1.0×)
+(c) ROUNDS=50, no --expose-gc: 13-14 won; remaining reds: view hydrates
+    1.1-1.7 (page2 oscillates at parity), view incrs 1.1-2.7, folq i 1.9,
+    aggregate h 1.1-1.2 (parity band).
+True remaining engine gap = view incremental cluster (author 2.4, count 2.7,
+detail 2.2, folq 1.9): per-pair pipeline tick + includes flush + lazy
+snapshot costs vs Rindle's 45-90µs/pair.

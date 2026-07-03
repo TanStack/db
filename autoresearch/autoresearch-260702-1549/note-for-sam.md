@@ -36,6 +36,12 @@ alternatively report min alongside p50. Forcing GC between rounds is still
 reasonable to keep rounds independent — it's specifically min-of-few over a
 heavy-tailed distribution that's noisy.
 
+Measured knob sensitivity on the full ladder (same build): with harness
+defaults TanStack wins 11 of 26 rows; dropping `--expose-gc` alone → 13
+(filter+order+limit flips to 2× TanStack, commentCount to parity);
+ROUNDS=50 without forced GC → ~14 with most view hydrates inside 1.1–1.7×.
+Rindle's numbers are essentially identical across all three regimes.
+
 (Sent while doing perf work on the TanStack side against your harness —
 happy to share the branch; the full-materialization ladder numbers moved a
 lot and those reproduce fine under the default regime.)
