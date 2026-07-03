@@ -282,3 +282,13 @@ detail hydrate 1.0× (parity), folq hydrate 1.1×, view_list 1.4×/1.1×,
 +author 1.5× — while +count spiked 7.0× (was 3.2-3.6). Run-to-run variance
 under min-of-4 forced GC now dominates every remaining red row; rows touch
 parity on good runs. Collecting median-of-3 scoreboard.
+
+## Median-of-3 scoreboard (post-iteration-18)
+WON 11: scan h+i, filter h+i, one_to_many h(0.9)+i, creator h+i, nested h+i,
+aggregate i. RED 15 (medians): views h 1.4/1.9/3.3/2.5/1.7/1.7, views i
+1.3/2.6/2.8/1.5/2.3/1.3, folq 1.3/1.8, aggregate h 1.7.
+
+## Iteration 19 — Index.join appends into shared results · KEEP ✅
+No intermediate arrays per delta term. aggregate 187ms isolated (best;
+Rindle 150-170 local ⇒ isolated gap now ~1.1-1.25×; harness regime prints
+1.7×). Both suites ✅.
