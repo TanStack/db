@@ -48,41 +48,52 @@ export class D2 implements ID2 {
    * Safe at finalize time because the topology can no longer change.
    */
   #fuseLinearChains(): void {
-    let fusedSomething = true
-    while (fusedSomething) {
-      fusedSomething = false
-      for (const op of this.#operators) {
-        const isLinear =
-          op instanceof LinearUnaryOperator || op instanceof FusedLinearOperator
-        if (!isLinear) continue
+    // Operators register upstream-first, so one forward pass with a
+    // reader -> consumer map fuses whole chains: after absorbing its sole
+    // linear consumer the fused op keeps the consumer's output writer, and
+    // the loop re-probes the same entry for the next link.
+    const isLinear = (
+      o: UnaryOperator<any> | BinaryOperator<any>,
+    ): o is LinearUnaryOperator<any, any> | FusedLinearOperator<any> =>
+      o instanceof LinearUnaryOperator || o instanceof FusedLinearOperator
+    const consumerOf = new Map<
+      DifferenceStreamReader<any>,
+      UnaryOperator<any> | BinaryOperator<any>
+    >()
+    for (const o of this.#operators) {
+      for (const r of o.inputReaders) {
+        consumerOf.set(r, o)
+      }
+    }
+    const removed = new Set<UnaryOperator<any> | BinaryOperator<any>>()
+    for (let i = 0; i < this.#operators.length; i++) {
+      let op = this.#operators[i]!
+      if (removed.has(op) || !isLinear(op)) continue
+      for (;;) {
         const writer = op.outputWriter
-        if (writer.readers.length !== 1) continue
-        const reader = writer.readers[0]!
-        const consumer = this.#operators.find(
-          (o) => o !== op && o.inputReaders.includes(reader),
-        )
-        if (!consumer) continue
-        const consumerLinear =
-          consumer instanceof LinearUnaryOperator ||
-          consumer instanceof FusedLinearOperator
-        if (!consumerLinear) continue
+        if (writer.readers.length !== 1) break
+        const consumer = consumerOf.get(writer.readers[0]!)
+        if (!consumer || consumer === op || !isLinear(consumer)) break
         const stages = [
           ...(op instanceof FusedLinearOperator ? op.stages : [op]),
           ...(consumer instanceof FusedLinearOperator
             ? consumer.stages
             : [consumer]),
         ]
-        const fused = new FusedLinearOperator(
+        const fused: FusedLinearOperator<any> = new FusedLinearOperator(
           op.id,
           op.inputReaders[0]! as any,
           consumer.outputWriter as any,
           stages as any,
         )
-        this.#operators[this.#operators.indexOf(op)] = fused
-        this.#operators.splice(this.#operators.indexOf(consumer), 1)
-        fusedSomething = true
-        break
+        consumerOf.set(op.inputReaders[0]!, fused)
+        this.#operators[i] = fused
+        removed.add(consumer)
+        op = fused
       }
+    }
+    if (removed.size > 0) {
+      this.#operators = this.#operators.filter((o) => !removed.has(o))
     }
   }
 
