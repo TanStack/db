@@ -235,3 +235,19 @@ collections, transactions). db 2456 ✅ react-db 95 ✅ offline-tx 65 ✅.
 ## Iteration 16 — minimal groupBy result rows · KEEP ✅
 No more full aggregated-row spread per group. aggregate_count 223→205ms
 (was 570 at baseline, Rindle ~150-170 local). db 2456 ✅.
+
+## Measurement findings (post-iteration-16 probes)
+- Heap sampling: view_list hydrate allocates only ~34KB — allocations are
+  NOT the dominant view-row cost.
+- --no-flush-bytecode: no effect — not code flushing.
+- Conclusion: their min-of-4-rounds with forced GC samples the tail of a
+  high-variance JS distribution (wasm's distribution is tight). Isolated
+  min-of-100 without forced GC: view_list 0.156–0.22ms — FASTER than
+  Rindle's 0.8–1.0. The lever for their-harness view rows remains lowering
+  mean AND variance; no single remaining hotspot (fast-lane commit ~50µs,
+  snapshot ~60µs, graph ~100µs at warm floor).
+- aggregate_count now 205ms (Rindle ~150–170): remaining cost = ~140k
+  Index.addValue calls (join deltas + reduce in/out) ~40ms, reduce ~15ms,
+  groupBy map ~14ms, GC ~60ms from ~5 allocs/row (join products, merged
+  nsRows, groupBy wrappers). Next ideas: consume join pairs in groupBy
+  without materializing merged nsRow; pool/flatten join result tuples.
