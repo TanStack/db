@@ -206,12 +206,24 @@ function removeFromPendingList(tx: Transaction<any>) {
   }
 }
 
+// Transaction ids are a lazily-created session prefix plus a counter:
+// globally unique (the prefix is a UUID) without paying UUID generation on
+// every transaction, and lazy so module load stays safe in environments that
+// forbid random in global scope (e.g. Cloudflare Workers).
+let transactionIdPrefix: string | undefined
+let transactionIdSequence = 0
+
+function nextTransactionId(): string {
+  transactionIdPrefix ??= safeRandomUUID()
+  return `${transactionIdPrefix}-t${++transactionIdSequence}`
+}
+
 class Transaction<T extends object = Record<string, unknown>> {
   public id: string
   public state: TransactionState
   public mutationFn: MutationFn<T>
   public mutations: Array<PendingMutation<T>>
-  public isPersisted: Deferred<Transaction<T>>
+  #isPersisted: Deferred<Transaction<T>> | undefined
   public autoCommit: boolean
   public createdAt: Date
   public sequenceNumber: number
@@ -225,15 +237,33 @@ class Transaction<T extends object = Record<string, unknown>> {
     if (typeof config.mutationFn === `undefined`) {
       throw new MissingMutationFunctionError()
     }
-    this.id = config.id ?? safeRandomUUID()
+    this.id = config.id ?? nextTransactionId()
     this.mutationFn = config.mutationFn
     this.state = `pending`
     this.mutations = []
-    this.isPersisted = createDeferred<Transaction<T>>()
     this.autoCommit = config.autoCommit ?? true
     this.createdAt = new Date()
     this.sequenceNumber = sequenceNumber++
     this.metadata = config.metadata ?? {}
+  }
+
+  /**
+   * Deferred that settles when the transaction completes or fails. Created
+   * lazily on first access — most transactions are never awaited, and the
+   * Promise machinery was a measurable share of per-mutation allocations.
+   * When accessed after the transaction already settled, it settles
+   * immediately from the terminal state.
+   */
+  get isPersisted(): Deferred<Transaction<T>> {
+    if (!this.#isPersisted) {
+      this.#isPersisted = createDeferred<Transaction<T>>()
+      if (this.state === `completed`) {
+        this.#isPersisted.resolve(this)
+      } else if (this.state === `failed`) {
+        this.#isPersisted.reject(this.error?.error)
+      }
+    }
+    return this.#isPersisted
   }
 
   setState(newState: TransactionState) {
@@ -427,8 +457,9 @@ class Transaction<T extends object = Record<string, unknown>> {
       }
     }
 
-    // Reject the promise
-    this.isPersisted.reject(this.error?.error)
+    // Reject the promise (only if someone is listening; late accessors get
+    // a deferred settled from the terminal state)
+    this.#isPersisted?.reject(this.error?.error)
     this.touchCollection()
 
     return this
@@ -499,7 +530,7 @@ class Transaction<T extends object = Record<string, unknown>> {
 
     if (this.mutations.length === 0) {
       this.setState(`completed`)
-      this.isPersisted.resolve(this)
+      this.#isPersisted?.resolve(this)
 
       return Promise.resolve(this)
     }
@@ -507,7 +538,7 @@ class Transaction<T extends object = Record<string, unknown>> {
     const complete = (): Transaction<T> => {
       this.setState(`completed`)
       this.touchCollection()
-      this.isPersisted.resolve(this)
+      this.#isPersisted?.resolve(this)
       return this
     }
 
