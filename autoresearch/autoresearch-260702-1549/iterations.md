@@ -227,3 +227,11 @@ must stay (its nsRow objects flow into merged rows).
 JoinKeyExtractors on JoinOperator + Index.fromMultiSetsBy; compiler drops the
 two per-side re-keying map operators; lazy tap uses the item-level extractor.
 db-ivm 324 ✅ db 2456 ✅. Bench noisy this cycle; head-to-head arbitrates.
+
+## Iteration 15 — lazy SortedMap ordering for custom comparators · KEEP ✅
+O(1) writes + rebuild-on-read for comparator-backed maps (ordered live
+collections, transactions). db 2456 ✅ react-db 95 ✅ offline-tx 65 ✅.
+
+## Iteration 16 — minimal groupBy result rows · KEEP ✅
+No more full aggregated-row spread per group. aggregate_count 223→205ms
+(was 570 at baseline, Rindle ~150-170 local). db 2456 ✅.
