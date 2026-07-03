@@ -34,7 +34,7 @@
  */
 
 import { MultiSet } from './multiset.js'
-import { hash } from './hashing/index.js'
+import { fastEquals, hash } from './hashing/index.js'
 import type { Hash } from './hashing/index.js'
 
 // We use a symbol to represent the absence of a prefix, unprefixed values a stored
@@ -82,7 +82,7 @@ class PrefixMap<TValue, TPrefix> extends Map<
       if (
         currentValue === value ||
         (prefixIdentity && prefix !== NO_PREFIX) ||
-        hash(currentValue) === hash(value)
+        fastEquals(currentValue, value)
       ) {
         // Same value, update multiplicity
         const newMultiplicity = currentMultiplicity + multiplicity
@@ -466,7 +466,7 @@ export class Index<TKey, TValue, TPrefix = any> {
       currentPrefix === newPrefix &&
       (currentValue === newValue ||
         (this.#prefixIdentity && newPrefix !== NO_PREFIX) ||
-        hash(currentValue) === hash(newValue))
+        fastEquals(currentValue, newValue))
     ) {
       const newMultiplicity = currentMultiplicity + multiplicity
       if (newMultiplicity === 0) {
