@@ -50,6 +50,47 @@ describe(`SortedMap`, () => {
     ])
   })
 
+  it(`sets entries with known presence`, () => {
+    const map = new SortedMap<string, number>()
+    map.set(`a`, 1)
+    map.set(`c`, 3)
+
+    map.setWithKnownPresence(`b`, 2, false, undefined)
+    map.setWithKnownPresence(`c`, 30, true, 3)
+
+    expect(Array.from(map.entries())).toEqual([
+      [`a`, 1],
+      [`b`, 2],
+      [`c`, 30],
+    ])
+  })
+
+  it(`sets entries with known presence and custom comparator`, () => {
+    const map = new SortedMap<string, number>((a, b) => b - a)
+    map.set(`a`, 1)
+    map.set(`b`, 2)
+
+    map.setWithKnownPresence(`a`, 3, true, 1)
+
+    expect(Array.from(map.entries())).toEqual([
+      [`a`, 3],
+      [`b`, 2],
+    ])
+  })
+
+  it(`sets entries with known presence when the previous value is undefined`, () => {
+    const map = new SortedMap<string, number | undefined>()
+    map.set(`a`, undefined)
+    map.set(`c`, 3)
+
+    map.setWithKnownPresence(`a`, 1, true, undefined)
+
+    expect(Array.from(map.entries())).toEqual([
+      [`a`, 1],
+      [`c`, 3],
+    ])
+  })
+
   it(`correctly handles deletions`, () => {
     const map = new SortedMap<string, number>()
     map.set(`a`, 1)
@@ -75,6 +116,20 @@ describe(`SortedMap`, () => {
     expect(Array.from(map.entries())).toEqual([
       [20, `twenty`],
       [30, `thirty`],
+    ])
+  })
+
+  it(`deletes entries with a known previous value`, () => {
+    const map = new SortedMap<number, string>()
+    map.set(10, `ten`)
+    map.set(20, `twenty`)
+    map.set(30, `thirty`)
+
+    expect(map.deleteWithKnownPreviousValue(30, true, `thirty`)).toBe(true)
+    expect(map.deleteWithKnownPreviousValue(40, false, undefined)).toBe(false)
+    expect(Array.from(map.entries())).toEqual([
+      [10, `ten`],
+      [20, `twenty`],
     ])
   })
 

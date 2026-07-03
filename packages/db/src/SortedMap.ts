@@ -82,6 +82,48 @@ export class SortedMap<TKey extends string | number, TValue> {
     return left
   }
 
+  private insertSortedKey(key: TKey, value: TValue): void {
+    const length = this.sortedKeys.length
+    if (length === 0) {
+      this.sortedKeys.push(key)
+      return
+    }
+
+    if (!this.comparator) {
+      const lastKey = this.sortedKeys[length - 1]!
+      if (compareKeys(key, lastKey) > 0) {
+        this.sortedKeys.push(key)
+        return
+      }
+
+      const firstKey = this.sortedKeys[0]!
+      if (compareKeys(key, firstKey) < 0) {
+        this.sortedKeys.unshift(key)
+        return
+      }
+    }
+
+    const index = this.indexOf(key, value)
+    this.sortedKeys.splice(index, 0, key)
+  }
+
+  private removeSortedKey(key: TKey, value: TValue): void {
+    if (!this.comparator) {
+      const lastIndex = this.sortedKeys.length - 1
+      if (this.sortedKeys[lastIndex] === key) {
+        this.sortedKeys.pop()
+        return
+      }
+      if (this.sortedKeys[0] === key) {
+        this.sortedKeys.shift()
+        return
+      }
+    }
+
+    const index = this.indexOf(key, value)
+    this.sortedKeys.splice(index, 1)
+  }
+
   /**
    * Sets a key-value pair in the map and maintains sort order
    *
@@ -96,24 +138,7 @@ export class SortedMap<TKey extends string | number, TValue> {
         return this
       }
 
-      const length = this.sortedKeys.length
-      if (length === 0) {
-        this.sortedKeys.push(key)
-      } else {
-        const lastKey = this.sortedKeys[length - 1]!
-        if (compareKeys(key, lastKey) > 0) {
-          this.sortedKeys.push(key)
-        } else {
-          const firstKey = this.sortedKeys[0]!
-          if (compareKeys(key, firstKey) < 0) {
-            this.sortedKeys.unshift(key)
-          } else {
-            const index = this.indexOf(key, value)
-            this.sortedKeys.splice(index, 0, key)
-          }
-        }
-      }
-
+      this.insertSortedKey(key, value)
       this.map.set(key, value)
       return this
     }
@@ -121,16 +146,41 @@ export class SortedMap<TKey extends string | number, TValue> {
     if (this.map.has(key)) {
       // Need to remove the old key from the sorted keys array
       const oldValue = this.map.get(key)!
-      const oldIndex = this.indexOf(key, oldValue)
-      this.sortedKeys.splice(oldIndex, 1)
+      this.removeSortedKey(key, oldValue)
     }
 
     // Insert the new key at the correct position
-    const index = this.indexOf(key, value)
-    this.sortedKeys.splice(index, 0, key)
+    this.insertSortedKey(key, value)
 
     this.map.set(key, value)
 
+    return this
+  }
+
+  /**
+   * Sets a key-value pair when the caller has already established whether the
+   * key exists. This avoids a duplicate Map lookup on hot paths.
+   */
+  setWithKnownPresence(
+    key: TKey,
+    value: TValue,
+    keyExists: boolean,
+    previousValue: TValue | undefined,
+  ): this {
+    if (!keyExists) {
+      this.insertSortedKey(key, value)
+      this.map.set(key, value)
+      return this
+    }
+
+    if (!this.comparator) {
+      this.map.set(key, value)
+      return this
+    }
+
+    this.removeSortedKey(key, previousValue as TValue)
+    this.insertSortedKey(key, value)
+    this.map.set(key, value)
     return this
   }
 
@@ -152,25 +202,29 @@ export class SortedMap<TKey extends string | number, TValue> {
    */
   delete(key: TKey): boolean {
     if (this.map.has(key)) {
-      if (!this.comparator) {
-        const lastIndex = this.sortedKeys.length - 1
-        if (this.sortedKeys[lastIndex] === key) {
-          this.sortedKeys.pop()
-          return this.map.delete(key)
-        }
-        if (this.sortedKeys[0] === key) {
-          this.sortedKeys.shift()
-          return this.map.delete(key)
-        }
-      }
-
       const oldValue = this.map.get(key)
-      const index = this.indexOf(key, oldValue!)
-      this.sortedKeys.splice(index, 1)
+      this.removeSortedKey(key, oldValue!)
       return this.map.delete(key)
     }
 
     return false
+  }
+
+  /**
+   * Deletes a key when the caller has already read the previous value.
+   * Returns false when the previous read proved the key was absent.
+   */
+  deleteWithKnownPreviousValue(
+    key: TKey,
+    keyExists: boolean,
+    previousValue: TValue | undefined,
+  ): boolean {
+    if (!keyExists) {
+      return false
+    }
+
+    this.removeSortedKey(key, previousValue as TValue)
+    return this.map.delete(key)
   }
 
   /**

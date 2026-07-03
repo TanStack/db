@@ -998,8 +998,9 @@ export class CollectionStateManager<
     }
 
     const previousVisibleValue = this.syncedData.get(key)
+    const hadPreviousVisibleValue = previousVisibleValue !== undefined
     const previousVirtualProps =
-      previousVisibleValue !== undefined
+      hadPreviousVisibleValue
         ? this.getVirtualPropsSnapshotForState(key)
         : undefined
     const rowUpdateMode = this.config.sync.rowUpdateMode || `partial`
@@ -1014,7 +1015,12 @@ export class CollectionStateManager<
           if (!(`value` in operation)) {
             return undefined
           }
-          this.syncedData.set(key, operation.value)
+          this.syncedData.setWithKnownPresence(
+            key,
+            operation.value,
+            hadPreviousVisibleValue,
+            previousVisibleValue,
+          )
           this.rowOrigins.set(key, origin)
           break
         case `update`: {
@@ -1024,18 +1030,32 @@ export class CollectionStateManager<
           if (rowUpdateMode === `partial`) {
             const updatedValue = Object.assign(
               {},
-              this.syncedData.get(key),
+              previousVisibleValue,
               operation.value,
             )
-            this.syncedData.set(key, updatedValue)
+            this.syncedData.setWithKnownPresence(
+              key,
+              updatedValue,
+              hadPreviousVisibleValue,
+              previousVisibleValue,
+            )
           } else {
-            this.syncedData.set(key, operation.value)
+            this.syncedData.setWithKnownPresence(
+              key,
+              operation.value,
+              hadPreviousVisibleValue,
+              previousVisibleValue,
+            )
           }
           this.rowOrigins.set(key, origin)
           break
         }
         case `delete`:
-          this.syncedData.delete(key)
+          this.syncedData.deleteWithKnownPreviousValue(
+            key,
+            hadPreviousVisibleValue,
+            previousVisibleValue,
+          )
           this.syncedMetadata.delete(key)
           this.rowOrigins.delete(key)
           break
