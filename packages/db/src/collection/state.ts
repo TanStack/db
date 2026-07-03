@@ -918,11 +918,27 @@ export class CollectionStateManager<
     // operation — no per-batch tracking maps needed.
     if (
       committedSyncedTransactions.length === 1 &&
-      committedSyncedTransactions[0]!.operations.length === 1 &&
-      committedSyncedTransactions[0]!.rowMetadataWrites.size === 0 &&
-      committedSyncedTransactions[0]!.collectionMetadataWrites.size === 0
+      committedSyncedTransactions[0]!.operations.length === 1
     ) {
-      const operation = committedSyncedTransactions[0]!.operations[0]!
+      const transaction = committedSyncedTransactions[0]!
+      const operation = transaction.operations[0]!
+      for (const [metaKey, metadataWrite] of transaction.rowMetadataWrites) {
+        if (metadataWrite.type === `delete`) {
+          this.syncedMetadata.delete(metaKey)
+        } else {
+          this.syncedMetadata.set(metaKey, metadataWrite.value)
+        }
+      }
+      for (const [
+        metaKey,
+        metadataWrite,
+      ] of transaction.collectionMetadataWrites) {
+        if (metadataWrite.type === `delete`) {
+          this.syncedCollectionMetadata.delete(metaKey)
+        } else {
+          this.syncedCollectionMetadata.set(metaKey, metadataWrite.value)
+        }
+      }
       const key = operation.key as TKey
       this.syncedKeys.add(key)
       const previousValue = this.syncedData.get(key)
@@ -1128,37 +1144,27 @@ export class CollectionStateManager<
 
     // pending synced transactions could be either `committed` or still open.
     // we only want to process `committed` transactions here
-    const {
-      committedSyncedTransactions,
-      uncommittedSyncedTransactions,
-      hasTruncateSync,
-      hasImmediateSync,
-    } = this.pendingSyncedTransactions.reduce(
-      (acc, t) => {
-        if (t.committed) {
-          acc.committedSyncedTransactions.push(t)
-          if (t.truncate) {
-            acc.hasTruncateSync = true
-          }
-          if (t.immediate) {
-            acc.hasImmediateSync = true
-          }
-        } else {
-          acc.uncommittedSyncedTransactions.push(t)
+    const committedSyncedTransactions: Array<
+      PendingSyncedTransaction<TOutput, TKey>
+    > = []
+    const uncommittedSyncedTransactions: Array<
+      PendingSyncedTransaction<TOutput, TKey>
+    > = []
+    let hasTruncateSync = false
+    let hasImmediateSync = false
+    for (const t of this.pendingSyncedTransactions) {
+      if (t.committed) {
+        committedSyncedTransactions.push(t)
+        if (t.truncate) {
+          hasTruncateSync = true
         }
-        return acc
-      },
-      {
-        committedSyncedTransactions: [] as Array<
-          PendingSyncedTransaction<TOutput, TKey>
-        >,
-        uncommittedSyncedTransactions: [] as Array<
-          PendingSyncedTransaction<TOutput, TKey>
-        >,
-        hasTruncateSync: false,
-        hasImmediateSync: false,
-      },
-    )
+        if (t.immediate) {
+          hasImmediateSync = true
+        }
+      } else {
+        uncommittedSyncedTransactions.push(t)
+      }
+    }
 
     // Fast lane: with no user transactions, no optimistic state, no truncate
     // and no pre-captured state, the general path below degenerates to
