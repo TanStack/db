@@ -251,3 +251,21 @@ No more full aggregated-row spread per group. aggregate_count 223→205ms
   groupBy map ~14ms, GC ~60ms from ~5 allocs/row (join products, merged
   nsRows, groupBy wrappers). Next ideas: consume join pairs in groupBy
   without materializing merged nsRow; pool/flatten join result tuples.
+
+## Iteration 17 — reduce indexes skip presence tracking · KEEP ✅
+trackConsolidated:false on reduce in/out indexes. aggregate_count ~190ms
+isolated (best yet). Both suites ✅.
+
+## ROOT CAUSE for the view-row regime gap (measured)
+30-round ramp under their forced-GC regime (view_list hydrate):
+1.23 1.42 0.95 1.22 1.15 1.23 1.53 2.16 | 1.02…0.80 | 0.73…0.57 — still
+declining at round 30; floor ~0.16-0.22 at round ~100+. Fresh closures per
+live-query creation reset V8 type feedback; tier-up happens across CREATIONS.
+Min-of-4 samples the top of the ramp; Rindle (wasm) has no such ramp.
+
+**The remaining lever: compiler blueprint refactor** — memoize per query
+STRUCTURE (structural IR hash → shared compiled evaluators + pipeline
+topology template) and instantiate per-instance state cheaply, so closure
+identities persist across live-query creations and stay hot. Benefits real
+apps too (components repeatedly mounting the same query shape). Sizeable,
+architectural — needs a green light.
