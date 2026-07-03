@@ -216,7 +216,26 @@ function compileRef(ref: PropRef): CompiledExpression {
 function compileSingleRowRef(ref: PropRef): CompiledSingleRowExpression {
   const propertyPath = ref.path
 
-  // This function works for all path lengths including empty path
+  if (propertyPath.length === 0) {
+    return (item) => item
+  }
+
+  if (propertyPath.length === 1) {
+    const prop = propertyPath[0]!
+    return (item) => item[prop]
+  }
+
+  if (propertyPath.length === 2) {
+    const firstProp = propertyPath[0]!
+    const secondProp = propertyPath[1]!
+    return (item) => {
+      const firstValue = item[firstProp]
+      return firstValue == null
+        ? firstValue
+        : (firstValue as Record<string, unknown>)[secondProp]
+    }
+  }
+
   return (item) => {
     let value: any = item
     for (const prop of propertyPath) {

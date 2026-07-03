@@ -281,8 +281,12 @@ export class CollectionSubscriber<
 
       this.trackSentValues(changesArray, orderByInfo.comparator)
 
-      // Split live updates into a delete of the old value and an insert of the new value
-      const splittedChanges = splitUpdates(changesArray)
+      // Split live updates into a delete of the old value and an insert of the
+      // new value. Insert/delete-only batches are already in the shape the
+      // pipeline needs, so keep the original array and avoid generator
+      // materialization in the hot ordered-change path.
+      const hasUpdates = changesArray.some((change) => change.type === `update`)
+      const splittedChanges = hasUpdates ? splitUpdates(changesArray) : changesArray
       this.sendChangesToPipelineWithTracking(
         splittedChanges,
         subscriptionHolder.current!,

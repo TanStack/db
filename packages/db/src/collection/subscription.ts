@@ -705,18 +705,21 @@ export class CollectionSubscription
     // 3. We're collecting all changes atomically, so filtering doesn't make sense
     const skipDeleteFilter = this.isBufferingForTruncate
 
-    const newChanges = []
-    for (const change of changes) {
+    let newChanges: Array<ChangeMessage<any, any>> | undefined
+    for (let index = 0; index < changes.length; index++) {
+      const change = changes[index]!
       let newChange = change
       const keyInSentKeys = this.sentKeys.has(change.key)
 
       if (!keyInSentKeys) {
         if (change.type === `update`) {
+          newChanges ??= changes.slice(0, index)
           newChange = { ...change, type: `insert`, previousValue: undefined }
         } else if (change.type === `delete`) {
           // Filter out deletes for keys that have not been sent,
           // UNLESS we're buffering for truncate (where all deletes should pass through)
           if (!skipDeleteFilter) {
+            newChanges ??= changes.slice(0, index)
             continue
           }
         }
@@ -728,6 +731,7 @@ export class CollectionSubscription
           // This prevents D2 multiplicity from going above 1, which would
           // cause deletes to not properly remove items (multiplicity would
           // go from 2 to 1 instead of 1 to 0).
+          newChanges ??= changes.slice(0, index)
           continue
         } else if (change.type === `delete`) {
           // Remove from sentKeys so future inserts for this key are allowed
@@ -735,9 +739,9 @@ export class CollectionSubscription
           this.sentKeys.delete(change.key)
         }
       }
-      newChanges.push(newChange)
+      newChanges?.push(newChange)
     }
-    return newChanges
+    return newChanges ?? changes
   }
 
   private trackSentKeys(changes: Array<ChangeMessage<any, string | number>>) {
