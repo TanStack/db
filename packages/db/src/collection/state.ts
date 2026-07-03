@@ -1013,18 +1013,23 @@ export class CollectionStateManager<
     }
 
     // First previous value and origin per touched key (captured before the
-    // first write to that key in this batch)
-    const previousValues = new Map<TKey, TOutput | undefined>()
-    const previousOrigins = new Map<TKey, VirtualOrigin | undefined>()
+    // first write to that key in this batch). One membership Set plus
+    // parallel arrays for the derive loop — cheaper than two Maps.
+    const touchedKeySet = new Set<TKey>()
+    const touchedKeys: Array<TKey> = []
+    const touchedPreviousValues: Array<TOutput | undefined> = []
+    const touchedPreviousOrigins: Array<VirtualOrigin | undefined> = []
 
     for (const transaction of committedSyncedTransactions) {
       for (const operation of transaction.operations) {
         const key = operation.key as TKey
         this.syncedKeys.add(key)
 
-        if (!previousValues.has(key)) {
-          previousValues.set(key, this.syncedData.get(key))
-          previousOrigins.set(key, this.rowOrigins.get(key))
+        if (!touchedKeySet.has(key)) {
+          touchedKeySet.add(key)
+          touchedKeys.push(key)
+          touchedPreviousValues.push(this.syncedData.get(key))
+          touchedPreviousOrigins.push(this.rowOrigins.get(key))
         }
 
         const origin: VirtualOrigin =
@@ -1082,7 +1087,9 @@ export class CollectionStateManager<
 
     // Derive one event per touched key from first-previous vs final state
     const events: Array<ChangeMessage<TOutput, TKey>> = []
-    for (const [key, previousValue] of previousValues) {
+    for (let i = 0; i < touchedKeys.length; i++) {
+      const key = touchedKeys[i]!
+      const previousValue = touchedPreviousValues[i]
       const newValue = this.syncedData.get(key)
       if (previousValue === undefined) {
         if (newValue !== undefined) {
@@ -1091,7 +1098,7 @@ export class CollectionStateManager<
       } else if (newValue === undefined) {
         events.push({ type: `delete`, key, value: previousValue })
       } else {
-        const previousOrigin = previousOrigins.get(key)
+        const previousOrigin = touchedPreviousOrigins[i]
         const originChanged =
           previousOrigin !== undefined &&
           previousOrigin !== this.rowOrigins.get(key)

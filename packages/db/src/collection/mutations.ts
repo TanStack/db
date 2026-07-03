@@ -35,6 +35,14 @@ import type {
 import type { CollectionLifecycleManager } from './lifecycle'
 import type { CollectionStateManager } from './state'
 
+// Mutation IDs only need uniqueness; a per-session UUID prefix plus a counter
+// preserves cross-session uniqueness without a crypto UUID per mutation.
+const mutationIdPrefix = safeRandomUUID()
+let mutationIdSequence = 0
+function nextMutationId(): string {
+  return `${mutationIdPrefix}-${++mutationIdSequence}`
+}
+
 export class CollectionMutationsManager<
   TOutput extends object = Record<string, unknown>,
   TKey extends string | number = string | number,
@@ -195,7 +203,7 @@ export class CollectionMutationsManager<
       const globalKey = this.generateGlobalKey(key, item)
 
       const mutation: PendingMutation<TOutput, `insert`> = {
-        mutationId: safeRandomUUID(),
+        mutationId: nextMutationId(),
         original: {},
         modified: validatedData,
         // Pick the values from validatedData based on what's passed in - this is for cases
@@ -374,7 +382,7 @@ export class CollectionMutationsManager<
         const globalKey = this.generateGlobalKey(modifiedItemId, modifiedItem)
 
         return {
-          mutationId: safeRandomUUID(),
+          mutationId: nextMutationId(),
           original: originalItem,
           modified: modifiedItem,
           // Pick the values from modifiedItem based on what's passed in - this is for cases
@@ -506,7 +514,7 @@ export class CollectionMutationsManager<
         `delete`,
         CollectionImpl<TOutput, TKey, TUtils, TSchema, TInput>
       > = {
-        mutationId: safeRandomUUID(),
+        mutationId: nextMutationId(),
         original: this.state.get(key)!,
         modified: this.state.get(key)!,
         changes: this.state.get(key)!,
