@@ -285,6 +285,18 @@ export class CollectionStateManager<
     return rowOrigins
   }
 
+  private setRowOrigin(
+    key: TKey,
+    origin: VirtualOrigin,
+    hadPreviousVisibleValue: boolean,
+  ): void {
+    if (origin === 'local') {
+      this.rowOrigins.set(key, origin)
+    } else if (hadPreviousVisibleValue) {
+      this.rowOrigins.delete(key)
+    }
+  }
+
   private enrichWithVirtualPropsSnapshot(
     row: TOutput,
     virtualProps: VirtualRowProps<TKey>,
@@ -1043,7 +1055,7 @@ export class CollectionStateManager<
             previousVisibleValue,
           )
           newVisibleValue = operation.value
-          this.rowOrigins.set(key, origin)
+          this.setRowOrigin(key, origin, hadPreviousVisibleValue)
           break
         case `update`: {
           if (!(`value` in operation)) {
@@ -1072,7 +1084,7 @@ export class CollectionStateManager<
             )
             newVisibleValue = operation.value
           }
-          this.rowOrigins.set(key, origin)
+          this.setRowOrigin(key, origin, hadPreviousVisibleValue)
           break
         }
         case `delete`:
@@ -1508,7 +1520,7 @@ export class CollectionStateManager<
               switch (operation.type) {
                 case `insert`:
                   this.syncedData.set(key, operation.value)
-                  this.rowOrigins.set(key, origin)
+                  this.setRowOrigin(key, origin, currentVisibleState.has(key))
                   // Clear pending local changes now that sync has confirmed
                   this.pendingLocalChanges.delete(key)
                   this.pendingLocalOrigins.delete(key)
@@ -1528,7 +1540,7 @@ export class CollectionStateManager<
                   } else {
                     this.syncedData.set(key, operation.value)
                   }
-                  this.rowOrigins.set(key, origin)
+                  this.setRowOrigin(key, origin, currentVisibleState.has(key))
                   // Clear pending local changes now that sync has confirmed
                   this.pendingLocalChanges.delete(key)
                   this.pendingLocalOrigins.delete(key)
