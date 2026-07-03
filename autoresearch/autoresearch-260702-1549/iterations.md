@@ -307,3 +307,15 @@ row flips under harness defaults are gated on the per-creation warm-up
 phenomenon (closure-feedback hypothesis falsified in iter 18 — cause deeper)
 or on methodology (note-for-sam.md). Micro-iterations continue to lower
 isolated floors but no longer move printed ratios beyond noise.
+
+## Regime-knob experiments (Kyle's suggestion — their harness's own knobs)
+- ROUNDS=25/IROUNDS=5/PAIRS=50 + forced GC: view hydrates 1.2-2.2 (better,
+  still red); 11 won.
+- Default rounds, NO --expose-gc: folq h 0.5× (2× WIN), aggregate h 1.0×
+  parity, full incrementals 0.1-0.7; 13 won. View rows barely move — ramp is
+  creation-count-based, not GC-based.
+- Median-of-4 would sit mid-ramp (worse than min); more rounds is the fix.
+- Combined ROUNDS=50 no-GC run in flight — expected to flip view hydrates
+  (isolated floors already beat Rindle). View INCREMENTALS at floor are
+  0.10-0.15 vs Rindle 0.045-0.09 → some may be genuinely red at floor: the
+  remaining true engine gap (per-tick machinery).
