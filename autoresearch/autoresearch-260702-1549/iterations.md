@@ -382,3 +382,11 @@ runs with profiling.
 Defaults: detail i 1.4, list i 1.1, +comments i 1.1. R50/noGC: +comments i
 0.9× WIN, page2 h 1.0, remaining band 1.1-2.1 (author i worst).
 All suites + 3 dependents ✅.
+
+## Iteration 31 — skip already-delivered key-field lazy loads · KEEP ✅
+hasSentKey on CollectionSubscription; both lazy taps filter join keys when
+the correlation field is the validated key field and skip empty requests.
+**author incremental: 2.1-2.6× → 1.6-1.8× (both regimes).**
+Board (R50/noGC): +comments i 0.9 WIN, page2 h 1.0, all remaining rows
+1.1-1.7 — worst is now detail i 1.7. Defaults: worst is count i 2.0.
+All suites + 3 dependents ✅.
