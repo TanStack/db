@@ -10,6 +10,15 @@ export type KeyedData<T> = [key: string, value: T]
 export class MultiSet<T> {
   #inner: MultiSetArray<T>
 
+  /**
+   * Set by the dataflow edge when this instance was delivered to exactly one
+   * consumer: that consumer may transform it in place (map/filter reuse the
+   * inner array and tuples) instead of cloning. Producers never retain the
+   * delivered instance or its tuples, only the row values inside them —
+   * which in-place transforms never mutate.
+   */
+  public exclusive = false
+
   constructor(data: MultiSetArray<T> = []) {
     this.#inner = data
   }
@@ -28,8 +37,17 @@ export class MultiSet<T> {
 
   /**
    * Apply a function to all records in the collection.
+   * Exclusively-owned instances are transformed in place (tuples and inner
+   * array reused); row values themselves are never mutated.
    */
   map<U>(f: (data: T) => U): MultiSet<U> {
+    if (this.exclusive) {
+      const inner = this.#inner as unknown as MultiSetArray<U>
+      for (let i = 0; i < inner.length; i++) {
+        inner[i]![0] = f(this.#inner[i]![0])
+      }
+      return this as unknown as MultiSet<U>
+    }
     return new MultiSet(
       this.#inner.map(([data, multiplicity]) => [f(data), multiplicity]),
     )
@@ -37,8 +55,21 @@ export class MultiSet<T> {
 
   /**
    * Filter out records for which a function f(record) evaluates to False.
+   * Exclusively-owned instances are compacted in place.
    */
   filter(f: (data: T) => boolean): MultiSet<T> {
+    if (this.exclusive) {
+      const inner = this.#inner
+      let writeIndex = 0
+      for (let i = 0; i < inner.length; i++) {
+        const entry = inner[i]!
+        if (f(entry[0])) {
+          inner[writeIndex++] = entry
+        }
+      }
+      inner.length = writeIndex
+      return this
+    }
     return new MultiSet(this.#inner.filter(([data, _]) => f(data)))
   }
 

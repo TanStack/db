@@ -38,6 +38,11 @@ export class DifferenceStreamWriter<T> implements IDifferenceStreamWriter<T> {
       collection = new MultiSet(collection)
     }
 
+    // With exactly one reader the delivered MultiSet is exclusively owned by
+    // the consumer, which allows in-place map/filter without cloning. With
+    // multiple readers it must be treated as shared.
+    collection.exclusive = this.#queues.length === 1
+
     for (const q of this.#queues) {
       q.unshift(collection)
     }
