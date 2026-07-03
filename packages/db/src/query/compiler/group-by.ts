@@ -351,8 +351,33 @@ export function processGroupBy(
     }
   }
 
+  // Fast group-key serializer for the common single-clause case with a
+  // primitive key value (e.g. GROUP BY issue.id) — avoids JSON-serializing
+  // an object per row. Includes mode adds a correlation key, so it falls
+  // back to the general path.
+  const keySerializer =
+    groupByClause.length === 1 && !mainSource
+      ? (key: Record<string, unknown>): string | null => {
+          const value = key.__key_0
+          switch (typeof value) {
+            case `number`:
+              return `n:${value}`
+            case `string`:
+              return `s:${value}`
+            case `boolean`:
+              return value ? `T` : `F`
+            case `bigint`:
+              return `b:${value}`
+            default:
+              return value === null ? `z` : null
+          }
+        }
+      : undefined
+
   // Apply the groupBy operator
-  pipeline = pipeline.pipe(groupBy(keyExtractor, aggregates))
+  pipeline = pipeline.pipe(
+    groupBy(keyExtractor, aggregates, { keySerializer }),
+  )
 
   // Update $selected to handle GROUP BY results
   pipeline = pipeline.pipe(

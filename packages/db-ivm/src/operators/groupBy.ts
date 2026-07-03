@@ -41,7 +41,18 @@ export function groupBy<
   T,
   K extends GroupKey,
   A extends Record<string, AggregateFunction<T, any, any>>,
->(keyExtractor: (data: T) => K, aggregates: A = {} as A) {
+>(
+  keyExtractor: (data: T) => K,
+  aggregates: A = {} as A,
+  options?: {
+    /**
+     * Optional fast serializer for the group key. Returning null falls back
+     * to the general serializeValue path for that key.
+     */
+    keySerializer?: (key: K) => string | null
+  },
+) {
+  const keySerializer = options?.keySerializer
   type ResultType = K & AggregatesReturnType<T, A>
 
   const basicAggregates = Object.fromEntries(
@@ -79,7 +90,8 @@ export function groupBy<
     const withKeysAndValues = stream.pipe(
       map((data) => {
         const key = keyExtractor(data)
-        const keyString = serializeValue(key)
+        const keyString =
+          (keySerializer ? keySerializer(key) : null) ?? serializeValue(key)
 
         // Create values object with pre-aggregated values
         const values: Record<string, unknown> = {}
