@@ -101,7 +101,7 @@ export abstract class BaseIndex<
 
   protected lookupCount = 0
   protected totalLookupTime = 0
-  protected lastUpdated = new Date()
+  private lastUpdatedTimestamp = Date.now()
   protected compareOptions: CompareOptions
   private readonly expressionEvaluator: CompiledSingleRowExpression
   /**
@@ -209,7 +209,7 @@ export abstract class BaseIndex<
       lookupCount: this.lookupCount,
       averageLookupTime:
         this.lookupCount > 0 ? this.totalLookupTime / this.lookupCount : 0,
-      lastUpdated: this.lastUpdated,
+      lastUpdated: new Date(this.lastUpdatedTimestamp),
     }
   }
 
@@ -226,7 +226,7 @@ export abstract class BaseIndex<
   }
 
   protected updateTimestamp(): void {
-    this.lastUpdated = new Date()
+    this.lastUpdatedTimestamp = Date.now()
   }
 }
 
