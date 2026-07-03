@@ -75,6 +75,12 @@ export class CollectionStateManager<
   > = []
   public syncedData: SortedMap<TKey, TOutput>
   public syncedMetadata = new TombstoneMap<TKey, unknown>()
+  /**
+   * Whether any row metadata was ever recorded for this collection. Most
+   * collections (all live query results) never use row metadata, so writes
+   * skip the per-row clear-metadata bookkeeping entirely while false.
+   */
+  public hasRowMetadata = false
   public syncedCollectionMetadata = new Map<string, unknown>()
 
   // Optimistic state tracking - make public for testing

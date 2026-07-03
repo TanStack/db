@@ -178,21 +178,33 @@ export class CollectionSyncManager<
             } as OptimisticChangeMessage<TOutput, TKey>
             pendingTransaction.operations.push(message)
 
+            // Clearing metadata on delete/metadata-less insert only matters
+            // when metadata could exist for the key — skip the per-row
+            // bookkeeping entirely for collections that never store any
+            // (all live query result collections).
+            const mayHaveMetadata =
+              this.state.hasRowMetadata || this.state.syncedMetadata.size > 0
             if (messageType === `delete`) {
               pendingTransaction.deletedKeys.add(key)
-              pendingTransaction.rowMetadataWrites.set(key, { type: `delete` })
+              if (mayHaveMetadata) {
+                pendingTransaction.rowMetadataWrites.set(key, {
+                  type: `delete`,
+                })
+              }
             } else if (messageType === `insert`) {
               if (message.metadata !== undefined) {
+                this.state.hasRowMetadata = true
                 pendingTransaction.rowMetadataWrites.set(key, {
                   type: `set`,
                   value: message.metadata,
                 })
-              } else {
+              } else if (mayHaveMetadata) {
                 pendingTransaction.rowMetadataWrites.set(key, {
                   type: `delete`,
                 })
               }
             } else if (message.metadata !== undefined) {
+              this.state.hasRowMetadata = true
               pendingTransaction.rowMetadataWrites.set(key, {
                 type: `set`,
                 value: message.metadata,
