@@ -352,3 +352,10 @@ DEFAULTS regime: +comments h 1.0×, detail i 1.1×, list i 1.2× — parity band
 reaches the default regime. ROUNDS=50 no-GC: page2 1.0/1.1, +comments
 1.3/1.0, folq 0.6/1.4, agg 1.1; stubbornest: author i 2.3, detail i 2.0,
 hydrates 1.3-1.4 band.
+
+## Iteration 25 — ultra path handles metadata writes + plain-loop preamble · KEEP ✅
+The single-op path never fired (sync.write always records a row-metadata
+write); now handles them. view_detail pair 166→98µs. All suites + 3
+dependents ✅. Scoreboards: parity band holds (+comments 1.0-1.2, page2
+1.0-1.2, agg 1.2); creator/count incr prints swing 1.5-2.7 with BOTH
+engines' run-to-run variance now larger than per-iteration movement.
