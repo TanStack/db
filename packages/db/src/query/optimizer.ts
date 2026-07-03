@@ -208,6 +208,28 @@ export function optimizeQuery(query: QueryIR): OptimizationResult {
   // First, extract source WHERE clauses before optimization
   const sourceWhereClauses = extractSourceWhereClauses(query)
 
+  // A single direct collection source with no joins has nowhere to push
+  // predicates and no subqueries to remove — the only effect of the loop
+  // below is combining multiple WHERE clauses into one AND. Do that directly
+  // and skip the repeated tree rewrites and full-tree deepEquals comparisons
+  // on every live query creation.
+  if (
+    query.from.type === `collectionRef` &&
+    (!query.join || query.join.length === 0)
+  ) {
+    let optimizedQuery = query
+    if (query.where && query.where.length > 1) {
+      optimizedQuery = {
+        ...query,
+        where: [combineWithAnd(query.where.map(getWhereExpression))],
+      }
+    }
+    return {
+      optimizedQuery,
+      sourceWhereClauses,
+    }
+  }
+
   // Apply multi-level predicate pushdown with iterative convergence
   let optimized = query
   let previousOptimized: QueryIR | undefined
