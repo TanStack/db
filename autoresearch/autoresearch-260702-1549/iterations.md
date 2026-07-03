@@ -363,3 +363,7 @@ engines' run-to-run variance now larger than per-iteration movement.
 ## Iteration 26 — counter mutation ids + Set/array batch tracking · KEEP ✅
 (collection-events flake re-confirmed as flake: passes isolated + full
 re-run.) All suites + 3 dependents ✅.
+
+## Iteration 26 scoreboards
+DEFAULTS: view_list i 1.0×, +comments i 1.0× — parity at defaults for two
+incr rows. R50/noGC: page2 h 1.0, +author h 1.2, agg h 1.1, count i 1.4.
