@@ -576,8 +576,9 @@ describe(`QueryCollection`, () => {
       expect(collection.size).toBe(items.length)
     })
 
-    // Verify getKey was called for each item
-    expect(getKeySpy).toHaveBeenCalledTimes(items.length * 2)
+    // Verify getKey was called for each item (+1 for the collection's
+    // key-field probe at construction)
+    expect(getKeySpy).toHaveBeenCalledTimes(items.length * 2 + 1)
     items.forEach((item) => {
       expect(getKeySpy).toHaveBeenCalledWith(item)
     })
