@@ -187,34 +187,22 @@ function processJoin(
   const compiledMainExpr = compileExpression(mainExpr)
   const compiledJoinedExpr = compileExpression(joinedExpr)
 
-  // Prepare the main pipeline for joining
-  let mainPipeline = pipeline.pipe(
-    map(([currentKey, namespacedRow]) => {
-      // Extract the join key from the main source expression
-      const mainKey = normalizeValue(compiledMainExpr(namespacedRow))
+  // Per-item join key extractors. The join operator derives keys itself
+  // (JoinKeyExtractors) so neither side needs a re-keying map operator that
+  // wraps every row in a [joinKey, [key, row]] pair.
+  const mainItemKey = (item: [unknown, NamespacedRow]): unknown =>
+    normalizeValue(compiledMainExpr(item[1]))
+  const joinedItemKey = (item: [unknown, NamespacedRow]): unknown =>
+    normalizeValue(compiledJoinedExpr(item[1]))
 
-      // Return [joinKey, [originalKey, namespacedRow]]
-      return [mainKey, [currentKey, namespacedRow]] as [
-        unknown,
-        [string, typeof namespacedRow],
-      ]
-    }),
-  )
+  // The main pipeline is already keyed as [originalKey, namespacedRow]
+  let mainPipeline = pipeline
 
-  // Prepare the joined pipeline
+  // Prepare the joined pipeline: wrap rows in a namespaced structure
   let joinedPipeline = joinedInput.pipe(
     map(([currentKey, row]) => {
-      // Wrap the row in a namespaced structure
       const namespacedRow: NamespacedRow = { [joinedSource]: row }
-
-      // Extract the join key from the joined source expression
-      const joinedKey = normalizeValue(compiledJoinedExpr(namespacedRow))
-
-      // Return [joinKey, [originalKey, namespacedRow]]
-      return [joinedKey, [currentKey, namespacedRow]] as [
-        unknown,
-        [string, typeof namespacedRow],
-      ]
+      return [currentKey, namespacedRow] as [unknown, NamespacedRow]
     }),
   )
 
@@ -263,6 +251,8 @@ function processJoin(
 
       const activePipeline =
         activeSource === `main` ? mainPipeline : joinedPipeline
+      const activeItemKey =
+        activeSource === `main` ? mainItemKey : joinedItemKey
 
       for (const target of lazyTargets) {
         const fieldName = target.path[0]
@@ -274,7 +264,7 @@ function processJoin(
       // Set up lazy loading: intercept active side's stream and dynamically load
       // matching rows from lazy side based on join keys.
       const activePipelineWithLoading: IStreamBuilder<
-        [key: unknown, [originalKey: string, namespacedRow: NamespacedRow]]
+        [key: unknown, namespacedRow: NamespacedRow]
       > = activePipeline.pipe(
         tap((data) => {
           // Deduplicate and filter null keys before requesting snapshot
@@ -282,7 +272,9 @@ function processJoin(
             ...new Set(
               data
                 .getInner()
-                .map(([[joinKey]]) => joinKey)
+                .map(([item]) =>
+                  activeItemKey(item as [unknown, NamespacedRow]),
+                )
                 .filter((key) => key != null),
             ),
           ]
@@ -339,7 +331,10 @@ function processJoin(
   }
 
   return mainPipeline.pipe(
-    joinOperator(joinedPipeline, joinClause.type as JoinType),
+    joinOperator(joinedPipeline as any, joinClause.type as JoinType, {
+      keyExtractorA: mainItemKey as any,
+      keyExtractorB: joinedItemKey as any,
+    }),
     processJoinResults(joinClause.type),
   )
 }

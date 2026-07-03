@@ -192,6 +192,27 @@ export class Index<TKey, TValue, TPrefix = any> {
   }
 
   /**
+   * Create an Index from MultiSet messages of raw values, deriving each
+   * value's key with the given extractor. The stored value is the message
+   * item itself (no wrapper allocation), which is what makes fused join
+   * re-keying cheaper than a map stage producing [key, value] pairs.
+   */
+  static fromMultiSetsBy<K, V>(
+    messages: Array<MultiSet<V>>,
+    extractKey: (value: V) => K,
+  ): Index<K, V> {
+    const index = new Index<K, V>()
+
+    for (const message of messages) {
+      for (const [item, multiplicity] of message.getInner()) {
+        index.addValue(extractKey(item), [item, multiplicity])
+      }
+    }
+
+    return index
+  }
+
+  /**
    * This method returns a string representation of the index.
    * @param indent - Whether to indent the string representation.
    * @returns A string representation of the index.
