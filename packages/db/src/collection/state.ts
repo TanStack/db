@@ -59,6 +59,11 @@ type InternalChangeMessage<
   }
 }
 
+type SimpleSyncCommitResult = {
+  changedKeyCount: number
+  eventCount: number
+}
+
 function perfDeepEquals(a: unknown, b: unknown): boolean {
   if (!isPerfEnabled()) {
     return deepEquals(a, b)
@@ -945,6 +950,173 @@ export class CollectionStateManager<
     return this.syncedData.get(key)
   }
 
+  private commitSinglePureSyncTransaction(
+    committedSyncedTransactions: Array<
+      PendingSyncedTransaction<TOutput, TKey>
+    >,
+    uncommittedSyncedTransactions: Array<
+      PendingSyncedTransaction<TOutput, TKey>
+    >,
+    hasPersistingTransaction: boolean,
+    hasTruncateSync: boolean,
+    hasImmediateSync: boolean,
+  ): SimpleSyncCommitResult | undefined {
+    if (
+      hasTruncateSync ||
+      (hasPersistingTransaction && !hasImmediateSync) ||
+      committedSyncedTransactions.length !== 1 ||
+      this.transactions.size !== 0 ||
+      this.optimisticUpserts.size !== 0 ||
+      this.optimisticDeletes.size !== 0 ||
+      this.pendingOptimisticUpserts.size !== 0 ||
+      this.pendingOptimisticDeletes.size !== 0 ||
+      this.pendingOptimisticDirectUpserts.size !== 0 ||
+      this.pendingOptimisticDirectDeletes.size !== 0 ||
+      this.pendingLocalChanges.size !== 0 ||
+      this.pendingLocalOrigins.size !== 0 ||
+      this.preSyncVisibleState.size !== 0 ||
+      this.recentlySyncedKeys.size !== 0
+    ) {
+      return undefined
+    }
+
+    const transaction = committedSyncedTransactions[0]!
+    if (
+      transaction.truncate ||
+      transaction.operations.length !== 1 ||
+      transaction.collectionMetadataWrites.size !== 0
+    ) {
+      return undefined
+    }
+
+    const operation = transaction.operations[0]!
+    const key = operation.key as TKey
+    for (const [metadataKey] of transaction.rowMetadataWrites) {
+      if (metadataKey !== key) {
+        return undefined
+      }
+    }
+
+    const previousVisibleValue = this.syncedData.get(key)
+    const previousVirtualProps =
+      previousVisibleValue !== undefined
+        ? this.getVirtualPropsSnapshotForState(key)
+        : undefined
+    const rowUpdateMode = this.config.sync.rowUpdateMode || `partial`
+
+    this.isCommittingSyncTransactions = true
+    try {
+      this.syncedKeys.add(key)
+      const origin: VirtualOrigin = this.isLocalOnly ? 'local' : 'remote'
+
+      switch (operation.type) {
+        case `insert`:
+          if (!(`value` in operation)) {
+            return undefined
+          }
+          this.syncedData.set(key, operation.value)
+          this.rowOrigins.set(key, origin)
+          break
+        case `update`: {
+          if (!(`value` in operation)) {
+            return undefined
+          }
+          if (rowUpdateMode === `partial`) {
+            const updatedValue = Object.assign(
+              {},
+              this.syncedData.get(key),
+              operation.value,
+            )
+            this.syncedData.set(key, updatedValue)
+          } else {
+            this.syncedData.set(key, operation.value)
+          }
+          this.rowOrigins.set(key, origin)
+          break
+        }
+        case `delete`:
+          this.syncedData.delete(key)
+          this.syncedMetadata.delete(key)
+          this.rowOrigins.delete(key)
+          break
+      }
+
+      for (const [metadataKey, metadataWrite] of transaction.rowMetadataWrites) {
+        if (metadataWrite.type === `delete`) {
+          this.syncedMetadata.delete(metadataKey)
+        } else {
+          this.syncedMetadata.set(metadataKey, metadataWrite.value)
+        }
+      }
+    } finally {
+      this.isCommittingSyncTransactions = false
+    }
+
+    const newVisibleValue = this.syncedData.get(key)
+    const events: Array<ChangeMessage<TOutput, TKey>> = []
+
+    if (previousVisibleValue === undefined && newVisibleValue !== undefined) {
+      events.push({
+        type: `insert`,
+        key,
+        value: newVisibleValue,
+      })
+    } else if (
+      previousVisibleValue !== undefined &&
+      newVisibleValue === undefined
+    ) {
+      events.push({
+        type: `delete`,
+        key,
+        value: this.enrichWithVirtualPropsSnapshot(
+          previousVisibleValue,
+          previousVirtualProps!,
+        ),
+      })
+    } else if (
+      previousVisibleValue !== undefined &&
+      newVisibleValue !== undefined
+    ) {
+      const nextVirtualProps = this.getVirtualPropsSnapshotForState(key)
+      const virtualChanged =
+        previousVirtualProps!.$synced !== nextVirtualProps.$synced ||
+        previousVirtualProps!.$origin !== nextVirtualProps.$origin
+      const valuesEqual = perfDeepEquals(previousVisibleValue, newVisibleValue)
+
+      if (!valuesEqual || virtualChanged) {
+        events.push({
+          type: `update`,
+          key,
+          value: newVisibleValue,
+          previousValue: this.enrichWithVirtualPropsSnapshot(
+            previousVisibleValue,
+            previousVirtualProps!,
+          ),
+        })
+      }
+    }
+
+    this.size = this.calculateSize()
+    if (events.length > 0) {
+      this.indexes.updateIndexes(events)
+    }
+    this.changes.emitEvents(events, true)
+
+    this.pendingSyncedTransactions = uncommittedSyncedTransactions
+    this.preSyncVisibleState.clear()
+    Promise.resolve().then(() => {
+      this.recentlySyncedKeys.clear()
+    })
+    if (!this.hasReceivedFirstCommit) {
+      this.hasReceivedFirstCommit = true
+    }
+
+    return {
+      changedKeyCount: 1,
+      eventCount: events.length,
+    }
+  }
+
   /**
    * Attempts to commit pending synced transactions if there are no active transactions
    * This method processes operations from pending transactions and applies them to the synced data
@@ -1012,6 +1184,19 @@ export class CollectionStateManager<
       committedSyncedTransactionCount = committedSyncedTransactions.length
       activeOptimisticTransactionCount = this.transactions.size
       classifySpan?.end()
+
+      const simpleSyncCommit = this.commitSinglePureSyncTransaction(
+        committedSyncedTransactions,
+        uncommittedSyncedTransactions,
+        hasPersistingTransaction,
+        hasTruncateSync,
+        hasImmediateSync,
+      )
+      if (simpleSyncCommit) {
+        changedKeyCount = simpleSyncCommit.changedKeyCount
+        eventCount = simpleSyncCommit.eventCount
+        return
+      }
 
       // Process committed transactions if:
       // 1. No persisting user transaction (normal sync flow), OR
