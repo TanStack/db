@@ -37,9 +37,12 @@ import type { CollectionStateManager } from './state'
 
 // Mutation IDs only need uniqueness; a per-session UUID prefix plus a counter
 // preserves cross-session uniqueness without a crypto UUID per mutation.
-const mutationIdPrefix = safeRandomUUID()
+// The prefix is generated lazily: some runtimes (Cloudflare Workers) forbid
+// generating random values in module scope.
+let mutationIdPrefix: string | undefined
 let mutationIdSequence = 0
 function nextMutationId(): string {
+  mutationIdPrefix ??= safeRandomUUID()
   return `${mutationIdPrefix}-${++mutationIdSequence}`
 }
 

@@ -57,6 +57,9 @@ export class D2 implements ID2 {
   }
 
   run(): void {
+    if (!this.#finalized) {
+      throw new Error(`Graph not finalized`)
+    }
     // Only run operators that actually have pending input; running idle
     // operators drains empty queues and allocates for nothing. Operators are
     // registered upstream-first, so one pass usually settles the graph and
