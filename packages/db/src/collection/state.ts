@@ -1006,6 +1006,7 @@ export class CollectionStateManager<
     const rowUpdateMode = this.config.sync.rowUpdateMode || `partial`
 
     this.isCommittingSyncTransactions = true
+    let newVisibleValue: TOutput | undefined
     try {
       this.syncedKeys.add(key)
       const origin: VirtualOrigin = this.isLocalOnly ? 'local' : 'remote'
@@ -1021,6 +1022,7 @@ export class CollectionStateManager<
             hadPreviousVisibleValue,
             previousVisibleValue,
           )
+          newVisibleValue = operation.value
           this.rowOrigins.set(key, origin)
           break
         case `update`: {
@@ -1039,6 +1041,7 @@ export class CollectionStateManager<
               hadPreviousVisibleValue,
               previousVisibleValue,
             )
+            newVisibleValue = updatedValue
           } else {
             this.syncedData.setWithKnownPresence(
               key,
@@ -1046,6 +1049,7 @@ export class CollectionStateManager<
               hadPreviousVisibleValue,
               previousVisibleValue,
             )
+            newVisibleValue = operation.value
           }
           this.rowOrigins.set(key, origin)
           break
@@ -1072,7 +1076,6 @@ export class CollectionStateManager<
       this.isCommittingSyncTransactions = false
     }
 
-    const newVisibleValue = this.syncedData.get(key)
     const events: Array<ChangeMessage<TOutput, TKey>> = []
 
     if (previousVisibleValue === undefined && newVisibleValue !== undefined) {
@@ -1116,7 +1119,7 @@ export class CollectionStateManager<
       }
     }
 
-    this.size = this.calculateSize()
+    this.size = this.syncedData.size
     if (events.length > 0) {
       this.indexes.updateIndexes(events)
     }
