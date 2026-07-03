@@ -49,6 +49,11 @@ export class BTreeIndex<
   // The `valueMap` is used for O(1) lookups of PKs by indexed value
   private orderedEntries: BTree<any, undefined> // we don't associate values with the keys of the B+ tree (the keys are indexed values)
   private valueMap = new Map<any, Set<TKey>>() // instead we store a mapping of indexed values to a set of PKs
+  // Values whose key set has emptied are kept as tombstones so that
+  // remove-then-re-add cycles (common under incremental updates) avoid tree
+  // churn; read paths skip empty sets. Compacted beyond a bound.
+  private emptyValueTombstones = 0
+  private static readonly MAX_VALUE_TOMBSTONES = 1024
   private indexedKeys = new Set<TKey>()
   private compareFn: (a: any, b: any) => number = defaultComparator
 
@@ -127,16 +132,18 @@ export class BTreeIndex<
     // Normalize the value for Map key usage
     const normalizedValue = normalizeForBTree(indexedValue)
 
-    if (this.valueMap.has(normalizedValue)) {
-      const keySet = this.valueMap.get(normalizedValue)!
+    const keySet = this.valueMap.get(normalizedValue)
+    if (keySet !== undefined) {
       keySet.delete(key)
 
-      // If set is now empty, remove the entry entirely
+      // Keep the emptied entry as a tombstone (read paths skip empty sets)
+      // so a re-add of the same value avoids tree churn; compact when the
+      // tombstone count grows.
       if (keySet.size === 0) {
-        this.valueMap.delete(normalizedValue)
-
-        // Remove from ordered entries
-        this.orderedEntries.delete(normalizedValue)
+        this.emptyValueTombstones++
+        if (this.emptyValueTombstones > BTreeIndex.MAX_VALUE_TOMBSTONES) {
+          this.compactValueTombstones()
+        }
       }
     }
 
@@ -427,11 +434,24 @@ export class BTreeIndex<
     ])
   }
 
+  private compactValueTombstones(): void {
+    for (const [value, keySet] of this.valueMap) {
+      if (keySet.size === 0) {
+        this.valueMap.delete(value)
+        this.orderedEntries.delete(value)
+      }
+    }
+    this.emptyValueTombstones = 0
+  }
+
   get valueMapData(): Map<any, Set<TKey>> {
-    // Return a new Map with denormalized keys
+    // Return a new Map with denormalized keys (tombstoned empty entries
+    // are an internal detail and excluded)
     const result = new Map<any, Set<TKey>>()
     for (const [key, value] of this.valueMap) {
-      result.set(denormalizeUndefined(key), value)
+      if (value.size > 0) {
+        result.set(denormalizeUndefined(key), value)
+      }
     }
     return result
   }
