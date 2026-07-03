@@ -292,3 +292,18 @@ aggregate i. RED 15 (medians): views h 1.4/1.9/3.3/2.5/1.7/1.7, views i
 No intermediate arrays per delta term. aggregate 187ms isolated (best;
 Rindle 150-170 local ⇒ isolated gap now ~1.1-1.25×; harness regime prints
 1.7×). Both suites ✅.
+
+## Iteration 20 — fast group-key serializer · KEEP ✅
+aggregate_count 187→164ms isolated — INSIDE Rindle's local band (150-172).
+Harness regime still prints 1.6× on that row. folq h down to 1.1×.
+Both suites ✅.
+
+## Definitive pattern after 6 head-to-head runs
+The harness regime (min-of-4, forced GC, tsx, 13 interleaved shapes) adds a
+~1.3-2× multiplier to TanStack's sub-second rows that no engine change has
+dented, while isolated floors on several "red" rows already beat or match
+Rindle (view_list 0.16-0.22 vs 0.8-1.0; aggregate 164 vs 150-172). Remaining
+row flips under harness defaults are gated on the per-creation warm-up
+phenomenon (closure-feedback hypothesis falsified in iter 18 — cause deeper)
+or on methodology (note-for-sam.md). Micro-iterations continue to lower
+isolated floors but no longer move printed ratios beyond noise.
