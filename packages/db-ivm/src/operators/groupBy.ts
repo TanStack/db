@@ -1,13 +1,20 @@
 import { serializeValue } from '../utils.js'
+import { DifferenceStreamWriter, UnaryOperator } from '../graph.js'
+import { StreamBuilder } from '../d2.js'
+import { MultiSet } from '../multiset.js'
+import { isPerfEnabled, recordPerfCount, startPerfSpan } from '../perf.js'
 import { map } from './map.js'
 import { reduce } from './reduce.js'
+import type { DifferenceStreamReader } from '../graph.js'
 import type { IStreamBuilder, KeyValue } from '../types.js'
 
 type GroupKey = Record<string, unknown>
 type GroupValuePrefix = string | number | bigint | undefined
 type GroupValue = [GroupValuePrefix, Record<string, unknown>]
+type IncrementalAggregateKind = `count` | `some` | `every`
 
 type BasicAggregateFunction<T, R, V = unknown> = {
+  kind?: IncrementalAggregateKind
   preMap: (data: T) => V
   reduce: (values: Array<[V, number]>) => V
   postMap?: (result: V) => R
@@ -34,6 +41,18 @@ function isPipedAggregateFunction<T, R>(
   return `pipe` in aggregate
 }
 
+type IncrementalAggregateFunction<T> = {
+  kind: IncrementalAggregateKind
+  preMap: (data: T) => unknown
+}
+
+function isIncrementalAggregateFunction<T, R, V>(
+  aggregate: BasicAggregateFunction<T, R, V>,
+): aggregate is BasicAggregateFunction<T, R, V> &
+  IncrementalAggregateFunction<T> {
+  return aggregate.kind !== undefined
+}
+
 function getGroupValuePrefix(data: unknown): GroupValuePrefix {
   if (!Array.isArray(data)) return undefined
 
@@ -43,6 +62,209 @@ function getGroupValuePrefix(data: unknown): GroupValuePrefix {
     typeof key === `bigint`
     ? key
     : undefined
+}
+
+type IncrementalGroupState<K extends GroupKey> = {
+  key: K
+  total: number
+  values: Array<number>
+}
+
+type IncrementalGroupSnapshot<K extends GroupKey> = {
+  key: K
+  total: number
+  values: Array<number>
+}
+
+function aggregateValuesEqual(
+  left: Array<number>,
+  right: Array<number>,
+): boolean {
+  if (left.length !== right.length) return false
+
+  for (let i = 0; i < left.length; i++) {
+    if (left[i] !== right[i]) return false
+  }
+
+  return true
+}
+
+function incrementalAggregateValue<T>(
+  aggregate: IncrementalAggregateFunction<T>,
+  data: T,
+): number {
+  const value = aggregate.preMap(data)
+  switch (aggregate.kind) {
+    case `count`:
+      return value as number
+    case `some`:
+      return value ? 1 : 0
+    case `every`:
+      return value ? 0 : 1
+  }
+}
+
+function incrementalAggregateOutput<T>(
+  aggregate: IncrementalAggregateFunction<T>,
+  value: number,
+): unknown {
+  switch (aggregate.kind) {
+    case `count`:
+      return value
+    case `some`:
+      return value > 0
+    case `every`:
+      return value <= 0
+  }
+}
+
+class IncrementalGroupByOperator<
+  T,
+  K extends GroupKey,
+  ResultType,
+> extends UnaryOperator<T, KeyValue<string, ResultType>> {
+  #groups = new Map<string, IncrementalGroupState<K>>()
+  #keyExtractor: (data: T) => K
+  #aggregates: Array<[string, IncrementalAggregateFunction<T>]>
+
+  constructor(
+    id: number,
+    input: DifferenceStreamReader<T>,
+    output: DifferenceStreamWriter<KeyValue<string, ResultType>>,
+    keyExtractor: (data: T) => K,
+    aggregates: Array<[string, IncrementalAggregateFunction<T>]>,
+  ) {
+    super(id, input, output)
+    this.#keyExtractor = keyExtractor
+    this.#aggregates = aggregates
+  }
+
+  run(): void {
+    const shouldTrace = isPerfEnabled()
+    const tags = shouldTrace
+      ? {
+          operatorId: this.id,
+          operator: this.constructor.name,
+        }
+      : undefined
+    const span = shouldTrace
+      ? startPerfSpan(`operator.groupBy.incremental.run`, tags)
+      : undefined
+
+    const changedGroups = new Map<
+      string,
+      {
+        before: IncrementalGroupSnapshot<K>
+        state: IncrementalGroupState<K>
+      }
+    >()
+    let inputRows = 0
+
+    for (const message of this.inputMessages()) {
+      for (const [data, multiplicity] of message.getInner()) {
+        inputRows++
+        const key = this.#keyExtractor(data)
+        const keyString = serializeValue(key)
+        let state = this.#groups.get(keyString)
+
+        if (!state) {
+          state = {
+            key,
+            total: 0,
+            values: new Array(this.#aggregates.length).fill(0),
+          }
+          this.#groups.set(keyString, state)
+        }
+
+        if (!changedGroups.has(keyString)) {
+          changedGroups.set(keyString, {
+            before: {
+              key: state.key,
+              total: state.total,
+              values: [...state.values],
+            },
+            state,
+          })
+        }
+
+        if (state.total <= 0 && multiplicity > 0) {
+          state.key = key
+        }
+        state.total += multiplicity
+
+        for (let i = 0; i < this.#aggregates.length; i++) {
+          state.values[i]! +=
+            incrementalAggregateValue(this.#aggregates[i]![1], data) *
+            multiplicity
+        }
+      }
+    }
+
+    const result: Array<[KeyValue<string, ResultType>, number]> = []
+    for (const [keyString, { before, state }] of changedGroups) {
+      const hadOutput = before.total > 0
+      const hasOutput = state.total > 0
+
+      if (!hasOutput) {
+        this.#groups.delete(keyString)
+      }
+
+      if (hadOutput && !hasOutput) {
+        result.push([
+          [keyString, this.#buildResult(before.key, before.values)],
+          -1,
+        ])
+      } else if (!hadOutput && hasOutput) {
+        result.push([
+          [keyString, this.#buildResult(state.key, state.values)],
+          1,
+        ])
+      } else if (
+        hadOutput &&
+        hasOutput &&
+        !aggregateValuesEqual(before.values, state.values)
+      ) {
+        result.push([
+          [keyString, this.#buildResult(before.key, before.values)],
+          -1,
+        ])
+        result.push([
+          [keyString, this.#buildResult(state.key, state.values)],
+          1,
+        ])
+      }
+    }
+
+    if (result.length > 0) {
+      this.output.sendData(new MultiSet(result))
+    }
+    if (shouldTrace) {
+      recordPerfCount(`operator.groupBy.incremental.inputRows`, inputRows, tags)
+      recordPerfCount(
+        `operator.groupBy.incremental.changedGroups`,
+        changedGroups.size,
+        tags,
+      )
+      recordPerfCount(
+        `operator.groupBy.incremental.outputRows`,
+        result.length,
+        tags,
+      )
+      span?.end({ outputRows: result.length })
+    }
+  }
+
+  #buildResult(key: K, values: Array<number>): ResultType {
+    const result: Record<string, unknown> = {}
+    Object.assign(result, key)
+
+    for (let i = 0; i < this.#aggregates.length; i++) {
+      const [name, aggregate] = this.#aggregates[i]!
+      result[name] = incrementalAggregateOutput(aggregate, values[i]!)
+    }
+
+    return result as ResultType
+  }
 }
 
 /**
@@ -75,6 +297,33 @@ export function groupBy<
   return (
     stream: IStreamBuilder<T>,
   ): IStreamBuilder<KeyValue<string, ResultType>> => {
+    const incrementalAggregateEntries = basicAggregateEntries.every(
+      ([_, aggregate]) => isIncrementalAggregateFunction(aggregate),
+    )
+      ? (basicAggregateEntries as Array<
+          [string, IncrementalAggregateFunction<T>]
+        >)
+      : undefined
+
+    if (
+      incrementalAggregateEntries !== undefined &&
+      incrementalAggregateEntries.length > 0
+    ) {
+      const output = new StreamBuilder<KeyValue<string, ResultType>>(
+        stream.graph,
+        new DifferenceStreamWriter<KeyValue<string, ResultType>>(),
+      )
+      const operator = new IncrementalGroupByOperator<T, K, ResultType>(
+        stream.graph.getNextOperatorId(),
+        stream.connectReader(),
+        output.writer,
+        keyExtractor,
+        incrementalAggregateEntries,
+      )
+      stream.graph.addOperator(operator)
+      return output
+    }
+
     // Special key to store the original key object
     const KEY_SENTINEL = `__original_key__`
 
@@ -184,9 +433,10 @@ export function sum<T>(
  * Creates a count aggregate function
  */
 export function count<T>(
-  valueExtractor: (value: T) => any = (v) => v,
+  valueExtractor: (value: T) => unknown = (v) => v,
 ): AggregateFunction<T, number, number> {
   return {
+    kind: `count`,
     // Count only not-null values (the `== null` comparison gives true for both null and undefined)
     preMap: (data: T) => (valueExtractor(data) == null ? 0 : 1),
     reduce: (values: Array<[number, number]>) => {

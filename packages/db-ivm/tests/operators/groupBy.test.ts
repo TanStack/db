@@ -374,6 +374,75 @@ describe(`Operators`, () => {
       expect(latestMessage.getInner()).toEqual(expectedResult)
     })
 
+    test(`with count-only aggregate skips unchanged null-count rows`, () => {
+      const graph = new D2()
+      const input = graph.newInput<{
+        category: string
+        amount: number | null
+      }>()
+      const messages: Array<MultiSet<any>> = []
+
+      input.pipe(
+        groupBy((data) => ({ category: data.category }), {
+          countNotNull: count((data) => data.amount),
+        }),
+        output((message) => {
+          messages.push(message)
+        }),
+      )
+
+      graph.finalize()
+
+      input.sendData(new MultiSet([[{ category: `A`, amount: null }, 1]]))
+      graph.run()
+
+      expect(messages).toHaveLength(1)
+      expect(messages[0]!.getInner()).toEqual([
+        [
+          [
+            `{"category":"A"}`,
+            {
+              category: `A`,
+              countNotNull: 0,
+            },
+          ],
+          1,
+        ],
+      ])
+
+      input.sendData(new MultiSet([[{ category: `A`, amount: null }, 1]]))
+      graph.run()
+
+      expect(messages).toHaveLength(1)
+
+      input.sendData(new MultiSet([[{ category: `A`, amount: 10 }, 1]]))
+      graph.run()
+
+      expect(messages).toHaveLength(2)
+      expect(messages[1]!.getInner()).toEqual([
+        [
+          [
+            `{"category":"A"}`,
+            {
+              category: `A`,
+              countNotNull: 0,
+            },
+          ],
+          -1,
+        ],
+        [
+          [
+            `{"category":"A"}`,
+            {
+              category: `A`,
+              countNotNull: 1,
+            },
+          ],
+          1,
+        ],
+      ])
+    })
+
     test(`with avg and count aggregates`, () => {
       const graph = new D2()
       const input = graph.newInput<{

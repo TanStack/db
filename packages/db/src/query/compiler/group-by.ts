@@ -135,6 +135,7 @@ export function processGroupBy(
 ): NamespacedAndKeyedStream {
   const virtualAggregates: Record<string, any> = {
     [VIRTUAL_SYNCED_KEY]: {
+      kind: `every`,
       preMap: ([, row]: [string, NamespacedRow]) =>
         getRowVirtualMetadata(row).synced,
       reduce: (values: Array<[boolean, number]>) => {
@@ -147,6 +148,7 @@ export function processGroupBy(
       },
     },
     [VIRTUAL_HAS_LOCAL_KEY]: {
+      kind: `some`,
       preMap: ([, row]: [string, NamespacedRow]) =>
         getRowVirtualMetadata(row).hasLocal,
       reduce: (values: Array<[boolean, number]>) => {
