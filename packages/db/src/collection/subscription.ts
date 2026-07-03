@@ -85,6 +85,11 @@ export class CollectionSubscription
 
   private filteredCallback: (changes: Array<ChangeMessage<any, any>>) => void
 
+  // The unwrapped subscriber callback. requestLimitedSnapshot delivers
+  // through this to skip the redundant trackSentKeys pass — snapshot keys
+  // are pre-added to sentKeys and the row count is updated explicitly.
+  private rawCallback: (changes: Array<ChangeMessage<any, any>>) => void
+
   private orderByIndex: IndexInterface<string | number> | undefined
 
   // Status tracking
@@ -127,6 +132,7 @@ export class CollectionSubscription
       this.trackSentKeys(changes)
     }
 
+    this.rawCallback = callback
     this.callback = callbackWithSentKeysTracking
 
     // Create a filtered callback if where clause is provided
@@ -564,7 +570,7 @@ export class CollectionSubscription
       this.sentKeys.add(change.key)
     }
 
-    this.callback(changes)
+    this.rawCallback(changes)
 
     // Update the row count and last key after sending (for next call's offset/cursor)
     this.limitedSnapshotRowCount += changes.length

@@ -2011,6 +2011,10 @@ function createChildCollectionEntry(
  *   4. Flush per-entry states — recursively flush nested includes on each entry
  *   5. Parent DELETEs — clean up child entries and routing index
  */
+// Shared read-only empty map for flushes with no pending child changes —
+// writes only happen inside the pendingChildChanges.size > 0 branch.
+const EMPTY_CHILD_CHANGE_ENTRIES = new Map<never, never>()
+
 function flushIncludesState(
   includesState: Array<IncludesOutputState>,
   parentCollection: Collection<any, any, any>,
@@ -2074,16 +2078,20 @@ function flushIncludesState(
     }
 
     // Track affected correlation keys for inline materializations before clearing child changes.
-    const affectedCorrelationKeys = materializesInline(state)
-      ? new Set<unknown>(state.pendingChildChanges.keys())
-      : null
+    const affectedCorrelationKeys =
+      materializesInline(state) && state.pendingChildChanges.size > 0
+        ? new Set<unknown>(state.pendingChildChanges.keys())
+        : null
 
     // Phase 2: Child changes — apply to child Collections
     // Track which entries had child changes and capture their childChanges maps
-    const entriesWithChildChanges = new Map<
+    const entriesWithChildChanges: Map<
       unknown,
       { entry: ChildCollectionEntry; childChanges: Map<unknown, Changes<any>> }
-    >()
+    > =
+      state.pendingChildChanges.size > 0
+        ? new Map()
+        : (EMPTY_CHILD_CHANGE_ENTRIES as any)
     if (state.pendingChildChanges.size > 0) {
       for (const [correlationKey, childChanges] of state.pendingChildChanges) {
         // Ensure child Collection exists for this correlation key
