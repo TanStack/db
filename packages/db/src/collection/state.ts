@@ -1016,9 +1016,19 @@ export class CollectionStateManager<
 
     if (
       transaction.truncate ||
-      transaction.operations.length !== 1 ||
       transaction.collectionMetadataWrites.size !== 0
     ) {
+      return undefined
+    }
+
+    if (transaction.operations.length === 2) {
+      return this.commitDoublePureSyncTransaction(
+        transaction,
+        uncommittedSyncedTransactions,
+      )
+    }
+
+    if (transaction.operations.length !== 1) {
       return undefined
     }
 
@@ -1169,6 +1179,166 @@ export class CollectionStateManager<
 
     return {
       changedKeyCount: 1,
+      eventCount: events.length,
+    }
+  }
+
+  private commitDoublePureSyncTransaction(
+    transaction: PendingSyncedTransaction<TOutput, TKey>,
+    uncommittedSyncedTransactions: Array<
+      PendingSyncedTransaction<TOutput, TKey>
+    >,
+  ): SimpleSyncCommitResult | undefined {
+    const changedKeys = new Set<TKey>()
+
+    for (const operation of transaction.operations) {
+      if (operation.type !== `delete` && !(`value` in operation)) {
+        return undefined
+      }
+
+      const key = operation.key as TKey
+      if (changedKeys.has(key)) {
+        return undefined
+      }
+      changedKeys.add(key)
+    }
+
+    for (const [metadataKey] of transaction.rowMetadataWrites) {
+      if (!changedKeys.has(metadataKey)) {
+        return undefined
+      }
+    }
+
+    const previousValues = new Map<TKey, TOutput>()
+    const previousVirtualProps = new Map<TKey, VirtualRowProps<TKey>>()
+
+    for (const key of changedKeys) {
+      const previousValue = this.syncedData.get(key)
+      if (previousValue !== undefined) {
+        previousValues.set(key, previousValue)
+        previousVirtualProps.set(key, this.getVirtualPropsSnapshotForState(key))
+      }
+    }
+
+    this.isCommittingSyncTransactions = true
+    try {
+      const origin: VirtualOrigin = this.isLocalOnly ? 'local' : 'remote'
+      const rowUpdateMode = this.config.sync.rowUpdateMode || `partial`
+
+      for (const operation of transaction.operations) {
+        const key = operation.key as TKey
+        const previousValue = previousValues.get(key)
+        const hadPreviousValue = previousValues.has(key)
+        this.syncedKeys.add(key)
+
+        switch (operation.type) {
+          case `insert`:
+            this.syncedData.setWithKnownPresence(
+              key,
+              operation.value,
+              hadPreviousValue,
+              previousValue,
+            )
+            this.setRowOrigin(key, origin, hadPreviousValue)
+            break
+          case `update`: {
+            const updatedValue =
+              rowUpdateMode === `partial`
+                ? Object.assign({}, previousValue, operation.value)
+                : operation.value
+            this.syncedData.setWithKnownPresence(
+              key,
+              updatedValue,
+              hadPreviousValue,
+              previousValue,
+            )
+            this.setRowOrigin(key, origin, hadPreviousValue)
+            break
+          }
+          case `delete`:
+            this.syncedData.deleteWithKnownPreviousValue(
+              key,
+              hadPreviousValue,
+              previousValue,
+            )
+            this.syncedMetadata.delete(key)
+            this.rowOrigins.delete(key)
+            break
+        }
+      }
+
+      for (const [metadataKey, metadataWrite] of transaction.rowMetadataWrites) {
+        if (metadataWrite.type === `delete`) {
+          this.syncedMetadata.delete(metadataKey)
+        } else {
+          this.syncedMetadata.set(metadataKey, metadataWrite.value)
+        }
+      }
+    } finally {
+      this.isCommittingSyncTransactions = false
+    }
+
+    const events: Array<ChangeMessage<TOutput, TKey>> = []
+
+    for (const key of changedKeys) {
+      const hadPreviousValue = previousValues.has(key)
+      const previousValue = previousValues.get(key)
+      const newValue = this.syncedData.get(key)
+
+      if (!hadPreviousValue && newValue !== undefined) {
+        events.push({
+          type: `insert`,
+          key,
+          value: newValue,
+        })
+      } else if (hadPreviousValue && newValue === undefined) {
+        events.push({
+          type: `delete`,
+          key,
+          value: this.enrichWithVirtualPropsSnapshot(
+            previousValue!,
+            previousVirtualProps.get(key)!,
+          ),
+        })
+      } else if (hadPreviousValue && newValue !== undefined) {
+        const nextVirtualProps = this.getVirtualPropsSnapshotForState(key)
+        const previousProps = previousVirtualProps.get(key)!
+        const virtualChanged =
+          previousProps.$synced !== nextVirtualProps.$synced ||
+          previousProps.$origin !== nextVirtualProps.$origin
+        const valuesEqual = perfDeepEquals(previousValue, newValue)
+
+        if (!valuesEqual || virtualChanged) {
+          events.push({
+            type: `update`,
+            key,
+            value: newValue,
+            previousValue: this.enrichWithVirtualPropsSnapshot(
+              previousValue!,
+              previousProps,
+            ),
+          })
+        }
+      }
+    }
+
+    this.size = this.syncedData.size
+    if (events.length > 0) {
+      this.indexes.updateIndexes(events)
+    }
+    this.changes.emitEvents(events, true)
+
+    this.pendingSyncedTransactions = uncommittedSyncedTransactions
+    this.preSyncVisibleState.clear()
+    Promise.resolve().then(() => {
+      this.recentlySyncedKeys.clear()
+    })
+    if (!this.hasReceivedFirstCommit) {
+      this.hasReceivedFirstCommit = true
+    }
+
+    return {
+      changedKeyCount: changedKeys.size,
       eventCount: events.length,
     }
   }
