@@ -151,6 +151,27 @@ export class TopKArray<V> implements TopK<V> {
     return { moveIns, moveOuts, changes: onlyInA.length + onlyInB.length > 0 }
   }
 
+  /**
+   * Fills an empty structure from an unsorted batch in one pass: sort once
+   * (O(n log n) instead of n binary-search + O(n) splices), assign strictly
+   * increasing fractional keys left-to-right (append-style generation is far
+   * cheaper than between-neighbour midpoint splits), and return the values
+   * that land inside the window. Caller must ensure the structure is empty.
+   */
+  bulkLoad(values: Array<V>): Array<IndexedValue<V>> {
+    const sorted = values.slice().sort(this.#comparator)
+    const indexed: Array<IndexedValue<V>> = new Array(sorted.length)
+    let prevKey: string | null = null
+    for (let i = 0; i < sorted.length; i++) {
+      prevKey = generateKeyBetween(prevKey, null)
+      indexed[i] = indexedValue(sorted[i]!, prevKey)
+    }
+    this.#sortedValues = indexed
+    const start = Math.min(this.#topKStart, indexed.length)
+    const end = Math.min(this.#topKEnd, indexed.length)
+    return indexed.slice(start, end)
+  }
+
   insert(value: V): TopKChanges<V> {
     const result: TopKChanges<V> = { moveIn: null, moveOut: null }
 

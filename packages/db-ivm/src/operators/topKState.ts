@@ -30,6 +30,10 @@ export class TopKState<K extends string | number, T> {
     return this.#multiplicities.size === 0 && this.#topK.size === 0
   }
 
+  get supportsBulkLoad(): boolean {
+    return this.#topK instanceof TopKArray
+  }
+
   /**
    * Process an element update (insert or delete based on multiplicity change).
    * Returns the changes to the topK window.
@@ -50,6 +54,21 @@ export class TopKState<K extends string | number, T> {
     // The value was invisible and remains invisible,
     // or was visible and remains visible - no topK change
     return { moveIn: null, moveOut: null }
+  }
+
+  /**
+   * Bulk-fills an empty state from a batch of unique visible items.
+   * Caller must ensure isEmpty, all multiplicities are +1 and keys unique.
+   * Returns the indexed values that land inside the topK window.
+   */
+  bulkLoad(items: Array<[K, T]>): Array<IndexedValue<[K, T]>> {
+    if (!(this.#topK instanceof TopKArray)) {
+      throw new Error(`bulkLoad requires the TopKArray implementation`)
+    }
+    for (const [key] of items) {
+      this.#multiplicities.set(key, 1)
+    }
+    return this.#topK.bulkLoad(items)
   }
 
   /**
