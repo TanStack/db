@@ -36,6 +36,7 @@ export class DifferenceStreamReader<T> implements IDifferenceStreamReader<T> {
  */
 export class DifferenceStreamWriter<T> implements IDifferenceStreamWriter<T> {
   #queues: Array<Array<MultiSet<T>>> = []
+  #readers: Array<DifferenceStreamReader<T>> = []
 
   sendData(collection: MultiSet<T> | MultiSetArray<T>): void {
     if (!(collection instanceof MultiSet)) {
@@ -55,7 +56,13 @@ export class DifferenceStreamWriter<T> implements IDifferenceStreamWriter<T> {
   newReader(): DifferenceStreamReader<T> {
     const q: Array<MultiSet<T>> = []
     this.#queues.push(q)
-    return new DifferenceStreamReader(q)
+    const reader = new DifferenceStreamReader(q)
+    this.#readers.push(reader)
+    return reader
+  }
+
+  get readers(): ReadonlyArray<DifferenceStreamReader<T>> {
+    return this.#readers
   }
 }
 
@@ -80,6 +87,14 @@ export abstract class Operator<T> implements IOperator<T> {
 
   hasPendingWork(): boolean {
     return this.inputs.some((input) => !input.isEmpty())
+  }
+
+  get inputReaders(): ReadonlyArray<DifferenceStreamReader<T>> {
+    return this.inputs
+  }
+
+  get outputWriter(): DifferenceStreamWriter<T> {
+    return this.output
   }
 }
 
@@ -135,6 +150,40 @@ export abstract class LinearUnaryOperator<T, U> extends UnaryOperator<T | U> {
   run(): void {
     for (const message of this.inputMessages()) {
       this.output.sendData(this.inner(message))
+    }
+  }
+}
+
+/**
+ * A chain of linear unary operators collapsed into a single operator at
+ * graph-finalize time. Each intermediate writer/reader hop costs a queue
+ * push/drain and a MultiSet delivery per message; fusing a chain pays that
+ * once. Stage order (and therefore side-effect order, e.g. tap) is
+ * preserved: each message flows through all stages before the next.
+ */
+export class FusedLinearOperator<T> extends UnaryOperator<T> {
+  constructor(
+    id: number,
+    inputA: DifferenceStreamReader<T>,
+    output: DifferenceStreamWriter<T>,
+    public readonly stages: Array<LinearUnaryOperator<any, any>>,
+  ) {
+    super(id, inputA, output)
+  }
+
+  run(): void {
+    for (const message of this.inputMessages()) {
+      let collection: MultiSet<any> = message
+      for (const stage of this.stages) {
+        const next = stage.inner(collection)
+        if (next !== collection) {
+          // Freshly created inside this operator — no other references
+          // exist, so downstream stages may transform it in place.
+          next.exclusive = true
+        }
+        collection = next
+      }
+      this.output.sendData(collection)
     }
   }
 }

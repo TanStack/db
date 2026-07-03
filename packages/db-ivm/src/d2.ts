@@ -1,4 +1,8 @@
-import { DifferenceStreamWriter } from './graph.js'
+import {
+  DifferenceStreamWriter,
+  FusedLinearOperator,
+  LinearUnaryOperator,
+} from './graph.js'
 import type {
   BinaryOperator,
   DifferenceStreamReader,
@@ -38,7 +42,52 @@ export class D2 implements ID2 {
     this.#operators.push(operator)
   }
 
+  /**
+   * Collapses chains of linear unary operators (map/filter/tap/negate) whose
+   * intermediate edge has exactly one consumer into single fused operators.
+   * Safe at finalize time because the topology can no longer change.
+   */
+  #fuseLinearChains(): void {
+    let fusedSomething = true
+    while (fusedSomething) {
+      fusedSomething = false
+      for (const op of this.#operators) {
+        const isLinear =
+          op instanceof LinearUnaryOperator || op instanceof FusedLinearOperator
+        if (!isLinear) continue
+        const writer = op.outputWriter
+        if (writer.readers.length !== 1) continue
+        const reader = writer.readers[0]!
+        const consumer = this.#operators.find(
+          (o) => o !== op && o.inputReaders.includes(reader),
+        )
+        if (!consumer) continue
+        const consumerLinear =
+          consumer instanceof LinearUnaryOperator ||
+          consumer instanceof FusedLinearOperator
+        if (!consumerLinear) continue
+        const stages = [
+          ...(op instanceof FusedLinearOperator ? op.stages : [op]),
+          ...(consumer instanceof FusedLinearOperator
+            ? consumer.stages
+            : [consumer]),
+        ]
+        const fused = new FusedLinearOperator(
+          op.id,
+          op.inputReaders[0]! as any,
+          consumer.outputWriter as any,
+          stages as any,
+        )
+        this.#operators[this.#operators.indexOf(op)] = fused
+        this.#operators.splice(this.#operators.indexOf(consumer), 1)
+        fusedSomething = true
+        break
+      }
+    }
+  }
+
   finalize() {
+    this.#fuseLinearChains()
     this.#checkNotFinalized()
     this.#finalized = true
   }
