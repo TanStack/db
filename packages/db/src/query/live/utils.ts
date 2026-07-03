@@ -303,6 +303,36 @@ export function sendChangesToInput(
   return multiSetArray.length
 }
 
+/**
+ * Array variant of splitUpdates with a fast path: when the batch contains no
+ * updates (the common incremental case), the input array is returned as-is.
+ */
+export function splitUpdatesArray<
+  T extends object = Record<string, unknown>,
+  TKey extends string | number = string | number,
+>(changes: Array<ChangeMessage<T, TKey>>): Array<ChangeMessage<T, TKey>> {
+  let hasUpdate = false
+  for (const change of changes) {
+    if (change.type === `update`) {
+      hasUpdate = true
+      break
+    }
+  }
+  if (!hasUpdate) {
+    return changes
+  }
+  const out: Array<ChangeMessage<T, TKey>> = []
+  for (const change of changes) {
+    if (change.type === `update`) {
+      out.push({ type: `delete`, key: change.key, value: change.previousValue! })
+      out.push({ type: `insert`, key: change.key, value: change.value })
+    } else {
+      out.push(change)
+    }
+  }
+  return out
+}
+
 /** Splits updates into a delete of the old value and an insert of the new value */
 export function* splitUpdates<
   T extends object = Record<string, unknown>,

@@ -7,7 +7,7 @@ import {
   computeSubscriptionOrderByHints,
   filterDuplicateInserts,
   sendChangesToInput,
-  splitUpdates,
+  splitUpdatesArray,
   trackBiggestSentValue,
 } from './utils.js'
 import type { Collection } from '../../collection/index.js'
@@ -256,7 +256,7 @@ export class CollectionSubscriber<
       this.trackSentValues(changesArray, orderByInfo.comparator)
 
       // Split live updates into a delete of the old value and an insert of the new value
-      const splittedChanges = splitUpdates(changesArray)
+      const splittedChanges = splitUpdatesArray(changesArray)
       this.sendChangesToPipelineWithTracking(
         splittedChanges,
         subscriptionHolder.current!,
