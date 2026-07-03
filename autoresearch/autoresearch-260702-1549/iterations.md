@@ -269,3 +269,10 @@ topology template) and instantiate per-instance state cheaply, so closure
 identities persist across live-query creations and stay hot. Benefits real
 apps too (components repeatedly mounting the same query shape). Sizeable,
 architectural — needs a green light.
+
+## Iteration 18 — structural evaluator cache · KEEP (hypothesis falsified) ⚠️
+Shared compiled-evaluator closures across creations did NOT flatten the
+creation tier-up ramp (30-round pattern unchanged) — the warm-up is not in
+evaluator closures. Cache kept: saves compile work on repeated mounts, all
+suites green. Full topology-template refactor now has UNCERTAIN payoff for
+the harness regime; de-prioritized pending discussion.
