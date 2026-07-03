@@ -232,25 +232,22 @@ export function processGroupBy(
           correlationKey !== undefined
             ? `single_group_${serializeValue(correlationKey)}`
             : `single_group`
-        const resultRow: Record<string, any> = {
-          ...(aggregatedRow as Record<string, any>),
-          $selected: finalResults,
-        }
         const groupMeta = (aggregatedRow as Record<string, any>)[
           VIRTUAL_META_KEY
         ] as number | undefined
-        resultRow.$synced =
-          groupMeta === undefined
-            ? true
-            : (groupMeta & VIRTUAL_META_SYNCED) !== 0
-        resultRow.$origin = (
-          groupMeta !== undefined && (groupMeta & VIRTUAL_META_HAS_LOCAL) !== 0
+        const resultRow: Record<string, any> = {
+          $selected: finalResults,
+          $synced:
+            groupMeta === undefined
+              ? true
+              : (groupMeta & VIRTUAL_META_SYNCED) !== 0,
+          $origin: (groupMeta !== undefined &&
+          (groupMeta & VIRTUAL_META_HAS_LOCAL) !== 0
             ? `local`
-            : `remote`
-        ) satisfies VirtualOrigin
-        resultRow.$key = resultKey
-        resultRow.$collectionId =
-          aggregateCollectionId ?? resultRow.$collectionId
+            : `remote`) satisfies VirtualOrigin,
+          $key: resultKey,
+          $collectionId: aggregateCollectionId,
+        }
         if (mainSource && correlationKey !== undefined) {
           resultRow[mainSource] = { __correlationKey: correlationKey }
         }
@@ -409,24 +406,26 @@ export function processGroupBy(
       const finalKey =
         keyParts.length === 1 ? keyParts[0] : serializeValue(keyParts)
 
-      // When in includes mode, restore the namespaced source structure with
-      // __correlationKey so output extraction can route results per-parent.
-      const resultRow: Record<string, any> = {
-        ...(aggregatedRow as Record<string, any>),
-        $selected: finalResults,
-      }
+      // Downstream stages (HAVING, DISTINCT, ORDER BY, the final $selected
+      // extraction) only read $selected, the virtual props and — in includes
+      // mode — the correlation fields, so the result row is built minimally
+      // instead of spreading the whole aggregated row per group.
       const groupMeta = (aggregatedRow as Record<string, any>)[
         VIRTUAL_META_KEY
       ] as number | undefined
-      resultRow.$synced =
-        groupMeta === undefined ? true : (groupMeta & VIRTUAL_META_SYNCED) !== 0
-      resultRow.$origin = (
-        groupMeta !== undefined && (groupMeta & VIRTUAL_META_HAS_LOCAL) !== 0
+      const resultRow: Record<string, any> = {
+        $selected: finalResults,
+        $synced:
+          groupMeta === undefined
+            ? true
+            : (groupMeta & VIRTUAL_META_SYNCED) !== 0,
+        $origin: (groupMeta !== undefined &&
+        (groupMeta & VIRTUAL_META_HAS_LOCAL) !== 0
           ? `local`
-          : `remote`
-      ) satisfies VirtualOrigin
-      resultRow.$key = finalKey
-      resultRow.$collectionId = aggregateCollectionId ?? resultRow.$collectionId
+          : `remote`) satisfies VirtualOrigin,
+        $key: finalKey,
+        $collectionId: aggregateCollectionId,
+      }
       if (mainSource && correlationKey !== undefined) {
         resultRow[mainSource] = { __correlationKey: correlationKey }
       }
