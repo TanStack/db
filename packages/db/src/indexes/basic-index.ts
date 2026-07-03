@@ -89,9 +89,10 @@ export class BasicIndex<
 
     const normalizedValue = normalizeValue(indexedValue)
 
-    if (this.valueMap.has(normalizedValue)) {
+    const existingKeySet = this.valueMap.get(normalizedValue)
+    if (existingKeySet !== undefined) {
       // Value already exists, just add the key to the set
-      this.valueMap.get(normalizedValue)!.add(key)
+      existingKeySet.add(key)
     } else {
       // New value - add to map and insert into sorted array
       this.valueMap.set(normalizedValue, new Set([key]))

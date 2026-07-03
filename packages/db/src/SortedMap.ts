@@ -63,11 +63,13 @@ export class SortedMap<TKey extends string | number, TValue> {
    */
   set(key: TKey, value: TValue): this {
     if (this.comparator) {
-      // Lazy ordering: append new keys, defer sorting to the next read
-      if (!this.map.has(key)) {
+      // Lazy ordering: append new keys, defer sorting to the next read.
+      // Size comparison instead of has() avoids a second map lookup.
+      const sizeBefore = this.map.size
+      this.map.set(key, value)
+      if (this.map.size !== sizeBefore) {
         this.sortedKeys.push(key)
       }
-      this.map.set(key, value)
       this.dirty = true
       return this
     }
@@ -76,7 +78,9 @@ export class SortedMap<TKey extends string | number, TValue> {
     // appending a key greater than the current tail keeps the array sorted
     // (the common monotonic-id case) — both avoid a splice. Other inserts
     // append and defer sorting to the next ordered read.
-    if (!this.map.has(key)) {
+    const sizeBefore = this.map.size
+    this.map.set(key, value)
+    if (this.map.size !== sizeBefore) {
       if (this.sortedKeys.length === 0) {
         this.sortedKeys.push(key)
       } else if (
@@ -89,7 +93,6 @@ export class SortedMap<TKey extends string | number, TValue> {
         this.dirty = true
       }
     }
-    this.map.set(key, value)
 
     return this
   }
