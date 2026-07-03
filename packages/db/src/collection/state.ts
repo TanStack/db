@@ -975,9 +975,7 @@ export class CollectionStateManager<
   }
 
   private commitSinglePureSyncTransaction(
-    committedSyncedTransactions: Array<
-      PendingSyncedTransaction<TOutput, TKey>
-    >,
+    transaction: PendingSyncedTransaction<TOutput, TKey> | undefined,
     uncommittedSyncedTransactions: Array<
       PendingSyncedTransaction<TOutput, TKey>
     >,
@@ -988,7 +986,7 @@ export class CollectionStateManager<
     if (
       hasTruncateSync ||
       (hasPersistingTransaction && !hasImmediateSync) ||
-      committedSyncedTransactions.length !== 1 ||
+      transaction === undefined ||
       this.transactions.size !== 0 ||
       this.optimisticUpserts.size !== 0 ||
       this.optimisticDeletes.size !== 0 ||
@@ -1004,7 +1002,6 @@ export class CollectionStateManager<
       return undefined
     }
 
-    const transaction = committedSyncedTransactions[0]!
     if (
       transaction.truncate ||
       transaction.operations.length !== 1 ||
@@ -1181,6 +1178,30 @@ export class CollectionStateManager<
     let eventCount = 0
 
     try {
+      const pendingSyncedTransactionCount =
+        this.pendingSyncedTransactions.length
+      if (
+        pendingSyncedTransactionCount === 1 &&
+        this.transactions.size === 0
+      ) {
+        const transaction = this.pendingSyncedTransactions[0]!
+        if (transaction.committed) {
+          const simpleSyncCommit = this.commitSinglePureSyncTransaction(
+            transaction,
+            [],
+            false,
+            false,
+            false,
+          )
+          if (simpleSyncCommit) {
+            committedSyncedTransactionCount = 1
+            changedKeyCount = simpleSyncCommit.changedKeyCount
+            eventCount = simpleSyncCommit.eventCount
+            return
+          }
+        }
+      }
+
       const classifySpan = shouldTrace
         ? startPerfSpan(`collection.commitPendingTransactions.classify`, {
             collectionId: this.collection.id,
@@ -1232,8 +1253,12 @@ export class CollectionStateManager<
       activeOptimisticTransactionCount = this.transactions.size
       classifySpan?.end()
 
+      const singleCommittedSyncedTransaction =
+        committedSyncedTransactions.length === 1
+          ? committedSyncedTransactions[0]!
+          : undefined
       const simpleSyncCommit = this.commitSinglePureSyncTransaction(
-        committedSyncedTransactions,
+        singleCommittedSyncedTransaction,
         uncommittedSyncedTransactions,
         hasPersistingTransaction,
         hasTruncateSync,
