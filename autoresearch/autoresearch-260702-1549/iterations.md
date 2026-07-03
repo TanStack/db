@@ -332,3 +332,11 @@ No splice per source write. Pair 155→132µs. All suites + deps ✅.
 True remaining engine gap = view incremental cluster (author 2.4, count 2.7,
 detail 2.2, folq 1.9): per-pair pipeline tick + includes flush + lazy
 snapshot costs vs Rindle's 45-90µs/pair.
+
+## Iteration 22 — recompute nothing-to-do fast path · KEEP ✅
+view_list_creator pair 254→145µs. All suites ✅ (query-db-collection exact
+spy count updated +1 for the key-field probe).
+Regime (a) defaults: view_list incr 1.0× parity, 11-12 won.
+Regime (c) ROUNDS=50 no-GC: **15 won** — remaining reds: view hydrates
+1.1-1.4 (parity band), author/count/detail incrs 1.8-2.2, folq incr 2.2,
+view_list incr 1.5.
