@@ -212,3 +212,13 @@ Remaining engineering tracks (each sizeable):
    ~3.7µs/row).
 3. Snapshot→pipeline fusion (ChangeMessage layer elimination).
 4. Creation-path allocation cuts (operator graph objects per live query).
+
+## Iteration 13 — normalizeValue primitive fast path · KEEP ✅
+aggregate_count 248→229ms; helps every eq/join/groupBy key path. db 2456 ✅.
+
+## Next up (design ready): join re-key fusion
+Extend JoinOperator with optional per-side key extractors so the compiler
+drops the two re-key map operators ([joinKey,[key,row]] wrappers per row per
+side). Watch-outs: the lazy-load tap consumes the re-keyed stream shape
+(apply extractor inside the tap instead), and the joined-side namespacing map
+must stay (its nsRow objects flow into merged rows).
