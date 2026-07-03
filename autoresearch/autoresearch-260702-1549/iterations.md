@@ -377,3 +377,8 @@ Both green (db 2456). The concurrent scoreboard runs were contaminated by
 profiling on the same box (detail i printed 3.7 vs 1.7-1.8 steady) —
 discard; clean re-run follows. Lesson recorded: never overlap head-to-head
 runs with profiling.
+
+## Iteration 30 — sync write literals · KEEP ✅ (clean scoreboards)
+Defaults: detail i 1.4, list i 1.1, +comments i 1.1. R50/noGC: +comments i
+0.9× WIN, page2 h 1.0, remaining band 1.1-2.1 (author i worst).
+All suites + 3 dependents ✅.
