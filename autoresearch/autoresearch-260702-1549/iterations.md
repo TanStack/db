@@ -359,3 +359,7 @@ write); now handles them. view_detail pair 166→98µs. All suites + 3
 dependents ✅. Scoreboards: parity band holds (+comments 1.0-1.2, page2
 1.0-1.2, agg 1.2); creator/count incr prints swing 1.5-2.7 with BOTH
 engines' run-to-run variance now larger than per-iteration movement.
+
+## Iteration 26 — counter mutation ids + Set/array batch tracking · KEEP ✅
+(collection-events flake re-confirmed as flake: passes isolated + full
+re-run.) All suites + 3 dependents ✅.
