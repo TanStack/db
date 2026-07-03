@@ -223,7 +223,13 @@ class Transaction<T extends object = Record<string, unknown>> {
   public state: TransactionState
   public mutationFn: MutationFn<T>
   public mutations: Array<PendingMutation<T>>
-  #isPersisted: Deferred<Transaction<T>> | undefined
+  /**
+   * Backing store for the lazy isPersisted getter. Not a #private field:
+   * private fields make the class nominally typed, which breaks structural
+   * consumers like TransactionWithMutations (an Omit<> over this class).
+   * @internal
+   */
+  _isPersisted?: Deferred<Transaction<T>> | undefined
   public autoCommit: boolean
   public createdAt: Date
   public sequenceNumber: number
@@ -255,15 +261,15 @@ class Transaction<T extends object = Record<string, unknown>> {
    * immediately from the terminal state.
    */
   get isPersisted(): Deferred<Transaction<T>> {
-    if (!this.#isPersisted) {
-      this.#isPersisted = createDeferred<Transaction<T>>()
+    if (!this._isPersisted) {
+      this._isPersisted = createDeferred<Transaction<T>>()
       if (this.state === `completed`) {
-        this.#isPersisted.resolve(this)
+        this._isPersisted.resolve(this)
       } else if (this.state === `failed`) {
-        this.#isPersisted.reject(this.error?.error)
+        this._isPersisted.reject(this.error?.error)
       }
     }
-    return this.#isPersisted
+    return this._isPersisted
   }
 
   setState(newState: TransactionState) {
@@ -466,7 +472,7 @@ class Transaction<T extends object = Record<string, unknown>> {
 
     // Reject the promise (only if someone is listening; late accessors get
     // a deferred settled from the terminal state)
-    this.#isPersisted?.reject(this.error?.error)
+    this._isPersisted?.reject(this.error?.error)
     this.touchCollection()
 
     return this
@@ -537,7 +543,7 @@ class Transaction<T extends object = Record<string, unknown>> {
 
     if (this.mutations.length === 0) {
       this.setState(`completed`)
-      this.#isPersisted?.resolve(this)
+      this._isPersisted?.resolve(this)
 
       return Promise.resolve(this)
     }
@@ -545,7 +551,7 @@ class Transaction<T extends object = Record<string, unknown>> {
     const complete = (): Transaction<T> => {
       this.setState(`completed`)
       this.touchCollection()
-      this.#isPersisted?.resolve(this)
+      this._isPersisted?.resolve(this)
       return this
     }
 
