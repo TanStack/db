@@ -340,3 +340,8 @@ Regime (a) defaults: view_list incr 1.0× parity, 11-12 won.
 Regime (c) ROUNDS=50 no-GC: **15 won** — remaining reds: view hydrates
 1.1-1.4 (parity band), author/count/detail incrs 1.8-2.2, folq incr 2.2,
 view_list incr 1.5.
+
+## Iteration 23 — pending-only operator scheduling + allocation-free drain · KEEP ✅
+Pair 145→142µs; all ticks benefit. Regime (c): +comments incr flipped 0.9×,
+page2 h 0.9×, ~15-16 won. Remaining reds: incrs author 2.0/detail 1.9/count
+1.6/folq 1.5/list 1.4; hydrates 1.2-1.5 band. Both suites ✅.
