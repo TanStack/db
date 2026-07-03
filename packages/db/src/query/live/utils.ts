@@ -304,6 +304,47 @@ export function sendChangesToInput(
 }
 
 /**
+ * Fused filterDuplicateInserts + sendChangesToInput: one pass over the batch
+ * builds the multiset tuples directly while maintaining the sent-keys
+ * bookkeeping, instead of allocating an intermediate filtered array and
+ * walking the changes twice. Semantics match the two-step composition:
+ * duplicate inserts are dropped, inserts add to / deletes remove from
+ * `sentKeys`, updates split into a retract + insert.
+ *
+ * Mutates `sentKeys` in place. Returns the number of multiset tuples sent.
+ */
+export function sendFilteredChangesToInput(
+  input: RootStreamBuilder<unknown>,
+  changes: Array<ChangeMessage<any, string | number>>,
+  sentKeys: Set<string | number>,
+): number {
+  const multiSetArray: MultiSetArray<unknown> = []
+  for (const change of changes) {
+    const key = change.key
+    if (change.type === `insert`) {
+      if (sentKeys.has(key)) {
+        continue // Skip duplicate insert
+      }
+      sentKeys.add(key)
+      multiSetArray.push([[key, change.value], 1])
+    } else if (change.type === `update`) {
+      multiSetArray.push([[key, change.previousValue], -1])
+      multiSetArray.push([[key, change.value], 1])
+    } else {
+      // change.type === `delete`
+      sentKeys.delete(key)
+      multiSetArray.push([[key, change.value], -1])
+    }
+  }
+
+  if (multiSetArray.length !== 0) {
+    input.sendData(new MultiSet(multiSetArray))
+  }
+
+  return multiSetArray.length
+}
+
+/**
  * Array variant of splitUpdates with a fast path: when the batch contains no
  * updates (the common incremental case), the input array is returned as-is.
  */

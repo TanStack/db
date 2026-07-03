@@ -5,8 +5,7 @@ import {
 import {
   computeOrderedLoadCursor,
   computeSubscriptionOrderByHints,
-  filterDuplicateInserts,
-  sendChangesToInput,
+  sendFilteredChangesToInput,
   splitUpdatesArray,
   trackBiggestSentValue,
 } from './utils.js'
@@ -154,16 +153,16 @@ export class CollectionSubscriber<
     callback?: () => boolean,
   ) {
     const changesArray = Array.isArray(changes) ? changes : [...changes]
-    const filteredChanges = filterDuplicateInserts(
-      changesArray,
-      this.sentToD2Keys,
-    )
 
     // currentSyncState and input are always defined when this method is called
     // (only called from active subscriptions during a sync session)
     const input =
       this.collectionConfigBuilder.currentSyncState!.inputs[this.alias]!
-    const sentChanges = sendChangesToInput(input, filteredChanges)
+    const sentChanges = sendFilteredChangesToInput(
+      input,
+      changesArray,
+      this.sentToD2Keys,
+    )
 
     // Do not provide the callback that loads more data
     // if there's no more data to load
