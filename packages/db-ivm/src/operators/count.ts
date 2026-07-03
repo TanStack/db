@@ -1,27 +1,77 @@
-import { DifferenceStreamWriter } from '../graph.js'
+import { DifferenceStreamWriter, UnaryOperator } from '../graph.js'
 import { StreamBuilder } from '../d2.js'
-import { ReduceOperator } from './reduce.js'
+import { MultiSet } from '../multiset.js'
+import { isPerfEnabled, recordPerfCount, startPerfSpan } from '../perf.js'
 import type { DifferenceStreamReader } from '../graph.js'
 import type { IStreamBuilder, KeyValue } from '../types.js'
 
 /**
  * Operator that counts elements by key (version-free)
  */
-export class CountOperator<K, V> extends ReduceOperator<K, V, number> {
+export class CountOperator<K, V> extends UnaryOperator<[K, V], [K, number]> {
+  #counts = new Map<K, number>()
+  #hasOutput = new Set<K>()
+
   constructor(
     id: number,
     inputA: DifferenceStreamReader<[K, V]>,
     output: DifferenceStreamWriter<[K, number]>,
   ) {
-    const countInner = (vals: Array<[V, number]>): Array<[number, number]> => {
-      let totalCount = 0
-      for (const [_, diff] of vals) {
-        totalCount += diff
+    super(id, inputA, output)
+  }
+
+  run(): void {
+    const shouldTrace = isPerfEnabled()
+    const tags = shouldTrace
+      ? {
+          operatorId: this.id,
+          operator: this.constructor.name,
+        }
+      : undefined
+    const span = shouldTrace
+      ? startPerfSpan(`operator.count.run`, tags)
+      : undefined
+
+    const deltas = new Map<K, number>()
+    let inputRows = 0
+    for (const message of this.inputMessages()) {
+      for (const [item, multiplicity] of message.getInner()) {
+        inputRows++
+        const [key] = item
+        deltas.set(key, (deltas.get(key) ?? 0) + multiplicity)
       }
-      return [[totalCount, 1]]
     }
 
-    super(id, inputA, output, countInner)
+    const result: Array<[[K, number], number]> = []
+    for (const [key, delta] of deltas) {
+      const oldCount = this.#counts.get(key) ?? 0
+      const newCount = oldCount + delta
+      const hasOutput = this.#hasOutput.has(key)
+
+      if (!hasOutput) {
+        result.push([[key, newCount], 1])
+        this.#hasOutput.add(key)
+      } else if (oldCount !== newCount) {
+        result.push([[key, oldCount], -1])
+        result.push([[key, newCount], 1])
+      }
+
+      if (newCount === 0) {
+        this.#counts.delete(key)
+      } else {
+        this.#counts.set(key, newCount)
+      }
+    }
+
+    if (result.length > 0) {
+      this.output.sendData(new MultiSet(result))
+    }
+    if (shouldTrace) {
+      recordPerfCount(`operator.count.inputRows`, inputRows, tags)
+      recordPerfCount(`operator.count.changedKeys`, deltas.size, tags)
+      recordPerfCount(`operator.count.outputRows`, result.length, tags)
+      span?.end({ outputRows: result.length })
+    }
   }
 }
 

@@ -4,6 +4,8 @@ import { reduce } from './reduce.js'
 import type { IStreamBuilder, KeyValue } from '../types.js'
 
 type GroupKey = Record<string, unknown>
+type GroupValuePrefix = string | number | bigint | undefined
+type GroupValue = [GroupValuePrefix, Record<string, unknown>]
 
 type BasicAggregateFunction<T, R, V = unknown> = {
   preMap: (data: T) => V
@@ -30,6 +32,17 @@ function isPipedAggregateFunction<T, R>(
   aggregate: AggregateFunction<T, R>,
 ): aggregate is PipedAggregateFunction<T, R> {
   return `pipe` in aggregate
+}
+
+function getGroupValuePrefix(data: unknown): GroupValuePrefix {
+  if (!Array.isArray(data)) return undefined
+
+  const key = data[0]
+  return typeof key === `string` ||
+    typeof key === `number` ||
+    typeof key === `bigint`
+    ? key
+    : undefined
 }
 
 /**
@@ -82,7 +95,10 @@ export function groupBy<
           values[name] = aggregate.preMap(data)
         }
 
-        return [keyString, values] as KeyValue<string, Record<string, unknown>>
+        return [keyString, [getGroupValuePrefix(data), values]] as KeyValue<
+          string,
+          GroupValue
+        >
       }),
     )
 
@@ -103,13 +119,13 @@ export function groupBy<
         const result: Record<string, unknown> = {}
 
         // Get the original key from first value in group
-        const originalKey = values[0]?.[0]?.[KEY_SENTINEL]
+        const originalKey = values[0]?.[0]?.[1][KEY_SENTINEL]
         result[KEY_SENTINEL] = originalKey
 
         // Apply each aggregate function
         for (const [name, aggregate] of basicAggregateEntries) {
           const preValues = values.map(
-            ([v, m]) => [v[name], m] as [any, number],
+            ([v, m]) => [v[1][name], m] as [any, number],
           )
           result[name] = aggregate.reduce(preValues)
         }

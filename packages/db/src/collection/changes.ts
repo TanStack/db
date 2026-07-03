@@ -121,6 +121,22 @@ export class CollectionChangesManager<
       return
     }
 
+    if (this.changeSubscriptions.size === 0) {
+      if (shouldTrace) {
+        recordPerfCount(`collection.changes.rawEvents`, rawEvents.length, {
+          collectionId: this.collection.id,
+        })
+        recordPerfCount(`collection.changes.enrichedEvents`, 0, {
+          collectionId: this.collection.id,
+        })
+        recordPerfCount(`collection.changes.subscriberDeliveries`, 0, {
+          collectionId: this.collection.id,
+        })
+        span?.end({ rawEvents: rawEvents.length })
+      }
+      return
+    }
+
     // Enrich all change messages with virtual properties
     // This uses the "add-if-missing" pattern to preserve pass-through semantics
     const enrichSpan = shouldTrace
