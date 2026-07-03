@@ -222,3 +222,8 @@ drops the two re-key map operators ([joinKey,[key,row]] wrappers per row per
 side). Watch-outs: the lazy-load tap consumes the re-keyed stream shape
 (apply extractor inside the tap instead), and the joined-side namespacing map
 must stay (its nsRow objects flow into merged rows).
+
+## Iteration 14 — join re-key fusion · KEEP ✅
+JoinKeyExtractors on JoinOperator + Index.fromMultiSetsBy; compiler drops the
+two per-side re-keying map operators; lazy tap uses the item-level extractor.
+db-ivm 324 ✅ db 2456 ✅. Bench noisy this cycle; head-to-head arbitrates.
