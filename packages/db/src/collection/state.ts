@@ -1138,12 +1138,16 @@ export class CollectionStateManager<
   }
 
   commitPendingTransactions = () => {
-    // Check if there are any persisting transaction
+    // Check if there are any persisting transaction. Guard on size: the
+    // empty case is the steady state and values() still pays an ordered
+    // rebuild + generator per call.
     let hasPersistingTransaction = false
-    for (const transaction of this.transactions.values()) {
-      if (transaction.state === `persisting`) {
-        hasPersistingTransaction = true
-        break
+    if (this.transactions.size > 0) {
+      for (const transaction of this.transactions.values()) {
+        if (transaction.state === `persisting`) {
+          hasPersistingTransaction = true
+          break
+        }
       }
     }
 
