@@ -276,3 +276,9 @@ creation tier-up ramp (30-round pattern unchanged) — the warm-up is not in
 evaluator closures. Cache kept: saves compile work on repeated mounts, all
 suites green. Full topology-template refactor now has UNCERTAIN payoff for
 the harness regime; de-prioritized pending discussion.
+
+## Iteration-18 head-to-head: parity sightings
+detail hydrate 1.0× (parity), folq hydrate 1.1×, view_list 1.4×/1.1×,
++author 1.5× — while +count spiked 7.0× (was 3.2-3.6). Run-to-run variance
+under min-of-4 forced GC now dominates every remaining red row; rows touch
+parity on good runs. Collecting median-of-3 scoreboard.
