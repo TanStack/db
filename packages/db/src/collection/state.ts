@@ -878,6 +878,143 @@ export class CollectionStateManager<
    * Attempts to commit pending synced transactions if there are no active transactions
    * This method processes operations from pending transactions and applies them to the synced data
    */
+  /**
+   * Direct implementation of committing synced transactions for the common
+   * steady state: no user transactions, no optimistic state, no truncate.
+   * Applies operations, derives one event per touched key (first previous
+   * value vs final visible value) and emits — skipping the snapshot,
+   * redundancy-detection and optimistic-overlay machinery of the general
+   * path, which all degenerate to no-ops under these preconditions.
+   */
+  private commitSyncedTransactionsFastLane(
+    committedSyncedTransactions: Array<PendingSyncedTransaction<TOutput, TKey>>,
+    uncommittedSyncedTransactions: Array<
+      PendingSyncedTransaction<TOutput, TKey>
+    >,
+  ): void {
+    this.isCommittingSyncTransactions = true
+
+    const rowUpdateMode = this.config.sync.rowUpdateMode || `partial`
+    // First previous value and origin per touched key (captured before the
+    // first write to that key in this batch)
+    const previousValues = new Map<TKey, TOutput | undefined>()
+    const previousOrigins = new Map<TKey, VirtualOrigin | undefined>()
+
+    for (const transaction of committedSyncedTransactions) {
+      for (const operation of transaction.operations) {
+        const key = operation.key as TKey
+        this.syncedKeys.add(key)
+
+        if (!previousValues.has(key)) {
+          previousValues.set(key, this.syncedData.get(key))
+          previousOrigins.set(key, this.rowOrigins.get(key))
+        }
+
+        const origin: VirtualOrigin =
+          this.isLocalOnly ||
+          this.pendingLocalChanges.has(key) ||
+          this.pendingLocalOrigins.has(key)
+            ? 'local'
+            : 'remote'
+
+        switch (operation.type) {
+          case `insert`:
+          case `update`: {
+            let newValue = operation.value
+            if (operation.type === `update` && rowUpdateMode === `partial`) {
+              newValue = Object.assign({}, this.syncedData.get(key), newValue)
+            }
+            this.verifyKeyFieldInvariant(key, newValue)
+            this.syncedData.set(key, newValue)
+            this.rowOrigins.set(key, origin)
+            this.pendingLocalChanges.delete(key)
+            this.pendingLocalOrigins.delete(key)
+            break
+          }
+          case `delete`:
+            this.syncedData.delete(key)
+            this.syncedMetadata.delete(key)
+            this.rowOrigins.delete(key)
+            this.pendingLocalChanges.delete(key)
+            this.pendingLocalOrigins.delete(key)
+            break
+        }
+      }
+
+      for (const [key, metadataWrite] of transaction.rowMetadataWrites) {
+        if (metadataWrite.type === `delete`) {
+          this.syncedMetadata.delete(key)
+          continue
+        }
+        this.syncedMetadata.set(key, metadataWrite.value)
+      }
+
+      for (const [
+        key,
+        metadataWrite,
+      ] of transaction.collectionMetadataWrites) {
+        if (metadataWrite.type === `delete`) {
+          this.syncedCollectionMetadata.delete(key)
+          continue
+        }
+        this.syncedCollectionMetadata.set(key, metadataWrite.value)
+      }
+    }
+
+    this.isCommittingSyncTransactions = false
+
+    // Derive one event per touched key from first-previous vs final state
+    const events: Array<ChangeMessage<TOutput, TKey>> = []
+    for (const [key, previousValue] of previousValues) {
+      const newValue = this.syncedData.get(key)
+      if (previousValue === undefined) {
+        if (newValue !== undefined) {
+          events.push({ type: `insert`, key, value: newValue })
+        }
+      } else if (newValue === undefined) {
+        events.push({ type: `delete`, key, value: previousValue })
+      } else {
+        const previousOrigin = previousOrigins.get(key)
+        const originChanged =
+          previousOrigin !== undefined &&
+          previousOrigin !== this.rowOrigins.get(key)
+        if (originChanged || !deepEquals(previousValue, newValue)) {
+          // Preserve the pre-change origin on the previous value when it
+          // flipped, matching the general path's virtual-props snapshots
+          const enrichedPrevious = originChanged
+            ? enrichRowWithVirtualProps(
+                previousValue,
+                key,
+                this.collection.id,
+                () => true,
+                () => previousOrigin,
+              )
+            : previousValue
+          events.push({
+            type: `update`,
+            key,
+            value: newValue,
+            previousValue: enrichedPrevious,
+          })
+        }
+      }
+    }
+
+    // No optimistic state by precondition, so size is just the synced size
+    this.size = this.syncedData.size
+
+    if (events.length > 0) {
+      this.indexes.updateIndexes(events)
+    }
+    this.changes.emitEvents(events, true)
+
+    this.pendingSyncedTransactions = uncommittedSyncedTransactions
+
+    if (!this.hasReceivedFirstCommit) {
+      this.hasReceivedFirstCommit = true
+    }
+  }
+
   commitPendingTransactions = () => {
     // Check if there are any persisting transaction
     let hasPersistingTransaction = false
@@ -921,6 +1058,31 @@ export class CollectionStateManager<
         hasImmediateSync: false,
       },
     )
+
+    // Fast lane: with no user transactions, no optimistic state, no truncate
+    // and no pre-captured state, the general path below degenerates to
+    // "apply ops, emit events". This is the steady state for every live
+    // query result collection on every graph tick, so it is worth a direct
+    // implementation without the snapshot/redundancy machinery.
+    if (
+      committedSyncedTransactions.length > 0 &&
+      !hasTruncateSync &&
+      this.transactions.size === 0 &&
+      this.optimisticUpserts.size === 0 &&
+      this.optimisticDeletes.size === 0 &&
+      this.pendingOptimisticUpserts.size === 0 &&
+      this.pendingOptimisticDeletes.size === 0 &&
+      this.pendingOptimisticDirectUpserts.size === 0 &&
+      this.pendingOptimisticDirectDeletes.size === 0 &&
+      this.preSyncVisibleState.size === 0 &&
+      this.recentlySyncedKeys.size === 0
+    ) {
+      this.commitSyncedTransactionsFastLane(
+        committedSyncedTransactions,
+        uncommittedSyncedTransactions,
+      )
+      return
+    }
 
     // Process committed transactions if:
     // 1. No persisting user transaction (normal sync flow), OR
