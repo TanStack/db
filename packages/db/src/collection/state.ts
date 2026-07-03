@@ -538,6 +538,24 @@ export class CollectionStateManager<
       return
     }
 
+    // Nothing-to-do fast path: with no transactions, no optimistic state and
+    // no pending sync work, the rebuild below is the identity and produces no
+    // events. This is the steady state right after a synchronously-completed
+    // direct mutation has been pruned.
+    if (
+      this.transactions.size === 0 &&
+      this.optimisticUpserts.size === 0 &&
+      this.optimisticDeletes.size === 0 &&
+      this.pendingOptimisticUpserts.size === 0 &&
+      this.pendingOptimisticDeletes.size === 0 &&
+      this.pendingOptimisticDirectUpserts.size === 0 &&
+      this.pendingOptimisticDirectDeletes.size === 0 &&
+      this.pendingSyncedTransactions.length === 0 &&
+      this.pendingLocalChanges.size === 0
+    ) {
+      return
+    }
+
     const previousState = new Map(this.optimisticUpserts)
     const previousDeletes = new Set(this.optimisticDeletes)
     const previousRowOrigins = this.rowOrigins
