@@ -38,76 +38,20 @@ export class SortedMap<TKey extends string | number, TValue> {
     if (!this.dirty) {
       return
     }
-    const comparator = this.comparator!
+    const comparator = this.comparator
     this.sortedKeys = [...this.map.keys()]
-    this.sortedKeys.sort((a, b) => {
-      const valueComparison = comparator(this.map.get(a)!, this.map.get(b)!)
-      if (valueComparison !== 0) {
-        return valueComparison
-      }
-      return compareKeys(a, b)
-    })
+    if (comparator) {
+      this.sortedKeys.sort((a, b) => {
+        const valueComparison = comparator(this.map.get(a)!, this.map.get(b)!)
+        if (valueComparison !== 0) {
+          return valueComparison
+        }
+        return compareKeys(a, b)
+      })
+    } else {
+      this.sortedKeys.sort(compareKeys)
+    }
     this.dirty = false
-  }
-
-  /**
-   * Finds the index where a key-value pair should be inserted to maintain sort order.
-   * Uses binary search to find the correct position based on the value (if comparator provided),
-   * with key-based tie-breaking for deterministic ordering when values compare as equal.
-   * If no comparator is provided, sorts by key only.
-   * Runs in O(log n) time.
-   *
-   * @param key - The key to find position for (used as tie-breaker or primary sort when no comparator)
-   * @param value - The value to compare against (only used if comparator is provided)
-   * @returns The index where the key should be inserted
-   */
-  private indexOf(key: TKey, value: TValue): number {
-    let left = 0
-    let right = this.sortedKeys.length
-
-    // Fast path: no comparator means sort by key only
-    if (!this.comparator) {
-      while (left < right) {
-        const mid = Math.floor((left + right) / 2)
-        const midKey = this.sortedKeys[mid]!
-        const keyComparison = compareKeys(key, midKey)
-        if (keyComparison < 0) {
-          right = mid
-        } else if (keyComparison > 0) {
-          left = mid + 1
-        } else {
-          return mid
-        }
-      }
-      return left
-    }
-
-    // With comparator: sort by value first, then key as tie-breaker
-    while (left < right) {
-      const mid = Math.floor((left + right) / 2)
-      const midKey = this.sortedKeys[mid]!
-      const midValue = this.map.get(midKey)!
-      const valueComparison = this.comparator(value, midValue)
-
-      if (valueComparison < 0) {
-        right = mid
-      } else if (valueComparison > 0) {
-        left = mid + 1
-      } else {
-        // Values are equal, use key as tie-breaker for deterministic ordering
-        const keyComparison = compareKeys(key, midKey)
-        if (keyComparison < 0) {
-          right = mid
-        } else if (keyComparison > 0) {
-          left = mid + 1
-        } else {
-          // Same key (shouldn't happen during insert, but handle for lookups)
-          return mid
-        }
-      }
-    }
-
-    return left
   }
 
   /**
@@ -128,17 +72,23 @@ export class SortedMap<TKey extends string | number, TValue> {
       return this
     }
 
-    if (this.map.has(key)) {
-      // Need to remove the old key from the sorted keys array
-      const oldValue = this.map.get(key)!
-      const oldIndex = this.indexOf(key, oldValue)
-      this.sortedKeys.splice(oldIndex, 1)
+    // Key-ordered map: updating an existing key never moves it, and
+    // appending a key greater than the current tail keeps the array sorted
+    // (the common monotonic-id case) — both avoid a splice. Other inserts
+    // append and defer sorting to the next ordered read.
+    if (!this.map.has(key)) {
+      if (this.sortedKeys.length === 0) {
+        this.sortedKeys.push(key)
+      } else if (
+        !this.dirty &&
+        compareKeys(key, this.sortedKeys[this.sortedKeys.length - 1]!) > 0
+      ) {
+        this.sortedKeys.push(key)
+      } else {
+        this.sortedKeys.push(key)
+        this.dirty = true
+      }
     }
-
-    // Insert the new key at the correct position
-    const index = this.indexOf(key, value)
-    this.sortedKeys.splice(index, 0, key)
-
     this.map.set(key, value)
 
     return this
@@ -161,24 +111,13 @@ export class SortedMap<TKey extends string | number, TValue> {
    * @returns True if the key was found and removed, false otherwise
    */
   delete(key: TKey): boolean {
-    if (this.comparator) {
-      // Lazy ordering: leave the stale key in sortedKeys; the next ordered
-      // read rebuilds from the map
-      const had = this.map.delete(key)
-      if (had) {
-        this.dirty = true
-      }
-      return had
+    // Lazy ordering (both modes): leave the stale key in sortedKeys; the
+    // next ordered read rebuilds from the map
+    const had = this.map.delete(key)
+    if (had) {
+      this.dirty = true
     }
-
-    if (this.map.has(key)) {
-      const oldValue = this.map.get(key)
-      const index = this.indexOf(key, oldValue!)
-      this.sortedKeys.splice(index, 1)
-      return this.map.delete(key)
-    }
-
-    return false
+    return had
   }
 
   /**
