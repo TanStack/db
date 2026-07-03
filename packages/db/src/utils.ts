@@ -27,16 +27,18 @@ interface TypedArray {
  * ```
  */
 export function deepEquals(a: any, b: any): boolean {
-  return deepEqualsInternal(a, b, new Map())
+  return deepEqualsInternal(a, b, null)
 }
 
 /**
- * Internal implementation with cycle detection to prevent infinite recursion
+ * Internal implementation with cycle detection to prevent infinite recursion.
+ * The visited map is allocated lazily on the first container descent — flat
+ * values (the common row shape) never pay for it.
  */
 function deepEqualsInternal(
   a: any,
   b: any,
-  visited: Map<object, object>,
+  visited: Map<object, object> | null,
 ): boolean {
   // Handle strict equality (primitives, same reference)
   if (a === b) return true
@@ -69,9 +71,10 @@ function deepEqualsInternal(
     if (a.size !== b.size) return false
 
     // Check for circular references
-    if (visited.has(a)) {
+    if (visited?.has(a)) {
       return visited.get(a) === b
     }
+    visited ??= new Map()
     visited.set(a, b)
 
     const entries = Array.from(a.entries())
@@ -91,9 +94,10 @@ function deepEqualsInternal(
     if (a.size !== b.size) return false
 
     // Check for circular references
-    if (visited.has(a)) {
+    if (visited?.has(a)) {
       return visited.get(a) === b
     }
+    visited ??= new Map()
     visited.set(a, b)
 
     // Convert to arrays for comparison
@@ -166,9 +170,10 @@ function deepEqualsInternal(
     if (!Array.isArray(b) || a.length !== b.length) return false
 
     // Check for circular references
-    if (visited.has(a)) {
+    if (visited?.has(a)) {
       return visited.get(a) === b
     }
+    visited ??= new Map()
     visited.set(a, b)
 
     const result = a.every((item, index) =>
@@ -183,10 +188,9 @@ function deepEqualsInternal(
   // Handle objects
   if (typeof a === `object`) {
     // Check for circular references
-    if (visited.has(a)) {
+    if (visited?.has(a)) {
       return visited.get(a) === b
     }
-    visited.set(a, b)
 
     // Get all keys from both objects
     const keysA = Object.keys(a)
@@ -194,15 +198,38 @@ function deepEqualsInternal(
 
     // Check if they have the same number of keys
     if (keysA.length !== keysB.length) {
-      visited.delete(a)
       return false
     }
 
-    // Check if all keys exist in both objects and their values are equal
-    const result = keysA.every(
-      (key) => key in b && deepEqualsInternal(a[key], b[key], visited),
-    )
+    // Single pass: primitives compare inline; container-valued keys are
+    // collected so cycle tracking (and its Map allocation) is only paid
+    // when there is actually something to recurse into.
+    let containerKeys: Array<string> | null = null
+    for (const key of keysA) {
+      if (!(key in b)) return false
+      const aVal = a[key]
+      const bVal = b[key]
+      if (aVal === bVal) continue
+      const aIsObj = typeof aVal === `object` && aVal !== null
+      const bIsObj = typeof bVal === `object` && bVal !== null
+      if (aIsObj && bIsObj) {
+        ;(containerKeys ??= []).push(key)
+        continue
+      }
+      if (deepEqualsInternal(aVal, bVal, visited) === false) return false
+    }
 
+    if (containerKeys === null) return true
+
+    visited ??= new Map()
+    visited.set(a, b)
+    let result = true
+    for (const key of containerKeys) {
+      if (!deepEqualsInternal(a[key], b[key], visited)) {
+        result = false
+        break
+      }
+    }
     visited.delete(a)
     return result
   }
