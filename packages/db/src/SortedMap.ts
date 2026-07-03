@@ -9,6 +9,14 @@ export class SortedMap<TKey extends string | number, TValue> {
   private map: Map<TKey, TValue>
   private sortedKeys: Array<TKey>
   private comparator: ((a: TValue, b: TValue) => number) | undefined
+  /**
+   * With a custom comparator, ordering is maintained lazily: writes are O(1)
+   * (append + mark dirty) and `sortedKeys` is rebuilt from the map on the
+   * next ordered read. Value comparators (e.g. fractional-index comparators
+   * on live query collections) are much more expensive per probe than key
+   * comparisons, and reads typically follow batches of writes.
+   */
+  private dirty = false
 
   /**
    * Creates a new SortedMap instance
@@ -20,6 +28,26 @@ export class SortedMap<TKey extends string | number, TValue> {
     this.map = new Map<TKey, TValue>()
     this.sortedKeys = []
     this.comparator = comparator
+  }
+
+  /**
+   * Rebuilds the sorted key order from the map when lazy writes have made it
+   * stale. `sortedKeys` may contain deleted keys until this runs.
+   */
+  private ensureSorted(): void {
+    if (!this.dirty) {
+      return
+    }
+    const comparator = this.comparator!
+    this.sortedKeys = [...this.map.keys()]
+    this.sortedKeys.sort((a, b) => {
+      const valueComparison = comparator(this.map.get(a)!, this.map.get(b)!)
+      if (valueComparison !== 0) {
+        return valueComparison
+      }
+      return compareKeys(a, b)
+    })
+    this.dirty = false
   }
 
   /**
@@ -90,6 +118,16 @@ export class SortedMap<TKey extends string | number, TValue> {
    * @returns This SortedMap instance for chaining
    */
   set(key: TKey, value: TValue): this {
+    if (this.comparator) {
+      // Lazy ordering: append new keys, defer sorting to the next read
+      if (!this.map.has(key)) {
+        this.sortedKeys.push(key)
+      }
+      this.map.set(key, value)
+      this.dirty = true
+      return this
+    }
+
     if (this.map.has(key)) {
       // Need to remove the old key from the sorted keys array
       const oldValue = this.map.get(key)!
@@ -123,6 +161,16 @@ export class SortedMap<TKey extends string | number, TValue> {
    * @returns True if the key was found and removed, false otherwise
    */
   delete(key: TKey): boolean {
+    if (this.comparator) {
+      // Lazy ordering: leave the stale key in sortedKeys; the next ordered
+      // read rebuilds from the map
+      const had = this.map.delete(key)
+      if (had) {
+        this.dirty = true
+      }
+      return had
+    }
+
     if (this.map.has(key)) {
       const oldValue = this.map.get(key)
       const index = this.indexOf(key, oldValue!)
@@ -164,6 +212,7 @@ export class SortedMap<TKey extends string | number, TValue> {
    * @returns An iterator for the map's entries
    */
   *[Symbol.iterator](): IterableIterator<[TKey, TValue]> {
+    this.ensureSorted()
     for (const key of this.sortedKeys) {
       yield [key, this.map.get(key)!] as [TKey, TValue]
     }
@@ -184,6 +233,7 @@ export class SortedMap<TKey extends string | number, TValue> {
    * @returns An iterator for the map's keys
    */
   keys(): IterableIterator<TKey> {
+    this.ensureSorted()
     return this.sortedKeys[Symbol.iterator]()
   }
 
@@ -194,6 +244,7 @@ export class SortedMap<TKey extends string | number, TValue> {
    */
   values(): IterableIterator<TValue> {
     return function* (this: SortedMap<TKey, TValue>) {
+      this.ensureSorted()
       for (const key of this.sortedKeys) {
         yield this.map.get(key)!
       }
@@ -208,6 +259,7 @@ export class SortedMap<TKey extends string | number, TValue> {
   forEach(
     callbackfn: (value: TValue, key: TKey, map: Map<TKey, TValue>) => void,
   ): void {
+    this.ensureSorted()
     for (const key of this.sortedKeys) {
       callbackfn(this.map.get(key)!, key, this.map)
     }
