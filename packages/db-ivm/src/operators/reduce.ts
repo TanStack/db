@@ -43,6 +43,36 @@ export class ReduceOperator<K, V1, V2> extends UnaryOperator<[K, V1], [K, V2]> {
       const currOut = this.#indexOut.get(key)
       const out = this.#f(curr)
 
+      // Fast path for the overwhelmingly common case: at most one previous
+      // output value and at most one new output value. Output values are
+      // fresh objects each recomputation (reference-keyed diffing below never
+      // matches them), so this is a plain retract + emit without allocating
+      // the two diff Maps per key.
+      if (out.length <= 1 && currOut.length <= 1) {
+        const oldEntry = currOut[0]
+        const newEntry = out[0]
+        if (
+          oldEntry !== undefined &&
+          (newEntry === undefined || oldEntry[0] !== newEntry[0])
+        ) {
+          result.push([[key, oldEntry[0]], -oldEntry[1]])
+          this.#indexOut.addValue(key, [oldEntry[0], -oldEntry[1]])
+        }
+        if (newEntry !== undefined && newEntry[1] !== 0) {
+          if (oldEntry !== undefined && oldEntry[0] === newEntry[0]) {
+            const delta = newEntry[1] - oldEntry[1]
+            if (delta !== 0) {
+              result.push([[key, newEntry[0]], delta])
+              this.#indexOut.addValue(key, [newEntry[0], delta])
+            }
+          } else {
+            result.push([[key, newEntry[0]], newEntry[1]])
+            this.#indexOut.addValue(key, [newEntry[0], newEntry[1]])
+          }
+        }
+        continue
+      }
+
       // Create maps for current and previous outputs using values directly as keys
       const newOutputMap = new Map<V2, number>()
       const oldOutputMap = new Map<V2, number>()

@@ -248,11 +248,36 @@ export class Index<TKey, TValue, TPrefix = any> {
 
   /**
    * This method returns all values for a given key.
+   * Builds the array directly (no generator) — this is on the hot path of
+   * join and reduce operators.
    * @param key - The key to get the values for.
    * @returns An array of value tuples [value, multiplicity].
    */
   get(key: TKey): Array<[TValue, number]> {
-    return [...this.getIterator(key)]
+    const mapOrSingleValue = this.#inner.get(key)
+    if (mapOrSingleValue === undefined) {
+      return []
+    }
+    if (isSingleValue(mapOrSingleValue)) {
+      return [mapOrSingleValue]
+    }
+    const result: Array<[TValue, number]> = []
+    if (mapOrSingleValue instanceof ValueMap) {
+      for (const valueTuple of mapOrSingleValue.values()) {
+        result.push(valueTuple)
+      }
+      return result
+    }
+    for (const singleValueOrValueMap of mapOrSingleValue.values()) {
+      if (isSingleValue(singleValueOrValueMap)) {
+        result.push(singleValueOrValueMap)
+      } else {
+        for (const valueTuple of singleValueOrValueMap.values()) {
+          result.push(valueTuple)
+        }
+      }
+    }
+    return result
   }
 
   /**
