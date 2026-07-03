@@ -473,6 +473,9 @@ export class CollectionSubscription
       ? createFilterFunctionFromExpression(where)
       : undefined
 
+    // Values fetched during filtering are cached so the emit loop below
+    // doesn't pay a second collection.get (optimistic-overlay walk) per key.
+    const snapshotValues = new Map<string | number, any>()
     const filterFn = (key: string | number | undefined): boolean => {
       if (key !== undefined && this.sentKeys.has(key)) {
         return false
@@ -481,6 +484,9 @@ export class CollectionSubscription
       const value = this.collection.get(key)
       if (value === undefined) {
         return false
+      }
+      if (key !== undefined) {
+        snapshotValues.set(key, value)
       }
 
       return whereFilterFn?.(value) ?? true
@@ -544,7 +550,7 @@ export class CollectionSubscription
       const insertedKeys = new Set<string | number>() // Track keys we add to `changes` in this iteration
 
       for (const key of keys) {
-        const value = this.collection.get(key)!
+        const value = snapshotValues.get(key) ?? this.collection.get(key)!
         changes.push({
           type: `insert`,
           key,
