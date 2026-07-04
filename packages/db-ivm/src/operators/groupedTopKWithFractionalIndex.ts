@@ -125,7 +125,66 @@ export class GroupedTopKWithFractionalIndexOperator<
 
   run(): void {
     const result: Array<[[K, IndexedValue<T>], number]> = []
-    for (const message of this.inputMessages()) {
+    const messages = this.inputMessages()
+
+    // Initial-load fast path (mirrors TopKWithFractionalIndexOperator): with
+    // no group state yet and a single batch of unique inserts, bucket rows
+    // per group and bulk-load each group — one sort and append-style
+    // fractional keys instead of per-element binary search + splices.
+    if (this.#groupStates.size === 0 && messages.length === 1) {
+      const inner = messages[0]!.getInner()
+      let qualifies = inner.length > 1
+      if (qualifies) {
+        const seen = new Set<K>()
+        for (const [item, multiplicity] of inner) {
+          if (multiplicity !== 1 || seen.has(item[0])) {
+            qualifies = false
+            break
+          }
+          seen.add(item[0])
+        }
+      }
+      if (qualifies) {
+        const groups = new Map<unknown, Array<[K, T]>>()
+        for (const [item] of inner) {
+          const groupKey = this.#groupKeyFn(item[0], item[1])
+          let bucket = groups.get(groupKey)
+          if (!bucket) {
+            bucket = []
+            groups.set(groupKey, bucket)
+          }
+          bucket.push(item)
+        }
+        for (const [groupKey, items] of groups) {
+          const state = this.#getOrCreateGroupState(groupKey)
+          if (state.supportsBulkLoad) {
+            for (const moveIn of state.bulkLoad(items)) {
+              handleMoveIn(moveIn, result)
+            }
+          } else {
+            for (const [key, value] of items) {
+              const changes = state.processElement(key, value, 1)
+              handleMoveIn(changes.moveIn, result)
+              handleMoveOut(changes.moveOut, result)
+            }
+            this.#cleanupGroupIfEmpty(groupKey, state)
+          }
+        }
+        if (result.length > 0) {
+          this.output.sendData(new MultiSet(result))
+        }
+        return
+      }
+      for (const [item, multiplicity] of inner) {
+        this.#processElement(item[0], item[1], multiplicity, result)
+      }
+      if (result.length > 0) {
+        this.output.sendData(new MultiSet(result))
+      }
+      return
+    }
+
+    for (const message of messages) {
       for (const [item, multiplicity] of message.getInner()) {
         const [key, value] = item
         this.#processElement(key, value, multiplicity, result)
