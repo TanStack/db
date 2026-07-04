@@ -1,3 +1,4 @@
+import { MultiSet } from '@tanstack/db-ivm'
 import {
   normalizeExpressionPaths,
   normalizeOrderByPaths,
@@ -19,10 +20,15 @@ import type { BasicExpression } from '../ir.js'
 import type { OrderByOptimizationInfo } from '../compiler/order-by.js'
 import type { CollectionConfigBuilder } from './collection-config-builder.js'
 import type { CollectionSubscription } from '../../collection/subscription.js'
+import type { MultiSetArray } from '@tanstack/db-ivm'
 
 const loadMoreCallbackSymbol = Symbol.for(
   `@tanstack/db.collection-config-builder`,
 )
+
+type SubscriptionWithLoader = CollectionSubscription & {
+  [loadMoreCallbackSymbol]?: () => boolean
+}
 
 export class CollectionSubscriber<
   TContext extends Context,
@@ -247,6 +253,54 @@ export class CollectionSubscriber<
     // Use a holder to forward-reference subscription in the callback
     const subscriptionHolder: { current?: CollectionSubscription } = {}
 
+    // Snapshot batch fast path: rows arrive as raw [key, value] pairs (all
+    // inserts). Replicates trackBiggestSentValue + sendChangesToPipeline
+    // semantics in a single pass without ChangeMessage objects.
+    const sendSnapshotBatch = (rows: Array<[string | number, any]>) => {
+      const comparator = orderByInfo.comparator
+      let biggest = this.biggest
+      let shouldResetLoadKey = false
+      const multiSetArray: MultiSetArray<unknown> = []
+      for (const [key, value] of rows) {
+        const isNewKey = !this.sentToD2Keys.has(key)
+        if (biggest === undefined || comparator(biggest, value) < 0) {
+          biggest = value
+          shouldResetLoadKey = true
+        } else if (isNewKey) {
+          // New key at same sort position — allow another load if needed
+          shouldResetLoadKey = true
+        }
+        if (isNewKey) {
+          this.sentToD2Keys.add(key)
+          multiSetArray.push([[key, value], 1])
+        }
+      }
+      this.biggest = biggest
+      if (shouldResetLoadKey) {
+        this.lastLoadRequestKey = undefined
+      }
+
+      // currentSyncState and input are always defined during a sync session
+      const input =
+        this.collectionConfigBuilder.currentSyncState!.inputs[this.alias]!
+      if (multiSetArray.length !== 0) {
+        input.sendData(new MultiSet(multiSetArray))
+      }
+
+      const subscription = subscriptionHolder.current! as SubscriptionWithLoader
+      subscription[loadMoreCallbackSymbol] ??= this.loadMoreIfNeeded.bind(
+        this,
+        subscription,
+      )
+      const dataLoader =
+        multiSetArray.length > 0
+          ? subscription[loadMoreCallbackSymbol]
+          : undefined
+      this.collectionConfigBuilder.scheduleGraphRun(dataLoader, {
+        alias: this.alias,
+      })
+    }
+
     const sendChangesInRange = (
       changes: Iterable<ChangeMessage<any, string | number>>,
     ) => {
@@ -301,6 +355,7 @@ export class CollectionSubscriber<
         orderBy: normalizedOrderBy,
         trackLoadSubsetPromise: false,
         onLoadSubsetResult: handleLoadSubsetResult,
+        onSnapshotBatch: sendSnapshotBatch,
       })
     } else {
       // No index available (e.g., non-ref expression): pass orderBy/limit to loadSubset
@@ -363,10 +418,6 @@ export class CollectionSubscriber<
     // Cache the loadMoreIfNeeded callback on the subscription using a symbol property.
     // This ensures we pass the same function instance to the scheduler each time,
     // allowing it to deduplicate callbacks when multiple changes arrive during a transaction.
-    type SubscriptionWithLoader = CollectionSubscription & {
-      [loadMoreCallbackSymbol]?: () => boolean
-    }
-
     const subscriptionWithLoader = subscription as SubscriptionWithLoader
 
     subscriptionWithLoader[loadMoreCallbackSymbol] ??=

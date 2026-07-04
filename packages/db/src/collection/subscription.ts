@@ -30,6 +30,13 @@ type RequestSnapshotOptions = {
   limit?: number
   /** Callback that receives the raw loadSubset result for external tracking */
   onLoadSubsetResult?: (result: Promise<void> | true) => void
+  /**
+   * When provided, snapshot rows are delivered as raw [key, value] pairs to
+   * this callback instead of ChangeMessage objects through the subscriber
+   * callback — skipping a per-row object allocation and two downstream
+   * passes. sentKeys/row-count/cursor bookkeeping is unchanged.
+   */
+  onSnapshotBatch?: (rows: Array<[string | number, any]>) => void
 }
 
 type RequestLimitedSnapshotOptions = {
@@ -43,6 +50,13 @@ type RequestLimitedSnapshotOptions = {
   trackLoadSubsetPromise?: boolean
   /** Callback that receives the raw loadSubset result for external tracking */
   onLoadSubsetResult?: (result: Promise<void> | true) => void
+  /**
+   * When provided, snapshot rows are delivered as raw [key, value] pairs to
+   * this callback instead of ChangeMessage objects through the subscriber
+   * callback — skipping a per-row object allocation and two downstream
+   * passes. sentKeys/row-count/cursor bookkeeping is unchanged.
+   */
+  onSnapshotBatch?: (rows: Array<[string | number, any]>) => void
 }
 
 type CollectionSubscriptionOptions = {
@@ -450,6 +464,7 @@ export class CollectionSubscription
     offset,
     trackLoadSubsetPromise: shouldTrackLoadSubsetPromise = true,
     onLoadSubsetResult,
+    onSnapshotBatch,
   }: RequestLimitedSnapshotOptions) {
     if (!limit) throw new Error(`limit is required`)
 
@@ -536,7 +551,6 @@ export class CollectionSubscription
       keys = index.takeFromStart(limit, filterFn)
     }
 
-    const valuesNeeded = () => Math.max(limit - changes.length, 0)
     const collectionExhausted = () => keys.length === 0
 
     // Create a value extractor for the orderBy field to properly track the biggest indexed value
@@ -546,20 +560,28 @@ export class CollectionSubscription
         ? compileExpression(new PropRef(orderByExpression.path), true)
         : null
 
-    while (valuesNeeded() > 0 && !collectionExhausted()) {
-      const insertedKeys = new Set<string | number>() // Track keys we add to `changes` in this iteration
+    // Batch mode collects raw [key, value] pairs instead of ChangeMessages
+    const batchRows: Array<[string | number, any]> | null = onSnapshotBatch
+      ? []
+      : null
+    const sentCount = () => (batchRows ? batchRows.length : changes.length)
+    const valuesNeeded = () => Math.max(limit - sentCount(), 0)
 
+    while (valuesNeeded() > 0 && !collectionExhausted()) {
       for (const key of keys) {
         const value = snapshotValues.get(key) ?? this.collection.get(key)!
-        changes.push({
-          type: `insert`,
-          key,
-          value,
-        })
+        if (batchRows) {
+          batchRows.push([key, value])
+        } else {
+          changes.push({
+            type: `insert`,
+            key,
+            value,
+          })
+        }
         // Extract the indexed value (e.g., salary) from the row, not the full row
         // This is needed for index.take() to work correctly with the BTree comparator
         biggestObservedValue = valueExtractor ? valueExtractor(value) : value
-        insertedKeys.add(key) // Track this key
       }
 
       keys = index.take(valuesNeeded(), biggestObservedValue!, filterFn)
@@ -572,15 +594,24 @@ export class CollectionSubscription
     // Add keys to sentKeys BEFORE calling callback to prevent race condition.
     // If a change event arrives while the callback is executing, it will see
     // the keys already in sentKeys and filter out duplicates correctly.
-    for (const change of changes) {
-      this.sentKeys.add(change.key)
+    if (batchRows) {
+      for (const row of batchRows) {
+        this.sentKeys.add(row[0])
+      }
+      onSnapshotBatch!(batchRows)
+    } else {
+      for (const change of changes) {
+        this.sentKeys.add(change.key)
+      }
+      this.rawCallback(changes)
     }
 
-    this.rawCallback(changes)
-
     // Update the row count and last key after sending (for next call's offset/cursor)
-    this.limitedSnapshotRowCount += changes.length
-    if (changes.length > 0) {
+    const deliveredCount = sentCount()
+    this.limitedSnapshotRowCount += deliveredCount
+    if (batchRows && batchRows.length > 0) {
+      this.lastSentKey = batchRows[batchRows.length - 1]![0]
+    } else if (changes.length > 0) {
       this.lastSentKey = changes[changes.length - 1]!.key
     }
 
