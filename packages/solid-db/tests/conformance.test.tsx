@@ -133,6 +133,7 @@ function makeHandle(
         status: result?.status ?? `idle`,
         isReady: Boolean(result?.isReady),
         isError: Boolean(result?.isError),
+        // solid-db exposes no `isEnabled`; derive it from status (status-derived).
         isEnabled: result?.status !== `disabled`,
       }
     },

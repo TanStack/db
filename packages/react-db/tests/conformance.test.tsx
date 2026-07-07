@@ -172,7 +172,9 @@ function makeHandle(hook: RenderHookResult<any, any>) {
         status: r?.status ?? `idle`,
         isReady: Boolean(r?.isReady),
         isError: Boolean(r?.isError),
-        isEnabled: r?.status !== `disabled`,
+        // Read react-db's real `isEnabled` field so the suite catches a broken
+        // one (deriving from status would mask it).
+        isEnabled: Boolean(r?.isEnabled),
       }
     },
     async flush() {

@@ -131,6 +131,7 @@ function makeHandle(getQuery: () => any, dispose: () => void): LiveQueryHandle {
         status: query?.status ?? `idle`,
         isReady: Boolean(query?.isReady),
         isError: Boolean(query?.isError),
+        // svelte-db exposes no `isEnabled`; derive it from status (status-derived).
         isEnabled: query?.status !== `disabled`,
       }
     },
