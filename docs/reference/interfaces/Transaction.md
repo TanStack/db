@@ -75,17 +75,6 @@ isPersisted: Deferred<Transaction<T>>;
 
 Defined in: [packages/db/src/transactions.ts:214](https://github.com/TanStack/db/blob/main/packages/db/src/transactions.ts#L214)
 
-Deferred that settles when this transaction's mutation function settles.
-
-Await `isPersisted.promise`, not `isPersisted` itself. The promise resolves
-after the mutation function completes successfully and rejects if the
-mutation function fails.
-
-This is TanStack DB's local transaction settlement boundary. It does not
-inherently prove that a backend has uploaded, confirmed, or read back the
-write unless the mutation function waits for that backend observation
-before returning.
-
 ***
 
 ### metadata
