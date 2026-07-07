@@ -1,7 +1,10 @@
 import { describe, expect, it } from 'vitest'
 import { createCollection } from '../src/collection/index.js'
 import { createLiveQueryObserver } from '../src/live-query-observer.js'
-import { mockSyncCollectionOptions } from './utils.js'
+import {
+  mockSyncCollectionOptions,
+  mockSyncCollectionOptionsNoInitialState,
+} from './utils.js'
 import type { ChangeMessage } from '../src/types.js'
 
 interface Row {
@@ -23,6 +26,18 @@ function makeSource(data: Array<Row> = SEED) {
       initialData: data,
     }),
   )
+}
+
+/** A collection that is syncing but not yet ready, with a manual `markReady`. */
+function makeLoadingSource() {
+  const collection = createCollection(
+    mockSyncCollectionOptionsNoInitialState<Row>({
+      id: `observer-loading-${seq++}`,
+      getKey: (r) => r.id,
+    }),
+  )
+  collection.startSyncImmediate()
+  return collection
 }
 
 describe(`createLiveQueryObserver`, () => {
@@ -115,6 +130,27 @@ describe(`createLiveQueryObserver`, () => {
     await Promise.resolve()
     // ...delivered on the next microtask.
     expect(notified).toBe(true)
+    observer.dispose()
+  })
+
+  it(`fires the ready notify once after unsubscribe-before-ready then resubscribe`, () => {
+    const collection = makeLoadingSource()
+    const observer = createLiveQueryObserver<Row, string>(collection as any)
+
+    // Subscribe then unsubscribe while still loading — this registers an
+    // onFirstReady callback that detach() can't remove.
+    observer.subscribe(() => {})()
+
+    let readyNotifications = 0
+    observer.subscribe((changes) => {
+      if (changes === undefined) readyNotifications++
+    })
+
+    collection.utils.markReady()
+
+    // Only the current subscription's ready callback should fire, not the
+    // stale one left behind by the first (already unsubscribed) attach.
+    expect(readyNotifications).toBe(1)
     observer.dispose()
   })
 })

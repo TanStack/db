@@ -90,6 +90,9 @@ class LiveQueryObserverImpl<
   private cachedSnapshot: LiveQuerySnapshot<T, TKey> = DISABLED_SNAPSHOT
   private readonly listeners = new Set<LiveQueryObserverListener<T, TKey>>()
   private collectionUnsub: (() => void) | null = null
+  // Bumped on each attach. `onFirstReady` can't be unsubscribed, so a callback
+  // from a superseded attach checks this to no-op instead of double-notifying.
+  private attachGeneration = 0
   private disposed = false
 
   constructor(
@@ -149,6 +152,8 @@ class LiveQueryObserverImpl<
     const collection = this.collection
     if (!collection || this.disposed) return
 
+    const generation = ++this.attachGeneration
+
     // Subscribe with initial state so granular consumers receive the current
     // rows as inserts followed by deltas through one consistent channel — the
     // same contract the adapters used before the observer existed (the
@@ -179,8 +184,16 @@ class LiveQueryObserverImpl<
     // (e.g. `markReady()` with no rows). Skip when already ready — the initial
     // state batch above already covers that, and `onFirstReady` would fire an
     // immediate duplicate.
+    //
+    // `onFirstReady` returns no unsubscribe, so a callback left behind by an
+    // earlier attach (subscribe → unsubscribe-before-ready → subscribe) would
+    // still fire on `markReady`. Guard with the attach generation so only the
+    // current attachment's callback notifies.
     if (collection.status !== `ready`) {
-      collection.onFirstReady(() => notify(undefined))
+      collection.onFirstReady(() => {
+        if (generation !== this.attachGeneration) return
+        notify(undefined)
+      })
     }
 
     attaching = false
