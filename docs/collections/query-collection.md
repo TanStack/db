@@ -125,7 +125,15 @@ const todosCollection = createCollection(
 
 This differs from TanStack Query's observer-level `select`: query-db-collection uses this option to bridge Query's response object into DB's normalized row store.
 
-Direct write utilities such as `writeInsert`, `writeUpdate`, and `writeDelete` make a best-effort attempt to update the matching row array inside wrapped Query cache entries while preserving wrapper metadata. Simple wrappers such as `{ data: [...] }`, `{ items: [...] }`, and `{ results: [...] }` work automatically. Derived projections, such as `select: (response) => response.edges.map((edge) => edge.node)`, are read-side row extraction only; query-db-collection cannot generally reconstruct the original response envelope from updated rows. Refetch or invalidate the query if the wrapped cache must exactly reflect direct writes for a derived projection.
+Direct write utilities such as `writeInsert`, `writeUpdate`, and `writeDelete` make a best-effort attempt to update the matching row array inside wrapped Query cache entries while preserving wrapper metadata.
+
+This works automatically for simple wrappers such as:
+
+- `{ data: [...] }`
+- `{ items: [...] }`
+- `{ results: [...] }`
+
+Derived projections, such as `select: (response) => response.edges.map((edge) => edge.node)`, are read-side row extraction only. query-db-collection cannot generally reconstruct the original response envelope from updated rows. Refetch or invalidate the query if the wrapped cache must exactly reflect direct writes for a derived projection.
 
 ### Collection Options
 
