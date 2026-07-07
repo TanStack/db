@@ -184,6 +184,23 @@ function marker(comparison: Comparison, threshold: number): string {
   return ``
 }
 
+// Individual rows are noisy at sub-ms timings, but a consistent shift across
+// many rows is a real change even when no single row clears the per-row
+// significance bar — the geometric mean of the ratios captures that.
+function geomeanRatio(group: Array<Comparison>): number {
+  const finite = group
+    .map((comparison) => comparison.medianRatio)
+    .filter((value) => Number.isFinite(value) && value > 0)
+  if (finite.length === 0) return 1
+  return Math.exp(
+    finite.reduce((sum, value) => sum + Math.log(value), 0) / finite.length,
+  )
+}
+
+function formatRatio(value: number): string {
+  return `${value.toFixed(2)}×`
+}
+
 function formatMarkdown(
   baseReport: Report,
   candidateReport: Report,
@@ -218,6 +235,12 @@ function formatMarkdown(
     )
   }
   lines.push(``)
+  lines.push(
+    `Overall median write time vs base: **${formatRatio(
+      geomeanRatio(allComparisons),
+    )}** (geometric mean of per-case ratios; lower is faster).`,
+  )
+  lines.push(``)
 
   const groups = new Map<string, Array<Comparison>>()
   for (const comparison of allComparisons) {
@@ -234,8 +257,12 @@ function formatMarkdown(
     const changed = group.filter(
       (comparison) => marker(comparison, threshold) !== ``,
     ).length
-    const summarySuffix = changed > 0 ? ` — ${changed} change(s)` : ``
-    lines.push(`<summary><b>${groupKey}</b>${summarySuffix}</summary>`)
+    const changedSuffix = changed > 0 ? `, ${changed} change(s)` : ``
+    lines.push(
+      `<summary><b>${groupKey}</b> — geomean ${formatRatio(
+        geomeanRatio(group),
+      )}${changedSuffix}</summary>`,
+    )
     lines.push(``)
     lines.push(
       `| Query | Base median | PR median | Δ median | Base p95 | PR p95 | Δ p95 | |`,
