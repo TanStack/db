@@ -1,4 +1,5 @@
 import { createDeferred } from './deferred'
+import { safeRandomUUID } from './utils/uuid'
 import './duplicate-instance-check'
 import {
   MissingMutationFunctionError,
@@ -224,7 +225,7 @@ class Transaction<T extends object = Record<string, unknown>> {
     if (typeof config.mutationFn === `undefined`) {
       throw new MissingMutationFunctionError()
     }
-    this.id = config.id ?? crypto.randomUUID()
+    this.id = config.id ?? safeRandomUUID()
     this.mutationFn = config.mutationFn
     this.state = `pending`
     this.mutations = []
@@ -333,26 +334,38 @@ class Transaction<T extends object = Record<string, unknown>> {
    * @param mutations - Array of new mutations to apply
    */
   applyMutations(mutations: Array<PendingMutation<any>>): void {
-    for (const newMutation of mutations) {
-      const existingIndex = this.mutations.findIndex(
-        (m) => m.globalKey === newMutation.globalKey,
-      )
+    // Merge via a globalKey-keyed map rather than a findIndex scan per
+    // mutation, which is O(n²) for bulk operations (e.g. inserting many rows
+    // in one call). Map preserves insertion order, matching the previous
+    // replace-in-place / remove / append semantics.
+    const merged = new Map<string, PendingMutation<any>>()
+    for (const mutation of this.mutations) {
+      merged.set(mutation.globalKey, mutation)
+    }
 
-      if (existingIndex >= 0) {
-        const existingMutation = this.mutations[existingIndex]!
+    for (const newMutation of mutations) {
+      const existingMutation = merged.get(newMutation.globalKey)
+
+      if (existingMutation) {
         const mergeResult = mergePendingMutations(existingMutation, newMutation)
 
         if (mergeResult === null) {
           // Remove the mutation (e.g., delete after insert cancels both)
-          this.mutations.splice(existingIndex, 1)
+          merged.delete(newMutation.globalKey)
         } else {
           // Replace with merged mutation
-          this.mutations[existingIndex] = mergeResult
+          merged.set(newMutation.globalKey, mergeResult)
         }
       } else {
         // Insert new mutation
-        this.mutations.push(newMutation)
+        merged.set(newMutation.globalKey, newMutation)
       }
+    }
+
+    // Rebuild in place to preserve the array's identity for external holders
+    this.mutations.length = 0
+    for (const mutation of merged.values()) {
+      this.mutations.push(mutation)
     }
   }
 

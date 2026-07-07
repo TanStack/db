@@ -594,6 +594,33 @@ describe(`createLiveQueryCollection`, () => {
     finalSubscription.unsubscribe()
   })
 
+  it(`loads its data again when preloaded after the live query and its source collection were cleaned up`, async () => {
+    const activeUsers = createLiveQueryCollection({
+      query: (q) =>
+        q
+          .from({ user: usersCollection })
+          .where(({ user }) => eq(user.active, true)),
+    })
+
+    await activeUsers.preload()
+    expect(activeUsers.status).toBe(`ready`)
+    expect(activeUsers.size).toBe(2)
+
+    // Tear down the source collection and the live query, e.g. when switching
+    // to a different data set at runtime. Cleaning up a source collection puts
+    // the dependent live query into an error state.
+    await usersCollection.cleanup()
+    expect(activeUsers.status).toBe(`error`)
+
+    await activeUsers.cleanup()
+    expect(activeUsers.status).toBe(`cleaned-up`)
+
+    // Preloading again restarts sync and resolves once the data is loaded.
+    await activeUsers.preload()
+    expect(activeUsers.status).toBe(`ready`)
+    expect(activeUsers.size).toBe(2)
+  })
+
   it(`should handle temporal values correctly in live queries`, async () => {
     // Define a type with temporal values
     type Task = {

@@ -80,6 +80,9 @@ export {
   type EffectQueryInput,
 } from './query/effect.js'
 
+// UUID helper (safe in non-secure browser contexts, see #1541)
+export { safeRandomUUID } from './utils/uuid.js'
+
 // Re-export some stuff explicitly to ensure the type & value is exported
 export type { Collection } from './collection/index.js'
 export { IR }

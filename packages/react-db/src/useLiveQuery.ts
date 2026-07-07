@@ -434,17 +434,28 @@ export function useLiveQuery(
         return () => {}
       }
 
+      let unsubscribed = false
+
       const subscription = collectionRef.current.subscribeChanges(() => {
+        // Drop late notifies that race with unsubscribe.
+        if (unsubscribed) return
         // Bump version on any change; getSnapshot will rebuild next time
         versionRef.current += 1
         onStoreChange()
       })
-      // Collection may be ready and will not receive initial `subscribeChanges()`
+      // Already-ready collections won't emit an initial change. Notify React
+      // ourselves, but defer to a microtask — calling onStoreChange synchronously
+      // here lands during the render-to-commit window and trips React's
+      // "state update on a component that hasn't mounted yet" warning.
       if (collectionRef.current.status === `ready`) {
-        versionRef.current += 1
-        onStoreChange()
+        queueMicrotask(() => {
+          if (unsubscribed) return
+          versionRef.current += 1
+          onStoreChange()
+        })
       }
       return () => {
+        unsubscribed = true
         subscription.unsubscribe()
       }
     }
