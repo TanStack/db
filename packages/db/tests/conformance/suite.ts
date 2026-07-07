@@ -16,7 +16,7 @@
  * status) are ported next, faithfully from the existing adapter tests.
  */
 import { describe, expect, it } from 'vitest'
-import type { LiveQueryDriver, Row } from './contract'
+import type { LiveQueryDriver, LiveQueryHandle, Row } from './contract'
 
 const SEED: Array<Row> = [
   { id: `1`, name: `John Doe`, age: 30, team: `a` },
@@ -40,9 +40,28 @@ const ISSUES: Array<Issue> = [
 /** Keys that are expected to fail on ALL adapters (core gaps, not adapter drift). */
 const UNIVERSAL_EXPECTED_FAIL = new Set<string>([`order-only-move`])
 
-export function runSuite(driver: LiveQueryDriver) {
-  const { ops } = driver
-  const gaps = new Set(driver.knownGaps ?? [])
+export function runSuite(rawDriver: LiveQueryDriver) {
+  const { ops } = rawDriver
+  const gaps = new Set(rawDriver.knownGaps ?? [])
+
+  // Track every handle mounted during the current scenario so it is always torn
+  // down, even when an (expected-fail) scenario throws before its own
+  // `h.unmount()`. Wrapping the driver's `mount*` methods records handles
+  // automatically, so scenario bodies need no `try/finally` of their own.
+  let mounted: Array<LiveQueryHandle> | null = null
+  const track = <H extends LiveQueryHandle>(handle: H): H => {
+    mounted?.push(handle)
+    return handle
+  }
+  const driver: LiveQueryDriver = {
+    ...rawDriver,
+    mount: (build) => track(rawDriver.mount(build)),
+    mountControllable: (build, initial) =>
+      track(rawDriver.mountControllable(build, initial)),
+    mountCollection: (collection) => track(rawDriver.mountCollection(collection)),
+    mountConfig: (build) => track(rawDriver.mountConfig(build)),
+    mountDisabled: () => track(rawDriver.mountDisabled()),
+  }
 
   /** Register a scenario as `it` or `it.fails` based on known gaps. */
   const scenario = (
@@ -52,8 +71,24 @@ export function runSuite(driver: LiveQueryDriver) {
   ) => {
     const expectFail = gaps.has(key) || UNIVERSAL_EXPECTED_FAIL.has(key)
     const label = `[${key}] ${name}${expectFail ? ` (expected-fail)` : ``}`
-    if (expectFail) it.fails(label, fn)
-    else it(label, fn)
+    const run = async () => {
+      const handles: Array<LiveQueryHandle> = []
+      mounted = handles
+      try {
+        await fn()
+      } finally {
+        mounted = null
+        for (const handle of handles) {
+          try {
+            handle.unmount()
+          } catch {
+            // teardown is best-effort / idempotent
+          }
+        }
+      }
+    }
+    if (expectFail) it.fails(label, run)
+    else it(label, run)
   }
 
   describe(`live-query conformance :: ${driver.name}`, () => {
