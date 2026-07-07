@@ -1,7 +1,6 @@
 import {
   computed,
   getCurrentInstance,
-  nextTick,
   onUnmounted,
   reactive,
   ref,
@@ -10,6 +9,7 @@ import {
 } from 'vue'
 import {
   createLiveQueryCollection,
+  createLiveQueryObserver,
   isCollection,
   isSingleResultCollection,
 } from '@tanstack/db'
@@ -22,6 +22,7 @@ import type {
   InferResultType,
   InitialQueryBuilder,
   LiveQueryCollectionConfig,
+  LiveQueryObserver,
   NonSingleResult,
   QueryBuilder,
   SingleResult,
@@ -363,101 +364,73 @@ export function useLiveQuery(
     internalData.push(...Array.from(currentCollection.values()))
   }
 
-  // Track current unsubscribe function
-  let currentUnsubscribe: (() => void) | null = null
+  // The shared observer owns subscription, the ready-race, and status; Vue
+  // materializes into its own reactive map (granular) + ordered array.
+  let currentObserver: LiveQueryObserver<any, any> | null = null
+
+  const syncFromObserver = (
+    observer: LiveQueryObserver<any, any>,
+    currentCollection: Collection<any, any, any>,
+  ) => {
+    status.value = observer.getSnapshot().status as CollectionStatus
+    syncDataFromCollection(currentCollection)
+  }
 
   // Watch for collection changes and subscribe to updates
   watchEffect((onInvalidate) => {
     const currentCollection = collection.value
+
+    // Tear down any previous observer.
+    currentObserver?.dispose()
+    currentObserver = null
 
     // Handle null collection (disabled query)
     if (!currentCollection) {
       status.value = `disabled` as const
       state.clear()
       internalData.length = 0
-      if (currentUnsubscribe) {
-        currentUnsubscribe()
-        currentUnsubscribe = null
-      }
       return
     }
 
-    // Update status ref whenever the effect runs
-    status.value = currentCollection.status
+    const observer = createLiveQueryObserver(currentCollection)
+    currentObserver = observer
 
-    // Clean up previous subscription
-    if (currentUnsubscribe) {
-      currentUnsubscribe()
-    }
-
-    // Initialize state with current collection data
+    // Initial rows arrive as the observer's first delta (includeInitialState);
+    // apply them and every subsequent delta granularly to the reactive map.
     state.clear()
-    for (const [key, value] of currentCollection.entries()) {
-      state.set(key, value)
-    }
 
-    // Initialize data array in correct order
-    syncDataFromCollection(currentCollection)
-
-    // Listen for the first ready event to catch status transitions
-    // that might not trigger change events (fixes async status transition bug)
-    currentCollection.onFirstReady(() => {
-      // Use nextTick to ensure Vue reactivity updates properly
-      nextTick(() => {
-        status.value = currentCollection.status
-      })
-    })
-
-    // Subscribe to collection changes with granular updates
-    const subscription = currentCollection.subscribeChanges(
-      (changes: Array<ChangeMessage<any>>) => {
-        // Apply each change individually to the reactive state
-        for (const change of changes) {
-          switch (change.type) {
-            case `insert`:
-            case `update`:
-              state.set(change.key, change.value)
-              break
-            case `delete`:
-              state.delete(change.key)
-              break
+    const unsubscribe = observer.subscribe(
+      (changes: Array<ChangeMessage<any>> | undefined) => {
+        if (changes) {
+          for (const change of changes) {
+            switch (change.type) {
+              case `insert`:
+              case `update`:
+                state.set(change.key, change.value)
+                break
+              case `delete`:
+                state.delete(change.key)
+                break
+            }
           }
         }
-
-        // Update the data array to maintain sorted order
-        syncDataFromCollection(currentCollection)
-        // Update status ref on every change
-        status.value = currentCollection.status
-      },
-      {
-        includeInitialState: true,
+        syncFromObserver(observer, currentCollection)
       },
     )
-
-    currentUnsubscribe = subscription.unsubscribe.bind(subscription)
-
-    // Preload collection data if not already started
-    if (currentCollection.status === `idle`) {
-      currentCollection.preload().catch(console.error)
-    }
+    syncFromObserver(observer, currentCollection)
 
     // Cleanup when effect is invalidated
     onInvalidate(() => {
-      if (currentUnsubscribe) {
-        currentUnsubscribe()
-        currentUnsubscribe = null
-      }
+      unsubscribe()
+      observer.dispose()
+      currentObserver = null
     })
   })
 
   // Cleanup on unmount (only if we're in a component context)
   const instance = getCurrentInstance()
   if (instance) {
-    onUnmounted(() => {
-      if (currentUnsubscribe) {
-        currentUnsubscribe()
-      }
-    })
+    onUnmounted(() => currentObserver?.dispose())
   }
 
   return {
