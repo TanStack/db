@@ -63,7 +63,8 @@ export function runSuite(rawDriver: LiveQueryDriver) {
     mount: (build) => track(rawDriver.mount(build)),
     mountControllable: (build, initial) =>
       track(rawDriver.mountControllable(build, initial)),
-    mountCollection: (collection) => track(rawDriver.mountCollection(collection)),
+    mountCollection: (collection) =>
+      track(rawDriver.mountCollection(collection)),
     mountConfig: (build) => track(rawDriver.mountConfig(build)),
     mountDisabled: () => track(rawDriver.mountDisabled()),
   }
