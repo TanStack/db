@@ -904,6 +904,10 @@ describe(`QueryCollection`, () => {
         items: initialMetaData.data,
         meta: { page: 1, total: initialMetaData.data.length },
       }
+      const expectedCacheResponse = {
+        items: initialMetaData.data.map((item) => ({ ...item })),
+        meta: { page: 1, total: initialMetaData.data.length },
+      }
 
       const queryFn = vi.fn().mockResolvedValue(wrappedResponse)
       const select = vi.fn((data: typeof wrappedResponse) => data.items)
@@ -931,7 +935,7 @@ describe(`QueryCollection`, () => {
       expect(stripVirtualProps(collection.get(`2`))).toEqual(
         wrappedResponse.items[1],
       )
-      expect(queryClient.getQueryData(queryKey)).toEqual(wrappedResponse)
+      expect(queryClient.getQueryData(queryKey)).toEqual(expectedCacheResponse)
     })
 
     it(`should not throw error when using writeInsert with select option`, async () => {
