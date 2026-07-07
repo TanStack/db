@@ -44,6 +44,10 @@ export function runSuite(rawDriver: LiveQueryDriver) {
   const { ops } = rawDriver
   const gaps = new Set(rawDriver.knownGaps ?? [])
 
+  // Every scenario key registered below, used to validate `knownGaps` /
+  // `UNIVERSAL_EXPECTED_FAIL` don't reference a stale or misspelled key.
+  const registeredKeys = new Set<string>()
+
   // Track every handle mounted during the current scenario so it is always torn
   // down, even when an (expected-fail) scenario throws before its own
   // `h.unmount()`. Wrapping the driver's `mount*` methods records handles
@@ -69,6 +73,7 @@ export function runSuite(rawDriver: LiveQueryDriver) {
     name: string,
     fn: () => Promise<void> | void,
   ) => {
+    registeredKeys.add(key)
     const expectFail = gaps.has(key) || UNIVERSAL_EXPECTED_FAIL.has(key)
     const label = `[${key}] ${name}${expectFail ? ` (expected-fail)` : ``}`
     const run = async () => {
@@ -660,5 +665,22 @@ export function runSuite(rawDriver: LiveQueryDriver) {
         h.unmount()
       },
     )
+
+    // ---- meta: guard against stale/misspelled expected-fail keys ---------
+
+    it(`every knownGap / universal expected-fail references a real scenario`, () => {
+      for (const key of rawDriver.knownGaps ?? []) {
+        expect(
+          registeredKeys.has(key),
+          `${driver.name} knownGaps has "${key}", which is not a scenario key`,
+        ).toBe(true)
+      }
+      for (const key of UNIVERSAL_EXPECTED_FAIL) {
+        expect(
+          registeredKeys.has(key),
+          `UNIVERSAL_EXPECTED_FAIL has "${key}", which is not a scenario key`,
+        ).toBe(true)
+      }
+    })
   })
 }
