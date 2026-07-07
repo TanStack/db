@@ -1623,24 +1623,32 @@ describe(`QueryCollection`, () => {
           }),
         )
 
-        await vi.waitFor(() => {
-          expect(queryFn).toHaveBeenCalledTimes(1)
-          expect(stripVirtualProps(collection.get(`1`))).toEqual({
-            id: `1`,
-            name: `Item 1`,
+        try {
+          await vi.waitFor(() => {
+            expect(queryFn).toHaveBeenCalledTimes(1)
+            expect(stripVirtualProps(collection.get(`1`))).toEqual({
+              id: `1`,
+              name: `Item 1`,
+            })
           })
-        })
 
-        items = [{ id: `1`, name: `Updated Item 1` }]
-        await queryClient.invalidateQueries({ queryKey, exact: true })
+          items = [{ id: `1`, name: `Updated Item 1` }]
+          await queryClient.invalidateQueries({ queryKey, exact: true })
 
-        await vi.waitFor(() => {
-          expect(queryFn).toHaveBeenCalledTimes(2)
-          expect(stripVirtualProps(collection.get(`1`))).toEqual({
-            id: `1`,
-            name: `Updated Item 1`,
+          await vi.waitFor(() => {
+            expect(queryFn).toHaveBeenCalledTimes(2)
+            expect(stripVirtualProps(collection.get(`1`))).toEqual({
+              id: `1`,
+              name: `Updated Item 1`,
+            })
           })
-        })
+        } finally {
+          await collection.cleanup()
+        }
+
+        expect(
+          queryClient.getQueryCache().find({ queryKey })?.getObserversCount(),
+        ).toBe(0)
       })
 
       it(`rematerializes an active eager query after prefix invalidation`, async () => {
@@ -1660,24 +1668,28 @@ describe(`QueryCollection`, () => {
           }),
         )
 
-        await vi.waitFor(() => {
-          expect(queryFn).toHaveBeenCalledTimes(1)
-          expect(stripVirtualProps(collection.get(`1`))).toEqual({
-            id: `1`,
-            name: `Item 1`,
+        try {
+          await vi.waitFor(() => {
+            expect(queryFn).toHaveBeenCalledTimes(1)
+            expect(stripVirtualProps(collection.get(`1`))).toEqual({
+              id: `1`,
+              name: `Item 1`,
+            })
           })
-        })
 
-        items = [{ id: `1`, name: `Updated Item 1` }]
-        await queryClient.invalidateQueries({ queryKey: rootQueryKey })
+          items = [{ id: `1`, name: `Updated Item 1` }]
+          await queryClient.invalidateQueries({ queryKey: rootQueryKey })
 
-        await vi.waitFor(() => {
-          expect(queryFn).toHaveBeenCalledTimes(2)
-          expect(stripVirtualProps(collection.get(`1`))).toEqual({
-            id: `1`,
-            name: `Updated Item 1`,
+          await vi.waitFor(() => {
+            expect(queryFn).toHaveBeenCalledTimes(2)
+            expect(stripVirtualProps(collection.get(`1`))).toEqual({
+              id: `1`,
+              name: `Updated Item 1`,
+            })
           })
-        })
+        } finally {
+          await collection.cleanup()
+        }
       })
 
       it(`rematerializes an active on-demand subset after exact invalidation`, async () => {
@@ -1899,25 +1911,29 @@ describe(`QueryCollection`, () => {
           }),
         )
 
-        await vi.waitFor(() => {
-          expect(queryFn).toHaveBeenCalledTimes(1)
+        try {
+          await vi.waitFor(() => {
+            expect(queryFn).toHaveBeenCalledTimes(1)
+            expect(stripVirtualProps(collection.get(`1`))).toEqual({
+              id: `1`,
+              name: `Item 1`,
+            })
+          })
+
+          await queryClient.invalidateQueries({ queryKey, exact: true })
+
+          await vi.waitFor(() => {
+            expect(queryFn).toHaveBeenCalledTimes(2)
+            expect(collection.utils.lastError).toBe(refetchError)
+          })
+          expect(collection.size).toBe(1)
           expect(stripVirtualProps(collection.get(`1`))).toEqual({
             id: `1`,
             name: `Item 1`,
           })
-        })
-
-        await queryClient.invalidateQueries({ queryKey, exact: true })
-
-        await vi.waitFor(() => {
-          expect(queryFn).toHaveBeenCalledTimes(2)
-          expect(collection.utils.lastError).toBe(refetchError)
-        })
-        expect(collection.size).toBe(1)
-        expect(stripVirtualProps(collection.get(`1`))).toEqual({
-          id: `1`,
-          name: `Item 1`,
-        })
+        } finally {
+          await collection.cleanup()
+        }
       })
 
       // Retained/persisted invalidation is intentionally not covered here: the
