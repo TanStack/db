@@ -1764,7 +1764,9 @@ describe(`QueryCollection`, () => {
 
           await vi.waitFor(() => {
             expect(queryFn).toHaveBeenCalledTimes(1)
-            expect(observedQueryKeys[0]?.length).toBeGreaterThan(queryKey.length)
+            expect(observedQueryKeys[0]?.length).toBeGreaterThan(
+              queryKey.length,
+            )
             expect(stripVirtualProps(collection.get(`1`))).toEqual({
               id: `1`,
               name: `Item 1`,
