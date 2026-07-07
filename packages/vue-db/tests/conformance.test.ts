@@ -1,5 +1,5 @@
 /**
- * Vue driver for the shared live-query conformance suite (#1623).
+ * Vue driver for the shared live-query conformance suite.
  *
  * Realm-sensitive pieces (collection factories, query operators) are imported
  * from Vue's `@tanstack/db` and handed to the shared scenarios. Vue composables

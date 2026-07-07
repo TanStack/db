@@ -1,5 +1,5 @@
 /**
- * Svelte driver for the shared live-query conformance suite (#1623).
+ * Svelte driver for the shared live-query conformance suite.
  *
  * Svelte 5 runes: each mount runs inside a persistent `$effect.root` so the
  * internal `$effect` keeps updating rune state after mount; `unmount` disposes

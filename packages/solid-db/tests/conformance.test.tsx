@@ -1,5 +1,5 @@
 /**
- * Solid driver for the shared live-query conformance suite (#1623).
+ * Solid driver for the shared live-query conformance suite.
  *
  * Each mount runs inside a `createRoot` so `unmount` disposes via the captured
  * dispose fn; the root stays alive between mount and reads so Solid's reactive

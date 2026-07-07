@@ -1,5 +1,5 @@
 /**
- * React reference driver for the shared live-query conformance suite (#1623).
+ * React reference driver for the shared live-query conformance suite.
  *
  * Everything realm-sensitive — collection creation and query operators — is
  * imported here (React package's `@tanstack/db`) and handed to the shared
@@ -7,7 +7,7 @@
  *
  * `knownGaps` is populated empirically from the run below, NOT from the coverage
  * matrix: only keys that actually fail belong here. Today that's just the
- * universal #1601 case (handled by the shared suite), so the list is empty.
+ * universal order-only-move case (handled by the shared suite), so the list is empty.
  */
 import { act, renderHook } from '@testing-library/react'
 import {

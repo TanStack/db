@@ -1,5 +1,5 @@
 /**
- * Shared live-query conformance suite (RFC #1623, Phase 1).
+ * Shared live-query conformance suite.
  *
  * Sourced bottom-up from the union of the five adapters' existing test suites
  * (the "spine" + framework-agnostic "gap-closers"), plus a small tail of
@@ -14,7 +14,7 @@
  * groupBy/aggregate, nested aggregates, `.includes` subqueries, findOne
  * cardinality, disabled + transitions, deferred readiness / eager / ready-with-
  * no-data, param recompilation, optimistic mutation, pre-created & config-object
- * inputs, error status, and the #1601 order-only-move tail (expected-fail).
+ * inputs, error status, and the order-only-move tail (expected-fail).
  */
 import { describe, expect, it } from 'vitest'
 import type { LiveQueryDriver, LiveQueryHandle, Row } from './contract'
@@ -648,15 +648,15 @@ export function runSuite(rawDriver: LiveQueryDriver) {
       },
     )
 
-    // ---- tail: universal expected-fail (#1601) ---------------------------
+    // ---- tail: universal expected-fail ---------------------------
 
     scenario(
       `order-only-move`,
-      `an order-only move republishes the ordered result (#1601)`,
+      `an order-only move republishes the ordered result`,
       async () => {
         const source = driver.makeSource(SEED)
         // Project only id+name; sort by age. Changing age reorders the result
-        // WITHOUT changing any projected row value — the #1601 case.
+        // WITHOUT changing any projected row value.
         const h = driver.mount((q) =>
           q
             .from({ items: source.collection })

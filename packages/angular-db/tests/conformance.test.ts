@@ -1,5 +1,5 @@
 /**
- * Angular driver for the shared live-query conformance suite (#1623).
+ * Angular driver for the shared live-query conformance suite.
  *
  * `injectLiveQuery` needs an injection context, so each mount runs inside a
  * child `EnvironmentInjector` created off TestBed's; `unmount` calls
