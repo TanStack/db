@@ -898,6 +898,42 @@ describe(`QueryCollection`, () => {
       expect(initialCache).toEqual(initialMetaData)
     })
 
+    it(`materializes selected rows while preserving wrapped Query cache response`, async () => {
+      const queryKey = [`select-row-extraction-test`]
+      const wrappedResponse = {
+        items: initialMetaData.data,
+        meta: { page: 1, total: initialMetaData.data.length },
+      }
+
+      const queryFn = vi.fn().mockResolvedValue(wrappedResponse)
+      const select = vi.fn((data: typeof wrappedResponse) => data.items)
+
+      const options = queryCollectionOptions({
+        id: `select-row-extraction-test`,
+        queryClient,
+        queryKey,
+        queryFn,
+        select,
+        getKey,
+        startSync: true,
+      })
+      const collection = createCollection(options)
+
+      await vi.waitFor(() => {
+        expect(queryFn).toHaveBeenCalledTimes(1)
+        expect(select).toHaveBeenCalledTimes(1)
+        expect(collection.size).toBe(wrappedResponse.items.length)
+      })
+
+      expect(stripVirtualProps(collection.get(`1`))).toEqual(
+        wrappedResponse.items[0],
+      )
+      expect(stripVirtualProps(collection.get(`2`))).toEqual(
+        wrappedResponse.items[1],
+      )
+      expect(queryClient.getQueryData(queryKey)).toEqual(wrappedResponse)
+    })
+
     it(`should not throw error when using writeInsert with select option`, async () => {
       const queryKey = [`select-writeInsert-test`]
       const consoleErrorSpy = vi
