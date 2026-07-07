@@ -10,10 +10,11 @@
  * as expected-fail. `UNIVERSAL_EXPECTED_FAIL` keys fail on every adapter until
  * the underlying core gap is fixed.
  *
- * STATUS: Phase-A slice — a verifiable core plus the two flagship gap-closers
- * (findOne cardinality, disabled) and the #1601 tail. Engine-heavy scenarios
- * (join / groupBy / aggregate / .includes / optimistic reconcile / async
- * status) are ported next, faithfully from the existing adapter tests.
+ * Coverage: query/where/select, live insert/update/delete, orderBy, join,
+ * groupBy/aggregate, nested aggregates, `.includes` subqueries, findOne
+ * cardinality, disabled + transitions, deferred readiness / eager / ready-with-
+ * no-data, param recompilation, optimistic mutation, pre-created & config-object
+ * inputs, error status, and the #1601 order-only-move tail (expected-fail).
  */
 import { describe, expect, it } from 'vitest'
 import type { LiveQueryDriver, LiveQueryHandle, Row } from './contract'
