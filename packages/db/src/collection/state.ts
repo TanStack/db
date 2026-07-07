@@ -154,7 +154,7 @@ export class CollectionStateManager<
   }
 
   /**
-   * Checks if a row has pending optimistic mutations (not yet confirmed by sync).
+   * Checks if a row has pending local optimistic mutations in the visible projection.
    * Used to compute the $synced virtual property.
    */
   public isRowSynced(key: TKey): boolean {

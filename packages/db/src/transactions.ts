@@ -211,6 +211,18 @@ class Transaction<T extends object = Record<string, unknown>> {
   public state: TransactionState
   public mutationFn: MutationFn<T>
   public mutations: Array<PendingMutation<T>>
+  /**
+   * Deferred that settles when this transaction's mutation function settles.
+   *
+   * Await `isPersisted.promise`, not `isPersisted` itself. The promise resolves
+   * after the mutation function completes successfully and rejects if the
+   * mutation function fails.
+   *
+   * This is TanStack DB's local transaction settlement boundary. It does not
+   * inherently prove that a backend has uploaded, confirmed, or read back the
+   * write unless the mutation function waits for that backend observation
+   * before returning.
+   */
   public isPersisted: Deferred<Transaction<T>>
   public autoCommit: boolean
   public createdAt: Date

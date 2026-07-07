@@ -21,7 +21,7 @@ These properties are:
 // Accessing virtual properties on a row
 const user = collection.get('user-1')
 if (user.$synced) {
-  console.log('Confirmed by backend')
+  console.log('No pending local optimistic writes for this row')
 }
 if (user.$origin === 'local') {
   console.log('Created/modified locally')
@@ -30,7 +30,7 @@ if (user.$origin === 'local') {
 
 ```typescript
 // Using virtual properties in queries
-const confirmedOrders = createLiveQueryCollection({
+const ordersWithoutLocalWrites = createLiveQueryCollection({
   query: (q) => q
     .from({ order: orders })
     .where(({ order }) => eq(order.$synced, true))
@@ -103,10 +103,16 @@ readonly $synced: boolean;
 
 Defined in: [packages/db/src/virtual-props.ts:69](https://github.com/TanStack/db/blob/main/packages/db/src/virtual-props.ts#L69)
 
-Whether this row reflects confirmed state from the backend.
+Whether this row currently has no pending local optimistic mutations in
+this collection's visible projection.
 
-- `true`: Row is confirmed by the backend (no pending optimistic mutations)
-- `false`: Row has pending optimistic mutations that haven't been confirmed
+- `true`: No pending local optimistic mutation currently affects this row
+- `false`: One or more pending local optimistic mutations affect this row
+
+This is a local write/projection status. It does not prove that a backend
+has uploaded, confirmed, or read back the row. Adapters that need stronger
+backend observation semantics should keep their mutation function pending
+until that observation has happened, or expose adapter-specific status.
 
 For local-only collections (no sync), this is always `true`.
 For live query collections, this is passed through from the source collection.
