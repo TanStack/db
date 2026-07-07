@@ -242,6 +242,48 @@ function formatMarkdown(
   )
   lines.push(``)
 
+  const byQuery = new Map<string, Array<Comparison>>()
+  for (const comparison of allComparisons) {
+    const group = byQuery.get(comparison.query) ?? []
+    group.push(comparison)
+    byQuery.set(comparison.query, group)
+  }
+
+  lines.push(`| Query | Δ median (geomean) | Best case | Worst case | Flags |`)
+  lines.push(`| --- | ---: | ---: | ---: | :-- |`)
+  for (const [query, group] of byQuery) {
+    const ratios = group
+      .map((comparison) => comparison.medianRatio)
+      .filter((value) => Number.isFinite(value))
+    const best = Math.min(...ratios)
+    const worst = Math.max(...ratios)
+    const redCount = group.filter((comparison) =>
+      isRegression(comparison, threshold),
+    ).length
+    const greenCount = group.filter((comparison) =>
+      isImprovement(comparison, threshold),
+    ).length
+    const flags =
+      [
+        redCount > 0 ? `${redCount} 🔴` : ``,
+        greenCount > 0 ? `${greenCount} 🟢` : ``,
+      ]
+        .filter(Boolean)
+        .join(` `) || `—`
+    lines.push(
+      `| ${query} | ${formatDelta(geomeanRatio(group))} | ${formatDelta(
+        best,
+      )} | ${formatDelta(worst)} | ${flags} |`,
+    )
+  }
+  lines.push(``)
+  lines.push(
+    `Each row aggregates the ${allComparisons.length / byQuery.size || 0} ` +
+      `scale/index/write-mode configurations of that query; per-configuration ` +
+      `tables below.`,
+  )
+  lines.push(``)
+
   const groups = new Map<string, Array<Comparison>>()
   for (const comparison of allComparisons) {
     const groupKey = `${formatScale(comparison.scale)} | source indexes: ${
