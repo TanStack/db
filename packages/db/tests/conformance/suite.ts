@@ -340,7 +340,13 @@ export function runSuite(rawDriver: LiveQueryDriver) {
 
         expect(h.current().data).toHaveLength(SEED.length)
         const john = h.current().data.find((r: any) => r.id === `1`)
+        // `john.issues` is a child collection; read its contents through the
+        // collection API. John (id 1) has issues i1 and i3.
         expect(john.issues).toBeDefined()
+        const johnIssueIds = Array.from(john.issues.values())
+          .map((i: any) => i.id)
+          .sort()
+        expect(johnIssueIds).toEqual([`i1`, `i3`])
         h.unmount()
       },
     )
