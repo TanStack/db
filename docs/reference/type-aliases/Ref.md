@@ -6,10 +6,10 @@ title: Ref
 # Type Alias: Ref\<T, Nullable\>
 
 ```ts
-type Ref<T, Nullable> = { [K in keyof T]: IsNonExactOptional<T[K]> extends true ? IsNonExactNullable<T[K]> extends true ? IsPlainObject<NonNullable<T[K]>> extends true ? Ref<NonNullable<T[K]>, Nullable> | undefined : RefLeaf<NonNullable<T[K]>, Nullable> | undefined : IsPlainObject<NonUndefined<T[K]>> extends true ? Ref<NonUndefined<T[K]>, Nullable> | undefined : RefLeaf<NonUndefined<T[K]>, Nullable> | undefined : IsNonExactNullable<T[K]> extends true ? IsPlainObject<NonNull<T[K]>> extends true ? Ref<NonNull<T[K]>, Nullable> | null : RefLeaf<NonNull<T[K]>, Nullable> | null : IsPlainObject<T[K]> extends true ? Ref<T[K], Nullable> : RefLeaf<T[K], Nullable> } & RefLeaf<T, Nullable> & VirtualPropsRef;
+type Ref<T, Nullable> = T extends unknown ? RefBranch<T, Nullable> : never;
 ```
 
-Defined in: [packages/db/src/query/builder/types.ts:773](https://github.com/TanStack/db/blob/main/packages/db/src/query/builder/types.ts#L773)
+Defined in: [packages/db/src/query/builder/types.ts:824](https://github.com/TanStack/db/blob/main/packages/db/src/query/builder/types.ts#L824)
 
 Ref - The user-facing ref interface for the query builder
 

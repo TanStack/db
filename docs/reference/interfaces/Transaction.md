@@ -169,7 +169,7 @@ Array of new mutations to apply
 commit(): Promise<Transaction<T>>;
 ```
 
-Defined in: [packages/db/src/transactions.ts:481](https://github.com/TanStack/db/blob/main/packages/db/src/transactions.ts#L481)
+Defined in: [packages/db/src/transactions.ts:493](https://github.com/TanStack/db/blob/main/packages/db/src/transactions.ts#L493)
 
 Commit the transaction and execute the mutation function
 
@@ -228,7 +228,7 @@ console.log(tx.state) // "completed" or "failed"
 compareCreatedAt(other): number;
 ```
 
-Defined in: [packages/db/src/transactions.ts:535](https://github.com/TanStack/db/blob/main/packages/db/src/transactions.ts#L535)
+Defined in: [packages/db/src/transactions.ts:547](https://github.com/TanStack/db/blob/main/packages/db/src/transactions.ts#L547)
 
 Compare two transactions by their createdAt time and sequence number in order
 to sort them in the order they were created.
@@ -331,7 +331,7 @@ await tx.commit()
 rollback(config?): Transaction<T>;
 ```
 
-Defined in: [packages/db/src/transactions.ts:398](https://github.com/TanStack/db/blob/main/packages/db/src/transactions.ts#L398)
+Defined in: [packages/db/src/transactions.ts:410](https://github.com/TanStack/db/blob/main/packages/db/src/transactions.ts#L410)
 
 Rollback the transaction and any conflicting transactions
 
@@ -418,7 +418,7 @@ Defined in: [packages/db/src/transactions.ts:239](https://github.com/TanStack/db
 touchCollection(): void;
 ```
 
-Defined in: [packages/db/src/transactions.ts:426](https://github.com/TanStack/db/blob/main/packages/db/src/transactions.ts#L426)
+Defined in: [packages/db/src/transactions.ts:438](https://github.com/TanStack/db/blob/main/packages/db/src/transactions.ts#L438)
 
 #### Returns
 
