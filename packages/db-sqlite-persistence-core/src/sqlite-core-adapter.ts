@@ -2019,6 +2019,11 @@ export class SQLiteCorePersistenceAdapter implements PersistenceAdapter {
         [collectionId],
       )
       await transactionDriver.run(
+        `DELETE FROM collection_metadata
+         WHERE collection_id = ?`,
+        [collectionId],
+      )
+      await transactionDriver.run(
         `DELETE FROM persisted_index_registry
          WHERE collection_id = ?`,
         [collectionId],
