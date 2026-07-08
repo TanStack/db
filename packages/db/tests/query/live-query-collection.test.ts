@@ -449,6 +449,21 @@ describe(`createLiveQueryCollection`, () => {
     })
   })
 
+  it(`should forward an explicit gcTime of 0 (disable GC) instead of coercing it to the default`, () => {
+    const options = liveQueryCollectionOptions({
+      query: (q) =>
+        q
+          .from({ user: usersCollection })
+          .where(({ user }) => eq(user.active, true)),
+      gcTime: 0,
+    })
+
+    // gcTime: 0 disables garbage collection. A `|| 5000` fallback treats the
+    // explicit 0 as unset and silently replaces it with the 5s default, so the
+    // collection is garbage collected instead of being kept alive.
+    expect(options.gcTime).toBe(0)
+  })
+
   it(`should not reuse finalized graph after GC cleanup (resubscribe is safe)`, async () => {
     const liveQuery = createLiveQueryCollection({
       query: (q) =>
