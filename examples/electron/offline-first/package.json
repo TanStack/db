@@ -16,7 +16,7 @@
     "@tanstack/electron-db-sqlite-persistence": "^0.1.18",
     "@tanstack/node-db-sqlite-persistence": "^0.2.6",
     "@tanstack/offline-transactions": "^1.0.39",
-    "@tanstack/query-db-collection": "^1.0.46",
+    "@tanstack/query-db-collection": "^1.0.47",
     "@tanstack/react-db": "^0.1.92",
     "@tanstack/react-query": "^5.90.20",
     "better-sqlite3": "^12.6.2",
