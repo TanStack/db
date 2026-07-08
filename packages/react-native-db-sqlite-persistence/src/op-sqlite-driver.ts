@@ -15,6 +15,8 @@ type OpSQLiteRowListLike = {
 type OpSQLiteStatementResultLike = {
   rows?: unknown
   resultRows?: unknown
+  rawRows?: unknown
+  columnNames?: unknown
   rowsAffected?: unknown
   changes?: unknown
   insertId?: unknown
@@ -163,11 +165,45 @@ function extractRowsFromStatementResult(
     return rowsFromResultRows
   }
 
+  const rowsFromColumnarResult = toRowArrayFromColumnarResult(
+    value.rawRows,
+    value.columnNames,
+  )
+  if (rowsFromColumnarResult) {
+    return rowsFromColumnarResult
+  }
+
   if (hasWriteResultMarker(value as Record<string, unknown>)) {
     return []
   }
 
   return null
+}
+
+/**
+ * op-sqlite v14 `executeAsync` returns SELECT results as columnar data:
+ * `rawRows` (arrays of values) plus `columnNames`. Zip them back into row
+ * objects; this must run before the write-result fallback because the same
+ * result also carries `rowsAffected`.
+ */
+function toRowArrayFromColumnarResult(
+  rawRows: unknown,
+  columnNames: unknown,
+): Array<unknown> | null {
+  if (!Array.isArray(rawRows) || !Array.isArray(columnNames)) {
+    return null
+  }
+
+  return rawRows.map((rawRow) => {
+    if (!Array.isArray(rawRow)) {
+      return rawRow
+    }
+    const row: Record<string, unknown> = {}
+    for (let index = 0; index < columnNames.length; index++) {
+      row[String(columnNames[index])] = rawRow[index]
+    }
+    return row
+  })
 }
 
 function extractRowsFromExecuteResult(
