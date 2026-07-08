@@ -6694,3 +6694,142 @@ describe(`QueryCollection`, () => {
     })
   })
 })
+
+describe(`cluster-verification #1488 (evaluate-review)`, () => {
+  // Claim (issue #1488): in syncMode: 'on-demand', when a live query re-subscribes
+  // and loadSubset resolves via the existing-observer / cached-data fast path in
+  // createQueryFromOpts (early return without running applySuccessfulResult), row
+  // ownership (rowToQueries) is not re-registered for that query. When a DIFFERENT
+  // overlapping query is later cleaned up, cleanupQueryInternal sees no remaining
+  // owners for the shared row and deletes it even though the re-subscribed query
+  // is still active.
+  it(`keeps a shared row when an overlapping list query is cleaned up after the detail query re-subscribed via the cached/reuse fast path`, async () => {
+    // Dedicated QueryClient with long staleTime/gcTime so the detail query's data
+    // stays in the TanStack Query cache across unsubscribe/resubscribe. This makes
+    // the re-subscribe in step (4) resolve synchronously from the cached-data fast
+    // path in createQueryFromOpts instead of performing a fresh fetch.
+    const localQueryClient = new QueryClient({
+      defaultOptions: {
+        queries: {
+          staleTime: 5 * 60 * 1000,
+          gcTime: 5 * 60 * 1000,
+          retry: false,
+        },
+      },
+    })
+
+    const rowA: TestItem = { id: `a`, name: `Item A` }
+    const rowB: TestItem = { id: `b`, name: `Item B` }
+    const rowC: TestItem = { id: `c`, name: `Item C` }
+
+    const detailFetches: Array<string> = []
+    const queryFn = vi
+      .fn()
+      .mockImplementation((ctx: QueryFunctionContext<any>) => {
+        const where = ctx.meta?.loadSubsetOptions?.where as any
+        if (where?.type === `func` && where.name === `eq`) {
+          // detail query: where id == 'a'
+          detailFetches.push(`detail`)
+          return Promise.resolve([rowA])
+        }
+        if (where?.type === `func` && where.name === `in`) {
+          // list query: where id in ['a', 'b', 'c']
+          return Promise.resolve([rowA, rowB, rowC])
+        }
+        return Promise.resolve([])
+      })
+
+    const collection = createCollection(
+      queryCollectionOptions<TestItem>({
+        id: `cluster-1488-ownership-test`,
+        queryClient: localQueryClient,
+        queryKey: [`cluster-1488-ownership-test`],
+        queryFn,
+        getKey,
+        syncMode: `on-demand`,
+        startSync: true,
+      }),
+    )
+
+    const makeDetailQuery = () =>
+      createLiveQueryCollection({
+        query: (q) =>
+          q
+            .from({ item: collection })
+            .where(({ item }) => eq(item.id, `a`))
+            .select(({ item }) => ({ id: item.id, name: item.name })),
+      })
+
+    // (1) Subscribe the detail query and let it load.
+    const detail1 = makeDetailQuery()
+    await detail1.preload()
+    await vi.waitFor(() => {
+      expect(collection.has(`a`)).toBe(true)
+    })
+    expect(detailFetches).toHaveLength(1)
+
+    // (2) Unsubscribe the detail query. Its row is GC'd from the collection, but
+    // the query data remains in the QueryClient cache (long gcTime), which sets up
+    // the fast path for the re-subscribe below.
+    await detail1.cleanup()
+    await vi.waitFor(() => {
+      expect(collection.has(`a`)).toBe(false)
+    })
+
+    // (3) Subscribe the list query and let it load. Row 'a' is now (also) owned by
+    // the list query.
+    const list = createLiveQueryCollection({
+      query: (q) =>
+        q
+          .from({ item: collection })
+          .where(({ item }) => inArray(item.id, [`a`, `b`, `c`]))
+          .select(({ item }) => ({ id: item.id, name: item.name })),
+    })
+    await list.preload()
+    await vi.waitFor(() => {
+      expect(collection.size).toBe(3)
+    })
+
+    // (4) Re-subscribe the detail query. Its data is still cached in the
+    // QueryClient (staleTime/gcTime not elapsed), so loadSubset resolves via the
+    // cached-data / existing-observer fast path in createQueryFromOpts without a
+    // fresh fetch. Per the claim, this path fails to re-register row ownership.
+    const detail2 = makeDetailQuery()
+    await detail2.preload()
+    await vi.waitFor(() => {
+      expect(detail2.size).toBe(1)
+    })
+    // Sanity-check the fast path was actually taken: no second detail fetch.
+    expect(detailFetches).toHaveLength(1)
+
+    // Also exercise the exact claimed branch: a further identical subscription now
+    // finds `state.observers.has(hashedQueryKey)` with `currentResult.isSuccess`
+    // and takes the existing-observer early return in createQueryFromOpts.
+    const detail3 = makeDetailQuery()
+    await detail3.preload()
+    await vi.waitFor(() => {
+      expect(detail3.size).toBe(1)
+    })
+    expect(detailFetches).toHaveLength(1)
+    await flushPromises()
+
+    // (5) Unsubscribe the list query and let its cleanup run.
+    await list.cleanup()
+    await flushPromises()
+
+    // (6) Row 'a' must survive: the detail queries are still active and must still
+    // be registered as owners. (Rows 'b' and 'c' were only owned by the list query
+    // and may be GC'd.)
+    await vi.waitFor(() => {
+      expect(collection.has(`b`)).toBe(false)
+      expect(collection.has(`c`)).toBe(false)
+    })
+    expect(collection.has(`a`)).toBe(true)
+    expect(detail2.size).toBe(1)
+    expect(detail3.size).toBe(1)
+
+    await detail3.cleanup()
+    await detail2.cleanup()
+    localQueryClient.clear()
+  })
+})

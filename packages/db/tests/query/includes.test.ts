@@ -7,6 +7,7 @@ import {
   createLiveQueryCollection,
   eq,
   materialize,
+  queryOnce,
   toArray,
 } from '../../src/query/index.js'
 import { createCollection } from '../../src/collection/index.js'
@@ -6758,5 +6759,388 @@ describe(`includes subqueries`, () => {
         },
       ])
     })
+  })
+})
+
+describe(`cluster-verification (evaluate-review)`, () => {
+  // CLAIM A (#1454): duplicate alias in sibling includes must not misroute
+  // data or silently break nested grandchildren.
+  it(`duplicate alias in sibling includes keeps nested children populated`, async () => {
+    type Tag = { id: number; projectId: number; label: string }
+
+    const projects = createCollection(
+      mockSyncCollectionOptions<Project>({
+        id: `cv-a-projects`,
+        getKey: (p) => p.id,
+        initialData: [{ id: 1, name: `Alpha` }],
+      }),
+    )
+    const issues = createCollection(
+      mockSyncCollectionOptions<Issue>({
+        id: `cv-a-issues`,
+        getKey: (i) => i.id,
+        initialData: [
+          { id: 10, projectId: 1, title: `Bug in Alpha` },
+          { id: 11, projectId: 1, title: `Feature for Alpha` },
+        ],
+      }),
+    )
+    const comments = createCollection(
+      mockSyncCollectionOptions<Comment>({
+        id: `cv-a-comments`,
+        getKey: (c) => c.id,
+        initialData: [
+          { id: 100, issueId: 10, body: `Looks bad` },
+          { id: 101, issueId: 10, body: `Fixed it` },
+        ],
+      }),
+    )
+    const tags = createCollection(
+      mockSyncCollectionOptions<Tag>({
+        id: `cv-a-tags`,
+        getKey: (t) => t.id,
+        initialData: [{ id: 500, projectId: 1, label: `frontend` }],
+      }),
+    )
+
+    const collection = createLiveQueryCollection((q) =>
+      q.from({ p: projects }).select(({ p }) => ({
+        id: p.id,
+        name: p.name,
+        issues: q
+          .from({ i: issues })
+          .where(({ i }) => eq(i.projectId, p.id))
+          .select(({ i }) => ({
+            id: i.id,
+            title: i.title,
+            comments: q
+              .from({ c: comments })
+              .where(({ c }) => eq(c.issueId, i.id))
+              .select(({ c }) => ({ id: c.id, body: c.body })),
+          })),
+        // Sibling include intentionally reuses the alias `i`
+        tags: q
+          .from({ i: tags })
+          .where(({ i }) => eq(i.projectId, p.id))
+          .select(({ i }) => ({ id: i.id, label: i.label })),
+      })),
+    )
+
+    await collection.preload()
+
+    const alpha = collection.get(1) as any
+
+    // The sibling tags include should be populated with tag rows
+    expect(childItems(alpha.tags)).toEqual([{ id: 500, label: `frontend` }])
+
+    // The issues include must contain issue rows (not misrouted tag data)
+    // and the nested comments grandchild must be populated.
+    expect(childItems(alpha.issues)).toEqual([
+      {
+        id: 10,
+        title: `Bug in Alpha`,
+        comments: [
+          { id: 100, body: `Looks bad` },
+          { id: 101, body: `Fixed it` },
+        ],
+      },
+      {
+        id: 11,
+        title: `Feature for Alpha`,
+        comments: [],
+      },
+    ])
+  })
+
+  // CLAIM B (#1444): includes orderBy must be applied immediately after an
+  // optimistic update on the child collection (not only after sync confirms).
+  it(`includes orderBy is applied immediately after an optimistic update on the child collection`, async () => {
+    type Status = { id: number; name: string; position: number }
+    type Task = {
+      id: number
+      status_id: number
+      name: string
+      position: number
+    }
+
+    const statuses = createCollection(
+      mockSyncCollectionOptions<Status>({
+        id: `cv-b-statuses`,
+        getKey: (s) => s.id,
+        initialData: [{ id: 1, name: `Todo`, position: 0 }],
+      }),
+    )
+    const tasks = createCollection(
+      mockSyncCollectionOptions<Task>({
+        id: `cv-b-tasks`,
+        getKey: (t) => t.id,
+        initialData: [
+          { id: 1, status_id: 1, name: `Hello`, position: 0 },
+          { id: 2, status_id: 1, name: `Test`, position: 1 },
+        ],
+      }),
+    )
+
+    const collection = createLiveQueryCollection((q) =>
+      q
+        .from({ status: statuses })
+        .orderBy(({ status }) => status.position, `asc`)
+        .select(({ status }) => ({
+          id: status.id,
+          name: status.name,
+          position: status.position,
+          tasks: q
+            .from({ task: tasks })
+            .where(({ task }) => eq(task.status_id, status.id))
+            .orderBy(({ task }) => task.position, `asc`)
+            .select(({ task }) => ({
+              id: task.id,
+              name: task.name,
+              position: task.position,
+            })),
+        })),
+    )
+
+    await collection.preload()
+
+    // Initial order by position asc: Hello (0), Test (1)
+    expect(plainRows((collection.get(1) as any).tasks)).toEqual([
+      { id: 1, name: `Hello`, position: 0 },
+      { id: 2, name: `Test`, position: 1 },
+    ])
+
+    // Optimistic update swapping the two tasks' positions. The mock
+    // collection's onUpdate awaits a sync promise that is never resolved in
+    // this test, so the mutation stays pending (purely optimistic).
+    tasks.update([1, 2], (drafts) => {
+      drafts[0]!.position = 1
+      drafts[1]!.position = 0
+    })
+
+    // The included tasks must be sorted by the NEW positions immediately,
+    // before any sync confirmation.
+    await vi.waitFor(
+      () => {
+        expect(plainRows((collection.get(1) as any).tasks)).toEqual([
+          { id: 2, name: `Test`, position: 0 },
+          { id: 1, name: `Hello`, position: 1 },
+        ])
+      },
+      { timeout: 1000 },
+    )
+  })
+
+  // CLAIM C (#1495): a sync-confirmed full-row update of an existing child in
+  // a toArray include must be applied as an update (not crash duplicate-key
+  // diagnostics with a TypeError on config.utils).
+  it(`sync-confirmed full-row child update in a toArray include applies without crashing`, async () => {
+    type ParentRow = { id: string; name: string; rank: string }
+    type ChildRow = { id: string; parentId: string; name: string; rank: string }
+
+    type CapturedSyncContext = {
+      begin: (options?: { immediate?: boolean }) => void
+      write: (message: any) => void
+      commit: () => void
+    }
+
+    function createHydratableLocalCollection<T extends { id: string }>(
+      id: string,
+    ) {
+      const options = localOnlyCollectionOptions<T>({
+        id,
+        getKey: (row) => row.id,
+      })
+      let syncContext: CapturedSyncContext | null = null
+
+      const collection = createCollection({
+        ...options,
+        sync: {
+          ...options.sync,
+          rowUpdateMode: `full` as const,
+          sync: (params: Parameters<SyncConfig<T>[`sync`]>[0]) => {
+            syncContext = {
+              begin: params.begin,
+              write: params.write as CapturedSyncContext[`write`],
+              commit: params.commit,
+            }
+            return options.sync.sync(params)
+          },
+        },
+      })
+
+      collection.startSyncImmediate()
+
+      return {
+        collection,
+        write(message: { type: `insert` | `update` | `delete`; value: T }) {
+          if (!syncContext) throw new Error(`Sync is not ready for ${id}`)
+          syncContext.begin({ immediate: true })
+          syncContext.write(message)
+          syncContext.commit()
+        },
+      }
+    }
+
+    const parents = createHydratableLocalCollection<ParentRow>(`cv-c-parents`)
+    const children = createHydratableLocalCollection<ChildRow>(`cv-c-children`)
+
+    const live = createLiveQueryCollection({
+      id: `cv-c-parents-with-children`,
+      query: (q) =>
+        q.from({ parent: parents.collection }).select(({ parent }) => ({
+          ...parent,
+          children: toArray(
+            q
+              .from({ child: children.collection })
+              .where(({ child }) => eq(child.parentId, parent.id)),
+          ),
+        })),
+    })
+
+    await live.preload()
+    const subscription = live.subscribeChanges(() => {}, {
+      includeInitialState: false,
+    })
+
+    parents.write({
+      type: `insert`,
+      value: { id: `parent-1`, name: `Parent`, rank: `0` },
+    })
+    children.write({
+      type: `insert`,
+      value: { id: `child-1`, parentId: `parent-1`, name: `Child A`, rank: `0` },
+    })
+
+    await vi.waitFor(
+      () => {
+        expect(
+          (live.get(`parent-1`) as any).children.map((row: any) => row.name),
+        ).toEqual([`Child A`])
+      },
+      { timeout: 1000 },
+    )
+
+    // Sync layer confirms the existing child changed, delivering the new
+    // full row as an update. This must not throw.
+    expect(() => {
+      children.write({
+        type: `update`,
+        value: {
+          id: `child-1`,
+          parentId: `parent-1`,
+          name: `Child B`,
+          rank: `0`,
+        },
+      })
+    }).not.toThrow()
+
+    await vi.waitFor(
+      () => {
+        expect(
+          (live.get(`parent-1`) as any).children.map((row: any) => row.name),
+        ).toEqual([`Child B`])
+      },
+      { timeout: 1000 },
+    )
+
+    subscription.unsubscribe()
+  })
+
+  // CLAIM D (#1501) — control, expected GREEN on main (fixed by PR #1607):
+  // 3-level nested toArray with overlapping correlation keys across parent
+  // groups, via queryOnce, using the exact repro from the issue.
+  it(`3-level nested toArray resolves overlapping correlation keys across parent groups (queryOnce)`, async () => {
+    type Anchor = { id: number }
+    type Product = { id: number; title: string }
+    type PriceRange = { id: number; productId: number; regionId: number }
+    type Region = { id: number; name: string }
+
+    const products = createCollection(
+      localOnlyCollectionOptions<Product>({
+        id: `cv-d-products`,
+        getKey: (p) => p.id,
+        initialData: [
+          { id: 1, title: `T-Shirt` },
+          { id: 2, title: `Hoodie` },
+        ],
+      }),
+    )
+    const priceRanges = createCollection(
+      localOnlyCollectionOptions<PriceRange>({
+        id: `cv-d-price-ranges`,
+        getKey: (r) => r.id,
+        initialData: [
+          { id: 1, productId: 1, regionId: 1 },
+          { id: 2, productId: 1, regionId: 2 },
+          { id: 3, productId: 2, regionId: 1 }, // same regionId as priceRange 1
+        ],
+      }),
+    )
+    const regions = createCollection(
+      localOnlyCollectionOptions<Region>({
+        id: `cv-d-regions`,
+        getKey: (r) => r.id,
+        initialData: [
+          { id: 1, name: `Europe` },
+          { id: 2, name: `North America` },
+        ],
+      }),
+    )
+    const anchor = createCollection(
+      localOnlyCollectionOptions<Anchor>({
+        id: `cv-d-anchor`,
+        getKey: (r) => r.id,
+        initialData: [{ id: 1 }],
+      }),
+    )
+
+    await Promise.all([
+      products.preload(),
+      priceRanges.preload(),
+      regions.preload(),
+      anchor.preload(),
+    ])
+
+    const result = await queryOnce((qb) =>
+      qb
+        .from({ _: anchor })
+        .select(({ _ }) => ({
+          products: toArray(
+            qb
+              .from({ p: products })
+              .where(({ p }) => eq(p.id, _.id)) // dummy correlation
+              .select(({ p }) => ({
+                id: p.id,
+                title: p.title,
+                priceRanges: toArray(
+                  qb
+                    .from({ pr: priceRanges })
+                    .where(({ pr }) => eq(pr.productId, p.id))
+                    .select(({ pr }) => ({
+                      id: pr.id,
+                      regionId: pr.regionId,
+                      region: toArray(
+                        qb
+                          .from({ r: regions })
+                          .where(({ r }) => eq(r.id, pr.regionId))
+                          .select(({ r }) => ({ id: r.id, name: r.name })),
+                      ),
+                    })),
+                ),
+              })),
+          ),
+        }))
+        .findOne(),
+    )
+
+    const tshirt = (result as any).products.find(
+      (p: any) => p.title === `T-Shirt`,
+    )
+    expect(tshirt).toBeDefined()
+    const pr1 = tshirt.priceRanges.find((r: any) => r.id === 1)
+    expect(pr1).toBeDefined()
+    expect(stripVirtualPropsDeep(pr1.region)).toEqual([
+      { id: 1, name: `Europe` },
+    ])
   })
 })

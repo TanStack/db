@@ -8,6 +8,7 @@ import {
   createOptimisticAction,
   eq,
   gt,
+  toArray,
 } from '@tanstack/db'
 import {
   For,
@@ -2586,5 +2587,237 @@ describe(`Query Collections`, () => {
 
       expect(rendered.result()).toBeUndefined()
     })
+  })
+})
+
+describe(`cluster-verification #1571 (evaluate-review)`, () => {
+  type CVProject = {
+    id: number
+    name: string
+  }
+
+  type CVIssue = {
+    id: number
+    projectId: number
+    title: string
+  }
+
+  const includeItems = (value: any): Array<any> => {
+    if (!value) return []
+    if (Array.isArray(value)) return value
+    // Collection includes expose a `toArray` getter
+    return [...(value.toArray ?? [])]
+  }
+
+  it(`part 1: toArray include values are reactive in the rendered data array after a child insert`, async () => {
+    const projects = createCollection(
+      mockSyncCollectionOptions<CVProject>({
+        id: `cv-1571-projects-part1`,
+        getKey: (p) => p.id,
+        initialData: [
+          { id: 1, name: `Alpha` },
+          { id: 2, name: `Beta` },
+        ],
+      }),
+    )
+    const issues = createCollection(
+      mockSyncCollectionOptions<CVIssue>({
+        id: `cv-1571-issues-part1`,
+        getKey: (i) => i.id,
+        initialData: [
+          { id: 10, projectId: 1, title: `Bug in Alpha` },
+          { id: 20, projectId: 2, title: `Bug in Beta` },
+        ],
+      }),
+    )
+
+    let queryRef: any
+
+    function TestComponent() {
+      const query = useLiveQuery((q) =>
+        q.from({ project: projects }).select(({ project }) => ({
+          id: project.id,
+          name: project.name,
+          issueTitles: toArray(
+            q
+              .from({ issue: issues })
+              .where(({ issue }) => eq(issue.projectId, project.id))
+              .select(({ issue }) => ({
+                id: issue.id,
+                title: issue.title,
+              })),
+          ),
+        })),
+      )
+      queryRef = query
+
+      return (
+        <ul data-testid="projects">
+          <For each={query()}>
+            {(project) => (
+              <li data-testid={`project-${project.id}`}>
+                {((project as any).issueTitles ?? [])
+                  .map((issue: any) => issue.title)
+                  .join(`|`)}
+              </li>
+            )}
+          </For>
+        </ul>
+      )
+    }
+
+    const { findByTestId } = render(() => <TestComponent />)
+
+    // Initial render shows the existing issue for project 1
+    await waitFor(
+      async () => {
+        const el = await findByTestId(`project-1`)
+        expect(el.textContent).toBe(`Bug in Alpha`)
+      },
+      { timeout: 3000 },
+    )
+
+    // Insert a new issue for project 1 after the initial render
+    issues.utils.begin()
+    issues.utils.write({
+      type: `insert`,
+      value: { id: 11, projectId: 1, title: `Feature for Alpha` },
+    })
+    issues.utils.commit()
+
+    // Nuance layer 1 (non-fatal): the underlying live query collection row
+    try {
+      await waitFor(
+        () => {
+          const raw = queryRef.collection.get(1)
+          expect(raw.issueTitles.map((i: any) => i.title)).toContain(
+            `Feature for Alpha`,
+          )
+        },
+        { timeout: 3000 },
+      )
+      console.log(`[nuance] underlying collection row updated: YES`)
+    } catch {
+      console.log(`[nuance] underlying collection row updated: NO`)
+    }
+
+    // Nuance layer 2 (non-fatal): the reactive `state` map
+    const stateTitles = (queryRef.state.get(1)?.issueTitles ?? []).map(
+      (i: any) => i.title,
+    )
+    console.log(`[nuance] state map issueTitles after insert:`, stateTitles)
+
+    // Nuance layer 3 (non-fatal): a plain (untracked) re-read of the data array
+    const dataRow = queryRef().find((r: any) => r.id === 1)
+    console.log(
+      `[nuance] plain data re-read issueTitles after insert:`,
+      (dataRow?.issueTitles ?? []).map((i: any) => i.title),
+    )
+
+    // CLAIM UNDER TEST: the rendered `data` array (reactive read via the DOM)
+    // should grow to include the new issue title
+    await waitFor(
+      async () => {
+        const el = await findByTestId(`project-1`)
+        expect(el.textContent).toBe(`Bug in Alpha|Feature for Alpha`)
+      },
+      { timeout: 3000 },
+    )
+  })
+
+  it(`part 2: an initially-empty collection include becomes populated on the rendered row after the first child insert`, async () => {
+    const projects = createCollection(
+      mockSyncCollectionOptions<CVProject>({
+        id: `cv-1571-projects-part2`,
+        getKey: (p) => p.id,
+        initialData: [{ id: 1, name: `Alpha` }],
+      }),
+    )
+    const issues = createCollection(
+      mockSyncCollectionOptions<CVIssue>({
+        id: `cv-1571-issues-part2`,
+        getKey: (i) => i.id,
+        initialData: [],
+      }),
+    )
+
+    const rendered = renderHook(() => {
+      return useLiveQuery((q) =>
+        q.from({ project: projects }).select(({ project }) => ({
+          id: project.id,
+          name: project.name,
+          issues: q
+            .from({ issue: issues })
+            .where(({ issue }) => eq(issue.projectId, project.id))
+            .select(({ issue }) => ({
+              id: issue.id,
+              title: issue.title,
+            })),
+        })),
+      )
+    })
+
+    await waitFor(
+      () => {
+        expect(rendered.result.isReady).toBe(true)
+        expect(rendered.result.state.size).toBe(1)
+      },
+      { timeout: 3000 },
+    )
+
+    const initialRow = rendered.result()[0] as any
+    console.log(
+      `[nuance] initial include value on data row:`,
+      initialRow?.issues === null
+        ? `null`
+        : initialRow?.issues === undefined
+          ? `undefined`
+          : `${typeof initialRow?.issues} (items: ${
+              includeItems(initialRow?.issues).length
+            })`,
+    )
+
+    // Insert the first child after the initial render
+    issues.utils.begin()
+    issues.utils.write({
+      type: `insert`,
+      value: { id: 10, projectId: 1, title: `Bug in Alpha` },
+    })
+    issues.utils.commit()
+
+    // Nuance layer 1 (non-fatal): the raw live query collection row
+    try {
+      await waitFor(
+        () => {
+          const raw = rendered.result.collection.get(1) as any
+          expect(includeItems(raw?.issues).map((i: any) => i.title)).toContain(
+            `Bug in Alpha`,
+          )
+        },
+        { timeout: 3000 },
+      )
+      console.log(`[nuance] underlying collection row include populated: YES`)
+    } catch {
+      console.log(`[nuance] underlying collection row include populated: NO`)
+    }
+
+    // Nuance layer 2 (non-fatal): the reactive `state` map
+    const stateRow = rendered.result.state.get(1) as any
+    console.log(
+      `[nuance] state map include after insert:`,
+      includeItems(stateRow?.issues).map((i: any) => i.title),
+    )
+
+    // CLAIM UNDER TEST: the include field on the rendered data row should
+    // become a populated value containing the inserted child
+    await waitFor(
+      () => {
+        const row = rendered.result()[0] as any
+        expect(row?.issues).toBeTruthy()
+        const titles = includeItems(row.issues).map((i: any) => i.title)
+        expect(titles).toContain(`Bug in Alpha`)
+      },
+      { timeout: 3000 },
+    )
   })
 })
