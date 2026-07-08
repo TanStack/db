@@ -91,59 +91,69 @@ registered parent) are in scope — today's failure mode is silent data corrupti
 
 ## 3. Proposed PR series
 
-Ordered so each PR is independently landable, keeps the public API frozen, and is gated by tests.
-PRs 1–5 fix the verified-RED bugs; PRs 6–10 remove the bug factory.
+**Sequencing rationale — oracle first.** The obvious order (fix the five verified bugs, then build
+the safety net) repeats the pattern that produced this cluster: each fix validated only by its own
+repro test — that is exactly how "fix depth 2 (#1457), discover depth 3 (#1501), fix that (#1607)"
+happened. Instead, the oracle harness is the first sequenced work, and the state-correctness bugs
+are fixed _against_ it. Writing the naive recompute evaluator also forces the semantics questions
+(optimistic child update + orderBy, empty-include representation, optimistic+confirm convergence)
+to be settled once, in a reference implementation, rather than implicitly across five PR reviews.
 
-### Phase 0 — stabilization (fix the verified bugs)
+The bugs split into two property classes, which is why there are two tracks:
 
-1. **Scoped includes inputs (fixes #1454).** Land/adapt open PR #1455: each includes subquery gets
-   its own D2 graph input and subscription instead of the flattened alias namespace. Its
-   `__inc_N_alias` key mangling is acceptable as stabilization and is superseded by PR 6.
-   Gate: cluster-verification claim A goes green.
-2. **Atomic order-index replacement (fixes #1444).** Land open PR #1496: apply the parent
-   accumulator's `orderByIndex`-update logic to the child and nested accumulators. Superseded by
-   PR 7, which deletes all three copies. Gate: claim B green.
-3. **Readiness for undemanded lazy children (fixes #1510).** Land open PR #1510: skip lazy aliases
-   in `allCollectionsReady`; the `isLoadingSubset` gate still holds the query while per-row loads
-   are in flight. Gate: #1510 verification tests green.
-4. **Solid publication shim (fixes #1571 part 1).** Land open PR #1604 (clone rows in
-   `syncDataFromCollection` before `reconcile`). Explicitly labeled a temporary
-   publication-boundary shim, removed by PR 9. Gate: #1571 part-1 test green.
-5. **Progressive fast path for nested children (fixes #1533).** When the child collection is in
-   progressive mode, request the correlated snapshot at subscription setup (or on first parent-key
-   batch) through the same `requestSnapshot` path a direct query uses, instead of relying on the
-   per-row lazy tap that fires after the buffering window closes
-   (`packages/db/src/query/live/collection-subscriber.ts:116-119`,
-   `packages/db/src/query/compiler/index.ts:544-578`). Needs a small design note: the electric
-   adapter's snapshot window (`isBufferingInitialSync`) vs late `loadSubset`. Gate: #1533
-   verification test green, baseline stays green.
+- **State-equivalence bugs** (#1454 misrouting, #1444 stale sort — and the whole phase 2–3
+  refactor): detectable by `incremental(query, history) === recompute(query, state)`. These wait
+  for the oracle and are fixed against it.
+- **Liveness, timing, and adapter bugs** (#1510 never-ready, #1533 fast-path window, #1571 Solid
+  `data` store): invisible to a state-equivalence oracle — the converged state is correct; what is
+  wrong is _when_ it becomes available or _which layer_ sees it. Gating these already-reviewed
+  community PRs on harness-building adds no confidence and delays users, so they proceed in
+  parallel.
 
-### Phase 1 — lock in behavior
+### Track A — parallel, not oracle-gated (community PRs, own regression tests)
 
-6. **Recompute-oracle property harness (test-only).** Model-based tests: random schemas (include
-   depth 1–4, overlapping correlation keys, duplicate aliases in separate scopes), random op
-   sequences (optimistic then sync-confirm, late parents/children, reorders, empty outers), and
+- **A1 — Readiness for undemanded lazy children (fixes #1510).** Land open PR #1510: skip lazy
+  aliases in `allCollectionsReady`; the `isLoadingSubset` gate still holds the query while per-row
+  loads are in flight. Gate: the #1510 verification tests (liveness assertions, bounded wait).
+- **A2 — Solid publication shim (fixes #1571 part 1).** Land open PR #1604 (clone rows in
+  `syncDataFromCollection` before `reconcile`). Explicitly labeled a temporary
+  publication-boundary shim, removed by PR 4 below. Gate: #1571 part-1 test + adapter conformance
+  suite.
+- **A3 — Progressive fast path for nested children (fixes #1533).** When the child collection is
+  in progressive mode, request the correlated snapshot at subscription setup (or on first
+  parent-key batch) through the same `requestSnapshot` path a direct query uses, instead of the
+  per-row lazy tap that fires after the buffering window closes
+  (`packages/db/src/query/live/collection-subscriber.ts:116-119`,
+  `packages/db/src/query/compiler/index.ts:544-578`). Fold in PR #1532's draft tests. Needs a
+  small design note: the electric adapter's snapshot window (`isBufferingInitialSync`) vs late
+  `loadSubset`. Gate: #1533 verification test green (timing assertion), baseline stays green.
+
+### Sequenced track
+
+1. **Recompute-oracle property harness (test-only, first).** Model-based tests: random schemas
+   (include depth 1–4, overlapping correlation keys, duplicate aliases in separate scopes), random
+   op sequences (optimistic then sync-confirm, late parents/children, reorders, empty outers), and
    after each op assert `incremental(query, history) === recompute(query, state)`. Metamorphic
    invariants: alpha-renaming aliases, reordering sibling includes, and adding an unrelated sibling
    include are all no-ops; optimistic+confirm converges to confirmed-only. `@fast-check/vitest` is
-   already a dev dependency. This is the safety net for everything below; it also retroactively
-   covers the classes of #1457/#1501/#1495.
-
-### Phase 2 — identities and one reducer (internal refactor)
-
-7. **Opaque node/source IDs + shared transition reducer.**
+   already a dev dependency. Expect this PR to _surface_ #1454 and #1444 on its own (those cases
+   ship as known-failing seeds until PR 2), and to retroactively cover the classes of
+   #1457/#1501/#1495. The naive evaluator doubles as the semantics reference for review debates.
+2. **Opaque node/source IDs + shared transition reducer (fixes #1454 and #1444 structurally).**
    - Compiler assigns generated IDs to include nodes and sources; all runtime maps
      (`collectionByAlias`, routing, lazy-target resolution) key by ID; lexical aliases resolve per
-     scope. Replaces PR 1's mangling. Also replace `computeRoutingKey`'s
+     scope — this fixes #1454 without alias mangling. Also replace `computeRoutingKey`'s
      `JSON.stringify([correlationKey, parentContext])` with one canonical structural-key encoder.
    - Extract the single per-key transition reducer (P2) and route parent, child, and nested outputs
-     through it; delete the three accumulator copies and the `has(key)`-based reclassification from
+     through it — value and order tuple replaced atomically, which fixes #1444 in all three
+     accumulator sites by deleting them; also removes the `has(key)`-based reclassification from
      #1600 (its tests remain and must stay green).
-   - Gate: oracle harness + alpha-renaming property + entire existing includes suite.
-
-### Phase 3 — correlated relation operator
-
-8. **`CorrelatedRelation` replaces nested buffers/routing (P3).** Introduce the operator with
+   - Fallback: if this PR's timeline stretches, open PRs #1455 (scoped inputs via `__inc_N_alias`
+     mangling) and #1496 (third copy of the order-index fix) can land first as stopgaps — with the
+     oracle from PR 1 now validating their completeness — and be deleted here.
+   - Gate: oracle harness (including the previously known-failing seeds) + alpha-renaming property
+     - entire existing includes suite.
+3. **`CorrelatedRelation` replaces nested buffers/routing (P3).** Introduce the operator with
    bucket state, subscriber edges, snapshot-on-subscribe, and non-destructive fan-out. Run in
    shadow mode first (tests compare it against the legacy materializer over the oracle workloads),
    then swap `nestedSetups` / `drainNestedBuffers` / `updateRoutingIndex` /
@@ -151,55 +161,57 @@ PRs 1–5 fix the verified-RED bugs; PRs 6–10 remove the bug factory.
    becomes the lightweight relation; the `Collection` facade remains only for bare
    subquery-in-select includes. Removes the `gcTime: 0` workaround and the internal-collection
    `config.utils` hazard class.
-
-### Phase 4 — publication and readiness
-
-9. **Copy-on-write publication (P4, fixes #1571 structurally).** Shallow-copy parent rows on
+4. **Copy-on-write publication (P4, fixes #1571 structurally).** Shallow-copy parent rows on
    include change with structural sharing; publish through the normal update path; delete
-   `emitEvents(events, true)` and the hand-cloned prev/next; remove the Solid shim from PR 4 and
+   `emitEvents(events, true)` and the hand-cloned prev/next; remove the Solid shim from A2 and
    verify the cross-adapter conformance suite (`packages/solid-db/tests/conformance.test.tsx` et
-   al.) passes for React/Solid/Vue/etc. Perf gate: `scripts/perf-bench.ts` A/B before/after —
-   rows are already double-cloned today for the forced event, so this is likely neutral-to-better.
-10. **Demand-relative readiness (P5, subsumes PR 3, fixes #1533's class).** Consolidate
-    `allCollectionsReady`, lazy-alias exclusions, `isLoadingSubset`, and progressive snapshot
-    delivery behind one internal demand model: readiness = all currently-demanded subsets settled.
-    PR 3's exclusion list and PR 5's special-casing collapse into it.
+   al.) passes for React/Solid/Vue/etc. Perf gate: A/B bench before/after — rows are already
+   double-cloned today for the forced event, so this is likely neutral-to-better.
+5. **Demand-relative readiness (P5, subsumes A1, fixes #1533's class).** Consolidate
+   `allCollectionsReady`, lazy-alias exclusions, `isLoadingSubset`, and progressive snapshot
+   delivery behind one internal demand model: readiness = all currently-demanded subsets settled.
+   A1's exclusion list and A3's special-casing collapse into it. The oracle harness gains
+   liveness/timing assertions here (bounded readiness; subset-before-full-sync) so this property
+   class is fuzzed too, not just unit-tested.
 
 ### Ongoing
 
-- **Dev-mode invariant assertions** land opportunistically inside PRs 7–9 (duplicate routing
+- **Dev-mode invariant assertions** land opportunistically inside PRs 2–4 (duplicate routing
   registration, orphaned buckets at flush end, alias-keyed runtime lookups, unbalanced weighted
   batches). Each converts a silent-corruption mode into a thrown error in development builds.
 
 ## 4. Non-goals / rejected approaches
 
 - No new public APIs (explain, loading-status fields, demand/lease surface, new helpers).
-- No further alias mangling beyond PR 1's stopgap, no additional per-depth buffers or flush
-  sub-passes, no per-adapter cloning beyond the temporary PR 4 shim, no growing the
-  readiness-exclusion list beyond PR 3's stopgap. Each of these closes one issue while making the
-  state machine harder to reason about — the phase 2–4 refactors exist to delete them.
+- No alias mangling (beyond the #1455 fallback, if taken), no additional per-depth buffers or
+  flush sub-passes, no per-adapter cloning beyond the temporary A2 shim, no growing the
+  readiness-exclusion list beyond A1's stopgap. Each of these closes one issue while making the
+  state machine harder to reason about — PRs 2–5 exist to delete them.
 
 ## 5. Risks
 
-- **PR 8 is the big one.** Shadow mode + the oracle harness are the mitigation; it should not land
-  before PR 6.
-- **PR 9 changes result-object identity guarantees** (rows are replaced, not mutated). This is the
+- **PR 3 is the big one.** Shadow mode + the oracle harness are the mitigation; it must not land
+  before PR 1.
+- **PR 4 changes result-object identity guarantees** (rows are replaced, not mutated). This is the
   documented expectation adapters already assume; the conformance suite plus the react/solid/vue
   adapter tests are the gate. Any user code depending on in-place mutation of live-query rows was
   already broken by `deepEquals` suppression semantics.
-- **PR 5 touches the electric adapter's sync window**; it needs an e2e test in
+- **A3 touches the electric adapter's sync window**; it needs an e2e test in
   `packages/electric-db-collection/e2e` (PR #1532's draft e2e test is a starting point).
+- **Oracle-first delays the #1454/#1444 fixes** relative to landing #1455/#1496 immediately. The
+  fallback in PR 2 caps that delay: if the structural fix stalls, the stopgap PRs land
+  oracle-validated instead.
 
 ## Appendix: relationship to open PRs
 
-| Open PR                                 | Disposition                                     |
-| --------------------------------------- | ----------------------------------------------- |
-| #1455 (duplicate alias)                 | Land as PR 1; superseded by PR 7's identities   |
-| #1496 (orderBy after optimistic update) | Land as PR 2; superseded by PR 7's reducer      |
-| #1510 (readiness)                       | Land as PR 3; superseded by PR 10               |
-| #1604 (solid clone)                     | Land as PR 4 as a labeled shim; removed by PR 9 |
-| #1532 (progressive nested test)         | Fold its tests into PR 5                        |
-| #1607, #1600, #1580                     | Already merged; their tests remain as gates     |
+| Open PR                                 | Disposition                                                                        |
+| --------------------------------------- | ---------------------------------------------------------------------------------- |
+| #1455 (duplicate alias)                 | Held for PR 2's structural fix; fallback stopgap if PR 2 stalls (oracle-validated) |
+| #1496 (orderBy after optimistic update) | Held for PR 2's reducer; same fallback rule                                        |
+| #1510 (readiness)                       | Land now as A1; superseded by PR 5                                                 |
+| #1604 (solid clone)                     | Land now as A2 as a labeled shim; removed by PR 4                                  |
+| #1532 (progressive nested test)         | Fold its tests into A3                                                             |
+| #1607, #1600, #1580                     | Already merged; their tests remain as gates                                        |
 
 Issue #1488 (observer-reuse ownership) did not reproduce on main and is excluded; recommend asking
 the reporter to re-verify against current `@tanstack/query-db-collection` and closing if stale.
