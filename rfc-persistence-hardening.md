@@ -24,10 +24,14 @@ The terminal user-visible state is always the same — a collection that is
 data-specific when they are actually deterministic.
 
 Every mechanism below was ground-truthed with a failing test before being
-accepted (see `review-claims.test.ts` in `db-sqlite-persistence-core/tests`,
-`browser-db-sqlite-persistence/tests`, and
-`react-native-db-sqlite-persistence/tests` on the
-`explore-persistence-electric-sqlite` branch).
+accepted — see `review-claims.test.ts` in
+[`db-sqlite-persistence-core/tests`](https://github.com/TanStack/db/blob/explore-persistence-electric-sqlite/packages/db-sqlite-persistence-core/tests/review-claims.test.ts),
+[`browser-db-sqlite-persistence/tests`](https://github.com/TanStack/db/blob/explore-persistence-electric-sqlite/packages/browser-db-sqlite-persistence/tests/review-claims.test.ts),
+and
+[`react-native-db-sqlite-persistence/tests`](https://github.com/TanStack/db/blob/explore-persistence-electric-sqlite/packages/react-native-db-sqlite-persistence/tests/review-claims.test.ts)
+on the
+[`explore-persistence-electric-sqlite`](https://github.com/TanStack/db/tree/explore-persistence-electric-sqlite)
+branch.
 
 ## 2. Verified defects
 
@@ -73,8 +77,13 @@ and violated today (or was, before the fixes on this branch):
 ## 4. Proposed PR series
 
 Ordered so that each PR is independently shippable and the highest
-data-loss-risk items land first. PRs 1–3 are implemented with tests on the
-`explore-persistence-electric-sqlite` branch and can be split out directly.
+data-loss-risk items land first. PRs 1–3 are implemented with tests and
+changesets on the
+[`explore-persistence-electric-sqlite`](https://github.com/TanStack/db/tree/explore-persistence-electric-sqlite)
+branch and can be split out directly — PR 1:
+[`4244cbd7`](https://github.com/TanStack/db/commit/4244cbd7), PR 2:
+[`875a9894`](https://github.com/TanStack/db/commit/875a9894), PR 3:
+[`4ca90715`](https://github.com/TanStack/db/commit/4ca90715).
 
 ### PR 1 — core: schema reset clears collection metadata (D1)
 
