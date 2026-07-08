@@ -195,6 +195,17 @@ export class CollectionStateManager<
     if (this.isRowSynced(key)) {
       return true
     }
+    // Acknowledgment is decided by the mutation currently supplying the visible
+    // row. If an active optimistic transaction covers the key, only its own
+    // acknowledged flag counts — a newer unacknowledged write must not inherit
+    // an older (completed or acknowledged) write's acknowledged state.
+    const covering = this.getCoveringOptimisticTransaction(key)
+    if (covering) {
+      return covering.acknowledged
+    }
+    // No active optimistic transaction covers the key: the visible row comes
+    // from a completed transaction's pending overlay, which is acknowledged
+    // (settling always acknowledges).
     if (
       this.pendingOptimisticUpserts.has(key) ||
       this.pendingOptimisticDeletes.has(key)
@@ -202,6 +213,34 @@ export class CollectionStateManager<
       return true
     }
     return this.acknowledgedKeys.has(key)
+  }
+
+  /**
+   * The active (not `completed`/`failed`) optimistic transaction that currently
+   * supplies the visible row for a key — the newest such transaction in
+   * creation order, mirroring the last-write-wins overlay. Returns undefined
+   * when no active optimistic mutation covers the key.
+   */
+  private getCoveringOptimisticTransaction(
+    key: TKey,
+  ): Transaction<any> | undefined {
+    let covering: Transaction<any> | undefined
+    // transactions iterates in createdAt order, so the last match is the newest.
+    for (const transaction of this.transactions.values()) {
+      if (transaction.state === `completed` || transaction.state === `failed`) {
+        continue
+      }
+      for (const mutation of transaction.mutations) {
+        if (
+          mutation.optimistic &&
+          this.isThisCollection(mutation.collection) &&
+          (mutation.key as TKey) === key
+        ) {
+          covering = transaction
+        }
+      }
+    }
+    return covering
   }
 
   /**
@@ -671,8 +710,14 @@ export class CollectionStateManager<
               break
           }
 
+          // Tie acknowledgment to the covering mutation. Active transactions are
+          // applied oldest-to-newest, so the last one to write this key also
+          // supplies its visible row and decides its acknowledged state: a newer
+          // unacknowledged write clears an older acknowledged write's flag.
           if (transaction.acknowledged) {
             this.acknowledgedKeys.add(mutation.key)
+          } else {
+            this.acknowledgedKeys.delete(mutation.key)
           }
         }
       }
@@ -1479,6 +1524,14 @@ export class CollectionStateManager<
       }
       const key = mutation.key as TKey
       if (this.acknowledgedKeys.has(key)) {
+        continue
+      }
+
+      // Only the transaction currently supplying the visible row may report it
+      // as acknowledged. If a newer, still-unacknowledged optimistic write now
+      // covers this key, this (older) ack must not flip it.
+      const covering = this.getCoveringOptimisticTransaction(key)
+      if (covering && covering !== transaction) {
         continue
       }
 

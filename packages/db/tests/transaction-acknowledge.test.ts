@@ -255,6 +255,71 @@ describe(`Transaction.acknowledge() — the ack layer`, () => {
     subscription.unsubscribe()
   })
 
+  it(`does not report a newer unacknowledged write as acknowledged when an older tx acked the same key`, async () => {
+    const changes: Array<Change> = []
+    const ackGate1 = createGate()
+    const settleGate1 = createGate()
+    const settleGate2 = createGate()
+
+    const collection = createCollection<Row, string>({
+      id: `ack-covering`,
+      getKey: (item) => item.id,
+      sync: {
+        sync: ({ markReady }) => markReady(),
+      },
+      onInsert: async ({ transaction }) => {
+        await ackGate1.promise
+        transaction.acknowledge()
+        await settleGate1.promise
+      },
+      onUpdate: async () => {
+        // Never acknowledges; stays persisting so its overlay covers the row.
+        await settleGate2.promise
+      },
+    })
+
+    const subscription = collection.subscribeChanges(
+      (events) => changes.push(...events),
+      { includeInitialState: false },
+    )
+
+    // Older transaction inserts r1 and gets acknowledged.
+    const tx1 = collection.insert({ id: `r1`, value: `v1` })
+    await waitForChanges()
+    ackGate1.release()
+    await tx1.isAcknowledged.promise
+    await waitForChanges()
+
+    expect(collection.state.get(`r1`)?.$acknowledged).toBe(true)
+
+    // Newer, still-unacknowledged transaction updates the same key.
+    changes.length = 0
+    const tx2 = collection.update(`r1`, (draft) => {
+      draft.value = `v2`
+    })
+    await waitForChanges()
+
+    expect(tx2.acknowledged).toBe(false)
+    // The visible row is now supplied by the newer optimistic write, so it must
+    // NOT inherit the older transaction's acknowledged state.
+    const row = collection.state.get(`r1`)
+    expect(row?.value).toBe(`v2`)
+    expect(row?.$acknowledged).toBe(false)
+    expect(row?.$synced).toBe(false)
+
+    // The emitted update for the newer write also reports $acknowledged: false.
+    const update = changes.find((c) => c.type === `update` && c.key === `r1`)
+    expect(update).toBeDefined()
+    expect(update!.value.value).toBe(`v2`)
+    expect(update!.value.$acknowledged).toBe(false)
+
+    settleGate1.release()
+    settleGate2.release()
+    await tx1.isPersisted.promise
+    await tx2.isPersisted.promise
+    subscription.unsubscribe()
+  })
+
   it(`emits two distinct updates when ack precedes settle (pending -> acked -> synced)`, async () => {
     const changes: Array<Change> = []
     const ackGate = createGate()
