@@ -1318,14 +1318,19 @@ export function queryCollectionOptions(
       })
 
       newItemsMap.forEach((newItem, key) => {
+        addRow(key, hashedQueryKey)
+        const existingItem = currentSyncedItems.get(key)
+        if (!existingItem) {
+          write({ type: `insert`, value: newItem })
+        } else if (!previouslyOwnedRows.has(key)) {
+          write({ type: `update`, value: newItem })
+        }
+        // Read owners AFTER write: insert clears pending metadata, so reading here
+        // ensures we see the post-insert baseline and correctly re-apply ownership.
         const owners = getPersistedOwners(key)
         if (!owners.has(hashedQueryKey)) {
           owners.add(hashedQueryKey)
           setPersistedOwners(key, owners)
-        }
-        addRow(key, hashedQueryKey)
-        if (!currentSyncedItems.has(key)) {
-          write({ type: `insert`, value: newItem })
         }
       })
 

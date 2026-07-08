@@ -2604,4 +2604,47 @@ describe(`Query Collections`, () => {
       )
     })
   })
+
+  describe(`unmounting narrow live query does not drop record from broad live query`, () => {
+    it(`should retain item in broad useLiveQuery when narrow eq-filter useLiveQuery unmounts`, async () => {
+      const collection = createCollection(
+        mockSyncCollectionOptions<Person>({
+          id: `test-unmount-sibling`,
+          getKey: (p: Person) => p.id,
+          initialData: initialPersons,
+        }),
+      )
+
+      // List view: all items
+      const listResult = renderHook(() =>
+        useLiveQuery((q) => q.from({ p: collection })),
+      )
+
+      // Wait for list to load
+      await waitFor(() => {
+        expect(listResult.result.current.data).toHaveLength(3)
+      })
+
+      // Detail view: single item with eq filter
+      const detailResult = renderHook(() =>
+        useLiveQuery((q) =>
+          q.from({ p: collection }).where(({ p }) => eq(p.id, `1`)),
+        ),
+      )
+
+      await waitFor(() => {
+        expect(detailResult.result.current.data).toHaveLength(1)
+      })
+
+      // Unmount the detail view
+      detailResult.unmount()
+
+      // Wait a tick for GC to fire (gcTime: 1ms)
+      await new Promise((r) => setTimeout(r, 10))
+
+      // List should still have all 3 items
+      expect(listResult.result.current.data).toHaveLength(3)
+      expect(listResult.result.current.state.get(`1`)).toBeDefined()
+    })
+  })
 })
