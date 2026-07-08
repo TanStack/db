@@ -131,22 +131,31 @@ export function createBrowserWASQLitePersistence(
     })
     adapterCache.set(cacheKey, adapter)
 
-    // Wire the adapter into the multi-tab coordinator so it can handle
-    // leader-side RPCs (applyCommittedTx, pullSince, ensureIndex, etc.)
-    if (resolvedCoordinator instanceof BrowserCollectionCoordinator) {
-      resolvedCoordinator.setAdapter(adapter)
-    }
-
     return adapter
   }
 
   const createCollectionPersistence = (
     mode: PersistedCollectionMode,
     schemaVersion: number | undefined,
-  ): PersistedCollectionPersistence => ({
-    adapter: getAdapterForCollection(mode, schemaVersion),
-    coordinator: resolvedCoordinator,
-  })
+    collectionId?: string,
+  ): PersistedCollectionPersistence => {
+    const adapter = getAdapterForCollection(mode, schemaVersion)
+
+    // Wire the adapter into the multi-tab coordinator so it can handle
+    // leader-side RPCs (applyCommittedTx, pullSince, ensureIndex, etc.).
+    // Adapters differ per schemaVersion, so the registration must be scoped
+    // to the collection — a shared slot would route one collection's
+    // operations through another collection's adapter and trigger spurious
+    // schema-mismatch resets (#1589).
+    if (resolvedCoordinator instanceof BrowserCollectionCoordinator) {
+      resolvedCoordinator.setAdapter(adapter, collectionId)
+    }
+
+    return {
+      adapter,
+      coordinator: resolvedCoordinator,
+    }
+  }
 
   const defaultPersistence = createCollectionPersistence(
     `sync-absent`,
@@ -155,8 +164,8 @@ export function createBrowserWASQLitePersistence(
 
   return {
     ...defaultPersistence,
-    resolvePersistenceForCollection: ({ mode, schemaVersion }) =>
-      createCollectionPersistence(mode, schemaVersion),
+    resolvePersistenceForCollection: ({ collectionId, mode, schemaVersion }) =>
+      createCollectionPersistence(mode, schemaVersion, collectionId),
     resolvePersistenceForMode: (mode) =>
       createCollectionPersistence(mode, undefined),
   }

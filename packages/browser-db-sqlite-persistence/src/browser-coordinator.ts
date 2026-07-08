@@ -124,6 +124,7 @@ export class BrowserCollectionCoordinator implements PersistedCollectionCoordina
   private adapter: AdapterWithPullSince | null
   private readonly channel: BroadcastChannel
   private readonly collections = new Map<string, CollectionState>()
+  private readonly collectionAdapters = new Map<string, AdapterWithPullSince>()
   private readonly pendingRPCs = new Map<string, PendingRPC>()
   private readonly appliedEnvelopeIds = new Map<string, number>()
   private disposed = false
@@ -133,13 +134,17 @@ export class BrowserCollectionCoordinator implements PersistedCollectionCoordina
     return this.disposed
   }
 
-  private requireAdapter(): AdapterWithPullSince {
-    if (!this.adapter) {
+  private requireAdapter(collectionId?: string): AdapterWithPullSince {
+    const adapter =
+      (collectionId !== undefined
+        ? this.collectionAdapters.get(collectionId)
+        : undefined) ?? this.adapter
+    if (!adapter) {
       throw new Error(
         `BrowserCollectionCoordinator: adapter not set. Call setAdapter() before using leader-side operations.`,
       )
     }
-    return this.adapter
+    return adapter
   }
 
   constructor(options: BrowserCollectionCoordinatorOptions) {
@@ -155,8 +160,18 @@ export class BrowserCollectionCoordinator implements PersistedCollectionCoordina
    * Set or replace the persistence adapter used for leader-side RPC handling.
    * Called by `createBrowserWASQLitePersistence` to wire the internally-created
    * adapter into the coordinator.
+   *
+   * When `collectionId` is provided the adapter is registered for that
+   * collection only; different collections can persist with different
+   * schemaVersions, so a single shared slot would route one collection's
+   * leader-side operations through another collection's adapter and trigger
+   * spurious schema-mismatch resets.
    */
-  setAdapter(adapter: AdapterWithPullSince): void {
+  setAdapter(adapter: AdapterWithPullSince, collectionId?: string): void {
+    if (collectionId !== undefined) {
+      this.collectionAdapters.set(collectionId, adapter)
+      return
+    }
     this.adapter = adapter
   }
 
@@ -199,6 +214,10 @@ export class BrowserCollectionCoordinator implements PersistedCollectionCoordina
   ): Promise<void> {
     if (this.isLeader(collectionId)) return
 
+    // The subscription is a per-tab object holding functions; it cannot be
+    // structured-cloned across BroadcastChannel and must never leave this tab.
+    const { subscription: _subscription, ...clonableOptions } = options
+
     const response = await this.sendRPC<{
       type: `rpc:ensureRemoteSubset:res`
       rpcId: string
@@ -207,7 +226,7 @@ export class BrowserCollectionCoordinator implements PersistedCollectionCoordina
     }>(collectionId, {
       type: `rpc:ensureRemoteSubset:req`,
       rpcId: safeRandomUUID(),
-      options,
+      options: clonableOptions,
     })
 
     if (!response.ok) {
@@ -223,7 +242,7 @@ export class BrowserCollectionCoordinator implements PersistedCollectionCoordina
     spec: PersistedIndexSpec,
   ): Promise<void> {
     if (this.isLeader(collectionId)) {
-      await this.requireAdapter().ensureIndex(collectionId, signature, spec)
+      await this.requireAdapter(collectionId).ensureIndex(collectionId, signature, spec)
       return
     }
 
@@ -348,7 +367,7 @@ export class BrowserCollectionCoordinator implements PersistedCollectionCoordina
 
           try {
             // Restore stream position from DB before claiming leadership
-            const adapter = this.requireAdapter()
+            const adapter = this.requireAdapter(collectionId)
             if (adapter.getStreamPosition) {
               const pos = await adapter.getStreamPosition(collectionId)
               state.latestTerm = pos.latestTerm
@@ -610,7 +629,7 @@ export class BrowserCollectionCoordinator implements PersistedCollectionCoordina
     },
   ): Promise<RPCResponse> {
     await this.withWriterLock(() =>
-      this.requireAdapter().ensureIndex(
+      this.requireAdapter(collectionId).ensureIndex(
         collectionId,
         request.signature,
         request.spec,
@@ -676,7 +695,7 @@ export class BrowserCollectionCoordinator implements PersistedCollectionCoordina
     }
 
     await this.withWriterLock(() =>
-      this.requireAdapter().applyCommittedTx(collectionId, tx),
+      this.requireAdapter(collectionId).applyCommittedTx(collectionId, tx),
     )
 
     // Track envelope for dedup
@@ -736,7 +755,7 @@ export class BrowserCollectionCoordinator implements PersistedCollectionCoordina
   ): Promise<PullSinceResponse> {
     const state = this.collections.get(collectionId)
 
-    const adapter = this.requireAdapter()
+    const adapter = this.requireAdapter(collectionId)
     if (!adapter.pullSince) {
       return {
         type: `rpc:pullSince:res`,
