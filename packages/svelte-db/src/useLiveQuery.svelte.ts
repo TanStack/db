@@ -349,6 +349,13 @@ export function useLiveQuery(
         startSync: true,
       })
     } else {
+      // A reactive getter (or param-driven query fn) can resolve to null/undefined
+      // to mean "disabled". `toValue` above already called it, so guard here —
+      // otherwise `{ ...null }` reaches createLiveQueryCollection and throws.
+      if (unwrappedParam === undefined || unwrappedParam === null) {
+        return null
+      }
+
       return createLiveQueryCollection({
         ...unwrappedParam,
         startSync: true,
