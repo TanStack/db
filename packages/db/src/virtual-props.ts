@@ -58,16 +58,15 @@ export interface VirtualRowProps<
   TKey extends string | number = string | number,
 > {
   /**
-   * Whether this row currently has no pending local optimistic mutations in
-   * this collection's visible projection.
+   * Whether this row currently has no pending local optimistic writes.
    *
    * - `true`: No pending local optimistic mutation currently affects this row
-   * - `false`: One or more pending local optimistic mutations affect this row
+   * - `false`: One or more pending local optimistic mutations currently affect this row
    *
-   * This is a local write/projection status. It does not prove that a backend
-   * has uploaded, confirmed, or read back the row. Adapters that need stronger
-   * backend observation semantics should keep their mutation function pending
-   * until that observation has happened, or expose adapter-specific status.
+   * This is local mutation status. It does not prove that a backend has uploaded,
+   * confirmed, or read back the row. If you need backend-confirmed status, keep
+   * your mutation function pending until that backend observation has happened,
+   * or expose adapter-specific status.
    *
    * For local-only collections (no sync), this is always `true`.
    * For live query collections, this is passed through from the source collection.
