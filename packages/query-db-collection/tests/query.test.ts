@@ -14,7 +14,7 @@ import {
   stripVirtualProps,
 } from '../../db/tests/utils'
 import { persistedCollectionOptions } from '../../db-sqlite-persistence-core/src'
-import { queryCollectionOptions } from '../src/query'
+import { defineQueryCollectionOptions, queryCollectionOptions } from '../src/query'
 import type { QueryFunctionContext } from '@tanstack/query-core'
 import type {
   Collection,
@@ -183,6 +183,59 @@ describe(`QueryCollection`, () => {
   afterEach(() => {
     // Ensure all queries are properly cleaned up after each test
     queryClient.clear()
+  })
+
+  it(`should define options without QueryClient and bind at runtime`, async () => {
+    const initialItems: Array<TestItem> = [{ id: `1`, name: `Item 1` }]
+    const queryFn = vi.fn().mockResolvedValue(initialItems)
+
+    const definition = defineQueryCollectionOptions<TestItem>({
+      id: `defined-test`,
+      queryKey: [`definedItems`],
+      queryFn,
+      getKey,
+      startSync: true,
+    })
+
+    const collection = createCollection(definition.bind({ queryClient }))
+
+    await vi.waitFor(() => {
+      expect(queryFn).toHaveBeenCalledTimes(1)
+      expect(collection.size).toBe(initialItems.length)
+    })
+
+    expect(stripVirtualProps(collection.get(`1`))).toEqual(initialItems[0])
+  })
+
+  it(`should isolate bindings to the provided QueryClient`, async () => {
+    const firstClient = new QueryClient({
+      defaultOptions: { queries: { retry: false } },
+    })
+    const secondClient = new QueryClient({
+      defaultOptions: { queries: { retry: false } },
+    })
+    const queryFn = vi.fn().mockResolvedValue([{ id: `1`, name: `Item 1` }])
+
+    const definition = defineQueryCollectionOptions<TestItem>({
+      id: `isolated-test`,
+      queryKey: [`isolatedItems`],
+      queryFn,
+      getKey,
+      startSync: false,
+    })
+
+    createCollection(definition.bind({ queryClient: firstClient }))
+    createCollection(definition.bind({ queryClient: secondClient }))
+
+    firstClient.setQueryData([`isolatedItems`], [{ id: `first`, name: `First` }])
+
+    expect(firstClient.getQueryData([`isolatedItems`])).toEqual([
+      { id: `first`, name: `First` },
+    ])
+    expect(secondClient.getQueryData([`isolatedItems`])).toBeUndefined()
+
+    firstClient.clear()
+    secondClient.clear()
   })
 
   it(`should initialize and fetch initial data`, async () => {

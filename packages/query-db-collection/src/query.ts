@@ -359,6 +359,174 @@ function getLoadSubsetOptionsForMeta(
   return serializableOptions
 }
 
+export interface DefinedQueryCollectionOptions<TConfig, TResult> {
+  bind: (runtime: { queryClient: QueryClient }) => TResult
+  config: TConfig
+}
+
+type QueryCollectionConfigWithoutClient<
+  T extends object = object,
+  TQueryFn extends (context: QueryFunctionContext<any>) => any = (
+    context: QueryFunctionContext<any>,
+  ) => any,
+  TError = unknown,
+  TQueryKey extends QueryKey = QueryKey,
+  TKey extends string | number = string | number,
+  TSchema extends StandardSchemaV1 = never,
+  TQueryData = Awaited<ReturnType<TQueryFn>>,
+> = Omit<
+  QueryCollectionConfig<T, TQueryFn, TError, TQueryKey, TKey, TSchema, TQueryData>,
+  `queryClient`
+>
+
+export function defineQueryCollectionOptions<
+  T extends StandardSchemaV1,
+  TQueryFn extends (context: QueryFunctionContext<any>) => any,
+  TError = unknown,
+  TQueryKey extends QueryKey = QueryKey,
+  TKey extends string | number = string | number,
+  TQueryData = Awaited<ReturnType<TQueryFn>>,
+>(
+  config: QueryCollectionConfigWithoutClient<
+    InferSchemaOutput<T>,
+    TQueryFn,
+    TError,
+    TQueryKey,
+    TKey,
+    T
+  > & {
+    schema: T
+    select: (data: TQueryData) => Array<InferSchemaInput<T>>
+  },
+): DefinedQueryCollectionOptions<
+  typeof config,
+  CollectionConfig<
+    InferSchemaOutput<T>,
+    TKey,
+    T,
+    QueryCollectionUtils<InferSchemaOutput<T>, TKey, InferSchemaInput<T>, TError>
+  > & {
+    schema: T
+    utils: QueryCollectionUtils<
+      InferSchemaOutput<T>,
+      TKey,
+      InferSchemaInput<T>,
+      TError
+    >
+  }
+>
+
+export function defineQueryCollectionOptions<
+  T extends object,
+  TQueryFn extends (context: QueryFunctionContext<any>) => any = (
+    context: QueryFunctionContext<any>,
+  ) => any,
+  TError = unknown,
+  TQueryKey extends QueryKey = QueryKey,
+  TKey extends string | number = string | number,
+  TQueryData = Awaited<ReturnType<TQueryFn>>,
+>(
+  config: QueryCollectionConfigWithoutClient<
+    T,
+    TQueryFn,
+    TError,
+    TQueryKey,
+    TKey,
+    never,
+    TQueryData
+  > & {
+    schema?: never
+    select: (data: TQueryData) => Array<T>
+  },
+): DefinedQueryCollectionOptions<
+  typeof config,
+  CollectionConfig<T, TKey, never, QueryCollectionUtils<T, TKey, T, TError>> & {
+    schema?: never
+    utils: QueryCollectionUtils<T, TKey, T, TError>
+  }
+>
+
+export function defineQueryCollectionOptions<
+  T extends StandardSchemaV1,
+  TError = unknown,
+  TQueryKey extends QueryKey = QueryKey,
+  TKey extends string | number = string | number,
+>(
+  config: QueryCollectionConfigWithoutClient<
+    InferSchemaOutput<T>,
+    (
+      context: QueryFunctionContext<any>,
+    ) => Array<InferSchemaOutput<T>> | Promise<Array<InferSchemaOutput<T>>>,
+    TError,
+    TQueryKey,
+    TKey,
+    T
+  > & {
+    schema: T
+  },
+): DefinedQueryCollectionOptions<
+  typeof config,
+  CollectionConfig<
+    InferSchemaOutput<T>,
+    TKey,
+    T,
+    QueryCollectionUtils<InferSchemaOutput<T>, TKey, InferSchemaInput<T>, TError>
+  > & {
+    schema: T
+    utils: QueryCollectionUtils<
+      InferSchemaOutput<T>,
+      TKey,
+      InferSchemaInput<T>,
+      TError
+    >
+  }
+>
+
+export function defineQueryCollectionOptions<
+  T extends object,
+  TError = unknown,
+  TQueryKey extends QueryKey = QueryKey,
+  TKey extends string | number = string | number,
+>(
+  config: QueryCollectionConfigWithoutClient<
+    T,
+    (context: QueryFunctionContext<any>) => Array<T> | Promise<Array<T>>,
+    TError,
+    TQueryKey,
+    TKey
+  > & { schema?: never },
+): DefinedQueryCollectionOptions<
+  typeof config,
+  CollectionConfig<T, TKey, never, QueryCollectionUtils<T, TKey, T, TError>> & {
+    schema?: never
+    utils: QueryCollectionUtils<T, TKey, T, TError>
+  }
+>
+
+export function defineQueryCollectionOptions(
+  config: QueryCollectionConfigWithoutClient<
+    Record<string, unknown>,
+    (context: QueryFunctionContext<any>) => any
+  >,
+): DefinedQueryCollectionOptions<
+  typeof config,
+  CollectionConfig<
+    Record<string, unknown>,
+    string | number,
+    never,
+    QueryCollectionUtils
+  > & { utils: QueryCollectionUtils }
+> {
+  return {
+    config,
+    bind: ({ queryClient }) =>
+      queryCollectionOptions({
+        ...config,
+        queryClient,
+      }),
+  }
+}
+
 /**
  * Creates query collection options for use with a standard Collection.
  * This integrates TanStack Query with TanStack DB for automatic synchronization.

@@ -10,7 +10,7 @@ import {
 } from '@tanstack/db'
 import { QueryClient } from '@tanstack/query-core'
 import { z } from 'zod'
-import { queryCollectionOptions } from '../src/query'
+import { defineQueryCollectionOptions, queryCollectionOptions } from '../src/query'
 import type {
   DataTag,
   QueryFunctionContext,
@@ -31,6 +31,19 @@ describe(`Query collection type resolution tests`, () => {
 
   // Create a mock QueryClient for tests
   const queryClient = new QueryClient()
+
+  it(`should preserve explicit types when definition is bound`, () => {
+    const definition = defineQueryCollectionOptions<ExplicitType>({
+      id: `defined-test`,
+      queryKey: [`defined-test`],
+      queryFn: () => Promise.resolve([]),
+      getKey: (item) => item.id,
+    })
+
+    const options = definition.bind({ queryClient })
+
+    expectTypeOf(options.getKey).parameters.toEqualTypeOf<[ExplicitType]>()
+  })
 
   it(`should prioritize explicit type in QueryCollectionConfig`, () => {
     const options = queryCollectionOptions<ExplicitType>({

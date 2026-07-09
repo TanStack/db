@@ -3,7 +3,9 @@
 export type { QueryCollectionMeta } from './global'
 
 export {
+  defineQueryCollectionOptions,
   queryCollectionOptions,
+  type DefinedQueryCollectionOptions,
   type QueryCollectionConfig,
   type QueryCollectionUtils,
   type SyncOperation,

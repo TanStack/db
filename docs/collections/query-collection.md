@@ -43,6 +43,31 @@ const todosCollection = createCollection(
 )
 ```
 
+## Runtime QueryClient Binding
+
+For SSR or request-scoped environments, define the collection options without a `QueryClient`, then bind the request-local client where you create the collection:
+
+```typescript
+import { QueryClient } from "@tanstack/query-core"
+import { createCollection } from "@tanstack/db"
+import { defineQueryCollectionOptions } from "@tanstack/query-db-collection"
+
+const todosDefinition = defineQueryCollectionOptions({
+  queryKey: ["todos"],
+  queryFn: async () => {
+    const response = await fetch("/api/todos")
+    return response.json()
+  },
+  getKey: (item) => item.id,
+})
+
+export function createTodosCollection(queryClient: QueryClient) {
+  return createCollection(todosDefinition.bind({ queryClient }))
+}
+```
+
+Each call to `bind` uses only the `QueryClient` you pass. The direct `queryCollectionOptions({ queryClient, ... })` API remains supported.
+
 ## Configuration Options
 
 The `queryCollectionOptions` function accepts the following options:
