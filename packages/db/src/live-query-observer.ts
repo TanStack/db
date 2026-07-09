@@ -87,6 +87,7 @@ class LiveQueryObserverImpl<
   private readonly deferInitialNotify: boolean
   private version = 0
   private cachedVersion = -1
+  private cachedStatus: CollectionStatus | undefined
   private cachedSnapshot: LiveQuerySnapshot<T, TKey> = DISABLED_SNAPSHOT
   private readonly listeners = new Set<LiveQueryObserverListener<T, TKey>>()
   private collectionUnsub: (() => void) | null = null
@@ -109,9 +110,15 @@ class LiveQueryObserverImpl<
     const collection = this.collection
     if (!collection) return DISABLED_SNAPSHOT
 
-    // Rebuild only when the version advanced, so identity stays stable.
-    if (this.cachedVersion !== this.version) {
+    // Rebuild when the version advanced, or when the collection's status
+    // changed without a version bump (e.g. a status-only loading→ready
+    // transition or `preload()` while there is no active subscription).
+    if (
+      this.cachedVersion !== this.version ||
+      this.cachedStatus !== collection.status
+    ) {
       this.cachedVersion = this.version
+      this.cachedStatus = collection.status
       const entries = Array.from(collection.entries()) as Array<[TKey, T]>
       const singleResult = isSingleResultCollection(collection)
       let stateCache: Map<TKey, T> | null = null
@@ -199,7 +206,16 @@ class LiveQueryObserverImpl<
     attaching = false
     if (deferred.length > 0) {
       queueMicrotask(() => {
-        if (this.disposed) return
+        // Skip if the observer was disposed, has no listeners, or a newer
+        // attach superseded this one before the flush — otherwise a stale
+        // initial batch would reach the current listener.
+        if (
+          this.disposed ||
+          this.listeners.size === 0 ||
+          generation !== this.attachGeneration
+        ) {
+          return
+        }
         for (const changes of deferred.splice(0)) this.emit(changes)
       })
     }

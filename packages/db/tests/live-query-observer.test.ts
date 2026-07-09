@@ -153,4 +153,40 @@ describe(`createLiveQueryObserver`, () => {
     expect(readyNotifications).toBe(1)
     observer.dispose()
   })
+
+  it(`does not flush a superseded deferred initial notify (deferInitialNotify)`, async () => {
+    const observer = createLiveQueryObserver<Row, string>(makeSource() as any, {
+      deferInitialNotify: true,
+    })
+
+    // Subscribe then unsubscribe before the microtask flush, then resubscribe.
+    observer.subscribe(() => {})()
+
+    let notifications = 0
+    observer.subscribe(() => {
+      notifications++
+    })
+    await Promise.resolve()
+
+    // Only the current subscription's deferred initial notify should flush,
+    // not the stale one queued by the first (superseded) attach.
+    expect(notifications).toBe(1)
+    observer.dispose()
+  })
+
+  it(`refreshes the snapshot when status changes without a version bump`, () => {
+    // A status-only loading→ready transition with no active subscription: the
+    // cached snapshot must not stay stale (covers the preload() case too).
+    const collection = makeLoadingSource()
+    const observer = createLiveQueryObserver<Row, string>(collection as any)
+
+    expect(observer.getSnapshot().isReady).toBe(false)
+    expect(observer.getSnapshot().status).toBe(`loading`)
+
+    collection.utils.markReady()
+
+    expect(observer.getSnapshot().isReady).toBe(true)
+    expect(observer.getSnapshot().status).toBe(`ready`)
+    observer.dispose()
+  })
 })

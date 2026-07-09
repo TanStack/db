@@ -1,4 +1,4 @@
-import { useRef, useSyncExternalStore } from 'react'
+import { useEffect, useRef, useSyncExternalStore } from 'react'
 import {
   BaseQueryBuilder,
   createLiveQueryCollection,
@@ -411,9 +411,12 @@ export function useLiveQuery(
     }
   }
 
-  // Recreate the observer when the underlying collection changes.
+  // Recreate the observer when the underlying collection changes. Do not
+  // dispose the previous observer here — teardown during render is unsafe under
+  // concurrent rendering. `useSyncExternalStore` unsubscribes the old observer
+  // when `subscribeRef` changes (below), which detaches it; the final observer
+  // is disposed in the unmount effect.
   if (needsNewCollection) {
-    observerRef.current?.dispose()
     // Defer the initial notify: useSyncExternalStore must not be notified
     // synchronously during subscribe.
     observerRef.current = createLiveQueryObserver(collectionRef.current, {
@@ -421,6 +424,14 @@ export function useLiveQuery(
     })
   }
   const observer = observerRef.current!
+
+  // Dispose the current observer on unmount (commit-phase cleanup).
+  useEffect(
+    () => () => {
+      observerRef.current?.dispose()
+    },
+    [],
+  )
 
   // Stable subscribe bound to the current observer; the observer owns the
   // subscription, ready-race, and disposal.
