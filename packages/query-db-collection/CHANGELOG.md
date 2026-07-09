@@ -1,5 +1,11 @@
 # @tanstack/query-db-collection
 
+## 1.0.47
+
+### Patch Changes
+
+- Keep on-demand load subset subscription state out of TanStack Query metadata so dehydrated query state remains safe to persist with structured-clone based persisters. ([#1644](https://github.com/TanStack/db/pull/1644))
+
 ## 1.0.46
 
 ### Patch Changes

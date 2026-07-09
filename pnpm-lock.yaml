@@ -218,7 +218,7 @@ importers:
         specifier: ^1.0.39
         version: link:../../../packages/offline-transactions
       '@tanstack/query-db-collection':
-        specifier: ^1.0.46
+        specifier: ^1.0.47
         version: link:../../../packages/query-db-collection
       '@tanstack/react-db':
         specifier: ^0.1.92
@@ -306,7 +306,7 @@ importers:
         specifier: ^1.0.39
         version: link:../../../packages/offline-transactions
       '@tanstack/query-db-collection':
-        specifier: ^1.0.46
+        specifier: ^1.0.47
         version: link:../../../packages/query-db-collection
       '@tanstack/react-db':
         specifier: ^0.1.92
@@ -491,7 +491,7 @@ importers:
         specifier: ^1.0.39
         version: link:../../../packages/offline-transactions
       '@tanstack/query-db-collection':
-        specifier: ^1.0.46
+        specifier: ^1.0.47
         version: link:../../../packages/query-db-collection
       '@tanstack/react-db':
         specifier: ^0.1.92
@@ -592,7 +592,7 @@ importers:
         specifier: ^5.90.20
         version: 5.90.20
       '@tanstack/query-db-collection':
-        specifier: ^1.0.46
+        specifier: ^1.0.47
         version: link:../../../packages/query-db-collection
       '@tanstack/react-db':
         specifier: ^0.1.92
@@ -731,7 +731,7 @@ importers:
         specifier: ^5.90.20
         version: 5.90.20
       '@tanstack/query-db-collection':
-        specifier: ^1.0.46
+        specifier: ^1.0.47
         version: link:../../../packages/query-db-collection
       '@tanstack/react-db':
         specifier: ^0.1.92
@@ -852,7 +852,7 @@ importers:
         specifier: ^5.90.20
         version: 5.90.20
       '@tanstack/query-db-collection':
-        specifier: ^1.0.46
+        specifier: ^1.0.47
         version: link:../../../packages/query-db-collection
       '@tanstack/solid-db':
         specifier: ^0.2.28

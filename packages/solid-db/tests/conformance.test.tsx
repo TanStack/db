@@ -214,12 +214,12 @@ const solidDriver: LiveQueryDriver = {
   mountCollection,
   mountConfig,
   mountDisabled,
-  // Divergence the suite surfaced: solid-db routes errors through its
-  // createResource/Suspense path, which THROWS (CollectionStateError) for an
-  // <ErrorBoundary> to catch, rather than exposing a readable isError flag like
-  // React/Vue/Svelte. Reading an errored query throws before isError can be
-  // observed, so the plain error-status assertion doesn't hold here.
-  knownGaps: [`error-status`],
+  // solid-db routes errors through its createResource/Suspense path: reading an
+  // errored query throws (CollectionStateError) for an <ErrorBoundary> to catch,
+  // rather than exposing a readable isError flag. That's a framework idiom, not a
+  // gap — the error-status scenario is parametrized to assert it via the boundary.
+  errorSurface: `throw`,
+  knownGaps: [],
   features: { serverSnapshot: false, suspense: true },
 }
 

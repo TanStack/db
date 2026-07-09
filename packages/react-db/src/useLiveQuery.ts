@@ -1,12 +1,13 @@
 import { useRef, useSyncExternalStore } from 'react'
 import {
   BaseQueryBuilder,
-  CollectionImpl,
   createLiveQueryCollection,
+  getLiveQueryStatusFlags,
+  isCollection,
+  isSingleResultCollection,
 } from '@tanstack/db'
 import type {
   Collection,
-  CollectionConfigSingleRowOption,
   CollectionStatus,
   Context,
   GetResult,
@@ -317,13 +318,8 @@ export function useLiveQuery(
   configOrQueryOrCollection: any,
   deps: Array<unknown> = [],
 ) {
-  // Check if it's already a collection by checking for specific collection methods
-  const isCollection =
-    configOrQueryOrCollection &&
-    typeof configOrQueryOrCollection === `object` &&
-    typeof configOrQueryOrCollection.subscribeChanges === `function` &&
-    typeof configOrQueryOrCollection.startSyncImmediate === `function` &&
-    typeof configOrQueryOrCollection.id === `string`
+  // Check if it's already a collection
+  const inputIsCollection = isCollection(configOrQueryOrCollection)
 
   // Use refs to cache collection and track dependencies
   const collectionRef = useRef<Collection<object, string | number, {}> | null>(
@@ -342,14 +338,14 @@ export function useLiveQuery(
   // Check if we need to create/recreate the collection
   const needsNewCollection =
     !collectionRef.current ||
-    (isCollection && configRef.current !== configOrQueryOrCollection) ||
-    (!isCollection &&
+    (inputIsCollection && configRef.current !== configOrQueryOrCollection) ||
+    (!inputIsCollection &&
       (depsRef.current === null ||
         depsRef.current.length !== deps.length ||
         depsRef.current.some((dep, i) => dep !== deps[i])))
 
   if (needsNewCollection) {
-    if (isCollection) {
+    if (inputIsCollection) {
       // Warn when passing a collection directly with on-demand sync mode
       // In on-demand mode, data is only loaded when queries with predicates request it
       // Passing the collection directly doesn't provide any predicates, so no data loads
@@ -379,7 +375,7 @@ export function useLiveQuery(
         if (result === undefined || result === null) {
           // Callback returned undefined/null - disabled query
           collectionRef.current = null
-        } else if (result instanceof CollectionImpl) {
+        } else if (isCollection(result)) {
           // Callback returned a Collection instance - use it directly
           result.startSyncImmediate()
           collectionRef.current = result
@@ -527,9 +523,7 @@ export function useLiveQuery(
     } else {
       // Capture a stable view of entries for this snapshot to avoid tearing
       const entries = Array.from(snapshot.collection.entries())
-      const config: CollectionConfigSingleRowOption<any, any, any> =
-        snapshot.collection.config
-      const singleResult = config.singleResult
+      const singleResult = isSingleResultCollection(snapshot.collection)
       let stateCache: Map<string | number, unknown> | null = null
       let dataCache: Array<unknown> | null = null
 
@@ -548,11 +542,7 @@ export function useLiveQuery(
         },
         collection: snapshot.collection,
         status: snapshot.collection.status,
-        isLoading: snapshot.collection.status === `loading`,
-        isReady: snapshot.collection.status === `ready`,
-        isIdle: snapshot.collection.status === `idle`,
-        isError: snapshot.collection.status === `error`,
-        isCleanedUp: snapshot.collection.status === `cleaned-up`,
+        ...getLiveQueryStatusFlags(snapshot.collection.status),
         isEnabled: true,
       }
     }
