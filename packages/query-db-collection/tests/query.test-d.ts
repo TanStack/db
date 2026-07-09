@@ -45,6 +45,24 @@ describe(`Query collection type resolution tests`, () => {
     expectTypeOf(options.getKey).parameters.toEqualTypeOf<[ExplicitType]>()
   })
 
+  it(`should not accept QueryClient in runtime-bound definitions`, () => {
+    defineQueryCollectionOptions<ExplicitType>({
+      id: `defined-test-without-client`,
+      queryKey: [`defined-test-without-client`],
+      queryFn: () => Promise.resolve([]),
+      getKey: (item) => item.id,
+    })
+
+    defineQueryCollectionOptions<ExplicitType>({
+      id: `defined-test-with-client`,
+      // @ts-expect-error - queryClient is supplied by definition.bind()
+      queryClient,
+      queryKey: [`defined-test-with-client`],
+      queryFn: () => Promise.resolve([]),
+      getKey: (item) => item.id,
+    })
+  })
+
   it(`should prioritize explicit type in QueryCollectionConfig`, () => {
     const options = queryCollectionOptions<ExplicitType>({
       id: `test`,

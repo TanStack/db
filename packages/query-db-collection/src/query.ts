@@ -375,9 +375,19 @@ type QueryCollectionConfigWithoutClient<
   TSchema extends StandardSchemaV1 = never,
   TQueryData = Awaited<ReturnType<TQueryFn>>,
 > = Omit<
-  QueryCollectionConfig<T, TQueryFn, TError, TQueryKey, TKey, TSchema, TQueryData>,
+  QueryCollectionConfig<
+    T,
+    TQueryFn,
+    TError,
+    TQueryKey,
+    TKey,
+    TSchema,
+    TQueryData
+  >,
   `queryClient`
->
+> & {
+  queryClient?: never
+}
 
 export function defineQueryCollectionOptions<
   T extends StandardSchemaV1,
