@@ -83,6 +83,106 @@ export type CompiledExpression = (namespacedRow: NamespacedRow) => any
 export type CompiledSingleRowExpression = (item: Record<string, unknown>) => any
 
 /**
+ * Cache of compiled evaluators keyed by an exact structural serialization of
+ * the expression IR. Live queries are frequently created with structurally
+ * identical expressions (components re-mounting the same query shape, or
+ * benchmarks re-hydrating): reusing the evaluator closure keeps its engine
+ * type feedback warm across creations instead of re-tiering per instance.
+ * The key is exact (not a lossy hash), so collisions are impossible; entries
+ * are evicted FIFO beyond a cap, and expressions that don't serialize to a
+ * reasonable key are compiled uncached.
+ */
+const expressionCache = new Map<
+  string,
+  CompiledExpression | CompiledSingleRowExpression
+>()
+const EXPRESSION_CACHE_MAX_ENTRIES = 512
+const EXPRESSION_CACHE_MAX_KEY_LENGTH = 2048
+
+function serializeExpressionForCache(expr: BasicExpression): string | null {
+  switch (expr.type) {
+    case `ref`:
+      return `r:${expr.path.join(`.`)}`
+    case `val`: {
+      const value = (expr as { value: unknown }).value
+      switch (typeof value) {
+        case `number`:
+        case `boolean`:
+        case `bigint`:
+          return `v:${typeof value}:${String(value)}`
+        case `string`:
+          return `v:s:${JSON.stringify(value)}`
+        case `undefined`:
+          return `v:u`
+        case `object`: {
+          if (value === null) return `v:z`
+          if (Array.isArray(value)) {
+            // Common for inArray: cache when all members are simple primitives
+            const parts: Array<string> = []
+            for (const item of value) {
+              const t = typeof item
+              if (t === `number` || t === `boolean` || t === `bigint`) {
+                parts.push(`${t}:${String(item)}`)
+              } else if (t === `string`) {
+                parts.push(`s:${JSON.stringify(item)}`)
+              } else if (item === null) {
+                parts.push(`z`)
+              } else {
+                return null
+              }
+            }
+            return `v:a:[${parts.join(`,`)}]`
+          }
+          return null
+        }
+        default:
+          return null
+      }
+    }
+    case `func`: {
+      const func = expr
+      const argKeys: Array<string> = []
+      for (const arg of func.args) {
+        const argKey = serializeExpressionForCache(arg)
+        if (argKey === null) return null
+        argKeys.push(argKey)
+      }
+      return `f:${func.name}(${argKeys.join(`,`)})`
+    }
+    default:
+      return null
+  }
+}
+
+function compileWithCache(
+  expr: BasicExpression,
+  isSingleRow: boolean,
+): CompiledExpression | CompiledSingleRowExpression {
+  const structuralKey = serializeExpressionForCache(expr)
+  if (
+    structuralKey === null ||
+    structuralKey.length > EXPRESSION_CACHE_MAX_KEY_LENGTH
+  ) {
+    return compileExpressionInternal(expr, isSingleRow)
+  }
+  const cacheKey = (isSingleRow ? `1|` : `0|`) + structuralKey
+  const cached = expressionCache.get(cacheKey)
+  if (cached) {
+    return cached
+  }
+  const compiled = compileExpressionInternal(expr, isSingleRow)
+  if (expressionCache.size >= EXPRESSION_CACHE_MAX_ENTRIES) {
+    // FIFO eviction: drop the oldest entry
+    const oldest = expressionCache.keys().next()
+    if (!oldest.done) {
+      expressionCache.delete(oldest.value)
+    }
+  }
+  expressionCache.set(cacheKey, compiled)
+  return compiled
+}
+
+/**
  * Compiles an expression into an optimized evaluator function.
  * This eliminates branching during evaluation by pre-compiling the expression structure.
  */
@@ -90,8 +190,7 @@ export function compileExpression(
   expr: BasicExpression,
   isSingleRow: boolean = false,
 ): CompiledExpression | CompiledSingleRowExpression {
-  const compiledFn = compileExpressionInternal(expr, isSingleRow)
-  return compiledFn
+  return compileWithCache(expr, isSingleRow)
 }
 
 /**
@@ -100,8 +199,7 @@ export function compileExpression(
 export function compileSingleRowExpression(
   expr: BasicExpression,
 ): CompiledSingleRowExpression {
-  const compiledFn = compileExpressionInternal(expr, true)
-  return compiledFn as CompiledSingleRowExpression
+  return compileWithCache(expr, true) as CompiledSingleRowExpression
 }
 
 /**
@@ -244,8 +342,20 @@ function compileFunction(func: Func, isSingleRow: boolean): (data: any) => any {
       const argA = compiledArgs[0]!
       const argB = compiledArgs[1]!
       return (data) => {
-        const a = normalizeValue(argA(data))
-        const b = normalizeValue(argB(data))
+        const rawA = argA(data)
+        const rawB = argB(data)
+        // Fast paths for same-type primitives, which need no normalization
+        const typeA = typeof rawA
+        if (typeA === typeof rawB) {
+          if (typeA === `string` || typeA === `boolean` || typeA === `bigint`) {
+            return rawA === rawB
+          }
+          if (typeA === `number`) {
+            return rawA === rawB || (Number.isNaN(rawA) && Number.isNaN(rawB))
+          }
+        }
+        const a = normalizeValue(rawA)
+        const b = normalizeValue(rawB)
         // In 3-valued logic, any comparison with null/undefined returns UNKNOWN
         if (isUnknown(a) || isUnknown(b)) {
           return null
@@ -392,6 +502,35 @@ function compileFunction(func: Func, isSingleRow: boolean): (data: any) => any {
     case `in`: {
       const valueEvaluator = compiledArgs[0]!
       const arrayEvaluator = compiledArgs[1]!
+
+      // Fast path: a constant array of simple primitives can be probed with a
+      // Set instead of a linear scan with deep equality per element.
+      const arrayArg = func.args[1]
+      if (arrayArg?.type === `val` && Array.isArray(arrayArg.value)) {
+        const values = arrayArg.value
+        const allSimple = values.every((item: any) => {
+          const t = typeof item
+          return (
+            (t === `string` ||
+              t === `boolean` ||
+              t === `bigint` ||
+              (t === `number` && !Number.isNaN(item))) &&
+            item !== null
+          )
+        })
+        if (allSimple) {
+          const set = new Set(values)
+          return (data) => {
+            const value = normalizeValue(valueEvaluator(data))
+            // In 3-valued logic, if the value is null/undefined, return UNKNOWN
+            if (isUnknown(value)) {
+              return null
+            }
+            return set.has(value)
+          }
+        }
+      }
+
       return (data) => {
         const value = normalizeValue(valueEvaluator(data))
         const array = arrayEvaluator(data)

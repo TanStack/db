@@ -185,6 +185,12 @@ export const UNDEFINED_SENTINEL = `__TS_DB_BTREE_UNDEFINED_VALUE__`
  * for BTree index operations that need to distinguish undefined values.
  */
 export function normalizeValue(value: any): any {
+  // Primitives (the overwhelmingly common case on join keys and comparison
+  // operands) need no normalization — skip the instanceof/tag checks below
+  if (typeof value !== `object` || value === null) {
+    return value
+  }
+
   if (value instanceof Date) {
     return value.getTime()
   }

@@ -63,12 +63,24 @@ export type JoinType = `inner` | `left` | `right` | `full` | `anti`
 /**
  * Operator that joins two input streams using direct join algorithms
  */
+/**
+ * Optional per-side key extractors. When provided for a side, that input
+ * stream carries raw values (not [key, value] pairs) and the operator derives
+ * join keys itself — eliminating the upstream re-keying map operator and its
+ * per-row wrapper allocations.
+ */
+export interface JoinKeyExtractors<K, V1, V2> {
+  keyExtractorA?: (value: V1) => K
+  keyExtractorB?: (value: V2) => K
+}
+
 export class JoinOperator<K, V1, V2> extends BinaryOperator<
   [K, V1] | [K, V2] | [K, [V1, V2]] | [K, [V1 | null, V2 | null]]
 > {
   #indexA = new Index<K, V1>()
   #indexB = new Index<K, V2>()
   #mode: JoinType
+  #keyExtractors: JoinKeyExtractors<K, V1, V2> | undefined
 
   constructor(
     id: number,
@@ -76,19 +88,33 @@ export class JoinOperator<K, V1, V2> extends BinaryOperator<
     inputB: DifferenceStreamReader<[K, V2]>,
     output: DifferenceStreamWriter<any>,
     mode: JoinType = `inner`,
+    keyExtractors?: JoinKeyExtractors<K, V1, V2>,
   ) {
     super(id, inputA, inputB, output)
     this.#mode = mode
+    this.#keyExtractors = keyExtractors
   }
 
   run(): void {
     // Build deltas from input messages
-    const deltaA = Index.fromMultiSets<K, V1>(
-      this.inputAMessages() as Array<MultiSet<[K, V1]>>,
-    )
-    const deltaB = Index.fromMultiSets<K, V2>(
-      this.inputBMessages() as Array<MultiSet<[K, V2]>>,
-    )
+    const extractA = this.#keyExtractors?.keyExtractorA
+    const extractB = this.#keyExtractors?.keyExtractorB
+    const deltaA = extractA
+      ? Index.fromMultiSetsBy<K, V1>(
+          this.inputAMessages() as unknown as Array<MultiSet<V1>>,
+          extractA,
+        )
+      : Index.fromMultiSets<K, V1>(
+          this.inputAMessages() as Array<MultiSet<[K, V1]>>,
+        )
+    const deltaB = extractB
+      ? Index.fromMultiSetsBy<K, V2>(
+          this.inputBMessages() as unknown as Array<MultiSet<V2>>,
+          extractB,
+        )
+      : Index.fromMultiSets<K, V2>(
+          this.inputBMessages() as Array<MultiSet<[K, V2]>>,
+        )
 
     // Early-out if nothing changed
     if (deltaA.size === 0 && deltaB.size === 0) return
@@ -132,10 +158,12 @@ export class JoinOperator<K, V1, V2> extends BinaryOperator<
     deltaB: Index<K, V2>,
     results: MultiSet<any>,
   ): void {
-    // Emit the three standard delta terms: ΔA⋈B_old, A_old⋈ΔB, ΔA⋈ΔB
-    if (deltaA.size > 0) results.extend(deltaA.join(this.#indexB))
-    if (deltaB.size > 0) results.extend(this.#indexA.join(deltaB))
-    if (deltaA.size > 0 && deltaB.size > 0) results.extend(deltaA.join(deltaB))
+    // Emit the three standard delta terms: ΔA⋈B_old, A_old⋈ΔB, ΔA⋈ΔB —
+    // appended directly into the shared results multiset (no intermediate
+    // arrays + copies per term)
+    if (deltaA.size > 0) deltaA.join(this.#indexB, results)
+    if (deltaB.size > 0) this.#indexA.join(deltaB, results as any)
+    if (deltaA.size > 0 && deltaB.size > 0) deltaA.join(deltaB, results)
   }
 
   private emitLeftOuterResults(
@@ -260,6 +288,7 @@ export function join<
 >(
   other: IStreamBuilder<KeyValue<K, V2>>,
   type: JoinType = `inner`,
+  keyExtractors?: JoinKeyExtractors<K, V1, V2>,
 ): PipedOperator<T, KeyValue<K, [V1 | null, V2 | null]>> {
   return (
     stream: IStreamBuilder<T>,
@@ -277,6 +306,7 @@ export function join<
       other.connectReader(),
       output.writer,
       type,
+      keyExtractors,
     )
     stream.graph.addOperator(operator)
     return output

@@ -34,22 +34,21 @@ import type {
 import type { NamespacedAndKeyedStream, NamespacedRow } from '../../types.js'
 import type { VirtualOrigin } from '../../virtual-props.js'
 
-const VIRTUAL_SYNCED_KEY = `__virtual_synced__`
-const VIRTUAL_HAS_LOCAL_KEY = `__virtual_has_local__`
+const VIRTUAL_META_KEY = `__virtual_meta__`
 const GROUP_KEY_REF_PREFIX = `__group_key_`
 
-type RowVirtualMetadata = {
-  synced: boolean
-  hasLocal: boolean
-}
+// Bitmask: bit 1 = all rows synced, bit 0 = some row has local origin
+const VIRTUAL_META_SYNCED = 2
+const VIRTUAL_META_HAS_LOCAL = 1
 
-function getRowVirtualMetadata(row: NamespacedRow): RowVirtualMetadata {
+function getRowVirtualMetadataMask(row: NamespacedRow): number {
   let found = false
   let allSynced = true
   let hasLocal = false
 
-  for (const [alias, value] of Object.entries(row as Record<string, unknown>)) {
+  for (const alias in row as Record<string, unknown>) {
     if (alias === `$selected`) continue
+    const value = (row as Record<string, unknown>)[alias]
     if (value === null || typeof value !== `object`) continue
     const asRecord = value as Record<string, unknown>
     const hasSyncedProp = `$synced` in asRecord
@@ -66,10 +65,10 @@ function getRowVirtualMetadata(row: NamespacedRow): RowVirtualMetadata {
     }
   }
 
-  return {
-    synced: found ? allSynced : true,
-    hasLocal,
-  }
+  const synced = found ? allSynced : true
+  return (
+    (synced ? VIRTUAL_META_SYNCED : 0) | (hasLocal ? VIRTUAL_META_HAS_LOCAL : 0)
+  )
 }
 
 const { sum, count, avg, min, max } = groupByOperators
@@ -134,28 +133,26 @@ export function processGroupBy(
   mainSource?: string,
 ): NamespacedAndKeyedStream {
   const virtualAggregates: Record<string, any> = {
-    [VIRTUAL_SYNCED_KEY]: {
+    [VIRTUAL_META_KEY]: {
       preMap: ([, row]: [string, NamespacedRow]) =>
-        getRowVirtualMetadata(row).synced,
-      reduce: (values: Array<[boolean, number]>) => {
-        for (const [isSynced, multiplicity] of values) {
-          if (!isSynced && multiplicity > 0) {
-            return false
+        getRowVirtualMetadataMask(row),
+      reduce: (values: Array<[number, number]>) => {
+        let allSynced = true
+        let hasLocal = false
+        for (const [mask, multiplicity] of values) {
+          if (multiplicity > 0) {
+            if ((mask & VIRTUAL_META_SYNCED) === 0) {
+              allSynced = false
+            }
+            if ((mask & VIRTUAL_META_HAS_LOCAL) !== 0) {
+              hasLocal = true
+            }
           }
         }
-        return true
-      },
-    },
-    [VIRTUAL_HAS_LOCAL_KEY]: {
-      preMap: ([, row]: [string, NamespacedRow]) =>
-        getRowVirtualMetadata(row).hasLocal,
-      reduce: (values: Array<[boolean, number]>) => {
-        for (const [isLocal, multiplicity] of values) {
-          if (isLocal && multiplicity > 0) {
-            return true
-          }
-        }
-        return false
+        return (
+          (allSynced ? VIRTUAL_META_SYNCED : 0) |
+          (hasLocal ? VIRTUAL_META_HAS_LOCAL : 0)
+        )
       },
     },
   }
@@ -235,23 +232,22 @@ export function processGroupBy(
           correlationKey !== undefined
             ? `single_group_${serializeValue(correlationKey)}`
             : `single_group`
+        const groupMeta = (aggregatedRow as Record<string, any>)[
+          VIRTUAL_META_KEY
+        ] as number | undefined
         const resultRow: Record<string, any> = {
-          ...(aggregatedRow as Record<string, any>),
           $selected: finalResults,
+          $synced:
+            groupMeta === undefined
+              ? true
+              : (groupMeta & VIRTUAL_META_SYNCED) !== 0,
+          $origin: (groupMeta !== undefined &&
+          (groupMeta & VIRTUAL_META_HAS_LOCAL) !== 0
+            ? `local`
+            : `remote`) satisfies VirtualOrigin,
+          $key: resultKey,
+          $collectionId: aggregateCollectionId,
         }
-        const groupSynced = (aggregatedRow as Record<string, any>)[
-          VIRTUAL_SYNCED_KEY
-        ]
-        const groupHasLocal = (aggregatedRow as Record<string, any>)[
-          VIRTUAL_HAS_LOCAL_KEY
-        ]
-        resultRow.$synced = groupSynced ?? true
-        resultRow.$origin = (
-          groupHasLocal ? `local` : `remote`
-        ) satisfies VirtualOrigin
-        resultRow.$key = resultKey
-        resultRow.$collectionId =
-          aggregateCollectionId ?? resultRow.$collectionId
         if (mainSource && correlationKey !== undefined) {
           resultRow[mainSource] = { __correlationKey: correlationKey }
         }
@@ -312,16 +308,14 @@ export function processGroupBy(
     string,
     NamespacedRow & { $selected?: any },
   ]) => {
-    // Use the original namespaced row for GROUP BY expressions, not $selected
-    const namespacedRow = { ...row }
-    delete (namespacedRow as any).$selected
-
     const key: Record<string, unknown> = {}
 
-    // Use simple __key_X format for each groupBy expression
+    // Use simple __key_X format for each groupBy expression.
+    // GROUP BY expressions reference source aliases, never `$selected`,
+    // so the row can be passed through without stripping it.
     for (let i = 0; i < groupByClause.length; i++) {
       const compiledExpr = compiledGroupByExpressions[i]!
-      const value = compiledExpr(namespacedRow)
+      const value = compiledExpr(row)
       key[`__key_${i}`] = value
     }
 
@@ -357,8 +351,31 @@ export function processGroupBy(
     }
   }
 
+  // Fast group-key serializer for the common single-clause case with a
+  // primitive key value (e.g. GROUP BY issue.id) — avoids JSON-serializing
+  // an object per row. Includes mode adds a correlation key, so it falls
+  // back to the general path.
+  const keySerializer =
+    groupByClause.length === 1 && !mainSource
+      ? (key: Record<string, unknown>): string | null => {
+          const value = key.__key_0
+          switch (typeof value) {
+            case `number`:
+              return `n:${value}`
+            case `string`:
+              return `s:${value}`
+            case `boolean`:
+              return value ? `T` : `F`
+            case `bigint`:
+              return `b:${value}`
+            default:
+              return value === null ? `z` : null
+          }
+        }
+      : undefined
+
   // Apply the groupBy operator
-  pipeline = pipeline.pipe(groupBy(keyExtractor, aggregates))
+  pipeline = pipeline.pipe(groupBy(keyExtractor, aggregates, { keySerializer }))
 
   // Update $selected to handle GROUP BY results
   pipeline = pipeline.pipe(
@@ -412,24 +429,26 @@ export function processGroupBy(
       const finalKey =
         keyParts.length === 1 ? keyParts[0] : serializeValue(keyParts)
 
-      // When in includes mode, restore the namespaced source structure with
-      // __correlationKey so output extraction can route results per-parent.
+      // Downstream stages (HAVING, DISTINCT, ORDER BY, the final $selected
+      // extraction) only read $selected, the virtual props and — in includes
+      // mode — the correlation fields, so the result row is built minimally
+      // instead of spreading the whole aggregated row per group.
+      const groupMeta = (aggregatedRow as Record<string, any>)[
+        VIRTUAL_META_KEY
+      ] as number | undefined
       const resultRow: Record<string, any> = {
-        ...(aggregatedRow as Record<string, any>),
         $selected: finalResults,
+        $synced:
+          groupMeta === undefined
+            ? true
+            : (groupMeta & VIRTUAL_META_SYNCED) !== 0,
+        $origin: (groupMeta !== undefined &&
+        (groupMeta & VIRTUAL_META_HAS_LOCAL) !== 0
+          ? `local`
+          : `remote`) satisfies VirtualOrigin,
+        $key: finalKey,
+        $collectionId: aggregateCollectionId,
       }
-      const groupSynced = (aggregatedRow as Record<string, any>)[
-        VIRTUAL_SYNCED_KEY
-      ]
-      const groupHasLocal = (aggregatedRow as Record<string, any>)[
-        VIRTUAL_HAS_LOCAL_KEY
-      ]
-      resultRow.$synced = groupSynced ?? true
-      resultRow.$origin = (
-        groupHasLocal ? `local` : `remote`
-      ) satisfies VirtualOrigin
-      resultRow.$key = finalKey
-      resultRow.$collectionId = aggregateCollectionId ?? resultRow.$collectionId
       if (mainSource && correlationKey !== undefined) {
         resultRow[mainSource] = { __correlationKey: correlationKey }
       }
@@ -638,6 +657,16 @@ function evaluateWrappedAggregates(
   wrappedAggExprs: Record<string, (data: any) => any>,
   groupKeyCount: number = 0,
 ): void {
+  // Without wrapped aggregate expressions the whole function is a no-op
+  // (it would copy synthetic keys in and delete them again)
+  let hasWrapped = false
+  for (const _ in wrappedAggExprs) {
+    hasWrapped = true
+    break
+  }
+  if (!hasWrapped) {
+    return
+  }
   for (const key of Object.keys(aggregatedRow)) {
     if (key.startsWith(`__agg_`)) {
       finalResults[key] = aggregatedRow[key]

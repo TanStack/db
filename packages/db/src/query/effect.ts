@@ -13,8 +13,7 @@ import {
   computeSubscriptionOrderByHints,
   extractCollectionAliases,
   extractCollectionsFromQuery,
-  filterDuplicateInserts,
-  sendChangesToInput,
+  sendFilteredChangesToInput,
   splitUpdates,
   trackBiggestSentValue,
 } from './live/utils.js'
@@ -713,9 +712,8 @@ class EffectPipelineRunner<TRow extends object, TKey extends string | number> {
 
     // Filter duplicates per alias
     const sentKeys = this.sentToD2KeysByAlias.get(alias)!
-    const filtered = filterDuplicateInserts(changes, sentKeys)
 
-    return sendChangesToInput(input, filtered)
+    return sendFilteredChangesToInput(input, changes, sentKeys)
   }
 
   /**

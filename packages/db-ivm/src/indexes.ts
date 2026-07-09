@@ -34,7 +34,7 @@
  */
 
 import { MultiSet } from './multiset.js'
-import { hash } from './hashing/index.js'
+import { fastEquals, hash } from './hashing/index.js'
 import type { Hash } from './hashing/index.js'
 
 // We use a symbol to represent the absence of a prefix, unprefixed values a stored
@@ -58,8 +58,14 @@ class PrefixMap<TValue, TPrefix> extends Map<
 > {
   /**
    * Add a value to the PrefixMap. Returns true if the map becomes empty after the operation.
+   * @param prefixIdentity - When true, values with an equal (non-NO_PREFIX) prefix are
+   * known to be equal, so multiplicities merge without a structural hash comparison.
    */
-  addValue(value: TValue, multiplicity: number): boolean {
+  addValue(
+    value: TValue,
+    multiplicity: number,
+    prefixIdentity = false,
+  ): boolean {
     if (multiplicity === 0) return this.size === 0
 
     const prefix = getPrefix<TValue, TPrefix>(value)
@@ -73,7 +79,11 @@ class PrefixMap<TValue, TPrefix> extends Map<
         throw new Error(`Mismatching prefixes, this should never happen`)
       }
 
-      if (currentValue === value || hash(currentValue) === hash(value)) {
+      if (
+        currentValue === value ||
+        (prefixIdentity && prefix !== NO_PREFIX) ||
+        fastEquals(currentValue, value)
+      ) {
         // Same value, update multiplicity
         const newMultiplicity = currentMultiplicity + multiplicity
         if (newMultiplicity === 0) {
@@ -151,9 +161,27 @@ export class Index<TKey, TValue, TPrefix = any> {
    */
   #inner: IndexMap<TKey, TValue, TPrefix>
   #consolidatedMultiplicity: Map<TKey, number> = new Map() // sum of multiplicities per key
+  /**
+   * When true, values under the same key with an equal prefix are known to be
+   * equal (the producer guarantees the prefix fully discriminates values), so
+   * multiplicities merge without structural hash comparisons.
+   */
+  #prefixIdentity: boolean
+  /**
+   * When false, the per-key consolidated multiplicity map is not maintained.
+   * Only join operators consume hasPresence/getConsolidatedMultiplicity/
+   * getPresenceKeys; reduce-style consumers can skip the two map operations
+   * per addValue.
+   */
+  #trackConsolidated: boolean
 
-  constructor() {
+  constructor(options?: {
+    prefixIdentity?: boolean
+    trackConsolidated?: boolean
+  }) {
     this.#inner = new Map()
+    this.#prefixIdentity = options?.prefixIdentity ?? false
+    this.#trackConsolidated = options?.trackConsolidated ?? true
   }
 
   /**
@@ -168,6 +196,27 @@ export class Index<TKey, TValue, TPrefix = any> {
       for (const [item, multiplicity] of message.getInner()) {
         const [key, value] = item
         index.addValue(key, [value, multiplicity])
+      }
+    }
+
+    return index
+  }
+
+  /**
+   * Create an Index from MultiSet messages of raw values, deriving each
+   * value's key with the given extractor. The stored value is the message
+   * item itself (no wrapper allocation), which is what makes fused join
+   * re-keying cheaper than a map stage producing [key, value] pairs.
+   */
+  static fromMultiSetsBy<K, V>(
+    messages: Array<MultiSet<V>>,
+    extractKey: (value: V) => K,
+  ): Index<K, V> {
+    const index = new Index<K, V>()
+
+    for (const message of messages) {
+      for (const [item, multiplicity] of message.getInner()) {
+        index.addValue(extractKey(item), [item, multiplicity])
       }
     }
 
@@ -231,11 +280,36 @@ export class Index<TKey, TValue, TPrefix = any> {
 
   /**
    * This method returns all values for a given key.
+   * Builds the array directly (no generator) — this is on the hot path of
+   * join and reduce operators.
    * @param key - The key to get the values for.
    * @returns An array of value tuples [value, multiplicity].
    */
   get(key: TKey): Array<[TValue, number]> {
-    return [...this.getIterator(key)]
+    const mapOrSingleValue = this.#inner.get(key)
+    if (mapOrSingleValue === undefined) {
+      return []
+    }
+    if (isSingleValue(mapOrSingleValue)) {
+      return [mapOrSingleValue]
+    }
+    const result: Array<[TValue, number]> = []
+    if (mapOrSingleValue instanceof ValueMap) {
+      for (const valueTuple of mapOrSingleValue.values()) {
+        result.push(valueTuple)
+      }
+      return result
+    }
+    for (const singleValueOrValueMap of mapOrSingleValue.values()) {
+      if (isSingleValue(singleValueOrValueMap)) {
+        result.push(singleValueOrValueMap)
+      } else {
+        for (const valueTuple of singleValueOrValueMap.values()) {
+          result.push(valueTuple)
+        }
+      }
+    }
+    return result
   }
 
   /**
@@ -302,13 +376,15 @@ export class Index<TKey, TValue, TPrefix = any> {
     // If the multiplicity is 0, do nothing
     if (multiplicity === 0) return
 
-    // Update consolidated multiplicity tracking
-    const newConsolidatedMultiplicity =
-      (this.#consolidatedMultiplicity.get(key) || 0) + multiplicity
-    if (newConsolidatedMultiplicity === 0) {
-      this.#consolidatedMultiplicity.delete(key)
-    } else {
-      this.#consolidatedMultiplicity.set(key, newConsolidatedMultiplicity)
+    // Update consolidated multiplicity tracking (join presence checks)
+    if (this.#trackConsolidated) {
+      const newConsolidatedMultiplicity =
+        (this.#consolidatedMultiplicity.get(key) || 0) + multiplicity
+      if (newConsolidatedMultiplicity === 0) {
+        this.#consolidatedMultiplicity.delete(key)
+      } else {
+        this.#consolidatedMultiplicity.set(key, newConsolidatedMultiplicity)
+      }
     }
 
     const mapOrSingleValue = this.#inner.get(key)
@@ -348,7 +424,11 @@ export class Index<TKey, TValue, TPrefix = any> {
       }
     } else {
       // Handle existing PrefixMap
-      const isEmpty = mapOrSingleValue.addValue(value, multiplicity)
+      const isEmpty = mapOrSingleValue.addValue(
+        value,
+        multiplicity,
+        this.#prefixIdentity,
+      )
       if (isEmpty) {
         this.#inner.delete(key)
       }
@@ -384,7 +464,9 @@ export class Index<TKey, TValue, TPrefix = any> {
     // Check if they're the same value by prefix/suffix comparison
     if (
       currentPrefix === newPrefix &&
-      (currentValue === newValue || hash(currentValue) === hash(newValue))
+      (currentValue === newValue ||
+        (this.#prefixIdentity && newPrefix !== NO_PREFIX) ||
+        fastEquals(currentValue, newValue))
     ) {
       const newMultiplicity = currentMultiplicity + multiplicity
       if (newMultiplicity === 0) {
@@ -424,23 +506,42 @@ export class Index<TKey, TValue, TPrefix = any> {
 
   /**
    * This method appends another index to the current index.
+   * Keys not yet present in this index adopt the other index's bucket
+   * wholesale (the delta indexes passed here are ephemeral, so transferring
+   * ownership is safe); only overlapping keys need per-value merging.
    * @param other - The index to append to the current index.
    */
   append(other: Index<TKey, TValue>): void {
-    for (const [key, value] of other.entries()) {
-      this.addValue(key, value)
+    for (const [key, bucket] of other.#inner) {
+      if (this.#inner.has(key)) {
+        for (const valueTuple of other.getIterator(key)) {
+          this.addValue(key, valueTuple)
+        }
+      } else {
+        this.#inner.set(key, bucket)
+        if (this.#trackConsolidated) {
+          const multiplicity = other.#consolidatedMultiplicity.get(key)
+          if (multiplicity !== undefined) {
+            this.#consolidatedMultiplicity.set(key, multiplicity)
+          }
+        }
+      }
     }
   }
 
   /**
    * This method joins two indexes.
    * @param other - The index to join with the current index.
-   * @returns A multiset of the joined values.
+   * @param into - Optional multiset to append results into (avoids an
+   * intermediate array + copy when accumulating multiple join terms).
+   * @returns The multiset holding the joined values.
    */
   join<TValue2>(
     other: Index<TKey, TValue2>,
+    into?: MultiSet<[TKey, [TValue, TValue2]]>,
   ): MultiSet<[TKey, [TValue, TValue2]]> {
-    const result: Array<[[TKey, [TValue, TValue2]], number]> = []
+    const target = into ?? new MultiSet<[TKey, [TValue, TValue2]]>()
+    const result = target.getInner()
     // We want to iterate over the smaller of the two indexes to reduce the
     // number of operations we need to do.
     if (this.size <= other.size) {
@@ -469,7 +570,7 @@ export class Index<TKey, TValue, TPrefix = any> {
       }
     }
 
-    return new MultiSet(result)
+    return target
   }
 }
 

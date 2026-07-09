@@ -1,4 +1,5 @@
 import { describe, expect, test } from 'vitest'
+import { fc, test as fcTest } from '@fast-check/vitest'
 import { D2 } from '../../src/d2.js'
 import { MultiSet } from '../../src/multiset.js'
 import {
@@ -1130,4 +1131,180 @@ describe(`Operators`, () => {
       expect(result).toEqual(expectedPartialRemovalResult)
     })
   })
+})
+
+/**
+ * Property-based tests: random insert/retract sequences through groupBy must
+ * always produce the same materialized state as a from-scratch recompute over
+ * the surviving rows.
+ *
+ * This pins the consolidation invariant behind the discriminant-prefix fast
+ * path (`prefixIdentity`): retractions arrive as fresh, structurally-equal
+ * objects in later ticks and must cancel against rows stored in earlier
+ * ticks. Both the primitive pre-value path (discriminant, no hashing) and the
+ * object pre-value path (avg — structural hash fallback) are exercised.
+ */
+describe(`GroupBy property-based tests`, () => {
+  type Row = { category: string; amount: number }
+  type KeyedRow = [unknown, Row]
+
+  const rowArb = fc.record({
+    category: fc.constantFrom(`A`, `B`, `C`, `D`),
+    // Positive integers: keeps float associativity out of sum comparisons
+    amount: fc.integer({ min: 1, max: 100 }),
+  })
+
+  // Each op: [isInsert, row, pickIndex] — retracts pick a previously-live row
+  const opsArb = fc.array(fc.tuple(fc.boolean(), rowArb, fc.nat()), {
+    minLength: 1,
+    maxLength: 60,
+  })
+
+  function runScenario(
+    ops: Array<[boolean, Row, number]>,
+    batchSize: number,
+    aggregates: Record<string, any>,
+  ): {
+    materialized: Map<string, Record<string, unknown>>
+    live: Array<Row>
+  } {
+    const graph = new D2()
+    const input = graph.newInput<KeyedRow>()
+    const messages: Array<MultiSet<any>> = []
+
+    input.pipe(
+      groupBy(
+        ([, data]: KeyedRow) => ({ category: data.category }),
+        aggregates,
+      ),
+      output((message) => {
+        messages.push(message)
+      }),
+    )
+    graph.finalize()
+
+    // Net multiplicity per (group key, serialized result row)
+    const netState = new Map<string, Map<string, number>>()
+    const rowByJson = new Map<string, Record<string, unknown>>()
+
+    const live: Array<Row> = []
+    let batch: Array<[KeyedRow, number]> = []
+    let nextKey = 0
+
+    const flush = () => {
+      if (batch.length > 0) {
+        input.sendData(new MultiSet(batch))
+        batch = []
+      }
+      graph.run()
+      for (const message of messages) {
+        for (const [[keyString, row], multiplicity] of message.getInner()) {
+          let byRow = netState.get(keyString)
+          if (!byRow) {
+            byRow = new Map()
+            netState.set(keyString, byRow)
+          }
+          const rowJson = JSON.stringify(row)
+          rowByJson.set(rowJson, row)
+          const next = (byRow.get(rowJson) ?? 0) + multiplicity
+          if (next === 0) {
+            byRow.delete(rowJson)
+          } else {
+            byRow.set(rowJson, next)
+          }
+        }
+      }
+      messages.length = 0
+    }
+
+    for (const [isInsert, row, pick] of ops) {
+      if (isInsert || live.length === 0) {
+        live.push(row)
+        // Fresh object per send: consolidation must work on content, not
+        // reference
+        batch.push([[nextKey++, { ...row }], 1])
+      } else {
+        const index = pick % live.length
+        const [removed] = live.splice(index, 1)
+        batch.push([[nextKey++, { ...removed! }], -1])
+      }
+      if (batch.length >= batchSize) {
+        flush()
+      }
+    }
+    flush()
+
+    // Collapse net state: each group must hold exactly one row with net
+    // multiplicity 1 (or be absent entirely)
+    const materialized = new Map<string, Record<string, unknown>>()
+    for (const [keyString, byRow] of netState) {
+      if (byRow.size === 0) continue
+      expect(byRow.size).toBe(1)
+      const [rowJson, multiplicity] = [...byRow.entries()][0]!
+      expect(multiplicity).toBe(1)
+      materialized.set(keyString, rowByJson.get(rowJson)!)
+    }
+    return { materialized, live }
+  }
+
+  function groupExpected(live: Array<Row>): Map<string, Array<Row>> {
+    const expected = new Map<string, Array<Row>>()
+    for (const row of live) {
+      const keyString = `{"category":${JSON.stringify(row.category)}}`
+      const group = expected.get(keyString) ?? []
+      group.push(row)
+      expected.set(keyString, group)
+    }
+    return expected
+  }
+
+  fcTest.prop([opsArb, fc.integer({ min: 1, max: 7 })])(
+    `incremental primitive aggregates match a from-scratch recompute`,
+    (ops, batchSize) => {
+      const { materialized, live } = runScenario(ops, batchSize, {
+        cnt: count(),
+        total: sum(([, data]: KeyedRow) => data.amount),
+        lo: min(([, data]: KeyedRow) => data.amount),
+        hi: max(([, data]: KeyedRow) => data.amount),
+      })
+
+      const expected = groupExpected(live)
+      expect([...materialized.keys()].sort()).toEqual(
+        [...expected.keys()].sort(),
+      )
+      for (const [keyString, rows] of expected) {
+        const amounts = rows.map((r) => r.amount)
+        expect(materialized.get(keyString)).toEqual({
+          category: rows[0]!.category,
+          cnt: rows.length,
+          total: amounts.reduce((a, b) => a + b, 0),
+          lo: Math.min(...amounts),
+          hi: Math.max(...amounts),
+        })
+      }
+    },
+  )
+
+  fcTest.prop([opsArb, fc.integer({ min: 1, max: 7 })])(
+    `incremental object-valued aggregates (avg) match a from-scratch recompute`,
+    (ops, batchSize) => {
+      const { materialized, live } = runScenario(ops, batchSize, {
+        average: avg(([, data]: KeyedRow) => data.amount),
+      })
+
+      const expected = groupExpected(live)
+      expect([...materialized.keys()].sort()).toEqual(
+        [...expected.keys()].sort(),
+      )
+      for (const [keyString, rows] of expected) {
+        const amounts = rows.map((r) => r.amount)
+        const row = materialized.get(keyString)!
+        expect(row.category).toBe(rows[0]!.category)
+        expect(row.average as number).toBeCloseTo(
+          amounts.reduce((a, b) => a + b, 0) / amounts.length,
+          10,
+        )
+      }
+    },
+  )
 })

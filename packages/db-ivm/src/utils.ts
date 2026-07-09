@@ -199,6 +199,53 @@ export function compareKeys(a: string | number, b: string | number): number {
  * This is used for creating string keys in groupBy operations.
  */
 export function serializeValue(value: unknown): string {
+  // Fast path for flat plain objects with simple primitive values (the common
+  // shape of groupBy keys). Produces output identical to the JSON.stringify
+  // call below, without the per-property replacer overhead.
+  if (value !== null && typeof value === `object` && isPlainObject(value)) {
+    let out = `{`
+    let first = true
+    for (const k in value) {
+      if (!Object.prototype.hasOwnProperty.call(value, k)) continue
+      const v = (value as Record<string, unknown>)[k]
+      let enc: string
+      switch (typeof v) {
+        case `number`:
+          enc = Number.isFinite(v) ? String(v) : `null`
+          break
+        case `boolean`:
+          enc = v ? `true` : `false`
+          break
+        case `string`:
+          enc = JSON.stringify(v)
+          break
+        case `undefined`:
+          // JSON.stringify omits undefined-valued properties
+          continue
+        default:
+          if (v === null) {
+            enc = `null`
+            break
+          }
+          // Nested object / bigint / Date / symbol — fall back to the
+          // replacer-based path below for exact semantics.
+          return serializeValueSlow(value)
+      }
+      if (!first) out += `,`
+      out += `${JSON.stringify(k)}:${enc}`
+      first = false
+    }
+    return out + `}`
+  }
+  return serializeValueSlow(value)
+}
+
+function isPlainObject(value: object): boolean {
+  const proto: unknown = Object.getPrototypeOf(value)
+  return proto === Object.prototype || proto === null
+}
+
+function serializeValueSlow(value: unknown): string {
   return JSON.stringify(value, (_, val) => {
     if (typeof val === 'bigint') {
       return val.toString()

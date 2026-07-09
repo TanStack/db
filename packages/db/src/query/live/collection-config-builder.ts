@@ -858,6 +858,7 @@ export class CollectionConfigBuilder<
         childRegistry: new Map(),
         pendingChildChanges: new Map(),
         correlationToParentKeys: new Map(),
+        deepDirtyKeys: new Set(),
       }
 
       // Attach output callback on the child pipeline
@@ -1223,6 +1224,18 @@ type IncludesOutputState = {
   correlationToParentKeys: Map<unknown, Set<unknown>>
   /** Shared nested pipeline setups (one per nested includes level) */
   nestedSetups?: Array<NestedIncludesSetup>
+  /**
+   * Correlation keys of child entries whose per-entry nested states received
+   * pending changes that have not been flushed yet. Lets the deep flush pass
+   * visit only implicated entries instead of scanning the whole registry.
+   */
+  deepDirtyKeys: Set<unknown>
+  /**
+   * For per-entry nested states: the state and correlation key of the child
+   * entry that owns this state. Used to resolve which top-level entry a deep
+   * buffered change belongs to without scanning.
+   */
+  owner?: { state: IncludesOutputState; key: unknown }
 }
 
 type ChildCollectionEntry = {
@@ -1258,7 +1271,8 @@ function materializeIncludedValue(
     return entry.collection
   }
 
-  const rows = [...entry.collection.toArray]
+  // `toArray` already returns a fresh array, no defensive copy needed
+  const rows = entry.collection.toArray
   const values = state.scalarField
     ? rows.map((row) => row?.[state.scalarField!])
     : rows
@@ -1369,6 +1383,7 @@ function createPerEntryIncludesStates(
       childRegistry: new Map(),
       pendingChildChanges: new Map(),
       correlationToParentKeys: new Map(),
+      deepDirtyKeys: new Set(),
     }
 
     if (setup.nestedSetups) {
@@ -1455,6 +1470,7 @@ function seedParentFromSnapshot(
     byChild = new Map()
     entryState.pendingChildChanges.set(nestedCorrelationKey, byChild)
   }
+  let seeded = false
   for (const [childKey, row] of snap) {
     if (byChild.has(childKey)) continue
     byChild.set(childKey, {
@@ -1463,6 +1479,10 @@ function seedParentFromSnapshot(
       value: cloneSnapshotValue(row.value),
       orderByIndex: row.orderByIndex,
     })
+    seeded = true
+  }
+  if (seeded) {
+    state.deepDirtyKeys.add(parentCorrelationKey)
   }
 }
 
@@ -1526,6 +1546,16 @@ function drainNestedBuffers(state: IncludesOutputState): Set<unknown> {
 
           if (targetState === state) {
             dirtyCorrelationKeys.add(parentCorrelationKey)
+          } else {
+            // Routed into another state's entry — record it there, and mark
+            // the whole owner chain so every ancestor's deep flush pass knows
+            // to descend into exactly this branch.
+            targetState.deepDirtyKeys.add(parentCorrelationKey)
+            let cursor: IncludesOutputState = targetState
+            while (cursor.owner) {
+              cursor.owner.state.deepDirtyKeys.add(cursor.owner.key)
+              cursor = cursor.owner.state
+            }
           }
           routedToAny = true
         }
@@ -1804,49 +1834,165 @@ function computeRoutingKey(
   return JSON.stringify([correlationKey, parentContext])
 }
 
+const EMPTY_CHANGE_SUBSCRIPTIONS = new Set<never>()
+
+/**
+ * Minimal in-memory store standing in for a full Collection in includes
+ * entries with inline materializations (`array` / `singleton` / `concat`).
+ * These child stores are never exposed to users (only their materialized
+ * arrays/values are), so the full Collection machinery — state manager,
+ * transactions, change events, lifecycle — is pure overhead. This class
+ * implements exactly the surface the includes flush machinery touches.
+ */
+class LightweightChildCollection {
+  readonly id: string
+  #data = new Map<unknown, any>()
+  #resultKeys: WeakMap<object, unknown>
+  #compare: ((a: any, b: any) => number) | null
+  #sorted: Array<any> | null = null
+
+  // Facade so flushIncludesState's subscriber check and event emission are
+  // no-ops for lightweight stores (they can have no subscribers).
+  readonly _changes = {
+    changeSubscriptions: EMPTY_CHANGE_SUBSCRIPTIONS,
+    emitEvents(): void {},
+  }
+
+  constructor(
+    id: string,
+    resultKeys: WeakMap<object, unknown>,
+    compare: ((a: any, b: any) => number) | null,
+  ) {
+    this.id = id
+    this.#resultKeys = resultKeys
+    this.#compare = compare
+  }
+
+  getKeyFromItem(item: any): unknown {
+    return this.#resultKeys.get(item)
+  }
+
+  has(key: unknown): boolean {
+    return this.#data.has(key)
+  }
+
+  get(key: unknown): any {
+    return this.#data.get(key)
+  }
+
+  get size(): number {
+    return this.#data.size
+  }
+
+  write(value: any, type: `insert` | `update` | `delete`): void {
+    const key = this.#resultKeys.get(value)
+    if (type === `delete`) {
+      this.#data.delete(key)
+    } else {
+      // Add-if-missing virtual props, in place. Rows written here are
+      // exclusively owned per-row pipeline outputs, so mutation is safe and
+      // matches what a full child Collection exposes on read.
+      if (value !== null && typeof value === `object`) {
+        if (value.$key === undefined) value.$key = key
+        if (value.$synced === undefined) value.$synced = true
+        if (value.$origin === undefined) value.$origin = `remote`
+        if (value.$collectionId === undefined) value.$collectionId = this.id
+      }
+      this.#data.set(key, value)
+    }
+    this.#sorted = null
+  }
+
+  get toArray(): Array<any> {
+    if (this.#sorted) {
+      return this.#sorted
+    }
+    const rows = [...this.#data.values()]
+    if (this.#compare) {
+      rows.sort(this.#compare)
+    }
+    this.#sorted = rows
+    return rows
+  }
+
+  cleanup(): Promise<void> {
+    this.#data.clear()
+    this.#sorted = null
+    return Promise.resolve()
+  }
+}
+
 /**
  * Creates a child Collection entry for includes subqueries.
- * The child Collection is a full-fledged Collection instance that starts syncing immediately.
+ * Inline materializations (`array` / `singleton` / `concat`) get a
+ * LightweightChildCollection; only the `collection` materialization — which
+ * hands the Collection instance itself to the user — pays for a full
+ * Collection instance that starts syncing immediately.
  */
 function createChildCollectionEntry(
   parentId: string,
   fieldName: string,
   correlationKey: unknown,
   hasOrderBy: boolean,
+  materialization: IncludesMaterialization,
   nestedSetups?: Array<NestedIncludesSetup>,
 ): ChildCollectionEntry {
   const resultKeys = new WeakMap<object, unknown>()
   const orderByIndices = hasOrderBy ? new WeakMap<object, string>() : null
-  let syncMethods: SyncMethods<any> | null = null
 
   const compare = orderByIndices
     ? createOrderByComparator(orderByIndices)
     : undefined
 
-  const collection = createCollection<any, string | number>({
-    id: `__child-collection:${parentId}-${fieldName}-${serializeValue(correlationKey)}`,
-    getKey: (item: any) => resultKeys.get(item) as string | number,
-    compare,
-    sync: {
-      rowUpdateMode: `full`,
-      sync: (methods) => {
-        syncMethods = methods
-        return () => {
-          syncMethods = null
-        }
-      },
-    },
-    startSync: true,
-    gcTime: 0,
-  })
+  let entry: ChildCollectionEntry
 
-  const entry: ChildCollectionEntry = {
-    collection,
-    get syncMethods() {
-      return syncMethods
-    },
-    resultKeys,
-    orderByIndices,
+  if (materialization !== `collection`) {
+    const store = new LightweightChildCollection(
+      `__child-collection:${parentId}-${fieldName}-${serializeValue(correlationKey)}`,
+      resultKeys,
+      compare ?? null,
+    )
+    const syncMethods = {
+      collection: store,
+      begin(): void {},
+      write(op: { value: any; type: `insert` | `update` | `delete` }): void {
+        store.write(op.value, op.type)
+      },
+      commit(): void {},
+    } as unknown as SyncMethods<any>
+    entry = {
+      collection: store as unknown as Collection<any, any, any>,
+      syncMethods,
+      resultKeys,
+      orderByIndices,
+    }
+  } else {
+    let syncMethods: SyncMethods<any> | null = null
+    const collection = createCollection<any, string | number>({
+      id: `__child-collection:${parentId}-${fieldName}-${serializeValue(correlationKey)}`,
+      getKey: (item: any) => resultKeys.get(item) as string | number,
+      compare,
+      sync: {
+        rowUpdateMode: `full`,
+        sync: (methods) => {
+          syncMethods = methods
+          return () => {
+            syncMethods = null
+          }
+        },
+      },
+      startSync: true,
+      gcTime: 0,
+    })
+
+    entry = {
+      collection,
+      get syncMethods() {
+        return syncMethods
+      },
+      resultKeys,
+      orderByIndices,
+    }
   }
 
   if (nestedSetups) {
@@ -1865,6 +2011,10 @@ function createChildCollectionEntry(
  *   4. Flush per-entry states — recursively flush nested includes on each entry
  *   5. Parent DELETEs — clean up child entries and routing index
  */
+// Shared read-only empty map for flushes with no pending child changes —
+// writes only happen inside the pendingChildChanges.size > 0 branch.
+const EMPTY_CHILD_CHANGE_ENTRIES = new Map<never, never>()
+
 function flushIncludesState(
   includesState: Array<IncludesOutputState>,
   parentCollection: Collection<any, any, any>,
@@ -1892,8 +2042,14 @@ function flushIncludesState(
                 state.fieldName,
                 routingKey,
                 state.hasOrderBy,
+                state.materialization,
                 state.nestedSetups,
               )
+              if (entry.includesStates) {
+                for (const nestedState of entry.includesStates) {
+                  nestedState.owner = { state, key: routingKey }
+                }
+              }
               state.childRegistry.set(routingKey, entry)
             }
             // Update reverse index: routing key → parent keys
@@ -1922,16 +2078,20 @@ function flushIncludesState(
     }
 
     // Track affected correlation keys for inline materializations before clearing child changes.
-    const affectedCorrelationKeys = materializesInline(state)
-      ? new Set<unknown>(state.pendingChildChanges.keys())
-      : null
+    const affectedCorrelationKeys =
+      materializesInline(state) && state.pendingChildChanges.size > 0
+        ? new Set<unknown>(state.pendingChildChanges.keys())
+        : null
 
     // Phase 2: Child changes — apply to child Collections
     // Track which entries had child changes and capture their childChanges maps
-    const entriesWithChildChanges = new Map<
+    const entriesWithChildChanges: Map<
       unknown,
       { entry: ChildCollectionEntry; childChanges: Map<unknown, Changes<any>> }
-    >()
+    > =
+      state.pendingChildChanges.size > 0
+        ? new Map()
+        : (EMPTY_CHILD_CHANGE_ENTRIES as any)
     if (state.pendingChildChanges.size > 0) {
       for (const [correlationKey, childChanges] of state.pendingChildChanges) {
         // Ensure child Collection exists for this correlation key
@@ -1942,8 +2102,14 @@ function flushIncludesState(
             state.fieldName,
             correlationKey,
             state.hasOrderBy,
+            state.materialization,
             state.nestedSetups,
           )
+          if (entry.includesStates) {
+            for (const nestedState of entry.includesStates) {
+              nestedState.owner = { state, key: correlationKey }
+            }
+          }
           state.childRegistry.set(correlationKey, entry)
         }
 
@@ -2029,13 +2195,25 @@ function flushIncludesState(
     // have pending data, but neither this level nor the immediate child level changed).
     // Without this pass, changes at depth 3+ are stranded because drainNestedBuffers
     // only drains one level and Phase 4 only flushes entries dirty from Phase 2/3.
+    // Candidates come from dirty-key tracking plus routing lookups on raw
+    // buffered data — proportional to pending work, not registry size.
     const deepBufferDirty = new Set<unknown>()
     if (state.nestedSetups) {
-      for (const [correlationKey, entry] of state.childRegistry) {
-        if (entriesWithChildChanges.has(correlationKey)) continue
-        if (dirtyFromBuffers.has(correlationKey)) continue
+      const deepCandidates = new Set(state.deepDirtyKeys)
+      collectBufferImplicatedKeys(state, state.nestedSetups, deepCandidates)
+      for (const correlationKey of deepCandidates) {
         if (
-          entry.includesStates &&
+          entriesWithChildChanges.has(correlationKey) ||
+          dirtyFromBuffers.has(correlationKey)
+        ) {
+          // Flushed earlier in Phase 4 — nothing pending remains
+          state.deepDirtyKeys.delete(correlationKey)
+          continue
+        }
+        const entry = state.childRegistry.get(correlationKey)
+        state.deepDirtyKeys.delete(correlationKey)
+        if (
+          entry?.includesStates &&
           hasPendingIncludesChanges(entry.includesStates)
         ) {
           flushIncludesState(
@@ -2064,6 +2242,18 @@ function flushIncludesState(
         ])
       : null
     if (parentSyncMethods && inlineReEmitKeys && inlineReEmitKeys.size > 0) {
+      // The clones exist only to build UPDATE event payloads. Without change
+      // subscriptions (always the case during initial hydrate, which runs
+      // synchronously inside createCollection) only the in-place mutation is
+      // needed and the clones + events can be skipped entirely.
+      const changesManager = (parentCollection as any)._changes as {
+        changeSubscriptions: Set<unknown>
+        emitEvents: (
+          changes: Array<ChangeMessage<any>>,
+          forceEmit?: boolean,
+        ) => void
+      }
+      const hasSubscribers = changesManager.changeSubscriptions.size > 0
       const events: Array<ChangeMessage<any>> = []
       for (const correlationKey of inlineReEmitKeys) {
         const parentKeys = state.correlationToParentKeys.get(correlationKey)
@@ -2072,6 +2262,14 @@ function flushIncludesState(
         for (const parentKey of parentKeys) {
           const item = parentCollection.get(parentKey as any)
           if (item) {
+            if (!hasSubscribers) {
+              setIncludedValue(
+                item,
+                state.resultPath,
+                materializeIncludedValue(state, entry),
+              )
+              continue
+            }
             // Capture previous value before in-place mutation
             const previousValue = cloneForIncludesUpdate(item, state.resultPath)
             setIncludedValue(
@@ -2092,12 +2290,6 @@ function flushIncludesState(
       if (events.length > 0) {
         // Emit directly — the in-place mutation already updated the data in
         // syncedData, so we only need to notify subscribers.
-        const changesManager = (parentCollection as any)._changes as {
-          emitEvents: (
-            changes: Array<ChangeMessage<any>>,
-            forceEmit?: boolean,
-          ) => void
-        }
         changesManager.emitEvents(events, true)
       }
     }
@@ -2137,23 +2329,53 @@ function flushIncludesState(
 }
 
 /**
+ * Collects correlation keys of `state`'s child entries implicated by data
+ * sitting in (recursively) nested shared buffers, by following each buffered
+ * key's routes and walking the target state's owner chain back up to `state`.
+ * Cost is proportional to buffered data, not registry size. Unroutable rows
+ * (no routes yet) contribute nothing — they cannot be flushed anywhere until
+ * a route is established, which happens during a child-change flush of the
+ * exact entry involved.
+ */
+function collectBufferImplicatedKeys(
+  state: IncludesOutputState,
+  setups: Array<NestedIncludesSetup>,
+  out: Set<unknown>,
+): void {
+  for (const setup of setups) {
+    for (const nestedCorrelationKey of setup.buffer.keys()) {
+      const stateRoutes = setup.routingIndex.get(nestedCorrelationKey)
+      if (!stateRoutes) continue
+      for (const targetState of stateRoutes.keys()) {
+        let cursor: IncludesOutputState | undefined = targetState
+        while (cursor) {
+          if (cursor.owner?.state === state) {
+            out.add(cursor.owner.key)
+            break
+          }
+          cursor = cursor.owner?.state
+        }
+      }
+    }
+    if (setup.nestedSetups) {
+      collectBufferImplicatedKeys(state, setup.nestedSetups, out)
+    }
+  }
+}
+
+/**
  * Checks whether any includes state has pending changes that need to be flushed.
- * Checks direct pending child changes and shared nested buffers.
+ * Uses dirty-key tracking and shared-buffer checks so the cost stays constant
+ * per state instead of scanning child registries.
  */
 function hasPendingIncludesChanges(
   states: Array<IncludesOutputState>,
 ): boolean {
   for (const state of states) {
     if (state.pendingChildChanges.size > 0) return true
+    if (state.deepDirtyKeys.size > 0) return true
     if (state.nestedSetups && hasNestedBufferChanges(state.nestedSetups))
       return true
-    for (const entry of state.childRegistry.values()) {
-      if (
-        entry.includesStates &&
-        hasPendingIncludesChanges(entry.includesStates)
-      )
-        return true
-    }
   }
   return false
 }

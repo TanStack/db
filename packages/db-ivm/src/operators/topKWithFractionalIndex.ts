@@ -76,7 +76,53 @@ export class TopKWithFractionalIndexOperator<
 
   run(): void {
     const result: Array<[[K, IndexedValue<T>], number]> = []
-    for (const message of this.inputMessages()) {
+    const messages = this.inputMessages()
+
+    // Initial-load fast path: an empty state receiving one batch of unique
+    // inserts (the hydrate snapshot) is filled with a single sort + append
+    // -style fractional key generation instead of per-element binary search,
+    // between-neighbour key splits and O(n) splices.
+    if (
+      this.#state.isEmpty &&
+      this.#state.supportsBulkLoad &&
+      messages.length === 1
+    ) {
+      const inner = messages[0]!.getInner()
+      let qualifies = inner.length > 1
+      if (qualifies) {
+        const seen = new Set<K>()
+        for (const [item, multiplicity] of inner) {
+          if (multiplicity !== 1 || seen.has(item[0])) {
+            qualifies = false
+            break
+          }
+          seen.add(item[0])
+        }
+      }
+      if (qualifies) {
+        const items: Array<[K, T]> = new Array(inner.length)
+        for (let i = 0; i < inner.length; i++) {
+          items[i] = inner[i]![0]
+        }
+        const moveIns = this.#state.bulkLoad(items)
+        for (const moveIn of moveIns) {
+          handleMoveIn(moveIn, result)
+        }
+        if (result.length > 0) {
+          this.output.sendData(new MultiSet(result))
+        }
+        return
+      }
+      for (const [item, multiplicity] of inner) {
+        this.processElement(item[0], item[1], multiplicity, result)
+      }
+      if (result.length > 0) {
+        this.output.sendData(new MultiSet(result))
+      }
+      return
+    }
+
+    for (const message of messages) {
       for (const [item, multiplicity] of message.getInner()) {
         const [key, value] = item
         this.processElement(key, value, multiplicity, result)

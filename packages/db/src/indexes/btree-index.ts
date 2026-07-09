@@ -49,7 +49,16 @@ export class BTreeIndex<
   // The `valueMap` is used for O(1) lookups of PKs by indexed value
   private orderedEntries: BTree<any, undefined> // we don't associate values with the keys of the B+ tree (the keys are indexed values)
   private valueMap = new Map<any, Set<TKey>>() // instead we store a mapping of indexed values to a set of PKs
-  private indexedKeys = new Set<TKey>()
+  // Values whose key set has emptied are kept as tombstones so that
+  // remove-then-re-add cycles (common under incremental updates) avoid tree
+  // churn; read paths skip empty sets. Compacted beyond a bound.
+  private emptyValueTombstones = 0
+  private static readonly MAX_VALUE_TOMBSTONES = 1024
+  // Number of distinct keys in the index. Kept as a counter instead of a
+  // Set: V8 hash tables degrade badly under repeated delete+re-add of the
+  // same key (each cycle appends to the data table and forces rehashes),
+  // which is exactly the churn incremental row updates produce.
+  private indexedKeyCount = 0
   private compareFn: (a: any, b: any) => number = defaultComparator
 
   constructor(
@@ -94,18 +103,25 @@ export class BTreeIndex<
     // Normalize the value for Map key usage
     const normalizedValue = normalizeForBTree(indexedValue)
 
-    // Check if this value already exists
-    if (this.valueMap.has(normalizedValue)) {
-      // Add to existing set
-      this.valueMap.get(normalizedValue)!.add(key)
+    const existingKeySet = this.valueMap.get(normalizedValue)
+    if (existingKeySet !== undefined) {
+      // Value already exists (possibly as a tombstone), reuse the entry
+      if (existingKeySet.size === 0) {
+        this.emptyValueTombstones--
+      }
+      const sizeBefore = existingKeySet.size
+      existingKeySet.add(key)
+      if (existingKeySet.size !== sizeBefore) {
+        this.indexedKeyCount++
+      }
     } else {
       // Create new set for this value
       const keySet = new Set<TKey>([key])
       this.valueMap.set(normalizedValue, keySet)
       this.orderedEntries.set(normalizedValue, undefined)
+      this.indexedKeyCount++
     }
 
-    this.indexedKeys.add(key)
     this.updateTimestamp()
   }
 
@@ -127,20 +143,21 @@ export class BTreeIndex<
     // Normalize the value for Map key usage
     const normalizedValue = normalizeForBTree(indexedValue)
 
-    if (this.valueMap.has(normalizedValue)) {
-      const keySet = this.valueMap.get(normalizedValue)!
-      keySet.delete(key)
+    const keySet = this.valueMap.get(normalizedValue)
+    if (keySet !== undefined && keySet.delete(key)) {
+      this.indexedKeyCount--
 
-      // If set is now empty, remove the entry entirely
+      // Keep the emptied entry as a tombstone (read paths skip empty sets)
+      // so a re-add of the same value avoids tree churn; compact when the
+      // tombstone count grows.
       if (keySet.size === 0) {
-        this.valueMap.delete(normalizedValue)
-
-        // Remove from ordered entries
-        this.orderedEntries.delete(normalizedValue)
+        this.emptyValueTombstones++
+        if (this.emptyValueTombstones > BTreeIndex.MAX_VALUE_TOMBSTONES) {
+          this.compactValueTombstones()
+        }
       }
     }
 
-    this.indexedKeys.delete(key)
     this.updateTimestamp()
   }
 
@@ -169,7 +186,8 @@ export class BTreeIndex<
   clear(): void {
     this.orderedEntries.clear()
     this.valueMap.clear()
-    this.indexedKeys.clear()
+    this.indexedKeyCount = 0
+    this.emptyValueTombstones = 0
     this.updateTimestamp()
   }
 
@@ -212,7 +230,7 @@ export class BTreeIndex<
    * Gets the number of indexed keys
    */
   get keyCount(): number {
-    return this.indexedKeys.size
+    return this.indexedKeyCount
   }
 
   // Public methods for backward compatibility (used by tests)
@@ -408,16 +426,26 @@ export class BTreeIndex<
 
   // Getter methods for testing compatibility
   get indexedKeysSet(): Set<TKey> {
-    return this.indexedKeys
+    const keys = new Set<TKey>()
+    for (const keySet of this.valueMap.values()) {
+      for (const key of keySet) {
+        keys.add(key)
+      }
+    }
+    return keys
   }
 
   get orderedEntriesArray(): Array<[any, Set<TKey>]> {
-    return this.orderedEntries
-      .keysArray()
-      .map((key) => [
-        denormalizeUndefined(key),
-        this.valueMap.get(key) ?? new Set(),
-      ])
+    // Tombstoned (emptied) values are an internal detail — filter them so
+    // snapshot APIs stay consistent with take*/valueMapData
+    const result: Array<[any, Set<TKey>]> = []
+    for (const key of this.orderedEntries.keysArray()) {
+      const keySet = this.valueMap.get(key)
+      if (keySet !== undefined && keySet.size > 0) {
+        result.push([denormalizeUndefined(key), keySet])
+      }
+    }
+    return result
   }
 
   get orderedEntriesArrayReversed(): Array<[any, Set<TKey>]> {
@@ -427,11 +455,24 @@ export class BTreeIndex<
     ])
   }
 
+  private compactValueTombstones(): void {
+    for (const [value, keySet] of this.valueMap) {
+      if (keySet.size === 0) {
+        this.valueMap.delete(value)
+        this.orderedEntries.delete(value)
+      }
+    }
+    this.emptyValueTombstones = 0
+  }
+
   get valueMapData(): Map<any, Set<TKey>> {
-    // Return a new Map with denormalized keys
+    // Return a new Map with denormalized keys (tombstoned empty entries
+    // are an internal detail and excluded)
     const result = new Map<any, Set<TKey>>()
     for (const [key, value] of this.valueMap) {
-      result.set(denormalizeUndefined(key), value)
+      if (value.size > 0) {
+        result.set(denormalizeUndefined(key), value)
+      }
     }
     return result
   }

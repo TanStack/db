@@ -1,4 +1,8 @@
-import { DifferenceStreamWriter } from './graph.js'
+import {
+  DifferenceStreamWriter,
+  FusedLinearOperator,
+  LinearUnaryOperator,
+} from './graph.js'
 import type {
   BinaryOperator,
   DifferenceStreamReader,
@@ -38,7 +42,63 @@ export class D2 implements ID2 {
     this.#operators.push(operator)
   }
 
+  /**
+   * Collapses chains of linear unary operators (map/filter/tap/negate) whose
+   * intermediate edge has exactly one consumer into single fused operators.
+   * Safe at finalize time because the topology can no longer change.
+   */
+  #fuseLinearChains(): void {
+    // Operators register upstream-first, so one forward pass with a
+    // reader -> consumer map fuses whole chains: after absorbing its sole
+    // linear consumer the fused op keeps the consumer's output writer, and
+    // the loop re-probes the same entry for the next link.
+    const isLinear = (
+      o: UnaryOperator<any> | BinaryOperator<any>,
+    ): o is LinearUnaryOperator<any, any> | FusedLinearOperator<any> =>
+      o instanceof LinearUnaryOperator || o instanceof FusedLinearOperator
+    const consumerOf = new Map<
+      DifferenceStreamReader<any>,
+      UnaryOperator<any> | BinaryOperator<any>
+    >()
+    for (const o of this.#operators) {
+      for (const r of o.inputReaders) {
+        consumerOf.set(r, o)
+      }
+    }
+    const removed = new Set<UnaryOperator<any> | BinaryOperator<any>>()
+    for (let i = 0; i < this.#operators.length; i++) {
+      let op = this.#operators[i]!
+      if (removed.has(op) || !isLinear(op)) continue
+      for (;;) {
+        const writer = op.outputWriter
+        if (writer.readers.length !== 1) break
+        const consumer = consumerOf.get(writer.readers[0]!)
+        if (!consumer || consumer === op || !isLinear(consumer)) break
+        const stages = [
+          ...(op instanceof FusedLinearOperator ? op.stages : [op]),
+          ...(consumer instanceof FusedLinearOperator
+            ? consumer.stages
+            : [consumer]),
+        ]
+        const fused: FusedLinearOperator<any> = new FusedLinearOperator(
+          op.id,
+          op.inputReaders[0]! as any,
+          consumer.outputWriter as any,
+          stages as any,
+        )
+        consumerOf.set(op.inputReaders[0]!, fused)
+        this.#operators[i] = fused
+        removed.add(consumer)
+        op = fused
+      }
+    }
+    if (removed.size > 0) {
+      this.#operators = this.#operators.filter((o) => !removed.has(o))
+    }
+  }
+
   finalize() {
+    this.#fuseLinearChains()
     this.#checkNotFinalized()
     this.#finalized = true
   }
@@ -57,8 +117,22 @@ export class D2 implements ID2 {
   }
 
   run(): void {
-    while (this.pendingWork()) {
-      this.step()
+    if (!this.#finalized) {
+      throw new Error(`Graph not finalized`)
+    }
+    // Only run operators that actually have pending input; running idle
+    // operators drains empty queues and allocates for nothing. Operators are
+    // registered upstream-first, so one pass usually settles the graph and
+    // the final pass is a cheap no-work scan.
+    let anyRan = true
+    while (anyRan) {
+      anyRan = false
+      for (const op of this.#operators) {
+        if (op.hasPendingWork()) {
+          op.run()
+          anyRan = true
+        }
+      }
     }
   }
 }

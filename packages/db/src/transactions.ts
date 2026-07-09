@@ -206,12 +206,30 @@ function removeFromPendingList(tx: Transaction<any>) {
   }
 }
 
+// Transaction ids are a lazily-created session prefix plus a counter:
+// globally unique (the prefix is a UUID) without paying UUID generation on
+// every transaction, and lazy so module load stays safe in environments that
+// forbid random in global scope (e.g. Cloudflare Workers).
+let transactionIdPrefix: string | undefined
+let transactionIdSequence = 0
+
+function nextTransactionId(): string {
+  transactionIdPrefix ??= safeRandomUUID()
+  return `${transactionIdPrefix}-t${++transactionIdSequence}`
+}
+
 class Transaction<T extends object = Record<string, unknown>> {
   public id: string
   public state: TransactionState
   public mutationFn: MutationFn<T>
   public mutations: Array<PendingMutation<T>>
-  public isPersisted: Deferred<Transaction<T>>
+  /**
+   * Backing store for the lazy isPersisted getter. Not a #private field:
+   * private fields make the class nominally typed, which breaks structural
+   * consumers like TransactionWithMutations (an Omit<> over this class).
+   * @internal
+   */
+  _isPersisted?: Deferred<Transaction<T>> | undefined
   public autoCommit: boolean
   public createdAt: Date
   public sequenceNumber: number
@@ -225,15 +243,33 @@ class Transaction<T extends object = Record<string, unknown>> {
     if (typeof config.mutationFn === `undefined`) {
       throw new MissingMutationFunctionError()
     }
-    this.id = config.id ?? safeRandomUUID()
+    this.id = config.id ?? nextTransactionId()
     this.mutationFn = config.mutationFn
     this.state = `pending`
     this.mutations = []
-    this.isPersisted = createDeferred<Transaction<T>>()
     this.autoCommit = config.autoCommit ?? true
     this.createdAt = new Date()
     this.sequenceNumber = sequenceNumber++
     this.metadata = config.metadata ?? {}
+  }
+
+  /**
+   * Deferred that settles when the transaction completes or fails. Created
+   * lazily on first access — most transactions are never awaited, and the
+   * Promise machinery was a measurable share of per-mutation allocations.
+   * When accessed after the transaction already settled, it settles
+   * immediately from the terminal state.
+   */
+  get isPersisted(): Deferred<Transaction<T>> {
+    if (!this._isPersisted) {
+      this._isPersisted = createDeferred<Transaction<T>>()
+      if (this.state === `completed`) {
+        this._isPersisted.resolve(this)
+      } else if (this.state === `failed`) {
+        this._isPersisted.reject(this.error?.error)
+      }
+    }
+    return this._isPersisted
   }
 
   setState(newState: TransactionState) {
@@ -334,6 +370,13 @@ class Transaction<T extends object = Record<string, unknown>> {
    * @param mutations - Array of new mutations to apply
    */
   applyMutations(mutations: Array<PendingMutation<any>>): void {
+    // Dominant case: a fresh direct-op transaction applying one mutation —
+    // nothing to merge, so skip the Map entirely.
+    if (this.mutations.length === 0 && mutations.length === 1) {
+      this.mutations.push(mutations[0]!)
+      return
+    }
+
     // Merge via a globalKey-keyed map rather than a findIndex scan per
     // mutation, which is O(n²) for bulk operations (e.g. inserting many rows
     // in one call). Map preserves insertion order, matching the previous
@@ -427,8 +470,9 @@ class Transaction<T extends object = Record<string, unknown>> {
       }
     }
 
-    // Reject the promise
-    this.isPersisted.reject(this.error?.error)
+    // Reject the promise (only if someone is listening; late accessors get
+    // a deferred settled from the terminal state)
+    this._isPersisted?.reject(this.error?.error)
     this.touchCollection()
 
     return this
@@ -490,34 +534,28 @@ class Transaction<T extends object = Record<string, unknown>> {
    * await tx.commit()
    * console.log(tx.state) // "completed" or "failed"
    */
-  async commit(): Promise<Transaction<T>> {
+  commit(): Promise<Transaction<T>> {
     if (this.state !== `pending`) {
-      throw new TransactionNotPendingCommitError()
+      return Promise.reject(new TransactionNotPendingCommitError())
     }
 
     this.setState(`persisting`)
 
     if (this.mutations.length === 0) {
       this.setState(`completed`)
-      this.isPersisted.resolve(this)
+      this._isPersisted?.resolve(this)
 
+      return Promise.resolve(this)
+    }
+
+    const complete = (): Transaction<T> => {
+      this.setState(`completed`)
+      this.touchCollection()
+      this._isPersisted?.resolve(this)
       return this
     }
 
-    // Run mutationFn
-    try {
-      // At this point we know there's at least one mutation
-      // We've already verified mutations is non-empty, so this cast is safe
-      // Use a direct type assertion instead of object spreading to preserve the original type
-      await this.mutationFn({
-        transaction: this as unknown as TransactionWithMutations<T>,
-      })
-
-      this.setState(`completed`)
-      this.touchCollection()
-
-      this.isPersisted.resolve(this)
-    } catch (error) {
+    const fail = (error: unknown): never => {
       // Preserve the original error for rethrowing
       const originalError =
         error instanceof Error ? error : new Error(String(error))
@@ -535,7 +573,39 @@ class Transaction<T extends object = Record<string, unknown>> {
       throw originalError
     }
 
-    return this
+    // Run mutationFn
+    try {
+      // At this point we know there's at least one mutation
+      // We've already verified mutations is non-empty, so this cast is safe
+      // Use a direct type assertion instead of object spreading to preserve the original type
+      // Typed as unknown: MutationFn is declared to return a promise, but
+      // internal synchronous handlers (e.g. local-only) may return a plain
+      // value, which is what enables synchronous completion.
+      const result: unknown = this.mutationFn({
+        transaction: this as unknown as TransactionWithMutations<T>,
+      })
+
+      if (
+        result !== null &&
+        typeof result === `object` &&
+        typeof (result as PromiseLike<unknown>).then === `function`
+      ) {
+        return Promise.resolve(result).then(complete, fail)
+      }
+
+      // The mutation function finished synchronously — complete the
+      // transaction synchronously so bursts of local mutations don't
+      // accumulate persisting transactions across microtasks.
+      return Promise.resolve(complete())
+    } catch (error) {
+      try {
+        fail(error)
+      } catch (rethrown) {
+        return Promise.reject(rethrown)
+      }
+      // Unreachable — fail always throws
+      return Promise.reject(error)
+    }
   }
 
   /**

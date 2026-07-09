@@ -97,7 +97,11 @@ export abstract class BaseIndex<
 
   protected lookupCount = 0
   protected totalLookupTime = 0
-  protected lastUpdated = new Date()
+  // Stored as epoch ms; a Date is only materialized for stats reads
+  protected lastUpdatedMs = Date.now()
+  protected get lastUpdated(): Date {
+    return new Date(this.lastUpdatedMs)
+  }
   protected compareOptions: CompareOptions
   /**
    * Set by subclasses when constructed with a user-supplied comparator, whose
@@ -209,8 +213,13 @@ export abstract class BaseIndex<
 
   protected abstract initialize(options?: any): void
 
+  private compiledIndexEvaluator:
+    | ((item: Record<string, unknown>) => any)
+    | undefined
+
   protected evaluateIndexExpression(item: any): any {
-    const evaluator = compileSingleRowExpression(this.expression)
+    const evaluator = (this.compiledIndexEvaluator ??=
+      compileSingleRowExpression(this.expression))
     return evaluator(item as Record<string, unknown>)
   }
 
@@ -221,7 +230,7 @@ export abstract class BaseIndex<
   }
 
   protected updateTimestamp(): void {
-    this.lastUpdated = new Date()
+    this.lastUpdatedMs = Date.now()
   }
 }
 

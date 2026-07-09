@@ -2875,3 +2875,130 @@ describe(`Virtual properties`, () => {
     await collection.cleanup()
   })
 })
+
+describe(`synced commit fast lane event derivation`, () => {
+  type Row = { id: number; name: string; value: number }
+
+  // A plain sync-driven collection with no user transactions or optimistic
+  // state exercises commitSyncedTransactionsFastLane (and its single-op
+  // ultra path) directly.
+  function createSyncCollection() {
+    let syncApi: any
+    const collection = createCollection<Row, number>({
+      id: `fast-lane-test-${Math.random()}`,
+      getKey: (r) => r.id,
+      startSync: true,
+      sync: {
+        sync: (api) => {
+          syncApi = api
+          api.markReady()
+        },
+      },
+    })
+    return { collection, sync: () => syncApi }
+  }
+
+  it(`suppresses update events when the new value is deep-equal`, async () => {
+    const { collection, sync } = createSyncCollection()
+    const api = sync()
+    api.begin()
+    api.write({ type: `insert`, value: { id: 1, name: `a`, value: 1 } })
+    api.commit()
+
+    const events: Array<any> = []
+    const subscription = collection.subscribeChanges(
+      (changes) => {
+        events.push(...changes)
+      },
+      { includeInitialState: false },
+    )
+
+    // Deep-equal update (fresh object, same content) must not emit
+    api.begin()
+    api.write({ type: `update`, value: { id: 1, name: `a`, value: 1 } })
+    api.commit()
+    expect(events).toHaveLength(0)
+
+    // A real change must emit an update with the previous value
+    api.begin()
+    api.write({ type: `update`, value: { id: 1, name: `a`, value: 2 } })
+    api.commit()
+    expect(events).toHaveLength(1)
+    expect(events[0].type).toBe(`update`)
+    expect(events[0].value.value).toBe(2)
+    expect(events[0].previousValue.value).toBe(1)
+
+    subscription.unsubscribe()
+    await collection.cleanup()
+  })
+
+  it(`derives one event per key for repeated-key batches`, async () => {
+    const { collection, sync } = createSyncCollection()
+    const api = sync()
+
+    const events: Array<any> = []
+    const subscription = collection.subscribeChanges((changes) => {
+      events.push(...changes)
+    })
+
+    // Insert then update the same key within one committed transaction:
+    // a single insert event carrying the final value
+    api.begin()
+    api.write({ type: `insert`, value: { id: 7, name: `x`, value: 1 } })
+    api.write({ type: `update`, value: { id: 7, name: `x`, value: 9 } })
+    api.commit()
+
+    expect(events).toHaveLength(1)
+    expect(events[0].type).toBe(`insert`)
+    expect(events[0].value.value).toBe(9)
+
+    // Insert then delete the same key nets out to no event
+    events.length = 0
+    api.begin()
+    api.write({ type: `insert`, value: { id: 8, name: `y`, value: 1 } })
+    api.write({ type: `delete`, value: { id: 8, name: `y`, value: 1 } })
+    api.commit()
+    expect(events).toHaveLength(0)
+
+    subscription.unsubscribe()
+    await collection.cleanup()
+  })
+
+  it(`merges partial updates and emits deletes via the single-op ultra path`, async () => {
+    const { collection, sync } = createSyncCollection()
+    const api = sync()
+    api.begin()
+    api.write({ type: `insert`, value: { id: 3, name: `n`, value: 5 } })
+    api.commit()
+
+    const events: Array<any> = []
+    const subscription = collection.subscribeChanges(
+      (changes) => {
+        events.push(...changes)
+      },
+      { includeInitialState: false },
+    )
+
+    // Partial update (default rowUpdateMode) merges with the existing row
+    api.begin()
+    api.write({ type: `update`, value: { id: 3, value: 6 } })
+    api.commit()
+    expect(events).toHaveLength(1)
+    expect(events[0].type).toBe(`update`)
+    expect(events[0].value.name).toBe(`n`)
+    expect(events[0].value.value).toBe(6)
+
+    // Single-op delete emits a delete carrying the previous value
+    events.length = 0
+    api.begin()
+    api.write({ type: `delete`, value: { id: 3, name: `n`, value: 6 } })
+    api.commit()
+    expect(events).toHaveLength(1)
+    expect(events[0].type).toBe(`delete`)
+    expect(events[0].value.value).toBe(6)
+    expect(collection.size).toBe(0)
+
+    subscription.unsubscribe()
+    await collection.cleanup()
+  })
+})

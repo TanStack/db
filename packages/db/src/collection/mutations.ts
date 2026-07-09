@@ -35,6 +35,17 @@ import type {
 import type { CollectionLifecycleManager } from './lifecycle'
 import type { CollectionStateManager } from './state'
 
+// Mutation IDs only need uniqueness; a per-session UUID prefix plus a counter
+// preserves cross-session uniqueness without a crypto UUID per mutation.
+// The prefix is generated lazily: some runtimes (Cloudflare Workers) forbid
+// generating random values in module scope.
+let mutationIdPrefix: string | undefined
+let mutationIdSequence = 0
+function nextMutationId(): string {
+  mutationIdPrefix ??= safeRandomUUID()
+  return `${mutationIdPrefix}-${++mutationIdSequence}`
+}
+
 export class CollectionMutationsManager<
   TOutput extends object = Record<string, unknown>,
   TKey extends string | number = string | number,
@@ -181,6 +192,7 @@ export class CollectionMutationsManager<
     const keysInCurrentBatch = new Set<TKey>()
 
     // Create mutations for each item
+    const batchTimestamp = new Date()
     items.forEach((item) => {
       // Validate the data against the schema if one exists
       const validatedData = this.validateData(item, `insert`)
@@ -194,26 +206,30 @@ export class CollectionMutationsManager<
       const globalKey = this.generateGlobalKey(key, item)
 
       const mutation: PendingMutation<TOutput, `insert`> = {
-        mutationId: safeRandomUUID(),
+        mutationId: nextMutationId(),
         original: {},
         modified: validatedData,
         // Pick the values from validatedData based on what's passed in - this is for cases
         // where a schema has default values. The validated data has the extra default
         // values but for changes, we just want to show the data that was actually passed in.
-        changes: Object.fromEntries(
-          Object.keys(item).map((k) => [
-            k,
-            validatedData[k as keyof typeof validatedData],
-          ]),
-        ) as TInput,
+        // Without a schema, validation is the identity, so the item itself is
+        // exactly "the data that was actually passed in".
+        changes: this.config.schema
+          ? (Object.fromEntries(
+              Object.keys(item).map((k) => [
+                k,
+                validatedData[k as keyof typeof validatedData],
+              ]),
+            ) as TInput)
+          : item,
         globalKey,
         key,
         metadata: config?.metadata as unknown,
         syncMetadata: this.config.sync.getSyncMetadata?.() || {},
         optimistic: config?.optimistic ?? true,
         type: `insert`,
-        createdAt: new Date(),
-        updatedAt: new Date(),
+        createdAt: batchTimestamp,
+        updatedAt: batchTimestamp,
         collection: this.collection,
       }
 
@@ -230,12 +246,14 @@ export class CollectionMutationsManager<
 
       return ambientTransaction
     } else {
-      // Create a new transaction with a mutation function that calls the onInsert handler
+      // Create a new transaction with a mutation function that calls the onInsert handler.
+      // Kept non-async so synchronous handlers (e.g. local-only collections)
+      // let the transaction complete synchronously.
       const directOpTransaction = createTransaction<TOutput>({
         metadata: { [DIRECT_TRANSACTION_METADATA_KEY]: true },
-        mutationFn: async (params) => {
+        mutationFn: (params) => {
           // Call the onInsert handler with the transaction and collection
-          return await this.config.onInsert!({
+          return this.config.onInsert!({
             transaction:
               params.transaction as unknown as TransactionWithMutations<
                 TOutput,
@@ -326,6 +344,7 @@ export class CollectionMutationsManager<
     }
 
     // Create mutations for each object that has changes
+    const updateBatchTimestamp = new Date()
     const mutations: Array<
       PendingMutation<
         TOutput,
@@ -367,7 +386,7 @@ export class CollectionMutationsManager<
         const globalKey = this.generateGlobalKey(modifiedItemId, modifiedItem)
 
         return {
-          mutationId: safeRandomUUID(),
+          mutationId: nextMutationId(),
           original: originalItem,
           modified: modifiedItem,
           // Pick the values from modifiedItem based on what's passed in - this is for cases
@@ -389,8 +408,8 @@ export class CollectionMutationsManager<
           >,
           optimistic: config.optimistic ?? true,
           type: `update`,
-          createdAt: new Date(),
-          updatedAt: new Date(),
+          createdAt: updateBatchTimestamp,
+          updatedAt: updateBatchTimestamp,
           collection: this.collection,
         }
       })
@@ -427,10 +446,12 @@ export class CollectionMutationsManager<
 
     // No need to check for onUpdate handler here as we've already checked at the beginning
 
-    // Create a new transaction with a mutation function that calls the onUpdate handler
+    // Create a new transaction with a mutation function that calls the onUpdate handler.
+    // Kept non-async so synchronous handlers (e.g. local-only collections)
+    // let the transaction complete synchronously.
     const directOpTransaction = createTransaction<TOutput>({
       metadata: { [DIRECT_TRANSACTION_METADATA_KEY]: true },
-      mutationFn: async (params) => {
+      mutationFn: (params) => {
         // Call the onUpdate handler with the transaction and collection
         return this.config.onUpdate!({
           transaction:
@@ -450,7 +471,6 @@ export class CollectionMutationsManager<
     directOpTransaction.commit().catch(() => undefined)
 
     // Add the transaction to the collection's transactions store
-
     state.transactions.set(directOpTransaction.id, directOpTransaction)
     state.scheduleTransactionCleanup(directOpTransaction)
     state.recomputeOptimisticState(true)
@@ -488,6 +508,7 @@ export class CollectionMutationsManager<
       >
     > = []
 
+    const batchTimestamp = new Date()
     for (const key of keysArray) {
       if (!this.state.has(key)) {
         throw new DeleteKeyNotFoundError(key)
@@ -498,7 +519,7 @@ export class CollectionMutationsManager<
         `delete`,
         CollectionImpl<TOutput, TKey, TUtils, TSchema, TInput>
       > = {
-        mutationId: safeRandomUUID(),
+        mutationId: nextMutationId(),
         original: this.state.get(key)!,
         modified: this.state.get(key)!,
         changes: this.state.get(key)!,
@@ -511,8 +532,8 @@ export class CollectionMutationsManager<
         >,
         optimistic: config?.optimistic ?? true,
         type: `delete`,
-        createdAt: new Date(),
-        updatedAt: new Date(),
+        createdAt: batchTimestamp,
+        updatedAt: batchTimestamp,
         collection: this.collection,
       }
 
@@ -530,11 +551,13 @@ export class CollectionMutationsManager<
       return ambientTransaction
     }
 
-    // Create a new transaction with a mutation function that calls the onDelete handler
+    // Create a new transaction with a mutation function that calls the onDelete handler.
+    // Kept non-async so synchronous handlers (e.g. local-only collections)
+    // let the transaction complete synchronously.
     const directOpTransaction = createTransaction<TOutput>({
       autoCommit: true,
       metadata: { [DIRECT_TRANSACTION_METADATA_KEY]: true },
-      mutationFn: async (params) => {
+      mutationFn: (params) => {
         // Call the onDelete handler with the transaction and collection
         return this.config.onDelete!({
           transaction:

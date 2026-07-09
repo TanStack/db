@@ -1,8 +1,5 @@
 import { defaultComparator, normalizeValue } from '../utils/comparison.js'
-import {
-  deleteInSortedArray,
-  findInsertPositionInArray,
-} from '../utils/array-utils.js'
+import { findInsertPositionInArray } from '../utils/array-utils.js'
 import { BaseIndex } from './base-index.js'
 import type { CompareOptions } from '../query/builder/types.js'
 import type { BasicExpression } from '../query/ir.js'
@@ -52,8 +49,16 @@ export class BasicIndex<
   private valueMap = new Map<any, Set<TKey>>()
   // Sorted array of unique indexed values for range queries
   private sortedValues: Array<any> = []
-  // Set of all indexed PKs
-  private indexedKeys = new Set<TKey>()
+  // Values whose key set has emptied are kept as tombstones so that
+  // remove-then-re-add cycles avoid the O(n) sorted-array splice; read paths
+  // skip empty sets. Compacted beyond a bound.
+  private emptyValueTombstones = 0
+  private static readonly MAX_VALUE_TOMBSTONES = 1024
+  // Number of distinct keys in the index. Kept as a counter instead of a
+  // Set: V8 hash tables degrade badly under repeated delete+re-add of the
+  // same key (each cycle appends to the data table and forces rehashes),
+  // which is exactly the churn incremental row updates produce.
+  private indexedKeyCount = 0
   // Comparator function
   private compareFn: (a: any, b: any) => number = defaultComparator
 
@@ -89,9 +94,17 @@ export class BasicIndex<
 
     const normalizedValue = normalizeValue(indexedValue)
 
-    if (this.valueMap.has(normalizedValue)) {
-      // Value already exists, just add the key to the set
-      this.valueMap.get(normalizedValue)!.add(key)
+    const existingKeySet = this.valueMap.get(normalizedValue)
+    if (existingKeySet !== undefined) {
+      // Value already exists (possibly as a tombstone), reuse the entry
+      if (existingKeySet.size === 0) {
+        this.emptyValueTombstones--
+      }
+      const sizeBefore = existingKeySet.size
+      existingKeySet.add(key)
+      if (existingKeySet.size !== sizeBefore) {
+        this.indexedKeyCount++
+      }
     } else {
       // New value - add to map and insert into sorted array
       this.valueMap.set(normalizedValue, new Set([key]))
@@ -103,9 +116,9 @@ export class BasicIndex<
         this.compareFn,
       )
       this.sortedValues.splice(insertIdx, 0, normalizedValue)
+      this.indexedKeyCount++
     }
 
-    this.indexedKeys.add(key)
     this.updateTimestamp()
   }
 
@@ -121,25 +134,27 @@ export class BasicIndex<
         `Failed to evaluate index expression for key ${key} during removal:`,
         error,
       )
-      this.indexedKeys.delete(key)
       this.updateTimestamp()
       return
     }
 
     const normalizedValue = normalizeValue(indexedValue)
 
-    if (this.valueMap.has(normalizedValue)) {
-      const keySet = this.valueMap.get(normalizedValue)!
-      keySet.delete(key)
+    const keySet = this.valueMap.get(normalizedValue)
+    if (keySet !== undefined && keySet.delete(key)) {
+      this.indexedKeyCount--
 
+      // Keep the emptied entry as a tombstone (read paths skip empty sets)
+      // so a re-add of the same value avoids the sorted-array splice;
+      // compact when the tombstone count grows.
       if (keySet.size === 0) {
-        // No more keys for this value, remove from map and sorted array
-        this.valueMap.delete(normalizedValue)
-        deleteInSortedArray(this.sortedValues, normalizedValue, this.compareFn)
+        this.emptyValueTombstones++
+        if (this.emptyValueTombstones > BasicIndex.MAX_VALUE_TOMBSTONES) {
+          this.compactValueTombstones()
+        }
       }
     }
 
-    this.indexedKeys.delete(key)
     this.updateTimestamp()
   }
 
@@ -170,8 +185,8 @@ export class BasicIndex<
         )
       }
       entriesArray.push({ key, value: normalizeValue(indexedValue) })
-      this.indexedKeys.add(key)
     }
+    this.indexedKeyCount = entriesArray.length
 
     // Group by value
     for (const { key, value } of entriesArray) {
@@ -194,7 +209,8 @@ export class BasicIndex<
   clear(): void {
     this.valueMap.clear()
     this.sortedValues = []
-    this.indexedKeys.clear()
+    this.indexedKeyCount = 0
+    this.emptyValueTombstones = 0
     this.updateTimestamp()
   }
 
@@ -237,7 +253,7 @@ export class BasicIndex<
    * Gets the number of indexed keys
    */
   get keyCount(): number {
-    return this.indexedKeys.size
+    return this.indexedKeyCount
   }
 
   /**
@@ -251,6 +267,16 @@ export class BasicIndex<
   /**
    * Performs a range query using binary search - O(log n + m)
    */
+  private compactValueTombstones(): void {
+    for (const [value, keySet] of this.valueMap) {
+      if (keySet.size === 0) {
+        this.valueMap.delete(value)
+      }
+    }
+    this.sortedValues = Array.from(this.valueMap.keys()).sort(this.compareFn)
+    this.emptyValueTombstones = 0
+  }
+
   rangeQuery(options: RangeQueryOptions = {}): Set<TKey> {
     const { from, to, fromInclusive = true, toInclusive = true } = options
     const result = new Set<TKey>()
@@ -483,26 +509,50 @@ export class BasicIndex<
 
   // Getter methods for testing/compatibility
   get indexedKeysSet(): Set<TKey> {
-    return this.indexedKeys
+    const keys = new Set<TKey>()
+    for (const keySet of this.valueMap.values()) {
+      for (const key of keySet) {
+        keys.add(key)
+      }
+    }
+    return keys
   }
 
   get orderedEntriesArray(): Array<[any, Set<TKey>]> {
-    return this.sortedValues.map((value) => [
-      value,
-      this.valueMap.get(value) ?? new Set(),
-    ])
+    // Tombstoned (emptied) values are an internal detail — filter them so
+    // snapshot APIs stay consistent with take*/valueMapData
+    const result: Array<[any, Set<TKey>]> = []
+    for (const value of this.sortedValues) {
+      const keySet = this.valueMap.get(value)
+      if (keySet !== undefined && keySet.size > 0) {
+        result.push([value, keySet])
+      }
+    }
+    return result
   }
 
   get orderedEntriesArrayReversed(): Array<[any, Set<TKey>]> {
     const result: Array<[any, Set<TKey>]> = []
     for (let i = this.sortedValues.length - 1; i >= 0; i--) {
       const value = this.sortedValues[i]
-      result.push([value, this.valueMap.get(value) ?? new Set()])
+      const keySet = this.valueMap.get(value)
+      if (keySet !== undefined && keySet.size > 0) {
+        result.push([value, keySet])
+      }
     }
     return result
   }
 
   get valueMapData(): Map<any, Set<TKey>> {
-    return this.valueMap
+    if (this.emptyValueTombstones === 0) {
+      return this.valueMap
+    }
+    const result = new Map<any, Set<TKey>>()
+    for (const [value, keySet] of this.valueMap) {
+      if (keySet.size > 0) {
+        result.set(value, keySet)
+      }
+    }
+    return result
   }
 }

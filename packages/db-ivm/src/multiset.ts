@@ -1,8 +1,4 @@
-import {
-  DefaultMap,
-  chunkedArrayPush,
-  globalObjectIdGenerator,
-} from './utils.js'
+import { DefaultMap, chunkedArrayPush } from './utils.js'
 import { hash } from './hashing/index.js'
 
 export type MultiSetArray<T> = Array<[T, number]>
@@ -13,6 +9,15 @@ export type KeyedData<T> = [key: string, value: T]
  */
 export class MultiSet<T> {
   #inner: MultiSetArray<T>
+
+  /**
+   * Set by the dataflow edge when this instance was delivered to exactly one
+   * consumer: that consumer may transform it in place (map/filter reuse the
+   * inner array and tuples) instead of cloning. Producers never retain the
+   * delivered instance or its tuples, only the row values inside them —
+   * which in-place transforms never mutate.
+   */
+  public exclusive = false
 
   constructor(data: MultiSetArray<T> = []) {
     this.#inner = data
@@ -32,8 +37,17 @@ export class MultiSet<T> {
 
   /**
    * Apply a function to all records in the collection.
+   * Exclusively-owned instances are transformed in place (tuples and inner
+   * array reused); row values themselves are never mutated.
    */
   map<U>(f: (data: T) => U): MultiSet<U> {
+    if (this.exclusive) {
+      const inner = this.#inner as unknown as MultiSetArray<U>
+      for (let i = 0; i < inner.length; i++) {
+        inner[i]![0] = f(this.#inner[i]![0])
+      }
+      return this as unknown as MultiSet<U>
+    }
     return new MultiSet(
       this.#inner.map(([data, multiplicity]) => [f(data), multiplicity]),
     )
@@ -41,8 +55,21 @@ export class MultiSet<T> {
 
   /**
    * Filter out records for which a function f(record) evaluates to False.
+   * Exclusively-owned instances are compacted in place.
    */
   filter(f: (data: T) => boolean): MultiSet<T> {
+    if (this.exclusive) {
+      const inner = this.#inner
+      let writeIndex = 0
+      for (let i = 0; i < inner.length; i++) {
+        const entry = inner[i]!
+        if (f(entry[0])) {
+          inner[writeIndex++] = entry
+        }
+      }
+      inner.length = writeIndex
+      return this
+    }
     return new MultiSet(this.#inner.filter(([data, _]) => f(data)))
   }
 
@@ -85,32 +112,25 @@ export class MultiSet<T> {
 
   /**
    * Private method for consolidating keyed multisets where keys are strings/numbers
-   * and values are compared by reference equality.
+   * and values are compared by reference equality (SameValueZero for primitives).
    *
-   * This method provides significant performance improvements over the hash-based approach
-   * by using WeakMap for object reference tracking and avoiding expensive serialization.
+   * Identity is tracked with nested Maps instead of composite string keys, so
+   * no per-row ID strings are allocated.
    *
    * Special handling for join operations: When values are tuples of length 2 (common in joins),
-   * we unpack them and compare each element individually to maintain proper equality semantics.
+   * we unpack them and track each element individually to maintain proper equality semantics
+   * (e.g. ['A', null] and [null, 'X'] consolidate separately).
    */
   #consolidateKeyed(): MultiSet<T> {
-    const consolidated = new Map<string, number>()
-    const values = new Map<string, T>()
-
-    // Use global object ID generator for consistent reference equality
-
-    /**
-     * Special handler for tuples (arrays of length 2) commonly produced by join operations.
-     * Unpacks the tuple and generates an ID based on both elements to ensure proper
-     * consolidation of join results like ['A', null] and [null, 'X'].
-     */
-    const getTupleId = (tuple: Array<any>): string => {
-      if (tuple.length !== 2) {
-        throw new Error(`Expected tuple of length 2`)
-      }
-      const [first, second] = tuple
-      return `${globalObjectIdGenerator.getStringId(first)}|${globalObjectIdGenerator.getStringId(second)}`
+    type Entry = [T, number]
+    type PerKey = {
+      // Non-tuple values: value identity → entry
+      plain: Map<unknown, Entry> | null
+      // Tuple values: first element → second element → entry
+      tuples: Map<unknown, Map<unknown, Entry>> | null
     }
+    const byKey = new Map<string | number, PerKey>()
+    const entries: Array<Entry> = []
 
     // Process each item in the multiset
     for (const [data, multiplicity] of this.#inner) {
@@ -128,34 +148,45 @@ export class MultiSet<T> {
         return this.#consolidateUnkeyed()
       }
 
-      // Generate value ID with special handling for join tuples
-      let valueId: string
+      let perKey = byKey.get(key)
+      if (!perKey) {
+        perKey = { plain: null, tuples: null }
+        byKey.set(key, perKey)
+      }
+
+      let entry: Entry | undefined
       if (Array.isArray(value) && value.length === 2) {
         // Special case: value is a tuple from join operations
-        valueId = getTupleId(value)
+        let bySecond = perKey.tuples?.get(value[0])
+        if (!bySecond) {
+          perKey.tuples ??= new Map()
+          bySecond = new Map()
+          perKey.tuples.set(value[0], bySecond)
+        }
+        entry = bySecond.get(value[1])
+        if (!entry) {
+          entry = [data as T, 0]
+          entries.push(entry)
+          bySecond.set(value[1], entry)
+        }
       } else {
         // Regular case: use reference/value equality
-        valueId = globalObjectIdGenerator.getStringId(value)
+        perKey.plain ??= new Map()
+        entry = perKey.plain.get(value)
+        if (!entry) {
+          entry = [data as T, 0]
+          entries.push(entry)
+          perKey.plain.set(value, entry)
+        }
       }
-
-      // Create composite key and consolidate
-      const compositeKey = key + `|` + valueId
-      consolidated.set(
-        compositeKey,
-        (consolidated.get(compositeKey) || 0) + multiplicity,
-      )
-
-      // Store the original data for the first occurrence
-      if (!values.has(compositeKey)) {
-        values.set(compositeKey, data as T)
-      }
+      entry[1] += multiplicity
     }
 
     // Build result array, filtering out zero multiplicities
     const result: MultiSetArray<T> = []
-    for (const [compositeKey, multiplicity] of consolidated) {
-      if (multiplicity !== 0) {
-        result.push([values.get(compositeKey)!, multiplicity])
+    for (const entry of entries) {
+      if (entry[1] !== 0) {
+        result.push(entry)
       }
     }
 

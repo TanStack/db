@@ -9,8 +9,8 @@ import type { IStreamBuilder, KeyValue } from '../types.js'
  * Base operator for reduction operations (version-free)
  */
 export class ReduceOperator<K, V1, V2> extends UnaryOperator<[K, V1], [K, V2]> {
-  #index = new Index<K, V1>()
-  #indexOut = new Index<K, V2>()
+  #index: Index<K, V1>
+  #indexOut: Index<K, V2>
   #f: (values: Array<[V1, number]>) => Array<[V2, number]>
 
   constructor(
@@ -18,8 +18,15 @@ export class ReduceOperator<K, V1, V2> extends UnaryOperator<[K, V1], [K, V2]> {
     inputA: DifferenceStreamReader<[K, V1]>,
     output: DifferenceStreamWriter<[K, V2]>,
     f: (values: Array<[V1, number]>) => Array<[V2, number]>,
+    options?: { prefixIdentity?: boolean },
   ) {
     super(id, inputA, output)
+    // Reduce never consults join-presence tracking on its indexes
+    this.#index = new Index<K, V1>({
+      prefixIdentity: options?.prefixIdentity,
+      trackConsolidated: false,
+    })
+    this.#indexOut = new Index<K, V2>({ trackConsolidated: false })
     this.#f = f
   }
 
@@ -40,6 +47,36 @@ export class ReduceOperator<K, V1, V2> extends UnaryOperator<[K, V1], [K, V2]> {
       const curr = this.#index.get(key)
       const currOut = this.#indexOut.get(key)
       const out = this.#f(curr)
+
+      // Fast path for the overwhelmingly common case: at most one previous
+      // output value and at most one new output value. Output values are
+      // fresh objects each recomputation (reference-keyed diffing below never
+      // matches them), so this is a plain retract + emit without allocating
+      // the two diff Maps per key.
+      if (out.length <= 1 && currOut.length <= 1) {
+        const oldEntry = currOut[0]
+        const newEntry = out[0]
+        if (
+          oldEntry !== undefined &&
+          (newEntry === undefined || oldEntry[0] !== newEntry[0])
+        ) {
+          result.push([[key, oldEntry[0]], -oldEntry[1]])
+          this.#indexOut.addValue(key, [oldEntry[0], -oldEntry[1]])
+        }
+        if (newEntry !== undefined && newEntry[1] !== 0) {
+          if (oldEntry !== undefined && oldEntry[0] === newEntry[0]) {
+            const delta = newEntry[1] - oldEntry[1]
+            if (delta !== 0) {
+              result.push([[key, newEntry[0]], delta])
+              this.#indexOut.addValue(key, [newEntry[0], delta])
+            }
+          } else {
+            result.push([[key, newEntry[0]], newEntry[1]])
+            this.#indexOut.addValue(key, [newEntry[0], newEntry[1]])
+          }
+        }
+        continue
+      }
 
       // Create maps for current and previous outputs using values directly as keys
       const newOutputMap = new Map<V2, number>()
@@ -105,7 +142,10 @@ export function reduce<
   V1Type extends T extends KeyValue<KType, infer V> ? V : never,
   R,
   T,
->(f: (values: Array<[V1Type, number]>) => Array<[R, number]>) {
+>(
+  f: (values: Array<[V1Type, number]>) => Array<[R, number]>,
+  options?: { prefixIdentity?: boolean },
+) {
   return (stream: IStreamBuilder<T>): IStreamBuilder<KeyValue<KType, R>> => {
     const output = new StreamBuilder<KeyValue<KType, R>>(
       stream.graph,
@@ -116,6 +156,7 @@ export function reduce<
       stream.connectReader() as DifferenceStreamReader<KeyValue<KType, V1Type>>,
       output.writer,
       f,
+      options,
     )
     stream.graph.addOperator(operator)
     return output
