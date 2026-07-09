@@ -56,7 +56,7 @@ The `queryCollectionOptions` function accepts the following options:
 
 ### Query Options
 
-- `select`: Function that lets extract array items when they're wrapped with metadata
+- `select`: Function that extracts the row array TanStack DB materializes from a wrapped Query response
 - `enabled`: Whether the query should automatically run (default: `true`)
 - `refetchInterval`: Refetch interval in milliseconds (default: 0 — set an interval to enable polling refetching)
 - `retry`: Retry configuration for failed queries
@@ -95,6 +95,45 @@ const todosCollection = createCollection(
 ```
 
 If `queryFn` is missing at runtime, `queryCollectionOptions` throws `QueryFnRequiredError`.
+
+### Selecting Rows from Wrapped Responses
+
+Many APIs return rows inside a response envelope that also contains metadata such as pagination cursors, totals, or request information. Use `select` to extract the row array that TanStack DB should materialize:
+
+```typescript
+interface TodosResponse {
+  items: Array<{ id: string; title: string }>
+  nextCursor?: string
+  total: number
+}
+
+const todosCollection = createCollection(
+  queryCollectionOptions({
+    queryKey: ["todos"],
+    queryFn: async (): Promise<TodosResponse> => {
+      const response = await fetch("/api/todos")
+      return response.json()
+    },
+    select: (response) => response.items,
+    queryClient,
+    getKey: (item) => item.id,
+  }),
+)
+```
+
+`select` is a query-db-collection row extraction hook. It tells TanStack DB which rows to materialize while the TanStack Query cache keeps the original query response shape. In the example above, `queryClient.getQueryData(["todos"])` still returns the full `TodosResponse`, including `nextCursor` and `total`.
+
+This differs from TanStack Query's observer-level `select`: query-db-collection uses this option to bridge Query's response object into DB's normalized row store.
+
+Direct write utilities such as `writeInsert`, `writeUpdate`, and `writeDelete` make a best-effort attempt to update the matching row array inside wrapped Query cache entries while preserving wrapper metadata.
+
+This works automatically for simple wrappers such as:
+
+- `{ data: [...] }`
+- `{ items: [...] }`
+- `{ results: [...] }`
+
+Derived projections, such as `select: (response) => response.edges.map((edge) => edge.node)`, are read-side row extraction only. query-db-collection cannot generally reconstruct the original response envelope from updated rows. Refetch or invalidate the query if the wrapped cache must exactly reflect direct writes for a derived projection.
 
 ### Collection Options
 

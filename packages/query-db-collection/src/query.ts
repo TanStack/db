@@ -77,7 +77,10 @@ export interface QueryCollectionConfig<
   ) => Promise<Array<any>> | Array<any>
     ? (context: QueryFunctionContext<TQueryKey>) => Promise<Array<T>> | Array<T>
     : TQueryFn
-  /* Function that extracts array items from wrapped API responses (e.g metadata, pagination)  */
+  /**
+   * Extracts the row array TanStack DB materializes from the Query response.
+   * The Query cache keeps the original response shape.
+   */
   select?: (data: TQueryData) => Array<T>
   /** The TanStack Query client instance */
   queryClient: QueryClient
