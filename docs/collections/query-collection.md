@@ -56,13 +56,41 @@ The `queryCollectionOptions` function accepts the following options:
 
 ### Query Options
 
+Query Collections use TanStack Query internally, but `queryCollectionOptions` is not a full `QueryObserverOptions` pass-through. It exposes only the Query options supported by the collection adapter. Fields that affect row materialization, collection identity, and synchronization are handled by the adapter itself.
+
+The following Query options are forwarded to the underlying Query observer:
+
 - `select`: Function that extracts the row array TanStack DB materializes from a wrapped Query response
 - `enabled`: Whether the query should automatically run (default: `true`)
-- `refetchInterval`: Refetch interval in milliseconds (default: 0 — set an interval to enable polling refetching)
+- `refetchInterval`: Refetch interval in milliseconds
 - `retry`: Retry configuration for failed queries
 - `retryDelay`: Delay between retries
 - `staleTime`: How long data is considered fresh
-- `meta`: Optional metadata that will be passed to the query function context
+- `gcTime`: How long unused query data stays in the Query cache
+- `meta`: Metadata passed to the query function context. Query Collections may add `loadSubsetOptions` for on-demand queries.
+
+Except for `meta`, these options are only passed to TanStack Query when you define them. If you omit them, `QueryClient.defaultOptions` can still apply.
+
+Some fields are owned or reinterpreted by the collection adapter rather than treated as ordinary Query option pass-through:
+
+- `queryKey`: Identifies the Query cache entry and, in on-demand mode, may be built from load-subset options.
+- `queryFn`: Fetches the complete collection state or the requested on-demand subset.
+- `select`: Extracts array rows from wrapped responses before they are stored in the collection. This is not the same contract as TanStack Query's `select` option.
+- `queryClient`: Supplies the Query client instance used by the collection.
+- `syncMode`: Controls whether the collection syncs eagerly or on demand.
+- `getKey`: Extracts each row's stable TanStack DB key.
+- Mutation handlers such as `onInsert`, `onUpdate`, and `onDelete`.
+
+Other TanStack Query options are not currently exposed through `queryCollectionOptions`. Common examples include:
+
+- `initialData`
+- `placeholderData`
+- `refetchOnWindowFocus`
+- `refetchOnReconnect`
+- `refetchOnMount`
+- `networkMode`
+- `throwOnError`
+- configurable `structuralSharing`
 
 ### Using with `queryOptions(...)`
 
