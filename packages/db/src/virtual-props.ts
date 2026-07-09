@@ -37,7 +37,7 @@ export type VirtualOrigin = 'local' | 'remote'
  * // Accessing virtual properties on a row
  * const user = collection.get('user-1')
  * if (user.$synced) {
- *   console.log('Confirmed by backend')
+ *   console.log('No pending local optimistic writes for this row')
  * }
  * if (user.$origin === 'local') {
  *   console.log('Created/modified locally')
@@ -47,7 +47,7 @@ export type VirtualOrigin = 'local' | 'remote'
  * @example
  * ```typescript
  * // Using virtual properties in queries
- * const confirmedOrders = createLiveQueryCollection({
+ * const ordersWithoutLocalWrites = createLiveQueryCollection({
  *   query: (q) => q
  *     .from({ order: orders })
  *     .where(({ order }) => eq(order.$synced, true))
@@ -58,10 +58,15 @@ export interface VirtualRowProps<
   TKey extends string | number = string | number,
 > {
   /**
-   * Whether this row reflects confirmed state from the backend.
+   * Whether this row currently has no pending local optimistic writes.
    *
-   * - `true`: Row is confirmed by the backend (no pending optimistic mutations)
-   * - `false`: Row has pending optimistic mutations that haven't been confirmed
+   * - `true`: No pending local optimistic mutation currently affects this row
+   * - `false`: One or more pending local optimistic mutations currently affect this row
+   *
+   * This is local mutation status. It does not prove that a backend has uploaded,
+   * confirmed, or read back the row. If you need backend-confirmed status, keep
+   * your mutation function pending until that backend observation has happened,
+   * or expose adapter-specific status.
    *
    * For local-only collections (no sync), this is always `true`.
    * For live query collections, this is passed through from the source collection.
