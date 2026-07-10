@@ -71,9 +71,13 @@ export type QueryCollectionQueryOptions<
   QueryCollectionAdapterOwnedQueryOptions
 >
 
-function omitUndefined<T extends Record<string, unknown>>(value: T): Partial<T> {
+function omitUndefined<T extends Record<string, unknown>>(
+  value: T,
+): Partial<T> {
   return Object.fromEntries(
-    Object.entries(value).filter(([, optionValue]) => optionValue !== undefined),
+    Object.entries(value).filter(
+      ([, optionValue]) => optionValue !== undefined,
+    ),
   ) as Partial<T>
 }
 
