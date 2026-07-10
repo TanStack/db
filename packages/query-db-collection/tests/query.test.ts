@@ -14,7 +14,10 @@ import {
   stripVirtualProps,
 } from '../../db/tests/utils'
 import { persistedCollectionOptions } from '../../db-sqlite-persistence-core/src'
-import { defineQueryCollectionOptions, queryCollectionOptions } from '../src/query'
+import {
+  defineQueryCollectionOptions,
+  queryCollectionOptions,
+} from '../src/query'
 import type { QueryFunctionContext } from '@tanstack/query-core'
 import type {
   Collection,
@@ -227,7 +230,10 @@ describe(`QueryCollection`, () => {
     createCollection(definition.bind({ queryClient: firstClient }))
     createCollection(definition.bind({ queryClient: secondClient }))
 
-    firstClient.setQueryData([`isolatedItems`], [{ id: `first`, name: `First` }])
+    firstClient.setQueryData(
+      [`isolatedItems`],
+      [{ id: `first`, name: `First` }],
+    )
 
     expect(firstClient.getQueryData([`isolatedItems`])).toEqual([
       { id: `first`, name: `First` },

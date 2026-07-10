@@ -10,7 +10,10 @@ import {
 } from '@tanstack/db'
 import { QueryClient } from '@tanstack/query-core'
 import { z } from 'zod'
-import { defineQueryCollectionOptions, queryCollectionOptions } from '../src/query'
+import {
+  defineQueryCollectionOptions,
+  queryCollectionOptions,
+} from '../src/query'
 import type {
   DataTag,
   QueryFunctionContext,

@@ -414,7 +414,12 @@ export function defineQueryCollectionOptions<
     InferSchemaOutput<T>,
     TKey,
     T,
-    QueryCollectionUtils<InferSchemaOutput<T>, TKey, InferSchemaInput<T>, TError>
+    QueryCollectionUtils<
+      InferSchemaOutput<T>,
+      TKey,
+      InferSchemaInput<T>,
+      TError
+    >
   > & {
     schema: T
     utils: QueryCollectionUtils<
@@ -480,7 +485,12 @@ export function defineQueryCollectionOptions<
     InferSchemaOutput<T>,
     TKey,
     T,
-    QueryCollectionUtils<InferSchemaOutput<T>, TKey, InferSchemaInput<T>, TError>
+    QueryCollectionUtils<
+      InferSchemaOutput<T>,
+      TKey,
+      InferSchemaInput<T>,
+      TError
+    >
   > & {
     schema: T
     utils: QueryCollectionUtils<
