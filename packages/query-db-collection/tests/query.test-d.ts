@@ -32,6 +32,46 @@ describe(`Query collection type resolution tests`, () => {
   // Create a mock QueryClient for tests
   const queryClient = new QueryClient()
 
+  it(`should type supported queryOptions pass-through and reject adapter-owned fields`, () => {
+    queryCollectionOptions<ExplicitType>({
+      id: `query-options-types`,
+      queryClient,
+      queryKey: [`query-options-types`],
+      queryFn: () => Promise.resolve([]),
+      getKey: (item) => item.id,
+      queryOptions: {
+        refetchOnWindowFocus: true,
+        refetchOnReconnect: true,
+        refetchOnMount: `always`,
+        networkMode: `online`,
+      },
+    })
+
+    queryCollectionOptions<ExplicitType>({
+      id: `query-options-owned-fields`,
+      queryClient,
+      queryKey: [`query-options-owned-fields`],
+      queryFn: () => Promise.resolve([]),
+      getKey: (item) => item.id,
+      queryOptions: {
+        // @ts-expect-error Query Collection owns row extraction select; it is not a Query pass-through option.
+        select: (items) => items,
+      },
+    })
+
+    queryCollectionOptions<ExplicitType>({
+      id: `query-options-subscribed-owned`,
+      queryClient,
+      queryKey: [`query-options-subscribed-owned`],
+      queryFn: () => Promise.resolve([]),
+      getKey: (item) => item.id,
+      queryOptions: {
+        // @ts-expect-error Query Collection owns observer subscription lifecycle.
+        subscribed: false,
+      },
+    })
+  })
+
   it(`should prioritize explicit type in QueryCollectionConfig`, () => {
     const options = queryCollectionOptions<ExplicitType>({
       id: `test`,

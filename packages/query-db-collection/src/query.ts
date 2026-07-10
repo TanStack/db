@@ -49,6 +49,34 @@ type InferSchemaInput<T> = T extends StandardSchemaV1
 
 type TQueryKeyBuilder<TQueryKey> = (opts: LoadSubsetOptions) => TQueryKey
 
+type QueryCollectionAdapterOwnedQueryOptions =
+  | `queryKey`
+  | `queryFn`
+  | `select`
+  | `meta`
+  | `subscribed`
+  | `structuralSharing`
+  | `notifyOnChangeProps`
+
+export type QueryCollectionQueryOptions<
+  T extends object = object,
+  TQueryFn extends (context: QueryFunctionContext<any>) => any = (
+    context: QueryFunctionContext<any>,
+  ) => any,
+  TError = unknown,
+  TQueryKey extends QueryKey = QueryKey,
+  TQueryData = Awaited<ReturnType<TQueryFn>>,
+> = Omit<
+  QueryObserverOptions<TQueryData, TError, Array<T>, TQueryData, TQueryKey>,
+  QueryCollectionAdapterOwnedQueryOptions
+>
+
+function omitUndefined<T extends Record<string, unknown>>(value: T): Partial<T> {
+  return Object.fromEntries(
+    Object.entries(value).filter(([, optionValue]) => optionValue !== undefined),
+  ) as Partial<T>
+}
+
 /**
  * Configuration options for creating a Query Collection
  * @template T - The explicit type of items stored in the collection
@@ -84,6 +112,20 @@ export interface QueryCollectionConfig<
   select?: (data: TQueryData) => Array<T>
   /** The TanStack Query client instance */
   queryClient: QueryClient
+
+  /**
+   * Additional TanStack Query observer options to pass through.
+   * Adapter-owned fields such as queryKey, queryFn, select, meta,
+   * subscribed, structuralSharing, and notifyOnChangeProps are managed by Query Collection.
+   * Existing top-level Query Collection options override duplicate values here.
+   */
+  queryOptions?: QueryCollectionQueryOptions<
+    T,
+    TQueryFn,
+    TError,
+    TQueryKey,
+    TQueryData
+  >
 
   // Query-specific options
   /** Whether the query should automatically run (default: true) */
@@ -590,6 +632,7 @@ export function queryCollectionOptions(
     queryFn,
     select,
     queryClient,
+    queryOptions,
     enabled,
     refetchInterval,
     retry,
@@ -1165,6 +1208,17 @@ export function queryCollectionOptions(
         }
       }
 
+      const {
+        queryKey: _queryOptionsQueryKey,
+        queryFn: _queryOptionsQueryFn,
+        select: _queryOptionsSelect,
+        meta: _queryOptionsMeta,
+        subscribed: _queryOptionsSubscribed,
+        structuralSharing: _queryOptionsStructuralSharing,
+        notifyOnChangeProps: _queryOptionsNotifyOnChangeProps,
+        ...passThroughQueryOptions
+      } = (queryOptions ?? {}) as Record<string, unknown>
+
       const observerOptions: QueryObserverOptions<
         Array<any>,
         any,
@@ -1172,13 +1226,15 @@ export function queryCollectionOptions(
         Array<any>,
         any
       > = {
+        ...omitUndefined(passThroughQueryOptions),
         queryKey: key,
         queryFn: queryFunction,
         meta: extendedMeta,
         structuralSharing: true,
         notifyOnChangeProps: `all`,
 
-        // Only include options that are explicitly defined to allow QueryClient defaultOptions to be used
+        // Only include options that are explicitly defined to allow QueryClient defaultOptions to be used.
+        // Existing top-level options win over queryOptions for backwards compatibility.
         ...(enabled !== undefined && { enabled }),
         ...(refetchInterval !== undefined && { refetchInterval }),
         ...(retry !== undefined && { retry }),

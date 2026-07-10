@@ -185,6 +185,114 @@ describe(`QueryCollection`, () => {
     queryClient.clear()
   })
 
+  it(`should pass through additional Query observer options`, async () => {
+    const queryKey = [`query-options-pass-through`]
+    const queryFn = vi.fn().mockResolvedValue([{ id: `1`, name: `Item 1` }])
+
+    const collection = createCollection(
+      queryCollectionOptions<TestItem>({
+        id: `query-options-pass-through`,
+        queryClient,
+        queryKey,
+        queryFn,
+        getKey,
+        startSync: true,
+        queryOptions: {
+          refetchOnWindowFocus: true,
+          refetchOnReconnect: true,
+          refetchOnMount: `always`,
+          networkMode: `online`,
+        },
+      }),
+    )
+
+    await vi.waitFor(() => {
+      expect(collection.size).toBe(1)
+    })
+
+    const query = queryClient.getQueryCache().find({ queryKey, exact: true })
+    const options = query?.options as any
+    expect(options.refetchOnWindowFocus).toBe(true)
+    expect(options.refetchOnReconnect).toBe(true)
+    expect(options.refetchOnMount).toBe(`always`)
+    expect(options.networkMode).toBe(`online`)
+  })
+
+  it(`should ignore adapter-owned subscribed in queryOptions`, async () => {
+    const queryKey = [`query-options-subscribed-owned`]
+    const queryFn = vi.fn().mockResolvedValue([{ id: `1`, name: `Item 1` }])
+
+    const collection = createCollection(
+      queryCollectionOptions<TestItem>({
+        id: `query-options-subscribed-owned`,
+        queryClient,
+        queryKey,
+        queryFn,
+        getKey,
+        startSync: true,
+        queryOptions: {
+          subscribed: false,
+        } as any,
+      }),
+    )
+
+    await vi.waitFor(() => {
+      expect(collection.size).toBe(1)
+    })
+
+    const query = queryClient.getQueryCache().find({ queryKey, exact: true })
+    const options = query?.options as any
+    expect(options.subscribed).toBeUndefined()
+  })
+
+  it(`should let top-level options override queryOptions and omit undefined values`, async () => {
+    const queryKey = [`query-options-top-level-precedence`]
+    const queryFn = vi.fn().mockResolvedValue([{ id: `1`, name: `Item 1` }])
+
+    const clientWithDefaults = new QueryClient({
+      defaultOptions: {
+        queries: {
+          staleTime: 1234,
+          retry: 3,
+          refetchOnWindowFocus: false,
+        },
+      },
+    })
+
+    const collection = createCollection(
+      queryCollectionOptions<TestItem>({
+        id: `query-options-top-level-precedence`,
+        queryClient: clientWithDefaults,
+        queryKey,
+        queryFn,
+        getKey,
+        startSync: true,
+        staleTime: 5678,
+        retry: undefined,
+        queryOptions: {
+          staleTime: 9999,
+          retry: undefined,
+          refetchOnWindowFocus: true,
+        },
+      }),
+    )
+
+    await vi.waitFor(() => {
+      expect(collection.size).toBe(1)
+    })
+
+    const query = clientWithDefaults.getQueryCache().find({
+      queryKey,
+      exact: true,
+    })
+    const options = query?.options as any
+    expect(options.staleTime).toBe(5678)
+    expect(options.retry).toBe(3)
+    expect(options.refetchOnWindowFocus).toBe(true)
+
+    clientWithDefaults.clear()
+  })
+
   it(`should initialize and fetch initial data`, async () => {
     const queryKey = [`testItems`]
     const initialItems: Array<TestItem> = [
