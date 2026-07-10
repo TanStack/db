@@ -697,28 +697,58 @@ export function queryCollectionOptions(
   // 3. Decrements refcount and GCs rows where count reaches 0
   const queryRefCounts = new Map<string, number>()
 
-  // Helper function to add a row to the internal state
-  const addRow = (rowKey: string | number, hashedQueryKey: string) => {
-    const rowToQueriesSet = rowToQueries.get(rowKey) || new Set()
-    rowToQueriesSet.add(hashedQueryKey)
-    rowToQueries.set(rowKey, rowToQueriesSet)
+  const addRowOwner = (rowKey: string | number, hashedQueryKey: string) => {
+    const owners = rowToQueries.get(rowKey) || new Set<string>()
+    owners.add(hashedQueryKey)
+    rowToQueries.set(rowKey, owners)
 
-    const queryToRowsSet = queryToRows.get(hashedQueryKey) || new Set()
-    queryToRowsSet.add(rowKey)
-    queryToRows.set(hashedQueryKey, queryToRowsSet)
+    const ownedRows =
+      queryToRows.get(hashedQueryKey) || new Set<string | number>()
+    ownedRows.add(rowKey)
+    queryToRows.set(hashedQueryKey, ownedRows)
   }
 
-  // Helper function to remove a row from the internal state
-  const removeRow = (rowKey: string | number, hashedQuerKey: string) => {
-    const rowToQueriesSet = rowToQueries.get(rowKey) || new Set()
-    rowToQueriesSet.delete(hashedQuerKey)
-    rowToQueries.set(rowKey, rowToQueriesSet)
+  const addRowOwners = (rowKey: string | number, owners: Set<string>) => {
+    rowToQueries.set(rowKey, new Set(owners))
+    owners.forEach((owner) => {
+      const ownedRows = queryToRows.get(owner) || new Set<string | number>()
+      ownedRows.add(rowKey)
+      queryToRows.set(owner, ownedRows)
+    })
+  }
 
-    const queryToRowsSet = queryToRows.get(hashedQuerKey) || new Set()
-    queryToRowsSet.delete(rowKey)
-    queryToRows.set(hashedQuerKey, queryToRowsSet)
+  const removeRowOwner = (rowKey: string | number, hashedQueryKey: string) => {
+    const owners = rowToQueries.get(rowKey) || new Set<string>()
+    owners.delete(hashedQueryKey)
+    rowToQueries.set(rowKey, owners)
 
-    return rowToQueriesSet.size === 0
+    const ownedRows =
+      queryToRows.get(hashedQueryKey) || new Set<string | number>()
+    ownedRows.delete(rowKey)
+    queryToRows.set(hashedQueryKey, ownedRows)
+
+    return owners.size === 0
+  }
+
+  const removeQueryOwnership = (hashedQueryKey: string) => {
+    const nextOwnersByRow = new Map<string | number, Set<string>>()
+
+    const rowKeys =
+      queryToRows.get(hashedQueryKey) ?? new Set<string | number>()
+
+    rowKeys.forEach((rowKey) => {
+      const owners = rowToQueries.get(rowKey)
+
+      if (!owners) {
+        return
+      }
+
+      const nextOwners = new Set(owners)
+      nextOwners.delete(hashedQueryKey)
+      nextOwnersByRow.set(rowKey, nextOwners)
+    })
+
+    return nextOwnersByRow
   }
 
   const internalSync: SyncConfig<any>[`sync`] = (params) => {
@@ -853,12 +883,7 @@ export function queryCollectionOptions(
           continue
         }
 
-        rowToQueries.set(rowKey, new Set(owners))
-        owners.forEach((owner) => {
-          const queryToRowsSet = queryToRows.get(owner) || new Set()
-          queryToRowsSet.add(rowKey)
-          queryToRows.set(owner, queryToRowsSet)
-        })
+        addRowOwners(rowKey, owners)
 
         if (owners.has(hashedQueryKey)) {
           ownedRows.add(rowKey)
@@ -944,12 +969,7 @@ export function queryCollectionOptions(
           return
         }
 
-        rowToQueries.set(row.key, new Set(ownerSet))
-        ownerSet.forEach((owner) => {
-          const queryToRowsSet = queryToRows.get(owner) || new Set()
-          queryToRowsSet.add(row.key)
-          queryToRows.set(owner, queryToRowsSet)
-        })
+        addRowOwners(row.key, ownerSet)
 
         if (ownerSet.has(hashedQueryKey)) {
           baseline.set(row.key, {
@@ -975,7 +995,7 @@ export function queryCollectionOptions(
       baseline.forEach(({ value: oldItem, owners }, rowKey) => {
         owners.delete(hashedQueryKey)
         setPersistedOwners(rowKey, owners)
-        const needToRemove = removeRow(rowKey, hashedQueryKey)
+        const needToRemove = removeRowOwner(rowKey, hashedQueryKey)
         if (needToRemove) {
           rowsToDelete.push(oldItem)
         }
@@ -1321,7 +1341,7 @@ export function queryCollectionOptions(
           const owners = getPersistedOwners(key)
           owners.delete(hashedQueryKey)
           setPersistedOwners(key, owners)
-          const needToRemove = removeRow(key, hashedQueryKey)
+          const needToRemove = removeRowOwner(key, hashedQueryKey)
           if (needToRemove) {
             write({ type: `delete`, value: oldItem })
           }
@@ -1336,7 +1356,7 @@ export function queryCollectionOptions(
           owners.add(hashedQueryKey)
           setPersistedOwners(key, owners)
         }
-        addRow(key, hashedQueryKey)
+        addRowOwner(key, hashedQueryKey)
         if (!currentSyncedItems.has(key)) {
           write({ type: `insert`, value: newItem })
         }
@@ -1506,21 +1526,10 @@ export function queryCollectionOptions(
       cancelPersistedRetentionExpiry(hashedQueryKey)
       retainedQueriesPendingRevalidation.delete(hashedQueryKey)
 
-      const rowKeys = queryToRows.get(hashedQueryKey) ?? new Set()
-      const nextOwnersByRow = new Map<string | number, Set<string>>()
+      const nextOwnersByRow = removeQueryOwnership(hashedQueryKey)
       const rowsToDelete: Array<any> = []
 
-      rowKeys.forEach((rowKey) => {
-        const queries = rowToQueries.get(rowKey)
-
-        if (!queries) {
-          return
-        }
-
-        const nextOwners = new Set(queries)
-        nextOwners.delete(hashedQueryKey)
-        nextOwnersByRow.set(rowKey, nextOwners)
-
+      nextOwnersByRow.forEach((nextOwners, rowKey) => {
         if (nextOwners.size === 0 && collection.has(rowKey)) {
           rowsToDelete.push(collection.get(rowKey))
         }
