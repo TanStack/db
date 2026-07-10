@@ -49,36 +49,38 @@ type InferSchemaInput<T> = T extends StandardSchemaV1
 
 type TQueryKeyBuilder<TQueryKey> = (opts: LoadSubsetOptions) => TQueryKey
 
-type QueryCollectionAdapterOwnedQueryOptions =
-  | `queryKey`
-  | `queryFn`
-  | `select`
-  | `meta`
-  | `subscribed`
-  | `structuralSharing`
-  | `notifyOnChangeProps`
+const queryObserverOptionKeys = [
+  `enabled`,
+  `refetchInterval`,
+  `retry`,
+  `retryDelay`,
+  `staleTime`,
+  `gcTime`,
+  `refetchOnWindowFocus`,
+  `refetchOnReconnect`,
+  `refetchOnMount`,
+  `networkMode`,
+] as const
 
-export type QueryCollectionQueryOptions<
-  T extends object = object,
-  TQueryFn extends (context: QueryFunctionContext<any>) => any = (
-    context: QueryFunctionContext<any>,
-  ) => any,
-  TError = unknown,
-  TQueryKey extends QueryKey = QueryKey,
-  TQueryData = Awaited<ReturnType<TQueryFn>>,
-> = Omit<
-  QueryObserverOptions<TQueryData, TError, Array<T>, TQueryData, TQueryKey>,
-  QueryCollectionAdapterOwnedQueryOptions
+type QueryObserverOptionKey = (typeof queryObserverOptionKeys)[number]
+
+type QueryObserverOptionValues = Pick<
+  QueryObserverOptions<Array<any>, any, Array<any>, Array<any>, any>,
+  QueryObserverOptionKey
 >
 
-function omitUndefined<T extends Record<string, unknown>>(
-  value: T,
-): Partial<T> {
-  return Object.fromEntries(
-    Object.entries(value).filter(
-      ([, optionValue]) => optionValue !== undefined,
-    ),
-  ) as Partial<T>
+function pickDefinedQueryObserverOptions(
+  config: Partial<QueryObserverOptionValues>,
+): Partial<QueryObserverOptionValues> {
+  const options: Partial<QueryObserverOptionValues> = {}
+
+  for (const key of queryObserverOptionKeys) {
+    if (config[key] !== undefined) {
+      ;(options as Record<QueryObserverOptionKey, unknown>)[key] = config[key]
+    }
+  }
+
+  return options
 }
 
 /**
@@ -116,20 +118,6 @@ export interface QueryCollectionConfig<
   select?: (data: TQueryData) => Array<T>
   /** The TanStack Query client instance */
   queryClient: QueryClient
-
-  /**
-   * Additional TanStack Query observer options to pass through.
-   * Adapter-owned fields such as queryKey, queryFn, select, meta,
-   * subscribed, structuralSharing, and notifyOnChangeProps are managed by Query Collection.
-   * Existing top-level Query Collection options override duplicate values here.
-   */
-  queryOptions?: QueryCollectionQueryOptions<
-    T,
-    TQueryFn,
-    TError,
-    TQueryKey,
-    TQueryData
-  >
 
   // Query-specific options
   /** Whether the query should automatically run (default: true) */
@@ -175,6 +163,34 @@ export interface QueryCollectionConfig<
     TQueryData,
     TQueryKey
   >[`gcTime`]
+  refetchOnWindowFocus?: QueryObserverOptions<
+    TQueryData,
+    TError,
+    Array<T>,
+    TQueryData,
+    TQueryKey
+  >[`refetchOnWindowFocus`]
+  refetchOnReconnect?: QueryObserverOptions<
+    TQueryData,
+    TError,
+    Array<T>,
+    TQueryData,
+    TQueryKey
+  >[`refetchOnReconnect`]
+  refetchOnMount?: QueryObserverOptions<
+    TQueryData,
+    TError,
+    Array<T>,
+    TQueryData,
+    TQueryKey
+  >[`refetchOnMount`]
+  networkMode?: QueryObserverOptions<
+    TQueryData,
+    TError,
+    Array<T>,
+    TQueryData,
+    TQueryKey
+  >[`networkMode`]
   persistedGcTime?: number
 
   /**
@@ -636,13 +652,16 @@ export function queryCollectionOptions(
     queryFn,
     select,
     queryClient,
-    queryOptions,
     enabled,
     refetchInterval,
     retry,
     retryDelay,
     staleTime,
     gcTime,
+    refetchOnWindowFocus,
+    refetchOnReconnect,
+    refetchOnMount,
+    networkMode,
     persistedGcTime,
     getKey,
     onInsert,
@@ -1212,17 +1231,6 @@ export function queryCollectionOptions(
         }
       }
 
-      const {
-        queryKey: _queryOptionsQueryKey,
-        queryFn: _queryOptionsQueryFn,
-        select: _queryOptionsSelect,
-        meta: _queryOptionsMeta,
-        subscribed: _queryOptionsSubscribed,
-        structuralSharing: _queryOptionsStructuralSharing,
-        notifyOnChangeProps: _queryOptionsNotifyOnChangeProps,
-        ...passThroughQueryOptions
-      } = (queryOptions ?? {}) as Record<string, unknown>
-
       const observerOptions: QueryObserverOptions<
         Array<any>,
         any,
@@ -1230,21 +1238,23 @@ export function queryCollectionOptions(
         Array<any>,
         any
       > = {
-        ...omitUndefined(passThroughQueryOptions),
+        ...pickDefinedQueryObserverOptions({
+          enabled,
+          refetchInterval,
+          retry,
+          retryDelay,
+          staleTime,
+          gcTime,
+          refetchOnWindowFocus,
+          refetchOnReconnect,
+          refetchOnMount,
+          networkMode,
+        }),
         queryKey: key,
         queryFn: queryFunction,
         meta: extendedMeta,
         structuralSharing: true,
         notifyOnChangeProps: `all`,
-
-        // Only include options that are explicitly defined to allow QueryClient defaultOptions to be used.
-        // Existing top-level options win over queryOptions for backwards compatibility.
-        ...(enabled !== undefined && { enabled }),
-        ...(refetchInterval !== undefined && { refetchInterval }),
-        ...(retry !== undefined && { retry }),
-        ...(retryDelay !== undefined && { retryDelay }),
-        ...(staleTime !== undefined && { staleTime }),
-        ...(gcTime !== undefined && { gcTime }),
       }
 
       const localObserver = new QueryObserver<

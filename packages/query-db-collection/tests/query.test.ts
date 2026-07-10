@@ -185,7 +185,7 @@ describe(`QueryCollection`, () => {
     queryClient.clear()
   })
 
-  it(`should pass through additional Query observer options`, async () => {
+  it(`should pass through additional top-level Query observer options`, async () => {
     const queryKey = [`query-options-pass-through`]
     const queryFn = vi.fn().mockResolvedValue([{ id: `1`, name: `Item 1` }])
 
@@ -197,12 +197,10 @@ describe(`QueryCollection`, () => {
         queryFn,
         getKey,
         startSync: true,
-        queryOptions: {
-          refetchOnWindowFocus: true,
-          refetchOnReconnect: true,
-          refetchOnMount: `always`,
-          networkMode: `online`,
-        },
+        refetchOnWindowFocus: true,
+        refetchOnReconnect: true,
+        refetchOnMount: `always`,
+        networkMode: `online`,
       }),
     )
 
@@ -218,35 +216,8 @@ describe(`QueryCollection`, () => {
     expect(options.networkMode).toBe(`online`)
   })
 
-  it(`should ignore adapter-owned subscribed in queryOptions`, async () => {
-    const queryKey = [`query-options-subscribed-owned`]
-    const queryFn = vi.fn().mockResolvedValue([{ id: `1`, name: `Item 1` }])
-
-    const collection = createCollection(
-      queryCollectionOptions<TestItem>({
-        id: `query-options-subscribed-owned`,
-        queryClient,
-        queryKey,
-        queryFn,
-        getKey,
-        startSync: true,
-        queryOptions: {
-          subscribed: false,
-        } as any,
-      }),
-    )
-
-    await vi.waitFor(() => {
-      expect(collection.size).toBe(1)
-    })
-
-    const query = queryClient.getQueryCache().find({ queryKey, exact: true })
-    const options = query?.options as any
-    expect(options.subscribed).toBeUndefined()
-  })
-
-  it(`should let top-level options override queryOptions and omit undefined values`, async () => {
-    const queryKey = [`query-options-top-level-precedence`]
+  it(`should omit undefined Query observer options to preserve defaults`, async () => {
+    const queryKey = [`query-options-default-preservation`]
     const queryFn = vi.fn().mockResolvedValue([{ id: `1`, name: `Item 1` }])
 
     const clientWithDefaults = new QueryClient({
@@ -261,7 +232,7 @@ describe(`QueryCollection`, () => {
 
     const collection = createCollection(
       queryCollectionOptions<TestItem>({
-        id: `query-options-top-level-precedence`,
+        id: `query-options-default-preservation`,
         queryClient: clientWithDefaults,
         queryKey,
         queryFn,
@@ -269,11 +240,7 @@ describe(`QueryCollection`, () => {
         startSync: true,
         staleTime: 5678,
         retry: undefined,
-        queryOptions: {
-          staleTime: 9999,
-          retry: undefined,
-          refetchOnWindowFocus: true,
-        },
+        refetchOnWindowFocus: true,
       }),
     )
 

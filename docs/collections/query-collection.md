@@ -56,7 +56,7 @@ The `queryCollectionOptions` function accepts the following options:
 
 ### Query Options
 
-Query Collections use TanStack Query internally. Common Query options can be provided either as existing top-level Query Collection options or through the additive `queryOptions` pass-through object.
+Query Collections use TanStack Query internally and expose supported Query observer options as top-level `queryCollectionOptions` fields.
 
 The following top-level Query Collection options are forwarded to the underlying Query observer:
 
@@ -67,9 +67,11 @@ The following top-level Query Collection options are forwarded to the underlying
 - `retryDelay`: Delay between retries
 - `staleTime`: How long data is considered fresh
 - `gcTime`: How long unused query data stays in the Query cache
+- `refetchOnWindowFocus`: Whether to refetch when the window regains focus
+- `refetchOnReconnect`: Whether to refetch when the network reconnects
+- `refetchOnMount`: Whether to refetch when the observer mounts
+- `networkMode`: Query network mode
 - `meta`: Metadata passed to the query function context. Query Collections may add `loadSubsetOptions` for on-demand queries.
-
-Additional TanStack Query observer options can be passed through with `queryOptions`:
 
 ```ts
 const todosCollection = createCollection(
@@ -78,17 +80,15 @@ const todosCollection = createCollection(
     queryFn: fetchTodos,
     queryClient,
     getKey: (todo) => todo.id,
-    queryOptions: {
-      refetchOnWindowFocus: true,
-      refetchOnReconnect: true,
-      refetchOnMount: "always",
-      networkMode: "online",
-    },
+    refetchOnWindowFocus: true,
+    refetchOnReconnect: true,
+    refetchOnMount: "always",
+    networkMode: "online",
   })
 )
 ```
 
-Top-level `meta` is always merged by Query Collection so it can add on-demand `loadSubsetOptions`. Other top-level Query options and all `queryOptions` entries are only passed to TanStack Query when you define them. If you omit them, `QueryClient.defaultOptions` can still apply. If the same supported option is provided both at the top level and in `queryOptions`, the existing top-level option wins for backwards compatibility.
+Top-level `meta` is always merged by Query Collection so it can add on-demand `loadSubsetOptions`. Other supported top-level Query options are only passed to TanStack Query when you define them. If you omit them, `QueryClient.defaultOptions` can still apply.
 
 Some fields are owned or reinterpreted by the collection adapter rather than treated as ordinary Query option pass-through:
 
@@ -100,7 +100,7 @@ Some fields are owned or reinterpreted by the collection adapter rather than tre
 - `getKey`: Extracts each row's stable TanStack DB key.
 - Mutation handlers such as `onInsert`, `onUpdate`, and `onDelete`.
 
-Most TanStack Query observer options that are not owned by Query Collection can be provided through `queryOptions`. Adapter-owned fields are intentionally not pass-through options:
+Some TanStack Query fields are owned or reinterpreted by Query Collection and are intentionally not exposed as ordinary Query observer options:
 
 - `queryKey`, `queryFn`, and `queryClient`
 - `select` (Query Collection uses this for row extraction, not TanStack Query's observer-level `select` contract)
@@ -108,9 +108,11 @@ Most TanStack Query observer options that are not owned by Query Collection can 
 - `subscribed` (Query Collection owns the observer subscription lifecycle)
 - `structuralSharing` and `notifyOnChangeProps` (managed by Query Collection synchronization)
 
+Other semantic options, such as `initialData`, `placeholderData`, and TanStack Query observer-level `select`, are intentionally deferred until their Query Collection behavior is explicitly designed.
+
 ### Using with `queryOptions(...)`
 
-If your app already uses TanStack Query's `queryOptions` helper (e.g. from `@tanstack/react-query`), you can spread those options into `queryCollectionOptions`. Note that `queryFn` must be explicitly provided since query collections require it both in types and at runtime:
+If your app already uses TanStack Query's `queryOptions` helper (e.g. from `@tanstack/react-query`), you can spread compatible top-level options into `queryCollectionOptions`. Note that `queryFn` must be explicitly provided since query collections require it both in types and at runtime, and Query Collection's `select` option is for row extraction rather than TanStack Query observer-level selection:
 
 ```typescript
 import { QueryClient } from "@tanstack/query-core"
