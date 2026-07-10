@@ -24,6 +24,21 @@ blocks appended to existing test files).
 | #1501          | 3-level nested `toArray` drops children when correlation keys overlap across parent groups                             | **Fixed on main** by merged #1607 (fan-out routing + snapshot reseeding)                                                                                                                                     | `includes.test.ts`, claim D (green control)                                |
 | #1488          | On-demand observer reuse loses row ownership; cleanup deletes rows still in use                                        | **Not reproducible on main**: the early-return shape exists, but atomic observer+ownership cleanup and ownership re-registration on `subscribers:change` compensate; likely fixed since the reported version | `packages/query-db-collection/tests/query.test.ts` (#1488 block, green)    |
 
+**New reports since this RFC was first drafted** (not yet red/green verified, mapped to the same
+classes):
+
+- **#1635** — nested includes come back `undefined` on the next render after a parent
+  `collection.update()` (Electric + React), self-healing on forced re-render. Publication-contract
+  class: this is the first evidence that **React is affected too**, not just Solid, which
+  strengthens the case for PR 4 below over per-adapter shims.
+- **#1634** — `useLiveQuery` with multi-level includes costs up to ~100ms per run. A performance
+  dimension this RFC's correctness scope doesn't target directly, but the per-flush bookkeeping
+  that PR 3 deletes is the likely hot path; PR 3 should carry a benchmark for this repro.
+- **#1631** and **PR #1656** — two more ownership-loss reports in `query-db-collection`
+  (eager-refcount vs `hasListeners` disagreement; persisted-owner baseline overwritten on insert).
+  The specific #1488 path did not reproduce (see appendix), but these show the ownership-loss
+  failure mode is real via other mechanisms — the lifecycle-bookkeeping critique stands.
+
 ### Why these keep happening
 
 The bugs are not independent. The includes system compiles each include into its own child D2
@@ -45,8 +60,9 @@ Correctness rests on identities that are only implicit:
    mid-flush, which works but keeps classification dependent on whatever state exists at flush time.
 4. **Object identity is not result revision.** `flushIncludesState` mutates parent rows in place
    and force-emits through `changesManager.emitEvents(events, true)` to defeat the collection's own
-   `deepEquals` suppression. React's version-bump tolerates this; Solid's `reconcile` does not
-   (#1571), and each future adapter needs its own workaround.
+   `deepEquals` suppression. React's version-bump mostly tolerates this; Solid's `reconcile` does
+   not (#1571), #1635 suggests React has its own window, and each future adapter needs its own
+   workaround.
 5. **Source-collection readiness is not query readiness.** Readiness is a global boolean over all
    involved collections; lazy children that were never demanded (#1510) or progressive children
    whose fast-path window is timing-dependent (#1533) fall through it.
@@ -118,7 +134,9 @@ The bugs split into two property classes, which is why there are two tracks:
 - **A2 — Solid publication shim (fixes #1571 part 1).** Land open PR #1604 (clone rows in
   `syncDataFromCollection` before `reconcile`). Explicitly labeled a temporary
   publication-boundary shim, removed by PR 4 below. Gate: #1571 part-1 test + adapter conformance
-  suite.
+  suite. **Coordination:** open PR #1642 (RFC #1623 step 3) rewrites `solid-db/src/useLiveQuery.ts`
+  around a shared `createLiveQueryObserver` — whichever lands second rebases, and if #1642 lands
+  first the clone belongs in the observer's snapshot path instead of the adapter.
 - **A3 — Progressive fast path for nested children (fixes #1533).** When the child collection is
   in progressive mode, request the correlated snapshot at subscription setup (or on first
   parent-key batch) through the same `requestSnapshot` path a direct query uses, instead of the
@@ -151,8 +169,8 @@ The bugs split into two property classes, which is why there are two tracks:
    - Fallback: if this PR's timeline stretches, open PRs #1455 (scoped inputs via `__inc_N_alias`
      mangling) and #1496 (third copy of the order-index fix) can land first as stopgaps — with the
      oracle from PR 1 now validating their completeness — and be deleted here.
-   - Gate: oracle harness (including the previously known-failing seeds) + alpha-renaming property
-     - entire existing includes suite.
+   - Gate: oracle harness (including the previously known-failing seeds), the alpha-renaming
+     property, and the entire existing includes suite.
 3. **`CorrelatedRelation` replaces nested buffers/routing (P3).** Introduce the operator with
    bucket state, subscriber edges, snapshot-on-subscribe, and non-destructive fan-out. Run in
    shadow mode first (tests compare it against the legacy materializer over the oracle workloads),
@@ -160,13 +178,17 @@ The bugs split into two property classes, which is why there are two tracks:
    `createPerEntryIncludesStates` over to it and delete the legacy path. Internal child state
    becomes the lightweight relation; the `Collection` facade remains only for bare
    subquery-in-select includes. Removes the `gcTime: 0` workaround and the internal-collection
-   `config.utils` hazard class.
-4. **Copy-on-write publication (P4, fixes #1571 structurally).** Shallow-copy parent rows on
-   include change with structural sharing; publish through the normal update path; delete
-   `emitEvents(events, true)` and the hand-cloned prev/next; remove the Solid shim from A2 and
-   verify the cross-adapter conformance suite (`packages/solid-db/tests/conformance.test.tsx` et
-   al.) passes for React/Solid/Vue/etc. Perf gate: A/B bench before/after — rows are already
-   double-cloned today for the forced event, so this is likely neutral-to-better.
+   `config.utils` hazard class. Also the likely fix for the #1634 performance report — carry a
+   benchmark based on that repro (deep-nested includes, target well under the reported ~100ms).
+4. **Copy-on-write publication (P4, fixes #1571 structurally; expected to fix #1635).**
+   Shallow-copy parent rows on include change with structural sharing; publish through the normal
+   update path; delete `emitEvents(events, true)` and the hand-cloned prev/next; remove the Solid
+   shim from A2 and verify the cross-adapter conformance suite
+   (`packages/solid-db/tests/conformance.test.tsx` et al., from merged #1636) passes for
+   React/Solid/Vue/etc. **Coordination:** if #1642's shared `createLiveQueryObserver` has landed,
+   implement the publication contract at the observer's snapshot boundary — one place instead of
+   five adapters; add a red/green repro for #1635 first. Perf gate: A/B bench before/after — rows
+   are already double-cloned today for the forced event, so this is likely neutral-to-better.
 5. **Demand-relative readiness (P5, subsumes A1, fixes #1533's class).** Consolidate
    `allCollectionsReady`, lazy-alias exclusions, `isLoadingSubset`, and progressive snapshot
    delivery behind one internal demand model: readiness = all currently-demanded subsets settled.
@@ -201,6 +223,9 @@ The bugs split into two property classes, which is why there are two tracks:
 - **Oracle-first delays the #1454/#1444 fixes** relative to landing #1455/#1496 immediately. The
   fallback in PR 2 caps that delay: if the structural fix stalls, the stopgap PRs land
   oracle-validated instead.
+- **Parallel adapter-platform work (RFC #1623, PR #1642) touches the same publication layer** as
+  A2 and PR 4. Sequence deliberately: agree with that track's owners whether the publication
+  contract lands in the shared observer (preferred if #1642 merges first) or per-adapter.
 
 ## Appendix: relationship to open PRs
 
@@ -211,9 +236,15 @@ The bugs split into two property classes, which is why there are two tracks:
 | #1510 (readiness)                       | Land now as A1; superseded by PR 5                                                 |
 | #1604 (solid clone)                     | Land now as A2 as a labeled shim; removed by PR 4                                  |
 | #1532 (progressive nested test)         | Fold its tests into A3                                                             |
+| #1642 (shared live-query observer)      | Parallel track (RFC #1623); coordinate A2/PR 4 publication contract with it        |
+| #1656 (record drop on subset unmount)   | query-db-collection ownership family; review with #1631/#1488 as its own cluster   |
+| #1660 (gcTime 0 falsy default)          | Independent one-line fix in the same file; land normally                           |
 | #1607, #1600, #1580                     | Already merged; their tests remain as gates                                        |
 
-Issue #1488 (observer-reuse ownership) did not reproduce on main and is excluded; recommend asking
-the reporter to re-verify against current `@tanstack/query-db-collection` and closing if stale.
+Issue #1488 (observer-reuse ownership) did not reproduce on main as reported; however, #1631 and
+PR #1656 demonstrate the same ownership-loss failure mode through different mechanisms, so the
+`query-db-collection` ownership/refcount lifecycle deserves its own focused pass (single
+acquisition path that always registers ownership; leases over incidental bookkeeping) rather than
+a per-symptom fix — tracked separately from this RFC.
 Issue #1505 is closed; its underlying concern (include fields transiently unmaterialized, types
-don't admit it) is addressed by PR 9's always-attached include values.
+don't admit it) is addressed by PR 4's always-attached include values.
