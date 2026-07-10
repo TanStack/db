@@ -54,6 +54,56 @@ The `queryCollectionOptions` function accepts the following options:
 - `queryClient`: TanStack Query client instance
 - `getKey`: Function to extract the unique key from an item
 
+### Creating Collection Options from a Runtime QueryClient
+
+`queryCollectionOptions` needs a `queryClient` when the collection options are created. In SSR, TanStack Start, tests, or multi-tenant apps, that `QueryClient` is often request-local or route-local rather than module-global.
+
+Keep shared collection configuration in a factory function that accepts the runtime `QueryClient`, then call that factory wherever the scoped client is available:
+
+```typescript
+import { QueryClient } from "@tanstack/query-core"
+import { createCollection } from "@tanstack/db"
+import { queryCollectionOptions } from "@tanstack/query-db-collection"
+
+interface Todo {
+  id: string
+  title: string
+}
+
+export function todoCollectionOptions(queryClient: QueryClient) {
+  return queryCollectionOptions<Todo>({
+    queryKey: ["todos"],
+    queryFn: async () => {
+      const response = await fetch("/api/todos")
+      return response.json() as Promise<Array<Todo>>
+    },
+    queryClient,
+    getKey: (todo) => todo.id,
+  })
+}
+
+const queryClient = getRequestQueryClient()
+const todosCollection = createCollection(todoCollectionOptions(queryClient))
+```
+
+The same pattern works for scoped or parameterized collections. Pass route params, a tenant ID, or filters into the factory alongside the `QueryClient`:
+
+```typescript
+export function projectTodosCollectionOptions(
+  queryClient: QueryClient,
+  projectId: string,
+) {
+  return queryCollectionOptions<Todo>({
+    queryKey: ["projects", projectId, "todos"],
+    queryFn: () => fetchProjectTodos(projectId),
+    queryClient,
+    getKey: (todo) => todo.id,
+  })
+}
+```
+
+This keeps SSR and request-scoped code from sharing a global `QueryClient`.
+
 ### Query Options
 
 Query Collections use TanStack Query internally, but `queryCollectionOptions` is not a full `QueryObserverOptions` pass-through. It exposes only the Query options supported by the collection adapter. Fields that affect row materialization, collection identity, and synchronization are handled by the adapter itself.
