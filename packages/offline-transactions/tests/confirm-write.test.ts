@@ -1,6 +1,10 @@
 import { describe, expect, it } from 'vitest'
 import { createTestOfflineEnvironment } from './harness'
-import type { ConfirmWriteContext, OfflineConfig } from '../src/types'
+import type {
+  ConfirmWriteContext,
+  CreateOfflineTransactionOptions,
+  OfflineConfig,
+} from '../src/types'
 
 const flushMicrotasks = () => new Promise((resolve) => setTimeout(resolve, 0))
 
@@ -31,8 +35,10 @@ const committedButNotSynced = async () => ({ txid: 42 })
 async function insertAndCommit(
   env: ReturnType<typeof createTestOfflineEnvironment>,
   id: string,
+  options: Partial<CreateOfflineTransactionOptions> = {},
 ) {
   const offlineTx = env.executor.createOfflineTransaction({
+    ...options,
     mutationFnName: env.mutationFnName,
     autoCommit: false,
   })
@@ -63,7 +69,11 @@ describe(`OfflineConfig.confirmWrite`, () => {
     })
     await env.waitForLeader()
 
-    const offlineTx = await insertAndCommit(env, `item-1`)
+    const offlineTx = await insertAndCommit(env, `item-1`, {
+      id: `offline-item-1`,
+      idempotencyKey: `idempotency-item-1`,
+      metadata: { source: `test` },
+    })
     await flushMicrotasks()
 
     // The server committed but the sync stream never delivered the row, so the
@@ -74,8 +84,11 @@ describe(`OfflineConfig.confirmWrite`, () => {
     // The hook received the committed mutations and the mutationFn's result.
     expect(calls).toHaveLength(1)
     expect(calls[0]!.transactionId).toBe(offlineTx.id)
+    expect(calls[0]!.mutationFnName).toBe(env.mutationFnName)
+    expect(calls[0]!.idempotencyKey).toBe(`idempotency-item-1`)
     expect(calls[0]!.mutations).toHaveLength(1)
     expect(calls[0]!.result).toEqual({ txid: 42 })
+    expect(calls[0]!.metadata).toEqual({ source: `test` })
 
     // Settle the hook → hold released. With nothing in the synced stream, the
     // optimistic row now drops (in production the sync stream would have it).
@@ -148,8 +161,12 @@ describe(`OfflineConfig.confirmWrite`, () => {
 
   it(`skips the hold past maxConfirmationHolds (O(n^2) safety valve)`, async () => {
     const gate = deferred()
+    let confirmCalls = 0
     const config: Partial<OfflineConfig> = {
-      confirmWrite: () => gate.promise,
+      confirmWrite: () => {
+        confirmCalls += 1
+        return gate.promise
+      },
       maxConfirmationHolds: 0,
     }
     const env = createTestOfflineEnvironment({
@@ -165,9 +182,154 @@ describe(`OfflineConfig.confirmWrite`, () => {
     // just drops at commit as it would without the hook.
     expect(env.executor.getActiveConfirmationHoldCount()).toBe(0)
     expect(env.collection.get(`item-1`)).toBeUndefined()
+    expect(confirmCalls).toBe(1)
 
     gate.resolve()
     env.executor.dispose()
+  })
+
+  it(`runs confirmation for a non-leader direct transaction`, async () => {
+    const gate = deferred()
+    const calls: Array<ConfirmWriteContext> = []
+    const env = createTestOfflineEnvironment({
+      mutationFn: committedButNotSynced,
+      config: {
+        confirmWrite: (context) => {
+          calls.push(context)
+          return gate.promise
+        },
+      },
+    })
+    await env.waitForLeader()
+    env.leader.setLeader(false)
+
+    await insertAndCommit(env, `direct-item`, {
+      id: `direct-transaction`,
+      idempotencyKey: `direct-idempotency`,
+      metadata: { mode: `direct` },
+    })
+    await flushMicrotasks()
+
+    expect(calls).toHaveLength(1)
+    expect(calls[0]).toMatchObject({
+      transactionId: `direct-transaction`,
+      mutationFnName: env.mutationFnName,
+      idempotencyKey: `direct-idempotency`,
+      result: { txid: 42 },
+      metadata: { mode: `direct` },
+    })
+    expect(env.executor.getActiveConfirmationHoldCount()).toBe(1)
+    expect(env.collection.get(`direct-item`)?.value).toBe(`direct-item`)
+
+    gate.resolve()
+    await flushMicrotasks()
+
+    expect(env.executor.getActiveConfirmationHoldCount()).toBe(0)
+    expect(env.collection.get(`direct-item`)).toBeUndefined()
+    env.executor.dispose()
+  })
+
+  it(`runs confirmation for a non-leader optimistic action`, async () => {
+    const gate = deferred()
+    const calls: Array<ConfirmWriteContext> = []
+    const env = createTestOfflineEnvironment({
+      mutationFn: committedButNotSynced,
+      config: {
+        confirmWrite: (context) => {
+          calls.push(context)
+          return gate.promise
+        },
+      },
+    })
+    await env.waitForLeader()
+    env.leader.setLeader(false)
+
+    const action = env.executor.createOfflineAction<{ id: string }>({
+      mutationFnName: env.mutationFnName,
+      onMutate: ({ id }) => {
+        env.collection.insert({
+          id,
+          value: id,
+          completed: false,
+          updatedAt: new Date(),
+        })
+      },
+    })
+    const tx = action({ id: `action-item` })
+    await tx.isPersisted.promise
+    await flushMicrotasks()
+
+    expect(calls).toHaveLength(1)
+    expect(calls[0]!.mutationFnName).toBe(env.mutationFnName)
+    expect(calls[0]!.result).toEqual({ txid: 42 })
+    expect(env.executor.getActiveConfirmationHoldCount()).toBe(1)
+    expect(env.collection.get(`action-item`)?.value).toBe(`action-item`)
+
+    gate.resolve()
+    await flushMicrotasks()
+
+    expect(env.executor.getActiveConfirmationHoldCount()).toBe(0)
+    expect(env.collection.get(`action-item`)).toBeUndefined()
+    env.executor.dispose()
+  })
+
+  it(`releases confirmation holds when the outbox is cleared`, async () => {
+    const never = deferred()
+    const env = createTestOfflineEnvironment({
+      mutationFn: committedButNotSynced,
+      config: {
+        confirmWrite: () => never.promise,
+      },
+    })
+    await env.waitForLeader()
+
+    await insertAndCommit(env, `item-1`)
+    await flushMicrotasks()
+    expect(env.executor.getActiveConfirmationHoldCount()).toBe(1)
+
+    await env.executor.clearOutbox()
+
+    expect(env.executor.getActiveConfirmationHoldCount()).toBe(0)
+    expect(env.collection.get(`item-1`)).toBeUndefined()
+    env.executor.dispose()
+  })
+
+  it(`does not install a hold after the executor is disposed`, async () => {
+    const server = deferred<{ txid: number }>()
+    let confirmCalls = 0
+    const env = createTestOfflineEnvironment({
+      mutationFn: () => server.promise,
+      config: {
+        confirmWrite: () => {
+          confirmCalls += 1
+        },
+      },
+    })
+    await env.waitForLeader()
+    env.leader.setLeader(false)
+
+    const tx = env.executor.createOfflineTransaction({
+      mutationFnName: env.mutationFnName,
+      autoCommit: false,
+    })
+    tx.mutate(() => {
+      env.collection.insert({
+        id: `late-item`,
+        value: `late-item`,
+        completed: false,
+        updatedAt: new Date(),
+      })
+    })
+    const commit = tx.commit()
+    await flushMicrotasks()
+
+    env.executor.dispose()
+    server.resolve({ txid: 42 })
+    await commit
+    await flushMicrotasks()
+
+    expect(confirmCalls).toBe(0)
+    expect(env.executor.getActiveConfirmationHoldCount()).toBe(0)
   })
 
   it(`releases all holds on dispose`, async () => {

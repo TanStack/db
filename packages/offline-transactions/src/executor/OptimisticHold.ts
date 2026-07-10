@@ -13,12 +13,8 @@ import type { Collection, PendingMutation, Transaction } from '@tanstack/db'
 export interface OptimisticHold {
   /** The underlying hold transaction. Never auto-commits. */
   transaction: Transaction
-  /**
-   * Tear the hold down. Idempotent. By default marks the hold `completed` (the
-   * affected rows then render from synced data); pass `{ rollback: true }` to
-   * discard the optimistic overlay instead.
-   */
-  release: (options?: { rollback?: boolean }) => void
+  /** Tear the hold down. Idempotent. */
+  release: () => void
 }
 
 /**
@@ -49,49 +45,77 @@ export function createOptimisticHold(
     // Intentionally ignored - holds are torn down via `release`, not commit.
   })
 
-  transaction.applyMutations(mutations)
-
   // Register with each affected collection's state manager. Dedup by collection
   // reference (the same collection can be touched by several mutations).
   const touchedCollections = new Set<Collection<any, any, any, any, any>>()
-  for (const mutation of mutations) {
-    // Defensive check for corrupted deserialized data
-    // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition
-    if (!mutation.collection) {
-      continue
-    }
-    if (touchedCollections.has(mutation.collection)) {
-      continue
-    }
-    touchedCollections.add(mutation.collection)
-    mutation.collection._state.transactions.set(transaction.id, transaction)
-    // `recomputeOptimisticState(true)` forces the recompute through even when a
-    // sync commit is in flight (the "triggered by user action" path), so the
-    // overlay always applies.
-    mutation.collection._state.recomputeOptimisticState(true)
-  }
-
   let released = false
-  const release = ({ rollback = false }: { rollback?: boolean } = {}): void => {
+  const release = (): void => {
     if (released) {
       return
     }
     released = true
 
-    if (rollback) {
-      // `rollback()` removes the transaction from its collections itself.
-      transaction.rollback()
-      return
+    const errors: Array<unknown> = []
+    try {
+      // A hold is synthetic: completing it only removes it from TanStack DB's
+      // module-global registry. It must never rollback and cascade into real
+      // user transactions that happen to touch the same keys.
+      transaction.setState(`completed`)
+    } catch (error) {
+      errors.push(error)
     }
 
-    // Mark completed so `recomputeOptimisticState` stops considering it; this
-    // also splices the tx out of @tanstack/db's global transaction registry, so
-    // the hold can never leak there. The rows now render from synced data.
-    transaction.setState(`completed`)
+    // Delete every registration before recomputing. If one collection throws,
+    // later collections are still cleaned up and cannot retain a leaked hold.
     for (const collection of touchedCollections) {
-      collection._state.transactions.delete(transaction.id)
-      collection._state.recomputeOptimisticState(false)
+      try {
+        collection._state.transactions.delete(transaction.id)
+      } catch (error) {
+        errors.push(error)
+      }
     }
+    for (const collection of touchedCollections) {
+      try {
+        collection._state.recomputeOptimisticState(false)
+      } catch (error) {
+        errors.push(error)
+      }
+    }
+
+    if (errors.length > 0) {
+      throw errors[0]
+    }
+  }
+
+  try {
+    transaction.applyMutations(mutations)
+
+    for (const mutation of mutations) {
+      // Defensive check for corrupted deserialized data
+      // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition
+      if (!mutation.collection) {
+        continue
+      }
+      if (touchedCollections.has(mutation.collection)) {
+        continue
+      }
+      // Track before registration so a throwing set/recompute is unwound too.
+      touchedCollections.add(mutation.collection)
+      mutation.collection._state.transactions.set(transaction.id, transaction)
+      // `recomputeOptimisticState(true)` forces the recompute through even when
+      // a sync commit is in flight (the "triggered by user action" path), so the
+      // overlay always applies.
+      mutation.collection._state.recomputeOptimisticState(true)
+    }
+  } catch (error) {
+    // Failure-atomic creation: remove any registrations installed before the
+    // throw and complete the synthetic transaction so no global state leaks.
+    try {
+      release()
+    } catch {
+      // Preserve the original registration error after best-effort cleanup.
+    }
+    throw error
   }
 
   return { transaction, release }

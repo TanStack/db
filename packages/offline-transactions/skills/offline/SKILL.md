@@ -112,7 +112,8 @@ If the executor is not the leader tab, falls back to `createOptimisticAction` di
 1. Mutation applied optimistically to collection (instant UI update)
 2. Transaction serialized and persisted to storage (outbox)
 3. Leader tab picks up transaction and executes `mutationFn`
-4. On success: removed from outbox, optimistic state resolved
+4. On success: removed from outbox; optional `confirmWrite` runs off the drain
+   while a temporary hold keeps optimistic state visible
 5. On failure: retried with exponential backoff
 6. On page reload: outbox replayed, optimistic state restored
 
@@ -165,6 +166,8 @@ interface OfflineConfig {
   maxConcurrency?: number // Parallel execution limit
   jitter?: boolean // Add jitter to retry delays
   beforeRetry?: (txs) => txs // Transform/filter before retry
+  confirmWrite?: (context) => void | Promise<void> // Post-commit sync confirmation
+  maxConfirmationHolds?: number // Optimistic hold cap (default: 1000)
   onUnknownMutationFn?: (name, tx) => void // Handle orphaned transactions
   onLeadershipChange?: (isLeader) => void // Leadership state callback
   onStorageFailure?: (diagnostic) => void // Storage probe failure callback
@@ -172,6 +175,32 @@ interface OfflineConfig {
   onlineDetector?: OnlineDetector // Custom connectivity detection
 }
 ```
+
+### Post-commit sync confirmation
+
+Use `confirmWrite` when a server write commits before an asynchronous sync
+stream echoes it back. The hook receives the `mutationFn` result, runs for
+leader and online-only paths, and does not block the serial outbox:
+
+```ts
+const executor = startOfflineExecutor({
+  // ...
+  mutationFns: {
+    syncTodos: ({ transaction, idempotencyKey }) =>
+      api.sync(transaction.mutations, { idempotencyKey }),
+  },
+  confirmWrite: async ({ mutations, result }) => {
+    const { txid } = result as { txid: number }
+    const collectionIds = new Set(mutations.map((m) => m.collection.id))
+    await Promise.all(
+      [...collectionIds].map((id) => collections[id].utils.awaitTxId(txid)),
+    )
+  },
+})
+```
+
+The library holds the affected optimistic rows until the hook settles. A
+rejection releases the hold but never rolls back the already-committed write.
 
 ### Custom storage adapter
 

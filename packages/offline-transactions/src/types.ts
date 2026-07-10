@@ -92,6 +92,10 @@ export interface StorageDiagnostic {
 export interface ConfirmWriteContext {
   /** Id of the offline transaction whose write just committed. */
   transactionId: string
+  /** Name of the mutation function that committed the write. */
+  mutationFnName: string
+  /** Stable idempotency key used for the committed write. */
+  idempotencyKey: string
   /**
    * The mutations that were committed. One optimistic overlay is held per
    * touched collection until the hook settles.
@@ -100,7 +104,7 @@ export interface ConfirmWriteContext {
   /** Whatever the matching mutationFn resolved with (e.g. a server txid). */
   result: unknown
   /** The transaction's metadata, if any was supplied when it was created. */
-  metadata?: Record<string, any>
+  metadata?: Record<string, unknown>
 }
 
 export interface OfflineConfig {
@@ -133,13 +137,14 @@ export interface OfflineConfig {
    * dropped early (a possible brief flicker), never data loss. Implement any
    * timeout / verify-by-state logic inside the hook and resolve when done.
    */
-  confirmWrite?: (context: ConfirmWriteContext) => Promise<void>
+  confirmWrite?: (context: ConfirmWriteContext) => void | Promise<void>
   /**
    * Safety cap on simultaneously-held confirmation holds (see `confirmWrite`).
    * Each hold adds one transaction to every touched collection's optimistic
    * recompute, which is O(transactions). Beyond the cap the hold is skipped (the
    * overlay drops at commit instead) to avoid O(n^2) churn on a large, fast
-   * drain. Defaults to 1000.
+   * drain. Set to 0 to run the hook without retaining optimistic holds.
+   * Non-finite or negative values fall back to the default of 1000.
    */
   maxConfirmationHolds?: number
   leaderElection?: LeaderElection
@@ -177,6 +182,7 @@ export interface TransactionSignaler {
   registerRestorationTransaction: (
     offlineTransactionId: string,
     restorationTransaction: Transaction,
+    releaseRestorationTransaction: () => void,
   ) => void
   isOnline: () => boolean
 }

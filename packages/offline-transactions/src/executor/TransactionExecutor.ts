@@ -2,7 +2,7 @@ import { DefaultRetryPolicy } from '../retry/RetryPolicy'
 import { NonRetriableError } from '../types'
 import { withNestedSpan } from '../telemetry/tracer'
 import { createOptimisticHold } from './OptimisticHold'
-import type { OptimisticHold } from './OptimisticHold'
+import type { ConfirmationManager } from './ConfirmationManager'
 import type { KeyScheduler } from './KeyScheduler'
 import type { OutboxManager } from '../outbox/OutboxManager'
 import type {
@@ -10,14 +10,8 @@ import type {
   OfflineTransaction,
   TransactionSignaler,
 } from '../types'
-import type { PendingMutation } from '@tanstack/db'
 
 const HANDLED_EXECUTION_ERROR = Symbol(`HandledExecutionError`)
-
-// Default safety cap for `OfflineConfig.confirmWrite` holds. See the field's
-// docs in types.ts: each hold adds O(transactions) recompute cost, so a large,
-// fast drain is bounded to avoid O(n^2) churn.
-const DEFAULT_MAX_CONFIRMATION_HOLDS = 1000
 
 export class TransactionExecutor {
   private scheduler: KeyScheduler
@@ -27,17 +21,15 @@ export class TransactionExecutor {
   private isExecuting = false
   private executionPromise: Promise<void> | null = null
   private offlineExecutor: TransactionSignaler
+  private confirmationManager: ConfirmationManager
   private retryTimer: ReturnType<typeof setTimeout> | null = null
-  // Optimistic holds kept alive across the post-commit confirmation window
-  // (see `OfflineConfig.confirmWrite`). Tracked so they can all be released on
-  // `clear()` (logout / outbox clear / company-switch).
-  private confirmationHolds = new Set<OptimisticHold>()
 
   constructor(
     scheduler: KeyScheduler,
     outbox: OutboxManager,
     config: OfflineConfig,
     offlineExecutor: TransactionSignaler,
+    confirmationManager: ConfirmationManager,
   ) {
     this.scheduler = scheduler
     this.outbox = outbox
@@ -47,6 +39,7 @@ export class TransactionExecutor {
       config.jitter ?? true,
     )
     this.offlineExecutor = offlineExecutor
+    this.confirmationManager = confirmationManager
   }
 
   async execute(transaction: OfflineTransaction): Promise<void> {
@@ -115,10 +108,7 @@ export class TransactionExecutor {
             await this.outbox.remove(transaction.id)
 
             span.setAttribute(`result`, `success`)
-            // Resolve the waiting transaction and, if `confirmWrite` is set, hold
-            // its optimistic state until confirmation completes — OFF this serial
-            // path, so it never blocks the next transaction below.
-            this.resolveWithOptionalConfirmation(transaction, result)
+            this.resolveCommittedTransaction(transaction, result)
           } catch (error) {
             const err =
               error instanceof Error ? error : new Error(String(error))
@@ -176,114 +166,32 @@ export class TransactionExecutor {
   }
 
   /**
-   * Resolve the waiting transaction, then — if `confirmWrite` is configured —
-   * keep its optimistic state painted until confirmation completes.
-   *
-   * The confirmation runs OFF the serial drain path: this method returns
-   * immediately so the executor can move on to the next transaction. The hold is
-   * created BEFORE `resolveTransaction` so the optimistic overlay is owned
-   * continuously (resolveTransaction drops the original/restoration transaction's
-   * overlay; the hold keeps the rows painted across that boundary, no flicker).
+   * Hand a committed write to the confirmation manager before resolving its
+   * original transaction, so the optimistic overlay is owned continuously.
    */
-  private resolveWithOptionalConfirmation(
+  private resolveCommittedTransaction(
     transaction: OfflineTransaction,
     result: unknown,
   ): void {
-    const confirmWrite = this.config.confirmWrite
+    this.confirmationManager.schedule({
+      transactionId: transaction.id,
+      mutationFnName: transaction.mutationFnName,
+      idempotencyKey: transaction.idempotencyKey,
+      mutations: transaction.mutations,
+      result,
+      metadata: transaction.metadata,
+    })
 
-    // No hook, or nothing to hold: behave exactly as before the hook existed.
-    if (!confirmWrite || transaction.mutations.length === 0) {
-      this.offlineExecutor.resolveTransaction(transaction.id, result)
-      return
-    }
-
-    const maxHolds =
-      this.config.maxConfirmationHolds ?? DEFAULT_MAX_CONFIRMATION_HOLDS
-    if (this.confirmationHolds.size >= maxHolds) {
-      // Safety valve: too many concurrent holds. Skip the hold — the optimistic
-      // overlay drops at resolve as it would without the hook. The write is
-      // already durably committed, so correctness is unaffected.
-      this.offlineExecutor.resolveTransaction(transaction.id, result)
-      return
-    }
-
-    const hold = this.createConfirmationHold(transaction.mutations)
-    this.offlineExecutor.resolveTransaction(transaction.id, result)
-
-    if (!hold) {
-      // Hold creation failed (already logged). The write is committed; just let
-      // the optimistic state drop as it did before the hook existed.
-      return
-    }
-
-    this.runConfirmation(confirmWrite, transaction, result, hold)
-  }
-
-  // Never throws: a throw here would propagate into the serial drain and make
-  // the executor treat an already-committed write as failed.
-  private createConfirmationHold(
-    mutations: Array<PendingMutation>,
-  ): OptimisticHold | null {
     try {
-      const hold = createOptimisticHold(mutations)
-      this.confirmationHolds.add(hold)
-      return hold
+      this.offlineExecutor.resolveTransaction(transaction.id, result)
     } catch (error) {
-      console.warn(`Failed to create confirmation hold:`, error)
-      return null
-    }
-  }
-
-  private runConfirmation(
-    confirmWrite: NonNullable<OfflineConfig[`confirmWrite`]>,
-    transaction: OfflineTransaction,
-    result: unknown,
-    hold: OptimisticHold,
-  ): void {
-    const release = (): void => {
-      this.confirmationHolds.delete(hold)
-      try {
-        hold.release()
-      } catch (error) {
-        console.warn(`Failed to release confirmation hold:`, error)
-      }
-    }
-
-    // Off the serial drain: `confirmWrite` must never block the next
-    // transaction, and a rejection must never surface as an unhandled rejection
-    // (the write already committed). Whatever happens, release exactly once.
-    void Promise.resolve()
-      .then(() =>
-        confirmWrite({
-          transactionId: transaction.id,
-          mutations: transaction.mutations,
-          result,
-          metadata: transaction.metadata,
-        }),
+      // The outbox entry is already removed and the server write committed.
+      // Cleanup failures must not re-enter retry handling and resend the write.
+      console.warn(
+        `Failed to resolve committed transaction ${transaction.id}:`,
+        error,
       )
-      .catch((error) => {
-        // The write is durably committed; a failed confirmation only means we
-        // stop holding the optimistic overlay (a possible brief flicker).
-        console.warn(`confirmWrite rejected for ${transaction.id}:`, error)
-      })
-      .finally(release)
-  }
-
-  /** Release every active confirmation hold immediately. */
-  releaseConfirmationHolds(): void {
-    for (const hold of [...this.confirmationHolds]) {
-      this.confirmationHolds.delete(hold)
-      try {
-        hold.release()
-      } catch (error) {
-        console.warn(`Failed to release confirmation hold:`, error)
-      }
     }
-  }
-
-  /** Diagnostics / tests: holds currently keeping optimistic state painted. */
-  getActiveConfirmationHoldCount(): number {
-    return this.confirmationHolds.size
   }
 
   private async handleError(
@@ -411,6 +319,7 @@ export class TransactionExecutor {
         this.offlineExecutor.registerRestorationTransaction(
           offlineTx.id,
           hold.transaction,
+          hold.release,
         )
       } catch (error) {
         console.warn(
@@ -424,7 +333,7 @@ export class TransactionExecutor {
   clear(): void {
     this.scheduler.clear()
     this.clearRetryTimer()
-    this.releaseConfirmationHolds()
+    this.confirmationManager.releaseAll()
   }
 
   getPendingCount(): number {
