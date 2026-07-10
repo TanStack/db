@@ -77,7 +77,10 @@ export interface QueryCollectionConfig<
   ) => Promise<Array<any>> | Array<any>
     ? (context: QueryFunctionContext<TQueryKey>) => Promise<Array<T>> | Array<T>
     : TQueryFn
-  /* Function that extracts array items from wrapped API responses (e.g metadata, pagination)  */
+  /**
+   * Extracts the row array TanStack DB materializes from the Query response.
+   * The Query cache keeps the original response shape.
+   */
   select?: (data: TQueryData) => Array<T>
   /** The TanStack Query client instance */
   queryClient: QueryClient
@@ -347,6 +350,13 @@ class QueryCollectionUtilsImpl {
       (observer) => observer.getCurrentResult().fetchStatus,
     )
   }
+}
+
+function getLoadSubsetOptionsForMeta(
+  opts: LoadSubsetOptions,
+): Omit<LoadSubsetOptions, `subscription`> {
+  const { subscription: _subscription, ...serializableOptions } = opts
+  return serializableOptions
 }
 
 /**
@@ -1092,7 +1102,10 @@ export function queryCollectionOptions(
       // Generate key using common function
       const key = generateQueryKeyFromOptions(opts)
       const hashedQueryKey = hashKey(key)
-      const extendedMeta = { ...meta, loadSubsetOptions: opts }
+      const extendedMeta = {
+        ...meta,
+        loadSubsetOptions: getLoadSubsetOptionsForMeta(opts),
+      }
       const retainedEntry = metadata?.collection.get(
         `${QUERY_COLLECTION_GC_PREFIX}${hashedQueryKey}`,
       )

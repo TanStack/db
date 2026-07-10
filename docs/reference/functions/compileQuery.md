@@ -21,7 +21,7 @@ function compileQuery(
    childCorrelationField?): CompilationResult;
 ```
 
-Defined in: [packages/db/src/query/compiler/index.ts:130](https://github.com/TanStack/db/blob/main/packages/db/src/query/compiler/index.ts#L130)
+Defined in: [packages/db/src/query/compiler/index.ts:162](https://github.com/TanStack/db/blob/main/packages/db/src/query/compiler/index.ts#L162)
 
 Compiles a query IR into a D2 pipeline
 

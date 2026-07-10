@@ -68,6 +68,15 @@ export interface IndexInterface<
 
   supports: (operation: IndexOperation) => boolean
 
+  /**
+   * Whether range lookups (gt/gte/lt/lte) on this index can be trusted to
+   * return every matching key. Range traversal relies on the index ordering, so
+   * it is unsafe when the index uses a custom comparator, whose order may not
+   * match the WHERE evaluator's relational operators. Callers must fall back to
+   * a full scan when this is `false`.
+   */
+  get supportsRangeOptimization(): boolean
+
   matchesField: (fieldPath: Array<string>) => boolean
   matchesCompareOptions: (compareOptions: CompareOptions) => boolean
   matchesDirection: (direction: OrderByDirection) => boolean
@@ -90,6 +99,11 @@ export abstract class BaseIndex<
   protected totalLookupTime = 0
   protected lastUpdated = new Date()
   protected compareOptions: CompareOptions
+  /**
+   * Set by subclasses when constructed with a user-supplied comparator, whose
+   * ordering may not match the WHERE evaluator's relational operators.
+   */
+  protected hasCustomComparator = false
 
   constructor(
     id: number,
@@ -142,6 +156,10 @@ export abstract class BaseIndex<
   // Common methods
   supports(operation: IndexOperation): boolean {
     return this.supportedOperations.has(operation)
+  }
+
+  get supportsRangeOptimization(): boolean {
+    return !this.hasCustomComparator
   }
 
   matchesField(fieldPath: Array<string>): boolean {

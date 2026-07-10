@@ -154,7 +154,12 @@ export class CollectionStateManager<
   }
 
   /**
-   * Checks if a row has pending optimistic mutations (not yet confirmed by sync).
+   * Checks whether this row currently has no pending local optimistic writes.
+   *
+   * This is local mutation status, not backend confirmation: `true` means the
+   * row is not currently affected by an optimistic transaction in this
+   * collection's visible state.
+   *
    * Used to compute the $synced virtual property.
    */
   public isRowSynced(key: TKey): boolean {
@@ -224,6 +229,21 @@ export class CollectionStateManager<
         ? 'local'
         : ((options?.rowOrigins ?? this.rowOrigins).get(key) ?? 'remote'),
     })
+  }
+
+  private snapshotRowOriginsForKeys(
+    keys: Iterable<TKey>,
+  ): Map<TKey, VirtualOrigin> {
+    const rowOrigins = new Map<TKey, VirtualOrigin>()
+
+    for (const key of keys) {
+      const origin = this.rowOrigins.get(key)
+      if (origin !== undefined) {
+        rowOrigins.set(key, origin)
+      }
+    }
+
+    return rowOrigins
   }
 
   private enrichWithVirtualPropsSnapshot(
@@ -476,7 +496,7 @@ export class CollectionStateManager<
 
     const previousState = new Map(this.optimisticUpserts)
     const previousDeletes = new Set(this.optimisticDeletes)
-    const previousRowOrigins = new Map(this.rowOrigins)
+    const previousRowOrigins = this.rowOrigins
 
     // Update pending optimistic state for completed/failed transactions
     for (const transaction of this.transactions.values()) {
@@ -857,10 +877,6 @@ export class CollectionStateManager<
       // Set flag to prevent redundant optimistic state recalculations
       this.isCommittingSyncTransactions = true
 
-      const previousRowOrigins = new Map(this.rowOrigins)
-      const previousOptimisticUpserts = new Map(this.optimisticUpserts)
-      const previousOptimisticDeletes = new Set(this.optimisticDeletes)
-
       // Get the optimistic snapshot from the truncate transaction (captured when truncate() was called)
       const truncateOptimisticSnapshot = hasTruncateSync
         ? committedSyncedTransactions.find((t) => t.truncate)
@@ -879,6 +895,18 @@ export class CollectionStateManager<
           changedKeys.add(key)
         }
       }
+
+      const virtualSnapshotKeys = new Set(changedKeys)
+      for (const key of this.pendingOptimisticDirectUpserts) {
+        virtualSnapshotKeys.add(key)
+      }
+      for (const key of this.pendingOptimisticDirectDeletes) {
+        virtualSnapshotKeys.add(key)
+      }
+      const previousRowOrigins =
+        this.snapshotRowOriginsForKeys(virtualSnapshotKeys)
+      const previousOptimisticUpserts = new Map(this.optimisticUpserts)
+      const previousOptimisticDeletes = new Set(this.optimisticDeletes)
 
       // Use pre-captured state if available (from optimistic scenarios),
       // otherwise capture current state (for pure sync scenarios)

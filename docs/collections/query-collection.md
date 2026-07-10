@@ -56,13 +56,41 @@ The `queryCollectionOptions` function accepts the following options:
 
 ### Query Options
 
-- `select`: Function that lets extract array items when they're wrapped with metadata
+Query Collections use TanStack Query internally, but `queryCollectionOptions` is not a full `QueryObserverOptions` pass-through. It exposes only the Query options supported by the collection adapter. Fields that affect row materialization, collection identity, and synchronization are handled by the adapter itself.
+
+The following Query options are forwarded to the underlying Query observer:
+
+- `select`: Function that extracts the row array TanStack DB materializes from a wrapped Query response
 - `enabled`: Whether the query should automatically run (default: `true`)
-- `refetchInterval`: Refetch interval in milliseconds (default: 0 — set an interval to enable polling refetching)
+- `refetchInterval`: Refetch interval in milliseconds
 - `retry`: Retry configuration for failed queries
 - `retryDelay`: Delay between retries
 - `staleTime`: How long data is considered fresh
-- `meta`: Optional metadata that will be passed to the query function context
+- `gcTime`: How long unused query data stays in the Query cache
+- `meta`: Metadata passed to the query function context. Query Collections may add `loadSubsetOptions` for on-demand queries.
+
+Except for `meta`, these options are only passed to TanStack Query when you define them. If you omit them, `QueryClient.defaultOptions` can still apply.
+
+Some fields are owned or reinterpreted by the collection adapter rather than treated as ordinary Query option pass-through:
+
+- `queryKey`: Identifies the Query cache entry and, in on-demand mode, may be built from load-subset options.
+- `queryFn`: Fetches the complete collection state or the requested on-demand subset.
+- `select`: Extracts array rows from wrapped responses before they are stored in the collection. This is not the same contract as TanStack Query's `select` option.
+- `queryClient`: Supplies the Query client instance used by the collection.
+- `syncMode`: Controls whether the collection syncs eagerly or on demand.
+- `getKey`: Extracts each row's stable TanStack DB key.
+- Mutation handlers such as `onInsert`, `onUpdate`, and `onDelete`.
+
+Other TanStack Query options are not currently exposed through `queryCollectionOptions`. Common examples include:
+
+- `initialData`
+- `placeholderData`
+- `refetchOnWindowFocus`
+- `refetchOnReconnect`
+- `refetchOnMount`
+- `networkMode`
+- `throwOnError`
+- configurable `structuralSharing`
 
 ### Using with `queryOptions(...)`
 
@@ -95,6 +123,45 @@ const todosCollection = createCollection(
 ```
 
 If `queryFn` is missing at runtime, `queryCollectionOptions` throws `QueryFnRequiredError`.
+
+### Selecting Rows from Wrapped Responses
+
+Many APIs return rows inside a response envelope that also contains metadata such as pagination cursors, totals, or request information. Use `select` to extract the row array that TanStack DB should materialize:
+
+```typescript
+interface TodosResponse {
+  items: Array<{ id: string; title: string }>
+  nextCursor?: string
+  total: number
+}
+
+const todosCollection = createCollection(
+  queryCollectionOptions({
+    queryKey: ["todos"],
+    queryFn: async (): Promise<TodosResponse> => {
+      const response = await fetch("/api/todos")
+      return response.json()
+    },
+    select: (response) => response.items,
+    queryClient,
+    getKey: (item) => item.id,
+  }),
+)
+```
+
+`select` is a query-db-collection row extraction hook. It tells TanStack DB which rows to materialize while the TanStack Query cache keeps the original query response shape. In the example above, `queryClient.getQueryData(["todos"])` still returns the full `TodosResponse`, including `nextCursor` and `total`.
+
+This differs from TanStack Query's observer-level `select`: query-db-collection uses this option to bridge Query's response object into DB's normalized row store.
+
+Direct write utilities such as `writeInsert`, `writeUpdate`, and `writeDelete` make a best-effort attempt to update the matching row array inside wrapped Query cache entries while preserving wrapper metadata.
+
+This works automatically for simple wrappers such as:
+
+- `{ data: [...] }`
+- `{ items: [...] }`
+- `{ results: [...] }`
+
+Derived projections, such as `select: (response) => response.edges.map((edge) => edge.node)`, are read-side row extraction only. query-db-collection cannot generally reconstruct the original response envelope from updated rows. Refetch or invalidate the query if the wrapped cache must exactly reflect direct writes for a derived projection.
 
 ### Collection Options
 

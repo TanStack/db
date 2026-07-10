@@ -99,7 +99,7 @@ Defined in: [packages/db/src/indexes/base-index.ts:40](https://github.com/TanSta
 getStats: () => IndexStats;
 ```
 
-Defined in: [packages/db/src/indexes/base-index.ts:75](https://github.com/TanStack/db/blob/main/packages/db/src/indexes/base-index.ts#L75)
+Defined in: [packages/db/src/indexes/base-index.ts:84](https://github.com/TanStack/db/blob/main/packages/db/src/indexes/base-index.ts#L84)
 
 #### Returns
 
@@ -157,7 +157,7 @@ Defined in: [packages/db/src/indexes/base-index.ts:38](https://github.com/TanSta
 matchesCompareOptions: (compareOptions) => boolean;
 ```
 
-Defined in: [packages/db/src/indexes/base-index.ts:72](https://github.com/TanStack/db/blob/main/packages/db/src/indexes/base-index.ts#L72)
+Defined in: [packages/db/src/indexes/base-index.ts:81](https://github.com/TanStack/db/blob/main/packages/db/src/indexes/base-index.ts#L81)
 
 #### Parameters
 
@@ -177,7 +177,7 @@ Defined in: [packages/db/src/indexes/base-index.ts:72](https://github.com/TanSta
 matchesDirection: (direction) => boolean;
 ```
 
-Defined in: [packages/db/src/indexes/base-index.ts:73](https://github.com/TanStack/db/blob/main/packages/db/src/indexes/base-index.ts#L73)
+Defined in: [packages/db/src/indexes/base-index.ts:82](https://github.com/TanStack/db/blob/main/packages/db/src/indexes/base-index.ts#L82)
 
 #### Parameters
 
@@ -197,7 +197,7 @@ Defined in: [packages/db/src/indexes/base-index.ts:73](https://github.com/TanSta
 matchesField: (fieldPath) => boolean;
 ```
 
-Defined in: [packages/db/src/indexes/base-index.ts:71](https://github.com/TanStack/db/blob/main/packages/db/src/indexes/base-index.ts#L71)
+Defined in: [packages/db/src/indexes/base-index.ts:80](https://github.com/TanStack/db/blob/main/packages/db/src/indexes/base-index.ts#L80)
 
 #### Parameters
 
@@ -488,6 +488,28 @@ Defined in: [packages/db/src/indexes/base-index.ts:64](https://github.com/TanSta
 ##### Returns
 
 \[`any`, `Set`\<`TKey`\>\][]
+
+***
+
+### supportsRangeOptimization
+
+#### Get Signature
+
+```ts
+get supportsRangeOptimization(): boolean;
+```
+
+Defined in: [packages/db/src/indexes/base-index.ts:78](https://github.com/TanStack/db/blob/main/packages/db/src/indexes/base-index.ts#L78)
+
+Whether range lookups (gt/gte/lt/lte) on this index can be trusted to
+return every matching key. Range traversal relies on the index ordering, so
+it is unsafe when the index uses a custom comparator, whose order may not
+match the WHERE evaluator's relational operators. Callers must fall back to
+a full scan when this is `false`.
+
+##### Returns
+
+`boolean`
 
 ***
 

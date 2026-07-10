@@ -489,5 +489,38 @@ describe(`Deterministic Ordering`, () => {
       const keys = changes?.map((c) => c.key)
       expect(keys).toEqual([`a`, `b`, `c`])
     })
+
+    it(`should place NaN values consistently when ordering`, () => {
+      type Item = { id: string; score: number }
+
+      const options = mockSyncCollectionOptions<Item>({
+        id: `test-collection-changes-nan`,
+        getKey: (item) => item.id,
+        initialData: [],
+      })
+
+      const collection = createCollection(options)
+
+      options.utils.begin()
+      options.utils.write({ type: `insert`, value: { id: `a`, score: 5 } })
+      options.utils.write({ type: `insert`, value: { id: `nan`, score: NaN } })
+      options.utils.write({ type: `insert`, value: { id: `b`, score: 1 } })
+      options.utils.write({ type: `insert`, value: { id: `c`, score: 3 } })
+      options.utils.commit()
+
+      const changes = collection.currentStateAsChanges({
+        orderBy: [
+          {
+            expression: new PropRef([`score`]),
+            compareOptions: { direction: `asc`, nulls: `first` },
+          },
+        ],
+      })
+
+      // Under PostgreSQL float semantics NaN is the greatest value, so the
+      // numbers sort ascending first and NaN sorts last.
+      const keys = changes?.map((c) => c.key)
+      expect(keys).toEqual([`b`, `c`, `a`, `nan`])
+    })
   })
 })
