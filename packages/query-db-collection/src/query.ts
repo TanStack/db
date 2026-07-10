@@ -1946,6 +1946,23 @@ export function queryCollectionOptions(
   // Enhanced internalSync that captures write functions for manual use
   const enhancedInternalSync: SyncConfig<any>[`sync`] = (params) => {
     const { begin, write, commit, collection } = params
+    let queryClientMounted = false
+
+    const mountQueryClient = () => {
+      if (!queryClientMounted) {
+        queryClient.mount()
+        queryClientMounted = true
+      }
+    }
+
+    const unmountQueryClient = () => {
+      if (queryClientMounted) {
+        queryClient.unmount()
+        queryClientMounted = false
+      }
+    }
+
+    mountQueryClient()
 
     // Get the base query key for the context (handle both static and function-based keys)
     const contextQueryKey =
@@ -1965,8 +1982,27 @@ export function queryCollectionOptions(
       updateCacheData,
     }
 
-    // Call the original internalSync logic
-    return internalSync(params)
+    // Call the original internalSync logic, pairing QueryClient mount with the
+    // collection sync lifecycle so focus/reconnect managers dispatch events for
+    // standalone QueryClient usage.
+    const syncResult = internalSync(params)
+    const sync =
+      typeof syncResult === `function`
+        ? { cleanup: syncResult }
+        : typeof syncResult === `object`
+          ? syncResult
+          : {}
+
+    return {
+      ...sync,
+      cleanup: () => {
+        try {
+          sync.cleanup?.()
+        } finally {
+          unmountQueryClient()
+        }
+      },
+    }
   }
 
   // Create write utils using the manual-sync module

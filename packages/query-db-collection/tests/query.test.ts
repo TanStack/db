@@ -1,5 +1,11 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { QueryClient, dehydrate, hashKey } from '@tanstack/query-core'
+import {
+  QueryClient,
+  dehydrate,
+  focusManager,
+  hashKey,
+  onlineManager,
+} from '@tanstack/query-core'
 import {
   BTreeIndex,
   createCollection,
@@ -214,6 +220,54 @@ describe(`QueryCollection`, () => {
     expect(options.refetchOnReconnect).toBe(true)
     expect(options.refetchOnMount).toBe(`always`)
     expect(options.networkMode).toBe(`online`)
+  })
+
+  it(`should refetch on focus and reconnect with standalone QueryClient`, async () => {
+    const queryKey = [`query-options-event-refetch`]
+    const queryFn = vi
+      .fn()
+      .mockResolvedValueOnce([{ id: `1`, name: `Initial` }])
+      .mockResolvedValueOnce([{ id: `1`, name: `Focused` }])
+      .mockResolvedValueOnce([{ id: `1`, name: `Reconnected` }])
+
+    const collection = createCollection(
+      queryCollectionOptions<TestItem>({
+        id: `query-options-event-refetch`,
+        queryClient,
+        queryKey,
+        queryFn,
+        getKey,
+        startSync: true,
+        staleTime: 0,
+        refetchOnWindowFocus: true,
+        refetchOnReconnect: true,
+      }),
+    )
+
+    try {
+      await vi.waitFor(() => {
+        expect(collection.size).toBe(1)
+        expect(queryFn).toHaveBeenCalledTimes(1)
+      })
+
+      focusManager.setFocused(false)
+      focusManager.setFocused(true)
+
+      await vi.waitFor(() => {
+        expect(queryFn).toHaveBeenCalledTimes(2)
+      })
+
+      onlineManager.setOnline(false)
+      onlineManager.setOnline(true)
+
+      await vi.waitFor(() => {
+        expect(queryFn).toHaveBeenCalledTimes(3)
+      })
+    } finally {
+      await collection.cleanup()
+      focusManager.setFocused(undefined)
+      onlineManager.setOnline(true)
+    }
   })
 
   it(`should omit undefined Query observer options to preserve defaults`, async () => {
