@@ -22,6 +22,14 @@ export interface LiveQuerySnapshot<
   data: T | ReadonlyArray<T> | undefined
   /** The underlying collection, or `undefined` when disabled. */
   collection: Collection<T, TKey, any> | undefined
+  /**
+   * Monotonic counter bumped whenever the visible layout changes — membership,
+   * ordering, or an order-only move. Lets consumers detect a reorder that
+   * changed no row value (which `data`/`state` identity alone can't express on
+   * its own once row values are structurally shared). Increments in lockstep
+   * with snapshot identity for enabled queries.
+   */
+  layoutRevision: number
   status: CollectionStatus | `disabled`
   isLoading: boolean
   isReady: boolean
@@ -70,6 +78,7 @@ const DISABLED_SNAPSHOT: LiveQuerySnapshot<any, any> = {
   state: undefined,
   data: undefined,
   collection: undefined,
+  layoutRevision: 0,
   status: `disabled`,
   isLoading: false,
   isReady: true,
@@ -89,6 +98,8 @@ class LiveQueryObserverImpl<
   private cachedVersion = -1
   private cachedStatus: CollectionStatus | undefined
   private cachedSnapshot: LiveQuerySnapshot<T, TKey> = DISABLED_SNAPSHOT
+  private layoutRevision = 0
+  private lastLayoutSignature: string | undefined
   private readonly listeners = new Set<LiveQueryObserverListener<T, TKey>>()
   private collectionUnsub: (() => void) | null = null
   // Bumped on each attach. `onFirstReady` can't be unsubscribed, so a callback
@@ -124,6 +135,15 @@ class LiveQueryObserverImpl<
       let stateCache: Map<TKey, T> | null = null
       let dataCache: Array<T> | null = null
 
+      // Bump the layout revision when the ordered key sequence changed —
+      // membership, ordering, or an order-only move all shift it. `\u0000`
+      // can't appear in a stringified key, so it's a safe separator.
+      const layoutSignature = entries.map(([key]) => String(key)).join(`\u0000`)
+      if (layoutSignature !== this.lastLayoutSignature) {
+        this.lastLayoutSignature = layoutSignature
+        this.layoutRevision++
+      }
+
       this.cachedSnapshot = {
         get state() {
           if (!stateCache) stateCache = new Map(entries)
@@ -134,6 +154,7 @@ class LiveQueryObserverImpl<
           return singleResult ? dataCache[0] : dataCache
         },
         collection,
+        layoutRevision: this.layoutRevision,
         status: collection.status,
         ...getLiveQueryStatusFlags(collection.status),
         isEnabled: true,

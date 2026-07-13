@@ -11,6 +11,7 @@ import {
 } from '../../errors.js'
 import { transactionScopedScheduler } from '../../scheduler.js'
 import { getActiveTransaction } from '../../transactions.js'
+import { deepEquals } from '../../utils.js'
 import { CollectionSubscriber } from './collection-subscriber.js'
 import { getCollectionBuilder } from './collection-registry.js'
 import { LIVE_QUERY_INTERNAL } from './internal.js'
@@ -799,6 +800,11 @@ export class CollectionConfigBuilder<
                 existing.orderByIndex = changes.orderByIndex
               }
             }
+            // Keep the retracted (old) side for order-only-move detection.
+            if (changes.deletes > 0) {
+              existing.previousValue = changes.previousValue
+              existing.previousOrderByIndex = changes.previousOrderByIndex
+            }
           } else {
             merged.set(customKey, { ...changes })
           }
@@ -811,6 +817,17 @@ export class CollectionConfigBuilder<
         begin()
         changesToApply.forEach(this.applyChanges.bind(this, config))
         commit()
+        // An order-only move (the row's projected value is unchanged but its
+        // `orderByIndex` moved) is swallowed by the collection's value-diff, so
+        // `commit()` emits nothing even though `.values()`/`.entries()` are now
+        // re-sorted. Publish an explicit layout-change notification so ordered
+        // consumers re-read — a first-class signal, not a forged row `update`.
+        if (hasOrderOnlyMove(changesToApply)) {
+          const changesManager = (config.collection as any)._changes as {
+            emitLayoutChangeEvent: () => void
+          }
+          changesManager.emitLayoutChangeEvent()
+        }
       }
       pendingChanges = new Map()
 
@@ -2315,6 +2332,10 @@ function accumulateChanges<T>(
   }
   if (multiplicity < 0) {
     changes.deletes += Math.abs(multiplicity)
+    // Remember the retracted (old) value + position so the flush can tell an
+    // order-only move apart from a real value change.
+    changes.previousValue = value
+    changes.previousOrderByIndex = orderByIndex
   } else if (multiplicity > 0) {
     changes.inserts += multiplicity
     // Update value to the latest version for this key
@@ -2325,4 +2346,26 @@ function accumulateChanges<T>(
   }
   acc.set(key, changes)
   return acc
+}
+
+/**
+ * Detect whether any accumulated change is an "order-only move": a row that was
+ * updated in place (both retracted and re-inserted) whose `orderByIndex` moved
+ * but whose projected value is deep-equal to before. The collection's value-diff
+ * emits nothing for these, so the flush must publish a layout notification.
+ * Rows whose value actually changed are ignored — they emit a normal `update`.
+ */
+function hasOrderOnlyMove<T>(changesToApply: Map<unknown, Changes<T>>): boolean {
+  for (const changes of changesToApply.values()) {
+    if (
+      changes.inserts > 0 &&
+      changes.deletes > 0 &&
+      changes.orderByIndex !== changes.previousOrderByIndex &&
+      changes.previousValue !== undefined &&
+      deepEquals(changes.previousValue, changes.value)
+    ) {
+      return true
+    }
+  }
+  return false
 }
