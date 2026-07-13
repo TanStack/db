@@ -2355,7 +2355,9 @@ function accumulateChanges<T>(
  * emits nothing for these, so the flush must publish a layout notification.
  * Rows whose value actually changed are ignored — they emit a normal `update`.
  */
-function hasOrderOnlyMove<T>(changesToApply: Map<unknown, Changes<T>>): boolean {
+function hasOrderOnlyMove<T>(
+  changesToApply: Map<unknown, Changes<T>>,
+): boolean {
   for (const changes of changesToApply.values()) {
     if (
       changes.inserts > 0 &&

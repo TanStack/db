@@ -45,9 +45,10 @@ describe(`order-only move (RFC #1623 phase 4)`, () => {
   it(`republishes the ordered result when a row moves but its value is unchanged`, async () => {
     const source = makeSource()
     const lq = await makeOrderedByAge(source)
-    const observer = createLiveQueryObserver<{ id: string; name: string }, string>(
-      lq as any,
-    )
+    const observer = createLiveQueryObserver<
+      { id: string; name: string },
+      string
+    >(lq as any)
 
     let notifications = 0
     observer.subscribe(() => {
@@ -55,14 +56,21 @@ describe(`order-only move (RFC #1623 phase 4)`, () => {
     })
 
     const before = observer.getSnapshot()
-    expect((before.data as Array<any>).map((r) => r.id)).toEqual([`2`, `1`, `3`])
+    expect((before.data as Array<any>).map((r) => r.id)).toEqual([
+      `2`,
+      `1`,
+      `3`,
+    ])
     const revBefore = before.layoutRevision
 
     // Move Bob (age 20 -> 99) to the end. The projected `{ id, name }` is
     // identical, so the collection's value-diff emits no row change — only the
     // layout notification should republish the new order.
     source.utils.begin()
-    source.utils.write({ type: `update`, value: { id: `2`, name: `Bob`, age: 99 } })
+    source.utils.write({
+      type: `update`,
+      value: { id: `2`, name: `Bob`, age: 99 },
+    })
     source.utils.commit()
     await flush()
 
@@ -76,9 +84,10 @@ describe(`order-only move (RFC #1623 phase 4)`, () => {
   it(`does not bump the layout revision when nothing about the layout changes`, async () => {
     const source = makeSource()
     const lq = await makeOrderedByAge(source)
-    const observer = createLiveQueryObserver<{ id: string; name: string }, string>(
-      lq as any,
-    )
+    const observer = createLiveQueryObserver<
+      { id: string; name: string },
+      string
+    >(lq as any)
     observer.subscribe(() => {})
 
     const revBefore = observer.getSnapshot().layoutRevision
@@ -86,7 +95,10 @@ describe(`order-only move (RFC #1623 phase 4)`, () => {
     // Update a row's `age` in a way that keeps its sort position (20 -> 21,
     // still the youngest) and does not change the projected value.
     source.utils.begin()
-    source.utils.write({ type: `update`, value: { id: `2`, name: `Bob`, age: 21 } })
+    source.utils.write({
+      type: `update`,
+      value: { id: `2`, name: `Bob`, age: 21 },
+    })
     source.utils.commit()
     await flush()
 
@@ -100,20 +112,29 @@ describe(`order-only move (RFC #1623 phase 4)`, () => {
   it(`bumps the layout revision on membership changes too`, async () => {
     const source = makeSource()
     const lq = await makeOrderedByAge(source)
-    const observer = createLiveQueryObserver<{ id: string; name: string }, string>(
-      lq as any,
-    )
+    const observer = createLiveQueryObserver<
+      { id: string; name: string },
+      string
+    >(lq as any)
     observer.subscribe(() => {})
 
     const revBefore = observer.getSnapshot().layoutRevision
 
     source.utils.begin()
-    source.utils.write({ type: `insert`, value: { id: `4`, name: `Dan`, age: 10 } })
+    source.utils.write({
+      type: `insert`,
+      value: { id: `4`, name: `Dan`, age: 10 },
+    })
     source.utils.commit()
     await flush()
 
     const after = observer.getSnapshot()
-    expect((after.data as Array<any>).map((r) => r.id)).toEqual([`4`, `2`, `1`, `3`])
+    expect((after.data as Array<any>).map((r) => r.id)).toEqual([
+      `4`,
+      `2`,
+      `1`,
+      `3`,
+    ])
     expect(after.layoutRevision).toBeGreaterThan(revBefore)
     observer.dispose()
   })
