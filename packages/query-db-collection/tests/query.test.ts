@@ -5126,35 +5126,128 @@ describe(`QueryCollection`, () => {
         })
       })
 
-      it(`stays empty after the final query row is removed and its cache entry is GCed`, async () => {
-        const queryKey = [`ownership-final-row-cache-gc-test`]
-        let items: Array<TestItem> = [{ id: `1`, name: `Only row` }]
-        const queryFn = vi.fn().mockImplementation(() => Promise.resolve(items))
+      it(`expires the Query cache entry after unload without restoring deleted rows`, async () => {
+        const expiringQueryClient = new QueryClient({
+          defaultOptions: {
+            queries: { gcTime: 100, retry: false, staleTime: Infinity },
+          },
+        })
+        const queryKey = [`ownership-query-cache-expiry-test`]
         const collection = createCollection(
           queryCollectionOptions<TestItem>({
-            id: `ownership-final-row-cache-gc-test`,
-            queryClient,
+            id: `ownership-query-cache-expiry-test`,
+            queryClient: expiringQueryClient,
             queryKey,
-            queryFn,
+            queryFn: async () => [{ id: `1`, name: `Only row` }],
             getKey,
-            startSync: true,
+            syncMode: `on-demand`,
           }),
         )
-
-        await vi.waitFor(() => {
-          expect(collection.has(`1`)).toBe(true)
+        const liveQuery = createLiveQueryCollection({
+          query: (q) => q.from({ item: collection }),
         })
 
-        items = []
-        await queryClient.invalidateQueries({ queryKey, exact: true })
-        await vi.waitFor(() => {
+        await liveQuery.preload()
+        expect(collection.has(`1`)).toBe(true)
+
+        vi.useFakeTimers()
+        try {
+          await liveQuery.cleanup()
           expect(collection.size).toBe(0)
+          expect(
+            expiringQueryClient.getQueryCache().find({ queryKey }),
+          ).toBeDefined()
+
+          await vi.advanceTimersByTimeAsync(101)
+
+          expect(
+            expiringQueryClient.getQueryCache().find({ queryKey }),
+          ).toBeUndefined()
+          expect(collection.size).toBe(0)
+        } finally {
+          vi.useRealTimers()
+          expiringQueryClient.clear()
+        }
+      })
+
+      it(`hydrates a retained row and deletes it when its query revalidates empty`, async () => {
+        const queryKey = [`ownership-retained-hydration-test`]
+        const queryHash = hashKey(queryKey)
+        const retainedRow: CategorisedItem = {
+          id: `1`,
+          name: `Retained row`,
+          category: `A`,
+        }
+        let releaseRevalidation!: () => void
+        const revalidationReleased = new Promise<void>((resolve) => {
+          releaseRevalidation = resolve
+        })
+        const queryFn = vi.fn(async () => {
+          await revalidationReleased
+          return []
+        })
+        const baseOptions = queryCollectionOptions<CategorisedItem>({
+          id: `ownership-retained-hydration-test`,
+          queryClient,
+          queryKey,
+          queryFn,
+          getKey: (item) => item.id,
+          startSync: true,
+        })
+        const originalSync = baseOptions.sync
+        const metadataHarness = createInMemorySyncMetadataApi<
+          string | number,
+          CategorisedItem
+        >({
+          persistedRows: new Map([[retainedRow.id, retainedRow]]),
+          rowMetadata: new Map([
+            [
+              retainedRow.id,
+              {
+                queryCollection: { owners: { [queryHash]: true } },
+              },
+            ],
+          ]),
+          collectionMetadata: new Map([
+            [
+              `queryCollection:gc:${queryHash}`,
+              { queryHash, mode: `until-revalidated` },
+            ],
+          ]),
+        })
+        const collection = createCollection({
+          ...baseOptions,
+          sync: {
+            sync: (params: Parameters<typeof originalSync.sync>[0]) => {
+              params.begin({ immediate: true })
+              params.write({ type: `insert`, value: retainedRow })
+              params.commit()
+              return originalSync.sync({
+                ...params,
+                metadata: metadataHarness.api,
+              })
+            },
+          },
         })
 
-        queryClient.removeQueries({ queryKey, exact: true })
-        await flushPromises()
-        expect(queryClient.getQueryCache().find({ queryKey })).toBeUndefined()
-        expect(collection.size).toBe(0)
+        expect(collection.has(retainedRow.id)).toBe(true)
+        expect(
+          metadataHarness.collectionMetadata.has(
+            `queryCollection:gc:${queryHash}`,
+          ),
+        ).toBe(true)
+
+        releaseRevalidation()
+        await vi.waitFor(() => {
+          expect(queryFn).toHaveBeenCalledTimes(1)
+          expect(collection.has(retainedRow.id)).toBe(false)
+        })
+        expect(metadataHarness.rowMetadata.get(retainedRow.id)).toBeUndefined()
+        expect(
+          metadataHarness.collectionMetadata.has(
+            `queryCollection:gc:${queryHash}`,
+          ),
+        ).toBe(false)
 
         await collection.cleanup()
       })
