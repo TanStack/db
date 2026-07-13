@@ -206,7 +206,10 @@ describe(`createLiveQueryObserver`, () => {
     source.utils.begin()
     source.utils.write({ type: `delete`, value: { id: `a`, name: `A` } })
     source.utils.write({ type: `delete`, value: { id: `b`, name: `B` } })
-    source.utils.write({ type: `insert`, value: { id: `a\u0000b`, name: `AB` } })
+    source.utils.write({
+      type: `insert`,
+      value: { id: `a\u0000b`, name: `AB` },
+    })
     source.utils.commit()
 
     expect(observer.getSnapshot().layoutRevision).not.toBe(revBefore)
