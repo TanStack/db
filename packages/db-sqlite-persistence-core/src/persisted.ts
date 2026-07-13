@@ -2209,6 +2209,13 @@ function createWrappedSyncConfig<
     ...sourceSyncConfig,
     sync: (params) => {
       const transactionStack: Array<OpenSyncTransaction<T, TKey>> = []
+      const startupState = { cleanedUp: false, readySignalled: false }
+      const signalReady = () => {
+        if (!startupState.cleanedUp && !startupState.readySignalled) {
+          startupState.readySignalled = true
+          params.markReady()
+        }
+      }
       const getOpenTransaction = () =>
         transactionStack[transactionStack.length - 1]
       let fullStartPromise: Promise<void> | null = null
@@ -2251,11 +2258,7 @@ function createWrappedSyncConfig<
                 error,
               )
             })
-            .finally(() => {
-              if (!startupState.cleanedUp) {
-                params.markReady()
-              }
-            })
+            .finally(signalReady)
         },
         begin: (options?: { immediate?: boolean }) => {
           const transaction: OpenSyncTransaction<T, TKey> = {
@@ -2495,7 +2498,6 @@ function createWrappedSyncConfig<
       }
 
       let sourceResult: SyncConfigRes = {}
-      const startupState = { cleanedUp: false }
       fullStartPromise = runtime.ensureStarted()
 
       // Mark ready after SQLite hydration so preload() resolves from local data
@@ -2504,15 +2506,13 @@ function createWrappedSyncConfig<
       // owns readiness there. On failure, mark ready to avoid blocking consumers.
       void fullStartPromise.then(
         () => {
-          if (!startupState.cleanedUp && runtime.syncMode !== `on-demand`) {
-            params.markReady()
+          if (runtime.syncMode !== `on-demand`) {
+            signalReady()
           }
         },
         (error) => {
           console.warn(`Failed persisted sync startup:`, error)
-          if (!startupState.cleanedUp) {
-            params.markReady()
-          }
+          signalReady()
         },
       )
 
