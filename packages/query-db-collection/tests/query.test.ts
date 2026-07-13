@@ -20,7 +20,10 @@ import {
   stripVirtualProps,
 } from '../../db/tests/utils'
 import { persistedCollectionOptions } from '../../db-sqlite-persistence-core/src'
-import { queryCollectionOptions } from '../src/query'
+import {
+  queryCollectionOptions,
+  removeOwnershipRelationship,
+} from '../src/query'
 import type { QueryFunctionContext } from '@tanstack/query-core'
 import type {
   Collection,
@@ -5075,6 +5078,26 @@ describe(`QueryCollection`, () => {
     })
 
     describe(`ownership lifecycle characterization`, () => {
+      it(`removes empty ownership entries with the final relationship`, () => {
+        const rowToQueries = new Map<string | number, Set<string>>([
+          [`row`, new Set([`query`])],
+        ])
+        const queryToRows = new Map<string, Set<string | number>>([
+          [`query`, new Set([`row`])],
+        ])
+
+        expect(
+          removeOwnershipRelationship(
+            rowToQueries,
+            queryToRows,
+            `row`,
+            `query`,
+          ),
+        ).toBe(true)
+        expect(rowToQueries.has(`row`)).toBe(false)
+        expect(queryToRows.has(`query`)).toBe(false)
+      })
+
       it(`removes only rows whose final subset owner is unloaded`, async () => {
         const queryFn = vi
           .fn()

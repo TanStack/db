@@ -506,6 +506,28 @@ function getLoadSubsetOptionsForMeta(
  *   })
  * )
  */
+/** @internal Exported from the source module only for ownership invariant tests. */
+export function removeOwnershipRelationship(
+  rowToQueries: Map<string | number, Set<string>>,
+  queryToRows: Map<string, Set<string | number>>,
+  rowKey: string | number,
+  hashedQueryKey: string,
+): boolean {
+  const owners = rowToQueries.get(rowKey)
+  owners?.delete(hashedQueryKey)
+  if (!owners || owners.size === 0) {
+    rowToQueries.delete(rowKey)
+  }
+
+  const ownedRows = queryToRows.get(hashedQueryKey)
+  ownedRows?.delete(rowKey)
+  if (!ownedRows || ownedRows.size === 0) {
+    queryToRows.delete(hashedQueryKey)
+  }
+
+  return !owners || owners.size === 0
+}
+
 // Overload for when schema is provided and select present
 export function queryCollectionOptions<
   T extends StandardSchemaV1,
@@ -740,6 +762,10 @@ export function queryCollectionOptions(
   // queryKey → Set<RowKey>
   const queryToRows = new Map<string, Set<string | number>>()
 
+  // Queries whose in-memory ownership is authoritative, including an empty set.
+  // This preserves the old empty queryToRows entry semantics without retaining it.
+  const resolvedOwnershipQueries = new Set<string>()
+
   // RowKey → Set<queryKey>
   const rowToQueries = new Map<string | number, Set<string>>()
 
@@ -764,6 +790,7 @@ export function queryCollectionOptions(
   const queryRefCounts = new Map<string, number>()
 
   const addRowOwner = (rowKey: string | number, hashedQueryKey: string) => {
+    resolvedOwnershipQueries.add(hashedQueryKey)
     const owners = rowToQueries.get(rowKey) || new Set<string>()
     owners.add(hashedQueryKey)
     rowToQueries.set(rowKey, owners)
@@ -775,8 +802,14 @@ export function queryCollectionOptions(
   }
 
   const addRowOwners = (rowKey: string | number, owners: Set<string>) => {
+    if (owners.size === 0) {
+      rowToQueries.delete(rowKey)
+      return
+    }
+
     rowToQueries.set(rowKey, new Set(owners))
     owners.forEach((owner) => {
+      resolvedOwnershipQueries.add(owner)
       const ownedRows = queryToRows.get(owner) || new Set<string | number>()
       ownedRows.add(rowKey)
       queryToRows.set(owner, ownedRows)
@@ -784,16 +817,13 @@ export function queryCollectionOptions(
   }
 
   const removeRowOwner = (rowKey: string | number, hashedQueryKey: string) => {
-    const owners = rowToQueries.get(rowKey) || new Set<string>()
-    owners.delete(hashedQueryKey)
-    rowToQueries.set(rowKey, owners)
-
-    const ownedRows =
-      queryToRows.get(hashedQueryKey) || new Set<string | number>()
-    ownedRows.delete(rowKey)
-    queryToRows.set(hashedQueryKey, ownedRows)
-
-    return owners.size === 0
+    resolvedOwnershipQueries.add(hashedQueryKey)
+    return removeOwnershipRelationship(
+      rowToQueries,
+      queryToRows,
+      rowKey,
+      hashedQueryKey,
+    )
   }
 
   const removeQueryOwnership = (hashedQueryKey: string) => {
@@ -938,7 +968,7 @@ export function queryCollectionOptions(
 
     const getHydratedOwnedRowsForQueryBaseline = (hashedQueryKey: string) => {
       const knownRows = queryToRows.get(hashedQueryKey)
-      if (knownRows) {
+      if (knownRows || resolvedOwnershipQueries.has(hashedQueryKey)) {
         return new Set(knownRows)
       }
 
@@ -971,14 +1001,14 @@ export function queryCollectionOptions(
     > => {
       const knownRows = queryToRows.get(hashedQueryKey)
       if (
-        knownRows &&
-        Array.from(knownRows).every((rowKey) => collection.has(rowKey))
+        (knownRows || resolvedOwnershipQueries.has(hashedQueryKey)) &&
+        Array.from(knownRows ?? []).every((rowKey) => collection.has(rowKey))
       ) {
         const baseline = new Map<
           string | number,
           { value: any; owners: Set<string> }
         >()
-        knownRows.forEach((rowKey) => {
+        knownRows?.forEach((rowKey) => {
           const value = collection.get(rowKey)
           const owners = rowToQueries.get(rowKey)
           if (value && owners) {
@@ -1636,6 +1666,7 @@ export function queryCollectionOptions(
 
       state.observers.delete(hashedQueryKey)
       queryToRows.delete(hashedQueryKey)
+      resolvedOwnershipQueries.delete(hashedQueryKey)
       hashToQueryKey.delete(hashedQueryKey)
       queryRefCounts.delete(hashedQueryKey)
       effectivePersistedGcTimes.delete(hashedQueryKey)
