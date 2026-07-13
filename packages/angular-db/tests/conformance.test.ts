@@ -133,6 +133,7 @@ function makeHandle(result: any, destroy: () => void): LiveQueryHandle {
     current(): ConformanceResult {
       return {
         data: result.data(),
+        state: result.state(),
         status: result.status(),
         isReady: Boolean(result.isReady()),
         isError: Boolean(result.isError()),
