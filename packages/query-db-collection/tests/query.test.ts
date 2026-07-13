@@ -20,10 +20,7 @@ import {
   stripVirtualProps,
 } from '../../db/tests/utils'
 import { persistedCollectionOptions } from '../../db-sqlite-persistence-core/src'
-import {
-  queryCollectionOptions,
-  removeOwnershipRelationship,
-} from '../src/query'
+import { queryCollectionOptions } from '../src/query'
 import type { QueryFunctionContext } from '@tanstack/query-core'
 import type {
   Collection,
@@ -49,6 +46,30 @@ interface CategorisedItem {
 }
 
 const getKey = (item: TestItem) => item.id
+
+type OwnershipMaps = {
+  rowToQueries: Map<string | number, Set<string>>
+  queryToRows: Map<string, Set<string | number>>
+  resolvedOwnershipQueries: Set<string>
+}
+
+function inspectOwnershipMaps(options: {
+  sync: { sync: unknown }
+}): OwnershipMaps {
+  const sync = options.sync.sync as {
+    __getOwnershipMapsForTests?: () => OwnershipMaps
+  }
+  const maps = sync.__getOwnershipMapsForTests?.()
+  if (!maps) {
+    throw new Error(`Ownership-map test inspection is unavailable`)
+  }
+  return maps
+}
+
+function expectNoEmptyOwnershipSets(maps: OwnershipMaps): void {
+  maps.rowToQueries.forEach((owners) => expect(owners.size).toBeGreaterThan(0))
+  maps.queryToRows.forEach((rows) => expect(rows.size).toBeGreaterThan(0))
+}
 
 // Helper to advance timers and allow microtasks to flush
 const flushPromises = () => new Promise((resolve) => setTimeout(resolve, 0))
@@ -5078,26 +5099,6 @@ describe(`QueryCollection`, () => {
     })
 
     describe(`ownership lifecycle characterization`, () => {
-      it(`removes empty ownership entries with the final relationship`, () => {
-        const rowToQueries = new Map<string | number, Set<string>>([
-          [`row`, new Set([`query`])],
-        ])
-        const queryToRows = new Map<string, Set<string | number>>([
-          [`query`, new Set([`row`])],
-        ])
-
-        expect(
-          removeOwnershipRelationship(
-            rowToQueries,
-            queryToRows,
-            `row`,
-            `query`,
-          ),
-        ).toBe(true)
-        expect(rowToQueries.has(`row`)).toBe(false)
-        expect(queryToRows.has(`query`)).toBe(false)
-      })
-
       it(`removes only rows whose final subset owner is unloaded`, async () => {
         const queryFn = vi
           .fn()
@@ -5109,16 +5110,16 @@ describe(`QueryCollection`, () => {
             { id: `2`, name: `Shared` },
             { id: `3`, name: `Second only` },
           ])
-        const collection = createCollection(
-          queryCollectionOptions<TestItem>({
-            id: `ownership-overlapping-subsets-test`,
-            queryClient,
-            queryKey: [`ownership-overlapping-subsets-test`],
-            queryFn,
-            getKey,
-            syncMode: `on-demand`,
-          }),
-        )
+        const options = queryCollectionOptions<TestItem>({
+          id: `ownership-overlapping-subsets-test`,
+          queryClient,
+          queryKey: [`ownership-overlapping-subsets-test`],
+          queryFn,
+          getKey,
+          syncMode: `on-demand`,
+        })
+        const ownershipMaps = inspectOwnershipMaps(options)
+        const collection = createCollection(options)
         const firstSubset = createLiveQueryCollection({
           query: (q) =>
             q
@@ -5142,11 +5143,15 @@ describe(`QueryCollection`, () => {
           expect(collection.has(`2`)).toBe(true)
           expect(collection.has(`3`)).toBe(true)
         })
+        expectNoEmptyOwnershipSets(ownershipMaps)
 
         await secondSubset.cleanup()
         await vi.waitFor(() => {
           expect(collection.size).toBe(0)
         })
+        expectNoEmptyOwnershipSets(ownershipMaps)
+        expect(ownershipMaps.rowToQueries.size).toBe(0)
+        expect(ownershipMaps.queryToRows.size).toBe(0)
       })
 
       it(`expires the Query cache entry after unload without restoring deleted rows`, async () => {
@@ -5218,6 +5223,7 @@ describe(`QueryCollection`, () => {
           startSync: true,
         })
         const originalSync = baseOptions.sync
+        const ownershipMaps = inspectOwnershipMaps(baseOptions)
         const metadataHarness = createInMemorySyncMetadataApi<
           string | number,
           CategorisedItem
@@ -5266,6 +5272,9 @@ describe(`QueryCollection`, () => {
           expect(collection.has(retainedRow.id)).toBe(false)
         })
         expect(metadataHarness.rowMetadata.get(retainedRow.id)).toBeUndefined()
+        expectNoEmptyOwnershipSets(ownershipMaps)
+        expect(ownershipMaps.rowToQueries.size).toBe(0)
+        expect(ownershipMaps.queryToRows.size).toBe(0)
         expect(
           metadataHarness.collectionMetadata.has(
             `queryCollection:gc:${queryHash}`,
@@ -5273,6 +5282,7 @@ describe(`QueryCollection`, () => {
         ).toBe(false)
 
         await collection.cleanup()
+        expect(ownershipMaps.resolvedOwnershipQueries.size).toBe(0)
       })
     })
 

@@ -506,8 +506,7 @@ function getLoadSubsetOptionsForMeta(
  *   })
  * )
  */
-/** @internal Exported from the source module only for ownership invariant tests. */
-export function removeOwnershipRelationship(
+function removeOwnershipRelationship(
   rowToQueries: Map<string | number, Set<string>>,
   queryToRows: Map<string, Set<string | number>>,
   rowKey: string | number,
@@ -790,7 +789,6 @@ export function queryCollectionOptions(
   const queryRefCounts = new Map<string, number>()
 
   const addRowOwner = (rowKey: string | number, hashedQueryKey: string) => {
-    resolvedOwnershipQueries.add(hashedQueryKey)
     const owners = rowToQueries.get(rowKey) || new Set<string>()
     owners.add(hashedQueryKey)
     rowToQueries.set(rowKey, owners)
@@ -809,7 +807,6 @@ export function queryCollectionOptions(
 
     rowToQueries.set(rowKey, new Set(owners))
     owners.forEach((owner) => {
-      resolvedOwnershipQueries.add(owner)
       const ownedRows = queryToRows.get(owner) || new Set<string | number>()
       ownedRows.add(rowKey)
       queryToRows.set(owner, ownedRows)
@@ -817,7 +814,6 @@ export function queryCollectionOptions(
   }
 
   const removeRowOwner = (rowKey: string | number, hashedQueryKey: string) => {
-    resolvedOwnershipQueries.add(hashedQueryKey)
     return removeOwnershipRelationship(
       rowToQueries,
       queryToRows,
@@ -1416,6 +1412,10 @@ export function queryCollectionOptions(
       const previouslyOwnedRows = shouldUsePersistedBaseline
         ? new Set(persistedBaseline.keys())
         : getHydratedOwnedRowsForQueryBaseline(hashedQueryKey)
+      // From this point onward the result, including an empty result, is the
+      // authoritative ownership baseline until this query is cleaned up.
+      resolvedOwnershipQueries.add(hashedQueryKey)
+
       const newItemsMap = new Map<string | number, any>()
       newItemsArray.forEach((item) => {
         const key = getKey(item)
@@ -2043,6 +2043,16 @@ export function queryCollectionOptions(
         }
       },
     }
+  }
+
+  if (typeof process !== `undefined` && process.env.NODE_ENV === `test`) {
+    Object.defineProperty(enhancedInternalSync, `__getOwnershipMapsForTests`, {
+      value: () => ({
+        rowToQueries,
+        queryToRows,
+        resolvedOwnershipQueries,
+      }),
+    })
   }
 
   // Create write utils using the manual-sync module
