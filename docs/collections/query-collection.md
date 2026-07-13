@@ -54,6 +54,84 @@ The `queryCollectionOptions` function accepts the following options:
 - `queryClient`: TanStack Query client instance
 - `getKey`: Function to extract the unique key from an item
 
+### Creating Collection Options from a Runtime QueryClient
+
+`queryCollectionOptions` needs a `queryClient` when the collection options are created. In SSR, TanStack Start, tests, or multi-tenant apps, that `QueryClient` is often request-local or route-local rather than module-global.
+
+Keep shared collection configuration in a factory function that accepts the runtime `QueryClient`:
+
+```typescript
+import { QueryClient } from "@tanstack/query-core"
+import { createCollection } from "@tanstack/db"
+import { queryCollectionOptions } from "@tanstack/query-db-collection"
+
+interface Todo {
+  id: string
+  title: string
+}
+
+export function todoCollectionOptions(queryClient: QueryClient) {
+  return queryCollectionOptions<Todo>({
+    queryKey: ["todos"],
+    queryFn: async () => {
+      const response = await fetch("/api/todos")
+      return response.json() as Promise<Array<Todo>>
+    },
+    queryClient,
+    getKey: (todo) => todo.id,
+  })
+}
+
+function createTodosCollection(queryClient: QueryClient) {
+  return createCollection(todoCollectionOptions(queryClient))
+}
+```
+
+Create the collection once for each scoped `QueryClient` and parameter set, then reuse that `Collection` instance. Creating multiple collections with the same `QueryClient` and `queryKey` gives each collection its own materialized state, lifecycle, subscriptions, and optimistic mutations.
+
+In request-scoped environments, store the collection in request or router context. For client-side scopes, memoize by `QueryClient`:
+
+```typescript
+type TodosCollection = ReturnType<typeof createTodosCollection>
+
+const collectionsByClient = new WeakMap<QueryClient, TodosCollection>()
+
+export function getTodosCollection(
+  queryClient: QueryClient,
+): TodosCollection {
+  let collection = collectionsByClient.get(queryClient)
+
+  if (!collection) {
+    collection = createTodosCollection(queryClient)
+    collectionsByClient.set(queryClient, collection)
+  }
+
+  return collection
+}
+```
+
+Avoid calling `createCollection(todoCollectionOptions(queryClient))` independently during render or in each consumer. Share the stable collection instance for the lifetime of that `QueryClient` scope.
+
+The same pattern works for scoped or parameterized collections. Pass route params, a tenant ID, or filters into the factory alongside the `QueryClient`:
+
+```typescript
+export function projectTodosCollectionOptions(
+  queryClient: QueryClient,
+  projectId: string,
+) {
+  return queryCollectionOptions<Todo>({
+    queryKey: ["projects", projectId, "todos"],
+    queryFn: () => fetchProjectTodos(projectId),
+    queryClient,
+    getKey: (todo) => todo.id,
+  })
+}
+```
+
+For parameterized collections, memoize by both the scoped `QueryClient` and the parameter tuple. If a long-lived scope can create unbounded parameter sets, add eviction or dispose collections when they are no longer needed.
+
+This keeps SSR and request-scoped code from sharing a global `QueryClient` while keeping each collection instance stable within its scope.
+
 ### Query Options
 
 Query Collections use TanStack Query internally and expose supported Query observer options as top-level `queryCollectionOptions` fields.
