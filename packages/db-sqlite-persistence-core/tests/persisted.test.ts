@@ -1640,6 +1640,47 @@ describe(`persistedCollectionOptions`, () => {
       title: `Updated`,
     })
   })
+
+  it(`preload resolves from local SQLite data when upstream sync never calls markReady`, async () => {
+    // Regression test: collection.preload() used to hang forever when the upstream
+    // sync never called markReady() (e.g. TanStack Query offlineFirst pausing a
+    // query). The fix fires params.markReady() after ensureStarted() so local
+    // SQLite data is enough to unblock preload().
+    const adapter = createRecordingAdapter([{ id: `1`, title: `Offline Todo` }])
+
+    const neverReadySync: SyncConfig<Todo, string> = {
+      sync: (_params) => {
+        // deliberately never call params.markReady() - simulates offlineFirst paused query
+        return { cleanup: () => {} }
+      },
+    }
+
+    const collection = createCollection(
+      persistedCollectionOptions<Todo, string>({
+        id: `persisted-offline-preload`,
+        getKey: (item) => item.id,
+        sync: neverReadySync,
+        persistence: {
+          adapter,
+        },
+      }),
+    )
+
+    const timeoutMs = 2000
+    const timeoutError = new Promise<never>((_, reject) =>
+      setTimeout(
+        () => reject(new Error(`preload timed out after ${timeoutMs}ms`)),
+        timeoutMs,
+      ),
+    )
+
+    await Promise.race([collection.preload(), timeoutError])
+
+    expect(stripVirtualProps(collection.get(`1`))).toEqual({
+      id: `1`,
+      title: `Offline Todo`,
+    })
+  })
 })
 
 describe(`persisted key and identifier helpers`, () => {
