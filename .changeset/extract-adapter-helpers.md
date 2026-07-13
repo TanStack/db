@@ -1,5 +1,5 @@
 ---
-'@tanstack/db': minor
+'@tanstack/db': patch
 '@tanstack/react-db': patch
 '@tanstack/vue-db': patch
 '@tanstack/svelte-db': patch
