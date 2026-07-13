@@ -112,25 +112,79 @@ export function getTodosCollection(
 
 Avoid calling `createCollection(todoCollectionOptions(queryClient))` independently during render or in each consumer. Share the stable collection instance for the lifetime of that `QueryClient` scope.
 
-The same pattern works for scoped or parameterized collections. Pass route params, a tenant ID, or filters into the factory alongside the `QueryClient`:
+This keeps SSR and request-scoped code from sharing a global `QueryClient` while keeping each collection instance stable within its scope.
+
+### Business-Scoped Collection Factories
+
+A tenant, project, account, or route parameter defines a **business scope**: it determines which server resource the collection represents. Put that scope in both the Query key and the query function. This extends the [runtime `QueryClient` factory pattern](#creating-collection-options-from-a-runtime-queryclient) with another explicit factory parameter:
 
 ```typescript
-export function projectTodosCollectionOptions(
+interface Todo {
+  id: string
+  title: string
+  projectId: string
+}
+
+async function fetchProjectTodos(projectId: string): Promise<Array<Todo>> {
+  const response = await fetch(`/api/projects/${projectId}/todos`)
+  return response.json()
+}
+
+export function createProjectTodosCollection(
   queryClient: QueryClient,
   projectId: string,
 ) {
-  return queryCollectionOptions<Todo>({
-    queryKey: ["projects", projectId, "todos"],
-    queryFn: () => fetchProjectTodos(projectId),
-    queryClient,
-    getKey: (todo) => todo.id,
-  })
+  return createCollection(
+    queryCollectionOptions<Todo>({
+      queryKey: ["projects", projectId, "todos"],
+      queryFn: () => fetchProjectTodos(projectId),
+      queryClient,
+      getKey: (todo) => todo.id,
+      staleTime: 30_000,
+    })
+  )
 }
 ```
 
-For parameterized collections, memoize by both the scoped `QueryClient` and the parameter tuple. If a long-lived scope can create unbounded parameter sets, add eviction or dispose collections when they are no longer needed.
+The scope is part of the collection's identity. Memoize by both the `QueryClient` and a stable scope key so consumers of the same project share one collection:
 
-This keeps SSR and request-scoped code from sharing a global `QueryClient` while keeping each collection instance stable within its scope.
+```typescript
+type ProjectTodosCollection = ReturnType<
+  typeof createProjectTodosCollection
+>
+
+const projectCollections = new WeakMap<
+  QueryClient,
+  Map<string, ProjectTodosCollection>
+>()
+
+export function getProjectTodosCollection(
+  queryClient: QueryClient,
+  projectId: string,
+): ProjectTodosCollection {
+  let collectionsByProject = projectCollections.get(queryClient)
+
+  if (!collectionsByProject) {
+    collectionsByProject = new Map()
+    projectCollections.set(queryClient, collectionsByProject)
+  }
+
+  let collection = collectionsByProject.get(projectId)
+
+  if (!collection) {
+    collection = createProjectTodosCollection(queryClient, projectId)
+    collectionsByProject.set(projectId, collection)
+  }
+
+  return collection
+}
+```
+
+For multiple scope values, use a collision-safe stable key (or nested maps) containing every value. Do not call the factory on each render. In a long-lived client, scopes such as user-selected projects may grow without bound; evict entries that are no longer needed and call `await collection.cleanup()` when your application owns their lifecycle. Request-local maps can instead be discarded with the request.
+
+Business scope is separate from a **relational subset** requested by a live query. With `syncMode: "on-demand"`, `LoadSubsetOptions` describes predicates, ordering, limits, and offsets within one business-scoped collection. The collection passes those options to `queryFn` through `ctx.meta.loadSubsetOptions` and uses them to manage subset Query keys. See [QueryFn and Predicate Push-Down](#queryfn-and-predicate-push-down).
+
+Do not create another collection for every `where`, `orderBy`, or `limit`. Reuse the project-scoped collection and let on-demand subset loading represent those relational queries. Create separate collections only when the server resources are genuinely distinct business scopes.
 
 ### Query Options
 
