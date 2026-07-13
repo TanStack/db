@@ -1,5 +1,11 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { QueryClient, dehydrate, hashKey } from '@tanstack/query-core'
+import {
+  QueryClient,
+  dehydrate,
+  focusManager,
+  hashKey,
+  onlineManager,
+} from '@tanstack/query-core'
 import {
   BTreeIndex,
   createCollection,
@@ -183,6 +189,129 @@ describe(`QueryCollection`, () => {
   afterEach(() => {
     // Ensure all queries are properly cleaned up after each test
     queryClient.clear()
+  })
+
+  it(`should pass through additional top-level Query observer options`, async () => {
+    const queryKey = [`query-options-pass-through`]
+    const queryFn = vi.fn().mockResolvedValue([{ id: `1`, name: `Item 1` }])
+
+    const collection = createCollection(
+      queryCollectionOptions<TestItem>({
+        id: `query-options-pass-through`,
+        queryClient,
+        queryKey,
+        queryFn,
+        getKey,
+        startSync: true,
+        refetchOnWindowFocus: true,
+        refetchOnReconnect: true,
+        refetchOnMount: `always`,
+        networkMode: `online`,
+      }),
+    )
+
+    await vi.waitFor(() => {
+      expect(collection.size).toBe(1)
+    })
+
+    const query = queryClient.getQueryCache().find({ queryKey, exact: true })
+    const options = query?.options as any
+    expect(options.refetchOnWindowFocus).toBe(true)
+    expect(options.refetchOnReconnect).toBe(true)
+    expect(options.refetchOnMount).toBe(`always`)
+    expect(options.networkMode).toBe(`online`)
+  })
+
+  it(`should refetch on focus and reconnect with standalone QueryClient`, async () => {
+    const queryKey = [`query-options-event-refetch`]
+    const queryFn = vi
+      .fn()
+      .mockResolvedValueOnce([{ id: `1`, name: `Initial` }])
+      .mockResolvedValueOnce([{ id: `1`, name: `Focused` }])
+      .mockResolvedValueOnce([{ id: `1`, name: `Reconnected` }])
+
+    const collection = createCollection(
+      queryCollectionOptions<TestItem>({
+        id: `query-options-event-refetch`,
+        queryClient,
+        queryKey,
+        queryFn,
+        getKey,
+        startSync: true,
+        staleTime: 0,
+        refetchOnWindowFocus: true,
+        refetchOnReconnect: true,
+      }),
+    )
+
+    try {
+      await vi.waitFor(() => {
+        expect(collection.size).toBe(1)
+        expect(queryFn).toHaveBeenCalledTimes(1)
+      })
+
+      focusManager.setFocused(false)
+      focusManager.setFocused(true)
+
+      await vi.waitFor(() => {
+        expect(queryFn).toHaveBeenCalledTimes(2)
+      })
+
+      onlineManager.setOnline(false)
+      onlineManager.setOnline(true)
+
+      await vi.waitFor(() => {
+        expect(queryFn).toHaveBeenCalledTimes(3)
+      })
+    } finally {
+      await collection.cleanup()
+      focusManager.setFocused(undefined)
+      onlineManager.setOnline(true)
+    }
+  })
+
+  it(`should omit undefined Query observer options to preserve defaults`, async () => {
+    const queryKey = [`query-options-default-preservation`]
+    const queryFn = vi.fn().mockResolvedValue([{ id: `1`, name: `Item 1` }])
+
+    const clientWithDefaults = new QueryClient({
+      defaultOptions: {
+        queries: {
+          staleTime: 1234,
+          retry: 3,
+          refetchOnWindowFocus: false,
+        },
+      },
+    })
+
+    const collection = createCollection(
+      queryCollectionOptions<TestItem>({
+        id: `query-options-default-preservation`,
+        queryClient: clientWithDefaults,
+        queryKey,
+        queryFn,
+        getKey,
+        startSync: true,
+        staleTime: 5678,
+        retry: undefined,
+        refetchOnWindowFocus: true,
+      }),
+    )
+
+    await vi.waitFor(() => {
+      expect(collection.size).toBe(1)
+    })
+
+    const query = clientWithDefaults.getQueryCache().find({
+      queryKey,
+      exact: true,
+    })
+    const options = query?.options as any
+    expect(options.staleTime).toBe(5678)
+    expect(options.retry).toBe(3)
+    expect(options.refetchOnWindowFocus).toBe(true)
+
+    clientWithDefaults.clear()
   })
 
   it(`should initialize and fetch initial data`, async () => {
