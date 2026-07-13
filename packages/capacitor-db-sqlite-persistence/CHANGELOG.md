@@ -1,5 +1,67 @@
 # @tanstack/capacitor-db-sqlite-persistence
 
+## 0.2.7
+
+### Patch Changes
+
+- Updated dependencies []:
+  - @tanstack/db-sqlite-persistence-core@0.2.7
+
+## 0.2.6
+
+### Patch Changes
+
+- Updated dependencies [[`f7da776`](https://github.com/TanStack/db/commit/f7da77660b16cbfe30817fb5c938267d696c8d1c)]:
+  - @tanstack/db-sqlite-persistence-core@0.2.6
+
+## 0.2.5
+
+### Patch Changes
+
+- Updated dependencies []:
+  - @tanstack/db-sqlite-persistence-core@0.2.5
+
+## 0.2.4
+
+### Patch Changes
+
+- Updated dependencies []:
+  - @tanstack/db-sqlite-persistence-core@0.2.4
+
+## 0.2.3
+
+### Patch Changes
+
+- Updated dependencies []:
+  - @tanstack/db-sqlite-persistence-core@0.2.3
+
+## 0.2.2
+
+### Patch Changes
+
+- Updated dependencies []:
+  - @tanstack/db-sqlite-persistence-core@0.2.2
+
+## 0.2.1
+
+### Patch Changes
+
+- Updated dependencies [[`00389a4`](https://github.com/TanStack/db/commit/00389a47b258ad58fc3a03c5cc6f66957b9bd2d1)]:
+  - @tanstack/db-sqlite-persistence-core@0.2.1
+
+## 0.2.0
+
+### Minor Changes
+
+- SQLite persistence wrappers now prune the `applied_tx` replay log by default so SQLite files no longer grow without bound. When prune options are omitted, wrappers that construct the shared SQLite core adapter apply `appliedTxPruneMaxRows: 1_000` and `appliedTxPruneMaxAgeSeconds: 86_400` (24h). Both remain overridable, and passing `0` disables that limit. The defaults are exported as `DEFAULT_APPLIED_TX_PRUNE_MAX_ROWS` and `DEFAULT_APPLIED_TX_PRUNE_MAX_AGE_SECONDS` from the shared SQLite core package and re-exported by wrapper packages. ([#1572](https://github.com/TanStack/db/pull/1572))
+
+  The shared SQLite core adapter now treats `applied_tx` as a bounded replay cache during `pullSince` recovery. If a recovery request starts before the retained replay window, `pullSince` returns `requiresFullReload: true` instead of returning partial deltas.
+
+### Patch Changes
+
+- Updated dependencies [[`58edb26`](https://github.com/TanStack/db/commit/58edb26e87de8d992594119e39a9daa6f80620f2)]:
+  - @tanstack/db-sqlite-persistence-core@0.2.0
+
 ## 0.1.11
 
 ### Patch Changes

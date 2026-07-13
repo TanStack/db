@@ -69,13 +69,32 @@ Whether the query should automatically run (default: true)
 
 ***
 
+### gcTime?
+
+```ts
+optional gcTime: number;
+```
+
+Defined in: [packages/query-db-collection/src/query.ts:122](https://github.com/TanStack/db/blob/main/packages/query-db-collection/src/query.ts#L122)
+
+Time in milliseconds after which the collection will be garbage collected
+when it has no active subscribers. Defaults to 5 minutes (300000ms).
+
+#### Overrides
+
+```ts
+BaseCollectionConfig.gcTime
+```
+
+***
+
 ### meta?
 
 ```ts
 optional meta: Record<string, unknown>;
 ```
 
-Defined in: [packages/query-db-collection/src/query.ts:144](https://github.com/TanStack/db/blob/main/packages/query-db-collection/src/query.ts#L144)
+Defined in: [packages/query-db-collection/src/query.ts:151](https://github.com/TanStack/db/blob/main/packages/query-db-collection/src/query.ts#L151)
 
 Metadata to pass to the query.
 Available in queryFn via context.meta
@@ -107,7 +126,7 @@ meta: {
 optional persistedGcTime: number;
 ```
 
-Defined in: [packages/query-db-collection/src/query.ts:122](https://github.com/TanStack/db/blob/main/packages/query-db-collection/src/query.ts#L122)
+Defined in: [packages/query-db-collection/src/query.ts:129](https://github.com/TanStack/db/blob/main/packages/query-db-collection/src/query.ts#L129)
 
 ***
 

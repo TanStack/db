@@ -6,11 +6,15 @@ import {
   inject,
   signal,
 } from '@angular/core'
-import { BaseQueryBuilder, createLiveQueryCollection } from '@tanstack/db'
+import {
+  BaseQueryBuilder,
+  createLiveQueryCollection,
+  isCollection,
+  isSingleResultCollection,
+} from '@tanstack/db'
 import type {
   ChangeMessage,
   Collection,
-  CollectionConfigSingleRowOption,
   CollectionStatus,
   Context,
   GetResult,
@@ -139,14 +143,7 @@ export function injectLiveQuery(opts: any) {
 
   const collection = computed(() => {
     // Check if it's an existing collection
-    const isExistingCollection =
-      opts &&
-      typeof opts === `object` &&
-      typeof opts.subscribeChanges === `function` &&
-      typeof opts.startSyncImmediate === `function` &&
-      typeof opts.id === `string`
-
-    if (isExistingCollection) {
+    if (isCollection(opts)) {
       return opts
     }
 
@@ -194,9 +191,11 @@ export function injectLiveQuery(opts: any) {
       })
     }
 
-    // Handle LiveQueryCollectionConfig objects
+    // Handle LiveQueryCollectionConfig objects. Default startSync/gcTime to
+    // match the query-fn and reactive-options paths, but let an explicit value
+    // in the config win — otherwise a bare `{ query }` never syncs.
     if (opts && typeof opts === `object` && typeof opts.query === `function`) {
-      return createLiveQueryCollection(opts)
+      return createLiveQueryCollection({ startSync: true, gcTime: 0, ...opts })
     }
 
     throw new Error(`Invalid options provided to injectLiveQuery`)
@@ -214,10 +213,9 @@ export function injectLiveQuery(opts: any) {
     if (!currentCollection) {
       return internalData()
     }
-    const config = currentCollection.config as
-      | CollectionConfigSingleRowOption<any, any, any>
-      | undefined
-    return config?.singleResult ? internalData()[0] : internalData()
+    return isSingleResultCollection(currentCollection)
+      ? internalData()[0]
+      : internalData()
   })
 
   const syncDataFromCollection = (
@@ -282,7 +280,9 @@ export function injectLiveQuery(opts: any) {
   return {
     state,
     data,
-    collection,
+    // Loosely typed so the impl return stays compatible with every overload
+    // (the shared `isCollection` guard narrows the computed to `Collection | null`).
+    collection: collection as Signal<any>,
     status,
     isLoading: computed(() => status() === `loading`),
     isReady: computed(() => status() === `ready` || status() === `disabled`),
