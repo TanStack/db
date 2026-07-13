@@ -50,6 +50,16 @@ const getKey = (item: TestItem) => item.id
 // Helper to advance timers and allow microtasks to flush
 const flushPromises = () => new Promise((resolve) => setTimeout(resolve, 0))
 
+function createDeferred<T>() {
+  let resolve!: (value: T) => void
+  let reject!: (reason?: unknown) => void
+  const promise = new Promise<T>((resolvePromise, rejectPromise) => {
+    resolve = resolvePromise
+    reject = rejectPromise
+  })
+  return { promise, resolve, reject }
+}
+
 function createInMemorySyncMetadataApi<
   TKey extends string | number = string | number,
   TItem extends object = Record<string, unknown>,
@@ -2370,6 +2380,175 @@ describe(`QueryCollection`, () => {
       // Collection should be cleaned up and not have processed the data
       expect(collection.status).toBe(`cleaned-up`)
       expect(collection.size).toBe(0)
+    })
+
+    describe(`query cancellation and subset cleanup lifecycle`, () => {
+      const createSubset = (collection: Collection<TestItem>) =>
+        createLiveQueryCollection({
+          query: (q) =>
+            q
+              .from({ item: collection })
+              .where(({ item }) => eq(item.id, `1`))
+              .select(({ item }) => ({ id: item.id, name: item.name })),
+        })
+
+      it(`forwards Query Core's signal and aborts an in-flight eager query on collection cleanup`, async () => {
+        const deferred = createDeferred<Array<TestItem>>()
+        let signal: AbortSignal | undefined
+        const collection = createCollection(
+          queryCollectionOptions<TestItem>({
+            id: `signal-forwarding-cleanup-test`,
+            queryClient,
+            queryKey: [`signal-forwarding-cleanup-test`],
+            queryFn: (context) => {
+              signal = context.signal
+              // Reading the signal makes Query Core treat the request as cancellable.
+              void context.signal.aborted
+              return deferred.promise
+            },
+            getKey,
+            startSync: true,
+          }),
+        )
+
+        await vi.waitFor(() => expect(signal).toBeDefined())
+        expect(signal?.aborted).toBe(false)
+
+        await collection.cleanup()
+
+        expect(signal?.aborted).toBe(true)
+        expect(collection.size).toBe(0)
+        // Query Core may retain the cancelled cache entry, but cleanup releases every observer.
+        expect(
+          queryClient
+            .getQueryCache()
+            .find({ queryKey: [`signal-forwarding-cleanup-test`] })
+            ?.getObserversCount() ?? 0,
+        ).toBe(0)
+      })
+
+      it(`does not rematerialize a late fulfilled result after an in-flight subset is unloaded`, async () => {
+        const deferred = createDeferred<Array<TestItem>>()
+        const collection = createCollection(
+          queryCollectionOptions<TestItem>({
+            id: `late-subset-result-test`,
+            queryClient,
+            queryKey: [`late-subset-result-test`],
+            queryFn: () => deferred.promise,
+            getKey,
+            syncMode: `on-demand`,
+          }),
+        )
+        const liveQuery = createSubset(collection)
+        void liveQuery.preload().catch(() => undefined)
+
+        await vi.waitFor(() => expect(queryClient.isFetching()).toBe(1))
+        await liveQuery.cleanup()
+        deferred.resolve([{ id: `1`, name: `Late item` }])
+        await flushPromises()
+
+        expect(collection.size).toBe(0)
+        expect(queryClient.isFetching()).toBe(0)
+        expect(
+          queryClient
+            .getQueryCache()
+            .findAll({
+              queryKey: [`late-subset-result-test`],
+            })[0]
+            ?.getObserversCount() ?? 0,
+        ).toBe(0)
+        await collection.cleanup()
+      })
+
+      it(`deterministically materializes a shared in-flight result after fast subset unmount and remount`, async () => {
+        const deferred = createDeferred<Array<TestItem>>()
+        const queryFn = vi.fn(() => deferred.promise)
+        const collection = createCollection(
+          queryCollectionOptions<TestItem>({
+            id: `fast-subset-remount-test`,
+            queryClient,
+            queryKey: [`fast-subset-remount-test`],
+            queryFn,
+            getKey,
+            syncMode: `on-demand`,
+          }),
+        )
+        const firstLiveQuery = createSubset(collection)
+        void firstLiveQuery.preload().catch(() => undefined)
+        await vi.waitFor(() => expect(queryFn).toHaveBeenCalledTimes(1))
+
+        await firstLiveQuery.cleanup()
+        const secondLiveQuery = createSubset(collection)
+        const secondPreload = secondLiveQuery.preload()
+        deferred.resolve([{ id: `1`, name: `Remounted item` }])
+        await secondPreload
+
+        expect(queryFn).toHaveBeenCalledTimes(1)
+        expect(stripVirtualProps(collection.get(`1`))).toEqual({
+          id: `1`,
+          name: `Remounted item`,
+        })
+        await secondLiveQuery.cleanup()
+        expect(collection.size).toBe(0)
+        await collection.cleanup()
+      })
+
+      it(`keeps invalidate-unsubscribe-resubscribe compatible while removing stale subset rows and observers`, async () => {
+        let items: Array<TestItem> = [{ id: `1`, name: `Initial item` }]
+        const queryFn = vi.fn(() => Promise.resolve(items))
+        const collection = createCollection(
+          queryCollectionOptions<TestItem>({
+            id: `subset-invalidation-remount-test`,
+            queryClient,
+            queryKey: [`subset-invalidation-remount-test`],
+            queryFn,
+            getKey,
+            syncMode: `on-demand`,
+          }),
+        )
+        const firstLiveQuery = createSubset(collection)
+        await firstLiveQuery.preload()
+        const subsetQuery = queryClient.getQueryCache().findAll({
+          queryKey: [`subset-invalidation-remount-test`],
+        })[0]
+        expect(subsetQuery).toBeDefined()
+
+        items = [{ id: `1`, name: `Invalidated item` }]
+        await queryClient.invalidateQueries({
+          queryKey: subsetQuery!.queryKey,
+          exact: true,
+        })
+        await vi.waitFor(() =>
+          expect(collection.get(`1`)?.name).toBe(`Invalidated item`),
+        )
+
+        await firstLiveQuery.cleanup()
+        expect(collection.size).toBe(0)
+        expect(subsetQuery!.getObserversCount()).toBe(0)
+
+        items = [{ id: `1`, name: `Remounted item` }]
+        const secondLiveQuery = createSubset(collection)
+        await secondLiveQuery.preload()
+        await queryClient.invalidateQueries({
+          queryKey: subsetQuery!.queryKey,
+          exact: true,
+        })
+        await vi.waitFor(() =>
+          expect(collection.get(`1`)?.name).toBe(`Remounted item`),
+        )
+
+        await secondLiveQuery.cleanup()
+        expect(collection.size).toBe(0)
+        expect(
+          queryClient
+            .getQueryCache()
+            .findAll({
+              queryKey: [`subset-invalidation-remount-test`],
+            })[0]
+            ?.getObserversCount() ?? 0,
+        ).toBe(0)
+        await collection.cleanup()
+      })
     })
 
     it(`should maintain data consistency during rapid updates`, async () => {

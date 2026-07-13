@@ -745,6 +745,7 @@ export function queryCollectionOptions(
 
   // queryKey → QueryObserver's unsubscribe function
   const unsubscribes = new Map<string, () => void>()
+  const pendingReadyUnsubscribes = new Map<string, Set<() => void>>()
 
   // queryKey → reference count (how many loadSubset calls are active)
   // Reference counting for QueryObserver lifecycle management
@@ -1174,6 +1175,27 @@ export function queryCollectionOptions(
             }
           })
 
+    const trackPendingReadyUnsubscribe = (
+      hashedQueryKey: string,
+      unsubscribe: () => void,
+    ) => {
+      const pending = pendingReadyUnsubscribes.get(hashedQueryKey) ?? new Set()
+      pending.add(unsubscribe)
+      pendingReadyUnsubscribes.set(hashedQueryKey, pending)
+    }
+
+    const releasePendingReadyUnsubscribe = (
+      hashedQueryKey: string,
+      unsubscribe: () => void,
+    ) => {
+      unsubscribe()
+      const pending = pendingReadyUnsubscribes.get(hashedQueryKey)
+      pending?.delete(unsubscribe)
+      if (pending?.size === 0) {
+        pendingReadyUnsubscribes.delete(hashedQueryKey)
+      }
+    }
+
     const createQueryFromOpts = (
       opts: LoadSubsetOptions = {},
       queryFunction: typeof queryFn = queryFn,
@@ -1239,14 +1261,15 @@ export function queryCollectionOptions(
               // Use a microtask in case `subscribe` is called synchronously, before `unsubscribe` is initialized
               queueMicrotask(() => {
                 if (result.isSuccess) {
-                  unsubscribe()
+                  releasePendingReadyUnsubscribe(hashedQueryKey, unsubscribe)
                   resolve()
                 } else if (result.isError) {
-                  unsubscribe()
+                  releasePendingReadyUnsubscribe(hashedQueryKey, unsubscribe)
                   reject(result.error)
                 }
               })
             })
+            trackPendingReadyUnsubscribe(hashedQueryKey, unsubscribe)
           })
         }
       }
@@ -1322,14 +1345,15 @@ export function queryCollectionOptions(
           // Use a microtask in case `subscribe` is called synchronously, before `unsubscribe` is initialized
           queueMicrotask(() => {
             if (result.isSuccess) {
-              unsubscribe()
+              releasePendingReadyUnsubscribe(hashedQueryKey, unsubscribe)
               resolve()
             } else if (result.isError) {
-              unsubscribe()
+              releasePendingReadyUnsubscribe(hashedQueryKey, unsubscribe)
               reject(result.error)
             }
           })
         })
+        trackPendingReadyUnsubscribe(hashedQueryKey, unsubscribe)
       })
 
       // If sync has started or there are subscribers to the collection, subscribe to the query straight away
@@ -1590,9 +1614,17 @@ export function queryCollectionOptions(
      * Perform row-level cleanup and remove all tracking for a query.
      * Callers are responsible for ensuring the query is safe to cleanup.
      */
+    const unsubscribePendingReadyListeners = (hashedQueryKey: string) => {
+      pendingReadyUnsubscribes.get(hashedQueryKey)?.forEach((unsubscribe) => {
+        unsubscribe()
+      })
+      pendingReadyUnsubscribes.delete(hashedQueryKey)
+    }
+
     const cleanupQueryInternal = (hashedQueryKey: string) => {
       unsubscribes.get(hashedQueryKey)?.()
       unsubscribes.delete(hashedQueryKey)
+      unsubscribePendingReadyListeners(hashedQueryKey)
       cancelPersistedRetentionExpiry(hashedQueryKey)
       retainedQueriesPendingRevalidation.delete(hashedQueryKey)
 
@@ -1655,6 +1687,7 @@ export function queryCollectionOptions(
         // Drop our subscription so hasListeners reflects only active consumers
         unsubscribes.get(hashedQueryKey)?.()
         unsubscribes.delete(hashedQueryKey)
+        unsubscribePendingReadyListeners(hashedQueryKey)
       }
 
       const hasListeners = observer?.hasListeners() ?? false
