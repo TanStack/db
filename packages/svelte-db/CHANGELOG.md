@@ -1,5 +1,20 @@
 # @tanstack/svelte-db
 
+## 0.1.92
+
+### Patch Changes
+
+- Extract shared live-query adapter helpers into `@tanstack/db` ([#1641](https://github.com/TanStack/db/pull/1641))
+
+  Adds `isCollection`, `isSingleResultCollection`, and `getLiveQueryStatusFlags` to `@tanstack/db` and migrates all five framework adapters to use them. `isCollection` replaces the per-adapter duck-typing and Solid's `instanceof CollectionImpl` with one structural, multi-realm-safe guard (the `instanceof` form gave false negatives across dual-package boundaries). No behavior change; internal deduplication only.
+
+- fix(svelte-db): a disabled `useLiveQuery` (query callback returning `null`/`undefined`) no longer crashes ([#1637](https://github.com/TanStack/db/pull/1637))
+
+  The reactive-getter unwrapping (`toValue`) called the query callback and, when it returned `null`/`undefined` to signal a disabled query, passed the unwrapped `null` into `createLiveQueryCollection`, throwing in `getQueryIR`. A `null`/`undefined` resolved value is now treated as a disabled query (returns the `disabled` state) as it is in the other adapters.
+
+- Updated dependencies [[`eabcea7`](https://github.com/TanStack/db/commit/eabcea743fdfa045a2db01e12bef87403613102a), [`6d4c096`](https://github.com/TanStack/db/commit/6d4c096395b7ff3f428122ea8842bbead551a8c9)]:
+  - @tanstack/db@0.6.15
+
 ## 0.1.91
 
 ### Patch Changes

@@ -1,5 +1,20 @@
 # @tanstack/angular-db
 
+## 0.1.75
+
+### Patch Changes
+
+- fix(angular-db): a `{ query }` config-object passed to `injectLiveQuery` now syncs ([#1638](https://github.com/TanStack/db/pull/1638))
+
+  The config-object branch called `createLiveQueryCollection(opts)` without defaulting `startSync`, unlike the query-function and reactive-options branches (which force `startSync: true`), so a bare `{ query }` never started syncing and produced no data. It now defaults `startSync: true` and `gcTime: 0` while still honoring any explicit values in the config.
+
+- Extract shared live-query adapter helpers into `@tanstack/db` ([#1641](https://github.com/TanStack/db/pull/1641))
+
+  Adds `isCollection`, `isSingleResultCollection`, and `getLiveQueryStatusFlags` to `@tanstack/db` and migrates all five framework adapters to use them. `isCollection` replaces the per-adapter duck-typing and Solid's `instanceof CollectionImpl` with one structural, multi-realm-safe guard (the `instanceof` form gave false negatives across dual-package boundaries). No behavior change; internal deduplication only.
+
+- Updated dependencies [[`eabcea7`](https://github.com/TanStack/db/commit/eabcea743fdfa045a2db01e12bef87403613102a), [`6d4c096`](https://github.com/TanStack/db/commit/6d4c096395b7ff3f428122ea8842bbead551a8c9)]:
+  - @tanstack/db@0.6.15
+
 ## 0.1.74
 
 ### Patch Changes
