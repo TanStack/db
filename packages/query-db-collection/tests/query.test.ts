@@ -5074,6 +5074,92 @@ describe(`QueryCollection`, () => {
       })
     })
 
+    describe(`ownership lifecycle characterization`, () => {
+      it(`removes only rows whose final subset owner is unloaded`, async () => {
+        const queryFn = vi
+          .fn()
+          .mockResolvedValueOnce([
+            { id: `1`, name: `First only` },
+            { id: `2`, name: `Shared` },
+          ])
+          .mockResolvedValueOnce([
+            { id: `2`, name: `Shared` },
+            { id: `3`, name: `Second only` },
+          ])
+        const collection = createCollection(
+          queryCollectionOptions<TestItem>({
+            id: `ownership-overlapping-subsets-test`,
+            queryClient,
+            queryKey: [`ownership-overlapping-subsets-test`],
+            queryFn,
+            getKey,
+            syncMode: `on-demand`,
+          }),
+        )
+        const firstSubset = createLiveQueryCollection({
+          query: (q) =>
+            q
+              .from({ item: collection })
+              .where(({ item }) => inArray(item.id, [`1`, `2`])),
+        })
+        const secondSubset = createLiveQueryCollection({
+          query: (q) =>
+            q
+              .from({ item: collection })
+              .where(({ item }) => inArray(item.id, [`2`, `3`])),
+        })
+
+        await firstSubset.preload()
+        await secondSubset.preload()
+        expect(collection.size).toBe(3)
+
+        await firstSubset.cleanup()
+        await vi.waitFor(() => {
+          expect(collection.has(`1`)).toBe(false)
+          expect(collection.has(`2`)).toBe(true)
+          expect(collection.has(`3`)).toBe(true)
+        })
+
+        await secondSubset.cleanup()
+        await vi.waitFor(() => {
+          expect(collection.size).toBe(0)
+        })
+      })
+
+      it(`stays empty after the final query row is removed and its cache entry is GCed`, async () => {
+        const queryKey = [`ownership-final-row-cache-gc-test`]
+        let items: Array<TestItem> = [{ id: `1`, name: `Only row` }]
+        const queryFn = vi.fn().mockImplementation(() => Promise.resolve(items))
+        const collection = createCollection(
+          queryCollectionOptions<TestItem>({
+            id: `ownership-final-row-cache-gc-test`,
+            queryClient,
+            queryKey,
+            queryFn,
+            getKey,
+            startSync: true,
+          }),
+        )
+
+        await vi.waitFor(() => {
+          expect(collection.has(`1`)).toBe(true)
+        })
+
+        items = []
+        await queryClient.invalidateQueries({ queryKey, exact: true })
+        await vi.waitFor(() => {
+          expect(collection.size).toBe(0)
+        })
+
+        queryClient.removeQueries({ queryKey, exact: true })
+        await flushPromises()
+        expect(queryClient.getQueryCache().find({ queryKey })).toBeUndefined()
+        expect(collection.size).toBe(0)
+
+        await collection.cleanup()
+      })
+    })
+
     it(`should handle duplicate subset loads correctly (refcount bug)`, async () => {
       // This test catches Bug 1: missing refcount increment when reusing existing observer
       // When two subscriptions load the same subset, unloading one should NOT destroy
