@@ -3196,7 +3196,7 @@ describe(`Electric Integration`, () => {
       )
     })
 
-    it(`should keep hydrated persisted rows when progressive resume receives up-to-date without snapshot rows`, async () => {
+    it(`should preserve hydrated rows and resumed changes received before up-to-date`, async () => {
       vi.clearAllMocks()
 
       const { ShapeStream } = await import(`@electric-sql/client`)
@@ -3257,17 +3257,32 @@ describe(`Electric Integration`, () => {
 
       subscriber([
         {
+          key: `2`,
+          value: { id: 2, name: `Resumed User` },
+          headers: { operation: `insert` },
+        },
+      ])
+      subscriber([
+        {
           headers: { control: `up-to-date` },
         },
       ])
 
-      expect(stripVirtualProps(persistedCollection.get(1))).toEqual({
-        id: 1,
-        name: `Persisted User`,
-      })
-      expect(stripVirtualProps(persistedRows.get(1))).toEqual({
-        id: 1,
-        name: `Persisted User`,
+      expect(
+        [persistedCollection.get(1), persistedCollection.get(2)].map(
+          stripVirtualProps,
+        ),
+      ).toEqual([
+        { id: 1, name: `Persisted User` },
+        { id: 2, name: `Resumed User` },
+      ])
+      await vi.waitFor(() => {
+        expect(
+          [persistedRows.get(1), persistedRows.get(2)].map(stripVirtualProps),
+        ).toEqual([
+          { id: 1, name: `Persisted User` },
+          { id: 2, name: `Resumed User` },
+        ])
       })
     })
 
