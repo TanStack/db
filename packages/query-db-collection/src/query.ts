@@ -1175,26 +1175,35 @@ export function queryCollectionOptions(
             }
           })
 
-    const trackPendingReadyUnsubscribe = (
+    const waitForQueryReady = (
+      observer: QueryObserver<Array<any>, any, Array<any>, Array<any>, any>,
       hashedQueryKey: string,
-      unsubscribe: () => void,
-    ) => {
-      const pending = pendingReadyUnsubscribes.get(hashedQueryKey) ?? new Set()
-      pending.add(unsubscribe)
-      pendingReadyUnsubscribes.set(hashedQueryKey, pending)
-    }
+    ): Promise<void> =>
+      new Promise<void>((resolve, reject) => {
+        const unsubscribe = observer.subscribe((result) => {
+          // Use a microtask in case `subscribe` is called synchronously, before `unsubscribe` is initialized
+          queueMicrotask(() => {
+            if (result.isSuccess || result.isError) {
+              unsubscribe()
+              const pending = pendingReadyUnsubscribes.get(hashedQueryKey)
+              pending?.delete(unsubscribe)
+              if (pending?.size === 0) {
+                pendingReadyUnsubscribes.delete(hashedQueryKey)
+              }
 
-    const releasePendingReadyUnsubscribe = (
-      hashedQueryKey: string,
-      unsubscribe: () => void,
-    ) => {
-      unsubscribe()
-      const pending = pendingReadyUnsubscribes.get(hashedQueryKey)
-      pending?.delete(unsubscribe)
-      if (pending?.size === 0) {
-        pendingReadyUnsubscribes.delete(hashedQueryKey)
-      }
-    }
+              if (result.isSuccess) {
+                resolve()
+              } else {
+                reject(result.error)
+              }
+            }
+          })
+        })
+        const pending =
+          pendingReadyUnsubscribes.get(hashedQueryKey) ?? new Set()
+        pending.add(unsubscribe)
+        pendingReadyUnsubscribes.set(hashedQueryKey, pending)
+      })
 
     const createQueryFromOpts = (
       opts: LoadSubsetOptions = {},
@@ -1256,21 +1265,7 @@ export function queryCollectionOptions(
           }
 
           // Query is still loading, wait for the first result
-          return new Promise<void>((resolve, reject) => {
-            const unsubscribe = observer.subscribe((result) => {
-              // Use a microtask in case `subscribe` is called synchronously, before `unsubscribe` is initialized
-              queueMicrotask(() => {
-                if (result.isSuccess) {
-                  releasePendingReadyUnsubscribe(hashedQueryKey, unsubscribe)
-                  resolve()
-                } else if (result.isError) {
-                  releasePendingReadyUnsubscribe(hashedQueryKey, unsubscribe)
-                  reject(result.error)
-                }
-              })
-            })
-            trackPendingReadyUnsubscribe(hashedQueryKey, unsubscribe)
-          })
+          return waitForQueryReady(observer, hashedQueryKey)
         }
       }
 
@@ -1340,21 +1335,7 @@ export function queryCollectionOptions(
       }
 
       // Create a promise that resolves when the query result is first available
-      const readyPromise = new Promise<void>((resolve, reject) => {
-        const unsubscribe = localObserver.subscribe((result) => {
-          // Use a microtask in case `subscribe` is called synchronously, before `unsubscribe` is initialized
-          queueMicrotask(() => {
-            if (result.isSuccess) {
-              releasePendingReadyUnsubscribe(hashedQueryKey, unsubscribe)
-              resolve()
-            } else if (result.isError) {
-              releasePendingReadyUnsubscribe(hashedQueryKey, unsubscribe)
-              reject(result.error)
-            }
-          })
-        })
-        trackPendingReadyUnsubscribe(hashedQueryKey, unsubscribe)
-      })
+      const readyPromise = waitForQueryReady(localObserver, hashedQueryKey)
 
       // If sync has started or there are subscribers to the collection, subscribe to the query straight away
       // This creates the main subscription that handles data updates
