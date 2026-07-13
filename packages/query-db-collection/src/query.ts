@@ -1101,6 +1101,7 @@ export function queryCollectionOptions(
         `${QUERY_COLLECTION_GC_PREFIX}${hashedQueryKey}`,
       )
       commit()
+      resolvedOwnershipQueries.delete(hashedQueryKey)
     }
 
     const schedulePersistedRetentionExpiry = (

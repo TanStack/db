@@ -5883,6 +5883,7 @@ describe(`QueryCollection`, () => {
 
         const baseOptions = queryCollectionOptions(config)
         const originalSync = baseOptions.sync
+        const ownershipMaps = inspectOwnershipMaps(baseOptions)
         const metadataHarness = createInMemorySyncMetadataApi<
           string | number,
           CategorisedItem
@@ -5916,6 +5917,15 @@ describe(`QueryCollection`, () => {
         await liveQuery.cleanup()
 
         expect(
+          ownershipMaps.resolvedOwnershipQueries.has(retainedQueryHash),
+        ).toBe(true)
+        expect(ownershipMaps.queryToRows.get(retainedQueryHash)).toEqual(
+          new Set([`1`]),
+        )
+        expect(ownershipMaps.rowToQueries.get(`1`)).toEqual(
+          new Set([retainedQueryHash]),
+        )
+        expect(
           metadataHarness.collectionMetadata.get(
             `queryCollection:gc:${retainedQueryHash}`,
           ),
@@ -5934,6 +5944,11 @@ describe(`QueryCollection`, () => {
           ),
         ).toBeUndefined()
         expect(collection.has(`1`)).toBe(false)
+        expect(ownershipMaps.queryToRows.has(retainedQueryHash)).toBe(false)
+        expect(ownershipMaps.rowToQueries.has(`1`)).toBe(false)
+        expect(
+          ownershipMaps.resolvedOwnershipQueries.has(retainedQueryHash),
+        ).toBe(false)
       } finally {
         vi.useRealTimers()
       }
