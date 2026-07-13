@@ -116,7 +116,7 @@ This keeps SSR and request-scoped code from sharing a global `QueryClient` while
 
 ### Business-Scoped Collection Factories
 
-A tenant, project, account, or route parameter defines a **business scope**: it determines which server resource the collection represents. Put that scope in both the Query key and the query function. This extends the [runtime `QueryClient` factory pattern](#creating-collection-options-from-a-runtime-queryclient) with another explicit factory parameter:
+A tenant, project, account, or route parameter can define a **business scope**: the server resource that a collection represents. Include the scope in both the Query key and `queryFn`. This extends the [runtime `QueryClient` factory pattern](#creating-collection-options-from-a-runtime-queryclient) with an explicit scope parameter:
 
 ```typescript
 interface Todo {
@@ -140,7 +140,6 @@ export function createProjectTodosCollection(
       queryFn: () => fetchProjectTodos(projectId),
       queryClient,
       getKey: (todo) => todo.id,
-      staleTime: 30_000,
     })
   )
 }
@@ -149,9 +148,7 @@ export function createProjectTodosCollection(
 The scope is part of the collection's identity. Memoize by both the `QueryClient` and a stable scope key so consumers of the same project share one collection:
 
 ```typescript
-type ProjectTodosCollection = ReturnType<
-  typeof createProjectTodosCollection
->
+type ProjectTodosCollection = ReturnType<typeof createProjectTodosCollection>
 
 const projectCollections = new WeakMap<
   QueryClient,
@@ -180,11 +177,11 @@ export function getProjectTodosCollection(
 }
 ```
 
-For multiple scope values, use a collision-safe stable key (or nested maps) containing every value. Do not call the factory on each render. In a long-lived client, scopes such as user-selected projects may grow without bound; evict entries that are no longer needed and call `await collection.cleanup()` when your application owns their lifecycle. Request-local maps can instead be discarded with the request.
+For multiple scope values, use nested maps or a collision-safe stable key that includes every value. Do not call the factory on each render. In a long-lived client, user-selected scopes can make the map grow without bound. Remove unused entries and call `await collection.cleanup()` when your application owns their lifecycle. Request-local maps can be discarded with the request.
 
-Business scope is separate from a **relational subset** requested by a live query. With `syncMode: "on-demand"`, `LoadSubsetOptions` describes predicates, ordering, limits, and offsets within one business-scoped collection. The collection passes those options to `queryFn` through `ctx.meta.loadSubsetOptions` and uses them to manage subset Query keys. See [QueryFn and Predicate Push-Down](#queryfn-and-predicate-push-down).
+A business scope is separate from a **relational subset** requested by a live query. With `syncMode: "on-demand"`, `LoadSubsetOptions` describes predicates, ordering, limits, and offsets within one business-scoped collection. These options reach `queryFn` through `ctx.meta.loadSubsetOptions` and determine the subset Query keys. See [QueryFn and Predicate Push-Down](#queryfn-and-predicate-push-down).
 
-Do not create another collection for every `where`, `orderBy`, or `limit`. Reuse the project-scoped collection and let on-demand subset loading represent those relational queries. Create separate collections only when the server resources are genuinely distinct business scopes.
+Do not create a collection for each `where`, `orderBy`, or `limit`. Reuse the business-scoped collection and let on-demand loading represent those subsets. Create separate collections only for distinct server resources.
 
 ### Query Options
 
