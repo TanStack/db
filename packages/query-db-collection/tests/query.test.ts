@@ -2427,7 +2427,7 @@ describe(`QueryCollection`, () => {
         ).toBe(0)
       })
 
-      it(`does not rematerialize a late fulfilled result after an in-flight subset is unloaded`, async () => {
+      it(`cleans listeners immediately and resolves the unloaded preload before its request settles`, async () => {
         const deferred = createDeferred<Array<TestItem>>()
         const collection = createCollection(
           queryCollectionOptions<TestItem>({
@@ -2440,23 +2440,67 @@ describe(`QueryCollection`, () => {
           }),
         )
         const liveQuery = createSubset(collection)
-        void liveQuery.preload().catch(() => undefined)
+        let preloadResolved = false
+        void liveQuery.preload().then(() => {
+          preloadResolved = true
+        })
 
         await vi.waitFor(() => expect(queryClient.isFetching()).toBe(1))
         await liveQuery.cleanup()
+
+        const subsetQuery = queryClient.getQueryCache().findAll({
+          queryKey: [`late-subset-result-test`],
+        })[0]
+        // This assertion runs while the request is unresolved and directly guards the
+        // ready-listener bookkeeping bug: unload must synchronously detach its observer.
+        expect(subsetQuery?.getObserversCount() ?? 0).toBe(0)
+        // Live-query cleanup resolves its preload even though Query Core is still fetching.
+        expect(preloadResolved).toBe(true)
+
         deferred.resolve([{ id: `1`, name: `Late item` }])
-        await flushPromises()
+        await vi.waitFor(() => expect(queryClient.isFetching()).toBe(0))
 
         expect(collection.size).toBe(0)
-        expect(queryClient.isFetching()).toBe(0)
-        expect(
-          queryClient
-            .getQueryCache()
-            .findAll({
-              queryKey: [`late-subset-result-test`],
-            })[0]
-            ?.getObserversCount() ?? 0,
-        ).toBe(0)
+        expect(preloadResolved).toBe(true)
+        expect(subsetQuery?.getObserversCount() ?? 0).toBe(0)
+        await collection.cleanup()
+      })
+
+      it(`preserves an active subset across cache removal and accepts a late notification from its detached observer`, async () => {
+        const queryKey = [`cache-removal-late-notification-test`]
+        const collection = createCollection(
+          queryCollectionOptions<TestItem>({
+            id: `cache-removal-late-notification-test`,
+            queryClient,
+            queryKey,
+            queryFn: () => Promise.resolve([{ id: `1`, name: `Initial item` }]),
+            getKey,
+            syncMode: `on-demand`,
+          }),
+        )
+        const liveQuery = createSubset(collection)
+        await liveQuery.preload()
+        const subsetQuery = queryClient.getQueryCache().findAll({ queryKey })[0]
+        expect(subsetQuery).toBeDefined()
+
+        // A Query Core `removed` event can arrive before this collection's observer
+        // is detached. Existing semantics retain the active rows and observer.
+        queryClient.getQueryCache().remove(subsetQuery!)
+        expect(queryClient.getQueryCache().findAll({ queryKey })).toHaveLength(
+          0,
+        )
+        expect(collection.get(`1`)?.name).toBe(`Initial item`)
+        expect(subsetQuery!.getObserversCount()).toBe(1)
+
+        // The retained observer can still notify after its query left the cache.
+        subsetQuery!.setData([{ id: `1`, name: `Late notification` }])
+        await vi.waitFor(() =>
+          expect(collection.get(`1`)?.name).toBe(`Late notification`),
+        )
+
+        await liveQuery.cleanup()
+        expect(subsetQuery!.getObserversCount()).toBe(0)
+        expect(collection.size).toBe(0)
         await collection.cleanup()
       })
 
