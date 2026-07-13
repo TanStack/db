@@ -1,5 +1,113 @@
 # @tanstack/db
 
+## 0.6.15
+
+### Patch Changes
+
+- Clarify local write status documentation for `$synced` and `isPersisted.promise`, and add core coverage for queued ambiguous server-key sync while optimistic temp-key inserts are pending. ([#1652](https://github.com/TanStack/db/pull/1652))
+
+- Extract shared live-query adapter helpers into `@tanstack/db` ([#1641](https://github.com/TanStack/db/pull/1641))
+
+  Adds `isCollection`, `isSingleResultCollection`, and `getLiveQueryStatusFlags` to `@tanstack/db` and migrates all five framework adapters to use them. `isCollection` replaces the per-adapter duck-typing and Solid's `instanceof CollectionImpl` with one structural, multi-realm-safe guard (the `instanceof` form gave false negatives across dual-package boundaries). No behavior change; internal deduplication only.
+
+## 0.6.14
+
+### Patch Changes
+
+- Avoid full row origin snapshots during incremental collection updates and make bulk mutation merging linear. ([#1640](https://github.com/TanStack/db/pull/1640))
+
+## 0.6.13
+
+### Patch Changes
+
+- Fix `.select()` collapsing discriminated-union fields to the intersection of common keys (#1511). `Ref<T>` now distributes over `T` so `keyof (A | B | C)` no longer reduces the union to its common keys, and `ExtractRef<T>` now distinguishes a real branded `Ref` (where the underlying user type `U` can be returned directly) from a spread-produced inline object (which still needs to be projected through `ResultTypeFromSelect`). This preserves discriminated unions both when the field is selected at the top level and when the field is nested inside another selected object. The real-`Ref` detection uses a strict structural equivalence against the canonical `Ref<U>` shape, so spread-derived objects that keep the same keys but change a field's type (e.g. `{ ...u, code: u.slug }`) or drop an optional key (e.g. `const { nickname, ...rest } = u`) are projected through `ResultTypeFromSelect` instead of being collapsed back to `U`. ([#1597](https://github.com/TanStack/db/pull/1597))
+
+- fix(db): keep deeply nested includes in sync when sibling groups share nested correlation keys ([#1607](https://github.com/TanStack/db/pull/1607))
+
+  Deeply nested includes could drop or stop updating nested rows when sibling parent groups shared the same nested correlation key, especially when one sibling group was inserted after the initial load. Shared nested pipeline buffers were being drained through route state that was scoped too narrowly, so one branch could consume a buffered update before other branches that referenced the same nested row received it.
+
+  Nested route state is now shared at the same scope as the nested buffer and routes updates to every concrete destination branch before clearing the buffer. Snapshot replay still seeds late-arriving sibling groups with already-materialized rows, and recursive pending-change detection ensures deeper routed updates are flushed back up through the result tree.
+
+## 0.6.12
+
+### Patch Changes
+
+- Fix live query includes reconciliation so updates that re-emit existing child rows update internal child collections instead of attempting duplicate inserts, and ensure duplicate-key sync errors handle collection configs without live query internals. ([#1600](https://github.com/TanStack/db/pull/1600))
+
+## 0.6.11
+
+### Patch Changes
+
+- Fix incorrect results from index-optimized `where` clauses that combine indexed and non-indexed conditions. ([#1582](https://github.com/TanStack/db/pull/1582))
+  - `OR` expressions are now only served from indexes when every disjunct can use an index; otherwise the query falls back to a full scan. Previously, rows matched only by a non-indexed disjunct were missing from the result.
+  - `AND` expressions still use indexes for the conditions that have them, but the remaining conditions are now enforced by re-checking each candidate row against the full expression. Previously, non-indexed conditions were silently dropped, returning rows that did not match the query.
+  - Compound range conditions (e.g. `age > 5 AND age < 10`) combined with conditions on other fields no longer ignore those other conditions.
+  - Compound range conditions sharing the same boundary value (e.g. `age >= 5 AND age > 5`) now apply the strictest bound regardless of the order the conditions appear in, using the same value comparison semantics as the indexes (dates, locale strings, ...).
+  - Compound range conditions that only bound one side (e.g. `age > 5 AND age >= 8`) no longer return an empty result.
+  - Strict range comparisons (`gt`/`lt`) on BTree-indexed fields holding normalized values such as dates now correctly exclude the boundary value.
+  - Compound range conditions with a `null`/`undefined` bound (e.g. `gt(score, undefined)`) now re-filter against the full expression instead of returning index-ordered rows, matching the semantics of a full scan (a comparison against `null`/`undefined` is never true).
+  - Index-optimized `eq`, `IN`, and range queries on a field that has rows with `null`/`undefined` values no longer leak those rows into results. BTree indexes store and return such rows (they sort as the smallest key), but a comparison against `null`/`undefined` is never true, so these results are now re-filtered against the full expression to stay equivalent to a full scan.
+  - String range conditions (`gt`/`gte`/`lt`/`lte`) on a collection using locale string collation (the default) are no longer served by the index. The index orders strings with `localeCompare` while the `where` evaluator compares them with standard relational operators, so an index range lookup could omit matching rows; these conditions now fall back to a full scan.
+  - Range conditions whose operand is not ordered the same way by the index and the `where` evaluator (arrays, plain objects, Temporal values) now fall back to a full scan instead of using the index, which could otherwise omit matching rows.
+  - Range conditions on an index created with a custom comparator now fall back to a full scan, since the comparator's ordering may not match the `where` evaluator's relational operators.
+
+- fix(query): drive lazy-join loading through the collection the join key resolves to ([#1614](https://github.com/TanStack/db/pull/1614))
+
+  When a subquery used in a JOIN clause selects its join key from a _joined_ source rather than from its own `from` clause, the lazy-join loader subscribed to the wrong inner source: it used the subquery's `from` alias while computing the index requirement against the collection the key actually resolves to. This produced a misleading `Join requires an index` warning naming an already-indexed collection and an unnecessary full-load fallback. `followRef` now reports the resolved source alias, so lazy loading subscribes to the correct collection and loads through its index.
+
+- Adopt PostgreSQL float semantics for `NaN` in `where` clauses and ordering. ([#1582](https://github.com/TanStack/db/pull/1582))
+
+  `NaN` (and invalid `Date` values, whose timestamp is `NaN`) previously had no consistent order — `NaN === NaN` is `false` in JavaScript, so `NaN` compared unequal to everything and could not be sorted or indexed deterministically. Following PostgreSQL, `NaN` is now treated as **equal to itself** and **greater than every other non-null value**:
+  - `eq(row.value, NaN)` matches rows whose value is `NaN`; `inArray(row.value, [NaN, ...])` matches them too.
+  - Range comparisons treat `NaN` as the greatest value: `gt`/`gte` include it, `lt`/`lte` exclude it.
+  - Ordering by a field containing `NaN` is now deterministic, with `NaN` sorting last (and `null` still ordered by `NULLS FIRST`/`NULLS LAST`).
+
+  `null`/`undefined` are unaffected: they continue to use three-valued logic (a comparison with `null` yields `UNKNOWN`).
+
+  This makes results independent of whether a query is served from an index or a full scan.
+
+- Fix prototype pollution via `select()` alias paths. Aliases were split on `.` and walked into the result object without sanitization, so a query like `select(() => ({ ['__proto__.polluted']: ... }))` (or any segment matching `__proto__`, `prototype`, or `constructor`) could mutate `Object.prototype`. The select compiler now rejects unsafe alias path segments with a new `UnsafeAliasPathError`. Fixes #1584. ([#1595](https://github.com/TanStack/db/pull/1595))
+
+## 0.6.10
+
+### Patch Changes
+
+- Fix live query `preload()` hanging forever after a source collection was cleaned up (#1576) ([#1606](https://github.com/TanStack/db/pull/1606))
+
+  When a source collection is cleaned up while a live query depends on it, the live query transitions to an error state and latches an internal `isInErrorState` flag. That flag was never reset, so restarting sync (e.g. calling `preload()` again after cleanup when switching profiles) left the live query unable to become ready and the returned promise never resolved. The flag is now cleared at the start of each sync session so the live query can recover.
+
+## 0.6.9
+
+### Patch Changes
+
+- Add `subtract`, `multiply`, and `divide` math functions for computed columns ([#1151](https://github.com/TanStack/db/pull/1151))
+
+  These functions enable complex calculations in `select` and `orderBy` clauses, such as ranking algorithms that combine multiple factors (e.g., HN-style scoring that balances recency and rating).
+
+  ```ts
+  import { subtract, multiply, divide } from '@tanstack/db'
+
+  // Example: Sort by computed ranking score
+  const ranked = createLiveQueryCollection((q) =>
+    q
+      .from({ r: recipesCollection })
+      .orderBy(
+        ({ r }) =>
+          subtract(
+            multiply(r.rating, r.timesMade),
+            divide(r.ageInMs, 86400000),
+          ),
+        'desc',
+      ),
+  )
+  ```
+
+  - `subtract(a, b)` - Subtraction
+  - `multiply(a, b)` - Multiplication
+  - `divide(a, b)` - Division (returns `null` on divide-by-zero)
+
+- Use a safe `randomUUID` helper that falls back to `crypto.getRandomValues` when `crypto.randomUUID` is unavailable (non-secure browser contexts such as dev servers reached via a LAN IP over HTTP). Fixes #1541. ([#1593](https://github.com/TanStack/db/pull/1593))
+
 ## 0.6.8
 
 ### Patch Changes

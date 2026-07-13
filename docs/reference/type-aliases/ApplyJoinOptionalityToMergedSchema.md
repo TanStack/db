@@ -3,13 +3,13 @@ id: ApplyJoinOptionalityToMergedSchema
 title: ApplyJoinOptionalityToMergedSchema
 ---
 
-# Type Alias: ApplyJoinOptionalityToMergedSchema\<TExistingSchema, TNewSchema, TJoinType, TFromSourceName\>
+# Type Alias: ApplyJoinOptionalityToMergedSchema\<TExistingSchema, TNewSchema, TJoinType, TFromSourceNames\>
 
 ```ts
-type ApplyJoinOptionalityToMergedSchema<TExistingSchema, TNewSchema, TJoinType, TFromSourceName> = { [K in keyof TExistingSchema]: K extends TFromSourceName ? TJoinType extends "right" | "full" ? TExistingSchema[K] | undefined : TExistingSchema[K] : TExistingSchema[K] } & { [K in keyof TNewSchema]: TJoinType extends "left" | "full" ? TNewSchema[K] | undefined : TNewSchema[K] };
+type ApplyJoinOptionalityToMergedSchema<TExistingSchema, TNewSchema, TJoinType, TFromSourceNames> = { [K in keyof TExistingSchema]: K extends TFromSourceNames ? TJoinType extends "right" | "full" ? TExistingSchema[K] | undefined : TExistingSchema[K] : TExistingSchema[K] } & { [K in keyof TNewSchema]: TJoinType extends "left" | "full" ? TNewSchema[K] | undefined : TNewSchema[K] };
 ```
 
-Defined in: [packages/db/src/query/builder/types.ts:779](https://github.com/TanStack/db/blob/main/packages/db/src/query/builder/types.ts#L779)
+Defined in: [packages/db/src/query/builder/types.ts:929](https://github.com/TanStack/db/blob/main/packages/db/src/query/builder/types.ts#L929)
 
 ApplyJoinOptionalityToMergedSchema - Applies optionality rules when merging schemas
 
@@ -49,6 +49,6 @@ into a single type while preserving all table references.
 
 `TJoinType` *extends* `"inner"` \| `"left"` \| `"right"` \| `"full"` \| `"outer"` \| `"cross"`
 
-### TFromSourceName
+### TFromSourceNames
 
-`TFromSourceName` *extends* `string`
+`TFromSourceNames` *extends* `string`

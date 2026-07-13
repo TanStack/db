@@ -9,7 +9,7 @@ title: GetResult
 type GetResult<TContext> = Prettify<ResultValue<TContext>>;
 ```
 
-Defined in: [packages/db/src/query/builder/types.ts:848](https://github.com/TanStack/db/blob/main/packages/db/src/query/builder/types.ts#L848)
+Defined in: [packages/db/src/query/builder/types.ts:1043](https://github.com/TanStack/db/blob/main/packages/db/src/query/builder/types.ts#L1043)
 
 ## Type Parameters
 

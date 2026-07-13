@@ -4,6 +4,7 @@ import { createCollection } from '../src/collection/index.js'
 import {
   CollectionRequiresConfigError,
   DuplicateKeyError,
+  DuplicateKeySyncError,
   InvalidKeyError,
   KeyUpdateNotAllowedError,
   MissingDeleteHandlerError,
@@ -18,7 +19,12 @@ import {
   stripVirtualProps,
   withExpectedRejection,
 } from './utils'
-import type { ChangeMessage, MutationFn, PendingMutation } from '../src/types'
+import type {
+  ChangeMessage,
+  MutationFn,
+  PendingMutation,
+  SyncConfig,
+} from '../src/types'
 
 const getStateValue = <T extends object, TKey extends string | number>(
   collection: { state: Map<TKey, T> },
@@ -42,7 +48,36 @@ describe(`Collection`, () => {
     expect(() => createCollection()).toThrow(CollectionRequiresConfigError)
   })
 
-  it(`removes optimistic insert when sync confirms with a different server-generated key`, async () => {
+  it(`throws DuplicateKeySyncError instead of TypeError when config has no utils`, async () => {
+    let begin!: () => void
+    let write!: Parameters<
+      SyncConfig<{ id: number; text: string }, number>[`sync`]
+    >[0][`write`]
+
+    const collection = createCollection<{ id: number; text: string }, number>({
+      id: `duplicate-key-no-utils-test`,
+      getKey: (item) => item.id,
+      sync: {
+        sync: (params) => {
+          begin = params.begin
+          write = params.write
+          params.begin()
+          params.write({ type: `insert`, value: { id: 1, text: `one` } })
+          params.commit()
+          params.markReady()
+        },
+      },
+    })
+
+    await collection.stateWhenReady()
+
+    begin()
+    expect(() =>
+      write({ type: `insert`, value: { id: 1, text: `changed` } }),
+    ).toThrow(DuplicateKeySyncError)
+  })
+
+  it(`keeps ambiguous server-key sync queued while a temp-key optimistic insert is pending`, async () => {
     const options = mockSyncCollectionOptionsNoInitialState<{
       id: number
       text: string
@@ -67,6 +102,11 @@ describe(`Collection`, () => {
     options.utils.commit()
 
     // The sync commit is held while the local insert transaction is persisting.
+    // Without an explicit temp-key -> server-key mapping, core cannot know
+    // whether key 24 is this optimistic insert's server echo or an unrelated
+    // row, so it must not expose both rows at the same time.
+    expect(tx.isPersisted.isPending()).toBe(true)
+    expect(collection.has(24)).toBe(false)
     expect(getStateEntries(collection)).toEqual([
       [4733, { id: 4733, text: `two` }],
     ])

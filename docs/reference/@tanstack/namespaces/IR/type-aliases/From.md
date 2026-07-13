@@ -8,7 +8,9 @@ title: From
 ```ts
 type From = 
   | CollectionRef
-  | QueryRef;
+  | QueryRef
+  | UnionFrom
+  | UnionAll;
 ```
 
-Defined in: [packages/db/src/query/ir.ts:32](https://github.com/TanStack/db/blob/main/packages/db/src/query/ir.ts#L32)
+Defined in: [packages/db/src/query/ir.ts:36](https://github.com/TanStack/db/blob/main/packages/db/src/query/ir.ts#L36)

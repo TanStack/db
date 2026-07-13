@@ -5,7 +5,7 @@ title: DuplicateAliasInSubqueryError
 
 # Class: DuplicateAliasInSubqueryError
 
-Defined in: [packages/db/src/errors.ts:495](https://github.com/TanStack/db/blob/main/packages/db/src/errors.ts#L495)
+Defined in: [packages/db/src/errors.ts:520](https://github.com/TanStack/db/blob/main/packages/db/src/errors.ts#L520)
 
 Error thrown when a subquery uses the same alias as its parent query.
 This causes issues because parent and subquery would share the same input streams,
@@ -23,7 +23,7 @@ leading to empty results or incorrect data (aggregation cross-leaking).
 new DuplicateAliasInSubqueryError(alias, parentAliases): DuplicateAliasInSubqueryError;
 ```
 
-Defined in: [packages/db/src/errors.ts:496](https://github.com/TanStack/db/blob/main/packages/db/src/errors.ts#L496)
+Defined in: [packages/db/src/errors.ts:521](https://github.com/TanStack/db/blob/main/packages/db/src/errors.ts#L521)
 
 #### Parameters
 
