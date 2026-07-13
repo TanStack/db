@@ -506,27 +506,6 @@ function getLoadSubsetOptionsForMeta(
  *   })
  * )
  */
-function removeOwnershipRelationship(
-  rowToQueries: Map<string | number, Set<string>>,
-  queryToRows: Map<string, Set<string | number>>,
-  rowKey: string | number,
-  hashedQueryKey: string,
-): boolean {
-  const owners = rowToQueries.get(rowKey)
-  owners?.delete(hashedQueryKey)
-  if (!owners || owners.size === 0) {
-    rowToQueries.delete(rowKey)
-  }
-
-  const ownedRows = queryToRows.get(hashedQueryKey)
-  ownedRows?.delete(rowKey)
-  if (!ownedRows || ownedRows.size === 0) {
-    queryToRows.delete(hashedQueryKey)
-  }
-
-  return !owners || owners.size === 0
-}
-
 // Overload for when schema is provided and select present
 export function queryCollectionOptions<
   T extends StandardSchemaV1,
@@ -814,12 +793,19 @@ export function queryCollectionOptions(
   }
 
   const removeRowOwner = (rowKey: string | number, hashedQueryKey: string) => {
-    return removeOwnershipRelationship(
-      rowToQueries,
-      queryToRows,
-      rowKey,
-      hashedQueryKey,
-    )
+    const owners = rowToQueries.get(rowKey)
+    owners?.delete(hashedQueryKey)
+    if (!owners?.size) {
+      rowToQueries.delete(rowKey)
+    }
+
+    const ownedRows = queryToRows.get(hashedQueryKey)
+    ownedRows?.delete(rowKey)
+    if (!ownedRows?.size) {
+      queryToRows.delete(hashedQueryKey)
+    }
+
+    return !owners?.size
   }
 
   const removeQueryOwnership = (hashedQueryKey: string) => {
