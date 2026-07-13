@@ -1,5 +1,18 @@
 # @tanstack/query-db-collection
 
+## 1.0.48
+
+### Patch Changes
+
+- Clarify that `select` extracts rows for DB materialization while preserving the wrapped TanStack Query cache response. ([#1654](https://github.com/TanStack/db/pull/1654))
+
+- Document the current TanStack Query option compatibility surface for Query Collections, including forwarded options, QueryClient defaults, adapter-owned fields, and common options that are not currently exposed. ([#1653](https://github.com/TanStack/db/pull/1653))
+
+- Add coverage for query invalidation behavior across eager and on-demand query collections. ([#1655](https://github.com/TanStack/db/pull/1655))
+
+- Updated dependencies [[`eabcea7`](https://github.com/TanStack/db/commit/eabcea743fdfa045a2db01e12bef87403613102a), [`6d4c096`](https://github.com/TanStack/db/commit/6d4c096395b7ff3f428122ea8842bbead551a8c9)]:
+  - @tanstack/db@0.6.15
+
 ## 1.0.47
 
 ### Patch Changes

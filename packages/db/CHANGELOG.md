@@ -1,5 +1,15 @@
 # @tanstack/db
 
+## 0.6.15
+
+### Patch Changes
+
+- Clarify local write status documentation for `$synced` and `isPersisted.promise`, and add core coverage for queued ambiguous server-key sync while optimistic temp-key inserts are pending. ([#1652](https://github.com/TanStack/db/pull/1652))
+
+- Extract shared live-query adapter helpers into `@tanstack/db` ([#1641](https://github.com/TanStack/db/pull/1641))
+
+  Adds `isCollection`, `isSingleResultCollection`, and `getLiveQueryStatusFlags` to `@tanstack/db` and migrates all five framework adapters to use them. `isCollection` replaces the per-adapter duck-typing and Solid's `instanceof CollectionImpl` with one structural, multi-realm-safe guard (the `instanceof` form gave false negatives across dual-package boundaries). No behavior change; internal deduplication only.
+
 ## 0.6.14
 
 ### Patch Changes
