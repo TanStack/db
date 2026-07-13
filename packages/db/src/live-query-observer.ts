@@ -23,11 +23,14 @@ export interface LiveQuerySnapshot<
   /** The underlying collection, or `undefined` when disabled. */
   collection: Collection<T, TKey, any> | undefined
   /**
-   * Monotonic counter bumped whenever the visible layout changes — membership,
-   * ordering, or an order-only move. Lets consumers detect a reorder that
-   * changed no row value (which `data`/`state` identity alone can't express on
-   * its own once row values are structurally shared). Increments in lockstep
-   * with snapshot identity for enabled queries.
+   * Monotonic counter bumped whenever the visible layout (the ordered key
+   * sequence) changes — membership, ordering, or an order-only move. Lets
+   * consumers detect a reorder that changed no row value (which `data`/`state`
+   * identity alone can't express once row values are structurally shared).
+   *
+   * It is NOT in lockstep with snapshot identity: a value-only update produces a
+   * new snapshot while `layoutRevision` stays put. A `layoutRevision` change
+   * always accompanies a new snapshot, but not vice versa.
    */
   layoutRevision: number
   status: CollectionStatus | `disabled`
@@ -99,7 +102,7 @@ class LiveQueryObserverImpl<
   private cachedStatus: CollectionStatus | undefined
   private cachedSnapshot: LiveQuerySnapshot<T, TKey> = DISABLED_SNAPSHOT
   private layoutRevision = 0
-  private lastLayoutSignature: string | undefined
+  private lastLayoutKeys: Array<TKey> | undefined
   private readonly listeners = new Set<LiveQueryObserverListener<T, TKey>>()
   private collectionUnsub: (() => void) | null = null
   // Bumped on each attach. `onFirstReady` can't be unsubscribed, so a callback
@@ -135,12 +138,26 @@ class LiveQueryObserverImpl<
       let stateCache: Map<TKey, T> | null = null
       let dataCache: Array<T> | null = null
 
-      // Bump the layout revision when the ordered key sequence changed —
-      // membership, ordering, or an order-only move all shift it. `\u0000`
-      // can't appear in a stringified key, so it's a safe separator.
-      const layoutSignature = entries.map(([key]) => String(key)).join(`\u0000`)
-      if (layoutSignature !== this.lastLayoutSignature) {
-        this.lastLayoutSignature = layoutSignature
+      // Bump the layout revision when the ordered key sequence changes
+      // (membership, ordering, or an order-only move). Compare the key sequence
+      // directly rather than via a serialized signature: a joined-with-separator
+      // signature can collide when a key value equals the concatenation of
+      // neighboring keys around the separator. Comparing keys also avoids
+      // materializing a large string on every rebuild; a new key array is only
+      // allocated when the layout actually moved.
+      const prevKeys = this.lastLayoutKeys
+      let layoutChanged =
+        prevKeys === undefined || prevKeys.length !== entries.length
+      if (!layoutChanged) {
+        for (let i = 0; i < entries.length; i++) {
+          if (prevKeys![i] !== entries[i]![0]) {
+            layoutChanged = true
+            break
+          }
+        }
+      }
+      if (layoutChanged) {
+        this.lastLayoutKeys = entries.map(([key]) => key)
         this.layoutRevision++
       }
 
