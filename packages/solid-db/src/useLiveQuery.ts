@@ -394,6 +394,11 @@ export function useLiveQuery(
     // The shared observer owns subscription, the ready-race, and status; Solid
     // materializes into its keyed ReactiveMap (granular) + reconciled store.
     const observer = createLiveQueryObserver(currentCollection)
+    // Clear any keys carried over from a previous collection before the new
+    // observer re-seeds via `includeInitialState` (which only inserts current
+    // rows, never deletes stale ones). Without this, switching collections
+    // leaves the dropped keys in `state` until the async resource reconciles.
+    state.clear()
     const unsubscribe = observer.subscribe(
       (changes: Array<ChangeMessage<any>> | undefined) => {
         batch(() => {
