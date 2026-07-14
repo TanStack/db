@@ -6169,6 +6169,67 @@ describe(`QueryCollection`, () => {
         // Query was cancelled, this is expected
       }
     })
+
+    it(`should abort in-flight on-demand queries when the last subscriber is cleaned up`, async () => {
+      const baseQueryKey = [`in-flight-abort-test`]
+      let capturedSignal: AbortSignal | undefined
+
+      const queryFn = vi.fn((ctx: QueryFunctionContext<any>) => {
+        capturedSignal = ctx.signal
+
+        return new Promise<Array<TestItem>>((_resolve, reject) => {
+          ctx.signal.addEventListener(`abort`, () => {
+            const error = new Error(`Query aborted`)
+            error.name = `AbortError`
+            reject(error)
+          })
+        })
+      })
+
+      const customQueryClient = new QueryClient({
+        defaultOptions: {
+          queries: {
+            gcTime: 5 * 60 * 1000,
+            retry: false,
+          },
+        },
+      })
+
+      const config: QueryCollectionConfig<TestItem> = {
+        id: `in-flight-abort-test`,
+        queryClient: customQueryClient,
+        queryKey: baseQueryKey,
+        queryFn,
+        getKey,
+        startSync: true,
+        syncMode: `on-demand`,
+      }
+
+      const options = queryCollectionOptions(config)
+      const collection = createCollection(options)
+
+      const query = createLiveQueryCollection({
+        query: (q) => q.from({ item: collection }).select(({ item }) => item),
+      })
+
+      const preloadPromise = query.preload().catch((error) => error)
+
+      await vi.waitFor(() => {
+        expect(queryFn).toHaveBeenCalledTimes(1)
+        expect(capturedSignal).toBeDefined()
+      })
+
+      expect(capturedSignal!.aborted).toBe(false)
+
+      await query.cleanup()
+
+      await vi.waitFor(() => {
+        expect(capturedSignal!.aborted).toBe(true)
+      })
+
+      await preloadPromise
+      expect(collection.size).toBe(0)
+    })
   })
 
   describe(`Cache Persistence on Remount`, () => {

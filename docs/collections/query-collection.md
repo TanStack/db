@@ -188,6 +188,27 @@ Some TanStack Query fields are owned or reinterpreted by Query Collection and ar
 
 Other semantic options, such as `initialData`, `placeholderData`, and TanStack Query observer-level `select`, are intentionally deferred until their Query Collection behavior is explicitly designed.
 
+### Query Function Context
+
+`queryFn` receives TanStack Query's `QueryFunctionContext`, including `signal` and `meta`. Query Collections cancel idle on-demand requests during cleanup, so pass `ctx.signal` to abortable request clients:
+
+```typescript
+const todosCollection = createCollection(
+  queryCollectionOptions({
+    queryKey: ["todos"],
+    syncMode: "on-demand",
+    queryFn: async (ctx) => {
+      const response = await fetch("/api/todos", {
+        signal: ctx.signal,
+      })
+      return response.json()
+    },
+    queryClient,
+    getKey: (item) => item.id,
+  })
+)
+```
+
 ### Using with `queryOptions(...)`
 
 If your app already uses TanStack Query's `queryOptions` helper (e.g. from `@tanstack/react-query`), you can spread compatible top-level options into `queryCollectionOptions`. Note that `queryFn` must be explicitly provided since query collections require it both in types and at runtime, and Query Collection's `select` option is for row extraction rather than TanStack Query observer-level selection:
