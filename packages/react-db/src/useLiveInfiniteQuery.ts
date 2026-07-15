@@ -4,6 +4,8 @@ import {
   createLiveQueryCollection,
   createLiveQueryWindowController,
 } from '@tanstack/db'
+// Type-only: used in `ReturnType<typeof useLiveQuery>` in UseLiveInfiniteQueryReturn.
+import type { useLiveQuery } from './useLiveQuery'
 import type {
   Collection,
   Context,
