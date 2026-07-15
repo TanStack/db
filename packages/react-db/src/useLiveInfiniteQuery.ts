@@ -1,23 +1,25 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { CollectionImpl } from '@tanstack/db'
-import { useLiveQuery } from './useLiveQuery'
+import { useCallback, useRef, useSyncExternalStore } from 'react'
+import {
+  CollectionImpl,
+  createLiveQueryCollection,
+  createLiveQueryWindowController,
+} from '@tanstack/db'
 import type {
   Collection,
   Context,
   InferResultType,
   InitialQueryBuilder,
-  LiveQueryCollectionUtils,
+  LiveQueryWindowController,
   NonSingleResult,
   QueryBuilder,
 } from '@tanstack/db'
 
-/**
- * Type guard to check if utils object has setWindow method (LiveQueryCollectionUtils)
- */
-function isLiveQueryCollectionUtils(
-  utils: unknown,
-): utils is LiveQueryCollectionUtils {
-  return typeof (utils as any).setWindow === `function`
+// Live queries created here are cleaned up immediately (0 disables GC).
+const DEFAULT_GC_TIME_MS = 1
+
+/** Type guard: does this collection expose `setWindow` (i.e. has an orderBy)? */
+function hasSetWindow(collection: Collection<any, any, any>): boolean {
+  return typeof (collection.utils)?.setWindow === `function`
 }
 
 export type UseLiveInfiniteQueryConfig<TContext extends Context> = {
@@ -151,14 +153,6 @@ export function useLiveInfiniteQuery<TContext extends Context>(
     )
   }
 
-  // Track how many pages have been loaded
-  const [loadedPageCount, setLoadedPageCount] = useState(1)
-  const [isFetchingNextPage, setIsFetchingNextPage] = useState(false)
-
-  // Track collection instance and whether we've validated it (only for pre-created collections)
-  const collectionRef = useRef(isCollection ? queryFnOrCollection : null)
-  const hasValidatedCollectionRef = useRef(false)
-
   // Track deps for query functions (stringify for comparison)
   let depsKey: string
   try {
@@ -169,162 +163,92 @@ export function useLiveInfiniteQuery<TContext extends Context>(
         `Ensure all dependency values are JSON-serializable.`,
     )
   }
-  const prevDepsKeyRef = useRef(depsKey)
 
-  // Reset pagination when inputs change
-  useEffect(() => {
-    let shouldReset = false
+  const collectionRef = useRef<Collection<any, any, any> | null>(null)
+  const controllerRef = useRef<LiveQueryWindowController<any, any> | null>(null)
+  const configRef = useRef<unknown>(null)
+  const depsRef = useRef<string | null>(null)
 
+  // Recreate the underlying collection + controller when the input identity
+  // (pre-created collection) or the deps (query function) change. A fresh
+  // controller starts back at page 1, which is the desired reset behaviour.
+  const needsNew =
+    !controllerRef.current ||
+    (isCollection && configRef.current !== queryFnOrCollection) ||
+    (!isCollection && depsRef.current !== depsKey)
+
+  if (needsNew) {
     if (isCollection) {
-      // Reset if collection instance changed
-      if (collectionRef.current !== queryFnOrCollection) {
-        collectionRef.current = queryFnOrCollection
-        hasValidatedCollectionRef.current = false
-        shouldReset = true
-      }
-    } else {
-      // Reset if deps changed (for query functions)
-      if (prevDepsKeyRef.current !== depsKey) {
-        prevDepsKeyRef.current = depsKey
-        shouldReset = true
-      }
-    }
-
-    if (shouldReset) {
-      setLoadedPageCount(1)
-    }
-  }, [isCollection, queryFnOrCollection, depsKey])
-
-  // Create a live query with initial limit and offset
-  // Either pass collection directly or wrap query function
-  // Use pageSize + 1 for peek-ahead detection (to know if there are more pages)
-  const queryResult = isCollection
-    ? useLiveQuery(queryFnOrCollection)
-    : useLiveQuery(
-        (q) =>
-          queryFnOrCollection(q)
-            .limit(pageSize + 1)
-            .offset(0),
-        deps,
-      )
-
-  // Adjust window when pagination changes
-  useEffect(() => {
-    const utils = queryResult.collection.utils
-    const expectedOffset = 0
-    const expectedLimit = loadedPageCount * pageSize + 1 // +1 for peek ahead
-
-    // Check if collection has orderBy (required for setWindow)
-    if (!isLiveQueryCollectionUtils(utils)) {
-      // For pre-created collections, throw an error if no orderBy
-      if (isCollection) {
+      const collection = queryFnOrCollection as Collection<any, any, any>
+      if (!hasSetWindow(collection)) {
         throw new Error(
           `useLiveInfiniteQuery: Pre-created live query collection must have an orderBy clause for infinite pagination to work. ` +
             `Please add .orderBy() to your createLiveQueryCollection query.`,
         )
       }
-      return
-    }
-
-    // For pre-created collections, validate window on first check
-    if (isCollection && !hasValidatedCollectionRef.current) {
-      const currentWindow = utils.getWindow()
-      if (
-        currentWindow &&
-        (currentWindow.offset !== expectedOffset ||
-          currentWindow.limit !== expectedLimit)
-      ) {
-        console.warn(
-          `useLiveInfiniteQuery: Pre-created collection has window {offset: ${currentWindow.offset}, limit: ${currentWindow.limit}} ` +
-            `but hook expects {offset: ${expectedOffset}, limit: ${expectedLimit}}. Adjusting window now.`,
-        )
-      }
-      hasValidatedCollectionRef.current = true
-    }
-
-    // For query functions, wait until collection is ready
-    if (!isCollection && !queryResult.isReady) return
-
-    // Adjust the window
-    let cancelled = false
-    const result = utils.setWindow({
-      offset: expectedOffset,
-      limit: expectedLimit,
-    })
-
-    if (result !== true) {
-      setIsFetchingNextPage(true)
-      result
-        .catch((error: unknown) => {
-          if (!cancelled)
-            console.error(`useLiveInfiniteQuery: setWindow failed:`, error)
-        })
-        .finally(() => {
-          if (!cancelled) setIsFetchingNextPage(false)
-        })
+      collection.startSyncImmediate()
+      collectionRef.current = collection
+      configRef.current = queryFnOrCollection
     } else {
-      setIsFetchingNextPage(false)
+      // Wrap the query with the first page's peek-ahead window; the controller
+      // grows the limit from here via setWindow.
+      collectionRef.current = createLiveQueryCollection({
+        query: (q: InitialQueryBuilder) =>
+          queryFnOrCollection(q)
+            .limit(pageSize + 1)
+            .offset(0),
+        startSync: true,
+        gcTime: DEFAULT_GC_TIME_MS,
+      })
+      depsRef.current = depsKey
     }
+    controllerRef.current = createLiveQueryWindowController(
+      collectionRef.current,
+      {
+        pageSize,
+        initialPageParam,
+        // useSyncExternalStore must not be notified synchronously on subscribe.
+        deferInitialNotify: true,
+        // A query-function collection already carries page 1's window in its
+        // query, so defer the (redundant) first apply until it is ready; a
+        // pre-created collection needs its window established up front.
+        waitForReady: !isCollection,
+      },
+    )
+  }
+  const controller = controllerRef.current!
 
-    return () => {
-      cancelled = true
-    }
-  }, [
-    isCollection,
-    queryResult.collection,
-    queryResult.isReady,
-    loadedPageCount,
-    pageSize,
-  ])
+  // Stable subscribe bound to the current controller.
+  const subscribeRef = useRef<((onStoreChange: () => void) => () => void) | null>(
+    null,
+  )
+  if (!subscribeRef.current || needsNew) {
+    subscribeRef.current = (onStoreChange) => controller.subscribe(onStoreChange)
+  }
 
-  // Split the data array into pages and determine if there's a next page
-  const { pages, pageParams, hasNextPage, flatData } = useMemo(() => {
-    const dataArray = (
-      Array.isArray(queryResult.data) ? queryResult.data : []
-    ) as InferResultType<TContext>
-    const totalItemsRequested = loadedPageCount * pageSize
+  const snapshot = useSyncExternalStore(subscribeRef.current, () =>
+    controller.getSnapshot(),
+  )
 
-    // Check if we have more data than requested (the peek ahead item)
-    const hasMore = dataArray.length > totalItemsRequested
-
-    // Build pages array (without the peek ahead item)
-    const pagesResult: Array<Array<InferResultType<TContext>[number]>> = []
-    const pageParamsResult: Array<number> = []
-
-    for (let i = 0; i < loadedPageCount; i++) {
-      const pageData = dataArray.slice(i * pageSize, (i + 1) * pageSize)
-      pagesResult.push(pageData)
-      pageParamsResult.push(initialPageParam + i)
-    }
-
-    // Flatten the pages for the data return (without peek ahead item)
-    const flatDataResult = dataArray.slice(
-      0,
-      totalItemsRequested,
-    ) as InferResultType<TContext>
-
-    return {
-      pages: pagesResult,
-      pageParams: pageParamsResult,
-      hasNextPage: hasMore,
-      flatData: flatDataResult,
-    }
-  }, [queryResult.data, loadedPageCount, pageSize, initialPageParam])
-
-  // Fetch next page
   const fetchNextPage = useCallback(() => {
-    if (!hasNextPage || isFetchingNextPage) return
-
-    setLoadedPageCount((prev) => prev + 1)
-  }, [hasNextPage, isFetchingNextPage])
+    controllerRef.current?.fetchNextPage()
+  }, [])
 
   return {
-    ...queryResult,
-    data: flatData,
-    pages,
-    pageParams,
+    data: snapshot.data as InferResultType<TContext>,
+    state: snapshot.state,
+    status: snapshot.status,
+    isLoading: snapshot.isLoading,
+    isReady: snapshot.isReady,
+    isIdle: snapshot.isIdle,
+    isError: snapshot.isError,
+    isCleanedUp: snapshot.isCleanedUp,
+    collection: snapshot.collection,
+    isEnabled: snapshot.isEnabled,
+    pages: snapshot.pages as Array<Array<InferResultType<TContext>[number]>>,
+    pageParams: snapshot.pageParams as Array<number>,
     fetchNextPage,
-    hasNextPage,
-    isFetchingNextPage,
+    hasNextPage: snapshot.hasNextPage,
+    isFetchingNextPage: snapshot.isFetchingNextPage,
   } as UseLiveInfiniteQueryReturn<TContext>
 }
