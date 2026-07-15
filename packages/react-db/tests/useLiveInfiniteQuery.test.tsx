@@ -1,6 +1,11 @@
 import { describe, expect, it, vi } from 'vitest'
 import { act, renderHook, waitFor } from '@testing-library/react'
-import { BTreeIndex, createCollection, createLiveQueryCollection, eq  } from '@tanstack/db'
+import {
+  BTreeIndex,
+  createCollection,
+  createLiveQueryCollection,
+  eq,
+} from '@tanstack/db'
 import { useLiveInfiniteQuery } from '../src/useLiveInfiniteQuery'
 import { mockSyncCollectionOptions } from '../../db/tests/utils'
 import { createFilterFunctionFromExpression } from '../../db/src/collection/change-events'
