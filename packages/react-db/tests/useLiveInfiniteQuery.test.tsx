@@ -1,7 +1,11 @@
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 import { act, renderHook, waitFor } from '@testing-library/react'
-import { createCollection, createLiveQueryCollection, eq } from '@tanstack/db'
-import { BTreeIndex } from '@tanstack/db'
+import {
+  BTreeIndex,
+  createCollection,
+  createLiveQueryCollection,
+  eq,
+} from '@tanstack/db'
 import { useLiveInfiniteQuery } from '../src/useLiveInfiniteQuery'
 import { mockSyncCollectionOptions } from '../../db/tests/utils'
 import { createFilterFunctionFromExpression } from '../../db/src/collection/change-events'
@@ -693,6 +697,44 @@ describe(`useLiveInfiniteQuery`, () => {
     result.current.pages[0]!.forEach((post) => {
       expect(post.category).toBe(`life`)
     })
+  })
+
+  it(`re-windows and re-slices when pageSize changes at runtime`, async () => {
+    const posts = createMockPosts(50)
+    const collection = createCollection(
+      mockSyncCollectionOptions<Post>({
+        autoIndex: `eager`,
+        id: `pagesize-change-test`,
+        getKey: (post: Post) => post.id,
+        initialData: posts,
+      }),
+    )
+
+    const { result, rerender } = renderHook(
+      ({ pageSize }: { pageSize: number }) =>
+        useLiveInfiniteQuery(
+          (q) =>
+            q
+              .from({ posts: collection })
+              .orderBy(({ posts: p }) => p.createdAt, `desc`),
+          { pageSize },
+        ),
+      { initialProps: { pageSize: 5 } },
+    )
+
+    await waitFor(() => expect(result.current.isReady).toBe(true))
+    expect(result.current.data).toHaveLength(5)
+    expect(result.current.pages[0]).toHaveLength(5)
+
+    // Grow the page size at runtime (no deps change) — the window and the
+    // page slicing must both pick it up.
+    act(() => {
+      rerender({ pageSize: 10 })
+    })
+
+    await waitFor(() => expect(result.current.data).toHaveLength(10))
+    expect(result.current.pages).toHaveLength(1)
+    expect(result.current.pages[0]).toHaveLength(10)
   })
 
   it(`should track pageParams correctly`, async () => {
@@ -1736,6 +1778,42 @@ describe(`useLiveInfiniteQuery`, () => {
       expect(result.current.pages[0]).toHaveLength(10)
       expect(result.current.data).toHaveLength(10)
       expect(result.current.hasNextPage).toBe(true)
+    })
+
+    it(`warns when a pre-created collection's window differs from the first page`, async () => {
+      const posts = createMockPosts(50)
+      const collection = createCollection(
+        mockSyncCollectionOptions<Post>({
+          autoIndex: `eager`,
+          id: `mismatched-window-warn-test`,
+          getKey: (post: Post) => post.id,
+          initialData: posts,
+        }),
+      )
+      const liveQueryCollection = createLiveQueryCollection({
+        query: (q) =>
+          q
+            .from({ posts: collection })
+            .orderBy(({ posts: p }) => p.createdAt, `desc`)
+            .limit(5)
+            .offset(0),
+      })
+      await liveQueryCollection.preload()
+      // Give the collection a concrete window that differs from the hook's
+      // expected first page (offset 0, limit pageSize + 1).
+      liveQueryCollection.utils.setWindow({ offset: 0, limit: 5 })
+
+      const warn = vi.spyOn(console, `warn`).mockImplementation(() => {})
+      try {
+        renderHook(() =>
+          useLiveInfiniteQuery(liveQueryCollection, { pageSize: 10 }),
+        )
+        expect(warn).toHaveBeenCalledWith(
+          expect.stringContaining(`Pre-created collection has window`),
+        )
+      } finally {
+        warn.mockRestore()
+      }
     })
 
     it(`should handle live updates with pre-created collection`, async () => {
