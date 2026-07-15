@@ -19,7 +19,7 @@ const DEFAULT_GC_TIME_MS = 1
 
 /** Type guard: does this collection expose `setWindow` (i.e. has an orderBy)? */
 function hasSetWindow(collection: Collection<any, any, any>): boolean {
-  return typeof (collection.utils)?.setWindow === `function`
+  return typeof collection.utils?.setWindow === `function`
 }
 
 export type UseLiveInfiniteQueryConfig<TContext extends Context> = {
@@ -219,11 +219,12 @@ export function useLiveInfiniteQuery<TContext extends Context>(
   const controller = controllerRef.current!
 
   // Stable subscribe bound to the current controller.
-  const subscribeRef = useRef<((onStoreChange: () => void) => () => void) | null>(
-    null,
-  )
+  const subscribeRef = useRef<
+    ((onStoreChange: () => void) => () => void) | null
+  >(null)
   if (!subscribeRef.current || needsNew) {
-    subscribeRef.current = (onStoreChange) => controller.subscribe(onStoreChange)
+    subscribeRef.current = (onStoreChange) =>
+      controller.subscribe(onStoreChange)
   }
 
   const snapshot = useSyncExternalStore(subscribeRef.current, () =>

@@ -42,8 +42,7 @@ export interface LiveQueryWindowSnapshot<
   isEnabled: boolean
 }
 
-export interface CreateLiveQueryWindowControllerOptions
-  extends CreateLiveQueryObserverOptions {
+export interface CreateLiveQueryWindowControllerOptions extends CreateLiveQueryObserverOptions {
   /** Rows per page (default 20). A falsy value falls back to the default. */
   pageSize?: number
   /** Value of the first page's `pageParam` (default 0). */
@@ -87,8 +86,7 @@ interface CachedFrom {
 class LiveQueryWindowControllerImpl<
   T extends object,
   TKey extends string | number,
-> implements LiveQueryWindowController<T, TKey>
-{
+> implements LiveQueryWindowController<T, TKey> {
   private readonly observer: LiveQueryObserver<T, TKey>
   private readonly collection: Collection<T, TKey, any> | null
   private readonly pageSize: number
@@ -183,7 +181,9 @@ class LiveQueryWindowControllerImpl<
   subscribe(listener: () => void): () => void {
     this.listeners.add(listener)
     if (this.listeners.size === 1) {
-      this.observerUnsub = this.observer.subscribe(() => this.onObserverNotify())
+      this.observerUnsub = this.observer.subscribe(() =>
+        this.onObserverNotify(),
+      )
       // Establish the current window now that the query is active.
       this.applyWindow()
     }
@@ -250,7 +250,12 @@ class LiveQueryWindowControllerImpl<
     this.appliedLimit = limit
 
     const utils = collection.utils as
-      | { setWindow?: (o: { offset: number; limit: number }) => true | Promise<void> }
+      | {
+          setWindow?: (o: {
+            offset: number
+            limit: number
+          }) => true | Promise<void>
+        }
       | undefined
     if (typeof utils?.setWindow !== `function`) return
 

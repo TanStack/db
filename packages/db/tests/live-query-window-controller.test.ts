@@ -23,7 +23,10 @@ function makeSource() {
 }
 
 /** Ordered live query with page 1's peek-ahead window baked in, as the React adapter builds it. */
-function makeOrderedLiveQuery(source: ReturnType<typeof makeSource>, pageSize: number) {
+function makeOrderedLiveQuery(
+  source: ReturnType<typeof makeSource>,
+  pageSize: number,
+) {
   return createLiveQueryCollection({
     query: (q) =>
       q
