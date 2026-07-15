@@ -170,16 +170,24 @@ export function useLiveInfiniteQuery<TContext extends Context>(
   const controllerRef = useRef<LiveQueryWindowController<any, any> | null>(null)
   const configRef = useRef<unknown>(null)
   const depsRef = useRef<string | null>(null)
+  const pageSizeRef = useRef(pageSize)
+  const initialPageParamRef = useRef(initialPageParam)
+  const validatedCollectionRef = useRef<unknown>(null)
 
   // Recreate the underlying collection + controller when the input identity
-  // (pre-created collection) or the deps (query function) change. A fresh
-  // controller starts back at page 1, which is the desired reset behaviour.
+  // (pre-created collection), the deps (query function), or the page shape
+  // (`pageSize`/`initialPageParam`) change. A fresh controller starts back at
+  // page 1, which is the desired reset behaviour.
   const needsNew =
     !controllerRef.current ||
+    pageSizeRef.current !== pageSize ||
+    initialPageParamRef.current !== initialPageParam ||
     (isCollection && configRef.current !== queryFnOrCollection) ||
     (!isCollection && depsRef.current !== depsKey)
 
   if (needsNew) {
+    pageSizeRef.current = pageSize
+    initialPageParamRef.current = initialPageParam
     if (isCollection) {
       const collection = queryFnOrCollection as Collection<any, any, any>
       if (!hasSetWindow(collection)) {
@@ -187,6 +195,21 @@ export function useLiveInfiniteQuery<TContext extends Context>(
           `useLiveInfiniteQuery: Pre-created live query collection must have an orderBy clause for infinite pagination to work. ` +
             `Please add .orderBy() to your createLiveQueryCollection query.`,
         )
+      }
+      // Warn once per collection instance if its current window doesn't match
+      // the first page the hook is about to enforce.
+      if (validatedCollectionRef.current !== collection) {
+        validatedCollectionRef.current = collection
+        const currentWindow = collection.utils.getWindow?.()
+        if (
+          currentWindow &&
+          (currentWindow.offset !== 0 || currentWindow.limit !== pageSize + 1)
+        ) {
+          console.warn(
+            `useLiveInfiniteQuery: Pre-created collection has window {offset: ${currentWindow.offset}, limit: ${currentWindow.limit}} ` +
+              `but the hook expects {offset: 0, limit: ${pageSize + 1}}. Adjusting window now.`,
+          )
+        }
       }
       collection.startSyncImmediate()
       collectionRef.current = collection
