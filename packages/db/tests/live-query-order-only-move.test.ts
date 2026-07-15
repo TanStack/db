@@ -252,13 +252,15 @@ describe(`order-only move (RFC #1623 phase 4)`, () => {
       }),
     )
     const teams = createCollection(
-      mockSyncCollectionOptions<{ id: string; orgId: string; position: number }>(
-        {
-          id: `order-only-teams-${seq++}`,
-          getKey: ({ id }) => id,
-          initialData: [{ id: `t1`, orgId: `o1`, position: 1 }],
-        },
-      ),
+      mockSyncCollectionOptions<{
+        id: string
+        orgId: string
+        position: number
+      }>({
+        id: `order-only-teams-${seq++}`,
+        getKey: ({ id }) => id,
+        initialData: [{ id: `t1`, orgId: `o1`, position: 1 }],
+      }),
     )
     const members = createCollection(
       mockSyncCollectionOptions<{
@@ -295,7 +297,7 @@ describe(`order-only move (RFC #1623 phase 4)`, () => {
     await lq.preload()
 
     const teamCollection = (lq.get(`o1`) as any).teams
-    const memberCollection = (teamCollection.get(`t1`)).members
+    const memberCollection = teamCollection.get(`t1`).members
     let notifications = 0
     const subscription = memberCollection.subscribeChanges(
       () => notifications++,
