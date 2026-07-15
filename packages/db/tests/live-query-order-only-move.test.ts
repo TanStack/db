@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest'
 import { createCollection } from '../src/collection/index.js'
 import { createLiveQueryCollection } from '../src/query/live-query-collection.js'
 import { createLiveQueryObserver } from '../src/live-query-observer.js'
+import { eq } from '../src/query/builder/functions.js'
 import { mockSyncCollectionOptions } from './utils.js'
 
 interface Person {
@@ -137,5 +138,104 @@ describe(`order-only move (RFC #1623 phase 4)`, () => {
     ])
     expect(after.layoutRevision).toBeGreaterThan(revBefore)
     observer.dispose()
+  })
+
+  // Kyle's review issue 1: a commit containing both an ordinary value update
+  // and an order-only move must publish exactly once — the ordinary publication
+  // already carries the final values and ordering, so the separate layout event
+  // is redundant.
+  it(`publishes a mixed value update and order-only move exactly once`, async () => {
+    const source = makeSource()
+    const lq = await makeOrderedByAge(source)
+    const observer = createLiveQueryObserver<
+      { id: string; name: string },
+      string
+    >(lq as any)
+
+    let notifications = 0
+    observer.subscribe(() => notifications++)
+    notifications = 0 // exclude subscribeChanges' initial-state publication
+
+    source.utils.begin()
+    source.utils.write({
+      type: `update`,
+      value: { id: `1`, name: `Alicia`, age: 30 },
+    })
+    source.utils.write({
+      type: `update`,
+      value: { id: `2`, name: `Bob`, age: 99 },
+    })
+    source.utils.commit()
+
+    const after = observer.getSnapshot()
+    expect(
+      (after.data as Array<Person>).map(({ id, name }) => [id, name]),
+    ).toEqual([
+      [`1`, `Alicia`],
+      [`3`, `Carol`],
+      [`2`, `Bob`],
+    ])
+    expect(notifications).toBe(1)
+    observer.dispose()
+  })
+
+  // Kyle's review issue 2: an ordered child collection produced by `includes`
+  // must consume the insertion-side order metadata and publish its move when the
+  // projected child value is unchanged.
+  it(`publishes an ordered included child move exactly once`, async () => {
+    const parents = createCollection(
+      mockSyncCollectionOptions<{ id: string }>({
+        id: `order-only-parents-${seq++}`,
+        getKey: ({ id }) => id,
+        initialData: [{ id: `p1` }],
+      }),
+    )
+    const children = createCollection(
+      mockSyncCollectionOptions<{
+        id: string
+        parentId: string
+        name: string
+        position: number
+      }>({
+        id: `order-only-children-${seq++}`,
+        getKey: ({ id }) => id,
+        initialData: [
+          { id: `c1`, parentId: `p1`, name: `One`, position: 1 },
+          { id: `c2`, parentId: `p1`, name: `Two`, position: 2 },
+        ],
+      }),
+    )
+    const lq = createLiveQueryCollection((q) =>
+      q.from({ parent: parents }).select(({ parent }) => ({
+        id: parent.id,
+        children: q
+          .from({ child: children })
+          .where(({ child }) => eq(child.parentId, parent.id))
+          .orderBy(({ child }) => child.position)
+          .select(({ child }) => ({ id: child.id, name: child.name })),
+      })),
+    )
+    await lq.preload()
+
+    const childCollection = (lq.get(`p1`) as any).children
+    let notifications = 0
+    const subscription = childCollection.subscribeChanges(
+      () => notifications++,
+      { includeInitialState: false },
+    )
+
+    children.utils.begin()
+    children.utils.write({
+      type: `update`,
+      value: { id: `c1`, parentId: `p1`, name: `One`, position: 3 },
+    })
+    children.utils.commit()
+
+    expect([...childCollection.values()].map(({ id }: any) => id)).toEqual([
+      `c2`,
+      `c1`,
+    ])
+    expect(notifications).toBe(1)
+    subscription.unsubscribe()
   })
 })
