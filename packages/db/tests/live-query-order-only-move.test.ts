@@ -238,4 +238,83 @@ describe(`order-only move (RFC #1623 phase 4)`, () => {
     expect(notifications).toBe(1)
     subscription.unsubscribe()
   })
+
+  // The includes flush is recursive, so the order-only-move handling must hold
+  // at depth, not just one level. Two levels of ordered includes
+  // (org -> teams -> members); move a grandchild whose projected value is
+  // unchanged and assert its collection re-sorts and publishes exactly once.
+  it(`publishes an ordered move in a deeply-nested included child exactly once`, async () => {
+    const orgs = createCollection(
+      mockSyncCollectionOptions<{ id: string }>({
+        id: `order-only-orgs-${seq++}`,
+        getKey: ({ id }) => id,
+        initialData: [{ id: `o1` }],
+      }),
+    )
+    const teams = createCollection(
+      mockSyncCollectionOptions<{ id: string; orgId: string; position: number }>(
+        {
+          id: `order-only-teams-${seq++}`,
+          getKey: ({ id }) => id,
+          initialData: [{ id: `t1`, orgId: `o1`, position: 1 }],
+        },
+      ),
+    )
+    const members = createCollection(
+      mockSyncCollectionOptions<{
+        id: string
+        teamId: string
+        name: string
+        position: number
+      }>({
+        id: `order-only-members-${seq++}`,
+        getKey: ({ id }) => id,
+        initialData: [
+          { id: `m1`, teamId: `t1`, name: `One`, position: 1 },
+          { id: `m2`, teamId: `t1`, name: `Two`, position: 2 },
+        ],
+      }),
+    )
+    const lq = createLiveQueryCollection((q) =>
+      q.from({ org: orgs }).select(({ org }) => ({
+        id: org.id,
+        teams: q
+          .from({ team: teams })
+          .where(({ team }) => eq(team.orgId, org.id))
+          .orderBy(({ team }) => team.position)
+          .select(({ team }) => ({
+            id: team.id,
+            members: q
+              .from({ member: members })
+              .where(({ member }) => eq(member.teamId, team.id))
+              .orderBy(({ member }) => member.position)
+              .select(({ member }) => ({ id: member.id, name: member.name })),
+          })),
+      })),
+    )
+    await lq.preload()
+
+    const teamCollection = (lq.get(`o1`) as any).teams
+    const memberCollection = (teamCollection.get(`t1`)).members
+    let notifications = 0
+    const subscription = memberCollection.subscribeChanges(
+      () => notifications++,
+      { includeInitialState: false },
+    )
+
+    // Move m1 behind m2 (position 1 -> 3); projected { id, name } unchanged.
+    members.utils.begin()
+    members.utils.write({
+      type: `update`,
+      value: { id: `m1`, teamId: `t1`, name: `One`, position: 3 },
+    })
+    members.utils.commit()
+
+    expect([...memberCollection.values()].map(({ id }: any) => id)).toEqual([
+      `m2`,
+      `m1`,
+    ])
+    expect(notifications).toBe(1)
+    subscription.unsubscribe()
+  })
 })
