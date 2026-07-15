@@ -22,6 +22,17 @@ export interface LiveQuerySnapshot<
   data: T | ReadonlyArray<T> | undefined
   /** The underlying collection, or `undefined` when disabled. */
   collection: Collection<T, TKey, any> | undefined
+  /**
+   * Monotonic counter bumped whenever the visible layout (the ordered key
+   * sequence) changes — membership, ordering, or an order-only move. Lets
+   * consumers detect a reorder that changed no row value (which `data`/`state`
+   * identity alone can't express once row values are structurally shared).
+   *
+   * It is NOT in lockstep with snapshot identity: a value-only update produces a
+   * new snapshot while `layoutRevision` stays put. A `layoutRevision` change
+   * always accompanies a new snapshot, but not vice versa.
+   */
+  layoutRevision: number
   status: CollectionStatus | `disabled`
   isLoading: boolean
   isReady: boolean
@@ -70,6 +81,7 @@ const DISABLED_SNAPSHOT: LiveQuerySnapshot<any, any> = {
   state: undefined,
   data: undefined,
   collection: undefined,
+  layoutRevision: 0,
   status: `disabled`,
   isLoading: false,
   isReady: true,
@@ -89,6 +101,8 @@ class LiveQueryObserverImpl<
   private cachedVersion = -1
   private cachedStatus: CollectionStatus | undefined
   private cachedSnapshot: LiveQuerySnapshot<T, TKey> = DISABLED_SNAPSHOT
+  private layoutRevision = 0
+  private lastLayoutKeys: Array<TKey> | undefined
   private readonly listeners = new Set<LiveQueryObserverListener<T, TKey>>()
   private collectionUnsub: (() => void) | null = null
   // Bumped on each attach. `onFirstReady` can't be unsubscribed, so a callback
@@ -124,6 +138,29 @@ class LiveQueryObserverImpl<
       let stateCache: Map<TKey, T> | null = null
       let dataCache: Array<T> | null = null
 
+      // Bump the layout revision when the ordered key sequence changes
+      // (membership, ordering, or an order-only move). Compare the key sequence
+      // directly rather than via a serialized signature: a joined-with-separator
+      // signature can collide when a key value equals the concatenation of
+      // neighboring keys around the separator. Comparing keys also avoids
+      // materializing a large string on every rebuild; a new key array is only
+      // allocated when the layout actually moved.
+      const prevKeys = this.lastLayoutKeys
+      let layoutChanged =
+        prevKeys === undefined || prevKeys.length !== entries.length
+      if (!layoutChanged) {
+        for (let i = 0; i < entries.length; i++) {
+          if (prevKeys![i] !== entries[i]![0]) {
+            layoutChanged = true
+            break
+          }
+        }
+      }
+      if (layoutChanged) {
+        this.lastLayoutKeys = entries.map(([key]) => key)
+        this.layoutRevision++
+      }
+
       this.cachedSnapshot = {
         get state() {
           if (!stateCache) stateCache = new Map(entries)
@@ -134,6 +171,7 @@ class LiveQueryObserverImpl<
           return singleResult ? dataCache[0] : dataCache
         },
         collection,
+        layoutRevision: this.layoutRevision,
         status: collection.status,
         ...getLiveQueryStatusFlags(collection.status),
         isEnabled: true,

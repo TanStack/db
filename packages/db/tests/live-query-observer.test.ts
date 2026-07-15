@@ -189,4 +189,30 @@ describe(`createLiveQueryObserver`, () => {
     expect(observer.getSnapshot().status).toBe(`ready`)
     observer.dispose()
   })
+
+  it(`bumps layoutRevision on a membership change that a joined key signature would collide on`, () => {
+    // Two keys "a","b" vs a single key "a\u0000b" join to the same string under
+    // any separator that can appear in a key. The revision compares the key
+    // sequence directly, so it must still register the membership change.
+    const source = makeSource([
+      { id: `a`, name: `A` },
+      { id: `b`, name: `B` },
+    ])
+    const observer = createLiveQueryObserver<Row, string>(source as any)
+    observer.subscribe(() => {})
+
+    const revBefore = observer.getSnapshot().layoutRevision
+
+    source.utils.begin()
+    source.utils.write({ type: `delete`, value: { id: `a`, name: `A` } })
+    source.utils.write({ type: `delete`, value: { id: `b`, name: `B` } })
+    source.utils.write({
+      type: `insert`,
+      value: { id: `a\u0000b`, name: `AB` },
+    })
+    source.utils.commit()
+
+    expect(observer.getSnapshot().layoutRevision).not.toBe(revBefore)
+    observer.dispose()
+  })
 })

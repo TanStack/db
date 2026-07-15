@@ -11,6 +11,7 @@ import {
 } from '../../errors.js'
 import { transactionScopedScheduler } from '../../scheduler.js'
 import { getActiveTransaction } from '../../transactions.js'
+import { deepEquals } from '../../utils.js'
 import { CollectionSubscriber } from './collection-subscriber.js'
 import { getCollectionBuilder } from './collection-registry.js'
 import { LIVE_QUERY_INTERNAL } from './internal.js'
@@ -799,6 +800,11 @@ export class CollectionConfigBuilder<
                 existing.orderByIndex = changes.orderByIndex
               }
             }
+            // Keep the retracted (old) side for order-only-move detection.
+            if (changes.deletes > 0) {
+              existing.previousValue = changes.previousValue
+              existing.previousOrderByIndex = changes.previousOrderByIndex
+            }
           } else {
             merged.set(customKey, { ...changes })
           }
@@ -811,6 +817,16 @@ export class CollectionConfigBuilder<
         begin()
         changesToApply.forEach(this.applyChanges.bind(this, config))
         commit()
+        // An order-only move (the row's projected value is unchanged but its
+        // `orderByIndex` moved) is swallowed by the collection's value-diff, so
+        // `commit()` emits nothing even though `.values()`/`.entries()` are now
+        // re-sorted. Publish an explicit layout-change notification so ordered
+        // consumers re-read — a first-class signal, not a forged row `update`.
+        // Only when the commit published nothing else: any real row change
+        // already notifies subscribers, who re-read the re-sorted collection.
+        if (needsLayoutOnlyPublication(changesToApply)) {
+          emitLayoutChange(config.collection)
+        }
       }
       pendingChanges = new Map()
 
@@ -893,9 +909,14 @@ export class CollectionConfigBuilder<
 
             if (multiplicity < 0) {
               existing.deletes += Math.abs(multiplicity)
+              existing.previousValue = childResult
+              existing.previousOrderByIndex = _orderByIndex
             } else if (multiplicity > 0) {
               existing.inserts += multiplicity
               existing.value = childResult
+              if (_orderByIndex !== undefined) {
+                existing.orderByIndex = _orderByIndex
+              }
             }
 
             byChild.set(childKey, existing)
@@ -1320,9 +1341,14 @@ function setupNestedPipelines(
 
           if (multiplicity < 0) {
             existing.deletes += Math.abs(multiplicity)
+            existing.previousValue = childResult
+            existing.previousOrderByIndex = _orderByIndex
           } else if (multiplicity > 0) {
             existing.inserts += multiplicity
             existing.value = childResult
+            if (_orderByIndex !== undefined) {
+              existing.orderByIndex = _orderByIndex
+            }
           }
 
           byChild.set(childKey, existing)
@@ -1985,6 +2011,13 @@ function flushIncludesState(
             }
           }
           entry.syncMethods.commit()
+          // Same order-only-move handling as the parent flush: a child row that
+          // moved without a value change is swallowed by the value-diff, so
+          // publish a layout-only notification when the child commit published
+          // nothing else.
+          if (needsLayoutOnlyPublication(childChanges)) {
+            emitLayoutChange(entry.syncMethods.collection)
+          }
         }
 
         // Update routing index for nested includes
@@ -2315,6 +2348,10 @@ function accumulateChanges<T>(
   }
   if (multiplicity < 0) {
     changes.deletes += Math.abs(multiplicity)
+    // Remember the retracted (old) value + position so the flush can tell an
+    // order-only move apart from a real value change.
+    changes.previousValue = value
+    changes.previousOrderByIndex = orderByIndex
   } else if (multiplicity > 0) {
     changes.inserts += multiplicity
     // Update value to the latest version for this key
@@ -2325,4 +2362,49 @@ function accumulateChanges<T>(
   }
   acc.set(key, changes)
   return acc
+}
+
+/**
+ * Decide whether a flush needs a standalone layout-change publication.
+ *
+ * An "order-only move" — a row updated in place whose `orderByIndex` moved but
+ * whose projected value is deep-equal to before — is swallowed by the value-diff
+ * and needs an explicit layout notification. But that notification is only
+ * needed when the same `commit()` published nothing else: any real change
+ * (insert, delete, or a value-changed update) already notifies subscribers, who
+ * re-read the re-sorted collection, so a second layout event would be redundant.
+ *
+ * Returns true iff there is at least one order-only move AND no change that the
+ * commit itself publishes.
+ */
+function needsLayoutOnlyPublication<T>(
+  changesToApply: Map<unknown, Changes<T>>,
+): boolean {
+  let layoutMoved = false
+  let commitPublishes = false
+  for (const changes of changesToApply.values()) {
+    const isUpdate = changes.inserts > 0 && changes.deletes > 0
+    if (!isUpdate) {
+      // A net insert or delete always publishes a row change.
+      commitPublishes = true
+    } else if (
+      changes.previousValue === undefined ||
+      !deepEquals(changes.previousValue, changes.value)
+    ) {
+      // In-place update whose value changed — publishes a normal `update`.
+      commitPublishes = true
+    } else if (changes.orderByIndex !== changes.previousOrderByIndex) {
+      // Value unchanged, position moved — swallowed by the value-diff.
+      layoutMoved = true
+    }
+  }
+  return layoutMoved && !commitPublishes
+}
+
+/** Emit a layout-only change notification on a live-query collection. */
+function emitLayoutChange(collection: Collection<any, any, any>): void {
+  const changesManager = (collection as any)._changes as {
+    emitLayoutChangeEvent: () => void
+  }
+  changesManager.emitLayoutChangeEvent()
 }

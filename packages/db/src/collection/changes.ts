@@ -61,6 +61,19 @@ export class CollectionChangesManager<
   }
 
   /**
+   * Notify subscribers that the visible layout (row order) changed without any
+   * row value changing — e.g. an order-only move in an `orderBy` live query.
+   * Emits an empty batch directly (bypassing the empty-array check) so ordered
+   * consumers re-read the now re-sorted collection. This is a first-class layout
+   * signal, deliberately not a forged row `update`.
+   */
+  public emitLayoutChangeEvent(): void {
+    for (const subscription of this.changeSubscriptions) {
+      subscription.emitEvents([])
+    }
+  }
+
+  /**
    * Enriches a change message with virtual properties ($synced, $origin, $key, $collectionId).
    * Uses the "add-if-missing" pattern to preserve virtual properties from upstream collections.
    */
