@@ -200,6 +200,8 @@ The following top-level Query Collection options are forwarded to the underlying
 - `refetchOnReconnect`: Whether to refetch when the network reconnects
 - `refetchOnMount`: Whether to refetch when the observer mounts
 - `networkMode`: Query network mode
+- `initialData`: Initial Query response for eager collections
+- `initialDataUpdatedAt`: Timestamp used by TanStack Query to determine initial data freshness
 - `meta`: Metadata passed to the query function context. Query Collections may add `loadSubsetOptions` for on-demand queries.
 
 ```ts
@@ -237,7 +239,7 @@ Some TanStack Query fields are owned or reinterpreted by Query Collection and ar
 - `subscribed` (Query Collection owns the observer subscription lifecycle)
 - `structuralSharing` and `notifyOnChangeProps` (managed by Query Collection synchronization)
 
-Other semantic options, such as `initialData`, `placeholderData`, and TanStack Query observer-level `select`, are intentionally deferred until their Query Collection behavior is explicitly designed.
+`placeholderData` is intentionally unsupported. TanStack Query treats placeholder data as observer-local presentation state rather than cached Query data. Materializing it would expose temporary UI data as collection-wide normalized rows. Render placeholders in the consuming UI instead.
 
 ### Using with `queryOptions(...)`
 
@@ -271,6 +273,51 @@ const todosCollection = createCollection(
 
 If `queryFn` is missing at runtime, `queryCollectionOptions` throws `QueryFnRequiredError`.
 
+### Initial Data
+
+Eager Query Collections support TanStack Query's `initialData` and
+`initialDataUpdatedAt` options. Initial data has the original Query response
+shape, is stored in the Query cache, and is immediately materialized as
+normalized collection rows. TanStack Query uses `initialDataUpdatedAt` together
+with `staleTime` to decide whether to fetch.
+
+```typescript
+const serverRenderedAt = Date.now()
+const initialTodos = [
+  { id: "1", title: "Write documentation" },
+  { id: "2", title: "Ship initial data support" },
+]
+
+const todosCollection = createCollection(
+  queryCollectionOptions({
+    queryKey: ["todos"],
+    queryFn: fetchTodos,
+    queryClient,
+    getKey: (todo) => todo.id,
+    initialData: initialTodos,
+    initialDataUpdatedAt: serverRenderedAt,
+    staleTime: 60_000,
+  }),
+)
+```
+
+An existing cached or hydrated Query response takes precedence over
+`initialData`. Query keys remain the cache identity: two collections using the
+same QueryClient and exact Query key observe one shared Query document, and a
+later collection's initializer does not replace it. Use distinct Query keys for
+independent documents.
+
+Initial data is supported only for eager collections. A collection-wide value
+cannot establish row membership for arbitrary on-demand predicates, ordering,
+limits, and offsets. For `syncMode: "on-demand"`, seed or hydrate the exact
+derived Query cache entries instead.
+
+If a stale initial response triggers a fetch, the initial rows remain available
+while it is in flight. A successful response reconciles them through the normal
+row ownership pipeline; an error retains the initial rows. Direct writes use the
+same Query cache-patching rules as fetched data, and a later successful server
+response may reconcile or replace those writes.
+
 ### Selecting Rows from Wrapped Responses
 
 Many APIs return rows inside a response envelope that also contains metadata such as pagination cursors, totals, or request information. Use `select` to extract the row array that TanStack DB should materialize:
@@ -289,6 +336,11 @@ const todosCollection = createCollection(
       const response = await fetch("/api/todos")
       return response.json()
     },
+    initialData: {
+      items: [{ id: "1", title: "Initial todo" }],
+      nextCursor: undefined,
+      total: 1,
+    },
     select: (response) => response.items,
     queryClient,
     getKey: (item) => item.id,
@@ -297,6 +349,10 @@ const todosCollection = createCollection(
 ```
 
 `select` is a query-db-collection row extraction hook. It tells TanStack DB which rows to materialize while the TanStack Query cache keeps the original query response shape. In the example above, `queryClient.getQueryData(["todos"])` still returns the full `TodosResponse`, including `nextCursor` and `total`.
+
+The same projection applies to `initialData`: provide the complete response
+envelope, and Query Collection materializes the rows returned by `select` while
+preserving the envelope in the Query cache.
 
 This differs from TanStack Query's observer-level `select`: query-db-collection uses this option to bridge Query's response object into DB's normalized row store.
 
