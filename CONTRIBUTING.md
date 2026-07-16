@@ -17,23 +17,23 @@ If you are here to suggest a feature, first create an issue if it does not alrea
 If you have been assigned to fix an issue or develop a new feature, please follow these steps to get started:
 
 - Fork this repository.
+- Use the Node.js version mentioned in `.nvmrc`.
+
+  ```bash
+  nvm use
+  ```
+
+- Enable [Corepack](https://nodejs.org/api/corepack.html) so the [pnpm](https://pnpm.io/) version mentioned in `package.json` is used.
+
+  ```bash
+  corepack enable
+  ```
+
 - Install dependencies.
 
   ```bash
   pnpm install
   ```
-
-  - We use [pnpm](https://pnpm.io/) for package management. Please use the version mentioned in `package.json`.
-
-    ```bash
-    corepack enable && corepack prepare pnpm@11.1.0 --activate
-    ```
-
-  - We use [nvm](https://github.com/nvm-sh/nvm) to manage Node.js versions. Please use the version mentioned in `.nvmrc`.
-
-    ```bash
-    nvm use
-    ```
 
 - Build all packages.
 
