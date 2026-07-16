@@ -9,7 +9,7 @@ title: MergeContextWithJoinType
 type MergeContextWithJoinType<TContext, TNewSchema, TJoinType> = object & PreserveSingleResultFlag<TContext["singleResult"]> & PreserveHasResultFlag<TContext["hasResult"]> & PreserveUnionFromFlag<TContext["hasUnionFrom"]> & PreserveFromSourceNames<TContext["fromSourceNames"]>;
 ```
 
-Defined in: [packages/db/src/query/builder/types.ts:871](https://github.com/TanStack/db/blob/main/packages/db/src/query/builder/types.ts#L871)
+Defined in: [packages/db/src/query/builder/types.ts:926](https://github.com/TanStack/db/blob/main/packages/db/src/query/builder/types.ts#L926)
 
 MergeContextWithJoinType - Creates a new context after a join operation
 
