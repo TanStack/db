@@ -737,12 +737,9 @@ export function queryCollectionOptions(
   // hashedQueryKey → queryKey
   const hashToQueryKey = new Map<string, QueryKey>()
 
-  // queryKey → Set<RowKey>
+  // queryKey → Set<RowKey>. Entry presence means ownership is resolved;
+  // an empty set represents a resolved query that currently owns no rows.
   const queryToRows = new Map<string, Set<string | number>>()
-
-  // Queries whose in-memory ownership is authoritative, including an empty set.
-  // This preserves the old empty queryToRows entry semantics without retaining it.
-  const resolvedOwnershipQueries = new Set<string>()
 
   // RowKey → Set<queryKey>
   const rowToQueries = new Map<string | number, Set<string>>()
@@ -801,9 +798,6 @@ export function queryCollectionOptions(
 
     const ownedRows = queryToRows.get(hashedQueryKey)
     ownedRows?.delete(rowKey)
-    if (!ownedRows?.size) {
-      queryToRows.delete(hashedQueryKey)
-    }
 
     return !owners?.size
   }
@@ -950,7 +944,7 @@ export function queryCollectionOptions(
 
     const getHydratedOwnedRowsForQueryBaseline = (hashedQueryKey: string) => {
       const knownRows = queryToRows.get(hashedQueryKey)
-      if (knownRows || resolvedOwnershipQueries.has(hashedQueryKey)) {
+      if (knownRows) {
         return new Set(knownRows)
       }
 
@@ -983,14 +977,14 @@ export function queryCollectionOptions(
     > => {
       const knownRows = queryToRows.get(hashedQueryKey)
       if (
-        (knownRows || resolvedOwnershipQueries.has(hashedQueryKey)) &&
-        Array.from(knownRows ?? []).every((rowKey) => collection.has(rowKey))
+        knownRows &&
+        Array.from(knownRows).every((rowKey) => collection.has(rowKey))
       ) {
         const baseline = new Map<
           string | number,
           { value: any; owners: Set<string> }
         >()
-        knownRows?.forEach((rowKey) => {
+        knownRows.forEach((rowKey) => {
           const value = collection.get(rowKey)
           const owners = rowToQueries.get(rowKey)
           if (value && owners) {
@@ -1087,7 +1081,7 @@ export function queryCollectionOptions(
         `${QUERY_COLLECTION_GC_PREFIX}${hashedQueryKey}`,
       )
       commit()
-      resolvedOwnershipQueries.delete(hashedQueryKey)
+      queryToRows.delete(hashedQueryKey)
     }
 
     const schedulePersistedRetentionExpiry = (
@@ -1401,7 +1395,10 @@ export function queryCollectionOptions(
         : getHydratedOwnedRowsForQueryBaseline(hashedQueryKey)
       // From this point onward the result, including an empty result, is the
       // authoritative ownership baseline until this query is cleaned up.
-      resolvedOwnershipQueries.add(hashedQueryKey)
+      queryToRows.set(
+        hashedQueryKey,
+        queryToRows.get(hashedQueryKey) ?? new Set<string | number>(),
+      )
 
       const newItemsMap = new Map<string | number, any>()
       newItemsArray.forEach((item) => {
@@ -1653,7 +1650,6 @@ export function queryCollectionOptions(
 
       state.observers.delete(hashedQueryKey)
       queryToRows.delete(hashedQueryKey)
-      resolvedOwnershipQueries.delete(hashedQueryKey)
       hashToQueryKey.delete(hashedQueryKey)
       queryRefCounts.delete(hashedQueryKey)
       effectivePersistedGcTimes.delete(hashedQueryKey)
@@ -2037,7 +2033,6 @@ export function queryCollectionOptions(
       value: () => ({
         rowToQueries,
         queryToRows,
-        resolvedOwnershipQueries,
       }),
     })
   }

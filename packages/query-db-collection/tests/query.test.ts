@@ -50,7 +50,6 @@ const getKey = (item: TestItem) => item.id
 type OwnershipMaps = {
   rowToQueries: Map<string | number, Set<string>>
   queryToRows: Map<string, Set<string | number>>
-  resolvedOwnershipQueries: Set<string>
 }
 
 function inspectOwnershipMaps(options: {
@@ -66,9 +65,8 @@ function inspectOwnershipMaps(options: {
   return maps
 }
 
-function expectNoEmptyOwnershipSets(maps: OwnershipMaps): void {
+function expectNoEmptyRowOwnershipSets(maps: OwnershipMaps): void {
   maps.rowToQueries.forEach((owners) => expect(owners.size).toBeGreaterThan(0))
-  maps.queryToRows.forEach((rows) => expect(rows.size).toBeGreaterThan(0))
 }
 
 // Helper to advance timers and allow microtasks to flush
@@ -5143,13 +5141,13 @@ describe(`QueryCollection`, () => {
           expect(collection.has(`2`)).toBe(true)
           expect(collection.has(`3`)).toBe(true)
         })
-        expectNoEmptyOwnershipSets(ownershipMaps)
+        expectNoEmptyRowOwnershipSets(ownershipMaps)
 
         await secondSubset.cleanup()
         await vi.waitFor(() => {
           expect(collection.size).toBe(0)
         })
-        expectNoEmptyOwnershipSets(ownershipMaps)
+        expectNoEmptyRowOwnershipSets(ownershipMaps)
         expect(ownershipMaps.rowToQueries.size).toBe(0)
         expect(ownershipMaps.queryToRows.size).toBe(0)
       })
@@ -5272,9 +5270,9 @@ describe(`QueryCollection`, () => {
           expect(collection.has(retainedRow.id)).toBe(false)
         })
         expect(metadataHarness.rowMetadata.get(retainedRow.id)).toBeUndefined()
-        expectNoEmptyOwnershipSets(ownershipMaps)
+        expectNoEmptyRowOwnershipSets(ownershipMaps)
         expect(ownershipMaps.rowToQueries.size).toBe(0)
-        expect(ownershipMaps.queryToRows.size).toBe(0)
+        expect(ownershipMaps.queryToRows.get(queryHash)).toEqual(new Set())
         expect(
           metadataHarness.collectionMetadata.has(
             `queryCollection:gc:${queryHash}`,
@@ -5282,7 +5280,6 @@ describe(`QueryCollection`, () => {
         ).toBe(false)
 
         await collection.cleanup()
-        expect(ownershipMaps.resolvedOwnershipQueries.size).toBe(0)
       })
     })
 
@@ -5916,9 +5913,7 @@ describe(`QueryCollection`, () => {
 
         await liveQuery.cleanup()
 
-        expect(
-          ownershipMaps.resolvedOwnershipQueries.has(retainedQueryHash),
-        ).toBe(true)
+        expect(ownershipMaps.queryToRows.has(retainedQueryHash)).toBe(true)
         expect(ownershipMaps.queryToRows.get(retainedQueryHash)).toEqual(
           new Set([`1`]),
         )
@@ -5946,9 +5941,6 @@ describe(`QueryCollection`, () => {
         expect(collection.has(`1`)).toBe(false)
         expect(ownershipMaps.queryToRows.has(retainedQueryHash)).toBe(false)
         expect(ownershipMaps.rowToQueries.has(`1`)).toBe(false)
-        expect(
-          ownershipMaps.resolvedOwnershipQueries.has(retainedQueryHash),
-        ).toBe(false)
       } finally {
         vi.useRealTimers()
       }
