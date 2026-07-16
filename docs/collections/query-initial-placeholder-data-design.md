@@ -2,11 +2,12 @@
 
 ## Status and scope
 
-This document proposes the semantics for TanStack Query `initialData` and
+This document defines the semantics for TanStack Query `initialData` and
 `placeholderData` at the `@tanstack/query-db-collection` boundary. It is the
 design follow-up for [RFC #1643](https://github.com/TanStack/db/issues/1643)
-and [issue #346](https://github.com/TanStack/db/issues/346). It does not change
-runtime behavior or the persistence format.
+and [issue #346](https://github.com/TanStack/db/issues/346). The accompanying
+implementation adds the approved eager `initialData` behavior without changing
+the persistence format.
 
 The adapter connects two different models:
 

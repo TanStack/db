@@ -704,6 +704,28 @@ export function queryCollectionOptions(
     throw new InitialDataInOnDemandModeError()
   }
 
+  const initialDataObserverOptions =
+    syncMode === `eager`
+      ? {
+          ...(initialData !== undefined && { initialData }),
+          ...(initialDataUpdatedAt !== undefined && {
+            initialDataUpdatedAt,
+          }),
+          // Placeholder data is observer-local UI state in TanStack Query. It
+          // must not be exposed as collection-wide normalized rows, including
+          // when supplied through QueryClient defaults.
+          placeholderData: undefined,
+        }
+      : {
+          // A collection-wide initializer cannot establish membership for
+          // arbitrary on-demand subsets. A defined initializer is needed to
+          // override a QueryClient default because Query Core can apply
+          // defaults again while constructing each Query.
+          initialData: () => undefined,
+          initialDataUpdatedAt: undefined,
+          placeholderData: undefined,
+        }
+
   // Compute the base query key once for cache lookups.
   // All derived keys (from on-demand predicates or function-based queryKey) must
   // share this prefix so that queryCache.findAll({ queryKey: baseKey }) can find them.
@@ -1318,25 +1340,7 @@ export function queryCollectionOptions(
           refetchOnMount,
           networkMode,
         }),
-        ...(syncMode === `eager`
-          ? {
-              ...(initialData !== undefined && { initialData }),
-              ...(initialDataUpdatedAt !== undefined && {
-                initialDataUpdatedAt,
-              }),
-            }
-          : {
-              // A collection-wide initializer cannot establish membership for
-              // arbitrary on-demand subsets. A defined initializer is needed
-              // to override a QueryClient default because Query Core can apply
-              // defaults again while constructing each Query.
-              initialData: () => undefined,
-              initialDataUpdatedAt: undefined,
-            }),
-        // Placeholder data is observer-local UI state in TanStack Query. It
-        // must not be exposed as collection-wide normalized rows, including
-        // when supplied through QueryClient defaults.
-        placeholderData: undefined,
+        ...initialDataObserverOptions,
         queryKey: key,
         queryFn: queryFunction,
         meta: extendedMeta,
