@@ -1,5 +1,20 @@
 # @tanstack/query-db-collection
 
+## 1.1.0
+
+### Minor Changes
+
+- Add top-level Query Collection support for additional Query observer options while preserving QueryClient defaultOptions behavior. ([#1665](https://github.com/TanStack/db/pull/1665))
+
+### Patch Changes
+
+- Fix temporary query readiness listeners so subset unload and collection cleanup release them correctly during in-flight requests. ([#1673](https://github.com/TanStack/db/pull/1673))
+
+- Extract internal query row ownership helpers to make lifecycle cleanup paths easier to reason about while preserving existing behavior. ([#1664](https://github.com/TanStack/db/pull/1664))
+
+- Updated dependencies [[`8258d09`](https://github.com/TanStack/db/commit/8258d0955ab47c8510bd49ea59bcdbefd2ae054d), [`286964d`](https://github.com/TanStack/db/commit/286964d72612b59e3e427baabd9870f5a71a4281)]:
+  - @tanstack/db@0.6.16
+
 ## 1.0.48
 
 ### Patch Changes

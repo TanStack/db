@@ -1,5 +1,13 @@
 # @tanstack/db
 
+## 0.6.16
+
+### Patch Changes
+
+- Fix queries failing to typecheck when the collection's row type is a generic type parameter. Refs inside where/join/select callbacks now expose the properties guaranteed by the type parameter's constraint, and subqueries over generic collections can be used as join sources again (regression introduced in 0.6.6). ([#1678](https://github.com/TanStack/db/pull/1678))
+
+- Preserve an explicit `gcTime: 0` on live query collections. The live query config builder used `this.config.gcTime || 5000`, so a `gcTime` of `0` (which disables garbage collection) was treated as unset and silently replaced by the 5s default, causing the collection to be garbage collected instead of kept alive. Use `??` so only `undefined` falls back to the default. ([#1660](https://github.com/TanStack/db/pull/1660))
+
 ## 0.6.15
 
 ### Patch Changes

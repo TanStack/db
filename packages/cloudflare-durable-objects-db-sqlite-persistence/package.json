@@ -1,6 +1,6 @@
 {
   "name": "@tanstack/cloudflare-durable-objects-db-sqlite-persistence",
-  "version": "0.2.7",
+  "version": "0.2.8",
   "description": "Cloudflare Durable Object SQLite persisted collection adapter for TanStack DB",
   "author": "TanStack Team",
   "license": "MIT",
