@@ -9,7 +9,7 @@ title: WithResult
 type WithResult<TContext, TResult> = Prettify<Omit<TContext, "result" | "hasResult"> & object>;
 ```
 
-Defined in: [packages/db/src/query/builder/types.ts:1287](https://github.com/TanStack/db/blob/main/packages/db/src/query/builder/types.ts#L1287)
+Defined in: [packages/db/src/query/builder/types.ts:1290](https://github.com/TanStack/db/blob/main/packages/db/src/query/builder/types.ts#L1290)
 
 WithResult - Updates a context with a new result type after select()
 
