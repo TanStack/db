@@ -64,6 +64,8 @@ export { isChangeMessage, isControlMessage } from '@electric-sql/client'
 
 const debug = DebugModule.debug(`ts/db:electric`)
 
+const FORCE_DISCONNECT_AND_REFRESH_TIMEOUT_MS = 250
+
 /**
  * Symbol for internal test hooks (hidden from public API)
  */
@@ -481,11 +483,23 @@ function createLoadSubsetDedupe<T extends Row<unknown>>({
     // When the stream is already up-to-date, it may be in a long-poll wait.
     // Forcing a disconnect-and-refresh ensures requestSnapshot gets a response
     // from a fresh server round-trip rather than waiting for the current poll to end.
-    // If the refresh fails (e.g., PauseLock held during subscriber processing in
-    // join pipelines), we fall through to requestSnapshot which still works.
+    // Some native fetch implementations (notably React Native/Expo) may not abort
+    // long-poll requests promptly. Bound the wait so on-demand live queries don't
+    // remain loading until the long-poll naturally times out.
+    // If the refresh fails or times out, we fall through to requestSnapshot which
+    // still works.
     if (stream.isUpToDate) {
+      let timeoutId: ReturnType<typeof setTimeout> | undefined
       try {
-        await stream.forceDisconnectAndRefresh()
+        await Promise.race([
+          stream.forceDisconnectAndRefresh(),
+          new Promise<void>((resolve) => {
+            timeoutId = setTimeout(
+              resolve,
+              FORCE_DISCONNECT_AND_REFRESH_TIMEOUT_MS,
+            )
+          }),
+        ])
       } catch (error) {
         if (handleSnapshotError(error, `forceDisconnectAndRefresh`)) {
           return
@@ -494,6 +508,8 @@ function createLoadSubsetDedupe<T extends Row<unknown>>({
           `${logPrefix}forceDisconnectAndRefresh failed, proceeding to requestSnapshot: %o`,
           error,
         )
+      } finally {
+        clearTimeout(timeoutId)
       }
     }
 

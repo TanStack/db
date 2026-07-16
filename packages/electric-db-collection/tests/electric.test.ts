@@ -2582,6 +2582,122 @@ describe(`Electric Integration`, () => {
       expect(mockRequestSnapshot).toHaveBeenCalledTimes(1)
     })
 
+    it(`should request the snapshot after the refresh timeout and ignore late fulfillment`, async () => {
+      vi.useFakeTimers()
+      try {
+        let resolveRefresh: () => void = () => {}
+        const refresh = new Promise<void>((resolve) => {
+          resolveRefresh = resolve
+        })
+        mockStream.isUpToDate = true
+        mockForceDisconnectAndRefresh.mockReturnValueOnce(refresh)
+
+        const testCollection = createCollection(
+          electricCollectionOptions({
+            id: `on-demand-refresh-timeout-fulfillment-test`,
+            shapeOptions: {
+              url: `http://test-url`,
+              params: { table: `test_table` },
+            },
+            syncMode: `on-demand`,
+            getKey: (item: Row) => item.id as number,
+            startSync: true,
+          }),
+        )
+
+        let loadSettled = false
+        const load = Promise.resolve(
+          testCollection._sync.loadSubset({ limit: 10 }),
+        ).then(() => {
+          loadSettled = true
+        })
+
+        await vi.advanceTimersByTimeAsync(249)
+        expect(mockRequestSnapshot).not.toHaveBeenCalled()
+        expect(loadSettled).toBe(false)
+
+        await vi.advanceTimersByTimeAsync(1)
+        await load
+        expect(mockRequestSnapshot).toHaveBeenCalledTimes(1)
+        expect(loadSettled).toBe(true)
+        await testCollection.cleanup()
+        expect(vi.getTimerCount()).toBe(0)
+
+        resolveRefresh()
+        await refresh
+        await Promise.resolve()
+        expect(mockRequestSnapshot).toHaveBeenCalledTimes(1)
+        expect(vi.getTimerCount()).toBe(0)
+      } finally {
+        vi.useRealTimers()
+      }
+    })
+
+    it(`should handle late refresh rejection after requesting the snapshot`, async () => {
+      vi.useFakeTimers()
+      try {
+        let rejectRefresh: (error: Error) => void = () => {}
+        const refresh = new Promise<void>((_resolve, reject) => {
+          rejectRefresh = reject
+        })
+        mockStream.isUpToDate = true
+        mockForceDisconnectAndRefresh.mockReturnValueOnce(refresh)
+
+        const testCollection = createCollection(
+          electricCollectionOptions({
+            id: `on-demand-refresh-timeout-rejection-test`,
+            shapeOptions: {
+              url: `http://test-url`,
+              params: { table: `test_table` },
+            },
+            syncMode: `on-demand`,
+            getKey: (item: Row) => item.id as number,
+            startSync: true,
+          }),
+        )
+
+        const load = testCollection._sync.loadSubset({ limit: 10 })
+        await vi.advanceTimersByTimeAsync(250)
+        await load
+
+        rejectRefresh(new Error(`late refresh failure`))
+        await expect(refresh).rejects.toThrow(`late refresh failure`)
+        await Promise.resolve()
+        expect(mockRequestSnapshot).toHaveBeenCalledTimes(1)
+        expect(vi.getTimerCount()).toBe(0)
+      } finally {
+        vi.useRealTimers()
+      }
+    })
+
+    it(`should clear the refresh timeout when refresh settles early`, async () => {
+      vi.useFakeTimers()
+      try {
+        mockStream.isUpToDate = true
+        mockForceDisconnectAndRefresh.mockResolvedValueOnce(undefined)
+
+        const testCollection = createCollection(
+          electricCollectionOptions({
+            id: `on-demand-refresh-clears-timeout-test`,
+            shapeOptions: {
+              url: `http://test-url`,
+              params: { table: `test_table` },
+            },
+            syncMode: `on-demand`,
+            getKey: (item: Row) => item.id as number,
+            startSync: true,
+          }),
+        )
+
+        await testCollection._sync.loadSubset({ limit: 10 })
+
+        expect(mockRequestSnapshot).toHaveBeenCalledTimes(1)
+        expect(vi.getTimerCount()).toBe(0)
+      } finally {
+        vi.useRealTimers()
+      }
+    })
+
     it(`should fetch snapshots in progressive mode when loadSubset is called before sync completes`, async () => {
       vi.clearAllMocks()
 
