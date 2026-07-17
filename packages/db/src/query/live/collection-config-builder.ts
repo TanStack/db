@@ -808,6 +808,11 @@ export class CollectionConfigBuilder<
 
       // 1. Flush parent changes
       if (hasParentChanges) {
+        // Materialize the current includes state into the new parent rows
+        // before they commit, so the emitted change events already carry
+        // their included values (the includes flush below patches stored
+        // rows in place without emitting).
+        patchParentChangesFromIncludes(includesState, changesToApply)
         begin()
         changesToApply.forEach(this.applyChanges.bind(this, config))
         commit()
@@ -1236,6 +1241,47 @@ type ChildCollectionEntry = {
 
 function materializesInline(state: IncludesOutputState): boolean {
   return state.materialization !== `collection`
+}
+
+/**
+ * Materializes the current includes state into freshly computed parent rows
+ * before they are committed, so the emitted change events already carry
+ * their included values.
+ *
+ * The post-commit includes flush patches stored parent rows in place without
+ * emitting an event, which consumers that copy rows at emit time (e.g.
+ * another live query layered on this collection) never observe: a
+ * parent-only update would wipe their included fields until an unrelated
+ * child change re-emitted the row.
+ */
+function patchParentChangesFromIncludes(
+  includesState: Array<IncludesOutputState>,
+  parentChanges: Map<unknown, Changes<any>>,
+): void {
+  for (const state of includesState) {
+    if (!materializesInline(state)) continue
+    for (const [, changes] of parentChanges) {
+      if (changes.inserts > 0) {
+        const parentResult = changes.value
+        const routing = parentResult[INCLUDES_ROUTING]?.[state.fieldName]
+        const correlationKey = routing?.correlationKey
+        if (correlationKey != null) {
+          const routingKey = computeRoutingKey(
+            correlationKey,
+            routing?.parentContext ?? null,
+          )
+          setIncludedValue(
+            parentResult,
+            state.resultPath,
+            materializeIncludedValue(
+              state,
+              state.childRegistry.get(routingKey),
+            ),
+          )
+        }
+      }
+    }
+  }
 }
 
 function materializeIncludedValue(

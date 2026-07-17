@@ -711,6 +711,58 @@ describe(`includes subqueries`, () => {
     })
   })
 
+  describe(`parent-only updates`, () => {
+    it(`keeps materialized includes on rows observed through a layered live query`, async () => {
+      const collection = createLiveQueryCollection((q) =>
+        q.from({ p: projects }).select(({ p }) => ({
+          id: p.id,
+          name: p.name,
+          issues: materialize(
+            q
+              .from({ i: issues })
+              .where(({ i }) => eq(i.projectId, p.id))
+              .select(({ i }) => ({
+                id: i.id,
+                title: i.title,
+              })),
+          ),
+        })),
+      )
+      await collection.preload()
+
+      // A second live query layered on top copies rows at emit time — the
+      // shape framework adapters produce for component-level queries. The
+      // emitted parent row must already carry its materialized includes: a
+      // post-commit in-place patch is invisible to this layer.
+      const layered = createLiveQueryCollection((q) =>
+        q.from({ row: collection }),
+      )
+      await layered.preload()
+
+      expect(sortedPlainRows((layered.get(1) as any).issues)).toEqual([
+        { id: 10, title: `Bug in Alpha` },
+        { id: 11, title: `Feature for Alpha` },
+      ])
+
+      // Update only the parent row; no child rows change.
+      projects.utils.begin()
+      projects.utils.write({
+        type: `update`,
+        value: { id: 1, name: `Alpha renamed` },
+      })
+      projects.utils.commit()
+
+      await new Promise((resolve) => setTimeout(resolve, 10))
+
+      const renamed = layered.get(1) as any
+      expect(renamed.name).toBe(`Alpha renamed`)
+      expect(sortedPlainRows(renamed.issues)).toEqual([
+        { id: 10, title: `Bug in Alpha` },
+        { id: 11, title: `Feature for Alpha` },
+      ])
+    })
+  })
+
   describe(`inner join filtering`, () => {
     it(`only shows children for parents matching a WHERE clause`, async () => {
       const collection = createLiveQueryCollection((q) =>
