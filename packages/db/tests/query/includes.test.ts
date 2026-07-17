@@ -730,21 +730,16 @@ describe(`includes subqueries`, () => {
       )
       await collection.preload()
 
-      // A second live query layered on top copies rows at emit time — the
-      // shape framework adapters produce for component-level queries. The
-      // emitted parent row must already carry its materialized includes: a
-      // post-commit in-place patch is invisible to this layer.
       const layered = createLiveQueryCollection((q) =>
         q.from({ row: collection }),
       )
       await layered.preload()
 
-      expect(sortedPlainRows((layered.get(1) as any).issues)).toEqual([
+      expect(sortedPlainRows(layered.get(1)!.issues)).toEqual([
         { id: 10, title: `Bug in Alpha` },
         { id: 11, title: `Feature for Alpha` },
       ])
 
-      // Update only the parent row; no child rows change.
       projects.utils.begin()
       projects.utils.write({
         type: `update`,
@@ -752,11 +747,11 @@ describe(`includes subqueries`, () => {
       })
       projects.utils.commit()
 
-      await new Promise((resolve) => setTimeout(resolve, 10))
+      await vi.waitFor(() => {
+        expect(layered.get(1)?.name).toBe(`Alpha renamed`)
+      })
 
-      const renamed = layered.get(1) as any
-      expect(renamed.name).toBe(`Alpha renamed`)
-      expect(sortedPlainRows(renamed.issues)).toEqual([
+      expect(sortedPlainRows(layered.get(1)!.issues)).toEqual([
         { id: 10, title: `Bug in Alpha` },
         { id: 11, title: `Feature for Alpha` },
       ])

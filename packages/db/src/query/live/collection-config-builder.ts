@@ -808,10 +808,6 @@ export class CollectionConfigBuilder<
 
       // 1. Flush parent changes
       if (hasParentChanges) {
-        // Materialize the current includes state into the new parent rows
-        // before they commit, so the emitted change events already carry
-        // their included values (the includes flush below patches stored
-        // rows in place without emitting).
         patchParentChangesFromIncludes(includesState, changesToApply)
         begin()
         changesToApply.forEach(this.applyChanges.bind(this, config))
@@ -1244,25 +1240,19 @@ function materializesInline(state: IncludesOutputState): boolean {
 }
 
 /**
- * Materializes the current includes state into freshly computed parent rows
- * before they are committed, so the emitted change events already carry
+ * Materializes the current includes state into freshly computed parent
+ * change values, so the change events emitted on commit already carry
  * their included values.
- *
- * The post-commit includes flush patches stored parent rows in place without
- * emitting an event, which consumers that copy rows at emit time (e.g.
- * another live query layered on this collection) never observe: a
- * parent-only update would wipe their included fields until an unrelated
- * child change re-emitted the row.
  */
-function patchParentChangesFromIncludes(
+function patchParentChangesFromIncludes<TResult extends object>(
   includesState: Array<IncludesOutputState>,
-  parentChanges: Map<unknown, Changes<any>>,
+  parentChanges: Map<unknown, Changes<TResult>>,
 ): void {
   for (const state of includesState) {
     if (!materializesInline(state)) continue
     for (const [, changes] of parentChanges) {
       if (changes.inserts > 0) {
-        const parentResult = changes.value
+        const parentResult = changes.value as Record<string | symbol, any>
         const routing = parentResult[INCLUDES_ROUTING]?.[state.fieldName]
         const correlationKey = routing?.correlationKey
         if (correlationKey != null) {
