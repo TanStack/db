@@ -6759,4 +6759,121 @@ describe(`includes subqueries`, () => {
       ])
     })
   })
+
+  // Regression test for https://github.com/TanStack/db/issues/1685
+  //
+  // Shape of the collections:
+  //
+  //   root 1 ──> mid 1 ─┐
+  //                     ├──> shared 1 ──> leaf 1
+  //   root 2 ──> mid 2 ─┘
+  //
+  // Both root rows resolve (through distinct `mid` rows) to the *same* `shared`
+  // row, which in turn resolves to the same `leaf` row. The deepest level was
+  // being dropped on all but one of the parent rows.
+  describe(`nested subqueries with a shared middle level`, () => {
+    type Leaf = { id: number }
+    type Shared = { id: number; leafId: number }
+    type Mid = { id: number; sharedId: number }
+    type Root = { id: number; midId: number }
+
+    function buildCollections() {
+      const leaves = createCollection(
+        mockSyncCollectionOptions<Leaf>({
+          id: `leaves`,
+          getKey: (r) => r.id,
+          initialData: [{ id: 1 }],
+        }),
+      )
+
+      // The shared level: a single row that both `mid` rows point at.
+      const shareds = createCollection(
+        mockSyncCollectionOptions<Shared>({
+          id: `shareds`,
+          getKey: (r) => r.id,
+          initialData: [{ id: 1, leafId: 1 }],
+        }),
+      )
+
+      const mids = createCollection(
+        mockSyncCollectionOptions<Mid>({
+          id: `mids`,
+          getKey: (r) => r.id,
+          initialData: [
+            { id: 1, sharedId: 1 },
+            { id: 2, sharedId: 1 },
+          ],
+        }),
+      )
+
+      const roots = createCollection(
+        mockSyncCollectionOptions<Root>({
+          id: `roots`,
+          getKey: (r) => r.id,
+          initialData: [
+            { id: 1, midId: 1 },
+            { id: 2, midId: 2 },
+          ],
+        }),
+      )
+
+      return { leaves, shareds, mids, roots }
+    }
+
+    it(`keeps the deepest level on every parent row`, async () => {
+      const { leaves, shareds, mids, roots } = buildCollections()
+
+      const live = createLiveQueryCollection((q) =>
+        q.from({ root: roots }).select(({ root }) => ({
+          ...root,
+          mid: toArray(
+            q
+              .from({ mid: mids })
+              .where(({ mid }) => eq(mid.id, root.midId))
+              .select(({ mid }) => ({
+                ...mid,
+                shared: toArray(
+                  q
+                    .from({ shared: shareds })
+                    .where(({ shared }) => eq(shared.id, mid.sharedId))
+                    .select(({ shared }) => ({
+                      ...shared,
+                      leaf: toArray(
+                        q
+                          .from({ leaf: leaves })
+                          .where(({ leaf }) => eq(leaf.id, shared.leafId))
+                          .findOne(),
+                      ),
+                    }))
+                    .findOne(),
+                ),
+              }))
+              .findOne(),
+          ),
+        })),
+      )
+
+      await live.preload()
+
+      const rows = live.toArray
+      expect(rows).toHaveLength(2)
+
+      for (const root of rows) {
+        const mid = root.mid.at(0)
+        expect(mid, `root ${root.id} is missing its mid`).toBeDefined()
+        expect(mid!.id).toBe(root.midId)
+
+        const shared = mid!.shared.at(0)
+        expect(shared, `root ${root.id} is missing its shared`).toBeDefined()
+        expect(shared!.id).toBe(1)
+
+        // The regression: `leaf` was undefined on one of the two root rows,
+        // because `shared 1` is reached through two different `mid` rows.
+        expect(
+          stripVirtualProps(shared!.leaf.at(0)!),
+          `root ${root.id} dropped its leaf`,
+        ).toEqual({ id: 1 })
+      }
+    })
+  })
 })
