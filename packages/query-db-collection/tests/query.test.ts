@@ -47,6 +47,28 @@ interface CategorisedItem {
 
 const getKey = (item: TestItem) => item.id
 
+type OwnershipMaps = {
+  rowToQueries: Map<string | number, Set<string>>
+  queryToRows: Map<string, Set<string | number>>
+}
+
+function inspectOwnershipMaps(options: {
+  sync: { sync: unknown }
+}): OwnershipMaps {
+  const sync = options.sync.sync as {
+    __getOwnershipMapsForTests?: () => OwnershipMaps
+  }
+  const maps = sync.__getOwnershipMapsForTests?.()
+  if (!maps) {
+    throw new Error(`Ownership-map test inspection is unavailable`)
+  }
+  return maps
+}
+
+function expectNoEmptyRowOwnershipSets(maps: OwnershipMaps): void {
+  maps.rowToQueries.forEach((owners) => expect(owners.size).toBeGreaterThan(0))
+}
+
 // Helper to advance timers and allow microtasks to flush
 const flushPromises = () => new Promise((resolve) => setTimeout(resolve, 0))
 
@@ -5329,6 +5351,193 @@ describe(`QueryCollection`, () => {
       })
     })
 
+    describe(`ownership lifecycle characterization`, () => {
+      it(`removes only rows whose final subset owner is unloaded`, async () => {
+        const queryFn = vi
+          .fn()
+          .mockResolvedValueOnce([
+            { id: `1`, name: `First only` },
+            { id: `2`, name: `Shared` },
+          ])
+          .mockResolvedValueOnce([
+            { id: `2`, name: `Shared` },
+            { id: `3`, name: `Second only` },
+          ])
+        const options = queryCollectionOptions<TestItem>({
+          id: `ownership-overlapping-subsets-test`,
+          queryClient,
+          queryKey: [`ownership-overlapping-subsets-test`],
+          queryFn,
+          getKey,
+          syncMode: `on-demand`,
+        })
+        const ownershipMaps = inspectOwnershipMaps(options)
+        const collection = createCollection(options)
+        const firstSubset = createLiveQueryCollection({
+          query: (q) =>
+            q
+              .from({ item: collection })
+              .where(({ item }) => inArray(item.id, [`1`, `2`])),
+        })
+        const secondSubset = createLiveQueryCollection({
+          query: (q) =>
+            q
+              .from({ item: collection })
+              .where(({ item }) => inArray(item.id, [`2`, `3`])),
+        })
+
+        await firstSubset.preload()
+        await secondSubset.preload()
+        expect(collection.size).toBe(3)
+
+        await firstSubset.cleanup()
+        await vi.waitFor(() => {
+          expect(collection.has(`1`)).toBe(false)
+          expect(collection.has(`2`)).toBe(true)
+          expect(collection.has(`3`)).toBe(true)
+        })
+        expectNoEmptyRowOwnershipSets(ownershipMaps)
+
+        await secondSubset.cleanup()
+        await vi.waitFor(() => {
+          expect(collection.size).toBe(0)
+        })
+        expectNoEmptyRowOwnershipSets(ownershipMaps)
+        expect(ownershipMaps.rowToQueries.size).toBe(0)
+        expect(ownershipMaps.queryToRows.size).toBe(0)
+      })
+
+      it(`expires the Query cache entry after unload without restoring deleted rows`, async () => {
+        const expiringQueryClient = new QueryClient({
+          defaultOptions: {
+            queries: { gcTime: 100, retry: false, staleTime: Infinity },
+          },
+        })
+        const queryKey = [`ownership-query-cache-expiry-test`]
+        const collection = createCollection(
+          queryCollectionOptions<TestItem>({
+            id: `ownership-query-cache-expiry-test`,
+            queryClient: expiringQueryClient,
+            queryKey,
+            queryFn: async () => [{ id: `1`, name: `Only row` }],
+            getKey,
+            syncMode: `on-demand`,
+          }),
+        )
+        const liveQuery = createLiveQueryCollection({
+          query: (q) => q.from({ item: collection }),
+        })
+
+        await liveQuery.preload()
+        expect(collection.has(`1`)).toBe(true)
+
+        vi.useFakeTimers()
+        try {
+          await liveQuery.cleanup()
+          expect(collection.size).toBe(0)
+          expect(
+            expiringQueryClient.getQueryCache().find({ queryKey }),
+          ).toBeDefined()
+
+          await vi.advanceTimersByTimeAsync(101)
+
+          expect(
+            expiringQueryClient.getQueryCache().find({ queryKey }),
+          ).toBeUndefined()
+          expect(collection.size).toBe(0)
+        } finally {
+          vi.useRealTimers()
+          expiringQueryClient.clear()
+        }
+      })
+
+      it(`hydrates a retained row and deletes it when its query revalidates empty`, async () => {
+        const queryKey = [`ownership-retained-hydration-test`]
+        const queryHash = hashKey(queryKey)
+        const retainedRow: CategorisedItem = {
+          id: `1`,
+          name: `Retained row`,
+          category: `A`,
+        }
+        let releaseRevalidation!: () => void
+        const revalidationReleased = new Promise<void>((resolve) => {
+          releaseRevalidation = resolve
+        })
+        const queryFn = vi.fn(async () => {
+          await revalidationReleased
+          return []
+        })
+        const baseOptions = queryCollectionOptions<CategorisedItem>({
+          id: `ownership-retained-hydration-test`,
+          queryClient,
+          queryKey,
+          queryFn,
+          getKey: (item) => item.id,
+          startSync: true,
+        })
+        const originalSync = baseOptions.sync
+        const ownershipMaps = inspectOwnershipMaps(baseOptions)
+        const metadataHarness = createInMemorySyncMetadataApi<
+          string | number,
+          CategorisedItem
+        >({
+          persistedRows: new Map([[retainedRow.id, retainedRow]]),
+          rowMetadata: new Map([
+            [
+              retainedRow.id,
+              {
+                queryCollection: { owners: { [queryHash]: true } },
+              },
+            ],
+          ]),
+          collectionMetadata: new Map([
+            [
+              `queryCollection:gc:${queryHash}`,
+              { queryHash, mode: `until-revalidated` },
+            ],
+          ]),
+        })
+        const collection = createCollection({
+          ...baseOptions,
+          sync: {
+            sync: (params: Parameters<typeof originalSync.sync>[0]) => {
+              params.begin({ immediate: true })
+              params.write({ type: `insert`, value: retainedRow })
+              params.commit()
+              return originalSync.sync({
+                ...params,
+                metadata: metadataHarness.api,
+              })
+            },
+          },
+        })
+
+        expect(collection.has(retainedRow.id)).toBe(true)
+        expect(
+          metadataHarness.collectionMetadata.has(
+            `queryCollection:gc:${queryHash}`,
+          ),
+        ).toBe(true)
+
+        releaseRevalidation()
+        await vi.waitFor(() => {
+          expect(queryFn).toHaveBeenCalledTimes(1)
+          expect(collection.has(retainedRow.id)).toBe(false)
+        })
+        expect(metadataHarness.rowMetadata.get(retainedRow.id)).toBeUndefined()
+        expectNoEmptyRowOwnershipSets(ownershipMaps)
+        expect(ownershipMaps.rowToQueries.size).toBe(0)
+        expect(ownershipMaps.queryToRows.get(queryHash)).toEqual(new Set())
+        expect(
+          metadataHarness.collectionMetadata.has(
+            `queryCollection:gc:${queryHash}`,
+          ),
+        ).toBe(false)
+
+        await collection.cleanup()
+      })
+    })
+
     it(`should handle duplicate subset loads correctly (refcount bug)`, async () => {
       // This test catches Bug 1: missing refcount increment when reusing existing observer
       // When two subscriptions load the same subset, unloading one should NOT destroy
@@ -5926,6 +6135,7 @@ describe(`QueryCollection`, () => {
 
         const baseOptions = queryCollectionOptions(config)
         const originalSync = baseOptions.sync
+        const ownershipMaps = inspectOwnershipMaps(baseOptions)
         const metadataHarness = createInMemorySyncMetadataApi<
           string | number,
           CategorisedItem
@@ -5958,6 +6168,13 @@ describe(`QueryCollection`, () => {
 
         await liveQuery.cleanup()
 
+        expect(ownershipMaps.queryToRows.has(retainedQueryHash)).toBe(true)
+        expect(ownershipMaps.queryToRows.get(retainedQueryHash)).toEqual(
+          new Set([`1`]),
+        )
+        expect(ownershipMaps.rowToQueries.get(`1`)).toEqual(
+          new Set([retainedQueryHash]),
+        )
         expect(
           metadataHarness.collectionMetadata.get(
             `queryCollection:gc:${retainedQueryHash}`,
@@ -5977,9 +6194,58 @@ describe(`QueryCollection`, () => {
           ),
         ).toBeUndefined()
         expect(collection.has(`1`)).toBe(false)
+        expect(ownershipMaps.queryToRows.has(retainedQueryHash)).toBe(false)
+        expect(ownershipMaps.rowToQueries.has(`1`)).toBe(false)
       } finally {
         vi.useRealTimers()
       }
+    })
+
+    it(`should clear retained ownership during explicit collection cleanup`, async () => {
+      const baseQueryKey = [`explicit-retained-cleanup-test`]
+      const retainedQueryHash = hashKey(baseQueryKey)
+      const items: Array<CategorisedItem> = [
+        { id: `1`, name: `Retained`, category: `A` },
+      ]
+      const config: QueryCollectionConfig<CategorisedItem> = {
+        id: `explicit-retained-cleanup-test`,
+        queryClient,
+        queryKey: () => baseQueryKey,
+        queryFn: async () => items,
+        getKey: (item) => item.id,
+        syncMode: `on-demand`,
+        startSync: true,
+        persistedGcTime: 60_000,
+      }
+      const baseOptions = queryCollectionOptions(config)
+      const originalSync = baseOptions.sync
+      const ownershipMaps = inspectOwnershipMaps(baseOptions)
+      const metadataHarness = createInMemorySyncMetadataApi<
+        string | number,
+        CategorisedItem
+      >({ persistedRows: new Map(items.map((item) => [item.id, item])) })
+      const collection = createCollection({
+        ...baseOptions,
+        sync: {
+          sync: (params: Parameters<typeof originalSync.sync>[0]) =>
+            originalSync.sync({ ...params, metadata: metadataHarness.api }),
+        },
+      })
+      const liveQuery = createLiveQueryCollection({
+        query: (q) =>
+          q
+            .from({ item: collection })
+            .where(({ item }) => eq(item.category, `A`)),
+      })
+
+      await liveQuery.preload()
+      await liveQuery.cleanup()
+      expect(ownershipMaps.queryToRows.has(retainedQueryHash)).toBe(true)
+
+      await collection.cleanup()
+
+      expect(ownershipMaps.queryToRows.size).toBe(0)
+      expect(ownershipMaps.rowToQueries.size).toBe(0)
     })
 
     it(`should default persisted retention ttl to query gcTime when persistedGcTime is undefined`, async () => {
