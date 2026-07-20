@@ -351,9 +351,16 @@ export function useLiveQuery(
     )
   }
 
+  // Generation guard for the resource's async continuations: Solid discards a
+  // superseded fetch's *return value*, but the writes below are side effects
+  // into hook-scoped state and would still run — resurrecting rows/status from
+  // a collection that has already been replaced.
+  let resourceGeneration = 0
+
   const [getDataResource] = createResource(
     () => ({ currentCollection: collection() }),
     async ({ currentCollection }) => {
+      const generation = ++resourceGeneration
       if (!currentCollection) {
         return []
       }
@@ -361,8 +368,11 @@ export function useLiveQuery(
       try {
         await currentCollection.toArrayWhenReady()
       } catch (error) {
-        setStatus(`error`)
+        if (generation === resourceGeneration) setStatus(`error`)
         throw error
+      }
+      if (generation !== resourceGeneration) {
+        return data
       }
       // Initialize state with current collection data
       batch(() => {

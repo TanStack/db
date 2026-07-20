@@ -566,6 +566,82 @@ describe(`Query Collections`, () => {
     })
   })
 
+  it(`does not resurrect state from a superseded collection's async continuation`, async () => {
+    // The resource fetcher awaits toArrayWhenReady(); if the collection is
+    // switched while that await is pending, the old continuation must not
+    // write its (now stale) rows/status over the new collection's.
+    return createRoot(async (dispose) => {
+      let beginA: (() => void) | undefined
+      let writeA: ((msg: any) => void) | undefined
+      let commitA: (() => void) | undefined
+      let markReadyA: (() => void) | undefined
+
+      const slowCollection = createCollection<Person>({
+        id: `superseded-async-slow`,
+        getKey: (person: Person) => person.id,
+        startSync: false,
+        sync: {
+          sync: ({ begin, write, commit, markReady }) => {
+            beginA = begin
+            writeA = write
+            commitA = commit
+            markReadyA = markReady
+            // Stays loading until markReady is called manually.
+          },
+        },
+      })
+      const fastCollection = createCollection(
+        mockSyncCollectionOptions<Person>({
+          id: `superseded-async-fast`,
+          getKey: (person: Person) => person.id,
+          initialData: [initialPersons[0]!],
+        }),
+      )
+
+      const [useSlow, setUseSlow] = createSignal(true)
+      const rendered = renderHook(() => {
+        return useLiveQuery((q) =>
+          q
+            .from({ persons: useSlow() ? slowCollection : fastCollection })
+            .select(({ persons }) => ({ id: persons.id, name: persons.name })),
+        )
+      })
+
+      await new Promise((resolve) => setTimeout(resolve, 10))
+      expect(rendered.result.isLoading).toBe(true)
+
+      // Switch collections while the slow fetch is still awaiting readiness.
+      setUseSlow(false)
+      await new Promise((resolve) => setTimeout(resolve, 10))
+      expect(rendered.result.state.has(`1`)).toBe(true)
+
+      // The superseded collection now becomes ready with different rows; its
+      // continuation resolves but must not clobber the current state.
+      beginA!()
+      writeA!({
+        type: `insert`,
+        value: {
+          id: `stale`,
+          name: `Stale Row`,
+          age: 99,
+          email: `stale@example.com`,
+          isActive: false,
+          team: `none`,
+        },
+      })
+      commitA!()
+      markReadyA!()
+      await new Promise((resolve) => setTimeout(resolve, 20))
+
+      expect(rendered.result.state.has(`stale`)).toBe(false)
+      expect(rendered.result.state.has(`1`)).toBe(true)
+      expect(rendered.result.data.map((p: any) => p.id)).toEqual([`1`])
+      expect(rendered.result.status).toBe(`ready`)
+
+      dispose()
+    })
+  })
+
   it(`should be able to query a result collection with live updates`, async () => {
     const collection = createCollection(
       mockSyncCollectionOptions<Person>({
