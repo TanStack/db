@@ -263,8 +263,11 @@ export function compareTemporalValues(a: unknown, b: unknown): number {
   }
   let compare = temporalCompareByTag.get(aTag)
   if (compare === undefined) {
-    const fn = ((a as { constructor: unknown }).constructor as { compare?: (x: unknown, y: unknown) => number })
-      .compare
+    const fn = (
+      (a as { constructor: unknown }).constructor as {
+        compare?: (x: unknown, y: unknown) => number
+      }
+    ).compare
     compare = typeof fn === `function` ? fn : null
     temporalCompareByTag.set(aTag, compare)
   }

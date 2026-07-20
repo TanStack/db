@@ -53,7 +53,9 @@ describe(`ascComparator - Temporal values`, () => {
     const later = new Temporal.PlainDate(2024, 6, 1)
     expect(ascComparator(earlier, later, opts)).toBeLessThan(0)
     expect(ascComparator(later, earlier, opts)).toBeGreaterThan(0)
-    expect(ascComparator(earlier, new Temporal.PlainDate(2024, 1, 1), opts)).toBe(0)
+    expect(
+      ascComparator(earlier, new Temporal.PlainDate(2024, 1, 1), opts),
+    ).toBe(0)
   })
 
   it(`treats ZonedDateTime values at the same instant as equal regardless of zone`, () => {
