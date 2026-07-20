@@ -108,8 +108,8 @@ class LiveQueryObserverImpl<
   > = []
   private dispatching = false
   private collectionUnsub: (() => void) | null = null
-  // Bumped on each attach. `onFirstReady` can't be unsubscribed, so a callback
-  // from a superseded attach checks this to no-op instead of double-notifying.
+  // Bumped on each attach so a deferred initial-notify microtask queued by a
+  // superseded attach can detect it and skip flushing.
   private attachGeneration = 0
   private disposed = false
 
@@ -216,7 +216,7 @@ class LiveQueryObserverImpl<
     // collection's per-subscriber change stream requires this to align deltes).
     //
     // When `deferInitialNotify` is set, emits that fire synchronously while
-    // attaching (the initial-state batch and an immediately-ready `onFirstReady`)
+    // attaching (the initial-state batch and any synchronous status notify)
     // are deferred to a microtask, so a wholesale consumer like React's
     // `useSyncExternalStore` never receives a synchronous notify during
     // `subscribe`. Effect/watcher-based adapters want the initial state
@@ -234,13 +234,23 @@ class LiveQueryObserverImpl<
       else this.emit(changes)
     }
 
+    // Status transitions that carry no change events (loading→ready with no
+    // rows, error, cleaned-up) are part of the canonical publication path:
+    // any status change publishes a synthetic notify so consumers re-read the
+    // snapshot. Unlike onFirstReady, `on` returns a real unsubscribe, so a
+    // detached attachment leaves nothing behind.
+    const statusUnsub = collection.on(`status:change`, () => notify(undefined))
+
     // `subscribeChanges` delivers the initial state synchronously, so a
     // listener can dispose the observer while the collection subscription is
     // still being created. Register the release hook up front; if detach()
     // ran during that replay (collectionUnsub no longer points at our hook),
     // undo the subscription as soon as the call returns.
     let subscription: { unsubscribe: () => void } | null = null
-    const release = () => subscription?.unsubscribe()
+    const release = () => {
+      statusUnsub()
+      subscription?.unsubscribe()
+    }
     this.collectionUnsub = release
     subscription = collection.subscribeChanges(
       (changes) => notify(changes as Array<ChangeMessage<T, TKey>>),
@@ -249,22 +259,6 @@ class LiveQueryObserverImpl<
     if (this.collectionUnsub !== release) {
       subscription.unsubscribe()
       return
-    }
-
-    // Catch a *later* loading→ready transition that carries no change events
-    // (e.g. `markReady()` with no rows). Skip when already ready — the initial
-    // state batch above already covers that, and `onFirstReady` would fire an
-    // immediate duplicate.
-    //
-    // `onFirstReady` returns no unsubscribe, so a callback left behind by an
-    // earlier attach (subscribe → unsubscribe-before-ready → subscribe) would
-    // still fire on `markReady`. Guard with the attach generation so only the
-    // current attachment's callback notifies.
-    if (collection.status !== `ready`) {
-      collection.onFirstReady(() => {
-        if (generation !== this.attachGeneration) return
-        notify(undefined)
-      })
     }
 
     attaching = false

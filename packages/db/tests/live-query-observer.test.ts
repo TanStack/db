@@ -368,6 +368,25 @@ describe(`createLiveQueryObserver`, () => {
     observer.dispose()
   })
 
+  it(`wakes consumers on status-only transitions (error, cleaned-up)`, () => {
+    const source = makeSource()
+    const observer = createLiveQueryObserver<Row, string>(source as any)
+
+    const statuses: Array<string> = []
+    observer.subscribe(() => {
+      statuses.push(observer.getSnapshot().status)
+    })
+
+    // Status transitions carry no row changes; the observer must publish
+    // them through the same canonical path as data changes.
+    source._lifecycle.setStatus(`error`)
+    source._lifecycle.setStatus(`cleaned-up`)
+
+    expect(statuses).toContain(`error`)
+    expect(statuses).toContain(`cleaned-up`)
+    observer.dispose()
+  })
+
   it(`refreshes the snapshot when status changes without a version bump`, () => {
     // A status-only loading→ready transition with no active subscription: the
     // cached snapshot must not stay stale (covers the preload() case too).
