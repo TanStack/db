@@ -95,7 +95,6 @@ class LiveQueryObserverImpl<
   TKey extends string | number,
 > implements LiveQueryObserver<T, TKey> {
   private readonly collection: Collection<T, TKey, any> | null
-  private readonly deferInitialNotify: boolean
   private readonly wholesale: boolean
   private cachedRevision = -1
   private cachedStatus: CollectionStatus | undefined
@@ -109,18 +108,10 @@ class LiveQueryObserverImpl<
   > = []
   private dispatching = false
   private collectionUnsub: (() => void) | null = null
-  // Bumped on each attach so a deferred initial-notify microtask queued by a
-  // superseded attach can detect it and skip flushing.
-  private attachGeneration = 0
   private disposed = false
 
-  constructor(
-    collection: Collection<T, TKey, any> | null,
-    deferInitialNotify: boolean,
-    wholesale: boolean,
-  ) {
+  constructor(collection: Collection<T, TKey, any> | null, wholesale: boolean) {
     this.collection = collection
-    this.deferInitialNotify = deferInitialNotify
     this.wholesale = wholesale
     // Starting sync during resolution matches every adapter's eager behavior.
     collection?.startSyncImmediate()
@@ -204,18 +195,12 @@ class LiveQueryObserverImpl<
     }
     if (seedChanges.length === 0) return
 
-    const deliver = () => {
-      if (record.active) record.listener(seedChanges)
-    }
-    if (this.deferInitialNotify) queueMicrotask(deliver)
-    else deliver()
+    record.listener(seedChanges)
   }
 
   private attach(): void {
     const collection = this.collection
     if (!collection || this.disposed) return
-
-    const generation = ++this.attachGeneration
 
     // Granular consumers subscribe with initial state so they receive the
     // current rows as inserts followed by deltas through one consistent
@@ -225,24 +210,13 @@ class LiveQueryObserverImpl<
     // no unfiltered loadSubset({ where: undefined }) against on-demand
     // collections. The explicit `false` marks all state as seen so deletes
     // still flow through as notifies.
-    //
-    // When `deferInitialNotify` is set, emits that fire synchronously while
-    // attaching (the initial-state batch and any synchronous status notify)
-    // are deferred to a microtask, so a wholesale consumer like React's
-    // `useSyncExternalStore` never receives a synchronous notify during
-    // `subscribe`. Effect/watcher-based adapters want the initial state
-    // synchronously, so by default it is not deferred. Later changes always emit
-    // synchronously.
-    let attaching = this.deferInitialNotify
-    const deferred: Array<Array<ChangeMessage<T, TKey>> | undefined> = []
     const notify = (changes: Array<ChangeMessage<T, TKey>> | undefined) => {
       if (this.disposed || this.subscriptions.size === 0) return
       // An empty batch carries no semantic change (e.g. the collection's
       // empty-ready flush); only real deltas and the synthetic ready notify
       // (undefined) are published.
       if (changes !== undefined && changes.length === 0) return
-      if (attaching) deferred.push(changes)
-      else this.emit(changes)
+      this.emit(changes)
     }
 
     // Status transitions that carry no change events (loading→ready with no
@@ -270,23 +244,6 @@ class LiveQueryObserverImpl<
     if (this.collectionUnsub !== release) {
       subscription.unsubscribe()
       return
-    }
-
-    attaching = false
-    if (deferred.length > 0) {
-      queueMicrotask(() => {
-        // Skip if the observer was disposed, has no listeners, or a newer
-        // attach superseded this one before the flush — otherwise a stale
-        // initial batch would reach the current listener.
-        if (
-          this.disposed ||
-          this.subscriptions.size === 0 ||
-          generation !== this.attachGeneration
-        ) {
-          return
-        }
-        for (const changes of deferred.splice(0)) this.emit(changes)
-      })
     }
   }
 
@@ -334,13 +291,6 @@ class LiveQueryObserverImpl<
 
 export interface CreateLiveQueryObserverOptions {
   /**
-   * Defer the initial-state notify to a microtask instead of emitting it
-   * synchronously during `subscribe`. Set this for `useSyncExternalStore`-style
-   * consumers (React) that must not receive a store notify during subscribe.
-   * Effect/watcher-based adapters leave it off to get initial state synchronously.
-   */
-  deferInitialNotify?: boolean
-  /**
    * How subscribers consume the observer:
    *
    * - `granular` (default): subscribers apply the delivered `ChangeMessage[]`
@@ -350,7 +300,9 @@ export interface CreateLiveQueryObserverOptions {
    * - `wholesale`: subscribers treat notifications as a wake-up and re-read
    *   `getSnapshot()` (React/Angular). The observer subscribes WITHOUT initial
    *   state, preserving those adapters' loading policy — no snapshot request,
-   *   so no unfiltered `loadSubset` against on-demand collections.
+   *   so no unfiltered `loadSubset` against on-demand collections. Nothing is
+   *   delivered synchronously during `subscribe`, which keeps
+   *   `useSyncExternalStore`-style consumers safe by construction.
    */
   mode?: `granular` | `wholesale`
 }
@@ -368,7 +320,6 @@ export function createLiveQueryObserver<
 ): LiveQueryObserver<T, TKey> {
   return new LiveQueryObserverImpl<T, TKey>(
     collection ?? null,
-    options.deferInitialNotify ?? false,
     options.mode === `wholesale`,
   )
 }

@@ -153,19 +153,39 @@ describe(`createLiveQueryObserver`, () => {
     observer.dispose()
   })
 
-  it(`defers the initial notify to a microtask when deferInitialNotify is set`, async () => {
+  it(`delivers nothing synchronously during a wholesale subscribe`, () => {
     const observer = createLiveQueryObserver<Row, string>(makeSource() as any, {
-      deferInitialNotify: true,
+      mode: `wholesale`,
     })
     let notified = false
     observer.subscribe(() => {
       notified = true
     })
-    // Not synchronous during subscribe (protects React's useSyncExternalStore)...
+    // No bootstrap replay in wholesale mode: useSyncExternalStore-style
+    // consumers are never notified inside their own subscribe call.
     expect(notified).toBe(false)
-    await Promise.resolve()
-    // ...delivered on the next microtask.
-    expect(notified).toBe(true)
+    expect(observer.getSnapshot().data).toHaveLength(2)
+    observer.dispose()
+  })
+
+  it(`delivers events in commit order — no notify can overtake an older one`, () => {
+    const source = makeSource()
+    const observer = createLiveQueryObserver<Row, string>(source as any)
+
+    const order: Array<string> = []
+    observer.subscribe((changes) => {
+      for (const c of changes ?? []) order.push(`${c.type}:${c.key}`)
+    })
+    order.length = 0 // drop the bootstrap
+
+    source.utils.begin()
+    source.utils.write({ type: `insert`, value: { id: `v1`, name: `V1` } })
+    source.utils.commit()
+    source.utils.begin()
+    source.utils.write({ type: `insert`, value: { id: `v2`, name: `V2` } })
+    source.utils.commit()
+
+    expect(order).toEqual([`insert:v1`, `insert:v2`])
     observer.dispose()
   })
 
@@ -190,23 +210,20 @@ describe(`createLiveQueryObserver`, () => {
     observer.dispose()
   })
 
-  it(`does not flush a superseded deferred initial notify (deferInitialNotify)`, async () => {
-    const observer = createLiveQueryObserver<Row, string>(makeSource() as any, {
-      deferInitialNotify: true,
-    })
+  it(`a resubscribe before a microtask cannot leak a stale bootstrap`, async () => {
+    const observer = createLiveQueryObserver<Row, string>(makeSource() as any)
 
-    // Subscribe then unsubscribe before the microtask flush, then resubscribe.
+    // Subscribe then unsubscribe immediately, then resubscribe. All delivery
+    // is synchronous now, so nothing deferred can flush later.
     observer.subscribe(() => {})()
 
     let notifications = 0
     observer.subscribe(() => {
       notifications++
     })
+    expect(notifications).toBe(1) // the synchronous bootstrap replay
     await Promise.resolve()
-
-    // Only the current subscription's deferred initial notify should flush,
-    // not the stale one queued by the first (superseded) attach.
-    expect(notifications).toBe(1)
+    expect(notifications).toBe(1) // and nothing else afterwards
     observer.dispose()
   })
 
