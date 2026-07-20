@@ -80,12 +80,23 @@ function createMockCollection<T extends object, K extends string | number>(
   }
 
   let status: CollectionStatus = initialStatus
+  let stateRevision = 0
   const subs = new Set<(changes: Array<any>) => void>()
   const readySubs = new Set<() => void>()
+  const statusSubs = new Set<(event: any) => void>()
   const id = `mock-col-` + Math.random().toString(36).slice(2)
 
+  // Mirrors the real collection contract: committed changes advance the
+  // state revision before they are emitted.
   const notify = (changes: Array<any> = []) => {
+    if (changes.length > 0) stateRevision++
     for (const cb of subs) cb(changes)
+  }
+
+  const emitStatusChange = (previousStatus: CollectionStatus) => {
+    for (const cb of statusSubs) {
+      cb({ type: `status:change`, previousStatus, status })
+    }
   }
 
   const notifyReady = () => {
@@ -96,6 +107,13 @@ function createMockCollection<T extends object, K extends string | number>(
     id,
     get status() {
       return status
+    },
+    get _stateRevision() {
+      return stateRevision
+    },
+    on: (event: string, cb: (e: any) => void) => {
+      if (event === `status:change`) statusSubs.add(cb)
+      return () => statusSubs.delete(cb)
     },
     entries: () => Array.from(map.entries()),
     values: () => Array.from(map.values()),
@@ -127,17 +145,25 @@ function createMockCollection<T extends object, K extends string | number>(
       }
     },
     __setStatus: (s: CollectionStatus) => {
+      const previousStatus = status
       const wasNotReady = status !== `ready`
       status = s
-      notify([])
+      emitStatusChange(previousStatus)
       if (wasNotReady && status === `ready`) {
         setTimeout(notifyReady, 0)
       }
     },
     __replaceAll: (rows: Array<T & Record<`id`, K>>) => {
+      const changes: Array<any> = []
+      for (const [key, value] of map.entries()) {
+        changes.push({ type: `delete`, key, value })
+      }
       map.clear()
-      for (const r of rows) map.set(r.id, r)
-      notify([])
+      for (const r of rows) {
+        map.set(r.id, r)
+        changes.push({ type: `insert`, key: r.id, value: r })
+      }
+      notify(changes)
     },
     __upsert: (row: T & Record<`id`, K>) => {
       const isUpdate = map.has(row.id)
