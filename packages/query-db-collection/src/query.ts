@@ -2,6 +2,7 @@ import { QueryObserver, hashKey } from '@tanstack/query-core'
 import { deepEquals } from '@tanstack/db'
 import {
   GetKeyRequiredError,
+  InitialDataInOnDemandModeError,
   QueryClientRequiredError,
   QueryFnRequiredError,
   QueryKeyRequiredError,
@@ -191,6 +192,26 @@ export interface QueryCollectionConfig<
     TQueryData,
     TQueryKey
   >[`networkMode`]
+  /**
+   * Data used to initialize the TanStack Query cache for an eager collection.
+   * The value has the original Query response shape and is projected through
+   * the collection's select option before rows are materialized.
+   */
+  initialData?: QueryObserverOptions<
+    TQueryData,
+    TError,
+    Array<T>,
+    TQueryData,
+    TQueryKey
+  >[`initialData`]
+  /** The timestamp TanStack Query uses to determine initialData freshness. */
+  initialDataUpdatedAt?: QueryObserverOptions<
+    TQueryData,
+    TError,
+    Array<T>,
+    TQueryData,
+    TQueryKey
+  >[`initialDataUpdatedAt`]
   persistedGcTime?: number
 
   /**
@@ -662,6 +683,8 @@ export function queryCollectionOptions(
     refetchOnReconnect,
     refetchOnMount,
     networkMode,
+    initialData,
+    initialDataUpdatedAt,
     persistedGcTime,
     getKey,
     onInsert,
@@ -673,6 +696,35 @@ export function queryCollectionOptions(
 
   // Default to eager sync mode if not provided
   const syncMode = baseCollectionConfig.syncMode ?? `eager`
+
+  if (
+    syncMode === `on-demand` &&
+    (initialData !== undefined || initialDataUpdatedAt !== undefined)
+  ) {
+    throw new InitialDataInOnDemandModeError()
+  }
+
+  const initialDataObserverOptions =
+    syncMode === `eager`
+      ? {
+          ...(initialData !== undefined && { initialData }),
+          ...(initialDataUpdatedAt !== undefined && {
+            initialDataUpdatedAt,
+          }),
+          // Placeholder data is observer-local UI state in TanStack Query. It
+          // must not be exposed as collection-wide normalized rows, including
+          // when supplied through QueryClient defaults.
+          placeholderData: undefined,
+        }
+      : {
+          // A collection-wide initializer cannot establish membership for
+          // arbitrary on-demand subsets. A defined initializer is needed to
+          // override a QueryClient default because Query Core can apply
+          // defaults again while constructing each Query.
+          initialData: () => undefined,
+          initialDataUpdatedAt: undefined,
+          placeholderData: undefined,
+        }
 
   // Compute the base query key once for cache lookups.
   // All derived keys (from on-demand predicates or function-based queryKey) must
@@ -1295,6 +1347,7 @@ export function queryCollectionOptions(
           refetchOnMount,
           networkMode,
         }),
+        ...initialDataObserverOptions,
         queryKey: key,
         queryFn: queryFunction,
         meta: extendedMeta,
@@ -1493,6 +1546,24 @@ export function queryCollectionOptions(
           }
 
           if (retainedQueriesPendingRevalidation.has(hashedQueryKey)) {
+            const query = queryClient.getQueryCache().find({
+              queryKey,
+              exact: true,
+            })
+            if (query?.state.dataUpdateCount === 0) {
+              // Initial data seeds Query state without a fetch. It must not
+              // satisfy persistence retention that lasts until revalidation.
+              if (!result.isFetching) {
+                state.observers
+                  .get(hashedQueryKey)
+                  ?.refetch()
+                  .catch(() => {
+                    // Errors handled by the next handleQueryResult invocation
+                  })
+              }
+              return
+            }
+
             void reconcileSuccessfulResult(queryKey, result).catch((error) => {
               console.error(
                 `[QueryCollection] Error reconciling query ${String(queryKey)}:`,
