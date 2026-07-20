@@ -66,6 +66,16 @@ export interface LiveQueryObserver<
   dispose: () => void
 }
 
+/**
+ * One logical subscription. Records — not raw callbacks — identify
+ * subscriptions, so the same listener function can be subscribed twice and
+ * each subscription tears down independently.
+ */
+interface SubscriptionRecord<T extends object, TKey extends string | number> {
+  listener: LiveQueryObserverListener<T, TKey>
+  active: boolean
+}
+
 const DISABLED_SNAPSHOT: LiveQuerySnapshot<any, any> = {
   state: undefined,
   data: undefined,
@@ -89,7 +99,14 @@ class LiveQueryObserverImpl<
   private cachedVersion = -1
   private cachedStatus: CollectionStatus | undefined
   private cachedSnapshot: LiveQuerySnapshot<T, TKey> = DISABLED_SNAPSHOT
-  private readonly listeners = new Set<LiveQueryObserverListener<T, TKey>>()
+  private readonly subscriptions = new Set<SubscriptionRecord<T, TKey>>()
+  // Publications are dispatched FIFO: an emit that happens while another
+  // publication is being delivered (a listener mutating the collection
+  // synchronously) is queued, never delivered reentrantly.
+  private readonly publicationQueue: Array<
+    Array<ChangeMessage<T, TKey>> | undefined
+  > = []
+  private dispatching = false
   private collectionUnsub: (() => void) | null = null
   // Bumped on each attach. `onFirstReady` can't be unsubscribed, so a callback
   // from a superseded attach checks this to no-op instead of double-notifying.
@@ -143,15 +160,15 @@ class LiveQueryObserverImpl<
   }
 
   subscribe(listener: LiveQueryObserverListener<T, TKey>): () => void {
-    this.listeners.add(listener)
-    if (this.listeners.size === 1) this.attach()
+    const record: SubscriptionRecord<T, TKey> = { listener, active: true }
+    this.subscriptions.add(record)
+    if (this.subscriptions.size === 1) this.attach()
 
-    let active = true
     return () => {
-      if (!active) return
-      active = false
-      this.listeners.delete(listener)
-      if (this.listeners.size === 0) this.detach()
+      if (!record.active) return
+      record.active = false
+      this.subscriptions.delete(record)
+      if (this.subscriptions.size === 0) this.detach()
     }
   }
 
@@ -176,7 +193,7 @@ class LiveQueryObserverImpl<
     let attaching = this.deferInitialNotify
     const deferred: Array<Array<ChangeMessage<T, TKey>> | undefined> = []
     const notify = (changes: Array<ChangeMessage<T, TKey>> | undefined) => {
-      if (this.disposed || this.listeners.size === 0) return
+      if (this.disposed || this.subscriptions.size === 0) return
       if (attaching) deferred.push(changes)
       else this.emit(changes)
     }
@@ -211,7 +228,7 @@ class LiveQueryObserverImpl<
         // initial batch would reach the current listener.
         if (
           this.disposed ||
-          this.listeners.size === 0 ||
+          this.subscriptions.size === 0 ||
           generation !== this.attachGeneration
         ) {
           return
@@ -227,8 +244,27 @@ class LiveQueryObserverImpl<
   }
 
   private emit(changes: Array<ChangeMessage<T, TKey>> | undefined): void {
-    this.version++
-    this.listeners.forEach((listener) => listener(changes))
+    this.publicationQueue.push(changes)
+    if (this.dispatching) return
+
+    this.dispatching = true
+    try {
+      // A dispose() during dispatch empties the queue, ending this loop.
+      while (this.publicationQueue.length > 0) {
+        const publication = this.publicationQueue.shift()!
+        this.version++
+        // Deliver over a snapshot of the records taken when this publication
+        // is dispatched: a subscription removed mid-delivery still receives
+        // the in-flight publication; one added mid-delivery does not.
+        const records = Array.from(this.subscriptions)
+        for (const subRecord of records) {
+          if (this.disposed) return
+          subRecord.listener(publication)
+        }
+      }
+    } finally {
+      this.dispatching = false
+    }
   }
 
   async preload(): Promise<void> {
@@ -239,7 +275,9 @@ class LiveQueryObserverImpl<
     if (this.disposed) return
     this.disposed = true
     this.detach()
-    this.listeners.clear()
+    for (const subRecord of this.subscriptions) subRecord.active = false
+    this.subscriptions.clear()
+    this.publicationQueue.length = 0
   }
 }
 

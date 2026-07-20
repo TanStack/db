@@ -174,6 +174,110 @@ describe(`createLiveQueryObserver`, () => {
     observer.dispose()
   })
 
+  it(`dispatches nested publications FIFO, never reentrantly`, () => {
+    const source = makeSource()
+    const observer = createLiveQueryObserver<Row, string>(source as any)
+
+    // Listener A reacts to the insert of row 3 by synchronously deleting it —
+    // a nested publication while the insert is still being delivered.
+    observer.subscribe((changes) => {
+      if (changes?.some((c) => c.type === `insert` && c.key === `3`)) {
+        source.utils.begin()
+        source.utils.write({ type: `delete`, value: { id: `3`, name: `C` } })
+        source.utils.commit()
+      }
+    })
+
+    const listenerBEvents: Array<string> = []
+    observer.subscribe((changes) => {
+      for (const c of changes ?? []) {
+        if (c.key === `3`) listenerBEvents.push(c.type)
+      }
+    })
+
+    source.utils.begin()
+    source.utils.write({ type: `insert`, value: { id: `3`, name: `C` } })
+    source.utils.commit()
+
+    // B must observe the insert before the (nested) delete.
+    expect(listenerBEvents).toEqual([`insert`, `delete`])
+    observer.dispose()
+  })
+
+  it(`does not deliver an in-flight publication to a listener added during dispatch`, () => {
+    const source = makeSource()
+    const observer = createLiveQueryObserver<Row, string>(source as any)
+
+    let lateListenerCalls = 0
+    observer.subscribe((changes) => {
+      // Add the late listener only while the row-4 delta is being dispatched.
+      if (changes?.some((c) => c.key === `4`)) {
+        observer.subscribe(() => {
+          lateListenerCalls++
+        })
+      }
+    })
+
+    source.utils.begin()
+    source.utils.write({ type: `insert`, value: { id: `4`, name: `D` } })
+    source.utils.commit()
+
+    expect(lateListenerCalls).toBe(0)
+    observer.dispose()
+  })
+
+  it(`still delivers the in-flight publication to a listener removed during dispatch`, () => {
+    const source = makeSource()
+    const observer = createLiveQueryObserver<Row, string>(source as any)
+
+    let existingListenerCalls = 0
+    let unsubB: (() => void) | null = null
+    observer.subscribe(() => {
+      unsubB?.()
+      unsubB = null
+    })
+    unsubB = observer.subscribe(() => {
+      existingListenerCalls++
+    })
+
+    source.utils.begin()
+    source.utils.write({ type: `insert`, value: { id: `5`, name: `E` } })
+    source.utils.commit()
+
+    // A removed B while the publication was in flight; B still receives it.
+    expect(existingListenerCalls).toBe(1)
+    observer.dispose()
+  })
+
+  it(`treats two subscriptions with the same callback as independent`, () => {
+    const source = makeSource()
+    const observer = createLiveQueryObserver<Row, string>(source as any)
+
+    let calls = 0
+    const shared = () => {
+      calls++
+    }
+    const unsubFirst = observer.subscribe(shared)
+    const unsubSecond = observer.subscribe(shared)
+
+    unsubFirst()
+    calls = 0
+    source.utils.begin()
+    source.utils.write({ type: `insert`, value: { id: `6`, name: `F` } })
+    source.utils.commit()
+
+    // The second subscription survives the first one's teardown.
+    expect(calls).toBe(1)
+    unsubSecond()
+
+    calls = 0
+    source.utils.begin()
+    source.utils.write({ type: `insert`, value: { id: `7`, name: `G` } })
+    source.utils.commit()
+    expect(calls).toBe(0)
+    observer.dispose()
+  })
+
   it(`refreshes the snapshot when status changes without a version bump`, () => {
     // A status-only loading→ready transition with no active subscription: the
     // cached snapshot must not stay stale (covers the preload() case too).
