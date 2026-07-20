@@ -110,11 +110,12 @@ class LiveQueryObserverImpl<
   private collectionUnsub: (() => void) | null = null
   private disposed = false
 
+  // Construction is side-effect-free: sync activation belongs to the first
+  // subscription (attach), so building an observer — e.g. in a React render
+  // that may be abandoned — cannot activate resources on its own.
   constructor(collection: Collection<T, TKey, any> | null, wholesale: boolean) {
     this.collection = collection
     this.wholesale = wholesale
-    // Starting sync during resolution matches every adapter's eager behavior.
-    collection?.startSyncImmediate()
   }
 
   getSnapshot(): LiveQuerySnapshot<T, TKey> {
@@ -201,6 +202,11 @@ class LiveQueryObserverImpl<
   private attach(): void {
     const collection = this.collection
     if (!collection || this.disposed) return
+
+    // Sync activation happens inside subscribeChanges (addSubscriber starts
+    // an idle/cleaned-up collection) — the same startSync path the old
+    // constructor-time startSyncImmediate() took, but now owned by the first
+    // committed subscription and observed by the status listener below.
 
     // Granular consumers subscribe with initial state so they receive the
     // current rows as inserts followed by deltas through one consistent

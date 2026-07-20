@@ -122,6 +122,8 @@ function createMockCollection<T extends object, K extends string | number>(
     size: () => map.size,
     subscribeChanges: (cb: (changes: Array<any>) => void) => {
       subs.add(cb)
+      // Real collections start sync when the first subscriber attaches.
+      api.startSyncImmediate()
       return {
         unsubscribe: () => subs.delete(cb),
       }
@@ -136,11 +138,10 @@ function createMockCollection<T extends object, K extends string | number>(
     },
     preload: () => Promise.resolve(),
     startSyncImmediate: () => {
-      const wasNotReady = status !== `ready`
+      const previousStatus = status
       if (status === `idle`) {
         status = `ready`
-      }
-      if (wasNotReady && status === `ready`) {
+        emitStatusChange(previousStatus)
         setTimeout(notifyReady, 0)
       }
     },

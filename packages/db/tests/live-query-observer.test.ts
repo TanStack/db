@@ -433,14 +433,16 @@ describe(`createLiveQueryObserver`, () => {
     // No initial-state request, so no loadSubset({ where: undefined }) — the
     // pre-observer React/Angular loading policy.
     expect(loadSubsetCalls).toHaveLength(0)
-    // No bootstrap replay either; wholesale consumers read getSnapshot().
-    expect(notifies).toHaveLength(0)
+    // No bootstrap replay either (only status wake-ups, which carry no
+    // changes); wholesale consumers read getSnapshot().
+    expect(notifies.filter((n) => n !== undefined)).toHaveLength(0)
     expect(observer.getSnapshot().data).toHaveLength(2)
 
     // Deltas — including deletes — still wake the consumer.
+    const notifiesBefore = notifies.length
     writeRow(`delete`, { id: `1`, name: `A` })
 
-    expect(notifies).toHaveLength(1)
+    expect(notifies.length).toBe(notifiesBefore + 1)
     expect(observer.getSnapshot().data).toHaveLength(1)
     observer.dispose()
   })
@@ -473,6 +475,25 @@ describe(`createLiveQueryObserver`, () => {
     expect(observer.getSnapshot().data).toHaveLength(2)
     expect(observer.getSnapshot().state?.size).toBe(2)
     expect(entriesSpy).toHaveBeenCalledTimes(1)
+    observer.dispose()
+  })
+
+  it(`does not activate sync at construction — only on first subscribe`, () => {
+    const collection = createCollection(
+      mockSyncCollectionOptionsNoInitialState<Row>({
+        id: `observer-idle-${seq++}`,
+        getKey: (r) => r.id,
+      }),
+    )
+    const observer = createLiveQueryObserver<Row, string>(collection as any)
+
+    // Construction (e.g. in an abandoned React render) is inert.
+    expect(collection.status).toBe(`idle`)
+    expect(observer.getSnapshot().status).toBe(`idle`)
+
+    const unsubscribe = observer.subscribe(() => {})
+    expect(collection.status).not.toBe(`idle`)
+    unsubscribe()
     observer.dispose()
   })
 
