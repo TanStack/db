@@ -1532,6 +1532,21 @@ export function queryCollectionOptions(
           }
 
           if (retainedQueriesPendingRevalidation.has(hashedQueryKey)) {
+            const query = queryClient.getQueryCache().find({
+              queryKey,
+              exact: true,
+            })
+            if (query?.state.dataUpdateCount === 0) {
+              // Initial data seeds Query state without a fetch. It must not
+              // satisfy persistence retention that lasts until revalidation.
+              if (!result.isFetching) {
+                state.observers.get(hashedQueryKey)?.refetch().catch(() => {
+                  // Errors handled by the next handleQueryResult invocation
+                })
+              }
+              return
+            }
+
             void reconcileSuccessfulResult(queryKey, result).catch((error) => {
               console.error(
                 `[QueryCollection] Error reconciling query ${String(queryKey)}:`,

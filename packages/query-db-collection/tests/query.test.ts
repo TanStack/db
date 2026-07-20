@@ -329,6 +329,70 @@ describe(`QueryCollection`, () => {
       }
     })
 
+    it(`retains initial rows when a refetch fails`, async () => {
+      const initialRow = { id: `initial`, name: `Initial` }
+      const error = new Error(`Refetch failed`)
+      const queryFn = vi.fn().mockRejectedValue(error)
+      const consoleErrorSpy = vi
+        .spyOn(console, `error`)
+        .mockImplementation(() => {})
+      const collection = createCollection(
+        queryCollectionOptions<TestItem>({
+          id: `initial-data-refetch-error`,
+          queryClient,
+          queryKey: [`initial-data-refetch-error`],
+          queryFn,
+          getKey,
+          startSync: true,
+          initialData: [initialRow],
+          initialDataUpdatedAt: 1,
+          staleTime: 0,
+          retry: false,
+        }),
+      )
+
+      try {
+        await vi.waitFor(() => {
+          expect(queryFn).toHaveBeenCalledTimes(1)
+          expect(collection.utils.lastError).toBe(error)
+        })
+        expect(stripVirtualProps(collection.get(initialRow.id))).toEqual(
+          initialRow,
+        )
+      } finally {
+        consoleErrorSpy.mockRestore()
+        await collection.cleanup()
+      }
+    })
+
+    it(`ignores a late refetch result after initial data is cleaned up`, async () => {
+      const serverResult = createDeferred<Array<TestItem>>()
+      const collection = createCollection(
+        queryCollectionOptions<TestItem>({
+          id: `initial-data-late-cleanup`,
+          queryClient,
+          queryKey: [`initial-data-late-cleanup`],
+          queryFn: () => serverResult.promise,
+          getKey,
+          startSync: true,
+          initialData: [{ id: `initial`, name: `Initial` }],
+          initialDataUpdatedAt: 1,
+          staleTime: 0,
+        }),
+      )
+
+      await vi.waitFor(() => {
+        expect(collection.get(`initial`)?.name).toBe(`Initial`)
+        expect(queryClient.isFetching()).toBe(1)
+      })
+      await collection.cleanup()
+
+      serverResult.resolve([{ id: `server`, name: `Server` }])
+      await vi.waitFor(() => expect(queryClient.isFetching()).toBe(0))
+      expect(collection.status).toBe(`cleaned-up`)
+      expect(collection.size).toBe(0)
+    })
+
     it(`projects a wrapped initial response while preserving its Query cache shape`, async () => {
       const queryKey = [`initial-data-wrapped`]
       const initialResponse = {
@@ -360,6 +424,46 @@ describe(`QueryCollection`, () => {
 
         expect(queryFn).not.toHaveBeenCalled()
         expect(queryClient.getQueryData(queryKey)).toEqual(initialResponse)
+      } finally {
+        await collection.cleanup()
+      }
+    })
+
+    it(`preserves a wrapped initial response when writing rows directly`, async () => {
+      const queryKey = [`initial-data-wrapped-writes`]
+      const initialResponse = {
+        items: [{ id: `1`, name: `Initial item` }],
+        nextCursor: `next`,
+      }
+      const collection = createCollection(
+        queryCollectionOptions({
+          id: `initial-data-wrapped-writes`,
+          queryClient,
+          queryKey,
+          queryFn: vi.fn().mockResolvedValue(initialResponse),
+          select: (response: typeof initialResponse) => response.items,
+          getKey,
+          startSync: true,
+          initialData: initialResponse,
+          staleTime: Infinity,
+        }),
+      )
+
+      try {
+        await vi.waitFor(() => {
+          expect(collection.get(`1`)?.name).toBe(`Initial item`)
+        })
+
+        collection.utils.writeInsert({ id: `2`, name: `Inserted item` })
+        collection.utils.writeUpdate({ id: `1`, name: `Updated item` })
+
+        expect(queryClient.getQueryData(queryKey)).toEqual({
+          items: [
+            { id: `1`, name: `Updated item` },
+            { id: `2`, name: `Inserted item` },
+          ],
+          nextCursor: `next`,
+        })
       } finally {
         await collection.cleanup()
       }
@@ -5669,6 +5773,89 @@ describe(`QueryCollection`, () => {
       await vi.waitFor(() => {
         expect(collection.size).toBe(0) // NOW it should be cleaned up
       })
+    })
+
+    it(`should not let initial data satisfy persisted revalidation`, async () => {
+      const queryKey = [`persisted-initial-data-revalidation`]
+      const queryHash = hashKey(queryKey)
+      const retainedRow = {
+        id: `retained`,
+        name: `Retained`,
+        category: `A`,
+      }
+      const initialRow = {
+        id: `initial`,
+        name: `Initial`,
+        category: `A`,
+      }
+      const serverRow = { id: `server`, name: `Server`, category: `A` }
+      const serverResult = createDeferred<Array<CategorisedItem>>()
+      const queryFn = vi.fn(() => serverResult.promise)
+      const adapter = createPersistedQueryAdapter<CategorisedItem>({
+        rows: new Map([[retainedRow.id, retainedRow]]),
+        rowMetadata: new Map([
+          [
+            retainedRow.id,
+            {
+              queryCollection: {
+                owners: {
+                  [queryHash]: true,
+                },
+              },
+            },
+          ],
+        ]),
+        collectionMetadata: new Map([
+          [
+            `queryCollection:gc:${queryHash}`,
+            {
+              queryHash,
+              mode: `until-revalidated`,
+            },
+          ],
+        ]),
+      })
+
+      const collection = createCollection(
+        persistedCollectionOptions({
+          ...(queryCollectionOptions<CategorisedItem>({
+            id: `persisted-initial-data-revalidation`,
+            queryClient,
+            queryKey,
+            queryFn,
+            getKey: (item) => item.id,
+            initialData: [initialRow],
+            staleTime: Infinity,
+            syncMode: `eager`,
+            startSync: true,
+          }) as any),
+          persistence: {
+            adapter,
+          },
+        }) as any,
+      )
+
+      try {
+        await vi.waitFor(() => {
+          expect(queryFn).toHaveBeenCalledTimes(1)
+        })
+        expect(adapter.rows.has(retainedRow.id)).toBe(true)
+        expect(adapter.rows.has(initialRow.id)).toBe(false)
+        expect(
+          adapter.collectionMetadata.has(`queryCollection:gc:${queryHash}`),
+        ).toBe(true)
+
+        serverResult.resolve([serverRow])
+        await vi.waitFor(() => {
+          expect(adapter.rows.has(retainedRow.id)).toBe(false)
+          expect(adapter.rows.get(serverRow.id)).toEqual(serverRow)
+          expect(
+            adapter.collectionMetadata.has(`queryCollection:gc:${queryHash}`),
+          ).toBe(false)
+        })
+      } finally {
+        await collection.cleanup()
+      }
     })
 
     it(`should diff against retained query-owned rows on warm start`, async () => {
