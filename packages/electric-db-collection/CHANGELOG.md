@@ -1,5 +1,23 @@
 # @tanstack/electric-db-collection
 
+## 0.3.14
+
+### Patch Changes
+
+- Prevent progressive Electric collections from truncating persisted rows when resuming from saved Electric shape metadata. ([#1493](https://github.com/TanStack/db/pull/1493))
+
+- Bound the wait for Electric stream refreshes before loading on-demand subsets so native fetch implementations that do not promptly abort long polls do not keep live queries loading until the poll times out. ([#1575](https://github.com/TanStack/db/pull/1575))
+
+- Updated dependencies [[`8258d09`](https://github.com/TanStack/db/commit/8258d0955ab47c8510bd49ea59bcdbefd2ae054d), [`286964d`](https://github.com/TanStack/db/commit/286964d72612b59e3e427baabd9870f5a71a4281)]:
+  - @tanstack/db@0.6.16
+
+## 0.3.13
+
+### Patch Changes
+
+- Updated dependencies [[`eabcea7`](https://github.com/TanStack/db/commit/eabcea743fdfa045a2db01e12bef87403613102a), [`6d4c096`](https://github.com/TanStack/db/commit/6d4c096395b7ff3f428122ea8842bbead551a8c9)]:
+  - @tanstack/db@0.6.15
+
 ## 0.3.12
 
 ### Patch Changes

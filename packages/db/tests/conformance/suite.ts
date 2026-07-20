@@ -665,14 +665,20 @@ export function runSuite(rawDriver: LiveQueryDriver) {
 
     scenario(
       `error-status`,
-      `a failing source surfaces status=error / isError`,
+      `a failing source surfaces an error (flag or boundary)`,
       async () => {
         const source = driver.makeErrorSource()
         const h = driver.mountCollection(source.collection)
         await h.flush()
 
-        expect(h.current().status).toBe(`error`)
-        expect(h.current().isError).toBe(true)
+        if (driver.errorSurface === `throw`) {
+          // Boundary model: reading the errored result throws (for an error
+          // boundary to catch), rather than exposing a readable flag.
+          expect(() => h.current()).toThrow()
+        } else {
+          expect(h.current().status).toBe(`error`)
+          expect(h.current().isError).toBe(true)
+        }
         h.unmount()
       },
     )

@@ -32,6 +32,30 @@ describe(`Query collection type resolution tests`, () => {
   // Create a mock QueryClient for tests
   const queryClient = new QueryClient()
 
+  it(`should type supported top-level Query observer options and reject adapter-owned fields`, () => {
+    queryCollectionOptions<ExplicitType>({
+      id: `query-options-types`,
+      queryClient,
+      queryKey: [`query-options-types`],
+      queryFn: () => Promise.resolve([]),
+      getKey: (item) => item.id,
+      refetchOnWindowFocus: true,
+      refetchOnReconnect: true,
+      refetchOnMount: `always`,
+      networkMode: `online`,
+    })
+
+    queryCollectionOptions<ExplicitType>({
+      id: `query-options-subscribed-owned`,
+      queryClient,
+      queryKey: [`query-options-subscribed-owned`],
+      queryFn: () => Promise.resolve([]),
+      getKey: (item) => item.id,
+      // @ts-expect-error Query Collection owns observer subscription lifecycle.
+      subscribed: false,
+    })
+  })
+
   it(`should prioritize explicit type in QueryCollectionConfig`, () => {
     const options = queryCollectionOptions<ExplicitType>({
       id: `test`,

@@ -211,6 +211,18 @@ class Transaction<T extends object = Record<string, unknown>> {
   public state: TransactionState
   public mutationFn: MutationFn<T>
   public mutations: Array<PendingMutation<T>>
+  /**
+   * Deferred that settles when this transaction settles.
+   *
+   * Await `isPersisted.promise`, not `isPersisted` itself. The promise resolves
+   * when the transaction completes successfully and rejects if the transaction
+   * fails or is rolled back.
+   *
+   * For non-empty commits, the mutation function is the normal settlement
+   * boundary. This does not inherently prove that a backend has uploaded,
+   * confirmed, or read back the write unless the mutation function waits for
+   * that backend observation before returning.
+   */
   public isPersisted: Deferred<Transaction<T>>
   public autoCommit: boolean
   public createdAt: Date

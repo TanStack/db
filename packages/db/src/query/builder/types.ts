@@ -117,7 +117,7 @@ export type SchemaFromSource<T extends Source> = Prettify<{
   [K in keyof T]: T[K] extends CollectionImpl<any, any, any, any, any>
     ? InferCollectionType<T[K]>
     : T[K] extends QueryBuilder<infer TContext>
-      ? GetResult<TContext>
+      ? GetRawResult<TContext>
       : never
 }>
 
@@ -662,8 +662,11 @@ type ValueOfUnion<T, K extends PropertyKey> = T extends unknown
     ? T[K]
     : never
   : never
-type RefForContextValue<T, Nullable extends boolean = false> =
-  IsPlainObject<T> extends true ? Ref<T, Nullable> : RefLeaf<T, Nullable>
+type RefForContextValue<T, Nullable extends boolean = false> = T extends unknown
+  ? IsPlainObject<T> extends true
+    ? Ref<T, Nullable>
+    : RefLeaf<T, Nullable>
+  : never
 type RefsSchemaForContext<TContext extends Context> =
   IsExactlyUndefined<TContext[`refsSchema`]> extends true
     ? TContext[`schema`]

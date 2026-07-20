@@ -151,5 +151,12 @@ export interface LiveQueryDriver {
   mountDisabled: () => LiveQueryHandle
   /** Scenario keys this adapter is empirically known NOT to satisfy yet. */
   knownGaps?: ReadonlyArray<string>
+  /**
+   * How the adapter surfaces a query error (see the `error-status` scenario):
+   * - `flag` (default): a readable `isError`/`status === 'error'` on the result.
+   * - `throw`: reading the errored result throws, for a framework error boundary
+   *   to catch (e.g. Solid's `createResource`/`<ErrorBoundary>` model).
+   */
+  errorSurface?: `flag` | `throw`
   features?: { serverSnapshot?: boolean; suspense?: boolean }
 }

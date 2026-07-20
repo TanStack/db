@@ -191,9 +191,11 @@ export function injectLiveQuery(opts: any) {
       })
     }
 
-    // Handle LiveQueryCollectionConfig objects
+    // Handle LiveQueryCollectionConfig objects. Default startSync/gcTime to
+    // match the query-fn and reactive-options paths, but let an explicit value
+    // in the config win — otherwise a bare `{ query }` never syncs.
     if (opts && typeof opts === `object` && typeof opts.query === `function`) {
-      return createLiveQueryCollection(opts)
+      return createLiveQueryCollection({ startSync: true, gcTime: 0, ...opts })
     }
 
     throw new Error(`Invalid options provided to injectLiveQuery`)
