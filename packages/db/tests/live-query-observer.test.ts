@@ -278,6 +278,17 @@ describe(`createLiveQueryObserver`, () => {
     observer.dispose()
   })
 
+  it(`releases the collection subscription when a listener disposes during initial replay`, () => {
+    const source = makeSource()
+    const observer = createLiveQueryObserver<Row, string>(source as any)
+
+    // The initial-state replay is delivered synchronously inside subscribe();
+    // disposing from the listener must not leak the collection subscription.
+    observer.subscribe(() => observer.dispose())
+
+    expect(source.subscriberCount).toBe(0)
+  })
+
   it(`refreshes the snapshot when status changes without a version bump`, () => {
     // A status-only loading→ready transition with no active subscription: the
     // cached snapshot must not stay stale (covers the preload() case too).

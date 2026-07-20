@@ -198,11 +198,22 @@ class LiveQueryObserverImpl<
       else this.emit(changes)
     }
 
-    const subscription = collection.subscribeChanges(
+    // `subscribeChanges` delivers the initial state synchronously, so a
+    // listener can dispose the observer while the collection subscription is
+    // still being created. Register the release hook up front; if detach()
+    // ran during that replay (collectionUnsub no longer points at our hook),
+    // undo the subscription as soon as the call returns.
+    let subscription: { unsubscribe: () => void } | null = null
+    const release = () => subscription?.unsubscribe()
+    this.collectionUnsub = release
+    subscription = collection.subscribeChanges(
       (changes) => notify(changes as Array<ChangeMessage<T, TKey>>),
       { includeInitialState: true },
     )
-    this.collectionUnsub = () => subscription.unsubscribe()
+    if (this.collectionUnsub !== release) {
+      subscription.unsubscribe()
+      return
+    }
 
     // Catch a *later* loading→ready transition that carries no change events
     // (e.g. `markReady()` with no rows). Skip when already ready — the initial
