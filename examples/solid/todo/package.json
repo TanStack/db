@@ -5,7 +5,7 @@
   "dependencies": {
     "@tanstack/electric-db-collection": "^0.3.14",
     "@tanstack/query-core": "^5.90.20",
-    "@tanstack/query-db-collection": "^1.1.0",
+    "@tanstack/query-db-collection": "^1.2.0",
     "@tanstack/solid-db": "^0.2.30",
     "@tanstack/solid-router": "^1.159.5",
     "@tanstack/solid-start": "^1.159.5",

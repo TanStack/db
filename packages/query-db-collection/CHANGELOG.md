@@ -1,5 +1,17 @@
 # @tanstack/query-db-collection
 
+## 1.2.0
+
+### Minor Changes
+
+- Add eager collection support for TanStack Query `initialData` and `initialDataUpdatedAt`, including wrapped response projection and collection-local initialization on shared QueryClient instances. ([#1683](https://github.com/TanStack/db/pull/1683))
+
+  QueryClient-default `placeholderData` no longer materializes as collection rows, and QueryClient-default `initialData` no longer seeds on-demand subset observers.
+
+### Patch Changes
+
+- Clean up empty query ownership state while preserving authoritative empty results and retained-row lifecycle behavior. ([#1672](https://github.com/TanStack/db/pull/1672))
+
 ## 1.1.0
 
 ### Minor Changes
