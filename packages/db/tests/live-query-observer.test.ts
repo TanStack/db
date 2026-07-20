@@ -208,12 +208,14 @@ describe(`createLiveQueryObserver`, () => {
     const source = makeSource()
     const observer = createLiveQueryObserver<Row, string>(source as any)
 
-    let lateListenerCalls = 0
+    let lateListenerRow4Deliveries = 0
     observer.subscribe((changes) => {
       // Add the late listener only while the row-4 delta is being dispatched.
       if (changes?.some((c) => c.key === `4`)) {
-        observer.subscribe(() => {
-          lateListenerCalls++
+        observer.subscribe((lateChanges) => {
+          if (lateChanges?.some((c) => c.key === `4`)) {
+            lateListenerRow4Deliveries++
+          }
         })
       }
     })
@@ -222,7 +224,9 @@ describe(`createLiveQueryObserver`, () => {
     source.utils.write({ type: `insert`, value: { id: `4`, name: `D` } })
     source.utils.commit()
 
-    expect(lateListenerCalls).toBe(0)
+    // The late subscriber receives row 4 exactly once — via its seed of the
+    // already-committed state, NOT additionally via the in-flight publication.
+    expect(lateListenerRow4Deliveries).toBe(1)
     observer.dispose()
   })
 
@@ -230,14 +234,14 @@ describe(`createLiveQueryObserver`, () => {
     const source = makeSource()
     const observer = createLiveQueryObserver<Row, string>(source as any)
 
-    let existingListenerCalls = 0
+    let row5Deliveries = 0
     let unsubB: (() => void) | null = null
     observer.subscribe(() => {
       unsubB?.()
       unsubB = null
     })
-    unsubB = observer.subscribe(() => {
-      existingListenerCalls++
+    unsubB = observer.subscribe((changes) => {
+      if (changes?.some((c) => c.key === `5`)) row5Deliveries++
     })
 
     source.utils.begin()
@@ -245,7 +249,7 @@ describe(`createLiveQueryObserver`, () => {
     source.utils.commit()
 
     // A removed B while the publication was in flight; B still receives it.
-    expect(existingListenerCalls).toBe(1)
+    expect(row5Deliveries).toBe(1)
     observer.dispose()
   })
 
@@ -287,6 +291,33 @@ describe(`createLiveQueryObserver`, () => {
     observer.subscribe(() => observer.dispose())
 
     expect(source.subscriberCount).toBe(0)
+  })
+
+  it(`seeds a second concurrent subscriber with the current rows`, () => {
+    const source = makeSource()
+    const observer = createLiveQueryObserver<Row, string>(source as any)
+
+    observer.subscribe(() => {})
+
+    // The attach (and its initial-state replay) already happened; a late
+    // subscriber must still receive the current rows as inserts.
+    const secondSubscriberKeys: Array<string> = []
+    observer.subscribe((changes) => {
+      for (const c of changes ?? []) {
+        if (c.type === `insert`) secondSubscriberKeys.push(c.key)
+      }
+    })
+
+    expect(secondSubscriberKeys.sort()).toEqual([`1`, `2`])
+    observer.dispose()
+  })
+
+  it(`throws when subscribing after dispose`, () => {
+    const observer = createLiveQueryObserver<Row, string>(makeSource() as any)
+    observer.dispose()
+    expect(() => observer.subscribe(() => {})).toThrow(
+      /disposed LiveQueryObserver/,
+    )
   })
 
   it(`refreshes the snapshot when status changes without a version bump`, () => {

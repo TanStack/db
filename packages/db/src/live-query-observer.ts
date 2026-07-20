@@ -1,3 +1,4 @@
+import { LiveQueryObserverDisposedError } from './errors.js'
 import {
   getLiveQueryStatusFlags,
   isSingleResultCollection,
@@ -160,9 +161,19 @@ class LiveQueryObserverImpl<
   }
 
   subscribe(listener: LiveQueryObserverListener<T, TKey>): () => void {
+    if (this.disposed) throw new LiveQueryObserverDisposedError()
+
     const record: SubscriptionRecord<T, TKey> = { listener, active: true }
     this.subscriptions.add(record)
-    if (this.subscriptions.size === 1) this.attach()
+    if (this.subscriptions.size === 1) {
+      this.attach()
+    } else {
+      // The initial-state replay only happens on attach, so a subscriber that
+      // arrives while already attached is seeded with the current rows —
+      // delivered to this subscription alone, without advancing the observer's
+      // revision (the collection state did not change).
+      this.seed(record)
+    }
 
     return () => {
       if (!record.active) return
@@ -170,6 +181,26 @@ class LiveQueryObserverImpl<
       this.subscriptions.delete(record)
       if (this.subscriptions.size === 0) this.detach()
     }
+  }
+
+  /** Deliver the collection's current rows to one late subscription as inserts. */
+  private seed(record: SubscriptionRecord<T, TKey>): void {
+    const collection = this.collection
+    if (!collection) return
+
+    const seedChanges: Array<ChangeMessage<T, TKey>> = []
+    for (const [key, value] of collection.entries() as IterableIterator<
+      [TKey, T]
+    >) {
+      seedChanges.push({ type: `insert`, key, value })
+    }
+    if (seedChanges.length === 0) return
+
+    const deliver = () => {
+      if (record.active) record.listener(seedChanges)
+    }
+    if (this.deferInitialNotify) queueMicrotask(deliver)
+    else deliver()
   }
 
   private attach(): void {
