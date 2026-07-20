@@ -40,13 +40,17 @@ export type LiveQueryObserverListener<
 
 /**
  * Wraps a resolved live-query `Collection` (or `null` for a disabled query) with
- * the shared lifecycle every framework adapter needs: start sync, subscribe to
- * changes, handle the already-ready race, expose a stable snapshot for
- * wholesale consumers, and deliver the raw change set for granular consumers.
+ * the shared lifecycle every framework adapter needs: start sync on first
+ * subscribe, subscribe to changes and status transitions, expose a stable
+ * snapshot for wholesale consumers, and deliver the raw change set for
+ * granular consumers.
  *
  * Input resolution (query fn / config / collection / disabled) stays in the
  * adapter — it is framework-reactive. The observer owns everything after the
  * input is resolved to a concrete collection.
+ *
+ * @internal Unstable contract for TanStack DB's official framework adapters —
+ * not a public extension point yet; may change in any release.
  */
 export interface LiveQueryObserver<
   T extends object,
@@ -316,6 +320,11 @@ export interface CreateLiveQueryObserverOptions {
 /**
  * Create a {@link LiveQueryObserver} for a resolved live-query collection, or a
  * disabled observer when `collection` is `null`/`undefined`.
+ *
+ * @internal This is an unstable contract shared by TanStack DB's official
+ * framework adapters. It is exported so the adapter packages can use it, but
+ * it is not a public extension point yet: its API may change in any release
+ * without a semver major.
  */
 export function createLiveQueryObserver<
   T extends object,
