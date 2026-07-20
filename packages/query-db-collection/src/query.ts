@@ -1540,9 +1540,12 @@ export function queryCollectionOptions(
               // Initial data seeds Query state without a fetch. It must not
               // satisfy persistence retention that lasts until revalidation.
               if (!result.isFetching) {
-                state.observers.get(hashedQueryKey)?.refetch().catch(() => {
-                  // Errors handled by the next handleQueryResult invocation
-                })
+                state.observers
+                  .get(hashedQueryKey)
+                  ?.refetch()
+                  .catch(() => {
+                    // Errors handled by the next handleQueryResult invocation
+                  })
               }
               return
             }
