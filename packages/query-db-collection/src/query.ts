@@ -1760,7 +1760,10 @@ export function queryCollectionOptions(
       persistedRetentionTimers.clear()
 
       const allQueryKeys = [...hashToQueryKey.values()]
-      const allHashedKeys = [...state.observers.keys()]
+      const allHashedKeys = new Set([
+        ...state.observers.keys(),
+        ...queryToRows.keys(),
+      ])
 
       // Force cleanup all queries (explicit cleanup path)
       // This ignores hasListeners and always cleans up

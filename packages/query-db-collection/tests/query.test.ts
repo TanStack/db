@@ -5946,6 +5946,53 @@ describe(`QueryCollection`, () => {
       }
     })
 
+    it(`should clear retained ownership during explicit collection cleanup`, async () => {
+      const baseQueryKey = [`explicit-retained-cleanup-test`]
+      const retainedQueryHash = hashKey(baseQueryKey)
+      const items: Array<CategorisedItem> = [
+        { id: `1`, name: `Retained`, category: `A` },
+      ]
+      const config: QueryCollectionConfig<CategorisedItem> = {
+        id: `explicit-retained-cleanup-test`,
+        queryClient,
+        queryKey: () => baseQueryKey,
+        queryFn: async () => items,
+        getKey: (item) => item.id,
+        syncMode: `on-demand`,
+        startSync: true,
+        persistedGcTime: 60_000,
+      }
+      const baseOptions = queryCollectionOptions(config)
+      const originalSync = baseOptions.sync
+      const ownershipMaps = inspectOwnershipMaps(baseOptions)
+      const metadataHarness = createInMemorySyncMetadataApi<
+        string | number,
+        CategorisedItem
+      >({ persistedRows: new Map(items.map((item) => [item.id, item])) })
+      const collection = createCollection({
+        ...baseOptions,
+        sync: {
+          sync: (params: Parameters<typeof originalSync.sync>[0]) =>
+            originalSync.sync({ ...params, metadata: metadataHarness.api }),
+        },
+      })
+      const liveQuery = createLiveQueryCollection({
+        query: (q) =>
+          q
+            .from({ item: collection })
+            .where(({ item }) => eq(item.category, `A`)),
+      })
+
+      await liveQuery.preload()
+      await liveQuery.cleanup()
+      expect(ownershipMaps.queryToRows.has(retainedQueryHash)).toBe(true)
+
+      await collection.cleanup()
+
+      expect(ownershipMaps.queryToRows.size).toBe(0)
+      expect(ownershipMaps.rowToQueries.size).toBe(0)
+    })
+
     it(`should default persisted retention ttl to query gcTime when persistedGcTime is undefined`, async () => {
       vi.useFakeTimers()
       const gcTime = 120
