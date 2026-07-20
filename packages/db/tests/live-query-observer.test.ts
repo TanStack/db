@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 import { createCollection } from '../src/collection/index.js'
 import { createLiveQueryObserver } from '../src/live-query-observer.js'
 import {
@@ -38,6 +38,42 @@ function makeLoadingSource() {
   )
   collection.startSyncImmediate()
   return collection
+}
+
+/** An on-demand collection whose sync exposes a loadSubset spy. */
+function makeLoadSubsetSource() {
+  const loadSubsetCalls: Array<unknown> = []
+  let writeRow: (type: `insert` | `delete`, row: Row) => void
+  const collection = createCollection<Row, string>({
+    id: `observer-loadsubset-${seq++}`,
+    getKey: (r) => r.id,
+    startSync: false,
+    syncMode: `on-demand`,
+    sync: {
+      sync: ({ begin, write, commit, markReady }) => {
+        begin()
+        for (const row of SEED) write({ type: `insert`, value: row })
+        commit()
+        markReady()
+        writeRow = (type, row) => {
+          begin()
+          write({ type, value: row })
+          commit()
+        }
+        return {
+          loadSubset: (options: unknown) => {
+            loadSubsetCalls.push(options)
+            return true as const
+          },
+        }
+      },
+    },
+  })
+  return {
+    collection,
+    loadSubsetCalls,
+    writeRow: (type: `insert` | `delete`, row: Row) => writeRow(type, row),
+  }
 }
 
 describe(`createLiveQueryObserver`, () => {
@@ -365,6 +401,61 @@ describe(`createLiveQueryObserver`, () => {
     expect(after).not.toBe(before)
     expect(after.state?.has(`8`)).toBe(true)
     expect(after.data).toHaveLength(3)
+    observer.dispose()
+  })
+
+  it(`wholesale mode does not request an initial snapshot (no unfiltered loadSubset)`, () => {
+    const { collection, loadSubsetCalls, writeRow } = makeLoadSubsetSource()
+    const observer = createLiveQueryObserver<Row, string>(collection as any, {
+      mode: `wholesale`,
+    })
+
+    const notifies: Array<unknown> = []
+    observer.subscribe((changes) => notifies.push(changes))
+
+    // No initial-state request, so no loadSubset({ where: undefined }) — the
+    // pre-observer React/Angular loading policy.
+    expect(loadSubsetCalls).toHaveLength(0)
+    // No bootstrap replay either; wholesale consumers read getSnapshot().
+    expect(notifies).toHaveLength(0)
+    expect(observer.getSnapshot().data).toHaveLength(2)
+
+    // Deltas — including deletes — still wake the consumer.
+    writeRow(`delete`, { id: `1`, name: `A` })
+
+    expect(notifies).toHaveLength(1)
+    expect(observer.getSnapshot().data).toHaveLength(1)
+    observer.dispose()
+  })
+
+  it(`granular mode still seeds from an initial snapshot`, () => {
+    const { collection, loadSubsetCalls } = makeLoadSubsetSource()
+    const observer = createLiveQueryObserver<Row, string>(collection as any)
+
+    const inserted: Array<string> = []
+    observer.subscribe((changes) => {
+      for (const c of changes ?? []) {
+        if (c.type === `insert`) inserted.push(c.key)
+      }
+    })
+
+    expect(inserted.sort()).toEqual([`1`, `2`])
+    expect(loadSubsetCalls).toHaveLength(1)
+    observer.dispose()
+  })
+
+  it(`does not enumerate entries for a status-only snapshot read`, () => {
+    const source = makeSource()
+    const observer = createLiveQueryObserver<Row, string>(source as any)
+
+    const entriesSpy = vi.spyOn(source, `entries`)
+    expect(observer.getSnapshot().status).toBe(`ready`)
+    expect(entriesSpy).not.toHaveBeenCalled()
+
+    // Materialization happens on first data/state access, once per revision.
+    expect(observer.getSnapshot().data).toHaveLength(2)
+    expect(observer.getSnapshot().state?.size).toBe(2)
+    expect(entriesSpy).toHaveBeenCalledTimes(1)
     observer.dispose()
   })
 

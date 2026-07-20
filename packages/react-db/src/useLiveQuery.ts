@@ -422,6 +422,9 @@ export function useLiveQuery(
     // synchronously during subscribe.
     observerRef.current = createLiveQueryObserver(collectionRef.current, {
       deferInitialNotify: true,
+      // React re-reads getSnapshot() on notify; subscribing without initial
+      // state preserves the hook's pre-observer loading policy.
+      mode: `wholesale`,
     })
   }
   const observer = observerRef.current!

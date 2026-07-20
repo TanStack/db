@@ -250,7 +250,11 @@ export function injectLiveQuery(opts: any) {
     // The shared observer owns sync start, subscription, the ready-race, and
     // status transitions; Angular re-reads the whole collection on each notify
     // (wholesale) into its signals.
-    const observer = createLiveQueryObserver(currentCollection)
+    // Angular re-reads the collection on notify; wholesale mode preserves its
+    // pre-observer loading policy (no initial-state snapshot request).
+    const observer = createLiveQueryObserver(currentCollection, {
+      mode: `wholesale`,
+    })
 
     // Seed immediately from the post-start state, then re-read on every notify.
     syncDataFromCollection(currentCollection)

@@ -96,6 +96,7 @@ class LiveQueryObserverImpl<
 > implements LiveQueryObserver<T, TKey> {
   private readonly collection: Collection<T, TKey, any> | null
   private readonly deferInitialNotify: boolean
+  private readonly wholesale: boolean
   private cachedRevision = -1
   private cachedStatus: CollectionStatus | undefined
   private cachedSnapshot: LiveQuerySnapshot<T, TKey> = DISABLED_SNAPSHOT
@@ -116,9 +117,11 @@ class LiveQueryObserverImpl<
   constructor(
     collection: Collection<T, TKey, any> | null,
     deferInitialNotify: boolean,
+    wholesale: boolean,
   ) {
     this.collection = collection
     this.deferInitialNotify = deferInitialNotify
+    this.wholesale = wholesale
     // Starting sync during resolution matches every adapter's eager behavior.
     collection?.startSyncImmediate()
   }
@@ -138,18 +141,21 @@ class LiveQueryObserverImpl<
     ) {
       this.cachedRevision = collection._stateRevision
       this.cachedStatus = collection.status
-      const entries = Array.from(collection.entries()) as Array<[TKey, T]>
       const singleResult = isSingleResultCollection(collection)
+      // Rows are materialized lazily on first `state`/`data` access, so a
+      // consumer that only reads `status` never enumerates the collection.
+      let entriesCache: Array<[TKey, T]> | null = null
       let stateCache: Map<TKey, T> | null = null
       let dataCache: Array<T> | null = null
+      const readEntries = () =>
+        (entriesCache ??= Array.from(collection.entries()) as Array<[TKey, T]>)
 
       this.cachedSnapshot = {
         get state() {
-          if (!stateCache) stateCache = new Map(entries)
-          return stateCache
+          return (stateCache ??= new Map(readEntries()))
         },
         get data() {
-          if (!dataCache) dataCache = entries.map(([, value]) => value)
+          dataCache ??= readEntries().map(([, value]) => value)
           return singleResult ? dataCache[0] : dataCache
         },
         collection,
@@ -169,11 +175,12 @@ class LiveQueryObserverImpl<
     if (this.subscriptions.size === 1) {
       this.attach()
     } else {
-      // The initial-state replay only happens on attach, so a subscriber that
-      // arrives while already attached is seeded with the current rows —
-      // delivered to this subscription alone, without advancing the observer's
-      // revision (the collection state did not change).
-      this.seed(record)
+      // The initial-state replay only happens on attach, so a granular
+      // subscriber that arrives while already attached is seeded with the
+      // current rows — delivered to this subscription alone, without advancing
+      // the observer's revision (the collection state did not change).
+      // Wholesale consumers read getSnapshot() instead and need no seed.
+      if (!this.wholesale) this.seed(record)
     }
 
     return () => {
@@ -210,10 +217,14 @@ class LiveQueryObserverImpl<
 
     const generation = ++this.attachGeneration
 
-    // Subscribe with initial state so granular consumers receive the current
-    // rows as inserts followed by deltas through one consistent channel — the
-    // same contract the adapters used before the observer existed (the
-    // collection's per-subscriber change stream requires this to align deltes).
+    // Granular consumers subscribe with initial state so they receive the
+    // current rows as inserts followed by deltas through one consistent
+    // channel (the collection's per-subscriber change stream requires this to
+    // align deltas). Wholesale consumers subscribe WITHOUT initial state —
+    // preserving their pre-observer loading policy: no snapshot request means
+    // no unfiltered loadSubset({ where: undefined }) against on-demand
+    // collections. The explicit `false` marks all state as seen so deletes
+    // still flow through as notifies.
     //
     // When `deferInitialNotify` is set, emits that fire synchronously while
     // attaching (the initial-state batch and any synchronous status notify)
@@ -254,7 +265,7 @@ class LiveQueryObserverImpl<
     this.collectionUnsub = release
     subscription = collection.subscribeChanges(
       (changes) => notify(changes as Array<ChangeMessage<T, TKey>>),
-      { includeInitialState: true },
+      { includeInitialState: !this.wholesale },
     )
     if (this.collectionUnsub !== release) {
       subscription.unsubscribe()
@@ -329,6 +340,19 @@ export interface CreateLiveQueryObserverOptions {
    * Effect/watcher-based adapters leave it off to get initial state synchronously.
    */
   deferInitialNotify?: boolean
+  /**
+   * How subscribers consume the observer:
+   *
+   * - `granular` (default): subscribers apply the delivered `ChangeMessage[]`
+   *   deltas to their own keyed state (Vue/Svelte/Solid). The observer
+   *   subscribes with initial state and seeds late subscribers, so every
+   *   subscriber converges from deltas alone.
+   * - `wholesale`: subscribers treat notifications as a wake-up and re-read
+   *   `getSnapshot()` (React/Angular). The observer subscribes WITHOUT initial
+   *   state, preserving those adapters' loading policy — no snapshot request,
+   *   so no unfiltered `loadSubset` against on-demand collections.
+   */
+  mode?: `granular` | `wholesale`
 }
 
 /**
@@ -345,5 +369,6 @@ export function createLiveQueryObserver<
   return new LiveQueryObserverImpl<T, TKey>(
     collection ?? null,
     options.deferInitialNotify ?? false,
+    options.mode === `wholesale`,
   )
 }
