@@ -320,6 +320,54 @@ describe(`createLiveQueryObserver`, () => {
     )
   })
 
+  it(`preserves snapshot identity across subscribe/unsubscribe cycles`, () => {
+    const observer = createLiveQueryObserver<Row, string>(makeSource() as any)
+
+    const before = observer.getSnapshot()
+    observer.subscribe(() => {})()
+    observer.subscribe(() => {})()
+
+    // Bootstrap replay is per-subscriber delivery, not a semantic revision:
+    // nothing observable changed, so the snapshot identity must not change.
+    expect(observer.getSnapshot()).toBe(before)
+    observer.dispose()
+  })
+
+  it(`emits exactly one post-bootstrap notification for a readiness transition`, () => {
+    const collection = makeLoadingSource()
+    const observer = createLiveQueryObserver<Row, string>(collection as any)
+
+    const events: Array<unknown> = []
+    observer.subscribe((changes) => events.push(changes))
+
+    collection.utils.markReady()
+
+    // Not the old [[], undefined, []]: empty batches carry no semantic change,
+    // so one readiness transition publishes exactly once.
+    expect(events).toEqual([undefined])
+    observer.dispose()
+  })
+
+  it(`serves a fresh snapshot for rows changed while detached`, () => {
+    const source = makeSource()
+    const observer = createLiveQueryObserver<Row, string>(source as any)
+
+    const unsubscribe = observer.subscribe(() => {})
+    const before = observer.getSnapshot()
+    unsubscribe()
+
+    // Mutate while nothing is attached; the status does not change.
+    source.utils.begin()
+    source.utils.write({ type: `insert`, value: { id: `8`, name: `H` } })
+    source.utils.commit()
+
+    const after = observer.getSnapshot()
+    expect(after).not.toBe(before)
+    expect(after.state?.has(`8`)).toBe(true)
+    expect(after.data).toHaveLength(3)
+    observer.dispose()
+  })
+
   it(`refreshes the snapshot when status changes without a version bump`, () => {
     // A status-only loading→ready transition with no active subscription: the
     // cached snapshot must not stay stale (covers the preload() case too).

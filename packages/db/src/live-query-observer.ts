@@ -96,8 +96,7 @@ class LiveQueryObserverImpl<
 > implements LiveQueryObserver<T, TKey> {
   private readonly collection: Collection<T, TKey, any> | null
   private readonly deferInitialNotify: boolean
-  private version = 0
-  private cachedVersion = -1
+  private cachedRevision = -1
   private cachedStatus: CollectionStatus | undefined
   private cachedSnapshot: LiveQuerySnapshot<T, TKey> = DISABLED_SNAPSHOT
   private readonly subscriptions = new Set<SubscriptionRecord<T, TKey>>()
@@ -128,14 +127,16 @@ class LiveQueryObserverImpl<
     const collection = this.collection
     if (!collection) return DISABLED_SNAPSHOT
 
-    // Rebuild when the version advanced, or when the collection's status
-    // changed without a version bump (e.g. a status-only loading→ready
-    // transition or `preload()` while there is no active subscription).
+    // The semantic clock: rebuild only when the collection's own state
+    // revision or status moved. The revision advances on every committed
+    // change — even while nothing is subscribed, so a detached snapshot never
+    // goes stale — and is untouched by subscription bootstrap replays, so
+    // resubscribing never manufactures a new snapshot identity.
     if (
-      this.cachedVersion !== this.version ||
+      this.cachedRevision !== collection._stateRevision ||
       this.cachedStatus !== collection.status
     ) {
-      this.cachedVersion = this.version
+      this.cachedRevision = collection._stateRevision
       this.cachedStatus = collection.status
       const entries = Array.from(collection.entries()) as Array<[TKey, T]>
       const singleResult = isSingleResultCollection(collection)
@@ -225,6 +226,10 @@ class LiveQueryObserverImpl<
     const deferred: Array<Array<ChangeMessage<T, TKey>> | undefined> = []
     const notify = (changes: Array<ChangeMessage<T, TKey>> | undefined) => {
       if (this.disposed || this.subscriptions.size === 0) return
+      // An empty batch carries no semantic change (e.g. the collection's
+      // empty-ready flush); only real deltas and the synthetic ready notify
+      // (undefined) are published.
+      if (changes !== undefined && changes.length === 0) return
       if (attaching) deferred.push(changes)
       else this.emit(changes)
     }
@@ -294,7 +299,6 @@ class LiveQueryObserverImpl<
       // A dispose() during dispatch empties the queue, ending this loop.
       while (this.publicationQueue.length > 0) {
         const publication = this.publicationQueue.shift()!
-        this.version++
         // Deliver over a snapshot of the records taken when this publication
         // is dispatched: a subscription removed mid-delivery still receives
         // the in-flight publication; one added mid-delivery does not.
