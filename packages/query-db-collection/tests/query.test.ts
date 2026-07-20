@@ -2466,6 +2466,38 @@ describe(`QueryCollection`, () => {
         await collection.cleanup()
       })
 
+      it(`keeps an unloaded preload resolved when its pending request later rejects`, async () => {
+        const deferred = createDeferred<Array<TestItem>>()
+        const collection = createCollection(
+          queryCollectionOptions<TestItem>({
+            id: `late-subset-rejection-test`,
+            queryClient,
+            queryKey: [`late-subset-rejection-test`],
+            queryFn: () => deferred.promise,
+            getKey,
+            syncMode: `on-demand`,
+          }),
+        )
+        const liveQuery = createSubset(collection)
+        const preloadPromise = liveQuery.preload()
+
+        await vi.waitFor(() => expect(queryClient.isFetching()).toBe(1))
+        await liveQuery.cleanup()
+
+        const subsetQuery = queryClient.getQueryCache().findAll({
+          queryKey: [`late-subset-rejection-test`],
+        })[0]
+        expect(subsetQuery?.getObserversCount() ?? 0).toBe(0)
+        await expect(preloadPromise).resolves.toBeUndefined()
+
+        deferred.reject(new Error(`Late query failure`))
+        await vi.waitFor(() => expect(queryClient.isFetching()).toBe(0))
+
+        expect(collection.size).toBe(0)
+        expect(subsetQuery?.getObserversCount() ?? 0).toBe(0)
+        await collection.cleanup()
+      })
+
       it(`preserves an active subset across cache removal and accepts a late notification from its detached observer`, async () => {
         const queryKey = [`cache-removal-late-notification-test`]
         const collection = createCollection(
