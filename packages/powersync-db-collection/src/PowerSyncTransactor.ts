@@ -1,8 +1,8 @@
-import { sanitizeSQL } from '@powersync/common'
+import { LogLevels, sanitizeSQL } from '@powersync/common'
 import DebugModule from 'debug'
 import { PendingOperationStore } from './PendingOperationStore'
 import { asPowerSyncRecord, mapOperationToPowerSync } from './helpers'
-import type { AbstractPowerSyncDatabase, LockContext } from '@powersync/common'
+import type { CommonPowerSyncDatabase, LockContext } from '@powersync/common'
 import type { PendingMutation, Transaction } from '@tanstack/db'
 import type { PendingOperation } from './PendingOperationStore'
 import type {
@@ -13,7 +13,7 @@ import type {
 const debug = DebugModule.debug(`ts/db:powersync`)
 
 export type TransactorOptions = {
-  database: AbstractPowerSyncDatabase
+  database: CommonPowerSyncDatabase
 }
 
 /**
@@ -52,7 +52,7 @@ export type TransactorOptions = {
  * @returns A promise that resolves when the mutations have been persisted to PowerSync
  */
 export class PowerSyncTransactor {
-  database: AbstractPowerSyncDatabase
+  database: CommonPowerSyncDatabase
   pendingOperationStore: PendingOperationStore
 
   constructor(options: TransactorOptions) {
@@ -321,10 +321,10 @@ export class PowerSyncTransactor {
       // If it's not supported, we don't store metadata.
       if (typeof mutation.metadata != `undefined`) {
         // Log a warning if metadata is provided but not tracked.
-        this.database.logger.warn(
-          `Metadata provided for collection ${mutation.collection.id} but the PowerSync table does not track metadata. The PowerSync table should be configured with trackMetadata: true.`,
-          mutation.metadata,
-        )
+        this.database.logger.log({
+          level: LogLevels.info,
+          message: `Metadata provided for collection ${mutation.collection.id} but the PowerSync table does not track metadata. The PowerSync table should be configured with trackMetadata: true.`,
+        })
       }
       return null
     } else if (typeof mutation.metadata == `undefined`) {
