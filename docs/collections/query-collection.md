@@ -314,9 +314,9 @@ derived Query cache entries instead.
 
 If a stale initial response triggers a fetch, the initial rows remain available
 while it is in flight. A successful response reconciles them through the normal
-row ownership pipeline; an error retains the initial rows. Direct writes use the
-same Query cache-patching rules as fetched data, and a later successful server
-response may reconcile or replace those writes.
+row ownership pipeline; an error retains the initial rows. Direct writes patch
+the eager Query cache in place, and a later successful server response may
+reconcile or replace those writes.
 
 ### Selecting Rows from Wrapped Responses
 
@@ -356,7 +356,7 @@ preserving the envelope in the Query cache.
 
 This differs from TanStack Query's observer-level `select`: query-db-collection uses this option to bridge Query's response object into DB's normalized row store.
 
-Direct write utilities such as `writeInsert`, `writeUpdate`, and `writeDelete` make a best-effort attempt to update the matching row array inside wrapped Query cache entries while preserving wrapper metadata.
+In eager mode, direct write utilities such as `writeInsert`, `writeUpdate`, and `writeDelete` make a best-effort attempt to update the matching row array inside wrapped Query cache entries while preserving wrapper metadata. In on-demand mode, they revalidate active scoped queries and remove inactive or disabled cache entries instead of patching them with the full collection snapshot.
 
 This works automatically for simple wrappers such as:
 
@@ -566,7 +566,7 @@ The collection provides these utility methods via `collection.utils`:
 
 ## Direct Writes
 
-Direct writes are intended for scenarios where the normal query/mutation flow doesn't fit your needs. They allow you to write directly to the synced data store, bypassing the optimistic update system and query refetch mechanism.
+Direct writes are intended for scenarios where the normal query/mutation flow doesn't fit your needs. They write directly to the synced data store and bypass the optimistic update system. How they update the Query cache depends on the collection's sync mode.
 
 ### Understanding the Data Stores
 
@@ -621,9 +621,9 @@ These operations:
 
 - Write directly to the synced data store
 - Do NOT create optimistic mutations
-- Do NOT trigger automatic query refetches
-- Update the TanStack Query cache immediately
 - Are immediately visible in the UI
+- In eager mode, update the full-result Query cache in place without refetching
+- In on-demand mode, refetch active enabled queries and remove inactive or disabled cache entries
 
 ### Batch Operations
 
@@ -641,7 +641,7 @@ todosCollection.utils.writeBatch(() => {
 ### Real-World Example: WebSocket Integration
 
 ```typescript
-// Handle real-time updates from WebSocket without triggering full refetches
+// Apply real-time updates from a WebSocket to the synced store
 ws.on("todos:update", (changes) => {
   todosCollection.utils.writeBatch(() => {
     changes.forEach((change) => {
@@ -823,13 +823,15 @@ This pattern allows you to:
 
 ### Direct Writes and Query Sync
 
-Direct writes update the collection immediately and also update the TanStack Query cache. However, they do not prevent the normal query sync behavior. If your `queryFn` returns data that conflicts with your direct writes, the query data will take precedence.
+Direct writes update the collection immediately. In eager mode, they also patch the full-result TanStack Query cache in place.
+
+In on-demand mode, each Query cache entry may represent a different predicate, order, limit, or offset. A full collection snapshot cannot safely replace those scoped results. Direct writes therefore refetch active enabled queries and remove inactive or disabled entries so their next subscription fetches fresh data. A successful `queryFn` result remains authoritative and may reconcile or replace a direct write.
 
 To handle this properly:
 
-1. Use `{ refetch: false }` in your persistence handlers when using direct writes
-2. Set appropriate `staleTime` to prevent unnecessary refetches
-3. Design your `queryFn` to be aware of incremental updates (e.g., only fetch new data)
+1. Use `{ refetch: false }` in persistence handlers to avoid the handler's additional refetch after a direct write. On-demand cache revalidation still runs.
+2. Make sure an on-demand `queryFn` returns the current server result for its pushed-down predicate, order, limit, and offset.
+3. Use eager mode when direct writes must update one complete cached result without a network request.
 
 ## Complete Direct Write API Reference
 
