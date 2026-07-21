@@ -2,11 +2,15 @@
 import { untrack } from 'svelte'
 // eslint-disable-next-line import/no-duplicates -- See https://github.com/un-ts/eslint-plugin-import-x/issues/308
 import { SvelteMap } from 'svelte/reactivity'
-import { BaseQueryBuilder, createLiveQueryCollection } from '@tanstack/db'
+import {
+  BaseQueryBuilder,
+  createLiveQueryCollection,
+  isCollection,
+  isSingleResultCollection,
+} from '@tanstack/db'
 import type {
   ChangeMessage,
   Collection,
-  CollectionConfigSingleRowOption,
   CollectionStatus,
   Context,
   GetResult,
@@ -301,14 +305,9 @@ export function useLiveQuery(
     }
 
     // Check if it's already a collection by checking for specific collection methods
-    const isCollection =
-      unwrappedParam &&
-      typeof unwrappedParam === `object` &&
-      typeof unwrappedParam.subscribeChanges === `function` &&
-      typeof unwrappedParam.startSyncImmediate === `function` &&
-      typeof unwrappedParam.id === `string`
+    const inputIsCollection = isCollection(unwrappedParam)
 
-    if (isCollection) {
+    if (inputIsCollection) {
       // Warn when passing a collection directly with on-demand sync mode
       // In on-demand mode, data is only loaded when queries with predicates request it
       // Passing the collection directly doesn't provide any predicates, so no data loads
@@ -350,6 +349,13 @@ export function useLiveQuery(
         startSync: true,
       })
     } else {
+      // A reactive getter (or param-driven query fn) can resolve to null/undefined
+      // to mean "disabled". `toValue` above already called it, so guard here —
+      // otherwise `{ ...null }` reaches createLiveQueryCollection and throws.
+      if (unwrappedParam === undefined || unwrappedParam === null) {
+        return null
+      }
+
       return createLiveQueryCollection({
         ...unwrappedParam,
         startSync: true,
@@ -474,16 +480,8 @@ export function useLiveQuery(
     },
     get data() {
       const currentCollection = collection
-      if (currentCollection) {
-        const config =
-          currentCollection.config as CollectionConfigSingleRowOption<
-            any,
-            any,
-            any
-          >
-        if (config.singleResult) {
-          return internalData[0]
-        }
+      if (currentCollection && isSingleResultCollection(currentCollection)) {
+        return internalData[0]
       }
       return internalData
     },

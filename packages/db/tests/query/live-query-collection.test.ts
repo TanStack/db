@@ -449,6 +449,21 @@ describe(`createLiveQueryCollection`, () => {
     })
   })
 
+  it(`should forward an explicit gcTime of 0 (disable GC) instead of coercing it to the default`, () => {
+    const options = liveQueryCollectionOptions({
+      query: (q) =>
+        q
+          .from({ user: usersCollection })
+          .where(({ user }) => eq(user.active, true)),
+      gcTime: 0,
+    })
+
+    // gcTime: 0 disables garbage collection. A `|| 5000` fallback treats the
+    // explicit 0 as unset and silently replaces it with the 5s default, so the
+    // collection is garbage collected instead of being kept alive.
+    expect(options.gcTime).toBe(0)
+  })
+
   it(`should not reuse finalized graph after GC cleanup (resubscribe is safe)`, async () => {
     const liveQuery = createLiveQueryCollection({
       query: (q) =>
@@ -592,6 +607,33 @@ describe(`createLiveQueryCollection`, () => {
     expect(nestedLQ.size).toBe(2)
 
     finalSubscription.unsubscribe()
+  })
+
+  it(`loads its data again when preloaded after the live query and its source collection were cleaned up`, async () => {
+    const activeUsers = createLiveQueryCollection({
+      query: (q) =>
+        q
+          .from({ user: usersCollection })
+          .where(({ user }) => eq(user.active, true)),
+    })
+
+    await activeUsers.preload()
+    expect(activeUsers.status).toBe(`ready`)
+    expect(activeUsers.size).toBe(2)
+
+    // Tear down the source collection and the live query, e.g. when switching
+    // to a different data set at runtime. Cleaning up a source collection puts
+    // the dependent live query into an error state.
+    await usersCollection.cleanup()
+    expect(activeUsers.status).toBe(`error`)
+
+    await activeUsers.cleanup()
+    expect(activeUsers.status).toBe(`cleaned-up`)
+
+    // Preloading again restarts sync and resolves once the data is loaded.
+    await activeUsers.preload()
+    expect(activeUsers.status).toBe(`ready`)
+    expect(activeUsers.size).toBe(2)
   })
 
   it(`should handle temporal values correctly in live queries`, async () => {

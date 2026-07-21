@@ -9,7 +9,7 @@ title: not
 function not(value): BasicExpression<boolean>;
 ```
 
-Defined in: [packages/db/src/query/builder/functions.ts:242](https://github.com/TanStack/db/blob/main/packages/db/src/query/builder/functions.ts#L242)
+Defined in: [packages/db/src/query/builder/functions.ts:246](https://github.com/TanStack/db/blob/main/packages/db/src/query/builder/functions.ts#L246)
 
 ## Parameters
 
