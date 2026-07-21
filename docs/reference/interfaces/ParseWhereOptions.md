@@ -87,6 +87,22 @@ optional avg: (...args) => T;
 
 `T`
 
+##### caseWhen()?
+
+```ts
+optional caseWhen: (...args) => T;
+```
+
+###### Parameters
+
+###### args
+
+...`any`[]
+
+###### Returns
+
+`T`
+
 ##### coalesce()?
 
 ```ts
@@ -123,6 +139,22 @@ optional concat: (...args) => T;
 
 ```ts
 optional count: (...args) => T;
+```
+
+###### Parameters
+
+###### args
+
+...`any`[]
+
+###### Returns
+
+`T`
+
+##### divide()?
+
+```ts
+optional divide: (...args) => T;
 ```
 
 ###### Parameters
@@ -359,6 +391,22 @@ optional min: (...args) => T;
 
 `T`
 
+##### multiply()?
+
+```ts
+optional multiply: (...args) => T;
+```
+
+###### Parameters
+
+###### args
+
+...`any`[]
+
+###### Returns
+
+`T`
+
 ##### not()?
 
 ```ts
@@ -379,6 +427,22 @@ optional not: (...args) => T;
 
 ```ts
 optional or: (...args) => T;
+```
+
+###### Parameters
+
+###### args
+
+...`any`[]
+
+###### Returns
+
+`T`
+
+##### subtract()?
+
+```ts
+optional subtract: (...args) => T;
 ```
 
 ###### Parameters

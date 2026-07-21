@@ -73,6 +73,10 @@ export class ReverseIndex<
     return this.originalIndex.supports(operation)
   }
 
+  get supportsRangeOptimization(): boolean {
+    return this.originalIndex.supportsRangeOptimization
+  }
+
   matchesField(fieldPath: Array<string>): boolean {
     return this.originalIndex.matchesField(fieldPath)
   }

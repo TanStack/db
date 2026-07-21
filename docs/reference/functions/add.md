@@ -6,10 +6,10 @@ title: add
 # Function: add()
 
 ```ts
-function add<T1, T2>(left, right): BinaryNumericReturnType<T1, T2>;
+function add<T1, T2>(left, right): BinaryNumericReturnType;
 ```
 
-Defined in: [packages/db/src/query/builder/functions.ts:354](https://github.com/TanStack/db/blob/main/packages/db/src/query/builder/functions.ts#L354)
+Defined in: [packages/db/src/query/builder/functions.ts:601](https://github.com/TanStack/db/blob/main/packages/db/src/query/builder/functions.ts#L601)
 
 ## Type Parameters
 
@@ -33,4 +33,4 @@ Defined in: [packages/db/src/query/builder/functions.ts:354](https://github.com/
 
 ## Returns
 
-`BinaryNumericReturnType`\<`T1`, `T2`\>
+`BinaryNumericReturnType`

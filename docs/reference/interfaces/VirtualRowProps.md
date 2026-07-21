@@ -21,7 +21,7 @@ These properties are:
 // Accessing virtual properties on a row
 const user = collection.get('user-1')
 if (user.$synced) {
-  console.log('Confirmed by backend')
+  console.log('No pending local optimistic writes for this row')
 }
 if (user.$origin === 'local') {
   console.log('Created/modified locally')
@@ -30,7 +30,7 @@ if (user.$origin === 'local') {
 
 ```typescript
 // Using virtual properties in queries
-const confirmedOrders = createLiveQueryCollection({
+const ordersWithoutLocalWrites = createLiveQueryCollection({
   query: (q) => q
     .from({ order: orders })
     .where(({ order }) => eq(order.$synced, true))
@@ -53,7 +53,7 @@ The type of the row's key (string or number)
 readonly $collectionId: string;
 ```
 
-Defined in: [packages/db/src/virtual-props.ts:96](https://github.com/TanStack/db/blob/main/packages/db/src/virtual-props.ts#L96)
+Defined in: [packages/db/src/virtual-props.ts:101](https://github.com/TanStack/db/blob/main/packages/db/src/virtual-props.ts#L101)
 
 The ID of the source collection this row originated from.
 
@@ -68,7 +68,7 @@ For live query collections, this is the ID of the upstream collection.
 readonly $key: TKey;
 ```
 
-Defined in: [packages/db/src/virtual-props.ts:88](https://github.com/TanStack/db/blob/main/packages/db/src/virtual-props.ts#L88)
+Defined in: [packages/db/src/virtual-props.ts:93](https://github.com/TanStack/db/blob/main/packages/db/src/virtual-props.ts#L93)
 
 The row's key (primary identifier).
 
@@ -83,7 +83,7 @@ Useful when you need the key in projections or computations.
 readonly $origin: VirtualOrigin;
 ```
 
-Defined in: [packages/db/src/virtual-props.ts:80](https://github.com/TanStack/db/blob/main/packages/db/src/virtual-props.ts#L80)
+Defined in: [packages/db/src/virtual-props.ts:85](https://github.com/TanStack/db/blob/main/packages/db/src/virtual-props.ts#L85)
 
 Origin of the last confirmed change to this row, from the current client's perspective.
 
@@ -101,12 +101,17 @@ For live query collections, this is passed through from the source collection.
 readonly $synced: boolean;
 ```
 
-Defined in: [packages/db/src/virtual-props.ts:69](https://github.com/TanStack/db/blob/main/packages/db/src/virtual-props.ts#L69)
+Defined in: [packages/db/src/virtual-props.ts:74](https://github.com/TanStack/db/blob/main/packages/db/src/virtual-props.ts#L74)
 
-Whether this row reflects confirmed state from the backend.
+Whether this row currently has no pending local optimistic writes.
 
-- `true`: Row is confirmed by the backend (no pending optimistic mutations)
-- `false`: Row has pending optimistic mutations that haven't been confirmed
+- `true`: No pending local optimistic mutation currently affects this row
+- `false`: One or more pending local optimistic mutations currently affect this row
+
+This is local mutation status. It does not prove that a backend has uploaded,
+confirmed, or read back the row. If you need backend-confirmed status, keep
+your mutation function pending until that backend observation has happened,
+or expose adapter-specific status.
 
 For local-only collections (no sync), this is always `true`.
 For live query collections, this is passed through from the source collection.

@@ -1,5 +1,67 @@
 # @tanstack/query-db-collection
 
+## 1.1.0
+
+### Minor Changes
+
+- Add top-level Query Collection support for additional Query observer options while preserving QueryClient defaultOptions behavior. ([#1665](https://github.com/TanStack/db/pull/1665))
+
+### Patch Changes
+
+- Fix temporary query readiness listeners so subset unload and collection cleanup release them correctly during in-flight requests. ([#1673](https://github.com/TanStack/db/pull/1673))
+
+- Extract internal query row ownership helpers to make lifecycle cleanup paths easier to reason about while preserving existing behavior. ([#1664](https://github.com/TanStack/db/pull/1664))
+
+- Updated dependencies [[`8258d09`](https://github.com/TanStack/db/commit/8258d0955ab47c8510bd49ea59bcdbefd2ae054d), [`286964d`](https://github.com/TanStack/db/commit/286964d72612b59e3e427baabd9870f5a71a4281)]:
+  - @tanstack/db@0.6.16
+
+## 1.0.48
+
+### Patch Changes
+
+- Clarify that `select` extracts rows for DB materialization while preserving the wrapped TanStack Query cache response. ([#1654](https://github.com/TanStack/db/pull/1654))
+
+- Document the current TanStack Query option compatibility surface for Query Collections, including forwarded options, QueryClient defaults, adapter-owned fields, and common options that are not currently exposed. ([#1653](https://github.com/TanStack/db/pull/1653))
+
+- Add coverage for query invalidation behavior across eager and on-demand query collections. ([#1655](https://github.com/TanStack/db/pull/1655))
+
+- Updated dependencies [[`eabcea7`](https://github.com/TanStack/db/commit/eabcea743fdfa045a2db01e12bef87403613102a), [`6d4c096`](https://github.com/TanStack/db/commit/6d4c096395b7ff3f428122ea8842bbead551a8c9)]:
+  - @tanstack/db@0.6.15
+
+## 1.0.47
+
+### Patch Changes
+
+- Keep on-demand load subset subscription state out of TanStack Query metadata so dehydrated query state remains safe to persist with structured-clone based persisters. ([#1644](https://github.com/TanStack/db/pull/1644))
+
+## 1.0.46
+
+### Patch Changes
+
+- Updated dependencies [[`397e12a`](https://github.com/TanStack/db/commit/397e12a1224ad563e20a331eebcbe904cd4af948)]:
+  - @tanstack/db@0.6.14
+
+## 1.0.45
+
+### Patch Changes
+
+- Updated dependencies [[`99e9afe`](https://github.com/TanStack/db/commit/99e9afed46ab4083d66609a3e37ee44103c2177f), [`816b667`](https://github.com/TanStack/db/commit/816b6671c2cc9806715f6e6ed4410b3f4efb5afb)]:
+  - @tanstack/db@0.6.13
+
+## 1.0.44
+
+### Patch Changes
+
+- Updated dependencies [[`2b27dd1`](https://github.com/TanStack/db/commit/2b27dd1448da71c78a48e2390cb71b0ada1b1488)]:
+  - @tanstack/db@0.6.12
+
+## 1.0.43
+
+### Patch Changes
+
+- Updated dependencies [[`d79b0cd`](https://github.com/TanStack/db/commit/d79b0cd3fd20c1f7e2525e90121752fb6bee314c), [`36fb29a`](https://github.com/TanStack/db/commit/36fb29ad7e906d39b6afdba2fd31e369c601bbb0), [`d79b0cd`](https://github.com/TanStack/db/commit/d79b0cd3fd20c1f7e2525e90121752fb6bee314c), [`ac09b11`](https://github.com/TanStack/db/commit/ac09b1177a100eafa85cba3cd09dd1f53f933ded)]:
+  - @tanstack/db@0.6.11
+
 ## 1.0.42
 
 ### Patch Changes
