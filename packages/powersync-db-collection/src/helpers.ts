@@ -1,9 +1,5 @@
 import { DiffTriggerOperation } from '@powersync/common'
-import type {
-  BaseColumnType,
-  ExtractColumnValueType,
-  Table,
-} from '@powersync/common'
+import type { ExtractColumnValueType, RowType, Table } from '@powersync/common'
 
 /**
  * All PowerSync table records include a UUID `id` column.
@@ -28,11 +24,11 @@ type OptionalIfUndefined<T> = {
 /**
  * Provides the base column types for a table. This excludes the `id` column.
  */
-export type ExtractedTableColumns<TTable extends Table> = {
-  [K in keyof TTable[`columnMap`]]: ExtractColumnValueType<
-    TTable[`columnMap`][K]
-  >
-}
+export type ExtractedTableColumns<TTable extends Table<any>> = Omit<
+  RowType<TTable>,
+  'id'
+>
+
 /**
  * Utility type that extracts the typed structure of a table based on its column definitions.
  * Maps each column to its corresponding TypeScript type using ExtractColumnValueType.
@@ -48,25 +44,25 @@ export type ExtractedTableColumns<TTable extends Table> = {
  * // Results in: { id: string, name: string | null, age: number | null }
  * ```
  */
-export type ExtractedTable<TTable extends Table> =
-  ExtractedTableColumns<TTable> & {
-    id: string
-  }
+export type ExtractedTable<TTable extends Table> = RowType<TTable>
 
-export type OptionalExtractedTable<TTable extends Table> = OptionalIfUndefined<{
-  [K in keyof TTable[`columnMap`]]: WithUndefinedIfNull<
-    ExtractColumnValueType<TTable[`columnMap`][K]>
-  >
-}> & {
-  id: string
-}
+export type OptionalExtractedTable<TTable extends Table> =
+  TTable extends Table<infer Columns>
+    ? OptionalIfUndefined<{
+        [K in keyof Columns]: WithUndefinedIfNull<
+          ExtractColumnValueType<Columns[K]>
+        >
+      }> & {
+        id: string
+      }
+    : never
 
 /**
  * Maps the schema of TTable to a type which
  * requires the keys be equal, but the values can have any value type.
  */
 export type AnyTableColumnType<TTable extends Table> = {
-  [K in keyof TTable[`columnMap`]]: any
+  [K in keyof ExtractedTableColumns<TTable>]: any
 } & { id: string }
 
 export function asPowerSyncRecord(record: any): PowerSyncRecord {
@@ -74,11 +70,6 @@ export function asPowerSyncRecord(record: any): PowerSyncRecord {
     throw new Error(`Record must have a string id field`)
   }
   return record as PowerSyncRecord
-}
-
-//  Helper type to ensure the keys of TOutput match the Table columns
-export type MapBaseColumnType<TOutput> = {
-  [Key in keyof TOutput]: BaseColumnType<any>
 }
 
 /**
