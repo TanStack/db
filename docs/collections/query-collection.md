@@ -54,19 +54,196 @@ The `queryCollectionOptions` function accepts the following options:
 - `queryClient`: TanStack Query client instance
 - `getKey`: Function to extract the unique key from an item
 
+### Creating Collection Options from a Runtime QueryClient
+
+`queryCollectionOptions` needs a `queryClient` when the collection options are created. In SSR, TanStack Start, tests, or multi-tenant apps, that `QueryClient` is often request-local or route-local rather than module-global.
+
+Keep shared collection configuration in a factory function that accepts the runtime `QueryClient`:
+
+```typescript
+import { QueryClient } from "@tanstack/query-core"
+import { createCollection } from "@tanstack/db"
+import { queryCollectionOptions } from "@tanstack/query-db-collection"
+
+interface Todo {
+  id: string
+  title: string
+}
+
+export function todoCollectionOptions(queryClient: QueryClient) {
+  return queryCollectionOptions<Todo>({
+    queryKey: ["todos"],
+    queryFn: async () => {
+      const response = await fetch("/api/todos")
+      return response.json() as Promise<Array<Todo>>
+    },
+    queryClient,
+    getKey: (todo) => todo.id,
+  })
+}
+
+function createTodosCollection(queryClient: QueryClient) {
+  return createCollection(todoCollectionOptions(queryClient))
+}
+```
+
+Create the collection once for each scoped `QueryClient` and parameter set, then reuse that `Collection` instance. Creating multiple collections with the same `QueryClient` and `queryKey` gives each collection its own materialized state, lifecycle, subscriptions, and optimistic mutations.
+
+In request-scoped environments, store the collection in request or router context. For client-side scopes, memoize by `QueryClient`:
+
+```typescript
+type TodosCollection = ReturnType<typeof createTodosCollection>
+
+const collectionsByClient = new WeakMap<QueryClient, TodosCollection>()
+
+export function getTodosCollection(
+  queryClient: QueryClient,
+): TodosCollection {
+  let collection = collectionsByClient.get(queryClient)
+
+  if (!collection) {
+    collection = createTodosCollection(queryClient)
+    collectionsByClient.set(queryClient, collection)
+  }
+
+  return collection
+}
+```
+
+Avoid calling `createCollection(todoCollectionOptions(queryClient))` independently during render or in each consumer. Share the stable collection instance for the lifetime of that `QueryClient` scope.
+
+This keeps SSR and request-scoped code from sharing a global `QueryClient` while keeping each collection instance stable within its scope.
+
+### Business-Scoped Collection Factories
+
+A tenant, project, account, or route parameter can define a **business scope**: the server resource that a collection represents. Include the scope in both the Query key and `queryFn`. This extends the [runtime `QueryClient` factory pattern](#creating-collection-options-from-a-runtime-queryclient) with an explicit scope parameter:
+
+```typescript
+interface Todo {
+  id: string
+  title: string
+  projectId: string
+}
+
+async function fetchProjectTodos(projectId: string): Promise<Array<Todo>> {
+  const response = await fetch(`/api/projects/${projectId}/todos`)
+  return response.json()
+}
+
+export function createProjectTodosCollection(
+  queryClient: QueryClient,
+  projectId: string,
+) {
+  return createCollection(
+    queryCollectionOptions<Todo>({
+      queryKey: ["projects", projectId, "todos"],
+      queryFn: () => fetchProjectTodos(projectId),
+      queryClient,
+      getKey: (todo) => todo.id,
+    })
+  )
+}
+```
+
+The scope is part of the collection's identity. Memoize by both the `QueryClient` and a stable scope key so consumers of the same project share one collection:
+
+```typescript
+type ProjectTodosCollection = ReturnType<typeof createProjectTodosCollection>
+
+const projectCollections = new WeakMap<
+  QueryClient,
+  Map<string, ProjectTodosCollection>
+>()
+
+export function getProjectTodosCollection(
+  queryClient: QueryClient,
+  projectId: string,
+): ProjectTodosCollection {
+  let collectionsByProject = projectCollections.get(queryClient)
+
+  if (!collectionsByProject) {
+    collectionsByProject = new Map()
+    projectCollections.set(queryClient, collectionsByProject)
+  }
+
+  let collection = collectionsByProject.get(projectId)
+
+  if (!collection) {
+    collection = createProjectTodosCollection(queryClient, projectId)
+    collectionsByProject.set(projectId, collection)
+  }
+
+  return collection
+}
+```
+
+For multiple scope values, use nested maps or a collision-safe stable key that includes every value. Do not call the factory on each render. In a long-lived client, user-selected scopes can make the map grow without bound. Remove unused entries and call `await collection.cleanup()` when your application owns their lifecycle. Request-local maps can be discarded with the request.
+
+A business scope is separate from a **relational subset** requested by a live query. With `syncMode: "on-demand"`, `LoadSubsetOptions` describes predicates, ordering, limits, and offsets within one business-scoped collection. These options reach `queryFn` through `ctx.meta.loadSubsetOptions` and determine the subset Query keys. See [QueryFn and Predicate Push-Down](#queryfn-and-predicate-push-down).
+
+Do not create a collection for each `where`, `orderBy`, or `limit`. Reuse the business-scoped collection and let on-demand loading represent those subsets. Create separate collections only for distinct server resources.
+
 ### Query Options
 
-- `select`: Function that lets extract array items when they're wrapped with metadata
+Query Collections use TanStack Query internally and expose supported Query observer options as top-level `queryCollectionOptions` fields.
+
+The following top-level Query Collection options are forwarded to the underlying Query observer:
+
+- `select`: Function that extracts the row array TanStack DB materializes from a wrapped Query response
 - `enabled`: Whether the query should automatically run (default: `true`)
-- `refetchInterval`: Refetch interval in milliseconds (default: 0 — set an interval to enable polling refetching)
+- `refetchInterval`: Refetch interval in milliseconds
 - `retry`: Retry configuration for failed queries
 - `retryDelay`: Delay between retries
 - `staleTime`: How long data is considered fresh
-- `meta`: Optional metadata that will be passed to the query function context
+- `gcTime`: How long unused query data stays in the Query cache
+- `refetchOnWindowFocus`: Whether to refetch when the window regains focus
+- `refetchOnReconnect`: Whether to refetch when the network reconnects
+- `refetchOnMount`: Whether to refetch when the observer mounts
+- `networkMode`: Query network mode
+- `initialData`: Initial Query response for eager collections
+- `initialDataUpdatedAt`: Timestamp used by TanStack Query to determine initial data freshness
+- `meta`: Metadata passed to the query function context. Query Collections may add `loadSubsetOptions` for on-demand queries.
+
+```ts
+const todosCollection = createCollection(
+  queryCollectionOptions({
+    queryKey: ["todos"],
+    queryFn: fetchTodos,
+    queryClient,
+    getKey: (todo) => todo.id,
+    refetchOnWindowFocus: true,
+    refetchOnReconnect: true,
+    refetchOnMount: "always",
+    networkMode: "online",
+  })
+)
+```
+
+Top-level `meta` is always merged by Query Collection so it can add on-demand `loadSubsetOptions`. Other supported top-level Query options are only passed to TanStack Query when you define them. If you omit them, `QueryClient.defaultOptions` can still apply.
+
+Some fields are owned or reinterpreted by the collection adapter rather than treated as ordinary Query option pass-through:
+
+- `queryKey`: Identifies the Query cache entry and, in on-demand mode, may be built from load-subset options.
+- `queryFn`: Fetches the complete collection state or the requested on-demand subset.
+- `select`: Extracts array rows from wrapped responses before they are stored in the collection. This is not the same contract as TanStack Query's `select` option.
+- `queryClient`: Supplies the Query client instance used by the collection.
+- `syncMode`: Controls whether the collection syncs eagerly or on demand.
+- `getKey`: Extracts each row's stable TanStack DB key.
+- Mutation handlers such as `onInsert`, `onUpdate`, and `onDelete`.
+
+Some TanStack Query fields are owned or reinterpreted by Query Collection and are intentionally not exposed as ordinary Query observer options:
+
+- `queryKey`, `queryFn`, and `queryClient`
+- `select` (Query Collection uses this for row extraction, not TanStack Query's observer-level `select` contract)
+- `meta` (merged by Query Collection so on-demand `loadSubsetOptions` can be included)
+- `subscribed` (Query Collection owns the observer subscription lifecycle)
+- `structuralSharing` and `notifyOnChangeProps` (managed by Query Collection synchronization)
+
+`placeholderData` is intentionally unsupported. TanStack Query treats placeholder data as observer-local presentation state rather than cached Query data. Materializing it would expose temporary UI data as collection-wide normalized rows. Render placeholders in the consuming UI instead.
 
 ### Using with `queryOptions(...)`
 
-If your app already uses TanStack Query's `queryOptions` helper (e.g. from `@tanstack/react-query`), you can spread those options into `queryCollectionOptions`. Note that `queryFn` must be explicitly provided since query collections require it both in types and at runtime:
+If your app already uses TanStack Query's `queryOptions` helper (e.g. from `@tanstack/react-query`), you can spread compatible top-level options into `queryCollectionOptions`. Note that `queryFn` must be explicitly provided since query collections require it both in types and at runtime, and Query Collection's `select` option is for row extraction rather than TanStack Query observer-level selection:
 
 ```typescript
 import { QueryClient } from "@tanstack/query-core"
@@ -95,6 +272,99 @@ const todosCollection = createCollection(
 ```
 
 If `queryFn` is missing at runtime, `queryCollectionOptions` throws `QueryFnRequiredError`.
+
+### Initial Data
+
+Eager Query Collections support TanStack Query's `initialData` and
+`initialDataUpdatedAt` options. Initial data has the original Query response
+shape, is stored in the Query cache, and is immediately materialized as
+normalized collection rows. TanStack Query uses `initialDataUpdatedAt` together
+with `staleTime` to decide whether to fetch.
+
+```typescript
+const serverRenderedAt = Date.now()
+const initialTodos = [
+  { id: "1", title: "Write documentation" },
+  { id: "2", title: "Ship initial data support" },
+]
+
+const todosCollection = createCollection(
+  queryCollectionOptions({
+    queryKey: ["todos"],
+    queryFn: fetchTodos,
+    queryClient,
+    getKey: (todo) => todo.id,
+    initialData: initialTodos,
+    initialDataUpdatedAt: serverRenderedAt,
+    staleTime: 60_000,
+  }),
+)
+```
+
+An existing cached or hydrated Query response takes precedence over
+`initialData`. Query keys remain the cache identity: two collections using the
+same QueryClient and exact Query key observe one shared Query document, and a
+later collection's initializer does not replace it. Use distinct Query keys for
+independent documents.
+
+Initial data is supported only for eager collections. A collection-wide value
+cannot establish row membership for arbitrary on-demand predicates, ordering,
+limits, and offsets. For `syncMode: "on-demand"`, seed or hydrate the exact
+derived Query cache entries instead.
+
+If a stale initial response triggers a fetch, the initial rows remain available
+while it is in flight. A successful response reconciles them through the normal
+row ownership pipeline; an error retains the initial rows. Direct writes use the
+same Query cache-patching rules as fetched data, and a later successful server
+response may reconcile or replace those writes.
+
+### Selecting Rows from Wrapped Responses
+
+Many APIs return rows inside a response envelope that also contains metadata such as pagination cursors, totals, or request information. Use `select` to extract the row array that TanStack DB should materialize:
+
+```typescript
+interface TodosResponse {
+  items: Array<{ id: string; title: string }>
+  nextCursor?: string
+  total: number
+}
+
+const todosCollection = createCollection(
+  queryCollectionOptions({
+    queryKey: ["todos"],
+    queryFn: async (): Promise<TodosResponse> => {
+      const response = await fetch("/api/todos")
+      return response.json()
+    },
+    initialData: {
+      items: [{ id: "1", title: "Initial todo" }],
+      nextCursor: undefined,
+      total: 1,
+    },
+    select: (response) => response.items,
+    queryClient,
+    getKey: (item) => item.id,
+  }),
+)
+```
+
+`select` is a query-db-collection row extraction hook. It tells TanStack DB which rows to materialize while the TanStack Query cache keeps the original query response shape. In the example above, `queryClient.getQueryData(["todos"])` still returns the full `TodosResponse`, including `nextCursor` and `total`.
+
+The same projection applies to `initialData`: provide the complete response
+envelope, and Query Collection materializes the rows returned by `select` while
+preserving the envelope in the Query cache.
+
+This differs from TanStack Query's observer-level `select`: query-db-collection uses this option to bridge Query's response object into DB's normalized row store.
+
+Direct write utilities such as `writeInsert`, `writeUpdate`, and `writeDelete` make a best-effort attempt to update the matching row array inside wrapped Query cache entries while preserving wrapper metadata.
+
+This works automatically for simple wrappers such as:
+
+- `{ data: [...] }`
+- `{ items: [...] }`
+- `{ results: [...] }`
+
+Derived projections, such as `select: (response) => response.edges.map((edge) => edge.node)`, are read-side row extraction only. query-db-collection cannot generally reconstruct the original response envelope from updated rows. Refetch or invalidate the query if the wrapped cache must exactly reflect direct writes for a derived projection.
 
 ### Collection Options
 
@@ -470,6 +740,27 @@ The query collection treats the `queryFn` result as the **complete state** of th
 - Items present in the collection but not in the query result will be deleted
 - Items in the query result but not in the collection will be inserted
 - Items present in both will be updated if they differ
+
+This is important when the same entity type can be loaded from multiple REST
+endpoints. For example, do not point the same Query Collection at
+`/api/documents/preview` for one load and `/api/documents/deleted` for another
+unless each result represents the complete state for that collection
+scope. A narrower endpoint can otherwise remove rows that were loaded from a
+different endpoint.
+
+For multiple endpoint or subset-loading use cases, choose the pattern that
+matches your API semantics:
+
+- Use `syncMode: 'on-demand'` when one logical collection can serve different
+  subsets of data. In this mode, query predicates (`where`, `orderBy`, `limit`,
+  and `offset`) are passed to your `queryFn` via `ctx.meta.loadSubsetOptions`,
+  letting you translate them into API parameters.
+- Use separate Query Collections when endpoints represent distinct server scopes
+  whose results should not replace each other. Use `unionAll` to combine them
+  into a single query when you need a unified view across endpoints.
+- Use direct writes such as `writeUpsert`/`writeBatch` for lower-level
+  incremental loading when you intentionally want to merge server responses into
+  the synced store yourself.
 
 ### Empty Array Behavior
 

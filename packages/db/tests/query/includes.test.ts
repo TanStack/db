@@ -6,12 +6,17 @@ import {
   count,
   createLiveQueryCollection,
   eq,
+  materialize,
   toArray,
 } from '../../src/query/index.js'
 import { createCollection } from '../../src/collection/index.js'
 import { CleanupQueue } from '../../src/collection/cleanup-queue.js'
 import { localOnlyCollectionOptions } from '../../src/local-only.js'
-import { mockSyncCollectionOptions, stripVirtualProps } from '../utils.js'
+import {
+  flushPromises,
+  mockSyncCollectionOptions,
+  stripVirtualProps,
+} from '../utils.js'
 import type { SyncConfig } from '../../src/types.js'
 
 type Project = {
@@ -566,6 +571,60 @@ describe(`includes subqueries`, () => {
   })
 
   describe(`change propagation`, () => {
+    it(`Collection includes: joined child update does not duplicate insert into child collection`, async () => {
+      type LineItem = { id: number; productId: number; qty: number }
+      type Product = { id: number; categoryId: number; name: string }
+
+      const lineItems = createCollection(
+        mockSyncCollectionOptions<LineItem>({
+          id: `includes-line-items`,
+          getKey: (lineItem) => lineItem.id,
+          initialData: [{ id: 1, productId: 10, qty: 1 }],
+        }),
+      )
+      const products = createCollection(
+        mockSyncCollectionOptions<Product>({
+          id: `includes-products`,
+          getKey: (product) => product.id,
+          initialData: [{ id: 10, categoryId: 1, name: `Widget` }],
+        }),
+      )
+
+      const collection = createLiveQueryCollection((q) =>
+        q.from({ lineItem: lineItems }).select(({ lineItem }) => ({
+          id: lineItem.id,
+          product: q
+            .from({ product: products })
+            .where(({ product }) => eq(product.id, lineItem.productId))
+            .select(({ product }) => ({
+              id: product.id,
+              categoryId: product.categoryId,
+              name: product.name,
+            })),
+        })),
+      )
+      await collection.preload()
+
+      lineItems.utils.begin()
+      expect(() => {
+        lineItems.utils.write({
+          type: `delete`,
+          value: { id: 1, productId: 10, qty: 1 },
+        })
+        lineItems.utils.write({
+          type: `insert`,
+          value: { id: 1, productId: 10, qty: 2 },
+        })
+      }).not.toThrow()
+      lineItems.utils.commit()
+
+      await vi.waitFor(() => {
+        expect(childItems((collection.get(1) as any).product)).toEqual([
+          { id: 10, categoryId: 1, name: `Widget` },
+        ])
+      })
+    })
+
     it(`Collection includes: child change does not re-emit the parent row`, async () => {
       const collection = buildIncludesQuery()
       await collection.preload()
@@ -2261,7 +2320,7 @@ describe(`includes subqueries`, () => {
       projectsWC.utils.write({
         type: `update`,
         value: { id: 1, name: `Alpha`, createdBy: `bob` },
-        oldValue: sampleProjectsWithCreator[0]!,
+        previousValue: sampleProjectsWithCreator[0]!,
       })
       projectsWC.utils.commit()
 
@@ -2306,7 +2365,7 @@ describe(`includes subqueries`, () => {
           title: `Feature for Alpha`,
           createdBy: `alice`,
         },
-        oldValue: sampleIssuesWithCreator[1]!,
+        previousValue: sampleIssuesWithCreator[1]!,
       })
       issuesWC.utils.commit()
 
@@ -2418,7 +2477,7 @@ describe(`includes subqueries`, () => {
       projectsWC.utils.write({
         type: `update`,
         value: { id: 1, name: `Alpha`, createdBy: `bob` },
-        oldValue: sampleProjectsWithCreator[0]!,
+        previousValue: sampleProjectsWithCreator[0]!,
       })
       projectsWC.utils.commit()
 
@@ -4901,6 +4960,1339 @@ describe(`includes subqueries`, () => {
 
       expect(data().runs[0].texts).toBe(run1TextsBefore)
     })
+
+    // Three collection levels (products -> priceRanges -> region). When two
+    // price ranges in different parent groups point at the same deepest
+    // correlation key (regionId 1, one under each product), each must still
+    // resolve its own copy of the nested `region` array.
+    it(`resolves nested grandchildren for sibling groups sharing a correlation key`, async () => {
+      type Product = { id: number; title: string }
+      type PriceRange = { id: number; productId: number; regionId: number }
+      type Region = { id: number; name: string }
+
+      const products = createCollection(
+        localOnlyCollectionOptions<Product>({
+          id: `shared-corr-products`,
+          getKey: (p) => p.id,
+          initialData: [
+            { id: 1, title: `T-Shirt` },
+            { id: 2, title: `Hoodie` },
+          ],
+        }),
+      )
+
+      const priceRanges = createCollection(
+        localOnlyCollectionOptions<PriceRange>({
+          id: `shared-corr-price-ranges`,
+          getKey: (r) => r.id,
+          initialData: [
+            { id: 1, productId: 1, regionId: 1 },
+            { id: 2, productId: 1, regionId: 2 },
+            { id: 3, productId: 2, regionId: 1 }, // same regionId as priceRange 1
+          ],
+        }),
+      )
+
+      const regions = createCollection(
+        localOnlyCollectionOptions<Region>({
+          id: `shared-corr-regions`,
+          getKey: (r) => r.id,
+          initialData: [
+            { id: 1, name: `Europe` },
+            { id: 2, name: `North America` },
+          ],
+        }),
+      )
+
+      await Promise.all([
+        products.preload(),
+        priceRanges.preload(),
+        regions.preload(),
+      ])
+
+      const collection = createLiveQueryCollection({
+        id: `shared-corr-live`,
+        query: (q) =>
+          q.from({ p: products }).select(({ p }) => ({
+            id: p.id,
+            title: p.title,
+            priceRanges: toArray(
+              q
+                .from({ pr: priceRanges })
+                .where(({ pr }) => eq(pr.productId, p.id))
+                .select(({ pr }) => ({
+                  id: pr.id,
+                  regionId: pr.regionId,
+                  region: toArray(
+                    q
+                      .from({ r: regions })
+                      .where(({ r }) => eq(r.id, pr.regionId))
+                      .select(({ r }) => ({ id: r.id, name: r.name })),
+                  ),
+                })),
+            ),
+          })),
+      })
+
+      await collection.preload()
+
+      expect(toTree(collection)).toEqual([
+        {
+          id: 1,
+          title: `T-Shirt`,
+          priceRanges: [
+            {
+              id: 1,
+              regionId: 1,
+              region: [{ id: 1, name: `Europe` }],
+            },
+            {
+              id: 2,
+              regionId: 2,
+              region: [{ id: 2, name: `North America` }],
+            },
+          ],
+        },
+        {
+          id: 2,
+          title: `Hoodie`,
+          priceRanges: [
+            {
+              id: 3,
+              regionId: 1,
+              region: [{ id: 1, name: `Europe` }],
+            },
+          ],
+        },
+      ])
+    })
+
+    // When a second parent group starts referencing a deepest correlation key
+    // that another group already resolved (the sibling price range is inserted
+    // after the initial load), the newly inserted group must also receive the
+    // nested grandchildren.
+    it(`fans nested grandchildren out to a sibling group inserted after load`, async () => {
+      type Product = { id: number; title: string }
+      type PriceRange = { id: number; productId: number; regionId: number }
+      type Region = { id: number; name: string }
+
+      const products = createCollection(
+        localOnlyCollectionOptions<Product>({
+          id: `shared-corr-incremental-products`,
+          getKey: (p) => p.id,
+          initialData: [
+            { id: 1, title: `T-Shirt` },
+            { id: 2, title: `Hoodie` },
+          ],
+        }),
+      )
+      const priceRanges = createCollection(
+        localOnlyCollectionOptions<PriceRange>({
+          id: `shared-corr-incremental-price-ranges`,
+          getKey: (r) => r.id,
+          initialData: [{ id: 1, productId: 1, regionId: 1 }],
+        }),
+      )
+      const regions = createCollection(
+        localOnlyCollectionOptions<Region>({
+          id: `shared-corr-incremental-regions`,
+          getKey: (r) => r.id,
+          initialData: [{ id: 1, name: `Europe` }],
+        }),
+      )
+
+      await Promise.all([
+        products.preload(),
+        priceRanges.preload(),
+        regions.preload(),
+      ])
+
+      const collection = createLiveQueryCollection({
+        id: `shared-corr-incremental-live`,
+        query: (q) =>
+          q.from({ p: products }).select(({ p }) => ({
+            id: p.id,
+            title: p.title,
+            priceRanges: toArray(
+              q
+                .from({ pr: priceRanges })
+                .where(({ pr }) => eq(pr.productId, p.id))
+                .select(({ pr }) => ({
+                  id: pr.id,
+                  regionId: pr.regionId,
+                  region: toArray(
+                    q
+                      .from({ r: regions })
+                      .where(({ r }) => eq(r.id, pr.regionId))
+                      .select(({ r }) => ({ id: r.id, name: r.name })),
+                  ),
+                })),
+            ),
+          })),
+      })
+      await collection.preload()
+
+      // Insert a second price range under a different product, sharing regionId 1.
+      priceRanges.insert({ id: 3, productId: 2, regionId: 1 })
+      await new Promise((r) => setTimeout(r, 50))
+
+      const tree = toTree(collection)
+      const tshirt = tree.find((p: any) => p.title === `T-Shirt`)
+      const hoodie = tree.find((p: any) => p.title === `Hoodie`)
+      expect(tshirt.priceRanges.find((pr: any) => pr.id === 1).region).toEqual([
+        { id: 1, name: `Europe` },
+      ])
+      expect(hoodie.priceRanges.find((pr: any) => pr.id === 3).region).toEqual([
+        { id: 1, name: `Europe` },
+      ])
+    })
+
+    it(`keeps deeper nested includes reactive for a sibling group added after load`, async () => {
+      type Product = { id: number; title: string }
+      type PriceRange = { id: number; productId: number; regionId: number }
+      type Region = { id: number; name: string; countryId: number }
+      type Country = { id: number; name: string }
+
+      const products = createCollection(
+        localOnlyCollectionOptions<Product>({
+          id: `shared-corr-late-sibling-products`,
+          getKey: (p) => p.id,
+          initialData: [
+            { id: 1, title: `T-Shirt` },
+            { id: 2, title: `Hoodie` },
+          ],
+        }),
+      )
+      const priceRanges = createCollection(
+        localOnlyCollectionOptions<PriceRange>({
+          id: `shared-corr-late-sibling-price-ranges`,
+          getKey: (r) => r.id,
+          initialData: [{ id: 1, productId: 1, regionId: 1 }],
+        }),
+      )
+      const regions = createCollection(
+        localOnlyCollectionOptions<Region>({
+          id: `shared-corr-late-sibling-regions`,
+          getKey: (r) => r.id,
+          initialData: [{ id: 1, name: `Europe`, countryId: 1 }],
+        }),
+      )
+      const countries = createCollection(
+        localOnlyCollectionOptions<Country>({
+          id: `shared-corr-late-sibling-countries`,
+          getKey: (c) => c.id,
+          initialData: [{ id: 1, name: `France` }],
+        }),
+      )
+
+      await Promise.all([
+        products.preload(),
+        priceRanges.preload(),
+        regions.preload(),
+        countries.preload(),
+      ])
+
+      const collection = createLiveQueryCollection({
+        id: `shared-corr-late-sibling-live`,
+        query: (q) =>
+          q.from({ p: products }).select(({ p }) => ({
+            id: p.id,
+            title: p.title,
+            priceRanges: toArray(
+              q
+                .from({ pr: priceRanges })
+                .where(({ pr }) => eq(pr.productId, p.id))
+                .select(({ pr }) => ({
+                  id: pr.id,
+                  regionId: pr.regionId,
+                  region: toArray(
+                    q
+                      .from({ r: regions })
+                      .where(({ r }) => eq(r.id, pr.regionId))
+                      .select(({ r }) => ({
+                        id: r.id,
+                        name: r.name,
+                        country: toArray(
+                          q
+                            .from({ c: countries })
+                            .where(({ c }) => eq(c.id, r.countryId))
+                            .select(({ c }) => ({ id: c.id, name: c.name })),
+                        ),
+                      })),
+                  ),
+                })),
+            ),
+          })),
+      })
+      await collection.preload()
+
+      priceRanges.insert({ id: 2, productId: 2, regionId: 1 })
+      await flushPromises()
+
+      priceRanges.delete(1)
+      await flushPromises()
+
+      countries.update(1, (draft) => {
+        draft.name = `Renamed France`
+      })
+      await flushPromises()
+
+      expect(toTree(collection)).toEqual([
+        {
+          id: 1,
+          title: `T-Shirt`,
+          priceRanges: [],
+        },
+        {
+          id: 2,
+          title: `Hoodie`,
+          priceRanges: [
+            {
+              id: 2,
+              regionId: 1,
+              region: [
+                {
+                  id: 1,
+                  name: `Europe`,
+                  country: [{ id: 1, name: `Renamed France` }],
+                },
+              ],
+            },
+          ],
+        },
+      ])
+    })
+
+    it(`keeps shared nested includes reactive for sibling groups added after load at depth 3`, async () => {
+      type Product = { id: number; title: string }
+      type PriceRange = { id: number; productId: number; regionId: number }
+      type Region = { id: number; name: string }
+
+      const products = createCollection(
+        localOnlyCollectionOptions<Product>({
+          id: `shared-corr-depth-3-products`,
+          getKey: (p) => p.id,
+          initialData: [
+            { id: 1, title: `T-Shirt` },
+            { id: 2, title: `Hoodie` },
+          ],
+        }),
+      )
+      const priceRanges = createCollection(
+        localOnlyCollectionOptions<PriceRange>({
+          id: `shared-corr-depth-3-price-ranges`,
+          getKey: (r) => r.id,
+          initialData: [{ id: 1, productId: 1, regionId: 1 }],
+        }),
+      )
+      const regions = createCollection(
+        localOnlyCollectionOptions<Region>({
+          id: `shared-corr-depth-3-regions`,
+          getKey: (r) => r.id,
+          initialData: [{ id: 1, name: `Europe` }],
+        }),
+      )
+
+      await Promise.all([
+        products.preload(),
+        priceRanges.preload(),
+        regions.preload(),
+      ])
+
+      const collection = createLiveQueryCollection({
+        id: `shared-corr-depth-3-live`,
+        query: (q) =>
+          q.from({ p: products }).select(({ p }) => ({
+            id: p.id,
+            title: p.title,
+            priceRanges: toArray(
+              q
+                .from({ pr: priceRanges })
+                .where(({ pr }) => eq(pr.productId, p.id))
+                .select(({ pr }) => ({
+                  id: pr.id,
+                  region: toArray(
+                    q
+                      .from({ r: regions })
+                      .where(({ r }) => eq(r.id, pr.regionId))
+                      .select(({ r }) => ({ id: r.id, name: r.name })),
+                  ),
+                })),
+            ),
+          })),
+      })
+      await collection.preload()
+
+      priceRanges.insert({ id: 2, productId: 2, regionId: 1 })
+      await flushPromises()
+
+      regions.update(1, (draft) => {
+        draft.name = `Renamed Europe`
+      })
+      await flushPromises()
+
+      expect(toTree(collection)).toEqual([
+        {
+          id: 1,
+          title: `T-Shirt`,
+          priceRanges: [{ id: 1, region: [{ id: 1, name: `Renamed Europe` }] }],
+        },
+        {
+          id: 2,
+          title: `Hoodie`,
+          priceRanges: [{ id: 2, region: [{ id: 1, name: `Renamed Europe` }] }],
+        },
+      ])
+    })
+
+    it(`keeps shared nested includes reactive for sibling groups added after load at depth 4`, async () => {
+      type Product = { id: number; title: string }
+      type PriceRange = { id: number; productId: number; regionId: number }
+      type Region = { id: number; name: string; countryId: number }
+      type Country = { id: number; name: string }
+
+      const products = createCollection(
+        localOnlyCollectionOptions<Product>({
+          id: `shared-corr-depth-4-products`,
+          getKey: (p) => p.id,
+          initialData: [
+            { id: 1, title: `T-Shirt` },
+            { id: 2, title: `Hoodie` },
+          ],
+        }),
+      )
+      const priceRanges = createCollection(
+        localOnlyCollectionOptions<PriceRange>({
+          id: `shared-corr-depth-4-price-ranges`,
+          getKey: (r) => r.id,
+          initialData: [{ id: 1, productId: 1, regionId: 1 }],
+        }),
+      )
+      const regions = createCollection(
+        localOnlyCollectionOptions<Region>({
+          id: `shared-corr-depth-4-regions`,
+          getKey: (r) => r.id,
+          initialData: [{ id: 1, name: `Europe`, countryId: 1 }],
+        }),
+      )
+      const countries = createCollection(
+        localOnlyCollectionOptions<Country>({
+          id: `shared-corr-depth-4-countries`,
+          getKey: (c) => c.id,
+          initialData: [{ id: 1, name: `France` }],
+        }),
+      )
+
+      await Promise.all([
+        products.preload(),
+        priceRanges.preload(),
+        regions.preload(),
+        countries.preload(),
+      ])
+
+      const collection = createLiveQueryCollection({
+        id: `shared-corr-depth-4-live`,
+        query: (q) =>
+          q.from({ p: products }).select(({ p }) => ({
+            id: p.id,
+            title: p.title,
+            priceRanges: toArray(
+              q
+                .from({ pr: priceRanges })
+                .where(({ pr }) => eq(pr.productId, p.id))
+                .select(({ pr }) => ({
+                  id: pr.id,
+                  region: toArray(
+                    q
+                      .from({ r: regions })
+                      .where(({ r }) => eq(r.id, pr.regionId))
+                      .select(({ r }) => ({
+                        id: r.id,
+                        name: r.name,
+                        country: toArray(
+                          q
+                            .from({ c: countries })
+                            .where(({ c }) => eq(c.id, r.countryId))
+                            .select(({ c }) => ({ id: c.id, name: c.name })),
+                        ),
+                      })),
+                  ),
+                })),
+            ),
+          })),
+      })
+      await collection.preload()
+
+      priceRanges.insert({ id: 2, productId: 2, regionId: 1 })
+      await flushPromises()
+
+      countries.update(1, (draft) => {
+        draft.name = `Renamed France`
+      })
+      await flushPromises()
+
+      expect(toTree(collection)).toEqual([
+        {
+          id: 1,
+          title: `T-Shirt`,
+          priceRanges: [
+            {
+              id: 1,
+              region: [
+                {
+                  id: 1,
+                  name: `Europe`,
+                  country: [{ id: 1, name: `Renamed France` }],
+                },
+              ],
+            },
+          ],
+        },
+        {
+          id: 2,
+          title: `Hoodie`,
+          priceRanges: [
+            {
+              id: 2,
+              region: [
+                {
+                  id: 1,
+                  name: `Europe`,
+                  country: [{ id: 1, name: `Renamed France` }],
+                },
+              ],
+            },
+          ],
+        },
+      ])
+    })
+
+    it(`keeps shared nested includes reactive for sibling groups added after load at depth 5`, async () => {
+      type Product = { id: number; title: string }
+      type PriceRange = { id: number; productId: number; regionId: number }
+      type Region = { id: number; name: string; countryId: number }
+      type Country = { id: number; name: string; zoneId: number }
+      type Zone = { id: number; name: string }
+
+      const products = createCollection(
+        localOnlyCollectionOptions<Product>({
+          id: `shared-corr-depth-5-products`,
+          getKey: (p) => p.id,
+          initialData: [
+            { id: 1, title: `T-Shirt` },
+            { id: 2, title: `Hoodie` },
+          ],
+        }),
+      )
+      const priceRanges = createCollection(
+        localOnlyCollectionOptions<PriceRange>({
+          id: `shared-corr-depth-5-price-ranges`,
+          getKey: (r) => r.id,
+          initialData: [{ id: 1, productId: 1, regionId: 1 }],
+        }),
+      )
+      const regions = createCollection(
+        localOnlyCollectionOptions<Region>({
+          id: `shared-corr-depth-5-regions`,
+          getKey: (r) => r.id,
+          initialData: [{ id: 1, name: `Europe`, countryId: 1 }],
+        }),
+      )
+      const countries = createCollection(
+        localOnlyCollectionOptions<Country>({
+          id: `shared-corr-depth-5-countries`,
+          getKey: (c) => c.id,
+          initialData: [{ id: 1, name: `France`, zoneId: 1 }],
+        }),
+      )
+      const zones = createCollection(
+        localOnlyCollectionOptions<Zone>({
+          id: `shared-corr-depth-5-zones`,
+          getKey: (z) => z.id,
+          initialData: [{ id: 1, name: `Eurozone` }],
+        }),
+      )
+
+      await Promise.all([
+        products.preload(),
+        priceRanges.preload(),
+        regions.preload(),
+        countries.preload(),
+        zones.preload(),
+      ])
+
+      const collection = createLiveQueryCollection({
+        id: `shared-corr-depth-5-live`,
+        query: (q) =>
+          q.from({ p: products }).select(({ p }) => ({
+            id: p.id,
+            title: p.title,
+            priceRanges: toArray(
+              q
+                .from({ pr: priceRanges })
+                .where(({ pr }) => eq(pr.productId, p.id))
+                .select(({ pr }) => ({
+                  id: pr.id,
+                  region: toArray(
+                    q
+                      .from({ r: regions })
+                      .where(({ r }) => eq(r.id, pr.regionId))
+                      .select(({ r }) => ({
+                        id: r.id,
+                        name: r.name,
+                        country: toArray(
+                          q
+                            .from({ c: countries })
+                            .where(({ c }) => eq(c.id, r.countryId))
+                            .select(({ c }) => ({
+                              id: c.id,
+                              name: c.name,
+                              zone: toArray(
+                                q
+                                  .from({ z: zones })
+                                  .where(({ z }) => eq(z.id, c.zoneId))
+                                  .select(({ z }) => ({
+                                    id: z.id,
+                                    name: z.name,
+                                  })),
+                              ),
+                            })),
+                        ),
+                      })),
+                  ),
+                })),
+            ),
+          })),
+      })
+      await collection.preload()
+
+      priceRanges.insert({ id: 2, productId: 2, regionId: 1 })
+      await flushPromises()
+
+      zones.update(1, (draft) => {
+        draft.name = `Renamed Eurozone`
+      })
+      await flushPromises()
+
+      expect(toTree(collection)).toEqual([
+        {
+          id: 1,
+          title: `T-Shirt`,
+          priceRanges: [
+            {
+              id: 1,
+              region: [
+                {
+                  id: 1,
+                  name: `Europe`,
+                  country: [
+                    {
+                      id: 1,
+                      name: `France`,
+                      zone: [{ id: 1, name: `Renamed Eurozone` }],
+                    },
+                  ],
+                },
+              ],
+            },
+          ],
+        },
+        {
+          id: 2,
+          title: `Hoodie`,
+          priceRanges: [
+            {
+              id: 2,
+              region: [
+                {
+                  id: 1,
+                  name: `Europe`,
+                  country: [
+                    {
+                      id: 1,
+                      name: `France`,
+                      zone: [{ id: 1, name: `Renamed Eurozone` }],
+                    },
+                  ],
+                },
+              ],
+            },
+          ],
+        },
+      ])
+    })
+
+    // When two parent groups share a deepest correlation key and one of them is
+    // deleted, the surviving group must keep its nested grandchildren.
+    it(`resolves two nested includes on the same child independently when they share a correlation value`, async () => {
+      type Product = { id: number; title: string }
+      type PriceRange = {
+        id: number
+        productId: number
+        regionId: number
+        currencyId: number
+      }
+      type Region = { id: number; name: string }
+      type Currency = { id: number; code: string }
+
+      const products = createCollection(
+        localOnlyCollectionOptions<Product>({
+          id: `shared-corr-value-products`,
+          getKey: (p) => p.id,
+          initialData: [{ id: 1, title: `T-Shirt` }],
+        }),
+      )
+      // The price range points at region 1 and currency 1: both nested includes
+      // correlate on the same value.
+      const priceRanges = createCollection(
+        localOnlyCollectionOptions<PriceRange>({
+          id: `shared-corr-value-price-ranges`,
+          getKey: (r) => r.id,
+          initialData: [{ id: 1, productId: 1, regionId: 1, currencyId: 1 }],
+        }),
+      )
+      const regions = createCollection(
+        localOnlyCollectionOptions<Region>({
+          id: `shared-corr-value-regions`,
+          getKey: (r) => r.id,
+          initialData: [
+            { id: 1, name: `Europe` },
+            { id: 2, name: `North America` },
+          ],
+        }),
+      )
+      const currencies = createCollection(
+        localOnlyCollectionOptions<Currency>({
+          id: `shared-corr-value-currencies`,
+          getKey: (c) => c.id,
+          initialData: [{ id: 1, code: `EUR` }],
+        }),
+      )
+
+      await Promise.all([
+        products.preload(),
+        priceRanges.preload(),
+        regions.preload(),
+        currencies.preload(),
+      ])
+
+      const collection = createLiveQueryCollection({
+        id: `shared-corr-value-live`,
+        query: (q) =>
+          q.from({ p: products }).select(({ p }) => ({
+            id: p.id,
+            title: p.title,
+            priceRanges: toArray(
+              q
+                .from({ pr: priceRanges })
+                .where(({ pr }) => eq(pr.productId, p.id))
+                .select(({ pr }) => ({
+                  id: pr.id,
+                  currency: toArray(
+                    q
+                      .from({ c: currencies })
+                      .where(({ c }) => eq(c.id, pr.currencyId))
+                      .select(({ c }) => ({ id: c.id, code: c.code })),
+                  ),
+                  region: toArray(
+                    q
+                      .from({ r: regions })
+                      .where(({ r }) => eq(r.id, pr.regionId))
+                      .select(({ r }) => ({ id: r.id, name: r.name })),
+                  ),
+                })),
+            ),
+          })),
+      })
+      await collection.preload()
+
+      // Re-point only the region include; the currency include still resolves 1.
+      priceRanges.update(1, (draft) => {
+        draft.regionId = 2
+      })
+      await new Promise((r) => setTimeout(r, 50))
+
+      // A later currency change must still reach the currency include.
+      currencies.update(1, (draft) => {
+        draft.code = `USD`
+      })
+      await new Promise((r) => setTimeout(r, 50))
+
+      expect(toTree(collection)).toEqual([
+        {
+          id: 1,
+          title: `T-Shirt`,
+          priceRanges: [
+            {
+              id: 1,
+              currency: [{ id: 1, code: `USD` }],
+              region: [{ id: 2, name: `North America` }],
+            },
+          ],
+        },
+      ])
+    })
+
+    it(`isolates a nested correlation-key update from a second nested include on the same child`, async () => {
+      type Product = { id: number; title: string }
+      type PriceRange = {
+        id: number
+        productId: number
+        regionId: number
+        currencyId: number
+      }
+      type Region = { id: number; name: string }
+      type Currency = { id: number; code: string }
+
+      const products = createCollection(
+        localOnlyCollectionOptions<Product>({
+          id: `temp2-products`,
+          getKey: (p) => p.id,
+          initialData: [{ id: 1, title: `T-Shirt` }],
+        }),
+      )
+      const priceRanges = createCollection(
+        localOnlyCollectionOptions<PriceRange>({
+          id: `temp2-price-ranges`,
+          getKey: (r) => r.id,
+          initialData: [{ id: 1, productId: 1, regionId: 1, currencyId: 9 }],
+        }),
+      )
+      const regions = createCollection(
+        localOnlyCollectionOptions<Region>({
+          id: `temp2-regions`,
+          getKey: (r) => r.id,
+          initialData: [
+            { id: 1, name: `Europe` },
+            { id: 2, name: `North America` },
+          ],
+        }),
+      )
+      const currencies = createCollection(
+        localOnlyCollectionOptions<Currency>({
+          id: `temp2-currencies`,
+          getKey: (c) => c.id,
+          initialData: [{ id: 9, code: `EUR` }],
+        }),
+      )
+
+      await Promise.all([
+        products.preload(),
+        priceRanges.preload(),
+        regions.preload(),
+        currencies.preload(),
+      ])
+
+      const collection = createLiveQueryCollection({
+        id: `temp2-live`,
+        query: (q) =>
+          q.from({ p: products }).select(({ p }) => ({
+            id: p.id,
+            title: p.title,
+            priceRanges: toArray(
+              q
+                .from({ pr: priceRanges })
+                .where(({ pr }) => eq(pr.productId, p.id))
+                .select(({ pr }) => ({
+                  id: pr.id,
+                  region: toArray(
+                    q
+                      .from({ r: regions })
+                      .where(({ r }) => eq(r.id, pr.regionId))
+                      .select(({ r }) => ({ id: r.id, name: r.name })),
+                  ),
+                  currency: toArray(
+                    q
+                      .from({ c: currencies })
+                      .where(({ c }) => eq(c.id, pr.currencyId))
+                      .select(({ c }) => ({ id: c.id, code: c.code })),
+                  ),
+                })),
+            ),
+          })),
+      })
+      await collection.preload()
+
+      // Change ONLY regionId; currency must still resolve, and a later currency
+      // rename must still reach this price range.
+      priceRanges.update(1, (draft) => {
+        draft.regionId = 2
+      })
+      await new Promise((r) => setTimeout(r, 50))
+
+      currencies.update(9, (draft) => {
+        draft.code = `USD`
+      })
+      await new Promise((r) => setTimeout(r, 50))
+
+      expect(toTree(collection)).toEqual([
+        {
+          id: 1,
+          title: `T-Shirt`,
+          priceRanges: [
+            {
+              id: 1,
+              region: [{ id: 2, name: `North America` }],
+              currency: [{ id: 9, code: `USD` }],
+            },
+          ],
+        },
+      ])
+    })
+
+    it(`keeps the survivor's data when a child changes its nested key then a sibling sharing the old key is deleted`, async () => {
+      type Product = { id: number; title: string }
+      type PriceRange = { id: number; productId: number; regionId: number }
+      type Region = { id: number; name: string }
+
+      const products = createCollection(
+        localOnlyCollectionOptions<Product>({
+          id: `temp-upd-products`,
+          getKey: (p) => p.id,
+          initialData: [{ id: 1, title: `T-Shirt` }],
+        }),
+      )
+      const priceRanges = createCollection(
+        localOnlyCollectionOptions<PriceRange>({
+          id: `temp-upd-price-ranges`,
+          getKey: (r) => r.id,
+          initialData: [
+            { id: 1, productId: 1, regionId: 1 },
+            { id: 2, productId: 1, regionId: 1 },
+          ],
+        }),
+      )
+      const regions = createCollection(
+        localOnlyCollectionOptions<Region>({
+          id: `temp-upd-regions`,
+          getKey: (r) => r.id,
+          initialData: [
+            { id: 1, name: `Europe` },
+            { id: 2, name: `North America` },
+          ],
+        }),
+      )
+
+      await Promise.all([
+        products.preload(),
+        priceRanges.preload(),
+        regions.preload(),
+      ])
+
+      const collection = createLiveQueryCollection({
+        id: `temp-upd-live`,
+        query: (q) =>
+          q.from({ p: products }).select(({ p }) => ({
+            id: p.id,
+            title: p.title,
+            priceRanges: toArray(
+              q
+                .from({ pr: priceRanges })
+                .where(({ pr }) => eq(pr.productId, p.id))
+                .select(({ pr }) => ({
+                  id: pr.id,
+                  regionId: pr.regionId,
+                  region: toArray(
+                    q
+                      .from({ r: regions })
+                      .where(({ r }) => eq(r.id, pr.regionId))
+                      .select(({ r }) => ({ id: r.id, name: r.name })),
+                  ),
+                })),
+            ),
+          })),
+      })
+      await collection.preload()
+
+      // pr_1 moves from region 1 to region 2 (both pr_1, pr_2 started at region 1)
+      priceRanges.update(1, (draft) => {
+        draft.regionId = 2
+      })
+      await new Promise((r) => setTimeout(r, 50))
+
+      // delete pr_2 (the remaining referencer of region 1)
+      priceRanges.delete(2)
+      await new Promise((r) => setTimeout(r, 50))
+
+      // rename region 1 — nothing references it anymore, must NOT affect pr_1
+      regions.update(1, (draft) => {
+        draft.name = `Renamed Europe`
+      })
+      await new Promise((r) => setTimeout(r, 50))
+
+      expect(toTree(collection)).toEqual([
+        {
+          id: 1,
+          title: `T-Shirt`,
+          priceRanges: [
+            { id: 1, regionId: 2, region: [{ id: 2, name: `North America` }] },
+          ],
+        },
+      ])
+    })
+
+    it(`keeps grandchildren on the surviving sibling after the other is deleted`, async () => {
+      type Product = { id: number; title: string }
+      type PriceRange = { id: number; productId: number; regionId: number }
+      type Region = { id: number; name: string }
+
+      const products = createCollection(
+        localOnlyCollectionOptions<Product>({
+          id: `shared-corr-delete-products`,
+          getKey: (p) => p.id,
+          initialData: [
+            { id: 1, title: `T-Shirt` },
+            { id: 2, title: `Hoodie` },
+          ],
+        }),
+      )
+      const priceRanges = createCollection(
+        localOnlyCollectionOptions<PriceRange>({
+          id: `shared-corr-delete-price-ranges`,
+          getKey: (r) => r.id,
+          initialData: [
+            { id: 1, productId: 1, regionId: 1 },
+            { id: 3, productId: 2, regionId: 1 },
+          ],
+        }),
+      )
+      const regions = createCollection(
+        localOnlyCollectionOptions<Region>({
+          id: `shared-corr-delete-regions`,
+          getKey: (r) => r.id,
+          initialData: [{ id: 1, name: `Europe` }],
+        }),
+      )
+
+      await Promise.all([
+        products.preload(),
+        priceRanges.preload(),
+        regions.preload(),
+      ])
+
+      const collection = createLiveQueryCollection({
+        id: `shared-corr-delete-live`,
+        query: (q) =>
+          q.from({ p: products }).select(({ p }) => ({
+            id: p.id,
+            title: p.title,
+            priceRanges: toArray(
+              q
+                .from({ pr: priceRanges })
+                .where(({ pr }) => eq(pr.productId, p.id))
+                .select(({ pr }) => ({
+                  id: pr.id,
+                  regionId: pr.regionId,
+                  region: toArray(
+                    q
+                      .from({ r: regions })
+                      .where(({ r }) => eq(r.id, pr.regionId))
+                      .select(({ r }) => ({ id: r.id, name: r.name })),
+                  ),
+                })),
+            ),
+          })),
+      })
+      await collection.preload()
+
+      // Delete the Hoodie's price range (the sibling sharing regionId 1).
+      priceRanges.delete(3)
+      await new Promise((r) => setTimeout(r, 50))
+
+      const tree = toTree(collection)
+      const tshirt = tree.find((p: any) => p.title === `T-Shirt`)
+      const hoodie = tree.find((p: any) => p.title === `Hoodie`)
+      expect(tshirt.priceRanges.find((pr: any) => pr.id === 1).region).toEqual([
+        { id: 1, name: `Europe` },
+      ])
+      expect(hoodie.priceRanges).toEqual([])
+    })
+
+    it(`keeps routing when one of multiple same-parent siblings sharing a nested key is deleted`, async () => {
+      type Product = { id: number; title: string }
+      type PriceRange = { id: number; productId: number; regionId: number }
+      type Region = { id: number; name: string }
+
+      const products = createCollection(
+        localOnlyCollectionOptions<Product>({
+          id: `shared-corr-same-parent-products`,
+          getKey: (p) => p.id,
+          initialData: [{ id: 1, title: `T-Shirt` }],
+        }),
+      )
+      const priceRanges = createCollection(
+        localOnlyCollectionOptions<PriceRange>({
+          id: `shared-corr-same-parent-price-ranges`,
+          getKey: (r) => r.id,
+          initialData: [
+            { id: 1, productId: 1, regionId: 1 },
+            { id: 2, productId: 1, regionId: 1 },
+          ],
+        }),
+      )
+      const regions = createCollection(
+        localOnlyCollectionOptions<Region>({
+          id: `shared-corr-same-parent-regions`,
+          getKey: (r) => r.id,
+          initialData: [{ id: 1, name: `Europe` }],
+        }),
+      )
+
+      await Promise.all([
+        products.preload(),
+        priceRanges.preload(),
+        regions.preload(),
+      ])
+
+      const collection = createLiveQueryCollection({
+        id: `shared-corr-same-parent-live`,
+        query: (q) =>
+          q.from({ p: products }).select(({ p }) => ({
+            id: p.id,
+            title: p.title,
+            priceRanges: toArray(
+              q
+                .from({ pr: priceRanges })
+                .where(({ pr }) => eq(pr.productId, p.id))
+                .select(({ pr }) => ({
+                  id: pr.id,
+                  regionId: pr.regionId,
+                  region: toArray(
+                    q
+                      .from({ r: regions })
+                      .where(({ r }) => eq(r.id, pr.regionId))
+                      .select(({ r }) => ({ id: r.id, name: r.name })),
+                  ),
+                })),
+            ),
+          })),
+      })
+      await collection.preload()
+
+      priceRanges.delete(1)
+      await new Promise((r) => setTimeout(r, 50))
+
+      regions.update(1, (draft) => {
+        draft.name = `Renamed Europe`
+      })
+      await new Promise((r) => setTimeout(r, 50))
+
+      expect(toTree(collection)).toEqual([
+        {
+          id: 1,
+          title: `T-Shirt`,
+          priceRanges: [
+            {
+              id: 2,
+              regionId: 1,
+              region: [{ id: 1, name: `Renamed Europe` }],
+            },
+          ],
+        },
+      ])
+    })
+
+    // The shared-correlation-key routing is independent of how each level is
+    // materialized, so the same guarantee must hold when the nested levels are
+    // left as live Collections (no toArray/materialize wrapper).
+    it(`resolves nested grandchildren for sibling groups when levels stay Collections`, async () => {
+      type Product = { id: number; title: string }
+      type PriceRange = { id: number; productId: number; regionId: number }
+      type Region = { id: number; name: string }
+
+      const products = createCollection(
+        localOnlyCollectionOptions<Product>({
+          id: `shared-corr-collection-products`,
+          getKey: (p) => p.id,
+          initialData: [
+            { id: 1, title: `T-Shirt` },
+            { id: 2, title: `Hoodie` },
+          ],
+        }),
+      )
+      const priceRanges = createCollection(
+        localOnlyCollectionOptions<PriceRange>({
+          id: `shared-corr-collection-price-ranges`,
+          getKey: (r) => r.id,
+          initialData: [
+            { id: 1, productId: 1, regionId: 1 },
+            { id: 2, productId: 1, regionId: 2 },
+            { id: 3, productId: 2, regionId: 1 },
+          ],
+        }),
+      )
+      const regions = createCollection(
+        localOnlyCollectionOptions<Region>({
+          id: `shared-corr-collection-regions`,
+          getKey: (r) => r.id,
+          initialData: [
+            { id: 1, name: `Europe` },
+            { id: 2, name: `North America` },
+          ],
+        }),
+      )
+
+      await Promise.all([
+        products.preload(),
+        priceRanges.preload(),
+        regions.preload(),
+      ])
+
+      const collection = createLiveQueryCollection({
+        id: `shared-corr-collection-live`,
+        query: (q) =>
+          q.from({ p: products }).select(({ p }) => ({
+            id: p.id,
+            title: p.title,
+            priceRanges: q
+              .from({ pr: priceRanges })
+              .where(({ pr }) => eq(pr.productId, p.id))
+              .select(({ pr }) => ({
+                id: pr.id,
+                regionId: pr.regionId,
+                region: q
+                  .from({ r: regions })
+                  .where(({ r }) => eq(r.id, pr.regionId))
+                  .select(({ r }) => ({ id: r.id, name: r.name })),
+              })),
+          })),
+      })
+      await collection.preload()
+
+      // toTree recursively unwraps the nested live Collections into arrays.
+      expect(toTree(collection)).toEqual([
+        {
+          id: 1,
+          title: `T-Shirt`,
+          priceRanges: [
+            { id: 1, regionId: 1, region: [{ id: 1, name: `Europe` }] },
+            {
+              id: 2,
+              regionId: 2,
+              region: [{ id: 2, name: `North America` }],
+            },
+          ],
+        },
+        {
+          id: 2,
+          title: `Hoodie`,
+          priceRanges: [
+            { id: 3, regionId: 1, region: [{ id: 1, name: `Europe` }] },
+          ],
+        },
+      ])
+    })
+
+    // Same guarantee for materialize(), which produces array/singleton
+    // snapshots through the same nested-includes routing.
+    it(`resolves nested grandchildren for sibling groups with materialize()`, async () => {
+      type Product = { id: number; title: string }
+      type PriceRange = { id: number; productId: number; regionId: number }
+      type Region = { id: number; name: string }
+
+      const products = createCollection(
+        localOnlyCollectionOptions<Product>({
+          id: `shared-corr-materialize-products`,
+          getKey: (p) => p.id,
+          initialData: [
+            { id: 1, title: `T-Shirt` },
+            { id: 2, title: `Hoodie` },
+          ],
+        }),
+      )
+      const priceRanges = createCollection(
+        localOnlyCollectionOptions<PriceRange>({
+          id: `shared-corr-materialize-price-ranges`,
+          getKey: (r) => r.id,
+          initialData: [
+            { id: 1, productId: 1, regionId: 1 },
+            { id: 2, productId: 1, regionId: 2 },
+            { id: 3, productId: 2, regionId: 1 },
+          ],
+        }),
+      )
+      const regions = createCollection(
+        localOnlyCollectionOptions<Region>({
+          id: `shared-corr-materialize-regions`,
+          getKey: (r) => r.id,
+          initialData: [
+            { id: 1, name: `Europe` },
+            { id: 2, name: `North America` },
+          ],
+        }),
+      )
+
+      await Promise.all([
+        products.preload(),
+        priceRanges.preload(),
+        regions.preload(),
+      ])
+
+      const collection = createLiveQueryCollection({
+        id: `shared-corr-materialize-live`,
+        query: (q) =>
+          q.from({ p: products }).select(({ p }) => ({
+            id: p.id,
+            title: p.title,
+            priceRanges: materialize(
+              q
+                .from({ pr: priceRanges })
+                .where(({ pr }) => eq(pr.productId, p.id))
+                .select(({ pr }) => ({
+                  id: pr.id,
+                  regionId: pr.regionId,
+                  region: materialize(
+                    q
+                      .from({ r: regions })
+                      .where(({ r }) => eq(r.id, pr.regionId))
+                      .select(({ r }) => ({ id: r.id, name: r.name })),
+                  ),
+                })),
+            ),
+          })),
+      })
+      await collection.preload()
+
+      expect(toTree(collection)).toEqual([
+        {
+          id: 1,
+          title: `T-Shirt`,
+          priceRanges: [
+            { id: 1, regionId: 1, region: [{ id: 1, name: `Europe` }] },
+            {
+              id: 2,
+              regionId: 2,
+              region: [{ id: 2, name: `North America` }],
+            },
+          ],
+        },
+        {
+          id: 2,
+          title: `Hoodie`,
+          priceRanges: [
+            { id: 3, regionId: 1, region: [{ id: 1, name: `Europe` }] },
+          ],
+        },
+      ])
+
+      // Post-load: insert a price range under Hoodie that references regionId 2,
+      // a correlation key already materialized for T-Shirt at load. This drives
+      // the late-arrival snapshot re-emit path through materialize() — the new
+      // sibling group must be seeded with the already-drained North America row
+      // without disturbing T-Shirt's existing nested rows.
+      priceRanges.insert({ id: 4, productId: 2, regionId: 2 })
+      await new Promise((r) => setTimeout(r, 50))
+
+      const tree = toTree(collection)
+      const tshirt = tree.find((p: any) => p.title === `T-Shirt`)
+      const hoodie = tree.find((p: any) => p.title === `Hoodie`)
+      expect(tshirt.priceRanges.find((pr: any) => pr.id === 2).region).toEqual([
+        { id: 2, name: `North America` },
+      ])
+      expect(hoodie.priceRanges.find((pr: any) => pr.id === 4).region).toEqual([
+        { id: 2, name: `North America` },
+      ])
+    })
   })
 
   describe(`many sibling toArray includes with chained derived collections`, () => {
@@ -5122,6 +6514,249 @@ describe(`includes subqueries`, () => {
       })
       await new Promise((r) => setTimeout(r, 100))
       expect(data().textDeltas).toHaveLength(2)
+    })
+  })
+
+  describe(`materialize`, () => {
+    // For singleton behavior we look up each issue's parent project.
+    // Each issue references exactly one project via projectId.
+    function buildSingletonQuery() {
+      return createLiveQueryCollection((q) =>
+        q.from({ i: issues }).select(({ i }) => ({
+          id: i.id,
+          title: i.title,
+          project: materialize(
+            q
+              .from({ p: projects })
+              .where(({ p }) => eq(p.id, i.projectId))
+              .select(({ p }) => ({
+                id: p.id,
+                name: p.name,
+              }))
+              .findOne(),
+          ),
+        })),
+      )
+    }
+
+    it(`findOne() materializes a single value, not an array`, async () => {
+      const collection = buildSingletonQuery()
+      await collection.preload()
+
+      const bug = collection.get(10) as any
+      expect(Array.isArray(bug.project)).toBe(false)
+      expect(stripVirtualPropsDeep(bug.project)).toEqual({
+        id: 1,
+        name: `Alpha`,
+      })
+
+      const betaBug = collection.get(20) as any
+      expect(stripVirtualPropsDeep(betaBug.project)).toEqual({
+        id: 2,
+        name: `Beta`,
+      })
+    })
+
+    it(`findOne() with no matching child yields undefined`, async () => {
+      // Issue referencing a non-existent project
+      issues.utils.begin()
+      issues.utils.write({
+        type: `insert`,
+        value: { id: 99, projectId: 999, title: `Orphan issue` },
+      })
+      issues.utils.commit()
+
+      const collection = buildSingletonQuery()
+      await collection.preload()
+
+      const orphan = collection.get(99) as any
+      expect(orphan.project).toBeUndefined()
+    })
+
+    it(`inserting the matching child re-emits parent with populated singleton`, async () => {
+      // Start with an issue whose project doesn't exist yet
+      issues.utils.begin()
+      issues.utils.write({
+        type: `insert`,
+        value: { id: 99, projectId: 999, title: `Orphan issue` },
+      })
+      issues.utils.commit()
+
+      const collection = buildSingletonQuery()
+      await collection.preload()
+
+      expect((collection.get(99) as any).project).toBeUndefined()
+
+      // Now create the matching project
+      projects.utils.begin()
+      projects.utils.write({
+        type: `insert`,
+        value: { id: 999, name: `Late Project` },
+      })
+      projects.utils.commit()
+
+      expect(
+        stripVirtualPropsDeep((collection.get(99) as any).project),
+      ).toEqual({ id: 999, name: `Late Project` })
+    })
+
+    it(`updating the matching child re-emits parent with updated singleton`, async () => {
+      const collection = buildSingletonQuery()
+      await collection.preload()
+
+      projects.utils.begin()
+      projects.utils.write({
+        type: `update`,
+        value: { id: 1, name: `Renamed Alpha` },
+      })
+      projects.utils.commit()
+
+      const bug = collection.get(10) as any
+      expect(stripVirtualPropsDeep(bug.project)).toEqual({
+        id: 1,
+        name: `Renamed Alpha`,
+      })
+    })
+
+    it(`deleting the matching child re-emits parent with undefined`, async () => {
+      const collection = buildSingletonQuery()
+      await collection.preload()
+
+      expect((collection.get(20) as any).project).toBeDefined()
+
+      projects.utils.begin()
+      projects.utils.write({
+        type: `delete`,
+        value: sampleProjects.find((p) => p.id === 2)!,
+      })
+      projects.utils.commit()
+
+      expect((collection.get(20) as any).project).toBeUndefined()
+    })
+
+    it(`two parents sharing a correlation key both see the singleton`, async () => {
+      const collection = buildSingletonQuery()
+      await collection.preload()
+
+      // Issues 10 and 11 both reference project 1
+      const bug = collection.get(10) as any
+      const feature = collection.get(11) as any
+      expect(stripVirtualPropsDeep(bug.project)).toEqual({
+        id: 1,
+        name: `Alpha`,
+      })
+      expect(stripVirtualPropsDeep(feature.project)).toEqual({
+        id: 1,
+        name: `Alpha`,
+      })
+
+      // Updating the shared project re-emits both parents
+      projects.utils.begin()
+      projects.utils.write({
+        type: `update`,
+        value: { id: 1, name: `Alpha v2` },
+      })
+      projects.utils.commit()
+
+      expect(
+        stripVirtualPropsDeep((collection.get(10) as any).project),
+      ).toEqual({ id: 1, name: `Alpha v2` })
+      expect(
+        stripVirtualPropsDeep((collection.get(11) as any).project),
+      ).toEqual({ id: 1, name: `Alpha v2` })
+    })
+
+    it(`materialize over a multi-row subquery still returns Array<T>`, async () => {
+      const collection = createLiveQueryCollection((q) =>
+        q.from({ p: projects }).select(({ p }) => ({
+          id: p.id,
+          name: p.name,
+          issues: materialize(
+            q
+              .from({ i: issues })
+              .where(({ i }) => eq(i.projectId, p.id))
+              .select(({ i }) => ({
+                id: i.id,
+                title: i.title,
+              })),
+          ),
+        })),
+      )
+      await collection.preload()
+
+      const alpha = collection.get(1) as any
+      expect(Array.isArray(alpha.issues)).toBe(true)
+      expect(sortedPlainRows(alpha.issues)).toEqual([
+        { id: 10, title: `Bug in Alpha` },
+        { id: 11, title: `Feature for Alpha` },
+      ])
+
+      const gamma = collection.get(3) as any
+      expect(Array.isArray(gamma.issues)).toBe(true)
+      expect(plainRows(gamma.issues)).toEqual([])
+    })
+
+    it(`materialize over a scalar findOne() returns the scalar value`, async () => {
+      const collection = createLiveQueryCollection((q) =>
+        q.from({ i: issues }).select(({ i }) => ({
+          id: i.id,
+          projectName: materialize(
+            q
+              .from({ p: projects })
+              .where(({ p }) => eq(p.id, i.projectId))
+              .select(({ p }) => p.name)
+              .findOne(),
+          ),
+        })),
+      )
+      await collection.preload()
+
+      expect((collection.get(10) as any).projectName).toBe(`Alpha`)
+      expect((collection.get(20) as any).projectName).toBe(`Beta`)
+    })
+
+    it(`nested materialize: array of issues with singleton first-comment lookup each`, async () => {
+      const collection = createLiveQueryCollection((q) =>
+        q.from({ p: projects }).select(({ p }) => ({
+          id: p.id,
+          name: p.name,
+          issues: materialize(
+            q
+              .from({ i: issues })
+              .where(({ i }) => eq(i.projectId, p.id))
+              .select(({ i }) => ({
+                id: i.id,
+                title: i.title,
+                firstComment: materialize(
+                  q
+                    .from({ c: comments })
+                    .where(({ c }) => eq(c.issueId, i.id))
+                    .orderBy(({ c }) => c.id, `asc`)
+                    .select(({ c }) => ({ id: c.id, body: c.body }))
+                    .findOne(),
+                ),
+              })),
+          ),
+        })),
+      )
+      await collection.preload()
+
+      const alpha = collection.get(1) as any
+      const issuesArr = stripVirtualPropsDeep(alpha.issues).sort(
+        (a: any, b: any) => a.id - b.id,
+      )
+      expect(issuesArr).toEqual([
+        {
+          id: 10,
+          title: `Bug in Alpha`,
+          firstComment: { id: 100, body: `Looks bad` },
+        },
+        {
+          id: 11,
+          title: `Feature for Alpha`,
+          firstComment: undefined,
+        },
+      ])
     })
   })
 })

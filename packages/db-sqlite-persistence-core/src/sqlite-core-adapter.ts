@@ -73,6 +73,21 @@ export type SQLitePullSinceResult<TKey extends string | number> =
 
 const DEFAULT_SCHEMA_VERSION = 1
 const DEFAULT_PULL_SINCE_RELOAD_THRESHOLD = 128
+
+/**
+ * Default cap on retained `applied_tx` rows per collection. The log is a
+ * replayable cache, so a bounded row count keeps SQLite files from growing
+ * without limit. Pass `appliedTxPruneMaxRows: 0` to disable the row cap.
+ */
+export const DEFAULT_APPLIED_TX_PRUNE_MAX_ROWS = 1_000
+
+/**
+ * Default age backstop for retained `applied_tx` rows, in seconds (24h). Rows
+ * older than this are pruned on the next write. Pass
+ * `appliedTxPruneMaxAgeSeconds: 0` to disable the age backstop.
+ */
+export const DEFAULT_APPLIED_TX_PRUNE_MAX_AGE_SECONDS = 24 * 60 * 60
+
 const SQLITE_MAX_IN_BATCH_SIZE = 900
 const SAFE_IDENTIFIER_PATTERN = /^[a-zA-Z_][a-zA-Z0-9_]*$/
 const FORBIDDEN_SQL_FRAGMENT_PATTERN = /(;|--|\/\*)/
@@ -1540,42 +1555,64 @@ export class SQLiteCorePersistenceAdapter implements PersistenceAdapter {
     const collectionTableSql = quoteIdentifier(tableMapping.tableName)
     const tombstoneTableSql = quoteIdentifier(tableMapping.tombstoneTableName)
 
-    const [changedRows, deletedRows, latestVersionRows, replayRows] =
-      await Promise.all([
-        this.driver.query<{ key: string }>(
-          `SELECT key
+    const [
+      changedRows,
+      deletedRows,
+      latestVersionRows,
+      replayRows,
+      replayAvailabilityRows,
+    ] = await Promise.all([
+      this.driver.query<{ key: string }>(
+        `SELECT key
          FROM ${collectionTableSql}
          WHERE row_version > ?`,
-          [fromRowVersion],
-        ),
-        this.driver.query<{ key: string }>(
-          `SELECT key
+        [fromRowVersion],
+      ),
+      this.driver.query<{ key: string }>(
+        `SELECT key
          FROM ${tombstoneTableSql}
          WHERE row_version > ?`,
-          [fromRowVersion],
-        ),
-        this.driver.query<{ latest_row_version: number }>(
-          `SELECT latest_row_version
+        [fromRowVersion],
+      ),
+      this.driver.query<{ latest_row_version: number }>(
+        `SELECT latest_row_version
          FROM collection_version
          WHERE collection_id = ?
          LIMIT 1`,
-          [collectionId],
-        ),
-        this.driver.query<{
-          tx_id: string
-          row_version: number
-          replay_json: string | null
-          replay_requires_full_reload: number
-        }>(
-          `SELECT tx_id, row_version, replay_json, replay_requires_full_reload
+        [collectionId],
+      ),
+      this.driver.query<{
+        tx_id: string
+        row_version: number
+        replay_json: string | null
+        replay_requires_full_reload: number
+      }>(
+        `SELECT tx_id, row_version, replay_json, replay_requires_full_reload
          FROM applied_tx
          WHERE collection_id = ? AND row_version > ?
          ORDER BY term ASC, seq ASC`,
-          [collectionId, fromRowVersion],
-        ),
-      ])
+        [collectionId, fromRowVersion],
+      ),
+      this.driver.query<{ min_row_version: number | null }>(
+        `SELECT MIN(row_version) AS min_row_version
+         FROM applied_tx
+         WHERE collection_id = ?`,
+        [collectionId],
+      ),
+    ])
 
     const latestRowVersion = latestVersionRows[0]?.latest_row_version ?? 0
+    const replayFloor = replayAvailabilityRows[0]?.min_row_version
+    if (
+      latestRowVersion > fromRowVersion &&
+      (replayFloor == null || replayFloor > fromRowVersion + 1)
+    ) {
+      return {
+        latestRowVersion,
+        requiresFullReload: true,
+      }
+    }
+
     const changedKeyCount = changedRows.length + deletedRows.length
 
     if (changedKeyCount > this.pullSinceReloadThreshold) {

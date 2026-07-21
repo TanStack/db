@@ -1,5 +1,9 @@
 // Storage adapters
-import { createOptimisticAction, createTransaction } from '@tanstack/db'
+import {
+  createOptimisticAction,
+  createTransaction,
+  safeRandomUUID,
+} from '@tanstack/db'
 import { IndexedDBAdapter } from './storage/IndexedDBAdapter'
 import { LocalStorageAdapter } from './storage/LocalStorageAdapter'
 
@@ -367,7 +371,7 @@ export class OfflineExecutor {
         mutationFn: (params) =>
           mutationFn({
             ...params,
-            idempotencyKey: options.idempotencyKey || crypto.randomUUID(),
+            idempotencyKey: options.idempotencyKey || safeRandomUUID(),
           }),
         metadata: options.metadata,
       })
@@ -399,7 +403,7 @@ export class OfflineExecutor {
             mutationFn({
               ...vars,
               ...params,
-              idempotencyKey: crypto.randomUUID(),
+              idempotencyKey: safeRandomUUID(),
             }),
           onMutate: options.onMutate,
         })

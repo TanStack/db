@@ -4,6 +4,7 @@ import { createCollection } from '../src/collection/index.js'
 import {
   CollectionRequiresConfigError,
   DuplicateKeyError,
+  DuplicateKeySyncError,
   InvalidKeyError,
   KeyUpdateNotAllowedError,
   MissingDeleteHandlerError,
@@ -11,13 +12,19 @@ import {
   MissingUpdateHandlerError,
 } from '../src/errors'
 import { createTransaction } from '../src/transactions'
+import { createLiveQueryCollection, eq } from '../src/query/index.js'
 import {
   flushPromises,
   mockSyncCollectionOptionsNoInitialState,
   stripVirtualProps,
   withExpectedRejection,
 } from './utils'
-import type { ChangeMessage, MutationFn, PendingMutation } from '../src/types'
+import type {
+  ChangeMessage,
+  MutationFn,
+  PendingMutation,
+  SyncConfig,
+} from '../src/types'
 
 const getStateValue = <T extends object, TKey extends string | number>(
   collection: { state: Map<TKey, T> },
@@ -39,6 +46,129 @@ describe(`Collection`, () => {
   it(`should throw if there's no sync config`, () => {
     // @ts-expect-error we're testing for throwing when there's no config passed in
     expect(() => createCollection()).toThrow(CollectionRequiresConfigError)
+  })
+
+  it(`throws DuplicateKeySyncError instead of TypeError when config has no utils`, async () => {
+    let begin!: () => void
+    let write!: Parameters<
+      SyncConfig<{ id: number; text: string }, number>[`sync`]
+    >[0][`write`]
+
+    const collection = createCollection<{ id: number; text: string }, number>({
+      id: `duplicate-key-no-utils-test`,
+      getKey: (item) => item.id,
+      sync: {
+        sync: (params) => {
+          begin = params.begin
+          write = params.write
+          params.begin()
+          params.write({ type: `insert`, value: { id: 1, text: `one` } })
+          params.commit()
+          params.markReady()
+        },
+      },
+    })
+
+    await collection.stateWhenReady()
+
+    begin()
+    expect(() =>
+      write({ type: `insert`, value: { id: 1, text: `changed` } }),
+    ).toThrow(DuplicateKeySyncError)
+  })
+
+  it(`keeps ambiguous server-key sync queued while a temp-key optimistic insert is pending`, async () => {
+    const options = mockSyncCollectionOptionsNoInitialState<{
+      id: number
+      text: string
+    }>({
+      id: `server-generated-key-test`,
+      getKey: (item) => item.id,
+      startSync: true,
+    })
+    const collection = createCollection(options)
+
+    options.utils.markReady()
+    await collection.stateWhenReady()
+
+    const tx = collection.insert({ id: 4733, text: `two` })
+
+    expect(getStateEntries(collection)).toEqual([
+      [4733, { id: 4733, text: `two` }],
+    ])
+
+    options.utils.begin()
+    options.utils.write({ type: `insert`, value: { id: 24, text: `two` } })
+    options.utils.commit()
+
+    // The sync commit is held while the local insert transaction is persisting.
+    // Without an explicit temp-key -> server-key mapping, core cannot know
+    // whether key 24 is this optimistic insert's server echo or an unrelated
+    // row, so it must not expose both rows at the same time.
+    expect(tx.isPersisted.isPending()).toBe(true)
+    expect(collection.has(24)).toBe(false)
+    expect(getStateEntries(collection)).toEqual([
+      [4733, { id: 4733, text: `two` }],
+    ])
+
+    options.utils.resolveSync()
+    await tx.isPersisted.promise
+    await flushPromises()
+
+    expect(getStateEntries(collection)).toEqual([[24, { id: 24, text: `two` }]])
+  })
+
+  it(`updates live queries when an optimistic insert is replaced by a different server key`, async () => {
+    const options = mockSyncCollectionOptionsNoInitialState<{
+      id: number
+      text: string
+      project_id: number
+    }>({
+      id: `server-generated-key-live-query-test`,
+      getKey: (item) => item.id,
+      startSync: true,
+    })
+    const collection = createCollection(options)
+    const liveCollection = createLiveQueryCollection((q) =>
+      q
+        .from({ collection })
+        .where(({ collection }) => eq(collection.project_id, 1))
+        .select(({ collection }) => ({
+          id: collection.id,
+          text: collection.text,
+          project_id: collection.project_id,
+          $synced: collection.$synced,
+          $origin: collection.$origin,
+          $key: collection.$key,
+        })),
+    )
+
+    options.utils.markReady()
+    await liveCollection.preload()
+
+    const tx = collection.insert({ id: 4733, text: `two`, project_id: 1 })
+
+    expect(liveCollection.toArray.map((todo) => todo.id)).toEqual([4733])
+
+    options.utils.begin()
+    options.utils.write({
+      type: `insert`,
+      value: { id: 24, text: `two`, project_id: 1 },
+    })
+    options.utils.commit()
+
+    options.utils.resolveSync()
+    await tx.isPersisted.promise
+    await flushPromises()
+
+    expect(
+      liveCollection.toArray.map((todo) => ({
+        id: todo.id,
+        synced: todo.$synced,
+        origin: todo.$origin,
+        key: todo.$key,
+      })),
+    ).toEqual([{ id: 24, synced: true, origin: `remote`, key: 24 }])
   })
 
   it(`should throw an error when trying to use mutation operations outside of a transaction`, async () => {

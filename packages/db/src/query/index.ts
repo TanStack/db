@@ -14,7 +14,11 @@ export {
   type ExtractContext,
   type QueryResult,
   // Types needed for declaration emit (https://github.com/TanStack/db/issues/1012)
+  type ContextFromSource,
+  type ContextFromUnionBranches,
+  type ContextFromUnionSource,
   type SchemaFromSource,
+  type SingleSource,
   type InferCollectionType,
   type MergeContextWithJoinType,
   type MergeContextForJoinCallback,
@@ -53,7 +57,11 @@ export {
   length,
   concat,
   coalesce,
+  caseWhen,
   add,
+  subtract,
+  multiply,
+  divide,
   // Aggregates
   count,
   avg,
@@ -62,6 +70,7 @@ export {
   max,
   // Includes helpers
   toArray,
+  materialize,
 } from './builder/functions.js'
 
 // Ref proxy utilities

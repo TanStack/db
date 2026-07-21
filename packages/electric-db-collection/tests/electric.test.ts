@@ -95,16 +95,22 @@ describe(`Electric Integration`, () => {
 
   const createPersistedAdapter = (
     collectionMetadata?: Map<string, unknown>,
+    rows: Map<string | number, Row> = new Map(),
   ) => ({
-    loadSubset: async () => [],
-    loadCollectionMetadata: async () =>
-      Array.from((collectionMetadata ?? new Map()).entries()).map(
-        ([key, value]) => ({
-          key,
-          value,
-        }),
+    loadSubset: () =>
+      Promise.resolve(
+        Array.from(rows.entries()).map(([key, value]) => ({ key, value })),
       ),
-    applyCommittedTx: async (_collectionId: string, tx: any) => {
+    loadCollectionMetadata: () =>
+      Promise.resolve(
+        Array.from((collectionMetadata ?? new Map()).entries()).map(
+          ([key, value]) => ({
+            key,
+            value,
+          }),
+        ),
+      ),
+    applyCommittedTx: (_collectionId: string, tx: any) => {
       for (const mutation of tx.collectionMetadataMutations ?? []) {
         if (mutation.type === `delete`) {
           collectionMetadata?.delete(mutation.key)
@@ -112,8 +118,19 @@ describe(`Electric Integration`, () => {
           collectionMetadata?.set(mutation.key, mutation.value)
         }
       }
+      if (tx.truncate) {
+        rows.clear()
+      }
+      for (const mutation of tx.mutations ?? []) {
+        if (mutation.type === `delete`) {
+          rows.delete(mutation.key)
+        } else {
+          rows.set(mutation.key, mutation.value)
+        }
+      }
+      return Promise.resolve()
     },
-    ensureIndex: async () => {},
+    ensureIndex: () => Promise.resolve(),
   })
 
   beforeEach(() => {
@@ -737,6 +754,49 @@ describe(`Electric Integration`, () => {
         name: `Direct Persistence User`,
       })
       expect(testCollection._state.syncedData.size).toEqual(1)
+    })
+
+    it(`should remove optimistic insert when txid sync confirms a different server-generated key`, async () => {
+      const txid = 1234
+      const onInsert = vi.fn().mockResolvedValue({ txid })
+
+      const testCollection = createCollection(
+        electricCollectionOptions({
+          id: `test-server-generated-key-txid`,
+          shapeOptions: {
+            url: `http://test-url`,
+            params: { table: `test_table` },
+          },
+          startSync: true,
+          getKey: (item: Row) => item.id as number,
+          onInsert,
+        }),
+      )
+
+      const tx = testCollection.insert({ id: 4733, text: `two` })
+
+      expect(stripVirtualProps(testCollection.get(4733))).toEqual({
+        id: 4733,
+        text: `two`,
+      })
+
+      subscriber([
+        {
+          key: `24`,
+          value: { id: 24, text: `two` },
+          headers: { operation: `insert`, txids: [txid] },
+        },
+        { headers: { control: `up-to-date` } },
+      ])
+
+      await tx.isPersisted.promise
+
+      expect(testCollection.has(4733)).toBe(false)
+      expect(stripVirtualProps(testCollection.get(24))).toEqual({
+        id: 24,
+        text: `two`,
+      })
+      expect(Array.from(testCollection.state.keys())).toEqual([24])
     })
 
     it(`should support void strategy when handler returns nothing`, async () => {
@@ -2522,6 +2582,122 @@ describe(`Electric Integration`, () => {
       expect(mockRequestSnapshot).toHaveBeenCalledTimes(1)
     })
 
+    it(`should request the snapshot after the refresh timeout and ignore late fulfillment`, async () => {
+      vi.useFakeTimers()
+      try {
+        let resolveRefresh: () => void = () => {}
+        const refresh = new Promise<void>((resolve) => {
+          resolveRefresh = resolve
+        })
+        mockStream.isUpToDate = true
+        mockForceDisconnectAndRefresh.mockReturnValueOnce(refresh)
+
+        const testCollection = createCollection(
+          electricCollectionOptions({
+            id: `on-demand-refresh-timeout-fulfillment-test`,
+            shapeOptions: {
+              url: `http://test-url`,
+              params: { table: `test_table` },
+            },
+            syncMode: `on-demand`,
+            getKey: (item: Row) => item.id as number,
+            startSync: true,
+          }),
+        )
+
+        let loadSettled = false
+        const load = Promise.resolve(
+          testCollection._sync.loadSubset({ limit: 10 }),
+        ).then(() => {
+          loadSettled = true
+        })
+
+        await vi.advanceTimersByTimeAsync(249)
+        expect(mockRequestSnapshot).not.toHaveBeenCalled()
+        expect(loadSettled).toBe(false)
+
+        await vi.advanceTimersByTimeAsync(1)
+        await load
+        expect(mockRequestSnapshot).toHaveBeenCalledTimes(1)
+        expect(loadSettled).toBe(true)
+        await testCollection.cleanup()
+        expect(vi.getTimerCount()).toBe(0)
+
+        resolveRefresh()
+        await refresh
+        await Promise.resolve()
+        expect(mockRequestSnapshot).toHaveBeenCalledTimes(1)
+        expect(vi.getTimerCount()).toBe(0)
+      } finally {
+        vi.useRealTimers()
+      }
+    })
+
+    it(`should handle late refresh rejection after requesting the snapshot`, async () => {
+      vi.useFakeTimers()
+      try {
+        let rejectRefresh: (error: Error) => void = () => {}
+        const refresh = new Promise<void>((_resolve, reject) => {
+          rejectRefresh = reject
+        })
+        mockStream.isUpToDate = true
+        mockForceDisconnectAndRefresh.mockReturnValueOnce(refresh)
+
+        const testCollection = createCollection(
+          electricCollectionOptions({
+            id: `on-demand-refresh-timeout-rejection-test`,
+            shapeOptions: {
+              url: `http://test-url`,
+              params: { table: `test_table` },
+            },
+            syncMode: `on-demand`,
+            getKey: (item: Row) => item.id as number,
+            startSync: true,
+          }),
+        )
+
+        const load = testCollection._sync.loadSubset({ limit: 10 })
+        await vi.advanceTimersByTimeAsync(250)
+        await load
+
+        rejectRefresh(new Error(`late refresh failure`))
+        await expect(refresh).rejects.toThrow(`late refresh failure`)
+        await Promise.resolve()
+        expect(mockRequestSnapshot).toHaveBeenCalledTimes(1)
+        expect(vi.getTimerCount()).toBe(0)
+      } finally {
+        vi.useRealTimers()
+      }
+    })
+
+    it(`should clear the refresh timeout when refresh settles early`, async () => {
+      vi.useFakeTimers()
+      try {
+        mockStream.isUpToDate = true
+        mockForceDisconnectAndRefresh.mockResolvedValueOnce(undefined)
+
+        const testCollection = createCollection(
+          electricCollectionOptions({
+            id: `on-demand-refresh-clears-timeout-test`,
+            shapeOptions: {
+              url: `http://test-url`,
+              params: { table: `test_table` },
+            },
+            syncMode: `on-demand`,
+            getKey: (item: Row) => item.id as number,
+            startSync: true,
+          }),
+        )
+
+        await testCollection._sync.loadSubset({ limit: 10 })
+
+        expect(mockRequestSnapshot).toHaveBeenCalledTimes(1)
+        expect(vi.getTimerCount()).toBe(0)
+      } finally {
+        vi.useRealTimers()
+      }
+    })
+
     it(`should fetch snapshots in progressive mode when loadSubset is called before sync completes`, async () => {
       vi.clearAllMocks()
 
@@ -3134,6 +3310,96 @@ describe(`Electric Integration`, () => {
           handle: undefined,
         }),
       )
+    })
+
+    it(`should preserve hydrated rows and resumed changes received before up-to-date`, async () => {
+      vi.clearAllMocks()
+
+      const { ShapeStream } = await import(`@electric-sql/client`)
+      mockFetchSnapshot.mockResolvedValue({
+        metadata: {},
+        data: [],
+      })
+
+      const collectionMetadata = new Map<string, unknown>([
+        [
+          `electric:resume`,
+          {
+            kind: `resume`,
+            offset: `10_0`,
+            handle: `handle-1`,
+            shapeId: `{"params":{"table":"test_table"},"url":"http://test-url"}`,
+            updatedAt: 1,
+          },
+        ],
+      ])
+      const persistedRows = new Map<string | number, Row>([
+        [1, { id: 1, name: `Persisted User` }],
+      ])
+
+      const persistedCollection = createCollection(
+        persistedCollectionOptions({
+          ...(electricCollectionOptions({
+            id: `persisted-progressive-resume-test`,
+            shapeOptions: {
+              url: `http://test-url`,
+              params: {
+                table: `test_table`,
+              },
+            },
+            syncMode: `progressive` as const,
+            getKey: (item: Row) => item.id as number,
+            startSync: true,
+          }) as any),
+          persistence: {
+            adapter: createPersistedAdapter(collectionMetadata, persistedRows),
+          },
+        }) as any,
+      )
+
+      persistedCollection.startSyncImmediate()
+      await persistedCollection._sync.loadSubset({ limit: 10 })
+
+      expect(ShapeStream).toHaveBeenCalledWith(
+        expect.objectContaining({
+          offset: `10_0`,
+          handle: `handle-1`,
+        }),
+      )
+      expect(stripVirtualProps(persistedCollection.get(1))).toEqual({
+        id: 1,
+        name: `Persisted User`,
+      })
+
+      subscriber([
+        {
+          key: `2`,
+          value: { id: 2, name: `Resumed User` },
+          headers: { operation: `insert` },
+        },
+      ])
+      subscriber([
+        {
+          headers: { control: `up-to-date` },
+        },
+      ])
+
+      expect(
+        [persistedCollection.get(1), persistedCollection.get(2)].map(
+          stripVirtualProps,
+        ),
+      ).toEqual([
+        { id: 1, name: `Persisted User` },
+        { id: 2, name: `Resumed User` },
+      ])
+      await vi.waitFor(() => {
+        expect(
+          [persistedRows.get(1), persistedRows.get(2)].map(stripVirtualProps),
+        ).toEqual([
+          { id: 1, name: `Persisted User` },
+          { id: 2, name: `Resumed User` },
+        ])
+      })
     })
 
     it(`should not mix explicit handle with persisted offset`, async () => {

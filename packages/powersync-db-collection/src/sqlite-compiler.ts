@@ -95,7 +95,15 @@ function compileExpression(
         )
       }
       const columnName = exp.path[0]!
-      if (compileOptions?.jsonColumn && columnName !== `id`) {
+
+      // PowerSync stores `id` as a top-level row column rather than inside the
+      // JSON `data` object, so we skip json_extract. However, when compiling for
+      // trigger WHEN clauses we still need the OLD./NEW. prefix. Extract it from
+      // the jsonColumn option.
+      if (compileOptions?.jsonColumn && columnName === `id`) {
+        const prefix = compileOptions.jsonColumn.split('.')[0]!
+        return `${prefix}.${quoteIdentifier(columnName)}`
+      } else if (compileOptions?.jsonColumn) {
         return `json_extract(${compileOptions.jsonColumn}, '$.${columnName}')`
       }
       return quoteIdentifier(columnName)

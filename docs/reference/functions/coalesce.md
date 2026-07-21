@@ -9,7 +9,7 @@ title: coalesce
 function coalesce<T>(...args): CoalesceReturnType<T>;
 ```
 
-Defined in: [packages/db/src/query/builder/functions.ts:345](https://github.com/TanStack/db/blob/main/packages/db/src/query/builder/functions.ts#L345)
+Defined in: [packages/db/src/query/builder/functions.ts:349](https://github.com/TanStack/db/blob/main/packages/db/src/query/builder/functions.ts#L349)
 
 ## Type Parameters
 

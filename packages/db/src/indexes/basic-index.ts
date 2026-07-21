@@ -65,6 +65,7 @@ export class BasicIndex<
   ) {
     super(id, expression, name, options)
     this.compareFn = options?.compareFn ?? defaultComparator
+    this.hasCustomComparator = options?.compareFn != null
     if (options?.compareOptions) {
       this.compareOptions = options!.compareOptions
     }

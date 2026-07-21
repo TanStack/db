@@ -17,22 +17,9 @@ interface Employee {
   active: boolean
 }
 
-interface Department {
-  id: number
-  name: string
-  budget: number
-  location: string
-}
-
 // Test collections
 const employeesCollection = new CollectionImpl<Employee>({
   id: `employees`,
-  getKey: (item) => item.id,
-  sync: { sync: () => {} },
-})
-
-const departmentsCollection = new CollectionImpl<Department>({
-  id: `departments`,
   getKey: (item) => item.id,
   sync: { sync: () => {} },
 })
@@ -99,13 +86,13 @@ describe(`QueryBuilder.from`, () => {
     }).toThrow(QueryMustHaveFromClauseError)
   })
 
-  it(`throws error with multiple sources`, () => {
+  it(`rejects multiple sources`, () => {
     const builder = new Query()
 
     expect(() => {
       builder.from({
         employees: employeesCollection,
-        departments: departmentsCollection,
+        otherEmployees: employeesCollection,
       } as any)
     }).toThrow(OnlyOneSourceAllowedError)
   })
@@ -163,6 +150,16 @@ describe(`QueryBuilder.from`, () => {
       builder.from(undefined as any)
     }).toThrow(
       /Invalid source for from clause: Expected an object with a single key-value pair/,
+    )
+  })
+
+  it(`throws helpful join example when passing invalid join source`, () => {
+    const builder = new Query().from({ employees: employeesCollection })
+
+    expect(() => {
+      builder.join(`departments` as any, () => eq(1, 1))
+    }).toThrow(
+      /Invalid source for join clause: Expected an object with a single key-value pair.*For example: \.join/,
     )
   })
 })

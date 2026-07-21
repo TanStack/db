@@ -3,7 +3,11 @@ import {
   UnknownExpressionTypeError,
   UnknownFunctionError,
 } from '../../errors.js'
-import { areValuesEqual, normalizeValue } from '../../utils/comparison.js'
+import {
+  areValuesEqual,
+  isUnorderable,
+  normalizeValue,
+} from '../../utils/comparison.js'
 import type { BasicExpression, Func, PropRef } from '../ir.js'
 import type { NamespacedRow } from '../../types.js'
 
@@ -12,6 +16,19 @@ import type { NamespacedRow } from '../../types.js'
  */
 function isUnknown(value: any): boolean {
   return value === null || value === undefined
+}
+
+/**
+ * Equality that follows PostgreSQL float semantics for `NaN`/invalid Dates:
+ * such values are equal to one another and unequal to anything else. For all
+ * other values it defers to {@link areValuesEqual}. Operands must not be
+ * null/undefined (callers handle UNKNOWN first).
+ */
+function valuesEqual(a: any, b: any): boolean {
+  if (isUnorderable(a) || isUnorderable(b)) {
+    return isUnorderable(a) && isUnorderable(b)
+  }
+  return areValuesEqual(a, b)
 }
 
 function toDateValue(value: any): Date | null {
@@ -233,8 +250,9 @@ function compileFunction(func: Func, isSingleRow: boolean): (data: any) => any {
         if (isUnknown(a) || isUnknown(b)) {
           return null
         }
-        // Use areValuesEqual for proper Uint8Array/Buffer comparison
-        return areValuesEqual(a, b)
+        // NaN/invalid Dates are equal to one another (PostgreSQL semantics);
+        // otherwise use areValuesEqual for proper Uint8Array/Buffer comparison
+        return valuesEqual(a, b)
       }
     }
     case `gt`: {
@@ -246,6 +264,11 @@ function compileFunction(func: Func, isSingleRow: boolean): (data: any) => any {
         // In 3-valued logic, any comparison with null/undefined returns UNKNOWN
         if (isUnknown(a) || isUnknown(b)) {
           return null
+        }
+        // NaN/invalid Dates sort greater than every other value, and are equal
+        // to one another (PostgreSQL semantics)
+        if (isUnorderable(a) || isUnorderable(b)) {
+          return isUnorderable(a) && !isUnorderable(b)
         }
         return a > b
       }
@@ -260,6 +283,9 @@ function compileFunction(func: Func, isSingleRow: boolean): (data: any) => any {
         if (isUnknown(a) || isUnknown(b)) {
           return null
         }
+        if (isUnorderable(a) || isUnorderable(b)) {
+          return isUnorderable(a)
+        }
         return a >= b
       }
     }
@@ -273,6 +299,9 @@ function compileFunction(func: Func, isSingleRow: boolean): (data: any) => any {
         if (isUnknown(a) || isUnknown(b)) {
           return null
         }
+        if (isUnorderable(a) || isUnorderable(b)) {
+          return isUnorderable(b) && !isUnorderable(a)
+        }
         return a < b
       }
     }
@@ -285,6 +314,9 @@ function compileFunction(func: Func, isSingleRow: boolean): (data: any) => any {
         // In 3-valued logic, any comparison with null/undefined returns UNKNOWN
         if (isUnknown(a) || isUnknown(b)) {
           return null
+        }
+        if (isUnorderable(a) || isUnorderable(b)) {
+          return isUnorderable(b)
         }
         return a <= b
       }
@@ -370,7 +402,7 @@ function compileFunction(func: Func, isSingleRow: boolean): (data: any) => any {
         if (!Array.isArray(array)) {
           return false
         }
-        return array.some((item) => normalizeValue(item) === value)
+        return array.some((item) => valuesEqual(normalizeValue(item), value))
       }
     }
 
@@ -457,6 +489,30 @@ function compileFunction(func: Func, isSingleRow: boolean): (data: any) => any {
         }
         return null
       }
+    case `caseWhen`: {
+      const hasDefaultValue = compiledArgs.length % 2 === 1
+      const pairCount = Math.floor(compiledArgs.length / 2)
+
+      if (compiledArgs.length < 2) {
+        throw new Error(`caseWhen() requires at least two arguments`)
+      }
+
+      return (data) => {
+        for (let i = 0; i < pairCount; i++) {
+          const condition = compiledArgs[i * 2]!
+          if (isCaseWhenConditionTrue(condition(data))) {
+            const value = compiledArgs[i * 2 + 1]!
+            return value(data)
+          }
+        }
+
+        if (hasDefaultValue) {
+          return compiledArgs[compiledArgs.length - 1]!(data)
+        }
+
+        return null
+      }
+    }
 
     // Math functions
     case `add`: {
@@ -548,6 +604,26 @@ function compileFunction(func: Func, isSingleRow: boolean): (data: any) => any {
     default:
       throw new UnknownFunctionError(func.name)
   }
+}
+
+export function isCaseWhenConditionTrue(value: any): boolean {
+  if (value == null || value === false) {
+    return false
+  }
+
+  if (value === true) {
+    return true
+  }
+
+  if (typeof value === `number`) {
+    return value !== 0 && !Number.isNaN(value)
+  }
+
+  if (typeof value === `bigint`) {
+    return value !== 0n
+  }
+
+  return Boolean(value)
 }
 
 /**

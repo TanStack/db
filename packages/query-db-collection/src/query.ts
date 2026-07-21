@@ -2,6 +2,7 @@ import { QueryObserver, hashKey } from '@tanstack/query-core'
 import { deepEquals } from '@tanstack/db'
 import {
   GetKeyRequiredError,
+  InitialDataInOnDemandModeError,
   QueryClientRequiredError,
   QueryFnRequiredError,
   QueryKeyRequiredError,
@@ -49,6 +50,40 @@ type InferSchemaInput<T> = T extends StandardSchemaV1
 
 type TQueryKeyBuilder<TQueryKey> = (opts: LoadSubsetOptions) => TQueryKey
 
+const queryObserverOptionKeys = [
+  `enabled`,
+  `refetchInterval`,
+  `retry`,
+  `retryDelay`,
+  `staleTime`,
+  `gcTime`,
+  `refetchOnWindowFocus`,
+  `refetchOnReconnect`,
+  `refetchOnMount`,
+  `networkMode`,
+] as const
+
+type QueryObserverOptionKey = (typeof queryObserverOptionKeys)[number]
+
+type QueryObserverOptionValues = Pick<
+  QueryObserverOptions<Array<any>, any, Array<any>, Array<any>, any>,
+  QueryObserverOptionKey
+>
+
+function pickDefinedQueryObserverOptions(
+  config: Partial<QueryObserverOptionValues>,
+): Partial<QueryObserverOptionValues> {
+  const options: Partial<QueryObserverOptionValues> = {}
+
+  for (const key of queryObserverOptionKeys) {
+    if (config[key] !== undefined) {
+      ;(options as Record<QueryObserverOptionKey, unknown>)[key] = config[key]
+    }
+  }
+
+  return options
+}
+
 /**
  * Configuration options for creating a Query Collection
  * @template T - The explicit type of items stored in the collection
@@ -77,7 +112,10 @@ export interface QueryCollectionConfig<
   ) => Promise<Array<any>> | Array<any>
     ? (context: QueryFunctionContext<TQueryKey>) => Promise<Array<T>> | Array<T>
     : TQueryFn
-  /* Function that extracts array items from wrapped API responses (e.g metadata, pagination)  */
+  /**
+   * Extracts the row array TanStack DB materializes from the Query response.
+   * The Query cache keeps the original response shape.
+   */
   select?: (data: TQueryData) => Array<T>
   /** The TanStack Query client instance */
   queryClient: QueryClient
@@ -119,6 +157,61 @@ export interface QueryCollectionConfig<
     TQueryData,
     TQueryKey
   >[`staleTime`]
+  gcTime?: QueryObserverOptions<
+    TQueryData,
+    TError,
+    Array<T>,
+    TQueryData,
+    TQueryKey
+  >[`gcTime`]
+  refetchOnWindowFocus?: QueryObserverOptions<
+    TQueryData,
+    TError,
+    Array<T>,
+    TQueryData,
+    TQueryKey
+  >[`refetchOnWindowFocus`]
+  refetchOnReconnect?: QueryObserverOptions<
+    TQueryData,
+    TError,
+    Array<T>,
+    TQueryData,
+    TQueryKey
+  >[`refetchOnReconnect`]
+  refetchOnMount?: QueryObserverOptions<
+    TQueryData,
+    TError,
+    Array<T>,
+    TQueryData,
+    TQueryKey
+  >[`refetchOnMount`]
+  networkMode?: QueryObserverOptions<
+    TQueryData,
+    TError,
+    Array<T>,
+    TQueryData,
+    TQueryKey
+  >[`networkMode`]
+  /**
+   * Data used to initialize the TanStack Query cache for an eager collection.
+   * The value has the original Query response shape and is projected through
+   * the collection's select option before rows are materialized.
+   */
+  initialData?: QueryObserverOptions<
+    TQueryData,
+    TError,
+    Array<T>,
+    TQueryData,
+    TQueryKey
+  >[`initialData`]
+  /** The timestamp TanStack Query uses to determine initialData freshness. */
+  initialDataUpdatedAt?: QueryObserverOptions<
+    TQueryData,
+    TError,
+    Array<T>,
+    TQueryData,
+    TQueryKey
+  >[`initialDataUpdatedAt`]
   persistedGcTime?: number
 
   /**
@@ -340,6 +433,13 @@ class QueryCollectionUtilsImpl {
       (observer) => observer.getCurrentResult().fetchStatus,
     )
   }
+}
+
+function getLoadSubsetOptionsForMeta(
+  opts: LoadSubsetOptions,
+): Omit<LoadSubsetOptions, `subscription`> {
+  const { subscription: _subscription, ...serializableOptions } = opts
+  return serializableOptions
 }
 
 /**
@@ -578,6 +678,13 @@ export function queryCollectionOptions(
     retry,
     retryDelay,
     staleTime,
+    gcTime,
+    refetchOnWindowFocus,
+    refetchOnReconnect,
+    refetchOnMount,
+    networkMode,
+    initialData,
+    initialDataUpdatedAt,
     persistedGcTime,
     getKey,
     onInsert,
@@ -589,6 +696,35 @@ export function queryCollectionOptions(
 
   // Default to eager sync mode if not provided
   const syncMode = baseCollectionConfig.syncMode ?? `eager`
+
+  if (
+    syncMode === `on-demand` &&
+    (initialData !== undefined || initialDataUpdatedAt !== undefined)
+  ) {
+    throw new InitialDataInOnDemandModeError()
+  }
+
+  const initialDataObserverOptions =
+    syncMode === `eager`
+      ? {
+          ...(initialData !== undefined && { initialData }),
+          ...(initialDataUpdatedAt !== undefined && {
+            initialDataUpdatedAt,
+          }),
+          // Placeholder data is observer-local UI state in TanStack Query. It
+          // must not be exposed as collection-wide normalized rows, including
+          // when supplied through QueryClient defaults.
+          placeholderData: undefined,
+        }
+      : {
+          // A collection-wide initializer cannot establish membership for
+          // arbitrary on-demand subsets. A defined initializer is needed to
+          // override a QueryClient default because Query Core can apply
+          // defaults again while constructing each Query.
+          initialData: () => undefined,
+          initialDataUpdatedAt: undefined,
+          placeholderData: undefined,
+        }
 
   // Compute the base query key once for cache lookups.
   // All derived keys (from on-demand predicates or function-based queryKey) must
@@ -653,7 +789,8 @@ export function queryCollectionOptions(
   // hashedQueryKey → queryKey
   const hashToQueryKey = new Map<string, QueryKey>()
 
-  // queryKey → Set<RowKey>
+  // queryKey → Set<RowKey>. Entry presence means ownership is resolved;
+  // an empty set represents a resolved query that currently owns no rows.
   const queryToRows = new Map<string, Set<string | number>>()
 
   // RowKey → Set<queryKey>
@@ -661,6 +798,7 @@ export function queryCollectionOptions(
 
   // queryKey → QueryObserver's unsubscribe function
   const unsubscribes = new Map<string, () => void>()
+  const pendingReadyUnsubscribes = new Map<string, Set<() => void>>()
 
   // queryKey → reference count (how many loadSubset calls are active)
   // Reference counting for QueryObserver lifecycle management
@@ -679,28 +817,63 @@ export function queryCollectionOptions(
   // 3. Decrements refcount and GCs rows where count reaches 0
   const queryRefCounts = new Map<string, number>()
 
-  // Helper function to add a row to the internal state
-  const addRow = (rowKey: string | number, hashedQueryKey: string) => {
-    const rowToQueriesSet = rowToQueries.get(rowKey) || new Set()
-    rowToQueriesSet.add(hashedQueryKey)
-    rowToQueries.set(rowKey, rowToQueriesSet)
+  const addRowOwner = (rowKey: string | number, hashedQueryKey: string) => {
+    const owners = rowToQueries.get(rowKey) || new Set<string>()
+    owners.add(hashedQueryKey)
+    rowToQueries.set(rowKey, owners)
 
-    const queryToRowsSet = queryToRows.get(hashedQueryKey) || new Set()
-    queryToRowsSet.add(rowKey)
-    queryToRows.set(hashedQueryKey, queryToRowsSet)
+    const ownedRows =
+      queryToRows.get(hashedQueryKey) || new Set<string | number>()
+    ownedRows.add(rowKey)
+    queryToRows.set(hashedQueryKey, ownedRows)
   }
 
-  // Helper function to remove a row from the internal state
-  const removeRow = (rowKey: string | number, hashedQuerKey: string) => {
-    const rowToQueriesSet = rowToQueries.get(rowKey) || new Set()
-    rowToQueriesSet.delete(hashedQuerKey)
-    rowToQueries.set(rowKey, rowToQueriesSet)
+  const addRowOwners = (rowKey: string | number, owners: Set<string>) => {
+    if (owners.size === 0) {
+      rowToQueries.delete(rowKey)
+      return
+    }
 
-    const queryToRowsSet = queryToRows.get(hashedQuerKey) || new Set()
-    queryToRowsSet.delete(rowKey)
-    queryToRows.set(hashedQuerKey, queryToRowsSet)
+    rowToQueries.set(rowKey, new Set(owners))
+    owners.forEach((owner) => {
+      const ownedRows = queryToRows.get(owner) || new Set<string | number>()
+      ownedRows.add(rowKey)
+      queryToRows.set(owner, ownedRows)
+    })
+  }
 
-    return rowToQueriesSet.size === 0
+  const removeRowOwner = (rowKey: string | number, hashedQueryKey: string) => {
+    const owners = rowToQueries.get(rowKey)
+    owners?.delete(hashedQueryKey)
+    if (!owners?.size) {
+      rowToQueries.delete(rowKey)
+    }
+
+    const ownedRows = queryToRows.get(hashedQueryKey)
+    ownedRows?.delete(rowKey)
+
+    return !owners?.size
+  }
+
+  const removeQueryOwnership = (hashedQueryKey: string) => {
+    const nextOwnersByRow = new Map<string | number, Set<string>>()
+
+    const rowKeys =
+      queryToRows.get(hashedQueryKey) ?? new Set<string | number>()
+
+    rowKeys.forEach((rowKey) => {
+      const owners = rowToQueries.get(rowKey)
+
+      if (!owners) {
+        return
+      }
+
+      const nextOwners = new Set(owners)
+      nextOwners.delete(hashedQueryKey)
+      nextOwnersByRow.set(rowKey, nextOwners)
+    })
+
+    return nextOwnersByRow
   }
 
   const internalSync: SyncConfig<any>[`sync`] = (params) => {
@@ -835,12 +1008,7 @@ export function queryCollectionOptions(
           continue
         }
 
-        rowToQueries.set(rowKey, new Set(owners))
-        owners.forEach((owner) => {
-          const queryToRowsSet = queryToRows.get(owner) || new Set()
-          queryToRowsSet.add(rowKey)
-          queryToRows.set(owner, queryToRowsSet)
-        })
+        addRowOwners(rowKey, owners)
 
         if (owners.has(hashedQueryKey)) {
           ownedRows.add(rowKey)
@@ -926,12 +1094,7 @@ export function queryCollectionOptions(
           return
         }
 
-        rowToQueries.set(row.key, new Set(ownerSet))
-        ownerSet.forEach((owner) => {
-          const queryToRowsSet = queryToRows.get(owner) || new Set()
-          queryToRowsSet.add(row.key)
-          queryToRows.set(owner, queryToRowsSet)
-        })
+        addRowOwners(row.key, ownerSet)
 
         if (ownerSet.has(hashedQueryKey)) {
           baseline.set(row.key, {
@@ -957,7 +1120,7 @@ export function queryCollectionOptions(
       baseline.forEach(({ value: oldItem, owners }, rowKey) => {
         owners.delete(hashedQueryKey)
         setPersistedOwners(rowKey, owners)
-        const needToRemove = removeRow(rowKey, hashedQueryKey)
+        const needToRemove = removeRowOwner(rowKey, hashedQueryKey)
         if (needToRemove) {
           rowsToDelete.push(oldItem)
         }
@@ -971,6 +1134,7 @@ export function queryCollectionOptions(
         `${QUERY_COLLECTION_GC_PREFIX}${hashedQueryKey}`,
       )
       commit()
+      queryToRows.delete(hashedQueryKey)
     }
 
     const schedulePersistedRetentionExpiry = (
@@ -1070,6 +1234,36 @@ export function queryCollectionOptions(
             }
           })
 
+    const waitForQueryReady = (
+      observer: QueryObserver<Array<any>, any, Array<any>, Array<any>, any>,
+      hashedQueryKey: string,
+    ): Promise<void> =>
+      new Promise<void>((resolve, reject) => {
+        const unsubscribe = observer.subscribe((result) => {
+          // Use a microtask in case `subscribe` is called synchronously, before `unsubscribe` is initialized
+          queueMicrotask(() => {
+            if (result.isSuccess || result.isError) {
+              unsubscribe()
+              const pending = pendingReadyUnsubscribes.get(hashedQueryKey)
+              pending?.delete(unsubscribe)
+              if (pending?.size === 0) {
+                pendingReadyUnsubscribes.delete(hashedQueryKey)
+              }
+
+              if (result.isSuccess) {
+                resolve()
+              } else {
+                reject(result.error)
+              }
+            }
+          })
+        })
+        const pending =
+          pendingReadyUnsubscribes.get(hashedQueryKey) ?? new Set()
+        pending.add(unsubscribe)
+        pendingReadyUnsubscribes.set(hashedQueryKey, pending)
+      })
+
     const createQueryFromOpts = (
       opts: LoadSubsetOptions = {},
       queryFunction: typeof queryFn = queryFn,
@@ -1084,7 +1278,10 @@ export function queryCollectionOptions(
       // Generate key using common function
       const key = generateQueryKeyFromOptions(opts)
       const hashedQueryKey = hashKey(key)
-      const extendedMeta = { ...meta, loadSubsetOptions: opts }
+      const extendedMeta = {
+        ...meta,
+        loadSubsetOptions: getLoadSubsetOptionsForMeta(opts),
+      }
       const retainedEntry = metadata?.collection.get(
         `${QUERY_COLLECTION_GC_PREFIX}${hashedQueryKey}`,
       )
@@ -1127,20 +1324,7 @@ export function queryCollectionOptions(
           }
 
           // Query is still loading, wait for the first result
-          return new Promise<void>((resolve, reject) => {
-            const unsubscribe = observer.subscribe((result) => {
-              // Use a microtask in case `subscribe` is called synchronously, before `unsubscribe` is initialized
-              queueMicrotask(() => {
-                if (result.isSuccess) {
-                  unsubscribe()
-                  resolve()
-                } else if (result.isError) {
-                  unsubscribe()
-                  reject(result.error)
-                }
-              })
-            })
-          })
+          return waitForQueryReady(observer, hashedQueryKey)
         }
       }
 
@@ -1151,18 +1335,24 @@ export function queryCollectionOptions(
         Array<any>,
         any
       > = {
+        ...pickDefinedQueryObserverOptions({
+          enabled,
+          refetchInterval,
+          retry,
+          retryDelay,
+          staleTime,
+          gcTime,
+          refetchOnWindowFocus,
+          refetchOnReconnect,
+          refetchOnMount,
+          networkMode,
+        }),
+        ...initialDataObserverOptions,
         queryKey: key,
         queryFn: queryFunction,
         meta: extendedMeta,
         structuralSharing: true,
         notifyOnChangeProps: `all`,
-
-        // Only include options that are explicitly defined to allow QueryClient defaultOptions to be used
-        ...(enabled !== undefined && { enabled }),
-        ...(refetchInterval !== undefined && { refetchInterval }),
-        ...(retry !== undefined && { retry }),
-        ...(retryDelay !== undefined && { retryDelay }),
-        ...(staleTime !== undefined && { staleTime }),
       }
 
       const localObserver = new QueryObserver<
@@ -1205,20 +1395,7 @@ export function queryCollectionOptions(
       }
 
       // Create a promise that resolves when the query result is first available
-      const readyPromise = new Promise<void>((resolve, reject) => {
-        const unsubscribe = localObserver.subscribe((result) => {
-          // Use a microtask in case `subscribe` is called synchronously, before `unsubscribe` is initialized
-          queueMicrotask(() => {
-            if (result.isSuccess) {
-              unsubscribe()
-              resolve()
-            } else if (result.isError) {
-              unsubscribe()
-              reject(result.error)
-            }
-          })
-        })
-      })
+      const readyPromise = waitForQueryReady(localObserver, hashedQueryKey)
 
       // If sync has started or there are subscribers to the collection, subscribe to the query straight away
       // This creates the main subscription that handles data updates
@@ -1274,6 +1451,13 @@ export function queryCollectionOptions(
       const previouslyOwnedRows = shouldUsePersistedBaseline
         ? new Set(persistedBaseline.keys())
         : getHydratedOwnedRowsForQueryBaseline(hashedQueryKey)
+      // From this point onward the result, including an empty result, is the
+      // authoritative ownership baseline until this query is cleaned up.
+      queryToRows.set(
+        hashedQueryKey,
+        queryToRows.get(hashedQueryKey) ?? new Set<string | number>(),
+      )
+
       const newItemsMap = new Map<string | number, any>()
       newItemsArray.forEach((item) => {
         const key = getKey(item)
@@ -1299,7 +1483,7 @@ export function queryCollectionOptions(
           const owners = getPersistedOwners(key)
           owners.delete(hashedQueryKey)
           setPersistedOwners(key, owners)
-          const needToRemove = removeRow(key, hashedQueryKey)
+          const needToRemove = removeRowOwner(key, hashedQueryKey)
           if (needToRemove) {
             write({ type: `delete`, value: oldItem })
           }
@@ -1314,7 +1498,7 @@ export function queryCollectionOptions(
           owners.add(hashedQueryKey)
           setPersistedOwners(key, owners)
         }
-        addRow(key, hashedQueryKey)
+        addRowOwner(key, hashedQueryKey)
         if (!currentSyncedItems.has(key)) {
           write({ type: `insert`, value: newItem })
         }
@@ -1362,6 +1546,24 @@ export function queryCollectionOptions(
           }
 
           if (retainedQueriesPendingRevalidation.has(hashedQueryKey)) {
+            const query = queryClient.getQueryCache().find({
+              queryKey,
+              exact: true,
+            })
+            if (query?.state.dataUpdateCount === 0) {
+              // Initial data seeds Query state without a fetch. It must not
+              // satisfy persistence retention that lasts until revalidation.
+              if (!result.isFetching) {
+                state.observers
+                  .get(hashedQueryKey)
+                  ?.refetch()
+                  .catch(() => {
+                    // Errors handled by the next handleQueryResult invocation
+                  })
+              }
+              return
+            }
+
             void reconcileSuccessfulResult(queryKey, result).catch((error) => {
               console.error(
                 `[QueryCollection] Error reconciling query ${String(queryKey)}:`,
@@ -1478,27 +1680,24 @@ export function queryCollectionOptions(
      * Perform row-level cleanup and remove all tracking for a query.
      * Callers are responsible for ensuring the query is safe to cleanup.
      */
+    const unsubscribePendingReadyListeners = (hashedQueryKey: string) => {
+      pendingReadyUnsubscribes.get(hashedQueryKey)?.forEach((unsubscribe) => {
+        unsubscribe()
+      })
+      pendingReadyUnsubscribes.delete(hashedQueryKey)
+    }
+
     const cleanupQueryInternal = (hashedQueryKey: string) => {
       unsubscribes.get(hashedQueryKey)?.()
       unsubscribes.delete(hashedQueryKey)
+      unsubscribePendingReadyListeners(hashedQueryKey)
       cancelPersistedRetentionExpiry(hashedQueryKey)
       retainedQueriesPendingRevalidation.delete(hashedQueryKey)
 
-      const rowKeys = queryToRows.get(hashedQueryKey) ?? new Set()
-      const nextOwnersByRow = new Map<string | number, Set<string>>()
+      const nextOwnersByRow = removeQueryOwnership(hashedQueryKey)
       const rowsToDelete: Array<any> = []
 
-      rowKeys.forEach((rowKey) => {
-        const queries = rowToQueries.get(rowKey)
-
-        if (!queries) {
-          return
-        }
-
-        const nextOwners = new Set(queries)
-        nextOwners.delete(hashedQueryKey)
-        nextOwnersByRow.set(rowKey, nextOwners)
-
+      nextOwnersByRow.forEach((nextOwners, rowKey) => {
         if (nextOwners.size === 0 && collection.has(rowKey)) {
           rowsToDelete.push(collection.get(rowKey))
         }
@@ -1554,6 +1753,7 @@ export function queryCollectionOptions(
         // Drop our subscription so hasListeners reflects only active consumers
         unsubscribes.get(hashedQueryKey)?.()
         unsubscribes.delete(hashedQueryKey)
+        unsubscribePendingReadyListeners(hashedQueryKey)
       }
 
       const hasListeners = observer?.hasListeners() ?? false
@@ -1645,7 +1845,10 @@ export function queryCollectionOptions(
       persistedRetentionTimers.clear()
 
       const allQueryKeys = [...hashToQueryKey.values()]
-      const allHashedKeys = [...state.observers.keys()]
+      const allHashedKeys = new Set([
+        ...state.observers.keys(),
+        ...queryToRows.keys(),
+      ])
 
       // Force cleanup all queries (explicit cleanup path)
       // This ignores hasListeners and always cleans up
@@ -1863,6 +2066,23 @@ export function queryCollectionOptions(
   // Enhanced internalSync that captures write functions for manual use
   const enhancedInternalSync: SyncConfig<any>[`sync`] = (params) => {
     const { begin, write, commit, collection } = params
+    let queryClientMounted = false
+
+    const mountQueryClient = () => {
+      if (!queryClientMounted) {
+        queryClient.mount()
+        queryClientMounted = true
+      }
+    }
+
+    const unmountQueryClient = () => {
+      if (queryClientMounted) {
+        queryClient.unmount()
+        queryClientMounted = false
+      }
+    }
+
+    mountQueryClient()
 
     // Get the base query key for the context (handle both static and function-based keys)
     const contextQueryKey =
@@ -1882,8 +2102,36 @@ export function queryCollectionOptions(
       updateCacheData,
     }
 
-    // Call the original internalSync logic
-    return internalSync(params)
+    // Call the original internalSync logic, pairing QueryClient mount with the
+    // collection sync lifecycle so focus/reconnect managers dispatch events for
+    // standalone QueryClient usage.
+    const syncResult = internalSync(params)
+    const sync =
+      typeof syncResult === `function`
+        ? { cleanup: syncResult }
+        : typeof syncResult === `object`
+          ? syncResult
+          : {}
+
+    return {
+      ...sync,
+      cleanup: () => {
+        try {
+          sync.cleanup?.()
+        } finally {
+          unmountQueryClient()
+        }
+      },
+    }
+  }
+
+  if (typeof process !== `undefined` && process.env.NODE_ENV === `test`) {
+    Object.defineProperty(enhancedInternalSync, `__getOwnershipMapsForTests`, {
+      value: () => ({
+        rowToQueries,
+        queryToRows,
+      }),
+    })
   }
 
   // Create write utils using the manual-sync module

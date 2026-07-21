@@ -6,6 +6,7 @@ import {
   add,
   and,
   avg,
+  caseWhen,
   coalesce,
   count,
   eq,
@@ -1843,6 +1844,34 @@ function createGroupByTests(autoIndex: `off` | `eager`): void {
         expect(stripVirtualProps(customerSummary.get(3))).toEqual({
           customer_id: 3,
           order_count: 2,
+        })
+      })
+
+      test(`caseWhen wrapping count can reference grouped columns`, () => {
+        const customerSummary = createLiveQueryCollection({
+          startSync: true,
+          query: (q) =>
+            q
+              .from({ orders: ordersCollection })
+              .groupBy(({ orders }) => orders.customer_id)
+              .select(({ orders }) => ({
+                customer_id: orders.customer_id,
+                first_customer_count: caseWhen(
+                  eq(orders.customer_id, 1),
+                  count(orders.id),
+                  0,
+                ),
+              })),
+        })
+
+        expect(customerSummary.size).toBe(3)
+        expect(stripVirtualProps(customerSummary.get(1))).toEqual({
+          customer_id: 1,
+          first_customer_count: 3,
+        })
+        expect(stripVirtualProps(customerSummary.get(2))).toEqual({
+          customer_id: 2,
+          first_customer_count: 0,
         })
       })
 

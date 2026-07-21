@@ -1,4 +1,5 @@
 import { createDeferred } from './deferred'
+import { safeRandomUUID } from './utils/uuid'
 import './duplicate-instance-check'
 import {
   MissingMutationFunctionError,
@@ -210,6 +211,18 @@ class Transaction<T extends object = Record<string, unknown>> {
   public state: TransactionState
   public mutationFn: MutationFn<T>
   public mutations: Array<PendingMutation<T>>
+  /**
+   * Deferred that settles when this transaction settles.
+   *
+   * Await `isPersisted.promise`, not `isPersisted` itself. The promise resolves
+   * when the transaction completes successfully and rejects if the transaction
+   * fails or is rolled back.
+   *
+   * For non-empty commits, the mutation function is the normal settlement
+   * boundary. This does not inherently prove that a backend has uploaded,
+   * confirmed, or read back the write unless the mutation function waits for
+   * that backend observation before returning.
+   */
   public isPersisted: Deferred<Transaction<T>>
   public autoCommit: boolean
   public createdAt: Date
@@ -224,7 +237,7 @@ class Transaction<T extends object = Record<string, unknown>> {
     if (typeof config.mutationFn === `undefined`) {
       throw new MissingMutationFunctionError()
     }
-    this.id = config.id ?? crypto.randomUUID()
+    this.id = config.id ?? safeRandomUUID()
     this.mutationFn = config.mutationFn
     this.state = `pending`
     this.mutations = []
@@ -245,9 +258,12 @@ class Transaction<T extends object = Record<string, unknown>> {
 
   /**
    * Execute collection operations within this transaction
-   * @param callback - Function containing collection operations to group together. If the
-   * callback returns a Promise, the transaction context will remain active until the promise
-   * settles, allowing optimistic writes after `await` boundaries.
+   * @param callback - Synchronous function containing collection operations to group together.
+   * The transaction context is active only for the synchronous duration of this callback.
+   * Async work should happen in `mutationFn`; collection operations after `await` boundaries
+   * inside this callback will not be part of this transaction. For manual transactions, call
+   * `mutate` multiple times before committing to add more synchronous operations to the same
+   * transaction.
    * @returns This transaction for chaining
    * @example
    * // Group multiple operations
@@ -279,6 +295,11 @@ class Transaction<T extends object = Record<string, unknown>> {
    *
    * tx.mutate(() => {
    *   collection.insert({ id: "1", text: "Item" })
+   * })
+   *
+   * // Add more synchronous mutations to the same transaction
+   * tx.mutate(() => {
+   *   collection.update("1", draft => { draft.text = "Updated item" })
    * })
    *
    * // Commit later when ready
@@ -325,26 +346,38 @@ class Transaction<T extends object = Record<string, unknown>> {
    * @param mutations - Array of new mutations to apply
    */
   applyMutations(mutations: Array<PendingMutation<any>>): void {
-    for (const newMutation of mutations) {
-      const existingIndex = this.mutations.findIndex(
-        (m) => m.globalKey === newMutation.globalKey,
-      )
+    // Merge via a globalKey-keyed map rather than a findIndex scan per
+    // mutation, which is O(n²) for bulk operations (e.g. inserting many rows
+    // in one call). Map preserves insertion order, matching the previous
+    // replace-in-place / remove / append semantics.
+    const merged = new Map<string, PendingMutation<any>>()
+    for (const mutation of this.mutations) {
+      merged.set(mutation.globalKey, mutation)
+    }
 
-      if (existingIndex >= 0) {
-        const existingMutation = this.mutations[existingIndex]!
+    for (const newMutation of mutations) {
+      const existingMutation = merged.get(newMutation.globalKey)
+
+      if (existingMutation) {
         const mergeResult = mergePendingMutations(existingMutation, newMutation)
 
         if (mergeResult === null) {
           // Remove the mutation (e.g., delete after insert cancels both)
-          this.mutations.splice(existingIndex, 1)
+          merged.delete(newMutation.globalKey)
         } else {
           // Replace with merged mutation
-          this.mutations[existingIndex] = mergeResult
+          merged.set(newMutation.globalKey, mergeResult)
         }
       } else {
         // Insert new mutation
-        this.mutations.push(newMutation)
+        merged.set(newMutation.globalKey, newMutation)
       }
+    }
+
+    // Rebuild in place to preserve the array's identity for external holders
+    this.mutations.length = 0
+    for (const mutation of merged.values()) {
+      this.mutations.push(mutation)
     }
   }
 

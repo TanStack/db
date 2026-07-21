@@ -1,4 +1,5 @@
 import { withArrayChangeTracking, withChangeTracking } from '../proxy'
+import { safeRandomUUID } from '../utils/uuid'
 import { createTransaction, getActiveTransaction } from '../transactions'
 import {
   DeleteKeyNotFoundError,
@@ -193,7 +194,7 @@ export class CollectionMutationsManager<
       const globalKey = this.generateGlobalKey(key, item)
 
       const mutation: PendingMutation<TOutput, `insert`> = {
-        mutationId: crypto.randomUUID(),
+        mutationId: safeRandomUUID(),
         original: {},
         modified: validatedData,
         // Pick the values from validatedData based on what's passed in - this is for cases
@@ -231,9 +232,7 @@ export class CollectionMutationsManager<
     } else {
       // Create a new transaction with a mutation function that calls the onInsert handler
       const directOpTransaction = createTransaction<TOutput>({
-        metadata: {
-          [DIRECT_TRANSACTION_METADATA_KEY]: true,
-        },
+        metadata: { [DIRECT_TRANSACTION_METADATA_KEY]: true },
         mutationFn: async (params) => {
           // Call the onInsert handler with the transaction and collection
           return await this.config.onInsert!({
@@ -368,7 +367,7 @@ export class CollectionMutationsManager<
         const globalKey = this.generateGlobalKey(modifiedItemId, modifiedItem)
 
         return {
-          mutationId: crypto.randomUUID(),
+          mutationId: safeRandomUUID(),
           original: originalItem,
           modified: modifiedItem,
           // Pick the values from modifiedItem based on what's passed in - this is for cases
@@ -430,9 +429,7 @@ export class CollectionMutationsManager<
 
     // Create a new transaction with a mutation function that calls the onUpdate handler
     const directOpTransaction = createTransaction<TOutput>({
-      metadata: {
-        [DIRECT_TRANSACTION_METADATA_KEY]: true,
-      },
+      metadata: { [DIRECT_TRANSACTION_METADATA_KEY]: true },
       mutationFn: async (params) => {
         // Call the onUpdate handler with the transaction and collection
         return this.config.onUpdate!({
@@ -501,7 +498,7 @@ export class CollectionMutationsManager<
         `delete`,
         CollectionImpl<TOutput, TKey, TUtils, TSchema, TInput>
       > = {
-        mutationId: crypto.randomUUID(),
+        mutationId: safeRandomUUID(),
         original: this.state.get(key)!,
         modified: this.state.get(key)!,
         changes: this.state.get(key)!,
@@ -536,9 +533,7 @@ export class CollectionMutationsManager<
     // Create a new transaction with a mutation function that calls the onDelete handler
     const directOpTransaction = createTransaction<TOutput>({
       autoCommit: true,
-      metadata: {
-        [DIRECT_TRANSACTION_METADATA_KEY]: true,
-      },
+      metadata: { [DIRECT_TRANSACTION_METADATA_KEY]: true },
       mutationFn: async (params) => {
         // Call the onDelete handler with the transaction and collection
         return this.config.onDelete!({
