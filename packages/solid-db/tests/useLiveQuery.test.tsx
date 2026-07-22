@@ -36,6 +36,14 @@ type Issue = {
   userId: string
 }
 
+type DeepNode = {
+  id: string
+  size: {
+    min: number
+    max: number
+  }
+}
+
 const initialPersons: Array<Person> = [
   {
     id: `1`,
@@ -2705,5 +2713,112 @@ describe(`Query Collections`, () => {
 
       expect(rendered.result()).toBeUndefined()
     })
+  })
+
+  it('single-row reflects the current value on remount', async () => {
+    const nodeId = 'node-1'
+    const collection = createCollection(
+      mockSyncCollectionOptions<DeepNode>({
+        id: `remount-single-nested-test`,
+        getKey: (item) => item.id,
+        initialData: [
+          {
+            id: nodeId,
+            size: { min: 1, max: 10 },
+          },
+        ],
+      }),
+    )
+
+    const updateMax = (max: number) => {
+      collection.update(nodeId, (draft) => {
+        draft.size.max = max
+      })
+    }
+
+    const mount = () =>
+      render(() => {
+        const query = useLiveQuery((q) =>
+          q
+            .from({ source: collection })
+            .where(({ source }) => eq(source.id, nodeId))
+            .findOne(),
+        )
+
+        return <span data-testid="value">{query()?.size.max ?? 'pending'}</span>
+      })
+
+    const first = mount()
+
+    await waitFor(() =>
+      expect(first.getByTestId(`value`).textContent).toBe(`10`),
+    )
+
+    updateMax(777)
+
+    await waitFor(() =>
+      expect(first.getByTestId(`value`).textContent).toBe(`777`),
+    )
+
+    first.unmount()
+
+    const second = mount()
+    await waitFor(() =>
+      expect(second.getByTestId(`value`).textContent).toBe(`777`),
+    )
+  })
+
+  it('array reflects the current value on remount', async () => {
+    const nodeId = 'node-1'
+    const collection = createCollection(
+      mockSyncCollectionOptions<DeepNode>({
+        id: `remount-single-nested-test`,
+        getKey: (item) => item.id,
+        initialData: [
+          {
+            id: nodeId,
+            size: { min: 1, max: 10 },
+          },
+        ],
+      }),
+    )
+
+    const updateMax = (max: number) => {
+      collection.update(nodeId, (draft) => {
+        draft.size.max = max
+      })
+    }
+
+    const mount = () =>
+      render(() => {
+        const query = useLiveQuery((q) =>
+          q
+            .from({ source: collection })
+            .where(({ source }) => eq(source.id, nodeId)),
+        )
+
+        return (
+          <span data-testid="value">{query()[0]?.size.max ?? 'pending'}</span>
+        )
+      })
+
+    const first = mount()
+
+    await waitFor(() =>
+      expect(first.getByTestId(`value`).textContent).toBe(`10`),
+    )
+
+    updateMax(777)
+
+    await waitFor(() =>
+      expect(first.getByTestId(`value`).textContent).toBe(`777`),
+    )
+
+    first.unmount()
+
+    const second = mount()
+    await waitFor(() =>
+      expect(second.getByTestId(`value`).textContent).toBe(`777`),
+    )
   })
 })
