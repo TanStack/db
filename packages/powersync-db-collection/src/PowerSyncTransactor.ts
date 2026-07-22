@@ -284,7 +284,7 @@ export class PowerSyncTransactor {
 
     // Need to get the operation in order to wait for it
     const diffOperation = await context.get<{ id: string; timestamp: string }>(
-      sanitizeSQL`SELECT id, timestamp FROM ${trackedTableName} ORDER BY timestamp DESC LIMIT 1`,
+      sanitizeSQL`SELECT id, timestamp FROM ${trackedTableName} ORDER BY operation_id DESC LIMIT 1`,
     )
     return {
       tableName,
