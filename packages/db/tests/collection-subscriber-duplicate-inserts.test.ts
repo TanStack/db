@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest'
 import { createCollection } from '../src/collection/index.js'
 import { BTreeIndex } from '../src/indexes/btree-index.js'
 import { createLiveQueryCollection, eq } from '../src/query/index.js'
+import { filterDuplicateInserts } from '../src/query/live/utils.js'
 import { mockSyncCollectionOptions } from './utils.js'
 import type { ChangeMessage } from '../src/types.js'
 
@@ -451,5 +452,68 @@ describe(`CollectionSubscriber duplicate insert prevention`, () => {
     expect(finalResults).toHaveLength(2)
 
     subscription.unsubscribe()
+  })
+
+  describe(`filterDuplicateInserts`, () => {
+    it(`should return empty output for empty changes and empty sentKeys`, () => {
+      const sentKeys = new Set<string | number>()
+      const changes: Array<ChangeMessage<TestItem, string>> = []
+
+      const result = filterDuplicateInserts(changes, sentKeys)
+
+      expect(result).toEqual([])
+      expect(sentKeys.size).toBe(0)
+    })
+
+    it(`should skip deletes for keys never sent to D2`, () => {
+      const sentKeys = new Set<string | number>([`1`, `2`])
+
+      const changes: Array<ChangeMessage<TestItem, string>> = [
+        { type: `delete`, key: `3`, value: { id: `3`, value: 50 } },
+      ]
+
+      const result = filterDuplicateInserts(changes, sentKeys)
+
+      expect(result).toHaveLength(0)
+      expect(sentKeys.has(`1`)).toBe(true)
+      expect(sentKeys.has(`2`)).toBe(true)
+      expect(sentKeys.has(`3`)).toBe(false)
+    })
+
+    it(`should forward deletes for keys that were sent to D2`, () => {
+      const sentKeys = new Set<string | number>([`1`, `2`])
+
+      const changes: Array<ChangeMessage<TestItem, string>> = [
+        { type: `delete`, key: `2`, value: { id: `2`, value: 90 } },
+      ]
+
+      const result = filterDuplicateInserts(changes, sentKeys)
+
+      expect(result).toHaveLength(1)
+      expect(result[0]!.type).toBe(`delete`)
+      expect(result[0]!.key).toBe(`2`)
+      expect(sentKeys.has(`2`)).toBe(false)
+    })
+
+    it(`should handle mixed inserts and ghost deletes correctly`, () => {
+      const sentKeys = new Set<string | number>([`1`])
+
+      const changes: Array<ChangeMessage<TestItem, string>> = [
+        { type: `insert`, key: `2`, value: { id: `2`, value: 90 } },
+        { type: `delete`, key: `3`, value: { id: `3`, value: 50 } },
+        { type: `delete`, key: `1`, value: { id: `1`, value: 100 } },
+        { type: `insert`, key: `4`, value: { id: `4`, value: 70 } },
+      ]
+
+      const result = filterDuplicateInserts(changes, sentKeys)
+
+      expect(result).toHaveLength(3)
+      expect(result.map((c) => ({ type: c.type, key: c.key }))).toEqual([
+        { type: `insert`, key: `2` },
+        { type: `delete`, key: `1` },
+        { type: `insert`, key: `4` },
+      ])
+      expect(sentKeys).toEqual(new Set([`2`, `4`]))
+    })
   })
 })
