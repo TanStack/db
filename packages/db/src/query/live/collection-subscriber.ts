@@ -248,15 +248,26 @@ export class CollectionSubscriber<
     // Use a holder to forward-reference subscription in the callback
     const subscriptionHolder: { current?: CollectionSubscription } = {}
 
+    const windowSize = limit + offset
     const sendChangesInRange = (
       changes: Iterable<ChangeMessage<any, string | number>>,
     ) => {
       const changesArray = Array.isArray(changes) ? changes : [...changes]
+      const windowBoundary = this.biggest
+      const relevant =
+        windowBoundary === undefined || windowSize === Infinity
+          ? changesArray
+          : changesArray.filter((change) => {
+              if (change.type !== `insert`) return true
+              if (this.sentToD2Keys.has(change.key)) return true
+              if (this.sentToD2Keys.size < windowSize) return true
+              return orderByInfo.comparator(windowBoundary, change.value) >= 0
+            })
 
-      this.trackSentValues(changesArray, orderByInfo.comparator)
+      this.trackSentValues(relevant, orderByInfo.comparator)
 
       // Split live updates into a delete of the old value and an insert of the new value
-      const splittedChanges = splitUpdates(changesArray)
+      const splittedChanges = splitUpdates(relevant)
       this.sendChangesToPipelineWithTracking(
         splittedChanges,
         subscriptionHolder.current!,
