@@ -1,58 +1,33 @@
 ---
-id: QueryCollectionError
-title: QueryCollectionError
+id: InitialDataInOnDemandModeError
+title: InitialDataInOnDemandModeError
 ---
 
-# Class: QueryCollectionError
+# Class: InitialDataInOnDemandModeError
 
-Defined in: [packages/query-db-collection/src/errors.ts:4](https://github.com/TanStack/db/blob/main/packages/query-db-collection/src/errors.ts#L4)
+Defined in: [packages/query-db-collection/src/errors.ts:39](https://github.com/TanStack/db/blob/main/packages/query-db-collection/src/errors.ts#L39)
 
 ## Extends
 
-- `TanStackDBError`
-
-## Extended by
-
-- [`QueryKeyRequiredError`](QueryKeyRequiredError.md)
-- [`QueryFnRequiredError`](QueryFnRequiredError.md)
-- [`QueryClientRequiredError`](QueryClientRequiredError.md)
-- [`GetKeyRequiredError`](GetKeyRequiredError.md)
-- [`InitialDataInOnDemandModeError`](InitialDataInOnDemandModeError.md)
-- [`SyncNotInitializedError`](SyncNotInitializedError.md)
-- [`InvalidItemStructureError`](InvalidItemStructureError.md)
-- [`ItemNotFoundError`](ItemNotFoundError.md)
-- [`DuplicateKeyInBatchError`](DuplicateKeyInBatchError.md)
-- [`UpdateOperationItemNotFoundError`](UpdateOperationItemNotFoundError.md)
-- [`DeleteOperationItemNotFoundError`](DeleteOperationItemNotFoundError.md)
-- [`InvalidSyncOperationError`](InvalidSyncOperationError.md)
-- [`UnknownOperationTypeError`](UnknownOperationTypeError.md)
-- [`MissingKeyFieldError`](MissingKeyFieldError.md)
+- [`QueryCollectionError`](QueryCollectionError.md)
 
 ## Constructors
 
 ### Constructor
 
 ```ts
-new QueryCollectionError(message): QueryCollectionError;
+new InitialDataInOnDemandModeError(): InitialDataInOnDemandModeError;
 ```
 
-Defined in: [packages/query-db-collection/src/errors.ts:5](https://github.com/TanStack/db/blob/main/packages/query-db-collection/src/errors.ts#L5)
-
-#### Parameters
-
-##### message
-
-`string`
+Defined in: [packages/query-db-collection/src/errors.ts:40](https://github.com/TanStack/db/blob/main/packages/query-db-collection/src/errors.ts#L40)
 
 #### Returns
 
-`QueryCollectionError`
+`InitialDataInOnDemandModeError`
 
 #### Overrides
 
-```ts
-TanStackDBError.constructor
-```
+[`QueryCollectionError`](QueryCollectionError.md).[`constructor`](QueryCollectionError.md#constructor)
 
 ## Properties
 
@@ -66,9 +41,7 @@ Defined in: node\_modules/.pnpm/typescript@5.9.3/node\_modules/typescript/lib/li
 
 #### Inherited from
 
-```ts
-TanStackDBError.cause
-```
+[`QueryCollectionError`](QueryCollectionError.md).[`cause`](QueryCollectionError.md#cause)
 
 ***
 
@@ -82,9 +55,7 @@ Defined in: node\_modules/.pnpm/typescript@5.9.3/node\_modules/typescript/lib/li
 
 #### Inherited from
 
-```ts
-TanStackDBError.message
-```
+[`QueryCollectionError`](QueryCollectionError.md).[`message`](QueryCollectionError.md#message)
 
 ***
 
@@ -98,9 +69,7 @@ Defined in: node\_modules/.pnpm/typescript@5.9.3/node\_modules/typescript/lib/li
 
 #### Inherited from
 
-```ts
-TanStackDBError.name
-```
+[`QueryCollectionError`](QueryCollectionError.md).[`name`](QueryCollectionError.md#name)
 
 ***
 
@@ -114,9 +83,7 @@ Defined in: node\_modules/.pnpm/typescript@5.9.3/node\_modules/typescript/lib/li
 
 #### Inherited from
 
-```ts
-TanStackDBError.stack
-```
+[`QueryCollectionError`](QueryCollectionError.md).[`stack`](QueryCollectionError.md#stack)
 
 ***
 
@@ -140,9 +107,7 @@ not capture any frames.
 
 #### Inherited from
 
-```ts
-TanStackDBError.stackTraceLimit
-```
+[`QueryCollectionError`](QueryCollectionError.md).[`stackTraceLimit`](QueryCollectionError.md#stacktracelimit)
 
 ## Methods
 
@@ -214,9 +179,7 @@ a();
 
 #### Inherited from
 
-```ts
-TanStackDBError.captureStackTrace
-```
+[`QueryCollectionError`](QueryCollectionError.md).[`captureStackTrace`](QueryCollectionError.md#capturestacktrace)
 
 ***
 
@@ -248,6 +211,4 @@ https://v8.dev/docs/stack-trace-api#customizing-stack-traces
 
 #### Inherited from
 
-```ts
-TanStackDBError.prepareStackTrace
-```
+[`QueryCollectionError`](QueryCollectionError.md).[`prepareStackTrace`](QueryCollectionError.md#preparestacktrace)
