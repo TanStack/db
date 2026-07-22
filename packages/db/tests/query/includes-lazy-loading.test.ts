@@ -676,3 +676,191 @@ describe(`includes child where clauses in loadSubset`, () => {
     expect(hasStatusFilter).toBe(true)
   })
 })
+
+describe(`subquery-in-select readiness with cold on-demand inner`, () => {
+  /**
+   * A live query whose select contains a subquery against an on-demand
+   * collection must reach ready even when the outer returns zero rows and
+   * no other consumer has warmed the inner. The lazy mechanism does not
+   * fire loadSubset on the inner (no parent rows → no per-row tap), so
+   * the inner must not block allCollectionsReady.
+   *
+   * These tests use an inner collection that becomes ready ONLY via
+   * loadSubset (no markReady in initial sync) — calling markReady in
+   * sync would mask the bug.
+   */
+
+  type Post = { id: number; authorId: string; title: string }
+  type Comment = { id: number; postId: number; body: string }
+
+  function createPostsCollection(initial: Array<Post>) {
+    const loadSubsetCalls: Array<LoadSubsetOptions> = []
+
+    const collection = createCollection<Post>({
+      id: `subq-cold-posts-${Math.random().toString(36).slice(2, 8)}`,
+      getKey: (p) => p.id,
+      syncMode: `on-demand`,
+      sync: {
+        sync: ({ begin, write, commit, markReady }) => {
+          // Intentionally do NOT call markReady here — only via loadSubset,
+          // mirroring a real on-demand source where readiness is gated on
+          // the first loadSubset completing.
+          return {
+            loadSubset: vi.fn((options: LoadSubsetOptions) => {
+              loadSubsetCalls.push(options)
+              begin()
+              for (const p of initial) {
+                write({ type: `insert`, value: p })
+              }
+              commit()
+              markReady()
+              return Promise.resolve()
+            }),
+          }
+        },
+      },
+    })
+
+    return { collection, loadSubsetCalls }
+  }
+
+  function createCommentsCollection() {
+    const loadSubsetCalls: Array<LoadSubsetOptions> = []
+    const sampleComments: Array<Comment> = [
+      { id: 100, postId: 1, body: `c1` },
+      { id: 101, postId: 1, body: `c2` },
+      { id: 200, postId: 2, body: `c3` },
+    ]
+
+    const collection = createCollection<Comment>({
+      id: `subq-cold-comments-${Math.random().toString(36).slice(2, 8)}`,
+      getKey: (c) => c.id,
+      syncMode: `on-demand`,
+      sync: {
+        sync: ({ begin, write, commit, markReady }) => {
+          // Intentionally do NOT call markReady here — only via loadSubset.
+          // This mirrors a real on-demand source: the collection is not
+          // ready until its first loadSubset completes.
+          return {
+            loadSubset: vi.fn((options: LoadSubsetOptions) => {
+              loadSubsetCalls.push(options)
+              begin()
+              for (const c of sampleComments) {
+                // Best-effort filter: if the request includes a postId IN
+                // filter (the lazy subquery passes one), only emit matching
+                // rows. Otherwise emit nothing.
+                const filters = extractSimpleComparisons(options.where)
+                const postFilter = filters.find(
+                  (f) => f.field[0] === `postId` && f.operator === `in`,
+                )
+                if (postFilter && Array.isArray(postFilter.value)) {
+                  if (postFilter.value.includes(c.postId)) {
+                    write({ type: `insert`, value: c })
+                  }
+                }
+              }
+              commit()
+              markReady()
+              return Promise.resolve()
+            }),
+          }
+        },
+      },
+    })
+
+    return { collection, loadSubsetCalls }
+  }
+
+  // Race a promise against a short timeout. Used to detect the hang —
+  // if preload never resolves, the test fails fast instead of timing out
+  // the whole vitest run.
+  function withTimeout<T>(p: Promise<T>, ms: number, label: string) {
+    return Promise.race([
+      p,
+      new Promise<never>((_, reject) =>
+        setTimeout(() => reject(new Error(`Timed out: ${label}`)), ms),
+      ),
+    ])
+  }
+
+  it(`should reach ready when outer is empty and inner is cold on-demand`, async () => {
+    const { collection: posts } = createPostsCollection([])
+    const { collection: comments, loadSubsetCalls: commentsLoads } =
+      createCommentsCollection()
+
+    const liveQuery = createLiveQueryCollection((q) =>
+      q
+        .from({ p: posts })
+        .where(({ p }) => eq(p.authorId, `X`))
+        .select(({ p }) => ({
+          id: p.id,
+          title: p.title,
+          comments: toArray(
+            q
+              .from({ c: comments })
+              .where(({ c }) => eq(c.postId, p.id))
+              .select(({ c }) => ({ id: c.id, body: c.body })),
+          ),
+        })),
+    )
+
+    // Without the fix this hangs forever (allCollectionsReady never goes
+    // true because the cold on-demand `comments` collection never receives
+    // a loadSubset call when the outer is empty).
+    await withTimeout(liveQuery.preload(), 1000, `liveQuery.preload()`)
+
+    expect(liveQuery.isReady()).toBe(true)
+    expect(liveQuery.size).toBe(0)
+    // The inner was never loaded — that's fine, there were no parent rows
+    // to drive a per-row load.
+    expect(commentsLoads.length).toBe(0)
+  })
+
+  it(`should still drive per-row loadSubset on the inner when outer has rows`, async () => {
+    const { collection: posts } = createPostsCollection([
+      { id: 1, authorId: `X`, title: `Post 1` },
+      { id: 2, authorId: `X`, title: `Post 2` },
+    ])
+    const { collection: comments, loadSubsetCalls: commentsLoads } =
+      createCommentsCollection()
+
+    const liveQuery = createLiveQueryCollection((q) =>
+      q
+        .from({ p: posts })
+        .where(({ p }) => eq(p.authorId, `X`))
+        .select(({ p }) => ({
+          id: p.id,
+          title: p.title,
+          comments: toArray(
+            q
+              .from({ c: comments })
+              .where(({ c }) => eq(c.postId, p.id))
+              .select(({ c }) => ({ id: c.id, body: c.body })),
+          ),
+        })),
+    )
+
+    await withTimeout(liveQuery.preload(), 1000, `liveQuery.preload()`)
+
+    expect(liveQuery.isReady()).toBe(true)
+    expect(liveQuery.size).toBe(2)
+    // The lazy subquery should have driven at least one loadSubset call on
+    // the inner with an inArray(postId, [...]) filter.
+    expect(commentsLoads.length).toBeGreaterThan(0)
+    const hasCorrelation = commentsLoads.some((call) => {
+      const filters = extractSimpleComparisons(call.where)
+      return filters.some(
+        (f) =>
+          f.field[0] === `postId` &&
+          f.operator === `in` &&
+          Array.isArray(f.value),
+      )
+    })
+    expect(hasCorrelation).toBe(true)
+
+    const post1 = stripVirtualProps(liveQuery.get(1)) as any
+    const post2 = stripVirtualProps(liveQuery.get(2)) as any
+    expect(post1.comments).toHaveLength(2)
+    expect(post2.comments).toHaveLength(1)
+  })
+})
