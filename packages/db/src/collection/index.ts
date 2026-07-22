@@ -997,11 +997,12 @@ function buildCompareOptionsFromConfig(
 ): StringCollationConfig {
   if (config.defaultStringCollation) {
     const options = config.defaultStringCollation
+    const stringSortEffective = options.stringSort ?? `locale`
+    const localeMode = stringSortEffective === `locale`
     return {
-      stringSort: options.stringSort ?? `locale`,
-      locale: options.stringSort === `locale` ? options.locale : undefined,
-      localeOptions:
-        options.stringSort === `locale` ? options.localeOptions : undefined,
+      stringSort: stringSortEffective,
+      ...(localeMode && options.locale !== undefined && { locale: options.locale }),
+      ...(localeMode && options.localeOptions !== undefined && { localeOptions: options.localeOptions }),
     }
   } else {
     return {

@@ -942,4 +942,142 @@ describe(`Collection Auto-Indexing`, () => {
       })
     })
   })
+
+  it(`should not include undefined locale/localeOptions keys in compareOptions when stringSort is not locale`, () => {
+    const collection = createCollection<TestItem, string>({
+      getKey: (item) => item.id,
+      defaultStringCollation: { stringSort: `codepoint` },
+      startSync: true,
+      sync: {
+        sync: ({ begin, commit, markReady }) => {
+          begin()
+          commit()
+          markReady()
+        },
+      },
+    })
+
+    const opts = collection.compareOptions
+    expect(opts.stringSort).toBe(`codepoint`)
+    expect(Object.keys(opts)).not.toContain(`locale`)
+    expect(Object.keys(opts)).not.toContain(`localeOptions`)
+    expect(Object.keys(opts)).toEqual([`stringSort`])
+  })
+
+  it(`should not include undefined locale/localeOptions keys when stringSort is locale without explicit locale`, () => {
+    const collection = createCollection<TestItem, string>({
+      getKey: (item) => item.id,
+      defaultStringCollation: { stringSort: `locale` },
+      startSync: true,
+      sync: {
+        sync: ({ begin, commit, markReady }) => {
+          begin()
+          commit()
+          markReady()
+        },
+      },
+    })
+
+    const opts = collection.compareOptions
+    expect(opts.stringSort).toBe(`locale`)
+    expect(Object.keys(opts)).not.toContain(`locale`)
+    expect(Object.keys(opts)).not.toContain(`localeOptions`)
+    expect(Object.keys(opts)).toEqual([`stringSort`])
+  })
+
+  it(`should include locale and localeOptions keys when explicitly provided`, () => {
+    const collection = createCollection<TestItem, string>({
+      getKey: (item) => item.id,
+      defaultStringCollation: {
+        stringSort: `locale`,
+        locale: `en-US`,
+        localeOptions: { sensitivity: `base` },
+      },
+      startSync: true,
+      sync: {
+        sync: ({ begin, commit, markReady }) => {
+          begin()
+          commit()
+          markReady()
+        },
+      },
+    })
+
+    const opts = collection.compareOptions
+    expect(opts.stringSort).toBe(`locale`)
+    expect(opts.locale).toBe(`en-US`)
+    expect(opts.localeOptions).toEqual({ sensitivity: `base` })
+    expect(Object.keys(opts).sort()).toEqual([`locale`, `localeOptions`, `stringSort`])
+  })
+
+  it(`should include locale fields when stringSort is omitted but locale values are provided`, () => {
+    const collection = createCollection<TestItem, string>({
+      getKey: (item) => item.id,
+      defaultStringCollation: {
+        locale: `en-US`,
+        localeOptions: { sensitivity: `base` },
+      },
+      startSync: true,
+      sync: {
+        sync: ({ begin, commit, markReady }) => {
+          begin()
+          commit()
+          markReady()
+        },
+      },
+    })
+
+    const opts = collection.compareOptions
+    expect(opts.stringSort).toBe(`locale`)
+    expect(opts.locale).toBe(`en-US`)
+    expect(opts.localeOptions).toEqual({ sensitivity: `base` })
+  })
+
+  it(`should not create duplicate auto-indexes when defaultStringCollation matches defaults`, async () => {
+    const collection = createCollection<TestItem, string>({
+      getKey: (item) => item.id,
+      autoIndex: `eager`,
+      defaultIndexType: BTreeIndex,
+      defaultStringCollation: { stringSort: `locale` },
+      startSync: true,
+      sync: {
+        sync: ({ begin, write, commit, markReady }) => {
+          begin()
+          for (const item of testData) {
+            write({ type: `insert`, value: item })
+          }
+          commit()
+          markReady()
+        },
+      },
+    })
+
+    await collection.stateWhenReady()
+
+    const sub1 = collection.subscribeChanges(() => {}, {
+      whereExpression: eq(row.status, `active`),
+    })
+    expect(collection.indexes.size).toBe(1)
+
+    // A second subscription on the same field should reuse the index
+    const sub2 = collection.subscribeChanges(() => {}, {
+      whereExpression: eq(row.status, `inactive`),
+    })
+    expect(collection.indexes.size).toBe(1)
+
+    // Verify the index is used for queries
+    withIndexTracking(collection, (tracker) => {
+      collection.currentStateAsChanges({
+        where: eq(row.status, `active`),
+      })
+
+      expectIndexUsage(tracker.stats, {
+        shouldUseIndex: true,
+        shouldUseFullScan: false,
+      })
+    })
+
+    sub1.unsubscribe()
+    sub2.unsubscribe()
+  })
 })
