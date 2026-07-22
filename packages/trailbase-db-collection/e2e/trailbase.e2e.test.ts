@@ -6,7 +6,7 @@
  */
 
 import { describe, expect, inject } from 'vitest'
-import { createCollection, BTreeIndex } from '@tanstack/db'
+import { BTreeIndex, createCollection } from '@tanstack/db'
 import { initClient } from 'trailbase'
 import { trailBaseCollectionOptions } from '../src/trailbase'
 import {

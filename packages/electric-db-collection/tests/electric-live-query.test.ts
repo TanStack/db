@@ -1,11 +1,11 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import {
+  BasicIndex,
   createCollection,
   createLiveQueryCollection,
   eq,
   gt,
   lt,
-  BasicIndex,
 } from '@tanstack/db'
 import { electricCollectionOptions } from '../src/electric'
 import type { ElectricCollectionUtils } from '../src/electric'
