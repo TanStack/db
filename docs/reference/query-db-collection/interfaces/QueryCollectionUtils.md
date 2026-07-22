@@ -8,7 +8,8 @@ title: QueryCollectionUtils
 Defined in: [packages/query-db-collection/src/query.ts:235](https://github.com/TanStack/db/blob/main/packages/query-db-collection/src/query.ts#L235)
 
 Utility methods available on Query Collections for direct writes and manual operations.
-Direct writes bypass the normal query/mutation flow and write directly to the synced data store.
+Direct writes bypass optimistic mutations and write to the synced data store.
+Eager collections patch Query cache; on-demand collections revalidate scoped entries.
 
 ## Extends
 
@@ -187,7 +188,7 @@ writeBatch: (callback) => void;
 
 Defined in: [packages/query-db-collection/src/query.ts:252](https://github.com/TanStack/db/blob/main/packages/query-db-collection/src/query.ts#L252)
 
-Execute multiple write operations as a single atomic batch to the synced data store
+Execute direct writes as one atomic batch, then update or revalidate the Query cache
 
 #### Parameters
 
@@ -209,7 +210,7 @@ writeDelete: (keys) => void;
 
 Defined in: [packages/query-db-collection/src/query.ts:248](https://github.com/TanStack/db/blob/main/packages/query-db-collection/src/query.ts#L248)
 
-Delete one or more items directly from the synced data store without triggering a query refetch or optimistic update
+Delete items without an optimistic update. On-demand queries revalidate their scoped cache entries.
 
 #### Parameters
 
@@ -231,7 +232,7 @@ writeInsert: (data) => void;
 
 Defined in: [packages/query-db-collection/src/query.ts:244](https://github.com/TanStack/db/blob/main/packages/query-db-collection/src/query.ts#L244)
 
-Insert one or more items directly into the synced data store without triggering a query refetch or optimistic update
+Insert items without an optimistic update. On-demand queries revalidate their scoped cache entries.
 
 #### Parameters
 
@@ -253,7 +254,7 @@ writeUpdate: (updates) => void;
 
 Defined in: [packages/query-db-collection/src/query.ts:246](https://github.com/TanStack/db/blob/main/packages/query-db-collection/src/query.ts#L246)
 
-Update one or more items directly in the synced data store without triggering a query refetch or optimistic update
+Update items without an optimistic update. On-demand queries revalidate their scoped cache entries.
 
 #### Parameters
 
@@ -275,7 +276,7 @@ writeUpsert: (data) => void;
 
 Defined in: [packages/query-db-collection/src/query.ts:250](https://github.com/TanStack/db/blob/main/packages/query-db-collection/src/query.ts#L250)
 
-Insert or update one or more items directly in the synced data store without triggering a query refetch or optimistic update
+Insert or update items without an optimistic update. On-demand queries revalidate their scoped cache entries.
 
 #### Parameters
 
