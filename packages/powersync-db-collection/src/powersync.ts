@@ -529,11 +529,14 @@ export function powerSyncCollectionOptions<
             onUnloadSubset = await restConfig.onLoadSubset?.(options)
           }
 
+          // Nothing to flush or dispose if no tracking table has been created yet.
           if (activeWhereExpressions.length === 0) {
-            await database.writeLock(async (ctx) => {
-              await flushDiffRecordsWithContext(ctx)
-              await disposeTracking?.({ context: ctx })
-            })
+            if (disposeTracking) {
+              await database.writeLock(async (ctx) => {
+                await flushDiffRecordsWithContext(ctx)
+                await disposeTracking?.({ context: ctx })
+              })
+            }
             return
           }
 
@@ -563,8 +566,12 @@ export function powerSyncCollectionOptions<
           const viewWhereClause = toInlinedWhereClause(compiledView)
 
           await database.writeLock(async (ctx) => {
-            await flushDiffRecordsWithContext(ctx)
-            await disposeTracking?.({ context: ctx })
+            // On the first loadSubset there is no tracking table yet, so there
+            // is nothing to flush or dispose.
+            if (disposeTracking) {
+              await flushDiffRecordsWithContext(ctx)
+              await disposeTracking({ context: ctx })
+            }
 
             disposeTracking = await createDiffTrigger({
               setupContext: ctx,
