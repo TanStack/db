@@ -1864,6 +1864,9 @@ function createChildCollectionEntry(
  *   3. Drain nested buffers — route buffered grandchild changes to per-entry states
  *   4. Flush per-entry states — recursively flush nested includes on each entry
  *   5. Parent DELETEs — clean up child entries and routing index
+ *
+ * `routingCleanup` collects the rows whose internal routing stamp must be
+ * dropped once the whole recursive pass is done; the outermost call owns it.
  */
 function flushIncludesState(
   includesState: Array<IncludesOutputState>,
@@ -1871,7 +1874,13 @@ function flushIncludesState(
   parentId: string,
   parentChanges: Map<unknown, Changes<any>> | null,
   parentSyncMethods: SyncMethods<any> | null,
+  routingCleanup?: Set<Record<PropertyKey, any>>,
 ): void {
+  // The outermost call owns the cleanup set; nested calls inherit it so the
+  // stamp survives until every parent group has been flushed.
+  const isOutermostCall = routingCleanup === undefined
+  const cleanup = routingCleanup ?? new Set<Record<PropertyKey, any>>()
+
   for (const state of includesState) {
     // Phase 1: Parent INSERTs — ensure a child Collection exists for every parent
     if (parentChanges) {
@@ -2008,6 +2017,7 @@ function flushIncludesState(
           entry.collection.id,
           childChanges,
           entry.syncMethods,
+          cleanup,
         )
       }
     }
@@ -2022,6 +2032,7 @@ function flushIncludesState(
           entry.collection.id,
           null,
           entry.syncMethods,
+          cleanup,
         )
       }
     }
@@ -2044,6 +2055,7 @@ function flushIncludesState(
             entry.collection.id,
             null,
             entry.syncMethods,
+            cleanup,
           )
           deepBufferDirty.add(correlationKey)
         }
@@ -2128,10 +2140,21 @@ function flushIncludesState(
     }
   }
 
-  // Clean up the internal routing stamp from parent/child results
+  // Defer clearing the internal routing stamp: a single child result object can
+  // be routed to several parent groups (sibling parents that share a
+  // correlation key), and each of those groups reads the stamp when its own
+  // nested level is flushed. Stripping it here would drop the deeper levels for
+  // every group flushed after the first, so collect the rows and clear them
+  // once the whole recursive pass is done.
   if (parentChanges) {
     for (const [, changes] of parentChanges) {
-      delete changes.value[INCLUDES_ROUTING]
+      cleanup.add(changes.value)
+    }
+  }
+
+  if (isOutermostCall) {
+    for (const value of cleanup) {
+      delete value[INCLUDES_ROUTING]
     }
   }
 }
