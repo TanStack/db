@@ -256,6 +256,16 @@ async function flushAsyncWork(delayMs: number = 0): Promise<void> {
   await new Promise((resolve) => setTimeout(resolve, delayMs))
 }
 
+function deferred<T = void>() {
+  let resolve!: (value: T | PromiseLike<T>) => void
+  let reject!: (reason?: unknown) => void
+  const promise = new Promise<T>((resolvePromise, rejectPromise) => {
+    resolve = resolvePromise
+    reject = rejectPromise
+  })
+  return { promise, resolve, reject }
+}
+
 describe(`persistedCollectionOptions`, () => {
   it(`provides a sync-absent loopback configuration with persisted utils`, async () => {
     const adapter = createRecordingAdapter()
@@ -1639,6 +1649,175 @@ describe(`persistedCollectionOptions`, () => {
       id: `1`,
       title: `Updated`,
     })
+  })
+
+  it(`preload resolves from local SQLite data when upstream sync never calls markReady`, async () => {
+    // Regression test: collection.preload() used to hang forever when the upstream
+    // sync never called markReady() (e.g. TanStack Query offlineFirst pausing a
+    // query). The fix fires params.markReady() after ensureStarted() so local
+    // SQLite data is enough to unblock preload().
+    const adapter = createRecordingAdapter([{ id: `1`, title: `Offline Todo` }])
+
+    const neverReadySync: SyncConfig<Todo, string> = {
+      sync: (_params) => {
+        // deliberately never call params.markReady() - simulates offlineFirst paused query
+        return { cleanup: () => {} }
+      },
+    }
+
+    const collection = createCollection(
+      persistedCollectionOptions<Todo, string>({
+        id: `persisted-offline-preload`,
+        getKey: (item) => item.id,
+        sync: neverReadySync,
+        persistence: {
+          adapter,
+        },
+      }),
+    )
+
+    await collection.preload()
+
+    expect(stripVirtualProps(collection.get(`1`))).toEqual({
+      id: `1`,
+      title: `Offline Todo`,
+    })
+  })
+
+  it(`keeps on-demand readiness gated on the upstream`, async () => {
+    const upstreamStarted = deferred()
+    let markUpstreamReady: (() => void) | undefined
+    const collection = createCollection(
+      persistedCollectionOptions<Todo, string>({
+        id: `on-demand-readiness`,
+        syncMode: `on-demand`,
+        getKey: (item) => item.id,
+        sync: {
+          sync: ({ markReady }) => {
+            markUpstreamReady = markReady
+            upstreamStarted.resolve()
+          },
+        },
+        persistence: { adapter: createRecordingAdapter() },
+      }),
+    )
+
+    collection.startSyncImmediate()
+    await upstreamStarted.promise
+    expect(collection.status).toBe(`loading`)
+
+    markUpstreamReady?.()
+    await collection.stateWhenReady()
+    expect(collection.status).toBe(`ready`)
+  })
+
+  it(`cleanup before hydration prevents late readiness`, async () => {
+    const hydrationStarted = deferred()
+    const hydration = deferred<Array<{ key: string; value: Todo }>>()
+    const adapter = createRecordingAdapter()
+    adapter.loadSubset = () => {
+      hydrationStarted.resolve()
+      return hydration.promise
+    }
+    const collection = createCollection(
+      persistedCollectionOptions<Todo, string>({
+        id: `cleanup-during-hydration`,
+        getKey: (item) => item.id,
+        sync: { sync: () => ({}) },
+        persistence: { adapter },
+      }),
+    )
+    let readyEvents = 0
+    collection.on(`status:ready`, () => readyEvents++)
+
+    collection.startSyncImmediate()
+    await hydrationStarted.promise
+    await collection.cleanup()
+    hydration.resolve([])
+    await hydration.promise
+    await Promise.resolve()
+
+    expect(readyEvents).toBe(0)
+  })
+
+  it(`signals first readiness once when hydration and upstream race`, async () => {
+    const hydrationStarted = deferred()
+    const hydration = deferred<Array<{ key: string; value: Todo }>>()
+    const adapter = createRecordingAdapter()
+    adapter.loadSubset = () => {
+      hydrationStarted.resolve()
+      return hydration.promise
+    }
+    let markUpstreamReady: (() => void) | undefined
+    const collection = createCollection(
+      persistedCollectionOptions<Todo, string>({
+        id: `readiness-race`,
+        getKey: (item) => item.id,
+        sync: { sync: ({ markReady }) => void (markUpstreamReady = markReady) },
+        persistence: { adapter },
+      }),
+    )
+    let readyEvents = 0
+    collection.on(`status:ready`, () => readyEvents++)
+
+    collection.startSyncImmediate()
+    await hydrationStarted.promise
+    markUpstreamReady?.()
+    hydration.resolve([])
+    await collection.stateWhenReady()
+    await Promise.resolve()
+
+    expect(readyEvents).toBe(1)
+  })
+
+  it(`settles readiness when startup fails without upstream readiness`, async () => {
+    const adapter = createRecordingAdapter()
+    adapter.loadSubset = () => Promise.reject(new Error(`startup failed`))
+    const collection = createCollection(
+      persistedCollectionOptions<Todo, string>({
+        id: `failed-startup-settles`,
+        getKey: (item) => item.id,
+        sync: { sync: () => ({}) },
+        persistence: { adapter },
+      }),
+    )
+
+    await collection.stateWhenReady()
+    expect(collection.status).toBe(`ready`)
+  })
+
+  it(`ignores upstream readiness and hydration callbacks after cleanup`, async () => {
+    const hydrationStarted = deferred()
+    const hydration = deferred<Array<{ key: string; value: Todo }>>()
+    const adapter = createRecordingAdapter()
+    adapter.loadSubset = () => {
+      hydrationStarted.resolve()
+      return hydration.promise
+    }
+    let markUpstreamReady: (() => void) | undefined
+    const collection = createCollection(
+      persistedCollectionOptions<Todo, string>({
+        id: `late-callbacks-after-cleanup`,
+        getKey: (item) => item.id,
+        sync: { sync: ({ markReady }) => void (markUpstreamReady = markReady) },
+        persistence: { adapter },
+      }),
+    )
+    let readyEvents = 0
+    collection.on(`status:ready`, () => readyEvents++)
+
+    collection.startSyncImmediate()
+    await hydrationStarted.promise
+    await collection.cleanup()
+    markUpstreamReady?.()
+    hydration.resolve([
+      { key: `late`, value: { id: `late`, title: `Must not apply` } },
+    ])
+    await hydration.promise
+    await Promise.resolve()
+
+    expect(readyEvents).toBe(0)
+    expect(collection.get(`late`)).toBeUndefined()
   })
 })
 
