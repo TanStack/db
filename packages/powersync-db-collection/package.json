@@ -59,11 +59,11 @@
     "p-defer": "^4.0.1"
   },
   "peerDependencies": {
-    "@powersync/common": "^1.41.0"
+    "@powersync/common": "^1.57.0"
   },
   "devDependencies": {
-    "@powersync/common": "1.49.0",
-    "@powersync/node": "0.18.1",
+    "@powersync/common": "1.57.0",
+    "@powersync/node": "0.19.2",
     "@types/debug": "^4.1.12",
     "@vitest/coverage-istanbul": "^3.2.4",
     "better-sqlite3": "^12.6.2"

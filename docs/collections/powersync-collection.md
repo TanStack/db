@@ -1100,3 +1100,170 @@ const liveQuery = createLiveQueryCollection({
       })),
 })
 ```
+
+## Attachments
+
+`@tanstack/powersync-db-collection` ships `TanStackDBAttachmentQueue`, an [`AttachmentQueue`](https://docs.powersync.com/usage/use-case-examples/attachments-files) whose file operations commit inside a TanStack DB collection transaction. This lets you create (or delete) an attachment and mutate a related collection row (for example, setting `lists.photo_id`) atomically in a single transaction, instead of issuing two independent writes.
+
+The queue extends PowerSync's `AttachmentQueue`, so the generic concepts are unchanged and documented once in the SDK.
+
+> This section only covers what is specific to the TanStack DB integration. For storage adapters (local and remote), the `AttachmentTable` schema primitive, error-handling/retry semantics, and the `startSync()` / `stopSync()` lifecycle, see the [PowerSync attachments documentation](https://docs.powersync.com/usage/use-case-examples/attachments-files).
+
+### Prerequisites
+
+These are standard PowerSync attachment requirements. See the SDK attachments docs for details.
+
+- An `AttachmentTable` in your schema:
+
+  ```ts
+  import { AttachmentTable, Schema } from "@powersync/web"
+
+  const APP_SCHEMA = new Schema({
+    // ...your tables
+    attachments: new AttachmentTable(),
+  })
+  ```
+
+- A local storage adapter (such as `IndexDBFileSystemStorageAdapter` on web) and a remote storage adapter (an implementation of the SDK's `RemoteStorageAdapter`, for example backed by Supabase Storage). Both are generic to all attachment users. See the SDK docs for the available adapters and the remote-adapter contract.
+
+### 1. Create the attachments collection
+
+This is the piece that makes the integration TanStack-aware: a normal PowerSync collection over the attachments table. The queue reads and writes attachment records through it.
+
+```ts
+import { createCollection } from "@tanstack/react-db"
+import { powerSyncCollectionOptions } from "@tanstack/powersync-db-collection"
+
+const attachmentsCollection = createCollection(
+  powerSyncCollectionOptions({
+    database: db,
+    table: APP_SCHEMA.props.attachments,
+  })
+)
+```
+
+### 2. Construct the queue
+
+Pass your collection as `attachmentsCollection` alongside the standard `AttachmentQueue` options. Only `attachmentsCollection` and `watchAttachments` (below) are specific to this package; `db`, `localStorage`, `remoteStorage`, and `errorHandler` are the usual SDK options.
+
+```ts
+import { TanStackDBAttachmentQueue } from "@tanstack/powersync-db-collection"
+
+const attachmentQueue = new TanStackDBAttachmentQueue({
+  db,
+  attachmentsCollection, // TanStack DB collection over your AttachmentTable
+  localStorage, // SDK local storage adapter
+  remoteStorage, // your RemoteStorageAdapter (see SDK docs)
+  watchAttachments, // see step 3
+  errorHandler, // standard AttachmentQueue error handler (see SDK docs)
+})
+```
+
+Start and stop syncing with the standard `attachmentQueue.startSync()` / `attachmentQueue.stopSync()` lifecycle (see SDK docs), typically inside a React effect or provider.
+
+### 3. Tell the queue which attachments exist (`watchAttachments`)
+
+`watchAttachments` reports the set of attachment IDs your data currently references, so the queue knows what to download and what to archive. With TanStack DB you drive it from a live query: emit the initial state, then re-emit the complete set on every change, and clean up on abort.
+
+```ts
+import {
+  createCollection,
+  isNull,
+  liveQueryCollectionOptions,
+  not,
+} from "@tanstack/db"
+import { WatchedAttachmentItem } from "@powersync/web"
+
+const watchAttachments = async (onUpdate, abortSignal) => {
+  // Every row in your data model that references an attachment.
+  const livePhotoIds = createCollection(
+    liveQueryCollectionOptions({
+      query: (q) =>
+        q
+          .from({ document: listsCollection })
+          .where(({ document }) => not(isNull(document.photo_id)))
+          .select(({ document }) => ({ photo_id: document.photo_id })),
+    })
+  )
+
+  const mapper = (item) =>
+    ({
+      id: item.photo_id,
+      fileExtension: "jpg",
+    }) satisfies WatchedAttachmentItem
+
+  // 1. Report the initial set of referenced attachment IDs.
+  const initialState = await livePhotoIds.stateWhenReady()
+  onUpdate(Array.from(initialState.values()).map(mapper))
+
+  // 2. Re-emit the whole set on every change (the queue expects the holistic state).
+  livePhotoIds.subscribeChanges(() => {
+    onUpdate(livePhotoIds.map(mapper))
+  })
+
+  // 3. Clean up when sync stops.
+  abortSignal.addEventListener("abort", () => livePhotoIds.cleanup(), {
+    once: true,
+  })
+}
+```
+
+> A `watchAttachmentsFromQuery(...)` convenience helper that collapses this boilerplate into a single call is planned. Until then, use the pattern above.
+
+### 4. Save an attachment atomically with related data
+
+`save` writes the file, inserts the attachment record into your collection, and runs your `updateHook` mutations in the same transaction. Use the hook to insert or update the row that references the new attachment, so both land together or not at all.
+
+```ts
+await attachmentQueue.save({
+  data, // file bytes (ArrayBuffer / base64, per your local adapter)
+  fileExtension: "jpg",
+  updateHook: async (attachmentRecord) => {
+    // Runs in the same transaction as the attachment insert.
+    listsCollection.insert({
+      id: crypto.randomUUID(),
+      name,
+      created_at: new Date(),
+      owner_id: userID,
+      photo_id: attachmentRecord.id, // associate the row with the attachment
+    })
+  },
+})
+```
+
+### 5. Delete an attachment and detach it from the row
+
+`delete` queues the file for deletion and runs your `updateHook` in the same transaction. Clear the foreign key so the row and the attachment stay consistent.
+
+```ts
+await attachmentQueue.delete({
+  id: photo_id,
+  updateHook: async () => {
+    listsCollection.update(listId, (draft) => {
+      draft.photo_id = null
+    })
+  },
+})
+```
+
+### 6. Display attachments via a live-query join
+
+Join your attachments collection into a live query to read the local URI (the locally cached file path) alongside your domain rows:
+
+```ts
+import { eq } from "@tanstack/db"
+
+const { data } = useLiveQuery((q) =>
+  q
+    .from({ lists: listsCollection })
+    .leftJoin({ attachment: attachmentsCollection }, ({ lists, attachment }) =>
+      eq(lists.photo_id, attachment.id)
+    )
+    .select(({ lists, attachment }) => ({
+      id: lists.id,
+      name: lists.name,
+      photo_id: lists.photo_id,
+      attachment_local_uri: attachment?.local_uri,
+    }))
+)
+```

@@ -1338,11 +1338,11 @@ importers:
         version: 4.0.1
     devDependencies:
       '@powersync/common':
-        specifier: 1.49.0
-        version: 1.49.0
+        specifier: 1.57.0
+        version: 1.57.0
       '@powersync/node':
-        specifier: 0.18.1
-        version: 0.18.1(@powersync/common@1.49.0)(better-sqlite3@12.8.0)
+        specifier: 0.19.2
+        version: 0.19.2(@powersync/common@1.57.0)(better-sqlite3@12.8.0)
       '@types/debug':
         specifier: ^4.1.12
         version: 4.1.12
@@ -4831,13 +4831,13 @@ packages:
   '@poppinss/exception@1.2.3':
     resolution: {integrity: sha512-dCED+QRChTVatE9ibtoaxc+WkdzOSjYTKi/+uacHWIsfodVfpsueo3+DKpgU5Px8qXjgmXkSvhXvSCz3fnP9lw==}
 
-  '@powersync/common@1.49.0':
-    resolution: {integrity: sha512-g6uonubvtmtyx8hS/G5trg9LsBvzHY3tAKHiV7SIQV3Xyz9ONM6NNnjDMP2vcLZVmsOSi8x/QJZmy/ig1YtBMg==}
+  '@powersync/common@1.57.0':
+    resolution: {integrity: sha512-uYccCxK5mwahELRouY3YY584TZgjFU8wPPKZQQ6sAOUoMikV8D/+v+UYsNI280MKMnhFqLkxk4TPZIG7ArIzTQ==}
 
-  '@powersync/node@0.18.1':
-    resolution: {integrity: sha512-fcTICgs61CAEb39xiC7pedYsPgbjUInJ/47dr7RIdnEHpAgjWH8bW95/b70qK1fQUANy9lKBBF3PcmfswVgfCw==}
+  '@powersync/node@0.19.2':
+    resolution: {integrity: sha512-lF7v/rkiLujAojn7Vjgvs1AibhL5zlEQVYO0iCUGoE1S1Hw7lxfUvAa1mTneKWCEmj0EC9yQBHkPUyBDZXVdLA==}
     peerDependencies:
-      '@powersync/common': ^1.49.0
+      '@powersync/common': ^1.57.0
       better-sqlite3: 12.x
     peerDependenciesMeta:
       better-sqlite3:
@@ -6799,9 +6799,6 @@ packages:
   async-limiter@1.0.1:
     resolution: {integrity: sha512-csOlWGAcRFJaI6m+F2WKdnMKr4HhdhFVBk0H/QbJFMCr+uO2kwohwXQPxw/9OCxp05r5ghVBFSyioixx3gfkNQ==}
 
-  async-mutex@0.5.0:
-    resolution: {integrity: sha512-1A94B18jkJ3DYq284ohPxoXbfTA5HsQ7/Mf4DEhcyLx3Bz27Rh59iScbB6EPiP+B+joue6YCxcMXSbFC1tZKwA==}
-
   asynckit@0.4.0:
     resolution: {integrity: sha512-Oei9OH4tRh0YqU3GxhX79dM/mwVgvbZJaSNaRk+bshkj0S5cfHcgYakreBjrHwatXKbz+IoIdYLxrKim2MjW0Q==}
 
@@ -8173,9 +8170,6 @@ packages:
     resolution: {integrity: sha512-aIL5Fx7mawVa300al2BnEE4iNvo1qETxLrPI/o05L7z6go7fCw1J6EQmbK4FmJ2AS7kgVF/KEZWufBfdClMcPg==}
     engines: {node: '>= 0.6'}
 
-  event-iterator@2.0.0:
-    resolution: {integrity: sha512-KGft0ldl31BZVV//jj+IAIGCxkvvUkkON+ScH6zfoX+l+omX6001ggyRSpI0Io2Hlro0ThXotswCtfzS8UkIiQ==}
-
   event-reduce-js@5.2.7:
     resolution: {integrity: sha512-Vi6aIiAmakzx81JAwhw8L988aSX5a3ZqqVjHyZa9xFU6P4oT1IotoDreWtjNlS+fvEnASvyIQT565nmkOtns/Q==}
     engines: {node: '>=16'}
@@ -9371,6 +9365,9 @@ packages:
 
   js-base64@3.7.8:
     resolution: {integrity: sha512-hNngCeKxIUQiEUN3GPJOkz4wF/YvdUdbNL9hsBcMQTkKzboD7T/q3OYOuuPZLUE6dBxSGpwhk5mwuDud7JVAow==}
+
+  js-logger@1.6.1:
+    resolution: {integrity: sha512-yTgMCPXVjhmg28CuUH8CKjU+cIKL/G+zTu4Fn4lQxs8mRFH/03QTNvEFngcxfg/gRDiQAOoyCKmMTOm9ayOzXA==}
 
   js-tokens@4.0.0:
     resolution: {integrity: sha512-RdJUflcE3cUzKiMqQgsCu06FPu9UdIJO0beYbPhHN4k6apgJtifcoCtT9bcxOpYBtpD2kCM6Sbzg4CausW/PKQ==}
@@ -16480,16 +16477,13 @@ snapshots:
 
   '@poppinss/exception@1.2.3': {}
 
-  '@powersync/common@1.49.0':
+  '@powersync/common@1.57.0':
     dependencies:
-      async-mutex: 0.5.0
-      event-iterator: 2.0.0
+      js-logger: 1.6.1
 
-  '@powersync/node@0.18.1(@powersync/common@1.49.0)(better-sqlite3@12.8.0)':
+  '@powersync/node@0.19.2(@powersync/common@1.57.0)(better-sqlite3@12.8.0)':
     dependencies:
-      '@powersync/common': 1.49.0
-      async-mutex: 0.5.0
-      bson: 6.10.4
+      '@powersync/common': 1.57.0
       comlink: 4.4.2
       undici: 7.24.4
     optionalDependencies:
@@ -18957,10 +18951,6 @@ snapshots:
 
   async-limiter@1.0.1: {}
 
-  async-mutex@0.5.0:
-    dependencies:
-      tslib: 2.8.1
-
   asynckit@0.4.0: {}
 
   at-least-node@1.0.0: {}
@@ -20577,8 +20567,6 @@ snapshots:
 
   etag@1.8.1: {}
 
-  event-iterator@2.0.0: {}
-
   event-reduce-js@5.2.7:
     dependencies:
       array-push-at-sort-position: 4.0.1
@@ -22132,6 +22120,8 @@ snapshots:
   jose@6.1.3: {}
 
   js-base64@3.7.8: {}
+
+  js-logger@1.6.1: {}
 
   js-tokens@4.0.0: {}
 
