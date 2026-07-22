@@ -1312,6 +1312,9 @@ importers:
       react-native:
         specifier: 0.79.6
         version: 0.79.6(@babel/core@7.29.0)(@types/react@19.2.13)(react@19.2.4)
+      temporal-polyfill:
+        specifier: ^0.3.0
+        version: 0.3.0
       typescript:
         specifier: ^5.9.2
         version: 5.9.3

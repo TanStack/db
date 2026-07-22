@@ -11,6 +11,7 @@ import { LocalStorageAdapter } from './storage/LocalStorageAdapter'
 import { OutboxManager } from './outbox/OutboxManager'
 import { KeyScheduler } from './executor/KeyScheduler'
 import { TransactionExecutor } from './executor/TransactionExecutor'
+import { MissingTemporalConstructorError } from './outbox/TransactionSerializer'
 
 // Coordination
 import { WebLocksLeader } from './coordination/WebLocksLeader'
@@ -284,7 +285,11 @@ export class OfflineExecutor {
         }
 
         // Storage available - set up offline components
-        this.outbox = new OutboxManager(storage, this.config.collections)
+        this.outbox = new OutboxManager(
+          storage,
+          this.config.collections,
+          this.config.temporal,
+        )
         this.executor = new TransactionExecutor(
           this.scheduler,
           this.outbox,
@@ -337,6 +342,10 @@ export class OfflineExecutor {
         console.warn(`Failed to execute transactions:`, error)
       })
     } catch (error) {
+      if (error instanceof MissingTemporalConstructorError) {
+        throw error
+      }
+
       console.warn(`Failed to load and replay transactions:`, error)
     }
   }
