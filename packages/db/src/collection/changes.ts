@@ -31,6 +31,15 @@ export class CollectionChangesManager<
   public shouldBatchEvents = false
 
   /**
+   * Monotonic revision of the collection's visible state, advanced once per
+   * committed batch of changes — including while nothing is subscribed.
+   * Lets consumers (the live-query observer) cheaply detect "did the data
+   * change" without subscribing, and stays untouched by subscription
+   * bootstrap replays, which do not go through emitEvents.
+   */
+  public stateRevision = 0
+
+  /**
    * Creates a new CollectionChangesManager instance
    */
   constructor() {}
@@ -77,6 +86,10 @@ export class CollectionChangesManager<
     changes: Array<ChangeMessage<TOutput, TKey>>,
     forceEmit = false,
   ): void {
+    // The visible state was already committed by the caller, so the revision
+    // advances even when the events below end up batched for later emission.
+    if (changes.length > 0) this.stateRevision++
+
     // Skip batching for user actions (forceEmit=true) to keep UI responsive
     if (this.shouldBatchEvents && !forceEmit) {
       // Add events to the batch

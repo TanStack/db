@@ -54,12 +54,24 @@ describe(`useLiveQuery: eager onStoreChange must not fire synchronously during s
     const onStoreChange = vi.fn()
     const unsub = capturedSubscribe!(onStoreChange)
 
-    // onStoreChange must not be invoked synchronously inside subscribe;
-    // it should be deferred to a microtask so it lands after React commits.
+    // onStoreChange must not be invoked synchronously inside subscribe —
+    // useSyncExternalStore's own post-subscribe getSnapshot re-read covers a
+    // ready transition that happened between render and subscribe, so an
+    // already-ready unchanged collection needs no wake-up at all.
     expect(onStoreChange).not.toHaveBeenCalled()
 
     await Promise.resolve()
-    expect(onStoreChange).toHaveBeenCalledTimes(1)
+    expect(onStoreChange).not.toHaveBeenCalled()
+
+    // A real delta does wake the store.
+    base.utils.begin()
+    base.utils.write({
+      type: `insert`,
+      value: { id: `3`, name: `C`, age: 30 },
+    })
+    base.utils.commit()
+    await Promise.resolve()
+    expect(onStoreChange).toHaveBeenCalled()
 
     unsub()
   })
