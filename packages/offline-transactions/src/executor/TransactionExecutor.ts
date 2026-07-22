@@ -1,7 +1,8 @@
-import { createTransaction } from '@tanstack/db'
 import { DefaultRetryPolicy } from '../retry/RetryPolicy'
 import { NonRetriableError } from '../types'
 import { withNestedSpan } from '../telemetry/tracer'
+import { createOptimisticHold } from './OptimisticHold'
+import type { ConfirmationManager } from './ConfirmationManager'
 import type { KeyScheduler } from './KeyScheduler'
 import type { OutboxManager } from '../outbox/OutboxManager'
 import type {
@@ -20,6 +21,7 @@ export class TransactionExecutor {
   private isExecuting = false
   private executionPromise: Promise<void> | null = null
   private offlineExecutor: TransactionSignaler
+  private confirmationManager: ConfirmationManager
   private retryTimer: ReturnType<typeof setTimeout> | null = null
 
   constructor(
@@ -27,6 +29,7 @@ export class TransactionExecutor {
     outbox: OutboxManager,
     config: OfflineConfig,
     offlineExecutor: TransactionSignaler,
+    confirmationManager: ConfirmationManager,
   ) {
     this.scheduler = scheduler
     this.outbox = outbox
@@ -36,6 +39,7 @@ export class TransactionExecutor {
       config.jitter ?? true,
     )
     this.offlineExecutor = offlineExecutor
+    this.confirmationManager = confirmationManager
   }
 
   async execute(transaction: OfflineTransaction): Promise<void> {
@@ -104,7 +108,7 @@ export class TransactionExecutor {
             await this.outbox.remove(transaction.id)
 
             span.setAttribute(`result`, `success`)
-            this.offlineExecutor.resolveTransaction(transaction.id, result)
+            this.resolveCommittedTransaction(transaction, result)
           } catch (error) {
             const err =
               error instanceof Error ? error : new Error(String(error))
@@ -129,7 +133,9 @@ export class TransactionExecutor {
     }
   }
 
-  private async runMutationFn(transaction: OfflineTransaction): Promise<void> {
+  private async runMutationFn(
+    transaction: OfflineTransaction,
+  ): Promise<unknown> {
     const mutationFn = this.config.mutationFns[transaction.mutationFnName]
 
     if (!mutationFn) {
@@ -150,10 +156,42 @@ export class TransactionExecutor {
       metadata: transaction.metadata ?? {},
     }
 
-    await mutationFn({
+    // Return the result so it can be surfaced to the waiting transaction and to
+    // `confirmWrite` (e.g. a server-assigned txid). Previously this value was
+    // awaited and discarded.
+    return await mutationFn({
       transaction: transactionWithMutations as any,
       idempotencyKey: transaction.idempotencyKey,
     })
+  }
+
+  /**
+   * Hand a committed write to the confirmation manager before resolving its
+   * original transaction, so the optimistic overlay is owned continuously.
+   */
+  private resolveCommittedTransaction(
+    transaction: OfflineTransaction,
+    result: unknown,
+  ): void {
+    this.confirmationManager.schedule({
+      transactionId: transaction.id,
+      mutationFnName: transaction.mutationFnName,
+      idempotencyKey: transaction.idempotencyKey,
+      mutations: transaction.mutations,
+      result,
+      metadata: transaction.metadata,
+    })
+
+    try {
+      this.offlineExecutor.resolveTransaction(transaction.id, result)
+    } catch (error) {
+      // The outbox entry is already removed and the server write committed.
+      // Cleanup failures must not re-enter retry handling and resend the write.
+      console.warn(
+        `Failed to resolve committed transaction ${transaction.id}:`,
+        error,
+      )
+    }
   }
 
   private async handleError(
@@ -270,47 +308,18 @@ export class TransactionExecutor {
       }
 
       try {
-        // Create a restoration transaction that holds mutations for optimistic state display.
-        // It will never commit - the real mutation is handled by the offline executor.
-        const restorationTx = createTransaction({
+        // Hold the mutations for optimistic display while the write is pending.
+        // It will never commit - the real mutation is handled by the offline
+        // executor, which tears the hold down via cleanupRestorationTransaction
+        // (keyed by the offline transaction id) once the write resolves.
+        const hold = createOptimisticHold(offlineTx.mutations, {
           id: offlineTx.id,
-          autoCommit: false,
-          mutationFn: async () => {},
         })
-
-        // Prevent unhandled promise rejection when cleanup calls rollback()
-        // We don't care about this promise - it's just for holding mutations
-        restorationTx.isPersisted.promise.catch(() => {
-          // Intentionally ignored - restoration transactions are cleaned up
-          // via cleanupRestorationTransaction, not through normal commit flow
-        })
-
-        restorationTx.applyMutations(offlineTx.mutations)
-
-        // Register with each affected collection's state manager
-        const touchedCollections = new Set<string>()
-        for (const mutation of offlineTx.mutations) {
-          // Defensive check for corrupted deserialized data
-          // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition
-          if (!mutation.collection) {
-            continue
-          }
-          const collectionId = mutation.collection.id
-          if (touchedCollections.has(collectionId)) {
-            continue
-          }
-          touchedCollections.add(collectionId)
-
-          mutation.collection._state.transactions.set(
-            restorationTx.id,
-            restorationTx,
-          )
-          mutation.collection._state.recomputeOptimisticState(true)
-        }
 
         this.offlineExecutor.registerRestorationTransaction(
           offlineTx.id,
-          restorationTx,
+          hold.transaction,
+          hold.release,
         )
       } catch (error) {
         console.warn(
@@ -324,6 +333,7 @@ export class TransactionExecutor {
   clear(): void {
     this.scheduler.clear()
     this.clearRetryTimer()
+    this.confirmationManager.releaseAll()
   }
 
   getPendingCount(): number {
