@@ -1095,9 +1095,9 @@ describe(`Query Collections`, () => {
             // Don't call begin/commit immediately
           },
         },
-        onInsert: async () => {},
-        onUpdate: async () => {},
-        onDelete: async () => {},
+        onInsert: async () => { },
+        onUpdate: async () => { },
+        onDelete: async () => { },
       })
 
       const rendered = renderHook(() => {
@@ -1193,9 +1193,9 @@ describe(`Query Collections`, () => {
             // Don't sync immediately
           },
         },
-        onInsert: async () => {},
-        onUpdate: async () => {},
-        onDelete: async () => {},
+        onInsert: async () => { },
+        onUpdate: async () => { },
+        onDelete: async () => { },
       })
 
       const rendered = renderHook(() => {
@@ -1318,9 +1318,9 @@ describe(`Query Collections`, () => {
             // Don't sync immediately
           },
         },
-        onInsert: async () => {},
-        onUpdate: async () => {},
-        onDelete: async () => {},
+        onInsert: async () => { },
+        onUpdate: async () => { },
+        onDelete: async () => { },
       })
 
       const issueCollection = createCollection<Issue>({
@@ -1335,9 +1335,9 @@ describe(`Query Collections`, () => {
             // Don't sync immediately
           },
         },
-        onInsert: async () => {},
-        onUpdate: async () => {},
-        onDelete: async () => {},
+        onInsert: async () => { },
+        onUpdate: async () => { },
+        onDelete: async () => { },
       })
 
       const { result } = renderHook(() => {
@@ -1417,9 +1417,9 @@ describe(`Query Collections`, () => {
               // Don't sync immediately
             },
           },
-          onInsert: async () => {},
-          onUpdate: async () => {},
-          onDelete: async () => {},
+          onInsert: async () => { },
+          onUpdate: async () => { },
+          onDelete: async () => { },
         })
 
         const [minAge, setMinAge] = createSignal(30)
@@ -2705,5 +2705,117 @@ describe(`Query Collections`, () => {
 
       expect(rendered.result()).toBeUndefined()
     })
+  })
+
+  it(`should resync first change after collection switch instead of patching stale row indexes`, async () => {
+    const oldSource = createCollection(
+      mockSyncCollectionOptions<Person>({
+        id: `first-change-old-source`,
+        getKey: (person: Person) => person.id,
+        initialData: [
+          {
+            id: `same`,
+            name: `Old Same`,
+            age: 30,
+            email: `old.same@example.com`,
+            isActive: true,
+            team: `old`,
+          },
+          {
+            id: `old-only`,
+            name: `Old Only`,
+            age: 31,
+            email: `old.only@example.com`,
+            isActive: true,
+            team: `old`,
+          },
+        ],
+      }),
+    )
+
+    const newSource = createCollection(
+      mockSyncCollectionOptions<Person>({
+        id: `first-change-new-source`,
+        getKey: (person: Person) => person.id,
+        initialData: [
+          {
+            id: `new-only`,
+            name: `New Only`,
+            age: 40,
+            email: `new.only@example.com`,
+            isActive: true,
+            team: `new`,
+          },
+          {
+            id: `same`,
+            name: `New Same`,
+            age: 41,
+            email: `new.same@example.com`,
+            isActive: true,
+            team: `new`,
+          },
+        ],
+      }),
+    )
+
+    const oldLiveQuery = createLiveQueryCollection({
+      query: (q) =>
+        q.from({ persons: oldSource }).select(({ persons }) => ({
+          id: persons.id,
+          name: persons.name,
+        })),
+      startSync: true,
+    })
+
+    const newLiveQuery = createLiveQueryCollection({
+      query: (q) =>
+        q.from({ persons: newSource }).select(({ persons }) => ({
+          id: persons.id,
+          name: persons.name,
+        })),
+      startSync: true,
+    })
+
+    let resolveNewLiveQuery: (() => void) | undefined
+    const originalToArrayWhenReady = newLiveQuery.toArrayWhenReady.bind(
+      newLiveQuery,
+    )
+    newLiveQuery.toArrayWhenReady = async () => {
+      await new Promise<void>((resolve) => {
+        resolveNewLiveQuery = resolve
+      })
+      return originalToArrayWhenReady()
+    }
+
+    const [activeCollection, setActiveCollection] = createSignal(oldLiveQuery)
+
+    const rendered = renderHook(() => {
+      return useLiveQuery(activeCollection)
+    })
+
+    await waitFor(() => {
+      expect(new Set(rendered.result().map((person) => person.id))).toEqual(
+        new Set([`same`, `old-only`]),
+      )
+      expect(rendered.result()).toHaveLength(2)
+    })
+
+    setActiveCollection(newLiveQuery)
+
+    newSource.update(`same`, (draft) => {
+      draft.name = `New Same Updated`
+    })
+
+    await waitFor(() => {
+      expect(new Set(rendered.result().map((person) => person.id))).toEqual(
+        new Set([`new-only`, `same`]),
+      )
+      expect(rendered.result()).toHaveLength(2)
+      expect(rendered.result().find((person) => person.id === `same`)).toMatchObject({
+        name: `New Same Updated`,
+      })
+    })
+
+    resolveNewLiveQuery!()
   })
 })
