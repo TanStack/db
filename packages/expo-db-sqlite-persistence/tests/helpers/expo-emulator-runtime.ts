@@ -7,15 +7,20 @@ import { spawn } from 'node:child_process'
 import type { IncomingMessage, ServerResponse } from 'node:http'
 import type { ChildProcessWithoutNullStreams } from 'node:child_process'
 import type {
-  ExpoSQLiteBindParams,
+  SQLiteBindParams,
+  SQLiteBindValue,
+  SQLiteRunResult,
+} from 'expo-sqlite'
+import type {
   ExpoSQLiteDatabaseLike,
-  ExpoSQLiteRunResult,
   ExpoSQLiteTransaction,
 } from '../../src/expo-sqlite-driver'
 import type {
   ExpoRuntimeCommand,
   ExpoRuntimeCommandResult,
   ExpoRuntimeRegistration,
+  ExpoRuntimeSQLiteBindParams,
+  ExpoRuntimeSQLiteBindValue,
   ExpoRuntimeSmokeTestResult,
 } from '../../e2e/runtime-protocol'
 
@@ -189,6 +194,36 @@ function parseCommandOverride(rawCommand: string): Array<string> {
     .filter((part) => part.length > 0)
 }
 
+function normalizeRuntimeSqliteValue(
+  value: SQLiteBindValue,
+): ExpoRuntimeSQLiteBindValue {
+  if (value instanceof Uint8Array) {
+    throw new TypeError(
+      `Expo runtime bridge does not support binary SQLite params`,
+    )
+  }
+
+  return value
+}
+
+function normalizeRuntimeSqliteParams(
+  params?: SQLiteBindParams,
+): ExpoRuntimeSQLiteBindParams | undefined {
+  if (params === undefined) {
+    return undefined
+  }
+
+  if (Array.isArray(params)) {
+    return params.map(normalizeRuntimeSqliteValue)
+  }
+
+  const normalized: Record<string, ExpoRuntimeSQLiteBindValue> = {}
+  for (const [key, value] of Object.entries(params)) {
+    normalized[key] = normalizeRuntimeSqliteValue(value)
+  }
+  return normalized
+}
+
 class ExpoEmulatorRuntime {
   private static readonly instances = new Map<
     RuntimePlatform,
@@ -239,29 +274,29 @@ class ExpoEmulatorRuntime {
       },
       getAllAsync: async <T>(
         sql: string,
-        params?: ExpoSQLiteBindParams,
+        params?: SQLiteBindParams,
       ): Promise<ReadonlyArray<T>> =>
         (await this.sendCommand({
           type: `db:getAll`,
           databaseId,
           databaseName,
           sql,
-          params,
+          params: normalizeRuntimeSqliteParams(params),
         })) as ReadonlyArray<T>,
       runAsync: async (
         sql: string,
-        params?: ExpoSQLiteBindParams,
-      ): Promise<ExpoSQLiteRunResult> =>
+        params?: SQLiteBindParams,
+      ): Promise<SQLiteRunResult> =>
         (await this.sendCommand({
           type: `db:run`,
           databaseId,
           databaseName,
           sql,
-          params,
-        })) as ExpoSQLiteRunResult,
-      withExclusiveTransactionAsync: async <T>(
-        task: (transaction: ExpoSQLiteTransaction) => Promise<T>,
-      ): Promise<T> => {
+          params: normalizeRuntimeSqliteParams(params),
+        })) as SQLiteRunResult,
+      withExclusiveTransactionAsync: async (
+        task: (transaction: ExpoSQLiteTransaction) => Promise<void>,
+      ): Promise<void> => {
         const transactionId = randomUUID()
         await this.sendCommand({
           type: `tx:start`,
@@ -279,33 +314,32 @@ class ExpoEmulatorRuntime {
           },
           getAllAsync: async <TRow>(
             sql: string,
-            params?: ExpoSQLiteBindParams,
+            params?: SQLiteBindParams,
           ): Promise<ReadonlyArray<TRow>> =>
             (await this.sendCommand({
               type: `tx:getAll`,
               transactionId,
               sql,
-              params,
+              params: normalizeRuntimeSqliteParams(params),
             })) as ReadonlyArray<TRow>,
           runAsync: async (
             sql: string,
-            params?: ExpoSQLiteBindParams,
-          ): Promise<ExpoSQLiteRunResult> =>
+            params?: SQLiteBindParams,
+          ): Promise<SQLiteRunResult> =>
             (await this.sendCommand({
               type: `tx:run`,
               transactionId,
               sql,
-              params,
-            })) as ExpoSQLiteRunResult,
+              params: normalizeRuntimeSqliteParams(params),
+            })) as SQLiteRunResult,
         }
 
         try {
-          const result = await task(transaction)
+          await task(transaction)
           await this.sendCommand({
             type: `tx:commit`,
             transactionId,
           })
-          return result
         } catch (error) {
           await this.sendCommand({
             type: `tx:rollback`,
