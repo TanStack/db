@@ -20,6 +20,11 @@ import type {
 // Helper function to wait for changes to be processed
 const waitForChanges = () => new Promise((resolve) => setTimeout(resolve, 10))
 
+type SyncFunctions<T extends object, TKey extends string | number> = Pick<
+  Parameters<SyncConfig<T, TKey>[`sync`]>[0],
+  `begin` | `write` | `commit` | `markReady`
+>
+
 const normalizeChange = <T extends Record<string, any>>(
   change: ChangeMessage<T>,
 ): ChangeMessage<T> => ({
@@ -2151,6 +2156,184 @@ describe(`Collection.subscribeChanges`, () => {
         whereExpression: eq(new PropRef([`status`]), `active`),
       })
     }).toThrow(`Cannot specify both 'where' and 'whereExpression' options`)
+  })
+})
+
+describe(`Collection.subscribeKeyChanges`, () => {
+  type TestItem = { id: string; value: string }
+
+  const createManualSyncCollection = (id: string) => {
+    let syncFns: SyncFunctions<TestItem, string> | undefined
+
+    const collection = createCollection<TestItem, string>({
+      id,
+      getKey: (item) => item.id,
+      sync: {
+        sync: (params) => {
+          syncFns = params
+          params.markReady()
+        },
+      },
+    })
+
+    collection.startSyncImmediate()
+
+    if (!syncFns) {
+      throw new Error(`Sync functions were not initialized`)
+    }
+
+    return { collection, syncFns }
+  }
+
+  const writeSyncedChanges = (
+    syncFns: SyncFunctions<TestItem, string>,
+    changes: Array<Omit<ChangeMessage<TestItem, string>, `key`>>,
+  ) => {
+    syncFns.begin()
+
+    for (const change of changes) {
+      syncFns.write(change)
+    }
+
+    syncFns.commit()
+  }
+
+  it(`should emit only future changes for the subscribed key`, () => {
+    const { collection, syncFns } = createManualSyncCollection(
+      `subscribe-key-changes-filter-test`,
+    )
+    const changes: Array<
+      ChangeMessage<OutputWithVirtual<TestItem, string>, string>
+    > = []
+
+    const subscription = collection.subscribeKeyChanges(`row-1`, (events) => {
+      changes.push(...events)
+    })
+
+    writeSyncedChanges(syncFns, [
+      { type: `insert`, value: { id: `row-1`, value: `one` } },
+      { type: `insert`, value: { id: `row-2`, value: `two` } },
+    ])
+
+    expect(changes).toHaveLength(1)
+    expect(changes[0]).toMatchObject({
+      type: `insert`,
+      key: `row-1`,
+      value: { id: `row-1`, value: `one` },
+    })
+
+    changes.length = 0
+
+    writeSyncedChanges(syncFns, [
+      { type: `update`, value: { id: `row-2`, value: `two updated` } },
+    ])
+
+    expect(changes).toEqual([])
+
+    writeSyncedChanges(syncFns, [
+      { type: `update`, value: { id: `row-1`, value: `one updated` } },
+    ])
+
+    expect(changes).toHaveLength(1)
+    expect(changes[0]).toMatchObject({
+      type: `update`,
+      key: `row-1`,
+      value: { id: `row-1`, value: `one updated` },
+    })
+
+    subscription.unsubscribe()
+  })
+
+  it(`should emit matching sync changes written while the subscription starts sync`, () => {
+    const changes: Array<
+      ChangeMessage<OutputWithVirtual<TestItem, string>, string>
+    > = []
+
+    const collection = createCollection<TestItem, string>({
+      id: `subscribe-key-changes-start-sync-test`,
+      getKey: (item) => item.id,
+      sync: {
+        sync: ({ begin, write, commit, markReady }) => {
+          begin()
+          write({
+            type: `insert`,
+            value: { id: `row-1`, value: `one` },
+          })
+          write({
+            type: `insert`,
+            value: { id: `row-2`, value: `two` },
+          })
+          commit()
+          markReady()
+        },
+      },
+    })
+
+    const subscription = collection.subscribeKeyChanges(`row-1`, (events) => {
+      changes.push(...events)
+    })
+
+    expect(changes).toHaveLength(1)
+    expect(changes[0]).toMatchObject({
+      type: `insert`,
+      key: `row-1`,
+      value: { id: `row-1`, value: `one` },
+    })
+
+    subscription.unsubscribe()
+  })
+
+  it(`should not emit an initial snapshot and should still emit future deletes`, () => {
+    const { collection, syncFns } = createManualSyncCollection(
+      `subscribe-key-changes-delete-test`,
+    )
+    const changes: Array<
+      ChangeMessage<OutputWithVirtual<TestItem, string>, string>
+    > = []
+
+    writeSyncedChanges(syncFns, [
+      { type: `insert`, value: { id: `row-1`, value: `one` } },
+    ])
+
+    const subscription = collection.subscribeKeyChanges(`row-1`, (events) => {
+      changes.push(...events)
+    })
+
+    expect(changes).toEqual([])
+
+    writeSyncedChanges(syncFns, [
+      { type: `delete`, value: { id: `row-1`, value: `one` } },
+    ])
+
+    expect(changes).toHaveLength(1)
+    expect(changes[0]).toMatchObject({
+      type: `delete`,
+      key: `row-1`,
+      value: { id: `row-1`, value: `one` },
+    })
+
+    subscription.unsubscribe()
+  })
+
+  it(`should stop emitting changes after unsubscribe`, () => {
+    const { collection, syncFns } = createManualSyncCollection(
+      `subscribe-key-changes-unsubscribe-test`,
+    )
+    const changes: Array<
+      ChangeMessage<OutputWithVirtual<TestItem, string>, string>
+    > = []
+
+    const subscription = collection.subscribeKeyChanges(`row-1`, (events) => {
+      changes.push(...events)
+    })
+
+    subscription.unsubscribe()
+
+    writeSyncedChanges(syncFns, [
+      { type: `insert`, value: { id: `row-1`, value: `one` } },
+    ])
+
+    expect(changes).toEqual([])
   })
 })
 
