@@ -12,14 +12,23 @@ TanStack DB is the reactive client-first store for your API. Stop building custo
 ```tsx
 import { createCollection, eq, useLiveQuery } from '@tanstack/react-db'
 import { queryCollectionOptions } from '@tanstack/query-db-collection'
+import { QueryClient } from '@tanstack/react-query'
+
+interface Todo {
+  id: string;
+  text: string;
+  createdAt: Date;
+  completed: boolean;
+}
 
 // Define a collection that loads data using TanStack Query
 const todoCollection = createCollection(
   queryCollectionOptions({
+    queryClient: new QueryClient(),
     queryKey: ['todos'],
     queryFn: async () => {
       const response = await fetch('/api/todos')
-      return response.json()
+      return response.json() as Promise<Todo[]>
     },
     getKey: (item) => item.id,
     onUpdate: async ({ transaction }) => {
@@ -40,7 +49,7 @@ function Todos() {
      .orderBy(({ todo }) => todo.createdAt, 'desc')
   )
 
-  const toggleTodo = (todo) => {
+  const toggleTodo = (todo: Todo) => {
     // Instantly applies optimistic state, then syncs to server
     todoCollection.update(todo.id, (draft) => {
       draft.completed = !draft.completed
