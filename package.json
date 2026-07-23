@@ -5,7 +5,7 @@
     "type": "git",
     "url": "git+https://github.com/TanStack/db.git"
   },
-  "packageManager": "pnpm@11.1.0",
+  "packageManager": "pnpm@11.9.0",
   "type": "module",
   "scripts": {
     "build": "pnpm --filter \"./packages/**\" build",
