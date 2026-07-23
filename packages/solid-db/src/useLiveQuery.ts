@@ -341,12 +341,35 @@ export function useLiveQuery(
     },
   )
 
-  // Helper to sync data array from collection in correct order
+  // Helper to sync data array from collection in correct order.
+  //
+  // `reconcile` short-circuits on `next === target` (both at the array-item
+  // level and at the field level), so when the collection mutates a row in
+  // place — as it does for `toArray` include values flushed by
+  // `flushIncludesState` in `packages/db/src/query/live/collection-config-builder.ts`
+  // — downstream consumers never see the change. Shallow-clone each row (and
+  // any array-valued field on it) so `reconcile` recurses into the field-level
+  // diff instead of bailing on the stable parent / include reference.
+  // Tracking issue: https://github.com/TanStack/db/issues/1571
+  const cloneRowForReconcile = <T,>(v: T): T => {
+    if (v === null || typeof v !== `object` || Array.isArray(v)) {
+      return v
+    }
+    const source = v as Record<string, unknown>
+    const out: Record<string, unknown> = {}
+    for (const key in source) {
+      const val = source[key]
+      out[key] = Array.isArray(val) ? [...val] : val
+    }
+    return out as T
+  }
   const syncDataFromCollection = (
     currentCollection: Collection<any, any, any>,
   ) => {
     setData((prev) =>
-      reconcile(Array.from(currentCollection.values()))(prev).filter(Boolean),
+      reconcile(
+        Array.from(currentCollection.values(), cloneRowForReconcile),
+      )(prev).filter(Boolean),
     )
   }
 
