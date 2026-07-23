@@ -80,13 +80,9 @@ export const ascComparator = (a: any, b: any, opts: CompareOptions): number => {
     return a.getTime() - b.getTime()
   }
 
-  // If both are Temporal objects of the same type, compare by string representation
+  // If both are Temporal objects, use compareTemporalValues for correct semantic ordering
   if (isTemporal(a) && isTemporal(b)) {
-    const aStr = a.toString()
-    const bStr = b.toString()
-    if (aStr < bStr) return -1
-    if (aStr > bStr) return 1
-    return 0
+    return compareTemporalValues(a, b)
   }
 
   // If at least one of the values is an object, use stable IDs for comparison
@@ -235,6 +231,68 @@ export function denormalizeUndefined(value: any): any {
     return undefined
   }
   return value
+}
+
+// Cached map from Symbol.toStringTag → static compare function (null = none defined).
+// Populated lazily on first encounter of each Temporal type so we never access
+// `.constructor` more than once per type, and dispatch is keyed on the already-
+// computed brand tag rather than on the constructor itself.
+const temporalCompareByTag = new Map<
+  string,
+  ((a: unknown, b: unknown) => number) | null
+>()
+
+/**
+ * Compare two Temporal values of the same type, returning -1, 0, or 1.
+ *
+ * Dispatch is keyed on `Symbol.toStringTag` (the brand already checked by
+ * `isTemporal`) rather than `a.constructor`, making it robust across realms
+ * and resistant to a shadowed `constructor` property. Types without a static
+ * `.compare` (e.g. `PlainMonthDay`) throw rather than fall back to string
+ * comparison, matching Temporal's design intent.
+ *
+ * Callers must ensure both arguments are Temporal objects; mixed types throw.
+ */
+export function compareTemporalValues(a: unknown, b: unknown): number {
+  const aTag = (a as Record<symbol, unknown>)[Symbol.toStringTag] as string
+  const bTag = (b as Record<symbol, unknown>)[Symbol.toStringTag] as string
+  if (aTag !== bTag) {
+    throw new TypeError(
+      `Cannot order Temporal values of different types: ${aTag} vs ${bTag}`,
+    )
+  }
+  let compare = temporalCompareByTag.get(aTag)
+  if (compare === undefined) {
+    const fn = (
+      (a as { constructor: unknown }).constructor as {
+        compare?: (x: unknown, y: unknown) => number
+      }
+    ).compare
+    compare = typeof fn === `function` ? fn : null
+    temporalCompareByTag.set(aTag, compare)
+  }
+  if (compare === null) {
+    throw new TypeError(`${aTag} has no defined ordering`)
+  }
+  return compare(a, b)
+}
+
+/**
+ * Order two non-null values, returning -1, 0, or 1.
+ *
+ * Temporal types intentionally throw from `valueOf` to prevent silent
+ * miscomparison via the native relational operators — delegate to
+ * `compareTemporalValues` for them. For everything else (numbers, strings,
+ * Dates via `valueOf`, etc.) the native operators do the right thing.
+ *
+ * Callers must handle null/undefined themselves — this helper assumes both
+ * arguments are non-null.
+ */
+export function compareValues(a: unknown, b: unknown): number {
+  if (isTemporal(a) && isTemporal(b)) {
+    return compareTemporalValues(a, b)
+  }
+  return (a as any) < (b as any) ? -1 : (a as any) > (b as any) ? 1 : 0
 }
 
 /**
