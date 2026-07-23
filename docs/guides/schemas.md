@@ -141,6 +141,21 @@ const schema = z.object({
 // TInput:  { created_at: string | Date }
 // TOutput: { created_at: Date }
 // Success: draft.created_at can be a Date because TInput accepts Date!
+
+// ✅ GOOD: Codecs Allow you to define a Bi-Directional Dataflow. ( Requires zod@4.1 )
+const dateCodec = z.codec(
+    z.union([z.string(), z.date()]), // Input Schema - Input must be a superset of TOutput
+    z.date(),                        // Output Schema 
+    {
+        decode: (val : string | Date ) => (typeof val === 'string' ? new Date(val) : val), 
+        encode: (val : Date ) => val.toISOString()
+    }
+);
+const schema = z.object({
+  created_at: dateCodec
+})
+
+
 ```
 
 **Rule of thumb:** If your schema transforms type A to type B, use `z.union([A, B])` to ensure TInput accepts both.
@@ -167,6 +182,7 @@ const collection = createCollection({
       ...item,
       created_at: item.created_at.toISOString()  // Date → string
     })
+    
   }
 })
 
@@ -181,6 +197,41 @@ collection.insert({
 const todo = collection.get("1")
 console.log(todo.created_at.getFullYear())  // It's a Date!
 ```
+## Codecs ( `zod@4.1` )
+
+Codecs allow you to implicitly define schemas where the input and output types diverge, it also allows you to define how to handle both directions of transformation.
+
+This allows you to represent JSON Compatible data coming from the server, and the richer javascript representation for the front end ( Dates, Sets, Maps, etc... ).
+
+This also allows you to use features like transform, without breaking JSONSchema compatiblity, allowing you to reuse schema definitions in more places. 
+
+If you are building codecs or using codecs from the link below, remember to modify them such that input is a super set of output. 
+
+[ Documentation ]( https://zod.dev/codecs )
+
+[ Common Codecs ](https://zod.dev/codecs#useful-codecs)
+
+```typescript
+// ❌ BAD: TInput only accepts strings
+const isoDatetimeToDate = z.codec(z.iso.datetime(), z.date(), {
+  decode: (isoString) => new Date(isoString),
+  encode: (date) => date.toISOString(),
+});
+// ✅ GOOD: Codecs Allow you to define a Bi-Directional Dataflow. ( Requires zod@4.1 )
+const dateCodec = z.codec(
+    z.union([z.iso.datetime(), z.date()]), // Input Schema - Input must be a superset of TOutput
+    z.date(),                        // Output Schema 
+    {
+        // Since we have to accept a union type we must also properly handle all input types.
+        decode: (val : string | Date ) => (typeof val === 'string' ? new Date(val) : val), 
+        encode: (val : Date ) => val.toISOString()
+    }
+);
+```
+
+
+
+
 
 ---
 
