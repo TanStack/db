@@ -156,6 +156,74 @@ describe(`sql-compiler`, () => {
       })
     })
 
+    describe(`in operator`, () => {
+      it(`should compile membership in a literal value list as = ANY`, () => {
+        const result = compileSQL({
+          where: func(`in`, [ref(`status`), val([`active`, `pending`])]),
+        })
+        expect(result.where).toBe(`"status" = ANY($1)`)
+        expect(result.params).toEqual({ '1': `{"active","pending"}` })
+      })
+
+      it(`should compile membership in an array column as @> (GIN-eligible)`, () => {
+        const result = compileSQL({
+          where: func(`in`, [val(`admin`), ref(`roles`)]),
+        })
+        expect(result.where).toBe(`"roles" @> ARRAY[$1]`)
+        expect(result.params).toEqual({ '1': `admin` })
+      })
+
+      it(`should compile array-column membership inside AND`, () => {
+        const result = compileSQL({
+          where: func(`and`, [
+            func(`in`, [val(`admin`), ref(`roles`)]),
+            func(`in`, [ref(`status`), val([`active`, `pending`])]),
+          ]),
+        })
+        expect(result.where).toBe(`"roles" @> ARRAY[$1] AND "status" = ANY($2)`)
+        expect(result.params).toEqual({
+          '1': `admin`,
+          '2': `{"active","pending"}`,
+        })
+      })
+
+      it(`should compile membership in an empty value list`, () => {
+        const result = compileSQL({
+          where: func(`in`, [ref(`status`), val([])]),
+        })
+        expect(result.where).toBe(`"status" = ANY($1)`)
+        expect(result.params).toEqual({ '1': `{}` })
+      })
+
+      it(`should compile membership in a single-element value list`, () => {
+        const result = compileSQL({
+          where: func(`in`, [ref(`status`), val([`active`])]),
+        })
+        expect(result.where).toBe(`"status" = ANY($1)`)
+        expect(result.params).toEqual({ '1': `{"active"}` })
+      })
+
+      it(`should throw for a null operand`, () => {
+        expect(() =>
+          compileSQL({ where: func(`in`, [val(null), ref(`roles`)]) }),
+        ).toThrow(`Cannot use null/undefined value with 'in' operator`)
+      })
+
+      it(`should throw for an undefined operand`, () => {
+        expect(() =>
+          compileSQL({ where: func(`in`, [val(undefined), ref(`roles`)]) }),
+        ).toThrow(`Cannot use null/undefined value with 'in' operator`)
+      })
+
+      it(`should throw for an array left operand against an array column`, () => {
+        expect(() =>
+          compileSQL({
+            where: func(`in`, [val([`admin`, `user`]), ref(`roles`)]),
+          }),
+        ).toThrow(`Cannot use an array value as the left operand of 'in'`)
+      })
+    })
+
     describe(`null/undefined value handling`, () => {
       it(`should throw error for eq(col, null)`, () => {
         // Users should use isNull() instead of eq(col, null)

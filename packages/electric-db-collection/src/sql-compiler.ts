@@ -356,8 +356,24 @@ function compileFunction(
       }
     }
 
-    // Special case for = ANY operator which needs parentheses around the array parameter
     if (name === `in`) {
+      // `value = ANY(arrayColumn)` and `arrayColumn @> ARRAY[value]` are
+      // equivalent, but only containment can use a GIN index. Emit @> when the
+      // array operand is a column; keep = ANY for a literal value list.
+      if (args[1]?.type === `ref`) {
+        // @> wraps a single scalar into ARRAY[...]; an array-valued left
+        // operand would nest into ARRAY[<array>] and silently change the
+        // membership semantics, so reject it.
+        const valueArg = args[0]
+        if (valueArg && valueArg.type === `val` && Array.isArray(valueArg.value)) {
+          throw new Error(
+            `Cannot use an array value as the left operand of 'in' against an ` +
+              `array column. Pass a scalar value to test membership ` +
+              `(e.g. inArray(value, arrayColumn)).`,
+          )
+        }
+        return `${rhs} @> ARRAY[${lhs}]`
+      }
       return `${lhs} ${opName}(${rhs})`
     }
     return `${lhs} ${opName} ${rhs}`
@@ -388,7 +404,7 @@ function isBinaryOp(name: string): boolean {
  * (null comparisons in SQL always evaluate to UNKNOWN)
  */
 function isComparisonOp(name: string): boolean {
-  const comparisonOps = [`eq`, `gt`, `gte`, `lt`, `lte`, `like`, `ilike`]
+  const comparisonOps = [`eq`, `gt`, `gte`, `lt`, `lte`, `like`, `ilike`, `in`]
   return comparisonOps.includes(name)
 }
 
