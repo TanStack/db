@@ -324,6 +324,9 @@ export type SyncConfigRes = {
   loadSubset?: LoadSubsetFn
   unloadSubset?: UnloadSubsetFn
 }
+
+export type CollectionCursor = string | number
+
 export interface SyncConfig<
   T extends object = Record<string, unknown>,
   TKey extends string | number = string | number,
@@ -386,6 +389,7 @@ export interface ChangeMessage<
   value: T
   previousValue?: T
   type: OperationType
+  cursor?: CollectionCursor
   metadata?: Record<string, unknown>
 }
 

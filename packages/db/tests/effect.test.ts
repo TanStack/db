@@ -134,6 +134,34 @@ describe(`createEffect`, () => {
       await effect.dispose()
     })
 
+    it(`should expose the sync cursor on emitted effect events`, async () => {
+      const users = createUsersCollection()
+      const events: Array<DeltaEvent<User, number>> = []
+
+      const effect = createEffect<User, number>({
+        query: (q) => q.from({ user: users }),
+        onEnter: collectEvents(events),
+        skipInitial: true,
+      })
+
+      await flushPromises()
+
+      users.utils.begin()
+      users.utils.write({
+        type: `insert`,
+        value: { id: 4, name: `Diana`, active: true },
+        cursor: `004`,
+      })
+      users.utils.commit()
+
+      await flushPromises()
+
+      expect(events).toHaveLength(1)
+      expect(events[0]!.cursor).toBe(`004`)
+
+      await effect.dispose()
+    })
+
     it(`should fire 'exit' event when a row is deleted from source`, async () => {
       const users = createUsersCollection()
       const events: Array<DeltaEvent<User, number>> = []
@@ -198,6 +226,607 @@ describe(`createEffect`, () => {
         throw new Error(`Expected update event`)
       }
       expect(updateEvent.previousValue.name).toBe(`Alice`)
+
+      await effect.dispose()
+    })
+
+    it(`should suppress replay until startAfter and preserve earlier state`, async () => {
+      const users = createCollection(
+        mockSyncCollectionOptionsNoInitialState<User>({
+          id: `cursor-gated-effect-users`,
+          getKey: (user) => user.id,
+        }),
+      )
+      const events: Array<DeltaEvent<User, number>> = []
+
+      const effect = createEffect<User, number>({
+        query: (q) => q.from({ user: users }),
+        onBatch: collectBatchEvents(events),
+        startAfter: 2,
+      })
+
+      users.utils.markReady()
+      await flushPromises()
+
+      users.utils.begin()
+      users.utils.write({
+        type: `insert`,
+        value: { id: 1, name: `Alice`, active: true },
+        cursor: 1,
+      })
+      users.utils.commit()
+
+      await flushPromises()
+      expect(events).toHaveLength(0)
+
+      users.utils.begin()
+      users.utils.write({
+        type: `insert`,
+        value: { id: 2, name: `Bob`, active: true },
+        cursor: 2,
+      })
+      users.utils.commit()
+
+      await flushPromises()
+      expect(events).toHaveLength(0)
+
+      users.utils.begin()
+      users.utils.write({
+        type: `update`,
+        value: { id: 2, name: `Bob v2`, active: true },
+        previousValue: { id: 2, name: `Bob`, active: true },
+        cursor: 3,
+      })
+      users.utils.commit()
+
+      await flushPromises()
+
+      expect(events).toHaveLength(1)
+      expect(events[0]!.type).toBe(`update`)
+      expect(events[0]!.cursor).toBe(3)
+      if (events[0]!.type !== `update`) {
+        throw new Error(`Expected update event`)
+      }
+      expect(events[0]!.previousValue.name).toBe(`Bob`)
+      expect(events[0]!.value.name).toBe(`Bob v2`)
+
+      await effect.dispose()
+    })
+
+    it(`should not crash sibling subscribers when cursor types are mixed`, async () => {
+      const users = createCollection(
+        mockSyncCollectionOptionsNoInitialState<User>({
+          id: `cursor-type-mismatch-users`,
+          getKey: (user) => user.id,
+        }),
+      )
+
+      const siblingEvents: Array<DeltaEvent<User, number>> = []
+      const errorEvents: Array<Error> = []
+
+      // Sibling effect — should keep working
+      const siblingEffect = createEffect<User, number>({
+        query: (q) => q.from({ user: users }),
+        onBatch: collectBatchEvents(siblingEvents),
+      })
+
+      // Effect with string startAfter — will receive numeric cursors
+      const brokenEffect = createEffect<User, number>({
+        query: (q) => q.from({ user: users }),
+        onBatch: () => {},
+        startAfter: `abc`,
+        onSourceError: (err) => errorEvents.push(err),
+      })
+
+      users.utils.markReady()
+      await flushPromises()
+
+      // Send a change with a numeric cursor — mismatches the string startAfter
+      users.utils.begin()
+      users.utils.write({
+        type: `insert`,
+        value: { id: 1, name: `Alice`, active: true },
+        cursor: 1,
+      })
+      users.utils.commit()
+
+      await flushPromises()
+
+      // The broken effect should have errored gracefully, not crashed the pipeline
+      expect(siblingEvents).toHaveLength(1)
+      expect(siblingEvents[0]!.type).toBe(`enter`)
+
+      await siblingEffect.dispose()
+      await brokenEffect.dispose()
+    })
+
+    it(`should eventually open cursor gate when cursor-less changes follow cursored replay`, async () => {
+      const users = createCollection(
+        mockSyncCollectionOptionsNoInitialState<User>({
+          id: `cursorless-after-replay-users`,
+          getKey: (user) => user.id,
+        }),
+      )
+      const events: Array<DeltaEvent<User, number>> = []
+
+      const effect = createEffect<User, number>({
+        query: (q) => q.from({ user: users }),
+        onBatch: collectBatchEvents(events),
+        startAfter: 1,
+      })
+
+      users.utils.markReady()
+      await flushPromises()
+
+      // Replay change at cursor 1 — should be suppressed
+      users.utils.begin()
+      users.utils.write({
+        type: `insert`,
+        value: { id: 1, name: `Alice`, active: true },
+        cursor: 1,
+      })
+      users.utils.commit()
+      await flushPromises()
+      expect(events).toHaveLength(0)
+
+      // Now a live change arrives WITHOUT a cursor
+      users.utils.begin()
+      users.utils.write({
+        type: `insert`,
+        value: { id: 2, name: `Bob`, active: true },
+      })
+      users.utils.commit()
+      await flushPromises()
+
+      // Should the gate open for cursor-less changes? Currently it won't.
+      // This test documents whether cursor-less changes after replay are emitted.
+      expect(events).toHaveLength(1)
+      expect(events[0]!.type).toBe(`enter`)
+
+      await effect.dispose()
+    })
+
+    it(`should preserve cursor when a cursor-less update follows a cursored insert in same transaction`, async () => {
+      let testSyncFunctions: any = null
+
+      const collection = createCollection<{ id: number; value: string }>({
+        id: `cursor-erasure-test`,
+        getKey: (item) => item.id,
+        startSync: true,
+        sync: {
+          sync: ({ begin, write, commit, markReady }) => {
+            begin()
+            write({
+              type: `insert`,
+              value: { id: 1, value: `initial` },
+            })
+            commit()
+            markReady()
+            testSyncFunctions = { begin, write, commit }
+          },
+        },
+      })
+
+      await collection.stateWhenReady()
+
+      const observedChanges: Array<any> = []
+      const subscription = collection.subscribeChanges(
+        (changes) => {
+          observedChanges.push(...changes)
+        },
+        { includeInitialState: false },
+      )
+
+      const { begin, write, commit } = testSyncFunctions
+
+      // Insert with cursor, then update same key without cursor in same tx
+      begin()
+      write({
+        type: `insert`,
+        value: { id: 2, value: `new` },
+        cursor: `005`,
+      })
+      write({
+        type: `update`,
+        value: { id: 2, value: `updated` },
+      })
+      commit()
+
+      // The cursor from the insert should not be erased by the cursor-less update
+      const cursoredChanges = observedChanges.filter(
+        (c: any) => c.cursor !== undefined,
+      )
+      expect(cursoredChanges.length).toBeGreaterThan(0)
+
+      subscription.unsubscribe()
+    })
+
+    it(`should emit uncursored changes in a batch that also contains a gate-opening cursor`, async () => {
+      const users = createCollection(
+        mockSyncCollectionOptionsNoInitialState<User>({
+          id: `mixed-cursor-batch-users`,
+          getKey: (user) => user.id,
+        }),
+      )
+      const events: Array<DeltaEvent<User, number>> = []
+
+      const effect = createEffect<User, number>({
+        query: (q) => q.from({ user: users }),
+        onBatch: collectBatchEvents(events),
+        startAfter: 2,
+      })
+
+      users.utils.markReady()
+      await flushPromises()
+
+      // Single transaction: uncursored insert first, then a cursored insert past the gate
+      users.utils.begin()
+      users.utils.write({
+        type: `insert`,
+        value: { id: 1, name: `Alice`, active: true },
+        // no cursor
+      })
+      users.utils.write({
+        type: `insert`,
+        value: { id: 2, name: `Bob`, active: true },
+        cursor: 3,
+      })
+      users.utils.commit()
+      await flushPromises()
+
+      // Both rows should emit — the uncursored change has no position in cursor
+      // space, so once the gate opens it should not be suppressed
+      expect(events).toHaveLength(2)
+
+      await effect.dispose()
+    })
+
+    it(`should stamp each DeltaEvent with the batch-level max cursor`, async () => {
+      const users = createCollection(
+        mockSyncCollectionOptionsNoInitialState<User>({
+          id: `batch-cursor-stamp-users`,
+          getKey: (user) => user.id,
+        }),
+      )
+      const events: Array<DeltaEvent<User, number>> = []
+
+      const effect = createEffect<User, number>({
+        query: (q) => q.from({ user: users }),
+        onBatch: collectBatchEvents(events),
+      })
+
+      users.utils.markReady()
+      await flushPromises()
+      events.length = 0
+
+      // Single transaction with two inserts at different cursors
+      users.utils.begin()
+      users.utils.write({
+        type: `insert`,
+        value: { id: 10, name: `First`, active: true },
+        cursor: 3,
+      })
+      users.utils.write({
+        type: `insert`,
+        value: { id: 11, name: `Second`, active: true },
+        cursor: 4,
+      })
+      users.utils.commit()
+      await flushPromises()
+
+      // Batch cursor should be the max (4) on all events — this is by-design
+      expect(events).toHaveLength(2)
+      expect(events[0]!.cursor).toBe(4)
+      expect(events[1]!.cursor).toBe(4)
+
+      await effect.dispose()
+    })
+
+    it(`should handle a batch that straddles the startAfter boundary`, async () => {
+      const users = createCollection(
+        mockSyncCollectionOptionsNoInitialState<User>({
+          id: `straddling-batch-users`,
+          getKey: (user) => user.id,
+        }),
+      )
+      const events: Array<DeltaEvent<User, number>> = []
+
+      const effect = createEffect<User, number>({
+        query: (q) => q.from({ user: users }),
+        onBatch: collectBatchEvents(events),
+        startAfter: 2,
+      })
+
+      users.utils.markReady()
+      await flushPromises()
+
+      // Single transaction with changes on both sides of the boundary
+      users.utils.begin()
+      users.utils.write({
+        type: `insert`,
+        value: { id: 1, name: `Alice`, active: true },
+        cursor: 1,
+      })
+      users.utils.write({
+        type: `insert`,
+        value: { id: 2, name: `Bob`, active: true },
+        cursor: 2,
+      })
+      users.utils.write({
+        type: `insert`,
+        value: { id: 3, name: `Charlie`, active: true },
+        cursor: 3,
+      })
+      users.utils.commit()
+      await flushPromises()
+
+      // Only cursor 3 should produce an event; cursors 1 & 2 are replay
+      expect(events).toHaveLength(1)
+      expect(events[0]!.type).toBe(`enter`)
+      expect(events[0]!.value.name).toBe(`Charlie`)
+      expect(events[0]!.cursor).toBe(3)
+
+      await effect.dispose()
+    })
+
+    it(`should reject non-monotonic cursor sequences within a batch`, async () => {
+      const users = createCollection(
+        mockSyncCollectionOptionsNoInitialState<User>({
+          id: `non-monotonic-cursor-users`,
+          getKey: (user) => user.id,
+        }),
+      )
+      const errors: Array<Error> = []
+
+      const effect = createEffect<User, number>({
+        query: (q) => q.from({ user: users }),
+        onBatch: () => {},
+        startAfter: 2,
+        onSourceError: (err) => errors.push(err),
+      })
+
+      users.utils.markReady()
+      await flushPromises()
+
+      // Non-monotonic batch: [cursor 1, cursor 3, cursor 2]
+      users.utils.begin()
+      users.utils.write({
+        type: `insert`,
+        value: { id: 1, name: `Alice`, active: true },
+        cursor: 1,
+      })
+      users.utils.write({
+        type: `insert`,
+        value: { id: 2, name: `Bob`, active: true },
+        cursor: 3,
+      })
+      users.utils.write({
+        type: `insert`,
+        value: { id: 3, name: `Charlie`, active: true },
+        cursor: 2,
+      })
+      users.utils.commit()
+      await flushPromises()
+
+      expect(errors).toHaveLength(1)
+      expect(errors[0]!.message).toMatch(/monotonically/)
+
+      await effect.dispose()
+    })
+
+    it(`should throw when a scalar startAfter is used with multi-source effects`, () => {
+      const users = createUsersCollection()
+      const issues = createIssuesCollection()
+
+      expect(() => {
+        createEffect({
+          query: (q) =>
+            q
+              .from({ issue: issues })
+              .join({ user: users }, ({ issue, user }) =>
+                eq(issue.userId, user.id),
+              ),
+          onBatch: () => {},
+          startAfter: 1,
+        })
+      }).toThrow(/scalar startAfter/)
+    })
+
+    it(`should support per-source startAfter with Record for join queries`, async () => {
+      const users = createCollection(
+        mockSyncCollectionOptionsNoInitialState<User>({
+          id: `join-cursor-users`,
+          getKey: (user) => user.id,
+        }),
+      )
+      const issues = createCollection(
+        mockSyncCollectionOptionsNoInitialState<Issue>({
+          id: `join-cursor-issues`,
+          getKey: (issue) => issue.id,
+        }),
+      )
+      const events: Array<DeltaEvent<any, any>> = []
+
+      const effect = createEffect({
+        query: (q) =>
+          q
+            .from({ issue: issues })
+            .join({ user: users }, ({ issue, user }) =>
+              eq(issue.userId, user.id),
+            ),
+        onBatch: collectBatchEvents(events),
+        startAfter: { issue: 2, user: 3 },
+      })
+
+      users.utils.markReady()
+      issues.utils.markReady()
+      await flushPromises()
+
+      // Replay: both sources send data at or before their respective cursors
+      issues.utils.begin()
+      issues.utils.write({
+        type: `insert`,
+        value: { id: 1, title: `Bug report`, userId: 1 },
+        cursor: 1,
+      })
+      issues.utils.write({
+        type: `insert`,
+        value: { id: 2, title: `Feature request`, userId: 2 },
+        cursor: 2,
+      })
+      issues.utils.commit()
+      await flushPromises()
+
+      users.utils.begin()
+      users.utils.write({
+        type: `insert`,
+        value: { id: 1, name: `Alice`, active: true },
+        cursor: 2,
+      })
+      users.utils.write({
+        type: `insert`,
+        value: { id: 2, name: `Bob`, active: true },
+        cursor: 3,
+      })
+      users.utils.commit()
+      await flushPromises()
+
+      // No events yet — both gates are still closed
+      expect(events).toHaveLength(0)
+
+      // Now issue cursor 3 arrives (past issue gate boundary of 2)
+      issues.utils.begin()
+      issues.utils.write({
+        type: `insert`,
+        value: { id: 3, title: `New issue`, userId: 1 },
+        cursor: 3,
+      })
+      issues.utils.commit()
+      await flushPromises()
+
+      // Issue gate opened — events should fire (Alice is already hydrated via join)
+      expect(events.length).toBeGreaterThan(0)
+      const issueEvent = events.find(
+        (e) => e.type === `enter` && e.value?.issue?.title === `New issue`,
+      )
+      expect(issueEvent).toBeDefined()
+      expect(issueEvent!.triggeringSource).toBe(`issue`)
+      expect(issueEvent!.cursors).toBeDefined()
+      expect(issueEvent!.cursors!.issue).toBe(3)
+
+      await effect.dispose()
+    })
+
+    it(`should emit events from ungated source while gated source replays`, async () => {
+      const users = createCollection(
+        mockSyncCollectionOptionsNoInitialState<User>({
+          id: `partial-gate-users`,
+          getKey: (user) => user.id,
+        }),
+      )
+      const issues = createCollection(
+        mockSyncCollectionOptionsNoInitialState<Issue>({
+          id: `partial-gate-issues`,
+          getKey: (issue) => issue.id,
+        }),
+      )
+      const events: Array<DeltaEvent<any, any>> = []
+
+      // Only gate the issue source; user source has no gate
+      const effect = createEffect({
+        query: (q) =>
+          q
+            .from({ issue: issues })
+            .join({ user: users }, ({ issue, user }) =>
+              eq(issue.userId, user.id),
+            ),
+        onBatch: collectBatchEvents(events),
+        startAfter: { issue: 5 },
+      })
+
+      users.utils.markReady()
+      issues.utils.markReady()
+      await flushPromises()
+
+      // Hydrate user data (no gate on users — always live)
+      users.utils.begin()
+      users.utils.write({
+        type: `insert`,
+        value: { id: 1, name: `Alice`, active: true },
+      })
+      users.utils.commit()
+      await flushPromises()
+
+      // User has no gate, so changes from user source are live
+      // But there are no issues yet to join with, so no join results
+      events.length = 0
+
+      // Replay issues (gate closed — cursor <= 5)
+      issues.utils.begin()
+      issues.utils.write({
+        type: `insert`,
+        value: { id: 1, title: `Old issue`, userId: 1 },
+        cursor: 4,
+      })
+      issues.utils.commit()
+      await flushPromises()
+
+      // Issue gate is still closed — no events
+      expect(events).toHaveLength(0)
+
+      // Live issue arrives (cursor > 5)
+      issues.utils.begin()
+      issues.utils.write({
+        type: `insert`,
+        value: { id: 2, title: `New issue`, userId: 1 },
+        cursor: 6,
+      })
+      issues.utils.commit()
+      await flushPromises()
+
+      // Gate opens — should see the new issue joined with Alice
+      const enterEvents = events.filter((e) => e.type === `enter`)
+      expect(enterEvents.length).toBeGreaterThan(0)
+      const newIssueEvent = enterEvents.find(
+        (e) => e.value?.issue?.title === `New issue`,
+      )
+      expect(newIssueEvent).toBeDefined()
+
+      await effect.dispose()
+    })
+
+    it(`should include triggeringSource and cursors on DeltaEvents for gated effects`, async () => {
+      const users = createCollection(
+        mockSyncCollectionOptionsNoInitialState<User>({
+          id: `triggering-source-users`,
+          getKey: (user) => user.id,
+        }),
+      )
+      const events: Array<DeltaEvent<User, number>> = []
+
+      const effect = createEffect<User, number>({
+        query: (q) => q.from({ user: users }),
+        onBatch: collectBatchEvents(events),
+        startAfter: 0,
+      })
+
+      users.utils.markReady()
+      await flushPromises()
+
+      // Send a change past the gate
+      users.utils.begin()
+      users.utils.write({
+        type: `insert`,
+        value: { id: 1, name: `Alice`, active: true },
+        cursor: 1,
+      })
+      users.utils.commit()
+      await flushPromises()
+
+      expect(events).toHaveLength(1)
+      expect(events[0]!.triggeringSource).toBe(`user`)
+      expect(events[0]!.cursors).toEqual({ user: 1 })
+      expect(events[0]!.cursor).toBe(1)
 
       await effect.dispose()
     })

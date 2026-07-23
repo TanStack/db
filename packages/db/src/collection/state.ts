@@ -12,6 +12,7 @@ import type { StandardSchemaV1 } from '@standard-schema/spec'
 import type {
   ChangeMessage,
   CollectionConfig,
+  CollectionCursor,
   OptimisticChangeMessage,
 } from '../types'
 import type { CollectionImpl } from './index.js'
@@ -28,6 +29,7 @@ interface PendingSyncedTransaction<
   operations: Array<OptimisticChangeMessage<T>>
   truncate?: boolean
   deletedKeys: Set<string | number>
+  rowCursorWrites: Map<TKey, PendingCursorWrite>
   rowMetadataWrites: Map<TKey, PendingMetadataWrite>
   collectionMetadataWrites: Map<string, PendingMetadataWrite>
   optimisticSnapshot?: {
@@ -41,6 +43,10 @@ interface PendingSyncedTransaction<
    */
   immediate?: boolean
 }
+
+type PendingCursorWrite =
+  | { type: `set`; value: CollectionCursor }
+  | { type: `delete` }
 
 type PendingMetadataWrite = { type: `set`; value: unknown } | { type: `delete` }
 
@@ -333,6 +339,7 @@ export class CollectionStateManager<
       type: change.type,
       value: enrichedValue,
       previousValue: enrichedPreviousValue,
+      cursor: change.cursor,
       metadata: change.metadata,
     } as ChangeMessage<WithVirtualProps<TOutput, TKey>, TKey>
   }
@@ -923,6 +930,7 @@ export class CollectionStateManager<
       }
 
       const events: Array<ChangeMessage<TOutput, TKey>> = []
+      const eventCursors = new Map<TKey, CollectionCursor>()
       const rowUpdateMode = this.config.sync.rowUpdateMode || `partial`
       const completedOptimisticOps = new Map<
         TKey,
@@ -1060,6 +1068,14 @@ export class CollectionStateManager<
             continue
           }
           this.syncedMetadata.set(key, metadataWrite.value)
+        }
+
+        for (const [key, cursorWrite] of transaction.rowCursorWrites) {
+          if (cursorWrite.type === `delete`) {
+            eventCursors.delete(key)
+            continue
+          }
+          eventCursors.set(key, cursorWrite.value)
         }
 
         for (const [
@@ -1217,6 +1233,7 @@ export class CollectionStateManager<
 
       // Now check what actually changed in the final visible state
       for (const key of changedKeys) {
+        const cursor = eventCursors.get(key)
         const previousVisibleValue = currentVisibleState.get(key)
         const newVisibleValue = this.get(key) // This returns the new derived state
         const previousVirtualProps = this.getVirtualPropsSnapshotForState(key, {
@@ -1290,12 +1307,14 @@ export class CollectionStateManager<
               key,
               value: newVisibleValue,
               previousValue: previousValueWithVirtualFromCompleted,
+              cursor,
             })
           } else {
             events.push({
               type: `insert`,
               key,
               value: newVisibleValue,
+              cursor,
             })
           }
         } else if (
@@ -1306,6 +1325,7 @@ export class CollectionStateManager<
             type: `delete`,
             key,
             value: previousValueWithVirtual ?? previousVisibleValue,
+            cursor,
           })
         } else if (
           previousVisibleValue !== undefined &&
@@ -1318,6 +1338,7 @@ export class CollectionStateManager<
             key,
             value: newVisibleValue,
             previousValue: previousValueWithVirtual ?? previousVisibleValue,
+            cursor,
           })
         }
       }
