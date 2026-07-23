@@ -1,7 +1,8 @@
 cleanupUnusedCatalogs: true
 linkWorkspacePackages: true
 preferWorkspacePackages: true
-blockExoticSubdeps: false
+blockExoticSubdeps: true
+trustPolicy: 'no-downgrade'
 
 packages:
   - packages/**
