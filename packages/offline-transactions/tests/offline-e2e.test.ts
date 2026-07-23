@@ -185,6 +185,71 @@ describe(`offline executor end-to-end`, () => {
     )
   })
 
+  it(`uses a custom retryPolicy provided via config`, async () => {
+    // The DefaultRetryPolicy classifies any error whose message includes "401"
+    // as a permanent failure. A custom policy passed via config overrides that:
+    // here it keeps retrying, so the transaction survives the 401 and succeeds
+    // once the backend recovers.
+    let online = false
+    let shouldRetryCalled = false
+
+    const env = createTestOfflineEnvironment({
+      config: {
+        retryPolicy: {
+          // Large delay so retries only fire when we force them via
+          // notifyOnline(), keeping the test deterministic.
+          calculateDelay: () => 60_000,
+          shouldRetry: () => {
+            shouldRetryCalled = true
+            return true
+          },
+        },
+      },
+      mutationFn: async (params) => {
+        const mutations = params.transaction.mutations as Array<
+          PendingMutation<TestItem>
+        >
+        if (!online) {
+          throw new Error(`HTTP 401 Unauthorized`)
+        }
+        env.applyMutations(mutations)
+        return { ok: true, mutations }
+      },
+    })
+
+    await env.waitForLeader()
+
+    const offlineTx = env.executor.createOfflineTransaction({
+      mutationFnName: env.mutationFnName,
+      autoCommit: false,
+    })
+    offlineTx.mutate(() => {
+      env.collection.insert({
+        id: `custom-retry-item`,
+        value: `kept`,
+        completed: false,
+        updatedAt: new Date(),
+      })
+    })
+    const commitPromise = offlineTx.commit()
+
+    // Despite the 401 (non-retryable under the default policy), the custom
+    // policy is consulted and keeps the transaction queued for retry.
+    await waitUntil(() => env.mutationCalls.length >= 1)
+    expect(shouldRetryCalled).toBe(true)
+    expect(await env.executor.peekOutbox()).toHaveLength(1)
+
+    // Backend recovers; the retries the custom policy allowed now succeed.
+    online = true
+    env.executor.getOnlineDetector().notifyOnline()
+
+    await expect(commitPromise).resolves.toBeDefined()
+    expect(await env.executor.peekOutbox()).toEqual([])
+    expect(env.serverState.get(`custom-retry-item`)?.value).toBe(`kept`)
+
+    env.executor.dispose()
+  })
+
   it(`does not execute mutations while offline`, async () => {
     const onlineDetector = new ManualOnlineDetector(false)
     const env = createTestOfflineEnvironment({
