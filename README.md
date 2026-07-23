@@ -55,7 +55,6 @@ Data loading is optimized. Interactions feel instantaneous. Your backend stays s
 - We welcome issues and pull requests!
 - Participate in [GitHub discussions](https://github.com/TanStack/db/discussions)
 - Chat with the community on [Discord](https://discord.com/invite/WrRKjPJ)
-- See [CONTRIBUTING.md](./CONTRIBUTING.md) for setup instructions
 
 ## Partners
 
