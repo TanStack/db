@@ -241,6 +241,54 @@ Some TanStack Query fields are owned or reinterpreted by Query Collection and ar
 
 `placeholderData` is intentionally unsupported. TanStack Query treats placeholder data as observer-local presentation state rather than cached Query data. Materializing it would expose temporary UI data as collection-wide normalized rows. Render placeholders in the consuming UI instead.
 
+### Request Cancellation with `QueryFunctionContext.signal`
+
+TanStack Query passes an `AbortSignal` to `queryFn` through the query function
+context. Forward `ctx.signal` to `fetch` or another abortable client to make the
+request cancellable:
+
+```typescript
+const todosCollection = createCollection(
+  queryCollectionOptions({
+    queryKey: ["todos"],
+    queryFn: async (ctx) => {
+      const response = await fetch("/api/todos", {
+        signal: ctx.signal,
+      })
+
+      if (!response.ok) {
+        throw new Error("Failed to fetch todos")
+      }
+
+      return response.json() as Promise<Array<Todo>>
+    },
+    queryClient,
+    getKey: (todo) => todo.id,
+  }),
+)
+```
+
+Explicit collection cleanup cancels collection-owned queries before removing
+them from the Query cache:
+
+```typescript
+await todosCollection.cleanup()
+```
+
+The underlying request is aborted only when its client consumes `ctx.signal`.
+A client that ignores the signal may continue its request even though the
+collection has been cleaned up.
+
+On-demand subset unloading has different semantics. When the last subscriber
+unloads a subset, Query Collection does **not** cancel its in-flight request.
+TanStack Query can cache the completed response, preserving cache reuse and a
+fast remount if the same subset is requested again.
+
+Broader cancellation and lease-policy changes are being designed in
+[RFC #1657](https://github.com/TanStack/db/issues/1657) and
+[PR #1573](https://github.com/TanStack/db/pull/1573). Those proposals are not
+the current behavior described here.
+
 ### Using with `queryOptions(...)`
 
 If your app already uses TanStack Query's `queryOptions` helper (e.g. from `@tanstack/react-query`), you can spread compatible top-level options into `queryCollectionOptions`. Note that `queryFn` must be explicitly provided since query collections require it both in types and at runtime, and Query Collection's `select` option is for row extraction rather than TanStack Query observer-level selection:
