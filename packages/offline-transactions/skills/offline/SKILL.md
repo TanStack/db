@@ -10,7 +10,7 @@ description: >
   React Native support via separate entry point.
 type: composition
 library: db
-library_version: '0.6.0'
+library_version: '0.6.17'
 requires:
   - db-core
   - db-core/mutations-optimistic
@@ -31,6 +31,7 @@ import {
   startOfflineExecutor,
   IndexedDBAdapter,
 } from '@tanstack/offline-transactions'
+import { safeRandomUUID } from '@tanstack/db'
 import { todoCollection } from './collections'
 
 const executor = startOfflineExecutor({
@@ -68,7 +69,7 @@ const tx = executor.createOfflineTransaction({
 
 // Mutations run inside tx.mutate() — uses ambient transaction context
 tx.mutate(() => {
-  todoCollection.insert({ id: crypto.randomUUID(), text: 'New todo' })
+  todoCollection.insert({ id: safeRandomUUID(), text: 'New todo' })
 })
 tx.commit()
 ```
@@ -82,7 +83,7 @@ const addTodo = executor.createOfflineAction({
   mutationFnName: 'createTodo',
   onMutate: (variables) => {
     todoCollection.insert({
-      id: crypto.randomUUID(),
+      id: safeRandomUUID(),
       text: variables.text,
     })
   },

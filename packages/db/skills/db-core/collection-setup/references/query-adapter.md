@@ -32,19 +32,28 @@ const collection = createCollection(
 
 ## Optional Config (with defaults)
 
-| Option            | Default      | Description                                     |
-| ----------------- | ------------ | ----------------------------------------------- |
-| `id`              | (none)       | Unique collection identifier                    |
-| `schema`          | (none)       | StandardSchema validator                        |
-| `select`          | (none)       | Extracts array items when wrapped with metadata |
-| `enabled`         | `true`       | Whether query runs automatically                |
-| `refetchInterval` | `0`          | Polling interval in ms; 0 = disabled            |
-| `retry`           | (TQ default) | Retry config for failed queries                 |
-| `retryDelay`      | (TQ default) | Delay between retries                           |
-| `staleTime`       | (TQ default) | How long data is considered fresh               |
-| `meta`            | (none)       | Metadata passed to queryFn context              |
-| `startSync`       | `true`       | Start syncing immediately                       |
-| `syncMode`        | (none)       | Set `"on-demand"` for predicate push-down       |
+| Option                 | Default      | Description                                     |
+| ---------------------- | ------------ | ----------------------------------------------- |
+| `id`                   | (none)       | Unique collection identifier                    |
+| `schema`               | (none)       | StandardSchema validator                        |
+| `select`               | (none)       | Extracts rows from the original response shape  |
+| `enabled`              | `true`       | Whether query runs automatically                |
+| `refetchInterval`      | (TQ default) | Polling interval                                |
+| `retry` / `retryDelay` | (TQ default) | Retry policy                                    |
+| `staleTime` / `gcTime` | (TQ default) | Freshness and unused-cache retention            |
+| `refetchOnWindowFocus` | (TQ default) | Refetch when the window regains focus           |
+| `refetchOnReconnect`   | (TQ default) | Refetch after reconnecting                      |
+| `refetchOnMount`       | (TQ default) | Refetch when the observer mounts                |
+| `networkMode`          | (TQ default) | TanStack Query network mode                     |
+| `initialData`          | (none)       | Initial response for eager collections          |
+| `initialDataUpdatedAt` | (none)       | Timestamp used to judge initial-data freshness  |
+| `meta`                 | (none)       | Metadata merged into the query function context |
+| `startSync`            | `true`       | Start syncing immediately                       |
+| `syncMode`             | `eager`      | Set `"on-demand"` for predicate push-down       |
+
+Query Client defaults apply when these pass-through fields are omitted.
+`placeholderData` is intentionally unsupported: it is observer-local UI state,
+not cache data, so it must not become collection-wide rows.
 
 ### Persistence Handlers
 
@@ -81,6 +90,124 @@ collection.utils.writeBatch(() => {
 })
 ```
 
+## Response Shape, Initial Data, and Query Options
+
+`select` is a Query Collection row-extraction hook, not TanStack Query's
+observer-level projection. The Query cache keeps the original response while
+the collection materializes the returned row array:
+
+```typescript
+const collection = createCollection(
+  queryCollectionOptions({
+    queryKey: ['todos'],
+    queryFn: fetchTodosResponse,
+    initialData: {
+      items: [{ id: '1', title: 'Initial todo' }],
+      total: 1,
+    },
+    initialDataUpdatedAt: Date.now(),
+    staleTime: 60_000,
+    select: (response) => response.items,
+    queryClient,
+    getKey: (todo) => todo.id,
+  }),
+)
+```
+
+The same `select` applies to fetched and initial responses. Cached or hydrated
+data for the same exact Query key takes precedence over a later `initialData`
+value. `initialData` is supported only in eager mode; seed the exact derived
+Query cache entries for on-demand subsets.
+
+Passing either `initialData` or `initialDataUpdatedAt` in on-demand mode throws
+`InitialDataInOnDemandModeError`. When stale initial data triggers a fetch, the
+rows remain visible while it runs. A failed fetch retains them; a successful
+fetch reconciles them normally.
+
+Direct writes can preserve simple wrappers such as `{ data: [...] }`,
+`{ items: [...] }`, or `{ results: [...] }`. For a derived projection such as
+`response.edges.map((edge) => edge.node)`, refetch or invalidate when the
+wrapped cache must reflect the write exactly.
+
+You may spread compatible `queryOptions(...)` output into
+`queryCollectionOptions`, but provide `queryFn` explicitly. Do not pass a
+TanStack Query observer-level `select`; Query Collection gives that name the
+row-extraction contract above.
+
+## Runtime QueryClient and Business Scopes
+
+When a `QueryClient` is request-, router-, tenant-, or test-scoped, put shared
+options in a factory and create one stable collection per client and business
+scope:
+
+```typescript
+function createProjectTodosCollection(
+  queryClient: QueryClient,
+  projectId: string,
+) {
+  return createCollection(
+    queryCollectionOptions({
+      queryKey: ['projects', projectId, 'todos'],
+      queryFn: () => fetchProjectTodos(projectId),
+      queryClient,
+      getKey: (todo) => todo.id,
+    }),
+  )
+}
+
+type ProjectTodosCollection = ReturnType<typeof createProjectTodosCollection>
+
+const projectCollections = new WeakMap<
+  QueryClient,
+  Map<string, ProjectTodosCollection>
+>()
+
+export function getProjectTodosCollection(
+  queryClient: QueryClient,
+  projectId: string,
+): ProjectTodosCollection {
+  let collectionsByProject = projectCollections.get(queryClient)
+  if (!collectionsByProject) {
+    collectionsByProject = new Map()
+    projectCollections.set(queryClient, collectionsByProject)
+  }
+
+  let collection = collectionsByProject.get(projectId)
+  if (!collection) {
+    collection = createProjectTodosCollection(queryClient, projectId)
+    collectionsByProject.set(projectId, collection)
+  }
+
+  return collection
+}
+
+export async function removeProjectTodosCollection(
+  queryClient: QueryClient,
+  projectId: string,
+): Promise<void> {
+  const collectionsByProject = projectCollections.get(queryClient)
+  if (!collectionsByProject) return
+
+  const collection = collectionsByProject.get(projectId)
+  if (!collection) return
+
+  collectionsByProject.delete(projectId)
+  if (collectionsByProject.size === 0) {
+    projectCollections.delete(queryClient)
+  }
+  await collection.cleanup()
+}
+```
+
+Memoize by `QueryClient` and every scope value. Do not create the collection
+during every render or in each consumer. Clean up and remove unused entries
+from long-lived scope maps when your application owns their lifecycle.
+
+A business scope names a distinct server resource. A relational subset
+(`where`, `orderBy`, `limit`, or `offset`) stays within that collection and, in
+on-demand mode, reaches `queryFn` as `ctx.meta.loadSubsetOptions`. Do not create
+a collection for each relational subset.
+
 ## Request Cancellation and Cleanup
 
 TanStack Query passes an `AbortSignal` through the query function context.
@@ -107,6 +234,14 @@ the same exact key, the request may finish and remain cached until `gcTime`.
 Query cache entries are shared within a `QueryClient`. Explicit cleanup can
 cancel or remove entries used by another collection or Query consumer with the
 same exact key.
+
+## Query Invalidation
+
+Exact-key and prefix invalidation refetch active eager and on-demand queries,
+then rematerialize their results. Overlapping subsets keep rows that another
+active subset still owns. A failed refetch retains current rows and records the
+error in `collection.utils.lastError`. Cleaned-up or otherwise inactive queries
+do not rematerialize.
 
 ## Predicate Push-Down (syncMode: "on-demand")
 
@@ -240,8 +375,10 @@ When using a function-based `queryKey`, all derived keys must share the base key
 
 ## Key Behaviors
 
-- `queryFn` result is treated as **complete state** -- missing items are deleted
-- Empty array from `queryFn` deletes all items
+- In eager mode, each `queryFn` result is complete collection state
+- In on-demand mode, it is complete state for that exact subset/Query key
+- An empty subset removes that subset's ownership; overlapping subsets can keep
+  the same rows materialized
 - Direct writes update TQ cache but are overridden by subsequent `queryFn` results
 - Persistence handlers automatically refetch unless they return `{ refetch: false }`
 - On-demand `collection.preload()` is a no-op; preload the live query instead

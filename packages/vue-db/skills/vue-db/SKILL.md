@@ -10,7 +10,7 @@ description: >
 type: framework
 library: db
 framework: vue
-library_version: '0.6.0'
+library_version: '0.6.17'
 requires:
   - db-core
 sources:

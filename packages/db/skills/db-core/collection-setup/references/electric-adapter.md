@@ -30,9 +30,22 @@ const collection = createCollection(
 | `id`                  | (none)  | Unique collection identifier                        |
 | `schema`              | (none)  | StandardSchema validator                            |
 | `shapeOptions.params` | (none)  | Additional shape params (e.g. `{ table: 'todos' }`) |
+| `syncMode`            | `eager` | `eager`, `on-demand`, or `progressive`              |
 | `onInsert`            | (none)  | Persistence handler; should return `{ txid }`       |
 | `onUpdate`            | (none)  | Persistence handler; should return `{ txid }`       |
 | `onDelete`            | (none)  | Persistence handler; should return `{ txid }`       |
+
+## Sync Modes
+
+- `eager` loads the full shape before use.
+- `on-demand` loads only the subsets requested by live queries.
+- `progressive` loads the requested subset first, then completes the full sync
+  in the background.
+
+With SQLite persistence, progressive resume keeps hydrated rows visible while
+the full Electric stream resumes. On-demand subset snapshots use a bounded
+refresh wait, so a stalled native long-poll refresh does not block loading
+forever.
 
 ## Three Sync Strategies
 
