@@ -17,7 +17,8 @@ const queryClient = new QueryClient()
 const collection = createCollection(
   queryCollectionOptions({
     queryKey: ['todos'],
-    queryFn: async () => fetch('/api/todos').then((r) => r.json()),
+    queryFn: async (ctx) =>
+      fetch('/api/todos', { signal: ctx.signal }).then((r) => r.json()),
     queryClient,
     getKey: (item) => item.id,
   }),
@@ -50,7 +51,7 @@ const collection = createCollection(
 ```typescript
 onInsert: async ({ transaction }) => {
   await api.createTodos(transaction.mutations.map((m) => m.modified))
-  // return nothing or { refetch: true } to trigger refetch
+  // Query Collection automatically refetches and awaits the result.
   // return { refetch: false } to skip refetch
 },
 onUpdate: async ({ transaction }) => {
@@ -79,6 +80,33 @@ collection.utils.writeBatch(() => {
   collection.utils.writeDelete('3')
 })
 ```
+
+## Request Cancellation and Cleanup
+
+TanStack Query passes an `AbortSignal` through the query function context.
+Forward it to `fetch` or another abortable client:
+
+```typescript
+queryFn: async (ctx) => {
+  const response = await fetch('/api/todos', { signal: ctx.signal })
+  return response.json()
+},
+```
+
+Explicit `collection.cleanup()` cancels each exact Query key the collection is
+currently tracking, then removes it from the Query cache. The underlying client
+stops work only when it consumes `ctx.signal`.
+
+An unloaded on-demand subset is no longer tracked, so later collection cleanup
+does not revisit its Query key. Unloading does not explicitly call
+`queryClient.cancelQueries()`: it removes the subset's Query observer. If that
+was the final observer and the query function consumed `ctx.signal`, Query Core
+aborts the request. If the signal was ignored, or another observer still uses
+the same exact key, the request may finish and remain cached until `gcTime`.
+
+Query cache entries are shared within a `QueryClient`. Explicit cleanup can
+cancel or remove entries used by another collection or Query consumer with the
+same exact key.
 
 ## Predicate Push-Down (syncMode: "on-demand")
 
@@ -151,7 +179,9 @@ const productsCollection = createCollection(
         )
       }
       if (limit) params.set('limit', String(limit))
-      return fetch(`/api/products?${params}`).then((r) => r.json())
+      return fetch(`/api/products?${params}`, {
+        signal: ctx.signal,
+      }).then((r) => r.json())
     },
     onInsert: async ({ transaction }) => {
       const serverItems = await api.createProducts(
@@ -213,3 +243,5 @@ When using a function-based `queryKey`, all derived keys must share the base key
 - `queryFn` result is treated as **complete state** -- missing items are deleted
 - Empty array from `queryFn` deletes all items
 - Direct writes update TQ cache but are overridden by subsequent `queryFn` results
+- Persistence handlers automatically refetch unless they return `{ refetch: false }`
+- On-demand `collection.preload()` is a no-op; preload the live query instead
