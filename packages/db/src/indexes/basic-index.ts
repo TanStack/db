@@ -173,7 +173,8 @@ export class BasicIndex<
 
     if (
       areSameValueZeroEqual(oldValue, newValue) &&
-      this.valueMap.get(newValue)?.has(key)
+      this.valueMap.get(newValue)?.has(key) &&
+      this.indexedKeys.has(key)
     ) {
       return
     }
