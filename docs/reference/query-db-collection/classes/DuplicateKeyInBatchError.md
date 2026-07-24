@@ -5,7 +5,7 @@ title: DuplicateKeyInBatchError
 
 # Class: DuplicateKeyInBatchError
 
-Defined in: [packages/query-db-collection/src/errors.ts:62](https://github.com/TanStack/db/blob/main/packages/query-db-collection/src/errors.ts#L62)
+Defined in: [packages/query-db-collection/src/errors.ts:71](https://github.com/TanStack/db/blob/main/packages/query-db-collection/src/errors.ts#L71)
 
 ## Extends
 
@@ -19,7 +19,7 @@ Defined in: [packages/query-db-collection/src/errors.ts:62](https://github.com/T
 new DuplicateKeyInBatchError(key): DuplicateKeyInBatchError;
 ```
 
-Defined in: [packages/query-db-collection/src/errors.ts:63](https://github.com/TanStack/db/blob/main/packages/query-db-collection/src/errors.ts#L63)
+Defined in: [packages/query-db-collection/src/errors.ts:72](https://github.com/TanStack/db/blob/main/packages/query-db-collection/src/errors.ts#L72)
 
 #### Parameters
 
