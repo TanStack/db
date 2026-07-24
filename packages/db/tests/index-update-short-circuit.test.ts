@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 import { BasicIndex } from '../src/indexes/basic-index.js'
 import { BTreeIndex } from '../src/indexes/btree-index.js'
 import { PropRef } from '../src/query/ir.js'
@@ -47,6 +47,7 @@ describe.each(indexTypes)(`%s update`, (_indexName, IndexType) => {
     const index = createIndex()
     index.add(`a`, { value: oldValue })
     const bucket = index.valueMapData.get(normalizeValue(oldValue))
+    expect(bucket).toBeDefined()
 
     index.update(`a`, { value: oldValue }, { value: newValue })
 
@@ -84,5 +85,49 @@ describe.each(indexTypes)(`%s update`, (_indexName, IndexType) => {
 
     expect(index.lookup(`eq`, `A`)).toEqual(new Set())
     expect(index.lookup(`eq`, `a`)).toEqual(new Set([`a`]))
+  })
+
+  it(`preserves the previous error behavior when evaluation fails`, () => {
+    const index = createIndex()
+    index.add(`a`, { value: 1 })
+    const newItem = Object.defineProperty({}, `value`, {
+      get() {
+        throw new Error(`evaluation failed`)
+      },
+    })
+
+    expect(() => index.update(`a`, { value: 1 }, newItem)).toThrow(
+      `evaluation failed`,
+    )
+
+    expect(index.lookup(`eq`, 1)).toEqual(new Set())
+    expect(index.keyCount).toBe(0)
+  })
+})
+
+describe(`BasicIndex update bookkeeping`, () => {
+  it(`repairs indexed key membership after a failed removal`, () => {
+    const index = new BasicIndex<string>(1, new PropRef([`value`]))
+    index.add(`a`, { value: 1 })
+    const itemWithThrowingValue = Object.defineProperty({}, `value`, {
+      get() {
+        throw new Error(`evaluation failed`)
+      },
+    })
+    const warn = vi.spyOn(console, `warn`).mockImplementation(() => {})
+
+    try {
+      index.remove(`a`, itemWithThrowingValue)
+    } finally {
+      warn.mockRestore()
+    }
+
+    expect(index.lookup(`eq`, 1)).toEqual(new Set([`a`]))
+    expect(index.keyCount).toBe(0)
+
+    index.update(`a`, { value: 1 }, { value: 1 })
+
+    expect(index.lookup(`eq`, 1)).toEqual(new Set([`a`]))
+    expect(index.keyCount).toBe(1)
   })
 })
