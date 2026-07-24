@@ -1,6 +1,7 @@
 import { compareKeys } from '@tanstack/db-ivm'
 import { BTree } from '../utils/btree.js'
 import {
+  areSameValueZeroEqual,
   defaultComparator,
   denormalizeUndefined,
   normalizeForBTree,
@@ -94,19 +95,23 @@ export class BTreeIndex<
     // Normalize the value for Map key usage
     const normalizedValue = normalizeForBTree(indexedValue)
 
-    // Check if this value already exists
-    if (this.valueMap.has(normalizedValue)) {
-      // Add to existing set
-      this.valueMap.get(normalizedValue)!.add(key)
-    } else {
-      // Create new set for this value
-      const keySet = new Set<TKey>([key])
-      this.valueMap.set(normalizedValue, keySet)
-      this.orderedEntries.set(normalizedValue, undefined)
-    }
+    this.addToBucket(key, normalizedValue)
 
     this.indexedKeys.add(key)
     this.updateTimestamp()
+  }
+
+  private addToBucket(key: TKey, normalizedValue: any): void {
+    const keySet = this.valueMap.get(normalizedValue)
+    if (keySet) {
+      // Add to existing set
+      keySet.add(key)
+    } else {
+      // Create new set for this value
+      const newKeySet = new Set<TKey>([key])
+      this.valueMap.set(normalizedValue, newKeySet)
+      this.orderedEntries.set(normalizedValue, undefined)
+    }
   }
 
   /**
@@ -127,8 +132,15 @@ export class BTreeIndex<
     // Normalize the value for Map key usage
     const normalizedValue = normalizeForBTree(indexedValue)
 
-    if (this.valueMap.has(normalizedValue)) {
-      const keySet = this.valueMap.get(normalizedValue)!
+    this.removeFromBucket(key, normalizedValue)
+
+    this.indexedKeys.delete(key)
+    this.updateTimestamp()
+  }
+
+  private removeFromBucket(key: TKey, normalizedValue: any): void {
+    const keySet = this.valueMap.get(normalizedValue)
+    if (keySet) {
       keySet.delete(key)
 
       // If set is now empty, remove the entry entirely
@@ -139,17 +151,34 @@ export class BTreeIndex<
         this.orderedEntries.delete(normalizedValue)
       }
     }
-
-    this.indexedKeys.delete(key)
-    this.updateTimestamp()
   }
 
   /**
    * Updates a value in the index
    */
   update(key: TKey, oldItem: any, newItem: any): void {
-    this.remove(key, oldItem)
-    this.add(key, newItem)
+    let oldValue: any
+    let newValue: any
+    try {
+      oldValue = normalizeForBTree(this.evaluateIndexExpression(oldItem))
+      newValue = normalizeForBTree(this.evaluateIndexExpression(newItem))
+    } catch {
+      this.remove(key, oldItem)
+      this.add(key, newItem)
+      return
+    }
+
+    if (
+      areSameValueZeroEqual(oldValue, newValue) &&
+      this.valueMap.get(newValue)?.has(key)
+    ) {
+      return
+    }
+
+    this.removeFromBucket(key, oldValue)
+    this.addToBucket(key, newValue)
+    this.indexedKeys.add(key)
+    this.updateTimestamp()
   }
 
   /**

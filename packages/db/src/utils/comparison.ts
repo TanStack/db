@@ -227,6 +227,13 @@ export function normalizeForBTree(value: any): any {
 }
 
 /**
+ * Compare values using the equality semantics used by Map keys.
+ */
+export function areSameValueZeroEqual(a: any, b: any): boolean {
+  return a === b || (Number.isNaN(a) && Number.isNaN(b))
+}
+
+/**
  * Converts the `UNDEFINED_SENTINEL` back to `undefined`.
  * Needed such that the sentinel is converted back to `undefined` before comparison.
  */
