@@ -1,6 +1,7 @@
 import { compileSingleRowExpression } from '../query/compiler/evaluators.js'
 import { comparisonFunctions } from '../query/builder/functions.js'
 import { DEFAULT_COMPARE_OPTIONS, deepEquals } from '../utils.js'
+import type { CompiledSingleRowExpression } from '../query/compiler/evaluators.js'
 import type { RangeQueryOptions } from './btree-index.js'
 import type { CompareOptions } from '../query/builder/types.js'
 import type { BasicExpression, OrderByDirection } from '../query/ir.js'
@@ -99,6 +100,7 @@ export abstract class BaseIndex<
   protected totalLookupTime = 0
   protected lastUpdated = new Date()
   protected compareOptions: CompareOptions
+  private compiledIndexEvaluator: CompiledSingleRowExpression | undefined
   /**
    * Set by subclasses when constructed with a user-supplied comparator, whose
    * ordering may not match the WHERE evaluator's relational operators.
@@ -210,7 +212,8 @@ export abstract class BaseIndex<
   protected abstract initialize(options?: any): void
 
   protected evaluateIndexExpression(item: any): any {
-    const evaluator = compileSingleRowExpression(this.expression)
+    const evaluator = (this.compiledIndexEvaluator ??=
+      compileSingleRowExpression(this.expression))
     return evaluator(item as Record<string, unknown>)
   }
 
