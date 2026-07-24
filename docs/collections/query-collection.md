@@ -268,8 +268,8 @@ const todosCollection = createCollection(
 )
 ```
 
-Explicit collection cleanup cancels collection-owned queries before removing
-them from the Query cache:
+Explicit collection cleanup cancels each exact Query key the collection is
+currently tracking before removing it from the Query cache:
 
 ```typescript
 await todosCollection.cleanup()
@@ -279,15 +279,18 @@ The underlying request is aborted only when its client consumes `ctx.signal`.
 A client that ignores the signal may continue its request even though the
 collection has been cleaned up.
 
-On-demand subset unloading has different semantics. When the last subscriber
-unloads a subset, Query Collection does **not** cancel its in-flight request.
-TanStack Query can cache the completed response, preserving cache reuse and a
-fast remount if the same subset is requested again.
+An unloaded on-demand subset is no longer tracked. A later explicit collection
+cleanup does not revisit its Query key.
 
-Broader cancellation and lease-policy changes are being designed in
-[RFC #1657](https://github.com/TanStack/db/issues/1657) and
-[PR #1573](https://github.com/TanStack/db/pull/1573). Those proposals are not
-the current behavior described here.
+Query cache entries are shared within a `QueryClient`. Explicit cleanup can
+affect other consumers using the same exact Query keys.
+
+On-demand subset unloading does not explicitly call
+`queryClient.cancelQueries()`. It removes the subset's Query observer. If this
+was the final observer and the query function consumed `ctx.signal`, TanStack
+Query aborts the request. If the signal was ignored, or another observer still
+uses the same exact Query key, the request may finish and remain cached until
+`gcTime`.
 
 ### Using with `queryOptions(...)`
 
