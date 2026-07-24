@@ -101,7 +101,7 @@ export class BTreeIndex<
     this.updateTimestamp()
   }
 
-  private addToBucket(key: TKey, normalizedValue: any): void {
+  private addToBucket(key: TKey, normalizedValue: unknown): void {
     const keySet = this.valueMap.get(normalizedValue)
     if (keySet) {
       // Add to existing set
@@ -138,7 +138,7 @@ export class BTreeIndex<
     this.updateTimestamp()
   }
 
-  private removeFromBucket(key: TKey, normalizedValue: any): void {
+  private removeFromBucket(key: TKey, normalizedValue: unknown): void {
     const keySet = this.valueMap.get(normalizedValue)
     if (keySet) {
       keySet.delete(key)
@@ -157,8 +157,8 @@ export class BTreeIndex<
    * Updates a value in the index
    */
   update(key: TKey, oldItem: any, newItem: any): void {
-    let oldValue: any
-    let newValue: any
+    let oldValue: unknown
+    let newValue: unknown
     try {
       oldValue = normalizeForBTree(this.evaluateIndexExpression(oldItem))
       newValue = normalizeForBTree(this.evaluateIndexExpression(newItem))

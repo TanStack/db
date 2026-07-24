@@ -229,8 +229,8 @@ export function normalizeForBTree(value: any): any {
 /**
  * Compare values using the equality semantics used by Map keys.
  */
-export function areSameValueZeroEqual(a: any, b: any): boolean {
-  return a === b || (Number.isNaN(a) && Number.isNaN(b))
+export function areSameValueZeroEqual(a: unknown, b: unknown): boolean {
+  return a === b || (a !== a && b !== b)
 }
 
 /**

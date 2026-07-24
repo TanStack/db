@@ -99,7 +99,7 @@ export class BasicIndex<
     this.updateTimestamp()
   }
 
-  private addToBucket(key: TKey, normalizedValue: any): void {
+  private addToBucket(key: TKey, normalizedValue: unknown): void {
     const keySet = this.valueMap.get(normalizedValue)
     if (keySet) {
       // Value already exists, just add the key to the set
@@ -143,7 +143,7 @@ export class BasicIndex<
     this.updateTimestamp()
   }
 
-  private removeFromBucket(key: TKey, normalizedValue: any): void {
+  private removeFromBucket(key: TKey, normalizedValue: unknown): void {
     const keySet = this.valueMap.get(normalizedValue)
     if (keySet) {
       keySet.delete(key)
@@ -160,8 +160,8 @@ export class BasicIndex<
    * Updates a value in the index
    */
   update(key: TKey, oldItem: any, newItem: any): void {
-    let oldValue: any
-    let newValue: any
+    let oldValue: unknown
+    let newValue: unknown
     try {
       oldValue = normalizeValue(this.evaluateIndexExpression(oldItem))
       newValue = normalizeValue(this.evaluateIndexExpression(newItem))
