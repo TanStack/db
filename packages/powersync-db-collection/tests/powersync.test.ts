@@ -1,12 +1,6 @@
 import { randomUUID } from 'node:crypto'
 import { tmpdir } from 'node:os'
-import {
-  CrudEntry,
-  PowerSyncDatabase,
-  Schema,
-  Table,
-  column,
-} from '@powersync/node'
+import { PowerSyncDatabase, Schema, Table, column } from '@powersync/node'
 import {
   createCollection,
   createTransaction,
@@ -17,7 +11,6 @@ import { describe, expect, it, onTestFinished, vi } from 'vitest'
 import { powerSyncCollectionOptions } from '../src'
 import { PowerSyncTransactor } from '../src/PowerSyncTransactor'
 import { TEST_DATABASE_IMPLEMENTATION } from './test-db-implementation'
-import type { AbstractPowerSyncDatabase } from '@powersync/node'
 
 const APP_SCHEMA = new Schema({
   users: new Table({
@@ -71,7 +64,7 @@ describePowerSync(`PowerSync Integration`, () => {
     return collection
   }
 
-  async function createTestData(db: AbstractPowerSyncDatabase) {
+  async function createTestData(db: PowerSyncDatabase) {
     await db.execute(`
         INSERT into documents (id, name)
         VALUES 
@@ -205,12 +198,8 @@ describePowerSync(`PowerSync Integration`, () => {
       await collection.delete(id).isPersisted.promise
 
       // There should be a crud entries for this
-      const _crudEntries = await db.getAll(`
-        SELECT * FROM ps_crud ORDER BY id`)
-
-      const crudEntries = _crudEntries.map((r) =>
-        CrudEntry.fromRow(r as Parameters<typeof CrudEntry.fromRow>[0]),
-      )
+      const crudEntries = await db.getAll<{ op: 'string' }>(`
+        SELECT data ->> 'op' AS op FROM ps_crud ORDER BY id`)
 
       expect(crudEntries.length).toBe(6)
       // We can only group transactions for similar operations
@@ -255,14 +244,10 @@ describePowerSync(`PowerSync Integration`, () => {
 
       // fetch the ps_crud items
       // There should be a crud entries for this
-      const _crudEntries = await db.getAll(`
+      const crudEntries = await db.getAll<{ tx_id: number }>(`
         SELECT * FROM ps_crud ORDER BY id`)
-      const crudEntries = _crudEntries.map((r) =>
-        CrudEntry.fromRow(r as Parameters<typeof CrudEntry.fromRow>[0]),
-      )
 
-      const lastTransactionId =
-        crudEntries[crudEntries.length - 1]?.transactionId
+      const lastTransactionId = crudEntries[crudEntries.length - 1]?.tx_id
       /**
        * The last items, created in the same transaction, should be in the same
        * PowerSync transaction.
@@ -271,7 +256,7 @@ describePowerSync(`PowerSync Integration`, () => {
         crudEntries
           .reverse()
           .slice(0, 5)
-          .every((crudEntry) => crudEntry.transactionId == lastTransactionId),
+          .every((crudEntry) => crudEntry.tx_id == lastTransactionId),
       ).true
     })
 
@@ -319,14 +304,10 @@ describePowerSync(`PowerSync Integration`, () => {
 
       // fetch the ps_crud items
       // There should be a crud entries for this
-      const _crudEntries = await db.getAll(`
+      const crudEntries = await db.getAll<{ tx_id: number }>(`
         SELECT * FROM ps_crud ORDER BY id`)
-      const crudEntries = _crudEntries.map((r) =>
-        CrudEntry.fromRow(r as Parameters<typeof CrudEntry.fromRow>[0]),
-      )
 
-      const lastTransactionId =
-        crudEntries[crudEntries.length - 1]?.transactionId
+      const lastTransactionId = crudEntries[crudEntries.length - 1]?.tx_id
       /**
        * The last items, created in the same transaction, should be in the same
        * PowerSync transaction.
@@ -335,7 +316,7 @@ describePowerSync(`PowerSync Integration`, () => {
         crudEntries
           .reverse()
           .slice(0, 10)
-          .every((crudEntry) => crudEntry.transactionId == lastTransactionId),
+          .every((crudEntry) => crudEntry.tx_id == lastTransactionId),
       ).true
     })
 
