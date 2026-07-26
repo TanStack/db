@@ -67,7 +67,7 @@ function FilteredTodos({ minPriority }: { minPriority: number }) {
 import { useLiveInfiniteQuery, eq } from '@tanstack/octane-db'
 
 function PostFeed({ category }: { category: string }) {
-  const { data, pages, fetchNextPage, hasNextPage } = useLiveInfiniteQuery(
+  const { data, fetchNextPage, hasNextPage } = useLiveInfiniteQuery(
     (q) => q
       .from({ posts: postsCollection })
       .where(({ posts }) => eq(posts.category, category))
@@ -80,7 +80,16 @@ function PostFeed({ category }: { category: string }) {
     [category]
   )
 
-  return <div>{data.length} posts loaded</div>
+  return (
+    <div>
+      <ul>
+        {data.map(post => <li key={post.id}>{post.title}</li>)}
+      </ul>
+      {hasNextPage && (
+        <button onClick={() => fetchNextPage()}>Load more</button>
+      )}
+    </div>
+  )
 }
 ```
 
