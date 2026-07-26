@@ -184,7 +184,7 @@ export function useLiveSuspenseQuery(
   }
 
   // SUSPENSE LOGIC: Throw promise or error based on collection status
-   
+
   if (!result.isEnabled) {
     // Suspense queries cannot be disabled - this matches TanStack Query's useSuspenseQuery behavior
     throw new Error(

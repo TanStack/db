@@ -1,10 +1,4 @@
-import {
-  useCallback,
-  useEffect,
-  useMemo,
-  useRef,
-  useState,
-} from 'octane'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'octane'
 import { CollectionImpl } from '@tanstack/db'
 import { subSlot } from './slot'
 import { useLiveQuery } from './useLiveQuery'
@@ -207,12 +201,16 @@ export function useLiveInfiniteQuery<TContext extends Context>(
   }
 
   // Reset pagination when query-function deps change
-  useEffect(() => {
-    if (!isCollection && prevDepsKeyRef.current !== depsKey) {
-      prevDepsKeyRef.current = depsKey
-      setLoadedPageCount(1)
-    }
-  }, [isCollection, depsKey], subSlot(slot, `reset-eff`))
+  useEffect(
+    () => {
+      if (!isCollection && prevDepsKeyRef.current !== depsKey) {
+        prevDepsKeyRef.current = depsKey
+        setLoadedPageCount(1)
+      }
+    },
+    [isCollection, depsKey],
+    subSlot(slot, `reset-eff`),
+  )
 
   // Create a live query with initial limit and offset
   // Either pass collection directly or wrap query function
@@ -229,114 +227,126 @@ export function useLiveInfiniteQuery<TContext extends Context>(
       )
 
   // Adjust window when pagination changes
-  useEffect(() => {
-    const utils = queryResult.collection.utils
-    const expectedOffset = 0
-    const expectedLimit = loadedPageCount * pageSize + 1 // +1 for peek ahead
+  useEffect(
+    () => {
+      const utils = queryResult.collection.utils
+      const expectedOffset = 0
+      const expectedLimit = loadedPageCount * pageSize + 1 // +1 for peek ahead
 
-    // Check if collection has orderBy (required for setWindow)
-    if (!isLiveQueryCollectionUtils(utils)) {
-      // For pre-created collections, throw an error if no orderBy
-      if (isCollection) {
-        throw new Error(
-          `useLiveInfiniteQuery: Pre-created live query collection must have an orderBy clause for infinite pagination to work. ` +
-            `Please add .orderBy() to your createLiveQueryCollection query.`,
-        )
+      // Check if collection has orderBy (required for setWindow)
+      if (!isLiveQueryCollectionUtils(utils)) {
+        // For pre-created collections, throw an error if no orderBy
+        if (isCollection) {
+          throw new Error(
+            `useLiveInfiniteQuery: Pre-created live query collection must have an orderBy clause for infinite pagination to work. ` +
+              `Please add .orderBy() to your createLiveQueryCollection query.`,
+          )
+        }
+        return
       }
-      return
-    }
 
-    // For pre-created collections, validate window on first check
-    if (isCollection && !hasValidatedCollectionRef.current) {
-      const currentWindow = utils.getWindow()
-      if (
-        currentWindow &&
-        (currentWindow.offset !== expectedOffset ||
-          currentWindow.limit !== expectedLimit)
-      ) {
-        console.warn(
-          `useLiveInfiniteQuery: Pre-created collection has window {offset: ${currentWindow.offset}, limit: ${currentWindow.limit}} ` +
-            `but hook expects {offset: ${expectedOffset}, limit: ${expectedLimit}}. Adjusting window now.`,
-        )
+      // For pre-created collections, validate window on first check
+      if (isCollection && !hasValidatedCollectionRef.current) {
+        const currentWindow = utils.getWindow()
+        if (
+          currentWindow &&
+          (currentWindow.offset !== expectedOffset ||
+            currentWindow.limit !== expectedLimit)
+        ) {
+          console.warn(
+            `useLiveInfiniteQuery: Pre-created collection has window {offset: ${currentWindow.offset}, limit: ${currentWindow.limit}} ` +
+              `but hook expects {offset: ${expectedOffset}, limit: ${expectedLimit}}. Adjusting window now.`,
+          )
+        }
+        hasValidatedCollectionRef.current = true
       }
-      hasValidatedCollectionRef.current = true
-    }
 
-    // For query functions, wait until collection is ready
-    if (!isCollection && !queryResult.isReady) return
+      // For query functions, wait until collection is ready
+      if (!isCollection && !queryResult.isReady) return
 
-    // Adjust the window
-    let cancelled = false
-    const result = utils.setWindow({
-      offset: expectedOffset,
-      limit: expectedLimit,
-    })
+      // Adjust the window
+      let cancelled = false
+      const result = utils.setWindow({
+        offset: expectedOffset,
+        limit: expectedLimit,
+      })
 
-    if (result !== true) {
-      setIsFetchingNextPage(true)
-      result
-        .catch((error: unknown) => {
-          if (!cancelled)
-            console.error(`useLiveInfiniteQuery: setWindow failed:`, error)
-        })
-        .finally(() => {
-          if (!cancelled) setIsFetchingNextPage(false)
-        })
-    } else {
-      setIsFetchingNextPage(false)
-    }
+      if (result !== true) {
+        setIsFetchingNextPage(true)
+        result
+          .catch((error: unknown) => {
+            if (!cancelled)
+              console.error(`useLiveInfiniteQuery: setWindow failed:`, error)
+          })
+          .finally(() => {
+            if (!cancelled) setIsFetchingNextPage(false)
+          })
+      } else {
+        setIsFetchingNextPage(false)
+      }
 
-    return () => {
-      cancelled = true
-    }
-  }, [
-    isCollection,
-    queryResult.collection,
-    queryResult.isReady,
-    loadedPageCount,
-    pageSize,
-  ], subSlot(slot, `window-eff`))
+      return () => {
+        cancelled = true
+      }
+    },
+    [
+      isCollection,
+      queryResult.collection,
+      queryResult.isReady,
+      loadedPageCount,
+      pageSize,
+    ],
+    subSlot(slot, `window-eff`),
+  )
 
   // Split the data array into pages and determine if there's a next page
-  const { pages, pageParams, hasNextPage, flatData } = useMemo(() => {
-    const dataArray = (
-      Array.isArray(queryResult.data) ? queryResult.data : []
-    ) as InferResultType<TContext>
-    const totalItemsRequested = loadedPageCount * pageSize
+  const { pages, pageParams, hasNextPage, flatData } = useMemo(
+    () => {
+      const dataArray = (
+        Array.isArray(queryResult.data) ? queryResult.data : []
+      ) as InferResultType<TContext>
+      const totalItemsRequested = loadedPageCount * pageSize
 
-    // Check if we have more data than requested (the peek ahead item)
-    const hasMore = dataArray.length > totalItemsRequested
+      // Check if we have more data than requested (the peek ahead item)
+      const hasMore = dataArray.length > totalItemsRequested
 
-    // Build pages array (without the peek ahead item)
-    const pagesResult: Array<Array<InferResultType<TContext>[number]>> = []
-    const pageParamsResult: Array<number> = []
+      // Build pages array (without the peek ahead item)
+      const pagesResult: Array<Array<InferResultType<TContext>[number]>> = []
+      const pageParamsResult: Array<number> = []
 
-    for (let i = 0; i < loadedPageCount; i++) {
-      const pageData = dataArray.slice(i * pageSize, (i + 1) * pageSize)
-      pagesResult.push(pageData)
-      pageParamsResult.push(initialPageParam + i)
-    }
+      for (let i = 0; i < loadedPageCount; i++) {
+        const pageData = dataArray.slice(i * pageSize, (i + 1) * pageSize)
+        pagesResult.push(pageData)
+        pageParamsResult.push(initialPageParam + i)
+      }
 
-    // Flatten the pages for the data return (without peek ahead item)
-    const flatDataResult = dataArray.slice(
-      0,
-      totalItemsRequested,
-    ) as InferResultType<TContext>
+      // Flatten the pages for the data return (without peek ahead item)
+      const flatDataResult = dataArray.slice(
+        0,
+        totalItemsRequested,
+      ) as InferResultType<TContext>
 
-    return {
-      pages: pagesResult,
-      pageParams: pageParamsResult,
-      hasNextPage: hasMore,
-      flatData: flatDataResult,
-    }
-  }, [queryResult.data, loadedPageCount, pageSize, initialPageParam], subSlot(slot, `pages-memo`))
+      return {
+        pages: pagesResult,
+        pageParams: pageParamsResult,
+        hasNextPage: hasMore,
+        flatData: flatDataResult,
+      }
+    },
+    [queryResult.data, loadedPageCount, pageSize, initialPageParam],
+    subSlot(slot, `pages-memo`),
+  )
 
   // Fetch next page
-  const fetchNextPage = useCallback(() => {
-    if (!hasNextPage || isFetchingNextPage) return
+  const fetchNextPage = useCallback(
+    () => {
+      if (!hasNextPage || isFetchingNextPage) return
 
-    setLoadedPageCount((prev) => prev + 1)
-  }, [hasNextPage, isFetchingNextPage], subSlot(slot, `fetch-cb`))
+      setLoadedPageCount((prev) => prev + 1)
+    },
+    [hasNextPage, isFetchingNextPage],
+    subSlot(slot, `fetch-cb`),
+  )
 
   return {
     ...queryResult,

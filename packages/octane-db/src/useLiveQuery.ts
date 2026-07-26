@@ -332,10 +332,7 @@ export function useLiveQuery(
     null,
     subSlot(slot, `coll-ref`),
   )
-  const depsRef = useRef<Array<unknown> | null>(
-    null,
-    subSlot(slot, `deps-ref`),
-  )
+  const depsRef = useRef<Array<unknown> | null>(null, subSlot(slot, `deps-ref`))
   const configRef = useRef<unknown>(null, subSlot(slot, `cfg-ref`))
 
   // Use refs to track version and memoized snapshot
