@@ -107,6 +107,13 @@ await generateReferenceDocs({
       exclude: [`packages/db/**/*`],
     },
     {
+      name: `octane-db`,
+      entryPoints: [resolve(__dirname, `../packages/octane-db/src/index.ts`)],
+      tsconfig: resolve(__dirname, `../packages/octane-db/tsconfig.docs.json`),
+      outputDir: resolve(__dirname, `../docs/framework/octane/reference`),
+      exclude: [`packages/db/**/*`],
+    },
+    {
       name: `angular-db`,
       entryPoints: [resolve(__dirname, `../packages/angular-db/src/index.ts`)],
       tsconfig: resolve(__dirname, `../packages/angular-db/tsconfig.docs.json`),

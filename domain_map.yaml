@@ -303,6 +303,9 @@ skills:
       - name: 'Angular'
         package: '@tanstack/angular-db'
         config_surface: 'injectLiveQuery with Signal, inject(DestroyRef)'
+      - name: 'Octane'
+        package: '@tanstack/octane-db'
+        config_surface: 'useLiveQuery, useLiveSuspenseQuery, useLiveInfiniteQuery, usePacedMutations'
     failure_modes:
       - mistake: 'Missing external values in useLiveQuery dependency array'
         mechanism: "When query uses external state (props, local state) not included in deps array, the query won't re-run when those values change, showing stale results"
