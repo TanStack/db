@@ -21,6 +21,7 @@ sources:
   - 'TanStack/db:docs/guides/live-queries.md'
   - 'TanStack/db:packages/octane-db/src/useLiveQuery.ts'
   - 'TanStack/db:packages/octane-db/src/useLiveInfiniteQuery.ts'
+  - 'TanStack/db:packages/octane-db/src/useLiveQueryEffect.ts'
 ---
 
 This skill builds on db-core. Read it first for collection setup, query builder, and mutation patterns.
@@ -137,6 +138,7 @@ const { data, fetchNextPage, hasNextPage, isFetchingNextPage } =
     (q) =>
       q
         .from({ posts: postsCollection })
+        .where(({ posts }) => eq(posts.category, category))
         .orderBy(({ posts }) => posts.createdAt, 'desc'),
     { pageSize: 20 },
     [category],
@@ -166,6 +168,31 @@ const mutate = usePacedMutations({
 
 // In handler:
 <textarea onChange={(e) => mutate(e.target.value)} />
+```
+
+### useLiveQueryEffect
+
+```tsx
+import { useLiveQueryEffect, eq } from '@tanstack/octane-db'
+
+// Fire side effects when rows enter, exit, or update a query result.
+// No render output — the effect is created on mount, disposed on unmount,
+// and recreated when deps change.
+function ChatComponent() {
+  useLiveQueryEffect(
+    {
+      query: (q) =>
+        q.from({ msg: messages }).where(({ msg }) => eq(msg.role, 'user')),
+      skipInitial: true,
+      onEnter: async (event) => {
+        await generateResponse(event.value)
+      },
+    },
+    [],
+  )
+
+  return <div>...</div>
+}
 ```
 
 ## Includes (Hierarchical Data)
@@ -229,7 +256,7 @@ const { data: projects } = useLiveQuery((q) =>
     ),
   })),
 )
-// project.issues is string[] — no subcomponent needed
+// project.issues is Array<{ id, title }> — no subcomponent needed
 ```
 
 See db-core/live-queries/SKILL.md for full includes rules (correlation conditions, nested includes, aggregates).

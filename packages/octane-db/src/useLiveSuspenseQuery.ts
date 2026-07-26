@@ -1,5 +1,5 @@
 import { useRef } from 'octane'
-import { subSlot } from './slot'
+import { splitTrailingSlot, subSlot } from './slot'
 import { useLiveQuery } from './useLiveQuery'
 import type {
   Collection,
@@ -157,11 +157,8 @@ export function useLiveSuspenseQuery(
   configOrQueryOrCollection: any,
   ...rest: Array<unknown>
 ) {
-  const slot =
-    typeof rest[rest.length - 1] === `symbol`
-      ? (rest.pop() as symbol)
-      : undefined
-  const deps = (rest[0] as Array<unknown> | undefined) ?? []
+  const [args, slot] = splitTrailingSlot(rest)
+  const deps = (args[0] as Array<unknown> | undefined) ?? []
 
   const promiseRef = useRef<Promise<void> | null>(
     null,
@@ -173,8 +170,14 @@ export function useLiveSuspenseQuery(
   )
   const hasBeenReadyRef = useRef(false, subSlot(slot, `ready-ref`))
 
-  // Use useLiveQuery to handle collection management and reactivity
-  const result = (useLiveQuery as any)(configOrQueryOrCollection, deps, slot)
+  // Use useLiveQuery to handle collection management and reactivity.
+  // Namespace the nested slot so useLiveQuery's internal refs (e.g. `coll-ref`)
+  // don't alias this wrapper's own refs of the same tag.
+  const result = (useLiveQuery as any)(
+    configOrQueryOrCollection,
+    deps,
+    subSlot(slot, `lq`),
+  )
 
   // Reset promise and ready state when collection changes (deps changed)
   if (collectionRef.current !== result.collection) {

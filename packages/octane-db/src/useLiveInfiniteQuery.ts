@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'octane'
 import { CollectionImpl } from '@tanstack/db'
-import { subSlot } from './slot'
+import { splitTrailingSlot, subSlot } from './slot'
 import { useLiveQuery } from './useLiveQuery'
 import type {
   Collection,
@@ -18,7 +18,11 @@ import type {
 function isLiveQueryCollectionUtils(
   utils: unknown,
 ): utils is LiveQueryCollectionUtils {
-  return typeof (utils as any).setWindow === `function`
+  return (
+    typeof utils === `object` &&
+    utils !== null &&
+    typeof (utils as { setWindow?: unknown }).setWindow === `function`
+  )
 }
 
 export type UseLiveInfiniteQueryConfig<TContext extends Context> = {
@@ -138,13 +142,15 @@ export function useLiveInfiniteQuery<TContext extends Context>(
   config: UseLiveInfiniteQueryConfig<TContext>,
   ...rest: Array<unknown>
 ): UseLiveInfiniteQueryReturn<TContext> {
-  const slot =
-    typeof rest[rest.length - 1] === `symbol`
-      ? (rest.pop() as symbol)
-      : undefined
-  const deps = (rest[0] as Array<unknown> | undefined) ?? []
+  const [args, slot] = splitTrailingSlot(rest)
+  const deps = (args[0] as Array<unknown> | undefined) ?? []
 
-  const pageSize = config.pageSize || 20
+  const pageSize = config.pageSize ?? 20
+  if (pageSize <= 0) {
+    throw new Error(
+      `useLiveInfiniteQuery: pageSize must be a positive integer. Received: ${pageSize}`,
+    )
+  }
   const initialPageParam = config.initialPageParam ?? 0
 
   // Detect if input is a collection or query function
@@ -215,15 +221,18 @@ export function useLiveInfiniteQuery<TContext extends Context>(
   // Create a live query with initial limit and offset
   // Either pass collection directly or wrap query function
   // Use pageSize + 1 for peek-ahead detection (to know if there are more pages)
+  // Namespace the nested slot so useLiveQuery's internal refs (e.g. `coll-ref`)
+  // don't alias this wrapper's own refs of the same tag.
+  const lqSlot = subSlot(slot, `lq`)
   const queryResult = isCollection
-    ? (useLiveQuery as any)(queryFnOrCollection, [], slot)
+    ? (useLiveQuery as any)(queryFnOrCollection, [], lqSlot)
     : (useLiveQuery as any)(
         (q: InitialQueryBuilder) =>
           queryFnOrCollection(q)
             .limit(pageSize + 1)
             .offset(0),
         deps,
-        slot,
+        lqSlot,
       )
 
   // Adjust window when pagination changes

@@ -1,6 +1,6 @@
 import { useEffect, useRef } from 'octane'
 import { createEffect } from '@tanstack/db'
-import { subSlot } from './slot'
+import { splitTrailingSlot, subSlot } from './slot'
 import type { Effect, EffectConfig } from '@tanstack/db'
 
 /**
@@ -36,10 +36,7 @@ export function useLiveQueryEffect<
   deps: Array<unknown> = [],
   ...rest: Array<unknown>
 ): void {
-  const slot =
-    typeof rest[rest.length - 1] === `symbol`
-      ? (rest.pop() as symbol)
-      : undefined
+  const [, slot] = splitTrailingSlot(rest)
 
   const configRef = useRef<EffectConfig<TRow, TKey>>(
     config,

@@ -1,6 +1,6 @@
 import { useCallback, useMemo, useRef } from 'octane'
 import { createPacedMutations } from '@tanstack/db'
-import { subSlot } from './slot'
+import { splitTrailingSlot, subSlot } from './slot'
 import type { PacedMutationsConfig, Transaction } from '@tanstack/db'
 
 /**
@@ -98,10 +98,7 @@ export function usePacedMutations<
   config: PacedMutationsConfig<TVariables, T>,
   ...rest: Array<unknown>
 ): (variables: TVariables) => Transaction<T> {
-  const slot =
-    typeof rest[rest.length - 1] === `symbol`
-      ? (rest.pop() as symbol)
-      : undefined
+  const [, slot] = splitTrailingSlot(rest)
 
   // Keep refs to the latest callbacks so we can call them without recreating the instance
   const onMutateRef = useRef(config.onMutate, subSlot(slot, `on-mutate-ref`))

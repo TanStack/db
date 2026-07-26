@@ -21,6 +21,8 @@ For comprehensive documentation on writing queries (filtering, joins, aggregatio
 
 ## Basic Usage
 
+The examples below assume `todosCollection` and `postsCollection` are collections you've already created (see the [Collections guide](../../guides/collections)), and that query helpers such as `eq` and `gt` are imported from `@tanstack/octane-db`.
+
 ### useLiveQuery
 
 ```tsx
@@ -62,18 +64,24 @@ function FilteredTodos({ minPriority }: { minPriority: number }) {
 ### useLiveInfiniteQuery
 
 ```tsx
-const { data, pages, fetchNextPage, hasNextPage } = useLiveInfiniteQuery(
-  (q) => q
-    .from({ posts: postsCollection })
-    .where(({ posts }) => eq(posts.category, category))
-    .orderBy(({ posts }) => posts.createdAt, 'desc'),
-  {
-    pageSize: 20,
-    getNextPageParam: (lastPage, allPages) =>
-      lastPage.length === 20 ? allPages.length : undefined
-  },
-  [category]
-)
+import { useLiveInfiniteQuery, eq } from '@tanstack/octane-db'
+
+function PostFeed({ category }: { category: string }) {
+  const { data, pages, fetchNextPage, hasNextPage } = useLiveInfiniteQuery(
+    (q) => q
+      .from({ posts: postsCollection })
+      .where(({ posts }) => eq(posts.category, category))
+      .orderBy(({ posts }) => posts.createdAt, 'desc'),
+    {
+      pageSize: 20,
+      getNextPageParam: (lastPage, allPages) =>
+        lastPage.length === 20 ? allPages.length : undefined
+    },
+    [category]
+  )
+
+  return <div>{data.length} posts loaded</div>
+}
 ```
 
 ### useLiveSuspenseQuery

@@ -6,7 +6,7 @@ import {
   isCollection,
   isSingleResultCollection,
 } from '@tanstack/db'
-import { subSlot } from './slot'
+import { splitTrailingSlot, subSlot } from './slot'
 import type {
   Collection,
   CollectionStatus,
@@ -319,11 +319,8 @@ export function useLiveQuery(
   configOrQueryOrCollection: any,
   ...rest: Array<unknown>
 ) {
-  const slot =
-    typeof rest[rest.length - 1] === `symbol`
-      ? (rest.pop() as symbol)
-      : undefined
-  const deps = (rest[0] as Array<unknown> | undefined) ?? []
+  const [args, slot] = splitTrailingSlot(rest)
+  const deps = (args[0] as Array<unknown> | undefined) ?? []
   // Check if it's already a collection
   const inputIsCollection = isCollection(configOrQueryOrCollection)
 
