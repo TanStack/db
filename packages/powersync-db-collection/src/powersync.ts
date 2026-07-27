@@ -317,6 +317,22 @@ export function powerSyncCollectionOptions<
         return runOnDemandSync()
       }
 
+      /**
+       * Disposes the current diff trigger, if one is active, and clears the
+       * tracking state.
+       */
+      async function safelyDisposeTracking(
+        context?: LockContext,
+      ): Promise<void> {
+        const dispose = disposeTracking
+        if (!dispose) {
+          return
+        }
+
+        disposeTracking = null
+        await dispose(context ? { context } : undefined)
+      }
+
       async function createDiffTrigger(options: {
         setupContext?: LockContext
         when: Record<DiffTriggerOperation, string>
@@ -383,6 +399,11 @@ export function powerSyncCollectionOptions<
       async function flushDiffRecordsWithContext(
         context: LockContext,
       ): Promise<void> {
+        // There is nothing to flush if no tracking table is currently active.
+        if (!disposeTracking) {
+          return
+        }
+
         try {
           begin()
           const operations = await context.getAll<TriggerDiffRecord>(
@@ -451,12 +472,12 @@ export function powerSyncCollectionOptions<
 
         // If the abort controller was aborted while processing the request above
         if (abortController.signal.aborted) {
-          await disposeTracking?.()
+          await safelyDisposeTracking()
         } else {
           abortController.signal.addEventListener(
             `abort`,
             async () => {
-              await disposeTracking?.()
+              await safelyDisposeTracking()
             },
             { once: true },
           )
@@ -529,14 +550,13 @@ export function powerSyncCollectionOptions<
             onUnloadSubset = await restConfig.onLoadSubset?.(options)
           }
 
-          // Nothing to flush or dispose if no tracking table has been created yet.
+          // No predicates remain, so stop tracking entirely. Both calls are no-ops
+          // when no tracking table is currently active.
           if (activeWhereExpressions.length === 0) {
-            if (disposeTracking) {
-              await database.writeLock(async (ctx) => {
-                await flushDiffRecordsWithContext(ctx)
-                await disposeTracking?.({ context: ctx })
-              })
-            }
+            await database.writeLock(async (ctx) => {
+              await flushDiffRecordsWithContext(ctx)
+              await safelyDisposeTracking(ctx)
+            })
             return
           }
 
@@ -566,12 +586,10 @@ export function powerSyncCollectionOptions<
           const viewWhereClause = toInlinedWhereClause(compiledView)
 
           await database.writeLock(async (ctx) => {
-            // On the first loadSubset there is no tracking table yet, so there
-            // is nothing to flush or dispose.
-            if (disposeTracking) {
-              await flushDiffRecordsWithContext(ctx)
-              await disposeTracking({ context: ctx })
-            }
+            // Replace any active tracking with one covering the new set of
+            // predicates.
+            await flushDiffRecordsWithContext(ctx)
+            await safelyDisposeTracking(ctx)
 
             disposeTracking = await createDiffTrigger({
               setupContext: ctx,

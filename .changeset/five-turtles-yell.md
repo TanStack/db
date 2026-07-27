@@ -2,4 +2,4 @@
 '@tanstack/powersync-db-collection': patch
 ---
 
-Added checks to not flush records when a `diffTrigger` isn't setup yet for `on-demand` mode. This fixes a non-critical error that was logged on startup.
+Fixed `no such table` errors logged by the `on-demand` sync handler. Records are no longer flushed before the `diffTrigger` has been set up, and the tracking state is now cleared as part of disposal so unloading a subset or cleaning up the collection no longer flushes the dropped tracking table.
