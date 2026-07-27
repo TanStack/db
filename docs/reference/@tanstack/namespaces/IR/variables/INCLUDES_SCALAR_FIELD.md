@@ -9,4 +9,4 @@ title: INCLUDES_SCALAR_FIELD
 const INCLUDES_SCALAR_FIELD: "__includes_scalar__";
 ```
 
-Defined in: [packages/db/src/query/ir.ts:30](https://github.com/TanStack/db/blob/main/packages/db/src/query/ir.ts#L30)
+Defined in: [packages/db/src/query/ir.ts:34](https://github.com/TanStack/db/blob/main/packages/db/src/query/ir.ts#L34)

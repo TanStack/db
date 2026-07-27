@@ -47,7 +47,7 @@ Defined in: [packages/db/src/indexes/reverse-index.ts:11](https://github.com/Tan
 get indexedKeysSet(): Set<TKey>;
 ```
 
-Defined in: [packages/db/src/indexes/reverse-index.ts:124](https://github.com/TanStack/db/blob/main/packages/db/src/indexes/reverse-index.ts#L124)
+Defined in: [packages/db/src/indexes/reverse-index.ts:128](https://github.com/TanStack/db/blob/main/packages/db/src/indexes/reverse-index.ts#L128)
 
 ##### Returns
 
@@ -67,7 +67,7 @@ Defined in: [packages/db/src/indexes/reverse-index.ts:124](https://github.com/Ta
 get keyCount(): number;
 ```
 
-Defined in: [packages/db/src/indexes/reverse-index.ts:112](https://github.com/TanStack/db/blob/main/packages/db/src/indexes/reverse-index.ts#L112)
+Defined in: [packages/db/src/indexes/reverse-index.ts:116](https://github.com/TanStack/db/blob/main/packages/db/src/indexes/reverse-index.ts#L116)
 
 ##### Returns
 
@@ -119,6 +119,32 @@ Defined in: [packages/db/src/indexes/reverse-index.ts:66](https://github.com/Tan
 
 ***
 
+### supportsRangeOptimization
+
+#### Get Signature
+
+```ts
+get supportsRangeOptimization(): boolean;
+```
+
+Defined in: [packages/db/src/indexes/reverse-index.ts:76](https://github.com/TanStack/db/blob/main/packages/db/src/indexes/reverse-index.ts#L76)
+
+Whether range lookups (gt/gte/lt/lte) on this index can be trusted to
+return every matching key. Range traversal relies on the index ordering, so
+it is unsafe when the index uses a custom comparator, whose order may not
+match the WHERE evaluator's relational operators. Callers must fall back to
+a full scan when this is `false`.
+
+##### Returns
+
+`boolean`
+
+#### Implementation of
+
+[`IndexInterface`](../interfaces/IndexInterface.md).[`supportsRangeOptimization`](../interfaces/IndexInterface.md#supportsrangeoptimization)
+
+***
+
 ### valueMapData
 
 #### Get Signature
@@ -127,7 +153,7 @@ Defined in: [packages/db/src/indexes/reverse-index.ts:66](https://github.com/Tan
 get valueMapData(): Map<any, Set<TKey>>;
 ```
 
-Defined in: [packages/db/src/indexes/reverse-index.ts:128](https://github.com/TanStack/db/blob/main/packages/db/src/indexes/reverse-index.ts#L128)
+Defined in: [packages/db/src/indexes/reverse-index.ts:132](https://github.com/TanStack/db/blob/main/packages/db/src/indexes/reverse-index.ts#L132)
 
 ##### Returns
 
@@ -145,7 +171,7 @@ Defined in: [packages/db/src/indexes/reverse-index.ts:128](https://github.com/Ta
 add(key, item): void;
 ```
 
-Defined in: [packages/db/src/indexes/reverse-index.ts:92](https://github.com/TanStack/db/blob/main/packages/db/src/indexes/reverse-index.ts#L92)
+Defined in: [packages/db/src/indexes/reverse-index.ts:96](https://github.com/TanStack/db/blob/main/packages/db/src/indexes/reverse-index.ts#L96)
 
 #### Parameters
 
@@ -173,7 +199,7 @@ Defined in: [packages/db/src/indexes/reverse-index.ts:92](https://github.com/Tan
 build(entries): void;
 ```
 
-Defined in: [packages/db/src/indexes/reverse-index.ts:104](https://github.com/TanStack/db/blob/main/packages/db/src/indexes/reverse-index.ts#L104)
+Defined in: [packages/db/src/indexes/reverse-index.ts:108](https://github.com/TanStack/db/blob/main/packages/db/src/indexes/reverse-index.ts#L108)
 
 #### Parameters
 
@@ -197,7 +223,7 @@ Defined in: [packages/db/src/indexes/reverse-index.ts:104](https://github.com/Ta
 clear(): void;
 ```
 
-Defined in: [packages/db/src/indexes/reverse-index.ts:108](https://github.com/TanStack/db/blob/main/packages/db/src/indexes/reverse-index.ts#L108)
+Defined in: [packages/db/src/indexes/reverse-index.ts:112](https://github.com/TanStack/db/blob/main/packages/db/src/indexes/reverse-index.ts#L112)
 
 #### Returns
 
@@ -215,7 +241,7 @@ Defined in: [packages/db/src/indexes/reverse-index.ts:108](https://github.com/Ta
 equalityLookup(value): Set<TKey>;
 ```
 
-Defined in: [packages/db/src/indexes/reverse-index.ts:116](https://github.com/TanStack/db/blob/main/packages/db/src/indexes/reverse-index.ts#L116)
+Defined in: [packages/db/src/indexes/reverse-index.ts:120](https://github.com/TanStack/db/blob/main/packages/db/src/indexes/reverse-index.ts#L120)
 
 #### Parameters
 
@@ -239,7 +265,7 @@ Defined in: [packages/db/src/indexes/reverse-index.ts:116](https://github.com/Ta
 getStats(): IndexStats;
 ```
 
-Defined in: [packages/db/src/indexes/reverse-index.ts:88](https://github.com/TanStack/db/blob/main/packages/db/src/indexes/reverse-index.ts#L88)
+Defined in: [packages/db/src/indexes/reverse-index.ts:92](https://github.com/TanStack/db/blob/main/packages/db/src/indexes/reverse-index.ts#L92)
 
 #### Returns
 
@@ -257,7 +283,7 @@ Defined in: [packages/db/src/indexes/reverse-index.ts:88](https://github.com/Tan
 inArrayLookup(values): Set<TKey>;
 ```
 
-Defined in: [packages/db/src/indexes/reverse-index.ts:120](https://github.com/TanStack/db/blob/main/packages/db/src/indexes/reverse-index.ts#L120)
+Defined in: [packages/db/src/indexes/reverse-index.ts:124](https://github.com/TanStack/db/blob/main/packages/db/src/indexes/reverse-index.ts#L124)
 
 #### Parameters
 
@@ -309,7 +335,7 @@ Defined in: [packages/db/src/indexes/reverse-index.ts:17](https://github.com/Tan
 matchesCompareOptions(compareOptions): boolean;
 ```
 
-Defined in: [packages/db/src/indexes/reverse-index.ts:80](https://github.com/TanStack/db/blob/main/packages/db/src/indexes/reverse-index.ts#L80)
+Defined in: [packages/db/src/indexes/reverse-index.ts:84](https://github.com/TanStack/db/blob/main/packages/db/src/indexes/reverse-index.ts#L84)
 
 #### Parameters
 
@@ -333,7 +359,7 @@ Defined in: [packages/db/src/indexes/reverse-index.ts:80](https://github.com/Tan
 matchesDirection(direction): boolean;
 ```
 
-Defined in: [packages/db/src/indexes/reverse-index.ts:84](https://github.com/TanStack/db/blob/main/packages/db/src/indexes/reverse-index.ts#L84)
+Defined in: [packages/db/src/indexes/reverse-index.ts:88](https://github.com/TanStack/db/blob/main/packages/db/src/indexes/reverse-index.ts#L88)
 
 #### Parameters
 
@@ -357,7 +383,7 @@ Defined in: [packages/db/src/indexes/reverse-index.ts:84](https://github.com/Tan
 matchesField(fieldPath): boolean;
 ```
 
-Defined in: [packages/db/src/indexes/reverse-index.ts:76](https://github.com/TanStack/db/blob/main/packages/db/src/indexes/reverse-index.ts#L76)
+Defined in: [packages/db/src/indexes/reverse-index.ts:80](https://github.com/TanStack/db/blob/main/packages/db/src/indexes/reverse-index.ts#L80)
 
 #### Parameters
 
@@ -429,7 +455,7 @@ Defined in: [packages/db/src/indexes/reverse-index.ts:35](https://github.com/Tan
 remove(key, item): void;
 ```
 
-Defined in: [packages/db/src/indexes/reverse-index.ts:96](https://github.com/TanStack/db/blob/main/packages/db/src/indexes/reverse-index.ts#L96)
+Defined in: [packages/db/src/indexes/reverse-index.ts:100](https://github.com/TanStack/db/blob/main/packages/db/src/indexes/reverse-index.ts#L100)
 
 #### Parameters
 
@@ -610,7 +636,7 @@ update(
    newItem): void;
 ```
 
-Defined in: [packages/db/src/indexes/reverse-index.ts:100](https://github.com/TanStack/db/blob/main/packages/db/src/indexes/reverse-index.ts#L100)
+Defined in: [packages/db/src/indexes/reverse-index.ts:104](https://github.com/TanStack/db/blob/main/packages/db/src/indexes/reverse-index.ts#L104)
 
 #### Parameters
 

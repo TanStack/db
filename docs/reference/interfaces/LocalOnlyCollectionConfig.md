@@ -5,7 +5,7 @@ title: LocalOnlyCollectionConfig
 
 # Interface: LocalOnlyCollectionConfig\<T, TSchema, TKey\>
 
-Defined in: [packages/db/src/local-only.ts:22](https://github.com/TanStack/db/blob/main/packages/db/src/local-only.ts#L22)
+Defined in: [packages/db/src/local-only.ts:23](https://github.com/TanStack/db/blob/main/packages/db/src/local-only.ts#L23)
 
 Configuration interface for Local-only collection options
 
@@ -221,7 +221,7 @@ Defined in: [packages/db/src/types.ts:534](https://github.com/TanStack/db/blob/m
 optional initialData: T[];
 ```
 
-Defined in: [packages/db/src/local-only.ts:34](https://github.com/TanStack/db/blob/main/packages/db/src/local-only.ts#L34)
+Defined in: [packages/db/src/local-only.ts:35](https://github.com/TanStack/db/blob/main/packages/db/src/local-only.ts#L35)
 
 Optional initial data to populate the collection with on creation
 This data will be applied during the initial sync process

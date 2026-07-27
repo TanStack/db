@@ -9,7 +9,7 @@ title: optimizeExpressionWithIndexes
 function optimizeExpressionWithIndexes<T, TKey>(expression, collection): OptimizationResult<TKey>;
 ```
 
-Defined in: [packages/db/src/utils/index-optimization.ts:100](https://github.com/TanStack/db/blob/main/packages/db/src/utils/index-optimization.ts#L100)
+Defined in: [packages/db/src/utils/index-optimization.ts:196](https://github.com/TanStack/db/blob/main/packages/db/src/utils/index-optimization.ts#L196)
 
 Optimizes a query expression using available indexes to find matching keys
 

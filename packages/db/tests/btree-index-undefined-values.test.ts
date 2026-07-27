@@ -248,6 +248,24 @@ describe(`BTreeIndex - undefined value handling`, () => {
       expect(withoutFrom.size).toBe(3)
     })
 
+    it(`should not drop the minimum key when an upper-only range is exclusive on the (absent) lower bound`, () => {
+      // When no `from` bound is provided, `fromInclusive` must not cause the
+      // smallest key to be excluded: there is no lower bound to exclude
+      // against. Only an explicitly provided exclusive lower bound should
+      // drop its boundary value.
+      const index = createIndex(`value`)
+      index.add(`a`, { value: 1 })
+      index.add(`b`, { value: 5 })
+      index.add(`c`, { value: 10 })
+
+      const result = index.rangeQuery({ to: 10, fromInclusive: false })
+
+      expect(result.size).toBe(3)
+      expect(result).toContain(`a`)
+      expect(result).toContain(`b`)
+      expect(result).toContain(`c`)
+    })
+
     it(`should handle range query from undefined to undefined`, () => {
       const index = createIndex(`value`)
       index.add(`a`, { value: undefined })

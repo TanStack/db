@@ -125,31 +125,12 @@ type MapToNumber<T> = T extends string | Array<any>
       ? null
       : T
 
-// Helper type for binary numeric operations (combines nullability of both operands)
-type BinaryNumericReturnType<T1, T2> =
-  ExtractType<T1> extends infer U1
-    ? ExtractType<T2> extends infer U2
-      ? U1 extends number
-        ? U2 extends number
-          ? BasicExpression<number>
-          : U2 extends number | undefined
-            ? BasicExpression<number | undefined>
-            : U2 extends number | null
-              ? BasicExpression<number | null>
-              : BasicExpression<number | undefined | null>
-        : U1 extends number | undefined
-          ? U2 extends number
-            ? BasicExpression<number | undefined>
-            : U2 extends number | undefined
-              ? BasicExpression<number | undefined>
-              : BasicExpression<number | undefined | null>
-          : U1 extends number | null
-            ? U2 extends number
-              ? BasicExpression<number | null>
-              : BasicExpression<number | undefined | null>
-            : BasicExpression<number | undefined | null>
-      : BasicExpression<number | undefined | null>
-    : BasicExpression<number | undefined | null>
+// Helper type for binary numeric operations.
+// Runtime coalesces nullish operands to 0 for these operations, so nullable
+// operands don't make the result nullable.
+type BinaryNumericReturnType = BasicExpression<number>
+
+type DivideReturnType = BasicExpression<number | null>
 
 // Operators
 
@@ -620,11 +601,41 @@ export function caseWhen(...args: Array<CaseWhenValue>): any {
 export function add<T1 extends ExpressionLike, T2 extends ExpressionLike>(
   left: T1,
   right: T2,
-): BinaryNumericReturnType<T1, T2> {
+): BinaryNumericReturnType {
   return new Func(`add`, [
     toExpression(left),
     toExpression(right),
-  ]) as BinaryNumericReturnType<T1, T2>
+  ]) as BinaryNumericReturnType
+}
+
+export function subtract<T1 extends ExpressionLike, T2 extends ExpressionLike>(
+  left: T1,
+  right: T2,
+): BinaryNumericReturnType {
+  return new Func(`subtract`, [
+    toExpression(left),
+    toExpression(right),
+  ]) as BinaryNumericReturnType
+}
+
+export function multiply<T1 extends ExpressionLike, T2 extends ExpressionLike>(
+  left: T1,
+  right: T2,
+): BinaryNumericReturnType {
+  return new Func(`multiply`, [
+    toExpression(left),
+    toExpression(right),
+  ]) as BinaryNumericReturnType
+}
+
+export function divide<T1 extends ExpressionLike, T2 extends ExpressionLike>(
+  left: T1,
+  right: T2,
+): DivideReturnType {
+  return new Func(`divide`, [
+    toExpression(left),
+    toExpression(right),
+  ]) as DivideReturnType
 }
 
 // Aggregates
@@ -690,6 +701,9 @@ export const operators = [
   `concat`,
   // Numeric functions
   `add`,
+  `subtract`,
+  `multiply`,
+  `divide`,
   // Utility functions
   `coalesce`,
   `caseWhen`,

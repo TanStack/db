@@ -9,7 +9,7 @@ title: StorageEventApi
 type StorageEventApi = object;
 ```
 
-Defined in: [packages/db/src/local-storage.ts:28](https://github.com/TanStack/db/blob/main/packages/db/src/local-storage.ts#L28)
+Defined in: [packages/db/src/local-storage.ts:29](https://github.com/TanStack/db/blob/main/packages/db/src/local-storage.ts#L29)
 
 Storage event API - subset of Window for 'storage' events only
 
@@ -21,7 +21,7 @@ Storage event API - subset of Window for 'storage' events only
 addEventListener: (type, listener) => void;
 ```
 
-Defined in: [packages/db/src/local-storage.ts:29](https://github.com/TanStack/db/blob/main/packages/db/src/local-storage.ts#L29)
+Defined in: [packages/db/src/local-storage.ts:30](https://github.com/TanStack/db/blob/main/packages/db/src/local-storage.ts#L30)
 
 #### Parameters
 
@@ -45,7 +45,7 @@ Defined in: [packages/db/src/local-storage.ts:29](https://github.com/TanStack/db
 removeEventListener: (type, listener) => void;
 ```
 
-Defined in: [packages/db/src/local-storage.ts:33](https://github.com/TanStack/db/blob/main/packages/db/src/local-storage.ts#L33)
+Defined in: [packages/db/src/local-storage.ts:34](https://github.com/TanStack/db/blob/main/packages/db/src/local-storage.ts#L34)
 
 #### Parameters
 

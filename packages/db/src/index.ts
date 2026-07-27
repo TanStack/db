@@ -10,6 +10,7 @@ export * from './types'
 export * from './proxy'
 export * from './query/index.js'
 export * from './optimistic-action'
+export * from './live-query-adapter'
 export * from './local-only'
 export * from './local-storage'
 export * from './errors'
@@ -79,6 +80,9 @@ export {
   type Effect,
   type EffectQueryInput,
 } from './query/effect.js'
+
+// UUID helper (safe in non-secure browser contexts, see #1541)
+export { safeRandomUUID } from './utils/uuid.js'
 
 // Re-export some stuff explicitly to ensure the type & value is exported
 export type { Collection } from './collection/index.js'

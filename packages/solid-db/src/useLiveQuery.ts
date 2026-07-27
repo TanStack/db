@@ -9,15 +9,15 @@ import {
 import { ReactiveMap } from '@solid-primitives/map'
 import {
   BaseQueryBuilder,
-  CollectionImpl,
   createLiveQueryCollection,
+  isCollection,
+  isSingleResultCollection,
 } from '@tanstack/db'
 import { createStore, reconcile } from 'solid-js/store'
 import type { Accessor } from 'solid-js'
 import type {
   ChangeMessage,
   Collection,
-  CollectionConfigSingleRowOption,
   CollectionStatus,
   Context,
   GetResult,
@@ -311,7 +311,7 @@ export function useLiveQuery(
         return null
       }
 
-      if (innerCollection instanceof CollectionImpl) {
+      if (isCollection(innerCollection)) {
         innerCollection.startSyncImmediate()
         return innerCollection as Collection
       }
@@ -426,9 +426,7 @@ export function useLiveQuery(
   function getData() {
     const currentCollection = collection()
     if (currentCollection) {
-      const config: CollectionConfigSingleRowOption<any, any, any> =
-        currentCollection.config
-      if (config.singleResult) {
+      if (isSingleResultCollection(currentCollection)) {
         // Force resource tracking so Suspense works
         getDataResource()
         return data[0]

@@ -730,6 +730,87 @@ describe(`evaluators`, () => {
             expect(compiled({})).toBe(null)
           })
         })
+
+        describe(`NaN (PostgreSQL float semantics)`, () => {
+          // Following PostgreSQL, NaN is equal to itself and greater than every
+          // other (non-null) value, so it has a well-defined order.
+          it(`treats NaN as equal to NaN`, () => {
+            const func = new Func(`eq`, [new Value(NaN), new Value(NaN)])
+            expect(compileExpression(func)({})).toBe(true)
+          })
+
+          it(`treats NaN as not equal to a number`, () => {
+            const func = new Func(`eq`, [new Value(NaN), new Value(5)])
+            expect(compileExpression(func)({})).toBe(false)
+          })
+
+          it(`still returns UNKNOWN when comparing NaN with null`, () => {
+            const func = new Func(`eq`, [new Value(NaN), new Value(null)])
+            expect(compileExpression(func)({})).toBe(null)
+          })
+
+          it(`treats NaN as greater than every number`, () => {
+            expect(
+              compileExpression(new Func(`gt`, [new Value(NaN), new Value(5)]))(
+                {},
+              ),
+            ).toBe(true)
+            expect(
+              compileExpression(new Func(`gt`, [new Value(5), new Value(NaN)]))(
+                {},
+              ),
+            ).toBe(false)
+            expect(
+              compileExpression(
+                new Func(`gt`, [new Value(NaN), new Value(NaN)]),
+              )({}),
+            ).toBe(false)
+          })
+
+          it(`orders NaN with gte/lt/lte consistently`, () => {
+            // NaN >= anything (including NaN); nothing finite >= NaN
+            expect(
+              compileExpression(
+                new Func(`gte`, [new Value(NaN), new Value(5)]),
+              )({}),
+            ).toBe(true)
+            expect(
+              compileExpression(
+                new Func(`gte`, [new Value(NaN), new Value(NaN)]),
+              )({}),
+            ).toBe(true)
+            // NaN < nothing; a finite value < NaN
+            expect(
+              compileExpression(new Func(`lt`, [new Value(NaN), new Value(5)]))(
+                {},
+              ),
+            ).toBe(false)
+            expect(
+              compileExpression(new Func(`lt`, [new Value(5), new Value(NaN)]))(
+                {},
+              ),
+            ).toBe(true)
+            // NaN <= NaN; a finite value <= NaN
+            expect(
+              compileExpression(
+                new Func(`lte`, [new Value(NaN), new Value(NaN)]),
+              )({}),
+            ).toBe(true)
+            expect(
+              compileExpression(
+                new Func(`lte`, [new Value(5), new Value(NaN)]),
+              )({}),
+            ).toBe(true)
+          })
+
+          it(`matches NaN inside an IN list`, () => {
+            const func = new Func(`in`, [
+              new Value(NaN),
+              new Value([NaN, 1, 2]),
+            ])
+            expect(compileExpression(func)({})).toBe(true)
+          })
+        })
       })
 
       describe(`boolean operators`, () => {

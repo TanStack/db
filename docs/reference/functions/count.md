@@ -9,7 +9,7 @@ title: count
 function count(arg): Aggregate<number>;
 ```
 
-Defined in: [packages/db/src/query/builder/functions.ts:366](https://github.com/TanStack/db/blob/main/packages/db/src/query/builder/functions.ts#L366)
+Defined in: [packages/db/src/query/builder/functions.ts:643](https://github.com/TanStack/db/blob/main/packages/db/src/query/builder/functions.ts#L643)
 
 ## Parameters
 

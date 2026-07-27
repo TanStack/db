@@ -8,11 +8,14 @@ import {
   toValue,
   watchEffect,
 } from 'vue'
-import { createLiveQueryCollection } from '@tanstack/db'
+import {
+  createLiveQueryCollection,
+  isCollection,
+  isSingleResultCollection,
+} from '@tanstack/db'
 import type {
   ChangeMessage,
   Collection,
-  CollectionConfigSingleRowOption,
   CollectionStatus,
   Context,
   GetResult,
@@ -265,15 +268,10 @@ export function useLiveQuery(
       }
     }
 
-    // Check if it's already a collection by checking for specific collection methods
-    const isCollection =
-      unwrappedParam &&
-      typeof unwrappedParam === `object` &&
-      typeof unwrappedParam.subscribeChanges === `function` &&
-      typeof unwrappedParam.startSyncImmediate === `function` &&
-      typeof unwrappedParam.id === `string`
+    // Check if it's already a collection
+    const inputIsCollection = isCollection(unwrappedParam)
 
-    if (isCollection) {
+    if (inputIsCollection) {
       // Warn when passing a collection directly with on-demand sync mode
       // In on-demand mode, data is only loaded when queries with predicates request it
       // Passing the collection directly doesn't provide any predicates, so no data loads
@@ -347,9 +345,9 @@ export function useLiveQuery(
     if (!currentCollection) {
       return internalData
     }
-    const config: CollectionConfigSingleRowOption<any, any, any> =
-      currentCollection.config
-    return config.singleResult ? internalData[0] : internalData
+    return isSingleResultCollection(currentCollection)
+      ? internalData[0]
+      : internalData
   })
 
   // Track collection status reactively

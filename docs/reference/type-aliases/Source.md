@@ -9,15 +9,15 @@ title: Source
 type Source = object;
 ```
 
-Defined in: [packages/db/src/query/builder/types.ts:79](https://github.com/TanStack/db/blob/main/packages/db/src/query/builder/types.ts#L79)
+Defined in: [packages/db/src/query/builder/types.ts:91](https://github.com/TanStack/db/blob/main/packages/db/src/query/builder/types.ts#L91)
 
-Source - Input definition for query builder `from()` clause
+Source - Input definition for query builder `from()` and `unionAll()` clauses
 
 Maps table aliases to either:
 - `CollectionImpl`: A database collection/table
 - `QueryBuilder`: A subquery that can be used as a table
 
-Example: `{ users: usersCollection, orders: ordersCollection }`
+Example: `{ users: usersCollection }`
 
 ## Index Signature
 
