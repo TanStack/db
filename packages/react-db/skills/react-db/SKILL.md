@@ -291,8 +291,9 @@ const { data } = useLiveQuery({
 })
 ```
 
-In development, opaque IR throws and tells the user to add `queryKey`. Slow or
-repeated derived identity work warns once and points to the same escape hatch.
+Before 1.0, opaque IR warns and keeps legacy mount-stable identity. Slow or
+repeated derived identity work also warns once. Both point to the same
+`queryKey` escape hatch; unhashable IR without a key will throw in 1.0.
 
 ### Suspense + Error Boundary
 

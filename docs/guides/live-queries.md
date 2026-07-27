@@ -207,7 +207,12 @@ export class UserListComponent {
 }
 ```
 
-> **Note:** React hooks derive query identity from structured query IR by default. Dependency arrays are still accepted for backwards compatibility, but warn in development and will be removed in 1.0. See the [React Adapter documentation](../framework/react/overview#query-identity) for details.
+> **Note:** React hooks derive query identity from structured query IR by
+> default. Dependency arrays are still accepted for backwards compatibility,
+> but warn in development and will be removed in 1.0. Unhashable queries also
+> warn and keep legacy mount-stable identity until 1.0; add `queryKey` to make
+> captured opaque values reactive. See the [React Adapter
+> documentation](../framework/react/overview#query-identity) for details.
 
 For server rendering and hydration, live query preloading feeds source collection
 rows into the `DbClient` payload. See the [SSR and Hydration guide](./ssr.md).
@@ -234,7 +239,10 @@ function UserSearch({ search }: { search: string }) {
 
 You can also provide a `queryKey` as a performance escape hatch for a very hot render path, but normal structured queries should omit it.
 
-React development builds detect both cases: opaque, unhashable query IR throws with a path-specific error, and repeated expensive identity derivation warns once with the same `queryKey` escape hatch.
+React development builds detect both cases. Before 1.0, opaque, unhashable IR
+warns and keeps legacy mount-stable identity; repeated expensive identity
+derivation also warns once. Both warnings point to the same `queryKey` escape
+hatch.
 
 For more details on framework integration, see the [React](../framework/react/overview), [Vue](../framework/vue/overview), and [Angular](../framework/angular/overview) adapter documentation.
 

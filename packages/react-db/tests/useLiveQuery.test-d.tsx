@@ -101,6 +101,56 @@ describe(`useLiveQuery type assertions`, () => {
     >()
   })
 
+  it(`should type queryKey and a per-call DbClient override`, () => {
+    const descriptor = collectionOptions(
+      mockSyncCollectionOptions<Person>({
+        id: `test-persons-client-override`,
+        getKey: (person: Person) => person.id,
+        initialData: [],
+      }),
+    )
+    const client = null as unknown as DbClient
+
+    const { result } = renderHook(() => {
+      return useLiveQuery({
+        client,
+        queryKey: [descriptor.id, `team`, `team-1`],
+        query: (q) =>
+          q
+            .from({ person: descriptor })
+            .where(({ person }) => eq(person.team, `team-1`)),
+      })
+    })
+
+    expectTypeOf(result.current.data).toMatchTypeOf<
+      Array<OutputWithVirtual<Person>>
+    >()
+  })
+
+  it(`keeps the deprecated dependency-array overload typed`, () => {
+    const collection = createCollection(
+      mockSyncCollectionOptions<Person>({
+        id: `test-persons-deprecated-deps`,
+        getKey: (person: Person) => person.id,
+        initialData: [],
+      }),
+    )
+
+    const { result } = renderHook(() =>
+      useLiveQuery(
+        (q) =>
+          q
+            .from({ person: collection })
+            .where(({ person }) => eq(person.team, `team-1`)),
+        [`team-1`],
+      ),
+    )
+
+    expectTypeOf(result.current.data).toMatchTypeOf<
+      Array<OutputWithVirtual<Person>>
+    >()
+  })
+
   it(`should type collection descriptors in query sources`, () => {
     const collection = collectionOptions(
       mockSyncCollectionOptions<Person>({

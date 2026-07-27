@@ -20,8 +20,8 @@ The SSR-friendly API adds four concepts:
 
 - `DbClient` owns materialized collection instances for one request, browser app,
   test, or script.
-- `collectionOptions(...)` creates a stable collection descriptor that can be
-  materialized by any `DbClient`.
+- `collectionOptions(...)` creates a stable collection descriptor. Reusable
+  descriptors create fresh adapter config for each `DbClient`.
 - `dbClient.dehydrate()`, `dbClient.hydrate(state)`, and
   `dbClient.applyCollectionChunk(chunk)` move collection rows across the
   server/client boundary.
@@ -32,7 +32,7 @@ Existing apps continue to work. `createCollection(...)` and direct collection
 instances still exist. The migration is required when you want SSR-safe request
 isolation, hydration, streaming chunks, or the 1.0-ready React hook shape.
 
-The one React API that now warns is the dependency-array form:
+The old dependency-array form now warns:
 
 ```tsx
 useLiveQuery((q) => q.from({ todos }).where(...), [status])
@@ -54,7 +54,7 @@ you want to skip derived identity work.
 
 | Task | Before | SSR-friendly |
 | --- | --- | --- |
-| Define a collection | `createCollection(options)` | `collectionOptions(options)` |
+| Define a collection | `createCollection(options)` | `collectionOptions(id, factory)` |
 | Materialize a collection | module-level singleton | `dbClient.collection(todoCollection)` |
 | Scope collection state | module lifetime | `new DbClient()` per request/browser/test |
 | Provide React context | none | `<DbProvider client={dbClient}>` |
@@ -78,7 +78,7 @@ import {
   useLiveQuery,
 } from '@tanstack/react-db'
 
-const todoCollection = collectionOptions({
+const todoCollection = collectionOptions('todos', () => ({
   id: 'todos',
   getKey: (todo: Todo) => todo.id,
   sync: {
@@ -86,7 +86,7 @@ const todoCollection = collectionOptions({
       markReady()
     },
   },
-})
+}))
 
 function useTodoCollection() {
   return useDbClient().collection(todoCollection)
@@ -127,6 +127,24 @@ root.render(
 )
 ```
 
+The factory matters when config contains mutable adapter state or closures.
+Every `DbClient` gets a fresh config and collection instance. First-party
+adapter option creators already attach an equivalent factory, so this is also
+safe:
+
+```tsx
+const todoCollection = collectionOptions(
+  localOnlyCollectionOptions<Todo>({
+    id: 'todos',
+    getKey: (todo) => todo.id,
+  })
+)
+```
+
+A descriptor created from an arbitrary concrete config can be materialized by
+one `DbClient` only. Use the explicit factory form for custom adapters and
+request-scoped dependencies.
+
 ## SSR Flow
 
 The server and browser use the same descriptors, but different `DbClient`
@@ -147,6 +165,12 @@ browser
   -> useLiveQuery({ query })
 ```
 
+During React hydration, descriptor-backed queries read the hydrated collection
+rows for the first browser render. Adapter sync and queued on-demand loads start
+when React commits the external-store subscription, so the initial markup still
+matches the server. Fresh adapter data remains authoritative and reconciles
+immediately after that commit.
+
 ### Server
 
 Create a fresh `DbClient` for each request. Materialize descriptors through that
@@ -160,7 +184,7 @@ import {
   eq,
 } from '@tanstack/db'
 
-export const todoCollection = collectionOptions({
+export const todoCollection = collectionOptions('todos', () => ({
   id: 'todos',
   getKey: (todo: Todo) => todo.id,
   syncMode: 'on-demand',
@@ -181,7 +205,7 @@ export const todoCollection = collectionOptions({
       }
     },
   },
-})
+}))
 
 export async function loadTodosForSsr() {
   const dbClient = new DbClient()
@@ -312,15 +336,16 @@ and the adapter can restart sync normally.
 
 `initialData` is a startup seed, not a sync-ready signal.
 
-Current `DbClient` precedence, from lowest to highest, is:
+Before adapter sync starts, current `DbClient` precedence from lowest to highest
+is:
 
-1. descriptor `initialData`
-2. per-materialization `initialData`
+1. per-materialization `initialData`
+2. persisted rows
 3. hydrated rows
 
-Hydrated rows win because they came from the server payload for this render.
-Per-materialization `initialData` wins over descriptor `initialData` because it
-is the more local caller choice.
+Fresh adapter sync is authoritative over all three. Hydrated and initial rows
+are provisional base state, so the adapter's first insert for the same key is
+reconciled as an update instead of raising a duplicate-key error.
 
 `initialData` never marks adapter sync as ready by itself. The adapter still
 owns readiness through its sync lifecycle.
@@ -369,8 +394,12 @@ Common reasons to add `queryKey`:
   the structured query
 - a render path where derived identity becomes measurably expensive
 
-In development, DB throws when structured IR cannot be hashed and points at the
-unhashable path. It also warns once if deriving identity becomes expensive enough
+Before 1.0, DB warns when structured IR cannot be hashed and preserves the
+legacy mount-stable identity. The query still works, but captured values inside
+opaque logic are not reactive unless they are represented in `queryKey`. In 1.0,
+an unhashable query without `queryKey` will throw.
+
+DB also warns once in development if deriving identity becomes expensive enough
 that an explicit `queryKey` would be better.
 
 Dependency arrays are accepted for backwards compatibility:
@@ -395,8 +424,8 @@ warning.
 
 ### 1. Create descriptors instead of SSR singletons
 
-For collections that need SSR, replace module-level `createCollection(...)` with
-`collectionOptions(...)`.
+For collections that need SSR, replace module-level `createCollection(...)`
+with a reusable `collectionOptions(...)` descriptor.
 
 ```tsx
 // Before
@@ -407,14 +436,17 @@ export const todoCollection = createCollection({
 })
 
 // After
-export const todoCollection = collectionOptions({
+export const todoCollection = collectionOptions('todos', () => ({
   id: 'todos',
-  getKey: (todo) => todo.id,
-  sync: todoSync,
-})
+  getKey: (todo: Todo) => todo.id,
+  sync: createTodoSync(),
+}))
 ```
 
-Collections that never participate in SSR can keep using `createCollection`.
+Put mutable state and closures inside the factory. First-party adapter option
+creators can also be passed directly because they provide a fresh config
+factory. Collections that never participate in SSR can keep using
+`createCollection`.
 
 ### 2. Add a `DbClient`
 
@@ -544,8 +576,8 @@ Still supported:
 Warnings:
 
 - React dependency arrays warn in development and will be removed in 1.0.
-- Opaque query IR without `queryKey` throws in development because DB cannot
-  derive stable identity safely.
+- Opaque query IR without `queryKey` warns in development and keeps legacy
+  mount-stable identity until 1.0. In 1.0 it will throw.
 - Expensive derived identity warns in development and suggests `queryKey`.
 
 Required for SSR:
@@ -571,12 +603,15 @@ Required for SSR:
 - `dbClient.dehydrate()`
 - `dbClient.hydrate(state)`
 - `dbClient.applyCollectionChunk(chunk)`
+- `dbClient.createTransaction(config)`
+- `dbClient.cleanup()`
 - React `DbProvider`
 - React `useDbClient()`
 - React `useOptionalDbClient()`
 - React descriptor resolution inside live query builders
 - React derived structured query identity
 - React `queryKey` escape hatch for opaque or hot-path queries
+- React per-query `client` override
 - SSR-capable `useSyncExternalStore` server snapshot support
 - TanStack Start + Playwright SSR E2E coverage
 
@@ -591,6 +626,10 @@ Required for SSR:
   not live query result snapshots.
 - Hydration applies rows as committed synced state without invoking mutation
   handlers or creating optimistic state.
+- Hydration and adapter sync begin in a deterministic order: pending rows and
+  sync metadata are imported before sync starts.
+- `DbClient` owns collection instances and ambient transaction scope; cleanup
+  releases both.
 - Streaming chunks use the same payload shape as full dehydration.
 
 ### Deprecated
@@ -618,5 +657,6 @@ The SSR strategy is covered by:
 - query adapter tests to ensure Query cache behavior still holds
 - persistence core tests to ensure persisted row behavior remains intact
 - a TanStack Start + Playwright E2E that verifies server HTML contains hydrated
-  DB rows, browser hydration succeeds, and an incremental collection chunk
-  updates an existing live query
+  DB rows, browser hydration has no markup mismatch, fresh sync reconciles a
+  hydrated row, and an incremental collection chunk updates an existing live
+  query

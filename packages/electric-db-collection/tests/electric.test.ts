@@ -1,4 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { ShapeStream } from '@electric-sql/client'
 import {
   CollectionImpl,
   createCollection,
@@ -440,6 +441,100 @@ describe(`Electric Integration`, () => {
       // Both txids should be tracked
       await expect(collection.utils.awaitTxId(txid1)).resolves.not.toThrow()
       await expect(collection.utils.awaitTxId(txid2)).resolves.not.toThrow()
+    })
+
+    it(`exports and imports versioned hydration sync metadata`, async () => {
+      mockStream.shapeHandle = `shape-handle`
+      mockStream.lastOffset = `42_0`
+
+      subscriber([
+        {
+          key: `1`,
+          value: { id: 1, name: `Test User` },
+          headers: {
+            operation: `insert`,
+            txids: [100, 200],
+          },
+        },
+        {
+          headers: { control: `up-to-date` },
+        },
+      ])
+
+      const exported = collection.config.sync.exportSyncMeta?.()
+      expect(exported).toMatchObject({
+        version: 1,
+        resume: {
+          kind: `resume`,
+          offset: `42_0`,
+          handle: `shape-handle`,
+        },
+        seenTxids: [100, 200],
+      })
+
+      const resumedOptions = electricCollectionOptions<Row>({
+        id: `resumed`,
+        shapeOptions: {
+          url: `http://test-url`,
+          params: {
+            table: `test_table`,
+          },
+        },
+        startSync: false,
+        getKey: (item) => item.id as number,
+      })
+
+      const merged = resumedOptions.sync.mergeSyncMeta?.(
+        {
+          version: 1,
+          seenTxids: [50],
+        },
+        exported,
+      )
+      resumedOptions.sync.importSyncMeta?.(merged)
+
+      await expect(resumedOptions.utils.awaitTxId(50)).resolves.toBe(true)
+      await expect(resumedOptions.utils.awaitTxId(200)).resolves.toBe(true)
+
+      const resumedCollection = createCollection({
+        ...resumedOptions,
+        startSync: true,
+      })
+
+      expect(vi.mocked(ShapeStream).mock.calls.at(-1)?.[0]).toMatchObject({
+        offset: `42_0`,
+        handle: `shape-handle`,
+      })
+
+      await resumedCollection.cleanup()
+    })
+
+    it(`ignores non-finite hydration sync metadata`, () => {
+      const options = electricCollectionOptions<Row>({
+        id: `invalid-hydration-sync-meta`,
+        shapeOptions: {
+          url: `http://test-url`,
+          params: {
+            table: `test_table`,
+          },
+        },
+        startSync: false,
+        getKey: (item) => item.id as number,
+      })
+
+      options.sync.importSyncMeta?.({
+        version: 1,
+        resume: {
+          kind: `reset`,
+          updatedAt: Number.POSITIVE_INFINITY,
+        },
+        seenTxids: [Number.NaN],
+      })
+
+      expect(options.sync.exportSyncMeta?.()).toEqual({
+        version: 1,
+        seenTxids: [],
+      })
     })
 
     it(`should reject with timeout when waiting for unknown txid`, async () => {

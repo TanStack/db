@@ -34,6 +34,7 @@ interface PendingSyncedTransaction<
     upserts: Map<TKey, T>
     deletes: Set<TKey>
   }
+  preserveHydrationSeedKeys?: boolean
   /**
    * When true, this transaction should be processed immediately even if there
    * are persisting user transactions. Used by manual write operations (writeInsert,
@@ -75,6 +76,8 @@ export class CollectionStateManager<
   public syncedData: SortedMap<TKey, TOutput>
   public syncedMetadata = new Map<TKey, unknown>()
   public syncedCollectionMetadata = new Map<string, unknown>()
+  public hydrationSeedKeys = new Set<TKey>()
+  public hydratedKeys = new Set<TKey>()
 
   // Optimistic state tracking - make public for testing
   public optimisticUpserts = new Map<TKey, TOutput>()
@@ -975,6 +978,8 @@ export class CollectionStateManager<
           this.syncedData.clear()
           this.syncedMetadata.clear()
           this.syncedKeys.clear()
+          this.hydrationSeedKeys.clear()
+          this.hydratedKeys.clear()
           this.clearOriginTrackingState()
 
           // 3) Clear currentVisibleState for truncated keys to ensure subsequent operations
@@ -1051,6 +1056,10 @@ export class CollectionStateManager<
               this.pendingOptimisticDirectUpserts.delete(key)
               this.pendingOptimisticDirectDeletes.delete(key)
               break
+          }
+          if (!transaction.preserveHydrationSeedKeys) {
+            this.hydrationSeedKeys.delete(key)
+            this.hydratedKeys.delete(key)
           }
         }
 
@@ -1435,6 +1444,8 @@ export class CollectionStateManager<
     this.pendingOptimisticDeletes.clear()
     this.pendingOptimisticDirectUpserts.clear()
     this.pendingOptimisticDirectDeletes.clear()
+    this.hydrationSeedKeys.clear()
+    this.hydratedKeys.clear()
     this.clearOriginTrackingState()
     this.isLocalOnly = false
     this.size = 0

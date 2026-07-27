@@ -1,5 +1,5 @@
 import { QueryObserver, hashKey } from '@tanstack/query-core'
-import { deepEquals } from '@tanstack/db'
+import { deepEquals, withCollectionConfigFactory } from '@tanstack/db'
 import {
   GetKeyRequiredError,
   InitialDataInOnDemandModeError,
@@ -2176,7 +2176,7 @@ export function queryCollectionOptions(
   // Create utils instance with state and dependencies passed explicitly
   const utils: any = new QueryCollectionUtilsImpl(state, refetch, writeUtils)
 
-  return {
+  const options = {
     ...baseCollectionConfig,
     getKey,
     syncMode,
@@ -2186,4 +2186,16 @@ export function queryCollectionOptions(
     onDelete: wrappedOnDelete,
     utils,
   }
+
+  return withCollectionConfigFactory(
+    options,
+    (client) =>
+      queryCollectionOptions({
+        ...config,
+        queryClient:
+          client.getDependency<QueryClient>(`queryClient`) ??
+          config.queryClient,
+        id: options.id,
+      }) as typeof options,
+  )
 }

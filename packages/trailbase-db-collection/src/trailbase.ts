@@ -1,5 +1,6 @@
 /* eslint-disable @typescript-eslint/no-unnecessary-condition */
 import { Store } from '@tanstack/store'
+import { withCollectionConfigFactory } from '@tanstack/db'
 import {
   ExpectedDeleteTypeError,
   ExpectedInsertTypeError,
@@ -363,7 +364,7 @@ export function trailBaseCollectionOptions<
       }) as const,
   }
 
-  return {
+  const options = {
     ...config,
     sync,
     getKey,
@@ -428,6 +429,11 @@ export function trailBaseCollectionOptions<
       cancel: cancelEventReader,
     },
   }
+
+  return withCollectionConfigFactory(
+    options,
+    () => trailBaseCollectionOptions(config) as typeof options,
+  )
 }
 
 function buildOrder(opts: LoadSubsetOptions): undefined | Array<string> {

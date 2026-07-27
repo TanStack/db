@@ -42,6 +42,7 @@ import type {
 import type { SingleRowRefProxy } from '../query/builder/ref-proxy'
 import type { StandardSchemaV1 } from '@standard-schema/spec'
 import type { WithVirtualProps } from '../virtual-props.js'
+import type { TransactionScope } from '../transactions.js'
 
 export type { CollectionIndexMetadata } from './events.js'
 
@@ -464,6 +465,26 @@ export class CollectionImpl<
    */
   public startSyncImmediate(): void {
     this._sync.startSync()
+  }
+
+  /** @internal */
+  public _setTransactionScope(transactionScope: TransactionScope): void {
+    this._mutations.setTransactionScope(transactionScope)
+  }
+
+  /** @internal */
+  public _hasHydratedKey(key: TKey): boolean {
+    return this._state.hydratedKeys.has(key)
+  }
+
+  /** @internal */
+  public _deferSyncStart(): boolean {
+    return this._sync.deferStart()
+  }
+
+  /** @internal */
+  public _resumeSyncStart(): void {
+    this._sync.resumeStart()
   }
 
   /**

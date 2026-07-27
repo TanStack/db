@@ -10,7 +10,7 @@ export type SsrTodo = {
   id: string
   text: string
   status: `open` | `done`
-  source: `server` | `stream`
+  source: `server` | `sync` | `stream`
 }
 
 export const ssrTodoCollectionId = `ssr-e2e-todos`
@@ -36,6 +36,16 @@ const serverTodos: Array<SsrTodo> = [
   },
 ]
 
+const browserTodos: Array<SsrTodo> = serverTodos.map((todo) =>
+  todo.id === `server-1`
+    ? {
+        ...todo,
+        text: `Pay invoices (reconciled from sync)`,
+        source: `sync`,
+      }
+    : { ...todo, source: `sync` },
+)
+
 export const streamedTodo: SsrTodo = {
   id: `streamed-1`,
   text: `Streamed from collection chunk`,
@@ -43,9 +53,9 @@ export const streamedTodo: SsrTodo = {
   source: `stream`,
 }
 
-export const ssrTodoCollection = collectionOptions<SsrTodo, string>({
+export const ssrTodoCollection = collectionOptions(ssrTodoCollectionId, () => ({
   id: ssrTodoCollectionId,
-  getKey: (todo) => todo.id,
+  getKey: (todo: SsrTodo) => todo.id,
   syncMode: `on-demand`,
   sync: {
     sync: ({ begin, write, commit, markReady }) => {
@@ -53,8 +63,11 @@ export const ssrTodoCollection = collectionOptions<SsrTodo, string>({
 
       return {
         loadSubset: () => {
+          const todos =
+            typeof window === `undefined` ? serverTodos : browserTodos
+
           begin({ immediate: true })
-          for (const todo of serverTodos) {
+          for (const todo of todos) {
             write({
               type: `insert`,
               value: todo,
@@ -66,7 +79,7 @@ export const ssrTodoCollection = collectionOptions<SsrTodo, string>({
       }
     },
   },
-})
+}))
 
 export async function createDehydratedSsrTodoState(): Promise<DehydratedDbState> {
   const dbClient = new DbClient()

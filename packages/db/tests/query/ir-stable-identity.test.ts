@@ -379,6 +379,42 @@ describe(`stable QueryIR identity smoke test`, () => {
     expect(getStableQueryIRHash(left)).toBe(getStableQueryIRHash(right))
   })
 
+  it(`keeps runtime values disjoint from internal identity tags`, () => {
+    const createQuery = (value: unknown) =>
+      getQueryIR(
+        new Query()
+          .from({ user: usersCollection })
+          .where(({ user }) => eq(user.profile, value as never)),
+      )
+
+    const hashes = [
+      undefined,
+      { type: `undefined` },
+      [`undefined`],
+      Number.NaN,
+      { type: `number`, value: `NaN` },
+      new Date(`2024-01-01T00:00:00.000Z`),
+      { type: `Date`, value: `2024-01-01T00:00:00.000Z` },
+    ].map((value) => getStableQueryIRHash(createQuery(value)))
+
+    expect(new Set(hashes).size).toBe(hashes.length)
+  })
+
+  it(`preserves __proto__ as a normal object key`, () => {
+    const withProtoKey = JSON.parse(`{"__proto__":{"value":true}}`) as object
+    const withoutProtoKey = {}
+    const createQuery = (value: object) =>
+      getQueryIR(
+        new Query()
+          .from({ user: usersCollection })
+          .where(({ user }) => eq(user.profile, value as never)),
+      )
+
+    expect(getStableQueryIRHash(createQuery(withProtoKey))).not.toBe(
+      getStableQueryIRHash(createQuery(withoutProtoKey)),
+    )
+  })
+
   it(`rejects functional query variants`, () => {
     const queries = [
       getQueryIR(

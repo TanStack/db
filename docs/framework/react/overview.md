@@ -101,7 +101,12 @@ function SearchTodos({ search }: { search: string }) {
 }
 ```
 
-In development, `useLiveQuery` enforces this boundary. If the structured IR contains opaque values that cannot be hashed, it throws and points at the path that needs an explicit `queryKey`. If deriving identity becomes expensive across renders, it warns once and suggests adding a `queryKey` as a performance escape hatch.
+Before 1.0, an unhashable query warns in development and keeps its legacy
+mount-stable identity. The query still runs, but captured values inside opaque
+logic only become reactive when they are represented in `queryKey`. In 1.0, an
+unhashable query without `queryKey` will throw. If deriving identity becomes
+expensive across renders, the hook warns once and suggests adding a `queryKey`
+as a performance escape hatch.
 
 #### What Happens When Identity Changes
 

@@ -1,7 +1,9 @@
 import { describe, expect, it } from 'vitest'
 import {
   BasicIndex,
+  DbClient,
   IR,
+  collectionOptions,
   createCollection,
   createTransaction,
 } from '@tanstack/db'
@@ -910,6 +912,51 @@ describe(`persistedCollectionOptions`, () => {
 
     expect(collection.id).toBe(options.id)
     expect(adapter.loadSubsetCalls[0]?.collectionId).toBe(collection.id)
+  })
+
+  it(`keeps hydrated rows ahead of persisted startup rows`, async () => {
+    const adapter = createRecordingAdapter([
+      { id: `1`, title: `Persisted title` },
+    ])
+    const descriptor = collectionOptions(
+      persistedCollectionOptions<Todo, string>({
+        id: `hydration-precedence`,
+        getKey: (item) => item.id,
+        sync: {
+          sync: ({ markReady }) => {
+            markReady()
+          },
+        },
+        persistence: {
+          adapter,
+        },
+      }),
+    )
+    const client = new DbClient()
+    client.hydrate({
+      collections: [
+        {
+          collectionId: descriptor.id,
+          rows: [
+            {
+              key: `1`,
+              value: { id: `1`, title: `SSR title` },
+            },
+          ],
+        },
+      ],
+    })
+
+    const collection = client.collection(descriptor)
+    await collection.stateWhenReady()
+    await flushAsyncWork()
+
+    expect(collection.get(`1`)).toMatchObject({
+      id: `1`,
+      title: `SSR title`,
+    })
+
+    await client.cleanup()
   })
 
   it(`bootstraps and tracks persisted index lifecycle in sync-present mode`, async () => {

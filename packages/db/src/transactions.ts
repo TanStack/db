@@ -17,10 +17,127 @@ import type {
   TransactionWithMutations,
 } from './types'
 
-const transactions: Array<Transaction<any>> = []
-let transactionStack: Array<Transaction<any>> = []
+export class TransactionScope {
+  private transactions: Array<Transaction<any>> = []
+  private transactionStack: Array<Transaction<any>> = []
+  private sequenceNumber = 0
 
-let sequenceNumber = 0
+  createTransaction<T extends object = Record<string, unknown>>(
+    config: TransactionConfig<T>,
+  ): Transaction<T> {
+    const transaction = new Transaction<T>(config, this, this.sequenceNumber++)
+    this.transactions.push(transaction)
+    return transaction
+  }
+
+  getActiveTransaction(): Transaction | undefined {
+    return this.transactionStack.at(-1)
+  }
+
+  getActiveTransactionForCollection(): Transaction | undefined {
+    const activeTransaction = this.getActiveTransaction()
+    if (activeTransaction) {
+      return activeTransaction
+    }
+
+    if (this === defaultTransactionScope) {
+      return undefined
+    }
+
+    return defaultTransactionScope.claimActiveTransaction(this)
+  }
+
+  private claimActiveTransaction(
+    targetScope: TransactionScope,
+  ): Transaction | undefined {
+    const transaction = this.getActiveTransaction()
+    if (!transaction) {
+      return undefined
+    }
+
+    const owner = getTransactionScope(transaction)
+    if (owner === targetScope) {
+      return transaction
+    }
+    if (owner !== this) {
+      throw new Error(
+        `A transaction created with createTransaction() cannot mutate collections from multiple DbClient instances. Use dbClient.createTransaction() for explicit client scope.`,
+      )
+    }
+
+    this.removeTransaction(transaction)
+    targetScope.transactions.push(transaction)
+    targetScope.transactionStack.push(transaction)
+    transaction.sequenceNumber = targetScope.sequenceNumber++
+    transactionScopes.set(transaction, targetScope)
+    return transaction
+  }
+
+  registerTransaction(transaction: Transaction<any>): void {
+    // Clear stale work left by an aborted mutate scope before reusing the id.
+    transactionScopedScheduler.clear(transaction.id)
+    this.transactionStack.push(transaction)
+  }
+
+  unregisterTransaction(transaction: Transaction<any>): void {
+    try {
+      transactionScopedScheduler.flush(transaction.id)
+    } finally {
+      this.transactionStack = this.transactionStack.filter(
+        (candidate) => candidate.id !== transaction.id,
+      )
+    }
+  }
+
+  removeTransaction(transaction: Transaction<any>): void {
+    const index = this.transactions.findIndex(
+      (candidate) => candidate.id === transaction.id,
+    )
+    if (index !== -1) {
+      this.transactions.splice(index, 1)
+    }
+  }
+
+  rollbackConflictingTransactions(
+    transaction: Transaction<any>,
+    mutationIds: Set<string>,
+  ): void {
+    for (const candidate of this.transactions) {
+      if (
+        candidate !== transaction &&
+        candidate.state === `pending` &&
+        candidate.mutations.some((mutation) =>
+          mutationIds.has(mutation.globalKey),
+        )
+      ) {
+        candidate.rollback({ isSecondaryRollback: true })
+      }
+    }
+  }
+
+  clear(): void {
+    const transactionIds = new Set([
+      ...this.transactions.map((transaction) => transaction.id),
+      ...this.transactionStack.map((transaction) => transaction.id),
+    ])
+    for (const transactionId of transactionIds) {
+      transactionScopedScheduler.clear(transactionId)
+    }
+    this.transactions = []
+    this.transactionStack = []
+  }
+}
+
+const defaultTransactionScope = new TransactionScope()
+const transactionScopes = new WeakMap<object, TransactionScope>()
+
+function getTransactionScope(transaction: object): TransactionScope {
+  const scope = transactionScopes.get(transaction)
+  if (!scope) {
+    throw new Error(`Transaction is not associated with a TransactionScope.`)
+  }
+  return scope
+}
 
 /**
  * Merges two pending mutations for the same item within a transaction
@@ -157,9 +274,7 @@ function mergePendingMutations<T extends object>(
 export function createTransaction<T extends object = Record<string, unknown>>(
   config: TransactionConfig<T>,
 ): Transaction<T> {
-  const newTransaction = new Transaction<T>(config)
-  transactions.push(newTransaction)
-  return newTransaction
+  return defaultTransactionScope.createTransaction(config)
 }
 
 /**
@@ -174,36 +289,7 @@ export function createTransaction<T extends object = Record<string, unknown>>(
  * }
  */
 export function getActiveTransaction(): Transaction | undefined {
-  if (transactionStack.length > 0) {
-    return transactionStack.slice(-1)[0]
-  } else {
-    return undefined
-  }
-}
-
-function registerTransaction(tx: Transaction<any>) {
-  // Clear any stale work that may have been left behind if a previous mutate
-  // scope aborted before we could flush.
-  transactionScopedScheduler.clear(tx.id)
-  transactionStack.push(tx)
-}
-
-function unregisterTransaction(tx: Transaction<any>) {
-  // Always flush pending work for this transaction before removing it from
-  // the ambient stack – this runs even if the mutate callback throws.
-  // If flush throws (e.g., due to a job error), we still clean up the stack.
-  try {
-    transactionScopedScheduler.flush(tx.id)
-  } finally {
-    transactionStack = transactionStack.filter((t) => t.id !== tx.id)
-  }
-}
-
-function removeFromPendingList(tx: Transaction<any>) {
-  const index = transactions.findIndex((t) => t.id === tx.id)
-  if (index !== -1) {
-    transactions.splice(index, 1)
-  }
+  return defaultTransactionScope.getActiveTransaction()
 }
 
 class Transaction<T extends object = Record<string, unknown>> {
@@ -233,7 +319,11 @@ class Transaction<T extends object = Record<string, unknown>> {
     error: Error
   }
 
-  constructor(config: TransactionConfig<T>) {
+  constructor(
+    config: TransactionConfig<T>,
+    scope: TransactionScope,
+    sequenceNumber: number,
+  ) {
     if (typeof config.mutationFn === `undefined`) {
       throw new MissingMutationFunctionError()
     }
@@ -244,15 +334,16 @@ class Transaction<T extends object = Record<string, unknown>> {
     this.isPersisted = createDeferred<Transaction<T>>()
     this.autoCommit = config.autoCommit ?? true
     this.createdAt = new Date()
-    this.sequenceNumber = sequenceNumber++
+    this.sequenceNumber = sequenceNumber
     this.metadata = config.metadata ?? {}
+    transactionScopes.set(this, scope)
   }
 
   setState(newState: TransactionState) {
     this.state = newState
 
     if (newState === `completed` || newState === `failed`) {
-      removeFromPendingList(this)
+      getTransactionScope(this).removeTransaction(this)
     }
   }
 
@@ -310,12 +401,17 @@ class Transaction<T extends object = Record<string, unknown>> {
       throw new TransactionNotPendingMutateError()
     }
 
-    registerTransaction(this)
+    const initialScope = getTransactionScope(this)
+    initialScope.registerTransaction(this)
 
     try {
       callback()
     } finally {
-      unregisterTransaction(this)
+      const finalScope = getTransactionScope(this)
+      if (finalScope !== initialScope) {
+        finalScope.unregisterTransaction(this)
+      }
+      initialScope.unregisterTransaction(this)
     }
 
     if (this.autoCommit) {
@@ -430,13 +526,13 @@ class Transaction<T extends object = Record<string, unknown>> {
     // See if there's any other transactions w/ mutations on the same ids
     // and roll them back as well.
     if (!isSecondaryRollback) {
-      const mutationIds = new Set()
-      this.mutations.forEach((m) => mutationIds.add(m.globalKey))
-      for (const t of transactions) {
-        t.state === `pending` &&
-          t.mutations.some((m) => mutationIds.has(m.globalKey)) &&
-          t.rollback({ isSecondaryRollback: true })
-      }
+      const mutationIds = new Set(
+        this.mutations.map((mutation) => mutation.globalKey),
+      )
+      getTransactionScope(this).rollbackConflictingTransactions(
+        this,
+        mutationIds,
+      )
     }
 
     // Reject the promise

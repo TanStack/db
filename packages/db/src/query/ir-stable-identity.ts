@@ -188,13 +188,15 @@ function canonicalizeSelect(
   path: string,
   seen: WeakSet<object>,
 ): StableIdentityValue {
-  const result: Record<string, StableIdentityValue> = {}
-
-  for (const key of Object.keys(select).sort()) {
-    result[key] = canonicalizeSelectValue(select[key]!, `${path}.${key}`, seen)
+  return {
+    type: `select`,
+    fields: Object.keys(select)
+      .sort()
+      .map((key) => [
+        key,
+        canonicalizeSelectValue(select[key]!, `${path}.${key}`, seen),
+      ]),
   }
-
-  return result
 }
 
 function canonicalizeSelectValue(
@@ -380,38 +382,42 @@ function canonicalizeRuntimeValue(
   path: string,
   seen: WeakSet<object>,
 ): StableIdentityValue {
-  if (value === null) return null
+  if (value === null) return [`null`]
 
-  if (typeof value === `string` || typeof value === `boolean`) {
-    return value
+  if (typeof value === `string`) {
+    return [`string`, value]
+  }
+
+  if (typeof value === `boolean`) {
+    return [`boolean`, value]
   }
 
   if (typeof value === `number`) {
     if (Number.isNaN(value)) {
-      return { type: `number`, value: `NaN` }
+      return [`number`, `NaN`]
     }
 
     if (value === Infinity) {
-      return { type: `number`, value: `Infinity` }
+      return [`number`, `Infinity`]
     }
 
     if (value === -Infinity) {
-      return { type: `number`, value: `-Infinity` }
+      return [`number`, `-Infinity`]
     }
 
     if (Object.is(value, -0)) {
-      return { type: `number`, value: `-0` }
+      return [`number`, `-0`]
     }
 
-    return value
+    return [`number`, value]
   }
 
   if (typeof value === `undefined`) {
-    return { type: `undefined` }
+    return [`undefined`]
   }
 
   if (typeof value === `bigint`) {
-    return { type: `bigint`, value: value.toString() }
+    return [`bigint`, value.toString()]
   }
 
   if (typeof value === `function`) {
@@ -427,11 +433,12 @@ function canonicalizeRuntimeValue(
   }
 
   if (Array.isArray(value)) {
-    return withCircularGuard(value, path, seen, () =>
+    return withCircularGuard(value, path, seen, () => [
+      `array`,
       value.map((item, index) =>
         canonicalizeRuntimeValue(item, `${path}[${index}]`, seen),
       ),
-    )
+    ])
   }
 
   if (value instanceof Date) {
@@ -440,23 +447,21 @@ function canonicalizeRuntimeValue(
       throw new UnhashableQueryIRError(path, `invalid Date`)
     }
 
-    return { type: `Date`, value: value.toISOString() }
+    return [`Date`, value.toISOString()]
   }
 
   if (value instanceof ArrayBuffer) {
-    return {
-      type: `ArrayBuffer`,
-      value: Array.from(new Uint8Array(value)),
-    }
+    return [`binary`, `ArrayBuffer`, Array.from(new Uint8Array(value))]
   }
 
   if (ArrayBuffer.isView(value)) {
-    return {
-      type: value.constructor.name,
-      value: Array.from(
+    return [
+      `binary`,
+      value.constructor.name,
+      Array.from(
         new Uint8Array(value.buffer, value.byteOffset, value.byteLength),
       ),
-    }
+    ]
   }
 
   if (isPlainObject(value)) {
@@ -471,15 +476,15 @@ function canonicalizeObject(
   path: string,
   seen: WeakSet<object>,
 ): StableIdentityValue {
-  return withCircularGuard(value, path, seen, () => {
-    const result: Record<string, StableIdentityValue> = {}
-
-    for (const key of Object.keys(value).sort()) {
-      result[key] = canonicalizeRuntimeValue(value[key], `${path}.${key}`, seen)
-    }
-
-    return result
-  })
+  return withCircularGuard(value, path, seen, () => [
+    `object`,
+    Object.keys(value)
+      .sort()
+      .map((key) => [
+        key,
+        canonicalizeRuntimeValue(value[key], `${path}.${key}`, seen),
+      ]),
+  ])
 }
 
 function withCircularGuard<T>(

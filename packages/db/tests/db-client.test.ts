@@ -1,9 +1,13 @@
 import { describe, expect, it, vi } from 'vitest'
+import { z } from 'zod'
 import {
   DbClient,
   collectionOptions,
   createLiveQueryCollection,
+  createTransaction,
   eq,
+  liveQueryCollectionOptions,
+  localOnlyCollectionOptions,
 } from '../src'
 import { mockSyncCollectionOptions } from './utils'
 
@@ -39,6 +43,124 @@ describe(`DbClient`, () => {
     expect(peopleA1).not.toBe(peopleB)
     expect(peopleA1.toArray).toHaveLength(2)
     expect(peopleB.toArray).toHaveLength(2)
+  })
+
+  it(`materializes independent adapter state for each client`, async () => {
+    const descriptor = collectionOptions(
+      localOnlyCollectionOptions<Person>({
+        id: `people`,
+        getKey: (person) => person.id,
+      }),
+    )
+    const clientA = new DbClient()
+    const clientB = new DbClient()
+    const peopleA = clientA.collection(descriptor)
+    const peopleB = clientB.collection(descriptor)
+
+    const transaction = peopleA.insert(people[0]!)
+    await transaction.isPersisted.promise
+
+    expect(peopleA.get(`1`)).toMatchObject(people[0]!)
+    expect(peopleB.get(`1`)).toBeUndefined()
+  })
+
+  it(`does not reuse concrete configs across clients`, () => {
+    const descriptor = collectionOptions({
+      id: `people`,
+      getKey: (person: Person) => person.id,
+      sync: { sync: () => {} },
+    })
+
+    new DbClient().collection(descriptor)
+
+    expect(() => new DbClient().collection(descriptor)).toThrow(
+      /cannot be safely reused across DbClient instances/,
+    )
+  })
+
+  it(`isolates ambient transactions between clients`, async () => {
+    const descriptor = collectionOptions(
+      localOnlyCollectionOptions<Person>({
+        id: `people`,
+        getKey: (person) => person.id,
+      }),
+    )
+    const clientA = new DbClient()
+    const clientB = new DbClient()
+    const peopleA = clientA.collection(descriptor)
+    const peopleB = clientB.collection(descriptor)
+    const transactionA = clientA.createTransaction<Person>({
+      autoCommit: false,
+      mutationFn: async () => {},
+    })
+    const rolledBack = transactionA.isPersisted.promise.catch(() => undefined)
+    let transactionB: ReturnType<typeof peopleB.insert> | undefined
+
+    transactionA.mutate(() => {
+      expect(peopleA.insert(people[0]!)).toBe(transactionA)
+      transactionB = peopleB.insert(people[1]!)
+      expect(transactionB).not.toBe(transactionA)
+      expect(clientA.activeTransaction).toBe(transactionA)
+      expect(clientB.activeTransaction).toBeUndefined()
+    })
+
+    await transactionB!.isPersisted.promise
+    transactionA.rollback()
+    await rolledBack
+
+    expect(peopleA.get(`1`)).toBeUndefined()
+    expect(peopleB.get(`2`)).toMatchObject(people[1]!)
+  })
+
+  it(`binds the backwards-compatible createTransaction API to one client`, async () => {
+    const descriptor = collectionOptions(
+      localOnlyCollectionOptions<Person>({
+        id: `people`,
+        getKey: (person) => person.id,
+      }),
+    )
+    const clientA = new DbClient()
+    const clientB = new DbClient()
+    const peopleA = clientA.collection(descriptor)
+    const peopleB = clientB.collection(descriptor)
+    const transaction = createTransaction<Person>({
+      autoCommit: false,
+      mutationFn: async () => {},
+    })
+    const rolledBack = transaction.isPersisted.promise.catch(() => undefined)
+
+    transaction.mutate(() => {
+      expect(peopleA.insert(people[0]!)).toBe(transaction)
+      expect(() => peopleB.insert(people[1]!)).toThrow(
+        /cannot mutate collections from multiple DbClient instances/,
+      )
+    })
+
+    transaction.rollback()
+    await rolledBack
+
+    expect(peopleA.get(`1`)).toBeUndefined()
+    expect(peopleB.get(`2`)).toBeUndefined()
+  })
+
+  it(`cleans up materialized collections and allows rematerialization`, async () => {
+    const cleanup = vi.fn()
+    const descriptor = collectionOptions(`people`, () => ({
+      id: `people`,
+      getKey: (person: Person) => person.id,
+      startSync: true,
+      sync: {
+        sync: () => ({ cleanup }),
+      },
+    }))
+    const client = new DbClient()
+    const first = client.collection(descriptor)
+
+    await client.cleanup()
+
+    expect(cleanup).toHaveBeenCalledOnce()
+    expect(client.dehydrate()).toEqual({ collections: [] })
+    expect(client.collection(descriptor)).not.toBe(first)
   })
 
   it(`serializes collection rows and sync metadata from explicit ids`, () => {
@@ -141,42 +263,33 @@ describe(`DbClient`, () => {
     )
   })
 
-  it(`requires stable explicit collection ids for dehydration`, () => {
-    const descriptor = collectionOptions(
-      mockSyncCollectionOptions<Person>({
-        id: undefined as unknown as string,
-        getKey: (person) => person.id,
-        initialData: people,
-      }),
-    )
-
-    const client = new DbClient()
-    client.collection(descriptor)
-
-    expect(() => client.dehydrate()).toThrow(
-      /SSR hydration requires stable collection ids/,
-    )
+  it(`requires a stable explicit collection id when creating a descriptor`, () => {
+    expect(() =>
+      collectionOptions(
+        mockSyncCollectionOptions<Person>({
+          id: undefined as unknown as string,
+          getKey: (person) => person.id,
+          initialData: people,
+        }),
+      ),
+    ).toThrow(/collectionOptions requires a non-empty explicit id/)
   })
 
-  it(`does not treat an empty collection id as stable for dehydration`, () => {
-    const descriptor = collectionOptions(
-      mockSyncCollectionOptions<Person>({
-        id: ``,
-        getKey: (person) => person.id,
-        initialData: people,
-      }),
-    )
-
-    const client = new DbClient()
-    client.collection(descriptor)
-
-    expect(() => client.dehydrate()).toThrow(
-      /SSR hydration requires stable collection ids/,
-    )
+  it(`rejects an empty collection descriptor id`, () => {
+    expect(() =>
+      collectionOptions(
+        mockSyncCollectionOptions<Person>({
+          id: ``,
+          getKey: (person) => person.id,
+          initialData: people,
+        }),
+      ),
+    ).toThrow(/collectionOptions requires a non-empty explicit id/)
   })
 
   it(`hydrates pending collection rows when the collection materializes`, () => {
     const importedMeta = vi.fn()
+    const lifecycleOrder: Array<string> = []
     const descriptor = collectionOptions(
       mockSyncCollectionOptions<Person>({
         id: `people`,
@@ -184,9 +297,13 @@ describe(`DbClient`, () => {
         initialData: [],
         sync: {
           sync: ({ markReady }) => {
+            lifecycleOrder.push(`sync`)
             markReady()
           },
-          importSyncMeta: importedMeta,
+          importSyncMeta: (meta) => {
+            lifecycleOrder.push(`import`)
+            importedMeta(meta)
+          },
         },
       }),
     )
@@ -215,7 +332,83 @@ describe(`DbClient`, () => {
       source: `ssr`,
     })
     expect(importedMeta).toHaveBeenCalledWith({ version: 1, cursor: `ssr` })
+    expect(lifecycleOrder).toEqual([`import`, `sync`])
     expect(collection.status).toBe(`ready`)
+  })
+
+  it(`defers adapter sync and replays subset loads after hydrated rows render`, () => {
+    const lifecycleOrder: Array<string> = []
+    const descriptor = collectionOptions(`people`, () => ({
+      id: `people`,
+      getKey: (person: Person) => person.id,
+      syncMode: `on-demand` as const,
+      sync: {
+        sync: ({ begin, write, commit, markReady }) => {
+          lifecycleOrder.push(`sync`)
+          markReady()
+          return {
+            loadSubset: () => {
+              lifecycleOrder.push(`load`)
+              begin({ immediate: true })
+              write({
+                type: `insert`,
+                value: { id: `1`, name: `fresh` },
+              })
+              commit()
+              return true
+            },
+          }
+        },
+      },
+    }))
+    const client = new DbClient()
+
+    client.hydrate({
+      collections: [
+        {
+          collectionId: `people`,
+          rows: [{ key: `1`, value: { id: `1`, name: `stale` } }],
+        },
+      ],
+    })
+
+    const collection = client._materializeCollectionForRender(descriptor)
+    const subscription = collection.subscribeChanges(() => {}, {
+      includeInitialState: true,
+    })
+
+    expect(collection.get(`1`)).toMatchObject({ id: `1`, name: `stale` })
+    expect(lifecycleOrder).toEqual([])
+
+    collection._resumeSyncStart()
+
+    expect(lifecycleOrder).toEqual([`sync`, `load`])
+    expect(collection.get(`1`)).toMatchObject({ id: `1`, name: `fresh` })
+    subscription.unsubscribe()
+  })
+
+  it(`lets the first sync snapshot replace stale hydrated rows`, () => {
+    const descriptor = collectionOptions(
+      mockSyncCollectionOptions<Person>({
+        id: `people`,
+        getKey: (person) => person.id,
+        initialData: [{ id: `1`, name: `fresh` }],
+      }),
+    )
+    const client = new DbClient()
+
+    client.hydrate({
+      collections: [
+        {
+          collectionId: `people`,
+          rows: [{ key: `1`, value: { id: `1`, name: `stale` } }],
+        },
+      ],
+    })
+
+    const collection = client.collection(descriptor)
+
+    expect(collection.get(`1`)).toMatchObject({ id: `1`, name: `fresh` })
   })
 
   it(`merges sync metadata before importing hydration metadata`, () => {
@@ -339,6 +532,36 @@ describe(`DbClient`, () => {
     })
   })
 
+  it(`does not dehydrate explicitly client-bound live query result collections`, async () => {
+    const peopleDescriptor = collectionOptions(
+      mockSyncCollectionOptions<Person>({
+        id: `people`,
+        getKey: (person) => person.id,
+        initialData: people,
+      }),
+    )
+    const activePeopleDescriptor = collectionOptions(
+      `active-people`,
+      (client) =>
+        liveQueryCollectionOptions({
+          id: `active-people`,
+          query: (q) =>
+            q
+              .from({ person: client.collection(peopleDescriptor) })
+              .where(({ person }) => eq(person.status, `active`)),
+        }),
+    )
+    const client = new DbClient()
+    const activePeople = client.collection(activePeopleDescriptor)
+
+    await activePeople.preload()
+
+    expect(activePeople.toArray.map((person) => person.id)).toEqual([`1`])
+    expect(
+      client.dehydrate().collections.map((chunk) => chunk.collectionId),
+    ).toEqual([`people`])
+  })
+
   it(`hydrates rows without running mutation handlers or creating optimistic state`, () => {
     const onInsert = vi.fn()
     const descriptor = collectionOptions({
@@ -408,7 +631,7 @@ describe(`DbClient`, () => {
       mockSyncCollectionOptions<Person>({
         id: `people`,
         getKey: (person) => person.id,
-        initialData: [{ id: `1`, name: `descriptor` }],
+        initialData: [],
       }),
     )
 
@@ -453,5 +676,30 @@ describe(`DbClient`, () => {
 
     expect(collection.get(`1`)).toMatchObject(people[0]!)
     expect(collection.status).not.toBe(`ready`)
+  })
+
+  it(`validates and transforms materialization initialData before keying`, () => {
+    const personSchema = z.object({
+      id: z.string().transform((id) => `person:${id}`),
+      name: z.string(),
+    })
+    const descriptor = collectionOptions({
+      id: `people`,
+      schema: personSchema,
+      getKey: (person) => person.id,
+      sync: {
+        sync: () => {},
+      },
+    })
+
+    const collection = new DbClient().collection(descriptor, {
+      initialData: [{ id: `1`, name: `Tanner` }],
+    })
+
+    expect(collection.get(`person:1`)).toMatchObject({
+      id: `person:1`,
+      name: `Tanner`,
+    })
+    expect(collection.get(`1`)).toBeUndefined()
   })
 })

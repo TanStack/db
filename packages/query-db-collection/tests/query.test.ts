@@ -8,6 +8,8 @@ import {
 } from '@tanstack/query-core'
 import {
   BTreeIndex,
+  DbClient,
+  collectionOptions,
   createCollection,
   createLiveQueryCollection,
   eq,
@@ -216,6 +218,66 @@ describe(`QueryCollection`, () => {
         },
       },
     })
+  })
+
+  it(`materializes against each DbClient QueryClient dependency`, async () => {
+    const constructionClient = new QueryClient()
+    const queryClientA = new QueryClient()
+    const queryClientB = new QueryClient()
+    const queryKey = [`db-client-query-dependency`] as const
+    const descriptor = collectionOptions(
+      queryCollectionOptions({
+        id: `db-client-query-dependency`,
+        queryClient: constructionClient,
+        queryKey,
+        queryFn: async () => [{ id: `1`, name: `Item` }],
+        getKey,
+      }),
+    )
+    const dbClientA = new DbClient({ queryClient: queryClientA })
+    const dbClientB = new DbClient({ queryClient: queryClientB })
+    const collectionA = dbClientA.collection(descriptor)
+    const collectionB = dbClientB.collection(descriptor)
+
+    await Promise.all([collectionA.preload(), collectionB.preload()])
+
+    expect(queryClientA.getQueryData(queryKey)).toEqual([
+      { id: `1`, name: `Item` },
+    ])
+    expect(queryClientB.getQueryData(queryKey)).toEqual([
+      { id: `1`, name: `Item` },
+    ])
+    expect(constructionClient.getQueryData(queryKey)).toBeUndefined()
+
+    await Promise.all([dbClientA.cleanup(), dbClientB.cleanup()])
+    constructionClient.clear()
+    queryClientA.clear()
+    queryClientB.clear()
+  })
+
+  it(`uses the configured QueryClient when DbClient has no override`, async () => {
+    const constructionClient = new QueryClient()
+    const queryKey = [`db-client-query-fallback`] as const
+    const descriptor = collectionOptions(
+      queryCollectionOptions({
+        id: `db-client-query-fallback`,
+        queryClient: constructionClient,
+        queryKey,
+        queryFn: async () => [{ id: `1`, name: `Item` }],
+        getKey,
+      }),
+    )
+    const dbClient = new DbClient()
+    const collection = dbClient.collection(descriptor)
+
+    await collection.preload()
+
+    expect(constructionClient.getQueryData(queryKey)).toEqual([
+      { id: `1`, name: `Item` },
+    ])
+
+    await dbClient.cleanup()
+    constructionClient.clear()
   })
 
   afterEach(() => {

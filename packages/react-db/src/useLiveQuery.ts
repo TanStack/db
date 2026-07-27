@@ -4,8 +4,8 @@ import {
   UnhashableQueryIRError,
   createLiveQueryCollection,
   deepEquals,
-  getStableQueryBuilderHash,
   getLiveQueryStatusFlags,
+  getStableQueryBuilderHash,
   isCollection,
   isSingleResultCollection,
 } from '@tanstack/db'
@@ -32,6 +32,8 @@ const DERIVED_IDENTITY_RENDER_COUNT_WARN_THRESHOLD = 10
 const DERIVED_IDENTITY_TOTAL_WARN_MS = 50
 const warnedDepsCallsites = new Set<string>()
 const warnedDerivedIdentityCallsites = new Set<string>()
+const warnedUnhashableIdentityCallsites = new Set<string>()
+const unpreparedQueryValue = Symbol(`unpreparedQueryValue`)
 
 type DerivedIdentityProfiler = {
   renderCount: number
@@ -50,6 +52,8 @@ export type UseLiveQueryConfig<TContext extends Context> =
      * Structured queries should omit this so DB can derive identity directly.
      */
     queryKey?: LiveQueryKey
+    /** Override the nearest DbProvider for this query. */
+    client?: DbClient
   }
 
 function warnDeprecatedDepsArray(): void {
@@ -69,7 +73,7 @@ function warnDeprecatedDepsArray(): void {
 
 function shouldWarnInDevelopment(disableEnvVar: string): boolean {
   if (typeof process === `undefined`) {
-    return true
+    return false
   }
 
   return (
@@ -129,44 +133,24 @@ function warnDerivedIdentityHotPath(
   )
 }
 
-function createInitialQueryBuilder(dbClient: DbClient | undefined) {
+function createInitialQueryBuilder(
+  dbClient: DbClient | undefined,
+  deferredCollections: Set<CollectionImpl<any, string | number, any, any, any>>,
+) {
   return new BaseQueryBuilder(
     {},
     dbClient
-      ? (options: CollectionOptions<any, string | number, any, any>) =>
-          dbClient.collection(options as any) as CollectionImpl<
-            any,
-            string | number,
-            any,
-            any,
-            any
-          >
+      ? (options: CollectionOptions<any, string | number, any, any>) => {
+          const collection = dbClient._materializeCollectionForRender(
+            options as any,
+          ) as CollectionImpl<any, string | number, any, any, any>
+          if (collection._deferSyncStart()) {
+            deferredCollections.add(collection)
+          }
+          return collection
+        }
       : undefined,
   ) as InitialQueryBuilder
-}
-
-function resolveQueryWithDbClient<TContext extends Context>(
-  query: LiveQueryCollectionConfig<TContext>[`query`],
-  dbClient: DbClient | undefined,
-): LiveQueryCollectionConfig<TContext>[`query`] {
-  if (typeof query !== `function`) {
-    return query
-  }
-
-  const resolvedQuery = (_: InitialQueryBuilder) =>
-    query(createInitialQueryBuilder(dbClient))
-
-  return resolvedQuery as LiveQueryCollectionConfig<TContext>[`query`]
-}
-
-function resolveConfigWithDbClient<TContext extends Context>(
-  config: LiveQueryCollectionConfig<TContext>,
-  dbClient: DbClient | undefined,
-): LiveQueryCollectionConfig<TContext> {
-  return {
-    ...config,
-    query: resolveQueryWithDbClient(config.query, dbClient),
-  }
 }
 
 function getExplicitQueryKey(value: unknown): LiveQueryKey | undefined {
@@ -177,50 +161,106 @@ function getExplicitQueryKey(value: unknown): LiveQueryKey | undefined {
     : undefined
 }
 
-function getDerivedQueryIdentity(
+function getExplicitDbClient(value: unknown): DbClient | undefined {
+  return value &&
+    typeof value === `object` &&
+    `client` in value &&
+    (value as { client?: unknown }).client !== undefined
+    ? (value as { client: DbClient }).client
+    : undefined
+}
+
+function prepareQueryValue(
+  value: unknown,
+  dbClient: DbClient | undefined,
+  deferredCollections: Set<CollectionImpl<any, string | number, any, any, any>>,
+): unknown {
+  if (typeof value === `function`) {
+    return prepareQueryValue(
+      value(createInitialQueryBuilder(dbClient, deferredCollections)),
+      dbClient,
+      deferredCollections,
+    )
+  }
+
+  if (
+    value &&
+    typeof value === `object` &&
+    !isCollection(value) &&
+    !(value instanceof BaseQueryBuilder) &&
+    `query` in value
+  ) {
+    const {
+      query,
+      queryKey: _queryKey,
+      client: _client,
+      ...config
+    } = value as LiveQueryCollectionConfig<any> & {
+      queryKey?: LiveQueryKey
+      client?: DbClient
+    }
+
+    return {
+      ...config,
+      query:
+        typeof query === `function`
+          ? query(createInitialQueryBuilder(dbClient, deferredCollections))
+          : query,
+    }
+  }
+
+  return value
+}
+
+type DerivedQueryPreparation =
+  | {
+      status: `hashable`
+      value: unknown
+      identityDeps: Array<unknown>
+    }
+  | {
+      status: `unhashable`
+      value: unknown
+      error: UnhashableQueryIRError
+    }
+
+function prepareDerivedQuery(
   value: unknown,
   dbClient: DbClient | undefined,
   profiler: DerivedIdentityProfiler,
-): Array<unknown> {
+  deferredCollections: Set<CollectionImpl<any, string | number, any, any, any>>,
+): DerivedQueryPreparation {
   const shouldProfile = shouldWarnInDevelopment(
     `TANSTACK_DB_DISABLE_QUERY_IDENTITY_WARNINGS`,
   )
   const start = shouldProfile ? getCurrentTime() : 0
+  const preparedValue = prepareQueryValue(value, dbClient, deferredCollections)
 
-  let identity: unknown
   try {
-    identity = deriveQueryIdentity(value, dbClient)
+    const identity = getPreparedQueryResultIdentity(preparedValue)
+    return {
+      status: `hashable`,
+      value: preparedValue,
+      identityDeps: [`derived`, identity],
+    }
   } catch (error) {
     if (error instanceof UnhashableQueryIRError) {
-      throw new Error(
-        `[useLiveQuery] This query cannot derive a stable identity from its structured IR because ${error.reason} at ${error.path}. ` +
-          `Provide an explicit queryKey: useLiveQuery({ queryKey: [...], query }).`,
-      )
+      return { status: `unhashable`, value: preparedValue, error }
     }
 
     throw error
+  } finally {
+    if (shouldProfile) {
+      const durationMs = getCurrentTime() - start
+      profiler.renderCount += 1
+      profiler.totalMs += durationMs
+      profiler.maxMs = Math.max(profiler.maxMs, durationMs)
+      warnDerivedIdentityHotPath(profiler, durationMs)
+    }
   }
-
-  if (shouldProfile) {
-    const durationMs = getCurrentTime() - start
-    profiler.renderCount += 1
-    profiler.totalMs += durationMs
-    profiler.maxMs = Math.max(profiler.maxMs, durationMs)
-    warnDerivedIdentityHotPath(profiler, durationMs)
-  }
-
-  return [`derived`, identity]
 }
 
-function deriveQueryIdentity(
-  value: unknown,
-  dbClient: DbClient | undefined,
-): unknown {
-  if (typeof value === `function`) {
-    const result = value(createInitialQueryBuilder(dbClient))
-    return deriveQueryResultIdentity(result, dbClient)
-  }
-
+function derivePreparedQueryIdentity(value: unknown): unknown {
   if (isCollection(value)) {
     return [`collection`, value.id]
   }
@@ -231,27 +271,67 @@ function deriveQueryIdentity(
 
   if (value && typeof value === `object` && `query` in value) {
     const config = value as LiveQueryCollectionConfig<any>
-    return [
-      `config`,
-      deriveQueryIdentity(
-        resolveQueryWithDbClient(config.query, dbClient),
-        dbClient,
-      ),
-    ]
+    return [`config`, derivePreparedQueryIdentity(config.query)]
   }
 
   return [`value`, value]
 }
 
-function deriveQueryResultIdentity(
-  result: unknown,
-  dbClient: DbClient | undefined,
-): unknown {
+function warnUnhashableDerivedIdentity(error: UnhashableQueryIRError): void {
+  if (!shouldWarnInDevelopment(`TANSTACK_DB_DISABLE_QUERY_IDENTITY_WARNINGS`)) {
+    return
+  }
+
+  const callsite = getWarningCallsite(4)
+  if (warnedUnhashableIdentityCallsites.has(callsite)) {
+    return
+  }
+  warnedUnhashableIdentityCallsites.add(callsite)
+
+  console.warn(
+    `[useLiveQuery] This query cannot derive a stable identity because ${error.reason} at ${error.path}. ` +
+      `It will keep the legacy mount-stable behavior for now. Add queryKey: [...] to make captured values reactive. ` +
+      `Unhashable queries without queryKey will throw in 1.0.`,
+  )
+}
+
+function createCollectionFromPreparedQuery(value: unknown) {
+  if (value === undefined || value === null) {
+    return null
+  }
+
+  if (isCollection(value)) {
+    value.startSyncImmediate()
+    return value
+  }
+
+  if (value instanceof BaseQueryBuilder) {
+    return createLiveQueryCollection({
+      query: value,
+      startSync: true,
+      gcTime: DEFAULT_GC_TIME_MS,
+    })
+  }
+
+  if (typeof value === `object`) {
+    return createLiveQueryCollection({
+      startSync: true,
+      gcTime: DEFAULT_GC_TIME_MS,
+      ...(value as LiveQueryCollectionConfig<any>),
+    })
+  }
+
+  throw new Error(
+    `useLiveQuery callback must return a QueryBuilder, LiveQueryCollectionConfig, Collection, undefined, or null. Got: ${typeof value}`,
+  )
+}
+
+function getPreparedQueryResultIdentity(result: unknown): unknown {
   if (result === undefined || result === null) {
     return [`disabled`]
   }
 
-  return deriveQueryIdentity(result, dbClient)
+  return derivePreparedQueryIdentity(result)
 }
 
 /**
@@ -568,10 +648,13 @@ export function useLiveQuery(
   configOrQueryOrCollection: any,
   deps?: Array<unknown>,
 ) {
-  const dbClient = useOptionalDbClient()
-  const resolvedDeps = deps ?? []
+  const contextDbClient = useOptionalDbClient()
   // Check if it's already a collection
   const inputIsCollection = isCollection(configOrQueryOrCollection)
+  const dbClient = inputIsCollection
+    ? contextDbClient
+    : (getExplicitDbClient(configOrQueryOrCollection) ?? contextDbClient)
+  const resolvedDeps = deps ?? []
 
   // Use refs to cache collection and track dependencies
   const collectionRef = useRef<Collection<object, string | number, {}> | null>(
@@ -579,6 +662,10 @@ export function useLiveQuery(
   )
   const depsRef = useRef<Array<unknown> | null>(null)
   const configRef = useRef<unknown>(null)
+  const clientRef = useRef(dbClient)
+  const legacyUnhashableIdentityRef = useRef<Array<unknown>>([
+    `legacy-unhashable`,
+  ])
 
   // Use refs to track version and memoized snapshot
   const versionRef = useRef(0)
@@ -592,21 +679,38 @@ export function useLiveQuery(
     maxMs: 0,
     warned: false,
   })
+  const deferredCollectionsRef = useRef(
+    new Set<CollectionImpl<any, string | number, any, any, any>>(),
+  )
 
   const queryKey = !inputIsCollection
     ? getExplicitQueryKey(configOrQueryOrCollection)
     : undefined
-  const identityDeps =
-    queryKey ??
-    (deps !== undefined
-      ? resolvedDeps
-      : inputIsCollection
-        ? []
-        : getDerivedQueryIdentity(
-            configOrQueryOrCollection,
-            dbClient,
-            derivedIdentityProfilerRef.current,
-          ))
+  let preparedQueryValue: unknown | typeof unpreparedQueryValue =
+    unpreparedQueryValue
+  let identityDeps: ReadonlyArray<unknown>
+
+  if (queryKey) {
+    identityDeps = queryKey
+  } else if (deps !== undefined) {
+    identityDeps = resolvedDeps
+  } else if (inputIsCollection) {
+    identityDeps = []
+  } else {
+    const preparation = prepareDerivedQuery(
+      configOrQueryOrCollection,
+      dbClient,
+      derivedIdentityProfilerRef.current,
+      deferredCollectionsRef.current,
+    )
+    preparedQueryValue = preparation.value
+    if (preparation.status === `hashable`) {
+      identityDeps = preparation.identityDeps
+    } else {
+      warnUnhashableDerivedIdentity(preparation.error)
+      identityDeps = legacyUnhashableIdentityRef.current
+    }
+  }
 
   if (deps !== undefined) {
     warnDeprecatedDepsArray()
@@ -617,7 +721,9 @@ export function useLiveQuery(
     !collectionRef.current ||
     (inputIsCollection && configRef.current !== configOrQueryOrCollection) ||
     (!inputIsCollection &&
-      (depsRef.current === null || !deepEquals(depsRef.current, identityDeps)))
+      (clientRef.current !== dbClient ||
+        depsRef.current === null ||
+        !deepEquals(depsRef.current, identityDeps)))
 
   if (needsNewCollection) {
     if (inputIsCollection) {
@@ -627,7 +733,10 @@ export function useLiveQuery(
       const syncMode = (
         configOrQueryOrCollection as { config?: { syncMode?: string } }
       ).config?.syncMode
-      if (syncMode === `on-demand`) {
+      if (
+        syncMode === `on-demand` &&
+        shouldWarnInDevelopment(`TANSTACK_DB_DISABLE_QUERY_IDENTITY_WARNINGS`)
+      ) {
         console.warn(
           `[useLiveQuery] Warning: Passing a collection with syncMode "on-demand" directly to useLiveQuery ` +
             `will not load any data. In on-demand mode, data is only loaded when queries with predicates request it.\n\n` +
@@ -641,60 +750,20 @@ export function useLiveQuery(
       collectionRef.current = configOrQueryOrCollection
       configRef.current = configOrQueryOrCollection
     } else {
-      // Handle different callback return types
-      if (typeof configOrQueryOrCollection === `function`) {
-        // Call the function with a query builder to see what it returns
-        const queryBuilder = createInitialQueryBuilder(dbClient)
-        const result = configOrQueryOrCollection(queryBuilder)
-
-        if (result === undefined || result === null) {
-          // Callback returned undefined/null - disabled query
-          collectionRef.current = null
-        } else if (isCollection(result)) {
-          // Callback returned a Collection instance - use it directly
-          result.startSyncImmediate()
-          collectionRef.current = result
-        } else if (result instanceof BaseQueryBuilder) {
-          // Callback returned QueryBuilder - create live query collection using the original callback
-          // (not the result, since the result might be from a different query builder instance)
-          collectionRef.current = createLiveQueryCollection({
-            query: resolveQueryWithDbClient(
-              configOrQueryOrCollection,
-              dbClient,
-            ),
-            startSync: true,
-            gcTime: DEFAULT_GC_TIME_MS,
-          })
-        } else if (result && typeof result === `object`) {
-          // Assume it's a LiveQueryCollectionConfig
-          const config = {
-            startSync: true,
-            gcTime: DEFAULT_GC_TIME_MS,
-            ...result,
-          } as LiveQueryCollectionConfig<any>
-          collectionRef.current = createLiveQueryCollection(
-            resolveConfigWithDbClient(config, dbClient) as any,
-          )
-        } else {
-          // Unexpected return type
-          throw new Error(
-            `useLiveQuery callback must return a QueryBuilder, LiveQueryCollectionConfig, Collection, undefined, or null. Got: ${typeof result}`,
-          )
-        }
-        depsRef.current = [...identityDeps]
-      } else {
-        // Original logic for config objects
-        const config = {
-          startSync: true,
-          gcTime: DEFAULT_GC_TIME_MS,
-          ...configOrQueryOrCollection,
-        } as LiveQueryCollectionConfig<any>
-        collectionRef.current = createLiveQueryCollection(
-          resolveConfigWithDbClient(config, dbClient) as any,
+      if (preparedQueryValue === unpreparedQueryValue) {
+        preparedQueryValue = prepareQueryValue(
+          configOrQueryOrCollection,
+          dbClient,
+          deferredCollectionsRef.current,
         )
-        depsRef.current = [...identityDeps]
       }
+      collectionRef.current = createCollectionFromPreparedQuery(
+        preparedQueryValue,
+      ) as Collection<object, string | number, {}>
+      configRef.current = configOrQueryOrCollection
+      depsRef.current = [...identityDeps]
     }
+    clientRef.current = dbClient
   }
 
   // Reset refs when collection changes
@@ -723,6 +792,10 @@ export function useLiveQuery(
         versionRef.current += 1
         onStoreChange()
       })
+      for (const collection of deferredCollectionsRef.current) {
+        collection._resumeSyncStart()
+      }
+      deferredCollectionsRef.current.clear()
       // Already-ready collections won't emit an initial change. Notify React
       // ourselves, but defer to a microtask — calling onStoreChange synchronously
       // here lands during the render-to-commit window and trips React's

@@ -22,14 +22,14 @@ import { QueryClient } from '@tanstack/query-core'
 import { queryCollectionOptions } from '@tanstack/query-db-collection'
 
 const queryClient = new QueryClient()
-const dbClient = new DbClient()
+const dbClient = new DbClient({ queryClient })
 
 // Define a stable collection descriptor that loads data using TanStack Query
-const todoCollection = collectionOptions(
+const todoCollection = collectionOptions('todos', (client) =>
   queryCollectionOptions({
     id: 'todos',
     queryKey: ['todos'],
-    queryClient,
+    queryClient: client.requireDependency<QueryClient>('queryClient'),
     queryFn: async () => {
       const response = await fetch('/api/todos')
       return response.json()
@@ -106,11 +106,11 @@ npm install @tanstack/react-db @tanstack/query-db-collection @tanstack/query-cor
 Collections store your data and handle persistence. The `queryCollectionOptions` loads data using TanStack Query and defines mutation handlers for server sync:
 
 ```tsx
-const todoCollection = collectionOptions(
+const todoCollection = collectionOptions('todos', (client) =>
   queryCollectionOptions({
     id: 'todos',
     queryKey: ['todos'],
-    queryClient,
+    queryClient: client.requireDependency<QueryClient>('queryClient'),
     queryFn: async () => {
       const response = await fetch('/api/todos')
       return response.json()

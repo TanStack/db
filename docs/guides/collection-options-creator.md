@@ -714,12 +714,12 @@ import { webSocketCollectionOptions } from './websocket-collection'
 
 const db = new DbClient()
 
-const todosCollection = collectionOptions(
+const todosCollection = collectionOptions('todos', () =>
   webSocketCollectionOptions({
     id: 'todos',
     url: 'ws://localhost:8080/todos',
     getKey: (todo) => todo.id,
-    schema: todoSchema
+    schema: todoSchema,
     // Note: No onInsert/onUpdate/onDelete - handled by WebSocket automatically
   })
 )

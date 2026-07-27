@@ -1,6 +1,6 @@
 import { expect, test } from '@playwright/test'
 
-test(`TanStack Start hydrates DB collection rows and applies streamed chunks`, async ({
+test(`TanStack Start hydrates, reconciles, and incrementally streams DB rows`, async ({
   page,
   request,
 }) => {
@@ -9,6 +9,7 @@ test(`TanStack Start hydrates DB collection rows and applies streamed chunks`, a
 
   const html = await response.text()
   expect(html).toContain(`Pay invoices`)
+  expect(html).not.toContain(`Pay invoices (reconciled from sync)`)
   expect(html).toContain(`Review pull requests`)
   expect(html).toContain(`ssr`)
   expect(html).not.toContain(`Streamed from collection chunk`)
@@ -29,7 +30,10 @@ test(`TanStack Start hydrates DB collection rows and applies streamed chunks`, a
   await expect(page.getByTestId(`ready-state`)).toHaveText(`ready`)
   await expect(page.getByTestId(`streamed-status`)).toHaveText(`waiting`)
   await expect(page.getByTestId(`ssr-row-count`)).toHaveText(`2`)
-  await expect(page.getByTestId(`ssr-todo-list`)).toContainText(`Pay invoices`)
+  await expect(page.getByTestId(`ssr-todo-list`)).toContainText(
+    `Pay invoices (reconciled from sync)`,
+  )
+  await expect(page.getByTestId(`ssr-todo-server-1`)).toContainText(`(sync)`)
   await expect(page.getByTestId(`ssr-todo-list`)).toContainText(
     `Review pull requests`,
   )

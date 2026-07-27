@@ -725,7 +725,7 @@ importers:
   examples/react/start-ssr-e2e:
     dependencies:
       '@tanstack/react-db':
-        specifier: ^0.1.85
+        specifier: ^0.1.95
         version: link:../../../packages/react-db
       '@tanstack/react-router':
         specifier: ^1.159.5

@@ -49,12 +49,14 @@ TanStack DB works by:
 - [making optimistic mutations](#making-optimistic-mutations) using transactional mutators
 
 ```tsx
+import { DbClient, DbProvider } from '@tanstack/react-db'
+
 // Define stable collection descriptors to load data into
-const todoCollection = collectionOptions({
+const todoCollection = collectionOptions('todos', () => ({
   id: 'todos',
   // ...your config
   onUpdate: updateMutationFn,
-})
+}))
 
 function useTodoCollection() {
   return useDbClient().collection(todoCollection)
@@ -86,6 +88,14 @@ const Todos = () => {
     </ul>
   )
 }
+
+const dbClient = new DbClient()
+
+const App = () => (
+  <DbProvider client={dbClient}>
+    <Todos />
+  </DbProvider>
+)
 ```
 
 ### Defining collections
@@ -112,15 +122,17 @@ Collections support three sync modes to optimize data loading:
 With on-demand mode, your component's query becomes the API call:
 
 ```tsx
-const productsCollection = collectionOptions(
+const productsCollection = collectionOptions('products', (client) =>
   queryCollectionOptions({
     id: 'products',
     queryKey: ['products'],
+    queryClient: client.requireDependency<QueryClient>('queryClient'),
     queryFn: async (ctx) => {
       // Query predicates passed automatically in ctx.meta
       const params = parseLoadSubsetOptions(ctx.meta?.loadSubsetOptions)
       return api.getProducts(params) // e.g., GET /api/products?category=electronics&price_lt=100
     },
+    getKey: (product) => product.id,
     syncMode: 'on-demand', // ← Enable query-driven sync
   })
 )
@@ -153,14 +165,14 @@ Collections support `insert`, `update` and `delete` operations. When called, by 
 
 ```ts
 // Define collection with persistence handlers
-const todoCollection = collectionOptions({
+const todoCollection = collectionOptions('todos', () => ({
   id: "todos",
   // ... other config
   onUpdate: async ({ transaction }) => {
     const { original, changes } = transaction.mutations[0]
     await api.todos.update(original.id, changes)
   },
-})
+}))
 const todosCollection = dbClient.collection(todoCollection)
 
 // Immediately applies optimistic state
@@ -414,18 +426,25 @@ The steps are to:
 
 ```tsx
 import {
+  DbClient,
+  DbProvider,
   collectionOptions,
   useLiveQuery,
 } from "@tanstack/react-db"
 import { queryCollectionOptions } from "@tanstack/query-db-collection"
+import { QueryClient } from "@tanstack/query-core"
+
+const queryClient = new QueryClient()
+const dbClient = new DbClient({ queryClient })
 
 // Load data into collections using TanStack Query.
 // It's common to define these in a `collections` module.
-const todoCollection = collectionOptions(
+const todoCollection = collectionOptions("todos", (client) =>
   queryCollectionOptions({
     id: "todos",
     queryKey: ["todos"],
-    queryFn: async () => fetch("/api/todos"),
+    queryClient: client.requireDependency<QueryClient>("queryClient"),
+    queryFn: async () => fetch("/api/todos").then((response) => response.json()),
     getKey: (item) => item.id,
     schema: todoSchema, // any standard schema
     onInsert: async ({ transaction }) => {
@@ -437,11 +456,13 @@ const todoCollection = collectionOptions(
     // also add onUpdate, onDelete as needed.
   })
 )
-const listCollection = collectionOptions(
+const listCollection = collectionOptions("todo-lists", (client) =>
   queryCollectionOptions({
     id: "todo-lists",
     queryKey: ["todo-lists"],
-    queryFn: async () => fetch("/api/todo-lists"),
+    queryClient: client.requireDependency<QueryClient>("queryClient"),
+    queryFn: async () =>
+      fetch("/api/todo-lists").then((response) => response.json()),
     getKey: (item) => item.id,
     schema: todoListSchema,
     onInsert: async ({ transaction }) => {
@@ -477,6 +498,12 @@ const Todos = () => {
 
   // ...
 }
+
+const App = () => (
+  <DbProvider client={dbClient}>
+    <Todos />
+  </DbProvider>
+)
 ```
 
 This pattern allows you to extend an existing TanStack Query application, or any application built on a REST API, with blazing fast, cross-collection live queries and local optimistic mutations with automatically managed optimistic state.

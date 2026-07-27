@@ -29,9 +29,9 @@ import { DbClient, collectionOptions } from "@tanstack/db"
 import { queryCollectionOptions } from "@tanstack/query-db-collection"
 
 const queryClient = new QueryClient()
-const db = new DbClient()
+const db = new DbClient({ queryClient })
 
-const todosCollection = collectionOptions(
+const todosCollection = collectionOptions("todos", (client) =>
   queryCollectionOptions({
     id: "todos",
     queryKey: ["todos"],
@@ -39,7 +39,7 @@ const todosCollection = collectionOptions(
       const response = await fetch("/api/todos")
       return response.json()
     },
-    queryClient,
+    queryClient: client.requireDependency<QueryClient>("queryClient"),
     getKey: (item) => item.id,
   })
 )
@@ -58,15 +58,15 @@ The `queryCollectionOptions` function accepts the following options:
 - `queryClient`: TanStack Query client instance
 - `getKey`: Function to extract the unique key from an item
 
-### Creating Collection Options from a Runtime QueryClient
+### Request-scoped QueryClient
 
-`queryCollectionOptions` needs a `queryClient` when the collection options are created. In SSR, TanStack Start, tests, or multi-tenant apps, that `QueryClient` is often request-local or route-local rather than module-global.
-
-Keep shared collection configuration in a factory function that accepts the runtime `QueryClient`:
+`queryCollectionOptions` needs a `queryClient`. In SSR, TanStack Start, tests,
+or multi-tenant apps, that client is request-local rather than module-global.
+Put it on `DbClient`, then resolve it inside the collection descriptor factory:
 
 ```typescript
 import { QueryClient } from "@tanstack/query-core"
-import { createCollection } from "@tanstack/db"
+import { DbClient, collectionOptions } from "@tanstack/db"
 import { queryCollectionOptions } from "@tanstack/query-db-collection"
 
 interface Todo {
@@ -74,53 +74,42 @@ interface Todo {
   title: string
 }
 
-export function todoCollectionOptions(queryClient: QueryClient) {
-  return queryCollectionOptions<Todo>({
+export const todoCollection = collectionOptions("todos", (client) =>
+  queryCollectionOptions<Todo>({
+    id: "todos",
     queryKey: ["todos"],
     queryFn: async () => {
       const response = await fetch("/api/todos")
       return response.json() as Promise<Array<Todo>>
     },
-    queryClient,
+    queryClient: client.requireDependency<QueryClient>("queryClient"),
     getKey: (todo) => todo.id,
   })
-}
+)
 
-function createTodosCollection(queryClient: QueryClient) {
-  return createCollection(todoCollectionOptions(queryClient))
-}
-```
-
-Create the collection once for each scoped `QueryClient` and parameter set, then reuse that `Collection` instance. Creating multiple collections with the same `QueryClient` and `queryKey` gives each collection its own materialized state, lifecycle, subscriptions, and optimistic mutations.
-
-In request-scoped environments, store the collection in request or router context. For client-side scopes, memoize by `QueryClient`:
-
-```typescript
-type TodosCollection = ReturnType<typeof createTodosCollection>
-
-const collectionsByClient = new WeakMap<QueryClient, TodosCollection>()
-
-export function getTodosCollection(
-  queryClient: QueryClient,
-): TodosCollection {
-  let collection = collectionsByClient.get(queryClient)
-
-  if (!collection) {
-    collection = createTodosCollection(queryClient)
-    collectionsByClient.set(queryClient, collection)
-  }
-
-  return collection
+export function createRequestClients() {
+  const queryClient = new QueryClient()
+  const dbClient = new DbClient({ queryClient })
+  return { queryClient, dbClient }
 }
 ```
 
-Avoid calling `createCollection(todoCollectionOptions(queryClient))` independently during render or in each consumer. Share the stable collection instance for the lifetime of that `QueryClient` scope.
+`dbClient.collection(todoCollection)` memoizes one collection instance for that
+descriptor and client. A second `DbClient` materializes fresh adapter state and
+uses its own `QueryClient`.
 
-This keeps SSR and request-scoped code from sharing a global `QueryClient` while keeping each collection instance stable within its scope.
+Passing `queryClient` directly to `queryCollectionOptions` remains supported for
+`createCollection(...)` and existing apps. When a descriptor is materialized,
+an explicit `DbClient` dependency takes precedence; the configured
+`queryClient` is the backwards-compatible fallback.
 
 ### Business-Scoped Collection Factories
 
-A tenant, project, account, or route parameter can define a **business scope**: the server resource that a collection represents. Include the scope in both the Query key and `queryFn`. This extends the [runtime `QueryClient` factory pattern](#creating-collection-options-from-a-runtime-queryclient) with an explicit scope parameter:
+A tenant, project, account, or route parameter can define a **business scope**:
+the server resource that a collection represents. Include the scope in the
+descriptor id, Query key, and `queryFn`. This extends the
+[request-scoped QueryClient pattern](#request-scoped-queryclient) with an
+explicit scope parameter:
 
 ```typescript
 interface Todo {
@@ -134,54 +123,48 @@ async function fetchProjectTodos(projectId: string): Promise<Array<Todo>> {
   return response.json()
 }
 
-export function createProjectTodosCollection(
-  queryClient: QueryClient,
+function createProjectTodosDescriptor(
   projectId: string,
 ) {
-  return createCollection(
+  return collectionOptions(`project:${projectId}:todos`, (client) =>
     queryCollectionOptions<Todo>({
+      id: `project:${projectId}:todos`,
       queryKey: ["projects", projectId, "todos"],
       queryFn: () => fetchProjectTodos(projectId),
-      queryClient,
+      queryClient: client.requireDependency<QueryClient>("queryClient"),
       getKey: (todo) => todo.id,
     })
   )
 }
 ```
 
-The scope is part of the collection's identity. Memoize by both the `QueryClient` and a stable scope key so consumers of the same project share one collection:
+The scope is part of the descriptor identity. Memoize descriptors by a stable
+scope key; `DbClient` handles collection memoization and QueryClient ownership:
 
 ```typescript
-type ProjectTodosCollection = ReturnType<typeof createProjectTodosCollection>
+type ProjectTodosDescriptor = ReturnType<typeof createProjectTodosDescriptor>
 
-const projectCollections = new WeakMap<
-  QueryClient,
-  Map<string, ProjectTodosCollection>
->()
+const projectDescriptors = new Map<string, ProjectTodosDescriptor>()
 
-export function getProjectTodosCollection(
-  queryClient: QueryClient,
+export function getProjectTodosDescriptor(
   projectId: string,
-): ProjectTodosCollection {
-  let collectionsByProject = projectCollections.get(queryClient)
-
-  if (!collectionsByProject) {
-    collectionsByProject = new Map()
-    projectCollections.set(queryClient, collectionsByProject)
+): ProjectTodosDescriptor {
+  let descriptor = projectDescriptors.get(projectId)
+  if (!descriptor) {
+    descriptor = createProjectTodosDescriptor(projectId)
+    projectDescriptors.set(projectId, descriptor)
   }
-
-  let collection = collectionsByProject.get(projectId)
-
-  if (!collection) {
-    collection = createProjectTodosCollection(queryClient, projectId)
-    collectionsByProject.set(projectId, collection)
-  }
-
-  return collection
+  return descriptor
 }
+
+const todos = dbClient.collection(getProjectTodosDescriptor(projectId))
 ```
 
-For multiple scope values, use nested maps or a collision-safe stable key that includes every value. Do not call the factory on each render. In a long-lived client, user-selected scopes can make the map grow without bound. Remove unused entries and call `await collection.cleanup()` when your application owns their lifecycle. Request-local maps can be discarded with the request.
+For multiple scope values, use nested maps or a collision-safe stable key that
+includes every value. Do not create a descriptor on each render. In a
+long-lived app, user-selected scopes can make the map grow without bound; remove
+unused descriptors and call `await dbClient.cleanup()` when the client scope
+ends. Request-local maps can be discarded with the request.
 
 A business scope is separate from a **relational subset** requested by a live query. With `syncMode: "on-demand"`, `LoadSubsetOptions` describes predicates, ordering, limits, and offsets within one business-scoped collection. These options reach `queryFn` through `ctx.meta.loadSubsetOptions` and determine the subset Query keys. See [QueryFn and Predicate Push-Down](#queryfn-and-predicate-push-down).
 
@@ -307,7 +290,7 @@ import { queryCollectionOptions } from "@tanstack/query-db-collection"
 import { queryOptions } from "@tanstack/react-query"
 
 const queryClient = new QueryClient()
-const db = new DbClient()
+const db = new DbClient({ queryClient })
 
 const listOptions = queryOptions({
   queryKey: ["todos"],
@@ -317,12 +300,12 @@ const listOptions = queryOptions({
   },
 })
 
-const todosCollection = collectionOptions(
+const todosCollection = collectionOptions("todos", (client) =>
   queryCollectionOptions({
     id: "todos",
     ...listOptions,
     queryFn: (context) => listOptions.queryFn!(context),
-    queryClient,
+    queryClient: client.requireDependency<QueryClient>("queryClient"),
     getKey: (item) => item.id,
   }),
 )
