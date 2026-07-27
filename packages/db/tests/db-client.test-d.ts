@@ -1,12 +1,7 @@
 import { describe, expectTypeOf, it } from 'vitest'
 import { z } from 'zod'
-import {
-  DbClient,
-  
-  
-  collectionOptions
-} from '../src'
-import type {DehydratedCollectionChunk, DehydratedDbState} from '../src';
+import { DbClient, collectionOptions } from '../src'
+import type { DehydratedCollectionChunk, DehydratedDbState } from '../src'
 
 type Todo = {
   id: string
