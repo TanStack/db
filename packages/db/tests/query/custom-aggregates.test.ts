@@ -70,9 +70,12 @@ function groupConcatImpl(ctx: AggregateContext, separator: string) {
 
 const registeredInTest = new Set<string>()
 
-function register(name: string, ...args: Array<any>) {
+function register(
+  name: string,
+  factory: Parameters<typeof registerAggregate>[1],
+): void {
   registeredInTest.add(name.toLowerCase())
-  return (registerAggregate as any)(name, ...args)
+  registerAggregate(name, factory)
 }
 
 afterEach(() => {
@@ -529,22 +532,7 @@ describe(`custom aggregate functions`, () => {
       register(`known_agg`, () => ({ preMap: () => 0, reduce: () => 0 }))
 
       const todos = createTodosCollection()
-      expect(() =>
-        createLiveQueryCollection({
-          startSync: true,
-          query: (q) =>
-            q
-              .from({ todo: todos })
-              .groupBy(({ todo }) => todo.listId)
-              .select(({ todo }) => ({
-                listId: todo.listId,
-                value: new Aggregate(`nope`, [
-                  toExpression(todo.points),
-                ]) as any,
-              })),
-        }),
-      ).toThrow(UnsupportedAggregateFunctionError)
-
+      let caught: unknown
       try {
         createLiveQueryCollection({
           startSync: true,
@@ -560,8 +548,11 @@ describe(`custom aggregate functions`, () => {
               })),
         })
       } catch (error) {
-        expect((error as Error).message).toContain(`known_agg`)
+        caught = error
       }
+
+      expect(caught).toBeInstanceOf(UnsupportedAggregateFunctionError)
+      expect((caught as Error).message).toContain(`known_agg`)
     })
 
     test(`non-constant additional argument throws`, () => {
