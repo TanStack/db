@@ -1218,7 +1218,7 @@ const watchAttachments = async (onUpdate, abortSignal) => {
 await attachmentQueue.save({
   data, // file bytes (ArrayBuffer / base64, per your local adapter)
   fileExtension: "jpg",
-  updateHook: async (attachmentRecord) => {
+  updateHook: (attachmentRecord) => {
     // Runs in the same transaction as the attachment insert.
     listsCollection.insert({
       id: crypto.randomUUID(),
@@ -1231,14 +1231,16 @@ await attachmentQueue.save({
 })
 ```
 
+> `updateHook` must be synchronous, it runs inside the transaction's synchronous `mutate()` block and its return value is not awaited, so any mutation after an `await` escapes the transaction. Do asynchronous work before calling `save` or `delete`.
+
 ### 5. Delete an attachment and detach it from the row
 
-`delete` queues the file for deletion and runs your `updateHook` in the same transaction. Clear the foreign key so the row and the attachment stay consistent.
+`delete` queues the file for deletion and runs your `updateHook` in the same transaction. Clear the foreign key so the row and the attachment stay consistent. As with `save`, the hook must be synchronous.
 
 ```ts
 await attachmentQueue.delete({
   id: photo_id,
-  updateHook: async () => {
+  updateHook: () => {
     listsCollection.update(listId, (draft) => {
       draft.photo_id = null
     })

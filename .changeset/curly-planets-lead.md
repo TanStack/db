@@ -1,5 +1,5 @@
 ---
-'@tanstack/powersync-db-collection': patch
+'@tanstack/powersync-db-collection': minor
 ---
 
 Add attachments support via `TanStackDBAttachmentQueue`. This extends the PowerSync SDK's `AttachmentQueue` and backs it with
