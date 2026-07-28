@@ -3,10 +3,10 @@ name: meta-framework
 description: >
   Integrating TanStack DB with meta-frameworks (TanStack Start, Next.js,
   Remix, Nuxt, SvelteKit). Client-side only: SSR is NOT supported — routes
-  must disable SSR. Preloading collections in route loaders with
-  collection.preload(). Pattern: ssr: false + await collection.preload() in
-  loader. Multiple collection preloading with Promise.all. Framework-specific
-  loader APIs.
+  must disable SSR. Preloading eager collections in route loaders with
+  collection.preload(). On-demand Query Collections require preloading the
+  live query because source collection preload is a no-op. Multiple collection
+  preloading with Promise.all. Framework-specific loader APIs.
 type: composition
 library: db
 library_version: '0.6.0'
@@ -28,7 +28,7 @@ This skill builds on db-core. Read it first for collection setup and query build
 TanStack DB collections are **client-side only**. SSR is not implemented. Routes using TanStack DB **must disable SSR**. The setup pattern is:
 
 1. Set `ssr: false` on the route
-2. Call `collection.preload()` in the route loader
+2. Preload the eager collection, or preload the live query for an on-demand source
 3. Use `useLiveQuery` in the component
 
 ## TanStack Start
@@ -71,6 +71,35 @@ function TodoPage() {
     </ul>
   )
 }
+```
+
+### On-demand Query Collection preload
+
+Calling `preload()` on an on-demand source collection is a no-op. Define the
+live query once, preload it in the loader, and pass that same collection to the
+framework hook:
+
+```tsx
+import { createLiveQueryCollection, eq } from '@tanstack/db'
+import { useLiveQuery } from '@tanstack/react-db'
+
+const activeTodos = createLiveQueryCollection((q) =>
+  q
+    .from({ todo: todoCollection })
+    .where(({ todo }) => eq(todo.completed, false)),
+)
+
+export const Route = createFileRoute('/todos')({
+  ssr: false,
+  loader: async () => {
+    await activeTodos.preload()
+    return null
+  },
+  component: () => {
+    const { data } = useLiveQuery(activeTodos)
+    // ...
+  },
+})
 ```
 
 ### Multiple collection preloading
@@ -227,7 +256,9 @@ export const ssr = false
 
 ### What preload() does
 
-`collection.preload()` starts the sync process and returns a promise that resolves when the collection reaches "ready" status. This means:
+For eager collections, `collection.preload()` starts the sync process and
+returns a promise that resolves when the collection reaches "ready" status.
+This means:
 
 1. The sync function connects to the backend
 2. Initial data is fetched and written to the collection
@@ -235,6 +266,10 @@ export const ssr = false
 4. The promise resolves
 
 Subsequent calls to `preload()` on an already-ready collection return immediately.
+
+For on-demand collections, source `collection.preload()` warns and does
+nothing because no subset has been requested. Create the required live query
+and await `liveQuery.preload()`.
 
 ### Collection module pattern
 

@@ -185,6 +185,10 @@ export const UNDEFINED_SENTINEL = `__TS_DB_BTREE_UNDEFINED_VALUE__`
  * for BTree index operations that need to distinguish undefined values.
  */
 export function normalizeValue(value: any): any {
+  if (typeof value !== `object` || value === null) {
+    return value
+  }
+
   if (value instanceof Date) {
     return value.getTime()
   }
@@ -224,6 +228,13 @@ export function normalizeForBTree(value: any): any {
     return UNDEFINED_SENTINEL
   }
   return normalizeValue(value)
+}
+
+/**
+ * Compare values using the equality semantics used by Map keys.
+ */
+export function areSameValueZeroEqual(a: unknown, b: unknown): boolean {
+  return a === b || (Number.isNaN(a) && Number.isNaN(b))
 }
 
 /**

@@ -217,7 +217,7 @@ a good fit for draft-style flows where local state updates immediately but the
 server call waits for Save/Blur; call `tx.rollback()` to discard the optimistic
 changes.
 
-### 4. Mutation handler with refetch (QueryCollection pattern)
+### 4. Mutation handlers with automatic refetch (QueryCollection pattern)
 
 ```ts
 const todoCollection = createCollection(
@@ -229,8 +229,7 @@ const todoCollection = createCollection(
       await Promise.all(
         transaction.mutations.map((m) => api.todos.create(m.modified)),
       )
-      // IMPORTANT: handler must not resolve until server state is synced back
-      // QueryCollection auto-refetches after handler completes
+      // Query Collection refetches after the handler completes and awaits it.
     },
     onUpdate: async ({ transaction }) => {
       await Promise.all(
@@ -341,25 +340,27 @@ If an item with the same key already exists (synced or optimistic), throws
 `DuplicateKeyError`. Always generate a unique key (e.g. `crypto.randomUUID()`)
 or check before inserting.
 
-### HIGH: Not awaiting refetch after mutation in query collection handler
+### HIGH: Manually refetching inside a Query Collection handler
 
-The optimistic state is held only until the handler resolves. If the handler
-returns before server state has synced back, optimistic state is dropped and
-users see a flash of missing data.
+Query Collection automatically refetches after `onInsert`, `onUpdate`, and
+`onDelete` complete, and waits for that refetch before the mutation finishes.
+Calling `utils.refetch()` inside the handler sends a redundant request.
 
 ```ts
-// WRONG -- optimistic state dropped before new server state arrives
-onInsert: async ({ transaction }) => {
-  await api.createTodo(transaction.mutations[0].modified)
-  // missing: await collection.utils.refetch()
-}
-
-// CORRECT
+// WRONG -- causes one manual and one automatic refetch
 onInsert: async ({ transaction }) => {
   await api.createTodo(transaction.mutations[0].modified)
   await collection.utils.refetch()
 }
+
+// CORRECT -- automatic refetch is awaited after this returns
+onInsert: async ({ transaction }) => {
+  await api.createTodo(transaction.mutations[0].modified)
+}
 ```
+
+When the handler writes the confirmed server result with direct-write utilities,
+return `{ refetch: false }` to skip the automatic refetch.
 
 ---
 

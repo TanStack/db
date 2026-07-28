@@ -1,5 +1,13 @@
 # @tanstack/db
 
+## 0.6.17
+
+### Patch Changes
+
+- Skip unchanged index writes while preserving index bookkeeping after failed ([#1691](https://github.com/TanStack/db/pull/1691))
+  removals. Cache index evaluators and avoid object normalization work for
+  primitive values to reduce update overhead.
+
 ## 0.6.16
 
 ### Patch Changes
