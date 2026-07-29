@@ -6758,5 +6758,106 @@ describe(`includes subqueries`, () => {
         },
       ])
     })
+
+    it(`materialize with correlation on a joined alias returns matching rows`, async () => {
+      // Regression test for #1704: the correlation predicate references the
+      // joined alias (`i`), not the subquery's own from alias (`c`).
+      const collection = createLiveQueryCollection((q) =>
+        q.from({ p: projects }).select(({ p }) => ({
+          id: p.id,
+          name: p.name,
+          comments: materialize(
+            q
+              .from({ c: comments })
+              .innerJoin({ i: issues }, ({ c, i }) => eq(c.issueId, i.id))
+              .where(({ i }) => eq(i.projectId, p.id))
+              .select(({ c }) => ({ id: c.id, body: c.body })),
+          ),
+        })),
+      )
+      await collection.preload()
+
+      const alpha = collection.get(1) as any
+      expect(sortedPlainRows(alpha.comments)).toEqual([
+        { id: 100, body: `Looks bad` },
+        { id: 101, body: `Fixed it` },
+      ])
+
+      const beta = collection.get(2) as any
+      expect(sortedPlainRows(beta.comments)).toEqual([
+        { id: 200, body: `Same bug` },
+      ])
+
+      const gamma = collection.get(3) as any
+      expect(plainRows(gamma.comments)).toEqual([])
+
+      // Incremental updates route through the joined-alias correlation too
+      comments.utils.begin()
+      comments.utils.write({
+        type: `insert`,
+        value: { id: 102, issueId: 11, body: `New comment` },
+      })
+      comments.utils.commit()
+
+      expect(sortedPlainRows((collection.get(1) as any).comments)).toEqual([
+        { id: 100, body: `Looks bad` },
+        { id: 101, body: `Fixed it` },
+        { id: 102, body: `New comment` },
+      ])
+
+      comments.utils.begin()
+      comments.utils.write({
+        type: `delete`,
+        value: { id: 100, issueId: 10, body: `Looks bad` },
+      })
+      comments.utils.commit()
+
+      expect(sortedPlainRows((collection.get(1) as any).comments)).toEqual([
+        { id: 101, body: `Fixed it` },
+        { id: 102, body: `New comment` },
+      ])
+    })
+
+    it(`materialize with joined-alias correlation and spread select of the from alias`, async () => {
+      // Mirrors the exact shape from #1704: `.select(({ from }) => ({ ...from }))`
+      const collection = createLiveQueryCollection((q) =>
+        q.from({ p: projects }).select(({ p }) => ({
+          id: p.id,
+          comments: materialize(
+            q
+              .from({ c: comments })
+              .innerJoin({ i: issues }, ({ c, i }) => eq(c.issueId, i.id))
+              .where(({ i }) => eq(i.projectId, p.id))
+              .select(({ c }) => ({ ...c })),
+          ),
+        })),
+      )
+      await collection.preload()
+
+      const alpha = collection.get(1) as any
+      expect(sortedPlainRows(alpha.comments)).toEqual([
+        { id: 100, issueId: 10, body: `Looks bad` },
+        { id: 101, issueId: 10, body: `Fixed it` },
+      ])
+
+      // Correlation on the from alias keeps working when a join is present
+      const control = createLiveQueryCollection((q) =>
+        q.from({ iss: issues }).select(({ iss }) => ({
+          id: iss.id,
+          comments: materialize(
+            q
+              .from({ c: comments })
+              .innerJoin({ i2: issues }, ({ c, i2 }) => eq(c.issueId, i2.id))
+              .where(({ c }) => eq(c.issueId, iss.id))
+              .select(({ c }) => ({ id: c.id })),
+          ),
+        })),
+      )
+      await control.preload()
+      expect(sortedPlainRows((control.get(10) as any).comments)).toEqual([
+        { id: 100 },
+        { id: 101 },
+      ])
+    })
   })
 })
