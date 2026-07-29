@@ -6573,6 +6573,116 @@ describe(`includes subqueries`, () => {
       expect(orphan.project).toBeUndefined()
     })
 
+    // Regression tests for #1706: a null correlation key must resolve to the
+    // empty materialized value (`undefined` for findOne(), `[]` for arrays),
+    // not leak the compiler's `null` select placeholder into the result.
+    describe(`null correlation key (#1706)`, () => {
+      type Author = { id: number; name: string }
+      type Post = { id: number; title: string; authorId: number | null }
+
+      function createAuthorAndPostCollections(posts: Array<Post>) {
+        const authorCollection = createCollection(
+          localOnlyCollectionOptions<Author>({
+            getKey: (author) => author.id,
+            initialData: [{ id: 1, name: `Ada` }],
+          }),
+        )
+        const postCollection = createCollection(
+          localOnlyCollectionOptions<Post>({
+            getKey: (post) => post.id,
+            initialData: posts,
+          }),
+        )
+        return { authorCollection, postCollection }
+      }
+
+      it(`findOne() with a null correlation key yields undefined`, async () => {
+        const { authorCollection, postCollection } =
+          createAuthorAndPostCollections([
+            { id: 1, title: `fk matches an author`, authorId: 1 },
+            { id: 2, title: `fk set, but no author matches`, authorId: 999 },
+            { id: 3, title: `fk is null`, authorId: null },
+          ])
+
+        const postsWithAuthor = createLiveQueryCollection((q) =>
+          q.from({ post: postCollection }).select(({ post }) => ({
+            ...post,
+            author: materialize(
+              q
+                .from({ author: authorCollection })
+                .where(({ author }) => eq(author.id, post.authorId))
+                .findOne(),
+            ),
+          })),
+        )
+        await postsWithAuthor.preload()
+
+        expect(
+          stripVirtualPropsDeep((postsWithAuthor.get(1) as any).author),
+        ).toEqual({ id: 1, name: `Ada` })
+        expect((postsWithAuthor.get(2) as any).author).toBeUndefined()
+        expect((postsWithAuthor.get(3) as any).author).toBeUndefined()
+        expect((postsWithAuthor.get(3) as any).author).not.toBeNull()
+      })
+
+      it(`array materialize with a null correlation key yields []`, async () => {
+        const { authorCollection, postCollection } =
+          createAuthorAndPostCollections([
+            { id: 3, title: `fk is null`, authorId: null },
+          ])
+
+        const postsWithAuthors = createLiveQueryCollection((q) =>
+          q.from({ post: postCollection }).select(({ post }) => ({
+            id: post.id,
+            authors: materialize(
+              q
+                .from({ author: authorCollection })
+                .where(({ author }) => eq(author.id, post.authorId))
+                .select(({ author }) => ({
+                  id: author.id,
+                  name: author.name,
+                })),
+            ),
+          })),
+        )
+        await postsWithAuthors.preload()
+
+        expect((postsWithAuthors.get(3) as any).authors).toEqual([])
+      })
+
+      it(`updating the correlation key to null re-emits undefined`, async () => {
+        const { authorCollection, postCollection } =
+          createAuthorAndPostCollections([
+            { id: 1, title: `starts with a matching fk`, authorId: 1 },
+          ])
+
+        const postsWithAuthor = createLiveQueryCollection((q) =>
+          q.from({ post: postCollection }).select(({ post }) => ({
+            ...post,
+            author: materialize(
+              q
+                .from({ author: authorCollection })
+                .where(({ author }) => eq(author.id, post.authorId))
+                .findOne(),
+            ),
+          })),
+        )
+        await postsWithAuthor.preload()
+
+        expect(
+          stripVirtualPropsDeep((postsWithAuthor.get(1) as any).author),
+        ).toEqual({ id: 1, name: `Ada` })
+
+        postCollection.update(1, (draft) => {
+          draft.authorId = null
+        })
+        await flushPromises()
+
+        expect((postsWithAuthor.get(1) as any).author).toBeUndefined()
+        expect((postsWithAuthor.get(1) as any).author).not.toBeNull()
+      })
+    })
+
     it(`inserting the matching child re-emits parent with populated singleton`, async () => {
       // Start with an issue whose project doesn't exist yet
       issues.utils.begin()
