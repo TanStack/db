@@ -1916,6 +1916,20 @@ function flushIncludesState(
             if (storedParent && storedParent !== parentResult) {
               setIncludedValue(storedParent, state.resultPath, childValue)
             }
+          } else if (routing && !routing.skipped && materializesInline(state)) {
+            // The correlation key itself is null/undefined, so no child row
+            // can ever match and no child pipeline output will arrive for
+            // this parent. Without this branch the compiler's `null` select
+            // placeholder leaks into the result (#1706). Resolve the field
+            // to its empty materialization instead: `undefined` for
+            // findOne(), `[]` for arrays, `` for concat.
+            const childValue = materializeIncludedValue(state, undefined)
+            setIncludedValue(parentResult, state.resultPath, childValue)
+
+            const storedParent = parentCollection.get(parentKey as any)
+            if (storedParent && storedParent !== parentResult) {
+              setIncludedValue(storedParent, state.resultPath, childValue)
+            }
           }
         }
       }

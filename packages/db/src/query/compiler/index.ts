@@ -346,6 +346,12 @@ export function compileQuery(
     getRouting: (nsRow: any) => {
       correlationKey: unknown
       parentContext: Record<string, any> | null
+      /**
+       * Set when this row does not participate in the include at all
+       * (conditional-select guards failed or no routing info was found),
+       * as opposed to participating with a null correlation key.
+       */
+      skipped?: boolean
     }
   }> = []
   for (const { sourceAlias, include } of sourceIncludes) {
@@ -388,12 +394,13 @@ export function compileQuery(
         fieldName,
         getRouting: (nsRow: any) => {
           if (!matchesConditionalSelectGuards(compiledGuards, nsRow)) {
-            return { correlationKey: null, parentContext: null }
+            return { correlationKey: null, parentContext: null, skipped: true }
           }
           return (
             nsRow[sourceAlias]?.[INCLUDES_ROUTING]?.[include.fieldName] ?? {
               correlationKey: null,
               parentContext: null,
+              skipped: true,
             }
           )
         },
@@ -427,12 +434,17 @@ export function compileQuery(
           fieldName,
           getRouting: (nsRow: any) => {
             if (!matchesConditionalSelectGuards(compiledGuards, nsRow)) {
-              return { correlationKey: null, parentContext: null }
+              return {
+                correlationKey: null,
+                parentContext: null,
+                skipped: true,
+              }
             }
             return (
               nsRow[INCLUDES_ROUTING]?.[include.fieldName] ?? {
                 correlationKey: null,
                 parentContext: null,
+                skipped: true,
               }
             )
           },
@@ -641,7 +653,11 @@ export function compileQuery(
           fieldName,
           getRouting: (nsRow: any) => {
             if (!matchesConditionalSelectGuards(compiledRoutingGuards, nsRow)) {
-              return { correlationKey: null, parentContext: null }
+              return {
+                correlationKey: null,
+                parentContext: null,
+                skipped: true,
+              }
             }
             const parentContext: Record<string, Record<string, any>> = {}
             for (const proj of compiledProjs) {
@@ -667,7 +683,11 @@ export function compileQuery(
           fieldName,
           getRouting: (nsRow: any) => {
             if (!matchesConditionalSelectGuards(compiledRoutingGuards, nsRow)) {
-              return { correlationKey: null, parentContext: null }
+              return {
+                correlationKey: null,
+                parentContext: null,
+                skipped: true,
+              }
             }
             return {
               correlationKey: compiledCorrelation(nsRow),
@@ -760,7 +780,11 @@ export function compileQuery(
       map(([key, namespacedRow]: any) => {
         const routing: Record<
           string,
-          { correlationKey: unknown; parentContext: Record<string, any> | null }
+          {
+            correlationKey: unknown
+            parentContext: Record<string, any> | null
+            skipped?: boolean
+          }
         > = {}
         for (const { fieldName, getRouting } of includesRoutingFns) {
           routing[fieldName] = getRouting(namespacedRow)
