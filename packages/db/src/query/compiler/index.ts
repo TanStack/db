@@ -243,7 +243,20 @@ export function compileQuery(
   // The inner join happens BEFORE namespace wrapping / WHERE / SELECT / ORDER BY,
   // so the child pipeline only processes rows that match parents.
   let pipeline: NamespacedAndKeyedStream = initialPipeline
-  if (!isUnionFrom && parentKeyStream && childCorrelationField) {
+  // When the correlation field references a joined alias (not the main from
+  // alias), the correlation value isn't available on the raw input rows, so
+  // the parent-key filter must be deferred until after joins are processed.
+  const correlationOnJoinedAlias: boolean =
+    !isUnionFrom &&
+    !!parentKeyStream &&
+    !!childCorrelationField &&
+    childCorrelationField.path[0] !== mainSource
+  if (
+    !isUnionFrom &&
+    parentKeyStream &&
+    childCorrelationField &&
+    !correlationOnJoinedAlias
+  ) {
     const mainInput = sources[mainSource]!
     let filteredMainInput = mainInput
     // Re-key child input by correlation field: [correlationValue, [childKey, childRow]]
@@ -307,6 +320,56 @@ export function compileQuery(
       aliasToCollectionId,
       aliasRemapping,
       sourceWhereClauses,
+    )
+  }
+
+  // Deferred parent-key filter for correlation fields on a joined alias.
+  // Mirrors the pre-join filter above, but operates on namespaced rows so
+  // the joined alias carrying the correlation value is present.
+  if (correlationOnJoinedAlias) {
+    const compiledChildCorrelation = compileExpression(childCorrelationField!)
+    // Re-key by correlation value: [correlationValue, [rowKey, namespacedRow]]
+    const rekeyed = pipeline.pipe(
+      map(([key, namespacedRow]: [unknown, any]) => {
+        const correlationValue = compiledChildCorrelation(namespacedRow)
+        return [correlationValue, [key, namespacedRow]] as [
+          unknown,
+          [unknown, any],
+        ]
+      }),
+    )
+
+    // Inner join: only rows whose correlation key exists in parent keys pass
+    const joinedWithParents = rekeyed.pipe(
+      joinOperator(parentKeyStream!, `inner`),
+    )
+
+    // Extract back to [rowKey, namespacedRow], tagging __correlationKey on the
+    // main source (where downstream routing expects it) and merging any
+    // projected parent context into the namespaced row for WHERE resolution.
+    pipeline = joinedWithParents.pipe(
+      filter(([_correlationValue, [childSide]]: any) => {
+        return childSide != null
+      }),
+      map(([correlationValue, [childSide, parentSide]]: any) => {
+        const [rowKey, namespacedRow] = childSide
+        const tagged: any = {
+          ...namespacedRow,
+          [mainSource]: {
+            ...namespacedRow[mainSource],
+            __correlationKey: correlationValue,
+          },
+        }
+        if (parentSide != null) {
+          Object.assign(tagged, parentSide)
+          tagged.__parentContext = parentSide
+        }
+        const effectiveKey =
+          parentSide != null
+            ? `${String(rowKey)}::${JSON.stringify(parentSide)}`
+            : rowKey
+        return [effectiveKey, tagged]
+      }),
     )
   }
 
