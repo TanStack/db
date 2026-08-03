@@ -1208,8 +1208,6 @@ const watchAttachments = async (onUpdate, abortSignal) => {
 }
 ```
 
-> A `watchAttachmentsFromQuery(...)` convenience helper that collapses this boilerplate into a single call is planned. Until then, use the pattern above.
-
 ### 4. Save an attachment atomically with related data
 
 `save` writes the file, inserts the attachment record into your collection, and runs your `updateHook` mutations in the same transaction. Use the hook to insert or update the row that references the new attachment, so both land together or not at all.

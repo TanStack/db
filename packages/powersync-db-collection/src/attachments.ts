@@ -1,7 +1,4 @@
-import {
-  AttachmentQueue,
-  AttachmentState
-} from '@powersync/common'
+import { AttachmentQueue, AttachmentState } from '@powersync/common'
 import { createTransaction } from '@tanstack/db'
 import { PowerSyncTransactor } from './PowerSyncTransactor'
 
@@ -9,8 +6,8 @@ import type {
   AbstractPowerSyncDatabase,
   AttachmentData,
   AttachmentQueueOptions,
-
-  AttachmentTable} from '@powersync/common'
+  AttachmentTable,
+} from '@powersync/common'
 import type { Collection, Transaction } from '@tanstack/db'
 import type { OptionalExtractedTable } from './helpers'
 
