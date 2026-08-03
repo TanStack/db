@@ -6,10 +6,10 @@ title: MergeContextWithJoinType
 # Type Alias: MergeContextWithJoinType\<TContext, TNewSchema, TJoinType\>
 
 ```ts
-type MergeContextWithJoinType<TContext, TNewSchema, TJoinType> = object & PreserveSingleResultFlag<TContext["singleResult"]> & PreserveHasResultFlag<TContext["hasResult"]>;
+type MergeContextWithJoinType<TContext, TNewSchema, TJoinType> = object & PreserveSingleResultFlag<TContext["singleResult"]> & PreserveHasResultFlag<TContext["hasResult"]> & PreserveUnionFromFlag<TContext["hasUnionFrom"]> & PreserveFromSourceNames<TContext["fromSourceNames"]>;
 ```
 
-Defined in: [packages/db/src/query/builder/types.ts:729](https://github.com/TanStack/db/blob/main/packages/db/src/query/builder/types.ts#L729)
+Defined in: [packages/db/src/query/builder/types.ts:929](https://github.com/TanStack/db/blob/main/packages/db/src/query/builder/types.ts#L929)
 
 MergeContextWithJoinType - Creates a new context after a join operation
 
@@ -59,6 +59,12 @@ hasJoins: true;
 joinTypes: TContext["joinTypes"] extends Record<string, any> ? TContext["joinTypes"] : object & { [K in keyof TNewSchema & string]: TJoinType };
 ```
 
+### refsSchema
+
+```ts
+refsSchema: ApplyJoinOptionalityToMergedSchema<RefsSchemaForContext<TContext>, TNewSchema, TJoinType, FromSourceNamesForOptionality<TContext>>;
+```
+
 ### result
 
 ```ts
@@ -68,7 +74,7 @@ result: TContext["result"];
 ### schema
 
 ```ts
-schema: ApplyJoinOptionalityToMergedSchema<TContext["schema"], TNewSchema, TJoinType, TContext["fromSourceName"]>;
+schema: ApplyJoinOptionalityToMergedSchema<TContext["schema"], TNewSchema, TJoinType, FromSourceNamesForOptionality<TContext>>;
 ```
 
 ## Type Parameters

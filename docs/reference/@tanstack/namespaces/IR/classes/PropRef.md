@@ -5,7 +5,7 @@ title: PropRef
 
 # Class: PropRef\<T\>
 
-Defined in: [packages/db/src/query/ir.ts:96](https://github.com/TanStack/db/blob/main/packages/db/src/query/ir.ts#L96)
+Defined in: [packages/db/src/query/ir.ts:133](https://github.com/TanStack/db/blob/main/packages/db/src/query/ir.ts#L133)
 
 ## Extends
 
@@ -25,7 +25,7 @@ Defined in: [packages/db/src/query/ir.ts:96](https://github.com/TanStack/db/blob
 new PropRef<T>(path): PropRef<T>;
 ```
 
-Defined in: [packages/db/src/query/ir.ts:98](https://github.com/TanStack/db/blob/main/packages/db/src/query/ir.ts#L98)
+Defined in: [packages/db/src/query/ir.ts:135](https://github.com/TanStack/db/blob/main/packages/db/src/query/ir.ts#L135)
 
 #### Parameters
 
@@ -51,7 +51,7 @@ BaseExpression<T>.constructor
 readonly __returnType: T;
 ```
 
-Defined in: [packages/db/src/query/ir.ts:73](https://github.com/TanStack/db/blob/main/packages/db/src/query/ir.ts#L73)
+Defined in: [packages/db/src/query/ir.ts:82](https://github.com/TanStack/db/blob/main/packages/db/src/query/ir.ts#L82)
 
 **`Internal`**
 
@@ -71,7 +71,7 @@ BaseExpression.__returnType
 path: string[];
 ```
 
-Defined in: [packages/db/src/query/ir.ts:99](https://github.com/TanStack/db/blob/main/packages/db/src/query/ir.ts#L99)
+Defined in: [packages/db/src/query/ir.ts:136](https://github.com/TanStack/db/blob/main/packages/db/src/query/ir.ts#L136)
 
 ***
 
@@ -81,7 +81,7 @@ Defined in: [packages/db/src/query/ir.ts:99](https://github.com/TanStack/db/blob
 type: "ref";
 ```
 
-Defined in: [packages/db/src/query/ir.ts:97](https://github.com/TanStack/db/blob/main/packages/db/src/query/ir.ts#L97)
+Defined in: [packages/db/src/query/ir.ts:134](https://github.com/TanStack/db/blob/main/packages/db/src/query/ir.ts#L134)
 
 #### Overrides
 

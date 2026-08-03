@@ -49,9 +49,15 @@ export function getLazyLoadTargets(
     return []
   }
 
+  // The subscription we drive lazy loading through must be the one for the
+  // collection the join key actually resolves to. When the key traces through a
+  // subquery's select into a *joined* source, that collection differs from the
+  // subquery's from clause (which is what `aliasRemapping[lazyAlias]` yields),
+  // so prefer the alias reported by `followRef`. Fall back to the from-clause
+  // remapping when the key resolves directly to the from source.
   return [
     {
-      alias: aliasRemapping[lazyAlias] || lazyAlias,
+      alias: followRefResult.alias || aliasRemapping[lazyAlias] || lazyAlias,
       collection: followRefResult.collection,
       path: followRefResult.path,
     },

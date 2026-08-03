@@ -1,3 +1,4 @@
+import { safeRandomUUID } from './utils/uuid'
 import type {
   BaseCollectionConfig,
   CollectionConfig,
@@ -182,7 +183,7 @@ export function localOnlyCollectionOptions<
   const { initialData, onInsert, onUpdate, onDelete, id, ...restConfig } =
     config
 
-  const collectionId = id ?? crypto.randomUUID()
+  const collectionId = id ?? safeRandomUUID()
 
   // Create the sync configuration with transaction confirmation capability
   const syncResult = createLocalOnlySync<T, TKey>(initialData)

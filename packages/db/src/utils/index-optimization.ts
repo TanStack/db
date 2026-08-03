@@ -18,6 +18,7 @@
 import { DEFAULT_COMPARE_OPTIONS } from '../utils.js'
 import { ReverseIndex } from '../indexes/reverse-index.js'
 import { hasVirtualPropPath } from '../virtual-props.js'
+import { makeComparator } from './comparison.js'
 import type { CompareOptions } from '../query/builder/types.js'
 import type { IndexInterface, IndexOperation } from '../indexes/base-index.js'
 import type { BasicExpression } from '../query/ir.js'
@@ -29,6 +30,13 @@ import type { CollectionLike } from '../types.js'
 export interface OptimizationResult<TKey> {
   canOptimize: boolean
   matchingKeys: Set<TKey>
+  /**
+   * Whether `matchingKeys` is exactly the set of keys matching the expression.
+   * When `false`, the keys are a superset of the true result (some conditions
+   * could not be served by an index) and each row must be re-checked against
+   * the full expression before being included in the result.
+   */
+  isExact: boolean
 }
 
 /**
@@ -95,6 +103,94 @@ export function unionSets<T>(sets: Array<Set<T>>): Set<T> {
 }
 
 /**
+ * Whether a value can be matched exactly by an index lookup, i.e. the index
+ * result for it is not a superset that the caller must re-filter.
+ *
+ * Only `null`/`undefined` are inexact: the WHERE evaluator's three-valued logic
+ * makes any comparison against them UNKNOWN, yet a BTree index stores and
+ * returns rows with nullish keys (they sort to the nulls end), so a result that
+ * could include such rows must be re-filtered.
+ *
+ * `NaN` and invalid Dates are exact: under the engine's PostgreSQL float
+ * semantics they are equal to themselves and ordered (greatest non-null value),
+ * so the evaluator and the index agree on them and no re-filtering is needed.
+ */
+function isExactComparisonValue(value: unknown): boolean {
+  return value != null
+}
+
+/**
+ * Whether the collection orders strings using locale collation.
+ *
+ * Under `stringSort: 'locale'` a BTree string index orders values with
+ * `localeCompare`, but the WHERE evaluator compares strings with JS relational
+ * operators (code-point order). For range predicates these orders disagree
+ * (e.g. `'ö' > 'z'` is true in JS but `'ö'` sorts before `'z'` under locale
+ * `en`), so an index range lookup can omit matching rows. Such omissions cannot
+ * be recovered by re-filtering, so locale-backed string range predicates must
+ * not be index-optimized.
+ */
+function usesLocaleStringSort(collection: CollectionLike<any, any>): boolean {
+  const opts = { ...DEFAULT_COMPARE_OPTIONS, ...collection.compareOptions }
+  return opts.stringSort === `locale`
+}
+
+/**
+ * Whether a range predicate on this operand would use an index ordering that
+ * differs from the WHERE evaluator's relational operators, so an index range
+ * lookup could omit genuine matches that re-filtering cannot recover.
+ *
+ * The evaluator compares with JS relational operators (extended with
+ * PostgreSQL float semantics for `NaN`/invalid Dates). That order matches the
+ * index comparator for numbers, booleans, bigints, lexically-sorted strings,
+ * Dates (valid, ordered by time; invalid, ordered as the greatest value) and
+ * `NaN`. It diverges for locale-sorted strings (localeCompare vs code-point
+ * order) and for arrays, plain objects, Temporal values and typed arrays
+ * (recursive/identity ordering vs string coercion).
+ *
+ * Note: `null`/`undefined` operands are not handled here — those are superset
+ * cases handled by re-filtering ({@link isExactComparisonValue}).
+ */
+function isRangeOrderingDivergent(
+  value: unknown,
+  collection: CollectionLike<any, any>,
+): boolean {
+  switch (typeof value) {
+    case `number`:
+    case `bigint`:
+    case `boolean`:
+      return false
+    case `string`:
+      return usesLocaleStringSort(collection)
+    case `object`: {
+      if (value === null) return false
+      // Dates order consistently with the evaluator: valid Dates by time, and
+      // invalid Dates as the greatest value under PostgreSQL float semantics.
+      return !(value instanceof Date)
+    }
+    default:
+      return false
+  }
+}
+
+/**
+ * Whether a range predicate (gt/gte/lt/lte) on this operand can be safely
+ * served by the given index: the operand's domain must order the same way the
+ * index does, and the index itself must support trustworthy range traversal
+ * (no custom comparator).
+ */
+function canRangeOptimize(
+  value: unknown,
+  index: IndexInterface<any>,
+  collection: CollectionLike<any, any>,
+): boolean {
+  return (
+    !isRangeOrderingDivergent(value, collection) &&
+    index.supportsRangeOptimization
+  )
+}
+
+/**
  * Optimizes a query expression using available indexes to find matching keys
  */
 export function optimizeExpressionWithIndexes<
@@ -134,7 +230,7 @@ function optimizeQueryRecursive<T extends object, TKey extends string | number>(
     }
   }
 
-  return { canOptimize: false, matchingKeys: new Set() }
+  return { canOptimize: false, matchingKeys: new Set(), isExact: false }
 }
 
 /**
@@ -168,6 +264,14 @@ export function canOptimizeExpression<
 }
 
 /**
+ * Result of compound range optimization, including which AND arguments
+ * were covered by the range query so the caller can process the rest.
+ */
+interface CompoundRangeResult<TKey> extends OptimizationResult<TKey> {
+  coveredArgIndices: Set<number>
+}
+
+/**
  * Optimizes compound range queries on the same field
  * Example: WHERE age > 5 AND age < 10
  */
@@ -177,9 +281,14 @@ function optimizeCompoundRangeQuery<
 >(
   expression: BasicExpression,
   collection: CollectionLike<T, TKey>,
-): OptimizationResult<TKey> {
+): CompoundRangeResult<TKey> {
   if (expression.type !== `func` || expression.args.length < 2) {
-    return { canOptimize: false, matchingKeys: new Set() }
+    return {
+      canOptimize: false,
+      matchingKeys: new Set(),
+      isExact: false,
+      coveredArgIndices: new Set(),
+    }
   }
 
   // Group range operations by field
@@ -188,11 +297,12 @@ function optimizeCompoundRangeQuery<
     Array<{
       operation: `gt` | `gte` | `lt` | `lte`
       value: any
+      argIndex: number
     }>
   >()
 
   // Collect all range operations from AND arguments
-  for (const arg of expression.args) {
+  for (const [argIndex, arg] of expression.args.entries()) {
     if (arg.type === `func` && [`gt`, `gte`, `lt`, `lte`].includes(arg.name)) {
       const rangeOp = arg as any
       if (rangeOp.args.length === 2) {
@@ -238,7 +348,7 @@ function optimizeCompoundRangeQuery<
           if (!fieldOperations.has(fieldKey)) {
             fieldOperations.set(fieldKey, [])
           }
-          fieldOperations.get(fieldKey)!.push({ operation, value })
+          fieldOperations.get(fieldKey)!.push({ operation, value, argIndex })
         }
       }
     }
@@ -250,55 +360,114 @@ function optimizeCompoundRangeQuery<
       const fieldPath = fieldKey.split(`.`)
       const index = findIndexForField(collection, fieldPath)
 
+      // Only collapse this field into a range query when every bound's domain
+      // orders the same way the index does and the index supports trustworthy
+      // range traversal. Otherwise the index may omit matching rows that
+      // re-filtering cannot recover, so leave the field for a full scan.
+      if (
+        index &&
+        operations.some((op) => !canRangeOptimize(op.value, index, collection))
+      ) {
+        continue
+      }
+
       if (index && index.supports(`gt`) && index.supports(`lt`)) {
-        // Build range query options
+        // Compare values with the same semantics the index uses (dates,
+        // locale strings, ...), in ascending order since bounds are about
+        // value order regardless of the index direction
+        const compare = makeComparator({
+          ...DEFAULT_COMPARE_OPTIONS,
+          ...collection.compareOptions,
+          direction: `asc`,
+        })
+
+        // Build range query options, keeping the strictest bound on each
+        // side: a larger lower bound (or smaller upper bound) wins, and at
+        // equal values the exclusive operation wins over the inclusive one.
+        // `hasFromBound`/`hasToBound` track whether a bound was selected,
+        // separately from the bound value (which may legitimately be falsy).
         let from: any = undefined
         let to: any = undefined
+        let hasFromBound = false
+        let hasToBound = false
         let fromInclusive = true
         let toInclusive = true
+        // A comparison against null/undefined is never true, but in an index
+        // nullish values sort to the nulls end, so a range query cannot
+        // represent such a bound. Track it and force a re-filter instead of
+        // claiming the result is exact. (NaN/invalid Dates are ordered and
+        // comparable under PostgreSQL semantics, so they are real bounds.)
+        let hasNonComparableBound = false
 
         for (const { operation, value } of operations) {
+          if (!isExactComparisonValue(value)) {
+            hasNonComparableBound = true
+            continue
+          }
           switch (operation) {
             case `gt`:
-              if (from === undefined || value > from) {
+            case `gte`: {
+              const cmp = hasFromBound ? compare(value, from) : 1
+              if (cmp > 0) {
                 from = value
+                hasFromBound = true
+                fromInclusive = operation === `gte`
+              } else if (cmp === 0 && operation === `gt`) {
                 fromInclusive = false
               }
               break
-            case `gte`:
-              if (from === undefined || value > from) {
-                from = value
-                fromInclusive = true
-              }
-              break
+            }
             case `lt`:
-              if (to === undefined || value < to) {
+            case `lte`: {
+              const cmp = hasToBound ? compare(value, to) : -1
+              if (cmp < 0) {
                 to = value
+                hasToBound = true
+                toInclusive = operation === `lte`
+              } else if (cmp === 0 && operation === `lt`) {
                 toInclusive = false
               }
               break
-            case `lte`:
-              if (to === undefined || value < to) {
-                to = value
-                toInclusive = true
-              }
-              break
+            }
           }
         }
 
-        const matchingKeys = (index as any).rangeQuery({
-          from,
-          to,
-          fromInclusive,
-          toInclusive,
-        })
+        // Only pass the bounds that were selected: rangeQuery distinguishes
+        // an absent bound (open-ended) from an explicitly provided one
+        const rangeOptions: Record<string, any> = {}
+        if (hasFromBound) {
+          rangeOptions.from = from
+          rangeOptions.fromInclusive = fromInclusive
+        }
+        if (hasToBound) {
+          rangeOptions.to = to
+          rangeOptions.toInclusive = toInclusive
+        }
+        const matchingKeys = (index as any).rangeQuery(rangeOptions)
 
-        return { canOptimize: true, matchingKeys }
+        return {
+          canOptimize: true,
+          matchingKeys,
+          // The range result is exact only when it cannot include rows with a
+          // nullish indexed value (which a comparison would reject but the
+          // index returns, as they sort as the smallest key). That requires a
+          // non-nullish lower bound to exclude them: without `hasFromBound`
+          // the range is open at the bottom and captures those rows, and a
+          // non-comparable bound value (`hasNonComparableBound`) can never
+          // bound them out.
+          isExact: hasFromBound && !hasNonComparableBound,
+          coveredArgIndices: new Set(operations.map((op) => op.argIndex)),
+        }
       }
     }
   }
 
-  return { canOptimize: false, matchingKeys: new Set() }
+  return {
+    canOptimize: false,
+    matchingKeys: new Set(),
+    isExact: false,
+    coveredArgIndices: new Set(),
+  }
 }
 
 /**
@@ -312,7 +481,7 @@ function optimizeSimpleComparison<
   collection: CollectionLike<T, TKey>,
 ): OptimizationResult<TKey> {
   if (expression.type !== `func` || expression.args.length !== 2) {
-    return { canOptimize: false, matchingKeys: new Set() }
+    return { canOptimize: false, matchingKeys: new Set(), isExact: false }
   }
 
   const leftArg = expression.args[0]!
@@ -362,15 +531,46 @@ function optimizeSimpleComparison<
 
       // Check if the index supports this operation
       if (!index.supports(indexOperation)) {
-        return { canOptimize: false, matchingKeys: new Set() }
+        return { canOptimize: false, matchingKeys: new Set(), isExact: false }
+      }
+
+      // A range op can only use the index when the operand's domain orders the
+      // same way the index does and the index supports trustworthy traversal.
+      // Otherwise the index may omit matching rows, which re-filtering cannot
+      // recover, so fall back to a full scan.
+      if (
+        (operation === `gt` ||
+          operation === `gte` ||
+          operation === `lt` ||
+          operation === `lte`) &&
+        !canRangeOptimize(queryValue, index, collection)
+      ) {
+        return { canOptimize: false, matchingKeys: new Set(), isExact: false }
       }
 
       const matchingKeys = index.lookup(indexOperation, queryValue)
-      return { canOptimize: true, matchingKeys }
+
+      // A comparison against a nullish value is never true, but BTree indexes
+      // store and return rows with nullish keys (they sort to the nulls end).
+      // Determine whether the index result is exact or a superset that the
+      // caller must re-filter:
+      // - eq/gt/gte: a nullish query value matches nothing while the index
+      //   still returns nullish-keyed rows -> inexact. A non-nullish lower
+      //   bound (gt/gte) excludes those bottom-sorted rows, so they stay exact.
+      // - lt/lte: the open lower bound always includes nullish-keyed rows,
+      //   so the result is conservatively inexact.
+      // NaN/invalid Dates are exact here: under PostgreSQL float semantics the
+      // evaluator and the index agree on them (equal to self, greatest).
+      const isExact =
+        operation === `lt` || operation === `lte`
+          ? false
+          : isExactComparisonValue(queryValue)
+
+      return { canOptimize: true, matchingKeys, isExact }
     }
   }
 
-  return { canOptimize: false, matchingKeys: new Set() }
+  return { canOptimize: false, matchingKeys: new Set(), isExact: false }
 }
 
 /**
@@ -412,22 +612,41 @@ function optimizeAndExpression<T extends object, TKey extends string | number>(
   collection: CollectionLike<T, TKey>,
 ): OptimizationResult<TKey> {
   if (expression.type !== `func` || expression.args.length < 2) {
-    return { canOptimize: false, matchingKeys: new Set() }
+    return { canOptimize: false, matchingKeys: new Set(), isExact: false }
   }
 
   // First, try to optimize compound range queries on the same field
+  // (e.g. age > 5 AND age < 10 becomes a single range query)
   const compoundRangeResult = optimizeCompoundRangeQuery(expression, collection)
-  if (compoundRangeResult.canOptimize) {
-    return compoundRangeResult
-  }
+  const coveredArgIndices = compoundRangeResult.canOptimize
+    ? compoundRangeResult.coveredArgIndices
+    : new Set<number>()
 
   const results: Array<OptimizationResult<TKey>> = []
+  if (compoundRangeResult.canOptimize) {
+    results.push(compoundRangeResult)
+  }
 
-  // Try to optimize each part, keep the optimizable ones
-  for (const arg of expression.args) {
+  // Try to optimize the remaining conjuncts, keep the optimizable ones.
+  // Conjuncts that cannot use an index make the result inexact: the
+  // intersection is then a superset of the true result and must be
+  // re-filtered against the full expression by the caller. The compound
+  // range result may itself be inexact (e.g. a null/undefined bound).
+  let allConjunctsExact = !compoundRangeResult.canOptimize
+    ? true
+    : compoundRangeResult.isExact
+  for (const [argIndex, arg] of expression.args.entries()) {
+    if (coveredArgIndices.has(argIndex)) {
+      continue
+    }
     const result = optimizeQueryRecursive(arg, collection)
     if (result.canOptimize) {
       results.push(result)
+      if (!result.isExact) {
+        allConjunctsExact = false
+      }
+    } else {
+      allConjunctsExact = false
     }
   }
 
@@ -435,10 +654,14 @@ function optimizeAndExpression<T extends object, TKey extends string | number>(
     // Use intersectSets utility for AND logic
     const allMatchingSets = results.map((r) => r.matchingKeys)
     const intersectedKeys = intersectSets(allMatchingSets)
-    return { canOptimize: true, matchingKeys: intersectedKeys }
+    return {
+      canOptimize: true,
+      matchingKeys: intersectedKeys,
+      isExact: allConjunctsExact,
+    }
   }
 
-  return { canOptimize: false, matchingKeys: new Set() }
+  return { canOptimize: false, matchingKeys: new Set(), isExact: false }
 }
 
 /**
@@ -464,27 +687,31 @@ function optimizeOrExpression<T extends object, TKey extends string | number>(
   collection: CollectionLike<T, TKey>,
 ): OptimizationResult<TKey> {
   if (expression.type !== `func` || expression.args.length < 2) {
-    return { canOptimize: false, matchingKeys: new Set() }
+    return { canOptimize: false, matchingKeys: new Set(), isExact: false }
   }
 
   const results: Array<OptimizationResult<TKey>> = []
 
-  // Try to optimize each part, keep the optimizable ones
+  // Every disjunct must be optimizable: rows matched only by a disjunct
+  // that cannot use an index would be missing from the union, and no
+  // post-filtering can recover them. In that case fall back to a full scan.
   for (const arg of expression.args) {
     const result = optimizeQueryRecursive(arg, collection)
-    if (result.canOptimize) {
-      results.push(result)
+    if (!result.canOptimize) {
+      return { canOptimize: false, matchingKeys: new Set(), isExact: false }
     }
+    results.push(result)
   }
 
-  if (results.length > 0) {
-    // Use unionSets utility for OR logic
-    const allMatchingSets = results.map((r) => r.matchingKeys)
-    const unionedKeys = unionSets(allMatchingSets)
-    return { canOptimize: true, matchingKeys: unionedKeys }
+  // Use unionSets utility for OR logic
+  const allMatchingSets = results.map((r) => r.matchingKeys)
+  const unionedKeys = unionSets(allMatchingSets)
+  return {
+    canOptimize: true,
+    matchingKeys: unionedKeys,
+    // An inexact (superset) disjunct makes the union a superset as well
+    isExact: results.every((r) => r.isExact),
   }
-
-  return { canOptimize: false, matchingKeys: new Set() }
 }
 
 /**
@@ -498,8 +725,9 @@ function canOptimizeOrExpression<
     return false
   }
 
-  // If any argument can be optimized, we can gain some speedup
-  return expression.args.some((arg) => canOptimizeExpression(arg, collection))
+  // Every disjunct must be optimizable, otherwise the union would miss
+  // rows matched only by the non-optimizable disjuncts
+  return expression.args.every((arg) => canOptimizeExpression(arg, collection))
 }
 
 /**
@@ -513,7 +741,7 @@ function optimizeInArrayExpression<
   collection: CollectionLike<T, TKey>,
 ): OptimizationResult<TKey> {
   if (expression.type !== `func` || expression.args.length !== 2) {
-    return { canOptimize: false, matchingKeys: new Set() }
+    return { canOptimize: false, matchingKeys: new Set(), isExact: false }
   }
 
   const fieldArg = expression.args[0]!
@@ -528,11 +756,17 @@ function optimizeInArrayExpression<
     const values = (arrayArg as any).value
     const index = findIndexForField(collection, fieldPath)
 
+    // A nullish or NaN member can never be matched by `IN` (a comparison
+    // against null/undefined/NaN is never true), but the index would still
+    // return rows with such an indexed value. When the list contains one of
+    // those the result is a superset that the caller must re-filter.
+    const isExact = values.every((value: any) => isExactComparisonValue(value))
+
     if (index) {
       // Check if the index supports IN operation
       if (index.supports(`in`)) {
         const matchingKeys = index.lookup(`in`, values)
-        return { canOptimize: true, matchingKeys }
+        return { canOptimize: true, matchingKeys, isExact }
       } else if (index.supports(`eq`)) {
         // Fallback to multiple equality lookups
         const matchingKeys = new Set<TKey>()
@@ -542,12 +776,12 @@ function optimizeInArrayExpression<
             matchingKeys.add(key)
           }
         }
-        return { canOptimize: true, matchingKeys }
+        return { canOptimize: true, matchingKeys, isExact }
       }
     }
   }
 
-  return { canOptimize: false, matchingKeys: new Set() }
+  return { canOptimize: false, matchingKeys: new Set(), isExact: false }
 }
 
 /**

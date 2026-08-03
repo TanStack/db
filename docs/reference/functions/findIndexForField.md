@@ -14,7 +14,7 @@ function findIndexForField<TKey>(
   | undefined;
 ```
 
-Defined in: [packages/db/src/utils/index-optimization.ts:37](https://github.com/TanStack/db/blob/main/packages/db/src/utils/index-optimization.ts#L37)
+Defined in: [packages/db/src/utils/index-optimization.ts:45](https://github.com/TanStack/db/blob/main/packages/db/src/utils/index-optimization.ts#L45)
 
 Finds an index that matches a given field path
 

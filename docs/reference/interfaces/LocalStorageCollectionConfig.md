@@ -5,7 +5,7 @@ title: LocalStorageCollectionConfig
 
 # Interface: LocalStorageCollectionConfig\<T, TSchema, TKey\>
 
-Defined in: [packages/db/src/local-storage.ts:58](https://github.com/TanStack/db/blob/main/packages/db/src/local-storage.ts#L58)
+Defined in: [packages/db/src/local-storage.ts:59](https://github.com/TanStack/db/blob/main/packages/db/src/local-storage.ts#L59)
 
 Configuration interface for localStorage collection options
 
@@ -433,7 +433,7 @@ onUpdate: async ({ transaction, collection }) => {
 optional parser: Parser;
 ```
 
-Defined in: [packages/db/src/local-storage.ts:84](https://github.com/TanStack/db/blob/main/packages/db/src/local-storage.ts#L84)
+Defined in: [packages/db/src/local-storage.ts:85](https://github.com/TanStack/db/blob/main/packages/db/src/local-storage.ts#L85)
 
 Parser to use for serializing and deserializing data to and from storage
 Defaults to JSON
@@ -487,7 +487,7 @@ false
 optional storage: StorageApi;
 ```
 
-Defined in: [packages/db/src/local-storage.ts:72](https://github.com/TanStack/db/blob/main/packages/db/src/local-storage.ts#L72)
+Defined in: [packages/db/src/local-storage.ts:73](https://github.com/TanStack/db/blob/main/packages/db/src/local-storage.ts#L73)
 
 Storage API to use (defaults to window.localStorage)
 Can be any object that implements the Storage interface (e.g., sessionStorage)
@@ -500,7 +500,7 @@ Can be any object that implements the Storage interface (e.g., sessionStorage)
 optional storageEventApi: StorageEventApi;
 ```
 
-Defined in: [packages/db/src/local-storage.ts:78](https://github.com/TanStack/db/blob/main/packages/db/src/local-storage.ts#L78)
+Defined in: [packages/db/src/local-storage.ts:79](https://github.com/TanStack/db/blob/main/packages/db/src/local-storage.ts#L79)
 
 Storage event API to use for cross-tab synchronization (defaults to window)
 Can be any object that implements addEventListener/removeEventListener for storage events
@@ -513,7 +513,7 @@ Can be any object that implements addEventListener/removeEventListener for stora
 storageKey: string;
 ```
 
-Defined in: [packages/db/src/local-storage.ts:66](https://github.com/TanStack/db/blob/main/packages/db/src/local-storage.ts#L66)
+Defined in: [packages/db/src/local-storage.ts:67](https://github.com/TanStack/db/blob/main/packages/db/src/local-storage.ts#L67)
 
 The key to use for storing the collection data in localStorage/sessionStorage
 

@@ -138,11 +138,16 @@ export function currentStateAsChanges<
     )
 
     if (optimizationResult.canOptimize) {
-      // Use index optimization
+      // Use index optimization. When the index lookup is inexact, the keys
+      // are a superset of the true result (some conditions could not be
+      // served by an index), so re-check each row against the full expression.
+      const filterFn = optimizationResult.isExact
+        ? undefined
+        : createFilterFunctionFromExpression(expression)
       const result: Array<ChangeMessage<WithVirtualProps<T, TKey>, TKey>> = []
       for (const key of optimizationResult.matchingKeys) {
         const value = collection.get(key)
-        if (value !== undefined) {
+        if (value !== undefined && (filterFn?.(value) ?? true)) {
           result.push({
             type: `insert`,
             key,

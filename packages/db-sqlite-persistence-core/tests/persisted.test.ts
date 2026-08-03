@@ -816,6 +816,78 @@ describe(`persistedCollectionOptions`, () => {
     )
   })
 
+  it(`preserves row metadata set before a metadata-less insert in the same sync transaction`, async () => {
+    const adapter = createRecordingAdapter()
+    const ownership = { queryCollection: { owners: [`gc:q1`] } }
+    const sync: SyncConfig<Todo, string> = {
+      sync: ({ begin, write, commit, markReady, metadata }) => {
+        begin()
+        metadata?.row.set(`remote-1`, ownership)
+        write({
+          type: `insert`,
+          value: {
+            id: `remote-1`,
+            title: `From remote`,
+          },
+        })
+        commit()
+        markReady()
+      },
+    }
+
+    const collection = createCollection(
+      persistedCollectionOptions<Todo, string>({
+        id: `sync-present`,
+        getKey: (item: Todo) => item.id,
+        sync,
+        persistence: {
+          adapter,
+        },
+      }),
+    )
+
+    await collection.stateWhenReady()
+    await flushAsyncWork()
+
+    expect(adapter.rowMetadata.get(`remote-1`)).toEqual(ownership)
+    expect(collection._state.syncedMetadata.get(`remote-1`)).toEqual(ownership)
+  })
+
+  it(`resets stale row metadata for a metadata-less insert with no queued metadata`, async () => {
+    const adapter = createRecordingAdapter()
+    adapter.rowMetadata.set(`remote-1`, { stale: true })
+    const sync: SyncConfig<Todo, string> = {
+      sync: ({ begin, write, commit, markReady }) => {
+        begin()
+        write({
+          type: `insert`,
+          value: {
+            id: `remote-1`,
+            title: `From remote`,
+          },
+        })
+        commit()
+        markReady()
+      },
+    }
+
+    const collection = createCollection(
+      persistedCollectionOptions<Todo, string>({
+        id: `sync-present`,
+        getKey: (item: Todo) => item.id,
+        sync,
+        persistence: {
+          adapter,
+        },
+      }),
+    )
+
+    await collection.stateWhenReady()
+    await flushAsyncWork()
+
+    expect(adapter.rowMetadata.has(`remote-1`)).toBe(false)
+  })
+
   it(`uses a stable generated collection id in sync-present mode when id is omitted`, async () => {
     const adapter = createRecordingAdapter()
     const options = persistedCollectionOptions<Todo, string>({

@@ -18,6 +18,21 @@ function getObjectId(obj: object): number {
 }
 
 /**
+ * Whether a value has no IEEE-754 natural order: `NaN`, or an invalid Date
+ * (whose timestamp is `NaN`). The query engine follows PostgreSQL float
+ * semantics for these values — they are all equal to one another and greater
+ * than every other (non-null) value — so the comparator and the WHERE
+ * evaluator treat them explicitly instead of letting `NaN` compare unequal to
+ * everything (which has no consistent order and cannot be indexed or sorted).
+ */
+export function isUnorderable(value: any): boolean {
+  return (
+    (typeof value === `number` && Number.isNaN(value)) ||
+    (value instanceof Date && Number.isNaN(value.getTime()))
+  )
+}
+
+/**
  * Universal comparison function for all data types
  * Handles null/undefined, strings, arrays, dates, objects, and primitives
  * Always sorts null/undefined values first
@@ -29,6 +44,16 @@ export const ascComparator = (a: any, b: any, opts: CompareOptions): number => {
   if (a == null && b == null) return 0
   if (a == null) return nulls === `first` ? -1 : 1
   if (b == null) return nulls === `first` ? 1 : -1
+
+  // Handle NaN / invalid Dates. Following PostgreSQL float semantics, they are
+  // all equal and sort greater than every other non-null value. This keeps the
+  // order total (NaN would otherwise compare equal to everything), so such
+  // values can be sorted and stored in tree-based indexes.
+  const aUnordered = isUnorderable(a)
+  const bUnordered = isUnorderable(b)
+  if (aUnordered && bUnordered) return 0
+  if (aUnordered) return 1
+  if (bUnordered) return -1
 
   // if a and b are both strings, compare them based on locale
   if (typeof a === `string` && typeof b === `string`) {
