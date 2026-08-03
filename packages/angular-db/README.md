@@ -1,3 +1,20 @@
+<div align="center">
+  <picture>
+    <source
+      media="(prefers-color-scheme: dark)"
+      srcset="https://tanstack.com/api/readme/db.png?title=TanStack%20Angular%20DB&theme=dark"
+    />
+    <source
+      media="(prefers-color-scheme: light)"
+      srcset="https://tanstack.com/api/readme/db.png?title=TanStack%20Angular%20DB"
+    />
+    <img
+      src="https://tanstack.com/api/readme/db.png?title=TanStack%20Angular%20DB"
+      alt="TanStack Angular DB"
+      width="900"
+    />
+  </picture>
+</div>
 # @tanstack/angular-db
 
 Angular hooks for TanStack DB. See [TanStack/db](https://github.com/TanStack/db) for more details.
