@@ -28,14 +28,17 @@ export interface SaveOptions {
   /**
    * Optional custom ID. If not provided, a UUID will be generated.
    *
-   * Reusing the ID of an existing attachment overwrites that attachment's local file
-   * before the write is rejected, and the file is then removed by cleanup — leaving the
-   * existing record without its file. Pass an ID that is not already in the queue.
+   * Rejected if an attachment with this ID is already in the queue.
    */
   id?: string
   /**
-   * Called within the same TanStackDB transaction as the attachment write,
+   * Called synchronously within the same TanStackDB transaction as the attachment write,
    * so any mutations made to other collections are committed atomically with it.
+   *
+   * Must not be async. `Transaction.mutate` unregisters the ambient transaction as soon as
+   * this callback returns, so any mutation made after an `await` inside the hook escapes the
+   * transaction and is not committed atomically with the attachment. Do asynchronous work
+   * before calling `save` or `delete`.
    */
   updateHook?: (attachment: AttachmentQueueRow) => void
 }
@@ -43,8 +46,13 @@ export interface SaveOptions {
 export interface DeleteOptions {
   id: string
   /**
-   * Called within the same TanStackDB transaction as the attachment write,
+   * Called synchronously within the same TanStackDB transaction as the attachment write,
    * so any mutations made to other collections are committed atomically with it.
+   *
+   * Must not be async. `Transaction.mutate` unregisters the ambient transaction as soon as
+   * this callback returns, so any mutation made after an `await` inside the hook escapes the
+   * transaction and is not committed atomically with the attachment. Do asynchronous work
+   * before calling `save` or `delete`.
    */
   updateHook?: (attachment: AttachmentQueueRow) => void
 }
@@ -79,6 +87,16 @@ export class TanStackDBAttachmentQueue extends AttachmentQueue {
     updateHook,
   }: SaveOptions): Promise<AttachmentQueueRow> {
     const resolvedId = id ?? (await this.generateAttachmentId())
+
+    /**
+     * Checked before the file is written. Writing first would overwrite the existing
+     * attachment's local file, and the cleanup below would then delete it — leaving the
+     * pre-existing record pointing at a file that no longer exists.
+     */
+    if (this.collection.get(resolvedId)) {
+      throw new Error(`Attachment with id ${resolvedId} already exists`)
+    }
+
     const filename = `${resolvedId}.${fileExtension}`
     const localUri = this.localStorage.getLocalUri(filename)
     const size = await this.localStorage.saveFile(localUri, data)

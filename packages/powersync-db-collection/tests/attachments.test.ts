@@ -323,6 +323,30 @@ describePowerSync(`PowerSync AttachmentQueue (TanStackDB)`, () => {
       expect(record.filename).toBe(`${id}.png`)
     })
 
+    it(`rejects a reused id without disturbing the existing attachment`, async () => {
+      const { createQueue, attachmentsCollection, localStorage } = await setup()
+      const queue = createQueue()
+
+      const original = await queue.save({
+        data: createMockJpegBuffer(),
+        fileExtension: `jpg`,
+      })
+
+      await expect(
+        queue.save({
+          id: original.id,
+          // A different payload, so an overwrite would be detectable by size alone.
+          data: new Uint8Array(999).fill(7).buffer,
+          fileExtension: `jpg`,
+        }),
+      ).rejects.toThrow(/already exists/)
+
+      // Without the up-front check the reused id overwrites this file and cleanup
+      // then deletes it, leaving the original record pointing at nothing.
+      expect(await localStorage.fileExists(original.local_uri!)).toBe(true)
+      expect(attachmentsCollection.get(original.id)?.size).toBe(original.size)
+    })
+
     it(`removes the local file and rolls back when the updateHook throws`, async () => {
       const {
         createQueue,
