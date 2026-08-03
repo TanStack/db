@@ -248,7 +248,7 @@ describePowerSync(`PowerSync AttachmentQueue (TanStackDB)`, () => {
       const record = await queue.save({
         data: createMockJpegBuffer(),
         fileExtension: `jpg`,
-        updateHook: async (attachment) => {
+        updateHook: (attachment) => {
           usersCollection.insert({
             id: userId,
             name: `steven`,
@@ -287,7 +287,7 @@ describePowerSync(`PowerSync AttachmentQueue (TanStackDB)`, () => {
       const record = await queue.save({
         data: createMockJpegBuffer(),
         fileExtension: `jpg`,
-        updateHook: async (attachment) => {
+        updateHook: (attachment) => {
           usersCollection.insert({
             id: userId,
             name: `steven`,
@@ -322,6 +322,44 @@ describePowerSync(`PowerSync AttachmentQueue (TanStackDB)`, () => {
       expect(record.id).toBe(id)
       expect(record.filename).toBe(`${id}.png`)
     })
+
+    it(`removes the local file and rolls back when the updateHook throws`, async () => {
+      const {
+        createQueue,
+        attachmentsCollection,
+        usersCollection,
+        localStorage,
+      } = await setup()
+      const queue = createQueue()
+
+      // A caller-supplied id lets us derive the local uri without a returned record.
+      const id = randomUUID()
+      const localUri = localStorage.getLocalUri(`${id}.jpg`)
+
+      await expect(
+        queue.save({
+          id,
+          data: createMockJpegBuffer(),
+          fileExtension: `jpg`,
+          updateHook: (attachment) => {
+            usersCollection.insert({
+              id: randomUUID(),
+              name: `steven`,
+              email: `steven@journeyapps.com`,
+              photo_id: attachment.id,
+            })
+            throw new Error(`updateHook failed`)
+          },
+        }),
+      ).rejects.toThrow(/updateHook failed/)
+
+      // The file is written before the transaction opens, so it must be cleaned up.
+      expect(await localStorage.fileExists(localUri)).toBe(false)
+
+      // Neither the attachment nor the hook's own mutation may survive the failure.
+      expect(attachmentsCollection.get(id)).toBeUndefined()
+      expect(usersCollection.size).toBe(0)
+    })
   })
 
   describe(`delete file`, () => {
@@ -339,7 +377,7 @@ describePowerSync(`PowerSync AttachmentQueue (TanStackDB)`, () => {
       const record = await queue.save({
         data: createMockJpegBuffer(),
         fileExtension: `jpg`,
-        updateHook: async (attachment) => {
+        updateHook: (attachment) => {
           usersCollection.insert({
             id: userId,
             name: `steven`,
@@ -357,7 +395,7 @@ describePowerSync(`PowerSync AttachmentQueue (TanStackDB)`, () => {
 
       await queue.delete({
         id: record.id,
-        updateHook: async (attachment) => {
+        updateHook: (attachment) => {
           usersCollection.update(userId, (draft) => {
             if (draft.photo_id === attachment.id) {
               draft.photo_id = null
@@ -396,6 +434,58 @@ describePowerSync(`PowerSync AttachmentQueue (TanStackDB)`, () => {
       expect(hook).not.toHaveBeenCalled()
       expect(attachmentsCollection.get(`does-not-exist`)).toBeUndefined()
       expect(usersCollection.size).toBe(0)
+    })
+
+    it(`rolls back the queued deletion when the updateHook throws`, async () => {
+      const {
+        createQueue,
+        attachmentsCollection,
+        usersCollection,
+        localStorage,
+      } = await setup()
+      const queue = createQueue()
+
+      const userId = randomUUID()
+      const record = await queue.save({
+        data: createMockJpegBuffer(),
+        fileExtension: `jpg`,
+        updateHook: (attachment) => {
+          usersCollection.insert({
+            id: userId,
+            name: `steven`,
+            email: `steven@journeyapps.com`,
+            photo_id: attachment.id,
+          })
+        },
+      })
+
+      // Sync is deliberately left stopped: the rollback happens entirely in the
+      // foreground transaction, and a running sync loop would only race teardown.
+      await waitForState(
+        attachmentsCollection,
+        record.id,
+        AttachmentState.QUEUED_UPLOAD,
+      )
+
+      await expect(
+        queue.delete({
+          id: record.id,
+          updateHook: () => {
+            usersCollection.update(userId, (draft) => {
+              draft.photo_id = null
+            })
+            throw new Error(`updateHook failed`)
+          },
+        }),
+      ).rejects.toThrow(/updateHook failed/)
+
+      // Both the QUEUED_DELETE transition and the hook's mutation must be rolled back,
+      // leaving the attachment intact rather than half-deleted.
+      expect(attachmentsCollection.get(record.id)?.state).toBe(
+        AttachmentState.QUEUED_UPLOAD,
+      )
+      expect(usersCollection.get(userId)?.photo_id).toBe(record.id)
+      expect(await localStorage.fileExists(record.local_uri!)).toBe(true)
     })
   })
 })

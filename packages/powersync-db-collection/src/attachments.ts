@@ -11,7 +11,7 @@ import type {
   AttachmentQueueOptions,
 
   AttachmentTable} from '@powersync/common'
-import type { Collection } from '@tanstack/db'
+import type { Collection, Transaction } from '@tanstack/db'
 import type { OptionalExtractedTable } from './helpers'
 
 export type TanStackDBAttachmentQueueOptions = AttachmentQueueOptions & {
@@ -28,6 +28,13 @@ export interface SaveOptions {
   fileExtension: string
   mediaType?: string
   metaData?: string
+  /**
+   * Optional custom ID. If not provided, a UUID will be generated.
+   *
+   * Reusing the ID of an existing attachment overwrites that attachment's local file
+   * before the write is rejected, and the file is then removed by cleanup — leaving the
+   * existing record without its file. Pass an ID that is not already in the queue.
+   */
   id?: string
   /**
    * Called within the same TanStackDB transaction as the attachment write,
@@ -91,29 +98,36 @@ export class TanStackDBAttachmentQueue extends AttachmentQueue {
       meta_data: metaData ?? null,
     }
 
-    /**
-     * We use the attachmentService lock to prevent attachment queue race conditions — specifically,
-     * it stops the watcher from treating a newly inserted attachment record as one that needs
-     * to be downloaded.
-     * */
-    await this.withAttachmentContext(async (ctx) => {
-      const tanStackDBTransaction = createTransaction({
-        autoCommit: false,
-        mutationFn: async ({ transaction }) => {
-          await new PowerSyncTransactor({
-            database: ctx.db,
-          }).applyTransaction(transaction)
-        },
-      })
+    try {
+      /**
+       * We use the attachmentService lock to prevent attachment queue race conditions — specifically,
+       * it stops the watcher from treating a newly inserted attachment record as one that needs
+       * to be downloaded.
+       * */
+      await this.withAttachmentContext(async (ctx) => {
+        const tanStackDBTransaction = createTransaction({
+          autoCommit: false,
+          mutationFn: async ({ transaction }) => {
+            await new PowerSyncTransactor({
+              database: ctx.db,
+            }).applyTransaction(transaction)
+          },
+        })
 
-      tanStackDBTransaction.mutate(() => {
-        this.collection.insert(attachment)
-        // allow the user to associate values in this transaction
-        updateHook?.(attachment)
+        await this.runInTransaction(tanStackDBTransaction, () => {
+          this.collection.insert(attachment)
+          // allow the user to associate values in this transaction
+          updateHook?.(attachment)
+        })
       })
-
-      await tanStackDBTransaction.commit()
-    })
+    } catch (error) {
+      /**
+       * The file is written before the transaction opens, so a failed transaction would
+       * otherwise leave an orphaned file behind that no attachment record points to.
+       */
+      await this.deleteLocalFile(localUri)
+      throw error
+    }
 
     return attachment
   }
@@ -135,7 +149,7 @@ export class TanStackDBAttachmentQueue extends AttachmentQueue {
         },
       })
 
-      tanStackDBTransaction.mutate(() => {
+      await this.runInTransaction(tanStackDBTransaction, () => {
         const attachment = this.collection.get(id)
         if (!attachment) {
           throw new Error(`Attachment with id ${id} not found`)
@@ -149,8 +163,48 @@ export class TanStackDBAttachmentQueue extends AttachmentQueue {
         // allow the user to associate values in this transaction
         updateHook?.(attachment)
       })
-
-      await tanStackDBTransaction.commit()
     })
+  }
+
+  /**
+   * Applies `mutations` to `transaction` and commits it, rolling back on any failure.
+   *
+   * `Transaction.mutate` does not roll back when its callback throws, so a throwing
+   * `updateHook` would otherwise leave the transaction pending with its optimistic
+   * mutations still applied to the collections.
+   */
+  protected async runInTransaction(
+    transaction: Transaction,
+    mutations: () => void,
+  ): Promise<void> {
+    /**
+     * `rollback` rejects this promise. The error is already surfaced to the caller by the
+     * throw below, so this catch only stops it from becoming an unhandled rejection.
+     */
+    void transaction.isPersisted.promise.catch(() => {})
+
+    try {
+      transaction.mutate(mutations)
+    } catch (error) {
+      transaction.rollback()
+      throw error
+    }
+
+    await transaction.commit()
+  }
+
+  /**
+   * Best-effort removal of a local file. A cleanup failure is logged rather than thrown,
+   * so that it can never mask the error which triggered the cleanup.
+   */
+  protected async deleteLocalFile(localUri: string): Promise<void> {
+    try {
+      await this.localStorage.deleteFile(localUri)
+    } catch (error) {
+      this.logger.error(
+        `Could not clean up local attachment file ${localUri}`,
+        error,
+      )
+    }
   }
 }
