@@ -1370,6 +1370,23 @@ describe(`Proxy Library`, () => {
         age: 30,
       })
     })
+
+    it(`should preserve untouched custom class instances in changed objects`, () => {
+      class Money {
+        constructor(public cents: number) {}
+      }
+
+      const price = new Money(500)
+      const obj = { details: { name: `Widget`, price } }
+
+      const changes = withChangeTracking(obj, (proxy) => {
+        proxy.details.name = `Gadget`
+      })
+
+      const changedDetails = changes.details as typeof obj.details
+      expect(changedDetails.price).toBe(price)
+      expect(changedDetails.price).toBeInstanceOf(Money)
+    })
   })
 
   describe(`withArrayChangeTracking`, () => {
