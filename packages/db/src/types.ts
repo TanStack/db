@@ -864,6 +864,12 @@ export interface SubscribeChangesOptions<
    * @internal
    */
   onLoadSubsetResult?: (result: Promise<void> | true) => void
+  /**
+   * When true, optimistic delete events are converted to updates with $pendingOperation: 'delete'
+   * instead of being passed through as deletes. This keeps deleted items visible in query results.
+   * @internal
+   */
+  includePendingDeletes?: boolean
 }
 
 export interface SubscribeChangesSnapshotOptions<

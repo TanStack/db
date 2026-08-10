@@ -23,6 +23,7 @@ export const stripVirtualProps = <T extends Record<string, any> | undefined>(
     $origin: _origin,
     $key: _key,
     $collectionId: _collectionId,
+    $pendingOperation: _pendingOperation,
     ...rest
   } = value as Record<string, unknown>
   return rest as T
@@ -30,12 +31,16 @@ export const stripVirtualProps = <T extends Record<string, any> | undefined>(
 
 export const omitVirtualProps = <T extends Record<string, any>>(
   value: T,
-): Omit<T, '$synced' | '$origin' | '$key' | '$collectionId'> => {
+): Omit<
+  T,
+  '$synced' | '$origin' | '$key' | '$collectionId' | '$pendingOperation'
+> => {
   const {
     $synced: _synced,
     $origin: _origin,
     $key: _key,
     $collectionId: _collectionId,
+    $pendingOperation: _pendingOperation,
     ...rest
   } = value as Record<string, unknown>
   return rest as any

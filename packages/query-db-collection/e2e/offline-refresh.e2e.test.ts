@@ -6,7 +6,7 @@
  */
 
 import { describe, expect, it, vi } from 'vitest'
-import { createCollection, BTreeIndex } from '@tanstack/db'
+import { BTreeIndex, createCollection } from '@tanstack/db'
 import { QueryClient } from '@tanstack/query-core'
 import { startOfflineExecutor } from '@tanstack/offline-transactions'
 import { queryCollectionOptions } from '../src/query'
