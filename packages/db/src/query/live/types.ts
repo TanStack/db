@@ -16,6 +16,11 @@ export type Changes<T> = {
   inserts: number
   value: T
   orderByIndex: string | undefined
+  // The retracted (old) side of a change, captured so the live query can detect
+  // an order-only move (same value, different orderByIndex) that the collection's
+  // value-diff would otherwise suppress.
+  previousValue?: T
+  previousOrderByIndex?: string | undefined
 }
 
 export type SyncState = {
