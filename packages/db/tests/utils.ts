@@ -238,12 +238,14 @@ export function mockSyncCollectionOptions<
       syncPendingResolve = resolve
       syncPendingReject = reject
     })
-    syncPendingPromise.then(() => {
-      syncPendingPromise = undefined
-      syncPendingResolve = undefined
-      syncPendingReject = undefined
-    })
+    void syncPendingPromise.finally(clearPendingSync)
     return syncPendingPromise
+  }
+
+  const clearPendingSync = () => {
+    syncPendingPromise = undefined
+    syncPendingResolve = undefined
+    syncPendingReject = undefined
   }
 
   const utils = {
@@ -336,12 +338,14 @@ export function mockSyncCollectionOptionsNoInitialState<
       syncPendingResolve = resolve
       syncPendingReject = reject
     })
-    syncPendingPromise.then(() => {
-      syncPendingPromise = undefined
-      syncPendingResolve = undefined
-      syncPendingReject = undefined
-    })
+    void syncPendingPromise.finally(clearPendingSync)
     return syncPendingPromise
+  }
+
+  const clearPendingSync = () => {
+    syncPendingPromise = undefined
+    syncPendingResolve = undefined
+    syncPendingReject = undefined
   }
 
   const utils = {

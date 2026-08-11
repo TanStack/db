@@ -17,7 +17,8 @@ import { describe, expect, it, onTestFinished, vi } from 'vitest'
 import { powerSyncCollectionOptions } from '../src'
 import { PowerSyncTransactor } from '../src/PowerSyncTransactor'
 import { TEST_DATABASE_IMPLEMENTATION } from './test-db-implementation'
-import type { AbstractPowerSyncDatabase } from '@powersync/node'
+import type { AbstractPowerSyncDatabase, LockContext } from '@powersync/node'
+import type { PendingMutation } from '@tanstack/db'
 
 const APP_SCHEMA = new Schema({
   users: new Table({
@@ -273,6 +274,70 @@ describePowerSync(`PowerSync Integration`, () => {
           .slice(0, 5)
           .every((crudEntry) => crudEntry.transactionId == lastTransactionId),
       ).true
+    })
+
+    it(`should complete transactions that delete one key and insert another (same-millisecond tie)`, async () => {
+      const db = await createDatabase()
+
+      const options = powerSyncCollectionOptions({
+        database: db,
+        table: APP_SCHEMA.props.documents,
+      })
+      const collection = createCollection(options)
+      onTestFinished(() => collection.cleanup())
+      await collection.stateWhenReady()
+
+      // Seed the row which will be deleted in the transaction
+      await collection.insert({ id: `a`, name: `row a` }).isPersisted.promise
+
+      const { trackedTableName } = options.utils.getMeta()
+
+      class SameMillisecondTransactor extends PowerSyncTransactor {
+        protected override async handleDelete(
+          mutation: PendingMutation<any>,
+          context: LockContext,
+          waitForCompletion?: boolean,
+        ) {
+          const result = await super.handleDelete(
+            mutation,
+            context,
+            waitForCompletion,
+          )
+          // Simulate the same-millisecond tie: ensure the delete's diff row
+          // wins the `ORDER BY timestamp DESC` readback of the insert below.
+          await context.execute(
+            `UPDATE ${trackedTableName} SET timestamp = '9999-12-31T23:59:59.999Z'`,
+          )
+          return result
+        }
+      }
+
+      const transactor = new SameMillisecondTransactor({ database: db })
+
+      const tx = createTransaction({
+        autoCommit: false,
+        mutationFn: async ({ transaction }) => {
+          await transactor.applyTransaction(transaction)
+        },
+      })
+
+      tx.mutate(() => {
+        collection.delete(`a`)
+        collection.insert({ id: `b`, name: `row b` })
+      })
+
+      const outcome = await Promise.race([
+        tx.commit().then(() => `persisted` as const),
+        new Promise<`timed out`>((resolve) =>
+          setTimeout(() => resolve(`timed out`), 2_000),
+        ),
+      ])
+      expect(outcome).toBe(`persisted`)
+
+      const documents = await db.getAll<{ id: string }>(
+        `SELECT id FROM documents`,
+      )
+      expect(documents.map((doc) => doc.id)).toEqual([`b`])
     })
 
     it(`should handle transactions with multiple collections`, async () => {
