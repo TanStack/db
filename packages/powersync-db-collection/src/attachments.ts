@@ -87,39 +87,37 @@ export class TanStackDBAttachmentQueue extends AttachmentQueue {
     updateHook,
   }: SaveOptions): Promise<AttachmentQueueRow> {
     const resolvedId = id ?? (await this.generateAttachmentId())
-
-    /**
-     * Checked before the file is written. Writing first would overwrite the existing
-     * attachment's local file, and the cleanup below would then delete it — leaving the
-     * pre-existing record pointing at a file that no longer exists.
-     */
-    if (this.collection.get(resolvedId)) {
-      throw new Error(`Attachment with id ${resolvedId} already exists`)
-    }
-
     const filename = `${resolvedId}.${fileExtension}`
     const localUri = this.localStorage.getLocalUri(filename)
-    const size = await this.localStorage.saveFile(localUri, data)
 
-    const attachment: AttachmentQueueRow = {
-      id: resolvedId,
-      filename,
-      media_type: mediaType ?? null,
-      local_uri: localUri,
-      state: AttachmentState.QUEUED_UPLOAD,
-      has_synced: 0,
-      size,
-      timestamp: new Date().getTime(),
-      meta_data: metaData ?? null,
-    }
-
-    try {
+    return this.withAttachmentContext(async (ctx) => {
       /**
-       * We use the attachmentService lock to prevent attachment queue race conditions — specifically,
-       * it stops the watcher from treating a newly inserted attachment record as one that needs
-       * to be downloaded.
-       * */
-      await this.withAttachmentContext(async (ctx) => {
+       * Checked before the file is written. Writing first would overwrite the existing
+       * attachment's local file, and the cleanup below would then delete it — leaving the
+       * pre-existing record pointing at a file that no longer exists.
+       *
+       * Deliberately outside the `try`: this throw must not reach the cleanup, because the file
+       * at `localUri` belongs to the pre-existing attachment rather than to this call.
+       */
+      if (this.collection.get(resolvedId)) {
+        throw new Error(`Attachment with id ${resolvedId} already exists`)
+      }
+
+      const size = await this.localStorage.saveFile(localUri, data)
+
+      const attachment: AttachmentQueueRow = {
+        id: resolvedId,
+        filename,
+        media_type: mediaType ?? null,
+        local_uri: localUri,
+        state: AttachmentState.QUEUED_UPLOAD,
+        has_synced: 0,
+        size,
+        timestamp: new Date().getTime(),
+        meta_data: metaData ?? null,
+      }
+
+      try {
         const tanStackDBTransaction = createTransaction({
           autoCommit: false,
           mutationFn: async ({ transaction }) => {
@@ -134,17 +132,17 @@ export class TanStackDBAttachmentQueue extends AttachmentQueue {
           // allow the user to associate values in this transaction
           updateHook?.(attachment)
         })
-      })
-    } catch (error) {
-      /**
-       * The file is written before the transaction opens, so a failed transaction would
-       * otherwise leave an orphaned file behind that no attachment record points to.
-       */
-      await this.deleteLocalFile(localUri)
-      throw error
-    }
+      } catch (error) {
+        /**
+         * The file is written before the transaction opens, so a failed transaction would
+         * otherwise leave an orphaned file behind that no attachment record points to.
+         */
+        await this.deleteLocalFile(localUri)
+        throw error
+      }
 
-    return attachment
+      return attachment
+    })
   }
 
   /**

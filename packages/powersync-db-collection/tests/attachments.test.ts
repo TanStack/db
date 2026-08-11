@@ -24,6 +24,7 @@ import type {
   RemoteStorageAdapter,
   WatchedAttachmentItem,
 } from '@powersync/common'
+import type { AttachmentQueueRow } from '../src/attachments'
 
 // A minimal valid 1x1 pixel JPEG used as the remote payload for downloads.
 const MOCK_JPEG_U8A = [
@@ -345,6 +346,47 @@ describePowerSync(`PowerSync AttachmentQueue (TanStackDB)`, () => {
       // then deletes it, leaving the original record pointing at nothing.
       expect(await localStorage.fileExists(original.local_uri!)).toBe(true)
       expect(attachmentsCollection.get(original.id)?.size).toBe(original.size)
+    })
+
+    it(`keeps the winner's file intact when two saves race on the same id`, async () => {
+      const { createQueue, attachmentsCollection, localStorage } = await setup()
+      const queue = createQueue()
+
+      const id = `contended-id`
+      // Distinct payload sizes, so an overwrite is detectable from the file length
+      const smallPayload = createMockJpegBuffer()
+      const largePayload = new Uint8Array(999).fill(7).buffer
+      expect(smallPayload.byteLength).not.toBe(largePayload.byteLength)
+
+      // Both calls run their duplicate check before either has inserted
+      const results = await Promise.allSettled([
+        queue.save({ id, data: smallPayload, fileExtension: `jpg` }),
+        queue.save({ id, data: largePayload, fileExtension: `jpg` }),
+      ])
+
+      const fulfilled = results.filter(
+        (result): result is PromiseFulfilledResult<AttachmentQueueRow> =>
+          result.status === `fulfilled`,
+      )
+      const rejected = results.filter(
+        (result): result is PromiseRejectedResult =>
+          result.status === `rejected`,
+      )
+
+      expect(fulfilled).toHaveLength(1)
+      expect(rejected).toHaveLength(1)
+      expect(rejected[0]!.reason).toEqual(
+        expect.objectContaining({ message: expect.stringMatching(/exists/) }),
+      )
+
+      const winner = fulfilled[0]!.value
+      expect(attachmentsCollection.size).toBe(1)
+      expect(attachmentsCollection.get(id)?.size).toBe(winner.size)
+
+      // The loser's cleanup must not delete the file the winner's record points at
+      expect(await localStorage.fileExists(winner.local_uri!)).toBe(true)
+      const onDisk = await localStorage.readFile(winner.local_uri!)
+      expect(onDisk.byteLength).toBe(winner.size)
     })
 
     it(`removes the local file and rolls back when the updateHook throws`, async () => {
