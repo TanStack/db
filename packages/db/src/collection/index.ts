@@ -437,9 +437,9 @@ export class CollectionImpl<
     return this._changes.layoutRevision
   }
 
-  /** Mark the next committed publication as layout-changing. Internal. */
+  /** Mark the active sync transaction as layout-changing. Internal. */
   public _markLayoutChange(): void {
-    this._changes.markLayoutChange()
+    this._sync.markLayoutChange()
   }
 
   /**

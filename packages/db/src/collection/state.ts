@@ -25,6 +25,7 @@ interface PendingSyncedTransaction<
   TKey extends string | number = string | number,
 > {
   committed: boolean
+  layoutChanged: boolean
   operations: Array<OptimisticChangeMessage<T>>
   truncate?: boolean
   deletedKeys: Set<string | number>
@@ -836,10 +837,12 @@ export class CollectionStateManager<
       uncommittedSyncedTransactions,
       hasTruncateSync,
       hasImmediateSync,
+      layoutChanged,
     } = this.pendingSyncedTransactions.reduce(
       (acc, t) => {
         if (t.committed) {
           acc.committedSyncedTransactions.push(t)
+          acc.layoutChanged ||= t.layoutChanged
           if (t.truncate) {
             acc.hasTruncateSync = true
           }
@@ -860,6 +863,7 @@ export class CollectionStateManager<
         >,
         hasTruncateSync: false,
         hasImmediateSync: false,
+        layoutChanged: false,
       },
     )
 
@@ -1331,7 +1335,7 @@ export class CollectionStateManager<
       }
 
       // End batching and emit all events (combines any batched events with sync events)
-      this.changes.emitEvents(events, true)
+      this.changes.emitEvents(events, true, layoutChanged)
 
       this.pendingSyncedTransactions = uncommittedSyncedTransactions
 
