@@ -154,7 +154,12 @@ export class CollectionStateManager<
   }
 
   /**
-   * Checks if a row has pending optimistic mutations (not yet confirmed by sync).
+   * Checks whether this row currently has no pending local optimistic writes.
+   *
+   * This is local mutation status, not backend confirmation: `true` means the
+   * row is not currently affected by an optimistic transaction in this
+   * collection's visible state.
+   *
    * Used to compute the $synced virtual property.
    */
   public isRowSynced(key: TKey): boolean {

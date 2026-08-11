@@ -83,7 +83,7 @@ export class CollectionSubscription
   // Track the last key sent via requestLimitedSnapshot for cursor-based pagination
   private lastSentKey: string | number | undefined
 
-  private filteredCallback: (changes: Array<ChangeMessage<any, any>>) => void
+  private filteredCallback: (changes: Array<ChangeMessage<any, any>>) => boolean
 
   private orderByIndex: IndexInterface<string | number> | undefined
 
@@ -99,6 +99,7 @@ export class CollectionSubscription
   // This prevents a flash of missing content between deletes and new inserts
   private isBufferingForTruncate = false
   private truncateBuffer: Array<Array<ChangeMessage<any, any>>> = []
+  private truncateBufferHasLayoutChange = false
   private pendingTruncateRefetches: Set<Promise<void>> = new Set()
 
   public get status(): SubscriptionStatus {
@@ -132,7 +133,10 @@ export class CollectionSubscription
     // Create a filtered callback if where clause is provided
     this.filteredCallback = options.whereExpression
       ? createFilteredCallback(this.callback, options)
-      : this.callback
+      : (changes) => {
+          this.callback(changes)
+          return true
+        }
 
     // Listen for truncate events to re-request data after must-refetch
     // When a truncate happens (e.g., from a 409 must-refetch), all collection data is cleared.
@@ -245,11 +249,14 @@ export class CollectionSubscription
     // Flatten all buffered changes into a single array for atomic emission
     // This ensures consumers see all truncate changes (deletes + inserts) in one callback
     const merged = this.truncateBuffer.flat()
-    if (merged.length > 0) {
-      this.filteredCallback(merged)
+    const layoutChanged = this.truncateBufferHasLayoutChange
+    if (merged.length > 0 || layoutChanged) {
+      const delivered = this.filteredCallback(merged)
+      if (layoutChanged && !delivered) this.filteredCallback([])
     }
 
     this.truncateBuffer = []
+    this.truncateBufferHasLayoutChange = false
   }
 
   setOrderByIndex(index: IndexInterface<any>) {
@@ -318,7 +325,10 @@ export class CollectionSubscription
     return this.snapshotSent
   }
 
-  emitEvents(changes: Array<ChangeMessage<any, any>>) {
+  emitEvents(
+    changes: Array<ChangeMessage<any, any>>,
+    layoutChanged = false,
+  ): boolean {
     const newChanges = this.filterAndFlipChanges(changes)
 
     if (this.isBufferingForTruncate) {
@@ -327,8 +337,12 @@ export class CollectionSubscription
       if (newChanges.length > 0) {
         this.truncateBuffer.push(newChanges)
       }
+      if (layoutChanged) this.truncateBufferHasLayoutChange = true
+      return false
     } else {
-      this.filteredCallback(newChanges)
+      const delivered = this.filteredCallback(newChanges)
+      if (layoutChanged && !delivered) return this.filteredCallback([])
+      return delivered
     }
   }
 
@@ -728,6 +742,7 @@ export class CollectionSubscription
     // Clean up truncate buffer state
     this.isBufferingForTruncate = false
     this.truncateBuffer = []
+    this.truncateBufferHasLayoutChange = false
     this.pendingTruncateRefetches.clear()
 
     // Unload all subsets that this subscription loaded

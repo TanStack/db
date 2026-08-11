@@ -420,8 +420,12 @@ export function useLiveQuery(
   if (needsNewCollection) {
     // Defer the initial notify: useSyncExternalStore must not be notified
     // synchronously during subscribe.
+    // Wholesale mode: React re-reads getSnapshot() on notify, keeps the
+    // hook's pre-observer loading policy, and — because wholesale delivers
+    // nothing synchronously during subscribe — never notifies
+    // useSyncExternalStore inside its own subscribe call.
     observerRef.current = createLiveQueryObserver(collectionRef.current, {
-      deferInitialNotify: true,
+      mode: `wholesale`,
     })
   }
   const observer = observerRef.current!

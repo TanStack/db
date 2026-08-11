@@ -191,9 +191,11 @@ export function injectLiveQuery(opts: any) {
       })
     }
 
-    // Handle LiveQueryCollectionConfig objects
+    // Handle LiveQueryCollectionConfig objects. Default startSync/gcTime to
+    // match the query-fn and reactive-options paths, but let an explicit value
+    // in the config win — otherwise a bare `{ query }` never syncs.
     if (opts && typeof opts === `object` && typeof opts.query === `function`) {
-      return createLiveQueryCollection(opts)
+      return createLiveQueryCollection({ startSync: true, gcTime: 0, ...opts })
     }
 
     throw new Error(`Invalid options provided to injectLiveQuery`)
@@ -250,14 +252,18 @@ export function injectLiveQuery(opts: any) {
     // The shared observer owns sync start, subscription, the ready-race, and
     // status transitions; Angular re-reads the whole collection on each notify
     // (wholesale) into its signals.
-    const observer = createLiveQueryObserver(currentCollection)
-
-    // Seed immediately from the post-start state, then re-read on every notify.
-    syncDataFromCollection(currentCollection)
+    // Angular re-reads the collection on notify; wholesale mode preserves its
+    // pre-observer loading policy (no initial-state snapshot request).
+    const observer = createLiveQueryObserver(currentCollection, {
+      mode: `wholesale`,
+    })
 
     const unsubscribe = observer.subscribe(() => {
       syncDataFromCollection(currentCollection)
     })
+    // Wholesale attach suppresses listener calls raised by synchronous sync
+    // startup. Read once after subscribe returns to capture that final state.
+    syncDataFromCollection(currentCollection)
     unsub = () => {
       unsubscribe()
       observer.dispose()

@@ -249,7 +249,7 @@ export class CollectionConfigBuilder<
       sync: this.getSyncConfig(),
       compare: this.compare,
       defaultStringCollation: this.compareOptions,
-      gcTime: this.config.gcTime || 5000, // 5 seconds by default for live queries
+      gcTime: this.config.gcTime ?? 5000, // 5 seconds by default for live queries
       schema: this.config.schema,
       onInsert: this.config.onInsert,
       onUpdate: this.config.onUpdate,
@@ -816,17 +816,10 @@ export class CollectionConfigBuilder<
       if (hasParentChanges) {
         begin()
         changesToApply.forEach(this.applyChanges.bind(this, config))
-        commit()
-        // An order-only move (the row's projected value is unchanged but its
-        // `orderByIndex` moved) is swallowed by the collection's value-diff, so
-        // `commit()` emits nothing even though `.values()`/`.entries()` are now
-        // re-sorted. Publish an explicit layout-change notification so ordered
-        // consumers re-read — a first-class signal, not a forged row `update`.
-        // Only when the commit published nothing else: any real row change
-        // already notifies subscribers, who re-read the re-sorted collection.
-        if (needsLayoutOnlyPublication(changesToApply)) {
-          emitLayoutChange(config.collection)
+        if (hasOrderOnlyMove(changesToApply)) {
+          markLayoutChange(config.collection)
         }
+        commit()
       }
       pendingChanges = new Map()
 
@@ -2010,14 +2003,10 @@ function flushIncludesState(
               entry.syncMethods.write({ value: change.value, type: `delete` })
             }
           }
-          entry.syncMethods.commit()
-          // Same order-only-move handling as the parent flush: a child row that
-          // moved without a value change is swallowed by the value-diff, so
-          // publish a layout-only notification when the child commit published
-          // nothing else.
-          if (needsLayoutOnlyPublication(childChanges)) {
-            emitLayoutChange(entry.syncMethods.collection)
+          if (hasOrderOnlyMove(childChanges)) {
+            markLayoutChange(entry.syncMethods.collection)
           }
+          entry.syncMethods.commit()
         }
 
         // Update routing index for nested includes
@@ -2365,46 +2354,31 @@ function accumulateChanges<T>(
 }
 
 /**
- * Decide whether a flush needs a standalone layout-change publication.
+ * Decide whether a flush contains an order-only move.
  *
  * An "order-only move" — a row updated in place whose `orderByIndex` moved but
  * whose projected value is deep-equal to before — is swallowed by the value-diff
- * and needs an explicit layout notification. But that notification is only
- * needed when the same `commit()` published nothing else: any real change
- * (insert, delete, or a value-changed update) already notifies subscribers, who
- * re-read the re-sorted collection, so a second layout event would be redundant.
- *
- * Returns true iff there is at least one order-only move AND no change that the
- * commit itself publishes.
+ * and needs an explicit layout notification. The collection coalesces that
+ * signal with any ordinary row publication per subscriber.
  */
-function needsLayoutOnlyPublication<T>(
+function hasOrderOnlyMove<T>(
   changesToApply: Map<unknown, Changes<T>>,
 ): boolean {
-  let layoutMoved = false
-  let commitPublishes = false
   for (const changes of changesToApply.values()) {
     const isUpdate = changes.inserts > 0 && changes.deletes > 0
-    if (!isUpdate) {
-      // A net insert or delete always publishes a row change.
-      commitPublishes = true
-    } else if (
-      changes.previousValue === undefined ||
-      !deepEquals(changes.previousValue, changes.value)
+    if (
+      isUpdate &&
+      changes.previousValue !== undefined &&
+      deepEquals(changes.previousValue, changes.value) &&
+      changes.orderByIndex !== changes.previousOrderByIndex
     ) {
-      // In-place update whose value changed — publishes a normal `update`.
-      commitPublishes = true
-    } else if (changes.orderByIndex !== changes.previousOrderByIndex) {
-      // Value unchanged, position moved — swallowed by the value-diff.
-      layoutMoved = true
+      return true
     }
   }
-  return layoutMoved && !commitPublishes
+  return false
 }
 
-/** Emit a layout-only change notification on a live-query collection. */
-function emitLayoutChange(collection: Collection<any, any, any>): void {
-  const changesManager = (collection as any)._changes as {
-    emitLayoutChangeEvent: () => void
-  }
-  changesManager.emitLayoutChangeEvent()
+/** Mark the collection's next commit as layout-changing. */
+function markLayoutChange(collection: { _markLayoutChange: () => void }): void {
+  collection._markLayoutChange()
 }
