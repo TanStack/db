@@ -232,8 +232,8 @@ export function useLiveInfiniteQuery<TContext extends Context>(
       {
         pageSize,
         initialPageParam,
-        // useSyncExternalStore must not be notified synchronously on subscribe.
-        deferInitialNotify: true,
+        // Wholesale mode provides useSyncExternalStore's no-sync-notify contract.
+        mode: 'wholesale',
         // A query-function collection already carries page 1's window in its
         // query, so defer the (redundant) first apply until it is ready; a
         // pre-created collection needs its window established up front.

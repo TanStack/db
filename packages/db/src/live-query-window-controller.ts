@@ -1,3 +1,4 @@
+import { LiveQueryWindowControllerDisposedError } from './errors.js'
 import { createLiveQueryObserver } from './live-query-observer.js'
 import type {
   CreateLiveQueryObserverOptions,
@@ -83,6 +84,15 @@ interface CachedFrom {
   isFetchingNextPage: boolean
 }
 
+interface SubscriptionRecord {
+  listener: () => void
+  active: boolean
+}
+
+interface Publication {
+  targets: Array<SubscriptionRecord>
+}
+
 class LiveQueryWindowControllerImpl<
   T extends object,
   TKey extends string | number,
@@ -92,6 +102,7 @@ class LiveQueryWindowControllerImpl<
   private readonly pageSize: number
   private readonly initialPageParam: number
   private readonly waitForReady: boolean
+  private readonly wholesale: boolean
 
   private loadedPageCount = 1
   private isFetchingNextPage = false
@@ -102,7 +113,10 @@ class LiveQueryWindowControllerImpl<
   // the fetching flag for a window that no longer applies.
   private windowGeneration = 0
 
-  private readonly listeners = new Set<() => void>()
+  private readonly subscriptions = new Set<SubscriptionRecord>()
+  private readonly publicationQueue: Array<Publication> = []
+  private dispatching = false
+  private blockDelivery = false
   private observerUnsub: (() => void) | null = null
   private cachedSnapshot: LiveQueryWindowSnapshot<T, TKey> | null = null
   private cachedFrom: CachedFrom | null = null
@@ -116,8 +130,9 @@ class LiveQueryWindowControllerImpl<
     this.pageSize = options.pageSize || DEFAULT_PAGE_SIZE
     this.initialPageParam = options.initialPageParam ?? 0
     this.waitForReady = options.waitForReady ?? false
+    this.wholesale = options.mode === `wholesale`
     this.observer = createLiveQueryObserver<T, TKey>(collection, {
-      deferInitialNotify: options.deferInitialNotify,
+      mode: options.mode,
     })
   }
 
@@ -179,21 +194,41 @@ class LiveQueryWindowControllerImpl<
   }
 
   subscribe(listener: () => void): () => void {
-    this.listeners.add(listener)
-    if (this.listeners.size === 1) {
-      this.observerUnsub = this.observer.subscribe(() =>
-        this.onObserverNotify(),
-      )
-      // Establish the current window now that the query is active.
-      this.applyWindow()
+    if (this.disposed) throw new LiveQueryWindowControllerDisposedError()
+
+    const record: SubscriptionRecord = { listener, active: true }
+    this.subscriptions.add(record)
+    if (this.subscriptions.size === 1) {
+      // A wholesale subscriber re-reads the snapshot immediately after
+      // subscribing, so setup publications are redundant and must not fire
+      // inside useSyncExternalStore's subscribe call.
+      this.blockDelivery = this.wholesale
+      let observerUnsub: (() => void) | null = null
+      try {
+        observerUnsub = this.observer.subscribe(() => this.onObserverNotify())
+        if (this.hasBeenDisposed()) {
+          observerUnsub()
+        } else {
+          this.observerUnsub = observerUnsub
+          // Establish the current window now that the query is active.
+          this.applyWindow()
+        }
+      } catch (error) {
+        observerUnsub?.()
+        this.observerUnsub = null
+        record.active = false
+        this.subscriptions.delete(record)
+        throw error
+      } finally {
+        this.blockDelivery = false
+      }
     }
 
-    let active = true
     return () => {
-      if (!active) return
-      active = false
-      this.listeners.delete(listener)
-      if (this.listeners.size === 0) {
+      if (!record.active) return
+      record.active = false
+      this.subscriptions.delete(record)
+      if (this.subscriptions.size === 0) {
         this.observerUnsub?.()
         this.observerUnsub = null
       }
@@ -230,7 +265,9 @@ class LiveQueryWindowControllerImpl<
     this.observerUnsub?.()
     this.observerUnsub = null
     this.observer.dispose()
-    this.listeners.clear()
+    for (const record of this.subscriptions) record.active = false
+    this.subscriptions.clear()
+    this.publicationQueue.length = 0
   }
 
   private onObserverNotify(): void {
@@ -287,7 +324,29 @@ class LiveQueryWindowControllerImpl<
   }
 
   private notify(): void {
-    this.listeners.forEach((listener) => listener())
+    if (this.disposed || this.blockDelivery || this.subscriptions.size === 0) {
+      return
+    }
+
+    this.publicationQueue.push({ targets: [...this.subscriptions] })
+    if (this.dispatching) return
+
+    this.dispatching = true
+    try {
+      while (this.publicationQueue.length > 0) {
+        const publication = this.publicationQueue.shift()!
+        for (const record of publication.targets) {
+          if (this.hasBeenDisposed()) return
+          record.listener()
+        }
+      }
+    } finally {
+      this.dispatching = false
+    }
+  }
+
+  private hasBeenDisposed(): boolean {
+    return this.disposed
   }
 }
 

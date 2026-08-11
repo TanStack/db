@@ -1,6 +1,7 @@
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 import { createCollection } from '../src/collection/index.js'
 import { createLiveQueryCollection } from '../src/query/live-query-collection.js'
+import { LiveQueryWindowControllerDisposedError } from '../src/errors.js'
 import { createLiveQueryWindowController } from '../src/live-query-window-controller.js'
 import { mockSyncCollectionOptions } from './utils.js'
 
@@ -151,6 +152,125 @@ describe(`createLiveQueryWindowController`, () => {
     await flush()
     expect(notifications).toBeGreaterThan(0)
     controller.dispose()
+  })
+
+  it(`does not notify synchronously while subscribing`, () => {
+    const lq = makeOrderedLiveQuery(makeSource(), 2)
+    vi.spyOn(lq.utils, `setWindow`).mockReturnValue(new Promise<void>(() => {}))
+    const controller = createLiveQueryWindowController<Row, string>(lq as any, {
+      pageSize: 2,
+      mode: `wholesale`,
+    })
+    let subscribing = true
+    let notifiedWhileSubscribing = false
+
+    const unsubscribe = controller.subscribe(() => {
+      if (subscribing) notifiedWhileSubscribing = true
+    })
+    subscribing = false
+
+    expect(notifiedWhileSubscribing).toBe(false)
+    unsubscribe()
+    controller.dispose()
+  })
+
+  it(`keeps duplicate callback subscriptions independent`, async () => {
+    const lq = makeOrderedLiveQuery(makeSource(), 2)
+    const controller = createLiveQueryWindowController<Row, string>(lq as any, {
+      pageSize: 2,
+    })
+    let notifications = 0
+    const listener = () => notifications++
+    const unsubscribeFirst = controller.subscribe(listener)
+    const unsubscribeSecond = controller.subscribe(listener)
+    await lq.preload()
+    await flush()
+
+    notifications = 0
+    unsubscribeFirst()
+    controller.fetchNextPage()
+    await flush()
+
+    expect(notifications).toBeGreaterThan(0)
+    unsubscribeSecond()
+    controller.dispose()
+  })
+
+  it(`does not deliver an in-flight notification to a late subscriber`, async () => {
+    const lq = makeOrderedLiveQuery(makeSource(), 2)
+    const controller = createLiveQueryWindowController<Row, string>(lq as any, {
+      pageSize: 2,
+    })
+    let publishing = false
+    let lateNotifications = 0
+    let unsubscribeLate: (() => void) | undefined
+    const unsubscribeFirst = controller.subscribe(() => {
+      if (publishing && !unsubscribeLate) {
+        unsubscribeLate = controller.subscribe(() => lateNotifications++)
+      }
+    })
+    await lq.preload()
+    await flush()
+    vi.spyOn(lq.utils, `setWindow`).mockReturnValue(true)
+
+    publishing = true
+    controller.fetchNextPage()
+    publishing = false
+
+    expect(lateNotifications).toBe(0)
+    unsubscribeLate?.()
+    unsubscribeFirst()
+    controller.dispose()
+  })
+
+  it(`rejects every subscription after disposal`, () => {
+    const controller = createLiveQueryWindowController<Row, string>(
+      makeOrderedLiveQuery(makeSource(), 2) as any,
+      { pageSize: 2 },
+    )
+    controller.dispose()
+
+    expect(() => controller.subscribe(() => {})).toThrow(
+      LiveQueryWindowControllerDisposedError,
+    )
+    expect(() => controller.subscribe(() => {})).toThrow(
+      LiveQueryWindowControllerDisposedError,
+    )
+  })
+
+  it(`releases subscriptions when disposed during initial replay`, () => {
+    const lq = makeOrderedLiveQuery(makeSource(), 2)
+    const controller = createLiveQueryWindowController<Row, string>(lq as any, {
+      pageSize: 2,
+    })
+
+    controller.subscribe(() => controller.dispose())
+
+    expect(lq.subscriberCount).toBe(0)
+  })
+
+  it(`stops an in-flight publication when a listener disposes`, async () => {
+    const lq = makeOrderedLiveQuery(makeSource(), 2)
+    const controller = createLiveQueryWindowController<Row, string>(lq as any, {
+      pageSize: 2,
+    })
+    let publishing = false
+    let secondListenerNotifications = 0
+    controller.subscribe(() => {
+      if (publishing) controller.dispose()
+    })
+    controller.subscribe(() => {
+      if (publishing) secondListenerNotifications++
+    })
+    await lq.preload()
+    await flush()
+    vi.spyOn(lq.utils, `setWindow`).mockReturnValue(true)
+
+    publishing = true
+    controller.fetchNextPage()
+    publishing = false
+
+    expect(secondListenerNotifications).toBe(0)
   })
 
   it(`returns a stable snapshot identity when nothing changed`, async () => {
