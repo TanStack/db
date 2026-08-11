@@ -121,10 +121,15 @@ function ensureActionsTargetRows(
   history: Array<HistoryAction>,
 ): Array<HistoryAction> {
   const keysByLevel = Array.from({ length: 5 }, () => new Set<number>())
+  const positionsByLevel = Array.from(
+    { length: 5 },
+    () => new Map<number, number>(),
+  )
   const rolledBackLevels = new Set<HistoryAction[`level`]>()
 
   return history.map((action) => {
     const keys = keysByLevel[action.level]!
+    const positions = positionsByLevel[action.level]!
     if (
       rolledBackLevels.has(action.level) &&
       (action.type === `optimisticConfirm` ||
@@ -135,7 +140,9 @@ function ensureActionsTargetRows(
     }
     if (action.type === `put`) {
       keys.add(action.id)
-      return action
+      const position = positions.get(action.id) ?? action.position
+      positions.set(action.id, position)
+      return { ...action, position }
     }
     if (keys.size === 0) {
       keys.add(action.id)
@@ -146,6 +153,7 @@ function ensureActionsTargetRows(
     const id = existingKeys[action.id % existingKeys.length]!
     if (action.type === `delete`) {
       keys.delete(id)
+      positions.delete(id)
     }
     if (action.type === `optimisticRollback`) {
       // The shared mock sync helper retains its rejected mutation promise, so
@@ -199,6 +207,48 @@ const sharedMaterializeSeed: MaterializeScenario = {
     `middle-1`,
     `shared-1`,
     `leaf-1`,
+  ],
+}
+
+const confirmedChildReorderSeed: Scenario = {
+  depth: 2,
+  history: [
+    {
+      type: `put`,
+      level: 0,
+      id: 0,
+      parentGroup: 0,
+      group: 0,
+      value: 0,
+      position: 0,
+    },
+    {
+      type: `put`,
+      level: 1,
+      id: 1,
+      parentGroup: 0,
+      group: 0,
+      value: 0,
+      position: -1,
+    },
+    {
+      type: `put`,
+      level: 1,
+      id: 2,
+      parentGroup: 0,
+      group: 0,
+      value: 0,
+      position: -1,
+    },
+    {
+      type: `put`,
+      level: 1,
+      id: 1,
+      parentGroup: 0,
+      group: 0,
+      value: 0,
+      position: 0,
+    },
   ],
 }
 
@@ -675,6 +725,32 @@ async function cleanupSources(sources: Sources) {
   )
 }
 
+async function expectScenarioMatches(scenario: Scenario): Promise<void> {
+  const sources = createSources()
+  const incremental = createIncrementalQuery(scenario.depth, sources)
+  const roots = new Map<number, RootRow>()
+  const levels = Array.from({ length: 4 }, () => new Map<number, ChildRow>())
+
+  try {
+    await incremental.preload()
+    expect(stripVirtualProperties(incremental.toArray)).toEqual([])
+
+    const assertMatches = () => {
+      expect(stripVirtualProperties(incremental.toArray)).toEqual(
+        recompute(roots, levels, scenario.depth),
+      )
+    }
+
+    for (const action of scenario.history) {
+      await applyAction(action, sources, roots, levels, assertMatches)
+      assertMatches()
+    }
+  } finally {
+    await incremental.cleanup()
+    await cleanupSources(sources)
+  }
+}
+
 function createMaterializeSources() {
   return {
     roots: createControlledCollection<MaterializeRoot>(`materialize-roots`),
@@ -858,34 +934,7 @@ async function expectMaterializeScenarioMatches({
 describe(`includes recompute oracle`, () => {
   fcTest.prop([scenarioArbitrary], { numRuns: 40 })(
     `matches naive recomputation after every incremental change`,
-    async (scenario) => {
-      const sources = createSources()
-      const incremental = createIncrementalQuery(scenario.depth, sources)
-      const roots = new Map<number, RootRow>()
-      const levels = Array.from(
-        { length: 4 },
-        () => new Map<number, ChildRow>(),
-      )
-
-      try {
-        await incremental.preload()
-        expect(stripVirtualProperties(incremental.toArray)).toEqual([])
-
-        const assertMatches = () => {
-          expect(stripVirtualProperties(incremental.toArray)).toEqual(
-            recompute(roots, levels, scenario.depth),
-          )
-        }
-
-        for (const action of scenario.history) {
-          await applyAction(action, sources, roots, levels, assertMatches)
-          assertMatches()
-        }
-      } finally {
-        await incremental.cleanup()
-        await cleanupSources(sources)
-      }
-    },
+    expectScenarioMatches,
   )
 
   fcTest.prop(
@@ -1102,6 +1151,14 @@ describe(`includes recompute oracle`, () => {
 
   // These expected failures are the red seeds later refactors must make green.
   // Once a bug is fixed, Vitest fails because the matching seed passes.
+  fcTest.fails.prop([fc.constant(confirmedChildReorderSeed)], {
+    numRuns: 1,
+    seed: 2051245230,
+  })(
+    `discovered seed: confirmed child reorder matches recomputation`,
+    expectScenarioMatches,
+  )
+
   fcTest.fails.prop([fc.constant(sharedMaterializeSeed)], {
     numRuns: 1,
     seed: 1685,
