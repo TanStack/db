@@ -125,28 +125,22 @@ function ensureActionsTargetRows(
     { length: 5 },
     () => new Map<number, number>(),
   )
-  const rolledBackLevels = new Set<HistoryAction[`level`]>()
 
   return history.map((action) => {
     const keys = keysByLevel[action.level]!
     const positions = positionsByLevel[action.level]!
-    if (
-      rolledBackLevels.has(action.level) &&
-      (action.type === `optimisticConfirm` ||
-        action.type === `optimisticRollback`)
-    ) {
-      keys.add(action.id)
-      return { ...action, type: `put` }
-    }
-    if (action.type === `put`) {
+    const normalizePut = (): HistoryAction => {
       keys.add(action.id)
       const position = positions.get(action.id) ?? action.position
       positions.set(action.id, position)
-      return { ...action, position }
+      return { ...action, type: `put`, position }
+    }
+
+    if (action.type === `put`) {
+      return normalizePut()
     }
     if (keys.size === 0) {
-      keys.add(action.id)
-      return { ...action, type: `put` }
+      return normalizePut()
     }
 
     const existingKeys = [...keys]
@@ -154,11 +148,6 @@ function ensureActionsTargetRows(
     if (action.type === `delete`) {
       keys.delete(id)
       positions.delete(id)
-    }
-    if (action.type === `optimisticRollback`) {
-      // The shared mock sync helper retains its rejected mutation promise, so
-      // it cannot start another optimistic mutation on this source.
-      rolledBackLevels.add(action.level)
     }
     return { ...action, id }
   })
@@ -321,6 +310,8 @@ function recompute(
   }))
 }
 
+// Collection delivery metadata is independent of include materialization.
+// Compare only the user-defined row shape modeled by the recompute oracle.
 function stripVirtualProperties(value: unknown): unknown {
   if (Array.isArray(value)) {
     return value.map(stripVirtualProperties)
@@ -598,6 +589,16 @@ async function settleOptimisticAction(
   })
 }
 
+function expectAssertionFailure<TArgs extends Array<unknown>>(
+  assertion: (...args: TArgs) => Promise<void>,
+): (...args: TArgs) => Promise<void> {
+  return async (...args) => {
+    await expect(assertion(...args)).rejects.toMatchObject({
+      name: `AssertionError`,
+    })
+  }
+}
+
 async function applyAction(
   action: HistoryAction,
   sources: Sources,
@@ -615,6 +616,8 @@ async function applyAction(
       return
     }
 
+    // Keep correlation keys stable in green fuzz histories. The known
+    // correlation-key update failure has its own deterministic seed below.
     const next: RootRow = {
       id: action.id,
       group: current?.group ?? action.group,
@@ -673,6 +676,8 @@ async function applyAction(
     return
   }
 
+  // Keep correlation keys stable in green fuzz histories. The known
+  // correlation-key update failure has its own deterministic seed below.
   const next: ChildRow = {
     id: action.id,
     parentGroup: current?.parentGroup ?? action.parentGroup,
@@ -932,6 +937,50 @@ async function expectMaterializeScenarioMatches({
 }
 
 describe(`includes recompute oracle`, () => {
+  fcTest(`supports repeated optimistic rollbacks in one history`, async () => {
+    await expectScenarioMatches({
+      depth: 1,
+      history: [
+        {
+          type: `put`,
+          level: 0,
+          id: 0,
+          parentGroup: 0,
+          group: 0,
+          value: 0,
+          position: 0,
+        },
+        {
+          type: `put`,
+          level: 1,
+          id: 0,
+          parentGroup: 0,
+          group: 0,
+          value: 0,
+          position: 0,
+        },
+        {
+          type: `optimisticRollback`,
+          level: 1,
+          id: 0,
+          parentGroup: 0,
+          group: 0,
+          value: 1,
+          position: 0,
+        },
+        {
+          type: `optimisticRollback`,
+          level: 1,
+          id: 0,
+          parentGroup: 0,
+          group: 0,
+          value: 2,
+          position: 0,
+        },
+      ],
+    })
+  })
+
   fcTest.prop([scenarioArbitrary], { numRuns: 40 })(
     `matches naive recomputation after every incremental change`,
     expectScenarioMatches,
@@ -958,7 +1007,7 @@ describe(`includes recompute oracle`, () => {
           value: fc.integer({ min: -3, max: 3 }),
           position: fc.integer({ min: -2, max: 2 }),
         }),
-        { selector: (row) => row.id, maxLength: 5 },
+        { selector: (row) => row.id, minLength: 1, maxLength: 5 },
       ),
       fc.uniqueArray(
         fc.record({
@@ -973,7 +1022,7 @@ describe(`includes recompute oracle`, () => {
     ],
     { numRuns: 25 },
   )(
-    `is unchanged by alpha-renaming, sibling reorder, or an unrelated sibling`,
+    `is unchanged by alpha-renaming, sibling declaration order, or an unrelated sibling`,
     async (rootRows, childRows) => {
       const roots = createControlledCollection<RootRow>(
         `metamorphic-roots`,
@@ -1149,30 +1198,30 @@ describe(`includes recompute oracle`, () => {
     },
   )
 
-  // These expected failures are the red seeds later refactors must make green.
-  // Once a bug is fixed, Vitest fails because the matching seed passes.
-  fcTest.fails.prop([fc.constant(confirmedChildReorderSeed)], {
+  // These known failures must reject with the oracle's assertion mismatch.
+  // A fixed bug or an unrelated runtime error makes the matching test fail.
+  fcTest.prop([fc.constant(confirmedChildReorderSeed)], {
     numRuns: 1,
     seed: 2051245230,
   })(
     `discovered seed: confirmed child reorder matches recomputation`,
-    expectScenarioMatches,
+    expectAssertionFailure(expectScenarioMatches),
   )
 
-  fcTest.fails.prop([fc.constant(sharedMaterializeSeed)], {
+  fcTest.prop([fc.constant(sharedMaterializeSeed)], {
     numRuns: 1,
     seed: 1685,
   })(
     `known seed: shared scalar materialization preserves the deepest row`,
-    expectMaterializeScenarioMatches,
+    expectAssertionFailure(expectMaterializeScenarioMatches),
   )
 
-  fcTest.fails.prop([fc.constant(`correlation-key-update`)], {
+  fcTest.prop([fc.constant(`correlation-key-update`)], {
     numRuns: 1,
     seed: 1658,
   })(
     `discovered seed: parent correlation-key update rematerializes children`,
-    async () => {
+    expectAssertionFailure(async () => {
       const roots = createControlledCollection<RootRow>(
         `correlation-seed-roots`,
       )
@@ -1221,12 +1270,12 @@ describe(`includes recompute oracle`, () => {
           children.collection.cleanup(),
         ])
       }
-    },
+    }),
   )
 
-  fcTest.fails.prop([fc.constant(`#1454`)], { numRuns: 1, seed: 1454 })(
+  fcTest.prop([fc.constant(`#1454`)], { numRuns: 1, seed: 1454 })(
     `known seed: alpha-renaming a duplicate sibling alias preserves results`,
-    async () => {
+    expectAssertionFailure(async () => {
       const roots = createControlledCollection<RootRow>(`alias-seed-roots`, [
         { id: 1, group: 1, value: 0, position: 0 },
       ])
@@ -1295,12 +1344,12 @@ describe(`includes recompute oracle`, () => {
           tags.collection.cleanup(),
         ])
       }
-    },
+    }),
   )
 
-  fcTest.fails.prop([fc.constant(`#1444`)], { numRuns: 1, seed: 1444 })(
+  fcTest.prop([fc.constant(`#1444`)], { numRuns: 1, seed: 1444 })(
     `known seed: optimistic child reorder matches recomputation`,
-    async () => {
+    expectAssertionFailure(async () => {
       const roots = createControlledCollection<RootRow>(`order-seed-roots`, [
         { id: 1, group: 1, value: 0, position: 0 },
       ])
@@ -1362,6 +1411,6 @@ describe(`includes recompute oracle`, () => {
           children.collection.cleanup(),
         ])
       }
-    },
+    }),
   )
 })
