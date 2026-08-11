@@ -125,7 +125,6 @@ function ensureActionsTargetRows(
     { length: 5 },
     () => new Map<number, number>(),
   )
-  const rolledBackLevels = new Set<HistoryAction[`level`]>()
 
   return history.map((action) => {
     const keys = keysByLevel[action.level]!
@@ -137,13 +136,6 @@ function ensureActionsTargetRows(
       return { ...action, type: `put`, position }
     }
 
-    if (
-      rolledBackLevels.has(action.level) &&
-      (action.type === `optimisticConfirm` ||
-        action.type === `optimisticRollback`)
-    ) {
-      return normalizePut()
-    }
     if (action.type === `put`) {
       return normalizePut()
     }
@@ -156,11 +148,6 @@ function ensureActionsTargetRows(
     if (action.type === `delete`) {
       keys.delete(id)
       positions.delete(id)
-    }
-    if (action.type === `optimisticRollback`) {
-      // The shared mock sync helper retains its rejected mutation promise, so
-      // it cannot start another optimistic mutation on this source.
-      rolledBackLevels.add(action.level)
     }
     return { ...action, id }
   })
@@ -323,6 +310,8 @@ function recompute(
   }))
 }
 
+// Collection delivery metadata is independent of include materialization.
+// Compare only the user-defined row shape modeled by the recompute oracle.
 function stripVirtualProperties(value: unknown): unknown {
   if (Array.isArray(value)) {
     return value.map(stripVirtualProperties)
@@ -948,6 +937,50 @@ async function expectMaterializeScenarioMatches({
 }
 
 describe(`includes recompute oracle`, () => {
+  fcTest(`supports repeated optimistic rollbacks in one history`, async () => {
+    await expectScenarioMatches({
+      depth: 1,
+      history: [
+        {
+          type: `put`,
+          level: 0,
+          id: 0,
+          parentGroup: 0,
+          group: 0,
+          value: 0,
+          position: 0,
+        },
+        {
+          type: `put`,
+          level: 1,
+          id: 0,
+          parentGroup: 0,
+          group: 0,
+          value: 0,
+          position: 0,
+        },
+        {
+          type: `optimisticRollback`,
+          level: 1,
+          id: 0,
+          parentGroup: 0,
+          group: 0,
+          value: 1,
+          position: 0,
+        },
+        {
+          type: `optimisticRollback`,
+          level: 1,
+          id: 0,
+          parentGroup: 0,
+          group: 0,
+          value: 2,
+          position: 0,
+        },
+      ],
+    })
+  })
+
   fcTest.prop([scenarioArbitrary], { numRuns: 40 })(
     `matches naive recomputation after every incremental change`,
     expectScenarioMatches,
@@ -974,7 +1007,7 @@ describe(`includes recompute oracle`, () => {
           value: fc.integer({ min: -3, max: 3 }),
           position: fc.integer({ min: -2, max: 2 }),
         }),
-        { selector: (row) => row.id, maxLength: 5 },
+        { selector: (row) => row.id, minLength: 1, maxLength: 5 },
       ),
       fc.uniqueArray(
         fc.record({
@@ -989,7 +1022,7 @@ describe(`includes recompute oracle`, () => {
     ],
     { numRuns: 25 },
   )(
-    `is unchanged by alpha-renaming, sibling reorder, or an unrelated sibling`,
+    `is unchanged by alpha-renaming, sibling declaration order, or an unrelated sibling`,
     async (rootRows, childRows) => {
       const roots = createControlledCollection<RootRow>(
         `metamorphic-roots`,
