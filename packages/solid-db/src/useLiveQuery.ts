@@ -424,12 +424,26 @@ export function useLiveQuery(
                   break
               }
             }
+          } else {
+            // Cleanup and other status-only publications carry no row deltas.
+            // Rebuild the keyed view so it cannot diverge from ordered data.
+            state.clear()
+            for (const [key, value] of observer.getSnapshot().state ?? []) {
+              state.set(key, value)
+            }
           }
           syncDataFromCollection(currentCollection)
           setStatus(observer.getSnapshot().status)
         })
       },
     )
+    // An already-ready empty collection produces no initial row batch. Bring
+    // ordered data and status in line synchronously instead of waiting for the
+    // resource continuation to correct the previous collection's rows.
+    batch(() => {
+      syncDataFromCollection(currentCollection)
+      setStatus(observer.getSnapshot().status)
+    })
 
     onCleanup(() => {
       unsubscribe()

@@ -413,6 +413,13 @@ export function useLiveQuery(
                 break
             }
           }
+        } else {
+          // Cleanup and other status-only publications carry no row deltas.
+          // Rebuild the keyed view so it cannot diverge from ordered data.
+          state.clear()
+          for (const [key, value] of observer.getSnapshot().state ?? []) {
+            state.set(key, value)
+          }
         }
         syncFromObserver(observer, currentCollection)
       },

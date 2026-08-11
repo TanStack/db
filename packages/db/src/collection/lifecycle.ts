@@ -263,8 +263,11 @@ export class CollectionLifecycleManager<
       // This fires the status:change event to notify listeners
       this.setStatus(`cleaned-up`)
 
-      // Finally, cleanup event handlers after the event has been fired
-      this.events.cleanup()
+      // Active collection subscriptions still depend on lifecycle events.
+      // Once the last subscriber leaves, its GC cleanup clears the handlers.
+      if (this.changes.activeSubscribersCount === 0) {
+        this.events.cleanup()
+      }
 
       return true
     } else {

@@ -85,6 +85,37 @@ const initialIssues: Array<Issue> = [
 ]
 
 describe(`Query Collections`, () => {
+  it(`clears data immediately when switching to an already-ready empty collection`, async () => {
+    return createRoot(async (dispose) => {
+      const populated = createCollection(
+        mockSyncCollectionOptions<Person>({
+          id: `solid-populated-switch`,
+          getKey: (person) => person.id,
+          initialData: initialPersons,
+        }),
+      )
+      const empty = createCollection(
+        mockSyncCollectionOptions<Person>({
+          id: `solid-empty-switch`,
+          getKey: (person) => person.id,
+          initialData: [],
+        }),
+      )
+      populated.startSyncImmediate()
+      empty.startSyncImmediate()
+
+      const [current, setCurrent] = createSignal(populated)
+      const result = useLiveQuery(current)
+      await waitFor(() => expect(result()).toHaveLength(3))
+
+      setCurrent(empty)
+
+      expect(result()).toHaveLength(0)
+      expect(result.state.size).toBe(0)
+      dispose()
+    })
+  })
+
   it(`should work with basic collection and select`, async () => {
     const collection = createCollection(
       mockSyncCollectionOptions<Person>({

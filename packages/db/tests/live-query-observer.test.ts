@@ -76,6 +76,55 @@ function makeLoadSubsetSource() {
   }
 }
 
+function makeControlledTruncateSource() {
+  let begin!: () => void
+  let write!: (message: { type: `insert`; value: Row }) => void
+  let commit!: () => void
+  let truncate!: () => void
+  let resolveLoad!: () => void
+  let loadCalls = 0
+
+  const collection = createCollection<Row, string>({
+    id: `observer-truncate-${seq++}`,
+    getKey: (row) => row.id,
+    syncMode: `on-demand`,
+    sync: {
+      sync: (ops) => {
+        begin = ops.begin
+        write = ops.write
+        commit = ops.commit
+        truncate = ops.truncate
+        ops.markReady()
+
+        return {
+          loadSubset: () => {
+            loadCalls++
+            return new Promise<void>((resolve) => {
+              resolveLoad = () => {
+                begin()
+                write({ type: `insert`, value: SEED[0]! })
+                commit()
+                resolve()
+              }
+            })
+          },
+        }
+      },
+    },
+  })
+
+  return {
+    collection,
+    syncOps: {
+      begin: () => begin(),
+      truncate: () => truncate(),
+      commit: () => commit(),
+    },
+    resolveLoad: () => resolveLoad(),
+    loadCount: () => loadCalls,
+  }
+}
+
 describe(`createLiveQueryObserver`, () => {
   it(`exposes a stable snapshot of a ready collection (wholesale path)`, () => {
     const observer = createLiveQueryObserver<Row, string>(makeSource() as any)
@@ -421,7 +470,7 @@ describe(`createLiveQueryObserver`, () => {
     observer.dispose()
   })
 
-  it(`wholesale mode does not request an initial snapshot (no unfiltered loadSubset)`, () => {
+  it(`wholesale mode does not request an initial snapshot (no unfiltered loadSubset)`, async () => {
     const { collection, loadSubsetCalls, writeRow } = makeLoadSubsetSource()
     const observer = createLiveQueryObserver<Row, string>(collection as any, {
       mode: `wholesale`,
@@ -439,10 +488,15 @@ describe(`createLiveQueryObserver`, () => {
     expect(observer.getSnapshot().data).toHaveLength(2)
 
     // Deltas — including deletes — still wake the consumer.
-    const notifiesBefore = notifies.length
+    const deltasBefore = notifies.filter(
+      (changes) => changes !== undefined,
+    ).length
     writeRow(`delete`, { id: `1`, name: `A` })
+    await Promise.resolve()
 
-    expect(notifies.length).toBe(notifiesBefore + 1)
+    expect(notifies.filter((changes) => changes !== undefined)).toHaveLength(
+      deltasBefore + 1,
+    )
     expect(observer.getSnapshot().data).toHaveLength(1)
     observer.dispose()
   })
@@ -463,17 +517,19 @@ describe(`createLiveQueryObserver`, () => {
     observer.dispose()
   })
 
-  it(`does not enumerate entries for a status-only snapshot read`, () => {
+  it(`reuses captured entries for a status-only snapshot change`, () => {
     const source = makeSource()
     const observer = createLiveQueryObserver<Row, string>(source as any)
 
     const entriesSpy = vi.spyOn(source, `entries`)
-    expect(observer.getSnapshot().status).toBe(`ready`)
-    expect(entriesSpy).not.toHaveBeenCalled()
-
-    // Materialization happens on first data/state access, once per revision.
     expect(observer.getSnapshot().data).toHaveLength(2)
+    expect(entriesSpy).toHaveBeenCalledTimes(1)
+
+    source._lifecycle.setStatus(`error`)
+
+    expect(observer.getSnapshot().status).toBe(`error`)
     expect(observer.getSnapshot().state?.size).toBe(2)
+    // Status-only changes reuse the immutable row capture.
     expect(entriesSpy).toHaveBeenCalledTimes(1)
     observer.dispose()
   })
@@ -529,6 +585,135 @@ describe(`createLiveQueryObserver`, () => {
 
     expect(observer.getSnapshot().isReady).toBe(true)
     expect(observer.getSnapshot().status).toBe(`ready`)
+    observer.dispose()
+  })
+
+  it(`keeps an unread snapshot pinned to the revision when it was created`, () => {
+    const source = makeSource()
+    const observer = createLiveQueryObserver<Row, string>(source as any, {
+      mode: `wholesale`,
+    })
+    const before = observer.getSnapshot()
+
+    source.utils.begin()
+    source.utils.write({ type: `insert`, value: { id: `3`, name: `C` } })
+    source.utils.commit()
+
+    expect(before.data).toHaveLength(2)
+    expect(before.state?.has(`3`)).toBe(false)
+    observer.dispose()
+  })
+
+  it(`does not notify synchronously when wholesale subscribe activates an idle source`, () => {
+    const { collection } = makeLoadSubsetSource()
+    const observer = createLiveQueryObserver<Row, string>(collection as any, {
+      mode: `wholesale`,
+    })
+    let insideSubscribe = true
+    let calledSynchronously = false
+
+    const unsubscribe = observer.subscribe(() => {
+      if (insideSubscribe) calledSynchronously = true
+    })
+    insideSubscribe = false
+
+    expect(calledSynchronously).toBe(false)
+    unsubscribe()
+    observer.dispose()
+  })
+
+  it(`does not reenter a late subscriber while delivering its seed`, () => {
+    const source = makeSource()
+    const observer = createLiveQueryObserver<Row, string>(source as any)
+    observer.subscribe(() => {})
+    let callbackDepth = 0
+    let wasReentrant = false
+    let wrote = false
+
+    observer.subscribe(() => {
+      callbackDepth++
+      if (callbackDepth > 1) wasReentrant = true
+      if (!wrote) {
+        wrote = true
+        source.utils.begin()
+        source.utils.write({ type: `insert`, value: { id: `3`, name: `C` } })
+        source.utils.commit()
+      }
+      callbackDepth--
+    })
+
+    expect(wasReentrant).toBe(false)
+    observer.dispose()
+  })
+
+  it(`keeps waking consumers after collection cleanup clears event listeners`, () => {
+    const source = makeSource()
+    const observer = createLiveQueryObserver<Row, string>(source as any)
+    const statuses: Array<string> = []
+    observer.subscribe(() => statuses.push(observer.getSnapshot().status))
+
+    void source.cleanup()
+    source._lifecycle.setStatus(`error`)
+
+    expect(statuses).toContain(`cleaned-up`)
+    expect(statuses).toContain(`error`)
+    observer.dispose()
+  })
+
+  it(`invalidates snapshots for compatible collections without a state revision`, () => {
+    const rows = new Map<string, Row>([[`1`, { id: `1`, name: `A` }]])
+    const listeners = new Set<
+      (changes: Array<ChangeMessage<Row, string>>) => void
+    >()
+    const collection = {
+      status: `ready`,
+      entries: () => rows.entries(),
+      on: () => () => {},
+      subscribeChanges: (
+        listener: (changes: Array<ChangeMessage<Row, string>>) => void,
+      ) => {
+        listeners.add(listener)
+        return { unsubscribe: () => listeners.delete(listener) }
+      },
+      preload: async () => {},
+    }
+    const observer = createLiveQueryObserver<Row, string>(collection as any, {
+      mode: `wholesale`,
+    })
+    observer.subscribe(() => {})
+    const before = observer.getSnapshot()
+
+    const row = { id: `2`, name: `B` }
+    rows.set(row.id, row)
+    for (const listener of listeners) {
+      listener([{ type: `insert`, key: row.id, value: row }])
+    }
+
+    const after = observer.getSnapshot()
+    expect(after).not.toBe(before)
+    expect(after.data).toHaveLength(2)
+    observer.dispose()
+  })
+
+  it(`does not expose a truncate while its subscription is buffering a refetch`, async () => {
+    const { collection, syncOps, resolveLoad, loadCount } =
+      makeControlledTruncateSource()
+    await collection.stateWhenReady()
+
+    const observer = createLiveQueryObserver<Row, string>(collection as any)
+    observer.subscribe(() => {})
+
+    resolveLoad()
+    await vi.waitFor(() => expect(observer.getSnapshot().data).toHaveLength(1))
+    const before = observer.getSnapshot()
+
+    syncOps.begin()
+    syncOps.truncate()
+    syncOps.commit()
+    await vi.waitFor(() => expect(loadCount()).toBe(2))
+
+    expect(observer.getSnapshot()).toBe(before)
+    expect(observer.getSnapshot().data).toHaveLength(1)
     observer.dispose()
   })
 })
