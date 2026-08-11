@@ -470,7 +470,7 @@ describe(`createLiveQueryObserver`, () => {
     observer.dispose()
   })
 
-  it(`wholesale mode does not request an initial snapshot (no unfiltered loadSubset)`, async () => {
+  it(`wholesale mode does not request an initial snapshot (no unfiltered loadSubset)`, () => {
     const { collection, loadSubsetCalls, writeRow } = makeLoadSubsetSource()
     const observer = createLiveQueryObserver<Row, string>(collection as any, {
       mode: `wholesale`,
@@ -492,7 +492,6 @@ describe(`createLiveQueryObserver`, () => {
       (changes) => changes !== undefined,
     ).length
     writeRow(`delete`, { id: `1`, name: `A` })
-    await Promise.resolve()
 
     expect(notifies.filter((changes) => changes !== undefined)).toHaveLength(
       deltasBefore + 1,
@@ -609,6 +608,7 @@ describe(`createLiveQueryObserver`, () => {
     const observer = createLiveQueryObserver<Row, string>(collection as any, {
       mode: `wholesale`,
     })
+    const before = observer.getSnapshot()
     let insideSubscribe = true
     let calledSynchronously = false
 
@@ -618,6 +618,9 @@ describe(`createLiveQueryObserver`, () => {
     insideSubscribe = false
 
     expect(calledSynchronously).toBe(false)
+    expect(observer.getSnapshot()).not.toBe(before)
+    expect(observer.getSnapshot().status).toBe(`ready`)
+    expect(observer.getSnapshot().data).toHaveLength(2)
     unsubscribe()
     observer.dispose()
   })

@@ -258,12 +258,12 @@ export function injectLiveQuery(opts: any) {
       mode: `wholesale`,
     })
 
-    // Seed immediately from the post-start state, then re-read on every notify.
-    syncDataFromCollection(currentCollection)
-
     const unsubscribe = observer.subscribe(() => {
       syncDataFromCollection(currentCollection)
     })
+    // Wholesale attach suppresses listener calls raised by synchronous sync
+    // startup. Read once after subscribe returns to capture that final state.
+    syncDataFromCollection(currentCollection)
     unsub = () => {
       unsubscribe()
       observer.dispose()

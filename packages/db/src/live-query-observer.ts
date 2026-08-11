@@ -120,7 +120,6 @@ class LiveQueryObserverImpl<
   // synchronously) is queued, never delivered reentrantly.
   private readonly publicationQueue: Array<Publication<T, TKey>> = []
   private dispatching = false
-  private deliveryScheduled = false
   private blockDelivery = false
   private attached = false
   private collectionUnsub: (() => void) | null = null
@@ -182,9 +181,23 @@ class LiveQueryObserverImpl<
     revision?: number
   } {
     const { entries, revision } = this.readEntries(collection)
+    this.updateCachedEntries(entries, revision)
+    return { entries, revision }
+  }
+
+  private updateCachedEntries(
+    entries: Array<[TKey, T]>,
+    revision: number | undefined,
+  ): void {
+    const changed =
+      revision !== undefined
+        ? this.cachedEntries === undefined ||
+          revision !== this.cachedCollectionRevision
+        : !this.entriesEqual(this.cachedEntries, entries)
+
     this.cachedEntries = entries
     this.cachedCollectionRevision = revision
-    return { entries, revision }
+    if (changed) this.snapshotDirty = true
   }
 
   private entriesEqual(
@@ -217,10 +230,7 @@ class LiveQueryObserverImpl<
       }
     } else {
       const entries = Array.from(collection.entries()) as Array<[TKey, T]>
-      if (!this.entriesEqual(this.cachedEntries, entries)) {
-        this.cachedEntries = entries
-        this.snapshotDirty = true
-      }
+      this.updateCachedEntries(entries, undefined)
     }
 
     if (this.visibleStatus !== status) {
@@ -345,8 +355,14 @@ class LiveQueryObserverImpl<
       subscription.unsubscribe()
       return
     }
-    if (this.publicationQueue.length > 0 && this.wholesale) {
-      this.scheduleDelivery()
+    if (this.wholesale) {
+      // Publications raised while subscribeChanges starts sync are part of the
+      // subscribe handshake. Apply their final snapshot state now, but suppress
+      // listener delivery: useSyncExternalStore performs its consistency read
+      // immediately after subscribe returns.
+      this.flushPublications(false)
+      const { entries, revision } = this.readEntries(collection)
+      this.updateCachedEntries(entries, revision)
     }
   }
 
@@ -372,21 +388,12 @@ class LiveQueryObserverImpl<
       status,
       collectionRevision,
     })
-    if (this.dispatching || this.blockDelivery || this.deliveryScheduled) return
+    if (this.dispatching || this.blockDelivery) return
 
     this.flushPublications()
   }
 
-  private scheduleDelivery(): void {
-    if (this.deliveryScheduled) return
-    this.deliveryScheduled = true
-    queueMicrotask(() => {
-      this.deliveryScheduled = false
-      if (!this.disposed && !this.blockDelivery) this.flushPublications()
-    })
-  }
-
-  private flushPublications(): void {
+  private flushPublications(deliver = true): void {
     if (this.dispatching) return
 
     this.dispatching = true
@@ -395,9 +402,10 @@ class LiveQueryObserverImpl<
       while (this.publicationQueue.length > 0) {
         const publication = this.publicationQueue.shift()!
         if (publication.entries) {
-          this.cachedEntries = publication.entries
-          this.cachedCollectionRevision = publication.collectionRevision
-          this.snapshotDirty = true
+          this.updateCachedEntries(
+            publication.entries,
+            publication.collectionRevision,
+          )
         }
         if (this.visibleStatus !== publication.status) {
           this.visibleStatus = publication.status
@@ -406,9 +414,11 @@ class LiveQueryObserverImpl<
         // Targets are captured when the publication is queued: a subscription
         // removed mid-delivery still receives the in-flight publication, and
         // one added later does not. Late-subscriber seeds use the same queue.
-        for (const subRecord of publication.targets) {
-          if (this.disposed) return
-          subRecord.listener(publication.changes)
+        if (deliver) {
+          for (const subRecord of publication.targets) {
+            if (this.disposed) return
+            subRecord.listener(publication.changes)
+          }
         }
       }
     } finally {
@@ -427,7 +437,6 @@ class LiveQueryObserverImpl<
     for (const subRecord of this.subscriptions) subRecord.active = false
     this.subscriptions.clear()
     this.publicationQueue.length = 0
-    this.deliveryScheduled = false
   }
 }
 
