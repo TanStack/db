@@ -1,3 +1,4 @@
+import { LiveQueryObserverDisposedError } from './errors.js'
 import {
   getLiveQueryStatusFlags,
   isSingleResultCollection,
@@ -10,7 +11,8 @@ import type { ChangeMessage, CollectionStatus } from './types.js'
  *
  * `getSnapshot()` returns a stable object identity that only changes when the
  * query changes, so `useSyncExternalStore`-style consumers can compare by
- * reference. `state`/`data` are computed lazily and cached per snapshot.
+ * reference. Each snapshot owns a captured view of `state`/`data`, so reading
+ * an older snapshot cannot expose rows from a later revision.
  */
 export interface LiveQuerySnapshot<
   T extends object,
@@ -50,13 +52,17 @@ export type LiveQueryObserverListener<
 
 /**
  * Wraps a resolved live-query `Collection` (or `null` for a disabled query) with
- * the shared lifecycle every framework adapter needs: start sync, subscribe to
- * changes, handle the already-ready race, expose a stable snapshot for
- * wholesale consumers, and deliver the raw change set for granular consumers.
+ * the shared lifecycle every framework adapter needs: start sync on first
+ * subscribe, subscribe to changes and status transitions, expose a stable
+ * snapshot for wholesale consumers, and deliver the raw change set for
+ * granular consumers.
  *
  * Input resolution (query fn / config / collection / disabled) stays in the
  * adapter — it is framework-reactive. The observer owns everything after the
  * input is resolved to a concrete collection.
+ *
+ * @internal Unstable contract for TanStack DB's official framework adapters —
+ * not a public extension point yet; may change in any release.
  */
 export interface LiveQueryObserver<
   T extends object,
@@ -75,6 +81,26 @@ export interface LiveQueryObserver<
   preload: () => Promise<void>
   /** Idempotent teardown. */
   dispose: () => void
+}
+
+/**
+ * One logical subscription. Records — not raw callbacks — identify
+ * subscriptions, so the same listener function can be subscribed twice and
+ * each subscription tears down independently.
+ */
+interface SubscriptionRecord<T extends object, TKey extends string | number> {
+  listener: LiveQueryObserverListener<T, TKey>
+  active: boolean
+}
+
+interface Publication<T extends object, TKey extends string | number> {
+  changes: Array<ChangeMessage<T, TKey>> | undefined
+  targets: Array<SubscriptionRecord<T, TKey>>
+  entries?: Array<[TKey, T]>
+  status: CollectionStatus
+  collectionRevision?: number
+  collectionLayoutRevision?: number
+  layoutChanged: boolean
 }
 
 const DISABLED_SNAPSHOT: LiveQuerySnapshot<any, any> = {
@@ -96,47 +122,48 @@ class LiveQueryObserverImpl<
   TKey extends string | number,
 > implements LiveQueryObserver<T, TKey> {
   private readonly collection: Collection<T, TKey, any> | null
-  private readonly deferInitialNotify: boolean
-  private version = 0
-  private cachedVersion = -1
-  private cachedStatus: CollectionStatus | undefined
+  private readonly wholesale: boolean
+  private visibleStatus: CollectionStatus | undefined
+  private cachedEntries: Array<[TKey, T]> | undefined
+  private cachedCollectionRevision: number | undefined
+  private cachedCollectionLayoutRevision: number | undefined
+  private snapshotDirty = true
   private cachedSnapshot: LiveQuerySnapshot<T, TKey> = DISABLED_SNAPSHOT
   private layoutRevision = 0
   private lastLayoutKeys: Array<TKey> | undefined
-  private readonly listeners = new Set<LiveQueryObserverListener<T, TKey>>()
+  private deliveredLayoutRevision: number | undefined
+  private readonly subscriptions = new Set<SubscriptionRecord<T, TKey>>()
+  // Publications are dispatched FIFO: an emit that happens while another
+  // publication is being delivered (a listener mutating the collection
+  // synchronously) is queued, never delivered reentrantly.
+  private readonly publicationQueue: Array<Publication<T, TKey>> = []
+  private dispatching = false
+  private blockDelivery = false
+  private attached = false
   private collectionUnsub: (() => void) | null = null
-  // Bumped on each attach. `onFirstReady` can't be unsubscribed, so a callback
-  // from a superseded attach checks this to no-op instead of double-notifying.
-  private attachGeneration = 0
   private disposed = false
 
-  constructor(
-    collection: Collection<T, TKey, any> | null,
-    deferInitialNotify: boolean,
-  ) {
+  // Construction is side-effect-free: sync activation belongs to the first
+  // subscription (attach), so building an observer — e.g. in a React render
+  // that may be abandoned — cannot activate resources on its own.
+  constructor(collection: Collection<T, TKey, any> | null, wholesale: boolean) {
     this.collection = collection
-    this.deferInitialNotify = deferInitialNotify
-    // Starting sync during resolution matches every adapter's eager behavior.
-    collection?.startSyncImmediate()
+    this.wholesale = wholesale
   }
 
   getSnapshot(): LiveQuerySnapshot<T, TKey> {
     const collection = this.collection
     if (!collection) return DISABLED_SNAPSHOT
 
-    // Rebuild when the version advanced, or when the collection's status
-    // changed without a version bump (e.g. a status-only loading→ready
-    // transition or `preload()` while there is no active subscription).
-    if (
-      this.cachedVersion !== this.version ||
-      this.cachedStatus !== collection.status
-    ) {
-      this.cachedVersion = this.version
-      this.cachedStatus = collection.status
-      const entries = Array.from(collection.entries()) as Array<[TKey, T]>
+    if (!this.attached) this.refreshDetachedState(collection)
+
+    if (this.snapshotDirty) {
+      const entries =
+        this.cachedEntries ?? this.captureEntries(collection).entries
+      const state = new Map(entries)
+      const data = entries.map(([, value]) => value)
       const singleResult = isSingleResultCollection(collection)
-      let stateCache: Map<TKey, T> | null = null
-      let dataCache: Array<T> | null = null
+      const status = this.visibleStatus ?? collection.status
 
       // Bump the layout revision when the ordered key sequence changes
       // (membership, ordering, or an order-only move). Compare the key sequence
@@ -162,111 +189,319 @@ class LiveQueryObserverImpl<
       }
 
       this.cachedSnapshot = {
-        get state() {
-          if (!stateCache) stateCache = new Map(entries)
-          return stateCache
-        },
-        get data() {
-          if (!dataCache) dataCache = entries.map(([, value]) => value)
-          return singleResult ? dataCache[0] : dataCache
-        },
+        state,
+        data: singleResult ? data[0] : data,
         collection,
         layoutRevision: this.layoutRevision,
-        status: collection.status,
-        ...getLiveQueryStatusFlags(collection.status),
+        status,
+        ...getLiveQueryStatusFlags(status),
         isEnabled: true,
       }
+      this.snapshotDirty = false
     }
     return this.cachedSnapshot
   }
 
-  subscribe(listener: LiveQueryObserverListener<T, TKey>): () => void {
-    this.listeners.add(listener)
-    if (this.listeners.size === 1) this.attach()
+  private getCollectionRevision(
+    collection: Collection<T, TKey, any>,
+  ): number | undefined {
+    const revision = (collection as { _stateRevision?: unknown })._stateRevision
+    return typeof revision === `number` ? revision : undefined
+  }
 
-    let active = true
-    return () => {
-      if (!active) return
-      active = false
-      this.listeners.delete(listener)
-      if (this.listeners.size === 0) this.detach()
+  private getCollectionLayoutRevision(
+    collection: Collection<T, TKey, any>,
+  ): number | undefined {
+    const revision = (collection as { _layoutRevision?: unknown })
+      ._layoutRevision
+    return typeof revision === `number` ? revision : undefined
+  }
+
+  private readEntries(collection: Collection<T, TKey, any>): {
+    entries: Array<[TKey, T]>
+    revision?: number
+  } {
+    const entries = Array.from(collection.entries()) as Array<[TKey, T]>
+    const revision = this.getCollectionRevision(collection)
+    return { entries, revision }
+  }
+
+  private captureEntries(collection: Collection<T, TKey, any>): {
+    entries: Array<[TKey, T]>
+    revision?: number
+  } {
+    const { entries, revision } = this.readEntries(collection)
+    this.updateCachedEntries(entries, revision)
+    return { entries, revision }
+  }
+
+  private updateCachedEntries(
+    entries: Array<[TKey, T]>,
+    revision: number | undefined,
+  ): void {
+    const changed =
+      revision !== undefined
+        ? this.cachedEntries === undefined ||
+          revision !== this.cachedCollectionRevision
+        : !this.entriesEqual(this.cachedEntries, entries)
+
+    this.cachedEntries = entries
+    this.cachedCollectionRevision = revision
+    if (changed) this.snapshotDirty = true
+  }
+
+  private entriesEqual(
+    left: Array<[TKey, T]> | undefined,
+    right: Array<[TKey, T]>,
+  ): boolean {
+    if (!left || left.length !== right.length) return false
+    return left.every(
+      ([key, value], index) =>
+        right[index]![0] === key && right[index]![1] === value,
+    )
+  }
+
+  /**
+   * While detached there is no delivered-publication clock, so fall back to
+   * the collection revision. Compatible cross-copy collections that predate
+   * `_stateRevision` are compared structurally instead.
+   */
+  private refreshDetachedState(collection: Collection<T, TKey, any>): void {
+    const status = collection.status
+    const revision = this.getCollectionRevision(collection)
+    const layoutRevision = this.getCollectionLayoutRevision(collection)
+
+    if (revision !== undefined) {
+      if (
+        this.cachedEntries === undefined ||
+        revision !== this.cachedCollectionRevision ||
+        layoutRevision !== this.cachedCollectionLayoutRevision
+      ) {
+        this.captureEntries(collection)
+        this.cachedCollectionLayoutRevision = layoutRevision
+        this.snapshotDirty = true
+      }
+    } else {
+      const entries = Array.from(collection.entries()) as Array<[TKey, T]>
+      this.updateCachedEntries(entries, undefined)
     }
+
+    if (this.visibleStatus !== status) {
+      this.visibleStatus = status
+      this.snapshotDirty = true
+    }
+  }
+
+  subscribe(listener: LiveQueryObserverListener<T, TKey>): () => void {
+    if (this.disposed) throw new LiveQueryObserverDisposedError()
+
+    const record: SubscriptionRecord<T, TKey> = { listener, active: true }
+    this.subscriptions.add(record)
+    if (this.subscriptions.size === 1) {
+      this.attach()
+    } else {
+      // The initial-state replay only happens on attach, so a granular
+      // subscriber that arrives while already attached is seeded with the
+      // current rows — delivered to this subscription alone, without advancing
+      // the observer's revision (the collection state did not change).
+      // Wholesale consumers read getSnapshot() instead and need no seed.
+      if (!this.wholesale) this.seed(record)
+    }
+
+    return () => {
+      if (!record.active) return
+      record.active = false
+      this.subscriptions.delete(record)
+      if (this.subscriptions.size === 0) this.detach()
+    }
+  }
+
+  /** Deliver the collection's current rows to one late subscription as inserts. */
+  private seed(record: SubscriptionRecord<T, TKey>): void {
+    const collection = this.collection
+    if (!collection) return
+
+    const seedChanges: Array<ChangeMessage<T, TKey>> = []
+    for (const [key, value] of collection.entries() as IterableIterator<
+      [TKey, T]
+    >) {
+      seedChanges.push({ type: `insert`, key, value })
+    }
+    if (seedChanges.length === 0) return
+
+    this.emit(seedChanges, [record])
   }
 
   private attach(): void {
     const collection = this.collection
     if (!collection || this.disposed) return
+    this.refreshDetachedState(collection)
+    this.attached = true
+    this.visibleStatus ??= collection.status
+    this.deliveredLayoutRevision = this.getCollectionLayoutRevision(collection)
+    this.blockDelivery = this.wholesale
 
-    const generation = ++this.attachGeneration
+    // Sync activation happens inside subscribeChanges (addSubscriber starts
+    // an idle/cleaned-up collection) — the same startSync path the old
+    // constructor-time startSyncImmediate() took, but now owned by the first
+    // committed subscription and observed by the status listener below.
 
-    // Subscribe with initial state so granular consumers receive the current
-    // rows as inserts followed by deltas through one consistent channel — the
-    // same contract the adapters used before the observer existed (the
-    // collection's per-subscriber change stream requires this to align deltes).
-    //
-    // When `deferInitialNotify` is set, emits that fire synchronously while
-    // attaching (the initial-state batch and an immediately-ready `onFirstReady`)
-    // are deferred to a microtask, so a wholesale consumer like React's
-    // `useSyncExternalStore` never receives a synchronous notify during
-    // `subscribe`. Effect/watcher-based adapters want the initial state
-    // synchronously, so by default it is not deferred. Later changes always emit
-    // synchronously.
-    let attaching = this.deferInitialNotify
-    const deferred: Array<Array<ChangeMessage<T, TKey>> | undefined> = []
-    const notify = (changes: Array<ChangeMessage<T, TKey>> | undefined) => {
-      if (this.disposed || this.listeners.size === 0) return
-      if (attaching) deferred.push(changes)
-      else this.emit(changes)
-    }
-
-    const subscription = collection.subscribeChanges(
-      (changes) => notify(changes as Array<ChangeMessage<T, TKey>>),
-      { includeInitialState: true },
-    )
-    this.collectionUnsub = () => subscription.unsubscribe()
-
-    // Catch a *later* loading→ready transition that carries no change events
-    // (e.g. `markReady()` with no rows). Skip when already ready — the initial
-    // state batch above already covers that, and `onFirstReady` would fire an
-    // immediate duplicate.
-    //
-    // `onFirstReady` returns no unsubscribe, so a callback left behind by an
-    // earlier attach (subscribe → unsubscribe-before-ready → subscribe) would
-    // still fire on `markReady`. Guard with the attach generation so only the
-    // current attachment's callback notifies.
-    if (collection.status !== `ready`) {
-      collection.onFirstReady(() => {
-        if (generation !== this.attachGeneration) return
-        notify(undefined)
-      })
-    }
-
-    attaching = false
-    if (deferred.length > 0) {
-      queueMicrotask(() => {
-        // Skip if the observer was disposed, has no listeners, or a newer
-        // attach superseded this one before the flush — otherwise a stale
-        // initial batch would reach the current listener.
+    // Granular consumers subscribe with initial state so they receive the
+    // current rows as inserts followed by deltas through one consistent
+    // channel (the collection's per-subscriber change stream requires this to
+    // align deltas). Wholesale consumers subscribe WITHOUT initial state —
+    // preserving their pre-observer loading policy: no snapshot request means
+    // no unfiltered loadSubset({ where: undefined }) against on-demand
+    // collections. The explicit `false` marks all state as seen so deletes
+    // still flow through as notifies.
+    const notify = (
+      changes: Array<ChangeMessage<T, TKey>> | undefined,
+      status: CollectionStatus = collection.status,
+    ) => {
+      if (this.disposed || this.subscriptions.size === 0) return
+      const layoutRevision = this.getCollectionLayoutRevision(collection)
+      let layoutChanged = false
+      if (changes !== undefined && changes.length === 0) {
+        // Empty ready events predate the explicit layout signal and share its
+        // empty-array payload. Only forward an empty batch when the collection
+        // confirms that a new layout-only publication occurred.
         if (
-          this.disposed ||
-          this.listeners.size === 0 ||
-          generation !== this.attachGeneration
+          layoutRevision === undefined ||
+          layoutRevision === this.deliveredLayoutRevision
         ) {
           return
         }
-        for (const changes of deferred.splice(0)) this.emit(changes)
-      })
+        layoutChanged = true
+      }
+      if (changes !== undefined && layoutRevision !== undefined) {
+        this.deliveredLayoutRevision = layoutRevision
+      }
+      const captured =
+        changes !== undefined
+          ? this.readEntries(collection)
+          : status === `cleaned-up`
+            ? this.readEntries(collection)
+            : undefined
+      this.emit(
+        changes,
+        undefined,
+        captured?.entries,
+        status,
+        captured?.revision,
+        layoutRevision,
+        layoutChanged,
+      )
+    }
+
+    // Status transitions that carry no change events (loading→ready with no
+    // rows, error, cleaned-up) are part of the canonical publication path:
+    // any status change publishes a synthetic notify so consumers re-read the
+    // snapshot. Unlike onFirstReady, `on` returns a real unsubscribe, so a
+    // detached attachment leaves nothing behind.
+    const statusUnsub = collection.on(`status:change`, ({ status }) =>
+      notify(undefined, status),
+    )
+
+    // `subscribeChanges` delivers the initial state synchronously, so a
+    // listener can dispose the observer while the collection subscription is
+    // still being created. Register the release hook up front; if detach()
+    // ran during that replay (collectionUnsub no longer points at our hook),
+    // undo the subscription as soon as the call returns.
+    let subscription: { unsubscribe: () => void } | null = null
+    const release = () => {
+      statusUnsub()
+      subscription?.unsubscribe()
+    }
+    this.collectionUnsub = release
+    subscription = collection.subscribeChanges(
+      (changes) => notify(changes as Array<ChangeMessage<T, TKey>>),
+      { includeInitialState: !this.wholesale },
+    )
+    this.blockDelivery = false
+    if (this.collectionUnsub !== release) {
+      subscription.unsubscribe()
+      return
+    }
+    if (this.wholesale) {
+      // Publications raised while subscribeChanges starts sync are part of the
+      // subscribe handshake. Apply their final snapshot state now, but suppress
+      // listener delivery: useSyncExternalStore performs its consistency read
+      // immediately after subscribe returns.
+      this.flushPublications(false)
+      const { entries, revision } = this.readEntries(collection)
+      this.updateCachedEntries(entries, revision)
     }
   }
 
   private detach(): void {
     this.collectionUnsub?.()
     this.collectionUnsub = null
+    this.attached = false
+    this.blockDelivery = false
+    this.publicationQueue.length = 0
   }
 
-  private emit(changes: Array<ChangeMessage<T, TKey>> | undefined): void {
-    this.version++
-    this.listeners.forEach((listener) => listener(changes))
+  private emit(
+    changes: Array<ChangeMessage<T, TKey>> | undefined,
+    targets = Array.from(this.subscriptions),
+    entries?: Array<[TKey, T]>,
+    status = this.collection?.status ?? `cleaned-up`,
+    collectionRevision?: number,
+    collectionLayoutRevision?: number,
+    layoutChanged = false,
+  ): void {
+    this.publicationQueue.push({
+      changes,
+      targets,
+      entries,
+      status,
+      collectionRevision,
+      collectionLayoutRevision,
+      layoutChanged,
+    })
+    if (this.dispatching || this.blockDelivery) return
+
+    this.flushPublications()
+  }
+
+  private flushPublications(deliver = true): void {
+    if (this.dispatching) return
+
+    this.dispatching = true
+    try {
+      // A dispose() during dispatch empties the queue, ending this loop.
+      while (this.publicationQueue.length > 0) {
+        const publication = this.publicationQueue.shift()!
+        if (publication.entries) {
+          this.updateCachedEntries(
+            publication.entries,
+            publication.collectionRevision,
+          )
+        }
+        if (publication.collectionLayoutRevision !== undefined) {
+          this.cachedCollectionLayoutRevision =
+            publication.collectionLayoutRevision
+        }
+        if (publication.layoutChanged) {
+          this.snapshotDirty = true
+        }
+        if (this.visibleStatus !== publication.status) {
+          this.visibleStatus = publication.status
+          this.snapshotDirty = true
+        }
+        // Targets are captured when the publication is queued: a subscription
+        // removed mid-delivery still receives the in-flight publication, and
+        // one added later does not. Late-subscriber seeds use the same queue.
+        if (deliver) {
+          for (const subRecord of publication.targets) {
+            if (this.disposed) return
+            subRecord.listener(publication.changes)
+          }
+        }
+      }
+    } finally {
+      this.dispatching = false
+    }
   }
 
   async preload(): Promise<void> {
@@ -277,23 +512,38 @@ class LiveQueryObserverImpl<
     if (this.disposed) return
     this.disposed = true
     this.detach()
-    this.listeners.clear()
+    for (const subRecord of this.subscriptions) subRecord.active = false
+    this.subscriptions.clear()
+    this.publicationQueue.length = 0
   }
 }
 
 export interface CreateLiveQueryObserverOptions {
   /**
-   * Defer the initial-state notify to a microtask instead of emitting it
-   * synchronously during `subscribe`. Set this for `useSyncExternalStore`-style
-   * consumers (React) that must not receive a store notify during subscribe.
-   * Effect/watcher-based adapters leave it off to get initial state synchronously.
+   * How subscribers consume the observer:
+   *
+   * - `granular` (default): subscribers apply the delivered `ChangeMessage[]`
+   *   deltas to their own keyed state (Vue/Svelte/Solid). The observer
+   *   subscribes with initial state and seeds late subscribers, so every
+   *   subscriber converges from deltas alone.
+   * - `wholesale`: subscribers treat notifications as a wake-up and re-read
+   *   `getSnapshot()` (React/Angular). The observer subscribes WITHOUT initial
+   *   state, preserving those adapters' loading policy — no snapshot request,
+   *   so no unfiltered `loadSubset` against on-demand collections. Nothing is
+   *   delivered synchronously during `subscribe`, which keeps
+   *   `useSyncExternalStore`-style consumers safe by construction.
    */
-  deferInitialNotify?: boolean
+  mode?: `granular` | `wholesale`
 }
 
 /**
  * Create a {@link LiveQueryObserver} for a resolved live-query collection, or a
  * disabled observer when `collection` is `null`/`undefined`.
+ *
+ * @internal This is an unstable contract shared by TanStack DB's official
+ * framework adapters. It is exported so the adapter packages can use it, but
+ * it is not a public extension point yet: its API may change in any release
+ * without a semver major.
  */
 export function createLiveQueryObserver<
   T extends object,
@@ -304,6 +554,6 @@ export function createLiveQueryObserver<
 ): LiveQueryObserver<T, TKey> {
   return new LiveQueryObserverImpl<T, TKey>(
     collection ?? null,
-    options.deferInitialNotify ?? false,
+    options.mode === `wholesale`,
   )
 }

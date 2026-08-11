@@ -82,6 +82,40 @@ describe(`order-only move (RFC #1623 phase 4)`, () => {
     observer.dispose()
   })
 
+  it(`refreshes a detached observer after an order-only move`, async () => {
+    const source = makeSource()
+    const lq = await makeOrderedByAge(source)
+    const observer = createLiveQueryObserver<
+      { id: string; name: string },
+      string
+    >(lq as any)
+
+    const before = observer.getSnapshot()
+    expect((before.data as Array<any>).map((row) => row.id)).toEqual([
+      `2`,
+      `1`,
+      `3`,
+    ])
+
+    source.utils.begin()
+    source.utils.write({
+      type: `update`,
+      value: { id: `2`, name: `Bob`, age: 99 },
+    })
+    source.utils.commit()
+    await flush()
+
+    const after = observer.getSnapshot()
+    expect(after).not.toBe(before)
+    expect((after.data as Array<any>).map((row) => row.id)).toEqual([
+      `1`,
+      `3`,
+      `2`,
+    ])
+    expect(after.layoutRevision).toBeGreaterThan(before.layoutRevision)
+    observer.dispose()
+  })
+
   it(`does not bump the layout revision when nothing about the layout changes`, async () => {
     const source = makeSource()
     const lq = await makeOrderedByAge(source)
@@ -89,7 +123,9 @@ describe(`order-only move (RFC #1623 phase 4)`, () => {
       { id: string; name: string },
       string
     >(lq as any)
-    observer.subscribe(() => {})
+    let notifications = 0
+    observer.subscribe(() => notifications++)
+    notifications = 0
 
     const revBefore = observer.getSnapshot().layoutRevision
 
@@ -107,6 +143,36 @@ describe(`order-only move (RFC #1623 phase 4)`, () => {
     const after = observer.getSnapshot()
     expect((after.data as Array<any>).map((r) => r.id)).toEqual([`2`, `1`, `3`])
     expect(after.layoutRevision).toBe(revBefore)
+    expect(notifications).toBe(0)
+    observer.dispose()
+  })
+
+  it(`does not publish when multiple moves cancel within one transaction`, async () => {
+    const source = makeSource()
+    const lq = await makeOrderedByAge(source)
+    const observer = createLiveQueryObserver<
+      { id: string; name: string },
+      string
+    >(lq as any)
+    let notifications = 0
+    observer.subscribe(() => notifications++)
+    notifications = 0
+
+    const before = observer.getSnapshot()
+    source.utils.begin()
+    source.utils.write({
+      type: `update`,
+      value: { id: `2`, name: `Bob`, age: 99 },
+    })
+    source.utils.write({
+      type: `update`,
+      value: { id: `2`, name: `Bob`, age: 20 },
+    })
+    source.utils.commit()
+    await flush()
+
+    expect(observer.getSnapshot()).toBe(before)
+    expect(notifications).toBe(0)
     observer.dispose()
   })
 
@@ -176,7 +242,40 @@ describe(`order-only move (RFC #1623 phase 4)`, () => {
       [`2`, `Bob`],
     ])
     expect(notifications).toBe(1)
+
+    // The layout clock from this mixed publication must be consumed even
+    // though it arrived with row changes. A later legacy empty-ready event is
+    // not a second layout publication.
+    ;(lq as any)._changes.emitEmptyReadyEvent()
+    expect(notifications).toBe(1)
     observer.dispose()
+  })
+
+  it(`publishes a mixed batch to a subscriber that filters out the row update`, async () => {
+    const source = makeSource()
+    const lq = await makeOrderedByAge(source)
+    const publications: Array<Array<unknown>> = []
+    const subscription = lq.subscribeChanges(
+      (changes) => publications.push(changes),
+      {
+        includeInitialState: false,
+        where: (row) => eq(row.name, `Bob`),
+      },
+    )
+
+    source.utils.begin()
+    source.utils.write({
+      type: `update`,
+      value: { id: `1`, name: `Alicia`, age: 30 },
+    })
+    source.utils.write({
+      type: `update`,
+      value: { id: `2`, name: `Bob`, age: 99 },
+    })
+    source.utils.commit()
+
+    expect(publications).toEqual([[]])
+    subscription.unsubscribe()
   })
 
   // Kyle's review issue 2: an ordered child collection produced by `includes`

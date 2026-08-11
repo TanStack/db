@@ -29,6 +29,23 @@ export class CollectionChangesManager<
   public changeSubscriptions = new Set<CollectionSubscription>()
   public batchedEvents: Array<ChangeMessage<TOutput, TKey>> = []
   public shouldBatchEvents = false
+  private pendingLayoutChange = false
+
+  /**
+   * Monotonic revision of the collection's visible state, advanced once per
+   * committed batch of changes — including while nothing is subscribed.
+   * Lets consumers (the live-query observer) cheaply detect "did the data
+   * change" without subscribing, and stays untouched by subscription
+   * bootstrap replays, which do not go through emitEvents.
+   */
+  public stateRevision = 0
+
+  /**
+   * Monotonic revision advanced only for explicit layout-only publications.
+   * This distinguishes them from the legacy empty ready event, since both use
+   * an empty change batch at the public subscription boundary.
+   */
+  public layoutRevision = 0
 
   /**
    * Creates a new CollectionChangesManager instance
@@ -61,16 +78,14 @@ export class CollectionChangesManager<
   }
 
   /**
-   * Notify subscribers that the visible layout (row order) changed without any
-   * row value changing — e.g. an order-only move in an `orderBy` live query.
-   * Emits an empty batch directly (bypassing the empty-array check) so ordered
-   * consumers re-read the now re-sorted collection. This is a first-class layout
-   * signal, deliberately not a forged row `update`.
+   * Mark the next committed publication as layout-changing. Each subscription
+   * receives its filtered row batch once, or one empty batch when filtering
+   * removed every row change, so ordered consumers always re-read without a
+   * duplicate callback or a forged row `update`.
    */
-  public emitLayoutChangeEvent(): void {
-    for (const subscription of this.changeSubscriptions) {
-      subscription.emitEvents([])
-    }
+  public markLayoutChange(): void {
+    this.layoutRevision++
+    this.pendingLayoutChange = true
   }
 
   /**
@@ -90,6 +105,10 @@ export class CollectionChangesManager<
     changes: Array<ChangeMessage<TOutput, TKey>>,
     forceEmit = false,
   ): void {
+    // The visible state was already committed by the caller, so the revision
+    // advances even when the events below end up batched for later emission.
+    if (changes.length > 0) this.stateRevision++
+
     // Skip batching for user actions (forceEmit=true) to keep UI responsive
     if (this.shouldBatchEvents && !forceEmit) {
       // Add events to the batch
@@ -111,9 +130,14 @@ export class CollectionChangesManager<
       this.shouldBatchEvents = false
     }
 
-    if (rawEvents.length === 0) {
+    const layoutChanged = this.pendingLayoutChange
+    if (rawEvents.length === 0 && !layoutChanged) {
       return
     }
+
+    // Clear before notifying so a nested publication can mark a new layout
+    // change without this flush erasing it.
+    this.pendingLayoutChange = false
 
     // Enrich all change messages with virtual properties
     // This uses the "add-if-missing" pattern to preserve pass-through semantics
@@ -123,7 +147,7 @@ export class CollectionChangesManager<
 
     // Emit to all listeners
     for (const subscription of this.changeSubscriptions) {
-      subscription.emitEvents(enrichedEvents)
+      subscription.emitEvents(enrichedEvents, layoutChanged)
     }
   }
 

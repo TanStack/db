@@ -351,6 +351,13 @@ export function useLiveQuery(
         startSync: true,
       })
     } else {
+      // A reactive getter (or param-driven query fn) can resolve to null/undefined
+      // to mean "disabled". `toValue` above already called it, so guard here —
+      // otherwise `{ ...null }` reaches createLiveQueryCollection and throws.
+      if (unwrappedParam === undefined || unwrappedParam === null) {
+        return null
+      }
+
       return createLiveQueryCollection({
         ...unwrappedParam,
         startSync: true,
@@ -428,6 +435,13 @@ export function useLiveQuery(
                   state.delete(change.key)
                   break
               }
+            }
+          } else {
+            // Cleanup and other status-only publications carry no row deltas.
+            // Rebuild the keyed view so it cannot diverge from ordered data.
+            state.clear()
+            for (const [key, value] of observer.getSnapshot().state ?? []) {
+              state.set(key, value)
             }
           }
         })

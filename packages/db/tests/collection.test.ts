@@ -77,7 +77,7 @@ describe(`Collection`, () => {
     ).toThrow(DuplicateKeySyncError)
   })
 
-  it(`removes optimistic insert when sync confirms with a different server-generated key`, async () => {
+  it(`keeps ambiguous server-key sync queued while a temp-key optimistic insert is pending`, async () => {
     const options = mockSyncCollectionOptionsNoInitialState<{
       id: number
       text: string
@@ -102,6 +102,11 @@ describe(`Collection`, () => {
     options.utils.commit()
 
     // The sync commit is held while the local insert transaction is persisting.
+    // Without an explicit temp-key -> server-key mapping, core cannot know
+    // whether key 24 is this optimistic insert's server echo or an unrelated
+    // row, so it must not expose both rows at the same time.
+    expect(tx.isPersisted.isPending()).toBe(true)
+    expect(collection.has(24)).toBe(false)
     expect(getStateEntries(collection)).toEqual([
       [4733, { id: 4733, text: `two` }],
     ])

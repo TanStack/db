@@ -81,6 +81,30 @@ describe(`Query Collections`, () => {
     cleanup?.()
   })
 
+  it(`keeps data and keyed state aligned after collection cleanup`, () => {
+    const collection = createCollection(
+      mockSyncCollectionOptions<Person>({
+        id: `cleanup-alignment-svelte`,
+        getKey: (person) => person.id,
+        initialData: initialPersons,
+      }),
+    )
+
+    cleanup = $effect.root(() => {
+      const query = useLiveQuery(collection)
+      flushSync()
+
+      expect(query.data).toHaveLength(3)
+      expect(query.state.size).toBe(3)
+
+      void collection.cleanup()
+      flushSync()
+
+      expect(query.data).toHaveLength(0)
+      expect(query.state.size).toBe(0)
+    })
+  })
+
   it(`should work with basic collection and select`, () => {
     const collection = createCollection(
       mockSyncCollectionOptions<Person>({
