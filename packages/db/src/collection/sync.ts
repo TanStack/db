@@ -73,18 +73,7 @@ export class CollectionSyncManager<
 
   /** Mark the active sync transaction as changing collection layout. */
   public markLayoutChange(): void {
-    const pendingTransaction =
-      this.state.pendingSyncedTransactions[
-        this.state.pendingSyncedTransactions.length - 1
-      ]
-    if (!pendingTransaction) {
-      throw new NoPendingSyncTransactionWriteError()
-    }
-    if (pendingTransaction.committed) {
-      throw new SyncTransactionAlreadyCommittedWriteError()
-    }
-
-    pendingTransaction.layoutChanged = true
+    this.getActivePendingSyncTransaction().layoutChanged = true
   }
 
   /**
