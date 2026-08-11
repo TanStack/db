@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { createCollection } from '../src/collection/index.js'
+import { createDeferred } from '../src/deferred.js'
 import { createLiveQueryCollection } from '../src/query/live-query-collection.js'
 import { createLiveQueryObserver } from '../src/live-query-observer.js'
 import { eq } from '../src/query/builder/functions.js'
@@ -113,6 +114,69 @@ describe(`order-only move (RFC #1623 phase 4)`, () => {
       `2`,
     ])
     expect(after.layoutRevision).toBeGreaterThan(before.layoutRevision)
+    observer.dispose()
+  })
+
+  it(`refreshes a detached observer when an order-only sync is parked`, async () => {
+    const source = makeSource()
+    const persist = createDeferred<void>()
+    const lq = createLiveQueryCollection({
+      getKey: (row) => row.id,
+      query: (q) =>
+        q
+          .from({ p: source })
+          .orderBy(({ p }) => p.age, `asc`)
+          .select(({ p }) => ({ id: p.id, name: p.name })),
+      onUpdate: () => persist.promise,
+    })
+    await lq.preload()
+    const observer = createLiveQueryObserver<
+      { id: string; name: string },
+      string
+    >(lq as any)
+
+    const before = observer.getSnapshot()
+    const collectionLayoutRevisionBefore = lq._layoutRevision
+    expect((before.data as Array<any>).map((row) => row.id)).toEqual([
+      `2`,
+      `1`,
+      `3`,
+    ])
+
+    const mutation = lq.update(
+      `1`,
+      { optimistic: false },
+      (draft) => void (draft.name = `Pending`),
+    )
+    expect(mutation.state).toBe(`persisting`)
+
+    source.utils.begin()
+    source.utils.write({
+      type: `update`,
+      value: { id: `2`, name: `Bob`, age: 99 },
+    })
+    source.utils.commit()
+    await flush()
+
+    const parked = observer.getSnapshot()
+    expect((parked.data as Array<any>).map((row) => row.id)).toEqual([
+      `2`,
+      `1`,
+      `3`,
+    ])
+    expect(lq._layoutRevision).toBe(collectionLayoutRevisionBefore)
+
+    persist.resolve()
+    await mutation.isPersisted.promise
+    await flush()
+
+    const after = observer.getSnapshot()
+    expect((after.data as Array<any>).map((row) => row.id)).toEqual([
+      `1`,
+      `3`,
+      `2`,
+    ])
+    expect(lq._layoutRevision).toBeGreaterThan(collectionLayoutRevisionBefore)
     observer.dispose()
   })
 

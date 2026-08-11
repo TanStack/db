@@ -29,7 +29,6 @@ export class CollectionChangesManager<
   public changeSubscriptions = new Set<CollectionSubscription>()
   public batchedEvents: Array<ChangeMessage<TOutput, TKey>> = []
   public shouldBatchEvents = false
-  private pendingLayoutChange = false
 
   /**
    * Monotonic revision of the collection's visible state, advanced once per
@@ -78,17 +77,6 @@ export class CollectionChangesManager<
   }
 
   /**
-   * Mark the next committed publication as layout-changing. Each subscription
-   * receives its filtered row batch once, or one empty batch when filtering
-   * removed every row change, so ordered consumers always re-read without a
-   * duplicate callback or a forged row `update`.
-   */
-  public markLayoutChange(): void {
-    this.layoutRevision++
-    this.pendingLayoutChange = true
-  }
-
-  /**
    * Enriches a change message with virtual properties ($synced, $origin, $key, $collectionId).
    * Uses the "add-if-missing" pattern to preserve virtual properties from upstream collections.
    */
@@ -104,10 +92,12 @@ export class CollectionChangesManager<
   public emitEvents(
     changes: Array<ChangeMessage<TOutput, TKey>>,
     forceEmit = false,
+    layoutChanged = false,
   ): void {
     // The visible state was already committed by the caller, so the revision
     // advances even when the events below end up batched for later emission.
     if (changes.length > 0) this.stateRevision++
+    if (layoutChanged) this.layoutRevision++
 
     // Skip batching for user actions (forceEmit=true) to keep UI responsive
     if (this.shouldBatchEvents && !forceEmit) {
@@ -130,14 +120,9 @@ export class CollectionChangesManager<
       this.shouldBatchEvents = false
     }
 
-    const layoutChanged = this.pendingLayoutChange
     if (rawEvents.length === 0 && !layoutChanged) {
       return
     }
-
-    // Clear before notifying so a nested publication can mark a new layout
-    // change without this flush erasing it.
-    this.pendingLayoutChange = false
 
     // Enrich all change messages with virtual properties
     // This uses the "add-if-missing" pattern to preserve pass-through semantics
