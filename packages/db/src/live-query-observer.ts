@@ -299,7 +299,6 @@ class LiveQueryObserverImpl<
     // no unfiltered loadSubset({ where: undefined }) against on-demand
     // collections. The explicit `false` marks all state as seen so deletes
     // still flow through as notifies.
-    let receivingInitialState = true
     const notify = (
       changes: Array<ChangeMessage<T, TKey>> | undefined,
       status: CollectionStatus = collection.status,
@@ -309,9 +308,8 @@ class LiveQueryObserverImpl<
       // empty-ready flush); only real deltas and the synthetic ready notify
       // (undefined) are published.
       if (changes !== undefined && changes.length === 0) return
-      const isInitialReplay = receivingInitialState && changes !== undefined
       const captured =
-        changes !== undefined && !isInitialReplay
+        changes !== undefined
           ? this.readEntries(collection)
           : status === `cleaned-up`
             ? this.readEntries(collection)
@@ -349,7 +347,6 @@ class LiveQueryObserverImpl<
       (changes) => notify(changes as Array<ChangeMessage<T, TKey>>),
       { includeInitialState: !this.wholesale },
     )
-    receivingInitialState = false
     this.blockDelivery = false
     if (this.collectionUnsub !== release) {
       subscription.unsubscribe()

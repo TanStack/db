@@ -503,6 +503,7 @@ describe(`createLiveQueryObserver`, () => {
   it(`granular mode still seeds from an initial snapshot`, () => {
     const { collection, loadSubsetCalls } = makeLoadSubsetSource()
     const observer = createLiveQueryObserver<Row, string>(collection as any)
+    const before = observer.getSnapshot()
 
     const inserted: Array<string> = []
     observer.subscribe((changes) => {
@@ -513,6 +514,8 @@ describe(`createLiveQueryObserver`, () => {
 
     expect(inserted.sort()).toEqual([`1`, `2`])
     expect(loadSubsetCalls).toHaveLength(1)
+    expect(observer.getSnapshot()).not.toBe(before)
+    expect(observer.getSnapshot().data).toHaveLength(2)
     observer.dispose()
   })
 
