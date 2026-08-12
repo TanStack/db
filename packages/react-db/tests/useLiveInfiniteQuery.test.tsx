@@ -849,6 +849,66 @@ describe(`useLiveInfiniteQuery`, () => {
     })
   })
 
+  it(`preserves loaded pages when dependencies are structurally unchanged`, async () => {
+    const source = createCollection(
+      mockSyncCollectionOptions<Post>({
+        id: `infinite-query-structurally-equal-deps`,
+        getKey: (post) => post.id,
+        initialData: createMockPosts(20),
+      }),
+    )
+    const { result, rerender } = renderHook(
+      ({ filter }: { filter: { category: string } }) =>
+        useLiveInfiniteQuery(
+          (q) =>
+            q
+              .from({ post: source })
+              .where(({ post }) => eq(post.category, filter.category))
+              .orderBy(({ post }) => post.createdAt, `desc`),
+          { pageSize: 2 },
+          [filter],
+        ),
+      { initialProps: { filter: { category: `tech` } } },
+    )
+
+    await waitFor(() => expect(result.current.isReady).toBe(true))
+    act(() => result.current.fetchNextPage())
+    await waitFor(() => expect(result.current.pages).toHaveLength(2))
+
+    rerender({ filter: { category: `tech` } })
+
+    await waitFor(() => expect(result.current.isReady).toBe(true))
+    expect(result.current.pages).toHaveLength(2)
+  })
+
+  it(`releases a replaced controller through the external-store unsubscribe`, async () => {
+    const source = createCollection(
+      mockSyncCollectionOptions<Post>({
+        id: `infinite-query-controller-replacement`,
+        getKey: (post) => post.id,
+        initialData: createMockPosts(20),
+      }),
+    )
+    const query = createLiveQueryCollection({
+      query: (q) =>
+        q.from({ post: source }).orderBy(({ post }) => post.createdAt, `desc`),
+    })
+    const { result, rerender, unmount } = renderHook(
+      ({ pageSize }) => useLiveInfiniteQuery(query, { pageSize }),
+      { initialProps: { pageSize: 2 } },
+    )
+
+    await waitFor(() => expect(result.current.isReady).toBe(true))
+    expect(query.subscriberCount).toBe(1)
+
+    rerender({ pageSize: 3 })
+    await waitFor(() => expect(result.current.pages[0]).toHaveLength(3))
+    expect(query.subscriberCount).toBe(1)
+
+    unmount()
+    expect(query.subscriberCount).toBe(0)
+  })
+
   it(`binds fetchNextPage to the controller that returned it`, async () => {
     const sourceA = createCollection(
       mockSyncCollectionOptions<Post>({
@@ -1994,9 +2054,6 @@ describe(`useLiveInfiniteQuery`, () => {
             .offset(0),
       })
       await liveQueryCollection.preload()
-      // Give the collection a concrete window that differs from the hook's
-      // expected first page (offset 0, limit pageSize + 1).
-      await liveQueryCollection.utils.setWindow({ offset: 0, limit: 5 })
 
       const warn = vi.spyOn(console, `warn`).mockImplementation(() => {})
       try {

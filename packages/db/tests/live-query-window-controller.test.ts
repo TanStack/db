@@ -1,4 +1,5 @@
 import { describe, expect, it, vi } from 'vitest'
+import { BTreeIndex } from '../src/index.js'
 import { createCollection } from '../src/collection/index.js'
 import { createLiveQueryCollection } from '../src/query/live-query-collection.js'
 import { LIVE_QUERY_INTERNAL } from '../src/query/live/internal.js'
@@ -232,7 +233,7 @@ describe(`createLiveQueryWindowController`, () => {
     expect(windowFn).toHaveBeenNthCalledWith(1, { offset: 0, limit: 5 })
     expect(windowFn).toHaveBeenNthCalledWith(2, { offset: 0, limit: 3 })
     expect(maybeRunGraph).toHaveBeenCalledTimes(2)
-    expect(lq.utils.getWindow()).toBeUndefined()
+    expect(lq.utils.getWindow()).toEqual({ offset: 0, limit: 3 })
   })
 
   it(`keeps the committed page retryable when a window load rejects`, async () => {
@@ -313,6 +314,113 @@ describe(`createLiveQueryWindowController`, () => {
       { pages: 1, fetching: true },
       { pages: 2, fetching: false },
     ])
+    controller.dispose()
+  })
+
+  it(`does not shrink the physical window when preload overlaps a page fetch`, async () => {
+    const lq = makeOrderedLiveQuery(makeSource(), 2)
+    const controller = createLiveQueryWindowController<Row, string>(lq as any, {
+      pageSize: 2,
+    })
+    controller.subscribe(() => {})
+    await lq.preload()
+
+    const originalSetWindow = lq.utils.setWindow.bind(lq.utils)
+    let resolveExpansion!: () => void
+    vi.spyOn(lq.utils, `setWindow`).mockImplementation((options) => {
+      const result = originalSetWindow(options)
+      if (options.limit !== 5) return result
+      return new Promise<void>((resolve) => {
+        resolveExpansion = resolve
+      })
+    })
+
+    const expansion = controller.fetchNextPage()
+    const preload = controller.preload()
+    resolveExpansion()
+    await Promise.all([expansion, preload])
+
+    expect(controller.getSnapshot().pages).toHaveLength(2)
+    expect(lq.utils.getWindow()).toEqual({ offset: 0, limit: 5 })
+    controller.dispose()
+  })
+
+  it(`publishes source changes while a page fetch is pending`, async () => {
+    const source = makeSource()
+    const lq = makeOrderedLiveQuery(source, 2)
+    const controller = createLiveQueryWindowController<Row, string>(lq as any, {
+      pageSize: 2,
+    })
+    let notifications = 0
+    controller.subscribe(() => notifications++)
+    await lq.preload()
+    notifications = 0
+
+    vi.spyOn(lq.utils, `setWindow`).mockReturnValueOnce(
+      new Promise<void>(() => {}),
+    )
+    void controller.fetchNextPage()
+    notifications = 0
+
+    source.utils.begin()
+    source.utils.write({
+      type: `update`,
+      value: { id: `1`, n: 0 },
+    })
+    source.utils.commit()
+    await flush()
+
+    expect(notifications).toBeGreaterThan(0)
+    expect(controller.getSnapshot().data[0]).toMatchObject({ id: `1`, n: 0 })
+    controller.dispose()
+  })
+
+  it(`surfaces a real async subset-load failure from setWindow`, async () => {
+    const remoteRows = [...ROWS]
+    let rejectLoads = false
+    const failure = new Error(`remote page failed`)
+    const source = createCollection<Row>({
+      id: `window-ctrl-rejecting-source-${seq++}`,
+      getKey: (row) => row.id,
+      syncMode: `on-demand`,
+      startSync: true,
+      autoIndex: `eager`,
+      defaultIndexType: BTreeIndex,
+      sync: {
+        sync: ({ begin, write, commit, markReady }) => {
+          markReady()
+          return {
+            loadSubset: (options) =>
+              new Promise<void>((resolve, reject) => {
+                queueMicrotask(() => {
+                  if (rejectLoads) {
+                    reject(failure)
+                    return
+                  }
+                  begin()
+                  remoteRows.slice(0, options.limit).forEach((row) => {
+                    write({ type: `insert`, value: row })
+                  })
+                  commit()
+                  resolve()
+                })
+              }),
+          }
+        },
+      },
+    })
+    const lq = makeOrderedLiveQuery(source, 2)
+    const controller = createLiveQueryWindowController<Row, string>(lq as any, {
+      pageSize: 2,
+    })
+    controller.subscribe(() => {})
+    await controller.preload()
+    expect(controller.getSnapshot().hasNextPage).toBe(true)
+
+    rejectLoads = true
+    await expect(controller.fetchNextPage()).rejects.toBe(failure)
+    expect(controller.getSnapshot().pages).toHaveLength(1)
+    expect(controller.getSnapshot().error).toBe(failure)
     controller.dispose()
   })
 
@@ -460,6 +568,98 @@ describe(`createLiveQueryWindowController`, () => {
     larger.dispose()
     expect(lq.utils.getWindow()).toEqual({ offset: 0, limit: 3 })
     smaller.dispose()
+  })
+
+  it(`rolls a failed lease request back to its committed window`, async () => {
+    const lq = makeOrderedLiveQuery(makeSource(), 2)
+    const controller = createLiveQueryWindowController<Row, string>(lq as any, {
+      pageSize: 2,
+    })
+    controller.subscribe(() => {})
+    await lq.preload()
+
+    const failure = new Error(`window failed`)
+    vi.spyOn(lq.utils, `setWindow`).mockRejectedValueOnce(failure)
+    await expect(controller.fetchNextPage()).rejects.toBe(failure)
+
+    const smaller = createLiveQueryWindowController<Row, string>(lq as any, {
+      pageSize: 1,
+    })
+    smaller.subscribe(() => {})
+
+    expect(lq.utils.getWindow()).toEqual({ offset: 0, limit: 3 })
+    smaller.dispose()
+    controller.dispose()
+  })
+
+  it(`restores the remaining lease after a pending larger lease is released`, async () => {
+    const lq = makeOrderedLiveQuery(makeSource(), 2)
+    const keeper = createLiveQueryWindowController<Row, string>(lq as any, {
+      pageSize: 2,
+    })
+    keeper.subscribe(() => {})
+    await lq.preload()
+    await keeper.fetchNextPage()
+    expect(lq.utils.getWindow()).toEqual({ offset: 0, limit: 5 })
+
+    const transient = createLiveQueryWindowController<Row, string>(lq as any, {
+      pageSize: 2,
+    })
+    transient.subscribe(() => {})
+    await transient.fetchNextPage()
+
+    const originalSetWindow = lq.utils.setWindow.bind(lq.utils)
+    let resolveExpansion!: () => void
+    vi.spyOn(lq.utils, `setWindow`).mockImplementation((options) => {
+      const result = originalSetWindow(options)
+      if (options.limit !== 7) return result
+      return new Promise<void>((resolve) => {
+        resolveExpansion = resolve
+      })
+    })
+
+    const expansion = transient.fetchNextPage()
+    transient.dispose()
+
+    expect(lq.utils.getWindow()).toEqual({ offset: 0, limit: 5 })
+    resolveExpansion()
+    await expansion
+    keeper.dispose()
+  })
+
+  it(`repairs an externally moved physical window`, async () => {
+    const lq = makeOrderedLiveQuery(makeSource(), 2)
+    const controller = createLiveQueryWindowController<Row, string>(lq as any, {
+      pageSize: 2,
+    })
+    controller.subscribe(() => {})
+    await lq.preload()
+
+    await lq.utils.setWindow({ offset: 1, limit: 3 })
+    expect(lq.utils.getWindow()).toEqual({ offset: 1, limit: 3 })
+
+    await controller.preload()
+    expect(lq.utils.getWindow()).toEqual({ offset: 0, limit: 3 })
+    controller.dispose()
+  })
+
+  it(`restores the query's initial window after the last lease is released`, async () => {
+    const lq = makeOrderedLiveQuery(makeSource(), 2)
+    const controller = createLiveQueryWindowController<Row, string>(lq as any, {
+      pageSize: 2,
+    })
+    const unsubscribe = controller.subscribe(() => {})
+    await lq.preload()
+    await controller.fetchNextPage()
+    expect(lq.utils.getWindow()).toEqual({ offset: 0, limit: 5 })
+
+    unsubscribe()
+    controller.dispose()
+    await lq.cleanup()
+    await lq.preload()
+
+    expect(lq.utils.getWindow()).toEqual({ offset: 0, limit: 3 })
+    expect(lq.toArray).toHaveLength(3)
   })
 
   it(`ignores a failed attachment superseded by a new lease`, async () => {
@@ -645,6 +845,44 @@ describe(`createLiveQueryWindowController`, () => {
     await lq.preload()
     await flush()
     expect(controller.getSnapshot()).toBe(controller.getSnapshot())
+    controller.dispose()
+  })
+
+  it(`derives status flags from a pagination error status`, async () => {
+    const lq = makeOrderedLiveQuery(makeSource(), 2)
+    const controller = createLiveQueryWindowController<Row, string>(lq as any, {
+      pageSize: 2,
+    })
+    controller.subscribe(() => {})
+    await lq.preload()
+
+    vi.spyOn(lq.utils, `setWindow`).mockRejectedValueOnce(
+      new Error(`window failed`),
+    )
+    await expect(controller.fetchNextPage()).rejects.toThrow(`window failed`)
+
+    expect(controller.getSnapshot()).toMatchObject({
+      status: `error`,
+      isLoading: false,
+      isReady: false,
+      isIdle: false,
+      isError: true,
+      isCleanedUp: false,
+    })
+    controller.dispose()
+  })
+
+  it(`normalizes a NaN initial page count to one page`, async () => {
+    const lq = makeOrderedLiveQuery(makeSource(), 2)
+    const controller = createLiveQueryWindowController<Row, string>(lq as any, {
+      pageSize: 2,
+      initialPageCount: Number.NaN,
+    })
+    controller.subscribe(() => {})
+    await lq.preload()
+
+    expect(controller.getSnapshot().pages).toHaveLength(1)
+    expect(ids(controller.getSnapshot())).toEqual([`1`, `2`])
     controller.dispose()
   })
 

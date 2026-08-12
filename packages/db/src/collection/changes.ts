@@ -124,12 +124,11 @@ export class CollectionChangesManager<
       return
     }
 
-    // A layout-only publication is not a ChangeMessage batch. Keep it on the
-    // observer's internal channel instead of overloading the public empty
-    // ready event with a second meaning.
+    // Notify both internal layout consumers and the public subscription API.
+    // Public subscribers historically receive an empty batch for order-only
+    // moves because there is no row-value ChangeMessage to publish.
     if (rawEvents.length === 0) {
       for (const listener of this.layoutChangeListeners) listener()
-      return
     }
 
     // Enrich all change messages with virtual properties

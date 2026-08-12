@@ -240,7 +240,7 @@ describe(`order-only move (RFC #1623 phase 4)`, () => {
     observer.dispose()
   })
 
-  it(`does not expose layout-only signals as empty public change batches`, async () => {
+  it(`exposes layout-only signals as empty public change batches`, async () => {
     const source = makeSource()
     const lq = await makeOrderedByAge(source)
     const publications: Array<Array<unknown>> = []
@@ -257,7 +257,7 @@ describe(`order-only move (RFC #1623 phase 4)`, () => {
     source.utils.commit()
     await flush()
 
-    expect(publications).toEqual([])
+    expect(publications).toEqual([[]])
     subscription.unsubscribe()
   })
 

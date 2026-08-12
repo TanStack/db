@@ -2,6 +2,7 @@ import {
   LiveQueryWindowControllerDisposedError,
   SetWindowRequiresOrderByError,
 } from './errors.js'
+import { getLiveQueryStatusFlags } from './live-query-adapter.js'
 import { createLiveQueryObserver } from './live-query-observer.js'
 import type {
   LiveQueryObserver,
@@ -17,6 +18,7 @@ type WindowResult = true | Promise<void>
 type WindowTarget = object & {
   utils?: {
     setWindow?: (options: { offset: number; limit: number }) => WindowResult
+    getWindow?: () => { offset: number; limit: number } | undefined
   }
 }
 
@@ -28,29 +30,76 @@ type PendingWindow = {
 
 class WindowCoordinator {
   private readonly leases = new Map<symbol, number>()
+  private readonly leaseVersions = new Map<symbol, number>()
+  private readonly initialWindow: { offset: number; limit: number } | undefined
   private appliedLimit: number | undefined
   private pending: PendingWindow | undefined
   private generation = 0
+  private leaseVersion = 0
 
-  constructor(private readonly target: WindowTarget) {}
+  constructor(private readonly target: WindowTarget) {
+    this.initialWindow = target.utils?.getWindow?.()
+  }
 
   request(lease: symbol, limit: number): WindowResult {
+    const previousLimit = this.leases.get(lease)
+    const previousVersion = this.leaseVersions.get(lease)
+    const version = ++this.leaseVersion
     this.leases.set(lease, limit)
-    return this.applyDesiredWindow()
+    this.leaseVersions.set(lease, version)
+
+    let result: WindowResult
+    try {
+      result = this.applyDesiredWindow()
+    } catch (error) {
+      this.rollbackLease(lease, version, previousLimit, previousVersion)
+      this.appliedLimit = undefined
+      throw error
+    }
+
+    if (result === true) return true
+    return result.catch(async (error: unknown) => {
+      if (this.rollbackLease(lease, version, previousLimit, previousVersion)) {
+        this.generation++
+        this.pending = undefined
+        this.appliedLimit = undefined
+        try {
+          if (this.leases.size === 0) {
+            this.restoreInitialWindow()
+          } else {
+            const rollback = this.applyDesiredWindow()
+            if (rollback !== true) await rollback
+          }
+        } catch {
+          // Preserve the failure from the requested window.
+        }
+      }
+      throw error
+    })
+  }
+
+  isLeaseSatisfied(lease: symbol, minimumLimit: number): boolean {
+    const limit = this.leases.get(lease)
+    if (limit === undefined || limit < minimumLimit) return false
+    const desiredLimit = this.getDesiredLimit()
+    const currentWindow = this.target.utils?.getWindow?.()
+    return (
+      currentWindow === undefined ||
+      (currentWindow.offset === 0 && currentWindow.limit === desiredLimit)
+    )
   }
 
   release(lease: symbol): void {
     if (!this.leases.delete(lease)) return
+    this.leaseVersions.delete(lease)
 
     // A pending request may still mutate the physical operator, but it no longer
     // establishes the accepted window for the remaining lease set.
     this.generation++
     this.pending = undefined
+    this.appliedLimit = undefined
 
     if (this.leases.size === 0) {
-      // There is no consumer-visible window to maintain. Force the next lease to
-      // re-apply even when it requests the same limit as the previous consumer.
-      this.appliedLimit = undefined
       return
     }
 
@@ -77,6 +126,38 @@ class WindowCoordinator {
     return desired
   }
 
+  private rollbackLease(
+    lease: symbol,
+    version: number,
+    previousLimit: number | undefined,
+    previousVersion: number | undefined,
+  ): boolean {
+    if (this.leaseVersions.get(lease) !== version) return false
+    if (previousLimit === undefined) {
+      this.leases.delete(lease)
+      this.leaseVersions.delete(lease)
+    } else {
+      this.leases.set(lease, previousLimit)
+      if (previousVersion === undefined) {
+        this.leaseVersions.delete(lease)
+      } else {
+        this.leaseVersions.set(lease, previousVersion)
+      }
+    }
+    return true
+  }
+
+  private restoreInitialWindow(): void {
+    const setWindow = this.target.utils?.setWindow
+    if (!this.initialWindow || typeof setWindow !== `function`) return
+    try {
+      const result = setWindow.call(this.target.utils, this.initialWindow)
+      if (result !== true) void result.catch(() => {})
+    } catch {
+      // Release has no error channel. A future lease will retry its own window.
+    }
+  }
+
   private applyDesiredWindow(): WindowResult {
     const limit = this.getDesiredLimit()
     if (limit === undefined) return true
@@ -89,7 +170,14 @@ class WindowCoordinator {
       this.pending = undefined
       this.appliedLimit = undefined
     }
-    if (limit === this.appliedLimit) return true
+    const currentWindow = this.target.utils?.getWindow?.()
+    if (
+      limit === this.appliedLimit &&
+      currentWindow?.offset === 0 &&
+      currentWindow.limit === limit
+    ) {
+      return true
+    }
 
     const setWindow = this.target.utils?.setWindow
     if (typeof setWindow !== `function`) {
@@ -260,10 +348,10 @@ class LiveQueryWindowControllerImpl<
         ? options.pageSize
         : DEFAULT_PAGE_SIZE
     this.initialPageParam = options.initialPageParam ?? 0
-    this.committedPageCount = Math.max(
-      1,
-      Math.floor(options.initialPageCount ?? 1),
-    )
+    const initialPageCount = Math.floor(options.initialPageCount ?? 1)
+    this.committedPageCount = Number.isFinite(initialPageCount)
+      ? Math.max(1, initialPageCount)
+      : 1
     // The controller listener carries no delta payload, so wholesale is the
     // only coherent observer contract and guarantees non-reentrant subscribe.
     this.observer = createLiveQueryObserver<T, TKey>(collection, {
@@ -307,6 +395,9 @@ class LiveQueryWindowControllerImpl<
     }
 
     const status = this.hasPaginationError ? `error` : observerSnapshot.status
+    const statusFlags = this.hasPaginationError
+      ? getLiveQueryStatusFlags(`error`)
+      : observerSnapshot
     this.cachedSnapshot = {
       data: rows.slice(0, totalRequested),
       pages,
@@ -317,10 +408,10 @@ class LiveQueryWindowControllerImpl<
       state: observerSnapshot.state,
       collection: observerSnapshot.collection,
       status,
-      isLoading: observerSnapshot.isLoading,
-      isReady: observerSnapshot.isReady,
-      isIdle: observerSnapshot.isIdle,
-      isError: this.hasPaginationError || observerSnapshot.isError,
+      isLoading: statusFlags.isLoading,
+      isReady: statusFlags.isReady,
+      isIdle: statusFlags.isIdle,
+      isError: statusFlags.isError,
       isCleanedUp: observerSnapshot.isCleanedUp,
       isEnabled: observerSnapshot.isEnabled,
     }
@@ -346,7 +437,7 @@ class LiveQueryWindowControllerImpl<
       try {
         // Store the desired physical window before observer activation can
         // compile or restart the live-query pipeline.
-        const windowResult = this.activateLease(this.committedPageCount)
+        const windowResult = this.ensureLeaseActive(this.committedPageCount)
         const leaseGeneration = this.leaseGeneration
         observerUnsub = this.observer.subscribe(() => this.onObserverNotify())
         this.observerUnsub = observerUnsub
@@ -404,7 +495,7 @@ class LiveQueryWindowControllerImpl<
     this.paginationError = undefined
     this.acquireInFlightLease()
     try {
-      const result = this.activateLease(this.committedPageCount)
+      const result = this.ensureLeaseActive(this.committedPageCount)
       if (result !== true) await result
       await this.observer.preload()
       this.failedHasNextPage = false
@@ -527,6 +618,17 @@ class LiveQueryWindowControllerImpl<
     return this.coordinator.request(this.lease, pageCount * this.pageSize + 1)
   }
 
+  private ensureLeaseActive(pageCount: number): WindowResult {
+    const minimumLimit = pageCount * this.pageSize + 1
+    if (
+      this.leaseActive &&
+      this.coordinator?.isLeaseSatisfied(this.lease, minimumLimit)
+    ) {
+      return true
+    }
+    return this.activateLease(pageCount)
+  }
+
   private deactivateLease(): void {
     if (!this.leaseActive || !this.coordinator) return
     this.leaseGeneration++
@@ -565,7 +667,6 @@ class LiveQueryWindowControllerImpl<
   }
 
   private onObserverNotify(): void {
-    if (this.pendingWindowGeneration !== undefined) return
     this.notify()
   }
 

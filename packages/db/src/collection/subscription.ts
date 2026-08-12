@@ -302,12 +302,13 @@ export class CollectionSubscription
       this.pendingLoadSubsetPromises.add(syncResult)
       this.setStatus(`loadingSubset`)
 
-      syncResult.finally(() => {
+      const finish = () => {
         this.pendingLoadSubsetPromises.delete(syncResult)
         if (this.pendingLoadSubsetPromises.size === 0) {
           this.setStatus(`ready`)
         }
-      })
+      }
+      void syncResult.then(finish, finish)
     }
   }
 

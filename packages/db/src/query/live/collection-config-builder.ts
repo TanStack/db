@@ -300,34 +300,18 @@ export class CollectionConfigBuilder<
       throw error
     }
 
-    // Check if loading a subset was triggered
-    if (this.liveQueryCollection?.isLoadingSubset) {
-      // Loading was triggered, return a promise that resolves when it completes
-      return new Promise<void>((resolve) => {
-        const unsubscribe = this.liveQueryCollection!.on(
-          `loadingSubset:change`,
-          (event) => {
-            if (!event.isLoadingSubset) {
-              unsubscribe()
-              resolve()
-            }
-          },
-        )
-      })
-    }
-
-    // No loading was triggered
-    return true
+    return this.liveQueryCollection?._sync.waitForCurrentLoadSubset() ?? true
   }
 
   getWindow(): { offset: number; limit: number } | undefined {
     // Only return window if this is a windowed query (has orderBy and windowFn)
-    if (!this.windowFn || !this.currentWindow) {
+    const window = this.currentWindow ?? this.initialWindow
+    if (!this.windowFn || !window) {
       return undefined
     }
     return {
-      offset: this.currentWindow.offset ?? 0,
-      limit: this.currentWindow.limit ?? 0,
+      offset: window.offset ?? 0,
+      limit: window.limit ?? 0,
     }
   }
 
@@ -677,6 +661,7 @@ export class CollectionConfigBuilder<
       this.currentSyncConfig = undefined
       this.currentSyncState = undefined
       this.maybeRunGraphFn = undefined
+      this.currentWindow = undefined
 
       // Clear all pending graph runs to prevent memory leaks from in-flight transactions
       // that may flush after the sync session ends

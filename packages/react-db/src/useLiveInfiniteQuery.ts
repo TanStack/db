@@ -3,6 +3,7 @@ import {
   CollectionImpl,
   createLiveQueryCollection,
   createLiveQueryWindowController,
+  deepEquals,
 } from '@tanstack/db'
 // Type-only: used in `ReturnType<typeof useLiveQuery>` in UseLiveInfiniteQueryReturn.
 import type { useLiveQuery } from './useLiveQuery'
@@ -180,12 +181,17 @@ export function useLiveInfiniteQuery<TContext extends Context>(
   const validatedCollectionRef = useRef<unknown>(null)
   const inputKind = isCollection ? `collection` : `query`
   const inputKindRef = useRef<typeof inputKind | null>(null)
+  const previousInputKind = inputKindRef.current
 
   const dependenciesChanged =
     !isCollection &&
     (depsRef.current === null ||
       depsRef.current.length !== deps.length ||
       depsRef.current.some((dep, index) => dep !== deps[index]))
+  const dependenciesStructurallyEqual =
+    !isCollection &&
+    depsRef.current !== null &&
+    deepEquals(depsRef.current, deps)
   const needsNewCollection =
     !collectionRef.current ||
     inputKindRef.current !== inputKind ||
@@ -242,10 +248,14 @@ export function useLiveInfiniteQuery<TContext extends Context>(
   }
 
   if (needsNewController) {
-    const initialPageCount =
-      controllerRef.current && !needsNewCollection
-        ? Math.max(1, controllerRef.current.getSnapshot().pages.length)
-        : 1
+    const previousController = controllerRef.current
+    const canPreservePageCount =
+      previousController !== null &&
+      (!needsNewCollection ||
+        (previousInputKind === `query` && dependenciesStructurallyEqual))
+    const initialPageCount = canPreservePageCount
+      ? Math.max(1, previousController.getSnapshot().pages.length)
+      : 1
     pageSizeRef.current = pageSize
     initialPageParamRef.current = initialPageParam
     controllerRef.current = createLiveQueryWindowController(
