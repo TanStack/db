@@ -897,6 +897,41 @@ describe(`useLiveInfiniteQuery`, () => {
     await waitFor(() => expect(result.current.pages).toHaveLength(2))
   })
 
+  it(`exposes pagination failures without an unhandled rejection`, async () => {
+    const source = createCollection(
+      mockSyncCollectionOptions<Post>({
+        id: `infinite-query-pagination-failure`,
+        getKey: (post) => post.id,
+        initialData: createMockPosts(10),
+      }),
+    )
+    const query = createLiveQueryCollection({
+      query: (q) =>
+        q.from({ post: source }).orderBy(({ post }) => post.createdAt, `desc`),
+    })
+    const { result } = renderHook(() =>
+      useLiveInfiniteQuery(query, { pageSize: 2 }),
+    )
+
+    await waitFor(() => {
+      expect(result.current.isReady).toBe(true)
+      expect(result.current.hasNextPage).toBe(true)
+    })
+
+    const failure = new Error(`window load failed`)
+    vi.spyOn(query.utils, `setWindow`).mockRejectedValueOnce(failure)
+
+    act(() => result.current.fetchNextPage())
+
+    await waitFor(() => {
+      expect(result.current.isError).toBe(true)
+      expect(result.current.error).toBe(failure)
+      expect(result.current.isFetchingNextPage).toBe(false)
+    })
+    expect(result.current.pages).toHaveLength(1)
+    expect(result.current.hasNextPage).toBe(true)
+  })
+
   it(`should track pageParams correctly`, async () => {
     const posts = createMockPosts(30)
     const collection = createCollection(

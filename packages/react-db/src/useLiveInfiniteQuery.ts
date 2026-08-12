@@ -267,7 +267,10 @@ export function useLiveInfiniteQuery<TContext extends Context>(
   const snapshot = useSyncExternalStore(subscribe, getSnapshot)
 
   const fetchNextPage = useCallback(() => {
-    void controller.fetchNextPage()
+    void controller.fetchNextPage().catch(() => {
+      // Pagination errors are exposed through the controller snapshot. The
+      // hook's void callback has no promise error channel, so consume it here.
+    })
   }, [controller])
 
   return {
