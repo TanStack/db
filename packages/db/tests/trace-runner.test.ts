@@ -65,4 +65,81 @@ describe(`runTrace`, () => {
 
     expect(cleanup).toHaveBeenCalledOnce()
   })
+
+  it(`checks synchronous steps before queued microtasks run`, async () => {
+    await expect(
+      runTrace({
+        steps: [1],
+        driver: {
+          setup: () => ({ observed: 0, expected: 0 }),
+          apply: (step, context) => {
+            context.expected = step
+            queueMicrotask(() => {
+              context.observed = step
+            })
+          },
+          cleanup: () => undefined,
+        },
+        projection: {
+          observe: (context) => context.observed,
+          recompute: (context) => context.expected,
+          assertEqual: (observed, expected) => {
+            expect(observed).toBe(expected)
+          },
+        },
+      }),
+    ).rejects.toThrow()
+  })
+
+  it(`preserves the trace failure when cleanup also fails`, async () => {
+    const traceError = new Error(`trace failed`)
+    const cleanupError = new Error(`cleanup failed`)
+
+    const run = runTrace({
+      steps: [],
+      driver: {
+        setup: () => ({ observed: 0, expected: 1 }),
+        apply: () => undefined,
+        cleanup: () => {
+          throw cleanupError
+        },
+      },
+      projection: {
+        observe: (context) => context.observed,
+        recompute: (context) => context.expected,
+        assertEqual: () => {
+          throw traceError
+        },
+      },
+    })
+
+    await expect(run).rejects.toBe(traceError)
+    expect(
+      (traceError as Error & { suppressed?: Array<unknown> }).suppressed,
+    ).toEqual([cleanupError])
+  })
+
+  it(`throws cleanup failures when the trace succeeds`, async () => {
+    const cleanupError = new Error(`cleanup failed`)
+
+    await expect(
+      runTrace({
+        steps: [],
+        driver: {
+          setup: () => ({ observed: 0, expected: 0 }),
+          apply: () => undefined,
+          cleanup: () => {
+            throw cleanupError
+          },
+        },
+        projection: {
+          observe: (context) => context.observed,
+          recompute: (context) => context.expected,
+          assertEqual: (observed, expected) => {
+            expect(observed).toBe(expected)
+          },
+        },
+      }),
+    ).rejects.toBe(cleanupError)
+  })
 })

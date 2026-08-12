@@ -33,6 +33,11 @@ type ChildRow = RootRow & {
   parentGroup: number
 }
 
+type SyncChange<T> = {
+  type: `insert` | `update` | `delete`
+  value: T
+}
+
 type HistoryAction = {
   type: `put` | `delete` | `optimisticConfirm` | `optimisticRollback`
   level: 0 | IncludeDepth
@@ -252,21 +257,27 @@ let nextHarnessId = 0
 function createControlledCollection<T extends { id: number }>(
   name: string,
   initialData: Array<T> = [],
+  rowUpdateMode: `partial` | `full` = `partial`,
 ) {
   const options = mockSyncCollectionOptions<T>({
     id: `${name}-${nextHarnessId++}`,
     getKey: (row) => row.id,
     initialData,
   })
+  options.sync.rowUpdateMode = rowUpdateMode
   const collection = createCollection(options)
+  const writeBatch = (changes: ReadonlyArray<SyncChange<T>>): void => {
+    options.utils.begin()
+    changes.forEach((change) => options.utils.write(change))
+    options.utils.commit()
+  }
 
   return {
     collection,
     write(type: `insert` | `update` | `delete`, value: T): void {
-      options.utils.begin()
-      options.utils.write({ type, value })
-      options.utils.commit()
+      writeBatch([{ type, value }])
     },
+    writeBatch,
     resolveSync(): void {
       options.utils.resolveSync()
     },
@@ -550,14 +561,18 @@ function createIncrementalQuery(depth: IncludeDepth, sources: Sources) {
   }
 }
 
-function createSources() {
+function createSources(rowUpdateMode: `partial` | `full` = `partial`) {
   return {
-    roots: createControlledCollection<RootRow>(`oracle-roots`),
+    roots: createControlledCollection<RootRow>(
+      `oracle-roots`,
+      [],
+      rowUpdateMode,
+    ),
     levels: [
-      createControlledCollection<ChildRow>(`oracle-level-1`),
-      createControlledCollection<ChildRow>(`oracle-level-2`),
-      createControlledCollection<ChildRow>(`oracle-level-3`),
-      createControlledCollection<ChildRow>(`oracle-level-4`),
+      createControlledCollection<ChildRow>(`oracle-level-1`, [], rowUpdateMode),
+      createControlledCollection<ChildRow>(`oracle-level-2`, [], rowUpdateMode),
+      createControlledCollection<ChildRow>(`oracle-level-3`, [], rowUpdateMode),
+      createControlledCollection<ChildRow>(`oracle-level-4`, [], rowUpdateMode),
     ] as const,
   }
 }
@@ -744,20 +759,33 @@ type StructuralTraceContext = {
   levels: Array<Map<number, ChildRow>>
 }
 
+function createStructuralTraceContext(
+  depth: IncludeDepth,
+  rowUpdateMode: `partial` | `full` = `partial`,
+): StructuralTraceContext {
+  const sources = createSources(rowUpdateMode)
+  return {
+    depth,
+    sources,
+    incremental: createIncrementalQuery(depth, sources),
+    roots: new Map<number, RootRow>(),
+    levels: Array.from({ length: 4 }, () => new Map<number, ChildRow>()),
+  }
+}
+
+async function cleanupStructuralTrace({
+  incremental,
+  sources,
+}: StructuralTraceContext): Promise<void> {
+  await incremental.cleanup()
+  await cleanupSources(sources)
+}
+
 function createStructuralTraceDriver(
   depth: IncludeDepth,
 ): TraceDriver<HistoryAction, StructuralTraceContext> {
   return {
-    setup: () => {
-      const sources = createSources()
-      return {
-        depth,
-        sources,
-        incremental: createIncrementalQuery(depth, sources),
-        roots: new Map<number, RootRow>(),
-        levels: Array.from({ length: 4 }, () => new Map<number, ChildRow>()),
-      }
-    },
+    setup: () => createStructuralTraceContext(depth),
     start: ({ incremental }) => incremental.preload(),
     apply: (action, context, checkpoint) =>
       applyAction(
@@ -767,12 +795,97 @@ function createStructuralTraceDriver(
         context.levels,
         checkpoint,
       ),
-    cleanup: async ({ incremental, sources }) => {
-      await incremental.cleanup()
-      await cleanupSources(sources)
-    },
+    cleanup: cleanupStructuralTrace,
   }
 }
+
+type FullRowBatchStep =
+  | { level: 0; changes: Array<SyncChange<RootRow>> }
+  | { level: 1; changes: Array<SyncChange<ChildRow>> }
+
+function updateModel<T extends { id: number }>(
+  model: Map<number, T>,
+  changes: ReadonlyArray<SyncChange<T>>,
+): void {
+  for (const change of changes) {
+    if (change.type === `delete`) {
+      model.delete(change.value.id)
+    } else {
+      model.set(change.value.id, change.value)
+    }
+  }
+}
+
+function createFullRowBatchTraceDriver(): TraceDriver<
+  FullRowBatchStep,
+  StructuralTraceContext
+> {
+  return {
+    setup: () => createStructuralTraceContext(1, `full`),
+    start: ({ incremental }) => incremental.preload(),
+    apply: (step, { sources, roots, levels }) => {
+      if (step.level === 0) {
+        sources.roots.writeBatch(step.changes)
+        updateModel(roots, step.changes)
+        return
+      }
+
+      sources.levels[0].writeBatch(step.changes)
+      updateModel(levels[0]!, step.changes)
+    },
+    cleanup: cleanupStructuralTrace,
+  }
+}
+
+function batchRoot(
+  id: number,
+  group: number,
+  value = id * 10,
+  position = id - 1,
+): RootRow {
+  return { id, group, value, position }
+}
+
+function batchChild(
+  id: number,
+  parentGroup: number,
+  value = id * 10,
+  position = id - 1,
+): ChildRow {
+  return { id, parentGroup, group: id * 10, value, position }
+}
+
+const fullRowBatchTrace: Array<FullRowBatchStep> = [
+  {
+    level: 0,
+    changes: [
+      { type: `insert`, value: batchRoot(1, 1) },
+      { type: `insert`, value: batchRoot(2, 2) },
+    ],
+  },
+  {
+    level: 1,
+    changes: [
+      { type: `insert`, value: batchChild(1, 1, 10, 0) },
+      { type: `insert`, value: batchChild(2, 1, 20, 1) },
+      { type: `insert`, value: batchChild(3, 2, 30, 0) },
+    ],
+  },
+  {
+    level: 1,
+    changes: [
+      { type: `update`, value: batchChild(1, 2, 11, 0) },
+      { type: `update`, value: batchChild(2, 1, 22, 1) },
+    ],
+  },
+  {
+    level: 1,
+    changes: [
+      { type: `delete`, value: batchChild(3, 2, 30, 0) },
+      { type: `insert`, value: batchChild(4, 2, 40, 1) },
+    ],
+  },
+]
 
 const structuralProjection: TraceProjection<
   StructuralTraceContext,
@@ -1027,6 +1140,14 @@ async function expectMaterializeScenarioMatches({
 }
 
 describe(`includes recompute oracle`, () => {
+  fcTest(`matches recomputation for full-row sync batches`, async () => {
+    await runTrace({
+      steps: fullRowBatchTrace,
+      driver: createFullRowBatchTraceDriver(),
+      projection: structuralProjection,
+    })
+  })
+
   fcTest(`supports repeated optimistic rollbacks in one history`, async () => {
     await expectScenarioMatches({
       depth: 1,
