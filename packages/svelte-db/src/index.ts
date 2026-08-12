@@ -1,5 +1,6 @@
 // Re-export all public APIs
 export * from './useLiveQuery.svelte.js'
+export * from './useLiveInfiniteQuery.svelte.js'
 
 // Re-export everything from @tanstack/db
 export * from '@tanstack/db'
