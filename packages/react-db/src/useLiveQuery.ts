@@ -1,4 +1,4 @@
-import { useRef, useSyncExternalStore } from 'react'
+import { useCallback, useState, useSyncExternalStore } from 'react'
 import {
   BaseQueryBuilder,
   createLiveQueryCollection,
@@ -13,7 +13,6 @@ import type {
   InferResultType,
   InitialQueryBuilder,
   LiveQueryCollectionConfig,
-  LiveQueryObserver,
   NonSingleResult,
   QueryBuilder,
   SingleResult,
@@ -321,28 +320,11 @@ export function useLiveQuery(
   // Check if it's already a collection
   const inputIsCollection = isCollection(configOrQueryOrCollection)
 
-  // Use refs to cache collection and track dependencies
-  const collectionRef = useRef<Collection<object, string | number, {}> | null>(
-    null,
-  )
-  const depsRef = useRef<Array<unknown> | null>(null)
-  const configRef = useRef<unknown>(null)
-
-  // The shared observer owns subscription, the ready-race, and the snapshot.
-  const observerRef = useRef<LiveQueryObserver<object, string | number> | null>(
-    null,
-  )
-
-  // Check if we need to create/recreate the collection
-  const needsNewCollection =
-    !collectionRef.current ||
-    (inputIsCollection && configRef.current !== configOrQueryOrCollection) ||
-    (!inputIsCollection &&
-      (depsRef.current === null ||
-        depsRef.current.length !== deps.length ||
-        depsRef.current.some((dep, i) => dep !== deps[i])))
-
-  if (needsNewCollection) {
+  const createCollection = (): Collection<
+    object,
+    string | number,
+    {}
+  > | null => {
     if (inputIsCollection) {
       // Warn when passing a collection directly with on-demand sync mode
       // In on-demand mode, data is only loaded when queries with predicates request it
@@ -361,8 +343,7 @@ export function useLiveQuery(
       }
       // It's already a collection, ensure sync is started for React hooks
       configOrQueryOrCollection.startSyncImmediate()
-      collectionRef.current = configOrQueryOrCollection
-      configRef.current = configOrQueryOrCollection
+      return configOrQueryOrCollection
     } else {
       // Handle different callback return types
       if (typeof configOrQueryOrCollection === `function`) {
@@ -372,22 +353,22 @@ export function useLiveQuery(
 
         if (result === undefined || result === null) {
           // Callback returned undefined/null - disabled query
-          collectionRef.current = null
+          return null
         } else if (isCollection(result)) {
           // Callback returned a Collection instance - use it directly
           result.startSyncImmediate()
-          collectionRef.current = result
+          return result
         } else if (result instanceof BaseQueryBuilder) {
           // Callback returned QueryBuilder - create live query collection using the original callback
           // (not the result, since the result might be from a different query builder instance)
-          collectionRef.current = createLiveQueryCollection({
+          return createLiveQueryCollection({
             query: configOrQueryOrCollection,
             startSync: true,
             gcTime: DEFAULT_GC_TIME_MS,
           })
         } else if (result && typeof result === `object`) {
           // Assume it's a LiveQueryCollectionConfig
-          collectionRef.current = createLiveQueryCollection({
+          return createLiveQueryCollection({
             startSync: true,
             gcTime: DEFAULT_GC_TIME_MS,
             ...result,
@@ -398,18 +379,54 @@ export function useLiveQuery(
             `useLiveQuery callback must return a QueryBuilder, LiveQueryCollectionConfig, Collection, undefined, or null. Got: ${typeof result}`,
           )
         }
-        depsRef.current = [...deps]
       } else {
         // Original logic for config objects
-        collectionRef.current = createLiveQueryCollection({
+        return createLiveQueryCollection({
           startSync: true,
           gcTime: DEFAULT_GC_TIME_MS,
           ...configOrQueryOrCollection,
         })
-        depsRef.current = [...deps]
       }
     }
   }
+
+  // Use state to cache collection and track dependencies
+  const [collection, setCollection] = useState(createCollection)
+  const [prevCollection, setPrevCollection] = useState(collection)
+  const [prevDeps, setPrevDeps] = useState(
+    !inputIsCollection ? [...deps] : null,
+  )
+  const [prevConfig, setPrevConfig] = useState(
+    inputIsCollection ? configOrQueryOrCollection : null,
+  )
+
+  // Check if we need to create/recreate the collection
+  const needsNewCollection =
+    (inputIsCollection && prevConfig !== configOrQueryOrCollection) ||
+    (!inputIsCollection &&
+      (prevDeps === null ||
+        prevDeps.length !== deps.length ||
+        prevDeps.some((dep, i) => dep !== deps[i])))
+
+  if (needsNewCollection) {
+    setCollection(createCollection)
+    if (isCollection(configOrQueryOrCollection)) {
+      setPrevConfig(configOrQueryOrCollection)
+    } else {
+      setPrevDeps([...deps])
+    }
+  }
+
+  // The shared observer owns subscription, the ready-race, and the snapshot.
+  const [observer, setObserver] = useState(() =>
+    // Defer the initial notify: useSyncExternalStore must not be notified
+    // synchronously during subscribe.
+    // Wholesale mode: React re-reads getSnapshot() on notify, keeps the
+    // hook's pre-observer loading policy, and — because wholesale delivers
+    // nothing synchronously during subscribe — never notifies
+    // useSyncExternalStore inside its own subscribe call.
+    createLiveQueryObserver(collection, { mode: `wholesale` }),
+  )
 
   // Recreate the observer when the underlying collection changes. The observer
   // is not disposed explicitly here or on unmount: `useSyncExternalStore`
@@ -417,32 +434,21 @@ export function useLiveQuery(
   // detaches the collection subscription; the observer is then GC'd. (An unmount
   // effect that disposed it would misfire under StrictMode/offscreen effect
   // replay, leaving a disposed observer in the ref.)
-  if (needsNewCollection) {
-    // Defer the initial notify: useSyncExternalStore must not be notified
-    // synchronously during subscribe.
-    // Wholesale mode: React re-reads getSnapshot() on notify, keeps the
-    // hook's pre-observer loading policy, and — because wholesale delivers
-    // nothing synchronously during subscribe — never notifies
-    // useSyncExternalStore inside its own subscribe call.
-    observerRef.current = createLiveQueryObserver(collectionRef.current, {
-      mode: `wholesale`,
-    })
+  if (prevCollection !== collection) {
+    setPrevCollection(collection)
+    setObserver(createLiveQueryObserver(collection, { mode: `wholesale` }))
   }
-  const observer = observerRef.current!
 
   // Stable subscribe bound to the current observer; the observer owns the
   // subscription, ready-race, and disposal.
-  const subscribeRef = useRef<
-    ((onStoreChange: () => void) => () => void) | null
-  >(null)
-  if (!subscribeRef.current || needsNewCollection) {
-    subscribeRef.current = (onStoreChange) =>
-      observer.subscribe(() => onStoreChange())
-  }
+  const subscribe = useCallback(
+    (onStoreChange: () => void) => observer.subscribe(() => onStoreChange()),
+    [observer],
+  )
+
+  const getSnapshot = useCallback(() => observer.getSnapshot(), [observer])
 
   // The observer returns a stable snapshot per revision, which is the return
   // shape this hook exposes. Keep the return loose to satisfy the overloads.
-  return useSyncExternalStore(subscribeRef.current, () =>
-    observer.getSnapshot(),
-  ) as any
+  return useSyncExternalStore(subscribe, getSnapshot) as any
 }
