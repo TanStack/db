@@ -3,12 +3,10 @@
 '@tanstack/react-db': patch
 ---
 
-feat(db): shared live-query window controller for infinite queries
+feat(db): internal shared live-query window controller for infinite queries
 
-Adds `createLiveQueryWindowController` to `@tanstack/db` — the framework-agnostic
-forward-pagination state machine (loaded-page count, peek-ahead window via
-`setWindow`, page slicing, `hasNextPage`/`isFetchingNextPage`) that composes the
-live-query observer. `react-db`'s `useLiveInfiniteQuery` is reimplemented as a
-thin binding over it with no public API change, so other framework adapters can
-build infinite queries on the same shared semantics instead of re-porting the
-React hook.
+Adds the unstable, `@internal` `createLiveQueryWindowController` adapter
+primitive to `@tanstack/db`. It owns forward pagination, collection-scoped
+window leases, transactional page commits, and failure/retry state while the
+RFC contract is finalized. `react-db`'s `useLiveInfiniteQuery` becomes a thin
+binding over it with no public API change.

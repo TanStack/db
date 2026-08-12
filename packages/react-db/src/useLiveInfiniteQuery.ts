@@ -19,8 +19,19 @@ import type {
 // Live queries created here are cleaned up immediately (0 disables GC).
 const DEFAULT_GC_TIME_MS = 1
 
+type WindowedCollection = Collection<any, any, any> & {
+  utils: {
+    setWindow: (options: {
+      offset: number
+      limit: number
+    }) => true | Promise<void>
+  }
+}
+
 /** Type guard: does this collection expose `setWindow` (i.e. has an orderBy)? */
-function hasSetWindow(collection: Collection<any, any, any>): boolean {
+function hasSetWindow(
+  collection: Collection<any, any, any>,
+): collection is WindowedCollection {
   return typeof collection.utils?.setWindow === `function`
 }
 
@@ -50,7 +61,12 @@ export type UseLiveInfiniteQueryReturn<TContext extends Context> = Omit<
   fetchNextPage: () => void
   hasNextPage: boolean
   isFetchingNextPage: boolean
+  error: unknown
 }
+
+type EnabledLiveQueryReturn<TContext extends Context> = ReturnType<
+  typeof useLiveQuery<TContext>
+>
 
 /**
  * Create an infinite query using a query function with live updates
@@ -155,39 +171,30 @@ export function useLiveInfiniteQuery<TContext extends Context>(
     )
   }
 
-  // Track deps for query functions (stringify for comparison)
-  let depsKey: string
-  try {
-    depsKey = JSON.stringify(deps)
-  } catch {
-    throw new Error(
-      `useLiveInfiniteQuery: dependency array contains values that cannot be serialized (e.g. circular references). ` +
-        `Ensure all dependency values are JSON-serializable.`,
-    )
-  }
-
   const collectionRef = useRef<Collection<any, any, any> | null>(null)
   const controllerRef = useRef<LiveQueryWindowController<any, any> | null>(null)
   const configRef = useRef<unknown>(null)
-  const depsRef = useRef<string | null>(null)
+  const depsRef = useRef<Array<unknown> | null>(null)
   const pageSizeRef = useRef(pageSize)
   const initialPageParamRef = useRef(initialPageParam)
   const validatedCollectionRef = useRef<unknown>(null)
 
-  // Recreate the underlying collection + controller when the input identity
-  // (pre-created collection), the deps (query function), or the page shape
-  // (`pageSize`/`initialPageParam`) change. A fresh controller starts back at
-  // page 1, which is the desired reset behaviour.
-  const needsNew =
-    !controllerRef.current ||
-    pageSizeRef.current !== pageSize ||
-    initialPageParamRef.current !== initialPageParam ||
+  const dependenciesChanged =
+    !isCollection &&
+    (depsRef.current === null ||
+      depsRef.current.length !== deps.length ||
+      depsRef.current.some((dep, index) => dep !== deps[index]))
+  const needsNewCollection =
+    !collectionRef.current ||
     (isCollection && configRef.current !== queryFnOrCollection) ||
-    (!isCollection && depsRef.current !== depsKey)
+    dependenciesChanged
+  const pageShapeChanged =
+    pageSizeRef.current !== pageSize ||
+    initialPageParamRef.current !== initialPageParam
+  const needsNewController =
+    !controllerRef.current || needsNewCollection || pageShapeChanged
 
-  if (needsNew) {
-    pageSizeRef.current = pageSize
-    initialPageParamRef.current = initialPageParam
+  if (needsNewCollection) {
     if (isCollection) {
       const collection = queryFnOrCollection as Collection<any, any, any>
       if (!hasSetWindow(collection)) {
@@ -211,7 +218,6 @@ export function useLiveInfiniteQuery<TContext extends Context>(
           )
         }
       }
-      collection.startSyncImmediate()
       collectionRef.current = collection
       configRef.current = queryFnOrCollection
     } else {
@@ -222,59 +228,62 @@ export function useLiveInfiniteQuery<TContext extends Context>(
           queryFnOrCollection(q)
             .limit(pageSize + 1)
             .offset(0),
-        startSync: true,
+        // Construction happens during render. Synchronization starts only when
+        // useSyncExternalStore commits the controller subscription.
+        startSync: false,
         gcTime: DEFAULT_GC_TIME_MS,
       })
-      depsRef.current = depsKey
+      depsRef.current = [...deps]
     }
+  }
+
+  if (needsNewController) {
+    const initialPageCount =
+      controllerRef.current && !needsNewCollection
+        ? Math.max(1, controllerRef.current.getSnapshot().pages.length)
+        : 1
+    pageSizeRef.current = pageSize
+    initialPageParamRef.current = initialPageParam
     controllerRef.current = createLiveQueryWindowController(
       collectionRef.current,
       {
         pageSize,
         initialPageParam,
-        // Wholesale mode provides useSyncExternalStore's no-sync-notify contract.
-        mode: 'wholesale',
-        // A query-function collection already carries page 1's window in its
-        // query, so defer the (redundant) first apply until it is ready; a
-        // pre-created collection needs its window established up front.
-        waitForReady: !isCollection,
+        initialPageCount,
       },
     )
   }
   const controller = controllerRef.current!
 
-  // Stable subscribe bound to the current controller.
-  const subscribeRef = useRef<
-    ((onStoreChange: () => void) => () => void) | null
-  >(null)
-  if (!subscribeRef.current || needsNew) {
-    subscribeRef.current = (onStoreChange) =>
-      controller.subscribe(onStoreChange)
-  }
-
-  const snapshot = useSyncExternalStore(subscribeRef.current, () =>
-    controller.getSnapshot(),
+  const subscribe = useCallback(
+    (onStoreChange: () => void) => controller.subscribe(onStoreChange),
+    [controller],
   )
+  const getSnapshot = useCallback(() => controller.getSnapshot(), [controller])
+  const snapshot = useSyncExternalStore(subscribe, getSnapshot)
 
   const fetchNextPage = useCallback(() => {
-    controllerRef.current?.fetchNextPage()
-  }, [])
+    void controller.fetchNextPage()
+  }, [controller])
 
   return {
     data: snapshot.data as InferResultType<TContext>,
-    state: snapshot.state,
-    status: snapshot.status,
+    state: snapshot.state as EnabledLiveQueryReturn<TContext>[`state`],
+    status: snapshot.status as EnabledLiveQueryReturn<TContext>[`status`],
     isLoading: snapshot.isLoading,
     isReady: snapshot.isReady,
     isIdle: snapshot.isIdle,
     isError: snapshot.isError,
     isCleanedUp: snapshot.isCleanedUp,
-    collection: snapshot.collection,
-    isEnabled: snapshot.isEnabled,
+    collection:
+      snapshot.collection as EnabledLiveQueryReturn<TContext>[`collection`],
+    isEnabled:
+      snapshot.isEnabled as EnabledLiveQueryReturn<TContext>[`isEnabled`],
     pages: snapshot.pages as Array<Array<InferResultType<TContext>[number]>>,
     pageParams: snapshot.pageParams as Array<number>,
     fetchNextPage,
     hasNextPage: snapshot.hasNextPage,
     isFetchingNextPage: snapshot.isFetchingNextPage,
-  } as UseLiveInfiniteQueryReturn<TContext>
+    error: snapshot.error,
+  }
 }

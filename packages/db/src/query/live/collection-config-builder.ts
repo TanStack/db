@@ -275,9 +275,17 @@ export class CollectionConfigBuilder<
       throw new SetWindowRequiresOrderByError()
     }
 
-    this.currentWindow = options
-    this.windowFn(options)
-    this.maybeRunGraphFn?.()
+    const previousWindow = this.currentWindow
+    try {
+      this.windowFn(options)
+      this.maybeRunGraphFn?.()
+      this.currentWindow = options
+    } catch (error) {
+      if (previousWindow) {
+        this.windowFn(previousWindow)
+      }
+      throw error
+    }
 
     // Check if loading a subset was triggered
     if (this.liveQueryCollection?.isLoadingSubset) {
@@ -655,6 +663,7 @@ export class CollectionConfigBuilder<
       // Clear current sync session state
       this.currentSyncConfig = undefined
       this.currentSyncState = undefined
+      this.maybeRunGraphFn = undefined
 
       // Clear all pending graph runs to prevent memory leaks from in-flight transactions
       // that may flush after the sync session ends
@@ -709,6 +718,12 @@ export class CollectionConfigBuilder<
       this.optimizableOrderByCollections,
       (windowFn: (options: WindowOptions) => void) => {
         this.windowFn = windowFn
+        // `setWindow` mutates the compiled top-K operator, which is replaced
+        // whenever a cleaned-up live query compiles a fresh pipeline. Keep the
+        // desired window on the builder and replay it into each new operator.
+        if (this.currentWindow) {
+          windowFn(this.currentWindow)
+        }
       },
     )
 

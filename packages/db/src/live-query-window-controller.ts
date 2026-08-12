@@ -1,37 +1,165 @@
-import { LiveQueryWindowControllerDisposedError } from './errors.js'
+import {
+  LiveQueryWindowControllerDisposedError,
+  SetWindowRequiresOrderByError,
+} from './errors.js'
 import { createLiveQueryObserver } from './live-query-observer.js'
 import type {
-  CreateLiveQueryObserverOptions,
   LiveQueryObserver,
+  LiveQuerySnapshot,
 } from './live-query-observer.js'
 import type { Collection } from './collection/index.js'
 import type { CollectionStatus } from './types.js'
 
 const DEFAULT_PAGE_SIZE = 20
 
+type WindowResult = true | Promise<void>
+
+type WindowTarget = object & {
+  utils?: {
+    setWindow?: (options: { offset: number; limit: number }) => WindowResult
+  }
+}
+
+type PendingWindow = {
+  generation: number
+  limit: number
+  promise: Promise<void>
+}
+
+class WindowCoordinator {
+  private readonly leases = new Map<symbol, number>()
+  private appliedLimit: number | undefined
+  private pending: PendingWindow | undefined
+  private generation = 0
+
+  constructor(private readonly target: WindowTarget) {}
+
+  request(lease: symbol, limit: number): WindowResult {
+    this.leases.set(lease, limit)
+    return this.applyDesiredWindow()
+  }
+
+  release(lease: symbol): void {
+    if (!this.leases.delete(lease)) return
+
+    // A pending request may still mutate the physical operator, but it no longer
+    // establishes the accepted window for the remaining lease set.
+    this.generation++
+    this.pending = undefined
+
+    if (this.leases.size === 0) {
+      // There is no consumer-visible window to maintain. Force the next lease to
+      // re-apply even when it requests the same limit as the previous consumer.
+      this.appliedLimit = undefined
+      return
+    }
+
+    try {
+      const result = this.applyDesiredWindow()
+      if (result !== true) {
+        void result.catch(() => {
+          // Unsubscribe has no async error channel. Leave the physical window
+          // unaccepted so the next request retries it.
+          this.appliedLimit = undefined
+        })
+      }
+    } catch {
+      // The remaining controller will retry on its next request.
+      this.appliedLimit = undefined
+    }
+  }
+
+  private getDesiredLimit(): number | undefined {
+    let desired: number | undefined
+    for (const limit of this.leases.values()) {
+      desired = desired === undefined ? limit : Math.max(desired, limit)
+    }
+    return desired
+  }
+
+  private applyDesiredWindow(): WindowResult {
+    const limit = this.getDesiredLimit()
+    if (limit === undefined) return true
+    if (this.pending?.limit === limit) return this.pending.promise
+    if (this.pending) {
+      // `setWindow` mutates the physical operator before its load promise
+      // settles. A different desired window must therefore be applied again,
+      // even when it matches the last settled limit.
+      this.generation++
+      this.pending = undefined
+      this.appliedLimit = undefined
+    }
+    if (limit === this.appliedLimit) return true
+
+    const setWindow = this.target.utils?.setWindow
+    if (typeof setWindow !== `function`) {
+      throw new SetWindowRequiresOrderByError()
+    }
+
+    const generation = ++this.generation
+    const result = setWindow.call(this.target.utils, { offset: 0, limit })
+    if (result === true) {
+      if (generation === this.generation && this.getDesiredLimit() === limit) {
+        this.appliedLimit = limit
+      }
+      return true
+    }
+
+    const promise = result.then(
+      () => {
+        if (
+          generation === this.generation &&
+          this.getDesiredLimit() === limit
+        ) {
+          this.appliedLimit = limit
+        }
+        if (this.pending?.generation === generation) {
+          this.pending = undefined
+        }
+      },
+      (error: unknown) => {
+        if (this.pending?.generation === generation) {
+          this.pending = undefined
+        }
+        throw error
+      },
+    )
+    this.pending = { generation, limit, promise }
+    return promise
+  }
+}
+
+const windowCoordinators = new WeakMap<object, WindowCoordinator>()
+
+function getWindowCoordinator(target: WindowTarget): WindowCoordinator {
+  let coordinator = windowCoordinators.get(target)
+  if (!coordinator) {
+    coordinator = new WindowCoordinator(target)
+    windowCoordinators.set(target, coordinator)
+  }
+  return coordinator
+}
+
 /**
- * A page-windowed view of a live query at a point in time. Extends the live
- * query's status/data contract with forward pagination derived from a
- * peek-ahead window (`limit = loadedPages * pageSize + 1`): the extra row tells
- * us whether another page exists and is then dropped from `data`/`pages`.
+ * A page-windowed view of a live query at a point in time.
  *
- * `getSnapshot()` returns a stable identity that only changes when the query,
- * the page count, or the fetching state changes, so `useSyncExternalStore`-style
- * consumers can compare by reference.
+ * @internal This contract is unstable while RFC #1623 is being implemented.
  */
 export interface LiveQueryWindowSnapshot<
   T extends object,
   TKey extends string | number,
 > {
-  /** Rows across all loaded pages, peek-ahead row removed. */
+  /** Rows across all committed pages, with the peek-ahead row removed. */
   data: ReadonlyArray<T>
-  /** Rows grouped into pages of `pageSize`. */
+  /** Rows grouped into committed pages of `pageSize`. */
   pages: ReadonlyArray<ReadonlyArray<T>>
-  /** `initialPageParam + i` for each loaded page. */
+  /** `initialPageParam + i` for each committed page. */
   pageParams: ReadonlyArray<number>
   hasNextPage: boolean
   isFetchingNextPage: boolean
-  /** Keyed results for the whole window (incl. peek row), or `undefined` when disabled. */
+  /** The last pagination failure, cleared when a retry begins. */
+  error: unknown
+  /** Keyed results for the physical window, or `undefined` when disabled. */
   state: ReadonlyMap<TKey, T> | undefined
   collection: Collection<T, TKey, any> | undefined
   status: CollectionStatus | `disabled`
@@ -43,45 +171,38 @@ export interface LiveQueryWindowSnapshot<
   isEnabled: boolean
 }
 
-export interface CreateLiveQueryWindowControllerOptions extends CreateLiveQueryObserverOptions {
-  /** Rows per page (default 20). A falsy value falls back to the default. */
+/** @internal This contract is unstable while RFC #1623 is being implemented. */
+export interface CreateLiveQueryWindowControllerOptions {
+  /** Rows per page (default 20). Non-positive values use the default. */
   pageSize?: number
   /** Value of the first page's `pageParam` (default 0). */
   initialPageParam?: number
-  /**
-   * Defer applying the first window until the collection is ready. Set for
-   * query-function inputs whose collection is created lazily and already carries
-   * the first page's window in its query; leave off for a pre-created collection
-   * whose window must be established up front.
-   */
-  waitForReady?: boolean
+  /** Committed pages to preserve when a framework binding changes page shape. */
+  initialPageCount?: number
 }
 
-/**
- * Owns the forward-pagination state machine for an ordered live query: the
- * loaded-page count, the peek-ahead window (via `collection.utils.setWindow`),
- * page slicing, and `hasNextPage`/`isFetchingNextPage`. Composes a
- * {@link LiveQueryObserver} for the data + lifecycle channel. Framework adapters
- * resolve the input to a collection and materialize the snapshot natively.
- */
+/** @internal This contract is unstable while RFC #1623 is being implemented. */
 export interface LiveQueryWindowController<
   T extends object,
   TKey extends string | number,
 > {
   getSnapshot: () => LiveQueryWindowSnapshot<T, TKey>
   subscribe: (listener: () => void) => () => void
-  /** Load one more page (no-op when already fetching or no next page exists). */
-  fetchNextPage: () => void
-  /** Reset back to the first page — call when the input identity/deps change. */
-  reset: () => void
+  /** Load one more page, resolving only after that page is committed. */
+  fetchNextPage: () => Promise<void>
+  /** Reset to the first page, resolving after the smaller window is accepted. */
+  reset: () => Promise<void>
   preload: () => Promise<void>
   dispose: () => void
 }
 
 interface CachedFrom {
   observerSnapshot: unknown
-  loadedPageCount: number
+  committedPageCount: number
   isFetchingNextPage: boolean
+  hasPaginationError: boolean
+  paginationError: unknown
+  failedHasNextPage: boolean
 }
 
 interface SubscriptionRecord {
@@ -99,24 +220,27 @@ class LiveQueryWindowControllerImpl<
 > implements LiveQueryWindowController<T, TKey> {
   private readonly observer: LiveQueryObserver<T, TKey>
   private readonly collection: Collection<T, TKey, any> | null
+  private readonly coordinator: WindowCoordinator | null
+  private readonly lease = Symbol(`liveQueryWindowLease`)
   private readonly pageSize: number
   private readonly initialPageParam: number
-  private readonly waitForReady: boolean
-  private readonly wholesale: boolean
 
-  private loadedPageCount = 1
+  private committedPageCount: number
   private isFetchingNextPage = false
-  // The limit last handed to `setWindow`, so we don't re-apply an unchanged
-  // window on every observer notification.
-  private appliedLimit: number | undefined
-  // Bumped on each window application so a superseded load promise doesn't clear
-  // the fetching flag for a window that no longer applies.
+  private hasPaginationError = false
+  private paginationError: unknown
+  private failedHasNextPage = false
   private windowGeneration = 0
+  private pendingWindowGeneration: number | undefined
+  private leaseActive = false
+  private leaseGeneration = 0
 
   private readonly subscriptions = new Set<SubscriptionRecord>()
   private readonly publicationQueue: Array<Publication> = []
   private dispatching = false
   private blockDelivery = false
+  private transitionDepth = 0
+  private transitionNeedsNotify = false
   private observerUnsub: (() => void) | null = null
   private cachedSnapshot: LiveQueryWindowSnapshot<T, TKey> | null = null
   private cachedFrom: CachedFrom | null = null
@@ -127,12 +251,22 @@ class LiveQueryWindowControllerImpl<
     options: CreateLiveQueryWindowControllerOptions,
   ) {
     this.collection = collection
-    this.pageSize = options.pageSize || DEFAULT_PAGE_SIZE
+    this.coordinator = collection
+      ? getWindowCoordinator(collection as unknown as WindowTarget)
+      : null
+    this.pageSize =
+      options.pageSize !== undefined && options.pageSize > 0
+        ? options.pageSize
+        : DEFAULT_PAGE_SIZE
     this.initialPageParam = options.initialPageParam ?? 0
-    this.waitForReady = options.waitForReady ?? false
-    this.wholesale = options.mode === `wholesale`
+    this.committedPageCount = Math.max(
+      1,
+      Math.floor(options.initialPageCount ?? 1),
+    )
+    // The controller listener carries no delta payload, so wholesale is the
+    // only coherent observer contract and guarantees non-reentrant subscribe.
     this.observer = createLiveQueryObserver<T, TKey>(collection, {
-      mode: options.mode,
+      mode: `wholesale`,
     })
   }
 
@@ -143,8 +277,11 @@ class LiveQueryWindowControllerImpl<
       cached &&
       this.cachedFrom &&
       this.cachedFrom.observerSnapshot === observerSnapshot &&
-      this.cachedFrom.loadedPageCount === this.loadedPageCount &&
-      this.cachedFrom.isFetchingNextPage === this.isFetchingNextPage
+      this.cachedFrom.committedPageCount === this.committedPageCount &&
+      this.cachedFrom.isFetchingNextPage === this.isFetchingNextPage &&
+      this.cachedFrom.hasPaginationError === this.hasPaginationError &&
+      this.cachedFrom.paginationError === this.paginationError &&
+      this.cachedFrom.failedHasNextPage === this.failedHasNextPage
     ) {
       return cached
     }
@@ -154,14 +291,13 @@ class LiveQueryWindowControllerImpl<
       enabled && Array.isArray(observerSnapshot.data)
         ? (observerSnapshot.data as ReadonlyArray<T>)
         : []
-    const totalRequested = this.loadedPageCount * this.pageSize
-    // The window peeks one row past what was requested; its presence means
-    // there is another page. It is not part of the visible result.
-    const hasNextPage = enabled && rows.length > totalRequested
+    const totalRequested = this.committedPageCount * this.pageSize
+    const computedHasNextPage = enabled && rows.length > totalRequested
+    const hasNextPage = this.hasPaginationError
+      ? this.failedHasNextPage
+      : computedHasNextPage
 
-    // A disabled query has no pages; an enabled query always has `loadedPageCount`
-    // pages (the last may be empty when there is no data yet).
-    const pageCount = enabled ? this.loadedPageCount : 0
+    const pageCount = enabled ? this.committedPageCount : 0
     const pages: Array<ReadonlyArray<T>> = []
     const pageParams: Array<number> = []
     for (let i = 0; i < pageCount; i++) {
@@ -169,26 +305,31 @@ class LiveQueryWindowControllerImpl<
       pageParams.push(this.initialPageParam + i)
     }
 
+    const status = this.hasPaginationError ? `error` : observerSnapshot.status
     this.cachedSnapshot = {
       data: rows.slice(0, totalRequested),
       pages,
       pageParams,
       hasNextPage,
       isFetchingNextPage: this.isFetchingNextPage,
+      error: this.hasPaginationError ? this.paginationError : undefined,
       state: observerSnapshot.state,
       collection: observerSnapshot.collection,
-      status: observerSnapshot.status,
+      status,
       isLoading: observerSnapshot.isLoading,
       isReady: observerSnapshot.isReady,
       isIdle: observerSnapshot.isIdle,
-      isError: observerSnapshot.isError,
+      isError: this.hasPaginationError || observerSnapshot.isError,
       isCleanedUp: observerSnapshot.isCleanedUp,
       isEnabled: observerSnapshot.isEnabled,
     }
     this.cachedFrom = {
       observerSnapshot,
-      loadedPageCount: this.loadedPageCount,
+      committedPageCount: this.committedPageCount,
       isFetchingNextPage: this.isFetchingNextPage,
+      hasPaginationError: this.hasPaginationError,
+      paginationError: this.paginationError,
+      failedHasNextPage: this.failedHasNextPage,
     }
     return this.cachedSnapshot
   }
@@ -199,23 +340,22 @@ class LiveQueryWindowControllerImpl<
     const record: SubscriptionRecord = { listener, active: true }
     this.subscriptions.add(record)
     if (this.subscriptions.size === 1) {
-      // A wholesale subscriber re-reads the snapshot immediately after
-      // subscribing, so setup publications are redundant and must not fire
-      // inside useSyncExternalStore's subscribe call.
-      this.blockDelivery = this.wholesale
+      this.blockDelivery = true
       let observerUnsub: (() => void) | null = null
       try {
+        // Store the desired physical window before observer activation can
+        // compile or restart the live-query pipeline.
+        const windowResult = this.activateLease(this.committedPageCount)
+        const leaseGeneration = this.leaseGeneration
         observerUnsub = this.observer.subscribe(() => this.onObserverNotify())
-        if (this.hasBeenDisposed()) {
-          observerUnsub()
-        } else {
-          this.observerUnsub = observerUnsub
-          // Establish the current window now that the query is active.
-          this.applyWindow()
+        this.observerUnsub = observerUnsub
+        if (windowResult !== true) {
+          this.trackAttachmentFailure(windowResult, leaseGeneration)
         }
       } catch (error) {
         observerUnsub?.()
         this.observerUnsub = null
+        this.deactivateLease()
         record.active = false
         this.subscriptions.delete(record)
         throw error
@@ -231,99 +371,216 @@ class LiveQueryWindowControllerImpl<
       if (this.subscriptions.size === 0) {
         this.observerUnsub?.()
         this.observerUnsub = null
+        this.deactivateLease()
       }
     }
   }
 
-  fetchNextPage(): void {
-    if (this.disposed || this.isFetchingNextPage) return
-    if (!this.getSnapshot().hasNextPage) return
-    this.loadedPageCount++
-    this.applyWindow()
-    this.notify()
+  fetchNextPage(): Promise<void> {
+    if (this.disposed || this.isFetchingNextPage) return Promise.resolve()
+    if (!this.getSnapshot().hasNextPage) return Promise.resolve()
+    return this.requestPageCount(this.committedPageCount + 1, true)
   }
 
-  reset(): void {
-    if (this.disposed) return
-    if (this.loadedPageCount === 1 && this.appliedLimit !== undefined) {
-      // Already on the first page; nothing to reset.
-      return
+  reset(): Promise<void> {
+    if (this.disposed) return Promise.resolve()
+    if (
+      this.committedPageCount === 1 &&
+      !this.hasPaginationError &&
+      !this.isFetchingNextPage &&
+      this.pendingWindowGeneration === undefined
+    ) {
+      return Promise.resolve()
     }
-    this.loadedPageCount = 1
-    this.appliedLimit = undefined
-    this.applyWindow()
-    this.notify()
+    return this.requestPageCount(1, false)
   }
 
-  preload(): Promise<void> {
-    return this.observer.preload()
+  async preload(): Promise<void> {
+    if (this.disposed) throw new LiveQueryWindowControllerDisposedError()
+
+    const temporaryLease = !this.leaseActive
+    try {
+      const result = this.activateLease(this.committedPageCount)
+      if (result !== true) await result
+      await this.observer.preload()
+    } catch (error) {
+      this.hasPaginationError = true
+      this.paginationError = error
+      this.failedHasNextPage = this.getComputedHasNextPage()
+      this.notify()
+      throw error
+    } finally {
+      if (temporaryLease && this.subscriptions.size === 0) {
+        this.deactivateLease()
+      }
+    }
   }
 
   dispose(): void {
     if (this.disposed) return
     this.disposed = true
+    this.windowGeneration++
+    this.pendingWindowGeneration = undefined
     this.observerUnsub?.()
     this.observerUnsub = null
+    this.deactivateLease()
     this.observer.dispose()
     for (const record of this.subscriptions) record.active = false
     this.subscriptions.clear()
     this.publicationQueue.length = 0
   }
 
-  private onObserverNotify(): void {
-    // Re-apply the window in case readiness just changed (a deferred first
-    // apply) — idempotent when the window is unchanged — then republish.
-    this.applyWindow()
-    this.notify()
-  }
-
-  private applyWindow(): void {
-    const collection = this.collection
-    if (!collection || this.disposed) return
-    if (this.waitForReady && !this.observer.getSnapshot().isReady) return
-
-    const limit = this.loadedPageCount * this.pageSize + 1
-    if (limit === this.appliedLimit) return
-    this.appliedLimit = limit
-
-    const utils = collection.utils as
-      | {
-          setWindow?: (o: {
-            offset: number
-            limit: number
-          }) => true | Promise<void>
-        }
-      | undefined
-    if (typeof utils?.setWindow !== `function`) return
-
+  private requestPageCount(
+    requestedPageCount: number,
+    fetchingNextPage: boolean,
+  ): Promise<void> {
     const generation = ++this.windowGeneration
-    const result = utils.setWindow({ offset: 0, limit })
-    if (result === true) {
-      this.setFetching(false)
-      return
+    const previousHasNextPage = this.getSnapshot().hasNextPage
+    const temporaryLease = !this.leaseActive && this.subscriptions.size === 0
+    this.pendingWindowGeneration = undefined
+
+    this.beginTransition()
+    this.isFetchingNextPage = fetchingNextPage
+    this.hasPaginationError = false
+    this.paginationError = undefined
+    if (fetchingNextPage) this.notify()
+
+    let result: WindowResult
+    try {
+      result = this.activateLease(requestedPageCount)
+    } catch (error) {
+      this.isFetchingNextPage = false
+      this.hasPaginationError = true
+      this.paginationError = error
+      this.failedHasNextPage = previousHasNextPage
+      this.notify()
+      this.endTransition()
+      if (temporaryLease) this.deactivateLease()
+      return Promise.reject(error)
     }
 
-    this.setFetching(true)
-    result
-      .catch(() => {
-        // Swallow — the load error surfaces through the collection's status.
-      })
+    if (result === true) {
+      if (!this.disposed && generation === this.windowGeneration) {
+        this.committedPageCount = requestedPageCount
+        this.isFetchingNextPage = false
+        this.failedHasNextPage = false
+        this.notify()
+      }
+      this.endTransition()
+      if (temporaryLease) this.deactivateLease()
+      return Promise.resolve()
+    }
+
+    this.pendingWindowGeneration = generation
+    this.endTransition()
+
+    return result
+      .then(
+        () => {
+          if (this.disposed || generation !== this.windowGeneration) return
+          this.beginTransition()
+          this.pendingWindowGeneration = undefined
+          this.committedPageCount = requestedPageCount
+          this.isFetchingNextPage = false
+          this.failedHasNextPage = false
+          this.notify()
+          this.endTransition()
+        },
+        (error: unknown) => {
+          if (!this.disposed && generation === this.windowGeneration) {
+            this.beginTransition()
+            this.pendingWindowGeneration = undefined
+            this.isFetchingNextPage = false
+            this.hasPaginationError = true
+            this.paginationError = error
+            this.failedHasNextPage = previousHasNextPage
+            this.notify()
+            this.endTransition()
+          }
+          throw error
+        },
+      )
       .finally(() => {
-        // Only clear for the window this call requested; a newer apply owns the
-        // flag otherwise.
-        if (!this.disposed && generation === this.windowGeneration) {
-          this.setFetching(false)
-        }
+        this.releaseTemporaryLease(temporaryLease)
       })
   }
 
-  private setFetching(value: boolean): void {
-    if (this.isFetchingNextPage === value) return
-    this.isFetchingNextPage = value
+  private releaseTemporaryLease(temporaryLease: boolean): void {
+    if (temporaryLease && this.subscriptions.size === 0) {
+      this.deactivateLease()
+    }
+  }
+
+  private activateLease(pageCount: number): WindowResult {
+    this.leaseGeneration++
+    if (!this.coordinator || !this.collection) return true
+    this.leaseActive = true
+    return this.coordinator.request(this.lease, pageCount * this.pageSize + 1)
+  }
+
+  private deactivateLease(): void {
+    if (!this.leaseActive || !this.coordinator) return
+    this.leaseGeneration++
+    this.leaseActive = false
+    this.coordinator.release(this.lease)
+  }
+
+  private trackAttachmentFailure(
+    result: Promise<void>,
+    leaseGeneration: number,
+  ): void {
+    void result.catch((error: unknown) => {
+      if (
+        this.disposed ||
+        !this.leaseActive ||
+        leaseGeneration !== this.leaseGeneration
+      ) {
+        return
+      }
+      this.beginTransition()
+      this.hasPaginationError = true
+      this.paginationError = error
+      this.failedHasNextPage = this.getComputedHasNextPage()
+      this.notify()
+      this.endTransition()
+    })
+  }
+
+  private getComputedHasNextPage(): boolean {
+    const snapshot: LiveQuerySnapshot<T, TKey> = this.observer.getSnapshot()
+    return (
+      snapshot.isEnabled &&
+      Array.isArray(snapshot.data) &&
+      snapshot.data.length > this.committedPageCount * this.pageSize
+    )
+  }
+
+  private onObserverNotify(): void {
+    if (this.pendingWindowGeneration !== undefined) return
     this.notify()
+  }
+
+  private beginTransition(): void {
+    this.transitionDepth++
+  }
+
+  private endTransition(): void {
+    this.transitionDepth--
+    if (this.transitionDepth === 0 && this.transitionNeedsNotify) {
+      this.transitionNeedsNotify = false
+      this.publish()
+    }
   }
 
   private notify(): void {
+    if (this.transitionDepth > 0) {
+      this.transitionNeedsNotify = true
+      return
+    }
+    this.publish()
+  }
+
+  private publish(): void {
     if (this.disposed || this.blockDelivery || this.subscriptions.size === 0) {
       return
     }
@@ -337,6 +594,7 @@ class LiveQueryWindowControllerImpl<
         const publication = this.publicationQueue.shift()!
         for (const record of publication.targets) {
           if (this.hasBeenDisposed()) return
+          if (!record.active) continue
           record.listener()
         }
       }
@@ -351,9 +609,9 @@ class LiveQueryWindowControllerImpl<
 }
 
 /**
- * Create a {@link LiveQueryWindowController} for a resolved, ordered live-query
- * collection (which must have an `orderBy`), or a disabled controller when
- * `collection` is `null`/`undefined`.
+ * Create an internal forward-window controller for an ordered live query.
+ *
+ * @internal This factory is unstable while RFC #1623 is being implemented.
  */
 export function createLiveQueryWindowController<
   T extends object,

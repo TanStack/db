@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from 'vitest'
-import { act, renderHook, waitFor } from '@testing-library/react'
+import { act, render, renderHook, waitFor } from '@testing-library/react'
+import { Suspense } from 'react'
 import {
   BTreeIndex,
   createCollection,
@@ -10,6 +11,7 @@ import { useLiveInfiniteQuery } from '../src/useLiveInfiniteQuery'
 import { mockSyncCollectionOptions } from '../../db/tests/utils'
 import { createFilterFunctionFromExpression } from '../../db/src/collection/change-events'
 import type { LoadSubsetOptions } from '@tanstack/db'
+import type { ReactNode } from 'react'
 
 type Post = {
   id: string
@@ -108,6 +110,68 @@ function createOnDemandCollection(opts: OnDemandCollectionOptions) {
 }
 
 describe(`useLiveInfiniteQuery`, () => {
+  it(`does not activate a query-function collection for an abandoned render`, async () => {
+    const source = createCollection(
+      mockSyncCollectionOptions<Post>({
+        id: `abandoned-infinite-query`,
+        getKey: (post) => post.id,
+        initialData: createMockPosts(10),
+      }),
+    )
+    const never = new Promise<void>(() => {})
+
+    function AbandonedQuery(): ReactNode {
+      useLiveInfiniteQuery(
+        (q) =>
+          q
+            .from({ post: source })
+            .orderBy(({ post }) => post.createdAt, `desc`),
+        { pageSize: 3 },
+      )
+      throw never
+    }
+
+    const rendered = render(
+      <Suspense fallback={null}>
+        <AbandonedQuery />
+      </Suspense>,
+    )
+    await new Promise((resolve) => setTimeout(resolve, 0))
+
+    expect(source.subscriberCount).toBe(0)
+    rendered.unmount()
+  })
+
+  it(`does not activate a supplied collection for an abandoned render`, async () => {
+    const source = createCollection(
+      mockSyncCollectionOptions<Post>({
+        id: `abandoned-supplied-infinite-query`,
+        getKey: (post) => post.id,
+        initialData: createMockPosts(10),
+      }),
+    )
+    const liveQuery = createLiveQueryCollection({
+      query: (q) =>
+        q.from({ post: source }).orderBy(({ post }) => post.createdAt, `desc`),
+    })
+    const never = new Promise<void>(() => {})
+
+    function AbandonedQuery(): ReactNode {
+      useLiveInfiniteQuery(liveQuery, { pageSize: 3 })
+      throw never
+    }
+
+    const rendered = render(
+      <Suspense fallback={null}>
+        <AbandonedQuery />
+      </Suspense>,
+    )
+    await new Promise((resolve) => setTimeout(resolve, 0))
+
+    expect(source.subscriberCount).toBe(0)
+    rendered.unmount()
+  })
+
   it(`should fetch initial page of data`, async () => {
     const posts = createMockPosts(50)
     const collection = createCollection(
@@ -726,15 +790,106 @@ describe(`useLiveInfiniteQuery`, () => {
     expect(result.current.data).toHaveLength(5)
     expect(result.current.pages[0]).toHaveLength(5)
 
-    // Grow the page size at runtime (no deps change) — the window and the
-    // page slicing must both pick it up.
+    act(() => result.current.fetchNextPage())
+    await waitFor(() => expect(result.current.pages).toHaveLength(2))
+    act(() => result.current.fetchNextPage())
+    await waitFor(() => expect(result.current.pages).toHaveLength(3))
+
+    // Grow the page size without discarding the committed page count.
     act(() => {
       rerender({ pageSize: 10 })
     })
 
-    await waitFor(() => expect(result.current.data).toHaveLength(10))
-    expect(result.current.pages).toHaveLength(1)
+    await waitFor(() => expect(result.current.data).toHaveLength(30))
+    expect(result.current.pages).toHaveLength(3)
     expect(result.current.pages[0]).toHaveLength(10)
+  })
+
+  it(`compares dependencies by identity instead of serialization`, async () => {
+    const source = createCollection(
+      mockSyncCollectionOptions<Post>({
+        id: `infinite-query-map-deps`,
+        getKey: (post) => post.id,
+        initialData: createMockPosts(10),
+      }),
+    )
+    const { result, rerender } = renderHook(
+      ({ filter }: { filter: Map<string, string> }) =>
+        useLiveInfiniteQuery(
+          (q) =>
+            q
+              .from({ post: source })
+              .where(({ post }) => eq(post.category, filter.get(`category`)))
+              .orderBy(({ post }) => post.createdAt, `desc`),
+          { pageSize: 3 },
+          [filter],
+        ),
+      {
+        initialProps: {
+          filter: new Map([[`category`, `tech`]]),
+        },
+      },
+    )
+
+    await waitFor(() => {
+      expect(result.current.isReady).toBe(true)
+      expect(result.current.data.length).toBeGreaterThan(0)
+      expect(
+        result.current.data.every((post) => post.category === `tech`),
+      ).toBe(true)
+    })
+
+    rerender({ filter: new Map([[`category`, `life`]]) })
+
+    await waitFor(() => {
+      expect(result.current.data.length).toBeGreaterThan(0)
+      expect(
+        result.current.data.every((post) => post.category === `life`),
+      ).toBe(true)
+    })
+  })
+
+  it(`binds fetchNextPage to the controller that returned it`, async () => {
+    const sourceA = createCollection(
+      mockSyncCollectionOptions<Post>({
+        id: `infinite-query-generation-a`,
+        getKey: (post) => post.id,
+        initialData: createMockPosts(10),
+      }),
+    )
+    const sourceB = createCollection(
+      mockSyncCollectionOptions<Post>({
+        id: `infinite-query-generation-b`,
+        getKey: (post) => post.id,
+        initialData: createMockPosts(10),
+      }),
+    )
+    const queryA = createLiveQueryCollection({
+      query: (q) =>
+        q.from({ post: sourceA }).orderBy(({ post }) => post.createdAt, `desc`),
+    })
+    const queryB = createLiveQueryCollection({
+      query: (q) =>
+        q.from({ post: sourceB }).orderBy(({ post }) => post.createdAt, `desc`),
+    })
+    const { result, rerender } = renderHook(
+      ({ query }) => useLiveInfiniteQuery(query, { pageSize: 2 }),
+      { initialProps: { query: queryA } },
+    )
+
+    await waitFor(() => expect(result.current.isReady).toBe(true))
+    const fetchFromA = result.current.fetchNextPage
+
+    rerender({ query: queryB })
+    await waitFor(() => {
+      expect(result.current.collection).toBe(queryB)
+      expect(result.current.isReady).toBe(true)
+      expect(result.current.pages).toHaveLength(1)
+    })
+
+    act(() => fetchFromA())
+
+    expect(result.current.pages).toHaveLength(1)
   })
 
   it(`should track pageParams correctly`, async () => {
@@ -1801,7 +1956,7 @@ describe(`useLiveInfiniteQuery`, () => {
       await liveQueryCollection.preload()
       // Give the collection a concrete window that differs from the hook's
       // expected first page (offset 0, limit pageSize + 1).
-      liveQueryCollection.utils.setWindow({ offset: 0, limit: 5 })
+      await liveQueryCollection.utils.setWindow({ offset: 0, limit: 5 })
 
       const warn = vi.spyOn(console, `warn`).mockImplementation(() => {})
       try {
@@ -1811,6 +1966,10 @@ describe(`useLiveInfiniteQuery`, () => {
         expect(warn).toHaveBeenCalledWith(
           expect.stringContaining(`Pre-created collection has window`),
         )
+        expect(liveQueryCollection.utils.getWindow()).toEqual({
+          offset: 0,
+          limit: 11,
+        })
       } finally {
         warn.mockRestore()
       }
@@ -1945,7 +2104,7 @@ describe(`useLiveInfiniteQuery`, () => {
     })
   })
 
-  it(`throws a descriptive error when deps contain non-serializable values`, () => {
+  it(`accepts circular dependency values`, async () => {
     const posts = createMockPosts(10)
     const collection = createCollection(
       mockSyncCollectionOptions<Post>({
@@ -1959,21 +2118,17 @@ describe(`useLiveInfiniteQuery`, () => {
     const circular: Record<string, unknown> = { a: 1 }
     circular.self = circular
 
-    expect(() => {
-      renderHook(() => {
-        return useLiveInfiniteQuery(
-          (q) =>
-            q
-              .from({ posts: collection })
-              .orderBy(({ posts: p }) => p.createdAt, `desc`),
-          {
-            pageSize: 5,
-            getNextPageParam: (lastPage) =>
-              lastPage.length === 5 ? lastPage.length : undefined,
-          },
-          [circular],
-        )
-      })
-    }).toThrow(/useLiveInfiniteQuery.*dependency/)
+    const { result } = renderHook(() =>
+      useLiveInfiniteQuery(
+        (q) =>
+          q
+            .from({ posts: collection })
+            .orderBy(({ posts: p }) => p.createdAt, `desc`),
+        { pageSize: 5 },
+        [circular],
+      ),
+    )
+
+    await waitFor(() => expect(result.current.isReady).toBe(true))
   })
 })
