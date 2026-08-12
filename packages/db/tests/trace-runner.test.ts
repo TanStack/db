@@ -92,7 +92,6 @@ describe(`runTrace`, () => {
   })
 
   it(`preserves the trace failure when cleanup also fails`, async () => {
-    const traceError = new Error(`trace failed`)
     const cleanupError = new Error(`cleanup failed`)
 
     const run = runTrace({
@@ -107,16 +106,65 @@ describe(`runTrace`, () => {
       projection: {
         observe: (context) => context.observed,
         recompute: (context) => context.expected,
-        assertEqual: () => {
-          throw traceError
+        assertEqual: (observed, expected) => {
+          expect(observed).toBe(expected)
         },
       },
     })
 
-    await expect(run).rejects.toBe(traceError)
+    const traceFailure = await run.catch((error: unknown) => error)
+    expect(traceFailure).toMatchObject({
+      name: `TraceAssertionError`,
+      checkpoint: 0,
+      cause: { name: `AssertionError` },
+    })
     expect(
-      (traceError as Error & { suppressed?: Array<unknown> }).suppressed,
+      (traceFailure as Error & { suppressed?: Array<unknown> }).suppressed,
     ).toEqual([cleanupError])
+  })
+
+  it(`does not wrap observation errors as assertion failures`, async () => {
+    const observationError = new Error(`observation failed`)
+
+    await expect(
+      runTrace({
+        steps: [],
+        driver: {
+          setup: () => undefined,
+          apply: () => undefined,
+          cleanup: () => undefined,
+        },
+        projection: {
+          observe: () => {
+            throw observationError
+          },
+          recompute: () => undefined,
+          assertEqual: () => undefined,
+        },
+      }),
+    ).rejects.toBe(observationError)
+  })
+
+  it(`does not wrap runtime errors from assertion callbacks`, async () => {
+    const runtimeError = new TypeError(`assertion callback failed`)
+
+    await expect(
+      runTrace({
+        steps: [],
+        driver: {
+          setup: () => undefined,
+          apply: () => undefined,
+          cleanup: () => undefined,
+        },
+        projection: {
+          observe: () => undefined,
+          recompute: () => undefined,
+          assertEqual: () => {
+            throw runtimeError
+          },
+        },
+      }),
+    ).rejects.toBe(runtimeError)
   })
 
   it(`throws cleanup failures when the trace succeeds`, async () => {

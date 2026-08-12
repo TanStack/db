@@ -4,6 +4,16 @@ type ErrorWithSuppressed = Error & {
   suppressed?: Array<unknown>
 }
 
+export class TraceAssertionError extends Error {
+  readonly checkpoint: number
+
+  constructor(checkpoint: number, cause: unknown) {
+    super(`Trace assertion failed at checkpoint ${checkpoint}`, { cause })
+    this.name = `TraceAssertionError`
+    this.checkpoint = checkpoint
+  }
+}
+
 export type TraceCheckpoint = () => undefined
 
 export type TraceDriver<TStep, TContext> = {
@@ -64,11 +74,20 @@ export async function runTrace<TStep, TContext, TObserved, TExpected>({
 }: RunTraceOptions<TStep, TContext, TObserved, TExpected>): Promise<void> {
   const setupResult = driver.setup()
   const context = isPromiseLike(setupResult) ? await setupResult : setupResult
+  let checkpointIndex = 0
   const checkpoint: TraceCheckpoint = () => {
-    projection.assertEqual(
-      projection.observe(context),
-      projection.recompute(context),
-    )
+    const currentCheckpoint = checkpointIndex
+    checkpointIndex += 1
+    const observed = projection.observe(context)
+    const expected = projection.recompute(context)
+    try {
+      projection.assertEqual(observed, expected)
+    } catch (error) {
+      if (!(error instanceof Error) || error.name !== `AssertionError`) {
+        throw error
+      }
+      throw new TraceAssertionError(currentCheckpoint, error)
+    }
     return undefined
   }
 
