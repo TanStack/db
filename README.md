@@ -1,5 +1,19 @@
 <div align="center">
-  <img src="./media/header_db.png" >
+  <picture>
+    <source
+      media="(prefers-color-scheme: dark)"
+      srcset="https://tanstack.com/api/readme/db.png?theme=dark"
+    />
+    <source
+      media="(prefers-color-scheme: light)"
+      srcset="https://tanstack.com/api/readme/db.png"
+    />
+    <img
+      src="https://tanstack.com/api/readme/db.png"
+      alt="TanStack DB"
+      width="900"
+    />
+  </picture>
 </div>
 
 <br />
