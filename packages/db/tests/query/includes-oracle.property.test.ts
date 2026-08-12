@@ -1,6 +1,7 @@
 import { fc, test as fcTest } from '@fast-check/vitest'
 import { describe, expect } from 'vitest'
 import {
+  concat,
   createLiveQueryCollection,
   eq,
   materialize,
@@ -776,7 +777,9 @@ function createStructuralTraceContext(
 async function cleanupStructuralTrace({
   incremental,
   sources,
-}: StructuralTraceContext): Promise<void> {
+}: Pick<StructuralTraceContext, `sources`> & {
+  incremental: { cleanup: () => Promise<void> }
+}): Promise<void> {
   await incremental.cleanup()
   await cleanupSources(sources)
 }
@@ -801,7 +804,24 @@ function createStructuralTraceDriver(
 
 type FullRowBatchStep =
   | { level: 0; changes: Array<SyncChange<RootRow>> }
-  | { level: 1; changes: Array<SyncChange<ChildRow>> }
+  | { level: IncludeDepth; changes: Array<SyncChange<ChildRow>> }
+
+type FullRowBatchInput = {
+  level: 0 | IncludeDepth
+  changes: Array<{
+    type: `put` | `delete`
+    id: number
+    parentGroup: number
+    group: number
+    value: number
+    position: number
+  }>
+}
+
+type FullRowBatchScenario = {
+  depth: IncludeDepth
+  steps: Array<FullRowBatchStep>
+}
 
 function updateModel<T extends { id: number }>(
   model: Map<number, T>,
@@ -816,12 +836,11 @@ function updateModel<T extends { id: number }>(
   }
 }
 
-function createFullRowBatchTraceDriver(): TraceDriver<
-  FullRowBatchStep,
-  StructuralTraceContext
-> {
+function createFullRowBatchTraceDriver(
+  depth: IncludeDepth,
+): TraceDriver<FullRowBatchStep, StructuralTraceContext> {
   return {
-    setup: () => createStructuralTraceContext(1, `full`),
+    setup: () => createStructuralTraceContext(depth, `full`),
     start: ({ incremental }) => incremental.preload(),
     apply: (step, { sources, roots, levels }) => {
       if (step.level === 0) {
@@ -830,8 +849,9 @@ function createFullRowBatchTraceDriver(): TraceDriver<
         return
       }
 
-      sources.levels[0].writeBatch(step.changes)
-      updateModel(levels[0]!, step.changes)
+      const level = step.level - 1
+      sources.levels[level]!.writeBatch(step.changes)
+      updateModel(levels[level]!, step.changes)
     },
     cleanup: cleanupStructuralTrace,
   }
@@ -886,6 +906,363 @@ const fullRowBatchTrace: Array<FullRowBatchStep> = [
     ],
   },
 ]
+
+const fullRowSharedRoutingSeed: FullRowBatchScenario = {
+  depth: 1,
+  steps: [
+    {
+      level: 0,
+      changes: [
+        { type: `insert`, value: batchRoot(0, 2, 0, 0) },
+        { type: `insert`, value: batchRoot(1, 2, 0, 0) },
+      ],
+    },
+    {
+      level: 0,
+      changes: [{ type: `delete`, value: batchRoot(1, 2, 0, 0) }],
+    },
+    {
+      level: 0,
+      changes: [{ type: `insert`, value: batchRoot(1, 0, 0, 0) }],
+    },
+    {
+      level: 1,
+      changes: [{ type: `insert`, value: batchChild(0, 2, 0, 0) }],
+    },
+  ],
+}
+
+function fullRowBatchInputArbitrary(
+  depth: IncludeDepth,
+  levels: `all` | `children`,
+  maxBatchSize = 3,
+): fc.Arbitrary<FullRowBatchInput> {
+  const levelsArbitrary =
+    levels === `all`
+      ? levelArbitrary(depth)
+      : fc.integer({ min: 1, max: depth }).map((level) => level as IncludeDepth)
+
+  return levelsArbitrary.chain((level) =>
+    fc
+      .uniqueArray(
+        fc.record({
+          // Root delete/reinsert has a known failing seed below. Keep the
+          // generated green corpus out of that class while still generating
+          // inserts, replacements, and multi-change batches at the root.
+          type:
+            level === 0
+              ? fc.constant(`put` as const)
+              : fc.constantFrom(`put` as const, `delete` as const),
+          id: fc.integer({ min: 0, max: 5 }),
+          parentGroup: fc.integer({ min: 0, max: 4 }),
+          group: fc.integer({ min: 0, max: 4 }),
+          value: fc.integer({ min: -3, max: 3 }),
+          position: fc.integer({ min: -2, max: 2 }),
+        }),
+        {
+          selector: (change) => change.id,
+          minLength: 1,
+          maxLength: maxBatchSize,
+        },
+      )
+      .map((changes) => ({ level, changes })),
+  )
+}
+
+function createConnectedBatchPrefix(
+  depth: IncludeDepth,
+): Array<FullRowBatchStep> {
+  // Generated ids stop at 5, so this path survives every later batch and
+  // guarantees that the selected depth is observable at every checkpoint.
+  const steps: Array<FullRowBatchStep> = [
+    {
+      level: 0,
+      changes: [{ type: `insert`, value: batchRoot(100, 100, 100, 0) }],
+    },
+  ]
+
+  for (let level = 1; level <= depth; level++) {
+    steps.push({
+      level: level as IncludeDepth,
+      changes: [
+        {
+          type: `insert`,
+          value: {
+            ...batchChild(100 + level, 99 + level, 100 + level, 0),
+            group: 100 + level,
+          },
+        },
+      ],
+    })
+  }
+
+  return steps
+}
+
+function normalizeFullRowBatchInputs(
+  depth: IncludeDepth,
+  inputs: Array<FullRowBatchInput>,
+  allowChildRelationshipUpdates: boolean,
+): FullRowBatchScenario {
+  const roots = new Map<number, RootRow>([[100, batchRoot(100, 100, 100, 0)]])
+  const levels = Array.from(
+    { length: 4 },
+    (_, level) =>
+      new Map<number, ChildRow>(
+        level < depth
+          ? [
+              [
+                101 + level,
+                {
+                  ...batchChild(101 + level, 100 + level, 101 + level, 0),
+                  group: 101 + level,
+                },
+              ],
+            ]
+          : [],
+      ),
+  )
+  const steps = createConnectedBatchPrefix(depth)
+
+  for (const input of inputs) {
+    if (input.level === 0) {
+      const changes = input.changes.map((change): SyncChange<RootRow> => {
+        const current = roots.get(change.id)
+        if (change.type === `delete` && current) {
+          roots.delete(change.id)
+          return { type: `delete`, value: current }
+        }
+
+        const value: RootRow = {
+          id: change.id,
+          group: current ? current.group : change.group,
+          value: change.value,
+          position: change.position,
+        }
+        roots.set(value.id, value)
+        return { type: current ? `update` : `insert`, value }
+      })
+      steps.push({ level: 0, changes })
+      continue
+    }
+
+    const model = levels[input.level - 1]!
+    const changes = input.changes.map((change): SyncChange<ChildRow> => {
+      const current = model.get(change.id)
+      if (change.type === `delete` && current) {
+        model.delete(change.id)
+        return { type: `delete`, value: current }
+      }
+
+      const value: ChildRow = {
+        id: change.id,
+        parentGroup:
+          !allowChildRelationshipUpdates && current
+            ? current.parentGroup
+            : change.parentGroup,
+        group:
+          !allowChildRelationshipUpdates && current
+            ? current.group
+            : change.group,
+        value: change.value,
+        position: change.position,
+      }
+      model.set(value.id, value)
+      return { type: current ? `update` : `insert`, value }
+    })
+    steps.push({ level: input.level, changes })
+  }
+
+  return { depth, steps }
+}
+
+function fullRowBatchScenarioArbitrary(
+  allowChildRelationshipUpdates: boolean,
+  levels: `all` | `children` = `all`,
+  maxBatchSize = 3,
+): fc.Arbitrary<FullRowBatchScenario> {
+  return depthArbitrary.chain((depth) =>
+    fc
+      .array(fullRowBatchInputArbitrary(depth, levels, maxBatchSize), {
+        minLength: 1,
+        maxLength: 10,
+      })
+      .map((inputs) =>
+        normalizeFullRowBatchInputs(
+          depth,
+          inputs,
+          allowChildRelationshipUpdates,
+        ),
+      ),
+  )
+}
+
+async function expectFullRowBatchScenarioMatches({
+  depth,
+  steps,
+}: FullRowBatchScenario): Promise<void> {
+  await runTrace({
+    steps,
+    driver: createFullRowBatchTraceDriver(depth),
+    projection: structuralProjection,
+  })
+}
+
+type FlatMaterialization = `array` | `concat`
+
+function createFlatMaterializationQuery(
+  materialization: FlatMaterialization,
+  sources: Sources,
+) {
+  if (materialization === `array`) {
+    return createLiveQueryCollection((q) =>
+      q
+        .from({ root: sources.roots.collection })
+        .orderBy(({ root }) => root.position)
+        .orderBy(({ root }) => root.id)
+        .select(({ root }) => ({
+          id: root.id,
+          group: root.group,
+          children: materialize(
+            q
+              .from({ child: sources.levels[0].collection })
+              .where(({ child }) => eq(child.parentGroup, root.group))
+              .orderBy(({ child }) => child.position)
+              .orderBy(({ child }) => child.id)
+              .select(({ child }) => ({ id: child.id, value: child.value })),
+          ),
+        })),
+    )
+  }
+
+  return createLiveQueryCollection((q) =>
+    q
+      .from({ root: sources.roots.collection })
+      .orderBy(({ root }) => root.position)
+      .orderBy(({ root }) => root.id)
+      .select(({ root }) => ({
+        id: root.id,
+        group: root.group,
+        content: concat(
+          toArray(
+            q
+              .from({ child: sources.levels[0].collection })
+              .where(({ child }) => eq(child.parentGroup, root.group))
+              .orderBy(({ child }) => child.position)
+              .orderBy(({ child }) => child.id)
+              .select(({ child }) => child.value),
+          ),
+        ),
+      })),
+  )
+}
+
+type FlatMaterializationContext = Omit<
+  StructuralTraceContext,
+  `incremental`
+> & {
+  incremental: ReturnType<typeof createFlatMaterializationQuery>
+}
+
+function createFlatMaterializationDriver(
+  materialization: FlatMaterialization,
+): TraceDriver<FullRowBatchStep, FlatMaterializationContext> {
+  return {
+    setup: () => {
+      const sources = createSources(`full`)
+      return {
+        depth: 1,
+        sources,
+        incremental: createFlatMaterializationQuery(materialization, sources),
+        roots: new Map<number, RootRow>(),
+        levels: Array.from({ length: 4 }, () => new Map<number, ChildRow>()),
+      }
+    },
+    start: ({ incremental }) => incremental.preload(),
+    apply: (step, { sources, roots, levels }) => {
+      if (step.level === 0) {
+        sources.roots.writeBatch(step.changes)
+        updateModel(roots, step.changes)
+        return
+      }
+
+      if (step.level !== 1) {
+        throw new Error(`Flat materialization only supports depth 1`)
+      }
+      sources.levels[0].writeBatch(step.changes)
+      updateModel(levels[0]!, step.changes)
+    },
+    cleanup: cleanupStructuralTrace,
+  }
+}
+
+type FlatMaterializationResult = Array<
+  | {
+      id: number
+      group: number
+      children: Array<{ id: number; value: number }>
+    }
+  | { id: number; group: number; content: string }
+>
+
+function recomputeFlatMaterialization(
+  materialization: FlatMaterialization,
+  roots: Map<number, RootRow>,
+  children: Map<number, ChildRow>,
+): FlatMaterializationResult {
+  return [...roots.values()].sort(compareRows).map((root) => {
+    const matching = [...children.values()]
+      .filter((child) => child.parentGroup === root.group)
+      .sort(compareRows)
+    return materialization === `array`
+      ? {
+          id: root.id,
+          group: root.group,
+          children: matching.map(({ id, value }) => ({ id, value })),
+        }
+      : {
+          id: root.id,
+          group: root.group,
+          content: matching.map(({ value }) => String(value)).join(``),
+        }
+  })
+}
+
+function flatMaterializationProjection(
+  materialization: FlatMaterialization,
+): TraceProjection<
+  FlatMaterializationContext,
+  unknown,
+  FlatMaterializationResult
+> {
+  return {
+    observe: ({ incremental }) => stripVirtualProperties(incremental.toArray),
+    recompute: ({ roots, levels }) =>
+      recomputeFlatMaterialization(materialization, roots, levels[0]!),
+    assertEqual: (observed, expected) => {
+      expect(observed).toEqual(expected)
+      return undefined
+    },
+  }
+}
+
+const flatMaterializationScenarioArbitrary = fc
+  .array(fullRowBatchInputArbitrary(1, `all`), {
+    minLength: 1,
+    maxLength: 12,
+  })
+  .map((inputs) => normalizeFullRowBatchInputs(1, inputs, false))
+
+async function expectFlatMaterializationScenarioMatches(
+  materialization: FlatMaterialization,
+  scenario: FullRowBatchScenario,
+): Promise<void> {
+  await runTrace({
+    steps: scenario.steps,
+    driver: createFlatMaterializationDriver(materialization),
+    projection: flatMaterializationProjection(materialization),
+  })
+}
 
 const structuralProjection: TraceProjection<
   StructuralTraceContext,
@@ -1149,7 +1526,75 @@ async function expectMaterializeScenarioMatches({
   })
 }
 
+const intraBatchChildHandOffScenario: FullRowBatchScenario = {
+  depth: 1,
+  steps: [
+    {
+      level: 0,
+      changes: [
+        { type: `insert`, value: batchRoot(0, 1, 0, 0) },
+        { type: `insert`, value: batchRoot(1, 3, 0, 0) },
+      ],
+    },
+    {
+      level: 1,
+      changes: [
+        { type: `insert`, value: batchChild(5, 3, 0, 0) },
+        { type: `insert`, value: batchChild(1, 1, 0, 0) },
+      ],
+    },
+    {
+      level: 1,
+      changes: [
+        { type: `update`, value: batchChild(1, 0, 0, 0) },
+        { type: `update`, value: batchChild(5, 1, 0, 0) },
+      ],
+    },
+  ],
+}
+
 describe(`includes recompute oracle`, () => {
+  for (const materialization of [`array`, `concat`] as const) {
+    fcTest(
+      `discovered trace: ${materialization} follows an intra-batch child hand-off`,
+      expectAssertionFailure(async () => {
+        await expectFlatMaterializationScenarioMatches(
+          materialization,
+          intraBatchChildHandOffScenario,
+        )
+      }),
+    )
+  }
+
+  fcTest.prop(
+    [
+      fc.constantFrom<FlatMaterialization>(`array`, `concat`),
+      flatMaterializationScenarioArbitrary,
+    ],
+    {
+      numRuns: 30,
+      seed: 1721,
+    },
+  )(`matches recomputation for flat materializations`, (kind, scenario) =>
+    expectFlatMaterializationScenarioMatches(kind, scenario),
+  )
+
+  fcTest.prop([fullRowBatchScenarioArbitrary(false)], {
+    numRuns: 40,
+    seed: 1719,
+  })(
+    `matches recomputation for generated full-row batches at every depth`,
+    expectFullRowBatchScenarioMatches,
+  )
+
+  fcTest.prop([fullRowBatchScenarioArbitrary(true, `children`, 1)], {
+    numRuns: 40,
+    seed: 1721,
+  })(
+    `matches recomputation for single-row child reparenting and rekeying`,
+    expectFullRowBatchScenarioMatches,
+  )
+
   fcTest(
     `discovered seed: nested scalar materialization follows a reference update`,
     expectAssertionFailure(async () => {
@@ -1170,10 +1615,17 @@ describe(`includes recompute oracle`, () => {
   fcTest(`matches recomputation for full-row sync batches`, async () => {
     await runTrace({
       steps: fullRowBatchTrace,
-      driver: createFullRowBatchTraceDriver(),
+      driver: createFullRowBatchTraceDriver(1),
       projection: structuralProjection,
     })
   })
+
+  fcTest(
+    `discovered seed: a reinserted parent drops its old shared route`,
+    expectAssertionFailure(() =>
+      expectFullRowBatchScenarioMatches(fullRowSharedRoutingSeed),
+    ),
+  )
 
   fcTest(`supports repeated optimistic rollbacks in one history`, async () => {
     await expectScenarioMatches({
