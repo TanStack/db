@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from 'vitest'
 import { createCollection } from '../src/collection/index.js'
 import { createLiveQueryCollection } from '../src/query/live-query-collection.js'
+import { LIVE_QUERY_INTERNAL } from '../src/query/live/internal.js'
 import { LiveQueryWindowControllerDisposedError } from '../src/errors.js'
 import { createLiveQueryWindowController } from '../src/live-query-window-controller.js'
 import { mockSyncCollectionOptions } from './utils.js'
@@ -205,6 +206,35 @@ describe(`createLiveQueryWindowController`, () => {
     controller.dispose()
   })
 
+  it(`restores the initial operator window when a graph run throws`, () => {
+    const lq = makeOrderedLiveQuery(makeSource(), 2)
+    const builder = lq.utils[LIVE_QUERY_INTERNAL].getBuilder()
+    const originalWindowFn = Reflect.get(builder, `windowFn`) as (options: {
+      offset?: number
+      limit?: number
+    }) => void
+    const windowFn = vi.fn(originalWindowFn)
+    const requestedError = new Error(`requested window failed`)
+    const maybeRunGraph = vi
+      .fn()
+      .mockImplementationOnce(() => {
+        throw requestedError
+      })
+      .mockImplementationOnce(() => {
+        throw new Error(`rollback failed`)
+      })
+    Reflect.set(builder, `windowFn`, windowFn)
+    Reflect.set(builder, `maybeRunGraphFn`, maybeRunGraph)
+
+    expect(() => lq.utils.setWindow({ offset: 0, limit: 5 })).toThrow(
+      requestedError,
+    )
+    expect(windowFn).toHaveBeenNthCalledWith(1, { offset: 0, limit: 5 })
+    expect(windowFn).toHaveBeenNthCalledWith(2, { offset: 0, limit: 3 })
+    expect(maybeRunGraph).toHaveBeenCalledTimes(2)
+    expect(lq.utils.getWindow()).toBeUndefined()
+  })
+
   it(`keeps the committed page retryable when a window load rejects`, async () => {
     const lq = makeOrderedLiveQuery(makeSource(), 2)
     const controller = createLiveQueryWindowController<Row, string>(lq as any, {
@@ -230,6 +260,23 @@ describe(`createLiveQueryWindowController`, () => {
 
     await controller.fetchNextPage()
     expect(controller.getSnapshot().pages).toHaveLength(2)
+    controller.dispose()
+  })
+
+  it(`clears a preload error after a successful retry`, async () => {
+    const lq = makeOrderedLiveQuery(makeSource(), 2)
+    const failure = new Error(`preload failed`)
+    vi.spyOn(lq.utils, `setWindow`).mockRejectedValueOnce(failure)
+    const controller = createLiveQueryWindowController<Row, string>(lq as any, {
+      pageSize: 2,
+    })
+
+    await expect(controller.preload()).rejects.toBe(failure)
+    expect(controller.getSnapshot().error).toBe(failure)
+
+    await controller.preload()
+    expect(controller.getSnapshot().isError).toBe(false)
+    expect(controller.getSnapshot().error).toBeUndefined()
     controller.dispose()
   })
 
@@ -299,6 +346,44 @@ describe(`createLiveQueryWindowController`, () => {
     resolveExpansion()
     await expansion
     expect(controller.getSnapshot().pages).toHaveLength(1)
+    controller.dispose()
+  })
+
+  it(`retains an unsubscribed lease until overlapping requests settle`, async () => {
+    const lq = makeOrderedLiveQuery(makeSource(), 2)
+    await lq.preload()
+
+    const originalSetWindow = lq.utils.setWindow.bind(lq.utils)
+    const resolvers: Array<() => void> = []
+    const setWindow = vi
+      .spyOn(lq.utils, `setWindow`)
+      .mockImplementation((options) => {
+        originalSetWindow(options)
+        if (resolvers.length >= 2) return true
+        return new Promise<void>((resolve) => resolvers.push(resolve))
+      })
+    const controller = createLiveQueryWindowController<Row, string>(lq as any, {
+      pageSize: 2,
+    })
+
+    const expansion = controller.fetchNextPage()
+    const reset = controller.reset()
+    expect(setWindow).toHaveBeenCalledTimes(2)
+
+    resolvers[0]!()
+    await expansion
+
+    const competingController = createLiveQueryWindowController<Row, string>(
+      lq as any,
+      { pageSize: 1 },
+    )
+    competingController.subscribe(() => {})
+    expect(setWindow).toHaveBeenCalledTimes(2)
+
+    resolvers[1]!()
+    await reset
+    expect(controller.getSnapshot().pages).toHaveLength(1)
+    competingController.dispose()
     controller.dispose()
   })
 

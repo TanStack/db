@@ -234,6 +234,7 @@ class LiveQueryWindowControllerImpl<
   private pendingWindowGeneration: number | undefined
   private leaseActive = false
   private leaseGeneration = 0
+  private inFlightLeaseHolders = 0
 
   private readonly subscriptions = new Set<SubscriptionRecord>()
   private readonly publicationQueue: Array<Publication> = []
@@ -371,7 +372,7 @@ class LiveQueryWindowControllerImpl<
       if (this.subscriptions.size === 0) {
         this.observerUnsub?.()
         this.observerUnsub = null
-        this.deactivateLease()
+        if (this.inFlightLeaseHolders === 0) this.deactivateLease()
       }
     }
   }
@@ -398,11 +399,16 @@ class LiveQueryWindowControllerImpl<
   async preload(): Promise<void> {
     if (this.disposed) throw new LiveQueryWindowControllerDisposedError()
 
-    const temporaryLease = !this.leaseActive
+    const hadPaginationError = this.hasPaginationError
+    this.hasPaginationError = false
+    this.paginationError = undefined
+    this.acquireInFlightLease()
     try {
       const result = this.activateLease(this.committedPageCount)
       if (result !== true) await result
       await this.observer.preload()
+      this.failedHasNextPage = false
+      if (hadPaginationError) this.notify()
     } catch (error) {
       this.hasPaginationError = true
       this.paginationError = error
@@ -410,9 +416,7 @@ class LiveQueryWindowControllerImpl<
       this.notify()
       throw error
     } finally {
-      if (temporaryLease && this.subscriptions.size === 0) {
-        this.deactivateLease()
-      }
+      this.releaseInFlightLease()
     }
   }
 
@@ -436,8 +440,8 @@ class LiveQueryWindowControllerImpl<
   ): Promise<void> {
     const generation = ++this.windowGeneration
     const previousHasNextPage = this.getSnapshot().hasNextPage
-    const temporaryLease = !this.leaseActive && this.subscriptions.size === 0
     this.pendingWindowGeneration = undefined
+    this.acquireInFlightLease()
 
     this.beginTransition()
     this.isFetchingNextPage = fetchingNextPage
@@ -455,7 +459,7 @@ class LiveQueryWindowControllerImpl<
       this.failedHasNextPage = previousHasNextPage
       this.notify()
       this.endTransition()
-      if (temporaryLease) this.deactivateLease()
+      this.releaseInFlightLease()
       return Promise.reject(error)
     }
 
@@ -467,7 +471,7 @@ class LiveQueryWindowControllerImpl<
         this.notify()
       }
       this.endTransition()
-      if (temporaryLease) this.deactivateLease()
+      this.releaseInFlightLease()
       return Promise.resolve()
     }
 
@@ -501,12 +505,17 @@ class LiveQueryWindowControllerImpl<
         },
       )
       .finally(() => {
-        this.releaseTemporaryLease(temporaryLease)
+        this.releaseInFlightLease()
       })
   }
 
-  private releaseTemporaryLease(temporaryLease: boolean): void {
-    if (temporaryLease && this.subscriptions.size === 0) {
+  private acquireInFlightLease(): void {
+    this.inFlightLeaseHolders++
+  }
+
+  private releaseInFlightLease(): void {
+    this.inFlightLeaseHolders--
+    if (this.inFlightLeaseHolders === 0 && this.subscriptions.size === 0) {
       this.deactivateLease()
     }
   }

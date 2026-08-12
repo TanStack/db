@@ -123,6 +123,7 @@ export class CollectionConfigBuilder<
   public liveQueryCollection?: Collection<TResult, any, any>
 
   private windowFn: ((options: WindowOptions) => void) | undefined
+  private readonly initialWindow: WindowOptions | undefined
   private currentWindow: WindowOptions | undefined
 
   private maybeRunGraphFn: (() => void) | undefined
@@ -176,6 +177,12 @@ export class CollectionConfigBuilder<
       query: config.query,
       requireObjectResult: true,
     })
+    this.initialWindow = this.query.orderBy?.length
+      ? {
+          offset: this.query.offset ?? 0,
+          limit: this.query.limit ?? Infinity,
+        }
+      : undefined
     this.collections = extractCollectionsFromQuery(this.query)
     const collectionAliasesById = extractCollectionAliases(this.query)
 
@@ -275,14 +282,20 @@ export class CollectionConfigBuilder<
       throw new SetWindowRequiresOrderByError()
     }
 
-    const previousWindow = this.currentWindow
+    const previousWindow = this.currentWindow ?? this.initialWindow
     try {
       this.windowFn(options)
       this.maybeRunGraphFn?.()
       this.currentWindow = options
     } catch (error) {
       if (previousWindow) {
-        this.windowFn(previousWindow)
+        try {
+          this.windowFn(previousWindow)
+          this.maybeRunGraphFn?.()
+        } catch {
+          // Recovery is best-effort; preserve the error from the requested
+          // window rather than replacing it with a rollback failure.
+        }
       }
       throw error
     }

@@ -888,8 +888,13 @@ describe(`useLiveInfiniteQuery`, () => {
     })
 
     act(() => fetchFromA())
-
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 0))
+    })
     expect(result.current.pages).toHaveLength(1)
+
+    act(() => result.current.fetchNextPage())
+    await waitFor(() => expect(result.current.pages).toHaveLength(2))
   })
 
   it(`should track pageParams correctly`, async () => {
