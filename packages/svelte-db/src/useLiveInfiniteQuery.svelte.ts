@@ -5,7 +5,10 @@ import {
 } from '@tanstack/db'
 import { untrack } from 'svelte'
 // Type-only: used in `ReturnType<typeof useLiveQuery>` below.
-import type { useLiveQuery } from './useLiveQuery.svelte.js'
+import type {
+  UseLiveQueryReturnWithCollection,
+  useLiveQuery,
+} from './useLiveQuery.svelte.js'
 import type {
   Collection,
   Context,
@@ -39,10 +42,26 @@ type ResolvedInput<TContext extends Context> =
       query: (q: InitialQueryBuilder) => QueryBuilder<TContext>
     }
 
+type InfiniteQueryOptions = {
+  pageSize?: number
+  initialPageParam?: number
+}
+
 function hasSetWindow(
   collection: Collection<any, any, any>,
 ): collection is WindowedCollection {
   return typeof collection.utils?.setWindow === `function`
+}
+
+function normalizePageSize(pageSize: number | undefined): number {
+  if (
+    pageSize === undefined ||
+    !Number.isSafeInteger(pageSize) ||
+    pageSize <= 0
+  ) {
+    return DEFAULT_PAGE_SIZE
+  }
+  return pageSize
 }
 
 function resolveInput<TContext extends Context>(
@@ -78,20 +97,21 @@ function resolveInput<TContext extends Context>(
   }
 }
 
-export type UseLiveInfiniteQueryConfig<TContext extends Context> = {
-  pageSize?: number
-  initialPageParam?: number
+export type LiveInfiniteQueryConfig<TRow> = InfiniteQueryOptions & {
   /**
    * @deprecated Pagination uses the shared controller's peek-ahead strategy.
    * This remains for compatibility with TanStack Query conventions.
    */
   getNextPageParam?: (
-    lastPage: Array<InferResultType<TContext>[number]>,
-    allPages: Array<Array<InferResultType<TContext>[number]>>,
+    lastPage: Array<TRow>,
+    allPages: Array<Array<TRow>>,
     lastPageParam: number,
     allPageParams: Array<number>,
   ) => number | undefined
 }
+
+export type UseLiveInfiniteQueryConfig<TContext extends Context> =
+  LiveInfiniteQueryConfig<InferResultType<TContext>[number]>
 
 export type UseLiveInfiniteQueryReturn<TContext extends Context> = Omit<
   ReturnType<typeof useLiveQuery<TContext>>,
@@ -100,7 +120,24 @@ export type UseLiveInfiniteQueryReturn<TContext extends Context> = Omit<
   data: InferResultType<TContext>
   pages: Array<Array<InferResultType<TContext>[number]>>
   pageParams: Array<number>
-  fetchNextPage: () => void
+  fetchNextPage: () => Promise<void>
+  hasNextPage: boolean
+  isFetchingNextPage: boolean
+  error: unknown
+}
+
+export type UseLiveInfiniteQueryReturnWithCollection<
+  TResult extends object,
+  TKey extends string | number,
+  TUtils extends Record<string, any>,
+> = Omit<
+  UseLiveQueryReturnWithCollection<TResult, TKey, TUtils, Array<TResult>>,
+  `data`
+> & {
+  data: Array<TResult>
+  pages: Array<Array<TResult>>
+  pageParams: Array<number>
+  fetchNextPage: () => Promise<void>
   hasNextPage: boolean
   isFetchingNextPage: boolean
   error: unknown
@@ -122,8 +159,8 @@ export function useLiveInfiniteQuery<
   liveQueryCollection: MaybeGetter<
     Collection<TResult, TKey, TUtils> & NonSingleResult
   >,
-  config: UseLiveInfiniteQueryConfig<any>,
-): UseLiveInfiniteQueryReturn<any>
+  config: LiveInfiniteQueryConfig<TResult>,
+): UseLiveInfiniteQueryReturnWithCollection<TResult, TKey, TUtils>
 
 export function useLiveInfiniteQuery<TContext extends Context>(
   queryFn: (q: InitialQueryBuilder) => QueryBuilder<TContext>,
@@ -133,16 +170,12 @@ export function useLiveInfiniteQuery<TContext extends Context>(
 
 export function useLiveInfiniteQuery<TContext extends Context>(
   queryFnOrCollection: unknown,
-  config: UseLiveInfiniteQueryConfig<TContext>,
+  config: InfiniteQueryOptions,
   deps: Array<() => unknown> = [],
 ): UseLiveInfiniteQueryReturn<TContext> {
   let validatedCollection: Collection<any, any, any> | null = null
 
-  const pageSize = $derived(
-    config.pageSize !== undefined && config.pageSize > 0
-      ? config.pageSize
-      : DEFAULT_PAGE_SIZE,
-  )
+  const pageSize = $derived(normalizePageSize(config.pageSize))
   const initialPageParam = $derived(config.initialPageParam ?? 0)
 
   const controller = $derived.by(() => {
@@ -210,11 +243,7 @@ export function useLiveInfiniteQuery<TContext extends Context>(
     }
   })
 
-  const fetchNextPage = () => {
-    void controller.fetchNextPage().catch(() => {
-      // Pagination errors are exposed through the controller snapshot.
-    })
-  }
+  const fetchNextPage = () => controller.fetchNextPage()
 
   return {
     get state() {
