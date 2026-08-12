@@ -13,6 +13,12 @@ import {
   mockSyncCollectionOptions,
   withExpectedRejection,
 } from '../utils.js'
+import { runTrace } from '../trace-runner.js'
+import type {
+  TraceCheckpoint,
+  TraceDriver,
+  TraceProjection,
+} from '../trace-runner.js'
 
 type IncludeDepth = 1 | 2 | 3 | 4
 
@@ -604,7 +610,7 @@ async function applyAction(
   sources: Sources,
   roots: Map<number, RootRow>,
   levels: Array<Map<number, ChildRow>>,
-  assertMatches: () => void,
+  assertMatches: TraceCheckpoint,
 ): Promise<void> {
   if (action.level === 0) {
     const current = roots.get(action.id)
@@ -730,30 +736,62 @@ async function cleanupSources(sources: Sources) {
   )
 }
 
-async function expectScenarioMatches(scenario: Scenario): Promise<void> {
-  const sources = createSources()
-  const incremental = createIncrementalQuery(scenario.depth, sources)
-  const roots = new Map<number, RootRow>()
-  const levels = Array.from({ length: 4 }, () => new Map<number, ChildRow>())
+type StructuralTraceContext = {
+  depth: IncludeDepth
+  sources: Sources
+  incremental: ReturnType<typeof createIncrementalQuery>
+  roots: Map<number, RootRow>
+  levels: Array<Map<number, ChildRow>>
+}
 
-  try {
-    await incremental.preload()
-    expect(stripVirtualProperties(incremental.toArray)).toEqual([])
-
-    const assertMatches = () => {
-      expect(stripVirtualProperties(incremental.toArray)).toEqual(
-        recompute(roots, levels, scenario.depth),
-      )
-    }
-
-    for (const action of scenario.history) {
-      await applyAction(action, sources, roots, levels, assertMatches)
-      assertMatches()
-    }
-  } finally {
-    await incremental.cleanup()
-    await cleanupSources(sources)
+function createStructuralTraceDriver(
+  depth: IncludeDepth,
+): TraceDriver<HistoryAction, StructuralTraceContext> {
+  return {
+    setup: () => {
+      const sources = createSources()
+      return {
+        depth,
+        sources,
+        incremental: createIncrementalQuery(depth, sources),
+        roots: new Map<number, RootRow>(),
+        levels: Array.from({ length: 4 }, () => new Map<number, ChildRow>()),
+      }
+    },
+    start: ({ incremental }) => incremental.preload(),
+    apply: (action, context, checkpoint) =>
+      applyAction(
+        action,
+        context.sources,
+        context.roots,
+        context.levels,
+        checkpoint,
+      ),
+    cleanup: async ({ incremental, sources }) => {
+      await incremental.cleanup()
+      await cleanupSources(sources)
+    },
   }
+}
+
+const structuralProjection: TraceProjection<
+  StructuralTraceContext,
+  unknown,
+  Array<OracleNode>
+> = {
+  observe: ({ incremental }) => stripVirtualProperties(incremental.toArray),
+  recompute: ({ roots, levels, depth }) => recompute(roots, levels, depth),
+  assertEqual: (observed, expected) => {
+    expect(observed).toEqual(expected)
+  },
+}
+
+async function expectScenarioMatches(scenario: Scenario): Promise<void> {
+  await runTrace({
+    steps: scenario.history,
+    driver: createStructuralTraceDriver(scenario.depth),
+    projection: structuralProjection,
+  })
 }
 
 function createMaterializeSources() {
@@ -767,6 +805,24 @@ function createMaterializeSources() {
 }
 
 type MaterializeSources = ReturnType<typeof createMaterializeSources>
+
+type MaterializeModels = {
+  roots: Map<number, MaterializeRoot>
+  middles: Map<number, MaterializeMiddle>
+  shared: Map<number, MaterializeShared>
+  leaves: Map<number, MaterializeLeaf>
+}
+
+type MaterializeTraceStep =
+  | { type: `insert`; insert: MaterializeInsert }
+  | { type: `incrementLeaf`; id: number }
+
+type MaterializeTraceContext = {
+  sharedIntermediate: boolean
+  sources: MaterializeSources
+  live: ReturnType<typeof createMaterializeQuery>
+  models: MaterializeModels
+}
 
 function createMaterializeQuery(sources: MaterializeSources) {
   return createLiveQueryCollection((q) =>
@@ -843,12 +899,7 @@ function insertMaterializeRow(
   insert: MaterializeInsert,
   sharedIntermediate: boolean,
   sources: MaterializeSources,
-  models: {
-    roots: Map<number, MaterializeRoot>
-    middles: Map<number, MaterializeMiddle>
-    shared: Map<number, MaterializeShared>
-    leaves: Map<number, MaterializeLeaf>
-  },
+  models: MaterializeModels,
 ): void {
   switch (insert) {
     case `root-1`:
@@ -891,49 +942,88 @@ async function cleanupMaterializeSources(sources: MaterializeSources) {
   )
 }
 
+function createMaterializeTraceSteps(
+  insertOrder: Array<MaterializeInsert>,
+): Array<MaterializeTraceStep> {
+  const steps: Array<MaterializeTraceStep> = insertOrder.map((insert) => ({
+    type: `insert`,
+    insert,
+  }))
+
+  for (const insert of insertOrder) {
+    if (insert === `leaf-1` || insert === `leaf-2`) {
+      steps.push({ type: `incrementLeaf`, id: insert === `leaf-1` ? 1 : 2 })
+    }
+  }
+
+  return steps
+}
+
+function createMaterializeTraceDriver(
+  scenarioSharedIntermediate: boolean,
+): TraceDriver<MaterializeTraceStep, MaterializeTraceContext> {
+  return {
+    setup: () => {
+      const sources = createMaterializeSources()
+      return {
+        sharedIntermediate: scenarioSharedIntermediate,
+        sources,
+        live: createMaterializeQuery(sources),
+        models: {
+          roots: new Map<number, MaterializeRoot>(),
+          middles: new Map<number, MaterializeMiddle>(),
+          shared: new Map<number, MaterializeShared>(),
+          leaves: new Map<number, MaterializeLeaf>(),
+        },
+      }
+    },
+    start: ({ live }) => live.preload(),
+    apply: (step, { models, sources, sharedIntermediate }) => {
+      if (step.type === `insert`) {
+        insertMaterializeRow(step.insert, sharedIntermediate, sources, models)
+        return
+      }
+
+      const leaf = models.leaves.get(step.id)
+      if (!leaf) throw new Error(`Missing leaf ${step.id} in trace model`)
+      const updated = { ...leaf, value: leaf.value + 1 }
+      sources.leaves.write(`update`, updated)
+      models.leaves.set(updated.id, updated)
+    },
+    cleanup: async ({ live, sources }) => {
+      await live.cleanup()
+      await cleanupMaterializeSources(sources)
+    },
+  }
+}
+
+const materializeProjection: TraceProjection<
+  MaterializeTraceContext,
+  unknown,
+  Array<MaterializeTree>
+> = {
+  observe: ({ live }) => stripVirtualProperties(live.toArray),
+  recompute: ({ models }) =>
+    recomputeMaterialize(
+      models.roots,
+      models.middles,
+      models.shared,
+      models.leaves,
+    ),
+  assertEqual: (observed, expected) => {
+    expect(observed).toEqual(expected)
+  },
+}
+
 async function expectMaterializeScenarioMatches({
   sharedIntermediate,
   insertOrder,
 }: MaterializeScenario): Promise<void> {
-  const sources = createMaterializeSources()
-  const live = createMaterializeQuery(sources)
-  const models = {
-    roots: new Map<number, MaterializeRoot>(),
-    middles: new Map<number, MaterializeMiddle>(),
-    shared: new Map<number, MaterializeShared>(),
-    leaves: new Map<number, MaterializeLeaf>(),
-  }
-
-  const assertMatches = () => {
-    expect(stripVirtualProperties(live.toArray)).toEqual(
-      recomputeMaterialize(
-        models.roots,
-        models.middles,
-        models.shared,
-        models.leaves,
-      ),
-    )
-  }
-
-  try {
-    await live.preload()
-    assertMatches()
-
-    for (const insert of insertOrder) {
-      insertMaterializeRow(insert, sharedIntermediate, sources, models)
-      assertMatches()
-    }
-
-    for (const leaf of models.leaves.values()) {
-      const updated = { ...leaf, value: leaf.value + 1 }
-      sources.leaves.write(`update`, updated)
-      models.leaves.set(updated.id, updated)
-      assertMatches()
-    }
-  } finally {
-    await live.cleanup()
-    await cleanupMaterializeSources(sources)
-  }
+  await runTrace({
+    steps: createMaterializeTraceSteps(insertOrder),
+    driver: createMaterializeTraceDriver(sharedIntermediate),
+    projection: materializeProjection,
+  })
 }
 
 describe(`includes recompute oracle`, () => {
