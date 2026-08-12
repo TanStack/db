@@ -13,11 +13,11 @@
     "postinstall": "prebuild-install --runtime electron --target 40.2.1 --arch arm64 || echo 'prebuild-install failed, try: npx @electron/rebuild'"
   },
   "dependencies": {
-    "@tanstack/electron-db-sqlite-persistence": "^0.1.21",
-    "@tanstack/node-db-sqlite-persistence": "^0.2.9",
-    "@tanstack/offline-transactions": "^1.0.42",
-    "@tanstack/query-db-collection": "^1.2.1",
-    "@tanstack/react-db": "^0.1.95",
+    "@tanstack/electron-db-sqlite-persistence": "^0.1.22",
+    "@tanstack/node-db-sqlite-persistence": "^0.2.10",
+    "@tanstack/offline-transactions": "^1.0.43",
+    "@tanstack/query-db-collection": "^1.2.2",
+    "@tanstack/react-db": "^0.1.96",
     "@tanstack/react-query": "^5.90.20",
     "better-sqlite3": "^12.6.2",
     "react": "^19.2.4",
