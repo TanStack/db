@@ -99,7 +99,6 @@ export class CollectionSubscription
   // This prevents a flash of missing content between deletes and new inserts
   private isBufferingForTruncate = false
   private truncateBuffer: Array<Array<ChangeMessage<any, any>>> = []
-  private truncateBufferHasLayoutChange = false
   private pendingTruncateRefetches: Set<Promise<void>> = new Set()
 
   public get status(): SubscriptionStatus {
@@ -249,14 +248,9 @@ export class CollectionSubscription
     // Flatten all buffered changes into a single array for atomic emission
     // This ensures consumers see all truncate changes (deletes + inserts) in one callback
     const merged = this.truncateBuffer.flat()
-    const layoutChanged = this.truncateBufferHasLayoutChange
-    if (merged.length > 0 || layoutChanged) {
-      const delivered = this.filteredCallback(merged)
-      if (layoutChanged && !delivered) this.filteredCallback([])
-    }
+    if (merged.length > 0) this.filteredCallback(merged)
 
     this.truncateBuffer = []
-    this.truncateBufferHasLayoutChange = false
   }
 
   setOrderByIndex(index: IndexInterface<any>) {
@@ -325,10 +319,7 @@ export class CollectionSubscription
     return this.snapshotSent
   }
 
-  emitEvents(
-    changes: Array<ChangeMessage<any, any>>,
-    layoutChanged = false,
-  ): boolean {
+  emitEvents(changes: Array<ChangeMessage<any, any>>): boolean {
     const newChanges = this.filterAndFlipChanges(changes)
 
     if (this.isBufferingForTruncate) {
@@ -337,12 +328,9 @@ export class CollectionSubscription
       if (newChanges.length > 0) {
         this.truncateBuffer.push(newChanges)
       }
-      if (layoutChanged) this.truncateBufferHasLayoutChange = true
       return false
     } else {
-      const delivered = this.filteredCallback(newChanges)
-      if (layoutChanged && !delivered) return this.filteredCallback([])
-      return delivered
+      return this.filteredCallback(newChanges)
     }
   }
 
@@ -742,7 +730,6 @@ export class CollectionSubscription
     // Clean up truncate buffer state
     this.isBufferingForTruncate = false
     this.truncateBuffer = []
-    this.truncateBufferHasLayoutChange = false
     this.pendingTruncateRefetches.clear()
 
     // Unload all subsets that this subscription loaded

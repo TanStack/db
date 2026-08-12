@@ -10,7 +10,7 @@ import {
 import { useLiveInfiniteQuery } from '../src/useLiveInfiniteQuery'
 import { mockSyncCollectionOptions } from '../../db/tests/utils'
 import { createFilterFunctionFromExpression } from '../../db/src/collection/change-events'
-import type { LoadSubsetOptions } from '@tanstack/db'
+import type { InitialQueryBuilder, LoadSubsetOptions } from '@tanstack/db'
 import type { ReactNode } from 'react'
 
 type Post = {
@@ -2135,5 +2135,107 @@ describe(`useLiveInfiniteQuery`, () => {
     )
 
     await waitFor(() => expect(result.current.isReady).toBe(true))
+  })
+
+  it(`recreates when switching collection to query function and back`, async () => {
+    const collectionSource = createCollection(
+      mockSyncCollectionOptions<Post>({
+        id: `input-kind-collection-source`,
+        getKey: (post) => post.id,
+        initialData: createMockPosts(10),
+      }),
+    )
+    const querySource = createCollection(
+      mockSyncCollectionOptions<Post>({
+        id: `input-kind-query-source`,
+        getKey: (post) => post.id,
+        initialData: createMockPosts(10).map((post) => ({
+          ...post,
+          id: `query-${post.id}`,
+        })),
+      }),
+    )
+    const collectionInput = createLiveQueryCollection({
+      query: (q) =>
+        q
+          .from({ posts: collectionSource })
+          .orderBy(({ posts }) => posts.createdAt, `desc`)
+          .limit(4),
+    })
+    await collectionInput.preload()
+    const queryInput = (q: InitialQueryBuilder) =>
+      q
+        .from({ posts: querySource })
+        .orderBy(({ posts }) => posts.createdAt, `desc`)
+
+    const { result, rerender } = renderHook(
+      ({ useCollection }: { useCollection: boolean }) =>
+        useLiveInfiniteQuery(
+          (useCollection ? collectionInput : queryInput) as any,
+          { pageSize: 3 },
+          ...((useCollection ? [] : [[]]) as [Array<unknown>] | []),
+        ),
+      { initialProps: { useCollection: true } },
+    )
+
+    await waitFor(() => expect(result.current.isReady).toBe(true))
+    expect((result.current.data[0] as Post).id).toBe(`1`)
+    rerender({ useCollection: false })
+    await waitFor(() =>
+      expect((result.current.data[0] as Post).id).toBe(`query-1`),
+    )
+    rerender({ useCollection: true })
+    await waitFor(() => expect((result.current.data[0] as Post).id).toBe(`1`))
+  })
+
+  it(`recreates when switching query function to collection and back`, async () => {
+    const querySource = createCollection(
+      mockSyncCollectionOptions<Post>({
+        id: `input-kind-query-first-source`,
+        getKey: (post) => post.id,
+        initialData: createMockPosts(10),
+      }),
+    )
+    const collectionSource = createCollection(
+      mockSyncCollectionOptions<Post>({
+        id: `input-kind-collection-second-source`,
+        getKey: (post) => post.id,
+        initialData: createMockPosts(10).map((post) => ({
+          ...post,
+          id: `collection-${post.id}`,
+        })),
+      }),
+    )
+    const queryInput = (q: InitialQueryBuilder) =>
+      q
+        .from({ posts: querySource })
+        .orderBy(({ posts }) => posts.createdAt, `desc`)
+    const collectionInput = createLiveQueryCollection({
+      query: (q) =>
+        q
+          .from({ posts: collectionSource })
+          .orderBy(({ posts }) => posts.createdAt, `desc`)
+          .limit(4),
+    })
+    await collectionInput.preload()
+
+    const { result, rerender } = renderHook(
+      ({ useCollection }: { useCollection: boolean }) =>
+        useLiveInfiniteQuery(
+          (useCollection ? collectionInput : queryInput) as any,
+          { pageSize: 3 },
+          ...((useCollection ? [] : [[]]) as [Array<unknown>] | []),
+        ),
+      { initialProps: { useCollection: false } },
+    )
+
+    await waitFor(() => expect(result.current.isReady).toBe(true))
+    expect((result.current.data[0] as Post).id).toBe(`1`)
+    rerender({ useCollection: true })
+    await waitFor(() =>
+      expect((result.current.data[0] as Post).id).toBe(`collection-1`),
+    )
+    rerender({ useCollection: false })
+    await waitFor(() => expect((result.current.data[0] as Post).id).toBe(`1`))
   })
 })

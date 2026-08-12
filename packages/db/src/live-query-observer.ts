@@ -44,7 +44,10 @@ export interface LiveQuerySnapshot<
   isEnabled: boolean
 }
 
-/** Listener payload: the change set, or `undefined` for the synthetic ready notify. */
+/**
+ * Listener payload: changes, `[]` for an internal layout-only publication, or
+ * `undefined` for a synthetic status/ready notification.
+ */
 export type LiveQueryObserverListener<
   T extends object,
   TKey extends string | number,
@@ -357,11 +360,16 @@ class LiveQueryObserverImpl<
     const notify = (
       changes: Array<ChangeMessage<T, TKey>> | undefined,
       status: CollectionStatus = collection.status,
+      explicitLayoutChange = false,
     ) => {
       if (this.disposed || this.subscriptions.size === 0) return
       const layoutRevision = this.getCollectionLayoutRevision(collection)
-      let layoutChanged = false
-      if (changes !== undefined && changes.length === 0) {
+      let layoutChanged = explicitLayoutChange
+      if (
+        !explicitLayoutChange &&
+        changes !== undefined &&
+        changes.length === 0
+      ) {
         // Empty ready events predate the explicit layout signal and share its
         // empty-array payload. Only forward an empty batch when the collection
         // confirms that a new layout-only publication occurred.
@@ -401,6 +409,17 @@ class LiveQueryObserverImpl<
     const statusUnsub = collection.on(`status:change`, ({ status }) =>
       notify(undefined, status),
     )
+    const subscribeLayoutChanges = (
+      collection as Collection<T, TKey, any> & {
+        _subscribeLayoutChanges?: (listener: () => void) => () => void
+      }
+    )._subscribeLayoutChanges
+    const layoutUnsub =
+      typeof subscribeLayoutChanges === `function`
+        ? subscribeLayoutChanges.call(collection, () =>
+            notify([], collection.status, true),
+          )
+        : () => {}
 
     // `subscribeChanges` delivers the initial state synchronously, so a
     // listener can dispose the observer while the collection subscription is
@@ -410,6 +429,7 @@ class LiveQueryObserverImpl<
     let subscription: { unsubscribe: () => void } | null = null
     const release = () => {
       statusUnsub()
+      layoutUnsub()
       subscription?.unsubscribe()
     }
     this.collectionUnsub = release

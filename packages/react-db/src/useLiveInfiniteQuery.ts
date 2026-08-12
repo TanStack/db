@@ -178,6 +178,8 @@ export function useLiveInfiniteQuery<TContext extends Context>(
   const pageSizeRef = useRef(pageSize)
   const initialPageParamRef = useRef(initialPageParam)
   const validatedCollectionRef = useRef<unknown>(null)
+  const inputKind = isCollection ? `collection` : `query`
+  const inputKindRef = useRef<typeof inputKind | null>(null)
 
   const dependenciesChanged =
     !isCollection &&
@@ -186,6 +188,7 @@ export function useLiveInfiniteQuery<TContext extends Context>(
       depsRef.current.some((dep, index) => dep !== deps[index]))
   const needsNewCollection =
     !collectionRef.current ||
+    inputKindRef.current !== inputKind ||
     (isCollection && configRef.current !== queryFnOrCollection) ||
     dependenciesChanged
   const pageShapeChanged =
@@ -195,6 +198,7 @@ export function useLiveInfiniteQuery<TContext extends Context>(
     !controllerRef.current || needsNewCollection || pageShapeChanged
 
   if (needsNewCollection) {
+    inputKindRef.current = inputKind
     if (isCollection) {
       const collection = queryFnOrCollection as Collection<any, any, any>
       if (!hasSetWindow(collection)) {
