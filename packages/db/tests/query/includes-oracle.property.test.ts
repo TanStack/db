@@ -1304,7 +1304,7 @@ function visibleRelationshipScenarioArbitrary(
   const scalarNoiseArbitrary = (
     side: VisibleScalarNoise[`side`],
     branch: fc.Arbitrary<0 | 1>,
-  ) =>
+  ): fc.Arbitrary<VisibleScalarNoise> =>
     fc.record({
       side: fc.constant(side),
       level: levelArbitrary(depth),
@@ -1895,20 +1895,48 @@ const minimalRekeyScenario = createVisibleRelationshipScenario({
 
 describe(`includes recompute oracle`, () => {
   fcTest(`rejects overlapping visible relationship keys`, () => {
-    expect(() =>
-      createVisibleRelationshipScenario({
-        depth: 4,
-        transition: `rekey`,
-        targetLevel: 1,
-        sourceBranch: 0,
+    const base = {
+      depth: 4,
+      transition: `rekey`,
+      targetLevel: 1,
+      sourceBranch: 0,
+      noise: [],
+    } as const
+    const collisions: Array<{
+      branches: readonly [ConnectedBranch, ConnectedBranch]
+      rekeyGroup: number
+    }> = [
+      {
         branches: [
           { idBase: 100, groupBase: 600 },
-          { idBase: 102, groupBase: 602 },
+          { idBase: 102, groupBase: 1_600 },
+        ],
+        rekeyGroup: 2_100,
+      },
+      {
+        branches: [
+          { idBase: 100, groupBase: 600 },
+          { idBase: 1_100, groupBase: 602 },
+        ],
+        rekeyGroup: 2_100,
+      },
+      {
+        branches: [
+          { idBase: 100, groupBase: 600 },
+          { idBase: 1_100, groupBase: 1_600 },
         ],
         rekeyGroup: 603,
-        noise: [],
-      }),
-    ).toThrow(/overlap/)
+      },
+    ]
+
+    for (const collision of collisions) {
+      expect(() =>
+        createVisibleRelationshipScenario({
+          ...base,
+          ...collision,
+        }),
+      ).toThrow(/overlap/)
+    }
   })
 
   for (const materialization of [`array`, `concat`] as const) {
