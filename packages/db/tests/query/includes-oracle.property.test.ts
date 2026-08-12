@@ -1198,16 +1198,16 @@ describe(`includes recompute oracle`, () => {
     },
   )
 
-  // These known failures must reject with the oracle's assertion mismatch.
-  // A fixed bug or an unrelated runtime error makes the matching test fail.
   fcTest.prop([fc.constant(confirmedChildReorderSeed)], {
     numRuns: 1,
     seed: 2051245230,
   })(
-    `discovered seed: confirmed child reorder matches recomputation`,
-    expectAssertionFailure(expectScenarioMatches),
+    `regression seed: confirmed child reorder matches recomputation`,
+    expectScenarioMatches,
   )
 
+  // These known failures must reject with the oracle's assertion mismatch.
+  // A fixed bug or an unrelated runtime error makes the matching test fail.
   fcTest.prop([fc.constant(sharedMaterializeSeed)], {
     numRuns: 1,
     seed: 1685,
@@ -1348,8 +1348,8 @@ describe(`includes recompute oracle`, () => {
   )
 
   fcTest.prop([fc.constant(`#1444`)], { numRuns: 1, seed: 1444 })(
-    `known seed: optimistic child reorder matches recomputation`,
-    expectAssertionFailure(async () => {
+    `regression seed: optimistic child reorder matches recomputation`,
+    async () => {
       const roots = createControlledCollection<RootRow>(`order-seed-roots`, [
         { id: 1, group: 1, value: 0, position: 0 },
       ])
@@ -1411,6 +1411,6 @@ describe(`includes recompute oracle`, () => {
           children.collection.cleanup(),
         ])
       }
-    }),
+    },
   )
 })

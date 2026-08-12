@@ -11,6 +11,7 @@ import {
 } from '../../errors.js'
 import { transactionScopedScheduler } from '../../scheduler.js'
 import { getActiveTransaction } from '../../transactions.js'
+import { deepEquals } from '../../utils.js'
 import { CollectionSubscriber } from './collection-subscriber.js'
 import { getCollectionBuilder } from './collection-registry.js'
 import { LIVE_QUERY_INTERNAL } from './internal.js'
@@ -799,6 +800,11 @@ export class CollectionConfigBuilder<
                 existing.orderByIndex = changes.orderByIndex
               }
             }
+            // Keep the retracted (old) side for order-only-move detection.
+            if (changes.deletes > 0) {
+              existing.previousValue = changes.previousValue
+              existing.previousOrderByIndex = changes.previousOrderByIndex
+            }
           } else {
             merged.set(customKey, { ...changes })
           }
@@ -810,6 +816,9 @@ export class CollectionConfigBuilder<
       if (hasParentChanges) {
         begin()
         changesToApply.forEach(this.applyChanges.bind(this, config))
+        if (hasOrderOnlyMove(changesToApply)) {
+          markLayoutChange(config.collection)
+        }
         commit()
       }
       pendingChanges = new Map()
@@ -893,9 +902,14 @@ export class CollectionConfigBuilder<
 
             if (multiplicity < 0) {
               existing.deletes += Math.abs(multiplicity)
+              existing.previousValue = childResult
+              existing.previousOrderByIndex = _orderByIndex
             } else if (multiplicity > 0) {
               existing.inserts += multiplicity
               existing.value = childResult
+              if (_orderByIndex !== undefined) {
+                existing.orderByIndex = _orderByIndex
+              }
             }
 
             byChild.set(childKey, existing)
@@ -1320,9 +1334,14 @@ function setupNestedPipelines(
 
           if (multiplicity < 0) {
             existing.deletes += Math.abs(multiplicity)
+            existing.previousValue = childResult
+            existing.previousOrderByIndex = _orderByIndex
           } else if (multiplicity > 0) {
             existing.inserts += multiplicity
             existing.value = childResult
+            if (_orderByIndex !== undefined) {
+              existing.orderByIndex = _orderByIndex
+            }
           }
 
           byChild.set(childKey, existing)
@@ -1984,6 +2003,9 @@ function flushIncludesState(
               entry.syncMethods.write({ value: change.value, type: `delete` })
             }
           }
+          if (hasOrderOnlyMove(childChanges)) {
+            markLayoutChange(entry.syncMethods.collection)
+          }
           entry.syncMethods.commit()
         }
 
@@ -2315,6 +2337,10 @@ function accumulateChanges<T>(
   }
   if (multiplicity < 0) {
     changes.deletes += Math.abs(multiplicity)
+    // Remember the retracted (old) value + position so the flush can tell an
+    // order-only move apart from a real value change.
+    changes.previousValue = value
+    changes.previousOrderByIndex = orderByIndex
   } else if (multiplicity > 0) {
     changes.inserts += multiplicity
     // Update value to the latest version for this key
@@ -2325,4 +2351,34 @@ function accumulateChanges<T>(
   }
   acc.set(key, changes)
   return acc
+}
+
+/**
+ * Decide whether a flush contains an order-only move.
+ *
+ * An "order-only move" — a row updated in place whose `orderByIndex` moved but
+ * whose projected value is deep-equal to before — is swallowed by the value-diff
+ * and needs an explicit layout notification. The collection coalesces that
+ * signal with any ordinary row publication per subscriber.
+ */
+function hasOrderOnlyMove<T>(
+  changesToApply: Map<unknown, Changes<T>>,
+): boolean {
+  for (const changes of changesToApply.values()) {
+    const isUpdate = changes.inserts > 0 && changes.deletes > 0
+    if (
+      isUpdate &&
+      changes.previousValue !== undefined &&
+      deepEquals(changes.previousValue, changes.value) &&
+      changes.orderByIndex !== changes.previousOrderByIndex
+    ) {
+      return true
+    }
+  }
+  return false
+}
+
+/** Mark the collection's next commit as layout-changing. */
+function markLayoutChange(collection: { _markLayoutChange: () => void }): void {
+  collection._markLayoutChange()
 }

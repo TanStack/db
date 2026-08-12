@@ -253,7 +253,7 @@ export function createFilteredCallback<
 >(
   originalCallback: (changes: Array<ChangeMessage<T>>) => void,
   options: SubscribeChangesOptions<T, TKey>,
-): (changes: Array<ChangeMessage<T>>) => void {
+): (changes: Array<ChangeMessage<T>>) => boolean {
   const filterFn = createFilterFunctionFromExpression(options.whereExpression!)
 
   return (changes: Array<ChangeMessage<T>>) => {
@@ -303,7 +303,9 @@ export function createFilteredCallback<
     // if the original changes array was empty (which indicates a ready signal)
     if (filteredChanges.length > 0 || changes.length === 0) {
       originalCallback(filteredChanges)
+      return true
     }
+    return false
   }
 }
 

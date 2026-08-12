@@ -71,6 +71,11 @@ export class CollectionSyncManager<
     this._events = deps.events
   }
 
+  /** Mark the active sync transaction as changing collection layout. */
+  public markLayoutChange(): void {
+    this.getActivePendingSyncTransaction().layoutChanged = true
+  }
+
   /**
    * Start the sync process for this collection
    * This is called when the collection is first accessed or preloaded
@@ -92,6 +97,7 @@ export class CollectionSyncManager<
           begin: (options?: { immediate?: boolean }) => {
             this.state.pendingSyncedTransactions.push({
               committed: false,
+              layoutChanged: false,
               operations: [],
               deletedKeys: new Set(),
               rowMetadataWrites: new Map(),

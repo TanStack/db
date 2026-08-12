@@ -430,6 +430,19 @@ export class CollectionImpl<
   }
 
   /**
+   * Monotonic revision of explicit layout-only publications.
+   * Internal — used to distinguish them from empty ready events.
+   */
+  public get _layoutRevision(): number {
+    return this._changes.layoutRevision
+  }
+
+  /** Mark the active sync transaction as layout-changing. Internal. */
+  public _markLayoutChange(): void {
+    this._sync.markLayoutChange()
+  }
+
+  /**
    * Register a callback to be executed when the collection first becomes ready
    * Useful for preloading collections
    * @param callback Function to call when the collection first becomes ready

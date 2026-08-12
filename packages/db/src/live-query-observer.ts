@@ -24,6 +24,17 @@ export interface LiveQuerySnapshot<
   data: T | ReadonlyArray<T> | undefined
   /** The underlying collection, or `undefined` when disabled. */
   collection: Collection<T, TKey, any> | undefined
+  /**
+   * Monotonic counter bumped whenever the visible layout (the ordered key
+   * sequence) changes — membership, ordering, or an order-only move. Lets
+   * consumers detect a reorder that changed no row value (which `data`/`state`
+   * identity alone can't express once row values are structurally shared).
+   *
+   * It is NOT in lockstep with snapshot identity: a value-only update produces a
+   * new snapshot while `layoutRevision` stays put. A `layoutRevision` change
+   * always accompanies a new snapshot, but not vice versa.
+   */
+  layoutRevision: number
   status: CollectionStatus | `disabled`
   isLoading: boolean
   isReady: boolean
@@ -88,12 +99,15 @@ interface Publication<T extends object, TKey extends string | number> {
   entries?: Array<[TKey, T]>
   status: CollectionStatus
   collectionRevision?: number
+  collectionLayoutRevision?: number
+  layoutChanged: boolean
 }
 
 const DISABLED_SNAPSHOT: LiveQuerySnapshot<any, any> = {
   state: undefined,
   data: undefined,
   collection: undefined,
+  layoutRevision: 0,
   status: `disabled`,
   isLoading: false,
   isReady: true,
@@ -112,8 +126,12 @@ class LiveQueryObserverImpl<
   private visibleStatus: CollectionStatus | undefined
   private cachedEntries: Array<[TKey, T]> | undefined
   private cachedCollectionRevision: number | undefined
+  private cachedCollectionLayoutRevision: number | undefined
   private snapshotDirty = true
   private cachedSnapshot: LiveQuerySnapshot<T, TKey> = DISABLED_SNAPSHOT
+  private layoutRevision = 0
+  private lastLayoutKeys: Array<TKey> | undefined
+  private deliveredLayoutRevision: number | undefined
   private readonly subscriptions = new Set<SubscriptionRecord<T, TKey>>()
   // Publications are dispatched FIFO: an emit that happens while another
   // publication is being delivered (a listener mutating the collection
@@ -147,10 +165,34 @@ class LiveQueryObserverImpl<
       const singleResult = isSingleResultCollection(collection)
       const status = this.visibleStatus ?? collection.status
 
+      // Bump the layout revision when the ordered key sequence changes
+      // (membership, ordering, or an order-only move). Compare the key sequence
+      // directly rather than via a serialized signature: a joined-with-separator
+      // signature can collide when a key value equals the concatenation of
+      // neighboring keys around the separator. Comparing keys also avoids
+      // materializing a large string on every rebuild; a new key array is only
+      // allocated when the layout actually moved.
+      const prevKeys = this.lastLayoutKeys
+      let layoutChanged =
+        prevKeys === undefined || prevKeys.length !== entries.length
+      if (!layoutChanged) {
+        for (let i = 0; i < entries.length; i++) {
+          if (prevKeys![i] !== entries[i]![0]) {
+            layoutChanged = true
+            break
+          }
+        }
+      }
+      if (layoutChanged) {
+        this.lastLayoutKeys = entries.map(([key]) => key)
+        this.layoutRevision++
+      }
+
       this.cachedSnapshot = {
         state,
         data: singleResult ? data[0] : data,
         collection,
+        layoutRevision: this.layoutRevision,
         status,
         ...getLiveQueryStatusFlags(status),
         isEnabled: true,
@@ -164,6 +206,14 @@ class LiveQueryObserverImpl<
     collection: Collection<T, TKey, any>,
   ): number | undefined {
     const revision = (collection as { _stateRevision?: unknown })._stateRevision
+    return typeof revision === `number` ? revision : undefined
+  }
+
+  private getCollectionLayoutRevision(
+    collection: Collection<T, TKey, any>,
+  ): number | undefined {
+    const revision = (collection as { _layoutRevision?: unknown })
+      ._layoutRevision
     return typeof revision === `number` ? revision : undefined
   }
 
@@ -219,13 +269,16 @@ class LiveQueryObserverImpl<
   private refreshDetachedState(collection: Collection<T, TKey, any>): void {
     const status = collection.status
     const revision = this.getCollectionRevision(collection)
+    const layoutRevision = this.getCollectionLayoutRevision(collection)
 
     if (revision !== undefined) {
       if (
         this.cachedEntries === undefined ||
-        revision !== this.cachedCollectionRevision
+        revision !== this.cachedCollectionRevision ||
+        layoutRevision !== this.cachedCollectionLayoutRevision
       ) {
         this.captureEntries(collection)
+        this.cachedCollectionLayoutRevision = layoutRevision
         this.snapshotDirty = true
       }
     } else {
@@ -282,8 +335,10 @@ class LiveQueryObserverImpl<
   private attach(): void {
     const collection = this.collection
     if (!collection || this.disposed) return
+    this.refreshDetachedState(collection)
     this.attached = true
     this.visibleStatus ??= collection.status
+    this.deliveredLayoutRevision = this.getCollectionLayoutRevision(collection)
     this.blockDelivery = this.wholesale
 
     // Sync activation happens inside subscribeChanges (addSubscriber starts
@@ -304,10 +359,23 @@ class LiveQueryObserverImpl<
       status: CollectionStatus = collection.status,
     ) => {
       if (this.disposed || this.subscriptions.size === 0) return
-      // An empty batch carries no semantic change (e.g. the collection's
-      // empty-ready flush); only real deltas and the synthetic ready notify
-      // (undefined) are published.
-      if (changes !== undefined && changes.length === 0) return
+      const layoutRevision = this.getCollectionLayoutRevision(collection)
+      let layoutChanged = false
+      if (changes !== undefined && changes.length === 0) {
+        // Empty ready events predate the explicit layout signal and share its
+        // empty-array payload. Only forward an empty batch when the collection
+        // confirms that a new layout-only publication occurred.
+        if (
+          layoutRevision === undefined ||
+          layoutRevision === this.deliveredLayoutRevision
+        ) {
+          return
+        }
+        layoutChanged = true
+      }
+      if (changes !== undefined && layoutRevision !== undefined) {
+        this.deliveredLayoutRevision = layoutRevision
+      }
       const captured =
         changes !== undefined
           ? this.readEntries(collection)
@@ -320,6 +388,8 @@ class LiveQueryObserverImpl<
         captured?.entries,
         status,
         captured?.revision,
+        layoutRevision,
+        layoutChanged,
       )
     }
 
@@ -377,6 +447,8 @@ class LiveQueryObserverImpl<
     entries?: Array<[TKey, T]>,
     status = this.collection?.status ?? `cleaned-up`,
     collectionRevision?: number,
+    collectionLayoutRevision?: number,
+    layoutChanged = false,
   ): void {
     this.publicationQueue.push({
       changes,
@@ -384,6 +456,8 @@ class LiveQueryObserverImpl<
       entries,
       status,
       collectionRevision,
+      collectionLayoutRevision,
+      layoutChanged,
     })
     if (this.dispatching || this.blockDelivery) return
 
@@ -403,6 +477,13 @@ class LiveQueryObserverImpl<
             publication.entries,
             publication.collectionRevision,
           )
+        }
+        if (publication.collectionLayoutRevision !== undefined) {
+          this.cachedCollectionLayoutRevision =
+            publication.collectionLayoutRevision
+        }
+        if (publication.layoutChanged) {
+          this.snapshotDirty = true
         }
         if (this.visibleStatus !== publication.status) {
           this.visibleStatus = publication.status

@@ -39,7 +39,7 @@ const ISSUES: Array<Issue> = [
 ]
 
 /** Keys that are expected to fail on ALL adapters (core gaps, not adapter drift). */
-const UNIVERSAL_EXPECTED_FAIL = new Set<string>([`order-only-move`])
+const UNIVERSAL_EXPECTED_FAIL = new Set<string>([])
 
 export function runSuite(rawDriver: LiveQueryDriver) {
   const { ops } = rawDriver
