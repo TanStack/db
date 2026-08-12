@@ -437,6 +437,11 @@ export class CollectionImpl<
     return this._changes.layoutRevision
   }
 
+  /** Subscribe to layout-only publications. Internal observer channel. */
+  public _subscribeLayoutChanges(listener: () => void): () => void {
+    return this._changes.subscribeLayoutChanges(listener)
+  }
+
   /** Mark the active sync transaction as layout-changing. Internal. */
   public _markLayoutChange(): void {
     this._sync.markLayoutChange()

@@ -29,6 +29,7 @@ export class CollectionChangesManager<
   public changeSubscriptions = new Set<CollectionSubscription>()
   public batchedEvents: Array<ChangeMessage<TOutput, TKey>> = []
   public shouldBatchEvents = false
+  private layoutChangeListeners = new Set<() => void>()
 
   /**
    * Monotonic revision of the collection's visible state, advanced once per
@@ -41,8 +42,7 @@ export class CollectionChangesManager<
 
   /**
    * Monotonic revision advanced only for explicit layout-only publications.
-   * This distinguishes them from the legacy empty ready event, since both use
-   * an empty change batch at the public subscription boundary.
+   * Observers use it to detect reordered rows whose values did not change.
    */
   public layoutRevision = 0
 
@@ -124,6 +124,13 @@ export class CollectionChangesManager<
       return
     }
 
+    // Notify both internal layout consumers and the public subscription API.
+    // Public subscribers historically receive an empty batch for order-only
+    // moves because there is no row-value ChangeMessage to publish.
+    if (rawEvents.length === 0) {
+      for (const listener of this.layoutChangeListeners) listener()
+    }
+
     // Enrich all change messages with virtual properties
     // This uses the "add-if-missing" pattern to preserve pass-through semantics
     const enrichedEvents: Array<
@@ -132,8 +139,14 @@ export class CollectionChangesManager<
 
     // Emit to all listeners
     for (const subscription of this.changeSubscriptions) {
-      subscription.emitEvents(enrichedEvents, layoutChanged)
+      subscription.emitEvents(enrichedEvents)
     }
+  }
+
+  /** Subscribe to layout-only publications. Internal observer channel. */
+  public subscribeLayoutChanges(listener: () => void): () => void {
+    this.layoutChangeListeners.add(listener)
+    return () => this.layoutChangeListeners.delete(listener)
   }
 
   /**

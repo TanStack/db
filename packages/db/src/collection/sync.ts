@@ -444,6 +444,18 @@ export class CollectionSyncManager<
     return this.pendingLoadSubsetPromises.size > 0
   }
 
+  /** Wait for the subset loads that are active during the current operation. */
+  public waitForCurrentLoadSubset(): true | Promise<void> {
+    if (this.pendingLoadSubsetPromises.size === 0) return true
+    return this.waitForPendingLoadSubset()
+  }
+
+  private async waitForPendingLoadSubset(): Promise<void> {
+    do {
+      await Promise.all([...this.pendingLoadSubsetPromises])
+    } while (this.pendingLoadSubsetPromises.size > 0)
+  }
+
   /**
    * Tracks a load promise for isLoadingSubset state.
    * @internal This is for internal coordination (e.g., live-query glue code), not for general use.
@@ -462,7 +474,7 @@ export class CollectionSyncManager<
       })
     }
 
-    promise.finally(() => {
+    const finish = () => {
       const loadingEnding =
         this.pendingLoadSubsetPromises.size === 1 &&
         this.pendingLoadSubsetPromises.has(promise)
@@ -477,7 +489,8 @@ export class CollectionSyncManager<
           loadingSubsetTransition: `end`,
         })
       }
-    })
+    }
+    void promise.then(finish, finish)
   }
 
   /**

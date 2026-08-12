@@ -240,6 +240,27 @@ describe(`order-only move (RFC #1623 phase 4)`, () => {
     observer.dispose()
   })
 
+  it(`exposes layout-only signals as empty public change batches`, async () => {
+    const source = makeSource()
+    const lq = await makeOrderedByAge(source)
+    const publications: Array<Array<unknown>> = []
+    const subscription = lq.subscribeChanges(
+      (changes) => publications.push(changes),
+      { includeInitialState: false },
+    )
+
+    source.utils.begin()
+    source.utils.write({
+      type: `update`,
+      value: { id: `2`, name: `Bob`, age: 99 },
+    })
+    source.utils.commit()
+    await flush()
+
+    expect(publications).toEqual([[]])
+    subscription.unsubscribe()
+  })
+
   it(`bumps the layout revision on membership changes too`, async () => {
     const source = makeSource()
     const lq = await makeOrderedByAge(source)
@@ -338,7 +359,7 @@ describe(`order-only move (RFC #1623 phase 4)`, () => {
     })
     source.utils.commit()
 
-    expect(publications).toEqual([[]])
+    expect(publications).toEqual([])
     subscription.unsubscribe()
   })
 
@@ -381,11 +402,10 @@ describe(`order-only move (RFC #1623 phase 4)`, () => {
     await lq.preload()
 
     const childCollection = (lq.get(`p1`) as any).children
+    const observer = createLiveQueryObserver(childCollection)
     let notifications = 0
-    const subscription = childCollection.subscribeChanges(
-      () => notifications++,
-      { includeInitialState: false },
-    )
+    observer.subscribe(() => notifications++)
+    notifications = 0
 
     children.utils.begin()
     children.utils.write({
@@ -399,7 +419,7 @@ describe(`order-only move (RFC #1623 phase 4)`, () => {
       `c1`,
     ])
     expect(notifications).toBe(1)
-    subscription.unsubscribe()
+    observer.dispose()
   })
 
   // The includes flush is recursive, so the order-only-move handling must hold
@@ -461,11 +481,10 @@ describe(`order-only move (RFC #1623 phase 4)`, () => {
 
     const teamCollection = (lq.get(`o1`) as any).teams
     const memberCollection = teamCollection.get(`t1`).members
+    const observer = createLiveQueryObserver(memberCollection)
     let notifications = 0
-    const subscription = memberCollection.subscribeChanges(
-      () => notifications++,
-      { includeInitialState: false },
-    )
+    observer.subscribe(() => notifications++)
+    notifications = 0
 
     // Move m1 behind m2 (position 1 -> 3); projected { id, name } unchanged.
     members.utils.begin()
@@ -480,6 +499,6 @@ describe(`order-only move (RFC #1623 phase 4)`, () => {
       `m1`,
     ])
     expect(notifications).toBe(1)
-    subscription.unsubscribe()
+    observer.dispose()
   })
 })
