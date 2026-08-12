@@ -1156,6 +1156,11 @@ type VisibleRelationshipScenario = FullRowBatchScenario & {
   transitionStepIndex: number
 }
 
+type VisibleRelationshipScenarios = {
+  transitionOnly: VisibleRelationshipScenario
+  stateful: VisibleRelationshipScenario
+}
+
 type VisibleScalarNoise = {
   side: `before` | `after`
   level: 0 | IncludeDepth
@@ -1258,8 +1263,16 @@ function visibleRelationshipScenarioArbitrary(
   depth: IncludeDepth,
   transition: VisibleRelationshipTransition,
   targetLevel: IncludeDepth,
-): fc.Arbitrary<VisibleRelationshipScenario> {
+): fc.Arbitrary<VisibleRelationshipScenarios> {
   const branchArbitrary = fc.constantFrom<0 | 1>(0, 1)
+  const scalarNoiseArbitrary = fc.record({
+    level: levelArbitrary(depth),
+    branch: branchArbitrary,
+    value: fc.integer({ min: -3, max: 3 }),
+    position: fc.integer({ min: -2, max: 2 }),
+  })
+  const noiseArbitrary = (side: VisibleScalarNoise[`side`]) =>
+    scalarNoiseArbitrary.map((entry) => ({ ...entry, side }))
 
   return fc
     .record({
@@ -1269,15 +1282,11 @@ function visibleRelationshipScenarioArbitrary(
       rightIdBase: fc.integer({ min: 1_100, max: 1_500 }),
       rightGroupBase: fc.integer({ min: 1_600, max: 2_000 }),
       rekeyGroup: fc.integer({ min: 2_100, max: 2_500 }),
-      noise: fc.array(
-        fc.record({
-          side: fc.constantFrom(`before` as const, `after` as const),
-          level: levelArbitrary(depth),
-          branch: branchArbitrary,
-          value: fc.integer({ min: -3, max: 3 }),
-          position: fc.integer({ min: -2, max: 2 }),
-        }),
-        { minLength: 1, maxLength: 10 },
+      beforeNoise: noiseArbitrary(`before`),
+      afterNoise: noiseArbitrary(`after`),
+      extraNoise: fc.array(
+        fc.oneof(noiseArbitrary(`before`), noiseArbitrary(`after`)),
+        { maxLength: 8 },
       ),
     })
     .map(
@@ -1288,18 +1297,21 @@ function visibleRelationshipScenarioArbitrary(
         rightIdBase,
         rightGroupBase,
         rekeyGroup,
-        noise,
+        beforeNoise,
+        afterNoise,
+        extraNoise,
       }) => {
         const stableBranch = sourceBranch === 0 ? 1 : 0
         // Updates to the moved branch expose a separate known defect, captured
         // by the deterministic trace below. Keep this generated corpus green
         // by applying post-transition noise to the branch that did not move.
-        const connectedNoise = noise.map((entry) => ({
-          ...entry,
-          branch: entry.side === `after` ? stableBranch : entry.branch,
-        }))
-
-        return createVisibleRelationshipScenario({
+        const connectedNoise = [beforeNoise, afterNoise, ...extraNoise].map(
+          (entry) => ({
+            ...entry,
+            branch: entry.side === `after` ? stableBranch : entry.branch,
+          }),
+        )
+        const options = {
           depth,
           transition,
           targetLevel,
@@ -1309,8 +1321,18 @@ function visibleRelationshipScenarioArbitrary(
             { idBase: rightIdBase, groupBase: rightGroupBase },
           ],
           rekeyGroup,
-          noise: connectedNoise,
-        })
+        } satisfies Omit<VisibleRelationshipScenarioOptions, `noise`>
+
+        return {
+          transitionOnly: createVisibleRelationshipScenario({
+            ...options,
+            noise: [],
+          }),
+          stateful: createVisibleRelationshipScenario({
+            ...options,
+            noise: connectedNoise,
+          }),
+        }
       },
     )
 }
@@ -1851,8 +1873,10 @@ describe(`includes recompute oracle`, () => {
       expectFullRowBatchScenarioMatches,
     )
 
-    const transitions: Array<VisibleRelationshipTransition> =
-      depth === 1 ? [`reparent`] : [`reparent`, `rekey`]
+    const transitions: Array<VisibleRelationshipTransition> = [
+      `reparent`,
+      `rekey`,
+    ]
     for (const transition of transitions) {
       for (let targetLevel = 1; targetLevel <= depth; targetLevel++) {
         const expectsFailure =
@@ -1873,24 +1897,29 @@ describe(`includes recompute oracle`, () => {
           expectsFailure
             ? `discovered trace: a visible rekey at depth ${depth}, level ${targetLevel}`
             : `matches recomputation for a visible ${transition} at depth ${depth}, level ${targetLevel}`,
-          async (scenario) => {
-            const beforeTransition = recomputeFullRowBatchScenario(
-              scenario,
-              scenario.transitionStepIndex,
-            )
-            const result = recomputeFullRowBatchScenario(
-              scenario,
-              scenario.transitionStepIndex + 1,
-            )
+          async (scenarios) => {
+            for (const scenario of [
+              scenarios.transitionOnly,
+              scenarios.stateful,
+            ]) {
+              const beforeTransition = recomputeFullRowBatchScenario(
+                scenario,
+                scenario.transitionStepIndex,
+              )
+              const result = recomputeFullRowBatchScenario(
+                scenario,
+                scenario.transitionStepIndex + 1,
+              )
 
-            expect(result).not.toEqual(beforeTransition)
-            if (expectsFailure) {
-              await expectAssertionFailure(
-                () => expectFullRowBatchScenarioMatches(scenario),
-                { checkpoint: scenario.transitionStepIndex + 1 },
-              )()
-            } else {
-              await expectFullRowBatchScenarioMatches(scenario)
+              expect(result).not.toEqual(beforeTransition)
+              if (expectsFailure) {
+                await expectAssertionFailure(
+                  () => expectFullRowBatchScenarioMatches(scenario),
+                  { checkpoint: scenario.transitionStepIndex + 1 },
+                )()
+              } else {
+                await expectFullRowBatchScenarioMatches(scenario)
+              }
             }
           },
         )
