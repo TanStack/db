@@ -929,6 +929,7 @@ type MaterializeModels = {
 type MaterializeTraceStep =
   | { type: `insert`; insert: MaterializeInsert }
   | { type: `incrementLeaf`; id: number }
+  | { type: `redirectMiddle`; id: number; sharedId: number }
 
 type MaterializeTraceContext = {
   sharedIntermediate: boolean
@@ -1097,6 +1098,15 @@ function createMaterializeTraceDriver(
         return
       }
 
+      if (step.type === `redirectMiddle`) {
+        const middle = models.middles.get(step.id)
+        if (!middle) throw new Error(`Missing middle ${step.id} in trace model`)
+        const updated = { ...middle, sharedId: step.sharedId }
+        sources.middles.write(`update`, updated)
+        models.middles.set(updated.id, updated)
+        return
+      }
+
       const leaf = models.leaves.get(step.id)
       if (!leaf) throw new Error(`Missing leaf ${step.id} in trace model`)
       const updated = { ...leaf, value: leaf.value + 1 }
@@ -1140,6 +1150,23 @@ async function expectMaterializeScenarioMatches({
 }
 
 describe(`includes recompute oracle`, () => {
+  fcTest(
+    `discovered seed: nested scalar materialization follows a reference update`,
+    expectAssertionFailure(async () => {
+      await runTrace({
+        steps: [
+          { type: `insert`, insert: `root-1` },
+          { type: `insert`, insert: `middle-1` },
+          { type: `insert`, insert: `shared-1` },
+          { type: `insert`, insert: `leaf-1` },
+          { type: `redirectMiddle`, id: 1, sharedId: 2 },
+        ],
+        driver: createMaterializeTraceDriver(false),
+        projection: materializeProjection,
+      })
+    }),
+  )
+
   fcTest(`matches recomputation for full-row sync batches`, async () => {
     await runTrace({
       steps: fullRowBatchTrace,
