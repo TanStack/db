@@ -1,33 +1,36 @@
 ---
 name: solid-db
 description: >
-  SolidJS bindings for TanStack DB. useLiveQuery returns an Accessor that
+  SolidJS v2 bindings for TanStack DB. useLiveQuery returns an Accessor that
   doubles as data access (call as function) with state/status properties.
   Fine-grained reactivity: signal reads MUST happen inside the query function
-  for tracking. Config passed as Accessor (() => config). Built-in Suspense
-  support via createResource and errors through Solid ErrorBoundary.
-  ReactiveMap for state. Import from
-  @tanstack/solid-db (re-exports all of @tanstack/db).
+  for tracking. Config passed as Accessor (() => config). Built-in Loading
+  boundary support via async createMemo. Wholesale observer mode + keyed
+  reconcile for per-field row reactivity. Opt-in external-source bridge via
+  enableSolidDBExternalSource. Import from @tanstack/solid-db (re-exports all
+  of @tanstack/db).
 type: framework
 library: db
 framework: solid
-library_version: '0.6.17'
+library_version: '0.7.0'
 requires:
   - db-core
 sources:
   - 'TanStack/db:docs/framework/solid/overview.md'
   - 'TanStack/db:packages/solid-db/src/useLiveQuery.ts'
+  - 'TanStack/db:packages/solid-db/src/external-source.ts'
 ---
 
 This skill builds on db-core. Read it first for collection setup, query builder, and mutation patterns.
 
-# TanStack DB — SolidJS
+# TanStack DB — SolidJS v2
 
 ## Setup
 
 ```tsx
 import { useLiveQuery, eq, not } from '@tanstack/solid-db'
-import { ErrorBoundary, For, Show, Suspense } from 'solid-js'
+import { For, Show } from 'solid-js'
+import { Loading } from '@solidjs/web'
 
 function TodoList() {
   const todosQuery = useLiveQuery((q) =>
@@ -38,11 +41,11 @@ function TodoList() {
   )
 
   return (
-    <Suspense fallback={<div>Loading...</div>}>
+    <Loading fallback={<div>Loading...</div>}>
       <ul>
         <For each={todosQuery()}>{(todo) => <li>{todo.text}</li>}</For>
       </ul>
-    </Suspense>
+    </Loading>
   )
 }
 ```
@@ -129,19 +132,37 @@ const userQuery = useLiveQuery((q) =>
 return <Show when={userQuery()}>{(user) => <div>{user().name}</div>}</Show>
 ```
 
-### Suspense integration
+### External-source bridge (opt-in)
+
+Solid v2's `enableExternalSource` API lets external reactive systems participate in Solid's tracking graph. TanStack DB exposes this as an opt-in one-time install:
 
 ```tsx
-<ErrorBoundary fallback={(error) => <div>{error.message}</div>}>
-  <Suspense fallback={<div>Loading...</div>}>
-    <For each={todosQuery()}>{(todo) => <li>{todo.text}</li>}</For>
-  </Suspense>
-</ErrorBoundary>
+import { enableSolidDBExternalSource, trackSnapshot } from '@tanstack/solid-db'
+import { createMemo } from 'solid-js'
+
+// Call once at app startup:
+enableSolidDBExternalSource()
+
+// Now trackSnapshot() inside any Solid compute auto-subscribes:
+const snapshot = createMemo(() => trackSnapshot(observer))
+// re-runs automatically when the observer notifies — no manual subscribe needed
 ```
 
-`useLiveQuery` integrates with Solid's `createResource`. Use `<Suspense>` for
-loading and `<ErrorBoundary>` for errors. Reading an errored query throws
-through the resource, so do not rely on reading `isError` after failure.
+Without the bridge, use `useLiveQuery` which handles subscription internally.
+
+### Loading boundary integration
+
+```tsx
+import { Loading, Errored } from '@solidjs/web'
+
+<Errored catch={(err) => <div>Error: {err.message}</div>}>
+  <Loading fallback={<div>Loading...</div>}>
+    <For each={todosQuery()}>{(todo) => <li>{todo.text}</li>}</For>
+  </Loading>
+</Errored>
+```
+
+`useLiveQuery` integrates with Solid v2's async `createMemo`: reading the accessor while the collection is loading throws `NotReadyError` (caught by `<Loading>`); reading an errored query throws the captured error (caught by `<Errored>`).
 
 ## Includes (Hierarchical Data)
 
