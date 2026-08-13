@@ -202,13 +202,28 @@ class WindowCoordinator {
     const setWindow = this.target.utils?.setWindow
     const baselineWindow = this.baselineWindow
     this.retainedWindow = undefined
-    this.shouldCaptureBaseline = true
-    if (!baselineWindow || typeof setWindow !== `function`) return
+    this.shouldCaptureBaseline = false
+    if (!baselineWindow || typeof setWindow !== `function`) {
+      this.shouldCaptureBaseline = true
+      return
+    }
+    const generation = this.generation
+    const markRestored = () => {
+      if (generation === this.generation && this.leases.size === 0) {
+        this.shouldCaptureBaseline = true
+      }
+    }
     try {
       const result = setWindow.call(this.target.utils, baselineWindow)
-      if (result !== true) void result.catch(() => {})
+      if (result === true) {
+        markRestored()
+      } else {
+        void result.then(markRestored, () => {
+          // Keep the original baseline so a later release can retry it.
+        })
+      }
     } catch {
-      // Release has no error channel. A future lease will retry its own window.
+      // Release has no error channel. Keep the baseline for a later retry.
     }
   }
 
@@ -472,6 +487,7 @@ class LiveQueryWindowControllerImpl<
   private hasPaginationError = false
   private paginationError: unknown
   private failedHasNextPage = false
+  private activeFetchPromise: Promise<void> | null = null
   private windowGeneration = 0
   private pendingWindowGeneration: number | undefined
   private leaseActive = false
@@ -623,9 +639,43 @@ class LiveQueryWindowControllerImpl<
   }
 
   fetchNextPage(): Promise<void> {
-    if (this.disposed || this.isFetchingNextPage) return Promise.resolve()
+    if (this.disposed) return Promise.resolve()
+    if (this.isFetchingNextPage && this.activeFetchPromise) {
+      return this.activeFetchPromise
+    }
     if (!this.getSnapshot().hasNextPage) return Promise.resolve()
-    return this.requestPageCount(this.committedPageCount + 1, true)
+
+    let resolveFetch!: () => void
+    let rejectFetch!: (error: unknown) => void
+    const activeFetchPromise = new Promise<void>((resolve, reject) => {
+      resolveFetch = resolve
+      rejectFetch = reject
+    })
+    this.activeFetchPromise = activeFetchPromise
+
+    let request: Promise<void>
+    try {
+      request = this.requestPageCount(this.committedPageCount + 1, true)
+    } catch (error) {
+      this.activeFetchPromise = null
+      rejectFetch(error)
+      return activeFetchPromise
+    }
+    void request.then(
+      () => {
+        if (this.activeFetchPromise === activeFetchPromise) {
+          this.activeFetchPromise = null
+        }
+        resolveFetch()
+      },
+      (error: unknown) => {
+        if (this.activeFetchPromise === activeFetchPromise) {
+          this.activeFetchPromise = null
+        }
+        rejectFetch(error)
+      },
+    )
+    return activeFetchPromise
   }
 
   reset(): Promise<void> {

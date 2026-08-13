@@ -139,6 +139,53 @@ describe(`createLiveQueryWindowController`, () => {
     controller.dispose()
   })
 
+  it(`returns the active fetch promise to concurrent callers`, async () => {
+    const lq = makeOrderedLiveQuery(makeSource(), 2)
+    const controller = createLiveQueryWindowController<Row, string>(lq as any, {
+      pageSize: 2,
+    })
+    controller.subscribe(() => {})
+    await lq.preload()
+
+    const failure = new Error(`window failed`)
+    const originalSetWindow = lq.utils.setWindow.bind(lq.utils)
+    let rejectWindow!: (error: Error) => void
+    vi.spyOn(lq.utils, `setWindow`).mockImplementationOnce((options) => {
+      originalSetWindow(options)
+      return new Promise<void>((_resolve, reject) => {
+        rejectWindow = reject
+      })
+    })
+
+    const first = controller.fetchNextPage()
+    const second = controller.fetchNextPage()
+    expect(second).toBe(first)
+    let secondSettled = false
+    const firstOutcome = first.then(
+      () => undefined,
+      (error: unknown) => error,
+    )
+    const secondOutcome = second.then(
+      () => {
+        secondSettled = true
+        return undefined
+      },
+      (error: unknown) => {
+        secondSettled = true
+        return error
+      },
+    )
+
+    await Promise.resolve()
+    const secondWasPending = !secondSettled
+    rejectWindow(failure)
+
+    expect(secondWasPending).toBe(true)
+    expect(await firstOutcome).toBe(failure)
+    expect(await secondOutcome).toBe(failure)
+    controller.dispose()
+  })
+
   it(`represents an empty enabled query as one empty page`, async () => {
     const lq = makeOrderedLiveQuery(makeSource([]), 2)
     const controller = createLiveQueryWindowController<Row, string>(lq as any, {
@@ -682,6 +729,43 @@ describe(`createLiveQueryWindowController`, () => {
     controller.dispose()
     await lq.cleanup()
   })
+
+  it.each([`throws`, `rejects`] as const)(
+    `retains the original baseline when its first restoration %s`,
+    async (failureMode) => {
+      const lq = makeOrderedLiveQuery(makeSource(), 3)
+      const first = createLiveQueryWindowController<Row, string>(lq as any, {
+        pageSize: 3,
+      })
+      const unsubscribeFirst = first.subscribe(() => {})
+      await lq.preload()
+      await first.fetchNextPage()
+      expect(lq.utils.getWindow()).toEqual({ offset: 0, limit: 7 })
+
+      const setWindow = vi.spyOn(lq.utils, `setWindow`)
+      if (failureMode === `throws`) {
+        setWindow.mockImplementationOnce(() => {
+          throw new Error(`restore failed`)
+        })
+      } else {
+        setWindow.mockRejectedValueOnce(new Error(`restore failed`))
+      }
+      unsubscribeFirst()
+      await Promise.resolve()
+      expect(lq.utils.getWindow()).toEqual({ offset: 0, limit: 7 })
+
+      const second = createLiveQueryWindowController<Row, string>(lq as any, {
+        pageSize: 3,
+      })
+      const unsubscribeSecond = second.subscribe(() => {})
+      unsubscribeSecond()
+
+      expect(lq.utils.getWindow()).toEqual({ offset: 0, limit: 4 })
+      first.dispose()
+      second.dispose()
+      await lq.cleanup()
+    },
+  )
 
   it(`recaptures an externally changed window before a new lease cycle`, async () => {
     const lq = makeOrderedLiveQuery(makeSource(), 2)

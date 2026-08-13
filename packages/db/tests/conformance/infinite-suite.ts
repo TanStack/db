@@ -362,10 +362,20 @@ export function runInfiniteQuerySuite(rawDriver: InfiniteQueryDriver): void {
         try {
           const first = handle.fetchNextPage()
           const second = handle.fetchNextPage()
+          let secondSettled = false
+          void second.then(
+            () => {
+              secondSettled = true
+            },
+            () => {
+              secondSettled = true
+            },
+          )
           await waitFor(() => resolveWindow !== undefined)
 
           expect(calls).toBe(1)
           expect(handle.current().isFetchingNextPage).toBe(true)
+          expect(secondSettled).toBe(false)
           resolveWindow?.()
           await Promise.all([first, second])
           await handle.flush()
@@ -587,9 +597,9 @@ export function runInfiniteQuerySuite(rawDriver: InfiniteQueryDriver): void {
 
     scenario(
       `circular-dependency`,
-      `accepts a circular dependency value`,
+      `preserves page depth for a structurally equal circular dependency`,
       async () => {
-        const source = driver.makeSource(rows(4))
+        const source = driver.makeSource(rows(8))
         const dependency: { self?: unknown } = {}
         dependency.self = dependency
         const handle = driver.mountControllable(
@@ -601,7 +611,17 @@ export function runInfiniteQuerySuite(rawDriver: InfiniteQueryDriver): void {
           { pageSize: 3 },
         )
         await handle.flush()
-        expect(handle.current().data).toHaveLength(3)
+        await handle.fetchNextPage()
+        await handle.flush()
+
+        const replacement: { self?: unknown } = {}
+        replacement.self = replacement
+        handle.setParamSync(replacement)
+        await handle.flush()
+
+        expect(handle.current().pages.map((page) => page.length)).toEqual([
+          3, 3,
+        ])
       },
     )
 

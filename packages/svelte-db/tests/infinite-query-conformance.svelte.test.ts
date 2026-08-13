@@ -103,7 +103,10 @@ function mountControllable<P>(
   let result: any
   let setParam!: (next: P) => void
   const dispose = $effect.root(() => {
-    let param = $state(initial)
+    // The contract treats dependency values as caller-owned identities. Avoid
+    // deep proxying, which rewrites circular object identity before it reaches
+    // the adapter.
+    let param = $state.raw(initial)
     result = useLiveInfiniteQuery((q: any) => build(q, param), config as any, [
       () => param,
     ])
