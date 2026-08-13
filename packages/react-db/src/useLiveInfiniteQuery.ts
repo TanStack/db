@@ -4,6 +4,8 @@ import {
   createLiveQueryCollection,
   createLiveQueryWindowController,
   deepEquals,
+  isSingleResultCollection,
+  normalizeLiveQueryWindowPageSize,
 } from '@tanstack/db'
 // Type-only: used in `ReturnType<typeof useLiveQuery>` in UseLiveInfiniteQueryReturn.
 import type { useLiveQuery } from './useLiveQuery'
@@ -29,14 +31,27 @@ type WindowedCollection = Collection<any, any, any> & {
   }
 }
 
-/** Type guard: does this collection expose `setWindow` (i.e. has an orderBy)? */
-function hasSetWindow(
+/** Type guard: does this collection have an active ordered window? */
+function isWindowedCollection(
   collection: Collection<any, any, any>,
 ): collection is WindowedCollection {
-  return typeof collection.utils?.setWindow === `function`
+  return (
+    typeof collection.utils?.setWindow === `function` &&
+    collection.utils.getWindow?.() !== undefined
+  )
 }
 
-export type UseLiveInfiniteQueryConfig<TContext extends Context> = {
+function assertManyResult(collection: Collection<any, any, any>): void {
+  if (isSingleResultCollection(collection)) {
+    throw new Error(
+      `useLiveInfiniteQuery: Infinite queries do not support single-result queries. Remove .findOne().`,
+    )
+  }
+}
+
+export type UseLiveInfiniteQueryConfig<
+  TContext extends Context & NonSingleResult,
+> = {
   pageSize?: number
   initialPageParam?: number
   /**
@@ -52,22 +67,20 @@ export type UseLiveInfiniteQueryConfig<TContext extends Context> = {
   ) => number | undefined
 }
 
-export type UseLiveInfiniteQueryReturn<TContext extends Context> = Omit<
-  ReturnType<typeof useLiveQuery<TContext>>,
-  `data`
-> & {
+export type UseLiveInfiniteQueryReturn<
+  TContext extends Context & NonSingleResult,
+> = Omit<ReturnType<typeof useLiveQuery<TContext>>, `data`> & {
   data: InferResultType<TContext>
   pages: Array<Array<InferResultType<TContext>[number]>>
   pageParams: Array<number>
-  fetchNextPage: () => void
+  fetchNextPage: () => Promise<void>
   hasNextPage: boolean
   isFetchingNextPage: boolean
   error: unknown
 }
 
-type EnabledLiveQueryReturn<TContext extends Context> = ReturnType<
-  typeof useLiveQuery<TContext>
->
+type EnabledLiveQueryReturn<TContext extends Context & NonSingleResult> =
+  ReturnType<typeof useLiveQuery<TContext>>
 
 /**
  * Create an infinite query using a query function with live updates
@@ -146,19 +159,23 @@ export function useLiveInfiniteQuery<
 ): UseLiveInfiniteQueryReturn<any>
 
 // Overload for query function
-export function useLiveInfiniteQuery<TContext extends Context>(
+export function useLiveInfiniteQuery<
+  TContext extends Context & NonSingleResult,
+>(
   queryFn: (q: InitialQueryBuilder) => QueryBuilder<TContext>,
   config: UseLiveInfiniteQueryConfig<TContext>,
   deps?: Array<unknown>,
 ): UseLiveInfiniteQueryReturn<TContext>
 
 // Implementation
-export function useLiveInfiniteQuery<TContext extends Context>(
+export function useLiveInfiniteQuery<
+  TContext extends Context & NonSingleResult,
+>(
   queryFnOrCollection: any,
   config: UseLiveInfiniteQueryConfig<TContext>,
   deps: Array<unknown> = [],
 ): UseLiveInfiniteQueryReturn<TContext> {
-  const pageSize = config.pageSize || 20
+  const pageSize = normalizeLiveQueryWindowPageSize(config.pageSize)
   const initialPageParam = config.initialPageParam ?? 0
 
   // Detect if input is a collection or query function
@@ -207,9 +224,10 @@ export function useLiveInfiniteQuery<TContext extends Context>(
     inputKindRef.current = inputKind
     if (isCollection) {
       const collection = queryFnOrCollection as Collection<any, any, any>
-      if (!hasSetWindow(collection)) {
+      assertManyResult(collection)
+      if (!isWindowedCollection(collection)) {
         throw new Error(
-          `useLiveInfiniteQuery: Pre-created live query collection must have an orderBy clause for infinite pagination to work. ` +
+          `useLiveInfiniteQuery: Pre-created live query collection must have an ORDER BY (orderBy) clause for infinite pagination to work. ` +
             `Please add .orderBy() to your createLiveQueryCollection query.`,
         )
       }
@@ -243,6 +261,7 @@ export function useLiveInfiniteQuery<TContext extends Context>(
         startSync: false,
         gcTime: DEFAULT_GC_TIME_MS,
       })
+      assertManyResult(collectionRef.current)
       depsRef.current = [...deps]
     }
   }
@@ -276,12 +295,10 @@ export function useLiveInfiniteQuery<TContext extends Context>(
   const getSnapshot = useCallback(() => controller.getSnapshot(), [controller])
   const snapshot = useSyncExternalStore(subscribe, getSnapshot)
 
-  const fetchNextPage = useCallback(() => {
-    void controller.fetchNextPage().catch(() => {
-      // Pagination errors are exposed through the controller snapshot. The
-      // hook's void callback has no promise error channel, so consume it here.
-    })
-  }, [controller])
+  const fetchNextPage = useCallback(
+    () => controller.fetchNextPage(),
+    [controller],
+  )
 
   return {
     data: snapshot.data as InferResultType<TContext>,

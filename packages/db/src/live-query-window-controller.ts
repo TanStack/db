@@ -13,6 +13,21 @@ import type { CollectionStatus } from './types.js'
 
 const DEFAULT_PAGE_SIZE = 20
 
+/** @internal This contract is unstable while RFC #1623 is being implemented. */
+export function normalizeLiveQueryWindowPageSize(
+  pageSize: number | undefined,
+): number {
+  if (
+    pageSize === undefined ||
+    !Number.isSafeInteger(pageSize) ||
+    pageSize <= 0 ||
+    pageSize >= Number.MAX_SAFE_INTEGER
+  ) {
+    return DEFAULT_PAGE_SIZE
+  }
+  return pageSize
+}
+
 type WindowResult = true | Promise<void>
 
 type WindowTarget = object & {
@@ -89,7 +104,7 @@ class WindowCoordinator {
     )
   }
 
-  release(lease: symbol): void {
+  release(lease: symbol, restoreWhenEmpty: boolean): void {
     if (!this.leases.delete(lease)) return
     this.leaseVersions.delete(lease)
 
@@ -100,6 +115,7 @@ class WindowCoordinator {
     this.appliedLimit = undefined
 
     if (this.leases.size === 0) {
+      if (restoreWhenEmpty) this.restoreInitialWindow()
       return
     }
 
@@ -261,7 +277,7 @@ export interface LiveQueryWindowSnapshot<
 
 /** @internal This contract is unstable while RFC #1623 is being implemented. */
 export interface CreateLiveQueryWindowControllerOptions {
-  /** Rows per page (default 20). Non-positive values use the default. */
+  /** Rows per page (default 20). Invalid values use the default. */
   pageSize?: number
   /** Value of the first page's `pageParam` (default 0). */
   initialPageParam?: number
@@ -323,6 +339,7 @@ class LiveQueryWindowControllerImpl<
   private leaseActive = false
   private leaseGeneration = 0
   private inFlightLeaseHolders = 0
+  private restoreInitialWindowOnRelease = false
 
   private readonly subscriptions = new Set<SubscriptionRecord>()
   private readonly publicationQueue: Array<Publication> = []
@@ -343,10 +360,7 @@ class LiveQueryWindowControllerImpl<
     this.coordinator = collection
       ? getWindowCoordinator(collection as unknown as WindowTarget)
       : null
-    this.pageSize =
-      options.pageSize !== undefined && options.pageSize > 0
-        ? options.pageSize
-        : DEFAULT_PAGE_SIZE
+    this.pageSize = normalizeLiveQueryWindowPageSize(options.pageSize)
     this.initialPageParam = options.initialPageParam ?? 0
     const initialPageCount = Math.floor(options.initialPageCount ?? 1)
     this.committedPageCount = Number.isFinite(initialPageCount)
@@ -432,6 +446,7 @@ class LiveQueryWindowControllerImpl<
     const record: SubscriptionRecord = { listener, active: true }
     this.subscriptions.add(record)
     if (this.subscriptions.size === 1) {
+      this.restoreInitialWindowOnRelease = false
       this.blockDelivery = true
       let observerUnsub: (() => void) | null = null
       try {
@@ -447,7 +462,7 @@ class LiveQueryWindowControllerImpl<
       } catch (error) {
         observerUnsub?.()
         this.observerUnsub = null
-        this.deactivateLease()
+        this.deactivateLease(true)
         record.active = false
         this.subscriptions.delete(record)
         throw error
@@ -461,9 +476,10 @@ class LiveQueryWindowControllerImpl<
       record.active = false
       this.subscriptions.delete(record)
       if (this.subscriptions.size === 0) {
+        this.restoreInitialWindowOnRelease = true
         this.observerUnsub?.()
         this.observerUnsub = null
-        if (this.inFlightLeaseHolders === 0) this.deactivateLease()
+        if (this.inFlightLeaseHolders === 0) this.deactivateLease(true)
       }
     }
   }
@@ -518,7 +534,7 @@ class LiveQueryWindowControllerImpl<
     this.pendingWindowGeneration = undefined
     this.observerUnsub?.()
     this.observerUnsub = null
-    this.deactivateLease()
+    this.deactivateLease(true)
     this.observer.dispose()
     for (const record of this.subscriptions) record.active = false
     this.subscriptions.clear()
@@ -607,7 +623,7 @@ class LiveQueryWindowControllerImpl<
   private releaseInFlightLease(): void {
     this.inFlightLeaseHolders--
     if (this.inFlightLeaseHolders === 0 && this.subscriptions.size === 0) {
-      this.deactivateLease()
+      this.deactivateLease(this.restoreInitialWindowOnRelease)
     }
   }
 
@@ -629,11 +645,12 @@ class LiveQueryWindowControllerImpl<
     return this.activateLease(pageCount)
   }
 
-  private deactivateLease(): void {
+  private deactivateLease(restoreWhenEmpty = false): void {
     if (!this.leaseActive || !this.coordinator) return
     this.leaseGeneration++
     this.leaseActive = false
-    this.coordinator.release(this.lease)
+    this.restoreInitialWindowOnRelease = false
+    this.coordinator.release(this.lease, restoreWhenEmpty)
   }
 
   private trackAttachmentFailure(

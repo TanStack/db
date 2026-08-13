@@ -4,7 +4,10 @@ import { createCollection } from '../src/collection/index.js'
 import { createLiveQueryCollection } from '../src/query/live-query-collection.js'
 import { LIVE_QUERY_INTERNAL } from '../src/query/live/internal.js'
 import { LiveQueryWindowControllerDisposedError } from '../src/errors.js'
-import { createLiveQueryWindowController } from '../src/live-query-window-controller.js'
+import {
+  createLiveQueryWindowController,
+  normalizeLiveQueryWindowPageSize,
+} from '../src/live-query-window-controller.js'
 import { mockSyncCollectionOptions } from './utils.js'
 
 interface Row {
@@ -48,6 +51,25 @@ const flush = () => new Promise((r) => setTimeout(r, 0))
 const ids = (snap: { data: ReadonlyArray<any> }) => snap.data.map((r) => r.id)
 
 describe(`createLiveQueryWindowController`, () => {
+  it.each([
+    { pageSize: undefined, normalized: 20 },
+    { pageSize: 0, normalized: 20 },
+    { pageSize: -1, normalized: 20 },
+    { pageSize: 1.5, normalized: 20 },
+    { pageSize: Number.POSITIVE_INFINITY, normalized: 20 },
+    { pageSize: Number.MAX_SAFE_INTEGER, normalized: 20 },
+    { pageSize: 1, normalized: 1 },
+    {
+      pageSize: Number.MAX_SAFE_INTEGER - 1,
+      normalized: Number.MAX_SAFE_INTEGER - 1,
+    },
+  ])(
+    `normalizes pageSize $pageSize to $normalized`,
+    ({ pageSize, normalized }) => {
+      expect(normalizeLiveQueryWindowPageSize(pageSize)).toBe(normalized)
+    },
+  )
+
   it(`exposes the first page with a peek-ahead hasNextPage`, async () => {
     const lq = makeOrderedLiveQuery(makeSource(), 2)
     const controller = createLiveQueryWindowController<Row, string>(lq as any, {
@@ -654,12 +676,11 @@ describe(`createLiveQueryWindowController`, () => {
     expect(lq.utils.getWindow()).toEqual({ offset: 0, limit: 5 })
 
     unsubscribe()
-    controller.dispose()
-    await lq.cleanup()
-    await lq.preload()
 
     expect(lq.utils.getWindow()).toEqual({ offset: 0, limit: 3 })
     expect(lq.toArray).toHaveLength(3)
+    controller.dispose()
+    await lq.cleanup()
   })
 
   it(`ignores a failed attachment superseded by a new lease`, async () => {

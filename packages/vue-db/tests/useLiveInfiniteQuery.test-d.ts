@@ -44,5 +44,15 @@ describe(`useLiveInfiniteQuery type assertions`, () => {
     expectTypeOf(collectionResult.state.value.get(`1`)?.id).toEqualTypeOf<
       string | undefined
     >()
+
+    useLiveInfiniteQuery(
+      // @ts-expect-error Infinite queries cannot use a single-result query.
+      (q: InitialQueryBuilder) =>
+        q
+          .from({ posts })
+          .orderBy(({ posts: post }) => post.createdAt, `desc`)
+          .findOne(),
+      { pageSize: 5 },
+    )
   })
 })

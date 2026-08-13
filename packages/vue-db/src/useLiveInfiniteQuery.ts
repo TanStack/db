@@ -1,8 +1,12 @@
 import { computed, shallowRef, toValue, watchEffect } from 'vue'
 import {
+  BaseQueryBuilder,
   createLiveQueryCollection,
   createLiveQueryWindowController,
+  deepEquals,
   isCollection,
+  isSingleResultCollection,
+  normalizeLiveQueryWindowPageSize,
 } from '@tanstack/db'
 import type {
   Collection,
@@ -17,9 +21,7 @@ import type {
 } from '@tanstack/db'
 import type { ComputedRef, MaybeRefOrGetter } from 'vue'
 
-const DEFAULT_PAGE_SIZE = 20
 const DEFAULT_GC_TIME_MS = 1
-const MAX_PAGE_SIZE = Number.MAX_SAFE_INTEGER - 1
 
 type InternalCollection = Collection<object, string | number, UtilsRecord>
 
@@ -37,30 +39,33 @@ type ResolvedInput<TContext extends Context> =
   | { kind: `collection`; collection: InternalCollection }
   | {
       kind: `query`
-      query: (q: InitialQueryBuilder) => QueryBuilder<TContext>
+      query: QueryBuilder<TContext>
     }
+
+type PreviousController = {
+  getSnapshot: () => { pages: ReadonlyArray<ReadonlyArray<unknown>> }
+}
 
 type InfiniteQueryOptions = {
   pageSize?: number
   initialPageParam?: number
 }
 
-function hasSetWindow(
+function isWindowedCollection(
   collection: InternalCollection,
 ): collection is WindowedCollection {
-  return typeof collection.utils.setWindow === `function`
+  return (
+    typeof collection.utils.setWindow === `function` &&
+    collection.utils.getWindow?.() !== undefined
+  )
 }
 
-function normalizePageSize(pageSize: number | undefined): number {
-  if (
-    pageSize === undefined ||
-    !Number.isSafeInteger(pageSize) ||
-    pageSize > MAX_PAGE_SIZE ||
-    pageSize <= 0
-  ) {
-    return DEFAULT_PAGE_SIZE
+function assertManyResult(collection: Collection<any, any, any>): void {
+  if (isSingleResultCollection(collection)) {
+    throw new Error(
+      `useLiveInfiniteQuery: Infinite queries do not support single-result queries. Remove .findOne().`,
+    )
   }
-  return pageSize
 }
 
 function resolveInput<TContext extends Context>(
@@ -71,15 +76,6 @@ function resolveInput<TContext extends Context>(
     if (isCollection(value)) {
       return { kind: `collection`, collection: value }
     }
-  } else if (input.length === 0) {
-    try {
-      const value = (input as () => unknown)()
-      if (isCollection(value)) {
-        return { kind: `collection`, collection: value }
-      }
-    } catch {
-      // Query callbacks that close over their builder can have arity 0.
-    }
   }
 
   if (typeof input !== `function`) {
@@ -89,9 +85,16 @@ function resolveInput<TContext extends Context>(
     )
   }
 
+  const value = (
+    input as (q: InitialQueryBuilder) => QueryBuilder<TContext> | unknown
+  )(new BaseQueryBuilder() as InitialQueryBuilder)
+  if (isCollection(value)) {
+    return { kind: `collection`, collection: value }
+  }
+
   return {
     kind: `query`,
-    query: input as (q: InitialQueryBuilder) => QueryBuilder<TContext>,
+    query: value as QueryBuilder<TContext>,
   }
 }
 
@@ -108,10 +111,13 @@ export type LiveInfiniteQueryConfig<TRow> = InfiniteQueryOptions & {
   ) => number | undefined
 }
 
-export type UseLiveInfiniteQueryConfig<TContext extends Context> =
-  LiveInfiniteQueryConfig<InferResultType<TContext>[number]>
+export type UseLiveInfiniteQueryConfig<
+  TContext extends Context & NonSingleResult,
+> = LiveInfiniteQueryConfig<InferResultType<TContext>[number]>
 
-export interface UseLiveInfiniteQueryReturn<TContext extends Context> {
+export interface UseLiveInfiniteQueryReturn<
+  TContext extends Context & NonSingleResult,
+> {
   state: ComputedRef<Map<string | number, GetResult<TContext>>>
   data: ComputedRef<InferResultType<TContext>>
   collection: ComputedRef<
@@ -168,31 +174,74 @@ export function useLiveInfiniteQuery<
   config: LiveInfiniteQueryConfig<TResult>,
 ): UseLiveInfiniteQueryReturnWithCollection<TResult, TKey, TUtils>
 
-export function useLiveInfiniteQuery<TContext extends Context>(
+export function useLiveInfiniteQuery<
+  TContext extends Context & NonSingleResult,
+>(
   queryFn: (q: InitialQueryBuilder) => QueryBuilder<TContext>,
   config: UseLiveInfiniteQueryConfig<TContext>,
   deps?: Array<MaybeRefOrGetter<unknown>>,
 ): UseLiveInfiniteQueryReturn<TContext>
 
-export function useLiveInfiniteQuery<TContext extends Context>(
+export function useLiveInfiniteQuery<
+  TContext extends Context & NonSingleResult,
+>(
   queryFnOrCollection: unknown,
   config: InfiniteQueryOptions,
   deps: Array<MaybeRefOrGetter<unknown>> = [],
 ): UseLiveInfiniteQueryReturn<TContext> {
   let validatedCollection: InternalCollection | null = null
+  let previousController: PreviousController | null = null
+  let previousInput: ResolvedInput<TContext> | null = null
+  let previousDependencies: Array<unknown> | null = null
+  let previousPageSize: number | null = null
+  let previousInitialPageParam: number | null = null
 
   const controller = computed(() => {
-    for (const dependency of deps) toValue(dependency)
+    const dependencies = deps.map((dependency) => toValue(dependency))
 
-    const pageSize = normalizePageSize(config.pageSize)
+    const pageSize = normalizeLiveQueryWindowPageSize(config.pageSize)
     const initialPageParam = config.initialPageParam ?? 0
     const input = resolveInput<TContext>(queryFnOrCollection)
+    const dependenciesChanged =
+      previousDependencies === null ||
+      previousDependencies.length !== dependencies.length ||
+      previousDependencies.some(
+        (dependency, index) => dependency !== dependencies[index],
+      )
+    const dependenciesStructurallyEqual =
+      previousDependencies !== null &&
+      deepEquals(previousDependencies, dependencies)
+    const pageShapeChanged =
+      previousPageSize !== pageSize ||
+      previousInitialPageParam !== initialPageParam
+    const sameCollection =
+      input.kind === `collection` &&
+      previousInput?.kind === `collection` &&
+      previousInput.collection === input.collection
+    const canPreservePageCount =
+      previousController !== null &&
+      previousInput?.kind === input.kind &&
+      (input.kind === `collection`
+        ? sameCollection
+        : dependenciesChanged
+          ? dependenciesStructurallyEqual
+          : pageShapeChanged)
+    const previousPageCount = previousController
+      ? Math.max(1, previousController.getSnapshot().pages.length)
+      : 1
+    const initialPageCount = canPreservePageCount ? previousPageCount : 1
+
+    previousInput = input
+    previousDependencies = [...dependencies]
+    previousPageSize = pageSize
+    previousInitialPageParam = initialPageParam
 
     if (input.kind === `collection`) {
       const collection = input.collection
-      if (!hasSetWindow(collection)) {
+      assertManyResult(collection)
+      if (!isWindowedCollection(collection)) {
         throw new Error(
-          `useLiveInfiniteQuery: Pre-created live query collection must have an orderBy clause for infinite pagination to work. ` +
+          `useLiveInfiniteQuery: Pre-created live query collection must have an ORDER BY (orderBy) clause for infinite pagination to work. ` +
             `Please add .orderBy() to your createLiveQueryCollection query.`,
         )
       }
@@ -212,44 +261,50 @@ export function useLiveInfiniteQuery<TContext extends Context>(
         }
       }
 
-      return createLiveQueryWindowController(collection, {
+      const currentController = createLiveQueryWindowController(collection, {
         pageSize,
         initialPageParam,
+        initialPageCount,
       })
+      previousController = currentController
+      return currentController
     }
 
     const collection = createLiveQueryCollection({
-      query: (q: InitialQueryBuilder) =>
-        input
-          .query(q)
-          .limit(pageSize + 1)
-          .offset(0),
+      query: input.query.limit(pageSize + 1).offset(0),
       startSync: false,
       gcTime: DEFAULT_GC_TIME_MS,
     })
-    return createLiveQueryWindowController(collection, {
+    assertManyResult(collection)
+    const currentController = createLiveQueryWindowController(collection, {
       pageSize,
       initialPageParam,
+      initialPageCount,
     })
+    previousController = currentController
+    return currentController
   })
 
   const snapshot = shallowRef(controller.value.getSnapshot())
 
-  watchEffect((onInvalidate) => {
-    const currentController = controller.value
-    const updateSnapshot = () => {
-      snapshot.value = currentController.getSnapshot()
-    }
+  watchEffect(
+    (onInvalidate) => {
+      const currentController = controller.value
+      const updateSnapshot = () => {
+        snapshot.value = currentController.getSnapshot()
+      }
 
-    updateSnapshot()
-    const unsubscribe = currentController.subscribe(updateSnapshot)
-    updateSnapshot()
+      updateSnapshot()
+      const unsubscribe = currentController.subscribe(updateSnapshot)
+      updateSnapshot()
 
-    onInvalidate(() => {
-      unsubscribe()
-      currentController.dispose()
-    })
-  })
+      onInvalidate(() => {
+        unsubscribe()
+        currentController.dispose()
+      })
+    },
+    { flush: `sync` },
+  )
 
   return {
     state: computed(
