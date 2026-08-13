@@ -1,5 +1,12 @@
 # @tanstack/react-db
 
+## 0.2.33
+
+### Patch Changes
+
+- Updated dependencies [[`424382b`](https://github.com/TanStack/db/commit/424382b3a80c6b3556701b433c26c8a60fc8d1af)]:
+  - @tanstack/db@0.7.1
+
 ## 0.2.32
 
 ### Patch Changes

@@ -1,5 +1,11 @@
 # @tanstack/db
 
+## 0.7.1
+
+### Patch Changes
+
+- Add `useLiveInfiniteQuery` as a Vue binding over the shared live-query window controller. Align infinite-query behavior across React, Vue, and Svelte, including awaitable page fetches, safe page sizes, reactive page-depth preservation, ordered collection validation, shared input resolution, and shared-window cleanup. ([#1724](https://github.com/TanStack/db/pull/1724))
+
 ## 0.7.0
 
 ### Minor Changes
