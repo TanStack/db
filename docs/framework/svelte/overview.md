@@ -46,6 +46,45 @@ The `useLiveQuery` utility creates a live query that automatically updates your 
 
 **Note:** With Svelte 5, `useLiveQuery` returns reactive values through getters. Access `query.data` and `query.isLoading` directly (no `$` prefix needed).
 
+### useLiveInfiniteQuery
+
+For ordered, paginated data with live updates, use `useLiveInfiniteQuery`:
+
+```svelte
+<script>
+  import { useLiveInfiniteQuery } from '@tanstack/svelte-db'
+  import { eq } from '@tanstack/db'
+
+  let category = $state('news')
+  const query = useLiveInfiniteQuery(
+    (q) =>
+      q
+        .from({ posts: postsCollection })
+        .where(({ posts }) => eq(posts.category, category))
+        .orderBy(({ posts }) => posts.createdAt, 'desc'),
+    { pageSize: 20 },
+    [() => category],
+  )
+</script>
+
+{#each query.data as post (post.id)}
+  <article>{post.title}</article>
+{/each}
+
+{#if query.hasNextPage}
+  <button
+    disabled={query.isFetchingNextPage}
+    onclick={() => query.fetchNextPage()}
+  >
+    Load more
+  </button>
+{/if}
+```
+
+The query must include `orderBy`. The dependency array is available only with
+the query-function form. You can also pass an ordered, pre-created live query
+collection directly.
+
 ### Dependency Arrays
 
 The `useLiveQuery` utility accepts an optional dependency array as its last parameter. When any value in the array changes, the query is recreated and re-executed.
