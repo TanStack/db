@@ -1,5 +1,11 @@
 # @tanstack/db
 
+## 0.7.2
+
+### Patch Changes
+
+- Update agent skills to match current APIs and behavior. ([#1696](https://github.com/TanStack/db/pull/1696))
+
 ## 0.7.1
 
 ### Patch Changes
