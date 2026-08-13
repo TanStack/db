@@ -84,4 +84,59 @@ Without the bridge, `useLiveQuery` handles subscription internally as before.
 
 ## Performance
 
-The renderer rework + wholesale refactor together improve render performance by up to 4x by eliminating redundant granular patching and leveraging Solid v2's batched updates.
+Benchmarks comparing the previous Solid v1 adapter (main branch, commit
+`2c35b588`) against the new Solid v2 wholesale adapter. JSDOM, median of
+5 iterations each. The v1 adapter is the pre-renderer-rework version that
+was running in production before this MR.
+
+#### Initial All-Row Mount
+
+| Rows  | v1 (main) | v2 wholesale | Result       |
+| ----- | --------: | -----------: | ------------ |
+| 10    |    2.35ms |       1.54ms | 1.53× faster |
+| 1,000 |   18.75ms |      11.53ms | 1.63× faster |
+| 10,000|  129.74ms |      73.35ms | 1.77× faster |
+
+#### Single-Row Update in All-Row Query
+
+| Rows  | v1 (main) | v2 wholesale | Result       |
+| ----- | --------: | -----------: | ------------ |
+| 10    |    0.06ms |       0.03ms | 2.00× faster |
+| 1,000 |    0.08ms |       0.02ms | 4.00× faster |
+| 10,000|    0.08ms |       0.02ms | 4.00× faster |
+
+#### 10% Row Batch Update
+
+| Rows  | v1 (main) | v2 wholesale | Result       |
+| ----- | --------: | -----------: | ------------ |
+| 10    |    0.07ms |       0.04ms | 1.75× faster |
+| 1,000 |    9.59ms |       1.68ms | 5.71× faster |
+| 10,000|   97.40ms |      24.00ms | 4.06× faster |
+
+#### Repeated Single-Row Updates (1000 rows × 200 commits)
+
+| v1 (main) | v2 wholesale | Result       |
+| --------: | -----------: | ------------ |
+|    2.52ms |       2.60ms | 0.97× (par)  |
+
+#### findOne Update (1000 rows)
+
+| v1 (main) | v2 wholesale | Result       |
+| --------: | -----------: | ------------ |
+|    0.01ms |       0.03ms | 0.33× slower |
+
+#### Remount After Update (1000 rows)
+
+| v1 (main) | v2 wholesale | Result       |
+| --------: | -----------: | ------------ |
+|    3.13ms |       3.77ms | 0.83× slower |
+
+**Summary**: The v2 wholesale adapter is **1.5–5.7× faster** than the v1
+adapter for mount, single-row updates, and batch updates — the scenarios
+that dominate real-world usage. findOne and remount are marginally slower
+(sub-millisecond absolute difference). Repeated rapid-fire single-row
+updates are on par.
+
+The gains come from eliminating the v1 adapter's full-store-reset on every
+change (replaced by Solid v2's keyed `reconcile`) and from the wholesale
+observer's efficient snapshot caching.
