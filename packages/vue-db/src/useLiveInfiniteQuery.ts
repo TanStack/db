@@ -19,6 +19,7 @@ import type { ComputedRef, MaybeRefOrGetter } from 'vue'
 
 const DEFAULT_PAGE_SIZE = 20
 const DEFAULT_GC_TIME_MS = 1
+const MAX_PAGE_SIZE = Number.MAX_SAFE_INTEGER - 1
 
 type InternalCollection = Collection<object, string | number, UtilsRecord>
 
@@ -54,6 +55,7 @@ function normalizePageSize(pageSize: number | undefined): number {
   if (
     pageSize === undefined ||
     !Number.isSafeInteger(pageSize) ||
+    pageSize > MAX_PAGE_SIZE ||
     pageSize <= 0
   ) {
     return DEFAULT_PAGE_SIZE
@@ -132,7 +134,7 @@ export interface UseLiveInfiniteQueryReturn<TContext extends Context> {
 export interface UseLiveInfiniteQueryReturnWithCollection<
   TResult extends object,
   TKey extends string | number,
-  TUtils extends Record<string, any>,
+  TUtils extends UtilsRecord,
 > {
   state: ComputedRef<Map<TKey, TResult>>
   data: ComputedRef<Array<TResult>>
@@ -158,7 +160,7 @@ export interface UseLiveInfiniteQueryReturnWithCollection<
 export function useLiveInfiniteQuery<
   TResult extends object,
   TKey extends string | number,
-  TUtils extends Record<string, any>,
+  TUtils extends UtilsRecord,
 >(
   liveQueryCollection: MaybeRefOrGetter<
     Collection<TResult, TKey, TUtils> & NonSingleResult

@@ -179,6 +179,13 @@ describe(`useLiveInfiniteQuery`, () => {
       pageLengths: [1],
       limit: 21,
     },
+    {
+      label: `unsafe page size`,
+      count: 1,
+      pageSize: Number.MAX_SAFE_INTEGER,
+      pageLengths: [1],
+      limit: 21,
+    },
   ])(
     `handles $label pagination boundaries`,
     async ({ label, count, pageSize, pageLengths, limit }) => {
@@ -187,12 +194,50 @@ describe(`useLiveInfiniteQuery`, () => {
       await flushVue()
 
       expect(query.pages.value.map((page) => page.length)).toEqual(pageLengths)
+      expect(query.pageParams.value).toEqual([0])
       expect(query.hasNextPage.value).toBe(false)
       expect(
         (query.collection.value.utils as LiveQueryCollectionUtils).getWindow(),
       ).toEqual({ offset: 0, limit })
+
+      const data = [...query.data.value]
+      await expect(query.fetchNextPage()).resolves.toBeUndefined()
+      await flushVue()
+      expect(query.data.value).toEqual(data)
+      expect(query.pages.value.map((page) => page.length)).toEqual(pageLengths)
     },
   )
+
+  it(`coalesces concurrent page requests`, async () => {
+    const posts = createPostsCollection(`vue-infinite-concurrent`, 8)
+    const query = mountPostsQuery(posts, { pageSize: 3 })
+    await flushVue()
+
+    const utils = query.collection.value.utils as LiveQueryCollectionUtils
+    const originalSetWindow = utils.setWindow.bind(utils)
+    let resolveWindow!: () => void
+    const setWindow = vi
+      .spyOn(utils, `setWindow`)
+      .mockImplementationOnce((options) => {
+        originalSetWindow(options)
+        return new Promise<void>((resolve) => {
+          resolveWindow = resolve
+        })
+      })
+
+    const firstFetch = query.fetchNextPage()
+    const concurrentFetch = query.fetchNextPage()
+
+    expect(query.isFetchingNextPage.value).toBe(true)
+    expect(setWindow).toHaveBeenCalledOnce()
+    await expect(concurrentFetch).resolves.toBeUndefined()
+
+    resolveWindow()
+    await firstFetch
+    await flushVue()
+
+    expect(query.pages.value.map((page) => page.length)).toEqual([3, 3])
+  })
 
   it(`accepts a reactive ref for a pre-created ordered collection`, async () => {
     const posts = createPostsCollection(`vue-infinite-precreated`, 7)
