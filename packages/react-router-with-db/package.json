@@ -1,0 +1,66 @@
+{
+  "name": "@tanstack/react-router-with-db",
+  "version": "0.0.0",
+  "description": "TanStack Router SSR integration for TanStack DB",
+  "author": "Kyle Mathews",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/TanStack/db.git",
+    "directory": "packages/react-router-with-db"
+  },
+  "homepage": "https://tanstack.com/db",
+  "keywords": [
+    "database",
+    "react",
+    "router",
+    "ssr",
+    "streaming",
+    "tanstack"
+  ],
+  "scripts": {
+    "build": "vite build",
+    "build:minified": "vite build --minify",
+    "dev": "vite build --watch",
+    "lint": "eslint . --fix",
+    "test": "vitest --run"
+  },
+  "type": "module",
+  "main": "dist/cjs/index.cjs",
+  "module": "dist/esm/index.js",
+  "types": "dist/esm/index.d.ts",
+  "exports": {
+    ".": {
+      "import": {
+        "types": "./dist/esm/index.d.ts",
+        "default": "./dist/esm/index.js"
+      },
+      "require": {
+        "types": "./dist/cjs/index.d.cts",
+        "default": "./dist/cjs/index.cjs"
+      }
+    },
+    "./package.json": "./package.json"
+  },
+  "sideEffects": false,
+  "files": [
+    "dist",
+    "src"
+  ],
+  "peerDependencies": {
+    "@tanstack/react-db": ">=0.2.0",
+    "@tanstack/react-router": ">=1.43.2",
+    "@tanstack/router-core": ">=1.114.7",
+    "react": ">=18.0.0",
+    "react-dom": ">=18.0.0"
+  },
+  "devDependencies": {
+    "@tanstack/react-db": "workspace:*",
+    "@tanstack/react-router": "^1.159.5",
+    "@tanstack/router-core": "^1.159.4",
+    "@vitejs/plugin-react": "^5.1.3",
+    "@vitest/coverage-istanbul": "^3.2.4",
+    "react": "^19.2.4",
+    "react-dom": "^19.2.4"
+  }
+}

@@ -1,5 +1,6 @@
 import { useRef } from 'react'
 import { useLiveQuery } from './useLiveQuery'
+import { getLiveQueryResultInfo } from './live-query-internals'
 import type { UseLiveQueryConfig } from './useLiveQuery'
 import type {
   Collection,
@@ -172,6 +173,7 @@ export function useLiveSuspenseQuery(
     deps === undefined
       ? useLiveQuery(configOrQueryOrCollection)
       : useLiveQuery(configOrQueryOrCollection, deps)
+  const queryInfo = getLiveQueryResultInfo(result)
 
   // Reset promise and ready state when query identity changes
   if (collectionRef.current !== result.collection) {
@@ -196,11 +198,20 @@ export function useLiveSuspenseQuery(
   // It’s not recommended to suspend a render based on a store value returned by useSyncExternalStore.
   // result.status is the snapshot from syncExternalStore. We read the fresh status from the collection reference instead.
   const collectionStatus = result.collection.status
+  const streamedQuery =
+    queryInfo.client && queryInfo.queryHash
+      ? queryInfo.client._getLiveQuery(queryInfo.queryHash)
+      : undefined
 
   // Track when we reach ready state
-  if (collectionStatus === `ready`) {
+  if (collectionStatus === `ready` || streamedQuery?.status === `success`) {
     hasBeenReadyRef.current = true
     promiseRef.current = null
+  }
+
+  if (streamedQuery?.status === `error` && !hasBeenReadyRef.current) {
+    promiseRef.current = null
+    throw streamedQuery.error
   }
 
   // Only throw errors during initial load (before first ready)
@@ -212,10 +223,35 @@ export function useLiveSuspenseQuery(
     throw new Error(`Collection "${result.collection.id}" failed to load`)
   }
 
-  if (collectionStatus === `loading` || collectionStatus === `idle`) {
+  if (streamedQuery?.status === `pending`) {
+    promiseRef.current = streamedQuery.promise
+    throw streamedQuery.promise
+  }
+
+  if (
+    !hasBeenReadyRef.current &&
+    (collectionStatus === `loading` || collectionStatus === `idle`)
+  ) {
+    if (queryInfo.client?._isSsrStreamingEnabled() && !queryInfo.queryHash) {
+      const reason = queryInfo.identityError
+        ? `${queryInfo.identityError.reason} at ${queryInfo.identityError.path}`
+        : `the query has no stable identity`
+      throw new Error(
+        `Cannot stream this live query during SSR because ${reason}. Provide an explicit serializable queryKey.`,
+      )
+    }
+
     // Create or reuse promise for current collection
     if (!promiseRef.current) {
-      promiseRef.current = result.collection.preload()
+      queryInfo.resumeDeferredCollections()
+      const preloadPromise = result.collection.preload()
+      promiseRef.current =
+        queryInfo.client?._isSsrStreamingEnabled() && queryInfo.queryHash
+          ? queryInfo.client._registerLiveQuery(
+              queryInfo.queryHash,
+              preloadPromise,
+            )
+          : preloadPromise
     }
     // THROW PROMISE - React Suspense catches this (React 18+ required)
     // Note: We don't check React version here. In React <18, this will be caught

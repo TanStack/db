@@ -3,12 +3,14 @@
 This example is a minimal TanStack Start app that demonstrates TanStack DB SSR
 with collection-row hydration.
 
-It verifies four things:
+It verifies five things:
 
 - server HTML contains rows loaded through a request-scoped `DbClient`
 - the browser hydrates those rows into a client `DbClient`
 - fresh adapter sync replaces a stale hydrated row with the same key
 - an incremental collection chunk updates an existing live query
+- critical collection rows hydrate while a query discovered later in the same
+  render streams through a Suspense boundary
 
 Live demo: https://tanstack-db-ssr-demo.netlify.app/ssr-db
 
@@ -20,7 +22,8 @@ pnpm --filter @tanstack/react-db build
 pnpm --filter @tanstack/db-example-react-start-ssr-e2e dev
 ```
 
-Open `/ssr-db`.
+Open `/ssr-db` for holistic and incremental hydration, or `/ssr-db-stream` for
+render-time Suspense streaming.
 
 ## Run E2E
 
@@ -28,8 +31,10 @@ Open `/ssr-db`.
 pnpm --filter @tanstack/db-example-react-start-ssr-e2e test:e2e
 ```
 
-The Playwright test checks raw SSR HTML first, browser hydration and fresh-sync
-reconciliation for the same row key, then an incremental collection chunk.
+The Playwright tests cover raw SSR HTML, browser hydration, fresh-sync
+reconciliation, incremental collection hydration, and critical hydration plus a
+render-time query in the same request. The streaming route shows its Suspense
+fallback before the streamed server rows arrive.
 
 ## Deploy Demo
 

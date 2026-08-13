@@ -100,6 +100,7 @@ export {
   canonicalizeQueryIR,
   getStableQueryBuilderHash,
   getStableQueryIRHash,
+  getStableValueHash,
 } from './ir-stable-identity.js'
 
 // Predicate utilities for predicate push-down

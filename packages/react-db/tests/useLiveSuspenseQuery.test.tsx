@@ -1,13 +1,17 @@
-import { describe, expect, it } from 'vitest'
-import { renderHook, waitFor } from '@testing-library/react'
+import { describe, expect, it, vi } from 'vitest'
+import { act, renderHook, waitFor } from '@testing-library/react'
 import {
+  DbClient,
+  collectionOptions,
   createCollection,
   createLiveQueryCollection,
   eq,
+  getStableValueHash,
   gt,
 } from '@tanstack/db'
 import { StrictMode, Suspense } from 'react'
 import { useLiveSuspenseQuery } from '../src/useLiveSuspenseQuery'
+import { DbProvider } from '../src/DbProvider'
 import { mockSyncCollectionOptions } from '../../db/tests/utils'
 import type { ReactNode } from 'react'
 
@@ -53,6 +57,168 @@ function SuspenseWrapper({ children }: { children: ReactNode }) {
 }
 
 describe(`useLiveSuspenseQuery`, () => {
+  it(`reuses a streamed pending query and renders hydrated collection rows`, async () => {
+    let resolveServerLoad!: () => void
+    const serverLoad = new Promise<void>((resolve) => {
+      resolveServerLoad = resolve
+    })
+    const browserLoad = vi.fn(() => true as const)
+    const descriptor = collectionOptions(`streamed-people`, (client) => {
+      const runtime = client.requireDependency<`server` | `browser`>(`runtime`)
+
+      return {
+        id: `streamed-people`,
+        getKey: (person: Person) => person.id,
+        syncMode: `on-demand` as const,
+        sync: {
+          sync: ({ begin, write, commit, markReady }) => {
+            markReady()
+            return {
+              loadSubset:
+                runtime === `server`
+                  ? async () => {
+                      await serverLoad
+                      begin({ immediate: true })
+                      write({ type: `insert`, value: initialPersons[0]! })
+                      commit()
+                    }
+                  : browserLoad,
+            }
+          },
+        },
+      }
+    })
+    const serverClient = new DbClient({ runtime: `server` })
+    serverClient._setSsrStreamingEnabled(true)
+    const serverWrapper = ({ children }: { children: ReactNode }) => (
+      <DbProvider client={serverClient}>
+        <Suspense fallback={<div>Loading...</div>}>{children}</Suspense>
+      </DbProvider>
+    )
+    const serverHook = renderHook(
+      () =>
+        useLiveSuspenseQuery({
+          query: (q) => q.from({ people: descriptor }),
+        }),
+      { wrapper: serverWrapper },
+    )
+
+    const dehydrated = serverClient.dehydrate({
+      shouldDehydrateCollection: () => false,
+      shouldDehydrateLiveQuery: () => true,
+    })
+    const dehydratedQuery = dehydrated.liveQueries?.[0]
+    expect(dehydratedQuery).toBeDefined()
+
+    const browserClient = new DbClient({ runtime: `browser` })
+    browserClient._setSsrStreamingEnabled(true)
+    browserClient.hydrate(dehydrated)
+    const browserWrapper = ({ children }: { children: ReactNode }) => (
+      <DbProvider client={browserClient}>
+        <Suspense fallback={<div>Loading...</div>}>{children}</Suspense>
+      </DbProvider>
+    )
+    const browserHook = renderHook(
+      () =>
+        useLiveSuspenseQuery({
+          query: (q) => q.from({ people: descriptor }),
+        }),
+      { wrapper: browserWrapper },
+    )
+
+    expect(browserLoad).not.toHaveBeenCalled()
+
+    await act(async () => {
+      resolveServerLoad()
+      await browserClient._getLiveQuery(dehydratedQuery!.queryHash)?.promise
+    })
+
+    await waitFor(() => {
+      expect(browserHook.result.current.data).toHaveLength(1)
+      expect(browserHook.result.current.data[0]).toMatchObject(
+        initialPersons[0]!,
+      )
+    })
+    serverHook.unmount()
+    browserHook.unmount()
+  })
+
+  it(`requires queryKey for an opaque query during SSR streaming`, () => {
+    const warn = vi.spyOn(console, `warn`).mockImplementation(() => {})
+    const descriptor = collectionOptions(`streamed-people`, () => ({
+      id: `streamed-people`,
+      getKey: (person: Person) => person.id,
+      syncMode: `on-demand` as const,
+      sync: {
+        sync: ({ markReady }) => {
+          markReady()
+          return { loadSubset: () => new Promise<void>(() => {}) }
+        },
+      },
+    }))
+    const client = new DbClient()
+    client._setSsrStreamingEnabled(true)
+    const wrapper = ({ children }: { children: ReactNode }) => (
+      <DbProvider client={client}>{children}</DbProvider>
+    )
+
+    expect(() =>
+      renderHook(
+        () =>
+          useLiveSuspenseQuery({
+            query: (q) =>
+              q
+                .from({ people: descriptor })
+                .fn.where(({ people }) => people.age > 20),
+          }),
+        { wrapper },
+      ),
+    ).toThrow(/Provide an explicit serializable queryKey/)
+    expect(warn).toHaveBeenCalledWith(
+      expect.stringContaining(`cannot derive a stable identity`),
+    )
+    warn.mockRestore()
+  })
+
+  it(`throws the original streamed query error`, async () => {
+    const error = new Error(`Server load failed`)
+    const queryKey = [`streamed-people-error`] as const
+    const queryHash = getStableValueHash([`queryKey`, queryKey], `queryKey`)
+    const descriptor = collectionOptions(`streamed-people-error`, () => ({
+      id: `streamed-people-error`,
+      getKey: (person: Person) => person.id,
+      syncMode: `on-demand` as const,
+      sync: {
+        sync: ({ markReady }) => {
+          markReady()
+          return { loadSubset: () => new Promise<void>(() => {}) }
+        },
+      },
+    }))
+    const client = new DbClient()
+    client._setSsrStreamingEnabled(true)
+    await expect(
+      client._registerLiveQuery(queryHash, Promise.reject(error)),
+    ).rejects.toBe(error)
+    const wrapper = ({ children }: { children: ReactNode }) => (
+      <DbProvider client={client}>{children}</DbProvider>
+    )
+    const consoleError = vi.spyOn(console, `error`).mockImplementation(() => {})
+
+    expect(() =>
+      renderHook(
+        () =>
+          useLiveSuspenseQuery({
+            queryKey,
+            query: (q) => q.from({ people: descriptor }),
+          }),
+        { wrapper },
+      ),
+    ).toThrow(error)
+
+    consoleError.mockRestore()
+  })
+
   it(`should suspend while loading and return data when ready`, async () => {
     const collection = createCollection(
       mockSyncCollectionOptions<Person>({

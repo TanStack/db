@@ -16,7 +16,7 @@ collections.
 
 ## High-level Summary
 
-The SSR-friendly API adds four concepts:
+The SSR-friendly API adds five concepts:
 
 - `DbClient` owns materialized collection instances for one request, browser app,
   test, or script.
@@ -27,10 +27,13 @@ The SSR-friendly API adds four concepts:
   server/client boundary.
 - React apps use `<DbProvider client={dbClient}>` so hooks can resolve
   collection descriptors against the current client.
+- `@tanstack/react-router-with-db` streams live queries discovered by Suspense
+  during a TanStack Start server render.
 
 Existing apps continue to work. `createCollection(...)` and direct collection
 instances still exist. The migration is required when you want SSR-safe request
-isolation, hydration, streaming chunks, or the 1.0-ready React hook shape.
+isolation, hydration, incremental chunks, Suspense streaming, or the 1.0-ready
+React hook shape.
 
 The old dependency-array form now warns:
 
@@ -63,7 +66,8 @@ you want to skip derived identity work.
 | Server preload | ad hoc collection preload | preload client-bound collection or live query |
 | Serialize SSR state | none | `const state = dbClient.dehydrate()` |
 | Hydrate in browser | none | `dbClient.hydrate(state)` before hooks read it |
-| Stream rows later | custom app state | `dbClient.applyCollectionChunk(chunk)` |
+| Apply rows incrementally | custom app state | `dbClient.applyCollectionChunk(chunk)` |
+| Stream render-time queries | none | `routerWithDbClient(router, dbClient)` |
 | React query identity | dependency array | derived IR, or `queryKey` when needed |
 
 ### Minimal React Pattern
@@ -256,9 +260,70 @@ browser client.
 
 Live demo: https://tanstack-db-ssr-demo.netlify.app/ssr-db
 
-## Streaming and Incremental Hydration
+## Suspense Streaming with TanStack Start
 
-Streaming uses the same collection chunk shape as holistic dehydration:
+`@tanstack/react-router-with-db` follows the same integration pattern as
+`@tanstack/react-router-with-query`:
+
+```tsx
+import { DbClient } from '@tanstack/react-db'
+import { createRouter } from '@tanstack/react-router'
+import { routerWithDbClient } from '@tanstack/react-router-with-db'
+
+export type RouterContext = {
+  dbClient: DbClient
+}
+
+export function getRouter() {
+  const dbClient = new DbClient()
+  const router = createRouter({
+    routeTree,
+    context: { dbClient },
+  })
+
+  return routerWithDbClient(router, dbClient)
+}
+```
+
+The adapter adds `dbClient` to router context, wraps the app in `DbProvider`,
+dehydrates critical collection state, and opens a stream for queries discovered
+later during rendering.
+
+```tsx
+function RouteComponent() {
+  return (
+    <Suspense fallback={<p>Loading todos</p>}>
+      <TodoList />
+    </Suspense>
+  )
+}
+
+function TodoList() {
+  const { data } = useLiveSuspenseQuery({
+    query: (q) =>
+      q
+        .from({ todo: todoCollection })
+        .where(({ todo }) => eq(todo.status, 'open')),
+  })
+
+  return data.map((todo) => <Todo key={todo.id} todo={todo} />)
+}
+```
+
+When `TodoList` suspends on the server, the adapter streams the pending query
+promise. That promise resolves to a normal `DehydratedDbState` containing source
+collection rows. The browser hydrates those rows and retries the same live query.
+Live-query result snapshots and D2 state do not cross the wire.
+
+The server and browser must derive the same live-query identity. Structured
+queries do this automatically. An opaque query must provide a serializable
+`queryKey`; render-time streaming throws if it cannot derive an identity.
+
+## Incremental Collection Hydration
+
+Applications can also apply collection rows received through their own stream.
+Incremental hydration uses the same collection chunk shape as holistic
+dehydration:
 
 ```ts
 dbClient.applyCollectionChunk({
@@ -294,13 +359,14 @@ Serialized:
 - synced row keys and values
 - row metadata
 - adapter sync metadata from `exportSyncMeta`
+- pending live-query identity and promise metadata when router streaming opts in
 
 Not serialized:
 
 - mutation handlers
 - pending optimistic mutations
 - pending subscriptions
-- live query result objects
+- live query result snapshots
 - D2 graphs or compiled pipelines
 - transaction stacks
 - module-level runtime state
@@ -347,8 +413,8 @@ Fresh adapter sync is authoritative over all three. Hydrated and initial rows
 are provisional base state, so the adapter's first insert for the same key is
 reconciled as an update instead of raising a duplicate-key error.
 
-`initialData` never marks adapter sync as ready by itself. The adapter still
-owns readiness through its sync lifecycle.
+Hydrated rows and `initialData` never mark adapter sync as ready by themselves.
+The adapter still owns readiness through its sync lifecycle.
 
 ## React Query Identity
 
@@ -588,6 +654,12 @@ Required for SSR:
 - `DbProvider` for descriptor resolution in React
 - `dehydrate()` on the server and `hydrate()` in the browser
 
+Required for render-time Suspense streaming:
+
+- `routerWithDbClient(router, dbClient)`
+- `useLiveSuspenseQuery(...)` inside a Suspense boundary
+- a stable derived query identity or explicit serializable `queryKey`
+
 ## Detailed Changelog
 
 ### Added
@@ -603,6 +675,7 @@ Required for SSR:
 - `dbClient.dehydrate()`
 - `dbClient.hydrate(state)`
 - `dbClient.applyCollectionChunk(chunk)`
+- `dbClient.subscribe(listener)`
 - `dbClient.createTransaction(config)`
 - `dbClient.cleanup()`
 - React `DbProvider`
@@ -614,6 +687,8 @@ Required for SSR:
 - React per-query `client` override
 - SSR-capable `useSyncExternalStore` server snapshot support
 - TanStack Start + Playwright SSR E2E coverage
+- `@tanstack/react-router-with-db`
+- render-time `useLiveSuspenseQuery` promise streaming
 
 ### Changed
 
@@ -630,7 +705,9 @@ Required for SSR:
   sync metadata are imported before sync starts.
 - `DbClient` owns collection instances and ambient transaction scope; cleanup
   releases both.
-- Streaming chunks use the same payload shape as full dehydration.
+- Incremental chunks use the same collection payload shape as full dehydration.
+- Streamed live-query promises resolve to collection-row hydration state rather
+  than live-query result snapshots.
 
 ### Deprecated
 
@@ -658,5 +735,6 @@ The SSR strategy is covered by:
 - persistence core tests to ensure persisted row behavior remains intact
 - a TanStack Start + Playwright E2E that verifies server HTML contains hydrated
   DB rows, browser hydration has no markup mismatch, fresh sync reconciles a
-  hydrated row, and an incremental collection chunk updates an existing live
-  query
+  hydrated row, an incremental collection chunk updates an existing live query,
+  and a query discovered during rendering streams through a real Suspense
+  boundary

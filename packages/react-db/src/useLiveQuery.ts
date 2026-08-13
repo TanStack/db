@@ -6,10 +6,12 @@ import {
   deepEquals,
   getLiveQueryStatusFlags,
   getStableQueryBuilderHash,
+  getStableValueHash,
   isCollection,
   isSingleResultCollection,
 } from '@tanstack/db'
 import { useOptionalDbClient } from './DbProvider'
+import { setLiveQueryResultInfo } from './live-query-internals'
 import type {
   Collection,
   CollectionImpl,
@@ -689,13 +691,18 @@ export function useLiveQuery(
   let preparedQueryValue: unknown | typeof unpreparedQueryValue =
     unpreparedQueryValue
   let identityDeps: ReadonlyArray<unknown>
+  let streamIdentity: unknown = undefined
+  let identityError: UnhashableQueryIRError | undefined
 
   if (queryKey) {
     identityDeps = queryKey
+    streamIdentity = [`queryKey`, queryKey]
   } else if (deps !== undefined) {
     identityDeps = resolvedDeps
+    streamIdentity = [`deps`, resolvedDeps]
   } else if (inputIsCollection) {
     identityDeps = []
+    streamIdentity = [`collection`, configOrQueryOrCollection.id]
   } else {
     const preparation = prepareDerivedQuery(
       configOrQueryOrCollection,
@@ -706,9 +713,24 @@ export function useLiveQuery(
     preparedQueryValue = preparation.value
     if (preparation.status === `hashable`) {
       identityDeps = preparation.identityDeps
+      streamIdentity = preparation.identityDeps
     } else {
       warnUnhashableDerivedIdentity(preparation.error)
       identityDeps = legacyUnhashableIdentityRef.current
+      identityError = preparation.error
+    }
+  }
+
+  let queryHash: string | undefined
+  if (streamIdentity !== undefined) {
+    try {
+      queryHash = getStableValueHash(streamIdentity, `queryKey`)
+    } catch (error) {
+      if (error instanceof UnhashableQueryIRError) {
+        identityError = error
+      } else {
+        throw error
+      }
     }
   }
 
@@ -772,6 +794,13 @@ export function useLiveQuery(
     snapshotRef.current = null
   }
 
+  const resumeDeferredCollections = () => {
+    for (const collection of deferredCollectionsRef.current) {
+      collection._resumeSyncStart()
+    }
+    deferredCollectionsRef.current.clear()
+  }
+
   // Create stable subscribe function using ref
   const subscribeRef = useRef<
     ((onStoreChange: () => void) => () => void) | null
@@ -792,10 +821,7 @@ export function useLiveQuery(
         versionRef.current += 1
         onStoreChange()
       })
-      for (const collection of deferredCollectionsRef.current) {
-        collection._resumeSyncStart()
-      }
-      deferredCollectionsRef.current.clear()
+      resumeDeferredCollections()
       // Already-ready collections won't emit an initial change. Notify React
       // ourselves, but defer to a microtask — calling onStoreChange synchronously
       // here lands during the render-to-commit window and trips React's
@@ -909,5 +935,12 @@ export function useLiveQuery(
     returnedSnapshotRef.current = snapshot
   }
 
-  return returnedRef.current!
+  const returned = returnedRef.current!
+  setLiveQueryResultInfo(returned, {
+    client: dbClient,
+    queryHash,
+    identityError,
+    resumeDeferredCollections,
+  })
+  return returned
 }

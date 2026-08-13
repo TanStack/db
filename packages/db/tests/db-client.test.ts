@@ -387,6 +387,40 @@ describe(`DbClient`, () => {
     subscription.unsubscribe()
   })
 
+  it(`keeps deferred subset loads pending until the replayed adapter load finishes`, async () => {
+    let resolveLoad!: () => void
+    const adapterLoad = new Promise<void>((resolve) => {
+      resolveLoad = resolve
+    })
+    const loadSubset = vi.fn(() => adapterLoad)
+    const descriptor = collectionOptions(`people`, () => ({
+      id: `people`,
+      getKey: (person: Person) => person.id,
+      syncMode: `on-demand` as const,
+      sync: {
+        sync: ({ markReady }) => {
+          markReady()
+          return { loadSubset }
+        },
+      },
+    }))
+    const client = new DbClient()
+    const collection = client._materializeCollectionForRender(descriptor)
+
+    const deferredLoad = collection._sync.loadSubset({})
+    expect(deferredLoad).toBeInstanceOf(Promise)
+    expect(collection.isLoadingSubset).toBe(true)
+    expect(loadSubset).not.toHaveBeenCalled()
+
+    collection._resumeSyncStart()
+    expect(loadSubset).toHaveBeenCalledOnce()
+    expect(collection.isLoadingSubset).toBe(true)
+
+    resolveLoad()
+    await deferredLoad
+    expect(collection.isLoadingSubset).toBe(false)
+  })
+
   it(`lets the first sync snapshot replace stale hydrated rows`, () => {
     const descriptor = collectionOptions(
       mockSyncCollectionOptions<Person>({
@@ -479,6 +513,83 @@ describe(`DbClient`, () => {
     })
 
     expect(activePeople.toArray.map((person) => person.id)).toEqual([`1`])
+  })
+
+  it(`streams pending live queries as collection hydration state`, async () => {
+    const descriptor = collectionOptions(`people`, () => ({
+      id: `people`,
+      getKey: (person: Person) => person.id,
+      sync: {
+        sync: ({ markReady }) => markReady(),
+      },
+    }))
+    const serverClient = new DbClient()
+    serverClient.collection(descriptor)
+    const listener = vi.fn()
+    serverClient.subscribe(listener)
+
+    let resolveLoad!: () => void
+    const loadPromise = new Promise<void>((resolve) => {
+      resolveLoad = resolve
+    })
+    serverClient._registerLiveQuery(`active-people`, loadPromise)
+
+    expect(listener).toHaveBeenCalledWith(
+      expect.objectContaining({
+        type: `liveQueryAdded`,
+        query: expect.objectContaining({
+          queryHash: `active-people`,
+          status: `pending`,
+        }),
+      }),
+    )
+    expect(serverClient.dehydrate().liveQueries).toBeUndefined()
+
+    const dehydrated = serverClient.dehydrate({
+      shouldDehydrateCollection: () => false,
+      shouldDehydrateLiveQuery: () => true,
+    })
+    expect(dehydrated.collections).toEqual([])
+    expect(dehydrated.liveQueries).toHaveLength(1)
+
+    const browserClient = new DbClient()
+    browserClient.hydrate(dehydrated)
+    const browserQuery = browserClient._getLiveQuery(`active-people`)
+    expect(browserQuery?.status).toBe(`pending`)
+
+    serverClient.applyCollectionChunk({
+      collectionId: `people`,
+      rows: [{ key: `1`, value: people[0]! }],
+    })
+    resolveLoad()
+    await browserQuery?.promise
+
+    expect(browserClient._getLiveQuery(`active-people`)?.status).toBe(`success`)
+    expect(browserClient.collection(descriptor).get(`1`)).toMatchObject(
+      people[0]!,
+    )
+  })
+
+  it(`propagates streamed live query failures to the hydrated client`, async () => {
+    const serverClient = new DbClient()
+    let rejectLoad!: (error: Error) => void
+    const loadPromise = new Promise<void>((_resolve, reject) => {
+      rejectLoad = reject
+    })
+    serverClient._registerLiveQuery(`active-people`, loadPromise)
+    const dehydrated = serverClient.dehydrate({
+      shouldDehydrateLiveQuery: () => true,
+    })
+    const browserClient = new DbClient()
+
+    browserClient.hydrate(dehydrated)
+    const browserQuery = browserClient._getLiveQuery(`active-people`)
+    const error = new Error(`Server load failed`)
+    rejectLoad(error)
+
+    await expect(browserQuery?.promise).rejects.toBe(error)
+    expect(browserQuery?.status).toBe(`error`)
+    expect(browserQuery?.error).toBe(error)
   })
 
   it(`live query preload dehydrates source collection rows instead of live query snapshots`, async () => {

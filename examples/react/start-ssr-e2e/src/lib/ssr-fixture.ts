@@ -81,15 +81,18 @@ export const ssrTodoCollection = collectionOptions(ssrTodoCollectionId, () => ({
   },
 }))
 
-export async function createDehydratedSsrTodoState(): Promise<DehydratedDbState> {
-  const dbClient = new DbClient()
+export async function preloadSsrTodos(dbClient: DbClient): Promise<void> {
   const todos = dbClient.collection(ssrTodoCollection)
   const openTodos = createLiveQueryCollection((q) =>
     q.from({ todo: todos }).where(({ todo }) => eq(todo.status, `open`)),
   )
 
   await openTodos.preload()
+}
 
+export async function createDehydratedSsrTodoState(): Promise<DehydratedDbState> {
+  const dbClient = new DbClient()
+  await preloadSsrTodos(dbClient)
   return dbClient.dehydrate()
 }
 

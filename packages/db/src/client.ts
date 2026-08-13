@@ -108,12 +108,48 @@ export type DehydratedCollectionChunk<
   syncMeta?: unknown
 }
 
+export type DehydratedLiveQuery = {
+  queryHash: string
+  dehydratedAt: number
+  promise: Promise<DehydratedDbState>
+}
+
 export type DehydratedDbState = {
   collections: Array<DehydratedCollectionChunk>
+  liveQueries?: Array<DehydratedLiveQuery>
+}
+
+export type DbClientLiveQueryState = `pending` | `success` | `error`
+
+export type DbClientLiveQuery = {
+  readonly queryHash: string
+  readonly dehydratedAt: number
+  readonly status: DbClientLiveQueryState
+  readonly promise: Promise<void>
+  readonly error?: unknown
+}
+
+export type DbClientEvent = {
+  type: `liveQueryAdded`
+  query: DbClientLiveQuery
+}
+
+export type DehydrateDbClientOptions = {
+  shouldDehydrateCollection?: (collection: Collection) => boolean
+  shouldDehydrateLiveQuery?: (query: DbClientLiveQuery) => boolean
 }
 
 type CollectionRecord = {
   collection: AnyCollection
+}
+
+type LiveQueryRecord = {
+  queryHash: string
+  dehydratedAt: number
+  status: DbClientLiveQueryState
+  promise: Promise<void>
+  dehydratedPromise: Promise<DehydratedDbState>
+  error?: unknown
 }
 
 export type DbClientOptions = Record<string, unknown>
@@ -248,6 +284,9 @@ export class DbClient {
   private collectionsByOptions = new WeakMap<object, AnyCollection>()
   private collectionsById = new Map<string, CollectionRecord>()
   private pendingHydration = new Map<string, Array<DehydratedCollectionChunk>>()
+  private liveQueries = new Map<string, LiveQueryRecord>()
+  private listeners = new Set<(event: DbClientEvent) => void>()
+  private ssrStreamingEnabled = false
   private readonly transactionScope = new TransactionScope()
 
   constructor(private readonly options: DbClientOptions = {}) {}
@@ -404,11 +443,14 @@ export class DbClient {
     return collection
   }
 
-  dehydrate(): DehydratedDbState {
+  dehydrate(options: DehydrateDbClientOptions = {}): DehydratedDbState {
     const collections: Array<DehydratedCollectionChunk> = []
 
     for (const { collection } of this.collectionsById.values()) {
-      if (getBuilderFromConfig(collection.config)) {
+      if (
+        getBuilderFromConfig(collection.config) ||
+        options.shouldDehydrateCollection?.(collection) === false
+      ) {
         continue
       }
 
@@ -430,7 +472,23 @@ export class DbClient {
       })
     }
 
-    return { collections }
+    const liveQueries = Array.from(this.liveQueries.values()).flatMap(
+      (query) =>
+        options.shouldDehydrateLiveQuery?.(query) === true
+          ? [
+              {
+                queryHash: query.queryHash,
+                dehydratedAt: query.dehydratedAt,
+                promise: query.dehydratedPromise,
+              },
+            ]
+          : [],
+    )
+
+    return {
+      collections,
+      ...(liveQueries.length > 0 ? { liveQueries } : {}),
+    }
   }
 
   hydrate(state: DehydratedDbState): void {
@@ -449,10 +507,68 @@ export class DbClient {
       pendingChunks.push(chunk)
       this.pendingHydration.set(chunk.collectionId, pendingChunks)
     }
+
+    for (const dehydratedQuery of state.liveQueries ?? []) {
+      this.hydrateLiveQuery(dehydratedQuery)
+    }
   }
 
   applyCollectionChunk(chunk: DehydratedCollectionChunk): void {
     this.hydrate({ collections: [chunk] })
+  }
+
+  subscribe(listener: (event: DbClientEvent) => void): () => void {
+    this.listeners.add(listener)
+    return () => this.listeners.delete(listener)
+  }
+
+  /** @internal */
+  _setSsrStreamingEnabled(enabled: boolean): void {
+    this.ssrStreamingEnabled = enabled
+  }
+
+  /** @internal */
+  _isSsrStreamingEnabled(): boolean {
+    return this.ssrStreamingEnabled
+  }
+
+  /** @internal */
+  _getLiveQuery(queryHash: string): DbClientLiveQuery | undefined {
+    return this.liveQueries.get(queryHash)
+  }
+
+  /** @internal */
+  _registerLiveQuery(queryHash: string, promise: Promise<void>): Promise<void> {
+    const existing = this.liveQueries.get(queryHash)
+    if (existing) {
+      return existing.promise
+    }
+
+    const record: LiveQueryRecord = {
+      queryHash,
+      dehydratedAt: Date.now(),
+      status: `pending`,
+      promise: undefined as unknown as Promise<void>,
+      dehydratedPromise: undefined as unknown as Promise<DehydratedDbState>,
+    }
+
+    record.promise = Promise.resolve(promise).then(
+      () => {
+        record.status = `success`
+      },
+      (error: unknown) => {
+        record.status = `error`
+        record.error = error
+        throw error
+      },
+    )
+    record.promise.catch(() => {})
+    record.dehydratedPromise = record.promise.then(() => this.dehydrate())
+    record.dehydratedPromise.catch(() => {})
+
+    this.liveQueries.set(queryHash, record)
+    this.emit({ type: `liveQueryAdded`, query: record })
+    return record.promise
   }
 
   async cleanup(): Promise<void> {
@@ -467,6 +583,48 @@ export class DbClient {
       this.collectionsByOptions = new WeakMap()
       this.collectionsById.clear()
       this.pendingHydration.clear()
+      this.liveQueries.clear()
+      this.listeners.clear()
+    }
+  }
+
+  private hydrateLiveQuery(dehydratedQuery: DehydratedLiveQuery): void {
+    const existing = this.liveQueries.get(dehydratedQuery.queryHash)
+    if (
+      existing?.status === `pending` ||
+      (existing && existing.dehydratedAt >= dehydratedQuery.dehydratedAt)
+    ) {
+      return
+    }
+
+    const record: LiveQueryRecord = {
+      queryHash: dehydratedQuery.queryHash,
+      dehydratedAt: dehydratedQuery.dehydratedAt,
+      status: `pending`,
+      promise: undefined as unknown as Promise<void>,
+      dehydratedPromise: Promise.resolve(dehydratedQuery.promise),
+    }
+
+    record.promise = record.dehydratedPromise.then(
+      (resolvedState) => {
+        this.hydrate(resolvedState)
+        record.status = `success`
+      },
+      (error: unknown) => {
+        record.status = `error`
+        record.error = error
+        throw error
+      },
+    )
+    record.promise.catch(() => {})
+
+    this.liveQueries.set(record.queryHash, record)
+    this.emit({ type: `liveQueryAdded`, query: record })
+  }
+
+  private emit(event: DbClientEvent): void {
+    for (const listener of this.listeners) {
+      listener(event)
     }
   }
 

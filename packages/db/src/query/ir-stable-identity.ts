@@ -43,6 +43,10 @@ export function getStableQueryBuilderHash(
   return getStableQueryIRHash(getQueryIR(query))
 }
 
+export function getStableValueHash(value: unknown, path = `value`): string {
+  return JSON.stringify(canonicalizeRuntimeValue(value, path, new WeakSet()))
+}
+
 export function canonicalizeQueryIR(query: QueryIR): StableIdentityValue {
   return canonicalizeQuery(query, `query`, new WeakSet<object>())
 }

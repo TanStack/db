@@ -27,6 +27,7 @@ import {
 import {
   UnhashableQueryIRError,
   getStableQueryIRHash,
+  getStableValueHash,
 } from '../../src/query/ir-stable-identity.js'
 import type { QueryIR } from '../../src/query/ir.js'
 
@@ -64,6 +65,20 @@ const usersCollection = new CollectionImpl<User>({
   id: `users`,
   getKey: (item) => item.id,
   sync: { sync: () => {} },
+})
+
+describe(`stable runtime value hashing`, () => {
+  it(`normalizes object key order`, () => {
+    expect(getStableValueHash([`todos`, { status: `open`, page: 1 }])).toBe(
+      getStableValueHash([`todos`, { page: 1, status: `open` }]),
+    )
+  })
+
+  it(`reports the path of an unhashable query key value`, () => {
+    expect(() =>
+      getStableValueHash([`todos`, { predicate: () => true }], `queryKey`),
+    ).toThrow(/queryKey\[1\]\.predicate/)
+  })
 })
 
 const postsCollection = new CollectionImpl<Post>({

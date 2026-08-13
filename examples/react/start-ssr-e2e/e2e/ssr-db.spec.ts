@@ -1,6 +1,6 @@
 import { expect, test } from '@playwright/test'
 
-test(`TanStack Start hydrates, reconciles, and incrementally streams DB rows`, async ({
+test(`TanStack Start hydrates, reconciles, and incrementally applies DB rows`, async ({
   page,
   request,
 }) => {
@@ -49,5 +49,32 @@ test(`TanStack Start hydrates, reconciles, and incrementally streams DB rows`, a
   await expect(page.getByTestId(`ssr-todo-streamed-1`)).toContainText(
     `Streamed from collection chunk`,
   )
+  expect(browserErrors).toEqual([])
+})
+
+test(`TanStack Start streams a DB query discovered in a Suspense boundary`, async ({
+  page,
+}) => {
+  const browserErrors: Array<string> = []
+  page.on(`console`, (message) => {
+    if (message.type() === `error`) {
+      browserErrors.push(message.text())
+    }
+  })
+  page.on(`pageerror`, (error) => {
+    browserErrors.push(error.message)
+  })
+
+  await page.goto(`/ssr-db-stream`, { waitUntil: `commit` })
+
+  await expect(page.getByTestId(`critical-todo-server-1`)).toContainText(
+    `Pay invoices`,
+  )
+  await expect(page.getByTestId(`stream-fallback`)).toBeVisible()
+  await expect(page.getByTestId(`streamed-todo-list`)).not.toBeVisible()
+  await expect(page.getByTestId(`streamed-todo-streamed-server-1`)).toHaveText(
+    `Streamed while rendering`,
+  )
+  await expect(page.getByTestId(`stream-fallback`)).not.toBeVisible()
   expect(browserErrors).toEqual([])
 })

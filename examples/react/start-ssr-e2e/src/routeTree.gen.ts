@@ -9,9 +9,15 @@
 // Additionally, you should also exclude this file from your linter and/or formatter to prevent it from being checked or modified.
 
 import { Route as rootRouteImport } from './routes/__root'
+import { Route as SsrDbStreamRouteImport } from './routes/ssr-db-stream'
 import { Route as SsrDbRouteImport } from './routes/ssr-db'
 import { Route as IndexRouteImport } from './routes/index'
 
+const SsrDbStreamRoute = SsrDbStreamRouteImport.update({
+  id: '/ssr-db-stream',
+  path: '/ssr-db-stream',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const SsrDbRoute = SsrDbRouteImport.update({
   id: '/ssr-db',
   path: '/ssr-db',
@@ -26,31 +32,42 @@ const IndexRoute = IndexRouteImport.update({
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
   '/ssr-db': typeof SsrDbRoute
+  '/ssr-db-stream': typeof SsrDbStreamRoute
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
   '/ssr-db': typeof SsrDbRoute
+  '/ssr-db-stream': typeof SsrDbStreamRoute
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
   '/': typeof IndexRoute
   '/ssr-db': typeof SsrDbRoute
+  '/ssr-db-stream': typeof SsrDbStreamRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
-  fullPaths: '/' | '/ssr-db'
+  fullPaths: '/' | '/ssr-db' | '/ssr-db-stream'
   fileRoutesByTo: FileRoutesByTo
-  to: '/' | '/ssr-db'
-  id: '__root__' | '/' | '/ssr-db'
+  to: '/' | '/ssr-db' | '/ssr-db-stream'
+  id: '__root__' | '/' | '/ssr-db' | '/ssr-db-stream'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
   IndexRoute: typeof IndexRoute
   SsrDbRoute: typeof SsrDbRoute
+  SsrDbStreamRoute: typeof SsrDbStreamRoute
 }
 
 declare module '@tanstack/react-router' {
   interface FileRoutesByPath {
+    '/ssr-db-stream': {
+      id: '/ssr-db-stream'
+      path: '/ssr-db-stream'
+      fullPath: '/ssr-db-stream'
+      preLoaderRoute: typeof SsrDbStreamRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/ssr-db': {
       id: '/ssr-db'
       path: '/ssr-db'
@@ -71,6 +88,7 @@ declare module '@tanstack/react-router' {
 const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
   SsrDbRoute: SsrDbRoute,
+  SsrDbStreamRoute: SsrDbStreamRoute,
 }
 export const routeTree = rootRouteImport
   ._addFileChildren(rootRouteChildren)
