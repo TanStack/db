@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 import { act, render, renderHook, waitFor } from '@testing-library/react'
 import { Suspense } from 'react'
 import {
@@ -111,7 +111,7 @@ describe(`useLiveInfiniteQuery`, () => {
       | {
           isReady: boolean
           pages: Array<Array<unknown>>
-          fetchNextPage: () => Promise<void>
+          fetchNextPage: () => void
         }
       | undefined
 
@@ -172,6 +172,43 @@ describe(`useLiveInfiniteQuery`, () => {
         useLiveInfiniteQuery(foreignCollection as any, { pageSize: 3 }),
       ),
     ).toThrow(/orderBy/)
+  })
+
+  it(`exposes pagination failures without an unhandled rejection`, async () => {
+    const source = createCollection(
+      mockSyncCollectionOptions<Post>({
+        id: `infinite-query-pagination-failure`,
+        getKey: (post) => post.id,
+        initialData: createMockPosts(10),
+      }),
+    )
+    const query = createLiveQueryCollection({
+      query: (q) =>
+        q.from({ post: source }).orderBy(({ post }) => post.createdAt, `desc`),
+    })
+    const { result } = renderHook(() =>
+      useLiveInfiniteQuery(query, { pageSize: 2 }),
+    )
+
+    await waitFor(() => {
+      expect(result.current.isReady).toBe(true)
+      expect(result.current.hasNextPage).toBe(true)
+    })
+
+    const failure = new Error(`window load failed`)
+    vi.spyOn(query.utils, `setWindow`).mockRejectedValueOnce(failure)
+
+    act(() => {
+      void result.current.fetchNextPage()
+    })
+
+    await waitFor(() => {
+      expect(result.current.isError).toBe(true)
+      expect(result.current.error).toBe(failure)
+      expect(result.current.isFetchingNextPage).toBe(false)
+    })
+    expect(result.current.pages).toHaveLength(1)
+    expect(result.current.hasNextPage).toBe(true)
   })
 
   it(`compares dependencies by identity instead of serialization`, async () => {

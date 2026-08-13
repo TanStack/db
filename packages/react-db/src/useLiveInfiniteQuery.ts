@@ -50,9 +50,7 @@ function assertManyResult(collection: Collection<any, any, any>): void {
   }
 }
 
-export type UseLiveInfiniteQueryConfig<
-  TContext extends Context & NonSingleResult,
-> = {
+export type UseLiveInfiniteQueryConfig<TContext extends Context> = {
   pageSize?: number
   initialPageParam?: number
   /**
@@ -68,20 +66,22 @@ export type UseLiveInfiniteQueryConfig<
   ) => number | undefined
 }
 
-export type UseLiveInfiniteQueryReturn<
-  TContext extends Context & NonSingleResult,
-> = Omit<ReturnType<typeof useLiveQuery<TContext>>, `data`> & {
+export type UseLiveInfiniteQueryReturn<TContext extends Context> = Omit<
+  ReturnType<typeof useLiveQuery<TContext>>,
+  `data`
+> & {
   data: InferResultType<TContext>
   pages: Array<Array<InferResultType<TContext>[number]>>
   pageParams: Array<number>
-  fetchNextPage: () => Promise<void>
+  fetchNextPage: () => void
   hasNextPage: boolean
   isFetchingNextPage: boolean
   error: unknown
 }
 
-type EnabledLiveQueryReturn<TContext extends Context & NonSingleResult> =
-  ReturnType<typeof useLiveQuery<TContext>>
+type EnabledLiveQueryReturn<TContext extends Context> = ReturnType<
+  typeof useLiveQuery<TContext>
+>
 
 type InfiniteQueryRenderState = {
   inputKind: `collection` | `query`
@@ -172,18 +172,14 @@ export function useLiveInfiniteQuery<
 ): UseLiveInfiniteQueryReturn<any>
 
 // Overload for query function
-export function useLiveInfiniteQuery<
-  TContext extends Context & NonSingleResult,
->(
+export function useLiveInfiniteQuery<TContext extends Context>(
   queryFn: (q: InitialQueryBuilder) => QueryBuilder<TContext>,
   config: UseLiveInfiniteQueryConfig<TContext>,
   deps?: Array<unknown>,
 ): UseLiveInfiniteQueryReturn<TContext>
 
 // Implementation
-export function useLiveInfiniteQuery<
-  TContext extends Context & NonSingleResult,
->(
+export function useLiveInfiniteQuery<TContext extends Context>(
   queryFnOrCollection: any,
   config: UseLiveInfiniteQueryConfig<TContext>,
   deps: Array<unknown> = [],
@@ -319,10 +315,12 @@ export function useLiveInfiniteQuery<
   const getSnapshot = useCallback(() => controller.getSnapshot(), [controller])
   const snapshot = useSyncExternalStore(subscribe, getSnapshot)
 
-  const fetchNextPage = useCallback(
-    () => controller.fetchNextPage(),
-    [controller],
-  )
+  const fetchNextPage = useCallback(() => {
+    void controller.fetchNextPage().catch(() => {
+      // Pagination errors are exposed through the controller snapshot. Keep
+      // the existing fire-and-forget React API from leaking rejections.
+    })
+  }, [controller])
 
   return {
     data: snapshot.data as InferResultType<TContext>,

@@ -54,5 +54,11 @@ describe(`useLiveInfiniteQuery type assertions`, () => {
           .findOne(),
       { pageSize: 5 },
     )
+
+    useLiveInfiniteQuery(
+      // @ts-expect-error Infinite queries do not support disabled null queries.
+      (_q: InitialQueryBuilder) => null,
+      { pageSize: 5 },
+    )
   })
 })

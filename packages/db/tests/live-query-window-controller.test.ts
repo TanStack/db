@@ -705,6 +705,24 @@ describe(`createLiveQueryWindowController`, () => {
     await lq.cleanup()
   })
 
+  it(`recaptures an external window change after standalone preload`, async () => {
+    const lq = makeOrderedLiveQuery(makeSource(), 2)
+    const controller = createLiveQueryWindowController<Row, string>(lq as any, {
+      pageSize: 3,
+    })
+
+    await controller.preload()
+    expect(lq.utils.getWindow()).toEqual({ offset: 0, limit: 4 })
+
+    await lq.utils.setWindow({ offset: 0, limit: 6 })
+    const unsubscribe = controller.subscribe(() => {})
+    unsubscribe()
+
+    expect(lq.utils.getWindow()).toEqual({ offset: 0, limit: 6 })
+    controller.dispose()
+    await lq.cleanup()
+  })
+
   it(`ignores a failed attachment superseded by a new lease`, async () => {
     const lq = makeOrderedLiveQuery(makeSource(), 2)
     await lq.preload()

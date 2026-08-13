@@ -47,6 +47,7 @@ class WindowCoordinator {
   private readonly leases = new Map<symbol, number>()
   private readonly leaseVersions = new Map<symbol, number>()
   private baselineWindow: { offset: number; limit: number } | undefined
+  private retainedWindow: { offset: number; limit: number } | undefined
   private shouldCaptureBaseline = true
   private appliedLimit: number | undefined
   private pending: PendingWindow | undefined
@@ -56,9 +57,17 @@ class WindowCoordinator {
   constructor(private readonly target: WindowTarget) {}
 
   request(lease: symbol, limit: number): WindowResult {
-    if (this.leases.size === 0 && this.shouldCaptureBaseline) {
-      this.baselineWindow = this.target.utils?.getWindow?.()
-      this.shouldCaptureBaseline = false
+    if (this.leases.size === 0) {
+      const currentWindow = this.target.utils?.getWindow?.()
+      const retainedWindowChanged =
+        this.retainedWindow !== undefined &&
+        (currentWindow?.offset !== this.retainedWindow.offset ||
+          currentWindow.limit !== this.retainedWindow.limit)
+      if (this.shouldCaptureBaseline || retainedWindowChanged) {
+        this.baselineWindow = currentWindow
+        this.shouldCaptureBaseline = false
+      }
+      this.retainedWindow = undefined
     }
     const previousLimit = this.leases.get(lease)
     const previousVersion = this.leaseVersions.get(lease)
@@ -123,7 +132,11 @@ class WindowCoordinator {
     this.appliedLimit = undefined
 
     if (this.leases.size === 0) {
-      if (restoreWhenEmpty) this.restoreInitialWindow()
+      if (restoreWhenEmpty) {
+        this.restoreInitialWindow()
+      } else {
+        this.retainedWindow = this.target.utils?.getWindow?.()
+      }
       return
     }
 
@@ -174,6 +187,7 @@ class WindowCoordinator {
   private restoreInitialWindow(): void {
     const setWindow = this.target.utils?.setWindow
     const baselineWindow = this.baselineWindow
+    this.retainedWindow = undefined
     this.shouldCaptureBaseline = true
     if (!baselineWindow || typeof setWindow !== `function`) return
     try {

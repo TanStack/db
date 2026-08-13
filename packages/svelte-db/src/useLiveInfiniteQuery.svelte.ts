@@ -113,13 +113,13 @@ export type LiveInfiniteQueryConfig<TRow> = InfiniteQueryOptions & {
   ) => number | undefined
 }
 
-export type UseLiveInfiniteQueryConfig<
-  TContext extends Context & NonSingleResult,
-> = LiveInfiniteQueryConfig<InferResultType<TContext>[number]>
+export type UseLiveInfiniteQueryConfig<TContext extends Context> =
+  LiveInfiniteQueryConfig<InferResultType<TContext>[number]>
 
-export type UseLiveInfiniteQueryReturn<
-  TContext extends Context & NonSingleResult,
-> = Omit<ReturnType<typeof useLiveQuery<TContext>>, `data`> & {
+export type UseLiveInfiniteQueryReturn<TContext extends Context> = Omit<
+  ReturnType<typeof useLiveQuery<TContext>>,
+  `data`
+> & {
   data: InferResultType<TContext>
   pages: Array<Array<InferResultType<TContext>[number]>>
   pageParams: Array<number>
@@ -146,8 +146,9 @@ export type UseLiveInfiniteQueryReturnWithCollection<
   error: unknown
 }
 
-type EnabledLiveQueryReturn<TContext extends Context & NonSingleResult> =
-  ReturnType<typeof useLiveQuery<TContext>>
+type EnabledLiveQueryReturn<TContext extends Context> = ReturnType<
+  typeof useLiveQuery<TContext>
+>
 
 /**
  * Create a Svelte-native reactive view over the shared live-query window
@@ -164,17 +165,13 @@ export function useLiveInfiniteQuery<
   config: LiveInfiniteQueryConfig<TResult>,
 ): UseLiveInfiniteQueryReturnWithCollection<TResult, TKey, TUtils>
 
-export function useLiveInfiniteQuery<
-  TContext extends Context & NonSingleResult,
->(
+export function useLiveInfiniteQuery<TContext extends Context>(
   queryFn: (q: InitialQueryBuilder) => QueryBuilder<TContext>,
   config: UseLiveInfiniteQueryConfig<TContext>,
   deps?: Array<() => unknown>,
 ): UseLiveInfiniteQueryReturn<TContext>
 
-export function useLiveInfiniteQuery<
-  TContext extends Context & NonSingleResult,
->(
+export function useLiveInfiniteQuery<TContext extends Context>(
   queryFnOrCollection: unknown,
   config: InfiniteQueryOptions,
   deps: Array<() => unknown> = [],

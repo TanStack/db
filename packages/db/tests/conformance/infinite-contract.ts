@@ -27,6 +27,7 @@ export interface InfiniteQueryResult {
 
 export interface InfiniteQueryHandle {
   current: () => InfiniteQueryResult
+  /** Invoke a page fetch and wait until its observable request settles. */
   fetchNextPage: () => Promise<void>
   flush: () => Promise<void>
   apply: (fn: () => void) => Promise<void>

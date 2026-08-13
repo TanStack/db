@@ -1,31 +1,31 @@
-import { describe, it } from 'vitest'
-import { createCollection } from '@tanstack/db'
-import { mockSyncCollectionOptions } from '../../db/tests/utils'
+import { describe, expectTypeOf, it } from 'vitest'
 import { useLiveInfiniteQuery } from '../src/useLiveInfiniteQuery.svelte.js'
-import type { InitialQueryBuilder } from '@tanstack/db'
-
-type Post = {
-  id: string
-  createdAt: number
-}
+import type {
+  UseLiveInfiniteQueryConfig,
+  UseLiveInfiniteQueryReturn,
+} from '../src/useLiveInfiniteQuery.svelte.js'
+import type { Context, InitialQueryBuilder } from '@tanstack/db'
 
 describe(`useLiveInfiniteQuery type assertions`, () => {
-  it(`rejects a single-result query`, () => {
-    const posts = createCollection(
-      mockSyncCollectionOptions<Post>({
-        id: `svelte-infinite-types`,
-        getKey: (post) => post.id,
-        initialData: [],
-      }),
-    )
+  it(`keeps legacy generic wrappers source-compatible`, () => {
+    function acceptsContext<TContext extends Context>(
+      _config: UseLiveInfiniteQueryConfig<TContext>,
+      _result: UseLiveInfiniteQueryReturn<TContext>,
+    ): void {}
 
+    void acceptsContext
+  })
+
+  it(`preserves the awaitable fetch callback`, () => {
+    expectTypeOf<
+      UseLiveInfiniteQueryReturn<Context>[`fetchNextPage`]
+    >().toEqualTypeOf<() => Promise<void>>()
+  })
+
+  it(`does not advertise disabled null queries`, () => {
     useLiveInfiniteQuery(
-      // @ts-expect-error Infinite queries cannot use a single-result query.
-      (q: InitialQueryBuilder) =>
-        q
-          .from({ posts })
-          .orderBy(({ posts: post }) => post.createdAt, `desc`)
-          .findOne(),
+      // @ts-expect-error Infinite queries do not support disabled null queries.
+      (_q: InitialQueryBuilder) => null,
       { pageSize: 5 },
     )
   })

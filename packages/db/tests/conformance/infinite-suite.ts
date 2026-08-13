@@ -379,8 +379,8 @@ export function runInfiniteQuerySuite(rawDriver: InfiniteQueryDriver): void {
     )
 
     scenario(
-      `fetch-promise`,
-      `returns a promise that settles with the window request`,
+      `fetch-settlement`,
+      `settles the driver operation with the window request`,
       async () => {
         const source = driver.makeSource(rows(8))
         const handle = driver.mount(

@@ -3,6 +3,7 @@ import { effectScope, nextTick, shallowRef } from 'vue'
 import { createCollection, createLiveQueryCollection } from '@tanstack/db'
 import { useLiveInfiniteQuery } from '../src/useLiveInfiniteQuery'
 import { mockSyncCollectionOptions } from '../../db/tests/utils'
+import type { InitialQueryBuilder } from '@tanstack/db'
 
 type Post = {
   id: string
@@ -113,5 +114,32 @@ describe(`useLiveInfiniteQuery`, () => {
     expect(query.collection.value).toBe(secondQuery)
     expect(query.pages.value).toHaveLength(1)
     expect(query.data.value.map((post) => post.createdAt)).toEqual([4, 3, 2])
+  })
+
+  it(`does not recreate a controller through a retained callback after unmount`, async () => {
+    const posts = createPostsCollection(`vue-infinite-retained-fetch`, 7)
+    let queryBuilds = 0
+    const scope = effectScope()
+    const query = scope.run(() =>
+      useLiveInfiniteQuery(
+        (q: InitialQueryBuilder) => {
+          queryBuilds++
+          return q
+            .from({ posts })
+            .orderBy(({ posts: post }) => post.createdAt, `desc`)
+        },
+        { pageSize: 3 },
+      ),
+    )
+    if (!query) throw new Error(`Failed to mount infinite query`)
+    await flushVue()
+    expect(queryBuilds).toBe(1)
+
+    const retainedFetch = query.fetchNextPage
+    scope.stop()
+    await retainedFetch()
+    await retainedFetch()
+
+    expect(queryBuilds).toBe(1)
   })
 })
