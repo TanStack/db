@@ -128,19 +128,21 @@ function makeHandle(
   return {
     current(): ConformanceResult {
       const result = getResult()
+      const col = result?.collection
+      const status = col ? col.status : `disabled`
       let data: any
       try {
-        data = result?.data
+        data = result()
       } catch (err) {
         if (!(err instanceof NotReadyError)) throw err
       }
       return {
         data,
         state: result?.state,
-        status: result?.status ?? `idle`,
-        isReady: Boolean(result?.isReady),
-        isError: Boolean(result?.isError),
-        isEnabled: result?.status !== `disabled`,
+        status,
+        isReady: status === `ready`,
+        isError: status === `error`,
+        isEnabled: status !== `disabled`,
       }
     },
     flush: settle,
