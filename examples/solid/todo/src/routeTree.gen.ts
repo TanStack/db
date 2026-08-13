@@ -9,23 +9,18 @@
 // Additionally, you should also exclude this file from your linter and/or formatter to prevent it from being checked or modified.
 
 import { Route as rootRouteImport } from './routes/__root'
-import { Route as TrailbaseRouteImport } from './routes/trailbase'
-import { Route as QueryRouteImport } from './routes/query'
-import { Route as ElectricRouteImport } from './routes/electric'
 import { Route as IndexRouteImport } from './routes/index'
-import { Route as ApiTodosRouteImport } from './routes/api/todos'
+import { Route as ElectricRouteImport } from './routes/electric'
+import { Route as QueryRouteImport } from './routes/query'
+import { Route as TrailbaseRouteImport } from './routes/trailbase'
 import { Route as ApiConfigRouteImport } from './routes/api/config'
-import { Route as ApiTodosIdRouteImport } from './routes/api/todos.$id'
+import { Route as ApiTodosRouteImport } from './routes/api/todos'
 import { Route as ApiConfigIdRouteImport } from './routes/api/config.$id'
+import { Route as ApiTodosIdRouteImport } from './routes/api/todos.$id'
 
-const TrailbaseRoute = TrailbaseRouteImport.update({
-  id: '/trailbase',
-  path: '/trailbase',
-  getParentRoute: () => rootRouteImport,
-} as any)
-const QueryRoute = QueryRouteImport.update({
-  id: '/query',
-  path: '/query',
+const IndexRoute = IndexRouteImport.update({
+  id: '/',
+  path: '/',
   getParentRoute: () => rootRouteImport,
 } as any)
 const ElectricRoute = ElectricRouteImport.update({
@@ -33,14 +28,14 @@ const ElectricRoute = ElectricRouteImport.update({
   path: '/electric',
   getParentRoute: () => rootRouteImport,
 } as any)
-const IndexRoute = IndexRouteImport.update({
-  id: '/',
-  path: '/',
+const QueryRoute = QueryRouteImport.update({
+  id: '/query',
+  path: '/query',
   getParentRoute: () => rootRouteImport,
 } as any)
-const ApiTodosRoute = ApiTodosRouteImport.update({
-  id: '/api/todos',
-  path: '/api/todos',
+const TrailbaseRoute = TrailbaseRouteImport.update({
+  id: '/trailbase',
+  path: '/trailbase',
   getParentRoute: () => rootRouteImport,
 } as any)
 const ApiConfigRoute = ApiConfigRouteImport.update({
@@ -48,15 +43,20 @@ const ApiConfigRoute = ApiConfigRouteImport.update({
   path: '/api/config',
   getParentRoute: () => rootRouteImport,
 } as any)
-const ApiTodosIdRoute = ApiTodosIdRouteImport.update({
-  id: '/$id',
-  path: '/$id',
-  getParentRoute: () => ApiTodosRoute,
+const ApiTodosRoute = ApiTodosRouteImport.update({
+  id: '/api/todos',
+  path: '/api/todos',
+  getParentRoute: () => rootRouteImport,
 } as any)
 const ApiConfigIdRoute = ApiConfigIdRouteImport.update({
   id: '/$id',
   path: '/$id',
   getParentRoute: () => ApiConfigRoute,
+} as any)
+const ApiTodosIdRoute = ApiTodosIdRouteImport.update({
+  id: '/$id',
+  path: '/$id',
+  getParentRoute: () => ApiTodosRoute,
 } as any)
 
 export interface FileRoutesByFullPath {
@@ -134,18 +134,11 @@ export interface RootRouteChildren {
 
 declare module '@tanstack/solid-router' {
   interface FileRoutesByPath {
-    '/trailbase': {
-      id: '/trailbase'
-      path: '/trailbase'
-      fullPath: '/trailbase'
-      preLoaderRoute: typeof TrailbaseRouteImport
-      parentRoute: typeof rootRouteImport
-    }
-    '/query': {
-      id: '/query'
-      path: '/query'
-      fullPath: '/query'
-      preLoaderRoute: typeof QueryRouteImport
+    '/': {
+      id: '/'
+      path: '/'
+      fullPath: '/'
+      preLoaderRoute: typeof IndexRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/electric': {
@@ -155,18 +148,18 @@ declare module '@tanstack/solid-router' {
       preLoaderRoute: typeof ElectricRouteImport
       parentRoute: typeof rootRouteImport
     }
-    '/': {
-      id: '/'
-      path: '/'
-      fullPath: '/'
-      preLoaderRoute: typeof IndexRouteImport
+    '/query': {
+      id: '/query'
+      path: '/query'
+      fullPath: '/query'
+      preLoaderRoute: typeof QueryRouteImport
       parentRoute: typeof rootRouteImport
     }
-    '/api/todos': {
-      id: '/api/todos'
-      path: '/api/todos'
-      fullPath: '/api/todos'
-      preLoaderRoute: typeof ApiTodosRouteImport
+    '/trailbase': {
+      id: '/trailbase'
+      path: '/trailbase'
+      fullPath: '/trailbase'
+      preLoaderRoute: typeof TrailbaseRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/api/config': {
@@ -176,12 +169,12 @@ declare module '@tanstack/solid-router' {
       preLoaderRoute: typeof ApiConfigRouteImport
       parentRoute: typeof rootRouteImport
     }
-    '/api/todos/$id': {
-      id: '/api/todos/$id'
-      path: '/$id'
-      fullPath: '/api/todos/$id'
-      preLoaderRoute: typeof ApiTodosIdRouteImport
-      parentRoute: typeof ApiTodosRoute
+    '/api/todos': {
+      id: '/api/todos'
+      path: '/api/todos'
+      fullPath: '/api/todos'
+      preLoaderRoute: typeof ApiTodosRouteImport
+      parentRoute: typeof rootRouteImport
     }
     '/api/config/$id': {
       id: '/api/config/$id'
@@ -189,6 +182,13 @@ declare module '@tanstack/solid-router' {
       fullPath: '/api/config/$id'
       preLoaderRoute: typeof ApiConfigIdRouteImport
       parentRoute: typeof ApiConfigRoute
+    }
+    '/api/todos/$id': {
+      id: '/api/todos/$id'
+      path: '/$id'
+      fullPath: '/api/todos/$id'
+      preLoaderRoute: typeof ApiTodosIdRouteImport
+      parentRoute: typeof ApiTodosRoute
     }
   }
 }
