@@ -9,7 +9,7 @@ title: UseLiveInfiniteQueryConfig
 type UseLiveInfiniteQueryConfig<TContext> = object;
 ```
 
-Defined in: [useLiveInfiniteQuery.ts:39](https://github.com/TanStack/db/blob/main/packages/react-db/src/useLiveInfiniteQuery.ts#L39)
+Defined in: [useLiveInfiniteQuery.ts:29](https://github.com/TanStack/db/blob/main/packages/react-db/src/useLiveInfiniteQuery.ts#L29)
 
 ## Type Parameters
 
@@ -25,7 +25,7 @@ Defined in: [useLiveInfiniteQuery.ts:39](https://github.com/TanStack/db/blob/mai
 optional getNextPageParam: (lastPage, allPages, lastPageParam, allPageParams) => number | undefined;
 ```
 
-Defined in: [useLiveInfiniteQuery.ts:47](https://github.com/TanStack/db/blob/main/packages/react-db/src/useLiveInfiniteQuery.ts#L47)
+Defined in: [useLiveInfiniteQuery.ts:37](https://github.com/TanStack/db/blob/main/packages/react-db/src/useLiveInfiniteQuery.ts#L37)
 
 #### Parameters
 
@@ -63,7 +63,7 @@ Provided for API compatibility with TanStack Query conventions.
 optional initialPageParam: number;
 ```
 
-Defined in: [useLiveInfiniteQuery.ts:41](https://github.com/TanStack/db/blob/main/packages/react-db/src/useLiveInfiniteQuery.ts#L41)
+Defined in: [useLiveInfiniteQuery.ts:31](https://github.com/TanStack/db/blob/main/packages/react-db/src/useLiveInfiniteQuery.ts#L31)
 
 ***
 
@@ -73,4 +73,4 @@ Defined in: [useLiveInfiniteQuery.ts:41](https://github.com/TanStack/db/blob/mai
 optional pageSize: number;
 ```
 
-Defined in: [useLiveInfiniteQuery.ts:40](https://github.com/TanStack/db/blob/main/packages/react-db/src/useLiveInfiniteQuery.ts#L40)
+Defined in: [useLiveInfiniteQuery.ts:30](https://github.com/TanStack/db/blob/main/packages/react-db/src/useLiveInfiniteQuery.ts#L30)

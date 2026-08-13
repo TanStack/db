@@ -9,10 +9,10 @@ title: UseLiveInfiniteQueryConfig
 type UseLiveInfiniteQueryConfig<TContext> = LiveInfiniteQueryConfig<InferResultType<TContext>[number]>;
 ```
 
-Defined in: [useLiveInfiniteQuery.svelte.ts:56](https://github.com/TanStack/db/blob/main/packages/svelte-db/src/useLiveInfiniteQuery.svelte.ts#L56)
+Defined in: [useLiveInfiniteQuery.ts:52](https://github.com/TanStack/db/blob/main/packages/vue-db/src/useLiveInfiniteQuery.ts#L52)
 
 ## Type Parameters
 
 ### TContext
 
-`TContext` *extends* `Context`
+`TContext` *extends* `Context` & `NonSingleResult`
