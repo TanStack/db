@@ -522,6 +522,22 @@ export interface LiveQueryWindowController<
   dispose: () => void
 }
 
+/**
+ * Run an adapter-facing page fetch. The controller records failures in its
+ * snapshot; consuming the rejection here keeps event handlers safe while the
+ * returned promise still settles with the request.
+ *
+ * @internal This contract is unstable while RFC #1623 is being implemented.
+ */
+export function fetchNextLiveQueryWindowPage(
+  controller: Pick<
+    LiveQueryWindowController<object, string | number>,
+    `fetchNextPage`
+  >,
+): Promise<void> {
+  return controller.fetchNextPage().catch(() => {})
+}
+
 interface CachedFrom {
   observerSnapshot: unknown
   committedPageCount: number

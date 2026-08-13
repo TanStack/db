@@ -3,6 +3,7 @@ import {
   compareLiveQueryWindowDependencies,
   createLiveQueryCollection,
   createLiveQueryWindowController,
+  fetchNextLiveQueryWindowPage,
   getLiveQueryWindowCollectionWarning,
   normalizeLiveQueryWindowPageSize,
   resolveLiveQueryWindowInput,
@@ -219,7 +220,7 @@ export function useLiveInfiniteQuery<TContext extends Context>(
     // effect that subscribes it. Queue the imperative call until that handoff
     // has completed so it cannot target an inactive controller.
     await tick()
-    await controller.fetchNextPage()
+    await fetchNextLiveQueryWindowPage(controller)
   }
 
   return {

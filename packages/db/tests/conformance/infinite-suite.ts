@@ -493,7 +493,7 @@ export function runInfiniteQuerySuite(rawDriver: InfiniteQueryDriver): void {
 
     scenario(
       `window-failure`,
-      `surfaces a rejected window request without committing the page`,
+      `surfaces a failed window request in state without rejecting`,
       async () => {
         const source = driver.makeSource(rows(8))
         const handle = driver.mount(
@@ -519,7 +519,7 @@ export function runInfiniteQuerySuite(rawDriver: InfiniteQueryDriver): void {
         }
 
         try {
-          await expect(handle.fetchNextPage()).rejects.toBe(failure)
+          await expect(handle.fetchNextPage()).resolves.toBeUndefined()
           await handle.flush()
           expect(handle.current().pages.map((page) => page.length)).toEqual([3])
           expect(handle.current().status).toBe(`error`)

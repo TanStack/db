@@ -4,6 +4,7 @@ import {
   compareLiveQueryWindowDependencies,
   createLiveQueryCollection,
   createLiveQueryWindowController,
+  fetchNextLiveQueryWindowPage,
   getLiveQueryWindowCollectionWarning,
   getLiveQueryWindowInputKind,
   normalizeLiveQueryWindowPageSize,
@@ -270,7 +271,7 @@ export function useLiveInfiniteQuery<TContext extends Context>(
   const snapshot = useSyncExternalStore(subscribe, getSnapshot)
 
   const fetchNextPage = useCallback(
-    () => controller.fetchNextPage(),
+    () => fetchNextLiveQueryWindowPage(controller),
     [controller],
   )
 

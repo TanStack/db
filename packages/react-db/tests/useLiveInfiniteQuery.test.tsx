@@ -174,7 +174,7 @@ describe(`useLiveInfiniteQuery`, () => {
     ).toThrow(/orderBy/)
   })
 
-  it(`returns pagination failures through the fetch promise and snapshot`, async () => {
+  it(`resolves the fetch promise and exposes pagination failures in state`, async () => {
     const source = createCollection(
       mockSyncCollectionOptions<Post>({
         id: `infinite-query-pagination-failure`,
@@ -203,7 +203,7 @@ describe(`useLiveInfiniteQuery`, () => {
       request = result.current.fetchNextPage()
     })
     await act(async () => {
-      await expect(request).rejects.toBe(failure)
+      await expect(request).resolves.toBeUndefined()
     })
 
     await waitFor(() => {
