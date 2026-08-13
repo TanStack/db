@@ -1,5 +1,14 @@
 # @tanstack/offline-transactions
 
+## 1.0.45
+
+### Patch Changes
+
+- Update agent skills to match current APIs and behavior. ([#1696](https://github.com/TanStack/db/pull/1696))
+
+- Updated dependencies [[`5f63996`](https://github.com/TanStack/db/commit/5f63996b0febd4775fb641f50975f8f0d442dc00)]:
+  - @tanstack/db@0.7.2
+
 ## 1.0.44
 
 ### Patch Changes
