@@ -2736,6 +2736,62 @@ describe(`Query Collections`, () => {
 
       expect(rendered.result()).toBeUndefined()
     })
+
+    it(`should reflect live updates, deletes, and inserts through findOne`, async () => {
+      const collection = createCollection(
+        mockSyncCollectionOptions<Person>({
+          id: `test-persons-findone-live`,
+          getKey: (person: Person) => person.id,
+          initialData: initialPersons,
+        }),
+      )
+
+      const rendered = renderHook(() => {
+        return useLiveQuery((q) =>
+          q
+            .from({ collection })
+            .where(({ collection: c }) => eq(c.id, `3`))
+            .findOne(),
+        )
+      })
+
+      await waitFor(() => {
+        expect(rendered.result()).toMatchObject({ id: `3`, name: `John Smith` })
+      })
+
+      collection.utils.begin()
+      collection.utils.write({
+        type: `update`,
+        value: { id: `3`, name: `John Smith Updated`, age: 50, email: `js@example.com`, isActive: true, team: `team3` },
+      })
+      collection.utils.commit()
+
+      await waitFor(() => {
+        expect(rendered.result()).toMatchObject({ id: `3`, name: `John Smith Updated` })
+      })
+
+      collection.utils.begin()
+      collection.utils.write({
+        type: `delete`,
+        value: { id: `3`, name: `John Smith Updated`, age: 50, email: `js@example.com`, isActive: true, team: `team3` },
+      })
+      collection.utils.commit()
+
+      await waitFor(() => {
+        expect(rendered.result()).toBeUndefined()
+      })
+
+      collection.utils.begin()
+      collection.utils.write({
+        type: `insert`,
+        value: { id: `3`, name: `John Smith Reborn`, age: 45, email: `jsr@example.com`, isActive: true, team: `team3` },
+      })
+      collection.utils.commit()
+
+      await waitFor(() => {
+        expect(rendered.result()).toMatchObject({ id: `3`, name: `John Smith Reborn` })
+      })
+    })
   })
 
   it(`should resync first change after collection switch instead of patching stale row indexes`, async () => {

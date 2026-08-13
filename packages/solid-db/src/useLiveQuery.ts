@@ -4,6 +4,7 @@ import {
   createLiveQueryCollection,
   createLiveQueryObserver,
   isCollection,
+  isSingleResultCollection,
 } from '@tanstack/db'
 import {
   createMemo,
@@ -14,7 +15,6 @@ import {
 } from 'solid-js'
 import type { Accessor } from 'solid-js'
 import type {
-  ChangeMessage,
   Collection,
   CollectionStatus,
   Context,
@@ -22,21 +22,17 @@ import type {
   InferResultType,
   InitialQueryBuilder,
   LiveQueryCollectionConfig,
+  LiveQuerySnapshot,
   NonSingleResult,
   QueryBuilder,
   SingleResult,
-  WithVirtualProps,
 } from '@tanstack/db'
 
 export type UseLiveQueryStatus = CollectionStatus | `disabled`
 
 const RECONCILE_KEY = `$key` as const
 
-// null key = positional/deep merge (v2 equivalent of v1's { merge: true })
-const RECONCILE_DEEP = null
-
 type AnyCollection = Collection<any, any, any>
-type AnyChange = ChangeMessage<any, string | number>
 
 /**
  * Create a live query using a query function
@@ -291,7 +287,9 @@ export function useLiveQuery<
   isCleanedUp: boolean
 }
 
-// Implementation - use function overloads to infer the actual collection type
+// Wholesale observer mode: the observer delivers wake-up notifies; Solid's
+// keyed reconcile handles the per-field diff. Collection-level optimistic
+// transactions flow through the change stream and reconcile naturally.
 export function useLiveQuery(
   configOrQueryOrCollection: (queryFn?: any) => any,
 ) {
@@ -332,59 +330,23 @@ export function useLiveQuery(
         })
       } catch (error) {
         collectionError = error
-        setStatus(`error` as const)
         return null
       }
     },
     { name: `TanstackDBCollectionMemo` },
   )
 
-  // Reactive state that gets updated granularly through change events
+  // Lazily synced — populated on first `.state` read, then kept in sync
+  // from subsequent observer snapshots.
   const state = new ReactiveMap<string | number, any>()
+  let stateAccessed = false
+  let stateSyncedCollection: AnyCollection | null = null
 
-  // Reactive data array that maintains sorted order
   const [data, setData] = createStore<Array<any>>([], {
     name: `TanstackDBData`,
   })
 
-  const rowIndex = new Map<string | number, number>()
-  const syncRows: Array<any> = []
-
-  // The collection currently reflected by `data`.
-  let syncedCollection: AnyCollection | null = null
-
-  // `.state` is maintained lazily and can lag behind `data` until accessed.
-  let stateSyncedCollection: AnyCollection | null = null
-  let stateAccessed = false
-
-  // The row currently exposed by findOne-style queries.
-  let singleRowKey: string | number | undefined
-
-  const isSingleResult = (currentCollection: AnyCollection) => {
-    const config = currentCollection.config
-    return 'singleResult' in config && config.singleResult === true
-  }
-
-  // Patch an existing store row instead of replacing the array. This keeps
-  // Solid's per-field subscriptions alive for rows that did not change.
-  const patchStoreRow = (index: number, row: WithVirtualProps<any>) => {
-    if (index >= data.length) return false
-
-    setData(s => { reconcile(row, RECONCILE_DEEP)(s[index]) })
-    return true
-  }
-
-  // Public `.state` is lazy. Most consumers only use the accessor result, so we
-  // avoid maintaining a second reactive map until `.state` is actually read.
-  const syncStateFromCollection = (currentCollection: AnyCollection) => {
-    state.clear()
-    for (const value of currentCollection.values()) {
-      state.set(value.$key, value)
-    }
-    stateSyncedCollection = currentCollection
-  }
-
-  // Track collection status reactively
+  // ownedWrite lets setStatus be called from the split-effect's apply phase.
   const [status, setStatus] = createSignal<UseLiveQueryStatus>(
     () => collection() ? collection()!.status : (`disabled` as const),
     {
@@ -393,143 +355,32 @@ export function useLiveQuery(
     },
   )
 
-  // Sync the ordered result array from the collection, reusing scratch storage.
-  const syncDataFromCollection = (
-    currentCollection: AnyCollection,
-    stateTarget = stateAccessed ? state : undefined,
-  ) => {
-    syncedCollection = currentCollection
-
-    // Unsorted result collections keep stable positions by key; sorted queries
-    // may move rows, so they always resync instead of using rowIndex patches.
-    const shouldTrackIndex = currentCollection.config.compare === undefined
-    if (shouldTrackIndex) rowIndex.clear()
-
-    stateTarget?.clear()
-
-    if (isSingleResult(currentCollection)) {
-      const value = currentCollection.values().next().value
-      if (!value) {
-        singleRowKey = undefined
-        syncRows.length = 0
-        if (stateTarget) stateSyncedCollection = currentCollection
-        setData(reconcile(syncRows, RECONCILE_KEY))
-        return
-      }
-
-      const row = value
-      singleRowKey = row.$key
-      if (stateTarget) {
-        stateTarget.set(row.$key, row)
-        stateSyncedCollection = currentCollection
-      }
-      syncRows[0] = row
-      syncRows.length = 1
-      setData(reconcile(syncRows, RECONCILE_KEY))
-      return
-    }
-
-    syncRows.length = 0
-
-    let index = 0
-    for (const value of currentCollection.values()) {
-      const row = value
-      syncRows[index] = row
-      if (shouldTrackIndex) rowIndex.set(row.$key, index)
-      if (stateTarget) stateTarget.set(row.$key, row)
-      index++
-    }
-    syncRows.length = index
-    if (stateTarget) stateSyncedCollection = currentCollection
-
-    setData(reconcile(syncRows, RECONCILE_KEY))
+  // Single-result collections expose data[0]; wrap in a 1-element array
+  // for uniform keyed reconciliation.
+  const snapshotToRows = (
+    snapshot: LiveQuerySnapshot<any, any>,
+  ): Array<any> => {
+    const snapshotData = snapshot.data
+    if (snapshotData === undefined) return []
+    if (Array.isArray(snapshotData)) return snapshotData
+    return [snapshotData]
   }
 
-  const syncDataOnlyFromCollection = (currentCollection: AnyCollection) => {
-    // Used after `.state` has already been incrementally updated while `data`
-    // still needs an authoritative rebuild for ordering/membership.
-    syncDataFromCollection(currentCollection, undefined)
-  }
-
-  // Fast path for update-only batches. Inserts/deletes or sorted queries can
-  // change membership/order, so those fall back to a collection resync.
-  const patchArrayChanges = (
+  const applySnapshot = (
+    snapshot: LiveQuerySnapshot<any, any>,
     currentCollection: AnyCollection,
-    changes: Array<AnyChange>,
   ) => {
-    let needsResync = false
-
-    for (const change of changes) {
-      if (change.type !== `update`) {
-        // Inserts/deletes can change membership; update `.state` while we are
-        // here, then rebuild `data` once after the loop.
-        needsResync = true
-        if (stateAccessed) {
-          if (change.type === `delete`) {
-            state.delete(change.key)
-          } else {
-            state.set(change.key, change.value)
-          }
+    setData(reconcile(snapshotToRows(snapshot), RECONCILE_KEY))
+    setStatus(snapshot.status)
+    if (stateAccessed) {
+      state.clear()
+      if (snapshot.state) {
+        for (const [key, value] of snapshot.state) {
+          state.set(key, value)
         }
-        continue
       }
-
-      const row = change.value
-
-      if (stateAccessed) state.set(change.key, row)
-
-      // Once a batch needs a resync, avoid doing wasted row-level patches for
-      // later updates in the same batch.
-      if (needsResync) continue
-
-      const index = rowIndex.get(change.key)
-      if (index === undefined || !patchStoreRow(index, row)) {
-        needsResync = true
-      }
+      stateSyncedCollection = currentCollection
     }
-
-    if (needsResync) {
-      syncDataOnlyFromCollection(currentCollection)
-    }
-
-    return !needsResync
-  }
-
-  const patchSingleResultChanges = (
-    currentCollection: AnyCollection,
-    changes: Array<AnyChange>,
-  ) => {
-    let needsResync = false
-
-    for (const change of changes) {
-      if (change.type !== `update`) {
-        // Non-update changes can replace/remove the single result; update the
-        // lazy state map now and rebuild `data` after this pass.
-        needsResync = true
-        if (stateAccessed) {
-          if (change.type === `delete`) {
-            state.delete(change.key)
-          } else {
-            state.set(change.key, change.value)
-          }
-        }
-        continue
-      }
-
-      // Updates for non-matching rows do not affect the exposed single result.
-      if (change.key !== singleRowKey) continue
-
-      const row = change.value
-      if (stateAccessed) state.set(change.key, row)
-
-      if (!needsResync) setData(s => { reconcile(row, RECONCILE_DEEP)(s[0]) })
-    }
-
-    if (needsResync) {
-      syncDataOnlyFromCollection(currentCollection)
-    }
-
-    return !needsResync
   }
 
   // Async memo for Loading: awaits collection readiness. Reading this
@@ -545,61 +396,43 @@ export function useLiveQuery(
     return col
   })
 
-  // Solid 2.0 split render effect: compute tracks the collection memo; apply
-  // runs during the render queue (not deferred like createEffect) so data is
-  // available synchronously. Reactive reads in apply are untracked by design.
+  // Split render effect owns the observer lifecycle per collection. Wholesale
+  // mode delivers nothing during subscribe, so the initial snapshot is pulled
+  // synchronously after attach.
   createRenderEffect(
     () => collection(),
     (currentCollection) => {
       if (!currentCollection) {
-        if (!collectionError) setStatus(`disabled` as const)
-        syncedCollection = null
+        if (collectionError) {
+          setStatus(`error` as const)
+        } else {
+          setStatus(`disabled` as const)
+        }
         stateSyncedCollection = null
-        singleRowKey = undefined
-        rowIndex.clear()
         if (stateAccessed) state.clear()
-        syncRows.length = 0
-        setData(reconcile(syncRows, RECONCILE_KEY))
+        setData(reconcile([], RECONCILE_KEY))
         return
       }
-      const singleResult = isSingleResult(currentCollection)
-      collectionError = null
-      const canPatchUpdates = currentCollection.config.compare === undefined
-      // The shared observer owns the subscription, the ready-race, and status;
-      // Solid materializes the delivered deltas into the keyed store, patching
-      // rows granularly when membership and order cannot change.
-      const observer = createLiveQueryObserver(currentCollection)
-      const unsubscribe = observer.subscribe(
-        (changes: Array<ChangeMessage<any>> | undefined) => {
-          if (syncedCollection !== currentCollection) {
-            // The observer replays the initial state on attach, which can win
-            // the race against the resource. Do one authoritative sync instead
-            // of patching stale row indices from the previous collection.
-            syncDataFromCollection(currentCollection)
-          } else if (changes !== undefined && canPatchUpdates) {
-            if (singleResult) {
-              patchSingleResultChanges(currentCollection, changes)
-            } else {
-              patchArrayChanges(currentCollection, changes)
-            }
-          } else {
-            // Synthetic status notifies carry no change set, and sorted
-            // queries can reorder rows on any delta; both need a full resync.
-            syncDataFromCollection(currentCollection)
-          }
 
-          // Update status ref on every change
-          setStatus(observer.getSnapshot().status)
-        },
-      )
-      // An already-ready empty collection produces no initial row batch. Bring
-      // ordered data and status in line synchronously instead of waiting for the
-      // resource continuation to correct the previous collection's rows.
-      syncDataFromCollection(currentCollection)
-      setStatus(observer.getSnapshot().status)
+      collectionError = null
+
+      const observer = createLiveQueryObserver(currentCollection, {
+        mode: `wholesale`,
+      })
+
+      const sync = () => {
+        applySnapshot(observer.getSnapshot(), currentCollection)
+      }
+
+      const unsubscribe = observer.subscribe(sync)
+
+      // Wholesale delivers nothing during subscribe — seed synchronously.
+      sync()
 
       let cancelled = false
 
+      // Observer already handles status:change; this captures the error
+      // object itself for getData() to re-throw.
       const offStatusError = currentCollection.on(`status:error`, () => {
         if (cancelled) return
         setStatus(`error` as const)
@@ -631,7 +464,7 @@ export function useLiveQuery(
       return data
     }
     if (s !== `ready`) readiness()
-    if (isSingleResult(currentCollection)) {
+    if (isSingleResultCollection(currentCollection)) {
       return data[0]
     }
     return data
@@ -663,7 +496,12 @@ export function useLiveQuery(
             stateSyncedCollection = null
           }
         } else if (stateSyncedCollection !== currentCollection) {
-          syncStateFromCollection(currentCollection)
+          // Lazy first-time sync; subsequent updates arrive via applySnapshot.
+          state.clear()
+          for (const value of currentCollection.values()) {
+            state.set(value.$key, value)
+          }
+          stateSyncedCollection = currentCollection
         }
         return state
       },

@@ -193,9 +193,8 @@ function mountControllable<P>(
   build: (q: any, param: P) => any,
   initial: P,
 ): ControllableHandle<P> {
-  const [param, setParam] = createSignal(initial as Exclude<P, (...args: Array<never>) => unknown>)
+  const [param, setParam] = createSignal(() => initial)
   const { getResult, dispose } = inRoot(() =>
-    // Reading param() inside the query fn makes Solid recompute on change.
     useLiveQuery((q: any) => build(q, param())),
   )
   const handle = makeHandle(getResult, dispose)

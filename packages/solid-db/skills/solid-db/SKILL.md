@@ -1,33 +1,36 @@
 ---
 name: solid-db
 description: >
-  SolidJS bindings for TanStack DB. useLiveQuery returns an Accessor that
+  SolidJS v2 bindings for TanStack DB. useLiveQuery returns an Accessor that
   doubles as data access (call as function) with state/status properties.
   Fine-grained reactivity: signal reads MUST happen inside the query function
-  for tracking. Config passed as Accessor (() => config). Built-in Suspense
-  support via createResource and errors through Solid ErrorBoundary.
-  ReactiveMap for state. Import from
-  @tanstack/solid-db (re-exports all of @tanstack/db).
+  for tracking. Config passed as Accessor (() => config). Built-in Loading
+  boundary support via async createMemo. Wholesale observer mode + keyed
+  reconcile for per-field row reactivity. Opt-in external-source bridge via
+  enableSolidDBExternalSource. Import from @tanstack/solid-db (re-exports all
+  of @tanstack/db).
 type: framework
 library: db
 framework: solid
-library_version: '0.6.17'
+library_version: '0.7.0'
 requires:
   - db-core
 sources:
   - 'TanStack/db:docs/framework/solid/overview.md'
   - 'TanStack/db:packages/solid-db/src/useLiveQuery.ts'
+  - 'TanStack/db:packages/solid-db/src/external-source.ts'
 ---
 
 This skill builds on db-core. Read it first for collection setup, query builder, and mutation patterns.
 
-# TanStack DB — SolidJS
+# TanStack DB — SolidJS v2
 
 ## Setup
 
 ```tsx
 import { useLiveQuery, eq, not } from '@tanstack/solid-db'
-import { ErrorBoundary, For, Show, Suspense } from 'solid-js'
+import { For, Show } from 'solid-js'
+import { Loading } from '@solidjs/web'
 
 function TodoList() {
   const todosQuery = useLiveQuery((q) =>
@@ -38,11 +41,11 @@ function TodoList() {
   )
 
   return (
-    <Suspense fallback={<div>Loading...</div>}>
+    <Loading fallback={<div>Loading...</div>}>
       <ul>
         <For each={todosQuery()}>{(todo) => <li>{todo.text}</li>}</For>
       </ul>
-    </Suspense>
+    </Loading>
   )
 }
 ```
@@ -59,12 +62,9 @@ Returns an `Accessor<Array<T>>` (or `Accessor<T | undefined>` with `findOne`) wi
 // Query function — call result as function for data
 const query = useLiveQuery((q) => q.from({ todo: todoCollection }))
 // query()        → Array<T> (data)  — or T | undefined when using findOne()
+// query.data     → DEPRECATED — use query() instead. Migrate any existing code.
 // query.status   → CollectionStatus
-// query.isLoading, query.isReady
-// query.isLoadingError → the first load failed: nothing to show
-// query.isCrashed      → status 'crashed': local storage broke
-// query.isSyncError    → data is shown, but a sync problem is in health
-// query.health   → health tree: one node for the query and one per source
+// query.isLoading, query.isReady, query.isError
 // query.state    → ReactiveMap<TKey, T>
 // query.collection → Collection
 
@@ -132,25 +132,41 @@ const userQuery = useLiveQuery((q) =>
 return <Show when={userQuery()}>{(user) => <div>{user().name}</div>}</Show>
 ```
 
-### Suspense integration
+### External-source bridge (opt-in)
+
+Solid v2's `enableExternalSource` API lets external reactive systems participate in Solid's tracking graph. TanStack DB exposes this as an opt-in one-time install:
 
 ```tsx
-<ErrorBoundary fallback={(error) => <div>{error.message}</div>}>
-  <Suspense fallback={<div>Loading...</div>}>
-    <For each={todosQuery()}>{(todo) => <li>{todo.text}</li>}</For>
-  </Suspense>
-</ErrorBoundary>
+import { enableSolidDBExternalSource, trackSnapshot } from '@tanstack/solid-db'
+import { createMemo } from 'solid-js'
+
+// Call once at app startup:
+enableSolidDBExternalSource()
+
+// Now trackSnapshot() inside any Solid compute auto-subscribes:
+const snapshot = createMemo(() => trackSnapshot(observer))
+// re-runs automatically when the observer notifies — no manual subscribe needed
 ```
 
-`useLiveQuery` integrates with Solid's `createResource`. Use `<Suspense>` for
-loading and `<ErrorBoundary>` for errors. Reading an errored query throws
-through the resource, so do not rely on reading `isLoadingError` after failure.
-After the first data, sync problems do not throw: read `isSyncError` or
-`health`. `isError` and node `phase` were removed.
+Without the bridge, use `useLiveQuery` which handles subscription internally.
+
+### Loading boundary integration
+
+```tsx
+import { Loading, Errored } from '@solidjs/web'
+
+<Errored catch={(err) => <div>Error: {err.message}</div>}>
+  <Loading fallback={<div>Loading...</div>}>
+    <For each={todosQuery()}>{(todo) => <li>{todo.text}</li>}</For>
+  </Loading>
+</Errored>
+```
+
+`useLiveQuery` integrates with Solid v2's async `createMemo`: reading the accessor while the collection is loading throws `NotReadyError` (caught by `<Loading>`); reading an errored query throws the captured error (caught by `<Errored>`).
 
 ## Includes (Hierarchical Data)
 
-When a query uses `include()` for a subquery in `select`, each child field is a live `Collection`. Subscribe to it with `useLiveQuery` in a subcomponent:
+When a query uses includes (subqueries in `select`), each child field is a live `Collection` by default. Subscribe to it with `useLiveQuery` in a subcomponent:
 
 ```tsx
 function ProjectList() {
@@ -158,12 +174,10 @@ function ProjectList() {
     q.from({ p: projectsCollection }).select(({ p }) => ({
       id: p.id,
       name: p.name,
-      issues: include(
-        q
-          .from({ i: issuesCollection })
-          .where(({ i }) => eq(i.projectId, p.id))
-          .select(({ i }) => ({ id: i.id, title: i.title })),
-      ),
+      issues: q
+        .from({ i: issuesCollection })
+        .where(({ i }) => eq(i.projectId, p.id))
+        .select(({ i }) => ({ id: i.id, title: i.title })),
     })),
   )
 
@@ -239,7 +253,7 @@ Solid's reactivity tracks signal reads inside reactive contexts. Reading outside
 
 Source: docs/framework/solid/overview.md
 
-### MEDIUM Reading query.data instead of calling query()
+### MEDIUM Using deprecated query.data instead of query()
 
 Wrong:
 
@@ -253,7 +267,7 @@ Correct:
 <For each={todosQuery()}>{(todo) => <li>{todo.text}</li>}</For>
 ```
 
-`query.data` has been removed. Call `query()` to access data.
+`query.data` is deprecated. Always use `query()` to access data. If you encounter existing code using `.data`, migrate it to the function call form.
 
 See also: db-core/live-queries/SKILL.md — for query builder API.
 
