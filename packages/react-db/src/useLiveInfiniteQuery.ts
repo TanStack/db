@@ -5,8 +5,9 @@ import {
   createLiveQueryCollection,
   createLiveQueryWindowController,
   getLiveQueryWindowCollectionWarning,
-  isCollection,
+  getLiveQueryWindowInputKind,
   normalizeLiveQueryWindowPageSize,
+  resolveLiveQueryWindowInput,
   shouldPreserveLiveQueryWindowPageCount,
 } from '@tanstack/db'
 // Type-only: used in `ReturnType<typeof useLiveQuery>` in UseLiveInfiniteQueryReturn.
@@ -47,7 +48,7 @@ export type UseLiveInfiniteQueryReturn<TContext extends Context> = Omit<
   data: InferResultType<TContext>
   pages: Array<Array<InferResultType<TContext>[number]>>
   pageParams: Array<number>
-  fetchNextPage: () => void
+  fetchNextPage: () => Promise<void>
   hasNextPage: boolean
   isFetchingNextPage: boolean
   error: unknown
@@ -161,16 +162,8 @@ export function useLiveInfiniteQuery<TContext extends Context>(
   const pageSize = normalizeLiveQueryWindowPageSize(config.pageSize)
   const initialPageParam = config.initialPageParam ?? 0
 
-  // Detect if input is a collection or query function
-  const inputIsCollection = isCollection(queryFnOrCollection)
-
-  // Validate input type
-  if (!inputIsCollection && typeof queryFnOrCollection !== `function`) {
-    throw new Error(
-      `useLiveInfiniteQuery: First argument must be either a pre-created live query collection ` +
-        `or a query function. Received: ${typeof queryFnOrCollection}`,
-    )
-  }
+  const inputIsCollection =
+    getLiveQueryWindowInputKind(queryFnOrCollection) === `collection`
 
   const committedRef = useRef<InfiniteQueryRenderState | null>(null)
   const committed = committedRef.current
@@ -201,16 +194,14 @@ export function useLiveInfiniteQuery<TContext extends Context>(
     let warning: string | null = null
 
     if (needsNewCollection) {
-      if (inputIsCollection) {
-        collection = queryFnOrCollection
+      const input = resolveLiveQueryWindowInput<TContext>(queryFnOrCollection)
+      if (input.kind === `collection`) {
+        collection = input.collection
       } else {
         // Wrap the query with the first page's peek-ahead window; the controller
         // grows the limit from here via setWindow.
         collection = createLiveQueryCollection({
-          query: (q: InitialQueryBuilder) =>
-            queryFnOrCollection(q)
-              .limit(pageSize + 1)
-              .offset(0),
+          query: input.query.limit(pageSize + 1).offset(0),
           // Construction happens during render. Synchronization starts only when
           // useSyncExternalStore commits the controller subscription.
           startSync: false,
@@ -278,12 +269,10 @@ export function useLiveInfiniteQuery<TContext extends Context>(
   const getSnapshot = useCallback(() => controller.getSnapshot(), [controller])
   const snapshot = useSyncExternalStore(subscribe, getSnapshot)
 
-  const fetchNextPage = useCallback(() => {
-    void controller.fetchNextPage().catch(() => {
-      // Pagination errors are exposed through the controller snapshot. Keep
-      // the existing fire-and-forget React API from leaking rejections.
-    })
-  }, [controller])
+  const fetchNextPage = useCallback(
+    () => controller.fetchNextPage(),
+    [controller],
+  )
 
   return {
     data: snapshot.data as InferResultType<TContext>,

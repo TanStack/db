@@ -80,6 +80,8 @@ const { data, fetchNextPage, hasNextPage, isFetchingNextPage } =
 </template>
 ```
 
+`fetchNextPage()` returns a promise that settles after the page request. A failed request rejects and is also exposed through the returned `error` ref.
+
 The query must include `orderBy`. The dependency array is available only with
 the query-function form. You can also pass an ordered, pre-created live query
 collection directly.

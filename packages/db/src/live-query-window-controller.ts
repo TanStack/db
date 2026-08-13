@@ -4,9 +4,11 @@ import {
 } from './errors.js'
 import {
   getLiveQueryStatusFlags,
+  isCollection,
   isSingleResultCollection,
 } from './live-query-adapter.js'
 import { createLiveQueryObserver } from './live-query-observer.js'
+import { BaseQueryBuilder } from './query/builder/index.js'
 import { deepEquals } from './utils.js'
 import type {
   LiveQueryObserver,
@@ -14,8 +16,75 @@ import type {
 } from './live-query-observer.js'
 import type { Collection } from './collection/index.js'
 import type { CollectionStatus } from './types.js'
+import type {
+  Context,
+  InitialQueryBuilder,
+  QueryBuilder,
+} from './query/builder/index.js'
 
 const DEFAULT_PAGE_SIZE = 20
+
+export type LiveQueryWindowInputKind = `collection` | `query`
+
+/** @internal The supported, enabled input forms for infinite-query adapters. */
+export type ResolvedLiveQueryWindowInput<TContext extends Context> =
+  | { kind: `collection`; collection: Collection<any, any, any> }
+  | { kind: `query`; query: QueryBuilder<TContext> }
+
+/**
+ * Classify an infinite-query input without invoking its query callback.
+ * Frameworks use this during lifecycle comparison so unchanged React renders
+ * do not execute the callback again.
+ *
+ * @internal This contract is unstable while RFC #1623 is being implemented.
+ */
+export function getLiveQueryWindowInputKind(
+  input: unknown,
+): LiveQueryWindowInputKind {
+  if (isCollection(input)) return `collection`
+  if (typeof input === `function`) return `query`
+  throw new Error(
+    `useLiveInfiniteQuery: First argument must be either a pre-created live query collection or a query function. ` +
+      `Received: ${typeof input}`,
+  )
+}
+
+/**
+ * Resolve a supported infinite-query input and invoke a query callback once.
+ * A function may resolve to a collection for framework getter compatibility.
+ * Nullable/disabled and config-object inputs are intentionally not supported.
+ *
+ * @internal This contract is unstable while RFC #1623 is being implemented.
+ */
+export function resolveLiveQueryWindowInput<TContext extends Context>(
+  input: unknown,
+): ResolvedLiveQueryWindowInput<TContext> {
+  if (getLiveQueryWindowInputKind(input) === `collection`) {
+    return {
+      kind: `collection`,
+      collection: input as Collection<any, any, any>,
+    }
+  }
+
+  const value = (
+    input as (q: InitialQueryBuilder) => QueryBuilder<TContext> | unknown
+  )(new BaseQueryBuilder() as InitialQueryBuilder)
+  if (isCollection(value)) {
+    return { kind: `collection`, collection: value }
+  }
+  if (
+    typeof value !== `object` ||
+    value === null ||
+    typeof (value as { limit?: unknown }).limit !== `function` ||
+    typeof (value as { offset?: unknown }).offset !== `function`
+  ) {
+    throw new Error(
+      `useLiveInfiniteQuery: Query function must return a query builder. ` +
+        `Disabled null or undefined queries are not supported.`,
+    )
+  }
+  return { kind: `query`, query: value as QueryBuilder<TContext> }
+}
 
 /** @internal This contract is unstable while RFC #1623 is being implemented. */
 export function normalizeLiveQueryWindowPageSize(

@@ -1,13 +1,12 @@
 import { computed, shallowRef, toValue, watchEffect } from 'vue'
 import {
-  BaseQueryBuilder,
   assertLiveQueryWindowManyResult,
   compareLiveQueryWindowDependencies,
   createLiveQueryCollection,
   createLiveQueryWindowController,
   getLiveQueryWindowCollectionWarning,
-  isCollection,
   normalizeLiveQueryWindowPageSize,
+  resolveLiveQueryWindowInput,
   shouldPreserveLiveQueryWindowPageCount,
 } from '@tanstack/db'
 import type {
@@ -27,13 +26,6 @@ const DEFAULT_GC_TIME_MS = 1
 
 type InternalCollection = Collection<object, string | number, UtilsRecord>
 
-type ResolvedInput<TContext extends Context> =
-  | { kind: `collection`; collection: InternalCollection }
-  | {
-      kind: `query`
-      query: QueryBuilder<TContext>
-    }
-
 type PreviousController = {
   getSnapshot: () => { pages: ReadonlyArray<ReadonlyArray<unknown>> }
 }
@@ -41,36 +33,6 @@ type PreviousController = {
 type InfiniteQueryOptions = {
   pageSize?: number
   initialPageParam?: number
-}
-
-function resolveInput<TContext extends Context>(
-  input: unknown,
-): ResolvedInput<TContext> {
-  if (typeof input !== `function`) {
-    const value = toValue(input)
-    if (isCollection(value)) {
-      return { kind: `collection`, collection: value }
-    }
-  }
-
-  if (typeof input !== `function`) {
-    throw new Error(
-      `useLiveInfiniteQuery: First argument must be either a pre-created live query collection or a query function. ` +
-        `Received: ${typeof input}`,
-    )
-  }
-
-  const value = (
-    input as (q: InitialQueryBuilder) => QueryBuilder<TContext> | unknown
-  )(new BaseQueryBuilder() as InitialQueryBuilder)
-  if (isCollection(value)) {
-    return { kind: `collection`, collection: value }
-  }
-
-  return {
-    kind: `query`,
-    query: value as QueryBuilder<TContext>,
-  }
 }
 
 export type LiveInfiniteQueryConfig<TRow> = InfiniteQueryOptions & {
@@ -166,7 +128,9 @@ export function useLiveInfiniteQuery<
 ): UseLiveInfiniteQueryReturn<TContext> {
   let validatedCollection: InternalCollection | null = null
   let previousController: PreviousController | null = null
-  let previousInput: ResolvedInput<TContext> | null = null
+  let previousInput: ReturnType<
+    typeof resolveLiveQueryWindowInput<TContext>
+  > | null = null
   let previousDependencies: Array<unknown> | null = null
   let previousPageSize: number | null = null
   let previousInitialPageParam: number | null = null
@@ -176,7 +140,11 @@ export function useLiveInfiniteQuery<
 
     const pageSize = normalizeLiveQueryWindowPageSize(config.pageSize)
     const initialPageParam = config.initialPageParam ?? 0
-    const input = resolveInput<TContext>(queryFnOrCollection)
+    const unwrappedInput =
+      typeof queryFnOrCollection === `function`
+        ? queryFnOrCollection
+        : toValue(queryFnOrCollection)
+    const input = resolveLiveQueryWindowInput<TContext>(unwrappedInput)
     const dependencyComparison = compareLiveQueryWindowDependencies(
       previousDependencies,
       dependencies,

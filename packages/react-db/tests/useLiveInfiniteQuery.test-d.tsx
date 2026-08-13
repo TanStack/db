@@ -15,9 +15,9 @@ describe(`useLiveInfiniteQuery type assertions`, () => {
     void acceptsContext
   })
 
-  it(`preserves the fire-and-forget fetch callback`, () => {
+  it(`exposes the controller fetch promise`, () => {
     expectTypeOf<
       UseLiveInfiniteQueryReturn<Context>[`fetchNextPage`]
-    >().toEqualTypeOf<() => void>()
+    >().toEqualTypeOf<() => Promise<void>>()
   })
 })

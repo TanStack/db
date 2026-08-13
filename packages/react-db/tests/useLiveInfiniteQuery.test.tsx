@@ -111,7 +111,7 @@ describe(`useLiveInfiniteQuery`, () => {
       | {
           isReady: boolean
           pages: Array<Array<unknown>>
-          fetchNextPage: () => void
+          fetchNextPage: () => Promise<void>
         }
       | undefined
 
@@ -174,7 +174,7 @@ describe(`useLiveInfiniteQuery`, () => {
     ).toThrow(/orderBy/)
   })
 
-  it(`exposes pagination failures without an unhandled rejection`, async () => {
+  it(`returns pagination failures through the fetch promise and snapshot`, async () => {
     const source = createCollection(
       mockSyncCollectionOptions<Post>({
         id: `infinite-query-pagination-failure`,
@@ -198,8 +198,12 @@ describe(`useLiveInfiniteQuery`, () => {
     const failure = new Error(`window load failed`)
     vi.spyOn(query.utils, `setWindow`).mockRejectedValueOnce(failure)
 
+    let request!: Promise<void>
     act(() => {
-      void result.current.fetchNextPage()
+      request = result.current.fetchNextPage()
+    })
+    await act(async () => {
+      await expect(request).rejects.toBe(failure)
     })
 
     await waitFor(() => {

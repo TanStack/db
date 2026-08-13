@@ -1,5 +1,5 @@
 /** React driver for the shared infinite-query conformance suite. */
-import { act, renderHook, waitFor } from '@testing-library/react'
+import { act, renderHook } from '@testing-library/react'
 import {
   BTreeIndex,
   createCollection,
@@ -68,18 +68,12 @@ function makeHandle(hook: RenderHookResult<any, any>): InfiniteQueryHandle {
         collection: result.collection,
       }
     },
-    async fetchNextPage() {
-      const previousError = hook.result.current.error
+    fetchNextPage() {
+      let request!: Promise<void>
       act(() => {
-        hook.result.current.fetchNextPage()
+        request = hook.result.current.fetchNextPage()
       })
-      await waitFor(() => {
-        if (hook.result.current.isFetchingNextPage) {
-          throw new Error(`Page fetch is still pending`)
-        }
-      })
-      const error = hook.result.current.error
-      if (error !== undefined && error !== previousError) throw error
+      return request
     },
     async flush() {
       await act(async () => {

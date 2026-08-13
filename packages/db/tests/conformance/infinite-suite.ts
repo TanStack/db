@@ -519,7 +519,7 @@ export function runInfiniteQuerySuite(rawDriver: InfiniteQueryDriver): void {
         }
 
         try {
-          await handle.fetchNextPage().catch(() => {})
+          await expect(handle.fetchNextPage()).rejects.toBe(failure)
           await handle.flush()
           expect(handle.current().pages.map((page) => page.length)).toEqual([3])
           expect(handle.current().status).toBe(`error`)
@@ -851,6 +851,20 @@ export function runInfiniteQuerySuite(rawDriver: InfiniteQueryDriver): void {
           ),
         )
         expect(error).toBe(failure)
+      },
+    )
+
+    scenario(
+      `disabled-callback`,
+      `rejects a nullable query callback through the shared input policy`,
+      async () => {
+        const error = await captureError(() =>
+          driver.mount((() => null) as any, { pageSize: 3 }),
+        )
+        expect(error).toBeInstanceOf(Error)
+        expect((error as Error).message).toContain(
+          `Disabled null or undefined queries are not supported`,
+        )
       },
     )
 
