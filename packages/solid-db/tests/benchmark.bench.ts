@@ -90,14 +90,14 @@ function benchAsync(label: string, fn: () => Promise<void>): Promise<number> {
 }
 
 describe('benchmarks', () => {
-  const results: Array<{ case: string; wholesale: number }> = []
+  const results: Array<{ case: string; time: number }> = []
 
   afterAll(() => {
     console.log('\n=== BENCHMARK RESULTS ===\n')
     console.log('| Case | Time |')
     console.log('| ---- | ---- |')
     for (const r of results) {
-      console.log(`| ${r.case} | ${r.wholesale.toFixed(2)}ms |`)
+      console.log(`| ${r.case} | ${r.time.toFixed(2)}ms |`)
     }
   })
 
@@ -112,13 +112,13 @@ describe('benchmarks', () => {
             const query = useLiveQuery((q) => q.from({ data: collection }).select(({ data }) => ({
               id: data.id, name: data.name,
             })))
-            try { query(); resolve() } catch { /* loading */ }
-            if (query.isReady) { resolve() }
+            try { query(); resolve() } catch { resolve() }
+            if (query.isReady) resolve()
             dispose()
           })
         })
       })
-      results.push({ case: `Initial mount (${n} rows)`, wholesale: time })
+      results.push({ case: `Initial mount (${n} rows)`, time: time })
     })
 
     it(`Single-row update — ${n} rows`, async () => {
@@ -138,7 +138,7 @@ describe('benchmarks', () => {
       })
 
       query.dispose()
-      results.push({ case: `Single-row update (${n} rows)`, wholesale: time })
+      results.push({ case: `Single-row update (${n} rows)`, time: time })
     })
 
     it(`10% batch update — ${n} rows`, async () => {
@@ -159,7 +159,7 @@ describe('benchmarks', () => {
       })
 
       query.dispose()
-      results.push({ case: `10% batch update (${n} rows)`, wholesale: time })
+      results.push({ case: `10% batch update (${n} rows)`, time: time })
     })
   }
 
@@ -182,7 +182,7 @@ describe('benchmarks', () => {
     })
 
     query.dispose()
-    results.push({ case: 'Repeated updates (1000×200)', wholesale: time })
+    results.push({ case: 'Repeated updates (1000×200)', time: time })
   })
 
   it('findOne update — 1000 rows', async () => {
@@ -202,7 +202,7 @@ describe('benchmarks', () => {
     })
 
     query.dispose()
-    results.push({ case: 'findOne update (1000 rows)', wholesale: time })
+    results.push({ case: 'findOne update (1000 rows)', time: time })
   })
 
   it('Remount after update — 1000 rows', async () => {
@@ -229,6 +229,6 @@ describe('benchmarks', () => {
       })
     })
 
-    results.push({ case: 'Remount after update (1000 rows)', wholesale: time })
+    results.push({ case: 'Remount after update (1000 rows)', time: time })
   })
 })
