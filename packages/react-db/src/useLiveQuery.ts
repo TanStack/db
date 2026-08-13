@@ -3,12 +3,11 @@ import {
   BaseQueryBuilder,
   UnhashableQueryIRError,
   createLiveQueryCollection,
+  createLiveQueryObserver,
   deepEquals,
-  getLiveQueryStatusFlags,
   getStableQueryBuilderHash,
   getStableValueHash,
   isCollection,
-  isSingleResultCollection,
 } from '@tanstack/db'
 import { useOptionalDbClient } from './DbProvider'
 import { setLiveQueryResultInfo } from './live-query-internals'
@@ -23,6 +22,7 @@ import type {
   InferResultType,
   InitialQueryBuilder,
   LiveQueryCollectionConfig,
+  LiveQueryObserver,
   NonSingleResult,
   QueryBuilder,
   SingleResult,
@@ -37,7 +37,7 @@ const warnedDerivedIdentityCallsites = new Set<string>()
 const warnedUnhashableIdentityCallsites = new Set<string>()
 const unpreparedQueryValue = Symbol(`unpreparedQueryValue`)
 
-type DerivedIdentityProfiler = {
+export type DerivedIdentityProfiler = {
   renderCount: number
   totalMs: number
   maxMs: number
@@ -58,7 +58,9 @@ export type UseLiveQueryConfig<TContext extends Context> =
     client?: DbClient
   }
 
-function warnDeprecatedDepsArray(): void {
+export function warnDeprecatedDepsArray(
+  hookName: `useLiveQuery` | `useLiveInfiniteQuery` = `useLiveQuery`,
+): void {
   if (!shouldWarnInDevelopment(`TANSTACK_DB_DISABLE_DEPRECATION_WARNINGS`)) {
     return
   }
@@ -68,8 +70,12 @@ function warnDeprecatedDepsArray(): void {
     return
   }
   warnedDepsCallsites.add(callsite)
+  const replacement =
+    hookName === `useLiveQuery`
+      ? `useLiveQuery({ query })`
+      : `useLiveInfiniteQuery(query, { queryKey })`
   console.warn(
-    `[useLiveQuery] The dependency-array form useLiveQuery(query, deps) is deprecated and will be removed in 1.0. Use useLiveQuery({ query }) instead. Provide queryKey only for functional/opaque queries or to avoid deriving identity from structured query IR on render.`,
+    `[${hookName}] The dependency-array form is deprecated and will be removed in 1.0. Use ${replacement} instead. Provide queryKey only for functional/opaque queries or to avoid deriving identity from structured query IR on render.`,
   )
 }
 
@@ -172,7 +178,7 @@ function getExplicitDbClient(value: unknown): DbClient | undefined {
     : undefined
 }
 
-function prepareQueryValue(
+export function prepareQueryValue(
   value: unknown,
   dbClient: DbClient | undefined,
   deferredCollections: Set<CollectionImpl<any, string | number, any, any, any>>,
@@ -226,7 +232,7 @@ type DerivedQueryPreparation =
       error: UnhashableQueryIRError
     }
 
-function prepareDerivedQuery(
+export function prepareDerivedQuery(
   value: unknown,
   dbClient: DbClient | undefined,
   profiler: DerivedIdentityProfiler,
@@ -279,7 +285,9 @@ function derivePreparedQueryIdentity(value: unknown): unknown {
   return [`value`, value]
 }
 
-function warnUnhashableDerivedIdentity(error: UnhashableQueryIRError): void {
+export function warnUnhashableDerivedIdentity(
+  error: UnhashableQueryIRError,
+): void {
   if (!shouldWarnInDevelopment(`TANSTACK_DB_DISABLE_QUERY_IDENTITY_WARNINGS`)) {
     return
   }
@@ -669,12 +677,6 @@ export function useLiveQuery(
     `legacy-unhashable`,
   ])
 
-  // Use refs to track version and memoized snapshot
-  const versionRef = useRef(0)
-  const snapshotRef = useRef<{
-    collection: Collection<object, string | number, {}> | null
-    version: number
-  } | null>(null)
   const derivedIdentityProfilerRef = useRef<DerivedIdentityProfiler>({
     renderCount: 0,
     totalMs: 0,
@@ -683,6 +685,9 @@ export function useLiveQuery(
   })
   const deferredCollectionsRef = useRef(
     new Set<CollectionImpl<any, string | number, any, any, any>>(),
+  )
+  const observerRef = useRef<LiveQueryObserver<object, string | number> | null>(
+    null,
   )
 
   const queryKey = !inputIsCollection
@@ -738,14 +743,18 @@ export function useLiveQuery(
     warnDeprecatedDepsArray()
   }
 
+  const identityChanged =
+    depsRef.current === null ||
+    (deps !== undefined
+      ? depsRef.current.length !== identityDeps.length ||
+        depsRef.current.some((dep, index) => dep !== identityDeps[index])
+      : !deepEquals(depsRef.current, identityDeps))
+
   // Check if we need to create/recreate the collection
   const needsNewCollection =
     !collectionRef.current ||
     (inputIsCollection && configRef.current !== configOrQueryOrCollection) ||
-    (!inputIsCollection &&
-      (clientRef.current !== dbClient ||
-        depsRef.current === null ||
-        !deepEquals(depsRef.current, identityDeps)))
+    (!inputIsCollection && (clientRef.current !== dbClient || identityChanged))
 
   if (needsNewCollection) {
     if (inputIsCollection) {
@@ -788,11 +797,24 @@ export function useLiveQuery(
     clientRef.current = dbClient
   }
 
-  // Reset refs when collection changes
+  // Recreate the observer when the underlying collection changes. The observer
+  // is not disposed explicitly here or on unmount: `useSyncExternalStore`
+  // unsubscribes it when the subscribe changes or the component unmounts, which
+  // detaches the collection subscription; the observer is then GC'd. (An unmount
+  // effect that disposed it would misfire under StrictMode/offscreen effect
+  // replay, leaving a disposed observer in the ref.)
   if (needsNewCollection) {
-    versionRef.current = 0
-    snapshotRef.current = null
+    // Defer the initial notify: useSyncExternalStore must not be notified
+    // synchronously during subscribe.
+    // Wholesale mode: React re-reads getSnapshot() on notify, keeps the
+    // hook's pre-observer loading policy, and — because wholesale delivers
+    // nothing synchronously during subscribe — never notifies
+    // useSyncExternalStore inside its own subscribe call.
+    observerRef.current = createLiveQueryObserver(collectionRef.current, {
+      mode: `wholesale`,
+    })
   }
+  const observer = observerRef.current!
 
   const resumeDeferredCollections = () => {
     for (const collection of deferredCollectionsRef.current) {
@@ -801,146 +823,29 @@ export function useLiveQuery(
     deferredCollectionsRef.current.clear()
   }
 
-  // Create stable subscribe function using ref
+  // Stable subscribe bound to the current observer; the observer owns the
+  // subscription, ready-race, and disposal.
   const subscribeRef = useRef<
     ((onStoreChange: () => void) => () => void) | null
   >(null)
   if (!subscribeRef.current || needsNewCollection) {
     subscribeRef.current = (onStoreChange: () => void) => {
-      // If no collection, return a no-op unsubscribe function
-      if (!collectionRef.current) {
-        return () => {}
-      }
-
-      let unsubscribed = false
-
-      const subscription = collectionRef.current.subscribeChanges(() => {
-        // Drop late notifies that race with unsubscribe.
-        if (unsubscribed) return
-        // Bump version on any change; getSnapshot will rebuild next time
-        versionRef.current += 1
-        onStoreChange()
-      })
+      const unsubscribe = observer.subscribe(() => onStoreChange())
       resumeDeferredCollections()
-      // Already-ready collections won't emit an initial change. Notify React
-      // ourselves, but defer to a microtask — calling onStoreChange synchronously
-      // here lands during the render-to-commit window and trips React's
-      // "state update on a component that hasn't mounted yet" warning.
-      if (collectionRef.current.status === `ready`) {
-        queueMicrotask(() => {
-          if (unsubscribed) return
-          versionRef.current += 1
-          onStoreChange()
-        })
-      }
-      return () => {
-        unsubscribed = true
-        subscription.unsubscribe()
-      }
+      return unsubscribe
     }
   }
 
-  // Create stable getSnapshot function using ref
-  const getSnapshotRef = useRef<
-    | (() => {
-        collection: Collection<object, string | number, {}> | null
-        version: number
-      })
-    | null
-  >(null)
-  if (!getSnapshotRef.current || needsNewCollection) {
-    getSnapshotRef.current = () => {
-      const currentVersion = versionRef.current
-      const currentCollection = collectionRef.current
-
-      // Recreate snapshot object only if version/collection changed
-      if (
-        !snapshotRef.current ||
-        snapshotRef.current.version !== currentVersion ||
-        snapshotRef.current.collection !== currentCollection
-      ) {
-        snapshotRef.current = {
-          collection: currentCollection,
-          version: currentVersion,
-        }
-      }
-
-      return snapshotRef.current
-    }
-  }
-
-  // Use useSyncExternalStore to subscribe to collection changes
-  const snapshot = useSyncExternalStore(
+  const returned = useSyncExternalStore(
     subscribeRef.current,
-    getSnapshotRef.current,
-    getSnapshotRef.current,
+    () => observer.getSnapshot(),
+    () => observer.getSnapshot(),
   )
-
-  // Track last snapshot (from useSyncExternalStore) and the returned value separately
-  const returnedSnapshotRef = useRef<{
-    collection: Collection<object, string | number, {}> | null
-    version: number
-  } | null>(null)
-  // Keep implementation return loose to satisfy overload signatures
-  const returnedRef = useRef<any>(null)
-
-  // Rebuild returned object only when the snapshot changes (version or collection identity)
-  if (
-    !returnedSnapshotRef.current ||
-    returnedSnapshotRef.current.version !== snapshot.version ||
-    returnedSnapshotRef.current.collection !== snapshot.collection
-  ) {
-    // Handle null collection case (when callback returns undefined/null)
-    if (!snapshot.collection) {
-      returnedRef.current = {
-        state: undefined,
-        data: undefined,
-        collection: undefined,
-        status: `disabled`,
-        isLoading: false,
-        isReady: true,
-        isIdle: false,
-        isError: false,
-        isCleanedUp: false,
-        isEnabled: false,
-      }
-    } else {
-      // Capture a stable view of entries for this snapshot to avoid tearing
-      const entries = Array.from(snapshot.collection.entries())
-      const singleResult = isSingleResultCollection(snapshot.collection)
-      let stateCache: Map<string | number, unknown> | null = null
-      let dataCache: Array<unknown> | null = null
-
-      returnedRef.current = {
-        get state() {
-          if (!stateCache) {
-            stateCache = new Map(entries)
-          }
-          return stateCache
-        },
-        get data() {
-          if (!dataCache) {
-            dataCache = entries.map(([, value]) => value)
-          }
-          return singleResult ? dataCache[0] : dataCache
-        },
-        collection: snapshot.collection,
-        status: snapshot.collection.status,
-        ...getLiveQueryStatusFlags(snapshot.collection.status),
-        isEnabled: true,
-      }
-    }
-
-    // Remember the snapshot that produced this returned value
-    returnedSnapshotRef.current = snapshot
-  }
-
-  const returned = returnedRef.current!
   setLiveQueryResultInfo(returned, {
     client: dbClient,
     queryHash,
     identityError,
     resumeDeferredCollections,
   })
-  return returned
+  return returned as any
 }

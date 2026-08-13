@@ -422,6 +422,33 @@ export class CollectionImpl<
   }
 
   /**
+   * Monotonic revision of the collection's visible state; advances once per
+   * committed batch of changes, even while nothing is subscribed.
+   * Internal — used by the live-query observer's snapshot cache.
+   */
+  public get _stateRevision(): number {
+    return this._changes.stateRevision
+  }
+
+  /**
+   * Monotonic revision of explicit layout-only publications.
+   * Internal — used to distinguish them from empty ready events.
+   */
+  public get _layoutRevision(): number {
+    return this._changes.layoutRevision
+  }
+
+  /** Subscribe to layout-only publications. Internal observer channel. */
+  public _subscribeLayoutChanges(listener: () => void): () => void {
+    return this._changes.subscribeLayoutChanges(listener)
+  }
+
+  /** Mark the active sync transaction as layout-changing. Internal. */
+  public _markLayoutChange(): void {
+    this._sync.markLayoutChange()
+  }
+
+  /**
    * Register a callback to be executed when the collection first becomes ready
    * Useful for preloading collections
    * @param callback Function to call when the collection first becomes ready

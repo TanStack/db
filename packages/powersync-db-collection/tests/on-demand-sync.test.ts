@@ -2112,4 +2112,173 @@ describe(`On-Demand Sync Mode`, () => {
       )
     })
   })
+
+  describe(`Tracking lifecycle`, () => {
+    // The sync handler catches its own errors and surfaces them only through the
+    // logger, so captured errors are how these tests assert it stayed healthy.
+    function captureSyncErrors(db: PowerSyncDatabase) {
+      const errors: Array<string> = []
+      vi.spyOn(db.logger, `error`).mockImplementation((...args: Array<any>) => {
+        errors.push(args.map(String).join(` `))
+      })
+      return () => errors
+    }
+
+    function makeCollection(db: PowerSyncDatabase) {
+      return createCollection(
+        powerSyncCollectionOptions({
+          database: db,
+          table: APP_SCHEMA.props.products,
+          syncMode: `on-demand`,
+        }),
+      )
+    }
+
+    function categoryQuery(
+      collection: ReturnType<typeof makeCollection>,
+      category: string,
+    ) {
+      return createLiveQueryCollection({
+        query: (q) =>
+          q
+            .from({ product: collection })
+            .where(({ product }) => eq(product.category, category))
+            .select(({ product }) => ({
+              id: product.id,
+              name: product.name,
+              price: product.price,
+              category: product.category,
+            })),
+      })
+    }
+
+    it(`should start tracking again when a subset is loaded after every subset was unloaded`, async () => {
+      const db = await createDatabase()
+      await createTestProducts(db)
+      const syncErrors = captureSyncErrors(db)
+
+      const collection = makeCollection(db)
+      onTestFinished(() => collection.cleanup())
+      await collection.stateWhenReady()
+
+      // Load a subset, then unload it so no predicates remain. Tracking stops and
+      // the tracking table is dropped.
+      const electronicsQuery = categoryQuery(collection, `electronics`)
+      await electronicsQuery.preload()
+      await vi.waitFor(
+        () => {
+          expect(electronicsQuery.size).toBe(3)
+        },
+        { timeout: 2000 },
+      )
+
+      electronicsQuery.cleanup()
+      await vi.waitFor(
+        () => {
+          expect(collection.size).toBe(0)
+        },
+        { timeout: 2000 },
+      )
+
+      // A new subset gets a freshly created tracking table and syncs normally.
+      const clothingQuery = categoryQuery(collection, `clothing`)
+      onTestFinished(() => clothingQuery.cleanup())
+      await clothingQuery.preload()
+
+      await vi.waitFor(
+        () => {
+          expect(clothingQuery.size).toBe(2)
+        },
+        { timeout: 2000 },
+      )
+
+      expect(syncErrors()).toEqual([])
+    })
+
+    it(`should stop tracking cleanly when every subset is unloaded and the collection is cleaned up`, async () => {
+      const db = await createDatabase()
+      await createTestProducts(db)
+      const syncErrors = captureSyncErrors(db)
+
+      const collection = makeCollection(db)
+      await collection.stateWhenReady()
+
+      const electronicsQuery = categoryQuery(collection, `electronics`)
+      const clothingQuery = categoryQuery(collection, `clothing`)
+      await electronicsQuery.preload()
+      await clothingQuery.preload()
+
+      await vi.waitFor(
+        () => {
+          expect(collection.size).toBe(5)
+        },
+        { timeout: 2000 },
+      )
+
+      // Unload every predicate, then tear the collection down.
+      clothingQuery.cleanup()
+      electronicsQuery.cleanup()
+      await vi.waitFor(
+        () => {
+          expect(collection.size).toBe(0)
+        },
+        { timeout: 2000 },
+      )
+
+      // Allow any flush queued by the tracking table's onChange watcher to run.
+      await new Promise((resolve) => setTimeout(resolve, 200))
+
+      collection.cleanup()
+      await new Promise((resolve) => setTimeout(resolve, 200))
+
+      expect(syncErrors()).toEqual([])
+    })
+
+    it(`should dispose each diff trigger exactly once`, async () => {
+      const db = await createDatabase()
+      await createTestProducts(db)
+
+      // Count dispose calls per created trigger. The collection should release its
+      // reference to a trigger once disposed, so no trigger is disposed twice.
+      const disposeCounts: Array<number> = []
+      const createDiffTrigger = db.triggers.createDiffTrigger.bind(db.triggers)
+      vi.spyOn(db.triggers, `createDiffTrigger`).mockImplementation(
+        async (options) => {
+          const dispose = await createDiffTrigger(options)
+          const index = disposeCounts.push(0) - 1
+          return async (disposeOptions) => {
+            disposeCounts[index]! += 1
+            return dispose(disposeOptions)
+          }
+        },
+      )
+
+      const collection = makeCollection(db)
+      await collection.stateWhenReady()
+
+      const electronicsQuery = categoryQuery(collection, `electronics`)
+      await electronicsQuery.preload()
+      await vi.waitFor(
+        () => {
+          expect(electronicsQuery.size).toBe(3)
+        },
+        { timeout: 2000 },
+      )
+
+      electronicsQuery.cleanup()
+      await vi.waitFor(
+        () => {
+          expect(collection.size).toBe(0)
+        },
+        { timeout: 2000 },
+      )
+
+      collection.cleanup()
+      await new Promise((resolve) => setTimeout(resolve, 200))
+
+      // One trigger is created for the electronics subset and disposed when that
+      // subset unloads. Cleaning up the collection must not dispose it again.
+      expect(disposeCounts).toEqual([1])
+    })
+  })
 })

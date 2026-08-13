@@ -83,7 +83,7 @@ export class CollectionSubscription
   // Track the last key sent via requestLimitedSnapshot for cursor-based pagination
   private lastSentKey: string | number | undefined
 
-  private filteredCallback: (changes: Array<ChangeMessage<any, any>>) => void
+  private filteredCallback: (changes: Array<ChangeMessage<any, any>>) => boolean
 
   private orderByIndex: IndexInterface<string | number> | undefined
 
@@ -132,7 +132,10 @@ export class CollectionSubscription
     // Create a filtered callback if where clause is provided
     this.filteredCallback = options.whereExpression
       ? createFilteredCallback(this.callback, options)
-      : this.callback
+      : (changes) => {
+          this.callback(changes)
+          return true
+        }
 
     // Listen for truncate events to re-request data after must-refetch
     // When a truncate happens (e.g., from a 409 must-refetch), all collection data is cleared.
@@ -245,9 +248,7 @@ export class CollectionSubscription
     // Flatten all buffered changes into a single array for atomic emission
     // This ensures consumers see all truncate changes (deletes + inserts) in one callback
     const merged = this.truncateBuffer.flat()
-    if (merged.length > 0) {
-      this.filteredCallback(merged)
-    }
+    if (merged.length > 0) this.filteredCallback(merged)
 
     this.truncateBuffer = []
   }
@@ -301,12 +302,13 @@ export class CollectionSubscription
       this.pendingLoadSubsetPromises.add(syncResult)
       this.setStatus(`loadingSubset`)
 
-      syncResult.finally(() => {
+      const finish = () => {
         this.pendingLoadSubsetPromises.delete(syncResult)
         if (this.pendingLoadSubsetPromises.size === 0) {
           this.setStatus(`ready`)
         }
-      })
+      }
+      void syncResult.then(finish, finish)
     }
   }
 
@@ -318,7 +320,7 @@ export class CollectionSubscription
     return this.snapshotSent
   }
 
-  emitEvents(changes: Array<ChangeMessage<any, any>>) {
+  emitEvents(changes: Array<ChangeMessage<any, any>>): boolean {
     const newChanges = this.filterAndFlipChanges(changes)
 
     if (this.isBufferingForTruncate) {
@@ -327,8 +329,9 @@ export class CollectionSubscription
       if (newChanges.length > 0) {
         this.truncateBuffer.push(newChanges)
       }
+      return false
     } else {
-      this.filteredCallback(newChanges)
+      return this.filteredCallback(newChanges)
     }
   }
 

@@ -640,6 +640,7 @@ export class DbClient {
 
     collection._state.pendingSyncedTransactions.push({
       committed: true,
+      layoutChanged: false,
       operations: chunk.rows.map((row) => {
         rowMetadataWrites.set(
           row.key,

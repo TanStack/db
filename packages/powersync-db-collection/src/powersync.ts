@@ -327,6 +327,22 @@ function createPowerSyncCollectionConfig<
         return runOnDemandSync()
       }
 
+      /**
+       * Disposes the current diff trigger, if one is active, and clears the
+       * tracking state.
+       */
+      async function safelyDisposeTracking(
+        context?: LockContext,
+      ): Promise<void> {
+        const dispose = disposeTracking
+        if (!dispose) {
+          return
+        }
+
+        disposeTracking = null
+        await dispose(context ? { context } : undefined)
+      }
+
       async function createDiffTrigger(options: {
         setupContext?: LockContext
         when: Record<DiffTriggerOperation, string>
@@ -393,6 +409,11 @@ function createPowerSyncCollectionConfig<
       async function flushDiffRecordsWithContext(
         context: LockContext,
       ): Promise<void> {
+        // There is nothing to flush if no tracking table is currently active.
+        if (!disposeTracking) {
+          return
+        }
+
         try {
           begin()
           const operations = await context.getAll<TriggerDiffRecord>(
@@ -461,12 +482,12 @@ function createPowerSyncCollectionConfig<
 
         // If the abort controller was aborted while processing the request above
         if (abortController.signal.aborted) {
-          await disposeTracking?.()
+          await safelyDisposeTracking()
         } else {
           abortController.signal.addEventListener(
             `abort`,
             async () => {
-              await disposeTracking?.()
+              await safelyDisposeTracking()
             },
             { once: true },
           )
@@ -539,10 +560,12 @@ function createPowerSyncCollectionConfig<
             onUnloadSubset = await restConfig.onLoadSubset?.(options)
           }
 
+          // No predicates remain, so stop tracking entirely. Both calls are no-ops
+          // when no tracking table is currently active.
           if (activeWhereExpressions.length === 0) {
             await database.writeLock(async (ctx) => {
               await flushDiffRecordsWithContext(ctx)
-              await disposeTracking?.({ context: ctx })
+              await safelyDisposeTracking(ctx)
             })
             return
           }
@@ -573,8 +596,10 @@ function createPowerSyncCollectionConfig<
           const viewWhereClause = toInlinedWhereClause(compiledView)
 
           await database.writeLock(async (ctx) => {
+            // Replace any active tracking with one covering the new set of
+            // predicates.
             await flushDiffRecordsWithContext(ctx)
-            await disposeTracking?.({ context: ctx })
+            await safelyDisposeTracking(ctx)
 
             disposeTracking = await createDiffTrigger({
               setupContext: ctx,

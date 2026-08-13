@@ -3026,6 +3026,68 @@ describe(`Query Collections`, () => {
       expect(result.current.collection).not.toBe(firstCollection)
     })
 
+    it(`keeps an explicit queryKey stable across structurally equal values`, async () => {
+      const collection = createCollection(
+        mockSyncCollectionOptions<Person>({
+          id: `explicit-query-key-structural-equality`,
+          getKey: (person: Person) => person.id,
+          initialData: initialPersons,
+        }),
+      )
+      let queryExecutions = 0
+
+      const { result, rerender } = renderHook(
+        ({ filter }: { filter: { minAge: number } }) =>
+          useLiveQuery({
+            queryKey: [collection.id, `minimum-age`, filter],
+            query: (q) => {
+              queryExecutions += 1
+              return q
+                .from({ people: collection })
+                .where(({ people }) => gt(people.age, filter.minAge))
+            },
+          }),
+        { initialProps: { filter: { minAge: 25 } } },
+      )
+
+      await waitFor(() => expect(result.current.data).toHaveLength(2))
+      const firstCollection = result.current.collection
+
+      rerender({ filter: { minAge: 25 } })
+
+      expect(result.current.collection).toBe(firstCollection)
+      expect(queryExecutions).toBe(1)
+    })
+
+    it(`preserves reference semantics for deprecated dependency arrays`, async () => {
+      const collection = createCollection(
+        mockSyncCollectionOptions<Person>({
+          id: `legacy-deps-reference-semantics`,
+          getKey: (person: Person) => person.id,
+          initialData: initialPersons,
+        }),
+      )
+
+      const { result, rerender } = renderHook(
+        ({ filter }: { filter: { minAge: number } }) =>
+          useLiveQuery(
+            (q) =>
+              q
+                .from({ people: collection })
+                .where(({ people }) => gt(people.age, filter.minAge)),
+            [filter],
+          ),
+        { initialProps: { filter: { minAge: 25 } } },
+      )
+
+      await waitFor(() => expect(result.current.data).toHaveLength(2))
+      const firstCollection = result.current.collection
+
+      rerender({ filter: { minAge: 25 } })
+
+      expect(result.current.collection).not.toBe(firstCollection)
+    })
+
     it(`warns when derived query identity is slow enough to need queryKey`, () => {
       const warnSpy = vi.spyOn(console, `warn`).mockImplementation(() => {})
       const nowSpy = vi.spyOn(globalThis.performance, `now`)

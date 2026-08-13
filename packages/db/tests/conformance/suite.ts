@@ -39,7 +39,7 @@ const ISSUES: Array<Issue> = [
 ]
 
 /** Keys that are expected to fail on ALL adapters (core gaps, not adapter drift). */
-const UNIVERSAL_EXPECTED_FAIL = new Set<string>([`order-only-move`])
+const UNIVERSAL_EXPECTED_FAIL = new Set<string>([])
 
 export function runSuite(rawDriver: LiveQueryDriver) {
   const { ops } = rawDriver
@@ -489,6 +489,35 @@ export function runSuite(rawDriver: LiveQueryDriver) {
 
         await h.setParam(50)
         expect(h.current().data).toHaveLength(0) // none
+        h.unmount()
+      },
+    )
+
+    scenario(
+      `recompile-drops-stale-keys`,
+      `recompiling to a narrower result drops keys from the previous collection`,
+      async () => {
+        const source = driver.makeSource(SEED)
+        const h = driver.mountControllable<number>(
+          (q, minAge) =>
+            q
+              .from({ items: source.collection })
+              .where(({ items }: any) => ops.gt(items.age, minAge))
+              .select(({ items }: any) => ({ id: items.id })),
+          10,
+        )
+        await h.flush()
+        expect(h.current().data).toHaveLength(3) // all ages > 10
+        // The keyed `state` map must mirror `data` exactly.
+        expect(h.current().state?.size).toBe(3)
+
+        // Narrowing the filter recompiles into a *new* underlying collection
+        // holding fewer keys. `includeInitialState` only inserts the new rows;
+        // if the adapter reuses a persistent keyed map without clearing it, the
+        // dropped keys leak into `state` even though `data` looks correct.
+        await h.setParam(32) // only John Smith (age 35) survives
+        expect(h.current().data).toHaveLength(1)
+        expect(h.current().state?.size).toBe(1)
         h.unmount()
       },
     )

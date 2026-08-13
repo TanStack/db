@@ -1,5 +1,16 @@
 # @tanstack/powersync-db-collection
 
+## 0.1.56
+
+### Patch Changes
+
+- Fixed `no such table` errors logged by the `on-demand` sync handler. Records are no longer flushed before the `diffTrigger` has been set up, and the tracking state is now cleared as part of disposal so unloading a subset or cleaning up the collection no longer flushes the dropped tracking table. ([#1585](https://github.com/TanStack/db/pull/1585))
+
+- Fix: applyTransaction hangs forever when a transaction mixes delete+insert on one collection for a same-millisecond tie. ([#1649](https://github.com/TanStack/db/pull/1649))
+
+- Updated dependencies [[`ad88d07`](https://github.com/TanStack/db/commit/ad88d0751db9723dfb9f164ebfcef88d52b6efa3), [`7e7abda`](https://github.com/TanStack/db/commit/7e7abda73a7ab313f9ec6a413fad00f300e79fb3), [`dc53f0e`](https://github.com/TanStack/db/commit/dc53f0ecbc38e173af68d829ff2de97531494722)]:
+  - @tanstack/db@0.7.0
+
 ## 0.1.55
 
 ### Patch Changes

@@ -11,6 +11,7 @@ import {
 } from '../../errors.js'
 import { transactionScopedScheduler } from '../../scheduler.js'
 import { getActiveTransaction } from '../../transactions.js'
+import { deepEquals } from '../../utils.js'
 import { CollectionSubscriber } from './collection-subscriber.js'
 import { getCollectionBuilder } from './collection-registry.js'
 import { LIVE_QUERY_INTERNAL } from './internal.js'
@@ -122,6 +123,7 @@ export class CollectionConfigBuilder<
   public liveQueryCollection?: Collection<TResult, any, any>
 
   private windowFn: ((options: WindowOptions) => void) | undefined
+  private readonly initialWindow: WindowOptions | undefined
   private currentWindow: WindowOptions | undefined
 
   private maybeRunGraphFn: (() => void) | undefined
@@ -175,6 +177,12 @@ export class CollectionConfigBuilder<
       query: config.query,
       requireObjectResult: true,
     })
+    this.initialWindow = this.query.orderBy?.length
+      ? {
+          offset: this.query.offset ?? 0,
+          limit: this.query.limit ?? Infinity,
+        }
+      : undefined
     this.collections = extractCollectionsFromQuery(this.query)
     const collectionAliasesById = extractCollectionAliases(this.query)
 
@@ -274,38 +282,36 @@ export class CollectionConfigBuilder<
       throw new SetWindowRequiresOrderByError()
     }
 
-    this.currentWindow = options
-    this.windowFn(options)
-    this.maybeRunGraphFn?.()
-
-    // Check if loading a subset was triggered
-    if (this.liveQueryCollection?.isLoadingSubset) {
-      // Loading was triggered, return a promise that resolves when it completes
-      return new Promise<void>((resolve) => {
-        const unsubscribe = this.liveQueryCollection!.on(
-          `loadingSubset:change`,
-          (event) => {
-            if (!event.isLoadingSubset) {
-              unsubscribe()
-              resolve()
-            }
-          },
-        )
-      })
+    const previousWindow = this.currentWindow ?? this.initialWindow
+    try {
+      this.windowFn(options)
+      this.maybeRunGraphFn?.()
+      this.currentWindow = options
+    } catch (error) {
+      if (previousWindow) {
+        try {
+          this.windowFn(previousWindow)
+          this.maybeRunGraphFn?.()
+        } catch {
+          // Recovery is best-effort; preserve the error from the requested
+          // window rather than replacing it with a rollback failure.
+        }
+      }
+      throw error
     }
 
-    // No loading was triggered
-    return true
+    return this.liveQueryCollection?._sync.waitForCurrentLoadSubset() ?? true
   }
 
   getWindow(): { offset: number; limit: number } | undefined {
     // Only return window if this is a windowed query (has orderBy and windowFn)
-    if (!this.windowFn || !this.currentWindow) {
+    const window = this.currentWindow ?? this.initialWindow
+    if (!this.windowFn || !window) {
       return undefined
     }
     return {
-      offset: this.currentWindow.offset ?? 0,
-      limit: this.currentWindow.limit ?? 0,
+      offset: window.offset ?? 0,
+      limit: window.limit ?? 0,
     }
   }
 
@@ -654,6 +660,8 @@ export class CollectionConfigBuilder<
       // Clear current sync session state
       this.currentSyncConfig = undefined
       this.currentSyncState = undefined
+      this.maybeRunGraphFn = undefined
+      this.currentWindow = undefined
 
       // Clear all pending graph runs to prevent memory leaks from in-flight transactions
       // that may flush after the sync session ends
@@ -708,6 +716,12 @@ export class CollectionConfigBuilder<
       this.optimizableOrderByCollections,
       (windowFn: (options: WindowOptions) => void) => {
         this.windowFn = windowFn
+        // `setWindow` mutates the compiled top-K operator, which is replaced
+        // whenever a cleaned-up live query compiles a fresh pipeline. Keep the
+        // desired window on the builder and replay it into each new operator.
+        if (this.currentWindow) {
+          windowFn(this.currentWindow)
+        }
       },
     )
 
@@ -799,6 +813,11 @@ export class CollectionConfigBuilder<
                 existing.orderByIndex = changes.orderByIndex
               }
             }
+            // Keep the retracted (old) side for order-only-move detection.
+            if (changes.deletes > 0) {
+              existing.previousValue = changes.previousValue
+              existing.previousOrderByIndex = changes.previousOrderByIndex
+            }
           } else {
             merged.set(customKey, { ...changes })
           }
@@ -810,6 +829,9 @@ export class CollectionConfigBuilder<
       if (hasParentChanges) {
         begin()
         changesToApply.forEach(this.applyChanges.bind(this, config))
+        if (hasOrderOnlyMove(changesToApply)) {
+          markLayoutChange(config.collection)
+        }
         commit()
       }
       pendingChanges = new Map()
@@ -893,9 +915,14 @@ export class CollectionConfigBuilder<
 
             if (multiplicity < 0) {
               existing.deletes += Math.abs(multiplicity)
+              existing.previousValue = childResult
+              existing.previousOrderByIndex = _orderByIndex
             } else if (multiplicity > 0) {
               existing.inserts += multiplicity
               existing.value = childResult
+              if (_orderByIndex !== undefined) {
+                existing.orderByIndex = _orderByIndex
+              }
             }
 
             byChild.set(childKey, existing)
@@ -1320,9 +1347,14 @@ function setupNestedPipelines(
 
           if (multiplicity < 0) {
             existing.deletes += Math.abs(multiplicity)
+            existing.previousValue = childResult
+            existing.previousOrderByIndex = _orderByIndex
           } else if (multiplicity > 0) {
             existing.inserts += multiplicity
             existing.value = childResult
+            if (_orderByIndex !== undefined) {
+              existing.orderByIndex = _orderByIndex
+            }
           }
 
           byChild.set(childKey, existing)
@@ -1984,6 +2016,9 @@ function flushIncludesState(
               entry.syncMethods.write({ value: change.value, type: `delete` })
             }
           }
+          if (hasOrderOnlyMove(childChanges)) {
+            markLayoutChange(entry.syncMethods.collection)
+          }
           entry.syncMethods.commit()
         }
 
@@ -2315,6 +2350,10 @@ function accumulateChanges<T>(
   }
   if (multiplicity < 0) {
     changes.deletes += Math.abs(multiplicity)
+    // Remember the retracted (old) value + position so the flush can tell an
+    // order-only move apart from a real value change.
+    changes.previousValue = value
+    changes.previousOrderByIndex = orderByIndex
   } else if (multiplicity > 0) {
     changes.inserts += multiplicity
     // Update value to the latest version for this key
@@ -2325,4 +2364,34 @@ function accumulateChanges<T>(
   }
   acc.set(key, changes)
   return acc
+}
+
+/**
+ * Decide whether a flush contains an order-only move.
+ *
+ * An "order-only move" — a row updated in place whose `orderByIndex` moved but
+ * whose projected value is deep-equal to before — is swallowed by the value-diff
+ * and needs an explicit layout notification. The collection coalesces that
+ * signal with any ordinary row publication per subscriber.
+ */
+function hasOrderOnlyMove<T>(
+  changesToApply: Map<unknown, Changes<T>>,
+): boolean {
+  for (const changes of changesToApply.values()) {
+    const isUpdate = changes.inserts > 0 && changes.deletes > 0
+    if (
+      isUpdate &&
+      changes.previousValue !== undefined &&
+      deepEquals(changes.previousValue, changes.value) &&
+      changes.orderByIndex !== changes.previousOrderByIndex
+    ) {
+      return true
+    }
+  }
+  return false
+}
+
+/** Mark the collection's next commit as layout-changing. */
+function markLayoutChange(collection: { _markLayoutChange: () => void }): void {
+  collection._markLayoutChange()
 }

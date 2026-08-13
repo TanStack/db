@@ -29,6 +29,22 @@ export class CollectionChangesManager<
   public changeSubscriptions = new Set<CollectionSubscription>()
   public batchedEvents: Array<ChangeMessage<TOutput, TKey>> = []
   public shouldBatchEvents = false
+  private layoutChangeListeners = new Set<() => void>()
+
+  /**
+   * Monotonic revision of the collection's visible state, advanced once per
+   * committed batch of changes — including while nothing is subscribed.
+   * Lets consumers (the live-query observer) cheaply detect "did the data
+   * change" without subscribing, and stays untouched by subscription
+   * bootstrap replays, which do not go through emitEvents.
+   */
+  public stateRevision = 0
+
+  /**
+   * Monotonic revision advanced only for explicit layout-only publications.
+   * Observers use it to detect reordered rows whose values did not change.
+   */
+  public layoutRevision = 0
 
   /**
    * Creates a new CollectionChangesManager instance
@@ -76,7 +92,13 @@ export class CollectionChangesManager<
   public emitEvents(
     changes: Array<ChangeMessage<TOutput, TKey>>,
     forceEmit = false,
+    layoutChanged = false,
   ): void {
+    // The visible state was already committed by the caller, so the revision
+    // advances even when the events below end up batched for later emission.
+    if (changes.length > 0) this.stateRevision++
+    if (layoutChanged) this.layoutRevision++
+
     // Skip batching for user actions (forceEmit=true) to keep UI responsive
     if (this.shouldBatchEvents && !forceEmit) {
       // Add events to the batch
@@ -98,8 +120,15 @@ export class CollectionChangesManager<
       this.shouldBatchEvents = false
     }
 
-    if (rawEvents.length === 0) {
+    if (rawEvents.length === 0 && !layoutChanged) {
       return
+    }
+
+    // Notify both internal layout consumers and the public subscription API.
+    // Public subscribers historically receive an empty batch for order-only
+    // moves because there is no row-value ChangeMessage to publish.
+    if (rawEvents.length === 0) {
+      for (const listener of this.layoutChangeListeners) listener()
     }
 
     // Enrich all change messages with virtual properties
@@ -112,6 +141,12 @@ export class CollectionChangesManager<
     for (const subscription of this.changeSubscriptions) {
       subscription.emitEvents(enrichedEvents)
     }
+  }
+
+  /** Subscribe to layout-only publications. Internal observer channel. */
+  public subscribeLayoutChanges(listener: () => void): () => void {
+    this.layoutChangeListeners.add(listener)
+    return () => this.layoutChangeListeners.delete(listener)
   }
 
   /**

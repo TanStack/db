@@ -1,5 +1,10 @@
 // Re-export all public APIs
-export * from './useLiveQuery'
+export { useLiveQuery } from './useLiveQuery'
+export type {
+  LiveQueryKey,
+  UseLiveQueryConfig,
+  UseLiveQueryStatus,
+} from './useLiveQuery'
 export * from './DbProvider'
 export * from './useLiveSuspenseQuery'
 export * from './usePacedMutations'

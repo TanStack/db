@@ -81,6 +81,11 @@ export class CollectionSyncManager<
     this._events = deps.events
   }
 
+  /** Mark the active sync transaction as changing collection layout. */
+  public markLayoutChange(): void {
+    this.getActivePendingSyncTransaction().layoutChanged = true
+  }
+
   /**
    * Start the sync process for this collection
    * This is called when the collection is first accessed or preloaded
@@ -107,6 +112,7 @@ export class CollectionSyncManager<
           begin: (options?: { immediate?: boolean }) => {
             this.state.pendingSyncedTransactions.push({
               committed: false,
+              layoutChanged: false,
               operations: [],
               deletedKeys: new Set(),
               rowMetadataWrites: new Map(),
@@ -505,6 +511,18 @@ export class CollectionSyncManager<
     return this.pendingLoadSubsetPromises.size > 0
   }
 
+  /** Wait for the subset loads that are active during the current operation. */
+  public waitForCurrentLoadSubset(): true | Promise<void> {
+    if (this.pendingLoadSubsetPromises.size === 0) return true
+    return this.waitForPendingLoadSubset()
+  }
+
+  private async waitForPendingLoadSubset(): Promise<void> {
+    do {
+      await Promise.all([...this.pendingLoadSubsetPromises])
+    } while (this.pendingLoadSubsetPromises.size > 0)
+  }
+
   /**
    * Tracks a load promise for isLoadingSubset state.
    * @internal This is for internal coordination (e.g., live-query glue code), not for general use.
@@ -523,7 +541,7 @@ export class CollectionSyncManager<
       })
     }
 
-    const finishTracking = () => {
+    const finish = () => {
       const loadingEnding =
         this.pendingLoadSubsetPromises.size === 1 &&
         this.pendingLoadSubsetPromises.has(promise)
@@ -539,8 +557,7 @@ export class CollectionSyncManager<
         })
       }
     }
-
-    void promise.then(finishTracking, finishTracking)
+    void promise.then(finish, finish)
   }
 
   /**

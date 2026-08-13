@@ -135,6 +135,18 @@ export class NegativeActiveSubscribersError extends CollectionStateError {
   }
 }
 
+export class LiveQueryObserverDisposedError extends CollectionStateError {
+  constructor() {
+    super(`Cannot subscribe to a disposed LiveQueryObserver`)
+  }
+}
+
+export class LiveQueryWindowControllerDisposedError extends CollectionStateError {
+  constructor() {
+    super(`Cannot subscribe to a disposed LiveQueryWindowController`)
+  }
+}
+
 // Collection Operation Errors
 export class CollectionOperationError extends TanStackDBError {
   constructor(message: string) {

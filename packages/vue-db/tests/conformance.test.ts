@@ -126,6 +126,7 @@ function makeHandle(result: any, scope: ReturnType<typeof effectScope>) {
     current(): ConformanceResult {
       return {
         data: result.data?.value,
+        state: result.state?.value,
         status: result.status?.value ?? `idle`,
         isReady: Boolean(result.isReady?.value),
         isError: Boolean(result.isError?.value),
