@@ -34,8 +34,8 @@ function detachTrigger(observer: AnyObserver, trigger: () => void): void {
 /**
  * Install the Solid v2 external-source bridge for TanStack DB observers.
  *
- * Call **once** at application startup, before any `useLiveQuery` hooks or
- * `createLiveQueryObserver` calls. After installation, {@link trackSnapshot}
+ * Call **once** at application startup, before a Solid computation first
+ * calls {@link trackSnapshot}. After installation, {@link trackSnapshot}
  * reads inside any Solid compute (memo, effect, component body) automatically
  * subscribe to the observer and re-run when the snapshot changes — no manual
  * `subscribe`/`onCleanup` wiring required.

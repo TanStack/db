@@ -496,10 +496,9 @@ export function useLiveQuery(
             stateSyncedCollection = null
           }
         } else if (stateSyncedCollection !== currentCollection) {
-          // Lazy first-time sync; subsequent updates arrive via applySnapshot.
           state.clear()
-          for (const value of currentCollection.values()) {
-            state.set(value.$key, value)
+          for (const [key, value] of currentCollection.entries() as IterableIterator<[any, any]>) {
+            state.set(key, value)
           }
           stateSyncedCollection = currentCollection
         }

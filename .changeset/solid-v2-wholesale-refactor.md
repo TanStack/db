@@ -89,7 +89,7 @@ Benchmarks comparing the previous Solid v1 adapter (main branch, commit
 5 iterations each. The v1 adapter is the pre-renderer-rework version that
 was running in production before this MR.
 
-#### Initial All-Row Mount
+### Initial All-Row Mount
 
 | Rows  | v1 (main) | v2 wholesale | Result       |
 | ----- | --------: | -----------: | ------------ |
@@ -97,7 +97,7 @@ was running in production before this MR.
 | 1,000 |   18.75ms |      11.53ms | 1.63× faster |
 | 10,000|  129.74ms |      73.35ms | 1.77× faster |
 
-#### Single-Row Update in All-Row Query
+### Single-Row Update in All-Row Query
 
 | Rows  | v1 (main) | v2 wholesale | Result       |
 | ----- | --------: | -----------: | ------------ |
@@ -105,7 +105,7 @@ was running in production before this MR.
 | 1,000 |    0.08ms |       0.02ms | 4.00× faster |
 | 10,000|    0.08ms |       0.02ms | 4.00× faster |
 
-#### 10% Row Batch Update
+### 10% Row Batch Update
 
 | Rows  | v1 (main) | v2 wholesale | Result       |
 | ----- | --------: | -----------: | ------------ |
@@ -113,19 +113,19 @@ was running in production before this MR.
 | 1,000 |    9.59ms |       1.68ms | 5.71× faster |
 | 10,000|   97.40ms |      24.00ms | 4.06× faster |
 
-#### Repeated Single-Row Updates (1000 rows × 200 commits)
+### Repeated Single-Row Updates (1000 rows × 200 commits)
 
 | v1 (main) | v2 wholesale | Result       |
 | --------: | -----------: | ------------ |
 |    2.52ms |       2.60ms | 0.97× (par)  |
 
-#### findOne Update (1000 rows)
+### findOne Update (1000 rows)
 
 | v1 (main) | v2 wholesale | Result       |
 | --------: | -----------: | ------------ |
 |    0.01ms |       0.03ms | 0.33× slower |
 
-#### Remount After Update (1000 rows)
+### Remount After Update (1000 rows)
 
 | v1 (main) | v2 wholesale | Result       |
 | --------: | -----------: | ------------ |
