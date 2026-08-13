@@ -29,7 +29,7 @@ Query function that defines what data to fetch
 
 ### Returns
 
-Accessor that returns data with Suspense support, with state and status information as properties
+Accessor that returns data with Loading boundary support, with state and status information as properties
 
 ### Examples
 
@@ -89,17 +89,17 @@ return (
 ```
 
 ```ts
-// Use Suspense boundaries
+// Use Loading boundaries
 const todosQuery = useLiveQuery((q) =>
   q.from({ todos: todoCollection })
 )
 
 return (
-  <Suspense fallback={<div>Loading...</div>}>
+  <Loading fallback={<div>Loading...</div>}>
     <For each={todosQuery()}>
       {(todo) => <li key={todo.id}>{todo.text}</li>}
     </For>
-  </Suspense>
+  </Loading>
 )
 ```
 
@@ -129,7 +129,7 @@ Query function that defines what data to fetch
 
 ### Returns
 
-Accessor that returns data with Suspense support, with state and status information as properties
+Accessor that returns data with Loading boundary support, with state and status information as properties
 
 ### Examples
 
@@ -189,17 +189,17 @@ return (
 ```
 
 ```ts
-// Use Suspense boundaries
+// Use Loading boundaries
 const todosQuery = useLiveQuery((q) =>
   q.from({ todos: todoCollection })
 )
 
 return (
-  <Suspense fallback={<div>Loading...</div>}>
+  <Loading fallback={<div>Loading...</div>}>
     <For each={todosQuery()}>
       {(todo) => <li key={todo.id}>{todo.text}</li>}
     </For>
-  </Suspense>
+  </Loading>
 )
 ```
 
@@ -229,7 +229,7 @@ Configuration object with query and options
 
 ### Returns
 
-Accessor that returns data with Suspense support, with state and status information as properties
+Accessor that returns data with Loading boundary support, with state and status information as properties
 
 ### Examples
 
@@ -306,7 +306,7 @@ Pre-created live query collection to subscribe to
 
 ### Returns
 
-Accessor that returns data with Suspense support, with state and status information as properties
+Accessor that returns data with Loading boundary support, with state and status information as properties
 
 ### Examples
 
@@ -376,7 +376,7 @@ Create a live query using a query function
 
 ### Returns
 
-Accessor that returns data with Suspense support, with state and status information as properties
+Accessor that returns data with Loading boundary support, with state and status information as properties
 
 ### Examples
 
@@ -436,16 +436,16 @@ return (
 ```
 
 ```ts
-// Use Suspense boundaries
+// Use Loading boundaries
 const todosQuery = useLiveQuery((q) =>
   q.from({ todos: todoCollection })
 )
 
 return (
-  <Suspense fallback={<div>Loading...</div>}>
+  <Loading fallback={<div>Loading...</div>}>
     <For each={todosQuery()}>
       {(todo) => <li key={todo.id}>{todo.text}</li>}
     </For>
-  </Suspense>
+  </Loading>
 )
 ```
