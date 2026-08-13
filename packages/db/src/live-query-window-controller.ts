@@ -46,17 +46,20 @@ type PendingWindow = {
 class WindowCoordinator {
   private readonly leases = new Map<symbol, number>()
   private readonly leaseVersions = new Map<symbol, number>()
-  private readonly initialWindow: { offset: number; limit: number } | undefined
+  private baselineWindow: { offset: number; limit: number } | undefined
+  private shouldCaptureBaseline = true
   private appliedLimit: number | undefined
   private pending: PendingWindow | undefined
   private generation = 0
   private leaseVersion = 0
 
-  constructor(private readonly target: WindowTarget) {
-    this.initialWindow = target.utils?.getWindow?.()
-  }
+  constructor(private readonly target: WindowTarget) {}
 
   request(lease: symbol, limit: number): WindowResult {
+    if (this.leases.size === 0 && this.shouldCaptureBaseline) {
+      this.baselineWindow = this.target.utils?.getWindow?.()
+      this.shouldCaptureBaseline = false
+    }
     const previousLimit = this.leases.get(lease)
     const previousVersion = this.leaseVersions.get(lease)
     const version = ++this.leaseVersion
@@ -69,6 +72,7 @@ class WindowCoordinator {
     } catch (error) {
       this.rollbackLease(lease, version, previousLimit, previousVersion)
       this.appliedLimit = undefined
+      if (this.leases.size === 0) this.shouldCaptureBaseline = true
       throw error
     }
 
@@ -102,6 +106,10 @@ class WindowCoordinator {
       currentWindow === undefined ||
       (currentWindow.offset === 0 && currentWindow.limit === desiredLimit)
     )
+  }
+
+  hasLeases(): boolean {
+    return this.leases.size > 0
   }
 
   release(lease: symbol, restoreWhenEmpty: boolean): void {
@@ -165,9 +173,11 @@ class WindowCoordinator {
 
   private restoreInitialWindow(): void {
     const setWindow = this.target.utils?.setWindow
-    if (!this.initialWindow || typeof setWindow !== `function`) return
+    const baselineWindow = this.baselineWindow
+    this.shouldCaptureBaseline = true
+    if (!baselineWindow || typeof setWindow !== `function`) return
     try {
-      const result = setWindow.call(this.target.utils, this.initialWindow)
+      const result = setWindow.call(this.target.utils, baselineWindow)
       if (result !== true) void result.catch(() => {})
     } catch {
       // Release has no error channel. A future lease will retry its own window.
@@ -242,6 +252,11 @@ function getWindowCoordinator(target: WindowTarget): WindowCoordinator {
     windowCoordinators.set(target, coordinator)
   }
   return coordinator
+}
+
+/** @internal Whether an infinite-query controller currently owns this window. */
+export function hasLiveQueryWindowLeases(target: object): boolean {
+  return windowCoordinators.get(target)?.hasLeases() ?? false
 }
 
 /**

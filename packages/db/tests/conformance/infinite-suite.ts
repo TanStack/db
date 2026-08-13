@@ -984,22 +984,28 @@ export function runInfiniteQuerySuite(rawDriver: InfiniteQueryDriver): void {
             .orderBy(({ items }: any) => items.rank, `desc`)
             .limit(4),
         ).collection
-        const larger = driver.mountCollection(collection, { pageSize: 3 })
-        const smaller = driver.mountCollection(collection, { pageSize: 1 })
-        await larger.flush()
-        await smaller.flush()
-        await larger.fetchNextPage()
-        await smaller.fetchNextPage()
-        await larger.flush()
+        const warn = vi.spyOn(console, `warn`).mockImplementation(() => {})
+        try {
+          const larger = driver.mountCollection(collection, { pageSize: 3 })
+          const smaller = driver.mountCollection(collection, { pageSize: 1 })
+          await larger.flush()
+          await smaller.flush()
+          await larger.fetchNextPage()
+          await smaller.fetchNextPage()
+          await larger.flush()
 
-        const getWindow = () =>
-          (collection.utils as { getWindow: () => unknown }).getWindow()
-        expect(getWindow()).toEqual({ offset: 0, limit: 7 })
-        larger.unmount()
-        await smaller.flush()
-        expect(getWindow()).toEqual({ offset: 0, limit: 3 })
-        smaller.unmount()
-        expect(getWindow()).toEqual({ offset: 0, limit: 4 })
+          const getWindow = () =>
+            (collection.utils as { getWindow: () => unknown }).getWindow()
+          expect(getWindow()).toEqual({ offset: 0, limit: 7 })
+          larger.unmount()
+          await smaller.flush()
+          expect(getWindow()).toEqual({ offset: 0, limit: 3 })
+          smaller.unmount()
+          expect(getWindow()).toEqual({ offset: 0, limit: 4 })
+          expect(warn).not.toHaveBeenCalled()
+        } finally {
+          warn.mockRestore()
+        }
       },
     )
 

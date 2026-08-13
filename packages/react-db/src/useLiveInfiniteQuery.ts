@@ -1,9 +1,10 @@
 import { useCallback, useRef, useSyncExternalStore } from 'react'
 import {
-  CollectionImpl,
   createLiveQueryCollection,
   createLiveQueryWindowController,
   deepEquals,
+  hasLiveQueryWindowLeases,
+  isCollection,
   isSingleResultCollection,
   normalizeLiveQueryWindowPageSize,
 } from '@tanstack/db'
@@ -81,6 +82,18 @@ export type UseLiveInfiniteQueryReturn<
 
 type EnabledLiveQueryReturn<TContext extends Context & NonSingleResult> =
   ReturnType<typeof useLiveQuery<TContext>>
+
+type InfiniteQueryRenderState = {
+  inputKind: `collection` | `query`
+  inputCollection: Collection<any, any, any> | null
+  dependencies: Array<unknown> | null
+  pageSize: number
+  initialPageParam: number
+  collection: Collection<any, any, any>
+  controller: LiveQueryWindowController<any, any>
+  warning: string | null
+  warned: boolean
+}
 
 /**
  * Create an infinite query using a query function with live updates
@@ -179,51 +192,72 @@ export function useLiveInfiniteQuery<
   const initialPageParam = config.initialPageParam ?? 0
 
   // Detect if input is a collection or query function
-  const isCollection = queryFnOrCollection instanceof CollectionImpl
+  const inputIsCollection = isCollection(queryFnOrCollection)
 
   // Validate input type
-  if (!isCollection && typeof queryFnOrCollection !== `function`) {
+  if (!inputIsCollection && typeof queryFnOrCollection !== `function`) {
     throw new Error(
-      `useLiveInfiniteQuery: First argument must be either a pre-created live query collection (CollectionImpl) ` +
+      `useLiveInfiniteQuery: First argument must be either a pre-created live query collection ` +
         `or a query function. Received: ${typeof queryFnOrCollection}`,
     )
   }
 
-  const collectionRef = useRef<Collection<any, any, any> | null>(null)
-  const controllerRef = useRef<LiveQueryWindowController<any, any> | null>(null)
-  const configRef = useRef<unknown>(null)
-  const depsRef = useRef<Array<unknown> | null>(null)
-  const pageSizeRef = useRef(pageSize)
-  const initialPageParamRef = useRef(initialPageParam)
-  const validatedCollectionRef = useRef<unknown>(null)
-  const inputKind = isCollection ? `collection` : `query`
-  const inputKindRef = useRef<typeof inputKind | null>(null)
-  const previousInputKind = inputKindRef.current
+  const committedRef = useRef<InfiniteQueryRenderState | null>(null)
+  const committed = committedRef.current
+  const inputKind = inputIsCollection ? `collection` : `query`
 
   const dependenciesChanged =
-    !isCollection &&
-    (depsRef.current === null ||
-      depsRef.current.length !== deps.length ||
-      depsRef.current.some((dep, index) => dep !== deps[index]))
+    !inputIsCollection &&
+    (committed?.dependencies === null ||
+      committed?.dependencies === undefined ||
+      committed.dependencies.length !== deps.length ||
+      committed.dependencies.some((dep, index) => dep !== deps[index]))
   const dependenciesStructurallyEqual =
-    !isCollection &&
-    depsRef.current !== null &&
-    deepEquals(depsRef.current, deps)
+    !inputIsCollection &&
+    committed?.dependencies !== null &&
+    committed?.dependencies !== undefined &&
+    deepEquals(committed.dependencies, deps)
   const needsNewCollection =
-    !collectionRef.current ||
-    inputKindRef.current !== inputKind ||
-    (isCollection && configRef.current !== queryFnOrCollection) ||
+    committed === null ||
+    committed.inputKind !== inputKind ||
+    (inputIsCollection && committed.inputCollection !== queryFnOrCollection) ||
     dependenciesChanged
   const pageShapeChanged =
-    pageSizeRef.current !== pageSize ||
-    initialPageParamRef.current !== initialPageParam
+    committed === null ||
+    committed.pageSize !== pageSize ||
+    committed.initialPageParam !== initialPageParam
   const needsNewController =
-    !controllerRef.current || needsNewCollection || pageShapeChanged
+    committed === null || needsNewCollection || pageShapeChanged
 
-  if (needsNewCollection) {
-    inputKindRef.current = inputKind
-    if (isCollection) {
-      const collection = queryFnOrCollection as Collection<any, any, any>
+  let renderState = committed
+  if (needsNewController) {
+    let collection = committed?.collection
+    let warning: string | null = null
+
+    if (needsNewCollection) {
+      if (inputIsCollection) {
+        collection = queryFnOrCollection
+      } else {
+        // Wrap the query with the first page's peek-ahead window; the controller
+        // grows the limit from here via setWindow.
+        collection = createLiveQueryCollection({
+          query: (q: InitialQueryBuilder) =>
+            queryFnOrCollection(q)
+              .limit(pageSize + 1)
+              .offset(0),
+          // Construction happens during render. Synchronization starts only when
+          // useSyncExternalStore commits the controller subscription.
+          startSync: false,
+          gcTime: DEFAULT_GC_TIME_MS,
+        })
+      }
+    }
+
+    if (!collection) {
+      throw new Error(`useLiveInfiniteQuery: Failed to create a collection.`)
+    }
+
+    if (inputIsCollection) {
       assertManyResult(collection)
       if (!isWindowedCollection(collection)) {
         throw new Error(
@@ -231,66 +265,56 @@ export function useLiveInfiniteQuery<
             `Please add .orderBy() to your createLiveQueryCollection query.`,
         )
       }
-      // Warn once per collection instance if its current window doesn't match
-      // the first page the hook is about to enforce.
-      if (validatedCollectionRef.current !== collection) {
-        validatedCollectionRef.current = collection
-        const currentWindow = collection.utils.getWindow?.()
-        if (
-          currentWindow &&
-          (currentWindow.offset !== 0 || currentWindow.limit !== pageSize + 1)
-        ) {
-          console.warn(
-            `useLiveInfiniteQuery: Pre-created collection has window {offset: ${currentWindow.offset}, limit: ${currentWindow.limit}} ` +
-              `but the hook expects {offset: 0, limit: ${pageSize + 1}}. Adjusting window now.`,
-          )
-        }
+      const currentWindow = collection.utils.getWindow?.()
+      if (
+        currentWindow &&
+        !hasLiveQueryWindowLeases(collection) &&
+        (currentWindow.offset !== 0 || currentWindow.limit !== pageSize + 1)
+      ) {
+        warning =
+          `useLiveInfiniteQuery: Pre-created collection has window {offset: ${currentWindow.offset}, limit: ${currentWindow.limit}} ` +
+          `but the hook expects {offset: 0, limit: ${pageSize + 1}}. Adjusting window now.`
       }
-      collectionRef.current = collection
-      configRef.current = queryFnOrCollection
-    } else {
-      // Wrap the query with the first page's peek-ahead window; the controller
-      // grows the limit from here via setWindow.
-      collectionRef.current = createLiveQueryCollection({
-        query: (q: InitialQueryBuilder) =>
-          queryFnOrCollection(q)
-            .limit(pageSize + 1)
-            .offset(0),
-        // Construction happens during render. Synchronization starts only when
-        // useSyncExternalStore commits the controller subscription.
-        startSync: false,
-        gcTime: DEFAULT_GC_TIME_MS,
-      })
-      assertManyResult(collectionRef.current)
-      depsRef.current = [...deps]
     }
-  }
 
-  if (needsNewController) {
-    const previousController = controllerRef.current
     const canPreservePageCount =
-      previousController !== null &&
+      committed !== null &&
       (!needsNewCollection ||
-        (previousInputKind === `query` && dependenciesStructurallyEqual))
+        (committed.inputKind === `query` && dependenciesStructurallyEqual))
     const initialPageCount = canPreservePageCount
-      ? Math.max(1, previousController.getSnapshot().pages.length)
+      ? Math.max(1, committed.controller.getSnapshot().pages.length)
       : 1
-    pageSizeRef.current = pageSize
-    initialPageParamRef.current = initialPageParam
-    controllerRef.current = createLiveQueryWindowController(
-      collectionRef.current,
-      {
+    assertManyResult(collection)
+    renderState = {
+      inputKind,
+      inputCollection: inputIsCollection ? collection : null,
+      dependencies: inputIsCollection ? null : [...deps],
+      pageSize,
+      initialPageParam,
+      collection,
+      controller: createLiveQueryWindowController(collection, {
         pageSize,
         initialPageParam,
         initialPageCount,
-      },
-    )
+      }),
+      warning,
+      warned: false,
+    }
   }
-  const controller = controllerRef.current!
+  const currentRenderState = renderState!
+  const controller = currentRenderState.controller
 
   const subscribe = useCallback(
-    (onStoreChange: () => void) => controller.subscribe(onStoreChange),
-    [controller],
+    (onStoreChange: () => void) => {
+      const unsubscribe = controller.subscribe(onStoreChange)
+      committedRef.current = currentRenderState
+      if (currentRenderState.warning && !currentRenderState.warned) {
+        currentRenderState.warned = true
+        console.warn(currentRenderState.warning)
+      }
+      return unsubscribe
+    },
+    [controller, currentRenderState],
   )
   const getSnapshot = useCallback(() => controller.getSnapshot(), [controller])
   const snapshot = useSyncExternalStore(subscribe, getSnapshot)

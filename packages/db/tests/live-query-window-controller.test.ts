@@ -683,6 +683,28 @@ describe(`createLiveQueryWindowController`, () => {
     await lq.cleanup()
   })
 
+  it(`recaptures an externally changed window before a new lease cycle`, async () => {
+    const lq = makeOrderedLiveQuery(makeSource(), 2)
+    const first = createLiveQueryWindowController<Row, string>(lq as any, {
+      pageSize: 2,
+    })
+    const unsubscribeFirst = first.subscribe(() => {})
+    await lq.preload()
+    unsubscribeFirst()
+
+    await lq.utils.setWindow({ offset: 0, limit: 4 })
+    const second = createLiveQueryWindowController<Row, string>(lq as any, {
+      pageSize: 2,
+    })
+    const unsubscribeSecond = second.subscribe(() => {})
+    unsubscribeSecond()
+
+    expect(lq.utils.getWindow()).toEqual({ offset: 0, limit: 4 })
+    first.dispose()
+    second.dispose()
+    await lq.cleanup()
+  })
+
   it(`ignores a failed attachment superseded by a new lease`, async () => {
     const lq = makeOrderedLiveQuery(makeSource(), 2)
     await lq.preload()

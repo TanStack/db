@@ -1,7 +1,12 @@
 import { describe, expect, it } from 'vitest'
 import { act, render, renderHook, waitFor } from '@testing-library/react'
 import { Suspense } from 'react'
-import { createCollection, createLiveQueryCollection, eq } from '@tanstack/db'
+import {
+  createCollection,
+  createLiveQueryCollection,
+  eq,
+  gt,
+} from '@tanstack/db'
 import { useLiveInfiniteQuery } from '../src/useLiveInfiniteQuery'
 import { mockSyncCollectionOptions } from '../../db/tests/utils'
 import type { ReactNode } from 'react'
@@ -89,6 +94,84 @@ describe(`useLiveInfiniteQuery`, () => {
 
     expect(source.subscriberCount).toBe(0)
     rendered.unmount()
+  })
+
+  it(`preserves committed pages across an abandoned dependency update`, async () => {
+    const source = createCollection(
+      mockSyncCollectionOptions<Post>({
+        autoIndex: `eager`,
+        id: `abandoned-infinite-query-update`,
+        getKey: (post) => post.id,
+        initialData: createMockPosts(20),
+      }),
+    )
+    const never = new Promise<void>(() => {})
+    let shouldSuspend = false
+    let current:
+      | {
+          isReady: boolean
+          pages: Array<Array<unknown>>
+          fetchNextPage: () => Promise<void>
+        }
+      | undefined
+
+    function Query({ minimum }: { minimum: number }): ReactNode {
+      current = useLiveInfiniteQuery(
+        (q) =>
+          q
+            .from({ post: source })
+            .where(({ post }) => gt(post.createdAt, minimum))
+            .orderBy(({ post }) => post.createdAt, `desc`),
+        { pageSize: 3 },
+        [minimum],
+      )
+      if (shouldSuspend) throw never
+      return null
+    }
+
+    function App({ minimum }: { minimum: number }): ReactNode {
+      return (
+        <Suspense fallback={null}>
+          <Query minimum={minimum} />
+        </Suspense>
+      )
+    }
+
+    const rendered = render(<App minimum={0} />)
+    await waitFor(() => expect(current?.isReady).toBe(true))
+    await act(async () => {
+      await current!.fetchNextPage()
+      await current!.fetchNextPage()
+    })
+    expect(current?.pages.map((page) => page.length)).toEqual([3, 3, 3])
+
+    shouldSuspend = true
+    rendered.rerender(<App minimum={5} />)
+    await Promise.resolve()
+
+    shouldSuspend = false
+    rendered.rerender(<App minimum={0} />)
+    await waitFor(() => expect(current?.isReady).toBe(true))
+    expect(current?.pages.map((page) => page.length)).toEqual([3, 3, 3])
+    rendered.unmount()
+  })
+
+  it(`recognizes a structurally valid collection from another realm`, () => {
+    const foreignCollection = {
+      id: `foreign-live-query`,
+      subscribeChanges: () => () => {},
+      startSyncImmediate: () => {},
+      utils: {
+        setWindow: () => true as const,
+        getWindow: () => undefined,
+      },
+    }
+
+    expect(() =>
+      renderHook(() =>
+        useLiveInfiniteQuery(foreignCollection as any, { pageSize: 3 }),
+      ),
+    ).toThrow(/orderBy/)
   })
 
   it(`compares dependencies by identity instead of serialization`, async () => {

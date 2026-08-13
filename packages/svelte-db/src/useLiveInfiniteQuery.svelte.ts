@@ -3,6 +3,7 @@ import {
   createLiveQueryCollection,
   createLiveQueryWindowController,
   deepEquals,
+  hasLiveQueryWindowLeases,
   isCollection,
   isSingleResultCollection,
   normalizeLiveQueryWindowPageSize,
@@ -242,6 +243,7 @@ export function useLiveInfiniteQuery<
         const expectedLimit = pageSize + 1
         if (
           currentWindow &&
+          !hasLiveQueryWindowLeases(collection) &&
           (currentWindow.offset !== 0 || currentWindow.limit !== expectedLimit)
         ) {
           console.warn(
