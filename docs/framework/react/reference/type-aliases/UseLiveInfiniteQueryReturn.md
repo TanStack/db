@@ -9,7 +9,7 @@ title: UseLiveInfiniteQueryReturn
 type UseLiveInfiniteQueryReturn<TContext> = Omit<ReturnType<typeof useLiveQuery>, "data"> & object;
 ```
 
-Defined in: [useLiveInfiniteQuery.ts:55](https://github.com/TanStack/db/blob/main/packages/react-db/src/useLiveInfiniteQuery.ts#L55)
+Defined in: [useLiveInfiniteQuery.ts:45](https://github.com/TanStack/db/blob/main/packages/react-db/src/useLiveInfiniteQuery.ts#L45)
 
 ## Type Declaration
 
@@ -28,12 +28,12 @@ error: unknown;
 ### fetchNextPage()
 
 ```ts
-fetchNextPage: () => void;
+fetchNextPage: () => Promise<void>;
 ```
 
 #### Returns
 
-`void`
+`Promise`\<`void`\>
 
 ### hasNextPage
 

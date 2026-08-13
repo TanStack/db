@@ -11,7 +11,7 @@ title: useLiveInfiniteQuery
 function useLiveInfiniteQuery<TResult, TKey, TUtils>(liveQueryCollection, config): UseLiveInfiniteQueryReturn<any>;
 ```
 
-Defined in: [useLiveInfiniteQuery.ts:139](https://github.com/TanStack/db/blob/main/packages/react-db/src/useLiveInfiniteQuery.ts#L139)
+Defined in: [useLiveInfiniteQuery.ts:141](https://github.com/TanStack/db/blob/main/packages/react-db/src/useLiveInfiniteQuery.ts#L141)
 
 Create an infinite query using a query function with live updates
 
@@ -118,7 +118,7 @@ function useLiveInfiniteQuery<TContext>(
 deps?): UseLiveInfiniteQueryReturn<TContext>;
 ```
 
-Defined in: [useLiveInfiniteQuery.ts:149](https://github.com/TanStack/db/blob/main/packages/react-db/src/useLiveInfiniteQuery.ts#L149)
+Defined in: [useLiveInfiniteQuery.ts:151](https://github.com/TanStack/db/blob/main/packages/react-db/src/useLiveInfiniteQuery.ts#L151)
 
 Create an infinite query using a query function with live updates
 

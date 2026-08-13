@@ -9,7 +9,7 @@ title: LiveInfiniteQueryConfig
 type LiveInfiniteQueryConfig<TRow> = InfiniteQueryOptions & object;
 ```
 
-Defined in: [useLiveInfiniteQuery.svelte.ts:43](https://github.com/TanStack/db/blob/main/packages/svelte-db/src/useLiveInfiniteQuery.svelte.ts#L43)
+Defined in: [useLiveInfiniteQuery.ts:39](https://github.com/TanStack/db/blob/main/packages/vue-db/src/useLiveInfiniteQuery.ts#L39)
 
 ## Type Declaration
 
