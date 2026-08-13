@@ -838,6 +838,18 @@ function updateModel<T extends { id: number }>(
   }
 }
 
+function updateFullRowBatchModels(
+  step: FullRowBatchStep,
+  roots: Map<number, RootRow>,
+  levels: Array<Map<number, ChildRow>>,
+): void {
+  if (step.level === 0) {
+    updateModel(roots, step.changes)
+  } else {
+    updateModel(levels[step.level - 1]!, step.changes)
+  }
+}
+
 function createFullRowBatchTraceDriver(
   depth: IncludeDepth,
 ): TraceDriver<FullRowBatchStep, StructuralTraceContext> {
@@ -847,13 +859,10 @@ function createFullRowBatchTraceDriver(
     apply: (step, { sources, roots, levels }) => {
       if (step.level === 0) {
         sources.roots.writeBatch(step.changes)
-        updateModel(roots, step.changes)
-        return
+      } else {
+        sources.levels[step.level - 1]!.writeBatch(step.changes)
       }
-
-      const level = step.level - 1
-      sources.levels[level]!.writeBatch(step.changes)
-      updateModel(levels[level]!, step.changes)
+      updateFullRowBatchModels(step, roots, levels)
     },
     cleanup: cleanupStructuralTrace,
   }
@@ -1001,16 +1010,24 @@ function createConnectedBatchPrefix(
   return steps
 }
 
+type ConnectedBranch = {
+  idBase: number
+  groupBase: number
+}
+
 function createConnectedBatchBranches(
   depth: IncludeDepth,
+  branches: ReadonlyArray<ConnectedBranch> = [
+    { idBase: 100, groupBase: 100 },
+    { idBase: 200, groupBase: 200 },
+  ],
 ): Array<FullRowBatchStep> {
-  const branchRoots = [100, 200]
   const steps: Array<FullRowBatchStep> = [
     {
       level: 0,
-      changes: branchRoots.map((id) => ({
+      changes: branches.map(({ idBase, groupBase }) => ({
         type: `insert`,
-        value: batchRoot(id, id, id, 0),
+        value: batchRoot(idBase, groupBase, idBase, 0),
       })),
     },
   ]
@@ -1018,11 +1035,16 @@ function createConnectedBatchBranches(
   for (let level = 1; level <= depth; level++) {
     steps.push({
       level: level as IncludeDepth,
-      changes: branchRoots.map((rootId) => ({
+      changes: branches.map(({ idBase, groupBase }) => ({
         type: `insert`,
         value: {
-          ...batchChild(rootId + level, rootId + level - 1, rootId + level, 0),
-          group: rootId + level,
+          ...batchChild(
+            idBase + level,
+            groupBase + level - 1,
+            idBase + level,
+            0,
+          ),
+          group: groupBase + level,
         },
       })),
     })
@@ -1034,7 +1056,6 @@ function createConnectedBatchBranches(
 function normalizeFullRowBatchInputs(
   depth: IncludeDepth,
   inputs: Array<FullRowBatchInput>,
-  allowChildRelationshipUpdates: boolean,
 ): FullRowBatchScenario {
   const roots = new Map<number, RootRow>([[100, batchRoot(100, 100, 100, 0)]])
   const levels = Array.from(
@@ -1088,14 +1109,8 @@ function normalizeFullRowBatchInputs(
 
       const value: ChildRow = {
         id: change.id,
-        parentGroup:
-          !allowChildRelationshipUpdates && current
-            ? current.parentGroup
-            : change.parentGroup,
-        group:
-          !allowChildRelationshipUpdates && current
-            ? current.group
-            : change.group,
+        parentGroup: current ? current.parentGroup : change.parentGroup,
+        group: current ? current.group : change.group,
         value: change.value,
         position: change.position,
       }
@@ -1117,11 +1132,9 @@ function fullRowBatchScenarioAtDepthArbitrary(
       maxLength: 10,
     })
     .map((inputs) => {
-      const noise = normalizeFullRowBatchInputs(
-        depth,
-        inputs,
-        false,
-      ).steps.slice(depth + 1)
+      const noise = normalizeFullRowBatchInputs(depth, inputs).steps.slice(
+        depth + 1,
+      )
       const changes: Array<SyncChange<ChildRow>> = [100, 200].map((rootId) => ({
         type: `update`,
         value: {
@@ -1148,35 +1161,230 @@ function fullRowBatchScenarioAtDepthArbitrary(
 
 type VisibleRelationshipTransition = `reparent` | `rekey`
 
+function otherBranch(branch: 0 | 1): 0 | 1 {
+  return branch === 0 ? 1 : 0
+}
+
+type VisibleRelationshipScenario = FullRowBatchScenario & {
+  transitionStepIndex: number
+}
+
+type VisibleRelationshipScenarios = {
+  transitionOnly: VisibleRelationshipScenario
+  stateful: VisibleRelationshipScenario
+}
+
+type VisibleScalarNoise = {
+  side: `before` | `after`
+  level: 0 | IncludeDepth
+  branch: 0 | 1
+  value: number
+  position: number
+}
+
+type VisibleRelationshipScenarioOptions = {
+  depth: IncludeDepth
+  targetLevel: IncludeDepth
+  sourceBranch: 0 | 1
+  branches: readonly [ConnectedBranch, ConnectedBranch]
+  noise: ReadonlyArray<VisibleScalarNoise>
+} & (
+  | { transition: `reparent`; rekeyGroup?: never }
+  | { transition: `rekey`; rekeyGroup: number }
+)
+
+function assertDisjointRelationshipKeys(
+  depth: IncludeDepth,
+  branches: readonly [ConnectedBranch, ConnectedBranch],
+  rekeyGroup: number | undefined,
+): void {
+  const ids = branches.flatMap(({ idBase }) =>
+    Array.from({ length: depth + 1 }, (_, level) => idBase + level),
+  )
+  const groups = [
+    ...branches.flatMap(({ groupBase }) =>
+      Array.from({ length: depth + 1 }, (_, level) => groupBase + level),
+    ),
+    ...(rekeyGroup === undefined ? [] : [rekeyGroup]),
+  ]
+  if (
+    new Set(ids).size !== ids.length ||
+    new Set(groups).size !== groups.length
+  ) {
+    throw new Error(`Visible relationship keys overlap`)
+  }
+}
+
+function createVisibleRelationshipScenario(
+  options: VisibleRelationshipScenarioOptions,
+): VisibleRelationshipScenario {
+  const { depth, transition, targetLevel, sourceBranch, branches, noise } =
+    options
+  assertDisjointRelationshipKeys(
+    depth,
+    branches,
+    transition === `rekey` ? options.rekeyGroup : undefined,
+  )
+  const steps = createConnectedBatchBranches(depth, branches)
+  const roots = new Map<number, RootRow>()
+  const levels = Array.from({ length: 4 }, () => new Map<number, ChildRow>())
+
+  for (const step of steps) {
+    updateFullRowBatchModels(step, roots, levels)
+  }
+
+  const appendNoise = (entry: VisibleScalarNoise): void => {
+    const branch = branches[entry.branch]
+    if (entry.level === 0) {
+      const current = roots.get(branch.idBase)!
+      const value = {
+        ...current,
+        value: entry.value,
+        position: entry.position,
+      }
+      roots.set(value.id, value)
+      steps.push({ level: 0, changes: [{ type: `update`, value }] })
+      return
+    }
+
+    const model = levels[entry.level - 1]!
+    const current = model.get(branch.idBase + entry.level)!
+    const value = {
+      ...current,
+      value: entry.value,
+      position: entry.position,
+    }
+    model.set(value.id, value)
+    steps.push({
+      level: entry.level,
+      changes: [{ type: `update`, value }],
+    })
+  }
+
+  for (const entry of noise.filter(({ side }) => side === `before`)) {
+    appendNoise(entry)
+  }
+
+  const source = branches[sourceBranch]
+  const destination = branches[otherBranch(sourceBranch)]
+  const targetModel = levels[targetLevel - 1]!
+  const current = targetModel.get(source.idBase + targetLevel)!
+  const value: ChildRow = {
+    ...current,
+    parentGroup:
+      transition === `reparent`
+        ? destination.groupBase + targetLevel - 1
+        : current.parentGroup,
+    group: transition === `rekey` ? options.rekeyGroup : current.group,
+  }
+  const transitionStepIndex = steps.length
+  steps.push({
+    level: targetLevel,
+    changes: [{ type: `update`, value }],
+  })
+  targetModel.set(value.id, value)
+
+  for (const entry of noise.filter(({ side }) => side === `after`)) {
+    appendNoise(entry)
+  }
+
+  return {
+    depth,
+    steps,
+    transitionStepIndex,
+  }
+}
+
 function visibleRelationshipScenarioArbitrary(
   depth: IncludeDepth,
   transition: VisibleRelationshipTransition,
-): fc.Arbitrary<FullRowBatchScenario> {
-  return fc
-    .array(fullRowBatchInputArbitrary(depth, `children`, 1), {
-      minLength: 1,
-      maxLength: 10,
+  targetLevel: IncludeDepth,
+): fc.Arbitrary<VisibleRelationshipScenarios> {
+  const branchArbitrary = fc.constantFrom<0 | 1>(0, 1)
+  const scalarNoiseArbitrary = (
+    side: VisibleScalarNoise[`side`],
+    branch: fc.Arbitrary<0 | 1>,
+  ): fc.Arbitrary<VisibleScalarNoise> =>
+    fc.record({
+      side: fc.constant(side),
+      level: levelArbitrary(depth),
+      branch,
+      value: fc.integer({ min: -3, max: 3 }),
+      position: fc.integer({ min: -2, max: 2 }),
     })
-    .map((inputs) => {
-      const noise = normalizeFullRowBatchInputs(
-        depth,
-        inputs,
-        true,
-      ).steps.slice(depth + 1)
-      const value: ChildRow = {
-        ...batchChild(101, transition === `reparent` ? 200 : 100, 101, 0),
-        group: transition === `rekey` ? 150 : 101,
-      }
 
-      return {
-        depth,
-        steps: [
-          ...createConnectedBatchBranches(depth),
-          ...noise,
-          { level: 1, changes: [{ type: `update`, value }] },
-        ],
-      }
+  return fc
+    .record({
+      sourceBranch: branchArbitrary,
+      leftIdBase: fc.integer({ min: 100, max: 500 }),
+      leftGroupBase: fc.integer({ min: 600, max: 1_000 }),
+      rightIdBase: fc.integer({ min: 1_100, max: 1_500 }),
+      rightGroupBase: fc.integer({ min: 1_600, max: 2_000 }),
+      rekeyGroup: fc.integer({ min: 2_100, max: 2_500 }),
+      beforeNoise: scalarNoiseArbitrary(`before`, branchArbitrary),
+      extraBeforeNoise: fc.array(
+        scalarNoiseArbitrary(`before`, branchArbitrary),
+        { maxLength: 4 },
+      ),
+      afterValues: fc.array(
+        fc.record({
+          level: levelArbitrary(depth),
+          value: fc.integer({ min: -3, max: 3 }),
+          position: fc.integer({ min: -2, max: 2 }),
+        }),
+        { minLength: 1, maxLength: 5 },
+      ),
     })
+    .map(
+      ({
+        sourceBranch,
+        leftIdBase,
+        leftGroupBase,
+        rightIdBase,
+        rightGroupBase,
+        rekeyGroup,
+        beforeNoise,
+        extraBeforeNoise,
+        afterValues,
+      }) => {
+        const stableBranch = otherBranch(sourceBranch)
+        // Updating two descendant levels after a reparent exposes a separate
+        // known defect, captured for every failing depth/level below. Keep the
+        // generated corpus green by updating only the branch that did not move.
+        const connectedNoise: Array<VisibleScalarNoise> = [
+          beforeNoise,
+          ...extraBeforeNoise,
+          ...afterValues.map((entry) => ({
+            ...entry,
+            side: `after` as const,
+            branch: stableBranch,
+          })),
+        ]
+        const options = {
+          depth,
+          targetLevel,
+          sourceBranch,
+          branches: [
+            { idBase: leftIdBase, groupBase: leftGroupBase },
+            { idBase: rightIdBase, groupBase: rightGroupBase },
+          ],
+          ...(transition === `rekey`
+            ? { transition, rekeyGroup }
+            : { transition }),
+        } satisfies Omit<VisibleRelationshipScenarioOptions, `noise`>
+
+        return {
+          transitionOnly: createVisibleRelationshipScenario({
+            ...options,
+            noise: [],
+          }),
+          stateful: createVisibleRelationshipScenario({
+            ...options,
+            noise: connectedNoise,
+          }),
+        }
+      },
+    )
 }
 
 async function expectFullRowBatchScenarioMatches({
@@ -1198,11 +1406,7 @@ function recomputeFullRowBatchScenario(
   const levels = Array.from({ length: 4 }, () => new Map<number, ChildRow>())
 
   for (const step of steps.slice(0, stepCount)) {
-    if (step.level === 0) {
-      updateModel(roots, step.changes)
-    } else {
-      updateModel(levels[step.level - 1]!, step.changes)
-    }
+    updateFullRowBatchModels(step, roots, levels)
   }
 
   return recompute(roots, levels, depth)
@@ -1351,7 +1555,7 @@ const flatMaterializationScenarioArbitrary = fc
     minLength: 1,
     maxLength: 12,
   })
-  .map((inputs) => normalizeFullRowBatchInputs(1, inputs, false))
+  .map((inputs) => normalizeFullRowBatchInputs(1, inputs))
 
 async function expectFlatMaterializationScenarioMatches(
   materialization: FlatMaterialization,
@@ -1653,24 +1857,85 @@ const intraBatchChildHandOffScenario: FullRowBatchScenario = {
   ],
 }
 
-describe(`includes recompute oracle`, () => {
-  fcTest(`covers a visible relationship transition at every depth`, () => {
-    const scenarios = ([1, 2, 3, 4] as const).map(
-      (depth) =>
-        fc.sample(visibleRelationshipScenarioArbitrary(depth, `reparent`), {
-          numRuns: 1,
-          seed: 1721 + depth,
-        })[0]!,
-    )
+function createReparentedSubtreeUpdateScenario(
+  depth: 3 | 4,
+  targetLevel: 1 | 2,
+): VisibleRelationshipScenario {
+  return createVisibleRelationshipScenario({
+    depth,
+    transition: `reparent`,
+    targetLevel,
+    sourceBranch: 0,
+    branches: [
+      { idBase: 100, groupBase: 600 },
+      { idBase: 1_100, groupBase: 1_600 },
+    ],
+    noise: [targetLevel + 1, targetLevel + 2].map((level) => ({
+      side: `after`,
+      level: level as IncludeDepth,
+      branch: 0,
+      value: 1,
+      position: 0,
+    })),
+  })
+}
 
-    for (const scenario of scenarios) {
-      const beforeTransition = recomputeFullRowBatchScenario(
-        scenario,
-        scenario.steps.length - 1,
-      )
-      expect(
-        recomputeFullRowBatchScenario(scenario, scenario.steps.length),
-      ).not.toEqual(beforeTransition)
+const minimalRekeyScenario = createVisibleRelationshipScenario({
+  depth: 3,
+  transition: `rekey`,
+  targetLevel: 1,
+  sourceBranch: 0,
+  branches: [
+    { idBase: 100, groupBase: 600 },
+    { idBase: 1_100, groupBase: 1_600 },
+  ],
+  rekeyGroup: 2_100,
+  noise: [],
+})
+
+describe(`includes recompute oracle`, () => {
+  fcTest(`rejects overlapping visible relationship keys`, () => {
+    const base = {
+      depth: 4,
+      transition: `rekey`,
+      targetLevel: 1,
+      sourceBranch: 0,
+      noise: [],
+    } as const
+    const collisions: Array<{
+      branches: readonly [ConnectedBranch, ConnectedBranch]
+      rekeyGroup: number
+    }> = [
+      {
+        branches: [
+          { idBase: 100, groupBase: 600 },
+          { idBase: 102, groupBase: 1_600 },
+        ],
+        rekeyGroup: 2_100,
+      },
+      {
+        branches: [
+          { idBase: 100, groupBase: 600 },
+          { idBase: 1_100, groupBase: 602 },
+        ],
+        rekeyGroup: 2_100,
+      },
+      {
+        branches: [
+          { idBase: 100, groupBase: 600 },
+          { idBase: 1_100, groupBase: 1_600 },
+        ],
+        rekeyGroup: 603,
+      },
+    ]
+
+    for (const collision of collisions) {
+      expect(() =>
+        createVisibleRelationshipScenario({
+          ...base,
+          ...collision,
+        }),
+      ).toThrow(/overlap/)
     }
   })
 
@@ -1688,6 +1953,31 @@ describe(`includes recompute oracle`, () => {
       ),
     )
   }
+
+  for (const [depth, targetLevel] of [
+    [3, 1],
+    [4, 1],
+    [4, 2],
+  ] as const) {
+    fcTest(
+      `discovered trace: later updates propagate through a reparented subtree at depth ${depth}, level ${targetLevel}`,
+      expectAssertionFailure(
+        () =>
+          expectFullRowBatchScenarioMatches(
+            createReparentedSubtreeUpdateScenario(depth, targetLevel),
+          ),
+        { checkpoint: depth + 4 },
+      ),
+    )
+  }
+
+  fcTest(
+    `discovered trace: rekeying a row detaches two descendant levels`,
+    expectAssertionFailure(
+      () => expectFullRowBatchScenarioMatches(minimalRekeyScenario),
+      { checkpoint: 5 },
+    ),
+  )
 
   fcTest.prop(
     [
@@ -1711,37 +2001,59 @@ describe(`includes recompute oracle`, () => {
       expectFullRowBatchScenarioMatches,
     )
 
-    const transitions: Array<VisibleRelationshipTransition> =
-      depth === 1 ? [`reparent`] : [`reparent`, `rekey`]
+    const transitions: Array<VisibleRelationshipTransition> = [
+      `reparent`,
+      `rekey`,
+    ]
     for (const transition of transitions) {
-      fcTest.prop([visibleRelationshipScenarioArbitrary(depth, transition)], {
-        numRuns: 6,
-        seed: 1721 + depth,
-      })(
-        transition === `rekey` && depth >= 3
-          ? `discovered trace: a visible rekey at depth ${depth}`
-          : `matches recomputation for a visible ${transition} at depth ${depth}`,
-        async (scenario) => {
-          const beforeTransition = recomputeFullRowBatchScenario(
-            scenario,
-            scenario.steps.length - 1,
-          )
-          const result = recomputeFullRowBatchScenario(
-            scenario,
-            scenario.steps.length,
-          )
+      for (let targetLevel = 1; targetLevel <= depth; targetLevel++) {
+        // Incremental routing fails to fully detach a rekeyed row when two or
+        // more descendant include levels still hang below it.
+        const expectsFailure =
+          transition === `rekey` && targetLevel + 2 <= depth
+        fcTest.prop(
+          [
+            visibleRelationshipScenarioArbitrary(
+              depth,
+              transition,
+              targetLevel as IncludeDepth,
+            ),
+          ],
+          {
+            numRuns: 4,
+            seed: 1721 + depth + targetLevel,
+          },
+        )(
+          expectsFailure
+            ? `discovered trace: a visible rekey at depth ${depth}, level ${targetLevel}`
+            : `matches recomputation for a visible ${transition} at depth ${depth}, level ${targetLevel}`,
+          async (scenarios) => {
+            for (const scenario of [
+              scenarios.transitionOnly,
+              scenarios.stateful,
+            ]) {
+              const beforeTransition = recomputeFullRowBatchScenario(
+                scenario,
+                scenario.transitionStepIndex,
+              )
+              const result = recomputeFullRowBatchScenario(
+                scenario,
+                scenario.transitionStepIndex + 1,
+              )
 
-          expect(result).not.toEqual(beforeTransition)
-          if (transition === `rekey` && depth >= 3) {
-            await expectAssertionFailure(
-              () => expectFullRowBatchScenarioMatches(scenario),
-              { checkpoint: scenario.steps.length },
-            )()
-          } else {
-            await expectFullRowBatchScenarioMatches(scenario)
-          }
-        },
-      )
+              expect(result).not.toEqual(beforeTransition)
+              if (expectsFailure) {
+                await expectAssertionFailure(
+                  () => expectFullRowBatchScenarioMatches(scenario),
+                  { checkpoint: scenario.transitionStepIndex + 1 },
+                )()
+              } else {
+                await expectFullRowBatchScenarioMatches(scenario)
+              }
+            }
+          },
+        )
+      }
     }
   }
 
