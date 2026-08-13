@@ -1,5 +1,6 @@
 import { createFileRoute } from '@tanstack/solid-router'
 import { useLiveQuery } from '@tanstack/solid-db'
+import { Loading } from '@solidjs/web'
 import {
   trailBaseConfigCollection,
   trailBaseTodoCollection,
@@ -32,12 +33,14 @@ function TrailBasePage() {
   )
 
   return (
-    <TodoApp
-      todos={todos()}
-      configData={configData()}
-      todoCollection={trailBaseTodoCollection}
-      configCollection={trailBaseConfigCollection}
-      title="todos (TrailBase)"
-    />
+    <Loading fallback="Loading...">
+      <TodoApp
+        todos={todos()}
+        configData={configData()}
+        todoCollection={trailBaseTodoCollection}
+        configCollection={trailBaseConfigCollection}
+        title="todos (TrailBase)"
+      />
+    </Loading>
   )
 }
