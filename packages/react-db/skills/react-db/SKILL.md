@@ -13,7 +13,7 @@ description: >
 type: framework
 library: db
 framework: react
-library_version: '0.6.0'
+library_version: '0.6.17'
 requires:
   - db-core
 sources:
@@ -229,7 +229,7 @@ const { data: projects } = useLiveQuery((q) =>
     ),
   })),
 )
-// project.issues is string[] — no subcomponent needed
+// project.issues is Array<{ id: string; title: string }> — no subcomponent needed
 ```
 
 See db-core/live-queries/SKILL.md for full includes rules (correlation conditions, nested includes, aggregates).
@@ -238,7 +238,8 @@ See db-core/live-queries/SKILL.md for full includes rules (correlation condition
 
 Live query results include computed, read-only virtual properties on every row:
 
-- `$synced`: `true` when the row is confirmed by sync; `false` when it is still optimistic.
+- `$synced`: `true` when no pending local optimistic write affects the row;
+  `false` while one does. It does not prove backend confirmation.
 - `$origin`: `"local"` if the last confirmed change came from this client, otherwise `"remote"`.
 - `$key`: the row key for the result.
 - `$collectionId`: the source collection ID.
@@ -253,7 +254,7 @@ const { data } = useLiveQuery(
       .where(({ todo }) => eq(todo.$synced, false)),
   [],
 )
-// Shows only optimistic (unconfirmed) todos
+// Shows rows with pending local optimistic writes
 ```
 
 ## React-Specific Patterns
@@ -354,7 +355,12 @@ Source: docs/guides/live-queries.md
 
 ### HIGH "Not a Collection" error from duplicate @tanstack/db
 
-If `useLiveQuery` throws `InvalidSourceError: The value provided for alias "todo" is not a Collection`, it usually means two copies of `@tanstack/db` are installed. The collection was created by one copy, but `useLiveQuery` checks `instanceof` against the other.
+If a query-builder alias throws
+`InvalidSourceError: The value provided for alias "todo" is not a Collection`,
+it can mean two copies of `@tanstack/db` are installed. Direct
+`useLiveQuery(preCreatedCollection)` detection is structural and works across
+package copies or realms, but `q.from({ todo: collection })` still validates
+the source with the core collection class.
 
 In dev mode, TanStack DB also throws `DuplicateDbInstanceError` if two instances are detected.
 
@@ -372,7 +378,7 @@ If multiple versions appear, fix with one of:
 {
   "pnpm": {
     "overrides": {
-      "@tanstack/db": "^0.6.0"
+      "@tanstack/db": "^0.6.17"
     }
   }
 }

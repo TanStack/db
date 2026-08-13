@@ -10,7 +10,7 @@ description: >
 type: framework
 library: db
 framework: angular
-library_version: '0.6.0'
+library_version: '0.6.17'
 requires:
   - db-core
 sources:
@@ -100,6 +100,10 @@ const query = injectLiveQuery({
   },
 })
 ```
+
+A bare `{ query }` config defaults to `startSync: true` and `gcTime: 0`, like
+the query-function overload. Explicit values in the config override those
+defaults.
 
 ## Angular-Specific Patterns
 
