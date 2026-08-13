@@ -1,12 +1,13 @@
 import { useCallback, useRef, useSyncExternalStore } from 'react'
 import {
+  assertLiveQueryWindowManyResult,
+  compareLiveQueryWindowDependencies,
   createLiveQueryCollection,
   createLiveQueryWindowController,
-  deepEquals,
-  hasLiveQueryWindowLeases,
+  getLiveQueryWindowCollectionWarning,
   isCollection,
-  isSingleResultCollection,
   normalizeLiveQueryWindowPageSize,
+  shouldPreserveLiveQueryWindowPageCount,
 } from '@tanstack/db'
 // Type-only: used in `ReturnType<typeof useLiveQuery>` in UseLiveInfiniteQueryReturn.
 import type { useLiveQuery } from './useLiveQuery'
@@ -22,33 +23,6 @@ import type {
 
 // Live queries created here are cleaned up immediately (0 disables GC).
 const DEFAULT_GC_TIME_MS = 1
-
-type WindowedCollection = Collection<any, any, any> & {
-  utils: {
-    setWindow: (options: {
-      offset: number
-      limit: number
-    }) => true | Promise<void>
-  }
-}
-
-/** Type guard: does this collection have an active ordered window? */
-function isWindowedCollection(
-  collection: Collection<any, any, any>,
-): collection is WindowedCollection {
-  return (
-    typeof collection.utils?.setWindow === `function` &&
-    collection.utils.getWindow?.() !== undefined
-  )
-}
-
-function assertManyResult(collection: Collection<any, any, any>): void {
-  if (isSingleResultCollection(collection)) {
-    throw new Error(
-      `useLiveInfiniteQuery: Infinite queries do not support single-result queries. Remove .findOne().`,
-    )
-  }
-}
 
 export type UseLiveInfiniteQueryConfig<TContext extends Context> = {
   pageSize?: number
@@ -202,17 +176,13 @@ export function useLiveInfiniteQuery<TContext extends Context>(
   const committed = committedRef.current
   const inputKind = inputIsCollection ? `collection` : `query`
 
-  const dependenciesChanged =
-    !inputIsCollection &&
-    (committed?.dependencies === null ||
-      committed?.dependencies === undefined ||
-      committed.dependencies.length !== deps.length ||
-      committed.dependencies.some((dep, index) => dep !== deps[index]))
+  const dependencyComparison = compareLiveQueryWindowDependencies(
+    committed?.dependencies,
+    deps,
+  )
+  const dependenciesChanged = !inputIsCollection && dependencyComparison.changed
   const dependenciesStructurallyEqual =
-    !inputIsCollection &&
-    committed?.dependencies !== null &&
-    committed?.dependencies !== undefined &&
-    deepEquals(committed.dependencies, deps)
+    !inputIsCollection && dependencyComparison.structurallyEqual
   const needsNewCollection =
     committed === null ||
     committed.inputKind !== inputKind ||
@@ -254,33 +224,26 @@ export function useLiveInfiniteQuery<TContext extends Context>(
     }
 
     if (inputIsCollection) {
-      assertManyResult(collection)
-      if (!isWindowedCollection(collection)) {
-        throw new Error(
-          `useLiveInfiniteQuery: Pre-created live query collection must have an ORDER BY (orderBy) clause for infinite pagination to work. ` +
-            `Please add .orderBy() to your createLiveQueryCollection query.`,
-        )
-      }
-      const currentWindow = collection.utils.getWindow?.()
-      if (
-        currentWindow &&
-        !hasLiveQueryWindowLeases(collection) &&
-        (currentWindow.offset !== 0 || currentWindow.limit !== pageSize + 1)
-      ) {
-        warning =
-          `useLiveInfiniteQuery: Pre-created collection has window {offset: ${currentWindow.offset}, limit: ${currentWindow.limit}} ` +
-          `but the hook expects {offset: 0, limit: ${pageSize + 1}}. Adjusting window now.`
-      }
+      warning =
+        getLiveQueryWindowCollectionWarning(collection, pageSize + 1) ?? null
+    } else {
+      assertLiveQueryWindowManyResult(collection)
     }
 
-    const canPreservePageCount =
-      committed !== null &&
-      (!needsNewCollection ||
-        (committed.inputKind === `query` && dependenciesStructurallyEqual))
-    const initialPageCount = canPreservePageCount
+    const canPreservePageCount = shouldPreserveLiveQueryWindowPageCount({
+      hasPreviousController: committed !== null,
+      previousInputKind: committed?.inputKind,
+      inputKind,
+      sameCollection:
+        inputIsCollection && committed?.inputCollection === collection,
+      dependenciesChanged,
+      dependenciesStructurallyEqual,
+      pageShapeChanged,
+    })
+    const previousPageCount = committed
       ? Math.max(1, committed.controller.getSnapshot().pages.length)
       : 1
-    assertManyResult(collection)
+    const initialPageCount = canPreservePageCount ? previousPageCount : 1
     renderState = {
       inputKind,
       inputCollection: inputIsCollection ? collection : null,

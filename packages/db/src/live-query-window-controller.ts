@@ -2,8 +2,12 @@ import {
   LiveQueryWindowControllerDisposedError,
   SetWindowRequiresOrderByError,
 } from './errors.js'
-import { getLiveQueryStatusFlags } from './live-query-adapter.js'
+import {
+  getLiveQueryStatusFlags,
+  isSingleResultCollection,
+} from './live-query-adapter.js'
 import { createLiveQueryObserver } from './live-query-observer.js'
+import { deepEquals } from './utils.js'
 import type {
   LiveQueryObserver,
   LiveQuerySnapshot,
@@ -29,6 +33,16 @@ export function normalizeLiveQueryWindowPageSize(
 }
 
 type WindowResult = true | Promise<void>
+
+type LiveQueryWindow = { offset: number; limit: number }
+
+/** @internal Shared adapter view of a collection with an ordered window. */
+export type LiveQueryWindowCollection = Collection<any, any, any> & {
+  utils: {
+    setWindow: (options: LiveQueryWindow) => WindowResult
+    getWindow: () => LiveQueryWindow | undefined
+  }
+}
 
 type WindowTarget = object & {
   utils?: {
@@ -271,6 +285,101 @@ function getWindowCoordinator(target: WindowTarget): WindowCoordinator {
 /** @internal Whether an infinite-query controller currently owns this window. */
 export function hasLiveQueryWindowLeases(target: object): boolean {
   return windowCoordinators.get(target)?.hasLeases() ?? false
+}
+
+/** @internal Shared validation for infinite-query adapters. */
+export function assertLiveQueryWindowManyResult(
+  collection: Collection<any, any, any>,
+): void {
+  if (isSingleResultCollection(collection)) {
+    throw new Error(
+      `useLiveInfiniteQuery: Infinite queries do not support single-result queries. Remove .findOne().`,
+    )
+  }
+}
+
+/** @internal Whether a collection exposes an active ordered window. */
+export function isLiveQueryWindowCollection(
+  collection: Collection<any, any, any>,
+): collection is LiveQueryWindowCollection {
+  return (
+    typeof collection.utils?.setWindow === `function` &&
+    collection.utils.getWindow?.() !== undefined
+  )
+}
+
+/**
+ * Validate a pre-created infinite-query collection and describe any window
+ * adjustment the adapter should warn about.
+ *
+ * @internal Shared validation for infinite-query adapters.
+ */
+export function getLiveQueryWindowCollectionWarning(
+  collection: Collection<any, any, any>,
+  expectedLimit: number,
+): string | undefined {
+  assertLiveQueryWindowManyResult(collection)
+  if (!isLiveQueryWindowCollection(collection)) {
+    throw new Error(
+      `useLiveInfiniteQuery: Pre-created live query collection must have an ORDER BY (orderBy) clause for infinite pagination to work. ` +
+        `Please add .orderBy() to your createLiveQueryCollection query.`,
+    )
+  }
+
+  const currentWindow = collection.utils.getWindow()
+  if (
+    !currentWindow ||
+    hasLiveQueryWindowLeases(collection) ||
+    (currentWindow.offset === 0 && currentWindow.limit === expectedLimit)
+  ) {
+    return undefined
+  }
+
+  return (
+    `useLiveInfiniteQuery: Pre-created collection has window {offset: ${currentWindow.offset}, limit: ${currentWindow.limit}} ` +
+    `but the hook expects {offset: 0, limit: ${expectedLimit}}. Adjusting window now.`
+  )
+}
+
+/** @internal Compare adapter dependencies by identity and structure. */
+export function compareLiveQueryWindowDependencies(
+  previous: ReadonlyArray<unknown> | null | undefined,
+  current: ReadonlyArray<unknown>,
+): { changed: boolean; structurallyEqual: boolean } {
+  const changed =
+    previous === null ||
+    previous === undefined ||
+    previous.length !== current.length ||
+    previous.some((dependency, index) => dependency !== current[index])
+  return {
+    changed,
+    structurallyEqual:
+      previous !== null &&
+      previous !== undefined &&
+      deepEquals(previous, current),
+  }
+}
+
+/** @internal Shared page-depth preservation policy for framework adapters. */
+export function shouldPreserveLiveQueryWindowPageCount(options: {
+  hasPreviousController: boolean
+  previousInputKind: `collection` | `query` | undefined
+  inputKind: `collection` | `query`
+  sameCollection: boolean
+  dependenciesChanged: boolean
+  dependenciesStructurallyEqual: boolean
+  pageShapeChanged: boolean
+}): boolean {
+  if (
+    !options.hasPreviousController ||
+    options.previousInputKind !== options.inputKind
+  ) {
+    return false
+  }
+  if (options.inputKind === `collection`) return options.sameCollection
+  return options.dependenciesChanged
+    ? options.dependenciesStructurallyEqual
+    : options.pageShapeChanged
 }
 
 /**
