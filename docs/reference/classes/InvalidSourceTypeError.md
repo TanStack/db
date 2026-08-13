@@ -5,7 +5,7 @@ title: InvalidSourceTypeError
 
 # Class: InvalidSourceTypeError
 
-Defined in: [packages/db/src/errors.ts:393](https://github.com/TanStack/db/blob/main/packages/db/src/errors.ts#L393)
+Defined in: [packages/db/src/errors.ts:405](https://github.com/TanStack/db/blob/main/packages/db/src/errors.ts#L405)
 
 ## Extends
 
@@ -19,7 +19,7 @@ Defined in: [packages/db/src/errors.ts:393](https://github.com/TanStack/db/blob/
 new InvalidSourceTypeError(context, type): InvalidSourceTypeError;
 ```
 
-Defined in: [packages/db/src/errors.ts:394](https://github.com/TanStack/db/blob/main/packages/db/src/errors.ts#L394)
+Defined in: [packages/db/src/errors.ts:406](https://github.com/TanStack/db/blob/main/packages/db/src/errors.ts#L406)
 
 #### Parameters
 

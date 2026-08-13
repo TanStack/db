@@ -24,19 +24,18 @@ import {
 
 const collection = createCollection(
   localOnlyCollectionOptions({
-    id: 'ui-state',
     getKey: (item) => item.id,
   }),
 )
 ```
 
-- `id` -- unique collection identifier
 - `getKey` -- extracts unique key from each item
 
 ### Optional Config
 
 | Option        | Default | Description                            |
 | ------------- | ------- | -------------------------------------- |
+| `id`          | UUID    | Unique collection identifier           |
 | `schema`      | (none)  | StandardSchema validator               |
 | `initialData` | (none)  | Array of items to populate on creation |
 | `onInsert`    | (none)  | Handler before confirming inserts      |
@@ -101,27 +100,26 @@ import {
 
 const collection = createCollection(
   localStorageCollectionOptions({
-    id: 'user-preferences',
     storageKey: 'app-user-prefs',
     getKey: (item) => item.id,
   }),
 )
 ```
 
-- `id` -- unique collection identifier
 - `storageKey` -- localStorage key for all collection data
 - `getKey` -- extracts unique key from each item
 
 ### Optional Config
 
-| Option            | Default        | Description                                                          |
-| ----------------- | -------------- | -------------------------------------------------------------------- |
-| `schema`          | (none)         | StandardSchema validator                                             |
-| `storage`         | `localStorage` | Custom storage (`sessionStorage` or any localStorage-compatible API) |
-| `storageEventApi` | `window`       | Event API for cross-tab sync                                         |
-| `onInsert`        | (none)         | Handler on insert                                                    |
-| `onUpdate`        | (none)         | Handler on update                                                    |
-| `onDelete`        | (none)         | Handler on delete                                                    |
+| Option            | Default          | Description                                                          |
+| ----------------- | ---------------- | -------------------------------------------------------------------- |
+| `id`              | From storage key | `local-collection:${storageKey}`                                     |
+| `schema`          | (none)           | StandardSchema validator                                             |
+| `storage`         | `localStorage`   | Custom storage (`sessionStorage` or any localStorage-compatible API) |
+| `storageEventApi` | `window`         | Event API for cross-tab sync                                         |
+| `onInsert`        | (none)           | Handler on insert                                                    |
+| `onUpdate`        | (none)           | Handler on update                                                    |
+| `onDelete`        | (none)           | Handler on delete                                                    |
 
 ### Using sessionStorage
 

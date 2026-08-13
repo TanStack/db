@@ -5,7 +5,7 @@ title: LocalStorageCollectionError
 
 # Class: LocalStorageCollectionError
 
-Defined in: [packages/db/src/errors.ts:670](https://github.com/TanStack/db/blob/main/packages/db/src/errors.ts#L670)
+Defined in: [packages/db/src/errors.ts:682](https://github.com/TanStack/db/blob/main/packages/db/src/errors.ts#L682)
 
 ## Extends
 
@@ -25,7 +25,7 @@ Defined in: [packages/db/src/errors.ts:670](https://github.com/TanStack/db/blob/
 new LocalStorageCollectionError(message): LocalStorageCollectionError;
 ```
 
-Defined in: [packages/db/src/errors.ts:671](https://github.com/TanStack/db/blob/main/packages/db/src/errors.ts#L671)
+Defined in: [packages/db/src/errors.ts:683](https://github.com/TanStack/db/blob/main/packages/db/src/errors.ts#L683)
 
 #### Parameters
 

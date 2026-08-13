@@ -4,7 +4,10 @@ import { createCollection } from '../src/collection/index.js'
 import { createLiveQueryCollection } from '../src/query/live-query-collection.js'
 import { LIVE_QUERY_INTERNAL } from '../src/query/live/internal.js'
 import { LiveQueryWindowControllerDisposedError } from '../src/errors.js'
-import { createLiveQueryWindowController } from '../src/live-query-window-controller.js'
+import {
+  createLiveQueryWindowController,
+  normalizeLiveQueryWindowPageSize,
+} from '../src/live-query-window-controller.js'
 import { mockSyncCollectionOptions } from './utils.js'
 
 interface Row {
@@ -48,6 +51,25 @@ const flush = () => new Promise((r) => setTimeout(r, 0))
 const ids = (snap: { data: ReadonlyArray<any> }) => snap.data.map((r) => r.id)
 
 describe(`createLiveQueryWindowController`, () => {
+  it.each([
+    { pageSize: undefined, normalized: 20 },
+    { pageSize: 0, normalized: 20 },
+    { pageSize: -1, normalized: 20 },
+    { pageSize: 1.5, normalized: 20 },
+    { pageSize: Number.POSITIVE_INFINITY, normalized: 20 },
+    { pageSize: Number.MAX_SAFE_INTEGER, normalized: 20 },
+    { pageSize: 1, normalized: 1 },
+    {
+      pageSize: Number.MAX_SAFE_INTEGER - 1,
+      normalized: Number.MAX_SAFE_INTEGER - 1,
+    },
+  ])(
+    `normalizes pageSize $pageSize to $normalized`,
+    ({ pageSize, normalized }) => {
+      expect(normalizeLiveQueryWindowPageSize(pageSize)).toBe(normalized)
+    },
+  )
+
   it(`exposes the first page with a peek-ahead hasNextPage`, async () => {
     const lq = makeOrderedLiveQuery(makeSource(), 2)
     const controller = createLiveQueryWindowController<Row, string>(lq as any, {
@@ -114,6 +136,53 @@ describe(`createLiveQueryWindowController`, () => {
     await flush()
     expect(ids(controller.getSnapshot())).toEqual([`1`, `2`, `3`, `4`, `5`])
     expect(controller.getSnapshot().pages).toHaveLength(1)
+    controller.dispose()
+  })
+
+  it(`returns the active fetch promise to concurrent callers`, async () => {
+    const lq = makeOrderedLiveQuery(makeSource(), 2)
+    const controller = createLiveQueryWindowController<Row, string>(lq as any, {
+      pageSize: 2,
+    })
+    controller.subscribe(() => {})
+    await lq.preload()
+
+    const failure = new Error(`window failed`)
+    const originalSetWindow = lq.utils.setWindow.bind(lq.utils)
+    let rejectWindow!: (error: Error) => void
+    vi.spyOn(lq.utils, `setWindow`).mockImplementationOnce((options) => {
+      originalSetWindow(options)
+      return new Promise<void>((_resolve, reject) => {
+        rejectWindow = reject
+      })
+    })
+
+    const first = controller.fetchNextPage()
+    const second = controller.fetchNextPage()
+    expect(second).toBe(first)
+    let secondSettled = false
+    const firstOutcome = first.then(
+      () => undefined,
+      (error: unknown) => error,
+    )
+    const secondOutcome = second.then(
+      () => {
+        secondSettled = true
+        return undefined
+      },
+      (error: unknown) => {
+        secondSettled = true
+        return error
+      },
+    )
+
+    await Promise.resolve()
+    const secondWasPending = !secondSettled
+    rejectWindow(failure)
+
+    expect(secondWasPending).toBe(true)
+    expect(await firstOutcome).toBe(failure)
+    expect(await secondOutcome).toBe(failure)
     controller.dispose()
   })
 
@@ -654,12 +723,88 @@ describe(`createLiveQueryWindowController`, () => {
     expect(lq.utils.getWindow()).toEqual({ offset: 0, limit: 5 })
 
     unsubscribe()
-    controller.dispose()
-    await lq.cleanup()
-    await lq.preload()
 
     expect(lq.utils.getWindow()).toEqual({ offset: 0, limit: 3 })
     expect(lq.toArray).toHaveLength(3)
+    controller.dispose()
+    await lq.cleanup()
+  })
+
+  it.each([`throws`, `rejects`] as const)(
+    `retains the original baseline when its first restoration %s`,
+    async (failureMode) => {
+      const lq = makeOrderedLiveQuery(makeSource(), 3)
+      const first = createLiveQueryWindowController<Row, string>(lq as any, {
+        pageSize: 3,
+      })
+      const unsubscribeFirst = first.subscribe(() => {})
+      await lq.preload()
+      await first.fetchNextPage()
+      expect(lq.utils.getWindow()).toEqual({ offset: 0, limit: 7 })
+
+      const setWindow = vi.spyOn(lq.utils, `setWindow`)
+      if (failureMode === `throws`) {
+        setWindow.mockImplementationOnce(() => {
+          throw new Error(`restore failed`)
+        })
+      } else {
+        setWindow.mockRejectedValueOnce(new Error(`restore failed`))
+      }
+      unsubscribeFirst()
+      await Promise.resolve()
+      expect(lq.utils.getWindow()).toEqual({ offset: 0, limit: 7 })
+
+      const second = createLiveQueryWindowController<Row, string>(lq as any, {
+        pageSize: 3,
+      })
+      const unsubscribeSecond = second.subscribe(() => {})
+      unsubscribeSecond()
+
+      expect(lq.utils.getWindow()).toEqual({ offset: 0, limit: 4 })
+      first.dispose()
+      second.dispose()
+      await lq.cleanup()
+    },
+  )
+
+  it(`recaptures an externally changed window before a new lease cycle`, async () => {
+    const lq = makeOrderedLiveQuery(makeSource(), 2)
+    const first = createLiveQueryWindowController<Row, string>(lq as any, {
+      pageSize: 2,
+    })
+    const unsubscribeFirst = first.subscribe(() => {})
+    await lq.preload()
+    unsubscribeFirst()
+
+    await lq.utils.setWindow({ offset: 0, limit: 4 })
+    const second = createLiveQueryWindowController<Row, string>(lq as any, {
+      pageSize: 2,
+    })
+    const unsubscribeSecond = second.subscribe(() => {})
+    unsubscribeSecond()
+
+    expect(lq.utils.getWindow()).toEqual({ offset: 0, limit: 4 })
+    first.dispose()
+    second.dispose()
+    await lq.cleanup()
+  })
+
+  it(`recaptures an external window change after standalone preload`, async () => {
+    const lq = makeOrderedLiveQuery(makeSource(), 2)
+    const controller = createLiveQueryWindowController<Row, string>(lq as any, {
+      pageSize: 3,
+    })
+
+    await controller.preload()
+    expect(lq.utils.getWindow()).toEqual({ offset: 0, limit: 4 })
+
+    await lq.utils.setWindow({ offset: 0, limit: 6 })
+    const unsubscribe = controller.subscribe(() => {})
+    unsubscribe()
+
+    expect(lq.utils.getWindow()).toEqual({ offset: 0, limit: 6 })
+    controller.dispose()
+    await lq.cleanup()
   })
 
   it(`ignores a failed attachment superseded by a new lease`, async () => {

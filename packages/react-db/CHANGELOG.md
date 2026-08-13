@@ -1,5 +1,25 @@
 # @tanstack/react-db
 
+## 0.2.1
+
+### Patch Changes
+
+- Update agent skills to match current APIs and behavior. ([#1696](https://github.com/TanStack/db/pull/1696))
+
+- Updated dependencies [[`5f63996`](https://github.com/TanStack/db/commit/5f63996b0febd4775fb641f50975f8f0d442dc00)]:
+  - @tanstack/db@0.7.2
+
+## 0.2.0
+
+### Minor Changes
+
+- Add `useLiveInfiniteQuery` as a Vue binding over the shared live-query window controller. Align infinite-query behavior across React, Vue, and Svelte, including awaitable page fetches, safe page sizes, reactive page-depth preservation, ordered collection validation, shared input resolution, and shared-window cleanup. ([#1724](https://github.com/TanStack/db/pull/1724))
+
+### Patch Changes
+
+- Updated dependencies [[`424382b`](https://github.com/TanStack/db/commit/424382b3a80c6b3556701b433c26c8a60fc8d1af)]:
+  - @tanstack/db@0.7.1
+
 ## 0.1.96
 
 ### Patch Changes

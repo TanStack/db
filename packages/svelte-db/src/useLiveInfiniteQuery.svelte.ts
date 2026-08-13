@@ -1,9 +1,15 @@
 import {
+  assertLiveQueryWindowManyResult,
+  compareLiveQueryWindowDependencies,
   createLiveQueryCollection,
   createLiveQueryWindowController,
-  isCollection,
+  fetchNextLiveQueryWindowPage,
+  getLiveQueryWindowCollectionWarning,
+  normalizeLiveQueryWindowPageSize,
+  resolveLiveQueryWindowInput,
+  shouldPreserveLiveQueryWindowPageCount,
 } from '@tanstack/db'
-import { untrack } from 'svelte'
+import { tick, untrack } from 'svelte'
 // Type-only: used in `ReturnType<typeof useLiveQuery>` below.
 import type {
   UseLiveQueryReturnWithCollection,
@@ -19,83 +25,19 @@ import type {
   UtilsRecord,
 } from '@tanstack/db'
 
-const DEFAULT_PAGE_SIZE = 20
 const DEFAULT_GC_TIME_MS = 1
 
 type MaybeGetter<T> = T | (() => T)
 
 type InternalCollection = Collection<object, string | number, UtilsRecord>
 
-type WindowedCollection = InternalCollection & {
-  utils: {
-    setWindow: (options: {
-      offset: number
-      limit: number
-    }) => true | Promise<void>
-    getWindow?: () => { offset: number; limit: number } | undefined
-  }
+type PreviousController = {
+  getSnapshot: () => { pages: ReadonlyArray<ReadonlyArray<unknown>> }
 }
-
-type ResolvedInput<TContext extends Context> =
-  | { kind: `collection`; collection: InternalCollection }
-  | {
-      kind: `query`
-      query: (q: InitialQueryBuilder) => QueryBuilder<TContext>
-    }
 
 type InfiniteQueryOptions = {
   pageSize?: number
   initialPageParam?: number
-}
-
-function hasSetWindow(
-  collection: InternalCollection,
-): collection is WindowedCollection {
-  return typeof collection.utils.setWindow === `function`
-}
-
-function normalizePageSize(pageSize: number | undefined): number {
-  if (
-    pageSize === undefined ||
-    !Number.isSafeInteger(pageSize) ||
-    pageSize <= 0
-  ) {
-    return DEFAULT_PAGE_SIZE
-  }
-  return pageSize
-}
-
-function resolveInput<TContext extends Context>(
-  input: unknown,
-): ResolvedInput<TContext> {
-  if (isCollection(input)) {
-    return { kind: `collection`, collection: input }
-  }
-
-  if (typeof input !== `function`) {
-    throw new Error(
-      `useLiveInfiniteQuery: First argument must be either a pre-created live query collection or a query function. ` +
-        `Received: ${typeof input}`,
-    )
-  }
-
-  // A zero-argument function can be a reactive collection getter. Query
-  // callbacks conventionally accept the builder, so avoid probing those.
-  if (input.length === 0) {
-    try {
-      const collection = (input as () => unknown)()
-      if (isCollection(collection)) {
-        return { kind: `collection`, collection }
-      }
-    } catch {
-      // Query callbacks that close over their builder can still have arity 0.
-    }
-  }
-
-  return {
-    kind: `query`,
-    query: input as (q: InitialQueryBuilder) => QueryBuilder<TContext>,
-  }
 }
 
 export type LiveInfiniteQueryConfig<TRow> = InfiniteQueryOptions & {
@@ -175,56 +117,86 @@ export function useLiveInfiniteQuery<TContext extends Context>(
   deps: Array<() => unknown> = [],
 ): UseLiveInfiniteQueryReturn<TContext> {
   let validatedCollection: InternalCollection | null = null
+  let previousController: PreviousController | null = null
+  let previousInput: ReturnType<
+    typeof resolveLiveQueryWindowInput<TContext>
+  > | null = null
+  let previousDependencies: Array<unknown> | null = null
+  let previousPageSize: number | null = null
+  let previousInitialPageParam: number | null = null
 
-  const pageSize = $derived(normalizePageSize(config.pageSize))
+  const pageSize = $derived(normalizeLiveQueryWindowPageSize(config.pageSize))
   const initialPageParam = $derived(config.initialPageParam ?? 0)
 
   const controller = $derived.by(() => {
-    for (const dependency of deps) dependency()
+    const dependencies = deps.map((dependency) => dependency())
 
-    const input = resolveInput<TContext>(queryFnOrCollection)
+    const input = resolveLiveQueryWindowInput<TContext>(queryFnOrCollection)
+    const dependencyComparison = compareLiveQueryWindowDependencies(
+      previousDependencies,
+      dependencies,
+    )
+    const dependenciesChanged = dependencyComparison.changed
+    const dependenciesStructurallyEqual = dependencyComparison.structurallyEqual
+    const pageShapeChanged =
+      previousPageSize !== pageSize ||
+      previousInitialPageParam !== initialPageParam
+    const sameCollection =
+      input.kind === `collection` &&
+      previousInput?.kind === `collection` &&
+      previousInput.collection === input.collection
+    const canPreservePageCount = shouldPreserveLiveQueryWindowPageCount({
+      hasPreviousController: previousController !== null,
+      previousInputKind: previousInput?.kind,
+      inputKind: input.kind,
+      sameCollection,
+      dependenciesChanged,
+      dependenciesStructurallyEqual,
+      pageShapeChanged,
+    })
+    const previousPageCount = previousController
+      ? Math.max(1, previousController.getSnapshot().pages.length)
+      : 1
+    const initialPageCount = canPreservePageCount ? previousPageCount : 1
+
+    previousInput = input
+    previousDependencies = [...dependencies]
+    previousPageSize = pageSize
+    previousInitialPageParam = initialPageParam
+
     if (input.kind === `collection`) {
       const collection = input.collection
-      if (!hasSetWindow(collection)) {
-        throw new Error(
-          `useLiveInfiniteQuery: Pre-created live query collection must have an orderBy clause for infinite pagination to work. ` +
-            `Please add .orderBy() to your createLiveQueryCollection query.`,
-        )
-      }
+      const warning = getLiveQueryWindowCollectionWarning(
+        collection,
+        pageSize + 1,
+      )
 
       if (validatedCollection !== collection) {
         validatedCollection = collection
-        const currentWindow = collection.utils.getWindow?.()
-        const expectedLimit = pageSize + 1
-        if (
-          currentWindow &&
-          (currentWindow.offset !== 0 || currentWindow.limit !== expectedLimit)
-        ) {
-          console.warn(
-            `useLiveInfiniteQuery: Pre-created collection has window {offset: ${currentWindow.offset}, limit: ${currentWindow.limit}} ` +
-              `but the hook expects {offset: 0, limit: ${expectedLimit}}. Adjusting window now.`,
-          )
-        }
+        if (warning) console.warn(warning)
       }
-      return createLiveQueryWindowController(collection, {
+      const currentController = createLiveQueryWindowController(collection, {
         pageSize,
         initialPageParam,
+        initialPageCount,
       })
+      previousController = currentController
+      return currentController
     }
 
     const collection = createLiveQueryCollection({
-      query: (q: InitialQueryBuilder) =>
-        input
-          .query(q)
-          .limit(pageSize + 1)
-          .offset(0),
+      query: input.query.limit(pageSize + 1).offset(0),
       startSync: false,
       gcTime: DEFAULT_GC_TIME_MS,
     })
-    return createLiveQueryWindowController(collection, {
+    assertLiveQueryWindowManyResult(collection)
+    const currentController = createLiveQueryWindowController(collection, {
       pageSize,
       initialPageParam,
+      initialPageCount,
     })
+    previousController = currentController
+    return currentController
   })
 
   let snapshot = $state.raw(untrack(() => controller.getSnapshot()))
@@ -243,7 +215,13 @@ export function useLiveInfiniteQuery<TContext extends Context>(
     }
   })
 
-  const fetchNextPage = () => controller.fetchNextPage()
+  const fetchNextPage = async () => {
+    // A dependency can invalidate the derived controller before Svelte runs the
+    // effect that subscribes it. Queue the imperative call until that handoff
+    // has completed so it cannot target an inactive controller.
+    await tick()
+    await fetchNextLiveQueryWindowPage(controller)
+  }
 
   return {
     get state() {

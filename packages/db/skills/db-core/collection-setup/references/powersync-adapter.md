@@ -9,7 +9,7 @@ pnpm add @tanstack/powersync-db-collection @powersync/web @journeyapps/wa-sqlite
 ## Required Config
 
 ```typescript
-import { createCollection } from '@tanstack/react-db'
+import { createCollection, safeRandomUUID } from '@tanstack/react-db'
 import { powerSyncCollectionOptions } from '@tanstack/powersync-db-collection'
 import { Schema, Table, column, PowerSyncDatabase } from '@powersync/web'
 
@@ -164,7 +164,7 @@ const APP_SCHEMA = new Schema({
 })
 
 await collection.insert(
-  { id: crypto.randomUUID(), name: 'Report' },
+  { id: safeRandomUUID(), name: 'Report' },
   { metadata: { source: 'web-app', userId: 'user-123' } },
 ).isPersisted.promise
 ```
@@ -187,7 +187,7 @@ const tx = createTransaction({
 })
 tx.mutate(() => {
   documentsCollection.insert({
-    id: crypto.randomUUID(),
+    id: safeRandomUUID(),
     name: 'Doc 1',
     created_at: new Date().toISOString(),
   })
