@@ -9,6 +9,8 @@ id: adapter
 npm install @tanstack/solid-db
 ```
 
+Requires `solid-js@>=2.0.0-rc.0` and `@solidjs/web@>=2.0.0-rc.0` as peer dependencies.
+
 ## Solid Primitives
 
 See the [Solid Functions Reference](./reference/index.md) to see the full list of primitives available in the Solid Adapter.
@@ -19,12 +21,13 @@ For comprehensive documentation on writing queries (filtering, joins, aggregatio
 
 ### useLiveQuery
 
-The `useLiveQuery` primitive creates a live query that automatically updates your component when data changes. Call the returned accessor to read its data; status fields such as `isLoading` and `status` are reactive properties:
+The `useLiveQuery` primitive creates a live query that automatically updates your component when data changes. It returns an accessor — call it as a function (`query()`) to read data. Status fields (`isLoading`, `isReady`, `isError`, `status`) are plain properties:
 
 ```tsx
 import { useLiveQuery } from '@tanstack/solid-db'
 import { eq } from '@tanstack/db'
-import { Show, For } from 'solid-js'
+import { For } from 'solid-js'
+import { Loading } from '@solidjs/web'
 
 function TodoList() {
   const query = useLiveQuery((q) =>
@@ -34,18 +37,66 @@ function TodoList() {
   )
 
   return (
-    <Show when={!query.isLoading} fallback={<div>Loading...</div>}>
+    <Loading fallback={<div>Loading...</div>}>
       <ul>
         <For each={query()}>
           {(todo) => <li>{todo.text}</li>}
         </For>
       </ul>
-    </Show>
+    </Loading>
   )
 }
 ```
 
-**Note:** `query()` reads the array; `query.isLoading` and `query.status` read reactive status properties.
+**Note:** Call `query()` to read data (not `query.data`, which is deprecated). Status fields like `query.isLoading`, `query.isReady`, `query.status` are plain properties — no parentheses needed.
+
+### Loading and Error Boundaries
+
+In Solid v2, reading the accessor while the collection is loading throws `NotReadyError` (caught by `<Loading>`), and reading an errored query throws the error (caught by `<Errored>`):
+
+```tsx
+import { Loading, Errored } from '@solidjs/web'
+
+function TodoList() {
+  const query = useLiveQuery((q) => q.from({ todos: todosCollection }))
+
+  return (
+    <Errored catch={(err) => <div>Error: {err.message}</div>}>
+      <Loading fallback={<div>Loading...</div>}>
+        <For each={query()}>
+          {(todo) => <li>{todo.text}</li>}
+        </For>
+      </Loading>
+    </Errored>
+  )
+}
+```
+
+You can also check status without boundaries:
+
+```tsx
+<Show when={query.isError}>
+  <div>Error: {query.status}</div>
+</Show>
+```
+
+### isPending and latest Helpers
+
+Solid v2's async `createMemo` enables `isPending` and `latest` on the accessor result:
+
+```tsx
+import { isPending, latest } from 'solid-js'
+
+// isPending: true during revalidation while new collection loads
+<Show when={isPending(query)}>
+  <Spinner />
+</Show>
+
+// latest: returns stale value during revalidation, skipping <Loading>
+<For each={latest(query)}>
+  {(todo) => <li>{todo.text}</li>}
+</For>
+```
 
 ### Reactive Queries with Signals
 
@@ -118,13 +169,11 @@ import { gt } from '@tanstack/db'
 function TodoList() {
   const [minPriority, setMinPriority] = createSignal(5)
 
-  // Good - signal accessed inside query function
   const query = useLiveQuery((q) =>
     q.from({ todos: todosCollection })
      .where(({ todos }) => gt(todos.priority, minPriority()))
   )
 
-  // Solid automatically tracks minPriority() and recomputes when it changes
   return <div>{query().length} todos</div>
 }
 ```
@@ -132,38 +181,13 @@ function TodoList() {
 **Don't read signals outside the query function:**
 
 ```tsx
-import { createSignal } from 'solid-js'
-import { useLiveQuery } from '@tanstack/solid-db'
-import { gt } from '@tanstack/db'
-
-function TodoList() {
-  const [minPriority, setMinPriority] = createSignal(5)
-
-  // Bad - reading signal outside query function
-  const currentPriority = minPriority()
-  const query = useLiveQuery((q) =>
-    q.from({ todos: todosCollection })
-     .where(({ todos }) => gt(todos.priority, currentPriority))
-  )
-  // Won't update when minPriority changes!
-
-  return <div>{query().length} todos</div>
-}
-```
-
-**Static queries need no special handling:**
-
-```tsx
-import { useLiveQuery } from '@tanstack/solid-db'
-
-function AllTodos() {
-  // No signals accessed - query never changes
-  const query = useLiveQuery((q) =>
-    q.from({ todos: todosCollection })
-  )
-
-  return <div>{query().length} todos</div>
-}
+// Bad - reading signal outside query function
+const currentPriority = minPriority()
+const query = useLiveQuery((q) =>
+  q.from({ todos: todosCollection })
+   .where(({ todos }) => gt(todos.priority, currentPriority))
+)
+// Won't update when minPriority changes!
 ```
 
 ### Using Pre-created Collections
@@ -171,7 +195,7 @@ function AllTodos() {
 You can also pass an existing collection to `useLiveQuery`. This is useful for sharing queries across components:
 
 ```tsx
-import { createLiveQueryCollection, eq } from '@tanstack/db'
+import { createLiveQueryCollection } from '@tanstack/db'
 import { useLiveQuery } from '@tanstack/solid-db'
 
 // Create collection outside component
@@ -181,9 +205,23 @@ const todosQuery = createLiveQueryCollection((q) =>
 )
 
 function TodoList() {
-  // Pass existing collection
+  // Pass existing collection via accessor
   const query = useLiveQuery(() => todosQuery)
 
   return <div>{query().length} todos</div>
 }
+```
+
+### External-Source Bridge (Opt-in)
+
+For advanced use cases where you want observer snapshots to auto-track in any Solid compute without `useLiveQuery`, install the external-source bridge once at app startup:
+
+```tsx
+import { enableSolidDBExternalSource, trackSnapshot } from '@tanstack/solid-db'
+import { createMemo } from 'solid-js'
+
+enableSolidDBExternalSource()
+
+// Now trackSnapshot() auto-subscribes inside any Solid compute:
+const snapshot = createMemo(() => trackSnapshot(observer))
 ```
