@@ -3072,7 +3072,7 @@ describe(`Query Collections`, () => {
           sync: ({ begin, write, commit, markReady }) => {
             secondMarkReady = markReady
             begin()
-            initialPersons.forEach((p) => write({ type: `insert`, value: p }))
+            initialPersons.slice(0, 2).forEach((p) => write({ type: `insert`, value: p }))
             commit()
           },
         },
@@ -3115,7 +3115,7 @@ describe(`Query Collections`, () => {
       // After ready, content updates
       secondMarkReady!()
       await waitFor(() => {
-        expect(queryByTestId(`content`)!.textContent).toContain(`3 items`)
+        expect(queryByTestId(`content`)!.textContent).toContain(`2 items`)
       })
     })
   })
