@@ -2,18 +2,116 @@ import {
   LiveQueryWindowControllerDisposedError,
   SetWindowRequiresOrderByError,
 } from './errors.js'
-import { getLiveQueryStatusFlags } from './live-query-adapter.js'
+import {
+  getLiveQueryStatusFlags,
+  isCollection,
+  isSingleResultCollection,
+} from './live-query-adapter.js'
 import { createLiveQueryObserver } from './live-query-observer.js'
+import { BaseQueryBuilder } from './query/builder/index.js'
+import { deepEquals } from './utils.js'
 import type {
   LiveQueryObserver,
   LiveQuerySnapshot,
 } from './live-query-observer.js'
 import type { Collection } from './collection/index.js'
 import type { CollectionStatus } from './types.js'
+import type {
+  Context,
+  InitialQueryBuilder,
+  QueryBuilder,
+} from './query/builder/index.js'
 
 const DEFAULT_PAGE_SIZE = 20
 
+export type LiveQueryWindowInputKind = `collection` | `query`
+
+/** @internal The supported, enabled input forms for infinite-query adapters. */
+export type ResolvedLiveQueryWindowInput<TContext extends Context> =
+  | { kind: `collection`; collection: Collection<any, any, any> }
+  | { kind: `query`; query: QueryBuilder<TContext> }
+
+/**
+ * Classify an infinite-query input without invoking its query callback.
+ * Frameworks use this during lifecycle comparison so unchanged React renders
+ * do not execute the callback again.
+ *
+ * @internal This contract is unstable while RFC #1623 is being implemented.
+ */
+export function getLiveQueryWindowInputKind(
+  input: unknown,
+): LiveQueryWindowInputKind {
+  if (isCollection(input)) return `collection`
+  if (typeof input === `function`) return `query`
+  throw new Error(
+    `useLiveInfiniteQuery: First argument must be either a pre-created live query collection or a query function. ` +
+      `Received: ${typeof input}`,
+  )
+}
+
+/**
+ * Resolve a supported infinite-query input and invoke a query callback once.
+ * A function may resolve to a collection for framework getter compatibility.
+ * Nullable/disabled and config-object inputs are intentionally not supported.
+ *
+ * @internal This contract is unstable while RFC #1623 is being implemented.
+ */
+export function resolveLiveQueryWindowInput<TContext extends Context>(
+  input: unknown,
+): ResolvedLiveQueryWindowInput<TContext> {
+  if (getLiveQueryWindowInputKind(input) === `collection`) {
+    return {
+      kind: `collection`,
+      collection: input as Collection<any, any, any>,
+    }
+  }
+
+  const value = (
+    input as (q: InitialQueryBuilder) => QueryBuilder<TContext> | unknown
+  )(new BaseQueryBuilder() as InitialQueryBuilder)
+  if (isCollection(value)) {
+    return { kind: `collection`, collection: value }
+  }
+  if (
+    typeof value !== `object` ||
+    value === null ||
+    typeof (value as { limit?: unknown }).limit !== `function` ||
+    typeof (value as { offset?: unknown }).offset !== `function`
+  ) {
+    throw new Error(
+      `useLiveInfiniteQuery: Query function must return a query builder. ` +
+        `Disabled null or undefined queries are not supported.`,
+    )
+  }
+  return { kind: `query`, query: value as QueryBuilder<TContext> }
+}
+
+/** @internal This contract is unstable while RFC #1623 is being implemented. */
+export function normalizeLiveQueryWindowPageSize(
+  pageSize: number | undefined,
+): number {
+  if (
+    pageSize === undefined ||
+    !Number.isSafeInteger(pageSize) ||
+    pageSize <= 0 ||
+    pageSize >= Number.MAX_SAFE_INTEGER
+  ) {
+    return DEFAULT_PAGE_SIZE
+  }
+  return pageSize
+}
+
 type WindowResult = true | Promise<void>
+
+type LiveQueryWindow = { offset: number; limit: number }
+
+/** @internal Shared adapter view of a collection with an ordered window. */
+export type LiveQueryWindowCollection = Collection<any, any, any> & {
+  utils: {
+    setWindow: (options: LiveQueryWindow) => WindowResult
+    getWindow: () => LiveQueryWindow | undefined
+  }
+}
 
 type WindowTarget = object & {
   utils?: {
@@ -31,17 +129,29 @@ type PendingWindow = {
 class WindowCoordinator {
   private readonly leases = new Map<symbol, number>()
   private readonly leaseVersions = new Map<symbol, number>()
-  private readonly initialWindow: { offset: number; limit: number } | undefined
+  private baselineWindow: { offset: number; limit: number } | undefined
+  private retainedWindow: { offset: number; limit: number } | undefined
+  private shouldCaptureBaseline = true
   private appliedLimit: number | undefined
   private pending: PendingWindow | undefined
   private generation = 0
   private leaseVersion = 0
 
-  constructor(private readonly target: WindowTarget) {
-    this.initialWindow = target.utils?.getWindow?.()
-  }
+  constructor(private readonly target: WindowTarget) {}
 
   request(lease: symbol, limit: number): WindowResult {
+    if (this.leases.size === 0) {
+      const currentWindow = this.target.utils?.getWindow?.()
+      const retainedWindowChanged =
+        this.retainedWindow !== undefined &&
+        (currentWindow?.offset !== this.retainedWindow.offset ||
+          currentWindow.limit !== this.retainedWindow.limit)
+      if (this.shouldCaptureBaseline || retainedWindowChanged) {
+        this.baselineWindow = currentWindow
+        this.shouldCaptureBaseline = false
+      }
+      this.retainedWindow = undefined
+    }
     const previousLimit = this.leases.get(lease)
     const previousVersion = this.leaseVersions.get(lease)
     const version = ++this.leaseVersion
@@ -54,6 +164,7 @@ class WindowCoordinator {
     } catch (error) {
       this.rollbackLease(lease, version, previousLimit, previousVersion)
       this.appliedLimit = undefined
+      if (this.leases.size === 0) this.shouldCaptureBaseline = true
       throw error
     }
 
@@ -89,7 +200,11 @@ class WindowCoordinator {
     )
   }
 
-  release(lease: symbol): void {
+  hasLeases(): boolean {
+    return this.leases.size > 0
+  }
+
+  release(lease: symbol, restoreWhenEmpty: boolean): void {
     if (!this.leases.delete(lease)) return
     this.leaseVersions.delete(lease)
 
@@ -100,6 +215,11 @@ class WindowCoordinator {
     this.appliedLimit = undefined
 
     if (this.leases.size === 0) {
+      if (restoreWhenEmpty) {
+        this.restoreInitialWindow()
+      } else {
+        this.retainedWindow = this.target.utils?.getWindow?.()
+      }
       return
     }
 
@@ -149,12 +269,30 @@ class WindowCoordinator {
 
   private restoreInitialWindow(): void {
     const setWindow = this.target.utils?.setWindow
-    if (!this.initialWindow || typeof setWindow !== `function`) return
+    const baselineWindow = this.baselineWindow
+    this.retainedWindow = undefined
+    this.shouldCaptureBaseline = false
+    if (!baselineWindow || typeof setWindow !== `function`) {
+      this.shouldCaptureBaseline = true
+      return
+    }
+    const generation = this.generation
+    const markRestored = () => {
+      if (generation === this.generation && this.leases.size === 0) {
+        this.shouldCaptureBaseline = true
+      }
+    }
     try {
-      const result = setWindow.call(this.target.utils, this.initialWindow)
-      if (result !== true) void result.catch(() => {})
+      const result = setWindow.call(this.target.utils, baselineWindow)
+      if (result === true) {
+        markRestored()
+      } else {
+        void result.then(markRestored, () => {
+          // Keep the original baseline so a later release can retry it.
+        })
+      }
     } catch {
-      // Release has no error channel. A future lease will retry its own window.
+      // Release has no error channel. Keep the baseline for a later retry.
     }
   }
 
@@ -228,6 +366,106 @@ function getWindowCoordinator(target: WindowTarget): WindowCoordinator {
   return coordinator
 }
 
+/** @internal Whether an infinite-query controller currently owns this window. */
+export function hasLiveQueryWindowLeases(target: object): boolean {
+  return windowCoordinators.get(target)?.hasLeases() ?? false
+}
+
+/** @internal Shared validation for infinite-query adapters. */
+export function assertLiveQueryWindowManyResult(
+  collection: Collection<any, any, any>,
+): void {
+  if (isSingleResultCollection(collection)) {
+    throw new Error(
+      `useLiveInfiniteQuery: Infinite queries do not support single-result queries. Remove .findOne().`,
+    )
+  }
+}
+
+/** @internal Whether a collection exposes an active ordered window. */
+export function isLiveQueryWindowCollection(
+  collection: Collection<any, any, any>,
+): collection is LiveQueryWindowCollection {
+  return (
+    typeof collection.utils?.setWindow === `function` &&
+    collection.utils.getWindow?.() !== undefined
+  )
+}
+
+/**
+ * Validate a pre-created infinite-query collection and describe any window
+ * adjustment the adapter should warn about.
+ *
+ * @internal Shared validation for infinite-query adapters.
+ */
+export function getLiveQueryWindowCollectionWarning(
+  collection: Collection<any, any, any>,
+  expectedLimit: number,
+): string | undefined {
+  assertLiveQueryWindowManyResult(collection)
+  if (!isLiveQueryWindowCollection(collection)) {
+    throw new Error(
+      `useLiveInfiniteQuery: Pre-created live query collection must have an ORDER BY (orderBy) clause for infinite pagination to work. ` +
+        `Please add .orderBy() to your createLiveQueryCollection query.`,
+    )
+  }
+
+  const currentWindow = collection.utils.getWindow()
+  if (
+    !currentWindow ||
+    hasLiveQueryWindowLeases(collection) ||
+    (currentWindow.offset === 0 && currentWindow.limit === expectedLimit)
+  ) {
+    return undefined
+  }
+
+  return (
+    `useLiveInfiniteQuery: Pre-created collection has window {offset: ${currentWindow.offset}, limit: ${currentWindow.limit}} ` +
+    `but the hook expects {offset: 0, limit: ${expectedLimit}}. Adjusting window now.`
+  )
+}
+
+/** @internal Compare adapter dependencies by identity and structure. */
+export function compareLiveQueryWindowDependencies(
+  previous: ReadonlyArray<unknown> | null | undefined,
+  current: ReadonlyArray<unknown>,
+): { changed: boolean; structurallyEqual: boolean } {
+  const changed =
+    previous === null ||
+    previous === undefined ||
+    previous.length !== current.length ||
+    previous.some((dependency, index) => dependency !== current[index])
+  return {
+    changed,
+    structurallyEqual:
+      previous !== null &&
+      previous !== undefined &&
+      deepEquals(previous, current),
+  }
+}
+
+/** @internal Shared page-depth preservation policy for framework adapters. */
+export function shouldPreserveLiveQueryWindowPageCount(options: {
+  hasPreviousController: boolean
+  previousInputKind: `collection` | `query` | undefined
+  inputKind: `collection` | `query`
+  sameCollection: boolean
+  dependenciesChanged: boolean
+  dependenciesStructurallyEqual: boolean
+  pageShapeChanged: boolean
+}): boolean {
+  if (
+    !options.hasPreviousController ||
+    options.previousInputKind !== options.inputKind
+  ) {
+    return false
+  }
+  if (options.inputKind === `collection`) return options.sameCollection
+  return options.dependenciesChanged
+    ? options.dependenciesStructurallyEqual
+    : options.pageShapeChanged
+}
+
 /**
  * A page-windowed view of a live query at a point in time.
  *
@@ -261,7 +499,7 @@ export interface LiveQueryWindowSnapshot<
 
 /** @internal This contract is unstable while RFC #1623 is being implemented. */
 export interface CreateLiveQueryWindowControllerOptions {
-  /** Rows per page (default 20). Non-positive values use the default. */
+  /** Rows per page (default 20). Invalid values use the default. */
   pageSize?: number
   /** Value of the first page's `pageParam` (default 0). */
   initialPageParam?: number
@@ -282,6 +520,22 @@ export interface LiveQueryWindowController<
   reset: () => Promise<void>
   preload: () => Promise<void>
   dispose: () => void
+}
+
+/**
+ * Run an adapter-facing page fetch. The controller records failures in its
+ * snapshot; consuming the rejection here keeps event handlers safe while the
+ * returned promise still settles with the request.
+ *
+ * @internal This contract is unstable while RFC #1623 is being implemented.
+ */
+export function fetchNextLiveQueryWindowPage(
+  controller: Pick<
+    LiveQueryWindowController<object, string | number>,
+    `fetchNextPage`
+  >,
+): Promise<void> {
+  return controller.fetchNextPage().catch(() => {})
 }
 
 interface CachedFrom {
@@ -318,11 +572,13 @@ class LiveQueryWindowControllerImpl<
   private hasPaginationError = false
   private paginationError: unknown
   private failedHasNextPage = false
+  private activeFetchPromise: Promise<void> | null = null
   private windowGeneration = 0
   private pendingWindowGeneration: number | undefined
   private leaseActive = false
   private leaseGeneration = 0
   private inFlightLeaseHolders = 0
+  private restoreInitialWindowOnRelease = false
 
   private readonly subscriptions = new Set<SubscriptionRecord>()
   private readonly publicationQueue: Array<Publication> = []
@@ -343,10 +599,7 @@ class LiveQueryWindowControllerImpl<
     this.coordinator = collection
       ? getWindowCoordinator(collection as unknown as WindowTarget)
       : null
-    this.pageSize =
-      options.pageSize !== undefined && options.pageSize > 0
-        ? options.pageSize
-        : DEFAULT_PAGE_SIZE
+    this.pageSize = normalizeLiveQueryWindowPageSize(options.pageSize)
     this.initialPageParam = options.initialPageParam ?? 0
     const initialPageCount = Math.floor(options.initialPageCount ?? 1)
     this.committedPageCount = Number.isFinite(initialPageCount)
@@ -432,6 +685,7 @@ class LiveQueryWindowControllerImpl<
     const record: SubscriptionRecord = { listener, active: true }
     this.subscriptions.add(record)
     if (this.subscriptions.size === 1) {
+      this.restoreInitialWindowOnRelease = false
       this.blockDelivery = true
       let observerUnsub: (() => void) | null = null
       try {
@@ -447,7 +701,7 @@ class LiveQueryWindowControllerImpl<
       } catch (error) {
         observerUnsub?.()
         this.observerUnsub = null
-        this.deactivateLease()
+        this.deactivateLease(true)
         record.active = false
         this.subscriptions.delete(record)
         throw error
@@ -461,17 +715,52 @@ class LiveQueryWindowControllerImpl<
       record.active = false
       this.subscriptions.delete(record)
       if (this.subscriptions.size === 0) {
+        this.restoreInitialWindowOnRelease = true
         this.observerUnsub?.()
         this.observerUnsub = null
-        if (this.inFlightLeaseHolders === 0) this.deactivateLease()
+        if (this.inFlightLeaseHolders === 0) this.deactivateLease(true)
       }
     }
   }
 
   fetchNextPage(): Promise<void> {
-    if (this.disposed || this.isFetchingNextPage) return Promise.resolve()
+    if (this.disposed) return Promise.resolve()
+    if (this.isFetchingNextPage && this.activeFetchPromise) {
+      return this.activeFetchPromise
+    }
     if (!this.getSnapshot().hasNextPage) return Promise.resolve()
-    return this.requestPageCount(this.committedPageCount + 1, true)
+
+    let resolveFetch!: () => void
+    let rejectFetch!: (error: unknown) => void
+    const activeFetchPromise = new Promise<void>((resolve, reject) => {
+      resolveFetch = resolve
+      rejectFetch = reject
+    })
+    this.activeFetchPromise = activeFetchPromise
+
+    let request: Promise<void>
+    try {
+      request = this.requestPageCount(this.committedPageCount + 1, true)
+    } catch (error) {
+      this.activeFetchPromise = null
+      rejectFetch(error)
+      return activeFetchPromise
+    }
+    void request.then(
+      () => {
+        if (this.activeFetchPromise === activeFetchPromise) {
+          this.activeFetchPromise = null
+        }
+        resolveFetch()
+      },
+      (error: unknown) => {
+        if (this.activeFetchPromise === activeFetchPromise) {
+          this.activeFetchPromise = null
+        }
+        rejectFetch(error)
+      },
+    )
+    return activeFetchPromise
   }
 
   reset(): Promise<void> {
@@ -518,7 +807,7 @@ class LiveQueryWindowControllerImpl<
     this.pendingWindowGeneration = undefined
     this.observerUnsub?.()
     this.observerUnsub = null
-    this.deactivateLease()
+    this.deactivateLease(true)
     this.observer.dispose()
     for (const record of this.subscriptions) record.active = false
     this.subscriptions.clear()
@@ -607,7 +896,7 @@ class LiveQueryWindowControllerImpl<
   private releaseInFlightLease(): void {
     this.inFlightLeaseHolders--
     if (this.inFlightLeaseHolders === 0 && this.subscriptions.size === 0) {
-      this.deactivateLease()
+      this.deactivateLease(this.restoreInitialWindowOnRelease)
     }
   }
 
@@ -629,11 +918,12 @@ class LiveQueryWindowControllerImpl<
     return this.activateLease(pageCount)
   }
 
-  private deactivateLease(): void {
+  private deactivateLease(restoreWhenEmpty = false): void {
     if (!this.leaseActive || !this.coordinator) return
     this.leaseGeneration++
     this.leaseActive = false
-    this.coordinator.release(this.lease)
+    this.restoreInitialWindowOnRelease = false
+    this.coordinator.release(this.lease, restoreWhenEmpty)
   }
 
   private trackAttachmentFailure(

@@ -1,3 +1,4 @@
+import { computed, shallowRef, toValue, watchEffect } from 'vue'
 import {
   assertLiveQueryWindowManyResult,
   compareLiveQueryWindowDependencies,
@@ -9,25 +10,20 @@ import {
   resolveLiveQueryWindowInput,
   shouldPreserveLiveQueryWindowPageCount,
 } from '@tanstack/db'
-import { tick, untrack } from 'svelte'
-// Type-only: used in `ReturnType<typeof useLiveQuery>` below.
-import type {
-  UseLiveQueryReturnWithCollection,
-  useLiveQuery,
-} from './useLiveQuery.svelte.js'
 import type {
   Collection,
+  CollectionStatus,
   Context,
+  GetResult,
   InferResultType,
   InitialQueryBuilder,
   NonSingleResult,
   QueryBuilder,
   UtilsRecord,
 } from '@tanstack/db'
+import type { ComputedRef, MaybeRefOrGetter } from 'vue'
 
 const DEFAULT_GC_TIME_MS = 1
-
-type MaybeGetter<T> = T | (() => T)
 
 type InternalCollection = Collection<object, string | number, UtilsRecord>
 
@@ -53,68 +49,83 @@ export type LiveInfiniteQueryConfig<TRow> = InfiniteQueryOptions & {
   ) => number | undefined
 }
 
-export type UseLiveInfiniteQueryConfig<TContext extends Context> =
-  LiveInfiniteQueryConfig<InferResultType<TContext>[number]>
+export type UseLiveInfiniteQueryConfig<
+  TContext extends Context & NonSingleResult,
+> = LiveInfiniteQueryConfig<InferResultType<TContext>[number]>
 
-export type UseLiveInfiniteQueryReturn<TContext extends Context> = Omit<
-  ReturnType<typeof useLiveQuery<TContext>>,
-  `data`
-> & {
-  data: InferResultType<TContext>
-  pages: Array<Array<InferResultType<TContext>[number]>>
-  pageParams: Array<number>
+export interface UseLiveInfiniteQueryReturn<
+  TContext extends Context & NonSingleResult,
+> {
+  state: ComputedRef<Map<string | number, GetResult<TContext>>>
+  data: ComputedRef<InferResultType<TContext>>
+  collection: ComputedRef<
+    Collection<GetResult<TContext>, string | number, UtilsRecord>
+  >
+  status: ComputedRef<CollectionStatus>
+  isLoading: ComputedRef<boolean>
+  isReady: ComputedRef<boolean>
+  isIdle: ComputedRef<boolean>
+  isError: ComputedRef<boolean>
+  isCleanedUp: ComputedRef<boolean>
+  pages: ComputedRef<Array<Array<InferResultType<TContext>[number]>>>
+  pageParams: ComputedRef<Array<number>>
   fetchNextPage: () => Promise<void>
-  hasNextPage: boolean
-  isFetchingNextPage: boolean
-  error: unknown
+  hasNextPage: ComputedRef<boolean>
+  isFetchingNextPage: ComputedRef<boolean>
+  error: ComputedRef<unknown>
 }
 
-export type UseLiveInfiniteQueryReturnWithCollection<
+export interface UseLiveInfiniteQueryReturnWithCollection<
   TResult extends object,
   TKey extends string | number,
-  TUtils extends Record<string, any>,
-> = Omit<
-  UseLiveQueryReturnWithCollection<TResult, TKey, TUtils, Array<TResult>>,
-  `data`
-> & {
-  data: Array<TResult>
-  pages: Array<Array<TResult>>
-  pageParams: Array<number>
+  TUtils extends UtilsRecord,
+> {
+  state: ComputedRef<Map<TKey, TResult>>
+  data: ComputedRef<Array<TResult>>
+  collection: ComputedRef<Collection<TResult, TKey, TUtils>>
+  status: ComputedRef<CollectionStatus>
+  isLoading: ComputedRef<boolean>
+  isReady: ComputedRef<boolean>
+  isIdle: ComputedRef<boolean>
+  isError: ComputedRef<boolean>
+  isCleanedUp: ComputedRef<boolean>
+  pages: ComputedRef<Array<Array<TResult>>>
+  pageParams: ComputedRef<Array<number>>
   fetchNextPage: () => Promise<void>
-  hasNextPage: boolean
-  isFetchingNextPage: boolean
-  error: unknown
+  hasNextPage: ComputedRef<boolean>
+  isFetchingNextPage: ComputedRef<boolean>
+  error: ComputedRef<unknown>
 }
 
-type EnabledLiveQueryReturn<TContext extends Context> = ReturnType<
-  typeof useLiveQuery<TContext>
->
-
 /**
- * Create a Svelte-native reactive view over the shared live-query window
+ * Create a Vue-native reactive view over the shared live-query window
  * controller. The query must include an `orderBy` clause.
  */
 export function useLiveInfiniteQuery<
   TResult extends object,
   TKey extends string | number,
-  TUtils extends Record<string, any>,
+  TUtils extends UtilsRecord,
 >(
-  liveQueryCollection: MaybeGetter<
+  liveQueryCollection: MaybeRefOrGetter<
     Collection<TResult, TKey, TUtils> & NonSingleResult
   >,
   config: LiveInfiniteQueryConfig<TResult>,
 ): UseLiveInfiniteQueryReturnWithCollection<TResult, TKey, TUtils>
 
-export function useLiveInfiniteQuery<TContext extends Context>(
+export function useLiveInfiniteQuery<
+  TContext extends Context & NonSingleResult,
+>(
   queryFn: (q: InitialQueryBuilder) => QueryBuilder<TContext>,
   config: UseLiveInfiniteQueryConfig<TContext>,
-  deps?: Array<() => unknown>,
+  deps?: Array<MaybeRefOrGetter<unknown>>,
 ): UseLiveInfiniteQueryReturn<TContext>
 
-export function useLiveInfiniteQuery<TContext extends Context>(
+export function useLiveInfiniteQuery<
+  TContext extends Context & NonSingleResult,
+>(
   queryFnOrCollection: unknown,
   config: InfiniteQueryOptions,
-  deps: Array<() => unknown> = [],
+  deps: Array<MaybeRefOrGetter<unknown>> = [],
 ): UseLiveInfiniteQueryReturn<TContext> {
   let validatedCollection: InternalCollection | null = null
   let previousController: PreviousController | null = null
@@ -125,13 +136,16 @@ export function useLiveInfiniteQuery<TContext extends Context>(
   let previousPageSize: number | null = null
   let previousInitialPageParam: number | null = null
 
-  const pageSize = $derived(normalizeLiveQueryWindowPageSize(config.pageSize))
-  const initialPageParam = $derived(config.initialPageParam ?? 0)
+  const controller = computed(() => {
+    const dependencies = deps.map((dependency) => toValue(dependency))
 
-  const controller = $derived.by(() => {
-    const dependencies = deps.map((dependency) => dependency())
-
-    const input = resolveLiveQueryWindowInput<TContext>(queryFnOrCollection)
+    const pageSize = normalizeLiveQueryWindowPageSize(config.pageSize)
+    const initialPageParam = config.initialPageParam ?? 0
+    const unwrappedInput =
+      typeof queryFnOrCollection === `function`
+        ? queryFnOrCollection
+        : toValue(queryFnOrCollection)
+    const input = resolveLiveQueryWindowInput<TContext>(unwrappedInput)
     const dependencyComparison = compareLiveQueryWindowDependencies(
       previousDependencies,
       dependencies,
@@ -175,6 +189,7 @@ export function useLiveInfiniteQuery<TContext extends Context>(
         validatedCollection = collection
         if (warning) console.warn(warning)
       }
+
       const currentController = createLiveQueryWindowController(collection, {
         pageSize,
         initialPageParam,
@@ -199,73 +214,54 @@ export function useLiveInfiniteQuery<TContext extends Context>(
     return currentController
   })
 
-  let snapshot = $state.raw(untrack(() => controller.getSnapshot()))
+  const snapshot = shallowRef(controller.value.getSnapshot())
 
-  $effect(() => {
-    const currentController = controller
-    snapshot = currentController.getSnapshot()
-    const unsubscribe = currentController.subscribe(() => {
-      snapshot = currentController.getSnapshot()
-    })
-    snapshot = currentController.getSnapshot()
+  watchEffect(
+    (onInvalidate) => {
+      const currentController = controller.value
+      const updateSnapshot = () => {
+        snapshot.value = currentController.getSnapshot()
+      }
 
-    return () => {
-      unsubscribe()
-      currentController.dispose()
-    }
-  })
+      updateSnapshot()
+      const unsubscribe = currentController.subscribe(updateSnapshot)
+      updateSnapshot()
 
-  const fetchNextPage = async () => {
-    // A dependency can invalidate the derived controller before Svelte runs the
-    // effect that subscribes it. Queue the imperative call until that handoff
-    // has completed so it cannot target an inactive controller.
-    await tick()
-    await fetchNextLiveQueryWindowPage(controller)
-  }
+      onInvalidate(() => {
+        unsubscribe()
+        currentController.dispose()
+      })
+    },
+    { flush: `sync` },
+  )
 
   return {
-    get state() {
-      return snapshot.state as EnabledLiveQueryReturn<TContext>[`state`]
-    },
-    get data() {
-      return snapshot.data as InferResultType<TContext>
-    },
-    get collection() {
-      return snapshot.collection as EnabledLiveQueryReturn<TContext>[`collection`]
-    },
-    get status() {
-      return snapshot.status as EnabledLiveQueryReturn<TContext>[`status`]
-    },
-    get isLoading() {
-      return snapshot.isLoading
-    },
-    get isReady() {
-      return snapshot.isReady
-    },
-    get isIdle() {
-      return snapshot.isIdle
-    },
-    get isError() {
-      return snapshot.isError
-    },
-    get isCleanedUp() {
-      return snapshot.isCleanedUp
-    },
-    get pages() {
-      return snapshot.pages as Array<Array<InferResultType<TContext>[number]>>
-    },
-    get pageParams() {
-      return snapshot.pageParams as Array<number>
-    },
-    get hasNextPage() {
-      return snapshot.hasNextPage
-    },
-    get isFetchingNextPage() {
-      return snapshot.isFetchingNextPage
-    },
-    get error() {
-      return snapshot.error
-    },
-    fetchNextPage,
+    state: computed(
+      () => snapshot.value.state as Map<string | number, GetResult<TContext>>,
+    ),
+    data: computed(() => snapshot.value.data as InferResultType<TContext>),
+    collection: computed(
+      () =>
+        snapshot.value.collection as Collection<
+          GetResult<TContext>,
+          string | number,
+          UtilsRecord
+        >,
+    ),
+    status: computed(() => snapshot.value.status as CollectionStatus),
+    isLoading: computed(() => snapshot.value.isLoading),
+    isReady: computed(() => snapshot.value.isReady),
+    isIdle: computed(() => snapshot.value.isIdle),
+    isError: computed(() => snapshot.value.isError),
+    isCleanedUp: computed(() => snapshot.value.isCleanedUp),
+    pages: computed(
+      () =>
+        snapshot.value.pages as Array<Array<InferResultType<TContext>[number]>>,
+    ),
+    pageParams: computed(() => snapshot.value.pageParams as Array<number>),
+    fetchNextPage: () => fetchNextLiveQueryWindowPage(controller.value),
+    hasNextPage: computed(() => snapshot.value.hasNextPage),
+    isFetchingNextPage: computed(() => snapshot.value.isFetchingNextPage),
+    error: computed(() => snapshot.value.error),
   }
 }

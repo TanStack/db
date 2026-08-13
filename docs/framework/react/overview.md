@@ -130,6 +130,8 @@ const { data, pages, fetchNextPage, hasNextPage } = useLiveInfiniteQuery(
 )
 ```
 
+`fetchNextPage()` returns a promise that resolves after the page request settles. Failures are exposed through the returned `error` value and do not reject the promise.
+
 **Note:** The dependency array is only available when using the query function variant, not when passing a pre-created collection.
 
 ### useLiveSuspenseQuery
