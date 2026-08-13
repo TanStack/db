@@ -22,6 +22,25 @@ Peer dependencies require Solid v2 RC. Code consuming `@tanstack/solid-db` must 
 - Store setter uses draft callback form
 - `ownedWrite: true` on status signal (written from observer callbacks)
 
+### Removed status flags and data property from accessor
+
+The accessor no longer exposes `data`, `status`, `isLoading`, `isReady`,
+`isIdle`, `isError`, or `isCleanedUp`. Loading and error states are handled
+exclusively through `<Loading>` and `<Errored>` boundaries, with `isPending`
+and `latest` helpers for finer control. The accessor surface is now just
+`query()` (data), `query.state` (ReactiveMap), and `query.collection`.
+
+```diff
+- query.data        // removed — use query()
+- query.status      // removed — use <Loading>/<Errored> boundaries
+- query.isLoading   // removed — use isPending(query)
+- query.isReady     // removed — wrap reads in <Loading>
+- query.isError     // removed — wrap reads in <Errored>
++ query()           // data access (throws NotReadyError when loading)
++ query.state       // ReactiveMap<TKey, TResult>
++ query.collection  // underlying Collection
+```
+
 ### Data accessor throws during loading
 
 Reading the accessor result (`query()`) while the collection is not yet ready

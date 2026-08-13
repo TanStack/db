@@ -37,9 +37,8 @@ type AnyCollection = Collection<any, any, any>
 /**
  * Create a live query using a query function
  * @param queryFn - Query function that defines what data to fetch
- * @returns Accessor that returns data with Loading boundary support, with state and status information as properties
+ * @returns Accessor that returns data with Loading boundary support, with state and collection as properties
  * @example
- * // Basic query with object syntax
  * const todosQuery = useLiveQuery((q) =>
  *   q.from({ todos: todosCollection })
  *    .where(({ todos }) => eq(todos.completed, false))
@@ -47,59 +46,11 @@ type AnyCollection = Collection<any, any, any>
  * )
  *
  * @example
- * // With dependencies that trigger re-execution
- * const todosQuery = useLiveQuery(
- *   (q) => q.from({ todos: todosCollection })
- *          .where(({ todos }) => gt(todos.priority, minPriority())),
- * )
- *
- * @example
- * // Join pattern
- * const personIssues = useLiveQuery((q) =>
- *   q.from({ issues: issueCollection })
- *    .join({ persons: personCollection }, ({ issues, persons }) =>
- *      eq(issues.userId, persons.id)
- *    )
- *    .select(({ issues, persons }) => ({
- *      id: issues.id,
- *      title: issues.title,
- *      userName: persons.name
- *    }))
- * )
- *
- * @example
- * // Handle loading and error states
- * const todosQuery = useLiveQuery((q) =>
- *   q.from({ todos: todoCollection })
- * )
- *
- * return (
- *   <Switch>
- *     <Match when={todosQuery.isLoading}>
- *       <div>Loading...</div>
- *     </Match>
- *     <Match when={todosQuery.isError}>
- *       <div>Error: {todosQuery.status}</div>
- *     </Match>
- *     <Match when={todosQuery.isReady}>
- *       <For each={todosQuery()}>
- *         {(todo) => <li key={todo.id}>{todo.text}</li>}
- *       </For>
- *     </Match>
- *   </Switch>
- * )
- *
- * @example
- * // Use Loading boundaries
- * const todosQuery = useLiveQuery((q) =>
- *   q.from({ todos: todoCollection })
- * )
+ * const todosQuery = useLiveQuery((q) => q.from({ todos: todoCollection }))
  *
  * return (
  *   <Loading fallback={<div>Loading...</div>}>
- *     <For each={todosQuery()}>
- *       {(todo) => <li key={todo.id}>{todo.text}</li>}
- *     </For>
+ *     <For each={todosQuery()}>{(todo) => <li>{todo.text}</li>}</For>
  *   </Loading>
  * )
  */
@@ -107,19 +58,8 @@ type AnyCollection = Collection<any, any, any>
 export function useLiveQuery<TContext extends Context>(
   queryFn: (q: InitialQueryBuilder) => QueryBuilder<TContext>,
 ): Accessor<InferResultType<TContext>> & {
-  /**
-   * @deprecated use function result instead
-   * query.data -> query()
-   */
-  data: InferResultType<TContext>
   state: ReactiveMap<string | number, GetResult<TContext>>
   collection: Collection<GetResult<TContext>, string | number, {}>
-  status: CollectionStatus
-  isLoading: boolean
-  isReady: boolean
-  isIdle: boolean
-  isError: boolean
-  isCleanedUp: boolean
 }
 
 // Overload 1b: Accept query function that can return undefined/null
@@ -128,114 +68,37 @@ export function useLiveQuery<TContext extends Context>(
     q: InitialQueryBuilder,
   ) => QueryBuilder<TContext> | undefined | null,
 ): Accessor<InferResultType<TContext>> & {
-  /**
-   * @deprecated use function result instead
-   * query.data -> query()
-   */
-  data: InferResultType<TContext>
   state: ReactiveMap<string | number, GetResult<TContext>>
   collection: Collection<GetResult<TContext>, string | number, {}> | null
-  status: CollectionStatus | `disabled`
-  isLoading: boolean
-  isReady: boolean
-  isIdle: boolean
-  isError: boolean
-  isCleanedUp: boolean
 }
 
 /**
  * Create a live query using configuration object
  * @param config - Configuration object with query and options
- * @returns Accessor that returns data with Loading boundary support, with state and status information as properties
+ * @returns Accessor that returns data with Loading boundary support, with state and collection as properties
  * @example
- * // Basic config object usage
  * const todosQuery = useLiveQuery(() => ({
  *   query: (q) => q.from({ todos: todosCollection }),
  *   gcTime: 60000
  * }))
- *
- * @example
- * // With query builder and options
- * const queryBuilder = new Query()
- *   .from({ persons: collection })
- *   .where(({ persons }) => gt(persons.age, 30))
- *   .select(({ persons }) => ({ id: persons.id, name: persons.name }))
- *
- * const personsQuery = useLiveQuery(() => ({ query: queryBuilder }))
- *
- * @example
- * // Handle all states uniformly
- * const itemsQuery = useLiveQuery(() => ({
- *   query: (q) => q.from({ items: itemCollection })
- * }))
- *
- * return (
- *   <Switch fallback={<div>{itemsQuery().length} items loaded</div>}>
- *     <Match when={itemsQuery.isLoading}>
- *       <div>Loading...</div>
- *     </Match>
- *     <Match when={itemsQuery.isError}>
- *       <div>Something went wrong</div>
- *     </Match>
- *     <Match when={!itemsQuery.isReady}>
- *       <div>Preparing...</div>
- *     </Match>
- *   </Switch>
- * )
  */
 // Overload 2: Accept config object
 export function useLiveQuery<TContext extends Context>(
   config: Accessor<LiveQueryCollectionConfig<TContext>>,
 ): Accessor<InferResultType<TContext>> & {
-  /**
-   * @deprecated use function result instead
-   * query.data -> query()
-   */
-  data: InferResultType<TContext>
   state: ReactiveMap<string | number, GetResult<TContext>>
   collection: Collection<GetResult<TContext>, string | number, {}>
-  status: CollectionStatus
-  isLoading: boolean
-  isReady: boolean
-  isIdle: boolean
-  isError: boolean
-  isCleanedUp: boolean
 }
 
 /**
  * Subscribe to an existing live query collection
  * @param liveQueryCollection - Pre-created live query collection to subscribe to
- * @returns Accessor that returns data with Loading boundary support, with state and status information as properties
+ * @returns Accessor that returns data with Loading boundary support, with state and collection as properties
  * @example
- * // Using pre-created live query collection
  * const myLiveQuery = createLiveQueryCollection((q) =>
  *   q.from({ todos: todosCollection }).where(({ todos }) => eq(todos.active, true))
  * )
  * const todosQuery = useLiveQuery(() => myLiveQuery)
- *
- * @example
- * // Access collection methods directly
- * const existingQuery = useLiveQuery(() => existingCollection)
- *
- * // Use collection for mutations
- * const handleToggle = (id) => {
- *   existingQuery.collection.update(id, draft => { draft.completed = !draft.completed })
- * }
- *
- * @example
- * // Handle states consistently
- * const sharedQuery = useLiveQuery(() => sharedCollection)
- *
- * return (
- *  <Switch fallback={<div><For each={sharedQuery()}>{(item) => <Item key={item.id} {...item} />}</For></div>}>
- *    <Match when={sharedQuery.isLoading}>
- *      <div>Loading...</div>
- *    </Match>
- *    <Match when={sharedQuery.isError}>
- *      <div>Error loading data</div>
- *    </Match>
- *  </Switch>
- * )
  */
 // Overload 3: Accept pre-created live query collection (non-single result)
 export function useLiveQuery<
@@ -247,19 +110,8 @@ export function useLiveQuery<
     Collection<TResult, TKey, TUtils> & NonSingleResult
   >,
 ): Accessor<Array<TResult>> & {
-  /**
-   * @deprecated use function result instead
-   * query.data -> query()
-   */
-  data: Array<TResult>
   state: ReactiveMap<TKey, TResult>
   collection: Collection<TResult, TKey, TUtils>
-  status: CollectionStatus
-  isLoading: boolean
-  isReady: boolean
-  isIdle: boolean
-  isError: boolean
-  isCleanedUp: boolean
 }
 
 // Overload 3b: Accept pre-created live query collection with singleResult: true
@@ -272,19 +124,8 @@ export function useLiveQuery<
     Collection<TResult, TKey, TUtils> & SingleResult
   >,
 ): Accessor<TResult | undefined> & {
-  /**
-   * @deprecated use function result instead
-   * query.data -> query()
-   */
-  data: TResult | undefined
   state: ReactiveMap<TKey, TResult>
   collection: Collection<TResult, TKey, TUtils> & SingleResult
-  status: CollectionStatus
-  isLoading: boolean
-  isReady: boolean
-  isIdle: boolean
-  isError: boolean
-  isCleanedUp: boolean
 }
 
 // Wholesale observer mode: the observer delivers wake-up notifies; Solid's
@@ -471,16 +312,6 @@ export function useLiveQuery(
   }
 
   Object.defineProperties(getData, {
-    data: {
-      get() {
-        return getData()
-      },
-    },
-    status: {
-      get() {
-        return status()
-      },
-    },
     collection: {
       get() {
         return collection()
@@ -503,31 +334,6 @@ export function useLiveQuery(
           stateSyncedCollection = currentCollection
         }
         return state
-      },
-    },
-    isLoading: {
-      get() {
-        return status() === `loading`
-      },
-    },
-    isReady: {
-      get() {
-        return status() === `ready` || status() === `disabled`
-      },
-    },
-    isIdle: {
-      get() {
-        return status() === `idle`
-      },
-    },
-    isError: {
-      get() {
-        return status() === `error`
-      },
-    },
-    isCleanedUp: {
-      get() {
-        return status() === `cleaned-up`
       },
     },
   })

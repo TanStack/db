@@ -48,7 +48,7 @@ function TodoList() {
 }
 ```
 
-**Note:** Call `query()` to read data (not `query.data`, which is deprecated). Status fields like `query.isLoading`, `query.isReady`, `query.status` are plain properties — no parentheses needed.
+**Note:** Call `query()` to read data. Use `<Loading>` and `<Errored>` boundaries to handle loading and error states. The accessor also exposes `query.state` (a `ReactiveMap`) and `query.collection` (the underlying `Collection`).
 
 ### Loading and Error Boundaries
 
