@@ -1,5 +1,6 @@
 import { createFileRoute } from '@tanstack/solid-router'
 import { useLiveQuery } from '@tanstack/solid-db'
+import { Loading } from '@solidjs/web'
 import {
   trailBaseConfigCollection,
   trailBaseTodoCollection,
@@ -20,24 +21,25 @@ export const Route = createFileRoute(`/trailbase`)({
 })
 
 function TrailBasePage() {
-  // Get data using live queries with Electric collections
-  const { data: todos } = useLiveQuery((q) =>
+  const todos = useLiveQuery((q) =>
     q
       .from({ todo: trailBaseTodoCollection })
       .orderBy(({ todo }) => todo.created_at, `asc`),
   )
 
-  const { data: configData } = useLiveQuery((q) =>
+  const configData = useLiveQuery((q) =>
     q.from({ config: trailBaseConfigCollection }),
   )
 
   return (
-    <TodoApp
-      todos={todos}
-      configData={configData}
-      todoCollection={trailBaseTodoCollection}
-      configCollection={trailBaseConfigCollection}
-      title="todos (TrailBase)"
-    />
+    <Loading fallback="Loading...">
+      <TodoApp
+        todos={todos()}
+        configData={configData()}
+        todoCollection={trailBaseTodoCollection}
+        configCollection={trailBaseConfigCollection}
+        title="todos (TrailBase)"
+      />
+    </Loading>
   )
 }

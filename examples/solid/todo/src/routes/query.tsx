@@ -1,6 +1,6 @@
 import { createFileRoute } from '@tanstack/solid-router'
 import { useLiveQuery } from '@tanstack/solid-db'
-import { Loading } from 'solid-js'
+import { Loading } from '@solidjs/web'
 import { queryConfigCollection, queryTodoCollection } from '../lib/collections'
 import { TodoApp } from '../components/TodoApp'
 
