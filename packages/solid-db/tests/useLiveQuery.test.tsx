@@ -9,13 +9,7 @@ import {
   eq,
   gt,
 } from '@tanstack/db'
-import {
-  For,
-  Suspense,
-  createComputed,
-  createRoot,
-  createSignal,
-} from 'solid-js'
+import { For, Loading, createEffect, createRoot, createSignal, flush, isPending, latest } from 'solid-js'
 import { useLiveQuery } from '../src/useLiveQuery'
 import { mockSyncCollectionOptions } from '../../db/tests/utils'
 import type { Accessor } from 'solid-js'
@@ -109,6 +103,7 @@ describe(`Query Collections`, () => {
       await waitFor(() => expect(result()).toHaveLength(3))
 
       setCurrent(empty)
+      flush()
 
       expect(result()).toHaveLength(0)
       expect(result.state.size).toBe(0)
@@ -588,6 +583,7 @@ describe(`Query Collections`, () => {
 
       // Narrow to only John Smith (age 35); ids 1 and 2 must not linger.
       setMinAge(32)
+      flush()
 
       expect(rendered.result.state.size).toBe(1)
       expect(rendered.result.state.has(`1`)).toBe(false)
@@ -812,14 +808,21 @@ describe(`Query Collections`, () => {
       )
 
       // Track each render state
-      createComputed(() => {
-        renderStates.push({
-          stateSize: queryResult.state.size,
-          hasTempKey: queryResult.state.has(`[temp-key,1]`),
-          hasPermKey: queryResult.state.has(`[4,1]`),
-          timestamp: Date.now(),
-        })
-      })
+      createEffect(
+        () => [
+          queryResult.state.size,
+          queryResult.state.has(`[temp-key,1]`),
+          queryResult.state.has(`[4,1]`),
+        ] as [number, boolean, boolean],
+        ([stateSize, hasTempKey, hasPermKey]) => {
+          renderStates.push({
+            stateSize,
+            hasTempKey,
+            hasPermKey,
+            timestamp: Date.now(),
+          })
+        },
+      )
 
       return queryResult
     })
@@ -1126,9 +1129,9 @@ describe(`Query Collections`, () => {
             // Don't call begin/commit immediately
           },
         },
-        onInsert: async () => { },
-        onUpdate: async () => { },
-        onDelete: async () => { },
+        onInsert: async () => {},
+        onUpdate: async () => {},
+        onDelete: async () => {},
       })
 
       const rendered = renderHook(() => {
@@ -1224,9 +1227,9 @@ describe(`Query Collections`, () => {
             // Don't sync immediately
           },
         },
-        onInsert: async () => { },
-        onUpdate: async () => { },
-        onDelete: async () => { },
+        onInsert: async () => {},
+        onUpdate: async () => {},
+        onDelete: async () => {},
       })
 
       const rendered = renderHook(() => {
@@ -1349,9 +1352,9 @@ describe(`Query Collections`, () => {
             // Don't sync immediately
           },
         },
-        onInsert: async () => { },
-        onUpdate: async () => { },
-        onDelete: async () => { },
+        onInsert: async () => {},
+        onUpdate: async () => {},
+        onDelete: async () => {},
       })
 
       const issueCollection = createCollection<Issue>({
@@ -1366,9 +1369,9 @@ describe(`Query Collections`, () => {
             // Don't sync immediately
           },
         },
-        onInsert: async () => { },
-        onUpdate: async () => { },
-        onDelete: async () => { },
+        onInsert: async () => {},
+        onUpdate: async () => {},
+        onDelete: async () => {},
       })
 
       const { result } = renderHook(() => {
@@ -1448,9 +1451,9 @@ describe(`Query Collections`, () => {
               // Don't sync immediately
             },
           },
-          onInsert: async () => { },
-          onUpdate: async () => { },
-          onDelete: async () => { },
+          onInsert: async () => {},
+          onUpdate: async () => {},
+          onDelete: async () => {},
         })
 
         const [minAge, setMinAge] = createSignal(30)
@@ -1558,7 +1561,6 @@ describe(`Query Collections`, () => {
       // Initially isLoading should be true
       expect(result.isLoading).toBe(true)
       expect(result.state.size).toBe(0)
-      expect(result()).toEqual([])
 
       // Start sync manually
       collection.preload()
@@ -1583,13 +1585,12 @@ describe(`Query Collections`, () => {
       })
       syncCommit!()
 
-      // Data should be visible even though still loading
+      // Data should be visible in state even though still loading
       await waitFor(() => {
         expect(result.state.size).toBe(1)
       })
       expect(result.isLoading).toBe(true) // Still loading
-      expect(result()).toHaveLength(1)
-      expect(result()[0]).toMatchObject({
+      expect(result.state.get(`1`)).toMatchObject({
         id: `1`,
         name: `John Smith`,
       })
@@ -1614,7 +1615,6 @@ describe(`Query Collections`, () => {
         expect(result.state.size).toBe(2)
       })
       expect(result.isLoading).toBe(true) // Still loading
-      expect(result()).toHaveLength(2)
 
       // Now mark as ready
       syncMarkReady!()
@@ -1707,13 +1707,13 @@ describe(`Query Collections`, () => {
       })
       syncCommit!()
 
-      // Should only show team1 members, even while loading
+      // Should only show team1 members in state, even while loading
       await waitFor(() => {
         expect(result.state.size).toBe(2)
       })
       expect(result.isLoading).toBe(true)
-      expect(result()).toHaveLength(2)
-      expect(result().every((p) => p.team === `team1`)).toBe(true)
+      const team1Values = Array.from(result.state.values())
+      expect(team1Values.every((p) => p.team === `team1`)).toBe(true)
 
       // Mark ready
       syncMarkReady!()
@@ -1825,13 +1825,13 @@ describe(`Query Collections`, () => {
       })
       issueSyncCommit!()
 
-      // Should see join result even while loading
+      // Should see join result in state even while loading
       await waitFor(() => {
         expect(result.state.size).toBe(1)
       })
       expect(result.isLoading).toBe(true)
-      expect(result()).toHaveLength(1)
-      expect(result()[0]).toMatchObject({
+      const joinRow = Array.from(result.state.values())[0]
+      expect(joinRow).toMatchObject({
         id: `1`,
         title: `First Issue`,
         userName: `John Doe`,
@@ -1881,7 +1881,6 @@ describe(`Query Collections`, () => {
       expect(result.isLoading).toBe(true)
       expect(result.isReady).toBe(false)
       expect(result.state.size).toBe(0)
-      expect(result()).toEqual([])
 
       // Start sync manually
       collection.preload()
@@ -1917,7 +1916,7 @@ describe(`Query Collections`, () => {
           }),
         )
 
-        const [enabled, setEnabled] = createSignal(false)
+        const [enabled, setEnabled] = createSignal(false, { ownedWrite: true })
         const rendered = renderHook(
           (props: { enabled: Accessor<boolean> }) => {
             return useLiveQuery((q) => {
@@ -1974,7 +1973,7 @@ describe(`Query Collections`, () => {
           }),
         )
 
-        const [enabled, setEnabled] = createSignal(false)
+        const [enabled, setEnabled] = createSignal(false, { ownedWrite: true })
         const rendered = renderHook(
           (props: { enabled: Accessor<boolean> }) => {
             return useLiveQuery((q) => {
@@ -2015,8 +2014,8 @@ describe(`Query Collections`, () => {
     })
   })
 
-  describe(`Suspense Integration`, () => {
-    it(`should work with Suspense boundaries`, async () => {
+  describe(`Loading Integration`, () => {
+    it(`should work with Loading boundaries`, async () => {
       const collection = createCollection(
         mockSyncCollectionOptions<Person>({
           id: `test-persons-suspense`,
@@ -2045,9 +2044,9 @@ describe(`Query Collections`, () => {
       }
 
       const { findByTestId } = render(() => (
-        <Suspense fallback={<div data-testid="loading">Loading...</div>}>
+        <Loading fallback={<div data-testid="loading">Loading...</div>}>
           <TestComponent />
-        </Suspense>
+        </Loading>
       ))
 
       // Should eventually show the list with data
@@ -2092,9 +2091,9 @@ describe(`Query Collections`, () => {
       }
 
       const { findByTestId } = render(() => (
-        <Suspense fallback={<div data-testid="loading">Loading...</div>}>
+        <Loading fallback={<div data-testid="loading">Loading...</div>}>
           <TestComponent />
-        </Suspense>
+        </Loading>
       ))
 
       // Should eventually resolve and show data
@@ -2123,12 +2122,13 @@ describe(`Query Collections`, () => {
 
       function RowComponent(props: { person: { id: string; name: string } }) {
         const id = props.person.id
-        // createComputed fires once initially and again each time person.name changes
-        createComputed(() => {
-          // Access name to subscribe to it
-          void props.person.name
-          nameEffectCounts[id] = (nameEffectCounts[id] || 0) + 1
-        })
+        // createEffect fires once initially and again each time person.name changes
+        createEffect(
+          () => props.person.name,
+          () => {
+            nameEffectCounts[id] = (nameEffectCounts[id] || 0) + 1
+          },
+        )
         return <li data-testid={`person-${id}`}>{props.person.name}</li>
       }
 
@@ -2808,9 +2808,8 @@ describe(`Query Collections`, () => {
     })
 
     let resolveNewLiveQuery: (() => void) | undefined
-    const originalToArrayWhenReady = newLiveQuery.toArrayWhenReady.bind(
-      newLiveQuery,
-    )
+    const originalToArrayWhenReady =
+      newLiveQuery.toArrayWhenReady.bind(newLiveQuery)
     newLiveQuery.toArrayWhenReady = async () => {
       await new Promise<void>((resolve) => {
         resolveNewLiveQuery = resolve
@@ -2842,11 +2841,226 @@ describe(`Query Collections`, () => {
         new Set([`new-only`, `same`]),
       )
       expect(rendered.result()).toHaveLength(2)
-      expect(rendered.result().find((person) => person.id === `same`)).toMatchObject({
+      expect(
+        rendered.result().find((person) => person.id === `same`),
+      ).toMatchObject({
         name: `New Same Updated`,
       })
     })
 
     resolveNewLiveQuery!()
+  })
+
+  describe(`Errored boundary`, () => {
+    it(`should throw when reading an errored query`, async () => {
+      const collection = createCollection<Person>({
+        id: `errored-throw-test`,
+        getKey: (p: Person) => p.id,
+        sync: {
+          sync: () => {
+            throw new Error(`conformance: sync failure`)
+          },
+        },
+        onInsert: () => Promise.resolve(),
+        onUpdate: () => Promise.resolve(),
+        onDelete: () => Promise.resolve(),
+      })
+      try {
+        collection.startSyncImmediate()
+      } catch {
+        // expected: engine catches the sync error and sets status to 'error'
+      }
+
+      const { result } = renderHook(() => useLiveQuery(() => collection))
+
+      await waitFor(() => expect(result.isError).toBe(true))
+      expect(() => result()).toThrow()
+    })
+  })
+
+  describe(`isPending and latest helpers`, () => {
+    it(`Loading shows fallback during initial load, data after ready`, async () => {
+      let syncMarkReady: (() => void) | undefined
+
+      const collection = createCollection<Person>({
+        id: `loading-initial-test`,
+        getKey: (person: Person) => person.id,
+        startSync: false,
+        sync: {
+          sync: ({ begin, write, commit, markReady }) => {
+            syncMarkReady = markReady
+            begin()
+            write({
+              type: `insert`,
+              value: {
+                id: `1`,
+                name: `John Doe`,
+                age: 35,
+                email: `j@e.com`,
+                isActive: true,
+                team: `team1`,
+              },
+            })
+            commit()
+          },
+        },
+        onInsert: () => Promise.resolve(),
+        onUpdate: () => Promise.resolve(),
+        onDelete: () => Promise.resolve(),
+      })
+
+      function TestComp() {
+        const query = useLiveQuery((q) =>
+          q
+            .from({ persons: collection })
+            .select(({ persons }) => ({ id: persons.id, name: persons.name })),
+        )
+        return (
+          <Loading fallback={<div data-testid="loading">Loading</div>}>
+            <div data-testid="content">
+              <For each={query()}>
+                {(person) => <div>{person.name}</div>}
+              </For>
+            </div>
+          </Loading>
+        )
+      }
+
+      const { queryByTestId } = render(() => <TestComp />)
+      collection.preload()
+
+      // While loading: <Loading> fallback must be visible
+      await waitFor(() => {
+        expect(queryByTestId(`loading`)).toBeTruthy()
+      })
+
+      // Mark ready — content must appear
+      syncMarkReady!()
+      await waitFor(() => {
+        expect(queryByTestId(`content`)).toBeTruthy()
+        expect(queryByTestId(`loading`)).toBeNull()
+      })
+    })
+
+    it(`isPending returns true during revalidation while new collection loads`, async () => {
+      let secondSyncMarkReady: (() => void) | undefined
+      const source1 = createCollection(
+        mockSyncCollectionOptions<Person>({
+          id: `ispending-reval-source-1`,
+          getKey: (p: Person) => p.id,
+          initialData: initialPersons,
+        }),
+      )
+      const source2 = createCollection<Person>({
+        id: `ispending-reval-source-2`,
+        getKey: (p: Person) => p.id,
+        startSync: false,
+        sync: {
+          sync: ({ begin, write, commit, markReady }) => {
+            secondSyncMarkReady = markReady
+            begin()
+            write({
+              type: `insert`,
+              value: { ...initialPersons[0]!, name: `Updated` },
+            })
+            commit()
+          },
+        },
+        onInsert: () => Promise.resolve(),
+        onUpdate: () => Promise.resolve(),
+        onDelete: () => Promise.resolve(),
+      })
+
+      const [useFirst, setUseFirst] = createSignal(true, { ownedWrite: true })
+
+      const { result } = renderHook(() =>
+        useLiveQuery((q) =>
+          q
+            .from({ persons: useFirst() ? source1 : source2 })
+            .select(({ persons }) => ({ id: persons.id, name: persons.name })),
+        ),
+      )
+
+      await waitFor(() => expect(result.isReady).toBe(true))
+      expect(isPending(() => result())).toBe(false)
+
+      // Switch to source2 (not yet ready) — isPending must be true
+      source2.preload()
+      setUseFirst(false)
+      flush()
+
+      // Still loading — check before ready
+      expect(result.isLoading).toBe(true)
+      expect(isPending(() => result())).toBe(true)
+
+      // Now ready
+      secondSyncMarkReady!()
+      await waitFor(() => expect(result.isReady).toBe(true))
+      expect(isPending(() => result())).toBe(false)
+    })
+
+    it(`latest returns stale value during revalidation (skips Loading)`, async () => {
+      let secondMarkReady: (() => void) | undefined
+      const source1 = createCollection(
+        mockSyncCollectionOptions<Person>({
+          id: `latest-reval-source-1`,
+          getKey: (p: Person) => p.id,
+          initialData: initialPersons,
+        }),
+      )
+      const source2 = createCollection<Person>({
+        id: `latest-reval-source-2`,
+        getKey: (p: Person) => p.id,
+        startSync: false,
+        sync: {
+          sync: ({ begin, write, commit, markReady }) => {
+            secondMarkReady = markReady
+            begin()
+            initialPersons.forEach((p) => write({ type: `insert`, value: p }))
+            commit()
+          },
+        },
+        onInsert: () => Promise.resolve(),
+        onUpdate: () => Promise.resolve(),
+        onDelete: () => Promise.resolve(),
+      })
+
+      const [useFirst, setUseFirst] = createSignal(true, { ownedWrite: true })
+
+      function TestComp() {
+        const query = useLiveQuery((q) =>
+          q
+            .from({ persons: useFirst() ? source1 : source2 })
+            .select(({ persons }) => ({ id: persons.id, name: persons.name })),
+        )
+        return (
+          <Loading fallback={<div data-testid="loading">Loading</div>}>
+            <div data-testid="content">
+              {latest(() => query()).length} items
+            </div>
+          </Loading>
+        )
+      }
+
+      const { queryByTestId } = render(() => <TestComp />)
+
+      await waitFor(() => expect(queryByTestId(`content`)).toBeTruthy())
+      expect(queryByTestId(`content`)!.textContent).toContain(`3 items`)
+
+      // Switch to loading source — latest() must keep showing old data
+      source2.preload()
+      setUseFirst(false)
+      flush()
+
+      // latest() skips Loading — content still visible with stale count
+      expect(queryByTestId(`content`)).toBeTruthy()
+      expect(queryByTestId(`loading`)).toBeNull()
+
+      // After ready, content updates
+      secondMarkReady!()
+      await waitFor(() => {
+        expect(queryByTestId(`content`)!.textContent).toContain(`3 items`)
+      })
+    })
   })
 })

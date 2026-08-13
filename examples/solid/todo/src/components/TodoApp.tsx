@@ -1,6 +1,5 @@
 import { Link } from '@tanstack/solid-router'
 import { For, Show, createSignal } from 'solid-js'
-import type { JSX } from 'solid-js'
 import type { Collection } from '@tanstack/solid-db'
 import type { SelectConfig, SelectTodo } from '../db/validation'
 
@@ -94,14 +93,11 @@ export function TodoApp(props: TodoAppProps) {
 
   const titleColor = getComplementaryColor(backgroundColor)
 
-  const handleColorChange: JSX.CustomEventHandlersCamelCase<HTMLInputElement>[`onInput`] =
-    (e) => {
-      const newColor = e.target.value
-      setConfigValue(`backgroundColor`, newColor)
-    }
+  const handleColorChange = (e: { currentTarget: { value: string } }) => {
+    setConfigValue(`backgroundColor`, e.currentTarget.value)
+  }
 
-  const handleSubmit: JSX.CustomEventHandlersCamelCase<HTMLFormElement>[`onSubmit`] =
-    (e) => {
+  const handleSubmit = (e: SubmitEvent) => {
       e.preventDefault()
       if (!newTodo().trim()) return
 
