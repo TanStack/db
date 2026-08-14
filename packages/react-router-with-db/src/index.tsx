@@ -25,7 +25,6 @@ export function routerWithDbClient<TRouter extends AnyRouter>(
   additionalOptions?: AdditionalOptions,
 ): TRouter {
   const originalOptions = router.options
-  dbClient._setSsrStreamingEnabled(true)
 
   router.options = {
     ...router.options,
@@ -48,6 +47,8 @@ export function routerWithDbClient<TRouter extends AnyRouter>(
   }
 
   if (router.isServer) {
+    dbClient._setSsrStreamingEnabled(true)
+    dbClient._setSsrServerCleanupEnabled(true)
     const dbStream = createPushableStream<DehydratedDbState>()
     const bufferedQueryHashes = new Set<string>()
     const streamedQueryHashes = new Set<string>()
@@ -97,6 +98,11 @@ export function routerWithDbClient<TRouter extends AnyRouter>(
         router.serverSsr!.onRenderFinished(() => {
           unsubscribe()
           dbStream.close()
+          void dbClient
+            .cleanup()
+            .catch((error) =>
+              console.error(`Error cleaning up DbClient:`, error),
+            )
         })
       }
 
@@ -113,15 +119,21 @@ export function routerWithDbClient<TRouter extends AnyRouter>(
     }
   } else {
     router.options.hydrate = async (dehydrated: DehydratedRouterDbState) => {
-      await originalOptions.hydrate?.(dehydrated)
-      dbClient.hydrate(dehydrated.dehydratedDbClient)
+      dbClient._setSsrStreamingEnabled(true)
+      try {
+        await originalOptions.hydrate?.(dehydrated)
+        dbClient.hydrate(dehydrated.dehydratedDbClient)
 
-      const reader = dehydrated.dbStream.getReader()
-      void readDbStream(reader, dbClient)
-        .catch((error) => console.error(`Error reading DB stream:`, error))
-        .finally(() => {
-          dbClient._setSsrStreamingEnabled(false)
-        })
+        const reader = dehydrated.dbStream.getReader()
+        void readDbStream(reader, dbClient)
+          .catch((error) => console.error(`Error reading DB stream:`, error))
+          .finally(() => {
+            dbClient._setSsrStreamingEnabled(false)
+          })
+      } catch (error) {
+        dbClient._setSsrStreamingEnabled(false)
+        throw error
+      }
     }
   }
 

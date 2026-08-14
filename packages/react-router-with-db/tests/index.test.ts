@@ -1,3 +1,4 @@
+import { readFileSync } from 'node:fs'
 import { describe, expect, it, vi } from 'vitest'
 import { DbClient, collectionOptions } from '@tanstack/react-db'
 import { routerWithDbClient } from '../src'
@@ -26,6 +27,66 @@ function createTodoDescriptor() {
 }
 
 describe(`routerWithDbClient`, () => {
+  it(`declares peer floors that contain the imported SSR APIs`, () => {
+    const packageJson = JSON.parse(readFileSync(`package.json`, `utf8`)) as {
+      peerDependencies: Record<string, string>
+    }
+
+    expect(packageJson.peerDependencies).toMatchObject({
+      '@tanstack/react-db': `>=0.2.1`,
+      '@tanstack/router-core': `>=1.127.0`,
+    })
+  })
+
+  it(`leaves SSR streaming disabled in the browser until hydration starts`, () => {
+    const dbClient = new DbClient()
+    const router = {
+      options: { context: { dbClient } },
+      isServer: false,
+    } as unknown as AnyRouter
+
+    adaptRouter(router, dbClient)
+
+    expect(dbClient._isSsrStreamingEnabled()).toBe(false)
+  })
+
+  it(`cleans up server collections when rendering finishes`, async () => {
+    const cleanup = vi.fn()
+    const dbClient = new DbClient()
+    const collection = dbClient.collection(
+      collectionOptions(`server-cleanup`, () => ({
+        id: `server-cleanup`,
+        getKey: (todo: Todo) => todo.id,
+        sync: {
+          sync: ({ markReady }) => {
+            markReady()
+            return cleanup
+          },
+        },
+      })),
+    )
+    await collection.preload()
+    let finishRender = () => {}
+    const router = {
+      options: { context: { dbClient } },
+      isServer: true,
+      serverSsr: {
+        isDehydrated: () => false,
+        onRenderFinished: (callback: () => void) => {
+          finishRender = callback
+        },
+      },
+    } as unknown as AnyRouter
+
+    adaptRouter(router, dbClient)
+    expect(dbClient._isSsrServerCleanupEnabled()).toBe(true)
+    await router.options.dehydrate?.()
+    finishRender()
+
+    await vi.waitFor(() => expect(cleanup).toHaveBeenCalledOnce())
+    expect(dbClient._isSsrServerCleanupEnabled()).toBe(false)
+  })
+
   it(`streams live queries registered after critical dehydration`, async () => {
     const dbClient = new DbClient()
     let isDehydrated = false

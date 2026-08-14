@@ -466,11 +466,48 @@ function canonicalizeRuntimeValue(
     ]
   }
 
+  if (value instanceof Map) {
+    return withCircularGuard(value, path, seen, () => {
+      const entries = Array.from(
+        value.entries(),
+        ([key, entryValue], index) => [
+          canonicalizeRuntimeValue(key, `${path}.key[${index}]`, seen),
+          canonicalizeRuntimeValue(entryValue, `${path}.value[${index}]`, seen),
+        ],
+      )
+      entries.sort(compareStableIdentityValues)
+      return [`Map`, entries]
+    })
+  }
+
+  if (value instanceof Set) {
+    return withCircularGuard(value, path, seen, () => {
+      const entries = Array.from(value, (entry, index) =>
+        canonicalizeRuntimeValue(entry, `${path}[${index}]`, seen),
+      )
+      entries.sort(compareStableIdentityValues)
+      return [`Set`, entries]
+    })
+  }
+
   if (isPlainObject(value)) {
     return canonicalizeObject(value, path, seen)
   }
 
   throw new UnhashableQueryIRError(path, `non-plain object value`)
+}
+
+function compareStableIdentityValues(
+  left: StableIdentityValue,
+  right: StableIdentityValue,
+): number {
+  const serializedLeft = JSON.stringify(left)
+  const serializedRight = JSON.stringify(right)
+  return serializedLeft < serializedRight
+    ? -1
+    : serializedLeft > serializedRight
+      ? 1
+      : 0
 }
 
 function canonicalizeObject(

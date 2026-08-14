@@ -2089,6 +2089,9 @@ describe(`Electric Integration`, () => {
 
       // Initial stream setup
       expect(mockSubscribe).toHaveBeenCalledTimes(1)
+      mockStream.shapeHandle = `discarded-handle`
+      mockStream.lastOffset = `42_0`
+      subscriber([{ headers: { control: `up-to-date` } }])
 
       // Cleanup
       await testCollection.cleanup()
@@ -2100,6 +2103,10 @@ describe(`Electric Integration`, () => {
       // Should have started a new stream
       expect(mockSubscribe).toHaveBeenCalledTimes(2)
       expect(testCollection.status).toBe(`loading`)
+      expect(vi.mocked(ShapeStream).mock.calls.at(-1)?.[0]).toMatchObject({
+        offset: undefined,
+        handle: undefined,
+      })
 
       subscription.unsubscribe()
     })
@@ -3311,6 +3318,60 @@ describe(`Electric Integration`, () => {
           handle: `handle-1`,
         }),
       )
+    })
+
+    it(`prefers newer persisted resume metadata over hydrated metadata`, () => {
+      vi.clearAllMocks()
+      const metadataHarness = createInMemorySyncMetadataApi(
+        new Map([
+          [
+            `electric:resume`,
+            {
+              kind: `resume`,
+              offset: `20_0`,
+              handle: `persisted-newer`,
+              shapeId: `{"params":{"table":"test_table"},"url":"http://test-url"}`,
+              updatedAt: 20,
+            },
+          ],
+        ]),
+      )
+      const options = electricCollectionOptions<Row>({
+        id: `resume-recency-test`,
+        shapeOptions: {
+          url: `http://test-url`,
+          params: { table: `test_table` },
+        },
+        startSync: false,
+        getKey: (item) => item.id as number,
+      })
+      options.sync.importSyncMeta?.({
+        version: 1,
+        resume: {
+          kind: `resume`,
+          offset: `10_0`,
+          handle: `hydrated-older`,
+          shapeId: `{"params":{"table":"test_table"},"url":"http://test-url"}`,
+          updatedAt: 10,
+        },
+        seenTxids: [],
+      })
+      const originalSync = options.sync
+
+      createCollection({
+        ...options,
+        startSync: true,
+        sync: {
+          ...originalSync,
+          sync: (params: Parameters<typeof originalSync.sync>[0]) =>
+            originalSync.sync({ ...params, metadata: metadataHarness.api }),
+        },
+      })
+
+      expect(vi.mocked(ShapeStream).mock.calls.at(-1)?.[0]).toMatchObject({
+        offset: `20_0`,
+        handle: `persisted-newer`,
+      })
     })
 
     it(`should ignore reset resume metadata and fall back to default startup`, async () => {

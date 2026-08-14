@@ -48,9 +48,9 @@
     "src"
   ],
   "peerDependencies": {
-    "@tanstack/react-db": ">=0.2.0",
+    "@tanstack/react-db": ">=0.2.1",
     "@tanstack/react-router": ">=1.43.2",
-    "@tanstack/router-core": ">=1.114.7",
+    "@tanstack/router-core": ">=1.127.0",
     "react": ">=18.0.0",
     "react-dom": ">=18.0.0"
   },

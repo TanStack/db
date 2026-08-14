@@ -379,7 +379,10 @@ export function useLiveQuery(
     try {
       queryHash =
         deps.length > 0 && !queryKey
-          ? getStableValueHash([`deps`, dependencyValues], `queryKey`)
+          ? getStableValueHash(
+              [`deps`, dependencyValues, getLiveQueryHash(preparedValue)],
+              `queryKey`,
+            )
           : getLiveQueryHash(preparedValue, queryKey)
     } catch (error) {
       if (!(error instanceof UnhashableQueryIRError)) throw error

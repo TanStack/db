@@ -255,7 +255,7 @@ describe(`QueryCollection`, () => {
     queryClientB.clear()
   })
 
-  it(`requires each DbClient to provide its QueryClient dependency`, () => {
+  it(`falls back to the configured QueryClient when DbClient has no dependency`, async () => {
     const constructionClient = new QueryClient()
     const queryKey = [`db-client-query-fallback`] as const
     const descriptor = collectionOptions(
@@ -269,11 +269,14 @@ describe(`QueryCollection`, () => {
     )
     const dbClient = new DbClient()
 
-    expect(() => dbClient.collection(descriptor)).toThrow(
-      /missing the required "queryClient" dependency/,
-    )
-    expect(constructionClient.getQueryData(queryKey)).toBeUndefined()
+    const collection = dbClient.collection(descriptor)
+    await collection.preload()
 
+    expect(constructionClient.getQueryData(queryKey)).toEqual([
+      { id: `1`, name: `Item` },
+    ])
+
+    await dbClient.cleanup()
     constructionClient.clear()
   })
 

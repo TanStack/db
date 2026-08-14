@@ -194,12 +194,10 @@ function mergeElectricSyncMeta(
     return incomingMeta
   }
 
-  const resume =
-    !currentMeta.resume ||
-    (incomingMeta.resume &&
-      incomingMeta.resume.updatedAt >= currentMeta.resume.updatedAt)
-      ? incomingMeta.resume
-      : currentMeta.resume
+  const resume = getNewestElectricResumeState(
+    currentMeta.resume,
+    incomingMeta.resume,
+  )
 
   return {
     version: 1,
@@ -208,6 +206,15 @@ function mergeElectricSyncMeta(
       new Set([...currentMeta.seenTxids, ...incomingMeta.seenTxids]),
     ).sort((a, b) => a - b),
   }
+}
+
+function getNewestElectricResumeState(
+  current: ElectricResumeState | undefined,
+  incoming: ElectricResumeState | undefined,
+): ElectricResumeState | undefined {
+  if (!current) return incoming
+  if (!incoming) return current
+  return incoming.updatedAt >= current.updatedAt ? incoming : current
 }
 
 /**
@@ -1480,8 +1487,10 @@ function createElectricSync<T extends Row<unknown>>(
         return parseElectricResumeState(persistedResumeState)
       }
 
-      const persistedResumeState =
-        hydratedResumeState.state ?? readPersistedResumeState()
+      const persistedResumeState = getNewestElectricResumeState(
+        readPersistedResumeState(),
+        hydratedResumeState.state,
+      )
       const shapeIdentity = getStableShapeIdentity({
         url: shapeOptions.url,
         params: shapeOptions.params as Record<string, unknown> | undefined,
@@ -1998,6 +2007,7 @@ function createElectricSync<T extends Row<unknown>>(
           abortController.abort()
           // Reset deduplication tracking so collection can load fresh data if restarted
           loadSubsetDedupe?.reset()
+          hydratedResumeState.setState(() => undefined)
         },
       }
     },

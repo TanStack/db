@@ -1,9 +1,4 @@
-import {
-  DbClient,
-  collectionOptions,
-  createLiveQueryCollection,
-  eq,
-} from '@tanstack/react-db'
+import { DbClient, collectionOptions, eq } from '@tanstack/react-db'
 import type { DehydratedDbState } from '@tanstack/react-db'
 
 export type SsrTodo = {
@@ -82,18 +77,22 @@ export const ssrTodoCollection = collectionOptions(ssrTodoCollectionId, () => ({
 }))
 
 export async function preloadSsrTodos(dbClient: DbClient): Promise<void> {
-  const todos = dbClient.collection(ssrTodoCollection)
-  const openTodos = createLiveQueryCollection((q) =>
-    q.from({ todo: todos }).where(({ todo }) => eq(todo.status, `open`)),
-  )
-
-  await openTodos.preload()
+  await dbClient.preloadLiveQuery({
+    query: (q) =>
+      q
+        .from({ todo: ssrTodoCollection })
+        .where(({ todo }) => eq(todo.status, `open`)),
+  })
 }
 
 export async function createDehydratedSsrTodoState(): Promise<DehydratedDbState> {
   const dbClient = new DbClient()
-  await preloadSsrTodos(dbClient)
-  return dbClient.dehydrate()
+  try {
+    await preloadSsrTodos(dbClient)
+    return dbClient.dehydrate()
+  } finally {
+    await dbClient.cleanup()
+  }
 }
 
 export function applyStreamedTodo(dbClient: DbClient): void {

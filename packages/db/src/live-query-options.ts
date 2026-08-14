@@ -96,11 +96,14 @@ export function getPreparedLiveQueryIdentity(value: unknown): unknown {
     return [`query`, getStableQueryBuilderHash(value)]
   }
   if (value && typeof value === `object` && `query` in value) {
+    const config = value as LiveQueryCollectionConfig<any>
     return [
       `config`,
-      getPreparedLiveQueryIdentity(
-        (value as LiveQueryCollectionConfig<any>).query,
-      ),
+      getPreparedLiveQueryIdentity(config.query),
+      [`getKey`, config.getKey],
+      [`schema`, config.schema],
+      [`singleResult`, config.singleResult === true],
+      [`defaultStringCollation`, config.defaultStringCollation],
     ]
   }
   if (value === undefined || value === null) return [`disabled`]

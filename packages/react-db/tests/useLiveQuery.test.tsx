@@ -16,6 +16,7 @@ import {
 } from '@tanstack/db'
 import { useEffect } from 'react'
 import { useLiveQuery } from '../src/useLiveQuery'
+import { getLiveQueryResultInfo } from '../src/live-query-internals'
 import { DbProvider } from '../src/DbProvider'
 import {
   mockSyncCollectionOptions,
@@ -3241,6 +3242,32 @@ describe(`Query Collections`, () => {
       )
 
       warnSpy.mockRestore()
+    })
+
+    it(`includes the query in legacy dependency-array SSR identity`, () => {
+      const collection = createCollection(
+        mockSyncCollectionOptions<Person>({
+          id: `legacy-deps-query-identity`,
+          getKey: (person) => person.id,
+          initialData: initialPersons,
+        }),
+      )
+      const first = renderHook(() =>
+        useLiveQuery((q) => q.from({ people: collection }), [1]),
+      )
+      const second = renderHook(() =>
+        useLiveQuery(
+          (q) =>
+            q
+              .from({ people: collection })
+              .where(({ people }) => gt(people.age, 30)),
+          [1],
+        ),
+      )
+
+      expect(getLiveQueryResultInfo(first.result.current).queryHash).not.toBe(
+        getLiveQueryResultInfo(second.result.current).queryHash,
+      )
     })
   })
 })

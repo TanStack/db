@@ -130,11 +130,20 @@ export class TransactionScope {
 
 const defaultTransactionScope = new TransactionScope()
 const transactionScopes = new WeakMap<object, TransactionScope>()
+const transactionAmbientScopes = new WeakMap<object, TransactionScope>()
 
 function getTransactionScope(transaction: object): TransactionScope {
   const scope = transactionScopes.get(transaction)
   if (!scope) {
     throw new Error(`Transaction is not associated with a TransactionScope.`)
+  }
+  return scope
+}
+
+function getTransactionAmbientScope(transaction: object): TransactionScope {
+  const scope = transactionAmbientScopes.get(transaction)
+  if (!scope) {
+    throw new Error(`Transaction is not associated with an ambient scope.`)
   }
   return scope
 }
@@ -337,6 +346,7 @@ class Transaction<T extends object = Record<string, unknown>> {
     this.sequenceNumber = sequenceNumber
     this.metadata = config.metadata ?? {}
     transactionScopes.set(this, scope)
+    transactionAmbientScopes.set(this, scope)
   }
 
   setState(newState: TransactionState) {
@@ -402,16 +412,21 @@ class Transaction<T extends object = Record<string, unknown>> {
     }
 
     const initialScope = getTransactionScope(this)
-    initialScope.registerTransaction(this)
+    const registeredScopes = new Set([
+      initialScope,
+      getTransactionAmbientScope(this),
+    ])
+    for (const scope of registeredScopes) {
+      scope.registerTransaction(this)
+    }
 
     try {
       callback()
     } finally {
-      const finalScope = getTransactionScope(this)
-      if (finalScope !== initialScope) {
-        finalScope.unregisterTransaction(this)
+      registeredScopes.add(getTransactionScope(this))
+      for (const scope of registeredScopes) {
+        scope.unregisterTransaction(this)
       }
-      initialScope.unregisterTransaction(this)
     }
 
     if (this.autoCommit) {

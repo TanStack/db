@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from 'vitest'
 import { createCollection } from '../src/collection/index.js'
-import { DbClient } from '../src/client.js'
+import { DbClient, collectionOptions } from '../src/client.js'
+import { createLiveQueryCollection } from '../src/query/index.js'
 import { createLiveQueryObserver } from '../src/live-query-observer.js'
 import {
   mockSyncCollectionOptions,
@@ -127,6 +128,146 @@ function makeControlledTruncateSource() {
 }
 
 describe(`createLiveQueryObserver`, () => {
+  it(`registers SSR live-query resources for client-owned cleanup`, async () => {
+    const errorSpy = vi.spyOn(console, `error`).mockImplementation(() => {})
+    const client = new DbClient()
+    const source = client.collection(
+      collectionOptions({
+        id: `observer-client-cleanup-source`,
+        getKey: (row: Row) => row.id,
+        sync: {
+          sync: ({ begin, write, commit, markReady }) => {
+            begin()
+            write({ type: `insert`, value: SEED[0]! })
+            commit()
+            markReady()
+          },
+        },
+      }),
+    )
+    const liveQuery = createLiveQueryCollection((q) => q.from({ source }))
+    client._setSsrServerCleanupEnabled(true)
+    const sourceObserver = createLiveQueryObserver<Row, string>(source as any, {
+      client,
+      queryHash: `observer-source-cleanup`,
+    })
+    const liveQueryObserver = createLiveQueryObserver<Row, string>(
+      liveQuery as any,
+      {
+        client,
+        queryHash: `observer-client-cleanup`,
+      },
+    )
+    sourceObserver.getServerSnapshot()
+    liveQueryObserver.getServerSnapshot()
+    liveQuery.startSyncImmediate()
+
+    try {
+      await client.cleanup()
+
+      expect(errorSpy).not.toHaveBeenCalledWith(
+        expect.stringContaining(`was manually cleaned up while live query`),
+      )
+    } finally {
+      errorSpy.mockRestore()
+    }
+  })
+
+  it(`publishes a live error instead of pinning a hydration seed as ready`, () => {
+    const collection = makeLoadingSource()
+    const client = new DbClient()
+    client.hydrate({
+      collections: [],
+      liveQueries: [
+        {
+          queryHash: `seeded-error`,
+          dehydratedAt: 1,
+          snapshot: {
+            rows: [{ key: `1`, value: { id: `1`, name: `server` } }],
+          },
+        },
+      ],
+    })
+    const observer = createLiveQueryObserver<Row, string>(collection as any, {
+      client,
+      queryHash: `seeded-error`,
+      mode: `wholesale`,
+    })
+    const listener = vi.fn()
+    observer.subscribe(listener)
+
+    collection._lifecycle.setStatus(`error`)
+
+    expect(listener).toHaveBeenCalled()
+    expect(observer.getSnapshot().status).toBe(`error`)
+    observer.dispose()
+  })
+
+  it(`exposes a streamed query error while a hydration seed is active`, async () => {
+    const collection = makeLoadingSource()
+    const client = new DbClient()
+    client.hydrate({
+      collections: [],
+      liveQueries: [
+        {
+          queryHash: `seeded-stream-error`,
+          dehydratedAt: 1,
+          snapshot: {
+            rows: [{ key: `1`, value: { id: `1`, name: `server` } }],
+          },
+        },
+      ],
+    })
+    const observer = createLiveQueryObserver<Row, string>(collection as any, {
+      client,
+      queryHash: `seeded-stream-error`,
+      mode: `wholesale`,
+    })
+    observer.subscribe(() => {})
+    const failure = new Error(`stream failed`)
+
+    client.hydrate({
+      collections: [],
+      liveQueries: [
+        {
+          queryHash: `seeded-stream-error`,
+          dehydratedAt: 2,
+          promise: Promise.reject(failure),
+        },
+      ],
+    })
+    await Promise.resolve()
+
+    expect(observer.getError()).toBe(failure)
+    observer.dispose()
+  })
+
+  it(`retries preload after settlement and replaces cached error records`, async () => {
+    const preload = vi.fn().mockResolvedValue(undefined)
+    const collection = {
+      status: `ready`,
+      entries: () => new Map().entries(),
+      on: () => () => {},
+      subscribeChanges: () => ({ unsubscribe: () => {} }),
+      preload,
+    }
+    const client = new DbClient()
+    const failure = new Error(`first preload failed`)
+    await expect(
+      client._registerLiveQuery(`retry-preload`, Promise.reject(failure)),
+    ).rejects.toBe(failure)
+    const observer = createLiveQueryObserver<Row, string>(collection as any, {
+      client,
+      queryHash: `retry-preload`,
+    })
+
+    await expect(observer.preload()).resolves.toBeUndefined()
+    await expect(observer.preload()).resolves.toBeUndefined()
+
+    expect(preload).toHaveBeenCalledTimes(2)
+    observer.dispose()
+  })
+
   it(`shows a hydrated result until the live collection is authoritative`, async () => {
     const collection = makeLoadingSource()
     const client = new DbClient()
@@ -279,6 +420,44 @@ describe(`createLiveQueryObserver`, () => {
     expect(client._getLiveQuery(`people`)).toBeUndefined()
     observer.dispose()
     laterObserver.dispose()
+  })
+
+  it(`does not consume a shared hydration result during an abandoned render read`, () => {
+    const collection = makeLoadingSource()
+    const client = new DbClient()
+    client.hydrate({
+      collections: [],
+      liveQueries: [
+        {
+          queryHash: `shared-render-result`,
+          dehydratedAt: 1,
+          snapshot: {
+            rows: [{ key: `1`, value: { id: `1`, name: `From server` } }],
+          },
+        },
+      ],
+    })
+    const abandoned = createLiveQueryObserver<Row, string>(collection as any, {
+      client,
+      queryHash: `shared-render-result`,
+      mode: `wholesale`,
+    })
+
+    expect(abandoned.getSnapshot().data).toEqual([
+      { id: `1`, name: `From server` },
+    ])
+    abandoned.dispose()
+
+    const sibling = createLiveQueryObserver<Row, string>(collection as any, {
+      client,
+      queryHash: `shared-render-result`,
+      mode: `wholesale`,
+    })
+    expect(sibling.getSnapshot().data).toEqual([
+      { id: `1`, name: `From server` },
+    ])
+    expect(client._getLiveQuery(`shared-render-result`)).toBeDefined()
+    sibling.dispose()
   })
 
   it(`ignores a server snapshot that arrives after browser sync is ready`, () => {

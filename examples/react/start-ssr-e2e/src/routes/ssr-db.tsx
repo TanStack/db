@@ -1,11 +1,12 @@
 import * as React from 'react'
 import { createFileRoute } from '@tanstack/react-router'
-import { DbClient, DbProvider, eq, useLiveQuery } from '@tanstack/react-db'
+import { eq, useLiveQuery } from '@tanstack/react-db'
 import {
   applyStreamedTodo,
   createDehydratedSsrTodoState,
   ssrTodoCollection,
 } from '../lib/ssr-fixture'
+import type { DbClient } from '@tanstack/react-db'
 
 export const Route = createFileRoute(`/ssr-db`)({
   loader: async () => {
@@ -18,17 +19,13 @@ export const Route = createFileRoute(`/ssr-db`)({
 
 function SsrDbRoute() {
   const { dbState } = Route.useLoaderData()
-  const [dbClient] = React.useState(() => {
-    const client = new DbClient()
-    client.hydrate(dbState)
-    return client
+  const { dbClient } = Route.useRouteContext()
+  const [hydratedDbClient] = React.useState(() => {
+    dbClient.hydrate(dbState)
+    return dbClient
   })
 
-  return (
-    <DbProvider client={dbClient}>
-      <SsrDbTodos dbClient={dbClient} />
-    </DbProvider>
-  )
+  return <SsrDbTodos dbClient={hydratedDbClient} />
 }
 
 function SsrDbTodos({ dbClient }: { dbClient: DbClient }) {

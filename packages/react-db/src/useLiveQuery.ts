@@ -612,6 +612,8 @@ export function useLiveQuery(
   const observerRef = useRef<LiveQueryObserver<object, string | number> | null>(
     null,
   )
+  const queryHashRef = useRef<string | undefined>(undefined)
+  const identityErrorRef = useRef<UnhashableQueryIRError | undefined>(undefined)
 
   const queryKey = !inputIsCollection
     ? getExplicitQueryKey(configOrQueryOrCollection)
@@ -627,7 +629,22 @@ export function useLiveQuery(
     streamIdentity = [`queryKey`, queryKey]
   } else if (deps !== undefined) {
     identityDeps = resolvedDeps
-    streamIdentity = [`deps`, resolvedDeps]
+    try {
+      preparedQueryValue = prepareQueryValue(
+        configOrQueryOrCollection,
+        dbClient,
+        deferredCollectionsRef.current,
+      )
+      streamIdentity = [
+        `deps`,
+        resolvedDeps,
+        getPreparedLiveQueryIdentity(preparedQueryValue),
+      ]
+    } catch (error) {
+      if (!(error instanceof UnhashableQueryIRError)) throw error
+      warnUnhashableDerivedIdentity(error)
+      identityError = error
+    }
   } else if (inputIsCollection) {
     identityDeps = []
     streamIdentity = [`collection`, configOrQueryOrCollection.id]
@@ -726,6 +743,8 @@ export function useLiveQuery(
       depsRef.current = [...identityDeps]
     }
     clientRef.current = dbClient
+    queryHashRef.current = queryHash
+    identityErrorRef.current = identityError
   }
 
   // Recreate the observer when the underlying collection changes. The observer
@@ -744,7 +763,7 @@ export function useLiveQuery(
     observerRef.current = createLiveQueryObserver(collectionRef.current, {
       mode: `wholesale`,
       client: dbClient,
-      queryHash,
+      queryHash: queryHashRef.current,
       onPreload: resumeDeferredCollections,
     })
   }
@@ -770,8 +789,8 @@ export function useLiveQuery(
   )
   setLiveQueryResultInfo(returned, {
     client: dbClient,
-    queryHash,
-    identityError,
+    queryHash: queryHashRef.current,
+    identityError: identityErrorRef.current,
     observer,
   })
   return returned as any

@@ -3,6 +3,7 @@ import {
   getLiveQueryStatusFlags,
   isSingleResultCollection,
 } from './live-query-adapter.js'
+import { getBuilderFromConfig } from './query/live/collection-registry.js'
 import type { Collection } from './collection/index.js'
 import type { DbClient, DehydratedLiveQueryResult } from './client.js'
 import type { ChangeMessage, CollectionStatus } from './types.js'
@@ -154,6 +155,7 @@ class LiveQueryObserverImpl<
   private blockDelivery = false
   private attached = false
   private collectionUnsub: (() => void) | null = null
+  private unregisterClientResource: (() => void) | undefined
   private hydrationSeed:
     | {
         dehydratedAt: number
@@ -161,14 +163,16 @@ class LiveQueryObserverImpl<
       }
     | undefined
   private hydrationError: unknown
+  private hasHydrationError = false
   private liveResultIsAuthoritative = false
   private handoffScheduled = false
   private preloadPromise: Promise<void> | undefined
   private disposed = false
 
-  // Construction is side-effect-free: sync activation belongs to the first
-  // subscription (attach), so building an observer — e.g. in a React render
-  // that may be abandoned — cannot activate resources on its own.
+  // Sync activation belongs to the first subscription (attach), so building
+  // an observer cannot activate collection resources on its own. Server
+  // request clients still record ownership here because React may render an
+  // observer without ever subscribing to it.
   constructor(
     collection: Collection<T, TKey, any> | null,
     wholesale: boolean,
@@ -181,6 +185,7 @@ class LiveQueryObserverImpl<
     this.client = client
     this.queryHash = queryHash
     this.onPreload = onPreload
+    this.registerClientResource()
   }
 
   getSnapshot(): LiveQuerySnapshot<T, TKey> {
@@ -195,9 +200,13 @@ class LiveQueryObserverImpl<
       const state = new Map(entries)
       const data = entries.map(([, value]) => value)
       const singleResult = isSingleResultCollection(collection)
-      const status = this.hasHydrationSeed()
-        ? (`ready` as const)
-        : (this.visibleStatus ?? collection.status)
+      const liveStatus = this.visibleStatus ?? collection.status
+      const status =
+        this.hasHydrationError || liveStatus === `error`
+          ? (`error` as const)
+          : this.hasHydrationSeed()
+            ? (`ready` as const)
+            : liveStatus
 
       // Bump the layout revision when the ordered key sequence changes
       // (membership, ordering, or an order-only move). Compare the key sequence
@@ -242,7 +251,7 @@ class LiveQueryObserverImpl<
 
   getError(): unknown {
     this.syncHydrationState()
-    return this.hasHydrationSeed() ? undefined : this.hydrationError
+    return this.hasHydrationError ? this.hydrationError : undefined
   }
 
   dehydrate(): DehydratedLiveQueryResult<T, TKey> {
@@ -290,8 +299,11 @@ class LiveQueryObserverImpl<
     }
 
     if (query.status === `error`) {
-      const changed = this.hydrationError !== query.error
+      const changed =
+        !this.hasHydrationError || this.hydrationError !== query.error
       this.hydrationError = query.error
+      this.hasHydrationError = true
+      if (changed) this.snapshotDirty = true
       return changed
     }
 
@@ -312,6 +324,7 @@ class LiveQueryObserverImpl<
       ]),
     }
     this.hydrationError = undefined
+    this.hasHydrationError = false
     this.snapshotDirty = true
     return true
   }
@@ -364,8 +377,9 @@ class LiveQueryObserverImpl<
   }
 
   private markLiveResultAuthoritative(dehydratedAt?: number): boolean {
-    const changed = this.hydrationError !== undefined
+    const changed = this.hasHydrationError
     this.hydrationError = undefined
+    this.hasHydrationError = false
     this.liveResultIsAuthoritative = true
     if (dehydratedAt !== undefined && this.queryHash) {
       this.client?._consumeLiveQueryResult(this.queryHash, dehydratedAt)
@@ -536,6 +550,7 @@ class LiveQueryObserverImpl<
   private attach(): void {
     const collection = this.collection
     if (!collection || this.disposed) return
+    this.registerClientResource()
     this.syncHydrationState()
     this.refreshDetachedState(collection)
     this.attached = true
@@ -566,7 +581,7 @@ class LiveQueryObserverImpl<
 
       if (this.hasHydrationSeed()) {
         if (status === `ready`) this.scheduleHydrationHandoff()
-        return
+        if (status !== `error`) return
       }
 
       if (
@@ -701,6 +716,28 @@ class LiveQueryObserverImpl<
     this.attached = false
     this.blockDelivery = false
     this.publicationQueue.length = 0
+    this.unregisterClientResource?.()
+    this.unregisterClientResource = undefined
+  }
+
+  private registerClientResource(): void {
+    if (
+      this.unregisterClientResource ||
+      !this.client?._isSsrServerCleanupEnabled() ||
+      !this.collection ||
+      !getBuilderFromConfig(this.collection.config)
+    ) {
+      return
+    }
+
+    this.unregisterClientResource = this.client._registerLiveQueryResource(
+      this,
+      async () => {
+        const collection = this.collection
+        this.dispose()
+        await collection?.cleanup()
+      },
+    )
   }
 
   private emit(
@@ -773,19 +810,26 @@ class LiveQueryObserverImpl<
       const query = this.client._getLiveQuery(this.queryHash)
       if (query?.status === `pending`) return query.promise
       if (query?.status === `success`) return Promise.resolve()
-      if (query?.status === `error`) return Promise.reject(query.error)
     }
 
+    this.registerClientResource()
     this.onPreload?.()
     const collectionPromise = this.collection?.preload() ?? Promise.resolve()
-    this.preloadPromise =
+    const preloadPromise =
       this.client?._isSsrStreamingEnabled() && this.queryHash
         ? this.client._registerLiveQuery(
             this.queryHash,
             collectionPromise.then(() => this.dehydrate()),
           )
         : collectionPromise
-    return this.preloadPromise
+    this.preloadPromise = preloadPromise
+    const clearPreload = () => {
+      if (this.preloadPromise === preloadPromise) {
+        this.preloadPromise = undefined
+      }
+    }
+    void preloadPromise.then(clearPreload, clearPreload)
+    return preloadPromise
   }
 
   dispose(): void {

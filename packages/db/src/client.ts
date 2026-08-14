@@ -316,8 +316,10 @@ export class DbClient {
       observer: { dispose: () => void }
     }
   >()
+  private liveQueryResources = new Map<object, () => Promise<void>>()
   private listeners = new Set<(event: DbClientEvent) => void>()
   private ssrStreamingEnabled = false
+  private ssrServerCleanupEnabled = false
   private lastLiveQueryTimestamp = 0
   private readonly transactionScope = new TransactionScope()
 
@@ -349,34 +351,38 @@ export class DbClient {
 
   preloadLiveQuery(options: LiveQueryOptions): Promise<void> {
     const deferredCollections: DeferredLiveQueryCollections = new Set()
-    const prepared = prepareLiveQueryValue(options, this, deferredCollections)
-    const queryHash = getLiveQueryHash(prepared, options.queryKey)
-    const existing = this.liveQueries.get(queryHash)
-    if (existing && existing.status !== `error`) return existing.promise
+    try {
+      const prepared = prepareLiveQueryValue(options, this, deferredCollections)
+      const queryHash = getLiveQueryHash(prepared, options.queryKey)
+      const existing = this.liveQueries.get(queryHash)
+      if (existing && existing.status !== `error`) return existing.promise
 
-    const failedPreload = this.preloadedLiveQueries.get(queryHash)
-    if (failedPreload) {
-      failedPreload.observer.dispose()
-      void failedPreload.collection.cleanup().catch(() => {})
-      this.preloadedLiveQueries.delete(queryHash)
+      const failedPreload = this.preloadedLiveQueries.get(queryHash)
+      if (failedPreload) {
+        failedPreload.observer.dispose()
+        void failedPreload.collection.cleanup().catch(() => {})
+        this.preloadedLiveQueries.delete(queryHash)
+      }
+
+      const collection = createLiveQueryCollection({
+        ...(prepared as LiveQueryOptions),
+        startSync: true,
+      }) as AnyCollection
+      const observer = createLiveQueryObserver(collection, {
+        client: this,
+        queryHash,
+        mode: `wholesale`,
+      })
+      this.preloadedLiveQueries.set(queryHash, { collection, observer })
+
+      return this._registerLiveQuery(
+        queryHash,
+        collection.preload().then(() => observer.dehydrate()),
+      )
+    } finally {
+      for (const source of deferredCollections) source._resumeSyncStart()
+      deferredCollections.clear()
     }
-
-    const collection = createLiveQueryCollection({
-      ...(prepared as LiveQueryOptions),
-      startSync: true,
-    }) as AnyCollection
-    const observer = createLiveQueryObserver(collection, {
-      client: this,
-      queryHash,
-      mode: `wholesale`,
-    })
-    this.preloadedLiveQueries.set(queryHash, { collection, observer })
-    for (const source of deferredCollections) source._resumeSyncStart()
-
-    return this._registerLiveQuery(
-      queryHash,
-      collection.preload().then(() => observer.dehydrate()),
-    )
   }
 
   collection<
@@ -484,13 +490,7 @@ export class DbClient {
         collection,
         {
           collectionId: collection.id,
-          rows: materializeOptions.initialData.map((value) => {
-            const validated = collection.validateData(value, `insert`)
-            return {
-              key: config.getKey(validated),
-              value: validated,
-            }
-          }),
+          rows: materializeOptions.initialData.map((value) => ({ value })),
         },
         `initialData`,
       )
@@ -576,11 +576,7 @@ export class DbClient {
     for (const chunk of state.collections) {
       const record = this.collectionsById.get(chunk.collectionId)
       if (record) {
-        this.applyRows(
-          record.collection,
-          chunk,
-          record.collection.status !== `ready` ? `hydration` : undefined,
-        )
+        this.applyRows(record.collection, chunk, `hydration`)
         continue
       }
 
@@ -611,6 +607,16 @@ export class DbClient {
   /** @internal */
   _isSsrStreamingEnabled(): boolean {
     return this.ssrStreamingEnabled
+  }
+
+  /** @internal */
+  _setSsrServerCleanupEnabled(enabled: boolean): void {
+    this.ssrServerCleanupEnabled = enabled
+  }
+
+  /** @internal */
+  _isSsrServerCleanupEnabled(): boolean {
+    return this.ssrServerCleanupEnabled
   }
 
   /** @internal */
@@ -649,6 +655,19 @@ export class DbClient {
   }
 
   /** @internal */
+  _registerLiveQueryResource(
+    owner: object,
+    cleanup: () => Promise<void>,
+  ): () => void {
+    this.liveQueryResources.set(owner, cleanup)
+    return () => {
+      if (this.liveQueryResources.get(owner) === cleanup) {
+        this.liveQueryResources.delete(owner)
+      }
+    }
+  }
+
+  /** @internal */
   _failPendingLiveQueries(error: unknown): void {
     for (const record of this.liveQueries.values()) {
       if (record.status === `pending`) record.fail(error)
@@ -658,18 +677,40 @@ export class DbClient {
 
   async cleanup(): Promise<void> {
     try {
-      await Promise.all([
-        ...Array.from(this.collectionsById.values(), ({ collection }) =>
-          collection.cleanup(),
-        ),
-        ...Array.from(
-          this.preloadedLiveQueries.values(),
-          ({ collection, observer }) => {
-            observer.dispose()
-            return collection.cleanup()
-          },
+      const materializedCollections = Array.from(
+        this.collectionsById.values(),
+        ({ collection }) => collection,
+      )
+      const preloadedQueries = Array.from(this.preloadedLiveQueries.values())
+      const liveQueryCollections = new Set([
+        ...preloadedQueries.map(({ collection }) => collection),
+        ...materializedCollections.filter((collection) =>
+          getBuilderFromConfig(collection.config),
         ),
       ])
+
+      for (const { observer } of preloadedQueries) observer.dispose()
+
+      const cleanupResults = [
+        ...(await Promise.allSettled(
+          Array.from(this.liveQueryResources.values(), (cleanup) => cleanup()),
+        )),
+        ...(await Promise.allSettled(
+          Array.from(liveQueryCollections, (collection) =>
+            collection.cleanup(),
+          ),
+        )),
+        ...(await Promise.allSettled(
+          materializedCollections
+            .filter((collection) => !liveQueryCollections.has(collection))
+            .map((collection) => collection.cleanup()),
+        )),
+      ]
+      const failure = cleanupResults.find(
+        (result): result is PromiseRejectedResult =>
+          result.status === `rejected`,
+      )
+      if (failure) throw failure.reason
     } finally {
       this.transactionScope.clear()
       this.collectionsByOptions = new WeakMap()
@@ -677,7 +718,10 @@ export class DbClient {
       this.pendingHydration.clear()
       this.liveQueries.clear()
       this.preloadedLiveQueries.clear()
+      this.liveQueryResources.clear()
       this.listeners.clear()
+      this.ssrStreamingEnabled = false
+      this.ssrServerCleanupEnabled = false
       this.lastLiveQueryTimestamp = 0
     }
   }
@@ -780,40 +824,38 @@ export class DbClient {
 
   private applyRows(
     collection: Collection<any, string | number, any, any, any>,
-    chunk: DehydratedCollectionChunk,
+    chunk: Omit<DehydratedCollectionChunk, `rows`> & {
+      rows: Array<
+        Omit<DehydratedCollectionRow, `key`> & {
+          key?: string | number
+        }
+      >
+    },
     seedKind?: `initialData` | `hydration`,
   ): void {
+    const rows = chunk.rows.flatMap((row) => {
+      const value = collection.validateData(row.value, `insert`)
+      const key = collection.config.getKey(value)
+      const isAdapterAuthoritative =
+        seedKind === `hydration` &&
+        collection._state.syncedData.has(key) &&
+        !collection._state.hydrationSeedKeys.has(key)
+
+      return isAdapterAuthoritative ? [] : [{ ...row, key, value }]
+    })
     const rowMetadataWrites = new Map<
       string | number,
       { type: `set`; value: unknown } | { type: `delete` }
     >()
 
-    collection._state.pendingSyncedTransactions.push({
-      committed: true,
-      layoutChanged: false,
-      operations: chunk.rows.map((row) => {
-        rowMetadataWrites.set(
-          row.key,
-          row.metadata === undefined
-            ? { type: `delete` as const }
-            : { type: `set` as const, value: row.metadata },
-        )
-
-        return {
-          type: collection._state.syncedData.has(row.key) ? `update` : `insert`,
-          key: row.key,
-          value: row.value,
-        }
-      }),
-      deletedKeys: new Set(),
-      rowMetadataWrites,
-      collectionMetadataWrites: new Map(),
-      immediate: true,
-      preserveHydrationSeedKeys: seedKind !== undefined,
-    })
+    for (const row of rows) {
+      if (row.metadata !== undefined) {
+        rowMetadataWrites.set(row.key, { type: `set`, value: row.metadata })
+      }
+    }
 
     if (seedKind) {
-      for (const row of chunk.rows) {
+      for (const row of rows) {
         collection._state.hydrationSeedKeys.add(row.key)
         if (seedKind === `hydration`) {
           collection._state.hydratedKeys.add(row.key)
@@ -821,7 +863,25 @@ export class DbClient {
       }
     }
 
-    collection._state.commitPendingTransactions()
+    if (rows.length > 0) {
+      collection._state.pendingSyncedTransactions.push({
+        committed: true,
+        layoutChanged: false,
+        operations: rows.map((row) => ({
+          type: collection._state.syncedData.has(row.key)
+            ? (`update` as const)
+            : (`insert` as const),
+          key: row.key,
+          value: row.value,
+        })),
+        deletedKeys: new Set(),
+        rowMetadataWrites,
+        collectionMetadataWrites: new Map(),
+        immediate: true,
+        preserveHydrationSeedKeys: seedKind !== undefined,
+      })
+      collection._state.commitPendingTransactions()
+    }
 
     if (chunk.syncMeta !== undefined) {
       const currentMeta = collection.config.sync.exportSyncMeta?.()

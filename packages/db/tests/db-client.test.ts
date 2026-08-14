@@ -807,6 +807,59 @@ describe(`DbClient`, () => {
     expect(client.dehydrate().liveQueries?.[0]?.snapshot?.rows).toHaveLength(1)
   })
 
+  it(`releases source deferrals when preload returns an existing result`, async () => {
+    const descriptor = collectionOptions(
+      mockSyncCollectionOptions<Person>({
+        id: `preload-existing-source`,
+        getKey: (person) => person.id,
+        initialData: people,
+      }),
+    )
+    const client = new DbClient()
+    const options = {
+      query: (q: InitialQueryBuilder) => q.from({ person: descriptor }),
+    }
+
+    await client.preloadLiveQuery(options)
+    const source = client.collection(descriptor)
+    await source.cleanup()
+    await client.preloadLiveQuery(options)
+
+    await expect(
+      Promise.race([
+        source.preload().then(() => `ready`),
+        new Promise<`timeout`>((resolve) =>
+          setTimeout(() => resolve(`timeout`), 20),
+        ),
+      ]),
+    ).resolves.toBe(`ready`)
+  })
+
+  it(`cleans up live queries before their source collections`, async () => {
+    const errorSpy = vi.spyOn(console, `error`).mockImplementation(() => {})
+    const descriptor = collectionOptions(
+      mockSyncCollectionOptions<Person>({
+        id: `cleanup-order-source`,
+        getKey: (person) => person.id,
+        initialData: people,
+      }),
+    )
+    const client = new DbClient()
+
+    try {
+      await client.preloadLiveQuery({
+        query: (q: InitialQueryBuilder) => q.from({ person: descriptor }),
+      })
+      await client.cleanup()
+
+      expect(errorSpy).not.toHaveBeenCalledWith(
+        expect.stringContaining(`was manually cleaned up while live query`),
+      )
+    } finally {
+      errorSpy.mockRestore()
+    }
+  })
+
   it(`does not dehydrate explicitly client-bound live query result collections`, async () => {
     const peopleDescriptor = collectionOptions(
       mockSyncCollectionOptions<Person>({
@@ -866,6 +919,105 @@ describe(`DbClient`, () => {
     expect(collection._state.optimisticUpserts.size).toBe(0)
     expect(collection._state.optimisticDeletes.size).toBe(0)
     expect(collection.get(`1`)).toMatchObject(people[0]!)
+  })
+
+  it(`validates and transforms hydrated rows through the collection schema`, () => {
+    const descriptor = collectionOptions({
+      id: `schema-hydration`,
+      schema: z.object({
+        id: z.string().transform((id) => `person:${id}`),
+        createdAt: z.coerce.date(),
+      }),
+      getKey: (row) => row.id,
+      sync: { sync: ({ markReady }) => markReady() },
+    })
+    const client = new DbClient()
+    const collection = client.collection(descriptor)
+
+    client.hydrate({
+      collections: [
+        {
+          collectionId: `schema-hydration`,
+          rows: [
+            {
+              key: `1`,
+              value: { id: `1`, createdAt: `2026-08-14T00:00:00.000Z` },
+            },
+          ],
+        },
+      ],
+    })
+
+    expect(collection.get(`person:1`)?.createdAt).toBeInstanceOf(Date)
+    expect(collection.get(`1`)).toBeUndefined()
+  })
+
+  it(`lets adapter inserts replace hydration applied to a ready collection`, async () => {
+    let adapterWrite!: (person: Person) => void
+    const descriptor = collectionOptions({
+      id: `ready-hydration-seed`,
+      getKey: (person: Person) => person.id,
+      sync: {
+        sync: ({ begin, write, commit, markReady }) => {
+          adapterWrite = (person) => {
+            begin()
+            write({ type: `insert`, value: person })
+            commit()
+          }
+          markReady()
+        },
+      },
+    })
+    const client = new DbClient()
+    const collection = client.collection(descriptor)
+    await collection.preload()
+
+    client.hydrate({
+      collections: [
+        {
+          collectionId: `ready-hydration-seed`,
+          rows: [{ key: `1`, value: { id: `1`, name: `hydrated` } }],
+        },
+      ],
+    })
+
+    expect(() => adapterWrite({ id: `1`, name: `adapter` })).not.toThrow()
+    expect(collection.get(`1`)?.name).toBe(`adapter`)
+  })
+
+  it(`does not let a late stream chunk overwrite adapter rows or metadata`, async () => {
+    const descriptor = collectionOptions({
+      id: `adapter-authority`,
+      getKey: (person: Person) => person.id,
+      sync: {
+        sync: ({ begin, write, commit, markReady }) => {
+          begin()
+          write({
+            type: `insert`,
+            value: { id: `1`, name: `adapter` },
+            metadata: { source: `adapter` },
+          })
+          commit()
+          markReady()
+        },
+      },
+    })
+    const client = new DbClient()
+    const collection = client.collection(descriptor)
+    await collection.preload()
+
+    expect(collection._state.syncedData.has(`1`)).toBe(true)
+    expect(collection._state.hydrationSeedKeys.has(`1`)).toBe(false)
+
+    client.applyCollectionChunk({
+      collectionId: `adapter-authority`,
+      rows: [{ key: `1`, value: { id: `1`, name: `stale stream` } }],
+    })
+
+    expect(collection.get(`1`)?.name).toBe(`adapter`)
+    expect(collection._state.syncedMetadata.get(`1`)).toEqual({
+      source: `adapter`,
+    })
   })
 
   it(`does not serialize optimistic pending mutations`, async () => {
