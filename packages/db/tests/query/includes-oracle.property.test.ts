@@ -1,3 +1,4 @@
+import { isDeepStrictEqual } from 'node:util'
 import { fc, test as fcTest } from '@fast-check/vitest'
 import { describe, expect } from 'vitest'
 import {
@@ -131,15 +132,47 @@ function classifyMissingSharedRouteSnapshot(
   { actual, expected }: AssertionDifference,
   enteringParentId: number,
   existingParentId: number,
-  childId: number,
+  childIds: number | ReadonlyArray<number>,
 ): boolean {
+  const expectedChildIds = Array.isArray(childIds) ? childIds : [childIds]
+  const expectedWithoutSnapshot = removeDirectChild(
+    expected,
+    enteringParentId,
+    expectedChildIds,
+  )
   return (
-    findRelationshipNode(actual, enteringParentId) !== undefined &&
-    findRelationshipNode(expected, enteringParentId) !== undefined &&
-    !hasDirectChild(actual, enteringParentId, childId) &&
-    hasDirectChild(expected, enteringParentId, childId) &&
-    hasDirectChild(actual, existingParentId, childId) &&
-    hasDirectChild(expected, existingParentId, childId)
+    expectedChildIds.every(
+      (childId) =>
+        hasDirectChild(expected, enteringParentId, childId) &&
+        hasDirectChild(actual, existingParentId, childId) &&
+        hasDirectChild(expected, existingParentId, childId),
+    ) && isDeepStrictEqual(actual, expectedWithoutSnapshot)
+  )
+}
+
+function removeDirectChild(
+  value: unknown,
+  parentId: number,
+  childIds: ReadonlyArray<number>,
+): unknown {
+  if (Array.isArray(value)) {
+    return value.map((entry) => removeDirectChild(entry, parentId, childIds))
+  }
+  if (typeof value !== `object` || value === null) return value
+
+  const isParent = isRelationshipNode(value) && value.id === parentId
+  return Object.fromEntries(
+    Object.entries(value).map(([key, entry]) => [
+      key,
+      key === `children` && isParent && Array.isArray(entry)
+        ? entry
+            .filter(
+              (child) =>
+                !isRelationshipNode(child) || !childIds.includes(child.id),
+            )
+            .map((child) => removeDirectChild(child, parentId, childIds))
+        : removeDirectChild(entry, parentId, childIds),
+    ]),
   )
 }
 
@@ -1812,11 +1845,18 @@ type RouteDestination = {
 
 type RouteTransitionDescriptor = {
   row: 0 | 1
-  destination: RouteDestination
   stepsBefore?: ReadonlyArray<FullRowBatchStep>
 } & (
-  | { kind: `reparent`; level: IncludeDepth }
-  | { kind: `rekey`; level: 0 | IncludeDepth }
+  | {
+      kind: `reparent`
+      level: IncludeDepth
+      destination: { strategy: `merge`; route: number }
+    }
+  | {
+      kind: `rekey`
+      level: 0 | IncludeDepth
+      destination: RouteDestination
+    }
 )
 
 type RouteLifecycleScenario = FullRowBatchScenario & {
@@ -1892,6 +1932,12 @@ function createRouteLifecycleScenario({
 
   const transitionStepIndexes: Array<number> = []
   for (const descriptor of descriptors) {
+    const destination = descriptor.destination as RouteDestination
+    if (descriptor.kind === `reparent` && destination.strategy !== `merge`) {
+      throw new Error(
+        `reparent transitions only support live merge destinations`,
+      )
+    }
     for (const step of descriptor.stepsBefore ?? []) {
       steps.push(step)
       applyRouteLifecycleStep(
@@ -2073,13 +2119,10 @@ function independentTransitionDescriptors(
     case `descendant-ancestor`:
       return [
         {
-          kind: `reparent`,
+          kind: `rekey`,
           level: 2,
           row: 0,
-          destination: {
-            strategy: `merge`,
-            route: branches[1].groupBase + 1,
-          },
+          destination: { strategy: `fresh`, route: freshRoutes[0] },
         },
         {
           kind: `reparent`,
@@ -2145,6 +2188,34 @@ function independentTransitionDescriptors(
   }
 }
 
+function independentTransitionPrefix(
+  shape: IndependentTransitionShape,
+  branches: readonly [ConnectedBranch, ConnectedBranch],
+): Array<FullRowBatchStep> {
+  const prefix = createConnectedBatchBranches(3, branches)
+  if (shape !== `sibling`) return prefix
+
+  const secondSiblingId = rowAt(branches, 1, 2)
+  return prefix.map((step) =>
+    step.level === 2
+      ? {
+          ...step,
+          changes: step.changes.map((change) =>
+            change.value.id === secondSiblingId
+              ? {
+                  ...change,
+                  value: {
+                    ...change.value,
+                    parentGroup: branches[0].groupBase + 1,
+                  },
+                }
+              : change,
+          ),
+        }
+      : step,
+  )
+}
+
 function independentTransitionScenarioArbitrary(
   shape: IndependentTransitionShape,
 ): fc.Arbitrary<RouteLifecycleScenario> {
@@ -2158,6 +2229,7 @@ function independentTransitionScenarioArbitrary(
       return createRouteLifecycleScenario({
         depth: 3,
         branches,
+        prefixSteps: independentTransitionPrefix(shape, branches),
         descriptors: independentTransitionDescriptors(
           shape,
           branches,
@@ -2245,24 +2317,6 @@ function destinationHistoryScenarioArbitrary(
         ),
       })
     })
-}
-
-function relationshipNodeValue(value: unknown, id: number): unknown {
-  return findRelationshipNode(value, id)?.value
-}
-
-function classifyMissingOrStaleChild(
-  { actual, expected }: AssertionDifference,
-  parentId: number,
-  childId: number,
-  expectedValue: number,
-): boolean {
-  return (
-    hasDirectChild(expected, parentId, childId) &&
-    relationshipNodeValue(expected, childId) === expectedValue &&
-    (!hasDirectChild(actual, parentId, childId) ||
-      relationshipNodeValue(actual, childId) !== expectedValue)
-  )
 }
 
 function createInitiallySharedRoutePrefix(
@@ -2391,11 +2445,10 @@ function createSharedRouteLastSubscriberScenario(
 
 function createSnapshotOnResubscribeScenarios(
   parentLevel: 0 | 1 | 2,
-): ClassifiedHistoryScenario {
+): Pick<ClassifiedHistoryScenario, `control` | `candidate`> {
   const depth = (parentLevel + 1) as IncludeDepth
   const branches = transitionHistoryBranches
   const childLevel = depth
-  const parentId = rowAt(branches, 0, parentLevel)
   const originalRoute = branches[0].groupBase + parentLevel
   const childId = rowAt(branches, 0, childLevel)
   const child = {
@@ -2436,14 +2489,6 @@ function createSnapshotOnResubscribeScenarios(
   return {
     control,
     candidate,
-    candidateCheckpoint: candidate.steps.length,
-    classify: (difference) =>
-      classifyMissingOrStaleChild(
-        difference,
-        parentId,
-        childId,
-        updatedChild.value,
-      ),
   }
 }
 
@@ -2899,7 +2944,10 @@ async function expectClassifiedHistoryMatches({
   control,
   greenVariants = [],
   candidate,
-}: ClassifiedHistoryScenario): Promise<void> {
+}: Pick<
+  ClassifiedHistoryScenario,
+  `control` | `greenVariants` | `candidate`
+>): Promise<void> {
   await expectFullRowBatchScenarioMatches(control)
   for (const greenVariant of greenVariants) {
     await expectFullRowBatchScenarioMatches(greenVariant)
@@ -3442,6 +3490,144 @@ const {
 })
 
 describe(`includes recompute oracle`, () => {
+  fcTest(
+    `shared-route snapshot classification rejects extra corruption`,
+    () => {
+      const expected = [
+        { id: 1, value: 10, children: [{ id: 3, value: 30 }] },
+        { id: 2, value: 20, children: [{ id: 3, value: 30 }] },
+      ]
+      const actual = [
+        { id: 1, value: 11, children: [] },
+        { id: 2, value: 20, children: [{ id: 3, value: 31 }] },
+      ]
+
+      expect(
+        classifyMissingSharedRouteSnapshot({ actual, expected }, 1, 2, 3),
+      ).toBe(false)
+    },
+  )
+
+  fcTest(`rejects subscriber lifecycle labels on reparent transitions`, () => {
+    expect(() =>
+      createRouteLifecycleScenario({
+        depth: 3,
+        branches: transitionHistoryBranches,
+        descriptors: [
+          {
+            kind: `reparent`,
+            level: 2,
+            row: 0,
+            destination: { strategy: `fresh`, route: 2_100 },
+          } as unknown as RouteTransitionDescriptor,
+        ],
+      }),
+    ).toThrow(/reparent transitions only support live merge destinations/)
+  })
+
+  fcTest(`the sibling topology targets rows under one parent`, () => {
+    const branches = transitionHistoryBranches
+    const prefix = independentTransitionPrefix(`sibling`, branches)
+    const levelTwo = prefix.find((step) => step.level === 2)
+    if (!levelTwo || levelTwo.level !== 2) throw new Error(`Missing level 2`)
+    const first = levelTwo.changes.find(
+      (change) => change.value.id === rowAt(branches, 0, 2),
+    )
+    const second = levelTwo.changes.find(
+      (change) => change.value.id === rowAt(branches, 1, 2),
+    )
+    if (!first || !second) throw new Error(`Missing sibling targets`)
+
+    expect(first.value.parentGroup).toBe(second.value.parentGroup)
+  })
+
+  fcTest(`the descendant remains attached before its ancestor moves`, () => {
+    const branches = transitionHistoryBranches
+    const scenario = createRouteLifecycleScenario({
+      depth: 3,
+      branches,
+      descriptors: independentTransitionDescriptors(
+        `descendant-ancestor`,
+        branches,
+        [2_100, 2_500],
+      ),
+    })
+    const ancestorTransitionStep = scenario.transitionStepIndexes[1]
+    if (ancestorTransitionStep === undefined) {
+      throw new Error(`Missing ancestor transition`)
+    }
+    const beforeAncestorMove = recomputeFullRowBatchScenario(
+      scenario,
+      ancestorTransitionStep,
+    )
+
+    expect(
+      hasDirectChild(
+        beforeAncestorMove,
+        rowAt(branches, 0, 1),
+        rowAt(branches, 0, 2),
+      ),
+    ).toBe(true)
+  })
+
+  fcTest(
+    `discovered trace: a root entering a live route misses its ordered snapshot`,
+    async () => {
+      const branches = transitionHistoryBranches
+      const prefix = createConnectedBatchBranches(1, branches)
+      const childStep = prefix.find((step) => step.level === 1)
+      if (!childStep || childStep.level !== 1)
+        throw new Error(`Missing children`)
+      const scenario: FullRowBatchScenario = {
+        depth: 1,
+        steps: [
+          prefix[0]!,
+          {
+            level: 1,
+            changes: [
+              ...childStep.changes,
+              {
+                type: `insert`,
+                value: {
+                  ...batchChild(3_000, branches[0].groupBase, 3_000, -1),
+                  group: 2_500,
+                },
+              },
+            ],
+          },
+          {
+            level: 0,
+            changes: [
+              {
+                type: `update`,
+                value: batchRoot(
+                  branches[1].idBase,
+                  branches[0].groupBase,
+                  branches[1].idBase,
+                  0,
+                ),
+              },
+            ],
+          },
+        ],
+      }
+
+      await expectAssertionFailure(
+        () => expectFullRowBatchScenarioMatches(scenario),
+        {
+          checkpoint: 3,
+          classify: (difference) =>
+            classifyMissingSharedRouteSnapshot(
+              difference,
+              branches[1].idBase,
+              branches[0].idBase,
+              [3_000, branches[0].idBase + 1],
+            ),
+        },
+      )()
+    },
+  )
+
   for (const [shapeIndex, shape] of independentTransitionShapes.entries()) {
     fcTest.prop([independentTransitionScenarioArbitrary(shape)], {
       numRuns: 4,
@@ -3470,6 +3656,8 @@ describe(`includes recompute oracle`, () => {
 
   for (const parentLevel of [0, 1, 2] as const) {
     for (const enteringRow of [0, 1] as const) {
+      // Only roots currently miss an existing shared-route snapshot; nested
+      // subscribers receive the snapshot and remain green controls.
       const expectsFailure = parentLevel === 0
       fcTest(
         expectsFailure
