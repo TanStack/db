@@ -2,19 +2,20 @@ import { describe, expect, it } from 'vitest'
 import { expectAssertionFailure } from './expected-failure.js'
 import { TraceAssertionError } from './trace-runner.js'
 
+function assertionMismatch(checkpoint: number): Promise<void> {
+  try {
+    expect(`observed`).toBe(`expected`)
+    return Promise.resolve()
+  } catch (error) {
+    return Promise.reject(new TraceAssertionError(checkpoint, error))
+  }
+}
+
 describe(`expected failure guard`, () => {
   it(`accepts an assertion mismatch at the expected checkpoint`, async () => {
-    const guarded = expectAssertionFailure(
-      () => {
-        try {
-          expect(`observed`).toBe(`expected`)
-          return Promise.resolve()
-        } catch (error) {
-          return Promise.reject(new TraceAssertionError(2, error))
-        }
-      },
-      { checkpoint: 2 },
-    )
+    const guarded = expectAssertionFailure(() => assertionMismatch(2), {
+      checkpoint: 2,
+    })
 
     await guarded()
   })
@@ -39,6 +40,25 @@ describe(`expected failure guard`, () => {
         ),
       { checkpoint: 2 },
     )
+
+    await expect(guarded()).rejects.toBeInstanceOf(Error)
+  })
+
+  it(`accepts an assertion mismatch with the expected difference`, async () => {
+    const guarded = expectAssertionFailure(() => assertionMismatch(2), {
+      checkpoint: 2,
+      classify: ({ actual, expected }) =>
+        actual === `observed` && expected === `expected`,
+    })
+
+    await guarded()
+  })
+
+  it(`rejects an assertion mismatch with a different shape`, async () => {
+    const guarded = expectAssertionFailure(() => assertionMismatch(2), {
+      checkpoint: 2,
+      classify: ({ actual }) => actual === `different`,
+    })
 
     await expect(guarded()).rejects.toBeInstanceOf(Error)
   })
