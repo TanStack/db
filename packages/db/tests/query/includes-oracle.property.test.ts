@@ -62,6 +62,7 @@ type OracleNode = RootRow & {
 
 type RelationshipNode = {
   id: number
+  value?: unknown
   children?: unknown
 }
 
@@ -123,6 +124,22 @@ function classifyMissingReplacementChild(
     findRelationshipNode(expected, replacementRowId) !== undefined &&
     !hasDirectChild(actual, replacementRowId, childId) &&
     hasDirectChild(expected, replacementRowId, childId)
+  )
+}
+
+function classifyMissingSharedRouteSnapshot(
+  { actual, expected }: AssertionDifference,
+  enteringParentId: number,
+  existingParentId: number,
+  childId: number,
+): boolean {
+  return (
+    findRelationshipNode(actual, enteringParentId) !== undefined &&
+    findRelationshipNode(expected, enteringParentId) !== undefined &&
+    !hasDirectChild(actual, enteringParentId, childId) &&
+    hasDirectChild(expected, enteringParentId, childId) &&
+    hasDirectChild(actual, existingParentId, childId) &&
+    hasDirectChild(expected, existingParentId, childId)
   )
 }
 
@@ -1788,6 +1805,648 @@ function expectEveryHistoryStepVisible(
   }
 }
 
+type RouteDestination = {
+  strategy: `fresh` | `restore` | `merge` | `split` | `retired`
+  route: number
+}
+
+type RouteTransitionDescriptor = {
+  row: 0 | 1
+  destination: RouteDestination
+  stepsBefore?: ReadonlyArray<FullRowBatchStep>
+} & (
+  | { kind: `reparent`; level: IncludeDepth }
+  | { kind: `rekey`; level: 0 | IncludeDepth }
+)
+
+type RouteLifecycleScenario = FullRowBatchScenario & {
+  transitionStepIndexes: ReadonlyArray<number>
+}
+
+type RouteLifecycleScenarioOptions = {
+  depth: IncludeDepth
+  branches: readonly [ConnectedBranch, ConnectedBranch]
+  descriptors: ReadonlyArray<RouteTransitionDescriptor>
+  prefixSteps?: ReadonlyArray<FullRowBatchStep>
+  trailingSteps?: ReadonlyArray<FullRowBatchStep>
+}
+
+function rowAt(
+  branches: readonly [ConnectedBranch, ConnectedBranch],
+  row: 0 | 1,
+  level: 0 | IncludeDepth,
+): number {
+  return branches[row].idBase + level
+}
+
+function applyRouteLifecycleStep(
+  step: FullRowBatchStep,
+  roots: Map<number, RootRow>,
+  levels: Array<Map<number, ChildRow>>,
+  seenRoutes: Set<number>,
+  retiredRouteOwners: Map<number, number>,
+): void {
+  const rows = step.level === 0 ? roots : levels[step.level - 1]!
+  const previousRouteOwners = new Map<number, Set<number>>()
+
+  for (const change of step.changes) {
+    const previous = rows.get(change.value.id)
+    if (!previous) continue
+    const owners = previousRouteOwners.get(previous.group) ?? new Set<number>()
+    owners.add(previous.id)
+    previousRouteOwners.set(previous.group, owners)
+  }
+
+  updateFullRowBatchModels(step, roots, levels)
+
+  for (const row of rows.values()) {
+    seenRoutes.add(row.group)
+    retiredRouteOwners.delete(row.group)
+  }
+  for (const [route, previousOwners] of previousRouteOwners) {
+    if ([...rows.values()].some((row) => row.group === route)) continue
+    if (previousOwners.size === 1) {
+      retiredRouteOwners.set(route, [...previousOwners][0]!)
+    } else {
+      retiredRouteOwners.delete(route)
+    }
+  }
+}
+
+function createRouteLifecycleScenario({
+  depth,
+  branches,
+  descriptors,
+  prefixSteps = createConnectedBatchBranches(depth, branches),
+  trailingSteps = [],
+}: RouteLifecycleScenarioOptions): RouteLifecycleScenario {
+  const seenRoutes = new Set<number>()
+  const retiredRouteOwners = new Map<number, number>()
+
+  const steps = [...prefixSteps]
+  const roots = new Map<number, RootRow>()
+  const levels = Array.from({ length: 4 }, () => new Map<number, ChildRow>())
+  for (const step of steps) {
+    applyRouteLifecycleStep(step, roots, levels, seenRoutes, retiredRouteOwners)
+  }
+
+  const transitionStepIndexes: Array<number> = []
+  for (const descriptor of descriptors) {
+    for (const step of descriptor.stepsBefore ?? []) {
+      steps.push(step)
+      applyRouteLifecycleStep(
+        step,
+        roots,
+        levels,
+        seenRoutes,
+        retiredRouteOwners,
+      )
+    }
+
+    const id = rowAt(branches, descriptor.row, descriptor.level)
+    const rowsAtLevel =
+      descriptor.level === 0
+        ? [...roots.values()]
+        : [...levels[descriptor.level - 1]!.values()]
+    const current = rowsAtLevel.find((row) => row.id === id)
+    if (!current) throw new Error(`Missing transition row ${id}`)
+    const currentRoute =
+      descriptor.kind === `rekey`
+        ? current.group
+        : (current as ChildRow).parentGroup
+    const destinationRows =
+      descriptor.kind === `rekey`
+        ? rowsAtLevel
+        : descriptor.level === 1
+          ? [...roots.values()]
+          : [...levels[descriptor.level - 2]!.values()]
+    const destinationIsLive = destinationRows.some(
+      (row) => row.group === descriptor.destination.route,
+    )
+    const currentRouteUsers = rowsAtLevel.filter((row) =>
+      descriptor.kind === `rekey`
+        ? row.group === currentRoute
+        : (row as ChildRow).parentGroup === currentRoute,
+    ).length
+    const retiredOwner = retiredRouteOwners.get(descriptor.destination.route)
+
+    switch (descriptor.destination.strategy) {
+      case `fresh`:
+        if (seenRoutes.has(descriptor.destination.route)) {
+          throw new Error(`fresh route must never have been used`)
+        }
+        break
+      case `restore`:
+        if (destinationIsLive || retiredOwner !== id) {
+          throw new Error(`restore route must have been retired by this row`)
+        }
+        break
+      case `merge`:
+        if (
+          !destinationIsLive ||
+          descriptor.destination.route === currentRoute
+        ) {
+          throw new Error(`merge route must be live and different`)
+        }
+        break
+      case `split`:
+        if (seenRoutes.has(descriptor.destination.route)) {
+          throw new Error(`split destination must be unused`)
+        }
+        if (currentRouteUsers < 2) {
+          throw new Error(`split source route must be shared`)
+        }
+        break
+      case `retired`:
+        if (
+          destinationIsLive ||
+          retiredOwner === undefined ||
+          retiredOwner === id
+        ) {
+          throw new Error(`retired route must have been retired by another row`)
+        }
+        break
+    }
+
+    let step: FullRowBatchStep
+    if (descriptor.level === 0) {
+      const root = roots.get(id)
+      if (!root) throw new Error(`Missing transition root ${id}`)
+      step = {
+        level: 0,
+        changes: [
+          {
+            type: `update`,
+            value: { ...root, group: descriptor.destination.route },
+          },
+        ],
+      }
+    } else {
+      const child = levels[descriptor.level - 1]!.get(id)
+      if (!child) throw new Error(`Missing transition child ${id}`)
+      step = {
+        level: descriptor.level,
+        changes: [
+          {
+            type: `update`,
+            value:
+              descriptor.kind === `rekey`
+                ? { ...child, group: descriptor.destination.route }
+                : {
+                    ...child,
+                    parentGroup: descriptor.destination.route,
+                  },
+          },
+        ],
+      }
+    }
+    transitionStepIndexes.push(steps.length)
+    steps.push(step)
+    applyRouteLifecycleStep(step, roots, levels, seenRoutes, retiredRouteOwners)
+  }
+
+  steps.push(...trailingSteps)
+  return { depth, steps, transitionStepIndexes }
+}
+
+function expectEveryRouteTransitionVisible(
+  scenario: RouteLifecycleScenario,
+): void {
+  for (const stepIndex of scenario.transitionStepIndexes) {
+    const before = relationshipOnly(
+      recomputeFullRowBatchScenario(scenario, stepIndex),
+    )
+    const after = relationshipOnly(
+      recomputeFullRowBatchScenario(scenario, stepIndex + 1),
+    )
+    expect(after).not.toEqual(before)
+  }
+}
+
+const independentTransitionShapes = [
+  `ancestor-descendant`,
+  `descendant-ancestor`,
+  `sibling`,
+  `cross-branch`,
+  `root`,
+] as const
+
+type IndependentTransitionShape = (typeof independentTransitionShapes)[number]
+
+function independentFreshRoutesArbitrary(
+  shape: IndependentTransitionShape,
+): fc.Arbitrary<readonly [number, number]> {
+  const first = fc.integer({ min: 2_100, max: 2_400 })
+  if (shape === `sibling`) {
+    return fc.tuple(first, fc.integer({ min: 2_500, max: 2_800 }))
+  }
+  if (shape === `ancestor-descendant` || shape === `root`) {
+    return first.map((route) => [route, 2_500] as const)
+  }
+  return fc.constant([2_100, 2_500] as const)
+}
+
+function independentTransitionDescriptors(
+  shape: IndependentTransitionShape,
+  branches: readonly [ConnectedBranch, ConnectedBranch],
+  freshRoutes: readonly [number, number],
+): ReadonlyArray<RouteTransitionDescriptor> {
+  switch (shape) {
+    case `ancestor-descendant`:
+      return [
+        {
+          kind: `reparent`,
+          level: 1,
+          row: 0,
+          destination: {
+            strategy: `merge`,
+            route: branches[1].groupBase,
+          },
+        },
+        {
+          kind: `rekey`,
+          level: 2,
+          row: 0,
+          destination: { strategy: `fresh`, route: freshRoutes[0] },
+        },
+      ]
+    case `descendant-ancestor`:
+      return [
+        {
+          kind: `reparent`,
+          level: 2,
+          row: 0,
+          destination: {
+            strategy: `merge`,
+            route: branches[1].groupBase + 1,
+          },
+        },
+        {
+          kind: `reparent`,
+          level: 1,
+          row: 0,
+          destination: {
+            strategy: `merge`,
+            route: branches[1].groupBase,
+          },
+        },
+      ]
+    case `sibling`:
+      return [
+        {
+          kind: `rekey`,
+          level: 2,
+          row: 0,
+          destination: { strategy: `fresh`, route: freshRoutes[0] },
+        },
+        {
+          kind: `rekey`,
+          level: 2,
+          row: 1,
+          destination: { strategy: `fresh`, route: freshRoutes[1] },
+        },
+      ]
+    case `cross-branch`:
+      return [
+        {
+          kind: `reparent`,
+          level: 2,
+          row: 0,
+          destination: {
+            strategy: `merge`,
+            route: branches[1].groupBase + 1,
+          },
+        },
+        {
+          kind: `reparent`,
+          level: 2,
+          row: 1,
+          destination: {
+            strategy: `merge`,
+            route: branches[0].groupBase + 1,
+          },
+        },
+      ]
+    case `root`:
+      return [
+        {
+          kind: `rekey`,
+          level: 0,
+          row: 0,
+          destination: { strategy: `fresh`, route: freshRoutes[0] },
+        },
+        {
+          kind: `reparent`,
+          level: 1,
+          row: 1,
+          destination: { strategy: `merge`, route: freshRoutes[0] },
+        },
+      ]
+  }
+}
+
+function independentTransitionScenarioArbitrary(
+  shape: IndependentTransitionShape,
+): fc.Arbitrary<RouteLifecycleScenario> {
+  return fc
+    .record({
+      ...generatedBranchArbitraries,
+      freshRoutes: independentFreshRoutesArbitrary(shape),
+    })
+    .map(({ freshRoutes, ...branchOptions }) => {
+      const branches = createGeneratedBranches(branchOptions)
+      return createRouteLifecycleScenario({
+        depth: 3,
+        branches,
+        descriptors: independentTransitionDescriptors(
+          shape,
+          branches,
+          freshRoutes,
+        ),
+      })
+    })
+}
+
+const destinationHistories = [
+  `fresh`,
+  `restore`,
+  `merge-split`,
+  `retired`,
+] as const
+
+type DestinationHistory = (typeof destinationHistories)[number]
+
+function destinationHistoryDescriptors(
+  history: DestinationHistory,
+  branches: readonly [ConnectedBranch, ConnectedBranch],
+  freshRoute: number,
+): ReadonlyArray<RouteTransitionDescriptor> {
+  const originalRoute = branches[0].groupBase + 2
+  const sharedRoute = branches[1].groupBase + 2
+  const first: RouteTransitionDescriptor = {
+    kind: `rekey`,
+    level: 2,
+    row: 0,
+    destination: { strategy: `fresh`, route: freshRoute },
+  }
+
+  switch (history) {
+    case `fresh`:
+      return [first]
+    case `restore`:
+      return [
+        first,
+        {
+          ...first,
+          destination: { strategy: `restore`, route: originalRoute },
+        },
+      ]
+    case `merge-split`:
+      return [
+        {
+          ...first,
+          destination: { strategy: `merge`, route: sharedRoute },
+        },
+        {
+          ...first,
+          destination: { strategy: `split`, route: freshRoute },
+        },
+      ]
+    case `retired`:
+      return [
+        first,
+        {
+          kind: `rekey`,
+          level: 2,
+          row: 1,
+          destination: { strategy: `retired`, route: originalRoute },
+        },
+      ]
+  }
+}
+
+function destinationHistoryScenarioArbitrary(
+  history: DestinationHistory,
+): fc.Arbitrary<RouteLifecycleScenario> {
+  return fc
+    .record({
+      ...generatedBranchArbitraries,
+      freshRoute: fc.integer({ min: 2_100, max: 2_400 }),
+    })
+    .map(({ freshRoute, ...branchOptions }) => {
+      const branches = createGeneratedBranches(branchOptions)
+      return createRouteLifecycleScenario({
+        depth: 3,
+        branches,
+        descriptors: destinationHistoryDescriptors(
+          history,
+          branches,
+          freshRoute,
+        ),
+      })
+    })
+}
+
+function relationshipNodeValue(value: unknown, id: number): unknown {
+  return findRelationshipNode(value, id)?.value
+}
+
+function classifyMissingOrStaleChild(
+  { actual, expected }: AssertionDifference,
+  parentId: number,
+  childId: number,
+  expectedValue: number,
+): boolean {
+  return (
+    hasDirectChild(expected, parentId, childId) &&
+    relationshipNodeValue(expected, childId) === expectedValue &&
+    (!hasDirectChild(actual, parentId, childId) ||
+      relationshipNodeValue(actual, childId) !== expectedValue)
+  )
+}
+
+function createInitiallySharedRoutePrefix(
+  depth: IncludeDepth,
+  parentLevel: 0 | 1 | 2,
+  branches: readonly [ConnectedBranch, ConnectedBranch],
+  enteringRow: 0 | 1 = 1,
+): Array<FullRowBatchStep> {
+  const enteringId = rowAt(branches, enteringRow, parentLevel)
+  const sharedRoute = branches[otherBranch(enteringRow)].groupBase + parentLevel
+  return createConnectedBatchBranches(depth, branches).map((step) => {
+    if (step.level !== parentLevel) return step
+
+    if (step.level === 0) {
+      return {
+        level: 0,
+        changes: step.changes.map((change) =>
+          change.value.id === enteringId
+            ? { ...change, value: { ...change.value, group: sharedRoute } }
+            : change,
+        ),
+      }
+    }
+
+    return {
+      level: step.level,
+      changes: step.changes.map((change) =>
+        change.value.id === enteringId
+          ? { ...change, value: { ...change.value, group: sharedRoute } }
+          : change,
+      ),
+    }
+  })
+}
+
+function createMergeIntoSharedRouteScenarios(
+  parentLevel: 0 | 1 | 2,
+  enteringRow: 0 | 1,
+): ClassifiedHistoryScenario {
+  const depth = (parentLevel + 1) as IncludeDepth
+  const branches = transitionHistoryBranches
+  const childLevel = depth
+  const existingRow = otherBranch(enteringRow)
+  const sharedRoute = branches[existingRow].groupBase + parentLevel
+  const enteringParentId = rowAt(branches, enteringRow, parentLevel)
+  const childId = rowAt(branches, existingRow, childLevel)
+  const candidate = createRouteLifecycleScenario({
+    depth,
+    branches,
+    descriptors: [
+      {
+        kind: `rekey`,
+        level: parentLevel,
+        row: enteringRow,
+        destination: { strategy: `merge`, route: sharedRoute },
+      },
+    ],
+  })
+  expectEveryRouteTransitionVisible(candidate)
+
+  return {
+    control: {
+      depth,
+      steps: createInitiallySharedRoutePrefix(
+        depth,
+        parentLevel,
+        branches,
+        enteringRow,
+      ),
+    },
+    candidate,
+    candidateCheckpoint: candidate.steps.length,
+    classify: (difference) =>
+      classifyMissingSharedRouteSnapshot(
+        difference,
+        enteringParentId,
+        rowAt(branches, existingRow, parentLevel),
+        childId,
+      ),
+  }
+}
+
+function createSharedRouteLastSubscriberScenario(
+  parentLevel: 0 | 1 | 2,
+): FullRowBatchScenario {
+  const depth = (parentLevel + 1) as IncludeDepth
+  const branches = transitionHistoryBranches
+  const childLevel = depth
+  const sharedRoute = branches[0].groupBase + parentLevel
+  const childId = rowAt(branches, 0, childLevel)
+  const child = {
+    ...batchChild(childId, sharedRoute, childId, 0),
+    group: branches[0].groupBase + childLevel,
+  }
+  const descriptors: ReadonlyArray<RouteTransitionDescriptor> = [
+    {
+      kind: `rekey`,
+      level: parentLevel,
+      row: 0,
+      destination: { strategy: `split`, route: 2_100 + parentLevel },
+    },
+    {
+      kind: `rekey`,
+      level: parentLevel,
+      row: 1,
+      destination: { strategy: `fresh`, route: 2_200 + parentLevel },
+    },
+  ]
+  const scenario = createRouteLifecycleScenario({
+    depth,
+    branches,
+    descriptors,
+    prefixSteps: createInitiallySharedRoutePrefix(depth, parentLevel, branches),
+    trailingSteps: [
+      {
+        level: childLevel,
+        changes: [
+          { type: `update`, value: { ...child, value: child.value + 1 } },
+        ],
+      },
+    ],
+  })
+  expectEveryRouteTransitionVisible(scenario)
+  return scenario
+}
+
+function createSnapshotOnResubscribeScenarios(
+  parentLevel: 0 | 1 | 2,
+): ClassifiedHistoryScenario {
+  const depth = (parentLevel + 1) as IncludeDepth
+  const branches = transitionHistoryBranches
+  const childLevel = depth
+  const parentId = rowAt(branches, 0, parentLevel)
+  const originalRoute = branches[0].groupBase + parentLevel
+  const childId = rowAt(branches, 0, childLevel)
+  const child = {
+    ...batchChild(childId, originalRoute, childId, 0),
+    group: branches[0].groupBase + childLevel,
+  }
+  const updatedChild = { ...child, value: child.value + 1 }
+  const prefix = createConnectedBatchBranches(depth, branches)
+  const childUpdate: FullRowBatchStep = {
+    level: childLevel,
+    changes: [{ type: `update`, value: updatedChild }],
+  }
+  const candidate = createRouteLifecycleScenario({
+    depth,
+    branches,
+    descriptors: [
+      {
+        kind: `rekey`,
+        level: parentLevel,
+        row: 0,
+        destination: { strategy: `fresh`, route: 2_300 + parentLevel },
+      },
+      {
+        kind: `rekey`,
+        level: parentLevel,
+        row: 0,
+        destination: { strategy: `restore`, route: originalRoute },
+        stepsBefore: [childUpdate],
+      },
+    ],
+  })
+  expectEveryRouteTransitionVisible(candidate)
+  const control: FullRowBatchScenario = {
+    depth,
+    steps: [...prefix, childUpdate],
+  }
+
+  return {
+    control,
+    candidate,
+    candidateCheckpoint: candidate.steps.length,
+    classify: (difference) =>
+      classifyMissingOrStaleChild(
+        difference,
+        parentId,
+        childId,
+        updatedChild.value,
+      ),
+  }
+}
+
 type ClassifiedHistoryScenario = {
   control: FullRowBatchScenario
   greenVariants?: ReadonlyArray<FullRowBatchScenario>
@@ -2783,6 +3442,204 @@ const {
 })
 
 describe(`includes recompute oracle`, () => {
+  for (const [shapeIndex, shape] of independentTransitionShapes.entries()) {
+    fcTest.prop([independentTransitionScenarioArbitrary(shape)], {
+      numRuns: 4,
+      seed: 1734 + shapeIndex,
+    })(
+      `matches recomputation for independent ${shape} relationship targets`,
+      async (scenario) => {
+        expectEveryRouteTransitionVisible(scenario)
+        await expectFullRowBatchScenarioMatches(scenario)
+      },
+    )
+  }
+
+  for (const [historyIndex, history] of destinationHistories.entries()) {
+    fcTest.prop([destinationHistoryScenarioArbitrary(history)], {
+      numRuns: 4,
+      seed: 1740 + historyIndex,
+    })(
+      `matches recomputation for the ${history} route destination history`,
+      async (scenario) => {
+        expectEveryRouteTransitionVisible(scenario)
+        await expectFullRowBatchScenarioMatches(scenario)
+      },
+    )
+  }
+
+  for (const parentLevel of [0, 1, 2] as const) {
+    for (const enteringRow of [0, 1] as const) {
+      const expectsFailure = parentLevel === 0
+      fcTest(
+        expectsFailure
+          ? `discovered trace: root ${enteringRow} entering a live shared route receives its snapshot`
+          : `matches recomputation when level-${parentLevel} row ${enteringRow} enters a live shared route`,
+        () =>
+          (expectsFailure
+            ? expectClassifiedHistoryFailure
+            : expectClassifiedHistoryMatches)(
+            createMergeIntoSharedRouteScenarios(parentLevel, enteringRow),
+          ),
+      )
+    }
+
+    fcTest(
+      `matches recomputation when the last level-${parentLevel} shared-route subscriber leaves`,
+      () =>
+        expectFullRowBatchScenarioMatches(
+          createSharedRouteLastSubscriberScenario(parentLevel),
+        ),
+    )
+
+    fcTest(
+      `matches recomputation after a level-${parentLevel} route resubscribes`,
+      () =>
+        expectClassifiedHistoryMatches(
+          createSnapshotOnResubscribeScenarios(parentLevel),
+        ),
+    )
+  }
+
+  fcTest(`rejects invalid route destination strategies`, () => {
+    const branches = transitionHistoryBranches
+    const ownRoute = branches[0].groupBase + 2
+    const otherRoute = branches[1].groupBase + 2
+    const freshRoute = 2_100
+    const invalidCases: ReadonlyArray<{
+      descriptors: ReadonlyArray<RouteTransitionDescriptor>
+      message: RegExp
+    }> = [
+      {
+        descriptors: [
+          {
+            kind: `rekey`,
+            level: 2,
+            row: 0,
+            destination: { strategy: `fresh`, route: otherRoute },
+          },
+        ],
+        message: /fresh route must never have been used/,
+      },
+      {
+        descriptors: [
+          {
+            kind: `rekey`,
+            level: 2,
+            row: 0,
+            destination: { strategy: `restore`, route: ownRoute },
+          },
+        ],
+        message: /restore route must have been retired by this row/,
+      },
+      {
+        descriptors: [
+          {
+            kind: `rekey`,
+            level: 2,
+            row: 0,
+            destination: { strategy: `fresh`, route: freshRoute },
+          },
+          {
+            kind: `rekey`,
+            level: 2,
+            row: 1,
+            destination: { strategy: `restore`, route: ownRoute },
+          },
+        ],
+        message: /restore route must have been retired by this row/,
+      },
+      {
+        descriptors: [
+          {
+            kind: `rekey`,
+            level: 2,
+            row: 0,
+            destination: { strategy: `merge`, route: freshRoute },
+          },
+        ],
+        message: /merge route must be live and different/,
+      },
+      {
+        descriptors: [
+          {
+            kind: `rekey`,
+            level: 2,
+            row: 0,
+            destination: { strategy: `merge`, route: ownRoute },
+          },
+        ],
+        message: /merge route must be live and different/,
+      },
+      {
+        descriptors: [
+          {
+            kind: `rekey`,
+            level: 2,
+            row: 0,
+            destination: { strategy: `split`, route: freshRoute },
+          },
+        ],
+        message: /split source route must be shared/,
+      },
+      {
+        descriptors: [
+          {
+            kind: `rekey`,
+            level: 2,
+            row: 0,
+            destination: { strategy: `merge`, route: otherRoute },
+          },
+          {
+            kind: `rekey`,
+            level: 2,
+            row: 0,
+            destination: { strategy: `split`, route: ownRoute },
+          },
+        ],
+        message: /split destination must be unused/,
+      },
+      {
+        descriptors: [
+          {
+            kind: `rekey`,
+            level: 2,
+            row: 0,
+            destination: { strategy: `retired`, route: otherRoute },
+          },
+        ],
+        message: /retired route must have been retired by another row/,
+      },
+      {
+        descriptors: [
+          {
+            kind: `rekey`,
+            level: 2,
+            row: 0,
+            destination: { strategy: `fresh`, route: freshRoute },
+          },
+          {
+            kind: `rekey`,
+            level: 2,
+            row: 0,
+            destination: { strategy: `retired`, route: ownRoute },
+          },
+        ],
+        message: /retired route must have been retired by another row/,
+      },
+    ]
+
+    for (const invalidCase of invalidCases) {
+      expect(() =>
+        createRouteLifecycleScenario({
+          depth: 3,
+          branches,
+          descriptors: invalidCase.descriptors,
+        }),
+      ).toThrow(invalidCase.message)
+    }
+  })
+
   fcTest(`rejects overlapping visible relationship keys`, () => {
     const base = {
       depth: 4,
