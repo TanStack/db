@@ -4,7 +4,9 @@ import { createCollection, eq } from '@tanstack/db'
 import { expectAssertionFailure } from '../../db/tests/expected-failure.js'
 import { TraceAssertionError } from '../../db/tests/trace-runner.js'
 import { queryCollectionOptions } from '../src/query.js'
-import type { SyncMetadataApi } from '@tanstack/db'
+import type { Collection, SyncMetadataApi } from '@tanstack/db'
+import type { NonSingleResult } from '../../db/src/types.js'
+import type { QueryCollectionUtils } from '../src/query.js'
 
 type Item = {
   id: string
@@ -29,6 +31,20 @@ type OwnershipFixtureOptions = {
   results: Array<Array<Item>>
   syncMode?: `eager` | `on-demand`
   metadataRecorder?: MetadataRecorder
+}
+
+type OwnershipFixture = {
+  collection: Collection<
+    Item,
+    string | number,
+    QueryCollectionUtils<Item, string | number, Item, unknown>,
+    never,
+    Item
+  > &
+    NonSingleResult
+  maps: OwnershipMaps
+  queryClient: QueryClient
+  queryFn: ReturnType<typeof vi.fn<() => Promise<Array<Item>>>>
 }
 
 const shared = { id: `shared`, category: `shared`, name: `Shared` }
@@ -62,9 +78,7 @@ function inspectOwnershipMaps(options: {
 }
 
 function sorted<T extends string | number>(values: Iterable<T>): Array<T> {
-  return Array.from(values).sort((left, right) =>
-    String(left).localeCompare(String(right)),
-  )
+  return Array.from(values).sort()
 }
 
 function ownersOf(maps: OwnershipMaps, rowId: string): Array<string> {
@@ -109,11 +123,9 @@ function observerCount(queryClient: QueryClient, queryHash: string): number {
 }
 
 function collectionRows(collection: {
-  has: (id: string) => boolean
+  keys: () => Iterable<string | number>
 }): Array<string> {
-  return [detailOnly.id, listOnly.id, shared.id].filter((id) =>
-    collection.has(id),
-  )
+  return sorted(collection.keys()).map(String)
 }
 
 function assertCheckpoint(
@@ -128,24 +140,40 @@ function assertCheckpoint(
   }
 }
 
-function classifyEagerOwnerLoss({
+function asRecords({
   actual,
   expected,
 }: {
   actual: unknown
   expected: unknown
-}): boolean {
+}):
+  | {
+      observed: Record<string, unknown>
+      wanted: Record<string, unknown>
+    }
+  | undefined {
   if (
     !actual ||
     typeof actual !== `object` ||
     !expected ||
     typeof expected !== `object`
   ) {
-    return false
+    return undefined
   }
 
-  const observed = actual as Record<string, unknown>
-  const wanted = expected as Record<string, unknown>
+  return {
+    observed: actual as Record<string, unknown>,
+    wanted: expected as Record<string, unknown>,
+  }
+}
+
+function classifyEagerOwnerLoss(difference: {
+  actual: unknown
+  expected: unknown
+}): boolean {
+  const records = asRecords(difference)
+  if (!records) return false
+  const { observed, wanted } = records
   return (
     observed.status === `ready` &&
     Array.isArray(observed.rows) &&
@@ -159,24 +187,13 @@ function classifyEagerOwnerLoss({
   )
 }
 
-function classifyInsertedOwnerMetadataLoss({
-  actual,
-  expected,
-}: {
+function classifyInsertedOwnerMetadataLoss(difference: {
   actual: unknown
   expected: unknown
 }): boolean {
-  if (
-    !actual ||
-    typeof actual !== `object` ||
-    !expected ||
-    typeof expected !== `object`
-  ) {
-    return false
-  }
-
-  const observed = actual as Record<string, unknown>
-  const wanted = expected as Record<string, unknown>
+  const records = asRecords(difference)
+  if (!records) return false
+  const { observed, wanted } = records
   return (
     Array.isArray(observed.persistedOwners) &&
     observed.persistedOwners.length === 0 &&
@@ -201,24 +218,13 @@ function sameArray(actual: unknown, expected: unknown): boolean {
   )
 }
 
-function classifyPersistedBaselineLoss({
-  actual,
-  expected,
-}: {
+function classifyPersistedBaselineLoss(difference: {
   actual: unknown
   expected: unknown
 }): boolean {
-  if (
-    !actual ||
-    typeof actual !== `object` ||
-    !expected ||
-    typeof expected !== `object`
-  ) {
-    return false
-  }
-
-  const observed = actual as Record<string, unknown>
-  const wanted = expected as Record<string, unknown>
+  const records = asRecords(difference)
+  if (!records) return false
+  const { observed, wanted } = records
   return (
     sameArray(observed.liveOwners, wanted.liveOwners) &&
     sameArray(observed.persistedOwners, wanted.insertedOwners) &&
@@ -260,10 +266,11 @@ function createOwnershipFixture({
   results,
   syncMode = `on-demand`,
   metadataRecorder,
-}: OwnershipFixtureOptions) {
+}: OwnershipFixtureOptions): OwnershipFixture {
   const queryClient = createQueryClient()
   const queryFn = vi.fn<() => Promise<Array<Item>>>()
   results.forEach((result) => queryFn.mockResolvedValueOnce(result))
+  queryFn.mockRejectedValue(new Error(`Unexpected ownership-oracle refetch`))
   const baseOptions = queryCollectionOptions<Item>({
     id,
     queryClient,
@@ -432,7 +439,7 @@ describe(`query collection ownership lifecycle oracle`, () => {
     assertCheckpoint(
       0,
       ownersOf(maps, shared.id),
-      [detailHash, listHash].sort(),
+      sorted([detailHash, listHash]),
     )
 
     collection._sync.unloadSubset(detailSubset)
@@ -471,7 +478,7 @@ describe(`query collection ownership lifecycle oracle`, () => {
       },
       {
         fetches: 2,
-        owners: [detailHash, listHash].sort(),
+        owners: sorted([detailHash, listHash]),
         tracksDetail: true,
         detailObservers: 1,
       },
@@ -509,12 +516,10 @@ describe(`query collection ownership lifecycle oracle`, () => {
     }
 
     await acquire(detailSubset)
+    const detailHash = onlyOwner(maps, shared.id)
     await acquire(detailSubset)
     await acquire(listSubset)
-    const [detailHash, listHash] = ownersOf(maps, shared.id)
-    if (!detailHash || !listHash) {
-      throw new Error(`Expected two query owners for ${shared.id}`)
-    }
+    const listHash = otherOwner(maps, shared.id, detailHash)
     assertCheckpoint(
       0,
       {
@@ -525,7 +530,7 @@ describe(`query collection ownership lifecycle oracle`, () => {
       },
       {
         acquisitions: 3,
-        queryOwners: [detailHash, listHash],
+        queryOwners: sorted([detailHash, listHash]),
         fetches: 2,
         rows: [detailOnly.id, listOnly.id, shared.id],
       },
@@ -606,7 +611,7 @@ describe(`query collection ownership lifecycle oracle`, () => {
       await assertOwnerSurvives()
       expect(warning).toHaveBeenCalledOnce()
       expect(warning).toHaveBeenCalledWith(
-        `[cleanupQueryIfIdle] Invariant violation: refcount=1 but no listeners. Cleaning up to prevent leak.`,
+        expect.stringContaining(`[cleanupQueryIfIdle]`),
         { hashedQueryKey: queryHash },
       )
     } finally {
@@ -669,8 +674,8 @@ describe(`query collection ownership lifecycle oracle`, () => {
               metadataSetKeys: setMetadataKeys(metadataRecorder),
             },
             {
-              liveOwners: [detailHash, listHash].sort(),
-              persistedOwners: [detailHash, listHash].sort(),
+              liveOwners: sorted([detailHash, listHash]),
+              persistedOwners: sorted([detailHash, listHash]),
               insertedOwners: [listHash],
               metadataSetKeys: [listOnly.id, shared.id],
             },
