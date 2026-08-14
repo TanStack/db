@@ -16,6 +16,8 @@ Ship TanStack DB SSR as a single coherent story:
 - Run `pnpm --filter @tanstack/db test`.
 - Run `pnpm --filter @tanstack/react-db test`.
 - Run `pnpm --filter @tanstack/svelte-db test`.
+- Run `pnpm --filter @tanstack/react-router-with-db test` (includes type
+  tests).
 - Run `pnpm --filter @tanstack/query-db-collection test`.
 - Run `pnpm --filter @tanstack/db-sqlite-persistence-core test`.
 - Run `pnpm --filter @tanstack/db-example-react-start-ssr-e2e test:e2e`.

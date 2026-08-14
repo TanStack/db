@@ -357,7 +357,7 @@ export class DbClient {
     const failedPreload = this.preloadedLiveQueries.get(queryHash)
     if (failedPreload) {
       failedPreload.observer.dispose()
-      void failedPreload.collection.cleanup()
+      void failedPreload.collection.cleanup().catch(() => {})
       this.preloadedLiveQueries.delete(queryHash)
     }
 
@@ -633,6 +633,7 @@ export class DbClient {
   ): Promise<void> {
     const existing = this.liveQueries.get(queryHash)
     if (existing && existing.status !== `error`) {
+      void Promise.resolve(promise).catch(() => {})
       return existing.promise
     }
 
@@ -692,6 +693,9 @@ export class DbClient {
       dehydratedQuery.dehydratedAt,
     )
     this.liveQueries.set(record.queryHash, record)
+    if (existing?.status === `pending`) {
+      void record.resultPromise.then(existing.succeed, existing.fail)
+    }
     this.emit({ type: `liveQueryAdded`, query: record })
 
     if (dehydratedQuery.snapshot) {

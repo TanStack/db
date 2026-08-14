@@ -200,6 +200,8 @@ export function trailBaseCollectionOptions<
 
       // Load (more) data.
       async function load(opts: LoadSubsetOptions) {
+        if (cancelled) return
+
         const lastKey = opts.cursor?.lastKey
         let cursor: string | undefined =
           lastKey !== undefined ? cursors.get(lastKey) : undefined
@@ -228,6 +230,7 @@ export function trailBaseCollectionOptions<
             order,
             filters,
           })
+          if (cancelled) return
 
           const length = response.records.length
           if (length === 0) {
@@ -322,6 +325,7 @@ export function trailBaseCollectionOptions<
           if (internalSyncMode === `eager`) {
             // Load everything on initial load.
             await load({})
+            if (cancelled) return
             fullSyncCompleted = true
           }
         } catch (e) {

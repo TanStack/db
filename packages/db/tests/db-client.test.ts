@@ -10,7 +10,7 @@ import {
   localOnlyCollectionOptions,
 } from '../src'
 import { mockSyncCollectionOptions } from './utils'
-import type { InitialQueryBuilder } from '../src'
+import type { DehydratedLiveQueryResult, InitialQueryBuilder } from '../src'
 
 type Person = {
   id: string
@@ -604,6 +604,65 @@ describe(`DbClient`, () => {
     expect(browserQuery?.error).toBe(error)
   })
 
+  it(`settles waiters when newer hydration supersedes a pending live query`, async () => {
+    const client = new DbClient()
+    let resolveOriginal!: (snapshot: {
+      rows: Array<{ key: string; value: Person }>
+    }) => void
+    const originalResult = new Promise<{
+      rows: Array<{ key: string; value: Person }>
+    }>((resolve) => {
+      resolveOriginal = resolve
+    })
+    const originalPromise = client._registerLiveQuery(
+      `active-people`,
+      originalResult,
+    )
+    const originalRecord = client._getLiveQuery(`active-people`)!
+
+    client.hydrate({
+      collections: [],
+      liveQueries: [
+        {
+          queryHash: `active-people`,
+          dehydratedAt: originalRecord.dehydratedAt + 1,
+          snapshot: {
+            rows: [{ key: `1`, value: people[0]! }],
+          },
+        },
+      ],
+    })
+
+    await expect(originalPromise).resolves.toBeUndefined()
+    expect(client._getLiveQuery(`active-people`)).toMatchObject({
+      status: `success`,
+      snapshot: { rows: [{ key: `1`, value: people[0]! }] },
+    })
+
+    resolveOriginal({ rows: [] })
+  })
+
+  it(`handles a rejected duplicate live-query registration`, async () => {
+    const client = new DbClient()
+    await client._registerLiveQuery(
+      `active-people`,
+      Promise.resolve({ rows: [] }),
+    )
+
+    let rejectDuplicate!: (error: Error) => void
+    const duplicate = new Promise<DehydratedLiveQueryResult>(
+      (_resolve, reject) => {
+        rejectDuplicate = reject
+      },
+    )
+
+    await expect(
+      client._registerLiveQuery(`active-people`, duplicate),
+    ).resolves.toBeUndefined()
+    rejectDuplicate(new Error(`duplicate failed`))
+    await new Promise((resolve) => setTimeout(resolve, 0))
+  })
+
   it(`explicit collection preload dehydrates source collection rows`, async () => {
     const descriptor = collectionOptions({
       id: `people`,
@@ -734,7 +793,13 @@ describe(`DbClient`, () => {
     const failedCollection = Array.from(
       internals.preloadedLiveQueries.values(),
     )[0]!.collection
-    const cleanup = vi.spyOn(failedCollection, `cleanup`)
+    const originalCleanup = failedCollection.cleanup.bind(failedCollection)
+    const cleanup = vi
+      .spyOn(failedCollection, `cleanup`)
+      .mockImplementationOnce(async () => {
+        await originalCleanup()
+        throw new Error(`cleanup failed`)
+      })
 
     await expect(client.preloadLiveQuery(options)).resolves.toBeUndefined()
 
