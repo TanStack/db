@@ -163,11 +163,9 @@ function canonicalizeSource(
   if (source.type === `unionFrom`) {
     return {
       type: `unionFrom`,
-      sources: [...source.sources]
-        .sort((a, b) => a.alias.localeCompare(b.alias))
-        .map((unionSource, index) =>
-          canonicalizeSource(unionSource, `${path}.sources[${index}]`, seen),
-        ),
+      sources: source.sources.map((unionSource, index) =>
+        canonicalizeSource(unionSource, `${path}.sources[${index}]`, seen),
+      ),
     }
   }
 

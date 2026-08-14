@@ -287,6 +287,12 @@ describe(`DbClient`, () => {
     ).toThrow(/collectionOptions requires a non-empty explicit id/)
   })
 
+  it(`requires a factory when using the explicit id overload`, () => {
+    expect(() =>
+      Reflect.apply(collectionOptions, undefined, [`people`]),
+    ).toThrow(/collectionOptions\("people"\) requires a factory/)
+  })
+
   it(`hydrates pending collection rows when the collection materializes`, () => {
     const importedMeta = vi.fn()
     const lifecycleOrder: Array<string> = []

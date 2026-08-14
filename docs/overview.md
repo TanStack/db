@@ -49,7 +49,14 @@ TanStack DB works by:
 - [making optimistic mutations](#making-optimistic-mutations) using transactional mutators
 
 ```tsx
-import { DbClient, DbProvider } from '@tanstack/react-db'
+import {
+  DbClient,
+  DbProvider,
+  collectionOptions,
+  not,
+  useDbClient,
+  useLiveQuery,
+} from '@tanstack/react-db'
 
 // Define stable collection descriptors to load data into
 const todoCollection = collectionOptions('todos', () => ({

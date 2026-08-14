@@ -359,6 +359,19 @@ describe(`stable QueryIR identity smoke test`, () => {
     )
   })
 
+  it(`preserves semantically significant union source ordering`, () => {
+    const usersThenPosts = getQueryIR(
+      new Query().unionAll({ user: usersCollection, post: postsCollection }),
+    )
+    const postsThenUsers = getQueryIR(
+      new Query().unionAll({ post: postsCollection, user: usersCollection }),
+    )
+
+    expect(getStableQueryIRHash(usersThenPosts)).not.toBe(
+      getStableQueryIRHash(postsThenUsers),
+    )
+  })
+
   it(`changes identity when captured structured values change`, () => {
     const createQuery = (status: User[`status`]) =>
       getQueryIR(

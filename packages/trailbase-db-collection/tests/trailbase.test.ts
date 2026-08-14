@@ -121,6 +121,18 @@ function setUp(recordApi: MockRecordApi<Data>) {
 }
 
 describe(`TrailBase Integration`, () => {
+  it(`cancels its event subscription when the collection is cleaned up`, async () => {
+    const recordApi = new MockRecordApi<Data>()
+    const cancel = vi.fn()
+    recordApi.subscribe.mockResolvedValue(new ReadableStream<Event>({ cancel }))
+    const collection = createCollection(setUp(recordApi))
+
+    await vi.waitFor(() => expect(recordApi.subscribe).toHaveBeenCalledOnce())
+    await collection.cleanup()
+
+    await vi.waitFor(() => expect(cancel).toHaveBeenCalledOnce())
+  })
+
   it(`initial fetch, receive update and cancel`, async () => {
     const records: Array<Data> = [
       {

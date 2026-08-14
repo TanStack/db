@@ -102,7 +102,7 @@ export class TransactionScope {
     transaction: Transaction<any>,
     mutationIds: Set<string>,
   ): void {
-    for (const candidate of this.transactions) {
+    for (const candidate of [...this.transactions]) {
       if (
         candidate !== transaction &&
         candidate.state === `pending` &&

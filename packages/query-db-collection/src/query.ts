@@ -2192,9 +2192,7 @@ export function queryCollectionOptions(
     (client) =>
       queryCollectionOptions({
         ...config,
-        queryClient:
-          client.getDependency<QueryClient>(`queryClient`) ??
-          config.queryClient,
+        queryClient: client.requireDependency<QueryClient>(`queryClient`),
         id: options.id,
       }) as typeof options,
   )

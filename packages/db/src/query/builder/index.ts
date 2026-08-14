@@ -231,7 +231,7 @@ export class BaseQueryBuilder<TContext extends Context = Context> {
     ...branches: Array<QueryBuilder<any>>
   ): QueryBuilder<any> {
     if (sourceOrBranch instanceof BaseQueryBuilder) {
-      return new BaseQueryBuilder({
+      return this._clone({
         ...this.query,
         from: new UnionAll(
           [sourceOrBranch, ...branches].map((branch) =>
@@ -248,7 +248,7 @@ export class BaseQueryBuilder<TContext extends Context = Context> {
     const from =
       refs.length === 1 ? refs[0]![1] : new UnionFrom(refs.map((r) => r[1]))
 
-    return new BaseQueryBuilder({
+    return this._clone({
       ...this.query,
       from,
     }) as any

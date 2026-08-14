@@ -169,7 +169,8 @@ export class CollectionSyncManager<
                 if (valuesEqual || this.state.hydrationSeedKeys.has(key)) {
                   // The "insert" is an echo of a value we already have locally.
                   // Hydration and initialData are also provisional base state, so
-                  // the adapter's first authoritative value replaces that seed.
+                  // accept the adapter's first authoritative value as an update
+                  // using the configured rowUpdateMode semantics.
                   messageType = `update`
                 } else {
                   const utils = this.config.utils as

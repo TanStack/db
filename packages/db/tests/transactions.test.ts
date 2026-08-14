@@ -506,6 +506,10 @@ describe(`Transactions`, () => {
       mutationFn: async () => Promise.resolve(),
       autoCommit: false,
     })
+    const transaction4 = createTransaction({
+      mutationFn: async () => Promise.resolve(),
+      autoCommit: false,
+    })
     const collection = createCollection<{
       id: number
       value: string
@@ -545,13 +549,23 @@ describe(`Transactions`, () => {
       })
     })
 
+    transaction4.mutate(() => {
+      collection.state.forEach((object) => {
+        collection.update(object.id, (draft) => {
+          draft.value = `foo-me-4`
+        })
+      })
+    })
+
     transaction1.rollback()
     transaction1.isPersisted.promise.catch(() => {})
     transaction3.isPersisted.promise.catch(() => {})
+    transaction4.isPersisted.promise.catch(() => {})
 
     expect(transaction1.state).toBe(`failed`)
     expect(transaction2.state).toBe(`completed`)
     expect(transaction3.state).toBe(`failed`)
+    expect(transaction4.state).toBe(`failed`)
   })
 
   describe(`duplicate instance detection`, () => {

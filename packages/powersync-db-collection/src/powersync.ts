@@ -226,7 +226,9 @@ export function powerSyncCollectionOptions<
 export function powerSyncCollectionOptions<
   TTable extends Table,
   TSchema extends StandardSchemaV1<any> = never,
->(config: PowerSyncCollectionConfig<TTable, TSchema>): unknown {
+>(
+  config: PowerSyncCollectionConfig<TTable, TSchema>,
+): ReturnType<typeof createPowerSyncCollectionConfig<TTable, TSchema>> {
   const outputConfig = createPowerSyncCollectionConfig(config)
   return withCollectionConfigFactory(outputConfig, () =>
     createPowerSyncCollectionConfig(config),

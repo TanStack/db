@@ -207,6 +207,12 @@ export function collectionOptions(
     )
   }
 
+  if (typeof optionsOrId === `string` && !explicitFactory) {
+    throw new Error(
+      `collectionOptions("${id}") requires a factory as its second argument.`,
+    )
+  }
+
   const reusableFactory:
     | ((client: DbClient) => AnyCollectionConfig)
     | undefined = config
