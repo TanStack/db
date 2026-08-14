@@ -3253,6 +3253,7 @@ describe(`includes recompute oracle`, () => {
 
             // Delivery boundaries and change order must not alter the final
             // recompute semantics for one generated fixture.
+            expect(finalStates.length).toBeGreaterThan(1)
             for (const finalState of finalStates.slice(1)) {
               expect(finalState).toEqual(finalStates[0])
             }
