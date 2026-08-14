@@ -1,5 +1,5 @@
 import { fc, test as fcTest } from '@fast-check/vitest'
-import { describe, expect } from 'vitest'
+import { beforeAll, describe, expect, it } from 'vitest'
 import { createCollection } from '../../src/collection/index.js'
 import { BTreeIndex } from '../../src/indexes/btree-index.js'
 import { localOnlyCollectionOptions } from '../../src/local-only.js'
@@ -50,6 +50,10 @@ type SourceWork = {
   links: WorkCount
 }
 
+type LinkObservation =
+  | { id: string; text: string }
+  | { id: string; targetId: string }
+
 type WorkObservation = {
   result: Array<{
     id: string
@@ -57,11 +61,23 @@ type WorkObservation = {
       id: string
       groups: Array<{
         id: string
-        links: Array<{ id: string; text?: string; targetId?: string }>
+        links: Array<LinkObservation>
       }>
     }>
   }>
   sourceWork: SourceWork
+}
+
+async function runCleanups(
+  cleanups: ReadonlyArray<() => void | Promise<void>>,
+): Promise<void> {
+  const results = await Promise.allSettled(
+    cleanups.map(async (cleanup) => cleanup()),
+  )
+  const firstRejection = results.find(
+    (result): result is PromiseRejectedResult => result.status === `rejected`,
+  )
+  if (firstRejection !== undefined) throw firstRejection.reason
 }
 
 const noFillers: FillerCounts = {
@@ -170,6 +186,14 @@ function createFixtureRows(filler: FillerCounts): SourceRows {
   }
 }
 
+function observeLink(link: LinkObservation): LinkObservation {
+  if (`text` in link) return { id: link.id, text: link.text }
+  if (`targetId` in link) return { id: link.id, targetId: link.targetId }
+
+  const exhaustive: never = link
+  return exhaustive
+}
+
 async function observeWork({
   filler,
   joinTargets,
@@ -268,11 +292,7 @@ async function observeWork({
             id: meaning.id,
             groups: meaning.groups.map((group) => ({
               id: group.id,
-              links: group.links.map((link) =>
-                `text` in link
-                  ? { id: link.id, text: link.text }
-                  : { id: link.id, targetId: link.targetId },
-              ),
+              links: group.links.map(observeLink),
             })),
           })),
         },
@@ -285,8 +305,10 @@ async function observeWork({
       },
     }
   } finally {
-    await cleanupLive?.()
-    await Promise.all(Object.values(sources).map((source) => source.cleanup()))
+    await runCleanups([
+      async () => cleanupLive?.(),
+      ...Object.values(sources).map((source) => async () => source.cleanup()),
+    ])
   }
 }
 
@@ -376,62 +398,77 @@ const joinFreeBaselineWork: SourceWork = {
   links: { delivered: 2, examined: 2 },
 }
 
+let joinedBaselineObservation: WorkObservation
+let joinFreeBaselineObservation: WorkObservation
+
+async function expectKnownCorrelatedJoinDefect(
+  fillerCount: number,
+): Promise<void> {
+  const baseline = joinedBaselineObservation
+  const scaled = await observeWork({
+    filler: {
+      terms: 0,
+      meanings: 0,
+      groups: 0,
+      links: fillerCount,
+    },
+    joinTargets: true,
+  })
+  expect(baseline.result).toEqual(expectedResult({ joinTargets: true }))
+  expect(scaled.result).toEqual(baseline.result)
+  expect(baseline.sourceWork).toEqual(joinedBaselineWork)
+
+  const knownLinkWork = {
+    delivered: baseline.sourceWork.links.delivered + fillerCount,
+    // Once irrelevant rows exist, the defective route scans the whole
+    // collection and then reads the two selected rows through the index.
+    examined: baseline.sourceWork.links.examined + fillerCount + 2,
+  }
+  const knownScaledWork: SourceWork = {
+    // The full left scan also activates one extra indexed target route.
+    terms: { delivered: 4, examined: 4 },
+    meanings: baseline.sourceWork.meanings,
+    groups: baseline.sourceWork.groups,
+    links: knownLinkWork,
+  }
+  await expectAssertionFailure(assertEqualSourceWork, {
+    checkpoint: 1,
+    classify: ({ actual, expected }) =>
+      isExactSourceWork(actual, knownScaledWork) &&
+      isExactSourceWork(expected, baseline.sourceWork),
+  })(scaled.sourceWork, baseline.sourceWork)
+}
+
 describe(`includes deterministic work-counter oracle`, () => {
-  fcTest.prop([fc.integer({ min: 4, max: 24 })], {
+  beforeAll(async () => {
+    const [joinedBaseline, joinFreeBaseline] = await Promise.all([
+      observeWork({ filler: noFillers, joinTargets: true }),
+      observeWork({ filler: noFillers, joinTargets: false }),
+    ])
+    joinedBaselineObservation = joinedBaseline
+    joinFreeBaselineObservation = joinFreeBaseline
+  })
+
+  it.each([1, 2, 3])(
+    `pins the #1709 defect formula at the small filler boundary (%i)`,
+    expectKnownCorrelatedJoinDefect,
+  )
+
+  fcTest.prop([fc.integer({ min: 1, max: 24 })], {
     numRuns: 6,
     seed: 1709,
   })(
     `known work defect: a join defeats correlated source pushdown (#1709)`,
-    async (fillerCount) => {
-      const baseline = await observeWork({
-        filler: noFillers,
-        joinTargets: true,
-      })
-      const scaled = await observeWork({
-        filler: {
-          terms: 0,
-          meanings: 0,
-          groups: 0,
-          links: fillerCount,
-        },
-        joinTargets: true,
-      })
-      expect(baseline.result).toEqual(expectedResult({ joinTargets: true }))
-      expect(scaled.result).toEqual(baseline.result)
-      expect(baseline.sourceWork).toEqual(joinedBaselineWork)
-
-      const knownLinkWork = {
-        delivered: baseline.sourceWork.links.delivered + fillerCount,
-        // Once irrelevant rows exist, the defective route scans the whole
-        // collection and then reads the two selected rows through the index.
-        examined: baseline.sourceWork.links.examined + fillerCount + 2,
-      }
-      const knownScaledWork: SourceWork = {
-        // The full left scan also activates one extra indexed target route.
-        terms: { delivered: 4, examined: 4 },
-        meanings: baseline.sourceWork.meanings,
-        groups: baseline.sourceWork.groups,
-        links: knownLinkWork,
-      }
-      await expectAssertionFailure(assertEqualSourceWork, {
-        checkpoint: 1,
-        classify: ({ actual, expected }) =>
-          isExactSourceWork(actual, knownScaledWork) &&
-          isExactSourceWork(expected, baseline.sourceWork),
-      })(scaled.sourceWork, baseline.sourceWork)
-    },
+    expectKnownCorrelatedJoinDefect,
   )
 
-  fcTest.prop([fc.integer({ min: 4, max: 24 })], {
+  fcTest.prop([fc.integer({ min: 1, max: 24 })], {
     numRuns: 6,
     seed: 170_900,
   })(
     `indexed join-target growth keeps source work flat (#1709 direction control)`,
     async (fillerCount) => {
-      const baseline = await observeWork({
-        filler: noFillers,
-        joinTargets: true,
-      })
+      const baseline = joinedBaselineObservation
       const scaled = await observeWork({
         filler: {
           terms: fillerCount,
@@ -449,16 +486,13 @@ describe(`includes deterministic work-counter oracle`, () => {
     },
   )
 
-  fcTest.prop([fc.integer({ min: 4, max: 24 })], {
+  fcTest.prop([fc.integer({ min: 1, max: 24 })], {
     numRuns: 6,
     seed: 17_090,
   })(
     `join-free correlated includes keep source work flat (#1709 control)`,
     async (fillerCount) => {
-      const baseline = await observeWork({
-        filler: noFillers,
-        joinTargets: false,
-      })
+      const baseline = joinFreeBaselineObservation
       const scaled = await observeWork({
         filler: {
           terms: fillerCount,

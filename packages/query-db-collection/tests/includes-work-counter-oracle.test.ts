@@ -8,7 +8,7 @@ import {
 } from '@tanstack/db'
 import { describe, expect, it } from 'vitest'
 import { queryCollectionOptions } from '../src/query'
-import type { Collection, WithVirtualProps } from '@tanstack/db'
+import type { Collection } from '@tanstack/db'
 
 let nextCollectionId = 0
 
@@ -32,9 +32,9 @@ type NodeRow = {
   children?: NodeCollection
 }
 
-type NodeCollection = Collection<
-  WithVirtualProps<NodeRow, string | number>,
-  string | number
+type NodeCollection = Pick<
+  Collection<NodeRow, string | number>,
+  'cleanup' | 'preload' | 'size' | 'toArray'
 >
 
 type NestedTreeWork = {
@@ -129,6 +129,25 @@ function requireChildren(row: NodeRow, level: string): NodeCollection {
   return row.children
 }
 
+async function runCleanups(
+  cleanups: ReadonlyArray<() => void | Promise<void>>,
+): Promise<void> {
+  const results = await Promise.allSettled(
+    cleanups.map(async (cleanup) => cleanup()),
+  )
+  const firstRejection = results.find(
+    (result): result is PromiseRejectedResult => result.status === `rejected`,
+  )
+  if (firstRejection !== undefined) throw firstRejection.reason
+}
+
+function rethrowFirstCleanupError(
+  results: ReadonlyArray<{ rejected: boolean; error: unknown }>,
+): void {
+  const firstRejection = results.find((result) => result.rejected)
+  if (firstRejection !== undefined) throw firstRejection.error
+}
+
 async function observeNestedTreeWork(
   rootCount: number,
 ): Promise<NestedTreeWork> {
@@ -142,7 +161,7 @@ async function observeNestedTreeWork(
     twigs: createQuerySource(`tree-twigs`, rows.twigs, queryClient),
     leaves: createQuerySource(`tree-leaves`, rows.leaves, queryClient),
   }
-  let roots: ReturnType<typeof createLiveQueryCollection> | undefined
+  let rootCollection: NodeCollection | undefined
 
   try {
     const sourceCounters = {
@@ -156,7 +175,7 @@ async function observeNestedTreeWork(
     // remains a live Collection. The timer in the report stops before React's
     // virtualizer mounts any recursive Level consumers, so this oracle measures
     // only the nested collections and rows constructed by the root query.
-    roots = createLiveQueryCollection({
+    const roots: NodeCollection = createLiveQueryCollection({
       startSync: true,
       query: (q) =>
         q.from({ root: sources.roots }).select(({ root }) => ({
@@ -185,6 +204,7 @@ async function observeNestedTreeWork(
             })),
         })),
     })
+    rootCollection = roots
     await roots.preload()
 
     const childCollectionsCreated = { branches: 0, twigs: 0, leaves: 0 }
@@ -195,7 +215,7 @@ async function observeNestedTreeWork(
       collection: NodeCollection,
       level: ChildLevel,
     ): void => {
-      const children = collection.toArray as unknown as ReadonlyArray<NodeRow>
+      const children = collection.toArray
       childCollectionsCreated[level]++
       childCollectionRows[level] += children.length
       treeRowsConstructed += children.length
@@ -213,7 +233,7 @@ async function observeNestedTreeWork(
       }
     }
 
-    for (const root of roots.toArray as unknown as ReadonlyArray<NodeRow>) {
+    for (const root of roots.toArray) {
       countChildren(requireChildren(root, `root`), `branches`)
     }
 
@@ -229,9 +249,31 @@ async function observeNestedTreeWork(
       childCollectionRows,
     }
   } finally {
-    await roots?.cleanup()
-    await Promise.all(Object.values(sources).map((source) => source.cleanup()))
-    queryClient.clear()
+    let cleanupRejected = false
+    let cleanupError: unknown
+    try {
+      await runCleanups([
+        async () => rootCollection?.cleanup(),
+        ...Object.values(sources).map((source) => async () => source.cleanup()),
+      ])
+    } catch (error) {
+      cleanupRejected = true
+      cleanupError = error
+    }
+
+    let clearRejected = false
+    let clearError: unknown
+    try {
+      queryClient.clear()
+    } catch (error) {
+      clearRejected = true
+      clearError = error
+    }
+
+    rethrowFirstCleanupError([
+      { rejected: cleanupRejected, error: cleanupError },
+      { rejected: clearRejected, error: clearError },
+    ])
   }
 }
 
@@ -257,7 +299,7 @@ function expectNestedTreeWork(
 }
 
 describe(`nested includes setup counter oracle`, () => {
-  fcTest.prop([fc.integer({ min: 1, max: 20 })], {
+  fcTest.prop([fc.integer({ min: 0, max: 20 })], {
     numRuns: 6,
     seed: 1634,
   })(
@@ -266,6 +308,10 @@ describe(`nested includes setup counter oracle`, () => {
       expectNestedTreeWork(await observeNestedTreeWork(rootCount), rootCount)
     },
   )
+
+  it(`constructs no nested collections for an empty root query`, async () => {
+    expectNestedTreeWork(await observeNestedTreeWork(0), 0)
+  })
 
   it(`pins #1634's reported 20-by-2-by-5-by-10 tree`, async () => {
     // These semantic counters do not claim to measure elapsed time. They pin
