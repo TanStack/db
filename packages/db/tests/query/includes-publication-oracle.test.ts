@@ -258,7 +258,12 @@ const publicationProjection: TraceProjection<
 }
 
 function sameValue(left: unknown, right: unknown): boolean {
-  return JSON.stringify(left) === JSON.stringify(right)
+  try {
+    expect(left).toEqual(right)
+    return true
+  } catch {
+    return false
+  }
 }
 
 // #1713 is specifically publication of Q1's compiled null placeholder to Q2:
