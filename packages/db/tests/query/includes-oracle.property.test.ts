@@ -16,6 +16,7 @@ import {
 } from '../utils.js'
 import { expectAssertionFailure } from '../expected-failure.js'
 import { runTrace } from '../trace-runner.js'
+import type { AssertionDifference } from '../expected-failure.js'
 import type {
   TraceCheckpoint,
   TraceDriver,
@@ -57,6 +58,86 @@ type Scenario = {
 
 type OracleNode = RootRow & {
   children?: Array<OracleNode>
+}
+
+type RelationshipNode = {
+  id: number
+  children?: unknown
+}
+
+function isRelationshipNode(value: unknown): value is RelationshipNode {
+  return (
+    typeof value === `object` &&
+    value !== null &&
+    `id` in value &&
+    typeof value.id === `number`
+  )
+}
+
+function findRelationshipNode(
+  value: unknown,
+  id: number,
+): RelationshipNode | undefined {
+  if (!Array.isArray(value)) return undefined
+
+  for (const entry of value) {
+    if (!isRelationshipNode(entry)) continue
+    if (entry.id === id) return entry
+    const nested = findRelationshipNode(entry.children, id)
+    if (nested) return nested
+  }
+  return undefined
+}
+
+function hasDirectChild(value: unknown, parentId: number, childId: number) {
+  const parent = findRelationshipNode(value, parentId)
+  return (
+    Array.isArray(parent?.children) &&
+    parent.children.some(
+      (child) => isRelationshipNode(child) && child.id === childId,
+    )
+  )
+}
+
+function classifyUnexpectedSharedChild(
+  { actual, expected }: AssertionDifference,
+  unexpectedParentId: number,
+  expectedParentId: number,
+  childId: number,
+): boolean {
+  return (
+    hasDirectChild(actual, unexpectedParentId, childId) &&
+    !hasDirectChild(expected, unexpectedParentId, childId) &&
+    hasDirectChild(actual, expectedParentId, childId) &&
+    hasDirectChild(expected, expectedParentId, childId)
+  )
+}
+
+function classifyMissingReplacementChild(
+  { actual, expected }: AssertionDifference,
+  replacementRowId: number,
+  childId: number,
+): boolean {
+  return (
+    findRelationshipNode(actual, replacementRowId) !== undefined &&
+    findRelationshipNode(expected, replacementRowId) !== undefined &&
+    !hasDirectChild(actual, replacementRowId, childId) &&
+    hasDirectChild(expected, replacementRowId, childId)
+  )
+}
+
+type RelationshipProjectionNode = {
+  id: number
+  children?: Array<RelationshipProjectionNode>
+}
+
+function relationshipOnly(
+  nodes: ReadonlyArray<OracleNode>,
+): Array<RelationshipProjectionNode> {
+  return nodes.map(({ id, children }) => ({
+    id,
+    ...(children ? { children: relationshipOnly(children) } : {}),
+  }))
 }
 
 type MaterializeRoot = { id: number; middleId: number }
@@ -1160,9 +1241,28 @@ function fullRowBatchScenarioAtDepthArbitrary(
 }
 
 type VisibleRelationshipTransition = `reparent` | `rekey`
+type BranchDeliveryOrder = `forward` | `reverse`
+const branchDeliveryOrders: ReadonlyArray<BranchDeliveryOrder> = [
+  `forward`,
+  `reverse`,
+]
 
 function otherBranch(branch: 0 | 1): 0 | 1 {
   return branch === 0 ? 1 : 0
+}
+
+function deliverBranches(
+  branches: readonly [ConnectedBranch, ConnectedBranch],
+  order: BranchDeliveryOrder,
+): readonly [ConnectedBranch, ConnectedBranch] {
+  return order === `forward` ? branches : [branches[1], branches[0]]
+}
+
+function deliveredBranchIndex(
+  branch: 0 | 1,
+  order: BranchDeliveryOrder,
+): 0 | 1 {
+  return order === `forward` ? branch : otherBranch(branch)
 }
 
 type VisibleRelationshipScenario = FullRowBatchScenario & {
@@ -1196,16 +1296,25 @@ type VisibleRelationshipScenarioOptions = {
 function assertDisjointRelationshipKeys(
   depth: IncludeDepth,
   branches: readonly [ConnectedBranch, ConnectedBranch],
-  rekeyGroup: number | undefined,
+  {
+    extraIds = [],
+    extraGroups = [],
+  }: {
+    extraIds?: ReadonlyArray<number>
+    extraGroups?: ReadonlyArray<number>
+  } = {},
 ): void {
-  const ids = branches.flatMap(({ idBase }) =>
-    Array.from({ length: depth + 1 }, (_, level) => idBase + level),
-  )
+  const ids = [
+    ...branches.flatMap(({ idBase }) =>
+      Array.from({ length: depth + 1 }, (_, level) => idBase + level),
+    ),
+    ...extraIds,
+  ]
   const groups = [
     ...branches.flatMap(({ groupBase }) =>
       Array.from({ length: depth + 1 }, (_, level) => groupBase + level),
     ),
-    ...(rekeyGroup === undefined ? [] : [rekeyGroup]),
+    ...extraGroups,
   ]
   if (
     new Set(ids).size !== ids.length ||
@@ -1223,7 +1332,7 @@ function createVisibleRelationshipScenario(
   assertDisjointRelationshipKeys(
     depth,
     branches,
-    transition === `rekey` ? options.rekeyGroup : undefined,
+    transition === `rekey` ? { extraGroups: [options.rekeyGroup] } : {},
   )
   const steps = createConnectedBatchBranches(depth, branches)
   const roots = new Map<number, RootRow>()
@@ -1387,6 +1496,718 @@ function visibleRelationshipScenarioArbitrary(
     )
 }
 
+type GeneratedBranchOptions = {
+  leftIdBase: number
+  leftGroupBase: number
+  rightIdBase: number
+  rightGroupBase: number
+}
+
+const generatedBranchArbitraries = {
+  leftIdBase: fc.integer({ min: 100, max: 500 }),
+  leftGroupBase: fc.integer({ min: 600, max: 1_000 }),
+  rightIdBase: fc.integer({ min: 1_100, max: 1_500 }),
+  rightGroupBase: fc.integer({ min: 1_600, max: 2_000 }),
+}
+
+function createGeneratedBranches({
+  leftIdBase,
+  leftGroupBase,
+  rightIdBase,
+  rightGroupBase,
+}: GeneratedBranchOptions): readonly [ConnectedBranch, ConnectedBranch] {
+  return [
+    { idBase: leftIdBase, groupBase: leftGroupBase },
+    { idBase: rightIdBase, groupBase: rightGroupBase },
+  ]
+}
+
+type TransitionHistoryScenario = FullRowBatchScenario & {
+  historyStartStepIndex: number
+}
+
+type TransitionHistoryScenarioOptions = {
+  depth: IncludeDepth
+  targetLevel: IncludeDepth
+  firstTransition: VisibleRelationshipTransition
+  secondTransition: VisibleRelationshipTransition
+  sourceBranch: 0 | 1
+  branches: readonly [ConnectedBranch, ConnectedBranch]
+  rekeyGroups: readonly [number, number]
+  insertedLevels: readonly [IncludeDepth, IncludeDepth]
+  insertedValues: readonly [number, number]
+  insertedPositions: readonly [number, number]
+}
+
+function createTransitionHistoryScenario({
+  depth,
+  targetLevel,
+  firstTransition,
+  secondTransition,
+  sourceBranch,
+  branches,
+  rekeyGroups,
+  insertedLevels,
+  insertedValues,
+  insertedPositions,
+}: TransitionHistoryScenarioOptions): TransitionHistoryScenario {
+  // Fresh keys keep this matrix green through both transitions. Separate
+  // state-aware families below reuse retired routes and replace existing rows,
+  // so those known failures remain shrinkable without masking later steps.
+  const insertedRows = [
+    {
+      id: 3_000,
+      group: 2_700,
+      value: insertedValues[0],
+      position: insertedPositions[0],
+    },
+    {
+      id: 3_001,
+      group: 2_800,
+      value: insertedValues[1],
+      position: insertedPositions[1],
+    },
+  ] as const
+  assertDisjointRelationshipKeys(depth, branches, {
+    extraIds: insertedRows.map(({ id }) => id),
+    extraGroups: [...rekeyGroups, ...insertedRows.map(({ group }) => group)],
+  })
+
+  const steps = createConnectedBatchBranches(depth, branches)
+  const historyStartStepIndex = steps.length
+  const source = branches[sourceBranch]
+  let current = {
+    ...batchChild(
+      source.idBase + targetLevel,
+      source.groupBase + targetLevel - 1,
+      source.idBase + targetLevel,
+      0,
+    ),
+    group: source.groupBase + targetLevel,
+  }
+  const appendStep = (
+    level: IncludeDepth,
+    changes: Array<SyncChange<ChildRow>>,
+  ): void => {
+    steps.push({ level, changes })
+  }
+  const insertRow = (
+    row: (typeof insertedRows)[number],
+    level: IncludeDepth,
+  ): ChildRow => {
+    if (level !== targetLevel && level !== targetLevel + 1) {
+      throw new Error(`History inserts must touch the target or its child`)
+    }
+    return {
+      ...row,
+      parentGroup: level === targetLevel ? current.parentGroup : current.group,
+    }
+  }
+  const transition = (
+    kind: VisibleRelationshipTransition,
+    rekeyGroup: number,
+  ): void => {
+    const currentParentBranch = branches.findIndex(
+      ({ groupBase }) => current.parentGroup === groupBase + targetLevel - 1,
+    )
+    if (currentParentBranch !== 0 && currentParentBranch !== 1) {
+      throw new Error(`Transition target has no visible parent branch`)
+    }
+    const destination = branches[otherBranch(currentParentBranch)]
+    current = {
+      ...current,
+      parentGroup:
+        kind === `reparent`
+          ? destination.groupBase + targetLevel - 1
+          : current.parentGroup,
+      group: kind === `rekey` ? rekeyGroup : current.group,
+    }
+    appendStep(targetLevel, [{ type: `update`, value: current }])
+  }
+  const interleaveTransition = (
+    kind: VisibleRelationshipTransition,
+    rekeyGroup: number,
+    row: (typeof insertedRows)[number],
+    level: IncludeDepth,
+  ): void => {
+    if (kind === `rekey`) {
+      if (level !== targetLevel + 1) {
+        throw new Error(`Rekey histories must seed the new child route`)
+      }
+      transition(kind, rekeyGroup)
+      appendStep(level, [{ type: `insert`, value: insertRow(row, level) }])
+      return
+    }
+
+    const inserted = insertRow(row, level)
+    appendStep(level, [{ type: `insert`, value: inserted }])
+    transition(kind, rekeyGroup)
+    appendStep(level, [{ type: `delete`, value: inserted }])
+  }
+
+  interleaveTransition(
+    firstTransition,
+    rekeyGroups[0],
+    insertedRows[0],
+    insertedLevels[0],
+  )
+  interleaveTransition(
+    secondTransition,
+    rekeyGroups[1],
+    insertedRows[1],
+    insertedLevels[1],
+  )
+
+  return {
+    depth,
+    steps,
+    historyStartStepIndex,
+  }
+}
+
+function transitionHistoryPlacements(
+  depth: IncludeDepth,
+  firstTransition: VisibleRelationshipTransition,
+  secondTransition: VisibleRelationshipTransition,
+): Array<{
+  targetLevel: IncludeDepth
+  insertedLevels: readonly [IncludeDepth, IncludeDepth]
+}> {
+  // A rekey needs one child level so it changes relationship membership. It
+  // also fails when two descendant levels remain. The single-transition matrix
+  // pins that failure and will turn red when this continuation can be widened.
+  const minimumTargetLevel =
+    firstTransition === `rekey` || secondTransition === `rekey`
+      ? Math.max(1, depth - 1)
+      : 1
+  const maximumTargetLevel =
+    firstTransition === `rekey` || secondTransition === `rekey`
+      ? depth - 1
+      : depth
+  const placements: Array<{
+    targetLevel: IncludeDepth
+    insertedLevels: readonly [IncludeDepth, IncludeDepth]
+  }> = []
+
+  for (let level = minimumTargetLevel; level <= maximumTargetLevel; level++) {
+    const targetLevel = level as IncludeDepth
+    const insertedLevels = (
+      transition: VisibleRelationshipTransition,
+    ): ReadonlyArray<IncludeDepth> =>
+      transition === `rekey`
+        ? [(targetLevel + 1) as IncludeDepth]
+        : targetLevel < depth
+          ? [targetLevel, (targetLevel + 1) as IncludeDepth]
+          : [targetLevel]
+
+    for (const firstInsertedLevel of insertedLevels(firstTransition)) {
+      for (const secondInsertedLevel of insertedLevels(secondTransition)) {
+        placements.push({
+          targetLevel,
+          insertedLevels: [firstInsertedLevel, secondInsertedLevel],
+        })
+      }
+    }
+  }
+
+  return placements
+}
+
+function transitionHistoryScenariosArbitrary(
+  depth: IncludeDepth,
+  firstTransition: VisibleRelationshipTransition,
+  secondTransition: VisibleRelationshipTransition,
+  sourceBranch: 0 | 1,
+): fc.Arbitrary<ReadonlyArray<TransitionHistoryScenario>> {
+  const placements = transitionHistoryPlacements(
+    depth,
+    firstTransition,
+    secondTransition,
+  )
+
+  return fc
+    .record({
+      ...generatedBranchArbitraries,
+      firstRekeyGroup: fc.integer({ min: 2_100, max: 2_300 }),
+      secondRekeyGroup: fc.integer({ min: 2_400, max: 2_600 }),
+      firstInsertedValue: fc.integer({ min: -3, max: 3 }),
+      secondInsertedValue: fc.integer({ min: -3, max: 3 }),
+      firstInsertedPosition: fc.integer({ min: -2, max: 2 }),
+      secondInsertedPosition: fc.integer({ min: -2, max: 2 }),
+    })
+    .map(
+      ({
+        leftIdBase,
+        leftGroupBase,
+        rightIdBase,
+        rightGroupBase,
+        firstRekeyGroup,
+        secondRekeyGroup,
+        firstInsertedValue,
+        secondInsertedValue,
+        firstInsertedPosition,
+        secondInsertedPosition,
+      }) =>
+        placements.map(({ targetLevel, insertedLevels }) =>
+          createTransitionHistoryScenario({
+            depth,
+            targetLevel,
+            firstTransition,
+            secondTransition,
+            sourceBranch,
+            branches: createGeneratedBranches({
+              leftIdBase,
+              leftGroupBase,
+              rightIdBase,
+              rightGroupBase,
+            }),
+            rekeyGroups: [firstRekeyGroup, secondRekeyGroup],
+            insertedLevels,
+            insertedValues: [firstInsertedValue, secondInsertedValue],
+            insertedPositions: [firstInsertedPosition, secondInsertedPosition],
+          }),
+        ),
+    )
+}
+
+function expectEveryHistoryStepVisible(
+  scenario: TransitionHistoryScenario,
+): void {
+  for (
+    let stepIndex = scenario.historyStartStepIndex;
+    stepIndex < scenario.steps.length;
+    stepIndex++
+  ) {
+    const before = relationshipOnly(
+      recomputeFullRowBatchScenario(scenario, stepIndex),
+    )
+    const after = relationshipOnly(
+      recomputeFullRowBatchScenario(scenario, stepIndex + 1),
+    )
+    expect(after).not.toEqual(before)
+  }
+}
+
+type ClassifiedHistoryScenario = {
+  control: FullRowBatchScenario
+  greenVariants?: ReadonlyArray<FullRowBatchScenario>
+  candidate: FullRowBatchScenario
+  candidateCheckpoint: number
+  classify: (difference: AssertionDifference) => boolean
+}
+
+type RekeyRouteReuseOptions = {
+  depth: 2 | 3 | 4
+  sourceBranch: 0 | 1
+  branches: readonly [ConnectedBranch, ConnectedBranch]
+  rekeyGroup: number
+  insertedId: number
+  insertedValue: number
+  insertedPosition: number
+}
+
+function createRekeyRouteReuseFixture({
+  depth,
+  sourceBranch,
+  branches,
+  rekeyGroup,
+  insertedId,
+  insertedValue,
+  insertedPosition,
+}: RekeyRouteReuseOptions): {
+  prefix: Array<FullRowBatchStep>
+  rekey: FullRowBatchStep
+  reuse: FullRowBatchStep
+  classify: (difference: AssertionDifference) => boolean
+} {
+  const targetLevel = (depth - 1) as IncludeDepth
+  assertDisjointRelationshipKeys(depth, branches, {
+    extraIds: [insertedId],
+    extraGroups: [rekeyGroup],
+  })
+
+  const prefix = createConnectedBatchBranches(depth, branches)
+  const source = branches[sourceBranch]
+  const parentGroup = source.groupBase + targetLevel - 1
+  const oldGroup = source.groupBase + targetLevel
+  const inserted = {
+    ...batchChild(insertedId, parentGroup, insertedValue, insertedPosition),
+    group: oldGroup,
+  }
+  const insertOldRoute: FullRowBatchStep = {
+    level: targetLevel,
+    changes: [{ type: `insert`, value: inserted }],
+  }
+  const rekey: FullRowBatchStep = {
+    level: targetLevel,
+    changes: [
+      {
+        type: `update`,
+        value: {
+          ...batchChild(
+            source.idBase + targetLevel,
+            parentGroup,
+            source.idBase + targetLevel,
+            0,
+          ),
+          group: rekeyGroup,
+        },
+      },
+    ],
+  }
+
+  const retiredRowId = source.idBase + targetLevel
+  const childId = source.idBase + targetLevel + 1
+
+  return {
+    prefix,
+    rekey,
+    reuse: insertOldRoute,
+    classify: (difference) =>
+      classifyUnexpectedSharedChild(
+        difference,
+        retiredRowId,
+        insertedId,
+        childId,
+      ),
+  }
+}
+
+function createRekeyRouteReuseScenarios(
+  options: RekeyRouteReuseOptions,
+): ClassifiedHistoryScenario {
+  const { depth } = options
+  const { prefix, rekey, reuse, classify } =
+    createRekeyRouteReuseFixture(options)
+
+  return {
+    control: { depth, steps: [...prefix, reuse] },
+    candidate: { depth, steps: [...prefix, rekey, reuse] },
+    candidateCheckpoint: prefix.length + 2,
+    classify,
+  }
+}
+
+function createIntraBatchRekeyRouteReuseScenarios(
+  options: RekeyRouteReuseOptions,
+): ClassifiedHistoryScenario {
+  const { depth } = options
+  const { prefix, rekey, reuse, classify } =
+    createRekeyRouteReuseFixture(options)
+  if (rekey.level === 0 || rekey.level !== reuse.level) {
+    throw new Error(`Intra-batch route reuse must share a child level`)
+  }
+
+  return {
+    control: {
+      depth,
+      steps: [
+        ...prefix,
+        { level: rekey.level, changes: [...reuse.changes, ...rekey.changes] },
+      ],
+    },
+    candidate: {
+      depth,
+      steps: [
+        ...prefix,
+        { level: rekey.level, changes: [...rekey.changes, ...reuse.changes] },
+      ],
+    },
+    candidateCheckpoint: prefix.length + 1,
+    classify,
+  }
+}
+
+function rekeyRouteReuseScenarioArbitrary(
+  depth: 2 | 3 | 4,
+  sourceBranch: 0 | 1,
+  createScenario: (
+    options: RekeyRouteReuseOptions,
+  ) => ClassifiedHistoryScenario = createRekeyRouteReuseScenarios,
+): fc.Arbitrary<ClassifiedHistoryScenario> {
+  return fc
+    .record({
+      ...generatedBranchArbitraries,
+      rekeyGroup: fc.integer({ min: 2_100, max: 2_600 }),
+      insertedId: fc.integer({ min: 3_000, max: 3_200 }),
+      insertedValue: fc.integer({ min: -3, max: 3 }),
+      insertedPosition: fc.integer({ min: -2, max: 2 }),
+    })
+    .map(
+      ({
+        leftIdBase,
+        leftGroupBase,
+        rightIdBase,
+        rightGroupBase,
+        rekeyGroup,
+        insertedId,
+        insertedValue,
+        insertedPosition,
+      }) =>
+        createScenario({
+          depth,
+          sourceBranch,
+          branches: createGeneratedBranches({
+            leftIdBase,
+            leftGroupBase,
+            rightIdBase,
+            rightGroupBase,
+          }),
+          rekeyGroup,
+          insertedId,
+          insertedValue,
+          insertedPosition,
+        }),
+    )
+}
+
+type MovedChildReplacementOptions = {
+  depth: 3 | 4
+  targetLevel: IncludeDepth
+  sourceBranch: 0 | 1
+  branches: readonly [ConnectedBranch, ConnectedBranch]
+  insertedId: number
+  insertedValue: number
+  insertedPosition: number
+}
+
+function createMovedChildReplacementScenarios({
+  depth,
+  targetLevel,
+  sourceBranch,
+  branches,
+  insertedId,
+  insertedValue,
+  insertedPosition,
+}: MovedChildReplacementOptions): ClassifiedHistoryScenario {
+  if (targetLevel + 2 > depth) {
+    throw new Error(`Child replacement needs a visible grandchild`)
+  }
+  assertDisjointRelationshipKeys(depth, branches, {
+    extraIds: [insertedId],
+  })
+
+  const prefix = createConnectedBatchBranches(depth, branches)
+  const source = branches[sourceBranch]
+  const destination = branches[otherBranch(sourceBranch)]
+  const targetGroup = source.groupBase + targetLevel
+  const childLevel = (targetLevel + 1) as IncludeDepth
+  const childGroup = source.groupBase + childLevel
+  const existingChild = {
+    ...batchChild(
+      source.idBase + childLevel,
+      targetGroup,
+      source.idBase + childLevel,
+      0,
+    ),
+    group: childGroup,
+  }
+  const replacementChild = {
+    ...batchChild(insertedId, targetGroup, insertedValue, insertedPosition),
+    group: childGroup,
+  }
+  const replaceChild: Array<FullRowBatchStep> = [
+    {
+      level: childLevel,
+      changes: [{ type: `delete`, value: existingChild }],
+    },
+    {
+      level: childLevel,
+      changes: [{ type: `insert`, value: replacementChild }],
+    },
+  ]
+  const reparent: FullRowBatchStep = {
+    level: targetLevel,
+    changes: [
+      {
+        type: `update`,
+        value: {
+          ...batchChild(
+            source.idBase + targetLevel,
+            destination.groupBase + targetLevel - 1,
+            source.idBase + targetLevel,
+            0,
+          ),
+          group: targetGroup,
+        },
+      },
+    ],
+  }
+  const atomicReplacement = (
+    order: `delete-first` | `insert-first`,
+  ): FullRowBatchScenario => ({
+    depth,
+    steps: [
+      ...prefix,
+      reparent,
+      {
+        level: childLevel,
+        changes:
+          order === `delete-first`
+            ? [
+                { type: `delete`, value: existingChild },
+                { type: `insert`, value: replacementChild },
+              ]
+            : [
+                { type: `insert`, value: replacementChild },
+                { type: `delete`, value: existingChild },
+              ],
+      },
+    ],
+  })
+  const grandchildId = source.idBase + targetLevel + 2
+
+  return {
+    control: { depth, steps: [...prefix, ...replaceChild] },
+    greenVariants: [
+      atomicReplacement(`delete-first`),
+      atomicReplacement(`insert-first`),
+    ],
+    candidate: { depth, steps: [...prefix, reparent, ...replaceChild] },
+    candidateCheckpoint: prefix.length + 3,
+    classify: (difference) =>
+      classifyMissingReplacementChild(difference, insertedId, grandchildId),
+  }
+}
+
+function movedChildReplacementMirrorsArbitrary(
+  depth: 3 | 4,
+  targetLevel: IncludeDepth,
+  sourceBranch: 0 | 1,
+): fc.Arbitrary<Record<BranchDeliveryOrder, ClassifiedHistoryScenario>> {
+  return fc
+    .record({
+      ...generatedBranchArbitraries,
+      insertedId: fc.integer({ min: 3_000, max: 3_200 }),
+      insertedValue: fc.integer({ min: -3, max: 3 }),
+      insertedPosition: fc.integer({ min: -2, max: 2 }),
+    })
+    .map(
+      ({
+        leftIdBase,
+        leftGroupBase,
+        rightIdBase,
+        rightGroupBase,
+        insertedId,
+        insertedValue,
+        insertedPosition,
+      }) => {
+        const branches = createGeneratedBranches({
+          leftIdBase,
+          leftGroupBase,
+          rightIdBase,
+          rightGroupBase,
+        })
+        const createMirror = (deliveryOrder: BranchDeliveryOrder) =>
+          createMovedChildReplacementScenarios({
+            depth,
+            targetLevel,
+            sourceBranch: deliveredBranchIndex(sourceBranch, deliveryOrder),
+            branches: deliverBranches(branches, deliveryOrder),
+            insertedId,
+            insertedValue,
+            insertedPosition,
+          })
+
+        return {
+          forward: createMirror(`forward`),
+          reverse: createMirror(`reverse`),
+        }
+      },
+    )
+}
+
+function createSharedRouteLifetimeScenarios(
+  parentLevel: 0 | 1,
+): ClassifiedHistoryScenario {
+  if (parentLevel === 0) {
+    const departed = batchRoot(100, 600, 100, 0)
+    const remaining = batchRoot(1_100, 600, 1_100, 1)
+    const child = { ...batchChild(101, 600, 101, 0), group: 601 }
+    const controlSteps: Array<FullRowBatchStep> = [
+      { level: 0, changes: [{ type: `insert`, value: departed }] },
+      { level: 1, changes: [{ type: `insert`, value: child }] },
+      {
+        level: 0,
+        changes: [{ type: `update`, value: { ...departed, group: 700 } }],
+      },
+      {
+        level: 1,
+        changes: [
+          { type: `update`, value: { ...child, value: child.value + 1 } },
+        ],
+      },
+    ]
+    const candidateSteps: Array<FullRowBatchStep> = [
+      {
+        level: 0,
+        changes: [
+          { type: `insert`, value: departed },
+          { type: `insert`, value: remaining },
+        ],
+      },
+      ...controlSteps.slice(1),
+    ]
+
+    return {
+      control: { depth: 1, steps: controlSteps },
+      candidate: { depth: 1, steps: candidateSteps },
+      candidateCheckpoint: candidateSteps.length,
+      classify: (difference) =>
+        classifyUnexpectedSharedChild(
+          difference,
+          departed.id,
+          remaining.id,
+          child.id,
+        ),
+    }
+  }
+
+  const root = batchRoot(100, 600, 100, 0)
+  const departed = { ...batchChild(101, 600, 101, 0), group: 601 }
+  const remaining = { ...batchChild(1_101, 600, 1_101, 1), group: 601 }
+  const child = { ...batchChild(102, 601, 102, 0), group: 602 }
+  const controlSteps: Array<FullRowBatchStep> = [
+    { level: 0, changes: [{ type: `insert`, value: root }] },
+    { level: 1, changes: [{ type: `insert`, value: departed }] },
+    { level: 2, changes: [{ type: `insert`, value: child }] },
+    {
+      level: 1,
+      changes: [{ type: `update`, value: { ...departed, group: 700 } }],
+    },
+    {
+      level: 2,
+      changes: [
+        { type: `update`, value: { ...child, value: child.value + 1 } },
+      ],
+    },
+  ]
+  const candidateSteps: Array<FullRowBatchStep> = [
+    controlSteps[0]!,
+    {
+      level: 1,
+      changes: [
+        { type: `insert`, value: departed },
+        { type: `insert`, value: remaining },
+      ],
+    },
+    ...controlSteps.slice(2),
+  ]
+
+  return {
+    control: { depth: 2, steps: controlSteps },
+    candidate: { depth: 2, steps: candidateSteps },
+    candidateCheckpoint: candidateSteps.length,
+    classify: (difference) =>
+      classifyUnexpectedSharedChild(
+        difference,
+        departed.id,
+        remaining.id,
+        child.id,
+      ),
+  }
+}
+
 async function expectFullRowBatchScenarioMatches({
   depth,
   steps,
@@ -1396,6 +2217,35 @@ async function expectFullRowBatchScenarioMatches({
     driver: createFullRowBatchTraceDriver(depth),
     projection: structuralProjection,
   })
+}
+
+async function expectClassifiedHistoryFailure({
+  control,
+  greenVariants = [],
+  candidate,
+  candidateCheckpoint,
+  classify,
+}: ClassifiedHistoryScenario): Promise<void> {
+  await expectFullRowBatchScenarioMatches(control)
+  for (const greenVariant of greenVariants) {
+    await expectFullRowBatchScenarioMatches(greenVariant)
+  }
+  await expectAssertionFailure(
+    () => expectFullRowBatchScenarioMatches(candidate),
+    { checkpoint: candidateCheckpoint, classify },
+  )()
+}
+
+async function expectClassifiedHistoryMatches({
+  control,
+  greenVariants = [],
+  candidate,
+}: ClassifiedHistoryScenario): Promise<void> {
+  await expectFullRowBatchScenarioMatches(control)
+  for (const greenVariant of greenVariants) {
+    await expectFullRowBatchScenarioMatches(greenVariant)
+  }
+  await expectFullRowBatchScenarioMatches(candidate)
 }
 
 function recomputeFullRowBatchScenario(
@@ -1893,6 +2743,45 @@ const minimalRekeyScenario = createVisibleRelationshipScenario({
   noise: [],
 })
 
+const transitionHistoryBranches = [
+  { idBase: 100, groupBase: 600 },
+  { idBase: 1_100, groupBase: 1_600 },
+] as const
+
+// The first rekey is correct on its own. Reusing its old correlation key for a
+// new visible row then resurrects the detached descendant under the old row.
+const {
+  control: rekeyRouteReuseControl,
+  candidate: rekeyRouteResurrectionScenario,
+  candidateCheckpoint: rekeyRouteResurrectionCheckpoint,
+  classify: classifyRekeyRouteResurrection,
+} = createRekeyRouteReuseScenarios({
+  depth: 2,
+  sourceBranch: 0,
+  branches: transitionHistoryBranches,
+  rekeyGroup: 2_100,
+  insertedId: 3_000,
+  insertedValue: 0,
+  insertedPosition: 0,
+})
+
+// The reparent and delete are each correct. Replacing the moved row's child
+// under the same correlation key then loses the existing grandchild snapshot.
+const {
+  control: childReplacementControl,
+  candidate: movedSubtreeChildReplacementScenario,
+  candidateCheckpoint: movedSubtreeChildReplacementCheckpoint,
+  classify: classifyMovedSubtreeChildReplacement,
+} = createMovedChildReplacementScenarios({
+  depth: 3,
+  targetLevel: 1,
+  sourceBranch: 0,
+  branches: transitionHistoryBranches,
+  insertedId: 3_000,
+  insertedValue: 0,
+  insertedPosition: 0,
+})
+
 describe(`includes recompute oracle`, () => {
   fcTest(`rejects overlapping visible relationship keys`, () => {
     const base = {
@@ -1979,6 +2868,118 @@ describe(`includes recompute oracle`, () => {
     ),
   )
 
+  fcTest(
+    `discovered trace: reusing a rekeyed row's old route does not resurrect its child`,
+    expectAssertionFailure(
+      () => expectFullRowBatchScenarioMatches(rekeyRouteResurrectionScenario),
+      {
+        checkpoint: rekeyRouteResurrectionCheckpoint,
+        classify: classifyRekeyRouteResurrection,
+      },
+    ),
+  )
+
+  fcTest(
+    `matches recomputation when sharing a route without rekeying its existing row`,
+    () => expectFullRowBatchScenarioMatches(rekeyRouteReuseControl),
+  )
+
+  fcTest(
+    `discovered trace: replacing a moved subtree child retains its grandchild`,
+    expectAssertionFailure(
+      () =>
+        expectFullRowBatchScenarioMatches(movedSubtreeChildReplacementScenario),
+      {
+        checkpoint: movedSubtreeChildReplacementCheckpoint,
+        classify: classifyMovedSubtreeChildReplacement,
+      },
+    ),
+  )
+
+  fcTest(
+    `matches recomputation when replacing a child without reparenting its ancestor`,
+    () => expectFullRowBatchScenarioMatches(childReplacementControl),
+  )
+
+  for (const depth of [2, 3, 4] as const) {
+    for (const sourceBranch of [0, 1] as const) {
+      fcTest.prop([rekeyRouteReuseScenarioArbitrary(depth, sourceBranch)], {
+        numRuns: 4,
+        seed: 1726 + depth * 10 + sourceBranch,
+      })(
+        `discovered histories: reusing a retired route at depth ${depth}, branch ${sourceBranch}`,
+        expectClassifiedHistoryFailure,
+      )
+
+      fcTest.prop(
+        [
+          rekeyRouteReuseScenarioArbitrary(
+            depth,
+            sourceBranch,
+            createIntraBatchRekeyRouteReuseScenarios,
+          ),
+        ],
+        {
+          numRuns: 4,
+          seed: 1733 + depth * 10 + sourceBranch,
+        },
+      )(
+        `discovered histories: intra-batch rekey then retired-route reuse at depth ${depth}, branch ${sourceBranch}`,
+        expectClassifiedHistoryFailure,
+      )
+    }
+  }
+
+  for (const parentLevel of [0, 1] as const) {
+    fcTest(
+      `discovered trace: a departed level-${parentLevel} shared-route subscriber receives later child updates`,
+      () =>
+        expectClassifiedHistoryFailure(
+          createSharedRouteLifetimeScenarios(parentLevel),
+        ),
+    )
+  }
+
+  for (const depth of [3, 4] as const) {
+    for (let targetLevel = 1; targetLevel <= depth - 2; targetLevel++) {
+      for (const sourceBranch of [0, 1] as const) {
+        fcTest.prop(
+          [
+            movedChildReplacementMirrorsArbitrary(
+              depth,
+              targetLevel as IncludeDepth,
+              sourceBranch,
+            ),
+          ],
+          {
+            numRuns: 4,
+            seed: 1727 + depth * 100 + targetLevel * 10 + sourceBranch,
+          },
+        )(
+          `classifies forward/reverse delivery mirrors when replacing a moved child at depth ${depth}, level ${targetLevel}, source ${sourceBranch}`,
+          async (scenarios) => {
+            for (const deliveryOrder of branchDeliveryOrders) {
+              const deliveredSource = deliveredBranchIndex(
+                sourceBranch,
+                deliveryOrder,
+              )
+              // At depth 4, level 2, replacement stays green only when the
+              // moved branch was delivered second. The mirrors share one
+              // generated fixture, so delivery order is the only difference.
+              const expectsFailure =
+                depth !== 4 || targetLevel !== 2 || deliveredSource !== 1
+              await (
+                expectsFailure
+                  ? expectClassifiedHistoryFailure
+                  : expectClassifiedHistoryMatches
+              )(scenarios[deliveryOrder])
+            }
+          },
+        )
+      }
+    }
+  }
+
   fcTest.prop(
     [
       fc.constantFrom<FlatMaterialization>(`array`, `concat`),
@@ -2053,6 +3054,53 @@ describe(`includes recompute oracle`, () => {
             }
           },
         )
+      }
+    }
+  }
+
+  for (const depth of [1, 2, 3, 4] as const) {
+    const transitions: Array<VisibleRelationshipTransition> = [
+      `reparent`,
+      `rekey`,
+    ]
+    for (const [firstIndex, firstTransition] of transitions.entries()) {
+      for (const [secondIndex, secondTransition] of transitions.entries()) {
+        if (
+          transitionHistoryPlacements(depth, firstTransition, secondTransition)
+            .length === 0
+        ) {
+          continue
+        }
+
+        for (const sourceBranch of [0, 1] as const) {
+          fcTest.prop(
+            [
+              transitionHistoryScenariosArbitrary(
+                depth,
+                firstTransition,
+                secondTransition,
+                sourceBranch,
+              ),
+            ],
+            {
+              numRuns: 3,
+              seed:
+                1725 +
+                depth * 100 +
+                firstIndex * 10 +
+                secondIndex * 2 +
+                sourceBranch,
+            },
+          )(
+            `matches recomputation for ${firstTransition} → ${secondTransition} histories at depth ${depth}, branch ${sourceBranch}`,
+            async (scenarios) => {
+              for (const scenario of scenarios) {
+                expectEveryHistoryStepVisible(scenario)
+                await expectFullRowBatchScenarioMatches(scenario)
+              }
+            },
+          )
+        }
       }
     }
   }
