@@ -1,5 +1,5 @@
 import { CollectionImpl } from '../../collection/index.js'
-import { isCollectionOptions } from '../../client.js'
+import { hasCollectionOptionsBrand } from '../../collection-options.js'
 import {
   Aggregate as AggregateExpr,
   CollectionRef,
@@ -37,7 +37,7 @@ import {
 } from './functions.js'
 import type { SourceClauseContext } from '../../errors.js'
 import type { NamespacedRow, SingleResult } from '../../types.js'
-import type { CollectionOptions } from '../../client.js'
+import type { CollectionOptionsIdentity } from '../../collection-options.js'
 import type {
   Aggregate,
   BasicExpression,
@@ -78,7 +78,7 @@ import type {
 const UNION_ALL_SOURCE_CONTEXT = `unionAll clause` satisfies SourceClauseContext
 
 type CollectionResolver = (
-  options: CollectionOptions<any, string | number, any, any>,
+  options: CollectionOptionsIdentity<any, string | number, any, any, any>,
 ) => CollectionImpl<any, string | number, any, any, any>
 
 export class BaseQueryBuilder<TContext extends Context = Context> {
@@ -155,7 +155,7 @@ export class BaseQueryBuilder<TContext extends Context = Context> {
 
       if (sourceValue instanceof CollectionImpl) {
         ref = new CollectionRef(sourceValue, alias)
-      } else if (isCollectionOptions(sourceValue)) {
+      } else if (hasCollectionOptionsBrand(sourceValue)) {
         if (!this.resolveCollection) {
           throw new Error(
             `Cannot use collection descriptor "${alias}" as a query source without a DbClient resolver. In React, wrap your tree in <DbProvider>.`,

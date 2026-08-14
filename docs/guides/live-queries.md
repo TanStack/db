@@ -214,8 +214,10 @@ export class UserListComponent {
 > captured opaque values reactive. See the [React Adapter
 > documentation](../framework/react/overview#query-identity) for details.
 
-For server rendering and hydration, live query preloading feeds source collection
-rows into the `DbClient` payload. See the [SSR and Hydration guide](./ssr.md).
+For server rendering and hydration, live query preloading transports the ordered
+query result without implicitly serializing its source collections. Explicit
+collection preloading still transports normalized collection rows. See the
+[SSR and Hydration guide](./ssr.md).
 
 #### When React Needs a Query Key
 

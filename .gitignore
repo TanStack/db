@@ -10,6 +10,8 @@ yarn.lock
 build
 coverage
 dist
+playwright-report
+test-results
 
 # misc
 .DS_Store

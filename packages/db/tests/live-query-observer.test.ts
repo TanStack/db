@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from 'vitest'
 import { createCollection } from '../src/collection/index.js'
+import { DbClient } from '../src/client.js'
 import { createLiveQueryObserver } from '../src/live-query-observer.js'
 import {
   mockSyncCollectionOptions,
@@ -126,6 +127,227 @@ function makeControlledTruncateSource() {
 }
 
 describe(`createLiveQueryObserver`, () => {
+  it(`shows a hydrated result until the live collection is authoritative`, async () => {
+    const collection = makeLoadingSource()
+    const client = new DbClient()
+    client.hydrate({
+      collections: [],
+      liveQueries: [
+        {
+          queryHash: `people`,
+          dehydratedAt: 1,
+          snapshot: {
+            rows: [{ key: `1`, value: { id: `1`, name: `From server` } }],
+          },
+        },
+      ],
+    })
+    const observer = createLiveQueryObserver<Row, string>(collection as any, {
+      client,
+      queryHash: `people`,
+      mode: `wholesale`,
+    })
+
+    expect(observer.getSnapshot()).toMatchObject({
+      status: `ready`,
+      data: [{ id: `1`, name: `From server` }],
+    })
+
+    const visibleSnapshots: Array<ReadonlyArray<Row>> = []
+    observer.subscribe(() => {
+      visibleSnapshots.push(observer.getSnapshot().data as ReadonlyArray<Row>)
+    })
+    collection.utils.begin()
+    collection.utils.write({
+      type: `insert`,
+      value: { id: `2`, name: `From live sync` },
+    })
+    collection.utils.commit()
+
+    expect(observer.getSnapshot().data).toEqual([
+      { id: `1`, name: `From server` },
+    ])
+    expect(visibleSnapshots).toEqual([])
+
+    collection.utils.markReady()
+    await Promise.resolve()
+
+    expect(observer.getSnapshot().data).toEqual([
+      expect.objectContaining({ id: `2`, name: `From live sync` }),
+    ])
+    expect(visibleSnapshots).toHaveLength(1)
+    expect(visibleSnapshots[0]).toEqual([
+      expect.objectContaining({ id: `2`, name: `From live sync` }),
+    ])
+    observer.dispose()
+  })
+
+  it(`delivers an atomic hydrated-to-live diff to granular consumers`, async () => {
+    const collection = makeLoadingSource()
+    const client = new DbClient()
+    client.hydrate({
+      collections: [],
+      liveQueries: [
+        {
+          queryHash: `people`,
+          dehydratedAt: 1,
+          snapshot: {
+            rows: [{ key: `1`, value: { id: `1`, name: `From server` } }],
+          },
+        },
+      ],
+    })
+    const observer = createLiveQueryObserver<Row, string>(collection as any, {
+      client,
+      queryHash: `people`,
+    })
+    const changes: Array<ChangeMessage<Row, string>> = []
+    observer.subscribe((batch) => changes.push(...(batch ?? [])))
+
+    expect(changes).toEqual([
+      {
+        type: `insert`,
+        key: `1`,
+        value: { id: `1`, name: `From server` },
+      },
+    ])
+    changes.length = 0
+
+    collection.utils.begin()
+    collection.utils.write({
+      type: `insert`,
+      value: { id: `2`, name: `From live sync` },
+    })
+    collection.utils.commit()
+    expect(changes).toEqual([])
+
+    collection.utils.markReady()
+    await Promise.resolve()
+    expect(changes).toEqual([
+      {
+        type: `delete`,
+        key: `1`,
+        value: { id: `1`, name: `From server` },
+      },
+      {
+        type: `insert`,
+        key: `2`,
+        value: expect.objectContaining({ id: `2`, name: `From live sync` }),
+      },
+    ])
+    observer.dispose()
+  })
+
+  it(`does not replay a consumed server snapshot to a later observer`, async () => {
+    const collection = makeLoadingSource()
+    const client = new DbClient()
+    client.hydrate({
+      collections: [],
+      liveQueries: [
+        {
+          queryHash: `people`,
+          dehydratedAt: 1,
+          snapshot: {
+            rows: [{ key: `1`, value: { id: `1`, name: `From server` } }],
+          },
+        },
+      ],
+    })
+    const observer = createLiveQueryObserver<Row, string>(collection as any, {
+      client,
+      queryHash: `people`,
+      mode: `wholesale`,
+    })
+    observer.subscribe(() => {})
+
+    collection.utils.begin()
+    collection.utils.write({
+      type: `insert`,
+      value: { id: `2`, name: `From live sync` },
+    })
+    collection.utils.commit()
+    collection.utils.markReady()
+    await Promise.resolve()
+
+    const laterObserver = createLiveQueryObserver<Row, string>(
+      collection as any,
+      { client, queryHash: `people`, mode: `wholesale` },
+    )
+    expect(laterObserver.getSnapshot().data).toEqual([
+      expect.objectContaining({ id: `2`, name: `From live sync` }),
+    ])
+    expect(client._getLiveQuery(`people`)).toBeUndefined()
+    observer.dispose()
+    laterObserver.dispose()
+  })
+
+  it(`ignores a server snapshot that arrives after browser sync is ready`, () => {
+    const collection = makeSource()
+    const client = new DbClient()
+    const observer = createLiveQueryObserver<Row, string>(collection as any, {
+      client,
+      queryHash: `people`,
+      mode: `wholesale`,
+    })
+    observer.subscribe(() => {})
+
+    client.hydrate({
+      collections: [],
+      liveQueries: [
+        {
+          queryHash: `people`,
+          dehydratedAt: 1,
+          snapshot: {
+            rows: [{ key: `server`, value: { id: `server`, name: `Stale` } }],
+          },
+        },
+      ],
+    })
+
+    expect(observer.getSnapshot().data).toEqual([
+      expect.objectContaining({ id: `1`, name: `A` }),
+      expect.objectContaining({ id: `2`, name: `B` }),
+    ])
+    expect(client._getLiveQuery(`people`)).toBeUndefined()
+    observer.dispose()
+  })
+
+  it(`ignores a server failure that arrives after browser sync is ready`, async () => {
+    const collection = makeSource()
+    const client = new DbClient()
+    const observer = createLiveQueryObserver<Row, string>(collection as any, {
+      client,
+      queryHash: `people`,
+      mode: `wholesale`,
+    })
+    observer.subscribe(() => {})
+    let rejectServerResult!: (error: Error) => void
+    const serverResult = new Promise<{ rows: [] }>((_resolve, reject) => {
+      rejectServerResult = reject
+    })
+
+    client.hydrate({
+      collections: [],
+      liveQueries: [
+        {
+          queryHash: `people`,
+          dehydratedAt: 1,
+          promise: serverResult,
+        },
+      ],
+    })
+    rejectServerResult(new Error(`Stale server failure`))
+    await Promise.resolve()
+
+    expect(observer.getError()).toBeUndefined()
+    expect(observer.getSnapshot().data).toEqual([
+      expect.objectContaining({ id: `1`, name: `A` }),
+      expect.objectContaining({ id: `2`, name: `B` }),
+    ])
+    expect(client._getLiveQuery(`people`)).toBeUndefined()
+    observer.dispose()
+  })
+
   it(`exposes a stable snapshot of a ready collection (wholesale path)`, () => {
     const observer = createLiveQueryObserver<Row, string>(makeSource() as any)
 

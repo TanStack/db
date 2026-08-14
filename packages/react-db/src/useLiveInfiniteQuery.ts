@@ -1,3 +1,5 @@
+'use client'
+
 import { useCallback, useRef, useSyncExternalStore } from 'react'
 import {
   assertLiveQueryWindowManyResult,

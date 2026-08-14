@@ -49,18 +49,61 @@ export function routerWithDbClient<TRouter extends AnyRouter>(
 
   if (router.isServer) {
     const dbStream = createPushableStream<DehydratedDbState>()
-    let unsubscribe = () => {}
+    const bufferedQueryHashes = new Set<string>()
+    const streamedQueryHashes = new Set<string>()
+    let criticalStateCaptured = false
+    let renderFinishRegistered = false
+
+    const streamLiveQuery = (queryHash: string) => {
+      if (streamedQueryHashes.has(queryHash)) return
+      streamedQueryHashes.add(queryHash)
+
+      const enqueued = dbStream.enqueue(
+        dbClient.dehydrate({
+          shouldDehydrateCollection: () => false,
+          shouldDehydrateLiveQuery: (query) => query.queryHash === queryHash,
+        }),
+      )
+      if (!enqueued) {
+        console.warn(
+          `Tried to stream live query ${queryHash} after the DB stream was closed.`,
+        )
+      }
+    }
+
+    const unsubscribe = dbClient.subscribe((event) => {
+      if (event.type !== `liveQueryAdded`) return
+
+      if (!criticalStateCaptured) {
+        bufferedQueryHashes.add(event.query.queryHash)
+        return
+      }
+
+      streamLiveQuery(event.query.queryHash)
+    })
 
     router.options.dehydrate = async (): Promise<DehydratedRouterDbState> => {
       const originalDehydrated = await originalOptions.dehydrate?.()
       const dehydratedDbClient = dbClient.dehydrate({
         shouldDehydrateLiveQuery: () => true,
       })
+      const criticalQueryHashes = new Set(
+        dehydratedDbClient.liveQueries?.map((query) => query.queryHash),
+      )
+      criticalStateCaptured = true
 
-      router.serverSsr!.onRenderFinished(() => {
-        unsubscribe()
-        dbStream.close()
-      })
+      if (!renderFinishRegistered) {
+        renderFinishRegistered = true
+        router.serverSsr!.onRenderFinished(() => {
+          unsubscribe()
+          dbStream.close()
+        })
+      }
+
+      for (const queryHash of bufferedQueryHashes) {
+        if (!criticalQueryHashes.has(queryHash)) streamLiveQuery(queryHash)
+      }
+      bufferedQueryHashes.clear()
 
       return {
         ...originalDehydrated,
@@ -68,36 +111,17 @@ export function routerWithDbClient<TRouter extends AnyRouter>(
         dbStream: dbStream.stream,
       }
     }
-
-    unsubscribe = dbClient.subscribe((event) => {
-      if (!router.serverSsr!.isDehydrated()) {
-        return
-      }
-
-      if (dbStream.isClosed()) {
-        console.warn(
-          `Tried to stream live query ${event.query.queryHash} after the DB stream was closed.`,
-        )
-        return
-      }
-
-      dbStream.enqueue(
-        dbClient.dehydrate({
-          shouldDehydrateCollection: () => false,
-          shouldDehydrateLiveQuery: (query) =>
-            query.queryHash === event.query.queryHash,
-        }),
-      )
-    })
   } else {
     router.options.hydrate = async (dehydrated: DehydratedRouterDbState) => {
       await originalOptions.hydrate?.(dehydrated)
       dbClient.hydrate(dehydrated.dehydratedDbClient)
 
       const reader = dehydrated.dbStream.getReader()
-      void readDbStream(reader, dbClient).finally(() => {
-        dbClient._setSsrStreamingEnabled(false)
-      })
+      void readDbStream(reader, dbClient)
+        .catch((error) => console.error(`Error reading DB stream:`, error))
+        .finally(() => {
+          dbClient._setSsrStreamingEnabled(false)
+        })
     }
   }
 
@@ -115,36 +139,46 @@ async function readDbStream(
       entry = await reader.read()
     }
   } catch (error) {
-    console.error(`Error reading DB stream:`, error)
+    dbClient._failPendingLiveQueries(error)
+    throw error
   }
 }
 
 type PushableStream<T> = {
   stream: ReadableStream<T>
-  enqueue: (chunk: T) => void
+  enqueue: (chunk: T) => boolean
   close: () => void
-  isClosed: () => boolean
+  error: (error: unknown) => void
 }
 
 function createPushableStream<T>(): PushableStream<T> {
   let controllerRef!: ReadableStreamDefaultController<T>
-  let closed = false
+  let state: `open` | `closed` | `errored` | `cancelled` = `open`
   const stream = new ReadableStream<T>({
     start(controller) {
       controllerRef = controller
+    },
+    cancel() {
+      state = `cancelled`
     },
   })
 
   return {
     stream,
-    enqueue: (chunk) => controllerRef.enqueue(chunk),
+    enqueue: (chunk) => {
+      if (state !== `open`) return false
+      controllerRef.enqueue(chunk)
+      return true
+    },
     close: () => {
-      if (closed) {
-        return
-      }
-      closed = true
+      if (state !== `open`) return
+      state = `closed`
       controllerRef.close()
     },
-    isClosed: () => closed,
+    error: (error) => {
+      if (state !== `open`) return
+      state = `errored`
+      controllerRef.error(error)
+    },
   }
 }

@@ -4,6 +4,7 @@ import {
   isSingleResultCollection,
 } from './live-query-adapter.js'
 import type { Collection } from './collection/index.js'
+import type { DbClient, DehydratedLiveQueryResult } from './client.js'
 import type { ChangeMessage, CollectionStatus } from './types.js'
 
 /**
@@ -73,6 +74,8 @@ export interface LiveQueryObserver<
 > {
   /** Stable per-revision snapshot for wholesale materialization. */
   getSnapshot: () => LiveQuerySnapshot<T, TKey>
+  /** Stable server snapshot used by useSyncExternalStore-style adapters. */
+  getServerSnapshot: () => LiveQuerySnapshot<T, TKey>
   /**
    * Subscribe to changes. The listener receives the change set (or `undefined`
    * for the synthetic notify a ready collection emits on attach). Granular
@@ -82,6 +85,10 @@ export interface LiveQueryObserver<
   subscribe: (listener: LiveQueryObserverListener<T, TKey>) => () => void
   /** Resolve once the collection has loaded its first data. */
   preload: () => Promise<void>
+  /** The transport or preload error for this query, if it has not produced data. */
+  getError: () => unknown
+  /** Capture the ordered query result without serializing its source collections. */
+  dehydrate: () => DehydratedLiveQueryResult<T, TKey>
   /** Idempotent teardown. */
   dispose: () => void
 }
@@ -126,6 +133,9 @@ class LiveQueryObserverImpl<
 > implements LiveQueryObserver<T, TKey> {
   private readonly collection: Collection<T, TKey, any> | null
   private readonly wholesale: boolean
+  private readonly client: DbClient | undefined
+  private readonly queryHash: string | undefined
+  private readonly onPreload: (() => void) | undefined
   private visibleStatus: CollectionStatus | undefined
   private cachedEntries: Array<[TKey, T]> | undefined
   private cachedCollectionRevision: number | undefined
@@ -144,29 +154,50 @@ class LiveQueryObserverImpl<
   private blockDelivery = false
   private attached = false
   private collectionUnsub: (() => void) | null = null
+  private hydrationSeed:
+    | {
+        dehydratedAt: number
+        entries: Array<[TKey, T]>
+      }
+    | undefined
+  private hydrationError: unknown
+  private liveResultIsAuthoritative = false
+  private handoffScheduled = false
+  private preloadPromise: Promise<void> | undefined
   private disposed = false
 
   // Construction is side-effect-free: sync activation belongs to the first
   // subscription (attach), so building an observer — e.g. in a React render
   // that may be abandoned — cannot activate resources on its own.
-  constructor(collection: Collection<T, TKey, any> | null, wholesale: boolean) {
+  constructor(
+    collection: Collection<T, TKey, any> | null,
+    wholesale: boolean,
+    client: DbClient | undefined,
+    queryHash: string | undefined,
+    onPreload: (() => void) | undefined,
+  ) {
     this.collection = collection
     this.wholesale = wholesale
+    this.client = client
+    this.queryHash = queryHash
+    this.onPreload = onPreload
   }
 
   getSnapshot(): LiveQuerySnapshot<T, TKey> {
     const collection = this.collection
     if (!collection) return DISABLED_SNAPSHOT
 
+    this.syncHydrationState()
     if (!this.attached) this.refreshDetachedState(collection)
 
     if (this.snapshotDirty) {
-      const entries =
-        this.cachedEntries ?? this.captureEntries(collection).entries
+      const entries = this.getVisibleEntries(collection)
       const state = new Map(entries)
       const data = entries.map(([, value]) => value)
       const singleResult = isSingleResultCollection(collection)
-      const status = this.visibleStatus ?? collection.status
+      const status = this.hasHydrationSeed()
+        ? (`ready` as const)
+        : (this.visibleStatus ?? collection.status)
 
       // Bump the layout revision when the ordered key sequence changes
       // (membership, ordering, or an order-only move). Compare the key sequence
@@ -203,6 +234,175 @@ class LiveQueryObserverImpl<
       this.snapshotDirty = false
     }
     return this.cachedSnapshot
+  }
+
+  getServerSnapshot(): LiveQuerySnapshot<T, TKey> {
+    return this.getSnapshot()
+  }
+
+  getError(): unknown {
+    this.syncHydrationState()
+    return this.hasHydrationSeed() ? undefined : this.hydrationError
+  }
+
+  dehydrate(): DehydratedLiveQueryResult<T, TKey> {
+    const collection = this.collection
+    if (!collection) return { rows: [] }
+
+    const entries = this.hasHydrationSeed()
+      ? this.hydrationSeed!.entries
+      : this.readEntries(collection).entries
+
+    return {
+      rows: entries.map(([key, value]) => ({
+        key,
+        value,
+      })),
+    }
+  }
+
+  private hasHydrationSeed(): boolean {
+    return this.hydrationSeed !== undefined && !this.liveResultIsAuthoritative
+  }
+
+  private getVisibleEntries(
+    collection: Collection<T, TKey, any>,
+  ): Array<[TKey, T]> {
+    if (this.hasHydrationSeed()) return this.hydrationSeed!.entries
+    return this.cachedEntries ?? this.captureEntries(collection).entries
+  }
+
+  private syncHydrationState(): boolean {
+    if (!this.client || !this.queryHash || this.liveResultIsAuthoritative) {
+      return false
+    }
+
+    const query = this.client._getLiveQuery(this.queryHash)
+    if (!query) return false
+
+    if (
+      this.attached &&
+      !this.hydrationSeed &&
+      this.collection?.status === `ready` &&
+      !this.collection.isLoadingSubset
+    ) {
+      return this.markLiveResultAuthoritative(query.dehydratedAt)
+    }
+
+    if (query.status === `error`) {
+      const changed = this.hydrationError !== query.error
+      this.hydrationError = query.error
+      return changed
+    }
+
+    if (
+      query.status !== `success` ||
+      !query.snapshot ||
+      (this.hydrationSeed &&
+        this.hydrationSeed.dehydratedAt >= query.dehydratedAt)
+    ) {
+      return false
+    }
+
+    this.hydrationSeed = {
+      dehydratedAt: query.dehydratedAt,
+      entries: query.snapshot.rows.map((row) => [
+        row.key as TKey,
+        row.value as T,
+      ]),
+    }
+    this.hydrationError = undefined
+    this.snapshotDirty = true
+    return true
+  }
+
+  private diffEntries(
+    previous: Array<[TKey, T]>,
+    next: Array<[TKey, T]>,
+  ): Array<ChangeMessage<T, TKey>> {
+    const previousByKey = new Map(previous)
+    const nextByKey = new Map(next)
+    const changes: Array<ChangeMessage<T, TKey>> = []
+
+    for (const [key, value] of previous) {
+      if (!nextByKey.has(key)) changes.push({ type: `delete`, key, value })
+    }
+    for (const [key, value] of next) {
+      const previousValue = previousByKey.get(key)
+      if (previousValue === undefined) {
+        changes.push({ type: `insert`, key, value })
+      } else if (previousValue !== value) {
+        changes.push({
+          type: `update`,
+          key,
+          value,
+          previousValue,
+        })
+      }
+    }
+
+    return changes
+  }
+
+  private handoffHydrationSeed(collection: Collection<T, TKey, any>): {
+    changes: Array<ChangeMessage<T, TKey>>
+    entries: Array<[TKey, T]>
+    revision?: number
+  } {
+    const previous = this.hydrationSeed?.entries ?? []
+    const dehydratedAt = this.hydrationSeed?.dehydratedAt
+    const { entries, revision } = this.readEntries(collection)
+    this.hydrationSeed = undefined
+    this.markLiveResultAuthoritative(dehydratedAt)
+    this.updateCachedEntries(entries, revision)
+    this.snapshotDirty = true
+    return {
+      changes: this.diffEntries(previous, entries),
+      entries,
+      revision,
+    }
+  }
+
+  private markLiveResultAuthoritative(dehydratedAt?: number): boolean {
+    const changed = this.hydrationError !== undefined
+    this.hydrationError = undefined
+    this.liveResultIsAuthoritative = true
+    if (dehydratedAt !== undefined && this.queryHash) {
+      this.client?._consumeLiveQueryResult(this.queryHash, dehydratedAt)
+    }
+    if (changed) this.snapshotDirty = true
+    return changed
+  }
+
+  private scheduleHydrationHandoff(): void {
+    if (this.handoffScheduled) return
+    this.handoffScheduled = true
+
+    queueMicrotask(() => {
+      this.handoffScheduled = false
+      const collection = this.collection
+      if (
+        this.disposed ||
+        !this.attached ||
+        !collection ||
+        !this.hasHydrationSeed() ||
+        collection.status !== `ready` ||
+        collection.isLoadingSubset
+      ) {
+        return
+      }
+
+      const handoff = this.handoffHydrationSeed(collection)
+      this.emit(
+        this.wholesale ? undefined : handoff.changes,
+        undefined,
+        handoff.entries,
+        collection.status,
+        handoff.revision,
+        this.getCollectionLayoutRevision(collection),
+        true,
+      )
+    })
   }
 
   private getCollectionRevision(
@@ -325,9 +525,7 @@ class LiveQueryObserverImpl<
     if (!collection) return
 
     const seedChanges: Array<ChangeMessage<T, TKey>> = []
-    for (const [key, value] of collection.entries() as IterableIterator<
-      [TKey, T]
-    >) {
+    for (const [key, value] of this.getVisibleEntries(collection)) {
       seedChanges.push({ type: `insert`, key, value })
     }
     if (seedChanges.length === 0) return
@@ -338,11 +536,13 @@ class LiveQueryObserverImpl<
   private attach(): void {
     const collection = this.collection
     if (!collection || this.disposed) return
+    this.syncHydrationState()
     this.refreshDetachedState(collection)
     this.attached = true
     this.visibleStatus ??= collection.status
     this.deliveredLayoutRevision = this.getCollectionLayoutRevision(collection)
-    this.blockDelivery = this.wholesale
+    const attachedWithHydrationSeed = this.hasHydrationSeed()
+    this.blockDelivery = this.wholesale || attachedWithHydrationSeed
 
     // Sync activation happens inside subscribeChanges (addSubscriber starts
     // an idle/cleaned-up collection) — the same startSync path the old
@@ -363,6 +563,23 @@ class LiveQueryObserverImpl<
       explicitLayoutChange = false,
     ) => {
       if (this.disposed || this.subscriptions.size === 0) return
+
+      if (this.hasHydrationSeed()) {
+        if (status === `ready`) this.scheduleHydrationHandoff()
+        return
+      }
+
+      if (
+        status === `ready` &&
+        !collection.isLoadingSubset &&
+        !this.liveResultIsAuthoritative &&
+        this.client &&
+        this.queryHash
+      ) {
+        const query = this.client._getLiveQuery(this.queryHash)
+        this.markLiveResultAuthoritative(query?.dehydratedAt)
+      }
+
       const layoutRevision = this.getCollectionLayoutRevision(collection)
       let layoutChanged = explicitLayoutChange
       if (
@@ -427,7 +644,28 @@ class LiveQueryObserverImpl<
     // ran during that replay (collectionUnsub no longer points at our hook),
     // undo the subscription as soon as the call returns.
     let subscription: { unsubscribe: () => void } | null = null
+    const clientUnsub =
+      this.client && this.queryHash
+        ? this.client.subscribe((event) => {
+            if (
+              event.type === `liveQueryStreamError` ||
+              event.query.queryHash !== this.queryHash
+            ) {
+              return
+            }
+
+            const previousEntries = this.getVisibleEntries(collection)
+            if (!this.syncHydrationState()) return
+            const nextEntries = this.getVisibleEntries(collection)
+            this.emit(
+              this.wholesale
+                ? undefined
+                : this.diffEntries(previousEntries, nextEntries),
+            )
+          })
+        : () => {}
     const release = () => {
+      clientUnsub()
       statusUnsub()
       layoutUnsub()
       subscription?.unsubscribe()
@@ -435,21 +673,25 @@ class LiveQueryObserverImpl<
     this.collectionUnsub = release
     subscription = collection.subscribeChanges(
       (changes) => notify(changes as Array<ChangeMessage<T, TKey>>),
-      { includeInitialState: !this.wholesale },
+      { includeInitialState: !this.wholesale && !attachedWithHydrationSeed },
     )
     this.blockDelivery = false
     if (this.collectionUnsub !== release) {
       subscription.unsubscribe()
       return
     }
-    if (this.wholesale) {
+    if (this.wholesale || attachedWithHydrationSeed) {
       // Publications raised while subscribeChanges starts sync are part of the
       // subscribe handshake. Apply their final snapshot state now, but suppress
       // listener delivery: useSyncExternalStore performs its consistency read
       // immediately after subscribe returns.
-      this.flushPublications(false)
+      this.flushPublications(!this.wholesale)
       const { entries, revision } = this.readEntries(collection)
       this.updateCachedEntries(entries, revision)
+    }
+    if (this.hasHydrationSeed()) {
+      if (!this.wholesale) this.seed(Array.from(this.subscriptions)[0]!)
+      if (collection.status === `ready`) this.scheduleHydrationHandoff()
     }
   }
 
@@ -524,8 +766,26 @@ class LiveQueryObserverImpl<
     }
   }
 
-  async preload(): Promise<void> {
-    await this.collection?.preload()
+  preload(): Promise<void> {
+    if (this.preloadPromise) return this.preloadPromise
+
+    if (this.client && this.queryHash) {
+      const query = this.client._getLiveQuery(this.queryHash)
+      if (query?.status === `pending`) return query.promise
+      if (query?.status === `success`) return Promise.resolve()
+      if (query?.status === `error`) return Promise.reject(query.error)
+    }
+
+    this.onPreload?.()
+    const collectionPromise = this.collection?.preload() ?? Promise.resolve()
+    this.preloadPromise =
+      this.client?._isSsrStreamingEnabled() && this.queryHash
+        ? this.client._registerLiveQuery(
+            this.queryHash,
+            collectionPromise.then(() => this.dehydrate()),
+          )
+        : collectionPromise
+    return this.preloadPromise
   }
 
   dispose(): void {
@@ -554,6 +814,12 @@ export interface CreateLiveQueryObserverOptions {
    *   `useSyncExternalStore`-style consumers safe by construction.
    */
   mode?: `granular` | `wholesale`
+  /** DbClient cache that owns SSR snapshots for this query identity. */
+  client?: DbClient
+  /** Stable live-query identity used for dehydration and hydration. */
+  queryHash?: string
+  /** Resume framework-deferred query sources before a server preload. */
+  onPreload?: () => void
 }
 
 /**
@@ -575,5 +841,8 @@ export function createLiveQueryObserver<
   return new LiveQueryObserverImpl<T, TKey>(
     collection ?? null,
     options.mode === `wholesale`,
+    options.client,
+    options.queryHash,
+    options.onPreload,
   )
 }

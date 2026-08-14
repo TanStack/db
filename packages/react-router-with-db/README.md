@@ -12,8 +12,10 @@ const router = createRouter({
 export default routerWithDbClient(router, dbClient)
 ```
 
-The adapter provides the client, hydrates critical collection state, and streams
+The adapter provides the client, hydrates critical DB state, and streams
 `useLiveSuspenseQuery` calls discovered during server rendering. Streamed
-promises resolve to normalized collection rows, not live-query result snapshots.
+promises resolve to ordered live-query result snapshots. Source collections
+start normally in the browser and replace the snapshot when their live result is
+ready.
 
 See the [SSR and Hydration guide](../../docs/guides/ssr.md).

@@ -1,7 +1,11 @@
 import { describe, expectTypeOf, it } from 'vitest'
 import { z } from 'zod'
-import { DbClient, collectionOptions } from '../src'
-import type { DehydratedCollectionChunk, DehydratedDbState } from '../src'
+import { DbClient, collectionOptions, eq } from '../src'
+import type {
+  DehydratedCollectionChunk,
+  DehydratedDbState,
+  DehydratedLiveQueryResult,
+} from '../src'
 
 type Todo = {
   id: string
@@ -66,6 +70,25 @@ describe(`DbClient type assertions`, () => {
     client.applyCollectionChunk(chunk)
 
     expectTypeOf(client.dehydrate()).toEqualTypeOf<DehydratedDbState>()
+  })
+
+  it(`types live-query preload and result snapshots`, () => {
+    const descriptor = collectionOptions(`live-todos`, () => ({
+      id: `live-todos`,
+      getKey: (todo: Todo) => todo.id,
+      sync: { sync: () => {} },
+    }))
+    const client = new DbClient()
+    const preload = client.preloadLiveQuery({
+      query: (q) =>
+        q.from({ todo: descriptor }).where(({ todo }) => eq(todo.id, `1`)),
+    })
+    const snapshot: DehydratedLiveQueryResult<Todo, string> = {
+      rows: [{ key: `1`, value: { id: `1`, title: `Ship SSR` } }],
+    }
+
+    expectTypeOf(preload).toEqualTypeOf<Promise<void>>()
+    expectTypeOf(snapshot.rows[0]!.value).toEqualTypeOf<Todo>()
   })
 
   it(`preserves schema input and output through descriptor factories`, () => {

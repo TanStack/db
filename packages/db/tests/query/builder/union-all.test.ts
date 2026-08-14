@@ -156,7 +156,7 @@ describe(`QueryBuilder.unionAll`, () => {
       .unionAll(employeeRows, departmentRows)
       .join(
         { departments: departmentDescriptor },
-        (refs) => eq(refs[`*`].id, refs.departments.id),
+        ({ id, departments }) => eq(id, departments.id),
         `inner`,
       )
 

@@ -5,28 +5,32 @@ id: ssr
 
 # SSR and Hydration
 
-TanStack DB SSR is based on collection-row hydration. The server loads rows into
-request-scoped collections, serializes those collection rows, and the browser
-hydrates them into a client-scoped `DbClient`. Live queries then read from the
-hydrated collections exactly like they read from synced data.
+TanStack DB SSR transports the smallest useful snapshot for the work the server
+performed:
 
-This keeps the SSR model aligned with why you use DB in the first place:
-normalized data lives in collections, and live queries are views over those
-collections.
+- Explicitly preloaded collections dehydrate as normalized collection rows.
+- Preloaded or render-discovered live queries dehydrate as ordered query-result
+  snapshots, without serializing all of their source collections.
+
+The browser renders either snapshot immediately, starts its normal collection
+sync and live-query pipeline, then atomically replaces a live-query snapshot
+when the browser result becomes authoritative.
 
 ## High-level Summary
 
-The SSR-friendly API adds five concepts:
+The SSR-friendly API adds six concepts:
 
 - `DbClient` owns materialized collection instances for one request, browser app,
   test, or script.
 - `collectionOptions(...)` creates a stable collection descriptor. Reusable
   descriptors create fresh adapter config for each `DbClient`.
 - `dbClient.dehydrate()`, `dbClient.hydrate(state)`, and
-  `dbClient.applyCollectionChunk(chunk)` move collection rows across the
-  server/client boundary.
-- React apps use `<DbProvider client={dbClient}>` so hooks can resolve
-  collection descriptors against the current client.
+  `dbClient.applyCollectionChunk(chunk)` move explicit collection state across
+  the server/client boundary.
+- `dbClient.preloadLiveQuery(options)` captures only the ordered result of a
+  live query for hydration or streaming.
+- React and Svelte apps use `DbProvider` so hooks can resolve collection
+  descriptors against the current client.
 - `@tanstack/react-router-with-db` streams live queries discovered by Suspense
   during a TanStack Start server render.
 
@@ -63,11 +67,11 @@ you want to skip derived identity work.
 | Provide React context | none | `<DbProvider client={dbClient}>` |
 | Query from React | direct collection instance | descriptor in `from`, resolved by `DbProvider` |
 | Mutate from React | import singleton collection | `useDbClient().collection(todoCollection)` |
-| Server preload | ad hoc collection preload | preload client-bound collection or live query |
+| Server preload | ad hoc collection preload | `collection.preload()` or `dbClient.preloadLiveQuery(...)` |
 | Serialize SSR state | none | `const state = dbClient.dehydrate()` |
 | Hydrate in browser | none | `dbClient.hydrate(state)` before hooks read it |
 | Apply rows incrementally | custom app state | `dbClient.applyCollectionChunk(chunk)` |
-| Stream render-time queries | none | `routerWithDbClient(router, dbClient)` |
+| Stream render-time results | none | `routerWithDbClient(router, dbClient)` |
 | React query identity | dependency array | derived IR, or `queryKey` when needed |
 
 ### Minimal React Pattern
@@ -157,8 +161,7 @@ instances.
 ```txt
 server request
   -> new DbClient()
-  -> dbClient.collection(todoCollection)
-  -> preload collections or live queries
+  -> preload an explicit collection or live-query result
   -> dbClient.dehydrate()
   -> send state through framework loader
 
@@ -167,13 +170,16 @@ browser
   -> dbClient.hydrate(loaderState)
   -> <DbProvider client={dbClient}>
   -> useLiveQuery({ query })
+  -> start source sync
+  -> atomically replace any query snapshot with the live result
 ```
 
-During React hydration, descriptor-backed queries read the hydrated collection
-rows for the first browser render. Adapter sync and queued on-demand loads start
-when React commits the external-store subscription, so the initial markup still
-matches the server. Fresh adapter data remains authoritative and reconciles
-immediately after that commit.
+During React hydration, descriptor-backed queries read either hydrated
+collection rows or their matching query-result snapshot for the first browser
+render. Adapter sync and queued on-demand loads start when React commits the
+external-store subscription, so the initial markup still matches the server.
+The snapshot remains visible while the source is loading. Once the browser live
+query is ready, DB publishes one handoff from the snapshot to the live result.
 
 ### Server
 
@@ -181,12 +187,7 @@ Create a fresh `DbClient` for each request. Materialize descriptors through that
 client, preload the data needed for the route, and dehydrate the client.
 
 ```tsx
-import {
-  DbClient,
-  collectionOptions,
-  createLiveQueryCollection,
-  eq,
-} from '@tanstack/db'
+import { DbClient, collectionOptions, eq } from '@tanstack/db'
 
 export const todoCollection = collectionOptions('todos', () => ({
   id: 'todos',
@@ -214,41 +215,53 @@ export const todoCollection = collectionOptions('todos', () => ({
 export async function loadTodosForSsr() {
   const dbClient = new DbClient()
   const todos = dbClient.collection(todoCollection)
-
-  const openTodos = createLiveQueryCollection({
-    query: (q) =>
-      q
-        .from({ todo: todos })
-        .where(({ todo }) => eq(todo.status, 'open')),
-  })
-
-  await openTodos.preload()
+  await todos.preload()
 
   return dbClient.dehydrate()
 }
 ```
 
-Preloading a live query loads the source collection rows required by that query.
-The dehydrated payload contains collection rows, not a live-query result
-snapshot.
+This explicit collection preload dehydrates normalized source rows. Use it when
+multiple browser queries need the same source data.
+
+If the source is much larger than the rendered result, preload the query instead:
+
+```tsx
+const dbClient = new DbClient()
+
+await dbClient.preloadLiveQuery({
+  query: (q) =>
+    q
+      .from({ todo: todoCollection })
+      .where(({ todo }) => eq(todo.status, 'open'))
+      .select(({ todo }) => ({ id: todo.id, title: todo.title })),
+})
+
+const state = dbClient.dehydrate()
+```
+
+This payload contains the projected query result and no source collection rows
+unless that collection was also materialized explicitly.
 
 ### Browser
 
 Hydrate the browser client before rendering components that read from DB.
 
 ```tsx
-import { DbClient, DbProvider } from '@tanstack/react-db'
+import {
+  DbClient,
+  DbProvider,
+  HydrationBoundary,
+} from '@tanstack/react-db'
 
 function App({ dehydratedDbState }: { dehydratedDbState: DehydratedDbState }) {
-  const [dbClient] = React.useState(() => {
-    const client = new DbClient()
-    client.hydrate(dehydratedDbState)
-    return client
-  })
+  const [dbClient] = React.useState(() => new DbClient())
 
   return (
     <DbProvider client={dbClient}>
-      <Routes />
+      <HydrationBoundary state={dehydratedDbState}>
+        <Routes />
+      </HydrationBoundary>
     </DbProvider>
   )
 }
@@ -257,6 +270,29 @@ function App({ dehydratedDbState }: { dehydratedDbState: DehydratedDbState }) {
 Frameworks differ in how loader data reaches the client, but the DB handoff is
 the same: `DbClient` on the server, `dehydrate()`, then `hydrate()` into the
 browser client.
+
+### Svelte
+
+Svelte resolves descriptors from its own `DbProvider` and reads hydrated query
+snapshots synchronously during server rendering:
+
+```svelte
+<script lang="ts">
+  import { DbClient, DbProvider } from '@tanstack/svelte-db'
+  import Todos from './Todos.svelte'
+
+  const client = new DbClient()
+  client.hydrate(dehydratedDbState)
+</script>
+
+<DbProvider {client}>
+  <Todos />
+</DbProvider>
+```
+
+Inside `Todos.svelte`, `useLiveQuery({ query })` can use collection descriptors
+directly. The browser subscription starts source sync and performs the same
+snapshot-to-live-result handoff as React.
 
 Live demo: https://tanstack-db-ssr-demo.netlify.app/ssr-db
 
@@ -286,8 +322,8 @@ export function getRouter() {
 ```
 
 The adapter adds `dbClient` to router context, wraps the app in `DbProvider`,
-dehydrates critical collection state, and opens a stream for queries discovered
-later during rendering.
+dehydrates critical state, and opens a stream for query results discovered later
+during rendering.
 
 ```tsx
 function RouteComponent() {
@@ -311,13 +347,46 @@ function TodoList() {
 ```
 
 When `TodoList` suspends on the server, the adapter streams the pending query
-promise. That promise resolves to a normal `DehydratedDbState` containing source
-collection rows. The browser hydrates those rows and retries the same live query.
-Live-query result snapshots and D2 state do not cross the wire.
+promise. That promise resolves to the ordered live-query result snapshot inside
+the streamed `DehydratedDbState`. The source collections and D2 graph do not
+cross the wire. The browser shows the snapshot, starts the source collections
+and live query normally, then replaces the snapshot when the browser result is
+ready.
 
 The server and browser must derive the same live-query identity. Structured
 queries do this automatically. An opaque query must provide a serializable
 `queryKey`; render-time streaming throws if it cannot derive an identity.
+
+## Suspense Streaming with Next.js
+
+Next.js App Router can transport the same pending query promise through React
+Server Components. Start the preload without awaiting it, dehydrate the pending
+result, and pass that state to a client hydration boundary:
+
+```tsx
+export default function Page() {
+  const dbClient = new DbClient()
+  void dbClient.preloadLiveQuery(openTodosQuery)
+
+  const state = dbClient.dehydrate({
+    shouldDehydrateCollection: () => false,
+    shouldDehydrateLiveQuery: () => true,
+  })
+
+  return (
+    <DbHydration state={state}>
+      <Suspense fallback={<p>Loading todos</p>}>
+        <TodoList />
+      </Suspense>
+    </DbHydration>
+  )
+}
+```
+
+`DbHydration` is a client component that creates one browser `DbClient`, wraps
+children in `DbProvider`, and passes `state` to `HydrationBoundary`. React streams
+the promise result into that boundary. The full working integration is in
+`examples/react/next-ssr-e2e`.
 
 ## Incremental Collection Hydration
 
@@ -350,30 +419,31 @@ materializes.
 
 ## What Gets Serialized
 
-`dbClient.dehydrate()` serializes only collection state that can safely cross the
-server/client boundary.
+`dbClient.dehydrate()` can emit two independent snapshot types.
 
 Serialized:
 
-- collection ids
-- synced row keys and values
-- row metadata
-- adapter sync metadata from `exportSyncMeta`
-- pending live-query identity and promise metadata when router streaming opts in
+- explicit collection snapshots: collection id, synced row keys and values, row
+  metadata, and adapter sync metadata from `exportSyncMeta`
+- live-query snapshots: query hash and ordered result rows; completed explicit
+  preloads are included by default, while framework integrations opt pending
+  promises into streaming
 
 Not serialized:
 
 - mutation handlers
 - pending optimistic mutations
 - pending subscriptions
-- live query result snapshots
 - D2 graphs or compiled pipelines
 - transaction stacks
 - module-level runtime state
+- source collection rows for a query-result snapshot, unless that collection was
+  also explicitly materialized for dehydration
 
-The rule is: if the client can reconstruct it from collection state or adapter
-sync, it does not belong in the payload. If the row data cannot be reconstructed
-without another round trip, it belongs in the payload.
+Choose the payload unit according to what the browser needs. Explicit collection
+preloading preserves normalized rows for reuse across queries. Live-query
+preloading avoids shipping a 50-100x larger source when the rendered projection
+is small. Neither mode serializes executable query state.
 
 ## Sync Metadata
 
@@ -600,17 +670,23 @@ useLiveQuery({
 
 ### 6. Preload and dehydrate on the server
 
-Preload the route's collections or live queries, then serialize:
+Preload a collection when the browser should receive normalized source rows:
 
 ```tsx
 const dbClient = new DbClient()
 const todos = dbClient.collection(todoCollection)
+await todos.preload()
 
-const openTodos = createLiveQueryCollection({
-  query: (q) => q.from({ todo: todos }).where(({ todo }) => eq(todo.status, 'open')),
-})
+return {
+  dbState: dbClient.dehydrate(),
+}
+```
 
-await openTodos.preload()
+Preload a live query when the browser only needs the rendered result:
+
+```tsx
+const dbClient = new DbClient()
+await dbClient.preloadLiveQuery(openTodosQuery)
 
 return {
   dbState: dbClient.dehydrate(),
@@ -620,11 +696,15 @@ return {
 ### 7. Hydrate before client hooks read DB
 
 ```tsx
-const client = new DbClient()
-client.hydrate(loaderData.dbState)
+<DbProvider client={client}>
+  <HydrationBoundary state={loaderData.dbState}>
+    <App />
+  </HydrationBoundary>
+</DbProvider>
 ```
 
-Then provide it with `DbProvider`.
+Imperative integrations can call `client.hydrate(loaderData.dbState)` before
+rendering instead.
 
 ## Compatibility
 
@@ -681,12 +761,16 @@ Required for render-time Suspense streaming:
 - React `DbProvider`
 - React `useDbClient()`
 - React `useOptionalDbClient()`
+- React `HydrationBoundary`
 - React descriptor resolution inside live query builders
 - React derived structured query identity
 - React `queryKey` escape hatch for opaque or hot-path queries
 - React per-query `client` override
 - SSR-capable `useSyncExternalStore` server snapshot support
-- TanStack Start + Playwright SSR E2E coverage
+- `dbClient.preloadLiveQuery(...)`
+- Svelte `DbProvider`, `useDbClient()`, descriptor resolution, and synchronous
+  server snapshot support
+- TanStack Start and Next.js Playwright SSR E2E coverage
 - `@tanstack/react-router-with-db`
 - render-time `useLiveSuspenseQuery` promise streaming
 
@@ -697,8 +781,11 @@ Required for render-time Suspense streaming:
   present.
 - React live query identity is derived from normalized structured IR when no
   explicit `queryKey` or legacy dependency array is supplied.
-- Live query preloading for SSR serializes source collection rows by default,
-  not live query result snapshots.
+- Explicit collection preloading serializes normalized collection rows.
+- Live-query preloading and render-time discovery serialize ordered result
+  snapshots without implicitly serializing source collections.
+- Browser observers keep the hydrated result visible while normal source sync
+  starts, then publish one authoritative handoff.
 - Hydration applies rows as committed synced state without invoking mutation
   handlers or creating optimistic state.
 - Hydration and adapter sync begin in a deterministic order: pending rows and
@@ -706,8 +793,7 @@ Required for render-time Suspense streaming:
 - `DbClient` owns collection instances and ambient transaction scope; cleanup
   releases both.
 - Incremental chunks use the same collection payload shape as full dehydration.
-- Streamed live-query promises resolve to collection-row hydration state rather
-  than live-query result snapshots.
+- Streamed live-query promises resolve to live-query result snapshots.
 
 ### Deprecated
 
@@ -718,8 +804,8 @@ Required for render-time Suspense streaming:
 
 - `createCollection(...)` remains available.
 - Direct collection runtime APIs remain available.
-- Non-React adapters keep their existing dependency/reactivity model until they
-  get their own SSR/client-provider work.
+- Vue, Solid, and Angular keep their existing dependency/reactivity model until
+  they get their own SSR/client-provider work. Svelte is covered by this change.
 - Query collection `queryKey` is still TanStack Query's cache key. It is
   separate from React live query identity.
 
@@ -730,11 +816,11 @@ The SSR strategy is covered by:
 - core `DbClient` tests for hydration, streaming chunks, sync metadata,
   initial data precedence, explicit ids, and no optimistic serialization
 - React tests for `DbProvider`, descriptor resolution, derived query identity,
-  `queryKey`, deprecation warnings, and SSR hydration
+  `queryKey`, deprecation warnings, SSR result snapshots, and atomic handoff
+- Svelte tests for provider ownership, server snapshot rendering, and browser
+  handoff
 - query adapter tests to ensure Query cache behavior still holds
 - persistence core tests to ensure persisted row behavior remains intact
-- a TanStack Start + Playwright E2E that verifies server HTML contains hydrated
-  DB rows, browser hydration has no markup mismatch, fresh sync reconciles a
-  hydrated row, an incremental collection chunk updates an existing live query,
-  and a query discovered during rendering streams through a real Suspense
-  boundary
+- TanStack Start and Next.js Playwright E2Es that verify a Suspense fallback,
+  streamed query result, omitted source-only data, clean hydration, and atomic
+  replacement by browser sync

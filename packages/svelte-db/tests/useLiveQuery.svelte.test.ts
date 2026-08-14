@@ -140,6 +140,26 @@ describe(`Query Collections`, () => {
     })
   })
 
+  it(`throws when an explicit queryKey cannot be stably hashed`, () => {
+    const collection = createCollection(
+      mockSyncCollectionOptions<Person>({
+        id: `unhashable-explicit-query-key-svelte`,
+        getKey: (person) => person.id,
+        initialData: initialPersons,
+      }),
+    )
+
+    expect(() => {
+      cleanup = $effect.root(() => {
+        useLiveQuery({
+          queryKey: [collection.id, () => `opaque`],
+          query: (q) => q.from({ people: collection }),
+        })
+        flushSync()
+      })
+    }).toThrow(/queryKey.*function value/)
+  })
+
   it(`should maintain reactivity when destructuring return values with $derived`, () => {
     const collection = createCollection(
       mockSyncCollectionOptions<Person>({

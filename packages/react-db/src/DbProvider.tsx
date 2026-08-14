@@ -1,3 +1,5 @@
+'use client'
+
 import { createContext, useContext } from 'react'
 import type { DbClient } from '@tanstack/db'
 import type { ReactNode } from 'react'

@@ -1,3 +1,5 @@
+'use client'
+
 import { useRef } from 'react'
 import { useLiveQuery } from './useLiveQuery'
 import { getLiveQueryResultInfo } from './live-query-internals'
@@ -195,23 +197,18 @@ export function useLiveSuspenseQuery(
     )
   }
 
-  // It’s not recommended to suspend a render based on a store value returned by useSyncExternalStore.
-  // result.status is the snapshot from syncExternalStore. We read the fresh status from the collection reference instead.
   const collectionStatus = result.collection.status
-  const streamedQuery =
-    queryInfo.client && queryInfo.queryHash
-      ? queryInfo.client._getLiveQuery(queryInfo.queryHash)
-      : undefined
 
   // Track when we reach ready state
-  if (collectionStatus === `ready` || streamedQuery?.status === `success`) {
+  if (result.isReady) {
     hasBeenReadyRef.current = true
     promiseRef.current = null
   }
 
-  if (streamedQuery?.status === `error` && !hasBeenReadyRef.current) {
+  const observerError = queryInfo.observer.getError()
+  if (observerError !== undefined && !hasBeenReadyRef.current) {
     promiseRef.current = null
-    throw streamedQuery.error
+    throw observerError
   }
 
   // Only throw errors during initial load (before first ready)
@@ -223,15 +220,7 @@ export function useLiveSuspenseQuery(
     throw new Error(`Collection "${result.collection.id}" failed to load`)
   }
 
-  if (streamedQuery?.status === `pending`) {
-    promiseRef.current = streamedQuery.promise
-    throw streamedQuery.promise
-  }
-
-  if (
-    !hasBeenReadyRef.current &&
-    (collectionStatus === `loading` || collectionStatus === `idle`)
-  ) {
+  if (!hasBeenReadyRef.current && (result.isLoading || result.isIdle)) {
     if (queryInfo.client?._isSsrStreamingEnabled() && !queryInfo.queryHash) {
       const reason = queryInfo.identityError
         ? `${queryInfo.identityError.reason} at ${queryInfo.identityError.path}`
@@ -243,15 +232,7 @@ export function useLiveSuspenseQuery(
 
     // Create or reuse promise for current collection
     if (!promiseRef.current) {
-      queryInfo.resumeDeferredCollections()
-      const preloadPromise = result.collection.preload()
-      promiseRef.current =
-        queryInfo.client?._isSsrStreamingEnabled() && queryInfo.queryHash
-          ? queryInfo.client._registerLiveQuery(
-              queryInfo.queryHash,
-              preloadPromise,
-            )
-          : preloadPromise
+      promiseRef.current = queryInfo.observer.preload()
     }
     // THROW PROMISE - React Suspense catches this (React 18+ required)
     // Note: We don't check React version here. In React <18, this will be caught

@@ -57,12 +57,17 @@ function SuspenseWrapper({ children }: { children: ReactNode }) {
 }
 
 describe(`useLiveSuspenseQuery`, () => {
-  it(`reuses a streamed pending query and renders hydrated collection rows`, async () => {
+  it(`renders a streamed query snapshot until browser sync is authoritative`, async () => {
     let resolveServerLoad!: () => void
     const serverLoad = new Promise<void>((resolve) => {
       resolveServerLoad = resolve
     })
-    const browserLoad = vi.fn(() => true as const)
+    let resolveBrowserLoad!: () => void
+    let finishBrowserLoad!: () => void
+    const browserLoadPromise = new Promise<void>((resolve) => {
+      finishBrowserLoad = resolve
+    })
+    const browserLoad = vi.fn()
     const descriptor = collectionOptions(`streamed-people`, (client) => {
       const runtime = client.requireDependency<`server` | `browser`>(`runtime`)
 
@@ -82,7 +87,19 @@ describe(`useLiveSuspenseQuery`, () => {
                       write({ type: `insert`, value: initialPersons[0]! })
                       commit()
                     }
-                  : browserLoad,
+                  : () => {
+                      browserLoad()
+                      resolveBrowserLoad = () => {
+                        begin({ immediate: true })
+                        write({
+                          type: `insert`,
+                          value: initialPersons[1]!,
+                        })
+                        commit()
+                        finishBrowserLoad()
+                      }
+                      return browserLoadPromise
+                    },
             }
           },
         },
@@ -137,6 +154,16 @@ describe(`useLiveSuspenseQuery`, () => {
       expect(browserHook.result.current.data).toHaveLength(1)
       expect(browserHook.result.current.data[0]).toMatchObject(
         initialPersons[0]!,
+      )
+    })
+    expect(browserLoad).toHaveBeenCalled()
+
+    await act(async () => resolveBrowserLoad())
+
+    await waitFor(() => {
+      expect(browserHook.result.current.data).toHaveLength(1)
+      expect(browserHook.result.current.data[0]).toMatchObject(
+        initialPersons[1]!,
       )
     })
     serverHook.unmount()

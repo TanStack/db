@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from 'vitest'
 import { DbClient, collectionOptions } from '@tanstack/react-db'
 import { routerWithDbClient } from '../src'
 import type { AnyRouter } from '@tanstack/react-router'
+import type { DehydratedDbState } from '@tanstack/react-db'
 import type { DehydratedRouterDbState } from '../src'
 
 type Todo = {
@@ -27,7 +28,6 @@ function createTodoDescriptor() {
 describe(`routerWithDbClient`, () => {
   it(`streams live queries registered after critical dehydration`, async () => {
     const dbClient = new DbClient()
-    const todos = dbClient.collection(createTodoDescriptor())
     let isDehydrated = false
     let finishRender = () => {}
     const router = {
@@ -49,8 +49,12 @@ describe(`routerWithDbClient`, () => {
     expect(initialState!.dehydratedDbClient.liveQueries).toBeUndefined()
 
     isDehydrated = true
-    let resolveQuery!: () => void
-    const queryPromise = new Promise<void>((resolve) => {
+    let resolveQuery!: (snapshot: {
+      rows: Array<{ key: string; value: Todo }>
+    }) => void
+    const queryPromise = new Promise<{
+      rows: Array<{ key: string; value: Todo }>
+    }>((resolve) => {
       resolveQuery = resolve
     })
     dbClient._registerLiveQuery(`open-todos`, queryPromise)
@@ -61,21 +65,14 @@ describe(`routerWithDbClient`, () => {
     expect(streamedState.value?.collections).toEqual([])
     expect(streamedState.value?.liveQueries?.[0]?.queryHash).toBe(`open-todos`)
 
-    dbClient.applyCollectionChunk({
-      collectionId: todos.id,
+    resolveQuery({
       rows: [{ key: `1`, value: { id: `1`, text: `Streamed` } }],
     })
-    resolveQuery()
 
     await expect(
       streamedState.value!.liveQueries![0]!.promise,
     ).resolves.toEqual({
-      collections: [
-        {
-          collectionId: `todos`,
-          rows: [{ key: `1`, value: { id: `1`, text: `Streamed` } }],
-        },
-      ],
+      rows: [{ key: `1`, value: { id: `1`, text: `Streamed` } }],
     })
 
     finishRender()
@@ -83,6 +80,116 @@ describe(`routerWithDbClient`, () => {
       done: true,
       value: undefined,
     })
+  })
+
+  it(`includes queries registered while critical dehydration is pending`, async () => {
+    const dbClient = new DbClient()
+    let releaseOriginalDehydrate!: () => void
+    const originalDehydrate = new Promise<void>((resolve) => {
+      releaseOriginalDehydrate = resolve
+    })
+    let finishRender = () => {}
+    const router = {
+      options: {
+        context: { dbClient },
+        dehydrate: () => originalDehydrate,
+      },
+      isServer: true,
+      serverSsr: {
+        isDehydrated: () => false,
+        onRenderFinished: (callback: () => void) => {
+          finishRender = callback
+        },
+      },
+    } as unknown as AnyRouter
+
+    adaptRouter(router, dbClient)
+    const statePromise = router.options.dehydrate?.()
+    dbClient._registerLiveQuery(
+      `during-critical`,
+      Promise.resolve({ rows: [] }),
+    )
+    releaseOriginalDehydrate()
+
+    const state = (await statePromise) as DehydratedRouterDbState
+    expect(
+      state.dehydratedDbClient.liveQueries?.map((query) => query.queryHash),
+    ).toEqual([`during-critical`])
+
+    const reader = state.dbStream.getReader()
+    finishRender()
+    await expect(reader.read()).resolves.toEqual({
+      done: true,
+      value: undefined,
+    })
+  })
+
+  it(`rejects pending live queries when the client stream fails`, async () => {
+    const dbClient = new DbClient()
+    const router = {
+      options: { context: { dbClient } },
+      isServer: false,
+    } as unknown as AnyRouter
+    const error = new Error(`transport failed`)
+    const pendingSnapshot = new Promise<{ rows: [] }>(() => {})
+    const dbStream = new ReadableStream<DehydratedDbState>({
+      start(controller) {
+        controller.error(error)
+      },
+    })
+    const consoleError = vi.spyOn(console, `error`).mockImplementation(() => {})
+
+    adaptRouter(router, dbClient)
+    await router.options.hydrate?.({
+      dehydratedDbClient: {
+        collections: [],
+        liveQueries: [
+          {
+            queryHash: `pending`,
+            dehydratedAt: 1,
+            promise: pendingSnapshot,
+          },
+        ],
+      },
+      dbStream,
+    } satisfies DehydratedRouterDbState)
+
+    await expect(dbClient._getLiveQuery(`pending`)?.promise).rejects.toBe(error)
+    await vi.waitFor(() => {
+      expect(dbClient._isSsrStreamingEnabled()).toBe(false)
+    })
+    consoleError.mockRestore()
+  })
+
+  it(`does not enqueue after the stream is cancelled`, async () => {
+    const dbClient = new DbClient()
+    let finishRender = () => {}
+    const router = {
+      options: { context: { dbClient } },
+      isServer: true,
+      serverSsr: {
+        isDehydrated: () => true,
+        onRenderFinished: (callback: () => void) => {
+          finishRender = callback
+        },
+      },
+    } as unknown as AnyRouter
+    const warning = vi.spyOn(console, `warn`).mockImplementation(() => {})
+
+    adaptRouter(router, dbClient)
+    const state =
+      (await router.options.dehydrate?.()) as DehydratedRouterDbState
+    await state.dbStream.cancel()
+
+    expect(() =>
+      dbClient._registerLiveQuery(`late`, Promise.resolve({ rows: [] })),
+    ).not.toThrow()
+    expect(warning).toHaveBeenCalledWith(
+      expect.stringContaining(`after the DB stream was closed`),
+    )
+
+    finishRender()
+    warning.mockRestore()
   })
 
   it(`hydrates every client stream entry`, async () => {

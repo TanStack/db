@@ -4,20 +4,28 @@ import { untrack } from 'svelte'
 import { SvelteMap } from 'svelte/reactivity'
 import {
   BaseQueryBuilder,
+  UnhashableQueryIRError,
   createLiveQueryCollection,
   createLiveQueryObserver,
+  getLiveQueryHash,
+  getStableValueHash,
   isCollection,
   isSingleResultCollection,
+  prepareLiveQueryValue,
 } from '@tanstack/db'
+import { useOptionalDbClient } from './db-context.js'
 import type {
   ChangeMessage,
   Collection,
   CollectionStatus,
   Context,
+  DbClient,
+  DeferredLiveQueryCollections,
   GetResult,
   InferResultType,
   InitialQueryBuilder,
   LiveQueryCollectionConfig,
+  LiveQueryKey,
   LiveQueryObserver,
   NonSingleResult,
   QueryBuilder,
@@ -66,6 +74,12 @@ export interface UseLiveQueryReturnWithCollection<
 }
 
 type MaybeGetter<T> = T | (() => T)
+
+export type UseLiveQueryConfig<TContext extends Context> =
+  LiveQueryCollectionConfig<TContext> & {
+    queryKey?: MaybeGetter<LiveQueryKey>
+    client?: DbClient
+  }
 
 function toValue<T>(value: MaybeGetter<T>): T {
   if (typeof value === `function`) {
@@ -218,7 +232,7 @@ export function useLiveQuery<TContext extends Context>(
  */
 // Overload 2: Accept config object
 export function useLiveQuery<TContext extends Context>(
-  config: LiveQueryCollectionConfig<TContext>,
+  config: UseLiveQueryConfig<TContext>,
   deps?: Array<() => unknown>,
 ): UseLiveQueryReturn<GetResult<TContext>, InferResultType<TContext>>
 
@@ -292,7 +306,9 @@ export function useLiveQuery(
   configOrQueryOrCollection: any,
   deps: Array<() => unknown> = [],
 ): UseLiveQueryReturn<any> | UseLiveQueryReturnWithCollection<any, any, any> {
-  const collection = $derived.by(() => {
+  const contextDbClient = useOptionalDbClient()
+
+  const resolved = $derived.by(() => {
     // First check if the original parameter might be a getter
     // by seeing if toValue returns something different than the original
     let unwrappedParam = configOrQueryOrCollection
@@ -308,6 +324,10 @@ export function useLiveQuery(
 
     // Check if it's already a collection by checking for specific collection methods
     const inputIsCollection = isCollection(unwrappedParam)
+    const dbClient = inputIsCollection
+      ? contextDbClient
+      : ((unwrappedParam as { client?: DbClient } | null)?.client ??
+        contextDbClient)
 
     if (inputIsCollection) {
       // Warn when passing a collection directly with on-demand sync mode
@@ -329,132 +349,150 @@ export function useLiveQuery(
       if (unwrappedParam.status === `idle`) {
         unwrappedParam.startSyncImmediate()
       }
-      return unwrappedParam
+      return {
+        collection: unwrappedParam,
+        client: dbClient,
+        queryHash: getStableValueHash(
+          [`collection`, unwrappedParam.id],
+          `queryKey`,
+        ),
+        resumeDeferredCollections: () => {},
+      }
     }
 
     // Reference deps to make computed reactive to them
-    deps.forEach((dep) => toValue(dep))
+    const dependencyValues = deps.map((dep) => toValue(dep))
+    const deferredCollections: DeferredLiveQueryCollections = new Set()
+    const preparedValue = prepareLiveQueryValue(
+      unwrappedParam,
+      dbClient,
+      deferredCollections,
+    )
+    const configuredQueryKey = (
+      unwrappedParam as { queryKey?: MaybeGetter<LiveQueryKey> } | null
+    )?.queryKey
+    const queryKey = configuredQueryKey
+      ? toValue(configuredQueryKey)
+      : undefined
 
-    // Ensure we always start sync for Svelte helpers
-    if (typeof unwrappedParam === `function`) {
-      // Check if query function returns null/undefined (disabled query)
-      const queryBuilder = new BaseQueryBuilder() as InitialQueryBuilder
-      const result = unwrappedParam(queryBuilder)
+    let queryHash: string | undefined
+    try {
+      queryHash =
+        deps.length > 0 && !queryKey
+          ? getStableValueHash([`deps`, dependencyValues], `queryKey`)
+          : getLiveQueryHash(preparedValue, queryKey)
+    } catch (error) {
+      if (!(error instanceof UnhashableQueryIRError)) throw error
+      if (queryKey !== undefined) throw error
+    }
 
-      if (result === undefined || result === null) {
-        // Disabled query - return null
-        return null
-      }
-
-      return createLiveQueryCollection({
-        query: unwrappedParam,
+    let collection: Collection<any, any, any> | null
+    if (preparedValue === undefined || preparedValue === null) {
+      collection = null
+    } else if (isCollection(preparedValue)) {
+      collection = preparedValue
+    } else if (preparedValue instanceof BaseQueryBuilder) {
+      collection = createLiveQueryCollection({
+        query: preparedValue,
         startSync: true,
       })
     } else {
-      // A reactive getter (or param-driven query fn) can resolve to null/undefined
-      // to mean "disabled". `toValue` above already called it, so guard here —
-      // otherwise `{ ...null }` reaches createLiveQueryCollection and throws.
-      if (unwrappedParam === undefined || unwrappedParam === null) {
-        return null
-      }
-
-      return createLiveQueryCollection({
-        ...unwrappedParam,
+      collection = createLiveQueryCollection({
+        ...(preparedValue as LiveQueryCollectionConfig<any>),
         startSync: true,
       })
     }
+
+    return {
+      collection,
+      client: dbClient,
+      queryHash,
+      resumeDeferredCollections: () => {
+        for (const deferredCollection of deferredCollections) {
+          deferredCollection._resumeSyncStart()
+        }
+        deferredCollections.clear()
+      },
+    }
   })
 
+  let currentResolved = untrack(() => resolved)
+  let currentObserver = createLiveQueryObserver(currentResolved.collection, {
+    client: currentResolved.client,
+    queryHash: currentResolved.queryHash,
+    onPreload: currentResolved.resumeDeferredCollections,
+  })
+  const initialSnapshot = currentObserver.getServerSnapshot()
+
   // Reactive state that gets updated granularly through change events
-  const state = new SvelteMap<string | number, any>()
+  const state = new SvelteMap<string | number, any>(initialSnapshot.state ?? [])
 
   // Reactive data array that maintains sorted order
-  let internalData = $state<Array<any>>([])
+  let internalData = $state<Array<any>>(
+    Array.from(initialSnapshot.state?.values() ?? []),
+  )
 
   // Track collection status reactively
-  let status = $state(collection ? collection.status : (`disabled` as const))
-
-  // Helper to sync data array from collection in correct order
-  const syncDataFromCollection = (
-    currentCollection: Collection<any, any, any>,
-  ) => {
-    untrack(() => {
-      internalData = []
-      internalData.push(...Array.from(currentCollection.values()))
-    })
-  }
-
-  // The shared observer owns subscription, the ready-race, and status; Svelte
-  // materializes into its own rune-backed map (granular) + ordered array.
-  let currentObserver: LiveQueryObserver<any, any> | null = null
+  let status = $state(initialSnapshot.status)
 
   const syncFromObserver = (
     observer: LiveQueryObserver<any, any>,
-    currentCollection: Collection<any, any, any>,
+    changes?: Array<ChangeMessage<any>>,
   ) => {
-    status = observer.getSnapshot().status as CollectionStatus
-    syncDataFromCollection(currentCollection)
+    const snapshot = observer.getSnapshot()
+    status = snapshot.status as CollectionStatus
+    untrack(() => {
+      if (changes && changes.length > 0) {
+        for (const change of changes) {
+          switch (change.type) {
+            case `insert`:
+            case `update`:
+              state.set(change.key, change.value)
+              break
+            case `delete`:
+              state.delete(change.key)
+              break
+          }
+        }
+      } else {
+        state.clear()
+        for (const [key, value] of snapshot.state ?? []) {
+          state.set(key, value)
+        }
+      }
+      internalData = Array.from(snapshot.state?.values() ?? [])
+    })
   }
 
   // Watch for collection changes and subscribe to updates
   $effect(() => {
-    const currentCollection = collection
+    const nextResolved = resolved
 
-    // Tear down any previous observer.
-    currentObserver?.dispose()
-    currentObserver = null
-
-    // Handle null collection (disabled query)
-    if (!currentCollection) {
-      status = `disabled` as const
-      untrack(() => {
-        state.clear()
-        internalData = []
+    if (nextResolved !== currentResolved) {
+      currentObserver.dispose()
+      currentResolved = nextResolved
+      currentObserver = createLiveQueryObserver(nextResolved.collection, {
+        client: nextResolved.client,
+        queryHash: nextResolved.queryHash,
+        onPreload: nextResolved.resumeDeferredCollections,
       })
-      return
+      syncFromObserver(currentObserver)
     }
 
-    const observer = createLiveQueryObserver(currentCollection)
-    currentObserver = observer
-
-    // Initial rows arrive as the observer's first delta (includeInitialState);
-    // apply them and every subsequent delta granularly to the rune-backed map.
-    untrack(() => state.clear())
+    const observer = currentObserver
 
     const unsubscribe = observer.subscribe(
       (changes: Array<ChangeMessage<any>> | undefined) => {
-        untrack(() => {
-          if (changes) {
-            for (const change of changes) {
-              switch (change.type) {
-                case `insert`:
-                case `update`:
-                  state.set(change.key, change.value)
-                  break
-                case `delete`:
-                  state.delete(change.key)
-                  break
-              }
-            }
-          } else {
-            // Cleanup and other status-only publications carry no row deltas.
-            // Rebuild the keyed view so it cannot diverge from ordered data.
-            state.clear()
-            for (const [key, value] of observer.getSnapshot().state ?? []) {
-              state.set(key, value)
-            }
-          }
-        })
-        syncFromObserver(observer, currentCollection)
+        syncFromObserver(observer, changes)
       },
     )
-    syncFromObserver(observer, currentCollection)
+    currentResolved.resumeDeferredCollections()
+    syncFromObserver(observer)
 
     // Cleanup when effect is invalidated
     return () => {
       unsubscribe()
-      observer.dispose()
-      currentObserver = null
+      if (observer === currentObserver) observer.dispose()
     }
   })
 
@@ -463,17 +501,17 @@ export function useLiveQuery(
       return state
     },
     get data() {
-      const currentCollection = collection
+      const currentCollection = resolved.collection
       if (currentCollection && isSingleResultCollection(currentCollection)) {
         return internalData[0]
       }
       return internalData
     },
     get collection() {
-      return collection
+      return resolved.collection
     },
     get status() {
-      return status
+      return status as CollectionStatus
     },
     get isLoading() {
       return status === `loading`

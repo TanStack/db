@@ -1,0 +1,25 @@
+{
+  "name": "@tanstack/db-example-react-next-ssr-e2e",
+  "private": true,
+  "version": "0.0.0",
+  "scripts": {
+    "build": "next build",
+    "dev": "next dev",
+    "start": "next start",
+    "test:e2e": "pnpm --filter @tanstack/db build && pnpm --filter @tanstack/react-db build && playwright test"
+  },
+  "dependencies": {
+    "@tanstack/db": "workspace:*",
+    "@tanstack/react-db": "workspace:*",
+    "next": "^16.3.1",
+    "react": "^19.2.4",
+    "react-dom": "^19.2.4"
+  },
+  "devDependencies": {
+    "@playwright/test": "^1.60.0",
+    "@types/node": "^25.2.2",
+    "@types/react": "^19.2.13",
+    "@types/react-dom": "^19.2.3",
+    "typescript": "^5.9.2"
+  }
+}

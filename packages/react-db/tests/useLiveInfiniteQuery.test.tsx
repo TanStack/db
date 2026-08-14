@@ -318,6 +318,49 @@ describe(`useLiveInfiniteQuery`, () => {
     expect(queryExecutions).toBe(2)
   })
 
+  it(`uses queryKey to make captured values in opaque queries reactive`, async () => {
+    const source = createCollection(
+      mockSyncCollectionOptions<Post>({
+        id: `infinite-opaque-query-key`,
+        getKey: (post) => post.id,
+        initialData: createMockPosts(20),
+      }),
+    )
+    const { result, rerender } = renderHook(
+      ({ category }: { category: string }) =>
+        useLiveInfiniteQuery(
+          (q) =>
+            q
+              .from({ post: source })
+              .fn.where(({ post }) => post.category === category)
+              .orderBy(({ post }) => post.createdAt, `desc`),
+          {
+            pageSize: 2,
+            queryKey: [source.id, `category-fn`, category],
+          },
+        ),
+      { initialProps: { category: `tech` } },
+    )
+
+    await waitFor(() => {
+      expect(result.current.data.length).toBeGreaterThan(0)
+      expect(
+        result.current.data.every((post) => post.category === `tech`),
+      ).toBe(true)
+    })
+    const firstCollection = result.current.collection
+
+    rerender({ category: `life` })
+
+    await waitFor(() => {
+      expect(result.current.collection).not.toBe(firstCollection)
+      expect(result.current.data.length).toBeGreaterThan(0)
+      expect(
+        result.current.data.every((post) => post.category === `life`),
+      ).toBe(true)
+    })
+  })
+
   it(`compares dependencies by identity instead of serialization`, async () => {
     const source = createCollection(
       mockSyncCollectionOptions<Post>({

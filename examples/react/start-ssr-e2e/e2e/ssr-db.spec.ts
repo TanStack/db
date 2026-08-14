@@ -52,9 +52,16 @@ test(`TanStack Start hydrates, reconciles, and incrementally applies DB rows`, a
   expect(browserErrors).toEqual([])
 })
 
-test(`TanStack Start streams a DB query discovered in a Suspense boundary`, async ({
+test(`TanStack Start streams a DB result snapshot and hands off to browser sync`, async ({
   page,
+  request,
 }) => {
+  const response = await request.get(`/ssr-db-stream`)
+  expect(response.ok()).toBe(true)
+  const html = await response.text()
+  expect(html).toContain(`Streamed while rendering`)
+  expect(html).not.toContain(`SOURCE_ONLY_DO_NOT_TRANSPORT`)
+
   const browserErrors: Array<string> = []
   page.on(`console`, (message) => {
     if (message.type() === `error`) {
@@ -76,5 +83,11 @@ test(`TanStack Start streams a DB query discovered in a Suspense boundary`, asyn
     `Streamed while rendering`,
   )
   await expect(page.getByTestId(`stream-fallback`)).not.toBeVisible()
+  await expect(
+    page.getByTestId(`streamed-todo-streamed-server-1`),
+  ).not.toBeVisible()
+  await expect(page.getByTestId(`streamed-todo-streamed-browser-1`)).toHaveText(
+    `Reconciled from browser sync`,
+  )
   expect(browserErrors).toEqual([])
 })

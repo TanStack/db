@@ -92,8 +92,9 @@ You now have collections, live queries, and optimistic mutations! Let's break th
 If you are building with SSR, see the [SSR and Hydration guide](./guides/ssr.md)
 after this quick start. The short version is that SSR apps use stable
 `collectionOptions(...)` descriptors, materialize them through a request-scoped
-`DbClient` on the server, then hydrate a browser `DbClient` before React hooks
-read from DB.
+`DbClient` on the server, then hydrate a browser `DbClient` with explicit
+collection rows or a preloaded live-query result before React hooks read from
+DB.
 
 ## Installation
 

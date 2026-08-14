@@ -12,15 +12,22 @@ type StreamedTodo = {
   id: string
   text: string
   status: `open` | `done`
+  sourcePayload: string
 }
 
-const streamedTodos: Array<StreamedTodo> = [
-  {
-    id: `streamed-server-1`,
-    text: `Streamed while rendering`,
-    status: `open`,
-  },
-]
+const serverTodo: StreamedTodo = {
+  id: `streamed-server-1`,
+  text: `Streamed while rendering`,
+  status: `open`,
+  sourcePayload: `SOURCE_ONLY_DO_NOT_TRANSPORT`,
+}
+
+const browserTodo: StreamedTodo = {
+  id: `streamed-browser-1`,
+  text: `Reconciled from browser sync`,
+  status: `open`,
+  sourcePayload: `BROWSER_SOURCE_ONLY_DO_NOT_TRANSPORT`,
+}
 
 const streamedTodoCollection = collectionOptions(
   `ssr-suspense-stream-todos`,
@@ -37,19 +44,19 @@ const streamedTodoCollection = collectionOptions(
 
           return {
             loadSubset: () => {
-              if (runtime === `browser`) {
-                return true
-              }
-
               return new Promise<void>((resolve) => {
-                setTimeout(() => {
-                  begin({ immediate: true })
-                  for (const todo of streamedTodos) {
-                    write({ type: `insert`, value: todo })
-                  }
-                  commit()
-                  resolve()
-                }, 1000)
+                setTimeout(
+                  () => {
+                    begin({ immediate: true })
+                    write({
+                      type: `insert`,
+                      value: runtime === `server` ? serverTodo : browserTodo,
+                    })
+                    commit()
+                    resolve()
+                  },
+                  runtime === `server` ? 1000 : 1500,
+                )
               })
             },
           }
@@ -104,7 +111,12 @@ function StreamedTodoList() {
     query: (q) =>
       q
         .from({ todo: streamedTodoCollection })
-        .where(({ todo }) => eq(todo.status, `open`)),
+        .where(({ todo }) => eq(todo.status, `open`))
+        .select(({ todo }) => ({
+          id: todo.id,
+          text: todo.text,
+          status: todo.status,
+        })),
   })
 
   return (

@@ -79,6 +79,11 @@ jobs:
           cd examples/react/start-ssr-e2e
           pnpm test:e2e
 
+      - name: Run Next.js SSR E2E tests
+        run: |
+          cd examples/react/next-ssr-e2e
+          pnpm test:e2e
+
       - name: Run Node SQLite persisted collection E2E tests
         run: |
           cd packages/node-db-sqlite-persistence

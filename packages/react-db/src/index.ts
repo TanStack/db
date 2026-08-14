@@ -6,6 +6,7 @@ export type {
   UseLiveQueryStatus,
 } from './useLiveQuery'
 export * from './DbProvider'
+export * from './HydrationBoundary'
 export * from './useLiveSuspenseQuery'
 export * from './usePacedMutations'
 export * from './useLiveInfiniteQuery'

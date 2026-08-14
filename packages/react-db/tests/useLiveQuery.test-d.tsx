@@ -12,7 +12,9 @@ import { useLiveQuery } from '../src/useLiveQuery'
 import { useLiveInfiniteQuery } from '../src/useLiveInfiniteQuery'
 import { useLiveSuspenseQuery } from '../src/useLiveSuspenseQuery'
 import { useDbClient } from '../src/DbProvider'
-import type { DbClient } from '../../db/src/index'
+import { HydrationBoundary } from '../src/HydrationBoundary'
+import type { DbClient, DehydratedDbState } from '../../db/src/index'
+import type { JSX } from 'react'
 import type { OutputWithVirtual } from '../../db/tests/utils'
 import type { SingleResult } from '../../db/src/types'
 
@@ -29,6 +31,17 @@ describe(`useLiveQuery type assertions`, () => {
   it(`should type useDbClient as DbClient`, () => {
     const client = useDbClient()
     expectTypeOf(client).toEqualTypeOf<DbClient>()
+  })
+
+  it(`types HydrationBoundary state`, () => {
+    const state: DehydratedDbState = { collections: [] }
+    const boundary = (
+      <HydrationBoundary state={state}>
+        <div />
+      </HydrationBoundary>
+    )
+
+    expectTypeOf(boundary).toEqualTypeOf<JSX.Element>()
   })
 
   it(`should type findOne query builder to return a single row`, () => {

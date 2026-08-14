@@ -1,8 +1,20 @@
 import { createCollection } from './collection/index.js'
+import {
+  collectionOptionsBrand,
+  collectionOptionsFactory,
+  hasCollectionOptionsBrand,
+} from './collection-options.js'
 import { TransactionScope } from './transactions.js'
 import { getBuilderFromConfig } from './query/live/collection-registry.js'
+import { createLiveQueryCollection } from './query/live-query-collection.js'
+import { createLiveQueryObserver } from './live-query-observer.js'
+import {
+  getLiveQueryHash,
+  prepareLiveQueryValue,
+} from './live-query-options.js'
 import type { StandardSchemaV1 } from '@standard-schema/spec'
 import type { Collection } from './collection/index.js'
+import type { CollectionOptionsIdentity } from './collection-options.js'
 import type {
   CollectionConfig,
   InferSchemaInput,
@@ -12,13 +24,11 @@ import type {
   TransactionConfig,
   UtilsRecord,
 } from './types.js'
+import type {
+  DeferredLiveQueryCollections,
+  LiveQueryOptions,
+} from './live-query-options.js'
 
-const collectionOptionsBrand: unique symbol = Symbol.for(
-  `@tanstack/db.collectionOptions`,
-) as never
-const collectionOptionsFactory: unique symbol = Symbol.for(
-  `@tanstack/db.collectionOptions.factory`,
-) as never
 const collectionConfigFactory: unique symbol = Symbol.for(
   `@tanstack/db.collectionConfig.factory`,
 ) as never
@@ -30,13 +40,7 @@ export type CollectionOptions<
   TKey extends string | number = string | number,
   TSchema extends StandardSchemaV1 = never,
   TUtils extends UtilsRecord = UtilsRecord,
-> = {
-  readonly id: string
-  readonly [collectionOptionsBrand]: true
-  readonly [collectionOptionsFactory]: (
-    client: DbClient,
-  ) => CollectionConfig<T, TKey, TSchema, TUtils>
-}
+> = CollectionOptionsIdentity<T, TKey, TSchema, TUtils, DbClient>
 
 type AnyCollectionOptions = CollectionOptions<any, any, any, any>
 type AnyCollection = Collection<any, any, any, any, any>
@@ -111,7 +115,15 @@ export type DehydratedCollectionChunk<
 export type DehydratedLiveQuery = {
   queryHash: string
   dehydratedAt: number
-  promise: Promise<DehydratedDbState>
+  snapshot?: DehydratedLiveQueryResult
+  promise?: Promise<DehydratedLiveQueryResult>
+}
+
+export type DehydratedLiveQueryResult<
+  T extends object = object,
+  TKey extends string | number = string | number,
+> = {
+  rows: Array<DehydratedCollectionRow<T, TKey>>
 }
 
 export type DehydratedDbState = {
@@ -126,13 +138,19 @@ export type DbClientLiveQuery = {
   readonly dehydratedAt: number
   readonly status: DbClientLiveQueryState
   readonly promise: Promise<void>
+  readonly snapshot?: DehydratedLiveQueryResult
   readonly error?: unknown
 }
 
-export type DbClientEvent = {
-  type: `liveQueryAdded`
-  query: DbClientLiveQuery
-}
+export type DbClientEvent =
+  | {
+      type: `liveQueryAdded` | `liveQueryUpdated`
+      query: DbClientLiveQuery
+    }
+  | {
+      type: `liveQueryStreamError`
+      error: unknown
+    }
 
 export type DehydrateDbClientOptions = {
   shouldDehydrateCollection?: (collection: Collection) => boolean
@@ -141,6 +159,7 @@ export type DehydrateDbClientOptions = {
 
 type CollectionRecord = {
   collection: AnyCollection
+  shouldDehydrate: boolean
 }
 
 type LiveQueryRecord = {
@@ -148,7 +167,10 @@ type LiveQueryRecord = {
   dehydratedAt: number
   status: DbClientLiveQueryState
   promise: Promise<void>
-  dehydratedPromise: Promise<DehydratedDbState>
+  resultPromise: Promise<DehydratedLiveQueryResult>
+  succeed: (snapshot: DehydratedLiveQueryResult) => void
+  fail: (error: unknown) => void
+  snapshot?: DehydratedLiveQueryResult
   error?: unknown
 }
 
@@ -279,11 +301,7 @@ export function collectionOptions(
 export function isCollectionOptions(
   value: unknown,
 ): value is CollectionOptions<any, string | number, any, UtilsRecord> {
-  return (
-    typeof value === `object` &&
-    value !== null &&
-    (value as Record<PropertyKey, unknown>)[collectionOptionsBrand] === true
-  )
+  return hasCollectionOptionsBrand(value)
 }
 
 export class DbClient {
@@ -291,8 +309,16 @@ export class DbClient {
   private collectionsById = new Map<string, CollectionRecord>()
   private pendingHydration = new Map<string, Array<DehydratedCollectionChunk>>()
   private liveQueries = new Map<string, LiveQueryRecord>()
+  private preloadedLiveQueries = new Map<
+    string,
+    {
+      collection: AnyCollection
+      observer: { dispose: () => void }
+    }
+  >()
   private listeners = new Set<(event: DbClientEvent) => void>()
   private ssrStreamingEnabled = false
+  private lastLiveQueryTimestamp = 0
   private readonly transactionScope = new TransactionScope()
 
   constructor(private readonly options: DbClientOptions = {}) {}
@@ -319,6 +345,38 @@ export class DbClient {
     config: TransactionConfig<T>,
   ) {
     return this.transactionScope.createTransaction(config)
+  }
+
+  preloadLiveQuery(options: LiveQueryOptions): Promise<void> {
+    const deferredCollections: DeferredLiveQueryCollections = new Set()
+    const prepared = prepareLiveQueryValue(options, this, deferredCollections)
+    const queryHash = getLiveQueryHash(prepared, options.queryKey)
+    const existing = this.liveQueries.get(queryHash)
+    if (existing && existing.status !== `error`) return existing.promise
+
+    const failedPreload = this.preloadedLiveQueries.get(queryHash)
+    if (failedPreload) {
+      failedPreload.observer.dispose()
+      void failedPreload.collection.cleanup()
+      this.preloadedLiveQueries.delete(queryHash)
+    }
+
+    const collection = createLiveQueryCollection({
+      ...(prepared as LiveQueryOptions),
+      startSync: true,
+    }) as AnyCollection
+    const observer = createLiveQueryObserver(collection, {
+      client: this,
+      queryHash,
+      mode: `wholesale`,
+    })
+    this.preloadedLiveQueries.set(queryHash, { collection, observer })
+    for (const source of deferredCollections) source._resumeSyncStart()
+
+    return this._registerLiveQuery(
+      queryHash,
+      collection.preload().then(() => observer.dehydrate()),
+    )
   }
 
   collection<
@@ -389,6 +447,9 @@ export class DbClient {
   ): AnyCollection {
     const existing = this.collectionsByOptions.get(options)
     if (existing) {
+      if (!deferSyncStart) {
+        this.collectionsById.get(existing.id)!.shouldDehydrate = true
+      }
       if (deferSyncStart) {
         existing._deferSyncStart()
       }
@@ -415,6 +476,7 @@ export class DbClient {
     this.collectionsByOptions.set(options, collection)
     this.collectionsById.set(collection.id, {
       collection,
+      shouldDehydrate: !deferSyncStart,
     })
 
     if (materializeOptions?.initialData?.length) {
@@ -452,10 +514,15 @@ export class DbClient {
   dehydrate(options: DehydrateDbClientOptions = {}): DehydratedDbState {
     const collections: Array<DehydratedCollectionChunk> = []
 
-    for (const { collection } of this.collectionsById.values()) {
+    for (const {
+      collection,
+      shouldDehydrate,
+    } of this.collectionsById.values()) {
+      const collectionDecision = options.shouldDehydrateCollection?.(collection)
       if (
         getBuilderFromConfig(collection.config) ||
-        options.shouldDehydrateCollection?.(collection) === false
+        collectionDecision === false ||
+        (!shouldDehydrate && collectionDecision !== true)
       ) {
         continue
       }
@@ -479,16 +546,24 @@ export class DbClient {
     }
 
     const liveQueries = Array.from(this.liveQueries.values()).flatMap(
-      (query) =>
-        options.shouldDehydrateLiveQuery?.(query) === true
-          ? [
-              {
-                queryHash: query.queryHash,
-                dehydratedAt: query.dehydratedAt,
-                promise: query.dehydratedPromise,
-              },
-            ]
-          : [],
+      (query): Array<DehydratedLiveQuery> => {
+        const shouldDehydrate =
+          options.shouldDehydrateLiveQuery?.(query) ??
+          query.status === `success`
+        if (!shouldDehydrate || query.status === `error`) {
+          return []
+        }
+
+        return [
+          {
+            queryHash: query.queryHash,
+            dehydratedAt: query.dehydratedAt,
+            ...(query.snapshot
+              ? { snapshot: query.snapshot }
+              : { promise: query.resultPromise }),
+          },
+        ]
+      },
     )
 
     return {
@@ -544,88 +619,153 @@ export class DbClient {
   }
 
   /** @internal */
-  _registerLiveQuery(queryHash: string, promise: Promise<void>): Promise<void> {
+  _consumeLiveQueryResult(queryHash: string, dehydratedAt: number): void {
+    const record = this.liveQueries.get(queryHash)
+    if (record?.dehydratedAt === dehydratedAt) {
+      this.liveQueries.delete(queryHash)
+    }
+  }
+
+  /** @internal */
+  _registerLiveQuery(
+    queryHash: string,
+    promise: Promise<DehydratedLiveQueryResult>,
+  ): Promise<void> {
     const existing = this.liveQueries.get(queryHash)
-    if (existing) {
+    if (existing && existing.status !== `error`) {
       return existing.promise
     }
 
-    const record: LiveQueryRecord = {
+    const record = this.createLiveQueryRecord(
       queryHash,
-      dehydratedAt: Date.now(),
-      status: `pending`,
-      promise: undefined as unknown as Promise<void>,
-      dehydratedPromise: undefined as unknown as Promise<DehydratedDbState>,
-    }
-
-    record.promise = Promise.resolve(promise).then(
-      () => {
-        record.status = `success`
-      },
-      (error: unknown) => {
-        record.status = `error`
-        record.error = error
-        throw error
-      },
+      this.nextLiveQueryTimestamp(),
     )
-    record.promise.catch(() => {})
-    record.dehydratedPromise = record.promise.then(() => this.dehydrate())
-    record.dehydratedPromise.catch(() => {})
 
     this.liveQueries.set(queryHash, record)
     this.emit({ type: `liveQueryAdded`, query: record })
+    Promise.resolve(promise).then(record.succeed, record.fail)
     return record.promise
+  }
+
+  /** @internal */
+  _failPendingLiveQueries(error: unknown): void {
+    for (const record of this.liveQueries.values()) {
+      if (record.status === `pending`) record.fail(error)
+    }
+    this.emit({ type: `liveQueryStreamError`, error })
   }
 
   async cleanup(): Promise<void> {
     try {
-      await Promise.all(
-        Array.from(this.collectionsById.values(), ({ collection }) =>
+      await Promise.all([
+        ...Array.from(this.collectionsById.values(), ({ collection }) =>
           collection.cleanup(),
         ),
-      )
+        ...Array.from(
+          this.preloadedLiveQueries.values(),
+          ({ collection, observer }) => {
+            observer.dispose()
+            return collection.cleanup()
+          },
+        ),
+      ])
     } finally {
       this.transactionScope.clear()
       this.collectionsByOptions = new WeakMap()
       this.collectionsById.clear()
       this.pendingHydration.clear()
       this.liveQueries.clear()
+      this.preloadedLiveQueries.clear()
       this.listeners.clear()
+      this.lastLiveQueryTimestamp = 0
     }
   }
 
   private hydrateLiveQuery(dehydratedQuery: DehydratedLiveQuery): void {
     const existing = this.liveQueries.get(dehydratedQuery.queryHash)
-    if (
-      existing?.status === `pending` ||
-      (existing && existing.dehydratedAt >= dehydratedQuery.dehydratedAt)
-    ) {
+    if (existing && existing.dehydratedAt >= dehydratedQuery.dehydratedAt) {
       return
     }
 
-    const record: LiveQueryRecord = {
-      queryHash: dehydratedQuery.queryHash,
-      dehydratedAt: dehydratedQuery.dehydratedAt,
-      status: `pending`,
-      promise: undefined as unknown as Promise<void>,
-      dehydratedPromise: Promise.resolve(dehydratedQuery.promise),
-    }
-
-    record.promise = record.dehydratedPromise.then(
-      (resolvedState) => {
-        this.hydrate(resolvedState)
-        record.status = `success`
-      },
-      (error: unknown) => {
-        record.status = `error`
-        record.error = error
-        throw error
-      },
+    const record = this.createLiveQueryRecord(
+      dehydratedQuery.queryHash,
+      dehydratedQuery.dehydratedAt,
     )
-    record.promise.catch(() => {})
-
     this.liveQueries.set(record.queryHash, record)
     this.emit({ type: `liveQueryAdded`, query: record })
+
+    if (dehydratedQuery.snapshot) {
+      record.succeed(dehydratedQuery.snapshot)
+    } else if (dehydratedQuery.promise) {
+      Promise.resolve(dehydratedQuery.promise).then(record.succeed, record.fail)
+    } else {
+      record.fail(
+        new Error(
+          `Dehydrated live query "${dehydratedQuery.queryHash}" has neither a snapshot nor a promise.`,
+        ),
+      )
+    }
+  }
+
+  private nextLiveQueryTimestamp(): number {
+    this.lastLiveQueryTimestamp = Math.max(
+      Date.now(),
+      this.lastLiveQueryTimestamp + 1,
+    )
+    return this.lastLiveQueryTimestamp
+  }
+
+  private createLiveQueryRecord(
+    queryHash: string,
+    dehydratedAt: number,
+  ): LiveQueryRecord {
+    this.lastLiveQueryTimestamp = Math.max(
+      this.lastLiveQueryTimestamp,
+      dehydratedAt,
+    )
+
+    let resolveResult!: (snapshot: DehydratedLiveQueryResult) => void
+    let rejectResult!: (error: unknown) => void
+    let settled = false
+    const resultPromise = new Promise<DehydratedLiveQueryResult>(
+      (resolve, reject) => {
+        resolveResult = resolve
+        rejectResult = reject
+      },
+    )
+    const promise = resultPromise.then(() => undefined)
+    resultPromise.catch(() => {})
+    promise.catch(() => {})
+
+    const record: LiveQueryRecord = {
+      queryHash,
+      dehydratedAt,
+      status: `pending`,
+      promise,
+      resultPromise,
+      succeed: (snapshot) => {
+        if (settled) return
+        settled = true
+        record.status = `success`
+        record.snapshot = snapshot
+        resolveResult(snapshot)
+        if (this.liveQueries.get(queryHash) === record) {
+          this.emit({ type: `liveQueryUpdated`, query: record })
+        }
+      },
+      fail: (error) => {
+        if (settled) return
+        settled = true
+        record.status = `error`
+        record.error = error
+        rejectResult(error)
+        if (this.liveQueries.get(queryHash) === record) {
+          this.emit({ type: `liveQueryUpdated`, query: record })
+        }
+      },
+    }
+
+    return record
   }
 
   private emit(event: DbClientEvent): void {

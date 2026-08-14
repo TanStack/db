@@ -3026,6 +3026,25 @@ describe(`Query Collections`, () => {
       expect(result.current.collection).not.toBe(firstCollection)
     })
 
+    it(`throws when an explicit queryKey cannot be stably hashed`, () => {
+      const collection = createCollection(
+        mockSyncCollectionOptions<Person>({
+          id: `unhashable-explicit-query-key`,
+          getKey: (person: Person) => person.id,
+          initialData: initialPersons,
+        }),
+      )
+
+      expect(() =>
+        renderHook(() =>
+          useLiveQuery({
+            queryKey: [collection.id, () => `opaque`],
+            query: (q) => q.from({ people: collection }),
+          }),
+        ),
+      ).toThrow(/queryKey.*function value/)
+    })
+
     it(`keeps an explicit queryKey stable across structurally equal values`, async () => {
       const collection = createCollection(
         mockSyncCollectionOptions<Person>({
