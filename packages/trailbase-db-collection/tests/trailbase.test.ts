@@ -141,9 +141,7 @@ describe(`TrailBase Integration`, () => {
         resolveList = resolve
       }),
     )
-    recordApi.subscribe.mockResolvedValue(
-      new TransformStream<Event>().readable,
-    )
+    recordApi.subscribe.mockResolvedValue(new TransformStream<Event>().readable)
     const options = setUp(recordApi)
     const collection = createCollection(options)
 
