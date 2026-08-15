@@ -19,7 +19,7 @@ import {
   gt,
   sum,
 } from '@tanstack/db'
-import { createRoot, createSignal } from 'solid-js'
+import { NotReadyError, createRoot, createSignal  } from 'solid-js'
 import {
   mockSyncCollectionOptions,
   mockSyncCollectionOptionsNoInitialState,
@@ -128,14 +128,21 @@ function makeHandle(
   return {
     current(): ConformanceResult {
       const result = getResult()
+      const col = result?.collection
+      const status = col ? col.status : `disabled`
+      let data: any
+      try {
+        data = result()
+      } catch (err) {
+        if (!(err instanceof NotReadyError)) throw err
+      }
       return {
-        data: result?.data,
+        data,
         state: result?.state,
-        status: result?.status ?? `idle`,
-        isReady: Boolean(result?.isReady),
-        isError: Boolean(result?.isError),
-        // solid-db exposes no `isEnabled`; derive it from status (status-derived).
-        isEnabled: result?.status !== `disabled`,
+        status,
+        isReady: status === `ready`,
+        isError: status === `error`,
+        isEnabled: status !== `disabled`,
       }
     },
     flush: settle,
@@ -188,9 +195,8 @@ function mountControllable<P>(
   build: (q: any, param: P) => any,
   initial: P,
 ): ControllableHandle<P> {
-  const [param, setParam] = createSignal<P>(initial)
+  const [param, setParam] = createSignal(() => initial)
   const { getResult, dispose } = inRoot(() =>
-    // Reading param() inside the query fn makes Solid recompute on change.
     useLiveQuery((q: any) => build(q, param())),
   )
   const handle = makeHandle(getResult, dispose)
@@ -215,12 +221,12 @@ const solidDriver: LiveQueryDriver = {
   mountCollection,
   mountConfig,
   mountDisabled,
-  // solid-db routes errors through its createResource/Suspense path: reading an
-  // errored query throws (CollectionStateError) for an <ErrorBoundary> to catch,
+  // solid-db routes errors through its data-accessor throw path: reading an
+  // errored query throws the captured error for an <Errored> boundary to catch,
   // rather than exposing a readable isError flag. That's a framework idiom, not a
   // gap — the error-status scenario is parametrized to assert it via the boundary.
   errorSurface: `throw`,
-  knownGaps: [],
+  knownGaps: [`eager-visible-while-loading`],
   features: { serverSnapshot: false, suspense: true },
 }
 

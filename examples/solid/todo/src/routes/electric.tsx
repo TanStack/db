@@ -1,6 +1,6 @@
 import { createFileRoute } from '@tanstack/solid-router'
 import { useLiveQuery } from '@tanstack/solid-db'
-import { Suspense } from 'solid-js'
+import { Loading } from '@solidjs/web'
 import {
   electricConfigCollection,
   electricTodoCollection,
@@ -33,7 +33,7 @@ function ElectricPage() {
   )
 
   return (
-    <Suspense fallback="Loading...">
+    <Loading fallback="Loading...">
       <TodoApp
         todos={todos()}
         configData={configData()}
@@ -41,6 +41,6 @@ function ElectricPage() {
         configCollection={electricConfigCollection}
         title="todos (electric)"
       />
-    </Suspense>
+    </Loading>
   )
 }

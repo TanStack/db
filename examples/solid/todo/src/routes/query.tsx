@@ -1,6 +1,6 @@
 import { createFileRoute } from '@tanstack/solid-router'
 import { useLiveQuery } from '@tanstack/solid-db'
-import { Suspense } from 'solid-js'
+import { Loading } from '@solidjs/web'
 import { queryConfigCollection, queryTodoCollection } from '../lib/collections'
 import { TodoApp } from '../components/TodoApp'
 
@@ -30,7 +30,7 @@ function QueryPage() {
   )
 
   return (
-    <Suspense fallback="Loading...">
+    <Loading fallback="Loading...">
       <TodoApp
         todos={todos()}
         configData={configData()}
@@ -38,6 +38,6 @@ function QueryPage() {
         configCollection={queryConfigCollection}
         title="todos (query)"
       />
-    </Suspense>
+    </Loading>
   )
 }
