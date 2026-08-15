@@ -74,7 +74,7 @@ type OracleNode = RootRow & {
   children?: Array<OracleNode>
 }
 
-type RelationshipNode = {
+type RelationshipNode = Record<string, unknown> & {
   id: number
   children?: unknown
 }
@@ -334,39 +334,50 @@ function stripVirtualProperties(value: unknown): unknown {
   )
 }
 
-function findRelationshipNode(
+function replaceDirectChildren(
   value: unknown,
-  id: number,
-): RelationshipNode | undefined {
+  parentId: number,
+  children: ReadonlyArray<OracleNode>,
+): unknown | undefined {
   if (!Array.isArray(value)) return undefined
-  for (const entry of value) {
-    if (!isRelationshipNode(entry)) continue
-    if (entry.id === id) return entry
-    const nested = findRelationshipNode(entry.children, id)
-    if (nested) return nested
+
+  let replacements = 0
+  const visit = (entries: ReadonlyArray<unknown>): Array<unknown> =>
+    entries.map((entry) => {
+      if (!isRelationshipNode(entry)) return entry
+      if (entry.id === parentId) {
+        replacements += 1
+        return { ...entry, children }
+      }
+      if (!Array.isArray(entry.children)) return entry
+      return { ...entry, children: visit(entry.children) }
+    })
+
+  const replaced = visit(value)
+  return replacements === 1 ? replaced : undefined
+}
+
+function matchesExactly(actual: unknown, expected: unknown): boolean {
+  try {
+    expect(actual).toEqual(expected)
+    return true
+  } catch {
+    return false
   }
-  return undefined
 }
 
-function hasDirectChild(value: unknown, parentId: number, childId: number) {
-  const parent = findRelationshipNode(value, parentId)
-  return (
-    Array.isArray(parent?.children) &&
-    parent.children.some(
-      (child) => isRelationshipNode(child) && child.id === childId,
-    )
+function classifyRetainedDetachedGrandchild(
+  { actual, expected }: AssertionDifference,
+  retainedChildren: ReadonlyArray<OracleNode>,
+) {
+  const expectedWithOnlyKnownDefect = replaceDirectChildren(
+    expected,
+    11,
+    retainedChildren,
   )
-}
-
-function classifyRetainedDetachedGrandchild({
-  actual,
-  expected,
-}: AssertionDifference) {
   return (
-    findRelationshipNode(actual, 11) !== undefined &&
-    findRelationshipNode(expected, 11) !== undefined &&
-    hasDirectChild(actual, 11, 21) &&
-    findRelationshipNode(expected, 21) === undefined
+    expectedWithOnlyKnownDefect !== undefined &&
+    matchesExactly(actual, expectedWithOnlyKnownDefect)
   )
 }
 
@@ -545,6 +556,18 @@ function fixture(routes: RouteValues) {
   return { roots, levels }
 }
 
+function retainedDetachedChildren(routes: RouteValues): Array<OracleNode> {
+  return [
+    {
+      id: 21,
+      group: routes.original + 1000,
+      value: 210,
+      position: 0,
+      children: [],
+    },
+  ]
+}
+
 async function expectHistoryMatches(
   routes: RouteValues,
   steps: ReadonlyArray<OptimisticRelationshipStep>,
@@ -565,6 +588,58 @@ const routeValuesArbitrary: fc.Arbitrary<RouteValues> = fc.record({
 })
 
 describe(`optimistic relationship-transition oracle`, () => {
+  fcTest(`known-defect classifier rejects collateral corruption`, () => {
+    const routes: RouteValues = {
+      rootA: 10,
+      rootB: 100,
+      rootC: 200,
+      original: 300,
+      optimistic: 400,
+      authoritative: 500,
+    }
+    const expected = [
+      {
+        id: 1,
+        group: routes.rootA,
+        value: 10,
+        position: 0,
+        children: [
+          {
+            id: 11,
+            group: routes.optimistic,
+            value: 110,
+            position: 0,
+            children: [],
+          },
+        ],
+      },
+    ]
+    const actual = [
+      {
+        id: 1,
+        group: routes.rootA,
+        value: 999,
+        position: 0,
+        children: [
+          {
+            id: 11,
+            group: routes.optimistic,
+            value: 110,
+            position: 0,
+            children: retainedDetachedChildren(routes),
+          },
+        ],
+      },
+    ]
+
+    expect(
+      classifyRetainedDetachedGrandchild(
+        { actual, expected },
+        retainedDetachedChildren(routes),
+      ),
+    ).toBe(false)
+  })
+
   fcTest(
     `rejects optimistic handles the sync mock cannot settle independently`,
     () => {
@@ -584,23 +659,29 @@ describe(`optimistic relationship-transition oracle`, () => {
 
   fcTest.prop([routeValuesArbitrary], { numRuns: 12 })(
     `known defect: an optimistic rekey detaches its old descendants immediately`,
-    expectAssertionFailure(
-      async (routes) => {
-        await expectHistoryMatches(routes, [
-          {
-            type: `optimistic`,
-            handle: `rekey`,
-            level: 1,
-            id: 11,
-            patch: { group: routes.optimistic },
-          },
-        ])
-      },
-      {
-        checkpoint: 1,
-        classify: classifyRetainedDetachedGrandchild,
-      },
-    ),
+    async (routes) => {
+      await expectAssertionFailure(
+        async () => {
+          await expectHistoryMatches(routes, [
+            {
+              type: `optimistic`,
+              handle: `rekey`,
+              level: 1,
+              id: 11,
+              patch: { group: routes.optimistic },
+            },
+          ])
+        },
+        {
+          checkpoint: 1,
+          classify: (difference) =>
+            classifyRetainedDetachedGrandchild(
+              difference,
+              retainedDetachedChildren(routes),
+            ),
+        },
+      )()
+    },
   )
 
   fcTest.prop([routeValuesArbitrary], { numRuns: 12 })(
@@ -637,6 +718,30 @@ describe(`optimistic relationship-transition oracle`, () => {
         },
         { type: `rollback`, handle: `descendant` },
         { type: `rollback`, handle: `reparent` },
+      ])
+    },
+  )
+
+  fcTest.prop([routeValuesArbitrary], { numRuns: 12 })(
+    `rolls back a reparented ancestor while its descendant update remains pending`,
+    async (routes) => {
+      await expectHistoryMatches(routes, [
+        {
+          type: `optimistic`,
+          handle: `reparent`,
+          level: 1,
+          id: 11,
+          patch: { parentGroup: routes.rootB },
+        },
+        {
+          type: `optimistic`,
+          handle: `descendant`,
+          level: 2,
+          id: 21,
+          patch: { value: 211 },
+        },
+        { type: `rollback`, handle: `reparent` },
+        { type: `rollback`, handle: `descendant` },
       ])
     },
   )
