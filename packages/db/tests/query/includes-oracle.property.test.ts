@@ -206,55 +206,6 @@ function replaceDirectChildren(
   )
 }
 
-function removeDirectRelationshipChild(
-  value: unknown,
-  parentId: number,
-  childId: number,
-): unknown {
-  if (!Array.isArray(value)) return value
-
-  return value.map((entry) => {
-    if (!isRelationshipNode(entry) || !Array.isArray(entry.children)) {
-      return entry
-    }
-
-    return {
-      ...entry,
-      children:
-        entry.id === parentId
-          ? entry.children.filter(
-              (child) => !isRelationshipNode(child) || child.id !== childId,
-            )
-          : removeDirectRelationshipChild(entry.children, parentId, childId),
-    }
-  })
-}
-
-function classifyOnlyMissingReplacementChild(
-  difference: AssertionDifference,
-  replacementRowId: number,
-  childId: number,
-): boolean {
-  if (!classifyMissingReplacementChild(difference, replacementRowId, childId)) {
-    return false
-  }
-
-  try {
-    expect(difference.actual).toEqual(
-      removeDirectRelationshipChild(
-        difference.expected,
-        replacementRowId,
-        childId,
-      ),
-    )
-    return true
-  } catch {
-    // Reject a known missing-child difference if any second difference rides
-    // along with it; expected failures must not hide new regressions.
-    return false
-  }
-}
-
 type RelationshipProjectionNode = {
   id: number
   children?: Array<RelationshipProjectionNode>
@@ -3101,7 +3052,7 @@ function createRelationshipBatchShapeScenarios({
     },
     candidateCheckpoint: prefix.length + 1 + replacementSteps.length,
     classify: (difference) =>
-      classifyOnlyMissingReplacementChild(
+      classifyMissingReplacementChild(
         difference,
         replacementChild.id,
         source.idBase + depth,
