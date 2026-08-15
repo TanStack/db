@@ -147,17 +147,14 @@ describe(`createLiveQueryObserver`, () => {
     )
     const liveQuery = createLiveQueryCollection((q) => q.from({ source }))
     client._setSsrServerCleanupEnabled(true)
-    const sourceObserver = createLiveQueryObserver<Row, string>(source as any, {
+    const sourceObserver = createLiveQueryObserver(source, {
       client,
       queryHash: `observer-source-cleanup`,
     })
-    const liveQueryObserver = createLiveQueryObserver<Row, string>(
-      liveQuery as any,
-      {
-        client,
-        queryHash: `observer-client-cleanup`,
-      },
-    )
+    const liveQueryObserver = createLiveQueryObserver(liveQuery, {
+      client,
+      queryHash: `observer-client-cleanup`,
+    })
     sourceObserver.getServerSnapshot()
     liveQueryObserver.getServerSnapshot()
     liveQuery.startSyncImmediate()
@@ -188,7 +185,7 @@ describe(`createLiveQueryObserver`, () => {
         },
       ],
     })
-    const observer = createLiveQueryObserver<Row, string>(collection as any, {
+    const observer = createLiveQueryObserver(collection, {
       client,
       queryHash: `seeded-error`,
       mode: `wholesale`,
@@ -218,7 +215,7 @@ describe(`createLiveQueryObserver`, () => {
         },
       ],
     })
-    const observer = createLiveQueryObserver<Row, string>(collection as any, {
+    const observer = createLiveQueryObserver(collection, {
       client,
       queryHash: `seeded-stream-error`,
       mode: `wholesale`,
@@ -243,20 +240,14 @@ describe(`createLiveQueryObserver`, () => {
   })
 
   it(`retries preload after settlement and replaces cached error records`, async () => {
-    const preload = vi.fn().mockResolvedValue(undefined)
-    const collection = {
-      status: `ready`,
-      entries: () => new Map().entries(),
-      on: () => () => {},
-      subscribeChanges: () => ({ unsubscribe: () => {} }),
-      preload,
-    }
+    const collection = makeSource()
+    const preload = vi.spyOn(collection, `preload`).mockResolvedValue(undefined)
     const client = new DbClient()
     const failure = new Error(`first preload failed`)
     await expect(
       client._registerLiveQuery(`retry-preload`, Promise.reject(failure)),
     ).rejects.toBe(failure)
-    const observer = createLiveQueryObserver<Row, string>(collection as any, {
+    const observer = createLiveQueryObserver(collection, {
       client,
       queryHash: `retry-preload`,
     })
@@ -437,7 +428,7 @@ describe(`createLiveQueryObserver`, () => {
         },
       ],
     })
-    const abandoned = createLiveQueryObserver<Row, string>(collection as any, {
+    const abandoned = createLiveQueryObserver(collection, {
       client,
       queryHash: `shared-render-result`,
       mode: `wholesale`,
@@ -448,7 +439,7 @@ describe(`createLiveQueryObserver`, () => {
     ])
     abandoned.dispose()
 
-    const sibling = createLiveQueryObserver<Row, string>(collection as any, {
+    const sibling = createLiveQueryObserver(collection, {
       client,
       queryHash: `shared-render-result`,
       mode: `wholesale`,
