@@ -37,11 +37,12 @@ type NodeCollection = Pick<
   'cleanup' | 'preload' | 'size' | 'toArray'
 >
 
-type NestedTreeWork = {
-  treeRowsConstructed: number
-  sourceRowsDelivered: TreeCounts
-  childCollectionsCreated: Record<ChildLevel, number>
-  childCollectionRows: Record<ChildLevel, number>
+type NestedTreeShape = {
+  reachableTreeRows: number
+  sourceRowsDeliveredAtPreload: TreeCounts
+  sourceRowsDeliveredAfterTraversal: TreeCounts
+  reachableChildCollections: Record<ChildLevel, number>
+  reachableChildRows: Record<ChildLevel, number>
 }
 
 const branchesPerRoot = 2
@@ -129,6 +130,47 @@ function requireChildren(row: NodeRow, level: string): NodeCollection {
   return row.children
 }
 
+function observeReachableTreeShape(roots: NodeCollection) {
+  const reachableChildCollections = { branches: 0, twigs: 0, leaves: 0 }
+  const reachableChildRows = { branches: 0, twigs: 0, leaves: 0 }
+  let reachableTreeRows = roots.size
+
+  const countChildren = (
+    collection: NodeCollection,
+    level: ChildLevel,
+  ): void => {
+    const children = collection.toArray
+    reachableChildCollections[level]++
+    reachableChildRows[level] += children.length
+    reachableTreeRows += children.length
+
+    const nextLevel =
+      level === `branches` ? `twigs` : level === `twigs` ? `leaves` : undefined
+    if (nextLevel === undefined) return
+
+    for (const child of children) {
+      countChildren(requireChildren(child, level), nextLevel)
+    }
+  }
+
+  for (const root of roots.toArray) {
+    countChildren(requireChildren(root, `root`), `branches`)
+  }
+
+  return { reachableTreeRows, reachableChildCollections, reachableChildRows }
+}
+
+function snapshotSourceRowsDelivered(
+  sourceCounters: Record<keyof TreeCounts, () => number>,
+): TreeCounts {
+  return {
+    roots: sourceCounters.roots(),
+    branches: sourceCounters.branches(),
+    twigs: sourceCounters.twigs(),
+    leaves: sourceCounters.leaves(),
+  }
+}
+
 async function runCleanups(
   cleanups: ReadonlyArray<() => void | Promise<void>>,
 ): Promise<void> {
@@ -148,9 +190,9 @@ function rethrowFirstCleanupError(
   if (firstRejection !== undefined) throw firstRejection.error
 }
 
-async function observeNestedTreeWork(
+async function observeNestedTreeShape(
   rootCount: number,
-): Promise<NestedTreeWork> {
+): Promise<NestedTreeShape> {
   const rows = createNestedTreeRows(rootCount)
   const queryClient = new QueryClient({
     defaultOptions: { queries: { retry: false } },
@@ -171,10 +213,10 @@ async function observeNestedTreeWork(
       leaves: countDeliveredRows(sources.leaves),
     }
 
-    // This is the root useLiveQuery shape timed by #1634. Each children property
-    // remains a live Collection. The timer in the report stops before React's
-    // virtualizer mounts any recursive Level consumers, so this oracle measures
-    // only the nested collections and rows constructed by the root query.
+    // This matches the nested result shape in #1634. Each children property
+    // remains a live Collection. The public result API exposes the reachable
+    // tree, not internal allocation counts, so this oracle constrains reachable
+    // cardinality and source delivery rather than claiming to count allocations.
     const roots: NodeCollection = createLiveQueryCollection({
       startSync: true,
       query: (q) =>
@@ -207,46 +249,18 @@ async function observeNestedTreeWork(
     rootCollection = roots
     await roots.preload()
 
-    const childCollectionsCreated = { branches: 0, twigs: 0, leaves: 0 }
-    const childCollectionRows = { branches: 0, twigs: 0, leaves: 0 }
-    let treeRowsConstructed = roots.size
-
-    const countChildren = (
-      collection: NodeCollection,
-      level: ChildLevel,
-    ): void => {
-      const children = collection.toArray
-      childCollectionsCreated[level]++
-      childCollectionRows[level] += children.length
-      treeRowsConstructed += children.length
-
-      const nextLevel =
-        level === `branches`
-          ? `twigs`
-          : level === `twigs`
-            ? `leaves`
-            : undefined
-      if (nextLevel === undefined) return
-
-      for (const child of children) {
-        countChildren(requireChildren(child, level), nextLevel)
-      }
-    }
-
-    for (const root of roots.toArray) {
-      countChildren(requireChildren(root, `root`), `branches`)
-    }
+    const sourceRowsDeliveredAtPreload =
+      snapshotSourceRowsDelivered(sourceCounters)
+    const { reachableTreeRows, reachableChildCollections, reachableChildRows } =
+      observeReachableTreeShape(roots)
 
     return {
-      treeRowsConstructed,
-      sourceRowsDelivered: {
-        roots: sourceCounters.roots(),
-        branches: sourceCounters.branches(),
-        twigs: sourceCounters.twigs(),
-        leaves: sourceCounters.leaves(),
-      },
-      childCollectionsCreated,
-      childCollectionRows,
+      reachableTreeRows,
+      sourceRowsDeliveredAtPreload,
+      sourceRowsDeliveredAfterTraversal:
+        snapshotSourceRowsDelivered(sourceCounters),
+      reachableChildCollections,
+      reachableChildRows,
     }
   } finally {
     let cleanupRejected = false
@@ -277,45 +291,55 @@ async function observeNestedTreeWork(
   }
 }
 
-function expectNestedTreeWork(
-  observation: NestedTreeWork,
+function expectNestedTreeShape(
+  observation: NestedTreeShape,
   rootCount: number,
 ): void {
   const expected = expectedTreeCounts(rootCount)
-  expect(observation.treeRowsConstructed).toBe(
+  expect(observation.reachableTreeRows).toBe(
     Object.values(expected).reduce((sum, count) => sum + count, 0),
   )
-  expect(observation.sourceRowsDelivered).toEqual(expected)
-  expect(observation.childCollectionsCreated).toEqual({
+  expect(observation.sourceRowsDeliveredAtPreload).toEqual(expected)
+  expect(observation.sourceRowsDeliveredAfterTraversal).toEqual(
+    observation.sourceRowsDeliveredAtPreload,
+  )
+  expect(observation.reachableChildCollections).toEqual({
     branches: expected.roots,
     twigs: expected.branches,
     leaves: expected.twigs,
   })
-  expect(observation.childCollectionRows).toEqual({
+  expect(observation.reachableChildRows).toEqual({
     branches: expected.branches,
     twigs: expected.twigs,
     leaves: expected.leaves,
   })
 }
 
-describe(`nested includes setup counter oracle`, () => {
+describe(`nested includes reachable-shape oracle`, () => {
   fcTest.prop([fc.integer({ min: 0, max: 20 })], {
     numRuns: 6,
     seed: 1634,
   })(
-    `constructs each nested collection inside the root query (#1634)`,
+    `preserves the complete reachable nested tree shape (#1634)`,
     async (rootCount) => {
-      expectNestedTreeWork(await observeNestedTreeWork(rootCount), rootCount)
+      expectNestedTreeShape(await observeNestedTreeShape(rootCount), rootCount)
     },
   )
 
-  it(`constructs no nested collections for an empty root query`, async () => {
-    expectNestedTreeWork(await observeNestedTreeWork(0), 0)
+  it(`exposes no nested collections for an empty root query`, async () => {
+    expectNestedTreeShape(await observeNestedTreeShape(0), 0)
   })
 
   it(`pins #1634's reported 20-by-2-by-5-by-10 tree`, async () => {
-    // These semantic counters do not claim to measure elapsed time. They pin
-    // source delivery and nested collection construction at the timed seam.
-    expectNestedTreeWork(await observeNestedTreeWork(20), 20)
+    // These semantic counters do not claim to measure elapsed time or internal
+    // allocations. They pin source delivery at preload and reachable shape.
+    expectNestedTreeShape(await observeNestedTreeShape(20), 20)
+  })
+
+  it(`does not deliver more source rows while traversing the result`, async () => {
+    const observation = await observeNestedTreeShape(20)
+    expect(observation.sourceRowsDeliveredAfterTraversal).toEqual(
+      observation.sourceRowsDeliveredAtPreload,
+    )
   })
 })
