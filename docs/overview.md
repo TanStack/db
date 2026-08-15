@@ -105,12 +105,14 @@ With on-demand mode, your component's query becomes the API call:
 ```tsx
 const productsCollection = createCollection(
   queryCollectionOptions({
+    queryClient: new QueryClient(),
     queryKey: ['products'],
     queryFn: async (ctx) => {
       // Query predicates passed automatically in ctx.meta
       const params = parseLoadSubsetOptions(ctx.meta?.loadSubsetOptions)
       return api.getProducts(params) // e.g., GET /api/products?category=electronics&price_lt=100
     },
+    getKey: (product) => product.id,
     syncMode: 'on-demand', // ← Enable query-driven sync
   })
 )
@@ -397,15 +399,17 @@ The steps are to:
 2. implement mutation handlers that handle mutations by posting them to your API endpoints
 
 ```tsx
-import { useLiveQuery, createCollection } from "@tanstack/react-db"
+import { useLiveQuery, createCollection, eq } from "@tanstack/react-db"
 import { queryCollectionOptions } from "@tanstack/query-db-collection"
+import { QueryClient } from "@tanstack/react-query";
 
 // Load data into collections using TanStack Query.
 // It's common to define these in a `collections` module.
 const todoCollection = createCollection(
   queryCollectionOptions({
+    queryClient: new QueryClient(),
     queryKey: ["todos"],
-    queryFn: async () => fetch("/api/todos"),
+    queryFn: async () => (await fetch("/api/todos")).json(),
     getKey: (item) => item.id,
     schema: todoSchema, // any standard schema
     onInsert: async ({ transaction }) => {
@@ -419,8 +423,9 @@ const todoCollection = createCollection(
 )
 const listCollection = createCollection(
   queryCollectionOptions({
+    queryClient: new QueryClient(),
     queryKey: ["todo-lists"],
-    queryFn: async () => fetch("/api/todo-lists"),
+    queryFn: async () => (await fetch("/api/todo-lists")).json(),
     getKey: (item) => item.id,
     schema: todoListSchema,
     onInsert: async ({ transaction }) => {
