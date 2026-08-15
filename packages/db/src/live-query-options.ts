@@ -114,7 +114,7 @@ export function getLiveQueryHash(
   preparedValue: unknown,
   queryKey?: LiveQueryKey,
 ): string {
-  const identity = queryKey
+  const identity = queryKey?.length
     ? [`queryKey`, queryKey]
     : isCollection(preparedValue)
       ? [`collection`, preparedValue.id]

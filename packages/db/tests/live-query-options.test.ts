@@ -31,6 +31,21 @@ describe(`live query identity`, () => {
     expect(first).toBe(second)
   })
 
+  it(`treats an empty queryKey as absent`, () => {
+    const first = createCollection<{ id: string }>({
+      id: `empty-query-key-first`,
+      getKey: (row) => row.id,
+      sync: { sync: ({ markReady }) => markReady() },
+    })
+    const second = createCollection<{ id: string }>({
+      id: `empty-query-key-second`,
+      getKey: (row) => row.id,
+      sync: { sync: ({ markReady }) => markReady() },
+    })
+
+    expect(getLiveQueryHash(first, [])).not.toBe(getLiveQueryHash(second, []))
+  })
+
   it(`does not collapse configs with opaque row identity behavior`, () => {
     const source = createCollection<{ id: string }>({
       id: `live-query-config-identity-source`,
