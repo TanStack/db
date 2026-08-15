@@ -2,7 +2,7 @@ import { assertType, describe, expectTypeOf, it } from 'vitest'
 import { z } from 'zod'
 import { createCollection } from '../src/collection/index.js'
 import type { OutputWithVirtual } from './utils'
-import type { OperationConfig } from '../src/types'
+import type { ChangeMessage, OperationConfig } from '../src/types'
 import type { StandardSchemaV1 } from '@standard-schema/spec'
 
 describe(`Collection.update type tests`, () => {
@@ -46,6 +46,28 @@ describe(`Collection.update type tests`, () => {
       // @ts-expect-error - This line should error.
       assertType<Array<TypeTestItem>>(draft)
     })
+  })
+})
+
+describe(`Collection.subscribeKeyChanges type tests`, () => {
+  type TypeTestItem = { id: string; value: number }
+
+  const testCollection = createCollection<TypeTestItem, string>({
+    getKey: (item) => item.id,
+    sync: { sync: () => {} },
+  })
+
+  it(`should type callback changes by collection key and output`, () => {
+    const subscription = testCollection.subscribeKeyChanges(
+      `id1`,
+      (changes) => {
+        expectTypeOf(changes).toEqualTypeOf<
+          Array<ChangeMessage<OutputWithVirtual<TypeTestItem, string>, string>>
+        >()
+      },
+    )
+
+    expectTypeOf(subscription.unsubscribe).toEqualTypeOf<() => void>()
   })
 })
 
