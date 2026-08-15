@@ -101,17 +101,22 @@ function hasDirectChild(value: unknown, parentId: number, childId: number) {
   )
 }
 
-function classifyUnexpectedSharedChild(
+function classifyUnexpectedSharedRoute(
   { actual, expected }: AssertionDifference,
   unexpectedParentId: number,
   expectedParentId: number,
   childId: number,
 ): boolean {
+  const expectedParent = findRelationshipNode(expected, expectedParentId)
+  const expectedWithSharedRoute = replaceDirectChildren(
+    expected,
+    unexpectedParentId,
+    Array.isArray(expectedParent?.children) ? expectedParent.children : [],
+  )
   return (
-    hasDirectChild(actual, unexpectedParentId, childId) &&
     !hasDirectChild(expected, unexpectedParentId, childId) &&
-    hasDirectChild(actual, expectedParentId, childId) &&
-    hasDirectChild(expected, expectedParentId, childId)
+    hasDirectChild(expected, expectedParentId, childId) &&
+    isDeepStrictEqual(actual, expectedWithSharedRoute)
   )
 }
 
@@ -120,11 +125,13 @@ function classifyMissingReplacementChild(
   replacementRowId: number,
   childId: number,
 ): boolean {
+  const expectedWithoutChild = removeDirectChild(expected, replacementRowId, [
+    childId,
+  ])
   return (
-    findRelationshipNode(actual, replacementRowId) !== undefined &&
     findRelationshipNode(expected, replacementRowId) !== undefined &&
-    !hasDirectChild(actual, replacementRowId, childId) &&
-    hasDirectChild(expected, replacementRowId, childId)
+    hasDirectChild(expected, replacementRowId, childId) &&
+    isDeepStrictEqual(actual, expectedWithoutChild)
   )
 }
 
@@ -172,6 +179,29 @@ function removeDirectChild(
             )
             .map((child) => removeDirectChild(child, parentId, childIds))
         : removeDirectChild(entry, parentId, childIds),
+    ]),
+  )
+}
+
+function replaceDirectChildren(
+  value: unknown,
+  parentId: number,
+  children: ReadonlyArray<unknown>,
+): unknown {
+  if (Array.isArray(value)) {
+    return value.map((entry) =>
+      replaceDirectChildren(entry, parentId, children),
+    )
+  }
+  if (typeof value !== `object` || value === null) return value
+
+  const isParent = isRelationshipNode(value) && value.id === parentId
+  return Object.fromEntries(
+    Object.entries(value).map(([key, entry]) => [
+      key,
+      key === `children` && isParent
+        ? children
+        : replaceDirectChildren(entry, parentId, children),
     ]),
   )
 }
@@ -1883,8 +1913,8 @@ function applyRouteLifecycleStep(
   step: FullRowBatchStep,
   roots: Map<number, RootRow>,
   levels: Array<Map<number, ChildRow>>,
-  seenRoutes: Set<number>,
-  retiredRouteOwners: Map<number, number>,
+  seenRoutes: Set<string>,
+  retiredRouteOwners: Map<string, number>,
 ): void {
   const rows = step.level === 0 ? roots : levels[step.level - 1]!
   const previousRouteOwners = new Map<number, Set<number>>()
@@ -1900,17 +1930,26 @@ function applyRouteLifecycleStep(
   updateFullRowBatchModels(step, roots, levels)
 
   for (const row of rows.values()) {
-    seenRoutes.add(row.group)
-    retiredRouteOwners.delete(row.group)
+    const route = routeIdentity(step.level, row.group)
+    seenRoutes.add(route)
+    retiredRouteOwners.delete(route)
   }
   for (const [route, previousOwners] of previousRouteOwners) {
     if ([...rows.values()].some((row) => row.group === route)) continue
+    const retiredRoute = routeIdentity(step.level, route)
     if (previousOwners.size === 1) {
-      retiredRouteOwners.set(route, [...previousOwners][0]!)
+      retiredRouteOwners.set(retiredRoute, [...previousOwners][0]!)
     } else {
-      retiredRouteOwners.delete(route)
+      retiredRouteOwners.delete(retiredRoute)
     }
   }
+}
+
+function routeIdentity(level: 0 | IncludeDepth, route: number): string {
+  // This oracle has one include edge per level, so level plus correlation value
+  // is the complete route identity. Equal values at different levels are not
+  // the same subscription lifecycle.
+  return `${level}:${route}`
 }
 
 function createRouteLifecycleScenario({
@@ -1920,8 +1959,8 @@ function createRouteLifecycleScenario({
   prefixSteps = createConnectedBatchBranches(depth, branches),
   trailingSteps = [],
 }: RouteLifecycleScenarioOptions): RouteLifecycleScenario {
-  const seenRoutes = new Set<number>()
-  const retiredRouteOwners = new Map<number, number>()
+  const seenRoutes = new Set<string>()
+  const retiredRouteOwners = new Map<string, number>()
 
   const steps = [...prefixSteps]
   const roots = new Map<number, RootRow>()
@@ -1974,11 +2013,15 @@ function createRouteLifecycleScenario({
         ? row.group === currentRoute
         : (row as ChildRow).parentGroup === currentRoute,
     ).length
-    const retiredOwner = retiredRouteOwners.get(descriptor.destination.route)
+    const destinationRoute = routeIdentity(
+      descriptor.level,
+      descriptor.destination.route,
+    )
+    const retiredOwner = retiredRouteOwners.get(destinationRoute)
 
     switch (descriptor.destination.strategy) {
       case `fresh`:
-        if (seenRoutes.has(descriptor.destination.route)) {
+        if (seenRoutes.has(destinationRoute)) {
           throw new Error(`fresh route must never have been used`)
         }
         break
@@ -1996,7 +2039,7 @@ function createRouteLifecycleScenario({
         }
         break
       case `split`:
-        if (seenRoutes.has(descriptor.destination.route)) {
+        if (seenRoutes.has(destinationRoute)) {
           throw new Error(`split destination must be unused`)
         }
         if (currentRouteUsers < 2) {
@@ -2492,6 +2535,69 @@ function createSnapshotOnResubscribeScenarios(
   }
 }
 
+function createInitiallySharedRouteResubscribeScenario(
+  parentLevel: 0 | 1 | 2,
+): ClassifiedHistoryScenario {
+  const depth = (parentLevel + 1) as IncludeDepth
+  const branches = transitionHistoryBranches
+  const childLevel = depth
+  const sharedRoute = branches[0].groupBase + parentLevel
+  const childId = rowAt(branches, 0, childLevel)
+  const child = {
+    ...batchChild(childId, sharedRoute, childId, 0),
+    group: branches[0].groupBase + childLevel,
+  }
+  const scenario = createRouteLifecycleScenario({
+    depth,
+    branches,
+    prefixSteps: createInitiallySharedRoutePrefix(depth, parentLevel, branches),
+    descriptors: [
+      {
+        kind: `rekey`,
+        level: parentLevel,
+        row: 0,
+        destination: { strategy: `split`, route: 2_100 + parentLevel },
+      },
+      {
+        kind: `rekey`,
+        level: parentLevel,
+        row: 1,
+        destination: { strategy: `fresh`, route: 2_200 + parentLevel },
+      },
+      {
+        kind: `rekey`,
+        level: parentLevel,
+        row: 1,
+        destination: { strategy: `restore`, route: sharedRoute },
+        stepsBefore: [
+          {
+            level: childLevel,
+            changes: [
+              {
+                type: `update`,
+                value: { ...child, value: child.value + 1 },
+              },
+            ],
+          },
+        ],
+      },
+    ],
+  })
+  expectEveryRouteTransitionVisible(scenario)
+  return {
+    control: createSharedRouteLastSubscriberScenario(parentLevel),
+    candidate: scenario,
+    candidateCheckpoint: scenario.steps.length,
+    classify: (difference) =>
+      classifyUnexpectedSharedRoute(
+        difference,
+        rowAt(branches, 0, parentLevel),
+        rowAt(branches, 1, parentLevel),
+        childId,
+      ),
+  }
+}
+
 type ClassifiedHistoryScenario = {
   control: FullRowBatchScenario
   greenVariants?: ReadonlyArray<FullRowBatchScenario>
@@ -2568,7 +2674,7 @@ function createRekeyRouteReuseFixture({
     rekey,
     reuse: insertOldRoute,
     classify: (difference) =>
-      classifyUnexpectedSharedChild(
+      classifyUnexpectedSharedRoute(
         difference,
         retiredRowId,
         insertedId,
@@ -2858,7 +2964,7 @@ function createSharedRouteLifetimeScenarios(
       candidate: { depth: 1, steps: candidateSteps },
       candidateCheckpoint: candidateSteps.length,
       classify: (difference) =>
-        classifyUnexpectedSharedChild(
+        classifyUnexpectedSharedRoute(
           difference,
           departed.id,
           remaining.id,
@@ -2903,7 +3009,7 @@ function createSharedRouteLifetimeScenarios(
     candidate: { depth: 2, steps: candidateSteps },
     candidateCheckpoint: candidateSteps.length,
     classify: (difference) =>
-      classifyUnexpectedSharedChild(
+      classifyUnexpectedSharedRoute(
         difference,
         departed.id,
         remaining.id,
@@ -3508,6 +3614,39 @@ describe(`includes recompute oracle`, () => {
     },
   )
 
+  fcTest(
+    `unexpected shared-child classification rejects extra corruption`,
+    () => {
+      const expected = [
+        { id: 1, value: 10, children: [] },
+        { id: 2, value: 20, children: [{ id: 3, value: 30 }] },
+      ]
+      const actual = [
+        { id: 1, value: 11, children: [{ id: 3, value: 30 }] },
+        { id: 2, value: 20, children: [{ id: 3, value: 31 }] },
+      ]
+
+      expect(classifyUnexpectedSharedRoute({ actual, expected }, 1, 2, 3)).toBe(
+        false,
+      )
+    },
+  )
+
+  fcTest(`missing replacement classification rejects extra corruption`, () => {
+    const expected = [
+      { id: 1, value: 10, children: [{ id: 3, value: 30 }] },
+      { id: 2, value: 20, children: [] },
+    ]
+    const actual = [
+      { id: 1, value: 11, children: [] },
+      { id: 2, value: 21, children: [] },
+    ]
+
+    expect(classifyMissingReplacementChild({ actual, expected }, 1, 3)).toBe(
+      false,
+    )
+  })
+
   fcTest(`rejects subscriber lifecycle labels on reparent transitions`, () => {
     expect(() =>
       createRouteLifecycleScenario({
@@ -3523,6 +3662,29 @@ describe(`includes recompute oracle`, () => {
         ],
       }),
     ).toThrow(/reparent transitions only support live merge destinations/)
+  })
+
+  fcTest(`scopes rekey route histories to their include level`, () => {
+    expect(() =>
+      createRouteLifecycleScenario({
+        depth: 3,
+        branches: transitionHistoryBranches,
+        descriptors: [
+          {
+            kind: `rekey`,
+            level: 1,
+            row: 0,
+            destination: { strategy: `fresh`, route: 2_100 },
+          },
+          {
+            kind: `rekey`,
+            level: 2,
+            row: 0,
+            destination: { strategy: `fresh`, route: 2_100 },
+          },
+        ],
+      }),
+    ).not.toThrow()
   })
 
   fcTest(`the sibling topology targets rows under one parent`, () => {
@@ -3685,6 +3847,18 @@ describe(`includes recompute oracle`, () => {
       () =>
         expectClassifiedHistoryMatches(
           createSnapshotOnResubscribeScenarios(parentLevel),
+        ),
+    )
+
+    fcTest(
+      parentLevel === 0
+        ? `discovered trace: an initially shared root route retires, changes, and resubscribes`
+        : `matches recomputation when an initially shared level-${parentLevel} route retires, changes, and resubscribes`,
+      () =>
+        (parentLevel === 0
+          ? expectClassifiedHistoryFailure
+          : expectClassifiedHistoryMatches)(
+          createInitiallySharedRouteResubscribeScenario(parentLevel),
         ),
     )
   }
