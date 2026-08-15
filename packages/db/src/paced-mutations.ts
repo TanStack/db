@@ -97,16 +97,13 @@ export function createPacedMutations<
 
   // Commit callback that the strategy will call when it's time to persist
   const commitCallback = () => {
-    if (!activeTransaction) {
-      throw new Error(
-        `Strategy callback called but no active transaction exists. This indicates a bug in the strategy implementation.`,
-      )
-    }
-
-    if (activeTransaction.state !== `pending`) {
-      throw new Error(
-        `Strategy callback called but active transaction is in state "${activeTransaction.state}". Expected "pending".`,
-      )
+    if (!activeTransaction || activeTransaction.state !== `pending`) {
+      // Transaction was externally cancelled (e.g., rolled back due to a
+      // server-side update via collection.rollbackOptimisticUpdates(), or
+      // via cascade conflict rollback). Clear the reference so the next
+      // mutate() call creates a fresh transaction.
+      activeTransaction = null
+      return
     }
 
     const txToCommit = activeTransaction
