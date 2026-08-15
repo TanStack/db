@@ -126,6 +126,55 @@ function classifyMissingReplacementChild(
   )
 }
 
+function removeDirectRelationshipChild(
+  value: unknown,
+  parentId: number,
+  childId: number,
+): unknown {
+  if (!Array.isArray(value)) return value
+
+  return value.map((entry) => {
+    if (!isRelationshipNode(entry) || !Array.isArray(entry.children)) {
+      return entry
+    }
+
+    return {
+      ...entry,
+      children:
+        entry.id === parentId
+          ? entry.children.filter(
+              (child) => !isRelationshipNode(child) || child.id !== childId,
+            )
+          : removeDirectRelationshipChild(entry.children, parentId, childId),
+    }
+  })
+}
+
+function classifyOnlyMissingReplacementChild(
+  difference: AssertionDifference,
+  replacementRowId: number,
+  childId: number,
+): boolean {
+  if (!classifyMissingReplacementChild(difference, replacementRowId, childId)) {
+    return false
+  }
+
+  try {
+    expect(difference.actual).toEqual(
+      removeDirectRelationshipChild(
+        difference.expected,
+        replacementRowId,
+        childId,
+      ),
+    )
+    return true
+  } catch {
+    // Reject a known missing-child difference if any second difference rides
+    // along with it; expected failures must not hide new regressions.
+    return false
+  }
+}
+
 type RelationshipProjectionNode = {
   id: number
   children?: Array<RelationshipProjectionNode>
@@ -2117,6 +2166,203 @@ function movedChildReplacementMirrorsArbitrary(
     )
 }
 
+type RelationshipBatchDelivery = `split` | `atomic`
+type RelationshipBatchOrder = `delete-insert` | `insert-delete`
+type ReplacementPublicId = `same` | `new`
+type ReplacementRoute = `handoff` | `fresh`
+type AncestorUpdateShape = `route-only` | `route-and-position`
+
+type RelationshipBatchShape = {
+  delivery: RelationshipBatchDelivery
+  order: RelationshipBatchOrder
+  publicId: ReplacementPublicId
+  route: ReplacementRoute
+  ancestorUpdate: AncestorUpdateShape
+}
+
+type RelationshipBatchShapeOptions = GeneratedBranchOptions & {
+  shape: RelationshipBatchShape
+  replacementId: number
+  replacementGroup: number
+  replacementValue: number
+  replacementPosition: number
+  movedPosition: number
+}
+
+function createRelationshipBatchShapeScenarios({
+  shape,
+  replacementId,
+  replacementGroup,
+  replacementValue,
+  replacementPosition,
+  movedPosition,
+  ...branchOptions
+}: RelationshipBatchShapeOptions): ClassifiedHistoryScenario {
+  const depth = 3
+  const branches = createGeneratedBranches(branchOptions)
+  assertDisjointRelationshipKeys(depth, branches, {
+    extraIds: shape.publicId === `new` ? [replacementId] : [],
+    extraGroups: shape.route === `fresh` ? [replacementGroup] : [],
+  })
+
+  const source = branches[0]
+  const destination = branches[1]
+  const prefix = createConnectedBatchBranches(depth, branches)
+  const targetLevel = 1
+  const childLevel = 2
+  const targetId = source.idBase + targetLevel
+  const childId = source.idBase + childLevel
+  const targetGroup = source.groupBase + targetLevel
+  const childGroup = source.groupBase + childLevel
+  const currentTarget = {
+    ...batchChild(targetId, source.groupBase, targetId, 0),
+    group: targetGroup,
+  }
+  const movedTarget = {
+    ...currentTarget,
+    parentGroup: destination.groupBase,
+    position:
+      shape.ancestorUpdate === `route-and-position`
+        ? movedPosition
+        : currentTarget.position,
+  }
+  const currentChild = {
+    ...batchChild(childId, targetGroup, childId, 0),
+    group: childGroup,
+  }
+  const replacementChild = {
+    ...currentChild,
+    id: shape.publicId === `same` ? childId : replacementId,
+    group: shape.route === `handoff` ? childGroup : replacementGroup,
+    value: replacementValue,
+    position: replacementPosition,
+  }
+  const replacementChanges: Array<SyncChange<ChildRow>> =
+    shape.order === `delete-insert`
+      ? [
+          { type: `delete`, value: currentChild },
+          { type: `insert`, value: replacementChild },
+        ]
+      : [
+          { type: `insert`, value: replacementChild },
+          { type: `delete`, value: currentChild },
+        ]
+  const replacementSteps: Array<FullRowBatchStep> =
+    shape.delivery === `atomic`
+      ? [{ level: childLevel, changes: replacementChanges }]
+      : replacementChanges.map(
+          (change): FullRowBatchStep => ({
+            level: childLevel,
+            changes: [change],
+          }),
+        )
+  const positionOnlyTarget = {
+    ...currentTarget,
+    position: movedTarget.position,
+  }
+  const controlMoveSteps: Array<FullRowBatchStep> =
+    shape.ancestorUpdate === `route-and-position`
+      ? [
+          {
+            level: targetLevel,
+            changes: [{ type: `update`, value: positionOnlyTarget }],
+          },
+        ]
+      : []
+
+  return {
+    // The same replacement history without the relationship move is the
+    // adjacent control for every shape cell. Preserve the position change so
+    // the only candidate difference is route membership.
+    control: {
+      depth,
+      steps: [...prefix, ...controlMoveSteps, ...replacementSteps],
+    },
+    candidate: {
+      depth,
+      steps: [
+        ...prefix,
+        {
+          level: targetLevel,
+          changes: [{ type: `update`, value: movedTarget }],
+        },
+        ...replacementSteps,
+      ],
+    },
+    candidateCheckpoint: prefix.length + 1 + replacementSteps.length,
+    classify: (difference) =>
+      classifyOnlyMissingReplacementChild(
+        difference,
+        replacementChild.id,
+        source.idBase + depth,
+      ),
+  }
+}
+
+const relationshipBatchFixtureArbitrary: fc.Arbitrary<
+  Omit<RelationshipBatchShapeOptions, `shape`>
+> = fc.record({
+  ...generatedBranchArbitraries,
+  replacementId: fc.integer({ min: 3_000, max: 3_200 }),
+  replacementGroup: fc.integer({ min: 2_700, max: 2_900 }),
+  replacementValue: fc.integer({ min: -3, max: 3 }),
+  replacementPosition: fc.integer({ min: -2, max: 2 }),
+  movedPosition: fc.constantFrom(-2, -1, 1, 2),
+})
+
+type RelationshipBatchShapeCell = {
+  shape: RelationshipBatchShape
+  scenarios: ClassifiedHistoryScenario
+}
+
+function createRelationshipBatchShapeMatrix(
+  fixture: Omit<RelationshipBatchShapeOptions, `shape`>,
+  publicId: ReplacementPublicId,
+  route: ReplacementRoute,
+  ancestorUpdate: AncestorUpdateShape,
+): Array<RelationshipBatchShapeCell> {
+  const cells: Array<RelationshipBatchShapeCell> = []
+
+  for (const delivery of [`split`, `atomic`] as const) {
+    for (const order of [`delete-insert`, `insert-delete`] as const) {
+      // Inserting the same public id before its existing row is retired is a
+      // duplicate-key error, not a valid alternate delivery of the same final
+      // state. The new-id cells exercise insert-before-delete in both forms.
+      if (publicId === `same` && order === `insert-delete`) continue
+      const shape = {
+        delivery,
+        order,
+        publicId,
+        route,
+        ancestorUpdate,
+      } satisfies RelationshipBatchShape
+      cells.push({
+        shape,
+        scenarios: createRelationshipBatchShapeScenarios({
+          ...fixture,
+          shape,
+        }),
+      })
+    }
+  }
+
+  return cells
+}
+
+function isKnownRelationshipBatchFailure(
+  shape: RelationshipBatchShape,
+): boolean {
+  // Split delete-then-insert with a new public id is the known moved-subtree
+  // replacement defect: the replacement arrives, but its handed-off route
+  // omits the existing grandchild.
+  return (
+    shape.delivery === `split` &&
+    shape.order === `delete-insert` &&
+    shape.publicId === `new` &&
+    shape.route === `handoff`
+  )
+}
+
 function createSharedRouteLifetimeScenarios(
   parentLevel: 0 | 1,
 ): ClassifiedHistoryScenario {
@@ -2973,6 +3219,58 @@ describe(`includes recompute oracle`, () => {
                   ? expectClassifiedHistoryFailure
                   : expectClassifiedHistoryMatches
               )(scenarios[deliveryOrder])
+            }
+          },
+        )
+      }
+    }
+  }
+
+  for (const [publicIdIndex, publicId] of (
+    [`same`, `new`] as const
+  ).entries()) {
+    for (const [routeIndex, route] of (
+      [`handoff`, `fresh`] as const
+    ).entries()) {
+      for (const [updateIndex, ancestorUpdate] of (
+        [`route-only`, `route-and-position`] as const
+      ).entries()) {
+        fcTest.prop([relationshipBatchFixtureArbitrary], {
+          numRuns: 4,
+          seed: 1738 + publicIdIndex * 100 + routeIndex * 10 + updateIndex,
+        })(
+          `classifies the split/atomic replacement matrix for ${publicId} public id, ${route} route, ${ancestorUpdate}`,
+          async (fixture) => {
+            const cells = createRelationshipBatchShapeMatrix(
+              fixture,
+              publicId,
+              route,
+              ancestorUpdate,
+            )
+            const finalStates = cells.map(({ scenarios: { candidate } }) =>
+              recomputeFullRowBatchScenario(candidate, candidate.steps.length),
+            )
+
+            // Delivery boundaries and change order must not alter the final
+            // recompute semantics for one generated fixture.
+            expect(finalStates.length).toBeGreaterThan(1)
+            for (const finalState of finalStates.slice(1)) {
+              expect(finalState).toEqual(finalStates[0])
+            }
+
+            for (const {
+              shape,
+              scenarios: { control, candidate, candidateCheckpoint, classify },
+            } of cells) {
+              await expectFullRowBatchScenarioMatches(control)
+              if (isKnownRelationshipBatchFailure(shape)) {
+                await expectAssertionFailure(
+                  () => expectFullRowBatchScenarioMatches(candidate),
+                  { checkpoint: candidateCheckpoint, classify },
+                )()
+              } else {
+                await expectFullRowBatchScenarioMatches(candidate)
+              }
             }
           },
         )
