@@ -1099,6 +1099,35 @@ describe(`createDeduplicatedLoadSubset`, () => {
       expect(onDeduplicate).toHaveBeenCalledTimes(1)
       expect(onDeduplicate).toHaveBeenCalledWith(subsetOptions)
     })
+
+    it(`does not share in-flight work across independent cancellation owners`, async () => {
+      const pending: Array<() => void> = []
+      const loadSubset = vi.fn(
+        () =>
+          new Promise<void>((resolve) => {
+            pending.push(resolve)
+          }),
+      )
+      const deduplicated = new DeduplicatedLoadSubset({ loadSubset })
+      const firstController = new AbortController()
+      const secondController = new AbortController()
+
+      const first = deduplicated.loadSubset({
+        where: gt(ref(`age`), val(10)),
+        signal: firstController.signal,
+      })
+      const second = deduplicated.loadSubset({
+        where: gt(ref(`age`), val(20)),
+        signal: secondController.signal,
+      })
+
+      expect(loadSubset).toHaveBeenCalledTimes(2)
+      expect(second).not.toBe(first)
+
+      firstController.abort()
+      for (const resolve of pending) resolve()
+      await Promise.all([first, second])
+    })
   })
 
   describe(`limited queries with different where clauses`, () => {

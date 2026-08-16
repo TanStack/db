@@ -5,6 +5,7 @@ import {
   join as joinOperator,
   map,
   reduce,
+  serializeValue,
   tap,
 } from '@tanstack/db-ivm'
 import { optimizeQuery } from '../optimizer.js'
@@ -23,17 +24,18 @@ import {
   IncludesSubquery,
   PropRef,
   Value as ValClass,
+  collectCollectionSources,
   getWhereExpression,
   isExpressionLike,
 } from '../ir.js'
 import { ensureIndexForField } from '../../indexes/auto-index.js'
-import { inArray } from '../builder/functions.js'
+import { deepEquals } from '../../utils.js'
 import {
   compileExpression,
   isCaseWhenConditionTrue,
   toBooleanPredicate,
 } from './evaluators.js'
-import { processJoins } from './joins.js'
+import { processJoins, registerLazyDemandPlan } from './joins.js'
 import { containsAggregate, processGroupBy } from './group-by.js'
 import { getLazyLoadTargets } from './lazy-targets.js'
 import { processOrderBy } from './order-by.js'
@@ -54,6 +56,7 @@ import type { Collection } from '../../collection/index.js'
 import type {
   KeyedStream,
   NamespacedAndKeyedStream,
+  NamespacedRow,
   ResultStream,
 } from '../../types.js'
 import type { QueryCache, QueryMapping, WindowOptions } from './types.js'
@@ -62,6 +65,7 @@ export type { WindowOptions } from './types.js'
 
 /** Symbol used to tag parent $selected with routing metadata for includes */
 export const INCLUDES_ROUTING = Symbol(`includesRouting`)
+export const INCLUDES_PUBLIC_KEY = Symbol(`includesPublicKey`)
 export const FN_SELECT_STATE = Symbol(`fnSelectState`)
 const SKIP_INCLUDE = Symbol(`skipInclude`)
 
@@ -117,7 +121,7 @@ export interface CompilationResult {
   /** The compiled query pipeline (D2 stream) */
   pipeline: ResultStream
 
-  /** Map of source aliases to their WHERE clauses for index optimization */
+  /** Map of opaque source IDs to their WHERE clauses for index optimization */
   sourceWhereClauses: Map<string, BasicExpression<boolean>>
 
   /**
@@ -153,7 +157,7 @@ export interface CompilationResult {
  * @param collections Mapping of collection IDs to Collection instances
  * @param subscriptions Mapping of source aliases to CollectionSubscription instances
  * @param callbacks Mapping of source aliases to lazy loading callbacks
- * @param lazySources Set of source aliases that should load data lazily
+ * @param lazySources Set of source identities that should load data lazily
  * @param optimizableOrderByCollections Map of collection IDs to order-by optimization info
  * @param cache Optional cache for compiled subqueries (used internally for recursion)
  * @param queryMapping Optional mapping from optimized queries to original queries
@@ -196,6 +200,7 @@ export function compileQuery(
 
   // Create a copy of the inputs map to avoid modifying the original
   const allInputs = { ...inputs }
+  bindSourceInputs(rawQuery, allInputs)
 
   // Track alias to collection id relationships discovered during compilation.
   // This includes all user-declared aliases plus inner aliases from subqueries.
@@ -243,7 +248,18 @@ export function compileQuery(
   // The inner join happens BEFORE namespace wrapping / WHERE / SELECT / ORDER BY,
   // so the child pipeline only processes rows that match parents.
   let pipeline: NamespacedAndKeyedStream = initialPipeline
-  if (!isUnionFrom && parentKeyStream && childCorrelationField) {
+  const childCorrelationAlias = childCorrelationField?.path[0]
+  const joinsParentAfterJoins =
+    !isUnionFrom &&
+    parentKeyStream !== undefined &&
+    childCorrelationField !== undefined &&
+    childCorrelationAlias !== mainSource
+  if (
+    !isUnionFrom &&
+    parentKeyStream &&
+    childCorrelationField &&
+    !joinsParentAfterJoins
+  ) {
     const mainInput = sources[mainSource]!
     let filteredMainInput = mainInput
     // Re-key child input by correlation field: [correlationValue, [childKey, childRow]]
@@ -267,7 +283,11 @@ export function compileQuery(
       }),
       map(([correlationValue, [childSide, parentSide]]: any) => {
         const [childKey, childRow] = childSide
-        const tagged: any = { ...childRow, __correlationKey: correlationValue }
+        const tagged: any = {
+          ...childRow,
+          __correlationKey: correlationValue,
+          [INCLUDES_PUBLIC_KEY]: childKey,
+        }
         if (parentSide != null) {
           tagged.__parentContext = parentSide
         }
@@ -307,7 +327,44 @@ export function compileQuery(
       aliasToCollectionId,
       aliasRemapping,
       sourceWhereClauses,
+      parentKeyStream !== undefined && !joinsParentAfterJoins,
     )
+  }
+
+  // A correlation field owned by a joined source does not exist on the main
+  // input. Join the fully namespaced child relation with its parent routes
+  // here, after the source join has made that field available.
+  if (joinsParentAfterJoins) {
+    const compiledChildCorrelation = compileExpression(childCorrelationField)
+    pipeline = pipeline.pipe(
+      map(
+        ([key, row]) =>
+          [compiledChildCorrelation(row), [key, row]] as [
+            unknown,
+            [unknown, typeof row],
+          ],
+      ),
+      joinOperator(parentKeyStream, `inner`),
+      filter(([_correlationValue, [childSide]]) => childSide != null),
+      map(([correlationValue, [childSide, parentSide]]) => {
+        const [childKey, row] = childSide as [unknown, NamespacedRow]
+        const namespaced = { ...row } as Record<string, any>
+        namespaced[mainSource] = {
+          ...namespaced[mainSource],
+          __correlationKey: correlationValue,
+          [INCLUDES_PUBLIC_KEY]: childKey,
+        }
+        if (parentSide != null) {
+          Object.assign(namespaced, parentSide)
+          namespaced.__parentContext = parentSide
+        }
+        const effectiveKey =
+          parentSide != null
+            ? `${String(childKey)}::${serializeValue(parentSide)}`
+            : childKey
+        return [effectiveKey, namespaced]
+      }),
+    ) as NamespacedAndKeyedStream
   }
 
   // Process the WHERE clause if it exists
@@ -344,6 +401,7 @@ export function compileQuery(
   const includesRoutingFns: Array<{
     fieldName: string
     getRouting: (nsRow: any) => {
+      active: boolean
       correlationKey: unknown
       parentContext: Record<string, any> | null
     }
@@ -388,10 +446,11 @@ export function compileQuery(
         fieldName,
         getRouting: (nsRow: any) => {
           if (!matchesConditionalSelectGuards(compiledGuards, nsRow)) {
-            return { correlationKey: null, parentContext: null }
+            return { active: false, correlationKey: null, parentContext: null }
           }
           return (
             nsRow[sourceAlias]?.[INCLUDES_ROUTING]?.[include.fieldName] ?? {
+              active: false,
               correlationKey: null,
               parentContext: null,
             }
@@ -427,10 +486,15 @@ export function compileQuery(
           fieldName,
           getRouting: (nsRow: any) => {
             if (!matchesConditionalSelectGuards(compiledGuards, nsRow)) {
-              return { correlationKey: null, parentContext: null }
+              return {
+                active: false,
+                correlationKey: null,
+                parentContext: null,
+              }
             }
             return (
               nsRow[INCLUDES_ROUTING]?.[include.fieldName] ?? {
+                active: false,
                 correlationKey: null,
                 parentContext: null,
               }
@@ -511,7 +575,7 @@ export function compileQuery(
       // --- Includes lazy loading (mirrors join lazy loading in joins.ts) ---
       // Resolve the child correlation field to concrete collection targets so
       // subquery and union child sources can load by branch when it is safe.
-      const childCorrelationAlias = subquery.childCorrelationField.path[0]!
+      const childSourceAlias = subquery.childCorrelationField.path[0]!
       const directChildCollection =
         subquery.query.from.type === `collectionRef`
           ? subquery.query.from.collection
@@ -519,7 +583,7 @@ export function compileQuery(
       const lazyTargets = getLazyLoadTargets(
         subquery.query,
         subquery.query.from,
-        childCorrelationAlias,
+        childSourceAlias,
         subquery.childCorrelationField,
         directChildCollection,
         aliasRemapping,
@@ -528,7 +592,7 @@ export function compileQuery(
       if (lazyTargets.length > 0) {
         // 1. Mark child source as lazy so CollectionSubscriber skips initial full load
         for (const target of lazyTargets) {
-          lazySources.add(target.alias)
+          lazySources.add(target.sourceId)
         }
 
         // 2. Ensure an index on the correlation field for efficient lookups
@@ -539,40 +603,46 @@ export function compileQuery(
           }
         }
 
-        // 3. Tap parent keys to intercept correlation values and request
-        //    matching child rows on-demand via the child's subscription
+        const initialKeys = getStaticDemandKeys(
+          rawQuery,
+          subquery.correlationField,
+        )
+        const demandPlans = lazyTargets.map((target) =>
+          registerLazyDemandPlan(callbacks, target, initialKeys),
+        )
+        const demandWeights = new Map<
+          string,
+          { key: unknown; weight: number }
+        >()
+
+        // Keep the async demand adapter in sync with the current parent-key
+        // relation. Retired keys stop participating in readiness immediately.
         parentKeys = parentKeys.pipe(
           tap((data: any) => {
-            const joinKeys = [
-              ...new Set(
-                data
-                  .getInner()
-                  .map(
-                    ([[correlationValue]]: any) => correlationValue as unknown,
-                  )
-                  .filter((joinKey: unknown) => joinKey != null),
-              ),
-            ]
-
-            if (joinKeys.length === 0) {
-              return
+            for (const [[correlationValue], weight] of data.getInner()) {
+              if (correlationValue == null) continue
+              const encoded = serializeValue(correlationValue)
+              const previous = demandWeights.get(encoded)
+              const nextWeight = (previous?.weight ?? 0) + weight
+              if (nextWeight === 0) {
+                demandWeights.delete(encoded)
+              } else {
+                demandWeights.set(encoded, {
+                  key: correlationValue,
+                  weight: nextWeight,
+                })
+              }
             }
 
-            for (const target of lazyTargets) {
-              const lazySourceSubscription = subscriptions[target.alias]
-
-              if (!lazySourceSubscription) {
-                continue
-              }
-
-              if (lazySourceSubscription.hasLoadedInitialState()) {
-                continue
-              }
-
-              const lazyJoinRef = new PropRef(target.path)
-              lazySourceSubscription.requestSnapshot({
-                where: inArray(lazyJoinRef, joinKeys),
-              })
+            const keys = new Set(
+              [...demandWeights.values()]
+                .filter(({ weight }) => weight > 0)
+                .map(({ key: demandedKey }) => demandedKey),
+            )
+            for (let index = 0; index < lazyTargets.length; index++) {
+              const target = lazyTargets[index]!
+              const plan = demandPlans[index]!
+              callbacks[target.sourceId]?.setDemand?.(plan, keys)
             }
           }),
         )
@@ -641,7 +711,11 @@ export function compileQuery(
           fieldName,
           getRouting: (nsRow: any) => {
             if (!matchesConditionalSelectGuards(compiledRoutingGuards, nsRow)) {
-              return { correlationKey: null, parentContext: null }
+              return {
+                active: false,
+                correlationKey: null,
+                parentContext: null,
+              }
             }
             const parentContext: Record<string, Record<string, any>> = {}
             for (const proj of compiledProjs) {
@@ -658,7 +732,11 @@ export function compileQuery(
               }
               target[proj.field[proj.field.length - 1]!] = value
             }
-            return { correlationKey: compiledCorr(nsRow), parentContext }
+            return {
+              active: true,
+              correlationKey: compiledCorr(nsRow),
+              parentContext,
+            }
           },
         })
       } else {
@@ -667,9 +745,14 @@ export function compileQuery(
           fieldName,
           getRouting: (nsRow: any) => {
             if (!matchesConditionalSelectGuards(compiledRoutingGuards, nsRow)) {
-              return { correlationKey: null, parentContext: null }
+              return {
+                active: false,
+                correlationKey: null,
+                parentContext: null,
+              }
             }
             return {
+              active: true,
               correlationKey: compiledCorrelation(nsRow),
               parentContext: null,
             }
@@ -705,13 +788,17 @@ export function compileQuery(
     pipeline = pipeline.pipe(
       map(([key, namespacedRow]) => {
         const selectResults = query.fnSelect!(namespacedRow)
+        let selected = selectResults
         if (selectResults && typeof selectResults === `object`) {
+          selected = Array.isArray(selectResults)
+            ? [...selectResults]
+            : { ...selectResults }
           const routing = (namespacedRow as any)[INCLUDES_ROUTING]
           if (routing) {
-            selectResults[INCLUDES_ROUTING] = routing
+            selected[INCLUDES_ROUTING] = routing
           }
           if (directIncludes.length > 0) {
-            Object.defineProperty(selectResults, FN_SELECT_STATE, {
+            Object.defineProperty(selected, FN_SELECT_STATE, {
               value: {
                 sourceRow: namespacedRow,
                 fnSelect: query.fnSelect!,
@@ -725,7 +812,7 @@ export function compileQuery(
           key,
           {
             ...namespacedRow,
-            $selected: selectResults,
+            $selected: selected,
           },
         ] as [string, typeof namespacedRow & { $selected: any }]
       }),
@@ -752,21 +839,27 @@ export function compileQuery(
     )
   }
 
-  // Tag $selected with routing metadata for includes.
-  // This lets collection-config-builder extract routing info (correlationKey + parentContext)
-  // from parent results without depending on the user's select.
+  // Tag $selected with routing metadata so the materialization graph can route
+  // children without depending on the user's projection.
   if (includesRoutingFns.length > 0) {
     pipeline = pipeline.pipe(
       map(([key, namespacedRow]: any) => {
         const routing: Record<
           string,
-          { correlationKey: unknown; parentContext: Record<string, any> | null }
+          {
+            active: boolean
+            correlationKey: unknown
+            parentContext: Record<string, any> | null
+          }
         > = {}
         for (const { fieldName, getRouting } of includesRoutingFns) {
           routing[fieldName] = getRouting(namespacedRow)
         }
-        namespacedRow.$selected[INCLUDES_ROUTING] = routing
-        return [key, namespacedRow]
+        const selected = Array.isArray(namespacedRow.$selected)
+          ? [...namespacedRow.$selected]
+          : { ...namespacedRow.$selected }
+        selected[INCLUDES_ROUTING] = routing
+        return [key, { ...namespacedRow, $selected: selected }]
       }),
     )
   }
@@ -832,6 +925,26 @@ export function compileQuery(
     }
   }
 
+  // Normalize every logical row before DISTINCT and ordering. Those operators
+  // track visibility by row key, so an insert-before-delete replacement with
+  // the same key would otherwise keep the old value and hide route or order
+  // changes. Joined contributors may differ in unselected namespaces; only
+  // the public value and its route/order inputs must be congruent.
+  if (!query.select || !containsAggregate(query.select)) {
+    pipeline = canonicalizeSelectedRows(
+      pipeline,
+      query,
+      mainSource,
+      parentKeyStream !== undefined,
+    )
+  }
+
+  const keyedSourceWhereClauses = keyWhereClausesBySource(
+    rawQuery,
+    sourceWhereClauses,
+    aliasRemapping,
+  )
+
   // Process the DISTINCT clause if it exists
   if (query.distinct) {
     pipeline = pipeline.pipe(distinct(([_key, row]) => row.$selected))
@@ -845,7 +958,9 @@ export function compileQuery(
       parentKeyStream &&
       (query.limit !== undefined || query.offset !== undefined)
         ? (_key: unknown, row: unknown) => {
-            const correlationKey = (row as any)?.[mainSource]?.__correlationKey
+            const correlationKey =
+              (row as any)?.[mainSource]?.__correlationKey ??
+              (row as any)?.__correlationKey
             const parentContext = (row as any)?.__parentContext
             if (parentContext != null) {
               return JSON.stringify([correlationKey, parentContext])
@@ -878,26 +993,32 @@ export function compileQuery(
         )
         // When in includes mode, embed the correlation key and parentContext
         if (parentKeyStream) {
-          const correlationKey = (row as any)[mainSource]?.__correlationKey
+          const correlationKey =
+            (row as any)[mainSource]?.__correlationKey ??
+            (row as any).__correlationKey
           const parentContext = (row as any).__parentContext ?? null
-          // Strip internal routing properties that may leak via spread selects
-          delete finalResults.__correlationKey
-          delete finalResults.__parentContext
+          const publicKey = getIncludesPublicKey(row, mainSource, key)
+          const routedResults = stripInternalCorrelation(finalResults)
           return [
             key,
-            [finalResults, orderByIndex, correlationKey, parentContext],
+            [
+              routedResults,
+              orderByIndex,
+              correlationKey,
+              parentContext,
+              publicKey,
+            ],
           ] as any
         }
         return [key, [finalResults, orderByIndex]] as [unknown, [any, string]]
       }),
     ) as ResultStream
 
-    const result = resultPipeline
     // Cache the result before returning (use original query as key)
     const compilationResult: CompilationResult = {
       collectionId: mainCollectionId,
-      pipeline: result,
-      sourceWhereClauses,
+      pipeline: resultPipeline,
+      sourceWhereClauses: keyedSourceWhereClauses,
       aliasToCollectionId,
       aliasRemapping,
       includes: includesResults.length > 0 ? includesResults : undefined,
@@ -921,14 +1042,15 @@ export function compileQuery(
       )
       // When in includes mode, embed the correlation key and parentContext
       if (parentKeyStream) {
-        const correlationKey = (row as any)[mainSource]?.__correlationKey
+        const correlationKey =
+          (row as any)[mainSource]?.__correlationKey ??
+          (row as any).__correlationKey
         const parentContext = (row as any).__parentContext ?? null
-        // Strip internal routing properties that may leak via spread selects
-        delete finalResults.__correlationKey
-        delete finalResults.__parentContext
+        const publicKey = getIncludesPublicKey(row, mainSource, key)
+        const routedResults = stripInternalCorrelation(finalResults)
         return [
           key,
-          [finalResults, undefined, correlationKey, parentContext],
+          [routedResults, undefined, correlationKey, parentContext, publicKey],
         ] as any
       }
       return [key, [finalResults, undefined]] as [
@@ -938,12 +1060,11 @@ export function compileQuery(
     }),
   )
 
-  const result = resultPipeline
   // Cache the result before returning (use original query as key)
   const compilationResult: CompilationResult = {
     collectionId: mainCollectionId,
-    pipeline: result,
-    sourceWhereClauses,
+    pipeline: resultPipeline,
+    sourceWhereClauses: keyedSourceWhereClauses,
     aliasToCollectionId,
     aliasRemapping,
     includes: includesResults.length > 0 ? includesResults : undefined,
@@ -951,6 +1072,92 @@ export function compileQuery(
   cache.set(rawQuery, compilationResult)
 
   return compilationResult
+}
+
+function keyWhereClausesBySource(
+  query: QueryIR,
+  clauses: Map<string, BasicExpression<boolean>>,
+  aliasRemapping: Record<string, string>,
+): Map<string, BasicExpression<boolean>> {
+  const sources = collectCollectionSources(query)
+  const sourceIds = new Set(sources.map(({ sourceId }) => sourceId))
+  const result = new Map<string, BasicExpression<boolean>>()
+  for (const [key, clause] of clauses) {
+    if (sourceIds.has(key)) {
+      result.set(key, clause)
+      continue
+    }
+
+    const alias = aliasRemapping[key] ?? key
+    for (const source of sources) {
+      if (source.alias === alias) result.set(source.sourceId, clause)
+    }
+  }
+  return result
+}
+
+function bindSourceInputs(
+  query: QueryIR,
+  inputs: Record<string, KeyedStream>,
+): void {
+  for (const source of collectCollectionSources(query)) {
+    const input = inputs[source.sourceId] ?? inputs[source.alias]
+    if (!input) continue
+    inputs[source.sourceId] = input
+    inputs[source.alias] = input
+  }
+}
+
+function canonicalizeSelectedRows(
+  pipeline: NamespacedAndKeyedStream,
+  query: QueryIR,
+  mainSource: string,
+  isIncludedRelation: boolean,
+): NamespacedAndKeyedStream {
+  const compiledOrder = (query.orderBy ?? []).map(({ expression }) =>
+    compileExpression(expression),
+  )
+  const signature = (row: any) => ({
+    value: row.$selected,
+    routing: row.$selected?.[INCLUDES_ROUTING],
+    outerCorrelation: isIncludedRelation
+      ? row[mainSource]?.__correlationKey
+      : undefined,
+    parentContext: isIncludedRelation
+      ? (row.__parentContext ?? row[mainSource]?.__parentContext ?? null)
+      : undefined,
+    order: compiledOrder.map((evaluate) => evaluate(row)),
+  })
+
+  return pipeline.pipe(
+    reduce((values: Array<[any, number]>) => {
+      const totalMultiplicity = values.reduce(
+        (total, [, multiplicity]) => total + multiplicity,
+        0,
+      )
+      if (totalMultiplicity === 0) return []
+      if (totalMultiplicity < 0) {
+        throw new Error(`Query row has negative multiplicity`)
+      }
+
+      const visible = values.find(([, multiplicity]) => multiplicity > 0)?.[0]
+      if (!visible) throw new Error(`Query row has no positive contributor`)
+      const visibleSignature = signature(visible)
+
+      for (const [candidate, multiplicity] of values) {
+        if (
+          multiplicity > 0 &&
+          !deepEquals(visibleSignature, signature(candidate))
+        ) {
+          throw new Error(
+            `Query contributors with the same row key are not congruent`,
+          )
+        }
+      }
+
+      return [[visible, 1]]
+    }),
+  ) as NamespacedAndKeyedStream
 }
 
 /**
@@ -1315,7 +1522,7 @@ function processFrom(
 } {
   switch (from.type) {
     case `collectionRef`: {
-      const input = allInputs[from.alias]
+      const input = allInputs[from.sourceId] ?? allInputs[from.alias]
       if (!input) {
         throw new CollectionInputNotFoundError(
           from.alias,
@@ -1461,13 +1668,40 @@ function attachVirtualPropsToSelected(
     return selected
   }
 
+  const result = Array.isArray(selected) ? [...selected] : { ...selected }
   for (const prop of VIRTUAL_PROP_NAMES) {
     if (selected[prop] == null && prop in row) {
-      selected[prop] = row[prop]
+      result[prop] = row[prop]
     }
   }
 
-  return selected
+  return result
+}
+
+function stripInternalCorrelation(selected: any): any {
+  if (
+    !selected ||
+    typeof selected !== `object` ||
+    (!(`__correlationKey` in selected) &&
+      !(`__parentContext` in selected) &&
+      !(INCLUDES_PUBLIC_KEY in selected))
+  ) {
+    return selected
+  }
+
+  const result = Array.isArray(selected) ? [...selected] : { ...selected }
+  delete result.__correlationKey
+  delete result.__parentContext
+  delete result[INCLUDES_PUBLIC_KEY]
+  return result
+}
+
+function getIncludesPublicKey(
+  row: Record<string, any>,
+  mainSource: string,
+  fallback: unknown,
+): unknown {
+  return row[mainSource]?.[INCLUDES_PUBLIC_KEY] ?? fallback
 }
 
 /**
@@ -1895,7 +2129,8 @@ function isNestedSelectObject(value: any): value is Record<string, any> {
     value != null &&
     typeof value === `object` &&
     !Array.isArray(value) &&
-    !isExpressionLike(value)
+    !isExpressionLike(value) &&
+    value.__refProxy !== true
   )
 }
 
@@ -2059,3 +2294,44 @@ function matchesConditionalSelectGuards(
 }
 
 export type CompileQueryFn = typeof compileQuery
+
+function getStaticDemandKeys(query: QueryIR, ref: PropRef): Set<unknown> {
+  const constraints: Array<Set<unknown>> = []
+  const visit = (expression: BasicExpression): void => {
+    if (expression.type !== `func`) return
+    if (expression.name === `and`) {
+      expression.args.forEach(visit)
+      return
+    }
+    if (expression.name !== `eq` && expression.name !== `in`) return
+
+    const [left, right] = expression.args
+    const value =
+      left?.type === `ref` &&
+      pathsEqual(left.path, ref.path) &&
+      right instanceof ValClass
+        ? right.value
+        : right?.type === `ref` &&
+            pathsEqual(right.path, ref.path) &&
+            left instanceof ValClass
+          ? left.value
+          : undefined
+    if (value === undefined) return
+    constraints.push(new Set(Array.isArray(value) ? value : [value]))
+  }
+
+  query.where?.forEach((where) => visit(getWhereExpression(where)))
+  if (constraints.length === 0) return new Set()
+  return new Set(
+    [...constraints[0]!].filter((value) =>
+      constraints.slice(1).every((constraint) => constraint.has(value)),
+    ),
+  )
+}
+
+function pathsEqual(left: Array<string>, right: Array<string>): boolean {
+  return (
+    left.length === right.length &&
+    left.every((segment, index) => segment === right[index])
+  )
+}

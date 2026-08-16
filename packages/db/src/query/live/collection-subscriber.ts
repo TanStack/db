@@ -10,6 +10,7 @@ import {
   splitUpdates,
   trackBiggestSentValue,
 } from './utils.js'
+import { SubsetDemandController } from './subset-demand-controller.js'
 import type { Collection } from '../../collection/index.js'
 import type {
   ChangeMessage,
@@ -20,6 +21,7 @@ import type { BasicExpression } from '../ir.js'
 import type { OrderByOptimizationInfo } from '../compiler/order-by.js'
 import type { CollectionConfigBuilder } from './collection-config-builder.js'
 import type { CollectionSubscription } from '../../collection/subscription.js'
+import type { LazyDemandPlan } from '../compiler/joins.js'
 
 const loadMoreCallbackSymbol = Symbol.for(
   `@tanstack/db.collection-config-builder`,
@@ -52,8 +54,10 @@ export class CollectionSubscriber<
   // used by loadNextItems for subsequent requestLimitedSnapshot calls)
   private orderedLoadSubsetResult?: (result: Promise<void> | true) => void
   private pendingOrderedLoadPromise: Promise<void> | undefined
+  private readonly demand = new SubsetDemandController()
 
   constructor(
+    private sourceId: string,
     private alias: string,
     private collectionId: string,
     private collection: Collection,
@@ -61,7 +65,7 @@ export class CollectionSubscriber<
   ) {}
 
   subscribe(): CollectionSubscription {
-    const whereClause = this.getWhereClauseForAlias()
+    const whereClause = this.getWhereClause()
 
     if (whereClause) {
       const whereExpression = normalizeExpressionPaths(whereClause, this.alias)
@@ -90,6 +94,7 @@ export class CollectionSubscriber<
     // Used as a fallback for status transitions not covered by direct tracking
     // (e.g., truncate-triggered reloads that call trackLoadSubsetPromise directly).
     const onStatusChange = (event: SubscriptionStatusChangeEvent) => {
+      if (this.collectionConfigBuilder.isLazySource(this.sourceId)) return
       const subscription = event.subscription as CollectionSubscription
       if (event.status === `loadingSubset`) {
         this.ensureLoadingPromise(subscription)
@@ -113,9 +118,9 @@ export class CollectionSubscriber<
         trackLoadResult,
       )
     } else {
-      // If the source alias is lazy then we should not include the initial state
-      const includeInitialState = !this.collectionConfigBuilder.isLazyAlias(
-        this.alias,
+      // Lazy sources load only the subsets demanded by the compiled graph.
+      const includeInitialState = !this.collectionConfigBuilder.isLazySource(
+        this.sourceId,
       )
 
       subscription = this.subscribeToMatchingChanges(
@@ -127,7 +132,10 @@ export class CollectionSubscriber<
 
     // Check current status after subscribing - if status is 'loadingSubset', track it.
     // The onStatusChange listener will catch the transition to 'ready'.
-    if (subscription.status === `loadingSubset`) {
+    if (
+      !this.collectionConfigBuilder.isLazySource(this.sourceId) &&
+      subscription.status === `loadingSubset`
+    ) {
       this.ensureLoadingPromise(subscription)
     }
 
@@ -139,6 +147,7 @@ export class CollectionSubscriber<
         deferred.resolve()
       }
 
+      this.demand.clear()
       subscription.unsubscribe()
     }
     // currentSyncState is always defined when subscribe() is called
@@ -147,6 +156,32 @@ export class CollectionSubscriber<
       unsubscribe,
     )
     return subscription
+  }
+
+  setDemand(
+    subscription: CollectionSubscription,
+    plan: LazyDemandPlan,
+    keys: Set<unknown>,
+  ): void {
+    const update = this.demand.setDemand(subscription, plan, keys)
+    if (!update.changed) return
+
+    if (update.empty) {
+      this.collectionConfigBuilder.retireDemand(plan.id)
+      return
+    }
+
+    const generation = this.collectionConfigBuilder.beginDemand(plan.id)
+    const pending = update.loadResults.filter(
+      (result): result is Promise<void> => result instanceof Promise,
+    )
+    if (pending.length > 0) {
+      void Promise.allSettled(pending).then(() =>
+        this.collectionConfigBuilder.settleDemand(plan.id, generation),
+      )
+    } else {
+      this.collectionConfigBuilder.settleDemand(plan.id, generation)
+    }
   }
 
   private sendChangesToPipeline(
@@ -162,7 +197,7 @@ export class CollectionSubscriber<
     // currentSyncState and input are always defined when this method is called
     // (only called from active subscriptions during a sync session)
     const input =
-      this.collectionConfigBuilder.currentSyncState!.inputs[this.alias]!
+      this.collectionConfigBuilder.currentSyncState!.inputs[this.sourceId]!
     const sentChanges = sendChangesToInput(input, filteredChanges)
 
     // Do not provide the callback that loads more data
@@ -174,7 +209,7 @@ export class CollectionSubscriber<
     // because we need to mark the collection as ready if it's not already
     // and that's only done in `scheduleGraphRun`
     this.collectionConfigBuilder.scheduleGraphRun(dataLoader, {
-      alias: this.alias,
+      sourceId: this.sourceId,
     })
   }
 
@@ -411,13 +446,13 @@ export class CollectionSubscriber<
     })
   }
 
-  private getWhereClauseForAlias(): BasicExpression<boolean> | undefined {
+  private getWhereClause(): BasicExpression<boolean> | undefined {
     const sourceWhereClausesCache =
       this.collectionConfigBuilder.sourceWhereClausesCache
     if (!sourceWhereClausesCache) {
       return undefined
     }
-    return sourceWhereClausesCache.get(this.alias)
+    return sourceWhereClausesCache.get(this.sourceId)
   }
 
   private getOrderByInfo(): OrderByOptimizationInfo | undefined {

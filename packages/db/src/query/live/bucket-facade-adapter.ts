@@ -1,0 +1,349 @@
+import { output, serializeValue } from '@tanstack/db-ivm'
+import { createCollection } from '../../collection/index.js'
+import { FN_SELECT_STATE, INCLUDES_ROUTING } from '../compiler/index.js'
+import { BUCKET_FACADE_REF } from './materialized-pipeline.js'
+import type { Collection } from '../../collection/index.js'
+import type { SyncConfig } from '../../types.js'
+import type {
+  BucketFacadeCompilation,
+  BucketFacadeRef,
+  BucketRow,
+} from './materialized-pipeline.js'
+
+type FacadeSync = Parameters<SyncConfig<any>[`sync`]>[0]
+
+type PendingRow = {
+  deletes: number
+  inserts: number
+  value: BucketRow
+}
+
+type FacadeEntry = {
+  collection: Collection<any, any, any>
+  sync: FacadeSync | undefined
+  keys: WeakMap<object, string | number>
+  order: WeakMap<object, string>
+  currentOrder: Map<string | number, string | undefined>
+}
+
+/**
+ * The only stateful boundary outside the materialization graph. It turns inert
+ * bucket references into stable public Collection facades and applies the
+ * graph's canonical bucket-row deltas to those facades.
+ */
+export class BucketFacadeAdapter {
+  private readonly pending = new Map<
+    string,
+    Map<string, Map<string, PendingRow>>
+  >()
+  private readonly pendingActivity = new Map<string, Map<string, number>>()
+  private readonly activeBuckets = new Map<string, Set<string>>()
+  private readonly entries = new Map<string, Map<string, FacadeEntry>>()
+  private readonly resolvedValues = new WeakMap<object, unknown>()
+
+  constructor(
+    private readonly parentId: string,
+    private readonly compilations: Array<BucketFacadeCompilation>,
+    onMessages: (count: number) => void,
+  ) {
+    for (const compilation of compilations) {
+      compilation.rows.pipe(
+        output((data) => {
+          const messages = data.getInner()
+          onMessages(messages.length)
+          for (const [[bucketKey, row], multiplicity] of messages) {
+            this.accumulate(compilation.edgeId, bucketKey, row, multiplicity)
+          }
+        }),
+      )
+      compilation.activeBuckets.pipe(
+        output((data) => {
+          const messages = data.getInner()
+          onMessages(messages.length)
+          for (const [[bucketKey], multiplicity] of messages) {
+            this.accumulateActivity(compilation.edgeId, bucketKey, multiplicity)
+          }
+        }),
+      )
+    }
+  }
+
+  hasPendingChanges(): boolean {
+    return this.pending.size > 0 || this.pendingActivity.size > 0
+  }
+
+  flush(): () => void {
+    const deferredEntries = new Set<FacadeEntry>()
+    const resumePublications: Array<() => void> = []
+    const deferPublication = (entry: FacadeEntry) => {
+      if (deferredEntries.has(entry)) return
+      deferredEntries.add(entry)
+      resumePublications.push(entry.collection._deferPublication())
+    }
+    let resumed = false
+    const resume = () => {
+      if (resumed) return
+      resumed = true
+      for (const resumePublication of resumePublications) {
+        resumePublication()
+      }
+    }
+
+    // Compilations are child-first, so nested facade references resolve before
+    // their containing rows are written to the next facade.
+    try {
+      for (const compilation of this.compilations) {
+        const activity = this.pendingActivity.get(compilation.edgeId)
+        const active = this.getActiveBuckets(compilation.edgeId)
+        for (const [bucketKey, multiplicity] of activity ?? []) {
+          if (multiplicity > 0) active.add(bucketKey)
+        }
+
+        const buckets = this.pending.get(compilation.edgeId)
+        for (const [bucketKey, changes] of buckets ?? []) {
+          const existing = this.entries.get(compilation.edgeId)?.get(bucketKey)
+          if (!active.has(bucketKey) && !existing) continue
+          const entry = this.getEntry(compilation.edgeId, bucketKey)
+          const sync = entry.sync
+          if (!sync || changes.size === 0) continue
+
+          deferPublication(entry)
+          sync.begin()
+          for (const change of changes.values()) {
+            this.applyChange(entry, sync, change, compilation.hasOrderBy)
+          }
+          sync.commit()
+        }
+        this.pending.delete(compilation.edgeId)
+
+        for (const [bucketKey, multiplicity] of activity ?? []) {
+          if (multiplicity >= 0) continue
+          active.delete(bucketKey)
+          this.retireEntry(compilation.edgeId, bucketKey, deferPublication)
+        }
+        this.pendingActivity.delete(compilation.edgeId)
+      }
+    } catch (error) {
+      resume()
+      throw error
+    }
+
+    return resume
+  }
+
+  resolve<T>(value: T): T {
+    return this.resolveValue(value) as T
+  }
+
+  cleanup(): void {
+    for (const byBucket of this.entries.values()) {
+      for (const entry of byBucket.values()) {
+        void entry.collection.cleanup()
+      }
+    }
+    this.entries.clear()
+    this.pending.clear()
+    this.pendingActivity.clear()
+    this.activeBuckets.clear()
+  }
+
+  private accumulate(
+    edgeId: string,
+    bucketKey: string,
+    row: BucketRow,
+    multiplicity: number,
+  ): void {
+    let buckets = this.pending.get(edgeId)
+    if (!buckets) {
+      buckets = new Map()
+      this.pending.set(edgeId, buckets)
+    }
+    let rows = buckets.get(bucketKey)
+    if (!rows) {
+      rows = new Map()
+      buckets.set(bucketKey, rows)
+    }
+
+    const key = serializeValue(row.publicKey)
+    const change = rows.get(key) ?? {
+      deletes: 0,
+      inserts: 0,
+      value: row,
+    }
+    if (multiplicity < 0) {
+      change.deletes += -multiplicity
+    } else if (multiplicity > 0) {
+      change.inserts += multiplicity
+      change.value = row
+    }
+    rows.set(key, change)
+  }
+
+  private accumulateActivity(
+    edgeId: string,
+    bucketKey: string,
+    multiplicity: number,
+  ): void {
+    let activity = this.pendingActivity.get(edgeId)
+    if (!activity) {
+      activity = new Map()
+      this.pendingActivity.set(edgeId, activity)
+    }
+    activity.set(bucketKey, (activity.get(bucketKey) ?? 0) + multiplicity)
+  }
+
+  private getActiveBuckets(edgeId: string): Set<string> {
+    let active = this.activeBuckets.get(edgeId)
+    if (!active) {
+      active = new Set()
+      this.activeBuckets.set(edgeId, active)
+    }
+    return active
+  }
+
+  private retireEntry(
+    edgeId: string,
+    bucketKey: string,
+    deferPublication: (entry: FacadeEntry) => void,
+  ): void {
+    const byBucket = this.entries.get(edgeId)
+    const entry = byBucket?.get(bucketKey)
+    if (!entry) return
+
+    const sync = entry.sync
+    const keys = [...entry.collection.keys()]
+    if (sync && keys.length > 0) {
+      deferPublication(entry)
+      sync.begin()
+      for (const key of keys) sync.write({ type: `delete`, key })
+      sync.commit()
+    }
+    byBucket!.delete(bucketKey)
+    if (byBucket!.size === 0) this.entries.delete(edgeId)
+  }
+
+  private getEntry(edgeId: string, bucketKey: string): FacadeEntry {
+    let byBucket = this.entries.get(edgeId)
+    if (!byBucket) {
+      byBucket = new Map()
+      this.entries.set(edgeId, byBucket)
+    }
+    const existing = byBucket.get(bucketKey)
+    if (existing) return existing
+
+    const keys = new WeakMap<object, string | number>()
+    const order = new WeakMap<object, string>()
+    let sync: FacadeSync | undefined
+    const collection = createCollection<any, string | number>({
+      id: `__bucket-facade:${this.parentId}:${edgeId}:${bucketKey}`,
+      getKey: (row) => keys.get(row)!,
+      compare: (left, right) => {
+        const leftOrder = order.get(left)
+        const rightOrder = order.get(right)
+        if (leftOrder === rightOrder) return 0
+        if (leftOrder === undefined) return 1
+        if (rightOrder === undefined) return -1
+        return leftOrder < rightOrder ? -1 : 1
+      },
+      sync: {
+        rowUpdateMode: `full`,
+        sync: (methods) => {
+          sync = methods
+          return () => {
+            sync = undefined
+          }
+        },
+      },
+      startSync: true,
+      gcTime: 0,
+    })
+    const entry: FacadeEntry = {
+      collection,
+      get sync() {
+        return sync
+      },
+      keys,
+      order,
+      currentOrder: new Map(),
+    }
+    byBucket.set(bucketKey, entry)
+    return entry
+  }
+
+  private applyChange(
+    entry: FacadeEntry,
+    sync: FacadeSync,
+    change: PendingRow,
+    hasOrderBy: boolean,
+  ): void {
+    const key = change.value.publicKey as string | number
+    const previousOrder = entry.currentOrder.get(key)
+    const nextOrder = change.value.order
+    const orderChanged = sync.collection.has(key) && previousOrder !== nextOrder
+    const resolvedRow = this.resolve(change.value.value)
+    const row =
+      orderChanged && sync.collection.get(key) === resolvedRow
+        ? { ...resolvedRow }
+        : resolvedRow
+    entry.keys.set(row, key)
+    if (nextOrder !== undefined) {
+      entry.order.set(row, nextOrder)
+    }
+
+    if (change.inserts > change.deletes) {
+      sync.write({
+        type: sync.collection.has(key) ? `update` : `insert`,
+        value: row,
+      })
+    } else if (change.inserts === change.deletes && sync.collection.has(key)) {
+      sync.write({ type: `update`, value: row })
+    } else if (change.deletes > 0) {
+      sync.write({ type: `delete`, key })
+      entry.currentOrder.delete(key)
+      return
+    }
+
+    entry.currentOrder.set(key, nextOrder)
+    if (hasOrderBy && orderChanged) sync.collection._markLayoutChange()
+  }
+
+  private resolveValue(value: unknown): unknown {
+    if (value !== null && typeof value === `object`) {
+      const cached = this.resolvedValues.get(value)
+      if (cached !== undefined) return cached
+    }
+    if (isBucketFacadeRef(value)) {
+      const { edgeId, bucketKey } = value[BUCKET_FACADE_REF]
+      const facade = this.getEntry(edgeId, bucketKey).collection
+      this.resolvedValues.set(value, facade)
+      return facade
+    }
+    if (Array.isArray(value)) {
+      const result: Array<unknown> = []
+      this.resolvedValues.set(value, result)
+      result.push(...value.map((item) => this.resolveValue(item)))
+      return result
+    }
+    if (!isPlainObject(value)) return value
+
+    const result: Record<PropertyKey, unknown> = {}
+    this.resolvedValues.set(value, result)
+    for (const key of Reflect.ownKeys(value)) {
+      if (key === INCLUDES_ROUTING || key === FN_SELECT_STATE) continue
+      result[key] = this.resolveValue(value[key])
+    }
+    return result
+  }
+}
+
+function isBucketFacadeRef(value: unknown): value is BucketFacadeRef {
+  return (
+    value !== null && typeof value === `object` && BUCKET_FACADE_REF in value
+  )
+}
+
+function isPlainObject(value: unknown): value is Record<PropertyKey, unknown> {
+  if (value === null || typeof value !== `object`) return false
+  const prototype = Object.getPrototypeOf(value)
+  return prototype === Object.prototype || prototype === null
+}

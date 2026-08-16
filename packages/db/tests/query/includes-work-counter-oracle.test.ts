@@ -8,8 +8,6 @@ import {
   eq,
   materialize,
 } from '../../src/query/index.js'
-import { expectAssertionFailure } from '../expected-failure.js'
-import { TraceAssertionError } from '../trace-runner.js'
 import type { Collection } from '../../src/collection/index.js'
 
 let nextCollectionId = 0
@@ -346,44 +344,6 @@ function expectedResult({
   ]
 }
 
-function assertEqualSourceWork(
-  actual: SourceWork,
-  expected: SourceWork,
-): Promise<void> {
-  try {
-    expect(actual).toEqual(expected)
-    return Promise.resolve()
-  } catch (error) {
-    return Promise.reject(new TraceAssertionError(1, error))
-  }
-}
-
-function isExactWorkCount(value: unknown, expected: WorkCount): boolean {
-  return (
-    typeof value === `object` &&
-    value !== null &&
-    `delivered` in value &&
-    value.delivered === expected.delivered &&
-    `examined` in value &&
-    value.examined === expected.examined
-  )
-}
-
-function isExactSourceWork(value: unknown, expected: SourceWork): boolean {
-  return (
-    typeof value === `object` &&
-    value !== null &&
-    `terms` in value &&
-    isExactWorkCount(value.terms, expected.terms) &&
-    `meanings` in value &&
-    isExactWorkCount(value.meanings, expected.meanings) &&
-    `groups` in value &&
-    isExactWorkCount(value.groups, expected.groups) &&
-    `links` in value &&
-    isExactWorkCount(value.links, expected.links)
-  )
-}
-
 const joinedBaselineWork: SourceWork = {
   terms: { delivered: 3, examined: 3 },
   meanings: { delivered: 1, examined: 1 },
@@ -401,7 +361,7 @@ const joinFreeBaselineWork: SourceWork = {
 let joinedBaselineObservation: WorkObservation
 let joinFreeBaselineObservation: WorkObservation
 
-async function expectKnownCorrelatedJoinDefect(
+async function expectCorrelatedJoinWorkBound(
   fillerCount: number,
 ): Promise<void> {
   const baseline = joinedBaselineObservation
@@ -418,25 +378,7 @@ async function expectKnownCorrelatedJoinDefect(
   expect(scaled.result).toEqual(baseline.result)
   expect(baseline.sourceWork).toEqual(joinedBaselineWork)
 
-  const knownLinkWork = {
-    delivered: baseline.sourceWork.links.delivered + fillerCount,
-    // Once irrelevant rows exist, the defective route scans the whole
-    // collection and then reads the two selected rows through the index.
-    examined: baseline.sourceWork.links.examined + fillerCount + 2,
-  }
-  const knownScaledWork: SourceWork = {
-    // The full left scan also activates one extra indexed target route.
-    terms: { delivered: 4, examined: 4 },
-    meanings: baseline.sourceWork.meanings,
-    groups: baseline.sourceWork.groups,
-    links: knownLinkWork,
-  }
-  await expectAssertionFailure(assertEqualSourceWork, {
-    checkpoint: 1,
-    classify: ({ actual, expected }) =>
-      isExactSourceWork(actual, knownScaledWork) &&
-      isExactSourceWork(expected, baseline.sourceWork),
-  })(scaled.sourceWork, baseline.sourceWork)
+  expect(scaled.sourceWork).toEqual(baseline.sourceWork)
 }
 
 describe(`includes deterministic work-counter oracle`, () => {
@@ -450,16 +392,16 @@ describe(`includes deterministic work-counter oracle`, () => {
   })
 
   it.each([1, 2, 3])(
-    `pins the #1709 defect formula at the small filler boundary (%i)`,
-    expectKnownCorrelatedJoinDefect,
+    `pins the #1709 work bound at the small filler boundary (%i)`,
+    expectCorrelatedJoinWorkBound,
   )
 
   fcTest.prop([fc.integer({ min: 1, max: 24 })], {
     numRuns: 6,
     seed: 1709,
   })(
-    `known work defect: a join defeats correlated source pushdown (#1709)`,
-    expectKnownCorrelatedJoinDefect,
+    `a join preserves correlated source pushdown (#1709)`,
+    expectCorrelatedJoinWorkBound,
   )
 
   fcTest.prop([fc.integer({ min: 1, max: 24 })], {

@@ -326,6 +326,38 @@ describe(`includes subqueries`, () => {
         },
       ])
     })
+
+    it(`gives an active null correlation an empty child Collection`, async () => {
+      const parents = createCollection(
+        mockSyncCollectionOptions<{ id: number; groupId: number | null }>({
+          id: `includes-null-correlation-parents`,
+          getKey: (parent) => parent.id,
+          initialData: [{ id: 1, groupId: null }],
+        }),
+      )
+      const children = createCollection(
+        mockSyncCollectionOptions<{ id: number; groupId: number }>({
+          id: `includes-null-correlation-children`,
+          getKey: (child) => child.id,
+          initialData: [{ id: 10, groupId: 1 }],
+        }),
+      )
+      const collection = createLiveQueryCollection((q) =>
+        q.from({ parent: parents }).select(({ parent }) => ({
+          id: parent.id,
+          items: q
+            .from({ child: children })
+            .where(({ child }) => eq(child.groupId, parent.groupId))
+            .select(({ child }) => ({ id: child.id })),
+        })),
+      )
+
+      await collection.preload()
+
+      const items = collection.get(1)!.items
+      expect(items).toBeDefined()
+      expect(plainRows(items)).toEqual([])
+    })
   })
 
   describe(`reactivity`, () => {
@@ -394,7 +426,8 @@ describe(`includes subqueries`, () => {
       const collection = buildIncludesQuery()
       await collection.preload()
 
-      expect(childItems((collection.get(1) as any).issues)).toHaveLength(2)
+      const originalIssues = (collection.get(1) as any).issues
+      expect(childItems(originalIssues)).toHaveLength(2)
 
       // Remove project Alpha
       projects.utils.begin()
@@ -405,6 +438,7 @@ describe(`includes subqueries`, () => {
       projects.utils.commit()
 
       expect(collection.get(1)).toBeUndefined()
+      expect(childItems(originalIssues)).toEqual([])
 
       // Re-add project Alpha — should get a fresh child collection
       projects.utils.begin()
@@ -416,6 +450,8 @@ describe(`includes subqueries`, () => {
 
       const alpha = collection.get(1) as any
       expect(alpha).toMatchObject({ id: 1, name: `Alpha Reborn` })
+      expect(alpha.issues).not.toBe(originalIssues)
+      expect(childItems(originalIssues)).toEqual([])
       expect(childItems(alpha.issues)).toEqual([
         { id: 10, title: `Bug in Alpha` },
         { id: 11, title: `Feature for Alpha` },
@@ -822,6 +858,37 @@ describe(`includes subqueries`, () => {
         { id: 11, title: `Feature for Alpha` },
       ])
     })
+
+    it(`order-only child changes update Collection layout`, async () => {
+      const collection = createLiveQueryCollection((q) =>
+        q.from({ p: projects }).select(({ p }) => ({
+          id: p.id,
+          issues: q
+            .from({ i: issues })
+            .where(({ i }) => eq(i.projectId, p.id))
+            .orderBy(({ i }) => i.title, `asc`)
+            .select(({ i }) => ({ id: i.id })),
+        })),
+      )
+
+      await collection.preload()
+      expect(plainRows((collection.get(1) as any).issues)).toEqual([
+        { id: 10 },
+        { id: 11 },
+      ])
+
+      issues.utils.begin()
+      issues.utils.write({
+        type: `update`,
+        value: { id: 11, projectId: 1, title: `A Feature for Alpha` },
+      })
+      issues.utils.commit()
+
+      expect(plainRows((collection.get(1) as any).issues)).toEqual([
+        { id: 11 },
+        { id: 10 },
+      ])
+    })
   })
 
   describe(`ordered child queries with limit`, () => {
@@ -1060,8 +1127,9 @@ describe(`includes subqueries`, () => {
       await collection.preload()
 
       // Both Frontend and Backend share departmentId 100
-      expect(childItems((collection.get(1) as any).members)).toHaveLength(2)
-      expect(childItems((collection.get(2) as any).members)).toHaveLength(2)
+      const sharedMembers = (collection.get(1) as any).members
+      expect((collection.get(2) as any).members).toBe(sharedMembers)
+      expect(childItems(sharedMembers)).toHaveLength(2)
 
       // Delete the Frontend team
       teams.utils.begin()
@@ -1074,10 +1142,211 @@ describe(`includes subqueries`, () => {
       expect(collection.get(1)).toBeUndefined()
 
       // Backend should still have its child collection with all members
+      expect((collection.get(2) as any).members).toBe(sharedMembers)
       expect(childItems((collection.get(2) as any).members)).toEqual([
         { id: 10, name: `Alice` },
         { id: 11, name: `Bob` },
       ])
+
+      // Rejoining the still-active route reuses its shared facade.
+      teams.utils.begin()
+      teams.utils.write({ type: `insert`, value: sampleTeams[0]! })
+      teams.utils.commit()
+      expect((collection.get(1) as any).members).toBe(sharedMembers)
+    })
+
+    it(`publishes a parent route move and its child facades coherently`, async () => {
+      type Parent = { id: number; groupId: number }
+      type Child = { id: number; groupId: number }
+
+      const parents = createCollection(
+        mockSyncCollectionOptions<Parent>({
+          id: `coherent-route-parents`,
+          getKey: (parent) => parent.id,
+          initialData: [{ id: 1, groupId: 1 }],
+        }),
+      )
+      const children = createCollection(
+        mockSyncCollectionOptions<Child>({
+          id: `coherent-route-children`,
+          getKey: (child) => child.id,
+          initialData: [
+            { id: 10, groupId: 1 },
+            { id: 20, groupId: 2 },
+          ],
+        }),
+      )
+      const collection = createLiveQueryCollection((q) =>
+        q.from({ parent: parents }).select(({ parent }) => ({
+          id: parent.id,
+          groupId: parent.groupId,
+          children: q
+            .from({ child: children })
+            .where(({ child }) => eq(child.groupId, parent.groupId))
+            .select(({ child }) => ({ id: child.id })),
+        })),
+      )
+
+      await collection.preload()
+
+      const oldFacade = collection.get(1)!.children
+      const observations: Array<{
+        groupId: number
+        sameFacade: boolean
+        oldRows: Array<{ id: number }>
+        currentRows: Array<{ id: number }>
+      }> = []
+      const facadeSubscription = oldFacade.subscribeChanges(
+        () => {
+          const current = collection.get(1)!
+          observations.push({
+            groupId: current.groupId,
+            sameFacade: current.children === oldFacade,
+            oldRows: plainRows(oldFacade),
+            currentRows: plainRows(current.children),
+          })
+        },
+        { includeInitialState: false },
+      )
+      const rootObservations: Array<{
+        groupId: number
+        oldRows: Array<{ id: number }>
+        currentRows: Array<{ id: number }>
+      }> = []
+      const rootSubscription = collection.subscribeChanges(
+        () => {
+          const current = collection.get(1)!
+          rootObservations.push({
+            groupId: current.groupId,
+            oldRows: plainRows(oldFacade),
+            currentRows: plainRows(current.children),
+          })
+        },
+        { includeInitialState: false },
+      )
+
+      try {
+        parents.utils.begin()
+        parents.utils.write({
+          type: `update`,
+          value: { id: 1, groupId: 2 },
+          previousValue: { id: 1, groupId: 1 },
+        })
+        parents.utils.commit()
+
+        expect(observations).toEqual([
+          {
+            groupId: 2,
+            sameFacade: false,
+            oldRows: [],
+            currentRows: [{ id: 20 }],
+          },
+        ])
+        expect(rootObservations).toEqual([
+          {
+            groupId: 2,
+            oldRows: [],
+            currentRows: [{ id: 20 }],
+          },
+        ])
+      } finally {
+        facadeSubscription.unsubscribe()
+        rootSubscription.unsubscribe()
+      }
+    })
+
+    it(`retires a shared facade after all parent routes publish`, async () => {
+      type Parent = { id: number; groupId: number }
+      type Child = { id: number; groupId: number }
+
+      const initialParents: Array<Parent> = [
+        { id: 1, groupId: 1 },
+        { id: 2, groupId: 1 },
+      ]
+      const parents = createCollection(
+        mockSyncCollectionOptions<Parent>({
+          id: `coherent-shared-route-parents`,
+          getKey: (parent) => parent.id,
+          initialData: initialParents,
+        }),
+      )
+      const children = createCollection(
+        mockSyncCollectionOptions<Child>({
+          id: `coherent-shared-route-children`,
+          getKey: (child) => child.id,
+          initialData: [
+            { id: 10, groupId: 1 },
+            { id: 20, groupId: 2 },
+            { id: 30, groupId: 3 },
+          ],
+        }),
+      )
+      const collection = createLiveQueryCollection((q) =>
+        q.from({ parent: parents }).select(({ parent }) => ({
+          id: parent.id,
+          groupId: parent.groupId,
+          children: q
+            .from({ child: children })
+            .where(({ child }) => eq(child.groupId, parent.groupId))
+            .select(({ child }) => ({ id: child.id })),
+        })),
+      )
+
+      await collection.preload()
+
+      const sharedFacade = collection.get(1)!.children
+      expect(collection.get(2)!.children).toBe(sharedFacade)
+      const observations: Array<{
+        oldRows: Array<{ id: number }>
+        parents: Array<{
+          id: number
+          groupId: number
+          rows: Array<{ id: number }>
+        }>
+      }> = []
+      const subscription = sharedFacade.subscribeChanges(
+        () => {
+          observations.push({
+            oldRows: plainRows(sharedFacade),
+            parents: [1, 2].map((id) => {
+              const current = collection.get(id)!
+              return {
+                id,
+                groupId: current.groupId,
+                rows: plainRows(current.children),
+              }
+            }),
+          })
+        },
+        { includeInitialState: false },
+      )
+
+      try {
+        parents.utils.begin()
+        parents.utils.write({
+          type: `update`,
+          value: { id: 1, groupId: 2 },
+          previousValue: initialParents[0]!,
+        })
+        parents.utils.write({
+          type: `update`,
+          value: { id: 2, groupId: 3 },
+          previousValue: initialParents[1]!,
+        })
+        parents.utils.commit()
+
+        expect(observations).toEqual([
+          {
+            oldRows: [],
+            parents: [
+              { id: 1, groupId: 2, rows: [{ id: 20 }] },
+              { id: 2, groupId: 3, rows: [{ id: 30 }] },
+            ],
+          },
+        ])
+      } finally {
+        subscription.unsubscribe()
+      }
     })
 
     it(`correlation field does not need to be in the parent select`, async () => {
@@ -2288,6 +2557,10 @@ describe(`includes subqueries`, () => {
           ],
         },
       ])
+
+      const alphaIssues = collection.get(1)!.issues
+      expect([...alphaIssues.keys()]).toEqual([10])
+      expect(alphaIssues.get(10)?.$key).toBe(10)
     })
 
     it(`reacts to parent field change`, async () => {
@@ -2593,6 +2866,12 @@ describe(`includes subqueries`, () => {
           items: [],
         },
       ])
+
+      const aliceItems = collection.get(1)!.items
+      const bobItems = collection.get(2)!.items
+      expect([...aliceItems.keys()]).toEqual([10])
+      expect(aliceItems.get(10)?.$key).toBe(10)
+      expect([...bobItems.keys()]).toEqual([])
     })
 
     it(`shared correlation key with parent filter + orderBy + limit`, async () => {

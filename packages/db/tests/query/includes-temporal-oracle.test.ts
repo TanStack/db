@@ -7,8 +7,8 @@ import {
   eq,
   toArray,
 } from '../../src/query/index.js'
-import { expectAssertionFailure } from '../expected-failure.js'
 import { runTrace } from '../trace-runner.js'
+import { flushPromises } from '../utils.js'
 import type { Collection } from '../../src/collection/index.js'
 import type { Deferred } from '../../src/deferred.js'
 import type { LoadSubsetOptions } from '../../src/types.js'
@@ -276,6 +276,7 @@ type DemandCancellationContext = {
 function createRemovablePost(): {
   collection: Collection<Post>
   remove: () => void
+  add: () => void
 } {
   const post: Post = {
     id: 1,
@@ -283,6 +284,9 @@ function createRemovablePost(): {
     title: `selected`,
   }
   let remove: () => void = () => {
+    throw new Error(`Post collection has not started`)
+  }
+  let add: () => void = () => {
     throw new Error(`Post collection has not started`)
   }
   const collection = createCollection<Post>({
@@ -299,10 +303,15 @@ function createRemovablePost(): {
           write({ type: `delete`, value: post })
           commit()
         }
+        add = () => {
+          begin()
+          write({ type: `insert`, value: post })
+          commit()
+        }
       },
     },
   })
-  return { collection, remove: () => remove() }
+  return { collection, remove: () => remove(), add: () => add() }
 }
 
 function createDemandCancellationDriver(): TraceDriver<
@@ -398,6 +407,88 @@ async function expectObsoleteDemandDoesNotBlockReadiness(): Promise<void> {
     driver: createDemandCancellationDriver(),
     projection: demandCancellationProjection,
   })
+}
+
+async function expectObsoleteDemandCannotPublishAfterReactivation(): Promise<void> {
+  const { collection: posts, remove, add } = createRemovablePost()
+  const requests: Array<{
+    deferred: Deferred<void>
+    outcome: Promise<void>
+    signal: AbortSignal | undefined
+  }> = []
+  const comments = createCollection<Comment>({
+    id: nextCollectionId(`temporal-generation-comments`),
+    getKey: (comment) => comment.id,
+    syncMode: `on-demand`,
+    sync: {
+      sync: ({ begin, write, commit, markReady }) => ({
+        loadSubset: (options) => {
+          const requestIndex = requests.length
+          const deferred = createDeferred<void>()
+          const signal = options.signal
+          const outcome = deferred.promise.then(() => {
+            if (signal?.aborted) return
+            begin()
+            write({
+              type: `insert`,
+              value:
+                requestIndex === 0
+                  ? { id: 100, postId: 1, body: `obsolete` }
+                  : { id: 200, postId: 1, body: `current` },
+            })
+            commit()
+            markReady()
+          })
+          requests.push({ deferred, outcome, signal })
+          return outcome
+        },
+      }),
+    },
+  })
+  const live = createLiveQueryCollection((q) =>
+    q.from({ post: posts }).select(({ post }) => ({
+      id: post.id,
+      comments: toArray(
+        q
+          .from({ comment: comments })
+          .where(({ comment }) => eq(comment.postId, post.id))
+          .select(({ comment }) => ({
+            id: comment.id,
+            body: comment.body,
+          })),
+      ),
+    })),
+  )
+
+  const preload = live.preload()
+  try {
+    await flushPromises()
+    expect(requests).toHaveLength(1)
+
+    remove()
+    await preload
+    expect(live.size).toBe(0)
+
+    add()
+    await flushPromises()
+    expect(requests).toHaveLength(2)
+
+    requests[1]!.deferred.resolve()
+    await requests[1]!.outcome
+    await flushPromises()
+    expect(live.get(1)?.comments).toEqual([{ id: 200, body: `current` }])
+
+    requests[0]!.deferred.resolve()
+    await requests[0]!.outcome
+    await flushPromises()
+    expect(live.get(1)?.comments).toEqual([{ id: 200, body: `current` }])
+    expect(requests[0]!.signal?.aborted).toBe(true)
+  } finally {
+    for (const request of requests) request.deferred.resolve()
+    await Promise.allSettled(requests.map(({ outcome }) => outcome))
+    await live.cleanup()
+    await Promise.all([posts.cleanup(), comments.cleanup()])
+  }
 }
 
 type FastPathEvent = {
@@ -632,12 +723,8 @@ async function expectProgressiveTraceMatches(
 }
 
 describe(`includes temporal oracle`, () => {
-  it(
-    `discovered trace: an empty outer does not wait for an undemanded child`,
-    expectAssertionFailure(() => expectReadinessMatches([]), {
-      checkpoint: 0,
-    }),
-  )
+  it(`an empty outer does not wait for an undemanded child`, () =>
+    expectReadinessMatches([]))
 
   it(`loads a demanded child before becoming ready`, async () => {
     await expectReadinessMatches([
@@ -647,20 +734,19 @@ describe(`includes temporal oracle`, () => {
   })
 
   it(
-    `discovered trace: obsolete child demand does not block readiness`,
-    expectAssertionFailure(expectObsoleteDemandDoesNotBlockReadiness, {
-      checkpoint: 1,
-    }),
+    `obsolete child demand does not block readiness`,
+    expectObsoleteDemandDoesNotBlockReadiness,
+  )
+
+  it(
+    `obsolete child demand cannot publish after the route is reactivated`,
+    expectObsoleteDemandCannotPublishAfterReactivation,
   )
 
   it(`loads a direct progressive subset inside the fast-path window`, async () => {
     await expectProgressiveTraceMatches(`direct`)
   })
 
-  it(
-    `discovered trace: a nested progressive subset loads inside the fast-path window`,
-    expectAssertionFailure(() => expectProgressiveTraceMatches(`nested`), {
-      checkpoint: 0,
-    }),
-  )
+  it(`a nested progressive subset loads inside the fast-path window`, () =>
+    expectProgressiveTraceMatches(`nested`))
 })

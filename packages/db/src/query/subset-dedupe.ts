@@ -112,8 +112,11 @@ export class DeduplicatedLoadSubset {
 
     // Check against in-flight calls using the same subset logic as resolved calls
     // This prevents duplicate requests when concurrent calls have subset relationships
-    const matchingInflight = this.inflightCalls.find((inflight) =>
-      isPredicateSubset(options, inflight.options),
+    const matchingInflight = this.inflightCalls.find(
+      (inflight) =>
+        !inflight.options.signal?.aborted &&
+        inflight.options.signal === options.signal &&
+        isPredicateSubset(options, inflight.options),
     )
 
     if (matchingInflight !== undefined) {
@@ -162,7 +165,10 @@ export class DeduplicatedLoadSubset {
             // Only update tracking if this request is still from the current generation
             // If reset() was called, the generation will have incremented and we should
             // not repopulate the state that was just cleared
-            if (capturedGeneration === this.generation) {
+            if (
+              capturedGeneration === this.generation &&
+              !trackingOptions.signal?.aborted
+            ) {
               this.updateTracking(trackingOptions)
             }
             return result

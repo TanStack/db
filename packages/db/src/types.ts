@@ -303,6 +303,11 @@ export type LoadSubsetOptions = {
    */
   offset?: number
   /**
+   * Aborted when this exact subset request is no longer current. Async sync
+   * adapters must check the signal before installing fetched rows.
+   */
+  signal?: AbortSignal
+  /**
    * The subscription that triggered the load.
    * Advanced sync implementations can use this for:
    * - LRU caching keyed by subscription

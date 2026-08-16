@@ -2,7 +2,7 @@ import { MultiSet, serializeValue } from '@tanstack/db-ivm'
 import { UnsupportedRootScalarSelectError } from '../../errors.js'
 import { normalizeOrderByPaths } from '../compiler/expressions.js'
 import { buildQuery, getQueryIR } from '../builder/index.js'
-import { ConditionalSelect, IncludesSubquery, isExpressionLike } from '../ir.js'
+import { collectCollectionSources, isExpressionLike } from '../ir.js'
 import type { MultiSetArray, RootStreamBuilder } from '@tanstack/db-ivm'
 import type { Collection } from '../../collection/index.js'
 import type { ChangeMessage } from '../../types.js'
@@ -17,89 +17,16 @@ import type { OrderByOptimizationInfo } from '../compiler/order-by.js'
  * Maps collections by their ID (not alias) as expected by the compiler.
  */
 export function extractCollectionsFromQuery(
-  query: any,
+  query: QueryIR,
 ): Record<string, Collection<any, any, any>> {
-  const collections: Record<string, any> = {}
-
-  // Helper function to recursively extract collections from a query or source
-  function extractFromSource(source: any) {
-    if (source.type === `collectionRef`) {
-      collections[source.collection.id] = source.collection
-    } else if (source.type === `queryRef`) {
-      // Recursively extract from subquery
-      extractFromQuery(source.query)
-    } else if (source.type === `unionFrom`) {
-      for (const childSource of source.sources) {
-        extractFromSource(childSource)
-      }
-    } else if (source.type === `unionAll`) {
-      for (const branch of source.queries) {
-        extractFromQuery(branch)
-      }
-    }
+  const collections: Record<string, Collection<any, any, any>> = {}
+  for (const source of collectCollectionSources(query)) {
+    collections[source.collection.id] = source.collection
   }
-
-  // Helper function to recursively extract collections from a query
-  function extractFromQuery(q: any) {
-    // Extract from FROM clause
-    if (q.from) {
-      extractFromSource(q.from)
-    }
-
-    // Extract from JOIN clauses
-    if (q.join && Array.isArray(q.join)) {
-      for (const joinClause of q.join) {
-        if (joinClause.from) {
-          extractFromSource(joinClause.from)
-        }
-      }
-    }
-
-    // Extract from SELECT (for IncludesSubquery)
-    if (q.select) {
-      extractFromSelect(q.select)
-    }
-  }
-
-  function extractFromSelect(select: any) {
-    for (const [key, value] of Object.entries(select)) {
-      if (typeof key === `string` && key.startsWith(`__SPREAD_SENTINEL__`)) {
-        continue
-      }
-      if (value instanceof IncludesSubquery) {
-        extractFromQuery(value.query)
-      } else if (value instanceof ConditionalSelect) {
-        extractFromConditionalSelect(value)
-      } else if (isNestedSelectObject(value)) {
-        extractFromSelect(value)
-      }
-    }
-  }
-
-  function extractFromConditionalSelect(conditional: ConditionalSelect) {
-    for (const branch of conditional.branches) {
-      extractFromSelectValue(branch.value)
-    }
-    if (conditional.defaultValue !== undefined) {
-      extractFromSelectValue(conditional.defaultValue)
-    }
-  }
-
-  function extractFromSelectValue(value: any) {
-    if (value instanceof IncludesSubquery) {
-      extractFromQuery(value.query)
-    } else if (value instanceof ConditionalSelect) {
-      extractFromConditionalSelect(value)
-    } else if (isNestedSelectObject(value)) {
-      extractFromSelect(value)
-    }
-  }
-
-  // Start extraction from the root query
-  extractFromQuery(query)
-
   return collections
 }
+
+export { collectCollectionSources as extractCollectionSources }
 
 /**
  * Helper function to extract the collection that is referenced in the query's FROM clause.
@@ -127,118 +54,10 @@ export function extractCollectionFromSource(
 }
 
 /**
- * Extracts all aliases used for each collection across the entire query tree.
- *
- * Traverses the QueryIR recursively to build a map from collection ID to all aliases
- * that reference that collection. This is essential for self-join support, where the
- * same collection may be referenced multiple times with different aliases.
- *
- * For example, given a query like:
- * ```ts
- * q.from({ employee: employeesCollection })
- *   .join({ manager: employeesCollection }, ({ employee, manager }) =>
- *     eq(employee.managerId, manager.id)
- *   )
- * ```
- *
- * This function would return:
- * ```
- * Map { "employees" => Set { "employee", "manager" } }
- * ```
- *
- * @param query - The query IR to extract aliases from
- * @returns A map from collection ID to the set of all aliases referencing that collection
- */
-export function extractCollectionAliases(
-  query: QueryIR,
-): Map<string, Set<string>> {
-  const aliasesById = new Map<string, Set<string>>()
-
-  function recordAlias(source: any) {
-    if (!source) return
-
-    if (source.type === `collectionRef`) {
-      const { id } = source.collection
-      const existing = aliasesById.get(id)
-      if (existing) {
-        existing.add(source.alias)
-      } else {
-        aliasesById.set(id, new Set([source.alias]))
-      }
-    } else if (source.type === `queryRef`) {
-      traverse(source.query)
-    } else if (source.type === `unionFrom`) {
-      for (const childSource of source.sources) {
-        recordAlias(childSource)
-      }
-    } else if (source.type === `unionAll`) {
-      for (const branch of source.queries) {
-        traverse(branch)
-      }
-    }
-  }
-
-  function traverseSelect(select: any) {
-    for (const [key, value] of Object.entries(select)) {
-      if (typeof key === `string` && key.startsWith(`__SPREAD_SENTINEL__`)) {
-        continue
-      }
-      if (value instanceof IncludesSubquery) {
-        traverse(value.query)
-      } else if (value instanceof ConditionalSelect) {
-        traverseConditionalSelect(value)
-      } else if (isNestedSelectObject(value)) {
-        traverseSelect(value)
-      }
-    }
-  }
-
-  function traverseConditionalSelect(conditional: ConditionalSelect) {
-    for (const branch of conditional.branches) {
-      traverseSelectValue(branch.value)
-    }
-    if (conditional.defaultValue !== undefined) {
-      traverseSelectValue(conditional.defaultValue)
-    }
-  }
-
-  function traverseSelectValue(value: any) {
-    if (value instanceof IncludesSubquery) {
-      traverse(value.query)
-    } else if (value instanceof ConditionalSelect) {
-      traverseConditionalSelect(value)
-    } else if (isNestedSelectObject(value)) {
-      traverseSelect(value)
-    }
-  }
-
-  function traverse(q?: QueryIR) {
-    if (!q) return
-
-    recordAlias(q.from)
-
-    if (q.join) {
-      for (const joinClause of q.join) {
-        recordAlias(joinClause.from)
-      }
-    }
-
-    if (q.select) {
-      traverseSelect(q.select)
-    }
-  }
-
-  traverse(query)
-
-  return aliasesById
-}
-
-/**
  * Check if a value is a nested select object (plain object, not an expression)
  */
 function isNestedSelectObject(obj: any): boolean {
   if (obj === null || typeof obj !== `object`) return false
-  if (obj instanceof IncludesSubquery) return false
   if (isExpressionLike(obj)) return false
   // Ref proxies from spread operations
   if (obj.__refProxy) return false

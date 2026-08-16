@@ -447,6 +447,11 @@ export class CollectionImpl<
     this._sync.markLayoutChange()
   }
 
+  /** Defer subscriber events until a coherent multi-Collection commit ends. */
+  public _deferPublication(): () => void {
+    return this._changes.deferPublication()
+  }
+
   /**
    * Register a callback to be executed when the collection first becomes ready
    * Useful for preloading collections

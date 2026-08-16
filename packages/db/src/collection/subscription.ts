@@ -22,6 +22,7 @@ import type { CollectionImpl } from './index.js'
 
 type RequestSnapshotOptions = {
   where?: BasicExpression<boolean>
+  signal?: AbortSignal
   optimizedOnly?: boolean
   trackLoadSubsetPromise?: boolean
   /** Optional orderBy to pass to loadSubset for backend optimization */
@@ -73,6 +74,10 @@ export class CollectionSubscription
    * We store the exact LoadSubsetOptions we passed to loadSubset to ensure symmetric unload.
    */
   private loadedSubsets: Array<LoadSubsetOptions> = []
+  private readonly requestedSubsetWhere = new WeakMap<
+    LoadSubsetOptions,
+    BasicExpression<boolean>
+  >()
 
   // Keep track of the keys we've sent (needed for join and orderBy optimizations)
   private sentKeys = new Set<string | number>()
@@ -374,6 +379,7 @@ export class CollectionSubscription
     // don't await it, we will load the data into the collection when it comes in
     const loadOptions: LoadSubsetOptions = {
       where: stateOpts.where,
+      signal: opts?.signal,
       subscription: this,
       // Include orderBy and limit if provided so sync layer can optimize the query
       orderBy: opts?.orderBy,
@@ -386,6 +392,7 @@ export class CollectionSubscription
 
     // Track this loadSubset call so we can unload it later
     this.loadedSubsets.push(loadOptions)
+    if (opts?.where) this.requestedSubsetWhere.set(loadOptions, opts.where)
 
     const trackLoadSubsetPromise = opts?.trackLoadSubsetPromise ?? true
     if (trackLoadSubsetPromise) {
@@ -415,6 +422,19 @@ export class CollectionSubscription
     this.snapshotSent = true
     this.callback(filteredSnapshot)
     return true
+  }
+
+  /** Release one exact subset request while keeping the subscription alive. */
+  releaseSnapshot(where: BasicExpression<boolean>): void {
+    const index = this.loadedSubsets.findIndex(
+      (options) =>
+        options.where === where ||
+        this.requestedSubsetWhere.get(options) === where,
+    )
+    if (index === -1) return
+
+    const [options] = this.loadedSubsets.splice(index, 1)
+    if (options) this.collection._sync.unloadSubset(options)
   }
 
   /**

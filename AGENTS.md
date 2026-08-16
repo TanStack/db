@@ -2,6 +2,17 @@
 
 This guide provides principles and patterns for AI agents contributing to the TanStack DB codebase. These guidelines are derived from PR review patterns and reflect the quality standards expected in this project.
 
+## Required reading: live-query materialization
+
+Before reading, analyzing, or modifying correlated live-query materialization
+code under `packages/db/src/query/live/`, read
+`packages/db/src/query/live/ARCHITECTURE.md` in full. Read it before changing
+the related includes oracle tests as well.
+
+Treat that document's component boundaries and normative laws as constraints.
+If a change intentionally revises an architectural contract, update the
+architecture document in the same pull request.
+
 ## Table of Contents
 
 1. [Type Safety](#type-safety)

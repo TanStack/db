@@ -29,6 +29,11 @@ export class CollectionChangesManager<
   public changeSubscriptions = new Set<CollectionSubscription>()
   public batchedEvents: Array<ChangeMessage<TOutput, TKey>> = []
   public shouldBatchEvents = false
+  private publicationDeferralDepth = 0
+  private deferredPublications: Array<{
+    changes: Array<ChangeMessage<TOutput, TKey>>
+    layoutChanged: boolean
+  }> = []
   private layoutChangeListeners = new Set<() => void>()
 
   /**
@@ -120,6 +125,44 @@ export class CollectionChangesManager<
       this.shouldBatchEvents = false
     }
 
+    if (this.publicationDeferralDepth > 0) {
+      this.deferredPublications.push({ changes: rawEvents, layoutChanged })
+      return
+    }
+
+    this.publishEvents(rawEvents, layoutChanged)
+  }
+
+  /**
+   * Defers subscriber delivery while a coherent multi-Collection publication
+   * installs all of its visible state. State and indexes still commit at their
+   * normal transaction boundaries.
+   */
+  public deferPublication(): () => void {
+    this.publicationDeferralDepth++
+    let resumed = false
+
+    return () => {
+      if (resumed) return
+      resumed = true
+      if (this.publicationDeferralDepth === 0) return
+
+      this.publicationDeferralDepth--
+      if (this.publicationDeferralDepth > 0) return
+
+      const publications = this.deferredPublications
+      this.deferredPublications = []
+      this.publishEvents(
+        publications.flatMap(({ changes }) => changes),
+        publications.some(({ layoutChanged }) => layoutChanged),
+      )
+    }
+  }
+
+  private publishEvents(
+    rawEvents: Array<ChangeMessage<TOutput, TKey>>,
+    layoutChanged: boolean,
+  ): void {
     if (rawEvents.length === 0 && !layoutChanged) {
       return
     }
@@ -259,5 +302,7 @@ export class CollectionChangesManager<
   public cleanup(): void {
     this.batchedEvents = []
     this.shouldBatchEvents = false
+    this.deferredPublications = []
+    this.publicationDeferralDepth = 0
   }
 }
