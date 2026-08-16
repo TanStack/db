@@ -1,4 +1,4 @@
-import { useRef } from 'react'
+import { useMemo, useState } from 'react'
 import { useLiveQuery } from './useLiveQuery'
 import type {
   Collection,
@@ -11,6 +11,8 @@ import type {
   QueryBuilder,
   SingleResult,
 } from '@tanstack/db'
+
+const safePromiseCache = new WeakMap<Promise<void>, Promise<void>>()
 
 /**
  * Create a live query with React Suspense support
@@ -156,18 +158,16 @@ export function useLiveSuspenseQuery(
   configOrQueryOrCollection: any,
   deps: Array<unknown> = [],
 ) {
-  const promiseRef = useRef<Promise<void> | null>(null)
-  const collectionRef = useRef<Collection<any, any, any> | null>(null)
-  const hasBeenReadyRef = useRef(false)
-
   // Use useLiveQuery to handle collection management and reactivity
   const result = useLiveQuery(configOrQueryOrCollection, deps)
 
+  const [prevCollection, setPrevCollection] = useState(result.collection)
+  const [hasBeenReady, setHasBeenReady] = useState(false)
+
   // Reset promise and ready state when collection changes (deps changed)
-  if (collectionRef.current !== result.collection) {
-    promiseRef.current = null
-    collectionRef.current = result.collection
-    hasBeenReadyRef.current = false
+  if (prevCollection !== result.collection) {
+    setPrevCollection(result.collection)
+    setHasBeenReady(false)
   }
 
   // SUSPENSE LOGIC: Throw promise or error based on collection status
@@ -188,15 +188,13 @@ export function useLiveSuspenseQuery(
   const collectionStatus = result.collection.status
 
   // Track when we reach ready state
-  if (collectionStatus === `ready`) {
-    hasBeenReadyRef.current = true
-    promiseRef.current = null
+  if (collectionStatus === `ready` && !hasBeenReady) {
+    setHasBeenReady(true)
   }
 
   // Only throw errors during initial load (before first ready)
   // After success, errors surface as stale data (matches TanStack Query behavior)
-  if (collectionStatus === `error` && !hasBeenReadyRef.current) {
-    promiseRef.current = null
+  if (collectionStatus === `error` && !hasBeenReady) {
     // TODO: Once collections hold a reference to their last error object (#671),
     // we should rethrow that actual error instead of creating a generic message
     throw new Error(`Collection "${result.collection.id}" failed to load`)
@@ -204,20 +202,26 @@ export function useLiveSuspenseQuery(
 
   if (collectionStatus === `loading` || collectionStatus === `idle`) {
     // Create or reuse promise for current collection
-    if (!promiseRef.current) {
-      promiseRef.current = result.collection.preload()
+    const promise = result.collection.preload()
+    let safePromise = safePromiseCache.get(promise)
+    if (!safePromise) {
+      safePromise = promise.catch(() => {})
+      safePromiseCache.set(promise, safePromise)
     }
     // THROW PROMISE - React Suspense catches this (React 18+ required)
     // Note: We don't check React version here. In React <18, this will be caught
     // by an Error Boundary, which provides a reasonable failure mode.
-    throw promiseRef.current
+    throw safePromise
   }
 
   // Return data without status/loading flags (handled by Suspense/ErrorBoundary)
   // If error after success, return last known good state (stale data)
-  return {
-    state: result.state,
-    data: result.data,
-    collection: result.collection,
-  }
+  return useMemo(
+    () => ({
+      state: result.state,
+      data: result.data,
+      collection: result.collection,
+    }),
+    [result.collection, result.data, result.state],
+  )
 }
