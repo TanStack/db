@@ -744,7 +744,11 @@ export class CollectionConfigBuilder<
       },
     )
 
-    const materialized = materializeCompilation(compilation, this.config.getKey)
+    const materialized = materializeCompilation(
+      compilation,
+      this.config.getKey,
+      this.hasJoins(this.query),
+    )
     this.pipelineCache = materialized.pipeline
     this.sourceWhereClausesCache = compilation.sourceWhereClauses
     this.compiledAliasToCollectionId = compilation.aliasToCollectionId

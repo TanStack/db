@@ -6,7 +6,6 @@ import {
   eq,
   materialize,
 } from '../../src/query/index.js'
-import { expectAssertionFailure } from '../expected-failure.js'
 import { runTrace } from '../trace-runner.js'
 import {
   flushPromises,
@@ -81,6 +80,7 @@ function createControlledCollection<T extends { id: number }>(
     id: `${name}-${nextCollectionOracleId++}`,
     getKey: (row) => row.id,
     initialData: initialData.map((row) => ({ ...row })),
+    autoIndex: `eager`,
   })
   options.sync.rowUpdateMode = `full`
   const collection = createCollection(options)
@@ -315,155 +315,131 @@ describe(`Collection-valued includes oracle`, () => {
     }),
   )
 
-  fcTest(
-    `discovered trace: retiring a route cleans up its facade`,
-    async () => {
-      let retiredFacade: IncludedChildCollection | undefined
-      const driver = createCollectionDriver(
-        [{ id: 1, group: 1 }],
-        [{ id: 10, parentGroup: 1, value: 1 }],
-      )
-      const lifecycleDriver: TraceDriver<CollectionAction, CollectionContext> =
-        {
-          ...driver,
-          apply(action, context, checkpoint) {
-            retiredFacade ??= context.live.get(1)?.children
-            return driver.apply(action, context, checkpoint)
-          },
-        }
-      const projection: TraceProjection<
-        CollectionContext,
-        { rows: Array<ProjectedParent>; retiredStatus: string | undefined }
-      > = {
-        observe: (context) => ({
-          rows: projectLive(context.live),
-          retiredStatus: retiredFacade?.status,
-        }),
-        recompute: (context) => ({
-          rows: recompute(context),
-          retiredStatus:
-            context.model.parents.size === 0
-              ? `cleaned-up`
-              : retiredFacade?.status,
-        }),
-        assertEqual(observed, expected) {
-          expect(observed).toEqual(expected)
-          return undefined
-        },
-      }
+  fcTest(`retiring a route cleans up its facade`, async () => {
+    let retiredFacade: IncludedChildCollection | undefined
+    const driver = createCollectionDriver(
+      [{ id: 1, group: 1 }],
+      [{ id: 10, parentGroup: 1, value: 1 }],
+    )
+    const lifecycleDriver: TraceDriver<CollectionAction, CollectionContext> = {
+      ...driver,
+      apply(action, context, checkpoint) {
+        retiredFacade ??= context.live.get(1)?.children
+        return driver.apply(action, context, checkpoint)
+      },
+    }
+    const projection: TraceProjection<
+      CollectionContext,
+      { rows: Array<ProjectedParent>; retiredStatus: string | undefined }
+    > = {
+      observe: (context) => ({
+        rows: projectLive(context.live),
+        retiredStatus: retiredFacade?.status,
+      }),
+      recompute: (context) => ({
+        rows: recompute(context),
+        retiredStatus:
+          context.model.parents.size === 0
+            ? `cleaned-up`
+            : retiredFacade?.status,
+      }),
+      assertEqual(observed, expected) {
+        expect(observed).toEqual(expected)
+        return undefined
+      },
+    }
 
-      await expectAssertionFailure(
-        () =>
-          runTrace({
-            steps: [{ type: `deleteParent`, id: 1 }],
-            driver: lifecycleDriver,
-            projection,
-          }),
-        {
-          checkpoint: 1,
-          classify: ({ actual, expected }) =>
-            JSON.stringify(actual) ===
-              JSON.stringify({ rows: [], retiredStatus: `ready` }) &&
-            JSON.stringify(expected) ===
-              JSON.stringify({ rows: [], retiredStatus: `cleaned-up` }),
-        },
-      )()
-    },
-  )
+    await runTrace({
+      steps: [{ type: `deleteParent`, id: 1 }],
+      driver: lifecycleDriver,
+      projection,
+    })
+  })
 
-  fcTest(
-    `discovered trace: a delete event preserves the published facade identity`,
-    async () => {
-      let publishedFacade: IncludedChildCollection | undefined
-      let previousFacadeMatched = true
-      const driver = createCollectionDriver(
-        [{ id: 1, group: 1 }],
-        [{ id: 10, parentGroup: 1, value: 1 }],
-      )
-      const eventDriver: TraceDriver<CollectionAction, CollectionContext> = {
-        ...driver,
-        async start(context) {
-          await driver.start?.(context)
-          publishedFacade = context.live.get(1)?.children
-          context.subscription = context.live.subscribeChanges(
-            (changes: Array<ChangeMessage<any, any>>) => {
-              for (const change of changes) {
-                if (change.type === `delete`) {
-                  previousFacadeMatched =
-                    change.previousValue?.children === publishedFacade
-                }
+  fcTest(`a delete event preserves the published facade identity`, async () => {
+    let publishedFacade: IncludedChildCollection | undefined
+    let previousFacadeMatched = true
+    const driver = createCollectionDriver(
+      [{ id: 1, group: 1 }],
+      [{ id: 10, parentGroup: 1, value: 1 }],
+    )
+    const eventDriver: TraceDriver<CollectionAction, CollectionContext> = {
+      ...driver,
+      async start(context) {
+        await driver.start?.(context)
+        publishedFacade = context.live.get(1)?.children
+        context.subscription = context.live.subscribeChanges(
+          (changes: Array<ChangeMessage<any, any>>) => {
+            for (const change of changes) {
+              if (change.type === `delete`) {
+                previousFacadeMatched =
+                  change.value.children === publishedFacade
               }
-            },
-            { includeInitialState: false },
-          )
-        },
-      }
-      const projection: TraceProjection<
-        CollectionContext,
-        { previousFacadeMatched: boolean }
-      > = {
-        observe: () => ({ previousFacadeMatched }),
-        recompute: () => ({ previousFacadeMatched: true }),
-        assertEqual(observed, expected) {
-          expect(observed).toEqual(expected)
-          return undefined
-        },
-      }
+            }
+          },
+          { includeInitialState: false },
+        )
+      },
+    }
+    const projection: TraceProjection<
+      CollectionContext,
+      { previousFacadeMatched: boolean }
+    > = {
+      observe: () => ({ previousFacadeMatched }),
+      recompute: () => ({ previousFacadeMatched: true }),
+      assertEqual(observed, expected) {
+        expect(observed).toEqual(expected)
+        return undefined
+      },
+    }
 
-      await expectAssertionFailure(
-        () =>
-          runTrace({
-            steps: [{ type: `deleteParent`, id: 1 }],
-            driver: eventDriver,
-            projection,
-          }),
-        {
-          checkpoint: 1,
-          classify: ({ actual, expected }) =>
-            JSON.stringify(actual) ===
-              JSON.stringify({ previousFacadeMatched: false }) &&
-            JSON.stringify(expected) ===
-              JSON.stringify({ previousFacadeMatched: true }),
-        },
-      )()
-    },
-  )
+    await runTrace({
+      steps: [{ type: `deleteParent`, id: 1 }],
+      driver: eventDriver,
+      projection,
+    })
+  })
 
-  fcTest(
-    `discovered trace: facade public keys survive row cloning`,
-    async () => {
-      const driver = createCollectionDriver(
+  fcTest(`facade public keys survive row cloning`, async () => {
+    const driver = createCollectionDriver(
+      [{ id: 1, group: 1 }],
+      [{ id: 10, parentGroup: 1, value: 1 }],
+    )
+    const projection: TraceProjection<
+      CollectionContext,
+      { clonedKey: unknown },
+      { clonedKey: number }
+    > = {
+      observe(context) {
+        const facade = context.live.get(1)!.children
+        const row = facade.get(10)!
+        return { clonedKey: facade.getKeyFromItem({ ...row }) }
+      },
+      recompute: () => ({ clonedKey: 10 }),
+      assertEqual(observed, expected) {
+        expect(observed).toEqual(expected)
+        return undefined
+      },
+    }
+
+    await runTrace({ steps: [], driver, projection })
+  })
+
+  fcTest(`reactivating a retired route restores its current snapshot`, () =>
+    runTrace({
+      steps: [
+        { type: `putParent`, row: { id: 1, group: 2 } },
+        { type: `putParent`, row: { id: 1, group: 1 } },
+      ],
+      driver: createCollectionDriver(
         [{ id: 1, group: 1 }],
-        [{ id: 10, parentGroup: 1, value: 1 }],
-      )
-      const projection: TraceProjection<
-        CollectionContext,
-        { clonedKey: unknown },
-        { clonedKey: number }
-      > = {
-        observe(context) {
-          const facade = context.live.get(1)!.children
-          const row = facade.get(10)!
-          return { clonedKey: facade.getKeyFromItem({ ...row }) }
-        },
-        recompute: () => ({ clonedKey: 10 }),
-        assertEqual(observed, expected) {
-          expect(observed).toEqual(expected)
-          return undefined
-        },
-      }
-
-      await expectAssertionFailure(
-        () => runTrace({ steps: [], driver, projection }),
-        {
-          checkpoint: 0,
-          classify: ({ actual, expected }) =>
-            JSON.stringify(actual) ===
-              JSON.stringify({ clonedKey: undefined }) &&
-            JSON.stringify(expected) === JSON.stringify({ clonedKey: 10 }),
-        },
-      )()
-    },
+        [
+          { id: 10, parentGroup: 1, value: 1 },
+          { id: 20, parentGroup: 2, value: 2 },
+        ],
+      ),
+      projection: collectionProjection,
+    }),
   )
 
   fcTest(
@@ -484,13 +460,8 @@ describe(`Collection-valued includes oracle`, () => {
         (batch) => changes.push(...batch),
         { includeInitialState: false },
       )
-      const internalConfig = (
-        facade._state as unknown as {
-          config: typeof facade.config
-        }
-      ).config
-      const originalGetKey = internalConfig.getKey
-      internalConfig.getKey = (row) => {
+      const originalGetKey = facade.config.getKey
+      facade.config.getKey = (row) => {
         if (row.id === 20) throw new Error(`facade key failed`)
         return originalGetKey(row)
       }
@@ -520,8 +491,18 @@ describe(`Collection-valued includes oracle`, () => {
           },
         ])
         expect(changes).toEqual([])
+
+        facade.config.getKey = originalGetKey
+        context.parents.write(`insert`, { id: 2, group: 2 })
+        await flushPromises()
+        expect(context.live.get(1)!.children).toBe(facade)
+        expect(projectLive(context.live)[0]!.children).toEqual([
+          { id: 10, parentGroup: 1, value: 10 },
+          { id: 20, parentGroup: 1, value: 20 },
+        ])
+        expect(changes).toHaveLength(2)
       } finally {
-        internalConfig.getKey = originalGetKey
+        facade.config.getKey = originalGetKey
         subscription.unsubscribe()
         await driver.cleanup(context)
       }
@@ -597,45 +578,39 @@ describe(`Collection-valued includes oracle`, () => {
     },
   )
 
-  fcTest(
-    `discovered trace: a matched null singleton remains null`,
-    expectAssertionFailure(
-      async () => {
-        type NullableChild = { id: number; parentGroup: number; value: null }
-        const parents = createControlledCollection(`nullable-oracle-parents`, [
-          { id: 1, group: 1 },
-        ])
-        const children = createControlledCollection<NullableChild>(
-          `nullable-oracle-children`,
-          [{ id: 10, parentGroup: 1, value: null }],
-        )
-        const live = createLiveQueryCollection((q) =>
-          q.from({ parent: parents.collection }).select(({ parent }) => ({
-            id: parent.id,
-            value: materialize(
-              q
-                .from({ child: children.collection })
-                .where(({ child }) => eq(child.parentGroup, parent.group))
-                .select(({ child }) => child.value)
-                .findOne(),
-            ),
-          })),
-        )
+  fcTest(`a matched null singleton remains null`, async () => {
+    type NullableChild = { id: number; parentGroup: number; value: null }
+    const parents = createControlledCollection(`nullable-oracle-parents`, [
+      { id: 1, group: 1 },
+    ])
+    const children = createControlledCollection<NullableChild>(
+      `nullable-oracle-children`,
+      [{ id: 10, parentGroup: 1, value: null }],
+    )
+    const live = createLiveQueryCollection((q) =>
+      q.from({ parent: parents.collection }).select(({ parent }) => ({
+        id: parent.id,
+        value: materialize(
+          q
+            .from({ child: children.collection })
+            .where(({ child }) => eq(child.parentGroup, parent.group))
+            .select(({ child }) => child.value)
+            .findOne(),
+        ),
+      })),
+    )
 
-        try {
-          await live.preload()
-          expect(live.get(1)!.value).toBeNull()
-        } finally {
-          await Promise.all([
-            live.cleanup(),
-            parents.collection.cleanup(),
-            children.collection.cleanup(),
-          ])
-        }
-      },
-      { message: `expected undefined to be null` },
-    ),
-  )
+    try {
+      await live.preload()
+      expect(live.get(1)!.value).toBeNull()
+    } finally {
+      await Promise.all([
+        live.cleanup(),
+        parents.collection.cleanup(),
+        children.collection.cleanup(),
+      ])
+    }
+  })
 
   fcTest.prop(
     [

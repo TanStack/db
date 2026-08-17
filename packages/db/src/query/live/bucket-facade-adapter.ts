@@ -58,6 +58,7 @@ export class BucketFacadeAdapter {
   private readonly pendingActivity = new Map<string, Map<string, number>>()
   private readonly activeBuckets = new Map<string, Set<string>>()
   private readonly entries = new Map<string, Map<string, FacadeEntry>>()
+  private readonly retiredEntries = new Map<string, Map<string, FacadeEntry>>()
   private resolvedValues = new WeakMap<object, unknown>()
 
   constructor(
@@ -123,6 +124,9 @@ export class BucketFacadeAdapter {
           const sync = entry.sync
           if (!sync || changes.size === 0) continue
 
+          for (const change of changes.values()) {
+            this.prepareChange(entry, change)
+          }
           deferPublication(entry)
           sync.begin()
           for (const change of changes.values()) {
@@ -130,8 +134,6 @@ export class BucketFacadeAdapter {
           }
           sync.commit()
         }
-        this.pending.delete(compilation.edgeId)
-
         for (const entry of newBaselines) entry.sync?.markReady()
 
         for (const [bucketKey, multiplicity] of activity ?? []) {
@@ -139,12 +141,15 @@ export class BucketFacadeAdapter {
           active.delete(bucketKey)
           this.retireEntry(compilation.edgeId, bucketKey, deferPublication)
         }
-        this.pendingActivity.delete(compilation.edgeId)
       }
     } catch (error) {
-      for (const publication of publications) publication.publish()
+      this.restore(snapshot, deferredEntries)
+      this.retiredEntries.clear()
+      for (const publication of publications) publication.discard()
       throw error
     }
+    this.pending.clear()
+    this.pendingActivity.clear()
 
     let closed = false
     return {
@@ -152,11 +157,13 @@ export class BucketFacadeAdapter {
         if (closed) return
         closed = true
         for (const publication of publications) publication.publish()
+        this.cleanupRetiredEntries()
       },
       rollback: () => {
         if (closed) return
         closed = true
         this.restore(snapshot, deferredEntries)
+        this.retiredEntries.clear()
         for (const publication of publications) publication.discard()
       },
     }
@@ -173,6 +180,7 @@ export class BucketFacadeAdapter {
       }
     }
     this.entries.clear()
+    this.cleanupRetiredEntries()
     this.pending.clear()
     this.pendingActivity.clear()
     this.activeBuckets.clear()
@@ -333,6 +341,12 @@ export class BucketFacadeAdapter {
     }
     byBucket!.delete(bucketKey)
     if (byBucket!.size === 0) this.entries.delete(edgeId)
+    let retired = this.retiredEntries.get(edgeId)
+    if (!retired) {
+      retired = new Map()
+      this.retiredEntries.set(edgeId, retired)
+    }
+    retired.set(bucketKey, entry)
   }
 
   private getEntry(edgeId: string, bucketKey: string): FacadeEntry {
@@ -349,7 +363,13 @@ export class BucketFacadeAdapter {
     let sync: FacadeSync | undefined
     const collection = createCollection<any, string | number>({
       id: `__bucket-facade:${this.parentId}:${edgeId}:${bucketKey}`,
-      getKey: (row) => keys.get(row)!,
+      getKey: (row) => {
+        const key = keys.get(row) ?? row?.$key
+        if (typeof key !== `string` && typeof key !== `number`) {
+          throw new Error(`Bucket facade row has no public key`)
+        }
+        return key
+      },
       compare: (left, right) => {
         const leftOrder = order.get(left)
         const rightOrder = order.get(right)
@@ -420,6 +440,14 @@ export class BucketFacadeAdapter {
     if (hasOrderBy && orderChanged) sync.collection._markLayoutChange()
   }
 
+  /** Resolve and validate every public key before opening a sync transaction. */
+  private prepareChange(entry: FacadeEntry, change: PendingRow): void {
+    const key = change.value.publicKey as string | number
+    const row = this.resolve(change.value.value)
+    entry.keys.set(row, key)
+    entry.collection.getKeyFromItem(row)
+  }
+
   private resolveValue(value: unknown): unknown {
     if (value !== null && typeof value === `object`) {
       const cached = this.resolvedValues.get(value)
@@ -427,7 +455,10 @@ export class BucketFacadeAdapter {
     }
     if (isBucketFacadeRef(value)) {
       const { edgeId, bucketKey } = value[BUCKET_FACADE_REF]
-      const facade = this.getEntry(edgeId, bucketKey).collection
+      const facade =
+        this.entries.get(edgeId)?.get(bucketKey)?.collection ??
+        this.retiredEntries.get(edgeId)?.get(bucketKey)?.collection ??
+        this.getEntry(edgeId, bucketKey).collection
       this.resolvedValues.set(value, facade)
       return facade
     }
@@ -446,6 +477,15 @@ export class BucketFacadeAdapter {
       result[key] = this.resolveValue(value[key])
     }
     return result
+  }
+
+  private cleanupRetiredEntries(): void {
+    for (const byBucket of this.retiredEntries.values()) {
+      for (const entry of byBucket.values()) {
+        void entry.collection.cleanup()
+      }
+    }
+    this.retiredEntries.clear()
   }
 }
 

@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from 'vitest'
 import { createCollection } from '../src/collection/index.js'
+import { BTreeIndex } from '../src/indexes/btree-index.js'
 import { Query, createEffect, createTransaction, eq } from '../src/index.js'
 import {
   mockSyncCollectionOptions,
@@ -1443,6 +1444,8 @@ describe(`createEffect`, () => {
         id: `effect-rejected-lazy-issues`,
         getKey: (issue) => issue.id,
         syncMode: `on-demand`,
+        autoIndex: `eager`,
+        defaultIndexType: BTreeIndex,
         sync: {
           sync: () => ({
             loadSubset: () => Promise.reject(new Error(`lazy load failed`)),

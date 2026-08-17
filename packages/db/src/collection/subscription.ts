@@ -31,6 +31,8 @@ type RequestSnapshotOptions = {
   limit?: number
   /** Callback that receives the raw loadSubset result for external tracking */
   onLoadSubsetResult?: (result: Promise<void> | true) => void
+  /** Called when the local snapshot must fall back from an index to a scan. */
+  onUnoptimized?: () => void
 }
 
 type RequestLimitedSnapshotOptions = {
@@ -400,7 +402,22 @@ export class CollectionSubscription
     }
 
     // Also load data immediately from the collection
-    const snapshot = this.collection.currentStateAsChanges(stateOpts)
+    let snapshot: Array<ChangeMessage<any, any>> | void
+    if (opts?.onUnoptimized) {
+      snapshot = this.collection.currentStateAsChanges({
+        ...stateOpts,
+        optimizedOnly: true,
+      })
+      if (snapshot === undefined) {
+        opts.onUnoptimized()
+        snapshot = this.collection.currentStateAsChanges({
+          ...stateOpts,
+          optimizedOnly: false,
+        })
+      }
+    } else {
+      snapshot = this.collection.currentStateAsChanges(stateOpts)
+    }
 
     if (snapshot === undefined) {
       // Couldn't load from indexes

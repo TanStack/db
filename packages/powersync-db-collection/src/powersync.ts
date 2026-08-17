@@ -529,7 +529,8 @@ export function powerSyncCollectionOptions<
       // On-demand mode.
       // Registers a diff trigger for the active WHERE expressions.
       function runOnDemandSync() {
-        let onUnloadSubset: CleanupFn | void | null = null
+        const unloadSubsetCallbacks = new Map<LoadSubsetOptions, CleanupFn>()
+        const releasedSubsets = new WeakSet<LoadSubsetOptions>()
 
         start().catch((error) =>
           database.logger.error(
@@ -547,7 +548,14 @@ export function powerSyncCollectionOptions<
         ): Promise<void> => {
           if (options) {
             activeWhereExpressions.push(options.where)
-            onUnloadSubset = await restConfig.onLoadSubset?.(options)
+            const cleanup = await restConfig.onLoadSubset?.(options)
+            if (cleanup) {
+              if (releasedSubsets.has(options) || options.signal?.aborted) {
+                cleanup()
+              } else {
+                unloadSubsetCallbacks.set(options, cleanup)
+              }
+            }
           }
 
           // No predicates remain, so stop tracking entirely. Both calls are no-ops
@@ -627,7 +635,9 @@ export function powerSyncCollectionOptions<
         }
 
         const unloadSubset = async (options: LoadSubsetOptions) => {
-          onUnloadSubset?.()
+          releasedSubsets.add(options)
+          unloadSubsetCallbacks.get(options)?.()
+          unloadSubsetCallbacks.delete(options)
 
           const idx = activeWhereExpressions.indexOf(options.where)
           if (idx !== -1) {
@@ -680,6 +690,8 @@ export function powerSyncCollectionOptions<
               `Sync has been stopped for ${viewName} into ${trackedTableName}`,
             )
             abortController.abort()
+            for (const cleanup of unloadSubsetCallbacks.values()) cleanup()
+            unloadSubsetCallbacks.clear()
           },
           loadSubset: (options: LoadSubsetOptions) => loadSubset(options),
           unloadSubset: (options: LoadSubsetOptions) => unloadSubset(options),

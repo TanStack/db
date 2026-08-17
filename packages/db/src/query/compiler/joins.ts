@@ -42,6 +42,7 @@ import type { CollectionSubscription } from '../../collection/subscription.js'
 export type LazyDemandPlan = {
   id: string
   path: Array<string>
+  collectionId: string
   initialKeys: Set<unknown>
 }
 
@@ -55,12 +56,13 @@ let nextLazyDemandPlanId = 0
 
 export function registerLazyDemandPlan(
   callbacks: Record<string, LazyCollectionCallbacks>,
-  target: { sourceId: string; path: Array<string> },
+  target: { sourceId: string; path: Array<string>; collection: Collection },
   initialKeys: Set<unknown> = new Set(),
 ): LazyDemandPlan {
   const plan: LazyDemandPlan = {
     id: `lazy-demand-${++nextLazyDemandPlanId}`,
     path: target.path,
+    collectionId: target.collection.id,
     initialKeys: new Set(initialKeys),
   }
   const state = (callbacks[target.sourceId] ??= {})

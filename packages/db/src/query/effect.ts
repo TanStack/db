@@ -662,7 +662,14 @@ class EffectPipelineRunner<TRow extends object, TKey extends string | number> {
     plan: LazyDemandPlan,
     keys: Set<unknown>,
   ): void {
-    this.demand.setDemand(subscription, plan, keys)
+    const update = this.demand.setDemand(subscription, plan, keys)
+    if (update.ready instanceof Promise) {
+      void update.ready.catch((error: unknown) => {
+        this.onSourceError(
+          error instanceof Error ? error : new Error(String(error)),
+        )
+      })
+    }
   }
 
   /**

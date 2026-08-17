@@ -31,6 +31,7 @@ export type DemandUpdate = {
  */
 export class SubsetDemandController {
   private readonly states = new Map<string, DemandState>()
+  private readonly warnedPlans = new Set<string>()
 
   setDemand(
     subscription: CollectionSubscription,
@@ -70,7 +71,11 @@ export class SubsetDemandController {
       [...nextKeys].filter(([key]) => !coveredKeys.has(key)),
     )
     if (added.size > 0) {
-      segments.push(requestSegment(subscription, plan, added))
+      segments.push(
+        requestSegment(subscription, plan, added, () =>
+          this.warnUnoptimized(plan),
+        ),
+      )
     }
 
     if (nextKeys.size === 0) {
@@ -98,6 +103,19 @@ export class SubsetDemandController {
       for (const segment of state.segments) segment.abortController.abort()
     }
     this.states.clear()
+    this.warnedPlans.clear()
+  }
+
+  private warnUnoptimized(plan: LazyDemandPlan): void {
+    if (this.warnedPlans.has(plan.id)) return
+    this.warnedPlans.add(plan.id)
+    const path = plan.path.join(`.`)
+    console.warn(
+      `[TanStack DB]${plan.collectionId ? ` [${plan.collectionId}]` : ``} Join requires an index on "${path}" for efficient loading. ` +
+        `Falling back to scanning local data. ` +
+        `Consider creating an index on the collection with collection.createIndex((row) => row.${path}) ` +
+        `or enable auto-indexing with autoIndex: 'eager' and a defaultIndexType.`,
+    )
   }
 }
 
@@ -125,6 +143,7 @@ function requestSegment(
   subscription: CollectionSubscription,
   plan: LazyDemandPlan,
   keys: Map<string, unknown>,
+  onUnoptimized: () => void,
 ): DemandSegment {
   const where = inArray(new PropRef(plan.path), [...keys.values()])
   const abortController = new AbortController()
@@ -133,6 +152,7 @@ function requestSegment(
     where,
     signal: abortController.signal,
     trackLoadSubsetPromise: false,
+    onUnoptimized,
     onLoadSubsetResult: (result) => {
       load.ready = result
     },

@@ -76,6 +76,26 @@ and results move in opposite conceptual directions.
 The graph owns the data plane. A small adapter owns asynchronous demand. The
 normal Collection transaction boundary owns public publication.
 
+## Concrete implementation map
+
+The relation and identity names in this document describe the graph's logical
+model. They are not a second set of runtime objects, nor does every name need a
+matching TypeScript type. The implementation maps this model onto existing D2
+operators and a few boundary adapters:
+
+| Architectural role                    | Concrete implementation                                                                                |
+| ------------------------------------- | ------------------------------------------------------------------------------------------------------ |
+| Compile relation IDs and demand plans | `packages/db/src/query/compiler/index.ts`, `packages/db/src/query/compiler/joins.ts`                   |
+| Reduce public keys and build routes   | `packages/db/src/query/live/materialized-pipeline.ts`                                                  |
+| Run the graph and publish root rows   | `packages/db/src/query/live/collection-config-builder.ts`                                              |
+| Publish Collection-valued buckets     | `packages/db/src/query/live/bucket-facade-adapter.ts`                                                  |
+| Start and release asynchronous demand | `packages/db/src/query/live/subset-demand-controller.ts`, `packages/db/src/collection/subscription.ts` |
+
+Queries without includes keep the original compiled pipeline and do not pay
+for facade state. The one exception is a joined query with a custom public-key
+function: its possible duplicate contributors still pass through the keyed
+reduction that enforces public-key congruence and multiplicity.
+
 ## Identity
 
 Aliases are lexical query-language names. They are not runtime identities. The
@@ -432,7 +452,9 @@ Correct relation state does not prove efficient work. When an applicable index
 exists, irrelevant correlated rows must not cause scans of unrelated rows or
 activate unrelated downstream routes. Relation rows, indexed keys, active
 demands, materialization cells, and public facades are the relevant space
-units. Inline materialization must not create recursive Collection machinery.
+units. Queries without includes retain their original pipeline unless a joined
+custom-key query needs contributor reduction. Inline materialization must not
+create recursive Collection machinery.
 
 ## Normative laws
 
@@ -496,6 +518,7 @@ units. Inline materialization must not create recursive Collection machinery.
 | Demand, cancellation, and progressive timing                                | `packages/db/tests/query/includes-temporal-oracle.test.ts`                |
 | Optimistic confirmation, rollback, and later reactivity                     | `packages/db/tests/query/includes-optimistic-oracle.property.test.ts`     |
 | Coherent layered publication                                                | `packages/db/tests/query/includes-publication-oracle.test.ts`             |
+| Collection facades, event coherence, and route activation                   | `packages/db/tests/query/includes-collection-oracle.property.test.ts`     |
 | Correlated physical work                                                    | `packages/db/tests/query/includes-work-counter-oracle.test.ts`            |
 | Query-db ownership                                                          | `packages/query-db-collection/tests/ownership-lifecycle.oracle.test.ts`   |
 | Reachable nested shape                                                      | `packages/query-db-collection/tests/includes-work-counter-oracle.test.ts` |
@@ -518,6 +541,6 @@ not own.
 - Never use a public Collection, emitted event, or materialized row as internal
   routing or contribution state.
 - Add a reduced oracle trace before adding any special lifecycle branch.
-- Measure retained relation rows, active demands, and public facades so the
-  simpler architecture remains a space improvement as well as a correctness
-  improvement.
+- Measure retained relation rows, active demands, and public facades. Preserve
+  the no-includes fast path and verify any claimed space improvement with those
+  counters.

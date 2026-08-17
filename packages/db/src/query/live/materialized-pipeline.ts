@@ -88,7 +88,15 @@ let nextBucketFacadeEdgeId = 0
 export function materializeCompilation(
   compilation: CompilationResult,
   getRootKey?: (row: any) => unknown,
+  reduceJoinedPublicKeys = false,
 ): MaterializedCompilation {
+  if (
+    !compilation.includes?.length &&
+    !(getRootKey && reduceJoinedPublicKeys)
+  ) {
+    return { pipeline: compilation.pipeline, facades: [] }
+  }
+
   const built: BuiltRelations = new WeakMap()
   const materialized = materializeRelation(
     compilation,
@@ -259,7 +267,7 @@ function attachInlineInclude(
       if (rows.length === 0) return []
 
       rows.sort(compareBucketRows)
-      return [[materializeRows(rows, include), 1]]
+      return [[{ value: materializeRows(rows, include) }, 1]]
     }),
   )
   const routedParents = parentPipeline.pipe(
@@ -285,7 +293,9 @@ function attachInlineInclude(
         ]
       }
       const materialized =
-        bucketValue ?? emptyMaterializedValue(include.materialization)
+        bucketValue === null
+          ? emptyMaterializedValue(include.materialization)
+          : bucketValue.value
       return [
         parent!.parentKey,
         [
