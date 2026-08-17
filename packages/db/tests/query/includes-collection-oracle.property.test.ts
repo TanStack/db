@@ -2,9 +2,11 @@ import { fc, test as fcTest } from '@fast-check/vitest'
 import { describe, expect } from 'vitest'
 import { createCollection } from '../../src/collection/index.js'
 import {
+  concat,
   createLiveQueryCollection,
   eq,
   materialize,
+  toArray,
 } from '../../src/query/index.js'
 import { runTrace } from '../trace-runner.js'
 import {
@@ -611,6 +613,73 @@ describe(`Collection-valued includes oracle`, () => {
       ])
     }
   })
+
+  fcTest.prop(
+    [
+      fc.record({
+        smallId: fc.integer({ min: 2, max: 9 }),
+        wideId: fc.integer({ min: 10, max: 19 }),
+      }),
+    ],
+    { numRuns: 20 },
+  )(
+    `uses one raw public-key order across Collection and inline materializations`,
+    async ({ smallId, wideId }) => {
+      const parents = createControlledCollection(`ordering-oracle-parents`, [
+        { id: 1, group: 1 },
+      ])
+      const children = createControlledCollection(`ordering-oracle-children`, [
+        { id: smallId, parentGroup: 1, value: smallId },
+        { id: wideId, parentGroup: 1, value: wideId },
+      ])
+      const live = createLiveQueryCollection((q) => {
+        return q.from({ parent: parents.collection }).select(({ parent }) => {
+          const childRows = () =>
+            q
+              .from({ child: children.collection })
+              .where(({ child }) => eq(child.parentGroup, parent.group))
+              .select(({ child }) => ({ id: child.id, value: child.value }))
+
+          return {
+            id: parent.id,
+            facade: childRows(),
+            array: toArray(childRows()),
+            materialized: materialize(childRows()),
+            first: materialize(childRows().findOne()),
+            joined: concat(
+              toArray(
+                q
+                  .from({ child: children.collection })
+                  .where(({ child }) => eq(child.parentGroup, parent.group))
+                  .select(({ child }) => child.value),
+              ),
+            ),
+          }
+        })
+      })
+
+      try {
+        await live.preload()
+        const result = live.get(1)!
+        const expectedIds = [smallId, wideId]
+        const facadeIds = result.facade.toArray.map((child) => child.id)
+
+        expect(facadeIds).toEqual(expectedIds)
+        expect(result.array.map((child) => child.id)).toEqual(expectedIds)
+        expect(result.materialized.map((child) => child.id)).toEqual(
+          expectedIds,
+        )
+        expect(result.first?.id).toBe(smallId)
+        expect(result.joined).toBe(`${smallId}${wideId}`)
+      } finally {
+        await Promise.all([
+          live.cleanup(),
+          parents.collection.cleanup(),
+          children.collection.cleanup(),
+        ])
+      }
+    },
+  )
 
   fcTest.prop(
     [

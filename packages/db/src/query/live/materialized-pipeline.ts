@@ -1,4 +1,5 @@
 import {
+  compareKeys,
   distinct,
   filter,
   join,
@@ -419,6 +420,14 @@ function compareBucketRows(left: BucketRow, right: BucketRow): number {
     if (left.order === undefined) return 1
     if (right.order === undefined) return -1
     return left.order < right.order ? -1 : 1
+  }
+
+  if (
+    (typeof left.publicKey === `string` ||
+      typeof left.publicKey === `number`) &&
+    (typeof right.publicKey === `string` || typeof right.publicKey === `number`)
+  ) {
+    return compareKeys(left.publicKey, right.publicKey)
   }
 
   const leftKey = serializeValue(left.publicKey)

@@ -7335,6 +7335,7 @@ describe(`includes subqueries`, () => {
         mockSyncCollectionOptions<OrderingChild>({
           id: `includes-ordering-children`,
           getKey: (child) => child.id,
+          autoIndex: `eager`,
           initialData: [
             { id: 2, parentId: 1, label: `two` },
             { id: 3, parentId: 1, label: `three` },
@@ -7343,27 +7344,29 @@ describe(`includes subqueries`, () => {
         }),
       )
       const collection = createLiveQueryCollection((q) => {
-        const childRows = (parentId: number) =>
-          q
-            .from({ child: orderingChildren })
-            .where(({ child }) => eq(child.parentId, parentId))
-            .select(({ child }) => ({ id: child.id, label: child.label }))
+        return q.from({ parent: orderingParents }).select(({ parent }) => {
+          const childRows = () =>
+            q
+              .from({ child: orderingChildren })
+              .where(({ child }) => eq(child.parentId, parent.id))
+              .select(({ child }) => ({ id: child.id, label: child.label }))
 
-        return q.from({ parent: orderingParents }).select(({ parent }) => ({
-          id: parent.id,
-          facade: childRows(parent.id),
-          array: toArray(childRows(parent.id)),
-          joined: concat(
-            toArray(
-              q
-                .from({ child: orderingChildren })
-                .where(({ child }) => eq(child.parentId, parent.id))
-                .select(({ child }) => child.label),
+          return {
+            id: parent.id,
+            facade: childRows(),
+            array: toArray(childRows()),
+            joined: concat(
+              toArray(
+                q
+                  .from({ child: orderingChildren })
+                  .where(({ child }) => eq(child.parentId, parent.id))
+                  .select(({ child }) => child.label),
+              ),
             ),
-          ),
-          first: materialize(childRows(parent.id).findOne()),
-          materialized: materialize(childRows(parent.id)),
-        }))
+            first: materialize(childRows().findOne()),
+            materialized: materialize(childRows()),
+          }
+        })
       })
       await collection.preload()
 
