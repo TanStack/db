@@ -7316,6 +7316,67 @@ describe(`includes subqueries`, () => {
   })
 
   describe(`materialize`, () => {
+    it(`uses the same public-key tie-breaker for Collection and inline includes`, async () => {
+      type OrderingParent = { id: number }
+      type OrderingChild = {
+        id: number
+        parentId: number
+        label: string
+      }
+
+      const orderingParents = createCollection(
+        mockSyncCollectionOptions<OrderingParent>({
+          id: `includes-ordering-parents`,
+          getKey: (parent) => parent.id,
+          initialData: [{ id: 1 }],
+        }),
+      )
+      const orderingChildren = createCollection(
+        mockSyncCollectionOptions<OrderingChild>({
+          id: `includes-ordering-children`,
+          getKey: (child) => child.id,
+          initialData: [
+            { id: 2, parentId: 1, label: `two` },
+            { id: 3, parentId: 1, label: `three` },
+            { id: 10, parentId: 1, label: `ten` },
+          ],
+        }),
+      )
+      const collection = createLiveQueryCollection((q) => {
+        const childRows = (parentId: number) =>
+          q
+            .from({ child: orderingChildren })
+            .where(({ child }) => eq(child.parentId, parentId))
+            .select(({ child }) => ({ id: child.id, label: child.label }))
+
+        return q.from({ parent: orderingParents }).select(({ parent }) => ({
+          id: parent.id,
+          facade: childRows(parent.id),
+          array: toArray(childRows(parent.id)),
+          joined: concat(
+            toArray(
+              q
+                .from({ child: orderingChildren })
+                .where(({ child }) => eq(child.parentId, parent.id))
+                .select(({ child }) => child.label),
+            ),
+          ),
+          first: materialize(childRows(parent.id).findOne()),
+          materialized: materialize(childRows(parent.id)),
+        }))
+      })
+      await collection.preload()
+
+      const result = collection.get(1)!
+      const facadeIds = result.facade.toArray.map((child) => child.id)
+
+      expect(facadeIds).toEqual([2, 3, 10])
+      expect(result.array.map((child) => child.id)).toEqual(facadeIds)
+      expect(result.materialized.map((child) => child.id)).toEqual(facadeIds)
+      expect(result.first?.id).toBe(facadeIds[0])
+      expect(result.joined).toBe(`twothreeten`)
+    })
+
     // For singleton behavior we look up each issue's parent project.
     // Each issue references exactly one project via projectId.
     function buildSingletonQuery() {
