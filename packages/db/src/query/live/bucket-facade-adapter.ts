@@ -157,7 +157,9 @@ export class BucketFacadeAdapter {
         if (closed) return
         closed = true
         for (const publication of publications) publication.publish()
-        this.cleanupRetiredEntries()
+        // Drop only the adapter's strong reference. External holders keep an
+        // empty, ready facade; a later active interval receives a new one.
+        this.retiredEntries.clear()
       },
       rollback: () => {
         if (closed) return

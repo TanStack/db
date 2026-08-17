@@ -341,9 +341,7 @@ describe(`Collection-valued includes oracle`, () => {
       recompute: (context) => ({
         rows: recompute(context),
         retiredStatus:
-          context.model.parents.size === 0
-            ? `ready`
-            : retiredFacade?.status,
+          context.model.parents.size === 0 ? `ready` : retiredFacade?.status,
       }),
       assertEqual(observed, expected) {
         expect(observed).toEqual(expected)
