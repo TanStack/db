@@ -11,6 +11,7 @@ import { LocalStorageAdapter } from './storage/LocalStorageAdapter'
 import { OutboxManager } from './outbox/OutboxManager'
 import { KeyScheduler } from './executor/KeyScheduler'
 import { TransactionExecutor } from './executor/TransactionExecutor'
+import { ConfirmationManager } from './executor/ConfirmationManager'
 
 // Coordination
 import { WebLocksLeader } from './coordination/WebLocksLeader'
@@ -48,6 +49,7 @@ export class OfflineExecutor {
   private outbox: OutboxManager | null
   private scheduler: KeyScheduler
   private executor: TransactionExecutor | null
+  private confirmationManager: ConfirmationManager
   private leaderElection: LeaderElection | null
   private onlineDetector: OnlineDetector
   private isLeaderState = false
@@ -74,11 +76,15 @@ export class OfflineExecutor {
   > = new Map()
 
   // Track restoration transactions for cleanup when offline transactions complete
-  private restorationTransactions: Map<string, Transaction> = new Map()
+  private restorationTransactions: Map<
+    string,
+    { transaction: Transaction; release: () => void }
+  > = new Map()
 
   constructor(config: OfflineConfig) {
     this.config = config
     this.scheduler = new KeyScheduler()
+    this.confirmationManager = new ConfirmationManager(config)
     this.onlineDetector = config.onlineDetector ?? new WebOnlineDetector()
 
     // Initialize as pending - will be set by async initialization
@@ -290,6 +296,7 @@ export class OfflineExecutor {
           this.outbox,
           this.config,
           this,
+          this.confirmationManager,
         )
         this.leaderElection = this.createLeaderElection()
 
@@ -366,13 +373,25 @@ export class OfflineExecutor {
     if (!this.isOfflineEnabled) {
       // Non-leader: use createTransaction directly with the resolved mutation function
       // We need to wrap it to add the idempotency key
+      const idempotencyKey = options.idempotencyKey ?? safeRandomUUID()
       return createTransaction({
+        id: options.id,
         autoCommit: options.autoCommit ?? true,
-        mutationFn: (params) =>
-          mutationFn({
+        mutationFn: async (params) => {
+          const result = await mutationFn({
             ...params,
-            idempotencyKey: options.idempotencyKey || safeRandomUUID(),
-          }),
+            idempotencyKey,
+          })
+          this.confirmationManager.schedule({
+            transactionId: params.transaction.id,
+            mutationFnName: options.mutationFnName,
+            idempotencyKey,
+            mutations: params.transaction.mutations,
+            result,
+            metadata: params.transaction.metadata,
+          })
+          return result
+        },
         metadata: options.metadata,
       })
     }
@@ -398,13 +417,24 @@ export class OfflineExecutor {
       // Check leadership when action is called, not when it's created
       if (!this.isOfflineEnabled) {
         // Non-leader: use createOptimisticAction directly
+        const idempotencyKey = safeRandomUUID()
         const action = createOptimisticAction({
-          mutationFn: (vars, params) =>
-            mutationFn({
+          mutationFn: async (vars, params) => {
+            const result = await mutationFn({
               ...vars,
               ...params,
-              idempotencyKey: safeRandomUUID(),
-            }),
+              idempotencyKey,
+            })
+            this.confirmationManager.schedule({
+              transactionId: params.transaction.id,
+              mutationFnName: options.mutationFnName,
+              idempotencyKey,
+              mutations: params.transaction.mutations,
+              result,
+              metadata: params.transaction.metadata,
+            })
+            return result
+          },
           onMutate: options.onMutate,
         })
         return action(variables)
@@ -498,56 +528,48 @@ export class OfflineExecutor {
       this.pendingTransactionPromises.delete(transactionId)
     }
 
-    // Clean up the restoration transaction and rollback optimistic state
-    this.cleanupRestorationTransaction(transactionId, true)
+    // Drop the synthetic restoration hold. The real transaction handles its
+    // own failure state; the hold must not cascade a rollback.
+    this.cleanupRestorationTransaction(transactionId)
   }
 
   // Method for TransactionExecutor to register restoration transactions
   registerRestorationTransaction(
     offlineTransactionId: string,
     restorationTransaction: Transaction,
+    releaseRestorationTransaction: () => void,
   ): void {
-    this.restorationTransactions.set(
-      offlineTransactionId,
-      restorationTransaction,
-    )
+    // Replaying the same outbox id twice must not orphan the previous hold.
+    this.cleanupRestorationTransaction(offlineTransactionId)
+    this.restorationTransactions.set(offlineTransactionId, {
+      transaction: restorationTransaction,
+      release: releaseRestorationTransaction,
+    })
   }
 
-  private cleanupRestorationTransaction(
-    transactionId: string,
-    shouldRollback = false,
-  ): void {
-    const restorationTx = this.restorationTransactions.get(transactionId)
-    if (!restorationTx) {
+  private cleanupRestorationTransaction(transactionId: string): void {
+    const restoration = this.restorationTransactions.get(transactionId)
+    if (!restoration) {
       return
     }
 
     this.restorationTransactions.delete(transactionId)
-
-    if (shouldRollback) {
-      restorationTx.rollback()
-      return
+    try {
+      // A restoration transaction is only an optimistic display hold. Releasing
+      // it is correct for both success and permanent failure and cannot cascade
+      // rollback into unrelated user transactions.
+      restoration.release()
+    } catch (error) {
+      console.warn(
+        `Failed to release restoration transaction ${restoration.transaction.id}:`,
+        error,
+      )
     }
+  }
 
-    // Mark as completed so recomputeOptimisticState removes it from consideration.
-    // The actual data will come from the sync.
-    restorationTx.setState(`completed`)
-
-    // Remove from each collection's transaction map and recompute
-    const touchedCollections = new Set<string>()
-    for (const mutation of restorationTx.mutations) {
-      // Defensive check for corrupted deserialized data
-      // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition
-      if (!mutation.collection) {
-        continue
-      }
-      const collectionId = mutation.collection.id
-      if (touchedCollections.has(collectionId)) {
-        continue
-      }
-      touchedCollections.add(collectionId)
-      mutation.collection._state.transactions.delete(restorationTx.id)
-      mutation.collection._state.recomputeOptimisticState(false)
+  private releaseRestorationTransactions(): void {
+    for (const transactionId of [...this.restorationTransactions.keys()]) {
+      this.cleanupRestorationTransaction(transactionId)
     }
   }
 
@@ -566,6 +588,8 @@ export class OfflineExecutor {
   }
 
   async clearOutbox(): Promise<void> {
+    this.confirmationManager.releaseAll()
+    this.releaseRestorationTransactions()
     if (!this.outbox || !this.executor) {
       return
     }
@@ -587,6 +611,14 @@ export class OfflineExecutor {
     return this.executor.getRunningCount()
   }
 
+  /**
+   * Number of optimistic holds currently kept alive by `confirmWrite` (see
+   * `OfflineConfig.confirmWrite`). Returns 0 when the hook is unused.
+   */
+  getActiveConfirmationHoldCount(): number {
+    return this.confirmationManager.getActiveHoldCount()
+  }
+
   getOnlineDetector(): OnlineDetector {
     return this.onlineDetector
   }
@@ -596,6 +628,11 @@ export class OfflineExecutor {
   }
 
   dispose(): void {
+    // Drop any optimistic holds still waiting on confirmation so they don't
+    // outlive the executor.
+    this.confirmationManager.dispose()
+    this.releaseRestorationTransactions()
+
     for (const collection of Object.values(this.config.collections)) {
       collection.deferDataRefresh = null
     }

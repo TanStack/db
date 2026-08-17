@@ -87,7 +87,10 @@ describe(`offline executor end-to-end`, () => {
 
     await offlineTx.commit()
 
-    await expect(waitPromise).resolves.toBeUndefined()
+    // waitForTransactionCompletion now resolves with the mutationFn's return
+    // value (previously this value was awaited and discarded, so it always
+    // resolved `undefined`). The default test mutationFn returns { ok, mutations }.
+    await expect(waitPromise).resolves.toMatchObject({ ok: true })
 
     const outboxEntries = await env.executor.peekOutbox()
     expect(outboxEntries).toEqual([])
