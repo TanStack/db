@@ -1305,7 +1305,7 @@ describe(`includes subqueries`, () => {
     })
 
     it(`replays existing bucket rows when a parent enters a limited result`, async () => {
-      type Parent = { id: number; groupId: number }
+      type Parent = { id: number; rank: number; groupId: number }
       type Child = { id: number; groupId: number }
 
       const parents = createCollection(
@@ -1313,11 +1313,9 @@ describe(`includes subqueries`, () => {
           id: `limited-late-route-parents`,
           getKey: (parent) => parent.id,
           initialData: [
-            { id: 1, groupId: 1 },
-            { id: 2, groupId: 2 },
+            { id: 1, rank: 1, groupId: 1 },
+            { id: 2, rank: 2, groupId: 2 },
           ],
-          autoIndex: `eager`,
-          defaultIndexType: BTreeIndex,
         }),
       )
       const children = createCollection(
@@ -1333,7 +1331,7 @@ describe(`includes subqueries`, () => {
       const collection = createLiveQueryCollection((q) =>
         q
           .from({ parent: parents })
-          .orderBy(({ parent }) => parent.id)
+          .orderBy(({ parent }) => parent.rank)
           .limit(1)
           .select(({ parent }) => ({
             id: parent.id,
@@ -1350,7 +1348,7 @@ describe(`includes subqueries`, () => {
       parents.utils.begin()
       parents.utils.write({
         type: `delete`,
-        value: { id: 1, groupId: 1 },
+        value: { id: 1, rank: 1, groupId: 1 },
       })
       parents.utils.commit()
 
