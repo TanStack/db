@@ -17,6 +17,19 @@ import type { CollectionChangesManager } from './changes'
 import type { CollectionSyncManager } from './sync'
 import type { CollectionStateManager } from './state'
 
+/**
+ * Floor applied to the GC delay of a collection that started syncing without
+ * ever having gained a subscriber.
+ *
+ * Framework adapters build their live query collection while rendering and
+ * subscribe to it only once that render commits, so the timer has to outlive
+ * the render-to-commit gap. `gcTime` on its own does not: adapters pass a
+ * near-zero `gcTime` so that teardown on unmount is immediate, and reusing it
+ * here would race the commit. The floor never applies to the timer armed when
+ * the last subscriber leaves, which still honours `gcTime` exactly.
+ */
+const UNSUBSCRIBED_GC_FLOOR_MS = 50
+
 export class CollectionLifecycleManager<
   TOutput extends object = Record<string, unknown>,
   TKey extends string | number = string | number,
@@ -159,10 +172,30 @@ export class CollectionLifecycleManager<
   }
 
   /**
+   * Arm the garbage collection timer for a collection that started syncing
+   * without a subscriber to justify it.
+   *
+   * Sync can start outside a subscription: `startSync: true`, `preload()` and
+   * `startSyncImmediate()` all reach it with a subscriber count of zero. Only
+   * `startGCTimer` reclaims a collection, and it runs on the edge where the
+   * last subscriber leaves — an edge a collection that went from zero
+   * subscribers straight back to zero never crosses. Without this call such a
+   * collection syncs forever, holding a subscription on every collection it
+   * reads from, however short its `gcTime` is.
+   */
+  public startGCTimerIfUnsubscribed(): void {
+    if (this.changes.activeSubscribersCount > 0) {
+      return
+    }
+
+    this.startGCTimer(UNSUBSCRIBED_GC_FLOOR_MS)
+  }
+
+  /**
    * Start the garbage collection timer
    * Called when the collection becomes inactive (no subscribers)
    */
-  public startGCTimer(): void {
+  public startGCTimer(minDelay = 0): void {
     const gcTime = this.config.gcTime ?? 300000 // 5 minutes default
 
     // If gcTime is 0, negative, or non-finite (Infinity, -Infinity, NaN), GC is disabled.
@@ -172,12 +205,16 @@ export class CollectionLifecycleManager<
       return
     }
 
-    CleanupQueue.getInstance().schedule(this, gcTime, () => {
-      if (this.changes.activeSubscribersCount === 0) {
-        // Schedule cleanup during idle time to avoid blocking the UI thread
-        this.scheduleIdleCleanup()
-      }
-    })
+    CleanupQueue.getInstance().schedule(
+      this,
+      Math.max(gcTime, minDelay),
+      () => {
+        if (this.changes.activeSubscribersCount === 0) {
+          // Schedule cleanup during idle time to avoid blocking the UI thread
+          this.scheduleIdleCleanup()
+        }
+      },
+    )
   }
 
   /**
