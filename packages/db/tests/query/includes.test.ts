@@ -1304,6 +1304,60 @@ describe(`includes subqueries`, () => {
       expect(childItems(collection.get(1)!.children)).toEqual([{ id: 10 }])
     })
 
+    it(`replays existing bucket rows when a parent enters a limited result`, async () => {
+      type Parent = { id: number; groupId: number }
+      type Child = { id: number; groupId: number }
+
+      const parents = createCollection(
+        mockSyncCollectionOptions<Parent>({
+          id: `limited-late-route-parents`,
+          getKey: (parent) => parent.id,
+          initialData: [
+            { id: 1, groupId: 1 },
+            { id: 2, groupId: 2 },
+          ],
+          autoIndex: `eager`,
+          defaultIndexType: BTreeIndex,
+        }),
+      )
+      const children = createCollection(
+        mockSyncCollectionOptions<Child>({
+          id: `limited-late-route-children`,
+          getKey: (child) => child.id,
+          initialData: [
+            { id: 10, groupId: 1 },
+            { id: 20, groupId: 2 },
+          ],
+        }),
+      )
+      const collection = createLiveQueryCollection((q) =>
+        q
+          .from({ parent: parents })
+          .orderBy(({ parent }) => parent.id)
+          .limit(1)
+          .select(({ parent }) => ({
+            id: parent.id,
+            children: q
+              .from({ child: children })
+              .where(({ child }) => eq(child.groupId, parent.groupId))
+              .select(({ child }) => ({ id: child.id })),
+          })),
+      )
+
+      await collection.preload()
+      expect(childItems(collection.get(1)!.children)).toEqual([{ id: 10 }])
+
+      parents.utils.begin()
+      parents.utils.write({
+        type: `delete`,
+        value: { id: 1, groupId: 1 },
+      })
+      parents.utils.commit()
+
+      expect(collection.get(1)).toBeUndefined()
+      expect(childItems(collection.get(2)!.children)).toEqual([{ id: 20 }])
+    })
+
     it(`does not publish facade changes when root publication fails`, async () => {
       type Parent = { id: number; groupId: number }
       type Child = { id: number; groupId: number }
