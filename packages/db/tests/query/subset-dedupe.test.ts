@@ -45,6 +45,36 @@ function not(expression: BasicExpression<boolean>): Func {
 }
 
 describe(`createDeduplicatedLoadSubset`, () => {
+  it(`keeps independently abortable in-flight requests isolated`, async () => {
+    const releases: Array<() => void> = []
+    let callCount = 0
+    const deduplicated = new DeduplicatedLoadSubset({
+      loadSubset: () => {
+        callCount += 1
+        return new Promise<void>((resolve) => releases.push(resolve))
+      },
+    })
+    const first = new AbortController()
+    const second = new AbortController()
+    const where = gt(ref(`age`), val(10))
+
+    const firstLoad = deduplicated.loadSubset({ where, signal: first.signal })
+    const secondLoad = deduplicated.loadSubset({ where, signal: second.signal })
+    expect(callCount).toBe(2)
+
+    first.abort()
+    for (const release of releases) release()
+    await Promise.all([firstLoad, secondLoad])
+
+    expect(
+      deduplicated.loadSubset({
+        where,
+        signal: new AbortController().signal,
+      }),
+    ).toBe(true)
+    expect(callCount).toBe(2)
+  })
+
   it(`should call underlying loadSubset on first call`, async () => {
     let callCount = 0
     const mockLoadSubset = () => {

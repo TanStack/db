@@ -81,6 +81,8 @@ describe(`Sync Streams`, () => {
 
     const onLoadSubsetMock = vi.fn()
     const onUnloadSubsetMock = vi.fn()
+    const unloadedRequests: Array<number> = []
+    let nextRequest = 0
 
     const collection = createCollection(
       powerSyncCollectionOptions({
@@ -89,9 +91,12 @@ describe(`Sync Streams`, () => {
         syncMode: `on-demand`,
         onLoadSubset: () => {
           onLoadSubsetMock()
+          nextRequest += 1
+          const request = nextRequest
 
           return () => {
             onUnloadSubsetMock()
+            unloadedRequests.push(request)
           }
         },
       }),
@@ -158,6 +163,7 @@ describe(`Sync Streams`, () => {
     await vi.waitFor(
       () => {
         expect(onUnloadSubsetMock).toHaveBeenCalledTimes(1)
+        expect(unloadedRequests).toEqual([1])
       },
       { timeout: 2000 },
     )
@@ -168,6 +174,7 @@ describe(`Sync Streams`, () => {
     await vi.waitFor(
       () => {
         expect(onUnloadSubsetMock).toHaveBeenCalledTimes(2)
+        expect(unloadedRequests).toEqual([1, 2])
       },
       { timeout: 2000 },
     )

@@ -706,6 +706,37 @@ async function expectRejectedDemandEntersError(): Promise<void> {
   }
 }
 
+async function expectSynchronousEmptyDemandIsReady(): Promise<void> {
+  const posts = createMutablePosts([
+    { id: 1, authorId: `selected`, title: `one` },
+  ])
+  let loadCount = 0
+  const comments = createCollection<Comment>({
+    id: nextCollectionId(`temporal-empty-comments`),
+    getKey: (comment) => comment.id,
+    syncMode: `on-demand`,
+    sync: {
+      sync: () => ({
+        loadSubset: () => {
+          loadCount += 1
+          return true
+        },
+      }),
+    },
+  })
+  const live = createPostsWithCommentsLive(posts.collection, comments)
+
+  try {
+    await live.preload()
+    expect(loadCount).toBe(1)
+    expect(live.isReady()).toBe(true)
+    expect(live.get(1)?.comments).toEqual([])
+  } finally {
+    await live.cleanup()
+    await Promise.all([posts.collection.cleanup(), comments.cleanup()])
+  }
+}
+
 async function expectPartialShrinkRetainsCoverage(): Promise<void> {
   const firstPost = { id: 1, authorId: `selected`, title: `one` }
   const secondPost = { id: 2, authorId: `selected`, title: `two` }
@@ -1039,6 +1070,11 @@ describe(`includes temporal oracle`, () => {
   )
 
   it(`rejected demand enters error`, expectRejectedDemandEntersError)
+
+  it(
+    `a synchronous empty demand can establish ready coverage`,
+    expectSynchronousEmptyDemandIsReady,
+  )
 
   it(
     `partially shrinking demand retains established coverage`,

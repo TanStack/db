@@ -1437,6 +1437,46 @@ describe(`createEffect`, () => {
   })
 
   describe(`source error handling`, () => {
+    it(`reports a rejected lazy subset load and disposes the effect`, async () => {
+      const users = createUsersCollection([sampleUsers[0]!])
+      const issues = createCollection<Issue>({
+        id: `effect-rejected-lazy-issues`,
+        getKey: (issue) => issue.id,
+        syncMode: `on-demand`,
+        sync: {
+          sync: () => ({
+            loadSubset: () => Promise.reject(new Error(`lazy load failed`)),
+          }),
+        },
+      })
+      const sourceErrors: Array<Error> = []
+      const effect = createEffect({
+        query: (q) =>
+          q
+            .from({ user: users })
+            .leftJoin({ issue: issues }, ({ user, issue }) =>
+              eq(user.id, issue.userId),
+            )
+            .select(({ user, issue }) => ({
+              id: user.id,
+              issueId: issue.id,
+            })),
+        onBatch: () => {},
+        onSourceError: (error) => sourceErrors.push(error),
+      })
+
+      try {
+        await flushPromises()
+        expect(sourceErrors).toEqual([
+          expect.objectContaining({ message: `lazy load failed` }),
+        ])
+        expect(effect.disposed).toBe(true)
+      } finally {
+        await effect.dispose()
+        await Promise.all([users.cleanup(), issues.cleanup()])
+      }
+    })
+
     it(`should auto-dispose when source collection is cleaned up`, async () => {
       const users = createUsersCollection()
       const events: Array<DeltaEvent<User, number>> = []
