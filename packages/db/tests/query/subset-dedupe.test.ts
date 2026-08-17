@@ -45,6 +45,46 @@ function not(expression: BasicExpression<boolean>): Func {
 }
 
 describe(`createDeduplicatedLoadSubset`, () => {
+  it(`shares in-flight work while any cancellation owner remains active`, async () => {
+    let resolveLoad: (() => void) | undefined
+    let sharedSignal: AbortSignal | undefined
+    const loadSubset = vi.fn(
+      (options: LoadSubsetOptions) =>
+        new Promise<void>((resolve) => {
+          sharedSignal = options.signal
+          resolveLoad = resolve
+        }),
+    )
+    const deduplicated = new DeduplicatedLoadSubset({ loadSubset })
+    const first = new AbortController()
+    const second = new AbortController()
+    const where = gt(ref(`age`), val(10))
+
+    const firstLoad = deduplicated.loadSubset({ where, signal: first.signal })
+    const secondLoad = deduplicated.loadSubset({
+      where,
+      signal: second.signal,
+    })
+
+    expect(loadSubset).toHaveBeenCalledTimes(1)
+    expect(secondLoad).toBe(firstLoad)
+    expect(sharedSignal).not.toBe(first.signal)
+    expect(sharedSignal).not.toBe(second.signal)
+
+    first.abort()
+    expect(sharedSignal?.aborted).toBe(false)
+
+    resolveLoad?.()
+    await Promise.all([firstLoad, secondLoad])
+
+    expect(
+      deduplicated.loadSubset({
+        where,
+        signal: new AbortController().signal,
+      }),
+    ).toBe(true)
+  })
+
   it(`keeps independently abortable in-flight requests isolated`, async () => {
     const releases: Array<() => void> = []
     let callCount = 0
