@@ -8,7 +8,7 @@ import {
   materialize,
 } from '../../src/query/index.js'
 import { runTrace } from '../trace-runner.js'
-import { oracleRuns } from '../oracle-config.js'
+import { oraclePropertyOptions } from '../oracle-config.js'
 import {
   flushPromises,
   mockSyncCollectionOptions,
@@ -450,7 +450,7 @@ describe(`layered-query publication oracle`, () => {
 
   for (const q1Shape of q1Shapes) {
     for (const q2Shape of q2Shapes) {
-      fcTest.prop([changedValueArbitrary], { numRuns: oracleRuns(12) })(
+      fcTest.prop([changedValueArbitrary], oraclePropertyOptions(12))(
         `publishes #1713 updates through a ${q1Shape} Q1 and ${q2Shape} Q2`,
         async (value) => {
           await expectPublicationMatches(
@@ -462,9 +462,10 @@ describe(`layered-query publication oracle`, () => {
         },
       )
 
-      fcTest.prop([changedValueArbitrary, changedChildValueArbitrary], {
-        numRuns: oracleRuns(12),
-      })(
+      fcTest.prop(
+        [changedValueArbitrary, changedChildValueArbitrary],
+        oraclePropertyOptions(12),
+      )(
         `recovers a ${q1Shape} Q1 and ${q2Shape} Q2 after a child update`,
         async (parentValue, childValue) => {
           await expectPublicationMatches(
@@ -476,7 +477,7 @@ describe(`layered-query publication oracle`, () => {
         },
       )
 
-      fcTest.prop([changedValueArbitrary], { numRuns: oracleRuns(8) })(
+      fcTest.prop([changedValueArbitrary], oraclePropertyOptions(8))(
         `publishes optimistic state before confirmation through a ${q1Shape} Q1 and ${q2Shape} Q2`,
         async (value) => {
           await expectPublicationMatches(
@@ -488,7 +489,7 @@ describe(`layered-query publication oracle`, () => {
         },
       )
 
-      fcTest.prop([changedValueArbitrary], { numRuns: oracleRuns(8) })(
+      fcTest.prop([changedValueArbitrary], oraclePropertyOptions(8))(
         `publishes state after optimistic confirmation through a ${q1Shape} Q1 and ${q2Shape} Q2`,
         async (value) => {
           await expectPublicationMatches(
@@ -502,14 +503,14 @@ describe(`layered-query publication oracle`, () => {
     }
   }
 
-  fcTest.prop([changedChildValueArbitrary], { numRuns: oracleRuns(100) })(
+  fcTest.prop([changedChildValueArbitrary], oraclePropertyOptions(100))(
     `publishes child-only scalar updates through both layers`,
     async (value) => {
       await expectPublicationMatches({ type: `childScalar`, value })
     },
   )
 
-  fcTest.prop([fc.constantFrom(20, 30)], { numRuns: oracleRuns(100) })(
+  fcTest.prop([fc.constantFrom(20, 30)], oraclePropertyOptions(100))(
     `compares route transitions at both query layers`,
     async (group) => {
       await expectPublicationMatches({ type: `parentRoute`, group })
@@ -523,12 +524,12 @@ describe(`layered-query publication oracle`, () => {
         value: changedValueArbitrary,
       }),
     ],
-    { numRuns: oracleRuns(100) },
+    oraclePropertyOptions(100),
   )(`compares atomic parent replacements at both query layers`, async (row) => {
     await expectPublicationMatches({ type: `atomicReplace`, ...row })
   })
 
-  fcTest.prop([changedValueArbitrary], { numRuns: oracleRuns(100) })(
+  fcTest.prop([changedValueArbitrary], oraclePropertyOptions(100))(
     `publishes restored state after optimistic rollback`,
     async (value) => {
       await expectPublicationMatches({

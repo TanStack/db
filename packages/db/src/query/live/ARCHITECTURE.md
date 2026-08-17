@@ -540,8 +540,17 @@ Run the DB oracle set with `pnpm test:oracles` from `packages/db`. Broad
 properties use FastCheck's random seed, while structural matrices keep fixed
 seeds so each run covers the same named cells. Increase both corpora with
 `TANSTACK_DB_ORACLE_RUNS_MULTIPLIER=10 pnpm test:oracles`. Preserve FastCheck's
-reported seed and shrink path while reducing a failure, then add the smallest
-case as a deterministic regression trace.
+reported seed and shrink path while reducing a failure. Replay a broad
+campaign with `TANSTACK_DB_ORACLE_SEED=<seed> pnpm test:oracles`, then add the
+smallest case as a deterministic regression trace.
+
+The broad relationship history changes correlation keys rather than freezing
+them. Set `TANSTACK_DB_ORACLE_STATISTICS=1` to print its generated depth,
+relationship-change, optimistic, and delete distribution. Collection-valued,
+array, and materialized includes are checked together for every Collection
+scenario instead of relying on a random mode sample. A separate metamorphic
+oracle compares nested includes with a flat join, fresh per-parent queries, and
+three-valued predicate partitioning.
 
 ## Implementation discipline
 

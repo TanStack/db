@@ -14,7 +14,7 @@ import {
   mockSyncCollectionOptions,
   withExpectedRejection,
 } from '../utils.js'
-import { oracleRuns } from '../oracle-config.js'
+import { oraclePropertyOptions, oracleRuns } from '../oracle-config.js'
 import { runTrace } from '../trace-runner.js'
 import type {
   TraceCheckpoint,
@@ -240,6 +240,58 @@ const scenarioArbitrary: fc.Arbitrary<Scenario> = depthArbitrary.chain(
         history: ensureActionsTargetRows(history),
       })),
 )
+
+function classifyScenarioCoverage({ depth, history }: Scenario): Array<string> {
+  const routesByLevel = Array.from(
+    { length: depth + 1 },
+    () => new Map<number, { parentGroup: number; group: number }>(),
+  )
+  let relationshipChanges = 0
+
+  for (const action of history) {
+    const routes = routesByLevel[action.level]!
+    if (action.type === `delete`) {
+      routes.delete(action.id)
+      continue
+    }
+
+    const previous = routes.get(action.id)
+    if (
+      previous &&
+      (previous.group !== action.group ||
+        (action.level > 0 && previous.parentGroup !== action.parentGroup))
+    ) {
+      relationshipChanges += 1
+    }
+    routes.set(action.id, {
+      parentGroup: action.parentGroup,
+      group: action.group,
+    })
+  }
+
+  return [
+    `depth=${depth}`,
+    `relationship-changes=${
+      relationshipChanges === 0
+        ? `none`
+        : relationshipChanges === 1
+          ? `one`
+          : `many`
+    }`,
+    `optimistic=${history.some((action) =>
+      action.type.startsWith(`optimistic`),
+    )}`,
+    `delete=${history.some((action) => action.type === `delete`)}`,
+  ]
+}
+
+if (process.env.TANSTACK_DB_ORACLE_STATISTICS === `1`) {
+  fc.statistics(
+    scenarioArbitrary,
+    classifyScenarioCoverage,
+    oraclePropertyOptions(1_000),
+  )
+}
 
 const materializeScenarioArbitrary: fc.Arbitrary<MaterializeScenario> = fc
   .boolean()
@@ -694,11 +746,9 @@ async function applyAction(
       return
     }
 
-    // Keep correlation keys stable in green fuzz histories. The known
-    // correlation-key update failure has its own deterministic seed below.
     const next: RootRow = {
       id: action.id,
-      group: current?.group ?? action.group,
+      group: action.group,
       value: action.value,
       position:
         action.type === `put` ? action.position : (current?.position ?? 0),
@@ -754,12 +804,10 @@ async function applyAction(
     return
   }
 
-  // Keep correlation keys stable in green fuzz histories. The known
-  // correlation-key update failure has its own deterministic seed below.
   const next: ChildRow = {
     id: action.id,
-    parentGroup: current?.parentGroup ?? action.parentGroup,
-    group: current?.group ?? action.group,
+    parentGroup: action.parentGroup,
+    group: action.group,
     value: action.value,
     position:
       action.type === `put` ? action.position : (current?.position ?? 0),
@@ -4280,7 +4328,7 @@ describe(`includes recompute oracle`, () => {
     })
   })
 
-  fcTest.prop([scenarioArbitrary], { numRuns: oracleRuns(40) })(
+  fcTest.prop([scenarioArbitrary], oraclePropertyOptions(40))(
     `matches naive recomputation after every incremental change`,
     expectScenarioMatches,
   )
@@ -4291,7 +4339,7 @@ describe(`includes recompute oracle`, () => {
         ({ sharedIntermediate }) => !sharedIntermediate,
       ),
     ],
-    { numRuns: oracleRuns(30) },
+    oraclePropertyOptions(30),
   )(
     `matches recomputation for nested scalar materialization`,
     expectMaterializeScenarioMatches,
@@ -4319,7 +4367,7 @@ describe(`includes recompute oracle`, () => {
         { selector: (row) => row.id, maxLength: 7 },
       ),
     ],
-    { numRuns: oracleRuns(25) },
+    oraclePropertyOptions(25),
   )(
     `is unchanged by alpha-renaming, sibling declaration order, or an unrelated sibling`,
     async (rootRows, childRows) => {
@@ -4431,7 +4479,7 @@ describe(`includes recompute oracle`, () => {
 
   fcTest.prop(
     [fc.integer({ min: -5, max: 5 }).filter((value) => value !== 0)],
-    { numRuns: oracleRuns(15) },
+    oraclePropertyOptions(15),
   )(
     `optimistic updates converge to confirmed-only state`,
     async (confirmedValue) => {

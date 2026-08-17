@@ -9,7 +9,7 @@ import {
   toArray,
 } from '../../src/query/index.js'
 import { runTrace } from '../trace-runner.js'
-import { oracleRuns } from '../oracle-config.js'
+import { oraclePropertyOptions } from '../oracle-config.js'
 import {
   flushPromises,
   mockSyncCollectionOptions,
@@ -353,7 +353,7 @@ const exhaustiveActions: ReadonlyArray<CollectionAction> = [
 ]
 
 describe(`Collection-valued includes oracle`, () => {
-  fcTest.prop([collectionScenarioArbitrary], { numRuns: oracleRuns(30) })(
+  fcTest.prop([collectionScenarioArbitrary], oraclePropertyOptions(30))(
     `keeps Collection, toArray, and materialize equivalent across generated relationship histories`,
     ({ parentGroup, childValue, actions }) =>
       runTrace({
@@ -740,7 +740,7 @@ describe(`Collection-valued includes oracle`, () => {
         wideId: fc.integer({ min: 10, max: 19 }),
       }),
     ],
-    { numRuns: oracleRuns(20) },
+    oraclePropertyOptions(20),
   )(
     `uses one raw public-key order across Collection and inline materializations`,
     async ({ smallId, wideId }) => {
@@ -809,7 +809,7 @@ describe(`Collection-valued includes oracle`, () => {
         value: fc.integer({ min: -10, max: 10 }),
       }),
     ],
-    { numRuns: oracleRuns(20) },
+    oraclePropertyOptions(20),
   )(
     `matches recomputation through optimistic child insert and delete confirmation and rollback`,
     async ({ group, insertedId, confirmedId, value }) => {

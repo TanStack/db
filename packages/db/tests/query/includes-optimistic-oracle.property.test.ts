@@ -12,7 +12,7 @@ import {
   withExpectedRejection,
 } from '../utils.js'
 import { runTrace } from '../trace-runner.js'
-import { oracleRuns } from '../oracle-config.js'
+import { oraclePropertyOptions } from '../oracle-config.js'
 import type { TraceDriver, TraceProjection } from '../trace-runner.js'
 
 type RootRow = {
@@ -531,7 +531,7 @@ describe(`optimistic relationship-transition oracle`, () => {
     },
   )
 
-  fcTest.prop([routeValuesArbitrary], { numRuns: oracleRuns(12) })(
+  fcTest.prop([routeValuesArbitrary], oraclePropertyOptions(12))(
     `an optimistic rekey detaches its old descendants immediately`,
     async (routes) => {
       await expectHistoryMatches(routes, [
@@ -546,7 +546,7 @@ describe(`optimistic relationship-transition oracle`, () => {
     },
   )
 
-  fcTest.prop([routeValuesArbitrary], { numRuns: oracleRuns(12) })(
+  fcTest.prop([routeValuesArbitrary], oraclePropertyOptions(12))(
     `restores the authoritative relationship after an optimistic rekey rolls back`,
     async (routes) => {
       await expectHistoryMatches(routes, [
@@ -560,7 +560,7 @@ describe(`optimistic relationship-transition oracle`, () => {
     },
   )
 
-  fcTest.prop([routeValuesArbitrary], { numRuns: oracleRuns(12) })(
+  fcTest.prop([routeValuesArbitrary], oraclePropertyOptions(12))(
     `rolls back a descendant update made while its ancestor is reparented`,
     async (routes) => {
       await expectHistoryMatches(routes, [
@@ -584,7 +584,7 @@ describe(`optimistic relationship-transition oracle`, () => {
     },
   )
 
-  fcTest.prop([routeValuesArbitrary], { numRuns: oracleRuns(12) })(
+  fcTest.prop([routeValuesArbitrary], oraclePropertyOptions(12))(
     `rolls back a reparented ancestor while its descendant update remains pending`,
     async (routes) => {
       await expectHistoryMatches(routes, [
@@ -608,7 +608,7 @@ describe(`optimistic relationship-transition oracle`, () => {
     },
   )
 
-  fcTest.prop([routeValuesArbitrary], { numRuns: oracleRuns(12) })(
+  fcTest.prop([routeValuesArbitrary], oraclePropertyOptions(12))(
     `settles a confirmed optimistic reparent on the same authoritative route`,
     async (routes) => {
       await expectHistoryMatches(routes, [
@@ -646,7 +646,7 @@ describe(`optimistic relationship-transition oracle`, () => {
     },
   )
 
-  fcTest.prop([routeValuesArbitrary], { numRuns: oracleRuns(12) })(
+  fcTest.prop([routeValuesArbitrary], oraclePropertyOptions(12))(
     `settles a confirmed optimistic reparent on a different authoritative route`,
     async (routes) => {
       await expectHistoryMatches(routes, [
@@ -686,7 +686,7 @@ describe(`optimistic relationship-transition oracle`, () => {
     },
   )
 
-  fcTest.prop([routeValuesArbitrary], { numRuns: oracleRuns(12) })(
+  fcTest.prop([routeValuesArbitrary], oraclePropertyOptions(12))(
     `restores a rekey after a sibling enters its old route`,
     async (routes) => {
       await expectHistoryMatches(routes, [
@@ -731,7 +731,7 @@ describe(`optimistic relationship-transition oracle`, () => {
     },
   )
 
-  fcTest.prop([routeValuesArbitrary], { numRuns: oracleRuns(12) })(
+  fcTest.prop([routeValuesArbitrary], oraclePropertyOptions(12))(
     `supports repeated rollback and confirmation histories`,
     async (routes) => {
       await expectHistoryMatches(routes, [

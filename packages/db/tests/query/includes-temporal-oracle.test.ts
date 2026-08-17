@@ -11,7 +11,7 @@ import {
   toArray,
 } from '../../src/query/index.js'
 import { runTrace } from '../trace-runner.js'
-import { oracleRuns } from '../oracle-config.js'
+import { oraclePropertyOptions } from '../oracle-config.js'
 import { flushPromises } from '../utils.js'
 import type { Collection } from '../../src/collection/index.js'
 import type { Deferred } from '../../src/deferred.js'
@@ -1138,7 +1138,7 @@ describe(`includes temporal oracle`, () => {
     expectObsoleteDemandCannotPublishAfterReactivation,
   )
 
-  fcTest.prop([fc.scheduler()], { numRuns: oracleRuns(20) })(
+  fcTest.prop([fc.scheduler()], oraclePropertyOptions(20))(
     `obsolete and current demand completions are generation-safe in either order`,
     expectScheduledDemandCompletionsStayGenerationSafe,
   )

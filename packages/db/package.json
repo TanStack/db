@@ -21,7 +21,7 @@
     "dev": "vite build --watch",
     "lint": "eslint . --fix",
     "test": "vitest --run",
-    "test:oracles": "vitest --run tests/query/includes-oracle.property.test.ts tests/query/includes-collection-oracle.property.test.ts tests/query/includes-temporal-oracle.test.ts tests/query/includes-optimistic-oracle.property.test.ts tests/query/includes-publication-oracle.test.ts tests/query/includes-query-shape-oracle.test.ts tests/query/includes-work-counter-oracle.test.ts"
+    "test:oracles": "vitest --run tests/query/includes-oracle.property.test.ts tests/query/includes-collection-oracle.property.test.ts tests/query/includes-cross-formulation-oracle.property.test.ts tests/query/includes-temporal-oracle.test.ts tests/query/includes-optimistic-oracle.property.test.ts tests/query/includes-publication-oracle.test.ts tests/query/includes-query-shape-oracle.test.ts tests/query/includes-work-counter-oracle.test.ts"
   },
   "type": "module",
   "main": "dist/cjs/index.cjs",
