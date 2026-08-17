@@ -367,7 +367,12 @@ type DemandSet = readonly [
 ```
 
 One request may cover many buckets, and the adapter may coalesce or reuse
-requests according to the compiled demand plan. Its semantic contract is:
+requests according to the compiled demand plan. A coalesced request has one
+shared abort lease. If one owner releases its lease, the source request remains
+active while another owner still needs its coverage. The source signal aborts
+only after every attached owner has released it.
+
+Its semantic contract is:
 
 > Every active, satisfiable bucket must be covered by a settled current demand
 > request before initial preload completes.

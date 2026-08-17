@@ -56,26 +56,22 @@ describe(`createDeduplicatedLoadSubset`, () => {
         }),
     )
     const deduplicated = new DeduplicatedLoadSubset({ loadSubset })
-    const first = new AbortController()
-    const second = new AbortController()
+    const owners = Array.from({ length: 10 }, () => new AbortController())
     const where = gt(ref(`age`), val(10))
 
-    const firstLoad = deduplicated.loadSubset({ where, signal: first.signal })
-    const secondLoad = deduplicated.loadSubset({
-      where,
-      signal: second.signal,
-    })
+    const loads = owners.map((owner) =>
+      deduplicated.loadSubset({ where, signal: owner.signal }),
+    )
 
     expect(loadSubset).toHaveBeenCalledTimes(1)
-    expect(secondLoad).toBe(firstLoad)
-    expect(sharedSignal).not.toBe(first.signal)
-    expect(sharedSignal).not.toBe(second.signal)
+    for (const load of loads) expect(load).toBe(loads[0])
+    for (const owner of owners) expect(sharedSignal).not.toBe(owner.signal)
 
-    first.abort()
+    for (const owner of owners.slice(0, -1)) owner.abort()
     expect(sharedSignal?.aborted).toBe(false)
 
     resolveLoad?.()
-    await Promise.all([firstLoad, secondLoad])
+    await Promise.all(loads)
 
     expect(
       deduplicated.loadSubset({
@@ -85,12 +81,14 @@ describe(`createDeduplicatedLoadSubset`, () => {
     ).toBe(true)
   })
 
-  it(`keeps independently abortable in-flight requests isolated`, async () => {
+  it(`aborts shared in-flight work after every cancellation owner leaves`, async () => {
     const releases: Array<() => void> = []
+    let sharedSignal: AbortSignal | undefined
     let callCount = 0
     const deduplicated = new DeduplicatedLoadSubset({
-      loadSubset: () => {
+      loadSubset: (options) => {
         callCount += 1
+        sharedSignal = options.signal
         return new Promise<void>((resolve) => releases.push(resolve))
       },
     })
@@ -100,19 +98,54 @@ describe(`createDeduplicatedLoadSubset`, () => {
 
     const firstLoad = deduplicated.loadSubset({ where, signal: first.signal })
     const secondLoad = deduplicated.loadSubset({ where, signal: second.signal })
-    expect(callCount).toBe(2)
+    expect(callCount).toBe(1)
+    expect(secondLoad).toBe(firstLoad)
 
     first.abort()
-    for (const release of releases) release()
+    expect(sharedSignal?.aborted).toBe(false)
+    second.abort()
+    expect(sharedSignal?.aborted).toBe(true)
+    releases[0]?.()
     await Promise.all([firstLoad, secondLoad])
 
-    expect(
-      deduplicated.loadSubset({
-        where,
-        signal: new AbortController().signal,
-      }),
-    ).toBe(true)
+    const retry = deduplicated.loadSubset({
+      where,
+      signal: new AbortController().signal,
+    })
     expect(callCount).toBe(2)
+    expect(retry).toBeInstanceOf(Promise)
+    releases[1]?.()
+    await retry
+  })
+
+  it(`keeps shared work active for a signal-less owner`, async () => {
+    let resolveLoad: (() => void) | undefined
+    let sharedSignal: AbortSignal | undefined
+    const loadSubset = vi.fn(
+      (options: LoadSubsetOptions) =>
+        new Promise<void>((resolve) => {
+          sharedSignal = options.signal
+          resolveLoad = resolve
+        }),
+    )
+    const deduplicated = new DeduplicatedLoadSubset({ loadSubset })
+    const controller = new AbortController()
+    const where = gt(ref(`age`), val(10))
+
+    const abortable = deduplicated.loadSubset({
+      where,
+      signal: controller.signal,
+    })
+    const persistent = deduplicated.loadSubset({ where })
+
+    expect(loadSubset).toHaveBeenCalledTimes(1)
+    expect(persistent).toBe(abortable)
+    controller.abort()
+    expect(sharedSignal?.aborted).toBe(false)
+
+    resolveLoad?.()
+    await Promise.all([abortable, persistent])
+    expect(deduplicated.loadSubset({ where })).toBe(true)
   })
 
   it(`should call underlying loadSubset on first call`, async () => {
@@ -1170,15 +1203,21 @@ describe(`createDeduplicatedLoadSubset`, () => {
       expect(onDeduplicate).toHaveBeenCalledWith(subsetOptions)
     })
 
-    it(`does not share in-flight work across independent cancellation owners`, async () => {
+    it(`reports a signal-bearing request deduplicated after shared work completes`, async () => {
       const pending: Array<() => void> = []
+      let sharedSignal: AbortSignal | undefined
       const loadSubset = vi.fn(
-        () =>
+        (options: LoadSubsetOptions) =>
           new Promise<void>((resolve) => {
+            sharedSignal = options.signal
             pending.push(resolve)
           }),
       )
-      const deduplicated = new DeduplicatedLoadSubset({ loadSubset })
+      const onDeduplicate = vi.fn()
+      const deduplicated = new DeduplicatedLoadSubset({
+        loadSubset,
+        onDeduplicate,
+      })
       const firstController = new AbortController()
       const secondController = new AbortController()
 
@@ -1186,17 +1225,21 @@ describe(`createDeduplicatedLoadSubset`, () => {
         where: gt(ref(`age`), val(10)),
         signal: firstController.signal,
       })
-      const second = deduplicated.loadSubset({
+      const secondOptions = {
         where: gt(ref(`age`), val(20)),
         signal: secondController.signal,
-      })
+      }
+      const second = deduplicated.loadSubset(secondOptions)
 
-      expect(loadSubset).toHaveBeenCalledTimes(2)
-      expect(second).not.toBe(first)
+      expect(loadSubset).toHaveBeenCalledTimes(1)
+      expect(second).toBe(first)
 
       firstController.abort()
+      expect(sharedSignal?.aborted).toBe(false)
       for (const resolve of pending) resolve()
       await Promise.all([first, second])
+      expect(onDeduplicate).toHaveBeenCalledTimes(1)
+      expect(onDeduplicate).toHaveBeenCalledWith(secondOptions)
     })
   })
 
