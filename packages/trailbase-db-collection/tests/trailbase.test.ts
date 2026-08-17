@@ -121,6 +121,43 @@ function setUp(recordApi: MockRecordApi<Data>) {
 }
 
 describe(`TrailBase Integration`, () => {
+  it(`cancels its event subscription when the collection is cleaned up`, async () => {
+    const recordApi = new MockRecordApi<Data>()
+    const cancel = vi.fn()
+    recordApi.subscribe.mockResolvedValue(new ReadableStream<Event>({ cancel }))
+    const collection = createCollection(setUp(recordApi))
+
+    await vi.waitFor(() => expect(recordApi.subscribe).toHaveBeenCalledOnce())
+    await collection.cleanup()
+
+    await vi.waitFor(() => expect(cancel).toHaveBeenCalledOnce())
+  })
+
+  it(`ignores an initial fetch that resolves after cleanup`, async () => {
+    const recordApi = new MockRecordApi<Data>()
+    let resolveList!: (response: ListResponse<Data>) => void
+    recordApi.list.mockReturnValue(
+      new Promise<ListResponse<Data>>((resolve) => {
+        resolveList = resolve
+      }),
+    )
+    recordApi.subscribe.mockResolvedValue(new TransformStream<Event>().readable)
+    const options = setUp(recordApi)
+    const collection = createCollection(options)
+
+    await vi.waitFor(() => expect(recordApi.list).toHaveBeenCalledOnce())
+    await collection.cleanup()
+    resolveList({
+      records: [{ id: 1, updated: 0, data: `late` }],
+    })
+    await new Promise((resolve) => setTimeout(resolve, 0))
+
+    expect(stripState(collection.state)).toEqual(new Map())
+    expect(options.sync.getSyncMetadata?.()).toMatchObject({
+      fullSyncComplete: false,
+    })
+  })
+
   it(`initial fetch, receive update and cancel`, async () => {
     const records: Array<Data> = [
       {

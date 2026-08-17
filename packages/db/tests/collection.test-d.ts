@@ -1,6 +1,7 @@
 import { assertType, describe, expectTypeOf, it } from 'vitest'
 import { z } from 'zod'
 import { createCollection } from '../src/collection/index.js'
+import { DbClient, collectionOptions } from '../src/index.js'
 import type { OutputWithVirtual } from './utils'
 import type { OperationConfig } from '../src/types'
 import type { StandardSchemaV1 } from '@standard-schema/spec'
@@ -159,6 +160,42 @@ describe(`Collection type resolution tests`, () => {
 
     // Should automatically infer nullable types correctly
     expectTypeOf<ItemOf<Param>>().toEqualTypeOf<ExpectedType>()
+  })
+})
+
+describe(`DbClient type tests`, () => {
+  type Todo = { id: string; text: string }
+
+  it(`materializes typed collection options`, () => {
+    const todos = collectionOptions<Todo, string>({
+      id: `todos`,
+      getKey: (todo) => todo.id,
+      sync: { sync: () => {} },
+    })
+
+    const client = new DbClient()
+    const collection = client.collection(todos)
+
+    expectTypeOf(collection.get(`1`)).toEqualTypeOf<
+      OutputWithVirtual<Todo, string> | undefined
+    >()
+  })
+
+  it(`accepts materialization initialData`, () => {
+    const todos = collectionOptions<Todo, string>({
+      id: `todos`,
+      getKey: (todo) => todo.id,
+      sync: { sync: () => {} },
+    })
+
+    const client = new DbClient()
+    const collection = client.collection(todos, {
+      initialData: [{ id: `1`, text: `Write tests` }],
+    })
+
+    expectTypeOf(collection.toArray).toEqualTypeOf<
+      Array<OutputWithVirtual<Todo, string>>
+    >()
   })
 })
 

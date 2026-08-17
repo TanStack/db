@@ -2,6 +2,7 @@ import {
   compileSingleRowExpression,
   safeRandomUUID,
   toBooleanPredicate,
+  withCollectionConfigFactory,
 } from '@tanstack/db'
 import {
   InvalidPersistedCollectionConfigError,
@@ -1244,6 +1245,9 @@ class PersistedCollectionRuntime<
       this.syncControls.begin?.({ immediate: true })
 
       for (const row of rows) {
+        if (this.collection?._hasHydratedKey(row.key)) {
+          continue
+        }
         this.syncControls.write?.({
           type: `update`,
           value: row.value,
@@ -2641,12 +2645,21 @@ export function persistedCollectionOptions<
       collectionId,
     )
 
-    return {
+    const result = {
       ...syncOptions,
       id: collectionId,
       sync: createWrappedSyncConfig<T, TKey>(syncOptions.sync, runtime),
       persistence,
     }
+
+    return withCollectionConfigFactory(
+      result,
+      () =>
+        persistedCollectionOptions({
+          ...options,
+          id: collectionId,
+        }) as typeof result,
+    )
   }
 
   const { schemaVersion, ...localOnlyOptions } = options
@@ -2734,7 +2747,7 @@ export function persistedCollectionOptions<
     ...persistedUtils,
   }
 
-  return {
+  const result = {
     ...localOnlyOptions,
     id: collectionId,
     persistence,
@@ -2746,6 +2759,15 @@ export function persistedCollectionOptions<
     startSync: true,
     gcTime: localOnlyOptions.gcTime ?? 0,
   }
+
+  return withCollectionConfigFactory(
+    result,
+    () =>
+      persistedCollectionOptions({
+        ...options,
+        id: collectionId,
+      }) as typeof result,
+  )
 }
 
 export function encodePersistedStorageKey(key: string | number): string {

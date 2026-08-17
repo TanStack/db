@@ -9,6 +9,7 @@ import {
   normalizeLiveQueryWindowPageSize,
 } from '../src/live-query-window-controller.js'
 import { mockSyncCollectionOptions } from './utils.js'
+import type { Collection } from '../src/collection/index.js'
 
 interface Row {
   id: string
@@ -29,10 +30,7 @@ function makeSource(initialData: Array<Row> = ROWS) {
 }
 
 /** Ordered live query with page 1's peek-ahead window baked in, as the React adapter builds it. */
-function makeOrderedLiveQuery(
-  source: ReturnType<typeof makeSource>,
-  pageSize: number,
-) {
+function makeOrderedLiveQuery(source: Collection<Row>, pageSize: number) {
   return createLiveQueryCollection({
     query: (q) =>
       q

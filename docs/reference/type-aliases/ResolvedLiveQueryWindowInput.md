@@ -6,7 +6,7 @@ title: ResolvedLiveQueryWindowInput
 # Type Alias: ResolvedLiveQueryWindowInput\<TContext\>
 
 ```ts
-type ResolvedLiveQueryWindowInput<TContext> = 
+type ResolvedLiveQueryWindowInput<TContext> =
   | {
   collection: Collection<any, any, any>;
   kind: "collection";

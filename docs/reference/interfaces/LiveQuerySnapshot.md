@@ -29,7 +29,7 @@ an older snapshot cannot expose rows from a later revision.
 ### collection
 
 ```ts
-collection: 
+collection:
   | Collection<T, TKey, any, StandardSchemaV1<unknown, unknown>, T>
   | undefined;
 ```

@@ -62,7 +62,9 @@ export const Route = createFileRoute('/todos')({
 })
 
 function TodoPage() {
-  const { data: todos } = useLiveQuery((q) => q.from({ todo: todoCollection }))
+  const { data: todos } = useLiveQuery({
+    query: (q) => q.from({ todo: todoCollection }),
+  })
   return (
     <ul>
       {todos.map((t) => (
@@ -127,9 +129,9 @@ import { useEffect, useState } from 'react'
 import { useLiveQuery } from '@tanstack/react-db'
 
 export default function TodoPage() {
-  const { data: todos, isLoading } = useLiveQuery((q) =>
-    q.from({ todo: todoCollection }),
-  )
+  const { data: todos, isLoading } = useLiveQuery({
+    query: (q) => q.from({ todo: todoCollection }),
+  })
 
   if (isLoading) return <div>Loading...</div>
   return (
@@ -157,7 +159,9 @@ import { useLiveQuery } from '@tanstack/react-db'
 const preloadPromise = todoCollection.preload()
 
 export default function TodoPage() {
-  const { data: todos } = useLiveQuery((q) => q.from({ todo: todoCollection }))
+  const { data: todos } = useLiveQuery({
+    query: (q) => q.from({ todo: todoCollection }),
+  })
   return (
     <ul>
       {todos.map((t) => (
@@ -186,7 +190,9 @@ export const clientLoader = async ({ request }: ClientLoaderFunctionArgs) => {
 export const loader = () => null
 
 export default function TodoPage() {
-  const { data: todos } = useLiveQuery((q) => q.from({ todo: todoCollection }))
+  const { data: todos } = useLiveQuery({
+    query: (q) => q.from({ todo: todoCollection }),
+  })
   return (
     <ul>
       {todos.map((t) => (
@@ -296,7 +302,9 @@ export const Route = createFileRoute('/todos')({
     return null
   },
   component: () => {
-    const { data } = useLiveQuery((q) => q.from({ todo: todoCollection }))
+    const { data } = useLiveQuery({
+      query: (q) => q.from({ todo: todoCollection }),
+    })
     // ...
   },
 })
@@ -387,7 +395,9 @@ export const Route = createFileRoute('/todos')({
   ssr: false,
   loader: async () => { await todoCollection.preload() },
   component: () => {
-    const { data } = useLiveQuery((q) => q.from({ todo: todoCollection }))
+    const { data } = useLiveQuery({
+      query: (q) => q.from({ todo: todoCollection }),
+    })
   },
 })
 ```

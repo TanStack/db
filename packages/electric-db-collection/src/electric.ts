@@ -6,7 +6,11 @@ import {
 } from '@electric-sql/client'
 import { Store } from '@tanstack/store'
 import DebugModule from 'debug'
-import { DeduplicatedLoadSubset, and } from '@tanstack/db'
+import {
+  DeduplicatedLoadSubset,
+  and,
+  withCollectionConfigFactory,
+} from '@tanstack/db'
 import {
   ExpectedNumberInAwaitTxIdError,
   StreamAbortedError,
@@ -86,6 +90,132 @@ export interface ElectricTestHooks {
  * Type representing a transaction ID in ElectricSQL
  */
 export type Txid = number
+
+type ElectricResumeState =
+  | {
+      kind: `resume`
+      offset: string
+      handle: string
+      shapeId: string
+      updatedAt: number
+    }
+  | {
+      kind: `reset`
+      updatedAt: number
+    }
+
+type ElectricSyncMeta = {
+  version: 1
+  resume?: ElectricResumeState
+  seenTxids: Array<Txid>
+}
+
+function parseElectricResumeState(
+  value: unknown,
+): ElectricResumeState | undefined {
+  if (!value || typeof value !== `object`) {
+    return undefined
+  }
+
+  const record = value as Record<string, unknown>
+  if (
+    record.kind === `resume` &&
+    typeof record.offset === `string` &&
+    typeof record.handle === `string` &&
+    typeof record.shapeId === `string` &&
+    typeof record.updatedAt === `number` &&
+    Number.isFinite(record.updatedAt)
+  ) {
+    return {
+      kind: `resume`,
+      offset: record.offset,
+      handle: record.handle,
+      shapeId: record.shapeId,
+      updatedAt: record.updatedAt,
+    }
+  }
+
+  if (
+    record.kind === `reset` &&
+    typeof record.updatedAt === `number` &&
+    Number.isFinite(record.updatedAt)
+  ) {
+    return {
+      kind: `reset`,
+      updatedAt: record.updatedAt,
+    }
+  }
+
+  return undefined
+}
+
+function parseElectricSyncMeta(value: unknown): ElectricSyncMeta | undefined {
+  if (!value || typeof value !== `object`) {
+    return undefined
+  }
+
+  const record = value as Record<string, unknown>
+  if (
+    record.version !== 1 ||
+    !Array.isArray(record.seenTxids) ||
+    !record.seenTxids.every(
+      (txid) => typeof txid === `number` && Number.isFinite(txid),
+    )
+  ) {
+    return undefined
+  }
+
+  const resume =
+    record.resume === undefined
+      ? undefined
+      : parseElectricResumeState(record.resume)
+  if (record.resume !== undefined && resume === undefined) {
+    return undefined
+  }
+
+  return {
+    version: 1,
+    ...(resume ? { resume } : {}),
+    seenTxids: Array.from(new Set(record.seenTxids)).sort((a, b) => a - b),
+  }
+}
+
+function mergeElectricSyncMeta(
+  current: unknown,
+  incoming: unknown,
+): ElectricSyncMeta | unknown {
+  const currentMeta = parseElectricSyncMeta(current)
+  const incomingMeta = parseElectricSyncMeta(incoming)
+
+  if (!incomingMeta) {
+    return current
+  }
+  if (!currentMeta) {
+    return incomingMeta
+  }
+
+  const resume = getNewestElectricResumeState(
+    currentMeta.resume,
+    incomingMeta.resume,
+  )
+
+  return {
+    version: 1,
+    ...(resume ? { resume } : {}),
+    seenTxids: Array.from(
+      new Set([...currentMeta.seenTxids, ...incomingMeta.seenTxids]),
+    ).sort((a, b) => a - b),
+  }
+}
+
+function getNewestElectricResumeState(
+  current: ElectricResumeState | undefined,
+  incoming: ElectricResumeState | undefined,
+): ElectricResumeState | undefined {
+  if (!current) return incoming
+  if (!incoming) return current
+  return incoming.updatedAt >= current.updatedAt ? incoming : current
+}
 
 /**
  * Custom match function type - receives stream messages and returns boolean
@@ -633,6 +763,9 @@ export function electricCollectionOptions<T extends Row<unknown>>(
 } {
   const seenTxids = new Store<Set<Txid>>(new Set([]))
   const seenSnapshots = new Store<Array<PostgresSnapshot>>([])
+  const hydratedResumeState = new Store<ElectricResumeState | undefined>(
+    undefined,
+  )
   const internalSyncMode = config.syncMode ?? `eager`
   const finalSyncMode =
     internalSyncMode === `progressive` ? `on-demand` : internalSyncMode
@@ -690,6 +823,7 @@ export function electricCollectionOptions<T extends Row<unknown>>(
   const sync = createElectricSync<T>(config.shapeOptions, {
     seenTxids,
     seenSnapshots,
+    hydratedResumeState,
     syncMode: internalSyncMode,
     pendingMatches,
     currentBatchMessages,
@@ -941,10 +1075,29 @@ export function electricCollectionOptions<T extends Row<unknown>>(
     ...restConfig
   } = config
 
-  return {
+  const options = {
     ...restConfig,
     syncMode: finalSyncMode,
-    sync,
+    sync: {
+      ...sync,
+      exportSyncMeta: (): ElectricSyncMeta => ({
+        version: 1,
+        ...(hydratedResumeState.state
+          ? { resume: hydratedResumeState.state }
+          : {}),
+        seenTxids: Array.from(seenTxids.state).sort((a, b) => a - b),
+      }),
+      importSyncMeta: (meta: unknown): void => {
+        const parsed = parseElectricSyncMeta(meta)
+        if (!parsed) {
+          return
+        }
+
+        hydratedResumeState.setState(() => parsed.resume)
+        seenTxids.setState(() => new Set(parsed.seenTxids))
+      },
+      mergeSyncMeta: mergeElectricSyncMeta,
+    },
     onInsert: wrappedOnInsert,
     onUpdate: wrappedOnUpdate,
     onDelete: wrappedOnDelete,
@@ -953,6 +1106,14 @@ export function electricCollectionOptions<T extends Row<unknown>>(
       awaitMatch,
     },
   }
+
+  return withCollectionConfigFactory(options, () =>
+    (
+      electricCollectionOptions as (
+        nextConfig: ElectricCollectionConfig<T, any>,
+      ) => typeof options
+    )(config),
+  )
 }
 
 /**
@@ -964,6 +1125,7 @@ function createElectricSync<T extends Row<unknown>>(
     syncMode: ElectricSyncMode
     seenTxids: Store<Set<Txid>>
     seenSnapshots: Store<Array<PostgresSnapshot>>
+    hydratedResumeState: Store<ElectricResumeState | undefined>
     pendingMatches: Store<
       Map<
         string,
@@ -987,6 +1149,7 @@ function createElectricSync<T extends Row<unknown>>(
   const {
     seenTxids,
     seenSnapshots,
+    hydratedResumeState,
     syncMode,
     pendingMatches,
     currentBatchMessages,
@@ -1319,40 +1482,15 @@ function createElectricSync<T extends Row<unknown>>(
         collection,
         metadata,
       } = params
-      const readPersistedResumeState = () => {
+      const readPersistedResumeState = (): ElectricResumeState | undefined => {
         const persistedResumeState = metadata?.collection.get(`electric:resume`)
-        if (!persistedResumeState || typeof persistedResumeState !== `object`) {
-          return undefined
-        }
-
-        const record = persistedResumeState as Record<string, unknown>
-        if (
-          record.kind === `resume` &&
-          typeof record.offset === `string` &&
-          typeof record.handle === `string` &&
-          typeof record.shapeId === `string` &&
-          typeof record.updatedAt === `number`
-        ) {
-          return {
-            kind: `resume` as const,
-            offset: record.offset,
-            handle: record.handle,
-            shapeId: record.shapeId,
-            updatedAt: record.updatedAt,
-          }
-        }
-
-        if (record.kind === `reset` && typeof record.updatedAt === `number`) {
-          return {
-            kind: `reset` as const,
-            updatedAt: record.updatedAt,
-          }
-        }
-
-        return undefined
+        return parseElectricResumeState(persistedResumeState)
       }
 
-      const persistedResumeState = readPersistedResumeState()
+      const persistedResumeState = getNewestElectricResumeState(
+        readPersistedResumeState(),
+        hydratedResumeState.state,
+      )
       const shapeIdentity = getStableShapeIdentity({
         url: shapeOptions.url,
         params: shapeOptions.params as Record<string, unknown> | undefined,
@@ -1476,35 +1614,35 @@ function createElectricSync<T extends Row<unknown>>(
       const syncedKeys = new Set<string | number>()
 
       const stageResumeMetadata = () => {
-        if (!metadata) {
-          return
-        }
         const shapeHandle = stream.shapeHandle
         const lastOffset = stream.lastOffset
         if (!shapeHandle || lastOffset === `-1`) {
           return
         }
 
-        metadata.collection.set(`electric:resume`, {
+        const resumeState: ElectricResumeState = {
           kind: `resume`,
           offset: lastOffset,
           handle: shapeHandle,
           shapeId: shapeIdentity,
           updatedAt: Date.now(),
-        })
+        }
+        hydratedResumeState.setState(() => resumeState)
+        metadata?.collection.set(`electric:resume`, resumeState)
       }
 
       const commitResetResumeMetadataImmediately = () => {
-        if (!metadata) {
-          return
-        }
-
-        begin({ immediate: true })
-        metadata.collection.set(`electric:resume`, {
+        const resetState: ElectricResumeState = {
           kind: `reset`,
           updatedAt: Date.now(),
-        })
-        commit()
+        }
+        hydratedResumeState.setState(() => resetState)
+
+        if (metadata) {
+          begin({ immediate: true })
+          metadata.collection.set(`electric:resume`, resetState)
+          commit()
+        }
       }
 
       if (hasIncompatiblePersistedResume) {
@@ -1869,6 +2007,7 @@ function createElectricSync<T extends Row<unknown>>(
           abortController.abort()
           // Reset deduplication tracking so collection can load fresh data if restarted
           loadSubsetDedupe?.reset()
+          hydratedResumeState.setState(() => undefined)
         },
       }
     },

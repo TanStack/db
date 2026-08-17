@@ -1,4 +1,5 @@
 import { safeRandomUUID } from './utils/uuid'
+import { withCollectionConfigFactory } from './client.js'
 import {
   InvalidStorageDataFormatError,
   InvalidStorageObjectFormatError,
@@ -607,7 +608,7 @@ export function localStorageCollectionOptions(
     sync.confirmOperationsSync(collectionMutations)
   }
 
-  return {
+  const options = {
     ...restConfig,
     id: collectionId,
     sync,
@@ -620,6 +621,15 @@ export function localStorageCollectionOptions(
       acceptMutations,
     },
   }
+
+  return withCollectionConfigFactory(
+    options,
+    () =>
+      localStorageCollectionOptions({
+        ...config,
+        id: collectionId,
+      }) as unknown as typeof options,
+  )
 }
 
 /**

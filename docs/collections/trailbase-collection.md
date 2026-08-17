@@ -194,11 +194,13 @@ export const todosCollection = createCollection<SelectTodo, Todo>(
 
 // Use in component
 function TodoList() {
-  const { data: todos } = useLiveQuery((q) =>
-    q.from({ todo: todosCollection })
-      .where(({ todo }) => not(todo.completed))
-      .orderBy(({ todo }) => todo.created_at, 'desc')
-  )
+  const { data: todos } = useLiveQuery({
+    query: (q) =>
+      q
+        .from({ todo: todosCollection })
+        .where(({ todo }) => not(todo.completed))
+        .orderBy(({ todo }) => todo.created_at, 'desc'),
+  })
 
   const addTodo = (text: string) => {
     todosCollection.insert({

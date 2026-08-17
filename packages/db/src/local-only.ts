@@ -1,4 +1,5 @@
 import { safeRandomUUID } from './utils/uuid'
+import { withCollectionConfigFactory } from './client.js'
 import type {
   BaseCollectionConfig,
   CollectionConfig,
@@ -264,7 +265,7 @@ export function localOnlyCollectionOptions<
     )
   }
 
-  return {
+  const options = {
     ...restConfig,
     id: collectionId,
     sync: syncResult.sync,
@@ -279,6 +280,17 @@ export function localOnlyCollectionOptions<
   } as LocalOnlyCollectionOptionsResult<T, TKey, TSchema> & {
     schema?: StandardSchemaV1
   }
+
+  return withCollectionConfigFactory(options, () =>
+    (
+      localOnlyCollectionOptions as (
+        nextConfig: LocalOnlyCollectionConfig<T, TSchema, TKey>,
+      ) => typeof options
+    )({
+      ...config,
+      id: collectionId,
+    }),
+  )
 }
 
 /**

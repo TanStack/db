@@ -8,6 +8,7 @@ import {
   SyncTransactionAlreadyCommittedError,
   SyncTransactionAlreadyCommittedWriteError,
 } from '../errors'
+import { createDeferred } from '../deferred'
 import { deepEquals } from '../utils'
 import { LIVE_QUERY_INTERNAL } from '../query/live/internal.js'
 import type { StandardSchemaV1 } from '@standard-schema/spec'
@@ -25,6 +26,12 @@ import type { CollectionStateManager } from './state'
 import type { CollectionLifecycleManager } from './lifecycle'
 import type { CollectionEventsManager } from './events.js'
 import type { LiveQueryCollectionUtils } from '../query/live/collection-config-builder.js'
+import type { Deferred } from '../deferred'
+
+type DeferredLoadSubset = {
+  options: LoadSubsetOptions
+  deferred: Deferred<void>
+}
 
 export class CollectionSyncManager<
   TOutput extends object = Record<string, unknown>,
@@ -49,6 +56,9 @@ export class CollectionSyncManager<
     null
 
   private pendingLoadSubsetPromises: Set<Promise<void>> = new Set()
+  private syncStartDeferred = false
+  private syncStartRequested = false
+  private deferredLoadSubsets: Array<DeferredLoadSubset> = []
 
   /**
    * Creates a new CollectionSyncManager instance
@@ -86,6 +96,11 @@ export class CollectionSyncManager<
       this.lifecycle.status !== `cleaned-up`
     ) {
       return // Already started or in progress
+    }
+
+    if (this.syncStartDeferred) {
+      this.syncStartRequested = true
+      return
     }
 
     this.lifecycle.setStatus(`loading`)
@@ -151,10 +166,11 @@ export class CollectionSyncManager<
                 const valuesEqual =
                   existingValue !== undefined &&
                   deepEquals(existingValue, messageWithOptionalKey.value)
-                if (valuesEqual) {
+                if (valuesEqual || this.state.hydrationSeedKeys.has(key)) {
                   // The "insert" is an echo of a value we already have locally.
-                  // Treat it as an update so we preserve optimistic intent without
-                  // throwing a duplicate-key error during reconciliation.
+                  // Hydration and initialData are also provisional base state, so
+                  // accept the adapter's first authoritative value as an update
+                  // using the configured rowUpdateMode semantics.
                   messageType = `update`
                 } else {
                   const utils = this.config.utils as
@@ -275,6 +291,58 @@ export class CollectionSyncManager<
     } catch (error) {
       this.lifecycle.setStatus(`error`)
       throw error
+    }
+  }
+
+  public deferStart(): boolean {
+    if (
+      this.lifecycle.status !== `idle` &&
+      this.lifecycle.status !== `cleaned-up`
+    ) {
+      return false
+    }
+
+    this.syncStartDeferred = true
+    return true
+  }
+
+  public resumeStart(): void {
+    if (!this.syncStartDeferred) {
+      return
+    }
+
+    this.syncStartDeferred = false
+    const shouldStart =
+      this.syncStartRequested || this.deferredLoadSubsets.length > 0
+    this.syncStartRequested = false
+    const deferredLoadSubsets = this.deferredLoadSubsets
+    this.deferredLoadSubsets = []
+
+    try {
+      if (shouldStart) {
+        this.startSync()
+      }
+    } catch (error) {
+      for (const { deferred } of deferredLoadSubsets) {
+        deferred.reject(error)
+      }
+      throw error
+    }
+
+    for (const { options, deferred } of deferredLoadSubsets) {
+      try {
+        const result = this.syncLoadSubsetFn?.(options) ?? true
+        if (result instanceof Promise) {
+          void result.then(
+            () => deferred.resolve(undefined),
+            (error: unknown) => deferred.reject(error),
+          )
+        } else {
+          deferred.resolve(undefined)
+        }
+      } catch (error) {
+        deferred.reject(error)
+      }
     }
   }
 
@@ -505,6 +573,14 @@ export class CollectionSyncManager<
       return true
     }
 
+    if (this.syncStartDeferred) {
+      this.syncStartRequested = true
+      const deferred = createDeferred<void>()
+      this.deferredLoadSubsets.push({ options, deferred })
+      this.trackLoadPromise(deferred.promise)
+      return deferred.promise
+    }
+
     if (this.syncLoadSubsetFn) {
       const result = this.syncLoadSubsetFn(options)
       // If the result is a promise, track it
@@ -522,6 +598,18 @@ export class CollectionSyncManager<
    * @param options Options that identify what data is being unloaded
    */
   public unloadSubset(options: LoadSubsetOptions): void {
+    if (this.syncStartDeferred) {
+      this.deferredLoadSubsets = this.deferredLoadSubsets.filter((request) => {
+        if (request.options !== options) {
+          return true
+        }
+
+        request.deferred.resolve(undefined)
+        return false
+      })
+      return
+    }
+
     if (this.syncUnloadSubsetFn) {
       this.syncUnloadSubsetFn(options)
     }
@@ -548,6 +636,13 @@ export class CollectionSyncManager<
       })
     }
     this.preloadPromise = null
+    this.syncStartDeferred = false
+    this.syncStartRequested = false
+    const deferredLoadSubsets = this.deferredLoadSubsets
+    this.deferredLoadSubsets = []
+    for (const { deferred } of deferredLoadSubsets) {
+      deferred.resolve(undefined)
+    }
   }
 }
 

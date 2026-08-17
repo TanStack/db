@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest'
+import { DbClient, collectionOptions } from '../src/client.js'
 import { createTransaction } from '../src/transactions'
 import { createCollection } from '../src/collection/index.js'
 import {
@@ -9,6 +10,62 @@ import {
 } from '../src/errors'
 
 describe(`Transactions`, () => {
+  it(`keeps a claimed default transaction ambient for later plain collection mutations`, () => {
+    const client = new DbClient()
+    const clientCollection = client.collection(
+      collectionOptions(`claimed-client-collection`, () => ({
+        id: `claimed-client-collection`,
+        getKey: (row: { id: number }) => row.id,
+        sync: { sync: () => {} },
+      })),
+    )
+    const plainCollection = createCollection<{ id: number }>({
+      id: `claimed-plain-collection`,
+      getKey: (row) => row.id,
+      sync: { sync: () => {} },
+    })
+    const transaction = createTransaction({
+      autoCommit: false,
+      mutationFn: async () => {},
+    })
+
+    transaction.mutate(() => clientCollection.insert({ id: 1 }))
+    transaction.mutate(() => plainCollection.insert({ id: 2 }))
+
+    expect(transaction.mutations).toHaveLength(2)
+  })
+
+  it(`does not cascade rollbacks across isolated client and default scopes`, () => {
+    const options = {
+      id: `isolated-rollback-scope`,
+      getKey: (row: { id: number }) => row.id,
+      sync: { sync: () => {} },
+    }
+    const plainCollection = createCollection(options)
+    const client = new DbClient()
+    const scopedCollection = client.collection(
+      collectionOptions(`isolated-rollback-scope`, () => ({
+        ...options,
+        id: `isolated-rollback-scope`,
+      })),
+    )
+    const clientTransaction = client.createTransaction({
+      autoCommit: false,
+      mutationFn: async () => {},
+    })
+    const defaultTransaction = createTransaction({
+      autoCommit: false,
+      mutationFn: async () => {},
+    })
+
+    clientTransaction.mutate(() => scopedCollection.insert({ id: 1 }))
+    defaultTransaction.mutate(() => plainCollection.insert({ id: 1 }))
+    clientTransaction.rollback()
+
+    expect(defaultTransaction.state).toBe(`pending`)
+    defaultTransaction.rollback()
+  })
+
   it(`calling createTransaction creates a transaction`, () => {
     const transaction = createTransaction({
       mutationFn: async () => Promise.resolve(),
@@ -506,6 +563,10 @@ describe(`Transactions`, () => {
       mutationFn: async () => Promise.resolve(),
       autoCommit: false,
     })
+    const transaction4 = createTransaction({
+      mutationFn: async () => Promise.resolve(),
+      autoCommit: false,
+    })
     const collection = createCollection<{
       id: number
       value: string
@@ -545,13 +606,23 @@ describe(`Transactions`, () => {
       })
     })
 
+    transaction4.mutate(() => {
+      collection.state.forEach((object) => {
+        collection.update(object.id, (draft) => {
+          draft.value = `foo-me-4`
+        })
+      })
+    })
+
     transaction1.rollback()
     transaction1.isPersisted.promise.catch(() => {})
     transaction3.isPersisted.promise.catch(() => {})
+    transaction4.isPersisted.promise.catch(() => {})
 
     expect(transaction1.state).toBe(`failed`)
     expect(transaction2.state).toBe(`completed`)
     expect(transaction3.state).toBe(`failed`)
+    expect(transaction4.state).toBe(`failed`)
   })
 
   describe(`duplicate instance detection`, () => {
