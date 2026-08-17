@@ -316,18 +316,20 @@ A bare child query is a Collection-valued include. It exposes one stable public
 Collection facade per active bucket in that edge:
 
 ```text
-BucketRow -> BucketFacade(bucket, Collection)
+ActiveBucket + BucketRow -> ActiveBucketRow -> BucketFacade(bucket, Collection)
 Route + BucketFacade -> CellValue(cell, Collection)
 ```
 
 Parents sharing a bucket share its facade. Child changes update that Collection
 without re-emitting every parent, and moving a route changes the parent field to
 the destination bucket's facade. A facade is never retargeted to another
-bucket. The adapter retains a facade only while at least one parent route uses
-its bucket. When the last route leaves, it retracts the facade's rows and drops
-its strong reference. An external holder may keep that empty Collection alive,
-but a later active interval gets a new facade. Inline modes do not create child
-Collections.
+bucket. The D2 join retains inactive bucket rows and emits their current
+snapshot when the bucket becomes active; the facade adapter does not buffer
+discarded deltas. The adapter retains a facade only while at least one parent
+route uses its bucket. When the last route leaves, it retracts the facade's rows
+and drops its strong reference. An external holder may keep that empty
+Collection alive, but a later active interval gets a new facade. Inline modes
+do not create child Collections.
 
 Composition is pure. It constructs a new result along changed paths and does
 not mutate a previously published row or use public routing metadata:

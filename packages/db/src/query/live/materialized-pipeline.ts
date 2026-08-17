@@ -139,9 +139,13 @@ function materializeRelation(
     if (include.materialization === `collection`) {
       const edgeId = `bucket-facade-${++nextBucketFacadeEdgeId}`
       const activeBuckets = createActiveBuckets(pipeline, include)
+      const activeBucketRows = activeBuckets.pipe(
+        join(bucketRows),
+        map(([bucketKey, [, row]]) => [bucketKey, row]),
+      ) as IStreamBuilder<[string, BucketRow]>
       facades.push({
         edgeId,
-        rows: bucketRows,
+        rows: activeBucketRows,
         activeBuckets,
         hasOrderBy: include.hasOrderBy,
       })
