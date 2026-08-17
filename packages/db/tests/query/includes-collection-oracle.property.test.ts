@@ -317,7 +317,7 @@ describe(`Collection-valued includes oracle`, () => {
     }),
   )
 
-  fcTest(`retiring a route cleans up its facade`, async () => {
+  fcTest(`retiring a route leaves a held facade empty and ready`, async () => {
     let retiredFacade: IncludedChildCollection | undefined
     const driver = createCollectionDriver(
       [{ id: 1, group: 1 }],
@@ -342,7 +342,7 @@ describe(`Collection-valued includes oracle`, () => {
         rows: recompute(context),
         retiredStatus:
           context.model.parents.size === 0
-            ? `cleaned-up`
+            ? `ready`
             : retiredFacade?.status,
       }),
       assertEqual(observed, expected) {
@@ -356,6 +356,9 @@ describe(`Collection-valued includes oracle`, () => {
       driver: lifecycleDriver,
       projection,
     })
+
+    expect(retiredFacade?.toArray).toEqual([])
+    await expect(retiredFacade?.preload()).resolves.toBeUndefined()
   })
 
   fcTest(`a delete event preserves the published facade identity`, async () => {
