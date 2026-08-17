@@ -1,6 +1,8 @@
+import { fc, test as fcTest } from '@fast-check/vitest'
 import { describe, expect, it, vi } from 'vitest'
 import { createCollection } from '../../src/collection/index.js'
 import { createDeferred } from '../../src/deferred.js'
+import { BasicIndex } from '../../src/indexes/basic-index.js'
 import { extractSimpleComparisons } from '../../src/query/expression-helpers.js'
 import { DeduplicatedLoadSubset } from '../../src/query/subset-dedupe.js'
 import {
@@ -9,11 +11,13 @@ import {
   toArray,
 } from '../../src/query/index.js'
 import { runTrace } from '../trace-runner.js'
+import { oracleRuns } from '../oracle-config.js'
 import { flushPromises } from '../utils.js'
 import type { Collection } from '../../src/collection/index.js'
 import type { Deferred } from '../../src/deferred.js'
 import type { LoadSubsetOptions } from '../../src/types.js'
 import type { TraceDriver, TraceProjection } from '../trace-runner.js'
+import type { Scheduler } from 'fast-check'
 
 type Post = {
   id: number
@@ -492,6 +496,77 @@ async function expectObsoleteDemandCannotPublishAfterReactivation(): Promise<voi
   }
 }
 
+async function expectScheduledDemandCompletionsStayGenerationSafe(
+  scheduler: Scheduler,
+): Promise<void> {
+  const { collection: posts, remove, add } = createRemovablePost()
+  const requests: Array<{
+    outcome: Promise<void>
+    signal: AbortSignal | undefined
+  }> = []
+  const comments = createCollection<Comment>({
+    id: nextCollectionId(`temporal-scheduled-generation-comments`),
+    getKey: (comment) => comment.id,
+    autoIndex: `eager`,
+    defaultIndexType: BasicIndex,
+    syncMode: `on-demand`,
+    sync: {
+      sync: ({ begin, write, commit, markReady }) => ({
+        loadSubset: (options) => {
+          const requestIndex = requests.length
+          const signal = options.signal
+          const outcome = scheduler
+            .schedule(Promise.resolve(), `demand-${requestIndex}`)
+            .then(() => {
+              if (signal?.aborted) return
+              begin()
+              write({
+                type: `insert`,
+                value: {
+                  id: requestIndex === 0 ? 100 : 200,
+                  postId: 1,
+                  body: requestIndex === 0 ? `obsolete` : `current`,
+                },
+              })
+              commit()
+              markReady()
+            })
+          requests.push({ outcome, signal })
+          return outcome
+        },
+      }),
+    },
+  })
+  const live = createPostsWithCommentsLive(posts, comments)
+  const preload = live.preload()
+
+  try {
+    await flushPromises()
+    expect(requests).toHaveLength(1)
+
+    remove()
+    await preload
+    add()
+    await flushPromises()
+    expect(requests).toHaveLength(2)
+    expect(requests[0]!.signal?.aborted).toBe(true)
+
+    await scheduler.waitAll()
+    await Promise.all(requests.map(({ outcome }) => outcome))
+    await flushPromises()
+
+    expect(live.isReady()).toBe(true)
+    expect(live.get(1)?.comments.map(({ id, body }) => ({ id, body }))).toEqual(
+      [{ id: 200, body: `current` }],
+    )
+  } finally {
+    if (scheduler.count() > 0) await scheduler.waitAll()
+    await Promise.allSettled(requests.map(({ outcome }) => outcome))
+    await live.cleanup()
+    await Promise.all([posts.cleanup(), comments.cleanup()])
+  }
+}
+
 function createMutablePosts(
   initial: ReadonlyArray<Post>,
   options: { markReadyInitially?: boolean } = {},
@@ -800,6 +875,10 @@ async function expectPartialShrinkRetainsCoverage(): Promise<void> {
     await flushPromises()
     expect(live.get(1)?.comments).toHaveLength(1)
     expect(unloads).toEqual([])
+
+    posts.write(`delete`, firstPost)
+    await flushPromises()
+    expect(unloads).toEqual([[1, 2]])
   } finally {
     initialLoad.resolve()
     await live.cleanup()
@@ -1057,6 +1136,11 @@ describe(`includes temporal oracle`, () => {
   it(
     `obsolete child demand cannot publish after the route is reactivated`,
     expectObsoleteDemandCannotPublishAfterReactivation,
+  )
+
+  fcTest.prop([fc.scheduler()], { numRuns: oracleRuns(20) })(
+    `obsolete and current demand completions are generation-safe in either order`,
+    expectScheduledDemandCompletionsStayGenerationSafe,
   )
 
   it(

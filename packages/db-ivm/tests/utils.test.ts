@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { Temporal } from 'temporal-polyfill'
-import { DefaultMap } from '../src/utils.js'
+import { DefaultMap, serializeValue } from '../src/utils.js'
 import { hash } from '../src/hashing/index.js'
 
 describe(`DefaultMap`, () => {
@@ -27,6 +27,29 @@ describe(`DefaultMap`, () => {
 
     map.update(`key`, (value) => value * 2)
     expect(map.get(`key`)).toBe(2)
+  })
+})
+
+describe(`serializeValue`, () => {
+  it(`preserves the established JSON form for ordinary keys`, () => {
+    expect(serializeValue(`user1`)).toBe(`"user1"`)
+    expect(serializeValue([1, `completed`])).toBe(`[1,"completed"]`)
+  })
+
+  it(`keeps distinct primitive types and special numbers distinct`, () => {
+    expect(serializeValue(1n)).not.toBe(serializeValue(`1`))
+    expect(serializeValue(Number.NaN)).not.toBe(serializeValue(null))
+    expect(serializeValue(undefined)).not.toBe(serializeValue(null))
+    expect(serializeValue(new Date(0))).not.toBe(
+      serializeValue(`1970-01-01T00:00:00.000Z`),
+    )
+    expect(serializeValue(new Date(Number.NaN))).not.toBe(
+      serializeValue(Number.NaN),
+    )
+  })
+
+  it(`canonicalizes plain-object property order`, () => {
+    expect(serializeValue({ a: 1, b: 2 })).toBe(serializeValue({ b: 2, a: 1 }))
   })
 })
 

@@ -960,7 +960,7 @@ export function compileQuery(
               (row as any)?.__correlationKey
             const parentContext = (row as any)?.__parentContext
             if (parentContext != null) {
-              return JSON.stringify([correlationKey, parentContext])
+              return serializeValue([correlationKey, parentContext])
             }
             return correlationKey
           }

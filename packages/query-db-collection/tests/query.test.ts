@@ -6255,6 +6255,65 @@ describe(`QueryCollection`, () => {
       ).toBe(false)
     })
 
+    it(`does not apply a retained-query result after its subset is released`, async () => {
+      const queryKey = [`stale-retained-reconciliation`]
+      const queryHash = hashKey(queryKey)
+      const item = { id: `1`, name: `Stale result`, category: `A` }
+      const persistedScan =
+        createDeferred<
+          Array<{ key: string; value: CategorisedItem; metadata?: unknown }>
+        >()
+      const metadataHarness = createInMemorySyncMetadataApi<string | number>({
+        collectionMetadata: new Map([
+          [
+            `queryCollection:gc:${queryHash}`,
+            { queryHash, mode: `until-revalidated` },
+          ],
+        ]),
+      })
+      const scanPersisted = vi.fn().mockReturnValue(persistedScan.promise)
+      const metadataApi = {
+        ...metadataHarness.api,
+        row: {
+          ...metadataHarness.api.row,
+          scanPersisted,
+        },
+      } as SyncMetadataApi<string | number>
+
+      const baseOptions = queryCollectionOptions<CategorisedItem>({
+        id: `stale-retained-reconciliation`,
+        queryClient,
+        queryKey: () => queryKey,
+        queryFn: async () => [item],
+        getKey: (value) => value.id,
+        syncMode: `on-demand`,
+        startSync: true,
+      })
+      const originalSync = baseOptions.sync
+      const collection = createCollection({
+        ...baseOptions,
+        sync: {
+          sync: (params: Parameters<typeof originalSync.sync>[0]) =>
+            originalSync.sync({
+              ...params,
+              metadata: metadataApi,
+            }),
+        },
+      })
+      const load = collection._sync.loadSubset({})
+      await vi.waitFor(() => {
+        expect(scanPersisted).toHaveBeenCalledOnce()
+      })
+
+      collection._sync.unloadSubset({})
+      persistedScan.resolve([])
+      await load
+      await flushPromises()
+
+      expect(collection.has(item.id)).toBe(false)
+      await collection.cleanup()
+    })
+
     it(`should clean up expired persisted ttl placeholders on startup`, async () => {
       const baseQueryKey = [`persisted-ttl-cleanup-test`]
       const queryFn = vi.fn().mockResolvedValue([])

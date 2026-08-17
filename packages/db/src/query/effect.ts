@@ -1,5 +1,8 @@
 import { D2, output } from '@tanstack/db-ivm'
-import { transactionScopedScheduler } from '../scheduler.js'
+import {
+  getActivePublicationContext,
+  transactionScopedScheduler,
+} from '../scheduler.js'
 import { getActiveTransaction } from '../transactions.js'
 import { compileQuery } from './compiler/index.js'
 import {
@@ -683,7 +686,8 @@ class EffectPipelineRunner<TRow extends object, TKey extends string | number> {
    * live query collections, ensuring parent queries run before effects.
    */
   private scheduleGraphRun(sourceId?: string): void {
-    const contextId = getActiveTransaction()?.id
+    const contextId =
+      getActiveTransaction()?.id ?? getActivePublicationContext()
 
     // Collect dependencies for this schedule call
     const deps = new Set(this.builderDependencies)

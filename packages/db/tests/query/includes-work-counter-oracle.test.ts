@@ -1,5 +1,6 @@
 import { fc, test as fcTest } from '@fast-check/vitest'
 import { beforeAll, describe, expect, it } from 'vitest'
+import { oracleRuns } from '../oracle-config.js'
 import { createCollection } from '../../src/collection/index.js'
 import { BTreeIndex } from '../../src/indexes/btree-index.js'
 import { localOnlyCollectionOptions } from '../../src/local-only.js'
@@ -397,7 +398,7 @@ describe(`includes deterministic work-counter oracle`, () => {
   )
 
   fcTest.prop([fc.integer({ min: 1, max: 24 })], {
-    numRuns: 6,
+    numRuns: oracleRuns(6),
     seed: 1709,
   })(
     `a join preserves correlated source pushdown (#1709)`,
@@ -405,7 +406,7 @@ describe(`includes deterministic work-counter oracle`, () => {
   )
 
   fcTest.prop([fc.integer({ min: 1, max: 24 })], {
-    numRuns: 6,
+    numRuns: oracleRuns(6),
     seed: 170_900,
   })(
     `indexed join-target growth keeps source work flat (#1709 direction control)`,
@@ -429,7 +430,7 @@ describe(`includes deterministic work-counter oracle`, () => {
   )
 
   fcTest.prop([fc.integer({ min: 1, max: 24 })], {
-    numRuns: 6,
+    numRuns: oracleRuns(6),
     seed: 17_090,
   })(
     `join-free correlated includes keep source work flat (#1709 control)`,

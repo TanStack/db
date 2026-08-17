@@ -4,7 +4,10 @@ import {
   MissingAliasInputsError,
   SetWindowRequiresOrderByError,
 } from '../../errors.js'
-import { transactionScopedScheduler } from '../../scheduler.js'
+import {
+  getActivePublicationContext,
+  transactionScopedScheduler,
+} from '../../scheduler.js'
 import { getActiveTransaction } from '../../transactions.js'
 import { deepEquals } from '../../utils.js'
 import { CollectionSubscriber } from './collection-subscriber.js'
@@ -398,13 +401,14 @@ export class CollectionConfigBuilder<
         let callbackCalled = false
         while (syncState.graph.pendingWork()) {
           syncState.graph.run()
-          // Flush accumulated changes after each graph step to commit them as one transaction.
-          // This ensures intermediate join states (like null on one side) don't cause
-          // duplicate key errors when the full join result arrives in the same step.
-          syncState.flushPendingChanges?.()
           callback?.()
           callbackCalled = true
         }
+
+        // Publish only after every operator has reached quiescence. A source
+        // change can reach sibling materializations in different graph steps;
+        // flushing between those steps would expose a mixed root snapshot.
+        syncState.flushPendingChanges?.()
 
         // Ensure the callback runs at least once even when the graph has no pending work.
         // This handles lazy loading scenarios where setWindow() increases the limit or
@@ -459,7 +463,10 @@ export class CollectionConfigBuilder<
       dependencies?: Array<CollectionConfigBuilder<any, any>>
     },
   ) {
-    const contextId = options?.contextId ?? getActiveTransaction()?.id
+    const contextId =
+      options?.contextId ??
+      getActiveTransaction()?.id ??
+      getActivePublicationContext()
     // Use the builder instance as the job ID for deduplication. This is memory-safe
     // because the scheduler's context Map is deleted after flushing (no long-term retention).
     const jobId = options?.jobId ?? this
@@ -981,7 +988,8 @@ export class CollectionConfigBuilder<
     // Mark ready when:
     // 1. All subscriptions are set up (subscribedToAllCollections)
     // 2. All source collections are ready
-    // 3. The live query collection is not loading subset data
+    // 3. Every active route demand has settled
+    // 4. The live query collection is not loading subset data
     // This prevents marking the live query ready before its data is processed
     // (fixes issue where useLiveQuery returns isReady=true with empty data)
     if (subscribedToAll && allReady && allDemandsSettled && !isLoading) {

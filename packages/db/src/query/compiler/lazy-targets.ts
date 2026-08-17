@@ -212,7 +212,8 @@ function resolveLazySource(
 
   if (
     lazyFrom.type === `collectionRef` &&
-    lazyFrom.collection === target.collection
+    lazyFrom.collection === target.collection &&
+    lazyFrom.alias === target.alias
   ) {
     return lazyFrom
   }

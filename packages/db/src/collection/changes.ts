@@ -1,4 +1,5 @@
 import { NegativeActiveSubscribersError } from '../errors'
+import { withPublicationContext } from '../scheduler.js'
 import {
   createSingleRowRefProxy,
   toExpression,
@@ -81,10 +82,11 @@ export class CollectionChangesManager<
    * This bypasses the normal empty array check in emitEvents
    */
   public emitEmptyReadyEvent(): void {
-    // Emit empty array directly to all subscribers
-    for (const subscription of this.changeSubscriptions) {
-      subscription.emitEvents([])
-    }
+    withPublicationContext(() => {
+      for (const subscription of this.changeSubscriptions) {
+        subscription.emitEvents([])
+      }
+    })
   }
 
   /**
@@ -183,23 +185,26 @@ export class CollectionChangesManager<
       return
     }
 
-    // Notify both internal layout consumers and the public subscription API.
-    // Public subscribers historically receive an empty batch for order-only
-    // moves because there is no row-value ChangeMessage to publish.
-    if (rawEvents.length === 0) {
-      for (const listener of this.layoutChangeListeners) listener()
-    }
-
     // Enrich all change messages with virtual properties
     // This uses the "add-if-missing" pattern to preserve pass-through semantics
     const enrichedEvents: Array<
       ChangeMessage<WithVirtualProps<TOutput, TKey>, TKey>
     > = rawEvents.map((change) => this.enrichChangeWithVirtualProps(change))
 
-    // Emit to all listeners
-    for (const subscription of this.changeSubscriptions) {
-      subscription.emitEvents(enrichedEvents)
-    }
+    // Every subscriber sees one committed source batch before dependent query
+    // graphs run. This keeps repeated aliases and sibling subqueries coherent.
+    withPublicationContext(() => {
+      // Notify both internal layout consumers and the public subscription API.
+      // Public subscribers historically receive an empty batch for order-only
+      // moves because there is no row-value ChangeMessage to publish.
+      if (rawEvents.length === 0) {
+        for (const listener of this.layoutChangeListeners) listener()
+      }
+
+      for (const subscription of this.changeSubscriptions) {
+        subscription.emitEvents(enrichedEvents)
+      }
+    })
   }
 
   /** Subscribe to layout-only publications. Internal observer channel. */

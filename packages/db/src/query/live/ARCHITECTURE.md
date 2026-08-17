@@ -536,6 +536,13 @@ scenarios use direct assertions. A boundary suite may retain an exact
 expected-failure guard for a planner or ownership defect that this graph does
 not own.
 
+Run the DB oracle set with `pnpm test:oracles` from `packages/db`. Broad
+properties use FastCheck's random seed, while structural matrices keep fixed
+seeds so each run covers the same named cells. Increase both corpora with
+`TANSTACK_DB_ORACLE_RUNS_MULTIPLIER=10 pnpm test:oracles`. Preserve FastCheck's
+reported seed and shrink path while reducing a failure, then add the smallest
+case as a deterministic regression trace.
+
 ## Implementation discipline
 
 - Express relation state with existing D2 inputs, joins, reductions, grouping,

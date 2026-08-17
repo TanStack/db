@@ -12,6 +12,7 @@ import {
   sum,
 } from '../../src/operators/groupBy.js'
 import { output } from '../../src/operators/index.js'
+import { serializeValue } from '../../src/utils.js'
 
 describe(`Operators`, () => {
   describe(`GroupBy operation`, () => {
@@ -50,7 +51,7 @@ describe(`Operators`, () => {
       const expectedResult = [
         [
           [
-            `{"category":"A"}`,
+            serializeValue({ category: `A` }),
             {
               category: `A`,
             },
@@ -59,7 +60,7 @@ describe(`Operators`, () => {
         ],
         [
           [
-            `{"category":"B"}`,
+            serializeValue({ category: `B` }),
             {
               category: `B`,
             },
@@ -108,7 +109,7 @@ describe(`Operators`, () => {
       const expectedResult = [
         [
           [
-            `{"category":"A"}`,
+            serializeValue({ category: `A` }),
             {
               total: 30,
               category: `A`,
@@ -118,7 +119,7 @@ describe(`Operators`, () => {
         ],
         [
           [
-            `{"category":"B"}`,
+            serializeValue({ category: `B` }),
             {
               total: 30,
               category: `B`,
@@ -177,7 +178,7 @@ describe(`Operators`, () => {
       const expectedResult = [
         [
           [
-            `{"category":"A","region":"East"}`,
+            serializeValue({ category: `A`, region: `East` }),
             {
               total: 30,
               count: 2,
@@ -189,7 +190,7 @@ describe(`Operators`, () => {
         ],
         [
           [
-            `{"category":"A","region":"West"}`,
+            serializeValue({ category: `A`, region: `West` }),
             {
               total: 30,
               count: 1,
@@ -201,7 +202,7 @@ describe(`Operators`, () => {
         ],
         [
           [
-            `{"category":"B","region":"East"}`,
+            serializeValue({ category: `B`, region: `East` }),
             {
               total: 40,
               count: 1,
@@ -228,7 +229,7 @@ describe(`Operators`, () => {
       const expectedAddResult = [
         [
           [
-            `{"category":"A","region":"East"}`,
+            serializeValue({ category: `A`, region: `East` }),
             {
               category: `A`,
               region: `East`,
@@ -240,7 +241,7 @@ describe(`Operators`, () => {
         ],
         [
           [
-            `{"category":"A","region":"East"}`,
+            serializeValue({ category: `A`, region: `East` }),
             {
               category: `A`,
               region: `East`,
@@ -252,7 +253,7 @@ describe(`Operators`, () => {
         ],
         [
           [
-            `{"category":"B","region":"West"}`,
+            serializeValue({ category: `B`, region: `West` }),
             {
               category: `B`,
               region: `West`,
@@ -277,7 +278,7 @@ describe(`Operators`, () => {
       const expectedDeleteResult = [
         [
           [
-            `{"category":"A","region":"East"}`,
+            serializeValue({ category: `A`, region: `East` }),
             {
               category: `A`,
               region: `East`,
@@ -289,7 +290,7 @@ describe(`Operators`, () => {
         ],
         [
           [
-            `{"category":"A","region":"East"}`,
+            serializeValue({ category: `A`, region: `East` }),
             {
               category: `A`,
               region: `East`,
@@ -349,7 +350,7 @@ describe(`Operators`, () => {
       const expectedResult = [
         [
           [
-            `{"category":"A"}`,
+            serializeValue({ category: `A` }),
             {
               category: `A`,
               countNotNull: 1,
@@ -360,7 +361,7 @@ describe(`Operators`, () => {
         ],
         [
           [
-            `{"category":"B"}`,
+            serializeValue({ category: `B` }),
             {
               category: `B`,
               countNotNull: 1,
@@ -412,7 +413,7 @@ describe(`Operators`, () => {
       const expectedResult = [
         [
           [
-            `{"category":"A"}`,
+            serializeValue({ category: `A` }),
             {
               category: `A`,
               average: 15,
@@ -423,7 +424,7 @@ describe(`Operators`, () => {
         ],
         [
           [
-            `{"category":"B"}`,
+            serializeValue({ category: `B` }),
             {
               category: `B`,
               average: 30,
@@ -448,7 +449,7 @@ describe(`Operators`, () => {
       const expectedAddResult = [
         [
           [
-            `{"category":"A"}`,
+            serializeValue({ category: `A` }),
             {
               category: `A`,
               average: 15,
@@ -459,7 +460,7 @@ describe(`Operators`, () => {
         ],
         [
           [
-            `{"category":"A"}`,
+            serializeValue({ category: `A` }),
             {
               category: `A`,
               average: 20,
@@ -470,7 +471,7 @@ describe(`Operators`, () => {
         ],
         [
           [
-            `{"category":"C"}`,
+            serializeValue({ category: `C` }),
             {
               category: `C`,
               average: 50,
@@ -494,7 +495,7 @@ describe(`Operators`, () => {
       const expectedDeleteResult = [
         [
           [
-            `{"category":"A"}`,
+            serializeValue({ category: `A` }),
             {
               category: `A`,
               average: 20,
@@ -505,7 +506,7 @@ describe(`Operators`, () => {
         ],
         [
           [
-            `{"category":"A"}`,
+            serializeValue({ category: `A` }),
             {
               category: `A`,
               average: 25,
@@ -561,7 +562,7 @@ describe(`Operators`, () => {
       const expectedResult = [
         [
           [
-            `{"category":"A"}`,
+            serializeValue({ category: `A` }),
             {
               category: `A`,
               minimum: 5,
@@ -574,7 +575,7 @@ describe(`Operators`, () => {
         ],
         [
           [
-            `{"category":"B"}`,
+            serializeValue({ category: `B` }),
             {
               category: `B`,
               minimum: 15,
@@ -637,7 +638,7 @@ describe(`Operators`, () => {
       const expectedResult = [
         [
           [
-            `{"category":"A"}`,
+            serializeValue({ category: `A` }),
             {
               category: `A`,
               middle: 20,
@@ -648,7 +649,7 @@ describe(`Operators`, () => {
         ],
         [
           [
-            `{"category":"B"}`,
+            serializeValue({ category: `B` }),
             {
               category: `B`,
               middle: 12.5,
@@ -699,7 +700,7 @@ describe(`Operators`, () => {
 
       // Find the group for category A
       const categoryAGroup = result.find(
-        ([key]: any) => key[0] === `{"category":"A"}`,
+        ([key]: any) => key[0] === serializeValue({ category: `A` }),
       )
       expect(categoryAGroup).toBeDefined()
       expect(categoryAGroup[0][1].total).toBe(30) // Sum of 10 + 20
@@ -722,7 +723,7 @@ describe(`Operators`, () => {
       const expectedResult = [
         [
           [
-            `{"category":"A"}`,
+            serializeValue({ category: `A` }),
             {
               category: `A`,
               total: 30,
@@ -737,7 +738,8 @@ describe(`Operators`, () => {
       // Verify no new group with total: 0 was created by checking that
       // we don't have any positive weight entries for category A
       const positiveCategoryAEntries = result.filter(
-        ([key, , weight]: any) => key[0] === `{"category":"A"}` && weight > 0,
+        ([key, , weight]: any) =>
+          key[0] === serializeValue({ category: `A` }) && weight > 0,
       )
       expect(positiveCategoryAEntries).toHaveLength(0)
     })
@@ -788,7 +790,8 @@ describe(`Operators`, () => {
 
       // Find the group for category A, region East
       const categoryAEastGroup = result.find(
-        ([key]: any) => key[0] === `{"category":"A","region":"East"}`,
+        ([key]: any) =>
+          key[0] === serializeValue({ category: `A`, region: `East` }),
       )
       expect(categoryAEastGroup).toBeDefined()
       expect(categoryAEastGroup[0][1]).toEqual({
@@ -816,7 +819,7 @@ describe(`Operators`, () => {
       const expectedResult = [
         [
           [
-            `{"category":"A","region":"East"}`,
+            serializeValue({ category: `A`, region: `East` }),
             {
               category: `A`,
               region: `East`,
@@ -834,7 +837,8 @@ describe(`Operators`, () => {
       // Verify no new group with zero/empty values was created
       const positiveCategoryAEastEntries = result.filter(
         ([key, , weight]: any) =>
-          key[0] === `{"category":"A","region":"East"}` && weight > 0,
+          key[0] === serializeValue({ category: `A`, region: `East` }) &&
+          weight > 0,
       )
       expect(positiveCategoryAEastEntries).toHaveLength(0)
     })
@@ -875,7 +879,7 @@ describe(`Operators`, () => {
 
       // Find the group for category A
       const categoryAGroup = result.find(
-        ([key]: any) => key[0] === `{"category":"A"}`,
+        ([key]: any) => key[0] === serializeValue({ category: `A` }),
       )
       expect(categoryAGroup).toBeDefined()
       expect(categoryAGroup[0][1].total).toBe(30) // Sum of 10 + 20
@@ -894,7 +898,7 @@ describe(`Operators`, () => {
       const expectedRemovalResult = [
         [
           [
-            `{"category":"A"}`,
+            serializeValue({ category: `A` }),
             {
               category: `A`,
               total: 30,
@@ -919,7 +923,7 @@ describe(`Operators`, () => {
       const expectedReAdditionResult = [
         [
           [
-            `{"category":"A"}`,
+            serializeValue({ category: `A` }),
             {
               category: `A`,
               total: 75, // 50 + 25 (new values, not the old 30)
@@ -939,7 +943,7 @@ describe(`Operators`, () => {
       const expectedUpdateResult = [
         [
           [
-            `{"category":"A"}`,
+            serializeValue({ category: `A` }),
             {
               category: `A`,
               total: 75, // Previous total
@@ -949,7 +953,7 @@ describe(`Operators`, () => {
         ],
         [
           [
-            `{"category":"A"}`,
+            serializeValue({ category: `A` }),
             {
               category: `A`,
               total: 90, // 75 + 15
@@ -1009,7 +1013,8 @@ describe(`Operators`, () => {
 
       // Find the group for category A, region East
       const categoryAEastGroup = result.find(
-        ([key]: any) => key[0] === `{"category":"A","region":"East"}`,
+        ([key]: any) =>
+          key[0] === serializeValue({ category: `A`, region: `East` }),
       )
       expect(categoryAEastGroup).toBeDefined()
       expect(categoryAEastGroup[0][1]).toEqual({
@@ -1037,7 +1042,7 @@ describe(`Operators`, () => {
       const expectedRemovalResult = [
         [
           [
-            `{"category":"A","region":"East"}`,
+            serializeValue({ category: `A`, region: `East` }),
             {
               category: `A`,
               region: `East`,
@@ -1069,7 +1074,7 @@ describe(`Operators`, () => {
       const expectedReAdditionResult = [
         [
           [
-            `{"category":"A","region":"East"}`,
+            serializeValue({ category: `A`, region: `East` }),
             {
               category: `A`,
               region: `East`,
@@ -1098,7 +1103,7 @@ describe(`Operators`, () => {
       const expectedPartialRemovalResult = [
         [
           [
-            `{"category":"A","region":"East"}`,
+            serializeValue({ category: `A`, region: `East` }),
             {
               category: `A`,
               region: `East`,
@@ -1113,7 +1118,7 @@ describe(`Operators`, () => {
         ],
         [
           [
-            `{"category":"A","region":"East"}`,
+            serializeValue({ category: `A`, region: `East` }),
             {
               category: `A`,
               region: `East`,

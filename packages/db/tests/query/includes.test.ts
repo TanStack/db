@@ -329,6 +329,31 @@ describe(`includes subqueries`, () => {
       ])
     })
 
+    it(`publishes a non-empty child Collection as ready with its rows`, async () => {
+      const collection = buildIncludesQuery()
+      const publications: Array<{ ready: boolean; issueIds: Array<number> }> =
+        []
+      const subscription = collection.subscribeChanges(
+        () => {
+          const project = collection.get(1)
+          if (!project) return
+          publications.push({
+            ready: project.issues.isReady(),
+            issueIds: [...project.issues.values()].map((issue) => issue.id),
+          })
+        },
+        { includeInitialState: true },
+      )
+
+      try {
+        await collection.preload()
+        expect(publications[0]).toEqual({ ready: true, issueIds: [10, 11] })
+      } finally {
+        subscription.unsubscribe()
+        await collection.cleanup()
+      }
+    })
+
     it(`gives an active null correlation an empty child Collection`, async () => {
       const parents = createCollection(
         mockSyncCollectionOptions<{ id: number; groupId: number | null }>({
@@ -1354,6 +1379,144 @@ describe(`includes subqueries`, () => {
 
       expect(collection.get(1)).toBeUndefined()
       expect(childItems(collection.get(2)!.children)).toEqual([{ id: 20 }])
+    })
+
+    it(`keeps a limited child facade complete as the window widens and receives later changes`, async () => {
+      type Parent = { id: number; rank: number; groupId: number }
+      type Child = { id: number; groupId: number; label: string }
+
+      const parents = createCollection(
+        mockSyncCollectionOptions<Parent>({
+          id: `widened-limited-facade-parents`,
+          getKey: (parent) => parent.id,
+          initialData: [
+            { id: 1, rank: 1, groupId: 1 },
+            { id: 2, rank: 2, groupId: 2 },
+          ],
+        }),
+      )
+      const children = createCollection(
+        mockSyncCollectionOptions<Child>({
+          id: `widened-limited-facade-children`,
+          getKey: (child) => child.id,
+          initialData: [
+            { id: 10, groupId: 1, label: `first` },
+            { id: 20, groupId: 2, label: `preloaded` },
+          ],
+        }),
+      )
+      const buildQuery = () =>
+        createLiveQueryCollection((q) =>
+          q
+            .from({ parent: parents })
+            // Keep this as orderBy + limit: parent keys branch before top-K,
+            // so the second bucket's initial rows arrive while it is inactive.
+            .orderBy(({ parent }) => parent.rank)
+            .limit(1)
+            .select(({ parent }) => ({
+              id: parent.id,
+              children: q
+                .from({ child: children })
+                .where(({ child }) => eq(child.groupId, parent.groupId))
+                .select(({ child }) => ({
+                  id: child.id,
+                  label: child.label,
+                })),
+            })),
+        )
+      const collection = buildQuery()
+
+      await collection.preload()
+      const windowResult = collection.utils.setWindow({ offset: 0, limit: 2 })
+      if (windowResult instanceof Promise) {
+        await windowResult
+      }
+
+      const secondFacade = collection.get(2)!.children
+      expect(secondFacade.status).toBe(`ready`)
+      expect(secondFacade.isReady()).toBe(true)
+      expect(plainRows(secondFacade)).toEqual([{ id: 20, label: `preloaded` }])
+
+      children.utils.begin()
+      children.utils.write({
+        type: `insert`,
+        value: { id: 21, groupId: 2, label: `fresh` },
+      })
+      children.utils.commit()
+      children.utils.begin()
+      children.utils.write({
+        type: `update`,
+        value: { id: 20, groupId: 2, label: `updated` },
+        previousValue: { id: 20, groupId: 2, label: `preloaded` },
+      })
+      children.utils.commit()
+
+      expect(plainRows(secondFacade)).toEqual([
+        { id: 20, label: `updated` },
+        { id: 21, label: `fresh` },
+      ])
+
+      parents.utils.begin()
+      parents.utils.write({
+        type: `delete`,
+        value: { id: 1, rank: 1, groupId: 1 },
+      })
+      parents.utils.commit()
+      await collection.cleanup()
+
+      const replayed = buildQuery()
+      await replayed.preload()
+      expect(plainRows(replayed.get(2)!.children)).toEqual([
+        { id: 20, label: `updated` },
+        { id: 21, label: `fresh` },
+      ])
+      await replayed.cleanup()
+    })
+
+    it(`replays existing child rows when a parent where predicate becomes true`, async () => {
+      type Parent = { id: number; active: boolean; groupId: number }
+      type Child = { id: number; groupId: number }
+
+      const parents = createCollection(
+        mockSyncCollectionOptions<Parent>({
+          id: `where-activated-facade-parents`,
+          getKey: (parent) => parent.id,
+          initialData: [{ id: 1, active: false, groupId: 1 }],
+        }),
+      )
+      const children = createCollection(
+        mockSyncCollectionOptions<Child>({
+          id: `where-activated-facade-children`,
+          getKey: (child) => child.id,
+          initialData: [{ id: 10, groupId: 1 }],
+        }),
+      )
+      const collection = createLiveQueryCollection((q) =>
+        q
+          .from({ parent: parents })
+          .where(({ parent }) => eq(parent.active, true))
+          .select(({ parent }) => ({
+            id: parent.id,
+            children: q
+              .from({ child: children })
+              .where(({ child }) => eq(child.groupId, parent.groupId)),
+          })),
+      )
+
+      await collection.preload()
+      expect(collection.size).toBe(0)
+
+      parents.utils.begin()
+      parents.utils.write({
+        type: `update`,
+        value: { id: 1, active: true, groupId: 1 },
+        previousValue: { id: 1, active: false, groupId: 1 },
+      })
+      parents.utils.commit()
+
+      expect(plainRows(collection.get(1)!.children)).toEqual([
+        { id: 10, groupId: 1 },
+      ])
     })
 
     it(`does not publish facade changes when root publication fails`, async () => {

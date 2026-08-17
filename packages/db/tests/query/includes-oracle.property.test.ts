@@ -14,6 +14,7 @@ import {
   mockSyncCollectionOptions,
   withExpectedRejection,
 } from '../utils.js'
+import { oracleRuns } from '../oracle-config.js'
 import { runTrace } from '../trace-runner.js'
 import type {
   TraceCheckpoint,
@@ -3698,7 +3699,7 @@ describe(`includes recompute oracle`, () => {
 
   for (const [shapeIndex, shape] of independentTransitionShapes.entries()) {
     fcTest.prop([independentTransitionScenarioArbitrary(shape)], {
-      numRuns: 4,
+      numRuns: oracleRuns(4),
       seed: 1734 + shapeIndex,
     })(
       `matches recomputation for independent ${shape} relationship targets`,
@@ -3711,7 +3712,7 @@ describe(`includes recompute oracle`, () => {
 
   for (const [historyIndex, history] of destinationHistories.entries()) {
     fcTest.prop([destinationHistoryScenarioArbitrary(history)], {
-      numRuns: 4,
+      numRuns: oracleRuns(4),
       seed: 1740 + historyIndex,
     })(
       `matches recomputation for the ${history} route destination history`,
@@ -3990,7 +3991,7 @@ describe(`includes recompute oracle`, () => {
   for (const depth of [2, 3, 4] as const) {
     for (const sourceBranch of [0, 1] as const) {
       fcTest.prop([rekeyRouteReuseScenarioArbitrary(depth, sourceBranch)], {
-        numRuns: 4,
+        numRuns: oracleRuns(4),
         seed: 1726 + depth * 10 + sourceBranch,
       })(
         `reuses a retired route at depth ${depth}, branch ${sourceBranch}`,
@@ -4006,7 +4007,7 @@ describe(`includes recompute oracle`, () => {
           ),
         ],
         {
-          numRuns: 4,
+          numRuns: oracleRuns(4),
           seed: 1733 + depth * 10 + sourceBranch,
         },
       )(
@@ -4038,7 +4039,7 @@ describe(`includes recompute oracle`, () => {
             ),
           ],
           {
-            numRuns: 4,
+            numRuns: oracleRuns(4),
             seed: 1727 + depth * 100 + targetLevel * 10 + sourceBranch,
           },
         )(
@@ -4063,7 +4064,7 @@ describe(`includes recompute oracle`, () => {
         [`route-only`, `route-and-position`] as const
       ).entries()) {
         fcTest.prop([relationshipBatchFixtureArbitrary], {
-          numRuns: 4,
+          numRuns: oracleRuns(4),
           seed: 1738 + publicIdIndex * 100 + routeIndex * 10 + updateIndex,
         })(
           `matches the split/atomic replacement matrix for ${publicId} public id, ${route} route, ${ancestorUpdate}`,
@@ -4103,7 +4104,7 @@ describe(`includes recompute oracle`, () => {
       flatMaterializationScenarioArbitrary,
     ],
     {
-      numRuns: 30,
+      numRuns: oracleRuns(30),
       seed: 1721,
     },
   )(`matches recomputation for flat materializations`, (kind, scenario) =>
@@ -4112,7 +4113,7 @@ describe(`includes recompute oracle`, () => {
 
   for (const depth of [1, 2, 3, 4] as const) {
     fcTest.prop([fullRowBatchScenarioAtDepthArbitrary(depth)], {
-      numRuns: 10,
+      numRuns: oracleRuns(10),
       seed: 1719 + depth,
     })(
       `matches recomputation for visible multi-row batches at depth ${depth}`,
@@ -4134,7 +4135,7 @@ describe(`includes recompute oracle`, () => {
             ),
           ],
           {
-            numRuns: 4,
+            numRuns: oracleRuns(4),
             seed: 1721 + depth + targetLevel,
           },
         )(
@@ -4187,7 +4188,7 @@ describe(`includes recompute oracle`, () => {
               ),
             ],
             {
-              numRuns: 3,
+              numRuns: oracleRuns(3),
               seed:
                 1725 +
                 depth * 100 +
@@ -4279,7 +4280,7 @@ describe(`includes recompute oracle`, () => {
     })
   })
 
-  fcTest.prop([scenarioArbitrary], { numRuns: 40 })(
+  fcTest.prop([scenarioArbitrary], { numRuns: oracleRuns(40) })(
     `matches naive recomputation after every incremental change`,
     expectScenarioMatches,
   )
@@ -4290,7 +4291,7 @@ describe(`includes recompute oracle`, () => {
         ({ sharedIntermediate }) => !sharedIntermediate,
       ),
     ],
-    { numRuns: 30 },
+    { numRuns: oracleRuns(30) },
   )(
     `matches recomputation for nested scalar materialization`,
     expectMaterializeScenarioMatches,
@@ -4318,7 +4319,7 @@ describe(`includes recompute oracle`, () => {
         { selector: (row) => row.id, maxLength: 7 },
       ),
     ],
-    { numRuns: 25 },
+    { numRuns: oracleRuns(25) },
   )(
     `is unchanged by alpha-renaming, sibling declaration order, or an unrelated sibling`,
     async (rootRows, childRows) => {
@@ -4430,7 +4431,7 @@ describe(`includes recompute oracle`, () => {
 
   fcTest.prop(
     [fc.integer({ min: -5, max: 5 }).filter((value) => value !== 0)],
-    { numRuns: 15 },
+    { numRuns: oracleRuns(15) },
   )(
     `optimistic updates converge to confirmed-only state`,
     async (confirmedValue) => {
@@ -4643,9 +4644,9 @@ describe(`includes recompute oracle`, () => {
           })),
         )
 
-        expect(stripVirtualProperties(duplicateAliases)).toEqual(
-          stripVirtualProperties(uniqueAliases),
-        )
+        const expected = [{ id: 1, issues: [{ id: 10 }], tags: [{ id: 20 }] }]
+        expect(stripVirtualProperties(uniqueAliases)).toEqual(expected)
+        expect(stripVirtualProperties(duplicateAliases)).toEqual(expected)
       } finally {
         await Promise.all([
           roots.collection.cleanup(),

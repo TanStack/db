@@ -179,4 +179,46 @@ describe(`Sync Streams`, () => {
       { timeout: 2000 },
     )
   })
+
+  it(`disposes a subset hook that resolves after collection cleanup`, async () => {
+    const db = await createDatabase()
+    await createTestProducts(db)
+    let resolveHook!: (cleanup: () => void) => void
+    const hook = new Promise<() => void>((resolve) => {
+      resolveHook = resolve
+    })
+    const cleanupHook = vi.fn()
+
+    const collection = createCollection(
+      powerSyncCollectionOptions({
+        database: db,
+        table: APP_SCHEMA.props.products,
+        syncMode: `on-demand`,
+        onLoadSubset: () => hook,
+      }),
+    )
+    await collection.stateWhenReady()
+    const query = createLiveQueryCollection({
+      query: (q) =>
+        q
+          .from({ product: collection })
+          .where(({ product }) => eq(product.category, `electronics`))
+          .select(({ product }) => ({
+            id: product.id,
+            name: product.name,
+            price: product.price,
+            category: product.category,
+          })),
+    })
+    const preload = query.preload()
+    void preload.catch(() => {})
+
+    await vi.waitFor(() => expect(resolveHook).toBeTypeOf(`function`))
+    const collectionCleanup = collection.cleanup()
+    resolveHook(cleanupHook)
+    await collectionCleanup
+
+    await vi.waitFor(() => expect(cleanupHook).toHaveBeenCalledOnce())
+    await query.cleanup()
+  })
 })

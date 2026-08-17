@@ -8,6 +8,7 @@ import {
   materialize,
 } from '../../src/query/index.js'
 import { runTrace } from '../trace-runner.js'
+import { oracleRuns } from '../oracle-config.js'
 import { mockSyncCollectionOptions } from '../utils.js'
 import type { TraceDriver, TraceProjection } from '../trace-runner.js'
 
@@ -385,7 +386,7 @@ const nullableProjection: TraceProjection<
 
 describe(`includes query-shape recompute oracle`, () => {
   fcTest.prop([fc.integer({ min: 2, max: 5 })], {
-    numRuns: 12,
+    numRuns: oracleRuns(12),
     seed: 1703,
   })(
     `deleting one joined contributor preserves remaining multiplicity (#1703)`,
@@ -415,7 +416,7 @@ describe(`includes query-shape recompute oracle`, () => {
         productionId: fc.integer({ min: 101, max: 200 }),
       }),
     ],
-    { numRuns: 12, seed: 1704 },
+    { numRuns: oracleRuns(12), seed: 1704 },
   )(
     `materialization follows correlation through a joined alias (#1704)`,
     async ({ correlationId, productionId }) => {
@@ -438,7 +439,7 @@ describe(`includes query-shape recompute oracle`, () => {
   )
 
   fcTest.prop([fc.integer({ min: 1, max: 100 })], {
-    numRuns: 12,
+    numRuns: oracleRuns(12),
     seed: 1706,
   })(
     `findOne maps a null correlation key to undefined (#1706)`,

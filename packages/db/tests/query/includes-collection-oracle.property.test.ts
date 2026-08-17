@@ -9,6 +9,7 @@ import {
   toArray,
 } from '../../src/query/index.js'
 import { runTrace } from '../trace-runner.js'
+import { oracleRuns } from '../oracle-config.js'
 import {
   flushPromises,
   mockSyncCollectionOptions,
@@ -40,6 +41,8 @@ type ProjectedParent = {
   group: number
   childrenReady: boolean
   children: Array<ChildRow>
+  arrayChildren: Array<ChildRow>
+  materializedChildren: Array<ChildRow>
 }
 
 type CollectionObservation = {
@@ -111,24 +114,37 @@ function createControlledCollection<T extends { id: number }>(
 function createCollectionQuery(
   parents: Collection<ParentRow>,
   children: Collection<ChildRow>,
+  reuseChildRelation = true,
 ) {
   return createLiveQueryCollection((q) =>
     q
       .from({ parent: parents })
       .orderBy(({ parent }) => parent.id)
-      .select(({ parent }) => ({
-        id: parent.id,
-        group: parent.group,
-        children: q
-          .from({ child: children })
-          .where(({ child }) => eq(child.parentGroup, parent.group))
-          .orderBy(({ child }) => child.id)
-          .select(({ child }) => ({
-            id: child.id,
-            parentGroup: child.parentGroup,
-            value: child.value,
-          })),
-      })),
+      .select(({ parent }) => {
+        const createChildRows = () =>
+          q
+            .from({ child: children })
+            .where(({ child }) => eq(child.parentGroup, parent.group))
+            .orderBy(({ child }) => child.id)
+            .select(({ child }) => ({
+              id: child.id,
+              parentGroup: child.parentGroup,
+              value: child.value,
+            }))
+        const childRows = createChildRows()
+
+        return {
+          id: parent.id,
+          group: parent.group,
+          children: childRows,
+          arrayChildren: toArray(
+            reuseChildRelation ? childRows : createChildRows(),
+          ),
+          materializedChildren: materialize(
+            reuseChildRelation ? childRows : createChildRows(),
+          ),
+        }
+      }),
   )
 }
 
@@ -139,32 +155,48 @@ type IncludedChildCollection = ReturnType<
 function projectLive(
   live: ReturnType<typeof createCollectionQuery>,
 ): Array<ProjectedParent> {
-  return [...live.values()].map((parent) => ({
-    id: parent.id,
-    group: parent.group,
-    childrenReady: parent.children.isReady(),
-    children: [...parent.children.values()]
-      .map(({ id, parentGroup, value }) => ({ id, parentGroup, value }))
-      .sort((left, right) => left.id - right.id),
-  }))
+  return [...live.values()].map((parent) => {
+    const projectChildren = (rows: Iterable<ChildRow>) =>
+      [...rows].map(({ id, parentGroup, value }) => ({
+        id,
+        parentGroup,
+        value,
+      }))
+
+    return {
+      id: parent.id,
+      group: parent.group,
+      childrenReady: parent.children.isReady(),
+      children: projectChildren(parent.children.values()),
+      arrayChildren: projectChildren(parent.arrayChildren),
+      materializedChildren: projectChildren(parent.materializedChildren),
+    }
+  })
 }
 
 function recompute(context: CollectionContext): Array<ProjectedParent> {
   return [...context.model.parents.values()]
     .sort((left, right) => left.id - right.id)
-    .map((parent) => ({
-      ...parent,
-      childrenReady: true,
-      children: [...context.model.children.values()]
+    .map((parent) => {
+      const children = [...context.model.children.values()]
         .filter((child) => child.parentGroup === parent.group)
         .sort((left, right) => left.id - right.id)
-        .map((child) => ({ ...child })),
-    }))
+        .map((child) => ({ ...child }))
+
+      return {
+        ...parent,
+        childrenReady: true,
+        children,
+        arrayChildren: children,
+        materializedChildren: children,
+      }
+    })
 }
 
 function createCollectionDriver(
   initialParents: ReadonlyArray<ParentRow>,
   initialChildren: ReadonlyArray<ChildRow>,
+  reuseChildRelation = true,
 ): TraceDriver<CollectionAction, CollectionContext> {
   return {
     setup() {
@@ -179,7 +211,11 @@ function createCollectionDriver(
       return {
         parents,
         children,
-        live: createCollectionQuery(parents.collection, children.collection),
+        live: createCollectionQuery(
+          parents.collection,
+          children.collection,
+          reuseChildRelation,
+        ),
         model: {
           parents: new Map(initialParents.map((row) => [row.id, { ...row }])),
           children: new Map(initialChildren.map((row) => [row.id, { ...row }])),
@@ -292,15 +328,89 @@ const collectionScenarioArbitrary = fc.record({
   actions: fc.array(actionArbitrary, { minLength: 1, maxLength: 16 }),
 })
 
+function enumerateActionSequences(
+  actions: ReadonlyArray<CollectionAction>,
+  maxLength: number,
+): Array<Array<CollectionAction>> {
+  const sequences: Array<Array<CollectionAction>> = [[]]
+  let frontier: Array<Array<CollectionAction>> = [[]]
+  for (let length = 1; length <= maxLength; length++) {
+    frontier = frontier.flatMap((prefix) =>
+      actions.map((action) => [...prefix, action]),
+    )
+    sequences.push(...frontier)
+  }
+  return sequences
+}
+
+const exhaustiveActions: ReadonlyArray<CollectionAction> = [
+  { type: `putParent`, row: { id: 0, group: 0 } },
+  { type: `putParent`, row: { id: 0, group: 1 } },
+  { type: `deleteParent`, id: 0 },
+  { type: `putChild`, row: { id: 10, parentGroup: 0, value: 0 } },
+  { type: `putChild`, row: { id: 10, parentGroup: 1, value: 1 } },
+  { type: `deleteChild`, id: 10 },
+]
+
 describe(`Collection-valued includes oracle`, () => {
-  fcTest.prop([collectionScenarioArbitrary], { numRuns: 30 })(
-    `matches recomputation and publishes coherent snapshots across generated relationship histories`,
+  fcTest.prop([collectionScenarioArbitrary], { numRuns: oracleRuns(30) })(
+    `keeps Collection, toArray, and materialize equivalent across generated relationship histories`,
     ({ parentGroup, childValue, actions }) =>
       runTrace({
         steps: actions,
         driver: createCollectionDriver(
           [{ id: 0, group: parentGroup }],
           [{ id: 10, parentGroup, value: childValue }],
+        ),
+        projection: collectionProjection,
+      }),
+  )
+
+  fcTest(
+    `exhaustively matches every two-step history in the smallest relationship domain`,
+    async () => {
+      const initialStates = [
+        { parents: [] as Array<ParentRow>, children: [] as Array<ChildRow> },
+        { parents: [{ id: 0, group: 0 }], children: [] as Array<ChildRow> },
+        {
+          parents: [] as Array<ParentRow>,
+          children: [{ id: 10, parentGroup: 0, value: 0 }],
+        },
+        {
+          parents: [{ id: 0, group: 0 }],
+          children: [{ id: 10, parentGroup: 0, value: 0 }],
+        },
+      ]
+      const histories = enumerateActionSequences(exhaustiveActions, 2)
+
+      for (const initial of initialStates) {
+        for (const steps of histories) {
+          try {
+            await runTrace({
+              steps,
+              driver: createCollectionDriver(initial.parents, initial.children),
+              projection: collectionProjection,
+            })
+          } catch (cause) {
+            throw new Error(
+              `Exhaustive Collection include history failed: ${JSON.stringify({ initial, steps })}`,
+              { cause },
+            )
+          }
+        }
+      }
+    },
+  )
+
+  fcTest(
+    `publishes independently compiled equivalent child relations coherently`,
+    () =>
+      runTrace({
+        steps: [{ type: `deleteChild`, id: 10 }],
+        driver: createCollectionDriver(
+          [{ id: 0, group: 0 }],
+          [{ id: 10, parentGroup: 0, value: 0 }],
+          false,
         ),
         projection: collectionProjection,
       }),
@@ -491,6 +601,14 @@ describe(`Collection-valued includes oracle`, () => {
               { id: 10, parentGroup: 1, value: 1 },
               { id: 20, parentGroup: 1, value: 2 },
             ],
+            arrayChildren: [
+              { id: 10, parentGroup: 1, value: 1 },
+              { id: 20, parentGroup: 1, value: 2 },
+            ],
+            materializedChildren: [
+              { id: 10, parentGroup: 1, value: 1 },
+              { id: 20, parentGroup: 1, value: 2 },
+            ],
           },
         ])
         expect(changes).toEqual([])
@@ -622,7 +740,7 @@ describe(`Collection-valued includes oracle`, () => {
         wideId: fc.integer({ min: 10, max: 19 }),
       }),
     ],
-    { numRuns: 20 },
+    { numRuns: oracleRuns(20) },
   )(
     `uses one raw public-key order across Collection and inline materializations`,
     async ({ smallId, wideId }) => {
@@ -691,7 +809,7 @@ describe(`Collection-valued includes oracle`, () => {
         value: fc.integer({ min: -10, max: 10 }),
       }),
     ],
-    { numRuns: 20 },
+    { numRuns: oracleRuns(20) },
   )(
     `matches recomputation through optimistic child insert and delete confirmation and rollback`,
     async ({ group, insertedId, confirmedId, value }) => {
@@ -702,12 +820,14 @@ describe(`Collection-valued includes oracle`, () => {
       const driver: TraceDriver<OptimisticAction, CollectionContext> = {
         ...base,
         async apply(action, context, checkpoint) {
+          context.publications = []
           if (action.type === `insert`) {
             const transaction = context.children.collection.insert({
               ...action.row,
             })
             context.model.children.set(action.row.id, { ...action.row })
             checkpoint()
+            context.publications = []
             if (action.settlement === `confirm`) {
               context.children.write(`insert`, action.row)
               context.children.resolveSync()
@@ -732,6 +852,7 @@ describe(`Collection-valued includes oracle`, () => {
           const transaction = context.children.collection.delete(action.id)
           context.model.children.delete(action.id)
           checkpoint()
+          context.publications = []
           if (action.settlement === `confirm`) {
             context.children.write(`delete`, previous)
             context.children.resolveSync()

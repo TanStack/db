@@ -531,6 +531,8 @@ export function powerSyncCollectionOptions<
       function runOnDemandSync() {
         const unloadSubsetCallbacks = new Map<LoadSubsetOptions, CleanupFn>()
         const releasedSubsets = new WeakSet<LoadSubsetOptions>()
+        let stopped = false
+        const hasStopped = () => stopped
 
         start().catch((error) =>
           database.logger.error(
@@ -546,9 +548,15 @@ export function powerSyncCollectionOptions<
         const loadSubset = async (
           options?: LoadSubsetOptions,
         ): Promise<void> => {
+          if (hasStopped()) return
+
           if (options) {
             activeWhereExpressions.push(options.where)
             const cleanup = await restConfig.onLoadSubset?.(options)
+            if (hasStopped()) {
+              cleanup?.()
+              return
+            }
             if (cleanup) {
               if (releasedSubsets.has(options) || options.signal?.aborted) {
                 cleanup()
@@ -686,12 +694,14 @@ export function powerSyncCollectionOptions<
 
         return {
           cleanup: () => {
+            stopped = true
             database.logger.info(
               `Sync has been stopped for ${viewName} into ${trackedTableName}`,
             )
             abortController.abort()
             for (const cleanup of unloadSubsetCallbacks.values()) cleanup()
             unloadSubsetCallbacks.clear()
+            activeWhereExpressions.length = 0
           },
           loadSubset: (options: LoadSubsetOptions) => loadSubset(options),
           unloadSubset: (options: LoadSubsetOptions) => unloadSubset(options),

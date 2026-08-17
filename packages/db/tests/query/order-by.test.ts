@@ -1947,6 +1947,39 @@ function createOrderByTests(autoIndex: `off` | `eager`): void {
       )
 
       itWhenAutoIndex(
+        `loads an ordered self-join through the ordered alias`,
+        async () => {
+          const collection = createLiveQueryCollection((q) =>
+            q
+              .from({ employee: employeesCollection })
+              .join({ manager: employeesCollection }, ({ employee, manager }) =>
+                eq(employee.id, manager.id),
+              )
+              .orderBy(({ manager }) => manager.name, `asc`)
+              .limit(3)
+              .select(({ employee, manager }) => ({
+                id: employee.id,
+                employeeName: employee.name,
+                managerName: manager.name,
+              })),
+          )
+
+          await collection.preload()
+
+          expect(
+            Array.from(collection.values()).map((row) => [
+              row.employeeName,
+              row.managerName,
+            ]),
+          ).toEqual([
+            [`Alice`, `Alice`],
+            [`Bob`, `Bob`],
+            [`Charlie`, `Charlie`],
+          ])
+        },
+      )
+
+      itWhenAutoIndex(
         `optimizes single-column orderBy when passed as array with single element`,
         async () => {
           // Patch getConfig to expose the builder on the returned config for test access
