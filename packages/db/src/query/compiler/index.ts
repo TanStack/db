@@ -179,7 +179,8 @@ export function compileQuery(
   childCorrelationField?: PropRef,
 ): CompilationResult {
   // Check if the original raw query has already been compiled
-  const cachedResult = cache.get(rawQuery)
+  const cachedResult =
+    parentKeyStream === undefined ? cache.get(rawQuery) : undefined
   if (cachedResult) {
     return cachedResult
   }
@@ -292,9 +293,7 @@ export function compileQuery(
           tagged.__parentContext = parentSide
         }
         const effectiveKey =
-          parentSide != null
-            ? `${String(childKey)}::${JSON.stringify(parentSide)}`
-            : childKey
+          parentSide != null ? serializeValue([childKey, parentSide]) : childKey
         return [effectiveKey, tagged]
       }),
     )
@@ -359,9 +358,7 @@ export function compileQuery(
           namespaced.__parentContext = parentSide
         }
         const effectiveKey =
-          parentSide != null
-            ? `${String(childKey)}::${serializeValue(parentSide)}`
-            : childKey
+          parentSide != null ? serializeValue([childKey, parentSide]) : childKey
         return [effectiveKey, namespaced]
       }),
     ) as NamespacedAndKeyedStream
@@ -1023,7 +1020,7 @@ export function compileQuery(
       aliasRemapping,
       includes: includesResults.length > 0 ? includesResults : undefined,
     }
-    cache.set(rawQuery, compilationResult)
+    if (parentKeyStream === undefined) cache.set(rawQuery, compilationResult)
 
     return compilationResult
   } else if (query.limit !== undefined || query.offset !== undefined) {
@@ -1069,7 +1066,7 @@ export function compileQuery(
     aliasRemapping,
     includes: includesResults.length > 0 ? includesResults : undefined,
   }
-  cache.set(rawQuery, compilationResult)
+  if (parentKeyStream === undefined) cache.set(rawQuery, compilationResult)
 
   return compilationResult
 }
@@ -1234,6 +1231,12 @@ function validateQueryStructure(
       if (joinClause.from.type === `queryRef`) {
         validateQueryStructure(joinClause.from.query, combinedAliases)
       }
+    }
+  }
+
+  if (query.select) {
+    for (const { subquery } of extractIncludesFromSelect(query.select)) {
+      validateQueryStructure(subquery.query, combinedAliases)
     }
   }
 }

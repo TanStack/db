@@ -303,8 +303,9 @@ export type LoadSubsetOptions = {
    */
   offset?: number
   /**
-   * Aborted when this exact subset request is no longer current. Async sync
-   * adapters must check the signal before installing fetched rows.
+   * Aborted when this exact subset request is no longer current. Cancellation
+   * is cooperative: async sync adapters must check the signal immediately
+   * before installing a baseline or later request-scoped rows.
    */
   signal?: AbortSignal
   /**

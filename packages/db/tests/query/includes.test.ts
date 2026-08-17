@@ -6,11 +6,13 @@ import {
   count,
   createLiveQueryCollection,
   eq,
+  gte,
   materialize,
   toArray,
 } from '../../src/query/index.js'
 import { createCollection } from '../../src/collection/index.js'
 import { CleanupQueue } from '../../src/collection/cleanup-queue.js'
+import { BTreeIndex } from '../../src/indexes/btree-index.js'
 import { localOnlyCollectionOptions } from '../../src/local-only.js'
 import {
   flushPromises,
@@ -357,6 +359,14 @@ describe(`includes subqueries`, () => {
       const items = collection.get(1)!.items
       expect(items).toBeDefined()
       expect(plainRows(items)).toEqual([])
+      expect(items.isReady()).toBe(true)
+      let preloadSettled = false
+      const preload = items.preload().then(() => {
+        preloadSettled = true
+      })
+      await flushPromises()
+      expect(preloadSettled).toBe(true)
+      await preload
     })
   })
 
@@ -1252,6 +1262,204 @@ describe(`includes subqueries`, () => {
       } finally {
         facadeSubscription.unsubscribe()
         rootSubscription.unsubscribe()
+      }
+    })
+
+    it(`replays existing bucket rows when their parent route becomes active`, async () => {
+      type Parent = { id: number; groupId: number }
+      type Child = { id: number; groupId: number }
+
+      const parents = createCollection(
+        mockSyncCollectionOptions<Parent>({
+          id: `late-route-parents`,
+          getKey: (parent) => parent.id,
+          initialData: [],
+        }),
+      )
+      const children = createCollection(
+        mockSyncCollectionOptions<Child>({
+          id: `late-route-children`,
+          getKey: (child) => child.id,
+          initialData: [{ id: 10, groupId: 1 }],
+        }),
+      )
+      const collection = createLiveQueryCollection((q) =>
+        q.from({ parent: parents }).select(({ parent }) => ({
+          id: parent.id,
+          children: q
+            .from({ child: children })
+            .where(({ child }) => eq(child.groupId, parent.groupId))
+            .select(({ child }) => ({ id: child.id })),
+        })),
+      )
+
+      await collection.preload()
+      parents.utils.begin()
+      parents.utils.write({
+        type: `insert`,
+        value: { id: 1, groupId: 1 },
+      })
+      parents.utils.commit()
+
+      expect(childItems(collection.get(1)!.children)).toEqual([{ id: 10 }])
+    })
+
+    it(`does not publish facade changes when root publication fails`, async () => {
+      type Parent = { id: number; groupId: number }
+      type Child = { id: number; groupId: number }
+
+      const parents = createCollection(
+        mockSyncCollectionOptions<Parent>({
+          id: `failed-publication-parents`,
+          getKey: (parent) => parent.id,
+          initialData: [{ id: 1, groupId: 1 }],
+        }),
+      )
+      const children = createCollection(
+        mockSyncCollectionOptions<Child>({
+          id: `failed-publication-children`,
+          getKey: (child) => child.id,
+          initialData: [
+            { id: 10, groupId: 1 },
+            { id: 20, groupId: 2 },
+          ],
+        }),
+      )
+      let keyReads = 0
+      let failAt: number | undefined
+      const collection = createLiveQueryCollection({
+        query: (q) =>
+          q.from({ parent: parents }).select(({ parent }) => ({
+            id: parent.id,
+            groupId: parent.groupId,
+            children: q
+              .from({ child: children })
+              .where(({ child }) => eq(child.groupId, parent.groupId))
+              .select(({ child }) => ({ id: child.id })),
+          })),
+        getKey: (row) => {
+          keyReads += 1
+          if (keyReads === failAt) throw new Error(`root publication failed`)
+          return row.id
+        },
+      })
+
+      await collection.preload()
+      const oldFacade = collection.get(1)!.children
+      const facadeChanges = vi.fn()
+      const subscription = oldFacade.subscribeChanges(facadeChanges, {
+        includeInitialState: false,
+      })
+
+      try {
+        keyReads = 0
+        failAt = 3
+        expect(() => {
+          parents.utils.begin()
+          parents.utils.write({
+            type: `update`,
+            previousValue: { id: 1, groupId: 1 },
+            value: { id: 1, groupId: 2 },
+          })
+          parents.utils.commit()
+        }).toThrow(`root publication failed`)
+
+        expect(collection.get(1)!.groupId).toBe(1)
+        expect(collection.get(1)!.children).toBe(oldFacade)
+        expect(childItems(oldFacade)).toEqual([{ id: 10 }])
+        expect(facadeChanges).not.toHaveBeenCalled()
+      } finally {
+        subscription.unsubscribe()
+      }
+    })
+
+    it(`publishes coherent includes through immediate ordered load-more passes`, async () => {
+      type Parent = { id: number; groupId: number; rank: number }
+      type Child = { id: number; groupId: number }
+
+      const sourceRows: Array<Parent> = [
+        { id: 1, groupId: 1, rank: 1 },
+        { id: 2, groupId: 2, rank: 2 },
+        { id: 3, groupId: 3, rank: 3 },
+      ]
+      let nextRow = 0
+      let loadCount = 0
+      const parents = createCollection<Parent>({
+        id: `ordered-publication-parents`,
+        getKey: (parent) => parent.id,
+        syncMode: `on-demand`,
+        autoIndex: `eager`,
+        defaultIndexType: BTreeIndex,
+        sync: {
+          sync: ({ begin, write, commit, markReady }) => ({
+            loadSubset: () => {
+              loadCount += 1
+              const row = sourceRows[nextRow++]
+              if (row) {
+                begin()
+                write({ type: `insert`, value: row })
+                commit()
+              }
+              markReady()
+              return true
+            },
+          }),
+        },
+      })
+      const children = createCollection(
+        mockSyncCollectionOptions<Child>({
+          id: `ordered-publication-children`,
+          getKey: (child) => child.id,
+          initialData: [
+            { id: 10, groupId: 1 },
+            { id: 20, groupId: 2 },
+            { id: 30, groupId: 3 },
+          ],
+        }),
+      )
+      const collection = createLiveQueryCollection((q) =>
+        q
+          .from({ parent: parents })
+          .orderBy(({ parent }) => parent.rank)
+          .limit(3)
+          .select(({ parent }) => ({
+            id: parent.id,
+            children: q
+              .from({ child: children })
+              .where(({ child }) => eq(child.groupId, parent.groupId))
+              .select(({ child }) => ({ id: child.id })),
+          })),
+      )
+      const observations: Array<
+        Array<{ id: number; childIds: Array<number> }>
+      > = []
+      const readObservation = () =>
+        [...collection.values()].map((parent) => ({
+          id: parent.id,
+          childIds: plainRows(parent.children).map((child) => child.id),
+        }))
+      const subscription = collection.subscribeChanges(
+        () => {
+          observations.push(readObservation())
+        },
+        { includeInitialState: false },
+      )
+
+      try {
+        await collection.preload()
+        expect(loadCount).toBe(3)
+        for (const observation of observations) {
+          for (const parent of observation) {
+            expect(parent.childIds).toEqual([parent.id * 10])
+          }
+        }
+        expect(readObservation()).toEqual([
+          { id: 1, childIds: [10] },
+          { id: 2, childIds: [20] },
+          { id: 3, childIds: [30] },
+        ])
+      } finally {
+        subscription.unsubscribe()
       }
     })
 
@@ -2872,6 +3080,265 @@ describe(`includes subqueries`, () => {
       expect([...aliceItems.keys()]).toEqual([10])
       expect(aliceItems.get(10)?.$key).toBe(10)
       expect([...bobItems.keys()]).toEqual([])
+    })
+
+    it(`keeps the same child public key in distinct parent-context buckets`, async () => {
+      type ScoreParent = { id: number; groupId: number; minimumScore: number }
+      type ScoreChild = {
+        id: number
+        groupId: number
+        score: number
+        label: string
+      }
+
+      const parents = createCollection(
+        mockSyncCollectionOptions<ScoreParent>({
+          id: `same-child-context-parents`,
+          getKey: (parent) => parent.id,
+          initialData: [
+            { id: 1, groupId: 1, minimumScore: 10 },
+            { id: 2, groupId: 1, minimumScore: 20 },
+          ],
+        }),
+      )
+      const children = createCollection(
+        mockSyncCollectionOptions<ScoreChild>({
+          id: `same-child-context-children`,
+          getKey: (child) => child.id,
+          initialData: [{ id: 7, groupId: 1, score: 30, label: `seven` }],
+        }),
+      )
+
+      const collection = createLiveQueryCollection((q) =>
+        q.from({ parent: parents }).select(({ parent }) => ({
+          id: parent.id,
+          children: materialize(
+            q
+              .from({ child: children })
+              .where(({ child }) => eq(child.groupId, parent.groupId))
+              .where(({ child }) => gte(child.score, parent.minimumScore))
+              .select(({ child }) => ({ id: child.id, score: child.score })),
+          ),
+          firstChild: materialize(
+            q
+              .from({ firstChild: children })
+              .where(({ firstChild }) => eq(firstChild.groupId, parent.groupId))
+              .where(({ firstChild }) =>
+                gte(firstChild.score, parent.minimumScore),
+              )
+              .select(({ firstChild }) => ({ id: firstChild.id }))
+              .findOne(),
+          ),
+          labels: concat(
+            toArray(
+              q
+                .from({ labelChild: children })
+                .where(({ labelChild }) =>
+                  eq(labelChild.groupId, parent.groupId),
+                )
+                .where(({ labelChild }) =>
+                  gte(labelChild.score, parent.minimumScore),
+                )
+                .select(({ labelChild }) => labelChild.label),
+            ),
+          ),
+        })),
+      )
+
+      await collection.preload()
+
+      expect(toTree(collection)).toEqual([
+        {
+          id: 1,
+          children: [{ id: 7, score: 30 }],
+          firstChild: { id: 7 },
+          labels: `seven`,
+        },
+        {
+          id: 2,
+          children: [{ id: 7, score: 30 }],
+          firstChild: { id: 7 },
+          labels: `seven`,
+        },
+      ])
+
+      parents.utils.begin()
+      parents.utils.write({
+        type: `update`,
+        previousValue: { id: 2, groupId: 1, minimumScore: 20 },
+        value: { id: 2, groupId: 2, minimumScore: 20 },
+      })
+      parents.utils.commit()
+      children.utils.begin()
+      children.utils.write({
+        type: `update`,
+        previousValue: { id: 7, groupId: 1, score: 30, label: `seven` },
+        value: { id: 7, groupId: 2, score: 30, label: `seven` },
+      })
+      children.utils.commit()
+
+      expect(toTree(collection)).toEqual([
+        { id: 1, children: [], firstChild: undefined, labels: `` },
+        {
+          id: 2,
+          children: [{ id: 7, score: 30 }],
+          firstChild: { id: 7 },
+          labels: `seven`,
+        },
+      ])
+    })
+
+    it(`uses canonical identity for non-JSON parent context values`, async () => {
+      type TaggedParent = { id: number; groupId: number; tag: bigint }
+      type TaggedChild = {
+        id: number | string
+        groupId: number
+        tag: bigint
+        metadataId: number
+      }
+      type Metadata = { id: number; groupId: number; tag: bigint }
+
+      const parents = createCollection(
+        mockSyncCollectionOptions<TaggedParent>({
+          id: `bigint-context-parents`,
+          getKey: (parent) => parent.id,
+          initialData: [{ id: 1, groupId: 1, tag: 1n }],
+        }),
+      )
+      const children = createCollection(
+        mockSyncCollectionOptions<TaggedChild>({
+          id: `bigint-context-children`,
+          getKey: (child) => child.id,
+          initialData: [
+            { id: 1, groupId: 1, tag: 1n, metadataId: 101 },
+            { id: `1`, groupId: 1, tag: 1n, metadataId: 102 },
+          ],
+        }),
+      )
+      const metadataRows = createCollection(
+        mockSyncCollectionOptions<Metadata>({
+          id: `bigint-context-metadata`,
+          getKey: (row) => row.id,
+          initialData: [
+            { id: 101, groupId: 1, tag: 1n },
+            { id: 102, groupId: 1, tag: 1n },
+          ],
+        }),
+      )
+
+      const collection = createLiveQueryCollection((q) =>
+        q.from({ parent: parents }).select(({ parent }) => ({
+          id: parent.id,
+          children: materialize(
+            q
+              .from({ child: children })
+              .where(({ child }) => eq(child.groupId, parent.groupId))
+              .where(({ child }) => eq(child.tag, parent.tag))
+              .select(({ child }) => ({ id: child.id })),
+          ),
+          joinedChildren: materialize(
+            q
+              .from({ joinedChild: children })
+              .join(
+                { metadata: metadataRows },
+                ({ joinedChild, metadata }) =>
+                  eq(joinedChild.metadataId, metadata.id),
+                `inner`,
+              )
+              .where(({ metadata }) => eq(metadata.groupId, parent.groupId))
+              .where(({ metadata }) => eq(metadata.tag, parent.tag))
+              .select(({ joinedChild }) => ({ id: joinedChild.id })),
+          ),
+        })),
+      )
+
+      await collection.preload()
+      const [row] = toTree(collection)
+      const typedIds = (values: Array<{ id: number | string }>) =>
+        values.map(({ id }) => `${typeof id}:${id}`).sort()
+      expect(row!.id).toBe(1)
+      expect(typedIds(row!.children)).toEqual([`number:1`, `string:1`])
+      expect(typedIds(row!.joinedChildren)).toEqual([`number:1`, `string:1`])
+    })
+
+    it(`keeps relation-local identity through Collection and nested includes`, async () => {
+      type Parent = { id: number; groupId: number; minimumScore: number }
+      type Child = { id: number; groupId: number; score: number }
+      type Note = { id: number; childId: number }
+
+      const parents = createCollection(
+        mockSyncCollectionOptions<Parent>({
+          id: `nested-context-parents`,
+          getKey: (parent) => parent.id,
+          initialData: [
+            { id: 1, groupId: 1, minimumScore: 10 },
+            { id: 2, groupId: 1, minimumScore: 20 },
+          ],
+        }),
+      )
+      const children = createCollection(
+        mockSyncCollectionOptions<Child>({
+          id: `nested-context-children`,
+          getKey: (child) => child.id,
+          initialData: [{ id: 7, groupId: 1, score: 30 }],
+        }),
+      )
+      const notes = createCollection(
+        mockSyncCollectionOptions<Note>({
+          id: `nested-context-notes`,
+          getKey: (note) => note.id,
+          initialData: [{ id: 70, childId: 7 }],
+        }),
+      )
+
+      const collection = createLiveQueryCollection((q) =>
+        q.from({ parent: parents }).select(({ parent }) => ({
+          id: parent.id,
+          children: q
+            .from({ child: children })
+            .where(({ child }) => eq(child.groupId, parent.groupId))
+            .where(({ child }) => gte(child.score, parent.minimumScore))
+            .select(({ child }) => ({
+              id: child.id,
+              notes: materialize(
+                q
+                  .from({ note: notes })
+                  .where(({ note }) => eq(note.childId, child.id))
+                  .select(({ note }) => ({ id: note.id })),
+              ),
+            })),
+        })),
+      )
+
+      await collection.preload()
+
+      const firstChildren = collection.get(1)!.children
+      const secondChildren = collection.get(2)!.children
+      expect([...firstChildren.keys()]).toEqual([7])
+      expect([...secondChildren.keys()]).toEqual([7])
+      expect(stripVirtualProps(firstChildren.get(7))).toEqual({
+        id: 7,
+        notes: [{ id: 70 }],
+      })
+      expect(stripVirtualProps(secondChildren.get(7))).toEqual({
+        id: 7,
+        notes: [{ id: 70 }],
+      })
+
+      children.utils.begin()
+      children.utils.write({
+        type: `update`,
+        previousValue: { id: 7, groupId: 1, score: 30 },
+        value: { id: 7, groupId: 1, score: 15 },
+      })
+      children.utils.commit()
+
+      expect([...firstChildren.keys()]).toEqual([7])
+      expect([...secondChildren.keys()]).toEqual([])
+      expect(stripVirtualProps(firstChildren.get(7))).toEqual({
+        id: 7,
+        notes: [{ id: 70 }],
+      })
     })
 
     it(`shared correlation key with parent filter + orderBy + limit`, async () => {

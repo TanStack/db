@@ -13,6 +13,7 @@ import { CollectionSyncManager } from './sync'
 import { CollectionIndexesManager } from './indexes'
 import { CollectionMutationsManager } from './mutations'
 import { CollectionEventsManager } from './events.js'
+import type { PublicationDeferral } from './changes'
 import type { CollectionSubscription } from './subscription'
 import type {
   AllCollectionEvents,
@@ -448,7 +449,7 @@ export class CollectionImpl<
   }
 
   /** Defer subscriber events until a coherent multi-Collection commit ends. */
-  public _deferPublication(): () => void {
+  public _deferPublication(): PublicationDeferral {
     return this._changes.deferPublication()
   }
 

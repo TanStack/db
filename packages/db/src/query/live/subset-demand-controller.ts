@@ -9,6 +9,8 @@ type DemandSegment = {
   keys: Map<string, unknown>
   where: BasicExpression<boolean>
   abortController: AbortController
+  ready: Promise<void> | true
+  state: `pending` | `settled` | `failed`
 }
 
 type DemandState = {
@@ -19,7 +21,7 @@ type DemandState = {
 export type DemandUpdate = {
   changed: boolean
   empty: boolean
-  loadResults: Array<Promise<void> | true>
+  ready: Promise<void> | true
 }
 
 /**
@@ -37,34 +39,38 @@ export class SubsetDemandController {
   ): DemandUpdate {
     const nextKeys = canonicalizeKeys(keys)
     const previous = this.states.get(plan.id)
-    if (previous && equalKeySets(previous.keys, nextKeys)) {
-      return { changed: false, empty: nextKeys.size === 0, loadResults: [] }
+    const hasFailedCoverage = previous?.segments.some(
+      (segment) =>
+        segment.state === `failed` && intersects(segment.keys, nextKeys),
+    )
+    if (
+      previous &&
+      equalKeySets(previous.keys, nextKeys) &&
+      !hasFailedCoverage
+    ) {
+      return { changed: false, empty: nextKeys.size === 0, ready: true }
     }
 
-    const loadResults: Array<Promise<void> | true> = []
     const segments: Array<DemandSegment> = []
 
     for (const segment of previous?.segments ?? []) {
-      if ([...segment.keys.keys()].every((key) => nextKeys.has(key))) {
+      if (segment.state !== `failed` && intersects(segment.keys, nextKeys)) {
         segments.push(segment)
         continue
       }
 
-      const retained = new Map(
-        [...segment.keys].filter(([key]) => nextKeys.has(key)),
-      )
-      if (retained.size > 0) {
-        segments.push(requestSegment(subscription, plan, retained, loadResults))
-      }
       segment.abortController.abort()
       subscription.releaseSnapshot(segment.where)
     }
 
+    const coveredKeys = new Set(
+      segments.flatMap((segment) => [...segment.keys.keys()]),
+    )
     const added = new Map(
-      [...nextKeys].filter(([key]) => !previous?.keys.has(key)),
+      [...nextKeys].filter(([key]) => !coveredKeys.has(key)),
     )
     if (added.size > 0) {
-      segments.push(requestSegment(subscription, plan, added, loadResults))
+      segments.push(requestSegment(subscription, plan, added))
     }
 
     if (nextKeys.size === 0) {
@@ -73,7 +79,18 @@ export class SubsetDemandController {
       this.states.set(plan.id, { keys: nextKeys, segments })
     }
 
-    return { changed: true, empty: nextKeys.size === 0, loadResults }
+    const activeSegments = segments.filter((segment) =>
+      intersects(segment.keys, nextKeys),
+    )
+    const pending = activeSegments
+      .map((segment) => segment.ready)
+      .filter((ready): ready is Promise<void> => ready instanceof Promise)
+    return {
+      changed: true,
+      empty: nextKeys.size === 0,
+      ready:
+        pending.length > 0 ? Promise.all(pending).then(() => undefined) : true,
+    }
   }
 
   clear(): void {
@@ -97,19 +114,46 @@ function equalKeySets(
   )
 }
 
+function intersects(
+  left: Map<string, unknown>,
+  right: Map<string, unknown>,
+): boolean {
+  return [...left.keys()].some((key) => right.has(key))
+}
+
 function requestSegment(
   subscription: CollectionSubscription,
   plan: LazyDemandPlan,
   keys: Map<string, unknown>,
-  loadResults: Array<Promise<void> | true>,
 ): DemandSegment {
   const where = inArray(new PropRef(plan.path), [...keys.values()])
   const abortController = new AbortController()
+  const load = { ready: true as Promise<void> | true }
   subscription.requestSnapshot({
     where,
     signal: abortController.signal,
     trackLoadSubsetPromise: false,
-    onLoadSubsetResult: (result) => loadResults.push(result),
+    onLoadSubsetResult: (result) => {
+      load.ready = result
+    },
   })
-  return { keys, where, abortController }
+  const ready = load.ready
+  const segment: DemandSegment = {
+    keys,
+    where,
+    abortController,
+    ready,
+    state: ready instanceof Promise ? `pending` : `settled`,
+  }
+  if (ready instanceof Promise) {
+    void ready.then(
+      () => {
+        segment.state = `settled`
+      },
+      () => {
+        segment.state = `failed`
+      },
+    )
+  }
+  return segment
 }

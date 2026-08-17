@@ -71,6 +71,13 @@ export type MaterializedCompilation = {
   facades: Array<BucketFacadeCompilation>
 }
 
+type RelationScope = `root` | `child`
+
+type BuiltRelations = WeakMap<
+  CompilationResult,
+  Partial<Record<RelationScope, MaterializedCompilation>>
+>
+
 let nextBucketFacadeEdgeId = 0
 
 /**
@@ -82,8 +89,13 @@ export function materializeCompilation(
   compilation: CompilationResult,
   getRootKey?: (row: any) => unknown,
 ): MaterializedCompilation {
-  const built = new WeakMap<CompilationResult, MaterializedCompilation>()
-  const materialized = materializeRelation(compilation, getRootKey, built)
+  const built: BuiltRelations = new WeakMap()
+  const materialized = materializeRelation(
+    compilation,
+    getRootKey,
+    built,
+    `root`,
+  )
   return {
     ...materialized,
     facades: dedupeFacades(materialized.facades),
@@ -93,14 +105,16 @@ export function materializeCompilation(
 function materializeRelation(
   compilation: CompilationResult,
   getKey: ((row: any) => unknown) | undefined,
-  built: WeakMap<CompilationResult, MaterializedCompilation>,
+  built: BuiltRelations,
+  scope: RelationScope,
 ): MaterializedCompilation {
-  const cached = built.get(compilation)
+  const cached = built.get(compilation)?.[scope]
   if (cached) return cached
 
   let pipeline = canonicalizeByPublicKey(
     exposeRouting(compilation.pipeline),
     getKey,
+    scope,
   )
   const facades: Array<BucketFacadeCompilation> = []
 
@@ -109,6 +123,7 @@ function materializeRelation(
       include.childCompilationResult,
       undefined,
       built,
+      `child`,
     )
     facades.push(...child.facades)
 
@@ -122,14 +137,14 @@ function materializeRelation(
         activeBuckets,
         hasOrderBy: include.hasOrderBy,
       })
-      pipeline = attachCollectionInclude(pipeline, include, edgeId)
+      pipeline = attachCollectionInclude(pipeline, include, edgeId, scope)
     } else {
-      pipeline = attachInlineInclude(pipeline, bucketRows, include)
+      pipeline = attachInlineInclude(pipeline, bucketRows, include, scope)
     }
   }
 
   const result = { pipeline, facades }
-  built.set(compilation, result)
+  built.set(compilation, { ...built.get(compilation), [scope]: result })
   return result
 }
 
@@ -161,15 +176,17 @@ function exposeRouting(pipeline: ResultStream): ResultStream {
 function canonicalizeByPublicKey(
   pipeline: ResultStream,
   getKey: ((row: any) => unknown) | undefined,
+  scope: RelationScope,
 ): ResultStream {
   return pipeline.pipe(
     map(([internalKey, rawTuple]) => {
       const tuple = rawTuple as ResultTuple
       const publicKey = getKey ? getKey(tuple[0]) : (tuple[5] ?? internalKey)
-      return [serializeValue(publicKey), { publicKey, tuple }] as [
-        string,
-        CanonicalResult,
-      ]
+      const relationKey =
+        scope === `root`
+          ? serializeValue([`root`, publicKey])
+          : serializeValue([routeKey(tuple[2], tuple[3]), publicKey])
+      return [relationKey, { publicKey, tuple }] as [string, CanonicalResult]
     }),
     reduce((values: Array<[CanonicalResult, number]>) => {
       const totalMultiplicity = values.reduce(
@@ -193,7 +210,10 @@ function canonicalizeByPublicKey(
 
       return [[visible, 1]]
     }),
-    map(([_serializedKey, { publicKey, tuple }]) => [publicKey, tuple]),
+    map(([relationKey, { publicKey, tuple }]) => [
+      scope === `root` ? publicKey : relationKey,
+      tuple,
+    ]),
   ) as ResultStream
 }
 
@@ -223,6 +243,7 @@ function attachInlineInclude(
   parentPipeline: ResultStream,
   bucketRows: IStreamBuilder<[string, BucketRow]>,
   include: IncludesCompilationResult,
+  scope: RelationScope,
 ): ResultStream {
   const bucketValues = bucketRows.pipe(
     reduce((values: Array<[BucketRow, number]>) => {
@@ -254,13 +275,13 @@ function attachInlineInclude(
     }),
     join(bucketValues, `left`),
     map(([_bucketKey, [parent, bucketValue]]) => {
-      const [value, order, correlationKey, parentContext, routing] =
+      const [value, order, correlationKey, parentContext, routing, publicKey] =
         parent!.tuple
       const edgeRouting = routing?.[include.fieldName]
       if (edgeRouting?.active !== true) {
         return [
           parent!.parentKey,
-          [value, order, correlationKey, parentContext, routing],
+          [value, order, correlationKey, parentContext, routing, publicKey],
         ]
       }
       const materialized =
@@ -273,6 +294,7 @@ function attachInlineInclude(
           correlationKey,
           parentContext,
           routing,
+          publicKey,
         ],
       ]
     }),
@@ -280,19 +302,23 @@ function attachInlineInclude(
   // A route move can make the join emit matched and empty-bucket deltas for
   // the same parent key in one graph turn. Reduce those deltas back to the one
   // canonical parent row before the next include or the public output sees it.
-  return canonicalizeByPublicKey(routedParents as ResultStream, undefined)
+  return canonicalizeByPublicKey(
+    routedParents as ResultStream,
+    undefined,
+    scope,
+  )
 }
 
 function createBucketRows(
   childPipeline: ResultStream,
 ): IStreamBuilder<[string, BucketRow]> {
   return childPipeline.pipe(
-    map(([publicKey, rawTuple]) => {
-      const [value, order, correlationKey, parentContext] =
+    map(([internalKey, rawTuple]) => {
+      const [value, order, correlationKey, parentContext, , publicKey] =
         rawTuple as ResultTuple
       return [
         routeKey(correlationKey, parentContext),
-        { publicKey, value, order },
+        { publicKey: publicKey ?? internalKey, value, order },
       ] as [string, BucketRow]
     }),
   )
@@ -302,6 +328,7 @@ function attachCollectionInclude(
   parentPipeline: ResultStream,
   include: IncludesCompilationResult,
   edgeId: string,
+  scope: RelationScope,
 ): ResultStream {
   const routedParents = parentPipeline.pipe(
     map(([parentKey, rawTuple]) => {
@@ -320,11 +347,16 @@ function attachCollectionInclude(
           tuple[2],
           tuple[3],
           tuple[4],
+          tuple[5],
         ],
       ]
     }),
   )
-  return canonicalizeByPublicKey(routedParents as ResultStream, undefined)
+  return canonicalizeByPublicKey(
+    routedParents as ResultStream,
+    undefined,
+    scope,
+  )
 }
 
 function createActiveBuckets(

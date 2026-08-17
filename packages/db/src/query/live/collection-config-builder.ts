@@ -161,6 +161,7 @@ export class CollectionConfigBuilder<
     string,
     { generation: number; settled: boolean }
   >()
+  private readonly demandGenerations = new Map<string, number>()
   // Map of collection IDs to optimizable ORDER BY state
   optimizableOrderByCollections: Record<string, OrderByOptimizationInfo> = {}
 
@@ -334,7 +335,8 @@ export class CollectionConfigBuilder<
   }
 
   beginDemand(planId: string): number {
-    const generation = (this.activeDemands.get(planId)?.generation ?? 0) + 1
+    const generation = (this.demandGenerations.get(planId) ?? 0) + 1
+    this.demandGenerations.set(planId, generation)
     this.activeDemands.set(planId, { generation, settled: false })
     return generation
   }
@@ -344,6 +346,13 @@ export class CollectionConfigBuilder<
     if (!demand || demand.generation !== generation || demand.settled) return
     demand.settled = true
     this.maybeRunGraphFn?.()
+  }
+
+  failDemand(planId: string, generation: number, error: unknown): void {
+    const demand = this.activeDemands.get(planId)
+    if (!demand || demand.generation !== generation) return
+    const message = error instanceof Error ? error.message : String(error)
+    this.transitionToError(`Subset demand '${planId}' failed: ${message}`)
   }
 
   retireDemand(planId: string): void {
@@ -685,6 +694,7 @@ export class CollectionConfigBuilder<
 
       // Reset lazy source alias state
       this.lazySources.clear()
+      this.demandGenerations.clear()
       this.activeDemands.clear()
       this.optimizableOrderByCollections = {}
       this.lazySourcesCallbacks = {}
@@ -802,7 +812,10 @@ export class CollectionConfigBuilder<
         return
       }
 
-      const resumeFacadePublications = bucketFacades.flush()
+      const facadePublication = bucketFacades.flush()
+      const rootPublication = hasParentChanges
+        ? config.collection._deferPublication()
+        : undefined
       try {
         const changesToApply: Map<unknown, Changes<TResult>> = new Map(
           [...pendingChanges].map(([key, changes]) => {
@@ -827,10 +840,27 @@ export class CollectionConfigBuilder<
           }
           commit()
         }
-      } finally {
-        resumeFacadePublications()
+      } catch (error) {
+        pendingChanges = new Map()
+        rootPublication?.discard()
+        facadePublication.rollback()
+        throw error
       }
       pendingChanges = new Map()
+
+      let publicationError: unknown
+      for (const publish of [
+        rootPublication?.publish,
+        facadePublication.publish,
+      ]) {
+        if (!publish) continue
+        try {
+          publish()
+        } catch (error) {
+          publicationError ??= error
+        }
+      }
+      if (publicationError !== undefined) throw publicationError
     }
 
     graph.finalize()

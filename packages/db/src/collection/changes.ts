@@ -13,6 +13,11 @@ import type { CollectionImpl } from './index.js'
 import type { CollectionStateManager } from './state.js'
 import type { WithVirtualProps } from '../virtual-props.js'
 
+export type PublicationDeferral = {
+  publish: () => void
+  discard: () => void
+}
+
 export class CollectionChangesManager<
   TOutput extends object = Record<string, unknown>,
   TKey extends string | number = string | number,
@@ -30,6 +35,7 @@ export class CollectionChangesManager<
   public batchedEvents: Array<ChangeMessage<TOutput, TKey>> = []
   public shouldBatchEvents = false
   private publicationDeferralDepth = 0
+  private discardDeferredPublications = false
   private deferredPublications: Array<{
     changes: Array<ChangeMessage<TOutput, TKey>>
     layoutChanged: boolean
@@ -138,24 +144,34 @@ export class CollectionChangesManager<
    * installs all of its visible state. State and indexes still commit at their
    * normal transaction boundaries.
    */
-  public deferPublication(): () => void {
+  public deferPublication(): PublicationDeferral {
     this.publicationDeferralDepth++
-    let resumed = false
+    let closed = false
 
-    return () => {
-      if (resumed) return
-      resumed = true
+    const close = (discard: boolean) => {
+      if (closed) return
+      closed = true
       if (this.publicationDeferralDepth === 0) return
+      this.discardDeferredPublications ||= discard
 
       this.publicationDeferralDepth--
       if (this.publicationDeferralDepth > 0) return
 
       const publications = this.deferredPublications
       this.deferredPublications = []
+      if (this.discardDeferredPublications) {
+        this.discardDeferredPublications = false
+        return
+      }
       this.publishEvents(
         publications.flatMap(({ changes }) => changes),
         publications.some(({ layoutChanged }) => layoutChanged),
       )
+    }
+
+    return {
+      publish: () => close(false),
+      discard: () => close(true),
     }
   }
 

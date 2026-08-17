@@ -78,8 +78,10 @@ normal Collection transaction boundary owns public publication.
 
 ## Identity
 
-Aliases are lexical query-language names. They are not runtime identities.
-Compilation assigns opaque IDs to the plan:
+Aliases are lexical query-language names. They are not runtime identities. The
+query builder requires collection aliases to be unique across one query tree,
+including includes; shadowing is rejected before compilation. Compilation then
+assigns opaque IDs to the accepted plan:
 
 ```ts
 type SourceId = Brand<string, 'SourceId'>
@@ -87,8 +89,8 @@ type RelationNodeId = Brand<string, 'RelationNodeId'>
 type MaterializationEdgeId = Brand<string, 'MaterializationEdgeId'>
 ```
 
-Alias text may remain as debug metadata. Alpha-renaming an alias cannot change
-the compiled graph or its result.
+Alias text may remain as debug metadata. Renaming an accepted alias to another
+unused name cannot change the compiled graph or its result.
 
 A `CanonicalCorrelationKey` is the canonical tuple of every evaluated
 parent-dependent value that can affect the child plan. This includes values
@@ -355,12 +357,13 @@ rows themselves.
 
 The source contract stays abstract: a demand request eventually establishes
 one coherent baseline and identifies when that baseline is complete. Each
-request receives an `AbortSignal`. Replacing or releasing its demand aborts
-that signal, and the source must check it before installing fetched rows. An
-aborted request cannot install or settle after its graph or request generation
-becomes obsolete. Buffering, snapshot tokens, shape offsets, Collection
-transactions, and local indexes are source-specific ways to satisfy that
-contract; they are not materializer state.
+request receives an `AbortSignal`. Cancellation is cooperative at this source
+boundary. Core guarantees that an obsolete request cannot settle current
+readiness; the source must honor the signal immediately before installing a
+baseline or later request-scoped result. Core cannot prevent an arbitrary
+adapter from writing after it ignores that signal. Buffering, snapshot tokens,
+shape offsets, Collection transactions, and local indexes are source-specific
+ways to satisfy that contract; they are not materializer state.
 
 This project uses a single graph-run order rather than multi-dimensional
 timely-dataflow frontiers. Do not introduce a general timestamp or frontier
@@ -433,7 +436,8 @@ units. Inline materialization must not create recursive Collection machinery.
 
 ## Normative laws
 
-1. **Alpha-renaming:** lexical alias names cannot change results.
+1. **Alpha-renaming:** changing any accepted alias to another unused name cannot
+   change results; alias shadowing within a query tree is rejected.
 2. **Contribution conservation:** a public row exists exactly when its reduced
    supporting weight and collision policy produce one.
 3. **Batch partition:** equivalent valid split and atomic deliveries converge.
@@ -441,8 +445,9 @@ units. Inline materialization must not create recursive Collection machinery.
    equal current materialization-cell values.
 5. **Total materialization:** every active inline cell has exactly one value,
    including its mode's empty value when its bucket has no rows.
-6. **Stale demand:** an obsolete graph or demand generation can neither publish
-   rows nor settle current readiness.
+6. **Stale demand:** an obsolete graph or demand generation cannot settle
+   current readiness, and a conforming source cannot publish its request-scoped
+   rows after cancellation.
 7. **Nested propagation:** every materialized relation consumes the fully
    materialized output relation of its children.
 8. **Publication:** reads, events, and downstream queries observe the same

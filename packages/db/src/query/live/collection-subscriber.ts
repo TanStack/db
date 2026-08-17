@@ -172,12 +172,11 @@ export class CollectionSubscriber<
     }
 
     const generation = this.collectionConfigBuilder.beginDemand(plan.id)
-    const pending = update.loadResults.filter(
-      (result): result is Promise<void> => result instanceof Promise,
-    )
-    if (pending.length > 0) {
-      void Promise.allSettled(pending).then(() =>
-        this.collectionConfigBuilder.settleDemand(plan.id, generation),
+    if (update.ready instanceof Promise) {
+      void update.ready.then(
+        () => this.collectionConfigBuilder.settleDemand(plan.id, generation),
+        (error) =>
+          this.collectionConfigBuilder.failDemand(plan.id, generation, error),
       )
     } else {
       this.collectionConfigBuilder.settleDemand(plan.id, generation)

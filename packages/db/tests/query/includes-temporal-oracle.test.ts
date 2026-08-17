@@ -1,7 +1,8 @@
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 import { createCollection } from '../../src/collection/index.js'
 import { createDeferred } from '../../src/deferred.js'
 import { extractSimpleComparisons } from '../../src/query/expression-helpers.js'
+import { DeduplicatedLoadSubset } from '../../src/query/subset-dedupe.js'
 import {
   createLiveQueryCollection,
   eq,
@@ -491,6 +492,290 @@ async function expectObsoleteDemandCannotPublishAfterReactivation(): Promise<voi
   }
 }
 
+function createMutablePosts(
+  initial: ReadonlyArray<Post>,
+  options: { markReadyInitially?: boolean } = {},
+): {
+  collection: Collection<Post>
+  write: (type: `insert` | `delete`, post: Post) => void
+  markReady: () => void
+} {
+  let writePost: (type: `insert` | `delete`, post: Post) => void = () => {
+    throw new Error(`Post collection has not started`)
+  }
+  let markPostsReady: () => void = () => {
+    throw new Error(`Post collection has not started`)
+  }
+  const collection = createCollection<Post>({
+    id: nextCollectionId(`temporal-mutable-posts`),
+    getKey: (post) => post.id,
+    sync: {
+      sync: ({ begin, write, commit, markReady }) => {
+        begin()
+        for (const post of initial) write({ type: `insert`, value: post })
+        commit()
+        if (options.markReadyInitially !== false) markReady()
+        writePost = (type, post) => {
+          begin()
+          write({ type, value: post })
+          commit()
+        }
+        markPostsReady = markReady
+      },
+    },
+  })
+  return {
+    collection,
+    write: (type, post) => writePost(type, post),
+    markReady: () => markPostsReady(),
+  }
+}
+
+function createPendingComments(): {
+  collection: Collection<Comment>
+  requests: Array<{
+    deferred: Deferred<void>
+    outcome: Promise<void>
+    keys: Array<number>
+    signal: AbortSignal | undefined
+  }>
+} {
+  const requests: Array<{
+    deferred: Deferred<void>
+    outcome: Promise<void>
+    keys: Array<number>
+    signal: AbortSignal | undefined
+  }> = []
+  const collection = createCollection<Comment>({
+    id: nextCollectionId(`temporal-pending-coverage-comments`),
+    getKey: (comment) => comment.id,
+    syncMode: `on-demand`,
+    sync: {
+      sync: ({ markReady }) => ({
+        loadSubset: (options) => {
+          const deferred = createDeferred<void>()
+          const outcome = deferred.promise.then(() => {
+            if (!options.signal?.aborted) markReady()
+          })
+          requests.push({
+            deferred,
+            outcome,
+            keys: correlationKeys([options], `postId`),
+            signal: options.signal,
+          })
+          return outcome
+        },
+      }),
+    },
+  })
+  return { collection, requests }
+}
+
+function createPostsWithCommentsLive(
+  posts: Collection<Post>,
+  comments: Collection<Comment>,
+) {
+  return createLiveQueryCollection((q) =>
+    q.from({ post: posts }).select(({ post }) => ({
+      id: post.id,
+      comments: toArray(
+        q
+          .from({ comment: comments })
+          .where(({ comment }) => eq(comment.postId, post.id)),
+      ),
+    })),
+  )
+}
+
+async function expectRetainedDemandBlocksReadiness(): Promise<void> {
+  const firstPost = { id: 1, authorId: `selected`, title: `one` }
+  const secondPost = { id: 2, authorId: `selected`, title: `two` }
+  const posts = createMutablePosts([firstPost])
+  const { collection: comments, requests } = createPendingComments()
+  const live = createPostsWithCommentsLive(posts.collection, comments)
+  const preload: PreloadState = { preloadSettled: false }
+  startPreload(live, preload)
+
+  try {
+    await flushPromises()
+    expect(requests.map(({ keys }) => keys)).toEqual([[1]])
+
+    posts.write(`insert`, secondPost)
+    await flushPromises()
+    expect(requests.map(({ keys }) => keys)).toEqual([[1], [2]])
+
+    requests[1]!.deferred.resolve()
+    await requests[1]!.outcome
+    await flushPromises()
+    expect(preload.preloadSettled).toBe(false)
+    expect(live.isReady()).toBe(false)
+
+    requests[0]!.deferred.resolve()
+    await requests[0]!.outcome
+    await finishPreload(preload)
+    expect(live.isReady()).toBe(true)
+  } finally {
+    for (const request of requests) request.deferred.resolve()
+    await Promise.allSettled(requests.map(({ outcome }) => outcome))
+    await live.cleanup()
+    await Promise.all([posts.collection.cleanup(), comments.cleanup()])
+  }
+}
+
+async function expectObsoleteDemandCannotSettleReactivatedDemand(): Promise<void> {
+  const post = { id: 1, authorId: `selected`, title: `one` }
+  const posts = createMutablePosts([post], { markReadyInitially: false })
+  const { collection: comments, requests } = createPendingComments()
+  const live = createPostsWithCommentsLive(posts.collection, comments)
+  const preload: PreloadState = { preloadSettled: false }
+  startPreload(live, preload)
+
+  try {
+    await flushPromises()
+    expect(requests).toHaveLength(1)
+
+    posts.write(`delete`, post)
+    posts.write(`insert`, post)
+    await flushPromises()
+    expect(requests).toHaveLength(2)
+    expect(requests[0]!.signal?.aborted).toBe(true)
+
+    requests[0]!.deferred.resolve()
+    await requests[0]!.outcome
+    posts.markReady()
+    await flushPromises()
+    expect(preload.preloadSettled).toBe(false)
+    expect(live.isReady()).toBe(false)
+
+    requests[1]!.deferred.resolve()
+    await requests[1]!.outcome
+    await finishPreload(preload)
+  } finally {
+    for (const request of requests) request.deferred.resolve()
+    await Promise.allSettled(requests.map(({ outcome }) => outcome))
+    await live.cleanup()
+    await Promise.all([posts.collection.cleanup(), comments.cleanup()])
+  }
+}
+
+async function expectRejectedDemandEntersError(): Promise<void> {
+  const posts = createMutablePosts([
+    { id: 1, authorId: `selected`, title: `one` },
+  ])
+  let loadCount = 0
+  let shouldReject = true
+  const comments = createCollection<Comment>({
+    id: nextCollectionId(`temporal-rejected-comments`),
+    getKey: (comment) => comment.id,
+    syncMode: `on-demand`,
+    sync: {
+      sync: ({ markReady }) => ({
+        loadSubset: () => {
+          loadCount += 1
+          if (shouldReject) {
+            return Promise.reject(new Error(`child load failed`))
+          }
+          markReady()
+          return true
+        },
+      }),
+    },
+  })
+  const live = createPostsWithCommentsLive(posts.collection, comments)
+  const preload: PreloadState = { preloadSettled: false }
+  const consoleError = vi.spyOn(console, `error`).mockImplementation(() => {})
+  startPreload(live, preload)
+
+  try {
+    await flushPromises()
+    expect(loadCount).toBe(1)
+    expect(live.status).toBe(`error`)
+    expect(preload.preloadSettled).toBe(false)
+
+    await live.cleanup()
+    await preload.preloadOutcome
+    shouldReject = false
+    await live.preload()
+    expect(loadCount).toBe(2)
+    expect(live.isReady()).toBe(true)
+  } finally {
+    await live.cleanup()
+    await preload.preloadOutcome
+    await Promise.all([posts.collection.cleanup(), comments.cleanup()])
+    consoleError.mockRestore()
+  }
+}
+
+async function expectPartialShrinkRetainsCoverage(): Promise<void> {
+  const firstPost = { id: 1, authorId: `selected`, title: `one` }
+  const secondPost = { id: 2, authorId: `selected`, title: `two` }
+  const posts = createMutablePosts([firstPost, secondPost])
+  const initialLoad = createDeferred<void>()
+  const installed = new Map<number, Comment>()
+  let begin: () => void
+  let write: (change: { type: `insert` | `delete`; value: Comment }) => void
+  let commit: () => void
+  let markReady: () => void
+  let deduped: DeduplicatedLoadSubset
+  const unloads: Array<Array<number>> = []
+  const comments = createCollection<Comment>({
+    id: nextCollectionId(`temporal-shrink-comments`),
+    getKey: (comment) => comment.id,
+    syncMode: `on-demand`,
+    sync: {
+      sync: (methods) => {
+        ;({ begin, write, commit, markReady } = methods)
+        deduped = new DeduplicatedLoadSubset({
+          loadSubset: (options) =>
+            initialLoad.promise.then(() => {
+              const keys = correlationKeys([options], `postId`)
+              begin()
+              for (const postId of keys) {
+                const comment = { id: postId * 100, postId, body: `${postId}` }
+                installed.set(postId, comment)
+                write({ type: `insert`, value: comment })
+              }
+              commit()
+              markReady()
+            }),
+        })
+        return {
+          loadSubset: (options) => deduped.loadSubset(options),
+          unloadSubset: (options) => {
+            const keys = correlationKeys([options], `postId`)
+            unloads.push(keys)
+            begin()
+            for (const postId of keys) {
+              const comment = installed.get(postId)
+              if (comment) write({ type: `delete`, value: comment })
+              installed.delete(postId)
+            }
+            commit()
+          },
+        }
+      },
+    },
+  })
+  const live = createPostsWithCommentsLive(posts.collection, comments)
+  const preload = live.preload()
+
+  try {
+    await flushPromises()
+    initialLoad.resolve()
+    await preload
+    expect(live.get(1)?.comments).toHaveLength(1)
+
+    posts.write(`delete`, secondPost)
+    await flushPromises()
+    expect(live.get(1)?.comments).toHaveLength(1)
+    expect(unloads).toEqual([])
+  } finally {
+    initialLoad.resolve()
+    await live.cleanup()
+    await Promise.all([posts.collection.cleanup(), comments.cleanup()])
+  }
+}
+
 type FastPathEvent = {
   phase: `fast` | `late`
   keys: Array<number>
@@ -741,6 +1026,23 @@ describe(`includes temporal oracle`, () => {
   it(
     `obsolete child demand cannot publish after the route is reactivated`,
     expectObsoleteDemandCannotPublishAfterReactivation,
+  )
+
+  it(
+    `retained pending demand blocks readiness after demand expands`,
+    expectRetainedDemandBlocksReadiness,
+  )
+
+  it(
+    `obsolete demand cannot settle a reactivated demand incarnation`,
+    expectObsoleteDemandCannotSettleReactivatedDemand,
+  )
+
+  it(`rejected demand enters error`, expectRejectedDemandEntersError)
+
+  it(
+    `partially shrinking demand retains established coverage`,
+    expectPartialShrinkRetainsCoverage,
   )
 
   it(`loads a direct progressive subset inside the fast-path window`, async () => {
