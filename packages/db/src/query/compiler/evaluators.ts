@@ -5,6 +5,7 @@ import {
 } from '../../errors.js'
 import {
   areValuesEqual,
+  compareValues,
   isUnorderable,
   normalizeValue,
 } from '../../utils/comparison.js'
@@ -265,12 +266,10 @@ function compileFunction(func: Func, isSingleRow: boolean): (data: any) => any {
         if (isUnknown(a) || isUnknown(b)) {
           return null
         }
-        // NaN/invalid Dates sort greater than every other value, and are equal
-        // to one another (PostgreSQL semantics)
         if (isUnorderable(a) || isUnorderable(b)) {
           return isUnorderable(a) && !isUnorderable(b)
         }
-        return a > b
+        return compareValues(a, b) > 0
       }
     }
     case `gte`: {
@@ -286,7 +285,7 @@ function compileFunction(func: Func, isSingleRow: boolean): (data: any) => any {
         if (isUnorderable(a) || isUnorderable(b)) {
           return isUnorderable(a)
         }
-        return a >= b
+        return compareValues(a, b) >= 0
       }
     }
     case `lt`: {
@@ -302,7 +301,7 @@ function compileFunction(func: Func, isSingleRow: boolean): (data: any) => any {
         if (isUnorderable(a) || isUnorderable(b)) {
           return isUnorderable(b) && !isUnorderable(a)
         }
-        return a < b
+        return compareValues(a, b) < 0
       }
     }
     case `lte`: {
@@ -318,7 +317,7 @@ function compileFunction(func: Func, isSingleRow: boolean): (data: any) => any {
         if (isUnorderable(a) || isUnorderable(b)) {
           return isUnorderable(b)
         }
-        return a <= b
+        return compareValues(a, b) <= 0
       }
     }
 
