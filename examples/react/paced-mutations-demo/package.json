@@ -1,6 +1,6 @@
 {
   "name": "@tanstack/db-example-paced-mutations-demo",
-  "version": "0.0.10",
+  "version": "0.0.11",
   "private": true,
   "type": "module",
   "scripts": {
@@ -9,8 +9,8 @@
     "preview": "vite preview"
   },
   "dependencies": {
-    "@tanstack/db": "^0.7.2",
-    "@tanstack/react-db": "^0.2.1",
+    "@tanstack/db": "^0.8.0",
+    "@tanstack/react-db": "^0.3.0",
     "mitt": "^3.0.1",
     "react": "^19.2.4",
     "react-dom": "^19.2.4"
