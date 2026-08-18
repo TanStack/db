@@ -2520,7 +2520,7 @@ describe(`Query Collections`, () => {
       { id: `i3`, title: `Bug in Beta`, projectId: `p2` },
     ]
 
-    it(`should render includes results and reactively update child collections`, async () => {
+    it(`renders only the affected child hook once when an include changes`, async () => {
       const projectsCollection = createCollection(
         mockSyncCollectionOptions<Project>({
           id: `includes-react-projects`,
@@ -2537,9 +2537,14 @@ describe(`Query Collections`, () => {
         }),
       )
 
+      let parentRenderCount = 0
+      let alphaRenderCount = 0
+      let betaRenderCount = 0
+
       // Parent hook: runs includes query that produces child Collections
-      const { result: parentResult } = renderHook(() =>
-        useLiveQuery((q) =>
+      const { result: parentResult } = renderHook(() => {
+        parentRenderCount += 1
+        return useLiveQuery((q) =>
           q.from({ p: projectsCollection }).select(({ p }) => ({
             id: p.id,
             name: p.name,
@@ -2551,8 +2556,8 @@ describe(`Query Collections`, () => {
                 title: i.title,
               })),
           })),
-        ),
-      )
+        )
+      })
 
       // Wait for parent to be ready
       await waitFor(() => {
@@ -2562,24 +2567,38 @@ describe(`Query Collections`, () => {
       const alphaProject = parentResult.current.data.find(
         (p: any) => p.id === `p1`,
       )!
+      const betaProject = parentResult.current.data.find(
+        (p: any) => p.id === `p2`,
+      )!
       expect(alphaProject.name).toBe(`Alpha`)
 
-      // Child hook: subscribes to the child Collection from the parent row,
-      // simulating a subcomponent using useLiveQuery(project.issues)
-      const { result: childResult } = renderHook(() =>
-        useLiveQuery((alphaProject as any).issues),
-      )
-
-      await waitFor(() => {
-        expect(childResult.current.data).toHaveLength(2)
+      // Child hooks simulate sibling subcomponents subscribing to the child
+      // Collections from their parent rows.
+      const { result: alphaResult } = renderHook(() => {
+        alphaRenderCount += 1
+        return useLiveQuery((alphaProject as any).issues)
+      })
+      const { result: betaResult } = renderHook(() => {
+        betaRenderCount += 1
+        return useLiveQuery((betaProject as any).issues)
       })
 
-      expect(childResult.current.data).toEqual(
+      await waitFor(() => {
+        expect(alphaResult.current.data).toHaveLength(2)
+        expect(alphaResult.current.isReady).toBe(true)
+        expect(betaResult.current.data).toHaveLength(1)
+        expect(betaResult.current.isReady).toBe(true)
+      })
+
+      expect(alphaResult.current.data).toEqual(
         expect.arrayContaining([
           expect.objectContaining({ id: `i1`, title: `Bug in Alpha` }),
           expect.objectContaining({ id: `i2`, title: `Feature for Alpha` }),
         ]),
       )
+      const settledParentRenders = parentRenderCount
+      const settledAlphaRenders = alphaRenderCount
+      const settledBetaRenders = betaRenderCount
 
       // Add a new issue to Alpha — the child hook should reactively update
       act(() => {
@@ -2592,16 +2611,19 @@ describe(`Query Collections`, () => {
       })
 
       await waitFor(() => {
-        expect(childResult.current.data).toHaveLength(3)
+        expect(alphaResult.current.data).toHaveLength(3)
       })
 
-      expect(childResult.current.data).toEqual(
+      expect(alphaResult.current.data).toEqual(
         expect.arrayContaining([
           expect.objectContaining({ id: `i1`, title: `Bug in Alpha` }),
           expect.objectContaining({ id: `i2`, title: `Feature for Alpha` }),
           expect.objectContaining({ id: `i4`, title: `New Alpha issue` }),
         ]),
       )
+      expect(parentRenderCount).toBe(settledParentRenders)
+      expect(alphaRenderCount).toBe(settledAlphaRenders + 1)
+      expect(betaRenderCount).toBe(settledBetaRenders)
     })
   })
 })
