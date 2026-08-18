@@ -54,18 +54,27 @@ const MAP_SET_ITERATOR_METHODS = new Set([
   `forEach`,
 ])
 
+function isPlainObject(value: object): boolean {
+  const prototype = Object.getPrototypeOf(value)
+  return prototype === Object.prototype || prototype === null
+}
+
 /**
- * Check if a value is a proxiable object (not Date, RegExp, or Temporal)
+ * Check if a value can be safely proxied without changing its semantics.
  */
 function isProxiableObject(
   value: unknown,
 ): value is Record<string | symbol, unknown> {
+  if (value === null || typeof value !== `object`) {
+    return false
+  }
+
   return (
-    value !== null &&
-    typeof value === `object` &&
-    !((value as any) instanceof Date) &&
-    !((value as any) instanceof RegExp) &&
-    !isTemporal(value)
+    isPlainObject(value) ||
+    Array.isArray(value) ||
+    value instanceof Map ||
+    value instanceof Set ||
+    (ArrayBuffer.isView(value) && !(value instanceof DataView))
   )
 }
 
@@ -589,7 +598,16 @@ function deepClone<T extends unknown>(
     return obj
   }
 
-  const clone = {} as Record<string | symbol, unknown>
+  // Preserve non-plain objects by reference. Proxying or cloning an arbitrary
+  // class instance as a plain object strips its prototype and internal state.
+  if (!isPlainObject(obj)) {
+    return obj
+  }
+
+  const clone = Object.create(Object.getPrototypeOf(obj)) as Record<
+    string | symbol,
+    unknown
+  >
   visited.set(obj as object, clone)
 
   for (const key in obj) {
@@ -897,7 +915,7 @@ export function createChangeProxy<
           return value.bind(ptarget)
         }
 
-        // If the value is an object (but not Date, RegExp, or Temporal), create a proxy for it
+        // Proxy only values whose semantics are preserved by our draft handling.
         if (isProxiableObject(value)) {
           // Create a parent reference for the nested object
           const nestedParent = {
