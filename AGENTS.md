@@ -368,6 +368,13 @@ test('ignores snapshot that resolves after up-to-date message', async () => {
 })
 ```
 
+### Name Tests After Behavior
+
+Test names should state the behavior they prove. Do not put issue or pull
+request numbers in test names; those references become stale and make the test
+suite harder to read. When an external report contains essential context that
+the test cannot express, link it in a nearby comment instead.
+
 ### Test Corner Cases
 
 Common corner cases to consider:

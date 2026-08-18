@@ -7,7 +7,9 @@ import {
 } from '@tanstack/db'
 import { persistedCollectionOptions } from '../../db-sqlite-persistence-core/src'
 import { electricCollectionOptions, isChangeMessage } from '../src/electric'
+import { expectAssertionFailure } from '../../db/tests/expected-failure'
 import { stripVirtualProps } from '../../db/tests/utils'
+import { TraceAssertionError } from '../../db/tests/trace-runner'
 import type { ElectricCollectionUtils } from '../src/electric'
 import type {
   Collection,
@@ -2623,6 +2625,45 @@ describe(`Electric Integration`, () => {
           params: {},
         }),
       )
+    })
+
+    it(`reloads Electric coverage after its final owner unloads`, async () => {
+      const testCollection = createCollection(
+        electricCollectionOptions({
+          id: `on-demand-unload-coverage-test`,
+          shapeOptions: {
+            url: `http://test-url`,
+            params: { table: `test_table` },
+          },
+          syncMode: `on-demand`,
+          getKey: (item: Row) => item.id as number,
+          startSync: true,
+        }),
+      )
+      const options = { limit: 10 }
+
+      try {
+        await testCollection._sync.loadSubset(options)
+        testCollection._sync.unloadSubset(options)
+        await testCollection._sync.loadSubset(options)
+
+        await expectAssertionFailure(
+          () =>
+            Promise.resolve().then(() => {
+              try {
+                expect(mockRequestSnapshot).toHaveBeenCalledTimes(2)
+              } catch (error) {
+                throw new TraceAssertionError(0, error)
+              }
+            }),
+          {
+            checkpoint: 0,
+            classify: ({ actual, expected }) => actual === 1 && expected === 2,
+          },
+        )()
+      } finally {
+        await testCollection.cleanup()
+      }
     })
 
     it(`should refresh the stream before requesting on-demand snapshots when already up-to-date`, async () => {
