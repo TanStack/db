@@ -610,21 +610,39 @@ function canOptimizeSimpleComparison<
 
   // Check both directions: field op value AND value op field
   let fieldPath: Array<string> | null = null
+  let queryValue: unknown
 
   if (leftArg.type === `ref` && rightArg.type === `val`) {
     fieldPath = (leftArg as any).path
+    queryValue = (rightArg as any).value
   } else if (leftArg.type === `val` && rightArg.type === `ref`) {
     fieldPath = (rightArg as any).path
+    queryValue = (leftArg as any).value
   }
 
   if (fieldPath) {
     const index = findIndexForField(collection, fieldPath)
-    // Mirror optimizeSimpleComparison's gate: an index that exists but does
-    // not support the operation (e.g. the implicit key index only serves
-    // eq/in) cannot optimize this comparison.
-    return (
-      index !== undefined && index.supports(expression.name as IndexOperation)
-    )
+    if (index === undefined) {
+      return false
+    }
+
+    // Mirror optimizeSimpleComparison's gates: the index must support the
+    // operation (e.g. the implicit key index only serves eq/in), and a range
+    // op additionally requires trustworthy index traversal for the operand's
+    // domain. The operand flip for `value op field` maps range ops onto range
+    // ops, so the classification needs no flip here.
+    const operation = expression.name as IndexOperation
+    if (!index.supports(operation)) {
+      return false
+    }
+    if (
+      operation !== `eq` &&
+      !canRangeOptimize(queryValue, index, collection)
+    ) {
+      return false
+    }
+
+    return true
   }
 
   return false

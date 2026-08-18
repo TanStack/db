@@ -5,6 +5,7 @@ import { BasicIndex } from '../src/indexes/basic-index.js'
 import {
   canOptimizeExpression,
   findIndexForField,
+  optimizeExpressionWithIndexes,
 } from '../src/utils/index-optimization.js'
 import { Func, PropRef, Value } from '../src/query/ir.js'
 import { mockSyncCollectionOptions } from './utils.js'
@@ -225,5 +226,41 @@ describe(`canOptimizeExpression with only a key index`, () => {
         collection,
       ),
     ).toBe(false)
+  })
+})
+
+describe(`canOptimizeExpression agrees with optimizeExpressionWithIndexes`, () => {
+  it(`rejects locale-ordered string ranges on a range-capable index`, () => {
+    const collection = makeCollection((item) => item.id)
+    collection.createIndex((row) => row.category, { indexType: BasicIndex })
+
+    // Default collections sort strings by locale, which diverges from the
+    // WHERE evaluator's code-point comparison, so a string range cannot be
+    // served by the index — and the predicate must say so too.
+    const rangeExpr = new Func(`gt`, [
+      new PropRef([`category`]),
+      new Value(`m`),
+    ])
+    expect(
+      optimizeExpressionWithIndexes(rangeExpr, collection).canOptimize,
+    ).toBe(false)
+    expect(canOptimizeExpression(rangeExpr, collection)).toBe(false)
+
+    // The flipped operand form must classify the same way.
+    const flippedExpr = new Func(`gt`, [
+      new Value(`m`),
+      new PropRef([`category`]),
+    ])
+    expect(
+      optimizeExpressionWithIndexes(flippedExpr, collection).canOptimize,
+    ).toBe(false)
+    expect(canOptimizeExpression(flippedExpr, collection)).toBe(false)
+
+    // Equality is unaffected by collation and stays optimizable.
+    const eqExpr = new Func(`eq`, [new PropRef([`category`]), new Value(`one`)])
+    expect(optimizeExpressionWithIndexes(eqExpr, collection).canOptimize).toBe(
+      true,
+    )
+    expect(canOptimizeExpression(eqExpr, collection)).toBe(true)
   })
 })
