@@ -93,46 +93,53 @@ export class KeyIndex<
     return false
   }
 
-  // Range and ordered access are not supported: `supports()` reports only
-  // eq/in, so the optimizer and order-by never route these calls here.
+  // The remaining IndexInterface members are mandated by BaseIndex's abstract
+  // contract but unreachable in practice: `supports()` reports only eq/in, so
+  // the optimizer and order-by never route range or ordered access here.
+  // Throwing (rather than returning empty results) keeps any future call path
+  // that does reach them loudly wrong instead of silently dropping rows.
+  private unsupported(feature: string): never {
+    throw new Error(`KeyIndex does not support ${feature}`)
+  }
+
   rangeQuery(): Set<TKey> {
-    throw new Error(`Range queries are not supported by KeyIndex`)
+    return this.unsupported(`range queries`)
   }
 
   rangeQueryReversed(): Set<TKey> {
-    throw new Error(`Range queries are not supported by KeyIndex`)
+    return this.unsupported(`range queries`)
   }
 
   take(): Array<TKey> {
-    throw new Error(`Ordered access is not supported by KeyIndex`)
+    return this.unsupported(`ordered access`)
   }
 
   takeFromStart(): Array<TKey> {
-    throw new Error(`Ordered access is not supported by KeyIndex`)
+    return this.unsupported(`ordered access`)
   }
 
   takeReversed(): Array<TKey> {
-    throw new Error(`Ordered access is not supported by KeyIndex`)
+    return this.unsupported(`ordered access`)
   }
 
   takeReversedFromEnd(): Array<TKey> {
-    throw new Error(`Ordered access is not supported by KeyIndex`)
+    return this.unsupported(`ordered access`)
   }
 
   get orderedEntriesArray(): Array<[any, Set<TKey>]> {
-    throw new Error(`Ordered access is not supported by KeyIndex`)
+    return this.unsupported(`ordered access`)
   }
 
   get orderedEntriesArrayReversed(): Array<[any, Set<TKey>]> {
-    throw new Error(`Ordered access is not supported by KeyIndex`)
+    return this.unsupported(`ordered access`)
   }
 
   get indexedKeysSet(): Set<TKey> {
-    throw new Error(`Key enumeration is not supported by KeyIndex`)
+    return this.unsupported(`key enumeration`)
   }
 
   get valueMapData(): Map<any, Set<TKey>> {
-    throw new Error(`Value enumeration is not supported by KeyIndex`)
+    return this.unsupported(`value enumeration`)
   }
 }
 
