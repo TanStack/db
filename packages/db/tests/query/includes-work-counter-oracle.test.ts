@@ -8,8 +8,6 @@ import {
   eq,
   materialize,
 } from '../../src/query/index.js'
-import { expectAssertionFailure } from '../expected-failure.js'
-import { TraceAssertionError } from '../trace-runner.js'
 import type { Collection } from '../../src/collection/index.js'
 
 let nextCollectionId = 0
@@ -33,9 +31,17 @@ type FillerCounts = {
   links: number
 }
 
+type SourceCollections = {
+  terms: Collection<TermRow>
+  meanings: Collection<MeaningRow>
+  groups: Collection<GroupRow>
+  links: Collection<LinkRow>
+}
+
 type WorkScenario = {
   filler: FillerCounts
   joinTargets: boolean
+  afterMount?: (sources: SourceCollections) => Promise<void> | void
 }
 
 type WorkCount = {
@@ -197,6 +203,7 @@ function observeLink(link: LinkObservation): LinkObservation {
 async function observeWork({
   filler,
   joinTargets,
+  afterMount,
 }: WorkScenario): Promise<WorkObservation> {
   const rows = createFixtureRows(filler)
   const sources = {
@@ -283,6 +290,11 @@ async function observeWork({
     cleanupLive = () => live.cleanup()
 
     await live.preload()
+    if (afterMount) {
+      await afterMount(sources)
+      // Let the change propagate through the dataflow graph
+      await new Promise((resolve) => setTimeout(resolve, 0))
+    }
     const root = live.toArray[0]!
     return {
       result: [
@@ -346,44 +358,6 @@ function expectedResult({
   ]
 }
 
-function assertEqualSourceWork(
-  actual: SourceWork,
-  expected: SourceWork,
-): Promise<void> {
-  try {
-    expect(actual).toEqual(expected)
-    return Promise.resolve()
-  } catch (error) {
-    return Promise.reject(new TraceAssertionError(1, error))
-  }
-}
-
-function isExactWorkCount(value: unknown, expected: WorkCount): boolean {
-  return (
-    typeof value === `object` &&
-    value !== null &&
-    `delivered` in value &&
-    value.delivered === expected.delivered &&
-    `examined` in value &&
-    value.examined === expected.examined
-  )
-}
-
-function isExactSourceWork(value: unknown, expected: SourceWork): boolean {
-  return (
-    typeof value === `object` &&
-    value !== null &&
-    `terms` in value &&
-    isExactWorkCount(value.terms, expected.terms) &&
-    `meanings` in value &&
-    isExactWorkCount(value.meanings, expected.meanings) &&
-    `groups` in value &&
-    isExactWorkCount(value.groups, expected.groups) &&
-    `links` in value &&
-    isExactWorkCount(value.links, expected.links)
-  )
-}
-
 const joinedBaselineWork: SourceWork = {
   terms: { delivered: 3, examined: 3 },
   meanings: { delivered: 1, examined: 1 },
@@ -401,7 +375,10 @@ const joinFreeBaselineWork: SourceWork = {
 let joinedBaselineObservation: WorkObservation
 let joinFreeBaselineObservation: WorkObservation
 
-async function expectKnownCorrelatedJoinDefect(
+// The correlated where bounds the join's left side, so irrelevant left-side
+// rows must not add source work: the join drives from the correlation-bounded
+// side and lazily loads targets keyed by its rows (#1709).
+async function expectBoundedCorrelatedJoinWork(
   fillerCount: number,
 ): Promise<void> {
   const baseline = joinedBaselineObservation
@@ -417,26 +394,7 @@ async function expectKnownCorrelatedJoinDefect(
   expect(baseline.result).toEqual(expectedResult({ joinTargets: true }))
   expect(scaled.result).toEqual(baseline.result)
   expect(baseline.sourceWork).toEqual(joinedBaselineWork)
-
-  const knownLinkWork = {
-    delivered: baseline.sourceWork.links.delivered + fillerCount,
-    // Once irrelevant rows exist, the defective route scans the whole
-    // collection and then reads the two selected rows through the index.
-    examined: baseline.sourceWork.links.examined + fillerCount + 2,
-  }
-  const knownScaledWork: SourceWork = {
-    // The full left scan also activates one extra indexed target route.
-    terms: { delivered: 4, examined: 4 },
-    meanings: baseline.sourceWork.meanings,
-    groups: baseline.sourceWork.groups,
-    links: knownLinkWork,
-  }
-  await expectAssertionFailure(assertEqualSourceWork, {
-    checkpoint: 1,
-    classify: ({ actual, expected }) =>
-      isExactSourceWork(actual, knownScaledWork) &&
-      isExactSourceWork(expected, baseline.sourceWork),
-  })(scaled.sourceWork, baseline.sourceWork)
+  expect(scaled.sourceWork).toEqual(baseline.sourceWork)
 }
 
 describe(`includes deterministic work-counter oracle`, () => {
@@ -450,17 +408,48 @@ describe(`includes deterministic work-counter oracle`, () => {
   })
 
   it.each([1, 2, 3])(
-    `pins the #1709 defect formula at the small filler boundary (%i)`,
-    expectKnownCorrelatedJoinDefect,
+    `keeps left-side source work flat at the small filler boundary (#1709) (%i)`,
+    expectBoundedCorrelatedJoinWork,
   )
 
   fcTest.prop([fc.integer({ min: 1, max: 24 })], {
     numRuns: 6,
     seed: 1709,
   })(
-    `known work defect: a join defeats correlated source pushdown (#1709)`,
-    expectKnownCorrelatedJoinDefect,
+    `a join no longer defeats correlated source pushdown (#1709)`,
+    expectBoundedCorrelatedJoinWork,
   )
+
+  it(`joins a late insert into the bounded side lazily without rescanning (#1709 incremental)`, async () => {
+    const observed = await observeWork({
+      filler: { terms: 5, meanings: 0, groups: 0, links: 12 },
+      joinTargets: true,
+      afterMount: (sources) => {
+        // New link in the selected group pointing at a target that was never
+        // loaded: the join must lazily load exactly that target, not rescan.
+        sources.links.insert({
+          id: `link-late`,
+          groupId: `group-0`,
+          targetId: `term-filler-3`,
+        })
+      },
+    })
+
+    const links = observed.result[0]!.meanings[0]!.groups[0]!.links
+    expect(links).toHaveLength(3)
+    expect(links).toContainEqual({
+      id: `link-late`,
+      text: `irrelevant target 3`,
+    })
+    expect(observed.sourceWork).toEqual({
+      // Mount work plus exactly one lazily loaded join target for the insert
+      terms: { delivered: 4, examined: 4 },
+      meanings: { delivered: 1, examined: 1 },
+      groups: { delivered: 1, examined: 1 },
+      // The inserted row arrives as a live update, not an indexed re-read
+      links: { delivered: 3, examined: 2 },
+    })
+  })
 
   fcTest.prop([fc.integer({ min: 1, max: 24 })], {
     numRuns: 6,

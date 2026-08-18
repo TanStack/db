@@ -171,6 +171,8 @@ function processJoin(
     joinClause.type,
     mainCollection,
     joinedCollection,
+    lazySources.has(mainSource),
+    lazySources.has(joinedSource),
   )
 
   // Analyze which source each expression refers to and swap if necessary
@@ -663,6 +665,8 @@ function getActiveAndLazySources(
   joinType: JoinClause[`type`],
   leftCollection: Collection,
   rightCollection: Collection,
+  mainIsLazy: boolean,
+  joinedIsLazy: boolean,
 ):
   | { activeSource: `main` | `joined`; lazySource: Collection }
   | { activeSource: undefined; lazySource: undefined } {
@@ -675,6 +679,18 @@ function getActiveAndLazySources(
     case `right`:
       return { activeSource: `joined`, lazySource: leftCollection }
     case `inner`:
+      // A main side that is already lazy is bounded: it never does an initial
+      // full load — its rows arrive on demand (keyed by an includes
+      // correlation, see #1709). The join must drive from that side so the
+      // joined side loads keyed by the bounded row set. Letting the size
+      // heuristic override this would load the joined side in full and drive
+      // the bounded side with join keys drawn from that full scan.
+      // (Deliberately asymmetric: a lazy JOINED side only arises today via
+      // correlation-alias shapes whose subscriptions are not actually lazy,
+      // where forcing the flip could regress; those keep the size heuristic.)
+      if (mainIsLazy && !joinedIsLazy) {
+        return { activeSource: `main`, lazySource: rightCollection }
+      }
       // The smallest collection should be the active collection
       // and the biggest collection should be lazy
       return leftCollection.size < rightCollection.size
