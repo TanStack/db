@@ -315,6 +315,74 @@ describe(`evaluators`, () => {
           expect(compiled({})).toBe(true)
         })
 
+        it(`handles like with wildcard in the middle`, () => {
+          const func = new Func(`like`, [
+            new Value(`hello brave new world`),
+            new Value(`hello%world`),
+          ])
+          const compiled = compileExpression(func)
+
+          expect(compiled({})).toBe(true)
+        })
+
+        it(`handles like where _ must match exactly one character`, () => {
+          const func = new Func(`like`, [new Value(`hell`), new Value(`hell_`)])
+          const compiled = compileExpression(func)
+
+          expect(compiled({})).toBe(false)
+        })
+
+        it(`handles like with a pattern of only wildcards`, () => {
+          const func = new Func(`like`, [new Value(``), new Value(`%%`)])
+          const compiled = compileExpression(func)
+
+          expect(compiled({})).toBe(true)
+        })
+
+        it(`handles like with an empty pattern`, () => {
+          const emptyValue = compileExpression(
+            new Func(`like`, [new Value(``), new Value(``)]),
+          )
+          const nonEmptyValue = compileExpression(
+            new Func(`like`, [new Value(`a`), new Value(``)]),
+          )
+
+          expect(emptyValue({})).toBe(true)
+          expect(nonEmptyValue({})).toBe(false)
+        })
+
+        it(`handles like matching across line breaks`, () => {
+          const func = new Func(`like`, [
+            new Value(`hello\nworld`),
+            new Value(`hello%world`),
+          ])
+          const compiled = compileExpression(func)
+
+          expect(compiled({})).toBe(true)
+        })
+
+        it(`evaluates pathological wildcard patterns without backtracking (ReDoS)`, () => {
+          // Compiled to a regex, this pattern produces 20 overlapping `.*`
+          // segments; the near-miss value (fails only at the last character)
+          // then made the regex engine backtrack exponentially and hang.
+          const pattern = `a%`.repeat(19) + `a`
+          const nearMiss = `a`.repeat(200) + `b`
+          const likeFunc = compileExpression(
+            new Func(`like`, [new Value(nearMiss), new Value(pattern)]),
+          )
+          const ilikeFunc = compileExpression(
+            new Func(`ilike`, [
+              new Value(nearMiss.toUpperCase()),
+              new Value(pattern),
+            ]),
+          )
+
+          const start = performance.now()
+          expect(likeFunc({})).toBe(false)
+          expect(ilikeFunc({})).toBe(false)
+          expect(performance.now() - start).toBeLessThan(1000)
+        })
+
         it(`handles like with null value (3-valued logic)`, () => {
           const func = new Func(`like`, [new Value(null), new Value(`hello%`)])
           const compiled = compileExpression(func)
