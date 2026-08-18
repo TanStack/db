@@ -66,6 +66,22 @@ export function findIndexForField<TKey extends string | number>(
       return index
     }
   }
+
+  // Fall back to the collection's implicit primary-key index, so equality
+  // lookups on the key field (e.g. joins on the primary key) work without a
+  // user-created index. Checked last so an explicit index always wins.
+  const keyIndex = collection.keyIndex
+  if (
+    keyIndex &&
+    keyIndex.matchesField(fieldPath) &&
+    keyIndex.matchesCompareOptions(compareOpts)
+  ) {
+    if (!keyIndex.matchesDirection(compareOpts.direction)) {
+      return new ReverseIndex(keyIndex)
+    }
+    return keyIndex
+  }
+
   return undefined
 }
 

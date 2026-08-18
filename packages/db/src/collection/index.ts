@@ -4,6 +4,7 @@ import {
   CollectionRequiresConfigError,
   CollectionRequiresSyncConfigError,
 } from '../errors'
+import { createKeyIndexFromGetKey } from '../indexes/key-index.js'
 import { currentStateAsChanges } from './change-events'
 
 import { CollectionStateManager } from './state'
@@ -13,6 +14,7 @@ import { CollectionSyncManager } from './sync'
 import { CollectionIndexesManager } from './indexes'
 import { CollectionMutationsManager } from './mutations'
 import { CollectionEventsManager } from './events.js'
+import type { KeyIndex } from '../indexes/key-index.js'
 import type { CollectionSubscription } from './subscription'
 import type {
   AllCollectionEvents,
@@ -310,6 +312,10 @@ export class CollectionImpl<
   public deferDataRefresh: Promise<void> | null = null
 
   private comparisonOpts: StringCollationConfig
+
+  // Lazily derived by the `keyIndex` getter; `null` records a failed
+  // derivation so introspection of `getKey` only ever runs once.
+  private _keyIndex: KeyIndex<TKey> | null | undefined
 
   /**
    * Creates a new Collection instance
@@ -676,6 +682,29 @@ export class CollectionImpl<
    */
   get indexes(): Map<number, BaseIndex<TKey>> {
     return this._indexes.indexes
+  }
+
+  /**
+   * Synthetic index over the collection's primary key, derived from
+   * `config.getKey` when it reads a single property (e.g. `(row) => row.id`).
+   * Query optimization consults it as a fallback when no user-created index
+   * matches the key field, so joins and lookups on the key don't require an
+   * explicit index. `undefined` when the key cannot be introspected (e.g.
+   * composite or computed keys). Note that `findIndexForField` conservatively
+   * skips this index for collections with a non-default `defaultStringCollation`
+   * (its compare options are the defaults), preserving the full-scan fallback
+   * there.
+   */
+  get keyIndex(): KeyIndex<TKey> | undefined {
+    if (this._keyIndex === undefined) {
+      this._keyIndex =
+        createKeyIndexFromGetKey<TOutput, TKey>(
+          this.config.getKey,
+          (key) => this.has(key),
+          () => this.size,
+        ) ?? null
+    }
+    return this._keyIndex ?? undefined
   }
 
   /**

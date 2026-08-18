@@ -89,6 +89,24 @@ function createIndexUsageTracker(collection: any): {
     configurable: true,
   })
 
+  // The implicit primary-key index lives outside `collection.indexes`, so
+  // patch its lookup separately to observe key-index-served queries.
+  const keyIndex = collection.keyIndex
+  const originalKeyIndexLookup = keyIndex?.lookup
+  if (keyIndex) {
+    keyIndex.lookup = function (operation: string, value: any) {
+      stats.rangeQueryCalls++
+      stats.indexesUsed.push(`keyIndex`)
+      stats.queriesExecuted.push({
+        type: `index`,
+        operation,
+        field: keyIndex.expression?.path?.join(`.`),
+        value,
+      })
+      return originalKeyIndexLookup.call(this, operation, value)
+    }
+  }
+
   // Track full scan calls (entries() iteration)
   const originalEntries = collection.entries
   collection.entries = function* () {
@@ -123,6 +141,10 @@ function createIndexUsageTracker(collection: any): {
       if (index) {
         index.lookup = originalLookup
       }
+    }
+
+    if (keyIndex && originalKeyIndexLookup) {
+      keyIndex.lookup = originalKeyIndexLookup
     }
 
     collection.entries = originalEntries
@@ -684,12 +706,14 @@ describe(`Query Index Optimization`, () => {
 
         // The WHERE clause on the non-nullable (left) side uses its index.
         // The WHERE clause on the nullable (right) side of the LEFT JOIN is NOT
-        // pushed down to avoid changing join semantics, so the right side does a full scan.
+        // pushed down to avoid changing join semantics, but the join key on the
+        // right side is its primary key, so the lazy join loads through the
+        // implicit key index instead of a full scan.
         expectIndexUsage(combinedStats, {
           shouldUseIndex: true,
-          shouldUseFullScan: true,
-          indexCallCount: 1, // Only item.status='active' uses index (non-nullable side)
-          fullScanCallCount: 1, // other collection does full scan (nullable side)
+          shouldUseFullScan: false,
+          indexCallCount: 2, // item.status='active' + join keys via the key index
+          fullScanCallCount: 0,
         })
       } finally {
         tracker1.restore()
@@ -804,7 +828,7 @@ describe(`Query Index Optimization`, () => {
       }
     })
 
-    it(`should not optimize inner join if biggest collection has no index on the join key`, async () => {
+    it(`should optimize inner join via the implicit key index when the biggest collection has no explicit index on the join key`, async () => {
       // Create a second collection for the join with its own index
       const secondCollection = createCollection<TestItem2, string>({
         getKey: (item) => item.id2,
@@ -878,13 +902,21 @@ describe(`Query Index Optimization`, () => {
           },
         ])
 
-        // We should have done an index lookup on the 1st collection to find active items
+        // We should have done an index lookup on the 1st collection to find
+        // active items, and the join keys are served by the implicit
+        // primary-key index instead of a full scan.
         expect(tracker1.stats.queriesExecuted).toEqual([
           {
             type: `index`,
             operation: `eq`,
             field: `status`,
             value: `active`,
+          },
+          {
+            type: `index`,
+            operation: `in`,
+            field: `id`,
+            value: [`1`],
           },
         ])
       } finally {
@@ -1018,9 +1050,11 @@ describe(`Query Index Optimization`, () => {
     })
 
     it(`should not optimize left join if right collection has no index on the join key`, async () => {
-      // Create a second collection for the join with its own index
+      // Create a second collection for the join with its own index.
+      // The key is computed so the join key `id2` is not served by the
+      // implicit primary-key index and the collection truly has no index on it.
       const secondCollection = createCollection<TestItem2, string>({
-        getKey: (item) => item.id2,
+        getKey: (item) => `computed-${item.id2}`,
         autoIndex: `off`,
         startSync: true,
         sync: {
@@ -1208,7 +1242,45 @@ describe(`Query Index Optimization`, () => {
     })
 
     it(`should not optimize right join if left collection has no index on the join key`, async () => {
-      // Create a second collection for the join with its own index
+      // Create a local left collection with a computed key, so the join key
+      // `id` is not served by the implicit primary-key index and the
+      // collection truly has no index on it.
+      const firstCollection = createCollection<TestItem, string>({
+        getKey: (item) => `computed-${item.id}`,
+        autoIndex: `off`,
+        startSync: true,
+        sync: {
+          sync: ({ begin, write, commit }) => {
+            begin()
+            write({
+              type: `insert`,
+              value: {
+                id: `1`,
+                name: `Alice`,
+                age: 25,
+                status: `active`,
+                score: 95,
+                createdAt: new Date(`2023-01-01`),
+              },
+            })
+            write({
+              type: `insert`,
+              value: {
+                id: `2`,
+                name: `Bob`,
+                age: 30,
+                status: `inactive`,
+                score: 80,
+                createdAt: new Date(`2023-01-02`),
+              },
+            })
+            commit()
+          },
+        },
+      })
+
+      await firstCollection.stateWhenReady()
+
       const secondCollection = createCollection<TestItem2, string>({
         getKey: (item) => item.id2,
         autoIndex: `off`,
@@ -1244,14 +1316,14 @@ describe(`Query Index Optimization`, () => {
       await secondCollection.stateWhenReady()
 
       // Track both collections
-      const tracker1 = createIndexUsageTracker(collection)
+      const tracker1 = createIndexUsageTracker(firstCollection)
       const tracker2 = createIndexUsageTracker(secondCollection)
 
       try {
         const liveQuery = createLiveQueryCollection({
           query: (q: any) =>
             q
-              .from({ item: collection })
+              .from({ item: firstCollection })
               .join(
                 { other: secondCollection },
                 ({ item, other }: any) => eq(item.id, other.id2),

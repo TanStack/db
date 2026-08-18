@@ -17,7 +17,7 @@ export interface CollectionLike<
   TKey extends string | number = string | number,
 > extends Pick<
   Collection<T, TKey>,
-  `get` | `has` | `entries` | `indexes` | `id` | `compareOptions`
+  `get` | `has` | `entries` | `indexes` | `keyIndex` | `id` | `compareOptions`
 > {}
 
 /**
