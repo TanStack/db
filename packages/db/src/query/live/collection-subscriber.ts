@@ -234,11 +234,12 @@ export class CollectionSubscriber<
     const handleLoadSubsetResult = (result: Promise<void> | true) => {
       if (result instanceof Promise) {
         this.pendingOrderedLoadPromise = result
-        result.finally(() => {
+        const finish = () => {
           if (this.pendingOrderedLoadPromise === result) {
             this.pendingOrderedLoadPromise = undefined
           }
-        })
+        }
+        void result.then(finish, finish)
       }
       onLoadSubsetResult(result)
     }

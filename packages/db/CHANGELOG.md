@@ -1,5 +1,64 @@
 # @tanstack/db
 
+## 0.8.0
+
+### Minor Changes
+
+- Add SSR through request-scoped `DbClient` instances, collection descriptors, ([#1564](https://github.com/TanStack/db/pull/1564))
+  explicit collection-row hydration, live-query result snapshots, adapter sync
+  metadata, and React and Svelte descriptor resolution.
+
+  React live queries now derive identity from structured query IR. Opaque queries
+  can provide `queryKey`; legacy dependency arrays and unkeyed opaque queries keep
+  working with development warnings until 1.0.
+
+  Add TanStack Router integration that streams live queries discovered during a
+  Suspense render as pending promises which resolve to ordered result snapshots.
+  The browser starts normal source sync and atomically replaces the snapshot when
+  its live result is ready.
+
+## 0.7.2
+
+### Patch Changes
+
+- Update agent skills to match current APIs and behavior. ([#1696](https://github.com/TanStack/db/pull/1696))
+
+## 0.7.1
+
+### Patch Changes
+
+- Add `useLiveInfiniteQuery` as a Vue binding over the shared live-query window controller. Align infinite-query behavior across React, Vue, and Svelte, including awaitable page fetches, safe page sizes, reactive page-depth preservation, ordered collection validation, shared input resolution, and shared-window cleanup. ([#1724](https://github.com/TanStack/db/pull/1724))
+
+## 0.7.0
+
+### Minor Changes
+
+- Add an internal shared live-query observer and migrate all five framework adapters to it ([#1642](https://github.com/TanStack/db/pull/1642))
+
+  Introduces `createLiveQueryObserver` in `@tanstack/db`: given a resolved live-query collection (or `null` for a disabled query) it owns the subscription lifecycle every adapter used to re-implement — change and status subscriptions, a snapshot with stable identity per state revision for wholesale consumers, and delivery of the raw `ChangeMessage[]` for granular consumers. React, Vue, Svelte, Solid, and Angular's live-query hooks now materialize from the observer instead of their own hand-rolled subscription/status/snapshot machinery, keeping each adapter's native reactivity and each adapter's data-loading policy (wholesale adapters subscribe without initial state; granular adapters seed from it).
+
+  The observer is an **internal, unstable contract** for TanStack DB's official adapters — it is exported so the adapter packages can consume it, but it is not a public extension point yet and its API may change in any release.
+
+  The migration also fixes several live-query lifecycle defects: status-only transitions (`error`, `cleaned-up`) now reach mounted consumers; snapshot identity is stable across unsubscribe/resubscribe and stays fresh while detached; dispatch is FIFO and non-reentrant with subscriptions identified by record rather than callback; disposing during the synchronous initial replay no longer leaks the collection subscription; subscribing after dispose throws instead of registering a dead listener; Solid guards its async resource continuations against superseded collections; and constructing an observer no longer activates sync. Observers activate on their first committed subscription unless an adapter has already started a pre-created collection supplied directly or returned from a callback.
+
+### Patch Changes
+
+- fix(db): republish ordered live queries on an order-only move ([#1669](https://github.com/TanStack/db/pull/1669))
+
+  An `orderBy` live query that reordered its rows without changing any projected
+  row value (an "order-only move") previously emitted nothing, so `useLiveQuery`
+  kept rendering the stale order. The live-query collection now publishes an
+  explicit layout-change notification when this happens, and the shared live-query
+  observer snapshot exposes a `layoutRevision` that increments on any visible
+  membership, ordering, or order-only-move change. All five framework adapters
+  pick this up via their existing wholesale re-read.
+
+- Add the unstable, internal `createLiveQueryWindowController` primitive for ([#1675](https://github.com/TanStack/db/pull/1675))
+  forward pagination. It coordinates collection-scoped window leases, commits
+  pages only after subset loads succeed, restores windows after failures and
+  cleanup, and lets React's `useLiveInfiniteQuery` become a thin binding without
+  changing its public API or resetting pages for structurally equal dependencies.
+
 ## 0.6.17
 
 ### Patch Changes

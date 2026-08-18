@@ -1,26 +1,55 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { CollectionImpl } from '@tanstack/db'
-import { useLiveQuery } from './useLiveQuery'
+'use client'
+
+import { useCallback, useRef, useSyncExternalStore } from 'react'
+import {
+  assertLiveQueryWindowManyResult,
+  compareLiveQueryWindowDependencies,
+  createLiveQueryCollection,
+  createLiveQueryWindowController,
+  fetchNextLiveQueryWindowPage,
+  getLiveQueryWindowCollectionWarning,
+  getLiveQueryWindowInputKind,
+  normalizeLiveQueryWindowPageSize,
+  resolveLiveQueryWindowInput,
+  shouldPreserveLiveQueryWindowPageCount,
+} from '@tanstack/db'
+import { useOptionalDbClient } from './DbProvider'
+import {
+  prepareDerivedQuery,
+  prepareQueryValue,
+  warnDeprecatedDepsArray,
+  warnUnhashableDerivedIdentity,
+} from './useLiveQuery'
+import type {
+  DerivedIdentityProfiler,
+  LiveQueryKey,
+  useLiveQuery,
+} from './useLiveQuery'
 import type {
   Collection,
+  CollectionImpl as CollectionImplType,
   Context,
+  DbClient,
   InferResultType,
   InitialQueryBuilder,
-  LiveQueryCollectionUtils,
+  LiveQueryWindowController,
   NonSingleResult,
   QueryBuilder,
 } from '@tanstack/db'
 
-/**
- * Type guard to check if utils object has setWindow method (LiveQueryCollectionUtils)
- */
-function isLiveQueryCollectionUtils(
-  utils: unknown,
-): utils is LiveQueryCollectionUtils {
-  return typeof (utils as any).setWindow === `function`
-}
+// Live queries created here are cleaned up immediately (0 disables GC).
+const DEFAULT_GC_TIME_MS = 1
+const unpreparedQueryValue = Symbol(`unpreparedQueryValue`)
 
 export type UseLiveInfiniteQueryConfig<TContext extends Context> = {
+  /**
+   * Explicit identity for queries that contain opaque functional variants or
+   * are hot enough that deriving identity from structured IR is too expensive.
+   * Structured queries should omit this so DB can derive identity directly.
+   */
+  queryKey?: LiveQueryKey
+  /** Override the nearest DbProvider for this query. */
+  client?: DbClient
   pageSize?: number
   initialPageParam?: number
   /**
@@ -43,75 +72,44 @@ export type UseLiveInfiniteQueryReturn<TContext extends Context> = Omit<
   data: InferResultType<TContext>
   pages: Array<Array<InferResultType<TContext>[number]>>
   pageParams: Array<number>
-  fetchNextPage: () => void
+  fetchNextPage: () => Promise<void>
   hasNextPage: boolean
   isFetchingNextPage: boolean
+  error: unknown
+}
+
+type EnabledLiveQueryReturn<TContext extends Context> = ReturnType<
+  typeof useLiveQuery<TContext>
+>
+
+type InfiniteQueryRenderState = {
+  inputKind: `collection` | `query`
+  inputCollection: Collection<any, any, any> | null
+  inputQuery: unknown
+  client: DbClient | undefined
+  identityMode: `collection` | `queryKey` | `legacyDeps` | `derived`
+  dependencies: Array<unknown> | null
+  pageSize: number
+  initialPageParam: number
+  collection: Collection<any, any, any>
+  controller: LiveQueryWindowController<any, any>
+  warning: string | null
+  warned: boolean
+  deferredCollections: Set<
+    CollectionImplType<any, string | number, any, any, any>
+  >
 }
 
 /**
- * Create an infinite query using a query function with live updates
+ * Create an infinite query using a query function with live updates.
  *
  * Uses `utils.setWindow()` to dynamically adjust the limit/offset window
  * without recreating the live query collection on each page change.
  *
  * @param queryFn - Query function that defines what data to fetch. Must include `.orderBy()` for setWindow to work.
  * @param config - Configuration including pageSize and getNextPageParam
- * @param deps - Array of dependencies that trigger query re-execution when changed
+ * @param deps - Deprecated array of dependencies that trigger query re-execution when changed
  * @returns Object with pages, data, and pagination controls
- *
- * @example
- * // Basic infinite query
- * const { data, pages, fetchNextPage, hasNextPage } = useLiveInfiniteQuery(
- *   (q) => q
- *     .from({ posts: postsCollection })
- *     .orderBy(({ posts }) => posts.createdAt, 'desc')
- *     .select(({ posts }) => ({
- *       id: posts.id,
- *       title: posts.title
- *     })),
- *   {
- *     pageSize: 20,
- *     getNextPageParam: (lastPage, allPages) =>
- *       lastPage.length === 20 ? allPages.length : undefined
- *   }
- * )
- *
- * @example
- * // With dependencies
- * const { pages, fetchNextPage } = useLiveInfiniteQuery(
- *   (q) => q
- *     .from({ posts: postsCollection })
- *     .where(({ posts }) => eq(posts.category, category))
- *     .orderBy(({ posts }) => posts.createdAt, 'desc'),
- *   {
- *     pageSize: 10,
- *     getNextPageParam: (lastPage) =>
- *       lastPage.length === 10 ? lastPage.length : undefined
- *   },
- *   [category]
- * )
- *
- * @example
- * // Router loader pattern with pre-created collection
- * // In loader:
- * const postsQuery = createLiveQueryCollection({
- *   query: (q) => q
- *     .from({ posts: postsCollection })
- *     .orderBy(({ posts }) => posts.createdAt, 'desc')
- *     .limit(20)
- * })
- * await postsQuery.preload()
- * return { postsQuery }
- *
- * // In component:
- * const { postsQuery } = useLoaderData()
- * const { data, fetchNextPage, hasNextPage } = useLiveInfiniteQuery(
- *   postsQuery,
- *   {
- *     pageSize: 20,
- *     getNextPageParam: (lastPage) => lastPage.length === 20 ? lastPage.length : undefined
- *   }
- * )
  */
 
 // Overload for pre-created collection (non-single result)
@@ -135,196 +133,220 @@ export function useLiveInfiniteQuery<TContext extends Context>(
 export function useLiveInfiniteQuery<TContext extends Context>(
   queryFnOrCollection: any,
   config: UseLiveInfiniteQueryConfig<TContext>,
-  deps: Array<unknown> = [],
+  deps?: Array<unknown>,
 ): UseLiveInfiniteQueryReturn<TContext> {
-  const pageSize = config.pageSize || 20
+  const pageSize = normalizeLiveQueryWindowPageSize(config.pageSize)
   const initialPageParam = config.initialPageParam ?? 0
+  const contextDbClient = useOptionalDbClient()
+  const dbClient = config.client ?? contextDbClient
 
-  // Detect if input is a collection or query function
-  const isCollection = queryFnOrCollection instanceof CollectionImpl
+  const inputIsCollection =
+    getLiveQueryWindowInputKind(queryFnOrCollection) === `collection`
 
-  // Validate input type
-  if (!isCollection && typeof queryFnOrCollection !== `function`) {
-    throw new Error(
-      `useLiveInfiniteQuery: First argument must be either a pre-created live query collection (CollectionImpl) ` +
-        `or a query function. Received: ${typeof queryFnOrCollection}`,
-    )
-  }
-
-  // Track how many pages have been loaded
-  const [loadedPageCount, setLoadedPageCount] = useState(1)
-  const [isFetchingNextPage, setIsFetchingNextPage] = useState(false)
-
-  // Track collection instance and whether we've validated it (only for pre-created collections)
-  const collectionRef = useRef(isCollection ? queryFnOrCollection : null)
-  const hasValidatedCollectionRef = useRef(false)
-
-  // Track deps for query functions (stringify for comparison)
-  let depsKey: string
-  try {
-    depsKey = JSON.stringify(deps)
-  } catch {
-    throw new Error(
-      `useLiveInfiniteQuery: dependency array contains values that cannot be serialized (e.g. circular references). ` +
-        `Ensure all dependency values are JSON-serializable.`,
-    )
-  }
-  const prevDepsKeyRef = useRef(depsKey)
-
-  // Reset pagination when inputs change
-  useEffect(() => {
-    let shouldReset = false
-
-    if (isCollection) {
-      // Reset if collection instance changed
-      if (collectionRef.current !== queryFnOrCollection) {
-        collectionRef.current = queryFnOrCollection
-        hasValidatedCollectionRef.current = false
-        shouldReset = true
-      }
-    } else {
-      // Reset if deps changed (for query functions)
-      if (prevDepsKeyRef.current !== depsKey) {
-        prevDepsKeyRef.current = depsKey
-        shouldReset = true
-      }
-    }
-
-    if (shouldReset) {
-      setLoadedPageCount(1)
-    }
-  }, [isCollection, queryFnOrCollection, depsKey])
-
-  // Create a live query with initial limit and offset
-  // Either pass collection directly or wrap query function
-  // Use pageSize + 1 for peek-ahead detection (to know if there are more pages)
-  const queryResult = isCollection
-    ? useLiveQuery(queryFnOrCollection)
-    : useLiveQuery(
-        (q) =>
-          queryFnOrCollection(q)
-            .limit(pageSize + 1)
-            .offset(0),
-        deps,
-      )
-
-  // Adjust window when pagination changes
-  useEffect(() => {
-    const utils = queryResult.collection.utils
-    const expectedOffset = 0
-    const expectedLimit = loadedPageCount * pageSize + 1 // +1 for peek ahead
-
-    // Check if collection has orderBy (required for setWindow)
-    if (!isLiveQueryCollectionUtils(utils)) {
-      // For pre-created collections, throw an error if no orderBy
-      if (isCollection) {
-        throw new Error(
-          `useLiveInfiniteQuery: Pre-created live query collection must have an orderBy clause for infinite pagination to work. ` +
-            `Please add .orderBy() to your createLiveQueryCollection query.`,
-        )
-      }
-      return
-    }
-
-    // For pre-created collections, validate window on first check
-    if (isCollection && !hasValidatedCollectionRef.current) {
-      const currentWindow = utils.getWindow()
-      if (
-        currentWindow &&
-        (currentWindow.offset !== expectedOffset ||
-          currentWindow.limit !== expectedLimit)
-      ) {
-        console.warn(
-          `useLiveInfiniteQuery: Pre-created collection has window {offset: ${currentWindow.offset}, limit: ${currentWindow.limit}} ` +
-            `but hook expects {offset: ${expectedOffset}, limit: ${expectedLimit}}. Adjusting window now.`,
-        )
-      }
-      hasValidatedCollectionRef.current = true
-    }
-
-    // For query functions, wait until collection is ready
-    if (!isCollection && !queryResult.isReady) return
-
-    // Adjust the window
-    let cancelled = false
-    const result = utils.setWindow({
-      offset: expectedOffset,
-      limit: expectedLimit,
-    })
-
-    if (result !== true) {
-      setIsFetchingNextPage(true)
-      result
-        .catch((error: unknown) => {
-          if (!cancelled)
-            console.error(`useLiveInfiniteQuery: setWindow failed:`, error)
-        })
-        .finally(() => {
-          if (!cancelled) setIsFetchingNextPage(false)
-        })
-    } else {
-      setIsFetchingNextPage(false)
-    }
-
-    return () => {
-      cancelled = true
-    }
-  }, [
-    isCollection,
-    queryResult.collection,
-    queryResult.isReady,
-    loadedPageCount,
-    pageSize,
+  const committedRef = useRef<InfiniteQueryRenderState | null>(null)
+  const committed = committedRef.current
+  const inputKind = inputIsCollection ? `collection` : `query`
+  const derivedIdentityProfilerRef = useRef<DerivedIdentityProfiler>({
+    renderCount: 0,
+    totalMs: 0,
+    maxMs: 0,
+    warned: false,
+  })
+  const legacyUnhashableIdentityRef = useRef<Array<unknown>>([
+    `legacy-unhashable`,
   ])
+  const deferredCollections = new Set<
+    CollectionImplType<any, string | number, any, any, any>
+  >()
 
-  // Split the data array into pages and determine if there's a next page
-  const { pages, pageParams, hasNextPage, flatData } = useMemo(() => {
-    const dataArray = (
-      Array.isArray(queryResult.data) ? queryResult.data : []
-    ) as InferResultType<TContext>
-    const totalItemsRequested = loadedPageCount * pageSize
+  let preparedQueryValue: unknown | typeof unpreparedQueryValue =
+    unpreparedQueryValue
+  let identityDeps: ReadonlyArray<unknown> = []
+  let identityMode: InfiniteQueryRenderState[`identityMode`] = `collection`
 
-    // Check if we have more data than requested (the peek ahead item)
-    const hasMore = dataArray.length > totalItemsRequested
+  if (!inputIsCollection) {
+    if (config.queryKey !== undefined) {
+      identityMode = `queryKey`
+      identityDeps = config.queryKey
+    } else if (deps !== undefined) {
+      identityMode = `legacyDeps`
+      identityDeps = deps
+      warnDeprecatedDepsArray(`useLiveInfiniteQuery`)
+    } else if (
+      committed?.identityMode === `derived` &&
+      committed.inputQuery === queryFnOrCollection &&
+      committed.client === dbClient
+    ) {
+      identityMode = `derived`
+      identityDeps = committed.dependencies ?? []
+    } else {
+      identityMode = `derived`
+      const preparation = prepareDerivedQuery(
+        queryFnOrCollection,
+        dbClient,
+        derivedIdentityProfilerRef.current,
+        deferredCollections,
+      )
+      preparedQueryValue = preparation.value
+      if (preparation.status === `hashable`) {
+        identityDeps = preparation.identityDeps
+      } else {
+        warnUnhashableDerivedIdentity(preparation.error)
+        identityDeps = legacyUnhashableIdentityRef.current
+      }
+    }
+  }
 
-    // Build pages array (without the peek ahead item)
-    const pagesResult: Array<Array<InferResultType<TContext>[number]>> = []
-    const pageParamsResult: Array<number> = []
+  const usesLegacyDeps =
+    !inputIsCollection && config.queryKey === undefined && deps !== undefined
+  const dependencyComparison = compareLiveQueryWindowDependencies(
+    committed?.dependencies,
+    identityDeps,
+  )
+  const sameClient = committed?.client === dbClient
+  const dependenciesChanged =
+    !inputIsCollection &&
+    (!sameClient ||
+      (usesLegacyDeps
+        ? dependencyComparison.changed
+        : !dependencyComparison.structurallyEqual))
+  const dependenciesStructurallyEqual =
+    usesLegacyDeps && sameClient && dependencyComparison.structurallyEqual
+  const needsNewCollection =
+    committed === null ||
+    committed.inputKind !== inputKind ||
+    (inputIsCollection && committed.inputCollection !== queryFnOrCollection) ||
+    dependenciesChanged
+  const pageShapeChanged =
+    committed === null ||
+    committed.pageSize !== pageSize ||
+    committed.initialPageParam !== initialPageParam
+  const needsNewController =
+    committed === null || needsNewCollection || pageShapeChanged
 
-    for (let i = 0; i < loadedPageCount; i++) {
-      const pageData = dataArray.slice(i * pageSize, (i + 1) * pageSize)
-      pagesResult.push(pageData)
-      pageParamsResult.push(initialPageParam + i)
+  let renderState = committed
+  if (needsNewController) {
+    let collection = committed?.collection
+    let warning: string | null = null
+
+    if (needsNewCollection) {
+      let inputValue = queryFnOrCollection
+      if (!inputIsCollection) {
+        if (preparedQueryValue === unpreparedQueryValue) {
+          preparedQueryValue = prepareQueryValue(
+            queryFnOrCollection,
+            dbClient,
+            deferredCollections,
+          )
+        }
+        inputValue = () => preparedQueryValue
+      }
+      const input = resolveLiveQueryWindowInput<TContext>(inputValue)
+      if (input.kind === `collection`) {
+        collection = input.collection
+      } else {
+        // Wrap the query with the first page's peek-ahead window; the controller
+        // grows the limit from here via setWindow.
+        collection = createLiveQueryCollection({
+          query: input.query.limit(pageSize + 1).offset(0),
+          // Construction happens during render. Synchronization starts only when
+          // useSyncExternalStore commits the controller subscription.
+          startSync: false,
+          gcTime: DEFAULT_GC_TIME_MS,
+        })
+      }
     }
 
-    // Flatten the pages for the data return (without peek ahead item)
-    const flatDataResult = dataArray.slice(
-      0,
-      totalItemsRequested,
-    ) as InferResultType<TContext>
-
-    return {
-      pages: pagesResult,
-      pageParams: pageParamsResult,
-      hasNextPage: hasMore,
-      flatData: flatDataResult,
+    if (!collection) {
+      throw new Error(`useLiveInfiniteQuery: Failed to create a collection.`)
     }
-  }, [queryResult.data, loadedPageCount, pageSize, initialPageParam])
 
-  // Fetch next page
-  const fetchNextPage = useCallback(() => {
-    if (!hasNextPage || isFetchingNextPage) return
+    if (inputIsCollection) {
+      warning =
+        getLiveQueryWindowCollectionWarning(collection, pageSize + 1) ?? null
+    } else {
+      assertLiveQueryWindowManyResult(collection)
+    }
 
-    setLoadedPageCount((prev) => prev + 1)
-  }, [hasNextPage, isFetchingNextPage])
+    const canPreservePageCount = shouldPreserveLiveQueryWindowPageCount({
+      hasPreviousController: committed !== null,
+      previousInputKind: committed?.inputKind,
+      inputKind,
+      sameCollection:
+        inputIsCollection && committed?.inputCollection === collection,
+      dependenciesChanged,
+      dependenciesStructurallyEqual,
+      pageShapeChanged,
+    })
+    const previousPageCount = committed
+      ? Math.max(1, committed.controller.getSnapshot().pages.length)
+      : 1
+    const initialPageCount = canPreservePageCount ? previousPageCount : 1
+    renderState = {
+      inputKind,
+      inputCollection: inputIsCollection ? collection : null,
+      inputQuery: inputIsCollection ? null : queryFnOrCollection,
+      client: dbClient,
+      identityMode,
+      dependencies: inputIsCollection ? null : [...identityDeps],
+      pageSize,
+      initialPageParam,
+      collection,
+      controller: createLiveQueryWindowController(collection, {
+        pageSize,
+        initialPageParam,
+        initialPageCount,
+      }),
+      warning,
+      warned: false,
+      deferredCollections,
+    }
+  }
+  const currentRenderState = renderState!
+  const controller = currentRenderState.controller
+
+  const subscribe = useCallback(
+    (onStoreChange: () => void) => {
+      const unsubscribe = controller.subscribe(onStoreChange)
+      committedRef.current = currentRenderState
+      if (currentRenderState.warning && !currentRenderState.warned) {
+        currentRenderState.warned = true
+        console.warn(currentRenderState.warning)
+      }
+      for (const collection of currentRenderState.deferredCollections) {
+        collection._resumeSyncStart()
+      }
+      currentRenderState.deferredCollections.clear()
+      return unsubscribe
+    },
+    [controller, currentRenderState],
+  )
+  const getSnapshot = useCallback(() => controller.getSnapshot(), [controller])
+  const snapshot = useSyncExternalStore(subscribe, getSnapshot, getSnapshot)
+
+  const fetchNextPage = useCallback(
+    () => fetchNextLiveQueryWindowPage(controller),
+    [controller],
+  )
 
   return {
-    ...queryResult,
-    data: flatData,
-    pages,
-    pageParams,
+    data: snapshot.data as InferResultType<TContext>,
+    state: snapshot.state as EnabledLiveQueryReturn<TContext>[`state`],
+    status: snapshot.status as EnabledLiveQueryReturn<TContext>[`status`],
+    isLoading: snapshot.isLoading,
+    isReady: snapshot.isReady,
+    isIdle: snapshot.isIdle,
+    isError: snapshot.isError,
+    isCleanedUp: snapshot.isCleanedUp,
+    collection:
+      snapshot.collection as EnabledLiveQueryReturn<TContext>[`collection`],
+    isEnabled:
+      snapshot.isEnabled as EnabledLiveQueryReturn<TContext>[`isEnabled`],
+    pages: snapshot.pages as Array<Array<InferResultType<TContext>[number]>>,
+    pageParams: snapshot.pageParams as Array<number>,
     fetchNextPage,
-    hasNextPage,
-    isFetchingNextPage,
-  } as UseLiveInfiniteQueryReturn<TContext>
+    hasNextPage: snapshot.hasNextPage,
+    isFetchingNextPage: snapshot.isFetchingNextPage,
+    error: snapshot.error,
+  }
 }

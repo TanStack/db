@@ -30,9 +30,12 @@ export function TodoList({ collection, executor }: TodoListProps) {
     [executor, collection],
   )
 
-  const { data: todoList = [], isLoading } = useLiveQuery((q) =>
-    q.from({ todo: collection }).orderBy(({ todo }) => todo.createdAt, `desc`),
-  )
+  const { data: todoList = [], isLoading } = useLiveQuery({
+    query: (q) =>
+      q
+        .from({ todo: collection })
+        .orderBy(({ todo }) => todo.createdAt, `desc`),
+  })
 
   // Monitor network status for UI display
   // (The executor's ReactNativeOnlineDetector handles sync retries internally)

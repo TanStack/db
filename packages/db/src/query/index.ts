@@ -113,6 +113,13 @@ export { queryOnce, type QueryOnceConfig } from './query-once.js'
 
 export { type LiveQueryCollectionConfig } from './live/types.js'
 export { type LiveQueryCollectionUtils } from './live/collection-config-builder.js'
+export {
+  UnhashableQueryIRError,
+  canonicalizeQueryIR,
+  getStableQueryBuilderHash,
+  getStableQueryIRHash,
+  getStableValueHash,
+} from './ir-stable-identity.js'
 
 // Predicate utilities for predicate push-down
 export {

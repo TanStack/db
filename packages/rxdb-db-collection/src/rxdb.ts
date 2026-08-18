@@ -7,6 +7,7 @@ import {
   rxStorageWriteErrorToRxError,
 } from 'rxdb/plugins/core'
 import DebugModule from 'debug'
+import { withCollectionConfigFactory } from '@tanstack/db'
 import { stripRxdbFields } from './helper'
 import type {
   FilledMangoQuery,
@@ -101,7 +102,9 @@ export function rxdbCollectionOptions<T extends object>(
   schema?: never // no schema in the result
 }
 
-export function rxdbCollectionOptions(config: RxDBCollectionConfig<any, any>) {
+export function rxdbCollectionOptions(
+  config: RxDBCollectionConfig<any, any>,
+): CollectionConfig<any, string, any> {
   type Row = Record<string, unknown>
   type Key = string // because RxDB primary keys must be strings
 
@@ -309,5 +312,7 @@ export function rxdbCollectionOptions(config: RxDBCollectionConfig<any, any>) {
       })
     },
   }
-  return collectionConfig
+  return withCollectionConfigFactory(collectionConfig, () =>
+    rxdbCollectionOptions(config),
+  )
 }

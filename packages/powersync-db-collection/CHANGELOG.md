@@ -1,5 +1,50 @@
 # @tanstack/powersync-db-collection
 
+## 0.1.59
+
+### Patch Changes
+
+- Add SSR through request-scoped `DbClient` instances, collection descriptors, ([#1564](https://github.com/TanStack/db/pull/1564))
+  explicit collection-row hydration, live-query result snapshots, adapter sync
+  metadata, and React and Svelte descriptor resolution.
+
+  React live queries now derive identity from structured query IR. Opaque queries
+  can provide `queryKey`; legacy dependency arrays and unkeyed opaque queries keep
+  working with development warnings until 1.0.
+
+  Add TanStack Router integration that streams live queries discovered during a
+  Suspense render as pending promises which resolve to ordered result snapshots.
+  The browser starts normal source sync and atomically replaces the snapshot when
+  its live result is ready.
+
+- Updated dependencies [[`4b9e8cd`](https://github.com/TanStack/db/commit/4b9e8cdf79551734cf526e6fa4bbdba42ec94575)]:
+  - @tanstack/db@0.8.0
+
+## 0.1.58
+
+### Patch Changes
+
+- Updated dependencies [[`5f63996`](https://github.com/TanStack/db/commit/5f63996b0febd4775fb641f50975f8f0d442dc00)]:
+  - @tanstack/db@0.7.2
+
+## 0.1.57
+
+### Patch Changes
+
+- Updated dependencies [[`424382b`](https://github.com/TanStack/db/commit/424382b3a80c6b3556701b433c26c8a60fc8d1af)]:
+  - @tanstack/db@0.7.1
+
+## 0.1.56
+
+### Patch Changes
+
+- Fixed `no such table` errors logged by the `on-demand` sync handler. Records are no longer flushed before the `diffTrigger` has been set up, and the tracking state is now cleared as part of disposal so unloading a subset or cleaning up the collection no longer flushes the dropped tracking table. ([#1585](https://github.com/TanStack/db/pull/1585))
+
+- Fix: applyTransaction hangs forever when a transaction mixes delete+insert on one collection for a same-millisecond tie. ([#1649](https://github.com/TanStack/db/pull/1649))
+
+- Updated dependencies [[`ad88d07`](https://github.com/TanStack/db/commit/ad88d0751db9723dfb9f164ebfcef88d52b6efa3), [`7e7abda`](https://github.com/TanStack/db/commit/7e7abda73a7ab313f9ec6a413fad00f300e79fb3), [`dc53f0e`](https://github.com/TanStack/db/commit/dc53f0ecbc38e173af68d829ff2de97531494722)]:
+  - @tanstack/db@0.7.0
+
 ## 0.1.55
 
 ### Patch Changes

@@ -9,11 +9,11 @@ import {
 import {
   BaseQueryBuilder,
   createLiveQueryCollection,
+  createLiveQueryObserver,
   isCollection,
   isSingleResultCollection,
 } from '@tanstack/db'
 import type {
-  ChangeMessage,
   Collection,
   CollectionStatus,
   Context,
@@ -249,28 +249,25 @@ export function injectLiveQuery(opts: any) {
 
     cleanup()
 
-    // Initialize immediately with current state
-    syncDataFromCollection(currentCollection)
-
-    // Start sync if idle
-    if (currentCollection.status === `idle`) {
-      currentCollection.startSyncImmediate()
-      // Update status after starting sync
-      status.set(currentCollection.status)
-    }
-
-    // Subscribe to changes
-    const subscription = currentCollection.subscribeChanges(
-      (_: Array<ChangeMessage<any>>) => {
-        syncDataFromCollection(currentCollection)
-      },
-    )
-    unsub = subscription.unsubscribe.bind(subscription)
-
-    // Handle ready state
-    currentCollection.onFirstReady(() => {
-      status.set(currentCollection.status)
+    // The shared observer owns sync start, subscription, the ready-race, and
+    // status transitions; Angular re-reads the whole collection on each notify
+    // (wholesale) into its signals.
+    // Angular re-reads the collection on notify; wholesale mode preserves its
+    // pre-observer loading policy (no initial-state snapshot request).
+    const observer = createLiveQueryObserver(currentCollection, {
+      mode: `wholesale`,
     })
+
+    const unsubscribe = observer.subscribe(() => {
+      syncDataFromCollection(currentCollection)
+    })
+    // Wholesale attach suppresses listener calls raised by synchronous sync
+    // startup. Read once after subscribe returns to capture that final state.
+    syncDataFromCollection(currentCollection)
+    unsub = () => {
+      unsubscribe()
+      observer.dispose()
+    }
 
     onCleanup(cleanup)
   })

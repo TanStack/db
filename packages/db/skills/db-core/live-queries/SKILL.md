@@ -5,16 +5,18 @@ description: >
   fullJoin, select, fn.select, groupBy, having, orderBy, limit, offset, distinct,
   findOne. Operators: eq, gt, gte, lt, lte, like, ilike, inArray, isNull,
   isUndefined, and, or, not. Aggregates: count, sum, avg, min, max. String
-  functions: upper, lower, length, concat. Utility: coalesce, caseWhen. Math: add.
+  functions: upper, lower, length, concat. Utility: coalesce, caseWhen. Math:
+  add, subtract, multiply, divide.
   $selected namespace. createLiveQueryCollection. Derived collections. Predicate push-down.
   Incremental view maintenance via differential dataflow (d2ts). Virtual
   properties ($synced, $origin, $key, $collectionId). Includes subqueries
-  for hierarchical data. toArray and concat(toArray(...)) scalar includes.
+  for hierarchical data. Collection, toArray, materialize, and
+  concat(toArray(...)) include modes.
   queryOnce for one-shot queries. createEffect for reactive side effects
   (onEnter, onUpdate, onExit, onBatch).
 type: sub-skill
 library: db
-library_version: '0.6.0'
+library_version: '0.6.17'
 sources:
   - 'TanStack/db:docs/guides/live-queries.md'
   - 'TanStack/db:packages/db/src/query/builder/index.ts'
@@ -106,6 +108,11 @@ Boolean column references work directly:
 .where(({ user }) => not(user.suspended)) // negated boolean ref
 ```
 
+Comparisons follow PostgreSQL semantics. Comparisons involving `null` or
+`undefined` are unknown and do not match; use `isNull()` or `isUndefined()`.
+`NaN` (and an invalid `Date`) equals itself and sorts after every other
+non-null value.
+
 ### 2. Joining two collections
 
 Join conditions **must** use `eq()` (equality only -- IVM constraint). Default join type is `left`. Convenience methods: `leftJoin`, `rightJoin`, `innerJoin`, `fullJoin`.
@@ -195,11 +202,16 @@ const activeUserPosts = createLiveQueryCollection((q) =>
 
 Create derived collections once at module scope and reuse them. Do not recreate on every render or navigation.
 
+Live query collections default to `gcTime: 5_000`. An explicit `gcTime: 0` is
+preserved and disables garbage collection for that derived collection.
+
 ## Virtual Properties
 
 Live query results include computed, read-only virtual properties on every row:
 
-- `$synced`: `true` when the row is confirmed by sync; `false` when it is still optimistic.
+- `$synced`: `true` when no pending local optimistic write affects the row;
+  `false` while one does. This is local mutation status, not proof that a
+  backend uploaded, confirmed, or read back the row.
 - `$origin`: `"local"` if the last confirmed change came from this client, otherwise `"remote"`.
 - `$key`: the row key for the result.
 - `$collectionId`: the source collection ID.
@@ -208,7 +220,9 @@ These props are added automatically and can be used in `where`, `select`, and `o
 
 ## Includes (Subqueries in Select)
 
-Embed a correlated subquery inside `select()` to produce hierarchical (nested) data. The subquery must contain a `where` with an `eq()` that correlates a parent field with a child field. Three materialization modes are available.
+Embed a correlated subquery inside `select()` to produce hierarchical (nested)
+data. The subquery must contain a `where` with an `eq()` that correlates a
+parent field with a child field.
 
 ### Collection includes (default)
 
@@ -239,7 +253,7 @@ for (const project of projectsWithIssues) {
 
 ### Array includes with toArray()
 
-Wrap the subquery in `toArray()` to get a plain array of scalar values instead of a Collection:
+Wrap the subquery in `toArray()` to get a plain array instead of a Collection:
 
 ```ts
 import { eq, toArray, createLiveQueryCollection } from '@tanstack/db'
@@ -258,6 +272,32 @@ const messagesWithParts = createLiveQueryCollection((q) =>
 )
 // row.contentParts is string[]
 ```
+
+### Plain values with materialize()
+
+Use `materialize()` when the parent row should hold a plain snapshot rather
+than a child collection:
+
+```ts
+import { eq, materialize, createLiveQueryCollection } from '@tanstack/db'
+
+const issuesWithProject = createLiveQueryCollection((q) =>
+  q.from({ issue: issuesCollection }).select(({ issue }) => ({
+    ...issue,
+    project: materialize(
+      q
+        .from({ project: projectsCollection })
+        .where(({ project }) => eq(project.id, issue.projectId))
+        .findOne(),
+    ),
+  })),
+)
+// row.project is Project | undefined
+```
+
+For a multi-row subquery, `materialize()` returns `Array<T>` like `toArray()`.
+For a subquery ending in `findOne()`, it returns `T | undefined`. In both cases,
+the parent row is re-emitted when the child result changes.
 
 ### Concatenated scalar with concat(toArray())
 
@@ -287,6 +327,9 @@ const messagesWithContent = createLiveQueryCollection((q) =>
 
 - The subquery **must** have a `where` clause with an `eq()` correlating a parent alias with a child alias. The library extracts this automatically as the join condition.
 - `toArray()` works with both scalar selects (e.g., `select(({ c }) => c.text)` → `string[]`) and object selects (e.g., `select(({ c }) => ({ id: c.id, title: c.title }))` → `Array<{id, title}>`).
+- `materialize()` returns an array, or one value for a `findOne()` subquery.
+  Like `toArray()`, it must be a top-level value in `select()` and cannot be
+  nested inside `coalesce()`, `eq()`, or another expression.
 - `concat(toArray())` requires a **scalar** `select` to concatenate into a string.
 - Collection includes (bare subquery) require an **object** `select`.
 - Includes subqueries are compiled into the same incremental pipeline as the parent query -- they are not separate live queries.
@@ -372,20 +415,26 @@ JS `.filter()` / `.map()` on the result array throws away incremental maintenanc
 
 ```ts
 // WRONG -- re-runs filter on every change
-const { data } = useLiveQuery((q) => q.from({ todos: todosCollection }))
+const { data } = useLiveQuery({
+  query: (q) => q.from({ todos: todosCollection }),
+})
 const active = data.filter((t) => t.completed === false)
 
 // CORRECT -- incrementally maintained
-const { data } = useLiveQuery((q) =>
-  q
-    .from({ todos: todosCollection })
-    .where(({ todos }) => eq(todos.completed, false)),
-)
+const { data } = useLiveQuery({
+  query: (q) =>
+    q
+      .from({ todos: todosCollection })
+      .where(({ todos }) => eq(todos.completed, false)),
+})
 ```
 
 ### HIGH: Not using the full operator set
 
-The library provides string functions (`upper`, `lower`, `length`, `concat`), math (`add`), utility functions (`coalesce`, `caseWhen`), and aggregates (`count`, `sum`, `avg`, `min`, `max`). All are incrementally maintained. Prefer them over JS equivalents.
+The library provides string functions (`upper`, `lower`, `length`, `concat`),
+math (`add`, `subtract`, `multiply`, `divide`), utility functions (`coalesce`,
+`caseWhen`), and aggregates (`count`, `sum`, `avg`, `min`, `max`). All are
+incrementally maintained. Prefer them over JS equivalents.
 
 ```ts
 // WRONG
@@ -401,6 +450,11 @@ The library provides string functions (`upper`, `lower`, `length`, `concat`), ma
   displayName: coalesce(user.displayName, user.name, 'Unknown'),
 }))
 ```
+
+Math expressions also work in `orderBy()`. When a computed expression is used
+with `limit()`, lazy-loading optimization is skipped and all matching rows load
+before sorting. Literal values such as `Date.now()` are captured when the query
+is created; recreate the query when the value must advance.
 
 ### HIGH: Missing conditional expression helpers
 
@@ -505,6 +559,12 @@ q.from(usersCollection)
 // CORRECT
 q.from({ users: usersCollection })
 ```
+
+### MEDIUM: Using unsafe select alias paths
+
+Select alias path segments named `__proto__`, `prototype`, or `constructor`
+throw `UnsafeAliasPathError`. Use ordinary data-field names; do not suppress
+this prototype-pollution guard.
 
 ## Tension: Query expressiveness vs. IVM constraints
 

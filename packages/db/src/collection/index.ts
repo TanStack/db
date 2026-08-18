@@ -42,6 +42,7 @@ import type {
 import type { SingleRowRefProxy } from '../query/builder/ref-proxy'
 import type { StandardSchemaV1 } from '@standard-schema/spec'
 import type { WithVirtualProps } from '../virtual-props.js'
+import type { TransactionScope } from '../transactions.js'
 
 export type { CollectionIndexMetadata } from './events.js'
 
@@ -421,6 +422,33 @@ export class CollectionImpl<
   }
 
   /**
+   * Monotonic revision of the collection's visible state; advances once per
+   * committed batch of changes, even while nothing is subscribed.
+   * Internal — used by the live-query observer's snapshot cache.
+   */
+  public get _stateRevision(): number {
+    return this._changes.stateRevision
+  }
+
+  /**
+   * Monotonic revision of explicit layout-only publications.
+   * Internal — used to distinguish them from empty ready events.
+   */
+  public get _layoutRevision(): number {
+    return this._changes.layoutRevision
+  }
+
+  /** Subscribe to layout-only publications. Internal observer channel. */
+  public _subscribeLayoutChanges(listener: () => void): () => void {
+    return this._changes.subscribeLayoutChanges(listener)
+  }
+
+  /** Mark the active sync transaction as layout-changing. Internal. */
+  public _markLayoutChange(): void {
+    this._sync.markLayoutChange()
+  }
+
+  /**
    * Register a callback to be executed when the collection first becomes ready
    * Useful for preloading collections
    * @param callback Function to call when the collection first becomes ready
@@ -464,6 +492,26 @@ export class CollectionImpl<
    */
   public startSyncImmediate(): void {
     this._sync.startSync()
+  }
+
+  /** @internal */
+  public _setTransactionScope(transactionScope: TransactionScope): void {
+    this._mutations.setTransactionScope(transactionScope)
+  }
+
+  /** @internal */
+  public _hasHydratedKey(key: TKey): boolean {
+    return this._state.hydratedKeys.has(key)
+  }
+
+  /** @internal */
+  public _deferSyncStart(): boolean {
+    return this._sync.deferStart()
+  }
+
+  /** @internal */
+  public _resumeSyncStart(): void {
+    this._sync.resumeStart()
   }
 
   /**

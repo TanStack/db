@@ -9,7 +9,7 @@ description: >
   onInsert/onUpdate/onDelete handlers. PendingMutation type. Transaction.isPersisted.
 type: sub-skill
 library: db
-library_version: '0.6.0'
+library_version: '0.6.17'
 sources:
   - 'TanStack/db:docs/guides/mutations.md'
   - 'TanStack/db:packages/db/src/transactions.ts'
@@ -24,7 +24,7 @@ sources:
 > handlers) before you can mutate.
 
 TanStack DB mutations follow a unidirectional loop:
-**optimistic mutation -> handler persists to backend -> sync back -> confirmed state**.
+**optimistic mutation -> handler persists -> handler waits for sync/ack -> confirmed state**.
 Optimistic state is applied in the current tick and dropped when the handler resolves.
 
 ---
@@ -34,17 +34,19 @@ Optimistic state is applied in the current tick and dropped when the handler res
 ### insert
 
 ```ts
+import { safeRandomUUID } from '@tanstack/db'
+
 // Single item
 todoCollection.insert({
-  id: crypto.randomUUID(),
+  id: safeRandomUUID(),
   text: 'Buy groceries',
   completed: false,
 })
 
 // Multiple items
 todoCollection.insert([
-  { id: crypto.randomUUID(), text: 'Buy groceries', completed: false },
-  { id: crypto.randomUUID(), text: 'Walk dog', completed: false },
+  { id: safeRandomUUID(), text: 'Buy groceries', completed: false },
+  { id: safeRandomUUID(), text: 'Walk dog', completed: false },
 ])
 
 // With metadata / non-optimistic
@@ -87,7 +89,9 @@ todoCollection.delete(todo.id, { metadata: { reason: 'completed' } })
 ```
 
 All three return a `Transaction` object. Use `tx.isPersisted.promise` to await
-persistence or catch rollback errors.
+settlement or catch rollback errors. For a non-empty transaction, this normally
+means its `mutationFn` returned; it proves upload, confirmation, or read-back
+only when that function waits for the backend observation before returning.
 
 ---
 
@@ -127,7 +131,7 @@ Multi-collection example:
 const createProject = createOptimisticAction<{ name: string; ownerId: string }>(
   {
     onMutate: ({ name, ownerId }) => {
-      projectCollection.insert({ id: crypto.randomUUID(), name, ownerId })
+      projectCollection.insert({ id: safeRandomUUID(), name, ownerId })
       userCollection.update(ownerId, (d) => {
         d.projectCount += 1
       })
@@ -207,7 +211,9 @@ await tx.commit()
 
 Inside `tx.mutate(() => { ... })`, the transaction is pushed onto an ambient
 stack. Any `collection.insert/update/delete` call joins the ambient transaction
-automatically via `getActiveTransaction()`.
+automatically via `getActiveTransaction()`. That scope is synchronous:
+collection operations after an `await` do not join it. Put async work in
+`mutationFn`, or call `mutate()` again before committing.
 
 For mutations captured by a manual transaction, collection-level
 `onInsert`/`onUpdate`/`onDelete` handlers are not invoked automatically. The
@@ -307,7 +313,7 @@ createOptimisticAction({
 // CORRECT
 createOptimisticAction({
   onMutate: (text) => {
-    collection.insert({ id: crypto.randomUUID(), text })
+    collection.insert({ id: safeRandomUUID(), text })
   },
   ...
 })
@@ -337,7 +343,7 @@ re-insert.
 ### HIGH: Inserting item with duplicate key
 
 If an item with the same key already exists (synced or optimistic), throws
-`DuplicateKeyError`. Always generate a unique key (e.g. `crypto.randomUUID()`)
+`DuplicateKeyError`. Always generate a unique key (e.g. `safeRandomUUID()`)
 or check before inserting.
 
 ### HIGH: Manually refetching inside a Query Collection handler

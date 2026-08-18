@@ -1,5 +1,6 @@
 /* eslint-disable @typescript-eslint/no-unnecessary-condition */
 import { Store } from '@tanstack/store'
+import { withCollectionConfigFactory } from '@tanstack/db'
 import {
   ExpectedDeleteTypeError,
   ExpectedInsertTypeError,
@@ -180,6 +181,17 @@ export function trailBaseCollectionOptions<
   const sync = {
     sync: (params: SyncParams) => {
       const { begin, write, commit, markReady } = params
+      let cancelled = false
+      let periodicCleanupTask: ReturnType<typeof setInterval> | undefined
+
+      const cleanup = () => {
+        cancelled = true
+        cancelEventReader()
+        if (periodicCleanupTask !== undefined) {
+          clearInterval(periodicCleanupTask)
+          periodicCleanupTask = undefined
+        }
+      }
 
       // NOTE: We cache cursors from prior fetches. TanStack/db expects that
       // cursors can be derived from a key, which is not true for TB, since
@@ -188,6 +200,8 @@ export function trailBaseCollectionOptions<
 
       // Load (more) data.
       async function load(opts: LoadSubsetOptions) {
+        if (cancelled) return
+
         const lastKey = opts.cursor?.lastKey
         let cursor: string | undefined =
           lastKey !== undefined ? cursors.get(lastKey) : undefined
@@ -216,6 +230,7 @@ export function trailBaseCollectionOptions<
             order,
             filters,
           })
+          if (cancelled) return
 
           const length = response.records.length
           if (length === 0) {
@@ -295,6 +310,10 @@ export function trailBaseCollectionOptions<
 
       async function start() {
         const eventStream = await config.recordApi.subscribe(`*`)
+        if (cancelled) {
+          await eventStream.cancel()
+          return
+        }
         const reader = (eventReader = eventStream.getReader())
 
         // Start listening for subscriptions first. Otherwise, we'd risk a gap
@@ -306,6 +325,7 @@ export function trailBaseCollectionOptions<
           if (internalSyncMode === `eager`) {
             // Load everything on initial load.
             await load({})
+            if (cancelled) return
             fullSyncCompleted = true
           }
         } catch (e) {
@@ -314,12 +334,14 @@ export function trailBaseCollectionOptions<
         } finally {
           // Mark ready both if everything went well or if there's an error to
           // avoid blocking apps waiting for `.preload()` to finish.
-          markReady()
+          if (!cancelled) markReady()
         }
 
         // Lastly, start a periodic cleanup task that will be removed when the
         // reader closes.
-        const periodicCleanupTask = setInterval(() => {
+        if (cancelled) return
+
+        periodicCleanupTask = setInterval(() => {
           seenIds.setState((curr) => {
             const now = Date.now()
             let anyExpired = false
@@ -337,17 +359,23 @@ export function trailBaseCollectionOptions<
           })
         }, 120 * 1000)
 
-        reader.closed.finally(() => clearInterval(periodicCleanupTask))
+        reader.closed.finally(() => {
+          if (periodicCleanupTask !== undefined) {
+            clearInterval(periodicCleanupTask)
+            periodicCleanupTask = undefined
+          }
+        })
       }
 
       start()
 
       // Eager mode doesn't need subset loading
       if (internalSyncMode === `eager`) {
-        return
+        return { cleanup }
       }
 
       return {
+        cleanup,
         loadSubset: load,
         getSyncMetadata: () =>
           ({
@@ -363,7 +391,7 @@ export function trailBaseCollectionOptions<
       }) as const,
   }
 
-  return {
+  const options = {
     ...config,
     sync,
     getKey,
@@ -428,6 +456,11 @@ export function trailBaseCollectionOptions<
       cancel: cancelEventReader,
     },
   }
+
+  return withCollectionConfigFactory(
+    options,
+    () => trailBaseCollectionOptions(config) as typeof options,
+  )
 }
 
 function buildOrder(opts: LoadSubsetOptions): undefined | Array<string> {

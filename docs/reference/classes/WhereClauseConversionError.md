@@ -5,7 +5,7 @@ title: WhereClauseConversionError
 
 # Class: WhereClauseConversionError
 
-Defined in: [packages/db/src/errors.ts:727](https://github.com/TanStack/db/blob/main/packages/db/src/errors.ts#L727)
+Defined in: [packages/db/src/errors.ts:739](https://github.com/TanStack/db/blob/main/packages/db/src/errors.ts#L739)
 
 Internal error when the query optimizer fails to convert a WHERE clause to a collection filter.
 
@@ -21,7 +21,7 @@ Internal error when the query optimizer fails to convert a WHERE clause to a col
 new WhereClauseConversionError(collectionId, alias): WhereClauseConversionError;
 ```
 
-Defined in: [packages/db/src/errors.ts:728](https://github.com/TanStack/db/blob/main/packages/db/src/errors.ts#L728)
+Defined in: [packages/db/src/errors.ts:740](https://github.com/TanStack/db/blob/main/packages/db/src/errors.ts#L740)
 
 #### Parameters
 

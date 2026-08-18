@@ -1,5 +1,5 @@
 import { DiffTriggerOperation, sanitizeSQL } from '@powersync/common'
-import { or } from '@tanstack/db'
+import { or, withCollectionConfigFactory } from '@tanstack/db'
 import { compileSQLite } from './sqlite-compiler'
 import { PendingOperationStore } from './PendingOperationStore'
 import { PowerSyncTransactor } from './PowerSyncTransactor'
@@ -224,6 +224,18 @@ export function powerSyncCollectionOptions<
  */
 
 export function powerSyncCollectionOptions<
+  TTable extends Table,
+  TSchema extends StandardSchemaV1<any> = never,
+>(
+  config: PowerSyncCollectionConfig<TTable, TSchema>,
+): ReturnType<typeof createPowerSyncCollectionConfig<TTable, TSchema>> {
+  const outputConfig = createPowerSyncCollectionConfig(config)
+  return withCollectionConfigFactory(outputConfig, () =>
+    createPowerSyncCollectionConfig(config),
+  )
+}
+
+function createPowerSyncCollectionConfig<
   TTable extends Table,
   TSchema extends StandardSchemaV1<any> = never,
 >(config: PowerSyncCollectionConfig<TTable, TSchema>) {

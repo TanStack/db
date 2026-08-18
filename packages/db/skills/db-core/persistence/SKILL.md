@@ -8,10 +8,11 @@ description: >
   Cloudflare Durable Objects. Multi-tab/multi-process coordination via
   BrowserCollectionCoordinator / ElectronCollectionCoordinator /
   SingleProcessCoordinator. schemaVersion for migration resets. Local-only mode
-  for offline-first without a server.
+  for offline-first without a server. Applied transaction log pruning and safe
+  full-reload recovery.
 type: sub-skill
 library: db
-library_version: '0.6.0'
+library_version: '0.6.17'
 sources:
   - 'TanStack/db:packages/db-sqlite-persistence-core/src/persisted.ts'
   - 'TanStack/db:packages/browser-db-sqlite-persistence/src/index.ts'
@@ -51,7 +52,6 @@ For purely local data with no sync backend:
 ```ts
 import { createCollection } from '@tanstack/react-db'
 import {
-  BrowserCollectionCoordinator,
   createBrowserWASQLitePersistence,
   openBrowserWASQLiteOPFSDatabase,
   persistedCollectionOptions,
@@ -61,13 +61,8 @@ const database = await openBrowserWASQLiteOPFSDatabase({
   databaseName: 'my-app.sqlite',
 })
 
-const coordinator = new BrowserCollectionCoordinator({
-  dbName: 'my-app',
-})
-
 const persistence = createBrowserWASQLitePersistence({
   database,
-  coordinator,
 })
 
 const draftsCollection = createCollection(
@@ -115,11 +110,15 @@ This works with any adapter: `electricCollectionOptions`, `queryCollectionOption
 
 Coordinators handle leader election and cross-instance communication so only one tab/process owns the database writer.
 
-| Platform                              | Coordinator                     | Mechanism                                      |
-| ------------------------------------- | ------------------------------- | ---------------------------------------------- |
-| Browser                               | `BrowserCollectionCoordinator`  | BroadcastChannel + Web Locks                   |
-| Electron                              | `ElectronCollectionCoordinator` | IPC (main holds DB, renderer accesses via RPC) |
-| Single-process (RN, Expo, Node, etc.) | `SingleProcessCoordinator`      | No-op (always leader)                          |
+| Platform                              | Coordinator                     | Mechanism                    |
+| ------------------------------------- | ------------------------------- | ---------------------------- |
+| Browser                               | `BrowserCollectionCoordinator`  | BroadcastChannel + Web Locks |
+| Electron                              | `ElectronCollectionCoordinator` | BroadcastChannel + Web Locks |
+| Single-process (RN, Expo, Node, etc.) | `SingleProcessCoordinator`      | No-op (always leader)        |
+
+Browser persistence uses single-process semantics by default. That is correct
+when the app runs in one tab at a time or each tab has its own database. Pass a
+`BrowserCollectionCoordinator` only when multiple tabs share one OPFS database.
 
 Browser example:
 
@@ -142,7 +141,12 @@ Electron requires setup in both processes:
 ```ts
 // Main process
 import { exposeElectronSQLitePersistence } from '@tanstack/electron-db-sqlite-persistence'
-exposeElectronSQLitePersistence({ persistence, ipcMain })
+import { app, ipcMain } from 'electron'
+
+const disposeIpc = exposeElectronSQLitePersistence({ persistence, ipcMain })
+app.on('before-quit', () => {
+  disposeIpc()
+})
 
 // Renderer process
 import {
@@ -157,6 +161,10 @@ const persistence = createElectronSQLitePersistence({
 })
 ```
 
+Electron persistence calls cross the renderer/main boundary through IPC. The
+`ElectronCollectionCoordinator` separately coordinates renderer instances with
+`BroadcastChannel` and Web Locks.
+
 ## Schema Versioning
 
 `schemaVersion` tracks the shape of persisted data. When the stored version doesn't match the code, the collection resets (drops and reloads from server for synced collections, or throws for local-only).
@@ -169,6 +177,36 @@ persistedCollectionOptions({
 ```
 
 There is no custom migration function -- a version mismatch triggers a full reset. For synced collections this is safe because the server re-supplies the data.
+
+## Applied Transaction Log Pruning
+
+The SQLite `applied_tx` log is a replay cache, not permanent history. Browser,
+Capacitor, Cloudflare Durable Objects, Expo, Node, React Native, and Tauri
+wrappers prune it inside write transactions by default, per collection:
+
+- `appliedTxPruneMaxRows: 1_000`
+- `appliedTxPruneMaxAgeSeconds: 86_400` (24 hours)
+
+Set either option to `0` to disable that limit, or raise it to retain a longer
+replay window:
+
+```ts
+const persistence = createNodeSQLitePersistence({
+  database,
+  appliedTxPruneMaxRows: 5_000,
+  appliedTxPruneMaxAgeSeconds: 0,
+})
+```
+
+If a follower asks to recover from a point older than the retained log, it
+falls back to a full reload. Pruning does not itself shrink the SQLite file;
+use SQLite vacuum settings or separate maintenance when disk reclamation
+matters. The defaults are exported as
+`DEFAULT_APPLIED_TX_PRUNE_MAX_ROWS` and
+`DEFAULT_APPLIED_TX_PRUNE_MAX_AGE_SECONDS`.
+
+Raw `createSQLiteCorePersistenceAdapter` calls do not inject these defaults.
+Electron uses whichever persistence adapter the main process supplies.
 
 ## Key Options
 
@@ -204,13 +242,13 @@ persistedCollectionOptions({
 
 Without an explicit `id`, the code generates a random UUID each session, so persisted data is silently abandoned on every reload. Local-only persisted collections must always provide an `id`. Synced collections derive it from the adapter config.
 
-### HIGH Forgetting the coordinator in multi-tab apps
+### HIGH Sharing one browser database across tabs without a coordinator
 
 Wrong:
 
 ```ts
 const persistence = createBrowserWASQLitePersistence({ database })
-// No coordinator — concurrent tabs corrupt the database
+// Unsafe if multiple tabs share this database
 ```
 
 Correct:
@@ -220,7 +258,9 @@ const coordinator = new BrowserCollectionCoordinator({ dbName: 'my-app' })
 const persistence = createBrowserWASQLitePersistence({ database, coordinator })
 ```
 
-Without a coordinator, multiple browser tabs write to SQLite concurrently, causing data corruption. Always use `BrowserCollectionCoordinator` in browser environments.
+Without a coordinator, multiple browser tabs that share one OPFS database can
+write concurrently. Use `BrowserCollectionCoordinator` for that case. Do not
+add it to a single-tab app merely because the runtime is a browser.
 
 ### HIGH Not bumping schemaVersion after changing data shape
 

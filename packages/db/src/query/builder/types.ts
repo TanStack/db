@@ -1,4 +1,5 @@
 import type { Collection, CollectionImpl } from '../../collection/index.js'
+import type { CollectionOptionsIdentity } from '../../collection-options.js'
 import type { SingleResult, StringCollationConfig } from '../../types.js'
 import type {
   Aggregate,
@@ -89,7 +90,10 @@ export type ContextSchema = Record<string, unknown>
  * Example: `{ users: usersCollection }`
  */
 export type Source = {
-  [alias: string]: CollectionImpl<any, any> | QueryBuilder<Context>
+  [alias: string]:
+    | CollectionImpl<any, any>
+    | CollectionOptionsIdentity<any, any, any, any, any>
+    | QueryBuilder<Context>
 }
 
 /**
@@ -101,7 +105,15 @@ export type Source = {
 export type InferCollectionType<T> =
   T extends CollectionImpl<infer TOutput, infer TKey, any, any, any>
     ? WithVirtualProps<TOutput, TKey>
-    : never
+    : T extends CollectionOptionsIdentity<
+          infer TOutput,
+          infer TKey,
+          any,
+          any,
+          any
+        >
+      ? WithVirtualProps<TOutput, TKey>
+      : never
 
 /**
  * SchemaFromSource - Converts a Source definition into a ContextSchema
@@ -116,9 +128,11 @@ export type InferCollectionType<T> =
 export type SchemaFromSource<T extends Source> = Prettify<{
   [K in keyof T]: T[K] extends CollectionImpl<any, any, any, any, any>
     ? InferCollectionType<T[K]>
-    : T[K] extends QueryBuilder<infer TContext>
-      ? GetRawResult<TContext>
-      : never
+    : T[K] extends CollectionOptionsIdentity<any, any, any, any, any>
+      ? InferCollectionType<T[K]>
+      : T[K] extends QueryBuilder<infer TContext>
+        ? GetRawResult<TContext>
+        : never
 }>
 
 export type UnionRefsSchema<TSchema extends ContextSchema> = Prettify<{

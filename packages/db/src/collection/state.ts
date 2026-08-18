@@ -25,6 +25,7 @@ interface PendingSyncedTransaction<
   TKey extends string | number = string | number,
 > {
   committed: boolean
+  layoutChanged: boolean
   operations: Array<OptimisticChangeMessage<T>>
   truncate?: boolean
   deletedKeys: Set<string | number>
@@ -34,6 +35,7 @@ interface PendingSyncedTransaction<
     upserts: Map<TKey, T>
     deletes: Set<TKey>
   }
+  preserveHydrationSeedKeys?: boolean
   /**
    * When true, this transaction should be processed immediately even if there
    * are persisting user transactions. Used by manual write operations (writeInsert,
@@ -75,6 +77,8 @@ export class CollectionStateManager<
   public syncedData: SortedMap<TKey, TOutput>
   public syncedMetadata = new Map<TKey, unknown>()
   public syncedCollectionMetadata = new Map<string, unknown>()
+  public hydrationSeedKeys = new Set<TKey>()
+  public hydratedKeys = new Set<TKey>()
 
   // Optimistic state tracking - make public for testing
   public optimisticUpserts = new Map<TKey, TOutput>()
@@ -836,10 +840,12 @@ export class CollectionStateManager<
       uncommittedSyncedTransactions,
       hasTruncateSync,
       hasImmediateSync,
+      layoutChanged,
     } = this.pendingSyncedTransactions.reduce(
       (acc, t) => {
         if (t.committed) {
           acc.committedSyncedTransactions.push(t)
+          acc.layoutChanged ||= t.layoutChanged
           if (t.truncate) {
             acc.hasTruncateSync = true
           }
@@ -860,6 +866,7 @@ export class CollectionStateManager<
         >,
         hasTruncateSync: false,
         hasImmediateSync: false,
+        layoutChanged: false,
       },
     )
 
@@ -975,6 +982,8 @@ export class CollectionStateManager<
           this.syncedData.clear()
           this.syncedMetadata.clear()
           this.syncedKeys.clear()
+          this.hydrationSeedKeys.clear()
+          this.hydratedKeys.clear()
           this.clearOriginTrackingState()
 
           // 3) Clear currentVisibleState for truncated keys to ensure subsequent operations
@@ -1051,6 +1060,10 @@ export class CollectionStateManager<
               this.pendingOptimisticDirectUpserts.delete(key)
               this.pendingOptimisticDirectDeletes.delete(key)
               break
+          }
+          if (!transaction.preserveHydrationSeedKeys) {
+            this.hydrationSeedKeys.delete(key)
+            this.hydratedKeys.delete(key)
           }
         }
 
@@ -1331,7 +1344,7 @@ export class CollectionStateManager<
       }
 
       // End batching and emit all events (combines any batched events with sync events)
-      this.changes.emitEvents(events, true)
+      this.changes.emitEvents(events, true, layoutChanged)
 
       this.pendingSyncedTransactions = uncommittedSyncedTransactions
 
@@ -1435,6 +1448,8 @@ export class CollectionStateManager<
     this.pendingOptimisticDeletes.clear()
     this.pendingOptimisticDirectUpserts.clear()
     this.pendingOptimisticDirectDeletes.clear()
+    this.hydrationSeedKeys.clear()
+    this.hydratedKeys.clear()
     this.clearOriginTrackingState()
     this.isLocalOnly = false
     this.size = 0

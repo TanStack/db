@@ -17,6 +17,8 @@ Defined in: [packages/db/src/errors.ts:103](https://github.com/TanStack/db/blob/
 - [`InvalidCollectionStatusTransitionError`](InvalidCollectionStatusTransitionError.md)
 - [`CollectionIsInErrorStateError`](CollectionIsInErrorStateError.md)
 - [`NegativeActiveSubscribersError`](NegativeActiveSubscribersError.md)
+- [`LiveQueryObserverDisposedError`](LiveQueryObserverDisposedError.md)
+- [`LiveQueryWindowControllerDisposedError`](LiveQueryWindowControllerDisposedError.md)
 
 ## Constructors
 

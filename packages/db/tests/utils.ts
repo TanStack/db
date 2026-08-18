@@ -1,5 +1,6 @@
 import { expect } from 'vitest'
 import { BTreeIndex } from '../src/indexes/btree-index'
+import { withCollectionConfigFactory } from '../src/client'
 import type {
   CollectionConfig,
   MutationFnParams,
@@ -219,9 +220,21 @@ type MockSyncCollectionConfig<T extends object = Record<string, unknown>> = {
   defaultIndexType?: IndexConstructor
 }
 
+type MockSyncCollectionUtils<T extends object> = {
+  begin: () => void
+  write: Parameters<SyncConfig<T>[`sync`]>[0][`write`]
+  commit: () => void
+  resolveSync: () => void
+  rejectSync: (error: Error) => void
+}
+
 export function mockSyncCollectionOptions<
   T extends object = Record<string, unknown>,
->(config: MockSyncCollectionConfig<T>) {
+>(
+  config: MockSyncCollectionConfig<T>,
+): CollectionConfig<T, string | number, never> & {
+  utils: MockSyncCollectionUtils<T>
+} {
   let begin: () => void
   let write: Parameters<SyncConfig<T>[`sync`]>[0][`write`]
   let commit: () => void
@@ -238,12 +251,14 @@ export function mockSyncCollectionOptions<
       syncPendingResolve = resolve
       syncPendingReject = reject
     })
-    syncPendingPromise.then(() => {
-      syncPendingPromise = undefined
-      syncPendingResolve = undefined
-      syncPendingReject = undefined
-    })
+    void syncPendingPromise.finally(clearPendingSync)
     return syncPendingPromise
+  }
+
+  const clearPendingSync = () => {
+    syncPendingPromise = undefined
+    syncPendingResolve = undefined
+    syncPendingReject = undefined
   }
 
   const utils = {
@@ -304,7 +319,9 @@ export function mockSyncCollectionOptions<
       (config.autoIndex === `eager` ? BTreeIndex : undefined),
   }
 
-  return options
+  return withCollectionConfigFactory(options, () =>
+    mockSyncCollectionOptions(config),
+  )
 }
 
 type MockSyncCollectionConfigNoInitialState<T> = {
@@ -336,12 +353,14 @@ export function mockSyncCollectionOptionsNoInitialState<
       syncPendingResolve = resolve
       syncPendingReject = reject
     })
-    syncPendingPromise.then(() => {
-      syncPendingPromise = undefined
-      syncPendingResolve = undefined
-      syncPendingReject = undefined
-    })
+    void syncPendingPromise.finally(clearPendingSync)
     return syncPendingPromise
+  }
+
+  const clearPendingSync = () => {
+    syncPendingPromise = undefined
+    syncPendingResolve = undefined
+    syncPendingReject = undefined
   }
 
   const utils = {
