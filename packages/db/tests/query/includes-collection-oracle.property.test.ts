@@ -630,6 +630,329 @@ describe(`Collection-valued includes oracle`, () => {
     },
   )
 
+  fcTest(
+    `root application failure rolls back a prepared facade publication`,
+    async () => {
+      type NodeRow = {
+        id: number
+        kind: `parent` | `child`
+        group: number
+        value: number
+      }
+      const initialParent: NodeRow = {
+        id: 1,
+        kind: `parent`,
+        group: 1,
+        value: 1,
+      }
+      const initialChild: NodeRow = {
+        id: 10,
+        kind: `child`,
+        group: 1,
+        value: 1,
+      }
+      const nodes = createControlledCollection<NodeRow>(`rollback-nodes`, [
+        initialParent,
+        initialChild,
+      ])
+      const live = createLiveQueryCollection((q) =>
+        q
+          .from({ parent: nodes.collection })
+          .where(({ parent }) => eq(parent.kind, `parent`))
+          .select(({ parent }) => ({
+            id: parent.id,
+            value: parent.value,
+            children: q
+              .from({ child: nodes.collection })
+              .where(({ child }) => eq(child.kind, `child`))
+              .where(({ child }) => eq(child.group, parent.group)),
+          })),
+      )
+
+      await live.preload()
+      const facade = live.get(1)!.children
+      const rootPublications: Array<unknown> = []
+      const childPublications: Array<unknown> = []
+      const rootSubscription = live.subscribeChanges(
+        (batch) => rootPublications.push(...batch),
+        { includeInitialState: false },
+      )
+      const childSubscription = facade.subscribeChanges(
+        (batch) => childPublications.push(...batch),
+        { includeInitialState: false },
+      )
+      const originalGetKey = live.config.getKey
+      live.config.getKey = (row) => {
+        if (row.value === 2) throw new Error(`root key failed`)
+        return originalGetKey(row)
+      }
+
+      try {
+        expect(() =>
+          nodes.writeBatch([
+            {
+              type: `update`,
+              value: { ...initialParent, value: 2 },
+            },
+            {
+              type: `update`,
+              value: { ...initialChild, value: 2 },
+            },
+          ]),
+        ).toThrow(`root key failed`)
+        expect(live.get(1)!.value).toBe(1)
+        expect(facade.get(10)!.value).toBe(1)
+        expect(rootPublications).toEqual([])
+        expect(childPublications).toEqual([])
+
+        live.config.getKey = originalGetKey
+        nodes.writeBatch([
+          {
+            type: `update`,
+            value: { ...initialParent, value: 3 },
+          },
+          {
+            type: `update`,
+            value: { ...initialChild, value: 3 },
+          },
+        ])
+        expect(live.get(1)!.value).toBe(3)
+        expect(facade.get(10)!.value).toBe(3)
+        expect(rootPublications).toHaveLength(1)
+        expect(childPublications).toHaveLength(1)
+      } finally {
+        live.config.getKey = originalGetKey
+        rootSubscription.unsubscribe()
+        childSubscription.unsubscribe()
+        await Promise.all([live.cleanup(), nodes.collection.cleanup()])
+      }
+    },
+  )
+
+  fcTest(
+    `child-only changes flush the facade without republishing the parent`,
+    async () => {
+      const parents = createControlledCollection(`facade-only-parents`, [
+        { id: 1, group: 1 },
+      ])
+      const children = createControlledCollection(`facade-only-children`, [
+        { id: 10, parentGroup: 1, value: 1 },
+      ])
+      const live = createLiveQueryCollection((q) =>
+        q.from({ parent: parents.collection }).select(({ parent }) => ({
+          id: parent.id,
+          children: q
+            .from({ child: children.collection })
+            .where(({ child }) => eq(child.parentGroup, parent.group)),
+        })),
+      )
+
+      await live.preload()
+      const facade = live.get(1)!.children
+      const rootPublications: Array<unknown> = []
+      const childPublications: Array<unknown> = []
+      const rootSubscription = live.subscribeChanges(
+        (batch) => rootPublications.push(...batch),
+        { includeInitialState: false },
+      )
+      const childSubscription = facade.subscribeChanges(
+        (batch) => childPublications.push(...batch),
+        { includeInitialState: false },
+      )
+
+      try {
+        children.write(`update`, {
+          id: 10,
+          parentGroup: 1,
+          value: 2,
+        })
+
+        expect(rootPublications).toEqual([])
+        expect(childPublications).toHaveLength(1)
+        expect(live.get(1)!.children).toBe(facade)
+        expect(
+          [...facade.values()].map(({ id, parentGroup, value }) => ({
+            id,
+            parentGroup,
+            value,
+          })),
+        ).toEqual([{ id: 10, parentGroup: 1, value: 2 }])
+      } finally {
+        rootSubscription.unsubscribe()
+        childSubscription.unsubscribe()
+        await Promise.all([
+          live.cleanup(),
+          parents.collection.cleanup(),
+          children.collection.cleanup(),
+        ])
+      }
+    },
+  )
+
+  fcTest(
+    `outer fn.select recomputes nested values after a union branch include changes`,
+    async () => {
+      const messages = createControlledCollection(`fn-select-messages`, [
+        { id: 1, group: 1 },
+      ])
+      const tools = createControlledCollection(`fn-select-tools`, [
+        { id: 2, group: 2 },
+      ])
+      const children = createControlledCollection(`fn-select-children`, [
+        { id: 10, parentGroup: 1, value: 1 },
+      ])
+      const live = createLiveQueryCollection((q) => {
+        const messageRows = q
+          .from({ message: messages.collection })
+          .select(({ message }) => ({
+            kind: `message` as const,
+            id: message.id,
+            children: toArray(
+              q
+                .from({ messageChild: children.collection })
+                .where(({ messageChild }) =>
+                  eq(messageChild.parentGroup, message.group),
+                )
+                .select(({ messageChild }) => ({
+                  id: messageChild.id,
+                  value: messageChild.value,
+                })),
+            ),
+          }))
+        const toolRows = q
+          .from({ tool: tools.collection })
+          .select(({ tool }) => ({
+            kind: `tool` as const,
+            id: tool.id,
+          }))
+
+        return q.unionAll(messageRows, toolRows).fn.select((row) => ({
+          kind: row.kind,
+          id: row.id,
+          payload: { children: row.children },
+        }))
+      })
+
+      try {
+        await live.preload()
+        const message = live.toArray.find((row) => row.kind === `message`)!
+        expect(message.payload.children).toEqual([{ id: 10, value: 1 }])
+
+        children.write(`update`, {
+          id: 10,
+          parentGroup: 1,
+          value: 2,
+        })
+        expect(
+          live.toArray.find((row) => row.kind === `message`)!.payload.children,
+        ).toEqual([{ id: 10, value: 2 }])
+      } finally {
+        await Promise.all([
+          live.cleanup(),
+          messages.collection.cleanup(),
+          tools.collection.cleanup(),
+          children.collection.cleanup(),
+        ])
+      }
+    },
+  )
+
+  fcTest(
+    `rejects collapsed contributors that disagree by value, order, or outgoing route`,
+    async () => {
+      type CommentRow = {
+        id: number
+        userId: number
+        text: string
+      }
+      const users = createControlledCollection(`congruence-users`, [
+        { id: 1, group: 1 },
+      ])
+
+      const expectIncrementalRejection = async (
+        mode: `value` | `order`,
+      ): Promise<void> => {
+        const comments = createControlledCollection<CommentRow>(
+          `congruence-${mode}-comments`,
+          [{ id: 1, userId: 1, text: `first` }],
+        )
+        const live = createLiveQueryCollection({
+          query: (q) => {
+            const joined = q
+              .from({ comment: comments.collection })
+              .join({ user: users.collection }, ({ comment, user }) =>
+                eq(comment.userId, user.id),
+              )
+            return mode === `value`
+              ? joined.select(({ comment }) => ({
+                  publicId: comment.userId,
+                  visible: comment.text,
+                }))
+              : joined
+                  .orderBy(({ comment }) => comment.id)
+                  .select(({ comment }) => ({
+                    publicId: comment.userId,
+                    visible: `same`,
+                  }))
+          },
+          getKey: (row) => row.publicId,
+        })
+
+        try {
+          await live.preload()
+          expect(() =>
+            comments.write(`insert`, {
+              id: 2,
+              userId: 1,
+              text: mode === `value` ? `second` : `ignored`,
+            }),
+          ).toThrow(`not congruent`)
+        } finally {
+          await live.cleanup()
+          await comments.collection.cleanup()
+        }
+      }
+
+      await expectIncrementalRejection(`value`)
+      await expectIncrementalRejection(`order`)
+
+      const parents = createControlledCollection(`congruence-parents`, [
+        { id: 1, group: 1 },
+      ])
+      const children = createControlledCollection<ChildRow>(
+        `congruence-children`,
+        [],
+      )
+      const routed = createLiveQueryCollection({
+        query: (q) =>
+          q.from({ parent: parents.collection }).select(({ parent }) => ({
+            publicId: 1,
+            visible: `same`,
+            children: toArray(
+              q
+                .from({ child: children.collection })
+                .where(({ child }) => eq(child.parentGroup, parent.group)),
+            ),
+          })),
+        getKey: (row) => row.publicId,
+      })
+
+      try {
+        await routed.preload()
+        expect(() => parents.write(`insert`, { id: 2, group: 2 })).toThrow(
+          `not congruent`,
+        )
+      } finally {
+        await routed.cleanup()
+        await Promise.all([
+          parents.collection.cleanup(),
+          children.collection.cleanup(),
+          users.collection.cleanup(),
+        ])
+      }
+    },
+  )
+
   fcTest(`facade events observe the matching root publication`, async () => {
     const driver = createCollectionDriver(
       [{ id: 1, group: 1 }],

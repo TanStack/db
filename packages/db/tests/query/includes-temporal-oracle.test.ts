@@ -4,6 +4,7 @@ import { createCollection } from '../../src/collection/index.js'
 import { createDeferred } from '../../src/deferred.js'
 import { BasicIndex } from '../../src/indexes/basic-index.js'
 import { extractSimpleComparisons } from '../../src/query/expression-helpers.js'
+import { SubsetDemandController } from '../../src/query/live/subset-demand-controller.js'
 import { DeduplicatedLoadSubset } from '../../src/query/subset-dedupe.js'
 import {
   createLiveQueryCollection,
@@ -16,6 +17,7 @@ import { flushPromises } from '../utils.js'
 import type { Collection } from '../../src/collection/index.js'
 import type { Deferred } from '../../src/deferred.js'
 import type { LoadSubsetOptions } from '../../src/types.js'
+import type { LazyDemandPlan } from '../../src/query/compiler/joins.js'
 import type { TraceDriver, TraceProjection } from '../trace-runner.js'
 import type { Scheduler } from 'fast-check'
 
@@ -781,6 +783,60 @@ async function expectRejectedDemandEntersError(): Promise<void> {
   }
 }
 
+async function expectFailedDemandRetriesSameCoverage(): Promise<void> {
+  let loadCount = 0
+  let shouldReject = true
+  const comments = createCollection<Comment>({
+    id: nextCollectionId(`temporal-demand-retry-comments`),
+    getKey: (comment) => comment.id,
+    syncMode: `on-demand`,
+    autoIndex: `eager`,
+    defaultIndexType: BasicIndex,
+    sync: {
+      sync: ({ markReady }) => ({
+        loadSubset: () => {
+          loadCount += 1
+          if (shouldReject) {
+            return Promise.reject(new Error(`child load failed`))
+          }
+          markReady()
+          return true
+        },
+      }),
+    },
+  })
+  comments.createIndex((comment) => comment.postId)
+  const subscription = comments.subscribeChanges(() => {}, {
+    includeInitialState: false,
+  })
+  const controller = new SubsetDemandController()
+  const plan: LazyDemandPlan = {
+    id: `same-coverage-retry`,
+    path: [`postId`],
+    collectionId: comments.id,
+    initialKeys: new Set(),
+  }
+
+  try {
+    const first = controller.setDemand(subscription, plan, new Set([1]))
+    expect(first.ready).toBeInstanceOf(Promise)
+    if (!(first.ready instanceof Promise)) {
+      throw new Error(`Expected failed demand to be asynchronous`)
+    }
+    await expect(first.ready).rejects.toThrow(`child load failed`)
+
+    shouldReject = false
+    const retry = controller.setDemand(subscription, plan, new Set([1]))
+    expect(retry.changed).toBe(true)
+    expect(loadCount).toBe(2)
+    if (retry.ready instanceof Promise) await retry.ready
+  } finally {
+    controller.clear()
+    subscription.unsubscribe()
+    await comments.cleanup()
+  }
+}
+
 async function expectSynchronousEmptyDemandIsReady(): Promise<void> {
   const posts = createMutablePosts([
     { id: 1, authorId: `selected`, title: `one` },
@@ -1154,6 +1210,11 @@ describe(`includes temporal oracle`, () => {
   )
 
   it(`rejected demand enters error`, expectRejectedDemandEntersError)
+
+  it(
+    `failed demand retries the same coverage`,
+    expectFailedDemandRetriesSameCoverage,
+  )
 
   it(
     `a synchronous empty demand can establish ready coverage`,
