@@ -2605,11 +2605,9 @@ describe(`Electric Integration`, () => {
           }),
         )
 
-        // Collections alive elsewhere in this file keep the shared GC timer
-        // armed, so assert this load leaves no timer of its own behind rather
-        // than that no timer exists at all. The queue picks its timer in a
-        // microtask, so let that settle before counting.
-        await Promise.resolve()
+        // Other collections in this file keep the shared GC timer armed, so
+        // assert this load leaves no timer of its own rather than none at all.
+        await Promise.resolve() // the GC queue picks its timer in a microtask
         const ambientTimers = vi.getTimerCount()
 
         let loadSettled = false
@@ -2663,11 +2661,9 @@ describe(`Electric Integration`, () => {
           }),
         )
 
-        // Collections alive elsewhere in this file keep the shared GC timer
-        // armed, so assert this load leaves no timer of its own behind rather
-        // than that no timer exists at all. The queue picks its timer in a
-        // microtask, so let that settle before counting.
-        await Promise.resolve()
+        // Other collections in this file keep the shared GC timer armed, so
+        // assert this load leaves no timer of its own rather than none at all.
+        await Promise.resolve() // the GC queue picks its timer in a microtask
         const ambientTimers = vi.getTimerCount()
 
         const load = testCollection._sync.loadSubset({ limit: 10 })
@@ -2703,11 +2699,9 @@ describe(`Electric Integration`, () => {
           }),
         )
 
-        // Collections alive elsewhere in this file keep the shared GC timer
-        // armed, so assert this load leaves no timer of its own behind rather
-        // than that no timer exists at all. The queue picks its timer in a
-        // microtask, so let that settle before counting.
-        await Promise.resolve()
+        // Other collections in this file keep the shared GC timer armed, so
+        // assert this load leaves no timer of its own rather than none at all.
+        await Promise.resolve() // the GC queue picks its timer in a microtask
         const ambientTimers = vi.getTimerCount()
 
         await testCollection._sync.loadSubset({ limit: 10 })

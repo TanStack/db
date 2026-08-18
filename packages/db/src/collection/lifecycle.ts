@@ -18,15 +18,12 @@ import type { CollectionSyncManager } from './sync'
 import type { CollectionStateManager } from './state'
 
 /**
- * Floor applied to the GC delay of a collection that started syncing without
- * ever having gained a subscriber.
- *
- * Framework adapters build their live query collection while rendering and
- * subscribe to it only once that render commits, so the timer has to outlive
- * the render-to-commit gap. `gcTime` on its own does not: adapters pass a
- * near-zero `gcTime` so that teardown on unmount is immediate, and reusing it
- * here would race the commit. The floor never applies to the timer armed when
- * the last subscriber leaves, which still honours `gcTime` exactly.
+ * Floor applied to the GC delay of a collection that started syncing before
+ * anything subscribed. Adapters build their live query while rendering and
+ * subscribe when that render commits, so the delay has to outlive that gap;
+ * `gcTime` cannot, because adapters pass a near-zero one to make teardown on
+ * unmount immediate. Does not apply to the timer armed when the last
+ * subscriber leaves, which still honours `gcTime` exactly.
  */
 const UNSUBSCRIBED_GC_FLOOR_MS = 50
 
@@ -172,16 +169,8 @@ export class CollectionLifecycleManager<
   }
 
   /**
-   * Arm the garbage collection timer for a collection that started syncing
-   * without a subscriber to justify it.
-   *
-   * Sync can start outside a subscription: `startSync: true`, `preload()` and
-   * `startSyncImmediate()` all reach it with a subscriber count of zero. Only
-   * `startGCTimer` reclaims a collection, and it runs on the edge where the
-   * last subscriber leaves — an edge a collection that went from zero
-   * subscribers straight back to zero never crosses. Without this call such a
-   * collection syncs forever, holding a subscription on every collection it
-   * reads from, however short its `gcTime` is.
+   * Start the garbage collection timer for a collection with no subscribers
+   * Called when sync starts outside a subscription
    */
   public startGCTimerIfUnsubscribed(): void {
     if (this.changes.activeSubscribersCount > 0) {

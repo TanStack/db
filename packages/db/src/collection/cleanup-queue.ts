@@ -43,8 +43,8 @@ export class CleanupQueue {
   public cancel(key: unknown): void {
     this.tasks.delete(key)
 
-    // Draining the queue retires the root timer with it. Cancelling the
-    // earliest of several tasks leaves the timer where it is: it wakes early,
+    // Retire the root timer with the last task. A non-empty queue keeps its
+    // timer even when the cancelled task was the earliest: it wakes early,
     // finds nothing due and reschedules, which costs less than rescanning
     // every task on each cancellation.
     if (this.tasks.size === 0 && this.timeoutId !== null) {

@@ -273,9 +273,9 @@ export class CollectionSyncManager<
         )
       }
 
-      // Every route into sync passes through here, so this is the one place
-      // that sees sync starting ahead of the subscriber that will justify it.
-      // `addSubscriber` counts itself in before it calls us, so a subscription
+      // Every route into sync passes through here, so it is the one place
+      // that sees sync start ahead of the subscriber that would justify it.
+      // `addSubscriber` counts itself in before calling us, so a subscription
       // starting sync leaves the timer alone.
       this.lifecycle.startGCTimerIfUnsubscribed()
     } catch (error) {
