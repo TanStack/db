@@ -9,6 +9,7 @@ import {
 } from '../src/utils/index-optimization.js'
 import { Func, PropRef, Value } from '../src/query/ir.js'
 import { mockSyncCollectionOptions } from './utils.js'
+import type { IndexOperation } from '../src/indexes/base-index.js'
 
 type Item = {
   id: string
@@ -262,5 +263,51 @@ describe(`canOptimizeExpression agrees with optimizeExpressionWithIndexes`, () =
       true,
     )
     expect(canOptimizeExpression(eqExpr, collection)).toBe(true)
+  })
+
+  it(`normalizes flipped operands before consulting index capabilities`, () => {
+    // An index that serves upper-bound ranges only: `5 > score` normalizes to
+    // `score < 5`, so both the optimizer and the predicate must consult
+    // supports(`lt`), not the expression's literal `gt` — otherwise the two
+    // disagree on either flipped form.
+    class UpperBoundOnlyIndex<
+      TKey extends string | number = string | number,
+    > extends BasicIndex<TKey> {
+      public readonly supportedOperations = new Set<IndexOperation>([
+        `eq`,
+        `lt`,
+        `lte`,
+      ])
+    }
+
+    const collection = createCollection(
+      mockSyncCollectionOptions<{ id: string; score: number }>({
+        id: `key-index-flip-test`,
+        getKey: (item) => item.id,
+        initialData: [
+          { id: `a`, score: 1 },
+          { id: `b`, score: 7 },
+        ],
+      }),
+    )
+    collection.createIndex((row) => row.score, {
+      indexType: UpperBoundOnlyIndex,
+    })
+
+    // `5 > score` means `score < 5`: served by the index, and the predicate
+    // must agree.
+    const flippedLt = new Func(`gt`, [new Value(5), new PropRef([`score`])])
+    const optimizedLt = optimizeExpressionWithIndexes(flippedLt, collection)
+    expect(optimizedLt.canOptimize).toBe(true)
+    expect(optimizedLt.matchingKeys).toEqual(new Set([`a`]))
+    expect(canOptimizeExpression(flippedLt, collection)).toBe(true)
+
+    // `5 < score` means `score > 5`: not served (no gt support), and the
+    // predicate must agree.
+    const flippedGt = new Func(`lt`, [new Value(5), new PropRef([`score`])])
+    expect(
+      optimizeExpressionWithIndexes(flippedGt, collection).canOptimize,
+    ).toBe(false)
+    expect(canOptimizeExpression(flippedGt, collection)).toBe(false)
   })
 })
