@@ -40,7 +40,12 @@ export interface OptimizationResult<TKey> {
 }
 
 /**
- * Finds an index that matches a given field path
+ * Finds an index that matches a given field path.
+ *
+ * The returned index may be capability-limited (e.g. the implicit primary-key
+ * index only serves `eq`/`in`), so callers must check `supports(operation)`
+ * before range or ordered access — as all callers in this module and in
+ * order-by/change-events do.
  */
 export function findIndexForField<TKey extends string | number>(
   collection: CollectionLike<any, TKey>,
@@ -614,7 +619,12 @@ function canOptimizeSimpleComparison<
 
   if (fieldPath) {
     const index = findIndexForField(collection, fieldPath)
-    return index !== undefined
+    // Mirror optimizeSimpleComparison's gate: an index that exists but does
+    // not support the operation (e.g. the implicit key index only serves
+    // eq/in) cannot optimize this comparison.
+    return (
+      index !== undefined && index.supports(expression.name as IndexOperation)
+    )
   }
 
   return false
@@ -821,7 +831,9 @@ function canOptimizeInArrayExpression<
   ) {
     const fieldPath = (fieldArg as any).path
     const index = findIndexForField(collection, fieldPath)
-    return index !== undefined
+    // Mirror optimizeInArrayExpression's gate: IN is served either natively
+    // or via per-value equality lookups.
+    return index !== undefined && (index.supports(`in`) || index.supports(`eq`))
   }
 
   return false

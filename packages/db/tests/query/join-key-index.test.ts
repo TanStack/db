@@ -63,6 +63,7 @@ describe(`lazy join on the primary key without an explicit index`, () => {
   test(`loads through the key index and does not warn`, () => {
     const teams = makeTeamsCollection()
     const members = makeMembersCollection()
+    const keyLookup = vi.spyOn(teams.keyIndex!, `lookup`)
 
     const joined = createLiveQueryCollection({
       startSync: true,
@@ -89,11 +90,19 @@ describe(`lazy join on the primary key without an explicit index`, () => {
     ])
 
     expect(indexWarnings()).toEqual([])
+
+    // The load must actually have gone through the key index, not a scan
+    // that merely stopped warning.
+    expect(keyLookup).toHaveBeenCalledWith(
+      `in`,
+      expect.arrayContaining([`t1`, `t2`]),
+    )
   })
 
   test(`serves join keys that appear after the initial load`, () => {
     const teams = makeTeamsCollection()
     const members = makeMembersCollection()
+    const keyLookup = vi.spyOn(teams.keyIndex!, `lookup`)
 
     const joined = createLiveQueryCollection({
       startSync: true,
@@ -127,6 +136,13 @@ describe(`lazy join on the primary key without an explicit index`, () => {
     })
 
     expect(indexWarnings()).toEqual([])
+
+    // The late-arriving key must have been loaded through the key index.
+    const t3Lookups = keyLookup.mock.calls.filter(
+      ([operation, values]) =>
+        operation === `in` && Array.isArray(values) && values.includes(`t3`),
+    )
+    expect(t3Lookups.length).toBeGreaterThan(0)
   })
 
   test(`still warns when the joined collection has a computed key`, () => {

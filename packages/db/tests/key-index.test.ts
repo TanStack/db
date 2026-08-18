@@ -2,7 +2,11 @@ import { describe, expect, it } from 'vitest'
 import { createCollection } from '../src/collection/index.js'
 import { KeyIndex, createKeyIndexFromGetKey } from '../src/indexes/key-index.js'
 import { BasicIndex } from '../src/indexes/basic-index.js'
-import { findIndexForField } from '../src/utils/index-optimization.js'
+import {
+  canOptimizeExpression,
+  findIndexForField,
+} from '../src/utils/index-optimization.js'
+import { Func, PropRef, Value } from '../src/query/ir.js'
 import { mockSyncCollectionOptions } from './utils.js'
 
 type Item = {
@@ -191,5 +195,35 @@ describe(`findIndexForField key-index fallback`, () => {
     // defaults, so lookups under a custom collation fall back to a full scan.
     expect(collection.keyIndex).toBeInstanceOf(KeyIndex)
     expect(findIndexForField(collection, [`id`])).toBeUndefined()
+  })
+})
+
+describe(`canOptimizeExpression with only a key index`, () => {
+  const collection = makeCollection((item) => item.id)
+
+  it(`reports eq and in on the key field as optimizable`, () => {
+    expect(
+      canOptimizeExpression(
+        new Func(`eq`, [new PropRef([`id`]), new Value(`a`)]),
+        collection,
+      ),
+    ).toBe(true)
+    expect(
+      canOptimizeExpression(
+        new Func(`in`, [new PropRef([`id`]), new Value([`a`, `b`])]),
+        collection,
+      ),
+    ).toBe(true)
+  })
+
+  it(`reports range operations on the key field as not optimizable`, () => {
+    // The key index exists but only supports eq/in, so the predicate must
+    // agree with what optimization would actually do.
+    expect(
+      canOptimizeExpression(
+        new Func(`gt`, [new PropRef([`id`]), new Value(`a`)]),
+        collection,
+      ),
+    ).toBe(false)
   })
 })
