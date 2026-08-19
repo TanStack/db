@@ -410,8 +410,10 @@ describe(`loadSubset with subqueries`, () => {
     await query.preload()
 
     expect(loadSubsetCalls).not.toHaveLength(0)
-    const lastCall = loadSubsetCalls.at(-1)
-    expect(lastCall?.orderBy).toBeUndefined()
-    expect(lastCall?.limit).toBeUndefined()
+    expect(
+      loadSubsetCalls.every(
+        ({ orderBy, limit }) => orderBy === undefined && limit === undefined,
+      ),
+    ).toBe(true)
   })
 })

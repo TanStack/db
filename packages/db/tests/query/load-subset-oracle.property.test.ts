@@ -9,6 +9,7 @@ import { Func, PropRef, Value } from '../../src/query/ir.js'
 import { createTransaction } from '../../src/transactions.js'
 import { expectAssertionFailure } from '../expected-failure.js'
 import { TraceAssertionError } from '../trace-runner.js'
+import { oracleRandomParameters, readOracleRunConfig } from '../utils.js'
 import type { BasicExpression } from '../../src/query/ir.js'
 import type { LoadSubsetOptions } from '../../src/types.js'
 
@@ -36,6 +37,11 @@ type AsyncScenario = {
 type ConcurrentAsyncScenario = {
   requestedValues: ReadonlyArray<ReadonlyArray<number>>
   deliveryOrder: `forward` | `reverse`
+}
+
+type RejectedWaiterScenario = {
+  covering: ReadonlyArray<number>
+  covered: ReadonlyArray<number>
 }
 
 type RangeOperator = Extract<PredicateSpec, { kind: `range` }>[`operator`]
@@ -177,7 +183,8 @@ const nonEmptyInValuesArbitrary = fc.uniqueArray(
 
 // A rejected request with an in-flight deduplicated waiter currently creates a
 // detached rejected promise inside DeduplicatedLoadSubset. Keep that discovered
-// defect out of this green settlement corpus; it is pinned separately below.
+// defect in its own generated corpus so this broader settlement property does
+// not create process-level unhandled rejection noise.
 const asyncScenarioArbitrary: fc.Arbitrary<AsyncScenario> = fc
   .record({
     first: nonEmptyInValuesArbitrary,
@@ -211,6 +218,13 @@ const concurrentAsyncScenarioArbitrary: fc.Arbitrary<ConcurrentAsyncScenario> =
     }),
     deliveryOrder: fc.constantFrom(`forward`, `reverse`),
   })
+
+const rejectedWaiterScenarioArbitrary: fc.Arbitrary<RejectedWaiterScenario> =
+  nonEmptyInValuesArbitrary.chain((covering) =>
+    fc
+      .subarray(covering, { minLength: 1 })
+      .map((covered) => ({ covering, covered })),
+  )
 
 const windowRequestArbitrary: fc.Arbitrary<Omit<WindowRequest, `where`>> =
   fc.record({
@@ -903,34 +917,9 @@ async function runAsyncScenarioWithKnownFailures(
   }
 }
 
-function readPositiveInteger(name: string, fallback: number): number {
-  const raw = process.env[name]
-  if (raw === undefined) return fallback
-
-  const value = Number(raw)
-  if (!Number.isSafeInteger(value) || value < 1) {
-    throw new Error(`${name} must be a positive integer`)
-  }
-  return value
-}
-
-function readSeed(): number | undefined {
-  const raw = process.env.TANSTACK_DB_ORACLE_SEED
-  if (raw === undefined) return undefined
-
-  const seed = Number(raw)
-  if (!Number.isSafeInteger(seed)) {
-    throw new Error(`TANSTACK_DB_ORACLE_SEED must be an integer`)
-  }
-  return seed
-}
-
-const runs = 40 * readPositiveInteger(`TANSTACK_DB_ORACLE_RUNS_MULTIPLIER`, 1)
-const replaySeed = readSeed()
-const randomParameters =
-  replaySeed === undefined
-    ? { numRuns: runs }
-    : { numRuns: runs, seed: replaySeed }
+const { multiplier, replaySeed } = readOracleRunConfig()
+const runs = 40 * multiplier
+const randomParameters = oracleRandomParameters(runs, replaySeed)
 
 let collectionSequence = 0
 
@@ -1049,7 +1038,9 @@ async function expectDerivedSyncDuringOptimisticMutation(): Promise<void> {
   }
 }
 
-async function expectDeduplicatedWaiterHandlesRejection(): Promise<void> {
+async function expectDeduplicatedWaiterHandlesRejection(
+  scenario: RejectedWaiterScenario,
+): Promise<void> {
   const detachedBranches: Array<Promise<unknown>> = []
   class LocallyTrackedPromise<T> extends Promise<T> {
     catch<TResult = never>(
@@ -1070,10 +1061,10 @@ async function expectDeduplicatedWaiterHandlesRejection(): Promise<void> {
   })
 
   const first = dedupe.loadSubset({
-    where: toWhere({ kind: `in`, values: [1, 2] }),
+    where: toWhere({ kind: `in`, values: scenario.covering }),
   })
   const second = dedupe.loadSubset({
-    where: toWhere({ kind: `eq`, value: 1 }),
+    where: toWhere({ kind: `in`, values: scenario.covered }),
   })
   if (!(first instanceof Promise) || !(second instanceof Promise)) {
     throw new Error(`Both callers must wait for the in-flight request`)
@@ -1094,6 +1085,54 @@ async function expectDeduplicatedWaiterHandlesRejection(): Promise<void> {
     }).toEqual({ branchCount: 1, statuses: [`fulfilled`] })
   } catch (error) {
     throw new TraceAssertionError(0, error)
+  }
+}
+
+function isDetachedWaiterRejectionDifference(
+  actual: unknown,
+  expected: unknown,
+): boolean {
+  return (
+    typeof actual === `object` &&
+    actual !== null &&
+    `branchCount` in actual &&
+    actual.branchCount === 1 &&
+    `statuses` in actual &&
+    Array.isArray(actual.statuses) &&
+    actual.statuses.join(`,`) === `rejected` &&
+    typeof expected === `object` &&
+    expected !== null &&
+    `branchCount` in expected &&
+    expected.branchCount === 1 &&
+    `statuses` in expected &&
+    Array.isArray(expected.statuses) &&
+    expected.statuses.join(`,`) === `fulfilled`
+  )
+}
+
+function isKnownDetachedWaiterRejection(error: unknown): boolean {
+  return (
+    error instanceof TraceAssertionError &&
+    error.checkpoint === 0 &&
+    typeof error.cause === `object` &&
+    error.cause !== null &&
+    `actual` in error.cause &&
+    `expected` in error.cause &&
+    isDetachedWaiterRejectionDifference(
+      error.cause.actual,
+      error.cause.expected,
+    )
+  )
+}
+
+async function runRejectedWaiterScenarioWithKnownFailure(
+  scenario: RejectedWaiterScenario,
+): Promise<void> {
+  try {
+    await expectDeduplicatedWaiterHandlesRejection(scenario)
+  } catch (error) {
+    if (isKnownDetachedWaiterRejection(error)) return
+    throw error
   }
 }
 
@@ -1481,6 +1520,19 @@ describe(`loadSubset coverage oracle`, () => {
     runConcurrentAsyncScenario,
   )
 
+  fcTest.prop([rejectedWaiterScenarioArbitrary], {
+    numRuns: runs,
+    seed: 1665,
+  })(
+    `checks rejected requests observed by an in-flight waiter for a fixed seed`,
+    runRejectedWaiterScenarioWithKnownFailure,
+  )
+
+  fcTest.prop([rejectedWaiterScenarioArbitrary], randomParameters)(
+    `checks rejected requests observed by an in-flight waiter for a random or replayed seed`,
+    runRejectedWaiterScenarioWithKnownFailure,
+  )
+
   fcTest.prop([windowTraceArbitrary], { numRuns: runs, seed: 1659 })(
     `never treats uncovered ordered windows as loaded for a fixed seed`,
     runWindowCoverageTraceWithKnownFailures,
@@ -1506,24 +1558,18 @@ describe(`loadSubset coverage oracle`, () => {
 
   it(
     `an in-flight deduplicated waiter rejects without an unhandled branch`,
-    expectAssertionFailure(expectDeduplicatedWaiterHandlesRejection, {
-      checkpoint: 0,
-      classify: ({ actual, expected }) =>
-        typeof actual === `object` &&
-        actual !== null &&
-        `branchCount` in actual &&
-        actual.branchCount === 1 &&
-        `statuses` in actual &&
-        Array.isArray(actual.statuses) &&
-        actual.statuses.join(`,`) === `rejected` &&
-        typeof expected === `object` &&
-        expected !== null &&
-        `branchCount` in expected &&
-        expected.branchCount === 1 &&
-        `statuses` in expected &&
-        Array.isArray(expected.statuses) &&
-        expected.statuses.join(`,`) === `fulfilled`,
-    }),
+    expectAssertionFailure(
+      () =>
+        expectDeduplicatedWaiterHandlesRejection({
+          covering: [1, 2],
+          covered: [1],
+        }),
+      {
+        checkpoint: 0,
+        classify: ({ actual, expected }) =>
+          isDetachedWaiterRejectionDifference(actual, expected),
+      },
+    ),
   )
 
   it(`applies loaded rows when no mutation is persisting`, async () => {

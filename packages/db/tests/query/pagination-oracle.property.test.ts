@@ -7,7 +7,12 @@ import { createLiveQueryCollection } from '../../src/query/live-query-collection
 import { PropRef } from '../../src/query/ir.js'
 import { expectAssertionFailure } from '../expected-failure.js'
 import { TraceAssertionError } from '../trace-runner.js'
-import { flushPromises, mockSyncCollectionOptions } from '../utils.js'
+import {
+  flushPromises,
+  mockSyncCollectionOptions,
+  oracleRandomParameters,
+  readOracleRunConfig,
+} from '../utils.js'
 import type { BasicExpression } from '../../src/query/ir.js'
 import type { LoadSubsetOptions } from '../../src/types.js'
 
@@ -278,35 +283,9 @@ const multiOrderScenarioArbitrary: fc.Arbitrary<MultiOrderScenario> = fc
     limit: Math.min(requestedLimit, rows.length),
   }))
 
-function readPositiveInteger(name: string, fallback: number): number {
-  const raw = process.env[name]
-  if (raw === undefined) return fallback
-
-  const value = Number(raw)
-  if (!Number.isSafeInteger(value) || value < 1) {
-    throw new Error(`${name} must be a positive integer`)
-  }
-  return value
-}
-
-function readSeed(): number | undefined {
-  const raw = process.env.TANSTACK_DB_ORACLE_SEED
-  if (raw === undefined) return undefined
-
-  const seed = Number(raw)
-  if (!Number.isSafeInteger(seed)) {
-    throw new Error(`TANSTACK_DB_ORACLE_SEED must be an integer`)
-  }
-  return seed
-}
-
-const multiplier = readPositiveInteger(`TANSTACK_DB_ORACLE_RUNS_MULTIPLIER`, 1)
+const { multiplier, replaySeed } = readOracleRunConfig()
 const runs = 12 * multiplier
-const replaySeed = readSeed()
-const randomParameters =
-  replaySeed === undefined
-    ? { numRuns: runs }
-    : { numRuns: runs, seed: replaySeed }
+const randomParameters = oracleRandomParameters(runs, replaySeed)
 
 let collectionSequence = 0
 
@@ -1932,9 +1911,7 @@ describe(`pagination recomputation oracle`, () => {
 
   fcTest.prop(
     [multiOrderScenarioArbitrary],
-    replaySeed === undefined
-      ? { numRuns: 12 * multiplier }
-      : { numRuns: 12 * multiplier, seed: replaySeed },
+    oracleRandomParameters(12 * multiplier, replaySeed),
   )(
     `matches multi-column nullable ordering for a random or replayed seed`,
     runMultiOrderScenarioWithKnownFailures,
@@ -2027,9 +2004,7 @@ describe(`pagination recomputation oracle`, () => {
 
   fcTest.prop(
     [pendingMutationScenarioArbitrary, responseTimingArbitrary],
-    replaySeed === undefined
-      ? { numRuns: 8 * multiplier }
-      : { numRuns: 8 * multiplier, seed: replaySeed },
+    oracleRandomParameters(8 * multiplier, replaySeed),
   )(
     `matches recomputation when source mutations cross a pending cursor response for a random or replayed seed`,
     runPendingMutationScenarioWithKnownFailures,
@@ -2057,9 +2032,7 @@ describe(`pagination recomputation oracle`, () => {
 
   fcTest.prop(
     [pendingHistoryScenarioArbitrary],
-    replaySeed === undefined
-      ? { numRuns: 8 * multiplier }
-      : { numRuns: 8 * multiplier, seed: replaySeed },
+    oracleRandomParameters(8 * multiplier, replaySeed),
   )(
     `matches recomputation across multi-action pending histories for a random or replayed seed`,
     runPendingHistoryScenarioWithKnownFailures,
@@ -2372,9 +2345,7 @@ describe(`pagination recomputation oracle`, () => {
 
   fcTest.prop(
     [stateScenarioArbitrary],
-    replaySeed === undefined
-      ? { numRuns: 8 * multiplier }
-      : { numRuns: 8 * multiplier, seed: replaySeed },
+    oracleRandomParameters(8 * multiplier, replaySeed),
   )(
     `matches full recomputation across source and window transitions for a random or replayed seed`,
     runPaginationStateScenarioWithKnownFailures,
@@ -2584,9 +2555,7 @@ describe(`pagination recomputation oracle`, () => {
 
   fcTest.prop(
     [scenarioArbitrary],
-    replaySeed === undefined
-      ? { numRuns: 8 * multiplier }
-      : { numRuns: 8 * multiplier, seed: replaySeed },
+    oracleRandomParameters(8 * multiplier, replaySeed),
   )(
     `matches full recomputation when exact async cursor loads widen ordered coverage for a random or replayed seed`,
     runOnDemandPaginationScenarioWithKnownFailures,
