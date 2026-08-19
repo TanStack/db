@@ -77,7 +77,7 @@ export class CollectionLifecycleManager<
       idle: [`loading`, `error`, `cleaned-up`],
       loading: [`ready`, `error`, `cleaned-up`],
       ready: [`cleaned-up`, `error`],
-      error: [`cleaned-up`, `idle`],
+      error: [`ready`, `cleaned-up`, `idle`],
       'cleaned-up': [`loading`, `error`],
     }
 
@@ -133,8 +133,8 @@ export class CollectionLifecycleManager<
    */
   public markReady(): void {
     this.validateStatusTransition(this.status, `ready`)
-    // Can transition to ready from loading state
-    if (this.status === `loading`) {
+    // A successful initial sync or recovery establishes a ready snapshot.
+    if (this.status === `loading` || this.status === `error`) {
       this.setStatus(`ready`, true)
 
       // Call any registered first ready callbacks (only on first time becoming ready)
@@ -156,6 +156,11 @@ export class CollectionLifecycleManager<
         this.changes.emitEmptyReadyEvent()
       }
     }
+  }
+
+  /** Mark an asynchronous sync failure after sync has started. */
+  public markError(): void {
+    this.setStatus(`error`)
   }
 
   /**

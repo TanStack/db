@@ -446,6 +446,9 @@ describe(`Collection Error Handling`, () => {
       expect(() =>
         collectionImpl._lifecycle.validateStatusTransition(`error`, `idle`),
       ).not.toThrow()
+      expect(() =>
+        collectionImpl._lifecycle.validateStatusTransition(`error`, `ready`),
+      ).not.toThrow()
 
       // Valid transitions from cleaned-up (allow restart)
       expect(() =>

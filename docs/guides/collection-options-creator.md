@@ -73,7 +73,7 @@ The sync function must return a cleanup function for proper garbage collection:
 
 ```typescript
 const sync: SyncConfig<T>['sync'] = (params) => {
-  const { begin, write, commit, markReady, collection } = params
+  const { begin, write, commit, markReady, markError, collection } = params
   
   // 1. Initialize connection to your sync engine
   const connection = initializeConnection(config)
@@ -134,13 +134,13 @@ const sync: SyncConfig<T>['sync'] = (params) => {
         commit()
         eventBuffer.splice(0)
       }
-      
+
+      // A complete initial snapshot is now available.
+      markReady()
     } catch (error) {
       console.error('Initial sync failed:', error)
-      throw error
-    } finally {
-      // ALWAYS call markReady, even on error
-      markReady()
+      // No usable initial snapshot exists.
+      markError()
     }
   }
 
@@ -163,7 +163,8 @@ The sync process follows this lifecycle:
 1. **begin()** - Start collecting changes
 2. **write()** - Add changes to the pending transaction (buffered until commit)
 3. **commit()** - Apply all changes atomically to the collection state
-4. **markReady()** - Signal that initial sync is complete
+4. **markReady()** - Signal that a usable initial or recovered snapshot exists
+5. **markError()** - Signal that initial sync failed before producing a usable snapshot
 
 **Race Condition Prevention:**
 Many sync engines start real-time subscriptions before the initial sync completes. Your implementation MUST deduplicate events that arrive via subscription that represent the same data as the initial sync. Consider:
@@ -900,8 +901,8 @@ const wrappedOnInsert = async (params) => {
 
 ## Best Practices
 
-1. **Always call markReady()** - This signals that the collection has initial data and is ready for use
-2. **Handle errors gracefully** - Call markReady() even on error to avoid blocking the app
+1. **Report initial sync status** - Call `markReady()` after a usable snapshot, or `markError()` if initial sync fails
+2. **Recover explicitly** - After an error, call `markReady()` only when a later sync has produced a usable snapshot
 3. **Clean up resources** - Return a cleanup function from sync to prevent memory leaks
 4. **Batch operations** - Use begin/commit to batch multiple changes for better performance
 5. **Race Conditions** - Start listeners before initial fetch and buffer events

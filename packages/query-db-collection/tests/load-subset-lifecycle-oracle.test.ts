@@ -29,17 +29,28 @@ async function expectInitialQueryFailureStatus(): Promise<void> {
   const queryClient = createQueryClient()
   const id = `load-subset-error-status-${collectionSequence++}`
   const loggedError = vi.spyOn(console, `error`).mockImplementation(() => {})
+  const queryFn = vi
+    .fn()
+    .mockRejectedValueOnce(error)
+    .mockResolvedValueOnce([{ id: `recovered` }])
   const collection = createCollection(
     queryCollectionOptions<Row>({
       id,
       queryClient,
       queryKey: [id],
-      queryFn: () => Promise.reject(error),
+      queryFn,
       getKey: (row) => row.id,
       startSync: true,
       retry: false,
     }),
   )
+  const live = createLiveQueryCollection((query) =>
+    query.from({ row: collection }).select(({ row }) => ({ id: row.id })),
+  )
+  const preloadOutcomes = Promise.allSettled([
+    collection.preload(),
+    live.preload(),
+  ])
 
   try {
     await vi.waitFor(() => {
@@ -49,10 +60,65 @@ async function expectInitialQueryFailureStatus(): Promise<void> {
     expect(loggedError).toHaveBeenCalled()
     try {
       expect(collection.status).toBe(`error`)
+      expect(live.status).toBe(`error`)
+      expect((await preloadOutcomes).map(({ status }) => status)).toEqual([
+        `rejected`,
+        `rejected`,
+      ])
     } catch (caught) {
       throw new TraceAssertionError(0, caught)
     }
+
+    await collection.utils.clearError()
+    await vi.waitFor(() => {
+      expect(collection.status).toBe(`ready`)
+      expect(collection.get(`recovered`)).toBeDefined()
+    })
+    await expect(collection.preload()).resolves.toBeUndefined()
   } finally {
+    await live.cleanup()
+    await collection.cleanup()
+    queryClient.clear()
+    loggedError.mockRestore()
+  }
+}
+
+async function expectRefetchFailureKeepsReadySnapshot(): Promise<void> {
+  const error = new Error(`refetch failed`)
+  const queryClient = createQueryClient()
+  const id = `load-subset-refetch-status-${collectionSequence++}`
+  const loggedError = vi.spyOn(console, `error`).mockImplementation(() => {})
+  const queryFn = vi
+    .fn()
+    .mockResolvedValueOnce([{ id: `cached` }])
+    .mockRejectedValueOnce(error)
+  const collection = createCollection(
+    queryCollectionOptions<Row>({
+      id,
+      queryClient,
+      queryKey: [id],
+      queryFn,
+      getKey: (row) => row.id,
+      startSync: true,
+      retry: false,
+    }),
+  )
+  const live = createLiveQueryCollection((query) =>
+    query.from({ row: collection }).select(({ row }) => ({ id: row.id })),
+  )
+
+  try {
+    await live.preload()
+    await collection.utils.refetch()
+    await vi.waitFor(() => {
+      expect(collection.utils.lastError).toBe(error)
+    })
+    expect(collection.status).toBe(`ready`)
+    expect(live.status).toBe(`ready`)
+    expect(collection.get(`cached`)).toBeDefined()
+    expect(live.get(`cached`)).toBeDefined()
+  } finally {
+    await live.cleanup()
     await collection.cleanup()
     queryClient.clear()
     loggedError.mockRestore()
@@ -218,12 +284,12 @@ async function expectRemountAfterAbortStartsFreshQuery(): Promise<void> {
 }
 
 describe(`loadSubset lifecycle oracle`, () => {
-  it(`reports an initial query failure through collection status`, async () => {
-    await expectAssertionFailure(expectInitialQueryFailureStatus, {
-      checkpoint: 0,
-      classify: ({ actual, expected }) =>
-        actual === `ready` && expected === `error`,
-    })()
+  it(`reports an initial query failure and recovers after a successful refetch`, async () => {
+    await expectInitialQueryFailureStatus()
+  })
+
+  it(`keeps the last ready snapshot after a refetch failure`, async () => {
+    await expectRefetchFailureKeepsReadySnapshot()
   })
 
   it(`commutative predicate forms share one query-db transport load`, async () => {

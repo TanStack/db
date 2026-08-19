@@ -122,7 +122,12 @@ export class DeduplicatedLoadSubset {
       // The in-flight promise already handles tracking updates when it completes
       const prom = matchingInflight.promise
       // Call `onDeduplicate` when the inflight request has loaded the data
-      prom.then(() => this.onDeduplicate?.(options)).catch() // ignore errors
+      void prom
+        .then(() => this.onDeduplicate?.(options))
+        .catch(() => {
+          // The original caller owns the transport failure. This observer only
+          // waits to publish successful deduplication.
+        })
       return prom
     }
 

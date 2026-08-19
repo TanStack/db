@@ -420,7 +420,7 @@ try {
 
 ### Query Collection Sync Errors
 
-Query collections handle sync errors gracefully and mark the collection as ready even on error to avoid blocking applications:
+Query collections distinguish an initial load failure from a later refetch failure:
 
 ```ts
 import { queryCollectionOptions } from "@tanstack/query-db-collection"
@@ -447,9 +447,11 @@ const todoCollection = createCollection(
 
 When sync errors occur:
 - Error is logged to console: `[QueryCollection] Error observing query...`
-- Collection is marked as ready to prevent blocking the application
-- Cached data remains available
+- An initial failure marks the collection as `error` because no usable snapshot exists
+- Readiness waits such as `preload()` and `toArrayWhenReady()` reject while the collection is in that initial error state
+- A later refetch failure keeps the collection `ready` and preserves its cached data
 - Error tracking counters are updated (`lastError`, `errorCount`)
+- A later successful refetch recovers an initial `error` collection to `ready`; a new readiness wait then resolves normally
 
 ### Sync Write Errors
 

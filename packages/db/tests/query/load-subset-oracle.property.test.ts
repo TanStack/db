@@ -181,10 +181,6 @@ const nonEmptyInValuesArbitrary = fc.uniqueArray(
   { minLength: 1, maxLength: 7 },
 )
 
-// A rejected request with an in-flight deduplicated waiter currently creates a
-// detached rejected promise inside DeduplicatedLoadSubset. Keep that discovered
-// defect in its own generated corpus so this broader settlement property does
-// not create process-level unhandled rejection noise.
 const asyncScenarioArbitrary: fc.Arbitrary<AsyncScenario> = fc
   .record({
     first: nonEmptyInValuesArbitrary,
@@ -1137,54 +1133,6 @@ async function expectDeduplicatedWaiterHandlesRejection(
   }
 }
 
-function isDetachedWaiterRejectionDifference(
-  actual: unknown,
-  expected: unknown,
-): boolean {
-  return (
-    typeof actual === `object` &&
-    actual !== null &&
-    `branchCount` in actual &&
-    actual.branchCount === 1 &&
-    `statuses` in actual &&
-    Array.isArray(actual.statuses) &&
-    actual.statuses.join(`,`) === `rejected` &&
-    typeof expected === `object` &&
-    expected !== null &&
-    `branchCount` in expected &&
-    expected.branchCount === 1 &&
-    `statuses` in expected &&
-    Array.isArray(expected.statuses) &&
-    expected.statuses.join(`,`) === `fulfilled`
-  )
-}
-
-function isKnownDetachedWaiterRejection(error: unknown): boolean {
-  return (
-    error instanceof TraceAssertionError &&
-    error.checkpoint === 0 &&
-    typeof error.cause === `object` &&
-    error.cause !== null &&
-    `actual` in error.cause &&
-    `expected` in error.cause &&
-    isDetachedWaiterRejectionDifference(
-      error.cause.actual,
-      error.cause.expected,
-    )
-  )
-}
-
-async function runRejectedWaiterScenarioWithKnownFailure(
-  scenario: RejectedWaiterScenario,
-): Promise<void> {
-  try {
-    await expectDeduplicatedWaiterHandlesRejection(scenario)
-  } catch (error) {
-    if (isKnownDetachedWaiterRejection(error)) return
-    throw error
-  }
-}
-
 describe(`loadSubset coverage oracle`, () => {
   it(
     `discovered trace: an empty predicate issues no transport work`,
@@ -1633,12 +1581,12 @@ describe(`loadSubset coverage oracle`, () => {
     seed: 1665,
   })(
     `checks rejected requests observed by an in-flight waiter for a fixed seed`,
-    runRejectedWaiterScenarioWithKnownFailure,
+    expectDeduplicatedWaiterHandlesRejection,
   )
 
   fcTest.prop([rejectedWaiterScenarioArbitrary], randomParameters)(
     `checks rejected requests observed by an in-flight waiter for a random or replayed seed`,
-    runRejectedWaiterScenarioWithKnownFailure,
+    expectDeduplicatedWaiterHandlesRejection,
   )
 
   fcTest.prop([windowTraceArbitrary], { numRuns: runs, seed: 1659 })(
@@ -1664,21 +1612,12 @@ describe(`loadSubset coverage oracle`, () => {
     expectDistinctWhereStartsDistinctLimitedWindowLoads,
   )
 
-  it(
-    `an in-flight deduplicated waiter rejects without an unhandled branch`,
-    expectAssertionFailure(
-      () =>
-        expectDeduplicatedWaiterHandlesRejection({
-          covering: [1, 2],
-          covered: [1],
-        }),
-      {
-        checkpoint: 0,
-        classify: ({ actual, expected }) =>
-          isDetachedWaiterRejectionDifference(actual, expected),
-      },
-    ),
-  )
+  it(`an in-flight deduplicated waiter rejects without an unhandled branch`, async () => {
+    await expectDeduplicatedWaiterHandlesRejection({
+      covering: [1, 2],
+      covered: [1],
+    })
+  })
 
   it(`applies loaded rows when no mutation is persisting`, async () => {
     await expectPersistingLoadIsApplied(false)

@@ -233,6 +233,9 @@ export class CollectionSyncManager<
           markReady: () => {
             this.lifecycle.markReady()
           },
+          markError: () => {
+            this.lifecycle.markError()
+          },
           truncate: () => {
             const pendingTransaction =
               this.state.pendingSyncedTransactions[
@@ -472,7 +475,7 @@ export class CollectionSyncManager<
       )
     }
 
-    this.preloadPromise = new Promise<void>((resolve, reject) => {
+    const attempt = new Promise<void>((resolve, reject) => {
       if (this.lifecycle.status === `ready`) {
         resolve()
         return
@@ -483,9 +486,25 @@ export class CollectionSyncManager<
         return
       }
 
-      // Register callback BEFORE starting sync to avoid race condition
-      this.lifecycle.onFirstReady(() => {
+      let settled = false
+      let unsubscribeError = () => {}
+      const resolveReady = () => {
+        if (settled) return
+        settled = true
+        unsubscribeError()
         resolve()
+      }
+      const rejectError = (error: unknown) => {
+        if (settled) return
+        settled = true
+        unsubscribeError()
+        reject(error)
+      }
+
+      // Register callback BEFORE starting sync to avoid race condition
+      this.lifecycle.onFirstReady(resolveReady)
+      unsubscribeError = this.collection.on(`status:error`, () => {
+        rejectError(new CollectionIsInErrorStateError())
       })
 
       // Start sync if collection hasn't started yet or was cleaned up
@@ -496,13 +515,19 @@ export class CollectionSyncManager<
         try {
           this.startSync()
         } catch (error) {
-          reject(error)
+          rejectError(error)
           return
         }
       }
     })
 
-    return this.preloadPromise
+    this.preloadPromise = attempt
+    void attempt.then(undefined, () => {
+      if (this.preloadPromise === attempt) {
+        this.preloadPromise = null
+      }
+    })
+    return attempt
   }
 
   /**

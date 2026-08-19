@@ -2,7 +2,7 @@
 name: db-core/custom-adapter
 description: >
   Building custom collection adapters for new backends. SyncConfig interface:
-  sync function receiving begin, write, commit, markReady, truncate, metadata
+  sync function receiving begin, write, commit, markReady, markError, truncate, metadata
   primitives and returning cleanup, loadSubset, and optional unloadSubset
   handlers.
   ChangeMessage format (insert, update, delete). On-demand LoadSubsetOptions
@@ -48,7 +48,7 @@ function myBackendCollectionOptions<T extends object>(config: {
   return {
     getKey: config.getKey,
     sync: {
-      sync: ({ begin, write, commit, markReady }) => {
+      sync: ({ begin, write, commit, markReady, markError }) => {
         let isInitialSyncComplete = false
         const bufferedEvents: Array<BackendEvent<T>> = []
 
@@ -64,25 +64,30 @@ function myBackendCollectionOptions<T extends object>(config: {
         })
 
         // 2. Fetch initial data
-        fetch(config.endpoint).then(async (res) => {
-          const items = await res.json()
-          begin()
-          for (const item of items) {
-            write({ type: 'insert', value: item })
-          }
-          commit()
-
-          // 3. Process buffered events
-          isInitialSyncComplete = true
-          for (const event of bufferedEvents) {
+        void fetch(config.endpoint)
+          .then(async (res) => {
+            const items = await res.json()
             begin()
-            write({ type: event.type, key: event.id, value: event.data })
+            for (const item of items) {
+              write({ type: 'insert', value: item })
+            }
             commit()
-          }
 
-          // 4. Signal readiness
-          markReady()
-        })
+            // 3. Process buffered events
+            isInitialSyncComplete = true
+            for (const event of bufferedEvents) {
+              begin()
+              write({ type: event.type, key: event.id, value: event.data })
+              commit()
+            }
+
+            // 4. Signal that a usable snapshot exists
+            markReady()
+          })
+          .catch((error) => {
+            console.error('Initial sync failed:', error)
+            markError()
+          })
 
         // 5. Return cleanup function
         return () => {
@@ -210,7 +215,7 @@ Without persistence the metadata is in-memory only and does not survive
 reloads. With persistence, it is durable across sessions.
 
 ```ts
-sync: ({ begin, write, commit, markReady, metadata }) => {
+sync: ({ begin, write, commit, markReady, markError, metadata }) => {
   if (!metadata) throw new Error('Sync metadata API is unavailable')
 
   // Row metadata: store per-row state (e.g. server version, ETag)
@@ -254,6 +259,7 @@ sync: ({ begin, write, commit, markReady, metadata }) => {
   })
 
   stream.on('ready', () => markReady())
+  stream.on('initial-error', () => markError())
   return () => stream.close()
 }
 ```
@@ -321,6 +327,10 @@ sync: ({ begin, write, commit, markReady }) => {
 ```
 
 `markReady()` transitions the collection to "ready" status. Without it, live queries never resolve and `useLiveSuspenseQuery` hangs forever in Suspense.
+
+If initial sync fails before it produces a usable snapshot, call `markError()`
+instead. This rejects readiness waits and moves dependent live queries to the
+error state. A later successful sync can call `markReady()` to recover.
 
 Source: docs/guides/collection-options-creator.md
 

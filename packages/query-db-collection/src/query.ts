@@ -877,7 +877,8 @@ export function queryCollectionOptions(
   }
 
   const internalSync: SyncConfig<any>[`sync`] = (params) => {
-    const { begin, write, commit, markReady, collection, metadata } = params
+    const { begin, write, commit, markReady, markError, collection, metadata } =
+      params
     const persistedMetadata = metadata as
       | QuerySyncMetadataWithPersistedScan<any>
       | undefined
@@ -1588,8 +1589,12 @@ export function queryCollectionOptions(
             result.error,
           )
 
-          // Mark collection as ready even on error to avoid blocking apps
-          markReady()
+          // A failure before the first successful snapshot leaves no usable
+          // collection state. Later refetch failures keep the last ready
+          // snapshot available while utils expose the error.
+          if (collection.status === `loading`) {
+            markError()
+          }
         }
       }
       return handleQueryResult
