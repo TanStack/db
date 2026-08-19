@@ -7,7 +7,7 @@ import { createLiveQueryCollection } from '../../src/query/live-query-collection
 import { PropRef } from '../../src/query/ir.js'
 import { expectAssertionFailure } from '../expected-failure.js'
 import { TraceAssertionError } from '../trace-runner.js'
-import { mockSyncCollectionOptions } from '../utils.js'
+import { flushPromises, mockSyncCollectionOptions } from '../utils.js'
 import type { BasicExpression } from '../../src/query/ir.js'
 import type { LoadSubsetOptions } from '../../src/types.js'
 
@@ -18,8 +18,20 @@ type PageRow = {
 
 type MultiOrderRow = {
   id: number
-  primary: number
-  secondary: number
+  primary: number | null
+  secondary: number | null
+}
+
+type MultiOrderTerm = {
+  direction: `asc` | `desc`
+  nulls: `first` | `last`
+}
+
+type MultiOrderScenario = {
+  rows: ReadonlyArray<MultiOrderRow>
+  primary: MultiOrderTerm
+  secondary: MultiOrderTerm
+  limit: number
 }
 
 type Window = {
@@ -48,7 +60,13 @@ type PaginationStateScenario = {
 type PendingCursorLoad = {
   options: LoadSubsetOptions
   deferred: ReturnType<typeof createDeferred<void>>
+  settled?: boolean
 }
+
+type PendingMutation =
+  | { type: `insert`; row: PageRow }
+  | { type: `delete`; id: number }
+  | { type: `update`; row: PageRow }
 
 const scenarioArbitrary: fc.Arbitrary<PaginationScenario> = fc.record({
   ranks: fc.array(fc.integer({ min: -2, max: 2 }), {
@@ -59,7 +77,7 @@ const scenarioArbitrary: fc.Arbitrary<PaginationScenario> = fc.record({
   windows: fc.array(
     fc.record({
       offset: fc.integer({ min: 0, max: 12 }),
-      limit: fc.integer({ min: 1, max: 8 }),
+      limit: fc.integer({ min: 0, max: 8 }),
     }),
     { minLength: 1, maxLength: 12 },
   ),
@@ -67,7 +85,7 @@ const scenarioArbitrary: fc.Arbitrary<PaginationScenario> = fc.record({
 
 const windowArbitrary: fc.Arbitrary<Window> = fc.record({
   offset: fc.integer({ min: 0, max: 12 }),
-  limit: fc.integer({ min: 1, max: 8 }),
+  limit: fc.integer({ min: 0, max: 8 }),
 })
 
 const paginationActionArbitrary: fc.Arbitrary<PaginationAction> = fc.oneof(
@@ -271,18 +289,63 @@ async function runPaginationScenario(
 }
 
 async function expectMultiOrderBoundaryMatches(): Promise<void> {
-  const rows: Array<MultiOrderRow> = [
-    { id: 1, primary: 0, secondary: 2 },
-    { id: 2, primary: 0, secondary: 0 },
-    { id: 3, primary: 0, secondary: 1 },
-    { id: 4, primary: 1, secondary: 1 },
-    { id: 5, primary: 1, secondary: 0 },
-    { id: 6, primary: 2, secondary: 0 },
-  ]
+  await runMultiOrderScenario({
+    rows: [
+      { id: 1, primary: 0, secondary: 2 },
+      { id: 2, primary: 0, secondary: 0 },
+      { id: 3, primary: 0, secondary: 1 },
+      { id: 4, primary: 1, secondary: 1 },
+      { id: 5, primary: 1, secondary: 0 },
+      { id: 6, primary: 2, secondary: 0 },
+    ],
+    primary: { direction: `asc`, nulls: `first` },
+    secondary: { direction: `asc`, nulls: `first` },
+    limit: 4,
+  })
+}
+
+function compareNullableNumber(
+  left: number | null,
+  right: number | null,
+  term: MultiOrderTerm,
+): number {
+  if (left === null || right === null) {
+    if (left === right) return 0
+    return left === null
+      ? term.nulls === `first`
+        ? -1
+        : 1
+      : term.nulls === `first`
+        ? 1
+        : -1
+  }
+  const compared = left === right ? 0 : left < right ? -1 : 1
+  return term.direction === `asc` ? compared : -compared
+}
+
+function referenceMultiOrder(scenario: MultiOrderScenario): Array<number> {
+  return [...scenario.rows]
+    .sort(
+      (left, right) =>
+        compareNullableNumber(left.primary, right.primary, scenario.primary) ||
+        compareNullableNumber(
+          left.secondary,
+          right.secondary,
+          scenario.secondary,
+        ) ||
+        left.id - right.id,
+    )
+    .slice(0, scenario.limit)
+    .map(({ id }) => id)
+}
+
+async function runMultiOrderScenario(
+  scenario: MultiOrderScenario,
+): Promise<void> {
   const source = createCollection(
     mockSyncCollectionOptions({
       id: `pagination-multi-order-oracle-source-${collectionSequence++}`,
-      initialData: rows.map((row) => ({ ...row })),
+      initialData: scenario.rows.map((row) => ({ ...row })),
       getKey: (row: MultiOrderRow) => row.id,
       autoIndex: `eager`,
     }),
@@ -290,17 +353,19 @@ async function expectMultiOrderBoundaryMatches(): Promise<void> {
   const live = createLiveQueryCollection((query) =>
     query
       .from({ row: source })
-      .orderBy(({ row }) => row.primary, `asc`)
-      .orderBy(({ row }) => row.secondary, `asc`)
+      .orderBy(({ row }) => row.primary, scenario.primary)
+      .orderBy(({ row }) => row.secondary, scenario.secondary)
       .orderBy(({ row }) => row.id, `asc`)
-      .limit(4)
+      .limit(scenario.limit)
       .select(({ row }) => ({ id: row.id })),
   )
 
   try {
     await live.preload()
     try {
-      expect(Array.from(live.values(), ({ id }) => id)).toEqual([2, 3, 1, 5])
+      expect(Array.from(live.values(), ({ id }) => id)).toEqual(
+        referenceMultiOrder(scenario),
+      )
     } catch (error) {
       throw new TraceAssertionError(0, error)
     }
@@ -647,6 +712,14 @@ function replayOnDemandPaginationWindow(
     { offset: 0, limit: delivered.size },
   ).at(-1)
 
+  if (initialWindow.limit === 0) {
+    return referenceWindow(
+      [...delivered.values()],
+      scenario.direction,
+      scenario.windows[checkpoint]!,
+    )
+  }
+
   for (const window of scenario.windows.slice(0, checkpoint + 1)) {
     const current = referenceWindowRows(
       [...delivered.values()],
@@ -884,7 +957,359 @@ async function expectOnDemandWindowsAreCompletionOrderIndependent(
   }
 }
 
+async function runPendingMutationScenario(
+  mutation: PendingMutation,
+  timing: `before-response` | `after-response`,
+): Promise<void> {
+  const rows = new Map<number, PageRow>([
+    [1, { id: 1, rank: 0 }],
+    [2, { id: 2, rank: 1 }],
+    [3, { id: 3, rank: 2 }],
+    [4, { id: 4, rank: 3 }],
+  ])
+  const pending: Array<PendingCursorLoad> = []
+  const deliveredIds = new Set<number>([1])
+  let begin!: () => void
+  let write!: (message: {
+    type: `insert` | `update` | `delete`
+    value: PageRow
+  }) => void
+  let commit!: () => void
+
+  const source = createCollection<PageRow>({
+    id: `pagination-event-order-source-${collectionSequence++}`,
+    getKey: (row) => row.id,
+    syncMode: `on-demand`,
+    startSync: true,
+    autoIndex: `eager`,
+    defaultIndexType: BTreeIndex,
+    sync: {
+      sync: (params) => {
+        begin = params.begin
+        write = params.write
+        commit = params.commit
+        begin()
+        write({ type: `insert`, value: { ...rows.get(1)! } })
+        commit()
+        params.markReady()
+        return {
+          loadSubset: (options: LoadSubsetOptions) => {
+            const deferred = createDeferred<void>()
+            pending.push({ options, deferred })
+            return deferred.promise
+          },
+        }
+      },
+    },
+  })
+  const live = createLiveQueryCollection((query) =>
+    query
+      .from({ row: source })
+      .orderBy(({ row }) => row.rank, `asc`)
+      .orderBy(({ row }) => row.id, `asc`)
+      .limit(3),
+  )
+
+  const applyMutation = () => {
+    begin()
+    if (mutation.type === `delete`) {
+      const row = rows.get(mutation.id)
+      if (!row) throw new Error(`Cannot delete missing authoritative row`)
+      rows.delete(mutation.id)
+      deliveredIds.delete(mutation.id)
+      write({ type: `delete`, value: { ...row } })
+    } else {
+      rows.set(mutation.row.id, { ...mutation.row })
+      if (mutation.type === `insert`) deliveredIds.add(mutation.row.id)
+      write({ type: mutation.type, value: { ...mutation.row } })
+    }
+    commit()
+  }
+
+  const settlePending = async () => {
+    for (const request of pending) {
+      if (request.settled) continue
+      request.settled = true
+      const orderedRows = referenceWindowRows([...rows.values()], `asc`, {
+        offset: 0,
+        limit: rows.size,
+      })
+      begin()
+      for (const row of rowsForLoadSubset(orderedRows, request.options)) {
+        if (deliveredIds.has(row.id)) continue
+        deliveredIds.add(row.id)
+        write({ type: `insert`, value: { ...row } })
+      }
+      commit()
+      request.deferred.resolve()
+      await Promise.resolve()
+    }
+  }
+
+  try {
+    const preload = live.preload()
+    expect(pending).toHaveLength(1)
+
+    if (timing === `before-response`) applyMutation()
+    await settlePending()
+    await preload
+    if (timing === `after-response`) {
+      applyMutation()
+      await Promise.resolve()
+      await settlePending()
+    }
+
+    try {
+      expect(
+        Array.from(live.values(), ({ id, rank }) => ({ id, rank })),
+      ).toEqual(
+        referenceWindowRows([...rows.values()], `asc`, {
+          offset: 0,
+          limit: 3,
+        }),
+      )
+    } catch (error) {
+      throw new TraceAssertionError(0, error)
+    }
+  } finally {
+    for (const request of pending) request.deferred.resolve()
+    live.cleanup()
+    source.cleanup()
+  }
+}
+
+async function expectInflightRequestFillsNewWindow(): Promise<void> {
+  const rows: Array<PageRow> = [
+    { id: 1, rank: 0 },
+    { id: 2, rank: 1 },
+    { id: 3, rank: 2 },
+    { id: 4, rank: 3 },
+  ]
+  const pending: Array<PendingCursorLoad> = []
+  const deliveredIds = new Set<number>([1])
+  let begin!: () => void
+  let write!: (message: { type: `insert`; value: PageRow }) => void
+  let commit!: () => void
+  const source = createCollection<PageRow>({
+    id: `pagination-late-window-source-${collectionSequence++}`,
+    getKey: (row) => row.id,
+    syncMode: `on-demand`,
+    startSync: true,
+    autoIndex: `eager`,
+    defaultIndexType: BTreeIndex,
+    sync: {
+      sync: (params) => {
+        begin = params.begin
+        write = params.write
+        commit = params.commit
+        begin()
+        write({ type: `insert`, value: { ...rows[0]! } })
+        commit()
+        params.markReady()
+        return {
+          loadSubset: (options: LoadSubsetOptions) => {
+            const deferred = createDeferred<void>()
+            pending.push({ options, deferred })
+            return deferred.promise
+          },
+        }
+      },
+    },
+  })
+  const live = createLiveQueryCollection((query) =>
+    query
+      .from({ row: source })
+      .orderBy(({ row }) => row.rank, `asc`)
+      .orderBy(({ row }) => row.id, `asc`)
+      .limit(2),
+  )
+
+  const settle = async (request: PendingCursorLoad) => {
+    begin()
+    for (const row of rowsForLoadSubset(rows, request.options)) {
+      if (deliveredIds.has(row.id)) continue
+      deliveredIds.add(row.id)
+      write({ type: `insert`, value: { ...row } })
+    }
+    commit()
+    request.deferred.resolve()
+    await Promise.resolve()
+  }
+
+  try {
+    const preload = live.preload()
+    expect(pending).toHaveLength(1)
+    const setWindow = live.utils.setWindow({ offset: 2, limit: 2 })
+    expect(setWindow).toBeInstanceOf(Promise)
+    await flushPromises()
+    expect(pending).toHaveLength(1)
+
+    await settle(pending[0]!)
+    await preload
+    if (setWindow instanceof Promise) await setWindow
+    expect(pending).toHaveLength(1)
+
+    try {
+      expect(Array.from(live.values(), ({ id }) => id)).toEqual([3, 4])
+    } catch (error) {
+      throw new TraceAssertionError(0, error)
+    }
+  } finally {
+    for (const request of pending) request.deferred.resolve()
+    live.cleanup()
+    source.cleanup()
+  }
+}
+
 describe(`pagination recomputation oracle`, () => {
+  it(`materializes an initially empty zero-limit window`, async () => {
+    await runPaginationScenario({
+      ranks: [0, 1, 2],
+      direction: `asc`,
+      windows: [{ offset: 0, limit: 0 }],
+    })
+  })
+
+  it(`clears and restores a nonempty window across a zero limit`, async () => {
+    await runPaginationScenario({
+      ranks: [0, 1, 2],
+      direction: `asc`,
+      windows: [
+        { offset: 0, limit: 2 },
+        { offset: 0, limit: 0 },
+        { offset: 1, limit: 1 },
+      ],
+    })
+  })
+
+  it(`discovered trace: loads an on-demand window after a zero limit`, async () => {
+    await expectAssertionFailure(runOnDemandPaginationScenario, {
+      checkpoint: 1,
+      classify: ({ actual, expected }) =>
+        isNumberArray(actual) &&
+        actual.join(`,`) === `1` &&
+        isNumberArray(expected) &&
+        expected.join(`,`) === `1,2`,
+    })({
+      ranks: [0, 0],
+      direction: `asc`,
+      windows: [
+        { offset: 1, limit: 0 },
+        { offset: 0, limit: 2 },
+      ],
+    })
+  })
+
+  const nullableBoundaryRows: ReadonlyArray<MultiOrderRow> = [
+    { id: 1, primary: null, secondary: 2 },
+    { id: 2, primary: null, secondary: 0 },
+    { id: 3, primary: null, secondary: 1 },
+    { id: 4, primary: 1, secondary: null },
+    { id: 5, primary: 1, secondary: 0 },
+    { id: 6, primary: 2, secondary: 0 },
+  ]
+
+  it.each([
+    [
+      `discovered trace: orders an ascending nullable boundary by its second term`,
+      {
+        rows: nullableBoundaryRows,
+        primary: { direction: `asc`, nulls: `first` },
+        secondary: { direction: `asc`, nulls: `first` },
+        limit: 1,
+      },
+      true,
+    ],
+    [
+      `orders a descending nullable boundary by its second term`,
+      {
+        rows: nullableBoundaryRows,
+        primary: { direction: `desc`, nulls: `first` },
+        secondary: { direction: `desc`, nulls: `first` },
+        limit: 1,
+      },
+      false,
+    ],
+    [
+      `orders an ascending and descending mixed nullable boundary`,
+      {
+        rows: nullableBoundaryRows,
+        primary: { direction: `asc`, nulls: `first` },
+        secondary: { direction: `desc`, nulls: `first` },
+        limit: 1,
+      },
+      false,
+    ],
+    [
+      `discovered trace: orders a descending and ascending mixed nullable boundary`,
+      {
+        rows: nullableBoundaryRows,
+        primary: { direction: `desc`, nulls: `first` },
+        secondary: { direction: `asc`, nulls: `first` },
+        limit: 1,
+      },
+      true,
+    ],
+    [
+      `uses the public key to break a complete tuple tie`,
+      {
+        rows: [
+          { id: 2, primary: 0, secondary: 0 },
+          { id: 1, primary: 0, secondary: 0 },
+        ],
+        primary: { direction: `asc`, nulls: `last` },
+        secondary: { direction: `asc`, nulls: `last` },
+        limit: 1,
+      },
+      false,
+    ],
+  ] satisfies ReadonlyArray<readonly [string, MultiOrderScenario, boolean]>)(
+    `%s`,
+    async (_name, scenario, expectsFailure) => {
+      if (!expectsFailure) {
+        await runMultiOrderScenario(scenario)
+        return
+      }
+      await expectAssertionFailure(runMultiOrderScenario, {
+        checkpoint: 0,
+        classify: ({ actual, expected }) =>
+          isNumberArray(actual) &&
+          actual.length === 1 &&
+          actual[0] === 1 &&
+          isNumberArray(expected) &&
+          expected.length === 1 &&
+          expected[0] === 2,
+      })(scenario)
+    },
+  )
+
+  it.each([
+    [`boundary insert`, { type: `insert`, row: { id: 5, rank: 0.5 } }],
+    [`visible delete`, { type: `delete`, id: 1 }],
+    [
+      `boundary-crossing rank update`,
+      { type: `update`, row: { id: 4, rank: 0.5 } },
+    ],
+  ] satisfies ReadonlyArray<readonly [string, PendingMutation]>)(
+    `%s converges before and after a pending response`,
+    async (_name, mutation) => {
+      await runPendingMutationScenario(mutation, `before-response`)
+      await runPendingMutationScenario(mutation, `after-response`)
+    },
+  )
+
+  it(
+    `discovered trace: an in-flight request does not underfill a new window`,
+    expectAssertionFailure(expectInflightRequestFillsNewWindow, {
+      checkpoint: 0,
+      classify: ({ actual, expected }) =>
+        isNumberArray(actual) &&
+        actual.length === 0 &&
+        isNumberArray(expected) &&
+        expected.join(`,`) === `3,4`,
+    }),
+  )
+
   it(`rejects collateral loss from the ordered-subscription classifier`, () => {
     const scenario: PaginationStateScenario = {
       ranks: [0, 1, 2],

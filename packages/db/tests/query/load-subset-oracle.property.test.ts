@@ -1,5 +1,5 @@
 import { fc, test as fcTest } from '@fast-check/vitest'
-import { describe, expect, it, vi } from 'vitest'
+import { describe, expect, it } from 'vitest'
 import { createCollection } from '../../src/collection/index.js'
 import { createDeferred } from '../../src/deferred.js'
 import { createOptimisticAction } from '../../src/optimistic-action.js'
@@ -49,6 +49,24 @@ type OptimisticDerivedRow = {
   value: string
 }
 
+type CoverageSubject = {
+  loadSubset: (options: LoadSubsetOptions) => true | Promise<void>
+}
+
+type CoverageSubjectFactory = (
+  recordLoad: (options: LoadSubsetOptions) => true,
+) => CoverageSubject
+
+class CoveredDemandRefetchedError extends Error {
+  constructor(
+    readonly checkpoint: number,
+    readonly requested: ReadonlySet<number>,
+    readonly loadedRegions: ReadonlyArray<ReadonlySet<number>>,
+  ) {
+    super(`Covered demand refetched at checkpoint ${checkpoint}`)
+  }
+}
+
 // The generated predicates only compare against integers from -3 through 3.
 // These points cover every distinct truth partition: both unbounded tails,
 // every equality point, and every open interval between adjacent thresholds.
@@ -70,7 +88,7 @@ const predicateSpecArbitrary: fc.Arbitrary<PredicateSpec> = fc.oneof(
     weight: 3,
     arbitrary: fc
       .uniqueArray(fc.integer({ min: -3, max: 3 }), {
-        minLength: 1,
+        minLength: 0,
         maxLength: 7,
       })
       .map((values) => ({ kind: `in` as const, values })),
@@ -91,7 +109,7 @@ const requestTraceArbitrary = fc.array(predicateSpecArbitrary, {
 })
 
 const inValuesArbitrary = fc.uniqueArray(fc.integer({ min: -3, max: 3 }), {
-  minLength: 1,
+  minLength: 0,
   maxLength: 7,
 })
 
@@ -126,7 +144,7 @@ const asyncScenarioArbitrary: fc.Arbitrary<AsyncScenario> = fc
 const windowRequestArbitrary: fc.Arbitrary<WindowRequest> = fc.record({
   direction: fc.constantFrom(`asc`, `desc`),
   offset: fc.integer({ min: 0, max: 6 }),
-  limit: fc.integer({ min: 1, max: 6 }),
+  limit: fc.integer({ min: 0, max: 6 }),
 })
 
 const windowTraceArbitrary = fc.array(windowRequestArbitrary, {
@@ -223,23 +241,33 @@ function expectSetEqual(
   expect([...actual].sort()).toEqual([...expected].sort())
 }
 
-function runCoverageTrace(trace: ReadonlyArray<PredicateSpec>): void {
+const createDeduplicatedCoverageSubject: CoverageSubjectFactory = (
+  recordLoad,
+) => new DeduplicatedLoadSubset({ loadSubset: recordLoad })
+
+const createAlwaysLoadingCoverageSubject: CoverageSubjectFactory = (
+  recordLoad,
+) => ({ loadSubset: recordLoad })
+
+function runCoverageTrace(
+  trace: ReadonlyArray<PredicateSpec>,
+  createSubject = createDeduplicatedCoverageSubject,
+): void {
   const covered = new Set<number>()
+  const loadedRegions: Array<Set<number>> = []
   const loads: Array<LoadSubsetOptions> = []
-  const dedupe = new DeduplicatedLoadSubset({
-    loadSubset: (options) => {
-      loads.push(options)
-      return true
-    },
+  const subject = createSubject((options) => {
+    loads.push(options)
+    return true
   })
 
-  for (const predicate of trace) {
+  for (const [checkpoint, predicate] of trace.entries()) {
     const where = toWhere(predicate)
     const requested = matchingValues(where)
     const missing = difference(requested, covered)
     const loadCountBefore = loads.length
 
-    const result = dedupe.loadSubset({ where })
+    const result = subject.loadSubset({ where })
 
     expect(result).toBe(true)
     expect(loads.length - loadCountBefore).toBeLessThanOrEqual(1)
@@ -248,12 +276,36 @@ function runCoverageTrace(trace: ReadonlyArray<PredicateSpec>): void {
     } else {
       expect(loads).toHaveLength(loadCountBefore + 1)
       const loaded = matchingValues(loads.at(-1)?.where)
-      expectSetEqual(difference(missing, loaded), new Set())
       expectSetEqual(difference(loaded, requested), new Set())
+      if (missing.size === 0) {
+        throw new CoveredDemandRefetchedError(
+          checkpoint,
+          requested,
+          loadedRegions.map((region) => new Set(region)),
+        )
+      }
+      expectSetEqual(difference(missing, loaded), new Set())
       for (const value of loaded) covered.add(value)
+      loadedRegions.push(loaded)
     }
 
     expectSetEqual(difference(requested, covered), new Set())
+  }
+}
+
+function runCoverageTraceWithKnownFailures(
+  trace: ReadonlyArray<PredicateSpec>,
+): void {
+  try {
+    runCoverageTrace(trace)
+  } catch (error) {
+    if (
+      error instanceof CoveredDemandRefetchedError &&
+      (error.requested.size === 0 || error.loadedRegions.length > 1)
+    ) {
+      return
+    }
+    throw error
   }
 }
 
@@ -294,26 +346,32 @@ function windowPositions(request: WindowRequest): Set<number> {
   )
 }
 
-function runWindowCoverageTrace(trace: ReadonlyArray<WindowRequest>): void {
+function runWindowCoverageTrace(
+  trace: ReadonlyArray<WindowRequest>,
+  createSubject = createDeduplicatedCoverageSubject,
+): void {
   const coveredByOrder = new Map<`asc` | `desc`, Set<number>>([
     [`asc`, new Set()],
     [`desc`, new Set()],
   ])
+  const loadedRegionsByOrder = new Map<`asc` | `desc`, Array<Set<number>>>([
+    [`asc`, []],
+    [`desc`, []],
+  ])
   const loads: Array<LoadSubsetOptions> = []
-  const dedupe = new DeduplicatedLoadSubset({
-    loadSubset: (options) => {
-      loads.push(options)
-      return true
-    },
+  const subject = createSubject((options) => {
+    loads.push(options)
+    return true
   })
 
-  for (const request of trace) {
+  for (const [checkpoint, request] of trace.entries()) {
     const requested = windowPositions(request)
     const covered = coveredByOrder.get(request.direction)!
+    const loadedRegions = loadedRegionsByOrder.get(request.direction)!
     const missing = difference(requested, covered)
     const callsBefore = loads.length
 
-    dedupe.loadSubset(toWindowOptions(request))
+    subject.loadSubset(toWindowOptions(request))
 
     expect(loads.length - callsBefore).toBeLessThanOrEqual(1)
     if (loads.length === callsBefore) {
@@ -325,9 +383,33 @@ function runWindowCoverageTrace(trace: ReadonlyArray<WindowRequest>): void {
       expect(loaded.orderBy?.[0]?.compareOptions.direction).toBe(
         request.direction,
       )
+      if (missing.size === 0) {
+        throw new CoveredDemandRefetchedError(
+          checkpoint,
+          requested,
+          loadedRegions.map((region) => new Set(region)),
+        )
+      }
       for (const position of requested) covered.add(position)
+      loadedRegions.push(requested)
     }
     expectSetEqual(difference(requested, covered), new Set())
+  }
+}
+
+function runWindowCoverageTraceWithKnownFailures(
+  trace: ReadonlyArray<WindowRequest>,
+): void {
+  try {
+    runWindowCoverageTrace(trace)
+  } catch (error) {
+    if (
+      error instanceof CoveredDemandRefetchedError &&
+      (error.requested.size === 0 || error.loadedRegions.length > 1)
+    ) {
+      return
+    }
+    throw error
   }
 }
 
@@ -583,41 +665,148 @@ async function expectDerivedSyncDuringOptimisticMutation(): Promise<void> {
   }
 }
 
-async function expectDeduplicatedWaiterInstallsRejectionHandler(): Promise<void> {
+async function captureUnhandledRejections(
+  run: () => Promise<void>,
+): Promise<Array<unknown>> {
+  const vitestHandler = process
+    .listeners(`unhandledRejection`)
+    .find((listener) => listener.name === `vitestUnhandledRejectionHandler`)
+  const reasons: Array<unknown> = []
+  const capture = (reason: unknown) => reasons.push(reason)
+
+  if (vitestHandler) process.removeListener(`unhandledRejection`, vitestHandler)
+  process.on(`unhandledRejection`, capture)
+  try {
+    await run()
+    await new Promise((resolve) => setTimeout(resolve, 0))
+    return reasons
+  } finally {
+    process.removeListener(`unhandledRejection`, capture)
+    if (vitestHandler) process.on(`unhandledRejection`, vitestHandler)
+  }
+}
+
+async function expectDeduplicatedWaiterHandlesRejection(): Promise<void> {
   const deferred = createDeferred<void>()
-  const catchSpy = vi.spyOn(Promise.prototype, `catch`)
   const dedupe = new DeduplicatedLoadSubset({
     loadSubset: () => deferred.promise,
   })
 
-  const first = dedupe.loadSubset({
-    where: toWhere({ kind: `in`, values: [1, 2] }),
-  })
-  try {
-    dedupe.loadSubset({ where: toWhere({ kind: `eq`, value: 1 }) })
-    try {
-      expect(catchSpy.mock.calls.map(([handler]) => handler)).not.toContain(
-        undefined,
-      )
-    } catch (error) {
-      throw new TraceAssertionError(0, error)
+  const unhandled = await captureUnhandledRejections(async () => {
+    const first = dedupe.loadSubset({
+      where: toWhere({ kind: `in`, values: [1, 2] }),
+    })
+    const second = dedupe.loadSubset({
+      where: toWhere({ kind: `eq`, value: 1 }),
+    })
+    if (!(first instanceof Promise) || !(second instanceof Promise)) {
+      throw new Error(`Both callers must wait for the in-flight request`)
     }
-  } finally {
-    catchSpy.mockRestore()
-    deferred.resolve()
-    if (first !== true) await first
+
+    const callerOutcomes = Promise.allSettled([first, second])
+    deferred.reject(new Error(`transport failed`))
+    expect((await callerOutcomes).map(({ status }) => status)).toEqual([
+      `rejected`,
+      `rejected`,
+    ])
+  })
+
+  try {
+    expect(unhandled).toEqual([])
+  } catch (error) {
+    throw new TraceAssertionError(0, error)
   }
 }
 
 describe(`loadSubset coverage oracle`, () => {
+  it(
+    `discovered trace: an empty predicate issues no transport work`,
+    expectAssertionFailure(
+      () =>
+        Promise.resolve().then(() => {
+          expect(countLoads([{ kind: `in`, values: [] }])).toBe(0)
+        }),
+      { message: /expected 1 to be/ },
+    ),
+  )
+
+  it(
+    `discovered trace: an empty ordered window issues no transport work`,
+    expectAssertionFailure(
+      () =>
+        Promise.resolve().then(() => {
+          expect(
+            countWindowLoads([{ direction: `asc`, offset: 0, limit: 0 }]),
+          ).toBe(0)
+        }),
+      { message: /expected 1 to be/ },
+    ),
+  )
+
+  it(`rejects repeated transport work for one covered predicate`, () => {
+    expect(() =>
+      runCoverageTrace(
+        [
+          { kind: `eq`, value: 1 },
+          { kind: `eq`, value: 1 },
+        ],
+        createAlwaysLoadingCoverageSubject,
+      ),
+    ).toThrow()
+  })
+
+  it(`reuses transport work for repeated and strictly covered predicates`, () => {
+    runCoverageTrace([
+      { kind: `range`, operator: `gte`, value: 0 },
+      ...Array.from(
+        { length: 20 },
+        (): PredicateSpec => ({ kind: `eq`, value: 1 }),
+      ),
+    ])
+  })
+
+  it(`rejects transport work for a strict covered predicate subset`, () => {
+    expect(() =>
+      runCoverageTrace(
+        [
+          { kind: `range`, operator: `gte`, value: 0 },
+          { kind: `eq`, value: 1 },
+        ],
+        createAlwaysLoadingCoverageSubject,
+      ),
+    ).toThrow()
+  })
+
+  it(`rejects repeated transport work for one covered window`, () => {
+    expect(() =>
+      runWindowCoverageTrace(
+        [
+          { direction: `asc`, offset: 1, limit: 2 },
+          { direction: `asc`, offset: 1, limit: 2 },
+        ],
+        createAlwaysLoadingCoverageSubject,
+      ),
+    ).toThrow()
+  })
+
+  it(`reuses transport work for repeated and strictly covered windows`, () => {
+    runWindowCoverageTrace([
+      { direction: `asc`, offset: 0, limit: 4 },
+      ...Array.from(
+        { length: 20 },
+        (): WindowRequest => ({ direction: `asc`, offset: 1, limit: 2 }),
+      ),
+    ])
+  })
+
   fcTest.prop([requestTraceArbitrary], { numRuns: runs, seed: 1657 })(
     `matches finite-domain coverage for a fixed seed`,
-    runCoverageTrace,
+    runCoverageTraceWithKnownFailures,
   )
 
   fcTest.prop([requestTraceArbitrary], randomParameters)(
     `matches finite-domain coverage for a random or replayed seed`,
-    runCoverageTrace,
+    runCoverageTraceWithKnownFailures,
   )
 
   fcTest.prop([asyncScenarioArbitrary], { numRuns: runs, seed: 1658 })(
@@ -632,18 +821,25 @@ describe(`loadSubset coverage oracle`, () => {
 
   fcTest.prop([windowTraceArbitrary], { numRuns: runs, seed: 1659 })(
     `never treats uncovered ordered windows as loaded for a fixed seed`,
-    runWindowCoverageTrace,
+    runWindowCoverageTraceWithKnownFailures,
   )
 
   fcTest.prop([windowTraceArbitrary], randomParameters)(
     `never treats uncovered ordered windows as loaded for a random or replayed seed`,
-    runWindowCoverageTrace,
+    runWindowCoverageTraceWithKnownFailures,
   )
 
   it(
-    `discovered trace: an in-flight deduplicated waiter installs a rejection handler`,
-    expectAssertionFailure(expectDeduplicatedWaiterInstallsRejectionHandler, {
+    `an in-flight deduplicated waiter rejects without an unhandled branch`,
+    expectAssertionFailure(expectDeduplicatedWaiterHandlesRejection, {
       checkpoint: 0,
+      classify: ({ actual, expected }) =>
+        Array.isArray(actual) &&
+        actual.length === 1 &&
+        actual[0] instanceof Error &&
+        actual[0].message === `transport failed` &&
+        Array.isArray(expected) &&
+        expected.length === 0,
     }),
   )
 
