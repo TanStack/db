@@ -20,7 +20,7 @@ import { ReverseIndex } from '../indexes/reverse-index.js'
 import { hasVirtualPropPath } from '../virtual-props.js'
 import { makeComparator } from './comparison.js'
 import type { CompareOptions } from '../query/builder/types.js'
-import type { IndexInterface, IndexOperation } from '../indexes/base-index.js'
+import type { IndexInterface } from '../indexes/base-index.js'
 import type { BasicExpression } from '../query/ir.js'
 import type { CollectionLike } from '../types.js'
 
@@ -40,7 +40,12 @@ export interface OptimizationResult<TKey> {
 }
 
 /**
- * Finds an index that matches a given field path
+ * Finds an index that matches a given field path.
+ *
+ * The returned index may be capability-limited (e.g. the implicit primary-key
+ * index only serves `eq`/`in`), so callers must check `supports(operation)`
+ * before range or ordered access — as all callers in this module and in
+ * order-by/change-events do.
  */
 export function findIndexForField<TKey extends string | number>(
   collection: CollectionLike<any, TKey>,
@@ -66,6 +71,22 @@ export function findIndexForField<TKey extends string | number>(
       return index
     }
   }
+
+  // Fall back to the collection's implicit primary-key index, so equality
+  // lookups on the key field (e.g. joins on the primary key) work without a
+  // user-created index. Checked last so an explicit index always wins.
+  const keyIndex = collection.keyIndex
+  if (
+    keyIndex &&
+    keyIndex.matchesField(fieldPath) &&
+    keyIndex.matchesCompareOptions(compareOpts)
+  ) {
+    if (!keyIndex.matchesDirection(compareOpts.direction)) {
+      return new ReverseIndex(keyIndex)
+    }
+    return keyIndex
+  }
+
   return undefined
 }
 
@@ -471,37 +492,39 @@ function optimizeCompoundRangeQuery<
 }
 
 /**
- * Optimizes simple comparison expressions (eq, gt, gte, lt, lte)
+ * A binary comparison normalized to `field op value` form. For `value op field`
+ * expressions the range operation is flipped (`gt`↔`lt`, `gte`↔`lte`; `eq` is
+ * symmetric), so `operation` is always the operation an index lookup serves.
  */
-function optimizeSimpleComparison<
-  T extends object,
-  TKey extends string | number,
->(
+interface NormalizedComparison {
+  fieldPath: Array<string>
+  queryValue: unknown
+  operation: `eq` | `gt` | `gte` | `lt` | `lte`
+}
+
+/**
+ * Normalizes a comparison expression to `field op value` form, or returns
+ * `undefined` when it is not a binary comparison between a field reference
+ * and a literal value. Both the optimizer and the `canOptimize*` predicates
+ * classify through this helper so their decisions cannot drift apart.
+ */
+function normalizeSimpleComparison(
   expression: BasicExpression,
-  collection: CollectionLike<T, TKey>,
-): OptimizationResult<TKey> {
+): NormalizedComparison | undefined {
   if (expression.type !== `func` || expression.args.length !== 2) {
-    return { canOptimize: false, matchingKeys: new Set(), isExact: false }
+    return undefined
   }
 
   const leftArg = expression.args[0]!
   const rightArg = expression.args[1]!
-
-  // Check both directions: field op value AND value op field
-  let fieldArg: BasicExpression | null = null
-  let valueArg: BasicExpression | null = null
-  let operation = expression.name as `eq` | `gt` | `gte` | `lt` | `lte`
+  let operation = expression.name as NormalizedComparison[`operation`]
 
   if (leftArg.type === `ref` && rightArg.type === `val`) {
-    // field op value
-    fieldArg = leftArg
-    valueArg = rightArg
-  } else if (leftArg.type === `val` && rightArg.type === `ref`) {
-    // value op field - need to flip the operation
-    fieldArg = rightArg
-    valueArg = leftArg
+    return { fieldPath: leftArg.path, queryValue: rightArg.value, operation }
+  }
 
-    // Flip the operation for reverse comparison
+  if (leftArg.type === `val` && rightArg.type === `ref`) {
+    // value op field - flip the range operation for the reverse comparison
     switch (operation) {
       case `gt`:
         operation = `lt`
@@ -517,57 +540,65 @@ function optimizeSimpleComparison<
         break
       // eq stays the same
     }
+    return { fieldPath: rightArg.path, queryValue: leftArg.value, operation }
   }
 
-  if (fieldArg && valueArg) {
-    const fieldPath = (fieldArg as any).path
-    const index = findIndexForField(collection, fieldPath)
+  return undefined
+}
 
-    if (index) {
-      const queryValue = (valueArg as any).value
+/**
+ * Optimizes simple comparison expressions (eq, gt, gte, lt, lte)
+ */
+function optimizeSimpleComparison<
+  T extends object,
+  TKey extends string | number,
+>(
+  expression: BasicExpression,
+  collection: CollectionLike<T, TKey>,
+): OptimizationResult<TKey> {
+  const normalized = normalizeSimpleComparison(expression)
+  if (!normalized) {
+    return { canOptimize: false, matchingKeys: new Set(), isExact: false }
+  }
+  const { fieldPath, queryValue, operation } = normalized
 
-      // Map operation to IndexOperation enum
-      const indexOperation = operation as IndexOperation
-
-      // Check if the index supports this operation
-      if (!index.supports(indexOperation)) {
-        return { canOptimize: false, matchingKeys: new Set(), isExact: false }
-      }
-
-      // A range op can only use the index when the operand's domain orders the
-      // same way the index does and the index supports trustworthy traversal.
-      // Otherwise the index may omit matching rows, which re-filtering cannot
-      // recover, so fall back to a full scan.
-      if (
-        (operation === `gt` ||
-          operation === `gte` ||
-          operation === `lt` ||
-          operation === `lte`) &&
-        !canRangeOptimize(queryValue, index, collection)
-      ) {
-        return { canOptimize: false, matchingKeys: new Set(), isExact: false }
-      }
-
-      const matchingKeys = index.lookup(indexOperation, queryValue)
-
-      // A comparison against a nullish value is never true, but BTree indexes
-      // store and return rows with nullish keys (they sort to the nulls end).
-      // Determine whether the index result is exact or a superset that the
-      // caller must re-filter:
-      // - eq/gt/gte: a nullish query value matches nothing while the index
-      //   still returns nullish-keyed rows -> inexact. A non-nullish lower
-      //   bound (gt/gte) excludes those bottom-sorted rows, so they stay exact.
-      // - lt/lte: the open lower bound always includes nullish-keyed rows,
-      //   so the result is conservatively inexact.
-      // NaN/invalid Dates are exact here: under PostgreSQL float semantics the
-      // evaluator and the index agree on them (equal to self, greatest).
-      const isExact =
-        operation === `lt` || operation === `lte`
-          ? false
-          : isExactComparisonValue(queryValue)
-
-      return { canOptimize: true, matchingKeys, isExact }
+  const index = findIndexForField(collection, fieldPath)
+  if (index) {
+    // Check if the index supports this operation
+    if (!index.supports(operation)) {
+      return { canOptimize: false, matchingKeys: new Set(), isExact: false }
     }
+
+    // A range op can only use the index when the operand's domain orders the
+    // same way the index does and the index supports trustworthy traversal.
+    // Otherwise the index may omit matching rows, which re-filtering cannot
+    // recover, so fall back to a full scan.
+    if (
+      operation !== `eq` &&
+      !canRangeOptimize(queryValue, index, collection)
+    ) {
+      return { canOptimize: false, matchingKeys: new Set(), isExact: false }
+    }
+
+    const matchingKeys = index.lookup(operation, queryValue)
+
+    // A comparison against a nullish value is never true, but BTree indexes
+    // store and return rows with nullish keys (they sort to the nulls end).
+    // Determine whether the index result is exact or a superset that the
+    // caller must re-filter:
+    // - eq/gt/gte: a nullish query value matches nothing while the index
+    //   still returns nullish-keyed rows -> inexact. A non-nullish lower
+    //   bound (gt/gte) excludes those bottom-sorted rows, so they stay exact.
+    // - lt/lte: the open lower bound always includes nullish-keyed rows,
+    //   so the result is conservatively inexact.
+    // NaN/invalid Dates are exact here: under PostgreSQL float semantics the
+    // evaluator and the index agree on them (equal to self, greatest).
+    const isExact =
+      operation === `lt` || operation === `lte`
+        ? false
+        : isExactComparisonValue(queryValue)
+
+    return { canOptimize: true, matchingKeys, isExact }
   }
 
   return { canOptimize: false, matchingKeys: new Set(), isExact: false }
@@ -580,28 +611,29 @@ function canOptimizeSimpleComparison<
   T extends object,
   TKey extends string | number,
 >(expression: BasicExpression, collection: CollectionLike<T, TKey>): boolean {
-  if (expression.type !== `func` || expression.args.length !== 2) {
+  const normalized = normalizeSimpleComparison(expression)
+  if (!normalized) {
+    return false
+  }
+  const { fieldPath, queryValue, operation } = normalized
+
+  const index = findIndexForField(collection, fieldPath)
+  if (index === undefined) {
     return false
   }
 
-  const leftArg = expression.args[0]!
-  const rightArg = expression.args[1]!
-
-  // Check both directions: field op value AND value op field
-  let fieldPath: Array<string> | null = null
-
-  if (leftArg.type === `ref` && rightArg.type === `val`) {
-    fieldPath = (leftArg as any).path
-  } else if (leftArg.type === `val` && rightArg.type === `ref`) {
-    fieldPath = (rightArg as any).path
+  // Mirror optimizeSimpleComparison's gates: the index must support the
+  // normalized operation (e.g. the implicit key index only serves eq/in),
+  // and a range op additionally requires trustworthy index traversal for
+  // the operand's domain.
+  if (!index.supports(operation)) {
+    return false
+  }
+  if (operation !== `eq` && !canRangeOptimize(queryValue, index, collection)) {
+    return false
   }
 
-  if (fieldPath) {
-    const index = findIndexForField(collection, fieldPath)
-    return index !== undefined
-  }
-
-  return false
+  return true
 }
 
 /**
@@ -805,7 +837,9 @@ function canOptimizeInArrayExpression<
   ) {
     const fieldPath = (fieldArg as any).path
     const index = findIndexForField(collection, fieldPath)
-    return index !== undefined
+    // Mirror optimizeInArrayExpression's gate: IN is served either natively
+    // or via per-value equality lookups.
+    return index !== undefined && (index.supports(`in`) || index.supports(`eq`))
   }
 
   return false

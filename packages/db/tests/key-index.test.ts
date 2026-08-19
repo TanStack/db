@@ -1,0 +1,313 @@
+import { describe, expect, it } from 'vitest'
+import { createCollection } from '../src/collection/index.js'
+import { KeyIndex, createKeyIndexFromGetKey } from '../src/indexes/key-index.js'
+import { BasicIndex } from '../src/indexes/basic-index.js'
+import {
+  canOptimizeExpression,
+  findIndexForField,
+  optimizeExpressionWithIndexes,
+} from '../src/utils/index-optimization.js'
+import { Func, PropRef, Value } from '../src/query/ir.js'
+import { mockSyncCollectionOptions } from './utils.js'
+import type { IndexOperation } from '../src/indexes/base-index.js'
+
+type Item = {
+  id: string
+  category: string
+}
+
+const sampleItems: Array<Item> = [
+  { id: `a`, category: `one` },
+  { id: `b`, category: `one` },
+  { id: `c`, category: `two` },
+]
+
+function makeCollection(getKey: (item: Item) => string) {
+  return createCollection(
+    mockSyncCollectionOptions<Item>({
+      id: `key-index-test`,
+      getKey,
+      initialData: sampleItems,
+    }),
+  )
+}
+
+describe(`createKeyIndexFromGetKey`, () => {
+  it(`derives an index from a single property access`, () => {
+    const keys = new Set([`a`, `b`])
+    const index = createKeyIndexFromGetKey<Item, string>(
+      (item) => item.id,
+      (key) => keys.has(key),
+      () => keys.size,
+    )
+
+    expect(index).toBeInstanceOf(KeyIndex)
+    expect(index!.matchesField([`id`])).toBe(true)
+    expect(index!.matchesField([`category`])).toBe(false)
+    expect(index!.keyCount).toBe(2)
+  })
+
+  it(`returns undefined for a composite key`, () => {
+    const index = createKeyIndexFromGetKey<Item, string>(
+      (item) => `${item.id}:${item.category}`,
+      () => true,
+      () => 0,
+    )
+
+    expect(index).toBeUndefined()
+  })
+
+  it(`returns undefined when getKey does not read a property`, () => {
+    const index = createKeyIndexFromGetKey<Item, string>(
+      (item) => item as unknown as string,
+      () => true,
+      () => 0,
+    )
+
+    expect(index).toBeUndefined()
+  })
+
+  it(`returns undefined when getKey throws on the introspection proxy`, () => {
+    const index = createKeyIndexFromGetKey<Item, string>(
+      () => {
+        throw new Error(`boom`)
+      },
+      () => true,
+      () => 0,
+    )
+
+    expect(index).toBeUndefined()
+  })
+})
+
+describe(`KeyIndex lookups`, () => {
+  const keys = new Set([`a`, `b`])
+  const index = createKeyIndexFromGetKey<Item, string>(
+    (item) => item.id,
+    (key) => keys.has(key),
+    () => keys.size,
+  )!
+
+  it(`supports only eq and in`, () => {
+    expect(index.supports(`eq`)).toBe(true)
+    expect(index.supports(`in`)).toBe(true)
+    expect(index.supports(`gt`)).toBe(false)
+    expect(index.supports(`lte`)).toBe(false)
+    expect(index.supportsRangeOptimization).toBe(false)
+  })
+
+  it(`resolves eq lookups through the key set`, () => {
+    expect(index.lookup(`eq`, `a`)).toEqual(new Set([`a`]))
+    expect(index.lookup(`eq`, `missing`)).toEqual(new Set())
+    expect(index.lookup(`eq`, null)).toEqual(new Set())
+  })
+
+  it(`resolves in lookups by filtering to present keys`, () => {
+    expect(index.lookup(`in`, [`a`, `b`, `missing`])).toEqual(
+      new Set([`a`, `b`]),
+    )
+    expect(index.lookup(`in`, [])).toEqual(new Set())
+  })
+
+  it(`rejects unsupported operations`, () => {
+    expect(() => index.lookup(`gt`, `a`)).toThrow(
+      `Operation gt not supported by KeyIndex`,
+    )
+  })
+})
+
+describe(`collection.keyIndex`, () => {
+  it(`is derived for a plain property getKey and reflects live state`, () => {
+    const collection = makeCollection((item) => item.id)
+    const keyIndex = collection.keyIndex
+
+    expect(keyIndex).toBeInstanceOf(KeyIndex)
+    expect(keyIndex!.matchesField([`id`])).toBe(true)
+    expect(keyIndex!.lookup(`eq`, `a`)).toEqual(new Set([`a`]))
+    expect(keyIndex!.lookup(`in`, [`a`, `c`, `zzz`])).toEqual(
+      new Set([`a`, `c`]),
+    )
+
+    collection.utils.begin()
+    collection.utils.write({
+      type: `insert`,
+      value: { id: `d`, category: `two` },
+    })
+    collection.utils.commit()
+
+    expect(keyIndex!.lookup(`eq`, `d`)).toEqual(new Set([`d`]))
+  })
+
+  it(`is undefined for a composite getKey`, () => {
+    const collection = makeCollection((item) => `${item.id}:${item.category}`)
+
+    expect(collection.keyIndex).toBeUndefined()
+  })
+})
+
+describe(`findIndexForField key-index fallback`, () => {
+  it(`serves the key field when no explicit index exists`, () => {
+    const collection = makeCollection((item) => item.id)
+
+    const index = findIndexForField(collection, [`id`])
+
+    expect(index).toBe(collection.keyIndex)
+    expect(index!.lookup(`eq`, `b`)).toEqual(new Set([`b`]))
+  })
+
+  it(`prefers an explicit index on the key field`, () => {
+    const collection = makeCollection((item) => item.id)
+    collection.createIndex((row) => row.id, { indexType: BasicIndex })
+
+    const index = findIndexForField(collection, [`id`])
+
+    expect(index).toBeInstanceOf(BasicIndex)
+  })
+
+  it(`does not serve non-key fields`, () => {
+    const collection = makeCollection((item) => item.id)
+
+    expect(findIndexForField(collection, [`category`])).toBeUndefined()
+  })
+
+  it(`does not serve collections with a composite key`, () => {
+    const collection = makeCollection((item) => `${item.id}:${item.category}`)
+
+    expect(findIndexForField(collection, [`id`])).toBeUndefined()
+  })
+
+  it(`is conservatively skipped for collections with a custom string collation`, () => {
+    const collection = createCollection<Item, string>({
+      getKey: (item) => item.id,
+      defaultStringCollation: { stringSort: `lexical` },
+      startSync: true,
+      sync: {
+        sync: ({ begin, write, commit, markReady }) => {
+          begin()
+          for (const item of sampleItems) {
+            write({ type: `insert`, value: item })
+          }
+          commit()
+          markReady()
+        },
+      },
+    })
+
+    // The key index itself is derivable, but its compare options are the
+    // defaults, so lookups under a custom collation fall back to a full scan.
+    expect(collection.keyIndex).toBeInstanceOf(KeyIndex)
+    expect(findIndexForField(collection, [`id`])).toBeUndefined()
+  })
+})
+
+describe(`canOptimizeExpression with only a key index`, () => {
+  const collection = makeCollection((item) => item.id)
+
+  it(`reports eq and in on the key field as optimizable`, () => {
+    expect(
+      canOptimizeExpression(
+        new Func(`eq`, [new PropRef([`id`]), new Value(`a`)]),
+        collection,
+      ),
+    ).toBe(true)
+    expect(
+      canOptimizeExpression(
+        new Func(`in`, [new PropRef([`id`]), new Value([`a`, `b`])]),
+        collection,
+      ),
+    ).toBe(true)
+  })
+
+  it(`reports range operations on the key field as not optimizable`, () => {
+    // The key index exists but only supports eq/in, so the predicate must
+    // agree with what optimization would actually do.
+    expect(
+      canOptimizeExpression(
+        new Func(`gt`, [new PropRef([`id`]), new Value(`a`)]),
+        collection,
+      ),
+    ).toBe(false)
+  })
+})
+
+describe(`canOptimizeExpression agrees with optimizeExpressionWithIndexes`, () => {
+  it(`rejects locale-ordered string ranges on a range-capable index`, () => {
+    const collection = makeCollection((item) => item.id)
+    collection.createIndex((row) => row.category, { indexType: BasicIndex })
+
+    // Default collections sort strings by locale, which diverges from the
+    // WHERE evaluator's code-point comparison, so a string range cannot be
+    // served by the index — and the predicate must say so too.
+    const rangeExpr = new Func(`gt`, [
+      new PropRef([`category`]),
+      new Value(`m`),
+    ])
+    expect(
+      optimizeExpressionWithIndexes(rangeExpr, collection).canOptimize,
+    ).toBe(false)
+    expect(canOptimizeExpression(rangeExpr, collection)).toBe(false)
+
+    // The flipped operand form must classify the same way.
+    const flippedExpr = new Func(`gt`, [
+      new Value(`m`),
+      new PropRef([`category`]),
+    ])
+    expect(
+      optimizeExpressionWithIndexes(flippedExpr, collection).canOptimize,
+    ).toBe(false)
+    expect(canOptimizeExpression(flippedExpr, collection)).toBe(false)
+
+    // Equality is unaffected by collation and stays optimizable.
+    const eqExpr = new Func(`eq`, [new PropRef([`category`]), new Value(`one`)])
+    expect(optimizeExpressionWithIndexes(eqExpr, collection).canOptimize).toBe(
+      true,
+    )
+    expect(canOptimizeExpression(eqExpr, collection)).toBe(true)
+  })
+
+  it(`normalizes flipped operands before consulting index capabilities`, () => {
+    // An index that serves upper-bound ranges only: `5 > score` normalizes to
+    // `score < 5`, so both the optimizer and the predicate must consult
+    // supports(`lt`), not the expression's literal `gt` — otherwise the two
+    // disagree on either flipped form.
+    class UpperBoundOnlyIndex<
+      TKey extends string | number = string | number,
+    > extends BasicIndex<TKey> {
+      public readonly supportedOperations = new Set<IndexOperation>([
+        `eq`,
+        `lt`,
+        `lte`,
+      ])
+    }
+
+    const collection = createCollection(
+      mockSyncCollectionOptions<{ id: string; score: number }>({
+        id: `key-index-flip-test`,
+        getKey: (item) => item.id,
+        initialData: [
+          { id: `a`, score: 1 },
+          { id: `b`, score: 7 },
+        ],
+      }),
+    )
+    collection.createIndex((row) => row.score, {
+      indexType: UpperBoundOnlyIndex,
+    })
+
+    // `5 > score` means `score < 5`: served by the index, and the predicate
+    // must agree.
+    const flippedLt = new Func(`gt`, [new Value(5), new PropRef([`score`])])
+    const optimizedLt = optimizeExpressionWithIndexes(flippedLt, collection)
+    expect(optimizedLt.canOptimize).toBe(true)
+    expect(optimizedLt.matchingKeys).toEqual(new Set([`a`]))
+    expect(canOptimizeExpression(flippedLt, collection)).toBe(true)
+
+    // `5 < score` means `score > 5`: not served (no gt support), and the
+    // predicate must agree.
+    const flippedGt = new Func(`lt`, [new Value(5), new PropRef([`score`])])
+    expect(
+      optimizeExpressionWithIndexes(flippedGt, collection).canOptimize,
+    ).toBe(false)
+    expect(canOptimizeExpression(flippedGt, collection)).toBe(false)
+  })
+})
