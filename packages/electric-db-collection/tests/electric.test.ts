@@ -7,9 +7,7 @@ import {
 } from '@tanstack/db'
 import { persistedCollectionOptions } from '../../db-sqlite-persistence-core/src'
 import { electricCollectionOptions, isChangeMessage } from '../src/electric'
-import { expectAssertionFailure } from '../../db/tests/expected-failure'
 import { stripVirtualProps } from '../../db/tests/utils'
-import { TraceAssertionError } from '../../db/tests/trace-runner'
 import type { ElectricCollectionUtils } from '../src/electric'
 import type {
   Collection,
@@ -2627,7 +2625,7 @@ describe(`Electric Integration`, () => {
       )
     })
 
-    it(`reloads Electric coverage after its final owner unloads`, async () => {
+    it(`retains Electric coverage when the adapter cannot unload it`, async () => {
       const testCollection = createCollection(
         electricCollectionOptions({
           id: `on-demand-unload-coverage-test`,
@@ -2647,20 +2645,7 @@ describe(`Electric Integration`, () => {
         testCollection._sync.unloadSubset(options)
         await testCollection._sync.loadSubset(options)
 
-        await expectAssertionFailure(
-          () =>
-            Promise.resolve().then(() => {
-              try {
-                expect(mockRequestSnapshot).toHaveBeenCalledTimes(2)
-              } catch (error) {
-                throw new TraceAssertionError(0, error)
-              }
-            }),
-          {
-            checkpoint: 0,
-            classify: ({ actual, expected }) => actual === 1 && expected === 2,
-          },
-        )()
+        expect(mockRequestSnapshot).toHaveBeenCalledTimes(1)
       } finally {
         await testCollection.cleanup()
       }

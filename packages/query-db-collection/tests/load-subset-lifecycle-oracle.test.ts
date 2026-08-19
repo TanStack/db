@@ -8,6 +8,7 @@ import type { QueryFunctionContext } from '@tanstack/query-core'
 
 type Row = {
   id: string
+  group?: string
 }
 
 let collectionSequence = 0
@@ -63,7 +64,7 @@ async function expectEquivalentPredicatesShareOneLoad(
 ): Promise<void> {
   const queryClient = createQueryClient()
   const id = `load-subset-canonical-predicate-${collectionSequence++}`
-  const queryFn = vi.fn().mockResolvedValue([])
+  const queryFn = vi.fn().mockResolvedValue([{ id: `a`, group: `x` }])
   const collection = createCollection(
     queryCollectionOptions<Row>({
       id,
@@ -81,8 +82,8 @@ async function expectEquivalentPredicatesShareOneLoad(
     new IR.Value(`a`),
   ])
   const secondComparison = new IR.Func<boolean>(`eq`, [
-    new IR.PropRef([`id`]),
-    new IR.Value(`b`),
+    new IR.PropRef([`group`]),
+    new IR.Value(`x`),
   ])
   const first =
     form === `commutative-and`

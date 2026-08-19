@@ -3,6 +3,8 @@ import { createCollection } from '../../src/collection/index.js'
 import { BasicIndex } from '../../src/indexes/basic-index.js'
 import { extractSimpleComparisons } from '../../src/query/expression-helpers.js'
 import { createLiveQueryCollection, eq } from '../../src/query/index.js'
+import { expectAssertionFailure } from '../expected-failure.js'
+import { TraceAssertionError } from '../trace-runner.js'
 import { flushPromises } from '../utils.js'
 import type {
   ChangeMessageOrDeleteKeyMessage,
@@ -103,18 +105,32 @@ describe(`loadSubset join-key deduplication`, () => {
     for (const cleanup of cleanups.splice(0).reverse()) cleanup()
   })
 
-  it(`does not reload the same join predicate on repeated preload`, async () => {
-    const { collection: parentCollection } = createParents()
-    const { collection: childCollection, loads } = createChildren()
-    const live = createJoinedQuery(parentCollection, childCollection)
+  it(
+    `discovered trace: a second live query reuses its loaded join predicate`,
+    expectAssertionFailure(
+      async () => {
+        const { collection: parentCollection } = createParents()
+        const { collection: childCollection, loads } = createChildren()
+        const firstLive = createJoinedQuery(parentCollection, childCollection)
 
-    await live.preload()
-    const loadCount = loads.length
-    expect(loadCount).toBeGreaterThan(0)
+        await firstLive.preload()
+        const loadCount = loads.length
+        expect(loadCount).toBeGreaterThan(0)
 
-    await live.preload()
-    expect(loads).toHaveLength(loadCount)
-  })
+        const secondLive = createJoinedQuery(parentCollection, childCollection)
+        await secondLive.preload()
+        try {
+          expect(loads).toHaveLength(loadCount)
+        } catch (error) {
+          throw new TraceAssertionError(0, error)
+        }
+      },
+      {
+        checkpoint: 0,
+        classify: ({ actual, expected }) => actual === 2 && expected === 1,
+      },
+    ),
+  )
 
   it(`requests only a newly inserted join key`, async () => {
     const { collection: parentCollection, insert } = createParents()
