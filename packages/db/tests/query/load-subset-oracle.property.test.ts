@@ -532,11 +532,12 @@ function loadedWindowCovers(
 ): boolean {
   const requestedOptions = toWindowOptions(requested)
   const loadedOptions = toWindowOptions(loaded)
-  // An unlimited load has every row in its predicate region. It can therefore
-  // cover any narrower predicate and let local query processing impose the
-  // requested order and window.
+  // An unlimited load that starts at zero has every row in its predicate
+  // region. It can therefore cover any narrower predicate and let local query
+  // processing impose the requested order and window.
   if (
     loaded.limit === undefined &&
+    loaded.offset === 0 &&
     isSubset(
       matchingValues(requestedOptions.where),
       matchingValues(loadedOptions.where),
@@ -603,6 +604,28 @@ function isKnownUnlimitedOffsetDeduplication(
   })
 }
 
+function isKnownOffsetTruncatedUnlimitedDeduplication(
+  error: UncoveredWindowDeduplicatedError,
+): boolean {
+  const requestedOptions = toWindowOptions(error.requested)
+
+  return error.loadedRegions.some(({ request: loaded }) => {
+    if (loaded.limit !== undefined || loaded.offset === 0) return false
+    const loadedOptions = toWindowOptions(loaded)
+    const priorLoads = error.loadedRegions.map(({ request }) => request)
+    return (
+      JSON.stringify(requestedOptions.orderBy) !==
+        JSON.stringify(loadedOptions.orderBy) &&
+      isSubset(
+        matchingValues(requestedOptions.where),
+        matchingValues(loadedOptions.where),
+      ) &&
+      countWindowLoads(priorLoads) === priorLoads.length &&
+      countWindowLoads([...priorLoads, error.requested]) === priorLoads.length
+    )
+  })
+}
+
 function isKnownCoveredWindowRefetch(
   error: CoveredWindowRefetchedError,
 ): boolean {
@@ -614,7 +637,12 @@ function isKnownCoveredWindowRefetch(
   ) {
     return true
   }
-  if (error.loadedRegions.length > 1) return true
+  if (error.loadedRegions.length > 1) {
+    const coveredByOneRegion = error.loadedRegions.some(({ positions }) =>
+      isSubset(error.requestedPositions, positions),
+    )
+    return !coveredByOneRegion
+  }
   if (error.requested.where === undefined) return false
 
   return error.loadedRegions.some(
@@ -622,6 +650,24 @@ function isKnownCoveredWindowRefetch(
       loadedWindowCovers(error.requested, loaded) &&
       isSubset(error.requestedPositions, positions),
   )
+}
+
+function isKnownIndividuallyCoveredWindowRefetch(
+  error: CoveredWindowRefetchedError,
+): boolean {
+  if (error.loadedRegions.length <= 1) return false
+  const coveredByOneRegion = error.loadedRegions.some(
+    ({ request: loaded, positions }) =>
+      loadedWindowCovers(error.requested, loaded) &&
+      isSubset(error.requestedPositions, positions),
+  )
+  if (!coveredByOneRegion) return false
+
+  const replay = [
+    ...error.loadedRegions.map(({ request }) => request),
+    error.requested,
+  ]
+  return countWindowLoads(replay) === replay.length
 }
 
 const createWindowKeyBlindSubject: CoverageSubjectFactory = (recordLoad) => {
@@ -706,16 +752,19 @@ function runWindowCoverageTraceWithKnownFailures(
   try {
     runWindowCoverageTrace(trace, createSubject)
   } catch (error) {
+    if (createSubject !== createDeduplicatedCoverageSubject) throw error
     if (
       error instanceof UncoveredWindowDeduplicatedError &&
       (isKnownCompareOptionsDeduplication(error) ||
-        isKnownUnlimitedOffsetDeduplication(error))
+        isKnownUnlimitedOffsetDeduplication(error) ||
+        isKnownOffsetTruncatedUnlimitedDeduplication(error))
     ) {
       return
     }
     if (
       error instanceof CoveredWindowRefetchedError &&
-      isKnownCoveredWindowRefetch(error)
+      (isKnownCoveredWindowRefetch(error) ||
+        isKnownIndividuallyCoveredWindowRefetch(error))
     ) {
       return
     }
@@ -1198,6 +1247,32 @@ describe(`loadSubset coverage oracle`, () => {
   )
 
   it(
+    `discovered trace: an offset-truncated unlimited load does not cover another ordering`,
+    expectAssertionFailure(
+      () =>
+        Promise.resolve().then(() => {
+          expect(
+            countWindowLoads([
+              {
+                orderField: `rank`,
+                direction: `asc`,
+                offset: 1,
+                limit: undefined,
+              },
+              {
+                orderField: `score`,
+                direction: `asc`,
+                offset: 1,
+                limit: 1,
+              },
+            ]),
+          ).toBe(2)
+        }),
+      { message: /expected 1 to be 2/ },
+    ),
+  )
+
+  it(
     `discovered trace: an identical filtered window reuses its load`,
     expectAssertionFailure(
       () =>
@@ -1340,6 +1415,39 @@ describe(`loadSubset coverage oracle`, () => {
         limit: undefined,
       },
     ])
+  })
+
+  it(`does not treat an offset-truncated unlimited load as complete under another ordering`, () => {
+    expect(
+      loadedWindowCovers(
+        {
+          orderField: `score`,
+          direction: `asc`,
+          offset: 1,
+          limit: 1,
+        },
+        {
+          orderField: `rank`,
+          direction: `asc`,
+          offset: 1,
+          limit: undefined,
+        },
+      ),
+    ).toBe(false)
+  })
+
+  it(`rejects redundant work for a window covered by one loaded region`, () => {
+    const first: WindowRequest = {
+      direction: `asc`,
+      offset: 0,
+      limit: 2,
+    }
+    expect(() =>
+      runWindowCoverageTraceWithKnownFailures(
+        [first, { direction: `asc`, offset: 2, limit: 2 }, first],
+        createAlwaysLoadingCoverageSubject,
+      ),
+    ).toThrow()
   })
 
   it.each([
@@ -1610,6 +1718,26 @@ describe(`loadSubset coverage oracle`, () => {
               { direction: `asc`, offset: 0, limit: 4 },
             ]),
           ).toBe(2)
+        }),
+      { message: /expected 3 to be 2/ },
+    ),
+  )
+
+  it(
+    `discovered trace: widening a window forgets an earlier covered window`,
+    expectAssertionFailure(
+      () =>
+        Promise.resolve().then(() => {
+          const first: WindowRequest = {
+            orderField: `none`,
+            direction: `asc`,
+            offset: 0,
+            limit: 1,
+            where: { kind: `in`, values: [0] },
+          }
+          expect(countWindowLoads([first, { ...first, limit: 2 }, first])).toBe(
+            2,
+          )
         }),
       { message: /expected 3 to be 2/ },
     ),
