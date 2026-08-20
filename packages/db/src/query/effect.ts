@@ -1,5 +1,8 @@
 import { D2, output } from '@tanstack/db-ivm'
-import { transactionScopedScheduler } from '../scheduler.js'
+import {
+  getActivePublicationContext,
+  transactionScopedScheduler,
+} from '../scheduler.js'
 import { getActiveTransaction } from '../transactions.js'
 import { compileQuery } from './compiler/index.js'
 import {
@@ -7,11 +10,12 @@ import {
   normalizeOrderByPaths,
 } from './compiler/expressions.js'
 import { getCollectionBuilder } from './live/collection-registry.js'
+import { SubsetDemandController } from './live/subset-demand-controller.js'
 import {
   buildQueryFromConfig,
   computeOrderedLoadCursor,
   computeSubscriptionOrderByHints,
-  extractCollectionAliases,
+  extractCollectionSources,
   extractCollectionsFromQuery,
   filterDuplicateInserts,
   sendChangesToInput,
@@ -25,6 +29,10 @@ import type { InitialQueryBuilder, QueryBuilder } from './builder/index.js'
 import type { Context } from './builder/types.js'
 import type { BasicExpression, QueryIR } from './ir.js'
 import type { OrderByOptimizationInfo } from './compiler/order-by.js'
+import type {
+  LazyCollectionCallbacks,
+  LazyDemandPlan,
+} from './compiler/joins.js'
 import type { ChangeMessage, KeyedStream, ResultStream } from '../types.js'
 
 // ---------------------------------------------------------------------------
@@ -314,27 +322,31 @@ interface EffectPipelineRunnerConfig<
  * Sets up the IVM graph, subscribes to source collections, runs the graph
  * when changes arrive, and classifies output multiplicities into DeltaEvents.
  *
- * Unlike CollectionConfigBuilder, this does NOT:
- * - Create or write to a collection (no materialisation)
- * - Manage ordering, windowing, or lazy loading
+ * Unlike CollectionConfigBuilder, this does not publish results to a
+ * Collection.
  */
 class EffectPipelineRunner<TRow extends object, TKey extends string | number> {
   private readonly query: QueryIR
   private readonly collections: Record<string, Collection<any, any, any>>
-  private readonly collectionByAlias: Record<string, Collection<any, any, any>>
+  private readonly collectionSources: ReturnType<
+    typeof extractCollectionSources
+  >
 
   private graph: D2 | undefined
   private inputs: Record<string, RootStreamBuilder<unknown>> | undefined
   private pipeline: ResultStream | undefined
   private sourceWhereClauses: Map<string, BasicExpression<boolean>> | undefined
-  private compiledAliasToCollectionId: Record<string, string> = {}
 
   // Mutable objects passed to compileQuery by reference.
   // The join compiler captures these references and reads them later when
   // the graph runs, so they must be populated before the first graph run.
   private readonly subscriptions: Record<string, CollectionSubscription> = {}
-  private readonly lazySourcesCallbacks: Record<string, any> = {}
+  private readonly lazySourcesCallbacks: Record<
+    string,
+    LazyCollectionCallbacks
+  > = {}
   private readonly lazySources = new Set<string>()
+  private readonly demand = new SubsetDemandController()
   // OrderBy optimization info populated by the compiler when limit is present
   private readonly optimizableOrderByCollections: Record<
     string,
@@ -348,8 +360,11 @@ class EffectPipelineRunner<TRow extends object, TKey extends string | number> {
 
   // Subscription management
   private readonly unsubscribeCallbacks = new Set<() => void>()
-  // Duplicate insert prevention per alias
-  private readonly sentToD2KeysByAlias = new Map<string, Set<string | number>>()
+  // Duplicate insert prevention per lexical source
+  private readonly sentToD2KeysBySource = new Map<
+    string,
+    Set<string | number>
+  >()
 
   // Output accumulator
   private pendingChanges: Map<unknown, EffectChanges<TRow>> = new Map()
@@ -361,7 +376,7 @@ class EffectPipelineRunner<TRow extends object, TKey extends string | number> {
   // Scheduler integration
   private subscribedToAllCollections = false
   private readonly builderDependencies = new Set<unknown>()
-  private readonly aliasDependencies: Record<string, Array<unknown>> = {}
+  private readonly sourceDependencies: Record<string, Array<unknown>> = {}
 
   // Reentrance guard
   private isGraphRunning = false
@@ -384,17 +399,7 @@ class EffectPipelineRunner<TRow extends object, TKey extends string | number> {
 
     // Extract source collections
     this.collections = extractCollectionsFromQuery(this.query)
-    const aliasesById = extractCollectionAliases(this.query)
-
-    // Build alias → collection map
-    this.collectionByAlias = {}
-    for (const [collectionId, aliases] of aliasesById.entries()) {
-      const collection = this.collections[collectionId]
-      if (!collection) continue
-      for (const alias of aliases) {
-        this.collectionByAlias[alias] = collection
-      }
-    }
+    this.collectionSources = extractCollectionSources(this.query)
 
     // Compile the pipeline
     this.compilePipeline()
@@ -404,8 +409,8 @@ class EffectPipelineRunner<TRow extends object, TKey extends string | number> {
   private compilePipeline(): void {
     this.graph = new D2()
     this.inputs = Object.fromEntries(
-      Object.keys(this.collectionByAlias).map((alias) => [
-        alias,
+      this.collectionSources.map((source) => [
+        source.sourceId,
         this.graph!.newInput<any>(),
       ]),
     )
@@ -426,7 +431,6 @@ class EffectPipelineRunner<TRow extends object, TKey extends string | number> {
 
     this.pipeline = compilation.pipeline
     this.sourceWhereClauses = compilation.sourceWhereClauses
-    this.compiledAliasToCollectionId = compilation.aliasToCollectionId
 
     // Attach the output operator that accumulates changes
     this.pipeline.pipe(
@@ -441,9 +445,7 @@ class EffectPipelineRunner<TRow extends object, TKey extends string | number> {
 
   /** Subscribe to source collections and start processing */
   start(): void {
-    // Use compiled aliases as the source of truth
-    const compiledAliases = Object.entries(this.compiledAliasToCollectionId)
-    if (compiledAliases.length === 0) {
+    if (this.collectionSources.length === 0) {
       // Nothing to subscribe to
       return
     }
@@ -467,59 +469,59 @@ class EffectPipelineRunner<TRow extends object, TKey extends string | number> {
       Array<Array<ChangeMessage<any, string | number>>>
     >()
 
-    for (const [alias, collectionId] of compiledAliases) {
-      const collection =
-        this.collectionByAlias[alias] ?? this.collections[collectionId]!
+    for (const source of this.collectionSources) {
+      const { sourceId, alias, collection } = source
+      const collectionId = collection.id
 
-      // Initialise per-alias duplicate tracking
-      this.sentToD2KeysByAlias.set(alias, new Set())
+      // Initialise per-source duplicate tracking
+      this.sentToD2KeysBySource.set(sourceId, new Set())
 
       // Discover dependencies: if source collection is itself a live query
       // collection, its builder must run first during transaction flushes.
       const dependencyBuilder = getCollectionBuilder(collection)
       if (dependencyBuilder) {
-        this.aliasDependencies[alias] = [dependencyBuilder]
+        this.sourceDependencies[sourceId] = [dependencyBuilder]
         this.builderDependencies.add(dependencyBuilder)
       } else {
-        this.aliasDependencies[alias] = []
+        this.sourceDependencies[sourceId] = []
       }
 
       // Get where clause for this alias (for predicate push-down)
-      const whereClause = this.sourceWhereClauses?.get(alias)
+      const whereClause = this.sourceWhereClauses?.get(sourceId)
       const whereExpression = whereClause
         ? normalizeExpressionPaths(whereClause, alias)
         : undefined
 
       // Initialise buffer for this alias
       const buffer: Array<Array<ChangeMessage<any, string | number>>> = []
-      pendingBuffers.set(alias, buffer)
+      pendingBuffers.set(sourceId, buffer)
 
       // Lazy aliases (marked by the join compiler) should NOT load initial state
       // eagerly — the join tap operator will load exactly the rows it needs on demand.
       // For on-demand collections, eager loading would trigger a full server fetch
       // for data that should be lazily loaded based on join keys.
-      const isLazy = this.lazySources.has(alias)
+      const isLazy = this.lazySources.has(sourceId)
 
       // Check if this alias has orderBy optimization (cursor-based loading)
-      const orderByInfo = this.getOrderByInfoForAlias(alias)
+      const orderByInfo = this.getOrderByInfoForSource(sourceId)
 
       // Build the change callback — for ordered aliases, split updates into
       // delete+insert and track the biggest sent value for cursor positioning.
       const changeCallback = orderByInfo
         ? (changes: Array<ChangeMessage<any, string | number>>) => {
-            if (pendingBuffers.has(alias)) {
-              pendingBuffers.get(alias)!.push(changes)
+            if (pendingBuffers.has(sourceId)) {
+              pendingBuffers.get(sourceId)!.push(changes)
             } else {
-              this.trackSentValues(alias, changes, orderByInfo.comparator)
+              this.trackSentValues(sourceId, changes, orderByInfo.comparator)
               const split = [...splitUpdates(changes)]
-              this.handleSourceChanges(alias, split)
+              this.handleSourceChanges(sourceId, split)
             }
           }
         : (changes: Array<ChangeMessage<any, string | number>>) => {
-            if (pendingBuffers.has(alias)) {
-              pendingBuffers.get(alias)!.push(changes)
+            if (pendingBuffers.has(sourceId)) {
+              pendingBuffers.get(sourceId)!.push(changes)
             } else {
-              this.handleSourceChanges(alias, changes)
+              this.handleSourceChanges(sourceId, changes)
             }
           }
 
@@ -538,7 +540,18 @@ class EffectPipelineRunner<TRow extends object, TKey extends string | number> {
       )
 
       // Store subscription immediately so the join compiler can find it
-      this.subscriptions[alias] = subscription
+      this.subscriptions[sourceId] = subscription
+
+      const lazyCallbacks = this.lazySourcesCallbacks[sourceId]
+      if (lazyCallbacks) {
+        lazyCallbacks.setDemand = (plan: LazyDemandPlan, keys: Set<unknown>) =>
+          this.setDemand(subscription, plan, keys)
+        for (const plan of lazyCallbacks.plans ?? []) {
+          if (plan.initialKeys.size > 0) {
+            lazyCallbacks.setDemand(plan, plan.initialKeys)
+          }
+        }
+      }
 
       // For ordered aliases with an index, trigger the initial limited snapshot.
       // This loads only the top N rows rather than the entire collection.
@@ -548,7 +561,7 @@ class EffectPipelineRunner<TRow extends object, TKey extends string | number> {
 
       this.unsubscribeCallbacks.add(() => {
         subscription.unsubscribe()
-        delete this.subscriptions[alias]
+        delete this.subscriptions[sourceId]
       })
 
       // Listen for status changes on source collections
@@ -600,22 +613,21 @@ class EffectPipelineRunner<TRow extends object, TKey extends string | number> {
     // switches that alias to direct-processing mode. Any new callbacks that
     // fire during the drain (e.g. from requestLimitedSnapshot) will go
     // through handleSourceChanges directly instead of being lost.
-    for (const [alias] of pendingBuffers) {
-      const buffer = pendingBuffers.get(alias)!
-      pendingBuffers.delete(alias)
-
-      const orderByInfo = this.getOrderByInfoForAlias(alias)
+    for (const [sourceId] of pendingBuffers) {
+      const buffer = pendingBuffers.get(sourceId)!
+      pendingBuffers.delete(sourceId)
+      const orderByInfo = this.getOrderByInfoForSource(sourceId)
 
       // Drain all buffered batches. Since we deleted the alias from
       // pendingBuffers above, any new changes arriving during drain go
       // through handleSourceChanges directly (not back into this buffer).
       for (const changes of buffer) {
         if (orderByInfo) {
-          this.trackSentValues(alias, changes, orderByInfo.comparator)
+          this.trackSentValues(sourceId, changes, orderByInfo.comparator)
           const split = [...splitUpdates(changes)]
-          this.sendChangesToD2(alias, split)
+          this.sendChangesToD2(sourceId, split)
         } else {
-          this.sendChangesToD2(alias, changes)
+          this.sendChangesToD2(sourceId, changes)
         }
       }
     }
@@ -635,11 +647,26 @@ class EffectPipelineRunner<TRow extends object, TKey extends string | number> {
 
   /** Handle incoming changes from a source collection */
   private handleSourceChanges(
-    alias: string,
+    sourceId: string,
     changes: Array<ChangeMessage<any, string | number>>,
   ): void {
-    this.sendChangesToD2(alias, changes)
-    this.scheduleGraphRun(alias)
+    this.sendChangesToD2(sourceId, changes)
+    this.scheduleGraphRun(sourceId)
+  }
+
+  private setDemand(
+    subscription: CollectionSubscription,
+    plan: LazyDemandPlan,
+    keys: Set<unknown>,
+  ): void {
+    const update = this.demand.setDemand(subscription, plan, keys)
+    if (update.ready instanceof Promise) {
+      void update.ready.catch((error: unknown) => {
+        this.onSourceError(
+          error instanceof Error ? error : new Error(String(error)),
+        )
+      })
+    }
   }
 
   /**
@@ -652,15 +679,16 @@ class EffectPipelineRunner<TRow extends object, TKey extends string | number> {
    * Dependencies are discovered from source collections that are themselves
    * live query collections, ensuring parent queries run before effects.
    */
-  private scheduleGraphRun(alias?: string): void {
-    const contextId = getActiveTransaction()?.id
+  private scheduleGraphRun(sourceId?: string): void {
+    const contextId =
+      getActiveTransaction()?.id ?? getActivePublicationContext()
 
     // Collect dependencies for this schedule call
     const deps = new Set(this.builderDependencies)
-    if (alias) {
-      const aliasDeps = this.aliasDependencies[alias]
-      if (aliasDeps) {
-        for (const dep of aliasDeps) {
+    if (sourceId) {
+      const sourceDeps = this.sourceDependencies[sourceId]
+      if (sourceDeps) {
+        for (const dep of sourceDeps) {
           deps.add(dep)
         }
       }
@@ -699,20 +727,20 @@ class EffectPipelineRunner<TRow extends object, TKey extends string | number> {
   }
 
   /**
-   * Send changes to the D2 input for the given alias.
+   * Send changes to the D2 input for the given lexical source.
    * Returns the number of multiset entries sent.
    */
   private sendChangesToD2(
-    alias: string,
+    sourceId: string,
     changes: Array<ChangeMessage<any, string | number>>,
   ): number {
     if (this.disposed || !this.inputs || !this.graph) return 0
 
-    const input = this.inputs[alias]
+    const input = this.inputs[sourceId]
     if (!input) return 0
 
-    // Filter duplicates per alias
-    const sentKeys = this.sentToD2KeysByAlias.get(alias)!
+    // Filter duplicates per lexical source
+    const sentKeys = this.sentToD2KeysBySource.get(sourceId)!
     const filtered = filterDuplicateInserts(changes, sentKeys)
 
     return sendChangesToInput(input, filtered)
@@ -854,19 +882,12 @@ class EffectPipelineRunner<TRow extends object, TKey extends string | number> {
     }
   }
 
-  /**
-   * Get orderBy optimization info for a given alias.
-   * Returns undefined if no optimization exists for this alias.
-   */
-  private getOrderByInfoForAlias(
-    alias: string,
+  /** Get orderBy optimization info for one lexical source. */
+  private getOrderByInfoForSource(
+    sourceId: string,
   ): OrderByOptimizationInfo | undefined {
-    // optimizableOrderByCollections is keyed by collection ID
-    const collectionId = this.compiledAliasToCollectionId[alias]
-    if (!collectionId) return undefined
-
-    const info = this.optimizableOrderByCollections[collectionId]
-    if (info && info.alias === alias) {
+    const info = this.optimizableOrderByCollections[sourceId]
+    if (info?.sourceId === sourceId) {
       return info
     }
     return undefined
@@ -899,20 +920,24 @@ class EffectPipelineRunner<TRow extends object, TKey extends string | number> {
    * position (the biggest value sent so far).
    */
   private loadNextItems(orderByInfo: OrderByOptimizationInfo, n: number): void {
-    const { alias } = orderByInfo
-    const subscription = this.subscriptions[alias]
+    const { alias, sourceId } = orderByInfo
+    const source = this.collectionSources.find(
+      (candidate) => candidate.sourceId === sourceId,
+    )
+    if (!source) return
+    const subscription = this.subscriptions[sourceId]
     if (!subscription) return
 
     const cursor = computeOrderedLoadCursor(
       orderByInfo,
-      this.biggestSentValue.get(alias),
-      this.lastLoadRequestKey.get(alias),
+      this.biggestSentValue.get(sourceId),
+      this.lastLoadRequestKey.get(sourceId),
       alias,
       n,
     )
     if (!cursor) return // Duplicate request — skip
 
-    this.lastLoadRequestKey.set(alias, cursor.loadRequestKey)
+    this.lastLoadRequestKey.set(sourceId, cursor.loadRequestKey)
 
     subscription.requestLimitedSnapshot({
       orderBy: cursor.normalizedOrderBy,
@@ -938,20 +963,20 @@ class EffectPipelineRunner<TRow extends object, TKey extends string | number> {
    * Used for cursor-based pagination in loadNextItems.
    */
   private trackSentValues(
-    alias: string,
+    sourceId: string,
     changes: Array<ChangeMessage<any, string | number>>,
     comparator: (a: any, b: any) => number,
   ): void {
-    const sentKeys = this.sentToD2KeysByAlias.get(alias) ?? new Set()
+    const sentKeys = this.sentToD2KeysBySource.get(sourceId) ?? new Set()
     const result = trackBiggestSentValue(
       changes,
-      this.biggestSentValue.get(alias),
+      this.biggestSentValue.get(sourceId),
       sentKeys,
       comparator,
     )
-    this.biggestSentValue.set(alias, result.biggest)
+    this.biggestSentValue.set(sourceId, result.biggest)
     if (result.shouldResetLoadKey) {
-      this.lastLoadRequestKey.delete(alias)
+      this.lastLoadRequestKey.delete(sourceId)
     }
   }
 
@@ -964,9 +989,10 @@ class EffectPipelineRunner<TRow extends object, TKey extends string | number> {
     // Immediately unsubscribe from sources and clear cheap state
     this.unsubscribeCallbacks.forEach((fn) => fn())
     this.unsubscribeCallbacks.clear()
-    this.sentToD2KeysByAlias.clear()
+    this.sentToD2KeysBySource.clear()
     this.pendingChanges.clear()
     this.lazySources.clear()
+    this.demand.clear()
     this.builderDependencies.clear()
     this.biggestSentValue.clear()
     this.lastLoadRequestKey.clear()
@@ -976,8 +1002,8 @@ class EffectPipelineRunner<TRow extends object, TKey extends string | number> {
     for (const key of Object.keys(this.lazySourcesCallbacks)) {
       delete this.lazySourcesCallbacks[key]
     }
-    for (const key of Object.keys(this.aliasDependencies)) {
-      delete this.aliasDependencies[key]
+    for (const key of Object.keys(this.sourceDependencies)) {
+      delete this.sourceDependencies[key]
     }
     for (const key of Object.keys(this.optimizableOrderByCollections)) {
       delete this.optimizableOrderByCollections[key]

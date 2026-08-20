@@ -1885,9 +1885,13 @@ function createOrderByTests(autoIndex: `off` | `eager`): void {
 
             const builder = (collection as any).config.__builder
             expect(builder).toBeTruthy()
-            expect(
-              Object.keys(builder.optimizableOrderByCollections),
-            ).toContain(employeesCollection.id)
+            const orderByInfo = Object.values(
+              builder.optimizableOrderByCollections,
+            )[0] as any
+            const orderedSource = builder.collectionSources.find(
+              (source: { alias: string }) => source.alias === `employees`,
+            )
+            expect(orderByInfo.sourceId).toBe(orderedSource.sourceId)
           } finally {
             CollectionConfigBuilder.prototype.getConfig = originalGetConfig
           }
@@ -1936,13 +1940,50 @@ function createOrderByTests(autoIndex: `off` | `eager`): void {
             const orderByInfo = Object.values(
               builder.optimizableOrderByCollections,
             )[0] as any
+            const orderedSource = builder.collectionSources.find(
+              (source: { alias: string }) => source.alias === `departments`,
+            )
             expect(orderByInfo).toBeDefined()
             expect(orderByInfo.alias).toBe(`departments`)
+            expect(orderByInfo.sourceId).toBe(orderedSource.sourceId)
             expect(orderByInfo.offset).toBe(0)
             expect(orderByInfo.limit).toBe(5)
           } finally {
             CollectionConfigBuilder.prototype.getConfig = originalGetConfig
           }
+        },
+      )
+
+      itWhenAutoIndex(
+        `loads an ordered self-join through the ordered alias`,
+        async () => {
+          const collection = createLiveQueryCollection((q) =>
+            q
+              .from({ employee: employeesCollection })
+              .join({ manager: employeesCollection }, ({ employee, manager }) =>
+                eq(employee.id, manager.id),
+              )
+              .orderBy(({ manager }) => manager.name, `asc`)
+              .limit(3)
+              .select(({ employee, manager }) => ({
+                id: employee.id,
+                employeeName: employee.name,
+                managerName: manager.name,
+              })),
+          )
+
+          await collection.preload()
+
+          expect(
+            Array.from(collection.values()).map((row) => [
+              row.employeeName,
+              row.managerName,
+            ]),
+          ).toEqual([
+            [`Alice`, `Alice`],
+            [`Bob`, `Bob`],
+            [`Charlie`, `Charlie`],
+          ])
         },
       )
 
@@ -1978,9 +2019,13 @@ function createOrderByTests(autoIndex: `off` | `eager`): void {
 
             const builder = (collection as any).config.__builder
             expect(builder).toBeTruthy()
-            expect(
-              Object.keys(builder.optimizableOrderByCollections),
-            ).toContain(employeesCollection.id)
+            const orderByInfo = Object.values(
+              builder.optimizableOrderByCollections,
+            )[0] as any
+            const orderedSource = builder.collectionSources.find(
+              (source: { alias: string }) => source.alias === `employees`,
+            )
+            expect(orderByInfo.sourceId).toBe(orderedSource.sourceId)
           } finally {
             CollectionConfigBuilder.prototype.getConfig = originalGetConfig
           }
