@@ -2407,14 +2407,12 @@ describe(`createLiveQueryCollection`, () => {
         commentsOptions.utils.commit()
         await new Promise((resolve) => setTimeout(resolve, 10))
       } catch (error: any) {
-        expect(error.message).toContain(`already exists in the collection`)
-        expect(error.message).toContain(`custom getKey`)
-        expect(error.message).toContain(`joined queries`)
-        expect(error.message).toContain(`composite key`)
+        expect(error.message).toContain(`public key "user1"`)
+        expect(error.message).toContain(`not congruent`)
         return
       }
 
-      throw new Error(`Expected DuplicateKeySyncError to be thrown`)
+      throw new Error(`Expected duplicate public-key invariant to be thrown`)
     })
   })
 

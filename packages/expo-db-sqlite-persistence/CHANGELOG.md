@@ -1,5 +1,12 @@
 # @tanstack/expo-db-sqlite-persistence
 
+## 0.2.14
+
+### Patch Changes
+
+- Updated dependencies []:
+  - @tanstack/db-sqlite-persistence-core@0.2.14
+
 ## 0.2.13
 
 ### Patch Changes

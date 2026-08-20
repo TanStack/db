@@ -1,6 +1,6 @@
 {
   "name": "@tanstack/trailbase-db-collection",
-  "version": "0.1.99",
+  "version": "0.1.100",
   "description": "TrailBase collection for TanStack DB",
   "author": "Sebastian Jeltsch",
   "license": "MIT",

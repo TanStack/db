@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from 'vitest'
 import { createCollection } from '../src/collection/index.js'
+import { BTreeIndex } from '../src/indexes/btree-index.js'
 import { Query, createEffect, createTransaction, eq } from '../src/index.js'
 import {
   mockSyncCollectionOptions,
@@ -1434,9 +1435,120 @@ describe(`createEffect`, () => {
 
       await effect.dispose()
     })
+
+    it(`loads each ordered sibling subquery through its own source`, async () => {
+      const left = createCollection(
+        mockSyncCollectionOptions<User>({
+          id: `ordered-sibling-left`,
+          getKey: (user) => user.id,
+          initialData: [
+            { id: 1, name: `Alice`, active: false },
+            { id: 2, name: `Bob`, active: true },
+          ],
+          autoIndex: `eager`,
+        }),
+      )
+      const right = createCollection(
+        mockSyncCollectionOptions<User>({
+          id: `ordered-sibling-right`,
+          getKey: (user) => user.id,
+          initialData: [
+            { id: 1, name: `Amy`, active: false },
+            { id: 2, name: `Bea`, active: true },
+          ],
+          autoIndex: `eager`,
+        }),
+      )
+      type JoinedActiveUser = {
+        id: number
+        leftName: string
+        rightName: string
+      }
+      const events: Array<DeltaEvent<JoinedActiveUser, number>> = []
+      const effect = createEffect<JoinedActiveUser, number>({
+        query: (q) => {
+          const leftTop = q
+            .from({ item: left })
+            .where(({ item }) => eq(item.active, true))
+            .orderBy(({ item }) => item.name, `asc`)
+            .limit(1)
+          const rightTop = q
+            .from({ item: right })
+            .where(({ item }) => eq(item.active, true))
+            .orderBy(({ item }) => item.name, `asc`)
+            .limit(1)
+
+          return q
+            .from({ left: leftTop })
+            .join({ right: rightTop }, ({ left: leftRow, right: rightRow }) =>
+              eq(leftRow.id, rightRow.id),
+            )
+            .select(({ left: leftRow, right: rightRow }) => ({
+              id: leftRow.id,
+              leftName: leftRow.name,
+              rightName: rightRow.name,
+            }))
+        },
+        onEnter: (event) => {
+          events.push(event)
+        },
+      })
+
+      try {
+        await flushPromises()
+        expect(events.map(({ value }) => value)).toEqual([
+          { id: 2, leftName: `Bob`, rightName: `Bea` },
+        ])
+      } finally {
+        await effect.dispose()
+        await Promise.all([left.cleanup(), right.cleanup()])
+      }
+    })
   })
 
   describe(`source error handling`, () => {
+    it(`reports a rejected lazy subset load and disposes the effect`, async () => {
+      const users = createUsersCollection([sampleUsers[0]!])
+      const issues = createCollection<Issue>({
+        id: `effect-rejected-lazy-issues`,
+        getKey: (issue) => issue.id,
+        syncMode: `on-demand`,
+        autoIndex: `eager`,
+        defaultIndexType: BTreeIndex,
+        sync: {
+          sync: () => ({
+            loadSubset: () => Promise.reject(new Error(`lazy load failed`)),
+          }),
+        },
+      })
+      const sourceErrors: Array<Error> = []
+      const effect = createEffect({
+        query: (q) =>
+          q
+            .from({ user: users })
+            .leftJoin({ issue: issues }, ({ user, issue }) =>
+              eq(user.id, issue.userId),
+            )
+            .select(({ user, issue }) => ({
+              id: user.id,
+              issueId: issue.id,
+            })),
+        onBatch: () => {},
+        onSourceError: (error) => sourceErrors.push(error),
+      })
+
+      try {
+        await flushPromises()
+        expect(sourceErrors).toEqual([
+          expect.objectContaining({ message: `lazy load failed` }),
+        ])
+        expect(effect.disposed).toBe(true)
+      } finally {
+        await effect.dispose()
+        await Promise.all([users.cleanup(), issues.cleanup()])
+      }
+    })
+
     it(`should auto-dispose when source collection is cleaned up`, async () => {
       const users = createUsersCollection()
       const events: Array<DeltaEvent<User, number>> = []

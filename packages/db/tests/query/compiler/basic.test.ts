@@ -1,6 +1,7 @@
 import { describe, expect, test } from 'vitest'
 import { D2, MultiSet, output } from '@tanstack/db-ivm'
 import { compileQuery } from '../../../src/query/compiler/index.js'
+import { materializeCompilation } from '../../../src/query/live/materialized-pipeline.js'
 import { CollectionRef, Func, PropRef, Value } from '../../../src/query/ir.js'
 import type { QueryIR } from '../../../src/query/ir.js'
 import type { CollectionImpl } from '../../../src/collection/index.js'
@@ -30,6 +31,33 @@ const sampleUsers: Array<User> = [
 
 describe(`Query2 Compiler`, () => {
   describe(`Basic Compilation`, () => {
+    test(`queries without includes keep their compiled pipeline`, () => {
+      const usersCollection = { id: `users` } as CollectionImpl
+      const query: QueryIR = {
+        from: new CollectionRef(usersCollection, `users`),
+      }
+      const graph = new D2()
+      const input = graph.newInput<[number, User]>()
+      const compilation = compileQuery(
+        query,
+        { users: input },
+        { users: usersCollection },
+        {},
+        {},
+        new Set(),
+        {},
+        () => {},
+      )
+
+      const materialized = materializeCompilation(
+        compilation,
+        (user: User) => user.id,
+      )
+
+      expect(materialized.pipeline).toBe(compilation.pipeline)
+      expect(materialized.facades).toEqual([])
+    })
+
     test(`compiles a simple FROM query`, () => {
       // Create a mock collection
       const usersCollection = {

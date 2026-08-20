@@ -154,6 +154,7 @@ describe(`loadSubset join-key deduplication`, () => {
       where: expect.anything(),
       orderBy: undefined,
       limit: undefined,
+      signal: expect.any(AbortSignal),
       subscription: expect.anything(),
     })
     expect(load.where).toBeDefined()
