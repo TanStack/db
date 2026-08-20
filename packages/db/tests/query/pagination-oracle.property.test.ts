@@ -39,7 +39,7 @@ type MultiOrderScenario = {
   limit: number
 }
 
-type Window = {
+type PaginationWindow = {
   offset: number
   limit: number
 }
@@ -47,18 +47,18 @@ type Window = {
 type PaginationScenario = {
   ranks: ReadonlyArray<number>
   direction: `asc` | `desc`
-  windows: ReadonlyArray<Window>
+  windows: ReadonlyArray<PaginationWindow>
 }
 
 type PaginationAction =
-  | ({ type: `window` } & Window)
+  | ({ type: `window` } & PaginationWindow)
   | { type: `put`; id: number; rank: number }
   | { type: `delete`; id: number }
 
 type PaginationStateScenario = {
   ranks: ReadonlyArray<number>
   direction: `asc` | `desc`
-  initialWindow: Window
+  initialWindow: PaginationWindow
   actions: ReadonlyArray<PaginationAction>
 }
 
@@ -110,7 +110,7 @@ const scenarioArbitrary: fc.Arbitrary<PaginationScenario> = fc.record({
   ),
 })
 
-const windowArbitrary: fc.Arbitrary<Window> = fc.record({
+const windowArbitrary: fc.Arbitrary<PaginationWindow> = fc.record({
   offset: fc.integer({ min: 0, max: 12 }),
   limit: fc.integer({ min: 0, max: 8 }),
 })
@@ -292,7 +292,7 @@ let collectionSequence = 0
 function referenceWindow(
   rows: ReadonlyArray<PageRow>,
   direction: `asc` | `desc`,
-  window: Window,
+  window: PaginationWindow,
 ): Array<number> {
   return referenceWindowRows(rows, direction, window).map(({ id }) => id)
 }
@@ -300,7 +300,7 @@ function referenceWindow(
 function referenceWindowRows(
   rows: ReadonlyArray<PageRow>,
   direction: `asc` | `desc`,
-  window: Window,
+  window: PaginationWindow,
 ): Array<PageRow> {
   const directionFactor = direction === `asc` ? 1 : -1
   return [...rows]
@@ -649,7 +649,7 @@ async function runPaginationStateScenario(
 
 type ReferencePaginationState = {
   rows: Map<number, PageRow>
-  window: Window
+  window: PaginationWindow
 }
 
 function replayReferenceState(
@@ -1759,6 +1759,22 @@ async function expectInflightRequestFillsNewWindow(): Promise<void> {
 }
 
 describe(`pagination recomputation oracle`, () => {
+  it(`materializes an empty source window`, async () => {
+    await runPaginationScenario({
+      ranks: [],
+      direction: `asc`,
+      windows: [{ offset: 0, limit: 3 }],
+    })
+  })
+
+  it(`materializes an offset past the final row`, async () => {
+    await runPaginationScenario({
+      ranks: [0, 1],
+      direction: `asc`,
+      windows: [{ offset: 4, limit: 2 }],
+    })
+  })
+
   it(`materializes an initially empty zero-limit window`, async () => {
     await runPaginationScenario({
       ranks: [0, 1, 2],

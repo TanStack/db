@@ -150,7 +150,6 @@ async function expectFinalOwnerCleanupAbortsQuery(): Promise<void> {
     expect(capturedSignal?.aborted).toBe(false)
 
     await live.cleanup()
-    await Promise.resolve()
     expect(capturedSignal?.aborted).toBe(true)
   } finally {
     await live.cleanup()

@@ -357,6 +357,10 @@ function isSubset(left: ReadonlySet<number>, right: ReadonlySet<number>) {
   return [...left].every((value) => right.has(value))
 }
 
+function unionSets(sets: ReadonlyArray<ReadonlySet<number>>): Set<number> {
+  return new Set(sets.flatMap((set) => [...set]))
+}
+
 function expectSetEqual(
   actual: ReadonlySet<number>,
   expected: ReadonlySet<number>,
@@ -471,7 +475,9 @@ function isKnownUnionCompositionRefetch(
   // current implementation can refetch any later covered demand, including a
   // strict subset of one original region. Fixed traces below make this waiver
   // expire when that product defect is repaired.
-  if (error.loadedRegions.length > 1) return true
+  if (error.loadedRegions.length > 1) {
+    return isSubset(error.requested, unionSets(error.loadedRegions))
+  }
 
   const usesCompoundPredicate = [
     error.requestedFingerprint,
@@ -642,6 +648,14 @@ function isKnownCoveredWindowRefetch(
     return true
   }
   if (error.loadedRegions.length > 1) {
+    if (
+      !isSubset(
+        error.requestedPositions,
+        unionSets(error.loadedRegions.map(({ positions }) => positions)),
+      )
+    ) {
+      return false
+    }
     const coveredByOneRegion = error.loadedRegions.some(({ positions }) =>
       isSubset(error.requestedPositions, positions),
     )
@@ -1028,8 +1042,8 @@ async function expectPersistingLoadIsApplied(persisting: boolean) {
       persistence.resolve()
       await transaction.isPersisted.promise
     }
-    live.cleanup()
-    source.cleanup()
+    await live.cleanup()
+    await source.cleanup()
   }
 }
 
@@ -1086,8 +1100,8 @@ async function expectDerivedSyncDuringOptimisticMutation(): Promise<void> {
   } finally {
     persistence.resolve()
     await transaction.isPersisted.promise
-    derived.cleanup()
-    source.cleanup()
+    await derived.cleanup()
+    await source.cleanup()
   }
 }
 
@@ -1189,7 +1203,68 @@ async function runRejectedWaiterScenarioWithKnownFailure(
   }
 }
 
+function expectExactCountFailure(
+  count: () => number,
+  actual: number,
+  expected: number,
+): () => Promise<void> {
+  return expectAssertionFailure(
+    () =>
+      Promise.resolve().then(() => {
+        try {
+          expect(count()).toBe(expected)
+        } catch (error) {
+          throw new TraceAssertionError(0, error)
+        }
+      }),
+    {
+      checkpoint: 0,
+      classify: ({ actual: received, expected: wanted }) =>
+        received === actual && wanted === expected,
+    },
+  )
+}
+
 describe(`loadSubset coverage oracle`, () => {
+  it(`rejects uncovered demand from the union-composition classifier`, () => {
+    expect(
+      isKnownUnionCompositionRefetch(
+        new CoveredDemandRefetchedError(
+          2,
+          new Set([3]),
+          [new Set([1]), new Set([2])],
+          JSON.stringify({ kind: `eq`, value: 3 }),
+          [
+            JSON.stringify({ kind: `eq`, value: 1 }),
+            JSON.stringify({ kind: `eq`, value: 2 }),
+          ],
+        ),
+      ),
+    ).toBe(false)
+  })
+
+  it(`rejects an uncovered window from the union classifier`, () => {
+    const request: WindowRequest = {
+      direction: `asc`,
+      offset: 2,
+      limit: 1,
+    }
+    expect(
+      isKnownCoveredWindowRefetch(
+        new CoveredWindowRefetchedError(2, request, new Set([2]), [
+          {
+            request: { direction: `asc`, offset: 0, limit: 1 },
+            positions: new Set([0]),
+          },
+          {
+            request: { direction: `asc`, offset: 1, limit: 1 },
+            positions: new Set([1]),
+          },
+        ]),
+      ),
+    ).toBe(false)
+  })
+
   it(`keeps empty predicates out of the distinct-window corpus`, () => {
     expect(
       isDistinctNonEmptyWindowWherePair([
@@ -1201,45 +1276,36 @@ describe(`loadSubset coverage oracle`, () => {
 
   it(
     `discovered trace: an empty predicate issues no transport work`,
-    expectAssertionFailure(
-      () =>
-        Promise.resolve().then(() => {
-          expect(countLoads([{ kind: `in`, values: [] }])).toBe(0)
-        }),
-      { message: /expected 1 to be/ },
+    expectExactCountFailure(
+      () => countLoads([{ kind: `in`, values: [] }]),
+      1,
+      0,
     ),
   )
 
   it(
     `discovered trace: an empty ordered window issues no transport work`,
-    expectAssertionFailure(
-      () =>
-        Promise.resolve().then(() => {
-          expect(
-            countWindowLoads([{ direction: `asc`, offset: 0, limit: 0 }]),
-          ).toBe(0)
-        }),
-      { message: /expected 1 to be/ },
+    expectExactCountFailure(
+      () => countWindowLoads([{ direction: `asc`, offset: 0, limit: 0 }]),
+      1,
+      0,
     ),
   )
 
   it(
     `discovered trace: an empty filtered window issues no transport work`,
-    expectAssertionFailure(
+    expectExactCountFailure(
       () =>
-        Promise.resolve().then(() => {
-          expect(
-            countWindowLoads([
-              {
-                where: { kind: `in`, values: [] },
-                direction: `asc`,
-                offset: 0,
-                limit: 1,
-              },
-            ]),
-          ).toBe(0)
-        }),
-      { message: /expected 1 to be/ },
+        countWindowLoads([
+          {
+            where: { kind: `in`, values: [] },
+            direction: `asc`,
+            offset: 0,
+            limit: 1,
+          },
+        ]),
+      1,
+      0,
     ),
   )
 
