@@ -81,6 +81,8 @@ describe(`Sync Streams`, () => {
 
     const onLoadSubsetMock = vi.fn()
     const onUnloadSubsetMock = vi.fn()
+    const unloadedRequests: Array<number> = []
+    let nextRequest = 0
 
     const collection = createCollection(
       powerSyncCollectionOptions({
@@ -89,9 +91,12 @@ describe(`Sync Streams`, () => {
         syncMode: `on-demand`,
         onLoadSubset: () => {
           onLoadSubsetMock()
+          nextRequest += 1
+          const request = nextRequest
 
           return () => {
             onUnloadSubsetMock()
+            unloadedRequests.push(request)
           }
         },
       }),
@@ -158,6 +163,7 @@ describe(`Sync Streams`, () => {
     await vi.waitFor(
       () => {
         expect(onUnloadSubsetMock).toHaveBeenCalledTimes(1)
+        expect(unloadedRequests).toEqual([1])
       },
       { timeout: 2000 },
     )
@@ -168,8 +174,51 @@ describe(`Sync Streams`, () => {
     await vi.waitFor(
       () => {
         expect(onUnloadSubsetMock).toHaveBeenCalledTimes(2)
+        expect(unloadedRequests).toEqual([1, 2])
       },
       { timeout: 2000 },
     )
+  })
+
+  it(`disposes a subset hook that resolves after collection cleanup`, async () => {
+    const db = await createDatabase()
+    await createTestProducts(db)
+    let resolveHook!: (cleanup: () => void) => void
+    const hook = new Promise<() => void>((resolve) => {
+      resolveHook = resolve
+    })
+    const cleanupHook = vi.fn()
+
+    const collection = createCollection(
+      powerSyncCollectionOptions({
+        database: db,
+        table: APP_SCHEMA.props.products,
+        syncMode: `on-demand`,
+        onLoadSubset: () => hook,
+      }),
+    )
+    await collection.stateWhenReady()
+    const query = createLiveQueryCollection({
+      query: (q) =>
+        q
+          .from({ product: collection })
+          .where(({ product }) => eq(product.category, `electronics`))
+          .select(({ product }) => ({
+            id: product.id,
+            name: product.name,
+            price: product.price,
+            category: product.category,
+          })),
+    })
+    const preload = query.preload()
+    void preload.catch(() => {})
+
+    await vi.waitFor(() => expect(resolveHook).toBeTypeOf(`function`))
+    const collectionCleanup = collection.cleanup()
+    resolveHook(cleanupHook)
+    await collectionCleanup
+
+    await vi.waitFor(() => expect(cleanupHook).toHaveBeenCalledOnce())
+    await query.cleanup()
   })
 })

@@ -886,12 +886,19 @@ export function queryCollectionOptions(
     let syncStarted = false
     let startupRetentionSettled = false
     const retainedQueriesPendingRevalidation = new Set<string>()
+    const pendingResultApplications = new Map<string, Promise<void>>()
+    const resultApplicationTokens = new Map<string, object>()
     const effectivePersistedGcTimes = new Map<string, number>()
     const persistedRetentionTimers = new Map<
       string,
       ReturnType<typeof setTimeout>
     >()
     let persistedRetentionMaintenance = Promise.resolve()
+
+    const invalidatePendingResultApplication = (hashedQueryKey: string) => {
+      pendingResultApplications.delete(hashedQueryKey)
+      resultApplicationTokens.delete(hashedQueryKey)
+    }
 
     const getRowMetadata = (rowKey: string | number) => {
       return (metadata?.row.get(rowKey) ??
@@ -1308,8 +1315,7 @@ export function queryCollectionOptions(
         const currentResult = observer.getCurrentResult()
 
         if (currentResult.isSuccess) {
-          // Data is already available, return true synchronously
-          return true
+          return pendingResultApplications.get(hashedQueryKey) ?? true
         } else if (currentResult.isError) {
           // Error already occurred, reject immediately
           return Promise.reject(currentResult.error)
@@ -1320,7 +1326,9 @@ export function queryCollectionOptions(
           // cycles (e.g., when a live query is cleaned up and recreated).
           const cachedData = queryClient.getQueryData(key)
           if (cachedData !== undefined) {
-            return true
+            return waitForQueryReady(observer, hashedQueryKey).then(() =>
+              pendingResultApplications.get(hashedQueryKey),
+            )
           }
 
           // Query is still loading, wait for the first result
@@ -1391,7 +1399,7 @@ export function queryCollectionOptions(
         if (syncStarted || collection.subscriberCount > 0) {
           subscribeToQuery(localObserver, hashedQueryKey)
         }
-        return true
+        return pendingResultApplications.get(hashedQueryKey) ?? true
       }
 
       // Create a promise that resolves when the query result is first available
@@ -1515,11 +1523,15 @@ export function queryCollectionOptions(
     const reconcileSuccessfulResult = async (
       queryKey: QueryKey,
       result: QueryObserverResult<any, any>,
+      applicationToken: object,
     ) => {
       const hashedQueryKey = hashKey(queryKey)
       const persistedBaseline =
         await loadPersistedBaselineForQuery(hashedQueryKey)
-      if (collection.status === `cleaned-up`) {
+      if (
+        collection.status === `cleaned-up` ||
+        resultApplicationTokens.get(hashedQueryKey) !== applicationToken
+      ) {
         return
       }
       applySuccessfulResult(queryKey, result, persistedBaseline)
@@ -1564,11 +1576,25 @@ export function queryCollectionOptions(
               return
             }
 
-            void reconcileSuccessfulResult(queryKey, result).catch((error) => {
+            const applicationToken = {}
+            resultApplicationTokens.set(hashedQueryKey, applicationToken)
+            const application = reconcileSuccessfulResult(
+              queryKey,
+              result,
+              applicationToken,
+            ).catch((error) => {
               console.error(
                 `[QueryCollection] Error reconciling query ${String(queryKey)}:`,
                 error,
               )
+            })
+            pendingResultApplications.set(hashedQueryKey, application)
+            void application.finally(() => {
+              if (
+                pendingResultApplications.get(hashedQueryKey) === application
+              ) {
+                pendingResultApplications.delete(hashedQueryKey)
+              }
             })
           } else {
             applySuccessfulResult(queryKey, result)
@@ -1693,6 +1719,7 @@ export function queryCollectionOptions(
       unsubscribePendingReadyListeners(hashedQueryKey)
       cancelPersistedRetentionExpiry(hashedQueryKey)
       retainedQueriesPendingRevalidation.delete(hashedQueryKey)
+      invalidatePendingResultApplication(hashedQueryKey)
 
       const nextOwnersByRow = removeQueryOwnership(hashedQueryKey)
       const rowsToDelete: Array<any> = []
@@ -1780,6 +1807,7 @@ export function queryCollectionOptions(
         metadata &&
         persistedMetadata?.row.scanPersisted
       ) {
+        invalidatePendingResultApplication(hashedQueryKey)
         begin()
         metadata.collection.set(
           `${QUERY_COLLECTION_GC_PREFIX}${hashedQueryKey}`,

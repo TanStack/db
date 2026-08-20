@@ -1,4 +1,10 @@
-import { filter, join as joinOperator, map, tap } from '@tanstack/db-ivm'
+import {
+  filter,
+  join as joinOperator,
+  map,
+  serializeValue,
+  tap,
+} from '@tanstack/db-ivm'
 import {
   CollectionInputNotFoundError,
   InvalidJoinCondition,
@@ -7,14 +13,11 @@ import {
   InvalidJoinConditionSameSourceError,
   InvalidJoinConditionSourceMismatchError,
   JoinCollectionNotFoundError,
-  SubscriptionNotFoundError,
   UnsupportedJoinSourceTypeError,
   UnsupportedJoinTypeError,
 } from '../../errors.js'
 import { normalizeValue } from '../../utils/comparison.js'
 import { ensureIndexForField } from '../../indexes/auto-index.js'
-import { PropRef } from '../ir.js'
-import { inArray } from '../builder/functions.js'
 import { compileExpression } from './evaluators.js'
 import { getLazyLoadTargets } from './lazy-targets.js'
 import type { CompileQueryFn } from './index.js'
@@ -36,13 +39,35 @@ import type {
 import type { QueryCache, QueryMapping, WindowOptions } from './types.js'
 import type { CollectionSubscription } from '../../collection/subscription.js'
 
-/** Function type for loading specific keys into a lazy collection */
-export type LoadKeysFn = (key: Set<string | number>) => void
+export type LazyDemandPlan = {
+  id: string
+  path: Array<string>
+  collectionId: string
+  initialKeys: Set<unknown>
+}
 
 /** Callbacks for managing lazy-loaded collections in optimized joins */
 export type LazyCollectionCallbacks = {
-  loadKeys: LoadKeysFn
-  loadInitialState: () => void
+  plans?: Array<LazyDemandPlan>
+  setDemand?: (plan: LazyDemandPlan, keys: Set<unknown>) => void
+}
+
+let nextLazyDemandPlanId = 0
+
+export function registerLazyDemandPlan(
+  callbacks: Record<string, LazyCollectionCallbacks>,
+  target: { sourceId: string; path: Array<string>; collection: Collection },
+  initialKeys: Set<unknown> = new Set(),
+): LazyDemandPlan {
+  const plan: LazyDemandPlan = {
+    id: `lazy-demand-${++nextLazyDemandPlanId}`,
+    path: target.path,
+    collectionId: target.collection.id,
+    initialKeys: new Set(initialKeys),
+  }
+  const state = (callbacks[target.sourceId] ??= {})
+  ;(state.plans ??= []).push(plan)
+  return plan
 }
 
 /**
@@ -69,6 +94,7 @@ export function processJoins(
   aliasToCollectionId: Record<string, string>,
   aliasRemapping: Record<string, string>,
   sourceWhereClauses: Map<string, BasicExpression<boolean>>,
+  mainSourceIsParentFiltered: boolean,
 ): NamespacedAndKeyedStream {
   let resultPipeline = pipeline
 
@@ -93,6 +119,7 @@ export function processJoins(
       aliasToCollectionId,
       aliasRemapping,
       sourceWhereClauses,
+      mainSourceIsParentFiltered,
     )
   }
 
@@ -123,6 +150,7 @@ function processJoin(
   aliasToCollectionId: Record<string, string>,
   aliasRemapping: Record<string, string>,
   sourceWhereClauses: Map<string, BasicExpression<boolean>>,
+  mainSourceIsParentFiltered: boolean,
 ): NamespacedAndKeyedStream {
   const isCollectionRef = joinClause.from.type === `collectionRef`
 
@@ -171,6 +199,7 @@ function processJoin(
     joinClause.type,
     mainCollection,
     joinedCollection,
+    mainSourceIsParentFiltered,
   )
 
   // Analyze which source each expression refers to and swap if necessary
@@ -258,8 +287,13 @@ function processJoin(
       // such that the liveQueryCollection can check it after compilation
       // to know which source aliases should load data lazily (not initially)
       for (const target of lazyTargets) {
-        lazySources.add(target.alias)
+        lazySources.add(target.sourceId)
       }
+
+      const demandPlans = lazyTargets.map((target) =>
+        registerLazyDemandPlan(callbacks, target),
+      )
+      const demandWeights = new Map<string, { key: unknown; weight: number }>()
 
       const activePipeline =
         activeSource === `main` ? mainPipeline : joinedPipeline
@@ -277,55 +311,26 @@ function processJoin(
         [key: unknown, [originalKey: string, namespacedRow: NamespacedRow]]
       > = activePipeline.pipe(
         tap((data) => {
-          // Deduplicate and filter null keys before requesting snapshot
-          const joinKeys = [
-            ...new Set(
-              data
-                .getInner()
-                .map(([[joinKey]]) => joinKey)
-                .filter((key) => key != null),
-            ),
-          ]
-
-          if (joinKeys.length === 0) {
-            return
+          for (const [[joinKey], weight] of data.getInner()) {
+            if (joinKey == null) continue
+            const encoded = serializeValue(joinKey)
+            const previous = demandWeights.get(encoded)
+            const nextWeight = (previous?.weight ?? 0) + weight
+            if (nextWeight === 0) {
+              demandWeights.delete(encoded)
+            } else {
+              demandWeights.set(encoded, { key: joinKey, weight: nextWeight })
+            }
           }
 
-          for (const target of lazyTargets) {
-            const lazySourceSubscription = subscriptions[target.alias]
-
-            if (!lazySourceSubscription) {
-              throw new SubscriptionNotFoundError(
-                target.alias,
-                lazyAlias,
-                target.collection.id,
-                Object.keys(subscriptions),
-              )
-            }
-
-            if (lazySourceSubscription.hasLoadedInitialState()) {
-              // Entire state was already loaded because we deoptimized the join
-              continue
-            }
-
-            const lazyJoinRef = new PropRef(target.path)
-            const loaded = lazySourceSubscription.requestSnapshot({
-              where: inArray(lazyJoinRef, joinKeys),
-              optimizedOnly: true,
-            })
-
-            if (!loaded) {
-              // Snapshot wasn't sent because it could not be loaded from the indexes
-              const collectionId = target.collection.id
-              const fieldPath = target.path.join(`.`)
-              console.warn(
-                `[TanStack DB]${collectionId ? ` [${collectionId}]` : ``} Join requires an index on "${fieldPath}" for efficient loading. ` +
-                  `Falling back to loading all data. ` +
-                  `Consider creating an index on the collection with collection.createIndex((row) => row.${fieldPath}) ` +
-                  `or enable auto-indexing with autoIndex: 'eager' and a defaultIndexType.`,
-              )
-              lazySourceSubscription.requestSnapshot()
-            }
+          const keys = new Set(
+            [...demandWeights.values()]
+              .filter(({ weight }) => weight > 0)
+              .map(({ key }) => key),
+          )
+          for (let index = 0; index < lazyTargets.length; index++) {
+            const target = lazyTargets[index]!
+            callbacks[target.sourceId]?.setDemand?.(demandPlans[index]!, keys)
           }
         }),
       )
@@ -470,7 +475,7 @@ function processJoinSource(
 ): { alias: string; input: KeyedStream; collectionId: string } {
   switch (from.type) {
     case `collectionRef`: {
-      const input = allInputs[from.alias]
+      const input = allInputs[from.sourceId] ?? allInputs[from.alias]
       if (!input) {
         throw new CollectionInputNotFoundError(
           from.alias,
@@ -663,6 +668,7 @@ function getActiveAndLazySources(
   joinType: JoinClause[`type`],
   leftCollection: Collection,
   rightCollection: Collection,
+  mainSourceIsParentFiltered: boolean,
 ):
   | { activeSource: `main` | `joined`; lazySource: Collection }
   | { activeSource: undefined; lazySource: undefined } {
@@ -675,6 +681,13 @@ function getActiveAndLazySources(
     case `right`:
       return { activeSource: `joined`, lazySource: leftCollection }
     case `inner`:
+      // A correlated include has already reduced the main relation to active
+      // parent routes. Keep that relation active and load the joined side from
+      // its keys; reversing the join would create an independent demand plan
+      // that widens the correlated source back to a union of constraints.
+      if (mainSourceIsParentFiltered) {
+        return { activeSource: `main`, lazySource: rightCollection }
+      }
       // The smallest collection should be the active collection
       // and the biggest collection should be lazy
       return leftCollection.size < rightCollection.size
