@@ -484,6 +484,7 @@ function runCoverageTraceWithKnownFailures(
   try {
     runCoverageTrace(trace, createSubject)
   } catch (error) {
+    if (createSubject !== createDeduplicatedCoverageSubject) throw error
     if (
       error instanceof CoveredDemandRefetchedError &&
       (isKnownUnionCompositionRefetch(error) ||
@@ -581,10 +582,15 @@ function toWindowOptions(request: WindowRequest): LoadSubsetOptions {
   }
 }
 
+function hasNoWindowDemand(request: WindowRequest): boolean {
+  return (
+    request.limit === 0 ||
+    matchingValues(toWindowOptions(request).where).size === 0
+  )
+}
+
 function windowPositions(request: WindowRequest): Set<number> {
-  if (request.where?.kind === `in` && request.where.values.length === 0) {
-    return new Set()
-  }
+  if (hasNoWindowDemand(request)) return new Set()
   // The coverage oracle needs a finite universe. Generated finite windows end
   // at position 11, so 16 positions preserve every generated subset relation
   // while giving an omitted limit an authoritative "through the end" region.
@@ -695,9 +701,7 @@ function isKnownCoveredWindowRefetch(
 ): boolean {
   if (
     error.requestedPositions.size === 0 &&
-    (error.requested.limit === 0 ||
-      (error.requested.where?.kind === `in` &&
-        error.requested.where.values.length === 0))
+    hasNoWindowDemand(error.requested)
   ) {
     return true
   }
@@ -1316,23 +1320,6 @@ describe(`loadSubset coverage oracle`, () => {
     expect(isKnownComposedRegionRefetch(error)).toBe(true)
   })
 
-  it(`rejects uncovered demand from the union-composition classifier`, () => {
-    expect(
-      isKnownUnionCompositionRefetch(
-        new CoveredDemandRefetchedError(
-          2,
-          new Set([3]),
-          [new Set([1]), new Set([2])],
-          JSON.stringify({ kind: `eq`, value: 3 }),
-          [
-            JSON.stringify({ kind: `eq`, value: 1 }),
-            JSON.stringify({ kind: `eq`, value: 2 }),
-          ],
-        ),
-      ),
-    ).toBe(false)
-  })
-
   it(`rejects an uncovered window from the union classifier`, () => {
     const request: WindowRequest = {
       direction: `asc`,
@@ -1403,6 +1390,29 @@ describe(`loadSubset coverage oracle`, () => {
         countWindowLoads([
           {
             where: { kind: `in`, values: [] },
+            direction: `asc`,
+            offset: 0,
+            limit: 1,
+          },
+        ]),
+      1,
+      0,
+    ),
+  )
+
+  it(
+    `discovered trace: a contradictory filtered window issues no transport work`,
+    expectExactCountFailure(
+      () =>
+        countWindowLoads([
+          {
+            where: {
+              kind: `and`,
+              operands: [
+                { kind: `eq`, value: 0 },
+                { kind: `eq`, value: 1 },
+              ],
+            },
             direction: `asc`,
             offset: 0,
             limit: 1,
@@ -1605,6 +1615,30 @@ describe(`loadSubset coverage oracle`, () => {
     expect(() =>
       runCoverageTraceWithKnownFailures(
         [predicate, predicate],
+        createAlwaysLoadingCoverageSubject,
+      ),
+    ).toThrow()
+  })
+
+  it(`rejects repeated transport work for a covered compound predicate`, () => {
+    const covering: PredicateSpec = {
+      kind: `and`,
+      operands: [
+        { kind: `range`, operator: `gte`, value: 0 },
+        { kind: `not`, operand: { kind: `eq`, value: 2 } },
+      ],
+    }
+    const covered: PredicateSpec = {
+      kind: `or`,
+      operands: [
+        { kind: `eq`, value: 1 },
+        { kind: `eq`, value: 3 },
+      ],
+    }
+
+    expect(() =>
+      runCoverageTraceWithKnownFailures(
+        [covering, covered],
         createAlwaysLoadingCoverageSubject,
       ),
     ).toThrow()

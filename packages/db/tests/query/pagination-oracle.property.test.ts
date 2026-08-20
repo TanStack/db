@@ -420,7 +420,11 @@ async function runPaginationScenario(
 
   try {
     await live.preload()
-    for (const window of scenario.windows) {
+    expect(Array.from(live.values(), ({ id }) => id)).toEqual(
+      referenceWindow(rows, scenario.direction, initialWindow),
+    )
+
+    for (const window of scenario.windows.slice(1)) {
       const result = live.utils.setWindow(window)
       if (result instanceof Promise) await result
 
@@ -1081,8 +1085,15 @@ async function runOnDemandPaginationScenario(
   try {
     await live.preload()
     expect(loads.length).toBeGreaterThan(0)
+    try {
+      expect(Array.from(live.values(), ({ id }) => id)).toEqual(
+        referenceWindow(authoritativeRows, scenario.direction, initialWindow),
+      )
+    } catch (error) {
+      throw new TraceAssertionError(0, error)
+    }
 
-    for (const [index, window] of scenario.windows.entries()) {
+    for (const [index, window] of scenario.windows.slice(1).entries()) {
       const result = live.utils.setWindow(window)
       if (result instanceof Promise) await result
 
@@ -1091,7 +1102,7 @@ async function runOnDemandPaginationScenario(
           referenceWindow(authoritativeRows, scenario.direction, window),
         )
       } catch (error) {
-        throw new TraceAssertionError(index, error)
+        throw new TraceAssertionError(index + 1, error)
       }
     }
 
