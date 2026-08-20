@@ -11,7 +11,7 @@ title: localStorageCollectionOptions
 function localStorageCollectionOptions<T, TKey>(config): CollectionConfig<InferSchemaOutput<T>, TKey, T, LocalStorageCollectionUtils> & object;
 ```
 
-Defined in: [packages/db/src/local-storage.ts:317](https://github.com/TanStack/db/blob/main/packages/db/src/local-storage.ts#L317)
+Defined in: [packages/db/src/local-storage.ts:318](https://github.com/TanStack/db/blob/main/packages/db/src/local-storage.ts#L318)
 
 Creates localStorage collection options for use with a standard Collection
 
@@ -126,7 +126,7 @@ await tx.commit()
 function localStorageCollectionOptions<T, TKey>(config): CollectionConfig<T, TKey, never, LocalStorageCollectionUtils> & object;
 ```
 
-Defined in: [packages/db/src/local-storage.ts:337](https://github.com/TanStack/db/blob/main/packages/db/src/local-storage.ts#L337)
+Defined in: [packages/db/src/local-storage.ts:338](https://github.com/TanStack/db/blob/main/packages/db/src/local-storage.ts#L338)
 
 Creates localStorage collection options for use with a standard Collection
 

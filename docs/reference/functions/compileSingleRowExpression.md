@@ -9,7 +9,7 @@ title: compileSingleRowExpression
 function compileSingleRowExpression(expr): CompiledSingleRowExpression;
 ```
 
-Defined in: [packages/db/src/query/compiler/evaluators.ts:100](https://github.com/TanStack/db/blob/main/packages/db/src/query/compiler/evaluators.ts#L100)
+Defined in: [packages/db/src/query/compiler/evaluators.ts:101](https://github.com/TanStack/db/blob/main/packages/db/src/query/compiler/evaluators.ts#L101)
 
 Compiles a single-row expression into an optimized evaluator function.
 

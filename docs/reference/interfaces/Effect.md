@@ -5,7 +5,7 @@ title: Effect
 
 # Interface: Effect
 
-Defined in: [packages/db/src/query/effect.ts:134](https://github.com/TanStack/db/blob/main/packages/db/src/query/effect.ts#L134)
+Defined in: [packages/db/src/query/effect.ts:142](https://github.com/TanStack/db/blob/main/packages/db/src/query/effect.ts#L142)
 
 Handle returned by createEffect
 
@@ -17,7 +17,7 @@ Handle returned by createEffect
 dispose: () => Promise<void>;
 ```
 
-Defined in: [packages/db/src/query/effect.ts:136](https://github.com/TanStack/db/blob/main/packages/db/src/query/effect.ts#L136)
+Defined in: [packages/db/src/query/effect.ts:144](https://github.com/TanStack/db/blob/main/packages/db/src/query/effect.ts#L144)
 
 Dispose the effect. Returns a promise that resolves when in-flight handlers complete.
 
@@ -33,6 +33,6 @@ Dispose the effect. Returns a promise that resolves when in-flight handlers comp
 readonly disposed: boolean;
 ```
 
-Defined in: [packages/db/src/query/effect.ts:138](https://github.com/TanStack/db/blob/main/packages/db/src/query/effect.ts#L138)
+Defined in: [packages/db/src/query/effect.ts:146](https://github.com/TanStack/db/blob/main/packages/db/src/query/effect.ts#L146)
 
 Whether this effect has been disposed

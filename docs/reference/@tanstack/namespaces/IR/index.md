@@ -47,6 +47,7 @@ title: IR
 
 ## Functions
 
+- [collectCollectionSources](functions/collectCollectionSources.md)
 - [createResidualWhere](functions/createResidualWhere.md)
 - [followRef](functions/followRef.md)
 - [getHavingExpression](functions/getHavingExpression.md)
