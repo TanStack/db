@@ -1435,6 +1435,75 @@ describe(`createEffect`, () => {
 
       await effect.dispose()
     })
+
+    it(`loads each ordered sibling subquery through its own source`, async () => {
+      const left = createCollection(
+        mockSyncCollectionOptions<User>({
+          id: `ordered-sibling-left`,
+          getKey: (user) => user.id,
+          initialData: [
+            { id: 1, name: `Alice`, active: false },
+            { id: 2, name: `Bob`, active: true },
+          ],
+          autoIndex: `eager`,
+        }),
+      )
+      const right = createCollection(
+        mockSyncCollectionOptions<User>({
+          id: `ordered-sibling-right`,
+          getKey: (user) => user.id,
+          initialData: [
+            { id: 1, name: `Amy`, active: false },
+            { id: 2, name: `Bea`, active: true },
+          ],
+          autoIndex: `eager`,
+        }),
+      )
+      type JoinedActiveUser = {
+        id: number
+        leftName: string
+        rightName: string
+      }
+      const events: Array<DeltaEvent<JoinedActiveUser, number>> = []
+      const effect = createEffect<JoinedActiveUser, number>({
+        query: (q) => {
+          const leftTop = q
+            .from({ item: left })
+            .where(({ item }) => eq(item.active, true))
+            .orderBy(({ item }) => item.name, `asc`)
+            .limit(1)
+          const rightTop = q
+            .from({ item: right })
+            .where(({ item }) => eq(item.active, true))
+            .orderBy(({ item }) => item.name, `asc`)
+            .limit(1)
+
+          return q
+            .from({ left: leftTop })
+            .join({ right: rightTop }, ({ left: leftRow, right: rightRow }) =>
+              eq(leftRow.id, rightRow.id),
+            )
+            .select(({ left: leftRow, right: rightRow }) => ({
+              id: leftRow.id,
+              leftName: leftRow.name,
+              rightName: rightRow.name,
+            }))
+        },
+        onEnter: (event) => {
+          events.push(event)
+        },
+      })
+
+      try {
+        await flushPromises()
+        expect(events.map(({ value }) => value)).toEqual([
+          { id: 2, leftName: `Bob`, rightName: `Bea` },
+        ])
+      } finally {
+        await effect.dispose()
+        await Promise.all([left.cleanup(), right.cleanup()])
+      }
+    })
   })
 
   describe(`source error handling`, () => {

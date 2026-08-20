@@ -59,7 +59,6 @@ export class CollectionSubscriber<
   constructor(
     private sourceId: string,
     private alias: string,
-    private collectionId: string,
     private collection: Collection,
     private collectionConfigBuilder: CollectionConfigBuilder<TContext, TResult>,
   ) {}
@@ -456,10 +455,8 @@ export class CollectionSubscriber<
 
   private getOrderByInfo(): OrderByOptimizationInfo | undefined {
     const info =
-      this.collectionConfigBuilder.optimizableOrderByCollections[
-        this.collectionId
-      ]
-    if (info && info.alias === this.alias) {
+      this.collectionConfigBuilder.optimizableOrderByCollections[this.sourceId]
+    if (info?.sourceId === this.sourceId) {
       return info
     }
     return undefined

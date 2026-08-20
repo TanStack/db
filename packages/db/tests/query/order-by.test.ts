@@ -1885,9 +1885,13 @@ function createOrderByTests(autoIndex: `off` | `eager`): void {
 
             const builder = (collection as any).config.__builder
             expect(builder).toBeTruthy()
-            expect(
-              Object.keys(builder.optimizableOrderByCollections),
-            ).toContain(employeesCollection.id)
+            const orderByInfo = Object.values(
+              builder.optimizableOrderByCollections,
+            )[0] as any
+            const orderedSource = builder.collectionSources.find(
+              (source: { alias: string }) => source.alias === `employees`,
+            )
+            expect(orderByInfo.sourceId).toBe(orderedSource.sourceId)
           } finally {
             CollectionConfigBuilder.prototype.getConfig = originalGetConfig
           }
@@ -1936,8 +1940,12 @@ function createOrderByTests(autoIndex: `off` | `eager`): void {
             const orderByInfo = Object.values(
               builder.optimizableOrderByCollections,
             )[0] as any
+            const orderedSource = builder.collectionSources.find(
+              (source: { alias: string }) => source.alias === `departments`,
+            )
             expect(orderByInfo).toBeDefined()
             expect(orderByInfo.alias).toBe(`departments`)
+            expect(orderByInfo.sourceId).toBe(orderedSource.sourceId)
             expect(orderByInfo.offset).toBe(0)
             expect(orderByInfo.limit).toBe(5)
           } finally {
@@ -2011,9 +2019,13 @@ function createOrderByTests(autoIndex: `off` | `eager`): void {
 
             const builder = (collection as any).config.__builder
             expect(builder).toBeTruthy()
-            expect(
-              Object.keys(builder.optimizableOrderByCollections),
-            ).toContain(employeesCollection.id)
+            const orderByInfo = Object.values(
+              builder.optimizableOrderByCollections,
+            )[0] as any
+            const orderedSource = builder.collectionSources.find(
+              (source: { alias: string }) => source.alias === `employees`,
+            )
+            expect(orderByInfo.sourceId).toBe(orderedSource.sourceId)
           } finally {
             CollectionConfigBuilder.prototype.getConfig = originalGetConfig
           }

@@ -158,7 +158,7 @@ export interface CompilationResult {
  * @param subscriptions Mapping of source aliases to CollectionSubscription instances
  * @param callbacks Mapping of source aliases to lazy loading callbacks
  * @param lazySources Set of source identities that should load data lazily
- * @param optimizableOrderByCollections Map of collection IDs to order-by optimization info
+ * @param optimizableOrderByCollections Map of source IDs to order-by optimization info
  * @param cache Optional cache for compiled subqueries (used internally for recursion)
  * @param queryMapping Optional mapping from optimized queries to original queries
  * @returns A CompilationResult with the pipeline, source WHERE clauses, and alias metadata

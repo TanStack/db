@@ -165,7 +165,7 @@ export class CollectionConfigBuilder<
     { generation: number; settled: boolean }
   >()
   private readonly demandGenerations = new Map<string, number>()
-  // Map of collection IDs to optimizable ORDER BY state
+  // Map of lexical source IDs to optimizable ORDER BY state
   optimizableOrderByCollections: Record<string, OrderByOptimizationInfo> = {}
 
   constructor(
@@ -823,11 +823,17 @@ export class CollectionConfigBuilder<
         return
       }
 
-      const facadePublication = bucketFacades.flush()
-      const rootPublication = hasParentChanges
-        ? config.collection._deferPublication()
-        : undefined
+      let facadePublication:
+        | ReturnType<BucketFacadeAdapter[`flush`]>
+        | undefined
+      let rootPublication:
+        | ReturnType<Collection[`_deferPublication`]>
+        | undefined
       try {
+        facadePublication = bucketFacades.flush()
+        rootPublication = hasParentChanges
+          ? config.collection._deferPublication()
+          : undefined
         const changesToApply: Map<unknown, Changes<TResult>> = new Map(
           [...pendingChanges].map(([key, changes]) => {
             const resolved: Changes<TResult> = {
@@ -854,7 +860,7 @@ export class CollectionConfigBuilder<
       } catch (error) {
         pendingChanges = new Map()
         rootPublication?.discard()
-        facadePublication.rollback()
+        facadePublication?.rollback()
         throw error
       }
       pendingChanges = new Map()
@@ -1053,7 +1059,6 @@ export class CollectionConfigBuilder<
       const collectionSubscriber = new CollectionSubscriber(
         sourceId,
         alias,
-        collectionId,
         collection,
         this,
       )

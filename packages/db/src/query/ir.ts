@@ -390,7 +390,12 @@ export function followRef(
   query: QueryIR,
   ref: PropRef<any>,
   collection: Collection,
-): { collection: Collection; path: Array<string>; alias?: string } | void {
+): {
+  collection: Collection
+  path: Array<string>
+  alias?: string
+  sourceId?: string
+} | void {
   if (ref.path.length === 0) {
     return
   }
@@ -429,7 +434,12 @@ export function followRef(
       // so the field must be on the collection itself.
       // Report the alias too: when the ref crossed a join, this is the source
       // that actually holds the field (which may differ from the from clause).
-      return { collection: aliasRef.collection, path: rest, alias }
+      return {
+        collection: aliasRef.collection,
+        path: rest,
+        alias,
+        sourceId: aliasRef.sourceId,
+      }
     }
   }
 }

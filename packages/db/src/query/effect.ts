@@ -336,7 +336,6 @@ class EffectPipelineRunner<TRow extends object, TKey extends string | number> {
   private inputs: Record<string, RootStreamBuilder<unknown>> | undefined
   private pipeline: ResultStream | undefined
   private sourceWhereClauses: Map<string, BasicExpression<boolean>> | undefined
-  private compiledAliasToCollectionId: Record<string, string> = {}
 
   // Mutable objects passed to compileQuery by reference.
   // The join compiler captures these references and reads them later when
@@ -432,7 +431,6 @@ class EffectPipelineRunner<TRow extends object, TKey extends string | number> {
 
     this.pipeline = compilation.pipeline
     this.sourceWhereClauses = compilation.sourceWhereClauses
-    this.compiledAliasToCollectionId = compilation.aliasToCollectionId
 
     // Attach the output operator that accumulates changes
     this.pipeline.pipe(
@@ -505,7 +503,7 @@ class EffectPipelineRunner<TRow extends object, TKey extends string | number> {
       const isLazy = this.lazySources.has(sourceId)
 
       // Check if this alias has orderBy optimization (cursor-based loading)
-      const orderByInfo = this.getOrderByInfoForAlias(alias)
+      const orderByInfo = this.getOrderByInfoForSource(sourceId)
 
       // Build the change callback — for ordered aliases, split updates into
       // delete+insert and track the biggest sent value for cursor positioning.
@@ -618,11 +616,7 @@ class EffectPipelineRunner<TRow extends object, TKey extends string | number> {
     for (const [sourceId] of pendingBuffers) {
       const buffer = pendingBuffers.get(sourceId)!
       pendingBuffers.delete(sourceId)
-      const source = this.collectionSources.find(
-        (candidate) => candidate.sourceId === sourceId,
-      )!
-
-      const orderByInfo = this.getOrderByInfoForAlias(source.alias)
+      const orderByInfo = this.getOrderByInfoForSource(sourceId)
 
       // Drain all buffered batches. Since we deleted the alias from
       // pendingBuffers above, any new changes arriving during drain go
@@ -888,19 +882,12 @@ class EffectPipelineRunner<TRow extends object, TKey extends string | number> {
     }
   }
 
-  /**
-   * Get orderBy optimization info for a given alias.
-   * Returns undefined if no optimization exists for this alias.
-   */
-  private getOrderByInfoForAlias(
-    alias: string,
+  /** Get orderBy optimization info for one lexical source. */
+  private getOrderByInfoForSource(
+    sourceId: string,
   ): OrderByOptimizationInfo | undefined {
-    // optimizableOrderByCollections is keyed by collection ID
-    const collectionId = this.compiledAliasToCollectionId[alias]
-    if (!collectionId) return undefined
-
-    const info = this.optimizableOrderByCollections[collectionId]
-    if (info && info.alias === alias) {
+    const info = this.optimizableOrderByCollections[sourceId]
+    if (info?.sourceId === sourceId) {
       return info
     }
     return undefined
@@ -933,24 +920,24 @@ class EffectPipelineRunner<TRow extends object, TKey extends string | number> {
    * position (the biggest value sent so far).
    */
   private loadNextItems(orderByInfo: OrderByOptimizationInfo, n: number): void {
-    const { alias } = orderByInfo
+    const { alias, sourceId } = orderByInfo
     const source = this.collectionSources.find(
-      (candidate) => candidate.alias === alias,
+      (candidate) => candidate.sourceId === sourceId,
     )
     if (!source) return
-    const subscription = this.subscriptions[source.sourceId]
+    const subscription = this.subscriptions[sourceId]
     if (!subscription) return
 
     const cursor = computeOrderedLoadCursor(
       orderByInfo,
-      this.biggestSentValue.get(source.sourceId),
-      this.lastLoadRequestKey.get(source.sourceId),
+      this.biggestSentValue.get(sourceId),
+      this.lastLoadRequestKey.get(sourceId),
       alias,
       n,
     )
     if (!cursor) return // Duplicate request — skip
 
-    this.lastLoadRequestKey.set(source.sourceId, cursor.loadRequestKey)
+    this.lastLoadRequestKey.set(sourceId, cursor.loadRequestKey)
 
     subscription.requestLimitedSnapshot({
       orderBy: cursor.normalizedOrderBy,
