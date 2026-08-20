@@ -250,17 +250,21 @@ const windowTraceArbitrary = fc
 
 const distinctWindowWherePairArbitrary = fc
   .tuple(predicateSpecArbitrary, predicateSpecArbitrary)
-  .filter(
-    ([first, second]) =>
-      !isSubset(
-        matchingValues(toWhere(first)),
-        matchingValues(toWhere(second)),
-      ) ||
-      !isSubset(
-        matchingValues(toWhere(second)),
-        matchingValues(toWhere(first)),
-      ),
+  .filter(isDistinctNonEmptyWindowWherePair)
+
+function isDistinctNonEmptyWindowWherePair([first, second]: readonly [
+  PredicateSpec,
+  PredicateSpec,
+]): boolean {
+  const firstValues = matchingValues(toWhere(first))
+  const secondValues = matchingValues(toWhere(second))
+  return (
+    firstValues.size > 0 &&
+    secondValues.size > 0 &&
+    (!isSubset(firstValues, secondValues) ||
+      !isSubset(secondValues, firstValues))
   )
+}
 
 function toWhere(
   predicate: PredicateSpec,
@@ -1186,6 +1190,15 @@ async function runRejectedWaiterScenarioWithKnownFailure(
 }
 
 describe(`loadSubset coverage oracle`, () => {
+  it(`keeps empty predicates out of the distinct-window corpus`, () => {
+    expect(
+      isDistinctNonEmptyWindowWherePair([
+        { kind: `in`, values: [] },
+        { kind: `eq`, value: 0 },
+      ]),
+    ).toBe(false)
+  })
+
   it(
     `discovered trace: an empty predicate issues no transport work`,
     expectAssertionFailure(
