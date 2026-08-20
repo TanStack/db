@@ -236,6 +236,16 @@ const windowRequestArbitrary: fc.Arbitrary<Omit<WindowRequest, `where`>> =
     limit: fc.option(fc.integer({ min: 0, max: 6 }), { nil: undefined }),
   })
 
+const finiteWindowRequestArbitrary: fc.Arbitrary<Omit<WindowRequest, `where`>> =
+  fc.record({
+    orderField: fc.constantFrom(`none`, `rank`, `score`),
+    direction: fc.constantFrom(`asc`, `desc`),
+    nulls: fc.constantFrom(`first`, `last`),
+    stringSort: fc.constantFrom(`lexical`, `locale`),
+    offset: fc.integer({ min: 0, max: 6 }),
+    limit: fc.integer({ min: 0, max: 6 }),
+  })
+
 const windowTraceArbitrary = fc
   .record({
     where: fc.option(predicateSpecArbitrary, { nil: undefined }),
@@ -265,6 +275,24 @@ function isDistinctNonEmptyWindowWherePair([first, second]: readonly [
       !isSubset(secondValues, firstValues))
   )
 }
+
+const changingWhereWindowTraceArbitrary = fc
+  .record({
+    wherePair: distinctWindowWherePairArbitrary,
+    first: finiteWindowRequestArbitrary,
+    second: finiteWindowRequestArbitrary,
+    rest: fc.array(fc.tuple(fc.boolean(), finiteWindowRequestArbitrary), {
+      maxLength: 18,
+    }),
+  })
+  .map(({ wherePair, first, second, rest }) => [
+    { ...first, where: wherePair[0] },
+    { ...second, where: wherePair[1] },
+    ...rest.map(([useSecond, request]) => ({
+      ...request,
+      where: wherePair[useSecond ? 1 : 0],
+    })),
+  ])
 
 function toWhere(
   predicate: PredicateSpec,
@@ -458,7 +486,8 @@ function runCoverageTraceWithKnownFailures(
   } catch (error) {
     if (
       error instanceof CoveredDemandRefetchedError &&
-      isKnownUnionCompositionRefetch(error)
+      (isKnownUnionCompositionRefetch(error) ||
+        isKnownComposedRegionRefetch(error))
     ) {
       return
     }
@@ -466,17 +495,32 @@ function runCoverageTraceWithKnownFailures(
   }
 }
 
+function isKnownComposedRegionRefetch(
+  error: CoveredDemandRefetchedError,
+): boolean {
+  if (error.requested.size === 0 || error.loadedRegions.length <= 1) {
+    return false
+  }
+
+  return error.loadedRegions.some((region) => isSubset(error.requested, region))
+}
+
 function isKnownUnionCompositionRefetch(
   error: CoveredDemandRefetchedError,
 ): boolean {
   if (error.requested.size === 0) return true
   // The error can only be built after the independent model proves the demand
-  // is already covered. Once two unlimited regions have been composed, the
-  // current implementation can refetch any later covered demand, including a
-  // strict subset of one original region. Fixed traces below make this waiver
-  // expire when that product defect is repaired.
+  // is already covered. This classifier is only for coverage formed by
+  // composing several regions; a request covered by one region is a different
+  // defect and must not enter this waiver.
   if (error.loadedRegions.length > 1) {
-    return isSubset(error.requested, unionSets(error.loadedRegions))
+    const coveredByOneRegion = error.loadedRegions.some((region) =>
+      isSubset(error.requested, region),
+    )
+    return (
+      !coveredByOneRegion &&
+      isSubset(error.requested, unionSets(error.loadedRegions))
+    )
   }
 
   const usesCompoundPredicate = [
@@ -501,6 +545,18 @@ function countLoads(trace: ReadonlyArray<PredicateSpec>): number {
     dedupe.loadSubset({ where: toWhere(predicate) })
   }
   return loads
+}
+
+function readDedupeTrackingState(dedupe: DeduplicatedLoadSubset): {
+  unlimitedWhere: BasicExpression<boolean> | undefined
+  limitedCalls: ReadonlyArray<LoadSubsetOptions>
+  inflightCalls: ReadonlyArray<unknown>
+} {
+  return dedupe as unknown as {
+    unlimitedWhere: BasicExpression<boolean> | undefined
+    limitedCalls: ReadonlyArray<LoadSubsetOptions>
+    inflightCalls: ReadonlyArray<unknown>
+  }
 }
 
 function toWindowOptions(request: WindowRequest): LoadSubsetOptions {
@@ -624,8 +680,6 @@ function isKnownOffsetTruncatedUnlimitedDeduplication(
     const loadedOptions = toWindowOptions(loaded)
     const priorLoads = error.loadedRegions.map(({ request }) => request)
     return (
-      JSON.stringify(requestedOptions.orderBy) !==
-        JSON.stringify(loadedOptions.orderBy) &&
       isSubset(
         matchingValues(requestedOptions.where),
         matchingValues(loadedOptions.where),
@@ -985,8 +1039,11 @@ async function runAsyncScenarioWithKnownFailures(
 }
 
 const { multiplier, replaySeed } = readOracleRunConfig()
-const runs = 40 * multiplier
-const randomParameters = oracleRandomParameters(runs, replaySeed)
+const coverageScenarioRuns = 40 * multiplier
+const coverageRandomParameters = oracleRandomParameters(
+  coverageScenarioRuns,
+  replaySeed,
+)
 
 let collectionSequence = 0
 
@@ -1226,6 +1283,39 @@ function expectExactCountFailure(
 }
 
 describe(`loadSubset coverage oracle`, () => {
+  it(`rejects one-region coverage from the union-composition classifier`, () => {
+    expect(
+      isKnownUnionCompositionRefetch(
+        new CoveredDemandRefetchedError(
+          2,
+          new Set([1]),
+          [new Set([1]), new Set([2])],
+          JSON.stringify({ kind: `eq`, value: 1 }),
+          [
+            JSON.stringify({ kind: `eq`, value: 1 }),
+            JSON.stringify({ kind: `eq`, value: 2 }),
+          ],
+        ),
+      ),
+    ).toBe(false)
+  })
+
+  it(`classifies a composed state that forgets one loaded region separately`, () => {
+    const error = new CoveredDemandRefetchedError(
+      2,
+      new Set([2]),
+      [new Set([0]), new Set([2])],
+      JSON.stringify({ kind: `eq`, value: 2 }),
+      [
+        JSON.stringify({ kind: `in`, values: [0] }),
+        JSON.stringify({ kind: `in`, values: [2] }),
+      ],
+    )
+
+    expect(isKnownUnionCompositionRefetch(error)).toBe(false)
+    expect(isKnownComposedRegionRefetch(error)).toBe(true)
+  })
+
   it(`rejects uncovered demand from the union-composition classifier`, () => {
     expect(
       isKnownUnionCompositionRefetch(
@@ -1263,6 +1353,20 @@ describe(`loadSubset coverage oracle`, () => {
         ]),
       ),
     ).toBe(false)
+  })
+
+  it(`generates window histories that change predicates`, () => {
+    const traces = fc.sample(changingWhereWindowTraceArbitrary, {
+      seed: 1750,
+      numRuns: 100,
+    })
+
+    expect(
+      traces.some(
+        (trace) =>
+          new Set(trace.map(({ where }) => JSON.stringify(where))).size > 1,
+      ),
+    ).toBe(true)
   })
 
   it(`keeps empty predicates out of the distinct-window corpus`, () => {
@@ -1352,6 +1456,28 @@ describe(`loadSubset coverage oracle`, () => {
   )
 
   it(
+    `discovered trace: an offset-truncated unfiltered load does not cover a filtered request`,
+    expectExactCountFailure(
+      () =>
+        countWindowLoads([
+          {
+            direction: `asc`,
+            offset: 1,
+            limit: undefined,
+          },
+          {
+            where: { kind: `not`, operand: { kind: `eq`, value: 0 } },
+            direction: `asc`,
+            offset: 1,
+            limit: undefined,
+          },
+        ]),
+      1,
+      2,
+    ),
+  )
+
+  it(
     `discovered trace: an identical filtered window reuses its load`,
     expectAssertionFailure(
       () =>
@@ -1389,6 +1515,22 @@ describe(`loadSubset coverage oracle`, () => {
         (): PredicateSpec => ({ kind: `eq`, value: 1 }),
       ),
     ])
+  })
+
+  it(`keeps tracking bounded across repeated covered demand`, () => {
+    const dedupe = new DeduplicatedLoadSubset({ loadSubset: () => true })
+    const request: LoadSubsetOptions = {
+      where: toWhere({ kind: `range`, operator: `gte`, value: 0 }),
+      offset: 0,
+      limit: 4,
+    }
+
+    dedupe.loadSubset(request)
+    for (let index = 0; index < 20; index++) dedupe.loadSubset(request)
+
+    const state = readDedupeTrackingState(dedupe)
+    expect(state.limitedCalls).toHaveLength(1)
+    expect(state.inflightCalls).toHaveLength(0)
   })
 
   it(`rejects transport work for a strict covered predicate subset`, () => {
@@ -1435,6 +1577,20 @@ describe(`loadSubset coverage oracle`, () => {
         checkpoint: 0,
         classify: ({ actual, expected }) => actual === 2 && expected === 1,
       },
+    ),
+  )
+
+  it(
+    `discovered trace: a composed predicate state forgets one loaded region`,
+    expectExactCountFailure(
+      () =>
+        countLoads([
+          { kind: `in`, values: [0] },
+          { kind: `in`, values: [2] },
+          { kind: `eq`, value: 2 },
+        ]),
+      3,
+      2,
     ),
   )
 
@@ -1674,71 +1830,93 @@ describe(`loadSubset coverage oracle`, () => {
     })
   })
 
-  fcTest.prop([requestTraceArbitrary], { numRuns: runs, seed: 1657 })(
+  fcTest.prop([requestTraceArbitrary], {
+    numRuns: coverageScenarioRuns,
+    seed: 1657,
+  })(
     `matches finite-domain coverage for a fixed seed`,
     runCoverageTraceWithKnownFailures,
   )
 
-  fcTest.prop([requestTraceArbitrary], randomParameters)(
+  fcTest.prop([requestTraceArbitrary], coverageRandomParameters)(
     `matches finite-domain coverage for a random or replayed seed`,
     runCoverageTraceWithKnownFailures,
   )
 
-  fcTest.prop([asyncScenarioArbitrary], { numRuns: runs, seed: 1658 })(
+  fcTest.prop([asyncScenarioArbitrary], {
+    numRuns: coverageScenarioRuns,
+    seed: 1658,
+  })(
     `settles, retries, and resets in-flight set requests for a fixed seed`,
     runAsyncScenarioWithKnownFailures,
   )
 
-  fcTest.prop([asyncScenarioArbitrary], randomParameters)(
+  fcTest.prop([asyncScenarioArbitrary], coverageRandomParameters)(
     `settles, retries, and resets in-flight set requests for a random or replayed seed`,
     runAsyncScenarioWithKnownFailures,
   )
 
   fcTest.prop([concurrentAsyncScenarioArbitrary], {
-    numRuns: runs,
+    numRuns: coverageScenarioRuns,
     seed: 1661,
   })(
     `deduplicates three or more concurrent requests for a fixed seed`,
     runConcurrentAsyncScenario,
   )
 
-  fcTest.prop([concurrentAsyncScenarioArbitrary], randomParameters)(
+  fcTest.prop([concurrentAsyncScenarioArbitrary], coverageRandomParameters)(
     `deduplicates three or more concurrent requests for a random or replayed seed`,
     runConcurrentAsyncScenario,
   )
 
   fcTest.prop([rejectedWaiterScenarioArbitrary], {
-    numRuns: runs,
+    numRuns: coverageScenarioRuns,
     seed: 1665,
   })(
     `checks rejected requests observed by an in-flight waiter for a fixed seed`,
     runRejectedWaiterScenarioWithKnownFailure,
   )
 
-  fcTest.prop([rejectedWaiterScenarioArbitrary], randomParameters)(
+  fcTest.prop([rejectedWaiterScenarioArbitrary], coverageRandomParameters)(
     `checks rejected requests observed by an in-flight waiter for a random or replayed seed`,
     runRejectedWaiterScenarioWithKnownFailure,
   )
 
-  fcTest.prop([windowTraceArbitrary], { numRuns: runs, seed: 1659 })(
+  fcTest.prop([windowTraceArbitrary], {
+    numRuns: coverageScenarioRuns,
+    seed: 1659,
+  })(
     `never treats uncovered ordered windows as loaded for a fixed seed`,
     runWindowCoverageTraceWithKnownFailures,
   )
 
-  fcTest.prop([windowTraceArbitrary], randomParameters)(
+  fcTest.prop([windowTraceArbitrary], coverageRandomParameters)(
     `never treats uncovered ordered windows as loaded for a random or replayed seed`,
     runWindowCoverageTraceWithKnownFailures,
   )
 
+  fcTest.prop([changingWhereWindowTraceArbitrary], {
+    numRuns: coverageScenarioRuns,
+    seed: 1666,
+  })(
+    `keeps changing predicates distinct across window histories for a fixed seed`,
+    runWindowCoverageTraceWithKnownFailures,
+  )
+
+  fcTest.prop([changingWhereWindowTraceArbitrary], coverageRandomParameters)(
+    `keeps changing predicates distinct across window histories for a random or replayed seed`,
+    runWindowCoverageTraceWithKnownFailures,
+  )
+
   fcTest.prop([distinctWindowWherePairArbitrary], {
-    numRuns: runs,
+    numRuns: coverageScenarioRuns,
     seed: 1662,
   })(
     `keeps distinct limited-window predicates separate for a fixed seed`,
     expectDistinctWhereStartsDistinctLimitedWindowLoads,
   )
 
-  fcTest.prop([distinctWindowWherePairArbitrary], randomParameters)(
+  fcTest.prop([distinctWindowWherePairArbitrary], coverageRandomParameters)(
     `keeps distinct limited-window predicates separate for a random or replayed seed`,
     expectDistinctWhereStartsDistinctLimitedWindowLoads,
   )
