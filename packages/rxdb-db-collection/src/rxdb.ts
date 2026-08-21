@@ -210,7 +210,19 @@ export function rxdbCollectionOptions(
         commit()
       }
 
-      let sub: Subscription
+      let sub: Subscription | undefined
+      function stopOngoingFetch() {
+        buffer.length = 0
+        if (!sub) return
+        getFromMapOrCreate(
+          OPEN_RXDB_SUBSCRIPTIONS,
+          rxCollection,
+          () => new Set(),
+        ).delete(sub)
+        sub.unsubscribe()
+        sub = undefined
+      }
+
       function startOngoingFetch() {
         // Subscribe early and buffer live changes during initial load and ongoing
         sub = rxCollection.$.subscribe((ev) => {
@@ -251,20 +263,13 @@ export function rxdbCollectionOptions(
       }
 
       void start().catch((error: unknown) => {
+        stopOngoingFetch()
         if (collection.status === `loading`) {
           markError(error)
         }
       })
 
-      return () => {
-        const subs = getFromMapOrCreate(
-          OPEN_RXDB_SUBSCRIPTIONS,
-          rxCollection,
-          () => new Set(),
-        )
-        subs.delete(sub)
-        sub.unsubscribe()
-      }
+      return stopOngoingFetch
     },
     // Expose the getSyncMetadata function
     getSyncMetadata: undefined,

@@ -9,7 +9,7 @@ title: trailBaseCollectionOptions
 function trailBaseCollectionOptions<TItem, TRecord, TKey>(config): CollectionConfig<TItem, TKey, never, TrailBaseCollectionUtils> & object;
 ```
 
-Defined in: [packages/trailbase-db-collection/src/trailbase.ts:121](https://github.com/TanStack/db/blob/main/packages/trailbase-db-collection/src/trailbase.ts#L121)
+Defined in: [packages/trailbase-db-collection/src/trailbase.ts:122](https://github.com/TanStack/db/blob/main/packages/trailbase-db-collection/src/trailbase.ts#L122)
 
 ## Type Parameters
 
