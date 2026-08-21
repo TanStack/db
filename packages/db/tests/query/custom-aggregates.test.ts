@@ -112,6 +112,35 @@ describe(`custom aggregate functions`, () => {
       expect(unregisterAggregate(`MIXEDCASE`)).toBe(true)
     })
 
+    test(`compiler lookup normalizes the aggregate name`, () => {
+      register(`MixedCaseSum`, (ctx: AggregateContext) => ({
+        preMap: (entry: AggregateEntry) => Number(ctx.value(entry)),
+        reduce: (values: Array<[number, number]>) =>
+          values.reduce((acc, [value, multiplicity]) => {
+            return acc + value * multiplicity
+          }, 0),
+      }))
+
+      const todos = createTodosCollection(`custom-agg-todos-case`)
+      const result = createLiveQueryCollection({
+        startSync: true,
+        query: (q) =>
+          q
+            .from({ todo: todos })
+            .groupBy(({ todo }) => todo.listId)
+            .select(({ todo }) => ({
+              listId: todo.listId,
+              // Registered as `MixedCaseSum`, referenced here in lower case
+              total: new Aggregate<number>(`mixedcasesum`, [
+                toExpression(todo.points),
+              ]),
+            })),
+      })
+
+      expect(result.get(1)?.total).toBe(6)
+      expect(result.get(2)?.total).toBe(4)
+    })
+
     test(`getRegisteredAggregates returns a snapshot, not a live view`, () => {
       const before = getRegisteredAggregates()
       register(`snapshot_agg`, () => ({
