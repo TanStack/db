@@ -330,6 +330,11 @@ export type LoadSubsetOptions = {
   subscription?: Subscription
 }
 
+/**
+ * Loads one subset and transfers its ongoing resource ownership only after
+ * returning `true` or a promise. An implementation that throws synchronously
+ * must release any partially acquired resource before throwing.
+ */
 export type LoadSubsetFn = (options: LoadSubsetOptions) => true | Promise<void>
 
 export type UnloadSubsetFn = (options: LoadSubsetOptions) => void

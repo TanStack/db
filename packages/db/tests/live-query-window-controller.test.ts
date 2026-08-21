@@ -542,9 +542,7 @@ describe(`createLiveQueryWindowController`, () => {
   it(`reset does not inherit a superseded expansion failure`, async () => {
     const failure = new Error(`superseded expansion failed`)
     let loadCount = 0
-    let rejectExpansion: (error: unknown) => void = () => {
-      throw new Error(`expansion has not started`)
-    }
+    const rejectLoads = new Map<number, (error: unknown) => void>()
     const loaded = new Set<string>()
     const source = createCollection<Row>({
       id: `window-reset-real-source-${seq++}`,
@@ -561,7 +559,7 @@ describe(`createLiveQueryWindowController`, () => {
               loadCount++
               if (loadCount === 2) {
                 return new Promise<void>((_resolve, reject) => {
-                  rejectExpansion = reject
+                  rejectLoads.set(loadCount, reject)
                 })
               }
               begin()
@@ -586,11 +584,14 @@ describe(`createLiveQueryWindowController`, () => {
     try {
       await controller.preload()
       const expansion = Promise.resolve(controller.fetchNextPage())
+      expect(loadCount).toBe(2)
+      const rejectExpansion = rejectLoads.get(2)
+      expect(rejectExpansion).toBeDefined()
       const reset = Promise.resolve(controller.reset())
       void expansion.catch(() => undefined)
       void reset.catch(() => undefined)
 
-      rejectExpansion(failure)
+      rejectExpansion!(failure)
 
       await expect(reset).resolves.toBeUndefined()
       await expect(expansion).rejects.toBe(failure)

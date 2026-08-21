@@ -276,7 +276,12 @@ export class CollectionChangesManager<
       this.changeSubscriptions.add(subscription)
     } catch (error) {
       if (subscription) {
-        subscription.unsubscribe()
+        try {
+          subscription.unsubscribe()
+        } catch {
+          // Preserve the setup error. Cleanup still releases subscriber
+          // ownership and attempts every subset unload before it throws.
+        }
       } else {
         this.removeSubscriber()
       }

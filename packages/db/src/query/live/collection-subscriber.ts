@@ -463,18 +463,35 @@ export class CollectionSubscriber<
     )
     if (!cursor) return // Duplicate request — skip
 
-    this.lastLoadRequestKey = cursor.loadRequestKey
+    const loadRequestKey = cursor.loadRequestKey
+    this.lastLoadRequestKey = loadRequestKey
 
     // Take the `n` items after the biggest sent value
     // Omit offset so requestLimitedSnapshot can advance based on
     // the number of rows already loaded (supports offset-based backends).
-    subscription.requestLimitedSnapshot({
-      orderBy: cursor.normalizedOrderBy,
-      limit: n,
-      minValues: cursor.minValues,
-      trackLoadSubsetPromise: false,
-      onLoadSubsetResult: this.orderedLoadSubsetResult,
-    })
+    try {
+      subscription.requestLimitedSnapshot({
+        orderBy: cursor.normalizedOrderBy,
+        limit: n,
+        minValues: cursor.minValues,
+        trackLoadSubsetPromise: false,
+        onLoadSubsetResult: (result) => {
+          if (result instanceof Promise) {
+            void result.then(undefined, () => {
+              if (this.lastLoadRequestKey === loadRequestKey) {
+                this.lastLoadRequestKey = undefined
+              }
+            })
+          }
+          this.orderedLoadSubsetResult?.(result)
+        },
+      })
+    } catch (error) {
+      if (this.lastLoadRequestKey === loadRequestKey) {
+        this.lastLoadRequestKey = undefined
+      }
+      throw error
+    }
   }
 
   private getWhereClause(): BasicExpression<boolean> | undefined {

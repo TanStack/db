@@ -318,20 +318,18 @@ describe(`CollectionSubscription status tracking`, () => {
     await collection.cleanup()
   })
 
-  it(`releases a subset acquired before loadSubset throws`, async () => {
-    const failure = new Error(`subset failed after acquisition`)
-    let acquiredOptions: unknown
+  it(`does not unload a subset when loadSubset throws before acquisition`, async () => {
+    const failure = new Error(`subset failed before acquisition`)
     const unloadedOptions: Array<unknown> = []
     const collection = createCollection<{ id: string }>({
-      id: `partial-subset-acquisition`,
+      id: `failed-subset-acquisition`,
       getKey: (item) => item.id,
       syncMode: `on-demand`,
       sync: {
         sync: ({ markReady }) => {
           markReady()
           return {
-            loadSubset: (options) => {
-              acquiredOptions = options
+            loadSubset: () => {
               throw failure
             },
             unloadSubset: (options) => unloadedOptions.push(options),
@@ -348,7 +346,7 @@ describe(`CollectionSubscription status tracking`, () => {
     ).toThrow(failure)
     subscription.unsubscribe()
 
-    expect(unloadedOptions).toEqual([acquiredOptions])
+    expect(unloadedOptions).toEqual([])
     await collection.cleanup()
   })
 
@@ -486,6 +484,79 @@ describe(`CollectionSubscription status tracking`, () => {
     expect(unloadCount).toBe(1)
     await collection.cleanup()
   })
+
+  it.each([`throw`, `reject`] as const)(
+    `keeps the last published snapshot when truncate replay fails ($delivery)`,
+    async (delivery) => {
+      type Row = { id: string }
+      const error = new Error(`truncate replay failed before replacement`)
+      let begin!: () => void
+      let write!: (message: { type: `insert`; value: Row }) => void
+      let commit!: () => void
+      let truncate!: () => void
+      let loadCount = 0
+      let failReplay = true
+      const collection = createCollection<Row>({
+        id: `truncate-replay-preserves-snapshot`,
+        getKey: (item) => item.id,
+        syncMode: `on-demand`,
+        sync: {
+          sync: (params) => {
+            begin = params.begin
+            write = params.write
+            commit = params.commit
+            truncate = params.truncate
+            params.markReady()
+            return {
+              loadSubset: () => {
+                loadCount++
+                if (loadCount > 1 && failReplay) {
+                  if (delivery === `throw`) throw error
+                  return Promise.reject(error)
+                }
+                begin()
+                write({ type: `insert`, value: { id: `one` } })
+                commit()
+                return true
+              },
+            }
+          },
+        },
+      })
+      const visible = new Map<string | number, Row>()
+      const subscription = collection.subscribeChanges(
+        (changes) => {
+          for (const change of changes) {
+            if (change.type === `delete`) visible.delete(change.key)
+            else visible.set(change.key, change.value)
+          }
+        },
+        { includeInitialState: false },
+      )
+
+      subscription.requestSnapshot({ optimizedOnly: false })
+      expect([...visible.keys()]).toEqual([`one`])
+
+      begin()
+      truncate()
+      commit()
+      await flushPromises()
+
+      expect(subscription.lastError).toBe(error)
+      expect([...visible.keys()]).toEqual([`one`])
+
+      failReplay = false
+      begin()
+      truncate()
+      commit()
+      await flushPromises()
+
+      expect([...visible.keys()]).toEqual([`one`])
+
+      subscription.unsubscribe()
+      await collection.cleanup()
+    },
+  )
 
   it(`scopes a subset failure to the subscription that requested it`, async () => {
     const error = new Error(`first subscription failed`)

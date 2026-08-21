@@ -1574,7 +1574,7 @@ describe(`createLiveQueryCollection`, () => {
     })
 
     it.each([`throw`, `reject`] as const)(
-      `waits for lazy child demand caused by a window change ($delivery)`,
+      `propagates lazy child demand failure from a window change ($0)`,
       async (delivery) => {
         type Parent = { id: number; rank: number }
         type Child = { id: number; parentId: number }
@@ -1669,6 +1669,65 @@ describe(`createLiveQueryCollection`, () => {
         }
       },
     )
+
+    it(`retries the same ordered refill after a transient rejection`, async () => {
+      type Row = { id: number; rank: number }
+      const failure = new Error(`ordered refill failed`)
+      let loadCount = 0
+      const source = createCollection<Row>({
+        id: `ordered-refill-retry-source`,
+        getKey: (row) => row.id,
+        syncMode: `on-demand`,
+        autoIndex: `eager`,
+        defaultIndexType: BTreeIndex,
+        sync: {
+          sync: ({ begin, write, commit, markReady }) => {
+            markReady()
+            return {
+              loadSubset: () => {
+                loadCount++
+                if (loadCount === 2) return Promise.reject(failure)
+                const deliver = () => {
+                  begin()
+                  write({
+                    type: `insert`,
+                    value: { id: loadCount, rank: loadCount },
+                  })
+                  commit()
+                }
+                if (loadCount === 1) {
+                  deliver()
+                  return true
+                }
+                return Promise.resolve().then(deliver)
+              },
+            }
+          },
+        },
+      })
+      const live = createLiveQueryCollection((q) =>
+        q
+          .from({ row: source })
+          .orderBy(({ row }) => row.rank, `asc`)
+          .limit(2),
+      )
+
+      try {
+        await live.preload()
+        await flushPromises()
+        expect(loadCount).toBe(2)
+        expect(live.utils.lastSubsetError).toBe(failure)
+
+        const retry = live.utils.setWindow({ offset: 0, limit: 2 })
+        if (retry instanceof Promise) await retry
+        await flushPromises()
+
+        expect(loadCount).toBe(3)
+        expect(Array.from(live.values(), ({ id }) => id)).toEqual([1, 3])
+      } finally {
+        await Promise.all([live.cleanup(), source.cleanup()])
+      }
+    })
 
     it(`concurrent live queries should each track loading state independently`, async () => {
       // This tests the fix for the !wasLoadingBefore bug:

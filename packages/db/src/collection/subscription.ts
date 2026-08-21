@@ -106,9 +106,10 @@ export class CollectionSubscription
   private truncateCleanup: (() => void) | undefined
 
   // Truncate buffering state
-  // When a truncate occurs, we buffer changes until all loadSubset refetches complete
+  // When a truncate occurs, we buffer changes until all loadSubset refetches succeed
   // This prevents a flash of missing content between deletes and new inserts
   private isBufferingForTruncate = false
+  private truncateRefetchFailed = false
   private truncateBuffer: Array<Array<ChangeMessage<any, any>>> = []
   private pendingTruncateRefetches: Set<Promise<void>> = new Set()
 
@@ -168,7 +169,8 @@ export class CollectionSubscription
    * This is called when the sync layer receives a must-refetch and clears all data.
    *
    * To prevent a flash of missing content, we buffer all changes (deletes from truncate
-   * and inserts from refetch) until all loadSubset promises resolve, then emit them together.
+   * and inserts from refetch) until all loadSubset calls succeed, then emit them together.
+   * A failed replay keeps the last published snapshot until a later truncate retries it.
    */
   private handleTruncate() {
     // Copy the loaded subsets before clearing (we'll re-request them)
@@ -191,8 +193,11 @@ export class CollectionSubscription
 
     // Start buffering BEFORE we receive the delete events from the truncate commit
     // This ensures we capture both the deletes and subsequent inserts
+    const retryingFailedRefetch =
+      this.isBufferingForTruncate && this.truncateRefetchFailed
     this.isBufferingForTruncate = true
-    this.truncateBuffer = []
+    if (!retryingFailedRefetch) this.truncateBuffer = []
+    this.truncateRefetchFailed = false
     this.pendingTruncateRefetches.clear()
 
     // Reset snapshot/pagination tracking state
@@ -225,6 +230,7 @@ export class CollectionSubscription
         try {
           syncResult = this.loadSubset(options)
         } catch {
+          this.truncateRefetchFailed = true
           continue
         }
 
@@ -237,14 +243,17 @@ export class CollectionSubscription
             this.pendingTruncateRefetches.delete(syncResult)
             this.checkTruncateRefetchComplete()
           }
-          void syncResult.then(finish, finish)
+          void syncResult.then(finish, () => {
+            this.truncateRefetchFailed = true
+            finish()
+          })
         }
       }
 
       // If all loadSubset calls were synchronous (returned true), flush now
       // At this point, delete events have already been buffered from the truncate commit
       if (this.pendingTruncateRefetches.size === 0) {
-        this.flushTruncateBuffer()
+        this.checkTruncateRefetchComplete()
       }
     })
   }
@@ -255,7 +264,8 @@ export class CollectionSubscription
   private checkTruncateRefetchComplete() {
     if (
       this.pendingTruncateRefetches.size === 0 &&
-      this.isBufferingForTruncate
+      this.isBufferingForTruncate &&
+      !this.truncateRefetchFailed
     ) {
       this.flushTruncateBuffer()
     }
@@ -266,6 +276,7 @@ export class CollectionSubscription
    */
   private flushTruncateBuffer() {
     this.isBufferingForTruncate = false
+    this.truncateRefetchFailed = false
 
     // Flatten all buffered changes into a single array for atomic emission
     // This ensures consumers see all truncate changes (deletes + inserts) in one callback
@@ -438,13 +449,12 @@ export class CollectionSubscription
       limit: opts?.limit,
     }
 
-    // Record ownership before invoking adapter or observer code. Either may
-    // throw after allocating resources, and unsubscribe must still release
-    // the exact request.
+    const syncResult = this.loadSubset(loadOptions)
+
+    // A returned result transfers ownership to the subscription. A throwing
+    // adapter retains responsibility for rolling back any partial setup.
     this.loadedSubsets.push(loadOptions)
     if (opts?.where) this.requestedSubsetWhere.set(loadOptions, opts.where)
-
-    const syncResult = this.loadSubset(loadOptions)
 
     // Pass the raw loadSubset result to the caller for external tracking
     opts?.onLoadSubsetResult?.(syncResult)
@@ -709,12 +719,11 @@ export class CollectionSubscription
       subscription: this,
     }
 
-    // Record ownership before invoking adapter or observer code. Either may
-    // throw after allocating resources, and unsubscribe must still release
-    // the exact request.
-    this.loadedSubsets.push(loadOptions)
-
     const syncResult = this.loadSubset(loadOptions)
+
+    // A returned result transfers ownership to the subscription. A throwing
+    // adapter retains responsibility for rolling back any partial setup.
+    this.loadedSubsets.push(loadOptions)
 
     // Pass the raw loadSubset result to the caller for external tracking
     onLoadSubsetResult?.(syncResult)
@@ -820,27 +829,45 @@ export class CollectionSubscription
   }
 
   unsubscribe() {
+    let firstCleanupError: unknown
+
     // Clean up truncate event listener
-    this.truncateCleanup?.()
+    try {
+      this.truncateCleanup?.()
+    } catch (error) {
+      firstCleanupError = error
+    }
     this.truncateCleanup = undefined
 
     // Clean up truncate buffer state
     this.isBufferingForTruncate = false
+    this.truncateRefetchFailed = false
     this.truncateBuffer = []
     this.pendingTruncateRefetches.clear()
 
     // Unload all subsets that this subscription loaded
     // We pass the exact same LoadSubsetOptions we used for loadSubset
     for (const options of this.loadedSubsets) {
-      this.collection._sync.unloadSubset(options)
+      try {
+        this.collection._sync.unloadSubset(options)
+      } catch (error) {
+        firstCleanupError ??= error
+      }
     }
     this.loadedSubsets = []
 
-    this.emitInner(`unsubscribed`, {
-      type: `unsubscribed`,
-      subscription: this,
-    })
-    // Clear all event listeners to prevent memory leaks
-    this.clearListeners()
+    try {
+      this.emitInner(`unsubscribed`, {
+        type: `unsubscribed`,
+        subscription: this,
+      })
+    } catch (error) {
+      firstCleanupError ??= error
+    } finally {
+      // Clear all event listeners to prevent memory leaks
+      this.clearListeners()
+    }
+
+    if (firstCleanupError !== undefined) throw firstCleanupError
   }
 }
