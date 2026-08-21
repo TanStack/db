@@ -14,6 +14,7 @@ import { SubsetDemandController } from './subset-demand-controller.js'
 import type { Collection } from '../../collection/index.js'
 import type {
   ChangeMessage,
+  SubscriptionLoadSubsetErrorEvent,
   SubscriptionStatusChangeEvent,
 } from '../../types.js'
 import type { Context, GetResult } from '../builder/types.js'
@@ -106,6 +107,9 @@ export class CollectionSubscriber<
         }
       }
     }
+    const onLoadSubsetError = (event: SubscriptionLoadSubsetErrorEvent) => {
+      this.collectionConfigBuilder.recordSubsetError(event.error)
+    }
 
     // Create subscription with onStatusChange - listener is registered before any async work
     let subscription: CollectionSubscription
@@ -115,6 +119,7 @@ export class CollectionSubscriber<
         orderByInfo,
         onStatusChange,
         trackLoadResult,
+        onLoadSubsetError,
       )
     } else {
       // Lazy sources load only the subsets demanded by the compiled graph.
@@ -126,6 +131,7 @@ export class CollectionSubscriber<
         whereExpression,
         includeInitialState,
         onStatusChange,
+        onLoadSubsetError,
       )
     }
 
@@ -215,6 +221,7 @@ export class CollectionSubscriber<
     whereExpression: BasicExpression<boolean> | undefined,
     includeInitialState: boolean,
     onStatusChange: (event: SubscriptionStatusChangeEvent) => void,
+    onLoadSubsetError: (event: SubscriptionLoadSubsetErrorEvent) => void,
   ): CollectionSubscription {
     const sendChanges = (
       changes: Array<ChangeMessage<any, string | number>>,
@@ -245,6 +252,7 @@ export class CollectionSubscriber<
       ...(includeInitialState && { includeInitialState }),
       whereExpression,
       onStatusChange,
+      onLoadSubsetError,
       orderBy: hints.orderBy,
       limit: hints.limit,
       onLoadSubsetResult,
@@ -258,6 +266,7 @@ export class CollectionSubscriber<
     orderByInfo: OrderByOptimizationInfo,
     onStatusChange: (event: SubscriptionStatusChangeEvent) => void,
     onLoadSubsetResult: (result: Promise<void> | true) => void,
+    onLoadSubsetError: (event: SubscriptionLoadSubsetErrorEvent) => void,
   ): CollectionSubscription {
     const { orderBy, offset, limit, index } = orderByInfo
 
@@ -302,6 +311,7 @@ export class CollectionSubscriber<
     const subscription = this.collection.subscribeChanges(sendChangesInRange, {
       whereExpression,
       onStatusChange,
+      onLoadSubsetError,
     })
     subscriptionHolder.current = subscription
 

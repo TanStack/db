@@ -476,7 +476,20 @@ describe(`createLiveQueryWindowController`, () => {
         },
       },
     })
-    const lq = makeOrderedLiveQuery(source, 2)
+    const lq = createLiveQueryCollection({
+      query: (q) =>
+        q
+          .from({ r: source })
+          .orderBy(({ r }) => r.n, `asc`)
+          .limit(3)
+          .offset(0)
+          .select(({ r }) => ({ id: r.id, n: r.n })),
+      startSync: true,
+      gcTime: 1,
+      utils: {
+        customUtility: () => `custom`,
+      },
+    })
     const controller = createLiveQueryWindowController<Row, string>(lq as any, {
       pageSize: 2,
     })
@@ -488,6 +501,8 @@ describe(`createLiveQueryWindowController`, () => {
     await expect(controller.fetchNextPage()).rejects.toBe(failure)
     expect(controller.getSnapshot().pages).toHaveLength(1)
     expect(controller.getSnapshot().error).toBe(failure)
+    expect(lq.utils.lastSubsetError).toBe(failure)
+    expect(lq.utils.customUtility()).toBe(`custom`)
     controller.dispose()
   })
 

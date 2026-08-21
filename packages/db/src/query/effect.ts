@@ -525,19 +525,18 @@ class EffectPipelineRunner<TRow extends object, TKey extends string | number> {
             }
           }
 
-      // Determine subscription options based on ordered vs unordered path
-      const subscriptionOptions = this.buildSubscriptionOptions(
-        alias,
-        isLazy,
-        orderByInfo,
-        whereExpression,
-      )
-
       // Subscribe to source changes
-      const subscription = collection.subscribeChanges(
-        changeCallback,
-        subscriptionOptions,
-      )
+      const subscription = collection.subscribeChanges(changeCallback, {
+        ...this.buildSubscriptionOptions(
+          alias,
+          isLazy,
+          orderByInfo,
+          whereExpression,
+        ),
+        onLoadSubsetError: ({ error }) => {
+          this.onSourceError(normaliseError(error))
+        },
+      })
 
       // Store subscription immediately so the join compiler can find it
       this.subscriptions[sourceId] = subscription
@@ -661,11 +660,10 @@ class EffectPipelineRunner<TRow extends object, TKey extends string | number> {
   ): void {
     const update = this.demand.setDemand(subscription, plan, keys)
     if (update.ready instanceof Promise) {
-      void update.ready.catch((error: unknown) => {
-        this.onSourceError(
-          error instanceof Error ? error : new Error(String(error)),
-        )
-      })
+      // Each segment reports its own failure through the subscription. Consume
+      // the aggregate rejection so Promise.all does not create a second,
+      // detached error channel.
+      void update.ready.then(undefined, () => {})
     }
   }
 
@@ -948,11 +946,12 @@ class EffectPipelineRunner<TRow extends object, TKey extends string | number> {
         // Track in-flight load to prevent redundant concurrent requests
         if (loadResult instanceof Promise) {
           this.pendingOrderedLoadPromise = loadResult
-          loadResult.finally(() => {
+          const finish = () => {
             if (this.pendingOrderedLoadPromise === loadResult) {
               this.pendingOrderedLoadPromise = undefined
             }
-          })
+          }
+          void loadResult.then(finish, finish)
         }
       },
     })
@@ -1116,9 +1115,10 @@ function trackPromise(
   inFlightHandlers: Set<Promise<void>>,
 ): void {
   inFlightHandlers.add(promise)
-  promise.finally(() => {
+  const finish = () => {
     inFlightHandlers.delete(promise)
-  })
+  }
+  void promise.then(finish, finish)
 }
 
 /** Report an error to the onError callback or console */
@@ -1127,7 +1127,7 @@ function reportError<TRow extends object, TKey extends string | number>(
   event: DeltaEvent<TRow, TKey>,
   onError?: (error: Error, event: DeltaEvent<TRow, TKey>) => void,
 ): void {
-  const normalised = error instanceof Error ? error : new Error(String(error))
+  const normalised = normaliseError(error)
   if (onError) {
     try {
       onError(normalised, event)
@@ -1139,4 +1139,8 @@ function reportError<TRow extends object, TKey extends string | number>(
   } else {
     console.error(`[Effect] Unhandled error in handler:`, normalised)
   }
+}
+
+function normaliseError(error: unknown): Error {
+  return error instanceof Error ? error : new Error(String(error))
 }

@@ -49,6 +49,8 @@ import type { AllCollectionEvents } from '../../collection/events.js'
 
 export type LiveQueryCollectionUtils = UtilsRecord & {
   getRunCount: () => number
+  /** Most recent subset-load failure observed by this live query. */
+  readonly lastSubsetError: unknown | undefined
   /**
    * Sets the offset and limit of an ordered query.
    * Is a no-op if the query is not ordered.
@@ -114,6 +116,7 @@ export class CollectionConfigBuilder<
   private isInErrorState = false
   private fatalQueryError = false
   private readonly erroredSourceIds = new Set<string>()
+  private lastSubsetError: unknown | undefined
 
   // Reference to the live query collection for error state transitions
   public liveQueryCollection?: Collection<TResult, any, any>
@@ -244,6 +247,7 @@ export class CollectionConfigBuilder<
   getConfig(): CollectionConfigSingleRowOption<TResult> & {
     utils: LiveQueryCollectionUtils
   } {
+    const builder = this
     return {
       id: this.id,
       getKey:
@@ -262,6 +266,9 @@ export class CollectionConfigBuilder<
       singleResult: this.query.singleResult,
       utils: {
         getRunCount: this.getRunCount.bind(this),
+        get lastSubsetError() {
+          return builder.lastSubsetError
+        },
         setWindow: this.setWindow.bind(this),
         getWindow: this.getWindow.bind(this),
         [LIVE_QUERY_INTERNAL]: {
@@ -356,8 +363,13 @@ export class CollectionConfigBuilder<
   failDemand(planId: string, generation: number, error: unknown): void {
     const demand = this.activeDemands.get(planId)
     if (!demand || demand.generation !== generation) return
+    this.recordSubsetError(error)
     const message = error instanceof Error ? error.message : String(error)
     this.transitionToError(`Subset demand '${planId}' failed: ${message}`)
+  }
+
+  recordSubsetError(error: unknown): void {
+    this.lastSubsetError = error
   }
 
   retireDemand(planId: string): void {
@@ -632,6 +644,7 @@ export class CollectionConfigBuilder<
     this.isInErrorState = false
     this.fatalQueryError = false
     this.erroredSourceIds.clear()
+    this.lastSubsetError = undefined
     // Store config and syncState as instance properties for the duration of this sync session
     this.currentSyncConfig = config
 

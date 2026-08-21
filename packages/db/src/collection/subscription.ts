@@ -15,6 +15,7 @@ import type {
   LoadSubsetOptions,
   Subscription,
   SubscriptionEvents,
+  SubscriptionLoadSubsetErrorEvent,
   SubscriptionStatus,
   SubscriptionUnsubscribedEvent,
 } from '../types.js'
@@ -54,6 +55,8 @@ type CollectionSubscriptionOptions = {
   whereExpression?: BasicExpression<boolean>
   /** Callback to call when the subscription is unsubscribed */
   onUnsubscribe?: (event: SubscriptionUnsubscribedEvent) => void
+  /** Callback for subset-load failures scoped to this subscription. */
+  onLoadSubsetError?: (event: SubscriptionLoadSubsetErrorEvent) => void
 }
 
 export class CollectionSubscription
@@ -96,6 +99,7 @@ export class CollectionSubscription
 
   // Status tracking
   private _status: SubscriptionStatus = `ready`
+  private _lastError: unknown | undefined
   private pendingLoadSubsetPromises: Set<Promise<void>> = new Set()
 
   // Cleanup function for truncate event listener
@@ -112,6 +116,10 @@ export class CollectionSubscription
     return this._status
   }
 
+  public get lastError(): unknown | undefined {
+    return this._lastError
+  }
+
   constructor(
     private collection: CollectionImpl<any, any, any, any, any>,
     private callback: (changes: Array<ChangeMessage<any, any>>) => void,
@@ -119,7 +127,10 @@ export class CollectionSubscription
   ) {
     super()
     if (options.onUnsubscribe) {
-      this.on(`unsubscribed`, (event) => options.onUnsubscribe!(event))
+      this.on(`unsubscribed`, options.onUnsubscribe)
+    }
+    if (options.onLoadSubsetError) {
+      this.on(`loadSubset:error`, options.onLoadSubsetError)
     }
 
     // Auto-index for where expressions if enabled
@@ -206,23 +217,27 @@ export class CollectionSubscription
 
       // Re-request all previously loaded subsets and track their promises
       for (const options of subsetsToReload) {
-        const syncResult = this.collection._sync.loadSubset(options)
-
-        // Track this loadSubset call so we can unload it later
+        // Keep ownership even if a synchronous replay fails. A later truncate
+        // must retry it, and unsubscribe must still release the subset.
         this.loadedSubsets.push(options)
-        this.trackLoadSubsetPromise(syncResult)
+
+        let syncResult: Promise<void> | true
+        try {
+          syncResult = this.loadSubset(options)
+        } catch {
+          continue
+        }
+
+        this.observeLoadSubsetResult(syncResult, options, true)
 
         // Track the promise for buffer flushing
         if (syncResult instanceof Promise) {
           this.pendingTruncateRefetches.add(syncResult)
-          syncResult
-            .catch(() => {
-              // Ignore errors - we still want to flush the buffer even if some requests fail
-            })
-            .finally(() => {
-              this.pendingTruncateRefetches.delete(syncResult)
-              this.checkTruncateRefetchComplete()
-            })
+          const finish = () => {
+            this.pendingTruncateRefetches.delete(syncResult)
+            this.checkTruncateRefetchComplete()
+          }
+          void syncResult.then(finish, finish)
         }
       }
 
@@ -300,23 +315,58 @@ export class CollectionSubscription
     } as SubscriptionEvents[typeof eventKey])
   }
 
-  /**
-   * Track a loadSubset promise and manage loading status
-   */
-  private trackLoadSubsetPromise(syncResult: Promise<void> | true) {
-    // Track the promise if it's actually a promise (async work)
-    if (syncResult instanceof Promise) {
+  /** Observe an asynchronous subset load and restore status on settlement. */
+  private observeLoadSubsetResult(
+    syncResult: Promise<void> | true,
+    options: LoadSubsetOptions,
+    trackStatus: boolean,
+  ) {
+    if (!(syncResult instanceof Promise)) return
+
+    if (trackStatus) {
       this.pendingLoadSubsetPromises.add(syncResult)
       this.setStatus(`loadingSubset`)
+    }
 
-      const finish = () => {
+    const finish = () => {
+      if (trackStatus) {
         this.pendingLoadSubsetPromises.delete(syncResult)
         if (this.pendingLoadSubsetPromises.size === 0) {
           this.setStatus(`ready`)
         }
       }
-      void syncResult.then(finish, finish)
     }
+
+    void syncResult.then(finish, (error: unknown) => {
+      this.recordLoadSubsetError(options, error)
+      finish()
+    })
+  }
+
+  private loadSubset(options: LoadSubsetOptions): Promise<void> | true {
+    try {
+      return this.collection._sync.loadSubset(options)
+    } catch (error) {
+      this.recordLoadSubsetError(options, error)
+      throw error
+    }
+  }
+
+  private recordLoadSubsetError(
+    options: LoadSubsetOptions,
+    error: unknown,
+  ): void {
+    // Aborted subset requests are obsolete demand, not load failures. The
+    // request may reject after its route has already been released.
+    if (options.signal?.aborted) return
+
+    this._lastError = error
+    this.emitInner(`loadSubset:error`, {
+      type: `loadSubset:error`,
+      subscription: this,
+      options,
+      error,
+    })
   }
 
   hasLoadedInitialState() {
@@ -387,7 +437,7 @@ export class CollectionSubscription
       orderBy: opts?.orderBy,
       limit: opts?.limit,
     }
-    const syncResult = this.collection._sync.loadSubset(loadOptions)
+    const syncResult = this.loadSubset(loadOptions)
 
     // Pass the raw loadSubset result to the caller for external tracking
     opts?.onLoadSubsetResult?.(syncResult)
@@ -396,10 +446,11 @@ export class CollectionSubscription
     this.loadedSubsets.push(loadOptions)
     if (opts?.where) this.requestedSubsetWhere.set(loadOptions, opts.where)
 
-    const trackLoadSubsetPromise = opts?.trackLoadSubsetPromise ?? true
-    if (trackLoadSubsetPromise) {
-      this.trackLoadSubsetPromise(syncResult)
-    }
+    this.observeLoadSubsetResult(
+      syncResult,
+      loadOptions,
+      opts?.trackLoadSubsetPromise ?? true,
+    )
 
     // Also load data immediately from the collection
     let snapshot: Array<ChangeMessage<any, any>> | void
@@ -654,16 +705,18 @@ export class CollectionSubscription
       offset: offset ?? currentOffset, // Use provided offset, or auto-tracked offset
       subscription: this,
     }
-    const syncResult = this.collection._sync.loadSubset(loadOptions)
+    const syncResult = this.loadSubset(loadOptions)
 
     // Pass the raw loadSubset result to the caller for external tracking
     onLoadSubsetResult?.(syncResult)
 
     // Track this loadSubset call
     this.loadedSubsets.push(loadOptions)
-    if (shouldTrackLoadSubsetPromise) {
-      this.trackLoadSubsetPromise(syncResult)
-    }
+    this.observeLoadSubsetResult(
+      syncResult,
+      loadOptions,
+      shouldTrackLoadSubsetPromise,
+    )
   }
 
   // TODO: also add similar test but that checks that it can also load it from the collection's loadSubset function

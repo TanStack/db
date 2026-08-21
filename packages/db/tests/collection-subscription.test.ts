@@ -246,6 +246,256 @@ describe(`CollectionSubscription status tracking`, () => {
     subscription.unsubscribe()
   })
 
+  it(`records the last rejected subset load without hiding ready data`, async () => {
+    const error = new Error(`incremental subset failed`)
+    const collection = createCollection<{ id: string; value: string }>({
+      id: `subset-error-recording`,
+      getKey: (item) => item.id,
+      syncMode: `on-demand`,
+      sync: {
+        sync: ({ begin, write, commit, markReady }) => {
+          begin()
+          write({
+            type: `insert`,
+            value: { id: `cached`, value: `available` },
+          })
+          commit()
+          markReady()
+          return {
+            loadSubset: () => Promise.reject(error),
+          }
+        },
+      },
+    })
+    const subscription = collection.subscribeChanges(() => {}, {
+      includeInitialState: false,
+    })
+    const failures: Array<unknown> = []
+    subscription.on(`loadSubset:error`, (event) => failures.push(event.error))
+
+    subscription.requestSnapshot({ optimizedOnly: false })
+    await flushPromises()
+
+    expect(subscription.status).toBe(`ready`)
+    expect(collection.get(`cached`)).toMatchObject({ value: `available` })
+    expect(subscription.lastError).toBe(error)
+    expect(failures).toEqual([error])
+
+    subscription.unsubscribe()
+    await collection.cleanup()
+  })
+
+  it(`records a synchronously thrown subset failure`, async () => {
+    const error = new Error(`synchronous subset failure`)
+    const collection = createCollection<{ id: string }>({
+      id: `synchronous-subset-error`,
+      getKey: (item) => item.id,
+      syncMode: `on-demand`,
+      sync: {
+        sync: ({ markReady }) => {
+          markReady()
+          return {
+            loadSubset: () => {
+              throw error
+            },
+          }
+        },
+      },
+    })
+    const subscription = collection.subscribeChanges(() => {}, {
+      includeInitialState: false,
+    })
+    const failures: Array<unknown> = []
+    subscription.on(`loadSubset:error`, (event) => failures.push(event.error))
+
+    expect(() =>
+      subscription.requestSnapshot({ optimizedOnly: false }),
+    ).toThrow(error)
+    expect(subscription.lastError).toBe(error)
+    expect(failures).toEqual([error])
+
+    subscription.unsubscribe()
+    await collection.cleanup()
+  })
+
+  it(`reports a rejected subset replay after truncate`, async () => {
+    const error = new Error(`truncate replay failed`)
+    let truncateSource: () => void = () => {
+      throw new Error(`source has not started`)
+    }
+    let loadCount = 0
+    const collection = createCollection<{ id: string }>({
+      id: `truncate-subset-error`,
+      getKey: (item) => item.id,
+      syncMode: `on-demand`,
+      sync: {
+        sync: ({ begin, commit, markReady, truncate }) => {
+          markReady()
+          truncateSource = () => {
+            begin()
+            truncate()
+            commit()
+          }
+          return {
+            loadSubset: () => {
+              loadCount++
+              return loadCount === 1 ? Promise.resolve() : Promise.reject(error)
+            },
+          }
+        },
+      },
+    })
+    const subscription = collection.subscribeChanges(() => {}, {
+      includeInitialState: false,
+    })
+    const failures: Array<unknown> = []
+    subscription.on(`loadSubset:error`, (event) => failures.push(event.error))
+
+    subscription.requestSnapshot({ optimizedOnly: false })
+    await flushPromises()
+    truncateSource()
+    await flushPromises()
+
+    expect(subscription.status).toBe(`ready`)
+    expect(subscription.lastError).toBe(error)
+    expect(failures).toEqual([error])
+
+    subscription.unsubscribe()
+    await collection.cleanup()
+  })
+
+  it(`retains a subset after a synchronous truncate replay failure`, async () => {
+    const error = new Error(`synchronous truncate replay failed`)
+    let truncateSource: () => void = () => {
+      throw new Error(`source has not started`)
+    }
+    let loadCount = 0
+    let unloadCount = 0
+    const collection = createCollection<{ id: string }>({
+      id: `synchronous-truncate-subset-error`,
+      getKey: (item) => item.id,
+      syncMode: `on-demand`,
+      sync: {
+        sync: ({ begin, commit, markReady, truncate }) => {
+          markReady()
+          truncateSource = () => {
+            begin()
+            truncate()
+            commit()
+          }
+          return {
+            loadSubset: () => {
+              loadCount++
+              if (loadCount === 2) throw error
+              return true
+            },
+            unloadSubset: () => {
+              unloadCount++
+            },
+          }
+        },
+      },
+    })
+    const subscription = collection.subscribeChanges(() => {}, {
+      includeInitialState: false,
+    })
+
+    subscription.requestSnapshot({ optimizedOnly: false })
+    truncateSource()
+    await flushPromises()
+    truncateSource()
+    await flushPromises()
+
+    expect(loadCount).toBe(3)
+    expect(subscription.lastError).toBe(error)
+
+    subscription.unsubscribe()
+    expect(unloadCount).toBe(1)
+    await collection.cleanup()
+  })
+
+  it(`scopes a subset failure to the subscription that requested it`, async () => {
+    const error = new Error(`first subscription failed`)
+    let loadCount = 0
+    const collection = createCollection<{ id: string }>({
+      id: `scoped-subset-error`,
+      getKey: (item) => item.id,
+      syncMode: `on-demand`,
+      sync: {
+        sync: ({ markReady }) => {
+          markReady()
+          return {
+            loadSubset: () => {
+              loadCount++
+              return loadCount === 1 ? Promise.reject(error) : Promise.resolve()
+            },
+          }
+        },
+      },
+    })
+    const failing = collection.subscribeChanges(() => {}, {
+      includeInitialState: false,
+    })
+    const healthy = collection.subscribeChanges(() => {}, {
+      includeInitialState: false,
+    })
+
+    failing.requestSnapshot({ optimizedOnly: false })
+    healthy.requestSnapshot({ optimizedOnly: false })
+    await flushPromises()
+
+    expect(collection.status).toBe(`ready`)
+    expect(failing.lastError).toBe(error)
+    expect(healthy.lastError).toBeUndefined()
+
+    failing.unsubscribe()
+    healthy.unsubscribe()
+    await collection.cleanup()
+  })
+
+  it(`does not report an aborted subset request as a failure`, async () => {
+    const cancellation = new Error(`obsolete subset request`)
+    cancellation.name = `AbortError`
+    const collection = createCollection<{ id: string }>({
+      id: `aborted-subset-request`,
+      getKey: (item) => item.id,
+      syncMode: `on-demand`,
+      sync: {
+        sync: ({ markReady }) => {
+          markReady()
+          return {
+            loadSubset: ({ signal }) =>
+              new Promise<void>((_resolve, reject) => {
+                signal?.addEventListener(`abort`, () => reject(cancellation), {
+                  once: true,
+                })
+              }),
+          }
+        },
+      },
+    })
+    const controller = new AbortController()
+    const failures: Array<unknown> = []
+    const subscription = collection.subscribeChanges(() => {}, {
+      includeInitialState: false,
+    })
+    subscription.on(`loadSubset:error`, (event) => failures.push(event.error))
+
+    subscription.requestSnapshot({
+      optimizedOnly: false,
+      signal: controller.signal,
+    })
+    controller.abort()
+    await flushPromises()
+
+    expect(subscription.status).toBe(`ready`)
+    expect(subscription.lastError).toBeUndefined()
+    expect(failures).toEqual([])
+
+    subscription.unsubscribe()
+    await collection.cleanup()
+  })
+
   it(`unsubscribe clears event listeners`, () => {
     const collection = createCollection<{ id: string; value: string }>({
       id: `test`,
