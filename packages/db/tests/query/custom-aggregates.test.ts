@@ -571,9 +571,9 @@ describe(`custom aggregate functions`, () => {
               .groupBy(({ todo }) => todo.listId)
               .select(({ todo }) => ({
                 listId: todo.listId,
-                value: new Aggregate(`nope`, [
+                value: new Aggregate<number>(`nope`, [
                   toExpression(todo.points),
-                ]) as any,
+                ]),
               })),
         })
       } catch (error) {
