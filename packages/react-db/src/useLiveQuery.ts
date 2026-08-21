@@ -67,11 +67,11 @@ type ConfiguredQueryBuilder<TContext extends Context> = Extract<
   QueryBuilder<TContext>
 >
 
-export type EnabledUseLiveQueryConfig<TContext extends Context> =
+export type UseLiveQueryConfig<TContext extends Context> =
   UseLiveQueryConfigOptions<TContext> &
     Pick<LiveQueryCollectionConfig<TContext>, `query`>
 
-export type UseLiveQueryConfig<TContext extends Context> =
+export type ConditionalUseLiveQueryConfig<TContext extends Context> =
   UseLiveQueryConfigOptions<TContext> & {
     query:
       | ConfiguredQueryBuilder<TContext>
@@ -506,7 +506,7 @@ export function useLiveQuery<
  */
 // Overload 6: Accept config object
 export function useLiveQuery<TContext extends Context>(
-  config: EnabledUseLiveQueryConfig<TContext>,
+  config: UseLiveQueryConfig<TContext>,
 ): {
   state: Map<string | number, GetResult<TContext>>
   data: InferResultType<TContext>
@@ -522,7 +522,7 @@ export function useLiveQuery<TContext extends Context>(
 
 // Overload 7: Accept config object with a query that can return undefined/null
 export function useLiveQuery<TContext extends Context>(
-  config: UseLiveQueryConfig<TContext>,
+  config: ConditionalUseLiveQueryConfig<TContext>,
 ): {
   state: Map<string | number, GetResult<TContext>> | undefined
   data: InferResultType<TContext> | undefined
@@ -551,6 +551,23 @@ export function useLiveQuery<TContext extends Context>(
   isError: boolean
   isCleanedUp: boolean
   isEnabled: true // Always true when query always returns a builder
+}
+
+// Overload 9: Accept config object with legacy deps and a query that can return undefined/null
+export function useLiveQuery<TContext extends Context>(
+  config: ConditionalUseLiveQueryConfig<TContext>,
+  deps: Array<unknown>,
+): {
+  state: Map<string | number, GetResult<TContext>> | undefined
+  data: InferResultType<TContext> | undefined
+  collection: Collection<GetResult<TContext>, string | number, {}> | undefined
+  status: UseLiveQueryStatus
+  isLoading: boolean
+  isReady: boolean
+  isIdle: boolean
+  isError: boolean
+  isCleanedUp: boolean
+  isEnabled: boolean
 }
 
 /**
@@ -582,7 +599,7 @@ export function useLiveQuery<TContext extends Context>(
  *
  * return <div>{data.map(item => <Item key={item.id} {...item} />)}</div>
  */
-// Overload 9: Accept pre-created live query collection
+// Overload 10: Accept pre-created live query collection
 export function useLiveQuery<
   TResult extends object,
   TKey extends string | number,

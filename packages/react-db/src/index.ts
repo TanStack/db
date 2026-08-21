@@ -1,6 +1,7 @@
 // Re-export all public APIs
 export { useLiveQuery } from './useLiveQuery'
 export type {
+  ConditionalUseLiveQueryConfig,
   LiveQueryKey,
   UseLiveQueryConfig,
   UseLiveQueryStatus,

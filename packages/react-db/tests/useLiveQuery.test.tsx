@@ -2051,6 +2051,48 @@ describe(`Query Collections`, () => {
       expect(result.current.isEnabled).toBe(false)
     })
 
+    it(`disables a config query with deprecated dependencies`, async () => {
+      const warnSpy = vi.spyOn(console, `warn`).mockImplementation(() => {})
+      const collection = createCollection(
+        mockSyncCollectionOptions<Person>({
+          id: `conditional-config-deps-test`,
+          getKey: (person: Person) => person.id,
+          initialData: initialPersons,
+        }),
+      )
+
+      const { result, rerender } = renderHook(
+        ({ enabled }: { enabled: boolean }) =>
+          useLiveQuery(
+            {
+              query: (q) => {
+                if (!enabled) return undefined
+                return q
+                  .from({ persons: collection })
+                  .where(({ persons }) => gt(persons.age, 30))
+              },
+            },
+            [enabled],
+          ),
+        { initialProps: { enabled: false } },
+      )
+
+      expect(result.current.status).toBe(`disabled`)
+      expect(result.current.isEnabled).toBe(false)
+
+      rerender({ enabled: true })
+
+      await waitFor(() => expect(result.current.data).toHaveLength(1))
+      expect(result.current.status).toBe(`ready`)
+      expect(result.current.isEnabled).toBe(true)
+
+      rerender({ enabled: false })
+
+      expect(result.current.status).toBe(`disabled`)
+      expect(result.current.isEnabled).toBe(false)
+      warnSpy.mockRestore()
+    })
+
     it(`should handle callback returning undefined without a dependency array`, async () => {
       const collection = createCollection(
         mockSyncCollectionOptions<Person>({

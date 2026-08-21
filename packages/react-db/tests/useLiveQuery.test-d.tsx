@@ -20,9 +20,10 @@ import type { OutputWithVirtual } from '../../db/tests/utils'
 import type { SingleResult } from '../../db/src/types'
 import type { QueryBuilder } from '../../db/src/query/index'
 import type {
+  ConditionalUseLiveQueryConfig,
   UseLiveQueryConfig,
   UseLiveQueryStatus,
-} from '../src/useLiveQuery'
+} from '../src/index'
 
 type Person = {
   id: string
@@ -112,7 +113,7 @@ describe(`useLiveQuery type assertions`, () => {
       .findOne()
     type QueryContext =
       typeof query extends QueryBuilder<infer TContext> ? TContext : never
-    const config: UseLiveQueryConfig<QueryContext> = {
+    const config: ConditionalUseLiveQueryConfig<QueryContext> = {
       queryKey: [collection.id, enabled],
       query: () => (enabled ? query : undefined),
     }
@@ -120,6 +121,55 @@ describe(`useLiveQuery type assertions`, () => {
     const { result } = renderHook(() => {
       return useLiveQuery(config)
     })
+
+    expectTypeOf(result.current.data).toMatchTypeOf<
+      OutputWithVirtual<Person> | undefined
+    >()
+    expectTypeOf(result.current.status).toEqualTypeOf<UseLiveQueryStatus>()
+    expectTypeOf(result.current.isEnabled).toEqualTypeOf<boolean>()
+  })
+
+  it(`accepts an annotated enabled config in useLiveSuspenseQuery`, () => {
+    const collection = createCollection(
+      mockSyncCollectionOptions<Person>({
+        id: `test-annotated-suspense-config`,
+        getKey: (person: Person) => person.id,
+        initialData: [],
+      }),
+    )
+    const query = new Query().from({ collection })
+    type QueryContext =
+      typeof query extends QueryBuilder<infer TContext> ? TContext : never
+    const config: UseLiveQueryConfig<QueryContext> = {
+      query: () => query,
+    }
+
+    const { result } = renderHook(() => useLiveSuspenseQuery(config))
+
+    expectTypeOf(result.current.data).toMatchTypeOf<
+      Array<OutputWithVirtual<Person>>
+    >()
+  })
+
+  it(`types a conditional config with deprecated dependencies`, () => {
+    const collection = createCollection(
+      mockSyncCollectionOptions<Person>({
+        id: `test-conditional-config-deps`,
+        getKey: (person: Person) => person.id,
+        initialData: [],
+      }),
+    )
+    const enabled = null as unknown as boolean
+
+    const { result } = renderHook(() =>
+      useLiveQuery(
+        {
+          query: (q) =>
+            enabled ? q.from({ collection }).findOne() : undefined,
+        },
+        [enabled],
+      ),
+    )
 
     expectTypeOf(result.current.data).toMatchTypeOf<
       OutputWithVirtual<Person> | undefined
