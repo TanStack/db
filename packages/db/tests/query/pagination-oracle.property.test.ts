@@ -6,14 +6,13 @@ import { BTreeIndex } from '../../src/index.js'
 import { createLiveQueryCollection } from '../../src/query/live-query-collection.js'
 import { PropRef } from '../../src/query/ir.js'
 import { expectAssertionFailure } from '../expected-failure.js'
-import { TraceAssertionError } from '../trace-runner.js'
 import {
-  flushPromises,
-  mockSyncCollectionOptions,
   oracleRandomParameters,
   readOracleRunConfig,
-} from '../utils.js'
-import type { BasicExpression } from '../../src/query/ir.js'
+} from '../oracle-config.js'
+import { evaluateReferenceExpression } from '../reference-expression.js'
+import { TraceAssertionError } from '../trace-runner.js'
+import { flushPromises, mockSyncCollectionOptions } from '../utils.js'
 import type { LoadSubsetOptions } from '../../src/types.js'
 
 type PageRow = {
@@ -37,6 +36,16 @@ type MultiOrderScenario = {
   primary: MultiOrderTerm
   secondary: MultiOrderTerm
   limit: number
+}
+
+type NullableCursorRow = {
+  id: number
+  rank: number | null
+}
+
+type NullableCursorScenario = {
+  rank: number
+  direction: `asc` | `desc`
 }
 
 type PaginationWindow = {
@@ -90,6 +99,15 @@ class PendingMutationTraceAssertionError extends TraceAssertionError {
   }
 }
 
+class PendingHistoryTraceAssertionError extends TraceAssertionError {
+  constructor(
+    cause: unknown,
+    readonly deliveredRows: ReadonlyArray<PageRow>,
+  ) {
+    super(0, cause)
+  }
+}
+
 type PendingHistoryScenario = {
   ranks: ReadonlyArray<number>
   direction: `asc` | `desc`
@@ -98,11 +116,6 @@ type PendingHistoryScenario = {
   wideLimit: number
   firstRank: number
   secondRank: number
-}
-
-type PendingHistoryObservation = {
-  rows: Array<PageRow>
-  modeledDeliveredRows: Array<PageRow>
 }
 
 const scenarioArbitrary: fc.Arbitrary<PaginationScenario> = fc.record({
@@ -296,6 +309,12 @@ const multiOrderScenarioArbitrary: fc.Arbitrary<MultiOrderScenario> = fc
     limit: Math.min(requestedLimit, rows.length),
   }))
 
+const nullableCursorScenarioArbitrary: fc.Arbitrary<NullableCursorScenario> =
+  fc.record({
+    rank: fc.integer({ min: -2, max: 2 }),
+    direction: fc.constantFrom(`asc` as const, `desc` as const),
+  })
+
 const { multiplier, replaySeed } = readOracleRunConfig()
 const orderedScenarioRuns = 12 * multiplier
 const transitionScenarioRuns = 8 * multiplier
@@ -319,62 +338,20 @@ function referenceWindowRows(
   direction: `asc` | `desc`,
   window: PaginationWindow,
 ): Array<PageRow> {
-  const directionFactor = direction === `asc` ? 1 : -1
   return [...rows]
     .sort(
       (left, right) =>
-        (left.rank - right.rank) * directionFactor || left.id - right.id,
+        (left.rank - right.rank) * (direction === `asc` ? 1 : -1) ||
+        left.id - right.id,
     )
     .slice(window.offset, window.offset + window.limit)
     .map((row) => ({ ...row }))
 }
 
-function readReference(expression: BasicExpression, row: PageRow): unknown {
-  if (expression.type === `val`) return expression.value
-  if (expression.type === `ref`) {
-    let value: unknown = row
-    for (const segment of expression.path) {
-      if (typeof value !== `object` || value === null) return undefined
-      value = (value as Record<string, unknown>)[segment]
-    }
-    return value
-  }
-
-  const args = expression.args.map((argument) => readReference(argument, row))
-  switch (expression.name) {
-    case `and`:
-      return args.every(Boolean)
-    case `or`:
-      return args.some(Boolean)
-    case `eq`:
-      return args[0] === args[1]
-    case `gt`:
-      return compareReferenceValues(args[0], args[1]) > 0
-    case `gte`:
-      return compareReferenceValues(args[0], args[1]) >= 0
-    case `lt`:
-      return compareReferenceValues(args[0], args[1]) < 0
-    case `lte`:
-      return compareReferenceValues(args[0], args[1]) <= 0
-    default:
-      throw new Error(`unsupported reference expression: ${expression.name}`)
-  }
-}
-
-function compareReferenceValues(left: unknown, right: unknown): number {
-  if (typeof left === `number` && typeof right === `number`) {
-    return left === right ? 0 : left < right ? -1 : 1
-  }
-  if (typeof left === `string` && typeof right === `string`) {
-    return left === right ? 0 : left < right ? -1 : 1
-  }
-  throw new Error(`cursor comparison requires like-typed numbers or strings`)
-}
-
-function rowsForLoadSubset(
-  rows: ReadonlyArray<PageRow>,
+function rowsForLoadSubset<TRow extends { id: number }>(
+  rows: ReadonlyArray<TRow>,
   options: LoadSubsetOptions,
-): Array<PageRow> {
+): Array<TRow> {
   if (!options.cursor) {
     const start = options.offset ?? 0
     const end =
@@ -383,14 +360,14 @@ function rowsForLoadSubset(
   }
 
   const current = rows.filter((row) =>
-    Boolean(readReference(options.cursor!.whereCurrent, row)),
+    Boolean(evaluateReferenceExpression(options.cursor!.whereCurrent, row)),
   )
   const from = rows.filter((row) =>
-    Boolean(readReference(options.cursor!.whereFrom, row)),
+    Boolean(evaluateReferenceExpression(options.cursor!.whereFrom, row)),
   )
   const limitedFrom =
     options.limit === undefined ? from : from.slice(0, options.limit)
-  const requested = new Map<number, PageRow>()
+  const requested = new Map<number, TRow>()
   for (const row of [...current, ...limitedFrom]) requested.set(row.id, row)
   return [...requested.values()]
 }
@@ -595,6 +572,119 @@ async function runMultiOrderScenarioWithKnownFailures(
   }
 }
 
+async function runNullableCursorScenario(
+  scenario: NullableCursorScenario,
+): Promise<void> {
+  const rows: Array<NullableCursorRow> = [
+    { id: 1, rank: null },
+    { id: 2, rank: scenario.rank },
+  ]
+  const orderedRows = [...rows].sort(
+    (left, right) =>
+      compareNullableNumber(left.rank, right.rank, {
+        direction: scenario.direction,
+        nulls: `first`,
+      }) || left.id - right.id,
+  )
+  const pending: Array<PendingCursorLoad> = []
+  let begin!: () => void
+  let write!: (message: { type: `insert`; value: NullableCursorRow }) => void
+  let commit!: () => void
+  const source = createCollection<NullableCursorRow>({
+    id: `pagination-nullable-cursor-source-${collectionSequence++}`,
+    getKey: (row) => row.id,
+    syncMode: `on-demand`,
+    startSync: true,
+    autoIndex: `eager`,
+    defaultIndexType: BTreeIndex,
+    sync: {
+      sync: (params) => {
+        begin = params.begin
+        write = params.write
+        commit = params.commit
+        params.markReady()
+        return {
+          loadSubset: (options: LoadSubsetOptions) => {
+            const deferred = createDeferred<void>()
+            pending.push({ options, deferred })
+            return deferred.promise
+          },
+        }
+      },
+    },
+  })
+  const live = createLiveQueryCollection((query) =>
+    query
+      .from({ row: source })
+      .orderBy(({ row }) => row.rank, {
+        direction: scenario.direction,
+        nulls: `first`,
+      })
+      .orderBy(({ row }) => row.id, `asc`)
+      .limit(1),
+  )
+
+  try {
+    const preload = live.preload()
+    expect(pending).toHaveLength(1)
+    const request = pending[0]!
+    begin()
+    for (const row of rowsForLoadSubset(orderedRows, request.options)) {
+      write({ type: `insert`, value: { ...row } })
+    }
+    commit()
+    request.settled = true
+    request.deferred.resolve()
+    await preload
+
+    try {
+      expect(Array.from(live.values(), ({ id }) => id)).toEqual([1])
+    } catch (error) {
+      throw new TraceAssertionError(0, error)
+    }
+  } finally {
+    for (const request of pending) request.deferred.resolve()
+    live.cleanup()
+    source.cleanup()
+  }
+}
+
+function isKnownNullableCursorOrderingFailure(
+  scenario: NullableCursorScenario,
+  error: unknown,
+): boolean {
+  if (
+    scenario.direction !== `asc` ||
+    !(error instanceof TraceAssertionError) ||
+    error.checkpoint !== 0 ||
+    typeof error.cause !== `object` ||
+    error.cause === null ||
+    !(`actual` in error.cause) ||
+    !(`expected` in error.cause)
+  ) {
+    return false
+  }
+  return (
+    isNumberArray(error.cause.actual) &&
+    error.cause.actual.length === 1 &&
+    error.cause.actual[0] === 2 &&
+    isNumberArray(error.cause.expected) &&
+    error.cause.expected.length === 1 &&
+    error.cause.expected[0] === 1
+  )
+}
+
+async function runNullableCursorScenarioWithKnownFailures(
+  scenario: NullableCursorScenario,
+): Promise<void> {
+  try {
+    await runNullableCursorScenario(scenario)
+  } catch (error) {
+    if (isKnownNullableCursorOrderingFailure(scenario, error)) return
+    throw error
+  }
+}
+
 async function runPaginationStateScenario(
   scenario: PaginationStateScenario,
 ): Promise<void> {
@@ -717,10 +807,14 @@ type PageRowDifference = {
   expected: Array<PageRow>
 }
 
-function readPageRowDifference(error: unknown): PageRowDifference | undefined {
+function readPageRowDifference(
+  error: unknown,
+  acceptsCheckpoint: (checkpoint: number) => boolean = (checkpoint) =>
+    checkpoint >= 1,
+): PageRowDifference | undefined {
   if (
     !(error instanceof TraceAssertionError) ||
-    error.checkpoint < 1 ||
+    !acceptsCheckpoint(error.checkpoint) ||
     typeof error.cause !== `object` ||
     error.cause === null ||
     !(`actual` in error.cause) ||
@@ -742,24 +836,7 @@ function readPageRowDifferenceAtCheckpoint(
   error: unknown,
   checkpoint: number,
 ): PageRowDifference | undefined {
-  if (
-    !(error instanceof TraceAssertionError) ||
-    error.checkpoint !== checkpoint ||
-    typeof error.cause !== `object` ||
-    error.cause === null ||
-    !(`actual` in error.cause) ||
-    !(`expected` in error.cause) ||
-    !isPageRowArray(error.cause.actual) ||
-    !isPageRowArray(error.cause.expected)
-  ) {
-    return undefined
-  }
-
-  return {
-    checkpoint,
-    actual: error.cause.actual,
-    expected: error.cause.expected,
-  }
+  return readPageRowDifference(error, (value) => value === checkpoint)
 }
 
 function sameRows(
@@ -798,7 +875,6 @@ function replayOrderedSubscriptionWindow(
       limit: scenario.initialWindow.offset + scenario.initialWindow.limit,
     }).map((row) => [row.id, row]),
   )
-  const sentIds = new Set(sentRows.keys())
   let biggest = referenceWindowRows(
     [...sentRows.values()],
     scenario.direction,
@@ -810,15 +886,20 @@ function replayOrderedSubscriptionWindow(
     referenceWindowRows([...sentRows.values()], scenario.direction, window)
 
   const refill = () => {
-    while (biggest !== undefined && currentResult().length < window.limit) {
-      const needed = window.limit - currentResult().length
-      const orderedRows = referenceWindowRows(
-        [...rows.values()],
-        scenario.direction,
-        { offset: 0, limit: rows.size },
-      )
+    const orderedRows = referenceWindowRows(
+      [...rows.values()],
+      scenario.direction,
+      {
+        offset: 0,
+        limit: rows.size,
+      },
+    )
+    while (biggest !== undefined) {
+      const currentLength = currentResult().length
+      if (currentLength >= window.limit) break
+      const needed = window.limit - currentLength
       const atCursor = orderedRows.filter(
-        (row) => row.rank === biggest!.rank && !sentIds.has(row.id),
+        (row) => row.rank === biggest!.rank && !sentRows.has(row.id),
       )
       const afterCursor = orderedRows
         .filter(
@@ -827,14 +908,13 @@ function replayOrderedSubscriptionWindow(
               { id: 0, rank: row.rank },
               { id: 0, rank: biggest!.rank },
               scenario.direction,
-            ) > 0 && !sentIds.has(row.id),
+            ) > 0 && !sentRows.has(row.id),
         )
         .slice(0, Math.max(0, needed - atCursor.length))
       const loaded = [...atCursor, ...afterCursor]
       if (loaded.length === 0) break
 
       for (const row of loaded) {
-        sentIds.add(row.id)
         sentRows.set(row.id, { ...row })
         if (comparePageRows(biggest, row, scenario.direction) < 0) {
           biggest = row
@@ -851,7 +931,6 @@ function replayOrderedSubscriptionWindow(
       if (previous?.rank !== action.rank) {
         const row = { id: action.id, rank: action.rank }
         rows.set(action.id, row)
-        sentIds.add(row.id)
         sentRows.set(row.id, { ...row })
         if (
           biggest === undefined ||
@@ -862,7 +941,7 @@ function replayOrderedSubscriptionWindow(
       }
     } else {
       rows.delete(action.id)
-      if (sentIds.delete(action.id)) sentRows.delete(action.id)
+      sentRows.delete(action.id)
     }
     refill()
   }
@@ -1329,10 +1408,30 @@ async function runPendingMutationScenario(
 
       finalLimit += 1
       const retry = live.utils.setWindow({ offset: 0, limit: finalLimit })
-      if (retry instanceof Promise) outstanding.push(retry)
-      expect(pending.length).toBeLessThanOrEqual(2)
-      if (pending.length === 2) await settlePending()
-      if (retry instanceof Promise) await retry
+      let retrySettled = retry === true
+      const observedRetry =
+        retry instanceof Promise
+          ? retry.then(
+              () => {
+                retrySettled = true
+              },
+              (error: unknown) => {
+                retrySettled = true
+                throw error
+              },
+            )
+          : undefined
+      if (pending.length === 2) {
+        await settlePending()
+      } else {
+        await Promise.resolve()
+        await Promise.resolve()
+        expect(retrySettled).toBe(true)
+      }
+      if (observedRetry) {
+        outstanding.push(observedRetry)
+        await observedRetry
+      }
     }
 
     try {
@@ -1655,20 +1754,16 @@ async function runPendingHistoryScenario(
         scenario.direction,
         { offset: 0, limit: scenario.wideLimit },
       )
-      const modeledDeliveredRows = referenceWindowRows(
-        [...rows.values()].filter(({ id }) => deliveredIds.has(id)),
-        scenario.direction,
-        { offset: 0, limit: scenario.wideLimit },
-      )
-      expect({
-        rows: actual,
-        modeledDeliveredRows,
-      } satisfies PendingHistoryObservation).toEqual({
-        rows: expected,
-        modeledDeliveredRows,
-      } satisfies PendingHistoryObservation)
+      expect(actual).toEqual(expected)
     } catch (error) {
-      throw new TraceAssertionError(0, error)
+      throw new PendingHistoryTraceAssertionError(
+        error,
+        referenceWindowRows(
+          [...rows.values()].filter(({ id }) => deliveredIds.has(id)),
+          scenario.direction,
+          { offset: 0, limit: scenario.wideLimit },
+        ),
+      )
     }
   } finally {
     for (const request of pending) request.deferred.resolve()
@@ -1702,48 +1797,25 @@ function pendingHistoryRows(
   return rows
 }
 
-function isPendingHistoryObservation(
-  value: unknown,
-): value is PendingHistoryObservation {
-  return (
-    typeof value === `object` &&
-    value !== null &&
-    `rows` in value &&
-    isPageRowArray(value.rows) &&
-    `modeledDeliveredRows` in value &&
-    isPageRowArray(value.modeledDeliveredRows)
-  )
-}
-
 function isKnownLatePendingHistoryUnderfill(
   scenario: PendingHistoryScenario,
   error: unknown,
 ): boolean {
-  if (
-    !(error instanceof TraceAssertionError) ||
-    error.checkpoint !== 0 ||
-    typeof error.cause !== `object` ||
-    error.cause === null ||
-    !(`actual` in error.cause) ||
-    !(`expected` in error.cause) ||
-    !isPendingHistoryObservation(error.cause.actual) ||
-    !isPendingHistoryObservation(error.cause.expected)
-  ) {
+  if (!(error instanceof PendingHistoryTraceAssertionError)) {
     return false
   }
 
-  const actual = error.cause.actual
-  const expected = error.cause.expected
+  const difference = readPageRowDifferenceAtCheckpoint(error, 0)
+  if (!difference) return false
   const authoritative = referenceWindowRows(
     [...pendingHistoryRows(scenario).values()],
     scenario.direction,
     { offset: 0, limit: scenario.wideLimit },
   )
   return (
-    sameRows(expected.rows, authoritative) &&
-    sameRows(actual.modeledDeliveredRows, expected.modeledDeliveredRows) &&
-    !sameRows(actual.modeledDeliveredRows, authoritative) &&
-    sameRows(actual.rows, actual.modeledDeliveredRows)
+    sameRows(difference.expected, authoritative) &&
+    !sameRows(error.deliveredRows, authoritative) &&
+    sameRows(difference.actual, error.deliveredRows)
   )
 }
 
@@ -2016,6 +2088,31 @@ describe(`pagination recomputation oracle`, () => {
     runMultiOrderScenarioWithKnownFailures,
   )
 
+  fcTest.prop([nullableCursorScenarioArbitrary], {
+    numRuns: transitionScenarioRuns,
+    seed: 1665,
+  })(
+    `matches nullable cursor ordering while an async response is pending for a fixed seed`,
+    runNullableCursorScenarioWithKnownFailures,
+  )
+
+  fcTest.prop(
+    [nullableCursorScenarioArbitrary],
+    oracleRandomParameters(transitionScenarioRuns, replaySeed),
+  )(
+    `matches nullable cursor ordering while an async response is pending for a random or replayed seed`,
+    runNullableCursorScenarioWithKnownFailures,
+  )
+
+  it(`rejects collateral output from the nullable cursor classifier`, () => {
+    expect(
+      isKnownNullableCursorOrderingFailure(
+        { rank: 0, direction: `asc` },
+        assertionDifference(0, [], [1]),
+      ),
+    ).toBe(false)
+  })
+
   it(`rejects collateral output from the secondary-order classifier`, () => {
     const scenario: MultiOrderScenario = {
       rows: [
@@ -2159,6 +2256,36 @@ describe(`pagination recomputation oracle`, () => {
   })(
     `matches recomputation when source mutations cross a pending cursor response for a fixed seed`,
     runPendingMutationScenarioWithKnownFailures,
+  )
+
+  it.each(
+    ([`insert`, `update`, `delete`] as const).flatMap((mutationKind) =>
+      ([`resolve`, `reject`] as const).flatMap((responseOutcome) =>
+        ([`before-response`, `after-response`] as const).map(
+          (timing) => [mutationKind, responseOutcome, timing] as const,
+        ),
+      ),
+    ),
+  )(
+    `covers pending %s with a %s response %s deterministically`,
+    async (mutationKind, responseOutcome, timing) => {
+      const mutation: PendingMutation =
+        mutationKind === `insert`
+          ? { type: `insert`, row: { id: 5, rank: -1 } }
+          : mutationKind === `update`
+            ? { type: `update`, row: { id: 2, rank: -1 } }
+            : { type: `delete`, id: 2 }
+      await runPendingMutationScenarioWithKnownFailures(
+        {
+          ranks: [0, 1, 2, 3],
+          direction: `asc`,
+          limit: 2,
+          mutation,
+          responseOutcome,
+        },
+        timing,
+      )
+    },
   )
 
   fcTest.prop(

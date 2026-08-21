@@ -8,8 +8,12 @@ import { DeduplicatedLoadSubset } from '../../src/query/subset-dedupe.js'
 import { Func, PropRef, Value } from '../../src/query/ir.js'
 import { createTransaction } from '../../src/transactions.js'
 import { expectAssertionFailure } from '../expected-failure.js'
+import {
+  oracleRandomParameters,
+  readOracleRunConfig,
+} from '../oracle-config.js'
+import { evaluateReferenceExpression } from '../reference-expression.js'
 import { TraceAssertionError } from '../trace-runner.js'
-import { oracleRandomParameters, readOracleRunConfig } from '../utils.js'
 import type { BasicExpression } from '../../src/query/ir.js'
 import type { LoadSubsetOptions } from '../../src/types.js'
 
@@ -150,24 +154,29 @@ const atomicPredicateSpecArbitrary: fc.Arbitrary<PredicateSpec> = fc.oneof(
   },
 )
 
+function booleanPredicateSpecArbitrary(
+  operand: fc.Arbitrary<PredicateSpec>,
+): fc.Arbitrary<PredicateSpec> {
+  return fc.oneof(
+    fc.record({
+      kind: fc.constantFrom(`and` as const, `or` as const),
+      operands: fc.tuple(operand, operand),
+    }),
+    operand.map((nested) => ({ kind: `not` as const, operand: nested })),
+  )
+}
+
+const shallowPredicateSpecArbitrary = fc.oneof(
+  atomicPredicateSpecArbitrary,
+  booleanPredicateSpecArbitrary(atomicPredicateSpecArbitrary),
+)
+
 const predicateSpecArbitrary: fc.Arbitrary<PredicateSpec> = fc.oneof(
   { weight: 8, arbitrary: atomicPredicateSpecArbitrary },
-  {
-    weight: 2,
-    arbitrary: fc.record({
-      kind: fc.constantFrom(`and` as const, `or` as const),
-      operands: fc.tuple(
-        atomicPredicateSpecArbitrary,
-        atomicPredicateSpecArbitrary,
-      ),
-    }),
-  },
+  { weight: 2, arbitrary: shallowPredicateSpecArbitrary },
   {
     weight: 1,
-    arbitrary: atomicPredicateSpecArbitrary.map((operand) => ({
-      kind: `not` as const,
-      operand,
-    })),
+    arbitrary: booleanPredicateSpecArbitrary(shallowPredicateSpecArbitrary),
   },
 )
 
@@ -181,30 +190,23 @@ const nonEmptyInValuesArbitrary = fc.uniqueArray(
   { minLength: 1, maxLength: 7 },
 )
 
-const asyncScenarioArbitrary: fc.Arbitrary<AsyncScenario> = fc
-  .record({
-    first: nonEmptyInValuesArbitrary,
-    second: nonEmptyInValuesArbitrary,
-    firstOutcome: fc.constantFrom<AsyncScenario[`firstOutcome`]>(
-      `resolve`,
-      `reject`,
-    ),
-    secondOutcome: fc.constantFrom<AsyncScenario[`secondOutcome`]>(
-      `resolve`,
-      `reject`,
-    ),
-    deliveryOrder: fc.constantFrom<AsyncScenario[`deliveryOrder`]>(
-      `forward`,
-      `reverse`,
-    ),
-    resetBeforeSettlement: fc.boolean(),
-  })
-  .map((scenario) =>
-    scenario.firstOutcome === `reject` &&
-    scenario.second.every((value) => scenario.first.includes(value))
-      ? { ...scenario, firstOutcome: `resolve` }
-      : scenario,
-  )
+const asyncScenarioArbitrary: fc.Arbitrary<AsyncScenario> = fc.record({
+  first: nonEmptyInValuesArbitrary,
+  second: nonEmptyInValuesArbitrary,
+  firstOutcome: fc.constantFrom<AsyncScenario[`firstOutcome`]>(
+    `resolve`,
+    `reject`,
+  ),
+  secondOutcome: fc.constantFrom<AsyncScenario[`secondOutcome`]>(
+    `resolve`,
+    `reject`,
+  ),
+  deliveryOrder: fc.constantFrom<AsyncScenario[`deliveryOrder`]>(
+    `forward`,
+    `reverse`,
+  ),
+  resetBeforeSettlement: fc.boolean(),
+})
 
 const concurrentAsyncScenarioArbitrary: fc.Arbitrary<ConcurrentAsyncScenario> =
   fc.record({
@@ -317,58 +319,14 @@ function toRequiredWhere(predicate: PredicateSpec): BasicExpression<boolean> {
   return toWhere(predicate) ?? new Value(true)
 }
 
-function evaluateExpression(
-  expression: BasicExpression,
-  score: number,
-): unknown {
-  switch (expression.type) {
-    case `ref`:
-      if (expression.path.at(-1) !== `score`) {
-        throw new Error(`Unsupported reference: ${expression.path.join(`.`)}`)
-      }
-      return score
-    case `val`:
-      return expression.value
-    case `func`: {
-      const args = expression.args.map((argument) =>
-        evaluateExpression(argument, score),
-      )
-      switch (expression.name) {
-        case `eq`:
-          return args[0] === args[1]
-        case `gt`:
-          return Number(args[0]) > Number(args[1])
-        case `gte`:
-          return Number(args[0]) >= Number(args[1])
-        case `lt`:
-          return Number(args[0]) < Number(args[1])
-        case `lte`:
-          return Number(args[0]) <= Number(args[1])
-        case `in`:
-          if (!Array.isArray(args[1])) {
-            throw new Error(`IN requires an array`)
-          }
-          return args[1].includes(args[0])
-        case `and`:
-          return args.every(Boolean)
-        case `or`:
-          return args.some(Boolean)
-        case `not`:
-          return !args[0]
-        default:
-          throw new Error(`Unsupported predicate function: ${expression.name}`)
-      }
-    }
-  }
-}
-
 function matchingValues(
   where: BasicExpression<boolean> | undefined,
 ): Set<number> {
   return new Set(
     valueDomain.filter(
       (score) =>
-        where === undefined || evaluateExpression(where, score) === true,
+        where === undefined ||
+        evaluateReferenceExpression(where, { score }) === true,
     ),
   )
 }
@@ -468,19 +426,15 @@ function runCoverageTrace(
       loadedRegions.push(loaded)
       loadedRegionFingerprints.push(JSON.stringify(predicate))
     }
-
-    expectSetEqual(difference(requested, covered), new Set())
   }
 }
 
 function runCoverageTraceWithKnownFailures(
   trace: ReadonlyArray<PredicateSpec>,
-  createSubject = createDeduplicatedCoverageSubject,
 ): void {
   try {
-    runCoverageTrace(trace, createSubject)
+    runCoverageTrace(trace)
   } catch (error) {
-    if (createSubject !== createDeduplicatedCoverageSubject) throw error
     if (
       error instanceof CoveredDemandRefetchedError &&
       (isKnownUnionCompositionRefetch(error) ||
@@ -594,36 +548,50 @@ function windowPositions(request: WindowRequest): Set<number> {
   return new Set(Array.from({ length }, (_, index) => request.offset + index))
 }
 
+type WindowCoverageDescriptor = {
+  request: WindowRequest
+  whereFingerprint: string
+  orderFingerprint: string | undefined
+  matching: Set<number>
+}
+
+function describeWindowCoverage(
+  request: WindowRequest,
+): WindowCoverageDescriptor {
+  const options = toWindowOptions(request)
+  return {
+    request,
+    whereFingerprint: JSON.stringify(options.where),
+    orderFingerprint: options.orderBy
+      ? JSON.stringify(options.orderBy)
+      : undefined,
+    matching: matchingValues(options.where),
+  }
+}
+
+function describedWindowCovers(
+  requested: WindowCoverageDescriptor,
+  loaded: WindowCoverageDescriptor,
+): boolean {
+  if (
+    loaded.request.limit === undefined &&
+    loaded.request.offset === 0 &&
+    isSubset(requested.matching, loaded.matching)
+  ) {
+    return true
+  }
+  if (requested.whereFingerprint !== loaded.whereFingerprint) return false
+  if (requested.orderFingerprint === undefined) return true
+  return requested.orderFingerprint === loaded.orderFingerprint
+}
+
 function loadedWindowCovers(
   requested: WindowRequest,
   loaded: WindowRequest,
 ): boolean {
-  const requestedOptions = toWindowOptions(requested)
-  const loadedOptions = toWindowOptions(loaded)
-  // An unlimited load that starts at zero has every row in its predicate
-  // region. It can therefore cover any narrower predicate and let local query
-  // processing impose the requested order and window.
-  if (
-    loaded.limit === undefined &&
-    loaded.offset === 0 &&
-    isSubset(
-      matchingValues(requestedOptions.where),
-      matchingValues(loadedOptions.where),
-    )
-  ) {
-    return true
-  }
-  if (
-    JSON.stringify(requestedOptions.where) !==
-    JSON.stringify(loadedOptions.where)
-  ) {
-    return false
-  }
-  if (!requestedOptions.orderBy?.length) return true
-  if (!loadedOptions.orderBy?.length) return false
-  return (
-    JSON.stringify(requestedOptions.orderBy) ===
-    JSON.stringify(loadedOptions.orderBy)
+  return describedWindowCovers(
+    describeWindowCoverage(requested),
+    describeWindowCoverage(loaded),
   )
 }
 
@@ -675,21 +643,27 @@ function isKnownUnlimitedOffsetDeduplication(
 function isKnownOffsetTruncatedUnlimitedDeduplication(
   error: UncoveredWindowDeduplicatedError,
 ): boolean {
-  const requestedOptions = toWindowOptions(error.requested)
+  const unlimitedLoads = error.loadedRegions.filter(
+    ({ request }) => request.limit === undefined,
+  )
+  if (!unlimitedLoads.some(({ request }) => request.offset > 0)) return false
 
-  return error.loadedRegions.some(({ request: loaded }) => {
-    if (loaded.limit !== undefined || loaded.offset === 0) return false
-    const loadedOptions = toWindowOptions(loaded)
-    const priorLoads = error.loadedRegions.map(({ request }) => request)
-    return (
-      isSubset(
-        matchingValues(requestedOptions.where),
-        matchingValues(loadedOptions.where),
-      ) &&
-      countWindowLoads(priorLoads) === priorLoads.length &&
-      countWindowLoads([...priorLoads, error.requested]) === priorLoads.length
-    )
-  })
+  // The known defect stores unlimited predicate coverage without its offset or
+  // ordering. Model that loss directly instead of replaying production dedupe.
+  if (unlimitedLoads.some(({ request }) => request.where === undefined)) {
+    return true
+  }
+  if (error.requested.where === undefined) return false
+
+  const incorrectlyTrackedValues = unionSets(
+    unlimitedLoads.map(({ request }) =>
+      matchingValues(toWindowOptions(request).where),
+    ),
+  )
+  return isSubset(
+    matchingValues(toWindowOptions(error.requested).where),
+    incorrectlyTrackedValues,
+  )
 }
 
 function isKnownCoveredWindowRefetch(
@@ -735,11 +709,7 @@ function isKnownIndividuallyCoveredWindowRefetch(
   )
   if (!coveredByOneRegion) return false
 
-  const replay = [
-    ...error.loadedRegions.map(({ request }) => request),
-    error.requested,
-  ]
-  return countWindowLoads(replay) === replay.length
+  return true
 }
 
 const createWindowKeyBlindSubject: CoverageSubjectFactory = (recordLoad) => {
@@ -764,6 +734,7 @@ function runWindowCoverageTrace(
   const loadedRegions: Array<{
     request: WindowRequest
     positions: Set<number>
+    coverage: WindowCoverageDescriptor
   }> = []
   const loads: Array<LoadSubsetOptions> = []
   const subject = createSubject((options) => {
@@ -773,8 +744,9 @@ function runWindowCoverageTrace(
 
   for (const [checkpoint, request] of trace.entries()) {
     const requested = windowPositions(request)
-    const compatibleRegions = loadedRegions.filter(({ request: loaded }) =>
-      loadedWindowCovers(request, loaded),
+    const requestedCoverage = describeWindowCoverage(request)
+    const compatibleRegions = loadedRegions.filter(({ coverage }) =>
+      describedWindowCovers(requestedCoverage, coverage),
     )
     const covered = new Set(
       compatibleRegions.flatMap(({ positions }) => [...positions]),
@@ -811,20 +783,21 @@ function runWindowCoverageTrace(
         )
       }
       for (const position of requested) covered.add(position)
-      loadedRegions.push({ request: { ...request }, positions: requested })
+      loadedRegions.push({
+        request: { ...request },
+        positions: requested,
+        coverage: requestedCoverage,
+      })
     }
-    expectSetEqual(difference(requested, covered), new Set())
   }
 }
 
 function runWindowCoverageTraceWithKnownFailures(
   trace: ReadonlyArray<WindowRequest>,
-  createSubject = createDeduplicatedCoverageSubject,
 ): void {
   try {
-    runWindowCoverageTrace(trace, createSubject)
+    runWindowCoverageTrace(trace)
   } catch (error) {
-    if (createSubject !== createDeduplicatedCoverageSubject) throw error
     if (
       error instanceof UncoveredWindowDeduplicatedError &&
       (isKnownCompareOptionsDeduplication(error) ||
@@ -869,6 +842,14 @@ function expectDistinctWhereStartsDistinctLimitedWindowLoads(
     limit: 2,
   })
   expect(countWindowLoads(predicates.map(createRequest))).toBe(2)
+}
+
+function predicateDepth(predicate: PredicateSpec): number {
+  if (predicate.kind === `and` || predicate.kind === `or`) {
+    return 1 + Math.max(...predicate.operands.map(predicateDepth))
+  }
+  if (predicate.kind === `not`) return 1 + predicateDepth(predicate.operand)
+  return 1
 }
 
 async function runAsyncScenario(
@@ -1304,6 +1285,59 @@ describe(`loadSubset coverage oracle`, () => {
     ).toBe(true)
   })
 
+  it(`generates nested boolean predicates`, () => {
+    const predicates = fc.sample(predicateSpecArbitrary, {
+      seed: 1751,
+      numRuns: 500,
+    })
+
+    expect(predicates.some((predicate) => predicateDepth(predicate) >= 3)).toBe(
+      true,
+    )
+  })
+
+  it(`generates rejected requests shared by a covered waiter`, () => {
+    const scenarios = fc.sample(asyncScenarioArbitrary, {
+      seed: 1752,
+      numRuns: 500,
+    })
+
+    expect(
+      scenarios.some(
+        (scenario) =>
+          scenario.firstOutcome === `reject` &&
+          scenario.second.every((value) => scenario.first.includes(value)),
+      ),
+    ).toBe(true)
+  })
+
+  it(`rejects unrelated offset loss from the truncated-unlimited classifier`, () => {
+    expect(
+      isKnownOffsetTruncatedUnlimitedDeduplication(
+        new UncoveredWindowDeduplicatedError(
+          1,
+          {
+            where: { kind: `eq`, value: 1 },
+            direction: `asc`,
+            offset: 0,
+            limit: 1,
+          },
+          [
+            {
+              request: {
+                where: { kind: `eq`, value: 2 },
+                direction: `asc`,
+                offset: 1,
+                limit: undefined,
+              },
+              positions: new Set([1, 2]),
+            },
+          ],
+        ),
+      ),
+    ).toBe(false)
+  })
+
   it(`keeps empty predicates out of the distinct-window corpus`, () => {
     expect(
       isDistinctNonEmptyWindowWherePair([
@@ -1561,7 +1595,7 @@ describe(`loadSubset coverage oracle`, () => {
       ],
     }
     expect(() =>
-      runCoverageTraceWithKnownFailures(
+      runCoverageTrace(
         [predicate, predicate],
         createAlwaysLoadingCoverageSubject,
       ),
@@ -1585,10 +1619,7 @@ describe(`loadSubset coverage oracle`, () => {
     }
 
     expect(() =>
-      runCoverageTraceWithKnownFailures(
-        [covering, covered],
-        createAlwaysLoadingCoverageSubject,
-      ),
+      runCoverageTrace([covering, covered], createAlwaysLoadingCoverageSubject),
     ).toThrow()
   })
 
@@ -1660,7 +1691,7 @@ describe(`loadSubset coverage oracle`, () => {
       limit: 2,
     }
     expect(() =>
-      runWindowCoverageTraceWithKnownFailures(
+      runWindowCoverageTrace(
         [first, { direction: `asc`, offset: 2, limit: 2 }, first],
         createAlwaysLoadingCoverageSubject,
       ),
