@@ -1,5 +1,11 @@
 # @tanstack/db
 
+## 0.8.2
+
+### Patch Changes
+
+- Propagate initial query sync failures through dependent live queries and readiness promises, including recovery and late subscribers, while preserving a ready cached snapshot on later refetch failures. Let sync adapters pass the original failure to `markError(error)` so readiness promises reject with that cause. Isolate adapter callbacks by sync session, preserve synchronous startup errors, and prevent rejected deduplicated subset requests from creating detached promise rejections. ([#1751](https://github.com/TanStack/db/pull/1751))
+
 ## 0.8.1
 
 ### Patch Changes
