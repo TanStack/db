@@ -1591,7 +1591,7 @@ getRegisteredAggregates() // ReadonlySet<string> of registered names
 unregisterAggregate('bit_or') // true if a registration existed
 ```
 
-Registration is global and case-insensitive. Registering a name that already exists — including a built-in like `sum` — replaces it for queries compiled *afterwards* and logs a warning in development. Queries already compiled keep the implementation they were compiled with, so overriding built-ins can produce inconsistent results across your app; prefer a distinct name. Unregistering a name that shadowed a built-in restores the built-in.
+Registration is global and case-insensitive. Registering a name that already exists — including a built-in like `sum` — replaces it for queries compiled *afterward* and logs a warning in development. Queries already compiled keep the implementation they were compiled with, so overriding built-ins can produce inconsistent results across your app; prefer a distinct name. Unregistering a name that shadowed a built-in restores the built-in.
 
 Custom aggregates work anywhere built-ins do, including `having` and ordering by `$selected.<alias>`. Because factories are plain functions, they cannot be serialized: with SSR, make sure the same registrations run on both the server and the client.
 
