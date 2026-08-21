@@ -9,7 +9,7 @@ title: CollectionStatus
 type CollectionStatus = "idle" | "loading" | "ready" | "error" | "cleaned-up";
 ```
 
-Defined in: [packages/db/src/types.ts:529](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L529)
+Defined in: [packages/db/src/types.ts:536](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L536)
 
 Collection status values for lifecycle management
 
@@ -27,5 +27,6 @@ if (collection.status === "loading") {
 ```ts
 // Status transitions
 // idle → loading → ready (when markReady() is called)
-// Any status can transition to → error or cleaned-up
+// Any active status can transition to → error or cleaned-up
+// error → ready after a successful sync recovery
 ```

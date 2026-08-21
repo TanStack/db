@@ -1084,7 +1084,7 @@ Subscribe to a collection event once
 ### onFirstReady()
 
 ```ts
-onFirstReady(callback): void;
+onFirstReady(callback): () => void;
 ```
 
 Defined in: [packages/db/src/collection/index.ts:467](https://github.com/TanStack/db/blob/main/packages/db/src/collection/index.ts#L467)
@@ -1101,6 +1101,12 @@ Useful for preloading collections
 Function to call when the collection first becomes ready
 
 #### Returns
+
+```ts
+(): void;
+```
+
+##### Returns
 
 `void`
 

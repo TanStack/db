@@ -25,7 +25,7 @@ Defined in: [packages/db/src/types.ts:333](https://github.com/TanStack/db/blob/m
 optional exportSyncMeta: () => unknown;
 ```
 
-Defined in: [packages/db/src/types.ts:362](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L362)
+Defined in: [packages/db/src/types.ts:368](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L368)
 
 Export adapter-specific metadata that lets hydration/persistence resume sync.
 The payload shape is owned by the adapter.
@@ -42,7 +42,7 @@ The payload shape is owned by the adapter.
 optional getSyncMetadata: () => Record<string, unknown>;
 ```
 
-Defined in: [packages/db/src/types.ts:356](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L356)
+Defined in: [packages/db/src/types.ts:362](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L362)
 
 Get the sync metadata for insert operations
 
@@ -60,7 +60,7 @@ Record containing relation information
 optional importSyncMeta: (meta) => void;
 ```
 
-Defined in: [packages/db/src/types.ts:367](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L367)
+Defined in: [packages/db/src/types.ts:373](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L373)
 
 Import adapter-specific metadata produced by exportSyncMeta.
 
@@ -82,7 +82,7 @@ Import adapter-specific metadata produced by exportSyncMeta.
 optional mergeSyncMeta: (current, incoming) => unknown;
 ```
 
-Defined in: [packages/db/src/types.ts:372](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L372)
+Defined in: [packages/db/src/types.ts:378](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L378)
 
 Merge two adapter-specific metadata payloads during hydration.
 
@@ -108,7 +108,7 @@ Merge two adapter-specific metadata payloads during hydration.
 optional rowUpdateMode: "full" | "partial";
 ```
 
-Defined in: [packages/db/src/types.ts:381](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L381)
+Defined in: [packages/db/src/types.ts:387](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L387)
 
 The row update mode used to sync to the collection.
 
@@ -152,9 +152,18 @@ Begin a new sync transaction.
 
 () => `void`
 
+###### markError
+
+(`error?`) => `void`
+
+Signal that initial sync failed before producing a usable snapshot.
+When supplied, `error` is preserved as the rejection reason from `preload()`.
+
 ###### markReady
 
 () => `void`
+
+Signal that a usable initial or recovered snapshot is available.
 
 ###### metadata?
 
