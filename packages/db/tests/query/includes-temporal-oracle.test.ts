@@ -2,6 +2,7 @@ import { fc, test as fcTest } from '@fast-check/vitest'
 import { describe, expect, it, vi } from 'vitest'
 import { createCollection } from '../../src/collection/index.js'
 import { createDeferred } from '../../src/deferred.js'
+import { CollectionIsInErrorStateError } from '../../src/errors.js'
 import { BasicIndex } from '../../src/indexes/basic-index.js'
 import { extractSimpleComparisons } from '../../src/query/expression-helpers.js'
 import { SubsetDemandController } from '../../src/query/live/subset-demand-controller.js'
@@ -767,7 +768,10 @@ async function expectRejectedDemandEntersError(): Promise<void> {
     await flushPromises()
     expect(loadCount).toBe(1)
     expect(live.status).toBe(`error`)
-    expect(preload.preloadSettled).toBe(false)
+    expect(preload.preloadSettled).toBe(true)
+    expect(preload.preloadFailure?.error).toBeInstanceOf(
+      CollectionIsInErrorStateError,
+    )
 
     await live.cleanup()
     await preload.preloadOutcome
