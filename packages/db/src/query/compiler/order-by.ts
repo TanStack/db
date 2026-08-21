@@ -3,7 +3,7 @@ import {
   orderByWithFractionalIndex,
 } from '@tanstack/db-ivm'
 import { defaultComparator, makeComparator } from '../../utils/comparison.js'
-import { PropRef, followRef } from '../ir.js'
+import { PropRef, collectCollectionSources, followRef } from '../ir.js'
 import { ensureIndexForField } from '../../indexes/auto-index.js'
 import { findIndexForField } from '../../utils/index-optimization.js'
 import { compileExpression } from './evaluators.js'
@@ -22,6 +22,7 @@ import type { IndexInterface } from '../../indexes/base-index.js'
 import type { Collection } from '../../collection/index.js'
 
 export type OrderByOptimizationInfo = {
+  sourceId: string
   alias: string
   orderBy: OrderBy
   offset: number
@@ -142,6 +143,7 @@ export function processOrderBy(
     let followRefCollection: Collection | undefined
     let firstColumnValueExtractor: CompiledSingleRowExpression | undefined
     let orderByAlias: string = rawQuery.from.alias
+    let orderBySourceId: string | undefined
 
     // Try to create/find an index on the FIRST orderBy column for lazy loading
     const firstClause = orderByClause[0]!
@@ -156,6 +158,7 @@ export function processOrderBy(
 
       if (followRefResult) {
         followRefCollection = followRefResult.collection
+        orderBySourceId = followRefResult.sourceId
         const fieldName = followRefResult.path[0]
         const compareOpts = buildCompareOptions(
           firstClause,
@@ -211,6 +214,11 @@ export function processOrderBy(
           firstOrderByExpression.path.length > 1
             ? String(firstOrderByExpression.path[0])
             : rawQuery.from.alias
+        orderBySourceId ??= collectCollectionSources(rawQuery).find(
+          (source) =>
+            source.alias === orderByAlias &&
+            source.collection === followRefCollection,
+        )?.sourceId
       }
     }
 
@@ -219,7 +227,7 @@ export function processOrderBy(
     if (!firstColumnValueExtractor) {
       // Skip optimization for non-ref expressions (aggregates, computed values, etc.)
       // The query will still work, but without lazy loading optimization
-    } else {
+    } else if (orderBySourceId) {
       // Build value extractors for all columns (must all be ref expressions for multi-column)
       // Check if all orderBy expressions are ref types (required for multi-column extraction)
       const allColumnsAreRefs = orderByClause.every(
@@ -290,6 +298,7 @@ export function processOrderBy(
       }
 
       orderByOptimizationInfo = {
+        sourceId: orderBySourceId,
         alias: orderByAlias,
         offset: offset ?? 0,
         limit,
@@ -300,11 +309,10 @@ export function processOrderBy(
         orderBy: orderByClause,
       }
 
-      // Store the optimization info keyed by collection ID
-      // Use the followed collection if available, otherwise use the main collection
-      const targetCollectionId = followRefCollection?.id ?? collection.id
-      optimizableOrderByCollections[targetCollectionId] =
-        orderByOptimizationInfo
+      // Ordered loading is owned by one lexical source. A collection can occur
+      // more than once in a query tree, so collection ID and alias are not
+      // sufficient identities here.
+      optimizableOrderByCollections[orderBySourceId] = orderByOptimizationInfo
 
       // Set up lazy loading callback to track how much more data is needed
       // This is used by loadMoreIfNeeded to determine if more data should be loaded
@@ -312,7 +320,7 @@ export function processOrderBy(
       // and all data is loaded eagerly via requestSnapshot instead.
       if (index) {
         setSizeCallback = (getSize: () => number) => {
-          optimizableOrderByCollections[targetCollectionId]![`dataNeeded`] =
+          optimizableOrderByCollections[orderBySourceId]![`dataNeeded`] =
             () => {
               const size = getSize()
               return Math.max(0, orderByOptimizationInfo!.limit - size)

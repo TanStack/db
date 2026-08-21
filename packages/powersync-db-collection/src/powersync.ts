@@ -541,7 +541,10 @@ function createPowerSyncCollectionConfig<
       // On-demand mode.
       // Registers a diff trigger for the active WHERE expressions.
       function runOnDemandSync() {
-        let onUnloadSubset: CleanupFn | void | null = null
+        const unloadSubsetCallbacks = new Map<LoadSubsetOptions, CleanupFn>()
+        const releasedSubsets = new WeakSet<LoadSubsetOptions>()
+        let stopped = false
+        const hasStopped = () => stopped
 
         start().catch((error) =>
           database.logger.error(
@@ -557,9 +560,22 @@ function createPowerSyncCollectionConfig<
         const loadSubset = async (
           options?: LoadSubsetOptions,
         ): Promise<void> => {
+          if (hasStopped()) return
+
           if (options) {
             activeWhereExpressions.push(options.where)
-            onUnloadSubset = await restConfig.onLoadSubset?.(options)
+            const cleanup = await restConfig.onLoadSubset?.(options)
+            if (hasStopped()) {
+              cleanup?.()
+              return
+            }
+            if (cleanup) {
+              if (releasedSubsets.has(options) || options.signal?.aborted) {
+                cleanup()
+              } else {
+                unloadSubsetCallbacks.set(options, cleanup)
+              }
+            }
           }
 
           // No predicates remain, so stop tracking entirely. Both calls are no-ops
@@ -639,7 +655,9 @@ function createPowerSyncCollectionConfig<
         }
 
         const unloadSubset = async (options: LoadSubsetOptions) => {
-          onUnloadSubset?.()
+          releasedSubsets.add(options)
+          unloadSubsetCallbacks.get(options)?.()
+          unloadSubsetCallbacks.delete(options)
 
           const idx = activeWhereExpressions.indexOf(options.where)
           if (idx !== -1) {
@@ -688,10 +706,14 @@ function createPowerSyncCollectionConfig<
 
         return {
           cleanup: () => {
+            stopped = true
             database.logger.info(
               `Sync has been stopped for ${viewName} into ${trackedTableName}`,
             )
             abortController.abort()
+            for (const cleanup of unloadSubsetCallbacks.values()) cleanup()
+            unloadSubsetCallbacks.clear()
+            activeWhereExpressions.length = 0
           },
           loadSubset: (options: LoadSubsetOptions) => loadSubset(options),
           unloadSubset: (options: LoadSubsetOptions) => unloadSubset(options),

@@ -64,13 +64,27 @@ The order by clause to sort the data
 
 ***
 
+### signal?
+
+```ts
+optional signal: AbortSignal;
+```
+
+Defined in: [packages/db/src/types.ts:310](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L310)
+
+Aborted when this exact subset request is no longer current. Cancellation
+is cooperative: async sync adapters must check the signal immediately
+before installing a baseline or later request-scoped rows.
+
+***
+
 ### subscription?
 
 ```ts
 optional subscription: Subscription;
 ```
 
-Defined in: [packages/db/src/types.ts:313](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L313)
+Defined in: [packages/db/src/types.ts:319](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L319)
 
 The subscription that triggered the load.
 Advanced sync implementations can use this for:

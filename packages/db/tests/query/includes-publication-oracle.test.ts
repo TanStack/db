@@ -7,14 +7,13 @@ import {
   eq,
   materialize,
 } from '../../src/query/index.js'
-import { expectAssertionFailure } from '../expected-failure.js'
-import { TraceAssertionError, runTrace } from '../trace-runner.js'
+import { runTrace } from '../trace-runner.js'
+import { oraclePropertyOptions } from '../oracle-config.js'
 import {
   flushPromises,
   mockSyncCollectionOptions,
   withExpectedRejection,
 } from '../utils.js'
-import type { AssertionDifference } from '../expected-failure.js'
 import type { TraceDriver, TraceProjection } from '../trace-runner.js'
 
 type ParentRow = {
@@ -257,71 +256,6 @@ const publicationProjection: TraceProjection<
   },
 }
 
-function sameValue(left: unknown, right: unknown): boolean {
-  try {
-    expect(left).toEqual(right)
-    return true
-  } catch {
-    return false
-  }
-}
-
-// #1713 is specifically publication of Q1's compiled null placeholder to Q2:
-// Q1 has already patched its materialization, while Q2 persists the placeholder.
-function classifyDroppedQ2Materialization({
-  actual,
-  expected,
-}: AssertionDifference): boolean {
-  if (
-    typeof actual !== `object` ||
-    actual === null ||
-    typeof expected !== `object` ||
-    expected === null ||
-    !(`q1` in actual) ||
-    !(`q2` in actual) ||
-    !(`q1` in expected) ||
-    !(`q2` in expected) ||
-    !Array.isArray(actual.q2) ||
-    !Array.isArray(expected.q2)
-  ) {
-    return false
-  }
-
-  const expectedWithDroppedChildren = expected.q2.map((row) =>
-    typeof row === `object` && row !== null
-      ? { ...row, children: null, otherChildren: null }
-      : row,
-  )
-
-  return (
-    sameValue(actual.q1, expected.q1) &&
-    sameValue(actual.q2, expectedWithDroppedChildren)
-  )
-}
-
-function expectDroppedQ2FailureAt(error: unknown, checkpoint: number): void {
-  expect(error).toMatchObject({
-    name: `TraceAssertionError`,
-    checkpoint,
-    cause: { name: `AssertionError` },
-  })
-  if (
-    !(error instanceof TraceAssertionError) ||
-    typeof error.cause !== `object` ||
-    error.cause === null ||
-    !(`actual` in error.cause) ||
-    !(`expected` in error.cause)
-  ) {
-    throw error
-  }
-  expect(
-    classifyDroppedQ2Materialization({
-      actual: error.cause.actual,
-      expected: error.cause.expected,
-    }),
-  ).toBe(true)
-}
-
 async function settleRollback(
   rejectSync: (error: Error) => void,
   persisted: Promise<unknown>,
@@ -396,13 +330,7 @@ function createPublicationDriver(
         context.sources.parents.write(`update`, nextParent)
         context.model.parents.set(nextParent.id, { ...nextParent })
 
-        let publicationFailure: unknown
-        try {
-          checkpoint()
-        } catch (error) {
-          publicationFailure = error
-        }
-        expectDroppedQ2FailureAt(publicationFailure, 1)
+        checkpoint()
 
         const nextChild = { ...child, value: action.childValue }
         context.sources.children.write(`update`, nextChild)
@@ -507,22 +435,6 @@ async function expectPublicationMatches(
   })
 }
 
-async function expectDroppedQ2Materialization(
-  action: PublicationAction,
-  checkpointOptimistic = false,
-  q1Shape: Q1Shape = `direct`,
-  q2Shape: Q2Shape = `passThrough`,
-): Promise<void> {
-  await expectAssertionFailure(
-    () =>
-      expectPublicationMatches(action, checkpointOptimistic, q1Shape, q2Shape),
-    {
-      checkpoint: 1,
-      classify: classifyDroppedQ2Materialization,
-    },
-  )()
-}
-
 const q2Shapes = [`passThrough`, `where`, `orderBy`, `select`] as const
 const q1Shapes = [`direct`, `joined`] as const
 
@@ -538,10 +450,10 @@ describe(`layered-query publication oracle`, () => {
 
   for (const q1Shape of q1Shapes) {
     for (const q2Shape of q2Shapes) {
-      fcTest.prop([changedValueArbitrary], { numRuns: 12 })(
-        `classifies #1713 through a ${q1Shape} Q1 and ${q2Shape} Q2`,
+      fcTest.prop([changedValueArbitrary], oraclePropertyOptions(12))(
+        `publishes #1713 updates through a ${q1Shape} Q1 and ${q2Shape} Q2`,
         async (value) => {
-          await expectDroppedQ2Materialization(
+          await expectPublicationMatches(
             { type: `parentScalar`, value },
             false,
             q1Shape,
@@ -550,9 +462,10 @@ describe(`layered-query publication oracle`, () => {
         },
       )
 
-      fcTest.prop([changedValueArbitrary, changedChildValueArbitrary], {
-        numRuns: 12,
-      })(
+      fcTest.prop(
+        [changedValueArbitrary, changedChildValueArbitrary],
+        oraclePropertyOptions(12),
+      )(
         `recovers a ${q1Shape} Q1 and ${q2Shape} Q2 after a child update`,
         async (parentValue, childValue) => {
           await expectPublicationMatches(
@@ -564,10 +477,10 @@ describe(`layered-query publication oracle`, () => {
         },
       )
 
-      fcTest.prop([changedValueArbitrary], { numRuns: 8 })(
-        `classifies optimistic publication before confirmation through a ${q1Shape} Q1 and ${q2Shape} Q2`,
+      fcTest.prop([changedValueArbitrary], oraclePropertyOptions(8))(
+        `publishes optimistic state before confirmation through a ${q1Shape} Q1 and ${q2Shape} Q2`,
         async (value) => {
-          await expectDroppedQ2Materialization(
+          await expectPublicationMatches(
             { type: `optimisticConfirm`, value },
             true,
             q1Shape,
@@ -576,10 +489,10 @@ describe(`layered-query publication oracle`, () => {
         },
       )
 
-      fcTest.prop([changedValueArbitrary], { numRuns: 8 })(
-        `classifies publication after optimistic confirmation through a ${q1Shape} Q1 and ${q2Shape} Q2`,
+      fcTest.prop([changedValueArbitrary], oraclePropertyOptions(8))(
+        `publishes state after optimistic confirmation through a ${q1Shape} Q1 and ${q2Shape} Q2`,
         async (value) => {
-          await expectDroppedQ2Materialization(
+          await expectPublicationMatches(
             { type: `optimisticConfirm`, value },
             false,
             q1Shape,
@@ -590,42 +503,36 @@ describe(`layered-query publication oracle`, () => {
     }
   }
 
-  fcTest.prop([changedChildValueArbitrary])(
+  fcTest.prop([changedChildValueArbitrary], oraclePropertyOptions(100))(
     `publishes child-only scalar updates through both layers`,
     async (value) => {
       await expectPublicationMatches({ type: `childScalar`, value })
     },
   )
 
-  fcTest.prop([fc.constantFrom(20, 30)])(
+  fcTest.prop([fc.constantFrom(20, 30)], oraclePropertyOptions(100))(
     `compares route transitions at both query layers`,
     async (group) => {
       await expectPublicationMatches({ type: `parentRoute`, group })
     },
   )
 
-  fcTest.prop([
-    fc.record({
-      group: fc.constantFrom(10, 20, 30),
-      value: changedValueArbitrary,
-    }),
-  ])(
-    `compares atomic parent replacements at both query layers`,
-    async (row) => {
-      // Changing the route rebuilds the materialization before publication and
-      // is green. A same-route replacement republishes the null placeholder.
-      const assertion =
-        row.group === 10
-          ? expectDroppedQ2Materialization
-          : expectPublicationMatches
-      await assertion({ type: `atomicReplace`, ...row })
-    },
-  )
+  fcTest.prop(
+    [
+      fc.record({
+        group: fc.constantFrom(10, 20, 30),
+        value: changedValueArbitrary,
+      }),
+    ],
+    oraclePropertyOptions(100),
+  )(`compares atomic parent replacements at both query layers`, async (row) => {
+    await expectPublicationMatches({ type: `atomicReplace`, ...row })
+  })
 
-  fcTest.prop([changedValueArbitrary])(
-    `classifies stale publication after optimistic rollback`,
+  fcTest.prop([changedValueArbitrary], oraclePropertyOptions(100))(
+    `publishes restored state after optimistic rollback`,
     async (value) => {
-      await expectDroppedQ2Materialization({
+      await expectPublicationMatches({
         type: `optimisticRollback`,
         value,
       })

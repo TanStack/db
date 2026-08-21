@@ -1,4 +1,3 @@
-import { isDeepStrictEqual } from 'node:util'
 import { fc, test as fcTest } from '@fast-check/vitest'
 import { describe, expect } from 'vitest'
 import {
@@ -15,9 +14,8 @@ import {
   mockSyncCollectionOptions,
   withExpectedRejection,
 } from '../utils.js'
-import { expectAssertionFailure } from '../expected-failure.js'
+import { oraclePropertyOptions, oracleRuns } from '../oracle-config.js'
 import { runTrace } from '../trace-runner.js'
-import type { AssertionDifference } from '../expected-failure.js'
 import type {
   TraceCheckpoint,
   TraceDriver,
@@ -101,111 +99,6 @@ function hasDirectChild(value: unknown, parentId: number, childId: number) {
   )
 }
 
-function classifyUnexpectedSharedRoute(
-  { actual, expected }: AssertionDifference,
-  unexpectedParentId: number,
-  expectedParentId: number,
-  childId: number,
-): boolean {
-  const expectedParent = findRelationshipNode(expected, expectedParentId)
-  const expectedWithSharedRoute = replaceDirectChildren(
-    expected,
-    unexpectedParentId,
-    Array.isArray(expectedParent?.children) ? expectedParent.children : [],
-  )
-  return (
-    !hasDirectChild(expected, unexpectedParentId, childId) &&
-    hasDirectChild(expected, expectedParentId, childId) &&
-    isDeepStrictEqual(actual, expectedWithSharedRoute)
-  )
-}
-
-function classifyMissingReplacementChild(
-  { actual, expected }: AssertionDifference,
-  replacementRowId: number,
-  childId: number,
-): boolean {
-  const expectedWithoutChild = removeDirectChild(expected, replacementRowId, [
-    childId,
-  ])
-  return (
-    findRelationshipNode(expected, replacementRowId) !== undefined &&
-    hasDirectChild(expected, replacementRowId, childId) &&
-    isDeepStrictEqual(actual, expectedWithoutChild)
-  )
-}
-
-function classifyMissingSharedRouteSnapshot(
-  { actual, expected }: AssertionDifference,
-  enteringParentId: number,
-  existingParentId: number,
-  childIds: number | ReadonlyArray<number>,
-): boolean {
-  const expectedChildIds = Array.isArray(childIds) ? childIds : [childIds]
-  const expectedWithoutSnapshot = removeDirectChild(
-    expected,
-    enteringParentId,
-    expectedChildIds,
-  )
-  return (
-    expectedChildIds.every(
-      (childId) =>
-        hasDirectChild(expected, enteringParentId, childId) &&
-        hasDirectChild(actual, existingParentId, childId) &&
-        hasDirectChild(expected, existingParentId, childId),
-    ) && isDeepStrictEqual(actual, expectedWithoutSnapshot)
-  )
-}
-
-function removeDirectChild(
-  value: unknown,
-  parentId: number,
-  childIds: ReadonlyArray<number>,
-): unknown {
-  if (Array.isArray(value)) {
-    return value.map((entry) => removeDirectChild(entry, parentId, childIds))
-  }
-  if (typeof value !== `object` || value === null) return value
-
-  const isParent = isRelationshipNode(value) && value.id === parentId
-  return Object.fromEntries(
-    Object.entries(value).map(([key, entry]) => [
-      key,
-      key === `children` && isParent && Array.isArray(entry)
-        ? entry
-            .filter(
-              (child) =>
-                !isRelationshipNode(child) || !childIds.includes(child.id),
-            )
-            .map((child) => removeDirectChild(child, parentId, childIds))
-        : removeDirectChild(entry, parentId, childIds),
-    ]),
-  )
-}
-
-function replaceDirectChildren(
-  value: unknown,
-  parentId: number,
-  children: ReadonlyArray<unknown>,
-): unknown {
-  if (Array.isArray(value)) {
-    return value.map((entry) =>
-      replaceDirectChildren(entry, parentId, children),
-    )
-  }
-  if (typeof value !== `object` || value === null) return value
-
-  const isParent = isRelationshipNode(value) && value.id === parentId
-  return Object.fromEntries(
-    Object.entries(value).map(([key, entry]) => [
-      key,
-      key === `children` && isParent
-        ? children
-        : replaceDirectChildren(entry, parentId, children),
-    ]),
-  )
-}
-
 type RelationshipProjectionNode = {
   id: number
   children?: Array<RelationshipProjectionNode>
@@ -277,8 +170,8 @@ function levelArbitrary(
 function actionArbitrary(depth: IncludeDepth): fc.Arbitrary<HistoryAction> {
   return levelArbitrary(depth).chain((level) =>
     fc.record({
-      // Root delete/reinsert has a deterministic expected-failure trace below.
-      // Keep the green fuzz corpus from rediscovering the same defect class.
+      // Root delete/reinsert has a focused history matrix below. Keep this
+      // unconstrained corpus small enough to shrink to one clear action.
       type:
         level === 0
           ? fc.constantFrom(
@@ -347,6 +240,58 @@ const scenarioArbitrary: fc.Arbitrary<Scenario> = depthArbitrary.chain(
         history: ensureActionsTargetRows(history),
       })),
 )
+
+function classifyScenarioCoverage({ depth, history }: Scenario): Array<string> {
+  const routesByLevel = Array.from(
+    { length: depth + 1 },
+    () => new Map<number, { parentGroup: number; group: number }>(),
+  )
+  let relationshipChanges = 0
+
+  for (const action of history) {
+    const routes = routesByLevel[action.level]!
+    if (action.type === `delete`) {
+      routes.delete(action.id)
+      continue
+    }
+
+    const previous = routes.get(action.id)
+    if (
+      previous &&
+      (previous.group !== action.group ||
+        (action.level > 0 && previous.parentGroup !== action.parentGroup))
+    ) {
+      relationshipChanges += 1
+    }
+    routes.set(action.id, {
+      parentGroup: action.parentGroup,
+      group: action.group,
+    })
+  }
+
+  return [
+    `depth=${depth}`,
+    `relationship-changes=${
+      relationshipChanges === 0
+        ? `none`
+        : relationshipChanges === 1
+          ? `one`
+          : `many`
+    }`,
+    `optimistic=${history.some((action) =>
+      action.type.startsWith(`optimistic`),
+    )}`,
+    `delete=${history.some((action) => action.type === `delete`)}`,
+  ]
+}
+
+if (process.env.TANSTACK_DB_ORACLE_STATISTICS === `1`) {
+  fc.statistics(
+    scenarioArbitrary,
+    classifyScenarioCoverage,
+    oraclePropertyOptions(1_000),
+  )
+}
 
 const materializeScenarioArbitrary: fc.Arbitrary<MaterializeScenario> = fc
   .boolean()
@@ -801,11 +746,9 @@ async function applyAction(
       return
     }
 
-    // Keep correlation keys stable in green fuzz histories. The known
-    // correlation-key update failure has its own deterministic seed below.
     const next: RootRow = {
       id: action.id,
-      group: current?.group ?? action.group,
+      group: action.group,
       value: action.value,
       position:
         action.type === `put` ? action.position : (current?.position ?? 0),
@@ -861,12 +804,10 @@ async function applyAction(
     return
   }
 
-  // Keep correlation keys stable in green fuzz histories. The known
-  // correlation-key update failure has its own deterministic seed below.
   const next: ChildRow = {
     id: action.id,
-    parentGroup: current?.parentGroup ?? action.parentGroup,
-    group: current?.group ?? action.group,
+    parentGroup: action.parentGroup,
+    group: action.group,
     value: action.value,
     position:
       action.type === `put` ? action.position : (current?.position ?? 0),
@@ -1515,14 +1456,10 @@ function visibleRelationshipScenarioArbitrary(
         scalarNoiseArbitrary(`before`, branchArbitrary),
         { maxLength: 4 },
       ),
-      afterValues: fc.array(
-        fc.record({
-          level: levelArbitrary(depth),
-          value: fc.integer({ min: -3, max: 3 }),
-          position: fc.integer({ min: -2, max: 2 }),
-        }),
-        { minLength: 1, maxLength: 5 },
-      ),
+      afterValues: fc.array(scalarNoiseArbitrary(`after`, branchArbitrary), {
+        minLength: 1,
+        maxLength: 5,
+      }),
     })
     .map(
       ({
@@ -1536,18 +1473,10 @@ function visibleRelationshipScenarioArbitrary(
         extraBeforeNoise,
         afterValues,
       }) => {
-        const stableBranch = otherBranch(sourceBranch)
-        // Updating two descendant levels after a reparent exposes a separate
-        // known defect, captured for every failing depth/level below. Keep the
-        // generated corpus green by updating only the branch that did not move.
         const connectedNoise: Array<VisibleScalarNoise> = [
           beforeNoise,
           ...extraBeforeNoise,
-          ...afterValues.map((entry) => ({
-            ...entry,
-            side: `after` as const,
-            branch: stableBranch,
-          })),
+          ...afterValues,
         ]
         const options = {
           depth,
@@ -1633,7 +1562,7 @@ function createTransitionHistoryScenario({
 }: TransitionHistoryScenarioOptions): TransitionHistoryScenario {
   // Fresh keys keep this matrix green through both transitions. Separate
   // state-aware families below reuse retired routes and replace existing rows,
-  // so those known failures remain shrinkable without masking later steps.
+  // so those histories remain shrinkable without masking later steps.
   const insertedRows = [
     {
       id: 3_000,
@@ -2398,14 +2327,11 @@ function createInitiallySharedRoutePrefix(
 function createMergeIntoSharedRouteScenarios(
   parentLevel: 0 | 1 | 2,
   enteringRow: 0 | 1,
-): ClassifiedHistoryScenario {
+): HistoryScenarioPair {
   const depth = (parentLevel + 1) as IncludeDepth
   const branches = transitionHistoryBranches
-  const childLevel = depth
   const existingRow = otherBranch(enteringRow)
   const sharedRoute = branches[existingRow].groupBase + parentLevel
-  const enteringParentId = rowAt(branches, enteringRow, parentLevel)
-  const childId = rowAt(branches, existingRow, childLevel)
   const candidate = createRouteLifecycleScenario({
     depth,
     branches,
@@ -2431,14 +2357,6 @@ function createMergeIntoSharedRouteScenarios(
       ),
     },
     candidate,
-    candidateCheckpoint: candidate.steps.length,
-    classify: (difference) =>
-      classifyMissingSharedRouteSnapshot(
-        difference,
-        enteringParentId,
-        rowAt(branches, existingRow, parentLevel),
-        childId,
-      ),
   }
 }
 
@@ -2488,7 +2406,7 @@ function createSharedRouteLastSubscriberScenario(
 
 function createSnapshotOnResubscribeScenarios(
   parentLevel: 0 | 1 | 2,
-): Pick<ClassifiedHistoryScenario, `control` | `candidate`> {
+): HistoryScenarioPair {
   const depth = (parentLevel + 1) as IncludeDepth
   const branches = transitionHistoryBranches
   const childLevel = depth
@@ -2537,7 +2455,7 @@ function createSnapshotOnResubscribeScenarios(
 
 function createInitiallySharedRouteResubscribeScenario(
   parentLevel: 0 | 1 | 2,
-): ClassifiedHistoryScenario {
+): HistoryScenarioPair {
   const depth = (parentLevel + 1) as IncludeDepth
   const branches = transitionHistoryBranches
   const childLevel = depth
@@ -2587,23 +2505,13 @@ function createInitiallySharedRouteResubscribeScenario(
   return {
     control: createSharedRouteLastSubscriberScenario(parentLevel),
     candidate: scenario,
-    candidateCheckpoint: scenario.steps.length,
-    classify: (difference) =>
-      classifyUnexpectedSharedRoute(
-        difference,
-        rowAt(branches, 0, parentLevel),
-        rowAt(branches, 1, parentLevel),
-        childId,
-      ),
   }
 }
 
-type ClassifiedHistoryScenario = {
+type HistoryScenarioPair = {
   control: FullRowBatchScenario
   greenVariants?: ReadonlyArray<FullRowBatchScenario>
   candidate: FullRowBatchScenario
-  candidateCheckpoint: number
-  classify: (difference: AssertionDifference) => boolean
 }
 
 type RekeyRouteReuseOptions = {
@@ -2628,7 +2536,6 @@ function createRekeyRouteReuseFixture({
   prefix: Array<FullRowBatchStep>
   rekey: FullRowBatchStep
   reuse: FullRowBatchStep
-  classify: (difference: AssertionDifference) => boolean
 } {
   const targetLevel = (depth - 1) as IncludeDepth
   assertDisjointRelationshipKeys(depth, branches, {
@@ -2666,44 +2573,30 @@ function createRekeyRouteReuseFixture({
     ],
   }
 
-  const retiredRowId = source.idBase + targetLevel
-  const childId = source.idBase + targetLevel + 1
-
   return {
     prefix,
     rekey,
     reuse: insertOldRoute,
-    classify: (difference) =>
-      classifyUnexpectedSharedRoute(
-        difference,
-        retiredRowId,
-        insertedId,
-        childId,
-      ),
   }
 }
 
 function createRekeyRouteReuseScenarios(
   options: RekeyRouteReuseOptions,
-): ClassifiedHistoryScenario {
+): HistoryScenarioPair {
   const { depth } = options
-  const { prefix, rekey, reuse, classify } =
-    createRekeyRouteReuseFixture(options)
+  const { prefix, rekey, reuse } = createRekeyRouteReuseFixture(options)
 
   return {
     control: { depth, steps: [...prefix, reuse] },
     candidate: { depth, steps: [...prefix, rekey, reuse] },
-    candidateCheckpoint: prefix.length + 2,
-    classify,
   }
 }
 
 function createIntraBatchRekeyRouteReuseScenarios(
   options: RekeyRouteReuseOptions,
-): ClassifiedHistoryScenario {
+): HistoryScenarioPair {
   const { depth } = options
-  const { prefix, rekey, reuse, classify } =
-    createRekeyRouteReuseFixture(options)
+  const { prefix, rekey, reuse } = createRekeyRouteReuseFixture(options)
   if (rekey.level === 0 || rekey.level !== reuse.level) {
     throw new Error(`Intra-batch route reuse must share a child level`)
   }
@@ -2723,8 +2616,6 @@ function createIntraBatchRekeyRouteReuseScenarios(
         { level: rekey.level, changes: [...rekey.changes, ...reuse.changes] },
       ],
     },
-    candidateCheckpoint: prefix.length + 1,
-    classify,
   }
 }
 
@@ -2733,8 +2624,8 @@ function rekeyRouteReuseScenarioArbitrary(
   sourceBranch: 0 | 1,
   createScenario: (
     options: RekeyRouteReuseOptions,
-  ) => ClassifiedHistoryScenario = createRekeyRouteReuseScenarios,
-): fc.Arbitrary<ClassifiedHistoryScenario> {
+  ) => HistoryScenarioPair = createRekeyRouteReuseScenarios,
+): fc.Arbitrary<HistoryScenarioPair> {
   return fc
     .record({
       ...generatedBranchArbitraries,
@@ -2789,7 +2680,7 @@ function createMovedChildReplacementScenarios({
   insertedId,
   insertedValue,
   insertedPosition,
-}: MovedChildReplacementOptions): ClassifiedHistoryScenario {
+}: MovedChildReplacementOptions): HistoryScenarioPair {
   if (targetLevel + 2 > depth) {
     throw new Error(`Child replacement needs a visible grandchild`)
   }
@@ -2865,8 +2756,6 @@ function createMovedChildReplacementScenarios({
       },
     ],
   })
-  const grandchildId = source.idBase + targetLevel + 2
-
   return {
     control: { depth, steps: [...prefix, ...replaceChild] },
     greenVariants: [
@@ -2874,9 +2763,6 @@ function createMovedChildReplacementScenarios({
       atomicReplacement(`insert-first`),
     ],
     candidate: { depth, steps: [...prefix, reparent, ...replaceChild] },
-    candidateCheckpoint: prefix.length + 3,
-    classify: (difference) =>
-      classifyMissingReplacementChild(difference, insertedId, grandchildId),
   }
 }
 
@@ -2884,7 +2770,7 @@ function movedChildReplacementMirrorsArbitrary(
   depth: 3 | 4,
   targetLevel: IncludeDepth,
   sourceBranch: 0 | 1,
-): fc.Arbitrary<Record<BranchDeliveryOrder, ClassifiedHistoryScenario>> {
+): fc.Arbitrary<Record<BranchDeliveryOrder, HistoryScenarioPair>> {
   return fc
     .record({
       ...generatedBranchArbitraries,
@@ -2958,7 +2844,7 @@ function createRelationshipBatchShapeScenarios({
   replacementPosition,
   movedPosition,
   ...branchOptions
-}: RelationshipBatchShapeOptions): ClassifiedHistoryScenario {
+}: RelationshipBatchShapeOptions): HistoryScenarioPair {
   const depth = 3
   const branches = createGeneratedBranches(branchOptions)
   assertDisjointRelationshipKeys(depth, branches, {
@@ -3050,13 +2936,6 @@ function createRelationshipBatchShapeScenarios({
         ...replacementSteps,
       ],
     },
-    candidateCheckpoint: prefix.length + 1 + replacementSteps.length,
-    classify: (difference) =>
-      classifyMissingReplacementChild(
-        difference,
-        replacementChild.id,
-        source.idBase + depth,
-      ),
   }
 }
 
@@ -3073,7 +2952,7 @@ const relationshipBatchFixtureArbitrary: fc.Arbitrary<
 
 type RelationshipBatchShapeCell = {
   shape: RelationshipBatchShape
-  scenarios: ClassifiedHistoryScenario
+  scenarios: HistoryScenarioPair
 }
 
 function createRelationshipBatchShapeMatrix(
@@ -3110,23 +2989,9 @@ function createRelationshipBatchShapeMatrix(
   return cells
 }
 
-function isKnownRelationshipBatchFailure(
-  shape: RelationshipBatchShape,
-): boolean {
-  // Split delete-then-insert with a new public id is the known moved-subtree
-  // replacement defect: the replacement arrives, but its handed-off route
-  // omits the existing grandchild.
-  return (
-    shape.delivery === `split` &&
-    shape.order === `delete-insert` &&
-    shape.publicId === `new` &&
-    shape.route === `handoff`
-  )
-}
-
 function createSharedRouteLifetimeScenarios(
   parentLevel: 0 | 1,
-): ClassifiedHistoryScenario {
+): HistoryScenarioPair {
   if (parentLevel === 0) {
     const departed = batchRoot(100, 600, 100, 0)
     const remaining = batchRoot(1_100, 600, 1_100, 1)
@@ -3159,14 +3024,6 @@ function createSharedRouteLifetimeScenarios(
     return {
       control: { depth: 1, steps: controlSteps },
       candidate: { depth: 1, steps: candidateSteps },
-      candidateCheckpoint: candidateSteps.length,
-      classify: (difference) =>
-        classifyUnexpectedSharedRoute(
-          difference,
-          departed.id,
-          remaining.id,
-          child.id,
-        ),
     }
   }
 
@@ -3204,14 +3061,6 @@ function createSharedRouteLifetimeScenarios(
   return {
     control: { depth: 2, steps: controlSteps },
     candidate: { depth: 2, steps: candidateSteps },
-    candidateCheckpoint: candidateSteps.length,
-    classify: (difference) =>
-      classifyUnexpectedSharedRoute(
-        difference,
-        departed.id,
-        remaining.id,
-        child.id,
-      ),
   }
 }
 
@@ -3226,31 +3075,11 @@ async function expectFullRowBatchScenarioMatches({
   })
 }
 
-async function expectClassifiedHistoryFailure({
+async function expectHistoryScenarioPairMatches({
   control,
   greenVariants = [],
   candidate,
-  candidateCheckpoint,
-  classify,
-}: ClassifiedHistoryScenario): Promise<void> {
-  await expectFullRowBatchScenarioMatches(control)
-  for (const greenVariant of greenVariants) {
-    await expectFullRowBatchScenarioMatches(greenVariant)
-  }
-  await expectAssertionFailure(
-    () => expectFullRowBatchScenarioMatches(candidate),
-    { checkpoint: candidateCheckpoint, classify },
-  )()
-}
-
-async function expectClassifiedHistoryMatches({
-  control,
-  greenVariants = [],
-  candidate,
-}: Pick<
-  ClassifiedHistoryScenario,
-  `control` | `greenVariants` | `candidate`
->): Promise<void> {
+}: HistoryScenarioPair): Promise<void> {
   await expectFullRowBatchScenarioMatches(control)
   for (const greenVariant of greenVariants) {
     await expectFullRowBatchScenarioMatches(greenVariant)
@@ -3758,13 +3587,9 @@ const transitionHistoryBranches = [
   { idBase: 1_100, groupBase: 1_600 },
 ] as const
 
-// The first rekey is correct on its own. Reusing its old correlation key for a
-// new visible row then resurrects the detached descendant under the old row.
 const {
   control: rekeyRouteReuseControl,
   candidate: rekeyRouteResurrectionScenario,
-  candidateCheckpoint: rekeyRouteResurrectionCheckpoint,
-  classify: classifyRekeyRouteResurrection,
 } = createRekeyRouteReuseScenarios({
   depth: 2,
   sourceBranch: 0,
@@ -3775,13 +3600,9 @@ const {
   insertedPosition: 0,
 })
 
-// The reparent and delete are each correct. Replacing the moved row's child
-// under the same correlation key then loses the existing grandchild snapshot.
 const {
   control: childReplacementControl,
   candidate: movedSubtreeChildReplacementScenario,
-  candidateCheckpoint: movedSubtreeChildReplacementCheckpoint,
-  classify: classifyMovedSubtreeChildReplacement,
 } = createMovedChildReplacementScenarios({
   depth: 3,
   targetLevel: 1,
@@ -3793,57 +3614,6 @@ const {
 })
 
 describe(`includes recompute oracle`, () => {
-  fcTest(
-    `shared-route snapshot classification rejects extra corruption`,
-    () => {
-      const expected = [
-        { id: 1, value: 10, children: [{ id: 3, value: 30 }] },
-        { id: 2, value: 20, children: [{ id: 3, value: 30 }] },
-      ]
-      const actual = [
-        { id: 1, value: 11, children: [] },
-        { id: 2, value: 20, children: [{ id: 3, value: 31 }] },
-      ]
-
-      expect(
-        classifyMissingSharedRouteSnapshot({ actual, expected }, 1, 2, 3),
-      ).toBe(false)
-    },
-  )
-
-  fcTest(
-    `unexpected shared-child classification rejects extra corruption`,
-    () => {
-      const expected = [
-        { id: 1, value: 10, children: [] },
-        { id: 2, value: 20, children: [{ id: 3, value: 30 }] },
-      ]
-      const actual = [
-        { id: 1, value: 11, children: [{ id: 3, value: 30 }] },
-        { id: 2, value: 20, children: [{ id: 3, value: 31 }] },
-      ]
-
-      expect(classifyUnexpectedSharedRoute({ actual, expected }, 1, 2, 3)).toBe(
-        false,
-      )
-    },
-  )
-
-  fcTest(`missing replacement classification rejects extra corruption`, () => {
-    const expected = [
-      { id: 1, value: 10, children: [{ id: 3, value: 30 }] },
-      { id: 2, value: 20, children: [] },
-    ]
-    const actual = [
-      { id: 1, value: 11, children: [] },
-      { id: 2, value: 21, children: [] },
-    ]
-
-    expect(classifyMissingReplacementChild({ actual, expected }, 1, 3)).toBe(
-      false,
-    )
-  })
-
   fcTest(`rejects subscriber lifecycle labels on reparent transitions`, () => {
     expect(() =>
       createRouteLifecycleScenario({
@@ -3930,7 +3700,7 @@ describe(`includes recompute oracle`, () => {
   })
 
   fcTest(
-    `discovered trace: a root entering a live route misses its ordered snapshot`,
+    `a root entering a live route receives its ordered snapshot`,
     async () => {
       const branches = transitionHistoryBranches
       const prefix = createConnectedBatchBranches(1, branches)
@@ -3971,25 +3741,13 @@ describe(`includes recompute oracle`, () => {
         ],
       }
 
-      await expectAssertionFailure(
-        () => expectFullRowBatchScenarioMatches(scenario),
-        {
-          checkpoint: 3,
-          classify: (difference) =>
-            classifyMissingSharedRouteSnapshot(
-              difference,
-              branches[1].idBase,
-              branches[0].idBase,
-              [3_000, branches[0].idBase + 1],
-            ),
-        },
-      )()
+      await expectFullRowBatchScenarioMatches(scenario)
     },
   )
 
   for (const [shapeIndex, shape] of independentTransitionShapes.entries()) {
     fcTest.prop([independentTransitionScenarioArbitrary(shape)], {
-      numRuns: 4,
+      numRuns: oracleRuns(4),
       seed: 1734 + shapeIndex,
     })(
       `matches recomputation for independent ${shape} relationship targets`,
@@ -4002,7 +3760,7 @@ describe(`includes recompute oracle`, () => {
 
   for (const [historyIndex, history] of destinationHistories.entries()) {
     fcTest.prop([destinationHistoryScenarioArbitrary(history)], {
-      numRuns: 4,
+      numRuns: oracleRuns(4),
       seed: 1740 + historyIndex,
     })(
       `matches recomputation for the ${history} route destination history`,
@@ -4015,17 +3773,10 @@ describe(`includes recompute oracle`, () => {
 
   for (const parentLevel of [0, 1, 2] as const) {
     for (const enteringRow of [0, 1] as const) {
-      // Only roots currently miss an existing shared-route snapshot; nested
-      // subscribers receive the snapshot and remain green controls.
-      const expectsFailure = parentLevel === 0
       fcTest(
-        expectsFailure
-          ? `discovered trace: root ${enteringRow} entering a live shared route receives its snapshot`
-          : `matches recomputation when level-${parentLevel} row ${enteringRow} enters a live shared route`,
+        `matches recomputation when level-${parentLevel} row ${enteringRow} enters a live shared route`,
         () =>
-          (expectsFailure
-            ? expectClassifiedHistoryFailure
-            : expectClassifiedHistoryMatches)(
+          expectHistoryScenarioPairMatches(
             createMergeIntoSharedRouteScenarios(parentLevel, enteringRow),
           ),
       )
@@ -4042,19 +3793,15 @@ describe(`includes recompute oracle`, () => {
     fcTest(
       `matches recomputation after a level-${parentLevel} route resubscribes`,
       () =>
-        expectClassifiedHistoryMatches(
+        expectHistoryScenarioPairMatches(
           createSnapshotOnResubscribeScenarios(parentLevel),
         ),
     )
 
     fcTest(
-      parentLevel === 0
-        ? `discovered trace: an initially shared root route retires, changes, and resubscribes`
-        : `matches recomputation when an initially shared level-${parentLevel} route retires, changes, and resubscribes`,
+      `matches recomputation when an initially shared level-${parentLevel} route retires, changes, and resubscribes`,
       () =>
-        (parentLevel === 0
-          ? expectClassifiedHistoryFailure
-          : expectClassifiedHistoryMatches)(
+        expectHistoryScenarioPairMatches(
           createInitiallySharedRouteResubscribeScenario(parentLevel),
         ),
     )
@@ -4245,16 +3992,10 @@ describe(`includes recompute oracle`, () => {
   })
 
   for (const materialization of [`array`, `concat`] as const) {
-    fcTest(
-      `discovered trace: ${materialization} follows an intra-batch child hand-off`,
-      expectAssertionFailure(
-        async () => {
-          await expectFlatMaterializationScenarioMatches(
-            materialization,
-            intraBatchChildHandOffScenario,
-          )
-        },
-        { checkpoint: 3 },
+    fcTest(`${materialization} follows an intra-batch child hand-off`, () =>
+      expectFlatMaterializationScenarioMatches(
+        materialization,
+        intraBatchChildHandOffScenario,
       ),
     )
   }
@@ -4265,34 +4006,20 @@ describe(`includes recompute oracle`, () => {
     [4, 2],
   ] as const) {
     fcTest(
-      `discovered trace: later updates propagate through a reparented subtree at depth ${depth}, level ${targetLevel}`,
-      expectAssertionFailure(
-        () =>
-          expectFullRowBatchScenarioMatches(
-            createReparentedSubtreeUpdateScenario(depth, targetLevel),
-          ),
-        { checkpoint: depth + 4 },
-      ),
+      `later updates propagate through a reparented subtree at depth ${depth}, level ${targetLevel}`,
+      () =>
+        expectFullRowBatchScenarioMatches(
+          createReparentedSubtreeUpdateScenario(depth, targetLevel),
+        ),
     )
   }
 
-  fcTest(
-    `discovered trace: rekeying a row detaches two descendant levels`,
-    expectAssertionFailure(
-      () => expectFullRowBatchScenarioMatches(minimalRekeyScenario),
-      { checkpoint: 5 },
-    ),
+  fcTest(`rekeying a row detaches two descendant levels`, () =>
+    expectFullRowBatchScenarioMatches(minimalRekeyScenario),
   )
 
-  fcTest(
-    `discovered trace: reusing a rekeyed row's old route does not resurrect its child`,
-    expectAssertionFailure(
-      () => expectFullRowBatchScenarioMatches(rekeyRouteResurrectionScenario),
-      {
-        checkpoint: rekeyRouteResurrectionCheckpoint,
-        classify: classifyRekeyRouteResurrection,
-      },
-    ),
+  fcTest(`reusing a rekeyed row's old route does not resurrect its child`, () =>
+    expectFullRowBatchScenarioMatches(rekeyRouteResurrectionScenario),
   )
 
   fcTest(
@@ -4300,16 +4027,8 @@ describe(`includes recompute oracle`, () => {
     () => expectFullRowBatchScenarioMatches(rekeyRouteReuseControl),
   )
 
-  fcTest(
-    `discovered trace: replacing a moved subtree child retains its grandchild`,
-    expectAssertionFailure(
-      () =>
-        expectFullRowBatchScenarioMatches(movedSubtreeChildReplacementScenario),
-      {
-        checkpoint: movedSubtreeChildReplacementCheckpoint,
-        classify: classifyMovedSubtreeChildReplacement,
-      },
-    ),
+  fcTest(`replacing a moved subtree child retains its grandchild`, () =>
+    expectFullRowBatchScenarioMatches(movedSubtreeChildReplacementScenario),
   )
 
   fcTest(
@@ -4320,11 +4039,11 @@ describe(`includes recompute oracle`, () => {
   for (const depth of [2, 3, 4] as const) {
     for (const sourceBranch of [0, 1] as const) {
       fcTest.prop([rekeyRouteReuseScenarioArbitrary(depth, sourceBranch)], {
-        numRuns: 4,
+        numRuns: oracleRuns(4),
         seed: 1726 + depth * 10 + sourceBranch,
       })(
-        `discovered histories: reusing a retired route at depth ${depth}, branch ${sourceBranch}`,
-        expectClassifiedHistoryFailure,
+        `reuses a retired route at depth ${depth}, branch ${sourceBranch}`,
+        expectHistoryScenarioPairMatches,
       )
 
       fcTest.prop(
@@ -4336,21 +4055,21 @@ describe(`includes recompute oracle`, () => {
           ),
         ],
         {
-          numRuns: 4,
+          numRuns: oracleRuns(4),
           seed: 1733 + depth * 10 + sourceBranch,
         },
       )(
-        `discovered histories: intra-batch rekey then retired-route reuse at depth ${depth}, branch ${sourceBranch}`,
-        expectClassifiedHistoryFailure,
+        `handles intra-batch rekey then retired-route reuse at depth ${depth}, branch ${sourceBranch}`,
+        expectHistoryScenarioPairMatches,
       )
     }
   }
 
   for (const parentLevel of [0, 1] as const) {
     fcTest(
-      `discovered trace: a departed level-${parentLevel} shared-route subscriber receives later child updates`,
+      `a departed level-${parentLevel} shared-route subscriber ignores later child updates`,
       () =>
-        expectClassifiedHistoryFailure(
+        expectHistoryScenarioPairMatches(
           createSharedRouteLifetimeScenarios(parentLevel),
         ),
     )
@@ -4368,27 +4087,14 @@ describe(`includes recompute oracle`, () => {
             ),
           ],
           {
-            numRuns: 4,
+            numRuns: oracleRuns(4),
             seed: 1727 + depth * 100 + targetLevel * 10 + sourceBranch,
           },
         )(
-          `classifies forward/reverse delivery mirrors when replacing a moved child at depth ${depth}, level ${targetLevel}, source ${sourceBranch}`,
+          `matches forward/reverse delivery mirrors when replacing a moved child at depth ${depth}, level ${targetLevel}, source ${sourceBranch}`,
           async (scenarios) => {
             for (const deliveryOrder of branchDeliveryOrders) {
-              const deliveredSource = deliveredBranchIndex(
-                sourceBranch,
-                deliveryOrder,
-              )
-              // At depth 4, level 2, replacement stays green only when the
-              // moved branch was delivered second. The mirrors share one
-              // generated fixture, so delivery order is the only difference.
-              const expectsFailure =
-                depth !== 4 || targetLevel !== 2 || deliveredSource !== 1
-              await (
-                expectsFailure
-                  ? expectClassifiedHistoryFailure
-                  : expectClassifiedHistoryMatches
-              )(scenarios[deliveryOrder])
+              await expectHistoryScenarioPairMatches(scenarios[deliveryOrder])
             }
           },
         )
@@ -4406,10 +4112,10 @@ describe(`includes recompute oracle`, () => {
         [`route-only`, `route-and-position`] as const
       ).entries()) {
         fcTest.prop([relationshipBatchFixtureArbitrary], {
-          numRuns: 4,
+          numRuns: oracleRuns(4),
           seed: 1738 + publicIdIndex * 100 + routeIndex * 10 + updateIndex,
         })(
-          `classifies the split/atomic replacement matrix for ${publicId} public id, ${route} route, ${ancestorUpdate}`,
+          `matches the split/atomic replacement matrix for ${publicId} public id, ${route} route, ${ancestorUpdate}`,
           async (fixture) => {
             const cells = createRelationshipBatchShapeMatrix(
               fixture,
@@ -4429,18 +4135,10 @@ describe(`includes recompute oracle`, () => {
             }
 
             for (const {
-              shape,
-              scenarios: { control, candidate, candidateCheckpoint, classify },
+              scenarios: { control, candidate },
             } of cells) {
               await expectFullRowBatchScenarioMatches(control)
-              if (isKnownRelationshipBatchFailure(shape)) {
-                await expectAssertionFailure(
-                  () => expectFullRowBatchScenarioMatches(candidate),
-                  { checkpoint: candidateCheckpoint, classify },
-                )()
-              } else {
-                await expectFullRowBatchScenarioMatches(candidate)
-              }
+              await expectFullRowBatchScenarioMatches(candidate)
             }
           },
         )
@@ -4454,7 +4152,7 @@ describe(`includes recompute oracle`, () => {
       flatMaterializationScenarioArbitrary,
     ],
     {
-      numRuns: 30,
+      numRuns: oracleRuns(30),
       seed: 1721,
     },
   )(`matches recomputation for flat materializations`, (kind, scenario) =>
@@ -4463,7 +4161,7 @@ describe(`includes recompute oracle`, () => {
 
   for (const depth of [1, 2, 3, 4] as const) {
     fcTest.prop([fullRowBatchScenarioAtDepthArbitrary(depth)], {
-      numRuns: 10,
+      numRuns: oracleRuns(10),
       seed: 1719 + depth,
     })(
       `matches recomputation for visible multi-row batches at depth ${depth}`,
@@ -4476,10 +4174,6 @@ describe(`includes recompute oracle`, () => {
     ]
     for (const transition of transitions) {
       for (let targetLevel = 1; targetLevel <= depth; targetLevel++) {
-        // Incremental routing fails to fully detach a rekeyed row when two or
-        // more descendant include levels still hang below it.
-        const expectsFailure =
-          transition === `rekey` && targetLevel + 2 <= depth
         fcTest.prop(
           [
             visibleRelationshipScenarioArbitrary(
@@ -4489,13 +4183,11 @@ describe(`includes recompute oracle`, () => {
             ),
           ],
           {
-            numRuns: 4,
+            numRuns: oracleRuns(4),
             seed: 1721 + depth + targetLevel,
           },
         )(
-          expectsFailure
-            ? `discovered trace: a visible rekey at depth ${depth}, level ${targetLevel}`
-            : `matches recomputation for a visible ${transition} at depth ${depth}, level ${targetLevel}`,
+          `matches recomputation for a visible ${transition} at depth ${depth}, level ${targetLevel}`,
           async (scenarios) => {
             for (const scenario of [
               scenarios.transitionOnly,
@@ -4511,14 +4203,7 @@ describe(`includes recompute oracle`, () => {
               )
 
               expect(result).not.toEqual(beforeTransition)
-              if (expectsFailure) {
-                await expectAssertionFailure(
-                  () => expectFullRowBatchScenarioMatches(scenario),
-                  { checkpoint: scenario.transitionStepIndex + 1 },
-                )()
-              } else {
-                await expectFullRowBatchScenarioMatches(scenario)
-              }
+              await expectFullRowBatchScenarioMatches(scenario)
             }
           },
         )
@@ -4551,7 +4236,7 @@ describe(`includes recompute oracle`, () => {
               ),
             ],
             {
-              numRuns: 3,
+              numRuns: oracleRuns(3),
               seed:
                 1725 +
                 depth * 100 +
@@ -4573,24 +4258,18 @@ describe(`includes recompute oracle`, () => {
     }
   }
 
-  fcTest(
-    `discovered seed: nested scalar materialization follows a reference update`,
-    expectAssertionFailure(
-      async () => {
-        await runTrace({
-          steps: [
-            { type: `insert`, insert: `root-1` },
-            { type: `insert`, insert: `middle-1` },
-            { type: `insert`, insert: `shared-1` },
-            { type: `insert`, insert: `leaf-1` },
-            { type: `redirectMiddle`, id: 1, sharedId: 2 },
-          ],
-          driver: createMaterializeTraceDriver(false),
-          projection: materializeProjection,
-        })
-      },
-      { checkpoint: 5 },
-    ),
+  fcTest(`nested scalar materialization follows a reference update`, () =>
+    runTrace({
+      steps: [
+        { type: `insert`, insert: `root-1` },
+        { type: `insert`, insert: `middle-1` },
+        { type: `insert`, insert: `shared-1` },
+        { type: `insert`, insert: `leaf-1` },
+        { type: `redirectMiddle`, id: 1, sharedId: 2 },
+      ],
+      driver: createMaterializeTraceDriver(false),
+      projection: materializeProjection,
+    }),
   )
 
   fcTest(`matches recomputation for full-row sync batches`, async () => {
@@ -4601,12 +4280,8 @@ describe(`includes recompute oracle`, () => {
     })
   })
 
-  fcTest(
-    `discovered seed: a reinserted parent drops its old shared route`,
-    expectAssertionFailure(
-      () => expectFullRowBatchScenarioMatches(fullRowSharedRoutingSeed),
-      { checkpoint: 4 },
-    ),
+  fcTest(`a reinserted parent drops its old shared route`, () =>
+    expectFullRowBatchScenarioMatches(fullRowSharedRoutingSeed),
   )
 
   fcTest(`supports repeated optimistic rollbacks in one history`, async () => {
@@ -4653,7 +4328,7 @@ describe(`includes recompute oracle`, () => {
     })
   })
 
-  fcTest.prop([scenarioArbitrary], { numRuns: 40 })(
+  fcTest.prop([scenarioArbitrary], oraclePropertyOptions(40))(
     `matches naive recomputation after every incremental change`,
     expectScenarioMatches,
   )
@@ -4664,7 +4339,7 @@ describe(`includes recompute oracle`, () => {
         ({ sharedIntermediate }) => !sharedIntermediate,
       ),
     ],
-    { numRuns: 30 },
+    oraclePropertyOptions(30),
   )(
     `matches recomputation for nested scalar materialization`,
     expectMaterializeScenarioMatches,
@@ -4692,7 +4367,7 @@ describe(`includes recompute oracle`, () => {
         { selector: (row) => row.id, maxLength: 7 },
       ),
     ],
-    { numRuns: 25 },
+    oraclePropertyOptions(25),
   )(
     `is unchanged by alpha-renaming, sibling declaration order, or an unrelated sibling`,
     async (rootRows, childRows) => {
@@ -4804,7 +4479,7 @@ describe(`includes recompute oracle`, () => {
 
   fcTest.prop(
     [fc.integer({ min: -5, max: 5 }).filter((value) => value !== 0)],
-    { numRuns: 15 },
+    oraclePropertyOptions(15),
   )(
     `optimistic updates converge to confirmed-only state`,
     async (confirmedValue) => {
@@ -4878,154 +4553,156 @@ describe(`includes recompute oracle`, () => {
     expectScenarioMatches,
   )
 
-  // These known failures must reject with the oracle's assertion mismatch.
-  // A fixed bug or an unrelated runtime error makes the matching test fail.
   fcTest.prop([fc.constant(sharedMaterializeSeed)], {
     numRuns: 1,
     seed: 1685,
   })(
-    `known seed: shared scalar materialization preserves the deepest row`,
-    expectAssertionFailure(expectMaterializeScenarioMatches, { checkpoint: 6 }),
+    `shared scalar materialization preserves the deepest row`,
+    expectMaterializeScenarioMatches,
   )
 
   fcTest.prop([fc.constant(`correlation-key-update`)], {
     numRuns: 1,
     seed: 1658,
-  })(
-    `discovered seed: parent correlation-key update rematerializes children`,
-    expectAssertionFailure(
-      async () => {
-        const roots = createControlledCollection<RootRow>(
-          `correlation-seed-roots`,
-        )
-        const children = createControlledCollection<ChildRow>(
-          `correlation-seed-children`,
-        )
-        const live = createLiveQueryCollection((q) =>
+  })(`parent correlation-key update rematerializes children`, async () => {
+    const roots = createControlledCollection<RootRow>(`correlation-seed-roots`)
+    const children = createControlledCollection<ChildRow>(
+      `correlation-seed-children`,
+    )
+    const live = createLiveQueryCollection((q) =>
+      q.from({ root: roots.collection }).select(({ root }) => ({
+        id: root.id,
+        group: root.group,
+        children: toArray(
+          q
+            .from({ child: children.collection })
+            .where(({ child }) => eq(child.parentGroup, root.group))
+            .select(({ child }) => ({ id: child.id })),
+        ),
+      })),
+    )
+
+    try {
+      await live.preload()
+      children.write(`insert`, {
+        id: 1,
+        parentGroup: 0,
+        group: 0,
+        value: 0,
+        position: 0,
+      })
+      children.write(`insert`, {
+        id: 2,
+        parentGroup: 1,
+        group: 0,
+        value: 0,
+        position: 0,
+      })
+      roots.write(`insert`, { id: 1, group: 1, value: 0, position: 0 })
+      roots.write(`update`, { id: 1, group: 0, value: 0, position: 0 })
+
+      expect(stripVirtualProperties(live.toArray)).toEqual([
+        { id: 1, group: 0, children: [{ id: 1 }] },
+      ])
+    } finally {
+      await live.cleanup()
+      await Promise.all([
+        roots.collection.cleanup(),
+        children.collection.cleanup(),
+      ])
+    }
+  })
+
+  fcTest.prop([fc.constant(`#1454`)], { numRuns: 1, seed: 1454 })(
+    `alpha-renaming a duplicate sibling alias preserves results`,
+    async () => {
+      const roots = createControlledCollection<RootRow>(`alias-seed-roots`, [
+        { id: 1, group: 1, value: 0, position: 0 },
+      ])
+      const issues = createControlledCollection<ChildRow>(`alias-seed-issues`, [
+        {
+          id: 10,
+          parentGroup: 1,
+          group: 10,
+          value: 10,
+          position: 0,
+        },
+        {
+          id: 11,
+          parentGroup: 1,
+          group: 11,
+          value: 99,
+          position: 1,
+        },
+      ])
+      const tags = createControlledCollection<ChildRow>(`alias-seed-tags`, [
+        {
+          id: 20,
+          parentGroup: 1,
+          group: 20,
+          value: 20,
+          position: 0,
+        },
+        {
+          id: 21,
+          parentGroup: 1,
+          group: 21,
+          value: 99,
+          position: 1,
+        },
+      ])
+
+      try {
+        const uniqueAliases = await queryOnce((q) =>
           q.from({ root: roots.collection }).select(({ root }) => ({
             id: root.id,
-            group: root.group,
-            children: toArray(
+            issues: toArray(
               q
-                .from({ child: children.collection })
-                .where(({ child }) => eq(child.parentGroup, root.group))
-                .select(({ child }) => ({ id: child.id })),
+                .from({ issue: issues.collection })
+                .where(({ issue }) => eq(issue.parentGroup, root.group))
+                .where(({ issue }) => eq(issue.value, 10))
+                .select(({ issue }) => ({ id: issue.id })),
+            ),
+            tags: toArray(
+              q
+                .from({ tag: tags.collection })
+                .where(({ tag }) => eq(tag.parentGroup, root.group))
+                .where(({ tag }) => eq(tag.value, 20))
+                .select(({ tag }) => ({ id: tag.id })),
+            ),
+          })),
+        )
+        const duplicateAliases = await queryOnce((q) =>
+          q.from({ root: roots.collection }).select(({ root }) => ({
+            id: root.id,
+            issues: toArray(
+              q
+                .from({ item: issues.collection })
+                .where(({ item }) => eq(item.parentGroup, root.group))
+                .where(({ item }) => eq(item.value, 10))
+                .select(({ item }) => ({ id: item.id })),
+            ),
+            tags: toArray(
+              q
+                .from({ item: tags.collection })
+                .where(({ item }) => eq(item.parentGroup, root.group))
+                .where(({ item }) => eq(item.value, 20))
+                .select(({ item }) => ({ id: item.id })),
             ),
           })),
         )
 
-        try {
-          await live.preload()
-          children.write(`insert`, {
-            id: 1,
-            parentGroup: 0,
-            group: 0,
-            value: 0,
-            position: 0,
-          })
-          children.write(`insert`, {
-            id: 2,
-            parentGroup: 1,
-            group: 0,
-            value: 0,
-            position: 0,
-          })
-          roots.write(`insert`, { id: 1, group: 1, value: 0, position: 0 })
-          roots.write(`update`, { id: 1, group: 0, value: 0, position: 0 })
-
-          expect(stripVirtualProperties(live.toArray)).toEqual([
-            { id: 1, group: 0, children: [{ id: 1 }] },
-          ])
-        } finally {
-          await live.cleanup()
-          await Promise.all([
-            roots.collection.cleanup(),
-            children.collection.cleanup(),
-          ])
-        }
-      },
-      { message: /children/ },
-    ),
-  )
-
-  fcTest.prop([fc.constant(`#1454`)], { numRuns: 1, seed: 1454 })(
-    `known seed: alpha-renaming a duplicate sibling alias preserves results`,
-    expectAssertionFailure(
-      async () => {
-        const roots = createControlledCollection<RootRow>(`alias-seed-roots`, [
-          { id: 1, group: 1, value: 0, position: 0 },
+        const expected = [{ id: 1, issues: [{ id: 10 }], tags: [{ id: 20 }] }]
+        expect(stripVirtualProperties(uniqueAliases)).toEqual(expected)
+        expect(stripVirtualProperties(duplicateAliases)).toEqual(expected)
+      } finally {
+        await Promise.all([
+          roots.collection.cleanup(),
+          issues.collection.cleanup(),
+          tags.collection.cleanup(),
         ])
-        const issues = createControlledCollection<ChildRow>(
-          `alias-seed-issues`,
-          [
-            {
-              id: 10,
-              parentGroup: 1,
-              group: 10,
-              value: 10,
-              position: 0,
-            },
-          ],
-        )
-        const tags = createControlledCollection<ChildRow>(`alias-seed-tags`, [
-          {
-            id: 20,
-            parentGroup: 1,
-            group: 20,
-            value: 20,
-            position: 0,
-          },
-        ])
-
-        try {
-          const uniqueAliases = await queryOnce((q) =>
-            q.from({ root: roots.collection }).select(({ root }) => ({
-              id: root.id,
-              issues: toArray(
-                q
-                  .from({ issue: issues.collection })
-                  .where(({ issue }) => eq(issue.parentGroup, root.group))
-                  .select(({ issue }) => ({ id: issue.id })),
-              ),
-              tags: toArray(
-                q
-                  .from({ tag: tags.collection })
-                  .where(({ tag }) => eq(tag.parentGroup, root.group))
-                  .select(({ tag }) => ({ id: tag.id })),
-              ),
-            })),
-          )
-          const duplicateAliases = await queryOnce((q) =>
-            q.from({ root: roots.collection }).select(({ root }) => ({
-              id: root.id,
-              issues: toArray(
-                q
-                  .from({ item: issues.collection })
-                  .where(({ item }) => eq(item.parentGroup, root.group))
-                  .select(({ item }) => ({ id: item.id })),
-              ),
-              tags: toArray(
-                q
-                  .from({ item: tags.collection })
-                  .where(({ item }) => eq(item.parentGroup, root.group))
-                  .select(({ item }) => ({ id: item.id })),
-              ),
-            })),
-          )
-
-          expect(stripVirtualProperties(duplicateAliases)).toEqual(
-            stripVirtualProperties(uniqueAliases),
-          )
-        } finally {
-          await Promise.all([
-            roots.collection.cleanup(),
-            issues.collection.cleanup(),
-            tags.collection.cleanup(),
-          ])
-        }
-      },
-      { message: /deeply equal/ },
-    ),
+      }
+    },
   )
 
   fcTest.prop([fc.constant(`#1444`)], { numRuns: 1, seed: 1444 })(

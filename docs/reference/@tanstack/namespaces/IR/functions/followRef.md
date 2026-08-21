@@ -15,10 +15,11 @@ function followRef(
   alias?: string;
   collection: Collection;
   path: string[];
+  sourceId?: string;
 };
 ```
 
-Defined in: [packages/db/src/query/ir.ts:332](https://github.com/TanStack/db/blob/main/packages/db/src/query/ir.ts#L332)
+Defined in: [packages/db/src/query/ir.ts:389](https://github.com/TanStack/db/blob/main/packages/db/src/query/ir.ts#L389)
 
 Follows the given reference in a query
 until its finds the root field the reference points to.
@@ -44,6 +45,7 @@ until its finds the root field the reference points to.
   `alias?`: `string`;
   `collection`: [`Collection`](../../../../interfaces/Collection.md);
   `path`: `string`[];
+  `sourceId?`: `string`;
 \}
 
 The collection, its alias, and the path to the root field in this collection.

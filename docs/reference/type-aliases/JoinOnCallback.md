@@ -9,7 +9,7 @@ title: JoinOnCallback
 type JoinOnCallback<TContext> = (refs) => any;
 ```
 
-Defined in: [packages/db/src/query/builder/types.ts:619](https://github.com/TanStack/db/blob/main/packages/db/src/query/builder/types.ts#L619)
+Defined in: [packages/db/src/query/builder/types.ts:633](https://github.com/TanStack/db/blob/main/packages/db/src/query/builder/types.ts#L633)
 
 JoinOnCallback - Type for join condition callback functions
 

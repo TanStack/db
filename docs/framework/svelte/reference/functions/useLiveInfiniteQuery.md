@@ -11,7 +11,7 @@ title: useLiveInfiniteQuery
 function useLiveInfiniteQuery<TResult, TKey, TUtils>(liveQueryCollection, config): UseLiveInfiniteQueryReturnWithCollection<TResult, TKey, TUtils>;
 ```
 
-Defined in: [useLiveInfiniteQuery.svelte.ts:97](https://github.com/TanStack/db/blob/main/packages/svelte-db/src/useLiveInfiniteQuery.svelte.ts#L97)
+Defined in: [packages/svelte-db/src/useLiveInfiniteQuery.svelte.ts:97](https://github.com/TanStack/db/blob/main/packages/svelte-db/src/useLiveInfiniteQuery.svelte.ts#L97)
 
 Create a Svelte-native reactive view over the shared live-query window
 controller. The query must include an `orderBy` clause.
@@ -48,12 +48,12 @@ controller. The query must include an `orderBy` clause.
 
 ```ts
 function useLiveInfiniteQuery<TContext>(
-   queryFn,
-   config,
+   queryFn, 
+   config, 
 deps?): UseLiveInfiniteQueryReturn<TContext>;
 ```
 
-Defined in: [useLiveInfiniteQuery.svelte.ts:108](https://github.com/TanStack/db/blob/main/packages/svelte-db/src/useLiveInfiniteQuery.svelte.ts#L108)
+Defined in: [packages/svelte-db/src/useLiveInfiniteQuery.svelte.ts:108](https://github.com/TanStack/db/blob/main/packages/svelte-db/src/useLiveInfiniteQuery.svelte.ts#L108)
 
 Create a Svelte-native reactive view over the shared live-query window
 controller. The query must include an `orderBy` clause.

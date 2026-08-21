@@ -263,6 +263,40 @@ describe(`Subquery Caching`, () => {
     expect(sharedCache.has(subquery)).toBe(true)
   })
 
+  it(`does not reuse a correlated query across parent streams`, () => {
+    const usersCollection = createMockCollection(`users`)
+    const query: QueryIR = {
+      from: new CollectionRef(usersCollection, `u`),
+      select: { id: new PropRef([`u`, `id`]) },
+    }
+    const graph = new D2()
+    const userInput = graph.newInput<[number, any]>()
+    const firstParents = graph.newInput<[number, any]>()
+    const secondParents = graph.newInput<[number, any]>()
+    const cache = new WeakMap()
+    const compileWithParents = (parents: typeof firstParents) =>
+      compileQuery(
+        query,
+        { u: userInput },
+        { users: usersCollection },
+        {},
+        {},
+        new Set(),
+        {},
+        () => {},
+        cache,
+        new WeakMap(),
+        parents,
+        new PropRef([`u`, `id`]),
+      )
+
+    const first = compileWithParents(firstParents)
+    const second = compileWithParents(secondParents)
+
+    expect(second).not.toBe(first)
+    expect(cache.has(query)).toBe(false)
+  })
+
   it(`should use cache to avoid recompilation in nested subqueries`, () => {
     const usersCollection = createMockCollection(`users`)
 

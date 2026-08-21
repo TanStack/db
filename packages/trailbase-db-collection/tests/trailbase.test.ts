@@ -1,7 +1,13 @@
 import { describe, expect, it, vi } from 'vitest'
 import { createCollection } from '@tanstack/db'
 import { trailBaseCollectionOptions } from '../src/trailbase'
-import { stripVirtualProps } from '../../db/tests/utils'
+import {
+  flushPromises,
+  stripVirtualProps,
+  withExpectedRejection,
+} from '../../db/tests/utils'
+import { expectAssertionFailure } from '../../db/tests/expected-failure'
+import { TraceAssertionError } from '../../db/tests/trace-runner'
 import type {
   CreateOperation,
   DeleteOperation,
@@ -120,7 +126,45 @@ function setUp(recordApi: MockRecordApi<Data>) {
   return options
 }
 
+async function expectWildcardFailureSettlesPreload(): Promise<void> {
+  const failure = new Error(`wildcard subscription denied`)
+  const recordApi = new MockRecordApi<Data>()
+  recordApi.subscribe.mockRejectedValue(failure)
+
+  await withExpectedRejection(failure.message, async () => {
+    const collection = createCollection(setUp(recordApi))
+    let settled = false
+    const preload = collection.preload().then(
+      () => {
+        settled = true
+      },
+      () => {
+        settled = true
+      },
+    )
+
+    try {
+      await flushPromises()
+      try {
+        expect(settled).toBe(true)
+      } catch (error) {
+        throw new TraceAssertionError(0, error)
+      }
+    } finally {
+      await collection.cleanup()
+      await preload
+    }
+  })
+}
+
 describe(`TrailBase Integration`, () => {
+  it(`settles preload when wildcard subscription startup fails`, async () => {
+    await expectAssertionFailure(expectWildcardFailureSettlesPreload, {
+      checkpoint: 0,
+      classify: ({ actual, expected }) => actual === false && expected === true,
+    })()
+  })
+
   it(`cancels its event subscription when the collection is cleaned up`, async () => {
     const recordApi = new MockRecordApi<Data>()
     const cancel = vi.fn()

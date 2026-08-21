@@ -6,11 +6,13 @@ import {
   count,
   createLiveQueryCollection,
   eq,
+  gte,
   materialize,
   toArray,
 } from '../../src/query/index.js'
 import { createCollection } from '../../src/collection/index.js'
 import { CleanupQueue } from '../../src/collection/cleanup-queue.js'
+import { BTreeIndex } from '../../src/indexes/btree-index.js'
 import { localOnlyCollectionOptions } from '../../src/local-only.js'
 import {
   flushPromises,
@@ -326,6 +328,71 @@ describe(`includes subqueries`, () => {
         },
       ])
     })
+
+    it(`publishes a non-empty child Collection as ready with its rows`, async () => {
+      const collection = buildIncludesQuery()
+      const publications: Array<{ ready: boolean; issueIds: Array<number> }> =
+        []
+      const subscription = collection.subscribeChanges(
+        () => {
+          const project = collection.get(1)
+          if (!project) return
+          publications.push({
+            ready: project.issues.isReady(),
+            issueIds: [...project.issues.values()].map((issue) => issue.id),
+          })
+        },
+        { includeInitialState: true },
+      )
+
+      try {
+        await collection.preload()
+        expect(publications[0]).toEqual({ ready: true, issueIds: [10, 11] })
+      } finally {
+        subscription.unsubscribe()
+        await collection.cleanup()
+      }
+    })
+
+    it(`gives an active null correlation an empty child Collection`, async () => {
+      const parents = createCollection(
+        mockSyncCollectionOptions<{ id: number; groupId: number | null }>({
+          id: `includes-null-correlation-parents`,
+          getKey: (parent) => parent.id,
+          initialData: [{ id: 1, groupId: null }],
+        }),
+      )
+      const children = createCollection(
+        mockSyncCollectionOptions<{ id: number; groupId: number }>({
+          id: `includes-null-correlation-children`,
+          getKey: (child) => child.id,
+          initialData: [{ id: 10, groupId: 1 }],
+        }),
+      )
+      const collection = createLiveQueryCollection((q) =>
+        q.from({ parent: parents }).select(({ parent }) => ({
+          id: parent.id,
+          items: q
+            .from({ child: children })
+            .where(({ child }) => eq(child.groupId, parent.groupId))
+            .select(({ child }) => ({ id: child.id })),
+        })),
+      )
+
+      await collection.preload()
+
+      const items = collection.get(1)!.items
+      expect(items).toBeDefined()
+      expect(plainRows(items)).toEqual([])
+      expect(items.isReady()).toBe(true)
+      let preloadSettled = false
+      const preload = items.preload().then(() => {
+        preloadSettled = true
+      })
+      await flushPromises()
+      expect(preloadSettled).toBe(true)
+      await preload
+    })
   })
 
   describe(`reactivity`, () => {
@@ -394,7 +461,8 @@ describe(`includes subqueries`, () => {
       const collection = buildIncludesQuery()
       await collection.preload()
 
-      expect(childItems((collection.get(1) as any).issues)).toHaveLength(2)
+      const originalIssues = (collection.get(1) as any).issues
+      expect(childItems(originalIssues)).toHaveLength(2)
 
       // Remove project Alpha
       projects.utils.begin()
@@ -405,6 +473,7 @@ describe(`includes subqueries`, () => {
       projects.utils.commit()
 
       expect(collection.get(1)).toBeUndefined()
+      expect(childItems(originalIssues)).toEqual([])
 
       // Re-add project Alpha — should get a fresh child collection
       projects.utils.begin()
@@ -416,6 +485,8 @@ describe(`includes subqueries`, () => {
 
       const alpha = collection.get(1) as any
       expect(alpha).toMatchObject({ id: 1, name: `Alpha Reborn` })
+      expect(alpha.issues).not.toBe(originalIssues)
+      expect(childItems(originalIssues)).toEqual([])
       expect(childItems(alpha.issues)).toEqual([
         { id: 10, title: `Bug in Alpha` },
         { id: 11, title: `Feature for Alpha` },
@@ -822,6 +893,37 @@ describe(`includes subqueries`, () => {
         { id: 11, title: `Feature for Alpha` },
       ])
     })
+
+    it(`order-only child changes update Collection layout`, async () => {
+      const collection = createLiveQueryCollection((q) =>
+        q.from({ p: projects }).select(({ p }) => ({
+          id: p.id,
+          issues: q
+            .from({ i: issues })
+            .where(({ i }) => eq(i.projectId, p.id))
+            .orderBy(({ i }) => i.title, `asc`)
+            .select(({ i }) => ({ id: i.id })),
+        })),
+      )
+
+      await collection.preload()
+      expect(plainRows((collection.get(1) as any).issues)).toEqual([
+        { id: 10 },
+        { id: 11 },
+      ])
+
+      issues.utils.begin()
+      issues.utils.write({
+        type: `update`,
+        value: { id: 11, projectId: 1, title: `A Feature for Alpha` },
+      })
+      issues.utils.commit()
+
+      expect(plainRows((collection.get(1) as any).issues)).toEqual([
+        { id: 11 },
+        { id: 10 },
+      ])
+    })
   })
 
   describe(`ordered child queries with limit`, () => {
@@ -1060,8 +1162,9 @@ describe(`includes subqueries`, () => {
       await collection.preload()
 
       // Both Frontend and Backend share departmentId 100
-      expect(childItems((collection.get(1) as any).members)).toHaveLength(2)
-      expect(childItems((collection.get(2) as any).members)).toHaveLength(2)
+      const sharedMembers = (collection.get(1) as any).members
+      expect((collection.get(2) as any).members).toBe(sharedMembers)
+      expect(childItems(sharedMembers)).toHaveLength(2)
 
       // Delete the Frontend team
       teams.utils.begin()
@@ -1074,10 +1177,599 @@ describe(`includes subqueries`, () => {
       expect(collection.get(1)).toBeUndefined()
 
       // Backend should still have its child collection with all members
+      expect((collection.get(2) as any).members).toBe(sharedMembers)
       expect(childItems((collection.get(2) as any).members)).toEqual([
         { id: 10, name: `Alice` },
         { id: 11, name: `Bob` },
       ])
+
+      // Rejoining the still-active route reuses its shared facade.
+      teams.utils.begin()
+      teams.utils.write({ type: `insert`, value: sampleTeams[0]! })
+      teams.utils.commit()
+      expect((collection.get(1) as any).members).toBe(sharedMembers)
+    })
+
+    it(`publishes a parent route move and its child facades coherently`, async () => {
+      type Parent = { id: number; groupId: number }
+      type Child = { id: number; groupId: number }
+
+      const parents = createCollection(
+        mockSyncCollectionOptions<Parent>({
+          id: `coherent-route-parents`,
+          getKey: (parent) => parent.id,
+          initialData: [{ id: 1, groupId: 1 }],
+        }),
+      )
+      const children = createCollection(
+        mockSyncCollectionOptions<Child>({
+          id: `coherent-route-children`,
+          getKey: (child) => child.id,
+          initialData: [
+            { id: 10, groupId: 1 },
+            { id: 20, groupId: 2 },
+          ],
+        }),
+      )
+      const collection = createLiveQueryCollection((q) =>
+        q.from({ parent: parents }).select(({ parent }) => ({
+          id: parent.id,
+          groupId: parent.groupId,
+          children: q
+            .from({ child: children })
+            .where(({ child }) => eq(child.groupId, parent.groupId))
+            .select(({ child }) => ({ id: child.id })),
+        })),
+      )
+
+      await collection.preload()
+
+      const oldFacade = collection.get(1)!.children
+      const observations: Array<{
+        groupId: number
+        sameFacade: boolean
+        oldRows: Array<{ id: number }>
+        currentRows: Array<{ id: number }>
+      }> = []
+      const facadeSubscription = oldFacade.subscribeChanges(
+        () => {
+          const current = collection.get(1)!
+          observations.push({
+            groupId: current.groupId,
+            sameFacade: current.children === oldFacade,
+            oldRows: plainRows(oldFacade),
+            currentRows: plainRows(current.children),
+          })
+        },
+        { includeInitialState: false },
+      )
+      const rootObservations: Array<{
+        groupId: number
+        oldRows: Array<{ id: number }>
+        currentRows: Array<{ id: number }>
+      }> = []
+      const rootSubscription = collection.subscribeChanges(
+        () => {
+          const current = collection.get(1)!
+          rootObservations.push({
+            groupId: current.groupId,
+            oldRows: plainRows(oldFacade),
+            currentRows: plainRows(current.children),
+          })
+        },
+        { includeInitialState: false },
+      )
+
+      try {
+        parents.utils.begin()
+        parents.utils.write({
+          type: `update`,
+          value: { id: 1, groupId: 2 },
+          previousValue: { id: 1, groupId: 1 },
+        })
+        parents.utils.commit()
+
+        expect(observations).toEqual([
+          {
+            groupId: 2,
+            sameFacade: false,
+            oldRows: [],
+            currentRows: [{ id: 20 }],
+          },
+        ])
+        expect(rootObservations).toEqual([
+          {
+            groupId: 2,
+            oldRows: [],
+            currentRows: [{ id: 20 }],
+          },
+        ])
+      } finally {
+        facadeSubscription.unsubscribe()
+        rootSubscription.unsubscribe()
+      }
+    })
+
+    it(`replays existing bucket rows when their parent route becomes active`, async () => {
+      type Parent = { id: number; groupId: number }
+      type Child = { id: number; groupId: number }
+
+      const parents = createCollection(
+        mockSyncCollectionOptions<Parent>({
+          id: `late-route-parents`,
+          getKey: (parent) => parent.id,
+          initialData: [],
+        }),
+      )
+      const children = createCollection(
+        mockSyncCollectionOptions<Child>({
+          id: `late-route-children`,
+          getKey: (child) => child.id,
+          initialData: [{ id: 10, groupId: 1 }],
+        }),
+      )
+      const collection = createLiveQueryCollection((q) =>
+        q.from({ parent: parents }).select(({ parent }) => ({
+          id: parent.id,
+          children: q
+            .from({ child: children })
+            .where(({ child }) => eq(child.groupId, parent.groupId))
+            .select(({ child }) => ({ id: child.id })),
+        })),
+      )
+
+      await collection.preload()
+      parents.utils.begin()
+      parents.utils.write({
+        type: `insert`,
+        value: { id: 1, groupId: 1 },
+      })
+      parents.utils.commit()
+
+      expect(childItems(collection.get(1)!.children)).toEqual([{ id: 10 }])
+    })
+
+    it(`replays existing bucket rows when a parent enters a limited result`, async () => {
+      type Parent = { id: number; rank: number; groupId: number }
+      type Child = { id: number; groupId: number }
+
+      const parents = createCollection(
+        mockSyncCollectionOptions<Parent>({
+          id: `limited-late-route-parents`,
+          getKey: (parent) => parent.id,
+          initialData: [
+            { id: 1, rank: 1, groupId: 1 },
+            { id: 2, rank: 2, groupId: 2 },
+          ],
+        }),
+      )
+      const children = createCollection(
+        mockSyncCollectionOptions<Child>({
+          id: `limited-late-route-children`,
+          getKey: (child) => child.id,
+          initialData: [
+            { id: 10, groupId: 1 },
+            { id: 20, groupId: 2 },
+          ],
+        }),
+      )
+      const collection = createLiveQueryCollection((q) =>
+        q
+          .from({ parent: parents })
+          .orderBy(({ parent }) => parent.rank)
+          .limit(1)
+          .select(({ parent }) => ({
+            id: parent.id,
+            children: q
+              .from({ child: children })
+              .where(({ child }) => eq(child.groupId, parent.groupId))
+              .select(({ child }) => ({ id: child.id })),
+          })),
+      )
+
+      await collection.preload()
+      expect(childItems(collection.get(1)!.children)).toEqual([{ id: 10 }])
+
+      parents.utils.begin()
+      parents.utils.write({
+        type: `delete`,
+        value: { id: 1, rank: 1, groupId: 1 },
+      })
+      parents.utils.commit()
+
+      expect(collection.get(1)).toBeUndefined()
+      expect(childItems(collection.get(2)!.children)).toEqual([{ id: 20 }])
+    })
+
+    it(`keeps a limited child facade complete as the window widens and receives later changes`, async () => {
+      type Parent = { id: number; rank: number; groupId: number }
+      type Child = { id: number; groupId: number; label: string }
+
+      const parents = createCollection(
+        mockSyncCollectionOptions<Parent>({
+          id: `widened-limited-facade-parents`,
+          getKey: (parent) => parent.id,
+          initialData: [
+            { id: 1, rank: 1, groupId: 1 },
+            { id: 2, rank: 2, groupId: 2 },
+          ],
+        }),
+      )
+      const children = createCollection(
+        mockSyncCollectionOptions<Child>({
+          id: `widened-limited-facade-children`,
+          getKey: (child) => child.id,
+          initialData: [
+            { id: 10, groupId: 1, label: `first` },
+            { id: 20, groupId: 2, label: `preloaded` },
+          ],
+        }),
+      )
+      const buildQuery = () =>
+        createLiveQueryCollection((q) =>
+          q
+            .from({ parent: parents })
+            // Keep this as orderBy + limit: parent keys branch before top-K,
+            // so the second bucket's initial rows arrive while it is inactive.
+            .orderBy(({ parent }) => parent.rank)
+            .limit(1)
+            .select(({ parent }) => ({
+              id: parent.id,
+              children: q
+                .from({ child: children })
+                .where(({ child }) => eq(child.groupId, parent.groupId))
+                .select(({ child }) => ({
+                  id: child.id,
+                  label: child.label,
+                })),
+            })),
+        )
+      const collection = buildQuery()
+
+      await collection.preload()
+      const windowResult = collection.utils.setWindow({ offset: 0, limit: 2 })
+      if (windowResult instanceof Promise) {
+        await windowResult
+      }
+
+      const secondFacade = collection.get(2)!.children
+      expect(secondFacade.status).toBe(`ready`)
+      expect(secondFacade.isReady()).toBe(true)
+      expect(plainRows(secondFacade)).toEqual([{ id: 20, label: `preloaded` }])
+
+      children.utils.begin()
+      children.utils.write({
+        type: `insert`,
+        value: { id: 21, groupId: 2, label: `fresh` },
+      })
+      children.utils.commit()
+      children.utils.begin()
+      children.utils.write({
+        type: `update`,
+        value: { id: 20, groupId: 2, label: `updated` },
+        previousValue: { id: 20, groupId: 2, label: `preloaded` },
+      })
+      children.utils.commit()
+
+      expect(plainRows(secondFacade)).toEqual([
+        { id: 20, label: `updated` },
+        { id: 21, label: `fresh` },
+      ])
+
+      parents.utils.begin()
+      parents.utils.write({
+        type: `delete`,
+        value: { id: 1, rank: 1, groupId: 1 },
+      })
+      parents.utils.commit()
+      await collection.cleanup()
+
+      const replayed = buildQuery()
+      await replayed.preload()
+      expect(plainRows(replayed.get(2)!.children)).toEqual([
+        { id: 20, label: `updated` },
+        { id: 21, label: `fresh` },
+      ])
+      await replayed.cleanup()
+    })
+
+    it(`replays existing child rows when a parent where predicate becomes true`, async () => {
+      type Parent = { id: number; active: boolean; groupId: number }
+      type Child = { id: number; groupId: number }
+
+      const parents = createCollection(
+        mockSyncCollectionOptions<Parent>({
+          id: `where-activated-facade-parents`,
+          getKey: (parent) => parent.id,
+          initialData: [{ id: 1, active: false, groupId: 1 }],
+        }),
+      )
+      const children = createCollection(
+        mockSyncCollectionOptions<Child>({
+          id: `where-activated-facade-children`,
+          getKey: (child) => child.id,
+          initialData: [{ id: 10, groupId: 1 }],
+        }),
+      )
+      const collection = createLiveQueryCollection((q) =>
+        q
+          .from({ parent: parents })
+          .where(({ parent }) => eq(parent.active, true))
+          .select(({ parent }) => ({
+            id: parent.id,
+            children: q
+              .from({ child: children })
+              .where(({ child }) => eq(child.groupId, parent.groupId)),
+          })),
+      )
+
+      await collection.preload()
+      expect(collection.size).toBe(0)
+
+      parents.utils.begin()
+      parents.utils.write({
+        type: `update`,
+        value: { id: 1, active: true, groupId: 1 },
+        previousValue: { id: 1, active: false, groupId: 1 },
+      })
+      parents.utils.commit()
+
+      expect(plainRows(collection.get(1)!.children)).toEqual([
+        { id: 10, groupId: 1 },
+      ])
+    })
+
+    it(`does not publish facade changes when root publication fails`, async () => {
+      type Parent = { id: number; groupId: number }
+      type Child = { id: number; groupId: number }
+
+      const parents = createCollection(
+        mockSyncCollectionOptions<Parent>({
+          id: `failed-publication-parents`,
+          getKey: (parent) => parent.id,
+          initialData: [{ id: 1, groupId: 1 }],
+        }),
+      )
+      const children = createCollection(
+        mockSyncCollectionOptions<Child>({
+          id: `failed-publication-children`,
+          getKey: (child) => child.id,
+          initialData: [
+            { id: 10, groupId: 1 },
+            { id: 20, groupId: 2 },
+          ],
+        }),
+      )
+      let keyReads = 0
+      let failAt: number | undefined
+      const collection = createLiveQueryCollection({
+        query: (q) =>
+          q.from({ parent: parents }).select(({ parent }) => ({
+            id: parent.id,
+            groupId: parent.groupId,
+            children: q
+              .from({ child: children })
+              .where(({ child }) => eq(child.groupId, parent.groupId))
+              .select(({ child }) => ({ id: child.id })),
+          })),
+        getKey: (row) => {
+          keyReads += 1
+          if (keyReads === failAt) throw new Error(`root publication failed`)
+          return row.id
+        },
+      })
+
+      await collection.preload()
+      const oldFacade = collection.get(1)!.children
+      const facadeChanges = vi.fn()
+      const subscription = oldFacade.subscribeChanges(facadeChanges, {
+        includeInitialState: false,
+      })
+
+      try {
+        keyReads = 0
+        failAt = 3
+        expect(() => {
+          parents.utils.begin()
+          parents.utils.write({
+            type: `update`,
+            previousValue: { id: 1, groupId: 1 },
+            value: { id: 1, groupId: 2 },
+          })
+          parents.utils.commit()
+        }).toThrow(`root publication failed`)
+
+        expect(collection.get(1)!.groupId).toBe(1)
+        expect(collection.get(1)!.children).toBe(oldFacade)
+        expect(childItems(oldFacade)).toEqual([{ id: 10 }])
+        expect(facadeChanges).not.toHaveBeenCalled()
+      } finally {
+        subscription.unsubscribe()
+      }
+    })
+
+    it(`publishes coherent includes through immediate ordered load-more passes`, async () => {
+      type Parent = { id: number; groupId: number; rank: number }
+      type Child = { id: number; groupId: number }
+
+      const sourceRows: Array<Parent> = [
+        { id: 1, groupId: 1, rank: 1 },
+        { id: 2, groupId: 2, rank: 2 },
+        { id: 3, groupId: 3, rank: 3 },
+      ]
+      let nextRow = 0
+      let loadCount = 0
+      const parents = createCollection<Parent>({
+        id: `ordered-publication-parents`,
+        getKey: (parent) => parent.id,
+        syncMode: `on-demand`,
+        autoIndex: `eager`,
+        defaultIndexType: BTreeIndex,
+        sync: {
+          sync: ({ begin, write, commit, markReady }) => ({
+            loadSubset: () => {
+              loadCount += 1
+              const row = sourceRows[nextRow++]
+              if (row) {
+                begin()
+                write({ type: `insert`, value: row })
+                commit()
+              }
+              markReady()
+              return true
+            },
+          }),
+        },
+      })
+      const children = createCollection(
+        mockSyncCollectionOptions<Child>({
+          id: `ordered-publication-children`,
+          getKey: (child) => child.id,
+          initialData: [
+            { id: 10, groupId: 1 },
+            { id: 20, groupId: 2 },
+            { id: 30, groupId: 3 },
+          ],
+        }),
+      )
+      const collection = createLiveQueryCollection((q) =>
+        q
+          .from({ parent: parents })
+          .orderBy(({ parent }) => parent.rank)
+          .limit(3)
+          .select(({ parent }) => ({
+            id: parent.id,
+            children: q
+              .from({ child: children })
+              .where(({ child }) => eq(child.groupId, parent.groupId))
+              .select(({ child }) => ({ id: child.id })),
+          })),
+      )
+      const observations: Array<
+        Array<{ id: number; childIds: Array<number> }>
+      > = []
+      const readObservation = () =>
+        [...collection.values()].map((parent) => ({
+          id: parent.id,
+          childIds: plainRows(parent.children).map((child) => child.id),
+        }))
+      const subscription = collection.subscribeChanges(
+        () => {
+          observations.push(readObservation())
+        },
+        { includeInitialState: false },
+      )
+
+      try {
+        await collection.preload()
+        expect(loadCount).toBe(3)
+        for (const observation of observations) {
+          for (const parent of observation) {
+            expect(parent.childIds).toEqual([parent.id * 10])
+          }
+        }
+        expect(readObservation()).toEqual([
+          { id: 1, childIds: [10] },
+          { id: 2, childIds: [20] },
+          { id: 3, childIds: [30] },
+        ])
+      } finally {
+        subscription.unsubscribe()
+      }
+    })
+
+    it(`retires a shared facade after all parent routes publish`, async () => {
+      type Parent = { id: number; groupId: number }
+      type Child = { id: number; groupId: number }
+
+      const initialParents: Array<Parent> = [
+        { id: 1, groupId: 1 },
+        { id: 2, groupId: 1 },
+      ]
+      const parents = createCollection(
+        mockSyncCollectionOptions<Parent>({
+          id: `coherent-shared-route-parents`,
+          getKey: (parent) => parent.id,
+          initialData: initialParents,
+        }),
+      )
+      const children = createCollection(
+        mockSyncCollectionOptions<Child>({
+          id: `coherent-shared-route-children`,
+          getKey: (child) => child.id,
+          initialData: [
+            { id: 10, groupId: 1 },
+            { id: 20, groupId: 2 },
+            { id: 30, groupId: 3 },
+          ],
+        }),
+      )
+      const collection = createLiveQueryCollection((q) =>
+        q.from({ parent: parents }).select(({ parent }) => ({
+          id: parent.id,
+          groupId: parent.groupId,
+          children: q
+            .from({ child: children })
+            .where(({ child }) => eq(child.groupId, parent.groupId))
+            .select(({ child }) => ({ id: child.id })),
+        })),
+      )
+
+      await collection.preload()
+
+      const sharedFacade = collection.get(1)!.children
+      expect(collection.get(2)!.children).toBe(sharedFacade)
+      const observations: Array<{
+        oldRows: Array<{ id: number }>
+        parents: Array<{
+          id: number
+          groupId: number
+          rows: Array<{ id: number }>
+        }>
+      }> = []
+      const subscription = sharedFacade.subscribeChanges(
+        () => {
+          observations.push({
+            oldRows: plainRows(sharedFacade),
+            parents: [1, 2].map((id) => {
+              const current = collection.get(id)!
+              return {
+                id,
+                groupId: current.groupId,
+                rows: plainRows(current.children),
+              }
+            }),
+          })
+        },
+        { includeInitialState: false },
+      )
+
+      try {
+        parents.utils.begin()
+        parents.utils.write({
+          type: `update`,
+          value: { id: 1, groupId: 2 },
+          previousValue: initialParents[0]!,
+        })
+        parents.utils.write({
+          type: `update`,
+          value: { id: 2, groupId: 3 },
+          previousValue: initialParents[1]!,
+        })
+        parents.utils.commit()
+
+        expect(observations).toEqual([
+          {
+            oldRows: [],
+            parents: [
+              { id: 1, groupId: 2, rows: [{ id: 20 }] },
+              { id: 2, groupId: 3, rows: [{ id: 30 }] },
+            ],
+          },
+        ])
+      } finally {
+        subscription.unsubscribe()
+      }
     })
 
     it(`correlation field does not need to be in the parent select`, async () => {
@@ -2288,6 +2980,10 @@ describe(`includes subqueries`, () => {
           ],
         },
       ])
+
+      const alphaIssues = collection.get(1)!.issues
+      expect([...alphaIssues.keys()]).toEqual([10])
+      expect(alphaIssues.get(10)?.$key).toBe(10)
     })
 
     it(`reacts to parent field change`, async () => {
@@ -2593,6 +3289,271 @@ describe(`includes subqueries`, () => {
           items: [],
         },
       ])
+
+      const aliceItems = collection.get(1)!.items
+      const bobItems = collection.get(2)!.items
+      expect([...aliceItems.keys()]).toEqual([10])
+      expect(aliceItems.get(10)?.$key).toBe(10)
+      expect([...bobItems.keys()]).toEqual([])
+    })
+
+    it(`keeps the same child public key in distinct parent-context buckets`, async () => {
+      type ScoreParent = { id: number; groupId: number; minimumScore: number }
+      type ScoreChild = {
+        id: number
+        groupId: number
+        score: number
+        label: string
+      }
+
+      const parents = createCollection(
+        mockSyncCollectionOptions<ScoreParent>({
+          id: `same-child-context-parents`,
+          getKey: (parent) => parent.id,
+          initialData: [
+            { id: 1, groupId: 1, minimumScore: 10 },
+            { id: 2, groupId: 1, minimumScore: 20 },
+          ],
+        }),
+      )
+      const children = createCollection(
+        mockSyncCollectionOptions<ScoreChild>({
+          id: `same-child-context-children`,
+          getKey: (child) => child.id,
+          initialData: [{ id: 7, groupId: 1, score: 30, label: `seven` }],
+        }),
+      )
+
+      const collection = createLiveQueryCollection((q) =>
+        q.from({ parent: parents }).select(({ parent }) => ({
+          id: parent.id,
+          children: materialize(
+            q
+              .from({ child: children })
+              .where(({ child }) => eq(child.groupId, parent.groupId))
+              .where(({ child }) => gte(child.score, parent.minimumScore))
+              .select(({ child }) => ({ id: child.id, score: child.score })),
+          ),
+          firstChild: materialize(
+            q
+              .from({ firstChild: children })
+              .where(({ firstChild }) => eq(firstChild.groupId, parent.groupId))
+              .where(({ firstChild }) =>
+                gte(firstChild.score, parent.minimumScore),
+              )
+              .select(({ firstChild }) => ({ id: firstChild.id }))
+              .findOne(),
+          ),
+          labels: concat(
+            toArray(
+              q
+                .from({ labelChild: children })
+                .where(({ labelChild }) =>
+                  eq(labelChild.groupId, parent.groupId),
+                )
+                .where(({ labelChild }) =>
+                  gte(labelChild.score, parent.minimumScore),
+                )
+                .select(({ labelChild }) => labelChild.label),
+            ),
+          ),
+        })),
+      )
+
+      await collection.preload()
+
+      expect(toTree(collection)).toEqual([
+        {
+          id: 1,
+          children: [{ id: 7, score: 30 }],
+          firstChild: { id: 7 },
+          labels: `seven`,
+        },
+        {
+          id: 2,
+          children: [{ id: 7, score: 30 }],
+          firstChild: { id: 7 },
+          labels: `seven`,
+        },
+      ])
+
+      parents.utils.begin()
+      parents.utils.write({
+        type: `update`,
+        previousValue: { id: 2, groupId: 1, minimumScore: 20 },
+        value: { id: 2, groupId: 2, minimumScore: 20 },
+      })
+      parents.utils.commit()
+      children.utils.begin()
+      children.utils.write({
+        type: `update`,
+        previousValue: { id: 7, groupId: 1, score: 30, label: `seven` },
+        value: { id: 7, groupId: 2, score: 30, label: `seven` },
+      })
+      children.utils.commit()
+
+      expect(toTree(collection)).toEqual([
+        { id: 1, children: [], firstChild: undefined, labels: `` },
+        {
+          id: 2,
+          children: [{ id: 7, score: 30 }],
+          firstChild: { id: 7 },
+          labels: `seven`,
+        },
+      ])
+    })
+
+    it(`uses canonical identity for non-JSON parent context values`, async () => {
+      type TaggedParent = { id: number; groupId: number; tag: bigint }
+      type TaggedChild = {
+        id: number | string
+        groupId: number
+        tag: bigint
+        metadataId: number
+      }
+      type Metadata = { id: number; groupId: number; tag: bigint }
+
+      const parents = createCollection(
+        mockSyncCollectionOptions<TaggedParent>({
+          id: `bigint-context-parents`,
+          getKey: (parent) => parent.id,
+          initialData: [{ id: 1, groupId: 1, tag: 1n }],
+        }),
+      )
+      const children = createCollection(
+        mockSyncCollectionOptions<TaggedChild>({
+          id: `bigint-context-children`,
+          getKey: (child) => child.id,
+          initialData: [
+            { id: 1, groupId: 1, tag: 1n, metadataId: 101 },
+            { id: `1`, groupId: 1, tag: 1n, metadataId: 102 },
+          ],
+        }),
+      )
+      const metadataRows = createCollection(
+        mockSyncCollectionOptions<Metadata>({
+          id: `bigint-context-metadata`,
+          getKey: (row) => row.id,
+          initialData: [
+            { id: 101, groupId: 1, tag: 1n },
+            { id: 102, groupId: 1, tag: 1n },
+          ],
+        }),
+      )
+
+      const collection = createLiveQueryCollection((q) =>
+        q.from({ parent: parents }).select(({ parent }) => ({
+          id: parent.id,
+          children: materialize(
+            q
+              .from({ child: children })
+              .where(({ child }) => eq(child.groupId, parent.groupId))
+              .where(({ child }) => eq(child.tag, parent.tag))
+              .select(({ child }) => ({ id: child.id })),
+          ),
+          joinedChildren: materialize(
+            q
+              .from({ joinedChild: children })
+              .join(
+                { metadata: metadataRows },
+                ({ joinedChild, metadata }) =>
+                  eq(joinedChild.metadataId, metadata.id),
+                `inner`,
+              )
+              .where(({ metadata }) => eq(metadata.groupId, parent.groupId))
+              .where(({ metadata }) => eq(metadata.tag, parent.tag))
+              .select(({ joinedChild }) => ({ id: joinedChild.id })),
+          ),
+        })),
+      )
+
+      await collection.preload()
+      const [row] = toTree(collection)
+      const typedIds = (values: Array<{ id: number | string }>) =>
+        values.map(({ id }) => `${typeof id}:${id}`).sort()
+      expect(row!.id).toBe(1)
+      expect(typedIds(row!.children)).toEqual([`number:1`, `string:1`])
+      expect(typedIds(row!.joinedChildren)).toEqual([`number:1`, `string:1`])
+    })
+
+    it(`keeps relation-local identity through Collection and nested includes`, async () => {
+      type Parent = { id: number; groupId: number; minimumScore: number }
+      type Child = { id: number; groupId: number; score: number }
+      type Note = { id: number; childId: number }
+
+      const parents = createCollection(
+        mockSyncCollectionOptions<Parent>({
+          id: `nested-context-parents`,
+          getKey: (parent) => parent.id,
+          initialData: [
+            { id: 1, groupId: 1, minimumScore: 10 },
+            { id: 2, groupId: 1, minimumScore: 20 },
+          ],
+        }),
+      )
+      const children = createCollection(
+        mockSyncCollectionOptions<Child>({
+          id: `nested-context-children`,
+          getKey: (child) => child.id,
+          initialData: [{ id: 7, groupId: 1, score: 30 }],
+        }),
+      )
+      const notes = createCollection(
+        mockSyncCollectionOptions<Note>({
+          id: `nested-context-notes`,
+          getKey: (note) => note.id,
+          initialData: [{ id: 70, childId: 7 }],
+        }),
+      )
+
+      const collection = createLiveQueryCollection((q) =>
+        q.from({ parent: parents }).select(({ parent }) => ({
+          id: parent.id,
+          children: q
+            .from({ child: children })
+            .where(({ child }) => eq(child.groupId, parent.groupId))
+            .where(({ child }) => gte(child.score, parent.minimumScore))
+            .select(({ child }) => ({
+              id: child.id,
+              notes: materialize(
+                q
+                  .from({ note: notes })
+                  .where(({ note }) => eq(note.childId, child.id))
+                  .select(({ note }) => ({ id: note.id })),
+              ),
+            })),
+        })),
+      )
+
+      await collection.preload()
+
+      const firstChildren = collection.get(1)!.children
+      const secondChildren = collection.get(2)!.children
+      expect([...firstChildren.keys()]).toEqual([7])
+      expect([...secondChildren.keys()]).toEqual([7])
+      expect(stripVirtualProps(firstChildren.get(7))).toEqual({
+        id: 7,
+        notes: [{ id: 70 }],
+      })
+      expect(stripVirtualProps(secondChildren.get(7))).toEqual({
+        id: 7,
+        notes: [{ id: 70 }],
+      })
+
+      children.utils.begin()
+      children.utils.write({
+        type: `update`,
+        previousValue: { id: 7, groupId: 1, score: 30 },
+        value: { id: 7, groupId: 1, score: 15 },
+      })
+      children.utils.commit()
+
+      expect([...firstChildren.keys()]).toEqual([7])
+      expect([...secondChildren.keys()]).toEqual([])
+      expect(stripVirtualProps(firstChildren.get(7))).toEqual({
+        id: 7,
+        notes: [{ id: 70 }],
+      })
     })
 
     it(`shared correlation key with parent filter + orderBy + limit`, async () => {
@@ -6518,6 +7479,70 @@ describe(`includes subqueries`, () => {
   })
 
   describe(`materialize`, () => {
+    it(`uses the same public-key tie-breaker for Collection and inline includes`, async () => {
+      type OrderingParent = { id: number }
+      type OrderingChild = {
+        id: number
+        parentId: number
+        label: string
+      }
+
+      const orderingParents = createCollection(
+        mockSyncCollectionOptions<OrderingParent>({
+          id: `includes-ordering-parents`,
+          getKey: (parent) => parent.id,
+          initialData: [{ id: 1 }],
+        }),
+      )
+      const orderingChildren = createCollection(
+        mockSyncCollectionOptions<OrderingChild>({
+          id: `includes-ordering-children`,
+          getKey: (child) => child.id,
+          autoIndex: `eager`,
+          initialData: [
+            { id: 2, parentId: 1, label: `two` },
+            { id: 3, parentId: 1, label: `three` },
+            { id: 10, parentId: 1, label: `ten` },
+          ],
+        }),
+      )
+      const collection = createLiveQueryCollection((q) => {
+        return q.from({ parent: orderingParents }).select(({ parent }) => {
+          const childRows = () =>
+            q
+              .from({ child: orderingChildren })
+              .where(({ child }) => eq(child.parentId, parent.id))
+              .select(({ child }) => ({ id: child.id, label: child.label }))
+
+          return {
+            id: parent.id,
+            facade: childRows(),
+            array: toArray(childRows()),
+            joined: concat(
+              toArray(
+                q
+                  .from({ child: orderingChildren })
+                  .where(({ child }) => eq(child.parentId, parent.id))
+                  .select(({ child }) => child.label),
+              ),
+            ),
+            first: materialize(childRows().findOne()),
+            materialized: materialize(childRows()),
+          }
+        })
+      })
+      await collection.preload()
+
+      const result = collection.get(1)!
+      const facadeIds = result.facade.toArray.map((child) => child.id)
+
+      expect(facadeIds).toEqual([2, 3, 10])
+      expect(result.array.map((child) => child.id)).toEqual(facadeIds)
+      expect(result.materialized.map((child) => child.id)).toEqual(facadeIds)
+      expect(result.first?.id).toBe(facadeIds[0])
+      expect(result.joined).toBe(`twothreeten`)
+    })
+
     // For singleton behavior we look up each issue's parent project.
     // Each issue references exactly one project via projectId.
     function buildSingletonQuery() {

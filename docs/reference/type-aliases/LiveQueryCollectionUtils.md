@@ -9,7 +9,7 @@ title: LiveQueryCollectionUtils
 type LiveQueryCollectionUtils = UtilsRecord & object;
 ```
 
-Defined in: [packages/db/src/query/live/collection-config-builder.ts:59](https://github.com/TanStack/db/blob/main/packages/db/src/query/live/collection-config-builder.ts#L59)
+Defined in: [packages/db/src/query/live/collection-config-builder.ts:50](https://github.com/TanStack/db/blob/main/packages/db/src/query/live/collection-config-builder.ts#L50)
 
 ## Type Declaration
 

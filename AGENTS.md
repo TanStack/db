@@ -2,6 +2,17 @@
 
 This guide provides principles and patterns for AI agents contributing to the TanStack DB codebase. These guidelines are derived from PR review patterns and reflect the quality standards expected in this project.
 
+## Required reading: live-query materialization
+
+Before reading, analyzing, or modifying correlated live-query materialization
+code under `packages/db/src/query/live/`, read
+`packages/db/src/query/live/ARCHITECTURE.md` in full. Read it before changing
+the related includes oracle tests as well.
+
+Treat that document's component boundaries and normative laws as constraints.
+If a change intentionally revises an architectural contract, update the
+architecture document in the same pull request.
+
 ## Table of Contents
 
 1. [Type Safety](#type-safety)
@@ -367,6 +378,13 @@ test('ignores snapshot that resolves after up-to-date message', async () => {
   // Verify it's handled correctly
 })
 ```
+
+### Name Tests After Behavior
+
+Test names should state the behavior they prove. Do not put issue or pull
+request numbers in test names; those references become stale and make the test
+suite harder to read. When an external report contains essential context that
+the test cannot express, link it in a nearby comment instead.
 
 ### Test Corner Cases
 

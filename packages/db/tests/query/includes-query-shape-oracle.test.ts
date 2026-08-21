@@ -7,8 +7,8 @@ import {
   eq,
   materialize,
 } from '../../src/query/index.js'
-import { expectAssertionFailure } from '../expected-failure.js'
 import { runTrace } from '../trace-runner.js'
+import { oracleRuns } from '../oracle-config.js'
 import { mockSyncCollectionOptions } from '../utils.js'
 import type { TraceDriver, TraceProjection } from '../trace-runner.js'
 
@@ -386,20 +386,16 @@ const nullableProjection: TraceProjection<
 
 describe(`includes query-shape recompute oracle`, () => {
   fcTest.prop([fc.integer({ min: 2, max: 5 })], {
-    numRuns: 12,
+    numRuns: oracleRuns(12),
     seed: 1703,
   })(
-    `discovered trace: deleting one joined contributor preserves remaining multiplicity (#1703)`,
+    `deleting one joined contributor preserves remaining multiplicity (#1703)`,
     async (childCount) => {
-      await expectAssertionFailure(
-        () =>
-          runTrace({
-            steps: [1],
-            driver: createMultiplicityDriver(childCount),
-            projection: multiplicityProjection,
-          }),
-        { checkpoint: 1 },
-      )()
+      await runTrace({
+        steps: [1],
+        driver: createMultiplicityDriver(childCount),
+        projection: multiplicityProjection,
+      })
     },
   )
 
@@ -420,23 +416,15 @@ describe(`includes query-shape recompute oracle`, () => {
         productionId: fc.integer({ min: 101, max: 200 }),
       }),
     ],
-    { numRuns: 12, seed: 1704 },
+    { numRuns: oracleRuns(12), seed: 1704 },
   )(
-    `discovered trace: materialization follows correlation through a joined alias (#1704)`,
+    `materialization follows correlation through a joined alias (#1704)`,
     async ({ correlationId, productionId }) => {
-      await expectAssertionFailure(
-        () =>
-          runTrace({
-            steps: [],
-            driver: createCorrelationDriver(
-              `joined`,
-              correlationId,
-              productionId,
-            ),
-            projection: correlationProjection,
-          }),
-        { checkpoint: 0 },
-      )()
+      await runTrace({
+        steps: [],
+        driver: createCorrelationDriver(`joined`, correlationId, productionId),
+        projection: correlationProjection,
+      })
     },
   )
 
@@ -451,20 +439,16 @@ describe(`includes query-shape recompute oracle`, () => {
   )
 
   fcTest.prop([fc.integer({ min: 1, max: 100 })], {
-    numRuns: 12,
+    numRuns: oracleRuns(12),
     seed: 1706,
   })(
-    `discovered trace: findOne maps a null correlation key to undefined (#1706)`,
+    `findOne maps a null correlation key to undefined (#1706)`,
     async (postId) => {
-      await expectAssertionFailure(
-        () =>
-          runTrace({
-            steps: [],
-            driver: createNullableDriver([], [{ id: postId, authorId: null }]),
-            projection: nullableProjection,
-          }),
-        { checkpoint: 0 },
-      )()
+      await runTrace({
+        steps: [],
+        driver: createNullableDriver([], [{ id: postId, authorId: null }]),
+        projection: nullableProjection,
+      })
     },
   )
 

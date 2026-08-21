@@ -220,3 +220,36 @@ export class Scheduler {
 }
 
 export const transactionScopedScheduler = new Scheduler()
+
+let activePublicationContext: SchedulerContextId | undefined
+
+/**
+ * Returns the Collection publication that currently owns synchronous change
+ * delivery. Live-query jobs use it to coalesce all source subscriptions that
+ * observe one committed batch.
+ */
+export function getActivePublicationContext(): SchedulerContextId | undefined {
+  return activePublicationContext
+}
+
+/**
+ * Runs one synchronous Collection publication inside a scheduler context.
+ * Nested publications share the outer context, so downstream live queries run
+ * only after every subscriber to the original committed batch has observed it.
+ */
+export function withPublicationContext<T>(publish: () => T): T {
+  if (activePublicationContext !== undefined) return publish()
+
+  const contextId = Symbol(`collection-publication`)
+  activePublicationContext = contextId
+  try {
+    const result = publish()
+    transactionScopedScheduler.flush(contextId)
+    return result
+  } catch (error) {
+    transactionScopedScheduler.clear(contextId)
+    throw error
+  } finally {
+    activePublicationContext = undefined
+  }
+}
