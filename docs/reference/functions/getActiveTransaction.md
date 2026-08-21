@@ -11,7 +11,7 @@ function getActiveTransaction():
   | undefined;
 ```
 
-Defined in: [packages/db/src/transactions.ts:176](https://github.com/TanStack/db/blob/main/packages/db/src/transactions.ts#L176)
+Defined in: [packages/db/src/transactions.ts:300](https://github.com/TanStack/db/blob/main/packages/db/src/transactions.ts#L300)
 
 Gets the currently active ambient transaction, if any
 Used internally by collection operations to join existing transactions

@@ -33,7 +33,7 @@ Shared page-depth preservation policy for framework adapters.
 
 #### inputKind
 
-`"collection"` \| `"query"`
+`"query"` \| `"collection"`
 
 #### pageShapeChanged
 
@@ -41,7 +41,7 @@ Shared page-depth preservation policy for framework adapters.
 
 #### previousInputKind
 
-`"collection"` \| `"query"` \| `undefined`
+`"query"` \| `"collection"` \| `undefined`
 
 #### sameCollection
 
