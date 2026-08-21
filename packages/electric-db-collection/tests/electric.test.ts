@@ -2625,6 +2625,32 @@ describe(`Electric Integration`, () => {
       )
     })
 
+    it(`retains Electric coverage when the adapter cannot unload it`, async () => {
+      const testCollection = createCollection(
+        electricCollectionOptions({
+          id: `on-demand-unload-coverage-test`,
+          shapeOptions: {
+            url: `http://test-url`,
+            params: { table: `test_table` },
+          },
+          syncMode: `on-demand`,
+          getKey: (item: Row) => item.id as number,
+          startSync: true,
+        }),
+      )
+      const options = { limit: 10 }
+
+      try {
+        await testCollection._sync.loadSubset(options)
+        testCollection._sync.unloadSubset(options)
+        await testCollection._sync.loadSubset(options)
+
+        expect(mockRequestSnapshot).toHaveBeenCalledTimes(1)
+      } finally {
+        await testCollection.cleanup()
+      }
+    })
+
     it(`should refresh the stream before requesting on-demand snapshots when already up-to-date`, async () => {
       vi.clearAllMocks()
 
