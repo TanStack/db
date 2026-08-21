@@ -2093,6 +2093,57 @@ describe(`Query Collections`, () => {
       warnSpy.mockRestore()
     })
 
+    it(`stays disabled when the prior query becomes ready`, async () => {
+      let finishSync: (() => void) | undefined
+      const collection = createCollection<Person>({
+        id: `conditional-config-pending-sync-test`,
+        getKey: (person) => person.id,
+        sync: {
+          sync: ({ begin, write, commit, markReady }) => {
+            finishSync = () => {
+              begin()
+              write({ type: `insert`, value: initialPersons[2]! })
+              commit()
+              markReady()
+            }
+          },
+        },
+        onInsert: async () => {},
+        onUpdate: async () => {},
+        onDelete: async () => {},
+      })
+
+      const { result, rerender } = renderHook(
+        ({ enabled }: { enabled: boolean }) =>
+          useLiveQuery({
+            query: (q) => {
+              if (!enabled) return undefined
+              return q
+                .from({ persons: collection })
+                .where(({ persons }) => gt(persons.age, 30))
+            },
+          }),
+        { initialProps: { enabled: true } },
+      )
+
+      await waitFor(() => expect(finishSync).toBeDefined())
+      expect(result.current.isLoading).toBe(true)
+
+      rerender({ enabled: false })
+      expect(result.current.status).toBe(`disabled`)
+
+      await act(async () => {
+        finishSync!()
+        await Promise.resolve()
+      })
+
+      expect(collection.status).toBe(`ready`)
+      expect(collection.state.size).toBe(1)
+      expect(result.current.status).toBe(`disabled`)
+      expect(result.current.data).toBeUndefined()
+      expect(result.current.collection).toBeUndefined()
+    })
+
     it(`should handle callback returning undefined without a dependency array`, async () => {
       const collection = createCollection(
         mockSyncCollectionOptions<Person>({
