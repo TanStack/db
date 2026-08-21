@@ -81,6 +81,57 @@ type CollectionResolver = (
   options: CollectionOptionsIdentity<any, string | number, any, any, any>,
 ) => CollectionImpl<any, string | number, any, any, any>
 
+type FnSelectQueryConstructionValue =
+  | QueryBuilder<any>
+  | InitialQueryBuilder
+  | BasicExpression
+  | Aggregate
+  | ToArrayWrapper<any>
+  | ConcatToArrayWrapper<any>
+  | MaterializeWrapper<any, boolean>
+  | CaseWhenWrapper<any>
+
+type IsAnyType<T> = 0 extends 1 & T ? true : false
+
+// Bound recursive inspection so deeply recursive result types do not exceed
+// TypeScript's instantiation limit. The runtime check has no depth limit.
+type ContainsFnSelectQueryConstructionValue<
+  T,
+  TDepth extends ReadonlyArray<unknown> = [],
+> =
+  IsAnyType<T> extends true
+    ? false
+    : T extends FnSelectQueryConstructionValue
+      ? true
+      : TDepth[`length`] extends 8
+        ? false
+        : T extends (...args: Array<any>) => any
+          ? false
+          : T extends ReadonlyArray<infer TItem>
+            ? ContainsFnSelectQueryConstructionValue<
+                TItem,
+                [...TDepth, unknown]
+              >
+            : T extends object
+              ? true extends {
+                  [K in keyof T]-?: ContainsFnSelectQueryConstructionValue<
+                    T[K],
+                    [...TDepth, unknown]
+                  >
+                }[keyof T]
+                ? true
+                : false
+              : false
+
+type InvalidFnSelectResult = {
+  readonly __tanstackDbFnSelectResultError__: `fn.select() cannot return child query builders, query expressions, or query helpers. Use them as direct fields in .select() instead.`
+}
+
+type FnSelectQueryResult<TContext extends Context, TResult> =
+  true extends ContainsFnSelectQueryConstructionValue<TResult>
+    ? InvalidFnSelectResult
+    : QueryBuilder<WithResult<TContext, TResult>>
+
 export class BaseQueryBuilder<TContext extends Context = Context> {
   private readonly query: Partial<QueryIR> = {}
 
@@ -889,10 +940,15 @@ export class BaseQueryBuilder<TContext extends Context = Context> {
        *     age: row.users.age + 1,
        *   }))
        * ```
+       *
+       * Child query builders, query expressions, and helpers such as eq(),
+       * toArray(), and materialize() cannot be returned from fn.select(). Use
+       * them as fields in select() so the compiler can add them to the query
+       * graph.
        */
       select<TFuncSelectResult>(
         callback: (row: TContext[`schema`]) => TFuncSelectResult,
-      ): QueryBuilder<WithResult<TContext, TFuncSelectResult>> {
+      ): FnSelectQueryResult<TContext, TFuncSelectResult> {
         return builder._clone({
           ...builder.query,
           select: undefined, // remove the select clause if it exists

@@ -2224,11 +2224,14 @@ function createGroupByTests(autoIndex: `off` | `eager`): void {
               q
                 .from({ orders: ordersCollection })
                 .groupBy(({ orders }) => orders.customer_id)
-                .fn.select((row) => ({
-                  customerId: row.orders.customer_id,
-                  totalAmount: sum(row.orders.amount),
-                  orderCount: count(row.orders.id),
-                })),
+                .fn.select(
+                  (row) =>
+                    ({
+                      customerId: row.orders.customer_id,
+                      totalAmount: sum(row.orders.amount),
+                      orderCount: count(row.orders.id),
+                    }) as any,
+                ),
           }),
         ).toThrow(`fn.select() cannot be used with groupBy()`)
       })

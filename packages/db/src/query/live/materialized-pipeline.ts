@@ -7,7 +7,11 @@ import {
   reduce,
   serializeValue,
 } from '@tanstack/db-ivm'
-import { FN_SELECT_STATE, INCLUDES_ROUTING } from '../compiler/index.js'
+import {
+  FN_SELECT_STATE,
+  INCLUDES_ROUTING,
+  validateFnSelectResult,
+} from '../compiler/index.js'
 import { VIRTUAL_PROP_NAMES } from '../../virtual-props.js'
 import { deepEquals } from '../../utils.js'
 import type {
@@ -492,6 +496,7 @@ function setMaterializedInclude(
 
   const sourceRow = setNestedValue(state.sourceRow, path, materialized)
   const selectedValue = state.fnSelect(sourceRow)
+  validateFnSelectResult(selectedValue)
   if (!selectedValue || typeof selectedValue !== `object`) {
     throw new Error(`fn.select must return an object when it projects includes`)
   }

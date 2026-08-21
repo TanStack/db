@@ -1,9 +1,12 @@
 import { beforeEach, describe, expect, test } from 'vitest'
 import {
+  caseWhen,
   count,
   createLiveQueryCollection,
   eq,
   gt,
+  materialize,
+  toArray,
 } from '../../src/query/index.js'
 import { createCollection } from '../../src/collection/index.js'
 import { mockSyncCollectionOptions, stripVirtualProps } from '../utils.js'
@@ -218,6 +221,101 @@ describe(`Functional Variants Query`, () => {
         isHighEarner: false,
         yearsToRetirement: 37,
       })
+    })
+
+    test(`rejects query-construction values returned from fn.select`, () => {
+      const departmentsCollection = createDepartmentsCollection()
+
+      expect(() =>
+        createLiveQueryCollection({
+          startSync: true,
+          query: (q) => {
+            const users = q.from({ user: usersCollection })
+            const departments = q.from({ department: departmentsCollection })
+
+            return users.fn.select(
+              (row) =>
+                ({
+                  id: row.user.id,
+                  nested: {
+                    departments: toArray(
+                      q.from({
+                        department: departments.fn.where(
+                          ({ department }) =>
+                            row.user.department_id === department.id,
+                        ),
+                      }),
+                    ),
+                  },
+                }) as any,
+            )
+          },
+        }),
+      ).toThrow(
+        `fn.select() cannot return toArray(). Child query builders, query expressions, and helpers`,
+      )
+
+      expect(() =>
+        createLiveQueryCollection({
+          startSync: true,
+          query: (q) =>
+            q.from({ user: usersCollection }).fn.select(
+              (row) =>
+                ({
+                  id: row.user.id,
+                  departments: materialize(
+                    q.from({ department: departmentsCollection }),
+                  ),
+                }) as any,
+            ),
+        }),
+      ).toThrow(`fn.select() cannot return materialize()`)
+
+      expect(() =>
+        createLiveQueryCollection({
+          startSync: true,
+          query: (q) =>
+            q.from({ user: usersCollection }).fn.select(
+              (row) =>
+                ({
+                  id: row.user.id,
+                  departments: q.from({ department: departmentsCollection }),
+                }) as any,
+            ),
+        }),
+      ).toThrow(`fn.select() cannot return a child query builder`)
+
+      expect(() =>
+        createLiveQueryCollection({
+          startSync: true,
+          query: (q) =>
+            q.from({ user: usersCollection }).fn.select(
+              (row) =>
+                ({
+                  id: row.user.id,
+                  active: eq(row.user.active, true),
+                }) as any,
+            ),
+        }),
+      ).toThrow(`fn.select() cannot return eq()`)
+
+      expect(() =>
+        createLiveQueryCollection({
+          startSync: true,
+          query: (q) =>
+            q.from({ user: usersCollection }).fn.select(
+              (row) =>
+                ({
+                  id: row.user.id,
+                  label: caseWhen(
+                    eq(row.user.active, true),
+                    `active`,
+                    `inactive`,
+                  ),
+                }) as any,
+            ),
+        }),
+      ).toThrow(`fn.select() cannot return caseWhen()`)
     })
   })
 
