@@ -4,6 +4,7 @@ import { createCollection } from '../../db/src/collection/index'
 import { collectionOptions } from '../../db/src/index'
 import { mockSyncCollectionOptions } from '../../db/tests/utils'
 import {
+  Query,
   createLiveQueryCollection,
   eq,
   liveQueryCollectionOptions,
@@ -17,6 +18,12 @@ import type { DbClient, DehydratedDbState } from '../../db/src/index'
 import type { JSX } from 'react'
 import type { OutputWithVirtual } from '../../db/tests/utils'
 import type { SingleResult } from '../../db/src/types'
+import type { QueryBuilder } from '../../db/src/query/index'
+import type {
+  ConditionalUseLiveQueryConfig,
+  UseLiveQueryConfig,
+  UseLiveQueryStatus,
+} from '../src/index'
 
 type Person = {
   id: string
@@ -89,6 +96,105 @@ describe(`useLiveQuery type assertions`, () => {
     expectTypeOf(result.current.data).toMatchTypeOf<
       OutputWithVirtual<Person> | undefined
     >()
+  })
+
+  it(`types a conditional findOne config object as disabled-capable`, () => {
+    const collection = createCollection(
+      mockSyncCollectionOptions<Person>({
+        id: `test-conditional-person-config`,
+        getKey: (person: Person) => person.id,
+        initialData: [],
+      }),
+    )
+    const enabled = null as unknown as boolean
+    const query = new Query()
+      .from({ collection })
+      .where(({ collection: c }) => eq(c.id, `3`))
+      .findOne()
+    type QueryContext =
+      typeof query extends QueryBuilder<infer TContext> ? TContext : never
+    const config: ConditionalUseLiveQueryConfig<QueryContext> = {
+      queryKey: [collection.id, enabled],
+      query: () => (enabled ? query : undefined),
+    }
+
+    const { result } = renderHook(() => {
+      return useLiveQuery(config)
+    })
+
+    expectTypeOf(result.current.data).toMatchTypeOf<
+      OutputWithVirtual<Person> | undefined
+    >()
+    expectTypeOf(result.current.status).toEqualTypeOf<UseLiveQueryStatus>()
+    expectTypeOf(result.current.isEnabled).toEqualTypeOf<boolean>()
+  })
+
+  it(`accepts an annotated enabled config in useLiveSuspenseQuery`, () => {
+    const collection = createCollection(
+      mockSyncCollectionOptions<Person>({
+        id: `test-annotated-suspense-config`,
+        getKey: (person: Person) => person.id,
+        initialData: [],
+      }),
+    )
+    const query = new Query().from({ collection })
+    type QueryContext =
+      typeof query extends QueryBuilder<infer TContext> ? TContext : never
+    const config: UseLiveQueryConfig<QueryContext> = {
+      query: () => query,
+    }
+
+    const { result } = renderHook(() => useLiveSuspenseQuery(config))
+
+    expectTypeOf(result.current.data).toMatchTypeOf<
+      Array<OutputWithVirtual<Person>>
+    >()
+  })
+
+  it(`types a conditional config with deprecated dependencies`, () => {
+    const collection = createCollection(
+      mockSyncCollectionOptions<Person>({
+        id: `test-conditional-config-deps`,
+        getKey: (person: Person) => person.id,
+        initialData: [],
+      }),
+    )
+    const enabled = null as unknown as boolean
+
+    const { result } = renderHook(() =>
+      useLiveQuery(
+        {
+          query: (q) =>
+            enabled ? q.from({ collection }).findOne() : undefined,
+        },
+        [enabled],
+      ),
+    )
+
+    expectTypeOf(result.current.data).toMatchTypeOf<
+      OutputWithVirtual<Person> | undefined
+    >()
+    expectTypeOf(result.current.status).toEqualTypeOf<UseLiveQueryStatus>()
+    expectTypeOf(result.current.isEnabled).toEqualTypeOf<boolean>()
+  })
+
+  it(`rejects a conditional config with a top-level scalar result`, () => {
+    const collection = createCollection(
+      mockSyncCollectionOptions<Person>({
+        id: `test-conditional-scalar-config`,
+        getKey: (person: Person) => person.id,
+        initialData: [],
+      }),
+    )
+    const enabled = null as unknown as boolean
+
+    useLiveQuery({
+      // @ts-expect-error - top-level scalar results are not supported
+      query: (q) => {
+        if (!enabled) return undefined
+        return q.from({ collection }).select(({ collection: c }) => c.name)
+      },
+    })
   })
 
   it(`should type config object to return query rows without queryKey`, () => {
