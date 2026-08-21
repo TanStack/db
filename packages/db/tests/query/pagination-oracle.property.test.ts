@@ -90,7 +90,7 @@ type PendingMutationScenario = {
   responseOutcome: `resolve` | `reject`
 }
 
-class PendingMutationTraceAssertionError extends TraceAssertionError {
+class DeliveredRowsTraceAssertionError extends TraceAssertionError {
   constructor(
     cause: unknown,
     readonly deliveredRows: ReadonlyArray<PageRow>,
@@ -99,14 +99,9 @@ class PendingMutationTraceAssertionError extends TraceAssertionError {
   }
 }
 
-class PendingHistoryTraceAssertionError extends TraceAssertionError {
-  constructor(
-    cause: unknown,
-    readonly deliveredRows: ReadonlyArray<PageRow>,
-  ) {
-    super(0, cause)
-  }
-}
+class PendingMutationTraceAssertionError extends DeliveredRowsTraceAssertionError {}
+
+class PendingHistoryTraceAssertionError extends DeliveredRowsTraceAssertionError {}
 
 type PendingHistoryScenario = {
   ranks: ReadonlyArray<number>
@@ -649,6 +644,8 @@ async function runNullableCursorScenario(
   }
 }
 
+// The current ascending cursor boundary can place the non-null row before the
+// nulls-first row. Remove this waiver when that request returns row 1.
 function isKnownNullableCursorOrderingFailure(
   scenario: NullableCursorScenario,
   error: unknown,
@@ -1424,8 +1421,7 @@ async function runPendingMutationScenario(
       if (pending.length === 2) {
         await settlePending()
       } else {
-        await Promise.resolve()
-        await Promise.resolve()
+        await flushPromises()
         expect(retrySettled).toBe(true)
       }
       if (observedRetry) {

@@ -121,6 +121,12 @@ describe(`RxDB Integration`, () => {
       try {
         await expect(collection.preload()).rejects.toBe(initialError)
         expect(collection.status).toBe(`error`)
+        expect(OPEN_RXDB_SUBSCRIPTIONS.get(rxCollection)?.size ?? 0).toBe(0)
+
+        await rxCollection.insert({ id: `after-failure`, name: `failed` })
+        await flushPromises()
+        expect(OPEN_RXDB_SUBSCRIPTIONS.get(rxCollection)?.size ?? 0).toBe(0)
+        expect(collection.has(`after-failure`)).toBe(false)
       } finally {
         query.mockRestore()
         await collection.cleanup()

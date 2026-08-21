@@ -292,7 +292,14 @@ async function expectDeferredStartupReadyDoesNotOverrideError(): Promise<void> {
   const maintenanceDeleted = new Promise<void>((resolve) => {
     resolveMaintenanceDelete = resolve
   })
-  const metadata = {
+  type MetadataWithPersistedScan = SyncMetadataApi<string | number> & {
+    row: SyncMetadataApi<string | number>[`row`] & {
+      scanPersisted: () => Promise<
+        Array<{ key: string | number; value: Row; metadata?: unknown }>
+      >
+    }
+  }
+  const metadata: MetadataWithPersistedScan = {
     row: {
       get: () => undefined,
       set: () => {},
@@ -315,7 +322,7 @@ async function expectDeferredStartupReadyDoesNotOverrideError(): Promise<void> {
         },
       ],
     },
-  } as SyncMetadataApi<string | number>
+  }
 
   collection._lifecycle.setStatus(`cleaned-up`)
   collection._lifecycle.setStatus(`loading`)
