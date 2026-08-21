@@ -601,6 +601,32 @@ describe(`createLiveQueryWindowController`, () => {
     }
   })
 
+  it(`cleanup settles the active load operation before another sync session`, async () => {
+    const lq = makeOrderedLiveQuery(makeSource(), 2)
+    await lq.preload()
+
+    let resolveLoad!: () => void
+    const load = new Promise<void>((resolve) => {
+      resolveLoad = resolve
+    })
+    const operation = lq._sync.beginLoadSubsetOperation()
+    lq._sync.trackLoadPromise(load)
+    const waiting = Promise.resolve(operation.wait())
+    let settled = false
+    void waiting.then(() => {
+      settled = true
+    })
+
+    lq._sync.cleanup()
+    await Promise.resolve()
+
+    expect(settled).toBe(true)
+
+    resolveLoad()
+    await waiting
+    await lq.cleanup()
+  })
+
   it(`retains an unsubscribed lease until overlapping requests settle`, async () => {
     const lq = makeOrderedLiveQuery(makeSource(), 2)
     await lq.preload()

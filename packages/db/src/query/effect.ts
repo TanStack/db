@@ -449,6 +449,10 @@ class EffectPipelineRunner<TRow extends object, TKey extends string | number> {
     this.graph.finalize()
   }
 
+  private isDisposed(): boolean {
+    return this.disposed
+  }
+
   /** Subscribe to source collections and start processing */
   start(): void {
     this.starting = true
@@ -478,6 +482,11 @@ class EffectPipelineRunner<TRow extends object, TKey extends string | number> {
     >()
 
     for (const source of this.collectionSources) {
+      if (this.isDisposed()) {
+        this.starting = false
+        return
+      }
+
       const { sourceId, alias, collection } = source
       const collectionId = collection.id
 
@@ -549,13 +558,23 @@ class EffectPipelineRunner<TRow extends object, TKey extends string | number> {
       // Store subscription immediately so the join compiler can find it
       this.subscriptions[sourceId] = subscription
 
+      const unsubscribe = () => {
+        subscription.unsubscribe()
+        delete this.subscriptions[sourceId]
+      }
+
+      // subscribeChanges can synchronously report a source error and dispose
+      // the runner before returning the subscription.
+      if (this.isDisposed()) {
+        unsubscribe()
+        this.starting = false
+        return
+      }
+
       // Own the subscription before any ordered snapshot or lazy demand can
       // throw. A partially started effect has no handle for its caller to
       // dispose, so start() must be able to release every acquired source.
-      this.unsubscribeCallbacks.add(() => {
-        subscription.unsubscribe()
-        delete this.subscriptions[sourceId]
-      })
+      this.unsubscribeCallbacks.add(unsubscribe)
 
       const lazyCallbacks = this.lazySourcesCallbacks[sourceId]
       if (lazyCallbacks) {

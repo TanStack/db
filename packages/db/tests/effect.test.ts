@@ -1507,6 +1507,47 @@ describe(`createEffect`, () => {
   })
 
   describe(`source error handling`, () => {
+    it(`does not subscribe later sources after startup disposes the effect`, async () => {
+      const failure = new Error(`synchronous source failure`)
+      const users = createUsersCollection([sampleUsers[0]!])
+      const issues = createIssuesCollection([sampleIssues[0]!])
+      const subscribeChanges = users.subscribeChanges.bind(users)
+
+      vi.spyOn(users, `subscribeChanges`).mockImplementation(((
+        callback,
+        options,
+      ) => {
+        const subscription = subscribeChanges(callback, {
+          ...options,
+          includeInitialState: false,
+        })
+        options?.onLoadSubsetError?.({ error: failure } as any)
+        return subscription
+      }) as typeof users.subscribeChanges)
+
+      const sourceErrors: Array<Error> = []
+      const effect = createEffect({
+        query: (q) =>
+          q
+            .from({ user: users })
+            .leftJoin({ issue: issues }, ({ user, issue }) =>
+              eq(user.id, issue.userId),
+            )
+            .select(({ user, issue }) => ({
+              id: user.id,
+              issueId: issue.id,
+            })),
+        onBatch: () => {},
+        onSourceError: (error) => sourceErrors.push(error),
+      })
+
+      expect(sourceErrors).toEqual([failure])
+      expect(effect.disposed).toBe(true)
+      expect(users.subscriberCount).toBe(0)
+      expect(issues.subscriberCount).toBe(0)
+      await Promise.all([users.cleanup(), issues.cleanup()])
+    })
+
     it(`releases source ownership when the automatic subset load throws`, async () => {
       const failure = new Error(`automatic subset failed`)
       const users = createCollection<User>({

@@ -806,6 +806,13 @@ export class CollectionSyncManager<
     this.syncUnloadSubsetFn = null
     this.syncStartDeferred = false
     this.syncStartRequested = false
+    const activeOperation = this.activeLoadSubsetOperation
+    this.activeLoadSubsetOperation = undefined
+    if (activeOperation && !activeOperation.completed) {
+      activeOperation.completed = true
+      activeOperation.pending.clear()
+      activeOperation.deferred?.resolve()
+    }
     const deferredLoadSubsets = this.deferredLoadSubsets
     this.deferredLoadSubsets = []
     for (const { deferred } of deferredLoadSubsets) {
