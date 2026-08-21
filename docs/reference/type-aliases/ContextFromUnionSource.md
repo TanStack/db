@@ -9,7 +9,7 @@ title: ContextFromUnionSource
 type ContextFromUnionSource<TSource> = IsUnion<keyof TSource & string> extends true ? object : ContextFromSource<TSource>;
 ```
 
-Defined in: [packages/db/src/query/builder/types.ts:144](https://github.com/TanStack/db/blob/main/packages/db/src/query/builder/types.ts#L144)
+Defined in: [packages/db/src/query/builder/types.ts:158](https://github.com/TanStack/db/blob/main/packages/db/src/query/builder/types.ts#L158)
 
 ## Type Parameters
 

@@ -6,10 +6,10 @@ title: SchemaFromSource
 # Type Alias: SchemaFromSource\<T\>
 
 ```ts
-type SchemaFromSource<T> = Prettify<{ [K in keyof T]: T[K] extends CollectionImpl<any, any, any, any, any> ? InferCollectionType<T[K]> : T[K] extends QueryBuilder<infer TContext> ? GetRawResult<TContext> : never }>;
+type SchemaFromSource<T> = Prettify<{ [K in keyof T]: T[K] extends CollectionImpl<any, any, any, any, any> ? InferCollectionType<T[K]> : T[K] extends CollectionOptionsIdentity<any, any, any, any, any> ? InferCollectionType<T[K]> : T[K] extends QueryBuilder<infer TContext> ? GetRawResult<TContext> : never }>;
 ```
 
-Defined in: [packages/db/src/query/builder/types.ts:116](https://github.com/TanStack/db/blob/main/packages/db/src/query/builder/types.ts#L116)
+Defined in: [packages/db/src/query/builder/types.ts:128](https://github.com/TanStack/db/blob/main/packages/db/src/query/builder/types.ts#L128)
 
 SchemaFromSource - Converts a Source definition into a ContextSchema
 

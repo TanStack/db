@@ -48,8 +48,8 @@ controller. The query must include an `orderBy` clause.
 
 ```ts
 function useLiveInfiniteQuery<TContext>(
-   queryFn,
-   config,
+   queryFn, 
+   config, 
 deps?): UseLiveInfiniteQueryReturn<TContext>;
 ```
 

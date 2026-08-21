@@ -11,7 +11,7 @@ type EffectQueryInput<TContext> =
 | QueryBuilder<TContext>;
 ```
 
-Defined in: [packages/db/src/query/effect.ts:75](https://github.com/TanStack/db/blob/main/packages/db/src/query/effect.ts#L75)
+Defined in: [packages/db/src/query/effect.ts:83](https://github.com/TanStack/db/blob/main/packages/db/src/query/effect.ts#L83)
 
 Query input - can be a builder function or a prebuilt query
 
