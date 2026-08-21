@@ -1575,6 +1575,7 @@ Arguments after the first one become the `params` tuple passed to your factory. 
 For dynamic scenarios there is also a lower-level API:
 
 ```ts
+import type { Aggregate, ExpressionLike } from '@tanstack/db'
 import { registerAggregate, unregisterAggregate, getRegisteredAggregates, IR, toExpression } from '@tanstack/db'
 
 registerAggregate('bit_or', (ctx) => ({
@@ -1583,7 +1584,8 @@ registerAggregate('bit_or', (ctx) => ({
 }))
 
 // Build the IR node yourself
-const bitOr = (arg) => new IR.Aggregate('bit_or', [toExpression(arg)])
+const bitOr = (arg: ExpressionLike): Aggregate<number> =>
+  new IR.Aggregate<number>('bit_or', [toExpression(arg)])
 
 getRegisteredAggregates() // ReadonlySet<string> of registered names
 unregisterAggregate('bit_or') // true if a registration existed
