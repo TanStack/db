@@ -39,6 +39,24 @@ export interface SerializedSpanContext {
   traceState?: string
 }
 
+export type TemporalConstructorName =
+  | `Duration`
+  | `Instant`
+  | `PlainDate`
+  | `PlainDateTime`
+  | `PlainMonthDay`
+  | `PlainTime`
+  | `PlainYearMonth`
+  | `ZonedDateTime`
+
+export type TemporalConstructor = {
+  from: (value: string) => unknown
+}
+
+export type TemporalConstructors = Partial<
+  Record<TemporalConstructorName, TemporalConstructor>
+>
+
 // In-memory representation with full PendingMutation objects
 export interface OfflineTransaction {
   id: string
@@ -108,6 +126,11 @@ export interface OfflineConfig {
    * The '@tanstack/offline-transactions/react-native' entry point uses ReactNativeOnlineDetector automatically.
    */
   onlineDetector?: OnlineDetector
+  /**
+   * Temporal constructors used to restore Temporal values from persisted
+   * offline transactions. Defaults to globalThis.Temporal when available.
+   */
+  temporal?: TemporalConstructors
 }
 
 export interface StorageAdapter {

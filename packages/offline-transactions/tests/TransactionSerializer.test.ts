@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest'
+import { Temporal } from 'temporal-polyfill'
 import { TransactionSerializer } from '../src/outbox/TransactionSerializer'
 import type { OfflineTransaction } from '../src/types'
 import type { PendingMutation } from '@tanstack/db'
@@ -12,7 +13,48 @@ describe(`TransactionSerializer`, () => {
   const createSerializer = () => {
     return new TransactionSerializer({
       'test-collection': mockCollection as any,
-    })
+    }, Temporal)
+  }
+
+  const createTransaction = ({
+    modified,
+    original = null,
+    changes = {},
+    metadata,
+  }: {
+    modified: any
+    original?: any
+    changes?: any
+    metadata?: Record<string, any>
+  }): OfflineTransaction => {
+    return {
+      id: `tx-1`,
+      createdAt: new Date(`2024-01-01T00:00:00.000Z`),
+      mutationFnName: `syncData`,
+      mutations: [
+        {
+          globalKey: `key-1`,
+          type: `insert`,
+          modified,
+          original,
+          collection: mockCollection,
+          mutationId: `mut-1`,
+          key: modified.id,
+          changes,
+          metadata: undefined,
+          syncMetadata: {},
+          optimistic: true,
+          createdAt: new Date(),
+          updatedAt: new Date(),
+        } as PendingMutation,
+      ],
+      keys: [`key-1`],
+      idempotencyKey: `idempotency-key-1`,
+      retryCount: 0,
+      nextAttemptAt: 0,
+      metadata,
+      version: 1,
+    }
   }
 
   describe(`date handling`, () => {
@@ -232,6 +274,98 @@ describe(`TransactionSerializer`, () => {
       expect(deserialized.createdAt).toBeInstanceOf(Date)
       expect(deserialized.createdAt.toISOString()).toBe(
         transactionDate.toISOString(),
+      )
+    })
+  })
+
+  describe(`Temporal handling`, () => {
+    it(`should restore Temporal values in mutation data`, () => {
+      const serializer = createSerializer()
+      const temporalValues = {
+        duration: Temporal.Duration.from({ hours: 1, minutes: 30 }),
+        instant: Temporal.Instant.from(`2024-01-15T10:30:00Z`),
+        plainDate: Temporal.PlainDate.from(`2024-01-15`),
+        plainDateTime: Temporal.PlainDateTime.from(`2024-01-15T10:30:00`),
+        plainMonthDay: Temporal.PlainMonthDay.from(`01-15`),
+        plainTime: Temporal.PlainTime.from(`10:30:00`),
+        plainYearMonth: Temporal.PlainYearMonth.from(`2024-01`),
+        zonedDateTime: Temporal.ZonedDateTime.from(
+          `2024-01-15T10:30:00+00:00[UTC]`,
+        ),
+      }
+
+      const transaction = createTransaction({
+        modified: {
+          id: `1`,
+          temporalValues,
+        },
+        original: {
+          id: `1`,
+          dueDate: temporalValues.plainDate,
+        },
+        changes: {
+          temporalValues,
+        },
+      })
+
+      const serialized = serializer.serialize(transaction)
+      const deserialized = serializer.deserialize(serialized)
+
+      const restoredValues = deserialized.mutations[0]!.modified.temporalValues
+      for (const [key, originalValue] of Object.entries(temporalValues)) {
+        const restoredValue = restoredValues[key]
+        expect(restoredValue[Symbol.toStringTag]).toBe(
+          originalValue[Symbol.toStringTag],
+        )
+        expect(restoredValue.toString()).toBe(originalValue.toString())
+      }
+
+      const restoredOriginal = deserialized.mutations[0]!.original.dueDate
+      expect(restoredOriginal[Symbol.toStringTag]).toBe(`Temporal.PlainDate`)
+      expect(restoredOriginal.toString()).toBe(
+        temporalValues.plainDate.toString(),
+      )
+
+      const restoredChanges =
+        deserialized.mutations[0]!.changes.temporalValues
+      for (const [key, originalValue] of Object.entries(temporalValues)) {
+        const restoredValue = restoredChanges[key]
+        expect(restoredValue[Symbol.toStringTag]).toBe(
+          originalValue[Symbol.toStringTag],
+        )
+        expect(restoredValue.toString()).toBe(originalValue.toString())
+      }
+    })
+
+    it(`should restore Temporal values in transaction metadata`, () => {
+      const serializer = createSerializer()
+      const submittedAt = Temporal.Instant.from(`2024-01-15T10:30:00Z`)
+      const scheduledFor = Temporal.PlainDate.from(`2024-02-01`)
+
+      const transaction = createTransaction({
+        modified: { id: `1`, name: `Test` },
+        metadata: {
+          submittedAt,
+          nested: {
+            scheduledFor,
+          },
+        },
+      })
+
+      const serialized = serializer.serialize(transaction)
+      const deserialized = serializer.deserialize(serialized)
+
+      expect(deserialized.metadata!.submittedAt[Symbol.toStringTag]).toBe(
+        `Temporal.Instant`,
+      )
+      expect(deserialized.metadata!.submittedAt.toString()).toBe(
+        submittedAt.toString(),
+      )
+      expect(
+        deserialized.metadata!.nested.scheduledFor[Symbol.toStringTag],
+      ).toBe(`Temporal.PlainDate`)
+      expect(deserialized.metadata!.nested.scheduledFor.toString()).toBe(
+        scheduledFor.toString(),
       )
     })
   })
