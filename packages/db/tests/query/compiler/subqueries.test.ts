@@ -212,10 +212,7 @@ describe(`Query2 Subqueries`, () => {
   })
 
   describe(`Subqueries in JOIN clause`, () => {
-    const dummyCallbacks = {
-      loadKeys: (_: any) => {},
-      loadInitialState: () => {},
-    }
+    const dummyCallbacks = {}
 
     it(`supports subquery in join clause`, () => {
       // Create a subquery for active users
@@ -301,11 +298,18 @@ describe(`Query2 Subqueries`, () => {
       )
       const { pipeline } = compilation
 
-      // Since we're doing a left join, the right-side source should be handled lazily.
-      // For subquery-backed joins, lazy loading is marked on the concrete source
-      // alias that has a subscription (`user`), not the outer QueryRef alias
-      // (`activeUser`).
-      expect(lazySources).contains(`user`)
+      // Since we're doing a left join, the concrete lexical source inside the
+      // right-side subquery should be handled lazily. Aliases are query-language
+      // names; the compiler tracks runtime demand by the source's opaque ID.
+      const activeUserJoin = builtQuery.join![0]!.from
+      expect(activeUserJoin.type).toBe(`queryRef`)
+      if (activeUserJoin.type === `queryRef`) {
+        const activeUserSource = activeUserJoin.query.from
+        expect(activeUserSource.type).toBe(`collectionRef`)
+        if (activeUserSource.type === `collectionRef`) {
+          expect(lazySources).contains(activeUserSource.sourceId)
+        }
+      }
 
       const messages: Array<MultiSet<any>> = []
       pipeline.pipe(
@@ -378,10 +382,7 @@ describe(`Query2 Subqueries`, () => {
         user: usersSubscription,
       }
 
-      const dummyCallbacks = {
-        loadKeys: (_: any) => {},
-        loadInitialState: () => {},
-      }
+      const dummyCallbacks = {}
 
       // Compile the query
       const graph = new D2()

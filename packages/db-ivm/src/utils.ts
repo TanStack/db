@@ -193,19 +193,214 @@ export function compareKeys(a: string | number, b: string | number): number {
   return typeof a === `string` ? -1 : 1
 }
 
+type CanonicalValue =
+  | readonly [`undefined`]
+  | readonly [`null`]
+  | readonly [`boolean`, boolean]
+  | readonly [`number`, number | `NaN` | `Infinity` | `-Infinity`]
+  | readonly [`bigint`, string]
+  | readonly [`string`, string]
+  | readonly [`date`, number | `Invalid`]
+  | readonly [`regexp`, string, string]
+  | readonly [`bytes`, Array<number>]
+  | readonly [`array`, Array<CanonicalValue>]
+  | readonly [`map`, Array<readonly [CanonicalValue, CanonicalValue]>]
+  | readonly [`set`, Array<CanonicalValue>]
+  | readonly [`object`, Array<readonly [string, CanonicalValue]>]
+
 /**
- * Serializes a value for use as a key, handling BigInt and Date values that JSON.stringify cannot handle.
- * Uses JSON.stringify with a replacer function to convert BigInt values to strings and Date values to ISO strings.
- * This is used for creating string keys in groupBy operations.
+ * Serializes a supported query value into one canonical key.
+ *
+ * JSON's native encoding is not suitable for relation keys: it merges BigInt
+ * with strings when a replacer is used, merges NaN with null, drops undefined,
+ * and depends on object insertion order. Ordinary JSON values keep their
+ * established wire form. Values that need richer types use a reserved prefix
+ * plus a structural, type-tagged encoding.
  */
 export function serializeValue(value: unknown): string {
-  return JSON.stringify(value, (_, val) => {
-    if (typeof val === 'bigint') {
-      return val.toString()
+  if (isJsonSafeStructuralValue(value, new Set())) {
+    return JSON.stringify(toStableJsonValue(value))
+  }
+
+  return `~${JSON.stringify(toCanonicalValue(value, new Set()))}`
+}
+
+type JsonValue =
+  | null
+  | boolean
+  | number
+  | string
+  | Array<JsonValue>
+  | { [key: string]: JsonValue }
+
+function isJsonSafeStructuralValue(
+  value: unknown,
+  ancestors: Set<object>,
+): boolean {
+  if (value === null) return true
+
+  switch (typeof value) {
+    case `boolean`:
+    case `string`:
+      return true
+    case `number`:
+      return Number.isFinite(value)
+    case `undefined`:
+    case `bigint`:
+    case `symbol`:
+    case `function`:
+      return false
+  }
+
+  return withAcyclicValue(value, ancestors, () => {
+    if (
+      value instanceof Date ||
+      value instanceof RegExp ||
+      value instanceof Uint8Array ||
+      value instanceof Map ||
+      value instanceof Set
+    ) {
+      return false
     }
-    if (val instanceof Date) {
-      return val.toISOString()
-    }
-    return val
+
+    return Array.isArray(value)
+      ? value.every((item) => isJsonSafeStructuralValue(item, ancestors))
+      : Object.keys(value).every((key) =>
+          isJsonSafeStructuralValue(
+            (value as Record<string, unknown>)[key],
+            ancestors,
+          ),
+        )
   })
+}
+
+function toStableJsonValue(value: unknown): JsonValue {
+  if (
+    value === null ||
+    typeof value === `boolean` ||
+    typeof value === `number` ||
+    typeof value === `string`
+  ) {
+    return value
+  }
+
+  if (Array.isArray(value)) {
+    return value.map(toStableJsonValue)
+  }
+
+  return Object.fromEntries(
+    Object.keys(value as object)
+      .sort()
+      .map((key) => [
+        key,
+        toStableJsonValue((value as Record<string, unknown>)[key]),
+      ]),
+  )
+}
+
+function toCanonicalValue(
+  value: unknown,
+  ancestors: Set<object>,
+): CanonicalValue {
+  if (value === undefined) return [`undefined`]
+  if (value === null) return [`null`]
+
+  switch (typeof value) {
+    case `boolean`:
+      return [`boolean`, value]
+    case `number`:
+      if (Number.isNaN(value)) return [`number`, `NaN`]
+      if (value === Infinity) return [`number`, `Infinity`]
+      if (value === -Infinity) return [`number`, `-Infinity`]
+      return [`number`, value === 0 ? 0 : value]
+    case `bigint`:
+      return [`bigint`, value.toString()]
+    case `string`:
+      return [`string`, value]
+    case `symbol`:
+    case `function`:
+      throw new TypeError(
+        `Cannot serialize ${typeof value} as a structural relation key`,
+      )
+  }
+
+  return withAcyclicValue(value, ancestors, () => {
+    if (value instanceof Date) {
+      const timestamp = value.getTime()
+      return Number.isNaN(timestamp)
+        ? ([`date`, `Invalid`] as const)
+        : ([`date`, timestamp] as const)
+    }
+
+    if (value instanceof RegExp) {
+      return [`regexp`, value.source, value.flags]
+    }
+
+    if (value instanceof Uint8Array) {
+      return [`bytes`, Array.from(value)]
+    }
+
+    if (Array.isArray(value)) {
+      return [`array`, value.map((item) => toCanonicalValue(item, ancestors))]
+    }
+
+    if (value instanceof Map) {
+      const entries = [...value.entries()].map(
+        ([key, entryValue]) =>
+          [
+            toCanonicalValue(key, ancestors),
+            toCanonicalValue(entryValue, ancestors),
+          ] as const,
+      )
+      entries.sort((left, right) =>
+        compareSerializedValues(JSON.stringify(left), JSON.stringify(right)),
+      )
+      return [`map`, entries]
+    }
+
+    if (value instanceof Set) {
+      const entries = [...value].map((entry) =>
+        toCanonicalValue(entry, ancestors),
+      )
+      entries.sort((left, right) =>
+        compareSerializedValues(JSON.stringify(left), JSON.stringify(right)),
+      )
+      return [`set`, entries]
+    }
+
+    const entries = Object.keys(value)
+      .sort()
+      .map(
+        (key) =>
+          [
+            key,
+            toCanonicalValue(
+              (value as Record<string, unknown>)[key],
+              ancestors,
+            ),
+          ] as const,
+      )
+    return [`object`, entries]
+  })
+}
+
+function compareSerializedValues(left: string, right: string): number {
+  return left < right ? -1 : left > right ? 1 : 0
+}
+
+function withAcyclicValue<T>(
+  value: object,
+  ancestors: Set<object>,
+  encode: () => T,
+): T {
+  if (ancestors.has(value)) {
+    throw new TypeError(`Cannot serialize a cyclic structural relation key`)
+  }
+
+  ancestors.add(value)
+  try {
+    return encode()
+  } finally {
+    ancestors.delete(value)
+  }
 }

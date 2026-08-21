@@ -3,7 +3,11 @@ import { createCollection } from '../../src/collection/index.js'
 import { createLiveQueryCollection, eq, isNull } from '../../src/query/index.js'
 import { createTransaction } from '../../src/transactions.js'
 import { createOptimisticAction } from '../../src/optimistic-action.js'
-import { transactionScopedScheduler } from '../../src/scheduler.js'
+import {
+  getActivePublicationContext,
+  transactionScopedScheduler,
+  withPublicationContext,
+} from '../../src/scheduler.js'
 import { CollectionConfigBuilder } from '../../src/query/live/collection-config-builder.js'
 import { mockSyncCollectionOptions, stripVirtualProps } from '../utils.js'
 import type { OutputWithVirtual } from '../utils.js'
@@ -85,6 +89,58 @@ function recordBatches(collection: any) {
 
 afterEach(() => {
   transactionScopedScheduler.flushAll()
+})
+
+describe(`Collection publication scheduler context`, () => {
+  it(`shares one context and flushes after the outer publication`, () => {
+    const calls: Array<string> = []
+    let contextId: ReturnType<typeof getActivePublicationContext>
+
+    withPublicationContext(() => {
+      contextId = getActivePublicationContext()
+      expect(contextId).toBeDefined()
+
+      transactionScopedScheduler.schedule({
+        contextId,
+        jobId: `outer`,
+        run: () => calls.push(`outer`),
+      })
+      withPublicationContext(() => {
+        expect(getActivePublicationContext()).toBe(contextId)
+        transactionScopedScheduler.schedule({
+          contextId,
+          jobId: `inner`,
+          run: () => calls.push(`inner`),
+        })
+      })
+
+      expect(calls).toEqual([])
+    })
+
+    expect(calls).toEqual([`outer`, `inner`])
+    expect(getActivePublicationContext()).toBeUndefined()
+  })
+
+  it(`clears queued work when publication throws`, () => {
+    const run = vi.fn()
+    let contextId: ReturnType<typeof getActivePublicationContext>
+
+    expect(() =>
+      withPublicationContext(() => {
+        contextId = getActivePublicationContext()
+        transactionScopedScheduler.schedule({
+          contextId,
+          jobId: `discarded`,
+          run,
+        })
+        throw new Error(`publication failed`)
+      }),
+    ).toThrow(`publication failed`)
+
+    expect(run).not.toHaveBeenCalled()
+    expect(getActivePublicationContext()).toBeUndefined()
+    expect(transactionScopedScheduler.hasPendingJobs(contextId!)).toBe(false)
+  })
 })
 
 describe(`live query scheduler`, () => {

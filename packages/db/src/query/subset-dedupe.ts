@@ -7,6 +7,19 @@ import {
 import type { BasicExpression } from './ir.js'
 import type { LoadSubsetOptions } from '../types.js'
 
+type SharedAbortLease = {
+  signal: AbortSignal | undefined
+  aborted: boolean
+  attach: (signal: AbortSignal | undefined) => void
+  dispose: () => void
+}
+
+type InflightCall = {
+  options: LoadSubsetOptions
+  promise: Promise<void>
+  lease: SharedAbortLease
+}
+
 /**
  * Deduplicated wrapper for a loadSubset function.
  * Tracks what data has been loaded and avoids redundant calls by applying
@@ -53,11 +66,8 @@ export class DeduplicatedLoadSubset {
   private limitedCalls: Array<LoadSubsetOptions> = []
 
   // Track in-flight calls to prevent concurrent duplicate requests
-  // We store both the options and the promise so we can apply subset logic
-  private inflightCalls: Array<{
-    options: LoadSubsetOptions
-    promise: Promise<void>
-  }> = []
+  // Each entry also owns the shared cancellation lease for its requesters.
+  private inflightCalls: Array<InflightCall> = []
 
   // Generation counter to invalidate in-flight requests after reset()
   // When reset() is called, this increments, and any in-flight completion handlers
@@ -112,11 +122,13 @@ export class DeduplicatedLoadSubset {
 
     // Check against in-flight calls using the same subset logic as resolved calls
     // This prevents duplicate requests when concurrent calls have subset relationships
-    const matchingInflight = this.inflightCalls.find((inflight) =>
-      isPredicateSubset(options, inflight.options),
+    const matchingInflight = this.inflightCalls.find(
+      (inflight) =>
+        !inflight.lease.aborted && isPredicateSubset(options, inflight.options),
     )
 
     if (matchingInflight !== undefined) {
+      matchingInflight.lease.attach(options.signal)
       // An in-flight call will load data that covers this request
       // Return the same promise so this caller waits for the data to load
       // The in-flight promise already handles tracking updates when it completes
@@ -133,8 +145,9 @@ export class DeduplicatedLoadSubset {
 
     // Preserve the original request for tracking and in-flight dedupe, but allow
     // the backend request to be narrowed to only the missing subset.
-    const trackingOptions = cloneOptions(options)
-    const loadOptions = cloneOptions(options)
+    const lease = createSharedAbortLease(options.signal)
+    const trackingOptions = cloneOptions({ ...options, signal: lease.signal })
+    const loadOptions = cloneOptions({ ...options, signal: lease.signal })
     if (this.unlimitedWhere !== undefined && options.limit === undefined) {
       // Compute difference to get only the missing data
       // We can only do this for unlimited queries
@@ -146,11 +159,18 @@ export class DeduplicatedLoadSubset {
     }
 
     // Call underlying loadSubset to load the missing data
-    const resultPromise = this._loadSubset(loadOptions)
+    let resultPromise: true | Promise<void>
+    try {
+      resultPromise = this._loadSubset(loadOptions)
+    } catch (error) {
+      lease.dispose()
+      throw error
+    }
 
     // Handle both sync (true) and async (Promise<void>) return values
     if (resultPromise === true) {
-      this.updateTracking(trackingOptions)
+      if (!lease.aborted) this.updateTracking(trackingOptions)
+      lease.dispose()
       return true
     } else {
       // Async return - track the promise and update tracking after it resolves
@@ -162,12 +182,13 @@ export class DeduplicatedLoadSubset {
       // We need to create a reference to the in-flight entry so we can remove it later
       const inflightEntry = {
         options: trackingOptions,
+        lease,
         promise: resultPromise
           .then((result) => {
             // Only update tracking if this request is still from the current generation
             // If reset() was called, the generation will have incremented and we should
             // not repopulate the state that was just cleared
-            if (capturedGeneration === this.generation) {
+            if (capturedGeneration === this.generation && !lease.aborted) {
               this.updateTracking(trackingOptions)
             }
             return result
@@ -179,6 +200,7 @@ export class DeduplicatedLoadSubset {
             if (index !== -1) {
               this.inflightCalls.splice(index, 1)
             }
+            lease.dispose()
           }),
       }
 
@@ -230,6 +252,61 @@ export class DeduplicatedLoadSubset {
       // Options are already cloned by caller to prevent mutation issues
       this.limitedCalls.push(options)
     }
+  }
+}
+
+function createSharedAbortLease(
+  initialSignal: AbortSignal | undefined,
+): SharedAbortLease {
+  const controller = initialSignal ? new AbortController() : undefined
+  const listeners = new Map<AbortSignal, () => void>()
+  let hasUnabortableOwner = initialSignal === undefined
+  let activeAbortableOwners = 0
+
+  const abortIfUnused = (reason?: unknown) => {
+    if (
+      !hasUnabortableOwner &&
+      listeners.size > 0 &&
+      activeAbortableOwners === 0
+    ) {
+      controller?.abort(reason)
+    }
+  }
+
+  const attach = (signal: AbortSignal | undefined) => {
+    if (!signal) {
+      hasUnabortableOwner = true
+      return
+    }
+    if (listeners.has(signal)) return
+
+    const onAbort = () => {
+      activeAbortableOwners -= 1
+      abortIfUnused(signal.reason)
+    }
+    listeners.set(signal, onAbort)
+    if (signal.aborted) {
+      abortIfUnused(signal.reason)
+    } else {
+      activeAbortableOwners += 1
+      signal.addEventListener(`abort`, onAbort, { once: true })
+    }
+  }
+
+  attach(initialSignal)
+
+  return {
+    signal: controller?.signal,
+    get aborted() {
+      return controller?.signal.aborted ?? false
+    },
+    attach,
+    dispose: () => {
+      for (const [signal, listener] of listeners) {
+        signal.removeEventListener(`abort`, listener)
+      }
+      listeners.clear()
+    },
   }
 }
 

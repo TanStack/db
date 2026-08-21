@@ -39,7 +39,7 @@ type MultiOrderScenario = {
   limit: number
 }
 
-type Window = {
+type PaginationWindow = {
   offset: number
   limit: number
 }
@@ -47,18 +47,18 @@ type Window = {
 type PaginationScenario = {
   ranks: ReadonlyArray<number>
   direction: `asc` | `desc`
-  windows: ReadonlyArray<Window>
+  windows: ReadonlyArray<PaginationWindow>
 }
 
 type PaginationAction =
-  | ({ type: `window` } & Window)
+  | ({ type: `window` } & PaginationWindow)
   | { type: `put`; id: number; rank: number }
   | { type: `delete`; id: number }
 
 type PaginationStateScenario = {
   ranks: ReadonlyArray<number>
   direction: `asc` | `desc`
-  initialWindow: Window
+  initialWindow: PaginationWindow
   actions: ReadonlyArray<PaginationAction>
 }
 
@@ -78,6 +78,16 @@ type PendingMutationScenario = {
   direction: `asc` | `desc`
   limit: number
   mutation: PendingMutation
+  responseOutcome: `resolve` | `reject`
+}
+
+class PendingMutationTraceAssertionError extends TraceAssertionError {
+  constructor(
+    cause: unknown,
+    readonly deliveredRows: ReadonlyArray<PageRow>,
+  ) {
+    super(0, cause)
+  }
 }
 
 type PendingHistoryScenario = {
@@ -110,7 +120,7 @@ const scenarioArbitrary: fc.Arbitrary<PaginationScenario> = fc.record({
   ),
 })
 
-const windowArbitrary: fc.Arbitrary<Window> = fc.record({
+const windowArbitrary: fc.Arbitrary<PaginationWindow> = fc.record({
   offset: fc.integer({ min: 0, max: 12 }),
   limit: fc.integer({ min: 0, max: 8 }),
 })
@@ -169,6 +179,7 @@ const pendingMutationScenarioArbitrary: fc.Arbitrary<PendingMutationScenario> =
         `update` as const,
         `delete` as const,
       ),
+      responseOutcome: fc.constantFrom(`resolve` as const, `reject` as const),
       targetIndex: fc.nat({ max: 7 }),
       rank: fc.integer({ min: -2, max: 2 }),
     })
@@ -178,6 +189,7 @@ const pendingMutationScenarioArbitrary: fc.Arbitrary<PendingMutationScenario> =
         direction,
         requestedLimit,
         mutationKind,
+        responseOutcome,
         targetIndex,
         rank,
       }) => {
@@ -194,8 +206,9 @@ const pendingMutationScenarioArbitrary: fc.Arbitrary<PendingMutationScenario> =
         return {
           ranks,
           direction,
-          limit: Math.min(requestedLimit, ranks.length),
+          limit: Math.min(requestedLimit, ranks.length - 2),
           mutation,
+          responseOutcome,
         }
       },
     )
@@ -284,15 +297,19 @@ const multiOrderScenarioArbitrary: fc.Arbitrary<MultiOrderScenario> = fc
   }))
 
 const { multiplier, replaySeed } = readOracleRunConfig()
-const runs = 12 * multiplier
-const randomParameters = oracleRandomParameters(runs, replaySeed)
+const orderedScenarioRuns = 12 * multiplier
+const transitionScenarioRuns = 8 * multiplier
+const orderedScenarioRandomParameters = oracleRandomParameters(
+  orderedScenarioRuns,
+  replaySeed,
+)
 
 let collectionSequence = 0
 
 function referenceWindow(
   rows: ReadonlyArray<PageRow>,
   direction: `asc` | `desc`,
-  window: Window,
+  window: PaginationWindow,
 ): Array<number> {
   return referenceWindowRows(rows, direction, window).map(({ id }) => id)
 }
@@ -300,7 +317,7 @@ function referenceWindow(
 function referenceWindowRows(
   rows: ReadonlyArray<PageRow>,
   direction: `asc` | `desc`,
-  window: Window,
+  window: PaginationWindow,
 ): Array<PageRow> {
   const directionFactor = direction === `asc` ? 1 : -1
   return [...rows]
@@ -403,7 +420,11 @@ async function runPaginationScenario(
 
   try {
     await live.preload()
-    for (const window of scenario.windows) {
+    expect(Array.from(live.values(), ({ id }) => id)).toEqual(
+      referenceWindow(rows, scenario.direction, initialWindow),
+    )
+
+    for (const window of scenario.windows.slice(1)) {
       const result = live.utils.setWindow(window)
       if (result instanceof Promise) await result
 
@@ -649,7 +670,7 @@ async function runPaginationStateScenario(
 
 type ReferencePaginationState = {
   rows: Map<number, PageRow>
-  window: Window
+  window: PaginationWindow
 }
 
 function replayReferenceState(
@@ -1064,8 +1085,15 @@ async function runOnDemandPaginationScenario(
   try {
     await live.preload()
     expect(loads.length).toBeGreaterThan(0)
+    try {
+      expect(Array.from(live.values(), ({ id }) => id)).toEqual(
+        referenceWindow(authoritativeRows, scenario.direction, initialWindow),
+      )
+    } catch (error) {
+      throw new TraceAssertionError(0, error)
+    }
 
-    for (const [index, window] of scenario.windows.entries()) {
+    for (const [index, window] of scenario.windows.slice(1).entries()) {
       const result = live.utils.setWindow(window)
       if (result instanceof Promise) await result
 
@@ -1074,7 +1102,7 @@ async function runOnDemandPaginationScenario(
           referenceWindow(authoritativeRows, scenario.direction, window),
         )
       } catch (error) {
-        throw new TraceAssertionError(index, error)
+        throw new TraceAssertionError(index + 1, error)
       }
     }
 
@@ -1234,6 +1262,7 @@ async function runPendingMutationScenario(
       .orderBy(({ row }) => row.id, `asc`)
       .limit(scenario.limit),
   )
+  const outstanding: Array<Promise<unknown>> = []
 
   const applyMutation = () => {
     const { mutation } = scenario
@@ -1246,7 +1275,7 @@ async function runPendingMutationScenario(
       write({ type: `delete`, value: { ...row } })
     } else {
       rows.set(mutation.row.id, { ...mutation.row })
-      if (mutation.type === `insert`) deliveredIds.add(mutation.row.id)
+      deliveredIds.add(mutation.row.id)
       write({ type: mutation.type, value: { ...mutation.row } })
     }
     commit()
@@ -1278,15 +1307,32 @@ async function runPendingMutationScenario(
 
   try {
     const preload = live.preload()
+    outstanding.push(preload)
     expect(pending).toHaveLength(1)
 
     if (timing === `before-response`) applyMutation()
-    await settlePending()
-    await preload
-    if (timing === `after-response`) {
-      applyMutation()
-      await Promise.resolve()
+    let finalLimit = scenario.limit
+    if (scenario.responseOutcome === `resolve`) {
       await settlePending()
+      await preload
+      if (timing === `after-response`) {
+        applyMutation()
+        await Promise.resolve()
+        await settlePending()
+      }
+    } else {
+      pending[0]!.settled = true
+      pending[0]!.deferred.reject(new Error(`cursor failed`))
+      await Promise.resolve()
+      await Promise.allSettled([preload])
+      if (timing === `after-response`) applyMutation()
+
+      finalLimit += 1
+      const retry = live.utils.setWindow({ offset: 0, limit: finalLimit })
+      if (retry instanceof Promise) outstanding.push(retry)
+      expect(pending.length).toBeLessThanOrEqual(2)
+      if (pending.length === 2) await settlePending()
+      if (retry instanceof Promise) await retry
     }
 
     try {
@@ -1295,16 +1341,24 @@ async function runPendingMutationScenario(
       ).toEqual(
         referenceWindowRows([...rows.values()], scenario.direction, {
           offset: 0,
-          limit: scenario.limit,
+          limit: finalLimit,
         }),
       )
     } catch (error) {
-      throw new TraceAssertionError(0, error)
+      throw new PendingMutationTraceAssertionError(
+        error,
+        referenceWindowRows(
+          [...rows.values()].filter(({ id }) => deliveredIds.has(id)),
+          scenario.direction,
+          { offset: 0, limit: finalLimit },
+        ),
+      )
     }
   } finally {
     for (const request of pending) request.deferred.resolve()
-    live.cleanup()
-    source.cleanup()
+    await Promise.allSettled(outstanding)
+    await live.cleanup()
+    await source.cleanup()
   }
 }
 
@@ -1327,7 +1381,9 @@ function isKnownSettledTopKMembershipFailure(
   timing: `before-response` | `after-response`,
   error: unknown,
 ): boolean {
-  if (timing !== `after-response`) return false
+  if (scenario.responseOutcome !== `resolve` || timing !== `after-response`) {
+    return false
+  }
   const difference = readPageRowDifferenceAtCheckpoint(error, 0)
   if (!difference) return false
 
@@ -1360,6 +1416,32 @@ function isKnownSettledTopKMembershipFailure(
   )
 }
 
+function isKnownRejectedCursorRetryFailure(
+  scenario: PendingMutationScenario,
+  error: unknown,
+): boolean {
+  if (scenario.responseOutcome !== `reject`) return false
+  if (!(error instanceof PendingMutationTraceAssertionError)) return false
+
+  const difference = readPageRowDifferenceAtCheckpoint(error, 0)
+  if (!difference) return false
+
+  const finalRows = pendingMutationRows(scenario)
+  const finalLimit = scenario.limit + 1
+  const expected = referenceWindowRows(
+    [...finalRows.values()],
+    scenario.direction,
+    { offset: 0, limit: finalLimit },
+  )
+  const defective = error.deliveredRows
+
+  return (
+    !sameRows(defective, expected) &&
+    sameRows(difference.actual, defective) &&
+    sameRows(difference.expected, expected)
+  )
+}
+
 async function runPendingMutationScenarioWithKnownFailures(
   scenario: PendingMutationScenario,
   timing: `before-response` | `after-response`,
@@ -1368,6 +1450,7 @@ async function runPendingMutationScenarioWithKnownFailures(
     await runPendingMutationScenario(scenario, timing)
   } catch (error) {
     if (isKnownSettledTopKMembershipFailure(scenario, timing, error)) return
+    if (isKnownRejectedCursorRetryFailure(scenario, error)) return
     throw error
   }
 }
@@ -1759,6 +1842,22 @@ async function expectInflightRequestFillsNewWindow(): Promise<void> {
 }
 
 describe(`pagination recomputation oracle`, () => {
+  it(`materializes an empty source window`, async () => {
+    await runPaginationScenario({
+      ranks: [],
+      direction: `asc`,
+      windows: [{ offset: 0, limit: 3 }],
+    })
+  })
+
+  it(`materializes an offset past the final row`, async () => {
+    await runPaginationScenario({
+      ranks: [0, 1],
+      direction: `asc`,
+      windows: [{ offset: 4, limit: 2 }],
+    })
+  })
+
   it(`materializes an initially empty zero-limit window`, async () => {
     await runPaginationScenario({
       ranks: [0, 1, 2],
@@ -1902,7 +2001,7 @@ describe(`pagination recomputation oracle`, () => {
   })
 
   fcTest.prop([multiOrderScenarioArbitrary], {
-    numRuns: 12 * multiplier,
+    numRuns: orderedScenarioRuns,
     seed: 1663,
   })(
     `matches multi-column nullable ordering for a fixed seed`,
@@ -1911,7 +2010,7 @@ describe(`pagination recomputation oracle`, () => {
 
   fcTest.prop(
     [multiOrderScenarioArbitrary],
-    oracleRandomParameters(12 * multiplier, replaySeed),
+    oracleRandomParameters(orderedScenarioRuns, replaySeed),
   )(
     `matches multi-column nullable ordering for a random or replayed seed`,
     runMultiOrderScenarioWithKnownFailures,
@@ -1951,6 +2050,7 @@ describe(`pagination recomputation oracle`, () => {
         direction: `asc`,
         limit: 3,
         mutation,
+        responseOutcome: `resolve`,
       }
       await runPendingMutationScenario(scenario, `before-response`)
       await runPendingMutationScenario(scenario, `after-response`)
@@ -1963,6 +2063,7 @@ describe(`pagination recomputation oracle`, () => {
       direction: `desc`,
       limit: 1,
       mutation: { type: `update`, row: { id: 3, rank: 0 } },
+      responseOutcome: `resolve`,
     }
     await expectAssertionFailure(
       () => runPendingMutationScenario(scenario, `after-response`),
@@ -1983,6 +2084,7 @@ describe(`pagination recomputation oracle`, () => {
       direction: `desc`,
       limit: 1,
       mutation: { type: `update`, row: { id: 3, rank: 0 } },
+      responseOutcome: `resolve`,
     }
 
     expect(
@@ -1994,8 +2096,65 @@ describe(`pagination recomputation oracle`, () => {
     ).toBe(false)
   })
 
+  it(`discovered trace: a rejected cursor does not treat a live insert as remote coverage`, async () => {
+    const scenario: PendingMutationScenario = {
+      ranks: [0, -1, 0],
+      direction: `asc`,
+      limit: 1,
+      mutation: { type: `insert`, row: { id: 4, rank: 0 } },
+      responseOutcome: `reject`,
+    }
+
+    await expectAssertionFailure(
+      () => runPendingMutationScenario(scenario, `before-response`),
+      {
+        checkpoint: 0,
+        classify: ({ actual, expected }) =>
+          isPageRowArray(actual) &&
+          sameRows(actual, [
+            { id: 2, rank: -1 },
+            { id: 4, rank: 0 },
+          ]) &&
+          isPageRowArray(expected) &&
+          sameRows(expected, [
+            { id: 2, rank: -1 },
+            { id: 1, rank: 0 },
+          ]),
+      },
+    )()
+  })
+
+  it(`rejects collateral output from the rejected-cursor retry classifier`, () => {
+    const scenario: PendingMutationScenario = {
+      ranks: [0, -1, 0],
+      direction: `asc`,
+      limit: 1,
+      mutation: { type: `insert`, row: { id: 4, rank: 0 } },
+      responseOutcome: `reject`,
+    }
+
+    const collateral = assertionDifference(
+      0,
+      [{ id: 4, rank: 0 }],
+      [
+        { id: 2, rank: -1 },
+        { id: 1, rank: 0 },
+      ],
+    )
+
+    expect(
+      isKnownRejectedCursorRetryFailure(
+        scenario,
+        new PendingMutationTraceAssertionError(collateral.cause, [
+          { id: 2, rank: -1 },
+          { id: 4, rank: 0 },
+        ]),
+      ),
+    ).toBe(false)
+  })
+
   fcTest.prop([pendingMutationScenarioArbitrary, responseTimingArbitrary], {
-    numRuns: 8 * multiplier,
+    numRuns: transitionScenarioRuns,
     seed: 1660,
   })(
     `matches recomputation when source mutations cross a pending cursor response for a fixed seed`,
@@ -2004,7 +2163,7 @@ describe(`pagination recomputation oracle`, () => {
 
   fcTest.prop(
     [pendingMutationScenarioArbitrary, responseTimingArbitrary],
-    oracleRandomParameters(8 * multiplier, replaySeed),
+    oracleRandomParameters(transitionScenarioRuns, replaySeed),
   )(
     `matches recomputation when source mutations cross a pending cursor response for a random or replayed seed`,
     runPendingMutationScenarioWithKnownFailures,
@@ -2023,7 +2182,7 @@ describe(`pagination recomputation oracle`, () => {
   )
 
   fcTest.prop([pendingHistoryScenarioArbitrary], {
-    numRuns: 8 * multiplier,
+    numRuns: transitionScenarioRuns,
     seed: 1664,
   })(
     `matches recomputation across multi-action pending histories for a fixed seed`,
@@ -2032,7 +2191,7 @@ describe(`pagination recomputation oracle`, () => {
 
   fcTest.prop(
     [pendingHistoryScenarioArbitrary],
-    oracleRandomParameters(8 * multiplier, replaySeed),
+    oracleRandomParameters(transitionScenarioRuns, replaySeed),
   )(
     `matches recomputation across multi-action pending histories for a random or replayed seed`,
     runPendingHistoryScenarioWithKnownFailures,
@@ -2325,18 +2484,21 @@ describe(`pagination recomputation oracle`, () => {
     })(scenario)
   })
 
-  fcTest.prop([scenarioArbitrary], { numRuns: runs, seed: 1657 })(
+  fcTest.prop([scenarioArbitrary], {
+    numRuns: orderedScenarioRuns,
+    seed: 1657,
+  })(
     `matches full recomputation across ordered windows for a fixed seed`,
     runPaginationScenario,
   )
 
-  fcTest.prop([scenarioArbitrary], randomParameters)(
+  fcTest.prop([scenarioArbitrary], orderedScenarioRandomParameters)(
     `matches full recomputation across ordered windows for a random or replayed seed`,
     runPaginationScenario,
   )
 
   fcTest.prop([stateScenarioArbitrary], {
-    numRuns: 8 * multiplier,
+    numRuns: transitionScenarioRuns,
     seed: 1658,
   })(
     `matches full recomputation across source and window transitions for a fixed seed`,
@@ -2345,7 +2507,7 @@ describe(`pagination recomputation oracle`, () => {
 
   fcTest.prop(
     [stateScenarioArbitrary],
-    oracleRandomParameters(8 * multiplier, replaySeed),
+    oracleRandomParameters(transitionScenarioRuns, replaySeed),
   )(
     `matches full recomputation across source and window transitions for a random or replayed seed`,
     runPaginationStateScenarioWithKnownFailures,
@@ -2546,7 +2708,7 @@ describe(`pagination recomputation oracle`, () => {
   })
 
   fcTest.prop([scenarioArbitrary], {
-    numRuns: 8 * multiplier,
+    numRuns: transitionScenarioRuns,
     seed: 1659,
   })(
     `matches full recomputation when exact async cursor loads widen ordered coverage for a fixed seed`,
@@ -2555,7 +2717,7 @@ describe(`pagination recomputation oracle`, () => {
 
   fcTest.prop(
     [scenarioArbitrary],
-    oracleRandomParameters(8 * multiplier, replaySeed),
+    oracleRandomParameters(transitionScenarioRuns, replaySeed),
   )(
     `matches full recomputation when exact async cursor loads widen ordered coverage for a random or replayed seed`,
     runOnDemandPaginationScenarioWithKnownFailures,

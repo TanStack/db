@@ -922,6 +922,85 @@ describe(`QueryCollection`, () => {
     })
   })
 
+  it(`reconciles a retained cached subset before an include becomes ready`, async () => {
+    type LineItem = { id: string; productId: string }
+    type Product = { id: string; name: string }
+
+    const queryKey = [`cached-includes-product`]
+    const cachedProducts: Array<Product> = [
+      { id: `product-1`, name: `Cached widget` },
+    ]
+    queryClient.setQueryData(queryKey, cachedProducts)
+    const queryHash = hashKey(queryKey)
+    const metadataHarness = createInMemorySyncMetadataApi<
+      string | number,
+      Product
+    >({
+      collectionMetadata: new Map([
+        [
+          `queryCollection:gc:${queryHash}`,
+          { queryHash, mode: `until-revalidated` },
+        ],
+      ]),
+    })
+
+    const lineItems = createCollection(
+      mockSyncCollectionOptions<LineItem>({
+        id: `cached-includes-line-items`,
+        getKey: (lineItem) => lineItem.id,
+        initialData: [{ id: `line-1`, productId: `product-1` }],
+      }),
+    )
+    const productOptions = queryCollectionOptions<Product>({
+      id: `cached-includes-products`,
+      queryClient,
+      queryKey: () => queryKey,
+      queryFn: vi.fn().mockResolvedValue(cachedProducts),
+      getKey: (product) => product.id,
+      syncMode: `on-demand`,
+      startSync: true,
+      staleTime: Infinity,
+    })
+    const originalSync = productOptions.sync
+    const products = createCollection({
+      ...productOptions,
+      sync: {
+        sync: (params: Parameters<typeof originalSync.sync>[0]) =>
+          originalSync.sync({ ...params, metadata: metadataHarness.api }),
+      },
+    })
+    const live = createLiveQueryCollection((q) =>
+      q.from({ lineItem: lineItems }).select(({ lineItem }) => ({
+        id: lineItem.id,
+        product: q
+          .from({ product: products })
+          .where(({ product }) => eq(product.id, lineItem.productId))
+          .select(({ product }) => ({
+            id: product.id,
+            name: product.name,
+          })),
+      })),
+    )
+
+    try {
+      await new Promise<void>((resolve) => products.onFirstReady(resolve))
+      await live.preload()
+
+      expect(live.status).toBe(`ready`)
+      expect(
+        (live.get(`line-1`) as any).product.toArray.map((product: Product) =>
+          stripVirtualProps(product),
+        ),
+      ).toEqual(cachedProducts)
+    } finally {
+      await Promise.all([
+        live.cleanup(),
+        products.cleanup(),
+        lineItems.cleanup(),
+      ])
+    }
+  })
+
   it(`should update collection when query data changes`, async () => {
     const queryKey = [`testItems`]
     const initialItems: Array<TestItem> = [
@@ -6236,6 +6315,65 @@ describe(`QueryCollection`, () => {
           `queryCollection:gc:${ownedQueryHash}`,
         ),
       ).toBe(false)
+    })
+
+    it(`does not apply a retained-query result after its subset is released`, async () => {
+      const queryKey = [`stale-retained-reconciliation`]
+      const queryHash = hashKey(queryKey)
+      const item = { id: `1`, name: `Stale result`, category: `A` }
+      const persistedScan =
+        createDeferred<
+          Array<{ key: string; value: CategorisedItem; metadata?: unknown }>
+        >()
+      const metadataHarness = createInMemorySyncMetadataApi<string | number>({
+        collectionMetadata: new Map([
+          [
+            `queryCollection:gc:${queryHash}`,
+            { queryHash, mode: `until-revalidated` },
+          ],
+        ]),
+      })
+      const scanPersisted = vi.fn().mockReturnValue(persistedScan.promise)
+      const metadataApi = {
+        ...metadataHarness.api,
+        row: {
+          ...metadataHarness.api.row,
+          scanPersisted,
+        },
+      } as SyncMetadataApi<string | number>
+
+      const baseOptions = queryCollectionOptions<CategorisedItem>({
+        id: `stale-retained-reconciliation`,
+        queryClient,
+        queryKey: () => queryKey,
+        queryFn: async () => [item],
+        getKey: (value) => value.id,
+        syncMode: `on-demand`,
+        startSync: true,
+      })
+      const originalSync = baseOptions.sync
+      const collection = createCollection({
+        ...baseOptions,
+        sync: {
+          sync: (params: Parameters<typeof originalSync.sync>[0]) =>
+            originalSync.sync({
+              ...params,
+              metadata: metadataApi,
+            }),
+        },
+      })
+      const load = collection._sync.loadSubset({})
+      await vi.waitFor(() => {
+        expect(scanPersisted).toHaveBeenCalledOnce()
+      })
+
+      collection._sync.unloadSubset({})
+      persistedScan.resolve([])
+      await load
+      await flushPromises()
+
+      expect(collection.has(item.id)).toBe(false)
+      await collection.cleanup()
     })
 
     it(`should clean up expired persisted ttl placeholders on startup`, async () => {

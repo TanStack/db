@@ -1,5 +1,22 @@
 # @tanstack/db
 
+## 0.8.1
+
+### Patch Changes
+
+- Rebuild correlated include materialization as one D2 graph, fixing stale or missing nested results across route changes, batching, lazy loading, optimistic updates, and layered queries. Add canonical structural relation keys, abortable subset demand, and coherent publication for Collection-valued includes. Dispose delayed PowerSync subset hooks after cleanup, and prevent released Query Collection cache results from reaching the collection. ([#1740](https://github.com/TanStack/db/pull/1740))
+
+- Support Temporal values in the `gt`/`gte`/`lt`/`lte` query operators. Comparisons now dispatch to the Temporal types' static `compare()` instead of the native relational operators, which throw on Temporal objects (`valueOf()` is designed to throw). `orderBy` uses the same logic, so filtering and ordering now agree — previously `orderBy` compared Temporal values lexicographically by their `toString()`, which mis-ordered equivalent `Duration` forms (`PT60M` vs `PT1H`) and same-instant `ZonedDateTime` values in different zones. ([#1519](https://github.com/TanStack/db/pull/1519))
+
+  Note two intentional behavior changes for `orderBy` over Temporal columns:
+  - Ordering `Temporal.PlainMonthDay` values now throws a `TypeError`, since the type has no defined ordering (previously they were silently ordered by string).
+  - Ordering mixed Temporal types (e.g. `PlainDate` vs `PlainDateTime`) now throws a `TypeError` instead of comparing their string forms.
+
+  Equality (`eq`) is unchanged: `ZonedDateTime` equality still treats the zone as part of identity, and equivalent `Duration` forms remain unequal, mirroring Temporal's `.equals()` vs `.compare()` semantics.
+
+- Updated dependencies [[`5d9335d`](https://github.com/TanStack/db/commit/5d9335d0d42c1cc1ec2b92be8ce40ae8abe42827)]:
+  - @tanstack/db-ivm@0.1.19
+
 ## 0.8.0
 
 ### Minor Changes

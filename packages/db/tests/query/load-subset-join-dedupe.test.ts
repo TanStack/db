@@ -26,7 +26,7 @@ const children = [
 ]
 
 let sequence = 0
-const cleanups: Array<() => void> = []
+const cleanups: Array<() => void | Promise<void>> = []
 
 function createParents() {
   let begin!: () => void
@@ -101,8 +101,8 @@ function createJoinedQuery(
 }
 
 describe(`loadSubset join-key deduplication`, () => {
-  afterEach(() => {
-    for (const cleanup of cleanups.splice(0).reverse()) cleanup()
+  afterEach(async () => {
+    for (const cleanup of cleanups.splice(0).reverse()) await cleanup()
   })
 
   it(
@@ -154,6 +154,7 @@ describe(`loadSubset join-key deduplication`, () => {
       where: expect.anything(),
       orderBy: undefined,
       limit: undefined,
+      signal: expect.any(AbortSignal),
       subscription: expect.anything(),
     })
     expect(load.where).toBeDefined()

@@ -593,6 +593,10 @@ export class CollectionSyncManager<
    *          Returns true if no sync function is configured, if syncMode is 'eager', or if there is no work to do.
    */
   public loadSubset(options: LoadSubsetOptions): Promise<void> | true {
+    if (options.signal?.aborted) {
+      return true
+    }
+
     // Bypass loadSubset when syncMode is 'eager'
     if (this.syncMode === `eager`) {
       return true

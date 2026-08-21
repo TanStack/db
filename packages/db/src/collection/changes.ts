@@ -1,4 +1,5 @@
 import { NegativeActiveSubscribersError } from '../errors'
+import { withPublicationContext } from '../scheduler.js'
 import {
   createSingleRowRefProxy,
   toExpression,
@@ -12,6 +13,11 @@ import type { CollectionEventsManager } from './events.js'
 import type { CollectionImpl } from './index.js'
 import type { CollectionStateManager } from './state.js'
 import type { WithVirtualProps } from '../virtual-props.js'
+
+export type PublicationDeferral = {
+  publish: () => void
+  discard: () => void
+}
 
 export class CollectionChangesManager<
   TOutput extends object = Record<string, unknown>,
@@ -29,6 +35,12 @@ export class CollectionChangesManager<
   public changeSubscriptions = new Set<CollectionSubscription>()
   public batchedEvents: Array<ChangeMessage<TOutput, TKey>> = []
   public shouldBatchEvents = false
+  private publicationDeferralDepth = 0
+  private discardDeferredPublications = false
+  private deferredPublications: Array<{
+    changes: Array<ChangeMessage<TOutput, TKey>>
+    layoutChanged: boolean
+  }> = []
   private layoutChangeListeners = new Set<() => void>()
 
   /**
@@ -70,10 +82,11 @@ export class CollectionChangesManager<
    * This bypasses the normal empty array check in emitEvents
    */
   public emitEmptyReadyEvent(): void {
-    // Emit empty array directly to all subscribers
-    for (const subscription of this.changeSubscriptions) {
-      subscription.emitEvents([])
-    }
+    withPublicationContext(() => {
+      for (const subscription of this.changeSubscriptions) {
+        subscription.emitEvents([])
+      }
+    })
   }
 
   /**
@@ -120,15 +133,56 @@ export class CollectionChangesManager<
       this.shouldBatchEvents = false
     }
 
-    if (rawEvents.length === 0 && !layoutChanged) {
+    if (this.publicationDeferralDepth > 0) {
+      this.deferredPublications.push({ changes: rawEvents, layoutChanged })
       return
     }
 
-    // Notify both internal layout consumers and the public subscription API.
-    // Public subscribers historically receive an empty batch for order-only
-    // moves because there is no row-value ChangeMessage to publish.
-    if (rawEvents.length === 0) {
-      for (const listener of this.layoutChangeListeners) listener()
+    this.publishEvents(rawEvents, layoutChanged)
+  }
+
+  /**
+   * Defers subscriber delivery while a coherent multi-Collection publication
+   * installs all of its visible state. State and indexes still commit at their
+   * normal transaction boundaries.
+   */
+  public deferPublication(): PublicationDeferral {
+    this.publicationDeferralDepth++
+    let closed = false
+
+    const close = (discard: boolean) => {
+      if (closed) return
+      closed = true
+      if (this.publicationDeferralDepth === 0) return
+      this.discardDeferredPublications ||= discard
+
+      this.publicationDeferralDepth--
+      if (this.publicationDeferralDepth > 0) return
+
+      const publications = this.deferredPublications
+      this.deferredPublications = []
+      if (this.discardDeferredPublications) {
+        this.discardDeferredPublications = false
+        return
+      }
+      this.publishEvents(
+        publications.flatMap(({ changes }) => changes),
+        publications.some(({ layoutChanged }) => layoutChanged),
+      )
+    }
+
+    return {
+      publish: () => close(false),
+      discard: () => close(true),
+    }
+  }
+
+  private publishEvents(
+    rawEvents: Array<ChangeMessage<TOutput, TKey>>,
+    layoutChanged: boolean,
+  ): void {
+    if (rawEvents.length === 0 && !layoutChanged) {
+      return
     }
 
     // Enrich all change messages with virtual properties
@@ -137,10 +191,20 @@ export class CollectionChangesManager<
       ChangeMessage<WithVirtualProps<TOutput, TKey>, TKey>
     > = rawEvents.map((change) => this.enrichChangeWithVirtualProps(change))
 
-    // Emit to all listeners
-    for (const subscription of this.changeSubscriptions) {
-      subscription.emitEvents(enrichedEvents)
-    }
+    // Every subscriber sees one committed source batch before dependent query
+    // graphs run. This keeps repeated aliases and sibling subqueries coherent.
+    withPublicationContext(() => {
+      // Notify both internal layout consumers and the public subscription API.
+      // Public subscribers historically receive an empty batch for order-only
+      // moves because there is no row-value ChangeMessage to publish.
+      if (rawEvents.length === 0) {
+        for (const listener of this.layoutChangeListeners) listener()
+      }
+
+      for (const subscription of this.changeSubscriptions) {
+        subscription.emitEvents(enrichedEvents)
+      }
+    })
   }
 
   /** Subscribe to layout-only publications. Internal observer channel. */
@@ -259,5 +323,7 @@ export class CollectionChangesManager<
   public cleanup(): void {
     this.batchedEvents = []
     this.shouldBatchEvents = false
+    this.deferredPublications = []
+    this.publicationDeferralDepth = 0
   }
 }
