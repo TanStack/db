@@ -2,10 +2,13 @@ import type { BasicExpression } from '../src/query/ir.js'
 
 function compareReferenceValues(left: unknown, right: unknown): number {
   if (left === right) return 0
-  // Query order cursors use nulls-first ordering. Treat null as the least
-  // value so adapters can evaluate the same cursor boundary independently.
-  if (left === null) return -1
-  if (right === null) return 1
+  // Query order cursors use nulls-first ordering. Missing reference paths are
+  // equivalent to null so adapters can evaluate the same boundary independently.
+  const leftNullish = left === null || left === undefined
+  const rightNullish = right === null || right === undefined
+  if (leftNullish && rightNullish) return 0
+  if (leftNullish) return -1
+  if (rightNullish) return 1
   if (typeof left === `number` && typeof right === `number`) {
     return left < right ? -1 : 1
   }

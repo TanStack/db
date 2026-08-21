@@ -646,17 +646,18 @@ function isKnownOffsetTruncatedUnlimitedDeduplication(
   const unlimitedLoads = error.loadedRegions.filter(
     ({ request }) => request.limit === undefined,
   )
-  if (!unlimitedLoads.some(({ request }) => request.offset > 0)) return false
+  const offsetLoads = unlimitedLoads.filter(({ request }) => request.offset > 0)
+  if (offsetLoads.length === 0) return false
 
   // The known defect stores unlimited predicate coverage without its offset or
   // ordering. Model that loss directly instead of replaying production dedupe.
-  if (unlimitedLoads.some(({ request }) => request.where === undefined)) {
+  if (offsetLoads.some(({ request }) => request.where === undefined)) {
     return true
   }
   if (error.requested.where === undefined) return false
 
   const incorrectlyTrackedValues = unionSets(
-    unlimitedLoads.map(({ request }) =>
+    offsetLoads.map(({ request }) =>
       matchingValues(toWindowOptions(request).where),
     ),
   )
@@ -709,7 +710,11 @@ function isKnownIndividuallyCoveredWindowRefetch(
   )
   if (!coveredByOneRegion) return false
 
-  return true
+  const replay = [
+    ...error.loadedRegions.map(({ request }) => request),
+    error.requested,
+  ]
+  return countWindowLoads(replay) === replay.length
 }
 
 const createWindowKeyBlindSubject: CoverageSubjectFactory = (recordLoad) => {
@@ -1216,6 +1221,20 @@ function expectExactCountFailure(
 }
 
 describe(`loadSubset coverage oracle`, () => {
+  it(`orders a missing reference path with null`, () => {
+    const missing = new PropRef<number | null>([`missing`])
+
+    expect(
+      evaluateReferenceExpression(
+        new Func(`lte`, [missing, new Value(null)]),
+        {},
+      ),
+    ).toBe(true)
+    expect(
+      evaluateReferenceExpression(new Func(`lt`, [missing, new Value(0)]), {}),
+    ).toBe(true)
+  })
+
   it(`rejects one-region coverage from the union-composition classifier`, () => {
     expect(
       isKnownUnionCompositionRefetch(

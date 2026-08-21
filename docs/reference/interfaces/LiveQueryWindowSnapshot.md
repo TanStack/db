@@ -28,7 +28,7 @@ A page-windowed view of a live query at a point in time.
 ### collection
 
 ```ts
-collection:
+collection: 
   | Collection<T, TKey, any, StandardSchemaV1<unknown, unknown>, T>
   | undefined;
 ```
