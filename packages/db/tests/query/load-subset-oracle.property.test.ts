@@ -1231,10 +1231,7 @@ describe(`loadSubset coverage oracle`, () => {
       ),
     ).toBe(true)
     expect(
-      evaluateReferenceExpression(
-        new Func(`lt`, [missing, new Value(0)]),
-        {},
-      ),
+      evaluateReferenceExpression(new Func(`lt`, [missing, new Value(0)]), {}),
     ).toBe(true)
   })
 
