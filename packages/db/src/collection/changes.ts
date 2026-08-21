@@ -222,9 +222,6 @@ export class CollectionChangesManager<
     ) => void,
     options: SubscribeChangesOptions<TOutput, TKey> = {},
   ): CollectionSubscription {
-    // Start sync and track subscriber
-    this.addSubscriber()
-
     // Compile where callback to whereExpression if provided
     if (options.where && options.whereExpression) {
       throw new Error(
@@ -239,6 +236,10 @@ export class CollectionChangesManager<
       const result = where(proxy)
       whereExpression = toExpression(result)
     }
+
+    // Acquire ownership only after all fallible option validation and
+    // user-provided predicate compilation has completed.
+    this.addSubscriber()
 
     let subscription: CollectionSubscription | undefined
     try {
@@ -293,12 +294,20 @@ export class CollectionChangesManager<
     this.activeSubscribersCount++
     this.lifecycle.cancelGCTimer()
 
-    // Start sync if collection was cleaned up
-    if (
-      this.lifecycle.status === `cleaned-up` ||
-      this.lifecycle.status === `idle`
-    ) {
-      this.sync.startSync()
+    try {
+      // Start sync if collection was cleaned up
+      if (
+        this.lifecycle.status === `cleaned-up` ||
+        this.lifecycle.status === `idle`
+      ) {
+        this.sync.startSync()
+      }
+    } catch (error) {
+      this.activeSubscribersCount = previousSubscriberCount
+      if (this.activeSubscribersCount === 0) {
+        this.lifecycle.startGCTimer()
+      }
+      throw error
     }
 
     this.events.emitSubscribersChange(

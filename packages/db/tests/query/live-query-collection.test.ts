@@ -1435,6 +1435,241 @@ describe(`createLiveQueryCollection`, () => {
       expect(liveQuery.isLoadingSubset).toBe(false)
     })
 
+    it(`releases an ordered source when initial live-query loading throws`, async () => {
+      const failure = new Error(`initial ordered live-query load failed`)
+      const source = createCollection<User>({
+        id: `initial-ordered-live-query-error`,
+        getKey: (user) => user.id,
+        syncMode: `on-demand`,
+        autoIndex: `eager`,
+        defaultIndexType: BTreeIndex,
+        sync: {
+          sync: ({ markReady }) => {
+            markReady()
+            return {
+              loadSubset: () => {
+                throw failure
+              },
+            }
+          },
+        },
+      })
+      const live = createLiveQueryCollection((q) =>
+        q
+          .from({ user: source })
+          .orderBy(({ user }) => user.name, `asc`)
+          .limit(1),
+      )
+
+      await expect(Promise.resolve().then(() => live.preload())).rejects.toBe(
+        failure,
+      )
+      expect(source.subscriberCount).toBe(0)
+
+      await Promise.all([live.cleanup(), source.cleanup()])
+    })
+
+    it(`releases earlier live-query sources when initial lazy demand throws`, async () => {
+      type Issue = { id: number; userId: number }
+      const failure = new Error(`initial live-query lazy demand failed`)
+      const users = createCollection(
+        mockSyncCollectionOptions<User>({
+          id: `partial-live-query-users`,
+          getKey: (user) => user.id,
+          initialData: [sampleUsers[0]!],
+        }),
+      )
+      const issues = createCollection<Issue>({
+        id: `partial-live-query-issues`,
+        getKey: (issue) => issue.id,
+        syncMode: `on-demand`,
+        sync: {
+          sync: ({ markReady }) => {
+            markReady()
+            return {
+              loadSubset: () => {
+                throw failure
+              },
+            }
+          },
+        },
+      })
+      const live = createLiveQueryCollection((q) =>
+        q
+          .from({ user: users })
+          .leftJoin({ issue: issues }, ({ user, issue }) =>
+            eq(user.id, issue.userId),
+          )
+          .select(({ user, issue }) => ({
+            id: user.id,
+            issueId: issue.id,
+          })),
+      )
+
+      await expect(Promise.resolve().then(() => live.preload())).rejects.toBe(
+        failure,
+      )
+      expect(users.subscriberCount).toBe(0)
+      expect(issues.subscriberCount).toBe(0)
+
+      await Promise.all([live.cleanup(), users.cleanup(), issues.cleanup()])
+    })
+
+    it(`isolates synchronous lazy-demand failure from an established source commit`, async () => {
+      type Issue = { id: number; userId: number }
+      const failure = new Error(`incremental live-query lazy demand failed`)
+      const users = createCollection(
+        mockSyncCollectionOptions<User>({
+          id: `incremental-live-query-users`,
+          getKey: (user) => user.id,
+          initialData: [],
+        }),
+      )
+      const issues = createCollection<Issue>({
+        id: `incremental-live-query-issues`,
+        getKey: (issue) => issue.id,
+        syncMode: `on-demand`,
+        sync: {
+          sync: ({ markReady }) => {
+            markReady()
+            return {
+              loadSubset: () => {
+                throw failure
+              },
+            }
+          },
+        },
+      })
+      const live = createLiveQueryCollection((q) =>
+        q
+          .from({ user: users })
+          .leftJoin({ issue: issues }, ({ user, issue }) =>
+            eq(user.id, issue.userId),
+          )
+          .select(({ user, issue }) => ({
+            id: user.id,
+            issueId: issue.id,
+          })),
+      )
+
+      try {
+        await live.preload()
+        expect(live.status).toBe(`ready`)
+
+        let commitError: unknown
+        try {
+          users.utils.begin()
+          users.utils.write({ type: `insert`, value: sampleUsers[0]! })
+          users.utils.commit()
+        } catch (error) {
+          commitError = error
+        }
+
+        expect(commitError).toBeUndefined()
+        expect(live.status).toBe(`error`)
+        expect(live.utils.lastSubsetError).toBe(failure)
+      } finally {
+        await Promise.all([live.cleanup(), users.cleanup(), issues.cleanup()])
+      }
+    })
+
+    it.each([`throw`, `reject`] as const)(
+      `waits for lazy child demand caused by a window change ($delivery)`,
+      async (delivery) => {
+        type Parent = { id: number; rank: number }
+        type Child = { id: number; parentId: number }
+        const failure = new Error(`window child demand failed`)
+        const loadedParents = new Set<number>()
+        let parentLoadCount = 0
+        const parents = createCollection<Parent>({
+          id: `window-lazy-demand-parents`,
+          getKey: (parent) => parent.id,
+          syncMode: `on-demand`,
+          autoIndex: `eager`,
+          defaultIndexType: BTreeIndex,
+          sync: {
+            sync: ({ begin, write, commit, markReady }) => {
+              markReady()
+              return {
+                loadSubset: () => {
+                  parentLoadCount++
+                  begin()
+                  const candidates: Array<Parent> = [
+                    { id: 1, rank: 1 },
+                    { id: 2, rank: 2 },
+                  ]
+                  candidates.slice(0, parentLoadCount).forEach((parent) => {
+                    if (loadedParents.has(parent.id)) return
+                    loadedParents.add(parent.id)
+                    write({ type: `insert`, value: parent })
+                  })
+                  commit()
+                  return Promise.resolve()
+                },
+              }
+            },
+          },
+        })
+        let childLoadCount = 0
+        const children = createCollection<Child>({
+          id: `window-lazy-demand-children`,
+          getKey: (child) => child.id,
+          syncMode: `on-demand`,
+          autoIndex: `eager`,
+          defaultIndexType: BTreeIndex,
+          sync: {
+            sync: ({ begin, write, commit, markReady }) => {
+              markReady()
+              return {
+                loadSubset: () => {
+                  childLoadCount++
+                  if (childLoadCount > 1) {
+                    if (delivery === `throw`) throw failure
+                    return Promise.reject(failure)
+                  }
+                  begin()
+                  write({ type: `insert`, value: { id: 10, parentId: 1 } })
+                  commit()
+                  return Promise.resolve()
+                },
+              }
+            },
+          },
+        })
+        const live = createLiveQueryCollection((q) =>
+          q
+            .from({ parent: parents })
+            .leftJoin({ child: children }, ({ parent, child }) =>
+              eq(parent.id, child.parentId),
+            )
+            .orderBy(({ parent }) => parent.rank, `asc`)
+            .limit(1)
+            .select(({ parent, child }) => ({
+              id: parent.id,
+              childId: child.id,
+            })),
+        )
+
+        try {
+          await live.preload()
+          expect(live.status).toBe(`ready`)
+
+          const setWindow = async () => {
+            const result = live.utils.setWindow({ offset: 0, limit: 2 })
+            if (result !== true) await result
+          }
+          await expect(setWindow()).rejects.toBe(failure)
+          expect(live.utils.lastSubsetError).toBe(failure)
+        } finally {
+          await Promise.all([
+            live.cleanup(),
+            parents.cleanup(),
+            children.cleanup(),
+          ])
+        }
+      },
+    )
+
     it(`concurrent live queries should each track loading state independently`, async () => {
       // This tests the fix for the !wasLoadingBefore bug:
       // When multiple live queries subscribe to the same source collection,
@@ -2052,6 +2287,37 @@ describe(`createLiveQueryCollection`, () => {
       // setWindow should return true when no loading is triggered
       const result = activeUsers.utils.setWindow({ offset: 1, limit: 2 })
       expect(result).toBe(true)
+    })
+
+    it(`does not wait for subset work that predates the window operation`, async () => {
+      const source = createCollection(
+        mockSyncCollectionOptions<User>({
+          id: `window-with-unrelated-load`,
+          getKey: (user) => user.id,
+          initialData: sampleUsers,
+          autoIndex: `eager`,
+        }),
+      )
+      const live = createLiveQueryCollection((q) =>
+        q
+          .from({ user: source })
+          .orderBy(({ user }) => user.name, `asc`)
+          .limit(1),
+      )
+      let resolveUnrelated: () => void
+      const unrelated = new Promise<void>((resolve) => {
+        resolveUnrelated = resolve
+      })
+
+      try {
+        await live.preload()
+        live._sync.trackLoadPromise(unrelated)
+
+        expect(live.utils.setWindow({ offset: 0, limit: 2 })).toBe(true)
+      } finally {
+        resolveUnrelated!()
+        await Promise.all([live.cleanup(), source.cleanup()])
+      }
     })
 
     it(`setWindow returns and resolves a Promise when async loading is triggered`, async () => {

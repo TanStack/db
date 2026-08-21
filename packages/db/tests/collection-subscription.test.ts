@@ -318,6 +318,79 @@ describe(`CollectionSubscription status tracking`, () => {
     await collection.cleanup()
   })
 
+  it(`releases a subset acquired before loadSubset throws`, async () => {
+    const failure = new Error(`subset failed after acquisition`)
+    let acquiredOptions: unknown
+    const unloadedOptions: Array<unknown> = []
+    const collection = createCollection<{ id: string }>({
+      id: `partial-subset-acquisition`,
+      getKey: (item) => item.id,
+      syncMode: `on-demand`,
+      sync: {
+        sync: ({ markReady }) => {
+          markReady()
+          return {
+            loadSubset: (options) => {
+              acquiredOptions = options
+              throw failure
+            },
+            unloadSubset: (options) => unloadedOptions.push(options),
+          }
+        },
+      },
+    })
+    const subscription = collection.subscribeChanges(() => {}, {
+      includeInitialState: false,
+    })
+
+    expect(() =>
+      subscription.requestSnapshot({ optimizedOnly: false }),
+    ).toThrow(failure)
+    subscription.unsubscribe()
+
+    expect(unloadedOptions).toEqual([acquiredOptions])
+    await collection.cleanup()
+  })
+
+  it(`releases a subset when its load-result observer throws`, async () => {
+    const failure = new Error(`load-result observer failed`)
+    let acquiredOptions: unknown
+    const unloadedOptions: Array<unknown> = []
+    const collection = createCollection<{ id: string }>({
+      id: `subset-observer-failure`,
+      getKey: (item) => item.id,
+      syncMode: `on-demand`,
+      sync: {
+        sync: ({ markReady }) => {
+          markReady()
+          return {
+            loadSubset: (options) => {
+              acquiredOptions = options
+              return true
+            },
+            unloadSubset: (options) => unloadedOptions.push(options),
+          }
+        },
+      },
+    })
+    const subscription = collection.subscribeChanges(() => {}, {
+      includeInitialState: false,
+    })
+
+    expect(() =>
+      subscription.requestSnapshot({
+        optimizedOnly: false,
+        onLoadSubsetResult: () => {
+          throw failure
+        },
+      }),
+    ).toThrow(failure)
+    subscription.unsubscribe()
+
+    expect(unloadedOptions).toEqual([acquiredOptions])
+    await collection.cleanup()
+  })
+
   it(`reports a rejected subset replay after truncate`, async () => {
     const error = new Error(`truncate replay failed`)
     let truncateSource: () => void = () => {

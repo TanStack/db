@@ -33,6 +33,15 @@ type DeferredLoadSubset = {
   deferred: Deferred<void>
 }
 
+type LoadSubsetOperation = {
+  pending: Set<Promise<void>>
+  waiting: boolean
+  completed: boolean
+  hasError: boolean
+  error?: unknown
+  deferred?: Deferred<void>
+}
+
 export class CollectionSyncManager<
   TOutput extends object = Record<string, unknown>,
   TKey extends string | number = string | number,
@@ -56,6 +65,7 @@ export class CollectionSyncManager<
     null
 
   private pendingLoadSubsetPromises: Set<Promise<void>> = new Set()
+  private activeLoadSubsetOperation: LoadSubsetOperation | undefined
   private syncStartDeferred = false
   private syncStartRequested = false
   private deferredLoadSubsets: Array<DeferredLoadSubset> = []
@@ -579,6 +589,93 @@ export class CollectionSyncManager<
     return this.waitForPendingLoadSubset()
   }
 
+  /** @internal Observe subset requests caused by one imperative operation. */
+  public beginLoadSubsetOperation(): {
+    wait: () => true | Promise<void>
+    cancel: () => void
+  } {
+    const operation: LoadSubsetOperation = {
+      pending: new Set(),
+      waiting: false,
+      completed: false,
+      hasError: false,
+    }
+    // A new imperative operation owns future requests. Older operations keep
+    // waiting for the promises they already acquired, but cannot absorb work
+    // caused by a superseding physical window.
+    this.activeLoadSubsetOperation = operation
+    return {
+      wait: () => this.waitForLoadSubsetOperation(operation),
+      cancel: () => {
+        operation.completed = true
+        if (this.activeLoadSubsetOperation === operation) {
+          this.activeLoadSubsetOperation = undefined
+        }
+      },
+    }
+  }
+
+  private waitForLoadSubsetOperation(
+    operation: LoadSubsetOperation,
+  ): true | Promise<void> {
+    operation.waiting = true
+    if (operation.pending.size === 0) {
+      operation.completed = true
+      if (this.activeLoadSubsetOperation === operation) {
+        this.activeLoadSubsetOperation = undefined
+      }
+      return operation.hasError ? Promise.reject(operation.error) : true
+    }
+    operation.deferred = createDeferred<void>()
+    return operation.deferred.promise
+  }
+
+  private settleLoadSubsetOperation(
+    operation: LoadSubsetOperation,
+    promise: Promise<void>,
+    outcome: { ok: true } | { ok: false; error: unknown },
+  ): void {
+    if (operation.completed) return
+    operation.pending.delete(promise)
+    if (!outcome.ok && !operation.hasError) {
+      operation.hasError = true
+      operation.error = outcome.error
+    }
+    if (!operation.waiting || operation.pending.size > 0) return
+
+    // A resolved request can synchronously publish source rows that register
+    // follow-up loads. Let those registrations join this operation before it
+    // is considered complete.
+    queueMicrotask(() => {
+      if (operation.completed || operation.pending.size > 0) return
+      operation.completed = true
+      if (this.activeLoadSubsetOperation === operation) {
+        this.activeLoadSubsetOperation = undefined
+      }
+      if (operation.hasError) {
+        operation.deferred!.reject(operation.error)
+      } else {
+        operation.deferred!.resolve()
+      }
+    })
+  }
+
+  /** @internal Attach a relevant existing request to the active operation. */
+  public trackLoadSubsetOperationPromise(promise: Promise<void>): void {
+    const operation = this.activeLoadSubsetOperation
+    if (!operation || operation.pending.has(promise)) return
+
+    operation.pending.add(promise)
+    void promise.then(
+      () => this.settleLoadSubsetOperation(operation, promise, { ok: true }),
+      (error) =>
+        this.settleLoadSubsetOperation(operation, promise, {
+          ok: false,
+          error,
+        }),
+    )
+  }
+
   private async waitForPendingLoadSubset(): Promise<void> {
     do {
       await Promise.all([...this.pendingLoadSubsetPromises])
@@ -592,6 +689,7 @@ export class CollectionSyncManager<
   public trackLoadPromise(promise: Promise<void>): void {
     const loadingStarting = !this.isLoadingSubset
     this.pendingLoadSubsetPromises.add(promise)
+    this.trackLoadSubsetOperationPromise(promise)
 
     if (loadingStarting) {
       this._events.emit(`loadingSubset:change`, {

@@ -437,14 +437,17 @@ export class CollectionSubscription
       orderBy: opts?.orderBy,
       limit: opts?.limit,
     }
+
+    // Record ownership before invoking adapter or observer code. Either may
+    // throw after allocating resources, and unsubscribe must still release
+    // the exact request.
+    this.loadedSubsets.push(loadOptions)
+    if (opts?.where) this.requestedSubsetWhere.set(loadOptions, opts.where)
+
     const syncResult = this.loadSubset(loadOptions)
 
     // Pass the raw loadSubset result to the caller for external tracking
     opts?.onLoadSubsetResult?.(syncResult)
-
-    // Track this loadSubset call so we can unload it later
-    this.loadedSubsets.push(loadOptions)
-    if (opts?.where) this.requestedSubsetWhere.set(loadOptions, opts.where)
 
     this.observeLoadSubsetResult(
       syncResult,
@@ -705,13 +708,16 @@ export class CollectionSubscription
       offset: offset ?? currentOffset, // Use provided offset, or auto-tracked offset
       subscription: this,
     }
+
+    // Record ownership before invoking adapter or observer code. Either may
+    // throw after allocating resources, and unsubscribe must still release
+    // the exact request.
+    this.loadedSubsets.push(loadOptions)
+
     const syncResult = this.loadSubset(loadOptions)
 
     // Pass the raw loadSubset result to the caller for external tracking
     onLoadSubsetResult?.(syncResult)
-
-    // Track this loadSubset call
-    this.loadedSubsets.push(loadOptions)
     this.observeLoadSubsetResult(
       syncResult,
       loadOptions,

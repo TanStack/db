@@ -539,6 +539,68 @@ describe(`createLiveQueryWindowController`, () => {
     controller.dispose()
   })
 
+  it(`reset does not inherit a superseded expansion failure`, async () => {
+    const failure = new Error(`superseded expansion failed`)
+    let loadCount = 0
+    let rejectExpansion: (error: unknown) => void = () => {
+      throw new Error(`expansion has not started`)
+    }
+    const loaded = new Set<string>()
+    const source = createCollection<Row>({
+      id: `window-reset-real-source-${seq++}`,
+      getKey: (row) => row.id,
+      syncMode: `on-demand`,
+      startSync: true,
+      autoIndex: `eager`,
+      defaultIndexType: BTreeIndex,
+      sync: {
+        sync: ({ begin, write, commit, markReady }) => {
+          markReady()
+          return {
+            loadSubset: (options) => {
+              loadCount++
+              if (loadCount === 2) {
+                return new Promise<void>((_resolve, reject) => {
+                  rejectExpansion = reject
+                })
+              }
+              begin()
+              ROWS.slice(0, options.limit).forEach((row) => {
+                if (loaded.has(row.id)) return
+                loaded.add(row.id)
+                write({ type: `insert`, value: row })
+              })
+              commit()
+              return Promise.resolve()
+            },
+          }
+        },
+      },
+    })
+    const lq = makeOrderedLiveQuery(source, 2)
+    const controller = createLiveQueryWindowController<Row, string>(lq as any, {
+      pageSize: 2,
+    })
+    controller.subscribe(() => {})
+
+    try {
+      await controller.preload()
+      const expansion = Promise.resolve(controller.fetchNextPage())
+      const reset = Promise.resolve(controller.reset())
+      void expansion.catch(() => undefined)
+      void reset.catch(() => undefined)
+
+      rejectExpansion(failure)
+
+      await expect(reset).resolves.toBeUndefined()
+      await expect(expansion).rejects.toBe(failure)
+      expect(controller.getSnapshot().pages).toHaveLength(1)
+    } finally {
+      controller.dispose()
+      await Promise.all([lq.cleanup(), source.cleanup()])
+    }
+  })
+
   it(`retains an unsubscribed lease until overlapping requests settle`, async () => {
     const lq = makeOrderedLiveQuery(makeSource(), 2)
     await lq.preload()

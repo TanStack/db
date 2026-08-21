@@ -291,7 +291,12 @@ export function createEffect<
       dispose()
     },
   })
-  runner.start()
+  try {
+    runner.start()
+  } catch (error) {
+    runner.dispose()
+    throw error
+  }
 
   return {
     dispose,
@@ -380,6 +385,7 @@ class EffectPipelineRunner<TRow extends object, TKey extends string | number> {
 
   // Reentrance guard
   private isGraphRunning = false
+  private starting = false
   private disposed = false
   // When dispose() is called mid-graph-run, defer heavy cleanup until the run completes
   private deferredCleanup = false
@@ -445,8 +451,10 @@ class EffectPipelineRunner<TRow extends object, TKey extends string | number> {
 
   /** Subscribe to source collections and start processing */
   start(): void {
+    this.starting = true
     if (this.collectionSources.length === 0) {
       // Nothing to subscribe to
+      this.starting = false
       return
     }
 
@@ -541,6 +549,14 @@ class EffectPipelineRunner<TRow extends object, TKey extends string | number> {
       // Store subscription immediately so the join compiler can find it
       this.subscriptions[sourceId] = subscription
 
+      // Own the subscription before any ordered snapshot or lazy demand can
+      // throw. A partially started effect has no handle for its caller to
+      // dispose, so start() must be able to release every acquired source.
+      this.unsubscribeCallbacks.add(() => {
+        subscription.unsubscribe()
+        delete this.subscriptions[sourceId]
+      })
+
       const lazyCallbacks = this.lazySourcesCallbacks[sourceId]
       if (lazyCallbacks) {
         lazyCallbacks.setDemand = (plan: LazyDemandPlan, keys: Set<unknown>) =>
@@ -557,11 +573,6 @@ class EffectPipelineRunner<TRow extends object, TKey extends string | number> {
       if (orderByInfo) {
         this.requestInitialOrderedSnapshot(alias, orderByInfo, subscription)
       }
-
-      this.unsubscribeCallbacks.add(() => {
-        subscription.unsubscribe()
-        delete this.subscriptions[sourceId]
-      })
 
       // Listen for status changes on source collections
       const statusUnsubscribe = collection.on(`status:change`, (event) => {
@@ -642,6 +653,7 @@ class EffectPipelineRunner<TRow extends object, TKey extends string | number> {
         this.initialLoadComplete = true
       }
     }
+    this.starting = false
   }
 
   /** Handle incoming changes from a source collection */
@@ -658,7 +670,17 @@ class EffectPipelineRunner<TRow extends object, TKey extends string | number> {
     plan: LazyDemandPlan,
     keys: Set<unknown>,
   ): void {
-    const update = this.demand.setDemand(subscription, plan, keys)
+    let update
+    try {
+      update = this.demand.setDemand(subscription, plan, keys)
+    } catch (error) {
+      // The subscription error event already reports adapter failures and
+      // disposes this effect. Do not let that query-local failure escape the
+      // source commit, but keep unrelated graph errors visible.
+      if (subscription.lastError !== error) throw error
+      if (this.starting) throw error
+      return
+    }
     if (update.ready instanceof Promise) {
       // Each segment reports its own failure through the subscription. Consume
       // the aggregate rejection so Promise.all does not create a second,

@@ -1539,6 +1539,146 @@ describe(`createEffect`, () => {
       await users.cleanup()
     })
 
+    it(`releases an ordered source when its initial subset load throws`, async () => {
+      const failure = new Error(`initial ordered subset failed`)
+      const users = createCollection<User>({
+        id: `effect-initial-ordered-subset-error`,
+        getKey: (user) => user.id,
+        syncMode: `on-demand`,
+        autoIndex: `eager`,
+        defaultIndexType: BTreeIndex,
+        sync: {
+          sync: ({ markReady }) => {
+            markReady()
+            return {
+              loadSubset: () => {
+                throw failure
+              },
+            }
+          },
+        },
+      })
+      const sourceErrors: Array<Error> = []
+
+      expect(() =>
+        createEffect({
+          query: (q) =>
+            q
+              .from({ user: users })
+              .orderBy(({ user }) => user.name, `asc`)
+              .limit(1),
+          onBatch: () => {},
+          onSourceError: (error) => sourceErrors.push(error),
+        }),
+      ).toThrow(failure)
+
+      expect(sourceErrors).toEqual([failure])
+      expect(users.subscriberCount).toBe(0)
+      await users.cleanup()
+    })
+
+    it(`releases every source when initial lazy demand throws`, async () => {
+      const failure = new Error(`initial lazy demand failed`)
+      const users = createUsersCollection([sampleUsers[0]!])
+      const issues = createCollection<Issue>({
+        id: `effect-initial-lazy-subset-error`,
+        getKey: (issue) => issue.id,
+        syncMode: `on-demand`,
+        sync: {
+          sync: ({ markReady }) => {
+            markReady()
+            return {
+              loadSubset: () => {
+                throw failure
+              },
+            }
+          },
+        },
+      })
+      const sourceErrors: Array<Error> = []
+
+      expect(() =>
+        createEffect({
+          query: (q) =>
+            q
+              .from({ user: users })
+              .leftJoin({ issue: issues }, ({ user, issue }) =>
+                eq(user.id, issue.userId),
+              )
+              .select(({ user, issue }) => ({
+                id: user.id,
+                issueId: issue.id,
+              })),
+          onBatch: () => {},
+          onSourceError: (error) => sourceErrors.push(error),
+        }),
+      ).toThrow(failure)
+
+      expect(sourceErrors).toEqual([failure])
+      expect(users.subscriberCount).toBe(0)
+      expect(issues.subscriberCount).toBe(0)
+      await Promise.all([users.cleanup(), issues.cleanup()])
+    })
+
+    it(`isolates synchronous lazy-demand failure from an established source commit`, async () => {
+      const failure = new Error(`incremental effect lazy demand failed`)
+      const users = createCollection(
+        mockSyncCollectionOptions<User>({
+          id: `incremental-effect-users`,
+          getKey: (user) => user.id,
+          initialData: [],
+        }),
+      )
+      const issues = createCollection<Issue>({
+        id: `incremental-effect-issues`,
+        getKey: (issue) => issue.id,
+        syncMode: `on-demand`,
+        sync: {
+          sync: ({ markReady }) => {
+            markReady()
+            return {
+              loadSubset: () => {
+                throw failure
+              },
+            }
+          },
+        },
+      })
+      const sourceErrors: Array<Error> = []
+      const effect = createEffect({
+        query: (q) =>
+          q
+            .from({ user: users })
+            .leftJoin({ issue: issues }, ({ user, issue }) =>
+              eq(user.id, issue.userId),
+            )
+            .select(({ user, issue }) => ({
+              id: user.id,
+              issueId: issue.id,
+            })),
+        onBatch: () => {},
+        onSourceError: (error) => sourceErrors.push(error),
+      })
+
+      try {
+        let commitError: unknown
+        try {
+          users.utils.begin()
+          users.utils.write({ type: `insert`, value: sampleUsers[0]! })
+          users.utils.commit()
+        } catch (error) {
+          commitError = error
+        }
+
+        expect(commitError).toBeUndefined()
+        expect(sourceErrors).toEqual([failure])
+        expect(effect.disposed).toBe(true)
+      } finally {
+        await effect.dispose()
+        await Promise.all([users.cleanup(), issues.cleanup()])
+      }
+    })
+
     it(`reports a rejected ordered subset load and disposes the effect`, async () => {
       const failure = new Error(`ordered subset failed`)
       let loadCount = 0
