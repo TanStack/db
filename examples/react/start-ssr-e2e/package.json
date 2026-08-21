@@ -10,7 +10,7 @@
     "test:e2e:hosted": "playwright test"
   },
   "dependencies": {
-    "@tanstack/react-db": "^0.3.1",
+    "@tanstack/react-db": "^0.3.2",
     "@tanstack/react-router": "^1.159.5",
     "@tanstack/react-router-with-db": "^0.1.0",
     "@tanstack/react-start": "^1.159.5",
