@@ -112,6 +112,8 @@ export class CollectionConfigBuilder<
 
   // Error state tracking
   private isInErrorState = false
+  private fatalQueryError = false
+  private readonly erroredSourceIds = new Set<string>()
 
   // Reference to the live query collection for error state transitions
   public liveQueryCollection?: Collection<TResult, any, any>
@@ -628,6 +630,8 @@ export class CollectionConfigBuilder<
     this.liveQueryCollection = config.collection
     // Reset error state from any previous sync session so a restarted sync can become ready again.
     this.isInErrorState = false
+    this.fatalQueryError = false
+    this.erroredSourceIds.clear()
     // Store config and syncState as instance properties for the duration of this sync session
     this.currentSyncConfig = config
 
@@ -686,6 +690,9 @@ export class CollectionConfigBuilder<
       this.currentSyncState = undefined
       this.maybeRunGraphFn = undefined
       this.currentWindow = undefined
+      this.isInErrorState = false
+      this.fatalQueryError = false
+      this.erroredSourceIds.clear()
 
       // Clear all pending graph runs to prevent memory leaks from in-flight transactions
       // that may flush after the sync session ends
@@ -947,6 +954,7 @@ export class CollectionConfigBuilder<
    */
   private handleSourceStatusChange(
     config: SyncMethods<TResult>,
+    sourceId: string,
     collectionId: string,
     event: AllCollectionEvents[`status:change`],
   ) {
@@ -954,7 +962,8 @@ export class CollectionConfigBuilder<
 
     // Handle error state - any source collection in error puts live query in error
     if (status === `error`) {
-      this.transitionToError(
+      this.erroredSourceIds.add(sourceId)
+      this.setErrorState(
         `Source collection '${collectionId}' entered error state`,
       )
       return
@@ -968,6 +977,18 @@ export class CollectionConfigBuilder<
           `Live queries prevent automatic GC, so this was likely a manual cleanup() call.`,
       )
       return
+    }
+
+    if (status === `ready`) {
+      const recovered = this.erroredSourceIds.delete(sourceId)
+      if (
+        recovered &&
+        !this.fatalQueryError &&
+        this.erroredSourceIds.size === 0
+      ) {
+        this.isInErrorState = false
+        this.maybeRunGraphFn?.()
+      }
     }
 
     // Update ready status based on all source collections
@@ -1007,6 +1028,11 @@ export class CollectionConfigBuilder<
    * Transition the live query to error state
    */
   private transitionToError(message: string) {
+    this.fatalQueryError = true
+    this.setErrorState(message)
+  }
+
+  private setErrorState(message: string) {
     this.isInErrorState = true
 
     // Log error to console for debugging
@@ -1065,9 +1091,21 @@ export class CollectionConfigBuilder<
 
       // Subscribe to status changes for status flow
       const statusUnsubscribe = collection.on(`status:change`, (event) => {
-        this.handleSourceStatusChange(config, collectionId, event)
+        this.handleSourceStatusChange(config, sourceId, collectionId, event)
       })
       syncState.unsubscribeCallbacks.add(statusUnsubscribe)
+
+      // The source may have failed before this live query subscribed. Register
+      // the listener first, then reconcile that current state so no transition
+      // can be missed between observation and subscription.
+      if (collection.status === `error`) {
+        this.handleSourceStatusChange(config, sourceId, collectionId, {
+          type: `status:change`,
+          collection,
+          status: `error`,
+          previousStatus: `error`,
+        })
+      }
 
       const subscription = collectionSubscriber.subscribe()
       this.subscriptions[sourceId] = subscription

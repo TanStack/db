@@ -59,6 +59,7 @@ export class CollectionSyncManager<
   private syncStartDeferred = false
   private syncStartRequested = false
   private deferredLoadSubsets: Array<DeferredLoadSubset> = []
+  private syncEpoch = 0
 
   /**
    * Creates a new CollectionSyncManager instance
@@ -103,6 +104,8 @@ export class CollectionSyncManager<
       return
     }
 
+    const syncEpoch = ++this.syncEpoch
+    const isCurrentSync = () => syncEpoch === this.syncEpoch
     this.lifecycle.setStatus(`loading`)
 
     try {
@@ -110,6 +113,7 @@ export class CollectionSyncManager<
         this.config.sync.sync({
           collection: this.collection,
           begin: (options?: { immediate?: boolean }) => {
+            if (!isCurrentSync()) return
             this.state.pendingSyncedTransactions.push({
               committed: false,
               layoutChanged: false,
@@ -126,6 +130,7 @@ export class CollectionSyncManager<
               TKey
             >,
           ) => {
+            if (!isCurrentSync()) return
             const pendingTransaction =
               this.state.pendingSyncedTransactions[
                 this.state.pendingSyncedTransactions.length - 1
@@ -215,6 +220,7 @@ export class CollectionSyncManager<
             }
           },
           commit: () => {
+            if (!isCurrentSync()) return
             const pendingTransaction =
               this.state.pendingSyncedTransactions[
                 this.state.pendingSyncedTransactions.length - 1
@@ -231,9 +237,13 @@ export class CollectionSyncManager<
             this.state.commitPendingTransactions()
           },
           markReady: () => {
-            this.lifecycle.markReady()
+            if (isCurrentSync()) this.lifecycle.markReady()
+          },
+          markError: (error?: unknown) => {
+            if (isCurrentSync()) this.lifecycle.markError(error)
           },
           truncate: () => {
+            if (!isCurrentSync()) return
             const pendingTransaction =
               this.state.pendingSyncedTransactions[
                 this.state.pendingSyncedTransactions.length - 1
@@ -268,7 +278,7 @@ export class CollectionSyncManager<
               deletes: new Set(this.state.optimisticDeletes),
             }
           },
-          metadata: this.createSyncMetadataApi(),
+          metadata: this.createSyncMetadataApi(isCurrentSync),
         }),
       )
 
@@ -289,7 +299,7 @@ export class CollectionSyncManager<
         )
       }
     } catch (error) {
-      this.lifecycle.setStatus(`error`)
+      this.lifecycle.markError(error)
       throw error
     }
   }
@@ -362,10 +372,13 @@ export class CollectionSyncManager<
     return pendingTransaction
   }
 
-  private createSyncMetadataApi(): SyncMetadataApi<TKey> {
+  private createSyncMetadataApi(
+    isCurrentSync: () => boolean,
+  ): SyncMetadataApi<TKey> {
     return {
       row: {
         get: (key) => {
+          if (!isCurrentSync()) return undefined
           const pendingTransaction =
             this.state.pendingSyncedTransactions[
               this.state.pendingSyncedTransactions.length - 1
@@ -382,6 +395,7 @@ export class CollectionSyncManager<
           return this.state.syncedMetadata.get(key)
         },
         set: (key, metadata) => {
+          if (!isCurrentSync()) return
           const pendingTransaction = this.getActivePendingSyncTransaction()
           pendingTransaction.rowMetadataWrites.set(key, {
             type: `set`,
@@ -389,6 +403,7 @@ export class CollectionSyncManager<
           })
         },
         delete: (key) => {
+          if (!isCurrentSync()) return
           const pendingTransaction = this.getActivePendingSyncTransaction()
           pendingTransaction.rowMetadataWrites.set(key, {
             type: `delete`,
@@ -397,6 +412,7 @@ export class CollectionSyncManager<
       },
       collection: {
         get: (key) => {
+          if (!isCurrentSync()) return undefined
           const pendingTransaction =
             this.state.pendingSyncedTransactions[
               this.state.pendingSyncedTransactions.length - 1
@@ -411,6 +427,7 @@ export class CollectionSyncManager<
           return this.state.syncedCollectionMetadata.get(key)
         },
         set: (key, value) => {
+          if (!isCurrentSync()) return
           const pendingTransaction = this.getActivePendingSyncTransaction()
           pendingTransaction.collectionMetadataWrites.set(key, {
             type: `set`,
@@ -418,12 +435,14 @@ export class CollectionSyncManager<
           })
         },
         delete: (key) => {
+          if (!isCurrentSync()) return
           const pendingTransaction = this.getActivePendingSyncTransaction()
           pendingTransaction.collectionMetadataWrites.set(key, {
             type: `delete`,
           })
         },
         list: (prefix) => {
+          if (!isCurrentSync()) return []
           const merged = new Map(this.state.syncedCollectionMetadata)
           const pendingTransaction =
             this.state.pendingSyncedTransactions[
@@ -472,20 +491,43 @@ export class CollectionSyncManager<
       )
     }
 
-    this.preloadPromise = new Promise<void>((resolve, reject) => {
+    const attempt = new Promise<void>((resolve, reject) => {
       if (this.lifecycle.status === `ready`) {
         resolve()
         return
       }
 
       if (this.lifecycle.status === `error`) {
-        reject(new CollectionIsInErrorStateError())
+        reject(this.getPreloadError())
         return
       }
 
-      // Register callback BEFORE starting sync to avoid race condition
-      this.lifecycle.onFirstReady(() => {
+      let settled = false
+      let startingSync = false
+      let unsubscribeError = () => {}
+      let unsubscribeReady = () => {}
+      const resolveReady = () => {
+        if (settled) return
+        settled = true
+        unsubscribeError()
+        unsubscribeReady()
         resolve()
+      }
+      const rejectError = (error: unknown) => {
+        if (settled) return
+        settled = true
+        unsubscribeError()
+        unsubscribeReady()
+        reject(error)
+      }
+
+      // Register callback BEFORE starting sync to avoid race condition
+      unsubscribeReady = this.lifecycle.onFirstReady(resolveReady)
+      unsubscribeError = this.collection.on(`status:error`, () => {
+        if (startingSync) {
+          return
+        }
+        rejectError(this.getPreloadError())
       })
 
       // Start sync if collection hasn't started yet or was cleaned up
@@ -493,16 +535,35 @@ export class CollectionSyncManager<
         this.lifecycle.status === `idle` ||
         this.lifecycle.status === `cleaned-up`
       ) {
+        startingSync = true
         try {
           this.startSync()
         } catch (error) {
-          reject(error)
+          rejectError(error)
           return
+        } finally {
+          startingSync = false
+        }
+        if (this.collection.status === `error`) {
+          rejectError(this.getPreloadError())
         }
       }
     })
 
-    return this.preloadPromise
+    this.preloadPromise = attempt
+    void attempt.then(undefined, () => {
+      if (this.preloadPromise === attempt) {
+        this.preloadPromise = null
+      }
+    })
+    return attempt
+  }
+
+  private getPreloadError(): unknown {
+    const syncError = this.lifecycle.getSyncError()
+    return syncError === undefined
+      ? new CollectionIsInErrorStateError()
+      : syncError
   }
 
   /**
@@ -620,6 +681,9 @@ export class CollectionSyncManager<
   }
 
   public cleanup(): void {
+    // Invalidate callbacks retained by asynchronous work from this session
+    // before invoking adapter cleanup or allowing a new session to start.
+    this.syncEpoch++
     try {
       if (this.syncCleanupFn) {
         this.syncCleanupFn()
@@ -640,6 +704,8 @@ export class CollectionSyncManager<
       })
     }
     this.preloadPromise = null
+    this.syncLoadSubsetFn = null
+    this.syncUnloadSubsetFn = null
     this.syncStartDeferred = false
     this.syncStartRequested = false
     const deferredLoadSubsets = this.deferredLoadSubsets

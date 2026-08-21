@@ -344,7 +344,13 @@ export interface SyncConfig<
     begin: (options?: { immediate?: boolean }) => void
     write: (message: ChangeMessageOrDeleteKeyMessage<T, TKey>) => void
     commit: () => void
+    /** Signal that a usable initial or recovered snapshot is available. */
     markReady: () => void
+    /**
+     * Signal that initial sync failed before producing a usable snapshot.
+     * When supplied, `error` is preserved as the rejection reason from `preload()`.
+     */
+    markError: (error?: unknown) => void
     truncate: () => void
     metadata?: SyncMetadataApi<TKey>
   }) => void | CleanupFn | SyncConfigRes
@@ -524,7 +530,8 @@ export type DeleteMutationFn<
  * @example
  * // Status transitions
  * // idle → loading → ready (when markReady() is called)
- * // Any status can transition to → error or cleaned-up
+ * // Any active status can transition to → error or cleaned-up
+ * // error → ready after a successful sync recovery
  */
 export type CollectionStatus =
   /** Collection is created but sync hasn't started yet (when startSync config is false) */

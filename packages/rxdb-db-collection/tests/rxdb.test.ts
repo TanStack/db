@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 import { createCollection } from '@tanstack/db'
 import {
   addRxPlugin,
@@ -103,6 +103,37 @@ describe(`RxDB Integration`, () => {
   }
 
   describe(`sync`, () => {
+    it(`reports an initial storage query failure`, async () => {
+      const db = await getDatababase()
+      const rxCollection: RxCollection<TestDocType> = db.test
+      const initialError = new Error(`initial RxDB query failed`)
+      const query = vi
+        .spyOn(rxCollection.storageInstance, `query`)
+        .mockRejectedValueOnce(initialError)
+      const collection = createCollection(
+        rxdbCollectionOptions({
+          rxCollection,
+          startSync: true,
+          syncBatchSize: 10,
+        }),
+      )
+
+      try {
+        await expect(collection.preload()).rejects.toBe(initialError)
+        expect(collection.status).toBe(`error`)
+        expect(OPEN_RXDB_SUBSCRIPTIONS.get(rxCollection)?.size ?? 0).toBe(0)
+
+        await rxCollection.insert({ id: `after-failure`, name: `failed` })
+        await flushPromises()
+        expect(OPEN_RXDB_SUBSCRIPTIONS.get(rxCollection)?.size ?? 0).toBe(0)
+        expect(collection.has(`after-failure`)).toBe(false)
+      } finally {
+        query.mockRestore()
+        await collection.cleanup()
+        await db.remove()
+      }
+    })
+
     it(`should initialize and fetch initial data`, async () => {
       const initialItems = getTestData(2)
 

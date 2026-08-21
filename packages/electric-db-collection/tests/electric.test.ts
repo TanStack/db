@@ -190,6 +190,24 @@ describe(`Electric Integration`, () => {
     expect(collection.status).toEqual(`ready`)
   })
 
+  it(`reports an initial stream error instead of publishing an empty ready snapshot`, async () => {
+    const loggedError = vi.spyOn(console, `error`).mockImplementation(() => {})
+    const preload = collection.preload()
+    const streamOptions = vi.mocked(ShapeStream).mock.calls.at(-1)?.[0] as
+      | { onError?: (error: unknown) => void }
+      | undefined
+    const initialError = new Error(`initial stream failed`)
+
+    try {
+      streamOptions?.onError?.(initialError)
+
+      expect(collection.status).toBe(`error`)
+      await expect(preload).rejects.toBe(initialError)
+    } finally {
+      loggedError.mockRestore()
+    }
+  })
+
   it(`should handle incoming insert messages and commit on up-to-date`, () => {
     // Simulate incoming insert message
     subscriber([

@@ -2,7 +2,7 @@
 name: db-core/custom-adapter
 description: >
   Building custom collection adapters for new backends. SyncConfig interface:
-  sync function receiving begin, write, commit, markReady, truncate, metadata
+  sync function receiving begin, write, commit, markReady, markError, truncate, metadata
   primitives and returning cleanup, loadSubset, and optional unloadSubset
   handlers.
   ChangeMessage format (insert, update, delete). On-demand LoadSubsetOptions
@@ -48,9 +48,10 @@ function myBackendCollectionOptions<T extends object>(config: {
   return {
     getKey: config.getKey,
     sync: {
-      sync: ({ begin, write, commit, markReady }) => {
+      sync: ({ begin, write, commit, markReady, markError, collection }) => {
         let isInitialSyncComplete = false
         const bufferedEvents: Array<BackendEvent<T>> = []
+        const initialSyncAbort = new AbortController()
 
         // 1. Subscribe to real-time events FIRST
         const unsubscribe = myWebSocket.subscribe(config.endpoint, (event) => {
@@ -64,28 +65,37 @@ function myBackendCollectionOptions<T extends object>(config: {
         })
 
         // 2. Fetch initial data
-        fetch(config.endpoint).then(async (res) => {
-          const items = await res.json()
-          begin()
-          for (const item of items) {
-            write({ type: 'insert', value: item })
-          }
-          commit()
-
-          // 3. Process buffered events
-          isInitialSyncComplete = true
-          for (const event of bufferedEvents) {
+        void fetch(config.endpoint, { signal: initialSyncAbort.signal })
+          .then(async (res) => {
+            const items = await res.json()
             begin()
-            write({ type: event.type, key: event.id, value: event.data })
+            for (const item of items) {
+              write({ type: 'insert', value: item })
+            }
             commit()
-          }
 
-          // 4. Signal readiness
-          markReady()
-        })
+            // 3. Process buffered events
+            isInitialSyncComplete = true
+            for (const event of bufferedEvents) {
+              begin()
+              write({ type: event.type, key: event.id, value: event.data })
+              commit()
+            }
+
+            // 4. Signal that a usable snapshot exists
+            markReady()
+          })
+          .catch((error) => {
+            if (initialSyncAbort.signal.aborted) return
+            console.error('Initial sync failed:', error)
+            // Only initial startup owns collection readiness. A later refetch
+            // failure must keep the last ready snapshot usable.
+            if (collection.status === 'loading') markError(error)
+          })
 
         // 5. Return cleanup function
         return () => {
+          initialSyncAbort.abort()
           unsubscribe()
         }
       },
@@ -210,7 +220,7 @@ Without persistence the metadata is in-memory only and does not survive
 reloads. With persistence, it is durable across sessions.
 
 ```ts
-sync: ({ begin, write, commit, markReady, metadata }) => {
+sync: ({ begin, write, commit, markReady, markError, metadata }) => {
   if (!metadata) throw new Error('Sync metadata API is unavailable')
 
   // Row metadata: store per-row state (e.g. server version, ETag)
@@ -254,6 +264,7 @@ sync: ({ begin, write, commit, markReady, metadata }) => {
   })
 
   stream.on('ready', () => markReady())
+  stream.on('initial-error', (error) => markError(error))
   return () => stream.close()
 }
 ```
@@ -321,6 +332,12 @@ sync: ({ begin, write, commit, markReady }) => {
 ```
 
 `markReady()` transitions the collection to "ready" status. Without it, live queries never resolve and `useLiveSuspenseQuery` hangs forever in Suspense.
+
+If initial sync fails before it produces a usable snapshot, call
+`markError(error)` instead. This rejects readiness waits with the supplied cause
+and moves dependent live queries to the error state. Calling `markError()`
+without a cause remains supported and rejects with a generic collection-state
+error. A later successful sync can call `markReady()` to recover.
 
 Source: docs/guides/collection-options-creator.md
 

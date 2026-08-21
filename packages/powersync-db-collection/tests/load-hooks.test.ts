@@ -75,6 +75,22 @@ describe(`Sync Streams`, () => {
     expect(onUnloadMock).toHaveBeenCalledOnce()
   })
 
+  it(`eager mode: reports an initial load failure`, async () => {
+    const db = await createDatabase()
+    const initialError = new Error(`initial PowerSync load failed`)
+    const collection = createCollection(
+      powerSyncCollectionOptions({
+        database: db,
+        table: APP_SCHEMA.props.products,
+        onLoad: () => Promise.reject(initialError),
+      }),
+    )
+    onTestFinished(() => collection.cleanup())
+
+    await expect(collection.preload()).rejects.toBe(initialError)
+    expect(collection.status).toBe(`error`)
+  })
+
   it(`on-demand mode: should call onLoadSubset/onUnloadSubset for each live query`, async () => {
     const db = await createDatabase()
     await createTestProducts(db)

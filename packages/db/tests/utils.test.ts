@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest'
 import { Temporal } from 'temporal-polyfill'
 import { deepEquals } from '../src/utils'
 import { isPromiseLike } from '../src/utils/type-guards'
-import { oracleRandomParameters, readOracleRunConfig } from './utils'
+import { oracleRandomParameters, readOracleRunConfig } from './oracle-config'
 
 describe(`oracle run configuration`, () => {
   it(`reads the multiplier and replay seed from an explicit environment`, () => {
@@ -24,7 +24,9 @@ describe(`oracle run configuration`, () => {
   it.each([
     [{ TANSTACK_DB_ORACLE_RUNS_MULTIPLIER: `0` }, `positive integer`],
     [{ TANSTACK_DB_ORACLE_RUNS_MULTIPLIER: `1.5` }, `positive integer`],
+    [{ TANSTACK_DB_ORACLE_RUNS_MULTIPLIER: ` ` }, `positive integer`],
     [{ TANSTACK_DB_ORACLE_SEED: `1.5` }, `must be an integer`],
+    [{ TANSTACK_DB_ORACLE_SEED: ` ` }, `must be an integer`],
   ] satisfies ReadonlyArray<readonly [Record<string, string>, string]>)(
     `rejects invalid environment values`,
     (environment, message) => {

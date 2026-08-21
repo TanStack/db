@@ -464,7 +464,7 @@ export class CollectionImpl<
    *   // Safe to access collection.state now
    * })
    */
-  public onFirstReady(callback: () => void): void {
+  public onFirstReady(callback: () => void): () => void {
     return this._lifecycle.onFirstReady(callback)
   }
 

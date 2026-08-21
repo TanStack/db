@@ -4710,9 +4710,9 @@ describe(`QueryCollection`, () => {
       const options = queryCollectionOptions(config)
       const collection = createCollection(options)
 
-      // Wait for collection to be ready (even with error)
+      // No initial snapshot exists, so the collection reports an error.
       await vi.waitFor(() => {
-        expect(collection.status).toBe(`ready`)
+        expect(collection.status).toBe(`error`)
         expect(collection.utils.isError).toBe(true)
       })
 
@@ -4736,9 +4736,9 @@ describe(`QueryCollection`, () => {
         queryFn,
       )
 
-      // Wait for collection to be ready (even with error)
+      // No initial snapshot exists, so the collection reports an error.
       await vi.waitFor(() => {
-        expect(collection.status).toBe(`ready`)
+        expect(collection.status).toBe(`error`)
         expect(collection.utils.isError).toBe(true)
       })
 
@@ -4782,7 +4782,7 @@ describe(`QueryCollection`, () => {
       // Wait for all retry attempts to complete and final failure
       await vi.waitFor(
         () => {
-          expect(collection.status).toBe(`ready`) // Should be ready even with error
+          expect(collection.status).toBe(`error`)
           expect(queryFn).toHaveBeenCalledTimes(totalAttempts)
           expect(collection.utils.isError).toBe(true)
         },

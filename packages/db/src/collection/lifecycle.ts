@@ -36,6 +36,7 @@ export class CollectionLifecycleManager<
   public hasReceivedFirstCommit = false
   public onFirstReadyCallbacks: Array<() => void> = []
   private idleCallbackId: number | null = null
+  private syncError: unknown
 
   /**
    * Creates a new CollectionLifecycleManager instance
@@ -77,7 +78,7 @@ export class CollectionLifecycleManager<
       idle: [`loading`, `error`, `cleaned-up`],
       loading: [`ready`, `error`, `cleaned-up`],
       ready: [`cleaned-up`, `error`],
-      error: [`cleaned-up`, `idle`],
+      error: [`ready`, `cleaned-up`, `idle`],
       'cleaned-up': [`loading`, `error`],
     }
 
@@ -133,8 +134,9 @@ export class CollectionLifecycleManager<
    */
   public markReady(): void {
     this.validateStatusTransition(this.status, `ready`)
-    // Can transition to ready from loading state
-    if (this.status === `loading`) {
+    // A successful initial sync or recovery establishes a ready snapshot.
+    if (this.status === `loading` || this.status === `error`) {
+      this.syncError = undefined
       this.setStatus(`ready`, true)
 
       // Call any registered first ready callbacks (only on first time becoming ready)
@@ -156,6 +158,18 @@ export class CollectionLifecycleManager<
         this.changes.emitEmptyReadyEvent()
       }
     }
+  }
+
+  /** Mark an asynchronous sync failure after sync has started. */
+  public markError(error?: unknown): void {
+    this.validateStatusTransition(this.status, `error`)
+    this.syncError = error
+    this.setStatus(`error`)
+  }
+
+  /** Return the cause supplied by the current sync session, if any. */
+  public getSyncError(): unknown {
+    return this.syncError
   }
 
   /**
@@ -243,6 +257,7 @@ export class CollectionLifecycleManager<
       CleanupQueue.getInstance().cancel(this)
 
       this.hasBeenReady = false
+      this.syncError = undefined
 
       // Call any pending onFirstReady callbacks before clearing them.
       // This ensures preload() promises resolve during cleanup instead of hanging.
@@ -282,14 +297,20 @@ export class CollectionLifecycleManager<
    * Useful for preloading collections
    * @param callback Function to call when the collection first becomes ready
    */
-  public onFirstReady(callback: () => void): void {
+  public onFirstReady(callback: () => void): () => void {
     // If already ready, call immediately
     if (this.hasBeenReady) {
       callback()
-      return
+      return () => {}
     }
 
     this.onFirstReadyCallbacks.push(callback)
+    return () => {
+      const index = this.onFirstReadyCallbacks.indexOf(callback)
+      if (index !== -1) {
+        this.onFirstReadyCallbacks.splice(index, 1)
+      }
+    }
   }
 
   public cleanup(): void {
