@@ -98,17 +98,15 @@ function getUnsupportedFnSelectResultDescription(
     return undefined
   }
 
-  const prototype = Object.getPrototypeOf(value)
-  if (
-    !Array.isArray(value) &&
-    prototype !== Object.prototype &&
-    prototype !== null
-  ) {
-    return undefined
-  }
-
   seen.add(value)
-  for (const entry of Object.values(value)) {
+  const keys = [
+    ...Object.keys(value),
+    ...Object.getOwnPropertySymbols(value).filter((key) =>
+      Object.prototype.propertyIsEnumerable.call(value, key),
+    ),
+  ]
+  for (const key of keys) {
+    const entry = (value as Record<PropertyKey, unknown>)[key]
     const unsupported = getUnsupportedFnSelectResultDescription(entry, seen)
     if (unsupported) return unsupported
   }

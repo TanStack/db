@@ -285,6 +285,40 @@ describe(`Functional Variants Query`, () => {
         }),
       ).toThrow(`fn.select() cannot return a child query builder`)
 
+      class Wrapper {
+        constructor(readonly departments: unknown) {}
+      }
+
+      expect(() =>
+        createLiveQueryCollection({
+          startSync: true,
+          query: (q) =>
+            q
+              .from({ user: usersCollection })
+              .fn.select(
+                () =>
+                  new Wrapper(
+                    q.from({ department: departmentsCollection }),
+                  ) as any,
+              ),
+        }),
+      ).toThrow(`fn.select() cannot return a child query builder`)
+
+      const departments = Symbol(`departments`)
+      expect(() =>
+        createLiveQueryCollection({
+          startSync: true,
+          query: (q) =>
+            q.from({ user: usersCollection }).fn.select(
+              (row) =>
+                ({
+                  id: row.user.id,
+                  [departments]: q.from({ department: departmentsCollection }),
+                }) as any,
+            ),
+        }),
+      ).toThrow(`fn.select() cannot return a child query builder`)
+
       expect(() =>
         createLiveQueryCollection({
           startSync: true,
