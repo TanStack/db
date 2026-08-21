@@ -858,6 +858,77 @@ describe(`Collection-valued includes oracle`, () => {
   )
 
   fcTest(
+    `fn.select rejects query values returned during include rematerialization`,
+    async () => {
+      const messages = createControlledCollection(`fn-select-reject-messages`, [
+        { id: 1, group: 1 },
+      ])
+      const tools = createControlledCollection(`fn-select-reject-tools`, [
+        { id: 2, group: 2 },
+      ])
+      const children = createControlledCollection(`fn-select-reject-children`, [
+        { id: 10, parentGroup: 1, value: 1 },
+      ])
+      const live = createLiveQueryCollection((q) => {
+        const messageRows = q
+          .from({ message: messages.collection })
+          .select(({ message }) => ({
+            kind: `message` as const,
+            id: message.id,
+            children: toArray(
+              q
+                .from({ messageChild: children.collection })
+                .where(({ messageChild }) =>
+                  eq(messageChild.parentGroup, message.group),
+                ),
+            ),
+          }))
+        const toolRows = q
+          .from({ tool: tools.collection })
+          .select(({ tool }) => ({
+            kind: `tool` as const,
+            id: tool.id,
+          }))
+
+        return q.unionAll(messageRows, toolRows).fn.select((row) => {
+          const includedChildren =
+            row.kind === `message`
+              ? (row.children as typeof row.children | null)
+              : null
+
+          return {
+            kind: row.kind,
+            id: row.id,
+            leakedQuery:
+              includedChildren?.[0]?.value === 2
+                ? q.from({ child: children.collection })
+                : null,
+          } as any
+        })
+      })
+
+      try {
+        await live.preload()
+
+        expect(() =>
+          children.write(`update`, {
+            id: 10,
+            parentGroup: 1,
+            value: 2,
+          }),
+        ).toThrow(`fn.select() cannot return a child query builder`)
+      } finally {
+        await Promise.all([
+          live.cleanup(),
+          messages.collection.cleanup(),
+          tools.collection.cleanup(),
+          children.collection.cleanup(),
+        ])
+      }
+    },
+  )
+
+  fcTest(
     `rejects collapsed contributors that disagree by value, order, or outgoing route`,
     async () => {
       type CommentRow = {
