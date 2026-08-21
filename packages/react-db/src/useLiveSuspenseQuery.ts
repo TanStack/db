@@ -3,7 +3,7 @@
 import { useRef } from 'react'
 import { useLiveQuery } from './useLiveQuery'
 import { getLiveQueryResultInfo } from './live-query-internals'
-import type { UseLiveQueryConfig } from './useLiveQuery'
+import type { EnabledUseLiveQueryConfig } from './useLiveQuery'
 import type {
   Collection,
   Context,
@@ -118,7 +118,7 @@ export function useLiveSuspenseQuery<TContext extends Context>(
 
 // Overload 2: Accept config object
 export function useLiveSuspenseQuery<TContext extends Context>(
-  config: UseLiveQueryConfig<TContext>,
+  config: EnabledUseLiveQueryConfig<TContext>,
 ): {
   state: Map<string | number, GetResult<TContext>>
   data: InferResultType<TContext>

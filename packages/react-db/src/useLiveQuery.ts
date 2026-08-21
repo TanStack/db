@@ -48,16 +48,36 @@ export type DerivedIdentityProfiler = {
 
 export type UseLiveQueryStatus = CollectionStatus | `disabled`
 export type LiveQueryKey = ReadonlyArray<unknown>
+type UseLiveQueryConfigOptions<TContext extends Context> = Omit<
+  LiveQueryCollectionConfig<TContext>,
+  `query`
+> & {
+  /**
+   * Explicit identity for queries that contain opaque functional variants or
+   * are hot enough that deriving identity from structured IR is too expensive.
+   * Structured queries should omit this so DB can derive identity directly.
+   */
+  queryKey?: LiveQueryKey
+  /** Override the nearest DbProvider for this query. */
+  client?: DbClient
+}
+
+type ConfiguredQueryBuilder<TContext extends Context> = Extract<
+  LiveQueryCollectionConfig<TContext>[`query`],
+  QueryBuilder<TContext>
+>
+
+export type EnabledUseLiveQueryConfig<TContext extends Context> =
+  UseLiveQueryConfigOptions<TContext> &
+    Pick<LiveQueryCollectionConfig<TContext>, `query`>
+
 export type UseLiveQueryConfig<TContext extends Context> =
-  LiveQueryCollectionConfig<TContext> & {
-    /**
-     * Explicit identity for queries that contain opaque functional variants or
-     * are hot enough that deriving identity from structured IR is too expensive.
-     * Structured queries should omit this so DB can derive identity directly.
-     */
-    queryKey?: LiveQueryKey
-    /** Override the nearest DbProvider for this query. */
-    client?: DbClient
+  UseLiveQueryConfigOptions<TContext> & {
+    query:
+      | ConfiguredQueryBuilder<TContext>
+      | ((
+          q: InitialQueryBuilder,
+        ) => ConfiguredQueryBuilder<TContext> | undefined | null)
   }
 
 export function warnDeprecatedDepsArray(
@@ -297,6 +317,16 @@ function createCollectionFromPreparedQuery(value: unknown) {
  * })
  *
  * @example
+ * // Return undefined or null to disable a query
+ * const { data, isEnabled } = useLiveQuery({
+ *   query: (q) => {
+ *     if (!userId) return undefined
+ *     return q.from({ todos: todosCollection })
+ *             .where(({ todos }) => eq(todos.userId, userId))
+ *   },
+ * })
+ *
+ * @example
  * // Join pattern
  * const { data } = useLiveQuery({
  *   query: (q) =>
@@ -476,21 +506,37 @@ export function useLiveQuery<
  */
 // Overload 6: Accept config object
 export function useLiveQuery<TContext extends Context>(
-  config: UseLiveQueryConfig<TContext>,
+  config: EnabledUseLiveQueryConfig<TContext>,
 ): {
   state: Map<string | number, GetResult<TContext>>
   data: InferResultType<TContext>
   collection: Collection<GetResult<TContext>, string | number, {}>
-  status: CollectionStatus // Can't be disabled for config objects
+  status: CollectionStatus // Can't be disabled when query always returns a builder
   isLoading: boolean
   isReady: boolean
   isIdle: boolean
   isError: boolean
   isCleanedUp: boolean
-  isEnabled: true // Always true for config objects
+  isEnabled: true // Always true when query always returns a builder
 }
 
-// Overload 7: Accept config object with legacy deps
+// Overload 7: Accept config object with a query that can return undefined/null
+export function useLiveQuery<TContext extends Context>(
+  config: UseLiveQueryConfig<TContext>,
+): {
+  state: Map<string | number, GetResult<TContext>> | undefined
+  data: InferResultType<TContext> | undefined
+  collection: Collection<GetResult<TContext>, string | number, {}> | undefined
+  status: UseLiveQueryStatus
+  isLoading: boolean
+  isReady: boolean
+  isIdle: boolean
+  isError: boolean
+  isCleanedUp: boolean
+  isEnabled: boolean
+}
+
+// Overload 8: Accept config object with legacy deps
 export function useLiveQuery<TContext extends Context>(
   config: LiveQueryCollectionConfig<TContext>,
   deps?: Array<unknown>,
@@ -498,13 +544,13 @@ export function useLiveQuery<TContext extends Context>(
   state: Map<string | number, GetResult<TContext>>
   data: InferResultType<TContext>
   collection: Collection<GetResult<TContext>, string | number, {}>
-  status: CollectionStatus // Can't be disabled for config objects
+  status: CollectionStatus // Can't be disabled when query always returns a builder
   isLoading: boolean
   isReady: boolean
   isIdle: boolean
   isError: boolean
   isCleanedUp: boolean
-  isEnabled: true // Always true for config objects
+  isEnabled: true // Always true when query always returns a builder
 }
 
 /**
@@ -536,7 +582,7 @@ export function useLiveQuery<TContext extends Context>(
  *
  * return <div>{data.map(item => <Item key={item.id} {...item} />)}</div>
  */
-// Overload 8: Accept pre-created live query collection
+// Overload 9: Accept pre-created live query collection
 export function useLiveQuery<
   TResult extends object,
   TKey extends string | number,
@@ -556,7 +602,7 @@ export function useLiveQuery<
   isEnabled: true // Always true for pre-created live query collections
 }
 
-// Overload 9: Accept pre-created live query collection with singleResult: true
+// Overload 10: Accept pre-created live query collection with singleResult: true
 export function useLiveQuery<
   TResult extends object,
   TKey extends string | number,

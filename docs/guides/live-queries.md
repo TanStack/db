@@ -454,11 +454,26 @@ function TodoList({ userId }: { userId: string }) {
 }
 ```
 
-The callback form can also return `undefined` or `null` to disable a query. This still uses derived identity, so captured structured values do not need a dependency array. When the query is disabled:
+The `query` callback can return `undefined` or `null` to disable a query. This still uses derived identity, so captured structured values do not need a dependency array:
+
+```tsx
+const { data, isEnabled, status } = useLiveQuery({
+  query: (q) => {
+    if (!userId) return undefined
+
+    return q
+      .from({ todos: todosCollection })
+      .where(({ todos }) => eq(todos.userId, userId))
+  },
+})
+```
+
+The top-level callback form supports the same behavior. When the query is disabled:
 - `status` is `'disabled'`
 - `data`, `state`, and `collection` are `undefined`
 - `isEnabled` is `false`
-- `isLoading`, `isReady`, `isIdle`, and `isError` are all `false`
+- `isReady` is `true`
+- `isLoading`, `isIdle`, `isError`, and `isCleanedUp` are all `false`
 
 ### Alternative Input Forms
 
