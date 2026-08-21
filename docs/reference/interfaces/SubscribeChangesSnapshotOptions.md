@@ -5,7 +5,7 @@ title: SubscribeChangesSnapshotOptions
 
 # Interface: SubscribeChangesSnapshotOptions\<T, TKey\>
 
-Defined in: [packages/db/src/types.ts:891](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L891)
+Defined in: [packages/db/src/types.ts:898](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L898)
 
 ## Extends
 
@@ -29,7 +29,7 @@ Defined in: [packages/db/src/types.ts:891](https://github.com/TanStack/db/blob/m
 optional limit: number;
 ```
 
-Defined in: [packages/db/src/types.ts:896](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L896)
+Defined in: [packages/db/src/types.ts:903](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L903)
 
 **`Internal`**
 
@@ -47,7 +47,7 @@ Optional limit to include in loadSubset for query-specific cache keys.
 optional onLoadSubsetResult: (result) => void;
 ```
 
-Defined in: [packages/db/src/types.ts:888](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L888)
+Defined in: [packages/db/src/types.ts:895](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L895)
 
 **`Internal`**
 
@@ -78,7 +78,7 @@ Omit.onLoadSubsetResult
 optional onStatusChange: (event) => void;
 ```
 
-Defined in: [packages/db/src/types.ts:872](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L872)
+Defined in: [packages/db/src/types.ts:879](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L879)
 
 **`Internal`**
 
@@ -109,7 +109,7 @@ Omit.onStatusChange
 optional orderBy: OrderBy;
 ```
 
-Defined in: [packages/db/src/types.ts:895](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L895)
+Defined in: [packages/db/src/types.ts:902](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L902)
 
 **`Internal`**
 
@@ -127,7 +127,7 @@ Optional orderBy to include in loadSubset for query-specific cache keys.
 optional where: (row) => any;
 ```
 
-Defined in: [packages/db/src/types.ts:864](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L864)
+Defined in: [packages/db/src/types.ts:871](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L871)
 
 Callback function for filtering changes using a row proxy.
 The callback receives a proxy object that records property access,
@@ -167,7 +167,7 @@ Omit.where
 optional whereExpression: BasicExpression<boolean>;
 ```
 
-Defined in: [packages/db/src/types.ts:866](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L866)
+Defined in: [packages/db/src/types.ts:873](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L873)
 
 Pre-compiled expression for filtering changes
 
