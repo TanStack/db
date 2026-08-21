@@ -448,7 +448,7 @@ const todoCollection = createCollection(
 When sync errors occur:
 - Error is logged to console: `[QueryCollection] Error observing query...`
 - An initial failure marks the collection as `error` because no usable snapshot exists
-- Readiness waits such as `preload()` and `toArrayWhenReady()` reject while the collection is in that initial error state
+- Readiness waits such as `preload()` and `toArrayWhenReady()` reject with the cause passed to `markError(error)` while the collection is in that initial error state
 - A later refetch failure keeps the collection `ready` and preserves its cached data
 - Error tracking counters are updated (`lastError`, `errorCount`)
 - A later successful refetch recovers an initial `error` collection to `ready`; a new readiness wait then resolves normally

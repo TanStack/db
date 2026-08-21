@@ -1619,7 +1619,7 @@ export function queryCollectionOptions(
           // collection state. Later refetch failures keep the last ready
           // snapshot available while utils expose the error.
           if (collection.status === `loading`) {
-            markError()
+            markError(result.error)
           }
         }
       }
@@ -1691,7 +1691,9 @@ export function queryCollectionOptions(
         // In on-demand mode, there is no initial query, but retained-placeholder
         // maintenance still needs to finish before the collection is treated as ready.
         void startupRetentionMaintenancePromise.then(() => {
-          markReady()
+          if (collection.status === `loading`) {
+            markReady()
+          }
         })
       }
     }

@@ -1,10 +1,17 @@
 import { QueryClient } from '@tanstack/query-core'
-import { IR, createCollection, createLiveQueryCollection } from '@tanstack/db'
+import {
+  BasicIndex,
+  IR,
+  createCollection,
+  createLiveQueryCollection,
+  eq,
+} from '@tanstack/db'
 import { describe, expect, it, vi } from 'vitest'
 import { expectAssertionFailure } from '../../db/tests/expected-failure.js'
 import { TraceAssertionError } from '../../db/tests/trace-runner.js'
 import { queryCollectionOptions } from '../src/query.js'
 import type { QueryFunctionContext } from '@tanstack/query-core'
+import type { SyncMetadataApi } from '@tanstack/db'
 
 type Row = {
   id: string
@@ -19,6 +26,7 @@ function createQueryClient(): QueryClient {
       queries: {
         gcTime: Number.POSITIVE_INFINITY,
         retry: false,
+        staleTime: Number.POSITIVE_INFINITY,
       },
     },
   })
@@ -73,12 +81,128 @@ async function expectInitialQueryFailureStatus(): Promise<void> {
     await vi.waitFor(() => {
       expect(collection.status).toBe(`ready`)
       expect(collection.get(`recovered`)).toBeDefined()
+      expect(live.status).toBe(`ready`)
+      expect(live.get(`recovered`)).toBeDefined()
     })
     await expect(collection.preload()).resolves.toBeUndefined()
+    await expect(live.preload()).resolves.toBeUndefined()
   } finally {
     await live.cleanup()
     await collection.cleanup()
     queryClient.clear()
+    loggedError.mockRestore()
+  }
+}
+
+async function expectLateDependentObservesInitialFailure(): Promise<void> {
+  const error = new Error(`source failed before dependent construction`)
+  const queryClient = createQueryClient()
+  const id = `load-subset-late-dependent-error-${collectionSequence++}`
+  const loggedError = vi.spyOn(console, `error`).mockImplementation(() => {})
+  const collection = createCollection(
+    queryCollectionOptions<Row>({
+      id,
+      queryClient,
+      queryKey: [id],
+      queryFn: vi.fn().mockRejectedValue(error),
+      getKey: (row) => row.id,
+      startSync: true,
+      retry: false,
+    }),
+  )
+
+  await expect(collection.preload()).rejects.toBe(error)
+  expect(collection.status).toBe(`error`)
+
+  const live = createLiveQueryCollection((query) =>
+    query.from({ row: collection }).select(({ row }) => ({ id: row.id })),
+  )
+  const livePreload = live.preload()
+  void livePreload.catch(() => undefined)
+
+  try {
+    expect(live.status).toBe(`error`)
+    await expect(livePreload).rejects.toThrow()
+  } finally {
+    await live.cleanup()
+    await collection.cleanup()
+    await Promise.allSettled([livePreload])
+    queryClient.clear()
+    loggedError.mockRestore()
+  }
+}
+
+async function expectEveryFailedSourceToRecover(): Promise<void> {
+  const createControlledSource = (id: string) => {
+    let fail: () => void = () => {
+      throw new Error(`Source '${id}' has not started`)
+    }
+    let recover: (row: Row) => void = (_row) => {
+      throw new Error(`Source '${id}' has not started`)
+    }
+    const collection = createCollection<Row>({
+      id,
+      getKey: (row) => row.id,
+      startSync: false,
+      autoIndex: `eager`,
+      defaultIndexType: BasicIndex,
+      sync: {
+        sync: ({ begin, write, commit, markReady, markError }) => {
+          fail = markError
+          recover = (row) => {
+            begin()
+            write({ type: `insert`, value: row })
+            commit()
+            markReady()
+          }
+        },
+      },
+    })
+    return {
+      collection,
+      fail: () => fail(),
+      recover: (row: Row) => recover(row),
+    }
+  }
+
+  const left = createControlledSource(
+    `load-subset-multi-error-left-${collectionSequence++}`,
+  )
+  const right = createControlledSource(
+    `load-subset-multi-error-right-${collectionSequence++}`,
+  )
+  const loggedError = vi.spyOn(console, `error`).mockImplementation(() => {})
+  const live = createLiveQueryCollection((query) =>
+    query
+      .from({ left: left.collection })
+      .join({ right: right.collection }, ({ left: leftRow, right: rightRow }) =>
+        eq(leftRow.id, rightRow.id),
+      )
+      .select(({ left: row }) => ({ id: row.id })),
+  )
+  const preload = live.preload()
+  void preload.catch(() => undefined)
+
+  try {
+    left.fail()
+    right.fail()
+    await expect(preload).rejects.toThrow()
+    expect(live.status).toBe(`error`)
+
+    left.recover({ id: `shared` })
+    expect(left.collection.status).toBe(`ready`)
+    expect(right.collection.status).toBe(`error`)
+    expect(live.status).toBe(`error`)
+
+    right.recover({ id: `shared` })
+    await expect(live.preload()).resolves.toBeUndefined()
+    expect(live.status).toBe(`ready`)
+    expect(live.toArray.map((row) => row.id)).toEqual([`shared`])
+  } finally {
+    await live.cleanup()
+    await left.collection.cleanup()
+    await right.collection.cleanup()
+    await Promise.allSettled([preload])
     loggedError.mockRestore()
   }
 }
@@ -119,6 +243,97 @@ async function expectRefetchFailureKeepsReadySnapshot(): Promise<void> {
     expect(live.get(`cached`)).toBeDefined()
   } finally {
     await live.cleanup()
+    await collection.cleanup()
+    queryClient.clear()
+    loggedError.mockRestore()
+  }
+}
+
+async function expectDeferredStartupReadyDoesNotOverrideError(): Promise<void> {
+  const loggedError = vi.spyOn(console, `error`).mockImplementation(() => {})
+  const queryClient = createQueryClient()
+  const id = `load-subset-deferred-ready-${collectionSequence++}`
+  const queryError = new Error(`cached observer failed`)
+  const queryFn = vi.fn().mockRejectedValue(queryError)
+  const baseOptions = queryCollectionOptions<Row>({
+    id,
+    queryClient,
+    queryKey: [id],
+    queryFn,
+    getKey: (row) => row.id,
+    startSync: true,
+    syncMode: `on-demand`,
+    retry: false,
+  })
+  const originalSync = baseOptions.sync
+  let syncParams!: Parameters<typeof originalSync.sync>[0]
+  const collection = createCollection({
+    ...baseOptions,
+    sync: {
+      sync: (params) => {
+        syncParams = params
+        return originalSync.sync(params)
+      },
+    },
+  })
+
+  const firstLoad = collection._sync.loadSubset({})
+  if (!(firstLoad instanceof Promise)) {
+    throw new Error(`The failing query must be asynchronous`)
+  }
+  await expect(firstLoad).rejects.toBe(queryError)
+  expect(collection.status).toBe(`ready`)
+
+  let releaseScan!: () => void
+  const scanReleased = new Promise<void>((resolve) => {
+    releaseScan = resolve
+  })
+  let resolveMaintenanceDelete!: () => void
+  const maintenanceDeleted = new Promise<void>((resolve) => {
+    resolveMaintenanceDelete = resolve
+  })
+  const metadata = {
+    row: {
+      get: () => undefined,
+      set: () => {},
+      delete: () => {},
+      scanPersisted: async () => {
+        await scanReleased
+        return []
+      },
+    },
+    collection: {
+      get: () => undefined,
+      set: () => {},
+      delete: () => {
+        resolveMaintenanceDelete()
+      },
+      list: () => [
+        {
+          key: `queryCollection:gc:expired`,
+          value: { queryHash: `expired`, mode: `ttl`, expiresAt: 0 },
+        },
+      ],
+    },
+  } as SyncMetadataApi<string | number>
+
+  collection._lifecycle.setStatus(`cleaned-up`)
+  collection._lifecycle.setStatus(`loading`)
+  const secondSync = originalSync.sync({ ...syncParams, metadata })
+
+  try {
+    expect(collection.status).toBe(`error`)
+    releaseScan()
+    await maintenanceDeleted
+    for (let turn = 0; turn < 10; turn++) await Promise.resolve()
+    expect(collection.status).toBe(`error`)
+    expect(collection.utils.lastError).toBe(queryError)
+  } finally {
+    if (typeof secondSync === `function`) {
+      await secondSync()
+    } else {
+      await secondSync?.cleanup?.()
+    }
     await collection.cleanup()
     queryClient.clear()
     loggedError.mockRestore()
@@ -287,8 +502,20 @@ describe(`loadSubset lifecycle oracle`, () => {
     await expectInitialQueryFailureStatus()
   })
 
+  it(`reports an initial failure to a dependent created after the source failed`, async () => {
+    await expectLateDependentObservesInitialFailure()
+  })
+
+  it(`recovers a dependent only after every failed source recovers`, async () => {
+    await expectEveryFailedSourceToRecover()
+  })
+
   it(`keeps the last ready snapshot after a refetch failure`, async () => {
     await expectRefetchFailureKeepsReadySnapshot()
+  })
+
+  it(`does not let deferred startup readiness override a replayed error`, async () => {
+    await expectDeferredStartupReadyDoesNotOverrideError()
   })
 
   it(`commutative predicate forms share one query-db transport load`, async () => {

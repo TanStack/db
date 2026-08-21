@@ -1478,6 +1478,7 @@ function createElectricSync<T extends Row<unknown>>(
         write,
         commit,
         markReady,
+        markError,
         truncate,
         collection,
         metadata,
@@ -1571,19 +1572,22 @@ function createElectricSync<T extends Row<unknown>>(
           (canUsePersistedResume ? persistedResumeState.handle : undefined),
         signal: abortController.signal,
         onError: (errorParams) => {
-          // Just immediately mark ready if there's an error to avoid blocking
-          // apps waiting for `.preload()` to finish.
           // Note that Electric sends a 409 error on a `must-refetch` message, but the
           // ShapeStream handled this and it will not reach this handler, therefor
-          // this markReady will not be triggers by a `must-refetch`.
-          markReady()
+          // this handler will not run for a `must-refetch`.
+          const initialSyncFailed = collection.status === `loading`
+          if (initialSyncFailed) {
+            markError(errorParams)
+          }
 
           if (shapeOptions.onError) {
             return shapeOptions.onError(errorParams)
           } else {
             console.error(
               `An error occurred while syncing collection: ${collection.id}, \n` +
-                `it has been marked as ready to avoid blocking apps waiting for '.preload()' to finish. \n` +
+                (initialSyncFailed
+                  ? `the initial sync has been marked as failed. \n`
+                  : `the last ready snapshot has been preserved. \n`) +
                 `You can provide an 'onError' handler on the shapeOptions to handle this error, and this message will not be logged.`,
               errorParams,
             )

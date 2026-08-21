@@ -127,7 +127,7 @@ export function rxdbCollectionOptions(
   type SyncParams = Parameters<SyncConfig<Row, string>[`sync`]>[0]
   const sync: SyncConfig<Row, Key> = {
     sync: (params: SyncParams) => {
-      const { begin, write, commit, markReady } = params
+      const { begin, write, commit, markReady, markError, collection } = params
 
       let ready = false
       async function initialFetch() {
@@ -250,7 +250,11 @@ export function rxdbCollectionOptions(
         markReady()
       }
 
-      start()
+      void start().catch((error: unknown) => {
+        if (collection.status === `loading`) {
+          markError(error)
+        }
+      })
 
       return () => {
         const subs = getFromMapOrCreate(

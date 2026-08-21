@@ -48,9 +48,10 @@ function myBackendCollectionOptions<T extends object>(config: {
   return {
     getKey: config.getKey,
     sync: {
-      sync: ({ begin, write, commit, markReady, markError }) => {
+      sync: ({ begin, write, commit, markReady, markError, collection }) => {
         let isInitialSyncComplete = false
         const bufferedEvents: Array<BackendEvent<T>> = []
+        const initialSyncAbort = new AbortController()
 
         // 1. Subscribe to real-time events FIRST
         const unsubscribe = myWebSocket.subscribe(config.endpoint, (event) => {
@@ -64,7 +65,7 @@ function myBackendCollectionOptions<T extends object>(config: {
         })
 
         // 2. Fetch initial data
-        void fetch(config.endpoint)
+        void fetch(config.endpoint, { signal: initialSyncAbort.signal })
           .then(async (res) => {
             const items = await res.json()
             begin()
@@ -85,12 +86,16 @@ function myBackendCollectionOptions<T extends object>(config: {
             markReady()
           })
           .catch((error) => {
+            if (initialSyncAbort.signal.aborted) return
             console.error('Initial sync failed:', error)
-            markError()
+            // Only initial startup owns collection readiness. A later refetch
+            // failure must keep the last ready snapshot usable.
+            if (collection.status === 'loading') markError(error)
           })
 
         // 5. Return cleanup function
         return () => {
+          initialSyncAbort.abort()
           unsubscribe()
         }
       },
@@ -259,7 +264,7 @@ sync: ({ begin, write, commit, markReady, metadata }) => {
   })
 
   stream.on('ready', () => markReady())
-  stream.on('initial-error', () => markError())
+  stream.on('initial-error', (error) => markError(error))
   return () => stream.close()
 }
 ```
@@ -328,9 +333,11 @@ sync: ({ begin, write, commit, markReady }) => {
 
 `markReady()` transitions the collection to "ready" status. Without it, live queries never resolve and `useLiveSuspenseQuery` hangs forever in Suspense.
 
-If initial sync fails before it produces a usable snapshot, call `markError()`
-instead. This rejects readiness waits and moves dependent live queries to the
-error state. A later successful sync can call `markReady()` to recover.
+If initial sync fails before it produces a usable snapshot, call
+`markError(error)` instead. This rejects readiness waits with the supplied cause
+and moves dependent live queries to the error state. Calling `markError()`
+without a cause remains supported and rejects with a generic collection-state
+error. A later successful sync can call `markReady()` to recover.
 
 Source: docs/guides/collection-options-creator.md
 

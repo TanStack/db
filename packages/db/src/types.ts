@@ -346,8 +346,11 @@ export interface SyncConfig<
     commit: () => void
     /** Signal that a usable initial or recovered snapshot is available. */
     markReady: () => void
-    /** Signal that initial sync failed before producing a usable snapshot. */
-    markError: () => void
+    /**
+     * Signal that initial sync failed before producing a usable snapshot.
+     * When supplied, `error` is preserved as the rejection reason from `preload()`.
+     */
+    markError: (error?: unknown) => void
     truncate: () => void
     metadata?: SyncMetadataApi<TKey>
   }) => void | CleanupFn | SyncConfigRes

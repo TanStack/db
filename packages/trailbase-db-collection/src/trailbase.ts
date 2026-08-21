@@ -180,7 +180,7 @@ export function trailBaseCollectionOptions<
   type SyncParams = Parameters<SyncConfig<TItem, TKey>[`sync`]>[0]
   const sync = {
     sync: (params: SyncParams) => {
-      const { begin, write, commit, markReady } = params
+      const { begin, write, commit, markReady, markError, collection } = params
       let cancelled = false
       let periodicCleanupTask: ReturnType<typeof setInterval> | undefined
 
@@ -309,18 +309,25 @@ export function trailBaseCollectionOptions<
       }
 
       async function start() {
-        const eventStream = await config.recordApi.subscribe(`*`)
-        if (cancelled) {
-          await eventStream.cancel()
-          return
-        }
-        const reader = (eventReader = eventStream.getReader())
-
-        // Start listening for subscriptions first. Otherwise, we'd risk a gap
-        // between the initial fetch and starting to listen.
-        listen(reader)
-
+        let reader: ReadableStreamDefaultReader<Event> | undefined
         try {
+          const eventStream = await config.recordApi.subscribe(`*`)
+          if (cancelled) {
+            await eventStream.cancel()
+            return
+          }
+          reader = eventReader = eventStream.getReader()
+
+          // Start listening for subscriptions first. Otherwise, we'd risk a gap
+          // between the initial fetch and starting to listen.
+          void listen(reader).catch((error: unknown) => {
+            if (!cancelled && collection.status === `loading`) {
+              markError(error)
+            } else if (!cancelled) {
+              console.error(`TrailBase subscription failed`, error)
+            }
+          })
+
           // Eager mode: perform initial fetch to populate everything
           if (internalSyncMode === `eager`) {
             // Load everything on initial load.
@@ -328,18 +335,20 @@ export function trailBaseCollectionOptions<
             if (cancelled) return
             fullSyncCompleted = true
           }
-        } catch (e) {
+          if (!cancelled && collection.status === `loading`) {
+            markReady()
+          }
+        } catch (error) {
           cancelEventReader()
-          throw e
-        } finally {
-          // Mark ready both if everything went well or if there's an error to
-          // avoid blocking apps waiting for `.preload()` to finish.
-          if (!cancelled) markReady()
+          if (!cancelled && collection.status === `loading`) {
+            markError(error)
+          }
+          return
         }
 
         // Lastly, start a periodic cleanup task that will be removed when the
         // reader closes.
-        if (cancelled) return
+        if (cancelled || !reader) return
 
         periodicCleanupTask = setInterval(() => {
           seenIds.setState((curr) => {
@@ -367,7 +376,7 @@ export function trailBaseCollectionOptions<
         })
       }
 
-      start()
+      void start()
 
       // Eager mode doesn't need subset loading
       if (internalSyncMode === `eager`) {

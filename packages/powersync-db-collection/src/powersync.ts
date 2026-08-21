@@ -316,7 +316,7 @@ function createPowerSyncCollectionConfig<
    */
   const sync: SyncConfig<OutputType, string> = {
     sync: (params) => {
-      const { begin, write, collection, commit, markReady } = params
+      const { begin, write, collection, commit, markReady, markError } = params
       const abortController = new AbortController()
 
       let disposeTracking:
@@ -522,12 +522,15 @@ function createPowerSyncCollectionConfig<
               ),
             onReady: () => markReady(),
           })
-        }).catch((error) =>
+        }).catch((error) => {
           database.logger.error(
             `Could not start syncing process for ${viewName} into ${trackedTableName}`,
             error,
-          ),
-        )
+          )
+          if (collection.status === `loading`) {
+            markError(error)
+          }
+        })
 
         return () => {
           database.logger.info(
