@@ -69,8 +69,14 @@ type TruncatePublicationState = {
   lastSentKey: string | number | undefined
 }
 
-type SubsetDemand = {
+type SubsetAcquisition = {
   options: LoadSubsetOptions
+  abortController?: AbortController
+  removeRequestAbortListener?: () => void
+}
+
+type SubsetDemand = SubsetAcquisition & {
+  requestOptions: LoadSubsetOptions
 }
 
 type TruncateReplayAttempt = {
@@ -167,9 +173,9 @@ export class CollectionSubscription
     const callbackWithSentKeysTracking = (
       changes: Array<ChangeMessage<any, any>>,
     ) => {
-      callback(changes)
       this.trackPublishedRows(changes)
       this.trackSentKeys(changes)
+      callback(changes)
     }
 
     this.callback = callbackWithSentKeysTracking
@@ -241,9 +247,16 @@ export class CollectionSubscription
     session.attempts.add(attempt)
     session.currentAttempt = attempt
 
+    // A newer replay replaces every prior acquisition for these demands. Abort
+    // the old work before it can install rows into the new generation.
+    for (const demand of demandsToReload) {
+      demand.abortController?.abort()
+    }
+
     // Start buffering before the truncate commit publishes its deletes. Every
     // overlapping attempt shares this one publication baseline and buffer.
-    this.stalePublishedRows.clear()
+    // Retained rows from an earlier failed replay stay marked until this
+    // attempt either replaces them or proves they are absent.
 
     // Reset snapshot/pagination tracking state for the replacement snapshot.
     this.snapshotSent = false
@@ -262,18 +275,24 @@ export class CollectionSubscription
         const isCurrentAttempt = () =>
           this.truncateReplaySession === session &&
           session.currentAttempt === attempt
+        const nextAcquisition = this.createSubsetAcquisition(demand)
         let syncResult: Promise<void> | true
         try {
-          syncResult = this.loadSubset(demand.options, isCurrentAttempt)
-          this.replaceSubsetAcquisition(demand)
+          syncResult = this.loadSubset(
+            nextAcquisition.options,
+            isCurrentAttempt,
+          )
+          this.replaceSubsetAcquisition(demand, nextAcquisition)
         } catch {
+          nextAcquisition.abortController.abort()
+          nextAcquisition.removeRequestAbortListener?.()
           attempt.failed = true
           continue
         }
 
         this.observeLoadSubsetResult(
           syncResult,
-          demand.options,
+          nextAcquisition.options,
           true,
           isCurrentAttempt,
         )
@@ -283,7 +302,15 @@ export class CollectionSubscription
           void syncResult.then(
             () => this.settleTruncateReplay(session, attempt, syncResult),
             () => {
-              attempt.failed = true
+              // A released demand no longer participates in the current
+              // replacement. Its cooperative AbortError must not discard the
+              // successful rows from demands that are still active.
+              if (
+                this.subsetDemands.includes(demand) &&
+                !nextAcquisition.options.signal?.aborted
+              ) {
+                attempt.failed = true
+              }
               this.settleTruncateReplay(session, attempt, syncResult)
             },
           )
@@ -341,10 +368,57 @@ export class CollectionSubscription
   private flushTruncateReplay(session: TruncateReplaySession): void {
     if (this.truncateReplaySession !== session) return
     this.truncateReplaySession = undefined
+
+    const retainedDeletes = [...this.stalePublishedRows].map(
+      ([key, value]): ChangeMessage<any, any> => ({
+        type: `delete`,
+        key,
+        value,
+      }),
+    )
     this.stalePublishedRows.clear()
 
-    const merged = session.buffer.flat()
-    if (merged.length > 0) this.filteredCallback(merged)
+    const merged = [...session.buffer.flat(), ...retainedDeletes]
+    const replacement = this.createPublicationDiff(
+      session.publicationState.publishedRows,
+      merged,
+    )
+    if (replacement.length > 0) this.filteredCallback(replacement)
+  }
+
+  /** Reduce a replay's raw delete/insert stream to one exact semantic delta. */
+  private createPublicationDiff(
+    baseline: ReadonlyMap<string | number, object>,
+    changes: ReadonlyArray<ChangeMessage<any, any>>,
+  ): Array<ChangeMessage<any, any>> {
+    const finalRows = new Map(baseline)
+    for (const change of changes) {
+      if (change.type === `delete`) finalRows.delete(change.key)
+      else finalRows.set(change.key, change.value)
+    }
+
+    const replacement: Array<ChangeMessage<any, any>> = []
+    for (const [key, previousValue] of baseline) {
+      const value = finalRows.get(key)
+      if (value === undefined) {
+        replacement.push({
+          type: `delete`,
+          key,
+          value: previousValue,
+        })
+      } else if (!deepEquals(value, previousValue)) {
+        replacement.push({
+          type: `update`,
+          key,
+          value,
+          previousValue,
+        })
+      }
+    }
+    for (const [key, value] of finalRows) {
+      if (!baseline.has(key)) replacement.push({ type: `insert`, key, value })
+    }
+    return replacement
   }
 
   private get isBufferingForTruncate(): boolean {
@@ -432,9 +506,83 @@ export class CollectionSubscription
     }
   }
 
+  /** Create a fresh, abortable adapter acquisition for a replay generation. */
+  private createSubsetAcquisition(
+    demand: SubsetDemand,
+  ): SubsetAcquisition & { abortController: AbortController } {
+    const abortController = new AbortController()
+    const requestSignal = demand.requestOptions.signal
+    let removeRequestAbortListener: (() => void) | undefined
+
+    if (requestSignal?.aborted) {
+      abortController.abort(requestSignal.reason)
+    } else if (requestSignal) {
+      const abort = () => abortController.abort(requestSignal.reason)
+      requestSignal.addEventListener(`abort`, abort, { once: true })
+      removeRequestAbortListener = () =>
+        requestSignal.removeEventListener(`abort`, abort)
+    }
+
+    return {
+      options: {
+        ...demand.requestOptions,
+        signal: abortController.signal,
+      },
+      abortController,
+      removeRequestAbortListener,
+    }
+  }
+
   /** Replace the adapter lease held for one logical subset demand. */
-  private replaceSubsetAcquisition(demand: SubsetDemand): void {
-    this.collection._sync.unloadSubset(demand.options)
+  private replaceSubsetAcquisition(
+    demand: SubsetDemand,
+    next: SubsetAcquisition & { abortController: AbortController },
+  ): void {
+    const previousOptions = demand.options
+    const removePreviousAbortListener = demand.removeRequestAbortListener
+    demand.options = next.options
+    demand.abortController = next.abortController
+    demand.removeRequestAbortListener = next.removeRequestAbortListener
+
+    try {
+      this.collection._sync.unloadSubset(previousOptions)
+    } finally {
+      removePreviousAbortListener?.()
+    }
+  }
+
+  /** Abort and release one current adapter acquisition. */
+  private releaseSubsetDemand(demand: SubsetDemand): void {
+    demand.abortController?.abort()
+    try {
+      this.collection._sync.unloadSubset(demand.options)
+    } finally {
+      demand.removeRequestAbortListener?.()
+    }
+  }
+
+  /** Start and retain the first acquisition for one logical subset demand. */
+  private startSubsetDemand(requestOptions: LoadSubsetOptions): {
+    demand: SubsetDemand
+    result: Promise<void> | true
+  } {
+    const demand: SubsetDemand = {
+      requestOptions,
+      options: requestOptions,
+    }
+    const acquisition = this.createSubsetAcquisition(demand)
+    try {
+      const result = this.loadSubset(acquisition.options)
+      demand.options = acquisition.options
+      demand.abortController = acquisition.abortController
+      demand.removeRequestAbortListener = acquisition.removeRequestAbortListener
+      this.subsetDemands.push(demand)
+      return { demand, result }
+    } catch (error) {
+      acquisition.abortController.abort()
+      acquisition.removeRequestAbortListener?.()
+      throw error
+    }
   }
 
   private recordLoadSubsetError(
@@ -464,6 +612,10 @@ export class CollectionSubscription
 
   emitEvents(changes: Array<ChangeMessage<any, any>>): boolean {
     const newChanges = this.filterAndFlipChanges(changes)
+
+    // Reconciliation can reduce a source delta to no visible change. Do not
+    // wake subscribers for an empty semantic batch.
+    if (changes.length > 0 && newChanges.length === 0) return false
 
     if (this.isBufferingForTruncate) {
       // Buffer the changes instead of emitting immediately
@@ -523,11 +675,7 @@ export class CollectionSubscription
       limit: opts?.limit,
     }
 
-    const syncResult = this.loadSubset(loadOptions)
-
-    // A returned result transfers ownership to the subscription. A throwing
-    // adapter retains responsibility for rolling back any partial setup.
-    this.subsetDemands.push({ options: loadOptions })
+    const { demand, result: syncResult } = this.startSubsetDemand(loadOptions)
     if (opts?.where) this.requestedSubsetWhere.set(loadOptions, opts.where)
 
     // Pass the raw loadSubset result to the caller for external tracking
@@ -535,7 +683,7 @@ export class CollectionSubscription
 
     this.observeLoadSubsetResult(
       syncResult,
-      loadOptions,
+      demand.options,
       opts?.trackLoadSubsetPromise ?? true,
     )
 
@@ -583,13 +731,13 @@ export class CollectionSubscription
   releaseSnapshot(where: BasicExpression<boolean>): void {
     const index = this.subsetDemands.findIndex(
       (demand) =>
-        demand.options.where === where ||
-        this.requestedSubsetWhere.get(demand.options) === where,
+        demand.requestOptions.where === where ||
+        this.requestedSubsetWhere.get(demand.requestOptions) === where,
     )
     if (index === -1) return
 
     const [demand] = this.subsetDemands.splice(index, 1)
-    if (demand) this.collection._sync.unloadSubset(demand.options)
+    if (demand) this.releaseSubsetDemand(demand)
   }
 
   /**
@@ -793,17 +941,13 @@ export class CollectionSubscription
       subscription: this,
     }
 
-    const syncResult = this.loadSubset(loadOptions)
-
-    // A returned result transfers ownership to the subscription. A throwing
-    // adapter retains responsibility for rolling back any partial setup.
-    this.subsetDemands.push({ options: loadOptions })
+    const { demand, result: syncResult } = this.startSubsetDemand(loadOptions)
 
     // Pass the raw loadSubset result to the caller for external tracking
     onLoadSubsetResult?.(syncResult)
     this.observeLoadSubsetResult(
       syncResult,
-      loadOptions,
+      demand.options,
       shouldTrackLoadSubsetPromise,
     )
   }
@@ -842,14 +986,16 @@ export class CollectionSubscription
       if (!keyInSentKeys) {
         if (change.type === `update`) {
           newChange = { ...change, type: `insert`, previousValue: undefined }
+          this.sentKeys.add(change.key)
         } else if (change.type === `delete`) {
           // Filter out deletes for keys that have not been sent,
           // UNLESS we're buffering for truncate (where all deletes should pass through)
           if (!skipDeleteFilter) {
             continue
           }
+        } else {
+          this.sentKeys.add(change.key)
         }
-        this.sentKeys.add(change.key)
       } else {
         // Key was already sent - handle based on change type
         if (change.type === `insert`) {
@@ -893,7 +1039,7 @@ export class CollectionSubscription
         reconciled.push({
           ...change,
           value: previous,
-          previousValue: previous,
+          previousValue: undefined,
         })
       } else if (!deepEquals(previous, change.value)) {
         reconciled.push({
@@ -971,7 +1117,7 @@ export class CollectionSubscription
     // Release the current adapter acquisition for each logical subset demand.
     for (const demand of this.subsetDemands) {
       try {
-        this.collection._sync.unloadSubset(demand.options)
+        this.releaseSubsetDemand(demand)
       } catch (error) {
         firstCleanupError ??= error
       }
