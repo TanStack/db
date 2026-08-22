@@ -6,7 +6,10 @@ import {
   mockSyncCollectionOptions,
   mockSyncCollectionOptionsNoInitialState,
 } from './utils.js'
-import type { DeltaEvent } from '../src/index.js'
+import type {
+  DeltaEvent,
+  SubscriptionLoadSubsetErrorEvent,
+} from '../src/index.js'
 
 // ---------------------------------------------------------------------------
 // Test types and helpers
@@ -1521,7 +1524,13 @@ describe(`createEffect`, () => {
           ...options,
           includeInitialState: false,
         })
-        options?.onLoadSubsetError?.({ error: failure } as any)
+        const errorEvent: SubscriptionLoadSubsetErrorEvent = {
+          type: `loadSubset:error`,
+          subscription,
+          options: { subscription },
+          error: failure,
+        }
+        options?.onLoadSubsetError?.(errorEvent)
         return subscription
       }) as typeof users.subscribeChanges)
 
@@ -1546,6 +1555,47 @@ describe(`createEffect`, () => {
       expect(users.subscriberCount).toBe(0)
       expect(issues.subscriberCount).toBe(0)
       await Promise.all([users.cleanup(), issues.cleanup()])
+    })
+
+    it(`releases every source when one unsubscriber throws`, async () => {
+      const failure = new Error(`first source unload failed`)
+      const createSource = (id: string, unloadSubset: () => void) =>
+        createCollection<{ id: number }>({
+          id,
+          getKey: (row) => row.id,
+          syncMode: `on-demand`,
+          sync: {
+            sync: ({ markReady }) => {
+              markReady()
+              return {
+                loadSubset: () => true,
+                unloadSubset,
+              }
+            },
+          },
+        })
+      const left = createSource(`effect-cleanup-left`, () => {
+        throw failure
+      })
+      const right = createSource(`effect-cleanup-right`, () => {})
+      const effect = createEffect({
+        query: (q) =>
+          q
+            .from({ left })
+            .leftJoin({ right }, ({ left: leftRow, right: rightRow }) =>
+              eq(leftRow.id, rightRow.id),
+            ),
+        onBatch: () => {},
+      })
+
+      expect(left.subscriberCount).toBe(1)
+      expect(right.subscriberCount).toBe(1)
+
+      await expect(effect.dispose()).rejects.toBe(failure)
+      expect(left.subscriberCount).toBe(0)
+      expect(right.subscriberCount).toBe(0)
+
+      await Promise.all([left.cleanup(), right.cleanup()])
     })
 
     it(`releases source ownership when the automatic subset load throws`, async () => {

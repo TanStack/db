@@ -2182,6 +2182,45 @@ describe(`Collection isLoadingSubset property`, () => {
     expect(collection.isLoadingSubset).toBe(false)
   })
 
+  it(`cleanup isolates subset loading state from a later sync session`, async () => {
+    const resolveLoads: Array<() => void> = []
+    const collection = createCollection<{ id: string; value: string }>({
+      id: `cleanup-isolates-subset-loading`,
+      getKey: (item) => item.id,
+      syncMode: `on-demand`,
+      startSync: true,
+      sync: {
+        sync: ({ markReady }) => {
+          markReady()
+          return {
+            loadSubset: () =>
+              new Promise<void>((resolve) => resolveLoads.push(resolve)),
+          }
+        },
+      },
+    })
+
+    collection._sync.loadSubset({})
+    expect(collection.isLoadingSubset).toBe(true)
+
+    await collection.cleanup()
+    expect(collection.isLoadingSubset).toBe(false)
+
+    collection.startSyncImmediate()
+    collection._sync.loadSubset({})
+    expect(collection.isLoadingSubset).toBe(true)
+
+    resolveLoads[0]!()
+    await flushPromises()
+    expect(collection.isLoadingSubset).toBe(true)
+
+    resolveLoads[1]!()
+    await flushPromises()
+    expect(collection.isLoadingSubset).toBe(false)
+
+    await collection.cleanup()
+  })
+
   it(`emits loadingSubset:change event`, async () => {
     let resolveLoadSubset: () => void
     const loadSubsetPromise = new Promise<void>((resolve) => {

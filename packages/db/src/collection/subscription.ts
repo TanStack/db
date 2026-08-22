@@ -59,6 +59,14 @@ type CollectionSubscriptionOptions = {
   onLoadSubsetError?: (event: SubscriptionLoadSubsetErrorEvent) => void
 }
 
+type TruncatePublicationState = {
+  loadedInitialState: boolean
+  snapshotSent: boolean
+  sentKeys: Set<string | number>
+  limitedSnapshotRowCount: number
+  lastSentKey: string | number | undefined
+}
+
 export class CollectionSubscription
   extends EventEmitter<SubscriptionEvents>
   implements Subscription
@@ -112,6 +120,7 @@ export class CollectionSubscription
   private truncateRefetchFailed = false
   private truncateBuffer: Array<Array<ChangeMessage<any, any>>> = []
   private pendingTruncateRefetches: Set<Promise<void>> = new Set()
+  private truncatePublicationState: TruncatePublicationState | undefined
 
   public get status(): SubscriptionStatus {
     return this._status
@@ -170,7 +179,8 @@ export class CollectionSubscription
    *
    * To prevent a flash of missing content, we buffer all changes (deletes from truncate
    * and inserts from refetch) until all loadSubset calls succeed, then emit them together.
-   * A failed replay keeps the last published snapshot until a later truncate retries it.
+   * A failed replay keeps the last published snapshot, resumes ordinary deltas,
+   * and retains subset ownership so a later truncate can retry the replay.
    */
   private handleTruncate() {
     // Copy the loaded subsets before clearing (we'll re-request them)
@@ -193,12 +203,22 @@ export class CollectionSubscription
 
     // Start buffering BEFORE we receive the delete events from the truncate commit
     // This ensures we capture both the deletes and subsequent inserts
-    const retryingFailedRefetch =
-      this.isBufferingForTruncate && this.truncateRefetchFailed
+    const startingReplayBatch = !this.isBufferingForTruncate
+    if (startingReplayBatch) {
+      this.truncatePublicationState = {
+        loadedInitialState: this.loadedInitialState,
+        snapshotSent: this.snapshotSent,
+        sentKeys: new Set(this.sentKeys),
+        limitedSnapshotRowCount: this.limitedSnapshotRowCount,
+        lastSentKey: this.lastSentKey,
+      }
+      this.truncateBuffer = []
+      this.truncateRefetchFailed = false
+    }
     this.isBufferingForTruncate = true
-    if (!retryingFailedRefetch) this.truncateBuffer = []
-    this.truncateRefetchFailed = false
-    this.pendingTruncateRefetches.clear()
+
+    // Overlapping truncates join one publication batch. Keep the first
+    // truncate's deletes and wait for every replay already in flight.
 
     // Reset snapshot/pagination tracking state
     // Note: We don't need to populate sentKeys here because filterAndFlipChanges
@@ -259,16 +279,41 @@ export class CollectionSubscription
   }
 
   /**
-   * Check if all truncate refetch promises have completed and flush buffer if so
+   * Publish a complete replay, or abandon a failed replay and resume later deltas.
    */
   private checkTruncateRefetchComplete() {
     if (
-      this.pendingTruncateRefetches.size === 0 &&
-      this.isBufferingForTruncate &&
-      !this.truncateRefetchFailed
-    ) {
-      this.flushTruncateBuffer()
+      this.pendingTruncateRefetches.size !== 0 ||
+      !this.isBufferingForTruncate
+    )
+      return
+
+    if (this.truncateRefetchFailed) {
+      this.abandonTruncateRefetch()
+      return
     }
+
+    this.flushTruncateBuffer()
+  }
+
+  /**
+   * Discard an incomplete replay and restore filtering state for the last
+   * published snapshot. Subset ownership remains active for the next retry.
+   */
+  private abandonTruncateRefetch() {
+    const publicationState = this.truncatePublicationState
+    if (publicationState) {
+      this.loadedInitialState = publicationState.loadedInitialState
+      this.snapshotSent = publicationState.snapshotSent
+      this.sentKeys = new Set(publicationState.sentKeys)
+      this.limitedSnapshotRowCount = publicationState.limitedSnapshotRowCount
+      this.lastSentKey = publicationState.lastSentKey
+    }
+
+    this.isBufferingForTruncate = false
+    this.truncateRefetchFailed = false
+    this.truncateBuffer = []
+    this.truncatePublicationState = undefined
   }
 
   /**
@@ -277,6 +322,7 @@ export class CollectionSubscription
   private flushTruncateBuffer() {
     this.isBufferingForTruncate = false
     this.truncateRefetchFailed = false
+    this.truncatePublicationState = undefined
 
     // Flatten all buffered changes into a single array for atomic emission
     // This ensures consumers see all truncate changes (deletes + inserts) in one callback
@@ -843,6 +889,7 @@ export class CollectionSubscription
     this.isBufferingForTruncate = false
     this.truncateRefetchFailed = false
     this.truncateBuffer = []
+    this.truncatePublicationState = undefined
     this.pendingTruncateRefetches.clear()
 
     // Unload all subsets that this subscription loaded

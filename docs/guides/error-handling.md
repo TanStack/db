@@ -155,6 +155,12 @@ try {
 Effects report subset failures through `onSourceError` and dispose because
 their incremental result can no longer be kept complete.
 
+When a must-refetch truncate cannot reload every active subset, a subscription
+keeps its last successful snapshot and reports the subset error. It discards
+the incomplete replay batch, then resumes publishing ordinary source changes.
+The next truncate retries every active subset and replaces the stale snapshot
+only after the full replay succeeds.
+
 ## Collection Status and Error States
 
 Collections track their status and transition between states:

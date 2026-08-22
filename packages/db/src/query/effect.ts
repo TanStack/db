@@ -258,12 +258,19 @@ export function createEffect<
     abortController.abort()
 
     // Tear down the pipeline (unsubscribe from sources, etc.)
-    runner.dispose()
+    let cleanupError: unknown
+    try {
+      runner.dispose()
+    } catch (error) {
+      cleanupError = error
+    }
 
     // Wait for any in-flight async handlers to settle
     if (inFlightHandlers.size > 0) {
       await Promise.allSettled([...inFlightHandlers])
     }
+
+    if (cleanupError !== undefined) throw cleanupError
   }
 
   // Create and start the pipeline
@@ -1026,8 +1033,15 @@ class EffectPipelineRunner<TRow extends object, TKey extends string | number> {
     this.disposed = true
     this.subscribedToAllCollections = false
 
-    // Immediately unsubscribe from sources and clear cheap state
-    this.unsubscribeCallbacks.forEach((fn) => fn())
+    // Immediately unsubscribe from every source, even if one release fails.
+    let firstCleanupError: unknown
+    for (const unsubscribe of this.unsubscribeCallbacks) {
+      try {
+        unsubscribe()
+      } catch (error) {
+        firstCleanupError ??= error
+      }
+    }
     this.unsubscribeCallbacks.clear()
     this.sentToD2KeysBySource.clear()
     this.pendingChanges.clear()
@@ -1056,6 +1070,8 @@ class EffectPipelineRunner<TRow extends object, TKey extends string | number> {
     } else {
       this.finalCleanup()
     }
+
+    if (firstCleanupError !== undefined) throw firstCleanupError
   }
 
   /** Clear graph references — called after graph run completes or immediately from dispose */

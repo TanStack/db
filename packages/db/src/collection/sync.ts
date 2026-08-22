@@ -70,6 +70,7 @@ export class CollectionSyncManager<
   private syncStartRequested = false
   private deferredLoadSubsets: Array<DeferredLoadSubset> = []
   private syncEpoch = 0
+  private loadSubsetSession = 0
 
   /**
    * Creates a new CollectionSyncManager instance
@@ -687,6 +688,7 @@ export class CollectionSyncManager<
    * @internal This is for internal coordination (e.g., live-query glue code), not for general use.
    */
   public trackLoadPromise(promise: Promise<void>): void {
+    const loadSubsetSession = this.loadSubsetSession
     const loadingStarting = !this.isLoadingSubset
     this.pendingLoadSubsetPromises.add(promise)
     this.trackLoadSubsetOperationPromise(promise)
@@ -702,6 +704,8 @@ export class CollectionSyncManager<
     }
 
     const finish = () => {
+      if (loadSubsetSession !== this.loadSubsetSession) return
+
       const loadingEnding =
         this.pendingLoadSubsetPromises.size === 1 &&
         this.pendingLoadSubsetPromises.has(promise)
@@ -782,6 +786,7 @@ export class CollectionSyncManager<
     // Invalidate callbacks retained by asynchronous work from this session
     // before invoking adapter cleanup or allowing a new session to start.
     this.syncEpoch++
+    this.loadSubsetSession++
     try {
       if (this.syncCleanupFn) {
         this.syncCleanupFn()
@@ -806,6 +811,17 @@ export class CollectionSyncManager<
     this.syncUnloadSubsetFn = null
     this.syncStartDeferred = false
     this.syncStartRequested = false
+    const wasLoadingSubset = this.pendingLoadSubsetPromises.size > 0
+    this.pendingLoadSubsetPromises.clear()
+    if (wasLoadingSubset) {
+      this._events.emit(`loadingSubset:change`, {
+        type: `loadingSubset:change`,
+        collection: this.collection,
+        isLoadingSubset: false,
+        previousIsLoadingSubset: true,
+        loadingSubsetTransition: `end`,
+      })
+    }
     const activeOperation = this.activeLoadSubsetOperation
     this.activeLoadSubsetOperation = undefined
     if (activeOperation && !activeOperation.completed) {

@@ -486,7 +486,7 @@ describe(`CollectionSubscription status tracking`, () => {
   })
 
   it.each([`throw`, `reject`] as const)(
-    `keeps the last published snapshot when truncate replay fails ($delivery)`,
+    `keeps the last published snapshot when truncate replay fails ($0)`,
     async (delivery) => {
       type Row = { id: string }
       const error = new Error(`truncate replay failed before replacement`)
@@ -545,6 +545,13 @@ describe(`CollectionSubscription status tracking`, () => {
       expect(subscription.lastError).toBe(error)
       expect([...visible.keys()]).toEqual([`one`])
 
+      begin()
+      write({ type: `insert`, value: { id: `two` } })
+      commit()
+      await flushPromises()
+
+      expect([...visible.keys()].sort()).toEqual([`one`, `two`])
+
       failReplay = false
       begin()
       truncate()
@@ -557,6 +564,83 @@ describe(`CollectionSubscription status tracking`, () => {
       await collection.cleanup()
     },
   )
+
+  it(`publishes one coherent snapshot after overlapping truncate replays`, async () => {
+    type Row = { id: string }
+    let begin!: () => void
+    let write!: (message: { type: `insert`; value: Row }) => void
+    let commit!: () => void
+    let truncate!: () => void
+    let loadCount = 0
+    const resolveReplays: Array<() => void> = []
+    const collection = createCollection<Row>({
+      id: `overlapping-truncate-replays`,
+      getKey: (item) => item.id,
+      syncMode: `on-demand`,
+      sync: {
+        sync: (params) => {
+          begin = params.begin
+          write = params.write
+          commit = params.commit
+          truncate = params.truncate
+          params.markReady()
+          return {
+            loadSubset: () => {
+              loadCount++
+              if (loadCount === 1) {
+                begin()
+                write({ type: `insert`, value: { id: `old` } })
+                commit()
+                return true
+              }
+              if (loadCount === 3) {
+                begin()
+                write({ type: `insert`, value: { id: `new` } })
+                commit()
+              }
+              return new Promise<void>((resolve) =>
+                resolveReplays.push(resolve),
+              )
+            },
+          }
+        },
+      },
+    })
+    const visible = new Map<string | number, Row>()
+    const subscription = collection.subscribeChanges(
+      (changes) => {
+        for (const change of changes) {
+          if (change.type === `delete`) visible.delete(change.key)
+          else visible.set(change.key, change.value)
+        }
+      },
+      { includeInitialState: false },
+    )
+
+    subscription.requestSnapshot({ optimizedOnly: false })
+    expect([...visible.keys()]).toEqual([`old`])
+
+    begin()
+    truncate()
+    commit()
+    await flushPromises()
+
+    begin()
+    truncate()
+    commit()
+    await flushPromises()
+
+    resolveReplays[1]!()
+    await flushPromises()
+    expect([...visible.keys()]).toEqual([`old`])
+
+    resolveReplays[0]!()
+    await flushPromises()
+    expect([...visible.keys()]).toEqual([`new`])
+
+    subscription.unsubscribe()
+    await collection.cleanup()
+  })
 
   it(`scopes a subset failure to the subscription that requested it`, async () => {
     const error = new Error(`first subscription failed`)
