@@ -158,8 +158,10 @@ their incremental result can no longer be kept complete.
 When a must-refetch truncate cannot reload every active subset, a subscription
 keeps its last successful snapshot and reports the subset error. It discards
 the incomplete replay batch, then resumes publishing ordinary source changes.
-The next truncate retries every active subset and replaces the stale snapshot
-only after the full replay succeeds.
+The next truncate retries every active subset. Overlapping truncates form one
+atomic replay: all in-flight requests settle, the newest attempt decides the
+result, and subscribers receive the replacement only when that attempt
+succeeds.
 
 ## Collection Status and Error States
 

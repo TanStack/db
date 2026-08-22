@@ -4,6 +4,7 @@ import { PropRef, Value } from '../query/ir.js'
 import { EventEmitter } from '../event-emitter.js'
 import { compileExpression } from '../query/compiler/evaluators.js'
 import { buildCursor } from '../utils/cursor.js'
+import { deepEquals } from '../utils.js'
 import {
   createFilterFunctionFromExpression,
   createFilteredCallback,
@@ -63,8 +64,26 @@ type TruncatePublicationState = {
   loadedInitialState: boolean
   snapshotSent: boolean
   sentKeys: Set<string | number>
+  publishedRows: Map<string | number, object>
   limitedSnapshotRowCount: number
   lastSentKey: string | number | undefined
+}
+
+type SubsetDemand = {
+  options: LoadSubsetOptions
+}
+
+type TruncateReplayAttempt = {
+  pending: Set<Promise<void>>
+  failed: boolean
+  setupComplete: boolean
+}
+
+type TruncateReplaySession = {
+  publicationState: TruncatePublicationState
+  buffer: Array<Array<ChangeMessage<any, any>>>
+  attempts: Set<TruncateReplayAttempt>
+  currentAttempt: TruncateReplayAttempt
 }
 
 export class CollectionSubscription
@@ -86,7 +105,7 @@ export class CollectionSubscription
    * Track all loadSubset calls made by this subscription so we can unload them on cleanup.
    * We store the exact LoadSubsetOptions we passed to loadSubset to ensure symmetric unload.
    */
-  private loadedSubsets: Array<LoadSubsetOptions> = []
+  private subsetDemands: Array<SubsetDemand> = []
   private readonly requestedSubsetWhere = new WeakMap<
     LoadSubsetOptions,
     BasicExpression<boolean>
@@ -94,6 +113,8 @@ export class CollectionSubscription
 
   // Keep track of the keys we've sent (needed for join and orderBy optimizations)
   private sentKeys = new Set<string | number>()
+  private publishedRows = new Map<string | number, object>()
+  private stalePublishedRows = new Map<string | number, object>()
 
   // Track the count of rows sent via requestLimitedSnapshot for offset-based pagination
   private limitedSnapshotRowCount = 0
@@ -113,14 +134,9 @@ export class CollectionSubscription
   // Cleanup function for truncate event listener
   private truncateCleanup: (() => void) | undefined
 
-  // Truncate buffering state
-  // When a truncate occurs, we buffer changes until all loadSubset refetches succeed
-  // This prevents a flash of missing content between deletes and new inserts
-  private isBufferingForTruncate = false
-  private truncateRefetchFailed = false
-  private truncateBuffer: Array<Array<ChangeMessage<any, any>>> = []
-  private pendingTruncateRefetches: Set<Promise<void>> = new Set()
-  private truncatePublicationState: TruncatePublicationState | undefined
+  // One replay session owns the publication baseline, overlapping attempts,
+  // and buffered changes until every attempt settles.
+  private truncateReplaySession: TruncateReplaySession | undefined
 
   public get status(): SubscriptionStatus {
     return this._status
@@ -152,6 +168,7 @@ export class CollectionSubscription
       changes: Array<ChangeMessage<any, any>>,
     ) => {
       callback(changes)
+      this.trackPublishedRows(changes)
       this.trackSentKeys(changes)
     }
 
@@ -183,8 +200,7 @@ export class CollectionSubscription
    * and retains subset ownership so a later truncate can retry the replay.
    */
   private handleTruncate() {
-    // Copy the loaded subsets before clearing (we'll re-request them)
-    const subsetsToReload = [...this.loadedSubsets]
+    const demandsToReload = [...this.subsetDemands]
 
     // Only buffer if there's an actual loadSubset handler that can do async work.
     // Without a loadSubset handler, there's nothing to re-request and no reason to buffer.
@@ -192,144 +208,147 @@ export class CollectionSubscription
     const hasLoadSubsetHandler = this.collection._sync.syncLoadSubsetFn !== null
 
     // If there are no subsets to reload OR no loadSubset handler, just reset state
-    if (subsetsToReload.length === 0 || !hasLoadSubsetHandler) {
+    if (demandsToReload.length === 0 || !hasLoadSubsetHandler) {
       this.snapshotSent = false
       this.loadedInitialState = false
       this.limitedSnapshotRowCount = 0
       this.lastSentKey = undefined
-      this.loadedSubsets = []
       return
     }
 
-    // Start buffering BEFORE we receive the delete events from the truncate commit
-    // This ensures we capture both the deletes and subsequent inserts
-    const startingReplayBatch = !this.isBufferingForTruncate
-    if (startingReplayBatch) {
-      this.truncatePublicationState = {
-        loadedInitialState: this.loadedInitialState,
-        snapshotSent: this.snapshotSent,
-        sentKeys: new Set(this.sentKeys),
-        limitedSnapshotRowCount: this.limitedSnapshotRowCount,
-        lastSentKey: this.lastSentKey,
-      }
-      this.truncateBuffer = []
-      this.truncateRefetchFailed = false
+    const attempt: TruncateReplayAttempt = {
+      pending: new Set(),
+      failed: false,
+      setupComplete: false,
     }
-    this.isBufferingForTruncate = true
+    let session = this.truncateReplaySession
+    if (!session) {
+      session = {
+        publicationState: {
+          loadedInitialState: this.loadedInitialState,
+          snapshotSent: this.snapshotSent,
+          sentKeys: new Set(this.sentKeys),
+          publishedRows: new Map(this.publishedRows),
+          limitedSnapshotRowCount: this.limitedSnapshotRowCount,
+          lastSentKey: this.lastSentKey,
+        },
+        buffer: [],
+        attempts: new Set(),
+        currentAttempt: attempt,
+      }
+      this.truncateReplaySession = session
+    }
+    session.attempts.add(attempt)
+    session.currentAttempt = attempt
 
-    // Overlapping truncates join one publication batch. Keep the first
-    // truncate's deletes and wait for every replay already in flight.
+    // Start buffering before the truncate commit publishes its deletes. Every
+    // overlapping attempt shares this one publication baseline and buffer.
+    this.stalePublishedRows.clear()
 
-    // Reset snapshot/pagination tracking state
-    // Note: We don't need to populate sentKeys here because filterAndFlipChanges
-    // will skip the delete filter when isBufferingForTruncate is true
+    // Reset snapshot/pagination tracking state for the replacement snapshot.
     this.snapshotSent = false
     this.loadedInitialState = false
     this.limitedSnapshotRowCount = 0
     this.lastSentKey = undefined
 
-    // Clear the loadedSubsets array since we're re-requesting fresh
-    this.loadedSubsets = []
-
-    // Defer the loadSubset calls to a microtask so the truncate commit's delete events
-    // are buffered BEFORE the loadSubset calls potentially trigger nested commits.
-    // This ensures correct event ordering: deletes first, then inserts.
+    // Defer the requests so the truncate commit's deletes enter the session
+    // buffer before a synchronous adapter can publish replacement rows.
     queueMicrotask(() => {
-      // Check if we were unsubscribed while waiting
-      if (!this.isBufferingForTruncate) {
-        return
-      }
+      if (this.truncateReplaySession !== session) return
 
-      // Re-request all previously loaded subsets and track their promises
-      for (const options of subsetsToReload) {
-        // Keep ownership even if a synchronous replay fails. A later truncate
-        // must retry it, and unsubscribe must still release the subset.
-        this.loadedSubsets.push(options)
+      for (const demand of demandsToReload) {
+        if (!this.subsetDemands.includes(demand)) continue
 
+        const isCurrentAttempt = () =>
+          this.truncateReplaySession === session &&
+          session.currentAttempt === attempt
         let syncResult: Promise<void> | true
         try {
-          syncResult = this.loadSubset(options)
+          syncResult = this.loadSubset(demand.options, isCurrentAttempt)
+          this.replaceSubsetAcquisition(demand)
         } catch {
-          this.truncateRefetchFailed = true
+          attempt.failed = true
           continue
         }
 
-        this.observeLoadSubsetResult(syncResult, options, true)
+        this.observeLoadSubsetResult(
+          syncResult,
+          demand.options,
+          true,
+          isCurrentAttempt,
+        )
 
-        // Track the promise for buffer flushing
         if (syncResult instanceof Promise) {
-          this.pendingTruncateRefetches.add(syncResult)
-          const finish = () => {
-            this.pendingTruncateRefetches.delete(syncResult)
-            this.checkTruncateRefetchComplete()
-          }
-          void syncResult.then(finish, () => {
-            this.truncateRefetchFailed = true
-            finish()
-          })
+          attempt.pending.add(syncResult)
+          void syncResult.then(
+            () => this.settleTruncateReplay(session, attempt, syncResult),
+            () => {
+              attempt.failed = true
+              this.settleTruncateReplay(session, attempt, syncResult)
+            },
+          )
         }
       }
 
-      // If all loadSubset calls were synchronous (returned true), flush now
-      // At this point, delete events have already been buffered from the truncate commit
-      if (this.pendingTruncateRefetches.size === 0) {
-        this.checkTruncateRefetchComplete()
-      }
+      attempt.setupComplete = true
+      this.checkTruncateReplayComplete(session)
     })
   }
 
-  /**
-   * Publish a complete replay, or abandon a failed replay and resume later deltas.
-   */
-  private checkTruncateRefetchComplete() {
-    if (
-      this.pendingTruncateRefetches.size !== 0 ||
-      !this.isBufferingForTruncate
-    )
-      return
+  private settleTruncateReplay(
+    session: TruncateReplaySession,
+    attempt: TruncateReplayAttempt,
+    promise: Promise<void>,
+  ): void {
+    if (this.truncateReplaySession !== session) return
+    attempt.pending.delete(promise)
+    this.checkTruncateReplayComplete(session)
+  }
 
-    if (this.truncateRefetchFailed) {
-      this.abandonTruncateRefetch()
-      return
+  /** Publish only after every overlapping replay attempt has settled. */
+  private checkTruncateReplayComplete(session: TruncateReplaySession): void {
+    if (this.truncateReplaySession !== session) return
+    for (const attempt of session.attempts) {
+      if (!attempt.setupComplete || attempt.pending.size > 0) return
     }
 
-    this.flushTruncateBuffer()
+    if (session.currentAttempt.failed) {
+      this.abandonTruncateReplay(session)
+    } else {
+      this.flushTruncateReplay(session)
+    }
   }
 
   /**
-   * Discard an incomplete replay and restore filtering state for the last
-   * published snapshot. Subset ownership remains active for the next retry.
+   * Discard an incomplete current replay and restore the last publication.
+   * Rows in that publication remain stale until a later source delta or replay
+   * reconciles them with the source collection.
    */
-  private abandonTruncateRefetch() {
-    const publicationState = this.truncatePublicationState
-    if (publicationState) {
-      this.loadedInitialState = publicationState.loadedInitialState
-      this.snapshotSent = publicationState.snapshotSent
-      this.sentKeys = new Set(publicationState.sentKeys)
-      this.limitedSnapshotRowCount = publicationState.limitedSnapshotRowCount
-      this.lastSentKey = publicationState.lastSentKey
-    }
-
-    this.isBufferingForTruncate = false
-    this.truncateRefetchFailed = false
-    this.truncateBuffer = []
-    this.truncatePublicationState = undefined
+  private abandonTruncateReplay(session: TruncateReplaySession): void {
+    if (this.truncateReplaySession !== session) return
+    const publicationState = session.publicationState
+    this.loadedInitialState = publicationState.loadedInitialState
+    this.snapshotSent = publicationState.snapshotSent
+    this.sentKeys = new Set(publicationState.sentKeys)
+    this.publishedRows = new Map(publicationState.publishedRows)
+    this.stalePublishedRows = new Map(publicationState.publishedRows)
+    this.limitedSnapshotRowCount = publicationState.limitedSnapshotRowCount
+    this.lastSentKey = publicationState.lastSentKey
+    this.truncateReplaySession = undefined
   }
 
-  /**
-   * Flush the truncate buffer, emitting all buffered changes to the callback
-   */
-  private flushTruncateBuffer() {
-    this.isBufferingForTruncate = false
-    this.truncateRefetchFailed = false
-    this.truncatePublicationState = undefined
+  /** Publish the complete buffered replacement as one subscriber batch. */
+  private flushTruncateReplay(session: TruncateReplaySession): void {
+    if (this.truncateReplaySession !== session) return
+    this.truncateReplaySession = undefined
+    this.stalePublishedRows.clear()
 
-    // Flatten all buffered changes into a single array for atomic emission
-    // This ensures consumers see all truncate changes (deletes + inserts) in one callback
-    const merged = this.truncateBuffer.flat()
+    const merged = session.buffer.flat()
     if (merged.length > 0) this.filteredCallback(merged)
+  }
 
-    this.truncateBuffer = []
+  private get isBufferingForTruncate(): boolean {
+    return this.truncateReplaySession !== undefined
   }
 
   setOrderByIndex(index: IndexInterface<any>) {
@@ -377,6 +396,7 @@ export class CollectionSubscription
     syncResult: Promise<void> | true,
     options: LoadSubsetOptions,
     trackStatus: boolean,
+    shouldReportError: () => boolean = () => true,
   ) {
     if (!(syncResult instanceof Promise)) return
 
@@ -395,18 +415,26 @@ export class CollectionSubscription
     }
 
     void syncResult.then(finish, (error: unknown) => {
-      this.recordLoadSubsetError(options, error)
+      if (shouldReportError()) this.recordLoadSubsetError(options, error)
       finish()
     })
   }
 
-  private loadSubset(options: LoadSubsetOptions): Promise<void> | true {
+  private loadSubset(
+    options: LoadSubsetOptions,
+    shouldReportError: () => boolean = () => true,
+  ): Promise<void> | true {
     try {
       return this.collection._sync.loadSubset(options)
     } catch (error) {
-      this.recordLoadSubsetError(options, error)
+      if (shouldReportError()) this.recordLoadSubsetError(options, error)
       throw error
     }
+  }
+
+  /** Replace the adapter lease held for one logical subset demand. */
+  private replaceSubsetAcquisition(demand: SubsetDemand): void {
+    this.collection._sync.unloadSubset(demand.options)
   }
 
   private recordLoadSubsetError(
@@ -441,7 +469,7 @@ export class CollectionSubscription
       // Buffer the changes instead of emitting immediately
       // This prevents a flash of missing content during truncate/refetch
       if (newChanges.length > 0) {
-        this.truncateBuffer.push(newChanges)
+        this.truncateReplaySession!.buffer.push(newChanges)
       }
       return false
     } else {
@@ -499,7 +527,7 @@ export class CollectionSubscription
 
     // A returned result transfers ownership to the subscription. A throwing
     // adapter retains responsibility for rolling back any partial setup.
-    this.loadedSubsets.push(loadOptions)
+    this.subsetDemands.push({ options: loadOptions })
     if (opts?.where) this.requestedSubsetWhere.set(loadOptions, opts.where)
 
     // Pass the raw loadSubset result to the caller for external tracking
@@ -553,15 +581,15 @@ export class CollectionSubscription
 
   /** Release one exact subset request while keeping the subscription alive. */
   releaseSnapshot(where: BasicExpression<boolean>): void {
-    const index = this.loadedSubsets.findIndex(
-      (options) =>
-        options.where === where ||
-        this.requestedSubsetWhere.get(options) === where,
+    const index = this.subsetDemands.findIndex(
+      (demand) =>
+        demand.options.where === where ||
+        this.requestedSubsetWhere.get(demand.options) === where,
     )
     if (index === -1) return
 
-    const [options] = this.loadedSubsets.splice(index, 1)
-    if (options) this.collection._sync.unloadSubset(options)
+    const [demand] = this.subsetDemands.splice(index, 1)
+    if (demand) this.collection._sync.unloadSubset(demand.options)
   }
 
   /**
@@ -769,7 +797,7 @@ export class CollectionSubscription
 
     // A returned result transfers ownership to the subscription. A throwing
     // adapter retains responsibility for rolling back any partial setup.
-    this.loadedSubsets.push(loadOptions)
+    this.subsetDemands.push({ options: loadOptions })
 
     // Pass the raw loadSubset result to the caller for external tracking
     onLoadSubsetResult?.(syncResult)
@@ -790,6 +818,8 @@ export class CollectionSubscription
    * Duplicate inserts are filtered out to prevent D2 multiplicity > 1.
    */
   private filterAndFlipChanges(changes: Array<ChangeMessage<any, any>>) {
+    changes = this.reconcileStalePublishedChanges(changes)
+
     if (this.loadedInitialState || this.skipFiltering) {
       // We loaded the entire initial state or filtering is explicitly skipped
       // so no need to filter or flip changes
@@ -839,6 +869,55 @@ export class CollectionSubscription
     return newChanges
   }
 
+  /**
+   * After a failed replay, the source collection is empty but subscribers still
+   * hold the last good publication. Reconcile the first later source delta for
+   * each retained key against that publication instead of treating it as a
+   * duplicate insert.
+   */
+  private reconcileStalePublishedChanges(
+    changes: Array<ChangeMessage<any, any>>,
+  ): Array<ChangeMessage<any, any>> {
+    if (this.stalePublishedRows.size === 0) return changes
+
+    const reconciled: Array<ChangeMessage<any, any>> = []
+    for (const change of changes) {
+      const previous = this.stalePublishedRows.get(change.key)
+      if (previous === undefined) {
+        reconciled.push(change)
+        continue
+      }
+
+      this.stalePublishedRows.delete(change.key)
+      if (change.type === `delete`) {
+        reconciled.push({
+          ...change,
+          value: previous,
+          previousValue: previous,
+        })
+      } else if (!deepEquals(previous, change.value)) {
+        reconciled.push({
+          ...change,
+          type: `update`,
+          previousValue: previous,
+        })
+      }
+    }
+    return reconciled
+  }
+
+  private trackPublishedRows(
+    changes: Array<ChangeMessage<any, string | number>>,
+  ): void {
+    for (const change of changes) {
+      if (change.type === `delete`) {
+        this.publishedRows.delete(change.key)
+      } else {
+        this.publishedRows.set(change.key, change.value)
+      }
+    }
+  }
+
   private trackSentKeys(changes: Array<ChangeMessage<any, string | number>>) {
     if (this.loadedInitialState || this.skipFiltering) {
       // No need to track sent keys if we loaded the entire state or filtering is skipped.
@@ -885,23 +964,19 @@ export class CollectionSubscription
     }
     this.truncateCleanup = undefined
 
-    // Clean up truncate buffer state
-    this.isBufferingForTruncate = false
-    this.truncateRefetchFailed = false
-    this.truncateBuffer = []
-    this.truncatePublicationState = undefined
-    this.pendingTruncateRefetches.clear()
+    // Stop any buffered replay from publishing after unsubscription.
+    this.truncateReplaySession = undefined
+    this.stalePublishedRows.clear()
 
-    // Unload all subsets that this subscription loaded
-    // We pass the exact same LoadSubsetOptions we used for loadSubset
-    for (const options of this.loadedSubsets) {
+    // Release the current adapter acquisition for each logical subset demand.
+    for (const demand of this.subsetDemands) {
       try {
-        this.collection._sync.unloadSubset(options)
+        this.collection._sync.unloadSubset(demand.options)
       } catch (error) {
         firstCleanupError ??= error
       }
     }
-    this.loadedSubsets = []
+    this.subsetDemands = []
 
     try {
       this.emitInner(`unsubscribed`, {

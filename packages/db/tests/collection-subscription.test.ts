@@ -481,7 +481,8 @@ describe(`CollectionSubscription status tracking`, () => {
     expect(subscription.lastError).toBe(error)
 
     subscription.unsubscribe()
-    expect(unloadCount).toBe(1)
+    // The initial load and the later successful replay each acquired a lease.
+    expect(unloadCount).toBe(2)
     await collection.cleanup()
   })
 
