@@ -651,6 +651,9 @@ function processJoinSource(
         map((data: any) => {
           const [key, [value, _orderByIndex, correlationKey, parentContext]] =
             data
+          if (!parentKeyStream) {
+            return [key, value] as [unknown, any]
+          }
           return [
             key,
             value != null && typeof value === `object`

@@ -1,6 +1,7 @@
 import { describe, expect, test } from 'vitest'
 import {
   add,
+  coalesce,
   count,
   createLiveQueryCollection,
   eq,
@@ -30,6 +31,12 @@ const materializationForms = [`collection`, `array`, `materialized`] as const
 const checkpoints = [`initial`, `parent-update`, `child-update`] as const
 
 const routeContextGrammar = {
+  parentProjection: {
+    shapes: [`field`, `whole-row`] as const,
+  },
+  correlationDomain: {
+    states: [`unmatched`, `null`] as const,
+  },
   lexicalScope: {
     scopes: [`immediate-parent`, `lexical-ancestor`] as const,
   },
@@ -51,7 +58,26 @@ const routeContextGrammar = {
     keySides: [`main`, `joined`] as const,
     correlationAttachments: [`main`, `joined`] as const,
   },
+  unionIdentity: {
+    forms: [`union-from`, `union-all`] as const,
+  },
 } as const
+
+const queryRefMetadataGrammar = {
+  routeModes: [`plain`, `routed`] as const,
+} as const
+
+type QueryRefMetadataMode = (typeof queryRefMetadataGrammar.routeModes)[number]
+
+type ParentProjectionCell = {
+  family: `parent-projection`
+  shape: (typeof routeContextGrammar.parentProjection.shapes)[number]
+}
+
+type CorrelationDomainCell = {
+  family: `correlation-domain`
+  state: (typeof routeContextGrammar.correlationDomain.states)[number]
+}
 
 type LexicalScopeCell = {
   family: `lexical-scope`
@@ -76,13 +102,33 @@ type JoinCell = {
   correlationAttachment: (typeof routeContextGrammar.join.correlationAttachments)[number]
 }
 
+type UnionIdentityCell = {
+  family: `union-identity`
+  form: (typeof routeContextGrammar.unionIdentity.forms)[number]
+}
+
 type GrammarCell =
+  | ParentProjectionCell
+  | CorrelationDomainCell
   | LexicalScopeCell
   | AggregationCell
   | RecursiveSourceCell
   | JoinCell
+  | UnionIdentityCell
 
 const grammarCells: Array<GrammarCell> = [
+  ...routeContextGrammar.parentProjection.shapes.map(
+    (shape): ParentProjectionCell => ({
+      family: `parent-projection`,
+      shape,
+    }),
+  ),
+  ...routeContextGrammar.correlationDomain.states.map(
+    (state): CorrelationDomainCell => ({
+      family: `correlation-domain`,
+      state,
+    }),
+  ),
   ...routeContextGrammar.lexicalScope.scopes.map(
     (scope): LexicalScopeCell => ({ family: `lexical-scope`, scope }),
   ),
@@ -112,6 +158,9 @@ const grammarCells: Array<GrammarCell> = [
         correlationAttachment,
       }),
     ),
+  ),
+  ...routeContextGrammar.unionIdentity.forms.map(
+    (form): UnionIdentityCell => ({ family: `union-identity`, form }),
   ),
 ]
 
@@ -167,6 +216,10 @@ function ids(rows: Iterable<{ id: number }>): Array<number> {
 
 function grammarCellName(cell: GrammarCell): string {
   switch (cell.family) {
+    case `parent-projection`:
+      return `${cell.family} / ${cell.shape}`
+    case `correlation-domain`:
+      return `${cell.family} / ${cell.state}`
     case `lexical-scope`:
       return `${cell.family} / ${cell.scope}`
     case `aggregation`:
@@ -175,6 +228,139 @@ function grammarCellName(cell: GrammarCell): string {
       return `${cell.family} / ${cell.boundary} / ${cell.phase}`
     case `join`:
       return `${cell.family} / ${cell.keySide}-side key / ${cell.correlationAttachment}-side correlation`
+    case `union-identity`:
+      return `${cell.family} / ${cell.form}`
+  }
+}
+
+async function runParentProjectionCell({
+  shape,
+}: ParentProjectionCell): Promise<void> {
+  type ParentRow = { id: number; group: number; token: string }
+  const parentRows: Array<ParentRow> = [
+    { id: 1, group: 1, token: `one` },
+    { id: 2, group: 1, token: `two` },
+  ]
+  const parents = createGrammarCollection(
+    `projection-${shape}-parents`,
+    parentRows,
+  )
+  const children = createGrammarCollection(`projection-${shape}-children`, [
+    { id: 10, parentGroup: 1 },
+    { id: 20, parentGroup: 1 },
+  ])
+  const live = createLiveQueryCollection((q) =>
+    q
+      .from({ parent: parents.collection })
+      .orderBy(({ parent }) => parent.id)
+      .select(({ parent }) => {
+        const correlated = q
+          .from({ child: children.collection })
+          .where(({ child }) => eq(child.parentGroup, parent.group))
+        const rows = correlated
+          .orderBy(({ child }) => child.id)
+          .select(({ child }) => ({
+            id: child.id,
+            parentSnapshot:
+              shape === `field`
+                ? { token: parent.token }
+                : coalesce(parent, null),
+          }))
+        return { id: parent.id, ...includeInEveryForm(rows) }
+      }),
+  )
+
+  const expected = (parentId: number) => {
+    const parent = parents.collection.get(parentId)!
+    return children.collection.toArray
+      .filter((child) => child.parentGroup === parent.group)
+      .map(({ id }) => ({ id, token: parent.token }))
+  }
+  const project = (
+    rows: Iterable<{ id: number; parentSnapshot: unknown }>,
+  ) =>
+    [...rows].map(({ id, parentSnapshot }) => {
+      const token =
+        parentSnapshot != null &&
+        typeof parentSnapshot === `object` &&
+        `token` in parentSnapshot &&
+        typeof parentSnapshot.token === `string`
+          ? parentSnapshot.token
+          : undefined
+      return { id, token }
+    })
+  const assertParents = () => {
+    for (const parent of parents.collection.toArray) {
+      expectEveryForm(live.get(parent.id)!, project, expected(parent.id))
+    }
+  }
+
+  try {
+    await live.preload()
+    assertParents()
+
+    const updatedParent = { id: 1, group: 1, token: `updated` }
+    parents.write(`update`, updatedParent)
+    assertParents()
+
+    children.write(`insert`, { id: 30, parentGroup: 1 })
+    assertParents()
+  } finally {
+    await cleanup(live, [parents, children])
+  }
+}
+
+async function runCorrelationDomainCell({
+  state,
+}: CorrelationDomainCell): Promise<void> {
+  type ParentRow = { id: number; group: number | null }
+  type ChildRow = { id: number; parentGroup: number | null }
+  const parents = createGrammarCollection<ParentRow>(
+    `correlation-${state}-parents`,
+    [{ id: 1, group: state === `null` ? null : 999 }],
+  )
+  const children = createGrammarCollection<ChildRow>(
+    `correlation-${state}-children`,
+    [
+      { id: 10, parentGroup: null },
+      { id: 20, parentGroup: 1 },
+    ],
+  )
+  const live = createLiveQueryCollection((q) =>
+    q.from({ parent: parents.collection }).select(({ parent }) => {
+      const rows = q
+        .from({ child: children.collection })
+        .where(({ child }) => eq(child.parentGroup, parent.group))
+        .orderBy(({ child }) => child.id)
+        .select(({ child }) => ({ id: child.id }))
+      return { id: parent.id, ...includeInEveryForm(rows) }
+    }),
+  )
+
+  const expected = () => {
+    const parentGroup = parents.collection.get(1)!.group
+    return children.collection.toArray
+      .filter(
+        (child) =>
+          parentGroup != null &&
+          child.parentGroup != null &&
+          child.parentGroup === parentGroup,
+      )
+      .map(({ id }) => id)
+  }
+  const assertResult = () => expectEveryForm(live.get(1)!, ids, expected())
+
+  try {
+    await live.preload()
+    assertResult()
+
+    parents.write(`update`, { id: 1, group: 1 })
+    assertResult()
+
+    children.write(`insert`, { id: 30, parentGroup: 1 })
+    assertResult()
+  } finally {
+    await cleanup(live, [parents, children])
   }
 }
 
@@ -366,14 +552,14 @@ async function runAggregationCell({
                 .select(({ child }) => ({
                   score:
                     placement === `inside-aggregate`
-                      ? sum(multiply(child.value, parent.factor))
-                      : multiply(sum(child.value), parent.factor),
+                      ? sum(add(child.value, parent.factor))
+                      : add(sum(child.value), parent.factor),
                 }))
             : correlated.select(({ child }) => ({
                 score:
                   placement === `inside-aggregate`
-                    ? sum(multiply(child.value, parent.factor))
-                    : multiply(sum(child.value), parent.factor),
+                    ? sum(add(child.value, parent.factor))
+                    : add(sum(child.value), parent.factor),
               }))
         return { id: parent.id, ...includeInEveryForm(rows) }
       }),
@@ -384,7 +570,14 @@ async function runAggregationCell({
     const total = children.collection.toArray
       .filter((child) => child.parentGroup === parent.group)
       .reduce((result, child) => result + child.value, 0)
-    return [total * parent.factor]
+    const childCount = children.collection.toArray.filter(
+      (child) => child.parentGroup === parent.group,
+    ).length
+    return [
+      placement === `inside-aggregate`
+        ? total + childCount * parent.factor
+        : total + parent.factor,
+    ]
   }
 
   const project = (rows: Iterable<{ score: number }>) =>
@@ -689,7 +882,9 @@ async function runRecursiveSourceCell({
   )
 
   const modelRows = new Map(initialCandidates.map((row) => [row.id, row]))
-  const leftModelIds = new Set(left.collection.toArray.map(({ id }) => id))
+  const leftModelIds = new Set(
+    initialCandidates.filter(({ id }) => id % 20 === 10).map(({ id }) => id),
+  )
   const expected = (parentId: number) => {
     const parent = parents.collection.get(parentId)!
     const correlated = [...modelRows.values()].filter(
@@ -756,7 +951,7 @@ async function runRecursiveSourceCell({
         : phase === `projection` || phase === `aggregate`
           ? 30
           : phase === `having`
-            ? 0
+            ? 1
             : 4
     parents.write(`update`, { id: 1, group: 1, parameter: updatedParameter })
     assertParents()
@@ -772,6 +967,216 @@ async function runRecursiveSourceCell({
     assertParents()
   } finally {
     await cleanup(live, [parents, candidates, left, right, anchors])
+  }
+}
+
+async function runUnionIdentityCell({
+  form,
+}: UnionIdentityCell): Promise<void> {
+  const parents = createGrammarCollection(`identity-${form}-parents`, [
+    { id: 1, group: 1, parameter: 10 },
+    { id: 2, group: 1, parameter: 20 },
+  ])
+  const left = createGrammarCollection<CandidateRow>(`identity-${form}-left`, [
+    { id: 10, parentGroup: 1, value: 1 },
+  ])
+  const right = createGrammarCollection<CandidateRow>(
+    `identity-${form}-right`,
+    [{ id: 20, parentGroup: 1, value: 2 }],
+  )
+  const anchors = createGrammarCollection(`identity-${form}-anchors`, [
+    { id: 10, parentGroup: 1 },
+    { id: 20, parentGroup: 1 },
+  ])
+  const live = createLiveQueryCollection((q) =>
+    q
+      .from({ parent: parents.collection })
+      .orderBy(({ parent }) => parent.id)
+      .select(({ parent }) => {
+        const unionAllRows = () => {
+          const leftRows = q
+            .from({ leftCandidate: left.collection })
+            .select(({ leftCandidate }) => ({
+              id: leftCandidate.id,
+              value: add(leftCandidate.value, parent.parameter),
+            }))
+          const rightRows = q
+            .from({ rightCandidate: right.collection })
+            .select(({ rightCandidate }) => ({
+              id: rightCandidate.id,
+              value: add(rightCandidate.value, parent.parameter),
+            }))
+          return q
+            .unionAll(leftRows, rightRows)
+            .innerJoin({ anchor: anchors.collection }, ({ id, anchor }) =>
+              eq(id, anchor.id),
+            )
+            .where(({ anchor }) => eq(anchor.parentGroup, parent.group))
+            .select(({ id, value }) => ({ id, value }))
+        }
+        const unionFromRows = () =>
+          q
+            .unionAll({
+              leftCandidate: left.collection,
+              rightCandidate: right.collection,
+            })
+            .innerJoin(
+              { anchor: anchors.collection },
+              ({ leftCandidate, rightCandidate, anchor }) =>
+                eq(coalesce(leftCandidate.id, rightCandidate.id), anchor.id),
+            )
+            .where(({ anchor }) => eq(anchor.parentGroup, parent.group))
+            .select(({ leftCandidate, rightCandidate }) => ({
+              id: coalesce(leftCandidate.id, rightCandidate.id),
+              value: add(
+                coalesce(leftCandidate.value, rightCandidate.value),
+                parent.parameter,
+              ),
+            }))
+        return form === `union-all`
+          ? { id: parent.id, ...includeInEveryForm(unionAllRows()) }
+          : { id: parent.id, ...includeInEveryForm(unionFromRows()) }
+      }),
+  )
+
+  const project = (rows: Iterable<{ id: number; value: number }>) =>
+    [...rows]
+      .map(({ id, value }) => ({ id, value }))
+      .sort((leftRow, rightRow) => leftRow.id - rightRow.id)
+  const expected = (parentId: number) => {
+    const parent = parents.collection.get(parentId)!
+    return [...left.collection.toArray, ...right.collection.toArray]
+      .filter((candidate) => candidate.parentGroup === parent.group)
+      .map((candidate) => ({
+        id: candidate.id,
+        value: candidate.value + parent.parameter,
+      }))
+      .sort((leftRow, rightRow) => leftRow.id - rightRow.id)
+  }
+  const keys = (parentId: number) => {
+    const collection = live.get(parentId)!.collection
+    return new Map(
+      collection.toArray.map((row) => [row.id, collection.getKeyFromItem(row)]),
+    )
+  }
+  const assertParents = () => {
+    for (const parent of parents.collection.toArray) {
+      expectEveryForm(live.get(parent.id)!, project, expected(parent.id))
+    }
+  }
+  const assertRouteIndependentKeys = () => expect(keys(2)).toEqual(keys(1))
+
+  try {
+    await live.preload()
+    assertParents()
+    assertRouteIndependentKeys()
+    const initialKeys = keys(1)
+
+    parents.write(`update`, { id: 1, group: 1, parameter: 30 })
+    assertParents()
+    expect(keys(1)).toEqual(initialKeys)
+    assertRouteIndependentKeys()
+
+    right.write(`update`, { id: 20, parentGroup: 1, value: 5 })
+    assertParents()
+    expect(keys(1)).toEqual(initialKeys)
+    assertRouteIndependentKeys()
+  } finally {
+    await cleanup(live, [parents, left, right, anchors])
+  }
+}
+
+function expectNoRouteMetadata(row: object): void {
+  expect(Object.hasOwn(row, `__correlationKey`)).toBe(false)
+  expect(Object.hasOwn(row, `__parentContext`)).toBe(false)
+}
+
+async function runQueryRefMetadataCell(
+  routeMode: QueryRefMetadataMode,
+): Promise<void> {
+  const anchors = createGrammarCollection(`metadata-${routeMode}-anchors`, [
+    { id: 1, candidateId: 10, parentGroup: 1 },
+  ])
+  const candidates = createGrammarCollection(
+    `metadata-${routeMode}-candidates`,
+    [{ id: 10, label: `ten` }],
+  )
+
+  if (routeMode === `plain`) {
+    const live = createLiveQueryCollection((q) => {
+      const projectedCandidates = q
+        .from({ candidate: candidates.collection })
+        .select(({ candidate }) => ({
+          id: candidate.id,
+          label: candidate.label,
+        }))
+      return q
+        .from({ anchor: anchors.collection })
+        .innerJoin(
+          { candidateResult: projectedCandidates },
+          ({ anchor, candidateResult }) =>
+            eq(anchor.candidateId, candidateResult.id),
+        )
+        .select(({ candidateResult }) => candidateResult)
+    })
+
+    try {
+      await live.preload()
+      expectNoRouteMetadata(live.toArray[0]!)
+
+      candidates.write(`update`, { id: 10, label: `updated` })
+      expectNoRouteMetadata(live.toArray[0]!)
+    } finally {
+      await cleanup(live, [anchors, candidates])
+    }
+    return
+  }
+
+  const parents = createGrammarCollection(`metadata-routed-parents`, [
+    { id: 1, group: 1 },
+  ])
+  const live = createLiveQueryCollection((q) =>
+    q.from({ parent: parents.collection }).select(({ parent }) => {
+      const projectedCandidates = q
+        .from({ candidate: candidates.collection })
+        .select(({ candidate }) => ({
+          id: candidate.id,
+          label: candidate.label,
+        }))
+      const rows = q
+        .from({ anchor: anchors.collection })
+        .innerJoin(
+          { candidateResult: projectedCandidates },
+          ({ anchor, candidateResult }) =>
+            eq(anchor.candidateId, candidateResult.id),
+        )
+        .where(({ anchor }) => eq(anchor.parentGroup, parent.group))
+        .select(({ candidateResult }) => candidateResult)
+      return { id: parent.id, ...includeInEveryForm(rows) }
+    }),
+  )
+  const assertClean = () => {
+    const forms = live.get(1)!
+    for (const rows of [
+      forms.collection.values(),
+      forms.array,
+      forms.materialized,
+    ]) {
+      for (const row of rows) expectNoRouteMetadata(row)
+    }
+  }
+
+  try {
+    await live.preload()
+    assertClean()
+
+    parents.write(`update`, { id: 1, group: 2 })
+    assertClean()
+
+    anchors.write(`update`, { id: 1, candidateId: 10, parentGroup: 2 })
+    assertClean()
+  } finally {
+    await cleanup(live, [parents, anchors, candidates])
   }
 }
 
@@ -866,6 +1271,10 @@ async function runJoinCell({
 
 async function runGrammarCell(cell: GrammarCell): Promise<void> {
   switch (cell.family) {
+    case `parent-projection`:
+      return runParentProjectionCell(cell)
+    case `correlation-domain`:
+      return runCorrelationDomainCell(cell)
     case `lexical-scope`:
       return runLexicalScopeCell(cell)
     case `aggregation`:
@@ -874,30 +1283,40 @@ async function runGrammarCell(cell: GrammarCell): Promise<void> {
       return runRecursiveSourceCell(cell)
     case `join`:
       return runJoinCell(cell)
+    case `union-identity`:
+      return runUnionIdentityCell(cell)
   }
 }
 
 describe(`correlated include route-context transport grammar`, () => {
   test(`expands every declared product without duplicate cells`, () => {
     const expectedCellCount =
+      routeContextGrammar.parentProjection.shapes.length +
+      routeContextGrammar.correlationDomain.states.length +
       routeContextGrammar.lexicalScope.scopes.length +
       routeContextGrammar.aggregation.groupings.length *
         routeContextGrammar.aggregation.placements.length +
       routeContextGrammar.recursiveSource.boundaries.length *
         routeContextGrammar.recursiveSource.phases.length +
       routeContextGrammar.join.keySides.length *
-        routeContextGrammar.join.correlationAttachments.length
+        routeContextGrammar.join.correlationAttachments.length +
+      routeContextGrammar.unionIdentity.forms.length
     const names = grammarCells.map(grammarCellName)
 
     expect(grammarCells).toHaveLength(expectedCellCount)
     expect(new Set(names)).toHaveLength(expectedCellCount)
     expect(
       grammarCells.length * materializationForms.length * checkpoints.length,
-    ).toBe(225)
+    ).toBe(279)
   })
 
   for (const cell of grammarCells) {
     test(`${grammarCellName(cell)} × every materialization form × parent/child updates`, () =>
       runGrammarCell(cell))
+  }
+
+  for (const routeMode of queryRefMetadataGrammar.routeModes) {
+    test(`query-ref metadata / ${routeMode}`, () =>
+      runQueryRefMetadataCell(routeMode))
   }
 })

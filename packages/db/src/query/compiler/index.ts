@@ -95,14 +95,23 @@ type CompiledParentProjection = {
 function projectParentContext(
   nsRow: NamespacedRow,
   projections: Array<CompiledParentProjection>,
-): Record<string, Record<string, any>> {
+): Record<string, any> {
   const inherited = (nsRow as any).__parentContext
-  const parentContext: Record<string, Record<string, any>> = inherited !=
+  const parentContext: Record<string, any> = inherited !=
     null && typeof inherited === `object`
     ? { ...inherited }
     : {}
 
   for (const projection of projections) {
+    if (projection.field.length === 0) {
+      const projectedAlias = projection.compiled(nsRow)
+      parentContext[projection.alias] =
+        projectedAlias != null && typeof projectedAlias === `object`
+          ? { ...projectedAlias }
+          : projectedAlias
+      continue
+    }
+
     const inheritedAlias = parentContext[projection.alias]
     const aliasContext =
       inheritedAlias != null && typeof inheritedAlias === `object`
@@ -1469,6 +1478,7 @@ function processFromClause(
         const branchRow = parentKeyStream
           ? {
               ...row,
+              [INCLUDES_PUBLIC_KEY]: branchPublicKey,
               [alias]: {
                 ...row[alias],
                 [INCLUDES_PUBLIC_KEY]: branchPublicKey,
@@ -1570,16 +1580,19 @@ function processUnionAll(
       map((data: any) => {
         const [key, [row, _order, correlationKey, parentContext, publicKey]] =
           data
-        const routedRow = attachRouteMetadataToResult(
-          row,
-          correlationKey,
-          parentContext,
-          publicKey,
-        )
-        return [`${index}:${encodeKeyForUnionBranch(key)}`, routedRow] as [
-          string,
-          Record<string, any>,
-        ]
+        const branchKey = `${index}:${encodeKeyForUnionBranch(key)}`
+        const branchPublicKey = `${index}:${encodeKeyForUnionBranch(
+          publicKey ?? key,
+        )}`
+        const routedRow = parentKeyStream
+          ? attachRouteMetadataToResult(
+              row,
+              correlationKey,
+              parentContext,
+              branchPublicKey,
+            )
+          : row
+        return [branchKey, routedRow] as [string, Record<string, any>]
       }),
     )
 
@@ -1847,7 +1860,11 @@ function getIncludesPublicKey(
   mainSource: string,
   fallback: unknown,
 ): unknown {
-  return row[mainSource]?.[INCLUDES_PUBLIC_KEY] ?? fallback
+  return (
+    row[mainSource]?.[INCLUDES_PUBLIC_KEY] ??
+    (row as any)[INCLUDES_PUBLIC_KEY] ??
+    fallback
+  )
 }
 
 /**
