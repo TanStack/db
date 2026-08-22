@@ -1829,6 +1829,75 @@ describe(`createEffect`, () => {
       }
     })
 
+    it(`reports a cleanup failure from automatic disposal`, async () => {
+      const loadFailure = new Error(`ordered subset failed`)
+      const cleanupFailure = new Error(`ordered subset cleanup failed`)
+      let loadCount = 0
+      let removeVisibleRow: () => void = () => {
+        throw new Error(`source has not started`)
+      }
+      const users = createCollection<User>({
+        id: `effect-rejected-ordered-cleanup-users`,
+        getKey: (user) => user.id,
+        syncMode: `on-demand`,
+        autoIndex: `eager`,
+        defaultIndexType: BTreeIndex,
+        sync: {
+          sync: ({ begin, write, commit, markReady }) => {
+            markReady()
+            removeVisibleRow = () => {
+              begin()
+              write({ type: `delete`, value: sampleUsers[0]! })
+              commit()
+            }
+            return {
+              loadSubset: () => {
+                loadCount++
+                if (loadCount > 1) return Promise.reject(loadFailure)
+                begin()
+                write({ type: `insert`, value: sampleUsers[0]! })
+                commit()
+                return Promise.resolve()
+              },
+              unloadSubset: () => {
+                throw cleanupFailure
+              },
+            }
+          },
+        },
+      })
+      const sourceErrors: Array<Error> = []
+      const consoleErrorSpy = vi
+        .spyOn(console, `error`)
+        .mockImplementation(() => {})
+      const effect = createEffect({
+        query: (q) =>
+          q
+            .from({ user: users })
+            .orderBy(({ user }) => user.name, `asc`)
+            .limit(1),
+        onBatch: () => {},
+        onSourceError: (error) => sourceErrors.push(error),
+      })
+
+      try {
+        await flushPromises()
+        removeVisibleRow()
+        await flushPromises()
+
+        expect(sourceErrors).toEqual([loadFailure])
+        expect(effect.disposed).toBe(true)
+        expect(consoleErrorSpy).toHaveBeenCalledWith(
+          expect.stringContaining(`failed to dispose after a source error`),
+          cleanupFailure,
+        )
+      } finally {
+        consoleErrorSpy.mockRestore()
+        await effect.dispose()
+        await users.cleanup()
+      }
+    })
+
     it(`reports a rejected lazy subset load and disposes the effect`, async () => {
       const users = createUsersCollection([sampleUsers[0]!])
       const issues = createCollection<Issue>({

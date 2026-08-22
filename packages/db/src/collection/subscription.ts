@@ -379,22 +379,44 @@ export class CollectionSubscription
     this.stalePublishedRows.clear()
 
     const merged = [...session.buffer.flat(), ...retainedDeletes]
+    const activeDemandFilters = this.subsetDemands.map((demand) =>
+      demand.requestOptions.where
+        ? createFilterFunctionFromExpression(demand.requestOptions.where)
+        : undefined,
+    )
     const replacement = this.createPublicationDiff(
       session.publicationState.publishedRows,
       merged,
+      (value) => activeDemandFilters.some((filter) => filter?.(value) ?? true),
     )
     if (replacement.length > 0) this.filteredCallback(replacement)
+    // Buffering records every source key before active-demand filtering. Reset
+    // the dedupe set to what the subscriber actually received so a later
+    // request can publish a row that belonged only to a released demand.
+    this.sentKeys = new Set(this.publishedRows.keys())
+    if (this.orderByIndex) {
+      this.limitedSnapshotRowCount = this.sentKeys.size
+      const orderedSentKeys = this.orderByIndex.takeFromStart(
+        this.sentKeys.size,
+        (key) => this.sentKeys.has(key),
+      )
+      this.lastSentKey = orderedSentKeys.at(-1)
+    }
   }
 
   /** Reduce a replay's raw delete/insert stream to one exact semantic delta. */
   private createPublicationDiff(
     baseline: ReadonlyMap<string | number, object>,
     changes: ReadonlyArray<ChangeMessage<any, any>>,
+    isCoveredByActiveDemand: (value: object) => boolean,
   ): Array<ChangeMessage<any, any>> {
     const finalRows = new Map(baseline)
     for (const change of changes) {
       if (change.type === `delete`) finalRows.delete(change.key)
       else finalRows.set(change.key, change.value)
+    }
+    for (const [key, value] of finalRows) {
+      if (!isCoveredByActiveDemand(value)) finalRows.delete(key)
     }
 
     const replacement: Array<ChangeMessage<any, any>> = []
@@ -883,7 +905,10 @@ export class CollectionSubscription
     this.callback(changes)
 
     // Update the row count and last key after sending (for next call's offset/cursor)
-    this.limitedSnapshotRowCount += changes.length
+    this.limitedSnapshotRowCount = Math.max(
+      this.limitedSnapshotRowCount,
+      currentOffset + changes.length,
+    )
     if (changes.length > 0) {
       this.lastSentKey = changes[changes.length - 1]!.key
     }

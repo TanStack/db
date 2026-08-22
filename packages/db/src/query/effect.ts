@@ -295,7 +295,12 @@ export function createEffect<
       }
 
       // Auto-dispose — the effect can no longer function
-      dispose()
+      void dispose().catch((cleanupError) => {
+        console.error(
+          `[Effect '${id}'] failed to dispose after a source error:`,
+          cleanupError,
+        )
+      })
     },
   })
   try {
