@@ -258,12 +258,19 @@ export function createEffect<
     abortController.abort()
 
     // Tear down the pipeline (unsubscribe from sources, etc.)
-    runner.dispose()
+    let cleanupError: unknown
+    try {
+      runner.dispose()
+    } catch (error) {
+      cleanupError = error
+    }
 
     // Wait for any in-flight async handlers to settle
     if (inFlightHandlers.size > 0) {
       await Promise.allSettled([...inFlightHandlers])
     }
+
+    if (cleanupError !== undefined) throw cleanupError
   }
 
   // Create and start the pipeline
@@ -291,7 +298,12 @@ export function createEffect<
       dispose()
     },
   })
-  runner.start()
+  try {
+    runner.start()
+  } catch (error) {
+    runner.dispose()
+    throw error
+  }
 
   return {
     dispose,
@@ -380,6 +392,7 @@ class EffectPipelineRunner<TRow extends object, TKey extends string | number> {
 
   // Reentrance guard
   private isGraphRunning = false
+  private starting = false
   private disposed = false
   // When dispose() is called mid-graph-run, defer heavy cleanup until the run completes
   private deferredCleanup = false
@@ -443,10 +456,16 @@ class EffectPipelineRunner<TRow extends object, TKey extends string | number> {
     this.graph.finalize()
   }
 
+  private isDisposed(): boolean {
+    return this.disposed
+  }
+
   /** Subscribe to source collections and start processing */
   start(): void {
+    this.starting = true
     if (this.collectionSources.length === 0) {
       // Nothing to subscribe to
+      this.starting = false
       return
     }
 
@@ -470,6 +489,11 @@ class EffectPipelineRunner<TRow extends object, TKey extends string | number> {
     >()
 
     for (const source of this.collectionSources) {
+      if (this.isDisposed()) {
+        this.starting = false
+        return
+      }
+
       const { sourceId, alias, collection } = source
       const collectionId = collection.id
 
@@ -525,22 +549,39 @@ class EffectPipelineRunner<TRow extends object, TKey extends string | number> {
             }
           }
 
-      // Determine subscription options based on ordered vs unordered path
-      const subscriptionOptions = this.buildSubscriptionOptions(
-        alias,
-        isLazy,
-        orderByInfo,
-        whereExpression,
-      )
-
       // Subscribe to source changes
-      const subscription = collection.subscribeChanges(
-        changeCallback,
-        subscriptionOptions,
-      )
+      const subscription = collection.subscribeChanges(changeCallback, {
+        ...this.buildSubscriptionOptions(
+          alias,
+          isLazy,
+          orderByInfo,
+          whereExpression,
+        ),
+        onLoadSubsetError: ({ error }) => {
+          this.onSourceError(normaliseError(error))
+        },
+      })
 
       // Store subscription immediately so the join compiler can find it
       this.subscriptions[sourceId] = subscription
+
+      const unsubscribe = () => {
+        subscription.unsubscribe()
+        delete this.subscriptions[sourceId]
+      }
+
+      // subscribeChanges can synchronously report a source error and dispose
+      // the runner before returning the subscription.
+      if (this.isDisposed()) {
+        unsubscribe()
+        this.starting = false
+        return
+      }
+
+      // Own the subscription before any ordered snapshot or lazy demand can
+      // throw. A partially started effect has no handle for its caller to
+      // dispose, so start() must be able to release every acquired source.
+      this.unsubscribeCallbacks.add(unsubscribe)
 
       const lazyCallbacks = this.lazySourcesCallbacks[sourceId]
       if (lazyCallbacks) {
@@ -558,11 +599,6 @@ class EffectPipelineRunner<TRow extends object, TKey extends string | number> {
       if (orderByInfo) {
         this.requestInitialOrderedSnapshot(alias, orderByInfo, subscription)
       }
-
-      this.unsubscribeCallbacks.add(() => {
-        subscription.unsubscribe()
-        delete this.subscriptions[sourceId]
-      })
 
       // Listen for status changes on source collections
       const statusUnsubscribe = collection.on(`status:change`, (event) => {
@@ -643,6 +679,7 @@ class EffectPipelineRunner<TRow extends object, TKey extends string | number> {
         this.initialLoadComplete = true
       }
     }
+    this.starting = false
   }
 
   /** Handle incoming changes from a source collection */
@@ -659,13 +696,22 @@ class EffectPipelineRunner<TRow extends object, TKey extends string | number> {
     plan: LazyDemandPlan,
     keys: Set<unknown>,
   ): void {
-    const update = this.demand.setDemand(subscription, plan, keys)
+    let update
+    try {
+      update = this.demand.setDemand(subscription, plan, keys)
+    } catch (error) {
+      // The subscription error event already reports adapter failures and
+      // disposes this effect. Do not let that query-local failure escape the
+      // source commit, but keep unrelated graph errors visible.
+      if (subscription.lastError !== error) throw error
+      if (this.starting) throw error
+      return
+    }
     if (update.ready instanceof Promise) {
-      void update.ready.catch((error: unknown) => {
-        this.onSourceError(
-          error instanceof Error ? error : new Error(String(error)),
-        )
-      })
+      // Each segment reports its own failure through the subscription. Consume
+      // the aggregate rejection so Promise.all does not create a second,
+      // detached error channel.
+      void update.ready.then(undefined, () => {})
     }
   }
 
@@ -948,11 +994,12 @@ class EffectPipelineRunner<TRow extends object, TKey extends string | number> {
         // Track in-flight load to prevent redundant concurrent requests
         if (loadResult instanceof Promise) {
           this.pendingOrderedLoadPromise = loadResult
-          loadResult.finally(() => {
+          const finish = () => {
             if (this.pendingOrderedLoadPromise === loadResult) {
               this.pendingOrderedLoadPromise = undefined
             }
-          })
+          }
+          void loadResult.then(finish, finish)
         }
       },
     })
@@ -986,8 +1033,15 @@ class EffectPipelineRunner<TRow extends object, TKey extends string | number> {
     this.disposed = true
     this.subscribedToAllCollections = false
 
-    // Immediately unsubscribe from sources and clear cheap state
-    this.unsubscribeCallbacks.forEach((fn) => fn())
+    // Immediately unsubscribe from every source, even if one release fails.
+    let firstCleanupError: unknown
+    for (const unsubscribe of this.unsubscribeCallbacks) {
+      try {
+        unsubscribe()
+      } catch (error) {
+        firstCleanupError ??= error
+      }
+    }
     this.unsubscribeCallbacks.clear()
     this.sentToD2KeysBySource.clear()
     this.pendingChanges.clear()
@@ -1016,6 +1070,8 @@ class EffectPipelineRunner<TRow extends object, TKey extends string | number> {
     } else {
       this.finalCleanup()
     }
+
+    if (firstCleanupError !== undefined) throw firstCleanupError
   }
 
   /** Clear graph references — called after graph run completes or immediately from dispose */
@@ -1116,9 +1172,10 @@ function trackPromise(
   inFlightHandlers: Set<Promise<void>>,
 ): void {
   inFlightHandlers.add(promise)
-  promise.finally(() => {
+  const finish = () => {
     inFlightHandlers.delete(promise)
-  })
+  }
+  void promise.then(finish, finish)
 }
 
 /** Report an error to the onError callback or console */
@@ -1127,7 +1184,7 @@ function reportError<TRow extends object, TKey extends string | number>(
   event: DeltaEvent<TRow, TKey>,
   onError?: (error: Error, event: DeltaEvent<TRow, TKey>) => void,
 ): void {
-  const normalised = error instanceof Error ? error : new Error(String(error))
+  const normalised = normaliseError(error)
   if (onError) {
     try {
       onError(normalised, event)
@@ -1139,4 +1196,8 @@ function reportError<TRow extends object, TKey extends string | number>(
   } else {
     console.error(`[Effect] Unhandled error in handler:`, normalised)
   }
+}
+
+function normaliseError(error: unknown): Error {
+  return error instanceof Error ? error : new Error(String(error))
 }

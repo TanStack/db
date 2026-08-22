@@ -6,7 +6,10 @@ import {
   mockSyncCollectionOptions,
   mockSyncCollectionOptionsNoInitialState,
 } from './utils.js'
-import type { DeltaEvent } from '../src/index.js'
+import type {
+  DeltaEvent,
+  SubscriptionLoadSubsetErrorEvent,
+} from '../src/index.js'
 
 // ---------------------------------------------------------------------------
 // Test types and helpers
@@ -1507,6 +1510,325 @@ describe(`createEffect`, () => {
   })
 
   describe(`source error handling`, () => {
+    it(`does not subscribe later sources after startup disposes the effect`, async () => {
+      const failure = new Error(`synchronous source failure`)
+      const users = createUsersCollection([sampleUsers[0]!])
+      const issues = createIssuesCollection([sampleIssues[0]!])
+      const subscribeChanges = users.subscribeChanges.bind(users)
+
+      vi.spyOn(users, `subscribeChanges`).mockImplementation(((
+        callback,
+        options,
+      ) => {
+        const subscription = subscribeChanges(callback, {
+          ...options,
+          includeInitialState: false,
+        })
+        const errorEvent: SubscriptionLoadSubsetErrorEvent = {
+          type: `loadSubset:error`,
+          subscription,
+          options: { subscription },
+          error: failure,
+        }
+        options?.onLoadSubsetError?.(errorEvent)
+        return subscription
+      }) as typeof users.subscribeChanges)
+
+      const sourceErrors: Array<Error> = []
+      const effect = createEffect({
+        query: (q) =>
+          q
+            .from({ user: users })
+            .leftJoin({ issue: issues }, ({ user, issue }) =>
+              eq(user.id, issue.userId),
+            )
+            .select(({ user, issue }) => ({
+              id: user.id,
+              issueId: issue.id,
+            })),
+        onBatch: () => {},
+        onSourceError: (error) => sourceErrors.push(error),
+      })
+
+      expect(sourceErrors).toEqual([failure])
+      expect(effect.disposed).toBe(true)
+      expect(users.subscriberCount).toBe(0)
+      expect(issues.subscriberCount).toBe(0)
+      await Promise.all([users.cleanup(), issues.cleanup()])
+    })
+
+    it(`releases every source when one unsubscriber throws`, async () => {
+      const failure = new Error(`first source unload failed`)
+      const createSource = (id: string, unloadSubset: () => void) =>
+        createCollection<{ id: number }>({
+          id,
+          getKey: (row) => row.id,
+          syncMode: `on-demand`,
+          sync: {
+            sync: ({ markReady }) => {
+              markReady()
+              return {
+                loadSubset: () => true,
+                unloadSubset,
+              }
+            },
+          },
+        })
+      const left = createSource(`effect-cleanup-left`, () => {
+        throw failure
+      })
+      const right = createSource(`effect-cleanup-right`, () => {})
+      const effect = createEffect({
+        query: (q) =>
+          q
+            .from({ left })
+            .leftJoin({ right }, ({ left: leftRow, right: rightRow }) =>
+              eq(leftRow.id, rightRow.id),
+            ),
+        onBatch: () => {},
+      })
+
+      expect(left.subscriberCount).toBe(1)
+      expect(right.subscriberCount).toBe(1)
+
+      await expect(effect.dispose()).rejects.toBe(failure)
+      expect(left.subscriberCount).toBe(0)
+      expect(right.subscriberCount).toBe(0)
+
+      await Promise.all([left.cleanup(), right.cleanup()])
+    })
+
+    it(`releases source ownership when the automatic subset load throws`, async () => {
+      const failure = new Error(`automatic subset failed`)
+      const users = createCollection<User>({
+        id: `effect-synchronous-subset-error`,
+        getKey: (user) => user.id,
+        syncMode: `on-demand`,
+        sync: {
+          sync: ({ markReady }) => {
+            markReady()
+            return {
+              loadSubset: () => {
+                throw failure
+              },
+            }
+          },
+        },
+      })
+      const sourceErrors: Array<Error> = []
+
+      expect(() =>
+        createEffect({
+          query: (q) => q.from({ user: users }),
+          onBatch: () => {},
+          onSourceError: (error) => sourceErrors.push(error),
+        }),
+      ).toThrow(failure)
+
+      expect(sourceErrors).toEqual([failure])
+      expect(users.subscriberCount).toBe(0)
+      await users.cleanup()
+    })
+
+    it(`releases an ordered source when its initial subset load throws`, async () => {
+      const failure = new Error(`initial ordered subset failed`)
+      const users = createCollection<User>({
+        id: `effect-initial-ordered-subset-error`,
+        getKey: (user) => user.id,
+        syncMode: `on-demand`,
+        autoIndex: `eager`,
+        defaultIndexType: BTreeIndex,
+        sync: {
+          sync: ({ markReady }) => {
+            markReady()
+            return {
+              loadSubset: () => {
+                throw failure
+              },
+            }
+          },
+        },
+      })
+      const sourceErrors: Array<Error> = []
+
+      expect(() =>
+        createEffect({
+          query: (q) =>
+            q
+              .from({ user: users })
+              .orderBy(({ user }) => user.name, `asc`)
+              .limit(1),
+          onBatch: () => {},
+          onSourceError: (error) => sourceErrors.push(error),
+        }),
+      ).toThrow(failure)
+
+      expect(sourceErrors).toEqual([failure])
+      expect(users.subscriberCount).toBe(0)
+      await users.cleanup()
+    })
+
+    it(`releases every source when initial lazy demand throws`, async () => {
+      const failure = new Error(`initial lazy demand failed`)
+      const users = createUsersCollection([sampleUsers[0]!])
+      const issues = createCollection<Issue>({
+        id: `effect-initial-lazy-subset-error`,
+        getKey: (issue) => issue.id,
+        syncMode: `on-demand`,
+        sync: {
+          sync: ({ markReady }) => {
+            markReady()
+            return {
+              loadSubset: () => {
+                throw failure
+              },
+            }
+          },
+        },
+      })
+      const sourceErrors: Array<Error> = []
+
+      expect(() =>
+        createEffect({
+          query: (q) =>
+            q
+              .from({ user: users })
+              .leftJoin({ issue: issues }, ({ user, issue }) =>
+                eq(user.id, issue.userId),
+              )
+              .select(({ user, issue }) => ({
+                id: user.id,
+                issueId: issue.id,
+              })),
+          onBatch: () => {},
+          onSourceError: (error) => sourceErrors.push(error),
+        }),
+      ).toThrow(failure)
+
+      expect(sourceErrors).toEqual([failure])
+      expect(users.subscriberCount).toBe(0)
+      expect(issues.subscriberCount).toBe(0)
+      await Promise.all([users.cleanup(), issues.cleanup()])
+    })
+
+    it(`isolates synchronous lazy-demand failure from an established source commit`, async () => {
+      const failure = new Error(`incremental effect lazy demand failed`)
+      const users = createCollection(
+        mockSyncCollectionOptions<User>({
+          id: `incremental-effect-users`,
+          getKey: (user) => user.id,
+          initialData: [],
+        }),
+      )
+      const issues = createCollection<Issue>({
+        id: `incremental-effect-issues`,
+        getKey: (issue) => issue.id,
+        syncMode: `on-demand`,
+        sync: {
+          sync: ({ markReady }) => {
+            markReady()
+            return {
+              loadSubset: () => {
+                throw failure
+              },
+            }
+          },
+        },
+      })
+      const sourceErrors: Array<Error> = []
+      const effect = createEffect({
+        query: (q) =>
+          q
+            .from({ user: users })
+            .leftJoin({ issue: issues }, ({ user, issue }) =>
+              eq(user.id, issue.userId),
+            )
+            .select(({ user, issue }) => ({
+              id: user.id,
+              issueId: issue.id,
+            })),
+        onBatch: () => {},
+        onSourceError: (error) => sourceErrors.push(error),
+      })
+
+      try {
+        let commitError: unknown
+        try {
+          users.utils.begin()
+          users.utils.write({ type: `insert`, value: sampleUsers[0]! })
+          users.utils.commit()
+        } catch (error) {
+          commitError = error
+        }
+
+        expect(commitError).toBeUndefined()
+        expect(sourceErrors).toEqual([failure])
+        expect(effect.disposed).toBe(true)
+      } finally {
+        await effect.dispose()
+        await Promise.all([users.cleanup(), issues.cleanup()])
+      }
+    })
+
+    it(`reports a rejected ordered subset load and disposes the effect`, async () => {
+      const failure = new Error(`ordered subset failed`)
+      let loadCount = 0
+      let removeVisibleRow: () => void = () => {
+        throw new Error(`source has not started`)
+      }
+      const users = createCollection<User>({
+        id: `effect-rejected-ordered-users`,
+        getKey: (user) => user.id,
+        syncMode: `on-demand`,
+        autoIndex: `eager`,
+        defaultIndexType: BTreeIndex,
+        sync: {
+          sync: ({ begin, write, commit, markReady }) => {
+            markReady()
+            removeVisibleRow = () => {
+              begin()
+              write({ type: `delete`, value: sampleUsers[0]! })
+              commit()
+            }
+            return {
+              loadSubset: () => {
+                loadCount++
+                if (loadCount > 1) return Promise.reject(failure)
+                begin()
+                write({ type: `insert`, value: sampleUsers[0]! })
+                commit()
+                return Promise.resolve()
+              },
+            }
+          },
+        },
+      })
+      const sourceErrors: Array<Error> = []
+      const effect = createEffect({
+        query: (q) =>
+          q
+            .from({ user: users })
+            .orderBy(({ user }) => user.name, `asc`)
+            .limit(1),
+        onBatch: () => {},
+        onSourceError: (error) => sourceErrors.push(error),
+      })
+
+      try {
+        await flushPromises()
+        expect(sourceErrors).toEqual([])
+
+        removeVisibleRow()
+        await flushPromises()
+
+        expect(sourceErrors).toEqual([failure])
+        expect(effect.disposed).toBe(true)
+      } finally {
+        await effect.dispose()
+        await users.cleanup()
+      }
+    })
+
     it(`reports a rejected lazy subset load and disposes the effect`, async () => {
       const users = createUsersCollection([sampleUsers[0]!])
       const issues = createCollection<Issue>({
@@ -1543,6 +1865,69 @@ describe(`createEffect`, () => {
           expect.objectContaining({ message: `lazy load failed` }),
         ])
         expect(effect.disposed).toBe(true)
+      } finally {
+        await effect.dispose()
+        await Promise.all([users.cleanup(), issues.cleanup()])
+      }
+    })
+
+    it(`keeps the effect alive when obsolete lazy demand is aborted`, async () => {
+      const users = createUsersCollection([sampleUsers[0]!])
+      const cancellation = new Error(`obsolete lazy demand`)
+      cancellation.name = `AbortError`
+      let capturedSignal: AbortSignal | undefined
+      const issues = createCollection<Issue>({
+        id: `effect-aborted-lazy-issues`,
+        getKey: (issue) => issue.id,
+        syncMode: `on-demand`,
+        autoIndex: `eager`,
+        defaultIndexType: BTreeIndex,
+        sync: {
+          sync: ({ markReady }) => {
+            markReady()
+            return {
+              loadSubset: ({ signal }) => {
+                capturedSignal = signal
+                return new Promise<void>((_resolve, reject) => {
+                  signal?.addEventListener(
+                    `abort`,
+                    () => reject(cancellation),
+                    { once: true },
+                  )
+                })
+              },
+            }
+          },
+        },
+      })
+      const sourceErrors: Array<Error> = []
+      const effect = createEffect({
+        query: (q) =>
+          q
+            .from({ user: users })
+            .leftJoin({ issue: issues }, ({ user, issue }) =>
+              eq(user.id, issue.userId),
+            )
+            .select(({ user, issue }) => ({
+              id: user.id,
+              issueId: issue.id,
+            })),
+        onBatch: () => {},
+        onSourceError: (error) => sourceErrors.push(error),
+      })
+
+      try {
+        await flushPromises()
+        expect(capturedSignal?.aborted).toBe(false)
+
+        users.utils.begin()
+        users.utils.write({ type: `delete`, value: sampleUsers[0]! })
+        users.utils.commit()
+        await flushPromises()
+
+        expect(capturedSignal?.aborted).toBe(true)
+        expect(sourceErrors).toEqual([])
+        expect(effect.disposed).toBe(false)
       } finally {
         await effect.dispose()
         await Promise.all([users.cleanup(), issues.cleanup()])

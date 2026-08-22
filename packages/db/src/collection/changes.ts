@@ -222,9 +222,6 @@ export class CollectionChangesManager<
     ) => void,
     options: SubscribeChangesOptions<TOutput, TKey> = {},
   ): CollectionSubscription {
-    // Start sync and track subscriber
-    this.addSubscriber()
-
     // Compile where callback to whereExpression if provided
     if (options.where && options.whereExpression) {
       throw new Error(
@@ -240,37 +237,56 @@ export class CollectionChangesManager<
       whereExpression = toExpression(result)
     }
 
-    const subscription = new CollectionSubscription(this.collection, callback, {
-      ...opts,
-      whereExpression,
-      onUnsubscribe: () => {
-        this.removeSubscriber()
-        this.changeSubscriptions.delete(subscription)
-      },
-    })
+    // Acquire ownership only after all fallible option validation and
+    // user-provided predicate compilation has completed.
+    this.addSubscriber()
 
-    // Register status listener BEFORE requesting snapshot to avoid race condition.
-    // This ensures the listener catches all status transitions, even if the
-    // loadSubset promise resolves synchronously or very quickly.
-    if (options.onStatusChange) {
-      subscription.on(`status:change`, options.onStatusChange)
-    }
-
-    if (options.includeInitialState) {
-      subscription.requestSnapshot({
-        trackLoadSubsetPromise: false,
-        orderBy: options.orderBy,
-        limit: options.limit,
-        onLoadSubsetResult: options.onLoadSubsetResult,
+    let subscription: CollectionSubscription | undefined
+    try {
+      subscription = new CollectionSubscription(this.collection, callback, {
+        ...opts,
+        whereExpression,
+        onUnsubscribe: () => {
+          this.removeSubscriber()
+          if (subscription) this.changeSubscriptions.delete(subscription)
+        },
       })
-    } else if (options.includeInitialState === false) {
-      // When explicitly set to false (not just undefined), mark all state as "seen"
-      // so that all future changes (including deletes) pass through unfiltered.
-      subscription.markAllStateAsSeen()
-    }
 
-    // Add to batched listeners
-    this.changeSubscriptions.add(subscription)
+      // Register status listener BEFORE requesting snapshot to avoid race condition.
+      // This ensures the listener catches all status transitions, even if the
+      // loadSubset promise resolves synchronously or very quickly.
+      if (options.onStatusChange) {
+        subscription.on(`status:change`, options.onStatusChange)
+      }
+
+      if (options.includeInitialState) {
+        subscription.requestSnapshot({
+          trackLoadSubsetPromise: false,
+          orderBy: options.orderBy,
+          limit: options.limit,
+          onLoadSubsetResult: options.onLoadSubsetResult,
+        })
+      } else if (options.includeInitialState === false) {
+        // When explicitly set to false (not just undefined), mark all state as "seen"
+        // so that all future changes (including deletes) pass through unfiltered.
+        subscription.markAllStateAsSeen()
+      }
+
+      // Add to batched listeners
+      this.changeSubscriptions.add(subscription)
+    } catch (error) {
+      if (subscription) {
+        try {
+          subscription.unsubscribe()
+        } catch {
+          // Preserve the setup error. Cleanup still releases subscriber
+          // ownership and attempts every subset unload before it throws.
+        }
+      } else {
+        this.removeSubscriber()
+      }
+      throw error
+    }
 
     return subscription
   }
@@ -283,12 +299,20 @@ export class CollectionChangesManager<
     this.activeSubscribersCount++
     this.lifecycle.cancelGCTimer()
 
-    // Start sync if collection was cleaned up
-    if (
-      this.lifecycle.status === `cleaned-up` ||
-      this.lifecycle.status === `idle`
-    ) {
-      this.sync.startSync()
+    try {
+      // Start sync if collection was cleaned up
+      if (
+        this.lifecycle.status === `cleaned-up` ||
+        this.lifecycle.status === `idle`
+      ) {
+        this.sync.startSync()
+      }
+    } catch (error) {
+      this.activeSubscribersCount = previousSubscriberCount
+      if (this.activeSubscribersCount === 0) {
+        this.lifecycle.startGCTimer()
+      }
+      throw error
     }
 
     this.events.emitSubscribersChange(

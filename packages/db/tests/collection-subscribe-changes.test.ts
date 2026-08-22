@@ -2151,6 +2151,74 @@ describe(`Collection.subscribeChanges`, () => {
         whereExpression: eq(new PropRef([`status`]), `active`),
       })
     }).toThrow(`Cannot specify both 'where' and 'whereExpression' options`)
+    expect(collection.subscriberCount).toBe(0)
+  })
+
+  it(`releases subscriber ownership when a where callback throws`, () => {
+    const failure = new Error(`where callback failed`)
+    const collection = createCollection<{ id: number; status: string }>({
+      id: `where-callback-error-test`,
+      getKey: (item) => item.id,
+      sync: { sync: () => {} },
+    })
+
+    expect(() =>
+      collection.subscribeChanges(() => {}, {
+        where: () => {
+          throw failure
+        },
+      }),
+    ).toThrow(failure)
+    expect(collection.subscriberCount).toBe(0)
+  })
+
+  it(`rolls back subscriber ownership when starting sync throws`, () => {
+    const failure = new Error(`sync setup failed`)
+    const collection = createCollection<{ id: number }>({
+      id: `subscriber-start-sync-error-test`,
+      getKey: (item) => item.id,
+      syncMode: `on-demand`,
+      sync: {
+        sync: () => {
+          throw failure
+        },
+      },
+    })
+
+    expect(() => collection.subscribeChanges(() => {})).toThrow(failure)
+    expect(collection.subscriberCount).toBe(0)
+    expect(collection.status).toBe(`error`)
+  })
+
+  it(`preserves setup failure when subscription cleanup also throws`, () => {
+    const loadFailure = new Error(`initial subset failed`)
+    const unloadFailure = new Error(`subset cleanup failed`)
+    const collection = createCollection<{ id: number }>({
+      id: `subscriber-load-and-unload-error-test`,
+      getKey: (item) => item.id,
+      syncMode: `on-demand`,
+      sync: {
+        sync: ({ markReady }) => {
+          markReady()
+          return {
+            loadSubset: () => true,
+            unloadSubset: () => {
+              throw unloadFailure
+            },
+          }
+        },
+      },
+    })
+
+    expect(() =>
+      collection.subscribeChanges(() => {}, {
+        includeInitialState: true,
+        onLoadSubsetResult: () => {
+          throw loadFailure
+        },
+      }),
+    ).toThrow(loadFailure)
+    expect(collection.subscriberCount).toBe(0)
   })
 })
 

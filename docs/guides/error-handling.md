@@ -119,6 +119,50 @@ Error tracking methods:
 - **`errorCount`**: Returns the number of consecutive sync failures. This counter is incremented only when queries fail completely (not per retry attempt) and is reset on successful queries:
 - **`clearError()`**: Clears the error state and triggers a refetch of the query. This method resets both `lastError` and `errorCount`:
 
+## Incremental Subset Load Errors
+
+An incremental `loadSubset` failure does not discard rows that are already
+available or put the shared source collection into `error`. The failure belongs
+to the subscription that requested that subset:
+
+```ts
+const subscription = todoCollection.subscribeChanges(handleChanges, {
+  includeInitialState: false,
+})
+
+subscription.on('loadSubset:error', ({ error, options }) => {
+  console.error('Subset failed', options, error)
+})
+
+subscription.requestSnapshot()
+
+// The most recent failure remains available for diagnostics.
+console.log(subscription.lastError)
+```
+
+For ordered live queries, `utils.setWindow()` rejects with the same error. The
+last failure is also available as `utils.lastSubsetError`, while the last
+successful snapshot remains readable:
+
+```ts
+try {
+  await liveTodos.utils.setWindow({ offset: 0, limit: 100 })
+} catch (error) {
+  console.error(liveTodos.utils.lastSubsetError)
+}
+```
+
+Effects report subset failures through `onSourceError` and dispose because
+their incremental result can no longer be kept complete.
+
+When a must-refetch truncate cannot reload every active subset, a subscription
+keeps its last successful snapshot and reports the subset error. It discards
+the incomplete replay batch, then resumes publishing ordinary source changes.
+The next truncate retries every active subset. Overlapping truncates form one
+atomic replay: all in-flight requests settle, the newest attempt decides the
+result, and subscribers receive the replacement only when that attempt
+succeeds.
+
 ## Collection Status and Error States
 
 Collections track their status and transition between states:

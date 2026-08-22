@@ -229,6 +229,14 @@ export interface SubscriptionStatusEvent<T extends SubscriptionStatus> {
   status: T
 }
 
+/** Event emitted when a subset requested by this subscription fails to load. */
+export interface SubscriptionLoadSubsetErrorEvent {
+  type: `loadSubset:error`
+  subscription: Subscription
+  options: LoadSubsetOptions
+  error: unknown
+}
+
 /**
  * Event emitted when subscription is unsubscribed
  */
@@ -244,6 +252,7 @@ export type SubscriptionEvents = {
   'status:change': SubscriptionStatusChangeEvent
   'status:ready': SubscriptionStatusEvent<`ready`>
   'status:loadingSubset': SubscriptionStatusEvent<`loadingSubset`>
+  'loadSubset:error': SubscriptionLoadSubsetErrorEvent
   unsubscribed: SubscriptionUnsubscribedEvent
 }
 
@@ -254,6 +263,8 @@ export type SubscriptionEvents = {
 export interface Subscription extends EventEmitter<SubscriptionEvents> {
   /** Current status of the subscription */
   readonly status: SubscriptionStatus
+  /** Most recent subset-load failure observed by this subscription. */
+  readonly lastError: unknown | undefined
 }
 
 /**
@@ -319,6 +330,11 @@ export type LoadSubsetOptions = {
   subscription?: Subscription
 }
 
+/**
+ * Loads one subset and transfers its ongoing resource ownership only after
+ * returning `true` or a promise. An implementation that throws synchronously
+ * must release any partially acquired resource before throwing.
+ */
 export type LoadSubsetFn = (options: LoadSubsetOptions) => true | Promise<void>
 
 export type UnloadSubsetFn = (options: LoadSubsetOptions) => void
@@ -893,6 +909,8 @@ export interface SubscribeChangesOptions<
    * @internal
    */
   onLoadSubsetResult?: (result: Promise<void> | true) => void
+  /** Receives subset-load failures scoped to this subscription. @internal */
+  onLoadSubsetError?: (event: SubscriptionLoadSubsetErrorEvent) => void
 }
 
 export interface SubscribeChangesSnapshotOptions<

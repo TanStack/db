@@ -49,6 +49,8 @@ import type { AllCollectionEvents } from '../../collection/events.js'
 
 export type LiveQueryCollectionUtils = UtilsRecord & {
   getRunCount: () => number
+  /** Most recent subset-load failure observed by this live query. */
+  readonly lastSubsetError: unknown | undefined
   /**
    * Sets the offset and limit of an ordered query.
    * Is a no-op if the query is not ordered.
@@ -114,6 +116,7 @@ export class CollectionConfigBuilder<
   private isInErrorState = false
   private fatalQueryError = false
   private readonly erroredSourceIds = new Set<string>()
+  private lastSubsetError: unknown | undefined
 
   // Reference to the live query collection for error state transitions
   public liveQueryCollection?: Collection<TResult, any, any>
@@ -121,6 +124,9 @@ export class CollectionConfigBuilder<
   private windowFn: ((options: WindowOptions) => void) | undefined
   private readonly initialWindow: WindowOptions | undefined
   private currentWindow: WindowOptions | undefined
+  private activeWindowOperation:
+    | { failed: boolean; error?: unknown }
+    | undefined
 
   private maybeRunGraphFn: (() => void) | undefined
 
@@ -244,6 +250,7 @@ export class CollectionConfigBuilder<
   getConfig(): CollectionConfigSingleRowOption<TResult> & {
     utils: LiveQueryCollectionUtils
   } {
+    const builder = this
     return {
       id: this.id,
       getKey:
@@ -262,6 +269,9 @@ export class CollectionConfigBuilder<
       singleResult: this.query.singleResult,
       utils: {
         getRunCount: this.getRunCount.bind(this),
+        get lastSubsetError() {
+          return builder.lastSubsetError
+        },
         setWindow: this.setWindow.bind(this),
         getWindow: this.getWindow.bind(this),
         [LIVE_QUERY_INTERNAL]: {
@@ -279,10 +289,16 @@ export class CollectionConfigBuilder<
       throw new SetWindowRequiresOrderByError()
     }
 
+    const loadOperation =
+      this.liveQueryCollection?._sync.beginLoadSubsetOperation()
     const previousWindow = this.currentWindow ?? this.initialWindow
+    const previousOperation = this.activeWindowOperation
+    const operation: { failed: boolean; error?: unknown } = { failed: false }
+    this.activeWindowOperation = operation
     try {
       this.windowFn(options)
       this.maybeRunGraphFn?.()
+      if (operation.failed) throw operation.error
       this.currentWindow = options
     } catch (error) {
       if (previousWindow) {
@@ -294,10 +310,13 @@ export class CollectionConfigBuilder<
           // window rather than replacing it with a rollback failure.
         }
       }
+      loadOperation?.cancel()
       throw error
+    } finally {
+      this.activeWindowOperation = previousOperation
     }
 
-    return this.liveQueryCollection?._sync.waitForCurrentLoadSubset() ?? true
+    return loadOperation?.wait() ?? true
   }
 
   getWindow(): { offset: number; limit: number } | undefined {
@@ -356,8 +375,25 @@ export class CollectionConfigBuilder<
   failDemand(planId: string, generation: number, error: unknown): void {
     const demand = this.activeDemands.get(planId)
     if (!demand || demand.generation !== generation) return
+    this.recordSubsetError(error)
+    if (this.activeWindowOperation) {
+      this.activeWindowOperation.failed = true
+      this.activeWindowOperation.error = error
+    }
     const message = error instanceof Error ? error.message : String(error)
     this.transitionToError(`Subset demand '${planId}' failed: ${message}`)
+  }
+
+  recordSubsetError(error: unknown): void {
+    this.lastSubsetError = error
+  }
+
+  trackSubsetLoadPromise(promise: Promise<void>): void {
+    this.liveQueryCollection!._sync.trackLoadPromise(promise)
+  }
+
+  trackSubsetLoadOperationPromise(promise: Promise<void>): void {
+    this.liveQueryCollection!._sync.trackLoadSubsetOperationPromise(promise)
   }
 
   retireDemand(planId: string): void {
@@ -632,6 +668,7 @@ export class CollectionConfigBuilder<
     this.isInErrorState = false
     this.fatalQueryError = false
     this.erroredSourceIds.clear()
+    this.lastSubsetError = undefined
     // Store config and syncState as instance properties for the duration of this sync session
     this.currentSyncConfig = config
 
@@ -641,49 +678,20 @@ export class CollectionConfigBuilder<
       unsubscribeCallbacks: new Set<() => void>(),
     }
 
-    // Extend the pipeline such that it applies the incoming changes to the collection
-    const fullSyncState = this.extendPipelineWithChangeProcessing(
-      config,
-      syncState,
-    )
-    this.currentSyncState = fullSyncState
+    let tornDown = false
+    const teardown = () => {
+      if (tornDown) return
+      tornDown = true
 
-    // Listen for scheduler context clears to clean up our pending state
-    // Re-register on each sync start so the listener is active for the sync session's lifetime
-    this.unsubscribeFromSchedulerClears = transactionScopedScheduler.onClear(
-      (contextId) => {
-        this.clearPendingGraphRun(contextId)
-      },
-    )
-
-    // Listen for loadingSubset changes on the live query collection BEFORE subscribing.
-    // This ensures we don't miss the event if subset loading completes synchronously.
-    // When isLoadingSubset becomes false, we may need to mark the collection as ready
-    // (if all source collections are already ready but we were waiting for subset load to complete)
-    const loadingSubsetUnsubscribe = config.collection.on(
-      `loadingSubset:change`,
-      (event) => {
-        if (!event.isLoadingSubset) {
-          // Subset loading finished, check if we can now mark ready
-          this.updateLiveQueryStatus(config)
+      let firstCleanupError: unknown
+      for (const unsubscribe of syncState.unsubscribeCallbacks) {
+        try {
+          unsubscribe()
+        } catch (error) {
+          firstCleanupError ??= error
         }
-      },
-    )
-    syncState.unsubscribeCallbacks.add(loadingSubsetUnsubscribe)
-
-    const loadSubsetDataCallbacks = this.subscribeToAllCollections(
-      config,
-      fullSyncState,
-    )
-
-    this.maybeRunGraphFn = () => this.scheduleGraphRun(loadSubsetDataCallbacks)
-
-    // Initial run with callback to load more data if needed
-    this.scheduleGraphRun(loadSubsetDataCallbacks)
-
-    // Return the unsubscribe function
-    return () => {
-      syncState.unsubscribeCallbacks.forEach((unsubscribe) => unsubscribe())
+      }
+      syncState.unsubscribeCallbacks.clear()
 
       // Clear current sync session state
       this.currentSyncConfig = undefined
@@ -724,7 +732,61 @@ export class CollectionConfigBuilder<
       // The scheduler's listener Set would otherwise keep a strong reference to this builder
       this.unsubscribeFromSchedulerClears?.()
       this.unsubscribeFromSchedulerClears = undefined
+
+      if (firstCleanupError !== undefined) throw firstCleanupError
     }
+
+    try {
+      // Extend the pipeline such that it applies the incoming changes to the collection
+      const fullSyncState = this.extendPipelineWithChangeProcessing(
+        config,
+        syncState,
+      )
+      this.currentSyncState = fullSyncState
+
+      // Listen for scheduler context clears to clean up our pending state
+      // Re-register on each sync start so the listener is active for the sync session's lifetime
+      this.unsubscribeFromSchedulerClears = transactionScopedScheduler.onClear(
+        (contextId) => {
+          this.clearPendingGraphRun(contextId)
+        },
+      )
+
+      // Listen for loadingSubset changes on the live query collection BEFORE subscribing.
+      // This ensures we don't miss the event if subset loading completes synchronously.
+      // When isLoadingSubset becomes false, we may need to mark the collection as ready
+      // (if all source collections are already ready but we were waiting for subset load to complete)
+      const loadingSubsetUnsubscribe = config.collection.on(
+        `loadingSubset:change`,
+        (event) => {
+          if (!event.isLoadingSubset) {
+            // Subset loading finished, check if we can now mark ready
+            this.updateLiveQueryStatus(config)
+          }
+        },
+      )
+      syncState.unsubscribeCallbacks.add(loadingSubsetUnsubscribe)
+
+      const loadSubsetDataCallbacks = this.subscribeToAllCollections(
+        config,
+        fullSyncState,
+      )
+
+      this.maybeRunGraphFn = () =>
+        this.scheduleGraphRun(loadSubsetDataCallbacks)
+
+      // Initial run with callback to load more data if needed
+      this.scheduleGraphRun(loadSubsetDataCallbacks)
+    } catch (error) {
+      try {
+        teardown()
+      } catch {
+        // Preserve the setup failure. It is the error the caller can act on.
+      }
+      throw error
+    }
+
+    return teardown
   }
 
   /**
