@@ -159,6 +159,7 @@ function parameterizeByParentRoutes(
           namespaced[mainSource]?.[INCLUDES_PUBLIC_KEY] ?? rowKey,
       }
       if (parentContext != null) Object.assign(namespaced, parentContext)
+      namespaced.__correlationKey = correlationKey
       namespaced.__parentContext = parentContext
       return [
         serializeValue([rowKey, correlationKey, parentContext]),
@@ -1461,10 +1462,20 @@ function processFromClause(
         : wrapInputWithAlias(input, alias)
     const branch = routedBranch.pipe(
       map(([key, row]) => {
-        return [`${alias}:${encodeKeyForUnionBranch(key)}`, row] as [
-          string,
-          typeof row,
-        ]
+        const branchKey = `${alias}:${encodeKeyForUnionBranch(key)}`
+        const aliasRow = row[alias] as Record<PropertyKey, unknown> | undefined
+        const publicKey = aliasRow?.[INCLUDES_PUBLIC_KEY] ?? key
+        const branchPublicKey = `${alias}:${encodeKeyForUnionBranch(publicKey)}`
+        const branchRow = parentKeyStream
+          ? {
+              ...row,
+              [alias]: {
+                ...row[alias],
+                [INCLUDES_PUBLIC_KEY]: branchPublicKey,
+              },
+            }
+          : row
+        return [branchKey, branchRow] as [string, typeof row]
       }),
     )
 

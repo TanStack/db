@@ -255,7 +255,7 @@ describe(`correlated include route-context transport oracle`, () => {
     }
   })
 
-  test(`keeps parent context inside joined union branches`, async () => {
+  test(`keeps parent context inside union branches`, async () => {
     const parents = createControlledCollection(`joined-union-parents`, [
       { id: 1, group: 1, maximumTag: 1 },
       { id: 2, group: 1, maximumTag: 2 },
@@ -265,10 +265,10 @@ describe(`correlated include route-context transport oracle`, () => {
       { id: 20, parentGroup: 1, tagId: 2 },
     ])
     const oddTags = createControlledCollection(`joined-union-odd-tags`, [
-      { id: 1 },
+      { id: 1, parentGroup: 1 },
     ])
     const evenTags = createControlledCollection(`joined-union-even-tags`, [
-      { id: 2 },
+      { id: 2, parentGroup: 1 },
     ])
     const live = createLiveQueryCollection((q) =>
       q
@@ -278,16 +278,21 @@ describe(`correlated include route-context transport oracle`, () => {
           const oddBranch = q
             .from({ oddTag: oddTags.collection })
             .where(({ oddTag }) => lte(oddTag.id, parent.maximumTag))
-            .select(({ oddTag }) => ({ id: oddTag.id }))
+            .select(({ oddTag }) => ({
+              id: oddTag.id,
+              parentGroup: oddTag.parentGroup,
+            }))
           const evenBranch = q
             .from({ evenTag: evenTags.collection })
             .where(({ evenTag }) => lte(evenTag.id, parent.maximumTag))
-            .select(({ evenTag }) => ({ id: evenTag.id }))
-          const allowedTags = q.unionAll(oddBranch, evenBranch)
+            .select(({ evenTag }) => ({
+              id: evenTag.id,
+              parentGroup: evenTag.parentGroup,
+            }))
           const childRows = q
-            .from({ child: children.collection })
-            .innerJoin({ tag: allowedTags }, ({ child, tag }) =>
-              eq(child.tagId, tag.id),
+            .unionAll(oddBranch, evenBranch)
+            .innerJoin({ child: children.collection }, ({ id, child }) =>
+              eq(id, child.tagId),
             )
             .where(({ child }) => eq(child.parentGroup, parent.group))
             .orderBy(({ child }) => child.id)
