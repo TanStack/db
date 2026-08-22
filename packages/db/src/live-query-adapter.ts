@@ -4,7 +4,7 @@ import type { CollectionStatus } from './types.js'
 /**
  * Shared helpers for the first-party framework adapters (`@tanstack/react-db`,
  * `@tanstack/vue-db`, `@tanstack/svelte-db`, `@tanstack/solid-db`,
- * `@tanstack/angular-db`).
+ * `@tanstack/angular-db`, `@tanstack/octane-db`).
  *
  * These centralize small pieces of logic every adapter used to duplicate, so
  * they stay consistent across frameworks. They are intended for the official
