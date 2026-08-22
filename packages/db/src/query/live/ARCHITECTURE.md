@@ -164,6 +164,18 @@ Adding one dimension to the query language requires checking its product with
 the others. A passing one-level filter case does not prove a nested aggregate,
 joined subquery, or union branch transports the same context.
 
+The executable oracle factors that product into valid compiler sub-grammars:
+
+- lexical scope, including nested outer and inner materialization forms;
+- grouping mode by aggregate-expression placement;
+- recursive source boundary by evaluation phase; and
+- join-key side by correlation attachment point.
+
+Every valid plan is checked as a Collection, `toArray`, and `materialize`
+include at initial load, after a parent-route update, and after a child update.
+The grammar declarations generate the cases; individual reported defects do
+not get one-off tests outside that product.
+
 A materialization cell identifies one include field on one parent-row
 occurrence:
 
