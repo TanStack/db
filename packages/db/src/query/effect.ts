@@ -306,7 +306,14 @@ export function createEffect<
   try {
     runner.start()
   } catch (error) {
-    runner.dispose()
+    try {
+      runner.dispose()
+    } catch (cleanupError) {
+      console.error(
+        `[Effect '${id}'] failed to dispose after a startup error:`,
+        cleanupError,
+      )
+    }
     throw error
   }
 

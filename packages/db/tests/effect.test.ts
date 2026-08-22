@@ -1598,6 +1598,67 @@ describe(`createEffect`, () => {
       await Promise.all([left.cleanup(), right.cleanup()])
     })
 
+    it(`preserves a startup error when cleanup also fails`, async () => {
+      const startupFailure = new Error(`second source failed to subscribe`)
+      const cleanupFailure = new Error(`first source failed to unload`)
+      const left = createCollection<{ id: number }>({
+        id: `effect-startup-error-left`,
+        getKey: (row) => row.id,
+        syncMode: `on-demand`,
+        sync: {
+          sync: ({ markReady }) => {
+            markReady()
+            return {
+              loadSubset: () => true,
+              unloadSubset: () => {
+                throw cleanupFailure
+              },
+            }
+          },
+        },
+      })
+      const right = createCollection<{ id: number }>({
+        id: `effect-startup-error-right`,
+        getKey: (row) => row.id,
+        syncMode: `on-demand`,
+        sync: {
+          sync: ({ markReady }) => {
+            markReady()
+            return { loadSubset: () => true }
+          },
+        },
+      })
+      vi.spyOn(right, `subscribeChanges`).mockImplementation(() => {
+        throw startupFailure
+      })
+      const consoleErrorSpy = vi
+        .spyOn(console, `error`)
+        .mockImplementation(() => {})
+
+      try {
+        expect(() =>
+          createEffect({
+            query: (q) =>
+              q
+                .from({ left })
+                .leftJoin({ right }, ({ left: leftRow, right: rightRow }) =>
+                  eq(leftRow.id, rightRow.id),
+                ),
+            onBatch: () => {},
+          }),
+        ).toThrow(startupFailure)
+        expect(consoleErrorSpy).toHaveBeenCalledWith(
+          expect.stringContaining(`failed to dispose after a startup error`),
+          cleanupFailure,
+        )
+        expect(left.subscriberCount).toBe(0)
+        expect(right.subscriberCount).toBe(0)
+      } finally {
+        consoleErrorSpy.mockRestore()
+        await Promise.all([left.cleanup(), right.cleanup()])
+      }
+    })
+
     it(`releases source ownership when the automatic subset load throws`, async () => {
       const failure = new Error(`automatic subset failed`)
       const users = createCollection<User>({
