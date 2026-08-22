@@ -77,13 +77,33 @@ export class CollectionSubscriber<
 
   private subscribeToChanges(whereExpression?: BasicExpression<boolean>) {
     const orderByInfo = this.getOrderByInfo()
+    let initialSubsetPending = !this.collectionConfigBuilder.isLazySource(
+      this.sourceId,
+    )
 
     // Direct load promise tracking: pipes loadSubset results straight to the
     // live query collection, avoiding the multi-hop deferred promise chain that
     // can break under microtask timing (e.g., queueMicrotask in TanStack Query).
     const trackLoadResult = (result: Promise<void> | true) => {
       if (result instanceof Promise) {
-        this.collectionConfigBuilder.trackSubsetLoadPromise(result)
+        // Defer the tracked rejection by one microtask so the subscription's
+        // error event can put an initial live query in error before loading
+        // state would otherwise let it become ready.
+        const trackedResult = result.catch(async (error: unknown) => {
+          await Promise.resolve()
+          throw error
+        })
+        this.collectionConfigBuilder.trackSubsetLoadPromise(trackedResult)
+        if (initialSubsetPending) {
+          void result.then(
+            () => {
+              initialSubsetPending = false
+            },
+            () => {},
+          )
+        }
+      } else {
+        initialSubsetPending = false
       }
     }
 
@@ -106,7 +126,10 @@ export class CollectionSubscriber<
       }
     }
     const onLoadSubsetError = (event: SubscriptionLoadSubsetErrorEvent) => {
-      this.collectionConfigBuilder.recordSubsetError(event.error)
+      this.collectionConfigBuilder.recordSubsetError(
+        event.error,
+        initialSubsetPending,
+      )
     }
 
     // Create subscription with onStatusChange - listener is registered before any async work
@@ -129,6 +152,7 @@ export class CollectionSubscriber<
         whereExpression,
         includeInitialState,
         onStatusChange,
+        trackLoadResult,
         onLoadSubsetError,
       )
       this.registerSubscriptionCleanup(subscription)
@@ -241,6 +265,7 @@ export class CollectionSubscriber<
     whereExpression: BasicExpression<boolean> | undefined,
     includeInitialState: boolean,
     onStatusChange: (event: SubscriptionStatusChangeEvent) => void,
+    onLoadSubsetResult: (result: Promise<void> | true) => void,
     onLoadSubsetError: (event: SubscriptionLoadSubsetErrorEvent) => void,
   ): CollectionSubscription {
     const sendChanges = (
@@ -258,14 +283,6 @@ export class CollectionSubscriber<
     // Track loading via the loadSubset promise directly.
     // requestSnapshot uses trackLoadSubsetPromise: false (needed for truncate handling),
     // so we use onLoadSubsetResult to get the promise and track it ourselves.
-    const onLoadSubsetResult = includeInitialState
-      ? (result: Promise<void> | true) => {
-          if (result instanceof Promise) {
-            this.collectionConfigBuilder.trackSubsetLoadPromise(result)
-          }
-        }
-      : undefined
-
     const subscription = this.collection.subscribeChanges(sendChanges, {
       ...(includeInitialState && { includeInitialState }),
       whereExpression,
@@ -273,7 +290,7 @@ export class CollectionSubscriber<
       onLoadSubsetError,
       orderBy: hints.orderBy,
       limit: hints.limit,
-      onLoadSubsetResult,
+      onLoadSubsetResult: includeInitialState ? onLoadSubsetResult : undefined,
     })
 
     return subscription
@@ -413,7 +430,13 @@ export class CollectionSubscriber<
         )
         return true
       }
-      this.loadNextItems(n, subscription)
+      try {
+        this.loadNextItems(n, subscription)
+      } catch (error) {
+        if (subscription.lastError !== error) throw error
+        // The subscription already reported the failure. Automatic refills
+        // must not make the source transaction that exposed the gap fail.
+      }
     }
     return true
   }

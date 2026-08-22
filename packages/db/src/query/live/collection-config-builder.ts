@@ -381,11 +381,22 @@ export class CollectionConfigBuilder<
       this.activeWindowOperation.error = error
     }
     const message = error instanceof Error ? error.message : String(error)
-    this.transitionToError(`Subset demand '${planId}' failed: ${message}`)
+    this.transitionToError(
+      `Subset demand '${planId}' failed: ${message}`,
+      error,
+    )
   }
 
-  recordSubsetError(error: unknown): void {
+  recordSubsetError(error: unknown, fatalBeforeReady = false): void {
     this.lastSubsetError = error
+    if (this.activeWindowOperation) {
+      this.activeWindowOperation.failed = true
+      this.activeWindowOperation.error = error
+    }
+    if (fatalBeforeReady) {
+      const message = error instanceof Error ? error.message : String(error)
+      this.transitionToError(`Initial subset load failed: ${message}`, error)
+    }
   }
 
   trackSubsetLoadPromise(promise: Promise<void>): void {
@@ -1089,19 +1100,19 @@ export class CollectionConfigBuilder<
   /**
    * Transition the live query to error state
    */
-  private transitionToError(message: string) {
+  private transitionToError(message: string, error?: unknown) {
     this.fatalQueryError = true
-    this.setErrorState(message)
+    this.setErrorState(message, error)
   }
 
-  private setErrorState(message: string) {
+  private setErrorState(message: string, error?: unknown) {
     this.isInErrorState = true
 
     // Log error to console for debugging
     console.error(`[Live Query Error] ${message}`)
 
     // Transition live query collection to error state
-    this.liveQueryCollection?._lifecycle.setStatus(`error`)
+    this.liveQueryCollection?._lifecycle.markError(error ?? new Error(message))
   }
 
   private allRequiredSourcesReady() {

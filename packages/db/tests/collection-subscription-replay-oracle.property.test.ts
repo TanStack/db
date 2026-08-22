@@ -3,6 +3,7 @@ import { describe, expect, it } from 'vitest'
 import { createCollection } from '../src/collection/index.js'
 import { createDeferred } from '../src/deferred.js'
 import { BTreeIndex } from '../src/indexes/btree-index.js'
+import { ReverseIndex } from '../src/indexes/reverse-index.js'
 import { Func, PropRef, Value } from '../src/query/ir.js'
 import { DeduplicatedLoadSubset } from '../src/query/subset-dedupe.js'
 import { createTransaction } from '../src/transactions.js'
@@ -1573,9 +1574,26 @@ describe(`CollectionSubscription replay oracle`, () => {
     }
   })
 
-  it.each([`resolve`, `reject`] as const)(
-    `restores ordered offset and cursor state after a replay %s`,
-    async (outcome) => {
+  const orderedReplayCases = ([`asc`, `desc`] as const).flatMap((direction) => [
+    ...([`return`, `resolve`] as const).flatMap((delivery) =>
+      ([`same`, `changed`] as const).map((identity) => ({
+        name: `${direction} ${delivery} with ${identity} keys`,
+        direction,
+        delivery,
+        identity,
+      })),
+    ),
+    ...([`throw`, `reject`] as const).map((delivery) => ({
+      name: `${direction} ${delivery}`,
+      direction,
+      delivery,
+      identity: `none` as const,
+    })),
+  ])
+
+  it.each(orderedReplayCases)(
+    `restores ordered offset and cursor state after replay: $name`,
+    async ({ direction, delivery, identity }) => {
       type OrderedReplayRow = {
         id: `one` | `two` | `three` | `four`
         value: number
@@ -1589,8 +1607,28 @@ describe(`CollectionSubscription replay oracle`, () => {
       let loadCount = 0
       const loadOptions: Array<LoadSubsetOptions> = []
       const replayLoads: Array<ReturnType<typeof createDeferred<void>>> = []
+      const replayRows: ReadonlyArray<OrderedReplayRow> =
+        identity === `same`
+          ? [
+              { id: `one`, value: 1 },
+              { id: `two`, value: 2 },
+            ]
+          : [
+              { id: `three`, value: 1 },
+              { id: `four`, value: 2 },
+            ]
+      let replayRowsInstalled = false
+      const installReplayRows = () => {
+        if (replayRowsInstalled || identity === `none`) return
+        replayRowsInstalled = true
+        begin()
+        for (const row of replayRows) {
+          write({ type: `insert`, value: row })
+        }
+        commit()
+      }
       const collection = createCollection<OrderedReplayRow>({
-        id: `ordered-replay-${outcome}`,
+        id: `ordered-replay-${direction}-${delivery}-${identity}`,
         getKey: (row) => row.id,
         syncMode: `on-demand`,
         sync: {
@@ -1611,6 +1649,17 @@ describe(`CollectionSubscription replay oracle`, () => {
                 if (loadCount <= 2) return true
                 if (loadCount > 4) return true
 
+                if (delivery === `return`) {
+                  installReplayRows()
+                  return true
+                }
+                if (delivery === `throw`) {
+                  if (loadCount === 3) {
+                    throw new Error(`ordered replay failed`)
+                  }
+                  return true
+                }
+
                 const deferred = createDeferred<void>()
                 replayLoads.push(deferred)
                 return deferred.promise
@@ -1623,63 +1672,77 @@ describe(`CollectionSubscription replay oracle`, () => {
       const index = collection.createIndex((row) => row.value, {
         indexType: BTreeIndex,
       })
+      const orderedIndex = direction === `asc` ? index : new ReverseIndex(index)
       const orderBy: OrderBy = [
         {
           expression: new PropRef([`value`]),
-          compareOptions: { direction: `asc`, nulls: `first` },
+          compareOptions: { direction, nulls: `first` },
         },
       ]
       const batches: Array<Array<OrderedReplayRow[`id`]>> = []
       const subscription = collection.subscribeChanges((changes) => {
         batches.push(changes.map(({ value }) => value.id))
       })
-      subscription.setOrderByIndex(index)
+      subscription.setOrderByIndex(orderedIndex)
+
+      const initialIds =
+        direction === `asc`
+          ? ([`one`, `two`] as const)
+          : ([`two`, `one`] as const)
+      const replacementIds =
+        direction === `asc`
+          ? ([`three`, `four`] as const)
+          : ([`four`, `three`] as const)
+      const succeeds = delivery === `return` || delivery === `resolve`
+      const expectedIds = identity === `changed` ? replacementIds : initialIds
 
       try {
         subscription.requestLimitedSnapshot({ orderBy, limit: 1 })
-        expect(batches).toEqual([[`one`]])
+        expect(batches).toEqual([[initialIds[0]]])
         subscription.requestLimitedSnapshot({
           orderBy,
           limit: 1,
-          minValues: [1],
+          minValues: [direction === `asc` ? 1 : 2],
         })
         expect(loadOptions[1]).toMatchObject({
           offset: 1,
-          cursor: { lastKey: `two` },
+          cursor: { lastKey: initialIds[1] },
         })
 
         begin()
         truncate()
         commit()
         await flushPromises()
-        expect(replayLoads).toHaveLength(2)
         expectSameSubsetRequest(loadOptions[2]!, loadOptions[0]!)
         expectSameSubsetRequest(loadOptions[3]!, loadOptions[1]!)
 
-        if (outcome === `resolve`) {
-          begin()
-          write({ type: `insert`, value: { id: `three`, value: 1 } })
-          write({ type: `insert`, value: { id: `four`, value: 2 } })
-          commit()
+        if (delivery === `resolve`) {
+          expect(replayLoads).toHaveLength(2)
+          installReplayRows()
           replayLoads[0]?.resolve()
           replayLoads[1]?.resolve()
-        } else {
+        } else if (delivery === `reject`) {
+          expect(replayLoads).toHaveLength(2)
           replayLoads[0]?.reject(new Error(`ordered replay failed`))
           replayLoads[1]?.resolve()
+        } else {
+          expect(replayLoads).toEqual([])
         }
         await flushPromises()
         expect(collection.toArray.map(({ id }) => id).sort()).toEqual(
-          outcome === `resolve` ? [`four`, `three`] : [],
+          succeeds ? [...expectedIds].sort() : [],
         )
 
         subscription.requestLimitedSnapshot({
           orderBy,
           limit: 1,
-          minValues: [2],
+          minValues: [direction === `asc` ? 2 : 1],
         })
         expect(loadOptions[4]).toMatchObject({
           offset: 2,
-          cursor: { lastKey: outcome === `resolve` ? `four` : `two` },
+          cursor: {
+            lastKey: succeeds ? expectedIds[1] : initialIds[1],
+          },
         })
         expect(batches.at(-1)).toEqual([])
       } finally {

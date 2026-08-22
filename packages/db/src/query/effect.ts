@@ -997,24 +997,34 @@ class EffectPipelineRunner<TRow extends object, TKey extends string | number> {
 
     this.lastLoadRequestKey.set(sourceId, cursor.loadRequestKey)
 
-    subscription.requestLimitedSnapshot({
-      orderBy: cursor.normalizedOrderBy,
-      limit: n,
-      minValues: cursor.minValues,
-      trackLoadSubsetPromise: false,
-      onLoadSubsetResult: (loadResult: Promise<void> | true) => {
-        // Track in-flight load to prevent redundant concurrent requests
-        if (loadResult instanceof Promise) {
-          this.pendingOrderedLoadPromise = loadResult
-          const finish = () => {
-            if (this.pendingOrderedLoadPromise === loadResult) {
-              this.pendingOrderedLoadPromise = undefined
+    try {
+      subscription.requestLimitedSnapshot({
+        orderBy: cursor.normalizedOrderBy,
+        limit: n,
+        minValues: cursor.minValues,
+        trackLoadSubsetPromise: false,
+        onLoadSubsetResult: (loadResult: Promise<void> | true) => {
+          // Track in-flight load to prevent redundant concurrent requests
+          if (loadResult instanceof Promise) {
+            this.pendingOrderedLoadPromise = loadResult
+            const finish = () => {
+              if (this.pendingOrderedLoadPromise === loadResult) {
+                this.pendingOrderedLoadPromise = undefined
+              }
             }
+            void loadResult.then(finish, finish)
           }
-          void loadResult.then(finish, finish)
-        }
-      },
-    })
+        },
+      })
+    } catch (error) {
+      if (subscription.lastError !== error) throw error
+      // subscribeChanges already routed the error through onSourceError. Do
+      // not let an automatic refill fail the source transaction that exposed
+      // the missing row.
+      if (this.lastLoadRequestKey.get(sourceId) === cursor.loadRequestKey) {
+        this.lastLoadRequestKey.delete(sourceId)
+      }
+    }
   }
 
   /**
