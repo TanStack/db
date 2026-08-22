@@ -276,9 +276,7 @@ async function runParentProjectionCell({
       .filter((child) => child.parentGroup === parent.group)
       .map(({ id }) => ({ id, token: parent.token }))
   }
-  const project = (
-    rows: Iterable<{ id: number; parentSnapshot: unknown }>,
-  ) =>
+  const project = (rows: Iterable<{ id: number; parentSnapshot: unknown }>) =>
     [...rows].map(({ id, parentSnapshot }) => {
       const token =
         parentSnapshot != null &&

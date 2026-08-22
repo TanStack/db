@@ -97,10 +97,8 @@ function projectParentContext(
   projections: Array<CompiledParentProjection>,
 ): Record<string, any> {
   const inherited = (nsRow as any).__parentContext
-  const parentContext: Record<string, any> = inherited !=
-    null && typeof inherited === `object`
-    ? { ...inherited }
-    : {}
+  const parentContext: Record<string, any> =
+    inherited != null && typeof inherited === `object` ? { ...inherited } : {}
 
   for (const projection of projections) {
     if (projection.field.length === 0) {
