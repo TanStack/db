@@ -2751,6 +2751,11 @@ describe(`Electric Integration`, () => {
           }),
         )
 
+        // Other collections in this file keep the shared GC timer armed, so
+        // assert this load leaves no timer of its own rather than none at all.
+        await Promise.resolve() // the GC queue picks its timer in a microtask
+        const ambientTimers = vi.getTimerCount()
+
         let loadSettled = false
         const load = Promise.resolve(
           testCollection._sync.loadSubset({ limit: 10 }),
@@ -2767,13 +2772,13 @@ describe(`Electric Integration`, () => {
         expect(mockRequestSnapshot).toHaveBeenCalledTimes(1)
         expect(loadSettled).toBe(true)
         await testCollection.cleanup()
-        expect(vi.getTimerCount()).toBe(0)
+        expect(vi.getTimerCount()).toBe(ambientTimers)
 
         resolveRefresh()
         await refresh
         await Promise.resolve()
         expect(mockRequestSnapshot).toHaveBeenCalledTimes(1)
-        expect(vi.getTimerCount()).toBe(0)
+        expect(vi.getTimerCount()).toBe(ambientTimers)
       } finally {
         vi.useRealTimers()
       }
@@ -2802,6 +2807,11 @@ describe(`Electric Integration`, () => {
           }),
         )
 
+        // Other collections in this file keep the shared GC timer armed, so
+        // assert this load leaves no timer of its own rather than none at all.
+        await Promise.resolve() // the GC queue picks its timer in a microtask
+        const ambientTimers = vi.getTimerCount()
+
         const load = testCollection._sync.loadSubset({ limit: 10 })
         await vi.advanceTimersByTimeAsync(250)
         await load
@@ -2810,7 +2820,7 @@ describe(`Electric Integration`, () => {
         await expect(refresh).rejects.toThrow(`late refresh failure`)
         await Promise.resolve()
         expect(mockRequestSnapshot).toHaveBeenCalledTimes(1)
-        expect(vi.getTimerCount()).toBe(0)
+        expect(vi.getTimerCount()).toBe(ambientTimers)
       } finally {
         vi.useRealTimers()
       }
@@ -2835,10 +2845,15 @@ describe(`Electric Integration`, () => {
           }),
         )
 
+        // Other collections in this file keep the shared GC timer armed, so
+        // assert this load leaves no timer of its own rather than none at all.
+        await Promise.resolve() // the GC queue picks its timer in a microtask
+        const ambientTimers = vi.getTimerCount()
+
         await testCollection._sync.loadSubset({ limit: 10 })
 
         expect(mockRequestSnapshot).toHaveBeenCalledTimes(1)
-        expect(vi.getTimerCount()).toBe(0)
+        expect(vi.getTimerCount()).toBe(ambientTimers)
       } finally {
         vi.useRealTimers()
       }

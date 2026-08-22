@@ -17,6 +17,16 @@ import type { CollectionChangesManager } from './changes'
 import type { CollectionSyncManager } from './sync'
 import type { CollectionStateManager } from './state'
 
+/**
+ * Floor applied to the GC delay of a collection that started syncing before
+ * anything subscribed. Adapters build their live query while rendering and
+ * subscribe when that render commits, so the delay has to outlive that gap;
+ * `gcTime` cannot, because adapters pass a near-zero one to make teardown on
+ * unmount immediate. Does not apply to the timer armed when the last
+ * subscriber leaves, which still honours `gcTime` exactly.
+ */
+const UNSUBSCRIBED_GC_FLOOR_MS = 50
+
 export class CollectionLifecycleManager<
   TOutput extends object = Record<string, unknown>,
   TKey extends string | number = string | number,
@@ -173,10 +183,22 @@ export class CollectionLifecycleManager<
   }
 
   /**
+   * Start the garbage collection timer for a collection with no subscribers
+   * Called when sync starts outside a subscription
+   */
+  public startGCTimerIfUnsubscribed(): void {
+    if (this.changes.activeSubscribersCount > 0) {
+      return
+    }
+
+    this.startGCTimer(UNSUBSCRIBED_GC_FLOOR_MS)
+  }
+
+  /**
    * Start the garbage collection timer
    * Called when the collection becomes inactive (no subscribers)
    */
-  public startGCTimer(): void {
+  public startGCTimer(minDelay = 0): void {
     const gcTime = this.config.gcTime ?? 300000 // 5 minutes default
 
     // If gcTime is 0, negative, or non-finite (Infinity, -Infinity, NaN), GC is disabled.
@@ -186,12 +208,16 @@ export class CollectionLifecycleManager<
       return
     }
 
-    CleanupQueue.getInstance().schedule(this, gcTime, () => {
-      if (this.changes.activeSubscribersCount === 0) {
-        // Schedule cleanup during idle time to avoid blocking the UI thread
-        this.scheduleIdleCleanup()
-      }
-    })
+    CleanupQueue.getInstance().schedule(
+      this,
+      Math.max(gcTime, minDelay),
+      () => {
+        if (this.changes.activeSubscribersCount === 0) {
+          // Schedule cleanup during idle time to avoid blocking the UI thread
+          this.scheduleIdleCleanup()
+        }
+      },
+    )
   }
 
   /**
