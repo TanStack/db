@@ -1146,10 +1146,72 @@ function collectRefsFromSelectValue(value: unknown): Array<PropRef> {
     ]
   }
   if (value instanceof IncludesSubquery) {
-    return [value.correlationField, ...(value.parentProjection ?? [])]
+    return [
+      value.correlationField,
+      ...(value.parentProjection ?? []),
+      ...collectExternalRefsFromQuery(value.query),
+    ]
   }
   if (!isPlainObject(value)) return []
   return Object.values(value).flatMap(collectRefsFromSelectValue)
+}
+
+function collectExternalRefsFromQuery(query: QueryIR): Array<PropRef> {
+  const localAliases = new Set(collectQueryAliases(query))
+  const refs: Array<PropRef> = []
+  const addExpression = (expression: BasicExpression | Aggregate) => {
+    refs.push(...collectRefsFromExpression(expression))
+  }
+  const addWhere = (where: Where) => {
+    addExpression(
+      typeof where === `object` && `expression` in where
+        ? where.expression
+        : where,
+    )
+  }
+
+  for (const where of query.where ?? []) addWhere(where)
+  for (const join of query.join ?? []) {
+    addExpression(join.left)
+    addExpression(join.right)
+    if (join.from.type === `queryRef`) {
+      refs.push(...collectExternalRefsFromQuery(join.from.query))
+    }
+  }
+  for (const expression of query.groupBy ?? []) addExpression(expression)
+  for (const having of query.having ?? []) addWhere(having)
+  for (const { expression } of query.orderBy ?? []) addExpression(expression)
+  if (query.select) refs.push(...collectRefsFromSelectValue(query.select))
+
+  if (query.from.type === `queryRef`) {
+    refs.push(...collectExternalRefsFromQuery(query.from.query))
+  } else if (query.from.type === `unionFrom`) {
+    for (const source of query.from.sources) {
+      if (source.type === `queryRef`) {
+        refs.push(...collectExternalRefsFromQuery(source.query))
+      }
+    }
+  } else if (query.from.type === `unionAll`) {
+    for (const branch of query.from.queries) {
+      refs.push(...collectExternalRefsFromQuery(branch))
+    }
+  }
+
+  const seen = new Set<string>()
+  return refs.filter((ref) => {
+    const alias = ref.path.length > 1 ? ref.path[0] : undefined
+    const path = ref.path.join(`.`)
+    if (
+      alias == null ||
+      alias === `$selected` ||
+      localAliases.has(alias) ||
+      seen.has(path)
+    ) {
+      return false
+    }
+    seen.add(path)
+    return true
+  })
 }
 
 function collectParentRefsFromQuery(
@@ -1179,7 +1241,9 @@ function collectParentRefsFromQuery(
   for (const expression of query.groupBy ?? []) addExpression(expression)
   for (const having of query.having ?? []) addWhere(having)
   for (const { expression } of query.orderBy ?? []) addExpression(expression)
-  if (query.select) refs.push(...collectRefsFromSelectValue(query.select))
+  if (query.select) {
+    refs.push(...collectRefsFromSelectValue(query.select))
+  }
 
   if (query.from.type === `queryRef`) {
     refs.push(...collectParentRefsFromQuery(query.from.query, parentAliases))
@@ -1210,6 +1274,16 @@ function collectParentRefsFromQuery(
   })
 }
 
+function collectExternalParentAliases(query: QueryIR): Array<string> {
+  return [
+    ...new Set(
+      collectExternalRefsFromQuery(query)
+        .map((ref) => ref.path[0])
+        .filter((alias): alias is string => alias !== undefined),
+    ),
+  ]
+}
+
 /**
  * Checks whether a WHERE clause references any parent alias.
  */
@@ -1238,6 +1312,9 @@ function buildIncludesSubquery(
 
   // Collect child's own aliases
   const childAliases = collectQueryAliases(childQuery)
+  const visibleParentAliases = [
+    ...new Set([...parentAliases, ...collectExternalParentAliases(childQuery)]),
+  ]
 
   // Walk child's WHERE clauses to find the correlation condition.
   // The correlation eq() may be a standalone WHERE or nested inside a top-level and().
@@ -1263,7 +1340,7 @@ function buildIncludesSubquery(
         const result = extractCorrelation(
           expr.args[0]!,
           expr.args[1]!,
-          parentAliases,
+          visibleParentAliases,
           childAliases,
         )
         if (result) {
@@ -1290,7 +1367,7 @@ function buildIncludesSubquery(
             const result = extractCorrelation(
               arg.args[0]!,
               arg.args[1]!,
-              parentAliases,
+              visibleParentAliases,
               childAliases,
             )
             if (result) {
@@ -1351,7 +1428,7 @@ function buildIncludesSubquery(
   const pureChildWhere: Array<Where> = []
   const parentFilters: Array<Where> = []
   for (const w of modifiedWhere) {
-    if (referencesParent(w, parentAliases)) {
+    if (referencesParent(w, visibleParentAliases)) {
       parentFilters.push(w)
     } else {
       pureChildWhere.push(w)
@@ -1362,7 +1439,7 @@ function buildIncludesSubquery(
   // identity, not only the main equality key or residual filters.
   const projectedParentRefs = collectParentRefsFromQuery(
     { ...childQuery, where: modifiedWhere },
-    parentAliases,
+    visibleParentAliases,
   )
   const parentProjection =
     projectedParentRefs.length > 0 ? projectedParentRefs : undefined

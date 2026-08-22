@@ -74,6 +74,19 @@ function getHavingEvaluationRow(row: Record<string, unknown>): NamespacedRow {
   }
 }
 
+function getWrappedAggregateEvaluationRow(
+  row: Record<string, unknown>,
+  selected: Record<string, unknown>,
+): NamespacedRow {
+  const parentContext = row.__parentContext
+  return {
+    ...(parentContext !== null && typeof parentContext === `object`
+      ? (parentContext as NamespacedRow)
+      : {}),
+    $selected: selected,
+  }
+}
+
 function getRowVirtualMetadata(row: NamespacedRow): RowVirtualMetadata {
   let found = false
   let allSynced = true
@@ -676,7 +689,9 @@ function evaluateWrappedAggregates(
     finalResults[`${GROUP_KEY_REF_PREFIX}${i}`] = aggregatedRow[`__key_${i}`]
   }
   for (const [alias, evaluator] of Object.entries(wrappedAggExprs)) {
-    finalResults[alias] = evaluator({ $selected: finalResults })
+    finalResults[alias] = evaluator(
+      getWrappedAggregateEvaluationRow(aggregatedRow, finalResults),
+    )
   }
   for (const key of Object.keys(finalResults)) {
     if (key.startsWith(`__agg_`) || key.startsWith(GROUP_KEY_REF_PREFIX)) {

@@ -30,6 +30,7 @@ import {
 } from '../ir.js'
 import { ensureIndexForField } from '../../indexes/auto-index.js'
 import { deepEquals } from '../../utils.js'
+import { normalizeValue } from '../../utils/comparison.js'
 import {
   compileExpression,
   isCaseWhenConditionTrue,
@@ -68,6 +69,7 @@ export const INCLUDES_ROUTING = Symbol(`includesRouting`)
 export const INCLUDES_PUBLIC_KEY = Symbol(`includesPublicKey`)
 export const FN_SELECT_STATE = Symbol(`fnSelectState`)
 const SKIP_INCLUDE = Symbol(`skipInclude`)
+const PARENT_ROUTE_CROSS_KEY = `__tanstack_parent_route_cross__`
 
 type ConditionalSelectGuard = {
   condition: BasicExpression
@@ -82,6 +84,130 @@ type SourceInclude = {
 type ProjectedSourceIncludePath = {
   path: Array<string>
   guards: Array<ConditionalSelectGuard>
+}
+
+type CompiledParentProjection = {
+  alias: string
+  field: Array<string>
+  compiled: (row: NamespacedRow) => unknown
+}
+
+function projectParentContext(
+  nsRow: NamespacedRow,
+  projections: Array<CompiledParentProjection>,
+): Record<string, Record<string, any>> {
+  const inherited = (nsRow as any).__parentContext
+  const parentContext: Record<string, Record<string, any>> = inherited !=
+    null && typeof inherited === `object`
+    ? { ...inherited }
+    : {}
+
+  for (const projection of projections) {
+    const inheritedAlias = parentContext[projection.alias]
+    const aliasContext =
+      inheritedAlias != null && typeof inheritedAlias === `object`
+        ? { ...inheritedAlias }
+        : {}
+    parentContext[projection.alias] = aliasContext
+
+    let target = aliasContext
+    for (let index = 0; index < projection.field.length - 1; index++) {
+      const segment = projection.field[index]!
+      const inheritedNested = target[segment]
+      const nested =
+        inheritedNested != null && typeof inheritedNested === `object`
+          ? { ...inheritedNested }
+          : {}
+      target[segment] = nested
+      target = nested
+    }
+    target[projection.field[projection.field.length - 1]!] =
+      projection.compiled(nsRow)
+  }
+
+  return parentContext
+}
+
+function parameterizeByParentRoutes(
+  pipeline: NamespacedAndKeyedStream,
+  parentKeyStream: KeyedStream,
+  mainSource: string,
+): NamespacedAndKeyedStream {
+  const rows: any = pipeline.pipe(
+    map(([rowKey, row]) => [PARENT_ROUTE_CROSS_KEY, [rowKey, row]]),
+  )
+  const routes: any = parentKeyStream.pipe(
+    map(([correlationKey, parentContext]) => [
+      PARENT_ROUTE_CROSS_KEY,
+      [correlationKey, parentContext],
+    ]),
+  )
+
+  return rows.pipe(
+    joinOperator(routes, `inner`),
+    filter(([, [rowSide, routeSide]]: any) =>
+      Boolean(rowSide != null && routeSide != null),
+    ),
+    map(([, [rowSide, routeSide]]: any) => {
+      const [rowKey, row] = rowSide!
+      const [correlationKey, parentContext] = routeSide!
+      const namespaced = { ...row } as Record<string, any>
+      namespaced[mainSource] = {
+        ...namespaced[mainSource],
+        __correlationKey: correlationKey,
+        [INCLUDES_PUBLIC_KEY]:
+          namespaced[mainSource]?.[INCLUDES_PUBLIC_KEY] ?? rowKey,
+      }
+      if (parentContext != null) Object.assign(namespaced, parentContext)
+      namespaced.__parentContext = parentContext
+      return [
+        serializeValue([rowKey, correlationKey, parentContext]),
+        namespaced,
+      ] as [string, NamespacedRow]
+    }),
+  ) as NamespacedAndKeyedStream
+}
+
+function getRowCorrelationKey(row: NamespacedRow, mainSource: string): unknown {
+  return (
+    (row as any)[mainSource]?.__correlationKey ?? (row as any).__correlationKey
+  )
+}
+
+function correlationValuesEqual(left: unknown, right: unknown): boolean {
+  if (left == null || right == null) return false
+  const normalizedLeft = normalizeValue(left)
+  const normalizedRight = normalizeValue(right)
+  return (
+    Object.is(normalizedLeft, normalizedRight) ||
+    (typeof normalizedLeft === `number` &&
+      typeof normalizedRight === `number` &&
+      Number.isNaN(normalizedLeft) &&
+      Number.isNaN(normalizedRight))
+  )
+}
+
+function attachRouteMetadataToResult(
+  value: any,
+  correlationKey: unknown,
+  parentContext: unknown,
+  publicKey: unknown,
+): any {
+  if (
+    value == null ||
+    typeof value !== `object` ||
+    (correlationKey === undefined &&
+      parentContext === undefined &&
+      publicKey === undefined)
+  ) {
+    return value
+  }
+  return {
+    ...value,
+    __correlationKey: correlationKey,
+    __parentContext: parentContext,
+    [INCLUDES_PUBLIC_KEY]: publicKey,
+  }
 }
 
 /**
@@ -227,6 +353,7 @@ export function compileQuery(
     sourceIncludes,
     directIncludes,
     isUnionFrom,
+    isParentRouted,
   } = processFromClause(
     query.from,
     allInputs,
@@ -241,6 +368,7 @@ export function compileQuery(
     aliasToCollectionId,
     aliasRemapping,
     sourceWhereClauses,
+    parentKeyStream,
   )
   Object.assign(sources, fromSources)
 
@@ -250,17 +378,13 @@ export function compileQuery(
   // so the child pipeline only processes rows that match parents.
   let pipeline: NamespacedAndKeyedStream = initialPipeline
   const childCorrelationAlias = childCorrelationField?.path[0]
-  const joinsParentAfterJoins =
+  const joinsParentDirectly =
     !isUnionFrom &&
+    !isParentRouted &&
     parentKeyStream !== undefined &&
     childCorrelationField !== undefined &&
-    childCorrelationAlias !== mainSource
-  if (
-    !isUnionFrom &&
-    parentKeyStream &&
-    childCorrelationField &&
-    !joinsParentAfterJoins
-  ) {
+    childCorrelationAlias === mainSource
+  if (parentKeyStream && childCorrelationField && joinsParentDirectly) {
     const mainInput = sources[mainSource]!
     let filteredMainInput = mainInput
     // Re-key child input by correlation field: [correlationValue, [childKey, childRow]]
@@ -302,6 +426,14 @@ export function compileQuery(
     sources[mainSource] = filteredMainInput
 
     pipeline = wrapInputWithAlias(filteredMainInput, mainSource)
+  } else if (parentKeyStream && !isParentRouted) {
+    // QueryRefs, unions, and joined-source correlations need the route before
+    // source-local joins, filters, grouping, ordering, or windows run.
+    pipeline = parameterizeByParentRoutes(
+      initialPipeline,
+      parentKeyStream,
+      mainSource,
+    )
   }
 
   // Process JOIN clauses if they exist
@@ -326,41 +458,23 @@ export function compileQuery(
       aliasToCollectionId,
       aliasRemapping,
       sourceWhereClauses,
-      parentKeyStream !== undefined && !joinsParentAfterJoins,
+      parentKeyStream !== undefined,
+      parentKeyStream,
     )
   }
 
-  // A correlation field owned by a joined source does not exist on the main
-  // input. Join the fully namespaced child relation with its parent routes
-  // here, after the source join has made that field available.
-  if (joinsParentAfterJoins) {
+  // A recursively compiled source or a correlation owned by a joined source
+  // is already parameterized by route. Once the correlation field is visible,
+  // retain only the copy whose route key matches it.
+  if (parentKeyStream && childCorrelationField && !joinsParentDirectly) {
     const compiledChildCorrelation = compileExpression(childCorrelationField)
     pipeline = pipeline.pipe(
-      map(
-        ([key, row]) =>
-          [compiledChildCorrelation(row), [key, row]] as [
-            unknown,
-            [unknown, typeof row],
-          ],
+      filter(([, row]) =>
+        correlationValuesEqual(
+          compiledChildCorrelation(row),
+          getRowCorrelationKey(row, mainSource),
+        ),
       ),
-      joinOperator(parentKeyStream, `inner`),
-      filter(([_correlationValue, [childSide]]) => childSide != null),
-      map(([correlationValue, [childSide, parentSide]]) => {
-        const [childKey, row] = childSide as [unknown, NamespacedRow]
-        const namespaced = { ...row } as Record<string, any>
-        namespaced[mainSource] = {
-          ...namespaced[mainSource],
-          __correlationKey: correlationValue,
-          [INCLUDES_PUBLIC_KEY]: childKey,
-        }
-        if (parentSide != null) {
-          Object.assign(namespaced, parentSide)
-          namespaced.__parentContext = parentSide
-        }
-        const effectiveKey =
-          parentSide != null ? serializeValue([childKey, parentSide]) : childKey
-        return [effectiveKey, namespaced]
-      }),
     ) as NamespacedAndKeyedStream
   }
 
@@ -517,32 +631,21 @@ export function compileQuery(
       }))
       let parentKeys: any
       if (subquery.parentProjection && subquery.parentProjection.length > 0) {
-        const compiledProjections = subquery.parentProjection.map((ref) => ({
-          alias: ref.path[0]!,
-          field: ref.path.slice(1),
-          compiled: compileExpression(ref),
-        }))
+        const compiledProjections: Array<CompiledParentProjection> =
+          subquery.parentProjection.map((ref) => ({
+            alias: ref.path[0]!,
+            field: ref.path.slice(1),
+            compiled: compileExpression(ref),
+          }))
         parentKeys = pipeline.pipe(
           map(([_key, nsRow]: any) => {
             if (!matchesConditionalSelectGuards(compiledGuards, nsRow)) {
               return [SKIP_INCLUDE, null] as any
             }
-            const parentContext: Record<string, Record<string, any>> = {}
-            for (const proj of compiledProjections) {
-              if (!parentContext[proj.alias]) {
-                parentContext[proj.alias] = {}
-              }
-              const value = proj.compiled(nsRow)
-              // Set nested field in the alias namespace
-              let target = parentContext[proj.alias]!
-              for (let i = 0; i < proj.field.length - 1; i++) {
-                if (!target[proj.field[i]!]) {
-                  target[proj.field[i]!] = {}
-                }
-                target = target[proj.field[i]!]
-              }
-              target[proj.field[proj.field.length - 1]!] = value
-            }
+            const parentContext = projectParentContext(
+              nsRow,
+              compiledProjections,
+            )
             return [compiledCorrelation(nsRow), parentContext] as any
           }),
         )
@@ -697,11 +800,12 @@ export function compileQuery(
 
       // Capture routing function for INCLUDES_ROUTING tagging
       if (subquery.parentProjection && subquery.parentProjection.length > 0) {
-        const compiledProjs = subquery.parentProjection.map((ref) => ({
-          alias: ref.path[0]!,
-          field: ref.path.slice(1),
-          compiled: compileExpression(ref),
-        }))
+        const compiledProjs: Array<CompiledParentProjection> =
+          subquery.parentProjection.map((ref) => ({
+            alias: ref.path[0]!,
+            field: ref.path.slice(1),
+            compiled: compileExpression(ref),
+          }))
         const compiledCorr = compiledCorrelation
         const compiledRoutingGuards = compiledGuards
         includesRoutingFns.push({
@@ -714,21 +818,7 @@ export function compileQuery(
                 parentContext: null,
               }
             }
-            const parentContext: Record<string, Record<string, any>> = {}
-            for (const proj of compiledProjs) {
-              if (!parentContext[proj.alias]) {
-                parentContext[proj.alias] = {}
-              }
-              const value = proj.compiled(nsRow)
-              let target = parentContext[proj.alias]!
-              for (let i = 0; i < proj.field.length - 1; i++) {
-                if (!target[proj.field[i]!]) {
-                  target[proj.field[i]!] = {}
-                }
-                target = target[proj.field[i]!]
-              }
-              target[proj.field[proj.field.length - 1]!] = value
-            }
+            const parentContext = projectParentContext(nsRow, compiledProjs)
             return {
               active: true,
               correlationKey: compiledCorr(nsRow),
@@ -1259,6 +1349,7 @@ function processFromClause(
   aliasToCollectionId: Record<string, string>,
   aliasRemapping: Record<string, string>,
   sourceWhereClauses: Map<string, BasicExpression<boolean>>,
+  parentKeyStream?: KeyedStream,
 ): {
   alias: string
   pipeline: NamespacedAndKeyedStream
@@ -1267,6 +1358,7 @@ function processFromClause(
   sourceIncludes: Array<SourceInclude>
   directIncludes: Array<IncludesCompilationResult>
   isUnionFrom: boolean
+  isParentRouted: boolean
 } {
   if (from.type === `unionAll`) {
     return processUnionAll(
@@ -1283,25 +1375,28 @@ function processFromClause(
       aliasToCollectionId,
       aliasRemapping,
       sourceWhereClauses,
+      parentKeyStream,
     )
   }
 
   if (from.type !== `unionFrom`) {
-    const { alias, input, collectionId, sourceIncludes } = processFrom(
-      from,
-      allInputs,
-      collections,
-      subscriptions,
-      callbacks,
-      lazySources,
-      optimizableOrderByCollections,
-      setWindowFn,
-      cache,
-      queryMapping,
-      aliasToCollectionId,
-      aliasRemapping,
-      sourceWhereClauses,
-    )
+    const { alias, input, collectionId, sourceIncludes, isParentRouted } =
+      processFrom(
+        from,
+        allInputs,
+        collections,
+        subscriptions,
+        callbacks,
+        lazySources,
+        optimizableOrderByCollections,
+        setWindowFn,
+        cache,
+        queryMapping,
+        aliasToCollectionId,
+        aliasRemapping,
+        sourceWhereClauses,
+        parentKeyStream,
+      )
 
     return {
       alias,
@@ -1311,6 +1406,7 @@ function processFromClause(
       sourceIncludes,
       directIncludes: [],
       isUnionFrom: false,
+      isParentRouted,
     }
   }
 
@@ -1330,6 +1426,7 @@ function processFromClause(
       input,
       collectionId,
       sourceIncludes: childSourceIncludes,
+      isParentRouted,
     } = processFrom(
       source,
       allInputs,
@@ -1344,6 +1441,7 @@ function processFromClause(
       aliasToCollectionId,
       aliasRemapping,
       sourceWhereClauses,
+      parentKeyStream,
     )
 
     if (!mainAlias) {
@@ -1353,7 +1451,15 @@ function processFromClause(
     sources[alias] = input
     sourceIncludes.push(...childSourceIncludes)
 
-    const branch = wrapInputWithAlias(input, alias).pipe(
+    const routedBranch =
+      parentKeyStream && !isParentRouted
+        ? parameterizeByParentRoutes(
+            wrapInputWithAlias(input, alias),
+            parentKeyStream,
+            alias,
+          )
+        : wrapInputWithAlias(input, alias)
+    const branch = routedBranch.pipe(
       map(([key, row]) => {
         return [`${alias}:${encodeKeyForUnionBranch(key)}`, row] as [
           string,
@@ -1373,6 +1479,7 @@ function processFromClause(
     sourceIncludes,
     directIncludes: [],
     isUnionFrom: true,
+    isParentRouted: parentKeyStream !== undefined,
   }
 }
 
@@ -1390,6 +1497,7 @@ function processUnionAll(
   aliasToCollectionId: Record<string, string>,
   aliasRemapping: Record<string, string>,
   sourceWhereClauses: Map<string, BasicExpression<boolean>>,
+  parentKeyStream?: KeyedStream,
 ): {
   alias: string
   pipeline: NamespacedAndKeyedStream
@@ -1398,6 +1506,7 @@ function processUnionAll(
   sourceIncludes: Array<SourceInclude>
   directIncludes: Array<IncludesCompilationResult>
   isUnionFrom: boolean
+  isParentRouted: boolean
 } {
   if (from.queries.length === 0) {
     throw new UnsupportedFromTypeError(`empty unionAll`)
@@ -1432,6 +1541,7 @@ function processUnionAll(
       setWindowFn,
       cache,
       queryMapping,
+      parentKeyStream,
     )
 
     if (!mainCollectionId) {
@@ -1446,8 +1556,16 @@ function processUnionAll(
     }
 
     const branchPipeline = branchResult.pipeline.pipe(
-      map(([key, [row]]) => {
-        return [`${index}:${encodeKeyForUnionBranch(key)}`, row] as [
+      map((data: any) => {
+        const [key, [row, _order, correlationKey, parentContext, publicKey]] =
+          data
+        const routedRow = attachRouteMetadataToResult(
+          row,
+          correlationKey,
+          parentContext,
+          publicKey,
+        )
+        return [`${index}:${encodeKeyForUnionBranch(key)}`, routedRow] as [
           string,
           Record<string, any>,
         ]
@@ -1467,6 +1585,7 @@ function processUnionAll(
     sourceIncludes,
     directIncludes,
     isUnionFrom: true,
+    isParentRouted: parentKeyStream !== undefined,
   }
 }
 
@@ -1517,11 +1636,13 @@ function processFrom(
   aliasToCollectionId: Record<string, string>,
   aliasRemapping: Record<string, string>,
   sourceWhereClauses: Map<string, BasicExpression<boolean>>,
+  parentKeyStream?: KeyedStream,
 ): {
   alias: string
   input: KeyedStream
   collectionId: string
   sourceIncludes: Array<SourceInclude>
+  isParentRouted: boolean
 } {
   switch (from.type) {
     case `collectionRef`: {
@@ -1539,6 +1660,7 @@ function processFrom(
         input,
         collectionId: from.collection.id,
         sourceIncludes: [],
+        isParentRouted: false,
       }
     }
     case `queryRef`: {
@@ -1557,6 +1679,7 @@ function processFrom(
         setWindowFn,
         cache,
         queryMapping,
+        parentKeyStream,
       )
 
       // Pull up alias mappings from subquery to parent scope.
@@ -1615,9 +1738,17 @@ function processFrom(
       // We need to extract just the value for use in parent queries
       const extractedInput = subQueryInput.pipe(
         map((data: any) => {
-          const [key, [value, _orderByIndex]] = data
+          const [
+            key,
+            [value, _orderByIndex, correlationKey, parentContext, publicKey],
+          ] = data
           // Unwrap Value expressions that might have leaked through as the entire row
-          const unwrapped = unwrapValue(value)
+          const unwrapped = attachRouteMetadataToResult(
+            unwrapValue(value),
+            correlationKey,
+            parentContext,
+            publicKey,
+          )
           return [key, unwrapped] as [unknown, any]
         }),
       )
@@ -1631,6 +1762,7 @@ function processFrom(
             sourceAlias: from.alias,
             include,
           })) ?? [],
+        isParentRouted: parentKeyStream !== undefined,
       }
     }
     default:

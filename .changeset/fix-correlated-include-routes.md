@@ -2,4 +2,4 @@
 '@tanstack/db': patch
 ---
 
-Preserve distinct correlated include routes when parent values affect child joins, ordering, projections, aggregates, or having clauses.
+Preserve parent-specific include results through nested includes, subqueries, unions, joins, ordering, projections, aggregates, and having clauses.

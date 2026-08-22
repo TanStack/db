@@ -132,6 +132,38 @@ Implementations use canonical values, interned handles, or nested maps; they do
 not reconstruct array or object keys and expect JavaScript `Map` identity to
 match.
 
+### Route-context transport
+
+A parent reference is a lexical dependency, even when it appears below the
+immediate child query. For every parent reference that the builder can inspect,
+the compiler must:
+
+1. discover it across nested includes, `QueryRef` sources, union branches, and
+   joined sources;
+2. include its evaluated value in the route identity;
+3. attach that route context before the first operator that evaluates it; and
+4. preserve it through each later recursive source, join, grouping, and
+   materialization edge.
+
+The third rule fixes the evaluation order. A parent-dependent filter, join key,
+aggregate wrapper, order, or window must run once per parent route. It cannot
+run on a shared child relation first and receive a route after the fact.
+
+The route-context grammar crosses these dimensions:
+
+```text
+lexical dependency scope
+  x recursive source boundary (nested include, QueryRef, union)
+  x evaluation phase (filter, join, group, aggregate, order, window)
+  x join side and correlation attachment point
+  x materialization form
+  x parent or child update
+```
+
+Adding one dimension to the query language requires checking its product with
+the others. A passing one-level filter case does not prove a nested aggregate,
+joined subquery, or union branch transports the same context.
+
 A materialization cell identifies one include field on one parent-row
 occurrence:
 
@@ -529,6 +561,7 @@ create recursive Collection machinery.
 | Coherent layered publication                                                | `packages/db/tests/query/includes-publication-oracle.test.ts`             |
 | Collection facades, event coherence, and route activation                   | `packages/db/tests/query/includes-collection-oracle.property.test.ts`     |
 | Correlated physical work                                                    | `packages/db/tests/query/includes-work-counter-oracle.test.ts`            |
+| Route-context discovery and transport across recursive and join boundaries  | `packages/db/tests/query/includes-context-transport-oracle.test.ts`       |
 | Query-db ownership                                                          | `packages/query-db-collection/tests/ownership-lifecycle.oracle.test.ts`   |
 | Reachable nested shape                                                      | `packages/query-db-collection/tests/includes-work-counter-oracle.test.ts` |
 
