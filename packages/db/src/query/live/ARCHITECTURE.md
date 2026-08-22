@@ -99,9 +99,10 @@ reduction that enforces public-key congruence and multiplicity.
 ## Identity
 
 Aliases are lexical query-language names. They are not runtime identities. The
-query builder requires collection aliases to be unique across one query tree,
-including includes; shadowing is rejected before compilation. Compilation then
-assigns opaque IDs to the accepted plan:
+query builder requires collection aliases to be unique within each lexical
+scope and rejects nested queries that shadow an ancestor alias. Sibling include
+scopes may reuse an alias because neither alias is visible to the other.
+Compilation then assigns opaque IDs to the accepted plan:
 
 ```ts
 type SourceId = Brand<string, 'SourceId'>
@@ -114,8 +115,8 @@ unused name cannot change the compiled graph or its result.
 
 A `CanonicalCorrelationKey` is the canonical tuple of every evaluated
 parent-dependent value that can affect the child plan. This includes values
-used by filters, joins, ordering, limits, and nullable predicates, not only the
-obvious foreign-key equality.
+used by filters, joins, grouping, aggregates, ordering, projections, limits,
+and nullable predicates, not only the obvious foreign-key equality.
 
 A bucket key identifies one such correlated partition at one relation node:
 
@@ -466,7 +467,8 @@ create recursive Collection machinery.
 ## Normative laws
 
 1. **Alpha-renaming:** changing any accepted alias to another unused name cannot
-   change results; alias shadowing within a query tree is rejected.
+   change results; aliases must be unique within one lexical scope and cannot
+   shadow an ancestor alias. Sibling scopes may reuse aliases.
 2. **Contribution conservation:** a public row exists exactly when its reduced
    supporting weight and collision policy produce one.
 3. **Batch partition:** equivalent valid split and atomic deliveries converge.

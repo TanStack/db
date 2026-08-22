@@ -1,6 +1,5 @@
 import { fc, test as fcTest } from '@fast-check/vitest'
 import { describe, expect } from 'vitest'
-import { createCollection } from '../../src/collection/index.js'
 import {
   createLiveQueryCollection,
   eq,
@@ -11,8 +10,10 @@ import {
   toArray,
 } from '../../src/query/index.js'
 import { oraclePropertyOptions } from '../oracle-config.js'
-import { flushPromises, mockSyncCollectionOptions } from '../utils.js'
+import { flushPromises } from '../utils.js'
+import { createControlledCollection as createOracleControlledCollection } from './includes-oracle-helpers.js'
 import type { Collection } from '../../src/collection/index.js'
+import type { ControlledCollection } from './includes-oracle-helpers.js'
 
 type ParentRow = {
   id: number
@@ -44,11 +45,6 @@ type NormalizedParent = ParentRow & {
   children: Array<ChildRow>
 }
 
-type ControlledCollection<T extends { id: number }> = {
-  collection: Collection<T>
-  write: (type: `insert` | `update` | `delete`, value: T) => void
-}
-
 type FlatRow = {
   parentId: number
   parentGroup: number
@@ -56,27 +52,14 @@ type FlatRow = {
   child: ChildRow | undefined
 }
 
-let nextCrossFormulationId = 0
-
 function createControlledCollection<T extends { id: number }>(
   name: string,
   initialData: ReadonlyArray<T>,
 ): ControlledCollection<T> {
-  const options = mockSyncCollectionOptions<T>({
-    id: `${name}-${nextCrossFormulationId++}`,
-    getKey: (row) => row.id,
-    initialData: initialData.map((row) => ({ ...row })),
+  return createOracleControlledCollection(name, initialData, {
     autoIndex: `eager`,
+    rowUpdateMode: `full`,
   })
-  options.sync.rowUpdateMode = `full`
-  return {
-    collection: createCollection(options),
-    write(type, value) {
-      options.utils.begin()
-      options.utils.write({ type, value: { ...value } })
-      options.utils.commit()
-    },
-  }
 }
 
 function compareParents(left: ParentRow, right: ParentRow): number {
@@ -159,6 +142,42 @@ function createNestedQuery(
               .where(({ child }) => eq(child.parentGroup, parent.group))
               .orderBy(({ child }) => child.position)
               .orderBy(({ child }) => child.id)
+              .select(({ child }) => ({
+                id: child.id,
+                parentGroup: child.parentGroup,
+                score: child.score,
+                position: child.position,
+              })),
+          ),
+        })),
+  })
+}
+
+function createWindowedNestedQuery(
+  parents: Collection<ParentRow>,
+  children: Collection<ChildRow>,
+  offset: number,
+  limit: number,
+) {
+  return createLiveQueryCollection({
+    getKey: (row) => row.id,
+    query: (q) =>
+      q
+        .from({ parent: parents })
+        .orderBy(({ parent }) => parent.position)
+        .orderBy(({ parent }) => parent.id)
+        .select(({ parent }) => ({
+          id: parent.id,
+          group: parent.group,
+          position: parent.position,
+          children: toArray(
+            q
+              .from({ child: children })
+              .where(({ child }) => eq(child.parentGroup, parent.group))
+              .orderBy(({ child }) => child.position)
+              .orderBy(({ child }) => child.id)
+              .offset(offset)
+              .limit(limit)
               .select(({ child }) => ({
                 id: child.id,
                 parentGroup: child.parentGroup,
@@ -358,6 +377,58 @@ async function expectFormulationsEquivalent(
   }
 }
 
+async function expectWindowedIncludeMatches(
+  scenario: CrossFormulationScenario,
+  offset: number,
+  limit: number,
+): Promise<void> {
+  const parentSource = createControlledCollection(
+    `windowed-cross-form-parents`,
+    scenario.parents,
+  )
+  const childSource = createControlledCollection(
+    `windowed-cross-form-children`,
+    scenario.children,
+  )
+  const parents = new Map(scenario.parents.map((row) => [row.id, { ...row }]))
+  const children = new Map(scenario.children.map((row) => [row.id, { ...row }]))
+  const nested = createWindowedNestedQuery(
+    parentSource.collection,
+    childSource.collection,
+    offset,
+    limit,
+  )
+
+  const assertEquivalent = () => {
+    const expected = normalizeNested(
+      [...parents.values()].map((parent) => ({
+        ...parent,
+        children: [...children.values()]
+          .filter((child) => child.parentGroup === parent.group)
+          .sort(compareChildren)
+          .slice(offset, offset + limit),
+      })),
+    )
+    expect(normalizeNested(nested.toArray)).toEqual(expected)
+  }
+
+  try {
+    await nested.preload()
+    assertEquivalent()
+    for (const action of scenario.actions) {
+      applyAction(action, parentSource, childSource, parents, children)
+      await flushPromises()
+      assertEquivalent()
+    }
+  } finally {
+    await Promise.allSettled([
+      nested.cleanup(),
+      parentSource.collection.cleanup(),
+      childSource.collection.cleanup(),
+    ])
+  }
+}
+
 const parentRowArbitrary = (id: number) =>
   fc.record({
     id: fc.constant(id),
@@ -403,6 +474,12 @@ const scenarioArbitrary: fc.Arbitrary<CrossFormulationScenario> = fc.record({
   actions: fc.array(actionArbitrary, { minLength: 1, maxLength: 5 }),
 })
 
+const windowedScenarioArbitrary = fc.record({
+  scenario: scenarioArbitrary,
+  offset: fc.integer({ min: 0, max: 2 }),
+  limit: fc.integer({ min: 0, max: 3 }),
+})
+
 describe(`includes cross-formulation oracle`, () => {
   fcTest(`shared-route child deletion agrees across formulations`, () =>
     expectFormulationsEquivalent({
@@ -423,5 +500,11 @@ describe(`includes cross-formulation oracle`, () => {
   fcTest.prop([scenarioArbitrary], oraclePropertyOptions(8))(
     `agrees across nested includes, flat joins, per-parent queries, and TLP partitions`,
     expectFormulationsEquivalent,
+  )
+
+  fcTest.prop([windowedScenarioArbitrary], oraclePropertyOptions(12))(
+    `matches recomputation for ordered offset and limit child windows`,
+    ({ scenario, offset, limit }) =>
+      expectWindowedIncludeMatches(scenario, offset, limit),
   )
 })

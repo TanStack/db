@@ -1106,14 +1106,17 @@ function buildConditionalSelect(
 /**
  * Recursively collects all PropRef nodes from an expression tree.
  */
-function collectRefsFromExpression(expr: BasicExpression): Array<PropRef> {
+function collectRefsFromExpression(
+  expr: BasicExpression | Aggregate,
+): Array<PropRef> {
   const refs: Array<PropRef> = []
   switch (expr.type) {
     case `ref`:
       refs.push(expr)
       break
     case `func`:
-      for (const arg of (expr as any).args ?? []) {
+    case `agg`:
+      for (const arg of expr.args) {
         refs.push(...collectRefsFromExpression(arg))
       }
       break
@@ -1121,6 +1124,90 @@ function collectRefsFromExpression(expr: BasicExpression): Array<PropRef> {
       break
   }
   return refs
+}
+
+function collectRefsFromSelectValue(value: unknown): Array<PropRef> {
+  if (
+    value instanceof PropRef ||
+    value instanceof FuncExpr ||
+    value instanceof AggregateExpr
+  ) {
+    return collectRefsFromExpression(value)
+  }
+  if (value instanceof ConditionalSelect) {
+    return [
+      ...value.branches.flatMap((branch) => [
+        ...collectRefsFromExpression(branch.condition),
+        ...collectRefsFromSelectValue(branch.value),
+      ]),
+      ...(value.defaultValue === undefined
+        ? []
+        : collectRefsFromSelectValue(value.defaultValue)),
+    ]
+  }
+  if (value instanceof IncludesSubquery) {
+    return [value.correlationField, ...(value.parentProjection ?? [])]
+  }
+  if (!isPlainObject(value)) return []
+  return Object.values(value).flatMap(collectRefsFromSelectValue)
+}
+
+function collectParentRefsFromQuery(
+  query: QueryIR,
+  parentAliases: Array<string>,
+): Array<PropRef> {
+  const refs: Array<PropRef> = []
+  const addExpression = (expression: BasicExpression | Aggregate) => {
+    refs.push(...collectRefsFromExpression(expression))
+  }
+  const addWhere = (where: Where) => {
+    addExpression(
+      typeof where === `object` && `expression` in where
+        ? where.expression
+        : where,
+    )
+  }
+
+  for (const where of query.where ?? []) addWhere(where)
+  for (const join of query.join ?? []) {
+    addExpression(join.left)
+    addExpression(join.right)
+    if (join.from.type === `queryRef`) {
+      refs.push(...collectParentRefsFromQuery(join.from.query, parentAliases))
+    }
+  }
+  for (const expression of query.groupBy ?? []) addExpression(expression)
+  for (const having of query.having ?? []) addWhere(having)
+  for (const { expression } of query.orderBy ?? []) addExpression(expression)
+  if (query.select) refs.push(...collectRefsFromSelectValue(query.select))
+
+  if (query.from.type === `queryRef`) {
+    refs.push(...collectParentRefsFromQuery(query.from.query, parentAliases))
+  } else if (query.from.type === `unionFrom`) {
+    for (const source of query.from.sources) {
+      if (source.type === `queryRef`) {
+        refs.push(...collectParentRefsFromQuery(source.query, parentAliases))
+      }
+    }
+  } else if (query.from.type === `unionAll`) {
+    for (const branch of query.from.queries) {
+      refs.push(...collectParentRefsFromQuery(branch, parentAliases))
+    }
+  }
+
+  const seen = new Set<string>()
+  return refs.filter((ref) => {
+    const path = ref.path.join(`.`)
+    if (
+      ref.path[0] == null ||
+      !parentAliases.includes(ref.path[0]) ||
+      seen.has(path)
+    ) {
+      return false
+    }
+    seen.add(path)
+    return true
+  })
 }
 
 /**
@@ -1271,25 +1358,14 @@ function buildIncludesSubquery(
     }
   }
 
-  // Collect distinct parent PropRefs from parent-referencing filters
-  let parentProjection: Array<PropRef> | undefined
-  if (parentFilters.length > 0) {
-    const seen = new Set<string>()
-    parentProjection = []
-    for (const w of parentFilters) {
-      const expr = typeof w === `object` && `expression` in w ? w.expression : w
-      for (const ref of collectRefsFromExpression(expr)) {
-        if (
-          ref.path[0] != null &&
-          parentAliases.includes(ref.path[0]) &&
-          !seen.has(ref.path.join(`.`))
-        ) {
-          seen.add(ref.path.join(`.`))
-          parentProjection.push(ref)
-        }
-      }
-    }
-  }
+  // Every parent input that can affect the child plan belongs to the route
+  // identity, not only the main equality key or residual filters.
+  const projectedParentRefs = collectParentRefsFromQuery(
+    { ...childQuery, where: modifiedWhere },
+    parentAliases,
+  )
+  const parentProjection =
+    projectedParentRefs.length > 0 ? projectedParentRefs : undefined
 
   const modifiedQuery: QueryIR = {
     ...childQuery,

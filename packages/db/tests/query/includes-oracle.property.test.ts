@@ -8,19 +8,16 @@ import {
   queryOnce,
   toArray,
 } from '../../src/query/index.js'
-import { createCollection } from '../../src/collection/index.js'
-import {
-  flushPromises,
-  mockSyncCollectionOptions,
-  withExpectedRejection,
-} from '../utils.js'
+import { flushPromises, withExpectedRejection } from '../utils.js'
 import { oraclePropertyOptions, oracleRuns } from '../oracle-config.js'
 import { runTrace } from '../trace-runner.js'
+import { createControlledCollection as createOracleControlledCollection } from './includes-oracle-helpers.js'
 import type {
   TraceCheckpoint,
   TraceDriver,
   TraceProjection,
 } from '../trace-runner.js'
+import type { OracleSyncChange as SyncChange } from './includes-oracle-helpers.js'
 
 type IncludeDepth = 1 | 2 | 3 | 4
 
@@ -33,11 +30,6 @@ type RootRow = {
 
 type ChildRow = RootRow & {
   parentGroup: number
-}
-
-type SyncChange<T> = {
-  type: `insert` | `update` | `delete`
-  value: T
 }
 
 type HistoryAction = {
@@ -371,39 +363,14 @@ const confirmedChildReorderSeed: Scenario = {
   ],
 }
 
-let nextHarnessId = 0
-
 function createControlledCollection<T extends { id: number }>(
   name: string,
   initialData: Array<T> = [],
   rowUpdateMode: `partial` | `full` = `partial`,
 ) {
-  const options = mockSyncCollectionOptions<T>({
-    id: `${name}-${nextHarnessId++}`,
-    getKey: (row) => row.id,
-    initialData,
+  return createOracleControlledCollection(name, initialData, {
+    rowUpdateMode,
   })
-  options.sync.rowUpdateMode = rowUpdateMode
-  const collection = createCollection(options)
-  const writeBatch = (changes: ReadonlyArray<SyncChange<T>>): void => {
-    options.utils.begin()
-    changes.forEach((change) => options.utils.write(change))
-    options.utils.commit()
-  }
-
-  return {
-    collection,
-    write(type: `insert` | `update` | `delete`, value: T): void {
-      writeBatch([{ type, value }])
-    },
-    writeBatch,
-    resolveSync(): void {
-      options.utils.resolveSync()
-    },
-    rejectSync(error: Error): void {
-      options.utils.rejectSync(error)
-    },
-  }
 }
 
 function compareRows(left: RootRow, right: RootRow): number {
