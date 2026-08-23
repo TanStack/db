@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 import { flushSync } from 'svelte'
 import { DbClient } from '@tanstack/db'
 import { useLiveQuery } from '../src/useLiveQuery.svelte.js'
@@ -32,13 +32,12 @@ describe(`Svelte hydration`, () => {
     ])
 
     resolveBrowserLoad()
-    await Promise.resolve()
-    await Promise.resolve()
-    flushSync()
-
-    expect(query.data).toEqual([
-      expect.objectContaining({ id: `browser`, name: `Browser source` }),
-    ])
+    await vi.waitFor(() => {
+      flushSync()
+      expect(query.data).toEqual([
+        expect.objectContaining({ id: `browser`, name: `Browser source` }),
+      ])
+    })
     dispose()
   })
 })
