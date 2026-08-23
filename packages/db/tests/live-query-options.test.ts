@@ -3,8 +3,24 @@ import { createCollection } from '../src/collection/index.js'
 import {
   getLiveQueryHash,
   getPreparedLiveQueryIdentity,
+  prepareLiveQueryValue,
 } from '../src/live-query-options.js'
 import { BaseQueryBuilder } from '../src/query/builder/index.js'
+
+describe(`live query preparation`, () => {
+  it.each([undefined, null])(
+    `promotes a nullish config query result to a disabled query`,
+    (disabled) => {
+      const prepared = prepareLiveQueryValue(
+        { query: () => disabled },
+        undefined,
+        new Set(),
+      )
+
+      expect(prepared).toBe(disabled)
+    },
+  )
+})
 
 describe(`live query identity`, () => {
   it(`hashes Map values in an explicit queryKey deterministically`, () => {
