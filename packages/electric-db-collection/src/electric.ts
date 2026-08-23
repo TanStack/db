@@ -573,12 +573,13 @@ function createLoadSubsetDedupe<T extends Row<unknown>>({
   }
 
   const loadSubset = async (opts: LoadSubsetOptions) => {
+    if (opts.signal?.aborted) return
+
     if (isBufferingInitialSync()) {
       const snapshotParams = compileSQL<T>(opts, compileOptions)
       try {
         const { data: rows } = await stream.fetchSnapshot(snapshotParams)
-
-        if (!isBufferingInitialSync()) {
+        if (opts.signal?.aborted || !isBufferingInitialSync()) {
           debug(`${logPrefix}Ignoring snapshot - sync completed while fetching`)
           return
         }
@@ -596,6 +597,7 @@ function createLoadSubsetDedupe<T extends Row<unknown>>({
           debug(`${logPrefix}Applied snapshot with ${rows.length} rows`)
         }
       } catch (error) {
+        if (opts.signal?.aborted) return
         if (handleSnapshotError(error, `fetchSnapshot`)) {
           return
         }
@@ -643,6 +645,14 @@ function createLoadSubsetDedupe<T extends Row<unknown>>({
       }
     }
 
+    if (opts.signal?.aborted) return
+
+    // Upstream limitation: ShapeStream.requestSnapshot() publishes its rows
+    // through the stream callback before its Promise resolves. It accepts no
+    // request signal and exposes no request identity on those messages, so an
+    // aborted request can already have installed rows before the check below.
+    // Full request-scoped cancellation requires support in the Electric client;
+    // matching snapshots by parameters is unsafe for overlapping equal requests.
     try {
       if (cursor) {
         const whereCurrentOpts: LoadSubsetOptions = {
@@ -675,6 +685,7 @@ function createLoadSubsetDedupe<T extends Row<unknown>>({
         await stream.requestSnapshot(snapshotParams)
       }
     } catch (error) {
+      if (opts.signal?.aborted) return
       if (handleSnapshotError(error, `requestSnapshot`)) {
         return
       }

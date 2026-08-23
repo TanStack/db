@@ -80,7 +80,7 @@ type SubsetDemand = SubsetAcquisition & {
 }
 
 type TruncateReplayAttempt = {
-  pending: Set<Promise<void>>
+  pending: Set<{ promise: Promise<void> }>
   failed: boolean
   setupComplete: boolean
 }
@@ -282,7 +282,6 @@ export class CollectionSubscription
             nextAcquisition.options,
             isCurrentAttempt,
           )
-          this.replaceSubsetAcquisition(demand, nextAcquisition)
         } catch {
           nextAcquisition.abortController.abort()
           nextAcquisition.removeRequestAbortListener?.()
@@ -294,13 +293,17 @@ export class CollectionSubscription
           syncResult,
           nextAcquisition.options,
           true,
-          isCurrentAttempt,
+          () => isCurrentAttempt() && !nextAcquisition.options.signal?.aborted,
         )
 
         if (syncResult instanceof Promise) {
-          attempt.pending.add(syncResult)
+          // A transport promise may be shared by several deduplicated logical
+          // demands. Track each demand separately so one settlement observer
+          // cannot complete the attempt before the others apply their result.
+          const pending = { promise: syncResult }
+          attempt.pending.add(pending)
           void syncResult.then(
-            () => this.settleTruncateReplay(session, attempt, syncResult),
+            () => this.settleTruncateReplay(session, attempt, pending),
             () => {
               // A released demand no longer participates in the current
               // replacement. Its cooperative AbortError must not discard the
@@ -311,9 +314,27 @@ export class CollectionSubscription
               ) {
                 attempt.failed = true
               }
-              this.settleTruncateReplay(session, attempt, syncResult)
+              this.settleTruncateReplay(session, attempt, pending)
             },
           )
+        }
+
+        try {
+          this.replaceSubsetAcquisition(demand, nextAcquisition)
+        } catch (error) {
+          // The old lease is still owned because its release failed. Abort and
+          // release the new acquisition, but keep observing its work so rows
+          // from a non-cooperative adapter cannot escape the replay buffer.
+          nextAcquisition.abortController.abort()
+          nextAcquisition.removeRequestAbortListener?.()
+          try {
+            this.collection._sync.unloadSubset(nextAcquisition.options)
+          } catch {
+            // Preserve the first ownership error. The demand still retains the
+            // old acquisition so normal cleanup can retry that release.
+          }
+          this.recordLoadSubsetError(demand.options, error, true)
+          attempt.failed = true
         }
       }
 
@@ -325,10 +346,10 @@ export class CollectionSubscription
   private settleTruncateReplay(
     session: TruncateReplaySession,
     attempt: TruncateReplayAttempt,
-    promise: Promise<void>,
+    pending: { promise: Promise<void> },
   ): void {
     if (this.truncateReplaySession !== session) return
-    attempt.pending.delete(promise)
+    attempt.pending.delete(pending)
     this.checkTruncateReplayComplete(session)
   }
 
@@ -562,15 +583,11 @@ export class CollectionSubscription
   ): void {
     const previousOptions = demand.options
     const removePreviousAbortListener = demand.removeRequestAbortListener
+    this.collection._sync.unloadSubset(previousOptions)
+    removePreviousAbortListener?.()
     demand.options = next.options
     demand.abortController = next.abortController
     demand.removeRequestAbortListener = next.removeRequestAbortListener
-
-    try {
-      this.collection._sync.unloadSubset(previousOptions)
-    } finally {
-      removePreviousAbortListener?.()
-    }
   }
 
   /** Abort and release one current adapter acquisition. */
@@ -610,10 +627,11 @@ export class CollectionSubscription
   private recordLoadSubsetError(
     options: LoadSubsetOptions,
     error: unknown,
+    reportAborted = false,
   ): void {
     // Aborted subset requests are obsolete demand, not load failures. The
     // request may reject after its route has already been released.
-    if (options.signal?.aborted) return
+    if (options.signal?.aborted && !reportAborted) return
 
     this._lastError = error
     this.emitInner(`loadSubset:error`, {

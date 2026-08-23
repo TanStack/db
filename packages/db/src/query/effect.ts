@@ -250,27 +250,31 @@ export function createEffect<
 
   // The dispose function is referenced by both the returned Effect object
   // and the onSourceError callback, so we define it first.
-  const dispose = async () => {
-    if (disposed) return
+  let disposalPromise: Promise<void> | undefined
+  const dispose = (): Promise<void> => {
+    if (disposalPromise) return disposalPromise
     disposed = true
 
     // Abort signal for in-flight handlers
     abortController.abort()
 
-    // Tear down the pipeline (unsubscribe from sources, etc.)
-    let cleanupError: unknown
-    try {
-      runner.dispose()
-    } catch (error) {
-      cleanupError = error
-    }
+    disposalPromise = (async () => {
+      // Tear down the pipeline (unsubscribe from sources, etc.)
+      let cleanupError: unknown
+      try {
+        runner.dispose()
+      } catch (error) {
+        cleanupError = error
+      }
 
-    // Wait for any in-flight async handlers to settle
-    if (inFlightHandlers.size > 0) {
-      await Promise.allSettled([...inFlightHandlers])
-    }
+      // Wait for any in-flight async handlers to settle
+      if (inFlightHandlers.size > 0) {
+        await Promise.allSettled([...inFlightHandlers])
+      }
 
-    if (cleanupError !== undefined) throw cleanupError
+      if (cleanupError !== undefined) throw cleanupError
+    })()
+    return disposalPromise
   }
 
   // Create and start the pipeline

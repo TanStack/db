@@ -648,6 +648,74 @@ describe(`createEffect`, () => {
       await effect.dispose() // Should not throw
       expect(effect.disposed).toBe(true)
     })
+
+    it(`joins cleanup that is already in progress`, async () => {
+      const users = createUsersCollection([sampleUsers[0]!])
+      let resolveHandler!: () => void
+      const handlerPending = new Promise<void>((resolve) => {
+        resolveHandler = resolve
+      })
+      const effect = createEffect<User, number>({
+        query: (q) => q.from({ user: users }),
+        onEnter: () => handlerPending,
+      })
+
+      await flushPromises()
+      const firstDispose = effect.dispose()
+      let secondDisposeSettled = false
+      const secondDispose = effect.dispose().finally(() => {
+        secondDisposeSettled = true
+      })
+
+      await Promise.resolve()
+      expect(secondDisposeSettled).toBe(false)
+
+      resolveHandler()
+      await Promise.all([firstDispose, secondDispose])
+      expect(secondDisposeSettled).toBe(true)
+    })
+
+    it(`reports one in-progress cleanup failure to every disposer`, async () => {
+      const failure = new Error(`source release failed`)
+      let resolveHandler!: () => void
+      const handlerPending = new Promise<void>((resolve) => {
+        resolveHandler = resolve
+      })
+      const source = createCollection<{ id: number }>({
+        id: `joined-effect-cleanup-error`,
+        getKey: (row) => row.id,
+        syncMode: `on-demand`,
+        sync: {
+          sync: ({ begin, write, commit, markReady }) => {
+            markReady()
+            return {
+              loadSubset: () => {
+                begin()
+                write({ type: `insert`, value: { id: 1 } })
+                commit()
+                return true
+              },
+              unloadSubset: () => {
+                throw failure
+              },
+            }
+          },
+        },
+      })
+      const effect = createEffect({
+        query: (q) => q.from({ source }),
+        onEnter: () => handlerPending,
+      })
+
+      await flushPromises()
+      const firstDispose = effect.dispose()
+      const secondDispose = effect.dispose()
+      resolveHandler()
+
+      await expect(firstDispose).rejects.toBe(failure)
+      await expect(secondDispose).rejects.toBe(failure)
+      await source.cleanup()
+    })
   })
 
   describe(`auto-generated IDs`, () => {
@@ -1953,8 +2021,8 @@ describe(`createEffect`, () => {
           cleanupFailure,
         )
       } finally {
+        await expect(effect.dispose()).rejects.toBe(cleanupFailure)
         consoleErrorSpy.mockRestore()
-        await effect.dispose()
         await users.cleanup()
       }
     })

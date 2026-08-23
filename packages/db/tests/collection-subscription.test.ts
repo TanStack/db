@@ -1,6 +1,10 @@
 import { describe, expect, it } from 'vitest'
 import { createCollection } from '../src/collection/index.js'
+import { createDeferred } from '../src/deferred.js'
+import { Func, PropRef, Value } from '../src/query/ir.js'
+import { DeduplicatedLoadSubset } from '../src/query/subset-dedupe.js'
 import { flushPromises } from './utils'
+import type { LoadSubsetOptions } from '../src/types.js'
 
 describe(`CollectionSubscription status tracking`, () => {
   it(`subscription starts with status 'ready'`, () => {
@@ -43,7 +47,6 @@ describe(`CollectionSubscription status tracking`, () => {
     const subscription = collection.subscribeChanges(() => {}, {
       includeInitialState: false,
     })
-
     expect(subscription.status).toBe(`ready`)
 
     // Trigger a snapshot request that will call loadSubset
@@ -433,6 +436,152 @@ describe(`CollectionSubscription status tracking`, () => {
 
     subscription.unsubscribe()
     await collection.cleanup()
+  })
+
+  it(`waits for every logical demand that shares one replay promise`, async () => {
+    type Row = { id: string; value: number }
+    let begin!: () => void
+    let write!: (message: { type: `insert`; value: Row }) => void
+    let commit!: () => void
+    let truncate!: () => void
+    const replay = createDeferred<void>()
+    let transportCalls = 0
+    const dedupe = new DeduplicatedLoadSubset({
+      loadSubset: () => {
+        transportCalls++
+        if (transportCalls === 1) {
+          begin()
+          write({ type: `insert`, value: { id: `one`, value: 1 } })
+          commit()
+          return Promise.resolve()
+        }
+        return replay.promise
+      },
+    })
+    const collection = createCollection<Row>({
+      id: `shared-replay-promise`,
+      getKey: (row) => row.id,
+      syncMode: `on-demand`,
+      sync: {
+        sync: (params) => {
+          begin = params.begin
+          write = params.write
+          commit = params.commit
+          truncate = params.truncate
+          params.markReady()
+          return {
+            loadSubset: dedupe.loadSubset,
+            unloadSubset: () => {},
+          }
+        },
+      },
+    })
+    const visible = new Map<string | number, Row>()
+    const subscription = collection.subscribeChanges(
+      (changes) => {
+        for (const change of changes) {
+          if (change.type === `delete`) visible.delete(change.key)
+          else visible.set(change.key, change.value)
+        }
+      },
+      { includeInitialState: false },
+    )
+    const where = new Func(`eq`, [new PropRef([`id`]), new Value(`one`)])
+
+    try {
+      subscription.requestSnapshot({ where })
+      await flushPromises()
+      subscription.requestSnapshot({ where })
+      expect(transportCalls).toBe(1)
+      expect(
+        [...visible.values()].map(({ id, value }) => ({ id, value })),
+      ).toEqual([{ id: `one`, value: 1 }])
+
+      dedupe.reset()
+      begin()
+      truncate()
+      commit()
+      await flushPromises()
+      expect(transportCalls).toBe(2)
+
+      subscription.releaseSnapshot(where)
+      const failure = new Error(`shared replay failed`)
+      replay.reject(failure)
+      await flushPromises()
+
+      expect(subscription.lastError).toBe(failure)
+      expect(
+        [...visible.values()].map(({ id, value }) => ({ id, value })),
+      ).toEqual([{ id: `one`, value: 1 }])
+    } finally {
+      replay.resolve()
+      subscription.unsubscribe()
+      await collection.cleanup()
+    }
+  })
+
+  it(`keeps the old lease when replacing it fails`, async () => {
+    const replay = createDeferred<void>()
+    const loads: Array<LoadSubsetOptions> = []
+    const unloads: Array<LoadSubsetOptions> = []
+    let truncate!: () => void
+    let begin!: () => void
+    let commit!: () => void
+    const collection = createCollection<{ id: string }>({
+      id: `failed-replay-lease-replacement`,
+      getKey: (row) => row.id,
+      syncMode: `on-demand`,
+      sync: {
+        sync: (params) => {
+          begin = params.begin
+          commit = params.commit
+          truncate = params.truncate
+          params.markReady()
+          return {
+            loadSubset: (options) => {
+              loads.push(options)
+              return loads.length === 1 ? true : replay.promise
+            },
+            unloadSubset: (options) => {
+              unloads.push(options)
+              if (options === loads[0] && unloads.length === 1) {
+                throw new Error(`old lease release failed`)
+              }
+            },
+          }
+        },
+      },
+    })
+    const subscription = collection.subscribeChanges(() => {}, {
+      includeInitialState: false,
+    })
+    let unsubscribed = false
+
+    try {
+      subscription.requestSnapshot({ optimizedOnly: false })
+      begin()
+      truncate()
+      commit()
+      await flushPromises()
+
+      expect(loads).toHaveLength(2)
+      expect(subscription.status).toBe(`loadingSubset`)
+
+      replay.reject(new DOMException(`replacement abandoned`, `AbortError`))
+      await flushPromises()
+      expect(subscription.status).toBe(`ready`)
+      expect(subscription.lastError).toEqual(
+        new Error(`old lease release failed`),
+      )
+
+      subscription.unsubscribe()
+      unsubscribed = true
+      expect(unloads).toEqual([loads[0], loads[1], loads[0]])
+    } finally {
+      replay.resolve()
+      if (!unsubscribed) subscription.unsubscribe()
+      await collection.cleanup()
+    }
   })
 
   it(`retains a subset after a synchronous truncate replay failure`, async () => {

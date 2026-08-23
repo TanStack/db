@@ -628,6 +628,35 @@ describe(`createLiveQueryWindowController`, () => {
     await lq.cleanup()
   })
 
+  it(`cleanup settles every superseded load operation`, async () => {
+    const lq = makeOrderedLiveQuery(makeSource(), 2)
+    await lq.preload()
+
+    const firstLoad = new Promise<void>(() => {})
+    const firstOperation = lq._sync.beginLoadSubsetOperation()
+    lq._sync.trackLoadPromise(firstLoad)
+    const firstWaiting = Promise.resolve(firstOperation.wait())
+
+    const secondLoad = new Promise<void>(() => {})
+    const secondOperation = lq._sync.beginLoadSubsetOperation()
+    lq._sync.trackLoadPromise(secondLoad)
+    const secondWaiting = Promise.resolve(secondOperation.wait())
+    const settled = [false, false]
+    void firstWaiting.then(() => {
+      settled[0] = true
+    })
+    void secondWaiting.then(() => {
+      settled[1] = true
+    })
+
+    lq._sync.cleanup()
+    await Promise.resolve()
+
+    expect(settled).toEqual([true, true])
+    await Promise.all([firstWaiting, secondWaiting])
+    await lq.cleanup()
+  })
+
   it(`retains an unsubscribed lease until overlapping requests settle`, async () => {
     const lq = makeOrderedLiveQuery(makeSource(), 2)
     await lq.preload()

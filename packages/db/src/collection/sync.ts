@@ -66,6 +66,7 @@ export class CollectionSyncManager<
 
   private pendingLoadSubsetPromises: Set<Promise<void>> = new Set()
   private activeLoadSubsetOperation: LoadSubsetOperation | undefined
+  private loadSubsetOperations = new Set<LoadSubsetOperation>()
   private syncStartDeferred = false
   private syncStartRequested = false
   private deferredLoadSubsets: Array<DeferredLoadSubset> = []
@@ -605,10 +606,12 @@ export class CollectionSyncManager<
     // waiting for the promises they already acquired, but cannot absorb work
     // caused by a superseding physical window.
     this.activeLoadSubsetOperation = operation
+    this.loadSubsetOperations.add(operation)
     return {
       wait: () => this.waitForLoadSubsetOperation(operation),
       cancel: () => {
         operation.completed = true
+        this.loadSubsetOperations.delete(operation)
         if (this.activeLoadSubsetOperation === operation) {
           this.activeLoadSubsetOperation = undefined
         }
@@ -622,6 +625,7 @@ export class CollectionSyncManager<
     operation.waiting = true
     if (operation.pending.size === 0) {
       operation.completed = true
+      this.loadSubsetOperations.delete(operation)
       if (this.activeLoadSubsetOperation === operation) {
         this.activeLoadSubsetOperation = undefined
       }
@@ -650,6 +654,7 @@ export class CollectionSyncManager<
     queueMicrotask(() => {
       if (operation.completed || operation.pending.size > 0) return
       operation.completed = true
+      this.loadSubsetOperations.delete(operation)
       if (this.activeLoadSubsetOperation === operation) {
         this.activeLoadSubsetOperation = undefined
       }
@@ -822,13 +827,15 @@ export class CollectionSyncManager<
         loadingSubsetTransition: `end`,
       })
     }
-    const activeOperation = this.activeLoadSubsetOperation
     this.activeLoadSubsetOperation = undefined
-    if (activeOperation && !activeOperation.completed) {
-      activeOperation.completed = true
-      activeOperation.pending.clear()
-      activeOperation.deferred?.resolve()
+    for (const operation of this.loadSubsetOperations) {
+      if (!operation.completed) {
+        operation.completed = true
+        operation.pending.clear()
+        operation.deferred?.resolve()
+      }
     }
+    this.loadSubsetOperations.clear()
     const deferredLoadSubsets = this.deferredLoadSubsets
     this.deferredLoadSubsets = []
     for (const { deferred } of deferredLoadSubsets) {
