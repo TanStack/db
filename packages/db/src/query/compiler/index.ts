@@ -40,6 +40,12 @@ import { processJoins, registerLazyDemandPlan } from './joins.js'
 import { containsAggregate, processGroupBy } from './group-by.js'
 import { getLazyLoadTargets } from './lazy-targets.js'
 import { processOrderBy } from './order-by.js'
+import { crossJoinParentRoutes } from './parent-routes.js'
+import {
+  INCLUDES_PUBLIC_KEY,
+  attachRouteMetadataToResult,
+  getRoutedScalarMetadata,
+} from './route-metadata.js'
 import { processSelect } from './select.js'
 import type { CollectionSubscription } from '../../collection/subscription.js'
 import type { OrderByOptimizationInfo } from './order-by.js'
@@ -63,13 +69,12 @@ import type {
 import type { QueryCache, QueryMapping, WindowOptions } from './types.js'
 
 export type { WindowOptions } from './types.js'
+export { INCLUDES_PUBLIC_KEY } from './route-metadata.js'
 
 /** Symbol used to tag parent $selected with routing metadata for includes */
 export const INCLUDES_ROUTING = Symbol(`includesRouting`)
-export const INCLUDES_PUBLIC_KEY = Symbol(`includesPublicKey`)
 export const FN_SELECT_STATE = Symbol(`fnSelectState`)
 const SKIP_INCLUDE = Symbol(`skipInclude`)
-const PARENT_ROUTE_CROSS_KEY = `__tanstack_parent_route_cross__`
 
 type ConditionalSelectGuard = {
   condition: BasicExpression
@@ -140,25 +145,13 @@ function parameterizeByParentRoutes(
   parentKeyStream: KeyedStream,
   mainSource: string,
 ): NamespacedAndKeyedStream {
-  const rows: any = pipeline.pipe(
-    map(([rowKey, row]) => [PARENT_ROUTE_CROSS_KEY, [rowKey, row]]),
-  )
-  const routes: any = parentKeyStream.pipe(
-    map(([correlationKey, parentContext]) => [
-      PARENT_ROUTE_CROSS_KEY,
-      [correlationKey, parentContext],
-    ]),
-  )
-
-  return rows.pipe(
-    joinOperator(routes, `inner`),
-    filter(([, [rowSide, routeSide]]: any) =>
-      Boolean(rowSide != null && routeSide != null),
-    ),
-    map(([, [rowSide, routeSide]]: any) => {
-      const [rowKey, row] = rowSide!
-      const [correlationKey, parentContext] = routeSide!
-      const namespaced = { ...row } as Record<string, any>
+  return crossJoinParentRoutes(
+    pipeline,
+    parentKeyStream,
+    (rowKey, row, correlationKey, parentContext) => {
+      const namespaced = {
+        ...(row as Record<string, unknown>),
+      } as Record<string, any>
       namespaced[mainSource] = {
         ...namespaced[mainSource],
         __correlationKey: correlationKey,
@@ -172,7 +165,7 @@ function parameterizeByParentRoutes(
         serializeValue([rowKey, correlationKey, parentContext]),
         namespaced,
       ] as [string, NamespacedRow]
-    }),
+    },
   ) as NamespacedAndKeyedStream
 }
 
@@ -193,29 +186,6 @@ function correlationValuesEqual(left: unknown, right: unknown): boolean {
       Number.isNaN(normalizedLeft) &&
       Number.isNaN(normalizedRight))
   )
-}
-
-function attachRouteMetadataToResult(
-  value: any,
-  correlationKey: unknown,
-  parentContext: unknown,
-  publicKey: unknown,
-): any {
-  if (
-    value == null ||
-    typeof value !== `object` ||
-    (correlationKey === undefined &&
-      parentContext === undefined &&
-      publicKey === undefined)
-  ) {
-    return value
-  }
-  return {
-    ...value,
-    __correlationKey: correlationKey,
-    __parentContext: parentContext,
-    [INCLUDES_PUBLIC_KEY]: publicKey,
-  }
 }
 
 /**
@@ -637,14 +607,14 @@ export function compileQuery(
         condition: compileExpression(guard.condition),
         expected: guard.expected,
       }))
+      const compiledProjections: Array<CompiledParentProjection> =
+        subquery.parentProjection?.map((ref) => ({
+          alias: ref.path[0]!,
+          field: ref.path.slice(1),
+          compiled: compileExpression(ref),
+        })) ?? []
       let parentKeys: any
-      if (subquery.parentProjection && subquery.parentProjection.length > 0) {
-        const compiledProjections: Array<CompiledParentProjection> =
-          subquery.parentProjection.map((ref) => ({
-            alias: ref.path[0]!,
-            field: ref.path.slice(1),
-            compiled: compileExpression(ref),
-          }))
+      if (compiledProjections.length > 0) {
         parentKeys = pipeline.pipe(
           map(([_key, nsRow]: any) => {
             if (!matchesConditionalSelectGuards(compiledGuards, nsRow)) {
@@ -807,13 +777,7 @@ export function compileQuery(
       })
 
       // Capture routing function for INCLUDES_ROUTING tagging
-      if (subquery.parentProjection && subquery.parentProjection.length > 0) {
-        const compiledProjs: Array<CompiledParentProjection> =
-          subquery.parentProjection.map((ref) => ({
-            alias: ref.path[0]!,
-            field: ref.path.slice(1),
-            compiled: compileExpression(ref),
-          }))
+      if (compiledProjections.length > 0) {
         const compiledCorr = compiledCorrelation
         const compiledRoutingGuards = compiledGuards
         includesRoutingFns.push({
@@ -826,7 +790,10 @@ export function compileQuery(
                 parentContext: null,
               }
             }
-            const parentContext = projectParentContext(nsRow, compiledProjs)
+            const parentContext = projectParentContext(
+              nsRow,
+              compiledProjections,
+            )
             return {
               active: true,
               correlationKey: compiledCorr(nsRow),
@@ -918,10 +885,13 @@ export function compileQuery(
     // If no SELECT clause, create $selected with the main table data
     pipeline = pipeline.pipe(
       map(([key, namespacedRow]) => {
+        const routedScalar = getRoutedScalarMetadata(namespacedRow)
         const selectResults =
-          !isUnionFrom && !query.join && !query.groupBy
-            ? namespacedRow[mainSource]
-            : namespacedRow
+          isUnionFrom && routedScalar
+            ? routedScalar.value
+            : !isUnionFrom && !query.join && !query.groupBy
+              ? namespacedRow[mainSource]
+              : namespacedRow
 
         return [
           key,
@@ -1216,7 +1186,7 @@ function canonicalizeSelectedRows(
     value: row.$selected,
     routing: row.$selected?.[INCLUDES_ROUTING],
     outerCorrelation: isIncludedRelation
-      ? row[mainSource]?.__correlationKey
+      ? (row[mainSource]?.__correlationKey ?? row.__correlationKey)
       : undefined,
     parentContext: isIncludedRelation
       ? (row.__parentContext ?? row[mainSource]?.__parentContext ?? null)
@@ -1617,6 +1587,28 @@ function wrapInputWithAlias(
 ): NamespacedAndKeyedStream {
   return input.pipe(
     map(([key, row]) => {
+      const inputRow: unknown = row
+      const scalar = getRoutedScalarMetadata(inputRow)
+      if (scalar) {
+        const nsRow = {
+          [alias]: scalar.value,
+          __correlationKey: scalar.correlationKey,
+          __parentContext: scalar.parentContext,
+          [INCLUDES_PUBLIC_KEY]: scalar.publicKey,
+        } as unknown as NamespacedRow
+        if (
+          scalar.parentContext != null &&
+          typeof scalar.parentContext === `object`
+        ) {
+          Object.assign(nsRow, scalar.parentContext)
+        }
+        return [key, nsRow] as [unknown, NamespacedRow]
+      }
+
+      if (inputRow == null || typeof inputRow !== `object`) {
+        return [key, { [alias]: inputRow }] as [unknown, NamespacedRow]
+      }
+
       // Initialize the record with a nested structure.
       // If __parentContext exists (from parent-referencing includes), merge parent
       // aliases into the namespaced row so WHERE can resolve parent refs.

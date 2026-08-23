@@ -154,6 +154,7 @@ The route-context grammar crosses these dimensions:
 ```text
 lexical dependency scope
   x recursive source boundary (nested include, QueryRef, union)
+  x recursive result shape (record, scalar, nullable scalar)
   x evaluation phase (filter, join, group, aggregate, order, window)
   x join side and correlation attachment point
   x materialization form
@@ -166,10 +167,20 @@ joined subquery, or union branch transports the same context.
 
 The executable oracle factors that product into valid compiler sub-grammars:
 
+- parent field projection by whole-row projection;
+- unmatched correlation values by null correlation values;
 - lexical scope, including nested outer and inner materialization forms;
 - grouping mode by aggregate-expression placement;
 - recursive source boundary by evaluation phase; and
-- join-key side by correlation attachment point.
+- join-key side by correlation attachment point;
+- union form and public-key identity; and
+- derived-result boundary by selection mode and scalar nullability.
+
+Objects carry route metadata as hidden fields while the compiler moves them
+through recursive sources. Scalars, including `null`, cannot carry fields, so
+the compiler uses an internal envelope at those same edges. Namespacing and
+join adapters unwrap the value, keep the route beside it, and never expose the
+envelope in the public query result.
 
 Every valid plan is checked as a Collection, `toArray`, and `materialize`
 include at initial load, after a parent-route update, and after a child update.

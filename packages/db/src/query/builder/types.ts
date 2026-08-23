@@ -93,7 +93,7 @@ export type Source = {
   [alias: string]:
     | CollectionImpl<any, any>
     | CollectionOptionsIdentity<any, any, any, any, any>
-    | QueryBuilder<Context>
+    | QueryBuilder<any>
 }
 
 /**
@@ -168,7 +168,7 @@ export type ContextFromUnionSource<TSource extends Source> =
     : ContextFromSource<TSource>
 
 type ResultFromBranch<TBranch> =
-  TBranch extends QueryBuilder<infer TContext> ? GetResult<TContext> : never
+  TBranch extends QueryBuilder<infer TContext> ? GetRawResult<TContext> : never
 
 type UnionBranchResult<TBranches extends ReadonlyArray<QueryBuilder<any>>> =
   ResultFromBranch<TBranches[number]>

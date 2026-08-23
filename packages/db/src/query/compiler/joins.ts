@@ -20,6 +20,12 @@ import { normalizeValue } from '../../utils/comparison.js'
 import { ensureIndexForField } from '../../indexes/auto-index.js'
 import { compileExpression } from './evaluators.js'
 import { getLazyLoadTargets } from './lazy-targets.js'
+import { crossJoinParentRoutes } from './parent-routes.js'
+import {
+  INCLUDES_PUBLIC_KEY,
+  attachRouteMetadataToResult,
+  getRoutedScalarMetadata,
+} from './route-metadata.js'
 import type { CompileQueryFn } from './index.js'
 import type { OrderByOptimizationInfo } from './order-by.js'
 import type {
@@ -53,43 +59,49 @@ export type LazyCollectionCallbacks = {
 }
 
 let nextLazyDemandPlanId = 0
-const PARENT_ROUTE_CROSS_KEY = `__tanstack_join_parent_route_cross__`
 
 function parameterizeJoinInputByParentRoutes(
   input: KeyedStream,
   parentKeyStream: KeyedStream,
 ): KeyedStream {
-  const rows: any = input.pipe(
-    map(([rowKey, row]) => [PARENT_ROUTE_CROSS_KEY, [rowKey, row]]),
-  )
-  const routes: any = parentKeyStream.pipe(
-    map(([correlationKey, parentContext]) => [
-      PARENT_ROUTE_CROSS_KEY,
-      [correlationKey, parentContext],
-    ]),
-  )
-
-  return rows.pipe(
-    joinOperator(routes, `inner`),
-    filter(([, [rowSide, routeSide]]: any) =>
-      Boolean(rowSide != null && routeSide != null),
-    ),
-    map(([, [rowSide, routeSide]]: any) => {
-      const [rowKey, row] = rowSide
-      const [correlationKey, parentContext] = routeSide
+  return crossJoinParentRoutes(
+    input,
+    parentKeyStream,
+    (rowKey, row, correlationKey, parentContext) => {
       return [
         serializeValue([rowKey, correlationKey, parentContext]),
         {
-          ...row,
+          ...(row as Record<string, unknown>),
           __correlationKey: correlationKey,
           __parentContext: parentContext,
         },
       ]
-    }),
-  ) as KeyedStream
+    },
+  )
 }
 
 function wrapJoinedInputRow(alias: string, row: any): NamespacedRow {
+  const scalar = getRoutedScalarMetadata(row)
+  if (scalar) {
+    const namespaced = {
+      [alias]: scalar.value,
+      __correlationKey: scalar.correlationKey,
+      __parentContext: scalar.parentContext,
+      [INCLUDES_PUBLIC_KEY]: scalar.publicKey,
+    } as unknown as NamespacedRow
+    if (
+      scalar.parentContext != null &&
+      typeof scalar.parentContext === `object`
+    ) {
+      Object.assign(namespaced, scalar.parentContext)
+    }
+    return namespaced
+  }
+
+  if (row == null || typeof row !== `object`) {
+    return { [alias]: row }
+  }
+
   const { __parentContext, ...cleanRow } = row
   const namespaced: NamespacedRow = { [alias]: cleanRow }
   if (__parentContext != null) {
@@ -649,20 +661,21 @@ function processJoinSource(
       // We need to extract just the value for use in parent queries
       const extractedInput = subQueryInput.pipe(
         map((data: any) => {
-          const [key, [value, _orderByIndex, correlationKey, parentContext]] =
-            data
+          const [
+            key,
+            [value, _orderByIndex, correlationKey, parentContext, publicKey],
+          ] = data
           if (!parentKeyStream) {
             return [key, value] as [unknown, any]
           }
           return [
             key,
-            value != null && typeof value === `object`
-              ? {
-                  ...value,
-                  __correlationKey: correlationKey,
-                  __parentContext: parentContext,
-                }
-              : value,
+            attachRouteMetadataToResult(
+              value,
+              correlationKey,
+              parentContext,
+              publicKey,
+            ),
           ] as [unknown, any]
         }),
       )
