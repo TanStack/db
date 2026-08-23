@@ -5,7 +5,7 @@ title: AggregateNotSupportedError
 
 # Class: AggregateNotSupportedError
 
-Defined in: [packages/db/src/errors.ts:767](https://github.com/TanStack/db/blob/main/packages/db/src/errors.ts#L767)
+Defined in: [packages/db/src/errors.ts:777](https://github.com/TanStack/db/blob/main/packages/db/src/errors.ts#L777)
 
 Error thrown when aggregate expressions are used outside of a GROUP BY context.
 
@@ -21,7 +21,7 @@ Error thrown when aggregate expressions are used outside of a GROUP BY context.
 new AggregateNotSupportedError(): AggregateNotSupportedError;
 ```
 
-Defined in: [packages/db/src/errors.ts:768](https://github.com/TanStack/db/blob/main/packages/db/src/errors.ts#L768)
+Defined in: [packages/db/src/errors.ts:778](https://github.com/TanStack/db/blob/main/packages/db/src/errors.ts#L778)
 
 #### Returns
 
