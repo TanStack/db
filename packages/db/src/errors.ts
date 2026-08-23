@@ -481,6 +481,16 @@ export class FnSelectWithGroupByError extends QueryCompilationError {
   }
 }
 
+export class UnsupportedFnSelectResultError extends QueryCompilationError {
+  constructor(valueDescription: string) {
+    super(
+      `fn.select() cannot return ${valueDescription}. ` +
+        `Child query builders, query expressions, and helpers such as eq(), toArray(), materialize(), concat(toArray()), and caseWhen() are query-construction values. ` +
+        `Use them as direct fields in .select() instead.`,
+    )
+  }
+}
+
 export class UnsupportedRootScalarSelectError extends QueryCompilationError {
   constructor() {
     super(

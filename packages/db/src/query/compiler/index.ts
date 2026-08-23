@@ -16,9 +16,17 @@ import {
   FnSelectWithGroupByError,
   HavingRequiresGroupByError,
   LimitOffsetRequireOrderByError,
+  UnsupportedFnSelectResultError,
   UnsupportedFromTypeError,
 } from '../../errors.js'
 import { VIRTUAL_PROP_NAMES } from '../../virtual-props.js'
+import { BaseQueryBuilder } from '../builder/index.js'
+import {
+  CaseWhenWrapper,
+  ConcatToArrayWrapper,
+  MaterializeWrapper,
+  ToArrayWrapper,
+} from '../builder/functions.js'
 import {
   ConditionalSelect,
   IncludesSubquery,
@@ -68,6 +76,50 @@ export const INCLUDES_ROUTING = Symbol(`includesRouting`)
 export const INCLUDES_PUBLIC_KEY = Symbol(`includesPublicKey`)
 export const FN_SELECT_STATE = Symbol(`fnSelectState`)
 const SKIP_INCLUDE = Symbol(`skipInclude`)
+
+function getUnsupportedFnSelectResultDescription(
+  value: unknown,
+  seen: Set<object> = new Set(),
+): string | undefined {
+  if (value instanceof BaseQueryBuilder) return `a child query builder`
+  if (value instanceof ToArrayWrapper) return `toArray()`
+  if (value instanceof ConcatToArrayWrapper) return `concat(toArray())`
+  if (value instanceof MaterializeWrapper) return `materialize()`
+  if (value instanceof CaseWhenWrapper) return `caseWhen()`
+  if (isExpressionLike(value)) {
+    return value &&
+      typeof value === `object` &&
+      `name` in value &&
+      typeof value.name === `string`
+      ? `${value.name}()`
+      : `a query expression`
+  }
+  if (value === null || typeof value !== `object` || seen.has(value)) {
+    return undefined
+  }
+
+  seen.add(value)
+  const keys = [
+    ...Object.keys(value),
+    ...Object.getOwnPropertySymbols(value).filter((key) =>
+      Object.prototype.propertyIsEnumerable.call(value, key),
+    ),
+  ]
+  for (const key of keys) {
+    const entry = (value as Record<PropertyKey, unknown>)[key]
+    const unsupported = getUnsupportedFnSelectResultDescription(entry, seen)
+    if (unsupported) return unsupported
+  }
+  return undefined
+}
+
+export function validateFnSelectResult(value: unknown): void {
+  const unsupportedValueDescription =
+    getUnsupportedFnSelectResultDescription(value)
+  if (unsupportedValueDescription) {
+    throw new UnsupportedFnSelectResultError(unsupportedValueDescription)
+  }
+}
 
 type ConditionalSelectGuard = {
   condition: BasicExpression
@@ -785,6 +837,7 @@ export function compileQuery(
     pipeline = pipeline.pipe(
       map(([key, namespacedRow]) => {
         const selectResults = query.fnSelect!(namespacedRow)
+        validateFnSelectResult(selectResults)
         let selected = selectResults
         if (selectResults && typeof selectResults === `object`) {
           selected = Array.isArray(selectResults)

@@ -1330,6 +1330,8 @@ The singleton vs. array result type is inferred from whether the wrapped query e
 
 Like `toArray()`, `materialize()` is only valid as a top-level value in `.select()` — it cannot be nested inside expression helpers such as `coalesce()` or `eq()`.
 
+Do not return child queries, `toArray()`, `materialize()`, or query expressions such as `eq()` and `caseWhen()` from `.fn.select()`. Functional select callbacks run after the compiler builds the query graph, so they cannot add query operations to it.
+
 ### Aggregates
 
 You can use aggregate functions in child queries. Aggregates are computed per parent:

@@ -1,9 +1,13 @@
 import { describe, expectTypeOf, test } from 'vitest'
 import {
+  Query,
+  caseWhen,
   count,
   createLiveQueryCollection,
   eq,
   gt,
+  materialize,
+  toArray,
 } from '../../src/query/index.js'
 import { createCollection } from '../../src/collection/index.js'
 import { mockSyncCollectionOptions } from '../utils.js'
@@ -142,6 +146,60 @@ describe(`Functional Variants Types`, () => {
         }>
       >
     >()
+  })
+
+  test(`fn.select rejects child queries and materialization helpers`, () => {
+    // @ts-expect-error query helpers are only supported in select()
+    createLiveQueryCollection((q) =>
+      q.from({ user: usersCollection }).fn.select((row) => ({
+        id: row.user.id,
+        nested: {
+          departments: toArray(q.from({ department: departmentsCollection })),
+        },
+      })),
+    )
+
+    // @ts-expect-error materialize() is only supported in select()
+    createLiveQueryCollection((q) =>
+      q.from({ user: usersCollection }).fn.select((row) => ({
+        id: row.user.id,
+        departments: materialize(q.from({ department: departmentsCollection })),
+      })),
+    )
+
+    // @ts-expect-error child query builders are only supported in select()
+    createLiveQueryCollection((q) =>
+      q.from({ user: usersCollection }).fn.select((row) => ({
+        id: row.user.id,
+        departments: q.from({ department: departmentsCollection }),
+      })),
+    )
+
+    // @ts-expect-error query expressions are only supported in select()
+    createLiveQueryCollection((q) =>
+      q.from({ user: usersCollection }).fn.select((row) => ({
+        id: row.user.id,
+        active: eq(row.user.active, true),
+      })),
+    )
+
+    // @ts-expect-error caseWhen() is only supported in select()
+    createLiveQueryCollection((q) =>
+      q.from({ user: usersCollection }).fn.select((row) => ({
+        id: row.user.id,
+        label: caseWhen(eq(row.user.active, true), `active`, `inactive`),
+      })),
+    )
+  })
+
+  test(`fn.select accepts unresolved generic result types`, () => {
+    const query = new Query().from({ user: usersCollection })
+
+    function selectValue<T>(value: T) {
+      return query.fn.select(() => value)
+    }
+
+    selectValue({ label: `active` })
   })
 
   test(`fn.where with filtered original type`, () => {
