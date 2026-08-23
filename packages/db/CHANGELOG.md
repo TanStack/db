@@ -1,5 +1,13 @@
 # @tanstack/db
 
+## 0.8.3
+
+### Patch Changes
+
+- Reject child query builders and query-construction helpers returned from `fn.select()` with type and runtime errors instead of exposing internal query objects. ([#1760](https://github.com/TanStack/db/pull/1760))
+
+- Support disabling live queries declared with the `{ query }` config syntax by returning `undefined` or `null` from the query callback. ([#1757](https://github.com/TanStack/db/pull/1757))
+
 ## 0.8.2
 
 ### Patch Changes
