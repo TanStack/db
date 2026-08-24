@@ -1,6 +1,5 @@
 import { fc, test as fcTest } from '@fast-check/vitest'
 import { describe, expect } from 'vitest'
-import { createCollection } from '../../src/collection/index.js'
 import { BasicIndex } from '../../src/indexes/basic-index.js'
 import {
   createLiveQueryCollection,
@@ -9,11 +8,8 @@ import {
 } from '../../src/query/index.js'
 import { runTrace } from '../trace-runner.js'
 import { oraclePropertyOptions } from '../oracle-config.js'
-import {
-  flushPromises,
-  mockSyncCollectionOptions,
-  withExpectedRejection,
-} from '../utils.js'
+import { flushPromises, withExpectedRejection } from '../utils.js'
+import { createControlledCollection } from './includes-oracle-helpers.js'
 import type { TraceDriver, TraceProjection } from '../trace-runner.js'
 
 type ParentRow = {
@@ -53,11 +49,6 @@ const initialOtherChildren: ReadonlyArray<ChildRow> = [
   { id: 400, parentGroup: 20, value: 4 },
 ]
 
-type SyncChange<T> = {
-  type: `insert` | `update` | `delete`
-  value: T
-}
-
 type PublicationAction =
   | { type: `parentScalar`; value: number }
   | { type: `childScalar`; value: number }
@@ -68,34 +59,6 @@ type PublicationAction =
   | { type: `parentThenChild`; parentValue: number; childValue: number }
 
 let nextCollectionId = 0
-
-function createControlledCollection<T extends { id: number }>(
-  name: string,
-  initialData: ReadonlyArray<T>,
-) {
-  const options = mockSyncCollectionOptions<T>({
-    id: `${name}-${nextCollectionId++}`,
-    getKey: (row) => row.id,
-    initialData: initialData.map((row) => ({ ...row })),
-  })
-  const collection = createCollection(options)
-
-  const writeBatch = (changes: ReadonlyArray<SyncChange<T>>): void => {
-    options.utils.begin()
-    for (const change of changes) options.utils.write(change)
-    options.utils.commit()
-  }
-
-  return {
-    collection,
-    write(type: SyncChange<T>[`type`], value: T): void {
-      writeBatch([{ type, value: { ...value } }])
-    },
-    writeBatch,
-    resolveSync: options.utils.resolveSync,
-    rejectSync: options.utils.rejectSync,
-  }
-}
 
 function createLayeredQuery(
   parents: ReturnType<typeof createControlledCollection<ParentRow>>,

@@ -156,6 +156,16 @@ export function processSelect(
   select: Select,
   _allInputs: Record<string, KeyedStream>,
 ): NamespacedAndKeyedStream {
+  if (!isNestedSelectObject(select)) {
+    const compiled = compileSelectValue(select as SelectValueExpression)
+    return pipeline.pipe(
+      map(([key, namespacedRow]) => [
+        key,
+        { ...namespacedRow, $selected: compiled(namespacedRow) },
+      ]),
+    ) as NamespacedAndKeyedStream
+  }
+
   // Build ordered operations to preserve authoring order (spreads and fields)
   const ops: Array<SelectOp> = []
 

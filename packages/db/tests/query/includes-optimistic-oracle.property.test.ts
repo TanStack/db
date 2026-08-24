@@ -1,19 +1,16 @@
 import { fc, test as fcTest } from '@fast-check/vitest'
 import { describe, expect } from 'vitest'
-import { createCollection } from '../../src/collection/index.js'
 import {
   createLiveQueryCollection,
   eq,
   toArray,
 } from '../../src/query/index.js'
-import {
-  flushPromises,
-  mockSyncCollectionOptions,
-  withExpectedRejection,
-} from '../utils.js'
+import { flushPromises, withExpectedRejection } from '../utils.js'
 import { runTrace } from '../trace-runner.js'
 import { oraclePropertyOptions } from '../oracle-config.js'
+import { createControlledCollection as createOracleControlledCollection } from './includes-oracle-helpers.js'
 import type { TraceDriver, TraceProjection } from '../trace-runner.js'
+import type { OracleSyncChange as SyncChange } from './includes-oracle-helpers.js'
 
 type RootRow = {
   id: number
@@ -24,11 +21,6 @@ type RootRow = {
 
 type ChildRow = RootRow & {
   parentGroup: number
-}
-
-type SyncChange<T> = {
-  type: `insert` | `update` | `delete`
-  value: T
 }
 
 type ChildLevel = 1 | 2 | 3
@@ -149,37 +141,13 @@ type RouteValues = {
   authoritative: number
 }
 
-let nextHarnessId = 0
-
 function createControlledCollection<T extends { id: number }>(
   name: string,
   initialData: ReadonlyArray<T>,
 ) {
-  const options = mockSyncCollectionOptions<T>({
-    id: `${name}-${nextHarnessId++}`,
-    getKey: (row) => row.id,
-    initialData: initialData.map((row) => ({ ...row })),
+  return createOracleControlledCollection(name, initialData, {
+    rowUpdateMode: `full`,
   })
-  options.sync.rowUpdateMode = `full`
-  const collection = createCollection(options)
-
-  const writeBatch = (changes: ReadonlyArray<SyncChange<T>>) => {
-    options.utils.begin()
-    for (const change of changes) {
-      options.utils.write({
-        type: change.type,
-        value: { ...change.value },
-      })
-    }
-    options.utils.commit()
-  }
-
-  return {
-    collection,
-    writeBatch,
-    resolveSync: options.utils.resolveSync,
-    rejectSync: options.utils.rejectSync,
-  }
 }
 
 function createSources(

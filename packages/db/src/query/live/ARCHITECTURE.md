@@ -99,9 +99,10 @@ reduction that enforces public-key congruence and multiplicity.
 ## Identity
 
 Aliases are lexical query-language names. They are not runtime identities. The
-query builder requires collection aliases to be unique across one query tree,
-including includes; shadowing is rejected before compilation. Compilation then
-assigns opaque IDs to the accepted plan:
+query builder requires collection aliases to be unique within each lexical
+scope and rejects nested queries that shadow an ancestor alias. Sibling include
+scopes may reuse an alias because neither alias is visible to the other.
+Compilation then assigns opaque IDs to the accepted plan:
 
 ```ts
 type SourceId = Brand<string, 'SourceId'>
@@ -114,8 +115,8 @@ unused name cannot change the compiled graph or its result.
 
 A `CanonicalCorrelationKey` is the canonical tuple of every evaluated
 parent-dependent value that can affect the child plan. This includes values
-used by filters, joins, ordering, limits, and nullable predicates, not only the
-obvious foreign-key equality.
+used by filters, joins, grouping, aggregates, ordering, projections, limits,
+and nullable predicates, not only the obvious foreign-key equality.
 
 A bucket key identifies one such correlated partition at one relation node:
 
@@ -130,6 +131,61 @@ Correlation equality must use the same value semantics as query predicates.
 Implementations use canonical values, interned handles, or nested maps; they do
 not reconstruct array or object keys and expect JavaScript `Map` identity to
 match.
+
+### Route-context transport
+
+A parent reference is a lexical dependency, even when it appears below the
+immediate child query. For every parent reference that the builder can inspect,
+the compiler must:
+
+1. discover it across nested includes, `QueryRef` sources, union branches, and
+   joined sources;
+2. include its evaluated value in the route identity;
+3. attach that route context before the first operator that evaluates it; and
+4. preserve it through each later recursive source, join, grouping, and
+   materialization edge.
+
+The third rule fixes the evaluation order. A parent-dependent filter, join key,
+aggregate wrapper, order, or window must run once per parent route. It cannot
+run on a shared child relation first and receive a route after the fact.
+
+The route-context grammar crosses these dimensions:
+
+```text
+lexical dependency scope
+  x recursive source boundary (nested include, QueryRef, union)
+  x recursive result shape (record, scalar, nullable scalar)
+  x evaluation phase (filter, join, group, aggregate, order, window)
+  x join side and correlation attachment point
+  x materialization form
+  x parent or child update
+```
+
+Adding one dimension to the query language requires checking its product with
+the others. A passing one-level filter case does not prove a nested aggregate,
+joined subquery, or union branch transports the same context.
+
+The executable oracle factors that product into valid compiler sub-grammars:
+
+- parent field projection by whole-row projection;
+- unmatched correlation values by null correlation values;
+- lexical scope, including nested outer and inner materialization forms;
+- grouping mode by aggregate-expression placement;
+- recursive source boundary by evaluation phase; and
+- join-key side by correlation attachment point;
+- union form and public-key identity; and
+- derived-result boundary by selection mode and scalar nullability.
+
+Objects carry route metadata as hidden fields while the compiler moves them
+through recursive sources. Scalars, including `null`, cannot carry fields, so
+the compiler uses an internal envelope at those same edges. Namespacing and
+join adapters unwrap the value, keep the route beside it, and never expose the
+envelope in the public query result.
+
+Every valid plan is checked as a Collection, `toArray`, and `materialize`
+include at initial load, after a parent-route update, and after a child update.
+The grammar declarations generate the cases; individual reported defects do
+not get one-off tests outside that product.
 
 A materialization cell identifies one include field on one parent-row
 occurrence:
@@ -466,7 +522,8 @@ create recursive Collection machinery.
 ## Normative laws
 
 1. **Alpha-renaming:** changing any accepted alias to another unused name cannot
-   change results; alias shadowing within a query tree is rejected.
+   change results; aliases must be unique within one lexical scope and cannot
+   shadow an ancestor alias. Sibling scopes may reuse aliases.
 2. **Contribution conservation:** a public row exists exactly when its reduced
    supporting weight and collision policy produce one.
 3. **Batch partition:** equivalent valid split and atomic deliveries converge.
@@ -527,6 +584,7 @@ create recursive Collection machinery.
 | Coherent layered publication                                                | `packages/db/tests/query/includes-publication-oracle.test.ts`             |
 | Collection facades, event coherence, and route activation                   | `packages/db/tests/query/includes-collection-oracle.property.test.ts`     |
 | Correlated physical work                                                    | `packages/db/tests/query/includes-work-counter-oracle.test.ts`            |
+| Route-context discovery and transport across recursive and join boundaries  | `packages/db/tests/query/includes-context-transport-oracle.test.ts`       |
 | Query-db ownership                                                          | `packages/query-db-collection/tests/ownership-lifecycle.oracle.test.ts`   |
 | Reachable nested shape                                                      | `packages/query-db-collection/tests/includes-work-counter-oracle.test.ts` |
 

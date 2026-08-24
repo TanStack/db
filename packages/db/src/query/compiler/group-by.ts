@@ -43,6 +43,50 @@ type RowVirtualMetadata = {
   hasLocal: boolean
 }
 
+function addCorrelationRouteToGroupKey(
+  key: Record<string, unknown>,
+  row: NamespacedRow,
+  mainSource: string,
+): void {
+  const rowRecord = row as Record<string, unknown>
+  const source = rowRecord[mainSource] as Record<string, unknown> | undefined
+  key.__correlationKey = source?.__correlationKey
+  if (rowRecord.__parentContext != null) {
+    key.__parentContext = rowRecord.__parentContext
+  }
+}
+
+function getCorrelationRouteIdentity(
+  aggregatedRow: Record<string, unknown>,
+): unknown {
+  return aggregatedRow.__parentContext == null
+    ? aggregatedRow.__correlationKey
+    : [aggregatedRow.__correlationKey, aggregatedRow.__parentContext]
+}
+
+function getHavingEvaluationRow(row: Record<string, unknown>): NamespacedRow {
+  const parentContext = row.__parentContext
+  return {
+    ...(parentContext !== null && typeof parentContext === `object`
+      ? (parentContext as NamespacedRow)
+      : {}),
+    $selected: row.$selected as Record<string, unknown>,
+  }
+}
+
+function getWrappedAggregateEvaluationRow(
+  row: Record<string, unknown>,
+  selected: Record<string, unknown>,
+): NamespacedRow {
+  const parentContext = row.__parentContext
+  return {
+    ...(parentContext !== null && typeof parentContext === `object`
+      ? (parentContext as NamespacedRow)
+      : {}),
+    $selected: selected,
+  }
+}
+
 function getRowVirtualMetadata(row: NamespacedRow): RowVirtualMetadata {
   let found = false
   let allSynced = true
@@ -189,15 +233,13 @@ export function processGroupBy(
       }
     }
 
-    // Use a constant key for single group.
-    // When mainSource is set (includes mode), include __correlationKey so that
-    // rows from different parents aggregate separately.
-    const keyExtractor = mainSource
-      ? ([, row]: [string, NamespacedRow]) => ({
-          __singleGroup: true,
-          __correlationKey: (row as any)?.[mainSource]?.__correlationKey,
-        })
-      : () => ({ __singleGroup: true })
+    // Use a constant key for single group. In includes mode, add the complete
+    // correlation route so parents with distinct projected inputs stay apart.
+    const keyExtractor = ([, row]: [string, NamespacedRow]) => {
+      const key: Record<string, unknown> = { __singleGroup: true }
+      if (mainSource) addCorrelationRouteToGroupKey(key, row, mainSource)
+      return key
+    }
 
     // Apply the groupBy operator with single group
     pipeline = pipeline.pipe(
@@ -231,9 +273,12 @@ export function processGroupBy(
         const correlationKey = mainSource
           ? (aggregatedRow as any).__correlationKey
           : undefined
+        const correlationRoute = mainSource
+          ? getCorrelationRouteIdentity(aggregatedRow)
+          : undefined
         const resultKey =
-          correlationKey !== undefined
-            ? `single_group_${serializeValue(correlationKey)}`
+          correlationRoute !== undefined
+            ? `single_group_${serializeValue(correlationRoute)}`
             : `single_group`
         const resultRow: Record<string, any> = {
           ...(aggregatedRow as Record<string, any>),
@@ -272,8 +317,7 @@ export function processGroupBy(
 
         pipeline = pipeline.pipe(
           filter(([, row]) => {
-            // Create a namespaced row structure for HAVING evaluation
-            const namespacedRow = { $selected: (row as any).$selected }
+            const namespacedRow = getHavingEvaluationRow(row)
             return toBooleanPredicate(compiledHaving(namespacedRow))
           }),
         )
@@ -285,8 +329,7 @@ export function processGroupBy(
       for (const fnHaving of fnHavingClauses) {
         pipeline = pipeline.pipe(
           filter(([, row]) => {
-            // Create a namespaced row structure for functional HAVING evaluation
-            const namespacedRow = { $selected: (row as any).$selected }
+            const namespacedRow = getHavingEvaluationRow(row)
             return toBooleanPredicate(fnHaving(namespacedRow))
           }),
         )
@@ -305,9 +348,9 @@ export function processGroupBy(
     compileExpression(e),
   )
 
-  // Create a key extractor function using simple __key_X format.
-  // When mainSource is set (includes mode), include __correlationKey so that
-  // rows from different parents with the same group key aggregate separately.
+  // Create a key extractor function using simple __key_X format. In includes
+  // mode, add the complete route so parents with distinct projected inputs do
+  // not aggregate together.
   const keyExtractor = ([, row]: [
     string,
     NamespacedRow & { $selected?: any },
@@ -325,9 +368,7 @@ export function processGroupBy(
       key[`__key_${i}`] = value
     }
 
-    if (mainSource) {
-      key.__correlationKey = (row as any)?.[mainSource]?.__correlationKey
-    }
+    if (mainSource) addCorrelationRouteToGroupKey(key, row, mainSource)
 
     return key
   }
@@ -397,17 +438,20 @@ export function processGroupBy(
       }
 
       // Generate a simple key for the live collection using group values.
-      // When in includes mode, include the correlation key so that groups
-      // from different parents don't collide.
+      // In includes mode, add the complete route so correlated groups do not
+      // collide.
       const correlationKey = mainSource
         ? (aggregatedRow as any).__correlationKey
+        : undefined
+      const correlationRoute = mainSource
+        ? getCorrelationRouteIdentity(aggregatedRow)
         : undefined
       const keyParts: Array<unknown> = []
       for (let i = 0; i < groupByClause.length; i++) {
         keyParts.push(aggregatedRow[`__key_${i}`])
       }
-      if (correlationKey !== undefined) {
-        keyParts.push(correlationKey)
+      if (correlationRoute !== undefined) {
+        keyParts.push(correlationRoute)
       }
       const finalKey =
         keyParts.length === 1 ? keyParts[0] : serializeValue(keyParts)
@@ -449,8 +493,7 @@ export function processGroupBy(
 
       pipeline = pipeline.pipe(
         filter(([, row]) => {
-          // Create a namespaced row structure for HAVING evaluation
-          const namespacedRow = { $selected: (row as any).$selected }
+          const namespacedRow = getHavingEvaluationRow(row)
           return compiledHaving(namespacedRow)
         }),
       )
@@ -462,8 +505,7 @@ export function processGroupBy(
     for (const fnHaving of fnHavingClauses) {
       pipeline = pipeline.pipe(
         filter(([, row]) => {
-          // Create a namespaced row structure for functional HAVING evaluation
-          const namespacedRow = { $selected: (row as any).$selected }
+          const namespacedRow = getHavingEvaluationRow(row)
           return toBooleanPredicate(fnHaving(namespacedRow))
         }),
       )
@@ -647,7 +689,9 @@ function evaluateWrappedAggregates(
     finalResults[`${GROUP_KEY_REF_PREFIX}${i}`] = aggregatedRow[`__key_${i}`]
   }
   for (const [alias, evaluator] of Object.entries(wrappedAggExprs)) {
-    finalResults[alias] = evaluator({ $selected: finalResults })
+    finalResults[alias] = evaluator(
+      getWrappedAggregateEvaluationRow(aggregatedRow, finalResults),
+    )
   }
   for (const key of Object.keys(finalResults)) {
     if (key.startsWith(`__agg_`) || key.startsWith(GROUP_KEY_REF_PREFIX)) {
