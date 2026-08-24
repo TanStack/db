@@ -1,5 +1,13 @@
 # @tanstack/db
 
+## 0.8.4
+
+### Patch Changes
+
+- Preserve parent-specific include results through nested includes, subqueries, unions, joins, ordering, projections, aggregates, and having clauses. ([#1761](https://github.com/TanStack/db/pull/1761))
+
+- Report incremental subset-load failures through subscriptions, live-query utilities, and effects while keeping cached source rows available. Recover cleanly from failed or overlapping must-refetch replays, collection cleanup, effect teardown errors, and cooperative adapter cancellation. Electric's shared-stream snapshot path still depends on upstream request identity or cancellation support to prevent rows from an aborted request from arriving before the request Promise settles. ([#1756](https://github.com/TanStack/db/pull/1756))
+
 ## 0.8.3
 
 ### Patch Changes
