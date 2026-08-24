@@ -1298,6 +1298,10 @@ async function runPendingMutationScenario(
   )[0]!
   const pending: Array<PendingCursorLoad> = []
   const deliveredIds = new Set<number>([firstDelivered.id])
+  // A rejected initial subset load is fatal. Establish a ready baseline first
+  // so reject scenarios exercise subscription-scoped window recovery.
+  let establishInitialCoverageSynchronously =
+    scenario.responseOutcome === `reject`
   let begin!: () => void
   let write!: (message: {
     type: `insert` | `update` | `delete`
@@ -1323,6 +1327,10 @@ async function runPendingMutationScenario(
         params.markReady()
         return {
           loadSubset: (options: LoadSubsetOptions) => {
+            if (establishInitialCoverageSynchronously) {
+              establishInitialCoverageSynchronously = false
+              return true
+            }
             const deferred = createDeferred<void>()
             pending.push({ options, deferred })
             return deferred.promise
@@ -1336,7 +1344,7 @@ async function runPendingMutationScenario(
       .from({ row: source })
       .orderBy(({ row }) => row.rank, scenario.direction)
       .orderBy(({ row }) => row.id, `asc`)
-      .limit(scenario.limit),
+      .limit(scenario.responseOutcome === `reject` ? 1 : scenario.limit),
   )
   const outstanding: Array<Promise<unknown>> = []
 
@@ -1384,11 +1392,10 @@ async function runPendingMutationScenario(
   try {
     const preload = live.preload()
     outstanding.push(preload)
-    expect(pending).toHaveLength(1)
-
-    if (timing === `before-response`) applyMutation()
     let finalLimit = scenario.limit
     if (scenario.responseOutcome === `resolve`) {
+      expect(pending).toHaveLength(1)
+      if (timing === `before-response`) applyMutation()
       await settlePending()
       await preload
       if (timing === `after-response`) {
@@ -1397,13 +1404,29 @@ async function runPendingMutationScenario(
         await settlePending()
       }
     } else {
-      pending[0]!.settled = true
-      pending[0]!.deferred.reject(new Error(`cursor failed`))
-      await Promise.resolve()
-      await Promise.allSettled([preload])
-      if (timing === `after-response`) applyMutation()
-
+      await preload
+      expect(pending).toHaveLength(0)
       finalLimit += 1
+      const failedWindow = live.utils.setWindow({
+        offset: 0,
+        limit: finalLimit,
+      })
+      expect(failedWindow).toBeInstanceOf(Promise)
+      const cursorError = new Error(`cursor failed`)
+      const observedFailure = (failedWindow as Promise<void>).then(
+        () => undefined,
+        (error: unknown) => error,
+      )
+      outstanding.push((failedWindow as Promise<void>).catch(() => {}))
+      expect(pending).toHaveLength(1)
+      if (timing === `before-response`) applyMutation()
+      pending[0]!.settled = true
+      pending[0]!.deferred.reject(cursorError)
+      if (timing === `after-response`) applyMutation()
+      await flushPromises()
+      await settlePending()
+      expect(await observedFailure).toBe(cursorError)
+
       const retry = live.utils.setWindow({ offset: 0, limit: finalLimit })
       let retrySettled = retry === true
       const observedRetry =
@@ -1559,6 +1582,9 @@ async function runRejectedCursorRetryAfterMutation(): Promise<void> {
   ])
   const pending: Array<PendingCursorLoad> = []
   const deliveredIds = new Set<number>([1])
+  // Keep the rejected cursor in the incremental path rather than failing the
+  // live query's initial preload.
+  let establishInitialCoverageSynchronously = true
   let begin!: () => void
   let write!: (message: { type: `insert` | `update`; value: PageRow }) => void
   let commit!: () => void
@@ -1580,6 +1606,10 @@ async function runRejectedCursorRetryAfterMutation(): Promise<void> {
         params.markReady()
         return {
           loadSubset: (options: LoadSubsetOptions) => {
+            if (establishInitialCoverageSynchronously) {
+              establishInitialCoverageSynchronously = false
+              return true
+            }
             const deferred = createDeferred<void>()
             pending.push({ options, deferred })
             return deferred.promise
@@ -1593,7 +1623,7 @@ async function runRejectedCursorRetryAfterMutation(): Promise<void> {
       .from({ row: source })
       .orderBy(({ row }) => row.rank, `asc`)
       .orderBy(({ row }) => row.id, `asc`)
-      .limit(2),
+      .limit(1),
   )
 
   const settle = async (request: PendingCursorLoad): Promise<void> => {
@@ -1614,7 +1644,16 @@ async function runRejectedCursorRetryAfterMutation(): Promise<void> {
   }
 
   try {
-    const preload = live.preload()
+    await live.preload()
+    expect(pending).toHaveLength(0)
+
+    const failedWindow = live.utils.setWindow({ offset: 0, limit: 2 })
+    expect(failedWindow).toBeInstanceOf(Promise)
+    const cursorError = new Error(`cursor failed`)
+    const observedFailure = (failedWindow as Promise<void>).then(
+      () => undefined,
+      (error: unknown) => error,
+    )
     expect(pending).toHaveLength(1)
 
     rows.set(1, { id: 1, rank: 3 })
@@ -1623,13 +1662,17 @@ async function runRejectedCursorRetryAfterMutation(): Promise<void> {
     commit()
 
     pending[0]!.settled = true
-    pending[0]!.deferred.reject(new Error(`cursor failed`))
-    await preload
-    await Promise.resolve()
+    pending[0]!.deferred.reject(cursorError)
+    await flushPromises()
+    for (let index = 1; index < pending.length; index++) {
+      if (!pending[index]!.settled) await settle(pending[index]!)
+    }
+    expect(await observedFailure).toBe(cursorError)
 
     const retry = live.utils.setWindow({ offset: 0, limit: 3 })
-    expect(pending).toHaveLength(2)
-    await settle(pending[1]!)
+    for (let index = 1; index < pending.length; index++) {
+      if (!pending[index]!.settled) await settle(pending[index]!)
+    }
     if (retry instanceof Promise) await retry
 
     try {

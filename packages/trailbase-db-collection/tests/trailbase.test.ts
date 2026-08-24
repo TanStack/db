@@ -179,6 +179,46 @@ describe(`TrailBase Integration`, () => {
     })
   })
 
+  it(`ignores a subset page that resolves after its request is aborted`, async () => {
+    const recordApi = new MockRecordApi<Data>()
+    let resolveList!: (response: ListResponse<Data>) => void
+    recordApi.list.mockReturnValue(
+      new Promise<ListResponse<Data>>((resolve) => {
+        resolveList = resolve
+      }),
+    )
+    recordApi.subscribe.mockResolvedValue(new TransformStream<Event>().readable)
+    const collection = createCollection(
+      trailBaseCollectionOptions({
+        recordApi,
+        getKey: (item: Data) => item.id ?? -1,
+        startSync: true,
+        syncMode: `on-demand`,
+        parse: {},
+        serialize: {},
+      }),
+    )
+    const abortController = new AbortController()
+
+    try {
+      await vi.waitFor(() => expect(collection.status).toBe(`ready`))
+      const load = collection._sync.loadSubset({
+        signal: abortController.signal,
+      })
+      expect(recordApi.list).toHaveBeenCalledOnce()
+      abortController.abort()
+      resolveList({
+        records: [{ id: 1, updated: 0, data: `obsolete` }],
+      })
+      if (load instanceof Promise) await load
+
+      expect(stripState(collection.state)).toEqual(new Map())
+    } finally {
+      resolveList({ records: [] })
+      await collection.cleanup()
+    }
+  })
+
   it(`initial fetch, receive update and cancel`, async () => {
     const records: Array<Data> = [
       {

@@ -198,6 +198,13 @@ return the fetched rows. `parseLoadSubsetOptions()` returns only `filters`,
 opaque backend cursor; translate or combine those expressions for your API.
 Return `unloadSubset` only when `loadSubset` creates an ongoing resource, such
 as a per-subset server subscription, that must be released.
+Ownership transfers to core only when `loadSubset` returns `true` or a promise.
+If it throws synchronously after partial setup, release that partial resource
+before throwing; core will not call `unloadSubset` for a request that never
+returned. A must-refetch can call `loadSubset` again with the same options. Each
+successful return is a fresh acquisition: core releases the previous
+acquisition when its replacement returns, then releases the current one when
+the demand ends.
 
 ### Managing optimistic state duration
 

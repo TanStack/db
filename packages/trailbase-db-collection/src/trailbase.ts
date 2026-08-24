@@ -200,7 +200,7 @@ export function trailBaseCollectionOptions<
 
       // Load (more) data.
       async function load(opts: LoadSubsetOptions) {
-        if (cancelled) return
+        if (cancelled || opts.signal?.aborted) return
 
         const lastKey = opts.cursor?.lastKey
         let cursor: string | undefined =
@@ -221,16 +221,22 @@ export function trailBaseCollectionOptions<
 
         while (true) {
           const limit = Math.min(remaining, 256)
-          const response = await config.recordApi.list({
-            pagination: {
-              limit,
-              offset,
-              cursor,
-            },
-            order,
-            filters,
-          })
-          if (cancelled) return
+          let response
+          try {
+            response = await config.recordApi.list({
+              pagination: {
+                limit,
+                offset,
+                cursor,
+              },
+              order,
+              filters,
+            })
+          } catch (error) {
+            if (cancelled || opts.signal?.aborted) return
+            throw error
+          }
+          if (cancelled || opts.signal?.aborted) return
 
           const length = response.records.length
           if (length === 0) {

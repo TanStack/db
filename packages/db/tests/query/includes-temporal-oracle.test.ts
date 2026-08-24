@@ -2,7 +2,6 @@ import { fc, test as fcTest } from '@fast-check/vitest'
 import { describe, expect, it, vi } from 'vitest'
 import { createCollection } from '../../src/collection/index.js'
 import { createDeferred } from '../../src/deferred.js'
-import { CollectionIsInErrorStateError } from '../../src/errors.js'
 import { BasicIndex } from '../../src/indexes/basic-index.js'
 import { extractSimpleComparisons } from '../../src/query/expression-helpers.js'
 import { SubsetDemandController } from '../../src/query/live/subset-demand-controller.js'
@@ -224,7 +223,7 @@ function createReadinessDriver(
     start: async (context) => {
       const preload = startPreload(context.live, context.preload)
       await context.parentLoaded.promise
-      if (initialPosts.length > 0) await preload
+      await preload
     },
     apply: () => undefined,
     cleanup: async ({ posts, comments, live, preload }) => {
@@ -742,6 +741,7 @@ async function expectRejectedDemandEntersError(): Promise<void> {
   ])
   let loadCount = 0
   let shouldReject = true
+  const childLoadError = new Error(`child load failed`)
   const comments = createCollection<Comment>({
     id: nextCollectionId(`temporal-rejected-comments`),
     getKey: (comment) => comment.id,
@@ -751,7 +751,7 @@ async function expectRejectedDemandEntersError(): Promise<void> {
         loadSubset: () => {
           loadCount += 1
           if (shouldReject) {
-            return Promise.reject(new Error(`child load failed`))
+            return Promise.reject(childLoadError)
           }
           markReady()
           return true
@@ -769,9 +769,7 @@ async function expectRejectedDemandEntersError(): Promise<void> {
     expect(loadCount).toBe(1)
     expect(live.status).toBe(`error`)
     expect(preload.preloadSettled).toBe(true)
-    expect(preload.preloadFailure?.error).toBeInstanceOf(
-      CollectionIsInErrorStateError,
-    )
+    expect(preload.preloadFailure?.error).toBe(childLoadError)
 
     await live.cleanup()
     await preload.preloadOutcome
