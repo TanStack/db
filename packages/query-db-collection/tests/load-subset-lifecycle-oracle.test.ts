@@ -7,7 +7,6 @@ import {
   eq,
 } from '@tanstack/db'
 import { describe, expect, it, vi } from 'vitest'
-import { expectAssertionFailure } from '../../db/tests/expected-failure.js'
 import { TraceAssertionError } from '../../db/tests/trace-runner.js'
 import { queryCollectionOptions } from '../src/query.js'
 import type { QueryFunctionContext } from '@tanstack/query-core'
@@ -348,7 +347,7 @@ async function expectDeferredStartupReadyDoesNotOverrideError(): Promise<void> {
 }
 
 async function expectEquivalentPredicatesShareOneLoad(
-  form: `commutative-and` | `reversed-equality`,
+  form: `commutative-and` | `commutative-or` | `reversed-equality`,
 ): Promise<void> {
   const queryClient = createQueryClient()
   const id = `load-subset-canonical-predicate-${collectionSequence++}`
@@ -373,14 +372,22 @@ async function expectEquivalentPredicatesShareOneLoad(
     new IR.PropRef([`group`]),
     new IR.Value(`x`),
   ])
-  const first =
-    form === `commutative-and`
-      ? new IR.Func(`and`, [firstComparison, secondComparison])
-      : firstComparison
-  const second =
-    form === `commutative-and`
-      ? new IR.Func(`and`, [secondComparison, firstComparison])
-      : new IR.Func<boolean>(`eq`, [new IR.Value(`a`), new IR.PropRef([`id`])])
+  let first: IR.BasicExpression<boolean>
+  let second: IR.BasicExpression<boolean>
+  switch (form) {
+    case `commutative-and`:
+      first = new IR.Func(`and`, [firstComparison, secondComparison])
+      second = new IR.Func(`and`, [secondComparison, firstComparison])
+      break
+    case `commutative-or`:
+      first = new IR.Func(`or`, [firstComparison, secondComparison])
+      second = new IR.Func(`or`, [secondComparison, firstComparison])
+      break
+    case `reversed-equality`:
+      first = firstComparison
+      second = new IR.Func(`eq`, [new IR.Value(`a`), new IR.PropRef([`id`])])
+      break
+  }
 
   try {
     await collection._sync.loadSubset({ where: first })
@@ -390,6 +397,41 @@ async function expectEquivalentPredicatesShareOneLoad(
     } catch (error) {
       throw new TraceAssertionError(0, error)
     }
+  } finally {
+    await collection.cleanup()
+    queryClient.clear()
+  }
+}
+
+async function expectEquivalentComparisonValuesShareOneLoad(
+  firstValue: unknown,
+  secondValue: unknown,
+): Promise<void> {
+  const queryClient = createQueryClient()
+  const id = `load-subset-comparison-value-${collectionSequence++}`
+  const queryFn = vi.fn().mockResolvedValue([{ id: `a` }])
+  const collection = createCollection(
+    queryCollectionOptions<Row>({
+      id,
+      queryClient,
+      queryKey: [id],
+      queryFn,
+      getKey: (row) => row.id,
+      startSync: true,
+      syncMode: `on-demand`,
+      retry: false,
+    }),
+  )
+  const value = new IR.PropRef([`value`])
+
+  try {
+    await collection._sync.loadSubset({
+      where: new IR.Func(`eq`, [value, new IR.Value(firstValue)]),
+    })
+    await collection._sync.loadSubset({
+      where: new IR.Func(`eq`, [value, new IR.Value(secondValue)]),
+    })
+    expect(queryFn).toHaveBeenCalledOnce()
   } finally {
     await collection.cleanup()
     queryClient.clear()
@@ -526,18 +568,30 @@ describe(`loadSubset lifecycle oracle`, () => {
   })
 
   it(`commutative predicate forms share one query-db transport load`, async () => {
-    await expectAssertionFailure(expectEquivalentPredicatesShareOneLoad, {
-      checkpoint: 0,
-      classify: ({ actual, expected }) => actual === 2 && expected === 1,
-    })(`commutative-and`)
+    await expectEquivalentPredicatesShareOneLoad(`commutative-and`)
+    await expectEquivalentPredicatesShareOneLoad(`commutative-or`)
   })
 
   it(`reversed equality operands share one query-db transport load`, async () => {
-    await expectAssertionFailure(expectEquivalentPredicatesShareOneLoad, {
-      checkpoint: 0,
-      classify: ({ actual, expected }) => actual === 2 && expected === 1,
-    })(`reversed-equality`)
+    await expectEquivalentPredicatesShareOneLoad(`reversed-equality`)
   })
+
+  it.each([
+    [
+      `valid Date`,
+      new Date(`2024-01-15T00:00:00Z`),
+      new Date(`2024-01-15T00:00:00Z`),
+    ],
+    [`invalid Date`, new Date(Number.NaN), new Date(Number.NaN)],
+  ])(
+    `shares one query-db transport load for equivalent %s values`,
+    async (_label, firstValue, secondValue) => {
+      await expectEquivalentComparisonValuesShareOneLoad(
+        firstValue,
+        secondValue,
+      )
+    },
+  )
 
   it(`aborts an in-flight query when its final live-query owner cleans up`, async () => {
     await expectFinalOwnerCleanupAbortsQuery()

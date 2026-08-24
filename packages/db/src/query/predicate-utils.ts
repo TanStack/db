@@ -1,4 +1,8 @@
 import { Func, Value } from './ir.js'
+import {
+  UnhashableQueryIRError,
+  getStableExpressionHash,
+} from './ir-stable-identity.js'
 import type { BasicExpression, OrderBy, PropRef } from './ir.js'
 import type { LoadSubsetOptions } from '../types.js'
 
@@ -872,6 +876,16 @@ export function isPredicateSubset(
   // Example: superset = {where: status='active', limit: 10, offset: 0, orderBy: desc}
   //          subset = {where: status='active', limit: 5, offset: 0, orderBy: desc}
   // The top 5 active items ARE contained in the top 10 active items.
+  if (superset.limit !== undefined || superset.cursor !== undefined) {
+    // A cursor page only covers another request for the same page, whether or
+    // not the adapter also uses a numeric limit.
+    // Adapters may use the cursor expressions instead of offset, so matching
+    // offsets alone do not prove that two requests load the same rows.
+    if (!areCursorExpressionsEqual(subset.cursor, superset.cursor)) {
+      return false
+    }
+  }
+
   if (superset.limit !== undefined) {
     // For limited supersets, where clauses must be equal
     if (!areWhereClausesEqual(subset.where, superset.where)) {
@@ -890,6 +904,31 @@ export function isPredicateSubset(
     isWhereSubset(subset.where, superset.where) &&
     isOrderBySubset(subset.orderBy, superset.orderBy) &&
     isOffsetLimitSubset(subset, superset)
+  )
+}
+
+/**
+ * Returns whether established coverage satisfies a requested demand.
+ *
+ * Coverage is a directional relation. It must not be replaced with DemandKey
+ * equality, which answers whether two exact requests are the same.
+ */
+export function isLoadSubsetCoveredBy(
+  demand: LoadSubsetOptions,
+  coverage: LoadSubsetOptions,
+): boolean {
+  return isPredicateSubset(demand, coverage)
+}
+
+function areCursorExpressionsEqual(
+  a: LoadSubsetOptions[`cursor`],
+  b: LoadSubsetOptions[`cursor`],
+): boolean {
+  if (a === undefined || b === undefined) return a === b
+  return (
+    Object.is(a.lastKey, b.lastKey) &&
+    areExpressionsEqual(a.whereFrom, b.whereFrom) &&
+    areExpressionsEqual(a.whereCurrent, b.whereCurrent)
   )
 }
 
@@ -1047,32 +1086,34 @@ function findPredicateWithOperator(
 }
 
 function areExpressionsEqual(a: BasicExpression, b: BasicExpression): boolean {
-  if (a.type !== b.type) {
-    return false
+  try {
+    return getStableExpressionHash(a) === getStableExpressionHash(b)
+  } catch (error) {
+    if (!(error instanceof UnhashableQueryIRError)) throw error
+    return areExpressionsStructurallyEqual(a, b)
   }
+}
 
+function areExpressionsStructurallyEqual(
+  a: BasicExpression,
+  b: BasicExpression,
+): boolean {
+  if (a.type !== b.type) return false
   if (a.type === `val` && b.type === `val`) {
     return areValuesEqual(a.value, b.value)
   }
-
   if (a.type === `ref` && b.type === `ref`) {
     return areRefsEqual(a, b)
   }
-
   if (a.type === `func` && b.type === `func`) {
-    const aFunc = a
-    const bFunc = b
-    if (aFunc.name !== bFunc.name) {
-      return false
-    }
-    if (aFunc.args.length !== bFunc.args.length) {
-      return false
-    }
-    return aFunc.args.every((arg, i) =>
-      areExpressionsEqual(arg, bFunc.args[i]!),
+    return (
+      a.name === b.name &&
+      a.args.length === b.args.length &&
+      a.args.every((arg, index) =>
+        areExpressionsStructurallyEqual(arg, b.args[index]!),
+      )
     )
   }
-
   return false
 }
 

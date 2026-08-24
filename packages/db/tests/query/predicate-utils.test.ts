@@ -832,6 +832,23 @@ describe(`isPredicateSubset`, () => {
     expect(isPredicateSubset(subset, superset)).toBe(true)
   })
 
+  it(`treats semantic predicate forms as equal coverage`, () => {
+    const age = ref(`age`)
+    const status = ref(`status`)
+    const ageCheck = gt(age, val(18))
+    const statusCheck = eq(status, val(`active`))
+    const subset: LoadSubsetOptions = {
+      where: func(`and`, ageCheck, statusCheck),
+      limit: 10,
+    }
+    const superset: LoadSubsetOptions = {
+      where: func(`and`, eq(val(`active`), status), func(`lt`, val(18), age)),
+      limit: 20,
+    }
+
+    expect(isPredicateSubset(subset, superset)).toBe(true)
+  })
+
   it(`should return false for limited superset with different where clause`, () => {
     // Even if subset's where is more restrictive, it can't be a subset
     // of a limited superset with a different where clause.
