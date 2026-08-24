@@ -5,7 +5,7 @@ title: GroupByError
 
 # Class: GroupByError
 
-Defined in: [packages/db/src/errors.ts:630](https://github.com/TanStack/db/blob/main/packages/db/src/errors.ts#L630)
+Defined in: [packages/db/src/errors.ts:640](https://github.com/TanStack/db/blob/main/packages/db/src/errors.ts#L640)
 
 ## Extends
 
@@ -26,7 +26,7 @@ Defined in: [packages/db/src/errors.ts:630](https://github.com/TanStack/db/blob/
 new GroupByError(message): GroupByError;
 ```
 
-Defined in: [packages/db/src/errors.ts:631](https://github.com/TanStack/db/blob/main/packages/db/src/errors.ts#L631)
+Defined in: [packages/db/src/errors.ts:641](https://github.com/TanStack/db/blob/main/packages/db/src/errors.ts#L641)
 
 #### Parameters
 

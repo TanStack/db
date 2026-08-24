@@ -16,6 +16,7 @@ Defined in: [packages/db/src/errors.ts:450](https://github.com/TanStack/db/blob/
 - [`UnsafeAliasPathError`](UnsafeAliasPathError.md)
 - [`DistinctRequiresSelectError`](DistinctRequiresSelectError.md)
 - [`FnSelectWithGroupByError`](FnSelectWithGroupByError.md)
+- [`UnsupportedFnSelectResultError`](UnsupportedFnSelectResultError.md)
 - [`UnsupportedRootScalarSelectError`](UnsupportedRootScalarSelectError.md)
 - [`HavingRequiresGroupByError`](HavingRequiresGroupByError.md)
 - [`LimitOffsetRequireOrderByError`](LimitOffsetRequireOrderByError.md)

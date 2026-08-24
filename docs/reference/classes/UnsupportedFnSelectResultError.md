@@ -1,13 +1,11 @@
 ---
-id: SetWindowRequiresOrderByError
-title: SetWindowRequiresOrderByError
+id: UnsupportedFnSelectResultError
+title: UnsupportedFnSelectResultError
 ---
 
-# Class: SetWindowRequiresOrderByError
+# Class: UnsupportedFnSelectResultError
 
-Defined in: [packages/db/src/errors.ts:801](https://github.com/TanStack/db/blob/main/packages/db/src/errors.ts#L801)
-
-Error thrown when setWindow is called on a collection without an ORDER BY clause.
+Defined in: [packages/db/src/errors.ts:484](https://github.com/TanStack/db/blob/main/packages/db/src/errors.ts#L484)
 
 ## Extends
 
@@ -18,14 +16,20 @@ Error thrown when setWindow is called on a collection without an ORDER BY clause
 ### Constructor
 
 ```ts
-new SetWindowRequiresOrderByError(): SetWindowRequiresOrderByError;
+new UnsupportedFnSelectResultError(valueDescription): UnsupportedFnSelectResultError;
 ```
 
-Defined in: [packages/db/src/errors.ts:802](https://github.com/TanStack/db/blob/main/packages/db/src/errors.ts#L802)
+Defined in: [packages/db/src/errors.ts:485](https://github.com/TanStack/db/blob/main/packages/db/src/errors.ts#L485)
+
+#### Parameters
+
+##### valueDescription
+
+`string`
 
 #### Returns
 
-`SetWindowRequiresOrderByError`
+`UnsupportedFnSelectResultError`
 
 #### Overrides
 
