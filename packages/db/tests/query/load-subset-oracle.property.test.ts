@@ -1563,7 +1563,7 @@ async function expectLaterImmediateCommitSettlesAppliedSubset() {
 }
 
 async function expectAbortedReceiptDoesNotPublishCoverage(
-  abortPhase: `before-commit` | `after-commit`,
+  abortPhase: `before-commit` | `while-parked`,
 ) {
   let transportCalls = 0
   const committed = createDeferred<void>()
@@ -1616,7 +1616,7 @@ async function expectAbortedReceiptDoesNotPublishCoverage(
   const first = requirePendingAppliedReceipt(
     source._sync.loadSubset({ signal: controller.signal }),
   )
-  if (abortPhase === `after-commit`) {
+  if (abortPhase === `while-parked`) {
     await committed.promise
   }
   controller.abort()
@@ -1624,7 +1624,11 @@ async function expectAbortedReceiptDoesNotPublishCoverage(
   try {
     persistence.resolve()
     await transaction.isPersisted.promise
-    await first
+    if (abortPhase === `while-parked`) {
+      await expect(first).rejects.toMatchObject({ name: `AbortError` })
+    } else {
+      await first
+    }
     expect(transportCalls).toBe(1)
     expect(source.get(`row`)).toBeUndefined()
 
@@ -1633,6 +1637,58 @@ async function expectAbortedReceiptDoesNotPublishCoverage(
     expect(transportCalls).toBe(2)
     expect(source.get(`row`)).toEqual(expect.objectContaining({ id: `row` }))
   } finally {
+    persistence.resolve()
+    await transaction.isPersisted.promise.catch(() => undefined)
+    await source.cleanup()
+  }
+}
+
+async function expectAbortDuringPublicationDoesNotCancelReceipt() {
+  const controller = new AbortController()
+  const source = createCollection<PersistedLoadRow>({
+    id: `load-subset-applied-publication-abort-${collectionSequence++}`,
+    getKey: (row) => row.id,
+    syncMode: `on-demand`,
+    sync: {
+      sync: ({ begin, write, commit, markReady }) => {
+        markReady()
+        return {
+          loadSubset: ({ signal }) => {
+            begin()
+            write({
+              type: `insert`,
+              value: { id: `row`, projectId: `p1` },
+            })
+            return commit(signal)
+          },
+        }
+      },
+    },
+  })
+  source.startSyncImmediate()
+
+  const persistence = createDeferred<void>()
+  const transaction = createTransaction({
+    mutationFn: () => persistence.promise,
+  })
+  transaction.mutate(() => source.insert({ id: `local`, projectId: `pending` }))
+  const subscription = source.subscribeChanges((changes) => {
+    if (changes.some((change) => change.key === `row`)) {
+      controller.abort()
+    }
+  })
+  const load = requirePendingAppliedReceipt(
+    source._sync.loadSubset({ signal: controller.signal }),
+  )
+
+  try {
+    persistence.resolve()
+    await transaction.isPersisted.promise
+    await expect(load).resolves.toBeUndefined()
+    expect(controller.signal.aborted).toBe(true)
+    expect(source.get(`row`)).toEqual(expect.objectContaining({ id: `row` }))
+  } finally {
+    subscription.unsubscribe()
     persistence.resolve()
     await transaction.isPersisted.promise.catch(() => undefined)
     await source.cleanup()
@@ -1687,7 +1743,9 @@ async function expectCanceledReceiptReleasesOnlyItsSuppression() {
     expect(source._state.recentlySyncedKeys).toEqual(new Set([`second`]))
     expect(source._state.preSyncVisibleState.has(`first`)).toBe(false)
     expect(source._state.preSyncVisibleState.has(`second`)).toBe(true)
-    if (canceled !== true) await canceled
+    if (canceled !== true) {
+      await expect(canceled).rejects.toMatchObject({ name: `AbortError` })
+    }
   } finally {
     persistence.resolve()
     await transaction.isPersisted.promise.catch(() => undefined)
@@ -1695,7 +1753,7 @@ async function expectCanceledReceiptReleasesOnlyItsSuppression() {
   }
 }
 
-async function expectCleanupSettlesReceiptOnce() {
+async function expectCleanupRejectsReceiptOnce() {
   let receipt!: Promise<void>
   let transportCalls = 0
   const deduplicated = new DeduplicatedLoadSubset({
@@ -1745,12 +1803,18 @@ async function expectCleanupSettlesReceiptOnce() {
   transaction.mutate(() => source.insert({ id: `local`, projectId: `p2` }))
   const load = requirePendingAppliedReceipt(source._sync.loadSubset({}))
   let settlements = 0
-  void receipt.then(() => {
-    settlements += 1
-  })
+  void receipt.then(
+    () => {
+      settlements += 1
+    },
+    () => {
+      settlements += 1
+    },
+  )
 
   await source.cleanup()
-  await Promise.all([load, receipt])
+  await expect(load).rejects.toMatchObject({ name: `AbortError` })
+  await expect(receipt).rejects.toMatchObject({ name: `AbortError` })
   expect(settlements).toBe(1)
 
   persistence.resolve()
@@ -2693,17 +2757,21 @@ describe(`loadSubset coverage oracle`, () => {
     await expectLaterImmediateCommitSettlesAppliedSubset()
   })
 
-  it.each([`before-commit`, `after-commit`] as const)(
+  it.each([`before-commit`, `while-parked`] as const)(
     `does not publish coverage when a parked receipt is aborted %s`,
     expectAbortedReceiptDoesNotPublishCoverage,
   )
+
+  it(`ignores an abort raised after application starts publishing`, async () => {
+    await expectAbortDuringPublicationDoesNotCancelReceipt()
+  })
 
   it(`releases only a canceled receipt's event suppression`, async () => {
     await expectCanceledReceiptReleasesOnlyItsSuppression()
   })
 
-  it(`settles an abandoned receipt once without publishing coverage`, async () => {
-    await expectCleanupSettlesReceiptOnce()
+  it(`rejects an abandoned receipt once without publishing coverage`, async () => {
+    await expectCleanupRejectsReceiptOnce()
   })
 
   it(`publishes synced source rows while a derived mutation persists`, async () => {

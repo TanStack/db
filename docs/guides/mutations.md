@@ -432,6 +432,12 @@ const todoCollection = createCollection({
 
 > [!IMPORTANT]
 > Operation handlers must not resolve until the server changes have synced back to the collection. Different collection types provide different patterns to ensure this happens correctly.
+>
+> Do not call or await `collection.preload()`, live-query `preload()`, or a
+> direct `loadSubset()` inside a mutation handler. The optimistic mutation is
+> already applied when the handler starts. A preload may need a sync commit
+> that is queued behind that same handler, which creates a deadlock. Use the
+> collection adapter's documented mutation acknowledgement pattern instead.
 
 ### Collection-Specific Handler Patterns
 

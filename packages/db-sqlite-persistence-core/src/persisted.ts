@@ -1,4 +1,5 @@
 import {
+  SyncTransactionAbortedError,
   compileSingleRowExpression,
   safeRandomUUID,
   toBooleanPredicate,
@@ -855,7 +856,8 @@ class PersistedCollectionRuntime<
       return true
     }
     this.pendingAppliedReceipts.set(sequence, receipt)
-    void receipt.then(() => this.pendingAppliedReceipts.delete(sequence))
+    const removeReceipt = () => this.pendingAppliedReceipts.delete(sequence)
+    void receipt.then(removeReceipt, removeReceipt)
     return receipt
   }
 
@@ -1191,7 +1193,7 @@ class PersistedCollectionRuntime<
     this.pendingRemoteSubsetEnsures.clear()
     this.activeSubsets.clear()
     for (const transaction of this.queuedHydrationTransactions) {
-      transaction.resolveApplied?.()
+      transaction.rejectApplied?.(new SyncTransactionAbortedError())
     }
     this.queuedHydrationTransactions.length = 0
     this.queuedTxCommitted.length = 0
@@ -1365,13 +1367,13 @@ class PersistedCollectionRuntime<
     transaction: BufferedSyncTransaction<T, TKey>,
   ): Promise<void> {
     if (transaction.signal?.aborted) {
-      transaction.resolveApplied?.()
+      transaction.rejectApplied?.(new SyncTransactionAbortedError())
       return
     }
 
     const { begin, write, commit, truncate, metadata } = this.syncControls
     if (!begin || !write || !commit) {
-      transaction.resolveApplied?.()
+      transaction.rejectApplied?.(new SyncTransactionAbortedError())
       return
     }
 
@@ -1424,7 +1426,7 @@ class PersistedCollectionRuntime<
         await applied
       }
 
-      if (!transaction.internal && !transaction.signal?.aborted) {
+      if (!transaction.internal) {
         await this.persistAndBroadcastExternalSyncTransactionUnsafe(transaction)
       }
       transaction.resolveApplied?.()
@@ -2522,13 +2524,18 @@ function createWrappedSyncConfig<
           }
 
           if (openTransaction.queuedBecauseHydrating) {
-            if (signal?.aborted) return true
+            if (signal?.aborted) {
+              const aborted = Promise.reject(new SyncTransactionAbortedError())
+              void aborted.catch(() => undefined)
+              return aborted
+            }
             let resolveApplied!: () => void
             let rejectApplied!: (error: unknown) => void
             const applied = new Promise<void>((resolve, reject) => {
               resolveApplied = resolve
               rejectApplied = reject
             })
+            void applied.catch(() => undefined)
             runtime.queueHydrationBufferedTransaction({
               operations: openTransaction.operations,
               rowMetadataWrites: openTransaction.rowMetadataWrites,
@@ -2547,7 +2554,6 @@ function createWrappedSyncConfig<
           if (!openTransaction.internal) {
             const persistAfterApplication = async () => {
               if (applied !== true) await applied
-              if (signal?.aborted) return
               await runtime.persistAndBroadcastExternalSyncTransaction({
                 operations: openTransaction.operations,
                 rowMetadataWrites: openTransaction.rowMetadataWrites,
@@ -2557,7 +2563,9 @@ function createWrappedSyncConfig<
                 internal: false,
               })
             }
-            return persistAfterApplication()
+            const persisted = persistAfterApplication()
+            void persisted.catch(() => undefined)
+            return persisted
           }
           return applied
         },

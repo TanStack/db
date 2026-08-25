@@ -855,12 +855,86 @@ describe(`persistedCollectionOptions`, () => {
         type: `insert`,
         value: { id: `aborted`, title: `Must not publish` },
       })
-      await remoteCommit?.(abortController.signal)
+      await expect(
+        remoteCommit?.(abortController.signal),
+      ).rejects.toMatchObject({ name: `AbortError` })
       await flushAsyncWork()
 
       expect(collection.get(`aborted`)).toBeUndefined()
       expect(adapter.applyCommittedTxCalls).toHaveLength(0)
     } finally {
+      await collection.cleanup()
+    }
+  })
+
+  it(`persists a wrapped sync transaction when abort follows application`, async () => {
+    const adapter = createRecordingAdapter()
+    let remoteBegin: (() => void) | undefined
+    let remoteWrite:
+      | ((message: { type: `insert`; value: Todo }) => void)
+      | undefined
+    let remoteCommit:
+      | ((signal?: AbortSignal) => true | Promise<void>)
+      | undefined
+    const collection = createCollection(
+      persistedCollectionOptions<Todo, string>({
+        id: `sync-present-abort-after-application`,
+        getKey: (item) => item.id,
+        sync: {
+          sync: ({ begin, write, commit, markReady }) => {
+            remoteBegin = begin
+            remoteWrite = write as (message: {
+              type: `insert`
+              value: Todo
+            }) => void
+            remoteCommit = commit
+            markReady()
+          },
+        },
+        persistence: { adapter },
+      }),
+    )
+    let releaseMutation!: () => void
+    const mutationGate = new Promise<void>((resolve) => {
+      releaseMutation = resolve
+    })
+    const transaction = createTransaction({
+      mutationFn: () => mutationGate,
+    })
+
+    try {
+      await collection.stateWhenReady()
+      transaction.mutate(() => {
+        collection.insert({ id: `local`, title: `Optimistic gate` })
+      })
+
+      const abortController = new AbortController()
+      const subscription = collection.subscribeChanges((changes) => {
+        if (changes.some((change) => change.key === `remote`)) {
+          abortController.abort()
+        }
+      })
+      remoteBegin?.()
+      remoteWrite?.({
+        type: `insert`,
+        value: { id: `remote`, title: `Already visible` },
+      })
+      const receipt = remoteCommit?.(abortController.signal)
+      expect(receipt).toBeInstanceOf(Promise)
+
+      releaseMutation()
+      await transaction.isPersisted.promise
+      await receipt
+      subscription.unsubscribe()
+
+      expect(stripVirtualProps(collection.get(`remote`))).toEqual({
+        id: `remote`,
+        title: `Already visible`,
+      })
+      expect(adapter.applyCommittedTxCalls).toHaveLength(1)
+    } finally {
+      releaseMutation()
+      await transaction.isPersisted.promise.catch(() => undefined)
       await collection.cleanup()
     }
   })
@@ -1240,7 +1314,9 @@ describe(`persistedCollectionOptions`, () => {
       abortController.abort()
       resolveLoadSubset?.()
       await ready
-      if (applied !== true) await applied
+      if (applied !== true) {
+        await expect(applied).rejects.toMatchObject({ name: `AbortError` })
+      }
       await flushAsyncWork()
 
       expect(collection.get(`aborted`)).toBeUndefined()

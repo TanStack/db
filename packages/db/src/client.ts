@@ -867,6 +867,7 @@ export class DbClient {
     if (rows.length > 0) {
       collection._state.pendingSyncedTransactions.push({
         committed: true,
+        applicationStarted: false,
         layoutChanged: false,
         operations: rows.map((row) => ({
           type: collection._state.syncedData.has(row.key)

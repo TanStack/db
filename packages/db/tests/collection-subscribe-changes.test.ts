@@ -731,6 +731,7 @@ describe(`Collection.subscribeChanges`, () => {
         begin: () => {
           syncCollection._state.pendingSyncedTransactions.push({
             committed: false,
+            applicationStarted: false,
             operations: [],
           })
         },

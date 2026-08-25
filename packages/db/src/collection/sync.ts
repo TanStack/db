@@ -126,15 +126,21 @@ export class CollectionSyncManager<
           collection: this.collection,
           begin: (options?: { immediate?: boolean }) => {
             if (!isCurrentSync()) return
+            const applied = createDeferred<void>()
+            // A source may ignore a stream receipt. Keep cancellation from
+            // becoming an unhandled rejection while preserving the original
+            // promise's rejection for callers that do await it.
+            void applied.promise.catch(() => undefined)
             this.state.pendingSyncedTransactions.push({
               committed: false,
+              applicationStarted: false,
               layoutChanged: false,
               operations: [],
               deletedKeys: new Set(),
               rowMetadataWrites: new Map(),
               collectionMetadataWrites: new Map(),
               immediate: options?.immediate,
-              applied: createDeferred<void>(),
+              applied,
             })
           },
           write: (
@@ -247,7 +253,7 @@ export class CollectionSyncManager<
 
             if (signal?.aborted) {
               this.state.cancelPendingSyncedTransaction(pendingTransaction)
-              return true
+              return pendingTransaction.applied.promise
             }
 
             pendingTransaction.committed = true
@@ -265,9 +271,10 @@ export class CollectionSyncManager<
 
             const receipt = pendingTransaction.applied.promise
             if (signal) {
-              void receipt.then(() => {
+              const removeAbortListener = () => {
                 signal.removeEventListener(`abort`, cancel)
-              })
+              }
+              void receipt.then(removeAbortListener, removeAbortListener)
             }
             return receipt
           },

@@ -1,6 +1,7 @@
 import { deepEquals } from '../utils'
 import { SortedMap } from '../SortedMap'
 import { enrichRowWithVirtualProps } from '../virtual-props.js'
+import { SyncTransactionAbortedError } from '../errors.js'
 import { DIRECT_TRANSACTION_METADATA_KEY } from './transaction-metadata.js'
 import type {
   VirtualOrigin,
@@ -26,13 +27,14 @@ interface PendingSyncedTransaction<
   TKey extends string | number = string | number,
 > {
   committed: boolean
+  applicationStarted: boolean
   layoutChanged: boolean
   operations: Array<OptimisticChangeMessage<T>>
   truncate?: boolean
   deletedKeys: Set<string | number>
   rowMetadataWrites: Map<TKey, PendingMetadataWrite>
   collectionMetadataWrites: Map<string, PendingMetadataWrite>
-  /** Resolves after this transaction's writes and events are visible. */
+  /** Resolves after application and rejects if canceled before application. */
   applied: Deferred<void>
   optimisticSnapshot?: {
     upserts: Map<TKey, T>
@@ -884,6 +886,13 @@ export class CollectionStateManager<
     // non-immediate transactions would be applied later and could overwrite newer state.
     // Processing all committed transactions together preserves causal ordering.
     if (!hasPersistingTransaction || hasTruncateSync || hasImmediateSync) {
+      // Application is now the point of no return. Event listeners run before
+      // the receipts resolve, so a signal aborted from one of those listeners
+      // must not cancel writes that are already becoming visible.
+      for (const transaction of committedSyncedTransactions) {
+        transaction.applicationStarted = true
+      }
+
       // Set flag to prevent redundant optimistic state recalculations
       this.isCommittingSyncTransactions = true
 
@@ -1374,11 +1383,13 @@ export class CollectionStateManager<
   public cancelPendingSyncedTransaction(
     transaction: PendingSyncedTransaction<TOutput, TKey>,
   ): void {
+    if (transaction.applicationStarted) return
+
     const index = this.pendingSyncedTransactions.indexOf(transaction)
     if (index === -1) return
 
     this.pendingSyncedTransactions.splice(index, 1)
-    transaction.applied.resolve()
+    transaction.applied.reject(new SyncTransactionAbortedError())
 
     const remainingPendingKeys = new Set<TKey>()
     for (const pending of this.pendingSyncedTransactions) {
@@ -1482,9 +1493,7 @@ export class CollectionStateManager<
    */
   public cleanup(): void {
     for (const transaction of this.pendingSyncedTransactions) {
-      // Applied receipts never reject. Cleanup abandons the collection and
-      // releases callers that may have retained and ignored a receipt.
-      transaction.applied.resolve()
+      transaction.applied.reject(new SyncTransactionAbortedError())
     }
     this.syncedData.clear()
     this.syncedMetadata.clear()

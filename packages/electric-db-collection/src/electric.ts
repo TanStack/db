@@ -1510,7 +1510,8 @@ function createElectricSync<T extends Row<unknown>>(
           return true
         }
         pendingAppliedReceipts.set(sequence, applied)
-        void applied.then(() => pendingAppliedReceipts.delete(sequence))
+        const removeReceipt = () => pendingAppliedReceipts.delete(sequence)
+        void applied.then(removeReceipt, removeReceipt)
         return applied
       }
       const waitForCommitsAfter = async (cursor: number): Promise<void> => {
@@ -2011,8 +2012,10 @@ function createElectricSync<T extends Row<unknown>>(
           if (applied === true) {
             wrappedMarkReady(wasBufferingInitialSync, readyErrorVersion)
           } else {
-            void applied.then(() =>
-              wrappedMarkReady(wasBufferingInitialSync, readyErrorVersion),
+            void applied.then(
+              () =>
+                wrappedMarkReady(wasBufferingInitialSync, readyErrorVersion),
+              () => undefined,
             )
           }
 

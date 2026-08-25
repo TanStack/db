@@ -317,7 +317,9 @@ describe(`TrailBase Integration`, () => {
       abortController.abort()
       resolvePersistence()
       await transaction.isPersisted.promise
-      if (load instanceof Promise) await load
+      if (load instanceof Promise) {
+        await expect(load).rejects.toMatchObject({ name: `AbortError` })
+      }
 
       expect(collection.get(1)).toBeUndefined()
       expect(recordApi.list).toHaveBeenCalledOnce()

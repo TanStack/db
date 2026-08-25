@@ -455,15 +455,25 @@ ways to satisfy that contract; they are not materializer state.
 Every sync `commit()` returns an applied receipt: `true` when that
 transaction's writes and events are already visible, or a promise when the
 transaction is parked in the causal queue. The promise resolves only after the
-writes and events become visible, or after collection cleanup abandons the
-transaction. A successful `loadSubset` implementation must await or return
-every receipt for the transactions that establish its result. A source must
-not add priority merely to make a subset load settle.
+writes and events become visible. It rejects with `AbortError` if request
+cancellation or collection cleanup abandons the transaction first. An abort
+after application has no effect. Application becomes irrevocable before change
+events are emitted, so an abort raised by a publication observer is already
+late. A successful `loadSubset` implementation must await or return every
+receipt for the transactions that establish its result. A source must not add
+priority merely to make a subset load settle.
 Existing immediate bootstrap and persistence-hydration paths, plus truncate,
 retain their queue-bypass contract; if one applies a parked subset transaction
 as part of that prefix, the subset receipt settles only after the writes are
 visible. Rejected, canceled, and obsolete acquisitions establish no coverage.
 Sources must honor cancellation before publishing request-scoped rows.
+
+A transaction `mutationFn` must not start or await collection or live-query
+preloads. User persistence owns the causal queue while that function runs, so a
+preload that waits for a queued sync commit can wait on the mutation that is
+waiting on the preload. Use an adapter's documented mutation acknowledgement
+helper instead; it must confirm the optimistic write without starting new
+collection demand.
 
 This project uses a single graph-run order rather than multi-dimensional
 timely-dataflow frontiers. Do not introduce a general timestamp or frontier
