@@ -111,6 +111,7 @@ type ModelClaim = {
 
 type ModelAcquisition = {
   active: boolean
+  applied: boolean
   generation: number
   prefix: Prefix
   sourceId: string
@@ -193,6 +194,7 @@ function addModelAcquisition(
   const index = model.acquisitions.length
   model.acquisitions.push({
     active: true,
+    applied: false,
     generation: options.generation,
     prefix: options.prefix,
     sourceId: options.sourceId,
@@ -300,6 +302,7 @@ function retireModelAcquisition(
   if (!acquisition.active) return []
   const rowsToRemove = replaceModelRows(model, acquisitionIndex, new Set())
   acquisition.active = false
+  acquisition.applied = false
   const affectedScopes = new Set<string>()
   for (const [lease, claim] of acquisition.claims) {
     const scope = scopeKey(claim.sourceId, claim.prefix)
@@ -386,6 +389,27 @@ function assertRegistryModel(model: RegistryModel, real: RegistryReal): void {
       : [],
   )
   expect(real.registry.retainedOutcomeEvidence()).toEqual(retainedOutcomes)
+  const appliedEvidence = model.acquisitions.flatMap(
+    (acquisition, acquisitionIndex) =>
+      acquisition.active &&
+      acquisition.applied &&
+      !acquisition.releaseSettled &&
+      acquisition.leases.size > 0
+        ? Array.from(acquisition.claims.values()).map((claim) => ({
+          acquisition: real.acquisitions[acquisitionIndex],
+          rowKeys: [...acquisition.rows],
+          outcome: createPrefixOutcome(
+              claim.generation,
+              claim.prefix,
+              `unknown`,
+              `prefixes`,
+              claim.sourceId,
+              [...acquisition.rows],
+            ),
+          }))
+        : [],
+  )
+  expect(real.registry.appliedAcquisitionEvidence()).toEqual(appliedEvidence)
   for (const row of modelRows) {
     expect(real.registry.rowOwnerCount(row)).toBe(
       model.acquisitions.filter(
@@ -602,6 +626,7 @@ class ReplaceRowsCommand implements Command<RegistryModel, RegistryReal> {
       ? replaceModelRows(model, acquisitionIndex, new Set(this.rows))
       : []
     if (accepted) {
+      acquisition.applied = false
       const affectedScopes = new Set<string>()
       for (const [claimLease, existingClaim] of acquisition.claims) {
         existingClaim.coverage = undefined
@@ -673,6 +698,7 @@ class PublishCommand implements Command<RegistryModel, RegistryReal> {
       this.extent !== `unknown` &&
       (this.rows.length >= claim!.prefix || this.extent === `exhausted`)
     if (accepted) {
+      acquisition.applied = true
       for (const peer of acquisition.claims.values()) {
         peer.retainedOutcome = undefined
       }
@@ -1077,6 +1103,36 @@ describe(`coverage registry oracle`, () => {
       rowsToRemove: [`a`, `b`],
     })
     expect(registry.retainedOutcomeEvidence()).toEqual([])
+  })
+
+  it(`exposes exact applied unknown ownership without creating coverage`, () => {
+    const registry = createPrefixRegistry()
+    const lease = registry.addLease(2)
+    const acquisition = addPrefixAcquisition(registry, {
+      generation: 1,
+      leases: [lease],
+      release: vi.fn(),
+      prefix: 2,
+    })
+    const outcome = createPrefixOutcome(
+      1,
+      2,
+      `unknown`,
+      `prefixes`,
+      `items`,
+      [`a`],
+    )
+
+    expect(registry.publishOutcome(acquisition, lease, outcome)).toEqual({
+      accepted: true,
+      published: false,
+      rowsToRemove: [],
+    })
+    expect(registry.appliedAcquisitionEvidence()).toEqual([
+      { acquisition, outcome, rowKeys: [`a`] },
+    ])
+    expect(registry.coverageAntichain()).toEqual([])
+    expect(registry.covers(2)).toBe(false)
   })
 
   it(`keeps a final lease intact when adapter release throws and retries it`, () => {

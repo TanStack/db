@@ -22,6 +22,7 @@ import {
 } from '../query/load-subset-options.js'
 import { createLoadSubsetCoverageRegistry } from '../query/coverage-registry.js'
 import { getLoadSubsetDemandKey } from '../query/ir-stable-identity.js'
+import { isLoadSubsetRequestSubsumedBy } from '../query/predicate-utils.js'
 import type { StandardSchemaV1 } from '@standard-schema/spec'
 import type {
   AppliedLoadSubsetOutcome,
@@ -1196,8 +1197,103 @@ export class CollectionSyncManager<
           : { coverage: covering.projected.coverage }),
         retainedOutcome: covering.projected.outcome,
       })
+    } else {
+      const applied = this.coverageRegistry
+        .appliedAcquisitionEvidence()
+        .filter(({ outcome }) => outcome.collectionId === this.id)
+        .flatMap((evidence) => {
+          const projected = this.projectAppliedSatisfiedOutcome(
+            evidence.outcome,
+            evidence.rowKeys,
+            demand,
+            generation,
+          )
+          return projected === undefined ? [] : [{ ...evidence, projected }]
+        })
+        .sort((left, right) => {
+          const leftExact =
+            getLoadSubsetDemandKey(left.outcome.demand) === demandKey
+          const rightExact =
+            getLoadSubsetDemandKey(right.outcome.demand) === demandKey
+          if (leftExact !== rightExact) {
+            return Number(rightExact) - Number(leftExact)
+          }
+          return right.outcome.generation - left.outcome.generation
+        })[0]
+      if (applied) {
+        this.coverageRegistry.attachLease(lease, applied.acquisition, {
+          generation,
+          scope: { collectionId: this.id, demand },
+          ...(applied.projected.coverage === undefined
+            ? {}
+            : { coverage: applied.projected.coverage }),
+          retainedOutcome: applied.projected.outcome,
+        })
+      }
     }
     this.recordCoverageLease(ownerOptions, lease)
+  }
+
+  private projectAppliedSatisfiedOutcome(
+    applied: AppliedLoadSubsetOutcome,
+    appliedRowKeys: ReadonlyArray<TKey>,
+    demand: LoadSubsetOptions,
+    generation: number,
+  ):
+    | {
+        coverage: AppliedLoadSubsetCoverage<TKey> | undefined
+        outcome: AppliedLoadSubsetOutcome
+      }
+    | undefined {
+    const retainedDemand = snapshotLoadSubsetDemand(demand)
+    const exact =
+      getLoadSubsetDemandKey(applied.demand) ===
+      getLoadSubsetDemandKey(retainedDemand)
+    if (
+      !exact &&
+      !isLoadSubsetRequestSubsumedBy(retainedDemand, applied.demand)
+    ) {
+      return undefined
+    }
+
+    const extent = exact
+      ? `unknown`
+      : this.provesRowsBeyondDemand(
+            {
+              demand: applied.demand,
+              extent: `unknown`,
+              rowKeys: appliedRowKeys,
+            },
+            retainedDemand,
+          )
+        ? `continues`
+        : undefined
+    if (extent === undefined) return undefined
+
+    const rowKeys = Object.freeze([...appliedRowKeys])
+    const outcome: AppliedLoadSubsetOutcome = {
+      collectionId: applied.collectionId,
+      ...(applied.sourceId === undefined ? {} : { sourceId: applied.sourceId }),
+      demand: retainedDemand,
+      generation,
+      extent,
+      appliedRowKeys: rowKeys,
+    }
+    return {
+      coverage:
+        extent === `unknown`
+          ? undefined
+          : {
+              collectionId: applied.collectionId,
+              ...(applied.sourceId === undefined
+                ? {}
+                : { sourceId: applied.sourceId }),
+              demand: retainedDemand,
+              extent,
+              rowKeys,
+            },
+      outcome,
+    }
   }
 
   private projectSatisfiedCoverage(
@@ -1246,7 +1342,11 @@ export class CollectionSyncManager<
   }
 
   private provesRowsBeyondDemand(
-    covering: AppliedLoadSubsetCoverage<TKey>,
+    covering: {
+      demand: LoadSubsetOptions
+      extent: AppliedLoadSubsetOutcome[`extent`]
+      rowKeys: ReadonlyArray<string | number>
+    },
     demand: LoadSubsetOptions,
   ): boolean {
     if (demand.limit === undefined) return false

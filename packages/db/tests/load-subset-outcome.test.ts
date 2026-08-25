@@ -375,7 +375,7 @@ describe(`loadSubset outcomes`, () => {
   )
 
   it.each(
-    ([`continues`, `exhausted`] as const).flatMap((sourceExtent) =>
+    ([`continues`, `exhausted`, `unknown`] as const).flatMap((sourceExtent) =>
       ([`exact`, `covering`, `narrower`] as const).flatMap((relationship) =>
         ([`loaded`, `satisfied`] as const).map((firstRelease) => ({
           sourceExtent,
@@ -405,7 +405,10 @@ describe(`loadSubset outcomes`, () => {
                 rowIds.forEach((id) => write({ type: `insert`, value: { id } }))
                 commit()
                 return Promise.resolve({
-                  hasMore: sourceExtent === `continues`,
+                  hasMore:
+                    sourceExtent === `unknown`
+                      ? undefined
+                      : sourceExtent === `continues`,
                   appliedRowKeys: rowIds,
                 })
               },
@@ -430,28 +433,57 @@ describe(`loadSubset outcomes`, () => {
           : sourceExtent === `continues` || relationship === `narrower`
             ? `continues`
             : `unknown`
+      const ownsAppliedAcquisition =
+        sourceExtent !== `unknown` ||
+        relationship === `exact` ||
+        relationship === `narrower`
 
       try {
         await collection._sync.loadSubset(owners.loaded)
         expect(collection._sync.loadSubset(owners.satisfied)).toBe(true)
-        expect(collection._sync.getLoadSubsetOutcome(owners.satisfied)).toEqual(
-          expect.objectContaining({
-            demand: owners.satisfied,
-            extent: expectedExtent,
-            appliedRowKeys: rowIds,
-          }),
-        )
+        if (ownsAppliedAcquisition) {
+          expect(
+            collection._sync.getLoadSubsetOutcome(owners.satisfied),
+          ).toEqual(
+            expect.objectContaining({
+              demand: owners.satisfied,
+              extent: expectedExtent,
+              appliedRowKeys: rowIds,
+            }),
+          )
+        } else {
+          expect(
+            collection._sync.getLoadSubsetOutcome(owners.satisfied),
+          ).toBeUndefined()
+        }
+        if (sourceExtent === `unknown`) {
+          expect(collection._sync.getLoadSubsetCoverage()).toHaveLength(
+            relationship === `narrower` ? 1 : 0,
+          )
+        }
 
         const finalRelease = firstRelease === `loaded` ? `satisfied` : `loaded`
         collection._sync.unloadSubset(owners[firstRelease])
-        expect(Array.from(collection.keys()).sort()).toEqual([...rowIds].sort())
+        expect(Array.from(collection.keys()).sort()).toEqual(
+          firstRelease === `loaded` && !ownsAppliedAcquisition
+            ? []
+            : [...rowIds].sort(),
+        )
         if (firstRelease === `loaded`) {
-          expect(
-            collection._sync.getLoadSubsetOutcome(owners.satisfied),
-          ).toEqual(expect.objectContaining({ extent: expectedExtent }))
+          if (ownsAppliedAcquisition) {
+            expect(
+              collection._sync.getLoadSubsetOutcome(owners.satisfied),
+            ).toEqual(expect.objectContaining({ extent: expectedExtent }))
+          } else {
+            expect(
+              collection._sync.getLoadSubsetOutcome(owners.satisfied),
+            ).toBeUndefined()
+          }
           expect(collection._sync.getLoadSubsetCoverage()).toHaveLength(
-            expectedExtent === `unknown` ? 0 : 1,
+            !ownsAppliedAcquisition || expectedExtent === `unknown` ? 0 : 1,
           )
+        } else if (sourceExtent === `unknown`) {
+          expect(collection._sync.getLoadSubsetCoverage()).toHaveLength(0)
         }
 
         collection._sync.unloadSubset(owners[finalRelease])
