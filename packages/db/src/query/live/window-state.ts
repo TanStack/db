@@ -153,33 +153,24 @@ export class WindowState<
       }
       return
     }
-    if (this.admittedKeys.size === 0) return
 
-    let invalidated = false
-    for (const change of changes) {
-      if (change.type === `delete`) {
-        if (this.admittedKeys.delete(change.key)) invalidated = true
-        continue
-      }
-
-      if (this.admittedKeys.has(change.key)) {
-        invalidated = true
-        continue
-      }
-
-      const possiblePrefix = new Set(this.admittedKeys)
-      possiblePrefix.add(change.key)
+    // Initial applied rows remain candidates until their boundary equivalence
+    // class is refined. Live source changes during that request still belong
+    // to the same ordered prefix and must survive its later settlement.
+    if (this.admittedKeys.size === 0) {
       if (
-        this.readRows(possiblePrefix, this.activeSize).some(
-          (row) => row.key === change.key,
-        )
+        this.candidateKeys.size > 0 &&
+        this.updateKnownPrefix(this.candidateKeys, changes)
       ) {
-        this.admittedKeys.add(change.key)
-        invalidated = true
+        this.coveredSize = 0
+        this.provenanceKeys.clear()
+        this.needsFullRefinement = false
+        this.needsPrefixRefresh = true
       }
+      return
     }
 
-    if (invalidated) {
+    if (this.updateKnownPrefix(this.admittedKeys, changes)) {
       // A live change may update the visible prefix at once, but an applied
       // snapshot fact does not prove the new remote boundary. Reacquire from
       // the start instead of continuing from a row whose provenance changed.
@@ -189,6 +180,36 @@ export class WindowState<
       this.needsFullRefinement = false
       this.needsPrefixRefresh = true
     }
+  }
+
+  private updateKnownPrefix(
+    knownKeys: Set<TKey>,
+    changes: ReadonlyArray<ChangeMessage<TRow, TKey>>,
+  ): boolean {
+    let invalidated = false
+    for (const change of changes) {
+      if (change.type === `delete`) {
+        if (knownKeys.delete(change.key)) invalidated = true
+        continue
+      }
+
+      if (knownKeys.has(change.key)) {
+        invalidated = true
+        continue
+      }
+
+      const possiblePrefix = new Set(knownKeys)
+      possiblePrefix.add(change.key)
+      if (
+        this.readRows(possiblePrefix, this.activeSize).some(
+          (row) => row.key === change.key,
+        )
+      ) {
+        knownKeys.add(change.key)
+        invalidated = true
+      }
+    }
+    return invalidated
   }
 
   boundary(

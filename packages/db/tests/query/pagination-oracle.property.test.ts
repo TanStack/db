@@ -2107,6 +2107,127 @@ describe(`pagination recomputation oracle`, () => {
     },
   )
 
+  it.each([
+    [
+      `insert`,
+      { type: `insert`, row: { id: 7, rank: 0 } },
+      [7, 1],
+    ],
+    [
+      `update`,
+      { type: `update`, row: { id: 2, rank: -1 } },
+      [2, 1],
+    ],
+    [`delete`, { type: `delete`, id: 1 }, [2, 3]],
+  ] satisfies ReadonlyArray<
+    readonly [string, PendingMutation, ReadonlyArray<number>]
+  >)(`keeps an SSE %s that arrives during boundary refinement`, async (
+    _name,
+    mutation,
+    expectedIds,
+  ) => {
+    const rows = new Map<number, PageRow>(
+      Array.from({ length: 6 }, (_, index) => [
+        index + 1,
+        { id: index + 1, rank: index + 1 },
+      ]),
+    )
+    const delivered = new Set<number>()
+    const pending: Array<PendingCursorLoad> = []
+    let begin!: () => void
+    let write!: (message: {
+      type: `insert` | `update` | `delete`
+      value: PageRow
+    }) => void
+    let commit!: () => void
+    const source = createCollection<PageRow>({
+      id: `pagination-pending-refinement-sse-${collectionSequence++}`,
+      getKey: (row) => row.id,
+      syncMode: `on-demand`,
+      startSync: true,
+      autoIndex: `eager`,
+      defaultIndexType: BTreeIndex,
+      sync: {
+        sync: (params) => {
+          begin = params.begin
+          write = params.write
+          commit = params.commit
+          params.markReady()
+          return {
+            loadSubset: (options: LoadSubsetOptions) => {
+              const deferred = createDeferred<void>()
+              pending.push({ options, deferred })
+              return withAppliedSubsetEvidence(
+                () =>
+                  referenceWindowRows([...rows.values()], `asc`, {
+                    offset: 0,
+                    limit: rows.size,
+                  }),
+                options,
+                deferred.promise,
+              )
+            },
+          }
+        },
+      },
+    })
+    const live = createLiveQueryCollection((query) =>
+      query
+        .from({ row: source })
+        .orderBy(({ row }) => row.rank, `asc`)
+        .orderBy(({ row }) => row.id, `asc`)
+        .limit(2),
+    )
+
+    const settle = async (request: PendingCursorLoad) => {
+      const ordered = referenceWindowRows([...rows.values()], `asc`, {
+        offset: 0,
+        limit: rows.size,
+      })
+      begin()
+      for (const row of rowsForLoadSubset(ordered, request.options)) {
+        if (delivered.has(row.id)) continue
+        delivered.add(row.id)
+        write({ type: `insert`, value: { ...row } })
+      }
+      commit()
+      request.deferred.resolve()
+      await flushPromises()
+    }
+
+    try {
+      const preload = live.preload()
+      expect(pending).toHaveLength(1)
+      await settle(pending[0]!)
+      expect(pending).toHaveLength(2)
+
+      begin()
+      if (mutation.type === `delete`) {
+        const row = rows.get(mutation.id)!
+        rows.delete(mutation.id)
+        delivered.delete(mutation.id)
+        write({ type: `delete`, value: { ...row } })
+      } else {
+        rows.set(mutation.row.id, { ...mutation.row })
+        delivered.add(mutation.row.id)
+        write({ type: mutation.type, value: { ...mutation.row } })
+      }
+      commit()
+
+      await settle(pending[1]!)
+      for (let index = 2; index < pending.length; index++) {
+        await settle(pending[index]!)
+      }
+      await preload
+
+      expect(Array.from(live.values(), ({ id }) => id)).toEqual(expectedIds)
+    } finally {
+      for (const request of pending) request.deferred.resolve()
+      live.cleanup()
+      source.cleanup()
+    }
+  })
+
   it(`does not use a new row beyond finite coverage as a widening boundary`, async () => {
     await runPendingMutationScenario(
       {
