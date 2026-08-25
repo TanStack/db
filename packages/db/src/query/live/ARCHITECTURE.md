@@ -481,10 +481,16 @@ window coordination. Only the root paginated source may use them to replace a
 peek-based pagination decision.
 
 The Collection sync boundary gives each logical owner a demand lease and each
-physical attempt an acquisition token. Exact logical peers waiting on the same
-physical promise attach their leases to that one acquisition. Starting a newer
-attempt does not supersede viable coverage; the current generation advances
-only when that attempt publishes authoritative coverage.
+physical attempt an acquisition token. Logical peers waiting on the same
+physical promise attach their leases to that one acquisition even when their
+canonical demands differ. Each lease keeps its own demand, generation, and
+coverage claim, while the physical acquisition owns one applied row set until
+its final lease releases. A synchronous `true` result creates no physical
+resource. It attaches the new logical lease to an active acquisition whose
+published coverage proves the demand, and projects that retained proof into a
+caller-relative claim. Starting a newer attempt does not supersede viable
+coverage; the current generation advances only when that attempt publishes
+authoritative coverage.
 
 The coverage registry accepts an exact applied outcome and its row keys as one
 publication. It rejects stale or mismatched tokens for the same physical
@@ -496,6 +502,19 @@ the requested limit or publish rows and coverage in separate steps. Failed,
 canceled, and stale work publishes neither rows nor coverage. Public reads
 return defensive snapshots; fact compaction never mutates or retires the
 underlying leases, acquisitions, or row ownership.
+
+A truncate replay publishes replacement applied rows and their acquisition
+ownership before it releases the prior lease. This handoff is one ownership
+transition from the Collection's point of view: replacing a row with the same
+key cannot let old-owner garbage collection delete the new value. A failed or
+obsolete replacement leaves the old lease in place and retires only the new
+attempt.
+
+An imperative load operation reports caller-relative evidence, not merely the
+promises started while it was active. If a successful operation starts no new
+physical request because exact active coverage already proves its demand, it
+retains that applied outcome in the operation result instead of publishing an
+empty outcome set.
 
 Adapter release and `unloadSubset` callbacks must be idempotent and
 non-throwing. Core still treats a thrown callback defensively: it surfaces the

@@ -978,7 +978,10 @@ export interface SubscribeChangesOptions<
    * Allows the caller to directly track the loading promise for isReady status.
    * @internal
    */
-  onLoadSubsetResult?: (result: LoadSubsetRequestResult) => void
+  onLoadSubsetResult?: (
+    result: LoadSubsetRequestResult,
+    demand: LoadSubsetOptions,
+  ) => void
   /** Receives subset-load failures scoped to this subscription. @internal */
   onLoadSubsetError?: (event: SubscriptionLoadSubsetErrorEvent) => void
 }

@@ -100,14 +100,22 @@ type ModelLease = {
   acquisitions: Set<number>
 }
 
+type ModelClaim = {
+  generation: number
+  prefix: Prefix
+  sourceId: string
+  coverage: Prefix | undefined
+  sequence: number
+}
+
 type ModelAcquisition = {
   active: boolean
   generation: number
   prefix: Prefix
   sourceId: string
   leases: Set<number>
+  claims: Map<number, ModelClaim>
   rows: Set<RowKey>
-  coverage: Prefix | undefined
   releaseCalls: number
   releaseFailuresRemaining: number
   releaseSettled: boolean
@@ -116,7 +124,8 @@ type ModelAcquisition = {
 type RegistryModel = {
   leases: Array<ModelLease>
   acquisitions: Array<ModelAcquisition>
-  currentByScope: Map<string, number>
+  currentByScope: Map<string, { acquisition: number; lease: number }>
+  claimSequence: number
 }
 
 type ReleaseProbe = {
@@ -187,8 +196,19 @@ function addModelAcquisition(
     prefix: options.prefix,
     sourceId: options.sourceId,
     leases: new Set([options.leaseIndex]),
+    claims: new Map([
+      [
+        options.leaseIndex,
+        {
+          generation: options.generation,
+          prefix: options.prefix,
+          sourceId: options.sourceId,
+          coverage: undefined,
+          sequence: model.claimSequence++,
+        },
+      ],
+    ]),
     rows: new Set(),
-    coverage: undefined,
     releaseCalls: 0,
     releaseFailuresRemaining: options.failFirstRelease ? 1 : 0,
     releaseSettled: false,
@@ -200,36 +220,56 @@ function addModelAcquisition(
 function canPublishModelAcquisition(
   model: RegistryModel,
   acquisitionIndex: number,
+  leaseIndex: number,
 ): boolean {
   const acquisition = model.acquisitions[acquisitionIndex]!
+  const claim = acquisition.claims.get(leaseIndex)
+  if (!claim) return false
   if (!acquisition.active || acquisition.releaseSettled) return false
   const currentIndex = model.currentByScope.get(
-    scopeKey(acquisition.sourceId, acquisition.prefix),
+    scopeKey(claim.sourceId, claim.prefix),
   )
-  if (currentIndex === undefined || currentIndex === acquisitionIndex) {
+  if (
+    currentIndex === undefined ||
+    currentIndex.acquisition === acquisitionIndex
+  ) {
     return true
   }
-  return acquisition.generation > model.acquisitions[currentIndex]!.generation
+  const currentClaim = model.acquisitions[currentIndex.acquisition]!.claims.get(
+    currentIndex.lease,
+  )!
+  return claim.generation > currentClaim.generation
 }
 
 function restoreModelCurrent(model: RegistryModel, scope: string): void {
   const candidate = model.acquisitions
-    .map((acquisition, index) => ({ acquisition, index }))
-    .filter(
-      ({ acquisition }) =>
-        acquisition.active &&
-        !acquisition.releaseSettled &&
-        acquisition.coverage !== undefined &&
-        scopeKey(acquisition.sourceId, acquisition.prefix) === scope,
+    .flatMap((acquisition, acquisitionIndex) =>
+      !acquisition.active || acquisition.releaseSettled
+        ? []
+        : Array.from(acquisition.claims.entries()).map(([lease, claim]) => ({
+            acquisition,
+            acquisitionIndex,
+            lease,
+            claim,
+          })),
     )
-    .sort(({ acquisition: left, index: leftIndex }, right) =>
-      left.generation === right.acquisition.generation
-        ? right.index - leftIndex
-        : right.acquisition.generation - left.generation,
+    .filter(
+      ({ claim }) =>
+        claim.coverage !== undefined &&
+        scopeKey(claim.sourceId, claim.prefix) === scope,
+    )
+    .sort((left, right) =>
+      left.claim.generation === right.claim.generation
+        ? right.claim.sequence - left.claim.sequence
+        : right.claim.generation - left.claim.generation,
     )[0]
 
-  if (candidate) model.currentByScope.set(scope, candidate.index)
-  else model.currentByScope.delete(scope)
+  if (candidate) {
+    model.currentByScope.set(scope, {
+      acquisition: candidate.acquisitionIndex,
+      lease: candidate.lease,
+    })
+  } else model.currentByScope.delete(scope)
 }
 
 function replaceModelRows(
@@ -257,14 +297,19 @@ function retireModelAcquisition(
   if (!acquisition.active) return []
   const rowsToRemove = replaceModelRows(model, acquisitionIndex, new Set())
   acquisition.active = false
-  acquisition.coverage = undefined
+  const affectedScopes = new Set<string>()
+  for (const [lease, claim] of acquisition.claims) {
+    const scope = scopeKey(claim.sourceId, claim.prefix)
+    const current = model.currentByScope.get(scope)
+    if (current?.acquisition === acquisitionIndex && current.lease === lease) {
+      affectedScopes.add(scope)
+    }
+    claim.coverage = undefined
+  }
   for (const leaseIndex of acquisition.leases) {
     model.leases[leaseIndex]?.acquisitions.delete(acquisitionIndex)
   }
-  const scope = scopeKey(acquisition.sourceId, acquisition.prefix)
-  if (model.currentByScope.get(scope) === acquisitionIndex) {
-    restoreModelCurrent(model, scope)
-  }
+  for (const scope of affectedScopes) restoreModelCurrent(model, scope)
   return rowsToRemove
 }
 
@@ -306,14 +351,20 @@ function expectReleaseFailure(release: () => unknown): void {
 }
 
 function assertRegistryModel(model: RegistryModel, real: RegistryReal): void {
-  const activeCoverage = model.acquisitions.flatMap((acquisition, index) =>
-    acquisition.active &&
-    acquisition.coverage !== undefined &&
-    model.currentByScope.get(
-      scopeKey(acquisition.sourceId, acquisition.prefix),
-    ) === index
-      ? [acquisition.coverage]
-      : [],
+  const activeCoverage = model.acquisitions.flatMap(
+    (acquisition, acquisitionIndex) =>
+      acquisition.active
+        ? Array.from(acquisition.claims.entries()).flatMap(([lease, claim]) => {
+            const current = model.currentByScope.get(
+              scopeKey(claim.sourceId, claim.prefix),
+            )
+            return claim.coverage !== undefined &&
+              current?.acquisition === acquisitionIndex &&
+              current.lease === lease
+              ? [claim.coverage]
+              : []
+          })
+        : [],
   )
   expect(real.registry.coverageAntichain()).toEqual(
     activeCoverage.length === 0
@@ -419,11 +470,30 @@ class AttachLeaseCommand implements Command<RegistryModel, RegistryReal> {
         ),
       ).toThrow(`Cannot attach to a released acquisition`)
     } else {
+      if (acquisition.leases.has(leaseIndex)) {
+        assertRegistryModel(model, real)
+        return
+      }
       model.leases[leaseIndex]!.acquisitions.add(acquisitionIndex)
       acquisition.leases.add(leaseIndex)
+      acquisition.claims.set(leaseIndex, {
+        generation: acquisition.generation,
+        prefix: model.leases[leaseIndex]!.prefix,
+        sourceId: acquisition.sourceId,
+        coverage: undefined,
+        sequence: model.claimSequence++,
+      })
       real.registry.attachLease(
         real.leases[leaseIndex]!,
         real.acquisitions[acquisitionIndex]!,
+        {
+          generation: acquisition.generation,
+          scope: {
+            collectionId: `prefixes`,
+            sourceId: acquisition.sourceId,
+            demand: { limit: model.leases[leaseIndex]!.prefix },
+          },
+        },
       )
     }
     assertRegistryModel(model, real)
@@ -449,21 +519,22 @@ class RetryAcquisitionCommand implements Command<RegistryModel, RegistryReal> {
     const leaseIndex = [...old.leases].find(
       (index) => model.leases[index]?.active,
     )!
+    const claim = old.claims.get(leaseIndex)!
     const release = createReleaseProbe(false)
     addModelAcquisition(model, {
-      generation: old.generation + 1,
-      prefix: old.prefix,
-      sourceId: old.sourceId,
+      generation: claim.generation + 1,
+      prefix: claim.prefix,
+      sourceId: claim.sourceId,
       leaseIndex,
       failFirstRelease: false,
     })
     real.acquisitions.push(
       addPrefixAcquisition(real.registry, {
-        generation: old.generation + 1,
+        generation: claim.generation + 1,
         leases: [real.leases[leaseIndex]!],
         release: () => release.release(),
-        prefix: old.prefix,
-        sourceId: old.sourceId,
+        prefix: claim.prefix,
+        sourceId: claim.sourceId,
       }),
     )
     real.releases.push(release)
@@ -489,16 +560,27 @@ class ReplaceRowsCommand implements Command<RegistryModel, RegistryReal> {
       this.rawAcquisition,
     )!
     const acquisition = model.acquisitions[acquisitionIndex]!
-    const accepted = canPublishModelAcquisition(model, acquisitionIndex)
+    const leaseIndex = acquisition.claims.keys().next().value
+    const accepted =
+      leaseIndex !== undefined &&
+      canPublishModelAcquisition(model, acquisitionIndex, leaseIndex)
     const rowsToRemove = accepted
       ? replaceModelRows(model, acquisitionIndex, new Set(this.rows))
       : []
     if (accepted) {
-      acquisition.coverage = undefined
-      const scope = scopeKey(acquisition.sourceId, acquisition.prefix)
-      if (model.currentByScope.get(scope) === acquisitionIndex) {
-        restoreModelCurrent(model, scope)
+      const affectedScopes = new Set<string>()
+      for (const [claimLease, existingClaim] of acquisition.claims) {
+        existingClaim.coverage = undefined
+        const scope = scopeKey(existingClaim.sourceId, existingClaim.prefix)
+        const current = model.currentByScope.get(scope)
+        if (
+          current?.acquisition === acquisitionIndex &&
+          current.lease === claimLease
+        ) {
+          affectedScopes.add(scope)
+        }
       }
+      for (const scope of affectedScopes) restoreModelCurrent(model, scope)
     }
     expect(
       real.registry.replaceRows(
@@ -532,16 +614,20 @@ class PublishCommand implements Command<RegistryModel, RegistryReal> {
       this.rawAcquisition,
     )!
     const acquisition = model.acquisitions[acquisitionIndex]!
+    const claimEntry = acquisition.claims.entries().next().value
+    const leaseIndex = claimEntry?.[0]
+    const claim = claimEntry?.[1]
     const outcome = createPrefixOutcome(
-      acquisition.generation + this.generationDelta,
-      acquisition.prefix,
+      (claim?.generation ?? acquisition.generation) + this.generationDelta,
+      claim?.prefix ?? acquisition.prefix,
       this.extent,
       this.exactScope ? `prefixes` : `other`,
-      acquisition.sourceId,
+      claim?.sourceId ?? acquisition.sourceId,
       this.rows,
     )
     const accepted =
-      canPublishModelAcquisition(model, acquisitionIndex) &&
+      leaseIndex !== undefined &&
+      canPublishModelAcquisition(model, acquisitionIndex, leaseIndex) &&
       this.generationDelta === 0 &&
       this.exactScope
     const rowsToRemove = accepted
@@ -550,14 +636,25 @@ class PublishCommand implements Command<RegistryModel, RegistryReal> {
     const published =
       accepted &&
       this.extent !== `unknown` &&
-      (this.rows.length >= acquisition.prefix || this.extent === `exhausted`)
+      (this.rows.length >= claim!.prefix || this.extent === `exhausted`)
     if (accepted) {
-      acquisition.coverage = published ? acquisition.prefix : undefined
-      const scope = scopeKey(acquisition.sourceId, acquisition.prefix)
+      claim!.coverage = published ? claim!.prefix : undefined
+      const scope = scopeKey(claim!.sourceId, claim!.prefix)
       if (published) {
-        model.currentByScope.set(scope, acquisitionIndex)
-      } else if (model.currentByScope.get(scope) === acquisitionIndex) {
+        for (const peer of acquisition.claims.values()) {
+          if (scopeKey(peer.sourceId, peer.prefix) === scope) {
+            peer.coverage = claim!.prefix
+          }
+        }
         restoreModelCurrent(model, scope)
+      } else {
+        const current = model.currentByScope.get(scope)
+        if (
+          current?.acquisition === acquisitionIndex &&
+          current.lease === leaseIndex
+        ) {
+          restoreModelCurrent(model, scope)
+        }
       }
     }
     expect(
@@ -633,6 +730,18 @@ class ReleaseLeaseCommand implements Command<RegistryModel, RegistryReal> {
     const rowsToRemove = new Set<RowKey>()
     for (const acquisitionIndex of [...lease.acquisitions]) {
       const acquisition = model.acquisitions[acquisitionIndex]!
+      const claim = acquisition.claims.get(leaseIndex)
+      if (claim) {
+        const scope = scopeKey(claim.sourceId, claim.prefix)
+        const current = model.currentByScope.get(scope)
+        acquisition.claims.delete(leaseIndex)
+        if (
+          current?.acquisition === acquisitionIndex &&
+          current.lease === leaseIndex
+        ) {
+          restoreModelCurrent(model, scope)
+        }
+      }
       acquisition.leases.delete(leaseIndex)
       if (acquisition.leases.size === 0) {
         retireModelAcquisition(model, acquisitionIndex).forEach((row) =>
@@ -686,19 +795,37 @@ class DisposeCommand implements Command<RegistryModel, RegistryReal> {
 }
 
 describe(`coverage registry oracle`, () => {
-  it(`shares one physical acquisition until its final demand lease releases`, () => {
+  it(`keeps caller-relative claims on one physical acquisition`, () => {
     const registry = createPrefixRegistry()
     const release = vi.fn()
     const first = registry.addLease(20)
     const second = registry.addLease(10)
     const acquisition = addPrefixAcquisition(registry, {
       generation: 1,
-      leases: [first, second],
+      leases: [first],
       release,
       prefix: 20,
     })
 
     publishPrefix(registry, acquisition, 1, 20, [`a`, `b`])
+    registry.attachLease(second, acquisition, {
+      generation: 2,
+      scope: {
+        collectionId: `prefixes`,
+        sourceId: `items`,
+        demand: { limit: 10 },
+      },
+    })
+    expect(
+      registry.publishOutcome(
+        acquisition,
+        second,
+        createPrefixOutcome(2, 10, `exhausted`, `prefixes`, `items`, [
+          `a`,
+          `b`,
+        ]),
+      ),
+    ).toMatchObject({ accepted: true, published: true })
 
     expect(registry.releaseLease(first)).toEqual({ rowsToRemove: [] })
     expect(release).not.toHaveBeenCalled()
@@ -1161,6 +1288,7 @@ describe(`coverage registry oracle`, () => {
             leases: [],
             acquisitions: [],
             currentByScope: new Map(),
+            claimSequence: 0,
           },
           real: {
             registry: createPrefixRegistry(),

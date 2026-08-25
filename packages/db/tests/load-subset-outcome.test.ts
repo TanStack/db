@@ -189,6 +189,124 @@ describe(`loadSubset outcomes`, () => {
     },
   )
 
+  it.each([`wide`, `narrow`] as const)(
+    `keeps one physical promise acquisition across different demands when the %s lease releases first`,
+    async (firstRelease) => {
+      let resolveLoad!: (result: {
+        hasMore: false
+        appliedRowKeys: ReadonlyArray<string>
+      }) => void
+      const physicalPromise = new Promise<{
+        hasMore: false
+        appliedRowKeys: ReadonlyArray<string>
+      }>((resolve) => {
+        resolveLoad = resolve
+      })
+      let installed = false
+      const collection = createCollection<{ id: string }>({
+        id: `load-subset-different-demand-peer-${firstRelease}`,
+        getKey: (row) => row.id,
+        syncMode: `on-demand`,
+        startSync: true,
+        sync: {
+          sync: ({ begin, write, commit, markReady }) => {
+            markReady()
+            return {
+              loadSubset: () => {
+                if (!installed) {
+                  installed = true
+                  begin()
+                  write({ type: `insert`, value: { id: `shared` } })
+                  commit()
+                }
+                return physicalPromise
+              },
+              unloadSubset: vi.fn(),
+            }
+          },
+        },
+      })
+
+      try {
+        const owners = {
+          wide: { limit: 10 },
+          narrow: { limit: 5 },
+        }
+        const wide = collection._sync.loadSubset(owners.wide)
+        const narrow = collection._sync.loadSubset(owners.narrow)
+        resolveLoad({ hasMore: false, appliedRowKeys: [`shared`] })
+        if (wide !== true) await wide
+        if (narrow !== true) await narrow
+
+        const finalRelease = firstRelease === `wide` ? `narrow` : `wide`
+        collection._sync.unloadSubset(owners[firstRelease])
+        expect(Array.from(collection.keys())).toEqual([`shared`])
+
+        collection._sync.unloadSubset(owners[finalRelease])
+        expect(Array.from(collection.keys())).toEqual([])
+      } finally {
+        resolveLoad({ hasMore: false, appliedRowKeys: [`shared`] })
+        await collection.cleanup()
+      }
+    },
+  )
+
+  it.each([`loaded`, `satisfied`] as const)(
+    `retains exact applied ownership through synchronous true reuse when the %s lease releases first`,
+    async (firstRelease) => {
+      let loadCount = 0
+      const collection = createCollection<{ id: string }>({
+        id: `load-subset-true-reuse-${firstRelease}`,
+        getKey: (row) => row.id,
+        syncMode: `on-demand`,
+        startSync: true,
+        sync: {
+          sync: ({ begin, write, commit, markReady }) => {
+            markReady()
+            return {
+              loadSubset: () => {
+                loadCount++
+                if (loadCount > 1) return true
+                begin()
+                write({ type: `insert`, value: { id: `shared` } })
+                commit()
+                return Promise.resolve({
+                  hasMore: false,
+                  appliedRowKeys: [`shared`],
+                })
+              },
+              unloadSubset: vi.fn(),
+            }
+          },
+        },
+      })
+
+      try {
+        const owners = {
+          loaded: { limit: 1 },
+          satisfied: { limit: 1 },
+        }
+        await collection._sync.loadSubset(owners.loaded)
+        expect(collection._sync.loadSubset(owners.satisfied)).toBe(true)
+
+        const finalRelease = firstRelease === `loaded` ? `satisfied` : `loaded`
+        collection._sync.unloadSubset(owners[firstRelease])
+        expect(Array.from(collection.keys())).toEqual([`shared`])
+        expect(collection._sync.getLoadSubsetOutcome({ limit: 1 })).toEqual(
+          expect.objectContaining({
+            extent: `exhausted`,
+            appliedRowKeys: [`shared`],
+          }),
+        )
+
+        collection._sync.unloadSubset(owners[finalRelease])
+        expect(Array.from(collection.keys())).toEqual([])
+      } finally {
+        await collection.cleanup()
+      }
+    },
+  )
+
   it(`keeps prior applied coverage when a newer exact attempt fails`, async () => {
     type PendingLoad = {
       succeed: (rowId: string) => Promise<void>
@@ -872,6 +990,8 @@ describe(`loadSubset outcomes`, () => {
   it(`retains source-scoped outcomes at the live-query window boundary`, async () => {
     type Row = { id: number; rank: number }
     let nextId = 1
+    let loadCount = 0
+    let skipPhysicalLoad = false
     const source = createCollection<Row>({
       id: `load-subset-outcome-live-source`,
       getKey: (row) => row.id,
@@ -883,15 +1003,20 @@ describe(`loadSubset outcomes`, () => {
         sync: ({ begin, write, commit, markReady }) => {
           markReady()
           return {
-            loadSubset: async () => {
-              begin()
-              write({
-                type: `insert`,
-                value: { id: nextId, rank: nextId++ },
-              })
-              const applied = commit()
-              if (applied !== true) await applied
-              return { hasMore: false }
+            loadSubset: () => {
+              if (skipPhysicalLoad) return true
+              loadCount++
+              const id = nextId++
+              return (async () => {
+                begin()
+                write({
+                  type: `insert`,
+                  value: { id, rank: id },
+                })
+                const applied = commit()
+                if (applied !== true) await applied
+                return { hasMore: false, appliedRowKeys: [id] }
+              })()
             },
           }
         },
@@ -929,6 +1054,22 @@ describe(`loadSubset outcomes`, () => {
       expect(
         controller[LIVE_QUERY_INTERNAL].getLatestAppliedOutcomes(),
       ).toEqual(internal.getLastWindowOutcomes())
+
+      const callsBeforeNoop = loadCount
+      const retainedOutcomes = internal.getLastWindowOutcomes()
+      skipPhysicalLoad = true
+      const noOp = live.utils.setWindow({ offset: 0, limit: 3 })
+      if (noOp !== true) await noOp
+      expect(loadCount).toBe(callsBeforeNoop)
+      expect(internal.getLastWindowOutcomes()).toEqual(retainedOutcomes)
+      expect(retainedOutcomes).toEqual([
+        expect.objectContaining({
+          collectionId: source.id,
+          sourceId: expect.any(String),
+          extent: `exhausted`,
+          appliedRowKeys: expect.any(Array),
+        }),
+      ])
     } finally {
       controller.dispose()
       await Promise.all([live.cleanup(), source.cleanup()])

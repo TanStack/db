@@ -567,7 +567,7 @@ describe(`CollectionSubscription status tracking`, () => {
       expect(loads).toHaveLength(2)
       expect(subscription.status).toBe(`loadingSubset`)
 
-      replay.reject(new DOMException(`replacement abandoned`, `AbortError`))
+      replay.resolve()
       await flushPromises()
       expect(subscription.status).toBe(`ready`)
       expect(subscription.lastError).toEqual(
@@ -583,6 +583,70 @@ describe(`CollectionSubscription status tracking`, () => {
       await collection.cleanup()
     }
   })
+
+  it.each([`return`, `resolve`] as const)(
+    `publishes same-key replay ownership before releasing the old acquisition ($0)`,
+    async (delivery) => {
+      type Row = { id: string; value: number }
+      let begin!: () => void
+      let write!: (message: { type: `insert`; value: Row }) => void
+      let commit!: () => void
+      let truncate!: () => void
+      let loadCount = 0
+      const collection = createCollection<Row>({
+        id: `same-key-replay-ownership-${delivery}`,
+        getKey: (row) => row.id,
+        syncMode: `on-demand`,
+        sync: {
+          sync: (params) => {
+            begin = params.begin
+            write = params.write
+            commit = params.commit
+            truncate = params.truncate
+            params.markReady()
+            return {
+              loadSubset: () => {
+                loadCount++
+                begin()
+                write({ type: `insert`, value: { id: `same`, value: 1 } })
+                commit()
+                const outcome = {
+                  hasMore: false,
+                  appliedRowKeys: [`same`],
+                }
+                return loadCount === 1 || delivery === `resolve`
+                  ? Promise.resolve(outcome)
+                  : true
+              },
+              unloadSubset: () => {},
+            }
+          },
+        },
+      })
+      const subscription = collection.subscribeChanges(() => {}, {
+        includeInitialState: false,
+      })
+
+      try {
+        subscription.requestSnapshot({ optimizedOnly: false })
+        await flushPromises()
+        expect(Array.from(collection.keys())).toEqual([`same`])
+
+        begin()
+        truncate()
+        commit()
+        await flushPromises()
+
+        expect(Array.from(collection.keys())).toEqual([`same`])
+        expect(collection._sync.getLoadSubsetCoverage()).toHaveLength(1)
+
+        subscription.unsubscribe()
+        expect(Array.from(collection.keys())).toEqual([])
+      } finally {
+        await collection.cleanup()
+      }
+    },
+  )
 
   it(`retains a subset after a synchronous truncate replay failure`, async () => {
     const error = new Error(`synchronous truncate replay failed`)
