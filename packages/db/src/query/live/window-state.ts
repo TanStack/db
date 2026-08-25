@@ -101,7 +101,6 @@ export class WindowState<
     requestedPrefix: number,
     fullRegion: boolean,
   ): void {
-    this.needsPrefixRefresh = false
     if (fullRegion || exhausted) {
       this.establishFullCoverage()
       return
@@ -111,8 +110,10 @@ export class WindowState<
       this.provenanceKeys.clear()
       this.coveredSize = 0
       this.needsFullRefinement = true
+      this.needsPrefixRefresh = false
       return
     }
+    const refreshInvalidatedPrefix = this.needsPrefixRefresh
     for (const key of this.candidateKeys) {
       this.admittedKeys.add(key)
       this.provenanceKeys.add(key)
@@ -122,7 +123,15 @@ export class WindowState<
       this.admittedKeys.add(key)
       this.provenanceKeys.add(key)
     }
-    this.coveredSize = Math.max(this.coveredSize, requestedPrefix)
+    if (refreshInvalidatedPrefix) {
+      // Live changes that raced the continuation are visible, but its original
+      // request no longer proves the new prefix. Keep the result admitted and
+      // reacquire from the start before using any of it as a boundary.
+      this.coveredSize = 0
+    } else {
+      this.coveredSize = Math.max(this.coveredSize, requestedPrefix)
+      this.needsPrefixRefresh = false
+    }
   }
 
   /**

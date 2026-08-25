@@ -2215,6 +2215,9 @@ describe(`pagination recomputation oracle`, () => {
       commit()
 
       await settle(pending[1]!)
+      expect(pending).toHaveLength(3)
+      expect(pending[2]?.options).toMatchObject({ offset: 0, limit: 2 })
+      expect(pending[2]?.options.cursor).toBeUndefined()
       for (let index = 2; index < pending.length; index++) {
         await settle(pending[index]!)
       }
