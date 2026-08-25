@@ -589,6 +589,7 @@ type BufferedSyncTransaction<T extends object, TKey extends string | number> = {
   internal: boolean
   signal?: AbortSignal
   resolveApplied?: () => void
+  rejectApplied?: (error: unknown) => void
 }
 
 type OpenSyncTransaction<
@@ -1347,13 +1348,22 @@ class PersistedCollectionRuntime<
       if (!transaction) {
         continue
       }
-      await this.applyBufferedSyncTransactionUnsafe(transaction)
+      try {
+        await this.applyBufferedSyncTransactionUnsafe(transaction)
+      } catch (error) {
+        transaction.rejectApplied?.(error)
+        for (const abandoned of this.queuedHydrationTransactions) {
+          abandoned.rejectApplied?.(error)
+        }
+        this.queuedHydrationTransactions.length = 0
+        throw error
+      }
     }
   }
 
-  private applyBufferedSyncTransactionUnsafe(
+  private async applyBufferedSyncTransactionUnsafe(
     transaction: BufferedSyncTransaction<T, TKey>,
-  ): void {
+  ): Promise<void> {
     if (transaction.signal?.aborted) {
       transaction.resolveApplied?.()
       return
@@ -1403,34 +1413,23 @@ class PersistedCollectionRuntime<
         }
       }
 
-      const applied = commit(transaction.signal)
-      if (applied === true) {
-        transaction.resolveApplied?.()
-      } else {
-        void applied.then(() => transaction.resolveApplied?.())
-      }
-      return applied
+      return commit(transaction.signal)
     }
 
     try {
-      if (transaction.internal) {
-        this.withInternalApply(applyToCollection)
-        return
+      const applied = transaction.internal
+        ? this.withInternalApply(applyToCollection)
+        : applyToCollection()
+      if (applied !== true) {
+        await applied
       }
 
-      const applied = applyToCollection()
-      const persistAfterApplication = async () => {
-        if (applied !== true) await applied
-        if (transaction.signal?.aborted) return
-        await this.persistAndBroadcastExternalSyncTransaction(transaction)
+      if (!transaction.internal && !transaction.signal?.aborted) {
+        await this.persistAndBroadcastExternalSyncTransactionUnsafe(transaction)
       }
-      void persistAfterApplication().catch((error) => {
-        console.warn(`Failed to persist buffered sync transaction:`, error)
-      })
-    } catch (error) {
-      // A replay failure before commit has no core receipt that cleanup can
-      // settle. Release the wrapper receipt so the source load cannot hang.
       transaction.resolveApplied?.()
+    } catch (error) {
+      transaction.rejectApplied?.(error)
       throw error
     }
   }
@@ -2525,8 +2524,10 @@ function createWrappedSyncConfig<
           if (openTransaction.queuedBecauseHydrating) {
             if (signal?.aborted) return true
             let resolveApplied!: () => void
-            const applied = new Promise<void>((resolve) => {
+            let rejectApplied!: (error: unknown) => void
+            const applied = new Promise<void>((resolve, reject) => {
               resolveApplied = resolve
+              rejectApplied = reject
             })
             runtime.queueHydrationBufferedTransaction({
               operations: openTransaction.operations,
@@ -2537,6 +2538,7 @@ function createWrappedSyncConfig<
               internal: openTransaction.internal,
               signal,
               resolveApplied,
+              rejectApplied,
             })
             return applied
           }
@@ -2555,9 +2557,7 @@ function createWrappedSyncConfig<
                 internal: false,
               })
             }
-            void persistAfterApplication().catch((error) => {
-              console.warn(`Failed to persist wrapped sync transaction:`, error)
-            })
+            return persistAfterApplication()
           }
           return applied
         },

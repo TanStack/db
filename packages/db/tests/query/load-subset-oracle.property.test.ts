@@ -1599,6 +1599,62 @@ async function expectAbortedReceiptDoesNotPublishCoverage(
   }
 }
 
+async function expectCanceledReceiptReleasesOnlyItsSuppression() {
+  let begin!: () => void
+  let write!: (message: { type: `update`; value: PersistedLoadRow }) => void
+  let commit!: (signal?: AbortSignal) => SyncAppliedReceipt
+  const source = createCollection<PersistedLoadRow>({
+    id: `load-subset-cancel-suppression-${collectionSequence++}`,
+    getKey: (row) => row.id,
+    sync: {
+      sync: (params) => {
+        begin = params.begin
+        write = params.write
+        commit = params.commit
+        begin()
+        write({ type: `update`, value: { id: `first`, projectId: `old` } })
+        write({ type: `update`, value: { id: `second`, projectId: `old` } })
+        commit()
+        params.markReady()
+      },
+    },
+  })
+  await source.preload()
+  await Promise.resolve()
+  const persistence = createDeferred<void>()
+  const transaction = createTransaction({
+    mutationFn: () => persistence.promise,
+  })
+  transaction.mutate(() => source.insert({ id: `local`, projectId: `pending` }))
+  expect(transaction.state).toBe(`persisting`)
+  try {
+    begin()
+    write({ type: `update`, value: { id: `first`, projectId: `new` } })
+    const canceled = commit()
+    const canceledTransaction = source._state.pendingSyncedTransactions.at(-1)!
+    expect(source._state.pendingSyncedTransactions).toHaveLength(1)
+    begin()
+    write({ type: `update`, value: { id: `second`, projectId: `new` } })
+    expect(source._state.pendingSyncedTransactions).toHaveLength(2)
+
+    source._state.capturePreSyncVisibleState()
+    expect(source._state.recentlySyncedKeys).toEqual(
+      new Set([`first`, `second`]),
+    )
+
+    source._state.cancelPendingSyncedTransaction(canceledTransaction)
+    expect(source._state.pendingSyncedTransactions).toHaveLength(1)
+    expect(source._state.recentlySyncedKeys).toEqual(new Set([`second`]))
+    expect(source._state.preSyncVisibleState.has(`first`)).toBe(false)
+    expect(source._state.preSyncVisibleState.has(`second`)).toBe(true)
+    if (canceled !== true) await canceled
+  } finally {
+    persistence.resolve()
+    await transaction.isPersisted.promise.catch(() => undefined)
+    await source.cleanup()
+  }
+}
+
 async function expectCleanupSettlesReceiptOnce() {
   let receipt!: Promise<void>
   let transportCalls = 0
@@ -2589,6 +2645,10 @@ describe(`loadSubset coverage oracle`, () => {
     `does not publish coverage when a parked receipt is aborted %s`,
     expectAbortedReceiptDoesNotPublishCoverage,
   )
+
+  it(`releases only a canceled receipt's event suppression`, async () => {
+    await expectCanceledReceiptReleasesOnlyItsSuppression()
+  })
 
   it(`settles an abandoned receipt once without publishing coverage`, async () => {
     await expectCleanupSettlesReceiptOnce()

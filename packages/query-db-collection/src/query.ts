@@ -889,7 +889,9 @@ export function queryCollectionOptions(
     let startupRetentionSettled = false
     const retainedQueriesPendingRevalidation = new Set<string>()
     const pendingResultApplications = new Map<string, Promise<void>>()
+    const failedResultApplications = new Map<string, unknown>()
     const resultApplicationTokens = new Map<string, object>()
+    const resultApplicationControllers = new Map<string, Set<AbortController>>()
     const effectivePersistedGcTimes = new Map<string, number>()
     const persistedRetentionTimers = new Map<
       string,
@@ -899,7 +901,25 @@ export function queryCollectionOptions(
 
     const invalidatePendingResultApplication = (hashedQueryKey: string) => {
       pendingResultApplications.delete(hashedQueryKey)
+      failedResultApplications.delete(hashedQueryKey)
       resultApplicationTokens.delete(hashedQueryKey)
+      resultApplicationControllers
+        .get(hashedQueryKey)
+        ?.forEach((controller) => controller.abort())
+      resultApplicationControllers.delete(hashedQueryKey)
+    }
+
+    const getResultApplicationSettlement = (
+      hashedQueryKey: string,
+    ): true | Promise<void> => {
+      const pending = pendingResultApplications.get(hashedQueryKey)
+      if (pending) return pending
+
+      if (failedResultApplications.has(hashedQueryKey)) {
+        return Promise.reject(failedResultApplications.get(hashedQueryKey))
+      }
+
+      return true
     }
 
     const getRowMetadata = (rowKey: string | number) => {
@@ -1251,7 +1271,10 @@ export function queryCollectionOptions(
         const unsubscribe = observer.subscribe((result) => {
           // Use a microtask in case `subscribe` is called synchronously, before `unsubscribe` is initialized
           queueMicrotask(() => {
-            if (result.isSuccess || result.isError) {
+            if (
+              (result.isSuccess && !collection.deferDataRefresh) ||
+              result.isError
+            ) {
               unsubscribe()
               const pending = pendingReadyUnsubscribes.get(hashedQueryKey)
               pending?.delete(unsubscribe)
@@ -1317,14 +1340,21 @@ export function queryCollectionOptions(
         const currentResult = observer.getCurrentResult()
 
         if (currentResult.isSuccess) {
-          return pendingResultApplications.get(hashedQueryKey) ?? true
+          if (collection.deferDataRefresh) {
+            return waitForQueryReady(observer, hashedQueryKey).then(() => {
+              const settlement = getResultApplicationSettlement(hashedQueryKey)
+              return settlement === true ? undefined : settlement
+            })
+          }
+          return getResultApplicationSettlement(hashedQueryKey)
         } else if (currentResult.isError) {
           // Error already occurred, reject immediately
           return Promise.reject(currentResult.error)
         } else {
-          return waitForQueryReady(observer, hashedQueryKey).then(() =>
-            pendingResultApplications.get(hashedQueryKey),
-          )
+          return waitForQueryReady(observer, hashedQueryKey).then(() => {
+            const settlement = getResultApplicationSettlement(hashedQueryKey)
+            return settlement === true ? undefined : settlement
+          })
         }
       }
 
@@ -1391,7 +1421,13 @@ export function queryCollectionOptions(
         if (syncStarted || collection.subscriberCount > 0) {
           subscribeToQuery(localObserver, hashedQueryKey)
         }
-        return pendingResultApplications.get(hashedQueryKey) ?? true
+        if (collection.deferDataRefresh) {
+          return waitForQueryReady(localObserver, hashedQueryKey).then(() => {
+            const settlement = getResultApplicationSettlement(hashedQueryKey)
+            return settlement === true ? undefined : settlement
+          })
+        }
+        return getResultApplicationSettlement(hashedQueryKey)
       }
 
       // Create a promise that resolves when the query result is first available
@@ -1403,9 +1439,10 @@ export function queryCollectionOptions(
         subscribeToQuery(localObserver, hashedQueryKey)
       }
 
-      return readyPromise.then(() =>
-        pendingResultApplications.get(hashedQueryKey),
-      )
+      return readyPromise.then(() => {
+        const settlement = getResultApplicationSettlement(hashedQueryKey)
+        return settlement === true ? undefined : settlement
+      })
     }
 
     type UpdateHandler = Parameters<QueryObserver[`subscribe`]>[0]
@@ -1420,10 +1457,11 @@ export function queryCollectionOptions(
           owners: Set<string>
         }
       >,
+      signal?: AbortSignal,
     ): Promise<void> => {
       const hashedQueryKey = hashKey(queryKey)
 
-      if (collection.status === `cleaned-up`) {
+      if (collection.status === `cleaned-up` || signal?.aborted) {
         return
       }
 
@@ -1472,6 +1510,23 @@ export function queryCollectionOptions(
         previousOwnersByRow.set(key, owners ? new Set(owners) : undefined)
       })
       let transactionActive = false
+
+      const restoreOwnershipTracking = () => {
+        if (!state.observers.has(hashedQueryKey)) return
+
+        if (previousOwnedRows === undefined) {
+          queryToRows.delete(hashedQueryKey)
+        } else {
+          queryToRows.set(hashedQueryKey, previousOwnedRows)
+        }
+        previousOwnersByRow.forEach((owners, key) => {
+          if (owners === undefined) {
+            rowToQueries.delete(key)
+          } else {
+            rowToQueries.set(key, owners)
+          }
+        })
+      }
 
       try {
         // From this point onward the result, including an empty result, is the
@@ -1522,7 +1577,7 @@ export function queryCollectionOptions(
           }
         })
 
-        const applied = commit()
+        const applied = commit(signal)
         transactionActive = false
         retainedQueriesPendingRevalidation.delete(hashedQueryKey)
         cancelPersistedRetentionExpiry(hashedQueryKey)
@@ -1532,20 +1587,13 @@ export function queryCollectionOptions(
         if (applied !== true) {
           await applied
         }
+        if (signal?.aborted) {
+          restoreOwnershipTracking()
+          return
+        }
         markReady()
       } catch (error) {
-        if (previousOwnedRows === undefined) {
-          queryToRows.delete(hashedQueryKey)
-        } else {
-          queryToRows.set(hashedQueryKey, previousOwnedRows)
-        }
-        previousOwnersByRow.forEach((owners, key) => {
-          if (owners === undefined) {
-            rowToQueries.delete(key)
-          } else {
-            rowToQueries.set(key, owners)
-          }
-        })
+        restoreOwnershipTracking()
 
         if (transactionActive) {
           const cancellation = new AbortController()
@@ -1564,6 +1612,7 @@ export function queryCollectionOptions(
       queryKey: QueryKey,
       result: QueryObserverResult<any, any>,
       applicationToken: object,
+      signal: AbortSignal,
     ) => {
       const hashedQueryKey = hashKey(queryKey)
       const persistedBaseline =
@@ -1574,7 +1623,7 @@ export function queryCollectionOptions(
       ) {
         return
       }
-      await applySuccessfulResult(queryKey, result, persistedBaseline)
+      await applySuccessfulResult(queryKey, result, persistedBaseline, signal)
     }
 
     const trackResultApplication = (
@@ -1585,31 +1634,52 @@ export function queryCollectionOptions(
       const finish = () => {
         if (pendingResultApplications.get(hashedQueryKey) === application) {
           pendingResultApplications.delete(hashedQueryKey)
+          return true
         }
+        return false
       }
-      void application.then(finish, (error) => {
-        finish()
-        state.lastError = error
-        state.errorCount++
-        state.lastErrorUpdatedAt = Date.now()
-        console.error(
-          `[QueryCollection] Error applying query ${String(hashToQueryKey.get(hashedQueryKey))}:`,
-          error,
-        )
-        if (collection.status === `loading`) {
-          markError(error)
-        }
-      })
+      void application.then(
+        () => {
+          if (finish()) failedResultApplications.delete(hashedQueryKey)
+        },
+        (error) => {
+          if (!finish()) return
+          failedResultApplications.set(hashedQueryKey, error)
+          state.lastError = error
+          state.errorCount++
+          state.lastErrorUpdatedAt = Date.now()
+          console.error(
+            `[QueryCollection] Error applying query ${String(hashToQueryKey.get(hashedQueryKey))}:`,
+            error,
+          )
+          if (collection.status === `loading`) {
+            markError(error)
+          }
+        },
+      )
     }
 
     const enqueueResultApplication = (
       hashedQueryKey: string,
-      apply: () => Promise<void>,
+      apply: (signal: AbortSignal) => Promise<void>,
     ): void => {
+      const controller = new AbortController()
+      const controllers =
+        resultApplicationControllers.get(hashedQueryKey) ?? new Set()
+      controllers.add(controller)
+      resultApplicationControllers.set(hashedQueryKey, controllers)
       const previousApplication = pendingResultApplications.get(hashedQueryKey)
+      const run = () => apply(controller.signal)
       const application = previousApplication
-        ? previousApplication.then(apply, apply)
-        : apply()
+        ? previousApplication.then(run, run)
+        : run()
+      const cleanupController = () => {
+        controllers.delete(controller)
+        if (controllers.size === 0) {
+          resultApplicationControllers.delete(hashedQueryKey)
+        }
+      }
+      void application.then(cleanupController, cleanupController)
       trackResultApplication(hashedQueryKey, application)
     }
 
@@ -1659,12 +1729,17 @@ export function queryCollectionOptions(
 
             const applicationToken = {}
             resultApplicationTokens.set(hashedQueryKey, applicationToken)
-            enqueueResultApplication(hashedQueryKey, () =>
-              reconcileSuccessfulResult(queryKey, result, applicationToken),
+            enqueueResultApplication(hashedQueryKey, (signal) =>
+              reconcileSuccessfulResult(
+                queryKey,
+                result,
+                applicationToken,
+                signal,
+              ),
             )
           } else {
-            enqueueResultApplication(hashedQueryKey, () =>
-              applySuccessfulResult(queryKey, result),
+            enqueueResultApplication(hashedQueryKey, (signal) =>
+              applySuccessfulResult(queryKey, result, undefined, signal),
             )
           }
         } else if (result.isError) {

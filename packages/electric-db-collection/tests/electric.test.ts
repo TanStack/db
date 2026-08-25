@@ -221,6 +221,37 @@ describe(`Electric Integration`, () => {
     }
   })
 
+  it(`does not let a parked ready receipt overwrite a later stream error`, async () => {
+    const persistence = createDeferred<void>()
+    const transaction = createTransaction({
+      mutationFn: () => persistence.promise,
+    })
+    const streamError = new Error(`stream failed`)
+    const loggedError = vi.spyOn(console, `error`).mockImplementation(() => {})
+
+    try {
+      transaction.mutate(() => collection.insert({ id: 99, name: `Local row` }))
+      subscriber([{ headers: { control: `up-to-date` } }])
+      expect(collection.status).toBe(`loading`)
+
+      const streamOptions = vi.mocked(ShapeStream).mock.calls.at(-1)?.[0] as
+        | { onError?: (error: unknown) => void }
+        | undefined
+      streamOptions?.onError?.(streamError)
+      expect(collection.status).toBe(`error`)
+
+      persistence.resolve()
+      await transaction.isPersisted.promise
+      await Promise.resolve()
+
+      expect(collection.status).toBe(`error`)
+    } finally {
+      persistence.resolve()
+      await transaction.isPersisted.promise.catch(() => undefined)
+      loggedError.mockRestore()
+    }
+  })
+
   it(`should handle incoming insert messages and commit on up-to-date`, () => {
     // Simulate incoming insert message
     subscriber([

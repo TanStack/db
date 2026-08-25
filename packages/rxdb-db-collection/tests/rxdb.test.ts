@@ -214,6 +214,65 @@ describe(`RxDB Integration`, () => {
       }
     })
 
+    it(`does not let later live traffic extend the startup readiness boundary`, async () => {
+      const db = await getDatababase()
+      const rxCollection: RxCollection<TestDocType> = db.test
+      const initialQueryStarted = createDeferred<void>()
+      const releaseInitialQuery = createDeferred<void>()
+      const bufferedApplied = createDeferred<void>()
+      const laterLiveApplied = createDeferred<void>()
+      const storageQuery = rxCollection.storageInstance.query.bind(
+        rxCollection.storageInstance,
+      )
+      const query = vi
+        .spyOn(rxCollection.storageInstance, `query`)
+        .mockImplementationOnce(async (preparedQuery) => {
+          const result = await storageQuery(preparedQuery)
+          initialQueryStarted.resolve()
+          await releaseInitialQuery.promise
+          return result
+        })
+      const options = rxdbCollectionOptions({ rxCollection })
+      const begin = vi.fn()
+      const write = vi.fn()
+      const commit = vi
+        .fn()
+        .mockReturnValueOnce(true)
+        .mockReturnValueOnce(bufferedApplied.promise)
+        .mockReturnValueOnce(laterLiveApplied.promise)
+      const markReady = vi.fn()
+      const markError = vi.fn()
+      const cleanup = options.sync.sync({
+        begin,
+        write,
+        commit,
+        markReady,
+        markError,
+        collection: { status: `loading` },
+      } as never)
+
+      try {
+        await initialQueryStarted.promise
+        await rxCollection.insert({ id: `buffered`, name: `Buffered` })
+        releaseInitialQuery.resolve()
+        await vi.waitFor(() => expect(commit).toHaveBeenCalledTimes(2))
+
+        await rxCollection.insert({ id: `later`, name: `Later` })
+        await vi.waitFor(() => expect(commit).toHaveBeenCalledTimes(3))
+        expect(markReady).not.toHaveBeenCalled()
+
+        bufferedApplied.resolve()
+        await vi.waitFor(() => expect(markReady).toHaveBeenCalledOnce())
+      } finally {
+        releaseInitialQuery.resolve()
+        bufferedApplied.resolve()
+        laterLiveApplied.resolve()
+        if (typeof cleanup === `function`) cleanup()
+        query.mockRestore()
+        await db.remove()
+      }
+    })
+
     it(`should initialize and fetch initial data`, async () => {
       const initialItems = getTestData(2)
 

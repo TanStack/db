@@ -865,6 +865,50 @@ describe(`persistedCollectionOptions`, () => {
     }
   })
 
+  it(`rejects a wrapped sync receipt when persistence fails`, async () => {
+    const adapter = createRecordingAdapter()
+    const persistenceError = new Error(`persistence failed`)
+    adapter.applyCommittedTx = () => Promise.reject(persistenceError)
+    let remoteBegin: (() => void) | undefined
+    let remoteWrite:
+      | ((message: { type: `insert`; value: Todo }) => void)
+      | undefined
+    let remoteCommit: (() => true | Promise<void>) | undefined
+    const collection = createCollection(
+      persistedCollectionOptions<Todo, string>({
+        id: `sync-present-persistence-error`,
+        getKey: (item) => item.id,
+        sync: {
+          sync: ({ begin, write, commit, markReady }) => {
+            remoteBegin = begin
+            remoteWrite = write as (message: {
+              type: `insert`
+              value: Todo
+            }) => void
+            remoteCommit = commit
+            markReady()
+          },
+        },
+        persistence: { adapter },
+      }),
+    )
+
+    try {
+      await collection.stateWhenReady()
+      remoteBegin?.()
+      remoteWrite?.({
+        type: `insert`,
+        value: { id: `failed`, title: `Not durable` },
+      })
+
+      await expect(Promise.resolve(remoteCommit?.())).rejects.toBe(
+        persistenceError,
+      )
+    } finally {
+      await collection.cleanup()
+    }
+  })
+
   it(`preserves row metadata set before a metadata-less insert in the same sync transaction`, async () => {
     const adapter = createRecordingAdapter()
     const ownership = { queryCollection: { owners: [`gc:q1`] } }
@@ -1207,7 +1251,7 @@ describe(`persistedCollectionOptions`, () => {
     }
   })
 
-  it(`settles a hydration-buffered receipt when replay fails`, async () => {
+  it(`rejects every hydration-buffered receipt when replay fails`, async () => {
     const adapter = createRecordingAdapter()
     let resolveLoadSubset: (() => void) | undefined
     adapter.loadSubset = async () => {
@@ -1265,19 +1309,28 @@ describe(`persistedCollectionOptions`, () => {
       type: `insert`,
       value: { id: `during-hydrate`, title: `During hydrate` },
     })
-    const receipt = remoteCommit?.()
-    expect(receipt).toBeInstanceOf(Promise)
-    let receiptSettled = false
-    void Promise.resolve(receipt).then(() => {
-      receiptSettled = true
+    const failingReceipt = remoteCommit?.()
+    remoteBegin?.()
+    remoteWrite?.({
+      type: `insert`,
+      value: { id: `sibling`, title: `Sibling` },
     })
+    const siblingReceipt = remoteCommit?.()
+    expect(failingReceipt).toBeInstanceOf(Promise)
+    expect(siblingReceipt).toBeInstanceOf(Promise)
+    const failingExpectation = expect(
+      Promise.resolve(failingReceipt),
+    ).rejects.toBe(replayError)
+    const siblingExpectation = expect(
+      Promise.resolve(siblingReceipt),
+    ).rejects.toBe(replayError)
 
     resolveLoadSubset?.()
     await readyPromise
-    await collection.cleanup()
-    await flushAsyncWork()
+    await failingExpectation
+    await siblingExpectation
 
-    expect(receiptSettled).toBe(true)
+    await collection.cleanup()
   })
 
   it(`marks ready even when persisted startup fails before markReady`, async () => {

@@ -258,10 +258,13 @@ export function rxdbCollectionOptions(
           return
         }
 
-        // Keep buffering until every older startup batch is applied. Events
-        // that arrive while one receipt is parked join the next FIFO batch.
-        while (buffer.length) {
-          const pending = buffer.splice(0)
+        // Take one finite snapshot of changes observed during the initial
+        // fetch, then route newer events through the normal live path. The
+        // core transaction queue preserves their order without letting a
+        // continuous event stream postpone readiness forever.
+        const pending = buffer.splice(0)
+        buffering = false
+        if (pending.length > 0) {
           begin()
           for (const msg of pending) write(msg)
           await commit()
@@ -269,7 +272,6 @@ export function rxdbCollectionOptions(
             return
           }
         }
-        buffering = false
 
         if (!isCleanedUp()) {
           markReady()

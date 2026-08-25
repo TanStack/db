@@ -1380,10 +1380,28 @@ export class CollectionStateManager<
     this.pendingSyncedTransactions.splice(index, 1)
     transaction.applied.resolve()
 
+    const remainingPendingKeys = new Set<TKey>()
+    for (const pending of this.pendingSyncedTransactions) {
+      for (const operation of pending.operations) {
+        remainingPendingKeys.add(operation.key as TKey)
+      }
+    }
+    for (const operation of transaction.operations) {
+      const key = operation.key as TKey
+      if (!remainingPendingKeys.has(key)) {
+        this.recentlySyncedKeys.delete(key)
+        this.preSyncVisibleState.delete(key)
+      }
+    }
+
     if (this.pendingSyncedTransactions.length === 0) {
       this.preSyncVisibleState.clear()
       this.recentlySyncedKeys.clear()
       this.changes.emitEvents([], true)
+    } else {
+      // Recompute after removing the canceled keys so optimistic cleanup is
+      // no longer suppressed by a sync transaction that will never publish.
+      this.recomputeOptimisticState(false)
     }
   }
 

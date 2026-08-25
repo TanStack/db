@@ -1544,7 +1544,13 @@ function createElectricSync<T extends Row<unknown>>(
 
       // Wrap markReady to wait for test hook in progressive mode
       let progressiveReadyGate: Promise<void> | null = null
-      const wrappedMarkReady = (isBuffering: boolean) => {
+      let streamErrorVersion = 0
+      const wrappedMarkReady = (
+        isBuffering: boolean,
+        expectedErrorVersion = streamErrorVersion,
+      ) => {
+        if (streamErrorVersion !== expectedErrorVersion) return
+
         // Only create gate if we're in buffering phase (first up-to-date)
         if (
           isBuffering &&
@@ -1554,7 +1560,9 @@ function createElectricSync<T extends Row<unknown>>(
           // Create a new gate promise for this sync cycle
           progressiveReadyGate = testHooks.beforeMarkingReady()
           progressiveReadyGate.then(() => {
-            markReady()
+            if (streamErrorVersion === expectedErrorVersion) {
+              markReady()
+            }
           })
         } else {
           // No hook, not buffering, or already past first up-to-date
@@ -1609,6 +1617,7 @@ function createElectricSync<T extends Row<unknown>>(
           (canUsePersistedResume ? persistedResumeState.handle : undefined),
         signal: abortController.signal,
         onError: (errorParams) => {
+          streamErrorVersion++
           // Note that Electric sends a 409 error on a `must-refetch` message, but the
           // ShapeStream handled this and it will not reach this handler, therefor
           // this handler will not run for a `must-refetch`.
@@ -1998,10 +2007,13 @@ function createElectricSync<T extends Row<unknown>>(
               applied = commit()
             }
           }
+          const readyErrorVersion = streamErrorVersion
           if (applied === true) {
-            wrappedMarkReady(wasBufferingInitialSync)
+            wrappedMarkReady(wasBufferingInitialSync, readyErrorVersion)
           } else {
-            void applied.then(() => wrappedMarkReady(wasBufferingInitialSync))
+            void applied.then(() =>
+              wrappedMarkReady(wasBufferingInitialSync, readyErrorVersion),
+            )
           }
 
           // Track that we've received the first up-to-date for progressive mode

@@ -279,11 +279,7 @@ describe(`TrailBase Integration`, () => {
   it(`does not publish a parked subset page after its request is aborted`, async () => {
     const recordApi = new MockRecordApi<Data>()
     recordApi.list.mockResolvedValue({
-      records: Array.from({ length: 256 }, (_, index) => ({
-        id: index + 1,
-        updated: 0,
-        data: `obsolete`,
-      })),
+      records: [{ id: 1, updated: 0, data: `obsolete` }],
     })
     recordApi.subscribe.mockResolvedValue(new TransformStream<Event>().readable)
     const collection = createCollection(
@@ -327,6 +323,60 @@ describe(`TrailBase Integration`, () => {
       expect(recordApi.list).toHaveBeenCalledOnce()
     } finally {
       abortController.abort()
+      resolvePersistence()
+      await transaction.isPersisted.promise.catch(() => undefined)
+      await collection.cleanup()
+    }
+  })
+
+  it(`fetches later subset pages while earlier pages wait to apply`, async () => {
+    const recordApi = new MockRecordApi<Data>()
+    recordApi.list.mockImplementation(async () => {
+      const start = recordApi.list.mock.calls.length === 1 ? 1 : 257
+      const count = start === 1 ? 256 : 1
+      return {
+        records: Array.from({ length: count }, (_, index) => ({
+          id: start + index,
+          updated: 0,
+          data: `remote`,
+        })),
+        cursor: `page-${start}`,
+      }
+    })
+    recordApi.subscribe.mockResolvedValue(new TransformStream<Event>().readable)
+    const collection = createCollection(
+      trailBaseCollectionOptions({
+        recordApi,
+        getKey: (item: Data) => item.id ?? -1,
+        startSync: true,
+        syncMode: `on-demand`,
+        parse: {},
+        serialize: {},
+      }),
+    )
+    let resolvePersistence!: () => void
+    const persistence = new Promise<void>((resolve) => {
+      resolvePersistence = resolve
+    })
+    const transaction = createTransaction({ mutationFn: () => persistence })
+
+    try {
+      await vi.waitFor(() => expect(collection.status).toBe(`ready`))
+      transaction.mutate(() =>
+        collection.insert({ id: 999, updated: 0, data: `local` }),
+      )
+      const load = collection._sync.loadSubset({ limit: 257 })
+
+      await vi.waitFor(() => expect(recordApi.list).toHaveBeenCalledTimes(2))
+      expect(collection.get(1)).toBeUndefined()
+
+      resolvePersistence()
+      await transaction.isPersisted.promise
+      if (load instanceof Promise) await load
+
+      expect(collection.get(1)?.data).toBe(`remote`)
+      expect(collection.get(257)?.data).toBe(`remote`)
+    } finally {
       resolvePersistence()
       await transaction.isPersisted.promise.catch(() => undefined)
       await collection.cleanup()
