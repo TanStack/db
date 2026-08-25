@@ -8,8 +8,13 @@ import { LIVE_QUERY_INTERNAL } from '../src/query/live/internal.js'
 import { createLiveQueryWindowController } from '../src/live-query-window-controller.js'
 import { Func, PropRef, Value } from '../src/query/ir.js'
 import { getLoadSubsetDemandKey } from '../src/query/ir-stable-identity.js'
+import { createDeferred } from '../src/deferred.js'
 import type { LazyDemandPlan } from '../src/query/compiler/joins.js'
-import type { LoadSubsetFn, LoadSubsetOptions } from '../src/types.js'
+import type {
+  AppliedLoadSubsetOutcome,
+  LoadSubsetFn,
+  LoadSubsetOptions,
+} from '../src/types.js'
 
 describe(`loadSubset outcomes`, () => {
   it.each([
@@ -187,6 +192,56 @@ describe(`loadSubset outcomes`, () => {
       await collection.cleanup()
     }
   })
+
+  it.each([`direct`, `await`, `rebuild`] as const)(
+    `keeps an exact %s-wrapper result authoritative after caller mutation`,
+    async (wrapperMode) => {
+      let resolveLoad!: (result: { hasMore: boolean }) => void
+      const load = new Promise<{ hasMore: boolean }>((resolve) => {
+        resolveLoad = resolve
+      })
+      const deduplicated = new DeduplicatedLoadSubset({
+        loadSubset: () => load,
+      })
+      const wrappedLoadSubset: LoadSubsetFn = (options) => {
+        const result = deduplicated.loadSubset(options)
+        if (wrapperMode === `direct` || result === true) return result
+        return result.then((sourceResult) => {
+          if (wrapperMode === `await` || sourceResult === undefined) {
+            return sourceResult
+          }
+          return { hasMore: sourceResult.hasMore }
+        })
+      }
+      const collection = createCollection<{ id: string }>({
+        id: `load-subset-outcome-mutable-${wrapperMode}-wrapper`,
+        getKey: (row) => row.id,
+        syncMode: `on-demand`,
+        startSync: true,
+        sync: {
+          sync: ({ markReady }) => {
+            markReady()
+            return { loadSubset: wrappedLoadSubset }
+          },
+        },
+      })
+
+      try {
+        const options = { limit: 10 }
+        const outcome = collection._sync.loadSubset(options)
+        options.limit = 20
+        resolveLoad({ hasMore: false })
+
+        await expect(outcome).resolves.toMatchObject({
+          demand: { limit: 10 },
+          extent: `exhausted`,
+        })
+      } finally {
+        resolveLoad({ hasMore: false })
+        await collection.cleanup()
+      }
+    },
+  )
 
   it(`scopes source extent to a narrowed physical acquisition`, async () => {
     const adapterCalls: Array<LoadSubsetOptions> = []
@@ -625,6 +680,77 @@ describe(`loadSubset outcomes`, () => {
       expect(internal.getLastWindowOutcomes()).toEqual([])
     } finally {
       resolveRight()
+      await Promise.all([live.cleanup(), source.cleanup()])
+    }
+  })
+
+  it(`keeps superseded window outcomes from overwriting newer evidence`, async () => {
+    const source = createCollection<{ id: number }>({
+      id: `load-subset-outcome-window-supersession-source`,
+      getKey: (row) => row.id,
+      autoIndex: `eager`,
+      defaultIndexType: BasicIndex,
+      sync: { sync: ({ markReady }) => markReady() },
+    })
+    const live = createLiveQueryCollection({
+      id: `load-subset-outcome-window-supersession-live`,
+      query: (q) =>
+        q
+          .from({ row: source })
+          .orderBy(({ row }) => row.id, `asc`)
+          .limit(1),
+      startSync: true,
+    })
+    const internal = live.utils[LIVE_QUERY_INTERNAL]
+    const builder = internal.getBuilder()
+    const first = createDeferred<AppliedLoadSubsetOutcome>()
+    const second = createDeferred<AppliedLoadSubsetOutcome>()
+
+    try {
+      await live.preload()
+      Reflect.set(builder, `windowFn`, (options: { limit: number }) => {
+        builder.trackSubsetLoadOperationPromise(
+          options.limit === 2 ? first.promise : second.promise,
+          `root`,
+        )
+      })
+
+      const firstReady = live.utils.setWindow({ offset: 0, limit: 2 })
+      const secondReady = live.utils.setWindow({ offset: 0, limit: 3 })
+      second.resolve({
+        collectionId: `root-collection`,
+        demand: { limit: 3 },
+        generation: 2,
+        extent: `exhausted`,
+      })
+      await secondReady
+      expect(internal.getLastWindowOutcomes()).toEqual([
+        expect.objectContaining({ demand: { limit: 3 } }),
+      ])
+
+      first.resolve({
+        collectionId: `root-collection`,
+        demand: { limit: 2 },
+        generation: 1,
+        extent: `continues`,
+      })
+      await firstReady
+      expect(internal.getLastWindowOutcomes()).toEqual([
+        expect.objectContaining({ demand: { limit: 3 } }),
+      ])
+    } finally {
+      first.resolve({
+        collectionId: `root-collection`,
+        demand: { limit: 2 },
+        generation: 1,
+        extent: `continues`,
+      })
+      second.resolve({
+        collectionId: `root-collection`,
+        demand: { limit: 3 },
+        generation: 2,
+        extent: `exhausted`,
+      })
       await Promise.all([live.cleanup(), source.cleanup()])
     }
   })

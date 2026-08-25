@@ -410,16 +410,12 @@ export class CollectionSyncManager<
       generation,
       deferred,
     } of deferredLoadSubsets) {
+      const loadSubset = this.syncLoadSubsetFn
+      if (loadSubset) {
+        this.retainDeferredAdapterOptions(ownerOptions, options)
+      }
       try {
-        const result = this.syncLoadSubsetFn?.(options) ?? true
-        if (this.syncLoadSubsetFn) {
-          const adapterOptions = this.deferredAdapterOptions.get(ownerOptions)
-          if (adapterOptions) {
-            adapterOptions.push(options)
-          } else {
-            this.deferredAdapterOptions.set(ownerOptions, [options])
-          }
-        }
+        const result = loadSubset?.(options) ?? true
         if (result instanceof Promise) {
           void result.then(
             (sourceResult) =>
@@ -428,7 +424,7 @@ export class CollectionSyncManager<
                   this.id,
                   demand,
                   generation,
-                  isLoadSubsetResultForDemand(result, sourceResult, options)
+                  isLoadSubsetResultForDemand(result, sourceResult, demand)
                     ? sourceResult
                     : undefined,
                 ),
@@ -446,6 +442,9 @@ export class CollectionSyncManager<
           )
         }
       } catch (error) {
+        if (loadSubset) {
+          this.forgetDeferredAdapterOptions(ownerOptions, options)
+        }
         deferred.reject(error)
       }
     }
@@ -885,7 +884,7 @@ export class CollectionSyncManager<
             this.id,
             demand,
             generation,
-            isLoadSubsetResultForDemand(result, sourceResult, options)
+            isLoadSubsetResultForDemand(result, sourceResult, demand)
               ? sourceResult
               : undefined,
           ),
@@ -926,10 +925,35 @@ export class CollectionSyncManager<
       const adapterOptions = this.deferredAdapterOptions.get(options)
       const acquiredOptions = adapterOptions?.[0] ?? options
       this.syncUnloadSubsetFn(acquiredOptions)
-      adapterOptions?.shift()
-      if (adapterOptions?.length === 0) {
-        this.deferredAdapterOptions.delete(options)
+      if (adapterOptions) {
+        this.forgetDeferredAdapterOptions(options, acquiredOptions)
       }
+    }
+  }
+
+  private retainDeferredAdapterOptions(
+    ownerOptions: LoadSubsetOptions,
+    acquiredOptions: LoadSubsetOptions,
+  ): void {
+    const adapterOptions = this.deferredAdapterOptions.get(ownerOptions)
+    if (adapterOptions) {
+      adapterOptions.push(acquiredOptions)
+    } else {
+      this.deferredAdapterOptions.set(ownerOptions, [acquiredOptions])
+    }
+  }
+
+  private forgetDeferredAdapterOptions(
+    ownerOptions: LoadSubsetOptions,
+    acquiredOptions: LoadSubsetOptions,
+  ): void {
+    const adapterOptions = this.deferredAdapterOptions.get(ownerOptions)
+    if (!adapterOptions) return
+
+    const index = adapterOptions.indexOf(acquiredOptions)
+    if (index !== -1) adapterOptions.splice(index, 1)
+    if (adapterOptions.length === 0) {
+      this.deferredAdapterOptions.delete(ownerOptions)
     }
   }
 

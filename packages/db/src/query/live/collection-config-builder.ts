@@ -184,6 +184,7 @@ export class CollectionConfigBuilder<
     AppliedLoadSubsetOutcome
   >()
   private syncSession = 0
+  private windowOperationGeneration = 0
   private lastWindowOutcomes: ReadonlyArray<AppliedLoadSubsetOutcome> = []
   // Map of lexical source IDs to optimizable ORDER BY state
   optimizableOrderByCollections: Record<string, OrderByOptimizationInfo> = {}
@@ -306,6 +307,7 @@ export class CollectionConfigBuilder<
     }
 
     const syncSession = this.syncSession
+    const windowOperationGeneration = ++this.windowOperationGeneration
     const loadOperation =
       this.liveQueryCollection?._sync.beginLoadSubsetOperation()
     const previousWindow = this.currentWindow ?? this.initialWindow
@@ -335,13 +337,20 @@ export class CollectionConfigBuilder<
 
     const ready = loadOperation?.wait() ?? true
     if (ready === true) {
-      this.lastWindowOutcomes = loadOperation?.getOutcomes() ?? []
+      if (
+        syncSession === this.syncSession &&
+        windowOperationGeneration === this.windowOperationGeneration &&
+        this.currentSyncConfig !== undefined
+      ) {
+        this.lastWindowOutcomes = loadOperation?.getOutcomes() ?? []
+      }
       return true
     }
     void ready.then(
       () => {
         if (
           syncSession !== this.syncSession ||
+          windowOperationGeneration !== this.windowOperationGeneration ||
           this.currentSyncConfig === undefined
         ) {
           return
