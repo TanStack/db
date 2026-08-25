@@ -827,12 +827,17 @@ function canonicalizeFunction(
 function sortUniqueStableIdentityValues(
   values: Array<StableIdentityValue>,
 ): Array<StableIdentityValue> {
-  values.sort(compareStableIdentityValues)
-  return values.filter(
-    (value, index) =>
-      index === 0 ||
-      compareStableIdentityValues(value, values[index - 1]!) !== 0,
-  )
+  const keyedValues = values.map((value) => ({
+    key: JSON.stringify(value),
+    value,
+  }))
+  keyedValues.sort((a, b) => (a.key < b.key ? -1 : a.key > b.key ? 1 : 0))
+  return keyedValues
+    .filter(
+      (entry, index) =>
+        index === 0 || entry.key !== keyedValues[index - 1]!.key,
+    )
+    .map((entry) => entry.value)
 }
 
 function isCanonicalFunction(

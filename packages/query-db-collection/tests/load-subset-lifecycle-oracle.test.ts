@@ -349,20 +349,9 @@ async function expectDeferredStartupReadyDoesNotOverrideError(): Promise<void> {
 async function expectEquivalentPredicatesShareOneLoad(
   form: `commutative-and` | `commutative-or` | `reversed-equality`,
 ): Promise<void> {
-  const queryClient = createQueryClient()
-  const id = `load-subset-canonical-predicate-${collectionSequence++}`
-  const queryFn = vi.fn().mockResolvedValue([{ id: `a`, group: `x` }])
-  const collection = createCollection(
-    queryCollectionOptions<Row>({
-      id,
-      queryClient,
-      queryKey: [id],
-      queryFn,
-      getKey: (row) => row.id,
-      startSync: true,
-      syncMode: `on-demand`,
-      retry: false,
-    }),
+  const { queryClient, collection, queryFn } = createOnDemandCollection(
+    `load-subset-canonical-predicate`,
+    [{ id: `a`, group: `x` }],
   )
   const firstComparison = new IR.Func<boolean>(`eq`, [
     new IR.PropRef([`id`]),
@@ -407,20 +396,9 @@ async function expectEquivalentComparisonValuesShareOneLoad(
   firstValue: unknown,
   secondValue: unknown,
 ): Promise<void> {
-  const queryClient = createQueryClient()
-  const id = `load-subset-comparison-value-${collectionSequence++}`
-  const queryFn = vi.fn().mockResolvedValue([{ id: `a` }])
-  const collection = createCollection(
-    queryCollectionOptions<Row>({
-      id,
-      queryClient,
-      queryKey: [id],
-      queryFn,
-      getKey: (row) => row.id,
-      startSync: true,
-      syncMode: `on-demand`,
-      retry: false,
-    }),
+  const { queryClient, collection, queryFn } = createOnDemandCollection(
+    `load-subset-comparison-value`,
+    [{ id: `a` }],
   )
   const value = new IR.PropRef([`value`])
 
@@ -436,6 +414,25 @@ async function expectEquivalentComparisonValuesShareOneLoad(
     await collection.cleanup()
     queryClient.clear()
   }
+}
+
+function createOnDemandCollection(idPrefix: string, rows: Array<Row>) {
+  const queryClient = createQueryClient()
+  const id = `${idPrefix}-${collectionSequence++}`
+  const queryFn = vi.fn().mockResolvedValue(rows)
+  const collection = createCollection(
+    queryCollectionOptions<Row>({
+      id,
+      queryClient,
+      queryKey: [id],
+      queryFn,
+      getKey: (row) => row.id,
+      startSync: true,
+      syncMode: `on-demand`,
+      retry: false,
+    }),
+  )
+  return { queryClient, collection, queryFn }
 }
 
 async function expectFinalOwnerCleanupAbortsQuery(): Promise<void> {
@@ -567,10 +564,12 @@ describe(`loadSubset lifecycle oracle`, () => {
     await expectDeferredStartupReadyDoesNotOverrideError()
   })
 
-  it(`commutative predicate forms share one query-db transport load`, async () => {
-    await expectEquivalentPredicatesShareOneLoad(`commutative-and`)
-    await expectEquivalentPredicatesShareOneLoad(`commutative-or`)
-  })
+  it.each([`commutative-and`, `commutative-or`] as const)(
+    `%s predicate forms share one query-db transport load`,
+    async (form) => {
+      await expectEquivalentPredicatesShareOneLoad(form)
+    },
+  )
 
   it(`reversed equality operands share one query-db transport load`, async () => {
     await expectEquivalentPredicatesShareOneLoad(`reversed-equality`)

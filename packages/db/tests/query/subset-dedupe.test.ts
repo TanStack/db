@@ -1387,5 +1387,30 @@ describe(`createDeduplicatedLoadSubset`, () => {
       expect(result).toBe(true)
       expect(callCount).toBe(1)
     })
+
+    it(`does not let caller mutations change a stored cursor boundary`, async () => {
+      const loadSubset = vi.fn().mockResolvedValue(undefined)
+      const deduplicated = new DeduplicatedLoadSubset({ loadSubset })
+      const mutableBoundary = val(1)
+      const firstCursor = {
+        whereFrom: gt(ref(`id`), mutableBoundary),
+        whereCurrent: eq(ref(`id`), mutableBoundary),
+        lastKey: 1,
+      }
+
+      await deduplicated.loadSubset({ cursor: firstCursor, limit: 10 })
+      mutableBoundary.value = 2
+
+      await deduplicated.loadSubset({
+        cursor: {
+          whereFrom: gt(ref(`id`), val(2)),
+          whereCurrent: eq(ref(`id`), val(2)),
+          lastKey: 1,
+        },
+        limit: 10,
+      })
+
+      expect(loadSubset).toHaveBeenCalledTimes(2)
+    })
   })
 })

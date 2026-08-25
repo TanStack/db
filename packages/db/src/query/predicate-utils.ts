@@ -46,7 +46,7 @@ export function isWhereSubset(
     return true
   }
 
-  return isWhereSubsetInternal(subset!, superset!)
+  return isWhereSubsetInternal(subset!, superset!, new WeakMap())
 }
 
 function makeDisjunction(
@@ -71,6 +71,7 @@ function convertInToOr(inField: InField) {
 function isWhereSubsetInternal(
   subset: BasicExpression<boolean>,
   superset: BasicExpression<boolean>,
+  expressionHashes: ExpressionHashCache,
 ): boolean {
   // If subset is false it is requesting no data,
   // thus the result set is empty
@@ -80,7 +81,7 @@ function isWhereSubsetInternal(
   }
 
   // If expressions are structurally equal, subset relationship holds
-  if (areExpressionsEqual(subset, superset)) {
+  if (areExpressionsEqual(subset, superset, expressionHashes)) {
     return true
   }
 
@@ -89,7 +90,11 @@ function isWhereSubsetInternal(
   // Example: (age > 20) ⊆ (age > 10 AND status = 'active') is false (doesn't imply status condition)
   if (superset.type === `func` && superset.name === `and`) {
     return superset.args.every((arg) =>
-      isWhereSubsetInternal(subset, arg as BasicExpression<boolean>),
+      isWhereSubsetInternal(
+        subset,
+        arg as BasicExpression<boolean>,
+        expressionHashes,
+      ),
     )
   }
 
@@ -98,7 +103,11 @@ function isWhereSubsetInternal(
   // decomposes the subset first: A ⊆ or(C, D) AND B ⊆ or(C, D).
   if (subset.type === `func` && subset.name === `or`) {
     return subset.args.every((arg) =>
-      isWhereSubsetInternal(arg as BasicExpression<boolean>, superset),
+      isWhereSubsetInternal(
+        arg as BasicExpression<boolean>,
+        superset,
+        expressionHashes,
+      ),
     )
   }
 
@@ -107,7 +116,11 @@ function isWhereSubsetInternal(
   // match a structurally equal disjunct via areExpressionsEqual.
   if (superset.type === `func` && superset.name === `or`) {
     return superset.args.some((arg) =>
-      isWhereSubsetInternal(subset, arg as BasicExpression<boolean>),
+      isWhereSubsetInternal(
+        subset,
+        arg as BasicExpression<boolean>,
+        expressionHashes,
+      ),
     )
   }
 
@@ -115,7 +128,11 @@ function isWhereSubsetInternal(
   if (subset.type === `func` && subset.name === `and`) {
     // For (A AND B) ⊆ C, since (A AND B) implies A, we check if any conjunct implies C
     return subset.args.some((arg) =>
-      isWhereSubsetInternal(arg as BasicExpression<boolean>, superset),
+      isWhereSubsetInternal(
+        arg as BasicExpression<boolean>,
+        superset,
+        expressionHashes,
+      ),
     )
   }
 
@@ -124,14 +141,22 @@ function isWhereSubsetInternal(
   if (subset.type === `func` && subset.name === `in`) {
     const inField = extractInField(subset)
     if (inField) {
-      return isWhereSubsetInternal(convertInToOr(inField), superset)
+      return isWhereSubsetInternal(
+        convertInToOr(inField),
+        superset,
+        expressionHashes,
+      )
     }
   }
 
   if (superset.type === `func` && superset.name === `in`) {
     const inField = extractInField(superset)
     if (inField) {
-      return isWhereSubsetInternal(subset, convertInToOr(inField))
+      return isWhereSubsetInternal(
+        subset,
+        convertInToOr(inField),
+        expressionHashes,
+      )
     }
   }
 
@@ -1088,13 +1113,41 @@ function findPredicateWithOperator(
   })
 }
 
-function areExpressionsEqual(a: BasicExpression, b: BasicExpression): boolean {
+const unhashableExpression = Symbol(`unhashableExpression`)
+type ExpressionHashCache = WeakMap<
+  BasicExpression,
+  string | typeof unhashableExpression
+>
+
+function getCachedExpressionHash(
+  expression: BasicExpression,
+  expressionHashes: ExpressionHashCache,
+): string | typeof unhashableExpression {
+  const cachedHash = expressionHashes.get(expression)
+  if (cachedHash !== undefined) return cachedHash
+
   try {
-    return getStableExpressionHash(a) === getStableExpressionHash(b)
+    const hash = getStableExpressionHash(expression)
+    expressionHashes.set(expression, hash)
+    return hash
   } catch (error) {
     if (!(error instanceof UnhashableQueryIRError)) throw error
+    expressionHashes.set(expression, unhashableExpression)
+    return unhashableExpression
+  }
+}
+
+function areExpressionsEqual(
+  a: BasicExpression,
+  b: BasicExpression,
+  expressionHashes: ExpressionHashCache = new WeakMap(),
+): boolean {
+  const aHash = getCachedExpressionHash(a, expressionHashes)
+  const bHash = getCachedExpressionHash(b, expressionHashes)
+  if (aHash === unhashableExpression || bHash === unhashableExpression) {
     return areExpressionsStructurallyEqual(a, b)
   }
+  return aHash === bHash
 }
 
 function areExpressionsStructurallyEqual(

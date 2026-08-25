@@ -915,6 +915,50 @@ describe(`isPredicateSubset`, () => {
     expect(isPredicateSubset(subset, superset)).toBe(true)
   })
 
+  it(`does not normalize distinct comparison operators at a limited boundary`, () => {
+    const subset: LoadSubsetOptions = {
+      where: gt(ref(`age`), val(18)),
+      limit: 10,
+    }
+    const superset: LoadSubsetOptions = {
+      where: gte(ref(`age`), val(18)),
+      limit: 20,
+    }
+
+    expect(isPredicateSubset(subset, superset)).toBe(false)
+  })
+
+  it(`does not retain expression hashes across comparison operations`, () => {
+    const subset = gt(ref(`age`), val(18))
+    const superset = gt(ref(`age`), val(18))
+
+    expect(isWhereSubset(subset, superset)).toBe(true)
+    superset.name = `lt`
+    expect(isWhereSubset(subset, superset)).toBe(false)
+  })
+
+  it(`hashes a repeated expression once per subset comparison`, () => {
+    let valueReads = 0
+    const countedValue = val(1)
+    Object.defineProperty(countedValue, `value`, {
+      configurable: true,
+      get: () => {
+        valueReads++
+        return 1
+      },
+    })
+    const subset = func(`custom-subset`, countedValue)
+    const superset = func(
+      `or`,
+      ...Array.from({ length: 4 }, (_, index) =>
+        func(`custom-superset-${index}`, val(index)),
+      ),
+    )
+
+    expect(isWhereSubset(subset, superset)).toBe(false)
+    expect(valueReads).toBe(1)
+  })
+
   it(`should return false for limited superset with different where clause`, () => {
     // Even if subset's where is more restrictive, it can't be a subset
     // of a limited superset with a different where clause.

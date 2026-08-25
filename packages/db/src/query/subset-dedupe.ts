@@ -4,6 +4,7 @@ import {
   minusWherePredicates,
   unionWherePredicates,
 } from './predicate-utils.js'
+import { Func, PropRef, Value } from './ir.js'
 import type { BasicExpression } from './ir.js'
 import type { LoadSubsetOptions } from '../types.js'
 
@@ -324,10 +325,34 @@ function createSharedAbortLease(
 export function cloneOptions(options: LoadSubsetOptions): LoadSubsetOptions {
   return {
     ...options,
+    where: options.where ? cloneBasicExpression(options.where) : undefined,
     orderBy: options.orderBy?.map((clause) => ({
       ...clause,
+      expression: cloneBasicExpression(clause.expression),
       compareOptions: { ...clause.compareOptions },
     })),
-    cursor: options.cursor ? { ...options.cursor } : undefined,
+    cursor: options.cursor
+      ? {
+          ...options.cursor,
+          whereFrom: cloneBasicExpression(options.cursor.whereFrom),
+          whereCurrent: cloneBasicExpression(options.cursor.whereCurrent),
+        }
+      : undefined,
+  }
+}
+
+function cloneBasicExpression<T>(
+  expression: BasicExpression<T>,
+): BasicExpression<T> {
+  switch (expression.type) {
+    case `ref`:
+      return new PropRef<T>([...expression.path])
+    case `val`:
+      return new Value<T>(expression.value)
+    case `func`:
+      return new Func<T>(
+        expression.name,
+        expression.args.map((arg) => cloneBasicExpression(arg)),
+      )
   }
 }
