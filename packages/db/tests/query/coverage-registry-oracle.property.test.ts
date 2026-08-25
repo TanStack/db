@@ -254,7 +254,8 @@ function restoreModelCurrent(model: RegistryModel, scope: string): void {
           })),
     )
     .filter(
-      ({ claim }) =>
+      ({ acquisition, lease, claim }) =>
+        acquisition.leases.has(lease) &&
         claim.coverage !== undefined &&
         scopeKey(claim.sourceId, claim.prefix) === scope,
     )
@@ -358,7 +359,8 @@ function assertRegistryModel(model: RegistryModel, real: RegistryReal): void {
             const current = model.currentByScope.get(
               scopeKey(claim.sourceId, claim.prefix),
             )
-            return claim.coverage !== undefined &&
+            return acquisition.leases.has(lease) &&
+              claim.coverage !== undefined &&
               current?.acquisition === acquisitionIndex &&
               current.lease === lease
               ? [claim.coverage]
@@ -560,7 +562,9 @@ class ReplaceRowsCommand implements Command<RegistryModel, RegistryReal> {
       this.rawAcquisition,
     )!
     const acquisition = model.acquisitions[acquisitionIndex]!
-    const leaseIndex = acquisition.claims.keys().next().value
+    const leaseIndex = Array.from(acquisition.claims.keys()).find((candidate) =>
+      acquisition.leases.has(candidate),
+    )
     const accepted =
       leaseIndex !== undefined &&
       canPublishModelAcquisition(model, acquisitionIndex, leaseIndex)
@@ -660,6 +664,7 @@ class PublishCommand implements Command<RegistryModel, RegistryReal> {
     expect(
       real.registry.publishOutcome(
         real.acquisitions[acquisitionIndex]!,
+        real.leases[leaseIndex!]!,
         outcome,
       ),
     ).toEqual({ accepted, published, rowsToRemove })
@@ -731,10 +736,10 @@ class ReleaseLeaseCommand implements Command<RegistryModel, RegistryReal> {
     for (const acquisitionIndex of [...lease.acquisitions]) {
       const acquisition = model.acquisitions[acquisitionIndex]!
       const claim = acquisition.claims.get(leaseIndex)
+      acquisition.leases.delete(leaseIndex)
       if (claim) {
         const scope = scopeKey(claim.sourceId, claim.prefix)
         const current = model.currentByScope.get(scope)
-        acquisition.claims.delete(leaseIndex)
         if (
           current?.acquisition === acquisitionIndex &&
           current.lease === leaseIndex
@@ -742,7 +747,6 @@ class ReleaseLeaseCommand implements Command<RegistryModel, RegistryReal> {
           restoreModelCurrent(model, scope)
         }
       }
-      acquisition.leases.delete(leaseIndex)
       if (acquisition.leases.size === 0) {
         retireModelAcquisition(model, acquisitionIndex).forEach((row) =>
           rowsToRemove.add(row),
@@ -841,6 +845,46 @@ describe(`coverage registry oracle`, () => {
 
     expect(registry.releaseLease(second)).toEqual({ rowsToRemove: [] })
     registry.dispose()
+    expect(release).toHaveBeenCalledOnce()
+  })
+
+  it(`retains a released claim as dormant physical publication identity`, () => {
+    const registry = createPrefixRegistry()
+    const release = vi.fn()
+    const physical = registry.addLease(20)
+    const peer = registry.addLease(10)
+    const acquisition = addPrefixAcquisition(registry, {
+      generation: 1,
+      leases: [physical],
+      release,
+      prefix: 20,
+    })
+    registry.attachLease(peer, acquisition, {
+      generation: 1,
+      scope: {
+        collectionId: `prefixes`,
+        sourceId: `items`,
+        demand: { limit: 10 },
+      },
+    })
+
+    expect(registry.releaseLease(physical)).toEqual({ rowsToRemove: [] })
+    expect(
+      registry.publishOutcome(
+        acquisition,
+        physical,
+        createPrefixOutcome(1, 20, `exhausted`, `prefixes`, `items`, [
+          `a`,
+          `b`,
+        ]),
+      ),
+    ).toEqual({ accepted: true, published: true, rowsToRemove: [] })
+    expect(registry.coverageAntichain()).toEqual([])
+    expect(registry.rowOwnerCount(`a`)).toBe(1)
+
+    expect(registry.releaseLease(peer)).toEqual({
+      rowsToRemove: [`a`, `b`],
+    })
     expect(release).toHaveBeenCalledOnce()
   })
 

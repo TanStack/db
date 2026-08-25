@@ -279,7 +279,7 @@ export class CoverageRegistry<
     const claim =
       lease === undefined
         ? undefined
-        : (record?.claims.get(lease as DemandLease<unknown>))
+        : record?.claims.get(lease as DemandLease<unknown>)
     if (
       !record ||
       !claim ||
@@ -347,12 +347,14 @@ export class CoverageRegistry<
     const record = this.acquisitions.get(acquisition)
     const lease = maybeRows
       ? (leaseOrRows as DemandLease<TDemand>)
-      : (record?.claims.keys().next().value as DemandLease<TDemand> | undefined)
+      : (Array.from(record?.claims.keys() ?? []).find((candidate) =>
+          record?.leases.has(candidate),
+        ) as DemandLease<TDemand> | undefined)
     const rows = maybeRows ?? (leaseOrRows as Iterable<TRowKey>)
     const claim =
       lease === undefined
         ? undefined
-        : (record?.claims.get(lease as DemandLease<unknown>))
+        : record?.claims.get(lease as DemandLease<unknown>)
     if (
       !record ||
       !claim ||
@@ -498,14 +500,13 @@ export class CoverageRegistry<
       const record = this.acquisitions.get(acquisition)
       if (!record) continue
       const claim = record.claims.get(lease as DemandLease<unknown>)
+      record.leases.delete(lease as DemandLease<unknown>)
       if (claim) {
         const current = this.currentAcquisitions.get(claim.scopeKey)
-        record.claims.delete(lease as DemandLease<unknown>)
         if (current?.acquisition === acquisition && current.lease === lease) {
           this.restoreCurrentAcquisition(claim.scopeKey)
         }
       }
-      record.leases.delete(lease as DemandLease<unknown>)
       leaseRecord.acquisitions.delete(acquisition)
       if (record.leases.size === 0) {
         this.retireAcquisitionState(acquisition, rowsToRemove)
@@ -597,7 +598,9 @@ export class CoverageRegistry<
         record.releaseSettled
           ? []
           : Array.from(record.claims.entries()).flatMap(([lease, claim]) =>
-              claim.scopeKey === scopeKey && claim.coverage !== undefined
+              record.leases.has(lease) &&
+              claim.scopeKey === scopeKey &&
+              claim.coverage !== undefined
                 ? [{ acquisition, lease, claim }]
                 : [],
             ),
@@ -646,9 +649,11 @@ export class CoverageRegistry<
     outcome: AppliedLoadSubsetOutcome,
   ): DemandLease<TDemand> | undefined {
     if (!record) return undefined
-    return Array.from(record.claims.entries()).find(([, claim]) =>
+    const matching = Array.from(record.claims.entries()).filter(([, claim]) =>
       matchesOutcome(claim, outcome),
-    )?.[0] as DemandLease<TDemand> | undefined
+    )
+    return (matching.find(([lease]) => record.leases.has(lease)) ??
+      matching[0])?.[0] as DemandLease<TDemand> | undefined
   }
 
   private currentCoverageClaims(): Array<{
@@ -660,6 +665,7 @@ export class CoverageRegistry<
     return Array.from(this.acquisitions.entries()).flatMap(
       ([acquisition, record]) =>
         Array.from(record.claims.entries()).flatMap(([lease, claim]) =>
+          record.leases.has(lease) &&
           claim.coverage !== undefined &&
           this.isCurrent(acquisition, lease, claim)
             ? [{ acquisition, record, lease, claim }]

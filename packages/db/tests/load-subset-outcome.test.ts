@@ -8,6 +8,7 @@ import { LIVE_QUERY_INTERNAL } from '../src/query/live/internal.js'
 import { createLiveQueryWindowController } from '../src/live-query-window-controller.js'
 import { Func, PropRef, Value } from '../src/query/ir.js'
 import { getLoadSubsetDemandKey } from '../src/query/ir-stable-identity.js'
+import { recordLoadSubsetPromiseDemandMatcher } from '../src/query/load-subset-outcome.js'
 import type { LazyDemandPlan } from '../src/query/compiler/joins.js'
 import type { LoadSubsetFn, LoadSubsetOptions } from '../src/types.js'
 
@@ -250,6 +251,66 @@ describe(`loadSubset outcomes`, () => {
       }
     },
   )
+
+  it(`keeps physical row ownership when its exact caller releases before settlement`, async () => {
+    let resolveLoad!: (result: {
+      hasMore: false
+      appliedRowKeys: ReadonlyArray<string>
+    }) => void
+    const physicalPromise = new Promise<{
+      hasMore: false
+      appliedRowKeys: ReadonlyArray<string>
+    }>((resolve) => {
+      resolveLoad = resolve
+    })
+    const wideDemand = { limit: 10 }
+    recordLoadSubsetPromiseDemandMatcher(
+      physicalPromise,
+      (candidate) => candidate.limit === wideDemand.limit,
+    )
+    let installed = false
+    const collection = createCollection<{ id: string }>({
+      id: `load-subset-released-physical-publisher`,
+      getKey: (row) => row.id,
+      syncMode: `on-demand`,
+      startSync: true,
+      sync: {
+        sync: ({ begin, write, commit, markReady }) => {
+          markReady()
+          return {
+            loadSubset: () => {
+              if (!installed) {
+                installed = true
+                begin()
+                write({ type: `insert`, value: { id: `shared` } })
+                commit()
+              }
+              return physicalPromise
+            },
+            unloadSubset: vi.fn(),
+          }
+        },
+      },
+    })
+
+    try {
+      const narrowDemand = { limit: 5 }
+      const wide = collection._sync.loadSubset(wideDemand)
+      const narrow = collection._sync.loadSubset(narrowDemand)
+      collection._sync.unloadSubset(wideDemand)
+
+      resolveLoad({ hasMore: false, appliedRowKeys: [`shared`] })
+      if (wide !== true) await wide
+      if (narrow !== true) await narrow
+      expect(Array.from(collection.keys())).toEqual([`shared`])
+
+      collection._sync.unloadSubset(narrowDemand)
+      expect(Array.from(collection.keys())).toEqual([])
+    } finally {
+      resolveLoad({ hasMore: false, appliedRowKeys: [`shared`] })
+      await collection.cleanup()
+    }
+  })
 
   it.each([`loaded`, `satisfied`] as const)(
     `retains exact applied ownership through synchronous true reuse when the %s lease releases first`,
