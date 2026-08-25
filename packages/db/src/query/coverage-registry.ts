@@ -151,7 +151,7 @@ export class CoverageRegistry<
     if (
       !record ||
       record.generation !== outcome.generation ||
-      outcome.extent === `unknown`
+      !hasAuthoritativeExtent(outcome)
     ) {
       return false
     }
@@ -301,6 +301,12 @@ export class CoverageRegistry<
       releaseErrors.push(error)
     }
   }
+}
+
+function hasAuthoritativeExtent(
+  outcome: AppliedLoadSubsetOutcome,
+): outcome is AuthoritativeAppliedLoadSubsetOutcome {
+  return outcome.extent !== `unknown`
 }
 
 function sortKeys<TKey extends string | number>(

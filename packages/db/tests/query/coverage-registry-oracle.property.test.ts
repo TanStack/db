@@ -195,7 +195,7 @@ describe(`coverage registry oracle`, () => {
         const acquisition = registry.addAcquisition({
           generation: index + 1,
           leases: [lease],
-          release: releases[index],
+          release: releases[index]!,
         })
         registry.replaceRows(acquisition, index + 1, claim.rows)
         publishPrefix(registry, acquisition, index + 1, claim.prefix)
@@ -223,7 +223,7 @@ describe(`coverage registry oracle`, () => {
       assertModel()
       for (const rawIndex of releaseOrder) {
         const index = rawIndex % claims.length
-        registry.releaseLease(leases[index])
+        registry.releaseLease(leases[index]!)
         active.delete(index)
         assertModel()
       }
