@@ -695,8 +695,9 @@ describe(`Collection.subscribeChanges`, () => {
     expect(callback).not.toHaveBeenCalled()
   })
 
-  it(`should correctly handle filtered updates that transition between filter states`, () => {
+  it(`should correctly handle filtered updates that transition between filter states`, async () => {
     const callback = vi.fn()
+    const emitter = mitt()
 
     // Create collection with items that have a status field
     const collection = createCollection<{
@@ -708,6 +709,21 @@ describe(`Collection.subscribeChanges`, () => {
       getKey: (item) => item.id,
       sync: {
         sync: ({ begin, write, commit }) => {
+          // Feed persisted mutations back through the real sync transaction
+          // path so this test also observes applied-receipt failures.
+          // @ts-expect-error don't trust Mitt's typing and this works.
+          emitter.on(`*`, (_, changes: Array<PendingMutation>) => {
+            begin()
+            changes.forEach((change) => {
+              write({
+                type: change.type,
+                // @ts-expect-error TODO type changes
+                value: change.modified,
+              })
+            })
+            commit()
+          })
+
           // Start with some initial data
           begin()
           write({
@@ -723,39 +739,8 @@ describe(`Collection.subscribeChanges`, () => {
       },
     })
 
-    const mutationFn: MutationFn = async () => {
-      // Simulate sync by writing the mutations back
-      const syncCollection = collection as any
-      syncCollection.config.sync.sync({
-        collection: syncCollection,
-        begin: () => {
-          syncCollection._state.pendingSyncedTransactions.push({
-            committed: false,
-            applicationStarted: false,
-            operations: [],
-          })
-        },
-        write: (messageWithoutKey: any) => {
-          const pendingTransaction =
-            syncCollection._state.pendingSyncedTransactions[
-              syncCollection._state.pendingSyncedTransactions.length - 1
-            ]
-          const key = syncCollection.getKeyFromItem(messageWithoutKey.value)
-          const message = { ...messageWithoutKey, key }
-          pendingTransaction.operations.push(message)
-        },
-        commit: () => {
-          const pendingTransaction =
-            syncCollection._state.pendingSyncedTransactions[
-              syncCollection._state.pendingSyncedTransactions.length - 1
-            ]
-          pendingTransaction.committed = true
-          syncCollection.commitPendingTransactions()
-        },
-        markReady: () => {
-          syncCollection.markReady()
-        },
-      })
+    const mutationFn: MutationFn = ({ transaction }) => {
+      emitter.emit(`sync`, transaction.mutations)
       return Promise.resolve()
     }
 
@@ -858,6 +843,15 @@ describe(`Collection.subscribeChanges`, () => {
 
     // Should not emit any events for inactive items
     expect(callback).not.toHaveBeenCalled()
+
+    // Keep the immediate optimistic assertions isolated above, then prove that
+    // every auto-commit also completes through applied-receipt settlement.
+    await Promise.all([
+      tx1.isPersisted.promise,
+      tx2.isPersisted.promise,
+      tx3.isPersisted.promise,
+      tx4.isPersisted.promise,
+    ])
 
     // Clean up
     subscription.unsubscribe()
