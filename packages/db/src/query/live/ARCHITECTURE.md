@@ -498,11 +498,13 @@ physical acquisition settles or retires. This lets an exact physical result
 attach its applied rows when that exact caller released before settlement but a
 peer still owns the physical work. A synchronous `true` result creates no
 physical resource. It attaches the new logical lease to an active acquisition
-whose published coverage proves the demand, and projects that retained proof
-into caller-relative evidence. An exact or locally proven continuing
-projection may also become a coverage fact. An unknown projection remains
-operation evidence only: its lease still owns the physical acquisition and
-rows, but it does not enter the coverage antichain or satisfy a later demand.
+whose published coverage proves the demand. Exact-scope reuse may also attach
+ownership-only to a live applied acquisition whose extent remains unknown.
+Non-exact applied evidence attaches only when its rows locally prove
+caller-relative continuation. An exact or locally proven continuing projection
+may become caller-relative evidence, but only the continuing projection becomes
+a new coverage fact. Unknown evidence still owns the physical acquisition and
+rows; it does not enter the coverage antichain or satisfy a later demand.
 Starting a newer attempt does not supersede
 viable coverage; the current generation advances only when that attempt
 publishes authoritative coverage.

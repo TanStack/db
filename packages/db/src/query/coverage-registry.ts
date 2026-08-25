@@ -37,6 +37,7 @@ type AcquisitionRecord<TCoverage, TRowKey extends string | number> = {
   claims: Map<DemandLease<unknown>, CoverageClaim<TCoverage>>
   release: () => void
   releaseSettled: boolean
+  applied: boolean
   rows: Set<TRowKey>
 }
 
@@ -48,6 +49,7 @@ type CoverageClaim<TCoverage> = {
     collectionId: string
     sourceId: string | undefined
     demandKey: string | undefined
+    demand: LoadSubsetOptions
   }
   coverage: TCoverage | undefined
   retainedOutcome: AppliedLoadSubsetOutcome | undefined
@@ -171,6 +173,7 @@ export class CoverageRegistry<
       ),
       release: options.release,
       releaseSettled: false,
+      applied: false,
       rows: new Set(),
     })
     leaseRecords.forEach((record) => record.acquisitions.add(acquisition))
@@ -269,6 +272,39 @@ export class CoverageRegistry<
   }
 
   /**
+   * Applied physical acquisitions projected as unknown operation evidence.
+   * This never creates a coverage fact or participates in covers().
+   */
+  appliedAcquisitionEvidence(): Array<{
+    acquisition: AcquisitionToken
+    outcome: AppliedLoadSubsetOutcome
+    rowKeys: ReadonlyArray<TRowKey>
+  }> {
+    return Array.from(this.acquisitions.entries()).flatMap(
+      ([acquisition, record]) =>
+        record.applied && !record.releaseSettled && record.leases.size > 0
+          ? Array.from(record.claims.values()).map((claim) => {
+              const rowKeys = Object.freeze([...record.rows])
+              return {
+                acquisition,
+                outcome: snapshotAppliedOutcome({
+                  collectionId: claim.scope.collectionId,
+                  ...(claim.scope.sourceId === undefined
+                    ? {}
+                    : { sourceId: claim.scope.sourceId }),
+                  demand: claim.scope.demand,
+                  generation: claim.generation,
+                  extent: `unknown`,
+                  appliedRowKeys: rowKeys,
+                }),
+                rowKeys,
+              }
+            })
+          : [],
+    )
+  }
+
+  /**
    * Publishes only coverage proved by an exact, applied source outcome.
    * Unknown source extent is request state, not achieved coverage.
    */
@@ -317,6 +353,7 @@ export class CoverageRegistry<
       record,
       nextRows,
     )
+    record.applied = true
     for (const peer of record.claims.values()) {
       peer.retainedOutcome = undefined
     }
@@ -383,6 +420,7 @@ export class CoverageRegistry<
     }
 
     const nextRows = new Set(rows)
+    record.applied = false
     const affectedScopes = new Set<string>()
     for (const [claimLease, existingClaim] of record.claims) {
       existingClaim.coverage = undefined
@@ -673,6 +711,7 @@ export class CoverageRegistry<
         collectionId: scope.collectionId,
         sourceId: scope.sourceId,
         demandKey,
+        demand,
       },
       coverage: undefined,
       retainedOutcome: undefined,
