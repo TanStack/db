@@ -462,6 +462,13 @@ shared abort lease. If one owner releases its lease, the source request remains
 active while another owner still needs its coverage. The source signal aborts
 only after every attached owner has released it.
 
+A Collection subscription installs each logical subset owner before it calls
+the source adapter. Reentrant release during `loadSubset` must therefore see and
+release that exact acquisition. A synchronous `loadSubset` throw that did not
+follow a failed release rolls the tentative owner back without calling
+`unloadSubset`; a failed release keeps the owner so a later cleanup can retry the
+same acquisition identity.
+
 Its semantic contract is:
 
 > Every active, satisfiable bucket must be covered by a settled current demand
@@ -514,12 +521,20 @@ physical attempt an acquisition token. Logical peers waiting on the same
 physical promise attach their leases to that one acquisition even when their
 canonical demands differ. Each lease keeps its own demand, generation, and
 coverage claim, while the physical acquisition owns one applied row set until
-its final lease releases. A synchronous `true` result creates no physical
-resource. It attaches the new logical lease to an active acquisition whose
-published coverage proves the demand, and projects that retained proof into a
-caller-relative claim. Starting a newer attempt does not supersede viable
-coverage; the current generation advances only when that attempt publishes
-authoritative coverage.
+its final lease releases. A released lease stops contributing active coverage
+at once, but its immutable publication identity remains dormant until the
+physical acquisition settles or retires. This lets an exact physical result
+attach its applied rows when that exact caller released before settlement but a
+peer still owns the physical work. A synchronous `true` result creates no
+physical resource. It attaches the new logical lease to an active acquisition
+whose published coverage proves the demand, and projects that retained proof
+into caller-relative evidence. An exact or locally proven continuing
+projection may also become a coverage fact. An unknown projection remains
+operation evidence only: its lease still owns the physical acquisition and
+rows, but it does not enter the coverage antichain or satisfy a later demand.
+Starting a newer attempt does not supersede
+viable coverage; the current generation advances only when that attempt
+publishes authoritative coverage.
 
 The coverage registry accepts an exact applied outcome and its row keys as one
 publication. It rejects stale or mismatched tokens for the same physical

@@ -7,9 +7,16 @@ import { createLiveQueryCollection } from '../src/query/index.js'
 import { LIVE_QUERY_INTERNAL } from '../src/query/live/internal.js'
 import { createLiveQueryWindowController } from '../src/live-query-window-controller.js'
 import { Func, PropRef, Value } from '../src/query/ir.js'
+import { eq } from '../src/query/builder/functions.js'
 import { getLoadSubsetDemandKey } from '../src/query/ir-stable-identity.js'
+import { recordLoadSubsetPromiseDemandMatcher } from '../src/query/load-subset-outcome.js'
+import { createDeferred } from '../src/deferred.js'
 import type { LazyDemandPlan } from '../src/query/compiler/joins.js'
-import type { LoadSubsetFn, LoadSubsetOptions } from '../src/types.js'
+import type {
+  AppliedLoadSubsetOutcome,
+  LoadSubsetFn,
+  LoadSubsetOptions,
+} from '../src/types.js'
 
 describe(`loadSubset outcomes`, () => {
   it(`publishes exact applied coverage through the collection sync boundary`, async () => {
@@ -251,6 +258,66 @@ describe(`loadSubset outcomes`, () => {
     },
   )
 
+  it(`keeps physical row ownership when its exact caller releases before settlement`, async () => {
+    let resolveLoad!: (result: {
+      hasMore: false
+      appliedRowKeys: ReadonlyArray<string>
+    }) => void
+    const physicalPromise = new Promise<{
+      hasMore: false
+      appliedRowKeys: ReadonlyArray<string>
+    }>((resolve) => {
+      resolveLoad = resolve
+    })
+    const wideDemand = { limit: 10 }
+    recordLoadSubsetPromiseDemandMatcher(
+      physicalPromise,
+      (candidate) => candidate.limit === wideDemand.limit,
+    )
+    let installed = false
+    const collection = createCollection<{ id: string }>({
+      id: `load-subset-released-physical-publisher`,
+      getKey: (row) => row.id,
+      syncMode: `on-demand`,
+      startSync: true,
+      sync: {
+        sync: ({ begin, write, commit, markReady }) => {
+          markReady()
+          return {
+            loadSubset: () => {
+              if (!installed) {
+                installed = true
+                begin()
+                write({ type: `insert`, value: { id: `shared` } })
+                commit()
+              }
+              return physicalPromise
+            },
+            unloadSubset: vi.fn(),
+          }
+        },
+      },
+    })
+
+    try {
+      const narrowDemand = { limit: 5 }
+      const wide = collection._sync.loadSubset(wideDemand)
+      const narrow = collection._sync.loadSubset(narrowDemand)
+      collection._sync.unloadSubset(wideDemand)
+
+      resolveLoad({ hasMore: false, appliedRowKeys: [`shared`] })
+      if (wide !== true) await wide
+      if (narrow !== true) await narrow
+      expect(Array.from(collection.keys())).toEqual([`shared`])
+
+      collection._sync.unloadSubset(narrowDemand)
+      expect(Array.from(collection.keys())).toEqual([])
+    } finally {
+      resolveLoad({ hasMore: false, appliedRowKeys: [`shared`] })
+      await collection.cleanup()
+    }
+  })
+
   it.each([`loaded`, `satisfied`] as const)(
     `retains exact applied ownership through synchronous true reuse when the %s lease releases first`,
     async (firstRelease) => {
@@ -306,6 +373,183 @@ describe(`loadSubset outcomes`, () => {
       }
     },
   )
+
+  it.each(
+    ([`continues`, `exhausted`] as const).flatMap((sourceExtent) =>
+      ([`exact`, `covering`, `narrower`] as const).flatMap((relationship) =>
+        ([`loaded`, `satisfied`] as const).map((firstRelease) => ({
+          sourceExtent,
+          relationship,
+          firstRelease,
+        })),
+      ),
+    ),
+  )(
+    `projects $sourceExtent evidence through $relationship synchronous true reuse when $firstRelease releases first`,
+    async ({ sourceExtent, relationship, firstRelease }) => {
+      let loadCount = 0
+      const rowIds = Array.from({ length: 10 }, (_, index) => `row-${index}`)
+      const collection = createCollection<{ id: string }>({
+        id: `load-subset-true-projection-${sourceExtent}-${relationship}-${firstRelease}`,
+        getKey: (row) => row.id,
+        syncMode: `on-demand`,
+        startSync: true,
+        sync: {
+          sync: ({ begin, write, commit, markReady }) => {
+            markReady()
+            return {
+              loadSubset: () => {
+                loadCount++
+                if (loadCount > 1) return true
+                begin()
+                rowIds.forEach((id) => write({ type: `insert`, value: { id } }))
+                commit()
+                return Promise.resolve({
+                  hasMore: sourceExtent === `continues`,
+                  appliedRowKeys: rowIds,
+                })
+              },
+              unloadSubset: vi.fn(),
+            }
+          },
+        },
+      })
+
+      const owners = {
+        loaded: { limit: 10 },
+        satisfied:
+          relationship === `exact`
+            ? { limit: 10 }
+            : relationship === `covering`
+              ? { offset: 5, limit: 5 }
+              : { limit: 5 },
+      }
+      const expectedExtent =
+        relationship === `exact`
+          ? sourceExtent
+          : sourceExtent === `continues` || relationship === `narrower`
+            ? `continues`
+            : `unknown`
+
+      try {
+        await collection._sync.loadSubset(owners.loaded)
+        expect(collection._sync.loadSubset(owners.satisfied)).toBe(true)
+        expect(collection._sync.getLoadSubsetOutcome(owners.satisfied)).toEqual(
+          expect.objectContaining({
+            demand: owners.satisfied,
+            extent: expectedExtent,
+            appliedRowKeys: rowIds,
+          }),
+        )
+
+        const finalRelease = firstRelease === `loaded` ? `satisfied` : `loaded`
+        collection._sync.unloadSubset(owners[firstRelease])
+        expect(Array.from(collection.keys()).sort()).toEqual([...rowIds].sort())
+        if (firstRelease === `loaded`) {
+          expect(
+            collection._sync.getLoadSubsetOutcome(owners.satisfied),
+          ).toEqual(expect.objectContaining({ extent: expectedExtent }))
+          expect(collection._sync.getLoadSubsetCoverage()).toHaveLength(
+            expectedExtent === `unknown` ? 0 : 1,
+          )
+        }
+
+        collection._sync.unloadSubset(owners[finalRelease])
+        expect(Array.from(collection.keys())).toEqual([])
+      } finally {
+        await collection.cleanup()
+      }
+    },
+  )
+
+  it(`retries only failed live-query source releases on later cleanup`, async () => {
+    const failure = new Error(`left source unload failed`)
+    let leftShouldFail = true
+    const leftUnload = vi.fn(() => {
+      if (leftShouldFail) throw failure
+    })
+    const rightUnload = vi.fn()
+    const createSource = (id: string, unloadSubset: () => void) =>
+      createCollection<{ id: number }>({
+        id,
+        getKey: (row) => row.id,
+        syncMode: `on-demand`,
+        startSync: true,
+        autoIndex: `eager`,
+        defaultIndexType: BasicIndex,
+        sync: {
+          sync: ({ begin, write, commit, markReady }) => {
+            markReady()
+            return {
+              loadSubset: async () => {
+                begin()
+                write({ type: `insert`, value: { id: 1 } })
+                const applied = commit()
+                if (applied !== true) await applied
+                return { hasMore: false, appliedRowKeys: [1] }
+              },
+              unloadSubset,
+            }
+          },
+        },
+      })
+    const left = createSource(`live-cleanup-retry-left`, leftUnload)
+    const right = createSource(`live-cleanup-retry-right`, rightUnload)
+    const live = createLiveQueryCollection({
+      id: `live-cleanup-retry`,
+      query: (q) =>
+        q
+          .from({ left })
+          .leftJoin({ right }, ({ left: leftRow, right: rightRow }) =>
+            eq(leftRow.id, rightRow.id),
+          ),
+      startSync: true,
+    })
+    const originalQueueMicrotask = globalThis.queueMicrotask
+    const queuedMicrotasks: Array<() => void> = []
+
+    try {
+      await live.preload()
+      expect(Array.from(left.keys())).toEqual([1])
+      expect(Array.from(right.keys())).toEqual([1])
+      expect(left._sync.getLoadSubsetCoverage()).toHaveLength(1)
+      expect(right._sync.getLoadSubsetCoverage()).toHaveLength(1)
+
+      globalThis.queueMicrotask = (callback) => {
+        queuedMicrotasks.push(callback)
+      }
+      await live.cleanup()
+
+      expect(leftUnload).toHaveBeenCalledOnce()
+      expect(rightUnload).toHaveBeenCalledOnce()
+      expect(Array.from(left.keys())).toEqual([1])
+      expect(left._sync.getLoadSubsetCoverage()).toHaveLength(1)
+      expect(Array.from(right.keys())).toEqual([])
+      expect(right._sync.getLoadSubsetCoverage()).toEqual([])
+      expect(queuedMicrotasks).toHaveLength(1)
+
+      let surfacedError: unknown
+      try {
+        queuedMicrotasks[0]!()
+      } catch (error) {
+        surfacedError = error
+      }
+      expect(surfacedError).toMatchObject({ cause: failure })
+
+      leftShouldFail = false
+      await live.cleanup()
+
+      expect(leftUnload).toHaveBeenCalledTimes(2)
+      expect(rightUnload).toHaveBeenCalledOnce()
+      expect(Array.from(left.keys())).toEqual([])
+      expect(left._sync.getLoadSubsetCoverage()).toEqual([])
+      expect(queuedMicrotasks).toHaveLength(1)
+    } finally {
+      globalThis.queueMicrotask = originalQueueMicrotask
+      leftShouldFail = false
+      await Promise.all([live.cleanup(), left.cleanup(), right.cleanup()])
+    }
+  })
 
   it(`keeps prior applied coverage when a newer exact attempt fails`, async () => {
     type PendingLoad = {
@@ -775,6 +1019,56 @@ describe(`loadSubset outcomes`, () => {
     }
   })
 
+  it.each([`direct`, `await`, `rebuild`] as const)(
+    `keeps an exact %s-wrapper result authoritative after caller mutation`,
+    async (wrapperMode) => {
+      let resolveLoad!: (result: { hasMore: boolean }) => void
+      const load = new Promise<{ hasMore: boolean }>((resolve) => {
+        resolveLoad = resolve
+      })
+      const deduplicated = new DeduplicatedLoadSubset({
+        loadSubset: () => load,
+      })
+      const wrappedLoadSubset: LoadSubsetFn = (options) => {
+        const result = deduplicated.loadSubset(options)
+        if (wrapperMode === `direct` || result === true) return result
+        return result.then((sourceResult) => {
+          if (wrapperMode === `await` || sourceResult === undefined) {
+            return sourceResult
+          }
+          return { hasMore: sourceResult.hasMore }
+        })
+      }
+      const collection = createCollection<{ id: string }>({
+        id: `load-subset-outcome-mutable-${wrapperMode}-wrapper`,
+        getKey: (row) => row.id,
+        syncMode: `on-demand`,
+        startSync: true,
+        sync: {
+          sync: ({ markReady }) => {
+            markReady()
+            return { loadSubset: wrappedLoadSubset }
+          },
+        },
+      })
+
+      try {
+        const options = { limit: 10 }
+        const outcome = collection._sync.loadSubset(options)
+        options.limit = 20
+        resolveLoad({ hasMore: false })
+
+        await expect(outcome).resolves.toMatchObject({
+          demand: { limit: 10 },
+          extent: `exhausted`,
+        })
+      } finally {
+        resolveLoad({ hasMore: false })
+        await collection.cleanup()
+      }
+    },
+  )
+
   it(`scopes source extent to a narrowed physical acquisition`, async () => {
     const adapterCalls: Array<LoadSubsetOptions> = []
     const deduplicated = new DeduplicatedLoadSubset({
@@ -1235,6 +1529,218 @@ describe(`loadSubset outcomes`, () => {
       expect(internal.getLastWindowOutcomes()).toEqual([])
     } finally {
       resolveRight()
+      await Promise.all([live.cleanup(), source.cleanup()])
+    }
+  })
+
+  it(`keeps superseded window outcomes from overwriting newer evidence`, async () => {
+    const source = createCollection<{ id: number }>({
+      id: `load-subset-outcome-window-supersession-source`,
+      getKey: (row) => row.id,
+      autoIndex: `eager`,
+      defaultIndexType: BasicIndex,
+      sync: { sync: ({ markReady }) => markReady() },
+    })
+    const live = createLiveQueryCollection({
+      id: `load-subset-outcome-window-supersession-live`,
+      query: (q) =>
+        q
+          .from({ row: source })
+          .orderBy(({ row }) => row.id, `asc`)
+          .limit(1),
+      startSync: true,
+    })
+    const internal = live.utils[LIVE_QUERY_INTERNAL]
+    const builder = internal.getBuilder()
+    const first = createDeferred<AppliedLoadSubsetOutcome>()
+    const second = createDeferred<AppliedLoadSubsetOutcome>()
+
+    try {
+      await live.preload()
+      Reflect.set(builder, `windowFn`, (options: { limit: number }) => {
+        builder.trackSubsetLoadOperationPromise(
+          options.limit === 2 ? first.promise : second.promise,
+          `root`,
+        )
+      })
+
+      const firstReady = live.utils.setWindow({ offset: 0, limit: 2 })
+      const secondReady = live.utils.setWindow({ offset: 0, limit: 3 })
+      second.resolve({
+        collectionId: `root-collection`,
+        demand: { limit: 3 },
+        generation: 2,
+        extent: `exhausted`,
+      })
+      await secondReady
+      expect(internal.getLastWindowOutcomes()).toEqual([
+        expect.objectContaining({ demand: { limit: 3 } }),
+      ])
+
+      first.resolve({
+        collectionId: `root-collection`,
+        demand: { limit: 2 },
+        generation: 1,
+        extent: `continues`,
+      })
+      await firstReady
+      expect(internal.getLastWindowOutcomes()).toEqual([
+        expect.objectContaining({ demand: { limit: 3 } }),
+      ])
+    } finally {
+      first.resolve({
+        collectionId: `root-collection`,
+        demand: { limit: 2 },
+        generation: 1,
+        extent: `continues`,
+      })
+      second.resolve({
+        collectionId: `root-collection`,
+        demand: { limit: 3 },
+        generation: 2,
+        extent: `exhausted`,
+      })
+      await Promise.all([live.cleanup(), source.cleanup()])
+    }
+  })
+
+  it(`publishes restored window evidence after a superseding window fails`, async () => {
+    const source = createCollection<{ id: number }>({
+      id: `load-subset-outcome-window-failed-supersession-source`,
+      getKey: (row) => row.id,
+      autoIndex: `eager`,
+      defaultIndexType: BasicIndex,
+      sync: { sync: ({ markReady }) => markReady() },
+    })
+    const live = createLiveQueryCollection({
+      id: `load-subset-outcome-window-failed-supersession-live`,
+      query: (q) =>
+        q
+          .from({ row: source })
+          .orderBy(({ row }) => row.id, `asc`)
+          .limit(1),
+      startSync: true,
+    })
+    const internal = live.utils[LIVE_QUERY_INTERNAL]
+    const builder = internal.getBuilder()
+    const first = createDeferred<AppliedLoadSubsetOutcome>()
+    const failure = new Error(`superseding window failed`)
+
+    try {
+      await live.preload()
+      Reflect.set(builder, `windowFn`, (options: { limit: number }) => {
+        if (options.limit === 3) throw failure
+        builder.trackSubsetLoadOperationPromise(first.promise, `root`)
+      })
+
+      const firstReady = live.utils.setWindow({ offset: 0, limit: 2 })
+      expect(() => live.utils.setWindow({ offset: 0, limit: 3 })).toThrow(
+        failure,
+      )
+      expect(live.utils.getWindow()).toEqual({ offset: 0, limit: 2 })
+
+      first.resolve({
+        collectionId: `root-collection`,
+        demand: { limit: 2 },
+        generation: 1,
+        extent: `continues`,
+      })
+      await firstReady
+
+      expect(internal.getLastWindowOutcomes()).toEqual([
+        expect.objectContaining({ demand: { limit: 2 } }),
+      ])
+    } finally {
+      first.resolve({
+        collectionId: `root-collection`,
+        demand: { limit: 2 },
+        generation: 1,
+        extent: `continues`,
+      })
+      await Promise.all([live.cleanup(), source.cleanup()])
+    }
+  })
+
+  it(`does not roll back a failed window over reentrant newer work`, async () => {
+    const source = createCollection<{ id: number }>({
+      id: `load-subset-outcome-window-reentrant-supersession-source`,
+      getKey: (row) => row.id,
+      autoIndex: `eager`,
+      defaultIndexType: BasicIndex,
+      sync: { sync: ({ markReady }) => markReady() },
+    })
+    const live = createLiveQueryCollection({
+      id: `load-subset-outcome-window-reentrant-supersession-live`,
+      query: (q) =>
+        q
+          .from({ row: source })
+          .orderBy(({ row }) => row.id, `asc`)
+          .limit(1),
+      startSync: true,
+    })
+    const internal = live.utils[LIVE_QUERY_INTERNAL]
+    const builder = internal.getBuilder()
+    const first = createDeferred<AppliedLoadSubsetOutcome>()
+    const newest = createDeferred<AppliedLoadSubsetOutcome>()
+    const appliedLimits: Array<number> = []
+    const failure = new Error(`reentrantly superseded window failed`)
+    let newestReady: true | Promise<void> = true
+
+    try {
+      await live.preload()
+      Reflect.set(builder, `windowFn`, (options: { limit: number }) => {
+        appliedLimits.push(options.limit)
+        if (options.limit === 3) {
+          newestReady = live.utils.setWindow({ offset: 0, limit: 4 })
+          throw failure
+        }
+        builder.trackSubsetLoadOperationPromise(
+          options.limit === 2 ? first.promise : newest.promise,
+          `root`,
+        )
+      })
+
+      const firstReady = live.utils.setWindow({ offset: 0, limit: 2 })
+      expect(() => live.utils.setWindow({ offset: 0, limit: 3 })).toThrow(
+        failure,
+      )
+      expect(appliedLimits).toEqual([2, 3, 4])
+      expect(live.utils.getWindow()).toEqual({ offset: 0, limit: 4 })
+
+      newest.resolve({
+        collectionId: `root-collection`,
+        demand: { limit: 4 },
+        generation: 2,
+        extent: `exhausted`,
+      })
+      await newestReady
+      expect(internal.getLastWindowOutcomes()).toEqual([
+        expect.objectContaining({ demand: { limit: 4 } }),
+      ])
+
+      first.resolve({
+        collectionId: `root-collection`,
+        demand: { limit: 2 },
+        generation: 1,
+        extent: `continues`,
+      })
+      await firstReady
+      expect(internal.getLastWindowOutcomes()).toEqual([
+        expect.objectContaining({ demand: { limit: 4 } }),
+      ])
+    } finally {
+      first.resolve({
+        collectionId: `root-collection`,
+        demand: { limit: 2 },
+        generation: 1,
+        extent: `continues`,
+      })
+      newest.resolve({
+        collectionId: `root-collection`,
+        demand: { limit: 4 },
+        generation: 2,
+        extent: `exhausted`,
+      })
       await Promise.all([live.cleanup(), source.cleanup()])
     }
   })

@@ -204,6 +204,10 @@ export class CollectionSubscriber<
 
       this.demand.clear()
       subscription.unsubscribe()
+      this.collectionConfigBuilder.releaseSubscriptionReference(
+        this.sourceId,
+        subscription,
+      )
     }
     // currentSyncState is always defined when subscribe() is called
     // (called during sync session setup)

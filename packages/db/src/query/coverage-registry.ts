@@ -50,6 +50,7 @@ type CoverageClaim<TCoverage> = {
     demandKey: string | undefined
   }
   coverage: TCoverage | undefined
+  retainedOutcome: AppliedLoadSubsetOutcome | undefined
 }
 
 export type CoverageRegistryOptions<TDemand, TCoverage> = {
@@ -192,6 +193,8 @@ export class CoverageRegistry<
         demand: LoadSubsetOptions
       }
       coverage?: TCoverage
+      /** Caller-relative evidence retained from an already applied acquisition. */
+      retainedOutcome?: AppliedLoadSubsetOutcome
     },
   ): void {
     const leaseRecord = this.leases.get(lease)
@@ -205,8 +208,6 @@ export class CoverageRegistry<
     }
     if (acquisitionRecord.leases.has(lease as DemandLease<unknown>)) return
 
-    leaseRecord.acquisitions.add(acquisition)
-    acquisitionRecord.leases.add(lease as DemandLease<unknown>)
     const fallback = acquisitionRecord.claims.values().next().value
     const claim = options
       ? this.createClaim(options.generation, options.scope)
@@ -216,9 +217,19 @@ export class CoverageRegistry<
             scopeKey: fallback.scopeKey,
             scope: fallback.scope,
             coverage: undefined,
+            retainedOutcome: undefined,
           }
         : undefined
     if (!claim) throw new Error(`Cannot attach to an unscoped acquisition`)
+    if (
+      options?.retainedOutcome !== undefined &&
+      !matchesOutcome(claim, options.retainedOutcome)
+    ) {
+      throw new Error(`Retained outcome does not match the attached claim`)
+    }
+
+    leaseRecord.acquisitions.add(acquisition)
+    acquisitionRecord.leases.add(lease as DemandLease<unknown>)
     acquisitionRecord.claims.set(lease as DemandLease<unknown>, {
       ...claim,
       sequence: this.claimSequence++,
@@ -226,6 +237,10 @@ export class CoverageRegistry<
         options?.coverage === undefined
           ? undefined
           : this.snapshotCoverage(options.coverage),
+      retainedOutcome:
+        options?.retainedOutcome === undefined
+          ? undefined
+          : snapshotAppliedOutcome(options.retainedOutcome),
     })
     if (options?.coverage !== undefined) {
       this.restoreCurrentAcquisition(claim.scopeKey)
@@ -279,7 +294,7 @@ export class CoverageRegistry<
     const claim =
       lease === undefined
         ? undefined
-        : (record?.claims.get(lease as DemandLease<unknown>))
+        : record?.claims.get(lease as DemandLease<unknown>)
     if (
       !record ||
       !claim ||
@@ -302,6 +317,9 @@ export class CoverageRegistry<
       record,
       nextRows,
     )
+    for (const peer of record.claims.values()) {
+      peer.retainedOutcome = undefined
+    }
     claim.coverage = nextCoverage
     if (nextCoverage !== undefined) {
       // One physical result proves the same exact scope for every logical
@@ -347,12 +365,14 @@ export class CoverageRegistry<
     const record = this.acquisitions.get(acquisition)
     const lease = maybeRows
       ? (leaseOrRows as DemandLease<TDemand>)
-      : (record?.claims.keys().next().value as DemandLease<TDemand> | undefined)
+      : (Array.from(record?.claims.keys() ?? []).find((candidate) =>
+          record?.leases.has(candidate),
+        ) as DemandLease<TDemand> | undefined)
     const rows = maybeRows ?? (leaseOrRows as Iterable<TRowKey>)
     const claim =
       lease === undefined
         ? undefined
-        : (record?.claims.get(lease as DemandLease<unknown>))
+        : record?.claims.get(lease as DemandLease<unknown>)
     if (
       !record ||
       !claim ||
@@ -366,6 +386,7 @@ export class CoverageRegistry<
     const affectedScopes = new Set<string>()
     for (const [claimLease, existingClaim] of record.claims) {
       existingClaim.coverage = undefined
+      existingClaim.retainedOutcome = undefined
       const current = this.currentAcquisitions.get(existingClaim.scopeKey)
       if (
         current?.acquisition === acquisition &&
@@ -474,6 +495,21 @@ export class CoverageRegistry<
     )
   }
 
+  /**
+   * Active caller-relative outcomes retained by synchronous satisfied leases.
+   * Unknown outcomes are evidence only: they never enter the coverage
+   * antichain or make covers() return true.
+   */
+  retainedOutcomeEvidence(): Array<AppliedLoadSubsetOutcome> {
+    return Array.from(this.acquisitions.values()).flatMap((record) =>
+      Array.from(record.claims.entries()).flatMap(([lease, claim]) =>
+        record.leases.has(lease) && claim.retainedOutcome !== undefined
+          ? [snapshotAppliedOutcome(claim.retainedOutcome)]
+          : [],
+      ),
+    )
+  }
+
   rowOwnerCount(row: TRowKey): number {
     return this.rowOwners.get(row)?.size ?? 0
   }
@@ -498,14 +534,13 @@ export class CoverageRegistry<
       const record = this.acquisitions.get(acquisition)
       if (!record) continue
       const claim = record.claims.get(lease as DemandLease<unknown>)
+      record.leases.delete(lease as DemandLease<unknown>)
       if (claim) {
         const current = this.currentAcquisitions.get(claim.scopeKey)
-        record.claims.delete(lease as DemandLease<unknown>)
         if (current?.acquisition === acquisition && current.lease === lease) {
           this.restoreCurrentAcquisition(claim.scopeKey)
         }
       }
-      record.leases.delete(lease as DemandLease<unknown>)
       leaseRecord.acquisitions.delete(acquisition)
       if (record.leases.size === 0) {
         this.retireAcquisitionState(acquisition, rowsToRemove)
@@ -597,7 +632,9 @@ export class CoverageRegistry<
         record.releaseSettled
           ? []
           : Array.from(record.claims.entries()).flatMap(([lease, claim]) =>
-              claim.scopeKey === scopeKey && claim.coverage !== undefined
+              record.leases.has(lease) &&
+              claim.scopeKey === scopeKey &&
+              claim.coverage !== undefined
                 ? [{ acquisition, lease, claim }]
                 : [],
             ),
@@ -638,6 +675,7 @@ export class CoverageRegistry<
         demandKey,
       },
       coverage: undefined,
+      retainedOutcome: undefined,
     }
   }
 
@@ -646,9 +684,11 @@ export class CoverageRegistry<
     outcome: AppliedLoadSubsetOutcome,
   ): DemandLease<TDemand> | undefined {
     if (!record) return undefined
-    return Array.from(record.claims.entries()).find(([, claim]) =>
+    const matching = Array.from(record.claims.entries()).filter(([, claim]) =>
       matchesOutcome(claim, outcome),
-    )?.[0] as DemandLease<TDemand> | undefined
+    )
+    return (matching.find(([lease]) => record.leases.has(lease)) ??
+      matching[0])?.[0] as DemandLease<TDemand> | undefined
   }
 
   private currentCoverageClaims(): Array<{
@@ -660,6 +700,7 @@ export class CoverageRegistry<
     return Array.from(this.acquisitions.entries()).flatMap(
       ([acquisition, record]) =>
         Array.from(record.claims.entries()).flatMap(([lease, claim]) =>
+          record.leases.has(lease) &&
           claim.coverage !== undefined &&
           this.isCurrent(acquisition, lease, claim)
             ? [{ acquisition, record, lease, claim }]
@@ -722,6 +763,21 @@ function snapshotAppliedCoverage<TRowKey extends string | number>(
   })
 }
 
+function snapshotAppliedOutcome(
+  outcome: AppliedLoadSubsetOutcome,
+): AppliedLoadSubsetOutcome {
+  return Object.freeze({
+    collectionId: outcome.collectionId,
+    ...(outcome.sourceId === undefined ? {} : { sourceId: outcome.sourceId }),
+    demand: snapshotLoadSubsetDemand(outcome.demand),
+    generation: outcome.generation,
+    extent: outcome.extent,
+    ...(outcome.appliedRowKeys === undefined
+      ? {}
+      : { appliedRowKeys: Object.freeze([...outcome.appliedRowKeys]) }),
+  })
+}
+
 function createScopeKey(
   collectionId: string,
   sourceId: string | undefined,
@@ -731,7 +787,7 @@ function createScopeKey(
 }
 
 function matchesOutcome<TCoverage>(
-  claim: CoverageClaim<TCoverage>,
+  claim: Pick<CoverageClaim<TCoverage>, `generation` | `scope`>,
   outcome: AppliedLoadSubsetOutcome,
 ): boolean {
   return (

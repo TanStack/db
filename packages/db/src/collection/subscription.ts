@@ -101,6 +101,8 @@ type SubsetDemand = SubsetAcquisition & {
     revision: number
   }
   pendingReplayAcquisitions: Set<ReplaySubsetAcquisition>
+  releaseFailed: boolean
+  releaseSettled: boolean
 }
 
 type TruncateReplayAttempt = {
@@ -729,6 +731,8 @@ export class CollectionSubscription
     demand.options = next.options
     demand.abortController = next.abortController
     demand.removeRequestAbortListener = next.removeRequestAbortListener
+    demand.releaseFailed = false
+    demand.releaseSettled = false
   }
 
   private tryReplaceSubsetAcquisition(
@@ -787,12 +791,17 @@ export class CollectionSubscription
         firstReleaseError ??= error
       }
     }
-    try {
-      this.collection._sync.unloadSubset(demand.options)
-    } catch (error) {
-      firstReleaseError ??= error
-    } finally {
-      demand.removeRequestAbortListener?.()
+    if (!demand.releaseSettled) {
+      try {
+        this.collection._sync.unloadSubset(demand.options)
+        demand.releaseFailed = false
+        demand.releaseSettled = true
+      } catch (error) {
+        demand.releaseFailed = true
+        firstReleaseError ??= error
+      } finally {
+        demand.removeRequestAbortListener?.()
+      }
     }
     if (firstReleaseError !== undefined) throw firstReleaseError
   }
@@ -810,19 +819,27 @@ export class CollectionSubscription
       options: requestOptions,
       ...(ordered === undefined ? {} : { ordered }),
       pendingReplayAcquisitions: new Set(),
+      releaseFailed: false,
+      releaseSettled: false,
     }
     if (ordered !== undefined) this.orderedSubsetDemands.add(demand)
     const acquisition = this.createSubsetAcquisition(demand)
+    demand.options = acquisition.options
+    demand.abortController = acquisition.abortController
+    demand.removeRequestAbortListener = acquisition.removeRequestAbortListener
+    // Reentrant release must see the exact acquisition before adapter work
+    // starts. A genuine load throw removes this tentative logical owner below.
+    this.subsetDemands.push(demand)
     try {
       const result = this.loadSubset(acquisition.options)
-      demand.options = acquisition.options
-      demand.abortController = acquisition.abortController
-      demand.removeRequestAbortListener = acquisition.removeRequestAbortListener
-      this.subsetDemands.push(demand)
       return { demand, result }
     } catch (error) {
-      acquisition.abortController.abort()
-      acquisition.removeRequestAbortListener?.()
+      const demandIndex = this.subsetDemands.indexOf(demand)
+      if (demandIndex !== -1 && !demand.releaseFailed) {
+        this.subsetDemands.splice(demandIndex, 1)
+        acquisition.abortController.abort()
+        acquisition.removeRequestAbortListener?.()
+      }
       throw error
     }
   }
