@@ -307,6 +307,7 @@ export class CollectionConfigBuilder<
     }
 
     const syncSession = this.syncSession
+    const previousWindowOperationGeneration = this.windowOperationGeneration
     const windowOperationGeneration = ++this.windowOperationGeneration
     const loadOperation =
       this.liveQueryCollection?._sync.beginLoadSubsetOperation()
@@ -320,10 +321,16 @@ export class CollectionConfigBuilder<
       if (operation.failed) throw operation.error
       this.currentWindow = options
     } catch (error) {
-      if (previousWindow) {
+      if (
+        previousWindow &&
+        windowOperationGeneration === this.windowOperationGeneration
+      ) {
         try {
           this.windowFn(previousWindow)
           this.maybeRunGraphFn?.()
+          if (windowOperationGeneration === this.windowOperationGeneration) {
+            this.windowOperationGeneration = previousWindowOperationGeneration
+          }
         } catch {
           // Recovery is best-effort; preserve the error from the requested
           // window rather than replacing it with a rollback failure.

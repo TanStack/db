@@ -755,6 +755,147 @@ describe(`loadSubset outcomes`, () => {
     }
   })
 
+  it(`publishes restored window evidence after a superseding window fails`, async () => {
+    const source = createCollection<{ id: number }>({
+      id: `load-subset-outcome-window-failed-supersession-source`,
+      getKey: (row) => row.id,
+      autoIndex: `eager`,
+      defaultIndexType: BasicIndex,
+      sync: { sync: ({ markReady }) => markReady() },
+    })
+    const live = createLiveQueryCollection({
+      id: `load-subset-outcome-window-failed-supersession-live`,
+      query: (q) =>
+        q
+          .from({ row: source })
+          .orderBy(({ row }) => row.id, `asc`)
+          .limit(1),
+      startSync: true,
+    })
+    const internal = live.utils[LIVE_QUERY_INTERNAL]
+    const builder = internal.getBuilder()
+    const first = createDeferred<AppliedLoadSubsetOutcome>()
+    const failure = new Error(`superseding window failed`)
+
+    try {
+      await live.preload()
+      Reflect.set(builder, `windowFn`, (options: { limit: number }) => {
+        if (options.limit === 3) throw failure
+        builder.trackSubsetLoadOperationPromise(first.promise, `root`)
+      })
+
+      const firstReady = live.utils.setWindow({ offset: 0, limit: 2 })
+      expect(() => live.utils.setWindow({ offset: 0, limit: 3 })).toThrow(
+        failure,
+      )
+      expect(live.utils.getWindow()).toEqual({ offset: 0, limit: 2 })
+
+      first.resolve({
+        collectionId: `root-collection`,
+        demand: { limit: 2 },
+        generation: 1,
+        extent: `continues`,
+      })
+      await firstReady
+
+      expect(internal.getLastWindowOutcomes()).toEqual([
+        expect.objectContaining({ demand: { limit: 2 } }),
+      ])
+    } finally {
+      first.resolve({
+        collectionId: `root-collection`,
+        demand: { limit: 2 },
+        generation: 1,
+        extent: `continues`,
+      })
+      await Promise.all([live.cleanup(), source.cleanup()])
+    }
+  })
+
+  it(`does not roll back a failed window over reentrant newer work`, async () => {
+    const source = createCollection<{ id: number }>({
+      id: `load-subset-outcome-window-reentrant-supersession-source`,
+      getKey: (row) => row.id,
+      autoIndex: `eager`,
+      defaultIndexType: BasicIndex,
+      sync: { sync: ({ markReady }) => markReady() },
+    })
+    const live = createLiveQueryCollection({
+      id: `load-subset-outcome-window-reentrant-supersession-live`,
+      query: (q) =>
+        q
+          .from({ row: source })
+          .orderBy(({ row }) => row.id, `asc`)
+          .limit(1),
+      startSync: true,
+    })
+    const internal = live.utils[LIVE_QUERY_INTERNAL]
+    const builder = internal.getBuilder()
+    const first = createDeferred<AppliedLoadSubsetOutcome>()
+    const newest = createDeferred<AppliedLoadSubsetOutcome>()
+    const appliedLimits: Array<number> = []
+    const failure = new Error(`reentrantly superseded window failed`)
+    let newestReady: true | Promise<void> = true
+
+    try {
+      await live.preload()
+      Reflect.set(builder, `windowFn`, (options: { limit: number }) => {
+        appliedLimits.push(options.limit)
+        if (options.limit === 3) {
+          newestReady = live.utils.setWindow({ offset: 0, limit: 4 })
+          throw failure
+        }
+        builder.trackSubsetLoadOperationPromise(
+          options.limit === 2 ? first.promise : newest.promise,
+          `root`,
+        )
+      })
+
+      const firstReady = live.utils.setWindow({ offset: 0, limit: 2 })
+      expect(() => live.utils.setWindow({ offset: 0, limit: 3 })).toThrow(
+        failure,
+      )
+      expect(appliedLimits).toEqual([2, 3, 4])
+      expect(live.utils.getWindow()).toEqual({ offset: 0, limit: 4 })
+
+      newest.resolve({
+        collectionId: `root-collection`,
+        demand: { limit: 4 },
+        generation: 2,
+        extent: `exhausted`,
+      })
+      await newestReady
+      expect(internal.getLastWindowOutcomes()).toEqual([
+        expect.objectContaining({ demand: { limit: 4 } }),
+      ])
+
+      first.resolve({
+        collectionId: `root-collection`,
+        demand: { limit: 2 },
+        generation: 1,
+        extent: `continues`,
+      })
+      await firstReady
+      expect(internal.getLastWindowOutcomes()).toEqual([
+        expect.objectContaining({ demand: { limit: 4 } }),
+      ])
+    } finally {
+      first.resolve({
+        collectionId: `root-collection`,
+        demand: { limit: 2 },
+        generation: 1,
+        extent: `continues`,
+      })
+      newest.resolve({
+        collectionId: `root-collection`,
+        demand: { limit: 4 },
+        generation: 2,
+        extent: `exhausted`,
+      })
+      await Promise.all([live.cleanup(), source.cleanup()])
+    }
+  })
+
   it(`retains same-generation outcomes from every source in one operation`, async () => {
     const collection = createCollection<{ id: string }>({
       id: `load-subset-outcome-operation-sources`,

@@ -48,6 +48,11 @@ type DeferredLoadSubset = {
   deferred: Deferred<AppliedLoadSubsetOutcome>
 }
 
+type DeferredAdapterAcquisition = {
+  options: LoadSubsetOptions
+  releaseFailed: boolean
+}
+
 type LoadSubsetOperation = {
   pending: Set<Promise<unknown>>
   outcomes: Map<
@@ -89,7 +94,7 @@ export class CollectionSyncManager<
   private deferredLoadSubsets: Array<DeferredLoadSubset> = []
   private deferredAdapterOptions = new Map<
     LoadSubsetOptions,
-    Array<LoadSubsetOptions>
+    Array<DeferredAdapterAcquisition>
   >()
   private syncEpoch = 0
   private loadSubsetSession = 0
@@ -411,9 +416,10 @@ export class CollectionSyncManager<
       deferred,
     } of deferredLoadSubsets) {
       const loadSubset = this.syncLoadSubsetFn
-      if (loadSubset) {
-        this.retainDeferredAdapterOptions(ownerOptions, options)
-      }
+      const adapterAcquisition =
+        loadSubset && this.syncUnloadSubsetFn
+          ? this.retainDeferredAdapterOptions(ownerOptions, options)
+          : undefined
       try {
         const result = loadSubset?.(options) ?? true
         if (result instanceof Promise) {
@@ -442,8 +448,11 @@ export class CollectionSyncManager<
           )
         }
       } catch (error) {
-        if (loadSubset) {
-          this.forgetDeferredAdapterOptions(ownerOptions, options)
+        // A reentrant release marks the tentative acquisition before its
+        // error escapes through loadSubset. Preserve only that known lease;
+        // a plain loadSubset throw established no acquisition to release.
+        if (adapterAcquisition && !adapterAcquisition.releaseFailed) {
+          this.forgetDeferredAdapterOptions(ownerOptions, adapterAcquisition)
         }
         deferred.reject(error)
       }
@@ -922,11 +931,16 @@ export class CollectionSyncManager<
     }
 
     if (this.syncUnloadSubsetFn) {
-      const adapterOptions = this.deferredAdapterOptions.get(options)
-      const acquiredOptions = adapterOptions?.[0] ?? options
-      this.syncUnloadSubsetFn(acquiredOptions)
-      if (adapterOptions) {
-        this.forgetDeferredAdapterOptions(options, acquiredOptions)
+      const adapterAcquisitions = this.deferredAdapterOptions.get(options)
+      const acquisition = adapterAcquisitions?.[0]
+      try {
+        this.syncUnloadSubsetFn(acquisition?.options ?? options)
+      } catch (error) {
+        if (acquisition) acquisition.releaseFailed = true
+        throw error
+      }
+      if (acquisition) {
+        this.forgetDeferredAdapterOptions(options, acquisition)
       }
     }
   }
@@ -934,25 +948,27 @@ export class CollectionSyncManager<
   private retainDeferredAdapterOptions(
     ownerOptions: LoadSubsetOptions,
     acquiredOptions: LoadSubsetOptions,
-  ): void {
-    const adapterOptions = this.deferredAdapterOptions.get(ownerOptions)
-    if (adapterOptions) {
-      adapterOptions.push(acquiredOptions)
+  ): DeferredAdapterAcquisition {
+    const acquisition = { options: acquiredOptions, releaseFailed: false }
+    const adapterAcquisitions = this.deferredAdapterOptions.get(ownerOptions)
+    if (adapterAcquisitions) {
+      adapterAcquisitions.push(acquisition)
     } else {
-      this.deferredAdapterOptions.set(ownerOptions, [acquiredOptions])
+      this.deferredAdapterOptions.set(ownerOptions, [acquisition])
     }
+    return acquisition
   }
 
   private forgetDeferredAdapterOptions(
     ownerOptions: LoadSubsetOptions,
-    acquiredOptions: LoadSubsetOptions,
+    acquisition: DeferredAdapterAcquisition,
   ): void {
-    const adapterOptions = this.deferredAdapterOptions.get(ownerOptions)
-    if (!adapterOptions) return
+    const adapterAcquisitions = this.deferredAdapterOptions.get(ownerOptions)
+    if (!adapterAcquisitions) return
 
-    const index = adapterOptions.indexOf(acquiredOptions)
-    if (index !== -1) adapterOptions.splice(index, 1)
-    if (adapterOptions.length === 0) {
+    const index = adapterAcquisitions.indexOf(acquisition)
+    if (index !== -1) adapterAcquisitions.splice(index, 1)
+    if (adapterAcquisitions.length === 0) {
       this.deferredAdapterOptions.delete(ownerOptions)
     }
   }
