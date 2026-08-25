@@ -316,6 +316,22 @@ describe(`semantic expression identity`, () => {
     expect(firstRuntime({ a: 1 })).not.toEqual(secondRuntime({ b: 2 }))
   })
 
+  it(`defers runtime entropy until an identity is requested`, () => {
+    const getRandomValues = vi.fn((values: Uint32Array) => values)
+    vi.stubGlobal(`crypto`, { getRandomValues })
+    try {
+      const runtime = createRuntimeReferenceIdentityFactory()
+
+      expect(getRandomValues).not.toHaveBeenCalled()
+
+      runtime({ a: 1 })
+
+      expect(getRandomValues).toHaveBeenCalledOnce()
+    } finally {
+      vi.unstubAllGlobals()
+    }
+  })
+
   it(`falls back when the runtime crypto object lacks getRandomValues`, () => {
     vi.stubGlobal(`crypto`, {})
     try {

@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest'
 import {
   BasicIndex,
   DbClient,
+  DeduplicatedLoadSubset,
   IR,
   collectionOptions,
   createCollection,
@@ -1833,6 +1834,64 @@ describe(`persistedCollectionOptions`, () => {
     expect(outcome).not.toBe(true)
     if (outcome !== true) {
       expect(outcome.extent).toBe(`exhausted`)
+    }
+  })
+
+  it(`preserves exact physical-request provenance through persistence`, async () => {
+    const adapter = createRecordingAdapter()
+    let resolveLoad!: (result: { hasMore: boolean }) => void
+    const load = new Promise<{ hasMore: boolean }>((resolve) => {
+      resolveLoad = resolve
+    })
+    const deduplicated = new DeduplicatedLoadSubset({
+      loadSubset: () => load,
+    })
+    let upstreamCalls = 0
+    let resolveSecondUpstream!: () => void
+    const secondUpstream = new Promise<void>((resolve) => {
+      resolveSecondUpstream = resolve
+    })
+    const collection = createCollection(
+      persistedCollectionOptions<Todo, string>({
+        id: `sync-present-exact-source-extent`,
+        syncMode: `on-demand`,
+        getKey: (item) => item.id,
+        sync: {
+          sync: ({ markReady }) => {
+            markReady()
+            return {
+              loadSubset: (options) => {
+                upstreamCalls++
+                const result = deduplicated.loadSubset(options)
+                if (upstreamCalls === 2) resolveSecondUpstream()
+                return result
+              },
+            }
+          },
+        },
+        persistence: {
+          adapter,
+          coordinator: createCoordinatorHarness(),
+        },
+      }),
+    )
+
+    try {
+      collection.startSyncImmediate()
+      await flushAsyncWork()
+
+      const sync = (collection as unknown as LoadSubsetTestCollection)._sync
+      const covering = sync.loadSubset({ limit: 10 })
+      const narrower = sync.loadSubset({ limit: 5 })
+
+      await secondUpstream
+      resolveLoad({ hasMore: false })
+
+      await expect(covering).resolves.toMatchObject({ extent: `exhausted` })
+      await expect(narrower).resolves.toMatchObject({ extent: `unknown` })
+    } finally {
+      resolveLoad({ hasMore: false })
+      await collection.cleanup()
     }
   })
 

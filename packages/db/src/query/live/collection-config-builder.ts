@@ -183,6 +183,7 @@ export class CollectionConfigBuilder<
     string,
     AppliedLoadSubsetOutcome
   >()
+  private syncSession = 0
   private lastWindowOutcomes: ReadonlyArray<AppliedLoadSubsetOutcome> = []
   // Map of lexical source IDs to optimizable ORDER BY state
   optimizableOrderByCollections: Record<string, OrderByOptimizationInfo> = {}
@@ -441,8 +442,15 @@ export class CollectionConfigBuilder<
   }
 
   trackSubsetLoadPromise(promise: Promise<unknown>, sourceId?: string): void {
+    const syncSession = this.syncSession
     const tracked = promise.then((result) => {
       const scoped = scopeLoadSubsetOutcomes(result, sourceId)
+      if (
+        syncSession !== this.syncSession ||
+        this.currentSyncConfig === undefined
+      ) {
+        return scoped
+      }
       const outcomes = Array.isArray(scoped) ? scoped : [scoped]
       for (const outcome of outcomes) {
         if (isAppliedLoadSubsetOutcome(outcome)) {
@@ -743,6 +751,7 @@ export class CollectionConfigBuilder<
   }
 
   private syncFn(config: SyncMethods<TResult>) {
+    const syncSession = ++this.syncSession
     // Store reference to the live query collection for error state transitions
     this.liveQueryCollection = config.collection
     // Reset error state from any previous sync session so a restarted sync can become ready again.
@@ -765,6 +774,7 @@ export class CollectionConfigBuilder<
     const teardown = () => {
       if (tornDown) return
       tornDown = true
+      if (this.syncSession === syncSession) this.syncSession++
 
       let firstCleanupError: unknown
       for (const unsubscribe of syncState.unsubscribeCallbacks) {

@@ -8,6 +8,10 @@ const loadSubsetPromiseDemandMatchers = new WeakMap<
   Promise<unknown>,
   (options: LoadSubsetOptions) => boolean
 >()
+const loadSubsetResultDemandMatchers = new WeakMap<
+  object,
+  (options: LoadSubsetOptions) => boolean
+>()
 
 export function recordLoadSubsetPromiseDemandMatcher(
   promise: Promise<unknown>,
@@ -16,11 +20,32 @@ export function recordLoadSubsetPromiseDemandMatcher(
   loadSubsetPromiseDemandMatchers.set(promise, matches)
 }
 
-export function isLoadSubsetPromiseForDemand(
+export function recordLoadSubsetResultDemandMatcher(
+  result: void | LoadSubsetResult,
+  matches: (options: LoadSubsetOptions) => boolean,
+): void | LoadSubsetResult {
+  if (typeof result !== `object`) return result
+
+  // Give each physical acquisition its own result identity. A source may reuse
+  // one result object across calls with different demands.
+  const retainedResult = { ...result }
+  loadSubsetResultDemandMatchers.set(retainedResult, matches)
+  return retainedResult
+}
+
+export function isLoadSubsetResultForDemand(
   promise: Promise<unknown>,
+  result: unknown,
   options: LoadSubsetOptions,
 ): boolean {
-  return loadSubsetPromiseDemandMatchers.get(promise)?.(options) ?? true
+  const promiseMatcher = loadSubsetPromiseDemandMatchers.get(promise)
+  if (promiseMatcher) return promiseMatcher(options)
+
+  if (typeof result === `object` && result !== null) {
+    return loadSubsetResultDemandMatchers.get(result)?.(options) ?? true
+  }
+
+  return true
 }
 
 export function createAppliedLoadSubsetOutcome(

@@ -2,6 +2,7 @@ import { deepEquals } from '../utils'
 import { SortedMap } from '../SortedMap'
 import { enrichRowWithVirtualProps } from '../virtual-props.js'
 import { SyncTransactionAbortedError } from '../errors.js'
+import { createDeferred } from '../deferred'
 import { DIRECT_TRANSACTION_METADATA_KEY } from './transaction-metadata.js'
 import type {
   VirtualOrigin,
@@ -1377,6 +1378,40 @@ export class CollectionStateManager<
         transaction.applied.resolve()
       }
     }
+  }
+
+  /** Apply source-row garbage collection through the normal sync boundary. */
+  public deleteSyncedRows(keys: ReadonlyArray<TKey>): true | Promise<void> {
+    const existingKeys = keys.filter((key) => this.syncedData.has(key))
+    if (existingKeys.length === 0) return true
+
+    const applied = createDeferred<void>()
+    // Some internal callers only need synchronous completion. Preserve the
+    // receipt for queued cases without allowing an ignored rejection to leak.
+    void applied.promise.catch(() => undefined)
+    const deletedKeys = new Set<TKey>(existingKeys)
+    this.pendingSyncedTransactions.push({
+      committed: true,
+      applicationStarted: false,
+      layoutChanged: false,
+      operations: existingKeys.map(
+        (key): OptimisticChangeMessage<TOutput, TKey> => ({
+          type: `delete`,
+          key,
+        }),
+      ),
+      deletedKeys,
+      rowMetadataWrites: new Map(
+        existingKeys.map((key) => [key, { type: `delete` as const }]),
+      ),
+      collectionMetadataWrites: new Map(),
+      // Coverage GC is part of releasing source ownership, so it cannot wait
+      // behind a user mutation that may itself observe the released rows.
+      immediate: true,
+      applied,
+    })
+    this.commitPendingTransactions()
+    return applied.isPending() ? applied.promise : true
   }
 
   /** Abandons one committed transaction before it becomes visible. */

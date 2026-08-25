@@ -7,11 +7,12 @@ export type RuntimeReferenceIdentity = [
 export function createRuntimeReferenceIdentityFactory(): (
   value: object,
 ) => RuntimeReferenceIdentity {
-  const namespace = createRuntimeReferenceNamespace()
+  let namespace: string | undefined
   const referenceIds = new WeakMap<object, number>()
   let sequence = 0
 
   return (value) => {
+    namespace ??= createRuntimeReferenceNamespace()
     let referenceId = referenceIds.get(value)
     if (referenceId === undefined) {
       referenceId = ++sequence
