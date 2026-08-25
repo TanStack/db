@@ -47,7 +47,7 @@ export class WindowState<
   }
 
   get localPrefixSize(): number {
-    return this.readPrefix()?.length ?? 0
+    return this.readPrefix().length
   }
 
   get coversActiveWindow(): boolean {
@@ -162,13 +162,7 @@ export class WindowState<
   }
 
   admitChanges(changes: ReadonlyArray<ChangeMessage<TRow, TKey>>): void {
-    if (this.hasFullCoverage) {
-      for (const change of changes) {
-        if (change.type === `delete`) this.admittedKeys.delete(change.key)
-        else this.admittedKeys.add(change.key)
-      }
-      return
-    }
+    if (this.hasFullCoverage) return
 
     // Initial applied rows remain candidates until their boundary equivalence
     // class is refined. Live source changes during that request still belong
@@ -243,7 +237,7 @@ export class WindowState<
       return fallback && this.totalOrder.boundary(fallback[1], fallback[0])
     }
 
-    const lastPrefixRow = this.readPrefix()?.at(-1)
+    const lastPrefixRow = this.readPrefix().at(-1)
     if (lastPrefixRow) {
       return this.totalOrder.boundary(lastPrefixRow.value, lastPrefixRow.key)
     }
@@ -268,7 +262,6 @@ export class WindowState<
     retainOutsideWindow?: (row: TRow) => boolean,
   ): Array<ChangeMessage<TRow, TKey>> {
     const snapshot = this.readPrefix()
-    if (!snapshot) return []
 
     const desired = new Map<TKey, TRow>()
     for (const change of snapshot) desired.set(change.key, change.value)
@@ -293,7 +286,7 @@ export class WindowState<
     return changes
   }
 
-  private readPrefix(): Array<ChangeMessage<TRow, TKey>> | undefined {
+  private readPrefix(): Array<ChangeMessage<TRow, TKey>> {
     if (this.admittedKeys.size === 0 && !this.hasFullCoverage) return []
     return this.readRows(
       this.hasFullCoverage ? undefined : this.admittedKeys,
@@ -308,10 +301,7 @@ export class WindowState<
     this.coveredSize = Number.POSITIVE_INFINITY
     this.candidateKeys.clear()
     this.provenanceKeys.clear()
-    for (const change of this.readRows(undefined)) {
-      this.admittedKeys.add(change.key)
-      this.provenanceKeys.add(change.key)
-    }
+    this.admittedKeys.clear()
   }
 
   private readRows(

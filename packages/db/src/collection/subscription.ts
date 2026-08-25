@@ -138,7 +138,6 @@ export class CollectionSubscription
    * We store the exact LoadSubsetOptions we passed to loadSubset to ensure symmetric unload.
    */
   private subsetDemands: Array<SubsetDemand> = []
-  private orderedSubsetDemands = new WeakSet<SubsetDemand>()
   private readonly requestedSubsetWhere = new WeakMap<
     LoadSubsetOptions,
     BasicExpression<boolean>
@@ -378,7 +377,7 @@ export class CollectionSubscription
           )
         }
 
-        if (this.orderedSubsetDemands.has(demand)) {
+        if (demand.ordered !== undefined) {
           // The replacement acquisition, not the retired generation, owns any
           // row provenance published by this replay result.
           this.observeOrderedCoverage(
@@ -608,7 +607,7 @@ export class CollectionSubscription
   private reconcileOrderedWindow(): Array<ChangeMessage<any, any>> {
     if (!this.orderedWindow) return []
     const additionalFilters = this.subsetDemands
-      .filter((demand) => !this.orderedSubsetDemands.has(demand))
+      .filter((demand) => demand.ordered === undefined)
       .map((demand) =>
         demand.requestOptions.where
           ? createFilterFunctionFromExpression(demand.requestOptions.where)
@@ -822,7 +821,6 @@ export class CollectionSubscription
       releaseFailed: false,
       releaseSettled: false,
     }
-    if (ordered !== undefined) this.orderedSubsetDemands.add(demand)
     const acquisition = this.createSubsetAcquisition(demand)
     demand.options = acquisition.options
     demand.abortController = acquisition.abortController

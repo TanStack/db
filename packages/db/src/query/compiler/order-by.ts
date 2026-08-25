@@ -34,8 +34,6 @@ export type OrderByOptimizationInfo = {
   ) => number
   /** Extracts all orderBy column values from a raw row (array for multi-column) */
   valueExtractorForRawRow: (row: Record<string, unknown>) => unknown
-  /** Extracts only the first column value - used for index-based cursor */
-  firstColumnValueExtractor: (row: Record<string, unknown>) => unknown
   /** Index on the first orderBy column - used for lazy loading */
   index?: IndexInterface<string | number>
   dataNeeded?: () => number
@@ -71,11 +69,6 @@ export function processOrderBy(
       compareOptions: buildCompareOptions(clause, collection),
     }
   })
-  const resolvedOrderBy = resolveOrderBy(
-    orderByClause,
-    collection.compareOptions,
-  )
-
   // Create a value extractor function for the orderBy operator
   const valueExtractor = (row: NamespacedRow & { $selected?: any }) => {
     // The namespaced row contains:
@@ -146,7 +139,6 @@ export function processOrderBy(
   ) {
     let index: IndexInterface<string | number> | undefined
     let followRefCollection: Collection | undefined
-    let firstColumnValueExtractor: CompiledSingleRowExpression | undefined
     let orderByAlias: string = rawQuery.from.alias
     let orderBySourceId: string | undefined
 
@@ -187,12 +179,6 @@ export function processOrderBy(
           )
         }
 
-        // First column value extractor - used for index cursor
-        firstColumnValueExtractor = compileExpression(
-          new PropRef(followRefResult.path),
-          true,
-        ) as CompiledSingleRowExpression
-
         index = findIndexForField(
           followRefCollection,
           followRefResult.path,
@@ -227,12 +213,7 @@ export function processOrderBy(
       }
     }
 
-    // Only create comparator and value extractors if the first column is a ref expression
-    // For aggregate or computed expressions, we can't extract values from raw collection rows
-    if (!firstColumnValueExtractor) {
-      // Skip optimization for non-ref expressions (aggregates, computed values, etc.)
-      // The query will still work, but without lazy loading optimization
-    } else if (orderBySourceId) {
+    if (orderBySourceId) {
       // A provider sees rows from one lexical source. Push only the leading
       // order terms owned by that source; a later term from an independent
       // join cannot be evaluated against this adapter's row shape. Stop at
@@ -241,18 +222,25 @@ export function processOrderBy(
       const sourceTerms: Array<{
         resolved: OrderByClause
         extractor: CompiledSingleRowExpression
+        compare: (left: unknown, right: unknown) => number
       }> = []
+      const resolvedOrderBy = resolveOrderBy(
+        orderByClause,
+        collection.compareOptions,
+      )
       for (let termIndex = 0; termIndex < orderByClause.length; termIndex++) {
         const clause = orderByClause[termIndex]!
         if (clause.expression.type !== `ref`) break
         const followed = followRef(rawQuery, clause.expression, collection)
         if (!followed || followed.sourceId !== orderBySourceId) break
+        const resolved = resolvedOrderBy[termIndex]!
         sourceTerms.push({
-          resolved: resolvedOrderBy[termIndex]!,
+          resolved,
           extractor: compileExpression(
             new PropRef(followed.path),
             true,
           ) as CompiledSingleRowExpression,
+          compare: makeComparator(resolved.compareOptions),
         })
       }
       const sourceOrderBy = sourceTerms.map(({ resolved }) => resolved)
@@ -262,9 +250,11 @@ export function processOrderBy(
         a: Record<string, unknown> | null | undefined,
         b: Record<string, unknown> | null | undefined,
       ) => {
-        for (const { resolved, extractor } of sourceTerms) {
-          const compareTerm = makeComparator(resolved.compareOptions)
-          const result = compareTerm(a ? extractor(a) : a, b ? extractor(b) : b)
+        for (const { extractor, compare: compareTerm } of sourceTerms) {
+          const result = compareTerm(
+            a ? extractor(a) : a,
+            b ? extractor(b) : b,
+          )
           if (result !== 0) return result
         }
         return 0
@@ -287,7 +277,6 @@ export function processOrderBy(
         limit,
         comparator: compareSourceRows,
         valueExtractorForRawRow: rawRowValueExtractor,
-        firstColumnValueExtractor: firstColumnValueExtractor,
         index,
         orderBy: sourceOrderBy,
       }
