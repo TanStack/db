@@ -395,11 +395,12 @@ a failed truncate replay, the last complete publication remains the boundary;
 a partial replacement snapshot has no continuation provenance. Exact applied
 row keys and source extent advance retained coverage. A requested limit, a
 settled promise, or the number of requests does not.
-A synchronous limited loader that returns only `true` supplies no row
-provenance, so core refines the whole filtered region before it marks the
-ordered source complete. During truncate replay that refinement belongs to the
-same atomic replacement: neither local reconciliation nor coverage settlement
-may publish until the refinement settles.
+A synchronous `true` or legacy `Promise<void>` supplies no reusable row
+provenance, source extent, or CoverageFact. Its exact request has still settled,
+so the owning subscription may admit only the current local prefix. A short
+page remains uncovered and triggers another pass. If the window later grows,
+core refreshes the required prefix from the start instead of continuing from
+those rows as a cursor boundary.
 
 A bare child query is a Collection-valued include. It exposes one stable public
 Collection facade per active bucket in that edge:

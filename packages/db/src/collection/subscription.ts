@@ -378,15 +378,6 @@ export class CollectionSubscription
           this.observeOrderedCoverage(
             syncResult,
             demand,
-            (fallbackResult) => {
-              this.trackTruncateReplayResult(
-                session,
-                attempt,
-                fallbackResult,
-                () => this.subsetDemands.includes(demand),
-              )
-            },
-            true,
             () => ownsReplacement,
           )
         }
@@ -1036,15 +1027,22 @@ export class CollectionSubscription
     )
 
     const where = this.options.whereExpression
+    const refreshPrefix =
+      this.stalePublishedRows.size === 0 &&
+      this.orderedWindow.requiresPrefixRefresh
     // A failed truncate replay leaves the last complete publication visible
     // while the source collection is empty. Continue from that retained prefix
     // until a later replay replaces it.
     const currentOffset =
       this.stalePublishedRows.size > 0
         ? this.limitedSnapshotRowCount
-        : this.orderedWindow.localPrefixSize
+        : refreshPrefix
+          ? 0
+          : this.orderedWindow.localPrefixSize
     const requestedPrefix =
-      offset !== undefined
+      refreshPrefix
+        ? Math.max(this.orderedWindow.size, limit)
+        : offset !== undefined
         ? offset + limit
         : minValues !== undefined
           ? currentOffset + limit
@@ -1155,6 +1153,14 @@ export class CollectionSubscription
           orderBy,
           subscription: this,
         }
+      : refreshPrefix
+        ? {
+            where,
+            limit: requestedPrefix,
+            orderBy,
+            offset: 0,
+            subscription: this,
+          }
       : {
           where, // Main filter only, no cursor
           limit,
@@ -1166,16 +1172,11 @@ export class CollectionSubscription
 
     const { demand, result: syncResult } = this.startSubsetDemand(loadOptions, {
       requestedPrefix,
-      hadBoundary: boundary !== undefined,
+      hadBoundary: boundary !== undefined || refreshPrefix,
       fullRegion,
     })
 
-    this.observeOrderedCoverage(
-      syncResult,
-      demand,
-      onLoadSubsetResult,
-      shouldTrackLoadSubsetPromise,
-    )
+    this.observeOrderedCoverage(syncResult, demand)
     // Pass the raw loadSubset result to the caller for external tracking
     onLoadSubsetResult?.(syncResult, demand.options)
     this.observeLoadSubsetResult(
@@ -1188,11 +1189,6 @@ export class CollectionSubscription
   private observeOrderedCoverage(
     result: LoadSubsetRequestResult,
     demand: SubsetDemand,
-    onFallbackResult?: (
-      result: LoadSubsetRequestResult,
-      demand: LoadSubsetOptions,
-    ) => void,
-    trackFallbackStatus = true,
     shouldApply: () => boolean = () => true,
   ): void {
     const ordered = demand.ordered
@@ -1225,7 +1221,9 @@ export class CollectionSubscription
         | undefined
       const exhausted = outcome?.extent === `exhausted`
 
-      if (!ordered.hadBoundary && !ordered.fullRegion) {
+      if (outcome !== undefined && rowKeys === undefined && !exhausted) {
+        window.recordLocalRequestSatisfaction(ordered.requestedPrefix)
+      } else if (!ordered.hadBoundary && !ordered.fullRegion) {
         window.recordInitialCoverage(rowKeys, exhausted)
       } else {
         window.recordContinuationCoverage(
@@ -1256,31 +1254,12 @@ export class CollectionSubscription
           ordered.requestedPrefix,
           true,
         )
-      } else if (!ordered.hadBoundary) {
-        window.recordInitialCoverage(undefined, false)
       } else {
-        window.recordContinuationCoverage(
-          undefined,
-          false,
-          ordered.requestedPrefix,
-          false,
-        )
+        window.recordLocalRequestSatisfaction(ordered.requestedPrefix)
       }
       if (!this.isBufferingForTruncate && this.stalePublishedRows.size === 0) {
         const changes = this.reconcileOrderedWindow()
         if (changes.length > 0) this.callback(changes)
-      }
-
-      if (hasSubsetLoader && !ordered.fullRegion) {
-        // A synchronous limited loader cannot attach applied row provenance to
-        // `true`. Re-request the unbounded filtered region before treating any
-        // local row as an ordered boundary.
-        this.requestLimitedSnapshot({
-          orderBy: window.totalOrder.orderBy,
-          limit: ordered.requestedPrefix,
-          trackLoadSubsetPromise: trackFallbackStatus,
-          onLoadSubsetResult: onFallbackResult,
-        })
       }
     }
   }

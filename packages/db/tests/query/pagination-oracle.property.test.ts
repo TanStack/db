@@ -1734,7 +1734,7 @@ describe(`pagination recomputation oracle`, () => {
     })
   })
 
-  it(`does not treat a synchronous limited load as full source coverage`, async () => {
+  it(`keeps synchronous limited satisfaction local to the active window`, async () => {
     const rows: Array<PageRow> = [
       { id: 1, rank: 1 },
       { id: 2, rank: 2 },
@@ -1780,6 +1780,7 @@ describe(`pagination recomputation oracle`, () => {
       await live.preload()
       await flushPromises()
       expect(Array.from(live.values(), ({ id }) => id)).toEqual([1])
+      expect(source._sync.getLoadSubsetCoverage()).toEqual([])
 
       const widened = live.utils.setWindow({ offset: 0, limit: 2 })
       if (widened instanceof Promise) await widened
@@ -1788,14 +1789,15 @@ describe(`pagination recomputation oracle`, () => {
       expect(Array.from(live.values(), ({ id }) => id)).toEqual([1, 2])
       expect(requests).toHaveLength(2)
       expect(requests[0]?.limit).toBe(1)
-      expect(requests[1]?.limit).toBeUndefined()
+      expect(requests[1]).toMatchObject({ limit: 2, offset: 0 })
+      expect(requests[1]?.cursor).toBeUndefined()
     } finally {
       live.cleanup()
       source.cleanup()
     }
   })
 
-  it(`tracks an asynchronous full-source refinement after a synchronous limited load`, async () => {
+  it(`tracks an asynchronous prefix refresh after synchronous satisfaction`, async () => {
     const rows: Array<PageRow> = [
       { id: 1, rank: 1 },
       { id: 2, rank: 2 },
@@ -1804,6 +1806,7 @@ describe(`pagination recomputation oracle`, () => {
     const requests: Array<LoadSubsetOptions> = []
     const delivered = new Set<number>()
     const refinement = createDeferred<void>()
+    let loadCount = 0
     const source = createCollection<PageRow>({
       id: `pagination-async-refinement-source-${collectionSequence++}`,
       getKey: (row) => row.id,
@@ -1830,7 +1833,9 @@ describe(`pagination recomputation oracle`, () => {
           return {
             loadSubset: (options: LoadSubsetOptions) => {
               requests.push(options)
-              if (options.limit !== undefined) {
+              loadCount += 1
+              if (loadCount === 1) {
+                publish(options)
                 return true
               }
 
@@ -1852,19 +1857,25 @@ describe(`pagination recomputation oracle`, () => {
     )
 
     try {
-      const preload = live.preload()
+      await live.preload()
+      expect(Array.from(live.values(), ({ id }) => id)).toEqual([1])
+      expect(requests.map(({ limit }) => limit)).toEqual([1])
 
+      const widened = live.utils.setWindow({ offset: 0, limit: 2 })
+      expect(widened).toBeInstanceOf(Promise)
       await flushPromises()
-      expect(requests.map(({ limit }) => limit)).toEqual([1, undefined])
+      expect(requests.map(({ limit }) => limit)).toEqual([1, 2])
+      expect(requests[1]).toMatchObject({ offset: 0 })
+      expect(requests[1]?.cursor).toBeUndefined()
       const settledBeforeRefinement = await Promise.race([
-        preload.then(() => true),
+        Promise.resolve(widened).then(() => true),
         new Promise<false>((resolve) => setTimeout(() => resolve(false), 10)),
       ])
       expect(settledBeforeRefinement).toBe(false)
 
       refinement.resolve()
-      await preload
-      expect(Array.from(live.values(), ({ id }) => id)).toEqual([1])
+      if (widened instanceof Promise) await widened
+      expect(Array.from(live.values(), ({ id }) => id)).toEqual([1, 2])
     } finally {
       live.cleanup()
       source.cleanup()

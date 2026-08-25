@@ -20,6 +20,7 @@ export class WindowState<
   private coveredSize = 0
   private hasFullCoverage = false
   private needsFullRefinement = false
+  private needsPrefixRefresh = false
   private readonly candidateKeys = new Set<TKey>()
   private readonly provenanceKeys = new Set<TKey>()
   private readonly admittedKeys = new Set<TKey>()
@@ -56,6 +57,10 @@ export class WindowState<
     return this.needsFullRefinement
   }
 
+  get requiresPrefixRefresh(): boolean {
+    return this.needsPrefixRefresh
+  }
+
   rowsNeeded(): number {
     return Math.max(0, this.activeSize - this.localPrefixSize)
   }
@@ -65,6 +70,7 @@ export class WindowState<
     this.coveredSize = 0
     this.hasFullCoverage = false
     this.needsFullRefinement = false
+    this.needsPrefixRefresh = false
     this.candidateKeys.clear()
     this.provenanceKeys.clear()
     this.admittedKeys.clear()
@@ -74,6 +80,7 @@ export class WindowState<
     rowKeys: ReadonlyArray<TKey> | undefined,
     exhausted: boolean,
   ): void {
+    this.needsPrefixRefresh = false
     if (exhausted) {
       this.establishFullCoverage()
       return
@@ -94,6 +101,7 @@ export class WindowState<
     requestedPrefix: number,
     fullRegion: boolean,
   ): void {
+    this.needsPrefixRefresh = false
     if (fullRegion || exhausted) {
       this.establishFullCoverage()
       return
@@ -115,6 +123,26 @@ export class WindowState<
       this.provenanceKeys.add(key)
     }
     this.coveredSize = Math.max(this.coveredSize, requestedPrefix)
+  }
+
+  /**
+   * A legacy result without applied row keys still says this exact request has
+   * settled. Admit only the current local prefix. A later expansion must
+   * refresh from the start because these rows are not a reusable cursor proof.
+   */
+  recordLocalRequestSatisfaction(requestedPrefix: number): void {
+    this.candidateKeys.clear()
+    this.provenanceKeys.clear()
+    this.admittedKeys.clear()
+    for (const change of this.readRows(undefined, requestedPrefix)) {
+      this.admittedKeys.add(change.key)
+    }
+    // `true` and legacy Promise<void> do not prove exhaustion. Only count rows
+    // that are now present, so a short synchronous page can request another
+    // pass until the active prefix is actually filled.
+    this.coveredSize = Math.min(requestedPrefix, this.admittedKeys.size)
+    this.needsFullRefinement = false
+    this.needsPrefixRefresh = true
   }
 
   admitChanges(changes: ReadonlyArray<ChangeMessage<TRow, TKey>>): void {
@@ -159,6 +187,7 @@ export class WindowState<
       this.candidateKeys.clear()
       this.provenanceKeys.clear()
       this.needsFullRefinement = false
+      this.needsPrefixRefresh = false
     }
   }
 
@@ -236,6 +265,7 @@ export class WindowState<
   private establishFullCoverage(): void {
     this.hasFullCoverage = true
     this.needsFullRefinement = false
+    this.needsPrefixRefresh = false
     this.coveredSize = Number.POSITIVE_INFINITY
     this.candidateKeys.clear()
     this.provenanceKeys.clear()

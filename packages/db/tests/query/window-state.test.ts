@@ -80,4 +80,44 @@ describe(`WindowState`, () => {
       expect(window.boundary(lastCompletePublication)).toEqual(expected)
     },
   )
+
+  it.each(
+    ([`asc`, `desc`] as const).flatMap((direction) =>
+      ([`first`, `last`] as const).flatMap((nulls) =>
+        [2, 4].map((requestedPrefix) => ({
+          direction,
+          nulls,
+          requestedPrefix,
+        })),
+      ),
+    ),
+  )(
+    `keeps legacy satisfaction local ($direction, nulls $nulls, prefix $requestedPrefix)`,
+    ({ direction, nulls, requestedPrefix }) => {
+      const window = new WindowState<Row, number>(
+        mockCollection([
+          { id: 1, rank: null },
+          { id: 2, rank: 1 },
+          { id: 3, rank: 2 },
+        ]),
+        [
+          {
+            expression: new PropRef([`rank`]),
+            compareOptions: { direction, nulls },
+          },
+        ],
+        undefined,
+        requestedPrefix,
+      )
+
+      window.recordLocalRequestSatisfaction(requestedPrefix)
+
+      expect(window.localPrefixSize).toBe(
+        Math.min(requestedPrefix, 3),
+      )
+      expect(window.coversActiveWindow).toBe(requestedPrefix <= 3)
+      expect(window.requestBoundary()).toBeUndefined()
+      expect(window.requiresPrefixRefresh).toBe(true)
+    },
+  )
 })

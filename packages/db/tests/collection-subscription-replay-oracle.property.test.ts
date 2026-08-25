@@ -1576,7 +1576,7 @@ describe(`CollectionSubscription replay oracle`, () => {
   })
 
   const orderedReplayCases = ([`asc`, `desc`] as const).flatMap((direction) => [
-    ...([`return`, `resolve`, `refine`] as const).flatMap((delivery) =>
+    ...([`return`, `resolve`] as const).flatMap((delivery) =>
       ([`same`, `changed`] as const).map((identity) => ({
         name: `${direction} ${delivery} with ${identity} keys`,
         direction,
@@ -1677,16 +1677,6 @@ describe(`CollectionSubscription replay oracle`, () => {
                   })
                 }
 
-                if (delivery === `refine`) {
-                  if (options.limit !== undefined) return true
-                  const deferred = createDeferred<{
-                    hasMore: boolean
-                    appliedRowKeys: Array<OrderedReplayRow[`id`]>
-                  }>()
-                  replayLoads.push(deferred)
-                  return deferred.promise
-                }
-
                 if (loadCount > 4) return true
 
                 if (delivery === `return`) {
@@ -1736,10 +1726,7 @@ describe(`CollectionSubscription replay oracle`, () => {
         direction === `asc`
           ? ([`three`, `four`] as const)
           : ([`four`, `three`] as const)
-      const succeeds =
-        delivery === `return` ||
-        delivery === `resolve` ||
-        delivery === `refine`
+      const succeeds = delivery === `return` || delivery === `resolve`
       const expectedIds = identity === `changed` ? replacementIds : initialIds
 
       try {
@@ -1760,7 +1747,6 @@ describe(`CollectionSubscription replay oracle`, () => {
           cursor: { lastKey: initialIds[0] },
         })
 
-        const batchCountBeforeReplay = batches.length
         begin()
         truncate()
         commit()
@@ -1771,21 +1757,7 @@ describe(`CollectionSubscription replay oracle`, () => {
         expectSameSubsetRequest(replayOptions[0]!, loadOptions[0]!)
         expectSameSubsetRequest(replayOptions[1]!, loadOptions[1]!)
 
-        if (delivery === `refine`) {
-          expect(replayLoads).toHaveLength(2)
-          // A synchronous limited replay still needs its asynchronous
-          // full-source refinement before it can replace the publication.
-          expect(batches).toHaveLength(batchCountBeforeReplay)
-          installReplayRows()
-          replayLoads[0]?.resolve({
-            hasMore: true,
-            appliedRowKeys: [expectedIds[0]],
-          })
-          replayLoads[1]?.resolve({
-            hasMore: false,
-            appliedRowKeys: [expectedIds[1]],
-          })
-        } else if (delivery === `resolve`) {
+        if (delivery === `resolve`) {
           expect(replayLoads).toHaveLength(2)
           installReplayRows()
           replayLoads[0]?.resolve({

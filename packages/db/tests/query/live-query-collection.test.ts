@@ -2507,7 +2507,7 @@ describe(`createLiveQueryCollection`, () => {
       }
     })
 
-    it(`advances offset when async loadSubset fills an initially empty window`, async () => {
+    it(`refreshes a wider prefix when an async load has no row provenance`, async () => {
       type Item = { id: number; value: number }
       const remoteData: Array<Item> = [
         { id: 1, value: 1 },
@@ -2516,6 +2516,7 @@ describe(`createLiveQueryCollection`, () => {
         { id: 4, value: 4 },
       ]
       const loadOffsets: Array<number | undefined> = []
+      const loadLimits: Array<number | undefined> = []
 
       const sourceCollection = createCollection<Item>({
         id: `offset-advances-async`,
@@ -2530,6 +2531,7 @@ describe(`createLiveQueryCollection`, () => {
             return {
               loadSubset: (options: LoadSubsetOptions) => {
                 loadOffsets.push(options.offset)
+                loadLimits.push(options.limit)
                 return new Promise<void>((resolve) => {
                   setTimeout(() => {
                     begin()
@@ -2567,11 +2569,12 @@ describe(`createLiveQueryCollection`, () => {
         await moveResult
       }
 
-      expect(loadOffsets).toEqual([0, 2])
+      expect(loadOffsets).toEqual([0, 0])
+      expect(loadLimits).toEqual([2, 4])
       expect(liveQuery.toArray.map((item) => item.value)).toEqual([3, 4])
     })
 
-    it(`requests new offsets when window moves across identical orderBy values`, async () => {
+    it(`refreshes wider prefixes when synchronous loads have no row provenance`, async () => {
       type Item = { id: number; rank: number }
       const remoteData: Array<Item> = [
         { id: 1, rank: 1 },
@@ -2582,6 +2585,7 @@ describe(`createLiveQueryCollection`, () => {
         { id: 6, rank: 1 },
       ]
       const loadOffsets: Array<number | undefined> = []
+      const loadLimits: Array<number | undefined> = []
 
       const sourceCollection = createCollection<Item>({
         id: `offset-moves-constant-orderby`,
@@ -2596,6 +2600,7 @@ describe(`createLiveQueryCollection`, () => {
             return {
               loadSubset: (options: LoadSubsetOptions) => {
                 loadOffsets.push(options.offset)
+                loadLimits.push(options.limit)
                 const start = options.offset ?? 0
                 const end = options.limit
                   ? start + options.limit
@@ -2630,7 +2635,8 @@ describe(`createLiveQueryCollection`, () => {
         await moveFirst
       }
       await flushPromises()
-      expect(loadOffsets).toEqual([0, 2])
+      expect(loadOffsets).toEqual([0, 0])
+      expect(loadLimits).toEqual([2, 4])
       expect(liveQuery.toArray.map((item) => item.id)).toEqual([3, 4])
 
       const moveSecond = liveQuery.utils.setWindow({ offset: 4, limit: 2 })
@@ -2638,7 +2644,8 @@ describe(`createLiveQueryCollection`, () => {
         await moveSecond
       }
       await flushPromises()
-      expect(loadOffsets).toEqual([0, 2, 4])
+      expect(loadOffsets).toEqual([0, 0, 0])
+      expect(loadLimits).toEqual([2, 4, 6])
       expect(liveQuery.toArray.map((item) => item.id)).toEqual([5, 6])
     })
   })
