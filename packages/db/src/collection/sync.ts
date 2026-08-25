@@ -59,6 +59,15 @@ type SharedCoverageAcquisition = {
   acquisition: AcquisitionToken
 }
 
+type DeferredAdapterAcquisition = {
+  options: LoadSubsetOptions
+  releaseFailed: boolean
+}
+
+type PendingCoverageDemand = {
+  released: boolean
+}
+
 type LoadSubsetOperation = {
   pending: Set<Promise<unknown>>
   outcomes: Map<
@@ -100,7 +109,11 @@ export class CollectionSyncManager<
   private deferredLoadSubsets: Array<DeferredLoadSubset> = []
   private deferredAdapterOptions = new Map<
     LoadSubsetOptions,
-    Array<LoadSubsetOptions>
+    Array<DeferredAdapterAcquisition>
+  >()
+  private pendingCoverageDemands = new WeakMap<
+    LoadSubsetOptions,
+    Array<PendingCoverageDemand>
   >()
   private syncEpoch = 0
   private loadSubsetSession = 0
@@ -432,16 +445,19 @@ export class CollectionSyncManager<
       deferred,
     } of deferredLoadSubsets) {
       const loadSubset = this.syncLoadSubsetFn
-      if (loadSubset) {
-        this.retainDeferredAdapterOptions(ownerOptions, options)
-      }
+      const adapterAcquisition =
+        loadSubset && this.syncUnloadSubsetFn
+          ? this.retainDeferredAdapterOptions(ownerOptions, options)
+          : undefined
+      const pendingCoverageDemand = loadSubset
+        ? this.retainPendingCoverageDemand(ownerOptions)
+        : undefined
       try {
         const result = loadSubset?.(options) ?? true
-        const retainsAdapterAcquisition =
-          loadSubset !== null &&
-          this.hasDeferredAdapterOptions(ownerOptions, options)
+        const retainsCoverageDemand =
+          pendingCoverageDemand !== undefined && !pendingCoverageDemand.released
         if (result instanceof Promise) {
-          const coverageOwnership = retainsAdapterAcquisition
+          const coverageOwnership = retainsCoverageDemand
             ? this.addCoverageOwnership(
                 ownerOptions,
                 demand,
@@ -476,7 +492,7 @@ export class CollectionSyncManager<
             },
           )
         } else {
-          if (retainsAdapterAcquisition) {
+          if (retainsCoverageDemand) {
             this.addSatisfiedCoverageOwnership(ownerOptions, demand, generation)
           }
           const outcome = createAppliedLoadSubsetOutcome(
@@ -488,10 +504,17 @@ export class CollectionSyncManager<
           deferred.resolve(outcome)
         }
       } catch (error) {
-        if (loadSubset) {
-          this.forgetDeferredAdapterOptions(ownerOptions, options)
+        // A reentrant release marks the tentative acquisition before its
+        // error escapes through loadSubset. Preserve only that known lease;
+        // a plain loadSubset throw established no acquisition to release.
+        if (adapterAcquisition && !adapterAcquisition.releaseFailed) {
+          this.forgetDeferredAdapterOptions(ownerOptions, adapterAcquisition)
         }
         deferred.reject(error)
+      } finally {
+        if (pendingCoverageDemand) {
+          this.forgetPendingCoverageDemand(ownerOptions, pendingCoverageDemand)
+        }
       }
     }
   }
@@ -944,7 +967,30 @@ export class CollectionSyncManager<
       // Validate and hash the retained scope before starting adapter work.
       getLoadSubsetDemandKey(demand)
       const generation = ++this.loadSubsetGeneration
-      const result: ReturnType<LoadSubsetFn> = this.syncLoadSubsetFn(options)
+      const pendingCoverageDemand = this.retainPendingCoverageDemand(options)
+      let result: ReturnType<LoadSubsetFn>
+      try {
+        result = this.syncLoadSubsetFn(options)
+      } finally {
+        this.forgetPendingCoverageDemand(options, pendingCoverageDemand)
+      }
+      if (pendingCoverageDemand.released) {
+        if (result instanceof Promise) {
+          const outcome = result.then((sourceResult) =>
+            createAppliedLoadSubsetOutcome(
+              this.id,
+              demand,
+              generation,
+              isLoadSubsetResultForDemand(result, sourceResult, demand)
+                ? sourceResult
+                : undefined,
+            ),
+          )
+          this.trackLoadPromise(outcome)
+          return outcome
+        }
+        return true
+      }
       // If the result is a promise, track it
       if (result instanceof Promise) {
         const { lease, acquisition } = this.addCoverageOwnership(
@@ -1005,14 +1051,21 @@ export class CollectionSyncManager<
     }
 
     if (this.syncUnloadSubsetFn) {
-      const adapterOptions = this.deferredAdapterOptions.get(options)
-      const acquiredOptions = adapterOptions?.[0] ?? options
-      this.syncUnloadSubsetFn(acquiredOptions)
-      if (adapterOptions) {
-        this.forgetDeferredAdapterOptions(options, acquiredOptions)
+      const adapterAcquisitions = this.deferredAdapterOptions.get(options)
+      const acquisition = adapterAcquisitions?.[0]
+      try {
+        this.syncUnloadSubsetFn(acquisition?.options ?? options)
+      } catch (error) {
+        if (acquisition) acquisition.releaseFailed = true
+        throw error
+      }
+      if (acquisition) {
+        this.forgetDeferredAdapterOptions(options, acquisition)
       }
     }
-    this.releaseCoverageLease(options)
+    if (!this.releaseCoverageLease(options)) {
+      this.releasePendingCoverageDemand(options)
+    }
   }
 
   /** @internal Applied source coverage retained by active subset owners. */
@@ -1137,17 +1190,18 @@ export class CollectionSyncManager<
     )
   }
 
-  private releaseCoverageLease(options: LoadSubsetOptions): void {
+  private releaseCoverageLease(options: LoadSubsetOptions): boolean {
     const leases = this.coverageLeasesByOwner.get(options)
     const lease = leases?.shift()
     if (!lease) {
       this.flushCoverageRowsToRemove()
-      return
+      return false
     }
     if (leases?.length === 0) this.coverageLeasesByOwner.delete(options)
     this.removeCoverageRows(
       this.coverageRegistry.releaseLease(lease).rowsToRemove,
     )
+    return true
   }
 
   private discardCoverageLease(
@@ -1185,36 +1239,59 @@ export class CollectionSyncManager<
   private retainDeferredAdapterOptions(
     ownerOptions: LoadSubsetOptions,
     acquiredOptions: LoadSubsetOptions,
-  ): void {
-    const adapterOptions = this.deferredAdapterOptions.get(ownerOptions)
-    if (adapterOptions) {
-      adapterOptions.push(acquiredOptions)
+  ): DeferredAdapterAcquisition {
+    const acquisition = { options: acquiredOptions, releaseFailed: false }
+    const adapterAcquisitions = this.deferredAdapterOptions.get(ownerOptions)
+    if (adapterAcquisitions) {
+      adapterAcquisitions.push(acquisition)
     } else {
-      this.deferredAdapterOptions.set(ownerOptions, [acquiredOptions])
+      this.deferredAdapterOptions.set(ownerOptions, [acquisition])
     }
+    return acquisition
   }
 
-  private hasDeferredAdapterOptions(
+  private retainPendingCoverageDemand(
     ownerOptions: LoadSubsetOptions,
-    acquiredOptions: LoadSubsetOptions,
-  ): boolean {
-    return (
-      this.deferredAdapterOptions
-        .get(ownerOptions)
-        ?.includes(acquiredOptions) ?? false
-    )
+  ): PendingCoverageDemand {
+    const demand = { released: false }
+    const demands = this.pendingCoverageDemands.get(ownerOptions)
+    if (demands) {
+      demands.push(demand)
+    } else {
+      this.pendingCoverageDemands.set(ownerOptions, [demand])
+    }
+    return demand
+  }
+
+  private releasePendingCoverageDemand(ownerOptions: LoadSubsetOptions): void {
+    const demand = this.pendingCoverageDemands.get(ownerOptions)?.[0]
+    if (demand) demand.released = true
+  }
+
+  private forgetPendingCoverageDemand(
+    ownerOptions: LoadSubsetOptions,
+    demand: PendingCoverageDemand,
+  ): void {
+    const demands = this.pendingCoverageDemands.get(ownerOptions)
+    if (!demands) return
+
+    const index = demands.indexOf(demand)
+    if (index !== -1) demands.splice(index, 1)
+    if (demands.length === 0) {
+      this.pendingCoverageDemands.delete(ownerOptions)
+    }
   }
 
   private forgetDeferredAdapterOptions(
     ownerOptions: LoadSubsetOptions,
-    acquiredOptions: LoadSubsetOptions,
+    acquisition: DeferredAdapterAcquisition,
   ): void {
-    const adapterOptions = this.deferredAdapterOptions.get(ownerOptions)
-    if (!adapterOptions) return
+    const adapterAcquisitions = this.deferredAdapterOptions.get(ownerOptions)
+    if (!adapterAcquisitions) return
 
-    const index = adapterOptions.indexOf(acquiredOptions)
-    if (index !== -1) adapterOptions.splice(index, 1)
-    if (adapterOptions.length === 0) {
+    const index = adapterAcquisitions.indexOf(acquisition)
+    if (index !== -1) adapterAcquisitions.splice(index, 1)
+    if (adapterAcquisitions.length === 0) {
       this.deferredAdapterOptions.delete(ownerOptions)
     }
   }
@@ -1249,6 +1326,7 @@ export class CollectionSyncManager<
     this.syncStartDeferred = false
     this.syncStartRequested = false
     this.deferredAdapterOptions.clear()
+    this.pendingCoverageDemands = new WeakMap()
     this.flushCoverageRowsToRemove()
     this.removeCoverageRows(this.coverageRegistry.dispose().rowsToRemove)
     this.coverageLeasesByOwner = new WeakMap()

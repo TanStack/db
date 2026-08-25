@@ -789,7 +789,7 @@ describe(`CollectionSubscription status tracking`, () => {
     }
   })
 
-  it(`uses the acquired options when deferred load reentrantly unsubscribes`, async () => {
+  it(`does not retain coverage when a deferred load reentrantly unsubscribes`, async () => {
     const loads: Array<LoadSubsetOptions> = []
     const unloads: Array<LoadSubsetOptions> = []
     let unsubscribeDuringLoad = () => {}
@@ -833,6 +833,61 @@ describe(`CollectionSubscription status tracking`, () => {
 
       subscription.unsubscribe()
       expect(unloads).toHaveLength(1)
+    } finally {
+      subscription.unsubscribe()
+      await collection.cleanup()
+    }
+  })
+
+  it(`retries the acquired options when deferred load reentrant release throws`, async () => {
+    const loads: Array<LoadSubsetOptions> = []
+    const unloads: Array<LoadSubsetOptions> = []
+    const failure = new Error(`reentrant release failed`)
+    let unsubscribeDuringLoad = () => {}
+    const collection = createCollection<{ id: string }>({
+      id: `reentrant-deferred-subscription-release-failure`,
+      getKey: (row) => row.id,
+      syncMode: `on-demand`,
+      startSync: false,
+      sync: {
+        sync: ({ markReady }) => {
+          markReady()
+          return {
+            loadSubset: (options) => {
+              loads.push(options)
+              unsubscribeDuringLoad()
+              return Promise.resolve()
+            },
+            unloadSubset: (options) => {
+              unloads.push(options)
+              if (unloads.length === 1) throw failure
+            },
+          }
+        },
+      },
+    })
+
+    expect(collection._deferSyncStart()).toBe(true)
+    const subscription = collection.subscribeChanges(() => {}, {
+      includeInitialState: false,
+    })
+    unsubscribeDuringLoad = () => subscription.unsubscribe()
+
+    try {
+      subscription.requestSnapshot({ limit: 1, optimizedOnly: false })
+      collection._resumeSyncStart()
+      await flushPromises()
+
+      expect(loads).toHaveLength(1)
+      expect(unloads).toHaveLength(1)
+      expect(unloads[0]).toBe(loads[0])
+
+      expect(() => subscription.unsubscribe()).not.toThrow()
+      expect(unloads).toHaveLength(2)
+      expect(unloads[1]).toBe(loads[0])
+
+      subscription.unsubscribe()
+      expect(unloads).toHaveLength(2)
     } finally {
       subscription.unsubscribe()
       await collection.cleanup()
