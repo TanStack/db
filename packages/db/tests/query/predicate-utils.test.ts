@@ -928,6 +928,24 @@ describe(`isPredicateSubset`, () => {
     expect(isPredicateSubset(subset, superset)).toBe(false)
   })
 
+  it(`requires equal predicates for a cursor-relative superset`, () => {
+    const cursor = {
+      whereFrom: gt(ref(`id`), val(10)),
+      whereCurrent: eq(ref(`id`), val(10)),
+      lastKey: 10,
+    }
+    const subset: LoadSubsetOptions = {
+      where: gt(ref(`age`), val(18)),
+      cursor,
+    }
+    const superset: LoadSubsetOptions = {
+      where: gte(ref(`age`), val(18)),
+      cursor,
+    }
+
+    expect(isPredicateSubset(subset, superset)).toBe(false)
+  })
+
   it(`does not retain expression hashes across comparison operations`, () => {
     const subset = gt(ref(`age`), val(18))
     const superset = gt(ref(`age`), val(18))

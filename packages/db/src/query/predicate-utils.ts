@@ -913,6 +913,15 @@ export function isPredicateSubset(
     }
   }
 
+  // A cursor-relative request is also a finite window. Even when it has no
+  // numeric limit, a different predicate can select rows outside that window.
+  if (
+    superset.cursor !== undefined &&
+    !areWhereClausesEqual(subset.where, superset.where)
+  ) {
+    return false
+  }
+
   if (superset.limit !== undefined) {
     // For limited supersets, where clauses must be equal
     if (!areWhereClausesEqual(subset.where, superset.where)) {
