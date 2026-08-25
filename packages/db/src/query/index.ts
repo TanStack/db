@@ -98,9 +98,13 @@ export { type LiveQueryCollectionUtils } from './live/collection-config-builder.
 export {
   UnhashableQueryIRError,
   canonicalizeQueryIR,
+  getLoadSubsetDemandKey,
+  getQueryIdentity,
   getStableQueryBuilderHash,
   getStableQueryIRHash,
   getStableValueHash,
+  type DemandKey,
+  type QueryIdentity,
 } from './ir-stable-identity.js'
 
 // Predicate utilities for predicate push-down
@@ -112,6 +116,7 @@ export {
   isLimitSubset,
   isOffsetLimitSubset,
   isPredicateSubset,
+  isLoadSubsetRequestSubsumedBy,
 } from './predicate-utils.js'
 
 export { DeduplicatedLoadSubset } from './subset-dedupe.js'

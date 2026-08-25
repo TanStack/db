@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import {
   isLimitSubset,
+  isLoadSubsetRequestSubsumedBy,
   isOffsetLimitSubset,
   isOrderBySubset,
   isPredicateSubset,
@@ -676,6 +677,71 @@ describe(`isOrderBySubset`, () => {
     expect(isOrderBySubset(subset, superset)).toBe(false)
   })
 
+  it.each([
+    [
+      `null placement`,
+      { direction: `asc`, nulls: `first`, stringSort: `lexical` } as const,
+      { direction: `asc`, nulls: `last`, stringSort: `lexical` } as const,
+    ],
+    [
+      `string sort mode`,
+      { direction: `asc`, nulls: `last`, stringSort: `lexical` } as const,
+      { direction: `asc`, nulls: `last`, stringSort: `locale` } as const,
+    ],
+    [
+      `locale`,
+      {
+        direction: `asc`,
+        nulls: `last`,
+        stringSort: `locale`,
+        locale: `en-US`,
+      } as const,
+      {
+        direction: `asc`,
+        nulls: `last`,
+        stringSort: `locale`,
+        locale: `de-DE`,
+      } as const,
+    ],
+    [
+      `locale options`,
+      {
+        direction: `asc`,
+        nulls: `last`,
+        stringSort: `locale`,
+        locale: `en-US`,
+        localeOptions: { numeric: true, sensitivity: `base` },
+      } as const,
+      {
+        direction: `asc`,
+        nulls: `last`,
+        stringSort: `locale`,
+        locale: `en-US`,
+        localeOptions: { numeric: false, sensitivity: `base` },
+      } as const,
+    ],
+  ])(`should return false when %s differs`, (_label, first, second) => {
+    const expression = ref(`name`)
+    expect(
+      isOrderBySubset(
+        [{ expression, compareOptions: first }],
+        [{ expression, compareOptions: second }],
+      ),
+    ).toBe(false)
+    expect(
+      isLoadSubsetRequestSubsumedBy(
+        {
+          orderBy: [{ expression, compareOptions: first }],
+          limit: 10,
+        },
+        {
+          orderBy: [{ expression, compareOptions: second }],
+          limit: 20,
+        },
+      ),
+    ).toBe(false)
+  })
+
   it(`should return false when subset is longer than superset`, () => {
     const subset: OrderBy = [
       orderByClause(ref(`age`), `asc`),
@@ -830,6 +896,85 @@ describe(`isPredicateSubset`, () => {
       limit: 20,
     }
     expect(isPredicateSubset(subset, superset)).toBe(true)
+  })
+
+  it(`treats semantic predicate forms as equal coverage`, () => {
+    const age = ref(`age`)
+    const status = ref(`status`)
+    const ageCheck = gt(age, val(18))
+    const statusCheck = eq(status, val(`active`))
+    const subset: LoadSubsetOptions = {
+      where: func(`and`, ageCheck, statusCheck),
+      limit: 10,
+    }
+    const superset: LoadSubsetOptions = {
+      where: func(`and`, eq(val(`active`), status), func(`lt`, val(18), age)),
+      limit: 20,
+    }
+
+    expect(isPredicateSubset(subset, superset)).toBe(true)
+  })
+
+  it(`does not normalize distinct comparison operators at a limited boundary`, () => {
+    const subset: LoadSubsetOptions = {
+      where: gt(ref(`age`), val(18)),
+      limit: 10,
+    }
+    const superset: LoadSubsetOptions = {
+      where: gte(ref(`age`), val(18)),
+      limit: 20,
+    }
+
+    expect(isPredicateSubset(subset, superset)).toBe(false)
+  })
+
+  it(`requires equal predicates for a cursor-relative superset`, () => {
+    const cursor = {
+      whereFrom: gt(ref(`id`), val(10)),
+      whereCurrent: eq(ref(`id`), val(10)),
+      lastKey: 10,
+    }
+    const subset: LoadSubsetOptions = {
+      where: gt(ref(`age`), val(18)),
+      cursor,
+    }
+    const superset: LoadSubsetOptions = {
+      where: gte(ref(`age`), val(18)),
+      cursor,
+    }
+
+    expect(isPredicateSubset(subset, superset)).toBe(false)
+  })
+
+  it(`does not retain expression hashes across comparison operations`, () => {
+    const subset = gt(ref(`age`), val(18))
+    const superset = gt(ref(`age`), val(18))
+
+    expect(isWhereSubset(subset, superset)).toBe(true)
+    superset.name = `lt`
+    expect(isWhereSubset(subset, superset)).toBe(false)
+  })
+
+  it(`hashes a repeated expression once per subset comparison`, () => {
+    let valueReads = 0
+    const countedValue = val(1)
+    Object.defineProperty(countedValue, `value`, {
+      configurable: true,
+      get: () => {
+        valueReads++
+        return 1
+      },
+    })
+    const subset = func(`custom-subset`, countedValue)
+    const superset = func(
+      `or`,
+      ...Array.from({ length: 4 }, (_, index) =>
+        func(`custom-superset-${index}`, val(index)),
+      ),
+    )
+
+    expect(isWhereSubset(subset, superset)).toBe(false)
+    expect(valueReads).toBe(1)
   })
 
   it(`should return false for limited superset with different where clause`, () => {

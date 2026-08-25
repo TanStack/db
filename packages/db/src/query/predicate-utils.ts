@@ -1,6 +1,12 @@
 import { Func, Value } from './ir.js'
+import {
+  UnhashableQueryIRError,
+  getStableExpressionHash,
+  getStableValueHash,
+} from './ir-stable-identity.js'
 import type { BasicExpression, OrderBy, PropRef } from './ir.js'
 import type { LoadSubsetOptions } from '../types.js'
+import type { CompareOptions } from './builder/types.js'
 
 /**
  * Check if one where clause is a logical subset of another.
@@ -40,7 +46,7 @@ export function isWhereSubset(
     return true
   }
 
-  return isWhereSubsetInternal(subset!, superset!)
+  return isWhereSubsetInternal(subset!, superset!, new WeakMap())
 }
 
 function makeDisjunction(
@@ -65,6 +71,7 @@ function convertInToOr(inField: InField) {
 function isWhereSubsetInternal(
   subset: BasicExpression<boolean>,
   superset: BasicExpression<boolean>,
+  expressionHashes: ExpressionHashCache,
 ): boolean {
   // If subset is false it is requesting no data,
   // thus the result set is empty
@@ -74,7 +81,7 @@ function isWhereSubsetInternal(
   }
 
   // If expressions are structurally equal, subset relationship holds
-  if (areExpressionsEqual(subset, superset)) {
+  if (areExpressionsEqual(subset, superset, expressionHashes)) {
     return true
   }
 
@@ -83,7 +90,11 @@ function isWhereSubsetInternal(
   // Example: (age > 20) ⊆ (age > 10 AND status = 'active') is false (doesn't imply status condition)
   if (superset.type === `func` && superset.name === `and`) {
     return superset.args.every((arg) =>
-      isWhereSubsetInternal(subset, arg as BasicExpression<boolean>),
+      isWhereSubsetInternal(
+        subset,
+        arg as BasicExpression<boolean>,
+        expressionHashes,
+      ),
     )
   }
 
@@ -92,7 +103,11 @@ function isWhereSubsetInternal(
   // decomposes the subset first: A ⊆ or(C, D) AND B ⊆ or(C, D).
   if (subset.type === `func` && subset.name === `or`) {
     return subset.args.every((arg) =>
-      isWhereSubsetInternal(arg as BasicExpression<boolean>, superset),
+      isWhereSubsetInternal(
+        arg as BasicExpression<boolean>,
+        superset,
+        expressionHashes,
+      ),
     )
   }
 
@@ -101,7 +116,11 @@ function isWhereSubsetInternal(
   // match a structurally equal disjunct via areExpressionsEqual.
   if (superset.type === `func` && superset.name === `or`) {
     return superset.args.some((arg) =>
-      isWhereSubsetInternal(subset, arg as BasicExpression<boolean>),
+      isWhereSubsetInternal(
+        subset,
+        arg as BasicExpression<boolean>,
+        expressionHashes,
+      ),
     )
   }
 
@@ -109,7 +128,11 @@ function isWhereSubsetInternal(
   if (subset.type === `func` && subset.name === `and`) {
     // For (A AND B) ⊆ C, since (A AND B) implies A, we check if any conjunct implies C
     return subset.args.some((arg) =>
-      isWhereSubsetInternal(arg as BasicExpression<boolean>, superset),
+      isWhereSubsetInternal(
+        arg as BasicExpression<boolean>,
+        superset,
+        expressionHashes,
+      ),
     )
   }
 
@@ -118,14 +141,22 @@ function isWhereSubsetInternal(
   if (subset.type === `func` && subset.name === `in`) {
     const inField = extractInField(subset)
     if (inField) {
-      return isWhereSubsetInternal(convertInToOr(inField), superset)
+      return isWhereSubsetInternal(
+        convertInToOr(inField),
+        superset,
+        expressionHashes,
+      )
     }
   }
 
   if (superset.type === `func` && superset.name === `in`) {
     const inField = extractInField(superset)
     if (inField) {
-      return isWhereSubsetInternal(subset, convertInToOr(inField))
+      return isWhereSubsetInternal(
+        subset,
+        convertInToOr(inField),
+        expressionHashes,
+      )
     }
   }
 
@@ -872,6 +903,25 @@ export function isPredicateSubset(
   // Example: superset = {where: status='active', limit: 10, offset: 0, orderBy: desc}
   //          subset = {where: status='active', limit: 5, offset: 0, orderBy: desc}
   // The top 5 active items ARE contained in the top 10 active items.
+  if (superset.limit !== undefined || superset.cursor !== undefined) {
+    // A cursor page only covers another request for the same page, whether or
+    // not the adapter also uses a numeric limit.
+    // Adapters may use the cursor expressions instead of offset, so matching
+    // offsets alone do not prove that two requests load the same rows.
+    if (!areCursorExpressionsEqual(subset.cursor, superset.cursor)) {
+      return false
+    }
+  }
+
+  // A cursor-relative request is also a finite window. Even when it has no
+  // numeric limit, a different predicate can select rows outside that window.
+  if (
+    superset.cursor !== undefined &&
+    !areWhereClausesEqual(subset.where, superset.where)
+  ) {
+    return false
+  }
+
   if (superset.limit !== undefined) {
     // For limited supersets, where clauses must be equal
     if (!areWhereClausesEqual(subset.where, superset.where)) {
@@ -890,6 +940,32 @@ export function isPredicateSubset(
     isWhereSubset(subset.where, superset.where) &&
     isOrderBySubset(subset.orderBy, superset.orderBy) &&
     isOffsetLimitSubset(subset, superset)
+  )
+}
+
+/**
+ * Returns whether one acquisition request subsumes another demand.
+ *
+ * This is a directional relationship between request shapes, not proof of
+ * applied or authoritative coverage. It must not be replaced with DemandKey
+ * equality, which answers whether two exact requests are the same.
+ */
+export function isLoadSubsetRequestSubsumedBy(
+  demand: LoadSubsetOptions,
+  acquisitionRequest: LoadSubsetOptions,
+): boolean {
+  return isPredicateSubset(demand, acquisitionRequest)
+}
+
+function areCursorExpressionsEqual(
+  a: LoadSubsetOptions[`cursor`],
+  b: LoadSubsetOptions[`cursor`],
+): boolean {
+  if (a === undefined || b === undefined) return a === b
+  return (
+    Object.is(a.lastKey, b.lastKey) &&
+    areExpressionsEqual(a.whereFrom, b.whereFrom) &&
+    areExpressionsEqual(a.whereCurrent, b.whereCurrent)
   )
 }
 
@@ -1046,33 +1122,63 @@ function findPredicateWithOperator(
   })
 }
 
-function areExpressionsEqual(a: BasicExpression, b: BasicExpression): boolean {
-  if (a.type !== b.type) {
-    return false
-  }
+const unhashableExpression = Symbol(`unhashableExpression`)
+type ExpressionHashCache = WeakMap<
+  BasicExpression,
+  string | typeof unhashableExpression
+>
 
+function getCachedExpressionHash(
+  expression: BasicExpression,
+  expressionHashes: ExpressionHashCache,
+): string | typeof unhashableExpression {
+  const cachedHash = expressionHashes.get(expression)
+  if (cachedHash !== undefined) return cachedHash
+
+  try {
+    const hash = getStableExpressionHash(expression)
+    expressionHashes.set(expression, hash)
+    return hash
+  } catch (error) {
+    if (!(error instanceof UnhashableQueryIRError)) throw error
+    expressionHashes.set(expression, unhashableExpression)
+    return unhashableExpression
+  }
+}
+
+function areExpressionsEqual(
+  a: BasicExpression,
+  b: BasicExpression,
+  expressionHashes: ExpressionHashCache = new WeakMap(),
+): boolean {
+  const aHash = getCachedExpressionHash(a, expressionHashes)
+  const bHash = getCachedExpressionHash(b, expressionHashes)
+  if (aHash === unhashableExpression || bHash === unhashableExpression) {
+    return areExpressionsStructurallyEqual(a, b)
+  }
+  return aHash === bHash
+}
+
+function areExpressionsStructurallyEqual(
+  a: BasicExpression,
+  b: BasicExpression,
+): boolean {
+  if (a.type !== b.type) return false
   if (a.type === `val` && b.type === `val`) {
     return areValuesEqual(a.value, b.value)
   }
-
   if (a.type === `ref` && b.type === `ref`) {
     return areRefsEqual(a, b)
   }
-
   if (a.type === `func` && b.type === `func`) {
-    const aFunc = a
-    const bFunc = b
-    if (aFunc.name !== bFunc.name) {
-      return false
-    }
-    if (aFunc.args.length !== bFunc.args.length) {
-      return false
-    }
-    return aFunc.args.every((arg, i) =>
-      areExpressionsEqual(arg, bFunc.args[i]!),
+    return (
+      a.name === b.name &&
+      a.args.length === b.args.length &&
+      a.args.every((arg, index) =>
+        areExpressionsStructurallyEqual(arg, b.args[index]!),
+      )
     )
   }
-
   return false
 }
 
@@ -1179,12 +1285,31 @@ function minValue(a: any, b: any): any {
   return Math.min(a, b)
 }
 
-function areCompareOptionsEqual(
-  a: { direction?: `asc` | `desc`; [key: string]: any },
-  b: { direction?: `asc` | `desc`; [key: string]: any },
-): boolean {
-  // For now, just compare direction - could be enhanced for other options
-  return a.direction === b.direction
+function areCompareOptionsEqual(a: CompareOptions, b: CompareOptions): boolean {
+  if (
+    a.direction !== b.direction ||
+    a.nulls !== b.nulls ||
+    a.stringSort !== b.stringSort
+  ) {
+    return false
+  }
+
+  if (a.stringSort !== `locale` || b.stringSort !== `locale`) {
+    return true
+  }
+
+  if (a.locale !== b.locale) return false
+  if (Object.is(a.localeOptions, b.localeOptions)) return true
+
+  try {
+    return (
+      getStableValueHash(a.localeOptions) ===
+      getStableValueHash(b.localeOptions)
+    )
+  } catch (error) {
+    if (!(error instanceof UnhashableQueryIRError)) throw error
+    return false
+  }
 }
 
 interface ComparisonField {

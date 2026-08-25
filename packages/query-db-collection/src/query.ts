@@ -1,5 +1,9 @@
 import { QueryObserver, hashKey } from '@tanstack/query-core'
-import { deepEquals, withCollectionConfigFactory } from '@tanstack/db'
+import {
+  deepEquals,
+  getLoadSubsetDemandKey,
+  withCollectionConfigFactory,
+} from '@tanstack/db'
 import {
   GetKeyRequiredError,
   InitialDataInOnDemandModeError,
@@ -8,7 +12,6 @@ import {
   QueryKeyRequiredError,
 } from './errors'
 import { createWriteUtils } from './manual-sync'
-import { serializeLoadSubsetOptions } from './serialization'
 import type {
   BaseCollectionConfig,
   ChangeMessage,
@@ -1236,10 +1239,10 @@ export function queryCollectionOptions(
         // Function-based queryKey: use it to build the key from opts
         return queryKey(opts)
       } else if (syncMode === `on-demand`) {
-        // Static queryKey in on-demand mode: automatically append serialized predicates
-        // to create separate cache entries for different predicate combinations
-        const serialized = serializeLoadSubsetOptions(opts)
-        return serialized !== undefined ? [...queryKey, serialized] : queryKey
+        // A static on-demand key is extended by exact semantic demand so
+        // equivalent predicates share one entry while distinct windows do not.
+        const demandKey = getLoadSubsetDemandKey(opts)
+        return demandKey !== undefined ? [...queryKey, demandKey] : queryKey
       } else {
         // Static queryKey in eager mode: use as-is
         return queryKey
