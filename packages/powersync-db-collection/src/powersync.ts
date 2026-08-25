@@ -323,6 +323,7 @@ function createPowerSyncCollectionConfig<
       let disposeTracking:
         | ((options?: { context?: LockContext }) => Promise<void>)
         | null = null
+      let trackingSetup: Promise<void> | null = null
 
       if (syncMode === `eager`) {
         return runEagerSync()
@@ -337,6 +338,13 @@ function createPowerSyncCollectionConfig<
       async function safelyDisposeTracking(
         context?: LockContext,
       ): Promise<void> {
+        // Cleanup can race trigger creation. Wait until the disposer has been
+        // published so an abort cannot strand a freshly-created trigger.
+        const setup = trackingSetup
+        if (setup) {
+          await setup.catch(() => undefined)
+        }
+
         const dispose = disposeTracking
         if (!dispose) {
           return
@@ -344,6 +352,25 @@ function createPowerSyncCollectionConfig<
 
         disposeTracking = null
         await dispose(context ? { context } : undefined)
+      }
+
+      async function establishTracking(
+        options: Parameters<typeof createDiffTrigger>[0],
+        appliedReceipts: Array<SyncAppliedReceipt>,
+      ): Promise<void> {
+        const setup = (async () => {
+          const dispose = await createDiffTrigger(options, appliedReceipts)
+          disposeTracking = dispose
+        })()
+        trackingSetup = setup
+
+        try {
+          await setup
+        } finally {
+          if (trackingSetup === setup) {
+            trackingSetup = null
+          }
+        }
       }
 
       async function createDiffTrigger(
@@ -398,6 +425,17 @@ function createPowerSyncCollectionConfig<
       }
 
       async function flushDiffRecords(): Promise<void> {
+        // PowerSync can notify after creating the tracking table but before its
+        // create call returns. Preserve that notification until the disposer,
+        // which proves the trigger is usable, has been published.
+        const setup = trackingSetup
+        if (setup) {
+          await setup.catch(() => undefined)
+        }
+        if (!disposeTracking) {
+          return
+        }
+
         const ignoredReceipts: Array<SyncAppliedReceipt> = []
         await database
           .writeTransaction(async (context) => {
@@ -515,7 +553,7 @@ function createPowerSyncCollectionConfig<
           onUnload = await restConfig.onLoad?.()
 
           const appliedReceipts: Array<SyncAppliedReceipt> = []
-          disposeTracking = await createDiffTrigger(
+          await establishTracking(
             {
               // Initial eager hydration must make the source usable before
               // PowerSync can persist a mutation queued during startup.
@@ -567,7 +605,8 @@ function createPowerSyncCollectionConfig<
         let stopped = false
         const hasStopped = () => stopped
 
-        start().catch((error) =>
+        const startup = start()
+        void startup.catch((error) =>
           database.logger.error(
             `Could not start syncing process for ${viewName} into ${trackedTableName}`,
             error,
@@ -581,6 +620,9 @@ function createPowerSyncCollectionConfig<
         const loadSubset = async (
           options?: LoadSubsetOptions,
         ): Promise<void> => {
+          if (hasStopped()) return
+          // Never create a trigger that has no observer to drain its diff table.
+          await startup
           if (hasStopped()) return
           const appliedReceipts: Array<SyncAppliedReceipt> = []
 
@@ -642,7 +684,7 @@ function createPowerSyncCollectionConfig<
             await flushDiffRecordsWithContext(ctx, appliedReceipts)
             await safelyDisposeTracking(ctx)
 
-            disposeTracking = await createDiffTrigger(
+            await establishTracking(
               {
                 setupContext: ctx,
                 when: {

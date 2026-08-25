@@ -12,6 +12,7 @@ import {
   lt,
   or,
 } from '@tanstack/db'
+import pDefer from 'p-defer'
 import { describe, expect, it, onTestFinished, vi } from 'vitest'
 import { powerSyncCollectionOptions } from '../src'
 
@@ -2228,6 +2229,108 @@ describe(`On-Demand Sync Mode`, () => {
             })),
       })
     }
+
+    it(`flushes eager changes that arrive before the tracking handle is published`, async () => {
+      const db = await createDatabase()
+      await createTestProducts(db)
+
+      let flushTrackingChanges:
+        | ((event: { changedTables: Array<string> }) => Promise<void> | void)
+        | undefined
+      vi.spyOn(db, `onChangeWithCallback`).mockImplementation((handler) => {
+        flushTrackingChanges = handler?.onChange
+        return () => {}
+      })
+
+      const triggerCreated = pDefer<void>()
+      const publishTrackingHandle = pDefer<void>()
+      const createDiffTrigger = db.triggers.createDiffTrigger.bind(db.triggers)
+      vi.spyOn(db.triggers, `createDiffTrigger`).mockImplementation(
+        async (options) => {
+          const dispose = await createDiffTrigger(options)
+          triggerCreated.resolve()
+          await publishTrackingHandle.promise
+          return dispose
+        },
+      )
+
+      const collection = createCollection(
+        powerSyncCollectionOptions({
+          database: db,
+          table: APP_SCHEMA.props.products,
+        }),
+      )
+      onTestFinished(() => collection.cleanup())
+
+      await triggerCreated.promise
+      await db.execute(`
+        INSERT INTO products (id, name, price, category)
+        VALUES ('during-startup', 'During startup', 300, 'electronics')
+      `)
+
+      expect(flushTrackingChanges).toBeDefined()
+      const flush = Promise.resolve(
+        flushTrackingChanges!({
+          changedTables: [collection.utils.getMeta().trackedTableName],
+        }),
+      )
+      await new Promise((resolve) => setTimeout(resolve, 0))
+
+      publishTrackingHandle.resolve()
+      await Promise.all([flush, collection.stateWhenReady()])
+
+      expect(collection.get(`during-startup`)?.name).toBe(`During startup`)
+    })
+
+    it(`does not create tracking when change observation fails to start`, async () => {
+      const db = await createDatabase()
+      const startupError = new Error(`change observation failed`)
+      vi.spyOn(db.logger, `error`).mockImplementation(() => {})
+      vi.spyOn(console, `error`).mockImplementation(() => {})
+      vi.spyOn(db, `onChangeWithCallback`).mockImplementation(() => {
+        throw startupError
+      })
+      const createDiffTrigger = vi.spyOn(db.triggers, `createDiffTrigger`)
+
+      const collection = makeCollection(db)
+      onTestFinished(() => collection.cleanup())
+      await collection.stateWhenReady()
+
+      const query = categoryQuery(collection, `electronics`)
+      onTestFinished(() => query.cleanup())
+
+      await expect(query.preload()).rejects.toBe(startupError)
+      expect(createDiffTrigger).not.toHaveBeenCalled()
+    })
+
+    it(`disposes tracking that finishes starting during collection cleanup`, async () => {
+      const db = await createDatabase()
+      vi.spyOn(db, `onChangeWithCallback`).mockImplementation(() => () => {})
+
+      const triggerStarted = pDefer<void>()
+      const finishTrigger = pDefer<void>()
+      const dispose = vi.fn(async () => {})
+      vi.spyOn(db.triggers, `createDiffTrigger`).mockImplementation(async () => {
+        triggerStarted.resolve()
+        await finishTrigger.promise
+        return dispose
+      })
+
+      const collection = createCollection(
+        powerSyncCollectionOptions({
+          database: db,
+          table: APP_SCHEMA.props.products,
+        }),
+      )
+
+      await triggerStarted.promise
+      collection.cleanup()
+      finishTrigger.resolve()
+
+      await vi.waitFor(() => {
+        expect(dispose).toHaveBeenCalledTimes(1)
+      })
+    })
 
     it(`should start tracking again when a subset is loaded after every subset was unloaded`, async () => {
       const db = await createDatabase()
