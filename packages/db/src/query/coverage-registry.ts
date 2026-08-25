@@ -1,5 +1,6 @@
 import { getLoadSubsetDemandKey } from './ir-stable-identity.js'
 import { snapshotLoadSubsetDemand } from './load-subset-options.js'
+import { isLoadSubsetRequestSubsumedBy } from './predicate-utils.js'
 import type { AppliedLoadSubsetOutcome, LoadSubsetOptions } from '../types.js'
 
 const demandLeaseBrand: unique symbol = Symbol(`DemandLease`)
@@ -32,6 +33,14 @@ type LeaseRecord<TDemand> = {
 }
 
 type AcquisitionRecord<TCoverage, TRowKey extends string | number> = {
+  leases: Set<DemandLease<unknown>>
+  claims: Map<DemandLease<unknown>, CoverageClaim<TCoverage>>
+  release: () => void
+  releaseSettled: boolean
+  rows: Set<TRowKey>
+}
+
+type CoverageClaim<TCoverage> = {
   sequence: number
   generation: number
   scopeKey: string
@@ -40,10 +49,6 @@ type AcquisitionRecord<TCoverage, TRowKey extends string | number> = {
     sourceId: string | undefined
     demandKey: string | undefined
   }
-  leases: Set<DemandLease<unknown>>
-  release: () => void
-  releaseSettled: boolean
-  rows: Set<TRowKey>
   coverage: TCoverage | undefined
 }
 
@@ -111,9 +116,13 @@ export class CoverageRegistry<
   private readonly rowOwners = new Map<TRowKey, Set<AcquisitionToken>>()
   private readonly currentAcquisitions = new Map<
     string,
-    { acquisition: AcquisitionToken; generation: number }
+    {
+      acquisition: AcquisitionToken
+      lease: DemandLease<unknown>
+      generation: number
+    }
   >()
-  private acquisitionSequence = 0
+  private claimSequence = 0
 
   constructor(options: CoverageRegistryOptions<TDemand, TCoverage>) {
     this.coversDemand = options.coversDemand
@@ -150,27 +159,18 @@ export class CoverageRegistry<
     const acquisition = {
       [acquisitionTokenBrand]: true,
     } as AcquisitionToken
-    const demand = snapshotLoadSubsetDemand(options.scope.demand)
-    const demandKey = getLoadSubsetDemandKey(demand)
-    const scopeKey = createScopeKey(
-      options.scope.collectionId,
-      options.scope.sourceId,
-      demandKey,
-    )
+    const claim = this.createClaim(options.generation, options.scope)
     this.acquisitions.set(acquisition, {
-      sequence: this.acquisitionSequence++,
-      generation: options.generation,
-      scopeKey,
-      scope: {
-        collectionId: options.scope.collectionId,
-        sourceId: options.scope.sourceId,
-        demandKey,
-      },
       leases: new Set(options.leases as ReadonlyArray<DemandLease<unknown>>),
+      claims: new Map(
+        options.leases.map((lease) => [
+          lease as DemandLease<unknown>,
+          { ...claim, sequence: this.claimSequence++ },
+        ]),
+      ),
       release: options.release,
       releaseSettled: false,
       rows: new Set(),
-      coverage: undefined,
     })
     leaseRecords.forEach((record) => record.acquisitions.add(acquisition))
     return acquisition
@@ -184,6 +184,15 @@ export class CoverageRegistry<
   attachLease(
     lease: DemandLease<TDemand>,
     acquisition: AcquisitionToken,
+    options?: {
+      generation: number
+      scope: {
+        collectionId: string
+        sourceId?: string
+        demand: LoadSubsetOptions
+      }
+      coverage?: TCoverage
+    },
   ): void {
     const leaseRecord = this.leases.get(lease)
     const acquisitionRecord = this.acquisitions.get(acquisition)
@@ -194,9 +203,54 @@ export class CoverageRegistry<
     if (acquisitionRecord.releaseSettled) {
       throw new Error(`Cannot attach to a released acquisition`)
     }
+    if (acquisitionRecord.leases.has(lease as DemandLease<unknown>)) return
 
     leaseRecord.acquisitions.add(acquisition)
     acquisitionRecord.leases.add(lease as DemandLease<unknown>)
+    const fallback = acquisitionRecord.claims.values().next().value
+    const claim = options
+      ? this.createClaim(options.generation, options.scope)
+      : fallback
+        ? {
+            generation: fallback.generation,
+            scopeKey: fallback.scopeKey,
+            scope: fallback.scope,
+            coverage: undefined,
+          }
+        : undefined
+    if (!claim) throw new Error(`Cannot attach to an unscoped acquisition`)
+    acquisitionRecord.claims.set(lease as DemandLease<unknown>, {
+      ...claim,
+      sequence: this.claimSequence++,
+      coverage:
+        options?.coverage === undefined
+          ? undefined
+          : this.snapshotCoverage(options.coverage),
+    })
+    if (options?.coverage !== undefined) {
+      this.restoreCurrentAcquisition(claim.scopeKey)
+    }
+  }
+
+  coveringAcquisitions(demand: TDemand): Array<{
+    acquisition: AcquisitionToken
+    coverage: TCoverage
+    generation: number
+  }> {
+    return this.currentCoverageClaims().flatMap(
+      ({ acquisition, record, claim }) =>
+        !record.releaseSettled &&
+        claim.coverage !== undefined &&
+        this.coversDemand(claim.coverage, demand)
+          ? [
+              {
+                acquisition,
+                coverage: this.snapshotCoverage(claim.coverage),
+                generation: claim.generation,
+              },
+            ]
+          : [],
+    )
   }
 
   /**
@@ -206,13 +260,32 @@ export class CoverageRegistry<
   publishOutcome(
     acquisition: AcquisitionToken,
     outcome: AppliedLoadSubsetOutcome,
+  ): CoveragePublicationResult<TRowKey>
+  publishOutcome(
+    acquisition: AcquisitionToken,
+    lease: DemandLease<TDemand>,
+    outcome: AppliedLoadSubsetOutcome,
+  ): CoveragePublicationResult<TRowKey>
+  publishOutcome(
+    acquisition: AcquisitionToken,
+    leaseOrOutcome: DemandLease<TDemand> | AppliedLoadSubsetOutcome,
+    maybeOutcome?: AppliedLoadSubsetOutcome,
   ): CoveragePublicationResult<TRowKey> {
     const record = this.acquisitions.get(acquisition)
+    const outcome = maybeOutcome ?? (leaseOrOutcome as AppliedLoadSubsetOutcome)
+    const lease = maybeOutcome
+      ? (leaseOrOutcome as DemandLease<TDemand>)
+      : this.findMatchingLease(record, outcome)
+    const claim =
+      lease === undefined
+        ? undefined
+        : (record?.claims.get(lease as DemandLease<unknown>))
     if (
       !record ||
+      !claim ||
       record.releaseSettled ||
-      !this.canPublish(acquisition, record) ||
-      !matchesOutcome(record, outcome) ||
+      !this.canPublish(acquisition, claim) ||
+      !matchesOutcome(claim, outcome) ||
       outcome.appliedRowKeys === undefined
     ) {
       return { accepted: false, published: false, rowsToRemove: [] }
@@ -229,17 +302,24 @@ export class CoverageRegistry<
       record,
       nextRows,
     )
-    record.coverage = nextCoverage
+    claim.coverage = nextCoverage
+    if (nextCoverage !== undefined) {
+      // One physical result proves the same exact scope for every logical
+      // owner attached to that acquisition, even when only one observer
+      // publishes the adapter result.
+      for (const peer of record.claims.values()) {
+        if (peer.scopeKey === claim.scopeKey) {
+          peer.coverage = this.snapshotCoverage(nextCoverage)
+        }
+      }
+    }
 
     if (nextCoverage !== undefined) {
-      this.currentAcquisitions.set(record.scopeKey, {
-        acquisition,
-        generation: record.generation,
-      })
+      this.restoreCurrentAcquisition(claim.scopeKey)
     } else {
-      const current = this.currentAcquisitions.get(record.scopeKey)
-      if (current?.acquisition === acquisition) {
-        this.restoreCurrentAcquisition(record.scopeKey)
+      const current = this.currentAcquisitions.get(claim.scopeKey)
+      if (current?.acquisition === acquisition && current.lease === lease) {
+        this.restoreCurrentAcquisition(claim.scopeKey)
       }
     }
 
@@ -253,22 +333,50 @@ export class CoverageRegistry<
   replaceRows(
     acquisition: AcquisitionToken,
     rows: Iterable<TRowKey>,
+  ): RowOwnershipUpdate<TRowKey>
+  replaceRows(
+    acquisition: AcquisitionToken,
+    lease: DemandLease<TDemand>,
+    rows: Iterable<TRowKey>,
+  ): RowOwnershipUpdate<TRowKey>
+  replaceRows(
+    acquisition: AcquisitionToken,
+    leaseOrRows: DemandLease<TDemand> | Iterable<TRowKey>,
+    maybeRows?: Iterable<TRowKey>,
   ): RowOwnershipUpdate<TRowKey> {
     const record = this.acquisitions.get(acquisition)
+    const lease = maybeRows
+      ? (leaseOrRows as DemandLease<TDemand>)
+      : (record?.claims.keys().next().value as DemandLease<TDemand> | undefined)
+    const rows = maybeRows ?? (leaseOrRows as Iterable<TRowKey>)
+    const claim =
+      lease === undefined
+        ? undefined
+        : (record?.claims.get(lease as DemandLease<unknown>))
     if (
       !record ||
+      !claim ||
       record.releaseSettled ||
-      !this.canPublish(acquisition, record)
+      !this.canPublish(acquisition, claim)
     ) {
       return { accepted: false, rowsToRemove: [] }
     }
 
     const nextRows = new Set(rows)
-    record.coverage = undefined
-    const current = this.currentAcquisitions.get(record.scopeKey)
-    if (current?.acquisition === acquisition) {
-      this.restoreCurrentAcquisition(record.scopeKey)
+    const affectedScopes = new Set<string>()
+    for (const [claimLease, existingClaim] of record.claims) {
+      existingClaim.coverage = undefined
+      const current = this.currentAcquisitions.get(existingClaim.scopeKey)
+      if (
+        current?.acquisition === acquisition &&
+        current.lease === claimLease
+      ) {
+        affectedScopes.add(existingClaim.scopeKey)
+      }
     }
+    affectedScopes.forEach((scopeKey) =>
+      this.restoreCurrentAcquisition(scopeKey),
+    )
     return {
       accepted: true,
       rowsToRemove: this.replaceRowsForRecord(acquisition, record, nextRows),
@@ -301,23 +409,23 @@ export class CoverageRegistry<
 
   private canPublish(
     acquisition: AcquisitionToken,
-    record: AcquisitionRecord<TCoverage, TRowKey>,
+    claim: CoverageClaim<TCoverage>,
   ): boolean {
-    const current = this.currentAcquisitions.get(record.scopeKey)
+    const current = this.currentAcquisitions.get(claim.scopeKey)
     return (
       current === undefined ||
       current.acquisition === acquisition ||
-      record.generation > current.generation
+      claim.generation > current.generation
     )
   }
 
   private isCurrent(
     acquisition: AcquisitionToken,
-    record: AcquisitionRecord<TCoverage, TRowKey>,
+    lease: DemandLease<unknown>,
+    claim: CoverageClaim<TCoverage>,
   ): boolean {
-    return (
-      this.currentAcquisitions.get(record.scopeKey)?.acquisition === acquisition
-    )
+    const current = this.currentAcquisitions.get(claim.scopeKey)
+    return current?.acquisition === acquisition && current.lease === lease
   }
 
   covers(demand: TDemand): boolean {
@@ -327,15 +435,10 @@ export class CoverageRegistry<
   }
 
   coverageAntichain(): Array<TCoverage> {
-    const facts = Array.from(this.acquisitions.entries()).flatMap(
-      ([acquisition, record]) =>
-        record.coverage !== undefined && this.isCurrent(acquisition, record)
-          ? [
-              record as AcquisitionRecord<TCoverage, TRowKey> & {
-                coverage: TCoverage
-              },
-            ]
-          : [],
+    const facts = this.currentCoverageClaims().flatMap(({ claim }) =>
+      claim.coverage === undefined
+        ? []
+        : [claim as CoverageClaim<TCoverage> & { coverage: TCoverage }],
     )
 
     return facts
@@ -356,6 +459,19 @@ export class CoverageRegistry<
         }),
       )
       .map(({ coverage }) => this.snapshotCoverage(coverage))
+  }
+
+  coverageEvidence(): Array<{ coverage: TCoverage; generation: number }> {
+    return this.currentCoverageClaims().flatMap(({ claim }) =>
+      claim.coverage === undefined
+        ? []
+        : [
+            {
+              coverage: this.snapshotCoverage(claim.coverage),
+              generation: claim.generation,
+            },
+          ],
+    )
   }
 
   rowOwnerCount(row: TRowKey): number {
@@ -381,6 +497,14 @@ export class CoverageRegistry<
     for (const acquisition of acquisitions) {
       const record = this.acquisitions.get(acquisition)
       if (!record) continue
+      const claim = record.claims.get(lease as DemandLease<unknown>)
+      if (claim) {
+        const current = this.currentAcquisitions.get(claim.scopeKey)
+        record.claims.delete(lease as DemandLease<unknown>)
+        if (current?.acquisition === acquisition && current.lease === lease) {
+          this.restoreCurrentAcquisition(claim.scopeKey)
+        }
+      }
       record.leases.delete(lease as DemandLease<unknown>)
       leaseRecord.acquisitions.delete(acquisition)
       if (record.leases.size === 0) {
@@ -442,10 +566,16 @@ export class CoverageRegistry<
     if (!record) return
 
     this.acquisitions.delete(acquisition)
-    const current = this.currentAcquisitions.get(record.scopeKey)
-    if (current?.acquisition === acquisition) {
-      this.restoreCurrentAcquisition(record.scopeKey)
+    const affectedScopes = new Set<string>()
+    for (const [lease, claim] of record.claims) {
+      const current = this.currentAcquisitions.get(claim.scopeKey)
+      if (current?.acquisition === acquisition && current.lease === lease) {
+        affectedScopes.add(claim.scopeKey)
+      }
     }
+    affectedScopes.forEach((scopeKey) =>
+      this.restoreCurrentAcquisition(scopeKey),
+    )
     for (const lease of record.leases) {
       this.leases
         .get(lease as DemandLease<TDemand>)
@@ -463,26 +593,79 @@ export class CoverageRegistry<
 
   private restoreCurrentAcquisition(scopeKey: string): void {
     const candidate = Array.from(this.acquisitions.entries())
-      .filter(
-        ([, record]) =>
-          record.scopeKey === scopeKey &&
-          record.coverage !== undefined &&
-          !record.releaseSettled,
+      .flatMap(([acquisition, record]) =>
+        record.releaseSettled
+          ? []
+          : Array.from(record.claims.entries()).flatMap(([lease, claim]) =>
+              claim.scopeKey === scopeKey && claim.coverage !== undefined
+                ? [{ acquisition, lease, claim }]
+                : [],
+            ),
       )
-      .sort(([, left], [, right]) =>
-        left.generation === right.generation
-          ? right.sequence - left.sequence
-          : right.generation - left.generation,
+      .sort((left, right) =>
+        left.claim.generation === right.claim.generation
+          ? right.claim.sequence - left.claim.sequence
+          : right.claim.generation - left.claim.generation,
       )[0]
 
     if (candidate) {
       this.currentAcquisitions.set(scopeKey, {
-        acquisition: candidate[0],
-        generation: candidate[1].generation,
+        acquisition: candidate.acquisition,
+        lease: candidate.lease,
+        generation: candidate.claim.generation,
       })
     } else {
       this.currentAcquisitions.delete(scopeKey)
     }
+  }
+
+  private createClaim(
+    generation: number,
+    scope: {
+      collectionId: string
+      sourceId?: string
+      demand: LoadSubsetOptions
+    },
+  ): Omit<CoverageClaim<TCoverage>, `sequence`> {
+    const demand = snapshotLoadSubsetDemand(scope.demand)
+    const demandKey = getLoadSubsetDemandKey(demand)
+    return {
+      generation,
+      scopeKey: createScopeKey(scope.collectionId, scope.sourceId, demandKey),
+      scope: {
+        collectionId: scope.collectionId,
+        sourceId: scope.sourceId,
+        demandKey,
+      },
+      coverage: undefined,
+    }
+  }
+
+  private findMatchingLease(
+    record: AcquisitionRecord<TCoverage, TRowKey> | undefined,
+    outcome: AppliedLoadSubsetOutcome,
+  ): DemandLease<TDemand> | undefined {
+    if (!record) return undefined
+    return Array.from(record.claims.entries()).find(([, claim]) =>
+      matchesOutcome(claim, outcome),
+    )?.[0] as DemandLease<TDemand> | undefined
+  }
+
+  private currentCoverageClaims(): Array<{
+    acquisition: AcquisitionToken
+    record: AcquisitionRecord<TCoverage, TRowKey>
+    lease: DemandLease<unknown>
+    claim: CoverageClaim<TCoverage>
+  }> {
+    return Array.from(this.acquisitions.entries()).flatMap(
+      ([acquisition, record]) =>
+        Array.from(record.claims.entries()).flatMap(([lease, claim]) =>
+          claim.coverage !== undefined &&
+          this.isCurrent(acquisition, lease, claim)
+            ? [{ acquisition, record, lease, claim }]
+            : [],
+        ),
+    )
   }
 }
 
@@ -500,13 +683,11 @@ export function createLoadSubsetCoverageRegistry<
 > {
   return new CoverageRegistry({
     coversDemand: (coverage, demand) =>
-      getLoadSubsetDemandKey(coverage.demand) ===
-      getLoadSubsetDemandKey(demand),
+      isLoadSubsetRequestSubsumedBy(demand, coverage.demand),
     coversCoverage: (coverage, candidate) =>
       coverage.collectionId === candidate.collectionId &&
       coverage.sourceId === candidate.sourceId &&
-      getLoadSubsetDemandKey(coverage.demand) ===
-        getLoadSubsetDemandKey(candidate.demand),
+      isLoadSubsetRequestSubsumedBy(candidate.demand, coverage.demand),
     snapshotCoverage: snapshotAppliedCoverage,
     projectAppliedCoverage: ({ outcome, rows }) => {
       const limit = outcome.demand.limit
@@ -549,15 +730,15 @@ function createScopeKey(
   return JSON.stringify([collectionId, sourceId ?? null, demandKey ?? null])
 }
 
-function matchesOutcome<TCoverage, TRowKey extends string | number>(
-  record: AcquisitionRecord<TCoverage, TRowKey>,
+function matchesOutcome<TCoverage>(
+  claim: CoverageClaim<TCoverage>,
   outcome: AppliedLoadSubsetOutcome,
 ): boolean {
   return (
-    record.generation === outcome.generation &&
-    record.scope.collectionId === outcome.collectionId &&
-    record.scope.sourceId === outcome.sourceId &&
-    record.scope.demandKey === getLoadSubsetDemandKey(outcome.demand)
+    claim.generation === outcome.generation &&
+    claim.scope.collectionId === outcome.collectionId &&
+    claim.scope.sourceId === outcome.sourceId &&
+    claim.scope.demandKey === getLoadSubsetDemandKey(outcome.demand)
   )
 }
 

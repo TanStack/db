@@ -305,6 +305,7 @@ export class CollectionConfigBuilder<
       throw new SetWindowRequiresOrderByError()
     }
 
+    const syncSession = this.syncSession
     const loadOperation =
       this.liveQueryCollection?._sync.beginLoadSubsetOperation()
     const previousWindow = this.currentWindow ?? this.initialWindow
@@ -334,12 +335,22 @@ export class CollectionConfigBuilder<
 
     const ready = loadOperation?.wait() ?? true
     if (ready === true) {
-      this.lastWindowOutcomes = loadOperation?.getOutcomes() ?? []
+      this.lastWindowOutcomes = this.resolveWindowOutcomes(
+        loadOperation?.getOutcomes() ?? [],
+      )
       return true
     }
     void ready.then(
       () => {
-        this.lastWindowOutcomes = loadOperation!.getOutcomes()
+        if (
+          syncSession !== this.syncSession ||
+          this.currentSyncConfig === undefined
+        ) {
+          return
+        }
+        this.lastWindowOutcomes = this.resolveWindowOutcomes(
+          loadOperation!.getOutcomes(),
+        )
       },
       () => {
         // The original promise carries the failure to the caller. This
@@ -347,6 +358,14 @@ export class CollectionConfigBuilder<
       },
     )
     return ready
+  }
+
+  private resolveWindowOutcomes(
+    outcomes: ReadonlyArray<AppliedLoadSubsetOutcome>,
+  ): ReadonlyArray<AppliedLoadSubsetOutcome> {
+    if (outcomes.length > 0) return outcomes
+    if (this.lastWindowOutcomes.length > 0) return this.lastWindowOutcomes
+    return [...this.latestSubsetOutcomes.values()]
   }
 
   getWindow(): { offset: number; limit: number } | undefined {
@@ -460,6 +479,15 @@ export class CollectionConfigBuilder<
       return scoped
     })
     this.liveQueryCollection!._sync.trackLoadPromise(tracked)
+  }
+
+  trackRetainedSubsetOutcome(
+    outcome: AppliedLoadSubsetOutcome,
+    sourceId?: string,
+  ): void {
+    const scoped = sourceId === undefined ? outcome : { ...outcome, sourceId }
+    this.recordSubsetOutcome(scoped)
+    this.liveQueryCollection!._sync.trackLoadSubsetOperationOutcome(scoped)
   }
 
   trackSubsetLoadOperationPromise(
