@@ -78,6 +78,7 @@ type SubsetAcquisition = {
 
 type SubsetDemand = SubsetAcquisition & {
   requestOptions: LoadSubsetOptions
+  releaseFailed: boolean
 }
 
 type TruncateReplayAttempt = {
@@ -596,6 +597,10 @@ export class CollectionSubscription
     demand.abortController?.abort()
     try {
       this.collection._sync.unloadSubset(demand.options)
+      demand.releaseFailed = false
+    } catch (error) {
+      demand.releaseFailed = true
+      throw error
     } finally {
       demand.removeRequestAbortListener?.()
     }
@@ -609,18 +614,25 @@ export class CollectionSubscription
     const demand: SubsetDemand = {
       requestOptions,
       options: requestOptions,
+      releaseFailed: false,
     }
     const acquisition = this.createSubsetAcquisition(demand)
+    demand.options = acquisition.options
+    demand.abortController = acquisition.abortController
+    demand.removeRequestAbortListener = acquisition.removeRequestAbortListener
+    // Reentrant release must see the exact acquisition before adapter work
+    // starts. A genuine load throw removes this tentative logical owner below.
+    this.subsetDemands.push(demand)
     try {
       const result = this.loadSubset(acquisition.options)
-      demand.options = acquisition.options
-      demand.abortController = acquisition.abortController
-      demand.removeRequestAbortListener = acquisition.removeRequestAbortListener
-      this.subsetDemands.push(demand)
       return { demand, result }
     } catch (error) {
-      acquisition.abortController.abort()
-      acquisition.removeRequestAbortListener?.()
+      const demandIndex = this.subsetDemands.indexOf(demand)
+      if (demandIndex !== -1 && !demand.releaseFailed) {
+        this.subsetDemands.splice(demandIndex, 1)
+        acquisition.abortController.abort()
+        acquisition.removeRequestAbortListener?.()
+      }
       throw error
     }
   }
