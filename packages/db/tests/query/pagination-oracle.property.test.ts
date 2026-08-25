@@ -6,6 +6,7 @@ import { BTreeIndex } from '../../src/index.js'
 import { createLiveQueryCollection } from '../../src/query/live-query-collection.js'
 import { PropRef } from '../../src/query/ir.js'
 import { expectAssertionFailure } from '../expected-failure.js'
+import { makeComparator } from '../../src/utils/comparison.js'
 import {
   oracleRandomParameters,
   readOracleRunConfig,
@@ -45,6 +46,12 @@ type NullableCursorRow = {
 
 type LocaleCursorRow = {
   id: number
+  label: string
+}
+
+type AdversarialOrderedRow = {
+  id: number
+  rank: number | null | object
   label: string
 }
 
@@ -372,6 +379,27 @@ function rowsForLoadSubset<TRow extends { id: number }>(
   return [...requested.values()]
 }
 
+function withAppliedSubsetEvidence<TRow extends { id: number }>(
+  rows: () => ReadonlyArray<TRow>,
+  options: LoadSubsetOptions,
+  settled: Promise<void>,
+) {
+  return settled.then(() => {
+    const authoritative = rows()
+    const requested = rowsForLoadSubset(authoritative, options)
+    const hasMore = options.cursor
+      ? authoritative.filter((row) =>
+          Boolean(evaluateReferenceExpression(options.cursor!.whereFrom, row)),
+        ).length > (options.limit ?? Number.POSITIVE_INFINITY)
+      : authoritative.length >
+        (options.offset ?? 0) + (options.limit ?? Number.POSITIVE_INFINITY)
+    return {
+      hasMore,
+      appliedRowKeys: requested.map(({ id }) => id),
+    }
+  })
+}
+
 async function runPaginationScenario(
   scenario: PaginationScenario,
 ): Promise<void> {
@@ -517,6 +545,7 @@ async function runNullableCursorScenario(
       }) || left.id - right.id,
   )
   const pending: Array<PendingCursorLoad> = []
+  const delivered = new Set<number>()
   let begin!: () => void
   let write!: (message: { type: `insert`; value: NullableCursorRow }) => void
   let commit!: () => void
@@ -537,7 +566,11 @@ async function runNullableCursorScenario(
           loadSubset: (options: LoadSubsetOptions) => {
             const deferred = createDeferred<void>()
             pending.push({ options, deferred })
-            return deferred.promise
+            return withAppliedSubsetEvidence(
+              () => orderedRows,
+              options,
+              deferred.promise,
+            )
           },
         }
       },
@@ -557,14 +590,21 @@ async function runNullableCursorScenario(
   try {
     const preload = live.preload()
     expect(pending).toHaveLength(1)
-    const request = pending[0]!
-    begin()
-    for (const row of rowsForLoadSubset(orderedRows, request.options)) {
-      write({ type: `insert`, value: { ...row } })
+    // Settling one request can append its boundary-refinement request.
+    // eslint-disable-next-line @typescript-eslint/prefer-for-of
+    for (let index = 0; index < pending.length; index++) {
+      const request = pending[index]!
+      begin()
+      for (const row of rowsForLoadSubset(orderedRows, request.options)) {
+        if (delivered.has(row.id)) continue
+        delivered.add(row.id)
+        write({ type: `insert`, value: { ...row } })
+      }
+      commit()
+      request.settled = true
+      request.deferred.resolve()
+      await flushPromises()
     }
-    commit()
-    request.settled = true
-    request.deferred.resolve()
     await preload
 
     try {
@@ -722,19 +762,6 @@ function isNumberArray(value: unknown): value is Array<number> {
   return Array.isArray(value) && value.every((item) => typeof item === `number`)
 }
 
-function assertionDifference(
-  checkpoint: number,
-  actual: unknown,
-  expected: unknown,
-): TraceAssertionError {
-  try {
-    expect(actual).toEqual(expected)
-  } catch (error) {
-    return new TraceAssertionError(checkpoint, error)
-  }
-  throw new Error(`test difference must not be equal`)
-}
-
 async function runOnDemandPaginationScenario(
   scenario: PaginationScenario,
 ): Promise<void> {
@@ -766,7 +793,7 @@ async function runOnDemandPaginationScenario(
             loads.push({ ...options })
             const requested = rowsForLoadSubset(orderedRows, options)
 
-            return new Promise<void>((resolve) => {
+            const settled = new Promise<void>((resolve) => {
               queueMicrotask(() => {
                 begin()
                 for (const row of requested) {
@@ -778,6 +805,11 @@ async function runOnDemandPaginationScenario(
                 resolve()
               })
             })
+            return withAppliedSubsetEvidence(
+              () => orderedRows,
+              options,
+              settled,
+            )
           },
         }
       },
@@ -878,7 +910,11 @@ async function expectOnDemandWindowsAreCompletionOrderIndependent(
           loadSubset: (options: LoadSubsetOptions) => {
             const deferred = createDeferred<void>()
             pending.push({ options, deferred })
-            return deferred.promise
+            return withAppliedSubsetEvidence(
+              () => authoritativeRows,
+              options,
+              deferred.promise,
+            )
           },
         }
       },
@@ -905,7 +941,13 @@ async function expectOnDemandWindowsAreCompletionOrderIndependent(
       const request = pending[index]!
       apply(request.options)
       request.deferred.resolve()
-      await Promise.resolve()
+      await flushPromises()
+    }
+    for (let index = 2; index < pending.length; index++) {
+      const request = pending[index]!
+      apply(request.options)
+      request.deferred.resolve()
+      await flushPromises()
     }
     await first
     await second
@@ -920,9 +962,99 @@ async function expectOnDemandWindowsAreCompletionOrderIndependent(
   }
 }
 
+async function runAdversarialOrderedProviderScenario(options: {
+  providerRows: ReadonlyArray<AdversarialOrderedRow>
+  initialRows?: ReadonlyArray<AdversarialOrderedRow>
+  order:
+    | { kind: `rank`; direction: `asc` | `desc`; nulls: `first` | `last` }
+    | { kind: `reference` }
+    | { kind: `locale` }
+  limit: number
+  expectedIds: ReadonlyArray<number>
+}): Promise<Array<LoadSubsetOptions>> {
+  const loads: Array<LoadSubsetOptions> = []
+  const delivered = new Set(options.initialRows?.map(({ id }) => id) ?? [])
+  const source = createCollection<AdversarialOrderedRow>({
+    id: `pagination-adversarial-order-source-${collectionSequence++}`,
+    getKey: (row) => row.id,
+    syncMode: `on-demand`,
+    startSync: true,
+    autoIndex: `eager`,
+    defaultIndexType: BTreeIndex,
+    sync: {
+      sync: ({ begin, write, commit, markReady }) => {
+        if (options.initialRows?.length) {
+          begin()
+          for (const row of options.initialRows) {
+            write({ type: `insert`, value: { ...row } })
+          }
+          commit()
+        }
+        markReady()
+        return {
+          loadSubset: (loadOptions: LoadSubsetOptions) => {
+            loads.push(loadOptions)
+            const requested = rowsForLoadSubset(
+              options.providerRows,
+              loadOptions,
+            )
+            begin()
+            for (const row of requested) {
+              if (delivered.has(row.id)) continue
+              delivered.add(row.id)
+              write({ type: `insert`, value: { ...row } })
+            }
+            const receipt = commit()
+            const requestedIds = requested.map(({ id }) => id)
+            const hasMore = requestedIds.length < options.providerRows.length
+            return Promise.resolve(receipt).then(() => ({
+              hasMore,
+              appliedRowKeys: requestedIds,
+            }))
+          },
+        }
+      },
+    },
+  })
+  const live = createLiveQueryCollection((query) => {
+    const from = query.from({ row: source })
+    const ordered =
+      options.order.kind === `locale`
+        ? from.orderBy(({ row }) => row.label, {
+            direction: `asc`,
+            nulls: `first`,
+            stringSort: `locale`,
+            locale: `en-US`,
+            localeOptions: { numeric: true },
+          })
+        : from.orderBy(
+            ({ row }) => row.rank,
+            options.order.kind === `reference`
+              ? { direction: `asc`, nulls: `first` }
+              : {
+                  direction: options.order.direction,
+                  nulls: options.order.nulls,
+                },
+          )
+    return ordered.limit(options.limit).select(({ row }) => ({ id: row.id }))
+  })
+
+  try {
+    await live.preload()
+    expect(Array.from(live.values(), ({ id }) => id)).toEqual(
+      options.expectedIds,
+    )
+    return loads
+  } finally {
+    live.cleanup()
+    source.cleanup()
+  }
+}
+
 async function runPendingMutationScenario(
   scenario: PendingMutationScenario,
   timing: `before-response` | `after-response`,
+  finalLimitAfterMutation?: number,
 ): Promise<void> {
   const rows = new Map<number, PageRow>(
     scenario.ranks.map((rank, index) => [index + 1, { id: index + 1, rank }]),
@@ -936,8 +1068,7 @@ async function runPendingMutationScenario(
   const deliveredIds = new Set<number>([firstDelivered.id])
   // A rejected initial subset load is fatal. Establish a ready baseline first
   // so reject scenarios exercise subscription-scoped window recovery.
-  let establishInitialCoverageSynchronously =
-    scenario.responseOutcome === `reject`
+  let initialCoverageRequests = scenario.responseOutcome === `reject` ? 2 : 0
   let begin!: () => void
   let write!: (message: {
     type: `insert` | `update` | `delete`
@@ -963,13 +1094,24 @@ async function runPendingMutationScenario(
         params.markReady()
         return {
           loadSubset: (options: LoadSubsetOptions) => {
-            if (establishInitialCoverageSynchronously) {
-              establishInitialCoverageSynchronously = false
-              return true
+            if (initialCoverageRequests > 0) {
+              initialCoverageRequests--
+              return Promise.resolve({
+                hasMore: true,
+                appliedRowKeys: [firstDelivered.id],
+              })
             }
             const deferred = createDeferred<void>()
             pending.push({ options, deferred })
-            return deferred.promise
+            return withAppliedSubsetEvidence(
+              () =>
+                referenceWindowRows([...rows.values()], scenario.direction, {
+                  offset: 0,
+                  limit: rows.size,
+                }),
+              options,
+              deferred.promise,
+            )
           },
         }
       },
@@ -1002,7 +1144,10 @@ async function runPendingMutationScenario(
   }
 
   const settlePending = async () => {
-    for (const request of pending) {
+    // Settling one request can append its boundary-refinement request.
+    // eslint-disable-next-line @typescript-eslint/prefer-for-of
+    for (let index = 0; index < pending.length; index++) {
+      const request = pending[index]!
       if (request.settled) continue
       request.settled = true
       const orderedRows = referenceWindowRows(
@@ -1021,7 +1166,7 @@ async function runPendingMutationScenario(
       }
       commit()
       request.deferred.resolve()
-      await Promise.resolve()
+      await flushPromises()
     }
   }
 
@@ -1036,8 +1181,17 @@ async function runPendingMutationScenario(
       await preload
       if (timing === `after-response`) {
         applyMutation()
-        await Promise.resolve()
+        await flushPromises()
+        if (finalLimitAfterMutation !== undefined) {
+          finalLimit = finalLimitAfterMutation
+          const widened = live.utils.setWindow({
+            offset: 0,
+            limit: finalLimit,
+          })
+          if (widened instanceof Promise) outstanding.push(widened)
+        }
         await settlePending()
+        await Promise.all(outstanding)
       }
     } else {
       await preload
@@ -1179,7 +1333,7 @@ async function runRejectedCursorRetryAfterMutation(): Promise<void> {
   const deliveredIds = new Set<number>([1])
   // Keep the rejected cursor in the incremental path rather than failing the
   // live query's initial preload.
-  let establishInitialCoverageSynchronously = true
+  let initialCoverageRequests = 2
   let begin!: () => void
   let write!: (message: { type: `insert` | `update`; value: PageRow }) => void
   let commit!: () => void
@@ -1201,13 +1355,24 @@ async function runRejectedCursorRetryAfterMutation(): Promise<void> {
         params.markReady()
         return {
           loadSubset: (options: LoadSubsetOptions) => {
-            if (establishInitialCoverageSynchronously) {
-              establishInitialCoverageSynchronously = false
-              return true
+            if (initialCoverageRequests > 0) {
+              initialCoverageRequests--
+              return Promise.resolve({
+                hasMore: true,
+                appliedRowKeys: [1],
+              })
             }
             const deferred = createDeferred<void>()
             pending.push({ options, deferred })
-            return deferred.promise
+            return withAppliedSubsetEvidence(
+              () =>
+                referenceWindowRows([...rows.values()], `asc`, {
+                  offset: 0,
+                  limit: rows.size,
+                }),
+              options,
+              deferred.promise,
+            )
           },
         }
       },
@@ -1235,7 +1400,7 @@ async function runRejectedCursorRetryAfterMutation(): Promise<void> {
     }
     commit()
     request.deferred.resolve()
-    await Promise.resolve()
+    await flushPromises()
   }
 
   try {
@@ -1319,7 +1484,15 @@ async function runPendingHistoryScenario(
           loadSubset: (options: LoadSubsetOptions) => {
             const deferred = createDeferred<void>()
             pending.push({ options, deferred })
-            return deferred.promise
+            return withAppliedSubsetEvidence(
+              () =>
+                referenceWindowRows([...rows.values()], scenario.direction, {
+                  offset: 0,
+                  limit: rows.size,
+                }),
+              options,
+              deferred.promise,
+            )
           },
         }
       },
@@ -1358,7 +1531,7 @@ async function runPendingHistoryScenario(
     }
     commit()
     request.deferred.resolve()
-    await Promise.resolve()
+    await flushPromises()
   }
 
   const track = (result: true | Promise<void>): void => {
@@ -1415,55 +1588,6 @@ function changedRankValue(previous: number, requested: number): number {
     : requested
 }
 
-function pendingHistoryRows(
-  scenario: PendingHistoryScenario,
-): Map<number, PageRow> {
-  const rows = new Map<number, PageRow>(
-    scenario.ranks.map((rank, index) => [index + 1, { id: index + 1, rank }]),
-  )
-  const first = referenceWindowRows([...rows.values()], scenario.direction, {
-    offset: 0,
-    limit: 1,
-  })[0]!
-  const afterFirst = changedRankValue(first.rank, scenario.firstRank)
-  const afterSecond = changedRankValue(afterFirst, scenario.secondRank)
-  rows.set(first.id, { ...first, rank: afterSecond })
-  return rows
-}
-
-function isKnownLatePendingHistoryUnderfill(
-  scenario: PendingHistoryScenario,
-  error: unknown,
-): boolean {
-  if (!(error instanceof PendingHistoryTraceAssertionError)) {
-    return false
-  }
-
-  const difference = readPageRowDifferenceAtCheckpoint(error, 0)
-  if (!difference) return false
-  const authoritative = referenceWindowRows(
-    [...pendingHistoryRows(scenario).values()],
-    scenario.direction,
-    { offset: 0, limit: scenario.wideLimit },
-  )
-  return (
-    sameRows(difference.expected, authoritative) &&
-    !sameRows(error.deliveredRows, authoritative) &&
-    sameRows(difference.actual, error.deliveredRows)
-  )
-}
-
-async function runPendingHistoryScenarioWithKnownFailures(
-  scenario: PendingHistoryScenario,
-): Promise<void> {
-  try {
-    await runPendingHistoryScenario(scenario)
-  } catch (error) {
-    if (isKnownLatePendingHistoryUnderfill(scenario, error)) return
-    throw error
-  }
-}
-
 async function expectInflightRequestFillsNewWindow(): Promise<void> {
   const rows: Array<PageRow> = [
     { id: 1, rank: 0 },
@@ -1496,7 +1620,11 @@ async function expectInflightRequestFillsNewWindow(): Promise<void> {
           loadSubset: (options: LoadSubsetOptions) => {
             const deferred = createDeferred<void>()
             pending.push({ options, deferred })
-            return deferred.promise
+            return withAppliedSubsetEvidence(
+              () => rows,
+              options,
+              deferred.promise,
+            )
           },
         }
       },
@@ -1604,7 +1732,7 @@ describe(`pagination recomputation oracle`, () => {
       { id: 3, label: `item11` },
     ]
     const pending: Array<PendingCursorLoad> = []
-    let initialLoad = true
+    const delivered = new Set<number>()
     let begin!: () => void
     let write!: (message: { type: `insert`; value: LocaleCursorRow }) => void
     let commit!: () => void
@@ -1620,19 +1748,16 @@ describe(`pagination recomputation oracle`, () => {
           begin = params.begin
           write = params.write
           commit = params.commit
-          begin()
-          write({ type: `insert`, value: { ...rows[0]! } })
-          commit()
           params.markReady()
           return {
             loadSubset: (options: LoadSubsetOptions) => {
-              if (initialLoad) {
-                initialLoad = false
-                return true
-              }
               const deferred = createDeferred<void>()
               pending.push({ options, deferred })
-              return deferred.promise
+              return withAppliedSubsetEvidence(
+                () => rows,
+                options,
+                deferred.promise,
+              )
             },
           }
         },
@@ -1653,30 +1778,40 @@ describe(`pagination recomputation oracle`, () => {
     )
 
     try {
-      await live.preload()
-      const widened = live.utils.setWindow({ offset: 0, limit: 2 })
-      expect(widened).toBeInstanceOf(Promise)
+      const preload = live.preload()
       expect(pending).toHaveLength(1)
-      const request = pending[0]!
-      expect(request.options.cursor).toBeDefined()
+      // Settling one request can append its boundary-refinement request.
+      // eslint-disable-next-line @typescript-eslint/prefer-for-of
+      for (let index = 0; index < pending.length; index++) {
+        const request = pending[index]!
+        begin()
+        for (const row of rowsForLoadSubset(rows, request.options)) {
+          if (delivered.has(row.id)) continue
+          delivered.add(row.id)
+          write({ type: `insert`, value: { ...row } })
+        }
+        commit()
+        request.deferred.resolve()
+        await flushPromises()
+      }
+      await preload
+
+      expect(pending).toHaveLength(2)
+      const refinement = pending[1]!
+      expect(refinement.options.cursor).toBeDefined()
       expect(
         rows.every((row) =>
           Boolean(
             evaluateReferenceExpression(
-              request.options.cursor!.whereCurrent,
+              refinement.options.cursor!.whereCurrent,
               row,
             ),
           ),
         ),
       ).toBe(true)
 
-      begin()
-      for (const row of rowsForLoadSubset(rows, request.options)) {
-        write({ type: `insert`, value: { ...row } })
-      }
-      commit()
-      request.deferred.resolve()
-      if (widened instanceof Promise) await widened
+      const widened = live.utils.setWindow({ offset: 0, limit: 2 })
+      expect(widened).toBe(true)
 
       expect(Array.from(live.values(), ({ id }) => id)).toEqual([1, 2])
     } finally {
@@ -1821,6 +1956,40 @@ describe(`pagination recomputation oracle`, () => {
     },
   )
 
+  it.each([
+    [`insert`, { type: `insert`, row: { id: 9, rank: 0.5 } }],
+    [`delete`, { type: `delete`, id: 1 }],
+    [`rank update`, { type: `update`, row: { id: 2, rank: 10 } }],
+  ] satisfies ReadonlyArray<readonly [string, PendingMutation]>)(
+    `revalidates a finite ordered prefix after a settled SSE %s`,
+    async (_name, mutation) => {
+      await runPendingMutationScenario(
+        {
+          ranks: [0, 1, 2, 3, 4, 5, 6, 7],
+          direction: `asc`,
+          limit: 2,
+          mutation,
+          responseOutcome: `resolve`,
+        },
+        `after-response`,
+      )
+    },
+  )
+
+  it(`does not use a new row beyond finite coverage as a widening boundary`, async () => {
+    await runPendingMutationScenario(
+      {
+        ranks: [0, 1, 2, 3, 4, 5, 6, 7],
+        direction: `asc`,
+        limit: 2,
+        mutation: { type: `insert`, row: { id: 9, rank: 4.5 } },
+        responseOutcome: `resolve`,
+      },
+      `after-response`,
+      5,
+    )
+  })
+
   it(`discovered trace: a settled rank update refreshes top-k membership`, async () => {
     const scenario: PendingMutationScenario = {
       ranks: [0, 0, 1],
@@ -1832,7 +2001,7 @@ describe(`pagination recomputation oracle`, () => {
     await runPendingMutationScenario(scenario, `after-response`)
   })
 
-  it(`discovered trace: a rejected cursor does not treat a live insert as remote coverage`, async () => {
+  it(`a rejected cursor does not treat a live insert as remote coverage`, async () => {
     const scenario: PendingMutationScenario = {
       ranks: [0, -1, 0],
       direction: `asc`,
@@ -1841,52 +2010,7 @@ describe(`pagination recomputation oracle`, () => {
       responseOutcome: `reject`,
     }
 
-    await expectAssertionFailure(
-      () => runPendingMutationScenario(scenario, `before-response`),
-      {
-        checkpoint: 0,
-        classify: ({ actual, expected }) =>
-          isPageRowArray(actual) &&
-          sameRows(actual, [
-            { id: 2, rank: -1 },
-            { id: 4, rank: 0 },
-          ]) &&
-          isPageRowArray(expected) &&
-          sameRows(expected, [
-            { id: 2, rank: -1 },
-            { id: 1, rank: 0 },
-          ]),
-      },
-    )()
-  })
-
-  it(`rejects collateral output from the rejected-cursor retry classifier`, () => {
-    const scenario: PendingMutationScenario = {
-      ranks: [0, -1, 0],
-      direction: `asc`,
-      limit: 1,
-      mutation: { type: `insert`, row: { id: 4, rank: 0 } },
-      responseOutcome: `reject`,
-    }
-
-    const collateral = assertionDifference(
-      0,
-      [{ id: 4, rank: 0 }],
-      [
-        { id: 2, rank: -1 },
-        { id: 1, rank: 0 },
-      ],
-    )
-
-    expect(
-      isKnownRejectedCursorRetryFailure(
-        scenario,
-        new PendingMutationTraceAssertionError(collateral.cause, [
-          { id: 2, rank: -1 },
-          { id: 4, rank: 0 },
-        ]),
-      ),
-    ).toBe(false)
+    await runPendingMutationScenario(scenario, `before-response`)
   })
 
   fcTest.prop([pendingMutationScenarioArbitrary, responseTimingArbitrary], {
@@ -1941,7 +2065,7 @@ describe(`pagination recomputation oracle`, () => {
       checkpoint: 0,
       classify: ({ actual, expected }) =>
         isNumberArray(actual) &&
-        actual.join(`,`) === `1,4` &&
+        actual.join(`,`) === `3,1,4` &&
         isNumberArray(expected) &&
         expected.join(`,`) === `2,3,1`,
     }),
@@ -1952,7 +2076,7 @@ describe(`pagination recomputation oracle`, () => {
     seed: 1664,
   })(
     `matches recomputation across multi-action pending histories for a fixed seed`,
-    runPendingHistoryScenarioWithKnownFailures,
+    runPendingHistoryScenario,
   )
 
   fcTest.prop(
@@ -1960,38 +2084,8 @@ describe(`pagination recomputation oracle`, () => {
     oracleRandomParameters(transitionScenarioRuns, replaySeed),
   )(
     `matches recomputation across multi-action pending histories for a random or replayed seed`,
-    runPendingHistoryScenarioWithKnownFailures,
+    runPendingHistoryScenario,
   )
-
-  it(`rejects collateral output from the late pending-history classifier`, () => {
-    const scenario: PendingHistoryScenario = {
-      ranks: [0, 0, 0, 0],
-      direction: `asc`,
-      initialLimit: 2,
-      narrowLimit: 1,
-      wideLimit: 3,
-      firstRank: 0,
-      secondRank: 0,
-    }
-    const expectedRows = referenceWindowRows(
-      [...pendingHistoryRows(scenario).values()],
-      scenario.direction,
-      { offset: 0, limit: scenario.wideLimit },
-    )
-    const cause = assertionDifference(
-      0,
-      {
-        rows: [{ id: 4, rank: 0 }],
-        modeledDeliveredRows: expectedRows.slice(0, 2),
-      },
-      {
-        rows: expectedRows,
-        modeledDeliveredRows: expectedRows.slice(0, 2),
-      },
-    )
-
-    expect(isKnownLatePendingHistoryUnderfill(scenario, cause)).toBe(false)
-  })
 
   it(
     `discovered trace: an in-flight request does not underfill a new window`,
@@ -2223,6 +2317,103 @@ describe(`pagination recomputation oracle`, () => {
   it(`expands a multi-column boundary before choosing top-K`, async () => {
     await expectMultiOrderBoundaryMatches()
   })
+
+  it(`expands a provider tie before applying the public-key tie-breaker`, async () => {
+    const loads = await runAdversarialOrderedProviderScenario({
+      providerRows: [
+        { id: 2, rank: 0, label: `second` },
+        { id: 1, rank: 0, label: `first` },
+        { id: 3, rank: 1, label: `third` },
+      ],
+      order: { kind: `rank`, direction: `asc`, nulls: `first` },
+      limit: 1,
+      expectedIds: [1],
+    })
+
+    expect(loads).toHaveLength(2)
+    expect(loads[1]?.cursor).toBeDefined()
+  })
+
+  it(`does not derive an ordered boundary from another demand's local row`, async () => {
+    const unrelated = { id: 100, rank: 100, label: `unrelated` }
+    const loads = await runAdversarialOrderedProviderScenario({
+      providerRows: [
+        { id: 1, rank: 1, label: `first` },
+        { id: 2, rank: 2, label: `second` },
+        unrelated,
+      ],
+      initialRows: [unrelated],
+      order: { kind: `rank`, direction: `asc`, nulls: `first` },
+      limit: 1,
+      expectedIds: [1],
+    })
+
+    expect(loads[0]?.offset).toBe(0)
+    expect(loads[0]?.cursor).toBeUndefined()
+  })
+
+  it(`refines an initial locale window without trusting provider collation`, async () => {
+    const loads = await runAdversarialOrderedProviderScenario({
+      // Lexical provider order disagrees with locale numeric order.
+      providerRows: [
+        { id: 2, rank: 0, label: `item10` },
+        { id: 1, rank: 0, label: `item2` },
+      ],
+      order: { kind: `locale` },
+      limit: 1,
+      expectedIds: [1],
+    })
+
+    expect(loads).toHaveLength(2)
+    expect(loads[1]?.cursor).toBeDefined()
+  })
+
+  it(`refines an initial reference-ordered window locally`, async () => {
+    const first = { value: `first` }
+    const second = { value: `second` }
+    // Fix their runtime reference order before the provider returns the
+    // opposite prefix.
+    makeComparator({ direction: `asc`, nulls: `first` })(first, second)
+
+    const loads = await runAdversarialOrderedProviderScenario({
+      providerRows: [
+        { id: 2, rank: second, label: `second` },
+        { id: 1, rank: first, label: `first` },
+      ],
+      order: { kind: `reference` },
+      limit: 1,
+      expectedIds: [1],
+    })
+
+    expect(loads).toHaveLength(2)
+    expect(loads[1]?.cursor).toBeDefined()
+  })
+
+  it.each([
+    { direction: `asc`, nulls: `first`, expectedIds: [1, 2] },
+    { direction: `asc`, nulls: `last`, expectedIds: [2, 3] },
+    { direction: `desc`, nulls: `first`, expectedIds: [1, 3] },
+    { direction: `desc`, nulls: `last`, expectedIds: [3, 2] },
+  ] as const)(
+    `keeps null placement and $direction across source refinement ($nulls)`,
+    async ({ direction, nulls, expectedIds }) => {
+      const providerRows = [
+        { id: 1, rank: null, label: `null` },
+        { id: 2, rank: 0, label: `zero` },
+        { id: 3, rank: 1, label: `one` },
+      ].sort(
+        (left, right) =>
+          compareNullableNumber(left.rank, right.rank, { direction, nulls }) ||
+          left.id - right.id,
+      )
+      await runAdversarialOrderedProviderScenario({
+        providerRows,
+        order: { kind: `rank`, direction, nulls },
+        limit: 2,
+        expectedIds,
+      })
+    },
+  )
 
   fcTest.prop([scenarioArbitrary], {
     numRuns: transitionScenarioRuns,

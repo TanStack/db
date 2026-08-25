@@ -381,6 +381,21 @@ and continuation boundary. Independent join demands may retain extra source
 rows, but those rows do not move the ordered boundary. The D2 top-K operator
 uses the same query terms and public-key tie-breaker for emitted layout.
 
+An adapter receives only the leading order terms owned by its lexical source.
+Later terms that depend on a joined or derived row stay in D2. Since the public
+key tie-breaker is local and is not part of the adapter query, a finite source
+prefix is only a candidate prefix. Core expands the complete source-order
+boundary class, then applies the public-key tie-break locally. Locale and
+reference orders that the predicate IR cannot express fetch the full filtered
+region and refine it locally.
+
+Every continuation boundary comes from rows established by the same ordered
+demand. Rows retained for another query, join, or window cannot move it. During
+a failed truncate replay, the last complete publication remains the boundary;
+a partial replacement snapshot has no continuation provenance. Exact applied
+row keys and source extent advance retained coverage. A requested limit, a
+settled promise, or the number of requests does not.
+
 A bare child query is a Collection-valued include. It exposes one stable public
 Collection facade per active bucket in that edge:
 

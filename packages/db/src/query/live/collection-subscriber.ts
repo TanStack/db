@@ -442,41 +442,31 @@ export class CollectionSubscriber<
       return true
     }
 
-    // `dataNeeded` probes the orderBy operator to see if it needs more data
-    // if it needs more data, it returns the number of items it needs
-    // Publish locally known rows at once, but do not treat them as proof that
-    // the remote prefix is complete. Until source-extent outcomes are wired,
-    // the existing load request remains the authority check for this window.
-    const expandedFromLocalRows = subscription.ensureOrderedWindowSize(
-      offset + limit,
-    )
-    // A prior continuation already asked the source for the complete boundary
-    // equivalence class. Rows retained by that request may fill this wider
-    // window without another transport. Initial local rows have no such proof,
-    // so they still require an authority check until source outcomes land.
-    if (expandedFromLocalRows && subscription.hasPriorOrderedContinuation) {
+    subscription.ensureOrderedWindowSize(offset + limit)
+    if (subscription.hasOrderedCoverageForActiveWindow) {
+      return true
+    }
+
+    if (this.pendingOrderedLoadPromise) {
+      // The current window still needs the in-flight coverage. Attach it to
+      // this operation without making an unrelated or superseded request a
+      // dependency of every window change.
+      this.collectionConfigBuilder.trackSubsetLoadOperationPromise(
+        this.pendingOrderedLoadPromise,
+        this.sourceId,
+      )
       return true
     }
 
     const n = Math.max(dataNeeded(), subscription.orderedRowsNeeded)
-    if (n > 0) {
-      if (this.pendingOrderedLoadPromise) {
-        // The current window still needs the in-flight coverage. Attach it to
-        // this operation without making an unrelated or superseded request a
-        // dependency of every window change.
-        this.collectionConfigBuilder.trackSubsetLoadOperationPromise(
-          this.pendingOrderedLoadPromise,
-          this.sourceId,
-        )
-        return true
-      }
-      try {
-        this.loadNextItems(n, subscription)
-      } catch (error) {
-        if (subscription.lastError !== error) throw error
-        // The subscription already reported the failure. Automatic refills
-        // must not make the source transaction that exposed the gap fail.
-      }
+    try {
+      // Local rows may fill the visible window without proving its remote
+      // prefix. One row is enough to request the boundary equivalence class.
+      this.loadNextItems(Math.max(1, n), subscription)
+    } catch (error) {
+      if (subscription.lastError !== error) throw error
+      // The subscription already reported the failure. Automatic refills
+      // must not make the source transaction that exposed the gap fail.
     }
     return true
   }
@@ -519,7 +509,7 @@ export class CollectionSubscriber<
 
     const cursor = computeOrderedLoadCursor(
       orderByInfo,
-      subscription.orderedBoundaryRow ?? this.biggest,
+      subscription.orderedBoundaryRow,
       this.lastLoadRequestKey,
       this.alias,
       n,

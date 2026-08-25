@@ -17,6 +17,12 @@ export class WindowState<
   readonly totalOrder: TotalOrder<TRow, TKey>
   private activeSize: number
   private retainedSize: number
+  private coveredSize = 0
+  private hasFullCoverage = false
+  private needsFullRefinement = false
+  private readonly candidateKeys = new Set<TKey>()
+  private readonly provenanceKeys = new Set<TKey>()
+  private readonly admittedKeys = new Set<TKey>()
 
   constructor(
     private readonly collection: CollectionImpl<TRow, TKey>,
@@ -42,25 +48,141 @@ export class WindowState<
     return this.readPrefix()?.length ?? 0
   }
 
+  get coversActiveWindow(): boolean {
+    return this.hasFullCoverage || this.coveredSize >= this.activeSize
+  }
+
+  get requiresFullRefinement(): boolean {
+    return this.needsFullRefinement
+  }
+
   rowsNeeded(): number {
     return Math.max(0, this.activeSize - this.localPrefixSize)
+  }
+
+  recordInitialCoverage(
+    rowKeys: ReadonlyArray<TKey> | undefined,
+    exhausted: boolean,
+  ): void {
+    if (exhausted) {
+      this.establishFullCoverage()
+      return
+    }
+    if (rowKeys === undefined) {
+      this.candidateKeys.clear()
+      this.provenanceKeys.clear()
+      this.needsFullRefinement = true
+      return
+    }
+    this.candidateKeys.clear()
+    for (const key of rowKeys) this.candidateKeys.add(key)
+  }
+
+  recordContinuationCoverage(
+    rowKeys: ReadonlyArray<TKey> | undefined,
+    exhausted: boolean,
+    requestedPrefix: number,
+    fullRegion: boolean,
+  ): void {
+    if (fullRegion || exhausted) {
+      this.establishFullCoverage()
+      return
+    }
+    if (rowKeys === undefined) {
+      this.candidateKeys.clear()
+      this.provenanceKeys.clear()
+      this.coveredSize = 0
+      this.needsFullRefinement = true
+      return
+    }
+    for (const key of this.candidateKeys) {
+      this.admittedKeys.add(key)
+      this.provenanceKeys.add(key)
+    }
+    this.candidateKeys.clear()
+    for (const key of rowKeys) {
+      this.admittedKeys.add(key)
+      this.provenanceKeys.add(key)
+    }
+    this.coveredSize = Math.max(this.coveredSize, requestedPrefix)
+  }
+
+  admitChanges(changes: ReadonlyArray<ChangeMessage<TRow, TKey>>): void {
+    if (this.hasFullCoverage) {
+      for (const change of changes) {
+        if (change.type === `delete`) this.admittedKeys.delete(change.key)
+        else this.admittedKeys.add(change.key)
+      }
+      return
+    }
+    if (this.admittedKeys.size === 0) return
+
+    let invalidated = false
+    for (const change of changes) {
+      if (change.type === `delete`) {
+        if (this.admittedKeys.delete(change.key)) invalidated = true
+        continue
+      }
+
+      if (this.admittedKeys.has(change.key)) {
+        invalidated = true
+        continue
+      }
+
+      const possiblePrefix = new Set(this.admittedKeys)
+      possiblePrefix.add(change.key)
+      if (
+        this.readRows(possiblePrefix, this.activeSize).some(
+          (row) => row.key === change.key,
+        )
+      ) {
+        this.admittedKeys.add(change.key)
+        invalidated = true
+      }
+    }
+
+    if (invalidated) {
+      // A live change may update the visible prefix at once, but an applied
+      // snapshot fact does not prove the new remote boundary. Reacquire from
+      // the start instead of continuing from a row whose provenance changed.
+      this.coveredSize = 0
+      this.candidateKeys.clear()
+      this.provenanceKeys.clear()
+      this.needsFullRefinement = false
+    }
   }
 
   boundary(
     staleRows?: ReadonlyMap<TKey, TRow>,
   ): TotalOrderBoundary<TKey> | undefined {
+    // A failed truncate replay may have installed only part of the next
+    // snapshot in the source collection. Its boundary is not a continuation
+    // point. Keep using the last complete publication until a replay settles.
+    if (staleRows) {
+      const fallback = [...staleRows]
+        .sort((left, right) => this.totalOrder.compareEntries(left, right))
+        .at(-1)
+      return fallback && this.totalOrder.boundary(fallback[1], fallback[0])
+    }
+
     const lastPrefixRow = this.readPrefix()?.at(-1)
     if (lastPrefixRow) {
       return this.totalOrder.boundary(lastPrefixRow.value, lastPrefixRow.key)
     }
-    // Only failed-replay state may stand in for an absent source prefix.
-    // Independently demanded rows must never move the ordered boundary.
-    const fallback = staleRows
-      ? [...staleRows]
-          .sort((left, right) => this.totalOrder.compareEntries(left, right))
-          .at(-1)
-      : undefined
-    return fallback && this.totalOrder.boundary(fallback[1], fallback[0])
+    return undefined
+  }
+
+  requestBoundary(): TotalOrderBoundary<TKey> | undefined {
+    const rows = this.readRows(
+      this.hasFullCoverage
+        ? undefined
+        : this.provenanceKeys.size > 0
+          ? this.provenanceKeys
+          : this.candidateKeys,
+      this.retainedSize,
+    )
+    const lastRow = rows.at(-1)
+    return lastRow && this.totalOrder.boundary(lastRow.value, lastRow.key)
   }
 
   reconcile(
@@ -94,10 +216,37 @@ export class WindowState<
   }
 
   private readPrefix(): Array<ChangeMessage<TRow, TKey>> | undefined {
-    return this.collection.currentStateAsChanges({
+    if (this.admittedKeys.size === 0 && !this.hasFullCoverage) return []
+    return this.readRows(
+      this.hasFullCoverage ? undefined : this.admittedKeys,
+      this.retainedSize,
+    )
+  }
+
+  private establishFullCoverage(): void {
+    this.hasFullCoverage = true
+    this.needsFullRefinement = false
+    this.coveredSize = Number.POSITIVE_INFINITY
+    this.candidateKeys.clear()
+    this.provenanceKeys.clear()
+    for (const change of this.readRows(undefined)) {
+      this.admittedKeys.add(change.key)
+      this.provenanceKeys.add(change.key)
+    }
+  }
+
+  private readRows(
+    allowedKeys: ReadonlySet<TKey> | undefined,
+    limit?: number,
+  ): Array<ChangeMessage<TRow, TKey>> {
+    const rows = this.collection.currentStateAsChanges({
       ...(this.where && { where: this.where }),
       orderBy: this.totalOrder.orderBy,
-      limit: this.retainedSize,
     }) as Array<ChangeMessage<TRow, TKey>> | undefined
+    const allowed =
+      allowedKeys === undefined
+        ? (rows ?? [])
+        : (rows ?? []).filter((change) => allowedKeys.has(change.key))
+    return limit === undefined ? allowed : allowed.slice(0, limit)
   }
 }

@@ -5,6 +5,21 @@ import type { CollectionLike, StringCollationConfig } from '../types.js'
 import type { CompareOptions } from './builder/types.js'
 import type { OrderBy, OrderByClause } from './ir.js'
 
+function comparePublicKeys(
+  left: string | number,
+  right: string | number,
+): number {
+  if (typeof left === `number` && typeof right === `number`) {
+    const leftIsNaN = Number.isNaN(left)
+    const rightIsNaN = Number.isNaN(right)
+    if (leftIsNaN || rightIsNaN) {
+      if (leftIsNaN && rightIsNaN) return 0
+      return leftIsNaN ? 1 : -1
+    }
+  }
+  return compareKeys(left, right)
+}
+
 export type TotalOrderBoundary<TKey extends string | number = string | number> =
   {
     key: TKey
@@ -77,7 +92,7 @@ export class TotalOrder<
       const result = compare(extract(left[1]), extract(right[1]))
       if (result !== 0) return result
     }
-    return compareKeys(left[0], right[0])
+    return comparePublicKeys(left[0], right[0])
   }
 
   compareBoundary(
@@ -91,6 +106,6 @@ export class TotalOrder<
       )
       if (result !== 0) return result
     }
-    return compareKeys(left.key, right.key)
+    return comparePublicKeys(left.key, right.key)
   }
 }

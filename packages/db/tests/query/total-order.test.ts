@@ -65,4 +65,26 @@ describe(`TotalOrder`, () => {
       ),
     )
   })
+
+  it(`orders NaN public keys apart from finite numeric keys`, () => {
+    const order = new TotalOrder<Row, number>(
+      [
+        {
+          expression: new PropRef([`rank`]),
+          compareOptions: { direction: `asc`, nulls: `first` },
+        },
+      ],
+      collection,
+    )
+    const finite: readonly [number, Row] = [1, { rank: 0, label: `finite` }]
+    const notANumber: readonly [number, Row] = [
+      Number.NaN,
+      { rank: 0, label: `nan` },
+    ]
+
+    expect(order.compareEntries(finite, notANumber)).not.toBe(0)
+    expect(order.compareEntries(notANumber, finite)).toBe(
+      -order.compareEntries(finite, notANumber),
+    )
+  })
 })

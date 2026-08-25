@@ -1923,6 +1923,7 @@ function createOrderByTests(autoIndex: `off` | `eager`): void {
                     eq(employees.department_id, departments.id),
                 )
                 .orderBy(({ departments }) => departments.name, `asc`)
+                .orderBy(({ employees }) => employees.salary, `desc`)
                 .limit(5)
                 .select(({ employees, departments }) => ({
                   employeeId: employees.id,
@@ -1948,6 +1949,12 @@ function createOrderByTests(autoIndex: `off` | `eager`): void {
             expect(orderByInfo.sourceId).toBe(orderedSource.sourceId)
             expect(orderByInfo.offset).toBe(0)
             expect(orderByInfo.limit).toBe(5)
+            expect(
+              orderByInfo.orderBy.map(
+                (clause: { expression: { path: Array<string> } }) =>
+                  clause.expression.path,
+              ),
+            ).toEqual([[`departments`, `name`]])
           } finally {
             CollectionConfigBuilder.prototype.getConfig = originalGetConfig
           }
@@ -2774,7 +2781,10 @@ describe(`OrderBy with duplicate values`, () => {
                     loadSubsetCursors.push(options.cursor)
 
                     // Simulate async loading from remote source
-                    return new Promise<void>((resolve) => {
+                    return new Promise<{
+                      hasMore: boolean
+                      appliedRowKeys: Array<number>
+                    }>((resolve) => {
                       setTimeout(() => {
                         begin()
 
@@ -2798,13 +2808,16 @@ describe(`OrderBy with duplicate values`, () => {
                           }
                         }
 
+                        const { limit } = options
+                        let hasMore =
+                          limit !== undefined && filteredData.length > limit
+
                         // Apply cursor expressions if present (cursor-based pagination)
                         // For proper cursor-based pagination:
                         // - whereCurrent should load ALL ties (no limit)
                         // - whereFrom should load with remaining limit
                         if (options.cursor) {
                           const { whereFrom, whereCurrent } = options.cursor
-                          const { limit } = options
                           try {
                             // Get ALL rows matching whereCurrent (no limit for ties)
                             const whereCurrentFn =
@@ -2816,6 +2829,8 @@ describe(`OrderBy with duplicate values`, () => {
                             const whereFromFn =
                               createFilterFunctionFromExpression(whereFrom)
                             const fromData = filteredData.filter(whereFromFn)
+                            hasMore =
+                              limit !== undefined && fromData.length > limit
                             const limitedFromData = limit
                               ? fromData.slice(0, limit)
                               : fromData
@@ -2844,7 +2859,6 @@ describe(`OrderBy with duplicate values`, () => {
 
                         // Apply limit for initial page load (no cursor).
                         // When cursor is present, limit was already applied in the cursor block above.
-                        const { limit } = options
                         const dataToLoad =
                           limit && !options.cursor
                             ? filteredData.slice(0, limit)
@@ -2858,7 +2872,10 @@ describe(`OrderBy with duplicate values`, () => {
                         })
 
                         commit()
-                        resolve()
+                        resolve({
+                          hasMore,
+                          appliedRowKeys: dataToLoad.map(({ id }) => id),
+                        })
                       }, 10) // Small delay to simulate network
                     })
                   },
@@ -2895,11 +2912,12 @@ describe(`OrderBy with duplicate values`, () => {
           { id: 4, a: 4, keep: true },
           { id: 5, a: 5, keep: true },
         ])
-        expect(loadSubsetCallCount).toBe(1)
-        // The initial provider request continues from the exact local boundary.
-        // This stays correct if that local prefix changes while the request is
-        // in flight; a raw offset would shift under the mutation.
-        expect(loadSubsetCursors[0]).toMatchObject({ lastKey: 5 })
+        expect(loadSubsetCallCount).toBe(2)
+        // Local rows do not prove source coverage. The first request acquires
+        // the prefix; the second expands its complete boundary class so the
+        // public-key tie-break is safe.
+        expect(loadSubsetCursors[0]).toBeUndefined()
+        expect(loadSubsetCursors[1]).toMatchObject({ lastKey: 5 })
 
         // Now move to next page (offset 5, limit 5) - this should trigger loadSubset with a cursor
         const moveToSecondPage = collection.utils.setWindow({
@@ -2921,11 +2939,11 @@ describe(`OrderBy with duplicate values`, () => {
           { id: 10, a: 5, keep: true },
         ])
         // we expect 1 new loadSubset call (cursor expressions for whereFrom/whereCurrent are now combined in single call)
-        expect(loadSubsetCallCount).toBe(2)
+        expect(loadSubsetCallCount).toBe(3)
         // Second loadSubset call (pagination) has a cursor with whereFrom and whereCurrent
-        expect(loadSubsetCursors[1]).toBeDefined()
-        expect(loadSubsetCursors[1]).toHaveProperty(`whereFrom`)
-        expect(loadSubsetCursors[1]).toHaveProperty(`whereCurrent`)
+        expect(loadSubsetCursors[2]).toBeDefined()
+        expect(loadSubsetCursors[2]).toHaveProperty(`whereFrom`)
+        expect(loadSubsetCursors[2]).toHaveProperty(`whereCurrent`)
 
         // Now move to third page (offset 10, limit 5)
         // It should advance past the duplicate 5s
@@ -2955,7 +2973,7 @@ describe(`OrderBy with duplicate values`, () => {
         // We expect no more loadSubset calls because when we loaded the previous page
         // we asked for all data equal to max value and LIMIT values greater than max value
         // and the LIMIT values greater than max value already loaded the next page
-        expect(loadSubsetCallCount).toBe(2)
+        expect(loadSubsetCallCount).toBe(3)
       })
 
       it(`should correctly advance window when there are duplicate values loaded from both local collection and sync layer`, async () => {
@@ -3012,7 +3030,10 @@ describe(`OrderBy with duplicate values`, () => {
                     loadSubsetCursors.push(options.cursor)
 
                     // Simulate async loading from remote source
-                    return new Promise<void>((resolve) => {
+                    return new Promise<{
+                      hasMore: boolean
+                      appliedRowKeys: Array<number>
+                    }>((resolve) => {
                       setTimeout(() => {
                         begin()
 
@@ -3036,13 +3057,16 @@ describe(`OrderBy with duplicate values`, () => {
                           }
                         }
 
+                        const { limit } = options
+                        let hasMore =
+                          limit !== undefined && filteredData.length > limit
+
                         // Apply cursor expressions if present (cursor-based pagination)
                         // For proper cursor-based pagination:
                         // - whereCurrent should load ALL ties (no limit)
                         // - whereFrom should load with remaining limit
                         if (options.cursor) {
                           const { whereFrom, whereCurrent } = options.cursor
-                          const { limit } = options
                           try {
                             // Get ALL rows matching whereCurrent (no limit for ties)
                             const whereCurrentFn =
@@ -3054,6 +3078,8 @@ describe(`OrderBy with duplicate values`, () => {
                             const whereFromFn =
                               createFilterFunctionFromExpression(whereFrom)
                             const fromData = filteredData.filter(whereFromFn)
+                            hasMore =
+                              limit !== undefined && fromData.length > limit
                             const limitedFromData = limit
                               ? fromData.slice(0, limit)
                               : fromData
@@ -3082,7 +3108,6 @@ describe(`OrderBy with duplicate values`, () => {
 
                         // Apply limit for initial page load (no cursor).
                         // When cursor is present, limit was already applied in the cursor block above.
-                        const { limit } = options
                         const dataToLoad =
                           limit && !options.cursor
                             ? filteredData.slice(0, limit)
@@ -3096,7 +3121,10 @@ describe(`OrderBy with duplicate values`, () => {
                         })
 
                         commit()
-                        resolve()
+                        resolve({
+                          hasMore,
+                          appliedRowKeys: dataToLoad.map(({ id }) => id),
+                        })
                       }, 10) // Small delay to simulate network
                     })
                   },
@@ -3133,11 +3161,12 @@ describe(`OrderBy with duplicate values`, () => {
           { id: 4, a: 4, keep: true },
           { id: 5, a: 5, keep: true },
         ])
-        expect(loadSubsetCallCount).toBe(1)
-        // The initial provider request continues from the exact local boundary.
-        // This stays correct if that local prefix changes while the request is
-        // in flight; a raw offset would shift under the mutation.
-        expect(loadSubsetCursors[0]).toMatchObject({ lastKey: 5 })
+        expect(loadSubsetCallCount).toBe(2)
+        // Local rows do not prove source coverage. The first request acquires
+        // the prefix; the second expands its complete boundary class so the
+        // public-key tie-break is safe.
+        expect(loadSubsetCursors[0]).toBeUndefined()
+        expect(loadSubsetCursors[1]).toMatchObject({ lastKey: 5 })
 
         // Now move to next page (offset 5, limit 5) - this should trigger loadSubset with a cursor
         const moveToSecondPage = collection.utils.setWindow({
@@ -3159,11 +3188,11 @@ describe(`OrderBy with duplicate values`, () => {
           { id: 10, a: 5, keep: true },
         ])
         // we expect 1 new loadSubset call (cursor expressions for whereFrom/whereCurrent are now combined in single call)
-        expect(loadSubsetCallCount).toBe(2)
+        expect(loadSubsetCallCount).toBe(3)
         // Second loadSubset call (pagination) has a cursor with whereFrom and whereCurrent
-        expect(loadSubsetCursors[1]).toBeDefined()
-        expect(loadSubsetCursors[1]).toHaveProperty(`whereFrom`)
-        expect(loadSubsetCursors[1]).toHaveProperty(`whereCurrent`)
+        expect(loadSubsetCursors[2]).toBeDefined()
+        expect(loadSubsetCursors[2]).toHaveProperty(`whereFrom`)
+        expect(loadSubsetCursors[2]).toHaveProperty(`whereCurrent`)
 
         // Now move to third page (offset 10, limit 5)
         // It should advance past the duplicate 5s
@@ -3193,7 +3222,7 @@ describe(`OrderBy with duplicate values`, () => {
         // We expect no more loadSubset calls because when we loaded the previous page
         // we asked for all data equal to max value and LIMIT values greater than max value
         // and the LIMIT values greater than max value already loaded the next page
-        expect(loadSubsetCallCount).toBe(2)
+        expect(loadSubsetCallCount).toBe(3)
       })
     })
   }
@@ -3262,7 +3291,10 @@ describe(`OrderBy with Date values and precision differences`, () => {
                 // Capture the cursor for inspection (now contains whereFrom/whereCurrent/lastKey)
                 loadSubsetCursors.push(options.cursor)
 
-                return new Promise<void>((resolve) => {
+                return new Promise<{
+                  hasMore: boolean
+                  appliedRowKeys: Array<number>
+                }>((resolve) => {
                   setTimeout(() => {
                     begin()
                     const sortedData = [...testData].sort(
@@ -3281,6 +3313,10 @@ describe(`OrderBy with Date values and precision differences`, () => {
                       }
                     }
 
+                    const { limit } = options
+                    let hasMore =
+                      limit !== undefined && filteredData.length > limit
+
                     // Apply cursor expressions if present
                     if (options.cursor) {
                       const { whereFrom, whereCurrent } = options.cursor
@@ -3288,6 +3324,11 @@ describe(`OrderBy with Date values and precision differences`, () => {
                         const whereFromFn =
                           createFilterFunctionFromExpression(whereFrom)
                         const fromData = filteredData.filter(whereFromFn)
+                        hasMore = limit !== undefined && fromData.length > limit
+                        const limitedFromData =
+                          limit === undefined
+                            ? fromData
+                            : fromData.slice(0, limit)
 
                         const whereCurrentFn =
                           createFilterFunctionFromExpression(whereCurrent)
@@ -3302,7 +3343,7 @@ describe(`OrderBy with Date values and precision differences`, () => {
                             filteredData.push(item)
                           }
                         }
-                        for (const item of fromData) {
+                        for (const item of limitedFromData) {
                           if (!seenIds.has(item.id)) {
                             seenIds.add(item.id)
                             filteredData.push(item)
@@ -3317,17 +3358,20 @@ describe(`OrderBy with Date values and precision differences`, () => {
                       }
                     }
 
-                    const { limit } = options
-                    const dataToLoad = limit
-                      ? filteredData.slice(0, limit)
-                      : filteredData
+                    const dataToLoad =
+                      limit !== undefined && !options.cursor
+                        ? filteredData.slice(0, limit)
+                        : filteredData
 
                     dataToLoad.forEach((item) => {
                       write({ type: `insert`, value: item })
                     })
 
                     commit()
-                    resolve()
+                    resolve({
+                      hasMore,
+                      appliedRowKeys: dataToLoad.map(({ id }) => id),
+                    })
                   }, 10)
                 })
               },
@@ -3355,9 +3399,6 @@ describe(`OrderBy with Date values and precision differences`, () => {
     // First page loads
     const results = Array.from(collection.values()).sort((a, b) => a.id - b.id)
     expect(results.map((r) => r.id)).toEqual([1, 2, 3, 4, 5])
-
-    // Clear tracked cursors before moving to next page
-    loadSubsetCursors.length = 0
 
     // Move to next page - this should trigger the Date precision handling
     const moveToSecondPage = collection.utils.setWindow({ offset: 5, limit: 5 })
@@ -3392,4 +3433,32 @@ describe(`OrderBy with Date values and precision differences`, () => {
     expect(ltValue).toBeInstanceOf(Date)
     expect(ltValue.getTime() - gteValue.getTime()).toBe(1) // 1ms difference
   })
+})
+
+it(`uses the public key as a total tie-breaker when one key is NaN`, async () => {
+  const source = createCollection(
+    mockSyncCollectionOptions({
+      id: `nan-public-key-order`,
+      getKey: (row: { id: number; rank: number; label: string }) => row.id,
+      initialData: [
+        { id: Number.NaN, rank: 0, label: `NaN` },
+        { id: 1, rank: 0, label: `finite` },
+      ],
+      autoIndex: `eager`,
+    }),
+  )
+  const live = createLiveQueryCollection((query) =>
+    query
+      .from({ row: source })
+      .orderBy(({ row }) => row.rank, `asc`)
+      .limit(1),
+  )
+
+  try {
+    await live.preload()
+    expect(Array.from(live.values(), ({ label }) => label)).toEqual([`finite`])
+  } finally {
+    await live.cleanup()
+    await source.cleanup()
+  }
 })

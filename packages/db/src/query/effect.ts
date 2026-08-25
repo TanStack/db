@@ -976,16 +976,10 @@ class EffectPipelineRunner<TRow extends object, TKey extends string | number> {
 
       const subscription = this.subscriptions[orderByInfo.sourceId]
       if (!subscription) continue
-      // Local rows can fill the visible prefix before the provider confirms
-      // it. Keep the remote request until exact source extent is consumed.
-      const expandedFromLocalRows = subscription.ensureOrderedWindowSize(
+      subscription.ensureOrderedWindowSize(
         orderByInfo.offset + orderByInfo.limit,
       )
-      // A prior continuation already asked the source for the complete boundary
-      // equivalence class. Rows retained by that request may fill this wider
-      // window without another transport. Initial local rows have no such proof,
-      // so they still require an authority check until source outcomes land.
-      if (expandedFromLocalRows && subscription.hasPriorOrderedContinuation) {
+      if (subscription.hasOrderedCoverageForActiveWindow) {
         continue
       }
 
@@ -998,9 +992,7 @@ class EffectPipelineRunner<TRow extends object, TKey extends string | number> {
         orderByInfo.dataNeeded(),
         subscription.orderedRowsNeeded,
       )
-      if (n > 0) {
-        this.loadNextItems(orderByInfo, n)
-      }
+      this.loadNextItems(orderByInfo, Math.max(1, n))
     }
   }
 
@@ -1033,7 +1025,7 @@ class EffectPipelineRunner<TRow extends object, TKey extends string | number> {
 
     const cursor = computeOrderedLoadCursor(
       orderByInfo,
-      subscription.orderedBoundaryRow ?? this.biggestSentValue.get(sourceId),
+      subscription.orderedBoundaryRow,
       this.lastLoadRequestKey.get(sourceId),
       alias,
       n,

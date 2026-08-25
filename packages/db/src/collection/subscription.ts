@@ -9,6 +9,7 @@ import {
 } from '../utils/cursor.js'
 import { deepEquals } from '../utils.js'
 import { WindowState } from '../query/live/window-state.js'
+import { getLoadSubsetDemandKey } from '../query/ir-stable-identity.js'
 import {
   createFilterFunctionFromExpression,
   createFilteredCallback,
@@ -16,6 +17,7 @@ import {
 import type { BasicExpression, OrderBy } from '../query/ir.js'
 import type { IndexInterface } from '../indexes/base-index.js'
 import type {
+  AppliedLoadSubsetOutcome,
   ChangeMessage,
   LoadSubsetOptions,
   LoadSubsetRequestResult,
@@ -82,6 +84,11 @@ type SubsetAcquisition = {
 
 type SubsetDemand = SubsetAcquisition & {
   requestOptions: LoadSubsetOptions
+  ordered?: {
+    requestedPrefix: number
+    hadBoundary: boolean
+    fullRegion: boolean
+  }
 }
 
 type TruncateReplayAttempt = {
@@ -506,19 +513,19 @@ export class CollectionSubscription
     return this.orderedWindow?.rowsNeeded() ?? 0
   }
 
-  get hasPriorOrderedContinuation(): boolean {
-    return (
-      this.subsetDemands.filter((demand) =>
-        this.orderedSubsetDemands.has(demand),
-      ).length > 1
-    )
+  get hasOrderedCoverageForActiveWindow(): boolean {
+    return this.orderedWindow?.coversActiveWindow ?? false
   }
 
   get orderedBoundaryRow(): object | undefined {
-    const boundary = this.orderedBoundary()
+    const boundary =
+      this.stalePublishedRows.size > 0
+        ? this.orderedBoundary()
+        : this.orderedWindow?.requestBoundary()
     return boundary === undefined
       ? undefined
-      : this.publishedRows.get(boundary.key)
+      : (this.publishedRows.get(boundary.key) ??
+          this.collection.get(boundary.key))
   }
 
   private orderedBoundary() {
@@ -668,7 +675,7 @@ export class CollectionSubscription
   /** Start and retain the first acquisition for one logical subset demand. */
   private startSubsetDemand(
     requestOptions: LoadSubsetOptions,
-    ordered = false,
+    ordered?: SubsetDemand[`ordered`],
   ): {
     demand: SubsetDemand
     result: LoadSubsetRequestResult
@@ -676,8 +683,9 @@ export class CollectionSubscription
     const demand: SubsetDemand = {
       requestOptions,
       options: requestOptions,
+      ...(ordered === undefined ? {} : { ordered }),
     }
-    if (ordered) this.orderedSubsetDemands.add(demand)
+    if (ordered !== undefined) this.orderedSubsetDemands.add(demand)
     const acquisition = this.createSubsetAcquisition(demand)
     try {
       const result = this.loadSubset(acquisition.options)
@@ -725,6 +733,7 @@ export class CollectionSubscription
       !this.isBufferingForTruncate &&
       this.stalePublishedRows.size === 0
     ) {
+      this.orderedWindow.admitChanges(changes)
       const orderedChanges = this.reconcileOrderedWindow()
       if (changes.length > 0 && orderedChanges.length === 0) return false
       this.callback(orderedChanges)
@@ -910,6 +919,7 @@ export class CollectionSubscription
           ? currentOffset + limit
           : limit
     this.orderedWindow.ensureSize(requestedPrefix)
+    const fullRegion = this.orderedWindow.requiresFullRefinement
     const changes =
       this.stalePublishedRows.size === 0 ? this.reconcileOrderedWindow() : []
 
@@ -940,7 +950,10 @@ export class CollectionSubscription
         }
       | undefined
 
-    const boundary = this.orderedBoundary()
+    const boundary =
+      this.stalePublishedRows.size > 0
+        ? this.orderedBoundary()
+        : this.orderedWindow.requestBoundary()
     const cursorValues = boundary?.values ?? minValues
     if (cursorValues !== undefined && cursorValues.length > 0) {
       const canPushCursor = canExpressCursorOrder(orderBy, cursorValues)
@@ -983,20 +996,28 @@ export class CollectionSubscription
     // don't await it, we will load the data into the collection when it comes in
     // Note: `where` does NOT include cursor expressions - they are passed separately
     // The sync layer can choose to use cursor-based or offset-based pagination
-    const loadOptions: LoadSubsetOptions = {
-      where, // Main filter only, no cursor
-      limit,
-      orderBy,
-      cursor: cursorExpressions, // Cursor expressions passed separately
-      offset: offset ?? currentOffset, // Use provided offset, or auto-tracked offset
-      subscription: this,
-    }
+    const loadOptions: LoadSubsetOptions = fullRegion
+      ? {
+          where,
+          orderBy,
+          subscription: this,
+        }
+      : {
+          where, // Main filter only, no cursor
+          limit,
+          orderBy,
+          cursor: cursorExpressions, // Cursor expressions passed separately
+          offset: offset ?? currentOffset, // Use provided offset, or auto-tracked offset
+          subscription: this,
+        }
 
-    const { demand, result: syncResult } = this.startSubsetDemand(
-      loadOptions,
-      true,
-    )
+    const { demand, result: syncResult } = this.startSubsetDemand(loadOptions, {
+      requestedPrefix,
+      hadBoundary: boundary !== undefined,
+      fullRegion,
+    })
 
+    this.observeOrderedCoverage(syncResult, demand)
     // Pass the raw loadSubset result to the caller for external tracking
     onLoadSubsetResult?.(syncResult)
     this.observeLoadSubsetResult(
@@ -1004,6 +1025,71 @@ export class CollectionSubscription
       demand.options,
       shouldTrackLoadSubsetPromise,
     )
+  }
+
+  private observeOrderedCoverage(
+    result: LoadSubsetRequestResult,
+    demand: SubsetDemand,
+  ): void {
+    const ordered = demand.ordered
+    const window = this.orderedWindow
+    if (!ordered || !window) return
+
+    const apply = (outcome?: AppliedLoadSubsetOutcome) => {
+      if (
+        !this.subsetDemands.includes(demand) ||
+        demand.options.signal?.aborted
+      ) {
+        return
+      }
+
+      const demandKey = outcome
+        ? getLoadSubsetDemandKey(outcome.demand)
+        : undefined
+      const coverage = outcome
+        ? this.collection._sync
+            .getLoadSubsetCoverage()
+            .find(
+              (candidate) =>
+                candidate.collectionId === outcome.collectionId &&
+                getLoadSubsetDemandKey(candidate.demand) === demandKey,
+            )
+        : undefined
+      const rowKeys = coverage?.rowKeys as
+        | ReadonlyArray<string | number>
+        | undefined
+      const exhausted = outcome?.extent === `exhausted`
+
+      if (!ordered.hadBoundary && !ordered.fullRegion) {
+        window.recordInitialCoverage(rowKeys, exhausted)
+      } else {
+        window.recordContinuationCoverage(
+          rowKeys,
+          exhausted,
+          ordered.requestedPrefix,
+          ordered.fullRegion,
+        )
+      }
+
+      if (this.stalePublishedRows.size > 0) return
+      const changes = this.reconcileOrderedWindow()
+      if (changes.length > 0) this.callback(changes)
+    }
+
+    if (result instanceof Promise) {
+      void result.then(apply, () => {})
+    } else {
+      // `true` is returned only when eager sync or the absence of a subset
+      // loader already makes the whole local source authoritative.
+      window.recordContinuationCoverage(
+        undefined,
+        true,
+        ordered.requestedPrefix,
+        true,
+      )
+      const changes = this.reconcileOrderedWindow()
+      if (changes.length > 0) this.callback(changes)
+    }
   }
 
   // TODO: also add similar test but that checks that it can also load it from the collection's loadSubset function
