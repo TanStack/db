@@ -347,8 +347,16 @@ describe(`loadSubset outcomes`, () => {
       await operation.wait()
       expect(operation.getOutcomes()).toEqual(
         expect.arrayContaining([
-          expect.objectContaining({ sourceId: `left`, generation: 1 }),
-          expect.objectContaining({ sourceId: `right`, generation: 1 }),
+          expect.objectContaining({
+            sourceId: `left`,
+            generation: 1,
+            extent: `continues`,
+          }),
+          expect.objectContaining({
+            sourceId: `right`,
+            generation: 1,
+            extent: `exhausted`,
+          }),
         ]),
       )
       expect(operation.getOutcomes()).toHaveLength(2)

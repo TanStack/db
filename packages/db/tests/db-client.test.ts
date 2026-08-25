@@ -488,6 +488,7 @@ describe(`DbClient`, () => {
     await deferredLoad
 
     const adapterOptions = loadSubset.mock.calls[0]![0]
+    expect(adapterOptions).toEqual(ownerOptions)
     expect(adapterOptions).not.toBe(ownerOptions)
 
     collection._sync.unloadSubset(ownerOptions)
