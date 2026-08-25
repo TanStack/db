@@ -6,6 +6,7 @@ import { BasicIndex } from '../src/indexes/basic-index.js'
 import { createLiveQueryCollection } from '../src/query/index.js'
 import { LIVE_QUERY_INTERNAL } from '../src/query/live/internal.js'
 import { createLiveQueryWindowController } from '../src/live-query-window-controller.js'
+import { Func, PropRef, Value } from '../src/query/ir.js'
 import type { LazyDemandPlan } from '../src/query/compiler/joins.js'
 
 describe(`loadSubset outcomes`, () => {
@@ -61,7 +62,342 @@ describe(`loadSubset outcomes`, () => {
       unloadShouldFail = false
       collection._sync.unloadSubset(options)
       expect(collection._sync.getLoadSubsetCoverage()).toEqual([])
+      expect(Array.from(collection.keys())).toEqual([])
       expect(unloadSubset).toHaveBeenCalledTimes(2)
+    } finally {
+      await collection.cleanup()
+    }
+  })
+
+  it.each([`first`, `second`] as const)(
+    `keeps one physical exact-peer acquisition until the %s lease releases last`,
+    async (lastLease) => {
+      let resolveLoad!: (result: {
+        hasMore: false
+        appliedRowKeys: ReadonlyArray<string>
+      }) => void
+      const sharedLoad = new Promise<{
+        hasMore: false
+        appliedRowKeys: ReadonlyArray<string>
+      }>((resolve) => {
+        resolveLoad = resolve
+      })
+      let wrote = false
+      const collection = createCollection<{ id: string }>({
+        id: `load-subset-exact-peer-${lastLease}`,
+        getKey: (row) => row.id,
+        syncMode: `on-demand`,
+        startSync: true,
+        sync: {
+          sync: ({ begin, write, commit, markReady }) => {
+            markReady()
+            const deduplicated = new DeduplicatedLoadSubset({
+              loadSubset: async () => {
+                const result = await sharedLoad
+                if (!wrote) {
+                  wrote = true
+                  begin()
+                  write({ type: `insert`, value: { id: `a` } })
+                  const applied = commit()
+                  if (applied !== true) await applied
+                }
+                return result
+              },
+            })
+            return {
+              loadSubset: deduplicated.loadSubset,
+              unloadSubset: vi.fn(),
+            }
+          },
+        },
+      })
+
+      try {
+        const first = { limit: 1 }
+        const second = { limit: 1 }
+        const firstLoad = collection._sync.loadSubset(first)
+        const secondLoad = collection._sync.loadSubset(second)
+        resolveLoad({ hasMore: false, appliedRowKeys: [`a`] })
+        if (firstLoad !== true) await firstLoad
+        if (secondLoad !== true) await secondLoad
+
+        const firstRelease = lastLease === `first` ? second : first
+        const finalRelease = lastLease === `first` ? first : second
+        collection._sync.unloadSubset(firstRelease)
+        expect(collection._sync.getLoadSubsetCoverage()).toHaveLength(1)
+        expect(Array.from(collection.keys())).toEqual([`a`])
+
+        collection._sync.unloadSubset(finalRelease)
+        expect(collection._sync.getLoadSubsetCoverage()).toEqual([])
+        expect(Array.from(collection.keys())).toEqual([])
+      } finally {
+        await collection.cleanup()
+      }
+    },
+  )
+
+  it(`keeps prior applied coverage when a newer exact attempt fails`, async () => {
+    type PendingLoad = {
+      succeed: (rowId: string) => Promise<void>
+      reject: (error: Error) => void
+    }
+    const pending: Array<PendingLoad> = []
+    const collection = createCollection<{ id: string }>({
+      id: `load-subset-failed-exact-retry`,
+      getKey: (row) => row.id,
+      syncMode: `on-demand`,
+      startSync: true,
+      sync: {
+        sync: ({ begin, write, commit, markReady }) => {
+          markReady()
+          return {
+            loadSubset: () =>
+              new Promise((resolve, reject) => {
+                pending.push({
+                  succeed: async (rowId) => {
+                    begin()
+                    write({ type: `insert`, value: { id: rowId } })
+                    const applied = commit()
+                    if (applied !== true) await applied
+                    resolve({
+                      hasMore: false,
+                      appliedRowKeys: [rowId],
+                    })
+                  },
+                  reject,
+                })
+              }),
+            unloadSubset: vi.fn(),
+          }
+        },
+      },
+    })
+
+    try {
+      const firstOptions = { limit: 1 }
+      const retryOptions = { limit: 1 }
+      const first = collection._sync.loadSubset(firstOptions)
+      const retry = collection._sync.loadSubset(retryOptions)
+      if (first === true || retry === true) {
+        throw new Error(`Expected asynchronous loads`)
+      }
+      void retry.catch(() => undefined)
+
+      await pending[0]!.succeed(`first`)
+      await first
+      expect(collection._sync.getLoadSubsetCoverage()).toHaveLength(1)
+
+      pending[1]!.reject(new Error(`retry failed`))
+      await expect(retry).rejects.toThrow(`retry failed`)
+      expect(collection._sync.getLoadSubsetCoverage()).toMatchObject([
+        { rowKeys: [`first`] },
+      ])
+    } finally {
+      await collection.cleanup()
+    }
+  })
+
+  it(`owns applied rows even when source extent is unknown`, async () => {
+    const collection = createCollection<{ id: string }>({
+      id: `load-subset-unknown-row-provenance`,
+      getKey: (row) => row.id,
+      syncMode: `on-demand`,
+      startSync: true,
+      sync: {
+        sync: ({ begin, write, commit, markReady }) => {
+          markReady()
+          return {
+            loadSubset: async () => {
+              begin()
+              write({ type: `insert`, value: { id: `a` } })
+              const applied = commit()
+              if (applied !== true) await applied
+              return { hasMore: undefined, appliedRowKeys: [`a`] }
+            },
+            unloadSubset: vi.fn(),
+          }
+        },
+      },
+    })
+
+    try {
+      const options = { limit: 1 }
+      await collection._sync.loadSubset(options)
+      expect(collection._sync.getLoadSubsetCoverage()).toEqual([])
+      expect(Array.from(collection.keys())).toEqual([`a`])
+
+      collection._sync.unloadSubset(options)
+      expect(Array.from(collection.keys())).toEqual([])
+    } finally {
+      await collection.cleanup()
+    }
+  })
+
+  it.each([
+    [`narrow`, `wide`],
+    [`wide`, `narrow`],
+  ] as const)(
+    `garbage-collects overlapping acquisition rows only after the %s owner releases last`,
+    async (firstRelease, finalRelease) => {
+      const collection = createCollection<{ id: string }>({
+        id: `load-subset-overlapping-row-owners-${firstRelease}`,
+        getKey: (row) => row.id,
+        syncMode: `on-demand`,
+        startSync: true,
+        sync: {
+          sync: ({ begin, write, commit, markReady }) => {
+            markReady()
+            return {
+              loadSubset: async (options) => {
+                begin()
+                write({ type: `insert`, value: { id: `shared` } })
+                if (options.limit === 2) {
+                  write({ type: `insert`, value: { id: `wide-only` } })
+                }
+                const applied = commit()
+                if (applied !== true) await applied
+                return {
+                  hasMore: false,
+                  appliedRowKeys:
+                    options.limit === 2 ? [`shared`, `wide-only`] : [`shared`],
+                }
+              },
+              unloadSubset: vi.fn(),
+            }
+          },
+        },
+      })
+
+      try {
+        const owners = {
+          narrow: { limit: 1 },
+          wide: { limit: 2 },
+        }
+        await collection._sync.loadSubset(owners.narrow)
+        await collection._sync.loadSubset(owners.wide)
+        expect(Array.from(collection.keys()).sort()).toEqual([
+          `shared`,
+          `wide-only`,
+        ])
+
+        collection._sync.unloadSubset(owners[firstRelease])
+        expect(collection.has(`shared`)).toBe(true)
+        expect(collection.has(`wide-only`)).toBe(finalRelease === `wide`)
+
+        collection._sync.unloadSubset(owners[finalRelease])
+        expect(Array.from(collection.keys())).toEqual([])
+      } finally {
+        await collection.cleanup()
+      }
+    },
+  )
+
+  it(`validates demand identity before starting adapter work`, async () => {
+    const loadSubset = vi.fn(() => Promise.resolve({ hasMore: false }))
+    const unloadSubset = vi.fn()
+    const collection = createCollection<{ id: string }>({
+      id: `load-subset-invalid-demand`,
+      getKey: (row) => row.id,
+      syncMode: `on-demand`,
+      startSync: true,
+      sync: {
+        sync: ({ markReady }) => {
+          markReady()
+          return { loadSubset, unloadSubset }
+        },
+      },
+    })
+
+    try {
+      expect(() =>
+        collection._sync.loadSubset({
+          where: new Func(`eq`, [
+            new PropRef([`item`, `value`]),
+            new Value(() => `unhashable`),
+          ]),
+        }),
+      ).toThrow(/not stably hashable/)
+      expect(loadSubset).not.toHaveBeenCalled()
+      expect(unloadSubset).not.toHaveBeenCalled()
+    } finally {
+      await collection.cleanup()
+    }
+  })
+
+  it(`snapshots nested ordering options across load and coverage reads`, async () => {
+    let resolveLoad!: (value: {
+      hasMore: false
+      appliedRowKeys: ReadonlyArray<string>
+    }) => void
+    const pending = new Promise<{
+      hasMore: false
+      appliedRowKeys: ReadonlyArray<string>
+    }>((resolve) => {
+      resolveLoad = resolve
+    })
+    const collection = createCollection<{ id: string }>({
+      id: `load-subset-nested-demand-snapshot`,
+      getKey: (row) => row.id,
+      syncMode: `on-demand`,
+      startSync: true,
+      sync: {
+        sync: ({ begin, write, commit, markReady }) => {
+          markReady()
+          return {
+            loadSubset: async () => {
+              const result = await pending
+              begin()
+              write({ type: `insert`, value: { id: `a` } })
+              const applied = commit()
+              if (applied !== true) await applied
+              return result
+            },
+          }
+        },
+      },
+    })
+
+    try {
+      const localeOptions = { numeric: true }
+      const options = {
+        limit: 1,
+        orderBy: [
+          {
+            expression: new PropRef([`item`, `name`]),
+            compareOptions: {
+              direction: `asc` as const,
+              nulls: `first` as const,
+              stringSort: `locale` as const,
+              locale: `en`,
+              localeOptions,
+            },
+          },
+        ],
+      }
+      const load = collection._sync.loadSubset(options)
+      localeOptions.numeric = false
+      resolveLoad({ hasMore: false, appliedRowKeys: [`a`] })
+      if (load !== true) await load
+
+      const fact = collection._sync.getLoadSubsetCoverage()[0]!
+      expect(
+        (
+          fact.demand.orderBy![0]!.compareOptions as {
+            localeOptions: { numeric: boolean }
+          }
+        ).localeOptions.numeric,
+      ).toBe(true)
+      ;(
+        fact.demand.orderBy![0]!.compareOptions as {
+          localeOptions: { numeric: boolean }
+        }
+      ).localeOptions.numeric = false
+      expect(
+        (
+          collection._sync.getLoadSubsetCoverage()[0]!.demand.orderBy![0]!
+            .compareOptions as { localeOptions: { numeric: boolean } }
+        ).localeOptions.numeric,
+      ).toBe(true)
     } finally {
       await collection.cleanup()
     }

@@ -38,6 +38,7 @@ function createPrefixOutcome(
   extent: AppliedLoadSubsetOutcome['extent'] = `exhausted`,
   collectionId = `prefixes`,
   sourceId = `items`,
+  rows: ReadonlyArray<RowKey> = [],
 ): AppliedLoadSubsetOutcome {
   return {
     collectionId,
@@ -45,6 +46,7 @@ function createPrefixOutcome(
     demand: { limit: prefix },
     generation,
     extent,
+    appliedRowKeys: rows,
   }
 }
 
@@ -80,8 +82,14 @@ function publishPrefix(
   expect(
     registry.publishOutcome(
       acquisition,
-      createPrefixOutcome(generation, coverage),
-      rows,
+      createPrefixOutcome(
+        generation,
+        coverage,
+        `exhausted`,
+        `prefixes`,
+        `items`,
+        rows,
+      ),
     ),
   ).toMatchObject({ accepted: true, published: true })
 }
@@ -173,10 +181,6 @@ function addModelAcquisition(
   },
 ): number {
   const index = model.acquisitions.length
-  const scope = scopeKey(options.sourceId, options.prefix)
-  const currentIndex = model.currentByScope.get(scope)
-  const current =
-    currentIndex === undefined ? undefined : model.acquisitions[currentIndex]
   model.acquisitions.push({
     active: true,
     generation: options.generation,
@@ -190,22 +194,42 @@ function addModelAcquisition(
     releaseSettled: false,
   })
   model.leases[options.leaseIndex]!.acquisitions.add(index)
-  if (!current || options.generation >= current.generation) {
-    model.currentByScope.set(scope, index)
-  }
   return index
 }
 
-function isCurrentAcquisition(
+function canPublishModelAcquisition(
   model: RegistryModel,
   acquisitionIndex: number,
 ): boolean {
   const acquisition = model.acquisitions[acquisitionIndex]!
-  return (
-    model.currentByScope.get(
-      scopeKey(acquisition.sourceId, acquisition.prefix),
-    ) === acquisitionIndex
+  if (!acquisition.active || acquisition.releaseSettled) return false
+  const currentIndex = model.currentByScope.get(
+    scopeKey(acquisition.sourceId, acquisition.prefix),
   )
+  if (currentIndex === undefined || currentIndex === acquisitionIndex) {
+    return true
+  }
+  return acquisition.generation > model.acquisitions[currentIndex]!.generation
+}
+
+function restoreModelCurrent(model: RegistryModel, scope: string): void {
+  const candidate = model.acquisitions
+    .map((acquisition, index) => ({ acquisition, index }))
+    .filter(
+      ({ acquisition }) =>
+        acquisition.active &&
+        !acquisition.releaseSettled &&
+        acquisition.coverage !== undefined &&
+        scopeKey(acquisition.sourceId, acquisition.prefix) === scope,
+    )
+    .sort(({ acquisition: left, index: leftIndex }, right) =>
+      left.generation === right.acquisition.generation
+        ? right.index - leftIndex
+        : right.acquisition.generation - left.generation,
+    )[0]
+
+  if (candidate) model.currentByScope.set(scope, candidate.index)
+  else model.currentByScope.delete(scope)
 }
 
 function replaceModelRows(
@@ -239,7 +263,7 @@ function retireModelAcquisition(
   }
   const scope = scopeKey(acquisition.sourceId, acquisition.prefix)
   if (model.currentByScope.get(scope) === acquisitionIndex) {
-    model.currentByScope.delete(scope)
+    restoreModelCurrent(model, scope)
   }
   return rowsToRemove
 }
@@ -282,8 +306,12 @@ function expectReleaseFailure(release: () => unknown): void {
 }
 
 function assertRegistryModel(model: RegistryModel, real: RegistryReal): void {
-  const activeCoverage = model.acquisitions.flatMap((acquisition) =>
-    acquisition.active && acquisition.coverage !== undefined
+  const activeCoverage = model.acquisitions.flatMap((acquisition, index) =>
+    acquisition.active &&
+    acquisition.coverage !== undefined &&
+    model.currentByScope.get(
+      scopeKey(acquisition.sourceId, acquisition.prefix),
+    ) === index
       ? [acquisition.coverage]
       : [],
   )
@@ -382,12 +410,22 @@ class AttachLeaseCommand implements Command<RegistryModel, RegistryReal> {
       model.acquisitions,
       this.rawAcquisition,
     )!
-    model.leases[leaseIndex]!.acquisitions.add(acquisitionIndex)
-    model.acquisitions[acquisitionIndex]!.leases.add(leaseIndex)
-    real.registry.attachLease(
-      real.leases[leaseIndex]!,
-      real.acquisitions[acquisitionIndex]!,
-    )
+    const acquisition = model.acquisitions[acquisitionIndex]!
+    if (acquisition.releaseSettled) {
+      expect(() =>
+        real.registry.attachLease(
+          real.leases[leaseIndex]!,
+          real.acquisitions[acquisitionIndex]!,
+        ),
+      ).toThrow(`Cannot attach to a released acquisition`)
+    } else {
+      model.leases[leaseIndex]!.acquisitions.add(acquisitionIndex)
+      acquisition.leases.add(leaseIndex)
+      real.registry.attachLease(
+        real.leases[leaseIndex]!,
+        real.acquisitions[acquisitionIndex]!,
+      )
+    }
     assertRegistryModel(model, real)
   }
 
@@ -450,12 +488,17 @@ class ReplaceRowsCommand implements Command<RegistryModel, RegistryReal> {
       model.acquisitions,
       this.rawAcquisition,
     )!
-    const accepted = isCurrentAcquisition(model, acquisitionIndex)
+    const acquisition = model.acquisitions[acquisitionIndex]!
+    const accepted = canPublishModelAcquisition(model, acquisitionIndex)
     const rowsToRemove = accepted
       ? replaceModelRows(model, acquisitionIndex, new Set(this.rows))
       : []
     if (accepted) {
-      model.acquisitions[acquisitionIndex]!.coverage = undefined
+      acquisition.coverage = undefined
+      const scope = scopeKey(acquisition.sourceId, acquisition.prefix)
+      if (model.currentByScope.get(scope) === acquisitionIndex) {
+        restoreModelCurrent(model, scope)
+      }
     }
     expect(
       real.registry.replaceRows(
@@ -495,12 +538,12 @@ class PublishCommand implements Command<RegistryModel, RegistryReal> {
       this.extent,
       this.exactScope ? `prefixes` : `other`,
       acquisition.sourceId,
+      this.rows,
     )
     const accepted =
-      isCurrentAcquisition(model, acquisitionIndex) &&
+      canPublishModelAcquisition(model, acquisitionIndex) &&
       this.generationDelta === 0 &&
-      this.exactScope &&
-      this.extent !== `unknown`
+      this.exactScope
     const rowsToRemove = accepted
       ? replaceModelRows(model, acquisitionIndex, new Set(this.rows))
       : []
@@ -509,12 +552,17 @@ class PublishCommand implements Command<RegistryModel, RegistryReal> {
       (this.rows.length >= acquisition.prefix || this.extent === `exhausted`)
     if (accepted) {
       acquisition.coverage = published ? acquisition.prefix : undefined
+      const scope = scopeKey(acquisition.sourceId, acquisition.prefix)
+      if (published) {
+        model.currentByScope.set(scope, acquisitionIndex)
+      } else if (model.currentByScope.get(scope) === acquisitionIndex) {
+        restoreModelCurrent(model, scope)
+      }
     }
     expect(
       real.registry.publishOutcome(
         real.acquisitions[acquisitionIndex]!,
         outcome,
-        this.rows,
       ),
     ).toEqual({ accepted, published, rowsToRemove })
     assertRegistryModel(model, real)
@@ -733,6 +781,55 @@ describe(`coverage registry oracle`, () => {
     })
   })
 
+  it(`keeps the last successful generation current while a newer attempt is pending`, () => {
+    const registry = createPrefixRegistry()
+    const priorLease = registry.addLease(1)
+    const retryLease = registry.addLease(1)
+    const prior = addPrefixAcquisition(registry, {
+      generation: 1,
+      leases: [priorLease],
+      release: vi.fn(),
+      prefix: 1,
+    })
+    publishPrefix(registry, prior, 1, 1, [`prior`])
+
+    const retry = addPrefixAcquisition(registry, {
+      generation: 2,
+      leases: [retryLease],
+      release: vi.fn(),
+      prefix: 1,
+    })
+    expect(registry.coverageAntichain()).toEqual([{ prefix: 1 }])
+    expect(registry.rowOwnerCount(`prior`)).toBe(1)
+
+    registry.releaseAcquisition(retry)
+    expect(registry.coverageAntichain()).toEqual([{ prefix: 1 }])
+    expect(registry.rowOwnerCount(`prior`)).toBe(1)
+  })
+
+  it(`records unknown-extent row ownership without publishing coverage`, () => {
+    const registry = createPrefixRegistry()
+    const lease = registry.addLease(1)
+    const acquisition = addPrefixAcquisition(registry, {
+      generation: 1,
+      leases: [lease],
+      release: vi.fn(),
+      prefix: 1,
+    })
+
+    expect(
+      registry.publishOutcome(
+        acquisition,
+        createPrefixOutcome(1, 1, `unknown`, `prefixes`, `items`, [`owned`]),
+      ),
+    ).toEqual({ accepted: true, published: false, rowsToRemove: [] })
+    expect(registry.coverageAntichain()).toEqual([])
+    expect(registry.rowOwnerCount(`owned`)).toBe(1)
+    expect(registry.releaseLease(lease)).toEqual({
+      rowsToRemove: [`owned`],
+    })
+  })
+
   it(`keeps a final lease intact when adapter release throws and retries it`, () => {
     const registry = createPrefixRegistry()
     const lease = registry.addLease(1)
@@ -829,6 +926,47 @@ describe(`coverage registry oracle`, () => {
     expect(secondRelease).toHaveBeenCalledTimes(2)
   })
 
+  it(`does not attach a new lease to an acquisition whose release settled`, () => {
+    const registry = createPrefixRegistry()
+    const settledLease = registry.addLease(1)
+    const failingLease = registry.addLease(2)
+    const settled = addPrefixAcquisition(registry, {
+      generation: 1,
+      leases: [settledLease],
+      release: vi.fn(),
+      prefix: 1,
+    })
+    let fail = true
+    const failing = addPrefixAcquisition(registry, {
+      generation: 1,
+      leases: [failingLease],
+      release: () => {
+        if (fail) throw new Error(`release failed`)
+      },
+      prefix: 2,
+    })
+    expect(() => registry.dispose()).toThrow(`release failed`)
+
+    const lateLease = registry.addLease(1)
+    expect(() => registry.attachLease(lateLease, settled)).toThrow(
+      `Cannot attach to a released acquisition`,
+    )
+    expect(registry.replaceRows(settled, [`late`])).toEqual({
+      accepted: false,
+      rowsToRemove: [],
+    })
+    expect(
+      registry.publishOutcome(
+        settled,
+        createPrefixOutcome(1, 1, `exhausted`, `prefixes`, `items`, [`late`]),
+      ),
+    ).toEqual({ accepted: false, published: false, rowsToRemove: [] })
+
+    fail = false
+    registry.releaseAcquisition(failing)
+    registry.releaseLease(lateLease)
+  })
+
   it(`publishes only current authoritative coverage projected from an applied outcome`, () => {
     const registry = createPrefixRegistry()
     const lease = registry.addLease(20)
@@ -840,20 +978,18 @@ describe(`coverage registry oracle`, () => {
     })
 
     expect(
-      registry.publishOutcome(acquisition, createPrefixOutcome(1, 20), []),
+      registry.publishOutcome(acquisition, createPrefixOutcome(1, 20)),
     ).toMatchObject({ accepted: false, published: false })
     expect(
       registry.publishOutcome(
         acquisition,
         createPrefixOutcome(2, 20, `unknown`),
-        [],
       ),
     ).toMatchObject({ accepted: false, published: false })
     expect(
       registry.publishOutcome(
         acquisition,
         createPrefixOutcome(2, 20, `exhausted`, `other`),
-        [],
       ),
     ).toMatchObject({ accepted: false, published: false })
     expect(registry.coverageAntichain()).toEqual([])
@@ -861,8 +997,14 @@ describe(`coverage registry oracle`, () => {
     expect(
       registry.publishOutcome(
         acquisition,
-        createPrefixOutcome(2, 30, `continues`),
-        Array.from({ length: 30 }, (_, index) => `row-${index}`),
+        createPrefixOutcome(
+          2,
+          30,
+          `continues`,
+          `prefixes`,
+          `items`,
+          Array.from({ length: 30 }, (_, index) => `row-${index}`),
+        ),
       ),
     ).toMatchObject({ accepted: true, published: true })
     expect(registry.coverageAntichain()).toEqual([{ prefix: 30 }])
@@ -882,7 +1024,6 @@ describe(`coverage registry oracle`, () => {
       registry.publishOutcome(
         acquisition,
         createPrefixOutcome(1, 30, `continues`),
-        [],
       ),
     ).toEqual({ accepted: true, published: false, rowsToRemove: [] })
     expect(registry.coverageAntichain()).toEqual([])
@@ -891,8 +1032,7 @@ describe(`coverage registry oracle`, () => {
     expect(
       registry.publishOutcome(
         acquisition,
-        createPrefixOutcome(1, 30, `continues`),
-        rows,
+        createPrefixOutcome(1, 30, `continues`, `prefixes`, `items`, rows),
       ),
     ).toEqual({ accepted: true, published: true, rowsToRemove: [] })
     expect(registry.rowOwnerCount(`row-0`)).toBe(1)
@@ -917,10 +1057,10 @@ describe(`coverage registry oracle`, () => {
     })
 
     expect(
-      registry.publishOutcome(nextAcquisition, createPrefixOutcome(2, 100), []),
+      registry.publishOutcome(nextAcquisition, createPrefixOutcome(2, 100)),
     ).toMatchObject({ accepted: true, published: true })
     expect(
-      registry.publishOutcome(oldAcquisition, createPrefixOutcome(1, 100), []),
+      registry.publishOutcome(oldAcquisition, createPrefixOutcome(1, 100)),
     ).toEqual({ accepted: false, published: false, rowsToRemove: [] })
     expect(registry.coverageAntichain()).toEqual([{ prefix: 100 }])
   })

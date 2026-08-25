@@ -481,23 +481,29 @@ window coordination. Only the root paginated source may use them to replace a
 peek-based pagination decision.
 
 The Collection sync boundary gives each logical owner a demand lease and each
-physical attempt an acquisition token. The coverage registry accepts an exact
-applied outcome and its row keys as one publication. It rejects tokens that are
-not current for the same physical collection, optional source, and canonical
-demand, and it rejects `unknown` extent. A finite prefix of `N` is established
-only by at least `N` applied authoritative rows, or fewer rows plus exact source
-exhaustion. Callers cannot derive achieved coverage from the requested limit or
-publish rows and coverage in separate steps. Failed, canceled, and stale work
-publishes neither rows nor coverage. Public reads return defensive snapshots;
-fact compaction never mutates or retires the underlying leases, acquisitions,
-or row ownership.
+physical attempt an acquisition token. Exact logical peers waiting on the same
+physical promise attach their leases to that one acquisition. Starting a newer
+attempt does not supersede viable coverage; the current generation advances
+only when that attempt publishes authoritative coverage.
+
+The coverage registry accepts an exact applied outcome and its row keys as one
+publication. It rejects stale or mismatched tokens for the same physical
+collection, optional source, and canonical demand. An `unknown` extent records
+the acquisition's applied row ownership but proves no coverage. A finite prefix
+of `N` is established only by at least `N` applied authoritative rows, or fewer
+rows plus exact source exhaustion. Callers cannot derive achieved coverage from
+the requested limit or publish rows and coverage in separate steps. Failed,
+canceled, and stale work publishes neither rows nor coverage. Public reads
+return defensive snapshots; fact compaction never mutates or retires the
+underlying leases, acquisitions, or row ownership.
 
 Adapter release and `unloadSubset` callbacks must be idempotent and
 non-throwing. Core still treats a thrown callback defensively: it surfaces the
 original error but preserves the acquisition, lease, coverage, and row owners.
 A later cleanup retries callbacks that have not yet settled. Logical ownership
-retires, and GC rows publish, only after every callback required by that release
-step succeeds.
+retires only after every callback required by that release step succeeds. Rows
+whose final acquisition owner retires are deleted once through the normal
+Collection sync boundary; shared rows remain until their final owner retires.
 
 An eager Query DB collection owns its base query for the Collection lifetime.
 If TanStack Query removes that cache entry while the Collection has no public

@@ -21,6 +21,7 @@ import {
   snapshotLoadSubsetDemand,
 } from '../query/load-subset-options.js'
 import { createLoadSubsetCoverageRegistry } from '../query/coverage-registry.js'
+import { getLoadSubsetDemandKey } from '../query/ir-stable-identity.js'
 import type { StandardSchemaV1 } from '@standard-schema/spec'
 import type {
   AppliedLoadSubsetOutcome,
@@ -51,9 +52,12 @@ type DeferredLoadSubset = {
   options: LoadSubsetOptions
   demand: LoadSubsetOptions
   generation: number
-  coverageLease: DemandLease<LoadSubsetOptions>
-  coverageAcquisition: AcquisitionToken
   deferred: Deferred<AppliedLoadSubsetOutcome>
+}
+
+type SharedCoverageAcquisition = {
+  demandKey: string | undefined
+  acquisition: AcquisitionToken
 }
 
 type LoadSubsetOperation = {
@@ -106,6 +110,10 @@ export class CollectionSyncManager<
   private coverageLeasesByOwner = new WeakMap<
     LoadSubsetOptions,
     Array<DemandLease<LoadSubsetOptions>>
+  >()
+  private coverageAcquisitionsByPromise = new WeakMap<
+    Promise<unknown>,
+    SharedCoverageAcquisition
   >()
 
   /**
@@ -421,8 +429,6 @@ export class CollectionSyncManager<
       options,
       demand,
       generation,
-      coverageLease,
-      coverageAcquisition,
       deferred,
     } of deferredLoadSubsets) {
       try {
@@ -436,6 +442,12 @@ export class CollectionSyncManager<
           }
         }
         if (result instanceof Promise) {
+          const { lease, acquisition } = this.addCoverageOwnership(
+            ownerOptions,
+            demand,
+            generation,
+            result,
+          )
           void result.then(
             (sourceResult) => {
               const outcome = createAppliedLoadSubsetOutcome(
@@ -446,11 +458,11 @@ export class CollectionSyncManager<
                   ? sourceResult
                   : undefined,
               )
-              this.publishCoverageOutcome(coverageAcquisition, outcome)
+              this.publishCoverageOutcome(acquisition, outcome)
               deferred.resolve(outcome)
             },
             (error: unknown) => {
-              this.discardCoverageLease(ownerOptions, coverageLease)
+              this.discardCoverageLease(ownerOptions, lease)
               deferred.reject(error)
             },
           )
@@ -461,11 +473,9 @@ export class CollectionSyncManager<
             generation,
             undefined,
           )
-          this.publishCoverageOutcome(coverageAcquisition, outcome)
           deferred.resolve(outcome)
         }
       } catch (error) {
-        this.discardCoverageLease(ownerOptions, coverageLease)
         deferred.reject(error)
       }
     }
@@ -884,19 +894,15 @@ export class CollectionSyncManager<
       const deferred = createDeferred<AppliedLoadSubsetOutcome>()
       const loadOptions = cloneLoadSubsetOptions(options)
       const demand = snapshotLoadSubsetDemand(loadOptions)
+      // Demand identity is part of acquisition scope. Reject unsupported
+      // values before an adapter can perform irreversible work.
+      getLoadSubsetDemandKey(demand)
       const generation = ++this.loadSubsetGeneration
-      const { lease, acquisition } = this.addCoverageAcquisition(
-        options,
-        demand,
-        generation,
-      )
       this.deferredLoadSubsets.push({
         ownerOptions: options,
         options: loadOptions,
         demand,
         generation,
-        coverageLease: lease,
-        coverageAcquisition: acquisition,
         deferred,
       })
       this.trackLoadPromise(deferred.promise)
@@ -905,15 +911,18 @@ export class CollectionSyncManager<
 
     if (this.syncLoadSubsetFn) {
       const demand = snapshotLoadSubsetDemand(options)
+      // Validate and hash the retained scope before starting adapter work.
+      getLoadSubsetDemandKey(demand)
       const generation = ++this.loadSubsetGeneration
       const result: ReturnType<LoadSubsetFn> = this.syncLoadSubsetFn(options)
-      const { lease, acquisition } = this.addCoverageAcquisition(
-        options,
-        demand,
-        generation,
-      )
       // If the result is a promise, track it
       if (result instanceof Promise) {
+        const { lease, acquisition } = this.addCoverageOwnership(
+          options,
+          demand,
+          generation,
+          result,
+        )
         const outcome = result.then(
           (sourceResult) => {
             const appliedOutcome = createAppliedLoadSubsetOutcome(
@@ -959,7 +968,6 @@ export class CollectionSyncManager<
             undefined,
           ),
         )
-        this.discardCoverageLease(request.ownerOptions, request.coverageLease)
         return false
       })
       return
@@ -984,23 +992,39 @@ export class CollectionSyncManager<
     return this.coverageRegistry.coverageAntichain()
   }
 
-  private addCoverageAcquisition(
+  private addCoverageOwnership(
     ownerOptions: LoadSubsetOptions,
     demand: LoadSubsetOptions,
     generation: number,
+    physicalPromise: Promise<unknown>,
   ): {
     lease: DemandLease<LoadSubsetOptions>
     acquisition: AcquisitionToken
   } {
     const lease = this.coverageRegistry.addLease(demand)
-    const acquisition = this.coverageRegistry.addAcquisition({
-      generation,
-      scope: { collectionId: this.id, demand },
-      leases: [lease],
-      // Adapter resource release remains owned by unloadSubset. The registry
-      // tracks the same lifetime without duplicating that side effect.
-      release: () => {},
-    })
+    const demandKey = getLoadSubsetDemandKey(demand)
+    const shared = this.coverageAcquisitionsByPromise.get(physicalPromise)
+    let acquisition: AcquisitionToken
+    if (
+      shared?.demandKey === demandKey &&
+      this.coverageRegistry.isAcquisitionAttachable(shared.acquisition)
+    ) {
+      acquisition = shared.acquisition
+      this.coverageRegistry.attachLease(lease, acquisition)
+    } else {
+      acquisition = this.coverageRegistry.addAcquisition({
+        generation,
+        scope: { collectionId: this.id, demand },
+        leases: [lease],
+        // Adapter resource release remains owned by unloadSubset. The registry
+        // tracks the same lifetime without duplicating that side effect.
+        release: () => {},
+      })
+      this.coverageAcquisitionsByPromise.set(physicalPromise, {
+        demandKey,
+        acquisition,
+      })
+    }
     const leases = this.coverageLeasesByOwner.get(ownerOptions) ?? []
     leases.push(lease)
     this.coverageLeasesByOwner.set(ownerOptions, leases)
@@ -1012,10 +1036,8 @@ export class CollectionSyncManager<
     outcome: AppliedLoadSubsetOutcome,
   ): void {
     if (outcome.appliedRowKeys === undefined) return
-    this.coverageRegistry.publishOutcome(
-      acquisition,
-      outcome,
-      outcome.appliedRowKeys as ReadonlyArray<TKey>,
+    this.removeCoverageRows(
+      this.coverageRegistry.publishOutcome(acquisition, outcome).rowsToRemove,
     )
   }
 
@@ -1024,7 +1046,9 @@ export class CollectionSyncManager<
     const lease = leases?.shift()
     if (!lease) return
     if (leases?.length === 0) this.coverageLeasesByOwner.delete(options)
-    this.coverageRegistry.releaseLease(lease)
+    this.removeCoverageRows(
+      this.coverageRegistry.releaseLease(lease).rowsToRemove,
+    )
   }
 
   private discardCoverageLease(
@@ -1037,7 +1061,17 @@ export class CollectionSyncManager<
       if (index >= 0) leases.splice(index, 1)
       if (leases.length === 0) this.coverageLeasesByOwner.delete(options)
     }
-    this.coverageRegistry.releaseLease(lease)
+    this.removeCoverageRows(
+      this.coverageRegistry.releaseLease(lease).rowsToRemove,
+    )
+  }
+
+  private removeCoverageRows(rows: ReadonlyArray<TKey>): void {
+    const unownedRows = rows.filter(
+      (row) => this.coverageRegistry.rowOwnerCount(row) === 0,
+    )
+    if (unownedRows.length === 0) return
+    this.state.deleteSyncedRows(unownedRows)
   }
 
   public cleanup(): void {
@@ -1070,8 +1104,9 @@ export class CollectionSyncManager<
     this.syncStartDeferred = false
     this.syncStartRequested = false
     this.deferredAdapterOptions.clear()
-    this.coverageRegistry.dispose()
+    this.removeCoverageRows(this.coverageRegistry.dispose().rowsToRemove)
     this.coverageLeasesByOwner = new WeakMap()
+    this.coverageAcquisitionsByPromise = new WeakMap()
     const wasLoadingSubset = this.pendingLoadSubsetPromises.size > 0
     this.pendingLoadSubsetPromises.clear()
     if (wasLoadingSubset) {
@@ -1095,7 +1130,6 @@ export class CollectionSyncManager<
     const deferredLoadSubsets = this.deferredLoadSubsets
     this.deferredLoadSubsets = []
     for (const request of deferredLoadSubsets) {
-      this.discardCoverageLease(request.ownerOptions, request.coverageLease)
       request.deferred.resolve(
         createAppliedLoadSubsetOutcome(
           this.id,

@@ -172,15 +172,13 @@ export class CoverageRegistry<
       rows: new Set(),
       coverage: undefined,
     })
-    const current = this.currentAcquisitions.get(scopeKey)
-    if (!current || options.generation >= current.generation) {
-      this.currentAcquisitions.set(scopeKey, {
-        acquisition,
-        generation: options.generation,
-      })
-    }
     leaseRecords.forEach((record) => record.acquisitions.add(acquisition))
     return acquisition
+  }
+
+  isAcquisitionAttachable(acquisition: AcquisitionToken): boolean {
+    const record = this.acquisitions.get(acquisition)
+    return record !== undefined && !record.releaseSettled
   }
 
   attachLease(
@@ -192,6 +190,9 @@ export class CoverageRegistry<
     if (!leaseRecord) throw new Error(`Cannot attach an inactive demand lease`)
     if (!acquisitionRecord) {
       throw new Error(`Cannot attach to an inactive acquisition`)
+    }
+    if (acquisitionRecord.releaseSettled) {
+      throw new Error(`Cannot attach to a released acquisition`)
     }
 
     leaseRecord.acquisitions.add(acquisition)
@@ -205,35 +206,48 @@ export class CoverageRegistry<
   publishOutcome(
     acquisition: AcquisitionToken,
     outcome: AppliedLoadSubsetOutcome,
-    rows: Iterable<TRowKey>,
   ): CoveragePublicationResult<TRowKey> {
     const record = this.acquisitions.get(acquisition)
     if (
       !record ||
-      !this.isCurrent(acquisition, record) ||
+      record.releaseSettled ||
+      !this.canPublish(acquisition, record) ||
       !matchesOutcome(record, outcome) ||
-      !hasAuthoritativeExtent(outcome)
+      outcome.appliedRowKeys === undefined
     ) {
       return { accepted: false, published: false, rowsToRemove: [] }
     }
 
-    const nextRows = new Set(rows)
+    const nextRows = new Set(outcome.appliedRowKeys as ReadonlyArray<TRowKey>)
+    const coverage = hasAuthoritativeExtent(outcome)
+      ? this.projectAppliedCoverage({ outcome, rows: nextRows })
+      : undefined
+    const nextCoverage =
+      coverage === undefined ? undefined : this.snapshotCoverage(coverage)
     const rowsToRemove = this.replaceRowsForRecord(
       acquisition,
       record,
       nextRows,
     )
-    const coverage = this.projectAppliedCoverage({
-      outcome,
-      rows: nextRows,
-    })
-    if (coverage === undefined) {
-      record.coverage = undefined
-      return { accepted: true, published: false, rowsToRemove }
+    record.coverage = nextCoverage
+
+    if (nextCoverage !== undefined) {
+      this.currentAcquisitions.set(record.scopeKey, {
+        acquisition,
+        generation: record.generation,
+      })
+    } else {
+      const current = this.currentAcquisitions.get(record.scopeKey)
+      if (current?.acquisition === acquisition) {
+        this.restoreCurrentAcquisition(record.scopeKey)
+      }
     }
 
-    record.coverage = this.snapshotCoverage(coverage)
-    return { accepted: true, published: true, rowsToRemove }
+    return {
+      accepted: true,
+      published: nextCoverage !== undefined,
+      rowsToRemove,
+    }
   }
 
   replaceRows(
@@ -241,12 +255,20 @@ export class CoverageRegistry<
     rows: Iterable<TRowKey>,
   ): RowOwnershipUpdate<TRowKey> {
     const record = this.acquisitions.get(acquisition)
-    if (!record || !this.isCurrent(acquisition, record)) {
+    if (
+      !record ||
+      record.releaseSettled ||
+      !this.canPublish(acquisition, record)
+    ) {
       return { accepted: false, rowsToRemove: [] }
     }
 
     const nextRows = new Set(rows)
     record.coverage = undefined
+    const current = this.currentAcquisitions.get(record.scopeKey)
+    if (current?.acquisition === acquisition) {
+      this.restoreCurrentAcquisition(record.scopeKey)
+    }
     return {
       accepted: true,
       rowsToRemove: this.replaceRowsForRecord(acquisition, record, nextRows),
@@ -277,14 +299,24 @@ export class CoverageRegistry<
     return sortKeys(rowsToRemove)
   }
 
-  private isCurrent(
+  private canPublish(
     acquisition: AcquisitionToken,
     record: AcquisitionRecord<TCoverage, TRowKey>,
   ): boolean {
     const current = this.currentAcquisitions.get(record.scopeKey)
     return (
-      current?.acquisition === acquisition &&
-      current.generation === record.generation
+      current === undefined ||
+      current.acquisition === acquisition ||
+      record.generation > current.generation
+    )
+  }
+
+  private isCurrent(
+    acquisition: AcquisitionToken,
+    record: AcquisitionRecord<TCoverage, TRowKey>,
+  ): boolean {
+    return (
+      this.currentAcquisitions.get(record.scopeKey)?.acquisition === acquisition
     )
   }
 
@@ -295,12 +327,15 @@ export class CoverageRegistry<
   }
 
   coverageAntichain(): Array<TCoverage> {
-    const facts = Array.from(this.acquisitions.values()).filter(
-      (
-        record,
-      ): record is AcquisitionRecord<TCoverage, TRowKey> & {
-        coverage: TCoverage
-      } => record.coverage !== undefined,
+    const facts = Array.from(this.acquisitions.entries()).flatMap(
+      ([acquisition, record]) =>
+        record.coverage !== undefined && this.isCurrent(acquisition, record)
+          ? [
+              record as AcquisitionRecord<TCoverage, TRowKey> & {
+                coverage: TCoverage
+              },
+            ]
+          : [],
     )
 
     return facts
@@ -409,7 +444,7 @@ export class CoverageRegistry<
     this.acquisitions.delete(acquisition)
     const current = this.currentAcquisitions.get(record.scopeKey)
     if (current?.acquisition === acquisition) {
-      this.currentAcquisitions.delete(record.scopeKey)
+      this.restoreCurrentAcquisition(record.scopeKey)
     }
     for (const lease of record.leases) {
       this.leases
@@ -423,6 +458,30 @@ export class CoverageRegistry<
         this.rowOwners.delete(row)
         rowsToRemove.add(row)
       }
+    }
+  }
+
+  private restoreCurrentAcquisition(scopeKey: string): void {
+    const candidate = Array.from(this.acquisitions.entries())
+      .filter(
+        ([, record]) =>
+          record.scopeKey === scopeKey &&
+          record.coverage !== undefined &&
+          !record.releaseSettled,
+      )
+      .sort(([, left], [, right]) =>
+        left.generation === right.generation
+          ? right.sequence - left.sequence
+          : right.generation - left.generation,
+      )[0]
+
+    if (candidate) {
+      this.currentAcquisitions.set(scopeKey, {
+        acquisition: candidate[0],
+        generation: candidate[1].generation,
+      })
+    } else {
+      this.currentAcquisitions.delete(scopeKey)
     }
   }
 }
