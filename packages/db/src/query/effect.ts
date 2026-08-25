@@ -33,7 +33,13 @@ import type {
   LazyCollectionCallbacks,
   LazyDemandPlan,
 } from './compiler/joins.js'
-import type { ChangeMessage, KeyedStream, ResultStream } from '../types.js'
+import type {
+  AppliedLoadSubsetOutcome,
+  ChangeMessage,
+  KeyedStream,
+  LoadSubsetRequestResult,
+  ResultStream,
+} from '../types.js'
 
 // ---------------------------------------------------------------------------
 // Public Types
@@ -384,7 +390,9 @@ class EffectPipelineRunner<TRow extends object, TKey extends string | number> {
   // Ordered subscription state for cursor-based loading
   private readonly biggestSentValue = new Map<string, any>()
   private readonly lastLoadRequestKey = new Map<string, string>()
-  private pendingOrderedLoadPromise: Promise<void> | undefined
+  private pendingOrderedLoadPromise:
+    | Promise<AppliedLoadSubsetOutcome>
+    | undefined
 
   // Subscription management
   private readonly unsubscribeCallbacks = new Set<() => void>()
@@ -996,7 +1004,7 @@ class EffectPipelineRunner<TRow extends object, TKey extends string | number> {
     }
   }
 
-  private trackOrderedLoad(result: Promise<void> | true): void {
+  private trackOrderedLoad(result: LoadSubsetRequestResult): void {
     if (!(result instanceof Promise)) return
     this.pendingOrderedLoadPromise = result
     const finish = () => {
@@ -1040,7 +1048,7 @@ class EffectPipelineRunner<TRow extends object, TKey extends string | number> {
         limit: n,
         minValues: cursor.minValues,
         trackLoadSubsetPromise: false,
-        onLoadSubsetResult: (loadResult: Promise<void> | true) =>
+        onLoadSubsetResult: (loadResult: LoadSubsetRequestResult) =>
           this.trackOrderedLoad(loadResult),
       })
     } catch (error) {

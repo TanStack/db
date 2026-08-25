@@ -10,6 +10,8 @@ import {
 } from '../../scheduler.js'
 import { getActiveTransaction } from '../../transactions.js'
 import { deepEquals } from '../../utils.js'
+import { getLoadSubsetDemandKey } from '../ir-stable-identity.js'
+import { isAppliedLoadSubsetOutcome } from '../load-subset-outcome.js'
 import { CollectionSubscriber } from './collection-subscriber.js'
 import { getCollectionBuilder } from './collection-registry.js'
 import { LIVE_QUERY_INTERNAL } from './internal.js'
@@ -29,6 +31,7 @@ import type { RootStreamBuilder } from '@tanstack/db-ivm'
 import type { OrderByOptimizationInfo } from '../compiler/order-by.js'
 import type { Collection } from '../../collection/index.js'
 import type {
+  AppliedLoadSubsetOutcome,
   CollectionConfigSingleRowOption,
   KeyedStream,
   ResultStream,
@@ -170,9 +173,17 @@ export class CollectionConfigBuilder<
   readonly lazySources = new Set<string>()
   private readonly activeDemands = new Map<
     string,
-    { generation: number; settled: boolean }
+    {
+      generation: number
+      settled: boolean
+    }
   >()
   private readonly demandGenerations = new Map<string, number>()
+  private readonly latestSubsetOutcomes = new Map<
+    string,
+    AppliedLoadSubsetOutcome
+  >()
+  private lastWindowOutcomes: ReadonlyArray<AppliedLoadSubsetOutcome> = []
   // Map of lexical source IDs to optimizable ORDER BY state
   optimizableOrderByCollections: Record<string, OrderByOptimizationInfo> = {}
 
@@ -279,6 +290,10 @@ export class CollectionConfigBuilder<
           hasCustomGetKey: !!this.config.getKey,
           hasJoins: this.hasJoins(this.query),
           hasDistinct: !!this.query.distinct,
+          getLatestSubsetOutcomes: () => [
+            ...this.latestSubsetOutcomes.values(),
+          ],
+          getLastWindowOutcomes: () => this.lastWindowOutcomes,
         },
       },
     }
@@ -316,7 +331,21 @@ export class CollectionConfigBuilder<
       this.activeWindowOperation = previousOperation
     }
 
-    return loadOperation?.wait() ?? true
+    const ready = loadOperation?.wait() ?? true
+    if (ready === true) {
+      this.lastWindowOutcomes = loadOperation?.getOutcomes() ?? []
+      return true
+    }
+    void ready.then(
+      () => {
+        this.lastWindowOutcomes = loadOperation!.getOutcomes()
+      },
+      () => {
+        // The original promise carries the failure to the caller. This
+        // observer only publishes successful operation outcomes.
+      },
+    )
+    return ready
   }
 
   getWindow(): { offset: number; limit: number } | undefined {
@@ -361,14 +390,26 @@ export class CollectionConfigBuilder<
   beginDemand(planId: string): number {
     const generation = (this.demandGenerations.get(planId) ?? 0) + 1
     this.demandGenerations.set(planId, generation)
-    this.activeDemands.set(planId, { generation, settled: false })
+    this.activeDemands.set(planId, {
+      generation,
+      settled: false,
+    })
     return generation
   }
 
-  settleDemand(planId: string, generation: number): void {
+  settleDemand(
+    planId: string,
+    generation: number,
+    outcomes: ReadonlyArray<AppliedLoadSubsetOutcome> = [],
+    sourceId?: string,
+  ): void {
     const demand = this.activeDemands.get(planId)
     if (!demand || demand.generation !== generation || demand.settled) return
     demand.settled = true
+    const sourcedOutcomes = outcomes.map((outcome) =>
+      sourceId === undefined ? outcome : { ...outcome, sourceId },
+    )
+    for (const outcome of sourcedOutcomes) this.recordSubsetOutcome(outcome)
     this.maybeRunGraphFn?.()
   }
 
@@ -399,12 +440,41 @@ export class CollectionConfigBuilder<
     }
   }
 
-  trackSubsetLoadPromise(promise: Promise<void>): void {
-    this.liveQueryCollection!._sync.trackLoadPromise(promise)
+  trackSubsetLoadPromise(promise: Promise<unknown>, sourceId?: string): void {
+    const tracked = promise.then((result) => {
+      const scoped = scopeLoadSubsetOutcomes(result, sourceId)
+      const outcomes = Array.isArray(scoped) ? scoped : [scoped]
+      for (const outcome of outcomes) {
+        if (isAppliedLoadSubsetOutcome(outcome)) {
+          this.recordSubsetOutcome(outcome)
+        }
+      }
+      return scoped
+    })
+    this.liveQueryCollection!._sync.trackLoadPromise(tracked)
   }
 
-  trackSubsetLoadOperationPromise(promise: Promise<void>): void {
-    this.liveQueryCollection!._sync.trackLoadSubsetOperationPromise(promise)
+  trackSubsetLoadOperationPromise(
+    promise: Promise<unknown>,
+    sourceId?: string,
+  ): void {
+    const tracked = promise.then((result) =>
+      scopeLoadSubsetOutcomes(result, sourceId),
+    )
+    // This observer may be offered when no imperative window operation is
+    // active. The original promise owns lifecycle error delivery; do not leave
+    // this source-scoping derivative as an unhandled rejection in that case.
+    void tracked.catch(() => {})
+    this.liveQueryCollection!._sync.trackLoadSubsetOperationPromise(tracked)
+  }
+
+  private recordSubsetOutcome(outcome: AppliedLoadSubsetOutcome): void {
+    const demandKey = getLoadSubsetDemandKey(outcome.demand)
+    const outcomeKey = `${outcome.sourceId ?? ``}\u0000${outcome.collectionId}\u0000${demandKey ?? ``}`
+    const previous = this.latestSubsetOutcomes.get(outcomeKey)
+    if (!previous || previous.generation < outcome.generation) {
+      this.latestSubsetOutcomes.set(outcomeKey, outcome)
+    }
   }
 
   retireDemand(planId: string): void {
@@ -680,6 +750,8 @@ export class CollectionConfigBuilder<
     this.fatalQueryError = false
     this.erroredSourceIds.clear()
     this.lastSubsetError = undefined
+    this.latestSubsetOutcomes.clear()
+    this.lastWindowOutcomes = []
     // Store config and syncState as instance properties for the duration of this sync session
     this.currentSyncConfig = config
 
@@ -729,6 +801,8 @@ export class CollectionConfigBuilder<
       this.lazySources.clear()
       this.demandGenerations.clear()
       this.activeDemands.clear()
+      this.latestSubsetOutcomes.clear()
+      this.lastWindowOutcomes = []
       this.optimizableOrderByCollections = {}
       this.lazySourcesCallbacks = {}
 
@@ -1311,4 +1385,15 @@ function hasOrderOnlyMove<T>(
 /** Mark the collection's next commit as layout-changing. */
 function markLayoutChange(collection: { _markLayoutChange: () => void }): void {
   collection._markLayoutChange()
+}
+
+function scopeLoadSubsetOutcomes(result: unknown, sourceId?: string): unknown {
+  if (sourceId === undefined) return result
+  if (isAppliedLoadSubsetOutcome(result)) return { ...result, sourceId }
+  if (Array.isArray(result)) {
+    return result.map((item) =>
+      isAppliedLoadSubsetOutcome(item) ? { ...item, sourceId } : item,
+    )
+  }
+  return result
 }
