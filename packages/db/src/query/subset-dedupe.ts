@@ -5,7 +5,10 @@ import {
   unionWherePredicates,
 } from './predicate-utils.js'
 import { cloneLoadSubsetOptions } from './load-subset-options.js'
-import { recordLoadSubsetPromiseDemandMatcher } from './load-subset-outcome.js'
+import {
+  recordLoadSubsetPromiseDemandMatcher,
+  recordLoadSubsetResultDemandMatcher,
+} from './load-subset-outcome.js'
 import type { BasicExpression } from './ir.js'
 import type {
   LoadSubsetFn,
@@ -177,6 +180,10 @@ export class DeduplicatedLoadSubset {
         minusWherePredicates(loadOptions.where, this.unlimitedWhere) ??
         loadOptions.where
     }
+    const physicalRequest = cloneLoadSubsetOptions(loadOptions)
+    const matchesPhysicalRequest = (candidate: LoadSubsetOptions) =>
+      isLoadSubsetRequestSubsumedBy(candidate, physicalRequest) &&
+      isLoadSubsetRequestSubsumedBy(physicalRequest, candidate)
 
     // Call underlying loadSubset to load the missing data
     let resultPromise: true | Promise<void | LoadSubsetResult>
@@ -211,7 +218,10 @@ export class DeduplicatedLoadSubset {
             if (capturedGeneration === this.generation && !lease.aborted) {
               this.updateTracking(trackingOptions)
             }
-            return result
+            return recordLoadSubsetResultDemandMatcher(
+              result,
+              matchesPhysicalRequest,
+            )
           })
           .finally(() => {
             // Always remove from in-flight array on completion OR rejection
@@ -226,9 +236,7 @@ export class DeduplicatedLoadSubset {
 
       recordLoadSubsetPromiseDemandMatcher(
         inflightEntry.promise,
-        (candidate) =>
-          isLoadSubsetRequestSubsumedBy(candidate, trackingOptions) &&
-          isLoadSubsetRequestSubsumedBy(trackingOptions, candidate),
+        matchesPhysicalRequest,
       )
 
       // Store the in-flight entry so concurrent subset calls can wait for it

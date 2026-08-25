@@ -488,11 +488,52 @@ describe(`DbClient`, () => {
     await deferredLoad
 
     const adapterOptions = loadSubset.mock.calls[0]![0]
+    expect(adapterOptions).toEqual(ownerOptions)
     expect(adapterOptions).not.toBe(ownerOptions)
 
     collection._sync.unloadSubset(ownerOptions)
 
     expect(unloadSubset.mock.calls[0]![0]).toBe(adapterOptions)
+  })
+
+  it(`retries a failed deferred release with the same adapter options`, async () => {
+    const loadSubset = vi.fn((_options: LoadSubsetOptions) =>
+      Promise.resolve(undefined),
+    )
+    let unloadCalls = 0
+    const unloadSubset = vi.fn((_options: LoadSubsetOptions) => {
+      unloadCalls++
+      if (unloadCalls === 1) throw new Error(`release failed`)
+    })
+    const descriptor = collectionOptions(`people`, () => ({
+      id: `people`,
+      getKey: (person: Person) => person.id,
+      syncMode: `on-demand` as const,
+      sync: {
+        sync: ({ markReady }) => {
+          markReady()
+          return { loadSubset, unloadSubset }
+        },
+      },
+    }))
+    const client = new DbClient()
+    const collection = client._materializeCollectionForRender(descriptor)
+    const ownerOptions = { limit: 1 }
+    const deferredLoad = collection._sync.loadSubset(ownerOptions)
+
+    collection._resumeSyncStart()
+    await deferredLoad
+
+    const adapterOptions = loadSubset.mock.calls[0]![0]
+    expect(() => collection._sync.unloadSubset(ownerOptions)).toThrow(
+      `release failed`,
+    )
+
+    collection._sync.unloadSubset(ownerOptions)
+
+    expect(unloadSubset).toHaveBeenCalledTimes(2)
+    expect(unloadSubset.mock.calls[0]![0]).toBe(adapterOptions)
+    expect(unloadSubset.mock.calls[1]![0]).toBe(adapterOptions)
   })
 
   it(`lets the first sync snapshot replace stale hydrated rows`, () => {

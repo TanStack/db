@@ -14,7 +14,7 @@ import { LIVE_QUERY_INTERNAL } from '../query/live/internal.js'
 import {
   createAppliedLoadSubsetOutcome,
   isAppliedLoadSubsetOutcome,
-  isLoadSubsetPromiseForDemand,
+  isLoadSubsetResultForDemand,
 } from '../query/load-subset-outcome.js'
 import {
   cloneLoadSubsetOptions,
@@ -454,7 +454,7 @@ export class CollectionSyncManager<
                 this.id,
                 demand,
                 generation,
-                isLoadSubsetPromiseForDemand(result, options)
+                isLoadSubsetResultForDemand(result, sourceResult, options)
                   ? sourceResult
                   : undefined,
               )
@@ -929,7 +929,7 @@ export class CollectionSyncManager<
               this.id,
               demand,
               generation,
-              isLoadSubsetPromiseForDemand(result, options)
+              isLoadSubsetResultForDemand(result, sourceResult, options)
                 ? sourceResult
                 : undefined,
             )
@@ -1006,7 +1006,8 @@ export class CollectionSyncManager<
     const shared = this.coverageAcquisitionsByPromise.get(physicalPromise)
     let acquisition: AcquisitionToken
     if (
-      shared?.demandKey === demandKey &&
+      shared !== undefined &&
+      shared.demandKey === demandKey &&
       this.coverageRegistry.isAcquisitionAttachable(shared.acquisition)
     ) {
       acquisition = shared.acquisition
