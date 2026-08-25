@@ -1790,6 +1790,36 @@ describe(`persistedCollectionOptions`, () => {
     expect(ensureCalls).toBeGreaterThanOrEqual(2)
   })
 
+  it(`preserves authoritative source extent through persistence`, async () => {
+    const adapter = createRecordingAdapter()
+    const collection = createCollection(
+      persistedCollectionOptions<Todo, string>({
+        id: `sync-present-source-extent`,
+        syncMode: `on-demand`,
+        getKey: (item) => item.id,
+        sync: {
+          sync: ({ markReady }) => {
+            markReady()
+            return {
+              loadSubset: async () => ({ hasMore: false }),
+            }
+          },
+        },
+        persistence: {
+          adapter,
+          coordinator: createCoordinatorHarness(),
+        },
+      }),
+    )
+
+    collection.startSyncImmediate()
+    await flushAsyncWork()
+
+    const outcome = await (collection as any)._sync.loadSubset({ limit: 1 })
+
+    expect(outcome.extent).toBe(`exhausted`)
+  })
+
   it(`fails sync-absent persistence when follower ack omits mutation ids`, async () => {
     const adapter = createRecordingAdapter()
     const coordinator: PersistedCollectionCoordinator = {
