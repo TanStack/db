@@ -10,7 +10,11 @@ import {
   localOnlyCollectionOptions,
 } from '../src'
 import { mockSyncCollectionOptions } from './utils'
-import type { DehydratedLiveQueryResult, InitialQueryBuilder } from '../src'
+import type {
+  DehydratedLiveQueryResult,
+  InitialQueryBuilder,
+  LoadSubsetOptions,
+} from '../src'
 
 type Person = {
   id: string
@@ -457,6 +461,38 @@ describe(`DbClient`, () => {
     resolveLoad()
     await deferredLoad
     expect(collection.isLoadingSubset).toBe(false)
+  })
+
+  it(`releases a deferred subset with the adapter's acquired options`, async () => {
+    const loadSubset = vi.fn((_options: LoadSubsetOptions) =>
+      Promise.resolve(undefined),
+    )
+    const unloadSubset = vi.fn()
+    const descriptor = collectionOptions(`people`, () => ({
+      id: `people`,
+      getKey: (person: Person) => person.id,
+      syncMode: `on-demand` as const,
+      sync: {
+        sync: ({ markReady }) => {
+          markReady()
+          return { loadSubset, unloadSubset }
+        },
+      },
+    }))
+    const client = new DbClient()
+    const collection = client._materializeCollectionForRender(descriptor)
+    const ownerOptions = { limit: 1 }
+    const deferredLoad = collection._sync.loadSubset(ownerOptions)
+
+    collection._resumeSyncStart()
+    await deferredLoad
+
+    const adapterOptions = loadSubset.mock.calls[0]![0]
+    expect(adapterOptions).not.toBe(ownerOptions)
+
+    collection._sync.unloadSubset(ownerOptions)
+
+    expect(unloadSubset.mock.calls[0]![0]).toBe(adapterOptions)
   })
 
   it(`lets the first sync snapshot replace stale hydrated rows`, () => {

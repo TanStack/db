@@ -50,7 +50,10 @@ type DeferredLoadSubset = {
 
 type LoadSubsetOperation = {
   pending: Set<Promise<unknown>>
-  outcomes: Map<number, AppliedLoadSubsetOutcome>
+  outcomes: Map<
+    string | undefined,
+    Map<string, Map<number, AppliedLoadSubsetOutcome>>
+  >
   waiting: boolean
   completed: boolean
   hasError: boolean
@@ -84,6 +87,10 @@ export class CollectionSyncManager<
   private syncStartDeferred = false
   private syncStartRequested = false
   private deferredLoadSubsets: Array<DeferredLoadSubset> = []
+  private deferredAdapterOptions = new Map<
+    LoadSubsetOptions,
+    Array<LoadSubsetOptions>
+  >()
   private syncEpoch = 0
   private loadSubsetSession = 0
   private loadSubsetGeneration = 0
@@ -397,6 +404,7 @@ export class CollectionSyncManager<
     }
 
     for (const {
+      ownerOptions,
       options,
       demand,
       generation,
@@ -404,6 +412,14 @@ export class CollectionSyncManager<
     } of deferredLoadSubsets) {
       try {
         const result = this.syncLoadSubsetFn?.(options) ?? true
+        if (this.syncLoadSubsetFn) {
+          const adapterOptions = this.deferredAdapterOptions.get(ownerOptions)
+          if (adapterOptions) {
+            adapterOptions.push(options)
+          } else {
+            this.deferredAdapterOptions.set(ownerOptions, [options])
+          }
+        }
         if (result instanceof Promise) {
           void result.then(
             (sourceResult) =>
@@ -685,7 +701,12 @@ export class CollectionSyncManager<
           this.activeLoadSubsetOperation = undefined
         }
       },
-      getOutcomes: () => [...operation.outcomes.values()],
+      getOutcomes: () =>
+        [...operation.outcomes.values()].flatMap((byCollection) =>
+          [...byCollection.values()].flatMap((byGeneration) => [
+            ...byGeneration.values(),
+          ]),
+        ),
     }
   }
 
@@ -722,10 +743,17 @@ export class CollectionSyncManager<
           ? [outcome.result]
           : []
       for (const result of results) {
-        const previous = operation.outcomes.get(result.generation)
-        if (!previous || previous.generation < result.generation) {
-          operation.outcomes.set(result.generation, result)
+        let byCollection = operation.outcomes.get(result.sourceId)
+        if (!byCollection) {
+          byCollection = new Map()
+          operation.outcomes.set(result.sourceId, byCollection)
         }
+        let byGeneration = byCollection.get(result.collectionId)
+        if (!byGeneration) {
+          byGeneration = new Map()
+          byCollection.set(result.collectionId, byGeneration)
+        }
+        byGeneration.set(result.generation, result)
       }
     }
     if (!operation.waiting || operation.pending.size > 0) return
@@ -895,7 +923,12 @@ export class CollectionSyncManager<
     }
 
     if (this.syncUnloadSubsetFn) {
-      this.syncUnloadSubsetFn(options)
+      const adapterOptions = this.deferredAdapterOptions.get(options)
+      const acquiredOptions = adapterOptions?.shift() ?? options
+      if (adapterOptions?.length === 0) {
+        this.deferredAdapterOptions.delete(options)
+      }
+      this.syncUnloadSubsetFn(acquiredOptions)
     }
   }
 
@@ -928,6 +961,7 @@ export class CollectionSyncManager<
     this.syncUnloadSubsetFn = null
     this.syncStartDeferred = false
     this.syncStartRequested = false
+    this.deferredAdapterOptions.clear()
     const wasLoadingSubset = this.pendingLoadSubsetPromises.size > 0
     this.pendingLoadSubsetPromises.clear()
     if (wasLoadingSubset) {

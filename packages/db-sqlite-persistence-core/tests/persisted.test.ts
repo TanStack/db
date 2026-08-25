@@ -27,11 +27,23 @@ import type {
   PullSinceResponse,
   TxCommitted,
 } from '../src'
-import type { LoadSubsetOptions, SyncConfig } from '@tanstack/db'
+import type {
+  AppliedLoadSubsetOutcome,
+  LoadSubsetOptions,
+  SyncConfig,
+} from '@tanstack/db'
 
 type Todo = {
   id: string
   title: string
+}
+
+type LoadSubsetTestCollection = {
+  _sync: {
+    loadSubset: (
+      options: LoadSubsetOptions,
+    ) => true | Promise<AppliedLoadSubsetOutcome>
+  }
 }
 
 type RecordingAdapter = PersistenceAdapter & {
@@ -1801,7 +1813,7 @@ describe(`persistedCollectionOptions`, () => {
           sync: ({ markReady }) => {
             markReady()
             return {
-              loadSubset: async () => ({ hasMore: false }),
+              loadSubset: () => Promise.resolve({ hasMore: false }),
             }
           },
         },
@@ -1815,9 +1827,13 @@ describe(`persistedCollectionOptions`, () => {
     collection.startSyncImmediate()
     await flushAsyncWork()
 
-    const outcome = await (collection as any)._sync.loadSubset({ limit: 1 })
+    const sync = (collection as unknown as LoadSubsetTestCollection)._sync
+    const outcome = await sync.loadSubset({ limit: 1 })
 
-    expect(outcome.extent).toBe(`exhausted`)
+    expect(outcome).not.toBe(true)
+    if (outcome !== true) {
+      expect(outcome.extent).toBe(`exhausted`)
+    }
   })
 
   it(`fails sync-absent persistence when follower ack omits mutation ids`, async () => {
