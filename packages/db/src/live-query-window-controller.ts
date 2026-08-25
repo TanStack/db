@@ -537,7 +537,9 @@ export interface LiveQueryWindowController<
   /** Reset to the first page, resolving after the smaller window is accepted. */
   reset: () => Promise<void>
   /** @internal Exact applied outcomes for the accepted physical window. */
-  getLatestAppliedOutcomes: () => ReadonlyArray<AppliedLoadSubsetOutcome>
+  [LIVE_QUERY_INTERNAL]: {
+    getLatestAppliedOutcomes: () => ReadonlyArray<AppliedLoadSubsetOutcome>
+  }
   preload: () => Promise<void>
   dispose: () => void
 }
@@ -580,6 +582,11 @@ class LiveQueryWindowControllerImpl<
   T extends object,
   TKey extends string | number,
 > implements LiveQueryWindowController<T, TKey> {
+  readonly [LIVE_QUERY_INTERNAL] = {
+    getLatestAppliedOutcomes: () =>
+      this.coordinator?.getLatestAppliedOutcomes() ?? [],
+  }
+
   private readonly observer: LiveQueryObserver<T, TKey>
   private readonly collection: Collection<T, TKey, any> | null
   private readonly coordinator: WindowCoordinator | null
@@ -794,10 +801,6 @@ class LiveQueryWindowControllerImpl<
       return Promise.resolve()
     }
     return this.requestPageCount(1, false)
-  }
-
-  getLatestAppliedOutcomes(): ReadonlyArray<AppliedLoadSubsetOutcome> {
-    return this.coordinator?.getLatestAppliedOutcomes() ?? []
   }
 
   async preload(): Promise<void> {

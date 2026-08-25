@@ -176,7 +176,6 @@ export class CollectionConfigBuilder<
     {
       generation: number
       settled: boolean
-      outcomes: ReadonlyArray<AppliedLoadSubsetOutcome>
     }
   >()
   private readonly demandGenerations = new Map<string, number>()
@@ -394,7 +393,6 @@ export class CollectionConfigBuilder<
     this.activeDemands.set(planId, {
       generation,
       settled: false,
-      outcomes: [],
     })
     return generation
   }
@@ -411,7 +409,6 @@ export class CollectionConfigBuilder<
     const sourcedOutcomes = outcomes.map((outcome) =>
       sourceId === undefined ? outcome : { ...outcome, sourceId },
     )
-    demand.outcomes = sourcedOutcomes
     for (const outcome of sourcedOutcomes) this.recordSubsetOutcome(outcome)
     this.maybeRunGraphFn?.()
   }

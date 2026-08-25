@@ -309,9 +309,9 @@ describe(`loadSubset outcomes`, () => {
           extent: `exhausted`,
         }),
       ])
-      expect(controller.getLatestAppliedOutcomes()).toEqual(
-        internal.getLastWindowOutcomes(),
-      )
+      expect(
+        controller[LIVE_QUERY_INTERNAL].getLatestAppliedOutcomes(),
+      ).toEqual(internal.getLastWindowOutcomes())
     } finally {
       controller.dispose()
       await Promise.all([live.cleanup(), source.cleanup()])
