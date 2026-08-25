@@ -821,6 +821,11 @@ export function queryCollectionOptions(
   // 3. Decrements refcount and GCs rows where count reaches 0
   const queryRefCounts = new Map<string, number>()
 
+  // Eager mode owns its base query for the collection's whole lifetime. Query
+  // cache GC may remove the idle cache entry, but that is not a release of the
+  // collection's ownership or its materialized rows.
+  const collectionLifetimeQueries = new Set<string>()
+
   const addRowOwner = (rowKey: string | number, hashedQueryKey: string) => {
     const owners = rowToQueries.get(rowKey) || new Set<string>()
     owners.add(hashedQueryKey)
@@ -1822,6 +1827,7 @@ export function queryCollectionOptions(
 
     // If syncMode is eager, create the initial query without any predicates
     if (syncMode === `eager`) {
+      collectionLifetimeQueries.add(hashKey(generateQueryKeyFromOptions({})))
       // Catch any errors to prevent unhandled rejections
       const initialResult = createQueryFromOpts({})
       if (initialResult instanceof Promise) {
@@ -1915,6 +1921,7 @@ export function queryCollectionOptions(
       queryToRows.delete(hashedQueryKey)
       hashToQueryKey.delete(hashedQueryKey)
       queryRefCounts.delete(hashedQueryKey)
+      collectionLifetimeQueries.delete(hashedQueryKey)
       effectivePersistedGcTimes.delete(hashedQueryKey)
     }
 
@@ -1927,6 +1934,10 @@ export function queryCollectionOptions(
       const observer = state.observers.get(hashedQueryKey)
       const effectivePersistedGcTime =
         effectivePersistedGcTimes.get(hashedQueryKey)
+
+      if (collectionLifetimeQueries.has(hashedQueryKey)) {
+        return
+      }
 
       if (refcount <= 0) {
         // Drop our subscription so hasListeners reflects only active consumers
