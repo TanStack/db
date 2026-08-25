@@ -1843,10 +1843,19 @@ describe(`persistedCollectionOptions`, () => {
     const load = new Promise<{ hasMore: boolean }>((resolve) => {
       resolveLoad = resolve
     })
+    const physicalLimits: Array<number | undefined> = []
     const deduplicated = new DeduplicatedLoadSubset({
-      loadSubset: () => load,
+      loadSubset: (options) => {
+        physicalLimits.push(options.limit)
+        return load
+      },
     })
     let upstreamCalls = 0
+    let resolveFirstUpstream!: () => void
+    const firstUpstream = new Promise<void>((resolve) => {
+      resolveFirstUpstream = resolve
+    })
+    const upstreamHasMore = new Map<number | undefined, boolean | undefined>()
     let resolveSecondUpstream!: () => void
     const secondUpstream = new Promise<void>((resolve) => {
       resolveSecondUpstream = resolve
@@ -1860,11 +1869,17 @@ describe(`persistedCollectionOptions`, () => {
           sync: ({ markReady }) => {
             markReady()
             return {
-              loadSubset: (options) => {
+              loadSubset: async (options) => {
                 upstreamCalls++
                 const result = deduplicated.loadSubset(options)
+                if (upstreamCalls === 1) resolveFirstUpstream()
                 if (upstreamCalls === 2) resolveSecondUpstream()
-                return result
+                if (result === true) return undefined
+                const sourceResult = await result
+                upstreamHasMore.set(options.limit, sourceResult?.hasMore)
+                return sourceResult === undefined
+                  ? undefined
+                  : { hasMore: sourceResult.hasMore }
               },
             }
           },
@@ -1882,13 +1897,25 @@ describe(`persistedCollectionOptions`, () => {
 
       const sync = (collection as unknown as LoadSubsetTestCollection)._sync
       const covering = sync.loadSubset({ limit: 10 })
+      await firstUpstream
       const narrower = sync.loadSubset({ limit: 5 })
 
       await secondUpstream
+      expect(physicalLimits).toEqual([10])
       resolveLoad({ hasMore: false })
 
-      await expect(covering).resolves.toMatchObject({ extent: `exhausted` })
-      await expect(narrower).resolves.toMatchObject({ extent: `unknown` })
+      const [coveringOutcome, narrowerOutcome] = await Promise.all([
+        covering,
+        narrower,
+      ])
+      expect(upstreamHasMore).toEqual(
+        new Map([
+          [10, false],
+          [5, undefined],
+        ]),
+      )
+      expect(coveringOutcome).toMatchObject({ extent: `exhausted` })
+      expect(narrowerOutcome).toMatchObject({ extent: `unknown` })
     } finally {
       resolveLoad({ hasMore: false })
       await collection.cleanup()

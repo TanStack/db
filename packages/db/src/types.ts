@@ -394,9 +394,12 @@ export type LoadSubsetFn = (
 export type SyncAppliedReceipt = true | Promise<void>
 
 /**
- * Releases one successful `loadSubset` ownership. Implementations must be
- * idempotent and must not throw. Core preserves the ownership and retries a
- * later unload if a buggy implementation throws despite this contract.
+ * Releases the exact acquisition created for `options`.
+ *
+ * Implementations must be idempotent and must not throw. An adapter owns any
+ * remote unsubscribe retry needed to make release reliable. Core preserves a
+ * failed release defensively so a later cleanup attempt can retry the same
+ * acquisition identity.
  */
 export type UnloadSubsetFn = (options: LoadSubsetOptions) => void
 

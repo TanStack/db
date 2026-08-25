@@ -321,7 +321,6 @@ export class CollectionSubscription
           attempt.pending.add(pending)
           void syncResult.then(
             () => {
-              demand.pendingReplayAcquisitions.delete(nextAcquisition)
               if (
                 isCurrentAttempt() &&
                 this.subsetDemands.includes(demand) &&
@@ -337,12 +336,11 @@ export class CollectionSubscription
                   attempt.failed = true
                 }
               } else {
-                this.releaseReplayAcquisition(nextAcquisition)
+                this.discardReplayAcquisition(demand, nextAcquisition)
               }
               this.settleTruncateReplay(session, attempt, pending)
             },
             () => {
-              demand.pendingReplayAcquisitions.delete(nextAcquisition)
               const failedCurrentDemand =
                 this.subsetDemands.includes(demand) &&
                 !nextAcquisition.options.signal?.aborted
@@ -352,12 +350,11 @@ export class CollectionSubscription
               if (failedCurrentDemand) {
                 attempt.failed = true
               }
-              this.releaseReplayAcquisition(nextAcquisition)
+              this.discardReplayAcquisition(demand, nextAcquisition)
               this.settleTruncateReplay(session, attempt, pending)
             },
           )
         } else {
-          demand.pendingReplayAcquisitions.delete(nextAcquisition)
           if (
             !this.tryReplaceSubsetAcquisition(demand, nextAcquisition, attempt)
           ) {
@@ -625,39 +622,63 @@ export class CollectionSubscription
   ): boolean {
     try {
       this.replaceSubsetAcquisition(demand, next)
+      demand.pendingReplayAcquisitions.delete(next)
       return true
     } catch (error) {
       // The old lease remains owned when its release fails. Release the new
       // acquisition and keep the old one available for a cleanup retry.
-      this.releaseReplayAcquisition(next)
+      this.discardReplayAcquisition(demand, next)
       this.recordLoadSubsetError(demand.options, error, true)
       attempt.failed = true
       return false
     }
   }
 
-  private releaseReplayAcquisition(next: ReplaySubsetAcquisition): void {
+  private discardReplayAcquisition(
+    demand: SubsetDemand,
+    next: ReplaySubsetAcquisition,
+  ): void {
+    try {
+      this.releaseReplayAcquisition(demand, next)
+    } catch {
+      // Keep the failed acquisition on the demand. releaseSnapshot,
+      // unsubscribe, or collection cleanup will retry its exact owner route.
+    }
+  }
+
+  private releaseReplayAcquisition(
+    demand: SubsetDemand,
+    next: ReplaySubsetAcquisition,
+  ): void {
+    if (!demand.pendingReplayAcquisitions.has(next)) return
     next.abortController.abort()
-    next.removeRequestAbortListener?.()
     try {
       this.collection._sync.unloadSubset(next.options)
-    } catch {
-      // The original replay failure or supersession decides publication. A
-      // cleanup error here must not replace it or retain a stale demand route.
+      demand.pendingReplayAcquisitions.delete(next)
+    } finally {
+      next.removeRequestAbortListener?.()
     }
   }
 
   /** Abort and release one current adapter acquisition. */
   private releaseSubsetDemand(demand: SubsetDemand): void {
     demand.abortController?.abort()
-    for (const pending of demand.pendingReplayAcquisitions) {
-      pending.abortController.abort()
+    let firstReleaseError: unknown
+    for (const pending of [...demand.pendingReplayAcquisitions]) {
+      try {
+        this.releaseReplayAcquisition(demand, pending)
+      } catch (error) {
+        firstReleaseError ??= error
+      }
     }
     try {
       this.collection._sync.unloadSubset(demand.options)
+    } catch (error) {
+      firstReleaseError ??= error
     } finally {
       demand.removeRequestAbortListener?.()
     }
+    if (firstReleaseError !== undefined) throw firstReleaseError
   }
 
   /** Start and retain the first acquisition for one logical subset demand. */
@@ -837,8 +858,10 @@ export class CollectionSubscription
     )
     if (index === -1) return
 
-    const [demand] = this.subsetDemands.splice(index, 1)
-    if (demand) this.releaseSubsetDemand(demand)
+    const demand = this.subsetDemands[index]
+    if (!demand) return
+    this.releaseSubsetDemand(demand)
+    this.subsetDemands.splice(index, 1)
   }
 
   /**
@@ -1219,14 +1242,16 @@ export class CollectionSubscription
     this.stalePublishedRows.clear()
 
     // Release the current adapter acquisition for each logical subset demand.
+    const failedDemands: Array<SubsetDemand> = []
     for (const demand of this.subsetDemands) {
       try {
         this.releaseSubsetDemand(demand)
       } catch (error) {
         firstCleanupError ??= error
+        failedDemands.push(demand)
       }
     }
-    this.subsetDemands = []
+    this.subsetDemands = failedDemands
 
     try {
       this.emitInner(`unsubscribed`, {

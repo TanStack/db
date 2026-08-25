@@ -648,6 +648,147 @@ describe(`CollectionSubscription status tracking`, () => {
     },
   )
 
+  it.each([`releaseSnapshot`, `unsubscribe`] as const)(
+    `retries a failed deferred release through %s`,
+    async (releaseMode) => {
+      const loads: Array<LoadSubsetOptions> = []
+      const unloads: Array<LoadSubsetOptions> = []
+      const failure = new Error(`release failed`)
+      const collection = createCollection<{ id: string }>({
+        id: `failed-deferred-subscription-release-${releaseMode}`,
+        getKey: (row) => row.id,
+        syncMode: `on-demand`,
+        startSync: false,
+        sync: {
+          sync: ({ markReady }) => {
+            markReady()
+            return {
+              loadSubset: (options) => {
+                loads.push(options)
+                return Promise.resolve()
+              },
+              unloadSubset: (options) => {
+                unloads.push(options)
+                if (unloads.length === 1) throw failure
+              },
+            }
+          },
+        },
+      })
+
+      expect(collection._deferSyncStart()).toBe(true)
+      const subscription = collection.subscribeChanges(() => {}, {
+        includeInitialState: false,
+      })
+      const where = new Func(`eq`, [
+        new PropRef([`id`]),
+        new Value(`requested`),
+      ])
+      const firstRelease = () => {
+        if (releaseMode === `releaseSnapshot`) {
+          subscription.releaseSnapshot(where)
+        } else {
+          subscription.unsubscribe()
+        }
+      }
+
+      try {
+        subscription.requestSnapshot({
+          where,
+          limit: 1,
+          optimizedOnly: false,
+        })
+        collection._resumeSyncStart()
+        await flushPromises()
+
+        expect(loads).toHaveLength(1)
+        let releaseError: unknown
+        try {
+          firstRelease()
+        } catch (error) {
+          releaseError = error
+        }
+        expect(releaseError).toBe(failure)
+        expect(() => subscription.unsubscribe()).not.toThrow()
+
+        expect(unloads).toHaveLength(2)
+        expect(unloads[0]).toBe(loads[0])
+        expect(unloads[1]).toBe(loads[0])
+
+        subscription.unsubscribe()
+        expect(unloads).toHaveLength(2)
+      } finally {
+        subscription.unsubscribe()
+        await collection.cleanup()
+      }
+    },
+  )
+
+  it(`retries the exact pending replay acquisition after release fails`, async () => {
+    const replay = createDeferred<void>()
+    const loads: Array<LoadSubsetOptions> = []
+    const unloads: Array<LoadSubsetOptions> = []
+    const failure = new Error(`pending replay release failed`)
+    let failedPendingRelease = false
+    let begin!: () => void
+    let commit!: () => void
+    let truncate!: () => void
+    const collection = createCollection<{ id: string }>({
+      id: `failed-pending-replay-release`,
+      getKey: (row) => row.id,
+      syncMode: `on-demand`,
+      sync: {
+        sync: (params) => {
+          begin = params.begin
+          commit = params.commit
+          truncate = params.truncate
+          params.markReady()
+          return {
+            loadSubset: (options) => {
+              loads.push(options)
+              return loads.length === 1 ? Promise.resolve() : replay.promise
+            },
+            unloadSubset: (options) => {
+              unloads.push(options)
+              if (options === loads[1] && !failedPendingRelease) {
+                failedPendingRelease = true
+                throw failure
+              }
+            },
+          }
+        },
+      },
+    })
+    const subscription = collection.subscribeChanges(() => {}, {
+      includeInitialState: false,
+    })
+
+    try {
+      subscription.requestSnapshot({ optimizedOnly: false })
+      await flushPromises()
+
+      begin()
+      truncate()
+      commit()
+      await flushPromises()
+      expect(loads).toHaveLength(2)
+
+      expect(() => subscription.unsubscribe()).toThrow(failure)
+      expect(() => subscription.unsubscribe()).not.toThrow()
+
+      const pendingUnloads = unloads.filter((options) => options === loads[1])
+      expect(pendingUnloads).toEqual([loads[1], loads[1]])
+
+      replay.resolve()
+      await flushPromises()
+      expect(unloads.filter((options) => options === loads[1])).toHaveLength(2)
+    } finally {
+      replay.resolve()
+      subscription.unsubscribe()
+      await collection.cleanup()
+    }
+  })
+
   it(`retains a subset after a synchronous truncate replay failure`, async () => {
     const error = new Error(`synchronous truncate replay failed`)
     let truncateSource: () => void = () => {

@@ -27,6 +27,7 @@ type InflightCall = {
   options: LoadSubsetOptions
   promise: Promise<void | LoadSubsetResult>
   lease: SharedAbortLease
+  matchesPhysicalRequest: (options: LoadSubsetOptions) => boolean
 }
 
 /**
@@ -140,12 +141,15 @@ export class DeduplicatedLoadSubset {
     if (matchingInflight !== undefined) {
       matchingInflight.lease.attach(options.signal)
       // An in-flight call will load data that covers this request
-      // Return the same promise so every requester shares cancellation and
-      // settlement identity. The promise retains the acquisition's exact
-      // demand as internal provenance, so a narrower caller cannot later
-      // mistake its source extent for caller-relative coverage.
+      // Every requester shares the physical work and cancellation lease. A
+      // narrower requester receives a caller-relative result whose extent is
+      // conservative even if an outer adapter rebuilds the result object.
       // The in-flight promise already handles tracking updates when it completes
-      const prom = matchingInflight.promise
+      const prom = projectLoadSubsetResultForCaller(
+        matchingInflight.promise,
+        options,
+        matchingInflight.matchesPhysicalRequest,
+      )
       // Call `onDeduplicate` when the inflight request has loaded the data
       void prom
         .then(() => this.onDeduplicate?.(options))
@@ -210,6 +214,7 @@ export class DeduplicatedLoadSubset {
       const inflightEntry = {
         options: trackingOptions,
         lease,
+        matchesPhysicalRequest,
         promise: resultPromise
           .then((result) => {
             // Only update tracking if this request is still from the current generation
@@ -241,7 +246,11 @@ export class DeduplicatedLoadSubset {
 
       // Store the in-flight entry so concurrent subset calls can wait for it
       this.inflightCalls.push(inflightEntry)
-      return inflightEntry.promise
+      return projectLoadSubsetResultForCaller(
+        inflightEntry.promise,
+        options,
+        matchesPhysicalRequest,
+      )
     }
   }
 
@@ -288,6 +297,27 @@ export class DeduplicatedLoadSubset {
       this.limitedCalls.push(options)
     }
   }
+}
+
+function projectLoadSubsetResultForCaller(
+  physicalPromise: Promise<void | LoadSubsetResult>,
+  callerOptions: LoadSubsetOptions,
+  matchesPhysicalRequest: (options: LoadSubsetOptions) => boolean,
+): Promise<void | LoadSubsetResult> {
+  if (matchesPhysicalRequest(callerOptions)) return physicalPromise
+
+  const callerRequest = cloneLoadSubsetOptions(callerOptions)
+  const matchesCallerRequest = (candidate: LoadSubsetOptions) =>
+    isLoadSubsetRequestSubsumedBy(candidate, callerRequest) &&
+    isLoadSubsetRequestSubsumedBy(callerRequest, candidate)
+  const projectedPromise = physicalPromise.then((result) =>
+    recordLoadSubsetResultDemandMatcher(
+      result === undefined ? undefined : { ...result, hasMore: undefined },
+      matchesCallerRequest,
+    ),
+  )
+  recordLoadSubsetPromiseDemandMatcher(projectedPromise, matchesCallerRequest)
+  return projectedPromise
 }
 
 function createSharedAbortLease(
