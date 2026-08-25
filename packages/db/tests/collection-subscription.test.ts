@@ -665,6 +665,7 @@ describe(`CollectionSubscription status tracking`, () => {
     async (resultKind) => {
       const loads: Array<LoadSubsetOptions> = []
       const unloads: Array<LoadSubsetOptions> = []
+      let unsubscribeDuringLoad = () => {}
       const collection = createCollection<{ id: string }>({
         id: `reentrant-active-subscription-release-${resultKind}`,
         getKey: (row) => row.id,
@@ -675,7 +676,7 @@ describe(`CollectionSubscription status tracking`, () => {
             return {
               loadSubset: (options) => {
                 loads.push(options)
-                options.subscription!.unsubscribe()
+                unsubscribeDuringLoad()
                 return resultKind === `return` ? true : Promise.resolve()
               },
               unloadSubset: (options) => {
@@ -689,6 +690,7 @@ describe(`CollectionSubscription status tracking`, () => {
       const subscription = collection.subscribeChanges(() => {}, {
         includeInitialState: false,
       })
+      unsubscribeDuringLoad = () => subscription.unsubscribe()
 
       try {
         subscription.requestSnapshot({ limit: 1, optimizedOnly: false })
@@ -708,6 +710,7 @@ describe(`CollectionSubscription status tracking`, () => {
 
   it(`releases active subset ownership reentrantly without an unload hook`, async () => {
     const loads: Array<LoadSubsetOptions> = []
+    let unsubscribeDuringLoad = () => {}
     const collection = createCollection<{ id: string }>({
       id: `reentrant-active-subscription-release-without-hook`,
       getKey: (row) => row.id,
@@ -718,7 +721,7 @@ describe(`CollectionSubscription status tracking`, () => {
           return {
             loadSubset: (options) => {
               loads.push(options)
-              options.subscription!.unsubscribe()
+              unsubscribeDuringLoad()
               return true
             },
           }
@@ -729,6 +732,7 @@ describe(`CollectionSubscription status tracking`, () => {
     const subscription = collection.subscribeChanges(() => {}, {
       includeInitialState: false,
     })
+    unsubscribeDuringLoad = () => subscription.unsubscribe()
 
     try {
       subscription.requestSnapshot({ limit: 1, optimizedOnly: false })
@@ -752,6 +756,7 @@ describe(`CollectionSubscription status tracking`, () => {
       const unloads: Array<LoadSubsetOptions> = []
       const failure = new Error(`reentrant active release failed`)
       let releaseError: unknown
+      let unsubscribeDuringLoad = () => {}
       const collection = createCollection<{ id: string }>({
         id: `reentrant-active-subscription-release-retry-${resultKind}`,
         getKey: (row) => row.id,
@@ -763,7 +768,7 @@ describe(`CollectionSubscription status tracking`, () => {
               loadSubset: (options) => {
                 loads.push(options)
                 try {
-                  options.subscription!.unsubscribe()
+                  unsubscribeDuringLoad()
                 } catch (error) {
                   releaseError = error
                 }
@@ -780,6 +785,7 @@ describe(`CollectionSubscription status tracking`, () => {
       const subscription = collection.subscribeChanges(() => {}, {
         includeInitialState: false,
       })
+      unsubscribeDuringLoad = () => subscription.unsubscribe()
 
       try {
         subscription.requestSnapshot({ limit: 1, optimizedOnly: false })
@@ -803,6 +809,7 @@ describe(`CollectionSubscription status tracking`, () => {
     const loads: Array<LoadSubsetOptions> = []
     const unloads: Array<LoadSubsetOptions> = []
     const failure = new Error(`reentrant active release escaped`)
+    let unsubscribeDuringLoad = () => {}
     const collection = createCollection<{ id: string }>({
       id: `reentrant-active-subscription-release-escaped`,
       getKey: (row) => row.id,
@@ -813,7 +820,7 @@ describe(`CollectionSubscription status tracking`, () => {
           return {
             loadSubset: (options) => {
               loads.push(options)
-              options.subscription!.unsubscribe()
+              unsubscribeDuringLoad()
               return true
             },
             unloadSubset: (options) => {
@@ -827,6 +834,7 @@ describe(`CollectionSubscription status tracking`, () => {
     const subscription = collection.subscribeChanges(() => {}, {
       includeInitialState: false,
     })
+    unsubscribeDuringLoad = () => subscription.unsubscribe()
 
     try {
       expect(() =>
