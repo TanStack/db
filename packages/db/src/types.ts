@@ -340,9 +340,10 @@ export type LoadSubsetOptions = {
 export interface LoadSubsetResult {
   /**
    * Whether the source authoritatively knows that more rows exist beyond this
-   * exact request. Omit this when the source cannot prove either direction.
+   * exact request. Return `undefined` when the source cannot prove either
+   * direction.
    */
-  hasMore?: boolean
+  hasMore: boolean | undefined
 }
 
 /** @internal Normalized source extent for one applied subset demand. */

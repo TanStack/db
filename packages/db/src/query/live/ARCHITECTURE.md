@@ -470,9 +470,10 @@ visible. Rejected, canceled, and obsolete acquisitions establish no coverage.
 Sources must honor cancellation before publishing request-scoped rows.
 
 After those writes are applied, `loadSubset` may resolve with
-`{ hasMore: boolean }`. Core normalizes that source fact to `continues` or
-`exhausted` and binds it to the exact collection demand and attempt generation;
-an omitted result remains `unknown`. A request reused for a narrower demand may
+`{ hasMore: boolean | undefined }`. Core normalizes that source fact to
+`continues`, `exhausted`, or `unknown` and binds it to the exact collection
+demand and attempt generation; an omitted result also remains `unknown`. A
+request reused for a narrower demand may
 settle that demand, but its raw extent does not become a fact about the narrower
 demand. Live-query plumbing preserves these outcomes through lazy demand and
 window coordination. Only the root paginated source may use them to replace a

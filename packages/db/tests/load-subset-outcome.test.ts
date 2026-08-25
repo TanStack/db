@@ -12,7 +12,7 @@ describe(`loadSubset outcomes`, () => {
   it.each([
     [{ hasMore: true }, `continues`],
     [{ hasMore: false }, `exhausted`],
-    [{}, `unknown`],
+    [{ hasMore: undefined }, `unknown`],
     [undefined, `unknown`],
   ] as const)(
     `normalizes an applied %o result to %s for its exact demand`,
