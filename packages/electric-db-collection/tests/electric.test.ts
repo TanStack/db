@@ -2896,6 +2896,112 @@ describe(`Electric Integration`, () => {
       }
     })
 
+    it(`should cancel a pending refresh wait when the collection is cleaned up`, async () => {
+      vi.useFakeTimers()
+      let resolveRefresh: () => void = () => {}
+      const refresh = new Promise<void>((resolve) => {
+        resolveRefresh = resolve
+      })
+
+      try {
+        mockStream.isUpToDate = true
+        mockForceDisconnectAndRefresh.mockReturnValueOnce(refresh)
+
+        const testCollection = createCollection(
+          electricCollectionOptions({
+            id: `on-demand-refresh-cleanup-test`,
+            shapeOptions: {
+              url: `http://test-url`,
+              params: { table: `test_table` },
+            },
+            syncMode: `on-demand`,
+            getKey: (item: Row) => item.id as number,
+            startSync: true,
+          }),
+        )
+
+        let loadSettled = false
+        const load = Promise.resolve(
+          testCollection._sync.loadSubset({ limit: 10 }),
+        ).then(() => {
+          loadSettled = true
+        })
+
+        await Promise.resolve()
+        await testCollection.cleanup()
+        await vi.advanceTimersByTimeAsync(0)
+
+        expect(loadSettled).toBe(true)
+        expect(mockRequestSnapshot).not.toHaveBeenCalled()
+        expect(vi.getTimerCount()).toBe(0)
+
+        resolveRefresh()
+        await refresh
+        await load
+        expect(mockRequestSnapshot).not.toHaveBeenCalled()
+      } finally {
+        resolveRefresh()
+        await vi.runOnlyPendingTimersAsync()
+        vi.useRealTimers()
+      }
+    })
+
+    it(`should retry a refresh wait after the requesting demand is aborted`, async () => {
+      vi.useFakeTimers()
+      let resolveRefresh: () => void = () => {}
+      const refresh = new Promise<void>((resolve) => {
+        resolveRefresh = resolve
+      })
+
+      try {
+        mockStream.isUpToDate = true
+        mockForceDisconnectAndRefresh.mockReturnValueOnce(refresh)
+
+        const testCollection = createCollection(
+          electricCollectionOptions({
+            id: `on-demand-refresh-abort-retry-test`,
+            shapeOptions: {
+              url: `http://test-url`,
+              params: { table: `test_table` },
+            },
+            syncMode: `on-demand`,
+            getKey: (item: Row) => item.id as number,
+            startSync: true,
+          }),
+        )
+        const abortController = new AbortController()
+        let abortedLoadSettled = false
+        const abortedLoad = Promise.resolve(
+          testCollection._sync.loadSubset({
+            limit: 10,
+            signal: abortController.signal,
+          }),
+        ).then(() => {
+          abortedLoadSettled = true
+        })
+
+        await Promise.resolve()
+        abortController.abort()
+        await vi.advanceTimersByTimeAsync(0)
+
+        expect(abortedLoadSettled).toBe(true)
+        expect(mockRequestSnapshot).not.toHaveBeenCalled()
+        expect(vi.getTimerCount()).toBe(0)
+
+        mockForceDisconnectAndRefresh.mockResolvedValueOnce(undefined)
+        await testCollection._sync.loadSubset({ limit: 10 })
+
+        expect(mockForceDisconnectAndRefresh).toHaveBeenCalledTimes(2)
+        expect(mockRequestSnapshot).toHaveBeenCalledTimes(1)
+        await testCollection.cleanup()
+        await abortedLoad
+      } finally {
+        resolveRefresh()
+        await vi.runOnlyPendingTimersAsync()
+        vi.useRealTimers()
+      }
+    })
+
     it(`should clear the refresh timeout when refresh settles early`, async () => {
       vi.useFakeTimers()
       try {
