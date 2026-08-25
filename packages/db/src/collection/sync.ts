@@ -115,6 +115,7 @@ export class CollectionSyncManager<
     Promise<unknown>,
     SharedCoverageAcquisition
   >()
+  private readonly pendingCoverageRowsToRemove = new Set<TKey>()
 
   /**
    * Creates a new CollectionSyncManager instance
@@ -1045,7 +1046,10 @@ export class CollectionSyncManager<
   private releaseCoverageLease(options: LoadSubsetOptions): void {
     const leases = this.coverageLeasesByOwner.get(options)
     const lease = leases?.shift()
-    if (!lease) return
+    if (!lease) {
+      this.flushCoverageRowsToRemove()
+      return
+    }
     if (leases?.length === 0) this.coverageLeasesByOwner.delete(options)
     this.removeCoverageRows(
       this.coverageRegistry.releaseLease(lease).rowsToRemove,
@@ -1068,11 +1072,20 @@ export class CollectionSyncManager<
   }
 
   private removeCoverageRows(rows: ReadonlyArray<TKey>): void {
-    const unownedRows = rows.filter(
+    rows.forEach((row) => this.pendingCoverageRowsToRemove.add(row))
+    this.flushCoverageRowsToRemove()
+  }
+
+  private flushCoverageRowsToRemove(): void {
+    const unownedRows = [...this.pendingCoverageRowsToRemove].filter(
       (row) => this.coverageRegistry.rowOwnerCount(row) === 0,
     )
     if (unownedRows.length === 0) return
-    this.state.deleteSyncedRows(unownedRows)
+    const result = this.state.deleteSyncedRows(unownedRows)
+    if (result !== true) {
+      throw new Error(`Immediate coverage row cleanup did not settle`)
+    }
+    unownedRows.forEach((row) => this.pendingCoverageRowsToRemove.delete(row))
   }
 
   public cleanup(): void {
@@ -1105,6 +1118,7 @@ export class CollectionSyncManager<
     this.syncStartDeferred = false
     this.syncStartRequested = false
     this.deferredAdapterOptions.clear()
+    this.flushCoverageRowsToRemove()
     this.removeCoverageRows(this.coverageRegistry.dispose().rowsToRemove)
     this.coverageLeasesByOwner = new WeakMap()
     this.coverageAcquisitionsByPromise = new WeakMap()

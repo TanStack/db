@@ -549,6 +549,7 @@ class PublishCommand implements Command<RegistryModel, RegistryReal> {
       : []
     const published =
       accepted &&
+      this.extent !== `unknown` &&
       (this.rows.length >= acquisition.prefix || this.extent === `exhausted`)
     if (accepted) {
       acquisition.coverage = published ? acquisition.prefix : undefined

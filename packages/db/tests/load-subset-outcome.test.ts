@@ -71,6 +71,57 @@ describe(`loadSubset outcomes`, () => {
     }
   })
 
+  it(`retries post-commit row cleanup without applying the delete twice`, async () => {
+    const unloadSubset = vi.fn()
+    const collection = createCollection<{ id: string }>({
+      id: `load-subset-coverage-gc-retry`,
+      getKey: (row) => row.id,
+      syncMode: `on-demand`,
+      startSync: true,
+      sync: {
+        sync: ({ begin, write, commit, markReady }) => {
+          markReady()
+          return {
+            loadSubset: async () => {
+              begin()
+              write({ type: `insert`, value: { id: `a` } })
+              const applied = commit()
+              if (applied !== true) await applied
+              return { hasMore: false, appliedRowKeys: [`a`] }
+            },
+            unloadSubset,
+          }
+        },
+      },
+    })
+
+    try {
+      const options = { limit: 1 }
+      await collection._sync.loadSubset(options)
+      const deleteSyncedRows = collection._state.deleteSyncedRows.bind(
+        collection._state,
+      )
+      const cleanupError = new Error(`cleanup observer failed`)
+      const cleanup = vi
+        .spyOn(collection._state, `deleteSyncedRows`)
+        .mockImplementationOnce((keys) => {
+          expect(deleteSyncedRows(keys)).toBe(true)
+          throw cleanupError
+        })
+
+      expect(() => collection._sync.unloadSubset(options)).toThrow(cleanupError)
+      expect(Array.from(collection.keys())).toEqual([])
+      expect(cleanup).toHaveBeenCalledOnce()
+
+      collection._sync.unloadSubset(options)
+      expect(Array.from(collection.keys())).toEqual([])
+      expect(cleanup).toHaveBeenCalledTimes(2)
+      expect(unloadSubset).toHaveBeenCalledTimes(2)
+    } finally {
+      await collection.cleanup()
+    }
+  })
+
   it.each([`first`, `second`] as const)(
     `keeps one physical exact-peer acquisition until the %s lease releases last`,
     async (lastLease) => {
