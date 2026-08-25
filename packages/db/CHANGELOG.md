@@ -1,5 +1,19 @@
 # @tanstack/db
 
+## 0.8.5
+
+### Patch Changes
+
+- Canonicalize equivalent loadSubset queries to one demand identity while preserving observable output aliases, exact projected values, and distinct ordered windows. Query DB now reuses the same canonical identity for its on-demand cache keys. ([#1768](https://github.com/TanStack/db/pull/1768))
+
+- Reuse materialized collections when new collection descriptors have the same id. This lets callers recreate dynamic descriptors without creating duplicate collections. ([#1770](https://github.com/TanStack/db/pull/1770))
+
+- Settle subset loads only after their committed rows and events are visible. A ([#1769](https://github.com/TanStack/db/pull/1769))
+  commit receipt now rejects with `AbortError` when cancellation wins before
+  application and ignores later aborts. Preserve causal publication,
+  cancellation, persistence, and error handling across the affected sync
+  adapters.
+
 ## 0.8.4
 
 ### Patch Changes
