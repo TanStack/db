@@ -20,6 +20,7 @@ import {
   cloneLoadSubsetOptions,
   snapshotLoadSubsetDemand,
 } from '../query/load-subset-options.js'
+import { createLoadSubsetCoverageRegistry } from '../query/coverage-registry.js'
 import type { StandardSchemaV1 } from '@standard-schema/spec'
 import type {
   AppliedLoadSubsetOutcome,
@@ -39,12 +40,19 @@ import type { CollectionLifecycleManager } from './lifecycle'
 import type { CollectionEventsManager } from './events.js'
 import type { LiveQueryCollectionUtils } from '../query/live/collection-config-builder.js'
 import type { Deferred } from '../deferred'
+import type {
+  AcquisitionToken,
+  AppliedLoadSubsetCoverage,
+  DemandLease,
+} from '../query/coverage-registry.js'
 
 type DeferredLoadSubset = {
   ownerOptions: LoadSubsetOptions
   options: LoadSubsetOptions
   demand: LoadSubsetOptions
   generation: number
+  coverageLease: DemandLease<LoadSubsetOptions>
+  coverageAcquisition: AcquisitionToken
   deferred: Deferred<AppliedLoadSubsetOutcome>
 }
 
@@ -94,6 +102,11 @@ export class CollectionSyncManager<
   private syncEpoch = 0
   private loadSubsetSession = 0
   private loadSubsetGeneration = 0
+  private readonly coverageRegistry = createLoadSubsetCoverageRegistry<TKey>()
+  private coverageLeasesByOwner = new WeakMap<
+    LoadSubsetOptions,
+    Array<DemandLease<LoadSubsetOptions>>
+  >()
 
   /**
    * Creates a new CollectionSyncManager instance
@@ -408,6 +421,8 @@ export class CollectionSyncManager<
       options,
       demand,
       generation,
+      coverageLease,
+      coverageAcquisition,
       deferred,
     } of deferredLoadSubsets) {
       try {
@@ -422,30 +437,35 @@ export class CollectionSyncManager<
         }
         if (result instanceof Promise) {
           void result.then(
-            (sourceResult) =>
-              deferred.resolve(
-                createAppliedLoadSubsetOutcome(
-                  this.id,
-                  demand,
-                  generation,
-                  isLoadSubsetPromiseForDemand(result, options)
-                    ? sourceResult
-                    : undefined,
-                ),
-              ),
-            (error: unknown) => deferred.reject(error),
+            (sourceResult) => {
+              const outcome = createAppliedLoadSubsetOutcome(
+                this.id,
+                demand,
+                generation,
+                isLoadSubsetPromiseForDemand(result, options)
+                  ? sourceResult
+                  : undefined,
+              )
+              this.publishCoverageOutcome(coverageAcquisition, outcome)
+              deferred.resolve(outcome)
+            },
+            (error: unknown) => {
+              this.discardCoverageLease(ownerOptions, coverageLease)
+              deferred.reject(error)
+            },
           )
         } else {
-          deferred.resolve(
-            createAppliedLoadSubsetOutcome(
-              this.id,
-              demand,
-              generation,
-              undefined,
-            ),
+          const outcome = createAppliedLoadSubsetOutcome(
+            this.id,
+            demand,
+            generation,
+            undefined,
           )
+          this.publishCoverageOutcome(coverageAcquisition, outcome)
+          deferred.resolve(outcome)
         }
       } catch (error) {
+        this.discardCoverageLease(ownerOptions, coverageLease)
         deferred.reject(error)
       }
     }
@@ -863,11 +883,20 @@ export class CollectionSyncManager<
       this.syncStartRequested = true
       const deferred = createDeferred<AppliedLoadSubsetOutcome>()
       const loadOptions = cloneLoadSubsetOptions(options)
+      const demand = snapshotLoadSubsetDemand(loadOptions)
+      const generation = ++this.loadSubsetGeneration
+      const { lease, acquisition } = this.addCoverageAcquisition(
+        options,
+        demand,
+        generation,
+      )
       this.deferredLoadSubsets.push({
         ownerOptions: options,
         options: loadOptions,
-        demand: snapshotLoadSubsetDemand(loadOptions),
-        generation: ++this.loadSubsetGeneration,
+        demand,
+        generation,
+        coverageLease: lease,
+        coverageAcquisition: acquisition,
         deferred,
       })
       this.trackLoadPromise(deferred.promise)
@@ -877,18 +906,31 @@ export class CollectionSyncManager<
     if (this.syncLoadSubsetFn) {
       const demand = snapshotLoadSubsetDemand(options)
       const generation = ++this.loadSubsetGeneration
-      const result = this.syncLoadSubsetFn(options)
+      const result: ReturnType<LoadSubsetFn> = this.syncLoadSubsetFn(options)
+      const { lease, acquisition } = this.addCoverageAcquisition(
+        options,
+        demand,
+        generation,
+      )
       // If the result is a promise, track it
       if (result instanceof Promise) {
-        const outcome = result.then((sourceResult) =>
-          createAppliedLoadSubsetOutcome(
-            this.id,
-            demand,
-            generation,
-            isLoadSubsetPromiseForDemand(result, options)
-              ? sourceResult
-              : undefined,
-          ),
+        const outcome = result.then(
+          (sourceResult) => {
+            const appliedOutcome = createAppliedLoadSubsetOutcome(
+              this.id,
+              demand,
+              generation,
+              isLoadSubsetPromiseForDemand(result, options)
+                ? sourceResult
+                : undefined,
+            )
+            this.publishCoverageOutcome(acquisition, appliedOutcome)
+            return appliedOutcome
+          },
+          (error: unknown) => {
+            this.discardCoverageLease(options, lease)
+            throw error
+          },
         )
         this.trackLoadPromise(outcome)
         return outcome
@@ -917,6 +959,7 @@ export class CollectionSyncManager<
             undefined,
           ),
         )
+        this.discardCoverageLease(request.ownerOptions, request.coverageLease)
         return false
       })
       return
@@ -924,12 +967,77 @@ export class CollectionSyncManager<
 
     if (this.syncUnloadSubsetFn) {
       const adapterOptions = this.deferredAdapterOptions.get(options)
-      const acquiredOptions = adapterOptions?.shift() ?? options
+      const acquiredOptions = adapterOptions?.[0] ?? options
+      this.syncUnloadSubsetFn(acquiredOptions)
+      adapterOptions?.shift()
       if (adapterOptions?.length === 0) {
         this.deferredAdapterOptions.delete(options)
       }
-      this.syncUnloadSubsetFn(acquiredOptions)
     }
+    this.releaseCoverageLease(options)
+  }
+
+  /** @internal Applied source coverage retained by active subset owners. */
+  public getLoadSubsetCoverage(): ReadonlyArray<
+    AppliedLoadSubsetCoverage<TKey>
+  > {
+    return this.coverageRegistry.coverageAntichain()
+  }
+
+  private addCoverageAcquisition(
+    ownerOptions: LoadSubsetOptions,
+    demand: LoadSubsetOptions,
+    generation: number,
+  ): {
+    lease: DemandLease<LoadSubsetOptions>
+    acquisition: AcquisitionToken
+  } {
+    const lease = this.coverageRegistry.addLease(demand)
+    const acquisition = this.coverageRegistry.addAcquisition({
+      generation,
+      scope: { collectionId: this.id, demand },
+      leases: [lease],
+      // Adapter resource release remains owned by unloadSubset. The registry
+      // tracks the same lifetime without duplicating that side effect.
+      release: () => {},
+    })
+    const leases = this.coverageLeasesByOwner.get(ownerOptions) ?? []
+    leases.push(lease)
+    this.coverageLeasesByOwner.set(ownerOptions, leases)
+    return { lease, acquisition }
+  }
+
+  private publishCoverageOutcome(
+    acquisition: AcquisitionToken,
+    outcome: AppliedLoadSubsetOutcome,
+  ): void {
+    if (outcome.appliedRowKeys === undefined) return
+    this.coverageRegistry.publishOutcome(
+      acquisition,
+      outcome,
+      outcome.appliedRowKeys as ReadonlyArray<TKey>,
+    )
+  }
+
+  private releaseCoverageLease(options: LoadSubsetOptions): void {
+    const leases = this.coverageLeasesByOwner.get(options)
+    const lease = leases?.shift()
+    if (!lease) return
+    if (leases?.length === 0) this.coverageLeasesByOwner.delete(options)
+    this.coverageRegistry.releaseLease(lease)
+  }
+
+  private discardCoverageLease(
+    options: LoadSubsetOptions,
+    lease: DemandLease<LoadSubsetOptions>,
+  ): void {
+    const leases = this.coverageLeasesByOwner.get(options)
+    if (leases) {
+      const index = leases.indexOf(lease)
+      if (index >= 0) leases.splice(index, 1)
+      if (leases.length === 0) this.coverageLeasesByOwner.delete(options)
+    }
+    this.coverageRegistry.releaseLease(lease)
   }
 
   public cleanup(): void {
@@ -962,6 +1070,8 @@ export class CollectionSyncManager<
     this.syncStartDeferred = false
     this.syncStartRequested = false
     this.deferredAdapterOptions.clear()
+    this.coverageRegistry.dispose()
+    this.coverageLeasesByOwner = new WeakMap()
     const wasLoadingSubset = this.pendingLoadSubsetPromises.size > 0
     this.pendingLoadSubsetPromises.clear()
     if (wasLoadingSubset) {
@@ -985,6 +1095,7 @@ export class CollectionSyncManager<
     const deferredLoadSubsets = this.deferredLoadSubsets
     this.deferredLoadSubsets = []
     for (const request of deferredLoadSubsets) {
+      this.discardCoverageLease(request.ownerOptions, request.coverageLease)
       request.deferred.resolve(
         createAppliedLoadSubsetOutcome(
           this.id,

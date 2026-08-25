@@ -470,20 +470,33 @@ visible. Rejected, canceled, and obsolete acquisitions establish no coverage.
 Sources must honor cancellation before publishing request-scoped rows.
 
 After those writes are applied, `loadSubset` may resolve with
-`{ hasMore: boolean | undefined }`. Core normalizes that source fact to
-`continues`, `exhausted`, or `unknown` and binds it to the exact collection
-demand and attempt generation; an omitted result also remains `unknown`. A
-request reused for a narrower demand may
+`{ hasMore: boolean | undefined, appliedRowKeys?: readonly Key[] }`. Core
+normalizes the extent to `continues`, `exhausted`, or `unknown` and binds it to
+the exact collection demand and attempt generation. The optional keys are the
+rows established by that same applied acquisition, not a later scan of the
+Collection. An omitted result remains `unknown`. A request reused for a narrower demand may
 settle that demand, but its raw extent does not become a fact about the narrower
 demand. Live-query plumbing preserves these outcomes through lazy demand and
 window coordination. Only the root paginated source may use them to replace a
 peek-based pagination decision.
 
-The coverage registry accepts that exact applied outcome rather than a
-request-shaped coverage claim. It first rejects stale generations and `unknown`
-extent, then a source-specific projector may turn the authoritative outcome
-into a coverage fact. Callers cannot publish coverage by separately asserting
-that a request was applied or authoritative.
+The Collection sync boundary gives each logical owner a demand lease and each
+physical attempt an acquisition token. The coverage registry accepts an exact
+applied outcome and its row keys as one publication. It rejects tokens that are
+not current for the same physical collection, optional source, and canonical
+demand, and it rejects `unknown` extent. A finite prefix of `N` is established
+only by at least `N` applied authoritative rows, or fewer rows plus exact source
+exhaustion. Callers cannot derive achieved coverage from the requested limit or
+publish rows and coverage in separate steps. Failed, canceled, and stale work
+publishes neither rows nor coverage. Public reads return defensive snapshots;
+fact compaction never mutates or retires the underlying leases, acquisitions,
+or row ownership.
+
+An eager Query DB collection owns its base query for the Collection lifetime.
+If TanStack Query removes that cache entry while the Collection has no public
+listeners, the adapter must replace the detached observer without retiring the
+base query's rows. Later cache updates and refetches must still flow through
+that lifetime observer.
 
 A transaction `mutationFn` must not start or await collection or live-query
 preloads. User persistence owns the causal queue while that function runs, so a
@@ -637,6 +650,7 @@ create recursive Collection machinery.
 | Correlated physical work                                                    | `packages/db/tests/query/includes-work-counter-oracle.test.ts`            |
 | Route-context discovery and transport across recursive and join boundaries  | `packages/db/tests/query/includes-context-transport-oracle.test.ts`       |
 | Coverage leases, acquisitions, fact compaction, and row provenance          | `packages/db/tests/query/coverage-registry-oracle.property.test.ts`       |
+| Applied coverage publication through the Collection sync boundary           | `packages/db/tests/load-subset-outcome.test.ts`                           |
 | Query-db ownership                                                          | `packages/query-db-collection/tests/ownership-lifecycle.oracle.test.ts`   |
 | Reachable nested shape                                                      | `packages/query-db-collection/tests/includes-work-counter-oracle.test.ts` |
 
