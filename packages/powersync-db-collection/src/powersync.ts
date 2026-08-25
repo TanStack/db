@@ -550,7 +550,12 @@ function createPowerSyncCollectionConfig<
         let onUnload: CleanupFn | void | null = null
 
         start(async () => {
-          onUnload = await restConfig.onLoad?.()
+          const cleanup = await restConfig.onLoad?.()
+          if (abortController.signal.aborted) {
+            cleanup?.()
+            return
+          }
+          onUnload = cleanup
 
           const appliedReceipts: Array<SyncAppliedReceipt> = []
           await establishTracking(
@@ -624,6 +629,12 @@ function createPowerSyncCollectionConfig<
           // Never create a trigger that has no observer to drain its diff table.
           await startup
           if (hasStopped()) return
+          if (
+            options &&
+            (releasedSubsets.has(options) || options.signal?.aborted)
+          ) {
+            return
+          }
           const appliedReceipts: Array<SyncAppliedReceipt> = []
 
           if (options) {

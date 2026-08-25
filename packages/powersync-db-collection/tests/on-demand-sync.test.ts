@@ -2230,6 +2230,51 @@ describe(`On-Demand Sync Mode`, () => {
       })
     }
 
+    it(`does not acquire a subset released while tracking startup is suspended`, async () => {
+      const db = await createDatabase()
+      const onLoadSubset = vi.fn()
+      const createDiffTrigger = vi.spyOn(db.triggers, `createDiffTrigger`)
+      const config = powerSyncCollectionOptions({
+        database: db,
+        table: APP_SCHEMA.props.products,
+        syncMode: `on-demand`,
+        onLoadSubset,
+      })
+      const sync = config.sync.sync({
+        collection: { status: `ready`, has: () => false },
+        begin: vi.fn(),
+        write: vi.fn(),
+        commit: () => true,
+        markReady: vi.fn(),
+        markError: vi.fn(),
+        truncate: vi.fn(),
+      } as never)
+
+      if (!sync || typeof sync === `function` || !sync.loadSubset) {
+        throw new Error(`Expected on-demand sync controls`)
+      }
+
+      const abortController = new AbortController()
+      const request = {
+        where: eq(`category`, `electronics`),
+        signal: abortController.signal,
+      }
+      const load = sync.loadSubset(request)
+
+      // Release the request before start() crosses its first async boundary.
+      abortController.abort()
+      sync.unloadSubset?.(request)
+
+      try {
+        await load
+
+        expect(onLoadSubset).not.toHaveBeenCalled()
+        expect(createDiffTrigger).not.toHaveBeenCalled()
+      } finally {
+        sync.cleanup?.()
+      }
+    })
+
     it(`flushes eager changes that arrive before the tracking handle is published`, async () => {
       const db = await createDatabase()
       await createTestProducts(db)
