@@ -1452,9 +1452,7 @@ describe(`minusWherePredicates`, () => {
           not(and(not(eq(score, val(-1))), lt(score, val(1)))),
         ),
       )
-      expect(
-        evaluateReferenceExpression(result!, { score: 0 }),
-      ).toBe(false)
+      expect(evaluateReferenceExpression(result!, { score: 0 })).toBe(false)
     })
 
     it(`preserves nested AND difference semantics across equality, range, and NOT terms`, () => {
