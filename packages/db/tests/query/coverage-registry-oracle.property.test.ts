@@ -396,9 +396,9 @@ function assertRegistryModel(model: RegistryModel, real: RegistryReal): void {
       !acquisition.releaseSettled &&
       acquisition.leases.size > 0
         ? Array.from(acquisition.claims.values()).map((claim) => ({
-          acquisition: real.acquisitions[acquisitionIndex],
-          rowKeys: [...acquisition.rows],
-          outcome: createPrefixOutcome(
+            acquisition: real.acquisitions[acquisitionIndex],
+            rowKeys: [...acquisition.rows],
+            outcome: createPrefixOutcome(
               claim.generation,
               claim.prefix,
               `unknown`,
@@ -1114,14 +1114,9 @@ describe(`coverage registry oracle`, () => {
       release: vi.fn(),
       prefix: 2,
     })
-    const outcome = createPrefixOutcome(
-      1,
-      2,
-      `unknown`,
-      `prefixes`,
-      `items`,
-      [`a`],
-    )
+    const outcome = createPrefixOutcome(1, 2, `unknown`, `prefixes`, `items`, [
+      `a`,
+    ])
 
     expect(registry.publishOutcome(acquisition, lease, outcome)).toEqual({
       accepted: true,
