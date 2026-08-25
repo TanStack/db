@@ -144,6 +144,50 @@ describe(`loadSubset outcomes`, () => {
     }
   })
 
+  it(`keeps copied async-wrapper results conservative for narrower demands`, async () => {
+    let resolveLoad!: (result: { hasMore: boolean }) => void
+    const load = new Promise<{ hasMore: boolean }>((resolve) => {
+      resolveLoad = resolve
+    })
+    const deduplicated = new DeduplicatedLoadSubset({
+      loadSubset: () => load,
+    })
+    const wrappedLoadSubset: LoadSubsetFn = async (options) => {
+      const result = deduplicated.loadSubset(options)
+      if (result === true) return undefined
+      const sourceResult = await result
+      return sourceResult === undefined
+        ? undefined
+        : { hasMore: sourceResult.hasMore }
+    }
+    const collection = createCollection<{ id: string }>({
+      id: `load-subset-outcome-copied-async-wrapper`,
+      getKey: (row) => row.id,
+      syncMode: `on-demand`,
+      startSync: true,
+      sync: {
+        sync: ({ markReady }) => {
+          markReady()
+          return { loadSubset: wrappedLoadSubset }
+        },
+      },
+    })
+
+    try {
+      const covering = collection._sync.loadSubset({ limit: 10 })
+      await Promise.resolve()
+      const narrower = collection._sync.loadSubset({ limit: 5 })
+
+      resolveLoad({ hasMore: false })
+
+      await expect(covering).resolves.toMatchObject({ extent: `exhausted` })
+      await expect(narrower).resolves.toMatchObject({ extent: `unknown` })
+    } finally {
+      resolveLoad({ hasMore: false })
+      await collection.cleanup()
+    }
+  })
+
   it(`scopes source extent to a narrowed physical acquisition`, async () => {
     const adapterCalls: Array<LoadSubsetOptions> = []
     const deduplicated = new DeduplicatedLoadSubset({
@@ -152,6 +196,14 @@ describe(`loadSubset outcomes`, () => {
         return Promise.resolve({ hasMore: false })
       },
     })
+    const wrappedLoadSubset: LoadSubsetFn = async (options) => {
+      const result = deduplicated.loadSubset(options)
+      if (result === true) return undefined
+      const sourceResult = await result
+      return sourceResult === undefined
+        ? undefined
+        : { hasMore: sourceResult.hasMore }
+    }
     const collection = createCollection<{ id: string }>({
       id: `load-subset-outcome-narrowed-acquisition`,
       getKey: (row) => row.id,
@@ -160,7 +212,7 @@ describe(`loadSubset outcomes`, () => {
       sync: {
         sync: ({ markReady }) => {
           markReady()
-          return { loadSubset: deduplicated.loadSubset }
+          return { loadSubset: wrappedLoadSubset }
         },
       },
     })
@@ -522,6 +574,58 @@ describe(`loadSubset outcomes`, () => {
     } finally {
       resolveLoad({ hasMore: false })
       await Promise.all([second.cleanup(), source.cleanup()])
+    }
+  })
+
+  it(`does not repopulate partial window outcomes after cleanup`, async () => {
+    const source = createCollection<{ id: number }>({
+      id: `load-subset-outcome-window-cleanup-source`,
+      getKey: (row) => row.id,
+      autoIndex: `eager`,
+      defaultIndexType: BasicIndex,
+      sync: { sync: ({ markReady }) => markReady() },
+    })
+    const live = createLiveQueryCollection({
+      id: `load-subset-outcome-window-cleanup-live`,
+      query: (q) =>
+        q
+          .from({ row: source })
+          .orderBy(({ row }) => row.id, `asc`)
+          .limit(1),
+      startSync: true,
+    })
+    const internal = live.utils[LIVE_QUERY_INTERNAL]
+    const builder = internal.getBuilder()
+    const left = Promise.resolve({
+      collectionId: `left-collection`,
+      demand: { limit: 1 },
+      generation: 1,
+      extent: `continues` as const,
+    })
+    let resolveRight!: () => void
+    const right = new Promise<void>((resolve) => {
+      resolveRight = resolve
+    })
+
+    try {
+      await live.preload()
+      Reflect.set(builder, `windowFn`, () => {
+        builder.trackSubsetLoadOperationPromise(left, `left`)
+        builder.trackSubsetLoadOperationPromise(right, `right`)
+      })
+
+      const windowReady = live.utils.setWindow({ offset: 0, limit: 2 })
+      expect(windowReady).toBeInstanceOf(Promise)
+      await Promise.resolve()
+      await Promise.resolve()
+
+      await live.cleanup()
+      await windowReady
+
+      expect(internal.getLastWindowOutcomes()).toEqual([])
+    } finally {
+      resolveRight()
+      await Promise.all([live.cleanup(), source.cleanup()])
     }
   })
 

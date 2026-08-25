@@ -305,6 +305,7 @@ export class CollectionConfigBuilder<
       throw new SetWindowRequiresOrderByError()
     }
 
+    const syncSession = this.syncSession
     const loadOperation =
       this.liveQueryCollection?._sync.beginLoadSubsetOperation()
     const previousWindow = this.currentWindow ?? this.initialWindow
@@ -339,6 +340,12 @@ export class CollectionConfigBuilder<
     }
     void ready.then(
       () => {
+        if (
+          syncSession !== this.syncSession ||
+          this.currentSyncConfig === undefined
+        ) {
+          return
+        }
         this.lastWindowOutcomes = loadOperation!.getOutcomes()
       },
       () => {

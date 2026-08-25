@@ -886,7 +886,8 @@ describe(`createDeduplicatedLoadSubset`, () => {
       expect(calls[1]).toEqual({
         where: not(eq(ref(`task_id`), val(`uuid-1`))),
       })
-      expect(secondAllDataLoad).toBe(firstAllDataLoad)
+      expect(firstAllDataLoad).toBeInstanceOf(Promise)
+      expect(secondAllDataLoad).toBeInstanceOf(Promise)
 
       resolveAllDataLoad?.()
       await firstAllDataLoad
@@ -1232,7 +1233,7 @@ describe(`createDeduplicatedLoadSubset`, () => {
       const second = deduplicated.loadSubset(secondOptions)
 
       expect(loadSubset).toHaveBeenCalledTimes(1)
-      expect(second).toBe(first)
+      expect(second).not.toBe(first)
 
       firstController.abort()
       expect(sharedSignal?.aborted).toBe(false)

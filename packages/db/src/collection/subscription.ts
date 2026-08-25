@@ -777,8 +777,10 @@ export class CollectionSubscription
     )
     if (index === -1) return
 
-    const [demand] = this.subsetDemands.splice(index, 1)
-    if (demand) this.releaseSubsetDemand(demand)
+    const demand = this.subsetDemands[index]
+    if (!demand) return
+    this.releaseSubsetDemand(demand)
+    this.subsetDemands.splice(index, 1)
   }
 
   /**
@@ -1159,14 +1161,16 @@ export class CollectionSubscription
     this.stalePublishedRows.clear()
 
     // Release the current adapter acquisition for each logical subset demand.
+    const failedDemands: Array<SubsetDemand> = []
     for (const demand of this.subsetDemands) {
       try {
         this.releaseSubsetDemand(demand)
       } catch (error) {
         firstCleanupError ??= error
+        failedDemands.push(demand)
       }
     }
-    this.subsetDemands = []
+    this.subsetDemands = failedDemands
 
     try {
       this.emitInner(`unsubscribed`, {
