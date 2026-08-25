@@ -536,6 +536,76 @@ describe(`DbClient`, () => {
     expect(unloadSubset.mock.calls[1]![0]).toBe(adapterOptions)
   })
 
+  it(`does not reinstall a deferred acquisition released during loadSubset`, async () => {
+    const unloadSubset = vi.fn()
+    const collectionHolder: {
+      current?: {
+        _sync: { unloadSubset: (options: LoadSubsetOptions) => void }
+      }
+    } = {}
+    const ownerOptions = { limit: 1 }
+    const loadSubset = vi.fn((_adapterOptions: LoadSubsetOptions) => {
+      collectionHolder.current!._sync.unloadSubset(ownerOptions)
+      return Promise.resolve(undefined)
+    })
+    const descriptor = collectionOptions(`people`, () => ({
+      id: `people`,
+      getKey: (person: Person) => person.id,
+      syncMode: `on-demand` as const,
+      sync: {
+        sync: ({ markReady }) => {
+          markReady()
+          return { loadSubset, unloadSubset }
+        },
+      },
+    }))
+    const client = new DbClient()
+    const collection = client._materializeCollectionForRender(descriptor)
+    collectionHolder.current = collection
+    const deferredLoad = collection._sync.loadSubset(ownerOptions)
+
+    collection._resumeSyncStart()
+    await deferredLoad
+
+    const adapterOptions = loadSubset.mock.calls[0]![0]
+    collection._sync.unloadSubset(ownerOptions)
+
+    expect(unloadSubset).toHaveBeenCalledTimes(2)
+    expect(unloadSubset.mock.calls[0]![0]).toBe(adapterOptions)
+    expect(unloadSubset.mock.calls[1]![0]).toBe(ownerOptions)
+  })
+
+  it(`forgets deferred adapter options when loadSubset throws`, async () => {
+    const failure = new Error(`load failed`)
+    const loadSubset = vi.fn((_options: LoadSubsetOptions) => {
+      throw failure
+    })
+    const unloadSubset = vi.fn()
+    const descriptor = collectionOptions(`people`, () => ({
+      id: `people`,
+      getKey: (person: Person) => person.id,
+      syncMode: `on-demand` as const,
+      sync: {
+        sync: ({ markReady }) => {
+          markReady()
+          return { loadSubset, unloadSubset }
+        },
+      },
+    }))
+    const client = new DbClient()
+    const collection = client._materializeCollectionForRender(descriptor)
+    const ownerOptions = { limit: 1 }
+    const deferredLoad = collection._sync.loadSubset(ownerOptions)
+
+    collection._resumeSyncStart()
+    await expect(deferredLoad).rejects.toBe(failure)
+
+    collection._sync.unloadSubset(ownerOptions)
+
+    expect(loadSubset.mock.calls[0]![0]).not.toBe(ownerOptions)
+    expect(unloadSubset.mock.calls[0]![0]).toBe(ownerOptions)
+  })
+
   it(`lets the first sync snapshot replace stale hydrated rows`, () => {
     const descriptor = collectionOptions(
       mockSyncCollectionOptions<Person>({

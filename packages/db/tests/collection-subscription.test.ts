@@ -789,6 +789,56 @@ describe(`CollectionSubscription status tracking`, () => {
     }
   })
 
+  it(`uses the acquired options when deferred load reentrantly unsubscribes`, async () => {
+    const loads: Array<LoadSubsetOptions> = []
+    const unloads: Array<LoadSubsetOptions> = []
+    let unsubscribeDuringLoad = () => {}
+    const collection = createCollection<{ id: string }>({
+      id: `reentrant-deferred-subscription-release`,
+      getKey: (row) => row.id,
+      syncMode: `on-demand`,
+      startSync: false,
+      sync: {
+        sync: ({ markReady }) => {
+          markReady()
+          return {
+            loadSubset: (options) => {
+              loads.push(options)
+              unsubscribeDuringLoad()
+              return Promise.resolve({ hasMore: false, appliedRowKeys: [] })
+            },
+            unloadSubset: (options) => {
+              // Model an adapter that silently ignores an unknown acquisition.
+              if (options === loads[0]) unloads.push(options)
+            },
+          }
+        },
+      },
+    })
+
+    expect(collection._deferSyncStart()).toBe(true)
+    const subscription = collection.subscribeChanges(() => {}, {
+      includeInitialState: false,
+    })
+    unsubscribeDuringLoad = () => subscription.unsubscribe()
+
+    try {
+      subscription.requestSnapshot({ limit: 1, optimizedOnly: false })
+      collection._resumeSyncStart()
+      await flushPromises()
+
+      expect(loads).toHaveLength(1)
+      expect(unloads).toEqual([loads[0]])
+      expect(collection._sync.getLoadSubsetCoverage()).toEqual([])
+
+      subscription.unsubscribe()
+      expect(unloads).toHaveLength(1)
+    } finally {
+      subscription.unsubscribe()
+      await collection.cleanup()
+    }
+  })
+
   it(`retains a subset after a synchronous truncate replay failure`, async () => {
     const error = new Error(`synchronous truncate replay failed`)
     let truncateSource: () => void = () => {

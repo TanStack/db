@@ -431,43 +431,52 @@ export class CollectionSyncManager<
       generation,
       deferred,
     } of deferredLoadSubsets) {
+      const loadSubset = this.syncLoadSubsetFn
+      if (loadSubset) {
+        this.retainDeferredAdapterOptions(ownerOptions, options)
+      }
       try {
-        const result = this.syncLoadSubsetFn?.(options) ?? true
-        if (this.syncLoadSubsetFn) {
-          const adapterOptions = this.deferredAdapterOptions.get(ownerOptions)
-          if (adapterOptions) {
-            adapterOptions.push(options)
-          } else {
-            this.deferredAdapterOptions.set(ownerOptions, [options])
-          }
-        }
+        const result = loadSubset?.(options) ?? true
+        const retainsAdapterAcquisition =
+          loadSubset !== null &&
+          this.hasDeferredAdapterOptions(ownerOptions, options)
         if (result instanceof Promise) {
-          const { lease, acquisition } = this.addCoverageOwnership(
-            ownerOptions,
-            demand,
-            generation,
-            result,
-          )
+          const coverageOwnership = retainsAdapterAcquisition
+            ? this.addCoverageOwnership(
+                ownerOptions,
+                demand,
+                generation,
+                result,
+              )
+            : undefined
           void result.then(
             (sourceResult) => {
               const outcome = createAppliedLoadSubsetOutcome(
                 this.id,
                 demand,
                 generation,
-                isLoadSubsetResultForDemand(result, sourceResult, options)
+                isLoadSubsetResultForDemand(result, sourceResult, demand)
                   ? sourceResult
                   : undefined,
               )
-              this.publishCoverageOutcome(acquisition, lease, outcome)
+              if (coverageOwnership) {
+                this.publishCoverageOutcome(
+                  coverageOwnership.acquisition,
+                  coverageOwnership.lease,
+                  outcome,
+                )
+              }
               deferred.resolve(outcome)
             },
             (error: unknown) => {
-              this.discardCoverageLease(ownerOptions, lease)
+              if (coverageOwnership) {
+                this.discardCoverageLease(ownerOptions, coverageOwnership.lease)
+              }
               deferred.reject(error)
             },
           )
         } else {
-          if (this.syncLoadSubsetFn) {
+          if (retainsAdapterAcquisition) {
             this.addSatisfiedCoverageOwnership(ownerOptions, demand, generation)
           }
           const outcome = createAppliedLoadSubsetOutcome(
@@ -479,6 +488,9 @@ export class CollectionSyncManager<
           deferred.resolve(outcome)
         }
       } catch (error) {
+        if (loadSubset) {
+          this.forgetDeferredAdapterOptions(ownerOptions, options)
+        }
         deferred.reject(error)
       }
     }
@@ -947,7 +959,7 @@ export class CollectionSyncManager<
               this.id,
               demand,
               generation,
-              isLoadSubsetResultForDemand(result, sourceResult, options)
+              isLoadSubsetResultForDemand(result, sourceResult, demand)
                 ? sourceResult
                 : undefined,
             )
@@ -996,9 +1008,8 @@ export class CollectionSyncManager<
       const adapterOptions = this.deferredAdapterOptions.get(options)
       const acquiredOptions = adapterOptions?.[0] ?? options
       this.syncUnloadSubsetFn(acquiredOptions)
-      adapterOptions?.shift()
-      if (adapterOptions?.length === 0) {
-        this.deferredAdapterOptions.delete(options)
+      if (adapterOptions) {
+        this.forgetDeferredAdapterOptions(options, acquiredOptions)
       }
     }
     this.releaseCoverageLease(options)
@@ -1169,6 +1180,43 @@ export class CollectionSyncManager<
       throw new Error(`Immediate coverage row cleanup did not settle`)
     }
     unownedRows.forEach((row) => this.pendingCoverageRowsToRemove.delete(row))
+  }
+
+  private retainDeferredAdapterOptions(
+    ownerOptions: LoadSubsetOptions,
+    acquiredOptions: LoadSubsetOptions,
+  ): void {
+    const adapterOptions = this.deferredAdapterOptions.get(ownerOptions)
+    if (adapterOptions) {
+      adapterOptions.push(acquiredOptions)
+    } else {
+      this.deferredAdapterOptions.set(ownerOptions, [acquiredOptions])
+    }
+  }
+
+  private hasDeferredAdapterOptions(
+    ownerOptions: LoadSubsetOptions,
+    acquiredOptions: LoadSubsetOptions,
+  ): boolean {
+    return (
+      this.deferredAdapterOptions
+        .get(ownerOptions)
+        ?.includes(acquiredOptions) ?? false
+    )
+  }
+
+  private forgetDeferredAdapterOptions(
+    ownerOptions: LoadSubsetOptions,
+    acquiredOptions: LoadSubsetOptions,
+  ): void {
+    const adapterOptions = this.deferredAdapterOptions.get(ownerOptions)
+    if (!adapterOptions) return
+
+    const index = adapterOptions.indexOf(acquiredOptions)
+    if (index !== -1) adapterOptions.splice(index, 1)
+    if (adapterOptions.length === 0) {
+      this.deferredAdapterOptions.delete(ownerOptions)
+    }
   }
 
   public cleanup(): void {
