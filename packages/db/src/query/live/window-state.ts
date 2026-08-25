@@ -21,6 +21,7 @@ export class WindowState<
   private hasFullCoverage = false
   private needsFullRefinement = false
   private needsPrefixRefresh = false
+  private revision = 0
   private readonly candidateKeys = new Set<TKey>()
   private readonly provenanceKeys = new Set<TKey>()
   private readonly admittedKeys = new Set<TKey>()
@@ -61,12 +62,17 @@ export class WindowState<
     return this.needsPrefixRefresh
   }
 
+  get coverageRevision(): number {
+    return this.revision
+  }
+
   rowsNeeded(): number {
     return Math.max(0, this.activeSize - this.localPrefixSize)
   }
 
   /** Discard source-generation evidence before a truncate replacement. */
   resetCoverage(): void {
+    this.revision++
     this.coveredSize = 0
     this.hasFullCoverage = false
     this.needsFullRefinement = false
@@ -100,6 +106,7 @@ export class WindowState<
     exhausted: boolean,
     requestedPrefix: number,
     fullRegion: boolean,
+    requestRevision: number,
   ): void {
     if (fullRegion || exhausted) {
       this.establishFullCoverage()
@@ -113,7 +120,7 @@ export class WindowState<
       this.needsPrefixRefresh = false
       return
     }
-    const refreshInvalidatedPrefix = this.needsPrefixRefresh
+    const refreshInvalidatedPrefix = this.revision !== requestRevision
     for (const key of this.candidateKeys) {
       this.admittedKeys.add(key)
       this.provenanceKeys.add(key)
@@ -171,6 +178,7 @@ export class WindowState<
         this.candidateKeys.size > 0 &&
         this.updateKnownPrefix(this.candidateKeys, changes)
       ) {
+        this.revision++
         this.coveredSize = 0
         this.provenanceKeys.clear()
         this.needsFullRefinement = false
@@ -180,6 +188,7 @@ export class WindowState<
     }
 
     if (this.updateKnownPrefix(this.admittedKeys, changes)) {
+      this.revision++
       // A live change may update the visible prefix at once, but an applied
       // snapshot fact does not prove the new remote boundary. Reacquire from
       // the start instead of continuing from a row whose provenance changed.

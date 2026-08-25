@@ -41,14 +41,26 @@ describe(`WindowState`, () => {
     )
 
     window.recordInitialCoverage([1], false)
-    window.recordContinuationCoverage([2], false, 2, false)
+    window.recordContinuationCoverage(
+      [2],
+      false,
+      2,
+      false,
+      window.coverageRevision,
+    )
     expect(window.requestBoundary()).toEqual({ key: 2, values: [2] })
 
     window.resetCoverage()
     expect(window.requestBoundary()).toBeUndefined()
 
     window.recordInitialCoverage([3], false)
-    window.recordContinuationCoverage([4], false, 2, false)
+    window.recordContinuationCoverage(
+      [4],
+      false,
+      2,
+      false,
+      window.coverageRevision,
+    )
     expect(window.requestBoundary()).toEqual({ key: 4, values: [4] })
   })
 

@@ -98,6 +98,7 @@ type SubsetDemand = SubsetAcquisition & {
     requestedPrefix: number
     hadBoundary: boolean
     fullRegion: boolean
+    revision: number
   }
   pendingReplayAcquisitions: Set<ReplaySubsetAcquisition>
 }
@@ -307,6 +308,9 @@ export class CollectionSubscription
         const isCurrentAttempt = () =>
           this.truncateReplaySession === session &&
           session.currentAttempt === attempt
+        if (demand.ordered && this.orderedWindow) {
+          demand.ordered.revision = this.orderedWindow.coverageRevision
+        }
         const nextAcquisition = this.createSubsetAcquisition(demand)
         demand.pendingReplayAcquisitions.add(nextAcquisition)
         let syncResult: LoadSubsetRequestResult
@@ -1174,6 +1178,7 @@ export class CollectionSubscription
       requestedPrefix,
       hadBoundary: boundary !== undefined || refreshPrefix,
       fullRegion,
+      revision: this.orderedWindow.coverageRevision,
     })
 
     this.observeOrderedCoverage(syncResult, demand)
@@ -1231,6 +1236,7 @@ export class CollectionSubscription
           exhausted,
           ordered.requestedPrefix,
           ordered.fullRegion,
+          ordered.revision,
         )
       }
 
@@ -1253,6 +1259,7 @@ export class CollectionSubscription
           true,
           ordered.requestedPrefix,
           true,
+          ordered.revision,
         )
       } else {
         window.recordLocalRequestSatisfaction(ordered.requestedPrefix)

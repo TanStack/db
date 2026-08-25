@@ -2112,19 +2112,27 @@ describe(`pagination recomputation oracle`, () => {
       `insert`,
       { type: `insert`, row: { id: 7, rank: 0 } },
       [7, 1],
+      [7, 1, 2],
     ],
     [
       `update`,
       { type: `update`, row: { id: 2, rank: -1 } },
       [2, 1],
+      [2, 1, 3],
     ],
-    [`delete`, { type: `delete`, id: 1 }, [2, 3]],
+    [`delete`, { type: `delete`, id: 1 }, [2, 3], [2, 3, 4]],
   ] satisfies ReadonlyArray<
-    readonly [string, PendingMutation, ReadonlyArray<number>]
+    readonly [
+      string,
+      PendingMutation,
+      ReadonlyArray<number>,
+      ReadonlyArray<number>,
+    ]
   >)(`keeps an SSE %s that arrives during boundary refinement`, async (
     _name,
     mutation,
     expectedIds,
+    expectedWideIds,
   ) => {
     const rows = new Map<number, PageRow>(
       Array.from({ length: 6 }, (_, index) => [
@@ -2224,6 +2232,20 @@ describe(`pagination recomputation oracle`, () => {
       await preload
 
       expect(Array.from(live.values(), ({ id }) => id)).toEqual(expectedIds)
+
+      const pendingBeforeWiden = pending.length
+      const widened = live.utils.setWindow({ offset: 0, limit: 3 })
+      await flushPromises()
+      expect(pending).toHaveLength(pendingBeforeWiden + 1)
+      expect(pending[pendingBeforeWiden]?.options.offset).toBe(3)
+      expect(pending[pendingBeforeWiden]?.options.cursor).toBeDefined()
+      for (let index = pendingBeforeWiden; index < pending.length; index++) {
+        await settle(pending[index]!)
+      }
+      if (widened instanceof Promise) await widened
+      expect(Array.from(live.values(), ({ id }) => id)).toEqual(
+        expectedWideIds,
+      )
     } finally {
       for (const request of pending) request.deferred.resolve()
       live.cleanup()
