@@ -23,7 +23,10 @@ import type { StandardSchemaV1 } from '@standard-schema/spec'
 
 const NativeAbortController = globalThis.AbortController
 
-function createDeferred<T>() {
+function createDeferred<T>(): {
+  promise: Promise<T>
+  resolve: (value: T | PromiseLike<T>) => void
+} {
   let resolve!: (value: T | PromiseLike<T>) => void
   const promise = new Promise<T>((resolvePromise) => {
     resolve = resolvePromise
