@@ -1,10 +1,14 @@
 import { ensureIndexForExpression } from '../indexes/auto-index.js'
-import { and, eq, gte, lt } from '../query/builder/functions.js'
-import { PropRef, Value } from '../query/ir.js'
+import { and, gte, lt } from '../query/builder/functions.js'
+import { Value } from '../query/ir.js'
 import { EventEmitter } from '../event-emitter.js'
-import { compileExpression } from '../query/compiler/evaluators.js'
-import { buildCursor } from '../utils/cursor.js'
+import {
+  buildCursor,
+  buildCursorEquality,
+  canExpressCursorOrder,
+} from '../utils/cursor.js'
 import { deepEquals } from '../utils.js'
+import { WindowState } from '../query/live/window-state.js'
 import {
   createFilterFunctionFromExpression,
   createFilteredCallback,
@@ -112,6 +116,7 @@ export class CollectionSubscription
    * We store the exact LoadSubsetOptions we passed to loadSubset to ensure symmetric unload.
    */
   private subsetDemands: Array<SubsetDemand> = []
+  private orderedSubsetDemands = new WeakSet<SubsetDemand>()
   private readonly requestedSubsetWhere = new WeakMap<
     LoadSubsetOptions,
     BasicExpression<boolean>
@@ -131,6 +136,7 @@ export class CollectionSubscription
   private filteredCallback: (changes: Array<ChangeMessage<any, any>>) => boolean
 
   private orderByIndex: IndexInterface<string | number> | undefined
+  private orderedWindow: WindowState | undefined
 
   // Status tracking
   private _status: SubscriptionStatus = `ready`
@@ -416,12 +422,17 @@ export class CollectionSubscription
     // request can publish a row that belonged only to a released demand.
     this.sentKeys = new Set(this.publishedRows.keys())
     if (this.orderByIndex) {
-      this.limitedSnapshotRowCount = this.sentKeys.size
-      const orderedSentKeys = this.orderByIndex.takeFromStart(
-        this.sentKeys.size,
-        (key) => this.sentKeys.has(key),
-      )
-      this.lastSentKey = orderedSentKeys.at(-1)
+      if (this.orderedWindow) {
+        this.limitedSnapshotRowCount = this.orderedWindow.localPrefixSize
+        this.lastSentKey = this.orderedBoundary()?.key
+      } else {
+        this.limitedSnapshotRowCount = this.sentKeys.size
+        const orderedSentKeys = this.orderByIndex.takeFromStart(
+          this.sentKeys.size,
+          (key) => this.sentKeys.has(key),
+        )
+        this.lastSentKey = orderedSentKeys.at(-1)
+      }
     }
   }
 
@@ -477,6 +488,59 @@ export class CollectionSubscription
    */
   hasOrderByIndex(): boolean {
     return this.orderByIndex !== undefined
+  }
+
+  /** Retain enough locally known rows to cover this ordered window prefix. */
+  ensureOrderedWindowSize(size: number): boolean {
+    if (!this.orderedWindow) return false
+    this.orderedWindow.ensureSize(size)
+    if (this.stalePublishedRows.size > 0) return false
+    const changes = this.reconcileOrderedWindow()
+    if (changes.length === 0) return false
+    this.callback(changes)
+    return true
+  }
+
+  get orderedRowsNeeded(): number {
+    return this.orderedWindow?.rowsNeeded() ?? 0
+  }
+
+  get hasPriorOrderedContinuation(): boolean {
+    return (
+      this.subsetDemands.filter((demand) =>
+        this.orderedSubsetDemands.has(demand),
+      ).length > 1
+    )
+  }
+
+  get orderedBoundaryRow(): object | undefined {
+    const boundary = this.orderedBoundary()
+    return boundary === undefined
+      ? undefined
+      : this.publishedRows.get(boundary.key)
+  }
+
+  private orderedBoundary() {
+    return this.orderedWindow?.boundary(
+      this.stalePublishedRows.size > 0 ? this.publishedRows : undefined,
+    )
+  }
+
+  private reconcileOrderedWindow(): Array<ChangeMessage<any, any>> {
+    if (!this.orderedWindow) return []
+    const additionalFilters = this.subsetDemands
+      .filter((demand) => !this.orderedSubsetDemands.has(demand))
+      .map((demand) =>
+        demand.requestOptions.where
+          ? createFilterFunctionFromExpression(demand.requestOptions.where)
+          : undefined,
+      )
+    return this.orderedWindow.reconcile(
+      this.publishedRows,
+      additionalFilters.length === 0
+        ? undefined
+        : (row) => additionalFilters.some((filter) => filter?.(row) ?? true),
+    )
   }
 
   /**
@@ -601,7 +665,10 @@ export class CollectionSubscription
   }
 
   /** Start and retain the first acquisition for one logical subset demand. */
-  private startSubsetDemand(requestOptions: LoadSubsetOptions): {
+  private startSubsetDemand(
+    requestOptions: LoadSubsetOptions,
+    ordered = false,
+  ): {
     demand: SubsetDemand
     result: Promise<void> | true
   } {
@@ -609,6 +676,7 @@ export class CollectionSubscription
       requestOptions,
       options: requestOptions,
     }
+    if (ordered) this.orderedSubsetDemands.add(demand)
     const acquisition = this.createSubsetAcquisition(demand)
     try {
       const result = this.loadSubset(acquisition.options)
@@ -651,6 +719,17 @@ export class CollectionSubscription
   }
 
   emitEvents(changes: Array<ChangeMessage<any, any>>): boolean {
+    if (
+      this.orderedWindow &&
+      !this.isBufferingForTruncate &&
+      this.stalePublishedRows.size === 0
+    ) {
+      const orderedChanges = this.reconcileOrderedWindow()
+      if (changes.length > 0 && orderedChanges.length === 0) return false
+      this.callback(orderedChanges)
+      return true
+    }
+
     const newChanges = this.filterAndFlipChanges(changes)
 
     // Reconciliation can reduce a source delta to no visible change. Do not
@@ -777,21 +856,22 @@ export class CollectionSubscription
     if (index === -1) return
 
     const [demand] = this.subsetDemands.splice(index, 1)
-    if (demand) this.releaseSubsetDemand(demand)
+    if (demand) {
+      this.releaseSubsetDemand(demand)
+      if (
+        this.orderedWindow &&
+        !this.isBufferingForTruncate &&
+        this.stalePublishedRows.size === 0
+      ) {
+        const changes = this.reconcileOrderedWindow()
+        if (changes.length > 0) this.callback(changes)
+      }
+    }
   }
 
   /**
-   * Sends a snapshot that fulfills the `where` clause and all rows are bigger or equal to the cursor.
-   * Requires a range index to be set with `setOrderByIndex` prior to calling this method.
-   * It uses that range index to load the items in the order of the index.
-   *
-   * For multi-column orderBy:
-   * - Uses first value from `minValues` for LOCAL index operations (wide bounds, ensures no missed rows)
-   * - Uses all `minValues` to build a precise composite cursor for SYNC layer loadSubset
-   *
-   * Note 1: it may load more rows than the provided LIMIT because it loads all values equal to the first cursor value + limit values greater.
-   *         This is needed to ensure that it does not accidentally skip duplicate values when the limit falls in the middle of some duplicated values.
-   * Note 2: it does not send keys that have already been sent before.
+   * Reconciles the exact locally known ordered prefix, then asks the sync layer
+   * for enough rows after its total-order boundary to extend that prefix.
    */
   requestLimitedSnapshot({
     orderBy,
@@ -801,135 +881,52 @@ export class CollectionSubscription
     trackLoadSubsetPromise: shouldTrackLoadSubsetPromise = true,
     onLoadSubsetResult,
   }: RequestLimitedSnapshotOptions) {
-    if (!limit) throw new Error(`limit is required`)
-
     if (!this.orderByIndex) {
       throw new Error(
         `Ordered snapshot was requested but no index was found. You have to call setOrderByIndex before requesting an ordered snapshot.`,
       )
     }
 
-    // Check if minValues has a first element (regardless of its value)
-    // This distinguishes between "no min value provided" vs "min value is undefined"
-    const hasMinValue = minValues !== undefined && minValues.length > 0
-    // Derive first column value from minValues (used for local index operations)
-    const minValue = minValues?.[0]
-    // Cast for index operations (index expects string | number)
-    const minValueForIndex = minValue as string | number | undefined
+    this.orderedWindow ??= new WindowState(
+      this.collection,
+      orderBy,
+      this.options.whereExpression,
+      limit,
+    )
 
-    const index = this.orderByIndex
     const where = this.options.whereExpression
-    const whereFilterFn = where
-      ? createFilterFunctionFromExpression(where)
-      : undefined
-
-    const filterFn = (key: string | number | undefined): boolean => {
-      if (key !== undefined && this.sentKeys.has(key)) {
-        return false
-      }
-
-      const value = this.collection.get(key)
-      if (value === undefined) {
-        return false
-      }
-
-      return whereFilterFn?.(value) ?? true
-    }
-
-    let biggestObservedValue = minValueForIndex
-    const changes: Array<ChangeMessage<any, string | number>> = []
-
-    // If we have a minValue we need to handle the case
-    // where there might be duplicate values equal to minValue that we need to include
-    // because we can have data like this: [1, 2, 3, 3, 3, 4, 5]
-    // so if minValue is 3 then the previous snapshot may not have included all 3s
-    // e.g. if it was offset 0 and limit 3 it would only have loaded the first 3
-    //      so we load all rows equal to minValue first, to be sure we don't skip any duplicate values
-    //
-    // For multi-column orderBy, we use the first column value for index operations (wide bounds)
-    // This may load some duplicates but ensures we never miss any rows.
-    let keys: Array<string | number> = []
-    if (hasMinValue) {
-      // First, get all items with the same FIRST COLUMN value as minValue
-      // This provides wide bounds for the local index
-      const { expression } = orderBy[0]!
-      const allRowsWithMinValue = this.collection.currentStateAsChanges({
-        where: eq(expression, new Value(minValueForIndex)),
-      })
-
-      if (allRowsWithMinValue) {
-        const keysWithMinValue = allRowsWithMinValue
-          .map((change) => change.key)
-          .filter((key) => !this.sentKeys.has(key) && filterFn(key))
-
-        // Add items with the minValue first
-        keys.push(...keysWithMinValue)
-
-        // Then get items greater than minValue
-        const keysGreaterThanMin = index.take(
-          limit - keys.length,
-          minValueForIndex!,
-          filterFn,
-        )
-        keys.push(...keysGreaterThanMin)
-      } else {
-        keys = index.take(limit, minValueForIndex!, filterFn)
-      }
-    } else {
-      // No min value provided, start from the beginning
-      keys = index.takeFromStart(limit, filterFn)
-    }
-
-    const valuesNeeded = () => Math.max(limit - changes.length, 0)
-    const collectionExhausted = () => keys.length === 0
-
-    // Create a value extractor for the orderBy field to properly track the biggest indexed value
-    const orderByExpression = orderBy[0]!.expression
-    const valueExtractor =
-      orderByExpression.type === `ref`
-        ? compileExpression(new PropRef(orderByExpression.path), true)
-        : null
-
-    while (valuesNeeded() > 0 && !collectionExhausted()) {
-      const insertedKeys = new Set<string | number>() // Track keys we add to `changes` in this iteration
-
-      for (const key of keys) {
-        const value = this.collection.get(key)!
-        changes.push({
-          type: `insert`,
-          key,
-          value,
-        })
-        // Extract the indexed value (e.g., salary) from the row, not the full row
-        // This is needed for index.take() to work correctly with the BTree comparator
-        biggestObservedValue = valueExtractor ? valueExtractor(value) : value
-        insertedKeys.add(key) // Track this key
-      }
-
-      keys = index.take(valuesNeeded(), biggestObservedValue!, filterFn)
-    }
-
-    // Track row count for offset-based pagination (before sending to callback)
-    // Use the current count as the offset for this load
-    const currentOffset = this.limitedSnapshotRowCount
-
-    // Add keys to sentKeys BEFORE calling callback to prevent race condition.
-    // If a change event arrives while the callback is executing, it will see
-    // the keys already in sentKeys and filter out duplicates correctly.
-    for (const change of changes) {
-      this.sentKeys.add(change.key)
-    }
+    // A failed truncate replay leaves the last complete publication visible
+    // while the source collection is empty. Continue from that retained prefix
+    // until a later replay replaces it.
+    const currentOffset =
+      this.stalePublishedRows.size > 0
+        ? this.limitedSnapshotRowCount
+        : this.orderedWindow.localPrefixSize
+    const requestedPrefix =
+      offset !== undefined
+        ? offset + limit
+        : minValues !== undefined
+          ? currentOffset + limit
+          : limit
+    this.orderedWindow.ensureSize(requestedPrefix)
+    const changes =
+      this.stalePublishedRows.size === 0 ? this.reconcileOrderedWindow() : []
 
     this.callback(changes)
 
-    // Update the row count and last key after sending (for next call's offset/cursor)
+    // A zero window establishes no remote demand, but it must still create the
+    // ordered coordinator so a later setWindow can load from the same order.
+    if (limit === 0) {
+      onLoadSubsetResult?.(true)
+      return
+    }
+
+    // Keep legacy offset bookkeeping aligned with the exact retained prefix.
     this.limitedSnapshotRowCount = Math.max(
       this.limitedSnapshotRowCount,
-      currentOffset + changes.length,
+      this.orderedWindow.localPrefixSize,
     )
-    if (changes.length > 0) {
-      this.lastSentKey = changes[changes.length - 1]!.key
-    }
+    this.lastSentKey = this.orderedBoundary()?.key
 
     // Build cursor expressions for sync layer loadSubset
     // The cursor expressions are separate from the main where clause
@@ -942,31 +939,41 @@ export class CollectionSubscription
         }
       | undefined
 
-    if (minValues !== undefined && minValues.length > 0) {
-      const whereFromCursor = buildCursor(orderBy, minValues)
+    const boundary = this.orderedBoundary()
+    const cursorValues = boundary?.values ?? minValues
+    if (cursorValues !== undefined && cursorValues.length > 0) {
+      const canPushCursor = canExpressCursorOrder(orderBy, cursorValues)
+      const whereFromCursor = canPushCursor
+        ? buildCursor(orderBy, [...cursorValues])
+        : new Value(false)
 
       if (whereFromCursor) {
         const { expression } = orderBy[0]!
-        const cursorMinValue = minValues[0]
+        const cursorMinValue = cursorValues[0]
 
         // Build the whereCurrent expression for the first orderBy column
         // For Date values, we need to handle precision differences between JS (ms) and backends (μs)
         // A JS Date represents a 1ms range, so we query for all values within that range
         let whereCurrentCursor: BasicExpression<boolean>
-        if (cursorMinValue instanceof Date) {
+        if (!canPushCursor) {
+          // Locale strings and reference-ordered values have no equivalent in
+          // the predicate IR. Fetch the full filtered region and let the local
+          // TotalOrder refine it instead of applying a lossy cursor remotely.
+          whereCurrentCursor = new Value(true)
+        } else if (cursorMinValue instanceof Date) {
           const cursorMinValuePlus1ms = new Date(cursorMinValue.getTime() + 1)
           whereCurrentCursor = and(
             gte(expression, new Value(cursorMinValue)),
             lt(expression, new Value(cursorMinValuePlus1ms)),
           )
         } else {
-          whereCurrentCursor = eq(expression, new Value(cursorMinValue))
+          whereCurrentCursor = buildCursorEquality(expression, cursorMinValue)
         }
 
         cursorExpressions = {
           whereFrom: whereFromCursor,
           whereCurrent: whereCurrentCursor,
-          lastKey: this.lastSentKey,
+          lastKey: boundary?.key ?? this.lastSentKey,
         }
       }
     }
@@ -984,7 +991,10 @@ export class CollectionSubscription
       subscription: this,
     }
 
-    const { demand, result: syncResult } = this.startSubsetDemand(loadOptions)
+    const { demand, result: syncResult } = this.startSubsetDemand(
+      loadOptions,
+      true,
+    )
 
     // Pass the raw loadSubset result to the caller for external tracking
     onLoadSubsetResult?.(syncResult)
@@ -1128,7 +1138,7 @@ export class CollectionSubscription
     if (this.orderByIndex) {
       this.limitedSnapshotRowCount = Math.max(
         this.limitedSnapshotRowCount,
-        this.sentKeys.size,
+        this.orderedWindow?.localPrefixSize ?? this.sentKeys.size,
       )
     }
   }

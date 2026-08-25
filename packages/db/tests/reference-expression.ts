@@ -43,6 +43,10 @@ export function evaluateReferenceExpression(
       return args.some(Boolean)
     case `not`:
       return !args[0]
+    case `isNull`:
+      return args[0] === null
+    case `isUndefined`:
+      return args[0] === undefined
     case `eq`:
       return args[0] === args[1]
     case `gt`:

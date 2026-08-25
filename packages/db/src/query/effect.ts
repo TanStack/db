@@ -934,6 +934,7 @@ class EffectPipelineRunner<TRow extends object, TKey extends string | number> {
         limit: offset + limit,
         orderBy: normalizedOrderBy,
         trackLoadSubsetPromise: false,
+        onLoadSubsetResult: (result) => this.trackOrderedLoad(result),
       })
     } else {
       subscription.requestSnapshot({
@@ -965,16 +966,48 @@ class EffectPipelineRunner<TRow extends object, TKey extends string | number> {
     )) {
       if (!orderByInfo.dataNeeded || !orderByInfo.index) continue
 
+      const subscription = this.subscriptions[orderByInfo.sourceId]
+      if (!subscription) continue
+      // Local rows can fill the visible prefix before the provider confirms
+      // it. Keep the remote request until exact source extent is consumed.
+      const expandedFromLocalRows = subscription.ensureOrderedWindowSize(
+        orderByInfo.offset + orderByInfo.limit,
+      )
+      // A prior continuation already asked the source for the complete boundary
+      // equivalence class. Rows retained by that request may fill this wider
+      // window without another transport. Initial local rows have no such proof,
+      // so they still require an authority check until source outcomes land.
+      if (expandedFromLocalRows && subscription.hasPriorOrderedContinuation) {
+        continue
+      }
+
       if (this.pendingOrderedLoadPromise) {
         // Wait for in-flight loads to complete before requesting more
         continue
       }
 
-      const n = orderByInfo.dataNeeded()
+      const n = Math.max(
+        orderByInfo.dataNeeded(),
+        subscription.orderedRowsNeeded,
+      )
       if (n > 0) {
         this.loadNextItems(orderByInfo, n)
       }
     }
+  }
+
+  private trackOrderedLoad(result: Promise<void> | true): void {
+    if (!(result instanceof Promise)) return
+    this.pendingOrderedLoadPromise = result
+    const finish = () => {
+      if (this.pendingOrderedLoadPromise === result) {
+        this.pendingOrderedLoadPromise = undefined
+      }
+    }
+    void result.then(() => {
+      finish()
+      this.loadMoreIfNeeded()
+    }, finish)
   }
 
   /**
@@ -992,7 +1025,7 @@ class EffectPipelineRunner<TRow extends object, TKey extends string | number> {
 
     const cursor = computeOrderedLoadCursor(
       orderByInfo,
-      this.biggestSentValue.get(sourceId),
+      subscription.orderedBoundaryRow ?? this.biggestSentValue.get(sourceId),
       this.lastLoadRequestKey.get(sourceId),
       alias,
       n,
@@ -1007,18 +1040,8 @@ class EffectPipelineRunner<TRow extends object, TKey extends string | number> {
         limit: n,
         minValues: cursor.minValues,
         trackLoadSubsetPromise: false,
-        onLoadSubsetResult: (loadResult: Promise<void> | true) => {
-          // Track in-flight load to prevent redundant concurrent requests
-          if (loadResult instanceof Promise) {
-            this.pendingOrderedLoadPromise = loadResult
-            const finish = () => {
-              if (this.pendingOrderedLoadPromise === loadResult) {
-                this.pendingOrderedLoadPromise = undefined
-              }
-            }
-            void loadResult.then(finish, finish)
-          }
-        },
+        onLoadSubsetResult: (loadResult: Promise<void> | true) =>
+          this.trackOrderedLoad(loadResult),
       })
     } catch (error) {
       if (subscription.lastError !== error) throw error

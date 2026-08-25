@@ -43,6 +43,11 @@ type NullableCursorRow = {
   rank: number | null
 }
 
+type LocaleCursorRow = {
+  id: number
+  label: string
+}
+
 type NullableCursorScenario = {
   rank: number
   direction: `asc` | `desc`
@@ -461,39 +466,6 @@ function referenceMultiOrder(scenario: MultiOrderScenario): Array<number> {
     .map(({ id }) => id)
 }
 
-function referenceMultiOrderWithoutSecondary(
-  scenario: MultiOrderScenario,
-): Array<number> {
-  // The current top-K boundary selects rows by the first order term and key,
-  // then applies the full comparator only to the rows that survived selection.
-  const selectedIds = new Set(
-    [...scenario.rows]
-      .sort(
-        (left, right) =>
-          compareNullableNumber(
-            left.primary,
-            right.primary,
-            scenario.primary,
-          ) || left.id - right.id,
-      )
-      .slice(0, scenario.limit)
-      .map(({ id }) => id),
-  )
-  return scenario.rows
-    .filter(({ id }) => selectedIds.has(id))
-    .sort(
-      (left, right) =>
-        compareNullableNumber(left.primary, right.primary, scenario.primary) ||
-        compareNullableNumber(
-          left.secondary,
-          right.secondary,
-          scenario.secondary,
-        ) ||
-        left.id - right.id,
-    )
-    .map(({ id }) => id)
-}
-
 async function runMultiOrderScenario(
   scenario: MultiOrderScenario,
 ): Promise<void> {
@@ -527,43 +499,6 @@ async function runMultiOrderScenario(
   } finally {
     live.cleanup()
     source.cleanup()
-  }
-}
-
-function isKnownSecondaryOrderBoundaryFailure(
-  scenario: MultiOrderScenario,
-  error: unknown,
-): boolean {
-  if (
-    !(error instanceof TraceAssertionError) ||
-    error.checkpoint !== 0 ||
-    typeof error.cause !== `object` ||
-    error.cause === null ||
-    !(`actual` in error.cause) ||
-    !(`expected` in error.cause) ||
-    !isNumberArray(error.cause.actual) ||
-    !isNumberArray(error.cause.expected)
-  ) {
-    return false
-  }
-
-  const expected = referenceMultiOrder(scenario)
-  const defective = referenceMultiOrderWithoutSecondary(scenario)
-  return (
-    defective.join(`,`) !== expected.join(`,`) &&
-    error.cause.actual.join(`,`) === defective.join(`,`) &&
-    error.cause.expected.join(`,`) === expected.join(`,`)
-  )
-}
-
-async function runMultiOrderScenarioWithKnownFailures(
-  scenario: MultiOrderScenario,
-): Promise<void> {
-  try {
-    await runMultiOrderScenario(scenario)
-  } catch (error) {
-    if (isKnownSecondaryOrderBoundaryFailure(scenario, error)) return
-    throw error
   }
 }
 
@@ -644,44 +579,6 @@ async function runNullableCursorScenario(
   }
 }
 
-// The current ascending cursor boundary can place the non-null row before the
-// nulls-first row. Remove this waiver when that request returns row 1.
-function isKnownNullableCursorOrderingFailure(
-  scenario: NullableCursorScenario,
-  error: unknown,
-): boolean {
-  if (
-    scenario.direction !== `asc` ||
-    !(error instanceof TraceAssertionError) ||
-    error.checkpoint !== 0 ||
-    typeof error.cause !== `object` ||
-    error.cause === null ||
-    !(`actual` in error.cause) ||
-    !(`expected` in error.cause)
-  ) {
-    return false
-  }
-  return (
-    isNumberArray(error.cause.actual) &&
-    error.cause.actual.length === 1 &&
-    error.cause.actual[0] === 2 &&
-    isNumberArray(error.cause.expected) &&
-    error.cause.expected.length === 1 &&
-    error.cause.expected[0] === 1
-  )
-}
-
-async function runNullableCursorScenarioWithKnownFailures(
-  scenario: NullableCursorScenario,
-): Promise<void> {
-  try {
-    await runNullableCursorScenario(scenario)
-  } catch (error) {
-    if (isKnownNullableCursorOrderingFailure(scenario, error)) return
-    throw error
-  }
-}
-
 async function runPaginationStateScenario(
   scenario: PaginationStateScenario,
 ): Promise<void> {
@@ -755,34 +652,6 @@ async function runPaginationStateScenario(
   }
 }
 
-type ReferencePaginationState = {
-  rows: Map<number, PageRow>
-  window: PaginationWindow
-}
-
-function replayReferenceState(
-  scenario: PaginationStateScenario,
-  actionCount: number,
-): ReferencePaginationState {
-  const state: ReferencePaginationState = {
-    rows: new Map(
-      scenario.ranks.map((rank, index) => [index + 1, { id: index + 1, rank }]),
-    ),
-    window: { ...scenario.initialWindow },
-  }
-
-  for (const action of scenario.actions.slice(0, actionCount)) {
-    if (action.type === `window`) {
-      state.window = { offset: action.offset, limit: action.limit }
-    } else if (action.type === `put`) {
-      state.rows.set(action.id, { id: action.id, rank: action.rank })
-    } else {
-      state.rows.delete(action.id)
-    }
-  }
-  return state
-}
-
 function isPageRowArray(value: unknown): value is Array<PageRow> {
   return (
     Array.isArray(value) &&
@@ -849,220 +718,8 @@ function sameRows(
   )
 }
 
-function comparePageRows(
-  left: PageRow,
-  right: PageRow,
-  direction: `asc` | `desc`,
-): number {
-  const directionFactor = direction === `asc` ? 1 : -1
-  return (left.rank - right.rank) * directionFactor || left.id - right.id
-}
-
-function replayOrderedSubscriptionWindow(
-  scenario: PaginationStateScenario,
-  actionCount: number,
-): Array<PageRow> {
-  const rows = new Map<number, PageRow>(
-    scenario.ranks.map((rank, index) => [index + 1, { id: index + 1, rank }]),
-  )
-  const initialRows = [...rows.values()]
-  const sentRows = new Map(
-    referenceWindowRows(initialRows, scenario.direction, {
-      offset: 0,
-      limit: scenario.initialWindow.offset + scenario.initialWindow.limit,
-    }).map((row) => [row.id, row]),
-  )
-  let biggest = referenceWindowRows(
-    [...sentRows.values()],
-    scenario.direction,
-    { offset: 0, limit: sentRows.size },
-  ).at(-1)
-  let window = { ...scenario.initialWindow }
-
-  const currentResult = () =>
-    referenceWindowRows([...sentRows.values()], scenario.direction, window)
-
-  const refill = () => {
-    const orderedRows = referenceWindowRows(
-      [...rows.values()],
-      scenario.direction,
-      {
-        offset: 0,
-        limit: rows.size,
-      },
-    )
-    while (biggest !== undefined) {
-      const currentLength = currentResult().length
-      if (currentLength >= window.limit) break
-      const needed = window.limit - currentLength
-      const atCursor = orderedRows.filter(
-        (row) => row.rank === biggest!.rank && !sentRows.has(row.id),
-      )
-      const afterCursor = orderedRows
-        .filter(
-          (row) =>
-            comparePageRows(
-              { id: 0, rank: row.rank },
-              { id: 0, rank: biggest!.rank },
-              scenario.direction,
-            ) > 0 && !sentRows.has(row.id),
-        )
-        .slice(0, Math.max(0, needed - atCursor.length))
-      const loaded = [...atCursor, ...afterCursor]
-      if (loaded.length === 0) break
-
-      for (const row of loaded) {
-        sentRows.set(row.id, { ...row })
-        if (comparePageRows(biggest, row, scenario.direction) < 0) {
-          biggest = row
-        }
-      }
-    }
-  }
-
-  for (const action of scenario.actions.slice(0, actionCount)) {
-    if (action.type === `window`) {
-      window = { offset: action.offset, limit: action.limit }
-    } else if (action.type === `put`) {
-      const previous = rows.get(action.id)
-      if (previous?.rank !== action.rank) {
-        const row = { id: action.id, rank: action.rank }
-        rows.set(action.id, row)
-        sentRows.set(row.id, { ...row })
-        if (
-          biggest === undefined ||
-          comparePageRows(biggest, row, scenario.direction) < 0
-        ) {
-          biggest = row
-        }
-      }
-    } else {
-      rows.delete(action.id)
-      sentRows.delete(action.id)
-    }
-    refill()
-  }
-
-  return currentResult()
-}
-
-function isKnownOrderedSubscriptionCoverageFailure(
-  scenario: PaginationStateScenario,
-  error: unknown,
-): boolean {
-  const difference = readPageRowDifference(error)
-  if (!difference) return false
-
-  const fullState = replayReferenceState(scenario, difference.checkpoint)
-  const expected = referenceWindowRows(
-    [...fullState.rows.values()],
-    scenario.direction,
-    fullState.window,
-  )
-  const defective = replayOrderedSubscriptionWindow(
-    scenario,
-    difference.checkpoint,
-  )
-  return (
-    !sameRows(defective, expected) &&
-    sameRows(difference.actual, defective) &&
-    sameRows(difference.expected, expected)
-  )
-}
-
 function isNumberArray(value: unknown): value is Array<number> {
   return Array.isArray(value) && value.every((item) => typeof item === `number`)
-}
-
-function isKnownOnDemandOffsetUnderfetch(
-  scenario: PaginationScenario,
-  error: unknown,
-): boolean {
-  if (
-    !(error instanceof TraceAssertionError) ||
-    error.checkpoint < 1 ||
-    typeof error.cause !== `object` ||
-    error.cause === null ||
-    !(`actual` in error.cause) ||
-    !(`expected` in error.cause) ||
-    !isNumberArray(error.cause.actual) ||
-    !isNumberArray(error.cause.expected)
-  ) {
-    return false
-  }
-
-  const actual = error.cause.actual
-  const expected = error.cause.expected
-  const window = scenario.windows[error.checkpoint]
-  if (window === undefined) return false
-  const authoritative = referenceWindow(
-    scenario.ranks.map((rank, index) => ({ id: index + 1, rank })),
-    scenario.direction,
-    window,
-  )
-  const defective = replayOnDemandPaginationWindow(scenario, error.checkpoint)
-  return (
-    expected.length === authoritative.length &&
-    expected.every((id, index) => id === authoritative[index]) &&
-    (defective.length !== authoritative.length ||
-      defective.some((id, index) => id !== authoritative[index])) &&
-    actual.length === defective.length &&
-    actual.every((id, index) => id === defective[index])
-  )
-}
-
-function replayOnDemandPaginationWindow(
-  scenario: PaginationScenario,
-  checkpoint: number,
-): Array<number> {
-  const authoritativeRows = referenceWindowRows(
-    scenario.ranks.map((rank, index) => ({ id: index + 1, rank })),
-    scenario.direction,
-    { offset: 0, limit: scenario.ranks.length },
-  )
-  const initialWindow = scenario.windows[0]!
-  const delivered = new Map(
-    authoritativeRows
-      .slice(0, initialWindow.offset + initialWindow.limit)
-      .map((row) => [row.id, row]),
-  )
-  let biggest = referenceWindowRows(
-    [...delivered.values()],
-    scenario.direction,
-    { offset: 0, limit: delivered.size },
-  ).at(-1)
-
-  if (initialWindow.limit === 0) {
-    return referenceWindow(
-      [...delivered.values()],
-      scenario.direction,
-      scenario.windows[checkpoint]!,
-    )
-  }
-
-  for (const window of scenario.windows.slice(0, checkpoint + 1)) {
-    const current = referenceWindowRows(
-      [...delivered.values()],
-      scenario.direction,
-      window,
-    )
-    const needed = window.limit - current.length
-    if (needed <= 0 || biggest === undefined) continue
-
-    const atCursor = authoritativeRows.filter(
-      (row) => row.rank === biggest!.rank,
-    )
-    const afterCursor = authoritativeRows
-      .filter((row) => comparePageRows(biggest!, row, scenario.direction) < 0)
-      .slice(0, needed)
-    for (const row of [...atCursor, ...afterCursor]) {
-      if (!delivered.has(row.id)) delivered.set(row.id, row)
-      if (comparePageRows(biggest, row, scenario.direction) < 0) biggest = row
-    }
-  }
-
-  const window = scenario.windows[checkpoint]!
-  return referenceWindow([...delivered.values()], scenario.direction, window)
 }
 
 function assertionDifference(
@@ -1076,28 +733,6 @@ function assertionDifference(
     return new TraceAssertionError(checkpoint, error)
   }
   throw new Error(`test difference must not be equal`)
-}
-
-async function runPaginationStateScenarioWithKnownFailures(
-  scenario: PaginationStateScenario,
-): Promise<void> {
-  try {
-    await runPaginationStateScenario(scenario)
-  } catch (error) {
-    if (isKnownOrderedSubscriptionCoverageFailure(scenario, error)) return
-    throw error
-  }
-}
-
-async function runOnDemandPaginationScenarioWithKnownFailures(
-  scenario: PaginationScenario,
-): Promise<void> {
-  try {
-    await runOnDemandPaginationScenario(scenario)
-  } catch (error) {
-    if (isKnownOnDemandOffsetUnderfetch(scenario, error)) return
-    throw error
-  }
 }
 
 async function runOnDemandPaginationScenario(
@@ -1192,7 +827,8 @@ async function runOnDemandPaginationScenario(
         compareOptions: { direction: `asc`, nulls: `first` },
       },
     ]
-    for (const load of loads) expect(load.orderBy).toEqual(expectedOrderBy)
+    for (const load of loads)
+      expect(load.orderBy).toMatchObject(expectedOrderBy)
   } finally {
     live.cleanup()
     source.cleanup()
@@ -1494,46 +1130,6 @@ function pendingMutationRows(
   return rows
 }
 
-function isKnownSettledTopKMembershipFailure(
-  scenario: PendingMutationScenario,
-  timing: `before-response` | `after-response`,
-  error: unknown,
-): boolean {
-  if (scenario.responseOutcome !== `resolve` || timing !== `after-response`) {
-    return false
-  }
-  const difference = readPageRowDifferenceAtCheckpoint(error, 0)
-  if (!difference) return false
-
-  const initialRows = scenario.ranks.map((rank, index) => ({
-    id: index + 1,
-    rank,
-  }))
-  const initialVisibleIds = new Set(
-    referenceWindowRows(initialRows, scenario.direction, {
-      offset: 0,
-      limit: scenario.limit,
-    }).map(({ id }) => id),
-  )
-  const finalRows = pendingMutationRows(scenario)
-  const expected = referenceWindowRows(
-    [...finalRows.values()],
-    scenario.direction,
-    { offset: 0, limit: scenario.limit },
-  )
-  const defective = referenceWindowRows(
-    [...finalRows.values()].filter(({ id }) => initialVisibleIds.has(id)),
-    scenario.direction,
-    { offset: 0, limit: scenario.limit },
-  )
-
-  return (
-    !sameRows(defective, expected) &&
-    sameRows(difference.actual, defective) &&
-    sameRows(difference.expected, expected)
-  )
-}
-
 function isKnownRejectedCursorRetryFailure(
   scenario: PendingMutationScenario,
   error: unknown,
@@ -1567,7 +1163,6 @@ async function runPendingMutationScenarioWithKnownFailures(
   try {
     await runPendingMutationScenario(scenario, timing)
   } catch (error) {
-    if (isKnownSettledTopKMembershipFailure(scenario, timing, error)) return
     if (isKnownRejectedCursorRetryFailure(scenario, error)) return
     throw error
   }
@@ -1936,9 +1531,11 @@ async function expectInflightRequestFillsNewWindow(): Promise<void> {
     expect(pending).toHaveLength(1)
 
     await settle(pending[0]!)
+    await flushPromises()
+    expect(pending).toHaveLength(2)
+    await settle(pending[1]!)
     await preload
     if (setWindow instanceof Promise) await setWindow
-    expect(pending).toHaveLength(1)
 
     try {
       expect(Array.from(live.values(), ({ id }) => id)).toEqual([3, 4])
@@ -1990,14 +1587,7 @@ describe(`pagination recomputation oracle`, () => {
   })
 
   it(`discovered trace: loads an on-demand window after a zero limit`, async () => {
-    await expectAssertionFailure(runOnDemandPaginationScenario, {
-      checkpoint: 1,
-      classify: ({ actual, expected }) =>
-        isNumberArray(actual) &&
-        actual.join(`,`) === `1` &&
-        isNumberArray(expected) &&
-        expected.join(`,`) === `1,2`,
-    })({
+    await runOnDemandPaginationScenario({
       ranks: [0, 0],
       direction: `asc`,
       windows: [
@@ -2005,6 +1595,95 @@ describe(`pagination recomputation oracle`, () => {
         { offset: 0, limit: 2 },
       ],
     })
+  })
+
+  it(`refines locale-ordered continuations locally when predicate IR cannot express the collation`, async () => {
+    const rows: Array<LocaleCursorRow> = [
+      { id: 1, label: `item2` },
+      { id: 2, label: `item10` },
+      { id: 3, label: `item11` },
+    ]
+    const pending: Array<PendingCursorLoad> = []
+    let initialLoad = true
+    let begin!: () => void
+    let write!: (message: { type: `insert`; value: LocaleCursorRow }) => void
+    let commit!: () => void
+    const source = createCollection<LocaleCursorRow>({
+      id: `pagination-locale-cursor-source-${collectionSequence++}`,
+      getKey: (row) => row.id,
+      syncMode: `on-demand`,
+      startSync: true,
+      autoIndex: `eager`,
+      defaultIndexType: BTreeIndex,
+      sync: {
+        sync: (params) => {
+          begin = params.begin
+          write = params.write
+          commit = params.commit
+          begin()
+          write({ type: `insert`, value: { ...rows[0]! } })
+          commit()
+          params.markReady()
+          return {
+            loadSubset: (options: LoadSubsetOptions) => {
+              if (initialLoad) {
+                initialLoad = false
+                return true
+              }
+              const deferred = createDeferred<void>()
+              pending.push({ options, deferred })
+              return deferred.promise
+            },
+          }
+        },
+      },
+    })
+    const live = createLiveQueryCollection((query) =>
+      query
+        .from({ row: source })
+        .orderBy(({ row }) => row.label, {
+          direction: `asc`,
+          nulls: `first`,
+          stringSort: `locale`,
+          locale: `en-US`,
+          localeOptions: { numeric: true },
+        })
+        .orderBy(({ row }) => row.id, `asc`)
+        .limit(1),
+    )
+
+    try {
+      await live.preload()
+      const widened = live.utils.setWindow({ offset: 0, limit: 2 })
+      expect(widened).toBeInstanceOf(Promise)
+      expect(pending).toHaveLength(1)
+      const request = pending[0]!
+      expect(request.options.cursor).toBeDefined()
+      expect(
+        rows.every((row) =>
+          Boolean(
+            evaluateReferenceExpression(
+              request.options.cursor!.whereCurrent,
+              row,
+            ),
+          ),
+        ),
+      ).toBe(true)
+
+      begin()
+      for (const row of rowsForLoadSubset(rows, request.options)) {
+        write({ type: `insert`, value: { ...row } })
+      }
+      commit()
+      request.deferred.resolve()
+      if (widened instanceof Promise) await widened
+
+      expect(Array.from(live.values(), ({ id }) => id)).toEqual([1, 2])
+    } finally {
+      for (const request of pending) request.deferred.resolve()
+      live.cleanup()
+      source.cleanup()
+    }
   })
 
   const nullableBoundaryRows: ReadonlyArray<MultiOrderRow> = [
@@ -2025,7 +1704,6 @@ describe(`pagination recomputation oracle`, () => {
         secondary: { direction: `asc`, nulls: `first` },
         limit: 1,
       },
-      { actual: [1], expected: [2] },
     ],
     [
       `orders a descending nullable boundary by its second term`,
@@ -2035,7 +1713,6 @@ describe(`pagination recomputation oracle`, () => {
         secondary: { direction: `desc`, nulls: `first` },
         limit: 1,
       },
-      undefined,
     ],
     [
       `orders an ascending and descending mixed nullable boundary`,
@@ -2045,7 +1722,6 @@ describe(`pagination recomputation oracle`, () => {
         secondary: { direction: `desc`, nulls: `first` },
         limit: 1,
       },
-      undefined,
     ],
     [
       `discovered trace: orders a descending and ascending mixed nullable boundary`,
@@ -2055,7 +1731,6 @@ describe(`pagination recomputation oracle`, () => {
         secondary: { direction: `asc`, nulls: `first` },
         limit: 1,
       },
-      { actual: [1], expected: [2] },
     ],
     [
       `uses the public key to break a complete tuple tie`,
@@ -2068,7 +1743,6 @@ describe(`pagination recomputation oracle`, () => {
         secondary: { direction: `asc`, nulls: `last` },
         limit: 1,
       },
-      undefined,
     ],
     [
       `discovered trace: places nulls last in an ascending nullable boundary`,
@@ -2078,7 +1752,6 @@ describe(`pagination recomputation oracle`, () => {
         secondary: { direction: `asc`, nulls: `last` },
         limit: 1,
       },
-      { actual: [4], expected: [5] },
     ],
     [
       `places nulls last in a descending nullable boundary`,
@@ -2088,35 +1761,18 @@ describe(`pagination recomputation oracle`, () => {
         secondary: { direction: `desc`, nulls: `last` },
         limit: 1,
       },
-      undefined,
     ],
-  ] satisfies ReadonlyArray<
-    readonly [
-      string,
-      MultiOrderScenario,
-      { actual: ReadonlyArray<number>; expected: ReadonlyArray<number> }?,
-    ]
-  >)(`%s`, async (_name, scenario, expectedFailure) => {
-    if (!expectedFailure) {
-      await runMultiOrderScenario(scenario)
-      return
-    }
-    await expectAssertionFailure(runMultiOrderScenario, {
-      checkpoint: 0,
-      classify: ({ actual, expected }) =>
-        isNumberArray(actual) &&
-        actual.join(`,`) === expectedFailure.actual.join(`,`) &&
-        isNumberArray(expected) &&
-        expected.join(`,`) === expectedFailure.expected.join(`,`),
-    })(scenario)
-  })
+  ] satisfies ReadonlyArray<readonly [string, MultiOrderScenario]>)(
+    `%s`,
+    async (_name, scenario) => runMultiOrderScenario(scenario),
+  )
 
   fcTest.prop([multiOrderScenarioArbitrary], {
     numRuns: orderedScenarioRuns,
     seed: 1663,
   })(
     `matches multi-column nullable ordering for a fixed seed`,
-    runMultiOrderScenarioWithKnownFailures,
+    runMultiOrderScenario,
   )
 
   fcTest.prop(
@@ -2124,7 +1780,7 @@ describe(`pagination recomputation oracle`, () => {
     oracleRandomParameters(orderedScenarioRuns, replaySeed),
   )(
     `matches multi-column nullable ordering for a random or replayed seed`,
-    runMultiOrderScenarioWithKnownFailures,
+    runMultiOrderScenario,
   )
 
   fcTest.prop([nullableCursorScenarioArbitrary], {
@@ -2132,7 +1788,7 @@ describe(`pagination recomputation oracle`, () => {
     seed: 1665,
   })(
     `matches nullable cursor ordering while an async response is pending for a fixed seed`,
-    runNullableCursorScenarioWithKnownFailures,
+    runNullableCursorScenario,
   )
 
   fcTest.prop(
@@ -2140,36 +1796,8 @@ describe(`pagination recomputation oracle`, () => {
     oracleRandomParameters(transitionScenarioRuns, replaySeed),
   )(
     `matches nullable cursor ordering while an async response is pending for a random or replayed seed`,
-    runNullableCursorScenarioWithKnownFailures,
+    runNullableCursorScenario,
   )
-
-  it(`rejects collateral output from the nullable cursor classifier`, () => {
-    expect(
-      isKnownNullableCursorOrderingFailure(
-        { rank: 0, direction: `asc` },
-        assertionDifference(0, [], [1]),
-      ),
-    ).toBe(false)
-  })
-
-  it(`rejects collateral output from the secondary-order classifier`, () => {
-    const scenario: MultiOrderScenario = {
-      rows: [
-        { id: 2, primary: -2, secondary: 0 },
-        { id: 1, primary: -2, secondary: null },
-      ],
-      primary: { direction: `asc`, nulls: `first` },
-      secondary: { direction: `asc`, nulls: `last` },
-      limit: 1,
-    }
-
-    expect(
-      isKnownSecondaryOrderBoundaryFailure(
-        scenario,
-        assertionDifference(0, [], [2]),
-      ),
-    ).toBe(false)
-  })
 
   it.each([
     [`boundary insert`, { type: `insert`, row: { id: 5, rank: 0.5 } }],
@@ -2201,35 +1829,7 @@ describe(`pagination recomputation oracle`, () => {
       mutation: { type: `update`, row: { id: 3, rank: 0 } },
       responseOutcome: `resolve`,
     }
-    await expectAssertionFailure(
-      () => runPendingMutationScenario(scenario, `after-response`),
-      {
-        checkpoint: 0,
-        classify: ({ actual, expected }) =>
-          isPageRowArray(actual) &&
-          sameRows(actual, [{ id: 3, rank: 0 }]) &&
-          isPageRowArray(expected) &&
-          sameRows(expected, [{ id: 1, rank: 0 }]),
-      },
-    )()
-  })
-
-  it(`rejects collateral output from the settled top-k classifier`, () => {
-    const scenario: PendingMutationScenario = {
-      ranks: [0, 0, 1],
-      direction: `desc`,
-      limit: 1,
-      mutation: { type: `update`, row: { id: 3, rank: 0 } },
-      responseOutcome: `resolve`,
-    }
-
-    expect(
-      isKnownSettledTopKMembershipFailure(
-        scenario,
-        `after-response`,
-        assertionDifference(0, [{ id: 2, rank: 0 }], [{ id: 1, rank: 0 }]),
-      ),
-    ).toBe(false)
+    await runPendingMutationScenario(scenario, `after-response`)
   })
 
   it(`discovered trace: a rejected cursor does not treat a live insert as remote coverage`, async () => {
@@ -2395,96 +1995,8 @@ describe(`pagination recomputation oracle`, () => {
 
   it(
     `discovered trace: an in-flight request does not underfill a new window`,
-    expectAssertionFailure(expectInflightRequestFillsNewWindow, {
-      checkpoint: 0,
-      classify: ({ actual, expected }) =>
-        isNumberArray(actual) &&
-        actual.length === 0 &&
-        isNumberArray(expected) &&
-        expected.join(`,`) === `3,4`,
-    }),
+    expectInflightRequestFillsNewWindow,
   )
-
-  it(`rejects collateral loss from the ordered-subscription classifier`, () => {
-    const scenario: PaginationStateScenario = {
-      ranks: [0, 1, 2],
-      direction: `asc`,
-      initialWindow: { offset: 0, limit: 3 },
-      actions: [{ type: `put`, id: 4, rank: 2 }],
-    }
-    const expected = [
-      { id: 1, rank: 0 },
-      { id: 2, rank: 1 },
-      { id: 3, rank: 2 },
-    ]
-
-    expect(
-      isKnownOrderedSubscriptionCoverageFailure(
-        scenario,
-        assertionDifference(1, [expected[0]!], expected),
-      ),
-    ).toBe(false)
-  })
-
-  it(`rejects arbitrary leading loss after an offset shift`, () => {
-    const scenario: PaginationStateScenario = {
-      ranks: [0, 1, 2, 3],
-      direction: `asc`,
-      initialWindow: { offset: 0, limit: 1 },
-      actions: [
-        { type: `put`, id: 5, rank: -1 },
-        { type: `window`, offset: 1, limit: 3 },
-      ],
-    }
-    const expected = [
-      { id: 1, rank: 0 },
-      { id: 2, rank: 1 },
-      { id: 3, rank: 2 },
-    ]
-
-    expect(
-      isKnownOrderedSubscriptionCoverageFailure(
-        scenario,
-        assertionDifference(2, [expected[2]!], expected),
-      ),
-    ).toBe(false)
-  })
-
-  it(`rejects excessive suffix loss from the on-demand classifier`, () => {
-    const scenario: PaginationScenario = {
-      ranks: [0, 1, 2, 3],
-      direction: `asc`,
-      windows: [
-        { offset: 0, limit: 1 },
-        { offset: 1, limit: 3 },
-      ],
-    }
-
-    expect(
-      isKnownOnDemandOffsetUnderfetch(
-        scenario,
-        assertionDifference(1, [2], [2, 3, 4]),
-      ),
-    ).toBe(false)
-  })
-
-  it(`rejects a corrupted expectation from the on-demand classifier`, () => {
-    const scenario: PaginationScenario = {
-      ranks: [0, 0, 0, 0, 0, 0, 1],
-      direction: `asc`,
-      windows: [
-        { offset: 0, limit: 1 },
-        { offset: 2, limit: 5 },
-      ],
-    }
-
-    expect(
-      isKnownOnDemandOffsetUnderfetch(
-        scenario,
-        assertionDifference(1, [3, 4, 5, 6], [3, 4, 5, 6, 99]),
-      ),
-    ).toBe(false)
-  })
 
   it(`discovered trace: a row moving across an offset window must refill its boundary`, async () => {
     const scenario: PaginationStateScenario = {
@@ -2493,14 +2005,7 @@ describe(`pagination recomputation oracle`, () => {
       initialWindow: { offset: 1, limit: 1 },
       actions: [{ type: `put`, id: 1, rank: -1 }],
     }
-    await expectAssertionFailure(runPaginationStateScenario, {
-      checkpoint: 1,
-      classify: ({ actual, expected }) =>
-        isPageRowArray(actual) &&
-        isPageRowArray(expected) &&
-        sameRows(actual, [{ id: 1, rank: -1 }]) &&
-        sameRows(expected, [{ id: 3, rank: 0 }]),
-    })(scenario)
+    await runPaginationStateScenario(scenario)
   })
 
   it(`retains authoritative rows when a later window admits a prior insert`, async () => {
@@ -2513,21 +2018,7 @@ describe(`pagination recomputation oracle`, () => {
         { type: `window`, offset: 0, limit: 3 },
       ],
     }
-    await expectAssertionFailure(runPaginationStateScenario, {
-      checkpoint: 2,
-      classify: ({ actual, expected }) =>
-        isPageRowArray(actual) &&
-        isPageRowArray(expected) &&
-        sameRows(actual, [
-          { id: 1, rank: 0 },
-          { id: 3, rank: 1 },
-        ]) &&
-        sameRows(expected, [
-          { id: 1, rank: 0 },
-          { id: 2, rank: 0 },
-          { id: 3, rank: 1 },
-        ]),
-    })(scenario)
+    await runPaginationStateScenario(scenario)
   })
 
   it(`restores an out-of-window insert when a later offset selects it`, async () => {
@@ -2540,14 +2031,7 @@ describe(`pagination recomputation oracle`, () => {
         { type: `window`, offset: 2, limit: 1 },
       ],
     }
-    await expectAssertionFailure(runPaginationStateScenario, {
-      checkpoint: 2,
-      classify: ({ actual, expected }) =>
-        isPageRowArray(actual) &&
-        actual.length === 0 &&
-        isPageRowArray(expected) &&
-        sameRows(expected, [{ id: 3, rank: 1 }]),
-    })(scenario)
+    await runPaginationStateScenario(scenario)
   })
 
   it(`restores an out-of-window rank update when a later offset selects it`, async () => {
@@ -2560,14 +2044,7 @@ describe(`pagination recomputation oracle`, () => {
         { type: `window`, offset: 2, limit: 1 },
       ],
     }
-    await expectAssertionFailure(runPaginationStateScenario, {
-      checkpoint: 2,
-      classify: ({ actual, expected }) =>
-        isPageRowArray(actual) &&
-        actual.length === 0 &&
-        isPageRowArray(expected) &&
-        sameRows(expected, [{ id: 2, rank: 1 }]),
-    })(scenario)
+    await runPaginationStateScenario(scenario)
   })
 
   it(`discovered trace: inserting at an empty offset boundary refills the window`, async () => {
@@ -2581,14 +2058,7 @@ describe(`pagination recomputation oracle`, () => {
         { type: `put`, id: 4, rank: 1 },
       ],
     }
-    await expectAssertionFailure(runPaginationStateScenario, {
-      checkpoint: 3,
-      classify: ({ actual, expected }) =>
-        isPageRowArray(actual) &&
-        actual.length === 0 &&
-        isPageRowArray(expected) &&
-        sameRows(expected, [{ id: 4, rank: 1 }]),
-    })(scenario)
+    await runPaginationStateScenario(scenario)
   })
 
   it(`discovered trace: an insert before a later offset does not skip its new boundary`, async () => {
@@ -2602,14 +2072,7 @@ describe(`pagination recomputation oracle`, () => {
       ],
     }
 
-    await expectAssertionFailure(runPaginationStateScenario, {
-      checkpoint: 2,
-      classify: ({ actual, expected }) =>
-        isPageRowArray(actual) &&
-        sameRows(actual, [{ id: 9, rank: 1 }]) &&
-        isPageRowArray(expected) &&
-        sameRows(expected, [{ id: 8, rank: 1 }]),
-    })(scenario)
+    await runPaginationStateScenario(scenario)
   })
 
   it(`discovered trace: an async cursor loads the full offset window`, async () => {
@@ -2621,14 +2084,7 @@ describe(`pagination recomputation oracle`, () => {
         { offset: 2, limit: 5 },
       ],
     }
-    await expectAssertionFailure(runOnDemandPaginationScenario, {
-      checkpoint: 1,
-      classify: ({ actual, expected }) =>
-        isNumberArray(actual) &&
-        isNumberArray(expected) &&
-        actual.join(`,`) === `3,4,5,6` &&
-        expected.join(`,`) === `3,4,5,6,7`,
-    })(scenario)
+    await runOnDemandPaginationScenario(scenario)
   })
 
   it(`discovered trace: an async cursor crosses an offset before filling one row`, async () => {
@@ -2640,14 +2096,7 @@ describe(`pagination recomputation oracle`, () => {
         { offset: 2, limit: 1 },
       ],
     }
-    await expectAssertionFailure(runOnDemandPaginationScenario, {
-      checkpoint: 1,
-      classify: ({ actual, expected }) =>
-        isNumberArray(actual) &&
-        actual.length === 0 &&
-        isNumberArray(expected) &&
-        expected.join(`,`) === `2`,
-    })(scenario)
+    await runOnDemandPaginationScenario(scenario)
   })
 
   fcTest.prop([scenarioArbitrary], {
@@ -2668,7 +2117,7 @@ describe(`pagination recomputation oracle`, () => {
     seed: 1658,
   })(
     `matches full recomputation across source and window transitions for a fixed seed`,
-    runPaginationStateScenarioWithKnownFailures,
+    runPaginationStateScenario,
   )
 
   fcTest.prop(
@@ -2676,7 +2125,7 @@ describe(`pagination recomputation oracle`, () => {
     oracleRandomParameters(transitionScenarioRuns, replaySeed),
   )(
     `matches full recomputation across source and window transitions for a random or replayed seed`,
-    runPaginationStateScenarioWithKnownFailures,
+    runPaginationStateScenario,
   )
 
   it(`discovered trace: a rank update must refill a top-1 window`, async () => {
@@ -2686,17 +2135,7 @@ describe(`pagination recomputation oracle`, () => {
       initialWindow: { offset: 0, limit: 1 },
       actions: [{ type: `put`, id: 1, rank: 1 }],
     }
-    const staleMembership = [{ id: 1, rank: 1 }]
-    const expected = [{ id: 2, rank: 0 }]
-
-    await expectAssertionFailure(runPaginationStateScenario, {
-      checkpoint: 1,
-      classify: (difference) =>
-        isPageRowArray(difference.actual) &&
-        isPageRowArray(difference.expected) &&
-        sameRows(difference.actual, staleMembership) &&
-        sameRows(difference.expected, expected),
-    })(scenario)
+    await runPaginationStateScenario(scenario)
   })
 
   it(`ignores an out-of-window insert when refilling after a delete`, async () => {
@@ -2709,25 +2148,7 @@ describe(`pagination recomputation oracle`, () => {
         { type: `delete`, id: 2 },
       ],
     }
-    const defective = [
-      { id: 1, rank: 100 },
-      { id: 3, rank: 80 },
-      { id: 5, rank: 10 },
-    ]
-    const expected = [
-      { id: 1, rank: 100 },
-      { id: 3, rank: 80 },
-      { id: 4, rank: 70 },
-    ]
-
-    await expectAssertionFailure(runPaginationStateScenario, {
-      checkpoint: 2,
-      classify: (difference) =>
-        isPageRowArray(difference.actual) &&
-        isPageRowArray(difference.expected) &&
-        sameRows(difference.actual, defective) &&
-        sameRows(difference.expected, expected),
-    })(scenario)
+    await runPaginationStateScenario(scenario)
   })
 
   it(`ignores an out-of-window rank update when refilling after a delete`, async () => {
@@ -2741,14 +2162,7 @@ describe(`pagination recomputation oracle`, () => {
       ],
     }
 
-    await expectAssertionFailure(runPaginationStateScenario, {
-      checkpoint: 2,
-      classify: ({ actual, expected }) =>
-        isPageRowArray(actual) &&
-        sameRows(actual, [{ id: 2, rank: 1 }]) &&
-        isPageRowArray(expected) &&
-        sameRows(expected, [{ id: 3, rank: 0 }]),
-    })(scenario)
+    await runPaginationStateScenario(scenario)
   })
 
   it(`ignores an out-of-window rank update when the visible row leaves`, async () => {
@@ -2762,14 +2176,7 @@ describe(`pagination recomputation oracle`, () => {
       ],
     }
 
-    await expectAssertionFailure(runPaginationStateScenario, {
-      checkpoint: 2,
-      classify: ({ actual, expected }) =>
-        isPageRowArray(actual) &&
-        sameRows(actual, [{ id: 2, rank: 1 }]) &&
-        isPageRowArray(expected) &&
-        sameRows(expected, [{ id: 3, rank: 0 }]),
-    })(scenario)
+    await runPaginationStateScenario(scenario)
   })
 
   it(`refills untouched rows when widening after an out-of-window rank update`, async () => {
@@ -2783,21 +2190,7 @@ describe(`pagination recomputation oracle`, () => {
       ],
     }
 
-    await expectAssertionFailure(runPaginationStateScenario, {
-      checkpoint: 2,
-      classify: ({ actual, expected }) =>
-        isPageRowArray(actual) &&
-        sameRows(actual, [
-          { id: 1, rank: 0 },
-          { id: 2, rank: -1 },
-        ]) &&
-        isPageRowArray(expected) &&
-        sameRows(expected, [
-          { id: 1, rank: 0 },
-          { id: 3, rank: 0 },
-          { id: 2, rank: -1 },
-        ]),
-    })(scenario)
+    await runPaginationStateScenario(scenario)
   })
 
   it(`rebuilds the full boundary when widening after an out-of-window rank update`, async () => {
@@ -2811,24 +2204,7 @@ describe(`pagination recomputation oracle`, () => {
       ],
     }
 
-    await expectAssertionFailure(runPaginationStateScenario, {
-      checkpoint: 2,
-      classify: ({ actual, expected }) =>
-        isPageRowArray(actual) &&
-        sameRows(actual, [
-          { id: 1, rank: 1 },
-          { id: 2, rank: 0 },
-          { id: 3, rank: 0 },
-          { id: 4, rank: 0 },
-        ]) &&
-        isPageRowArray(expected) &&
-        sameRows(expected, [
-          { id: 1, rank: 1 },
-          { id: 5, rank: 1 },
-          { id: 2, rank: 0 },
-          { id: 3, rank: 0 },
-        ]),
-    })(scenario)
+    await runPaginationStateScenario(scenario)
   })
 
   it(`ignores an out-of-window insert when widening a tied window`, async () => {
@@ -2841,36 +2217,11 @@ describe(`pagination recomputation oracle`, () => {
         { type: `window`, offset: 0, limit: 2 },
       ],
     }
-    const defective = [
-      { id: 1, rank: 0 },
-      { id: 3, rank: 0 },
-    ]
-    const expected = [
-      { id: 1, rank: 0 },
-      { id: 2, rank: 0 },
-    ]
-
-    await expectAssertionFailure(runPaginationStateScenario, {
-      checkpoint: 2,
-      classify: (difference) =>
-        isPageRowArray(difference.actual) &&
-        isPageRowArray(difference.expected) &&
-        sameRows(difference.actual, defective) &&
-        sameRows(difference.expected, expected),
-    })(scenario)
+    await runPaginationStateScenario(scenario)
   })
 
   it(`expands a multi-column boundary before choosing top-K`, async () => {
-    await expectAssertionFailure(expectMultiOrderBoundaryMatches, {
-      checkpoint: 0,
-      classify: ({ actual, expected }) =>
-        Array.isArray(actual) &&
-        actual.every((value) => typeof value === `number`) &&
-        Array.isArray(expected) &&
-        expected.every((value) => typeof value === `number`) &&
-        actual.join(`,`) === `2,3,1,4` &&
-        expected.join(`,`) === `2,3,1,5`,
-    })()
+    await expectMultiOrderBoundaryMatches()
   })
 
   fcTest.prop([scenarioArbitrary], {
@@ -2878,7 +2229,7 @@ describe(`pagination recomputation oracle`, () => {
     seed: 1659,
   })(
     `matches full recomputation when exact async cursor loads widen ordered coverage for a fixed seed`,
-    runOnDemandPaginationScenarioWithKnownFailures,
+    runOnDemandPaginationScenario,
   )
 
   fcTest.prop(
@@ -2886,7 +2237,7 @@ describe(`pagination recomputation oracle`, () => {
     oracleRandomParameters(transitionScenarioRuns, replaySeed),
   )(
     `matches full recomputation when exact async cursor loads widen ordered coverage for a random or replayed seed`,
-    runOnDemandPaginationScenarioWithKnownFailures,
+    runOnDemandPaginationScenario,
   )
 
   it.each([`forward`, `reverse`] as const)(

@@ -6,6 +6,7 @@ import { defaultComparator, makeComparator } from '../../utils/comparison.js'
 import { PropRef, collectCollectionSources, followRef } from '../ir.js'
 import { ensureIndexForField } from '../../indexes/auto-index.js'
 import { findIndexForField } from '../../utils/index-optimization.js'
+import { resolveCompareOptions, resolveOrderBy } from '../total-order.js'
 import { compileExpression } from './evaluators.js'
 import { replaceAggregatesByRefs } from './group-by.js'
 import type { CompareOptions } from '../builder/types.js'
@@ -70,6 +71,10 @@ export function processOrderBy(
       compareOptions: buildCompareOptions(clause, collection),
     }
   })
+  const resolvedOrderBy = resolveOrderBy(
+    orderByClause,
+    collection.compareOptions,
+  )
 
   // Create a value extractor function for the orderBy operator
   const valueExtractor = (row: NamespacedRow & { $selected?: any }) => {
@@ -134,7 +139,7 @@ export function processOrderBy(
   // Skip this optimization when using grouped ordering (includes with limit),
   // because the limit is per-group, not global — the child collection needs all data loaded.
   if (
-    limit &&
+    limit !== undefined &&
     !groupKeyFn &&
     rawQuery.from.type !== `unionFrom` &&
     rawQuery.from.type !== `unionAll`
@@ -160,10 +165,10 @@ export function processOrderBy(
         followRefCollection = followRefResult.collection
         orderBySourceId = followRefResult.sourceId
         const fieldName = followRefResult.path[0]
-        const compareOpts = buildCompareOptions(
-          firstClause,
-          followRefCollection,
-        )
+        // The query's first source defines implicit string collation for the
+        // whole order. Build the source index with that same resolved term so
+        // provider admission cannot disagree with emitted query order.
+        const compareOpts = buildCompareOptions(firstClause, collection)
 
         if (fieldName) {
           // Use a single-column comparator for the index, not the
@@ -306,7 +311,7 @@ export function processOrderBy(
         valueExtractorForRawRow: rawRowValueExtractor,
         firstColumnValueExtractor: firstColumnValueExtractor,
         index,
-        orderBy: orderByClause,
+        orderBy: resolvedOrderBy,
       }
 
       // Ordered loading is owned by one lexical source. A collection can occur
@@ -397,13 +402,5 @@ export function buildCompareOptions(
   clause: OrderByClause,
   collection: CollectionLike<any, any>,
 ): CompareOptions {
-  if (clause.compareOptions.stringSort !== undefined) {
-    return clause.compareOptions
-  }
-
-  return {
-    ...collection.compareOptions,
-    direction: clause.compareOptions.direction,
-    nulls: clause.compareOptions.nulls,
-  }
+  return resolveCompareOptions(clause, collection.compareOptions)
 }

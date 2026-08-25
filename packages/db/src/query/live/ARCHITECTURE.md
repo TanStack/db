@@ -91,6 +91,7 @@ operators and a few boundary adapters:
 | Run the graph and publish root rows   | `packages/db/src/query/live/collection-config-builder.ts`                                              |
 | Publish Collection-valued buckets     | `packages/db/src/query/live/bucket-facade-adapter.ts`                                                  |
 | Start and release asynchronous demand | `packages/db/src/query/live/subset-demand-controller.ts`, `packages/db/src/collection/subscription.ts` |
+| Reconcile ordered source windows      | `packages/db/src/query/total-order.ts`, `packages/db/src/query/live/window-state.ts`                   |
 
 Queries without includes keep the original compiled pipeline and do not pay
 for facade state. The one exception is a joined query with a custom public-key
@@ -371,6 +372,13 @@ A total order is the query's order keys followed by a deterministic stable
 tie-breaker, normally the child public key. An order-only change is a
 bucket-value change for arrays, singletons, concatenation, and Collection
 layout.
+
+At the asynchronous source boundary, `TotalOrder` resolves every direction,
+null-placement, and string-collation option and appends the collection public
+key. `WindowState` uses that order for the retained prefix, admission, refill,
+and continuation boundary. Independent join demands may retain extra source
+rows, but those rows do not move the ordered boundary. The D2 top-K operator
+uses the same query terms and public-key tie-breaker for emitted layout.
 
 A bare child query is a Collection-valued include. It exposes one stable public
 Collection facade per active bucket in that edge:

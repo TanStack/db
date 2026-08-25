@@ -316,14 +316,18 @@ export class CollectionSubscriber<
             this.pendingOrderedLoadPromise = undefined
           }
         }
-        void result.then(finish, finish)
+        void result.then(() => {
+          finish()
+          const subscription = subscriptionHolder.current
+          if (subscription) this.loadMoreIfNeeded(subscription)
+        }, finish)
       }
       onLoadSubsetResult(result)
     }
 
     this.orderedLoadSubsetResult = handleLoadSubsetResult
 
-    // Use a holder to forward-reference subscription in the callback
+    // Use a holder to forward-reference subscription in callbacks.
     const subscriptionHolder: { current?: CollectionSubscription } = {}
 
     const sendChangesInRange = (
@@ -408,7 +412,7 @@ export class CollectionSubscriber<
       return true
     }
 
-    const { dataNeeded, index } = orderByInfo
+    const { dataNeeded, index, offset, limit } = orderByInfo
 
     if (!dataNeeded || !index) {
       // dataNeeded is not set when there's no index (e.g., non-ref expression
@@ -419,7 +423,21 @@ export class CollectionSubscriber<
 
     // `dataNeeded` probes the orderBy operator to see if it needs more data
     // if it needs more data, it returns the number of items it needs
-    const n = dataNeeded()
+    // Publish locally known rows at once, but do not treat them as proof that
+    // the remote prefix is complete. Until source-extent outcomes are wired,
+    // the existing load request remains the authority check for this window.
+    const expandedFromLocalRows = subscription.ensureOrderedWindowSize(
+      offset + limit,
+    )
+    // A prior continuation already asked the source for the complete boundary
+    // equivalence class. Rows retained by that request may fill this wider
+    // window without another transport. Initial local rows have no such proof,
+    // so they still require an authority check until source outcomes land.
+    if (expandedFromLocalRows && subscription.hasPriorOrderedContinuation) {
+      return true
+    }
+
+    const n = Math.max(dataNeeded(), subscription.orderedRowsNeeded)
     if (n > 0) {
       if (this.pendingOrderedLoadPromise) {
         // The current window still needs the in-flight coverage. Attach it to
@@ -479,7 +497,7 @@ export class CollectionSubscriber<
 
     const cursor = computeOrderedLoadCursor(
       orderByInfo,
-      this.biggest,
+      subscription.orderedBoundaryRow ?? this.biggest,
       this.lastLoadRequestKey,
       this.alias,
       n,

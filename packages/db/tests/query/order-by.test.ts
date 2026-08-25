@@ -2896,8 +2896,10 @@ describe(`OrderBy with duplicate values`, () => {
           { id: 5, a: 5, keep: true },
         ])
         expect(loadSubsetCallCount).toBe(1)
-        // First loadSubset call (initial page at offset 0) has no cursor
-        expect(loadSubsetCursors[0]).toBeUndefined()
+        // The initial provider request continues from the exact local boundary.
+        // This stays correct if that local prefix changes while the request is
+        // in flight; a raw offset would shift under the mutation.
+        expect(loadSubsetCursors[0]).toMatchObject({ lastKey: 5 })
 
         // Now move to next page (offset 5, limit 5) - this should trigger loadSubset with a cursor
         const moveToSecondPage = collection.utils.setWindow({
@@ -3132,8 +3134,10 @@ describe(`OrderBy with duplicate values`, () => {
           { id: 5, a: 5, keep: true },
         ])
         expect(loadSubsetCallCount).toBe(1)
-        // First loadSubset call (initial page at offset 0) has no cursor
-        expect(loadSubsetCursors[0]).toBeUndefined()
+        // The initial provider request continues from the exact local boundary.
+        // This stays correct if that local prefix changes while the request is
+        // in flight; a raw offset would shift under the mutation.
+        expect(loadSubsetCursors[0]).toMatchObject({ lastKey: 5 })
 
         // Now move to next page (offset 5, limit 5) - this should trigger loadSubset with a cursor
         const moveToSecondPage = collection.utils.setWindow({
