@@ -7,6 +7,7 @@ import { createLiveQueryCollection } from '../src/query/index.js'
 import { LIVE_QUERY_INTERNAL } from '../src/query/live/internal.js'
 import { createLiveQueryWindowController } from '../src/live-query-window-controller.js'
 import { Func, PropRef, Value } from '../src/query/ir.js'
+import { eq } from '../src/query/builder/functions.js'
 import { getLoadSubsetDemandKey } from '../src/query/ir-stable-identity.js'
 import { recordLoadSubsetPromiseDemandMatcher } from '../src/query/load-subset-outcome.js'
 import { createDeferred } from '../src/deferred.js'
@@ -372,6 +373,183 @@ describe(`loadSubset outcomes`, () => {
       }
     },
   )
+
+  it.each(
+    ([`continues`, `exhausted`] as const).flatMap((sourceExtent) =>
+      ([`exact`, `covering`, `narrower`] as const).flatMap((relationship) =>
+        ([`loaded`, `satisfied`] as const).map((firstRelease) => ({
+          sourceExtent,
+          relationship,
+          firstRelease,
+        })),
+      ),
+    ),
+  )(
+    `projects $sourceExtent evidence through $relationship synchronous true reuse when $firstRelease releases first`,
+    async ({ sourceExtent, relationship, firstRelease }) => {
+      let loadCount = 0
+      const rowIds = Array.from({ length: 10 }, (_, index) => `row-${index}`)
+      const collection = createCollection<{ id: string }>({
+        id: `load-subset-true-projection-${sourceExtent}-${relationship}-${firstRelease}`,
+        getKey: (row) => row.id,
+        syncMode: `on-demand`,
+        startSync: true,
+        sync: {
+          sync: ({ begin, write, commit, markReady }) => {
+            markReady()
+            return {
+              loadSubset: () => {
+                loadCount++
+                if (loadCount > 1) return true
+                begin()
+                rowIds.forEach((id) => write({ type: `insert`, value: { id } }))
+                commit()
+                return Promise.resolve({
+                  hasMore: sourceExtent === `continues`,
+                  appliedRowKeys: rowIds,
+                })
+              },
+              unloadSubset: vi.fn(),
+            }
+          },
+        },
+      })
+
+      const owners = {
+        loaded: { limit: 10 },
+        satisfied:
+          relationship === `exact`
+            ? { limit: 10 }
+            : relationship === `covering`
+              ? { offset: 5, limit: 5 }
+              : { limit: 5 },
+      }
+      const expectedExtent =
+        relationship === `exact`
+          ? sourceExtent
+          : sourceExtent === `continues` || relationship === `narrower`
+            ? `continues`
+            : `unknown`
+
+      try {
+        await collection._sync.loadSubset(owners.loaded)
+        expect(collection._sync.loadSubset(owners.satisfied)).toBe(true)
+        expect(collection._sync.getLoadSubsetOutcome(owners.satisfied)).toEqual(
+          expect.objectContaining({
+            demand: owners.satisfied,
+            extent: expectedExtent,
+            appliedRowKeys: rowIds,
+          }),
+        )
+
+        const finalRelease = firstRelease === `loaded` ? `satisfied` : `loaded`
+        collection._sync.unloadSubset(owners[firstRelease])
+        expect(Array.from(collection.keys()).sort()).toEqual([...rowIds].sort())
+        if (firstRelease === `loaded`) {
+          expect(
+            collection._sync.getLoadSubsetOutcome(owners.satisfied),
+          ).toEqual(expect.objectContaining({ extent: expectedExtent }))
+          expect(collection._sync.getLoadSubsetCoverage()).toHaveLength(
+            expectedExtent === `unknown` ? 0 : 1,
+          )
+        }
+
+        collection._sync.unloadSubset(owners[finalRelease])
+        expect(Array.from(collection.keys())).toEqual([])
+      } finally {
+        await collection.cleanup()
+      }
+    },
+  )
+
+  it(`retries only failed live-query source releases on later cleanup`, async () => {
+    const failure = new Error(`left source unload failed`)
+    let leftShouldFail = true
+    const leftUnload = vi.fn(() => {
+      if (leftShouldFail) throw failure
+    })
+    const rightUnload = vi.fn()
+    const createSource = (id: string, unloadSubset: () => void) =>
+      createCollection<{ id: number }>({
+        id,
+        getKey: (row) => row.id,
+        syncMode: `on-demand`,
+        startSync: true,
+        autoIndex: `eager`,
+        defaultIndexType: BasicIndex,
+        sync: {
+          sync: ({ begin, write, commit, markReady }) => {
+            markReady()
+            return {
+              loadSubset: async () => {
+                begin()
+                write({ type: `insert`, value: { id: 1 } })
+                const applied = commit()
+                if (applied !== true) await applied
+                return { hasMore: false, appliedRowKeys: [1] }
+              },
+              unloadSubset,
+            }
+          },
+        },
+      })
+    const left = createSource(`live-cleanup-retry-left`, leftUnload)
+    const right = createSource(`live-cleanup-retry-right`, rightUnload)
+    const live = createLiveQueryCollection({
+      id: `live-cleanup-retry`,
+      query: (q) =>
+        q
+          .from({ left })
+          .leftJoin({ right }, ({ left: leftRow, right: rightRow }) =>
+            eq(leftRow.id, rightRow.id),
+          ),
+      startSync: true,
+    })
+    const originalQueueMicrotask = globalThis.queueMicrotask
+    const queuedMicrotasks: Array<() => void> = []
+
+    try {
+      await live.preload()
+      expect(Array.from(left.keys())).toEqual([1])
+      expect(Array.from(right.keys())).toEqual([1])
+      expect(left._sync.getLoadSubsetCoverage()).toHaveLength(1)
+      expect(right._sync.getLoadSubsetCoverage()).toHaveLength(1)
+
+      globalThis.queueMicrotask = (callback) => {
+        queuedMicrotasks.push(callback)
+      }
+      await live.cleanup()
+
+      expect(leftUnload).toHaveBeenCalledOnce()
+      expect(rightUnload).toHaveBeenCalledOnce()
+      expect(Array.from(left.keys())).toEqual([1])
+      expect(left._sync.getLoadSubsetCoverage()).toHaveLength(1)
+      expect(Array.from(right.keys())).toEqual([])
+      expect(right._sync.getLoadSubsetCoverage()).toEqual([])
+      expect(queuedMicrotasks).toHaveLength(1)
+
+      let surfacedError: unknown
+      try {
+        queuedMicrotasks[0]!()
+      } catch (error) {
+        surfacedError = error
+      }
+      expect(surfacedError).toMatchObject({ cause: failure })
+
+      leftShouldFail = false
+      await live.cleanup()
+
+      expect(leftUnload).toHaveBeenCalledTimes(2)
+      expect(rightUnload).toHaveBeenCalledOnce()
+      expect(Array.from(left.keys())).toEqual([])
+      expect(left._sync.getLoadSubsetCoverage()).toEqual([])
+      expect(queuedMicrotasks).toHaveLength(1)
+    } finally {
+      globalThis.queueMicrotask = originalQueueMicrotask
+      leftShouldFail = false
+      await Promise.all([live.cleanup(), left.cleanup(), right.cleanup()])
+    }
+  })
 
   it(`keeps prior applied coverage when a newer exact attempt fails`, async () => {
     type PendingLoad = {

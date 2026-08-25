@@ -50,6 +50,7 @@ type CoverageClaim<TCoverage> = {
     demandKey: string | undefined
   }
   coverage: TCoverage | undefined
+  retainedOutcome: AppliedLoadSubsetOutcome | undefined
 }
 
 export type CoverageRegistryOptions<TDemand, TCoverage> = {
@@ -192,6 +193,8 @@ export class CoverageRegistry<
         demand: LoadSubsetOptions
       }
       coverage?: TCoverage
+      /** Caller-relative evidence retained from an already applied acquisition. */
+      retainedOutcome?: AppliedLoadSubsetOutcome
     },
   ): void {
     const leaseRecord = this.leases.get(lease)
@@ -205,8 +208,6 @@ export class CoverageRegistry<
     }
     if (acquisitionRecord.leases.has(lease as DemandLease<unknown>)) return
 
-    leaseRecord.acquisitions.add(acquisition)
-    acquisitionRecord.leases.add(lease as DemandLease<unknown>)
     const fallback = acquisitionRecord.claims.values().next().value
     const claim = options
       ? this.createClaim(options.generation, options.scope)
@@ -216,9 +217,19 @@ export class CoverageRegistry<
             scopeKey: fallback.scopeKey,
             scope: fallback.scope,
             coverage: undefined,
+            retainedOutcome: undefined,
           }
         : undefined
     if (!claim) throw new Error(`Cannot attach to an unscoped acquisition`)
+    if (
+      options?.retainedOutcome !== undefined &&
+      !matchesOutcome(claim, options.retainedOutcome)
+    ) {
+      throw new Error(`Retained outcome does not match the attached claim`)
+    }
+
+    leaseRecord.acquisitions.add(acquisition)
+    acquisitionRecord.leases.add(lease as DemandLease<unknown>)
     acquisitionRecord.claims.set(lease as DemandLease<unknown>, {
       ...claim,
       sequence: this.claimSequence++,
@@ -226,6 +237,10 @@ export class CoverageRegistry<
         options?.coverage === undefined
           ? undefined
           : this.snapshotCoverage(options.coverage),
+      retainedOutcome:
+        options?.retainedOutcome === undefined
+          ? undefined
+          : snapshotAppliedOutcome(options.retainedOutcome),
     })
     if (options?.coverage !== undefined) {
       this.restoreCurrentAcquisition(claim.scopeKey)
@@ -302,6 +317,9 @@ export class CoverageRegistry<
       record,
       nextRows,
     )
+    for (const peer of record.claims.values()) {
+      peer.retainedOutcome = undefined
+    }
     claim.coverage = nextCoverage
     if (nextCoverage !== undefined) {
       // One physical result proves the same exact scope for every logical
@@ -368,6 +386,7 @@ export class CoverageRegistry<
     const affectedScopes = new Set<string>()
     for (const [claimLease, existingClaim] of record.claims) {
       existingClaim.coverage = undefined
+      existingClaim.retainedOutcome = undefined
       const current = this.currentAcquisitions.get(existingClaim.scopeKey)
       if (
         current?.acquisition === acquisition &&
@@ -473,6 +492,21 @@ export class CoverageRegistry<
               generation: claim.generation,
             },
           ],
+    )
+  }
+
+  /**
+   * Active caller-relative outcomes retained by synchronous satisfied leases.
+   * Unknown outcomes are evidence only: they never enter the coverage
+   * antichain or make covers() return true.
+   */
+  retainedOutcomeEvidence(): Array<AppliedLoadSubsetOutcome> {
+    return Array.from(this.acquisitions.values()).flatMap((record) =>
+      Array.from(record.claims.entries()).flatMap(([lease, claim]) =>
+        record.leases.has(lease) && claim.retainedOutcome !== undefined
+          ? [snapshotAppliedOutcome(claim.retainedOutcome)]
+          : [],
+      ),
     )
   }
 
@@ -641,6 +675,7 @@ export class CoverageRegistry<
         demandKey,
       },
       coverage: undefined,
+      retainedOutcome: undefined,
     }
   }
 
@@ -728,6 +763,21 @@ function snapshotAppliedCoverage<TRowKey extends string | number>(
   })
 }
 
+function snapshotAppliedOutcome(
+  outcome: AppliedLoadSubsetOutcome,
+): AppliedLoadSubsetOutcome {
+  return Object.freeze({
+    collectionId: outcome.collectionId,
+    ...(outcome.sourceId === undefined ? {} : { sourceId: outcome.sourceId }),
+    demand: snapshotLoadSubsetDemand(outcome.demand),
+    generation: outcome.generation,
+    extent: outcome.extent,
+    ...(outcome.appliedRowKeys === undefined
+      ? {}
+      : { appliedRowKeys: Object.freeze([...outcome.appliedRowKeys]) }),
+  })
+}
+
 function createScopeKey(
   collectionId: string,
   sourceId: string | undefined,
@@ -737,7 +787,7 @@ function createScopeKey(
 }
 
 function matchesOutcome<TCoverage>(
-  claim: CoverageClaim<TCoverage>,
+  claim: Pick<CoverageClaim<TCoverage>, `generation` | `scope`>,
   outcome: AppliedLoadSubsetOutcome,
 ): boolean {
   return (

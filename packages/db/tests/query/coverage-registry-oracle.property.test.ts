@@ -105,6 +105,7 @@ type ModelClaim = {
   prefix: Prefix
   sourceId: string
   coverage: Prefix | undefined
+  retainedOutcome: AppliedLoadSubsetOutcome | undefined
   sequence: number
 }
 
@@ -204,6 +205,7 @@ function addModelAcquisition(
           prefix: options.prefix,
           sourceId: options.sourceId,
           coverage: undefined,
+          retainedOutcome: undefined,
           sequence: model.claimSequence++,
         },
       ],
@@ -306,6 +308,7 @@ function retireModelAcquisition(
       affectedScopes.add(scope)
     }
     claim.coverage = undefined
+    claim.retainedOutcome = undefined
   }
   for (const leaseIndex of acquisition.leases) {
     model.leases[leaseIndex]?.acquisitions.delete(acquisitionIndex)
@@ -373,6 +376,16 @@ function assertRegistryModel(model: RegistryModel, real: RegistryReal): void {
       ? []
       : [{ prefix: Math.max(...activeCoverage) }],
   )
+  const retainedOutcomes = model.acquisitions.flatMap((acquisition) =>
+    acquisition.active
+      ? Array.from(acquisition.claims.entries()).flatMap(([lease, claim]) =>
+          acquisition.leases.has(lease) && claim.retainedOutcome !== undefined
+            ? [claim.retainedOutcome]
+            : [],
+        )
+      : [],
+  )
+  expect(real.registry.retainedOutcomeEvidence()).toEqual(retainedOutcomes)
   for (const row of modelRows) {
     expect(real.registry.rowOwnerCount(row)).toBe(
       model.acquisitions.filter(
@@ -448,6 +461,9 @@ class AttachLeaseCommand implements Command<RegistryModel, RegistryReal> {
   constructor(
     private readonly rawLease: number,
     private readonly rawAcquisition: number,
+    private readonly retainedExtent:
+      | AppliedLoadSubsetOutcome[`extent`]
+      | undefined,
   ) {}
 
   check(model: Readonly<RegistryModel>): boolean {
@@ -478,11 +494,24 @@ class AttachLeaseCommand implements Command<RegistryModel, RegistryReal> {
       }
       model.leases[leaseIndex]!.acquisitions.add(acquisitionIndex)
       acquisition.leases.add(leaseIndex)
+      const prefix = model.leases[leaseIndex]!.prefix
+      const retainedOutcome =
+        this.retainedExtent === undefined
+          ? undefined
+          : createPrefixOutcome(
+              acquisition.generation,
+              prefix,
+              this.retainedExtent,
+              `prefixes`,
+              acquisition.sourceId,
+              [...acquisition.rows],
+            )
       acquisition.claims.set(leaseIndex, {
         generation: acquisition.generation,
-        prefix: model.leases[leaseIndex]!.prefix,
+        prefix,
         sourceId: acquisition.sourceId,
         coverage: undefined,
+        retainedOutcome,
         sequence: model.claimSequence++,
       })
       real.registry.attachLease(
@@ -493,8 +522,9 @@ class AttachLeaseCommand implements Command<RegistryModel, RegistryReal> {
           scope: {
             collectionId: `prefixes`,
             sourceId: acquisition.sourceId,
-            demand: { limit: model.leases[leaseIndex]!.prefix },
+            demand: { limit: prefix },
           },
+          ...(retainedOutcome === undefined ? {} : { retainedOutcome }),
         },
       )
     }
@@ -502,7 +532,7 @@ class AttachLeaseCommand implements Command<RegistryModel, RegistryReal> {
   }
 
   toString = () =>
-    `attachLease(lease=${this.rawLease}, acquisition=${this.rawAcquisition})`
+    `attachLease(lease=${this.rawLease}, acquisition=${this.rawAcquisition}, retainedExtent=${this.retainedExtent})`
 }
 
 class RetryAcquisitionCommand implements Command<RegistryModel, RegistryReal> {
@@ -575,6 +605,7 @@ class ReplaceRowsCommand implements Command<RegistryModel, RegistryReal> {
       const affectedScopes = new Set<string>()
       for (const [claimLease, existingClaim] of acquisition.claims) {
         existingClaim.coverage = undefined
+        existingClaim.retainedOutcome = undefined
         const scope = scopeKey(existingClaim.sourceId, existingClaim.prefix)
         const current = model.currentByScope.get(scope)
         if (
@@ -642,6 +673,9 @@ class PublishCommand implements Command<RegistryModel, RegistryReal> {
       this.extent !== `unknown` &&
       (this.rows.length >= claim!.prefix || this.extent === `exhausted`)
     if (accepted) {
+      for (const peer of acquisition.claims.values()) {
+        peer.retainedOutcome = undefined
+      }
       claim!.coverage = published ? claim!.prefix : undefined
       const scope = scopeKey(claim!.sourceId, claim!.prefix)
       if (published) {
@@ -1002,6 +1036,49 @@ describe(`coverage registry oracle`, () => {
     })
   })
 
+  it(`keeps projected unknown evidence outside coverage while its lease owns the acquisition`, () => {
+    const registry = createPrefixRegistry()
+    const physical = registry.addLease(20)
+    const satisfied = registry.addLease(10)
+    const acquisition = addPrefixAcquisition(registry, {
+      generation: 1,
+      leases: [physical],
+      release: vi.fn(),
+      prefix: 20,
+    })
+    publishPrefix(registry, acquisition, 1, 20, [`a`, `b`])
+    const retainedOutcome = createPrefixOutcome(
+      2,
+      10,
+      `unknown`,
+      `prefixes`,
+      `items`,
+      [`a`, `b`],
+    )
+
+    registry.attachLease(satisfied, acquisition, {
+      generation: 2,
+      scope: {
+        collectionId: `prefixes`,
+        sourceId: `items`,
+        demand: { limit: 10 },
+      },
+      retainedOutcome,
+    })
+    expect(registry.retainedOutcomeEvidence()).toEqual([retainedOutcome])
+
+    expect(registry.releaseLease(physical)).toEqual({ rowsToRemove: [] })
+    expect(registry.coverageAntichain()).toEqual([])
+    expect(registry.covers(10)).toBe(false)
+    expect(registry.retainedOutcomeEvidence()).toEqual([retainedOutcome])
+    expect(registry.rowOwnerCount(`a`)).toBe(1)
+
+    expect(registry.releaseLease(satisfied)).toEqual({
+      rowsToRemove: [`a`, `b`],
+    })
+    expect(registry.retainedOutcomeEvidence()).toEqual([])
+  })
+
   it(`keeps a final lease intact when adapter release throws and retries it`, () => {
     const registry = createPrefixRegistry()
     const lease = registry.addLease(1)
@@ -1281,9 +1358,21 @@ describe(`coverage registry oracle`, () => {
           ),
       ),
     fc
-      .tuple(fc.nat(), fc.nat())
+      .tuple(
+        fc.nat(),
+        fc.nat(),
+        fc.option(
+          fc.constantFrom<AppliedLoadSubsetOutcome[`extent`]>(
+            `unknown`,
+            `continues`,
+            `exhausted`,
+          ),
+          { nil: undefined },
+        ),
+      )
       .map(
-        ([lease, acquisition]) => new AttachLeaseCommand(lease, acquisition),
+        ([lease, acquisition, retainedExtent]) =>
+          new AttachLeaseCommand(lease, acquisition, retainedExtent),
       ),
     fc.nat().map((acquisition) => new RetryAcquisitionCommand(acquisition)),
     fc
