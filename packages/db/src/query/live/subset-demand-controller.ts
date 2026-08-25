@@ -4,12 +4,16 @@ import { PropRef } from '../ir.js'
 import type { CollectionSubscription } from '../../collection/subscription.js'
 import type { LazyDemandPlan } from '../compiler/joins.js'
 import type { BasicExpression } from '../ir.js'
+import type {
+  AppliedLoadSubsetOutcome,
+  LoadSubsetRequestResult,
+} from '../../types.js'
 
 type DemandSegment = {
   keys: Map<string, unknown>
   where: BasicExpression<boolean>
   abortController: AbortController
-  ready: Promise<void> | true
+  ready: LoadSubsetRequestResult
   state: `pending` | `settled` | `failed`
 }
 
@@ -21,7 +25,7 @@ type DemandState = {
 export type DemandUpdate = {
   changed: boolean
   empty: boolean
-  ready: Promise<void> | true
+  ready: Promise<Array<AppliedLoadSubsetOutcome>> | true
 }
 
 /**
@@ -89,12 +93,14 @@ export class SubsetDemandController {
     )
     const pending = activeSegments
       .map((segment) => segment.ready)
-      .filter((ready): ready is Promise<void> => ready instanceof Promise)
+      .filter(
+        (ready): ready is Promise<AppliedLoadSubsetOutcome> =>
+          ready instanceof Promise,
+      )
     return {
       changed: true,
       empty: nextKeys.size === 0,
-      ready:
-        pending.length > 0 ? Promise.all(pending).then(() => undefined) : true,
+      ready: pending.length > 0 ? Promise.all(pending) : true,
     }
   }
 
@@ -147,7 +153,7 @@ function requestSegment(
 ): DemandSegment {
   const where = inArray(new PropRef(plan.path), [...keys.values()])
   const abortController = new AbortController()
-  const load = { ready: true as Promise<void> | true }
+  const load = { ready: true as LoadSubsetRequestResult }
   subscription.requestSnapshot({
     where,
     signal: abortController.signal,
