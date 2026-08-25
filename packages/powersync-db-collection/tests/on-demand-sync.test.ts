@@ -2355,11 +2355,13 @@ describe(`On-Demand Sync Mode`, () => {
       const triggerStarted = pDefer<void>()
       const finishTrigger = pDefer<void>()
       const dispose = vi.fn(async () => {})
-      vi.spyOn(db.triggers, `createDiffTrigger`).mockImplementation(async () => {
-        triggerStarted.resolve()
-        await finishTrigger.promise
-        return dispose
-      })
+      vi.spyOn(db.triggers, `createDiffTrigger`).mockImplementation(
+        async () => {
+          triggerStarted.resolve()
+          await finishTrigger.promise
+          return dispose
+        },
+      )
 
       const collection = createCollection(
         powerSyncCollectionOptions({
