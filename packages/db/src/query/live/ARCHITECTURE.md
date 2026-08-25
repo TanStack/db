@@ -433,6 +433,13 @@ shared abort lease. If one owner releases its lease, the source request remains
 active while another owner still needs its coverage. The source signal aborts
 only after every attached owner has released it.
 
+A Collection subscription installs each logical subset owner before it calls
+the source adapter. Reentrant release during `loadSubset` must therefore see and
+release that exact acquisition. A synchronous `loadSubset` throw that did not
+follow a failed release rolls the tentative owner back without calling
+`unloadSubset`; a failed release keeps the owner so a later cleanup can retry the
+same acquisition identity.
+
 Its semantic contract is:
 
 > Every active, satisfiable bucket must be covered by a settled current demand
