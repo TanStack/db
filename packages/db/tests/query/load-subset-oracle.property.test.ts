@@ -15,7 +15,12 @@ import {
 import { evaluateReferenceExpression } from '../reference-expression.js'
 import { TraceAssertionError } from '../trace-runner.js'
 import type { BasicExpression } from '../../src/query/ir.js'
-import type { LoadSubsetOptions, SyncAppliedReceipt } from '../../src/types.js'
+import type {
+  LoadSubsetFn,
+  LoadSubsetOptions,
+  LoadSubsetResult,
+  SyncAppliedReceipt,
+} from '../../src/types.js'
 
 type PredicateSpec =
   | { kind: `all` }
@@ -72,17 +77,15 @@ type OptimisticDerivedRow = {
 }
 
 type CoverageSubject = {
-  loadSubset: (options: LoadSubsetOptions) => true | Promise<void>
+  loadSubset: LoadSubsetFn
   reset?: () => void
 }
 
-type CoverageSubjectFactory = (
-  recordLoad: (options: LoadSubsetOptions) => true | Promise<void>,
-) => CoverageSubject
+type CoverageSubjectFactory = (recordLoad: LoadSubsetFn) => CoverageSubject
 
-function requirePendingAppliedReceipt(
-  receipt: SyncAppliedReceipt,
-): Promise<void> {
+function requirePendingAppliedReceipt<T>(
+  receipt: true | Promise<T>,
+): Promise<T> {
   if (receipt === true) {
     throw new Error(`Expected an asynchronous subset load`)
   }
@@ -1012,14 +1015,14 @@ async function runConcurrentAsyncScenario(
   const transports: Array<{
     values: Set<number>
     deferred: ReturnType<typeof createDeferred<void>>
-    result?: Promise<void>
+    result?: Promise<void | LoadSubsetResult>
   }> = []
   const subject = createDeduplicatedCoverageSubject((options) => {
     const deferred = createDeferred<void>()
     transports.push({ values: matchingValues(options.where), deferred })
     return deferred.promise
   })
-  const callerResults: Array<Promise<void>> = []
+  const callerResults: Array<Promise<void | LoadSubsetResult>> = []
 
   for (const values of scenario.requestedValues) {
     const requested = new Set(values)
@@ -1383,7 +1386,7 @@ async function expectCoverageWaitsForAppliedRows() {
     await Promise.resolve()
 
     const concurrent = source._sync.loadSubset({})
-    expect(concurrent).toBe(first)
+    expect(concurrent).toBeInstanceOf(Promise)
     expect(transportCalls).toBe(1)
     expect(source.get(`r1`)).toBeUndefined()
 
@@ -1684,7 +1687,7 @@ async function expectAbortDuringPublicationDoesNotCancelReceipt() {
   try {
     persistence.resolve()
     await transaction.isPersisted.promise
-    await expect(load).resolves.toBeUndefined()
+    await expect(load).resolves.toMatchObject({ extent: `unknown` })
     expect(controller.signal.aborted).toBe(true)
     expect(source.get(`row`)).toEqual(expect.objectContaining({ id: `row` }))
   } finally {

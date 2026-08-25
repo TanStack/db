@@ -13,7 +13,9 @@ import {
 import { SubsetDemandController } from './subset-demand-controller.js'
 import type { Collection } from '../../collection/index.js'
 import type {
+  AppliedLoadSubsetOutcome,
   ChangeMessage,
+  LoadSubsetRequestResult,
   SubscriptionLoadSubsetErrorEvent,
   SubscriptionStatusChangeEvent,
 } from '../../types.js'
@@ -53,8 +55,10 @@ export class CollectionSubscriber<
 
   // Direct load tracking callback for ordered path (set during subscribeToOrderedChanges,
   // used by loadNextItems for subsequent requestLimitedSnapshot calls)
-  private orderedLoadSubsetResult?: (result: Promise<void> | true) => void
-  private pendingOrderedLoadPromise: Promise<void> | undefined
+  private orderedLoadSubsetResult?: (result: LoadSubsetRequestResult) => void
+  private pendingOrderedLoadPromise:
+    | Promise<AppliedLoadSubsetOutcome>
+    | undefined
   private readonly demand = new SubsetDemandController()
 
   constructor(
@@ -84,7 +88,7 @@ export class CollectionSubscriber<
     // Direct load promise tracking: pipes loadSubset results straight to the
     // live query collection, avoiding the multi-hop deferred promise chain that
     // can break under microtask timing (e.g., queueMicrotask in TanStack Query).
-    const trackLoadResult = (result: Promise<void> | true) => {
+    const trackLoadResult = (result: LoadSubsetRequestResult) => {
       if (result instanceof Promise) {
         // Defer the tracked rejection by one microtask so the subscription's
         // error event can put an initial live query in error before loading
@@ -93,7 +97,10 @@ export class CollectionSubscriber<
           await Promise.resolve()
           throw error
         })
-        this.collectionConfigBuilder.trackSubsetLoadPromise(trackedResult)
+        this.collectionConfigBuilder.trackSubsetLoadPromise(
+          trackedResult,
+          this.sourceId,
+        )
         if (initialSubsetPending) {
           void result.then(
             () => {
@@ -221,14 +228,28 @@ export class CollectionSubscriber<
 
     const generation = this.collectionConfigBuilder.beginDemand(plan.id)
     if (update.ready instanceof Promise) {
-      this.collectionConfigBuilder.trackSubsetLoadOperationPromise(update.ready)
+      this.collectionConfigBuilder.trackSubsetLoadOperationPromise(
+        update.ready,
+        this.sourceId,
+      )
       void update.ready.then(
-        () => this.collectionConfigBuilder.settleDemand(plan.id, generation),
+        (outcomes) =>
+          this.collectionConfigBuilder.settleDemand(
+            plan.id,
+            generation,
+            outcomes,
+            this.sourceId,
+          ),
         (error) =>
           this.collectionConfigBuilder.failDemand(plan.id, generation, error),
       )
     } else {
-      this.collectionConfigBuilder.settleDemand(plan.id, generation)
+      this.collectionConfigBuilder.settleDemand(
+        plan.id,
+        generation,
+        [],
+        this.sourceId,
+      )
     }
   }
 
@@ -265,7 +286,7 @@ export class CollectionSubscriber<
     whereExpression: BasicExpression<boolean> | undefined,
     includeInitialState: boolean,
     onStatusChange: (event: SubscriptionStatusChangeEvent) => void,
-    onLoadSubsetResult: (result: Promise<void> | true) => void,
+    onLoadSubsetResult: (result: LoadSubsetRequestResult) => void,
     onLoadSubsetError: (event: SubscriptionLoadSubsetErrorEvent) => void,
   ): CollectionSubscription {
     const sendChanges = (
@@ -300,7 +321,7 @@ export class CollectionSubscriber<
     whereExpression: BasicExpression<boolean> | undefined,
     orderByInfo: OrderByOptimizationInfo,
     onStatusChange: (event: SubscriptionStatusChangeEvent) => void,
-    onLoadSubsetResult: (result: Promise<void> | true) => void,
+    onLoadSubsetResult: (result: LoadSubsetRequestResult) => void,
     onLoadSubsetError: (event: SubscriptionLoadSubsetErrorEvent) => void,
   ): CollectionSubscription {
     const { orderBy, offset, limit, index } = orderByInfo
@@ -308,7 +329,7 @@ export class CollectionSubscriber<
     // Store the callback so loadNextItems can also use direct tracking.
     // Track in-flight ordered loads to avoid issuing redundant requests while
     // a previous snapshot is still pending.
-    const handleLoadSubsetResult = (result: Promise<void> | true) => {
+    const handleLoadSubsetResult = (result: LoadSubsetRequestResult) => {
       if (result instanceof Promise) {
         this.pendingOrderedLoadPromise = result
         const finish = () => {
@@ -427,6 +448,7 @@ export class CollectionSubscriber<
         // dependency of every window change.
         this.collectionConfigBuilder.trackSubsetLoadOperationPromise(
           this.pendingOrderedLoadPromise,
+          this.sourceId,
         )
         return true
       }
@@ -564,6 +586,6 @@ export class CollectionSubscriber<
     this.subscriptionLoadingPromises.set(subscription, {
       resolve: resolve!,
     })
-    this.collectionConfigBuilder.trackSubsetLoadPromise(promise)
+    this.collectionConfigBuilder.trackSubsetLoadPromise(promise, this.sourceId)
   }
 }

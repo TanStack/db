@@ -336,14 +336,45 @@ export type LoadSubsetOptions = {
   subscription?: Subscription
 }
 
+/** Optional source facts established by a successful subset load. */
+export interface LoadSubsetResult {
+  /**
+   * Whether the source authoritatively knows that more rows exist beyond this
+   * exact request. Omit this when the source cannot prove either direction.
+   */
+  hasMore?: boolean
+}
+
+/** @internal Normalized source extent for one applied subset demand. */
+export type SourceExtent = `unknown` | `continues` | `exhausted`
+
+/**
+ * @internal A source result attached to the exact demand and attempt that
+ * established it. Ownership fields are omitted from the retained demand.
+ */
+export interface AppliedLoadSubsetOutcome {
+  collectionId: string
+  /** @internal Lexical live-query source, attached after collection loading. */
+  sourceId?: string
+  demand: LoadSubsetOptions
+  generation: number
+  extent: SourceExtent
+}
+
+/** @internal Result returned by the collection's normalized subset boundary. */
+export type LoadSubsetRequestResult = true | Promise<AppliedLoadSubsetOutcome>
+
 /**
  * Loads one subset and transfers its ongoing resource ownership only after
  * returning `true` or a promise. An implementation that throws synchronously
  * must release any partially acquired resource before throwing. A successful
  * implementation must await or return every applied receipt from the sync
- * `commit()` calls that establish the loaded subset.
+ * `commit()` calls that establish the loaded subset. A result describes only
+ * the exact `options` passed to this call.
  */
-export type LoadSubsetFn = (options: LoadSubsetOptions) => true | Promise<void>
+export type LoadSubsetFn = (
+  options: LoadSubsetOptions,
+) => true | Promise<void | LoadSubsetResult>
 
 /**
  * Confirms whether a committed sync transaction is visible or is waiting for
@@ -933,7 +964,7 @@ export interface SubscribeChangesOptions<
    * Allows the caller to directly track the loading promise for isReady status.
    * @internal
    */
-  onLoadSubsetResult?: (result: Promise<void> | true) => void
+  onLoadSubsetResult?: (result: LoadSubsetRequestResult) => void
   /** Receives subset-load failures scoped to this subscription. @internal */
   onLoadSubsetError?: (event: SubscriptionLoadSubsetErrorEvent) => void
 }
