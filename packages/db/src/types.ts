@@ -126,6 +126,12 @@ export type MutationFnParams<T extends object = Record<string, unknown>> = {
   transaction: TransactionWithMutations<T>
 }
 
+/**
+ * Persists an optimistic transaction. Do not start or await collection or
+ * live-query preloads here. Sync commits queue behind this function, so waiting
+ * for preload work that needs one of those commits can deadlock the mutation.
+ * Use the collection adapter's mutation acknowledgement helper instead.
+ */
 export type MutationFn<T extends object = Record<string, unknown>> = (
   params: MutationFnParams<T>,
 ) => Promise<any>
@@ -333,9 +339,19 @@ export type LoadSubsetOptions = {
 /**
  * Loads one subset and transfers its ongoing resource ownership only after
  * returning `true` or a promise. An implementation that throws synchronously
- * must release any partially acquired resource before throwing.
+ * must release any partially acquired resource before throwing. A successful
+ * implementation must await or return every applied receipt from the sync
+ * `commit()` calls that establish the loaded subset.
  */
 export type LoadSubsetFn = (options: LoadSubsetOptions) => true | Promise<void>
+
+/**
+ * Confirms whether a committed sync transaction is visible or is waiting for
+ * its turn in the collection's causal queue. A pending receipt rejects with an
+ * error named `AbortError` if cancellation wins before application. Once the
+ * writes are visible, later cancellation has no effect.
+ */
+export type SyncAppliedReceipt = true | Promise<void>
 
 export type UnloadSubsetFn = (options: LoadSubsetOptions) => void
 
@@ -359,7 +375,16 @@ export interface SyncConfig<
      */
     begin: (options?: { immediate?: boolean }) => void
     write: (message: ChangeMessageOrDeleteKeyMessage<T, TKey>) => void
-    commit: () => void
+    /**
+     * Commit the active sync transaction in FIFO order.
+     * Returns `true` when the writes and events are already visible. Otherwise
+     * returns a receipt that resolves after they become visible. If collection
+     * cleanup or an optional request abort abandons the transaction first, the
+     * receipt rejects with an error named `AbortError`.
+     * Pass a signal only for request-scoped work that must not publish after
+     * cancellation. Aborting after application has no effect.
+     */
+    commit: (signal?: AbortSignal) => SyncAppliedReceipt
     /** Signal that a usable initial or recovered snapshot is available. */
     markReady: () => void
     /**

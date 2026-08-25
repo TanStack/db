@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest'
-import { createCollection } from '@tanstack/db'
+import { createCollection, createTransaction } from '@tanstack/db'
 import {
   addRxPlugin,
   createRxDatabase,
@@ -21,6 +21,14 @@ type RxCollections = { test: RxCollection<TestDocType> }
 
 // Helper to advance timers and allow microtasks to flush
 const flushPromises = () => new Promise((resolve) => setTimeout(resolve, 0))
+
+function createDeferred<T>() {
+  let resolve!: (value: T) => void
+  const promise = new Promise<T>((resolvePromise) => {
+    resolve = resolvePromise
+  })
+  return { promise, resolve }
+}
 
 describe(`RxDB Integration`, () => {
   addRxPlugin(RxDBDevModePlugin)
@@ -130,6 +138,137 @@ describe(`RxDB Integration`, () => {
       } finally {
         query.mockRestore()
         await collection.cleanup()
+        await db.remove()
+      }
+    })
+
+    it(`marks initial sync ready only after its rows are applied`, async () => {
+      const db = await getDatababase([{ id: `server`, name: `Server` }])
+      const rxCollection: RxCollection<TestDocType> = db.test
+      const releaseInitialQuery = createDeferred<void>()
+      const initialQueryStarted = createDeferred<void>()
+      const storageQuery = rxCollection.storageInstance.query.bind(
+        rxCollection.storageInstance,
+      )
+      const query = vi
+        .spyOn(rxCollection.storageInstance, `query`)
+        .mockImplementationOnce(async (preparedQuery) => {
+          const result = await storageQuery(preparedQuery)
+          initialQueryStarted.resolve()
+          await releaseInitialQuery.promise
+          return result
+        })
+      const collection = createCollection(
+        rxdbCollectionOptions({
+          rxCollection,
+          startSync: true,
+          syncBatchSize: 10,
+        }),
+      )
+      const persistence = createDeferred<void>()
+      const transaction = createTransaction({
+        mutationFn: () => persistence.promise,
+      })
+
+      try {
+        await initialQueryStarted.promise
+        transaction.mutate(() =>
+          collection.insert({ id: `local`, name: `Local` }),
+        )
+        const buffered = await rxCollection.insert({
+          id: `buffered`,
+          name: `Buffered`,
+        })
+        releaseInitialQuery.resolve()
+
+        const ready = collection.preload()
+        await flushPromises()
+
+        // The initial receipt is still parked. A later live change for the
+        // same row must not overtake the older buffered insert.
+        await buffered.getLatest().patch({ name: `Newest` })
+        await flushPromises()
+
+        expect(collection.status).toBe(`loading`)
+        expect(collection.get(`server`)).toBeUndefined()
+        expect(collection.get(`buffered`)).toBeUndefined()
+
+        persistence.resolve()
+        await transaction.isPersisted.promise
+        await ready
+
+        expect(collection.get(`server`)).toEqual(
+          expect.objectContaining({ id: `server`, name: `Server` }),
+        )
+        expect(collection.get(`buffered`)).toEqual(
+          expect.objectContaining({ id: `buffered`, name: `Newest` }),
+        )
+        expect(collection.status).toBe(`ready`)
+      } finally {
+        releaseInitialQuery.resolve()
+        persistence.resolve()
+        await transaction.isPersisted.promise.catch(() => undefined)
+        query.mockRestore()
+        await collection.cleanup()
+        await db.remove()
+      }
+    })
+
+    it(`does not let later live traffic extend the startup readiness boundary`, async () => {
+      const db = await getDatababase()
+      const rxCollection: RxCollection<TestDocType> = db.test
+      const initialQueryStarted = createDeferred<void>()
+      const releaseInitialQuery = createDeferred<void>()
+      const bufferedApplied = createDeferred<void>()
+      const laterLiveApplied = createDeferred<void>()
+      const storageQuery = rxCollection.storageInstance.query.bind(
+        rxCollection.storageInstance,
+      )
+      const query = vi
+        .spyOn(rxCollection.storageInstance, `query`)
+        .mockImplementationOnce(async (preparedQuery) => {
+          const result = await storageQuery(preparedQuery)
+          initialQueryStarted.resolve()
+          await releaseInitialQuery.promise
+          return result
+        })
+      const options = rxdbCollectionOptions({ rxCollection })
+      const begin = vi.fn()
+      const write = vi.fn()
+      const commit = vi
+        .fn()
+        .mockReturnValueOnce(true)
+        .mockReturnValueOnce(bufferedApplied.promise)
+        .mockReturnValueOnce(laterLiveApplied.promise)
+      const markReady = vi.fn()
+      const markError = vi.fn()
+      const cleanup = options.sync.sync({
+        begin,
+        write,
+        commit,
+        markReady,
+        markError,
+        collection: { status: `loading` },
+      } as never)
+
+      try {
+        await initialQueryStarted.promise
+        await rxCollection.insert({ id: `buffered`, name: `Buffered` })
+        releaseInitialQuery.resolve()
+        await vi.waitFor(() => expect(commit).toHaveBeenCalledTimes(2))
+
+        await rxCollection.insert({ id: `later`, name: `Later` })
+        await vi.waitFor(() => expect(commit).toHaveBeenCalledTimes(3))
+        expect(markReady).not.toHaveBeenCalled()
+
+        bufferedApplied.resolve()
+        await vi.waitFor(() => expect(markReady).toHaveBeenCalledOnce())
+      } finally {
+        releaseInitialQuery.resolve()
+        bufferedApplied.resolve()
+        laterLiveApplied.resolve()
+        if (typeof cleanup === `function`) cleanup()
+        query.mockRestore()
         await db.remove()
       }
     })

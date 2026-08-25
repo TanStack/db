@@ -129,7 +129,7 @@ export function rxdbCollectionOptions(
     sync: (params: SyncParams) => {
       const { begin, write, commit, markReady, markError, collection } = params
 
-      let ready = false
+      let initialFetchComplete = false
       async function initialFetch() {
         /**
          * RxDB stores a last-write-time
@@ -140,7 +140,7 @@ export function rxdbCollectionOptions(
         const syncBatchSize = config.syncBatchSize ? config.syncBatchSize : 1000
         begin()
 
-        while (!ready) {
+        while (!initialFetchComplete) {
           let query: FilledMangoQuery<Row>
           if (cursor) {
             query = {
@@ -184,7 +184,7 @@ export function rxdbCollectionOptions(
 
           cursor = lastOfArray(docs)
           if (docs.length === 0) {
-            ready = true
+            initialFetchComplete = true
             break
           }
 
@@ -195,13 +195,14 @@ export function rxdbCollectionOptions(
             })
           })
         }
-        commit()
+        await commit()
       }
 
       type WriteMessage = Parameters<typeof write>[0]
       const buffer: Array<WriteMessage> = []
+      let buffering = true
       const queue = (msg: WriteMessage) => {
-        if (!ready) {
+        if (buffering) {
           buffer.push(msg)
           return
         }
@@ -249,17 +250,32 @@ export function rxdbCollectionOptions(
       }
 
       async function start() {
+        const isCleanedUp = () => collection.status === `cleaned-up`
+
         startOngoingFetch()
         await initialFetch()
-
-        if (buffer.length) {
-          begin()
-          for (const msg of buffer) write(msg)
-          commit()
-          buffer.length = 0
+        if (isCleanedUp()) {
+          return
         }
 
-        markReady()
+        // Take one finite snapshot of changes observed during the initial
+        // fetch, then route newer events through the normal live path. The
+        // core transaction queue preserves their order without letting a
+        // continuous event stream postpone readiness forever.
+        const pending = buffer.splice(0)
+        buffering = false
+        if (pending.length > 0) {
+          begin()
+          for (const msg of pending) write(msg)
+          await commit()
+          if (isCleanedUp()) {
+            return
+          }
+        }
+
+        if (!isCleanedUp()) {
+          markReady()
+        }
       }
 
       void start().catch((error: unknown) => {

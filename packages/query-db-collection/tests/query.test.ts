@@ -12,6 +12,7 @@ import {
   collectionOptions,
   createCollection,
   createLiveQueryCollection,
+  createTransaction,
   eq,
   ilike,
   inArray,
@@ -669,6 +670,182 @@ describe(`QueryCollection`, () => {
       } finally {
         await collection.cleanup()
         defaultInitialQueryClient.clear()
+      }
+    })
+
+    it(`keeps an eager result loading until its rows are applied`, async () => {
+      const queryResult = createDeferred<Array<TestItem>>()
+      const queryFn = vi.fn(() => queryResult.promise)
+      const collection = createCollection(
+        queryCollectionOptions<TestItem>({
+          id: `eager-applied-settlement`,
+          queryClient,
+          queryKey: [`eager-applied-settlement`],
+          queryFn,
+          getKey,
+          syncMode: `eager`,
+          startSync: true,
+        }),
+      )
+      const persistence = createDeferred<void>()
+      const transaction = createTransaction({
+        mutationFn: () => persistence.promise,
+      })
+      transaction.mutate(() =>
+        collection.insert({ id: `local`, name: `Local` }),
+      )
+
+      try {
+        const ready = collection.stateWhenReady()
+        await vi.waitFor(() => expect(queryFn).toHaveBeenCalledOnce())
+        queryResult.resolve([{ id: `server`, name: `Server` }])
+        await flushPromises()
+
+        expect(collection.status).toBe(`loading`)
+        expect(collection.get(`server`)).toBeUndefined()
+
+        persistence.resolve()
+        await transaction.isPersisted.promise
+        await ready
+
+        expect(collection.status).toBe(`ready`)
+        expect(collection.get(`server`)).toEqual(
+          expect.objectContaining({ id: `server`, name: `Server` }),
+        )
+      } finally {
+        persistence.resolve()
+        await transaction.isPersisted.promise.catch(() => undefined)
+        await collection.cleanup()
+      }
+    })
+
+    it(`does not publish queued query results after the subset is released`, async () => {
+      const queryKey = [`released-result-application`]
+      const queryResult = createDeferred<Array<TestItem>>()
+      const collection = createCollection(
+        queryCollectionOptions<TestItem>({
+          id: `released-result-application`,
+          queryClient,
+          queryKey,
+          queryFn: () => queryResult.promise,
+          getKey,
+          syncMode: `on-demand`,
+          startSync: true,
+        }),
+      )
+      const persistence = createDeferred<void>()
+      const transaction = createTransaction({
+        mutationFn: () => persistence.promise,
+      })
+
+      try {
+        transaction.mutate(() =>
+          collection.insert({ id: `local`, name: `Local` }),
+        )
+        collection._sync.loadSubset({})
+        queryResult.resolve([{ id: `first`, name: `First` }])
+        await flushPromises()
+
+        queryClient.setQueryData(queryKey, [{ id: `second`, name: `Second` }])
+        await flushPromises()
+        collection._sync.unloadSubset({})
+
+        persistence.resolve()
+        await transaction.isPersisted.promise
+        await flushPromises()
+
+        expect(collection.has(`first`)).toBe(false)
+        expect(collection.has(`second`)).toBe(false)
+      } finally {
+        persistence.resolve()
+        await transaction.isPersisted.promise.catch(() => undefined)
+        await collection.cleanup()
+      }
+    })
+
+    it(`keeps a deferred successful result pending until its refetch applies`, async () => {
+      const barrier = createDeferred<void>()
+      const queryFn = vi
+        .fn()
+        .mockResolvedValue([{ id: `server`, name: `Server` }])
+      const collection = createCollection(
+        queryCollectionOptions<TestItem>({
+          id: `deferred-result-application`,
+          queryClient,
+          queryKey: [`deferred-result-application`],
+          queryFn,
+          getKey,
+          syncMode: `on-demand`,
+          startSync: true,
+        }),
+      )
+      collection.deferDataRefresh = barrier.promise
+
+      try {
+        const load = collection._sync.loadSubset({})
+        let settled = false
+        void Promise.resolve(load).then(() => {
+          settled = true
+        })
+        await vi.waitFor(() => expect(queryFn).toHaveBeenCalledOnce())
+        await flushPromises()
+
+        expect(settled).toBe(false)
+        expect(collection.has(`server`)).toBe(false)
+
+        collection.deferDataRefresh = null
+        barrier.resolve()
+        if (load !== true) await load
+
+        expect(queryFn).toHaveBeenCalledTimes(2)
+        expect(collection.has(`server`)).toBe(true)
+      } finally {
+        collection.deferDataRefresh = null
+        barrier.resolve()
+        await collection.cleanup()
+      }
+    })
+
+    it(`applies successive eager results in publication order`, async () => {
+      const queryKey = [`eager-result-publication-order`]
+      const collection = createCollection(
+        queryCollectionOptions<TestItem>({
+          id: `eager-result-publication-order`,
+          queryClient,
+          queryKey,
+          queryFn: vi.fn().mockResolvedValue([]),
+          getKey,
+          syncMode: `eager`,
+          startSync: true,
+        }),
+      )
+
+      await collection.stateWhenReady()
+
+      const persistence = createDeferred<void>()
+      const transaction = createTransaction({
+        mutationFn: () => persistence.promise,
+      })
+      transaction.mutate(() =>
+        collection.insert({ id: `local`, name: `Local` }),
+      )
+
+      try {
+        queryClient.setQueryData(queryKey, [{ id: `server`, name: `Server` }])
+        await flushPromises()
+        queryClient.setQueryData(queryKey, [])
+        await flushPromises()
+
+        persistence.resolve()
+        await transaction.isPersisted.promise
+
+        await vi.waitFor(() => {
+          expect(collection.get(`server`)).toBeUndefined()
+        })
+      } finally {
+        persistence.resolve()
+        await transaction.isPersisted.promise.catch(() => undefined)
+        await collection.cleanup()
       }
     })
 
@@ -4521,6 +4698,90 @@ describe(`QueryCollection`, () => {
       const options = queryCollectionOptions(config)
       return createCollection(options)
     }
+
+    it.each([`select`, `getKey`, `write`] as const)(
+      `reports an error when %s throws while applying a successful result`,
+      async (failureStage) => {
+        const applicationError = new Error(`${failureStage} failed`)
+        const consoleErrorSpy = vi
+          .spyOn(console, `error`)
+          .mockImplementation(() => {})
+        let keyCalls = 0
+        const throwingGetKey = (item: TestItem) => {
+          keyCalls++
+          if (
+            failureStage === `getKey` ||
+            (failureStage === `write` && keyCalls === 2)
+          ) {
+            throw applicationError
+          }
+          return item.id
+        }
+
+        const options = queryCollectionOptions<TestItem>({
+          id: `successful-result-${failureStage}-error-test`,
+          queryClient,
+          queryKey: [`successful-result-${failureStage}-error-test`],
+          queryFn: vi.fn().mockResolvedValue([{ id: `1`, name: `Item 1` }]),
+          getKey: throwingGetKey,
+          select:
+            failureStage === `select`
+              ? () => {
+                  throw applicationError
+                }
+              : undefined,
+          startSync: true,
+          retry: false,
+        })
+        const collection = createCollection(options)
+
+        await expect(collection.preload()).rejects.toBe(applicationError)
+        expect(collection.status).toBe(`error`)
+        expect(collection.utils.lastError).toBe(applicationError)
+        expect(collection.utils.errorCount).toBe(1)
+        expect(collection.size).toBe(0)
+        expect(inspectOwnershipMaps(options).rowToQueries.size).toBe(0)
+        expect(inspectOwnershipMaps(options).queryToRows.size).toBe(0)
+
+        await collection.cleanup()
+        consoleErrorSpy.mockRestore()
+      },
+    )
+
+    it(`does not treat a failed application as established coverage`, async () => {
+      const applicationError = new Error(`application failed`)
+      const consoleErrorSpy = vi
+        .spyOn(console, `error`)
+        .mockImplementation(() => {})
+      const demand = { where: eq(`id`, `1`) }
+      const collection = createCollection(
+        queryCollectionOptions<TestItem>({
+          id: `failed-application-coverage`,
+          queryClient,
+          queryKey: [`failed-application-coverage`],
+          queryFn: vi.fn().mockResolvedValue([{ id: `1`, name: `Item 1` }]),
+          getKey: () => {
+            throw applicationError
+          },
+          syncMode: `on-demand`,
+          startSync: true,
+          retry: false,
+        }),
+      )
+
+      try {
+        const firstLoad = collection._sync.loadSubset(demand)
+        await expect(Promise.resolve(firstLoad)).rejects.toBe(applicationError)
+
+        const repeatedLoad = collection._sync.loadSubset(demand)
+        await expect(Promise.resolve(repeatedLoad)).rejects.toBe(
+          applicationError,
+        )
+      } finally {
+        await collection.cleanup()
+        consoleErrorSpy.mockRestore()
+      }
+    })
 
     it(`should track error state, count, and support recovery`, async () => {
       const initialData = [{ id: `1`, name: `Item 1` }]

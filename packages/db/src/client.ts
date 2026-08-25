@@ -8,6 +8,7 @@ import { TransactionScope } from './transactions.js'
 import { getBuilderFromConfig } from './query/live/collection-registry.js'
 import { createLiveQueryCollection } from './query/live-query-collection.js'
 import { createLiveQueryObserver } from './live-query-observer.js'
+import { createDeferred } from './deferred.js'
 import {
   getLiveQueryHash,
   prepareLiveQueryValue,
@@ -866,6 +867,7 @@ export class DbClient {
     if (rows.length > 0) {
       collection._state.pendingSyncedTransactions.push({
         committed: true,
+        applicationStarted: false,
         layoutChanged: false,
         operations: rows.map((row) => ({
           type: collection._state.syncedData.has(row.key)
@@ -877,6 +879,7 @@ export class DbClient {
         deletedKeys: new Set(),
         rowMetadataWrites,
         collectionMetadataWrites: new Map(),
+        applied: createDeferred<void>(),
         immediate: true,
         preserveHydrationSeedKeys: seedKind !== undefined,
       })

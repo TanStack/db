@@ -218,6 +218,7 @@ export function trailBaseCollectionOptions<
         if (remaining <= 0) {
           return
         }
+        const appliedPages: Array<Promise<void>> = []
 
         while (true) {
           const limit = Math.min(remaining, 256)
@@ -253,7 +254,11 @@ export function trailBaseCollectionOptions<
             })
           }
 
-          commit()
+          const applied = commit(opts.signal)
+          if (applied !== true) {
+            appliedPages.push(applied)
+          }
+          if (cancelled || opts.signal?.aborted) return
 
           remaining -= length
 
@@ -275,6 +280,8 @@ export function trailBaseCollectionOptions<
             cursor = response.cursor
           }
         }
+
+        await Promise.all(appliedPages)
       }
 
       // Afterwards subscribe.
@@ -302,7 +309,7 @@ export function trailBaseCollectionOptions<
           } else {
             console.error(`Error: ${event.Error}`)
           }
-          commit()
+          void commit()
 
           if (value) {
             seenIds.setState((curr: Map<string, number>) => {

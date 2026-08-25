@@ -126,14 +126,21 @@ export class CollectionSyncManager<
           collection: this.collection,
           begin: (options?: { immediate?: boolean }) => {
             if (!isCurrentSync()) return
+            const applied = createDeferred<void>()
+            // A source may ignore a stream receipt. Keep cancellation from
+            // becoming an unhandled rejection while preserving the original
+            // promise's rejection for callers that do await it.
+            void applied.promise.catch(() => undefined)
             this.state.pendingSyncedTransactions.push({
               committed: false,
+              applicationStarted: false,
               layoutChanged: false,
               operations: [],
               deletedKeys: new Set(),
               rowMetadataWrites: new Map(),
               collectionMetadataWrites: new Map(),
               immediate: options?.immediate,
+              applied,
             })
           },
           write: (
@@ -231,8 +238,8 @@ export class CollectionSyncManager<
               })
             }
           },
-          commit: () => {
-            if (!isCurrentSync()) return
+          commit: (signal?: AbortSignal) => {
+            if (!isCurrentSync()) return true
             const pendingTransaction =
               this.state.pendingSyncedTransactions[
                 this.state.pendingSyncedTransactions.length - 1
@@ -244,9 +251,32 @@ export class CollectionSyncManager<
               throw new SyncTransactionAlreadyCommittedError()
             }
 
+            if (signal?.aborted) {
+              this.state.cancelPendingSyncedTransaction(pendingTransaction)
+              return pendingTransaction.applied.promise
+            }
+
             pendingTransaction.committed = true
 
+            const cancel = () => {
+              this.state.cancelPendingSyncedTransaction(pendingTransaction)
+            }
+            signal?.addEventListener(`abort`, cancel, { once: true })
+
             this.state.commitPendingTransactions()
+            if (!pendingTransaction.applied.isPending()) {
+              signal?.removeEventListener(`abort`, cancel)
+              return true
+            }
+
+            const receipt = pendingTransaction.applied.promise
+            if (signal) {
+              const removeAbortListener = () => {
+                signal.removeEventListener(`abort`, cancel)
+              }
+              void receipt.then(removeAbortListener, removeAbortListener)
+            }
+            return receipt
           },
           markReady: () => {
             if (isCurrentSync()) this.lifecycle.markReady()

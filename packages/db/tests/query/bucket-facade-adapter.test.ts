@@ -69,11 +69,12 @@ describe(`BucketFacadeAdapter`, () => {
     const commit = sync.commit
     let shouldThrow = true
     sync.commit = () => {
-      commit()
+      const applied = commit()
       if (shouldThrow) {
         shouldThrow = false
         throw new Error(`facade flush failed`)
       }
+      return applied
     }
 
     const replacement = { id: 1, value: `replacement` }

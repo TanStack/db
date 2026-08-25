@@ -15,7 +15,7 @@ import {
 import { evaluateReferenceExpression } from '../reference-expression.js'
 import { TraceAssertionError } from '../trace-runner.js'
 import type { BasicExpression } from '../../src/query/ir.js'
-import type { LoadSubsetOptions } from '../../src/types.js'
+import type { LoadSubsetOptions, SyncAppliedReceipt } from '../../src/types.js'
 
 type PredicateSpec =
   | { kind: `all` }
@@ -79,6 +79,15 @@ type CoverageSubject = {
 type CoverageSubjectFactory = (
   recordLoad: (options: LoadSubsetOptions) => true | Promise<void>,
 ) => CoverageSubject
+
+function requirePendingAppliedReceipt(
+  receipt: SyncAppliedReceipt,
+): Promise<void> {
+  if (receipt === true) {
+    throw new Error(`Expected an asynchronous subset load`)
+  }
+  return receipt
+}
 
 class CoveredDemandRefetchedError extends Error {
   constructor(
@@ -1073,7 +1082,11 @@ const coverageRandomParameters = oracleRandomParameters(
 
 let collectionSequence = 0
 
-async function expectPersistingLoadIsApplied(persisting: boolean) {
+async function expectPersistingLoadIsApplied(
+  persisting: boolean,
+  delivery: `synchronous` | `asynchronous` = `synchronous`,
+  transactionStart: `during-load` | `before-load` = `during-load`,
+) {
   const rows: Array<PersistedLoadRow> = [
     { id: `r1`, projectId: `p1` },
     { id: `r2`, projectId: `p1` },
@@ -1085,16 +1098,25 @@ async function expectPersistingLoadIsApplied(persisting: boolean) {
     syncMode: `on-demand`,
     sync: {
       sync: ({ begin, write, commit, markReady }) => {
+        if (transactionStart === `before-load`) begin()
         markReady()
         return {
           loadSubset: () => {
             loadCalls += 1
-            begin()
-            for (const row of rows) {
-              write({ type: `insert`, value: { ...row } })
+            const applyRows = () => {
+              if (transactionStart === `during-load`) begin()
+              for (const row of rows) {
+                write({ type: `insert`, value: { ...row } })
+              }
+              return commit()
             }
-            commit()
-            return Promise.resolve()
+            if (delivery === `synchronous`) {
+              return applyRows()
+            }
+            return Promise.resolve().then(async () => {
+              const applied = applyRows()
+              if (applied !== true) await applied
+            })
           },
         }
       },
@@ -1113,7 +1135,24 @@ async function expectPersistingLoadIsApplied(persisting: boolean) {
   )
 
   try {
-    const result = await live.toArrayWhenReady()
+    const ready = live.toArrayWhenReady()
+    if (persisting) {
+      let settled = false
+      void ready.then(() => {
+        settled = true
+      })
+      await Promise.resolve()
+      await Promise.resolve()
+
+      expect(settled).toBe(false)
+      expect(source.get(`r1`)).toBeUndefined()
+      expect(source.get(`r2`)).toBeUndefined()
+
+      persistence.resolve()
+      await transaction.isPersisted.promise
+    }
+
+    const result = await ready
     expect(loadCalls).toBe(1)
     try {
       expect(result.map(({ id }) => id).sort()).toEqual([`r1`, `r2`])
@@ -1128,6 +1167,670 @@ async function expectPersistingLoadIsApplied(persisting: boolean) {
     await live.cleanup()
     await source.cleanup()
   }
+}
+
+async function expectAppliedReceiptTiming(
+  gate: `free` | `parked`,
+  delivery: `synchronous` | `asynchronous`,
+): Promise<void> {
+  const source = createCollection<PersistedLoadRow>({
+    id: `load-subset-applied-timing-${collectionSequence++}`,
+    getKey: (row) => row.id,
+    syncMode: `on-demand`,
+    sync: {
+      sync: ({ begin, write, commit, markReady }) => {
+        markReady()
+        return {
+          loadSubset: () => {
+            const applyRow = () => {
+              begin()
+              write({
+                type: `insert`,
+                value: { id: `remote`, projectId: `p1` },
+              })
+              return commit()
+            }
+
+            return delivery === `synchronous`
+              ? applyRow()
+              : Promise.resolve().then(async () => {
+                  const applied = applyRow()
+                  if (applied !== true) await applied
+                })
+          },
+        }
+      },
+    },
+  })
+  source.startSyncImmediate()
+
+  const persistence = createDeferred<void>()
+  const transaction = createTransaction({
+    mutationFn: () => persistence.promise,
+  })
+  if (gate === `parked`) {
+    transaction.mutate(() => source.insert({ id: `local`, projectId: `p2` }))
+    expect(transaction.state).toBe(`persisting`)
+  }
+
+  const receipt = source._sync.loadSubset({})
+
+  try {
+    if (gate === `free` && delivery === `synchronous`) {
+      expect(receipt).toBe(true)
+      expect(source.get(`remote`)).toEqual(
+        expect.objectContaining({ id: `remote`, projectId: `p1` }),
+      )
+      return
+    }
+
+    const pending = requirePendingAppliedReceipt(receipt)
+    let settled = false
+    let visibleWhenSettled = false
+    void pending.then(() => {
+      settled = true
+      visibleWhenSettled = source.get(`remote`)?.id === `remote`
+    })
+
+    expect(settled).toBe(false)
+    expect(source.get(`remote`)).toBeUndefined()
+    await Promise.resolve()
+    await Promise.resolve()
+
+    if (gate === `parked`) {
+      expect(settled).toBe(false)
+      expect(source.get(`remote`)).toBeUndefined()
+      persistence.resolve()
+      await transaction.isPersisted.promise
+    }
+
+    await pending
+    expect(settled).toBe(true)
+    expect(visibleWhenSettled).toBe(true)
+    expect(source.get(`remote`)).toEqual(
+      expect.objectContaining({ id: `remote`, projectId: `p1` }),
+    )
+  } finally {
+    persistence.resolve()
+    if (gate === `parked`) {
+      await transaction.isPersisted.promise.catch(() => undefined)
+    }
+    await source.cleanup()
+  }
+}
+
+async function expectAppliedLoadDoesNotFlushEarlierParkedSync() {
+  const rows: Array<PersistedLoadRow> = [
+    { id: `r1`, projectId: `p1` },
+    { id: `r2`, projectId: `p1` },
+  ]
+  let publishUnrelated!: () => void
+  const source = createCollection<PersistedLoadRow>({
+    id: `load-subset-applied-order-${collectionSequence++}`,
+    getKey: (row) => row.id,
+    syncMode: `on-demand`,
+    sync: {
+      sync: ({ begin, write, commit, markReady }) => {
+        publishUnrelated = () => {
+          begin()
+          write({
+            type: `insert`,
+            value: { id: `unrelated`, projectId: `p2` },
+          })
+          commit()
+        }
+        markReady()
+        return {
+          loadSubset: () => {
+            begin()
+            for (const row of rows) {
+              write({ type: `insert`, value: { ...row } })
+            }
+            return commit()
+          },
+        }
+      },
+    },
+  })
+  source.startSyncImmediate()
+
+  const persistence = createDeferred<void>()
+  const transaction = createTransaction({
+    mutationFn: () => persistence.promise,
+  })
+  transaction.mutate(() => source.insert({ id: `other`, projectId: `p2` }))
+  expect(transaction.state).toBe(`persisting`)
+  publishUnrelated()
+
+  const live = createLiveQueryCollection((query) =>
+    query.from({ row: source }).where(({ row }) => eq(row.projectId, `p1`)),
+  )
+
+  try {
+    const ready = live.toArrayWhenReady()
+    let settled = false
+    void ready.then(() => {
+      settled = true
+    })
+    await Promise.resolve()
+    await Promise.resolve()
+
+    expect(settled).toBe(false)
+    expect(source.get(`unrelated`)).toBeUndefined()
+
+    persistence.resolve()
+    await transaction.isPersisted.promise
+    await expect(ready).resolves.toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ id: `r1` }),
+        expect.objectContaining({ id: `r2` }),
+      ]),
+    )
+  } finally {
+    persistence.resolve()
+    await transaction.isPersisted.promise.catch(() => undefined)
+    await live.cleanup()
+    await source.cleanup()
+  }
+}
+
+async function expectCoverageWaitsForAppliedRows() {
+  let publishUnrelated!: () => void
+  let transportCalls = 0
+  const source = createCollection<PersistedLoadRow>({
+    id: `load-subset-applied-coverage-${collectionSequence++}`,
+    getKey: (row) => row.id,
+    syncMode: `on-demand`,
+    sync: {
+      sync: ({ begin, write, commit, markReady }) => {
+        publishUnrelated = () => {
+          begin()
+          write({
+            type: `insert`,
+            value: { id: `unrelated`, projectId: `p2` },
+          })
+          commit()
+        }
+        const deduplicated = new DeduplicatedLoadSubset({
+          loadSubset: () => {
+            transportCalls += 1
+            begin()
+            write({
+              type: `insert`,
+              value: { id: `r1`, projectId: `p1` },
+            })
+            return commit()
+          },
+        })
+        markReady()
+        return { loadSubset: deduplicated.loadSubset }
+      },
+    },
+  })
+  source.startSyncImmediate()
+
+  const persistence = createDeferred<void>()
+  const transaction = createTransaction({
+    mutationFn: () => persistence.promise,
+  })
+  transaction.mutate(() => source.insert({ id: `other`, projectId: `p2` }))
+  publishUnrelated()
+
+  try {
+    const first = source._sync.loadSubset({})
+    expect(first).toBeInstanceOf(Promise)
+    await Promise.resolve()
+    await Promise.resolve()
+
+    const concurrent = source._sync.loadSubset({})
+    expect(concurrent).toBe(first)
+    expect(transportCalls).toBe(1)
+    expect(source.get(`r1`)).toBeUndefined()
+
+    persistence.resolve()
+    await transaction.isPersisted.promise
+    await Promise.all([first, concurrent])
+    expect(source.get(`r1`)).toEqual(
+      expect.objectContaining({ id: `r1`, projectId: `p1` }),
+    )
+    expect(source._sync.loadSubset({})).toBe(true)
+  } finally {
+    persistence.resolve()
+    await transaction.isPersisted.promise.catch(() => undefined)
+    await source.cleanup()
+  }
+}
+
+async function expectConcurrentStreamCommitStaysParked() {
+  let publishUnrelated!: () => void
+  let publishSubset!: () => void
+  const source = createCollection<PersistedLoadRow>({
+    id: `load-subset-applied-concurrent-${collectionSequence++}`,
+    getKey: (row) => row.id,
+    syncMode: `on-demand`,
+    sync: {
+      sync: ({ begin, write, commit, markReady }) => {
+        publishUnrelated = () => {
+          begin()
+          write({
+            type: `insert`,
+            value: { id: `unrelated`, projectId: `p2` },
+          })
+          commit()
+        }
+        markReady()
+        return {
+          loadSubset: () =>
+            new Promise<void>((resolve) => {
+              publishSubset = () => {
+                begin()
+                write({
+                  type: `insert`,
+                  value: { id: `r1`, projectId: `p1` },
+                })
+                const applied = commit()
+                if (applied === true) {
+                  resolve()
+                } else {
+                  void applied.then(resolve)
+                }
+              }
+            }),
+        }
+      },
+    },
+  })
+  source.startSyncImmediate()
+
+  const persistence = createDeferred<void>()
+  const transaction = createTransaction({
+    mutationFn: () => persistence.promise,
+  })
+  transaction.mutate(() => source.insert({ id: `other`, projectId: `p2` }))
+
+  const load = requirePendingAppliedReceipt(source._sync.loadSubset({}))
+  publishUnrelated()
+  publishSubset()
+
+  try {
+    let settled = false
+    void load.then(() => {
+      settled = true
+    })
+    await Promise.resolve()
+    await Promise.resolve()
+
+    expect(settled).toBe(false)
+    expect(source.get(`unrelated`)).toBeUndefined()
+    expect(source.get(`r1`)).toBeUndefined()
+    persistence.resolve()
+    await transaction.isPersisted.promise
+    await load
+    expect(source.get(`unrelated`)).toEqual(
+      expect.objectContaining({ id: `unrelated`, projectId: `p2` }),
+    )
+    expect(source.get(`r1`)).toEqual(
+      expect.objectContaining({ id: `r1`, projectId: `p1` }),
+    )
+  } finally {
+    persistence.resolve()
+    await transaction.isPersisted.promise.catch(() => undefined)
+    await source.cleanup()
+  }
+}
+
+async function expectLaterImmediateCommitSettlesAppliedSubset() {
+  let publishLater!: () => SyncAppliedReceipt
+  const source = createCollection<PersistedLoadRow>({
+    id: `load-subset-applied-priority-${collectionSequence++}`,
+    getKey: (row) => row.id,
+    syncMode: `on-demand`,
+    sync: {
+      sync: ({ begin, write, commit, markReady }) => {
+        begin()
+        write({
+          type: `insert`,
+          value: { id: `initial`, projectId: `p0` },
+        })
+        void commit()
+        publishLater = () => {
+          begin({ immediate: true })
+          write({
+            type: `insert`,
+            value: { id: `later`, projectId: `p2` },
+          })
+          return commit()
+        }
+        markReady()
+        return {
+          loadSubset: () => {
+            begin()
+            write({
+              type: `insert`,
+              value: { id: `subset`, projectId: `p1` },
+            })
+            return commit()
+          },
+        }
+      },
+    },
+  })
+  source.startSyncImmediate()
+
+  const persistence = createDeferred<void>()
+  const transaction = createTransaction({
+    mutationFn: () => persistence.promise,
+  })
+  transaction.mutate(() => source.insert({ id: `local`, projectId: `p3` }))
+
+  const load = requirePendingAppliedReceipt(source._sync.loadSubset({}))
+  const later = publishLater()
+
+  try {
+    let loadSettled = false
+    let subsetVisibleWhenSettled = false
+    void load.then(() => {
+      loadSettled = true
+      subsetVisibleWhenSettled = source.get(`subset`)?.id === `subset`
+    })
+    await later
+    await load
+
+    expect(loadSettled).toBe(true)
+    expect(subsetVisibleWhenSettled).toBe(true)
+    expect(source.get(`subset`)).toEqual(
+      expect.objectContaining({ id: `subset` }),
+    )
+    expect(source.get(`later`)).toEqual(
+      expect.objectContaining({ id: `later` }),
+    )
+    expect(source.get(`initial`)).toEqual(
+      expect.objectContaining({ id: `initial` }),
+    )
+
+    persistence.resolve()
+    await transaction.isPersisted.promise
+    await Promise.all([load, later])
+
+    expect(source.get(`subset`)).toEqual(
+      expect.objectContaining({ id: `subset` }),
+    )
+  } finally {
+    persistence.resolve()
+    await transaction.isPersisted.promise.catch(() => undefined)
+    await source.cleanup()
+  }
+}
+
+async function expectAbortedReceiptDoesNotPublishCoverage(
+  abortPhase: `before-commit` | `while-parked`,
+) {
+  let transportCalls = 0
+  const committed = createDeferred<void>()
+  const deduplicated = new DeduplicatedLoadSubset({
+    loadSubset: async ({ signal }) => {
+      transportCalls += 1
+      if (abortPhase === `before-commit`) {
+        // Give cancellation a chance to revoke this request before its
+        // request-scoped rows enter the collection transaction.
+        await Promise.resolve()
+        if (signal?.aborted) {
+          return
+        }
+      }
+      begin()
+      write({
+        type: `insert`,
+        value: { id: `row`, projectId: `p1` },
+      })
+      const applied = commit(signal)
+      committed.resolve()
+      if (applied !== true) await applied
+    },
+  })
+  let begin!: () => void
+  let write!: (message: { type: `insert`; value: PersistedLoadRow }) => void
+  let commit!: (signal?: AbortSignal) => SyncAppliedReceipt
+  const source = createCollection<PersistedLoadRow>({
+    id: `load-subset-applied-abort-${collectionSequence++}`,
+    getKey: (row) => row.id,
+    syncMode: `on-demand`,
+    sync: {
+      sync: (params) => {
+        begin = params.begin
+        write = params.write
+        commit = params.commit
+        params.markReady()
+        return { loadSubset: deduplicated.loadSubset }
+      },
+    },
+  })
+  source.startSyncImmediate()
+
+  const persistence = createDeferred<void>()
+  const transaction = createTransaction({
+    mutationFn: () => persistence.promise,
+  })
+  transaction.mutate(() => source.insert({ id: `local`, projectId: `p2` }))
+  const controller = new AbortController()
+  const first = requirePendingAppliedReceipt(
+    source._sync.loadSubset({ signal: controller.signal }),
+  )
+  if (abortPhase === `while-parked`) {
+    await committed.promise
+  }
+  controller.abort()
+
+  try {
+    persistence.resolve()
+    await transaction.isPersisted.promise
+    if (abortPhase === `while-parked`) {
+      await expect(first).rejects.toMatchObject({ name: `AbortError` })
+    } else {
+      await first
+    }
+    expect(transportCalls).toBe(1)
+    expect(source.get(`row`)).toBeUndefined()
+
+    const retry = source._sync.loadSubset({})
+    if (retry !== true) await retry
+    expect(transportCalls).toBe(2)
+    expect(source.get(`row`)).toEqual(expect.objectContaining({ id: `row` }))
+  } finally {
+    persistence.resolve()
+    await transaction.isPersisted.promise.catch(() => undefined)
+    await source.cleanup()
+  }
+}
+
+async function expectAbortDuringPublicationDoesNotCancelReceipt() {
+  const controller = new AbortController()
+  const source = createCollection<PersistedLoadRow>({
+    id: `load-subset-applied-publication-abort-${collectionSequence++}`,
+    getKey: (row) => row.id,
+    syncMode: `on-demand`,
+    sync: {
+      sync: ({ begin, write, commit, markReady }) => {
+        markReady()
+        return {
+          loadSubset: ({ signal }) => {
+            begin()
+            write({
+              type: `insert`,
+              value: { id: `row`, projectId: `p1` },
+            })
+            return commit(signal)
+          },
+        }
+      },
+    },
+  })
+  source.startSyncImmediate()
+
+  const persistence = createDeferred<void>()
+  const transaction = createTransaction({
+    mutationFn: () => persistence.promise,
+  })
+  transaction.mutate(() => source.insert({ id: `local`, projectId: `pending` }))
+  const subscription = source.subscribeChanges((changes) => {
+    if (changes.some((change) => change.key === `row`)) {
+      controller.abort()
+    }
+  })
+  const load = requirePendingAppliedReceipt(
+    source._sync.loadSubset({ signal: controller.signal }),
+  )
+
+  try {
+    persistence.resolve()
+    await transaction.isPersisted.promise
+    await expect(load).resolves.toBeUndefined()
+    expect(controller.signal.aborted).toBe(true)
+    expect(source.get(`row`)).toEqual(expect.objectContaining({ id: `row` }))
+  } finally {
+    subscription.unsubscribe()
+    persistence.resolve()
+    await transaction.isPersisted.promise.catch(() => undefined)
+    await source.cleanup()
+  }
+}
+
+async function expectCanceledReceiptReleasesOnlyItsSuppression() {
+  let begin!: () => void
+  let write!: (message: { type: `update`; value: PersistedLoadRow }) => void
+  let commit!: (signal?: AbortSignal) => SyncAppliedReceipt
+  const source = createCollection<PersistedLoadRow>({
+    id: `load-subset-cancel-suppression-${collectionSequence++}`,
+    getKey: (row) => row.id,
+    sync: {
+      sync: (params) => {
+        begin = params.begin
+        write = params.write
+        commit = params.commit
+        begin()
+        write({ type: `update`, value: { id: `first`, projectId: `old` } })
+        write({ type: `update`, value: { id: `second`, projectId: `old` } })
+        commit()
+        params.markReady()
+      },
+    },
+  })
+  await source.preload()
+  await Promise.resolve()
+  const persistence = createDeferred<void>()
+  const transaction = createTransaction({
+    mutationFn: () => persistence.promise,
+  })
+  transaction.mutate(() => source.insert({ id: `local`, projectId: `pending` }))
+  expect(transaction.state).toBe(`persisting`)
+  try {
+    begin()
+    write({ type: `update`, value: { id: `first`, projectId: `new` } })
+    const canceled = commit()
+    const canceledTransaction = source._state.pendingSyncedTransactions.at(-1)!
+    expect(source._state.pendingSyncedTransactions).toHaveLength(1)
+    begin()
+    write({ type: `update`, value: { id: `second`, projectId: `new` } })
+    expect(source._state.pendingSyncedTransactions).toHaveLength(2)
+
+    source._state.capturePreSyncVisibleState()
+    expect(source._state.recentlySyncedKeys).toEqual(
+      new Set([`first`, `second`]),
+    )
+
+    source._state.cancelPendingSyncedTransaction(canceledTransaction)
+    expect(source._state.pendingSyncedTransactions).toHaveLength(1)
+    expect(source._state.recentlySyncedKeys).toEqual(new Set([`second`]))
+    expect(source._state.preSyncVisibleState.has(`first`)).toBe(false)
+    expect(source._state.preSyncVisibleState.has(`second`)).toBe(true)
+    if (canceled !== true) {
+      await expect(canceled).rejects.toMatchObject({ name: `AbortError` })
+    }
+  } finally {
+    persistence.resolve()
+    await transaction.isPersisted.promise.catch(() => undefined)
+    await source.cleanup()
+  }
+}
+
+async function expectCleanupRejectsReceiptOnce() {
+  let receipt!: Promise<void>
+  let transportCalls = 0
+  const deduplicated = new DeduplicatedLoadSubset({
+    loadSubset: () => {
+      transportCalls += 1
+      begin()
+      write({
+        type: `insert`,
+        value: { id: `row`, projectId: `p1` },
+      })
+      const applied = commit()
+      if (transportCalls === 1) {
+        if (applied === true) {
+          throw new Error(`Expected the subset transaction to remain parked`)
+        }
+        receipt = applied
+      }
+      return applied
+    },
+  })
+  let begin!: () => void
+  let write!: (message: { type: `insert`; value: PersistedLoadRow }) => void
+  let commit!: () => SyncAppliedReceipt
+  const source = createCollection<PersistedLoadRow>({
+    id: `load-subset-applied-cleanup-${collectionSequence++}`,
+    getKey: (row) => row.id,
+    syncMode: `on-demand`,
+    sync: {
+      sync: (params) => {
+        begin = params.begin
+        write = params.write
+        commit = params.commit
+        params.markReady()
+        return {
+          loadSubset: deduplicated.loadSubset,
+          cleanup: () => deduplicated.reset(),
+        }
+      },
+    },
+  })
+  source.startSyncImmediate()
+
+  const persistence = createDeferred<void>()
+  const transaction = createTransaction({
+    mutationFn: () => persistence.promise,
+  })
+  transaction.mutate(() => source.insert({ id: `local`, projectId: `p2` }))
+  const load = requirePendingAppliedReceipt(source._sync.loadSubset({}))
+  let settlements = 0
+  void receipt.then(
+    () => {
+      settlements += 1
+    },
+    () => {
+      settlements += 1
+    },
+  )
+
+  await source.cleanup()
+  await expect(load).rejects.toMatchObject({ name: `AbortError` })
+  await expect(receipt).rejects.toMatchObject({ name: `AbortError` })
+  expect(settlements).toBe(1)
+
+  persistence.resolve()
+  await transaction.isPersisted.promise.catch(() => undefined)
+  await Promise.resolve()
+  expect(settlements).toBe(1)
+
+  // Restarting installs fresh sync controls. Reacquisition must both perform
+  // transport work and publish its rows; stale callbacks cannot prove either.
+  source.startSyncImmediate()
+  const retry = source._sync.loadSubset({})
+  if (retry !== true) await retry
+  expect(transportCalls).toBe(2)
+  expect(source.get(`row`)).toEqual(expect.objectContaining({ id: `row` }))
+
+  await source.cleanup()
 }
 
 async function expectDerivedSyncDuringOptimisticMutation(): Promise<void> {
@@ -2017,14 +2720,58 @@ describe(`loadSubset coverage oracle`, () => {
   })
 
   it(`applies loaded rows before resolving readiness behind a persisting mutation`, async () => {
-    await expectAssertionFailure(expectPersistingLoadIsApplied, {
-      checkpoint: 0,
-      classify: ({ actual, expected }) =>
-        Array.isArray(actual) &&
-        actual.length === 0 &&
-        Array.isArray(expected) &&
-        expected.join(`,`) === `r1,r2`,
-    })(true)
+    await expectPersistingLoadIsApplied(true)
+  })
+
+  it(`applies asynchronously delivered rows before resolving readiness`, async () => {
+    await expectPersistingLoadIsApplied(true, `asynchronous`)
+  })
+
+  it(`applies a transaction opened before its subset demand`, async () => {
+    await expectPersistingLoadIsApplied(true, `synchronous`, `before-load`)
+  })
+
+  it.each([
+    [`free`, `synchronous`],
+    [`free`, `asynchronous`],
+    [`parked`, `synchronous`],
+    [`parked`, `asynchronous`],
+  ] as const)(
+    `preserves applied-receipt timing with a %s gate and %s delivery`,
+    expectAppliedReceiptTiming,
+  )
+
+  it(`does not flush earlier parked sync work to apply a subset load`, async () => {
+    await expectAppliedLoadDoesNotFlushEarlierParkedSync()
+  })
+
+  it(`publishes coverage only after its establishing rows apply`, async () => {
+    await expectCoverageWaitsForAppliedRows()
+  })
+
+  it(`keeps an unrelated stream commit parked during a subset acquisition`, async () => {
+    await expectConcurrentStreamCommitStaysParked()
+  })
+
+  it(`settles a subset receipt after a later immediate commit applies it`, async () => {
+    await expectLaterImmediateCommitSettlesAppliedSubset()
+  })
+
+  it.each([`before-commit`, `while-parked`] as const)(
+    `does not publish coverage when a parked receipt is aborted %s`,
+    expectAbortedReceiptDoesNotPublishCoverage,
+  )
+
+  it(`ignores an abort raised after application starts publishing`, async () => {
+    await expectAbortDuringPublicationDoesNotCancelReceipt()
+  })
+
+  it(`releases only a canceled receipt's event suppression`, async () => {
+    await expectCanceledReceiptReleasesOnlyItsSuppression()
+  })
+
+  it(`rejects an abandoned receipt once without publishing coverage`, async () => {
+    await expectCleanupRejectsReceiptOnce()
   })
 
   it(`publishes synced source rows while a derived mutation persists`, async () => {

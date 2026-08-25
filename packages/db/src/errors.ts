@@ -729,6 +729,14 @@ export class SyncCleanupError extends TanStackDBError {
   }
 }
 
+/** A sync transaction was canceled before its writes became visible. */
+export class SyncTransactionAbortedError extends Error {
+  constructor() {
+    super(`Sync transaction was aborted before application`)
+    this.name = `AbortError`
+  }
+}
+
 // Query Optimizer Errors
 export class QueryOptimizerError extends TanStackDBError {
   constructor(message: string) {

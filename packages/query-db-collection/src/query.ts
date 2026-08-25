@@ -19,6 +19,7 @@ import type {
   DeleteMutationFnParams,
   InsertMutationFnParams,
   LoadSubsetOptions,
+  SyncAppliedReceipt,
   SyncConfig,
   SyncMetadataApi,
   UpdateMutationFnParams,
@@ -891,7 +892,9 @@ export function queryCollectionOptions(
     let startupRetentionSettled = false
     const retainedQueriesPendingRevalidation = new Set<string>()
     const pendingResultApplications = new Map<string, Promise<void>>()
+    const failedResultApplications = new Map<string, unknown>()
     const resultApplicationTokens = new Map<string, object>()
+    const resultApplicationControllers = new Map<string, Set<AbortController>>()
     const effectivePersistedGcTimes = new Map<string, number>()
     const persistedRetentionTimers = new Map<
       string,
@@ -901,7 +904,25 @@ export function queryCollectionOptions(
 
     const invalidatePendingResultApplication = (hashedQueryKey: string) => {
       pendingResultApplications.delete(hashedQueryKey)
+      failedResultApplications.delete(hashedQueryKey)
       resultApplicationTokens.delete(hashedQueryKey)
+      resultApplicationControllers
+        .get(hashedQueryKey)
+        ?.forEach((controller) => controller.abort())
+      resultApplicationControllers.delete(hashedQueryKey)
+    }
+
+    const getResultApplicationSettlement = (
+      hashedQueryKey: string,
+    ): true | Promise<void> => {
+      const pending = pendingResultApplications.get(hashedQueryKey)
+      if (pending) return pending
+
+      if (failedResultApplications.has(hashedQueryKey)) {
+        return Promise.reject(failedResultApplications.get(hashedQueryKey))
+      }
+
+      return true
     }
 
     const getRowMetadata = (rowKey: string | number) => {
@@ -1253,7 +1274,10 @@ export function queryCollectionOptions(
         const unsubscribe = observer.subscribe((result) => {
           // Use a microtask in case `subscribe` is called synchronously, before `unsubscribe` is initialized
           queueMicrotask(() => {
-            if (result.isSuccess || result.isError) {
+            if (
+              (result.isSuccess && !collection.deferDataRefresh) ||
+              result.isError
+            ) {
               unsubscribe()
               const pending = pendingReadyUnsubscribes.get(hashedQueryKey)
               pending?.delete(unsubscribe)
@@ -1319,24 +1343,21 @@ export function queryCollectionOptions(
         const currentResult = observer.getCurrentResult()
 
         if (currentResult.isSuccess) {
-          return pendingResultApplications.get(hashedQueryKey) ?? true
+          if (collection.deferDataRefresh) {
+            return waitForQueryReady(observer, hashedQueryKey).then(() => {
+              const settlement = getResultApplicationSettlement(hashedQueryKey)
+              return settlement === true ? undefined : settlement
+            })
+          }
+          return getResultApplicationSettlement(hashedQueryKey)
         } else if (currentResult.isError) {
           // Error already occurred, reject immediately
           return Promise.reject(currentResult.error)
         } else {
-          // Check QueryClient cache directly - observer's getCurrentResult() may show
-          // a loading state even when data exists in cache. This happens because observer
-          // state can lag behind the QueryClient cache during unsubscribe/resubscribe
-          // cycles (e.g., when a live query is cleaned up and recreated).
-          const cachedData = queryClient.getQueryData(key)
-          if (cachedData !== undefined) {
-            return waitForQueryReady(observer, hashedQueryKey).then(() =>
-              pendingResultApplications.get(hashedQueryKey),
-            )
-          }
-
-          // Query is still loading, wait for the first result
-          return waitForQueryReady(observer, hashedQueryKey)
+          return waitForQueryReady(observer, hashedQueryKey).then(() => {
+            const settlement = getResultApplicationSettlement(hashedQueryKey)
+            return settlement === true ? undefined : settlement
+          })
         }
       }
 
@@ -1403,7 +1424,13 @@ export function queryCollectionOptions(
         if (syncStarted || collection.subscriberCount > 0) {
           subscribeToQuery(localObserver, hashedQueryKey)
         }
-        return pendingResultApplications.get(hashedQueryKey) ?? true
+        if (collection.deferDataRefresh) {
+          return waitForQueryReady(localObserver, hashedQueryKey).then(() => {
+            const settlement = getResultApplicationSettlement(hashedQueryKey)
+            return settlement === true ? undefined : settlement
+          })
+        }
+        return getResultApplicationSettlement(hashedQueryKey)
       }
 
       // Create a promise that resolves when the query result is first available
@@ -1415,12 +1442,15 @@ export function queryCollectionOptions(
         subscribeToQuery(localObserver, hashedQueryKey)
       }
 
-      return readyPromise
+      return readyPromise.then(() => {
+        const settlement = getResultApplicationSettlement(hashedQueryKey)
+        return settlement === true ? undefined : settlement
+      })
     }
 
     type UpdateHandler = Parameters<QueryObserver[`subscribe`]>[0]
 
-    const applySuccessfulResult = (
+    const applySuccessfulResult = async (
       queryKey: QueryKey,
       result: QueryObserverResult<any, any>,
       persistedBaseline?: Map<
@@ -1430,16 +1460,13 @@ export function queryCollectionOptions(
           owners: Set<string>
         }
       >,
-    ) => {
+      signal?: AbortSignal,
+    ): Promise<void> => {
       const hashedQueryKey = hashKey(queryKey)
 
-      if (collection.status === `cleaned-up`) {
+      if (collection.status === `cleaned-up` || signal?.aborted) {
         return
       }
-
-      // Clear error state
-      state.lastError = undefined
-      state.errorCount = 0
 
       const rawData = result.data
       const newItemsArray = select ? select(rawData) : rawData
@@ -1463,12 +1490,6 @@ export function queryCollectionOptions(
       const previouslyOwnedRows = shouldUsePersistedBaseline
         ? new Set(persistedBaseline.keys())
         : getHydratedOwnedRowsForQueryBaseline(hashedQueryKey)
-      // From this point onward the result, including an empty result, is the
-      // authoritative ownership baseline until this query is cleaned up.
-      queryToRows.set(
-        hashedQueryKey,
-        queryToRows.get(hashedQueryKey) ?? new Set<string | number>(),
-      )
 
       const newItemsMap = new Map<string | number, any>()
       newItemsArray.forEach((item) => {
@@ -1476,58 +1497,125 @@ export function queryCollectionOptions(
         newItemsMap.set(key, item)
       })
 
-      begin()
-      if (metadata) {
-        metadata.collection.delete(
-          `${QUERY_COLLECTION_GC_PREFIX}${hashedQueryKey}`,
-        )
+      const previousOwnedRows = queryToRows.has(hashedQueryKey)
+        ? new Set(queryToRows.get(hashedQueryKey))
+        : undefined
+      const affectedRowKeys = new Set([
+        ...previouslyOwnedRows,
+        ...newItemsMap.keys(),
+      ])
+      const previousOwnersByRow = new Map<
+        string | number,
+        Set<string> | undefined
+      >()
+      affectedRowKeys.forEach((key) => {
+        const owners = rowToQueries.get(key)
+        previousOwnersByRow.set(key, owners ? new Set(owners) : undefined)
+      })
+      let transactionActive = false
+
+      const restoreOwnershipTracking = () => {
+        if (!state.observers.has(hashedQueryKey)) return
+
+        if (previousOwnedRows === undefined) {
+          queryToRows.delete(hashedQueryKey)
+        } else {
+          queryToRows.set(hashedQueryKey, previousOwnedRows)
+        }
+        previousOwnersByRow.forEach((owners, key) => {
+          if (owners === undefined) {
+            rowToQueries.delete(key)
+          } else {
+            rowToQueries.set(key, owners)
+          }
+        })
       }
 
-      previouslyOwnedRows.forEach((key) => {
-        const oldItem = shouldUsePersistedBaseline
-          ? persistedBaseline.get(key)?.value
-          : currentSyncedItems.get(key)
-        if (!oldItem) {
+      try {
+        // From this point onward the result, including an empty result, is the
+        // authoritative ownership baseline until this query is cleaned up.
+        queryToRows.set(
+          hashedQueryKey,
+          queryToRows.get(hashedQueryKey) ?? new Set<string | number>(),
+        )
+
+        begin()
+        transactionActive = true
+        if (metadata) {
+          metadata.collection.delete(
+            `${QUERY_COLLECTION_GC_PREFIX}${hashedQueryKey}`,
+          )
+        }
+
+        previouslyOwnedRows.forEach((key) => {
+          const oldItem = shouldUsePersistedBaseline
+            ? persistedBaseline.get(key)?.value
+            : currentSyncedItems.get(key)
+          if (!oldItem) {
+            return
+          }
+          const newItem = newItemsMap.get(key)
+          if (!newItem) {
+            const owners = getPersistedOwners(key)
+            owners.delete(hashedQueryKey)
+            setPersistedOwners(key, owners)
+            const needToRemove = removeRowOwner(key, hashedQueryKey)
+            if (needToRemove) {
+              write({ type: `delete`, value: oldItem })
+            }
+          } else if (!deepEquals(oldItem, newItem)) {
+            write({ type: `update`, value: newItem })
+          }
+        })
+
+        newItemsMap.forEach((newItem, key) => {
+          const owners = getPersistedOwners(key)
+          if (!owners.has(hashedQueryKey)) {
+            owners.add(hashedQueryKey)
+            setPersistedOwners(key, owners)
+          }
+          addRowOwner(key, hashedQueryKey)
+          if (!currentSyncedItems.has(key)) {
+            write({ type: `insert`, value: newItem })
+          }
+        })
+
+        const applied = commit(signal)
+        transactionActive = false
+        retainedQueriesPendingRevalidation.delete(hashedQueryKey)
+        cancelPersistedRetentionExpiry(hashedQueryKey)
+
+        // Readiness is publication: do not expose it until the establishing
+        // transaction's rows and events are visible.
+        if (applied !== true) {
+          await applied
+        }
+        if (signal?.aborted) {
+          restoreOwnershipTracking()
           return
         }
-        const newItem = newItemsMap.get(key)
-        if (!newItem) {
-          const owners = getPersistedOwners(key)
-          owners.delete(hashedQueryKey)
-          setPersistedOwners(key, owners)
-          const needToRemove = removeRowOwner(key, hashedQueryKey)
-          if (needToRemove) {
-            write({ type: `delete`, value: oldItem })
+        markReady()
+      } catch (error) {
+        restoreOwnershipTracking()
+
+        if (transactionActive) {
+          const cancellation = new AbortController()
+          cancellation.abort()
+          try {
+            commit(cancellation.signal)
+          } catch {
+            // Preserve the application error that caused the rollback.
           }
-        } else if (!deepEquals(oldItem, newItem)) {
-          write({ type: `update`, value: newItem })
         }
-      })
-
-      newItemsMap.forEach((newItem, key) => {
-        const owners = getPersistedOwners(key)
-        if (!owners.has(hashedQueryKey)) {
-          owners.add(hashedQueryKey)
-          setPersistedOwners(key, owners)
-        }
-        addRowOwner(key, hashedQueryKey)
-        if (!currentSyncedItems.has(key)) {
-          write({ type: `insert`, value: newItem })
-        }
-      })
-
-      commit()
-      retainedQueriesPendingRevalidation.delete(hashedQueryKey)
-      cancelPersistedRetentionExpiry(hashedQueryKey)
-
-      // Mark collection as ready after first successful query result
-      markReady()
+        throw error
+      }
     }
 
     const reconcileSuccessfulResult = async (
       queryKey: QueryKey,
       result: QueryObserverResult<any, any>,
       applicationToken: object,
+      signal: AbortSignal,
     ) => {
       const hashedQueryKey = hashKey(queryKey)
       const persistedBaseline =
@@ -1538,7 +1626,64 @@ export function queryCollectionOptions(
       ) {
         return
       }
-      applySuccessfulResult(queryKey, result, persistedBaseline)
+      await applySuccessfulResult(queryKey, result, persistedBaseline, signal)
+    }
+
+    const trackResultApplication = (
+      hashedQueryKey: string,
+      application: Promise<void>,
+    ): void => {
+      pendingResultApplications.set(hashedQueryKey, application)
+      const finish = () => {
+        if (pendingResultApplications.get(hashedQueryKey) === application) {
+          pendingResultApplications.delete(hashedQueryKey)
+          return true
+        }
+        return false
+      }
+      void application.then(
+        () => {
+          if (finish()) failedResultApplications.delete(hashedQueryKey)
+        },
+        (error) => {
+          if (!finish()) return
+          failedResultApplications.set(hashedQueryKey, error)
+          state.lastError = error
+          state.errorCount++
+          state.lastErrorUpdatedAt = Date.now()
+          console.error(
+            `[QueryCollection] Error applying query ${String(hashToQueryKey.get(hashedQueryKey))}:`,
+            error,
+          )
+          if (collection.status === `loading`) {
+            markError(error)
+          }
+        },
+      )
+    }
+
+    const enqueueResultApplication = (
+      hashedQueryKey: string,
+      apply: (signal: AbortSignal) => Promise<void>,
+    ): void => {
+      const controller = new AbortController()
+      const controllers =
+        resultApplicationControllers.get(hashedQueryKey) ?? new Set()
+      controllers.add(controller)
+      resultApplicationControllers.set(hashedQueryKey, controllers)
+      const previousApplication = pendingResultApplications.get(hashedQueryKey)
+      const run = () => apply(controller.signal)
+      const application = previousApplication
+        ? previousApplication.then(run, run)
+        : run()
+      const cleanupController = () => {
+        controllers.delete(controller)
+        if (controllers.size === 0) {
+          resultApplicationControllers.delete(hashedQueryKey)
+        }
+      }
+      void application.then(cleanupController, cleanupController)
+      trackResultApplication(hashedQueryKey, application)
     }
 
     // eslint-disable-next-line no-shadow
@@ -1546,6 +1691,11 @@ export function queryCollectionOptions(
       const hashedQueryKey = hashKey(queryKey)
       const handleQueryResult: UpdateHandler = (result) => {
         if (result.isSuccess) {
+          // Error state follows observer notification order, not the later
+          // publication time of a queued successful result.
+          state.lastError = undefined
+          state.errorCount = 0
+
           // Skip processing this result while data refreshes are deferred.
           // Optimistic state covers the gap. Once the barrier resolves,
           // trigger a fresh refetch to get authoritative data.
@@ -1582,26 +1732,18 @@ export function queryCollectionOptions(
 
             const applicationToken = {}
             resultApplicationTokens.set(hashedQueryKey, applicationToken)
-            const application = reconcileSuccessfulResult(
-              queryKey,
-              result,
-              applicationToken,
-            ).catch((error) => {
-              console.error(
-                `[QueryCollection] Error reconciling query ${String(queryKey)}:`,
-                error,
-              )
-            })
-            pendingResultApplications.set(hashedQueryKey, application)
-            void application.finally(() => {
-              if (
-                pendingResultApplications.get(hashedQueryKey) === application
-              ) {
-                pendingResultApplications.delete(hashedQueryKey)
-              }
-            })
+            enqueueResultApplication(hashedQueryKey, (signal) =>
+              reconcileSuccessfulResult(
+                queryKey,
+                result,
+                applicationToken,
+                signal,
+              ),
+            )
           } else {
-            applySuccessfulResult(queryKey, result)
+            enqueueResultApplication(hashedQueryKey, (signal) =>
+              applySuccessfulResult(queryKey, result, undefined, signal),
+            )
           }
         } else if (result.isError) {
           const isNewError =
@@ -2088,7 +2230,7 @@ export function queryCollectionOptions(
     getKey: (item: any) => string | number
     begin: () => void
     write: (message: Omit<ChangeMessage<any>, `key`>) => void
-    commit: () => void
+    commit: () => SyncAppliedReceipt
     updateCacheData?: (items: Array<any>) => void
   } | null = null
 

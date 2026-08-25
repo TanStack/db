@@ -379,6 +379,16 @@ test('ignores snapshot that resolves after up-to-date message', async () => {
 })
 ```
 
+### Treat Every Review Bug as a Test Gap
+
+When a reviewer agent confirms a bug, it must also ask why the existing tests
+did not catch it. The finding should name the missing test law, state
+transition, generator dimension, adapter boundary, or assertion. If a test or
+oracle should already have caught the bug, identify the false-green model,
+classifier, fixture, or assertion that let it pass. Use that analysis to suggest
+the smallest test or oracle improvement that would catch the same class of bug,
+not only the reported example.
+
 ### Name Tests After Behavior
 
 Test names should state the behavior they prove. Do not put issue or pull

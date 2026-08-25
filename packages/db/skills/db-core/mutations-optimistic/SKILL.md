@@ -93,6 +93,11 @@ settlement or catch rollback errors. For a non-empty transaction, this normally
 means its `mutationFn` returned; it proves upload, confirmation, or read-back
 only when that function waits for the backend observation before returning.
 
+Do not start or await collection preloads, live-query preloads, or direct
+`loadSubset()` calls inside `mutationFn`. Sync commits queue behind mutation
+persistence, so the preload can wait on the mutation that is waiting on it.
+Use the collection adapter's documented mutation acknowledgement pattern.
+
 ---
 
 ## Core Patterns

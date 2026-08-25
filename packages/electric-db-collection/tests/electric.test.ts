@@ -23,6 +23,17 @@ import type { StandardSchemaV1 } from '@standard-schema/spec'
 
 const NativeAbortController = globalThis.AbortController
 
+function createDeferred<T>(): {
+  promise: Promise<T>
+  resolve: (value: T | PromiseLike<T>) => void
+} {
+  let resolve!: (value: T | PromiseLike<T>) => void
+  const promise = new Promise<T>((resolvePromise) => {
+    resolve = resolvePromise
+  })
+  return { promise, resolve }
+}
+
 // Mock the ShapeStream module
 const mockSubscribe = vi.fn()
 const mockRequestSnapshot = vi.fn()
@@ -210,6 +221,37 @@ describe(`Electric Integration`, () => {
     }
   })
 
+  it(`does not let a parked ready receipt overwrite a later stream error`, async () => {
+    const persistence = createDeferred<void>()
+    const transaction = createTransaction({
+      mutationFn: () => persistence.promise,
+    })
+    const streamError = new Error(`stream failed`)
+    const loggedError = vi.spyOn(console, `error`).mockImplementation(() => {})
+
+    try {
+      transaction.mutate(() => collection.insert({ id: 99, name: `Local row` }))
+      subscriber([{ headers: { control: `up-to-date` } }])
+      expect(collection.status).toBe(`loading`)
+
+      const streamOptions = vi.mocked(ShapeStream).mock.calls.at(-1)?.[0] as
+        | { onError?: (error: unknown) => void }
+        | undefined
+      streamOptions?.onError?.(streamError)
+      expect(collection.status).toBe(`error`)
+
+      persistence.resolve()
+      await transaction.isPersisted.promise
+      await Promise.resolve()
+
+      expect(collection.status).toBe(`error`)
+    } finally {
+      persistence.resolve()
+      await transaction.isPersisted.promise.catch(() => undefined)
+      loggedError.mockRestore()
+    }
+  })
+
   it(`should handle incoming insert messages and commit on up-to-date`, () => {
     // Simulate incoming insert message
     subscriber([
@@ -230,6 +272,38 @@ describe(`Electric Integration`, () => {
 
     expect(stripCollectionState(collection.state)).toEqual(
       new Map([[1, { id: 1, name: `Test User` }]]),
+    )
+  })
+
+  it(`marks the source ready only after its initial rows are applied`, async () => {
+    const persistence = createDeferred<void>()
+    const transaction = createTransaction({
+      mutationFn: () => persistence.promise,
+    })
+    transaction.mutate(() =>
+      collection.insert({ id: 99, name: `Optimistic user` }),
+    )
+
+    subscriber([
+      {
+        key: `1`,
+        value: { id: 1, name: `Synced user` },
+        headers: { operation: `insert` },
+      },
+      { headers: { control: `up-to-date` } },
+    ])
+    await Promise.resolve()
+
+    expect(collection.status).toBe(`loading`)
+    expect(collection.get(1)).toBeUndefined()
+
+    persistence.resolve()
+    await transaction.isPersisted.promise
+    await collection.stateWhenReady()
+
+    expect(collection.status).toBe(`ready`)
+    expect(collection.get(1)).toEqual(
+      expect.objectContaining({ id: 1, name: `Synced user` }),
     )
   })
 
@@ -2959,6 +3033,63 @@ describe(`Electric Integration`, () => {
         expect(testCollection.has(2)).toBe(false)
       } finally {
         resolveSnapshot({ metadata: {}, data: [] })
+        await testCollection.cleanup()
+      }
+    })
+
+    it(`does not publish a progressive snapshot aborted while its commit is parked`, async () => {
+      mockFetchSnapshot.mockResolvedValue({
+        metadata: {},
+        data: [
+          {
+            key: `2`,
+            value: { id: 2, name: `Obsolete snapshot` },
+            headers: { operation: `insert` },
+          },
+        ],
+      })
+      mockSubscribe.mockImplementation(() => () => {})
+      const testCollection = createCollection(
+        electricCollectionOptions({
+          id: `progressive-parked-abort-test`,
+          shapeOptions: {
+            url: `http://test-url`,
+            params: { table: `test_table` },
+          },
+          syncMode: `progressive`,
+          getKey: (item: Row) => item.id as number,
+          startSync: true,
+        }),
+      )
+      const persistence = createDeferred<void>()
+      const transaction = createTransaction({
+        mutationFn: () => persistence.promise,
+      })
+      const abortController = new AbortController()
+
+      try {
+        transaction.mutate(() =>
+          testCollection.insert({ id: 3, name: `Local row` }),
+        )
+        const load = testCollection._sync.loadSubset({
+          limit: 1,
+          signal: abortController.signal,
+        })
+        await vi.waitFor(() => expect(mockFetchSnapshot).toHaveBeenCalledOnce())
+        await Promise.resolve()
+        await Promise.resolve()
+
+        expect(testCollection.has(2)).toBe(false)
+        abortController.abort()
+        persistence.resolve()
+        await transaction.isPersisted.promise
+        if (load instanceof Promise) await load
+
+        expect(testCollection.has(2)).toBe(false)
+      } finally {
+        abortController.abort()
+        persistence.resolve()
+        await transaction.isPersisted.promise.catch(() => undefined)
         await testCollection.cleanup()
       }
     })

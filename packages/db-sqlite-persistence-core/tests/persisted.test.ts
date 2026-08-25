@@ -818,6 +818,171 @@ describe(`persistedCollectionOptions`, () => {
     )
   })
 
+  it(`does not apply or persist a wrapped sync transaction committed with an aborted signal`, async () => {
+    const adapter = createRecordingAdapter()
+    let remoteBegin: (() => void) | undefined
+    let remoteWrite:
+      | ((message: { type: `insert`; value: Todo }) => void)
+      | undefined
+    let remoteCommit:
+      | ((signal?: AbortSignal) => true | Promise<void>)
+      | undefined
+    const collection = createCollection(
+      persistedCollectionOptions<Todo, string>({
+        id: `sync-present-aborted-commit`,
+        getKey: (item) => item.id,
+        sync: {
+          sync: ({ begin, write, commit, markReady }) => {
+            remoteBegin = begin
+            remoteWrite = write as (message: {
+              type: `insert`
+              value: Todo
+            }) => void
+            remoteCommit = commit
+            markReady()
+          },
+        },
+        persistence: { adapter },
+      }),
+    )
+
+    try {
+      await collection.stateWhenReady()
+      const abortController = new AbortController()
+      abortController.abort()
+      remoteBegin?.()
+      remoteWrite?.({
+        type: `insert`,
+        value: { id: `aborted`, title: `Must not publish` },
+      })
+      await expect(
+        remoteCommit?.(abortController.signal),
+      ).rejects.toMatchObject({ name: `AbortError` })
+      await flushAsyncWork()
+
+      expect(collection.get(`aborted`)).toBeUndefined()
+      expect(adapter.applyCommittedTxCalls).toHaveLength(0)
+    } finally {
+      await collection.cleanup()
+    }
+  })
+
+  it(`persists a wrapped sync transaction when abort follows application`, async () => {
+    const adapter = createRecordingAdapter()
+    let remoteBegin: (() => void) | undefined
+    let remoteWrite:
+      | ((message: { type: `insert`; value: Todo }) => void)
+      | undefined
+    let remoteCommit:
+      | ((signal?: AbortSignal) => true | Promise<void>)
+      | undefined
+    const collection = createCollection(
+      persistedCollectionOptions<Todo, string>({
+        id: `sync-present-abort-after-application`,
+        getKey: (item) => item.id,
+        sync: {
+          sync: ({ begin, write, commit, markReady }) => {
+            remoteBegin = begin
+            remoteWrite = write as (message: {
+              type: `insert`
+              value: Todo
+            }) => void
+            remoteCommit = commit
+            markReady()
+          },
+        },
+        persistence: { adapter },
+      }),
+    )
+    let releaseMutation!: () => void
+    const mutationGate = new Promise<void>((resolve) => {
+      releaseMutation = resolve
+    })
+    const transaction = createTransaction({
+      mutationFn: () => mutationGate,
+    })
+
+    try {
+      await collection.stateWhenReady()
+      transaction.mutate(() => {
+        collection.insert({ id: `local`, title: `Optimistic gate` })
+      })
+
+      const abortController = new AbortController()
+      const subscription = collection.subscribeChanges((changes) => {
+        if (changes.some((change) => change.key === `remote`)) {
+          abortController.abort()
+        }
+      })
+      remoteBegin?.()
+      remoteWrite?.({
+        type: `insert`,
+        value: { id: `remote`, title: `Already visible` },
+      })
+      const receipt = remoteCommit?.(abortController.signal)
+      expect(receipt).toBeInstanceOf(Promise)
+
+      releaseMutation()
+      await transaction.isPersisted.promise
+      await receipt
+      subscription.unsubscribe()
+
+      expect(stripVirtualProps(collection.get(`remote`))).toEqual({
+        id: `remote`,
+        title: `Already visible`,
+      })
+      expect(adapter.applyCommittedTxCalls).toHaveLength(1)
+    } finally {
+      releaseMutation()
+      await transaction.isPersisted.promise.catch(() => undefined)
+      await collection.cleanup()
+    }
+  })
+
+  it(`rejects a wrapped sync receipt when persistence fails`, async () => {
+    const adapter = createRecordingAdapter()
+    const persistenceError = new Error(`persistence failed`)
+    adapter.applyCommittedTx = () => Promise.reject(persistenceError)
+    let remoteBegin: (() => void) | undefined
+    let remoteWrite:
+      | ((message: { type: `insert`; value: Todo }) => void)
+      | undefined
+    let remoteCommit: (() => true | Promise<void>) | undefined
+    const collection = createCollection(
+      persistedCollectionOptions<Todo, string>({
+        id: `sync-present-persistence-error`,
+        getKey: (item) => item.id,
+        sync: {
+          sync: ({ begin, write, commit, markReady }) => {
+            remoteBegin = begin
+            remoteWrite = write as (message: {
+              type: `insert`
+              value: Todo
+            }) => void
+            remoteCommit = commit
+            markReady()
+          },
+        },
+        persistence: { adapter },
+      }),
+    )
+
+    try {
+      await collection.stateWhenReady()
+      remoteBegin?.()
+      remoteWrite?.({
+        type: `insert`,
+        value: { id: `failed`, title: `Not durable` },
+      })
+
+      await expect(Promise.resolve(remoteCommit?.())).rejects.toBe(
+        persistenceError,
+      )
+    } finally {
+      await collection.cleanup()
+    }
+  })
+
   it(`preserves row metadata set before a metadata-less insert in the same sync transaction`, async () => {
     const adapter = createRecordingAdapter()
     const ownership = { queryCollection: { owners: [`gc:q1`] } }
@@ -1097,6 +1262,151 @@ describe(`persistedCollectionOptions`, () => {
       id: `during-hydrate`,
       title: `During hydrate`,
     })
+  })
+
+  it(`discards a hydration-buffered transaction aborted before replay`, async () => {
+    const adapter = createRecordingAdapter()
+    let resolveLoadSubset: (() => void) | undefined
+    adapter.loadSubset = async () => {
+      await new Promise<void>((resolve) => {
+        resolveLoadSubset = resolve
+      })
+      return []
+    }
+    let remoteBegin: (() => void) | undefined
+    let remoteWrite:
+      | ((message: { type: `insert`; value: Todo }) => void)
+      | undefined
+    let remoteCommit:
+      | ((signal?: AbortSignal) => true | Promise<void>)
+      | undefined
+    const collection = createCollection(
+      persistedCollectionOptions<Todo, string>({
+        id: `sync-present-aborted-hydration-queue`,
+        getKey: (item) => item.id,
+        sync: {
+          sync: ({ begin, write, commit, markReady }) => {
+            remoteBegin = begin
+            remoteWrite = write as (message: {
+              type: `insert`
+              value: Todo
+            }) => void
+            remoteCommit = commit
+            markReady()
+          },
+        },
+        persistence: { adapter },
+      }),
+    )
+
+    try {
+      const ready = collection.stateWhenReady()
+      for (let attempt = 0; attempt < 20 && !resolveLoadSubset; attempt++) {
+        await flushAsyncWork()
+      }
+      const abortController = new AbortController()
+      remoteBegin?.()
+      remoteWrite?.({
+        type: `insert`,
+        value: { id: `aborted`, title: `Must not replay` },
+      })
+      const applied = remoteCommit?.(abortController.signal)
+      abortController.abort()
+      resolveLoadSubset?.()
+      await ready
+      if (applied !== true) {
+        await expect(applied).rejects.toMatchObject({ name: `AbortError` })
+      }
+      await flushAsyncWork()
+
+      expect(collection.get(`aborted`)).toBeUndefined()
+      expect(adapter.applyCommittedTxCalls).toHaveLength(0)
+    } finally {
+      resolveLoadSubset?.()
+      await collection.cleanup()
+    }
+  })
+
+  it(`rejects every hydration-buffered receipt when replay fails`, async () => {
+    const adapter = createRecordingAdapter()
+    let resolveLoadSubset: (() => void) | undefined
+    adapter.loadSubset = async () => {
+      await new Promise<void>((resolve) => {
+        resolveLoadSubset = resolve
+      })
+      return []
+    }
+
+    const replayError = new Error(`replay key failed`)
+    let bufferedRowKeyReads = 0
+    let remoteBegin: (() => void) | undefined
+    let remoteWrite:
+      | ((message: { type: `insert`; value: Todo }) => void)
+      | undefined
+    let remoteCommit: (() => true | Promise<void>) | undefined
+
+    const collection = createCollection(
+      persistedCollectionOptions<Todo, string>({
+        id: `sync-present-replay-failure-receipt`,
+        getKey: (item) => {
+          if (item.id === `during-hydrate`) {
+            bufferedRowKeyReads++
+            if (bufferedRowKeyReads === 2) {
+              throw replayError
+            }
+          }
+          return item.id
+        },
+        sync: {
+          sync: ({ begin, write, commit, markReady }) => {
+            remoteBegin = begin
+            remoteWrite = write as (message: {
+              type: `insert`
+              value: Todo
+            }) => void
+            remoteCommit = commit
+            markReady()
+            return {}
+          },
+        },
+        persistence: {
+          adapter,
+        },
+      }),
+    )
+
+    const readyPromise = collection.stateWhenReady()
+    for (let attempt = 0; attempt < 20 && !resolveLoadSubset; attempt++) {
+      await flushAsyncWork()
+    }
+
+    remoteBegin?.()
+    remoteWrite?.({
+      type: `insert`,
+      value: { id: `during-hydrate`, title: `During hydrate` },
+    })
+    const failingReceipt = remoteCommit?.()
+    remoteBegin?.()
+    remoteWrite?.({
+      type: `insert`,
+      value: { id: `sibling`, title: `Sibling` },
+    })
+    const siblingReceipt = remoteCommit?.()
+    expect(failingReceipt).toBeInstanceOf(Promise)
+    expect(siblingReceipt).toBeInstanceOf(Promise)
+    const failingExpectation = expect(
+      Promise.resolve(failingReceipt),
+    ).rejects.toBe(replayError)
+    const siblingExpectation = expect(
+      Promise.resolve(siblingReceipt),
+    ).rejects.toBe(replayError)
+
+    resolveLoadSubset?.()
+    await readyPromise
+    await failingExpectation
+    await siblingExpectation
+
+    await collection.cleanup()
   })
 
   it(`marks ready even when persisted startup fails before markReady`, async () => {
