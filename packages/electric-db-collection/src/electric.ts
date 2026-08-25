@@ -542,7 +542,7 @@ function createLoadSubsetDedupe<T extends Row<unknown>>({
     value: T
     metadata: Record<string, unknown>
   }) => void
-  commit: () => SyncAppliedReceipt
+  commit: (signal?: AbortSignal) => SyncAppliedReceipt
   getCommitCursor: () => number
   waitForCommitsAfter: (cursor: number) => Promise<void>
   collectionId?: string
@@ -599,7 +599,7 @@ function createLoadSubsetDedupe<T extends Row<unknown>>({
               metadata: { ...row.headers },
             })
           }
-          await commit()
+          await commit(opts.signal)
           debug(`${logPrefix}Applied snapshot with ${rows.length} rows`)
         }
       } catch (error) {
@@ -1503,9 +1503,9 @@ function createElectricSync<T extends Row<unknown>>(
       } = params
       let commitSequence = 0
       const pendingAppliedReceipts = new Map<number, Promise<void>>()
-      const commit = (): SyncAppliedReceipt => {
+      const commit = (signal?: AbortSignal): SyncAppliedReceipt => {
         const sequence = ++commitSequence
-        const applied = commitSyncTransaction()
+        const applied = commitSyncTransaction(signal)
         if (applied === true) {
           return true
         }

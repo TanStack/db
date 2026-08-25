@@ -279,7 +279,11 @@ describe(`TrailBase Integration`, () => {
   it(`does not publish a parked subset page after its request is aborted`, async () => {
     const recordApi = new MockRecordApi<Data>()
     recordApi.list.mockResolvedValue({
-      records: [{ id: 1, updated: 0, data: `obsolete` }],
+      records: Array.from({ length: 256 }, (_, index) => ({
+        id: index + 1,
+        updated: 0,
+        data: `obsolete`,
+      })),
     })
     recordApi.subscribe.mockResolvedValue(new TransformStream<Event>().readable)
     const collection = createCollection(
@@ -320,6 +324,7 @@ describe(`TrailBase Integration`, () => {
       if (load instanceof Promise) await load
 
       expect(collection.get(1)).toBeUndefined()
+      expect(recordApi.list).toHaveBeenCalledOnce()
     } finally {
       abortController.abort()
       resolvePersistence()

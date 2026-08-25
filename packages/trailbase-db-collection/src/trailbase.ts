@@ -254,6 +254,7 @@ export function trailBaseCollectionOptions<
           }
 
           await commit(opts.signal)
+          if (cancelled || opts.signal?.aborted) return
 
           remaining -= length
 

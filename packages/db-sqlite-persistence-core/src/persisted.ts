@@ -434,7 +434,7 @@ type SyncControlFns<T extends object, TKey extends string | number> = {
           | { type: `delete`; key: TKey },
       ) => void)
     | null
-  commit: (() => SyncAppliedReceipt) | null
+  commit: ((signal?: AbortSignal) => SyncAppliedReceipt) | null
   truncate: (() => void) | null
   metadata: SyncMetadataApi<TKey> | null
 }
@@ -587,6 +587,7 @@ type BufferedSyncTransaction<T extends object, TKey extends string | number> = {
   >
   truncate: boolean
   internal: boolean
+  signal?: AbortSignal
   resolveApplied?: () => void
 }
 
@@ -841,7 +842,9 @@ class PersistedCollectionRuntime<
     const commit = syncControls.commit
     this.syncControls = {
       ...syncControls,
-      commit: commit ? () => this.trackAppliedReceipt(commit()) : null,
+      commit: commit
+        ? (signal) => this.trackAppliedReceipt(commit(signal))
+        : null,
     }
   }
 
@@ -1348,17 +1351,21 @@ class PersistedCollectionRuntime<
     }
   }
 
-  private async applyBufferedSyncTransactionUnsafe(
+  private applyBufferedSyncTransactionUnsafe(
     transaction: BufferedSyncTransaction<T, TKey>,
-  ): Promise<void> {
+  ): void {
+    if (transaction.signal?.aborted) {
+      transaction.resolveApplied?.()
+      return
+    }
+
     const { begin, write, commit, truncate, metadata } = this.syncControls
     if (!begin || !write || !commit) {
       transaction.resolveApplied?.()
       return
     }
 
-    let receiptLinkedToCoreApplication = false
-    const applyToCollection = (): boolean => {
+    const applyToCollection = (): SyncAppliedReceipt => {
       begin()
 
       if (transaction.truncate) {
@@ -1396,31 +1403,34 @@ class PersistedCollectionRuntime<
         }
       }
 
-      const applied = commit()
+      const applied = commit(transaction.signal)
       if (applied === true) {
         transaction.resolveApplied?.()
-        return false
       } else {
         void applied.then(() => transaction.resolveApplied?.())
-        return true
       }
+      return applied
     }
 
     try {
       if (transaction.internal) {
-        receiptLinkedToCoreApplication =
-          this.withInternalApply(applyToCollection)
+        this.withInternalApply(applyToCollection)
         return
       }
 
-      receiptLinkedToCoreApplication = applyToCollection()
-      await this.persistAndBroadcastExternalSyncTransactionUnsafe(transaction)
+      const applied = applyToCollection()
+      const persistAfterApplication = async () => {
+        if (applied !== true) await applied
+        if (transaction.signal?.aborted) return
+        await this.persistAndBroadcastExternalSyncTransaction(transaction)
+      }
+      void persistAfterApplication().catch((error) => {
+        console.warn(`Failed to persist buffered sync transaction:`, error)
+      })
     } catch (error) {
       // A replay failure before commit has no core receipt that cleanup can
       // settle. Release the wrapper receipt so the source load cannot hang.
-      if (!receiptLinkedToCoreApplication) {
-        transaction.resolveApplied?.()
-      }
+      transaction.resolveApplied?.()
       throw error
     }
   }
@@ -2506,13 +2516,14 @@ function createWrappedSyncConfig<
             params.truncate()
           }
         },
-        commit: () => {
+        commit: (signal?: AbortSignal) => {
           const openTransaction = transactionStack.pop()
           if (!openTransaction) {
-            return params.commit()
+            return params.commit(signal)
           }
 
           if (openTransaction.queuedBecauseHydrating) {
+            if (signal?.aborted) return true
             let resolveApplied!: () => void
             const applied = new Promise<void>((resolve) => {
               resolveApplied = resolve
@@ -2524,15 +2535,18 @@ function createWrappedSyncConfig<
                 openTransaction.collectionMetadataWrites,
               truncate: openTransaction.truncate,
               internal: openTransaction.internal,
+              signal,
               resolveApplied,
             })
             return applied
           }
 
-          const applied = params.commit()
+          const applied = params.commit(signal)
           if (!openTransaction.internal) {
-            void runtime
-              .persistAndBroadcastExternalSyncTransaction({
+            const persistAfterApplication = async () => {
+              if (applied !== true) await applied
+              if (signal?.aborted) return
+              await runtime.persistAndBroadcastExternalSyncTransaction({
                 operations: openTransaction.operations,
                 rowMetadataWrites: openTransaction.rowMetadataWrites,
                 collectionMetadataWrites:
@@ -2540,12 +2554,10 @@ function createWrappedSyncConfig<
                 truncate: openTransaction.truncate,
                 internal: false,
               })
-              .catch((error) => {
-                console.warn(
-                  `Failed to persist wrapped sync transaction:`,
-                  error,
-                )
-              })
+            }
+            void persistAfterApplication().catch((error) => {
+              console.warn(`Failed to persist wrapped sync transaction:`, error)
+            })
           }
           return applied
         },

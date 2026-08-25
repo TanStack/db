@@ -818,6 +818,53 @@ describe(`persistedCollectionOptions`, () => {
     )
   })
 
+  it(`does not apply or persist a wrapped sync transaction committed with an aborted signal`, async () => {
+    const adapter = createRecordingAdapter()
+    let remoteBegin: (() => void) | undefined
+    let remoteWrite:
+      | ((message: { type: `insert`; value: Todo }) => void)
+      | undefined
+    let remoteCommit:
+      | ((signal?: AbortSignal) => true | Promise<void>)
+      | undefined
+    const collection = createCollection(
+      persistedCollectionOptions<Todo, string>({
+        id: `sync-present-aborted-commit`,
+        getKey: (item) => item.id,
+        sync: {
+          sync: ({ begin, write, commit, markReady }) => {
+            remoteBegin = begin
+            remoteWrite = write as (message: {
+              type: `insert`
+              value: Todo
+            }) => void
+            remoteCommit = commit
+            markReady()
+          },
+        },
+        persistence: { adapter },
+      }),
+    )
+
+    try {
+      await collection.stateWhenReady()
+      const abortController = new AbortController()
+      abortController.abort()
+      remoteBegin?.()
+      remoteWrite?.({
+        type: `insert`,
+        value: { id: `aborted`, title: `Must not publish` },
+      })
+      await remoteCommit?.(abortController.signal)
+      await flushAsyncWork()
+
+      expect(collection.get(`aborted`)).toBeUndefined()
+      expect(adapter.applyCommittedTxCalls).toHaveLength(0)
+    } finally {
+      await collection.cleanup()
+    }
+  })
+
   it(`preserves row metadata set before a metadata-less insert in the same sync transaction`, async () => {
     const adapter = createRecordingAdapter()
     const ownership = { queryCollection: { owners: [`gc:q1`] } }
@@ -1097,6 +1144,67 @@ describe(`persistedCollectionOptions`, () => {
       id: `during-hydrate`,
       title: `During hydrate`,
     })
+  })
+
+  it(`discards a hydration-buffered transaction aborted before replay`, async () => {
+    const adapter = createRecordingAdapter()
+    let resolveLoadSubset: (() => void) | undefined
+    adapter.loadSubset = async () => {
+      await new Promise<void>((resolve) => {
+        resolveLoadSubset = resolve
+      })
+      return []
+    }
+    let remoteBegin: (() => void) | undefined
+    let remoteWrite:
+      | ((message: { type: `insert`; value: Todo }) => void)
+      | undefined
+    let remoteCommit:
+      | ((signal?: AbortSignal) => true | Promise<void>)
+      | undefined
+    const collection = createCollection(
+      persistedCollectionOptions<Todo, string>({
+        id: `sync-present-aborted-hydration-queue`,
+        getKey: (item) => item.id,
+        sync: {
+          sync: ({ begin, write, commit, markReady }) => {
+            remoteBegin = begin
+            remoteWrite = write as (message: {
+              type: `insert`
+              value: Todo
+            }) => void
+            remoteCommit = commit
+            markReady()
+          },
+        },
+        persistence: { adapter },
+      }),
+    )
+
+    try {
+      const ready = collection.stateWhenReady()
+      for (let attempt = 0; attempt < 20 && !resolveLoadSubset; attempt++) {
+        await flushAsyncWork()
+      }
+      const abortController = new AbortController()
+      remoteBegin?.()
+      remoteWrite?.({
+        type: `insert`,
+        value: { id: `aborted`, title: `Must not replay` },
+      })
+      const applied = remoteCommit?.(abortController.signal)
+      abortController.abort()
+      resolveLoadSubset?.()
+      await ready
+      if (applied !== true) await applied
+      await flushAsyncWork()
+
+      expect(collection.get(`aborted`)).toBeUndefined()
+      expect(adapter.applyCommittedTxCalls).toHaveLength(0)
+    } finally {
+      resolveLoadSubset?.()
+      await collection.cleanup()
+    }
   })
 
   it(`settles a hydration-buffered receipt when replay fails`, async () => {
