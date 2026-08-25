@@ -478,6 +478,12 @@ demand. Live-query plumbing preserves these outcomes through lazy demand and
 window coordination. Only the root paginated source may use them to replace a
 peek-based pagination decision.
 
+The coverage registry accepts that exact applied outcome rather than a
+request-shaped coverage claim. It first rejects stale generations and `unknown`
+extent, then a source-specific projector may turn the authoritative outcome
+into a coverage fact. Callers cannot publish coverage by separately asserting
+that a request was applied or authoritative.
+
 A transaction `mutationFn` must not start or await collection or live-query
 preloads. User persistence owns the causal queue while that function runs, so a
 preload that waits for a queued sync commit can wait on the mutation that is

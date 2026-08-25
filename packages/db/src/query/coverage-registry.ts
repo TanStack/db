@@ -1,3 +1,5 @@
+import type { AppliedLoadSubsetOutcome } from '../types.js'
+
 const demandLeaseBrand: unique symbol = Symbol(`DemandLease`)
 const acquisitionTokenBrand: unique symbol = Symbol(`AcquisitionToken`)
 
@@ -9,19 +11,8 @@ export type AcquisitionToken = {
   readonly [acquisitionTokenBrand]: true
 }
 
-/**
- * Evidence accepted at the coverage boundary.
- *
- * Outcome plumbing constructs this only after the adapter result is
- * authoritative for the stated region and every establishing write is
- * applied. Unknown, rejected, canceled, and obsolete outcomes never reach
- * this boundary.
- */
-export type AppliedCoveragePublication<TCoverage> = {
-  applied: boolean
-  authoritative: boolean
-  generation: number
-  coverage: TCoverage
+export type AuthoritativeAppliedLoadSubsetOutcome = AppliedLoadSubsetOutcome & {
+  extent: Exclude<AppliedLoadSubsetOutcome['extent'], `unknown`>
 }
 
 type LeaseRecord<TDemand> = {
@@ -41,6 +32,13 @@ type AcquisitionRecord<TCoverage, TRowKey extends string | number> = {
 export type CoverageRegistryOptions<TDemand, TCoverage> = {
   coversDemand: (coverage: TCoverage, demand: TDemand) => boolean
   coversCoverage: (coverage: TCoverage, candidate: TCoverage) => boolean
+  /**
+   * Projects an exact applied source fact into the registry's coverage
+   * domain. Return undefined when that fact cannot prove coverage.
+   */
+  projectAppliedCoverage: (
+    outcome: AuthoritativeAppliedLoadSubsetOutcome,
+  ) => TCoverage | undefined
 }
 
 export type RowOwnershipUpdate<TRowKey extends string | number> = {
@@ -71,6 +69,9 @@ export class CoverageRegistry<
     coverage: TCoverage,
     candidate: TCoverage,
   ) => boolean
+  private readonly projectAppliedCoverage: (
+    outcome: AuthoritativeAppliedLoadSubsetOutcome,
+  ) => TCoverage | undefined
   private readonly leases = new Map<
     DemandLease<TDemand>,
     LeaseRecord<TDemand>
@@ -85,6 +86,7 @@ export class CoverageRegistry<
   constructor(options: CoverageRegistryOptions<TDemand, TCoverage>) {
     this.coversDemand = options.coversDemand
     this.coversCoverage = options.coversCoverage
+    this.projectAppliedCoverage = options.projectAppliedCoverage
   }
 
   addLease(demand: TDemand): DemandLease<TDemand> {
@@ -137,21 +139,27 @@ export class CoverageRegistry<
     acquisitionRecord.leases.add(lease as DemandLease<unknown>)
   }
 
-  publishCoverage(
+  /**
+   * Publishes only coverage proved by an exact, applied source outcome.
+   * Unknown source extent is request state, not achieved coverage.
+   */
+  publishOutcome(
     acquisition: AcquisitionToken,
-    publication: AppliedCoveragePublication<TCoverage>,
+    outcome: AppliedLoadSubsetOutcome,
   ): boolean {
     const record = this.acquisitions.get(acquisition)
     if (
       !record ||
-      record.generation !== publication.generation ||
-      !publication.applied ||
-      !publication.authoritative
+      record.generation !== outcome.generation ||
+      outcome.extent === `unknown`
     ) {
       return false
     }
 
-    record.coverage = publication.coverage
+    const coverage = this.projectAppliedCoverage(outcome)
+    if (coverage === undefined) return false
+
+    record.coverage = coverage
     return true
   }
 

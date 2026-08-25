@@ -2,6 +2,7 @@ import { fc, test as fcTest } from '@fast-check/vitest'
 import { describe, expect, it, vi } from 'vitest'
 import { CoverageRegistry } from '../../src/query/coverage-registry.js'
 import { oraclePropertyOptions } from '../oracle-config.js'
+import type { AppliedLoadSubsetOutcome } from '../../src/types.js'
 
 type Prefix = number
 type RowKey = string
@@ -10,7 +11,23 @@ function createPrefixRegistry(): CoverageRegistry<Prefix, Prefix, RowKey> {
   return new CoverageRegistry({
     coversDemand: (coverage, demand) => coverage >= demand,
     coversCoverage: (coverage, candidate) => coverage >= candidate,
+    projectAppliedCoverage: (outcome) =>
+      outcome.collectionId === `prefixes` ? outcome.demand.limit : undefined,
   })
+}
+
+function createPrefixOutcome(
+  generation: number,
+  prefix: Prefix,
+  extent: AppliedLoadSubsetOutcome['extent'] = `exhausted`,
+  collectionId = `prefixes`,
+): AppliedLoadSubsetOutcome {
+  return {
+    collectionId,
+    demand: { limit: prefix },
+    generation,
+    extent,
+  }
 }
 
 function publishPrefix(
@@ -20,12 +37,10 @@ function publishPrefix(
   coverage: Prefix,
 ): void {
   expect(
-    registry.publishCoverage(acquisition, {
-      applied: true,
-      authoritative: true,
-      generation,
-      coverage,
-    }),
+    registry.publishOutcome(
+      acquisition,
+      createPrefixOutcome(generation, coverage),
+    ),
   ).toBe(true)
 }
 
@@ -121,7 +136,7 @@ describe(`coverage registry oracle`, () => {
     })
   })
 
-  it(`rejects stale and non-authoritative coverage publication`, () => {
+  it(`publishes only current authoritative coverage projected from an applied outcome`, () => {
     const registry = createPrefixRegistry()
     const lease = registry.addLease(20)
     const acquisition = registry.addAcquisition({
@@ -131,30 +146,29 @@ describe(`coverage registry oracle`, () => {
     })
 
     expect(
-      registry.publishCoverage(acquisition, {
-        applied: true,
-        authoritative: true,
-        generation: 1,
-        coverage: 20,
-      }),
+      registry.publishOutcome(acquisition, createPrefixOutcome(1, 20)),
     ).toBe(false)
     expect(
-      registry.publishCoverage(acquisition, {
-        applied: false,
-        authoritative: true,
-        generation: 2,
-        coverage: 20,
-      }),
+      registry.publishOutcome(
+        acquisition,
+        createPrefixOutcome(2, 20, `unknown`),
+      ),
     ).toBe(false)
     expect(
-      registry.publishCoverage(acquisition, {
-        applied: true,
-        authoritative: false,
-        generation: 2,
-        coverage: 20,
-      }),
+      registry.publishOutcome(
+        acquisition,
+        createPrefixOutcome(2, 20, `exhausted`, `other`),
+      ),
     ).toBe(false)
     expect(registry.coverageAntichain()).toEqual([])
+
+    expect(
+      registry.publishOutcome(
+        acquisition,
+        createPrefixOutcome(2, 30, `continues`),
+      ),
+    ).toBe(true)
+    expect(registry.coverageAntichain()).toEqual([30])
   })
 
   fcTest.prop(
