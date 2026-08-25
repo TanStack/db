@@ -1099,6 +1099,79 @@ describe(`persistedCollectionOptions`, () => {
     })
   })
 
+  it(`settles a hydration-buffered receipt when replay fails`, async () => {
+    const adapter = createRecordingAdapter()
+    let resolveLoadSubset: (() => void) | undefined
+    adapter.loadSubset = async () => {
+      await new Promise<void>((resolve) => {
+        resolveLoadSubset = resolve
+      })
+      return []
+    }
+
+    const replayError = new Error(`replay key failed`)
+    let bufferedRowKeyReads = 0
+    let remoteBegin: (() => void) | undefined
+    let remoteWrite:
+      | ((message: { type: `insert`; value: Todo }) => void)
+      | undefined
+    let remoteCommit: (() => true | Promise<void>) | undefined
+
+    const collection = createCollection(
+      persistedCollectionOptions<Todo, string>({
+        id: `sync-present-replay-failure-receipt`,
+        getKey: (item) => {
+          if (item.id === `during-hydrate`) {
+            bufferedRowKeyReads++
+            if (bufferedRowKeyReads === 2) {
+              throw replayError
+            }
+          }
+          return item.id
+        },
+        sync: {
+          sync: ({ begin, write, commit, markReady }) => {
+            remoteBegin = begin
+            remoteWrite = write as (message: {
+              type: `insert`
+              value: Todo
+            }) => void
+            remoteCommit = commit
+            markReady()
+            return {}
+          },
+        },
+        persistence: {
+          adapter,
+        },
+      }),
+    )
+
+    const readyPromise = collection.stateWhenReady()
+    for (let attempt = 0; attempt < 20 && !resolveLoadSubset; attempt++) {
+      await flushAsyncWork()
+    }
+
+    remoteBegin?.()
+    remoteWrite?.({
+      type: `insert`,
+      value: { id: `during-hydrate`, title: `During hydrate` },
+    })
+    const receipt = remoteCommit?.()
+    expect(receipt).toBeInstanceOf(Promise)
+    let receiptSettled = false
+    void Promise.resolve(receipt).then(() => {
+      receiptSettled = true
+    })
+
+    resolveLoadSubset?.()
+    await readyPromise
+    await collection.cleanup()
+    await flushAsyncWork()
+
+    expect(receiptSettled).toBe(true)
+  })
+
   it(`marks ready even when persisted startup fails before markReady`, async () => {
     const adapter = createRecordingAdapter()
     adapter.loadSubset = async () => {

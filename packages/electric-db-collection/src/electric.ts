@@ -47,6 +47,7 @@ import type {
   DeleteMutationFnParams,
   InsertMutationFnParams,
   LoadSubsetOptions,
+  SyncAppliedReceipt,
   SyncConfig,
   SyncMode,
   UpdateMutationFnParams,
@@ -526,6 +527,8 @@ function createLoadSubsetDedupe<T extends Row<unknown>>({
   begin,
   write,
   commit,
+  getCommitCursor,
+  waitForCommitsAfter,
   collectionId,
   encodeColumnName,
   signal,
@@ -539,7 +542,9 @@ function createLoadSubsetDedupe<T extends Row<unknown>>({
     value: T
     metadata: Record<string, unknown>
   }) => void
-  commit: () => void
+  commit: () => SyncAppliedReceipt
+  getCommitCursor: () => number
+  waitForCommitsAfter: (cursor: number) => Promise<void>
   collectionId?: string
   /**
    * Optional function to encode column names (e.g., camelCase to snake_case).
@@ -573,6 +578,7 @@ function createLoadSubsetDedupe<T extends Row<unknown>>({
   }
 
   const loadSubset = async (opts: LoadSubsetOptions) => {
+    const commitCursor = getCommitCursor()
     if (opts.signal?.aborted) return
 
     if (isBufferingInitialSync()) {
@@ -593,7 +599,7 @@ function createLoadSubsetDedupe<T extends Row<unknown>>({
               metadata: { ...row.headers },
             })
           }
-          commit()
+          await commit()
           debug(`${logPrefix}Applied snapshot with ${rows.length} rows`)
         }
       } catch (error) {
@@ -691,6 +697,7 @@ function createLoadSubsetDedupe<T extends Row<unknown>>({
       }
       throw error
     }
+    await waitForCommitsAfter(commitCursor)
   }
 
   return new DeduplicatedLoadSubset({ loadSubset })
@@ -1487,13 +1494,32 @@ function createElectricSync<T extends Row<unknown>>(
       const {
         begin,
         write,
-        commit,
+        commit: commitSyncTransaction,
         markReady,
         markError,
         truncate,
         collection,
         metadata,
       } = params
+      let commitSequence = 0
+      const pendingAppliedReceipts = new Map<number, Promise<void>>()
+      const commit = (): SyncAppliedReceipt => {
+        const sequence = ++commitSequence
+        const applied = commitSyncTransaction()
+        if (applied === true) {
+          return true
+        }
+        pendingAppliedReceipts.set(sequence, applied)
+        void applied.then(() => pendingAppliedReceipts.delete(sequence))
+        return applied
+      }
+      const waitForCommitsAfter = async (cursor: number): Promise<void> => {
+        await Promise.all(
+          Array.from(pendingAppliedReceipts, ([sequence, applied]) =>
+            sequence > cursor ? applied : undefined,
+          ),
+        )
+      }
       const readPersistedResumeState = (): ElectricResumeState | undefined => {
         const persistedResumeState = metadata?.collection.get(`electric:resume`)
         return parseElectricResumeState(persistedResumeState)
@@ -1730,6 +1756,8 @@ function createElectricSync<T extends Row<unknown>>(
         begin,
         write,
         commit,
+        getCommitCursor: () => commitSequence,
+        waitForCommitsAfter,
         collectionId,
         // Pass the columnMapper's encode function to transform column names
         // (e.g., camelCase to snake_case) when compiling SQL for subset queries
@@ -1892,6 +1920,8 @@ function createElectricSync<T extends Row<unknown>>(
         }
 
         if (commitPoint !== null) {
+          let applied: SyncAppliedReceipt = true
+          const wasBufferingInitialSync = isBufferingInitialSync()
           // PROGRESSIVE MODE: Atomic swap on first up-to-date (not subset-end)
           // EXCEPTION: Skip atomic swap if a transaction is already started (e.g., from must-refetch).
           // In that case, do a normal commit to properly close the existing transaction.
@@ -1946,7 +1976,7 @@ function createElectricSync<T extends Row<unknown>>(
 
             // Commit the atomic swap
             stageResumeMetadata()
-            commit()
+            applied = commit()
 
             // Exit buffering phase by marking that we've received up-to-date
             // isBufferingInitialSync() will now return false
@@ -1960,15 +1990,19 @@ function createElectricSync<T extends Row<unknown>>(
             // Both up-to-date and subset-end trigger a commit
             if (transactionStarted) {
               stageResumeMetadata()
-              commit()
+              applied = commit()
               transactionStarted = false
             } else if (commitPoint === `up-to-date` && metadata) {
               begin()
               stageResumeMetadata()
-              commit()
+              applied = commit()
             }
           }
-          wrappedMarkReady(isBufferingInitialSync())
+          if (applied === true) {
+            wrappedMarkReady(wasBufferingInitialSync)
+          } else {
+            void applied.then(() => wrappedMarkReady(wasBufferingInitialSync))
+          }
 
           // Track that we've received the first up-to-date for progressive mode
           if (commitPoint === `up-to-date`) {

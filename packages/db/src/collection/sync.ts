@@ -134,6 +134,7 @@ export class CollectionSyncManager<
               rowMetadataWrites: new Map(),
               collectionMetadataWrites: new Map(),
               immediate: options?.immediate,
+              applied: createDeferred<void>(),
             })
           },
           write: (
@@ -231,8 +232,8 @@ export class CollectionSyncManager<
               })
             }
           },
-          commit: () => {
-            if (!isCurrentSync()) return
+          commit: (signal?: AbortSignal) => {
+            if (!isCurrentSync()) return true
             const pendingTransaction =
               this.state.pendingSyncedTransactions[
                 this.state.pendingSyncedTransactions.length - 1
@@ -244,9 +245,31 @@ export class CollectionSyncManager<
               throw new SyncTransactionAlreadyCommittedError()
             }
 
+            if (signal?.aborted) {
+              this.state.cancelPendingSyncedTransaction(pendingTransaction)
+              return true
+            }
+
             pendingTransaction.committed = true
 
+            const cancel = () => {
+              this.state.cancelPendingSyncedTransaction(pendingTransaction)
+            }
+            signal?.addEventListener(`abort`, cancel, { once: true })
+
             this.state.commitPendingTransactions()
+            if (!pendingTransaction.applied.isPending()) {
+              signal?.removeEventListener(`abort`, cancel)
+              return true
+            }
+
+            const receipt = pendingTransaction.applied.promise
+            if (signal) {
+              void receipt.then(() => {
+                signal.removeEventListener(`abort`, cancel)
+              })
+            }
+            return receipt
           },
           markReady: () => {
             if (isCurrentSync()) this.lifecycle.markReady()

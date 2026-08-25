@@ -253,7 +253,7 @@ export function trailBaseCollectionOptions<
             })
           }
 
-          commit()
+          await commit(opts.signal)
 
           remaining -= length
 
@@ -302,7 +302,7 @@ export function trailBaseCollectionOptions<
           } else {
             console.error(`Error: ${event.Error}`)
           }
-          commit()
+          void commit()
 
           if (value) {
             seenIds.setState((curr: Map<string, number>) => {

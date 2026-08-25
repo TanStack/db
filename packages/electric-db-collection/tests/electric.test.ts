@@ -23,6 +23,14 @@ import type { StandardSchemaV1 } from '@standard-schema/spec'
 
 const NativeAbortController = globalThis.AbortController
 
+function createDeferred<T>() {
+  let resolve!: (value: T | PromiseLike<T>) => void
+  const promise = new Promise<T>((resolvePromise) => {
+    resolve = resolvePromise
+  })
+  return { promise, resolve }
+}
+
 // Mock the ShapeStream module
 const mockSubscribe = vi.fn()
 const mockRequestSnapshot = vi.fn()
@@ -230,6 +238,38 @@ describe(`Electric Integration`, () => {
 
     expect(stripCollectionState(collection.state)).toEqual(
       new Map([[1, { id: 1, name: `Test User` }]]),
+    )
+  })
+
+  it(`marks the source ready only after its initial rows are applied`, async () => {
+    const persistence = createDeferred<void>()
+    const transaction = createTransaction({
+      mutationFn: () => persistence.promise,
+    })
+    transaction.mutate(() =>
+      collection.insert({ id: 99, name: `Optimistic user` }),
+    )
+
+    subscriber([
+      {
+        key: `1`,
+        value: { id: 1, name: `Synced user` },
+        headers: { operation: `insert` },
+      },
+      { headers: { control: `up-to-date` } },
+    ])
+    await Promise.resolve()
+
+    expect(collection.status).toBe(`loading`)
+    expect(collection.get(1)).toBeUndefined()
+
+    persistence.resolve()
+    await transaction.isPersisted.promise
+    await collection.stateWhenReady()
+
+    expect(collection.status).toBe(`ready`)
+    expect(collection.get(1)).toEqual(
+      expect.objectContaining({ id: 1, name: `Synced user` }),
     )
   })
 

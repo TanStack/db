@@ -5,6 +5,7 @@ import {
   and,
   createCollection,
   createLiveQueryCollection,
+  createTransaction,
   eq,
   gt,
   gte,
@@ -138,6 +139,82 @@ describe(`On-Demand Sync Mode`, () => {
     // Verify prices are correct
     const prices = loadedProducts.map((p) => p.price).sort((a, b) => a! - b!)
     expect(prices).toEqual([150, 200])
+  })
+
+  it(`resolves subset readiness only after its rows are applied`, async () => {
+    const db = await createDatabase()
+    await createTestProducts(db)
+
+    let resolvePersistence!: () => void
+    const persistence = new Promise<void>((resolve) => {
+      resolvePersistence = resolve
+    })
+    const transaction = createTransaction({
+      mutationFn: () => persistence,
+    })
+    const options = powerSyncCollectionOptions({
+      database: db,
+      table: APP_SCHEMA.props.products,
+      syncMode: `on-demand`,
+      onLoadSubset: () => {
+        transaction.mutate(() =>
+          collection.insert({
+            id: `local`,
+            name: `Local product`,
+            price: 1,
+            category: `local`,
+          }),
+        )
+      },
+    })
+    const collection = createCollection(options)
+    onTestFinished(() => collection.cleanup())
+    await collection.stateWhenReady()
+
+    const electronics = createLiveQueryCollection({
+      query: (q) =>
+        q
+          .from({ product: collection })
+          .where(({ product }) => eq(product.category, `electronics`)),
+    })
+    onTestFinished(() => electronics.cleanup())
+    const preload = electronics.preload()
+    let settled = false
+    void preload.then(() => {
+      settled = true
+    })
+
+    try {
+      const { trackedTableName } = options.utils.getMeta()
+      await vi.waitFor(
+        async () => {
+          const table = await db.writeLock((context) =>
+            context.get<{ count: number }>(
+              `SELECT COUNT(*) as count FROM sqlite_temp_master WHERE type = 'table' AND name = ?`,
+              [trackedTableName],
+            ),
+          )
+          expect(table.count).toBe(1)
+        },
+        { timeout: 2_000 },
+      )
+
+      expect(transaction.state).toBe(`persisting`)
+      expect(settled).toBe(false)
+      expect(electronics.size).toBe(0)
+
+      resolvePersistence()
+      await transaction.isPersisted.promise
+      await preload
+
+      expect(electronics.toArray.map((product) => product.name).sort()).toEqual(
+        [`Product A`, `Product B`, `Product D`],
+      )
+    } finally {
+      resolvePersistence()
+      await transaction.isPersisted.promise.catch(() => undefined)
+      await Promise.allSettled([preload])
+    }
   })
 
   it(`should reactively update live query when new matching data is inserted into SQLite`, async () => {

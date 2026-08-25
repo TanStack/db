@@ -22,6 +22,7 @@ import type {
   InsertMutationFnParams,
   LoadSubsetOptions,
   PendingMutation,
+  SyncAppliedReceipt,
   SyncConfig,
   SyncConfigRes,
   SyncMetadataApi,
@@ -433,7 +434,7 @@ type SyncControlFns<T extends object, TKey extends string | number> = {
           | { type: `delete`; key: TKey },
       ) => void)
     | null
-  commit: (() => void) | null
+  commit: (() => SyncAppliedReceipt) | null
   truncate: (() => void) | null
   metadata: SyncMetadataApi<TKey> | null
 }
@@ -586,6 +587,7 @@ type BufferedSyncTransaction<T extends object, TKey extends string | number> = {
   >
   truncate: boolean
   internal: boolean
+  resolveApplied?: () => void
 }
 
 type OpenSyncTransaction<
@@ -811,6 +813,8 @@ class PersistedCollectionRuntime<
   private startupMetadataPromise: Promise<void> | null = null
   private startPromise: Promise<void> | null = null
   private internalApplyDepth = 0
+  private appliedReceiptSequence = 0
+  private readonly pendingAppliedReceipts = new Map<number, Promise<void>>()
   private isHydrating = false
   private coordinatorUnsubscribe: (() => void) | null = null
   private indexAddedUnsubscribe: (() => void) | null = null
@@ -834,7 +838,29 @@ class PersistedCollectionRuntime<
   ) {}
 
   setSyncControls(syncControls: SyncControlFns<T, TKey>): void {
-    this.syncControls = syncControls
+    const commit = syncControls.commit
+    this.syncControls = {
+      ...syncControls,
+      commit: commit ? () => this.trackAppliedReceipt(commit()) : null,
+    }
+  }
+
+  private trackAppliedReceipt(receipt: SyncAppliedReceipt): SyncAppliedReceipt {
+    const sequence = ++this.appliedReceiptSequence
+    if (receipt === true) {
+      return true
+    }
+    this.pendingAppliedReceipts.set(sequence, receipt)
+    void receipt.then(() => this.pendingAppliedReceipts.delete(sequence))
+    return receipt
+  }
+
+  private async waitForAppliedReceiptsAfter(cursor: number): Promise<void> {
+    await Promise.all(
+      Array.from(this.pendingAppliedReceipts, ([sequence, receipt]) =>
+        sequence > cursor ? receipt : undefined,
+      ),
+    )
   }
 
   clearSyncControls(): void {
@@ -906,9 +932,11 @@ class PersistedCollectionRuntime<
 
     if (this.syncMode !== `on-demand`) {
       this.activeSubsets.set(this.getSubsetKey({}), {})
+      const appliedCursor = this.appliedReceiptSequence
       await this.applyMutex.run(() =>
         this.hydrateSubsetUnsafe({}, { requestRemoteEnsure: false }),
       )
+      await this.waitForAppliedReceiptsAfter(appliedCursor)
     }
   }
 
@@ -985,17 +1013,19 @@ class PersistedCollectionRuntime<
   ): Promise<void> {
     this.activeSubsets.set(this.getSubsetKey(options), options)
 
+    const appliedCursor = this.appliedReceiptSequence
     await this.applyMutex.run(() =>
       this.hydrateSubsetUnsafe(options, {
         requestRemoteEnsure: this.mode === `sync-present`,
       }),
     )
+    await this.waitForAppliedReceiptsAfter(appliedCursor)
 
     if (upstreamLoadSubset) {
       try {
         const maybePromise = upstreamLoadSubset(options)
         if (maybePromise instanceof Promise) {
-          maybePromise.catch((error) => {
+          await maybePromise.catch((error) => {
             console.warn(
               `Failed to load remote subset in persisted wrapper:`,
               error,
@@ -1156,15 +1186,18 @@ class PersistedCollectionRuntime<
 
     this.pendingRemoteSubsetEnsures.clear()
     this.activeSubsets.clear()
+    for (const transaction of this.queuedHydrationTransactions) {
+      transaction.resolveApplied?.()
+    }
     this.queuedHydrationTransactions.length = 0
     this.queuedTxCommitted.length = 0
     this.clearSyncControls()
   }
 
-  private withInternalApply(task: () => void): void {
+  private withInternalApply<TResult>(task: () => TResult): TResult {
     this.internalApplyDepth++
     try {
-      task()
+      return task()
     } finally {
       this.internalApplyDepth--
     }
@@ -1318,29 +1351,28 @@ class PersistedCollectionRuntime<
   private async applyBufferedSyncTransactionUnsafe(
     transaction: BufferedSyncTransaction<T, TKey>,
   ): Promise<void> {
-    if (
-      !this.syncControls.begin ||
-      !this.syncControls.write ||
-      !this.syncControls.commit
-    ) {
+    const { begin, write, commit, truncate, metadata } = this.syncControls
+    if (!begin || !write || !commit) {
+      transaction.resolveApplied?.()
       return
     }
 
-    const applyToCollection = () => {
-      this.syncControls.begin?.()
+    let receiptLinkedToCoreApplication = false
+    const applyToCollection = (): boolean => {
+      begin()
 
       if (transaction.truncate) {
-        this.syncControls.truncate?.()
+        truncate?.()
       }
 
       for (const operation of transaction.operations) {
         if (operation.type === `delete`) {
-          this.syncControls.write?.({
+          write({
             type: `delete`,
             key: operation.key,
           })
         } else {
-          this.syncControls.write?.({
+          write({
             type: `update`,
             value: operation.value,
             metadata: operation.metadata,
@@ -1350,30 +1382,47 @@ class PersistedCollectionRuntime<
 
       for (const [key, metadataWrite] of transaction.rowMetadataWrites) {
         if (metadataWrite.type === `delete`) {
-          this.syncControls.metadata?.row.delete(key)
+          metadata?.row.delete(key)
         } else {
-          this.syncControls.metadata?.row.set(key, metadataWrite.value)
+          metadata?.row.set(key, metadataWrite.value)
         }
       }
 
       for (const [key, metadataWrite] of transaction.collectionMetadataWrites) {
         if (metadataWrite.type === `delete`) {
-          this.syncControls.metadata?.collection.delete(key)
+          metadata?.collection.delete(key)
         } else {
-          this.syncControls.metadata?.collection.set(key, metadataWrite.value)
+          metadata?.collection.set(key, metadataWrite.value)
         }
       }
 
-      this.syncControls.commit?.()
+      const applied = commit()
+      if (applied === true) {
+        transaction.resolveApplied?.()
+        return false
+      } else {
+        void applied.then(() => transaction.resolveApplied?.())
+        return true
+      }
     }
 
-    if (transaction.internal) {
-      this.withInternalApply(applyToCollection)
-      return
-    }
+    try {
+      if (transaction.internal) {
+        receiptLinkedToCoreApplication =
+          this.withInternalApply(applyToCollection)
+        return
+      }
 
-    applyToCollection()
-    await this.persistAndBroadcastExternalSyncTransactionUnsafe(transaction)
+      receiptLinkedToCoreApplication = applyToCollection()
+      await this.persistAndBroadcastExternalSyncTransactionUnsafe(transaction)
+    } catch (error) {
+      // A replay failure before commit has no core receipt that cleanup can
+      // settle. Release the wrapper receipt so the source load cannot hang.
+      if (!receiptLinkedToCoreApplication) {
+        transaction.resolveApplied?.()
+      }
+      throw error
+    }
   }
 
   private async persistAndBroadcastExternalSyncTransactionUnsafe(
@@ -2460,11 +2509,14 @@ function createWrappedSyncConfig<
         commit: () => {
           const openTransaction = transactionStack.pop()
           if (!openTransaction) {
-            params.commit()
-            return
+            return params.commit()
           }
 
           if (openTransaction.queuedBecauseHydrating) {
+            let resolveApplied!: () => void
+            const applied = new Promise<void>((resolve) => {
+              resolveApplied = resolve
+            })
             runtime.queueHydrationBufferedTransaction({
               operations: openTransaction.operations,
               rowMetadataWrites: openTransaction.rowMetadataWrites,
@@ -2472,11 +2524,12 @@ function createWrappedSyncConfig<
                 openTransaction.collectionMetadataWrites,
               truncate: openTransaction.truncate,
               internal: openTransaction.internal,
+              resolveApplied,
             })
-            return
+            return applied
           }
 
-          params.commit()
+          const applied = params.commit()
           if (!openTransaction.internal) {
             void runtime
               .persistAndBroadcastExternalSyncTransaction({
@@ -2494,6 +2547,7 @@ function createWrappedSyncConfig<
                 )
               })
           }
+          return applied
         },
       }
 

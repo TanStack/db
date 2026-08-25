@@ -26,8 +26,9 @@ This architecture covers:
 - coherent publication to public Collections;
 - the boundaries with query-db ownership and physical query planning.
 
-It does not define new public APIs. Optimistic transactions are another source
-of weighted input changes; they do not have a separate routing model.
+The applied-settlement receipt described below is its only new public boundary
+contract. Optimistic transactions are another source of weighted input changes;
+they do not have a separate routing model.
 
 ## One relational graph
 
@@ -448,6 +449,19 @@ adapter from writing after it ignores that signal. Buffering, snapshot tokens,
 shape offsets, Collection transactions, and local indexes are source-specific
 ways to satisfy that contract; they are not materializer state.
 
+Every sync `commit()` returns an applied receipt: `true` when that
+transaction's writes and events are already visible, or a promise when the
+transaction is parked in the causal queue. The promise resolves only after the
+writes and events become visible, or after collection cleanup abandons the
+transaction. A successful `loadSubset` implementation must await or return
+every receipt for the transactions that establish its result. A source must
+not add priority merely to make a subset load settle.
+Existing immediate bootstrap and persistence-hydration paths, plus truncate,
+retain their queue-bypass contract; if one applies a parked subset transaction
+as part of that prefix, the subset receipt settles only after the writes are
+visible. Rejected, canceled, and obsolete acquisitions establish no coverage.
+Sources must honor cancellation before publishing request-scoped rows.
+
 This project uses a single graph-run order rather than multi-dimensional
 timely-dataflow frontiers. Do not introduce a general timestamp or frontier
 framework unless a source contract proves that the generation and up-to-date
@@ -534,17 +548,20 @@ create recursive Collection machinery.
 6. **Stale demand:** an obsolete graph or demand generation cannot settle
    current readiness, and a conforming source cannot publish its request-scoped
    rows after cancellation.
-7. **Nested propagation:** every materialized relation consumes the fully
+7. **Applied settlement:** a successful subset load settles only after its
+   establishing sync transactions are visible; a source must not add queue
+   priority merely to force the load to settle.
+8. **Nested propagation:** every materialized relation consumes the fully
    materialized output relation of its children.
-8. **Publication:** reads, events, and downstream queries observe the same
+9. **Publication:** reads, events, and downstream queries observe the same
    complete graph result.
-9. **Initial demand:** preload completes when every initially reachable demand
-   is covered; obsolete demand does not block it.
-10. **Ownership:** a query-db row exists exactly while an explicit owner
+10. **Initial demand:** preload completes when every initially reachable demand
+    is covered; obsolete demand does not block it.
+11. **Ownership:** a query-db row exists exactly while an explicit owner
     remains.
-11. **Work:** irrelevant rows do not cause unrelated scans or activate unrelated
+12. **Work:** irrelevant rows do not cause unrelated scans or activate unrelated
     routes when an applicable index exists.
-12. **Space:** state scales with retained D2 relation/index rows, active demands,
+13. **Space:** state scales with retained D2 relation/index rows, active demands,
     materialization cells, visible rows, and required Collection facades.
 
 ## Glossary

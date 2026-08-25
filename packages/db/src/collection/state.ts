@@ -19,6 +19,7 @@ import type { CollectionLifecycleManager } from './lifecycle'
 import type { CollectionChangesManager } from './changes'
 import type { CollectionIndexesManager } from './indexes'
 import type { CollectionEventsManager } from './events'
+import type { Deferred } from '../deferred'
 
 interface PendingSyncedTransaction<
   T extends object = Record<string, unknown>,
@@ -31,6 +32,8 @@ interface PendingSyncedTransaction<
   deletedKeys: Set<string | number>
   rowMetadataWrites: Map<TKey, PendingMetadataWrite>
   collectionMetadataWrites: Map<string, PendingMetadataWrite>
+  /** Resolves after this transaction's writes and events are visible. */
+  applied: Deferred<void>
   optimisticSnapshot?: {
     upserts: Map<TKey, T>
     deletes: Set<TKey>
@@ -1360,6 +1363,27 @@ export class CollectionStateManager<
       if (!this.hasReceivedFirstCommit) {
         this.hasReceivedFirstCommit = true
       }
+
+      for (const transaction of committedSyncedTransactions) {
+        transaction.applied.resolve()
+      }
+    }
+  }
+
+  /** Abandons one committed transaction before it becomes visible. */
+  public cancelPendingSyncedTransaction(
+    transaction: PendingSyncedTransaction<TOutput, TKey>,
+  ): void {
+    const index = this.pendingSyncedTransactions.indexOf(transaction)
+    if (index === -1) return
+
+    this.pendingSyncedTransactions.splice(index, 1)
+    transaction.applied.resolve()
+
+    if (this.pendingSyncedTransactions.length === 0) {
+      this.preSyncVisibleState.clear()
+      this.recentlySyncedKeys.clear()
+      this.changes.emitEvents([], true)
     }
   }
 
@@ -1439,6 +1463,11 @@ export class CollectionStateManager<
    * This can be called manually or automatically by garbage collection
    */
   public cleanup(): void {
+    for (const transaction of this.pendingSyncedTransactions) {
+      // Applied receipts never reject. Cleanup abandons the collection and
+      // releases callers that may have retained and ignored a receipt.
+      transaction.applied.resolve()
+    }
     this.syncedData.clear()
     this.syncedMetadata.clear()
     this.syncedCollectionMetadata.clear()

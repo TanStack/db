@@ -11,6 +11,7 @@ import type {
   CleanupFn,
   LoadSubsetOptions,
   OperationType,
+  SyncAppliedReceipt,
   SyncConfig,
 } from '@tanstack/db'
 import type {
@@ -345,18 +346,21 @@ function createPowerSyncCollectionConfig<
         await dispose(context ? { context } : undefined)
       }
 
-      async function createDiffTrigger(options: {
-        setupContext?: LockContext
-        when: Record<DiffTriggerOperation, string>
-        writeType: (rowId: string) => OperationType
-        batchQuery: (
-          lockContext: LockContext,
-          batchSize: number,
-          cursor: number,
-        ) => Promise<Array<TableType>>
-        onReady: () => void
-      }) {
-        const { setupContext, when, writeType, batchQuery, onReady } = options
+      async function createDiffTrigger(
+        options: {
+          setupContext?: LockContext
+          immediate?: boolean
+          when: Record<DiffTriggerOperation, string>
+          writeType: (rowId: string) => OperationType
+          batchQuery: (
+            lockContext: LockContext,
+            batchSize: number,
+            cursor: number,
+          ) => Promise<Array<TableType>>
+        },
+        appliedReceipts: Array<SyncAppliedReceipt>,
+      ) {
+        const { setupContext, immediate, when, writeType, batchQuery } = options
 
         return await database.triggers.createDiffTrigger({
           source: viewName,
@@ -368,7 +372,7 @@ function createPowerSyncCollectionConfig<
               let currentBatchCount = syncBatchSize
               let cursor = 0
               while (currentBatchCount == syncBatchSize) {
-                begin()
+                begin(immediate ? { immediate: true } : undefined)
 
                 const batchItems = await batchQuery(
                   context,
@@ -383,9 +387,8 @@ function createPowerSyncCollectionConfig<
                     value: deserializeSyncRow(row),
                   })
                 }
-                commit()
+                appliedReceipts.push(commit())
               }
-              onReady()
               database.logger.info(
                 `Sync is ready for ${viewName} into ${trackedTableName}`,
               )
@@ -395,9 +398,10 @@ function createPowerSyncCollectionConfig<
       }
 
       async function flushDiffRecords(): Promise<void> {
+        const ignoredReceipts: Array<SyncAppliedReceipt> = []
         await database
           .writeTransaction(async (context) => {
-            await flushDiffRecordsWithContext(context)
+            await flushDiffRecordsWithContext(context, ignoredReceipts)
           })
           .catch((error) => {
             database.logger.error(
@@ -410,6 +414,7 @@ function createPowerSyncCollectionConfig<
       // We can use this directly if we want to pair a flush with dispose+recreate diff trigger.
       async function flushDiffRecordsWithContext(
         context: LockContext,
+        appliedReceipts: Array<SyncAppliedReceipt>,
       ): Promise<void> {
         // There is nothing to flush if no tracking table is currently active.
         if (!disposeTracking) {
@@ -452,7 +457,12 @@ function createPowerSyncCollectionConfig<
           // clear the current operations
           await context.execute(`DELETE FROM ${trackedTableName}`)
 
-          commit()
+          const applied = commit()
+          appliedReceipts.push(applied)
+          // Mutation persistence is what releases the Collection's FIFO gate.
+          // Confirm these local operations after the sync transaction is
+          // staged; waiting for its applied receipt would deadlock the user
+          // transaction that currently parks it.
           pendingOperationStore.resolvePendingFor(pendingOperations)
         } catch (error) {
           database.logger.error(
@@ -504,24 +514,32 @@ function createPowerSyncCollectionConfig<
         start(async () => {
           onUnload = await restConfig.onLoad?.()
 
-          disposeTracking = await createDiffTrigger({
-            when: {
-              [DiffTriggerOperation.INSERT]: `TRUE`,
-              [DiffTriggerOperation.UPDATE]: `TRUE`,
-              [DiffTriggerOperation.DELETE]: `TRUE`,
+          const appliedReceipts: Array<SyncAppliedReceipt> = []
+          disposeTracking = await createDiffTrigger(
+            {
+              // Initial eager hydration must make the source usable before
+              // PowerSync can persist a mutation queued during startup.
+              immediate: true,
+              when: {
+                [DiffTriggerOperation.INSERT]: `TRUE`,
+                [DiffTriggerOperation.UPDATE]: `TRUE`,
+                [DiffTriggerOperation.DELETE]: `TRUE`,
+              },
+              writeType: (_rowId: string) => `insert`,
+              batchQuery: (
+                lockContext: LockContext,
+                batchSize: number,
+                cursor: number,
+              ) =>
+                lockContext.getAll<TableType>(
+                  sanitizeSQL`SELECT * FROM ${viewName} LIMIT ? OFFSET ?`,
+                  [batchSize, cursor],
+                ),
             },
-            writeType: (_rowId: string) => `insert`,
-            batchQuery: (
-              lockContext: LockContext,
-              batchSize: number,
-              cursor: number,
-            ) =>
-              lockContext.getAll<TableType>(
-                sanitizeSQL`SELECT * FROM ${viewName} LIMIT ? OFFSET ?`,
-                [batchSize, cursor],
-              ),
-            onReady: () => markReady(),
-          })
+            appliedReceipts,
+          )
+          await Promise.all(appliedReceipts)
+          markReady()
         }).catch((error) => {
           database.logger.error(
             `Could not start syncing process for ${viewName} into ${trackedTableName}`,
@@ -564,6 +582,7 @@ function createPowerSyncCollectionConfig<
           options?: LoadSubsetOptions,
         ): Promise<void> => {
           if (hasStopped()) return
+          const appliedReceipts: Array<SyncAppliedReceipt> = []
 
           if (options) {
             activeWhereExpressions.push(options.where)
@@ -585,9 +604,10 @@ function createPowerSyncCollectionConfig<
           // when no tracking table is currently active.
           if (activeWhereExpressions.length === 0) {
             await database.writeLock(async (ctx) => {
-              await flushDiffRecordsWithContext(ctx)
+              await flushDiffRecordsWithContext(ctx, appliedReceipts)
               await safelyDisposeTracking(ctx)
             })
+            await Promise.all(appliedReceipts)
             return
           }
 
@@ -619,30 +639,33 @@ function createPowerSyncCollectionConfig<
           await database.writeLock(async (ctx) => {
             // Replace any active tracking with one covering the new set of
             // predicates.
-            await flushDiffRecordsWithContext(ctx)
+            await flushDiffRecordsWithContext(ctx, appliedReceipts)
             await safelyDisposeTracking(ctx)
 
-            disposeTracking = await createDiffTrigger({
-              setupContext: ctx,
-              when: {
-                [DiffTriggerOperation.INSERT]: newDataWhenClause,
-                [DiffTriggerOperation.UPDATE]: `(${newDataWhenClause}) OR (${oldDataWhenClause})`,
-                [DiffTriggerOperation.DELETE]: oldDataWhenClause,
+            disposeTracking = await createDiffTrigger(
+              {
+                setupContext: ctx,
+                when: {
+                  [DiffTriggerOperation.INSERT]: newDataWhenClause,
+                  [DiffTriggerOperation.UPDATE]: `(${newDataWhenClause}) OR (${oldDataWhenClause})`,
+                  [DiffTriggerOperation.DELETE]: oldDataWhenClause,
+                },
+                writeType: (rowId: string) =>
+                  collection.has(rowId) ? `update` : `insert`,
+                batchQuery: (
+                  lockContext: LockContext,
+                  batchSize: number,
+                  cursor: number,
+                ) =>
+                  lockContext.getAll<TableType>(
+                    `SELECT * FROM ${viewName} WHERE ${viewWhereClause} LIMIT ? OFFSET ?`,
+                    [batchSize, cursor],
+                  ),
               },
-              writeType: (rowId: string) =>
-                collection.has(rowId) ? `update` : `insert`,
-              batchQuery: (
-                lockContext: LockContext,
-                batchSize: number,
-                cursor: number,
-              ) =>
-                lockContext.getAll<TableType>(
-                  `SELECT * FROM ${viewName} WHERE ${viewWhereClause} LIMIT ? OFFSET ?`,
-                  [batchSize, cursor],
-                ),
-              onReady: () => {},
-            })
+              appliedReceipts,
+            )
           })
+          await Promise.all(appliedReceipts)
         }
 
         const toInlinedWhereClause = (compiled: {
@@ -698,7 +721,11 @@ function createPowerSyncCollectionConfig<
             for (const { id } of rowsToEvict) {
               write({ type: `delete`, key: id })
             }
-            commit()
+            // Eviction does not establish new subset coverage. Keep trigger
+            // replacement in the same unload turn even when this delete waits
+            // behind a persisting mutation; the later load tracks its own
+            // establishing receipts.
+            void commit()
           }
 
           // Recreate the diff trigger for the remaining active WHERE expressions.

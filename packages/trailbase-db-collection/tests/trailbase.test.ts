@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest'
-import { createCollection } from '@tanstack/db'
+import { createCollection, createTransaction } from '@tanstack/db'
 import { trailBaseCollectionOptions } from '../src/trailbase'
 import { stripVirtualProps } from '../../db/tests/utils'
 import type {
@@ -138,6 +138,63 @@ async function expectWildcardFailureSettlesPreload(): Promise<void> {
 }
 
 describe(`TrailBase Integration`, () => {
+  it(`marks initial sync ready only after its rows are applied`, async () => {
+    const recordApi = new MockRecordApi<Data>()
+    let resolveList!: (response: ListResponse<Data>) => void
+    recordApi.list.mockReturnValue(
+      new Promise<ListResponse<Data>>((resolve) => {
+        resolveList = resolve
+      }),
+    )
+    recordApi.subscribe.mockResolvedValue(new TransformStream<Event>().readable)
+
+    let resolvePersistence!: () => void
+    const persistence = new Promise<void>((resolve) => {
+      resolvePersistence = resolve
+    })
+    const collection = createCollection(setUp(recordApi))
+    const transaction = createTransaction({
+      mutationFn: () => persistence,
+    })
+    const preload = collection.preload()
+
+    try {
+      await vi.waitFor(() => expect(recordApi.list).toHaveBeenCalledOnce())
+      transaction.mutate(() =>
+        collection.insert({ id: 2, updated: 0, data: `local` }),
+      )
+      expect(transaction.state).toBe(`persisting`)
+
+      resolveList({
+        records: [{ id: 1, updated: 0, data: `server` }],
+      })
+      await Promise.resolve()
+      await Promise.resolve()
+
+      expect(collection.status).toBe(`loading`)
+      expect(collection.get(1)).toBeUndefined()
+
+      resolvePersistence()
+      await transaction.isPersisted.promise
+      await preload
+
+      expect(collection.status).toBe(`ready`)
+      expect(collection.get(1)).toEqual(
+        expect.objectContaining({
+          id: 1,
+          updated: 0,
+          data: `server`,
+        }),
+      )
+    } finally {
+      resolveList({ records: [] })
+      resolvePersistence()
+      await transaction.isPersisted.promise.catch(() => undefined)
+      await collection.cleanup()
+      await Promise.allSettled([preload])
+    }
+  })
+
   it(`settles preload when wildcard subscription startup fails`, async () => {
     await expectWildcardFailureSettlesPreload()
   })
@@ -215,6 +272,58 @@ describe(`TrailBase Integration`, () => {
       expect(stripState(collection.state)).toEqual(new Map())
     } finally {
       resolveList({ records: [] })
+      await collection.cleanup()
+    }
+  })
+
+  it(`does not publish a parked subset page after its request is aborted`, async () => {
+    const recordApi = new MockRecordApi<Data>()
+    recordApi.list.mockResolvedValue({
+      records: [{ id: 1, updated: 0, data: `obsolete` }],
+    })
+    recordApi.subscribe.mockResolvedValue(new TransformStream<Event>().readable)
+    const collection = createCollection(
+      trailBaseCollectionOptions({
+        recordApi,
+        getKey: (item: Data) => item.id ?? -1,
+        startSync: true,
+        syncMode: `on-demand`,
+        parse: {},
+        serialize: {},
+      }),
+    )
+    let resolvePersistence!: () => void
+    const persistence = new Promise<void>((resolve) => {
+      resolvePersistence = resolve
+    })
+    const transaction = createTransaction({
+      mutationFn: () => persistence,
+    })
+    const abortController = new AbortController()
+
+    try {
+      await vi.waitFor(() => expect(collection.status).toBe(`ready`))
+      transaction.mutate(() =>
+        collection.insert({ id: 2, updated: 0, data: `local` }),
+      )
+      const load = collection._sync.loadSubset({
+        signal: abortController.signal,
+      })
+      await vi.waitFor(() => expect(recordApi.list).toHaveBeenCalledOnce())
+      await Promise.resolve()
+      await Promise.resolve()
+
+      expect(collection.get(1)).toBeUndefined()
+      abortController.abort()
+      resolvePersistence()
+      await transaction.isPersisted.promise
+      if (load instanceof Promise) await load
+
+      expect(collection.get(1)).toBeUndefined()
+    } finally {
+      abortController.abort()
+      resolvePersistence()
+      await transaction.isPersisted.promise.catch(() => undefined)
       await collection.cleanup()
     }
   })
