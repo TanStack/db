@@ -116,7 +116,7 @@ export {
   isLimitSubset,
   isOffsetLimitSubset,
   isPredicateSubset,
-  isLoadSubsetCoveredBy,
+  isLoadSubsetRequestSubsumedBy,
 } from './predicate-utils.js'
 
 export { DeduplicatedLoadSubset } from './subset-dedupe.js'

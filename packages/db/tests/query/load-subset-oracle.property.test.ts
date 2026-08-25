@@ -1865,7 +1865,7 @@ describe(`loadSubset coverage oracle`, () => {
     ],
   ] as const)(
     `discovered trace: a different %s starts a distinct window load`,
-    async (_name, firstOptions, secondOptions) => {
+    (_name, firstOptions, secondOptions) => {
       const createRequest = (
         compareOptions: typeof firstOptions | typeof secondOptions,
       ): WindowRequest => ({
@@ -1875,25 +1875,12 @@ describe(`loadSubset coverage oracle`, () => {
         limit: 1,
         ...compareOptions,
       })
-      await expectAssertionFailure(
-        () =>
-          Promise.resolve().then(() => {
-            try {
-              expect(
-                countWindowLoads([
-                  createRequest(firstOptions),
-                  createRequest(secondOptions),
-                ]),
-              ).toBe(2)
-            } catch (error) {
-              throw new TraceAssertionError(0, error)
-            }
-          }),
-        {
-          checkpoint: 0,
-          classify: ({ actual, expected }) => actual === 1 && expected === 2,
-        },
-      )()
+      expect(
+        countWindowLoads([
+          createRequest(firstOptions),
+          createRequest(secondOptions),
+        ]),
+      ).toBe(2)
     },
   )
 

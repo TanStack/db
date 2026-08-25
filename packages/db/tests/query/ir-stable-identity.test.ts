@@ -46,7 +46,7 @@ import {
   Value,
 } from '../../src/query/ir.js'
 import { compileExpression } from '../../src/query/compiler/evaluators.js'
-import { isLoadSubsetCoveredBy } from '../../src/query/predicate-utils.js'
+import { isLoadSubsetRequestSubsumedBy } from '../../src/query/predicate-utils.js'
 import { createRuntimeReferenceIdentityFactory } from '../../src/query/runtime-reference-identity.js'
 import type { BasicExpression, QueryIR } from '../../src/query/ir.js'
 import type { LoadSubsetOptions } from '../../src/types.js'
@@ -91,6 +91,28 @@ const referenceSemanticPairArbitrary = fc.oneof(
       new Int16Array(value),
       new Int16Array(value),
     ]),
+)
+
+const outputExpressionPairArbitrary: fc.Arbitrary<{
+  first: BasicExpression
+  second: BasicExpression
+}> = fc.oneof(
+  fc.integer().map((value) => ({
+    first: new Value(value),
+    second: new Value(value),
+  })),
+  fc.string().map((value) => ({
+    first: new Func(`concat`, [new Value(value)]),
+    second: new Func(`concat`, [new Value(value)]),
+  })),
+  fc.uint8Array({ minLength: 1, maxLength: 8 }).map((value) => ({
+    first: new Func(`concat`, [new Value(Buffer.from(value))]),
+    second: new Func(`concat`, [new Value(new Uint8Array(value))]),
+  })),
+  fc.constant({
+    first: new Value(-0),
+    second: new Value(0),
+  }),
 )
 
 interface Post {
@@ -264,7 +286,7 @@ describe(`semantic expression identity`, () => {
         getLoadSubsetDemandKey({ where: firstPredicate, limit: 1 }),
       ).not.toBe(getLoadSubsetDemandKey({ where: secondPredicate, limit: 1 }))
       expect(
-        isLoadSubsetCoveredBy(
+        isLoadSubsetRequestSubsumedBy(
           { where: firstPredicate, limit: 1 },
           { where: secondPredicate, limit: 1 },
         ),
@@ -504,6 +526,45 @@ function createAlphaRenamedJoinQuery(
         compareOptions: { direction: `desc`, nulls: `last` },
       },
     ],
+  }
+}
+
+function createAlphaRenamedImplicitJoinQuery(
+  userAlias: string,
+  postAlias: string,
+): QueryIR {
+  return {
+    from: new CollectionRef(
+      usersCollection as unknown as ConstructorParameters<
+        typeof CollectionRef
+      >[0],
+      userAlias,
+    ),
+    join: [
+      {
+        type: `inner`,
+        from: new CollectionRef(
+          postsCollection as unknown as ConstructorParameters<
+            typeof CollectionRef
+          >[0],
+          postAlias,
+        ),
+        left: new PropRef([userAlias, `id`]),
+        right: new PropRef([postAlias, `userId`]),
+      },
+    ],
+  }
+}
+
+function createProjectedExpressionQuery(expression: BasicExpression): QueryIR {
+  return {
+    from: new CollectionRef(
+      usersCollection as unknown as ConstructorParameters<
+        typeof CollectionRef
+      >[0],
+      `user`,
+    ),
+    select: { value: expression },
   }
 }
 
@@ -986,6 +1047,66 @@ describe(`stable QueryIR identity smoke test`, () => {
       ),
     )
   })
+
+  it(`keeps aliases that define an implicit joined result shape`, () => {
+    expect(
+      getQueryIdentity(createAlphaRenamedImplicitJoinQuery(`user`, `post`)),
+    ).not.toBe(
+      getQueryIdentity(
+        createAlphaRenamedImplicitJoinQuery(`account`, `article`),
+      ),
+    )
+  })
+
+  it(`keeps output-producing runtime values exact`, () => {
+    const bufferExpression = new Func(`concat`, [new Value(Buffer.from([65]))])
+    const uint8Expression = new Func(`concat`, [
+      new Value(new Uint8Array([65])),
+    ])
+
+    expect(compileExpression(bufferExpression)({})).toBe(`A`)
+    expect(compileExpression(uint8Expression)({})).toBe(`65`)
+    expect(
+      getQueryIdentity(createProjectedExpressionQuery(bufferExpression)),
+    ).not.toBe(
+      getQueryIdentity(createProjectedExpressionQuery(uint8Expression)),
+    )
+
+    expect(
+      getQueryIdentity(createProjectedExpressionQuery(new Value(-0))),
+    ).not.toBe(getQueryIdentity(createProjectedExpressionQuery(new Value(0))))
+
+    const firstObject = { value: 1 }
+    const secondObject = { value: 1 }
+    expect(
+      getQueryIdentity(createProjectedExpressionQuery(new Value(firstObject))),
+    ).not.toBe(
+      getQueryIdentity(createProjectedExpressionQuery(new Value(secondObject))),
+    )
+    expect(compileExpression(new Value(firstObject))({})).toBe(firstObject)
+    expect(compileExpression(new Value(secondObject))({})).toBe(secondObject)
+  })
+
+  fcTest.prop([outputExpressionPairArbitrary])(
+    `equal query identities imply equal projected expression results`,
+    ({ first, second }) => {
+      const firstIdentity = getQueryIdentity(
+        createProjectedExpressionQuery(first),
+      )
+      const secondIdentity = getQueryIdentity(
+        createProjectedExpressionQuery(second),
+      )
+
+      if (firstIdentity === secondIdentity) {
+        expect(
+          Object.is(
+            compileExpression(first)({}),
+            compileExpression(second)({}),
+          ),
+        ).toBe(true)
+      }
+    },
+  )
 
   fcTest.prop([
     fc

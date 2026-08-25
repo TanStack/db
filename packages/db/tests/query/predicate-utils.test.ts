@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import {
   isLimitSubset,
+  isLoadSubsetRequestSubsumedBy,
   isOffsetLimitSubset,
   isOrderBySubset,
   isPredicateSubset,
@@ -674,6 +675,71 @@ describe(`isOrderBySubset`, () => {
     const subset: OrderBy = [orderByClause(ref(`age`), `desc`)]
     const superset: OrderBy = [orderByClause(ref(`age`), `asc`)]
     expect(isOrderBySubset(subset, superset)).toBe(false)
+  })
+
+  it.each([
+    [
+      `null placement`,
+      { direction: `asc`, nulls: `first`, stringSort: `lexical` } as const,
+      { direction: `asc`, nulls: `last`, stringSort: `lexical` } as const,
+    ],
+    [
+      `string sort mode`,
+      { direction: `asc`, nulls: `last`, stringSort: `lexical` } as const,
+      { direction: `asc`, nulls: `last`, stringSort: `locale` } as const,
+    ],
+    [
+      `locale`,
+      {
+        direction: `asc`,
+        nulls: `last`,
+        stringSort: `locale`,
+        locale: `en-US`,
+      } as const,
+      {
+        direction: `asc`,
+        nulls: `last`,
+        stringSort: `locale`,
+        locale: `de-DE`,
+      } as const,
+    ],
+    [
+      `locale options`,
+      {
+        direction: `asc`,
+        nulls: `last`,
+        stringSort: `locale`,
+        locale: `en-US`,
+        localeOptions: { numeric: true, sensitivity: `base` },
+      } as const,
+      {
+        direction: `asc`,
+        nulls: `last`,
+        stringSort: `locale`,
+        locale: `en-US`,
+        localeOptions: { numeric: false, sensitivity: `base` },
+      } as const,
+    ],
+  ])(`should return false when %s differs`, (_label, first, second) => {
+    const expression = ref(`name`)
+    expect(
+      isOrderBySubset(
+        [{ expression, compareOptions: first }],
+        [{ expression, compareOptions: second }],
+      ),
+    ).toBe(false)
+    expect(
+      isLoadSubsetRequestSubsumedBy(
+        {
+          orderBy: [{ expression, compareOptions: first }],
+          limit: 10,
+        },
+        {
+          orderBy: [{ expression, compareOptions: second }],
+          limit: 20,
+        },
+      ),
+    ).toBe(false)
   })
 
   it(`should return false when subset is longer than superset`, () => {

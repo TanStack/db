@@ -26,7 +26,10 @@ type StableIdentityValue =
   | Array<StableIdentityValue>
   | { [key: string]: StableIdentityValue }
 
-type RuntimeValueIdentity = `structural` | `semantic`
+type ValueIdentityContext =
+  | `exact-output`
+  | `equality-operand`
+  | `ordering-operand`
 
 type AliasScope = {
   bindings: ReadonlyMap<string, number>
@@ -86,7 +89,12 @@ export function getQueryIdentity(query: QueryIR): QueryIdentity {
 /** Returns the semantic identity of one structured expression. */
 export function getStableExpressionHash(expression: BasicExpression): string {
   return JSON.stringify(
-    canonicalizeExpression(expression, `expression`, new WeakSet(), `semantic`),
+    canonicalizeExpression(
+      expression,
+      `expression`,
+      new WeakSet(),
+      `exact-output`,
+    ),
   )
 }
 
@@ -143,13 +151,13 @@ export function getLoadSubsetDemandKey(
         options.cursor.whereFrom,
         `loadSubset.cursor.whereFrom`,
         seen,
-        `semantic`,
+        `exact-output`,
       ),
       whereCurrent: canonicalizeExpression(
         options.cursor.whereCurrent,
         `loadSubset.cursor.whereCurrent`,
         seen,
-        `semantic`,
+        `exact-output`,
       ),
     }
     if (options.cursor.lastKey !== undefined) {
@@ -260,6 +268,18 @@ function canonicalizeQueryInScope(
     )
   }
 
+  if (
+    !query.select &&
+    (Boolean(query.join?.length) || Boolean(query.groupBy?.length))
+  ) {
+    // Without an explicit projection, these query shapes return a namespaced
+    // row. Its alias keys are public output and therefore part of identity.
+    result.implicitOutput = {
+      type: `namespaced`,
+      aliases: Array.from(scope.bindings.keys()),
+    }
+  }
+
   if (query.join) {
     result.join = query.join.map((join, index) =>
       canonicalizeJoin(join, `${path}.join[${index}]`, seen, scope),
@@ -281,7 +301,7 @@ function canonicalizeQueryInScope(
         expression,
         `${path}.groupBy[${index}]`,
         seen,
-        `semantic`,
+        `exact-output`,
         scope,
       ),
     )
@@ -302,7 +322,7 @@ function canonicalizeQueryInScope(
         orderBy,
         `${path}.orderBy[${index}]`,
         seen,
-        `semantic`,
+        `ordering-operand`,
         scope,
       ),
     )
@@ -363,7 +383,7 @@ function canonicalizeLoadSubsetQuery(
       options.where,
       `${path}.where`,
       seen,
-      `semantic`,
+      `exact-output`,
     )
   }
 
@@ -373,7 +393,7 @@ function canonicalizeLoadSubsetQuery(
         orderBy,
         `${path}.orderBy[${index}]`,
         seen,
-        `semantic`,
+        `ordering-operand`,
       ),
     )
   }
@@ -394,14 +414,14 @@ function canonicalizeJoin(
       join.left,
       `${path}.left`,
       seen,
-      `semantic`,
+      `equality-operand`,
       scope,
     ),
     right: canonicalizeExpression(
       join.right,
       `${path}.right`,
       seen,
-      `semantic`,
+      `equality-operand`,
       scope,
     ),
   }
@@ -488,20 +508,20 @@ function canonicalizeSelectValue(
       toExpression(value),
       path,
       seen,
-      `semantic`,
+      `exact-output`,
       scope,
     )
   }
 
   if (isExpression(value)) {
-    return canonicalizeExpression(value, path, seen, `semantic`, scope)
+    return canonicalizeExpression(value, path, seen, `exact-output`, scope)
   }
 
   if (isPlainObject(value)) {
     return canonicalizeSelect(value as Select, path, seen, scope)
   }
 
-  return canonicalizeSemanticRuntimeValue(value, path, seen, scope)
+  return canonicalizeExactOutputRuntimeValue(value, path, seen)
 }
 
 function canonicalizeWhere(
@@ -517,7 +537,7 @@ function canonicalizeWhere(
         where.expression,
         `${path}.expression`,
         seen,
-        `semantic`,
+        `exact-output`,
         scope,
       ),
     }
@@ -529,14 +549,14 @@ function canonicalizeWhere(
     return result
   }
 
-  return canonicalizeExpression(where, path, seen, `semantic`, scope)
+  return canonicalizeExpression(where, path, seen, `exact-output`, scope)
 }
 
 function canonicalizeOrderBy(
   orderBy: OrderByClause,
   path: string,
   seen: WeakSet<object>,
-  runtimeValueIdentity: RuntimeValueIdentity = `structural`,
+  valueContext: ValueIdentityContext = `exact-output`,
   scope?: AliasScope,
 ): StableIdentityValue {
   return {
@@ -544,7 +564,7 @@ function canonicalizeOrderBy(
       orderBy.expression,
       `${path}.expression`,
       seen,
-      runtimeValueIdentity,
+      valueContext,
       scope,
     ),
     compareOptions: canonicalizeRuntimeValue(
@@ -563,7 +583,7 @@ function canonicalizeExpression(
     | ConditionalSelect,
   path: string,
   seen: WeakSet<object>,
-  runtimeValueIdentity: RuntimeValueIdentity = `structural`,
+  valueContext: ValueIdentityContext = `exact-output`,
   scope?: AliasScope,
 ): StableIdentityValue {
   if (expression.type === `ref`) {
@@ -594,14 +614,24 @@ function canonicalizeExpression(
     return {
       type: `val`,
       value:
-        runtimeValueIdentity === `semantic`
-          ? canonicalizeSemanticRuntimeValue(
+        valueContext === `equality-operand`
+          ? canonicalizeEqualityRuntimeValue(
               expression.value,
               `${path}.value`,
               seen,
               scope,
             )
-          : canonicalizeRuntimeValue(expression.value, `${path}.value`, seen),
+          : valueContext === `ordering-operand`
+            ? canonicalizeOrderingRuntimeValue(
+                expression.value,
+                `${path}.value`,
+                seen,
+              )
+            : canonicalizeExactOutputRuntimeValue(
+                expression.value,
+                `${path}.value`,
+                seen,
+              ),
     }
   }
 
@@ -613,25 +643,19 @@ function canonicalizeExpression(
       Array.isArray(expression.args[1].value)
     ) {
       const candidates = expression.args[1].value.map((value, index) =>
-        runtimeValueIdentity === `semantic`
-          ? canonicalizeSemanticRuntimeValue(
-              value,
-              `${path}.args[1].value[${index}]`,
-              seen,
-              scope,
-            )
-          : canonicalizeRuntimeValue(
-              value,
-              `${path}.args[1].value[${index}]`,
-              seen,
-            ),
+        canonicalizeEqualityRuntimeValue(
+          value,
+          `${path}.args[1].value[${index}]`,
+          seen,
+          scope,
+        ),
       )
       return canonicalizeFunction(expression.name, [
         canonicalizeExpression(
           expression.args[0]!,
           `${path}.args[0]`,
           seen,
-          runtimeValueIdentity,
+          `equality-operand`,
           scope,
         ),
         {
@@ -643,12 +667,21 @@ function canonicalizeExpression(
       ])
     }
 
+    const operandContext: ValueIdentityContext =
+      expression.name === `eq`
+        ? `equality-operand`
+        : expression.name === `gt` ||
+            expression.name === `gte` ||
+            expression.name === `lt` ||
+            expression.name === `lte`
+          ? `ordering-operand`
+          : `exact-output`
     const args = expression.args.map((arg, index) =>
       canonicalizeExpression(
         arg,
         `${path}.args[${index}]`,
         seen,
-        runtimeValueIdentity,
+        operandContext,
         scope,
       ),
     )
@@ -664,7 +697,7 @@ function canonicalizeExpression(
           arg,
           `${path}.args[${index}]`,
           seen,
-          runtimeValueIdentity,
+          `exact-output`,
           scope,
         ),
       ),
@@ -679,7 +712,7 @@ function canonicalizeExpression(
           branch.condition,
           `${path}.branches[${index}].condition`,
           seen,
-          `semantic`,
+          `exact-output`,
           scope,
         ),
         value: canonicalizeSelectValue(
@@ -716,14 +749,14 @@ function canonicalizeExpression(
       expression.correlationField,
       `${path}.correlationField`,
       seen,
-      `semantic`,
+      `equality-operand`,
       scope,
     ),
     childCorrelationField: canonicalizeExpression(
       expression.childCorrelationField,
       `${path}.childCorrelationField`,
       seen,
-      `semantic`,
+      `equality-operand`,
       childScope,
     ),
     fieldName: expression.fieldName,
@@ -743,7 +776,7 @@ function canonicalizeExpression(
           projection,
           `${path}.parentProjection[${index}]`,
           seen,
-          `semantic`,
+          `exact-output`,
           scope,
         ),
     )
@@ -953,7 +986,19 @@ function canonicalizeRuntimeValue(
   throw new UnhashableQueryIRError(path, `non-plain object value`)
 }
 
-function canonicalizeSemanticRuntimeValue(
+function canonicalizeExactOutputRuntimeValue(
+  value: unknown,
+  path: string,
+  seen: WeakSet<object>,
+): StableIdentityValue {
+  if (typeof value === `object` && value !== null) {
+    return getRuntimeReferenceIdentity(value)
+  }
+
+  return canonicalizeRuntimeValue(value, path, seen)
+}
+
+function canonicalizeEqualityRuntimeValue(
   value: unknown,
   path: string,
   seen: WeakSet<object>,
@@ -964,7 +1009,7 @@ function canonicalizeSemanticRuntimeValue(
       toExpression(value),
       path,
       seen,
-      `semantic`,
+      `equality-operand`,
       scope,
     )
   }
@@ -992,6 +1037,38 @@ function canonicalizeSemanticRuntimeValue(
   }
 
   return canonicalizeRuntimeValue(value, path, seen)
+}
+
+function canonicalizeOrderingRuntimeValue(
+  value: unknown,
+  path: string,
+  seen: WeakSet<object>,
+): StableIdentityValue {
+  if (typeof value === `number` && Object.is(value, -0)) {
+    return canonicalizeRuntimeValue(0, path, seen)
+  }
+
+  if (value instanceof Date && Number.isNaN(value.getTime())) {
+    return canonicalizeRuntimeValue(Number.NaN, path, seen)
+  }
+
+  const normalized = normalizeValue(value)
+  if (normalized !== value && !(value instanceof Uint8Array)) {
+    return canonicalizeRuntimeValue(normalized, path, seen)
+  }
+
+  try {
+    return canonicalizeRuntimeValue(value, path, seen)
+  } catch (error) {
+    if (
+      error instanceof UnhashableQueryIRError &&
+      typeof value === `object` &&
+      value !== null
+    ) {
+      return getRuntimeReferenceIdentity(value)
+    }
+    throw error
+  }
 }
 
 function compareStableIdentityValues(

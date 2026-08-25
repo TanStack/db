@@ -2,9 +2,11 @@ import { Func, Value } from './ir.js'
 import {
   UnhashableQueryIRError,
   getStableExpressionHash,
+  getStableValueHash,
 } from './ir-stable-identity.js'
 import type { BasicExpression, OrderBy, PropRef } from './ir.js'
 import type { LoadSubsetOptions } from '../types.js'
+import type { CompareOptions } from './builder/types.js'
 
 /**
  * Check if one where clause is a logical subset of another.
@@ -908,16 +910,17 @@ export function isPredicateSubset(
 }
 
 /**
- * Returns whether established coverage satisfies a requested demand.
+ * Returns whether one acquisition request subsumes another demand.
  *
- * Coverage is a directional relation. It must not be replaced with DemandKey
+ * This is a directional relationship between request shapes, not proof of
+ * applied or authoritative coverage. It must not be replaced with DemandKey
  * equality, which answers whether two exact requests are the same.
  */
-export function isLoadSubsetCoveredBy(
+export function isLoadSubsetRequestSubsumedBy(
   demand: LoadSubsetOptions,
-  coverage: LoadSubsetOptions,
+  acquisitionRequest: LoadSubsetOptions,
 ): boolean {
-  return isPredicateSubset(demand, coverage)
+  return isPredicateSubset(demand, acquisitionRequest)
 }
 
 function areCursorExpressionsEqual(
@@ -1220,12 +1223,31 @@ function minValue(a: any, b: any): any {
   return Math.min(a, b)
 }
 
-function areCompareOptionsEqual(
-  a: { direction?: `asc` | `desc`; [key: string]: any },
-  b: { direction?: `asc` | `desc`; [key: string]: any },
-): boolean {
-  // For now, just compare direction - could be enhanced for other options
-  return a.direction === b.direction
+function areCompareOptionsEqual(a: CompareOptions, b: CompareOptions): boolean {
+  if (
+    a.direction !== b.direction ||
+    a.nulls !== b.nulls ||
+    a.stringSort !== b.stringSort
+  ) {
+    return false
+  }
+
+  if (a.stringSort !== `locale` || b.stringSort !== `locale`) {
+    return true
+  }
+
+  if (a.locale !== b.locale) return false
+  if (Object.is(a.localeOptions, b.localeOptions)) return true
+
+  try {
+    return (
+      getStableValueHash(a.localeOptions) ===
+      getStableValueHash(b.localeOptions)
+    )
+  } catch (error) {
+    if (!(error instanceof UnhashableQueryIRError)) throw error
+    return false
+  }
 }
 
 interface ComparisonField {

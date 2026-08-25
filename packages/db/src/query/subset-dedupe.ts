@@ -1,5 +1,5 @@
 import {
-  isLoadSubsetCoveredBy,
+  isLoadSubsetRequestSubsumedBy,
   isWhereSubset,
   minusWherePredicates,
   unionWherePredicates,
@@ -111,7 +111,7 @@ export class DeduplicatedLoadSubset {
     // Check against limited calls
     if (options.limit !== undefined || options.cursor !== undefined) {
       const alreadyLoaded = this.limitedCalls.some((loaded) =>
-        isLoadSubsetCoveredBy(options, loaded),
+        isLoadSubsetRequestSubsumedBy(options, loaded),
       )
 
       if (alreadyLoaded) {
@@ -125,7 +125,7 @@ export class DeduplicatedLoadSubset {
     const matchingInflight = this.inflightCalls.find(
       (inflight) =>
         !inflight.lease.aborted &&
-        isLoadSubsetCoveredBy(options, inflight.options),
+        isLoadSubsetRequestSubsumedBy(options, inflight.options),
     )
 
     if (matchingInflight !== undefined) {
