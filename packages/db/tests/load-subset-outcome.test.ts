@@ -317,4 +317,43 @@ describe(`loadSubset outcomes`, () => {
       await Promise.all([live.cleanup(), source.cleanup()])
     }
   })
+
+  it(`retains same-generation outcomes from every source in one operation`, async () => {
+    const collection = createCollection<{ id: string }>({
+      id: `load-subset-outcome-operation-sources`,
+      getKey: (row) => row.id,
+      sync: { sync: ({ markReady }) => markReady() },
+    })
+    const operation = collection._sync.beginLoadSubsetOperation()
+    const left = Promise.resolve({
+      collectionId: `left-collection`,
+      sourceId: `left`,
+      demand: { limit: 1 },
+      generation: 1,
+      extent: `continues` as const,
+    })
+    const right = Promise.resolve({
+      collectionId: `right-collection`,
+      sourceId: `right`,
+      demand: { limit: 1 },
+      generation: 1,
+      extent: `exhausted` as const,
+    })
+
+    collection._sync.trackLoadSubsetOperationPromise(left)
+    collection._sync.trackLoadSubsetOperationPromise(right)
+
+    try {
+      await operation.wait()
+      expect(operation.getOutcomes()).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({ sourceId: `left`, generation: 1 }),
+          expect.objectContaining({ sourceId: `right`, generation: 1 }),
+        ]),
+      )
+      expect(operation.getOutcomes()).toHaveLength(2)
+    } finally {
+      await collection.cleanup()
+    }
+  })
 })
