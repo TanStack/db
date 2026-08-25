@@ -1,6 +1,6 @@
 import { normalizeValue } from '../utils/comparison.js'
 import { isRefProxy, toExpression } from './builder/ref-proxy.js'
-import { getQueryIR } from './builder/index.js'
+import { getQueryIR } from './builder/get-query-ir.js'
 import { getRuntimeReferenceIdentity } from './runtime-reference-identity.js'
 import type {
   Aggregate,

@@ -344,6 +344,12 @@ export interface LoadSubsetResult {
    * direction.
    */
   hasMore: boolean | undefined
+  /**
+   * Keys whose establishing writes were applied by this exact acquisition.
+   * @internal Coverage bookkeeping only; adapters omit this unless they can
+   * prove row provenance for the returned result.
+   */
+  appliedRowKeys?: ReadonlyArray<string | number>
 }
 
 /** @internal Normalized source extent for one applied subset demand. */
@@ -360,6 +366,8 @@ export interface AppliedLoadSubsetOutcome {
   demand: LoadSubsetOptions
   generation: number
   extent: SourceExtent
+  /** @internal Applied row provenance supplied by the exact acquisition. */
+  appliedRowKeys?: ReadonlyArray<string | number>
 }
 
 /** @internal Result returned by the collection's normalized subset boundary. */
@@ -385,6 +393,11 @@ export type LoadSubsetFn = (
  */
 export type SyncAppliedReceipt = true | Promise<void>
 
+/**
+ * Releases one successful `loadSubset` ownership. Implementations must be
+ * idempotent and must not throw. Core preserves the ownership and retries a
+ * later unload if a buggy implementation throws despite this contract.
+ */
 export type UnloadSubsetFn = (options: LoadSubsetOptions) => void
 
 export type CleanupFn = () => void

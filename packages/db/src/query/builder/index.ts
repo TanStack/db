@@ -35,6 +35,7 @@ import {
   MaterializeWrapper,
   ToArrayWrapper,
 } from './functions.js'
+import { getQueryIR } from './get-query-ir.js'
 import type { SourceClauseContext } from '../../errors.js'
 import type { NamespacedRow, SingleResult } from '../../types.js'
 import type { CollectionOptionsIdentity } from '../../collection-options.js'
@@ -1614,12 +1615,7 @@ export function buildQuery<TContext extends Context>(
   return getQueryIR(result)
 }
 
-// Internal function to get the QueryIR from a builder
-export function getQueryIR(
-  builder: BaseQueryBuilder | QueryBuilder<any> | InitialQueryBuilder,
-): QueryIR {
-  return (builder as unknown as BaseQueryBuilder)._getQuery()
-}
+export { getQueryIR } from './get-query-ir.js'
 
 // Type-only exports for the query builder
 export type InitialQueryBuilder = Pick<

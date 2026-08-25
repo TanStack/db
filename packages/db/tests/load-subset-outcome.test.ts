@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 import { createCollection } from '../src/collection/index.js'
 import { DeduplicatedLoadSubset } from '../src/query/subset-dedupe.js'
 import { SubsetDemandController } from '../src/query/live/subset-demand-controller.js'
@@ -9,6 +9,89 @@ import { createLiveQueryWindowController } from '../src/live-query-window-contro
 import type { LazyDemandPlan } from '../src/query/compiler/joins.js'
 
 describe(`loadSubset outcomes`, () => {
+  it(`publishes exact applied coverage through the collection sync boundary`, async () => {
+    const unloadError = new Error(`unload failed`)
+    let unloadShouldFail = true
+    const unloadSubset = vi.fn(() => {
+      if (unloadShouldFail) throw unloadError
+    })
+    const collection = createCollection<{ id: string }>({
+      id: `load-subset-outcome-coverage-registry`,
+      getKey: (row) => row.id,
+      syncMode: `on-demand`,
+      startSync: true,
+      sync: {
+        sync: ({ begin, write, commit, markReady }) => {
+          markReady()
+          return {
+            loadSubset: async () => {
+              begin()
+              write({ type: `insert`, value: { id: `a` } })
+              write({ type: `insert`, value: { id: `b` } })
+              const applied = commit()
+              if (applied !== true) await applied
+              return {
+                hasMore: true,
+                appliedRowKeys: [`a`, `b`],
+              }
+            },
+            unloadSubset,
+          }
+        },
+      },
+    })
+
+    try {
+      const options = { limit: 2 }
+      await collection._sync.loadSubset(options)
+
+      expect(Array.from(collection.keys()).sort()).toEqual([`a`, `b`])
+      expect(collection._sync.getLoadSubsetCoverage()).toEqual([
+        {
+          collectionId: collection.id,
+          demand: { limit: 2 },
+          extent: `continues`,
+          rowKeys: [`a`, `b`],
+        },
+      ])
+
+      expect(() => collection._sync.unloadSubset(options)).toThrow(unloadError)
+      expect(collection._sync.getLoadSubsetCoverage()).toHaveLength(1)
+
+      unloadShouldFail = false
+      collection._sync.unloadSubset(options)
+      expect(collection._sync.getLoadSubsetCoverage()).toEqual([])
+      expect(unloadSubset).toHaveBeenCalledTimes(2)
+    } finally {
+      await collection.cleanup()
+    }
+  })
+
+  it(`does not publish a continuing prefix without applied rows`, async () => {
+    const collection = createCollection<{ id: string }>({
+      id: `load-subset-outcome-rowless-coverage`,
+      getKey: (row) => row.id,
+      syncMode: `on-demand`,
+      startSync: true,
+      sync: {
+        sync: ({ markReady }) => {
+          markReady()
+          return {
+            loadSubset: () =>
+              Promise.resolve({ hasMore: true, appliedRowKeys: [] }),
+          }
+        },
+      },
+    })
+
+    try {
+      await collection._sync.loadSubset({ limit: 2 })
+      expect(collection._sync.getLoadSubsetCoverage()).toEqual([])
+    } finally {
+      await collection.cleanup()
+    }
+  })
+
   it.each([
     [{ hasMore: true }, `continues`],
     [{ hasMore: false }, `exhausted`],

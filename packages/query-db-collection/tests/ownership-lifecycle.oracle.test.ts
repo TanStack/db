@@ -167,26 +167,6 @@ function asRecords({
   }
 }
 
-function classifyEagerOwnerLoss(difference: {
-  actual: unknown
-  expected: unknown
-}): boolean {
-  const records = asRecords(difference)
-  if (!records) return false
-  const { observed, wanted } = records
-  return (
-    observed.status === `ready` &&
-    Array.isArray(observed.rows) &&
-    observed.rows.length === 0 &&
-    observed.owners === 0 &&
-    wanted.status === `ready` &&
-    Array.isArray(wanted.rows) &&
-    wanted.rows.length === 1 &&
-    wanted.rows[0] === shared.id &&
-    wanted.owners === 1
-  )
-}
-
 function classifyInsertedOwnerMetadataLoss(difference: {
   actual: unknown
   expected: unknown
@@ -559,16 +539,16 @@ describe(`query collection ownership lifecycle oracle`, () => {
     )
   })
 
-  it(`#1631 keeps the eager owner when its last collection listener departs`, async () => {
-    const id = `ownership-eager-listener-1631`
-    const { collection, maps, queryClient } = createOwnershipFixture({
+  it(`keeps the eager owner when its last collection listener departs`, async () => {
+    const id = `ownership-eager-listener`
+    const { collection, maps, queryClient, queryFn } = createOwnershipFixture({
       id,
       syncMode: `eager`,
-      results: [[shared]],
+      results: [[shared], [{ ...shared, name: `Refetched` }]],
     })
 
     await collection.stateWhenReady()
-    const queryHash = onlyOwner(maps, shared.id)
+    onlyOwner(maps, shared.id)
     const subscription = collection.subscribeChanges(() => {})
     assertCheckpoint(
       0,
@@ -589,31 +569,34 @@ describe(`query collection ownership lifecycle oracle`, () => {
       // without making the defect boundary depend on a timer.
       queryClient.removeQueries({ queryKey: [id], exact: true })
 
-      const assertOwnerSurvives = expectAssertionFailure(
-        () =>
-          Promise.resolve().then(() => {
-            assertCheckpoint(
-              2,
-              {
-                status: collection.status,
-                rows: collectionRows(collection),
-                owners: ownersOf(maps, shared.id).length,
-              },
-              { status: `ready`, rows: [shared.id], owners: 1 },
-            )
-          }),
+      assertCheckpoint(
+        2,
         {
-          checkpoint: 2,
-          classify: classifyEagerOwnerLoss,
+          status: collection.status,
+          rows: collectionRows(collection),
+          owners: ownersOf(maps, shared.id).length,
         },
+        { status: `ready`, rows: [shared.id], owners: 1 },
       )
+      expect(warning).not.toHaveBeenCalled()
 
-      await assertOwnerSurvives()
-      expect(warning).toHaveBeenCalledOnce()
-      expect(warning).toHaveBeenCalledWith(
-        expect.stringContaining(`[cleanupQueryIfIdle]`),
-        { hashedQueryKey: queryHash },
+      await vi.waitFor(() => {
+        expect(observerCount(queryClient, onlyOwner(maps, shared.id))).toBe(1)
+        expect(queryFn).toHaveBeenCalledTimes(2)
+        expect(collection.get(shared.id)?.name).toBe(`Refetched`)
+      })
+
+      const remounted = collection.subscribeChanges(() => {})
+      assertCheckpoint(
+        3,
+        {
+          status: collection.status,
+          rows: collectionRows(collection),
+          owners: ownersOf(maps, shared.id).length,
+        },
+        { status: `ready`, rows: [shared.id], owners: 1 },
       )
+      remounted.unsubscribe()
     } finally {
       warning.mockRestore()
     }
