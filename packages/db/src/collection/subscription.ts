@@ -261,6 +261,10 @@ export class CollectionSubscription
     session.attempts.add(attempt)
     session.currentAttempt = attempt
 
+    // Truncate starts a new source generation. Its rows cannot inherit an
+    // ordered boundary or admission proof from the generation being replaced.
+    this.orderedWindow?.resetCoverage()
+
     // A newer replay replaces every prior acquisition for these demands. Abort
     // the old work before it can install rows into the new generation.
     for (const demand of demandsToReload) {
@@ -310,10 +314,38 @@ export class CollectionSubscription
           () => isCurrentAttempt() && !nextAcquisition.options.signal?.aborted,
         )
 
+        let replaced = false
+        try {
+          this.replaceSubsetAcquisition(demand, nextAcquisition)
+          replaced = true
+        } catch (error) {
+          // The old lease is still owned because its release failed. Abort and
+          // release the new acquisition, but keep observing its work so rows
+          // from a non-cooperative adapter cannot escape the replay buffer.
+          nextAcquisition.abortController.abort()
+          nextAcquisition.removeRequestAbortListener?.()
+          try {
+            this.collection._sync.unloadSubset(nextAcquisition.options)
+          } catch {
+            // Preserve the first ownership error. The demand still retains the
+            // old acquisition so normal cleanup can retry that release.
+          }
+          this.recordLoadSubsetError(demand.options, error, true)
+          attempt.failed = true
+        }
+
+        if (replaced && this.orderedSubsetDemands.has(demand)) {
+          // The replacement acquisition, not the retired generation, owns any
+          // row provenance published by this replay result.
+          this.observeOrderedCoverage(syncResult, demand)
+        }
+
         if (syncResult instanceof Promise) {
           // A transport promise may be shared by several deduplicated logical
           // demands. Track each demand separately so one settlement observer
           // cannot complete the attempt before the others apply their result.
+          // Register this after ordered coverage so replay publication cannot
+          // overtake its boundary evidence on the same promise.
           const pending = { promise: syncResult }
           attempt.pending.add(pending)
           void syncResult.then(
@@ -331,24 +363,6 @@ export class CollectionSubscription
               this.settleTruncateReplay(session, attempt, pending)
             },
           )
-        }
-
-        try {
-          this.replaceSubsetAcquisition(demand, nextAcquisition)
-        } catch (error) {
-          // The old lease is still owned because its release failed. Abort and
-          // release the new acquisition, but keep observing its work so rows
-          // from a non-cooperative adapter cannot escape the replay buffer.
-          nextAcquisition.abortController.abort()
-          nextAcquisition.removeRequestAbortListener?.()
-          try {
-            this.collection._sync.unloadSubset(nextAcquisition.options)
-          } catch {
-            // Preserve the first ownership error. The demand still retains the
-            // old acquisition so normal cleanup can retry that release.
-          }
-          this.recordLoadSubsetError(demand.options, error, true)
-          attempt.failed = true
         }
       }
 
@@ -923,11 +937,19 @@ export class CollectionSubscription
     const changes =
       this.stalePublishedRows.size === 0 ? this.reconcileOrderedWindow() : []
 
-    this.callback(changes)
+    if (changes.length > 0) this.callback(changes)
 
     // A zero window establishes no remote demand, but it must still create the
     // ordered coordinator so a later setWindow can load from the same order.
     if (limit === 0) {
+      onLoadSubsetResult?.(true)
+      return
+    }
+
+    if (
+      this.stalePublishedRows.size === 0 &&
+      this.orderedWindow.coversActiveWindow
+    ) {
       onLoadSubsetResult?.(true)
       return
     }
@@ -1079,16 +1101,39 @@ export class CollectionSubscription
     if (result instanceof Promise) {
       void result.then(apply, () => {})
     } else {
-      // `true` is returned only when eager sync or the absence of a subset
-      // loader already makes the whole local source authoritative.
-      window.recordContinuationCoverage(
-        undefined,
-        true,
-        ordered.requestedPrefix,
-        true,
-      )
+      const hasSubsetLoader = this.collection._sync.syncLoadSubsetFn !== null
+      if (!hasSubsetLoader || ordered.fullRegion) {
+        // Eager sources are already complete. A synchronous unbounded subset
+        // request also makes its whole filtered region visible before return.
+        window.recordContinuationCoverage(
+          undefined,
+          true,
+          ordered.requestedPrefix,
+          true,
+        )
+      } else if (!ordered.hadBoundary) {
+        window.recordInitialCoverage(undefined, false)
+      } else {
+        window.recordContinuationCoverage(
+          undefined,
+          false,
+          ordered.requestedPrefix,
+          false,
+        )
+      }
       const changes = this.reconcileOrderedWindow()
       if (changes.length > 0) this.callback(changes)
+
+      if (hasSubsetLoader && !ordered.fullRegion) {
+        // A synchronous limited loader cannot attach applied row provenance to
+        // `true`. Re-request the unbounded filtered region before treating any
+        // local row as an ordered boundary.
+        this.requestLimitedSnapshot({
+          orderBy: window.totalOrder.orderBy,
+          limit: ordered.requestedPrefix,
+          trackLoadSubsetPromise: false,
+        })
+      }
     }
   }
 

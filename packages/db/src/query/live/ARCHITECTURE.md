@@ -395,6 +395,9 @@ a failed truncate replay, the last complete publication remains the boundary;
 a partial replacement snapshot has no continuation provenance. Exact applied
 row keys and source extent advance retained coverage. A requested limit, a
 settled promise, or the number of requests does not.
+A synchronous limited loader that returns only `true` supplies no row
+provenance, so core refines the whole filtered region before it marks the
+ordered source complete.
 
 A bare child query is a Collection-valued include. It exposes one stable public
 Collection facade per active bucket in that edge:
@@ -669,20 +672,22 @@ create recursive Collection machinery.
 
 ## Executable contracts
 
-| Contract                                                                    | Test suite                                                                |
-| --------------------------------------------------------------------------- | ------------------------------------------------------------------------- |
-| State equivalence, route lifecycle, transition history, and batch partition | `packages/db/tests/query/includes-oracle.property.test.ts`                |
-| Joined multiplicity, alias identity, and null-key normalization             | `packages/db/tests/query/includes-query-shape-oracle.test.ts`             |
-| Demand, cancellation, and progressive timing                                | `packages/db/tests/query/includes-temporal-oracle.test.ts`                |
-| Optimistic confirmation, rollback, and later reactivity                     | `packages/db/tests/query/includes-optimistic-oracle.property.test.ts`     |
-| Coherent layered publication                                                | `packages/db/tests/query/includes-publication-oracle.test.ts`             |
-| Collection facades, event coherence, and route activation                   | `packages/db/tests/query/includes-collection-oracle.property.test.ts`     |
-| Correlated physical work                                                    | `packages/db/tests/query/includes-work-counter-oracle.test.ts`            |
-| Route-context discovery and transport across recursive and join boundaries  | `packages/db/tests/query/includes-context-transport-oracle.test.ts`       |
-| Coverage leases, acquisitions, fact compaction, and row provenance          | `packages/db/tests/query/coverage-registry-oracle.property.test.ts`       |
-| Applied coverage publication through the Collection sync boundary           | `packages/db/tests/load-subset-outcome.test.ts`                           |
-| Query-db ownership                                                          | `packages/query-db-collection/tests/ownership-lifecycle.oracle.test.ts`   |
-| Reachable nested shape                                                      | `packages/query-db-collection/tests/includes-work-counter-oracle.test.ts` |
+| Contract                                                                    | Test suite                                                                 |
+| --------------------------------------------------------------------------- | -------------------------------------------------------------------------- |
+| State equivalence, route lifecycle, transition history, and batch partition | `packages/db/tests/query/includes-oracle.property.test.ts`                 |
+| Joined multiplicity, alias identity, and null-key normalization             | `packages/db/tests/query/includes-query-shape-oracle.test.ts`              |
+| Demand, cancellation, and progressive timing                                | `packages/db/tests/query/includes-temporal-oracle.test.ts`                 |
+| Optimistic confirmation, rollback, and later reactivity                     | `packages/db/tests/query/includes-optimistic-oracle.property.test.ts`      |
+| Coherent layered publication                                                | `packages/db/tests/query/includes-publication-oracle.test.ts`              |
+| Collection facades, event coherence, and route activation                   | `packages/db/tests/query/includes-collection-oracle.property.test.ts`      |
+| Correlated physical work                                                    | `packages/db/tests/query/includes-work-counter-oracle.test.ts`             |
+| Route-context discovery and transport across recursive and join boundaries  | `packages/db/tests/query/includes-context-transport-oracle.test.ts`        |
+| Ordered source coverage, total boundaries, and window transitions           | `packages/db/tests/query/pagination-oracle.property.test.ts`               |
+| Truncate replacement, retained publication, and boundary provenance         | `packages/db/tests/collection-subscription-replay-oracle.property.test.ts` |
+| Coverage leases, acquisitions, fact compaction, and row provenance          | `packages/db/tests/query/coverage-registry-oracle.property.test.ts`        |
+| Applied coverage publication through the Collection sync boundary           | `packages/db/tests/load-subset-outcome.test.ts`                            |
+| Query-db ownership                                                          | `packages/query-db-collection/tests/ownership-lifecycle.oracle.test.ts`    |
+| Reachable nested shape                                                      | `packages/query-db-collection/tests/includes-work-counter-oracle.test.ts`  |
 
 Each oracle identifies the first divergent checkpoint and compares either the
 whole result or one exact structural difference. Correlated-materialization

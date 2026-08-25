@@ -60,6 +60,16 @@ export class WindowState<
     return Math.max(0, this.activeSize - this.localPrefixSize)
   }
 
+  /** Discard source-generation evidence before a truncate replacement. */
+  resetCoverage(): void {
+    this.coveredSize = 0
+    this.hasFullCoverage = false
+    this.needsFullRefinement = false
+    this.candidateKeys.clear()
+    this.provenanceKeys.clear()
+    this.admittedKeys.clear()
+  }
+
   recordInitialCoverage(
     rowKeys: ReadonlyArray<TKey> | undefined,
     exhausted: boolean,

@@ -1606,7 +1606,14 @@ describe(`CollectionSubscription replay oracle`, () => {
       let truncate!: () => void
       let loadCount = 0
       const loadOptions: Array<LoadSubsetOptions> = []
-      const replayLoads: Array<ReturnType<typeof createDeferred<void>>> = []
+      const replayLoads: Array<
+        ReturnType<
+          typeof createDeferred<{
+            hasMore: boolean
+            appliedRowKeys: Array<OrderedReplayRow[`id`]>
+          }>
+        >
+      > = []
       const replayRows: ReadonlyArray<OrderedReplayRow> =
         identity === `same`
           ? [
@@ -1637,16 +1644,37 @@ describe(`CollectionSubscription replay oracle`, () => {
             write = params.write
             commit = params.commit
             truncate = params.truncate
-            begin()
-            write({ type: `insert`, value: { id: `one`, value: 1 } })
-            write({ type: `insert`, value: { id: `two`, value: 2 } })
-            commit()
             params.markReady()
             return {
               loadSubset: (options) => {
                 loadCount++
                 loadOptions.push(options)
-                if (loadCount <= 2) return true
+                if (loadCount === 1) {
+                  const row =
+                    direction === `asc`
+                      ? ({ id: `one`, value: 1 } as const)
+                      : ({ id: `two`, value: 2 } as const)
+                  begin()
+                  write({ type: `insert`, value: row })
+                  commit()
+                  return Promise.resolve({
+                    hasMore: true,
+                    appliedRowKeys: [row.id],
+                  })
+                }
+                if (loadCount === 2) {
+                  const row =
+                    direction === `asc`
+                      ? ({ id: `two`, value: 2 } as const)
+                      : ({ id: `one`, value: 1 } as const)
+                  begin()
+                  write({ type: `insert`, value: row })
+                  commit()
+                  return Promise.resolve({
+                    hasMore: false,
+                    appliedRowKeys: [row.id],
+                  })
+                }
                 if (loadCount > 4) return true
 
                 if (delivery === `return`) {
@@ -1660,7 +1688,10 @@ describe(`CollectionSubscription replay oracle`, () => {
                   return true
                 }
 
-                const deferred = createDeferred<void>()
+                const deferred = createDeferred<{
+                  hasMore: boolean
+                  appliedRowKeys: Array<OrderedReplayRow[`id`]>
+                }>()
                 replayLoads.push(deferred)
                 return deferred.promise
               },
@@ -1698,33 +1729,50 @@ describe(`CollectionSubscription replay oracle`, () => {
 
       try {
         subscription.requestLimitedSnapshot({ orderBy, limit: 1 })
-        expect(batches).toEqual([[initialIds[0]]])
+        await flushPromises()
+        // A finite ordered result stays unpublished until the continuation
+        // proves the complete boundary class used for the public-key tie-break.
+        expect(batches).toEqual([])
         subscription.requestLimitedSnapshot({
           orderBy,
           limit: 1,
           minValues: [direction === `asc` ? 1 : 2],
         })
+        await flushPromises()
+        expect(batches).toEqual([[initialIds[0]]])
         expect(loadOptions[1]).toMatchObject({
-          offset: 1,
-          cursor: { lastKey: initialIds[1] },
+          offset: 0,
+          cursor: { lastKey: initialIds[0] },
         })
 
         begin()
         truncate()
         commit()
         await flushPromises()
-        expectSameSubsetRequest(loadOptions[2]!, loadOptions[0]!)
-        expectSameSubsetRequest(loadOptions[3]!, loadOptions[1]!)
+        const replayOptions = loadOptions
+          .slice(2)
+          .filter((options) => options.limit !== undefined)
+        expectSameSubsetRequest(replayOptions[0]!, loadOptions[0]!)
+        expectSameSubsetRequest(replayOptions[1]!, loadOptions[1]!)
 
         if (delivery === `resolve`) {
           expect(replayLoads).toHaveLength(2)
           installReplayRows()
-          replayLoads[0]?.resolve()
-          replayLoads[1]?.resolve()
+          replayLoads[0]?.resolve({
+            hasMore: true,
+            appliedRowKeys: [expectedIds[0]],
+          })
+          replayLoads[1]?.resolve({
+            hasMore: false,
+            appliedRowKeys: [expectedIds[1]],
+          })
         } else if (delivery === `reject`) {
           expect(replayLoads).toHaveLength(2)
           replayLoads[0]?.reject(new Error(`ordered replay failed`))
-          replayLoads[1]?.resolve()
+          replayLoads[1]?.resolve({
+            hasMore: false,
+            appliedRowKeys: [initialIds[1]],
+          })
         } else {
           expect(replayLoads).toEqual([])
         }
@@ -1733,18 +1781,20 @@ describe(`CollectionSubscription replay oracle`, () => {
           succeeds ? [...expectedIds].sort() : [],
         )
 
+        const loadCountBeforeWiden = loadOptions.length
         subscription.requestLimitedSnapshot({
           orderBy,
           limit: 1,
           minValues: [direction === `asc` ? 2 : 1],
         })
-        expect(loadOptions[4]).toMatchObject({
-          offset: 2,
-          cursor: {
-            lastKey: succeeds ? expectedIds[1] : initialIds[1],
-          },
-        })
-        expect(batches.at(-1)).toEqual([])
+        if (succeeds) {
+          expect(loadOptions).toHaveLength(loadCountBeforeWiden)
+        } else {
+          expect(loadOptions[loadCountBeforeWiden]).toMatchObject({
+            offset: 1,
+            cursor: { lastKey: initialIds[0] },
+          })
+        }
       } finally {
         subscription.unsubscribe()
         await collection.cleanup()

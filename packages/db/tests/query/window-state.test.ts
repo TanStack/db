@@ -22,6 +22,36 @@ function mockCollection(rows: ReadonlyArray<Row>): CollectionImpl<Row, number> {
 }
 
 describe(`WindowState`, () => {
+  it(`does not reuse an ordered boundary across truncate generations`, () => {
+    const window = new WindowState<Row, number>(
+      mockCollection([
+        { id: 1, rank: 1 },
+        { id: 2, rank: 2 },
+        { id: 3, rank: 3 },
+        { id: 4, rank: 4 },
+      ]),
+      [
+        {
+          expression: new PropRef([`rank`]),
+          compareOptions: { direction: `asc`, nulls: `first` },
+        },
+      ],
+      undefined,
+      2,
+    )
+
+    window.recordInitialCoverage([1], false)
+    window.recordContinuationCoverage([2], false, 2, false)
+    expect(window.requestBoundary()).toEqual({ key: 2, values: [2] })
+
+    window.resetCoverage()
+    expect(window.requestBoundary()).toBeUndefined()
+
+    window.recordInitialCoverage([3], false)
+    window.recordContinuationCoverage([4], false, 2, false)
+    expect(window.requestBoundary()).toEqual({ key: 4, values: [4] })
+  })
+
   it.each([
     { direction: `asc`, nulls: `first`, expected: { key: 3, values: [2] } },
     { direction: `asc`, nulls: `last`, expected: { key: 1, values: [null] } },
