@@ -2937,6 +2937,50 @@ describe(`Query Collections`, () => {
       })
     })
 
+    it(`reuses dynamically-created collection descriptors by id`, async () => {
+      const dbClient = new DbClient()
+      const materialize = vi.fn(() =>
+        mockSyncCollectionOptions<Person>({
+          id: `dynamic-descriptor-people`,
+          getKey: (person) => person.id,
+          initialData: initialPersons,
+        }),
+      )
+      const descriptors = new Set<object>()
+      const wrapper = ({ children }: { children: ReactNode }) => (
+        <DbProvider client={dbClient}>{children}</DbProvider>
+      )
+
+      const { result, rerender } = renderHook(
+        ({ team }) =>
+          useLiveQuery({
+            query: (q) => {
+              const descriptor = collectionOptions(
+                `dynamic-descriptor-people`,
+                materialize,
+              )
+              descriptors.add(descriptor)
+
+              return q
+                .from({ people: descriptor })
+                .where(({ people }) => eq(people.team, team))
+            },
+          }),
+        { initialProps: { team: `team1` }, wrapper },
+      )
+
+      await waitFor(() => {
+        expect(result.current.data).toHaveLength(2)
+      })
+      const firstCollection = result.current.collection
+
+      rerender({ team: `team1` })
+
+      expect(descriptors.size).toBeGreaterThan(1)
+      expect(materialize).toHaveBeenCalledOnce()
+      expect(result.current.collection).toBe(firstCollection)
+    })
+
     it(`keeps the same live query collection when derived identity is stable`, async () => {
       const collection = createCollection(
         mockSyncCollectionOptions<Person>({

@@ -240,28 +240,59 @@ describe(`DbClient`, () => {
     ).toEqual([`people`])
   })
 
-  it(`requires collection ids to be unique per client`, () => {
-    const firstDescriptor = collectionOptions(
+  it(`uses the collection id to reuse separately-created descriptors`, () => {
+    const firstFactory = vi.fn(() =>
       mockSyncCollectionOptions<Person>({
         id: `people`,
         getKey: (person) => person.id,
         initialData: [people[0]!],
       }),
     )
-    const secondDescriptor = collectionOptions(
+    const secondFactory = vi.fn(() =>
       mockSyncCollectionOptions<Person>({
         id: `people`,
         getKey: (person) => person.id,
         initialData: [people[1]!],
       }),
     )
+    const firstDescriptor = collectionOptions(`people`, firstFactory)
+    const secondDescriptor = collectionOptions(`people`, secondFactory)
 
     const client = new DbClient()
-    client.collection(firstDescriptor)
+    const first = client.collection(firstDescriptor)
+    const second = client.collection(secondDescriptor)
 
-    expect(() => client.collection(secondDescriptor)).toThrow(
-      /collection ids to be unique per DbClient/,
+    expect(second).toBe(first)
+    expect(firstFactory).toHaveBeenCalledOnce()
+    expect(secondFactory).not.toHaveBeenCalled()
+    expect(second.toArray).toHaveLength(1)
+    expect(second.toArray[0]).toMatchObject(people[0]!)
+  })
+
+  it(`reuses a same-id collection materialized by a descriptor factory`, () => {
+    const client = new DbClient()
+    const nestedDescriptor = collectionOptions(`people`, () =>
+      mockSyncCollectionOptions<Person>({
+        id: `people`,
+        getKey: (person) => person.id,
+        initialData: [people[0]!],
+      }),
     )
+    const nestedCollections: Array<unknown> = []
+    const outerDescriptor = collectionOptions(`people`, () => {
+      nestedCollections.push(client.collection(nestedDescriptor))
+      return mockSyncCollectionOptions<Person>({
+        id: `people`,
+        getKey: (person) => person.id,
+        initialData: [people[1]!],
+      })
+    })
+
+    const collection = client.collection(outerDescriptor)
+
+    expect(collection).toBe(nestedCollections[0])
+    expect(collection.toArray).toHaveLength(1)
+    expect(collection.toArray[0]).toMatchObject(people[0]!)
   })
 
   it(`requires a stable explicit collection id when creating a descriptor`, () => {
