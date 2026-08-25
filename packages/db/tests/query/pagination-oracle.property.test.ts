@@ -5,7 +5,6 @@ import { createDeferred } from '../../src/deferred.js'
 import { BTreeIndex } from '../../src/index.js'
 import { createLiveQueryCollection } from '../../src/query/live-query-collection.js'
 import { PropRef } from '../../src/query/ir.js'
-import { expectAssertionFailure } from '../expected-failure.js'
 import { makeComparator } from '../../src/utils/comparison.js'
 import {
   oracleRandomParameters,
@@ -692,76 +691,6 @@ async function runPaginationStateScenario(
   }
 }
 
-function isPageRowArray(value: unknown): value is Array<PageRow> {
-  return (
-    Array.isArray(value) &&
-    value.every(
-      (row) =>
-        typeof row === `object` &&
-        row !== null &&
-        `id` in row &&
-        typeof row.id === `number` &&
-        `rank` in row &&
-        typeof row.rank === `number`,
-    )
-  )
-}
-
-type PageRowDifference = {
-  checkpoint: number
-  actual: Array<PageRow>
-  expected: Array<PageRow>
-}
-
-function readPageRowDifference(
-  error: unknown,
-  acceptsCheckpoint: (checkpoint: number) => boolean = (checkpoint) =>
-    checkpoint >= 1,
-): PageRowDifference | undefined {
-  if (
-    !(error instanceof TraceAssertionError) ||
-    !acceptsCheckpoint(error.checkpoint) ||
-    typeof error.cause !== `object` ||
-    error.cause === null ||
-    !(`actual` in error.cause) ||
-    !(`expected` in error.cause) ||
-    !isPageRowArray(error.cause.actual) ||
-    !isPageRowArray(error.cause.expected)
-  ) {
-    return undefined
-  }
-
-  return {
-    checkpoint: error.checkpoint,
-    actual: error.cause.actual,
-    expected: error.cause.expected,
-  }
-}
-
-function readPageRowDifferenceAtCheckpoint(
-  error: unknown,
-  checkpoint: number,
-): PageRowDifference | undefined {
-  return readPageRowDifference(error, (value) => value === checkpoint)
-}
-
-function sameRows(
-  left: ReadonlyArray<PageRow>,
-  right: ReadonlyArray<PageRow>,
-): boolean {
-  return (
-    left.length === right.length &&
-    left.every(
-      (row, index) =>
-        row.id === right[index]!.id && row.rank === right[index]!.rank,
-    )
-  )
-}
-
-function isNumberArray(value: unknown): value is Array<number> {
-  return Array.isArray(value) && value.every((item) => typeof item === `number`)
-}
-
 async function runOnDemandPaginationScenario(
   scenario: PaginationScenario,
 ): Promise<void> {
@@ -1269,65 +1198,6 @@ async function runPendingMutationScenario(
     await Promise.allSettled(outstanding)
     await live.cleanup()
     await source.cleanup()
-  }
-}
-
-function pendingMutationRows(
-  scenario: PendingMutationScenario,
-): Map<number, PageRow> {
-  const rows = new Map<number, PageRow>(
-    scenario.ranks.map((rank, index) => [index + 1, { id: index + 1, rank }]),
-  )
-  if (scenario.mutation.type === `delete`) {
-    rows.delete(scenario.mutation.id)
-  } else {
-    rows.set(scenario.mutation.row.id, { ...scenario.mutation.row })
-  }
-  return rows
-}
-
-function isKnownRejectedCursorRetryFailure(
-  scenario: PendingMutationScenario,
-  error: unknown,
-): boolean {
-  if (scenario.responseOutcome !== `reject`) return false
-  if (!(error instanceof PendingMutationTraceAssertionError)) return false
-
-  const difference = readPageRowDifferenceAtCheckpoint(error, 0)
-  if (!difference) return false
-
-  const finalRows = pendingMutationRows(scenario)
-  const finalLimit = scenario.limit + 1
-  const expected = referenceWindowRows(
-    [...finalRows.values()],
-    scenario.direction,
-    { offset: 0, limit: finalLimit },
-  )
-  // The rejected retry can leave any stale window drawn from rows the source
-  // already delivered. Keep the exception scoped to that recovery path while
-  // still rejecting invented rows and an incorrect reference expectation.
-  const actualRowsWereDelivered = difference.actual.every((actual) =>
-    error.deliveredRows.some(
-      (delivered) =>
-        delivered.id === actual.id && delivered.rank === actual.rank,
-    ),
-  )
-  return (
-    actualRowsWereDelivered &&
-    !sameRows(difference.actual, expected) &&
-    sameRows(difference.expected, expected)
-  )
-}
-
-async function runPendingMutationScenarioWithKnownFailures(
-  scenario: PendingMutationScenario,
-  timing: `before-response` | `after-response`,
-): Promise<void> {
-  try {
-    await runPendingMutationScenario(scenario, timing)
-  } catch (error) {
-    if (isKnownRejectedCursorRetryFailure(scenario, error)) return
-    throw error
   }
 }
 
@@ -2133,6 +2003,110 @@ describe(`pagination recomputation oracle`, () => {
     },
   )
 
+  it.each([`asc`, `desc`] as const)(
+    `refreshes from the start when one SSE batch moves the retained prefix (%s)`,
+    async (direction) => {
+      const rows = new Map<number, PageRow>(
+        Array.from({ length: 6 }, (_, index) => [
+          index + 1,
+          { id: index + 1, rank: index + 1 },
+        ]),
+      )
+      const delivered = new Set<number>()
+      const loads: Array<LoadSubsetOptions> = []
+      let begin!: () => void
+      let write!: (message: {
+        type: `insert` | `update`
+        value: PageRow
+      }) => void
+      let commit!: () => void
+      const source = createCollection<PageRow>({
+        id: `pagination-batch-prefix-refresh-${collectionSequence++}`,
+        getKey: (row) => row.id,
+        syncMode: `on-demand`,
+        startSync: true,
+        autoIndex: `eager`,
+        defaultIndexType: BTreeIndex,
+        sync: {
+          sync: (params) => {
+            begin = params.begin
+            write = params.write
+            commit = params.commit
+            params.markReady()
+            return {
+              loadSubset: (options: LoadSubsetOptions) => {
+                loads.push(options)
+                const settled = new Promise<void>((resolve) => {
+                  queueMicrotask(() => {
+                    const ordered = referenceWindowRows(
+                      [...rows.values()],
+                      direction,
+                      { offset: 0, limit: rows.size },
+                    )
+                    begin()
+                    for (const row of rowsForLoadSubset(ordered, options)) {
+                      if (delivered.has(row.id)) continue
+                      delivered.add(row.id)
+                      write({ type: `insert`, value: { ...row } })
+                    }
+                    commit()
+                    resolve()
+                  })
+                })
+                return withAppliedSubsetEvidence(
+                  () =>
+                    referenceWindowRows([...rows.values()], direction, {
+                      offset: 0,
+                      limit: rows.size,
+                    }),
+                  options,
+                  settled,
+                )
+              },
+            }
+          },
+        },
+      })
+      const live = createLiveQueryCollection((query) =>
+        query
+          .from({ row: source })
+          .orderBy(({ row }) => row.rank, direction)
+          .orderBy(({ row }) => row.id, `asc`)
+          .limit(2),
+      )
+
+      try {
+        await live.preload()
+        expect(Array.from(live.values(), ({ id }) => id)).toEqual(
+          direction === `asc` ? [1, 2] : [6, 5],
+        )
+
+        begin()
+        const movedIds =
+          direction === `asc` ? [1, 2, 3, 4] : [3, 4, 5, 6]
+        for (const id of movedIds) {
+          const row = {
+            id,
+            rank: direction === `asc` ? 100 + id : -100 - id,
+          }
+          rows.set(id, row)
+          write({ type: `update`, value: { ...row } })
+        }
+        commit()
+        for (let index = 0; index < 5; index++) await flushPromises()
+
+        expect(Array.from(live.values(), ({ id }) => id)).toEqual(
+          direction === `asc` ? [5, 6] : [2, 1],
+        )
+        expect(loads.at(-1)).toMatchObject({ offset: 0, limit: 2 })
+        expect(loads.at(-1)?.cursor).toBeUndefined()
+      } finally {
+        live.cleanup()
+        source.cleanup()
+      }
+    },
+  )
+
   it(`does not use a new row beyond finite coverage as a widening boundary`, async () => {
     await runPendingMutationScenario(
       {
@@ -2175,7 +2149,7 @@ describe(`pagination recomputation oracle`, () => {
     seed: 1660,
   })(
     `matches recomputation when source mutations cross a pending cursor response for a fixed seed`,
-    runPendingMutationScenarioWithKnownFailures,
+    runPendingMutationScenario,
   )
 
   it.each(
@@ -2195,7 +2169,7 @@ describe(`pagination recomputation oracle`, () => {
           : mutationKind === `update`
             ? { type: `update`, row: { id: 2, rank: -1 } }
             : { type: `delete`, id: 2 }
-      await runPendingMutationScenarioWithKnownFailures(
+      await runPendingMutationScenario(
         {
           ranks: [0, 1, 2, 3],
           direction: `asc`,
@@ -2213,19 +2187,12 @@ describe(`pagination recomputation oracle`, () => {
     oracleRandomParameters(transitionScenarioRuns, replaySeed),
   )(
     `matches recomputation when source mutations cross a pending cursor response for a random or replayed seed`,
-    runPendingMutationScenarioWithKnownFailures,
+    runPendingMutationScenario,
   )
 
   it(
     `discovered trace: retries a rejected cursor after a source and window transition`,
-    expectAssertionFailure(runRejectedCursorRetryAfterMutation, {
-      checkpoint: 0,
-      classify: ({ actual, expected }) =>
-        isNumberArray(actual) &&
-        actual.join(`,`) === `3,1,4` &&
-        isNumberArray(expected) &&
-        expected.join(`,`) === `2,3,1`,
-    }),
+    runRejectedCursorRetryAfterMutation,
   )
 
   fcTest.prop([pendingHistoryScenarioArbitrary], {

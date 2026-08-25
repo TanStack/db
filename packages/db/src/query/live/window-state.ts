@@ -187,7 +187,7 @@ export class WindowState<
       this.candidateKeys.clear()
       this.provenanceKeys.clear()
       this.needsFullRefinement = false
-      this.needsPrefixRefresh = false
+      this.needsPrefixRefresh = true
     }
   }
 
