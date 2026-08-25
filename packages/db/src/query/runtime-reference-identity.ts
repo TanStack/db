@@ -27,9 +27,9 @@ export const getRuntimeReferenceIdentity =
 function createRuntimeReferenceNamespace(): string {
   const randomValues = new Uint32Array(4)
   const runtimeCrypto = Reflect.get(globalThis, `crypto`) as
-    | { getRandomValues: (values: Uint32Array) => Uint32Array }
+    | { getRandomValues?: (values: Uint32Array) => Uint32Array }
     | undefined
-  if (runtimeCrypto !== undefined) {
+  if (typeof runtimeCrypto?.getRandomValues === `function`) {
     runtimeCrypto.getRandomValues(randomValues)
     return Array.from(randomValues, (value) => value.toString(36)).join(`-`)
   }

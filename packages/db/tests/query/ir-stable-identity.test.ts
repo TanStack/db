@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 import { fc, test as fcTest } from '@fast-check/vitest'
 import { Temporal } from 'temporal-polyfill'
 import { CollectionImpl } from '../../src/collection/index.js'
@@ -277,6 +277,21 @@ describe(`semantic expression identity`, () => {
     const secondRuntime = createRuntimeReferenceIdentityFactory()
 
     expect(firstRuntime({ a: 1 })).not.toEqual(secondRuntime({ b: 2 }))
+  })
+
+  it(`falls back when the runtime crypto object lacks getRandomValues`, () => {
+    vi.stubGlobal(`crypto`, {})
+    try {
+      const runtime = createRuntimeReferenceIdentityFactory()
+
+      expect(runtime({ a: 1 })).toEqual([
+        `runtimeReference`,
+        expect.any(String),
+        1,
+      ])
+    } finally {
+      vi.unstubAllGlobals()
+    }
   })
 
   fcTest.prop([
