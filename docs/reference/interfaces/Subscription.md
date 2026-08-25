@@ -5,7 +5,7 @@ title: Subscription
 
 # Interface: Subscription
 
-Defined in: [packages/db/src/types.ts:254](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L254)
+Defined in: [packages/db/src/types.ts:269](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L269)
 
 Public interface for a collection subscription
 Used by sync implementations to track subscription lifecycle
@@ -16,13 +16,25 @@ Used by sync implementations to track subscription lifecycle
 
 ## Properties
 
+### lastError
+
+```ts
+readonly lastError: unknown;
+```
+
+Defined in: [packages/db/src/types.ts:273](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L273)
+
+Most recent subset-load failure observed by this subscription.
+
+***
+
 ### status
 
 ```ts
 readonly status: SubscriptionStatus;
 ```
 
-Defined in: [packages/db/src/types.ts:256](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L256)
+Defined in: [packages/db/src/types.ts:271](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L271)
 
 Current status of the subscription
 
