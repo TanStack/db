@@ -10,7 +10,11 @@ import type { LazyDemandPlan } from '../src/query/compiler/joins.js'
 
 describe(`loadSubset outcomes`, () => {
   it(`publishes exact applied coverage through the collection sync boundary`, async () => {
-    const unloadSubset = vi.fn()
+    const unloadError = new Error(`unload failed`)
+    let unloadShouldFail = true
+    const unloadSubset = vi.fn(() => {
+      if (unloadShouldFail) throw unloadError
+    })
     const collection = createCollection<{ id: string }>({
       id: `load-subset-outcome-coverage-registry`,
       getKey: (row) => row.id,
@@ -51,9 +55,13 @@ describe(`loadSubset outcomes`, () => {
         },
       ])
 
+      expect(() => collection._sync.unloadSubset(options)).toThrow(unloadError)
+      expect(collection._sync.getLoadSubsetCoverage()).toHaveLength(1)
+
+      unloadShouldFail = false
       collection._sync.unloadSubset(options)
       expect(collection._sync.getLoadSubsetCoverage()).toEqual([])
-      expect(unloadSubset).toHaveBeenCalledOnce()
+      expect(unloadSubset).toHaveBeenCalledTimes(2)
     } finally {
       await collection.cleanup()
     }

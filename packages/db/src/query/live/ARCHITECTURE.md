@@ -492,6 +492,13 @@ publishes neither rows nor coverage. Public reads return defensive snapshots;
 fact compaction never mutates or retires the underlying leases, acquisitions,
 or row ownership.
 
+Adapter release and `unloadSubset` callbacks must be idempotent and
+non-throwing. Core still treats a thrown callback defensively: it surfaces the
+original error but preserves the acquisition, lease, coverage, and row owners.
+A later cleanup retries callbacks that have not yet settled. Logical ownership
+retires, and GC rows publish, only after every callback required by that release
+step succeeds.
+
 An eager Query DB collection owns its base query for the Collection lifetime.
 If TanStack Query removes that cache entry while the Collection has no public
 listeners, the adapter must replace the detached observer without retiring the

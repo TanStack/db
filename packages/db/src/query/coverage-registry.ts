@@ -42,6 +42,7 @@ type AcquisitionRecord<TCoverage, TRowKey extends string | number> = {
   }
   leases: Set<DemandLease<unknown>>
   release: () => void
+  releaseSettled: boolean
   rows: Set<TRowKey>
   coverage: TCoverage | undefined
 }
@@ -167,6 +168,7 @@ export class CoverageRegistry<
       },
       leases: new Set(options.leases as ReadonlyArray<DemandLease<unknown>>),
       release: options.release,
+      releaseSettled: false,
       rows: new Set(),
       coverage: undefined,
     })
@@ -329,50 +331,81 @@ export class CoverageRegistry<
     const leaseRecord = this.leases.get(lease)
     if (!leaseRecord) return { rowsToRemove: [] }
 
-    this.leases.delete(lease)
-    const rowsToRemove = new Set<TRowKey>()
+    const acquisitions = Array.from(leaseRecord.acquisitions)
+    const finalAcquisitions = acquisitions.filter((acquisition) => {
+      const record = this.acquisitions.get(acquisition)
+      return record?.leases.size === 1 && record.leases.has(lease)
+    })
     const releaseErrors: Array<unknown> = []
-    for (const acquisition of leaseRecord.acquisitions) {
+    this.settleReleases(finalAcquisitions, releaseErrors)
+    // A failed adapter cleanup leaves the logical graph unchanged. A later
+    // release retries only callbacks that did not settle successfully.
+    throwReleaseErrors(releaseErrors)
+
+    const rowsToRemove = new Set<TRowKey>()
+    for (const acquisition of acquisitions) {
       const record = this.acquisitions.get(acquisition)
       if (!record) continue
       record.leases.delete(lease as DemandLease<unknown>)
+      leaseRecord.acquisitions.delete(acquisition)
       if (record.leases.size === 0) {
-        this.retireAcquisition(acquisition, rowsToRemove, releaseErrors)
+        this.retireAcquisitionState(acquisition, rowsToRemove)
       }
     }
-    throwReleaseErrors(releaseErrors)
+    this.leases.delete(lease)
     return { rowsToRemove: sortKeys(rowsToRemove) }
   }
 
   releaseAcquisition(acquisition: AcquisitionToken): ReleaseResult<TRowKey> {
-    const rowsToRemove = new Set<TRowKey>()
+    if (!this.acquisitions.has(acquisition)) return { rowsToRemove: [] }
     const releaseErrors: Array<unknown> = []
-    this.retireAcquisition(acquisition, rowsToRemove, releaseErrors)
+    this.settleReleases([acquisition], releaseErrors)
     throwReleaseErrors(releaseErrors)
+
+    const rowsToRemove = new Set<TRowKey>()
+    this.retireAcquisitionState(acquisition, rowsToRemove)
     return { rowsToRemove: sortKeys(rowsToRemove) }
   }
 
   dispose(): ReleaseResult<TRowKey> {
-    const rowsToRemove = new Set<TRowKey>()
+    const acquisitions = Array.from(this.acquisitions.keys())
     const releaseErrors: Array<unknown> = []
-    for (const acquisition of Array.from(this.acquisitions.keys())) {
-      this.retireAcquisition(acquisition, rowsToRemove, releaseErrors)
+    this.settleReleases(acquisitions, releaseErrors)
+    // Keep every logical owner intact until all physical cleanup callbacks
+    // settle. This preserves the full GC result for the successful retry.
+    throwReleaseErrors(releaseErrors)
+
+    const rowsToRemove = new Set<TRowKey>()
+    for (const acquisition of acquisitions) {
+      this.retireAcquisitionState(acquisition, rowsToRemove)
     }
     this.leases.clear()
-    throwReleaseErrors(releaseErrors)
     return { rowsToRemove: sortKeys(rowsToRemove) }
   }
 
-  private retireAcquisition(
+  private settleReleases(
+    acquisitions: ReadonlyArray<AcquisitionToken>,
+    releaseErrors: Array<unknown>,
+  ): void {
+    for (const acquisition of acquisitions) {
+      const record = this.acquisitions.get(acquisition)
+      if (!record || record.releaseSettled) continue
+      try {
+        record.release()
+        record.releaseSettled = true
+      } catch (error) {
+        releaseErrors.push(error)
+      }
+    }
+  }
+
+  private retireAcquisitionState(
     acquisition: AcquisitionToken,
     rowsToRemove: Set<TRowKey>,
-    releaseErrors: Array<unknown>,
   ): void {
     const record = this.acquisitions.get(acquisition)
     if (!record) return
 
-    // Retire first. A throwing release callback cannot make a later cleanup
-    // invoke the same physical release twice.
     this.acquisitions.delete(acquisition)
     const current = this.currentAcquisitions.get(record.scopeKey)
     if (current?.acquisition === acquisition) {
@@ -390,12 +423,6 @@ export class CoverageRegistry<
         this.rowOwners.delete(row)
         rowsToRemove.add(row)
       }
-    }
-
-    try {
-      record.release()
-    } catch (error) {
-      releaseErrors.push(error)
     }
   }
 }

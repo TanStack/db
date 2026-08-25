@@ -101,6 +101,8 @@ type ModelAcquisition = {
   rows: Set<RowKey>
   coverage: Prefix | undefined
   releaseCalls: number
+  releaseFailuresRemaining: number
+  releaseSettled: boolean
 }
 
 type RegistryModel = {
@@ -111,6 +113,8 @@ type RegistryModel = {
 
 type ReleaseProbe = {
   calls: number
+  failuresRemaining: number
+  error: Error
   release: () => void
 }
 
@@ -165,6 +169,7 @@ function addModelAcquisition(
     prefix: Prefix
     sourceId: string
     leaseIndex: number
+    failFirstRelease: boolean
   },
 ): number {
   const index = model.acquisitions.length
@@ -181,6 +186,8 @@ function addModelAcquisition(
     rows: new Set(),
     coverage: undefined,
     releaseCalls: 0,
+    releaseFailuresRemaining: options.failFirstRelease ? 1 : 0,
+    releaseSettled: false,
   })
   model.leases[options.leaseIndex]!.acquisitions.add(index)
   if (!current || options.generation >= current.generation) {
@@ -227,7 +234,6 @@ function retireModelAcquisition(
   const rowsToRemove = replaceModelRows(model, acquisitionIndex, new Set())
   acquisition.active = false
   acquisition.coverage = undefined
-  acquisition.releaseCalls++
   for (const leaseIndex of acquisition.leases) {
     model.leases[leaseIndex]?.acquisitions.delete(acquisitionIndex)
   }
@@ -236,6 +242,43 @@ function retireModelAcquisition(
     model.currentByScope.delete(scope)
   }
   return rowsToRemove
+}
+
+function settleModelRelease(acquisition: ModelAcquisition): boolean {
+  if (acquisition.releaseSettled) return true
+  acquisition.releaseCalls++
+  if (acquisition.releaseFailuresRemaining > 0) {
+    acquisition.releaseFailuresRemaining--
+    return false
+  }
+  acquisition.releaseSettled = true
+  return true
+}
+
+function createReleaseProbe(failFirst: boolean): ReleaseProbe {
+  const probe: ReleaseProbe = {
+    calls: 0,
+    failuresRemaining: failFirst ? 1 : 0,
+    error: new Error(`release failed`),
+    release: () => {
+      probe.calls++
+      if (probe.failuresRemaining > 0) {
+        probe.failuresRemaining--
+        throw probe.error
+      }
+    },
+  }
+  return probe
+}
+
+function expectReleaseFailure(release: () => unknown): void {
+  let threw = false
+  try {
+    release()
+  } catch {
+    threw = true
+  }
+  expect(threw).toBe(true)
 }
 
 function assertRegistryModel(model: RegistryModel, real: RegistryReal): void {
@@ -284,6 +327,7 @@ class AddAcquisitionCommand implements Command<RegistryModel, RegistryReal> {
     private readonly rawLease: number,
     private readonly generation: number,
     private readonly sourceSlot: number,
+    private readonly failFirstRelease: boolean,
   ) {}
 
   check(model: Readonly<RegistryModel>): boolean {
@@ -294,17 +338,13 @@ class AddAcquisitionCommand implements Command<RegistryModel, RegistryReal> {
     const leaseIndex = activeIndex(model.leases, this.rawLease)!
     const prefix = model.leases[leaseIndex]!.prefix
     const sourceId = `source-${this.sourceSlot}`
-    const release: ReleaseProbe = {
-      calls: 0,
-      release() {
-        this.calls++
-      },
-    }
+    const release = createReleaseProbe(this.failFirstRelease)
     addModelAcquisition(model, {
       generation: this.generation,
       prefix,
       sourceId,
       leaseIndex,
+      failFirstRelease: this.failFirstRelease,
     })
     real.acquisitions.push(
       addPrefixAcquisition(real.registry, {
@@ -320,7 +360,7 @@ class AddAcquisitionCommand implements Command<RegistryModel, RegistryReal> {
   }
 
   toString = () =>
-    `addAcquisition(lease=${this.rawLease}, generation=${this.generation}, source=${this.sourceSlot})`
+    `addAcquisition(lease=${this.rawLease}, generation=${this.generation}, source=${this.sourceSlot}, failFirst=${this.failFirstRelease})`
 }
 
 class AttachLeaseCommand implements Command<RegistryModel, RegistryReal> {
@@ -371,17 +411,13 @@ class RetryAcquisitionCommand implements Command<RegistryModel, RegistryReal> {
     const leaseIndex = [...old.leases].find(
       (index) => model.leases[index]?.active,
     )!
-    const release: ReleaseProbe = {
-      calls: 0,
-      release() {
-        this.calls++
-      },
-    }
+    const release = createReleaseProbe(false)
     addModelAcquisition(model, {
       generation: old.generation + 1,
       prefix: old.prefix,
       sourceId: old.sourceId,
       leaseIndex,
+      failFirstRelease: false,
     })
     real.acquisitions.push(
       addPrefixAcquisition(real.registry, {
@@ -503,10 +539,17 @@ class ReleaseAcquisitionCommand implements Command<
       model.acquisitions,
       this.rawAcquisition,
     )!
-    const rowsToRemove = retireModelAcquisition(model, acquisitionIndex)
-    expect(
-      real.registry.releaseAcquisition(real.acquisitions[acquisitionIndex]!),
-    ).toEqual({ rowsToRemove })
+    const acquisition = model.acquisitions[acquisitionIndex]!
+    if (!settleModelRelease(acquisition)) {
+      expectReleaseFailure(() =>
+        real.registry.releaseAcquisition(real.acquisitions[acquisitionIndex]!),
+      )
+    } else {
+      const rowsToRemove = retireModelAcquisition(model, acquisitionIndex)
+      expect(
+        real.registry.releaseAcquisition(real.acquisitions[acquisitionIndex]!),
+      ).toEqual({ rowsToRemove })
+    }
     assertRegistryModel(model, real)
   }
 
@@ -523,6 +566,21 @@ class ReleaseLeaseCommand implements Command<RegistryModel, RegistryReal> {
   run(model: RegistryModel, real: RegistryReal): void {
     const leaseIndex = activeIndex(model.leases, this.rawLease)!
     const lease = model.leases[leaseIndex]!
+    const finalAcquisitions = [...lease.acquisitions].filter((index) => {
+      const acquisition = model.acquisitions[index]!
+      return acquisition.active && acquisition.leases.size === 1
+    })
+    const releaseFailed = finalAcquisitions
+      .map((index) => settleModelRelease(model.acquisitions[index]!))
+      .some((settled) => !settled)
+    if (releaseFailed) {
+      expectReleaseFailure(() =>
+        real.registry.releaseLease(real.leases[leaseIndex]!),
+      )
+      assertRegistryModel(model, real)
+      return
+    }
+
     const rowsToRemove = new Set<RowKey>()
     for (const acquisitionIndex of [...lease.acquisitions]) {
       const acquisition = model.acquisitions[acquisitionIndex]!
@@ -548,6 +606,16 @@ class DisposeCommand implements Command<RegistryModel, RegistryReal> {
   check = () => true
 
   run(model: RegistryModel, real: RegistryReal): void {
+    const releaseFailed = model.acquisitions
+      .filter(({ active }) => active)
+      .map(settleModelRelease)
+      .some((settled) => !settled)
+    if (releaseFailed) {
+      expectReleaseFailure(() => real.registry.dispose())
+      assertRegistryModel(model, real)
+      return
+    }
+
     const rowsToRemove = new Set<RowKey>()
     model.acquisitions.forEach((acquisition, index) => {
       if (!acquisition.active) return
@@ -663,6 +731,102 @@ describe(`coverage registry oracle`, () => {
     expect(registry.releaseLease(secondLease)).toEqual({
       rowsToRemove: [`second`, `shared`],
     })
+  })
+
+  it(`keeps a final lease intact when adapter release throws and retries it`, () => {
+    const registry = createPrefixRegistry()
+    const lease = registry.addLease(1)
+    const releaseError = new Error(`release failed`)
+    let shouldFail = true
+    const release = vi.fn(() => {
+      if (shouldFail) throw releaseError
+    })
+    const acquisition = addPrefixAcquisition(registry, {
+      generation: 1,
+      leases: [lease],
+      release,
+      prefix: 1,
+    })
+    publishPrefix(registry, acquisition, 1, 1, [`a`])
+
+    let caught: unknown
+    try {
+      registry.releaseLease(lease)
+    } catch (error) {
+      caught = error
+    }
+    expect(caught).toBe(releaseError)
+    expect(registry.coverageAntichain()).toEqual([{ prefix: 1 }])
+    expect(registry.rowOwnerCount(`a`)).toBe(1)
+
+    shouldFail = false
+    expect(registry.releaseLease(lease)).toEqual({ rowsToRemove: [`a`] })
+    expect(release).toHaveBeenCalledTimes(2)
+    expect(registry.releaseLease(lease)).toEqual({ rowsToRemove: [] })
+    expect(release).toHaveBeenCalledTimes(2)
+  })
+
+  it(`keeps an acquisition intact when its direct release throws`, () => {
+    const registry = createPrefixRegistry()
+    const lease = registry.addLease(1)
+    const releaseError = new Error(`release failed`)
+    let shouldFail = true
+    const release = vi.fn(() => {
+      if (shouldFail) throw releaseError
+    })
+    const acquisition = addPrefixAcquisition(registry, {
+      generation: 1,
+      leases: [lease],
+      release,
+      prefix: 1,
+    })
+    publishPrefix(registry, acquisition, 1, 1, [`a`])
+
+    expect(() => registry.releaseAcquisition(acquisition)).toThrow(releaseError)
+    expect(registry.coverageAntichain()).toEqual([{ prefix: 1 }])
+    expect(registry.rowOwnerCount(`a`)).toBe(1)
+
+    shouldFail = false
+    expect(registry.releaseAcquisition(acquisition)).toEqual({
+      rowsToRemove: [`a`],
+    })
+    expect(release).toHaveBeenCalledTimes(2)
+  })
+
+  it(`keeps disposal atomic across successful and failed adapter releases`, () => {
+    const registry = createPrefixRegistry()
+    const firstLease = registry.addLease(1)
+    const secondLease = registry.addLease(2)
+    const firstRelease = vi.fn()
+    const releaseError = new Error(`release failed`)
+    let shouldFail = true
+    const secondRelease = vi.fn(() => {
+      if (shouldFail) throw releaseError
+    })
+    const first = addPrefixAcquisition(registry, {
+      generation: 1,
+      leases: [firstLease],
+      release: firstRelease,
+      prefix: 1,
+    })
+    const second = addPrefixAcquisition(registry, {
+      generation: 1,
+      leases: [secondLease],
+      release: secondRelease,
+      prefix: 2,
+    })
+    publishPrefix(registry, first, 1, 1, [`a`])
+    publishPrefix(registry, second, 1, 2, [`b`])
+
+    expect(() => registry.dispose()).toThrow(releaseError)
+    expect(registry.coverageAntichain()).toEqual([{ prefix: 2 }])
+    expect(registry.rowOwnerCount(`a`)).toBe(1)
+    expect(registry.rowOwnerCount(`b`)).toBe(1)
+
+    shouldFail = false
+    expect(registry.dispose()).toEqual({ rowsToRemove: [`a`, `b`] })
+    expect(firstRelease).toHaveBeenCalledOnce()
+    expect(secondRelease).toHaveBeenCalledTimes(2)
   })
 
   it(`publishes only current authoritative coverage projected from an applied outcome`, () => {
@@ -793,10 +957,16 @@ describe(`coverage registry oracle`, () => {
         rawLease: fc.nat(),
         generation: fc.integer({ min: 1, max: 4 }),
         sourceSlot: fc.integer({ min: 0, max: 1 }),
+        failFirstRelease: fc.boolean(),
       })
       .map(
-        ({ rawLease, generation, sourceSlot }) =>
-          new AddAcquisitionCommand(rawLease, generation, sourceSlot),
+        ({ rawLease, generation, sourceSlot, failFirstRelease }) =>
+          new AddAcquisitionCommand(
+            rawLease,
+            generation,
+            sourceSlot,
+            failFirstRelease,
+          ),
       ),
     fc
       .tuple(fc.nat(), fc.nat())
