@@ -9,7 +9,7 @@ title: UpdateMutationFnParams
 type UpdateMutationFnParams<T, TKey, TUtils> = object;
 ```
 
-Defined in: [packages/db/src/types.ts:473](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L473)
+Defined in: [packages/db/src/types.ts:514](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L514)
 
 ## Type Parameters
 
@@ -33,7 +33,7 @@ Defined in: [packages/db/src/types.ts:473](https://github.com/TanStack/db/blob/m
 collection: Collection<T, TKey, TUtils>;
 ```
 
-Defined in: [packages/db/src/types.ts:479](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L479)
+Defined in: [packages/db/src/types.ts:520](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L520)
 
 ***
 
@@ -43,4 +43,4 @@ Defined in: [packages/db/src/types.ts:479](https://github.com/TanStack/db/blob/m
 transaction: TransactionWithMutations<T, "update">;
 ```
 
-Defined in: [packages/db/src/types.ts:478](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L478)
+Defined in: [packages/db/src/types.ts:519](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L519)

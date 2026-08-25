@@ -1,35 +1,37 @@
 ---
-id: SetWindowRequiresOrderByError
-title: SetWindowRequiresOrderByError
+id: SyncTransactionAbortedError
+title: SyncTransactionAbortedError
 ---
 
-# Class: SetWindowRequiresOrderByError
+# Class: SyncTransactionAbortedError
 
-Defined in: [packages/db/src/errors.ts:809](https://github.com/TanStack/db/blob/main/packages/db/src/errors.ts#L809)
+Defined in: [packages/db/src/errors.ts:733](https://github.com/TanStack/db/blob/main/packages/db/src/errors.ts#L733)
 
-Error thrown when setWindow is called on a collection without an ORDER BY clause.
+A sync transaction was canceled before its writes became visible.
 
 ## Extends
 
-- [`QueryCompilationError`](QueryCompilationError.md)
+- `Error`
 
 ## Constructors
 
 ### Constructor
 
 ```ts
-new SetWindowRequiresOrderByError(): SetWindowRequiresOrderByError;
+new SyncTransactionAbortedError(): SyncTransactionAbortedError;
 ```
 
-Defined in: [packages/db/src/errors.ts:810](https://github.com/TanStack/db/blob/main/packages/db/src/errors.ts#L810)
+Defined in: [packages/db/src/errors.ts:734](https://github.com/TanStack/db/blob/main/packages/db/src/errors.ts#L734)
 
 #### Returns
 
-`SetWindowRequiresOrderByError`
+`SyncTransactionAbortedError`
 
 #### Overrides
 
-[`QueryCompilationError`](QueryCompilationError.md).[`constructor`](QueryCompilationError.md#constructor)
+```ts
+Error.constructor
+```
 
 ## Properties
 
@@ -43,7 +45,9 @@ Defined in: node\_modules/.pnpm/typescript@5.9.3/node\_modules/typescript/lib/li
 
 #### Inherited from
 
-[`QueryCompilationError`](QueryCompilationError.md).[`cause`](QueryCompilationError.md#cause)
+```ts
+Error.cause
+```
 
 ***
 
@@ -57,7 +61,9 @@ Defined in: node\_modules/.pnpm/typescript@5.9.3/node\_modules/typescript/lib/li
 
 #### Inherited from
 
-[`QueryCompilationError`](QueryCompilationError.md).[`message`](QueryCompilationError.md#message)
+```ts
+Error.message
+```
 
 ***
 
@@ -71,7 +77,9 @@ Defined in: node\_modules/.pnpm/typescript@5.9.3/node\_modules/typescript/lib/li
 
 #### Inherited from
 
-[`QueryCompilationError`](QueryCompilationError.md).[`name`](QueryCompilationError.md#name)
+```ts
+Error.name
+```
 
 ***
 
@@ -85,7 +93,9 @@ Defined in: node\_modules/.pnpm/typescript@5.9.3/node\_modules/typescript/lib/li
 
 #### Inherited from
 
-[`QueryCompilationError`](QueryCompilationError.md).[`stack`](QueryCompilationError.md#stack)
+```ts
+Error.stack
+```
 
 ***
 
@@ -109,7 +119,9 @@ not capture any frames.
 
 #### Inherited from
 
-[`QueryCompilationError`](QueryCompilationError.md).[`stackTraceLimit`](QueryCompilationError.md#stacktracelimit)
+```ts
+Error.stackTraceLimit
+```
 
 ## Methods
 
@@ -181,7 +193,9 @@ a();
 
 #### Inherited from
 
-[`QueryCompilationError`](QueryCompilationError.md).[`captureStackTrace`](QueryCompilationError.md#capturestacktrace)
+```ts
+Error.captureStackTrace
+```
 
 ***
 
@@ -213,4 +227,6 @@ https://v8.dev/docs/stack-trace-api#customizing-stack-traces
 
 #### Inherited from
 
-[`QueryCompilationError`](QueryCompilationError.md).[`prepareStackTrace`](QueryCompilationError.md#preparestacktrace)
+```ts
+Error.prepareStackTrace
+```
