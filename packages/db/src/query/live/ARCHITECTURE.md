@@ -397,7 +397,9 @@ row keys and source extent advance retained coverage. A requested limit, a
 settled promise, or the number of requests does not.
 A synchronous limited loader that returns only `true` supplies no row
 provenance, so core refines the whole filtered region before it marks the
-ordered source complete.
+ordered source complete. During truncate replay that refinement belongs to the
+same atomic replacement: neither local reconciliation nor coverage settlement
+may publish until the refinement settles.
 
 A bare child query is a Collection-valued include. It exposes one stable public
 Collection facade per active bucket in that edge:

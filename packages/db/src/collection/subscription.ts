@@ -337,38 +337,54 @@ export class CollectionSubscription
         if (replaced && this.orderedSubsetDemands.has(demand)) {
           // The replacement acquisition, not the retired generation, owns any
           // row provenance published by this replay result.
-          this.observeOrderedCoverage(syncResult, demand)
+          this.observeOrderedCoverage(syncResult, demand, (fallbackResult) => {
+            this.trackTruncateReplayResult(
+              session,
+              attempt,
+              fallbackResult,
+              () => this.subsetDemands.includes(demand),
+            )
+          })
         }
 
-        if (syncResult instanceof Promise) {
-          // A transport promise may be shared by several deduplicated logical
-          // demands. Track each demand separately so one settlement observer
-          // cannot complete the attempt before the others apply their result.
-          // Register this after ordered coverage so replay publication cannot
-          // overtake its boundary evidence on the same promise.
-          const pending = { promise: syncResult }
-          attempt.pending.add(pending)
-          void syncResult.then(
-            () => this.settleTruncateReplay(session, attempt, pending),
-            () => {
-              // A released demand no longer participates in the current
-              // replacement. Its cooperative AbortError must not discard the
-              // successful rows from demands that are still active.
-              if (
-                this.subsetDemands.includes(demand) &&
-                !nextAcquisition.options.signal?.aborted
-              ) {
-                attempt.failed = true
-              }
-              this.settleTruncateReplay(session, attempt, pending)
-            },
+        // Register this after ordered coverage so replay publication cannot
+        // overtake its boundary evidence on the same promise.
+        this.trackTruncateReplayResult(session, attempt, syncResult, () => {
+          // A released demand no longer participates in the current
+          // replacement. Its cooperative AbortError must not discard the
+          // successful rows from demands that are still active.
+          return (
+            this.subsetDemands.includes(demand) &&
+            !nextAcquisition.options.signal?.aborted
           )
-        }
+        })
       }
 
       attempt.setupComplete = true
       this.checkTruncateReplayComplete(session)
     })
+  }
+
+  private trackTruncateReplayResult(
+    session: TruncateReplaySession,
+    attempt: TruncateReplayAttempt,
+    result: LoadSubsetRequestResult,
+    shouldFailAttempt: () => boolean,
+  ): void {
+    if (!(result instanceof Promise)) return
+
+    // A transport promise may be shared by several deduplicated logical
+    // demands. Track each demand separately so one settlement observer cannot
+    // complete the attempt before the others apply their result.
+    const pending = { promise: result }
+    attempt.pending.add(pending)
+    void result.then(
+      () => this.settleTruncateReplay(session, attempt, pending),
+      () => {
+        if (shouldFailAttempt()) attempt.failed = true
+        this.settleTruncateReplay(session, attempt, pending)
+      },
+    )
   }
 
   private settleTruncateReplay(
@@ -935,7 +951,9 @@ export class CollectionSubscription
     this.orderedWindow.ensureSize(requestedPrefix)
     const fullRegion = this.orderedWindow.requiresFullRefinement
     const changes =
-      this.stalePublishedRows.size === 0 ? this.reconcileOrderedWindow() : []
+      !this.isBufferingForTruncate && this.stalePublishedRows.size === 0
+        ? this.reconcileOrderedWindow()
+        : []
 
     if (changes.length > 0) this.callback(changes)
 
@@ -1100,7 +1118,9 @@ export class CollectionSubscription
         )
       }
 
-      if (this.stalePublishedRows.size > 0) return
+      if (this.isBufferingForTruncate || this.stalePublishedRows.size > 0) {
+        return
+      }
       const changes = this.reconcileOrderedWindow()
       if (changes.length > 0) this.callback(changes)
     }
@@ -1128,8 +1148,10 @@ export class CollectionSubscription
           false,
         )
       }
-      const changes = this.reconcileOrderedWindow()
-      if (changes.length > 0) this.callback(changes)
+      if (!this.isBufferingForTruncate && this.stalePublishedRows.size === 0) {
+        const changes = this.reconcileOrderedWindow()
+        if (changes.length > 0) this.callback(changes)
+      }
 
       if (hasSubsetLoader && !ordered.fullRegion) {
         // A synchronous limited loader cannot attach applied row provenance to
