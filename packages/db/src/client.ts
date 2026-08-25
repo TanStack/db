@@ -306,7 +306,6 @@ export function isCollectionOptions(
 }
 
 export class DbClient {
-  private collectionsByOptions = new WeakMap<object, AnyCollection>()
   private collectionsById = new Map<string, CollectionRecord>()
   private pendingHydration = new Map<string, Array<DehydratedCollectionChunk>>()
   private liveQueries = new Map<string, LiveQueryRecord>()
@@ -452,24 +451,20 @@ export class DbClient {
     materializeOptions: CollectionMaterializeOptions<any> | undefined,
     deferSyncStart: boolean,
   ): AnyCollection {
-    const existing = this.collectionsByOptions.get(options)
+    const existing = this.collectionsById.get(options.id)
     if (existing) {
-      if (!deferSyncStart) {
-        this.collectionsById.get(existing.id)!.shouldDehydrate = true
-      }
-      if (deferSyncStart) {
-        existing._deferSyncStart()
-      }
-      return existing
-    }
-
-    if (this.collectionsById.has(options.id)) {
-      throw new Error(
-        `Cannot materialize collection "${options.id}" because this DbClient already has a different collection with that id. SSR hydration requires collection ids to be unique per DbClient.`,
-      )
+      return this.reuseMaterializedCollection(existing, deferSyncStart)
     }
 
     const config = options[collectionOptionsFactory](this)
+    const materializedDuringFactory = this.collectionsById.get(options.id)
+    if (materializedDuringFactory) {
+      return this.reuseMaterializedCollection(
+        materializedDuringFactory,
+        deferSyncStart,
+      )
+    }
+
     const shouldStartSync = config.startSync === true
     const collection = createCollection({
       ...config,
@@ -480,7 +475,6 @@ export class DbClient {
       collection._deferSyncStart()
     }
 
-    this.collectionsByOptions.set(options, collection)
     this.collectionsById.set(collection.id, {
       collection,
       shouldDehydrate: !deferSyncStart,
@@ -510,6 +504,18 @@ export class DbClient {
     }
 
     return collection
+  }
+
+  private reuseMaterializedCollection(
+    record: CollectionRecord,
+    deferSyncStart: boolean,
+  ): AnyCollection {
+    if (deferSyncStart) {
+      record.collection._deferSyncStart()
+    } else {
+      record.shouldDehydrate = true
+    }
+    return record.collection
   }
 
   dehydrate(options: DehydrateDbClientOptions = {}): DehydratedDbState {
@@ -714,7 +720,6 @@ export class DbClient {
       if (failure) throw failure.reason
     } finally {
       this.transactionScope.clear()
-      this.collectionsByOptions = new WeakMap()
       this.collectionsById.clear()
       this.pendingHydration.clear()
       this.liveQueries.clear()

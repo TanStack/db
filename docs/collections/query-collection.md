@@ -138,33 +138,19 @@ function createProjectTodosDescriptor(
 }
 ```
 
-The scope is part of the descriptor identity. Memoize descriptors by a stable
-scope key; `DbClient` handles collection memoization and QueryClient ownership:
+The scope is part of the descriptor identity. `DbClient` resolves separately
+created descriptors with the same id to the same collection, so a React hook
+can create the descriptor from its current parameters:
 
 ```typescript
-type ProjectTodosDescriptor = ReturnType<typeof createProjectTodosDescriptor>
-
-const projectDescriptors = new Map<string, ProjectTodosDescriptor>()
-
-export function getProjectTodosDescriptor(
-  projectId: string,
-): ProjectTodosDescriptor {
-  let descriptor = projectDescriptors.get(projectId)
-  if (!descriptor) {
-    descriptor = createProjectTodosDescriptor(projectId)
-    projectDescriptors.set(projectId, descriptor)
-  }
-  return descriptor
+export function useProjectTodos(projectId: string) {
+  return useDbClient().collection(createProjectTodosDescriptor(projectId))
 }
-
-const todos = dbClient.collection(getProjectTodosDescriptor(projectId))
 ```
 
-For multiple scope values, use nested maps or a collision-safe stable key that
-includes every value. Do not create a descriptor on each render. In a
-long-lived app, user-selected scopes can make the map grow without bound; remove
-unused descriptors and call `await dbClient.cleanup()` when the client scope
-ends. Request-local maps can be discarded with the request.
+Only the first descriptor for an id is materialized. Include every scope value
+that changes the collection in both its descriptor id and Query key. Call
+`await dbClient.cleanup()` when the client scope ends.
 
 A business scope is separate from a **relational subset** requested by a live query. With `syncMode: "on-demand"`, `LoadSubsetOptions` describes predicates, ordering, limits, and offsets within one business-scoped collection. These options reach `queryFn` through `ctx.meta.loadSubsetOptions` and determine the subset Query keys. See [QueryFn and Predicate Push-Down](#queryfn-and-predicate-push-down).
 
