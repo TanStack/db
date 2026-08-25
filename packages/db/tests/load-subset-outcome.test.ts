@@ -739,11 +739,11 @@ describe(`loadSubset outcomes`, () => {
     },
   )
 
-  it(`validates demand identity before starting adapter work`, async () => {
+  it(`tracks opaque demand values by runtime reference`, async () => {
     const loadSubset = vi.fn(() => Promise.resolve({ hasMore: false }))
     const unloadSubset = vi.fn()
     const collection = createCollection<{ id: string }>({
-      id: `load-subset-invalid-demand`,
+      id: `load-subset-opaque-demand`,
       getKey: (row) => row.id,
       syncMode: `on-demand`,
       startSync: true,
@@ -756,16 +756,20 @@ describe(`loadSubset outcomes`, () => {
     })
 
     try {
-      expect(() =>
-        collection._sync.loadSubset({
-          where: new Func(`eq`, [
-            new PropRef([`item`, `value`]),
-            new Value(() => `unhashable`),
-          ]),
-        }),
-      ).toThrow(/not stably hashable/)
-      expect(loadSubset).not.toHaveBeenCalled()
-      expect(unloadSubset).not.toHaveBeenCalled()
+      const opaqueValue = () => `opaque`
+      const options = {
+        where: new Func(`eq`, [
+          new PropRef([`item`, `value`]),
+          new Value(opaqueValue),
+        ]),
+      }
+      const outcome = await collection._sync.loadSubset(options)
+
+      expect(loadSubset).toHaveBeenCalledWith(options)
+      expect(outcome).toMatchObject({ extent: `exhausted` })
+
+      collection._sync.unloadSubset(options)
+      expect(unloadSubset).toHaveBeenCalledWith(options)
     } finally {
       await collection.cleanup()
     }

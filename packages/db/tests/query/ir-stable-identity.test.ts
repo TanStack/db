@@ -455,6 +455,29 @@ describe(`loadSubset demand identity`, () => {
     )
   })
 
+  it(`uses runtime reference identity for opaque demand values`, () => {
+    const field = new PropRef<unknown>([`row`, `value`])
+    const firstFunction = () => `value`
+    const secondFunction = () => `value`
+    const firstSymbol = Symbol(`value`)
+    const secondSymbol = Symbol(`value`)
+    const demandKey = (value: unknown) =>
+      getLoadSubsetDemandKey({
+        where: new Func(`eq`, [field, new Value(value)]),
+      })
+
+    expect(demandKey(firstFunction)).toBe(demandKey(firstFunction))
+    expect(demandKey(firstFunction)).not.toBe(demandKey(secondFunction))
+    expect(demandKey(firstSymbol)).toBe(demandKey(firstSymbol))
+    expect(demandKey(firstSymbol)).not.toBe(demandKey(secondSymbol))
+
+    expect(() =>
+      getStableExpressionHash(
+        new Func(`eq`, [field, new Value(firstFunction)]),
+      ),
+    ).toThrow(/function value/)
+  })
+
   it.each([
     [`signed zero`, -0, 0],
     [`invalid Date`, new Date(Number.NaN), new Date(Number.NaN)],
