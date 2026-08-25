@@ -270,7 +270,9 @@ function canonicalizeQueryInScope(
 
   if (
     !query.select &&
-    (Boolean(query.join?.length) || Boolean(query.groupBy?.length))
+    (query.from.type === `unionFrom` ||
+      query.join !== undefined ||
+      query.groupBy !== undefined)
   ) {
     // Without an explicit projection, these query shapes return a namespaced
     // row. Its alias keys are public output and therefore part of identity.
@@ -799,9 +801,10 @@ function canonicalizeFunction(
     )
     const unique = sortUniqueStableIdentityValues(flattened)
 
-    return unique.length === 1
-      ? unique[0]!
-      : { type: `func`, name, args: unique }
+    // The evaluator gives `and` and `or` boolean results even when their sole
+    // operand returns another truthy or falsy value. Keep that coercion in the
+    // identity because expression result types are erased at runtime.
+    return { type: `func`, name, args: unique }
   }
 
   if (name === `eq` && args.length === 2) {

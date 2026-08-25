@@ -45,7 +45,10 @@ import {
   UnionAll,
   Value,
 } from '../../src/query/ir.js'
-import { compileExpression } from '../../src/query/compiler/evaluators.js'
+import {
+  compileExpression,
+  toBooleanPredicate,
+} from '../../src/query/compiler/evaluators.js'
 import { isLoadSubsetRequestSubsumedBy } from '../../src/query/predicate-utils.js'
 import { createRuntimeReferenceIdentityFactory } from '../../src/query/runtime-reference-identity.js'
 import type { BasicExpression, QueryIR } from '../../src/query/ir.js'
@@ -231,7 +234,19 @@ describe(`semantic expression identity`, () => {
 
     expect(getStableExpressionHash(nested)).toBe(getStableExpressionHash(flat))
     expect(getStableExpressionHash(new Func(`or`, [adult, adult]))).toBe(
-      getStableExpressionHash(adult),
+      getStableExpressionHash(new Func(`or`, [adult])),
+    )
+  })
+
+  it(`keeps a boolean wrapper when duplicate operands coerce their result`, () => {
+    const bareAge = new PropRef<number>([`user`, `age`])
+    const duplicateAnd = new Func<boolean>(`and`, [bareAge, bareAge])
+    const row = { user: { age: 18 } }
+
+    expect(toBooleanPredicate(compileExpression(bareAge)(row))).toBe(false)
+    expect(toBooleanPredicate(compileExpression(duplicateAnd)(row))).toBe(true)
+    expect(getStableExpressionHash(duplicateAnd)).not.toBe(
+      getStableExpressionHash(bareAge),
     )
   })
 
@@ -1055,6 +1070,42 @@ describe(`stable QueryIR identity smoke test`, () => {
       getQueryIdentity(
         createAlphaRenamedImplicitJoinQuery(`account`, `article`),
       ),
+    )
+  })
+
+  it(`keeps aliases that define an implicit union-source result shape`, () => {
+    const usersAndPosts = getQueryIR(
+      new Query().unionAll({
+        user: usersCollection,
+        post: postsCollection,
+      }),
+    )
+    const accountsAndArticles = getQueryIR(
+      new Query().unionAll({
+        account: usersCollection,
+        article: postsCollection,
+      }),
+    )
+
+    expect(usersAndPosts.from.type).toBe(`unionFrom`)
+    expect(getQueryIdentity(usersAndPosts)).not.toBe(
+      getQueryIdentity(accountsAndArticles),
+    )
+  })
+
+  it(`keeps aliases when an empty groupBy still selects a namespaced row`, () => {
+    const createQuery = (alias: string) =>
+      getQueryIR(
+        new Query()
+          .from({ [alias]: usersCollection } as Record<
+            string,
+            typeof usersCollection
+          >)
+          .groupBy(() => []),
+      )
+
+    expect(getQueryIdentity(createQuery(`user`))).not.toBe(
+      getQueryIdentity(createQuery(`account`)),
     )
   })
 
