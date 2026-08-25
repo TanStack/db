@@ -98,8 +98,8 @@ reduction that enforces public-key congruence and multiplicity.
 
 ## Identity
 
-Aliases are lexical query-language names. They are not runtime identities. The
-query builder requires collection aliases to be unique within each lexical
+Aliases are lexical query-language names rather than source runtime identities.
+The query builder requires collection aliases to be unique within each lexical
 scope and rejects nested queries that shadow an ancestor alias. Sibling include
 scopes may reuse an alias because neither alias is visible to the other.
 Compilation then assigns opaque IDs to the accepted plan:
@@ -110,8 +110,11 @@ type RelationNodeId = Brand<string, 'RelationNodeId'>
 type MaterializationEdgeId = Brand<string, 'MaterializationEdgeId'>
 ```
 
-Alias text may remain as debug metadata. Renaming an accepted alias to another
-unused name cannot change the compiled graph or its result.
+An explicit projection can alpha-normalize aliases because its field names
+define the public shape. Without a projection, joined and grouped queries return
+a namespaced row whose keys are the lexical aliases. Those observable keys are
+part of query identity. Alias text may otherwise remain as debug metadata
+without becoming source identity.
 
 A `CanonicalCorrelationKey` is the canonical tuple of every evaluated
 parent-dependent value that can affect the child plan. This includes values
@@ -522,8 +525,9 @@ create recursive Collection machinery.
 ## Normative laws
 
 1. **Alpha-renaming:** changing any accepted alias to another unused name cannot
-   change results; aliases must be unique within one lexical scope and cannot
-   shadow an ancestor alias. Sibling scopes may reuse aliases.
+   change an explicitly projected result. An implicit namespaced result keeps
+   its aliases as public field names. Aliases must be unique within one lexical
+   scope and cannot shadow an ancestor alias. Sibling scopes may reuse aliases.
 2. **Contribution conservation:** a public row exists exactly when its reduced
    supporting weight and collision policy produce one.
 3. **Batch partition:** equivalent valid split and atomic deliveries converge.

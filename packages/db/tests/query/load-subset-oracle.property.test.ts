@@ -56,6 +56,7 @@ type WindowRequest = {
   direction: `asc` | `desc`
   nulls?: `first` | `last`
   stringSort?: `lexical` | `locale`
+  cursorBoundary?: number
   offset: number
   limit?: number
 }
@@ -226,10 +227,23 @@ const rejectedWaiterScenarioArbitrary: fc.Arbitrary<RejectedWaiterScenario> =
 
 const windowRequestArbitrary: fc.Arbitrary<Omit<WindowRequest, `where`>> =
   fc.record({
-    orderField: fc.constantFrom(`none`, `rank`, `score`),
-    direction: fc.constantFrom(`asc`, `desc`),
-    nulls: fc.constantFrom(`first`, `last`),
-    stringSort: fc.constantFrom(`lexical`, `locale`),
+    orderField: fc.constantFrom<NonNullable<WindowRequest[`orderField`]>>(
+      `none`,
+      `rank`,
+      `score`,
+    ),
+    direction: fc.constantFrom<WindowRequest[`direction`]>(`asc`, `desc`),
+    nulls: fc.constantFrom<NonNullable<WindowRequest[`nulls`]>>(
+      `first`,
+      `last`,
+    ),
+    stringSort: fc.constantFrom<NonNullable<WindowRequest[`stringSort`]>>(
+      `lexical`,
+      `locale`,
+    ),
+    cursorBoundary: fc.option(fc.integer({ min: -3, max: 3 }), {
+      nil: undefined,
+    }),
     offset: fc.integer({ min: 0, max: 6 }),
     limit: fc.option(fc.integer({ min: 0, max: 6 }), { nil: undefined }),
   })
@@ -240,6 +254,9 @@ const finiteWindowRequestArbitrary: fc.Arbitrary<Omit<WindowRequest, `where`>> =
     direction: fc.constantFrom(`asc`, `desc`),
     nulls: fc.constantFrom(`first`, `last`),
     stringSort: fc.constantFrom(`lexical`, `locale`),
+    cursorBoundary: fc.option(fc.integer({ min: -3, max: 3 }), {
+      nil: undefined,
+    }),
     offset: fc.integer({ min: 0, max: 6 }),
     limit: fc.integer({ min: 0, max: 6 }),
   })
@@ -512,10 +529,25 @@ function readDedupeTrackingState(dedupe: DeduplicatedLoadSubset): {
 
 function toWindowOptions(request: WindowRequest): LoadSubsetOptions {
   const orderField = request.orderField ?? `rank`
+  const cursorRef = orderField === `score` ? scoreRef : rankRef
   return {
     where: request.where ? toWhere(request.where) : undefined,
     offset: request.offset,
     limit: request.limit,
+    cursor:
+      request.cursorBoundary === undefined
+        ? undefined
+        : {
+            whereFrom: new Func(request.direction === `asc` ? `gt` : `lt`, [
+              cursorRef,
+              new Value(request.cursorBoundary),
+            ]),
+            whereCurrent: new Func(`eq`, [
+              cursorRef,
+              new Value(request.cursorBoundary),
+            ]),
+            lastKey: request.cursorBoundary,
+          },
     orderBy:
       orderField === `none`
         ? undefined
@@ -552,6 +584,7 @@ type WindowCoverageDescriptor = {
   request: WindowRequest
   whereFingerprint: string
   orderFingerprint: string | undefined
+  cursorFingerprint: string | undefined
   matching: Set<number>
 }
 
@@ -565,6 +598,9 @@ function describeWindowCoverage(
     orderFingerprint: options.orderBy
       ? JSON.stringify(options.orderBy)
       : undefined,
+    cursorFingerprint: options.cursor
+      ? JSON.stringify(options.cursor)
+      : undefined,
     matching: matchingValues(options.where),
   }
 }
@@ -576,9 +612,13 @@ function describedWindowCovers(
   if (
     loaded.request.limit === undefined &&
     loaded.request.offset === 0 &&
+    loaded.cursorFingerprint === undefined &&
     isSubset(requested.matching, loaded.matching)
   ) {
     return true
+  }
+  if (requested.cursorFingerprint !== loaded.cursorFingerprint) {
+    return false
   }
   if (requested.whereFingerprint !== loaded.whereFingerprint) return false
   if (requested.orderFingerprint === undefined) return true
@@ -1488,23 +1528,48 @@ describe(`loadSubset coverage oracle`, () => {
     ),
   )
 
-  it(
-    `discovered trace: an identical filtered window reuses its load`,
-    expectAssertionFailure(
-      () =>
-        Promise.resolve().then(() => {
-          const request: WindowRequest = {
-            where: { kind: `in`, values: [0] },
-            orderField: `none`,
-            direction: `asc`,
-            offset: 0,
-            limit: 1,
-          }
-          expect(countWindowLoads([request, request])).toBe(1)
-        }),
-      { message: /expected 2 to be/ },
-    ),
-  )
+  it(`discovered trace: an identical filtered window reuses its load`, () => {
+    const request: WindowRequest = {
+      where: { kind: `in`, values: [0] },
+      orderField: `none`,
+      direction: `asc`,
+      offset: 0,
+      limit: 1,
+    }
+    expect(countWindowLoads([request, request])).toBe(1)
+  })
+
+  it(`discovered trace: distinct cursor pages start distinct loads`, () => {
+    const request: WindowRequest = {
+      orderField: `rank`,
+      direction: `asc`,
+      offset: 0,
+      limit: 2,
+      cursorBoundary: 1,
+    }
+
+    runWindowCoverageTrace([
+      request,
+      { ...request, cursorBoundary: 2 },
+      request,
+    ])
+  })
+
+  it(`discovered trace: a cursor without a limit is not full coverage`, () => {
+    const request: WindowRequest = {
+      orderField: `rank`,
+      direction: `asc`,
+      offset: 0,
+      limit: undefined,
+      cursorBoundary: 1,
+    }
+
+    runWindowCoverageTrace([
+      request,
+      { ...request, cursorBoundary: 2 },
+      { ...request, cursorBoundary: undefined },
+    ])
+  })
 
   it(`rejects repeated transport work for one covered predicate`, () => {
     expect(() =>
@@ -1800,7 +1865,7 @@ describe(`loadSubset coverage oracle`, () => {
     ],
   ] as const)(
     `discovered trace: a different %s starts a distinct window load`,
-    async (_name, firstOptions, secondOptions) => {
+    (_name, firstOptions, secondOptions) => {
       const createRequest = (
         compareOptions: typeof firstOptions | typeof secondOptions,
       ): WindowRequest => ({
@@ -1810,25 +1875,12 @@ describe(`loadSubset coverage oracle`, () => {
         limit: 1,
         ...compareOptions,
       })
-      await expectAssertionFailure(
-        () =>
-          Promise.resolve().then(() => {
-            try {
-              expect(
-                countWindowLoads([
-                  createRequest(firstOptions),
-                  createRequest(secondOptions),
-                ]),
-              ).toBe(2)
-            } catch (error) {
-              throw new TraceAssertionError(0, error)
-            }
-          }),
-        {
-          checkpoint: 0,
-          classify: ({ actual, expected }) => actual === 1 && expected === 2,
-        },
-      )()
+      expect(
+        countWindowLoads([
+          createRequest(firstOptions),
+          createRequest(secondOptions),
+        ]),
+      ).toBe(2)
     },
   )
 
@@ -2003,25 +2055,16 @@ describe(`loadSubset coverage oracle`, () => {
     ),
   )
 
-  it(
-    `discovered trace: widening a window forgets an earlier covered window`,
-    expectAssertionFailure(
-      () =>
-        Promise.resolve().then(() => {
-          const first: WindowRequest = {
-            orderField: `none`,
-            direction: `asc`,
-            offset: 0,
-            limit: 1,
-            where: { kind: `in`, values: [0] },
-          }
-          expect(countWindowLoads([first, { ...first, limit: 2 }, first])).toBe(
-            2,
-          )
-        }),
-      { message: /expected 3 to be 2/ },
-    ),
-  )
+  it(`discovered trace: widening a window remembers an earlier covered window`, () => {
+    const first: WindowRequest = {
+      orderField: `none`,
+      direction: `asc`,
+      offset: 0,
+      limit: 1,
+      where: { kind: `in`, values: [0] },
+    }
+    expect(countWindowLoads([first, { ...first, limit: 2 }, first])).toBe(2)
+  })
 
   it(
     `discovered trace: complementary ranges redundantly reload an all-data request`,

@@ -1,9 +1,10 @@
 import {
-  isPredicateSubset,
+  isLoadSubsetRequestSubsumedBy,
   isWhereSubset,
   minusWherePredicates,
   unionWherePredicates,
 } from './predicate-utils.js'
+import { Func, PropRef, Value } from './ir.js'
 import type { BasicExpression } from './ir.js'
 import type { LoadSubsetOptions } from '../types.js'
 
@@ -61,7 +62,7 @@ export class DeduplicatedLoadSubset {
   // Flag to track if we've loaded all data (unlimited call with no where clause)
   private hasLoadedAllData = false
 
-  // List of all limited calls (with limit, possibly with orderBy)
+  // List of calls with a finite or cursor-relative result window.
   // We clone options before storing to prevent mutation of stored predicates
   private limitedCalls: Array<LoadSubsetOptions> = []
 
@@ -109,9 +110,9 @@ export class DeduplicatedLoadSubset {
     }
 
     // Check against limited calls
-    if (options.limit !== undefined) {
+    if (options.limit !== undefined || options.cursor !== undefined) {
       const alreadyLoaded = this.limitedCalls.some((loaded) =>
-        isPredicateSubset(options, loaded),
+        isLoadSubsetRequestSubsumedBy(options, loaded),
       )
 
       if (alreadyLoaded) {
@@ -124,7 +125,8 @@ export class DeduplicatedLoadSubset {
     // This prevents duplicate requests when concurrent calls have subset relationships
     const matchingInflight = this.inflightCalls.find(
       (inflight) =>
-        !inflight.lease.aborted && isPredicateSubset(options, inflight.options),
+        !inflight.lease.aborted &&
+        isLoadSubsetRequestSubsumedBy(options, inflight.options),
     )
 
     if (matchingInflight !== undefined) {
@@ -148,7 +150,11 @@ export class DeduplicatedLoadSubset {
     const lease = createSharedAbortLease(options.signal)
     const trackingOptions = cloneOptions({ ...options, signal: lease.signal })
     const loadOptions = cloneOptions({ ...options, signal: lease.signal })
-    if (this.unlimitedWhere !== undefined && options.limit === undefined) {
+    if (
+      this.unlimitedWhere !== undefined &&
+      options.limit === undefined &&
+      options.cursor === undefined
+    ) {
       // Compute difference to get only the missing data
       // We can only do this for unlimited queries
       // and we can only remove data that was loaded from unlimited queries
@@ -230,7 +236,7 @@ export class DeduplicatedLoadSubset {
 
   private updateTracking(options: LoadSubsetOptions): void {
     // Update tracking based on whether this was a limited or unlimited call
-    if (options.limit === undefined) {
+    if (options.limit === undefined && options.cursor === undefined) {
       // Unlimited call - update combined where predicate
       // We ignore orderBy for unlimited calls as mentioned in requirements
       if (options.where === undefined) {
@@ -319,10 +325,94 @@ function createSharedAbortLease(
 export function cloneOptions(options: LoadSubsetOptions): LoadSubsetOptions {
   return {
     ...options,
+    where: options.where
+      ? cloneBasicExpression(options.where, `predicate`)
+      : undefined,
     orderBy: options.orderBy?.map((clause) => ({
       ...clause,
+      expression: cloneBasicExpression(clause.expression),
       compareOptions: { ...clause.compareOptions },
     })),
-    cursor: options.cursor ? { ...options.cursor } : undefined,
+    cursor: options.cursor
+      ? {
+          ...options.cursor,
+          whereFrom: cloneBasicExpression(
+            options.cursor.whereFrom,
+            `predicate`,
+          ),
+          whereCurrent: cloneBasicExpression(
+            options.cursor.whereCurrent,
+            `predicate`,
+          ),
+        }
+      : undefined,
   }
+}
+
+type ExpressionCloneContext = `exact` | `predicate` | `comparison`
+
+function cloneBasicExpression<T>(
+  expression: BasicExpression<T>,
+  context: ExpressionCloneContext = `exact`,
+): BasicExpression<T> {
+  switch (expression.type) {
+    case `ref`:
+      return new PropRef<T>([...expression.path])
+    case `val`:
+      return new Value<T>(
+        context === `comparison`
+          ? snapshotComparisonValue(expression.value)
+          : expression.value,
+      )
+    case `func`:
+      return new Func<T>(
+        expression.name,
+        expression.args.map((arg, index) => {
+          if (
+            context === `predicate` &&
+            expression.name === `in` &&
+            index === 1 &&
+            arg.type === `val` &&
+            Array.isArray(arg.value)
+          ) {
+            return new Value(
+              arg.value.map((value) => snapshotComparisonValue(value)),
+            )
+          }
+
+          const argumentContext =
+            context === `predicate` && isComparisonFunction(expression.name)
+              ? `comparison`
+              : context
+          return cloneBasicExpression(arg, argumentContext)
+        }),
+      )
+  }
+}
+
+function isComparisonFunction(name: string): boolean {
+  return (
+    name === `eq` ||
+    name === `gt` ||
+    name === `gte` ||
+    name === `lt` ||
+    name === `lte`
+  )
+}
+
+function snapshotComparisonValue<T>(value: T): T {
+  if (value instanceof Date) {
+    return new Date(value.getTime()) as T
+  }
+
+  if (typeof Buffer !== `undefined` && value instanceof Buffer) {
+    return Buffer.from(value) as T
+  }
+
+  if (value instanceof Uint8Array) {
+    return value.slice() as T
+  }
+
+  // Other objects use reference equality in predicate identity and comparison.
+  return value
 }
