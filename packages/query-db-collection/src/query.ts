@@ -2020,6 +2020,22 @@ export function queryCollectionOptions(
         if (event.type === `removed`) {
           // Only cleanup if this is OUR query (we track it)
           if (hashToQueryKey.has(hashedKey)) {
+            if (collectionLifetimeQueries.has(hashedKey)) {
+              // Cache removal detaches the old observer. Eager mode still owns
+              // this query, so replace that observer without retiring its rows.
+              unsubscribes.get(hashedKey)?.()
+              unsubscribes.delete(hashedKey)
+              unsubscribePendingReadyListeners(hashedKey)
+              state.observers.delete(hashedKey)
+              queryRefCounts.set(hashedKey, 0)
+              const replacement = createQueryFromOpts({})
+              if (replacement instanceof Promise) {
+                replacement.catch(() => {
+                  // Errors are handled by the query result handler.
+                })
+              }
+              return
+            }
             // TanStack Query GC'd this query after gcTime expired.
             // Use the guarded cleanup path to avoid deleting rows for active queries.
             cleanupQueryIfIdle(hashedKey)

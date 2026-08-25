@@ -541,10 +541,10 @@ describe(`query collection ownership lifecycle oracle`, () => {
 
   it(`keeps the eager owner when its last collection listener departs`, async () => {
     const id = `ownership-eager-listener`
-    const { collection, maps, queryClient } = createOwnershipFixture({
+    const { collection, maps, queryClient, queryFn } = createOwnershipFixture({
       id,
       syncMode: `eager`,
-      results: [[shared]],
+      results: [[shared], [{ ...shared, name: `Refetched` }]],
     })
 
     await collection.stateWhenReady()
@@ -579,6 +579,12 @@ describe(`query collection ownership lifecycle oracle`, () => {
         { status: `ready`, rows: [shared.id], owners: 1 },
       )
       expect(warning).not.toHaveBeenCalled()
+
+      await vi.waitFor(() => {
+        expect(observerCount(queryClient, onlyOwner(maps, shared.id))).toBe(1)
+        expect(queryFn).toHaveBeenCalledTimes(2)
+        expect(collection.get(shared.id)?.name).toBe(`Refetched`)
+      })
 
       const remounted = collection.subscribeChanges(() => {})
       assertCheckpoint(
