@@ -1786,6 +1786,82 @@ describe(`pagination recomputation oracle`, () => {
     }
   })
 
+  it(`tracks an asynchronous full-source refinement after a synchronous limited load`, async () => {
+    const rows: Array<PageRow> = [
+      { id: 1, rank: 1 },
+      { id: 2, rank: 2 },
+      { id: 3, rank: 3 },
+    ]
+    const requests: Array<LoadSubsetOptions> = []
+    const delivered = new Set<number>()
+    const refinement = createDeferred<void>()
+    const source = createCollection<PageRow>({
+      id: `pagination-async-refinement-source-${collectionSequence++}`,
+      getKey: (row) => row.id,
+      syncMode: `on-demand`,
+      startSync: true,
+      autoIndex: `eager`,
+      defaultIndexType: BTreeIndex,
+      sync: {
+        sync: ({ begin, write, commit, markReady }) => {
+          markReady()
+          const publish = (options: LoadSubsetOptions) => {
+            const appliedRowKeys: Array<number> = []
+            begin()
+            for (const row of rowsForLoadSubset(rows, options)) {
+              if (delivered.has(row.id)) continue
+              delivered.add(row.id)
+              appliedRowKeys.push(row.id)
+              write({ type: `insert`, value: { ...row } })
+            }
+            commit()
+            return appliedRowKeys
+          }
+
+          return {
+            loadSubset: (options: LoadSubsetOptions) => {
+              requests.push(options)
+              if (options.limit !== undefined) {
+                return true
+              }
+
+              return refinement.promise.then(() => ({
+                hasMore: false,
+                appliedRowKeys: publish(options),
+              }))
+            },
+          }
+        },
+      },
+    })
+    const live = createLiveQueryCollection((query) =>
+      query
+        .from({ row: source })
+        .orderBy(({ row }) => row.rank, `asc`)
+        .orderBy(({ row }) => row.id, `asc`)
+        .limit(1),
+    )
+
+    try {
+      const preload = live.preload()
+
+      await flushPromises()
+      expect(requests.map(({ limit }) => limit)).toEqual([1, undefined])
+      const settledBeforeRefinement = await Promise.race([
+        preload.then(() => true),
+        new Promise<false>((resolve) => setTimeout(() => resolve(false), 10)),
+      ])
+      expect(settledBeforeRefinement).toBe(false)
+
+      refinement.resolve()
+      await preload
+      expect(Array.from(live.values(), ({ id }) => id)).toEqual([1])
+    } finally {
+      live.cleanup()
+      source.cleanup()
+    }
+  })
+
   it(`refines locale-ordered continuations locally when predicate IR cannot express the collation`, async () => {
     const rows: Array<LocaleCursorRow> = [
       { id: 1, label: `item2` },

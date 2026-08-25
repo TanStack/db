@@ -1039,7 +1039,12 @@ export class CollectionSubscription
       fullRegion,
     })
 
-    this.observeOrderedCoverage(syncResult, demand)
+    this.observeOrderedCoverage(
+      syncResult,
+      demand,
+      onLoadSubsetResult,
+      shouldTrackLoadSubsetPromise,
+    )
     // Pass the raw loadSubset result to the caller for external tracking
     onLoadSubsetResult?.(syncResult)
     this.observeLoadSubsetResult(
@@ -1052,6 +1057,8 @@ export class CollectionSubscription
   private observeOrderedCoverage(
     result: LoadSubsetRequestResult,
     demand: SubsetDemand,
+    onFallbackResult?: (result: LoadSubsetRequestResult) => void,
+    trackFallbackStatus = true,
   ): void {
     const ordered = demand.ordered
     const window = this.orderedWindow
@@ -1131,7 +1138,8 @@ export class CollectionSubscription
         this.requestLimitedSnapshot({
           orderBy: window.totalOrder.orderBy,
           limit: ordered.requestedPrefix,
-          trackLoadSubsetPromise: false,
+          trackLoadSubsetPromise: trackFallbackStatus,
+          onLoadSubsetResult: onFallbackResult,
         })
       }
     }
