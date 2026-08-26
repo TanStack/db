@@ -104,6 +104,19 @@ export type LoadSubsetFullFlowEvent =
       attemptId: string
       outcome: `resolve` | `reject`
     }
+  | {
+      type: `registerSourceDemand`
+      sessionId: FullFlowSessionId
+      sourceId: FullFlowSourceId
+      demandId: FullFlowDemandId
+    }
+  | {
+      type: `settleSourceDemand`
+      sessionId: FullFlowSessionId
+      sourceId: FullFlowSourceId
+      demandId: FullFlowDemandId
+      outcome: `resolve` | `reject`
+    }
 
 export type ExpectedAdapterLifecycleEvent = {
   type: `invoke` | `release`
@@ -179,6 +192,8 @@ export function projectTransportLoads(
       case `startReplay`:
       case `writeReplayRows`:
       case `settleReplay`:
+      case `registerSourceDemand`:
+      case `settleSourceDemand`:
         break
     }
   }
@@ -252,6 +267,8 @@ export function projectAuthorizedContinuationStarts(
       case `startReplay`:
       case `writeReplayRows`:
       case `settleReplay`:
+      case `registerSourceDemand`:
+      case `settleSourceDemand`:
         break
     }
   }
@@ -410,6 +427,8 @@ export function projectSyncTransactions(
       case `startReplay`:
       case `writeReplayRows`:
       case `settleReplay`:
+      case `registerSourceDemand`:
+      case `settleSourceDemand`:
         break
     }
   }
@@ -602,6 +621,8 @@ export function projectReplayPublication(
       case `abortSyncTransaction`:
       case `publishSyncTransaction`:
       case `settleSyncReceipt`:
+      case `registerSourceDemand`:
+      case `settleSourceDemand`:
         break
     }
   }
@@ -610,5 +631,107 @@ export function projectReplayPublication(
     coreRows: sortVersionedRows(coreRows.values()),
     visibleRows: sortVersionedRows(visibleRows.values()),
     publishedBatches,
+  }
+}
+
+export type ExpectedSourceReadiness = {
+  status: `loading` | `ready` | `error` | `cleaned-up`
+  pendingSources: Array<FullFlowSourceId>
+  failedSources: Array<FullFlowSourceId>
+}
+
+/** Projects initial live-query readiness across every reachable source. */
+export function projectSourceReadiness(
+  history: ReadonlyArray<LoadSubsetFullFlowEvent>,
+): ExpectedSourceReadiness {
+  const demands = new Map<
+    string,
+    {
+      sessionId: FullFlowSessionId
+      sourceId: FullFlowSourceId
+      state: `pending` | `resolved` | `rejected`
+    }
+  >()
+  let currentSession: FullFlowSessionId | undefined
+  let cleanedUp = false
+
+  for (const event of history) {
+    switch (event.type) {
+      case `registerSourceDemand`:
+        currentSession ??= event.sessionId
+        if (event.sessionId !== currentSession) break
+        cleanedUp = false
+        demands.set(`${event.sourceId}\u0000${event.demandId}`, {
+          sessionId: event.sessionId,
+          sourceId: event.sourceId,
+          state: `pending`,
+        })
+        break
+      case `settleSourceDemand`: {
+        if (event.sessionId !== currentSession) break
+        const demand = demands.get(`${event.sourceId}\u0000${event.demandId}`)
+        if (demand)
+          demand.state = event.outcome === `resolve` ? `resolved` : `rejected`
+        break
+      }
+      case `cleanupSession`:
+        if (event.sessionId === currentSession) {
+          cleanedUp = true
+          demands.clear()
+        }
+        break
+      case `restartSession`:
+        currentSession = event.nextSessionId
+        cleanedUp = false
+        demands.clear()
+        break
+      case `requestDemand`:
+      case `applyAuthoritativeRows`:
+      case `releaseDemand`:
+      case `advanceWindowRevision`:
+      case `scheduleContinuation`:
+      case `runContinuation`:
+      case `stageSyncTransaction`:
+      case `commitSyncTransaction`:
+      case `enterSyncApplication`:
+      case `abortSyncTransaction`:
+      case `publishSyncTransaction`:
+      case `settleSyncReceipt`:
+      case `establishPublication`:
+      case `startReplay`:
+      case `writeReplayRows`:
+      case `settleReplay`:
+        break
+    }
+  }
+
+  const currentDemands = [...demands.values()].filter(
+    ({ sessionId }) => sessionId === currentSession,
+  )
+  const pendingSources = [
+    ...new Set(
+      currentDemands
+        .filter(({ state }) => state === `pending`)
+        .map(({ sourceId }) => sourceId),
+    ),
+  ].sort()
+  const failedSources = [
+    ...new Set(
+      currentDemands
+        .filter(({ state }) => state === `rejected`)
+        .map(({ sourceId }) => sourceId),
+    ),
+  ].sort()
+
+  return {
+    status: cleanedUp
+      ? `cleaned-up`
+      : failedSources.length > 0
+        ? `error`
+        : pendingSources.length > 0 || currentDemands.length === 0
+          ? `loading`
+          : `ready`,
+    pendingSources,
+    failedSources,
   }
 }
