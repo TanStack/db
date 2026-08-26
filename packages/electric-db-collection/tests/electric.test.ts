@@ -2659,7 +2659,15 @@ describe(`Electric Integration`, () => {
 
   // Tests for syncMode configuration
   describe(`syncMode configuration`, () => {
-    const createOnDemandCollection = (id: string) =>
+    const createOnDemandCollection = (
+      id: string,
+    ): Collection<
+      Row,
+      number,
+      ElectricCollectionUtils,
+      StandardSchemaV1<unknown, unknown>,
+      Row
+    > =>
       createCollection(
         electricCollectionOptions({
           id,
@@ -2946,6 +2954,31 @@ describe(`Electric Integration`, () => {
         await vi.runOnlyPendingTimersAsync()
         vi.useRealTimers()
       }
+    })
+
+    it(`does not start a refresh when the collection signal is already aborted`, async () => {
+      mockStream.isUpToDate = true
+      const abortController = new AbortController()
+      abortController.abort()
+      const testCollection = createCollection(
+        electricCollectionOptions({
+          id: `on-demand-refresh-already-aborted-test`,
+          shapeOptions: {
+            url: `http://test-url`,
+            params: { table: `test_table` },
+            signal: abortController.signal,
+          },
+          syncMode: `on-demand`,
+          getKey: (item: Row) => item.id as number,
+          startSync: true,
+        }),
+      )
+
+      await testCollection._sync.loadSubset({ limit: 10 })
+
+      expect(mockForceDisconnectAndRefresh).not.toHaveBeenCalled()
+      expect(mockRequestSnapshot).not.toHaveBeenCalled()
+      await testCollection.cleanup()
     })
 
     it(`should retry a refresh wait after the requesting demand is aborted`, async () => {

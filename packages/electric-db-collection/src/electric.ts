@@ -579,7 +579,9 @@ function createLoadSubsetDedupe<T extends Row<unknown>>({
 
   const loadSubset = async (opts: LoadSubsetOptions) => {
     const commitCursor = getCommitCursor()
-    if (opts.signal?.aborted) return
+    const isAborted = (): boolean =>
+      signal.aborted || opts.signal?.aborted === true
+    if (isAborted()) return
 
     if (isBufferingInitialSync()) {
       const snapshotParams = compileSQL<T>(opts, compileOptions)
@@ -677,7 +679,7 @@ function createLoadSubsetDedupe<T extends Row<unknown>>({
       }
     }
 
-    if (signal.aborted || opts.signal?.aborted) return
+    if (isAborted()) return
 
     // Upstream limitation: ShapeStream.requestSnapshot() publishes its rows
     // through the stream callback before its Promise resolves. It accepts no
