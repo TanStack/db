@@ -820,6 +820,10 @@ export class CollectionSubscription
     demand.options = acquisition.options
     demand.abortController = acquisition.abortController
     demand.removeRequestAbortListener = acquisition.removeRequestAbortListener
+    if (acquisition.abortController.signal.aborted) {
+      acquisition.removeRequestAbortListener?.()
+      return { demand, result: true }
+    }
     // Reentrant release must see the exact acquisition before adapter work
     // starts. A genuine load throw removes this tentative logical owner below.
     this.subsetDemands.push(demand)

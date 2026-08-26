@@ -1,3 +1,11 @@
+/**
+ * Component model for CoverageRegistry ownership and publication only.
+ *
+ * It deliberately does not model CollectionSubscription start/skip behavior,
+ * session-owned continuations, adapter dedupe retention, transaction
+ * visibility, or public query results. Full-flow histories exercise those
+ * boundaries through real production objects.
+ */
 export type LoadSubsetLifecycleState =
   | `initial`
   | `provisional`

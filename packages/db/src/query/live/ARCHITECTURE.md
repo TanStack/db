@@ -569,6 +569,10 @@ A later cleanup retries callbacks that have not yet settled. Logical ownership
 retires only after every callback required by that release step succeeds. Rows
 whose final acquisition owner retires are deleted once through the normal
 Collection sync boundary; shared rows remain until their final owner retires.
+An adapter that uses `DeduplicatedLoadSubset` across live-query lifetimes must
+also return the helper's paired `unloadSubset` callback. That callback
+invalidates remembered request coverage when core may delete its establishing
+rows. A dedupe hit cannot outlive the evidence it claims to reuse.
 
 An eager Query DB collection owns its base query for the Collection lifetime.
 If TanStack Query removes that cache entry while the Collection has no public

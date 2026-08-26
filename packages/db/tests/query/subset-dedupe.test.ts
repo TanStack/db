@@ -45,6 +45,67 @@ function not(expression: BasicExpression<boolean>): Func {
 }
 
 describe(`createDeduplicatedLoadSubset`, () => {
+  it.each(
+    [
+      {
+        name: `unbounded`,
+        createOptions: (): LoadSubsetOptions => ({}),
+      },
+      {
+        name: `filtered`,
+        createOptions: (): LoadSubsetOptions => ({
+          where: eq(ref(`status`), val(`active`)),
+        }),
+      },
+      {
+        name: `limited`,
+        createOptions: (): LoadSubsetOptions => ({ limit: 2 }),
+      },
+    ].flatMap((coverage) =>
+      ([`sync`, `async`] as const).map((settlement) => ({
+        ...coverage,
+        settlement,
+      })),
+    ),
+  )(
+    `invalidates $settlement $name settled coverage on unload`,
+    async ({ createOptions, settlement }) => {
+      const loadSubset = vi.fn(() =>
+        settlement === `sync` ? (true as const) : Promise.resolve(),
+      )
+      const deduplicated = new DeduplicatedLoadSubset({ loadSubset })
+      const owner = createOptions()
+
+      await deduplicated.loadSubset(owner)
+      expect(deduplicated.loadSubset(createOptions())).toBe(true)
+      expect(loadSubset).toHaveBeenCalledTimes(1)
+
+      deduplicated.unloadSubset(owner)
+      await deduplicated.loadSubset(createOptions())
+
+      expect(loadSubset).toHaveBeenCalledTimes(2)
+    },
+  )
+
+  it(`does not restore invalidated coverage when unloaded work settles late`, async () => {
+    let resolveLoad: (() => void) | undefined
+    const loadSubset = vi.fn(
+      () => new Promise<void>((resolve) => (resolveLoad = resolve)),
+    )
+    const deduplicated = new DeduplicatedLoadSubset({ loadSubset })
+    const owner = new AbortController()
+    const options = { limit: 2, signal: owner.signal }
+    const first = deduplicated.loadSubset(options)
+
+    owner.abort()
+    deduplicated.unloadSubset(options)
+    resolveLoad?.()
+    await first
+
+    deduplicated.loadSubset({ limit: 2 })
+    expect(loadSubset).toHaveBeenCalledTimes(2)
+  })
+
   it(`shares in-flight work while any cancellation owner remains active`, async () => {
     let resolveLoad: (() => void) | undefined
     let sharedSignal: AbortSignal | undefined
