@@ -740,8 +740,10 @@ describe(`loadSubset outcomes`, () => {
   )
 
   it(`tracks opaque demand values by runtime reference`, async () => {
-    const loadSubset = vi.fn(() => Promise.resolve({ hasMore: false }))
-    const unloadSubset = vi.fn()
+    const loadSubset = vi.fn((_options: LoadSubsetOptions) =>
+      Promise.resolve({ hasMore: false }),
+    )
+    const unloadSubset = vi.fn((_options: LoadSubsetOptions) => {})
     const collection = createCollection<{ id: string }>({
       id: `load-subset-opaque-demand`,
       getKey: (row) => row.id,
