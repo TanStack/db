@@ -157,9 +157,10 @@ export class WindowState<
   }
 
   /**
-   * A legacy result without applied row keys still says this exact request has
-   * settled. Admit only the current local prefix. A later expansion must
-   * refresh from the start because these rows are not a reusable cursor proof.
+   * An outcome-free completion without applied row keys still says this exact
+   * request has settled. Admit only the current local prefix. A later expansion
+   * must refresh from the start because these rows are not a reusable cursor
+   * proof.
    */
   recordLocalRequestSatisfaction(requestedPrefix: number): void {
     this.candidateKeys.clear()
@@ -168,9 +169,9 @@ export class WindowState<
     for (const change of this.readRows(undefined, requestedPrefix)) {
       this.admittedKeys.add(change.key)
     }
-    // `true` and legacy Promise<void> do not prove exhaustion. Only count rows
-    // that are now present, so a short synchronous page can request another
-    // pass until the active prefix is actually filled.
+    // Outcome-free completions (`true` and Promise<void>) do not prove
+    // exhaustion. Only count rows that are now present, so a short synchronous
+    // page can request another pass until the active prefix is actually filled.
     this.coveredSize = Math.min(requestedPrefix, this.admittedKeys.size)
     this.needsFullRefinement = false
     this.needsPrefixRefresh = true
