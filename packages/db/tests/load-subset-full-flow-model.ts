@@ -3,6 +3,11 @@ export type FullFlowSessionId = string
 export type FullFlowDemandId = string
 export type FullFlowSourceId = string
 export type FullFlowTransactionId = string
+export type FullFlowVersionedRow = {
+  sourceId: FullFlowSourceId
+  rowKey: string
+  version: number
+}
 
 export type LoadSubsetFullFlowEvent =
   | {
@@ -78,6 +83,27 @@ export type LoadSubsetFullFlowEvent =
       type: `settleSyncReceipt`
       transactionId: FullFlowTransactionId
     }
+  | {
+      type: `establishPublication`
+      sourceId: FullFlowSourceId
+      rows: ReadonlyArray<FullFlowVersionedRow>
+    }
+  | {
+      type: `startReplay`
+      attemptId: string
+      sourceId: FullFlowSourceId
+    }
+  | {
+      type: `writeReplayRows`
+      attemptId: string
+      rows: ReadonlyArray<FullFlowVersionedRow>
+      acceptedByCore: boolean
+    }
+  | {
+      type: `settleReplay`
+      attemptId: string
+      outcome: `resolve` | `reject`
+    }
 
 export type ExpectedAdapterLifecycleEvent = {
   type: `invoke` | `release`
@@ -149,6 +175,10 @@ export function projectTransportLoads(
       case `abortSyncTransaction`:
       case `publishSyncTransaction`:
       case `settleSyncReceipt`:
+      case `establishPublication`:
+      case `startReplay`:
+      case `writeReplayRows`:
+      case `settleReplay`:
         break
     }
   }
@@ -218,6 +248,10 @@ export function projectAuthorizedContinuationStarts(
       case `abortSyncTransaction`:
       case `publishSyncTransaction`:
       case `settleSyncReceipt`:
+      case `establishPublication`:
+      case `startReplay`:
+      case `writeReplayRows`:
+      case `settleReplay`:
         break
     }
   }
@@ -372,6 +406,10 @@ export function projectSyncTransactions(
       case `advanceWindowRevision`:
       case `scheduleContinuation`:
       case `runContinuation`:
+      case `establishPublication`:
+      case `startReplay`:
+      case `writeReplayRows`:
+      case `settleReplay`:
         break
     }
   }
@@ -393,5 +431,184 @@ export function projectSyncTransactions(
       .sort((left, right) =>
         left.transactionId.localeCompare(right.transactionId),
       ),
+  }
+}
+
+export type ExpectedVersionedChange = {
+  type: `insert` | `update` | `delete`
+  row: FullFlowVersionedRow
+  previousVersion?: number
+}
+
+export type ExpectedReplayObservation = {
+  coreRows: Array<FullFlowVersionedRow>
+  visibleRows: Array<FullFlowVersionedRow>
+  publishedBatches: Array<Array<ExpectedVersionedChange>>
+}
+
+type ProjectedReplayAttempt = {
+  outcome?: `resolve` | `reject`
+}
+
+type ProjectedReplaySession = {
+  sourceId: FullFlowSourceId
+  currentAttemptId: string
+  attempts: Map<string, ProjectedReplayAttempt>
+  baseline: Map<string, FullFlowVersionedRow>
+}
+
+function versionedRowIdentity(row: FullFlowVersionedRow): string {
+  return `${row.sourceId}\u0000${row.rowKey}`
+}
+
+function sortVersionedRows(
+  rows: Iterable<FullFlowVersionedRow>,
+): Array<FullFlowVersionedRow> {
+  return [...rows].sort((left, right) =>
+    versionedRowIdentity(left).localeCompare(versionedRowIdentity(right)),
+  )
+}
+
+function versionedPublicationDiff(
+  baseline: ReadonlyMap<string, FullFlowVersionedRow>,
+  replacement: ReadonlyMap<string, FullFlowVersionedRow>,
+): Array<ExpectedVersionedChange> {
+  const changes: Array<ExpectedVersionedChange> = []
+  for (const [identity, previous] of baseline) {
+    const next = replacement.get(identity)
+    if (!next) {
+      changes.push({ type: `delete`, row: previous })
+    } else if (next.version !== previous.version) {
+      changes.push({
+        type: `update`,
+        row: next,
+        previousVersion: previous.version,
+      })
+    }
+  }
+  for (const [identity, row] of replacement) {
+    if (!baseline.has(identity)) changes.push({ type: `insert`, row })
+  }
+  return changes.sort((left, right) =>
+    versionedRowIdentity(left.row).localeCompare(
+      versionedRowIdentity(right.row),
+    ),
+  )
+}
+
+/**
+ * Projects truncate replay as a replacement protocol. Core rows and last-good
+ * publication are independent domains: truncate clears core immediately, but
+ * public rows change only after every overlapping attempt settles and the
+ * newest attempt succeeds.
+ */
+export function projectReplayPublication(
+  history: ReadonlyArray<LoadSubsetFullFlowEvent>,
+): ExpectedReplayObservation {
+  const coreRows = new Map<string, FullFlowVersionedRow>()
+  const visibleRows = new Map<string, FullFlowVersionedRow>()
+  const publishedBatches: Array<Array<ExpectedVersionedChange>> = []
+  const sessions = new Map<FullFlowSourceId, ProjectedReplaySession>()
+  const attemptSessions = new Map<string, ProjectedReplaySession>()
+
+  for (const event of history) {
+    switch (event.type) {
+      case `establishPublication`: {
+        const batch: Array<ExpectedVersionedChange> = []
+        for (const row of event.rows) {
+          const identity = versionedRowIdentity(row)
+          coreRows.set(identity, row)
+          visibleRows.set(identity, row)
+          batch.push({ type: `insert`, row })
+        }
+        if (batch.length > 0) publishedBatches.push(batch)
+        break
+      }
+      case `startReplay`: {
+        let session = sessions.get(event.sourceId)
+        if (!session) {
+          session = {
+            sourceId: event.sourceId,
+            currentAttemptId: event.attemptId,
+            attempts: new Map(),
+            baseline: new Map(
+              [...visibleRows].filter(
+                ([, row]) => row.sourceId === event.sourceId,
+              ),
+            ),
+          }
+          sessions.set(event.sourceId, session)
+        }
+        session.currentAttemptId = event.attemptId
+        session.attempts.set(event.attemptId, {})
+        attemptSessions.set(event.attemptId, session)
+        for (const [identity, row] of coreRows) {
+          if (row.sourceId === event.sourceId) coreRows.delete(identity)
+        }
+        break
+      }
+      case `writeReplayRows`:
+        if (event.acceptedByCore) {
+          for (const row of event.rows) {
+            coreRows.set(versionedRowIdentity(row), row)
+          }
+        }
+        break
+      case `settleReplay`: {
+        const session = attemptSessions.get(event.attemptId)
+        const attempt = session?.attempts.get(event.attemptId)
+        if (!session || !attempt) break
+        attempt.outcome = event.outcome
+        if ([...session.attempts.values()].some(({ outcome }) => !outcome)) {
+          break
+        }
+
+        const current = session.attempts.get(session.currentAttemptId)
+        if (current?.outcome === `resolve`) {
+          const replacement = new Map(
+            [...coreRows].filter(
+              ([, row]) => row.sourceId === session.sourceId,
+            ),
+          )
+          const changes = versionedPublicationDiff(
+            session.baseline,
+            replacement,
+          )
+          for (const [identity, row] of visibleRows) {
+            if (row.sourceId === session.sourceId) visibleRows.delete(identity)
+          }
+          for (const [identity, row] of replacement) {
+            visibleRows.set(identity, row)
+          }
+          if (changes.length > 0) publishedBatches.push(changes)
+        }
+        sessions.delete(session.sourceId)
+        for (const attemptId of session.attempts.keys()) {
+          attemptSessions.delete(attemptId)
+        }
+        break
+      }
+      case `requestDemand`:
+      case `applyAuthoritativeRows`:
+      case `releaseDemand`:
+      case `restartSession`:
+      case `cleanupSession`:
+      case `advanceWindowRevision`:
+      case `scheduleContinuation`:
+      case `runContinuation`:
+      case `stageSyncTransaction`:
+      case `commitSyncTransaction`:
+      case `enterSyncApplication`:
+      case `abortSyncTransaction`:
+      case `publishSyncTransaction`:
+      case `settleSyncReceipt`:
+        break
+    }
+  }
+
+  return {
+    coreRows: sortVersionedRows(coreRows.values()),
+    visibleRows: sortVersionedRows(visibleRows.values()),
+    publishedBatches,
   }
 }
