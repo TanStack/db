@@ -3,6 +3,7 @@ export type FullFlowSessionId = string
 export type FullFlowDemandId = string
 export type FullFlowSourceId = string
 export type FullFlowTransactionId = string
+export type FullFlowAcquisitionId = string
 export type FullFlowVersionedRow = {
   sourceId: FullFlowSourceId
   rowKey: string
@@ -117,6 +118,23 @@ export type LoadSubsetFullFlowEvent =
       demandId: FullFlowDemandId
       outcome: `resolve` | `reject`
     }
+  | {
+      type: `startAcquisition`
+      acquisitionId: FullFlowAcquisitionId
+      sourceId: FullFlowSourceId
+      demandId: FullFlowDemandId
+    }
+  | {
+      type: `attachAcquisitionOwner`
+      acquisitionId: FullFlowAcquisitionId
+      ownerId: FullFlowOwnerId
+    }
+  | {
+      type: `settleAcquisition`
+      acquisitionId: FullFlowAcquisitionId
+      outcome: `resolve` | `reject`
+      rowKeys: ReadonlyArray<string>
+    }
 
 export type ExpectedAdapterLifecycleEvent = {
   type: `invoke` | `release`
@@ -194,6 +212,9 @@ export function projectTransportLoads(
       case `settleReplay`:
       case `registerSourceDemand`:
       case `settleSourceDemand`:
+      case `startAcquisition`:
+      case `attachAcquisitionOwner`:
+      case `settleAcquisition`:
         break
     }
   }
@@ -269,6 +290,9 @@ export function projectAuthorizedContinuationStarts(
       case `settleReplay`:
       case `registerSourceDemand`:
       case `settleSourceDemand`:
+      case `startAcquisition`:
+      case `attachAcquisitionOwner`:
+      case `settleAcquisition`:
         break
     }
   }
@@ -429,6 +453,9 @@ export function projectSyncTransactions(
       case `settleReplay`:
       case `registerSourceDemand`:
       case `settleSourceDemand`:
+      case `startAcquisition`:
+      case `attachAcquisitionOwner`:
+      case `settleAcquisition`:
         break
     }
   }
@@ -463,6 +490,7 @@ export type ExpectedReplayObservation = {
   coreRows: Array<FullFlowVersionedRow>
   visibleRows: Array<FullFlowVersionedRow>
   publishedBatches: Array<Array<ExpectedVersionedChange>>
+  callbackReads: Array<Array<FullFlowVersionedRow>>
 }
 
 type ProjectedReplayAttempt = {
@@ -527,6 +555,7 @@ export function projectReplayPublication(
   const coreRows = new Map<string, FullFlowVersionedRow>()
   const visibleRows = new Map<string, FullFlowVersionedRow>()
   const publishedBatches: Array<Array<ExpectedVersionedChange>> = []
+  const callbackReads: Array<Array<FullFlowVersionedRow>> = []
   const sessions = new Map<FullFlowSourceId, ProjectedReplaySession>()
   const attemptSessions = new Map<string, ProjectedReplaySession>()
 
@@ -540,7 +569,10 @@ export function projectReplayPublication(
           visibleRows.set(identity, row)
           batch.push({ type: `insert`, row })
         }
-        if (batch.length > 0) publishedBatches.push(batch)
+        if (batch.length > 0) {
+          publishedBatches.push(batch)
+          callbackReads.push(sortVersionedRows(visibleRows.values()))
+        }
         break
       }
       case `startReplay`: {
@@ -599,7 +631,10 @@ export function projectReplayPublication(
           for (const [identity, row] of replacement) {
             visibleRows.set(identity, row)
           }
-          if (changes.length > 0) publishedBatches.push(changes)
+          if (changes.length > 0) {
+            publishedBatches.push(changes)
+            callbackReads.push(sortVersionedRows(visibleRows.values()))
+          }
         }
         sessions.delete(session.sourceId)
         for (const attemptId of session.attempts.keys()) {
@@ -623,6 +658,9 @@ export function projectReplayPublication(
       case `settleSyncReceipt`:
       case `registerSourceDemand`:
       case `settleSourceDemand`:
+      case `startAcquisition`:
+      case `attachAcquisitionOwner`:
+      case `settleAcquisition`:
         break
     }
   }
@@ -631,6 +669,7 @@ export function projectReplayPublication(
     coreRows: sortVersionedRows(coreRows.values()),
     visibleRows: sortVersionedRows(visibleRows.values()),
     publishedBatches,
+    callbackReads,
   }
 }
 
@@ -701,6 +740,9 @@ export function projectSourceReadiness(
       case `startReplay`:
       case `writeReplayRows`:
       case `settleReplay`:
+      case `startAcquisition`:
+      case `attachAcquisitionOwner`:
+      case `settleAcquisition`:
         break
     }
   }
@@ -733,5 +775,82 @@ export function projectSourceReadiness(
           : `ready`,
     pendingSources,
     failedSources,
+  }
+}
+
+export type ExpectedAcquisitionObservation = {
+  physicalStarts: Array<FullFlowAcquisitionId>
+  owners: Array<{
+    ownerId: FullFlowOwnerId
+    state: `pending` | `resolved` | `rejected`
+    rowKeys: Array<string>
+  }>
+  visibleRowKeys: Array<string>
+}
+
+/**
+ * Projects the semantic result of physical acquisition sharing.
+ *
+ * A physical acquisition may serve one or many logical owners. Sharing may
+ * reduce transport starts, but it cannot change any owner's settlement or the
+ * rows made visible by successful work.
+ */
+export function projectAcquisitionSettlement(
+  history: ReadonlyArray<LoadSubsetFullFlowEvent>,
+): ExpectedAcquisitionObservation {
+  const acquisitions = new Map<
+    FullFlowAcquisitionId,
+    {
+      owners: Set<FullFlowOwnerId>
+      state: `pending` | `resolved` | `rejected`
+      rowKeys: Array<string>
+    }
+  >()
+  const physicalStarts: Array<FullFlowAcquisitionId> = []
+  const visibleRowKeys = new Set<string>()
+
+  for (const event of history) {
+    switch (event.type) {
+      case `startAcquisition`:
+        if (!acquisitions.has(event.acquisitionId)) {
+          acquisitions.set(event.acquisitionId, {
+            owners: new Set(),
+            state: `pending`,
+            rowKeys: [],
+          })
+          physicalStarts.push(event.acquisitionId)
+        }
+        break
+      case `attachAcquisitionOwner`:
+        acquisitions.get(event.acquisitionId)?.owners.add(event.ownerId)
+        break
+      case `settleAcquisition`: {
+        const acquisition = acquisitions.get(event.acquisitionId)
+        if (!acquisition || acquisition.state !== `pending`) break
+        acquisition.state =
+          event.outcome === `resolve` ? `resolved` : `rejected`
+        acquisition.rowKeys = [...new Set(event.rowKeys)].sort()
+        if (acquisition.state === `resolved`) {
+          acquisition.rowKeys.forEach((rowKey) => visibleRowKeys.add(rowKey))
+        }
+        break
+      }
+      default:
+        break
+    }
+  }
+
+  return {
+    physicalStarts,
+    owners: [...acquisitions.values()]
+      .flatMap((acquisition) =>
+        [...acquisition.owners].map((ownerId) => ({
+          ownerId,
+          state: acquisition.state,
+          rowKeys: acquisition.state === `resolved` ? acquisition.rowKeys : [],
+        })),
+      )
+      .sort((left, right) => left.ownerId.localeCompare(right.ownerId)),
+    visibleRowKeys: [...visibleRowKeys].sort(),
   }
 }
