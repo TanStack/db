@@ -346,13 +346,7 @@ function getOrderedKeys<T extends object, TKey extends string | number>(
       // Find the index
       const index = findIndexForField(collection, fieldPath, compareOpts)
 
-      if (
-        index &&
-        index.supports(`gt`) &&
-        // Reversing a value index also reverses keys inside an equal-value
-        // bucket, but query TotalOrder keeps its public-key tie-break ascending.
-        !(index instanceof ReverseIndex)
-      ) {
+      if (index && index.supports(`gt`)) {
         // Use index optimization
         const filterFn = (key: TKey): boolean => {
           const value = collection.get(key)
@@ -365,7 +359,30 @@ function getOrderedKeys<T extends object, TKey extends string | number>(
         // Take the keys that match the filter and limit
         // if no limit is provided `index.keyCount` is used,
         // i.e. we will take all keys that match the filter
-        return index.takeFromStart(limit ?? index.keyCount, filterFn)
+        if (!(index instanceof ReverseIndex)) {
+          return index.takeFromStart(limit ?? index.keyCount, filterFn)
+        }
+
+        // Reversing a value index also reverses keys inside an equal-value
+        // bucket, but query TotalOrder keeps its public-key tie-break ascending.
+        // Refine all matching indexed rows locally so a limit cannot cut the
+        // wrong side of a tied boundary.
+        const totalOrder = new TotalOrder(orderBy, collection)
+        const indexedEntries = index
+          .takeFromStart(index.keyCount, filterFn)
+          .flatMap((key) => {
+            const value = collection.get(key)
+            return value === undefined ? [] : [{ key, value }]
+          })
+        indexedEntries.sort((left, right) =>
+          totalOrder.compareEntries(
+            [left.key, left.value],
+            [right.key, right.value],
+          ),
+        )
+        return indexedEntries
+          .slice(0, limit ?? indexedEntries.length)
+          .map(({ key }) => key)
       }
     }
   }
