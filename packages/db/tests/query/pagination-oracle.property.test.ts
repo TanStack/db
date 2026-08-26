@@ -14,10 +14,7 @@ import {
 import { evaluateReferenceExpression } from '../reference-expression.js'
 import { TraceAssertionError } from '../trace-runner.js'
 import { flushPromises, mockSyncCollectionOptions } from '../utils.js'
-import type {
-  LoadSubsetOptions,
-  LoadSubsetResult,
-} from '../../src/types.js'
+import type { LoadSubsetOptions, LoadSubsetResult } from '../../src/types.js'
 
 type PageRow = {
   id: number
@@ -2367,8 +2364,7 @@ describe(`pagination recomputation oracle`, () => {
         )
 
         begin()
-        const movedIds =
-          direction === `asc` ? [1, 2, 3, 4] : [3, 4, 5, 6]
+        const movedIds = direction === `asc` ? [1, 2, 3, 4] : [3, 4, 5, 6]
         for (const id of movedIds) {
           const row = {
             id,
@@ -2393,18 +2389,8 @@ describe(`pagination recomputation oracle`, () => {
   )
 
   it.each([
-    [
-      `insert`,
-      { type: `insert`, row: { id: 7, rank: 0 } },
-      [7, 1],
-      [7, 1, 2],
-    ],
-    [
-      `update`,
-      { type: `update`, row: { id: 2, rank: -1 } },
-      [2, 1],
-      [2, 1, 3],
-    ],
+    [`insert`, { type: `insert`, row: { id: 7, rank: 0 } }, [7, 1], [7, 1, 2]],
+    [`update`, { type: `update`, row: { id: 2, rank: -1 } }, [2, 1], [2, 1, 3]],
     [`delete`, { type: `delete`, id: 1 }, [2, 3], [2, 3, 4]],
   ] satisfies ReadonlyArray<
     readonly [
@@ -2413,130 +2399,128 @@ describe(`pagination recomputation oracle`, () => {
       ReadonlyArray<number>,
       ReadonlyArray<number>,
     ]
-  >)(`keeps an SSE %s that arrives during boundary refinement`, async (
-    _name,
-    mutation,
-    expectedIds,
-    expectedWideIds,
-  ) => {
-    const rows = new Map<number, PageRow>(
-      Array.from({ length: 6 }, (_, index) => [
-        index + 1,
-        { id: index + 1, rank: index + 1 },
-      ]),
-    )
-    const delivered = new Set<number>()
-    const pending: Array<PendingCursorLoad> = []
-    let begin!: () => void
-    let write!: (message: {
-      type: `insert` | `update` | `delete`
-      value: PageRow
-    }) => void
-    let commit!: () => void
-    const source = createCollection<PageRow>({
-      id: `pagination-pending-refinement-sse-${collectionSequence++}`,
-      getKey: (row) => row.id,
-      syncMode: `on-demand`,
-      startSync: true,
-      autoIndex: `eager`,
-      defaultIndexType: BTreeIndex,
-      sync: {
-        sync: (params) => {
-          begin = params.begin
-          write = params.write
-          commit = params.commit
-          params.markReady()
-          return {
-            loadSubset: (options: LoadSubsetOptions) => {
-              const deferred = createDeferred<void>()
-              pending.push({ options, deferred })
-              return withAppliedSubsetEvidence(
-                () =>
-                  referenceWindowRows([...rows.values()], `asc`, {
-                    offset: 0,
-                    limit: rows.size,
-                  }),
-                options,
-                deferred.promise,
-              )
-            },
-          }
-        },
-      },
-    })
-    const live = createLiveQueryCollection((query) =>
-      query
-        .from({ row: source })
-        .orderBy(({ row }) => row.rank, `asc`)
-        .orderBy(({ row }) => row.id, `asc`)
-        .limit(2),
-    )
-
-    const settle = async (request: PendingCursorLoad) => {
-      const ordered = referenceWindowRows([...rows.values()], `asc`, {
-        offset: 0,
-        limit: rows.size,
-      })
-      begin()
-      for (const row of rowsForLoadSubset(ordered, request.options)) {
-        if (delivered.has(row.id)) continue
-        delivered.add(row.id)
-        write({ type: `insert`, value: { ...row } })
-      }
-      commit()
-      request.deferred.resolve()
-      await flushPromises()
-    }
-
-    try {
-      const preload = live.preload()
-      expect(pending).toHaveLength(1)
-      await settle(pending[0]!)
-      expect(pending).toHaveLength(2)
-
-      begin()
-      if (mutation.type === `delete`) {
-        const row = rows.get(mutation.id)!
-        rows.delete(mutation.id)
-        delivered.delete(mutation.id)
-        write({ type: `delete`, value: { ...row } })
-      } else {
-        rows.set(mutation.row.id, { ...mutation.row })
-        delivered.add(mutation.row.id)
-        write({ type: mutation.type, value: { ...mutation.row } })
-      }
-      commit()
-
-      await settle(pending[1]!)
-      expect(pending).toHaveLength(3)
-      expect(pending[2]?.options).toMatchObject({ offset: 0, limit: 2 })
-      expect(pending[2]?.options.cursor).toBeUndefined()
-      for (let index = 2; index < pending.length; index++) {
-        await settle(pending[index]!)
-      }
-      await preload
-
-      expect(Array.from(live.values(), ({ id }) => id)).toEqual(expectedIds)
-
-      const pendingBeforeWiden = pending.length
-      const widened = live.utils.setWindow({ offset: 0, limit: 3 })
-      await flushPromises()
-      expect(pending).toHaveLength(pendingBeforeWiden + 1)
-      expect(pending[pendingBeforeWiden]?.options.offset).toBe(3)
-      expect(pending[pendingBeforeWiden]?.options.cursor).toBeDefined()
-      for (let index = pendingBeforeWiden; index < pending.length; index++) {
-        await settle(pending[index]!)
-      }
-      if (widened instanceof Promise) await widened
-      expect(Array.from(live.values(), ({ id }) => id)).toEqual(
-        expectedWideIds,
+  >)(
+    `keeps an SSE %s that arrives during boundary refinement`,
+    async (_name, mutation, expectedIds, expectedWideIds) => {
+      const rows = new Map<number, PageRow>(
+        Array.from({ length: 6 }, (_, index) => [
+          index + 1,
+          { id: index + 1, rank: index + 1 },
+        ]),
       )
-    } finally {
-      for (const request of pending) request.deferred.resolve()
-      live.cleanup()
-      source.cleanup()
-    }
-  })
+      const delivered = new Set<number>()
+      const pending: Array<PendingCursorLoad> = []
+      let begin!: () => void
+      let write!: (message: {
+        type: `insert` | `update` | `delete`
+        value: PageRow
+      }) => void
+      let commit!: () => void
+      const source = createCollection<PageRow>({
+        id: `pagination-pending-refinement-sse-${collectionSequence++}`,
+        getKey: (row) => row.id,
+        syncMode: `on-demand`,
+        startSync: true,
+        autoIndex: `eager`,
+        defaultIndexType: BTreeIndex,
+        sync: {
+          sync: (params) => {
+            begin = params.begin
+            write = params.write
+            commit = params.commit
+            params.markReady()
+            return {
+              loadSubset: (options: LoadSubsetOptions) => {
+                const deferred = createDeferred<void>()
+                pending.push({ options, deferred })
+                return withAppliedSubsetEvidence(
+                  () =>
+                    referenceWindowRows([...rows.values()], `asc`, {
+                      offset: 0,
+                      limit: rows.size,
+                    }),
+                  options,
+                  deferred.promise,
+                )
+              },
+            }
+          },
+        },
+      })
+      const live = createLiveQueryCollection((query) =>
+        query
+          .from({ row: source })
+          .orderBy(({ row }) => row.rank, `asc`)
+          .orderBy(({ row }) => row.id, `asc`)
+          .limit(2),
+      )
+
+      const settle = async (request: PendingCursorLoad) => {
+        const ordered = referenceWindowRows([...rows.values()], `asc`, {
+          offset: 0,
+          limit: rows.size,
+        })
+        begin()
+        for (const row of rowsForLoadSubset(ordered, request.options)) {
+          if (delivered.has(row.id)) continue
+          delivered.add(row.id)
+          write({ type: `insert`, value: { ...row } })
+        }
+        commit()
+        request.deferred.resolve()
+        await flushPromises()
+      }
+
+      try {
+        const preload = live.preload()
+        expect(pending).toHaveLength(1)
+        await settle(pending[0]!)
+        expect(pending).toHaveLength(2)
+
+        begin()
+        if (mutation.type === `delete`) {
+          const row = rows.get(mutation.id)!
+          rows.delete(mutation.id)
+          delivered.delete(mutation.id)
+          write({ type: `delete`, value: { ...row } })
+        } else {
+          rows.set(mutation.row.id, { ...mutation.row })
+          delivered.add(mutation.row.id)
+          write({ type: mutation.type, value: { ...mutation.row } })
+        }
+        commit()
+
+        await settle(pending[1]!)
+        expect(pending).toHaveLength(3)
+        expect(pending[2]?.options).toMatchObject({ offset: 0, limit: 2 })
+        expect(pending[2]?.options.cursor).toBeUndefined()
+        for (let index = 2; index < pending.length; index++) {
+          await settle(pending[index]!)
+        }
+        await preload
+
+        expect(Array.from(live.values(), ({ id }) => id)).toEqual(expectedIds)
+
+        const pendingBeforeWiden = pending.length
+        const widened = live.utils.setWindow({ offset: 0, limit: 3 })
+        await flushPromises()
+        expect(pending).toHaveLength(pendingBeforeWiden + 1)
+        expect(pending[pendingBeforeWiden]?.options.offset).toBe(3)
+        expect(pending[pendingBeforeWiden]?.options.cursor).toBeDefined()
+        for (let index = pendingBeforeWiden; index < pending.length; index++) {
+          await settle(pending[index]!)
+        }
+        if (widened instanceof Promise) await widened
+        expect(Array.from(live.values(), ({ id }) => id)).toEqual(
+          expectedWideIds,
+        )
+      } finally {
+        for (const request of pending) request.deferred.resolve()
+        live.cleanup()
+        source.cleanup()
+      }
+    },
+  )
 
   it(`does not use a new row beyond finite coverage as a widening boundary`, async () => {
     await runPendingMutationScenario(
@@ -3012,33 +2996,33 @@ describe(`pagination recomputation oracle`, () => {
     }
   })
 
-  it.each([
-    { ids: [1, Number.NaN] },
-    { ids: [Number.NaN, 1] },
-  ])(`keeps finite public keys before NaN across insertion order`, async ({ ids }) => {
-    const source = createCollection(
-      mockSyncCollectionOptions({
-        id: `pagination-nan-key-order-${collectionSequence++}`,
-        initialData: ids.map((id) => ({ id, rank: 0 })),
-        getKey: (row: PageRow) => row.id,
-        autoIndex: `eager`,
-      }),
-    )
-    const live = createLiveQueryCollection((query) =>
-      query
-        .from({ row: source })
-        .orderBy(({ row }) => row.rank, `asc`)
-        .limit(1),
-    )
+  it.each([{ ids: [1, Number.NaN] }, { ids: [Number.NaN, 1] }])(
+    `keeps finite public keys before NaN across insertion order`,
+    async ({ ids }) => {
+      const source = createCollection(
+        mockSyncCollectionOptions({
+          id: `pagination-nan-key-order-${collectionSequence++}`,
+          initialData: ids.map((id) => ({ id, rank: 0 })),
+          getKey: (row: PageRow) => row.id,
+          autoIndex: `eager`,
+        }),
+      )
+      const live = createLiveQueryCollection((query) =>
+        query
+          .from({ row: source })
+          .orderBy(({ row }) => row.rank, `asc`)
+          .limit(1),
+      )
 
-    try {
-      await live.preload()
-      expect(Array.from(live.values(), ({ id }) => id)).toEqual([1])
-    } finally {
-      live.cleanup()
-      source.cleanup()
-    }
-  })
+      try {
+        await live.preload()
+        expect(Array.from(live.values(), ({ id }) => id)).toEqual([1])
+      } finally {
+        live.cleanup()
+        source.cleanup()
+      }
+    },
+  )
 
   it(`stabilizes an on-demand window with a NaN public-key tie`, async () => {
     const loads = await runAdversarialOrderedProviderScenario({

@@ -195,10 +195,7 @@ export class WindowState<
         return
       }
       for (const change of changes) {
-        if (
-          change.type !== `insert` ||
-          this.candidateKeys.has(change.key)
-        ) {
+        if (change.type !== `insert` || this.candidateKeys.has(change.key)) {
           this.hasUnsettledInitialMutation = true
         }
         if (change.type === `delete`) this.candidateKeys.delete(change.key)

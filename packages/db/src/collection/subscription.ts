@@ -379,11 +379,7 @@ export class CollectionSubscription
         if (demand.ordered !== undefined) {
           // The replacement acquisition, not the retired generation, owns any
           // row provenance published by this replay result.
-          this.observeOrderedCoverage(
-            syncResult,
-            demand,
-            () => ownsReplacement,
-          )
+          this.observeOrderedCoverage(syncResult, demand, () => ownsReplacement)
         }
 
         // Register this after ordered coverage so replay publication cannot
@@ -1057,10 +1053,9 @@ export class CollectionSubscription
         : refreshPrefix
           ? 0
           : this.orderedWindow.localPrefixSize
-    const requestedPrefix =
-      refreshPrefix
-        ? Math.max(this.orderedWindow.size, limit)
-        : offset !== undefined
+    const requestedPrefix = refreshPrefix
+      ? Math.max(this.orderedWindow.size, limit)
+      : offset !== undefined
         ? offset + limit
         : minValues !== undefined
           ? currentOffset + limit
@@ -1177,14 +1172,14 @@ export class CollectionSubscription
             offset: 0,
             subscription: this,
           }
-      : {
-          where, // Main filter only, no cursor
-          limit,
-          orderBy,
-          cursor: cursorExpressions, // Cursor expressions passed separately
-          offset: offset ?? currentOffset, // Use provided offset, or auto-tracked offset
-          subscription: this,
-        }
+        : {
+            where, // Main filter only, no cursor
+            limit,
+            orderBy,
+            cursor: cursorExpressions, // Cursor expressions passed separately
+            offset: offset ?? currentOffset, // Use provided offset, or auto-tracked offset
+            subscription: this,
+          }
 
     const { demand, result: syncResult } = this.startSubsetDemand(loadOptions, {
       requestedPrefix,
