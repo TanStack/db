@@ -1312,7 +1312,9 @@ export class CollectionSyncManager<
       ? covering.extent
       : this.provesRowsBeyondDemand(covering, retainedDemand)
         ? `continues`
-        : `unknown`
+        : covering.extent === `exhausted`
+          ? `exhausted`
+          : `unknown`
     const outcome: AppliedLoadSubsetOutcome = {
       collectionId: covering.collectionId,
       ...(covering.sourceId === undefined
