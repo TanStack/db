@@ -2659,15 +2659,7 @@ describe(`Electric Integration`, () => {
 
   // Tests for syncMode configuration
   describe(`syncMode configuration`, () => {
-    const createOnDemandCollection = (
-      id: string,
-    ): Collection<
-      Row,
-      number,
-      ElectricCollectionUtils,
-      StandardSchemaV1<unknown, unknown>,
-      Row
-    > =>
+    const createOnDemandCollection = (id: string) =>
       createCollection(
         electricCollectionOptions({
           id,
