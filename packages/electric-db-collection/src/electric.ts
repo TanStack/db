@@ -587,12 +587,13 @@ function createLoadSubsetDedupe<T extends Row<unknown>>({
       const snapshotParams = compileSQL<T>(opts, compileOptions)
       try {
         const { data: rows } = await stream.fetchSnapshot(snapshotParams)
-        if (opts.signal?.aborted || !isBufferingInitialSync()) {
+        if (isAborted() || !isBufferingInitialSync()) {
           debug(`${logPrefix}Ignoring snapshot - sync completed while fetching`)
           return
         }
 
         if (rows.length > 0) {
+          if (isAborted()) return
           begin()
           for (const row of rows) {
             write({
@@ -605,7 +606,7 @@ function createLoadSubsetDedupe<T extends Row<unknown>>({
           debug(`${logPrefix}Applied snapshot with ${rows.length} rows`)
         }
       } catch (error) {
-        if (opts.signal?.aborted) return
+        if (isAborted()) return
         if (handleSnapshotError(error, `fetchSnapshot`)) {
           return
         }

@@ -2948,6 +2948,59 @@ describe(`Electric Integration`, () => {
       }
     })
 
+    it(`does not start buffered snapshot publication after adapter cleanup`, async () => {
+      const snapshot = createDeferred<{
+        data: Array<{
+          key: string
+          value: Row
+          headers: { operation: `insert` }
+        }>
+      }>()
+      mockFetchSnapshot.mockReturnValueOnce(snapshot.promise)
+      const options = electricCollectionOptions({
+        id: `progressive-snapshot-cleanup-test`,
+        shapeOptions: {
+          url: `http://test-url`,
+          params: { table: `test_table` },
+        },
+        syncMode: `progressive`,
+        getKey: (item: Row) => item.id as number,
+        startSync: true,
+      })
+      const begin = vi.fn()
+      const write = vi.fn()
+      const commit = vi.fn(() => true as const)
+      const controls = options.sync.sync({
+        collection: { id: options.id, status: `loading` },
+        begin,
+        write,
+        commit,
+        markReady: vi.fn(),
+        markError: vi.fn(),
+        truncate: vi.fn(),
+      } as never)
+      if (!controls || typeof controls === `function` || !controls.loadSubset) {
+        throw new Error(`Expected progressive sync controls`)
+      }
+
+      const load = controls.loadSubset({ limit: 10 })
+      controls.cleanup?.()
+      snapshot.resolve({
+        data: [
+          {
+            key: `1`,
+            value: { id: 1, name: `Late snapshot user` },
+            headers: { operation: `insert` },
+          },
+        ],
+      })
+      if (load !== true) await load
+
+      expect(begin).not.toHaveBeenCalled()
+      expect(write).not.toHaveBeenCalled()
+      expect(commit).not.toHaveBeenCalled()
+    })
+
     it(`does not start a refresh when the collection signal is already aborted`, async () => {
       mockStream.isUpToDate = true
       const abortController = new AbortController()
