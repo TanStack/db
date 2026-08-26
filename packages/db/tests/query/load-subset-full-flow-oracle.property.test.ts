@@ -2,7 +2,13 @@ import { expect, it } from 'vitest'
 import { createCollection } from '../../src/collection/index.js'
 import { createLiveQueryCollection } from '../../src/query/index.js'
 import { DeduplicatedLoadSubset } from '../../src/query/subset-dedupe.js'
+import {
+  projectAdapterLifecycle,
+  projectRetainedRowKeys,
+  projectTransportLoads,
+} from '../load-subset-full-flow-model.js'
 import type { LoadSubsetOptions } from '../../src/types.js'
+import type { LoadSubsetFullFlowEvent } from '../load-subset-full-flow-model.js'
 
 type AdapterLifecycleEvent =
   | { type: `start`; options: LoadSubsetOptions }
@@ -21,6 +27,25 @@ function visibleRows<Row extends { id: string; value: number }>(
 }
 
 it(`does not release physical work when an already-aborted demand skips adapter start`, async () => {
+  const ownerId = `aborted-owner`
+  const requestEvent: LoadSubsetFullFlowEvent = {
+    type: `requestDemand`,
+    ownerId,
+    sessionId: `session-1`,
+    demandId: `all-rows`,
+    alreadyAborted: true,
+  }
+  const history: ReadonlyArray<LoadSubsetFullFlowEvent> = [
+    requestEvent,
+    {
+      type: `releaseDemand`,
+      ownerId,
+      demandId: `all-rows`,
+      rowKeys: [],
+      finalRowOwner: false,
+      invalidatesAdapterEvidence: false,
+    },
+  ]
   const adapterEvents: Array<AdapterLifecycleEvent> = []
   const collection = createCollection<{ id: string }>({
     id: `full-flow-aborted-before-start`,
@@ -52,12 +77,20 @@ it(`does not release physical work when an already-aborted demand skips adapter 
       signal: request.signal,
       optimizedOnly: false,
     })
-    expect(eventTypes(adapterEvents)).toEqual([])
+    expect(eventTypes(adapterEvents)).toEqual(
+      projectAdapterLifecycle([requestEvent]).map(({ type }) =>
+        type === `invoke` ? `start` : `release`,
+      ),
+    )
 
     subscription.unsubscribe()
 
     // A skipped adapter call creates no physical resource to release.
-    expect(eventTypes(adapterEvents)).toEqual([])
+    expect(eventTypes(adapterEvents)).toEqual(
+      projectAdapterLifecycle(history).map(({ type }) =>
+        type === `invoke` ? `start` : `release`,
+      ),
+    )
   } finally {
     subscription.unsubscribe()
     await collection.cleanup()
@@ -67,6 +100,47 @@ it(`does not release physical work when an already-aborted demand skips adapter 
 it(`reloads authoritative rows after final-owner cleanup invalidates retained adapter coverage`, async () => {
   type Row = { id: string; value: number }
   const row: Row = { id: `row`, value: 1 }
+  const history: ReadonlyArray<LoadSubsetFullFlowEvent> = [
+    {
+      type: `requestDemand`,
+      ownerId: `owner-1`,
+      sessionId: `session-1`,
+      demandId: `all-rows`,
+      alreadyAborted: false,
+    },
+    {
+      type: `applyAuthoritativeRows`,
+      ownerId: `owner-1`,
+      demandId: `all-rows`,
+      rowKeys: [row.id],
+    },
+    {
+      type: `releaseDemand`,
+      ownerId: `owner-1`,
+      demandId: `all-rows`,
+      rowKeys: [row.id],
+      finalRowOwner: true,
+      invalidatesAdapterEvidence: true,
+    },
+    {
+      type: `restartSession`,
+      previousSessionId: `session-1`,
+      nextSessionId: `session-2`,
+    },
+    {
+      type: `requestDemand`,
+      ownerId: `owner-2`,
+      sessionId: `session-2`,
+      demandId: `all-rows`,
+      alreadyAborted: false,
+    },
+    {
+      type: `applyAuthoritativeRows`,
+      ownerId: `owner-2`,
+      demandId: `all-rows`,
+      rowKeys: [row.id],
+    },
+  ]
   let transportLoads = 0
   let begin!: () => void
   let write!: (message: { type: `insert`; value: Row }) => void
@@ -121,8 +195,10 @@ it(`reloads authoritative rows after final-owner cleanup invalidates retained ad
     await second.preload()
 
     // The adapter must either replay retained evidence or fetch it again.
-    expect(transportLoads).toBe(2)
-    expect(visibleRows(second.values())).toEqual([row])
+    expect(transportLoads).toBe(projectTransportLoads(history))
+    expect(visibleRows(second.values()).map(({ id }) => id)).toEqual(
+      projectRetainedRowKeys(history),
+    )
   } finally {
     await Promise.all([
       first.cleanup(),
