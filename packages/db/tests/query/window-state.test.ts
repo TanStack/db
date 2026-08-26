@@ -70,13 +70,7 @@ describe(`WindowState`, () => {
     )
 
     window.recordInitialCoverage([1, 2, 3], false)
-    window.recordContinuationCoverage(
-      [],
-      false,
-      3,
-      false,
-      window.coverageRevision,
-    )
+    window.recordContinuationCoverage([], false, 3, window.coverageRevision)
     window.ensureSize(1)
     window.admitChanges([{ type: `insert`, key: 7, value: rows[2]! }])
     window.ensureSize(3)
@@ -104,28 +98,50 @@ describe(`WindowState`, () => {
     )
 
     window.recordInitialCoverage([1], false)
-    window.recordContinuationCoverage(
-      [2],
-      false,
-      2,
-      false,
-      window.coverageRevision,
-    )
+    window.recordContinuationCoverage([2], false, 2, window.coverageRevision)
     expect(window.requestBoundary()).toEqual({ key: 2, values: [2] })
 
     window.resetCoverage()
     expect(window.requestBoundary()).toBeUndefined()
 
     window.recordInitialCoverage([3], false)
-    window.recordContinuationCoverage(
-      [4],
-      false,
-      2,
-      false,
-      window.coverageRevision,
-    )
+    window.recordContinuationCoverage([4], false, 2, window.coverageRevision)
     expect(window.requestBoundary()).toEqual({ key: 4, values: [4] })
   })
+
+  it.each([
+    { extent: `continues`, rowKeys: [1, 2] },
+    { extent: `unknown`, rowKeys: undefined },
+  ] as const)(
+    `does not establish full coverage from $extent continuation evidence`,
+    ({ rowKeys }) => {
+      const window = new WindowState<Row, number>(
+        mockCollection([
+          { id: 1, rank: 1 },
+          { id: 2, rank: 2 },
+        ]),
+        [
+          {
+            expression: new PropRef([`rank`]),
+            compareOptions: { direction: `asc`, nulls: `first` },
+          },
+        ],
+        undefined,
+        1,
+      )
+
+      window.recordInitialCoverage([1], false)
+      window.recordContinuationCoverage(
+        rowKeys,
+        false,
+        2,
+        window.coverageRevision,
+      )
+      window.ensureSize(3)
+
+      expect(window.coversActiveWindow).toBe(false)
+    },
+  )
 
   it.each([
     { direction: `asc`, nulls: `first`, expected: { key: 3, values: [2] } },

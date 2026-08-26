@@ -908,6 +908,9 @@ async function runAdversarialOrderedProviderScenario(options: {
   limit: number
   expectedIds: ReadonlyArray<number>
   useOffsetWhenAvailable?: boolean
+  providerPageCap?: number
+  reportedExtent?: `computed` | `continues` | `unknown` | `exhausted`
+  widenTo?: number
 }): Promise<Array<LoadSubsetOptions>> {
   const loads: Array<LoadSubsetOptions> = []
   const delivered = new Set(options.initialRows?.map(({ id }) => id) ?? [])
@@ -931,7 +934,7 @@ async function runAdversarialOrderedProviderScenario(options: {
         return {
           loadSubset: (loadOptions: LoadSubsetOptions) => {
             loads.push(loadOptions)
-            const requested = options.useOffsetWhenAvailable
+            const providerMatch = options.useOffsetWhenAvailable
               ? options.providerRows.slice(
                   loadOptions.offset ?? 0,
                   loadOptions.limit === undefined
@@ -939,6 +942,10 @@ async function runAdversarialOrderedProviderScenario(options: {
                     : (loadOptions.offset ?? 0) + loadOptions.limit,
                 )
               : rowsForLoadSubset(options.providerRows, loadOptions)
+            const requested =
+              options.providerPageCap === undefined
+                ? providerMatch
+                : providerMatch.slice(0, options.providerPageCap)
             begin()
             for (const row of requested) {
               if (delivered.has(row.id)) continue
@@ -947,7 +954,15 @@ async function runAdversarialOrderedProviderScenario(options: {
             }
             const receipt = commit()
             const requestedIds = requested.map(({ id }) => id)
-            const hasMore = requestedIds.length < options.providerRows.length
+            const hasMore =
+              options.reportedExtent === undefined ||
+              options.reportedExtent === `computed`
+                ? requestedIds.length < options.providerRows.length
+                : options.reportedExtent === `continues`
+                  ? true
+                  : options.reportedExtent === `exhausted`
+                    ? false
+                    : undefined
             return Promise.resolve(receipt).then(() => ({
               hasMore,
               appliedRowKeys: requestedIds,
@@ -988,6 +1003,15 @@ async function runAdversarialOrderedProviderScenario(options: {
     expect(Array.from(live.values(), ({ id }) => id)).toEqual(
       options.expectedIds,
     )
+    if (options.widenTo !== undefined) {
+      const loadCount = loads.length
+      const widened = live.utils.setWindow({
+        offset: 0,
+        limit: options.widenTo,
+      })
+      if (widened instanceof Promise) await widened
+      expect(loads.length).toBeGreaterThan(loadCount)
+    }
     return loads
   } finally {
     live.cleanup()
@@ -2908,6 +2932,29 @@ describe(`pagination recomputation oracle`, () => {
     expect(loads[1]?.limit).toBeUndefined()
     expect(loads[1]?.offset).toBeUndefined()
   })
+
+  it.each([`continues`, `unknown`] as const)(
+    `does not treat an unbounded capped locale request as full coverage when extent is %s`,
+    async (reportedExtent) => {
+      const loads = await runAdversarialOrderedProviderScenario({
+        providerRows: [
+          { id: 1, rank: 0, label: `item2` },
+          { id: 2, rank: 0, label: `item10` },
+          { id: 3, rank: 0, label: `item11` },
+        ],
+        order: { kind: `locale` },
+        limit: 1,
+        expectedIds: [1],
+        providerPageCap: 1,
+        reportedExtent,
+        widenTo: 2,
+      })
+
+      expect(loads[1]?.limit).toBeUndefined()
+      expect(loads[1]?.offset).toBeUndefined()
+      expect(loads.length).toBeGreaterThan(2)
+    },
+  )
 
   it(`refines an initial reference-ordered window locally`, async () => {
     const first = { value: `first` }

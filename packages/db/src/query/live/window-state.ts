@@ -120,11 +120,10 @@ export class WindowState<
     rowKeys: ReadonlyArray<TKey> | undefined,
     exhausted: boolean,
     requestedPrefix: number,
-    fullRegion: boolean,
     requestRevision: number,
   ): void {
     this.hasInitialCoverage = true
-    if (fullRegion || exhausted) {
+    if (exhausted) {
       this.establishFullCoverage()
       return
     }

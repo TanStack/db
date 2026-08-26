@@ -96,7 +96,7 @@ type SubsetDemand = SubsetAcquisition & {
   ordered?: {
     requestedPrefix: number
     hadBoundary: boolean
-    fullRegion: boolean
+    requiresUnboundedRefinement: boolean
     revision: number
   }
   pendingReplayAcquisitions: Set<ReplaySubsetAcquisition>
@@ -1061,7 +1061,7 @@ export class CollectionSubscription
           ? currentOffset + limit
           : limit
     this.orderedWindow.ensureSize(requestedPrefix)
-    const fullRegion = this.orderedWindow.requiresFullRefinement
+    let requiresUnboundedRefinement = this.orderedWindow.requiresFullRefinement
     const changes =
       !this.isBufferingForTruncate && this.stalePublishedRows.size === 0
         ? this.reconcileOrderedWindow()
@@ -1113,8 +1113,6 @@ export class CollectionSubscription
           lastKey?: string | number
         }
       | undefined
-    let requiresUnboundedRefinement = false
-
     const boundary =
       this.stalePublishedRows.size > 0
         ? this.orderedBoundary()
@@ -1157,8 +1155,7 @@ export class CollectionSubscription
     // don't await it, we will load the data into the collection when it comes in
     // Note: `where` does NOT include cursor expressions - they are passed separately
     // The sync layer can choose to use cursor-based or offset-based pagination
-    const effectiveFullRegion = fullRegion || requiresUnboundedRefinement
-    const loadOptions: LoadSubsetOptions = effectiveFullRegion
+    const loadOptions: LoadSubsetOptions = requiresUnboundedRefinement
       ? {
           where,
           orderBy,
@@ -1184,7 +1181,7 @@ export class CollectionSubscription
     const { demand, result: syncResult } = this.startSubsetDemand(loadOptions, {
       requestedPrefix,
       hadBoundary: boundary !== undefined || refreshPrefix,
-      fullRegion: effectiveFullRegion,
+      requiresUnboundedRefinement,
       revision: this.orderedWindow.coverageRevision,
     })
 
@@ -1226,14 +1223,13 @@ export class CollectionSubscription
 
       if (outcome !== undefined && rowKeys === undefined && !exhausted) {
         window.recordLocalRequestSatisfaction(ordered.requestedPrefix)
-      } else if (!ordered.hadBoundary && !ordered.fullRegion) {
+      } else if (!ordered.hadBoundary && !ordered.requiresUnboundedRefinement) {
         window.recordInitialCoverage(rowKeys, exhausted)
       } else {
         window.recordContinuationCoverage(
           rowKeys,
           exhausted,
           ordered.requestedPrefix,
-          ordered.fullRegion,
           ordered.revision,
         )
       }
@@ -1249,14 +1245,12 @@ export class CollectionSubscription
       void result.then(apply, () => {})
     } else {
       const hasSubsetLoader = this.collection._sync.syncLoadSubsetFn !== null
-      if (!hasSubsetLoader || ordered.fullRegion) {
-        // Eager sources are already complete. A synchronous unbounded subset
-        // request also makes its whole filtered region visible before return.
+      if (!hasSubsetLoader) {
+        // Eager sources are already complete.
         window.recordContinuationCoverage(
           undefined,
           true,
           ordered.requestedPrefix,
-          true,
           ordered.revision,
         )
       } else {
