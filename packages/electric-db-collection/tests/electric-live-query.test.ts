@@ -8,10 +8,15 @@ import {
   lt,
 } from '@tanstack/db'
 import { electricCollectionOptions } from '../src/electric'
+import {
+  projectRetainedRowKeys,
+  projectTransportLoads,
+} from '../../db/tests/load-subset-full-flow-model'
 import type { ElectricCollectionUtils } from '../src/electric'
 import type { Collection } from '@tanstack/db'
 import type { Message } from '@electric-sql/client'
 import type { StandardSchemaV1 } from '@standard-schema/spec'
+import type { LoadSubsetFullFlowEvent } from '../../db/tests/load-subset-full-flow-model'
 
 // Sample user type for tests
 type User = {
@@ -1315,5 +1320,99 @@ describe(`Electric Collection - loadSubset deduplication`, () => {
 
     // Still 2 calls - third was covered by the union of first two
     expect(mockRequestSnapshot).toHaveBeenCalledTimes(2)
+  })
+
+  it(`matches the shared remount history after final-owner release`, async () => {
+    const electricCollection = createElectricCollectionWithSyncMode(`on-demand`)
+    const row = sampleUsers[0]!
+    const history: Array<LoadSubsetFullFlowEvent> = [
+      {
+        type: `requestDemand`,
+        ownerId: `owner-1`,
+        sessionId: `session-1`,
+        demandId: `active-users`,
+        alreadyAborted: false,
+      },
+    ]
+    const createLive = (id: string) =>
+      createLiveQueryCollection({
+        id,
+        startSync: true,
+        query: (q) =>
+          q
+            .from({ user: electricCollection })
+            .where(({ user }) => eq(user.active, true)),
+      })
+    simulateInitialSync([])
+    mockRequestSnapshot.mockResolvedValue({
+      data: [
+        {
+          headers: { operation: `insert` },
+          key: row.id,
+          value: row,
+        },
+      ],
+    })
+    const first = createLive(`electric-conformance-first`)
+    let second: ReturnType<typeof createLive> | undefined
+
+    try {
+      await first.preload()
+      history.push({
+        type: `applyAuthoritativeRows`,
+        ownerId: `owner-1`,
+        demandId: `active-users`,
+        rowKeys: [String(row.id)],
+      })
+      expect(first.toArray.map(({ id }) => String(id))).toEqual([
+        String(row.id),
+      ])
+
+      await first.cleanup()
+      history.push(
+        {
+          type: `releaseDemand`,
+          ownerId: `owner-1`,
+          demandId: `active-users`,
+          rowKeys: [String(row.id)],
+          finalRowOwner: true,
+          invalidatesAdapterEvidence: true,
+        },
+        {
+          type: `restartSession`,
+          previousSessionId: `session-1`,
+          nextSessionId: `session-2`,
+        },
+        {
+          type: `requestDemand`,
+          ownerId: `owner-2`,
+          sessionId: `session-2`,
+          demandId: `active-users`,
+          alreadyAborted: false,
+        },
+      )
+
+      second = createLive(`electric-conformance-second`)
+      await second.preload()
+      history.push({
+        type: `applyAuthoritativeRows`,
+        ownerId: `owner-2`,
+        demandId: `active-users`,
+        rowKeys: [String(row.id)],
+      })
+
+      expect(mockRequestSnapshot).toHaveBeenCalledTimes(
+        projectTransportLoads(history),
+      )
+      expect(second.toArray.map(({ id }) => String(id))).toEqual(
+        projectRetainedRowKeys(history),
+      )
+    } finally {
+      await Promise.all([
+        first.cleanup(),
+        second?.cleanup() ?? Promise.resolve(),
+        electricCollection.cleanup(),
+      ])
+    }
   })
 })

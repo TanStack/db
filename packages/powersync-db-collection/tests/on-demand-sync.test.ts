@@ -14,6 +14,11 @@ import {
 } from '@tanstack/db'
 import { describe, expect, it, onTestFinished, vi } from 'vitest'
 import { powerSyncCollectionOptions } from '../src'
+import {
+  projectRetainedRowKeys,
+  projectTransportLoads,
+} from '../../db/tests/load-subset-full-flow-model'
+import type { LoadSubsetFullFlowEvent } from '../../db/tests/load-subset-full-flow-model'
 
 const APP_SCHEMA = new Schema({
   products: new Table({
@@ -1791,6 +1796,96 @@ describe(`On-Demand Sync Mode`, () => {
         },
         { timeout: 2000 },
       )
+    })
+
+    it(`matches the shared remount history after final-owner release`, async () => {
+      const db = await createDatabase()
+      await createTestProducts(db)
+      let transportLoads = 0
+      const collection = createCollection(
+        powerSyncCollectionOptions({
+          database: db,
+          table: APP_SCHEMA.props.products,
+          syncMode: `on-demand`,
+          onLoadSubset: () => {
+            transportLoads++
+          },
+        }),
+      )
+      await collection.stateWhenReady()
+      const createLive = () =>
+        createLiveQueryCollection({
+          query: (q) =>
+            q
+              .from({ product: collection })
+              .where(({ product }) => eq(product.category, `electronics`)),
+        })
+      const first = createLive()
+      let second: ReturnType<typeof createLive> | undefined
+      const history: Array<LoadSubsetFullFlowEvent> = [
+        {
+          type: `requestDemand`,
+          ownerId: `owner-1`,
+          sessionId: `session-1`,
+          demandId: `electronics`,
+          alreadyAborted: false,
+        },
+      ]
+
+      try {
+        await first.preload()
+        const rowKeys = first.toArray.map(({ id }) => String(id)).sort()
+        history.push({
+          type: `applyAuthoritativeRows`,
+          ownerId: `owner-1`,
+          demandId: `electronics`,
+          rowKeys,
+        })
+
+        await first.cleanup()
+        history.push(
+          {
+            type: `releaseDemand`,
+            ownerId: `owner-1`,
+            demandId: `electronics`,
+            rowKeys,
+            finalRowOwner: true,
+            invalidatesAdapterEvidence: true,
+          },
+          {
+            type: `restartSession`,
+            previousSessionId: `session-1`,
+            nextSessionId: `session-2`,
+          },
+          {
+            type: `requestDemand`,
+            ownerId: `owner-2`,
+            sessionId: `session-2`,
+            demandId: `electronics`,
+            alreadyAborted: false,
+          },
+        )
+        await vi.waitFor(() => expect(collection.size).toBe(0))
+
+        second = createLive()
+        await second.preload()
+        const reloadedKeys = second.toArray.map(({ id }) => String(id)).sort()
+        history.push({
+          type: `applyAuthoritativeRows`,
+          ownerId: `owner-2`,
+          demandId: `electronics`,
+          rowKeys: reloadedKeys,
+        })
+
+        expect(transportLoads).toBe(projectTransportLoads(history))
+        expect(reloadedKeys).toEqual(projectRetainedRowKeys(history))
+      } finally {
+        await Promise.all([
+          first.cleanup(),
+          second?.cleanup() ?? Promise.resolve(),
+          collection.cleanup(),
+        ])
+      }
     })
   })
 
