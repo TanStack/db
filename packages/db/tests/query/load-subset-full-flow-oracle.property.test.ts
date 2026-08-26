@@ -306,3 +306,79 @@ it(`does not let an ordered continuation from a cleaned session start new work a
     ])
   }
 })
+
+it.each([`sync`, `async`] as const)(
+  `keeps a legacy %s result local to its exact ordered window`,
+  async (settlement) => {
+    type Row = { id: number; rank: number }
+    const remoteRows: ReadonlyArray<Row> = [
+      { id: 1, rank: 1 },
+      { id: 2, rank: 2 },
+      { id: 3, rank: 3 },
+    ]
+    const loadedKeys = new Set<number>()
+    const demands: Array<LoadSubsetOptions> = []
+    const source = createCollection<Row>({
+      id: `full-flow-legacy-${settlement}-source`,
+      getKey: (row) => row.id,
+      syncMode: `on-demand`,
+      startSync: true,
+      autoIndex: `eager`,
+      defaultIndexType: BTreeIndex,
+      sync: {
+        sync: ({ begin, write, commit, markReady }) => {
+          markReady()
+          const applyRequestedPrefix = (options: LoadSubsetOptions) => {
+            demands.push(options)
+            const requestedPrefix = options.limit ?? remoteRows.length
+            begin()
+            for (const row of remoteRows.slice(0, requestedPrefix)) {
+              if (loadedKeys.has(row.id)) continue
+              write({ type: `insert`, value: row })
+              loadedKeys.add(row.id)
+            }
+            commit()
+          }
+          return {
+            loadSubset: (options) => {
+              if (settlement === `sync`) {
+                applyRequestedPrefix(options)
+                return true
+              }
+              return Promise.resolve().then(() => {
+                applyRequestedPrefix(options)
+              })
+            },
+            unloadSubset: () => {},
+          }
+        },
+      },
+    })
+    const live = createLiveQueryCollection({
+      id: `full-flow-legacy-${settlement}-live`,
+      query: (q) =>
+        q
+          .from({ row: source })
+          .orderBy(({ row }) => row.rank)
+          .limit(1),
+      startSync: true,
+    })
+
+    try {
+      await live.preload()
+      expect(live.toArray.map(({ id }) => id)).toEqual([1])
+      expect(demands).toHaveLength(1)
+      expect(demands[0]?.cursor).toBeUndefined()
+
+      await live.utils.setWindow({ offset: 0, limit: 2 })
+
+      expect(live.toArray.map(({ id }) => id)).toEqual([1, 2])
+      expect(demands).toHaveLength(2)
+      expect(demands[1]).toMatchObject({ limit: 2, offset: 0 })
+      expect(demands[1]?.cursor).toBeUndefined()
+    } finally {
+      await live.cleanup()
+      await source.cleanup()
+    }
+  },
+)

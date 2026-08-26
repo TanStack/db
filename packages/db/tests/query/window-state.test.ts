@@ -109,6 +109,36 @@ describe(`WindowState`, () => {
     expect(window.requestBoundary()).toEqual({ key: 4, values: [4] })
   })
 
+  it(`does not promote continuation coverage across a window revision`, () => {
+    const rows = [
+      { id: 2, rank: 0 },
+      { id: 1, rank: 1 },
+      { id: 3, rank: 2 },
+    ]
+    const window = new WindowState<Row, number>(
+      mockCollection(rows),
+      [
+        {
+          expression: new PropRef([`rank`]),
+          compareOptions: { direction: `asc`, nulls: `first` },
+        },
+      ],
+      undefined,
+      1,
+    )
+
+    window.recordInitialCoverage([1], false)
+    window.recordContinuationCoverage([1], false, 1, window.coverageRevision)
+    const requestRevision = window.coverageRevision
+
+    window.admitChanges([{ type: `insert`, key: rows[0]!.id, value: rows[0]! }])
+    window.recordContinuationCoverage([3], false, 2, requestRevision)
+
+    expect(window.coverageRevision).toBeGreaterThan(requestRevision)
+    expect(window.coversActiveWindow).toBe(false)
+    expect(window.requiresPrefixRefresh).toBe(true)
+  })
+
   it.each([
     { extent: `continues`, rowKeys: [1, 2] },
     { extent: `unknown`, rowKeys: undefined },
