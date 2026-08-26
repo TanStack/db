@@ -756,20 +756,40 @@ describe(`loadSubset outcomes`, () => {
     })
 
     try {
-      const opaqueValue = () => `opaque`
-      const options = {
-        where: new Func(`eq`, [
-          new PropRef([`item`, `value`]),
-          new Value(opaqueValue),
-        ]),
+      const field = new PropRef<unknown>([`item`, `value`])
+      const createDemands = (value: unknown): Array<LoadSubsetOptions> => [
+        { where: new Func(`eq`, [field, new Value(value)]) },
+        { where: new Func(`in`, [field, new Value([value])]) },
+        {
+          orderBy: [
+            {
+              expression: new Func(`coalesce`, [field, new Value(value)]),
+              compareOptions: { direction: `asc`, nulls: `first` },
+            },
+          ],
+        },
+        {
+          cursor: {
+            whereFrom: new Func(`gt`, [field, new Value(value)]),
+            whereCurrent: new Func(`eq`, [field, new Value(value)]),
+          },
+        },
+      ]
+      const demands = [
+        ...createDemands(() => `opaque`),
+        ...createDemands(Symbol(`opaque`)),
+      ]
+
+      for (const options of demands) {
+        const outcome = await collection._sync.loadSubset(options)
+        expect(outcome).toMatchObject({ extent: `exhausted` })
+        collection._sync.unloadSubset(options)
       }
-      const outcome = await collection._sync.loadSubset(options)
 
-      expect(loadSubset).toHaveBeenCalledWith(options)
-      expect(outcome).toMatchObject({ extent: `exhausted` })
-
-      collection._sync.unloadSubset(options)
-      expect(unloadSubset).toHaveBeenCalledWith(options)
+      expect(loadSubset.mock.calls.map(([options]) => options)).toEqual(demands)
+      expect(unloadSubset.mock.calls.map(([options]) => options)).toEqual(
+        demands,
+      )
     } finally {
       await collection.cleanup()
     }

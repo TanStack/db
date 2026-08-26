@@ -51,6 +51,10 @@ import {
 } from '../../src/query/compiler/evaluators.js'
 import { isLoadSubsetRequestSubsumedBy } from '../../src/query/predicate-utils.js'
 import { createRuntimeReferenceIdentityFactory } from '../../src/query/runtime-reference-identity.js'
+import {
+  cloneLoadSubsetOptions,
+  snapshotLoadSubsetDemand,
+} from '../../src/query/load-subset-options.js'
 import type { BasicExpression, QueryIR } from '../../src/query/ir.js'
 import type { LoadSubsetOptions } from '../../src/types.js'
 
@@ -461,15 +465,45 @@ describe(`loadSubset demand identity`, () => {
     const secondFunction = () => `value`
     const firstSymbol = Symbol(`value`)
     const secondSymbol = Symbol(`value`)
-    const demandKey = (value: unknown) =>
-      getLoadSubsetDemandKey({
-        where: new Func(`eq`, [field, new Value(value)]),
-      })
+    const createDemands = (value: unknown): Array<LoadSubsetOptions> => [
+      { where: new Func(`eq`, [field, new Value(value)]) },
+      { where: new Func(`in`, [field, new Value([value])]) },
+      {
+        orderBy: [
+          {
+            expression: new Func(`coalesce`, [field, new Value(value)]),
+            compareOptions: { direction: `asc`, nulls: `first` },
+          },
+        ],
+      },
+      {
+        cursor: {
+          whereFrom: new Func(`gt`, [field, new Value(value)]),
+          whereCurrent: new Func(`eq`, [field, new Value(value)]),
+        },
+      },
+    ]
 
-    expect(demandKey(firstFunction)).toBe(demandKey(firstFunction))
-    expect(demandKey(firstFunction)).not.toBe(demandKey(secondFunction))
-    expect(demandKey(firstSymbol)).toBe(demandKey(firstSymbol))
-    expect(demandKey(firstSymbol)).not.toBe(demandKey(secondSymbol))
+    for (const [firstValue, secondValue] of [
+      [firstFunction, secondFunction],
+      [firstSymbol, secondSymbol],
+    ] as const) {
+      const firstDemands = createDemands(firstValue)
+      const secondDemands = createDemands(secondValue)
+
+      firstDemands.forEach((demand, index) => {
+        const demandKey = getLoadSubsetDemandKey(demand)
+        expect(getLoadSubsetDemandKey(cloneLoadSubsetOptions(demand))).toBe(
+          demandKey,
+        )
+        expect(getLoadSubsetDemandKey(snapshotLoadSubsetDemand(demand))).toBe(
+          demandKey,
+        )
+        expect(getLoadSubsetDemandKey(secondDemands[index]!)).not.toBe(
+          demandKey,
+        )
+      })
+    }
 
     expect(() =>
       getStableExpressionHash(
