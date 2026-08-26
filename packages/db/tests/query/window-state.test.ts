@@ -22,6 +22,71 @@ function mockCollection(rows: ReadonlyArray<Row>): CollectionImpl<Row, number> {
 }
 
 describe(`WindowState`, () => {
+  it(`retains live changes that arrive before initial coverage settles`, () => {
+    const rows = [
+      { id: 1, rank: 1 },
+      { id: 2, rank: 2 },
+      { id: 3, rank: 3 },
+    ]
+    const window = new WindowState<Row, number>(
+      mockCollection(rows),
+      [
+        {
+          expression: new PropRef([`rank`]),
+          compareOptions: { direction: `asc`, nulls: `first` },
+        },
+      ],
+      undefined,
+      2,
+    )
+
+    window.admitChanges(
+      rows.slice(1).map((value) => ({ type: `insert`, key: value.id, value })),
+    )
+    window.admitChanges([{ type: `insert`, key: 1, value: rows[0]! }])
+    window.recordInitialCoverage([2, 3], false)
+
+    expect(window.requestBoundary()).toEqual({ key: 2, values: [2] })
+    expect(window.requiresPrefixRefresh).toBe(true)
+  })
+
+  it(`tracks changes that enter retained coverage while the active window is narrow`, () => {
+    const rows = [
+      { id: 1, rank: 1 },
+      { id: 2, rank: 2 },
+      { id: 7, rank: 2.5 },
+      { id: 3, rank: 3 },
+    ]
+    const window = new WindowState<Row, number>(
+      mockCollection(rows),
+      [
+        {
+          expression: new PropRef([`rank`]),
+          compareOptions: { direction: `asc`, nulls: `first` },
+        },
+      ],
+      undefined,
+      3,
+    )
+
+    window.recordInitialCoverage([1, 2, 3], false)
+    window.recordContinuationCoverage(
+      [],
+      false,
+      3,
+      false,
+      window.coverageRevision,
+    )
+    window.ensureSize(1)
+    window.admitChanges([{ type: `insert`, key: 7, value: rows[2]! }])
+    window.ensureSize(3)
+
+    expect(
+      window.reconcile(new Map()).map(({ key }) => key),
+    ).toEqual([1, 2, 7])
+    expect(window.requiresPrefixRefresh).toBe(true)
+  })
+
   it(`does not reuse an ordered boundary across truncate generations`, () => {
     const window = new WindowState<Row, number>(
       mockCollection([

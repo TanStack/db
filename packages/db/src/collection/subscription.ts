@@ -9,7 +9,6 @@ import {
 } from '../utils/cursor.js'
 import { deepEquals } from '../utils.js'
 import { WindowState } from '../query/live/window-state.js'
-import { getLoadSubsetDemandKey } from '../query/ir-stable-identity.js'
 import {
   createFilterFunctionFromExpression,
   createFilteredCallback,
@@ -1119,6 +1118,7 @@ export class CollectionSubscription
           lastKey?: string | number
         }
       | undefined
+    let requiresUnboundedRefinement = false
 
     const boundary =
       this.stalePublishedRows.size > 0
@@ -1127,9 +1127,10 @@ export class CollectionSubscription
     const cursorValues = boundary?.values ?? minValues
     if (cursorValues !== undefined && cursorValues.length > 0) {
       const canPushCursor = canExpressCursorOrder(orderBy, cursorValues)
+      if (!canPushCursor) requiresUnboundedRefinement = true
       const whereFromCursor = canPushCursor
         ? buildCursor(orderBy, [...cursorValues])
-        : new Value(false)
+        : undefined
 
       if (whereFromCursor) {
         const { expression } = orderBy[0]!
@@ -1139,12 +1140,7 @@ export class CollectionSubscription
         // For Date values, we need to handle precision differences between JS (ms) and backends (μs)
         // A JS Date represents a 1ms range, so we query for all values within that range
         let whereCurrentCursor: BasicExpression<boolean>
-        if (!canPushCursor) {
-          // Locale strings and reference-ordered values have no equivalent in
-          // the predicate IR. Fetch the full filtered region and let the local
-          // TotalOrder refine it instead of applying a lossy cursor remotely.
-          whereCurrentCursor = new Value(true)
-        } else if (cursorMinValue instanceof Date) {
+        if (cursorMinValue instanceof Date) {
           const cursorMinValuePlus1ms = new Date(cursorMinValue.getTime() + 1)
           whereCurrentCursor = and(
             gte(expression, new Value(cursorMinValue)),
@@ -1166,7 +1162,8 @@ export class CollectionSubscription
     // don't await it, we will load the data into the collection when it comes in
     // Note: `where` does NOT include cursor expressions - they are passed separately
     // The sync layer can choose to use cursor-based or offset-based pagination
-    const loadOptions: LoadSubsetOptions = fullRegion
+    const effectiveFullRegion = fullRegion || requiresUnboundedRefinement
+    const loadOptions: LoadSubsetOptions = effectiveFullRegion
       ? {
           where,
           orderBy,
@@ -1192,7 +1189,7 @@ export class CollectionSubscription
     const { demand, result: syncResult } = this.startSubsetDemand(loadOptions, {
       requestedPrefix,
       hadBoundary: boundary !== undefined || refreshPrefix,
-      fullRegion,
+      fullRegion: effectiveFullRegion,
       revision: this.orderedWindow.coverageRevision,
     })
 
@@ -1224,21 +1221,12 @@ export class CollectionSubscription
         return
       }
 
-      const demandKey = outcome
-        ? getLoadSubsetDemandKey(outcome.demand)
-        : undefined
-      const coverage = outcome
-        ? this.collection._sync
-            .getLoadSubsetCoverage()
-            .find(
-              (candidate) =>
-                candidate.collectionId === outcome.collectionId &&
-                getLoadSubsetDemandKey(candidate.demand) === demandKey,
-            )
-        : undefined
-      const rowKeys = coverage?.rowKeys as
-        | ReadonlyArray<string | number>
-        | undefined
+      // The settled outcome is the caller-relative acquisition evidence. Its
+      // applied keys remain useful even when the source cannot prove an extent,
+      // while such unknown evidence is intentionally absent from the reusable
+      // coverage antichain. WindowState filters a shared covering acquisition's
+      // physical keys through this subscription's predicate and total order.
+      const rowKeys = outcome?.appliedRowKeys
       const exhausted = outcome?.extent === `exhausted`
 
       if (outcome !== undefined && rowKeys === undefined && !exhausted) {
@@ -1277,6 +1265,13 @@ export class CollectionSubscription
           ordered.revision,
         )
       } else {
+        const retainedOutcome = this.collection._sync.getLoadSubsetOutcome(
+          demand.options,
+        )
+        if (retainedOutcome) {
+          apply(retainedOutcome)
+          return
+        }
         window.recordLocalRequestSatisfaction(ordered.requestedPrefix)
       }
       if (!this.isBufferingForTruncate && this.stalePublishedRows.size === 0) {

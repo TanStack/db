@@ -171,6 +171,9 @@ const UINT8ARRAY_NORMALIZE_THRESHOLD = 128
  * and "start from the key undefined" (actual undefined value in the tree).
  */
 export const UNDEFINED_SENTINEL = `__TS_DB_BTREE_UNDEFINED_VALUE__`
+const UNORDERABLE_BTREE_SENTINEL = Object.freeze({
+  kind: `tanstack-db-unorderable`,
+})
 
 /**
  * Normalize a value for comparison and Map key usage
@@ -223,7 +226,8 @@ export function normalizeForBTree(value: any): any {
   if (value === undefined) {
     return UNDEFINED_SENTINEL
   }
-  return normalizeValue(value)
+  const normalized = normalizeValue(value)
+  return Number.isNaN(normalized) ? UNORDERABLE_BTREE_SENTINEL : normalized
 }
 
 /**
@@ -233,11 +237,11 @@ export function areSameValueZeroEqual(a: unknown, b: unknown): boolean {
   return a === b || (Number.isNaN(a) && Number.isNaN(b))
 }
 
-/**
- * Converts the `UNDEFINED_SENTINEL` back to `undefined`.
- * Needed such that the sentinel is converted back to `undefined` before comparison.
- */
+/** Converts BTree sentinels back to values understood by the comparator. */
 export function denormalizeUndefined(value: any): any {
+  if (value === UNORDERABLE_BTREE_SENTINEL) {
+    return Number.NaN
+  }
   if (value === UNDEFINED_SENTINEL) {
     return undefined
   }

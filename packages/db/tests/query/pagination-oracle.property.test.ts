@@ -5,6 +5,7 @@ import { createDeferred } from '../../src/deferred.js'
 import { BTreeIndex } from '../../src/index.js'
 import { createLiveQueryCollection } from '../../src/query/live-query-collection.js'
 import { PropRef } from '../../src/query/ir.js'
+import { DeduplicatedLoadSubset } from '../../src/query/subset-dedupe.js'
 import { makeComparator } from '../../src/utils/comparison.js'
 import {
   oracleRandomParameters,
@@ -13,7 +14,10 @@ import {
 import { evaluateReferenceExpression } from '../reference-expression.js'
 import { TraceAssertionError } from '../trace-runner.js'
 import { flushPromises, mockSyncCollectionOptions } from '../utils.js'
-import type { LoadSubsetOptions } from '../../src/types.js'
+import type {
+  LoadSubsetOptions,
+  LoadSubsetResult,
+} from '../../src/types.js'
 
 type PageRow = {
   id: number
@@ -898,10 +902,15 @@ async function runAdversarialOrderedProviderScenario(options: {
   initialRows?: ReadonlyArray<AdversarialOrderedRow>
   order:
     | { kind: `rank`; direction: `asc` | `desc`; nulls: `first` | `last` }
-    | { kind: `reference` }
+    | {
+        kind: `reference`
+        direction?: `asc` | `desc`
+        nulls?: `first` | `last`
+      }
     | { kind: `locale` }
   limit: number
   expectedIds: ReadonlyArray<number>
+  useOffsetWhenAvailable?: boolean
 }): Promise<Array<LoadSubsetOptions>> {
   const loads: Array<LoadSubsetOptions> = []
   const delivered = new Set(options.initialRows?.map(({ id }) => id) ?? [])
@@ -925,10 +934,14 @@ async function runAdversarialOrderedProviderScenario(options: {
         return {
           loadSubset: (loadOptions: LoadSubsetOptions) => {
             loads.push(loadOptions)
-            const requested = rowsForLoadSubset(
-              options.providerRows,
-              loadOptions,
-            )
+            const requested = options.useOffsetWhenAvailable
+              ? options.providerRows.slice(
+                  loadOptions.offset ?? 0,
+                  loadOptions.limit === undefined
+                    ? undefined
+                    : (loadOptions.offset ?? 0) + loadOptions.limit,
+                )
+              : rowsForLoadSubset(options.providerRows, loadOptions)
             begin()
             for (const row of requested) {
               if (delivered.has(row.id)) continue
@@ -961,7 +974,10 @@ async function runAdversarialOrderedProviderScenario(options: {
         : from.orderBy(
             ({ row }) => row.rank,
             options.order.kind === `reference`
-              ? { direction: `asc`, nulls: `first` }
+              ? {
+                  direction: options.order.direction ?? `asc`,
+                  nulls: options.order.nulls ?? `first`,
+                }
               : {
                   direction: options.order.direction,
                   nulls: options.order.nulls,
@@ -1667,6 +1683,195 @@ describe(`pagination recomputation oracle`, () => {
     }
   })
 
+  it(`admits only applied rows when the source extent is unknown`, async () => {
+    const providerRows: Array<PageRow> = [
+      { id: 1, rank: 1 },
+      { id: 2, rank: 2 },
+      { id: 3, rank: 3 },
+    ]
+    const delivered = new Set<number>()
+    const source = createCollection<PageRow>({
+      id: `pagination-unknown-extent-source-${collectionSequence++}`,
+      getKey: (row) => row.id,
+      syncMode: `on-demand`,
+      startSync: true,
+      autoIndex: `eager`,
+      defaultIndexType: BTreeIndex,
+      sync: {
+        sync: ({ begin, write, commit, markReady }) => {
+          begin()
+          write({ type: `insert`, value: { id: 99, rank: -1 } })
+          commit()
+          markReady()
+          return {
+            loadSubset: (options: LoadSubsetOptions) => {
+              const requested = rowsForLoadSubset(providerRows, options)
+              begin()
+              for (const row of requested) {
+                if (delivered.has(row.id)) continue
+                delivered.add(row.id)
+                write({ type: `insert`, value: { ...row } })
+              }
+              const receipt = commit()
+              return Promise.resolve(receipt).then(() => ({
+                hasMore: undefined,
+                appliedRowKeys: requested.map(({ id }) => id),
+              }))
+            },
+          }
+        },
+      },
+    })
+    const live = createLiveQueryCollection((query) =>
+      query
+        .from({ row: source })
+        .orderBy(({ row }) => row.rank, `asc`)
+        .orderBy(({ row }) => row.id, `asc`)
+        .limit(2),
+    )
+
+    try {
+      await live.preload()
+      expect(Array.from(live.values(), ({ id }) => id)).toEqual([1, 2])
+    } finally {
+      live.cleanup()
+      source.cleanup()
+    }
+  })
+
+  it.each([
+    [`unknown`, undefined, [1, 2, 3], `covering`],
+    [`unknown`, undefined, [1, 2, 3], `narrower`],
+    [`continues`, true, [1, 2, 3], `covering`],
+    [`continues`, true, [1, 2, 3], `narrower`],
+    [`exhausted`, false, [99, 1, 2], `covering`],
+    [`exhausted`, false, [99, 1, 2], `narrower`],
+  ] satisfies ReadonlyArray<
+    readonly [
+      string,
+      boolean | undefined,
+      ReadonlyArray<number>,
+      `covering` | `narrower`,
+    ]
+  >)(
+    `projects a shared covering acquisition into exact and narrower windows (%s, release %s first)`,
+    async (_extent, hasMore, expectedCovering, releaseFirst) => {
+      const providerRows: Array<PageRow> = [
+        { id: 1, rank: 1 },
+        { id: 2, rank: 2 },
+        { id: 3, rank: 3 },
+        { id: 4, rank: 4 },
+      ]
+      const settlement = createDeferred<void>()
+      const physicalLoads: Array<LoadSubsetOptions> = []
+      let begin!: () => void
+      let write!: (change: { type: `insert`; value: PageRow }) => void
+      let commit!: () => void
+      let deduplicated!: DeduplicatedLoadSubset
+      const source = createCollection<PageRow>({
+        id: `pagination-shared-provenance-source-${collectionSequence++}`,
+        getKey: (row) => row.id,
+        syncMode: `on-demand`,
+        startSync: true,
+        autoIndex: `eager`,
+        defaultIndexType: BTreeIndex,
+        sync: {
+          sync: (params) => {
+            begin = params.begin
+            write = params.write
+            commit = params.commit
+            begin()
+            write({ type: `insert`, value: { id: 99, rank: -1 } })
+            commit()
+            params.markReady()
+            deduplicated = new DeduplicatedLoadSubset({
+              loadSubset: (options) => {
+                physicalLoads.push(options)
+                const requested = rowsForLoadSubset(providerRows, options)
+                begin()
+                for (const row of requested) {
+                  write({ type: `insert`, value: { ...row } })
+                }
+                const receipt = commit()
+                return Promise.all([receipt, settlement.promise]).then(
+                  () =>
+                    ({
+                      hasMore,
+                      appliedRowKeys: requested.map(({ id }) => id),
+                    }) satisfies LoadSubsetResult,
+                )
+              },
+            })
+            return {
+              loadSubset: (options) => deduplicated.loadSubset(options),
+            }
+          },
+        },
+      })
+      const covering = createLiveQueryCollection((query) =>
+        query
+          .from({ row: source })
+          .orderBy(({ row }) => row.rank, `asc`)
+          .orderBy(({ row }) => row.id, `asc`)
+          .limit(3),
+      )
+      const narrower = createLiveQueryCollection((query) =>
+        query
+          .from({ row: source })
+          .orderBy(({ row }) => row.rank, `asc`)
+          .orderBy(({ row }) => row.id, `asc`)
+          .limit(2),
+      )
+
+      try {
+        const coveringReady = covering.preload()
+        const narrowerReady = narrower.preload()
+        await flushPromises()
+        expect(physicalLoads).toHaveLength(1)
+        settlement.resolve()
+        await Promise.all([coveringReady, narrowerReady])
+        expect(Array.from(covering.values(), ({ id }) => id)).toEqual(
+          expectedCovering,
+        )
+        expect(Array.from(narrower.values(), ({ id }) => id)).toEqual(
+          expectedCovering.slice(0, 2),
+        )
+
+        const covered = createLiveQueryCollection((query) =>
+          query
+            .from({ row: source })
+            .orderBy(({ row }) => row.rank, `asc`)
+            .orderBy(({ row }) => row.id, `asc`)
+            .limit(1),
+        )
+        try {
+          await covered.preload()
+          expect(Array.from(covered.values(), ({ id }) => id)).toEqual(
+            expectedCovering.slice(0, 1),
+          )
+        } finally {
+          covered.cleanup()
+        }
+
+        if (releaseFirst === `covering`) {
+          covering.cleanup()
+          expect(Array.from(narrower.values(), ({ id }) => id)).toEqual(
+            expectedCovering.slice(0, 2),
+          )
+        } else {
+          narrower.cleanup()
+          expect(Array.from(covering.values(), ({ id }) => id)).toEqual(
+            expectedCovering,
+          )
+        }
+      } finally {
+        covering.cleanup()
+        narrower.cleanup()
+        source.cleanup()
+      }
+    },
+  )
+
   it(`tracks an asynchronous prefix refresh after synchronous satisfaction`, async () => {
     const rows: Array<PageRow> = [
       { id: 1, rank: 1 },
@@ -1825,17 +2030,9 @@ describe(`pagination recomputation oracle`, () => {
 
       expect(pending).toHaveLength(2)
       const refinement = pending[1]!
-      expect(refinement.options.cursor).toBeDefined()
-      expect(
-        rows.every((row) =>
-          Boolean(
-            evaluateReferenceExpression(
-              refinement.options.cursor!.whereCurrent,
-              row,
-            ),
-          ),
-        ),
-      ).toBe(true)
+      expect(refinement.options.cursor).toBeUndefined()
+      expect(refinement.options.limit).toBeUndefined()
+      expect(refinement.options.offset).toBeUndefined()
 
       const widened = live.utils.setWindow({ offset: 0, limit: 2 })
       expect(widened).toBe(true)
@@ -2632,10 +2829,12 @@ describe(`pagination recomputation oracle`, () => {
       order: { kind: `locale` },
       limit: 1,
       expectedIds: [1],
+      useOffsetWhenAvailable: true,
     })
 
     expect(loads).toHaveLength(2)
-    expect(loads[1]?.cursor).toBeDefined()
+    expect(loads[1]?.limit).toBeUndefined()
+    expect(loads[1]?.offset).toBeUndefined()
   })
 
   it(`refines an initial reference-ordered window locally`, async () => {
@@ -2653,10 +2852,104 @@ describe(`pagination recomputation oracle`, () => {
       order: { kind: `reference` },
       limit: 1,
       expectedIds: [1],
+      useOffsetWhenAvailable: true,
     })
 
     expect(loads).toHaveLength(2)
-    expect(loads[1]?.cursor).toBeDefined()
+    expect(loads[1]?.limit).toBeUndefined()
+    expect(loads[1]?.offset).toBeUndefined()
+  })
+
+  it.each(
+    ([`asc`, `desc`] as const).flatMap((direction) =>
+      ([`first`, `last`] as const).map((nulls) => ({ direction, nulls })),
+    ),
+  )(
+    `refines invalid Date ties with an unbounded local-order request ($direction, nulls $nulls)`,
+    async ({ direction, nulls }) => {
+      const invalid = new Date(Number.NaN)
+      const loads = await runAdversarialOrderedProviderScenario({
+        providerRows: [
+          { id: 2, rank: invalid, label: `second` },
+          { id: 1, rank: invalid, label: `first` },
+        ],
+        order: { kind: `reference`, direction, nulls },
+        limit: 1,
+        expectedIds: [1],
+        useOffsetWhenAvailable: true,
+      })
+
+      expect(loads).toHaveLength(2)
+      expect(loads[1]?.limit).toBeUndefined()
+      expect(loads[1]?.offset).toBeUndefined()
+    },
+  )
+
+  it(`keeps ascending public-key ties when reusing a descending index`, async () => {
+    const rows: Array<PageRow> = [
+      { id: 3, rank: 1 },
+      { id: 1, rank: 0 },
+      { id: 2, rank: 0 },
+    ]
+    const source = createCollection(
+      mockSyncCollectionOptions({
+        id: `pagination-reversed-index-ties-${collectionSequence++}`,
+        initialData: rows,
+        getKey: (row: PageRow) => row.id,
+      }),
+    )
+    source.createIndex((row) => row.rank, {
+      indexType: BTreeIndex,
+      options: {
+        compareOptions: {
+          direction: `asc`,
+          nulls: `first`,
+          stringSort: `locale`,
+        },
+      },
+    })
+    const live = createLiveQueryCollection((query) =>
+      query
+        .from({ row: source })
+        .orderBy(({ row }) => row.rank, `desc`)
+        .limit(2),
+    )
+
+    try {
+      await live.preload()
+      expect(Array.from(live.values(), ({ id }) => id)).toEqual([3, 1])
+    } finally {
+      live.cleanup()
+      source.cleanup()
+    }
+  })
+
+  it.each([
+    { ids: [1, Number.NaN] },
+    { ids: [Number.NaN, 1] },
+  ])(`keeps finite public keys before NaN across insertion order`, async ({ ids }) => {
+    const source = createCollection(
+      mockSyncCollectionOptions({
+        id: `pagination-nan-key-order-${collectionSequence++}`,
+        initialData: ids.map((id) => ({ id, rank: 0 })),
+        getKey: (row: PageRow) => row.id,
+        autoIndex: `eager`,
+      }),
+    )
+    const live = createLiveQueryCollection((query) =>
+      query
+        .from({ row: source })
+        .orderBy(({ row }) => row.rank, `asc`)
+        .limit(1),
+    )
+
+    try {
+      await live.preload()
+      expect(Array.from(live.values(), ({ id }) => id)).toEqual([1])
+    } finally {
+      live.cleanup()
+      source.cleanup()
+    }
   })
 
   it.each([

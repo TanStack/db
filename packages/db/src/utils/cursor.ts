@@ -89,7 +89,8 @@ export function canExpressCursorOrder(
 ): boolean {
   return orderBy.every((clause, index) => {
     const value = values[index]
-    if (value == null || value instanceof Date) return true
+    if (value == null) return true
+    if (value instanceof Date) return Number.isFinite(value.getTime())
     if (typeof value === `string`) {
       return clause.compareOptions.stringSort === `lexical`
     }

@@ -21,6 +21,8 @@ export class WindowState<
   private hasFullCoverage = false
   private needsFullRefinement = false
   private needsPrefixRefresh = false
+  private hasInitialCoverage = false
+  private hasUnsettledInitialMutation = false
   private revision = 0
   private readonly candidateKeys = new Set<TKey>()
   private readonly provenanceKeys = new Set<TKey>()
@@ -77,6 +79,8 @@ export class WindowState<
     this.hasFullCoverage = false
     this.needsFullRefinement = false
     this.needsPrefixRefresh = false
+    this.hasInitialCoverage = false
+    this.hasUnsettledInitialMutation = false
     this.candidateKeys.clear()
     this.provenanceKeys.clear()
     this.admittedKeys.clear()
@@ -86,18 +90,29 @@ export class WindowState<
     rowKeys: ReadonlyArray<TKey> | undefined,
     exhausted: boolean,
   ): void {
-    this.needsPrefixRefresh = false
+    this.hasInitialCoverage = true
     if (exhausted) {
+      this.hasUnsettledInitialMutation = false
       this.establishFullCoverage()
       return
     }
     if (rowKeys === undefined) {
+      this.hasUnsettledInitialMutation = false
       this.candidateKeys.clear()
       this.provenanceKeys.clear()
       this.needsFullRefinement = true
       return
     }
-    this.candidateKeys.clear()
+    const appliedKeys = new Set(rowKeys)
+    if (
+      this.hasUnsettledInitialMutation ||
+      [...this.candidateKeys].some((key) => !appliedKeys.has(key))
+    ) {
+      this.needsPrefixRefresh = true
+    }
+    this.hasUnsettledInitialMutation = false
+    // Changes may arrive after the establishing writes commit but before the
+    // adapter promise settles. Keep those staged keys alongside the receipt.
     for (const key of rowKeys) this.candidateKeys.add(key)
   }
 
@@ -108,6 +123,7 @@ export class WindowState<
     fullRegion: boolean,
     requestRevision: number,
   ): void {
+    this.hasInitialCoverage = true
     if (fullRegion || exhausted) {
       this.establishFullCoverage()
       return
@@ -168,15 +184,25 @@ export class WindowState<
     // class is refined. Live source changes during that request still belong
     // to the same ordered prefix and must survive its later settlement.
     if (this.admittedKeys.size === 0) {
-      if (
-        this.candidateKeys.size > 0 &&
-        this.updateKnownPrefix(this.candidateKeys, changes)
-      ) {
-        this.revision++
-        this.coveredSize = 0
-        this.provenanceKeys.clear()
-        this.needsFullRefinement = false
-        this.needsPrefixRefresh = true
+      if (this.hasInitialCoverage) {
+        if (this.updateKnownPrefix(this.candidateKeys, changes)) {
+          this.revision++
+          this.coveredSize = 0
+          this.provenanceKeys.clear()
+          this.needsFullRefinement = false
+          this.needsPrefixRefresh = true
+        }
+        return
+      }
+      for (const change of changes) {
+        if (
+          change.type !== `insert` ||
+          this.candidateKeys.has(change.key)
+        ) {
+          this.hasUnsettledInitialMutation = true
+        }
+        if (change.type === `delete`) this.candidateKeys.delete(change.key)
+        else this.candidateKeys.add(change.key)
       }
       return
     }
@@ -199,9 +225,11 @@ export class WindowState<
     changes: ReadonlyArray<ChangeMessage<TRow, TKey>>,
   ): boolean {
     let invalidated = false
+    const possiblePrefix = new Set(knownKeys)
     for (const change of changes) {
       if (change.type === `delete`) {
-        if (knownKeys.delete(change.key)) invalidated = true
+        possiblePrefix.delete(change.key)
+        if (knownKeys.has(change.key)) invalidated = true
         continue
       }
 
@@ -209,18 +237,22 @@ export class WindowState<
         invalidated = true
         continue
       }
-
-      const possiblePrefix = new Set(knownKeys)
       possiblePrefix.add(change.key)
-      if (
-        this.readRows(possiblePrefix, this.activeSize).some(
-          (row) => row.key === change.key,
-        )
-      ) {
-        knownKeys.add(change.key)
-        invalidated = true
-      }
     }
+
+    // Evaluate the final batch once. The retained prefix, not only the active
+    // window, must survive a temporary shrink so a later expansion is exact.
+    const retainedPrefix = new Set(
+      this.readRows(possiblePrefix, this.retainedSize).map(({ key }) => key),
+    )
+    if (
+      retainedPrefix.size !== knownKeys.size ||
+      [...retainedPrefix].some((key) => !knownKeys.has(key))
+    ) {
+      invalidated = true
+    }
+    knownKeys.clear()
+    for (const key of retainedPrefix) knownKeys.add(key)
     return invalidated
   }
 

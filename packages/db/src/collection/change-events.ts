@@ -11,6 +11,7 @@ import {
   optimizeExpressionWithIndexes,
 } from '../utils/index-optimization.js'
 import { ensureIndexForField } from '../indexes/auto-index.js'
+import { ReverseIndex } from '../indexes/reverse-index.js'
 import { buildCompareOptions } from '../query/compiler/order-by'
 import { TotalOrder } from '../query/total-order.js'
 import type {
@@ -345,7 +346,13 @@ function getOrderedKeys<T extends object, TKey extends string | number>(
       // Find the index
       const index = findIndexForField(collection, fieldPath, compareOpts)
 
-      if (index && index.supports(`gt`)) {
+      if (
+        index &&
+        index.supports(`gt`) &&
+        // Reversing a value index also reverses keys inside an equal-value
+        // bucket, but query TotalOrder keeps its public-key tie-break ascending.
+        !(index instanceof ReverseIndex)
+      ) {
         // Use index optimization
         const filterFn = (key: TKey): boolean => {
           const value = collection.get(key)
