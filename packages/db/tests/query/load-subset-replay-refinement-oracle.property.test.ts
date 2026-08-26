@@ -1,9 +1,13 @@
 import { describe, expect, it } from 'vitest'
 import { createCollection } from '../../src/collection/index.js'
 import { createDeferred } from '../../src/deferred.js'
+import { createLiveQueryCollection } from '../../src/query/index.js'
 import { projectReplayPublication } from '../load-subset-full-flow-model.js'
 import { flushPromises } from '../utils.js'
-import type { LoadSubsetFullFlowEvent } from '../load-subset-full-flow-model.js'
+import type {
+  FullFlowVersionedRow,
+  LoadSubsetFullFlowEvent,
+} from '../load-subset-full-flow-model.js'
 import type {
   ChangeMessage,
   ChangeMessageOrDeleteKeyMessage,
@@ -30,7 +34,6 @@ describe(`loadSubset replay refinement`, () => {
         previousVersion?: number
       }>
     > = []
-    const visible = new Map<string, Row>()
     const source = createCollection<Row>({
       id: sourceId,
       getKey: (row) => row.id,
@@ -60,11 +63,19 @@ describe(`loadSubset replay refinement`, () => {
         },
       },
     })
-    const subscription = source.subscribeChanges(
+    const downstream = createLiveQueryCollection({
+      id: `${sourceId}-downstream`,
+      query: (q) =>
+        q.from({ row: source }).select(({ row }) => ({
+          id: row.id,
+          version: row.version,
+        })),
+      startSync: true,
+    })
+    const callbackReads: Array<Array<FullFlowVersionedRow>> = []
+    const subscription = downstream.subscribeChanges(
       (changes: Array<ChangeMessage<Row, string>>) => {
         const batch = changes.map((change) => {
-          if (change.type === `delete`) visible.delete(String(change.key))
-          else visible.set(String(change.key), { ...change.value })
           return {
             type: change.type,
             row: {
@@ -77,8 +88,18 @@ describe(`loadSubset replay refinement`, () => {
               : { previousVersion: change.previousValue.version }),
           }
         })
-        if (batch.length > 0) batches.push(batch)
+        if (batch.length > 0) {
+          batches.push(batch)
+          callbackReads.push(
+            downstream.toArray.map(({ id, version }) => ({
+              sourceId,
+              rowKey: id,
+              version,
+            })),
+          )
+        }
       },
+      { includeInitialState: true },
     )
 
     const replaceCore = (version: number) => {
@@ -99,7 +120,7 @@ describe(`loadSubset replay refinement`, () => {
         version,
       }))
     const visibleRows = () =>
-      [...visible.values()].map(({ id, version }) => ({
+      downstream.toArray.map(({ id, version }) => ({
         sourceId,
         rowKey: id,
         version,
@@ -107,9 +128,11 @@ describe(`loadSubset replay refinement`, () => {
 
     return {
       source,
+      downstream,
       subscription,
       pending,
       batches,
+      callbackReads,
       replaceCore,
       startReplay,
       coreRows,
@@ -130,7 +153,7 @@ describe(`loadSubset replay refinement`, () => {
     const harness = createHarness(sourceId)
 
     try {
-      harness.subscription.requestSnapshot({ optimizedOnly: false })
+      await harness.downstream.preload()
       await harness.startReplay()
       history.push({ type: `startReplay`, attemptId: `replay-1`, sourceId })
 
@@ -153,9 +176,13 @@ describe(`loadSubset replay refinement`, () => {
       expect(harness.coreRows()).toEqual(expected.coreRows)
       expect(harness.visibleRows()).toEqual(expected.visibleRows)
       expect(harness.batches).toEqual(expected.publishedBatches)
+      expect(harness.callbackReads).toEqual(expected.callbackReads)
     } finally {
       harness.subscription.unsubscribe()
-      await harness.source.cleanup()
+      await Promise.all([
+        harness.downstream.cleanup(),
+        harness.source.cleanup(),
+      ])
     }
   })
 
@@ -172,7 +199,7 @@ describe(`loadSubset replay refinement`, () => {
     const harness = createHarness(sourceId)
 
     try {
-      harness.subscription.requestSnapshot({ optimizedOnly: false })
+      await harness.downstream.preload()
       await harness.startReplay()
       history.push({ type: `startReplay`, attemptId: `replay-1`, sourceId })
       await harness.startReplay()
@@ -199,6 +226,9 @@ describe(`loadSubset replay refinement`, () => {
         beforeObsoleteSettlement.visibleRows,
       )
       expect(harness.batches).toEqual(beforeObsoleteSettlement.publishedBatches)
+      expect(harness.callbackReads).toEqual(
+        beforeObsoleteSettlement.callbackReads,
+      )
 
       harness.pending[0]?.deferred.reject(
         new DOMException(`obsolete`, `AbortError`),
@@ -214,10 +244,14 @@ describe(`loadSubset replay refinement`, () => {
       expect(harness.coreRows()).toEqual(expected.coreRows)
       expect(harness.visibleRows()).toEqual(expected.visibleRows)
       expect(harness.batches).toEqual(expected.publishedBatches)
+      expect(harness.callbackReads).toEqual(expected.callbackReads)
     } finally {
       for (const replay of harness.pending) replay.deferred.resolve()
       harness.subscription.unsubscribe()
-      await harness.source.cleanup()
+      await Promise.all([
+        harness.downstream.cleanup(),
+        harness.source.cleanup(),
+      ])
     }
   })
 })
