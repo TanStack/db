@@ -2,7 +2,7 @@ import { expect, it } from 'vitest'
 import { createCollection } from '../../src/collection/index.js'
 import { createDeferred } from '../../src/deferred.js'
 import { BTreeIndex } from '../../src/index.js'
-import { createLiveQueryCollection } from '../../src/query/index.js'
+import { createLiveQueryCollection, eq, gte } from '../../src/query/index.js'
 import { DeduplicatedLoadSubset } from '../../src/query/subset-dedupe.js'
 import {
   projectAdapterLifecycle,
@@ -29,6 +29,100 @@ function visibleRows<Row extends { id: string; value: number }>(
 ): Array<{ id: string; value: number }> {
   return Array.from(values, ({ id, value }) => ({ id, value }))
 }
+
+it(`loads each side of a filtered inner join once`, async () => {
+  type Order = {
+    id: number
+    scheduledAt: string
+    status: string
+    addressId: number
+  }
+  type Charge = { id: number; addressId: number }
+
+  const orderLoads: Array<LoadSubsetOptions> = []
+  const chargeLoads: Array<LoadSubsetOptions> = []
+  const orders = createCollection<Order>({
+    id: `full-flow-filtered-join-orders`,
+    getKey: (order) => order.id,
+    syncMode: `on-demand`,
+    autoIndex: `eager`,
+    defaultIndexType: BTreeIndex,
+    sync: {
+      sync: ({ begin, write, commit, markReady }) => {
+        begin()
+        write({
+          type: `insert`,
+          value: {
+            id: 1,
+            scheduledAt: `2024-01-15`,
+            status: `queued`,
+            addressId: 1,
+          },
+        })
+        write({
+          type: `insert`,
+          value: {
+            id: 2,
+            scheduledAt: `2024-01-10`,
+            status: `queued`,
+            addressId: 2,
+          },
+        })
+        commit()
+        markReady()
+        return {
+          loadSubset: (options) => {
+            orderLoads.push(options)
+            return true
+          },
+        }
+      },
+    },
+  })
+  const charges = createCollection<Charge>({
+    id: `full-flow-filtered-join-charges`,
+    getKey: (charge) => charge.id,
+    syncMode: `on-demand`,
+    autoIndex: `eager`,
+    defaultIndexType: BTreeIndex,
+    sync: {
+      sync: ({ begin, write, commit, markReady }) => {
+        begin()
+        write({ type: `insert`, value: { id: 10, addressId: 1 } })
+        write({ type: `insert`, value: { id: 20, addressId: 2 } })
+        commit()
+        markReady()
+        return {
+          loadSubset: (options) => {
+            chargeLoads.push(options)
+            return true
+          },
+        }
+      },
+    },
+  })
+  const query = createLiveQueryCollection((q) =>
+    q
+      .from({ order: orders })
+      .where(({ order }) => gte(order.scheduledAt, `2024-01-12`))
+      .where(({ order }) => eq(order.status, `queued`))
+      .innerJoin({ charge: charges }, ({ order, charge }) =>
+        eq(order.addressId, charge.addressId),
+      ),
+  )
+
+  try {
+    await query.preload()
+
+    expect(
+      [...query.values()].map(({ order, charge }) => [order.id, charge.id]),
+    ).toEqual([[1, 10]])
+    expect(orderLoads).toHaveLength(1)
+    expect(chargeLoads).toHaveLength(1)
+  } finally {
+    await Promise.all([query.cleanup(), orders.cleanup(), charges.cleanup()])
+  }
+})
 
 it(`does not release physical work when an already-aborted demand skips adapter start`, async () => {
   const ownerId = `aborted-owner`
