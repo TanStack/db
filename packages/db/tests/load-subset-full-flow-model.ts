@@ -1,6 +1,8 @@
 export type FullFlowOwnerId = string
 export type FullFlowSessionId = string
 export type FullFlowDemandId = string
+export type FullFlowSourceId = string
+export type FullFlowTransactionId = string
 
 export type LoadSubsetFullFlowEvent =
   | {
@@ -47,6 +49,34 @@ export type LoadSubsetFullFlowEvent =
   | {
       type: `runContinuation`
       taskId: string
+    }
+  | {
+      type: `stageSyncTransaction`
+      transactionId: FullFlowTransactionId
+      sourceId: FullFlowSourceId
+      rowKeys: ReadonlyArray<string>
+    }
+  | {
+      type: `commitSyncTransaction`
+      transactionId: FullFlowTransactionId
+      parked: boolean
+      signalAborted: boolean
+    }
+  | {
+      type: `enterSyncApplication`
+      transactionId: FullFlowTransactionId
+    }
+  | {
+      type: `abortSyncTransaction`
+      transactionId: FullFlowTransactionId
+    }
+  | {
+      type: `publishSyncTransaction`
+      transactionId: FullFlowTransactionId
+    }
+  | {
+      type: `settleSyncReceipt`
+      transactionId: FullFlowTransactionId
     }
 
 export type ExpectedAdapterLifecycleEvent = {
@@ -113,6 +143,12 @@ export function projectTransportLoads(
       case `advanceWindowRevision`:
       case `scheduleContinuation`:
       case `runContinuation`:
+      case `stageSyncTransaction`:
+      case `commitSyncTransaction`:
+      case `enterSyncApplication`:
+      case `abortSyncTransaction`:
+      case `publishSyncTransaction`:
+      case `settleSyncReceipt`:
         break
     }
   }
@@ -176,6 +212,12 @@ export function projectAuthorizedContinuationStarts(
       }
       case `applyAuthoritativeRows`:
       case `releaseDemand`:
+      case `stageSyncTransaction`:
+      case `commitSyncTransaction`:
+      case `enterSyncApplication`:
+      case `abortSyncTransaction`:
+      case `publishSyncTransaction`:
+      case `settleSyncReceipt`:
         break
     }
   }
@@ -199,4 +241,157 @@ export function projectRetainedRowKeys(
   }
 
   return [...retainedRows].sort()
+}
+
+export type ExpectedSyncReceiptState = `pending` | `resolved` | `rejected`
+
+export type ExpectedPublicRow = {
+  sourceId: FullFlowSourceId
+  rowKey: string
+}
+
+export type ExpectedSyncTransactionObservation = {
+  visibleRows: Array<ExpectedPublicRow>
+  publishedBatches: Array<Array<ExpectedPublicRow>>
+  callbackReads: Array<Array<ExpectedPublicRow>>
+  receipts: Array<{
+    transactionId: FullFlowTransactionId
+    state: ExpectedSyncReceiptState
+  }>
+}
+
+type SyncTransactionState =
+  | `staged`
+  | `committed`
+  | `parked`
+  | `applying`
+  | `published`
+  | `resolved`
+  | `rejected`
+
+type ProjectedSyncTransaction = {
+  sourceId: FullFlowSourceId
+  rowKeys: ReadonlyArray<string>
+  state: SyncTransactionState
+}
+
+function sortPublicRows(
+  rows: Iterable<ExpectedPublicRow>,
+): Array<ExpectedPublicRow> {
+  return [...rows].sort((left, right) =>
+    left.sourceId === right.sourceId
+      ? left.rowKey.localeCompare(right.rowKey)
+      : left.sourceId.localeCompare(right.sourceId),
+  )
+}
+
+/**
+ * Projects the sync transaction's public contract without consulting the
+ * collection queue. Abort can still win while work is staged, committed, or
+ * parked. Once application starts, publication is irrevocable. A receipt does
+ * not resolve until the published batch and callback-time reads are visible.
+ */
+export function projectSyncTransactions(
+  history: ReadonlyArray<LoadSubsetFullFlowEvent>,
+): ExpectedSyncTransactionObservation {
+  const transactions = new Map<
+    FullFlowTransactionId,
+    ProjectedSyncTransaction
+  >()
+  const visibleRows = new Map<string, ExpectedPublicRow>()
+  const publishedBatches: Array<Array<ExpectedPublicRow>> = []
+  const callbackReads: Array<Array<ExpectedPublicRow>> = []
+
+  for (const event of history) {
+    switch (event.type) {
+      case `stageSyncTransaction`:
+        transactions.set(event.transactionId, {
+          sourceId: event.sourceId,
+          rowKeys: event.rowKeys,
+          state: `staged`,
+        })
+        break
+      case `commitSyncTransaction`: {
+        const transaction = transactions.get(event.transactionId)
+        if (!transaction || transaction.state !== `staged`) break
+        transaction.state = event.signalAborted
+          ? `rejected`
+          : event.parked
+            ? `parked`
+            : `committed`
+        break
+      }
+      case `enterSyncApplication`: {
+        const transaction = transactions.get(event.transactionId)
+        if (
+          transaction?.state === `committed` ||
+          transaction?.state === `parked`
+        ) {
+          transaction.state = `applying`
+        }
+        break
+      }
+      case `abortSyncTransaction`: {
+        const transaction = transactions.get(event.transactionId)
+        if (
+          transaction?.state === `staged` ||
+          transaction?.state === `committed` ||
+          transaction?.state === `parked`
+        ) {
+          transaction.state = `rejected`
+        }
+        break
+      }
+      case `publishSyncTransaction`: {
+        const transaction = transactions.get(event.transactionId)
+        if (transaction?.state !== `applying`) break
+        const batch = transaction.rowKeys.map((rowKey) => ({
+          sourceId: transaction.sourceId,
+          rowKey,
+        }))
+        for (const row of batch) {
+          visibleRows.set(`${row.sourceId}\u0000${row.rowKey}`, row)
+        }
+        transaction.state = `published`
+        publishedBatches.push(sortPublicRows(batch))
+        callbackReads.push(sortPublicRows(visibleRows.values()))
+        break
+      }
+      case `settleSyncReceipt`: {
+        const transaction = transactions.get(event.transactionId)
+        if (transaction?.state === `published`) {
+          transaction.state = `resolved`
+        }
+        break
+      }
+      case `requestDemand`:
+      case `applyAuthoritativeRows`:
+      case `releaseDemand`:
+      case `restartSession`:
+      case `cleanupSession`:
+      case `advanceWindowRevision`:
+      case `scheduleContinuation`:
+      case `runContinuation`:
+        break
+    }
+  }
+
+  return {
+    visibleRows: sortPublicRows(visibleRows.values()),
+    publishedBatches,
+    callbackReads,
+    receipts: [...transactions]
+      .flatMap(([transactionId, transaction]) => {
+        const state =
+          transaction.state === `resolved`
+            ? `resolved`
+            : transaction.state === `rejected`
+              ? `rejected`
+              : `pending`
+        return [{ transactionId, state } as const]
+      })
+      .sort((left, right) =>
+        left.transactionId.localeCompare(right.transactionId),
+      ),
+  }
 }
