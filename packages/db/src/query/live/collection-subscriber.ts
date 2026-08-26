@@ -556,12 +556,26 @@ export class CollectionSubscriber<
         minValues: cursor.minValues,
         trackLoadSubsetPromise: false,
         onLoadSubsetResult: (result, demand) => {
+          const resetIfRequestWasRefinedFromStart = () => {
+            // WindowState can replace a computed continuation with a prefix
+            // refresh. That refresh does not satisfy the continuation key, so
+            // a later expansion must still be allowed to issue it.
+            if (
+              cursor.minValues !== undefined &&
+              demand.cursor === undefined &&
+              this.lastLoadRequestKey === loadRequestKey
+            ) {
+              this.lastLoadRequestKey = undefined
+            }
+          }
           if (result instanceof Promise) {
-            void result.then(undefined, () => {
+            void result.then(resetIfRequestWasRefinedFromStart, () => {
               if (this.lastLoadRequestKey === loadRequestKey) {
                 this.lastLoadRequestKey = undefined
               }
             })
+          } else {
+            resetIfRequestWasRefinedFromStart()
           }
           this.orderedLoadSubsetResult?.(result, demand)
         },

@@ -1620,6 +1620,19 @@ describe(`pagination recomputation oracle`, () => {
     })
   })
 
+  it(`widens an offset on-demand window after starting at zero limit`, async () => {
+    await runOnDemandPaginationScenario({
+      ranks: [-1, 0, 0, 0, -1, 0],
+      direction: `asc`,
+      windows: [
+        { offset: 1, limit: 0 },
+        { offset: 4, limit: 1 },
+        { offset: 4, limit: 2 },
+        { offset: 0, limit: 0 },
+      ],
+    })
+  })
+
   it(`keeps synchronous limited satisfaction local to the active window`, async () => {
     const rows: Array<PageRow> = [
       { id: 1, rank: 1 },
@@ -2199,6 +2212,81 @@ describe(`pagination recomputation oracle`, () => {
       )
     },
   )
+
+  it(`retains a finite inactive prefix across shrink, SSE, and re-expansion`, async () => {
+    const rows = new Map<number, PageRow>(
+      Array.from({ length: 5 }, (_, index) => [
+        index + 1,
+        { id: index + 1, rank: index + 1 },
+      ]),
+    )
+    const delivered = new Set<number>()
+    let begin!: () => void
+    let write!: (message: { type: `insert`; value: PageRow }) => void
+    let commit!: () => void
+    const source = createCollection<PageRow>({
+      id: `pagination-retained-prefix-live-${collectionSequence++}`,
+      getKey: (row) => row.id,
+      syncMode: `on-demand`,
+      startSync: true,
+      autoIndex: `eager`,
+      defaultIndexType: BTreeIndex,
+      sync: {
+        sync: (params) => {
+          begin = params.begin
+          write = params.write
+          commit = params.commit
+          params.markReady()
+          return {
+            loadSubset: (options: LoadSubsetOptions) => {
+              const ordered = [...rows.values()].sort(
+                (left, right) => left.rank - right.rank || left.id - right.id,
+              )
+              const requested = rowsForLoadSubset(ordered, options)
+              begin()
+              for (const row of requested) {
+                if (delivered.has(row.id)) continue
+                delivered.add(row.id)
+                write({ type: `insert`, value: { ...row } })
+              }
+              const receipt = commit()
+              return Promise.resolve(receipt).then(() => ({
+                hasMore: requested.length < ordered.length,
+                appliedRowKeys: requested.map(({ id }) => id),
+              }))
+            },
+          }
+        },
+      },
+    })
+    const live = createLiveQueryCollection((query) =>
+      query
+        .from({ row: source })
+        .orderBy(({ row }) => row.rank, `asc`)
+        .orderBy(({ row }) => row.id, `asc`)
+        .limit(3),
+    )
+
+    try {
+      await live.preload()
+      expect(Array.from(live.values(), ({ id }) => id)).toEqual([1, 2, 3])
+
+      await live.utils.setWindow({ offset: 0, limit: 1 })
+      const inserted = { id: 9, rank: 2.5 }
+      rows.set(inserted.id, inserted)
+      delivered.add(inserted.id)
+      begin()
+      write({ type: `insert`, value: inserted })
+      commit()
+      await flushPromises()
+
+      await live.utils.setWindow({ offset: 0, limit: 3 })
+      expect(Array.from(live.values(), ({ id }) => id)).toEqual([1, 2, 9])
+    } finally {
+      live.cleanup()
+      source.cleanup()
+    }
+  })
 
   it.each([`asc`, `desc`] as const)(
     `refreshes from the start when one SSE batch moves the retained prefix (%s)`,
@@ -2950,6 +3038,20 @@ describe(`pagination recomputation oracle`, () => {
       live.cleanup()
       source.cleanup()
     }
+  })
+
+  it(`stabilizes an on-demand window with a NaN public-key tie`, async () => {
+    const loads = await runAdversarialOrderedProviderScenario({
+      providerRows: [
+        { id: 1, rank: 0, label: `finite` },
+        { id: Number.NaN, rank: 0, label: `nan` },
+      ],
+      order: { kind: `rank`, direction: `asc`, nulls: `first` },
+      limit: 1,
+      expectedIds: [1],
+    })
+
+    expect(loads).toHaveLength(2)
   })
 
   it.each([
