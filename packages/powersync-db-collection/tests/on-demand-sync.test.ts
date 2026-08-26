@@ -2275,6 +2275,279 @@ describe(`On-Demand Sync Mode`, () => {
       }
     })
 
+    it(`does not start queued tracking after collection cleanup`, async () => {
+      const db = await createDatabase()
+      const queued = pDefer<void>()
+      let runQueuedWriteLock!: () => Promise<void>
+      vi.spyOn(db, `writeLock`).mockImplementation(
+        (callback) =>
+          new Promise((resolve, reject) => {
+            runQueuedWriteLock = async () => {
+              try {
+                await callback({} as never)
+                resolve(undefined as never)
+              } catch (error) {
+                reject(error)
+              }
+            }
+            queued.resolve()
+          }) as never,
+      )
+      const createDiffTrigger = vi
+        .spyOn(db.triggers, `createDiffTrigger`)
+        .mockResolvedValue(vi.fn())
+      const config = powerSyncCollectionOptions({
+        database: db,
+        table: APP_SCHEMA.props.products,
+        syncMode: `on-demand`,
+      })
+      const sync = config.sync.sync({
+        collection: { status: `ready`, has: () => false },
+        begin: vi.fn(),
+        write: vi.fn(),
+        commit: () => true,
+        markReady: vi.fn(),
+        markError: vi.fn(),
+        truncate: vi.fn(),
+      } as never)
+      if (!sync || typeof sync === `function` || !sync.loadSubset) {
+        throw new Error(`Expected on-demand sync controls`)
+      }
+
+      const load = sync.loadSubset({ where: eq(`category`, `electronics`) })
+      await queued.promise
+      sync.cleanup?.()
+      await runQueuedWriteLock()
+      await load
+
+      expect(createDiffTrigger).not.toHaveBeenCalled()
+    })
+
+    it(`does not retain a predicate whose load hook rejects`, async () => {
+      const db = await createDatabase()
+      const hookFailure = new Error(`subset hook failed`)
+      const onLoadSubset = vi
+        .fn()
+        .mockRejectedValueOnce(hookFailure)
+        .mockResolvedValueOnce(undefined)
+      const createDiffTrigger = vi
+        .spyOn(db.triggers, `createDiffTrigger`)
+        .mockResolvedValue(vi.fn())
+      const config = powerSyncCollectionOptions({
+        database: db,
+        table: APP_SCHEMA.props.products,
+        syncMode: `on-demand`,
+        onLoadSubset,
+      })
+      const sync = config.sync.sync({
+        collection: { status: `ready`, has: () => false },
+        begin: vi.fn(),
+        write: vi.fn(),
+        commit: () => true,
+        markReady: vi.fn(),
+        markError: vi.fn(),
+        truncate: vi.fn(),
+      } as never)
+      if (!sync || typeof sync === `function` || !sync.loadSubset) {
+        throw new Error(`Expected on-demand sync controls`)
+      }
+
+      try {
+        await expect(
+          sync.loadSubset({ where: eq(`category`, `electronics`) }),
+        ).rejects.toBe(hookFailure)
+        await sync.loadSubset({ where: eq(`category`, `clothing`) })
+
+        const when = createDiffTrigger.mock.calls.at(-1)?.[0].when
+        expect(when?.INSERT).toContain(`clothing`)
+        expect(when?.INSERT).not.toContain(`electronics`)
+      } finally {
+        sync.cleanup?.()
+      }
+    })
+
+    it(`does not publish a provisional hook through another active demand`, async () => {
+      const db = await createDatabase()
+      const firstHook = pDefer<void>()
+      const onLoadSubset = vi
+        .fn()
+        .mockReturnValueOnce(firstHook.promise)
+        .mockResolvedValueOnce(undefined)
+      const createDiffTrigger = vi
+        .spyOn(db.triggers, `createDiffTrigger`)
+        .mockResolvedValue(vi.fn())
+      const config = powerSyncCollectionOptions({
+        database: db,
+        table: APP_SCHEMA.props.products,
+        syncMode: `on-demand`,
+        onLoadSubset,
+      })
+      const sync = config.sync.sync({
+        collection: { status: `ready`, has: () => false },
+        begin: vi.fn(),
+        write: vi.fn(),
+        commit: () => true,
+        markReady: vi.fn(),
+        markError: vi.fn(),
+        truncate: vi.fn(),
+      } as never)
+      if (!sync || typeof sync === `function` || !sync.loadSubset) {
+        throw new Error(`Expected on-demand sync controls`)
+      }
+
+      const provisional = sync.loadSubset({
+        where: eq(`category`, `electronics`),
+      })
+      await vi.waitFor(() => expect(onLoadSubset).toHaveBeenCalledTimes(1))
+      await sync.loadSubset({ where: eq(`category`, `clothing`) })
+
+      const when = createDiffTrigger.mock.calls.at(-1)?.[0].when
+      expect(when?.INSERT).toContain(`clothing`)
+      expect(when?.INSERT).not.toContain(`electronics`)
+
+      firstHook.resolve()
+      await provisional
+      sync.cleanup?.()
+    })
+
+    it(`hands subset release to the adapter without returning a promise`, async () => {
+      const db = await createDatabase()
+      vi.spyOn(db.triggers, `createDiffTrigger`).mockResolvedValue(vi.fn())
+      vi.spyOn(db, `getAll`).mockResolvedValue([])
+      const config = powerSyncCollectionOptions({
+        database: db,
+        table: APP_SCHEMA.props.products,
+        syncMode: `on-demand`,
+      })
+      const sync = config.sync.sync({
+        collection: { status: `ready`, has: () => false },
+        begin: vi.fn(),
+        write: vi.fn(),
+        commit: () => true,
+        markReady: vi.fn(),
+        markError: vi.fn(),
+        truncate: vi.fn(),
+      } as never)
+      if (
+        !sync ||
+        typeof sync === `function` ||
+        !sync.loadSubset ||
+        !sync.unloadSubset
+      ) {
+        throw new Error(`Expected on-demand sync controls`)
+      }
+      const request = { where: eq(`category`, `electronics`) }
+
+      await sync.loadSubset(request)
+      const release = (
+        sync.unloadSubset as (options: typeof request) => unknown
+      )(request)
+      try {
+        expect(release).toBeUndefined()
+      } finally {
+        await Promise.resolve(release)
+        sync.cleanup?.()
+      }
+    })
+
+    it(`retries physical subset release after asynchronous adapter failure`, async () => {
+      vi.useFakeTimers()
+      const db = await createDatabase()
+      vi.spyOn(db.triggers, `createDiffTrigger`).mockResolvedValue(vi.fn())
+      const getAll = vi
+        .spyOn(db, `getAll`)
+        .mockRejectedValueOnce(new Error(`transient eviction failure`))
+        .mockResolvedValueOnce([])
+      const config = powerSyncCollectionOptions({
+        database: db,
+        table: APP_SCHEMA.props.products,
+        syncMode: `on-demand`,
+      })
+      const sync = config.sync.sync({
+        collection: { status: `ready`, has: () => false },
+        begin: vi.fn(),
+        write: vi.fn(),
+        commit: () => true,
+        markReady: vi.fn(),
+        markError: vi.fn(),
+        truncate: vi.fn(),
+      } as never)
+      if (
+        !sync ||
+        typeof sync === `function` ||
+        !sync.loadSubset ||
+        !sync.unloadSubset
+      ) {
+        throw new Error(`Expected on-demand sync controls`)
+      }
+      const request = { where: eq(`category`, `electronics`) }
+
+      try {
+        await sync.loadSubset(request)
+        expect(sync.unloadSubset(request)).toBeUndefined()
+        await vi.waitFor(() => expect(getAll).toHaveBeenCalledTimes(1))
+
+        await vi.advanceTimersByTimeAsync(1000)
+        await vi.waitFor(() => expect(getAll).toHaveBeenCalledTimes(2))
+      } finally {
+        sync.cleanup?.()
+        await vi.runOnlyPendingTimersAsync()
+        vi.useRealTimers()
+      }
+    })
+
+    it(`recomputes eviction when another demand activates during release`, async () => {
+      const db = await createDatabase()
+      vi.spyOn(db.triggers, `createDiffTrigger`).mockResolvedValue(vi.fn())
+      const firstEviction = pDefer<Array<{ id: string }>>()
+      const getAll = vi
+        .spyOn(db, `getAll`)
+        .mockReturnValueOnce(firstEviction.promise)
+        .mockResolvedValueOnce([])
+      const write = vi.fn()
+      const config = powerSyncCollectionOptions({
+        database: db,
+        table: APP_SCHEMA.props.products,
+        syncMode: `on-demand`,
+      })
+      const sync = config.sync.sync({
+        collection: { status: `ready`, has: () => false },
+        begin: vi.fn(),
+        write,
+        commit: () => true,
+        markReady: vi.fn(),
+        markError: vi.fn(),
+        truncate: vi.fn(),
+      } as never)
+      if (
+        !sync ||
+        typeof sync === `function` ||
+        !sync.loadSubset ||
+        !sync.unloadSubset
+      ) {
+        throw new Error(`Expected on-demand sync controls`)
+      }
+      const departing = { where: eq(`category`, `electronics`) }
+
+      try {
+        await sync.loadSubset(departing)
+        sync.unloadSubset(departing)
+        await vi.waitFor(() => expect(getAll).toHaveBeenCalledTimes(1))
+
+        await sync.loadSubset({ where: eq(`category`, `clothing`) })
+        firstEviction.resolve([{ id: `row-now-owned-by-clothing` }])
+
+        await vi.waitFor(() => expect(getAll).toHaveBeenCalledTimes(2))
+        expect(write).not.toHaveBeenCalledWith({
+          type: `delete`,
+          key: `row-now-owned-by-clothing`,
+        })
+      } finally {
+        firstEviction.resolve([])
+        sync.cleanup?.()
+      }
+    })
+
     it(`flushes eager changes that arrive before the tracking handle is published`, async () => {
       const db = await createDatabase()
       await createTestProducts(db)
