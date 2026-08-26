@@ -9,7 +9,6 @@ import type {
   LoadSubsetFullFlowEvent,
 } from '../load-subset-full-flow-model.js'
 import type {
-  ChangeMessage,
   ChangeMessageOrDeleteKeyMessage,
   LoadSubsetOptions,
 } from '../../src/types.js'
@@ -74,7 +73,7 @@ describe(`loadSubset replay refinement`, () => {
     })
     const callbackReads: Array<Array<FullFlowVersionedRow>> = []
     const subscription = downstream.subscribeChanges(
-      (changes: Array<ChangeMessage<Row, string>>) => {
+      (changes) => {
         const batch = changes.map((change) => ({
           type: change.type,
           row: {
