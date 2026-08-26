@@ -427,12 +427,16 @@ describe(`loadSubset outcomes`, () => {
               ? { offset: 5, limit: 5 }
               : { limit: 5 },
       }
+      const satisfiedEnd =
+        (owners.satisfied.offset ?? 0) + owners.satisfied.limit
       const expectedExtent =
         relationship === `exact`
           ? sourceExtent
-          : sourceExtent === `continues` || relationship === `narrower`
+          : sourceExtent === `continues` || rowIds.length > satisfiedEnd
             ? `continues`
-            : `unknown`
+            : sourceExtent === `exhausted`
+              ? `exhausted`
+              : `unknown`
       const ownsAppliedAcquisition =
         sourceExtent !== `unknown` ||
         relationship === `exact` ||
