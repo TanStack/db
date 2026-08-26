@@ -251,10 +251,7 @@ export function processOrderBy(
         b: Record<string, unknown> | null | undefined,
       ) => {
         for (const { extractor, compare: compareTerm } of sourceTerms) {
-          const result = compareTerm(
-            a ? extractor(a) : a,
-            b ? extractor(b) : b,
-          )
+          const result = compareTerm(a ? extractor(a) : a, b ? extractor(b) : b)
           if (result !== 0) return result
         }
         return 0

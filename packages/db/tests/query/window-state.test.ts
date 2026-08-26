@@ -81,9 +81,7 @@ describe(`WindowState`, () => {
     window.admitChanges([{ type: `insert`, key: 7, value: rows[2]! }])
     window.ensureSize(3)
 
-    expect(
-      window.reconcile(new Map()).map(({ key }) => key),
-    ).toEqual([1, 2, 7])
+    expect(window.reconcile(new Map()).map(({ key }) => key)).toEqual([1, 2, 7])
     expect(window.requiresPrefixRefresh).toBe(true)
   })
 
@@ -189,9 +187,7 @@ describe(`WindowState`, () => {
 
       window.recordLocalRequestSatisfaction(requestedPrefix)
 
-      expect(window.localPrefixSize).toBe(
-        Math.min(requestedPrefix, 3),
-      )
+      expect(window.localPrefixSize).toBe(Math.min(requestedPrefix, 3))
       expect(window.coversActiveWindow).toBe(requestedPrefix <= 3)
       expect(window.requestBoundary()).toBeUndefined()
       expect(window.requiresPrefixRefresh).toBe(true)
