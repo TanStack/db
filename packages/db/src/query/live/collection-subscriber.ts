@@ -416,6 +416,14 @@ export class CollectionSubscriber<
     // Clean up truncate listener when subscription is unsubscribed
     subscription.on(`unsubscribed`, () => {
       truncateUnsubscribe()
+      subscriptionHolder.current = undefined
+
+      // Ordered continuations belong to this subscription session. A settled
+      // load from a cleaned session must not refill through a later session.
+      if (this.orderedLoadSubsetResult === handleLoadSubsetResult) {
+        this.orderedLoadSubsetResult = undefined
+        this.pendingOrderedLoadPromise = undefined
+      }
     })
 
     // Normalize the orderBy clauses such that the references are relative to the collection

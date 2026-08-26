@@ -1,12 +1,16 @@
 import { expect, it } from 'vitest'
 import { createCollection } from '../../src/collection/index.js'
+import { createDeferred } from '../../src/deferred.js'
+import { BTreeIndex } from '../../src/index.js'
 import { createLiveQueryCollection } from '../../src/query/index.js'
 import { DeduplicatedLoadSubset } from '../../src/query/subset-dedupe.js'
 import {
   projectAdapterLifecycle,
+  projectAuthorizedContinuationStarts,
   projectRetainedRowKeys,
   projectTransportLoads,
 } from '../load-subset-full-flow-model.js'
+import { flushPromises } from '../utils.js'
 import type { LoadSubsetOptions } from '../../src/types.js'
 import type { LoadSubsetFullFlowEvent } from '../load-subset-full-flow-model.js'
 
@@ -203,6 +207,101 @@ it(`reloads authoritative rows after final-owner cleanup invalidates retained ad
     await Promise.all([
       first.cleanup(),
       second?.cleanup() ?? Promise.resolve(),
+      source.cleanup(),
+    ])
+  }
+})
+
+it(`does not let an ordered continuation from a cleaned session start new work after restart`, async () => {
+  type Row = { id: number; rank: number }
+  const history: ReadonlyArray<LoadSubsetFullFlowEvent> = [
+    {
+      type: `requestDemand`,
+      ownerId: `owner-1`,
+      sessionId: `session-1`,
+      demandId: `top-1`,
+      alreadyAborted: false,
+    },
+    {
+      type: `scheduleContinuation`,
+      taskId: `load-1-settlement`,
+      sessionId: `session-1`,
+      windowRevision: 0,
+    },
+    { type: `cleanupSession`, sessionId: `session-1` },
+    {
+      type: `restartSession`,
+      previousSessionId: `session-1`,
+      nextSessionId: `session-2`,
+    },
+    {
+      type: `requestDemand`,
+      ownerId: `owner-2`,
+      sessionId: `session-2`,
+      demandId: `top-1`,
+      alreadyAborted: false,
+    },
+    { type: `runContinuation`, taskId: `load-1-settlement` },
+  ]
+  const pending: Array<ReturnType<typeof createDeferred<void>>> = []
+  const source = createCollection<Row>({
+    id: `full-flow-stale-ordered-continuation-source`,
+    getKey: (row) => row.id,
+    syncMode: `on-demand`,
+    startSync: true,
+    autoIndex: `eager`,
+    defaultIndexType: BTreeIndex,
+    sync: {
+      sync: ({ markReady }) => {
+        markReady()
+        return {
+          loadSubset: () => {
+            const deferred = createDeferred<void>()
+            pending.push(deferred)
+            return deferred.promise.then(() => ({
+              hasMore: false,
+              appliedRowKeys: [],
+            }))
+          },
+          unloadSubset: () => {},
+        }
+      },
+    },
+  })
+  const live = createLiveQueryCollection({
+    id: `full-flow-stale-ordered-continuation-live`,
+    query: (q) =>
+      q
+        .from({ row: source })
+        .orderBy(({ row }) => row.rank)
+        .limit(1),
+    startSync: true,
+  })
+  const firstPreload = live.preload().catch(() => undefined)
+  let secondPreload: Promise<unknown> | undefined
+
+  try {
+    expect(pending).toHaveLength(1)
+    await live.cleanup()
+
+    secondPreload = live.preload()
+    expect(pending).toHaveLength(2)
+
+    const requestsBeforeStaleSettlement = pending.length
+    pending[0]!.resolve()
+    await flushPromises()
+
+    expect(pending).toHaveLength(
+      requestsBeforeStaleSettlement +
+        projectAuthorizedContinuationStarts(history),
+    )
+  } finally {
+    for (const request of pending) request.resolve()
+    await flushPromises()
+    await Promise.all([
+      firstPreload,
+      secondPreload?.catch(() => undefined) ?? Promise.resolve(),
+      live.cleanup(),
       source.cleanup(),
     ])
   }

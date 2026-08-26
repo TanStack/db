@@ -29,6 +29,25 @@ export type LoadSubsetFullFlowEvent =
       previousSessionId: FullFlowSessionId
       nextSessionId: FullFlowSessionId
     }
+  | {
+      type: `cleanupSession`
+      sessionId: FullFlowSessionId
+    }
+  | {
+      type: `advanceWindowRevision`
+      sessionId: FullFlowSessionId
+      revision: number
+    }
+  | {
+      type: `scheduleContinuation`
+      taskId: string
+      sessionId: FullFlowSessionId
+      windowRevision: number
+    }
+  | {
+      type: `runContinuation`
+      taskId: string
+    }
 
 export type ExpectedAdapterLifecycleEvent = {
   type: `invoke` | `release`
@@ -90,11 +109,78 @@ export function projectTransportLoads(
         }
         break
       case `restartSession`:
+      case `cleanupSession`:
+      case `advanceWindowRevision`:
+      case `scheduleContinuation`:
+      case `runContinuation`:
         break
     }
   }
 
   return loads
+}
+
+/**
+ * Counts follow-up loads that a settled ordered continuation may authorize.
+ * Authority is scoped to both the current live-query session and the window
+ * revision captured when the continuation was scheduled.
+ */
+export function projectAuthorizedContinuationStarts(
+  history: ReadonlyArray<LoadSubsetFullFlowEvent>,
+): number {
+  const activeSessions = new Set<FullFlowSessionId>()
+  const revisions = new Map<FullFlowSessionId, number>()
+  const tasks = new Map<
+    string,
+    { sessionId: FullFlowSessionId; windowRevision: number }
+  >()
+  let currentSession: FullFlowSessionId | undefined
+  let starts = 0
+
+  for (const event of history) {
+    switch (event.type) {
+      case `requestDemand`:
+        currentSession ??= event.sessionId
+        activeSessions.add(event.sessionId)
+        revisions.set(event.sessionId, revisions.get(event.sessionId) ?? 0)
+        break
+      case `cleanupSession`:
+        activeSessions.delete(event.sessionId)
+        break
+      case `restartSession`:
+        currentSession = event.nextSessionId
+        activeSessions.add(event.nextSessionId)
+        revisions.set(event.nextSessionId, 0)
+        break
+      case `advanceWindowRevision`:
+        revisions.set(event.sessionId, event.revision)
+        break
+      case `scheduleContinuation`:
+        tasks.set(event.taskId, {
+          sessionId: event.sessionId,
+          windowRevision: event.windowRevision,
+        })
+        break
+      case `runContinuation`: {
+        const task = tasks.get(event.taskId)
+        if (
+          task &&
+          currentSession === task.sessionId &&
+          activeSessions.has(task.sessionId) &&
+          revisions.get(task.sessionId) === task.windowRevision
+        ) {
+          starts++
+        }
+        tasks.delete(event.taskId)
+        break
+      }
+      case `applyAuthoritativeRows`:
+      case `releaseDemand`:
+        break
+    }
+  }
+
+  return starts
 }
 
 /** Derives visible row identity without consulting Collection implementation. */
