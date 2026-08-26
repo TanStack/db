@@ -2723,7 +2723,7 @@ describe(`Electric Integration`, () => {
       )
     })
 
-    it(`retains Electric coverage when the adapter cannot unload it`, async () => {
+    it(`invalidates Electric dedupe when core releases its rows`, async () => {
       const testCollection = createCollection(
         electricCollectionOptions({
           id: `on-demand-unload-coverage-test`,
@@ -2743,7 +2743,7 @@ describe(`Electric Integration`, () => {
         testCollection._sync.unloadSubset(options)
         await testCollection._sync.loadSubset(options)
 
-        expect(mockRequestSnapshot).toHaveBeenCalledTimes(1)
+        expect(mockRequestSnapshot).toHaveBeenCalledTimes(2)
       } finally {
         await testCollection.cleanup()
       }
