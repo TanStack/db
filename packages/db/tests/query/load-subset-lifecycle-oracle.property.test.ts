@@ -1,30 +1,23 @@
 import { fc, test as fcTest } from '@fast-check/vitest'
 import { expect, it } from 'vitest'
 import { CoverageRegistry } from '../../src/query/coverage-registry.js'
+import {
+  applyLoadSubsetLifecycleEvent,
+  canApplyLoadSubsetLifecycleEvent,
+  createLoadSubsetLifecycleModel,
+  lifecycleOwnsAppliedRows,
+  lifecyclePublishesCoverage,
+} from '../load-subset-lifecycle-model.js'
 import { oraclePropertyOptions } from '../oracle-config.js'
 import type { AppliedLoadSubsetOutcome } from '../../src/types.js'
+import type {
+  LoadSubsetLifecycleEvent,
+  LoadSubsetLifecycleModel,
+} from '../load-subset-lifecycle-model.js'
 import type { Command } from 'fast-check'
 
-type LifecycleState =
-  | `initial`
-  | `provisional`
-  | `active`
-  | `applied`
-  | `release-pending`
-  | `failed`
-  | `released`
-  | `disposed`
-
-type ReleaseMode = `lease` | `dispose`
 type PrefixCoverage = Readonly<{ prefix: number }>
-
-type LifecycleModel = {
-  state: LifecycleState
-  applied: boolean
-  releaseAccepted: boolean
-  releaseCalls: number
-  releaseMode?: ReleaseMode
-}
+type LifecycleModel = LoadSubsetLifecycleModel
 
 type ReleaseProbe = {
   accepted: boolean
@@ -82,14 +75,8 @@ function expectReleasePending(operation: () => unknown): void {
 }
 
 function assertLifecycle(model: LifecycleModel, real: LifecycleReal): void {
-  const ownsAppliedRow =
-    model.applied &&
-    model.state !== `released` &&
-    model.state !== `disposed` &&
-    model.state !== `failed`
-  const publishesCoverage =
-    ownsAppliedRow &&
-    (model.state === `applied` || model.state === `release-pending`)
+  const ownsAppliedRow = lifecycleOwnsAppliedRows(model)
+  const publishesCoverage = lifecyclePublishesCoverage(model)
 
   expect(real.registry.rowOwnerCount(`row`)).toBe(ownsAppliedRow ? 1 : 0)
   expect(real.registry.coverageAntichain()).toEqual(
@@ -102,6 +89,7 @@ abstract class LifecycleCommand implements Command<
   LifecycleModel,
   LifecycleReal
 > {
+  abstract event: LoadSubsetLifecycleEvent
   abstract check(model: Readonly<LifecycleModel>): boolean
   abstract run(model: LifecycleModel, real: LifecycleReal): void
   abstract toString(): string
@@ -109,14 +97,20 @@ abstract class LifecycleCommand implements Command<
   protected assert(model: LifecycleModel, real: LifecycleReal): void {
     assertLifecycle(model, real)
   }
+
+  protected apply(model: LifecycleModel): void {
+    applyLoadSubsetLifecycleEvent(model, this.event)
+  }
 }
 
 class StartDemandCommand extends LifecycleCommand {
-  check = (model: Readonly<LifecycleModel>) => model.state === `initial`
+  event = { type: `startDemand` } as const
+  check = (model: Readonly<LifecycleModel>) =>
+    canApplyLoadSubsetLifecycleEvent(model, this.event)
 
   run(model: LifecycleModel, real: LifecycleReal): void {
     real.lease = real.registry.addLease(1)
-    model.state = `provisional`
+    this.apply(model)
     this.assert(model, real)
   }
 
@@ -124,7 +118,9 @@ class StartDemandCommand extends LifecycleCommand {
 }
 
 class ActivateDemandCommand extends LifecycleCommand {
-  check = (model: Readonly<LifecycleModel>) => model.state === `provisional`
+  event = { type: `activateDemand` } as const
+  check = (model: Readonly<LifecycleModel>) =>
+    canApplyLoadSubsetLifecycleEvent(model, this.event)
 
   run(model: LifecycleModel, real: LifecycleReal): void {
     real.acquisition = real.registry.addAcquisition({
@@ -137,7 +133,7 @@ class ActivateDemandCommand extends LifecycleCommand {
       leases: [real.lease!],
       release: real.release.release,
     })
-    model.state = `active`
+    this.apply(model)
     this.assert(model, real)
   }
 
@@ -145,15 +141,16 @@ class ActivateDemandCommand extends LifecycleCommand {
 }
 
 class ApplyOutcomeCommand extends LifecycleCommand {
-  check = (model: Readonly<LifecycleModel>) => model.state === `active`
+  event = { type: `applyOutcome` } as const
+  check = (model: Readonly<LifecycleModel>) =>
+    canApplyLoadSubsetLifecycleEvent(model, this.event)
 
   run(model: LifecycleModel, real: LifecycleReal): void {
     real.registry.replaceRows(real.acquisition!, new Set([`row`]))
     expect(
       real.registry.publishOutcome(real.acquisition!, appliedOutcome()),
     ).toMatchObject({ accepted: true, published: true })
-    model.state = `applied`
-    model.applied = true
+    this.apply(model)
     this.assert(model, real)
   }
 
@@ -161,13 +158,15 @@ class ApplyOutcomeCommand extends LifecycleCommand {
 }
 
 class FailProvisionalCommand extends LifecycleCommand {
-  check = (model: Readonly<LifecycleModel>) => model.state === `provisional`
+  event = { type: `failProvisional` } as const
+  check = (model: Readonly<LifecycleModel>) =>
+    canApplyLoadSubsetLifecycleEvent(model, this.event)
 
   run(model: LifecycleModel, real: LifecycleReal): void {
     expect(real.registry.releaseLease(real.lease!)).toEqual({
       rowsToRemove: [],
     })
-    model.state = `failed`
+    this.apply(model)
     this.assert(model, real)
   }
 
@@ -175,12 +174,15 @@ class FailProvisionalCommand extends LifecycleCommand {
 }
 
 class PublishStaleGenerationCommand extends LifecycleCommand {
-  check = (model: Readonly<LifecycleModel>) => model.state === `active`
+  event = { type: `publishStaleGeneration` } as const
+  check = (model: Readonly<LifecycleModel>) =>
+    canApplyLoadSubsetLifecycleEvent(model, this.event)
 
   run(model: LifecycleModel, real: LifecycleReal): void {
     expect(
       real.registry.publishOutcome(real.acquisition!, appliedOutcome(0)),
     ).toMatchObject({ accepted: false, published: false })
+    this.apply(model)
     this.assert(model, real)
   }
 
@@ -188,14 +190,13 @@ class PublishStaleGenerationCommand extends LifecycleCommand {
 }
 
 class RequestReleaseCommand extends LifecycleCommand {
+  event = { type: `requestRelease` } as const
   check = (model: Readonly<LifecycleModel>) =>
-    model.state === `active` || model.state === `applied`
+    canApplyLoadSubsetLifecycleEvent(model, this.event)
 
   run(model: LifecycleModel, real: LifecycleReal): void {
     expectReleasePending(() => real.registry.releaseLease(real.lease!))
-    model.state = `release-pending`
-    model.releaseMode = `lease`
-    model.releaseCalls++
+    this.apply(model)
     this.assert(model, real)
   }
 
@@ -203,8 +204,9 @@ class RequestReleaseCommand extends LifecycleCommand {
 }
 
 class RetryPendingReleaseCommand extends LifecycleCommand {
+  event = { type: `retryPendingRelease` } as const
   check = (model: Readonly<LifecycleModel>) =>
-    model.state === `release-pending` && !model.releaseAccepted
+    canApplyLoadSubsetLifecycleEvent(model, this.event)
 
   run(model: LifecycleModel, real: LifecycleReal): void {
     expectReleasePending(() =>
@@ -212,7 +214,7 @@ class RetryPendingReleaseCommand extends LifecycleCommand {
         ? real.registry.dispose()
         : real.registry.releaseLease(real.lease!),
     )
-    model.releaseCalls++
+    this.apply(model)
     this.assert(model, real)
   }
 
@@ -220,8 +222,9 @@ class RetryPendingReleaseCommand extends LifecycleCommand {
 }
 
 class AcceptPendingReleaseCommand extends LifecycleCommand {
+  event = { type: `acceptPendingRelease` } as const
   check = (model: Readonly<LifecycleModel>) =>
-    model.state === `release-pending` && !model.releaseAccepted
+    canApplyLoadSubsetLifecycleEvent(model, this.event)
 
   run(model: LifecycleModel, real: LifecycleReal): void {
     real.release.accepted = true
@@ -230,9 +233,7 @@ class AcceptPendingReleaseCommand extends LifecycleCommand {
         ? real.registry.dispose()
         : real.registry.releaseLease(real.lease!)
     expect(result.rowsToRemove).toEqual(model.applied ? [`row`] : [])
-    model.releaseAccepted = true
-    model.releaseCalls++
-    model.state = model.releaseMode === `dispose` ? `disposed` : `released`
+    this.apply(model)
     this.assert(model, real)
   }
 
@@ -240,22 +241,17 @@ class AcceptPendingReleaseCommand extends LifecycleCommand {
 }
 
 class DisposeCommand extends LifecycleCommand {
+  event = { type: `dispose` } as const
   check = (model: Readonly<LifecycleModel>) =>
-    model.state === `initial` ||
-    model.state === `provisional` ||
-    model.state === `active` ||
-    model.state === `applied`
+    canApplyLoadSubsetLifecycleEvent(model, this.event)
 
   run(model: LifecycleModel, real: LifecycleReal): void {
     if (model.state === `active` || model.state === `applied`) {
       expectReleasePending(() => real.registry.dispose())
-      model.state = `release-pending`
-      model.releaseMode = `dispose`
-      model.releaseCalls++
     } else {
       expect(real.registry.dispose()).toEqual({ rowsToRemove: [] })
-      model.state = `disposed`
     }
+    this.apply(model)
     this.assert(model, real)
   }
 
@@ -263,8 +259,9 @@ class DisposeCommand extends LifecycleCommand {
 }
 
 class PublishLateOutcomeCommand extends LifecycleCommand {
+  event = { type: `publishLateOutcome` } as const
   check = (model: Readonly<LifecycleModel>) =>
-    model.state === `released` || model.state === `disposed`
+    canApplyLoadSubsetLifecycleEvent(model, this.event)
 
   run(model: LifecycleModel, real: LifecycleReal): void {
     if (real.acquisition) {
@@ -272,6 +269,7 @@ class PublishLateOutcomeCommand extends LifecycleCommand {
         real.registry.publishOutcome(real.acquisition, appliedOutcome(2)),
       ).toMatchObject({ accepted: false, published: false })
     }
+    this.apply(model)
     this.assert(model, real)
   }
 
@@ -296,12 +294,7 @@ function createLifecyclePair(): {
   real: LifecycleReal
 } {
   return {
-    model: {
-      state: `initial`,
-      applied: false,
-      releaseAccepted: false,
-      releaseCalls: 0,
-    },
+    model: createLoadSubsetLifecycleModel(),
     real: {
       registry: createRegistry(),
       release: createReleaseProbe(),
