@@ -739,11 +739,11 @@ describe(`loadSubset outcomes`, () => {
     },
   )
 
-  it(`validates demand identity before starting adapter work`, async () => {
+  it(`tracks opaque demand values by runtime reference`, async () => {
     const loadSubset = vi.fn(() => Promise.resolve({ hasMore: false }))
     const unloadSubset = vi.fn()
     const collection = createCollection<{ id: string }>({
-      id: `load-subset-invalid-demand`,
+      id: `load-subset-opaque-demand`,
       getKey: (row) => row.id,
       syncMode: `on-demand`,
       startSync: true,
@@ -756,16 +756,40 @@ describe(`loadSubset outcomes`, () => {
     })
 
     try {
-      expect(() =>
-        collection._sync.loadSubset({
-          where: new Func(`eq`, [
-            new PropRef([`item`, `value`]),
-            new Value(() => `unhashable`),
-          ]),
-        }),
-      ).toThrow(/not stably hashable/)
-      expect(loadSubset).not.toHaveBeenCalled()
-      expect(unloadSubset).not.toHaveBeenCalled()
+      const field = new PropRef<unknown>([`item`, `value`])
+      const createDemands = (value: unknown): Array<LoadSubsetOptions> => [
+        { where: new Func(`eq`, [field, new Value(value)]) },
+        { where: new Func(`in`, [field, new Value([value])]) },
+        {
+          orderBy: [
+            {
+              expression: new Func(`coalesce`, [field, new Value(value)]),
+              compareOptions: { direction: `asc`, nulls: `first` },
+            },
+          ],
+        },
+        {
+          cursor: {
+            whereFrom: new Func(`gt`, [field, new Value(value)]),
+            whereCurrent: new Func(`eq`, [field, new Value(value)]),
+          },
+        },
+      ]
+      const demands = [
+        ...createDemands(() => `opaque`),
+        ...createDemands(Symbol(`opaque`)),
+      ]
+
+      for (const options of demands) {
+        const outcome = await collection._sync.loadSubset(options)
+        expect(outcome).toMatchObject({ extent: `exhausted` })
+        collection._sync.unloadSubset(options)
+      }
+
+      expect(loadSubset.mock.calls.map(([options]) => options)).toEqual(demands)
+      expect(unloadSubset.mock.calls.map(([options]) => options)).toEqual(
+        demands,
+      )
     } finally {
       await collection.cleanup()
     }

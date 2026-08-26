@@ -31,6 +31,8 @@ type ValueIdentityContext =
   | `equality-operand`
   | `ordering-operand`
 
+type OpaqueValueIdentity = `reject` | `runtime-reference`
+
 type AliasScope = {
   bindings: ReadonlyMap<string, number>
   hasUnqualifiedOutput: boolean
@@ -152,12 +154,16 @@ export function getLoadSubsetDemandKey(
         `loadSubset.cursor.whereFrom`,
         seen,
         `exact-output`,
+        undefined,
+        `runtime-reference`,
       ),
       whereCurrent: canonicalizeExpression(
         options.cursor.whereCurrent,
         `loadSubset.cursor.whereCurrent`,
         seen,
         `exact-output`,
+        undefined,
+        `runtime-reference`,
       ),
     }
     if (options.cursor.lastKey !== undefined) {
@@ -386,6 +392,8 @@ function canonicalizeLoadSubsetQuery(
       `${path}.where`,
       seen,
       `exact-output`,
+      undefined,
+      `runtime-reference`,
     )
   }
 
@@ -396,6 +404,8 @@ function canonicalizeLoadSubsetQuery(
         `${path}.orderBy[${index}]`,
         seen,
         `ordering-operand`,
+        undefined,
+        `runtime-reference`,
       ),
     )
   }
@@ -560,6 +570,7 @@ function canonicalizeOrderBy(
   seen: WeakSet<object>,
   valueContext: ValueIdentityContext = `exact-output`,
   scope?: AliasScope,
+  opaqueValueIdentity: OpaqueValueIdentity = `reject`,
 ): StableIdentityValue {
   return {
     expression: canonicalizeExpression(
@@ -568,6 +579,7 @@ function canonicalizeOrderBy(
       seen,
       valueContext,
       scope,
+      opaqueValueIdentity,
     ),
     compareOptions: canonicalizeRuntimeValue(
       orderBy.compareOptions,
@@ -587,6 +599,7 @@ function canonicalizeExpression(
   seen: WeakSet<object>,
   valueContext: ValueIdentityContext = `exact-output`,
   scope?: AliasScope,
+  opaqueValueIdentity: OpaqueValueIdentity = `reject`,
 ): StableIdentityValue {
   if (expression.type === `ref`) {
     const binding = resolveAliasBinding(scope, expression.path[0] ?? ``)
@@ -622,17 +635,20 @@ function canonicalizeExpression(
               `${path}.value`,
               seen,
               scope,
+              opaqueValueIdentity,
             )
           : valueContext === `ordering-operand`
             ? canonicalizeOrderingRuntimeValue(
                 expression.value,
                 `${path}.value`,
                 seen,
+                opaqueValueIdentity,
               )
             : canonicalizeExactOutputRuntimeValue(
                 expression.value,
                 `${path}.value`,
                 seen,
+                opaqueValueIdentity,
               ),
     }
   }
@@ -650,6 +666,7 @@ function canonicalizeExpression(
           `${path}.args[1].value[${index}]`,
           seen,
           scope,
+          opaqueValueIdentity,
         ),
       )
       return canonicalizeFunction(expression.name, [
@@ -659,6 +676,7 @@ function canonicalizeExpression(
           seen,
           `equality-operand`,
           scope,
+          opaqueValueIdentity,
         ),
         {
           type: `val`,
@@ -685,6 +703,7 @@ function canonicalizeExpression(
         seen,
         operandContext,
         scope,
+        opaqueValueIdentity,
       ),
     )
     return canonicalizeFunction(expression.name, args)
@@ -998,8 +1017,13 @@ function canonicalizeExactOutputRuntimeValue(
   value: unknown,
   path: string,
   seen: WeakSet<object>,
+  opaqueValueIdentity: OpaqueValueIdentity = `reject`,
 ): StableIdentityValue {
-  if (typeof value === `object` && value !== null) {
+  if (
+    (typeof value === `object` && value !== null) ||
+    (opaqueValueIdentity === `runtime-reference` &&
+      (typeof value === `function` || typeof value === `symbol`))
+  ) {
     return getRuntimeReferenceIdentity(value)
   }
 
@@ -1011,6 +1035,7 @@ function canonicalizeEqualityRuntimeValue(
   path: string,
   seen: WeakSet<object>,
   scope?: AliasScope,
+  opaqueValueIdentity: OpaqueValueIdentity = `reject`,
 ): StableIdentityValue {
   if (isRefProxy(value)) {
     return canonicalizeExpression(
@@ -1019,7 +1044,15 @@ function canonicalizeEqualityRuntimeValue(
       seen,
       `equality-operand`,
       scope,
+      opaqueValueIdentity,
     )
+  }
+
+  if (
+    opaqueValueIdentity === `runtime-reference` &&
+    (typeof value === `function` || typeof value === `symbol`)
+  ) {
+    return getRuntimeReferenceIdentity(value)
   }
 
   if (typeof value === `number` && Object.is(value, -0)) {
@@ -1051,7 +1084,14 @@ function canonicalizeOrderingRuntimeValue(
   value: unknown,
   path: string,
   seen: WeakSet<object>,
+  opaqueValueIdentity: OpaqueValueIdentity = `reject`,
 ): StableIdentityValue {
+  if (
+    opaqueValueIdentity === `runtime-reference` &&
+    (typeof value === `function` || typeof value === `symbol`)
+  ) {
+    return getRuntimeReferenceIdentity(value)
+  }
   if (typeof value === `number` && Object.is(value, -0)) {
     return canonicalizeRuntimeValue(0, path, seen)
   }

@@ -51,6 +51,10 @@ import {
 } from '../../src/query/compiler/evaluators.js'
 import { isLoadSubsetRequestSubsumedBy } from '../../src/query/predicate-utils.js'
 import { createRuntimeReferenceIdentityFactory } from '../../src/query/runtime-reference-identity.js'
+import {
+  cloneLoadSubsetOptions,
+  snapshotLoadSubsetDemand,
+} from '../../src/query/load-subset-options.js'
 import type { BasicExpression, QueryIR } from '../../src/query/ir.js'
 import type { LoadSubsetOptions } from '../../src/types.js'
 
@@ -453,6 +457,59 @@ describe(`loadSubset demand identity`, () => {
     expect(getLoadSubsetDemandKey({ where: first, offset: 0 })).toBe(
       getLoadSubsetDemandKey({ where: first }),
     )
+  })
+
+  it(`uses runtime reference identity for opaque demand values`, () => {
+    const field = new PropRef<unknown>([`row`, `value`])
+    const firstFunction = () => `value`
+    const secondFunction = () => `value`
+    const firstSymbol = Symbol(`value`)
+    const secondSymbol = Symbol(`value`)
+    const createDemands = (value: unknown): Array<LoadSubsetOptions> => [
+      { where: new Func(`eq`, [field, new Value(value)]) },
+      { where: new Func(`in`, [field, new Value([value])]) },
+      {
+        orderBy: [
+          {
+            expression: new Func(`coalesce`, [field, new Value(value)]),
+            compareOptions: { direction: `asc`, nulls: `first` },
+          },
+        ],
+      },
+      {
+        cursor: {
+          whereFrom: new Func(`gt`, [field, new Value(value)]),
+          whereCurrent: new Func(`eq`, [field, new Value(value)]),
+        },
+      },
+    ]
+
+    for (const [firstValue, secondValue] of [
+      [firstFunction, secondFunction],
+      [firstSymbol, secondSymbol],
+    ] as const) {
+      const firstDemands = createDemands(firstValue)
+      const secondDemands = createDemands(secondValue)
+
+      firstDemands.forEach((demand, index) => {
+        const demandKey = getLoadSubsetDemandKey(demand)
+        expect(getLoadSubsetDemandKey(cloneLoadSubsetOptions(demand))).toBe(
+          demandKey,
+        )
+        expect(getLoadSubsetDemandKey(snapshotLoadSubsetDemand(demand))).toBe(
+          demandKey,
+        )
+        expect(getLoadSubsetDemandKey(secondDemands[index]!)).not.toBe(
+          demandKey,
+        )
+      })
+    }
+
+    expect(() =>
+      getStableExpressionHash(
+        new Func(`eq`, [field, new Value(firstFunction)]),
+      ),
+    ).toThrow(/function value/)
   })
 
   it.each([
