@@ -1410,7 +1410,7 @@ describe(`Electric Collection - loadSubset deduplication`, () => {
     } finally {
       await Promise.all([
         first.cleanup(),
-        second?.cleanup() ?? Promise.resolve(),
+        second?.cleanup(),
         electricCollection.cleanup(),
       ])
     }

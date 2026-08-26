@@ -1801,6 +1801,14 @@ describe(`On-Demand Sync Mode`, () => {
     it(`matches the shared remount history after final-owner release`, async () => {
       const db = await createDatabase()
       await createTestProducts(db)
+      const expectedRowKeys = (
+        await db.getAll<{ id: string }>(
+          `SELECT id FROM products WHERE category = 'electronics'`,
+        )
+      )
+        .map(({ id }) => String(id))
+        .sort()
+      expect(expectedRowKeys).toHaveLength(3)
       let transportLoads = 0
       const collection = createCollection(
         powerSyncCollectionOptions({
@@ -1834,13 +1842,15 @@ describe(`On-Demand Sync Mode`, () => {
 
       try {
         await first.preload()
-        const rowKeys = first.toArray.map(({ id }) => String(id)).sort()
         history.push({
           type: `applyAuthoritativeRows`,
           ownerId: `owner-1`,
           demandId: `electronics`,
-          rowKeys,
+          rowKeys: expectedRowKeys,
         })
+        expect(first.toArray.map(({ id }) => String(id)).sort()).toEqual(
+          projectRetainedRowKeys(history),
+        )
 
         await first.cleanup()
         history.push(
@@ -1848,7 +1858,7 @@ describe(`On-Demand Sync Mode`, () => {
             type: `releaseDemand`,
             ownerId: `owner-1`,
             demandId: `electronics`,
-            rowKeys,
+            rowKeys: expectedRowKeys,
             finalRowOwner: true,
             invalidatesAdapterEvidence: true,
           },
@@ -1874,7 +1884,7 @@ describe(`On-Demand Sync Mode`, () => {
           type: `applyAuthoritativeRows`,
           ownerId: `owner-2`,
           demandId: `electronics`,
-          rowKeys: reloadedKeys,
+          rowKeys: expectedRowKeys,
         })
 
         expect(transportLoads).toBe(projectTransportLoads(history))
@@ -1882,7 +1892,7 @@ describe(`On-Demand Sync Mode`, () => {
       } finally {
         await Promise.all([
           first.cleanup(),
-          second?.cleanup() ?? Promise.resolve(),
+          second?.cleanup(),
           collection.cleanup(),
         ])
       }

@@ -1,3 +1,12 @@
+/**
+ * A shared event vocabulary for small, independent refinement projections.
+ *
+ * This is deliberately not a second implementation of the Collection state
+ * machine. Each projector owns one law and ignores unrelated events. The
+ * lifecycle command model generates legal acquisition/release histories;
+ * boundary suites compare these projections with public Collection
+ * observations at the points where planes meet.
+ */
 export type FullFlowOwnerId = string
 export type FullFlowSessionId = string
 export type FullFlowDemandId = string
@@ -23,6 +32,10 @@ export type LoadSubsetFullFlowEvent =
       ownerId: FullFlowOwnerId
       demandId: FullFlowDemandId
       rowKeys: ReadonlyArray<string>
+    }
+  | {
+      type: `settleDemandWithoutEvidence`
+      demandId: FullFlowDemandId
     }
   | {
       type: `releaseDemand`
@@ -170,29 +183,41 @@ export function projectAdapterLifecycle(
 /**
  * Projects physical transport work from adapter evidence lifetime.
  *
- * Request settlement alone is not evidence. Only an applied authoritative row
- * publication makes the exact demand reusable, and an unload that invalidates
- * that evidence forces the next owner to fetch again.
+ * Concurrent owners attach to one in-flight exact demand. Settlement alone is
+ * not reusable evidence: only an applied authoritative row publication makes
+ * the demand reusable, and an unload that invalidates that evidence forces the
+ * next owner to fetch again.
  */
 export function projectTransportLoads(
   history: ReadonlyArray<LoadSubsetFullFlowEvent>,
 ): number {
   const reusableDemands = new Set<FullFlowDemandId>()
+  const inFlightDemands = new Set<FullFlowDemandId>()
   let loads = 0
 
   for (const event of history) {
     switch (event.type) {
       case `requestDemand`:
-        if (!event.alreadyAborted && !reusableDemands.has(event.demandId)) {
+        if (
+          !event.alreadyAborted &&
+          !reusableDemands.has(event.demandId) &&
+          !inFlightDemands.has(event.demandId)
+        ) {
           loads++
+          inFlightDemands.add(event.demandId)
         }
         break
       case `applyAuthoritativeRows`:
+        inFlightDemands.delete(event.demandId)
         reusableDemands.add(event.demandId)
+        break
+      case `settleDemandWithoutEvidence`:
+        inFlightDemands.delete(event.demandId)
         break
       case `releaseDemand`:
         if (event.invalidatesAdapterEvidence) {
           reusableDemands.delete(event.demandId)
+          inFlightDemands.delete(event.demandId)
         }
         break
       case `restartSession`:
@@ -277,6 +302,7 @@ export function projectAuthorizedContinuationStarts(
         break
       }
       case `applyAuthoritativeRows`:
+      case `settleDemandWithoutEvidence`:
       case `releaseDemand`:
       case `stageSyncTransaction`:
       case `commitSyncTransaction`:
@@ -441,6 +467,7 @@ export function projectSyncTransactions(
       }
       case `requestDemand`:
       case `applyAuthoritativeRows`:
+      case `settleDemandWithoutEvidence`:
       case `releaseDemand`:
       case `restartSession`:
       case `cleanupSession`:
@@ -465,14 +492,14 @@ export function projectSyncTransactions(
     publishedBatches,
     callbackReads,
     receipts: [...transactions]
-      .flatMap(([transactionId, transaction]) => {
+      .map(([transactionId, transaction]) => {
         const state =
           transaction.state === `resolved`
             ? `resolved`
             : transaction.state === `rejected`
               ? `rejected`
               : `pending`
-        return [{ transactionId, state } as const]
+        return { transactionId, state } as const
       })
       .sort((left, right) =>
         left.transactionId.localeCompare(right.transactionId),
@@ -644,6 +671,7 @@ export function projectReplayPublication(
       }
       case `requestDemand`:
       case `applyAuthoritativeRows`:
+      case `settleDemandWithoutEvidence`:
       case `releaseDemand`:
       case `restartSession`:
       case `cleanupSession`:
@@ -686,7 +714,6 @@ export function projectSourceReadiness(
   const demands = new Map<
     string,
     {
-      sessionId: FullFlowSessionId
       sourceId: FullFlowSourceId
       state: `pending` | `resolved` | `rejected`
     }
@@ -701,7 +728,6 @@ export function projectSourceReadiness(
         if (event.sessionId !== currentSession) break
         cleanedUp = false
         demands.set(`${event.sourceId}\u0000${event.demandId}`, {
-          sessionId: event.sessionId,
           sourceId: event.sourceId,
           state: `pending`,
         })
@@ -726,6 +752,7 @@ export function projectSourceReadiness(
         break
       case `requestDemand`:
       case `applyAuthoritativeRows`:
+      case `settleDemandWithoutEvidence`:
       case `releaseDemand`:
       case `advanceWindowRevision`:
       case `scheduleContinuation`:
@@ -747,9 +774,7 @@ export function projectSourceReadiness(
     }
   }
 
-  const currentDemands = [...demands.values()].filter(
-    ({ sessionId }) => sessionId === currentSession,
-  )
+  const currentDemands = [...demands.values()]
   const pendingSources = [
     ...new Set(
       currentDemands

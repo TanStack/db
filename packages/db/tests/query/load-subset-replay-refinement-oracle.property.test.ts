@@ -75,19 +75,17 @@ describe(`loadSubset replay refinement`, () => {
     const callbackReads: Array<Array<FullFlowVersionedRow>> = []
     const subscription = downstream.subscribeChanges(
       (changes: Array<ChangeMessage<Row, string>>) => {
-        const batch = changes.map((change) => {
-          return {
-            type: change.type,
-            row: {
-              sourceId,
-              rowKey: String(change.key),
-              version: change.value.version,
-            },
-            ...(change.previousValue === undefined
-              ? {}
-              : { previousVersion: change.previousValue.version }),
-          }
-        })
+        const batch = changes.map((change) => ({
+          type: change.type,
+          row: {
+            sourceId,
+            rowKey: String(change.key),
+            version: change.value.version,
+          },
+          ...(change.previousValue === undefined
+            ? {}
+            : { previousVersion: change.previousValue.version }),
+        }))
         if (batch.length > 0) {
           batches.push(batch)
           callbackReads.push(

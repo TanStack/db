@@ -735,6 +735,11 @@ create recursive Collection machinery.
 | Truncate replacement, retained publication, and boundary provenance         | `packages/db/tests/collection-subscription-replay-oracle.property.test.ts` |
 | Coverage leases, acquisitions, fact compaction, and row provenance          | `packages/db/tests/query/coverage-registry-oracle.property.test.ts`        |
 | Applied coverage publication through the Collection sync boundary           | `packages/db/tests/load-subset-outcome.test.ts`                            |
+| Scheduled acquisition, release retry, and stale settlement                  | `packages/db/tests/query/load-subset-lifecycle-oracle.property.test.ts`    |
+| End-to-end demand, continuation, and outcome-free boundaries                | `packages/db/tests/query/load-subset-full-flow-oracle.property.test.ts`    |
+| Subset acquisition, readiness, receipt, and replay refinement laws          | `packages/db/tests/query/load-subset-refinement-*.property.test.ts`        |
+| Production-boundary refinement drivers                                      | `packages/db/tests/query/load-subset-*-refinement-oracle.property.test.ts` |
+| Adapter final-owner release and remount transport                           | Electric `electric-live-query.test.ts`; PowerSync `on-demand-sync.test.ts` |
 | Query-db ownership                                                          | `packages/query-db-collection/tests/ownership-lifecycle.oracle.test.ts`    |
 | Reachable nested shape                                                      | `packages/query-db-collection/tests/includes-work-counter-oracle.test.ts`  |
 
