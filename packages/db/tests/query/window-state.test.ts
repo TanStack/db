@@ -213,7 +213,7 @@ describe(`WindowState`, () => {
       ),
     ),
   )(
-    `keeps legacy satisfaction local ($direction, nulls $nulls, prefix $requestedPrefix)`,
+    `keeps outcome-free satisfaction local ($direction, nulls $nulls, prefix $requestedPrefix)`,
     ({ direction, nulls, requestedPrefix }) => {
       const window = new WindowState<Row, number>(
         mockCollection([

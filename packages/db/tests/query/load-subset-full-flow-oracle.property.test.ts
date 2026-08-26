@@ -308,7 +308,7 @@ it(`does not let an ordered continuation from a cleaned session start new work a
 })
 
 it.each([`sync`, `async`] as const)(
-  `keeps a legacy %s result local to its exact ordered window`,
+  `keeps an outcome-free %s completion local to its exact ordered window`,
   async (settlement) => {
     type Row = { id: number; rank: number }
     const remoteRows: ReadonlyArray<Row> = [
@@ -319,7 +319,7 @@ it.each([`sync`, `async`] as const)(
     const loadedKeys = new Set<number>()
     const demands: Array<LoadSubsetOptions> = []
     const source = createCollection<Row>({
-      id: `full-flow-legacy-${settlement}-source`,
+      id: `full-flow-outcome-free-${settlement}-source`,
       getKey: (row) => row.id,
       syncMode: `on-demand`,
       startSync: true,
@@ -355,7 +355,7 @@ it.each([`sync`, `async`] as const)(
       },
     })
     const live = createLiveQueryCollection({
-      id: `full-flow-legacy-${settlement}-live`,
+      id: `full-flow-outcome-free-${settlement}-live`,
       query: (q) =>
         q
           .from({ row: source })

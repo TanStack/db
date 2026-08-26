@@ -395,7 +395,7 @@ a failed truncate replay, the last complete publication remains the boundary;
 a partial replacement snapshot has no continuation provenance. Exact applied
 row keys and source extent advance retained coverage. A requested limit, a
 settled promise, or the number of requests does not.
-A synchronous `true` or legacy `Promise<void>` supplies no reusable row
+An outcome-free completion (`true` or `Promise<void>`) supplies no reusable row
 provenance, source extent, or CoverageFact. Its exact request has still settled,
 so the owning subscription may admit only the current local prefix. A short
 page remains uncovered and triggers another pass. If the window later grows,
