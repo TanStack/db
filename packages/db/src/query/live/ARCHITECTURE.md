@@ -396,7 +396,9 @@ a partial replacement snapshot has no continuation provenance. Exact applied
 row keys and source extent advance retained coverage. Public readers also keep
 that last complete publication while every overlapping replacement attempt is
 pending. A successful current replacement publishes its settled ordered
-reconciliation once; failure publishes no replacement batch.
+reconciliation once, but only after applied evidence proves the retained prefix
+or authoritative exhaustion. A continuing page stays private while its next
+acquisition refines that evidence; failure publishes no replacement batch.
 A requested limit, a settled promise, or the number of requests does not.
 An outcome-free completion (`true` or `Promise<void>`) supplies no reusable row
 provenance, source extent, or CoverageFact. Its exact request has still settled,

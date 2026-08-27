@@ -86,7 +86,17 @@ export type LoadSubsetFullFlowEvent =
   | {
       type: `settleReplacement`
       publicationId: FullFlowPublicationId
-      outcome: `success` | `failure` | `abort`
+      outcome: `failure` | `abort`
+    }
+  | {
+      type: `settleReplacement`
+      publicationId: FullFlowPublicationId
+      outcome: `success`
+      extent: `exhausted` | `continues`
+    }
+  | {
+      type: `establishReplacementCoverage`
+      publicationId: FullFlowPublicationId
     }
   | {
       type: `resizeOrderedWindow`
@@ -175,6 +185,7 @@ export function projectTransportLoads(
       case `commitPublication`:
       case `beginReplacement`:
       case `settleReplacement`:
+      case `establishReplacementCoverage`:
       case `resizeOrderedWindow`:
         break
     }
@@ -246,6 +257,7 @@ export function projectAuthorizedContinuationStarts(
       case `commitPublication`:
       case `beginReplacement`:
       case `settleReplacement`:
+      case `establishReplacementCoverage`:
       case `resizeOrderedWindow`:
         break
     }
@@ -294,6 +306,7 @@ export function projectReusableDemands(
       case `commitPublication`:
       case `beginReplacement`:
       case `settleReplacement`:
+      case `establishReplacementCoverage`:
       case `resizeOrderedWindow`:
         break
     }
@@ -361,6 +374,7 @@ export function projectAtomicOrderedPublications(
   history: ReadonlyArray<LoadSubsetFullFlowEvent>,
   options: {
     demandId: FullFlowDemandId
+    additionalDemandIds?: ReadonlyArray<FullFlowDemandId>
     direction: `asc` | `desc`
     initialWindowSize: number
   },
@@ -371,24 +385,47 @@ export function projectAtomicOrderedPublications(
   >()
   const attempts = new Map<
     FullFlowPublicationId,
-    `success` | `failure` | `abort` | undefined
+    | { outcome: `success`; publishable: boolean }
+    | { outcome: `failure` | `abort`; publishable: false }
+    | undefined
   >()
+  const activeAdditionalDemands = new Set(options.additionalDemandIds ?? [])
   const publications: Array<ReadonlyArray<FullFlowPublishedOrderRow>> = []
   let currentReplacement: FullFlowPublicationId | undefined
   let retainedSize = options.initialWindowSize
 
-  const publish = (rows: ReadonlyArray<FullFlowPublishedOrderRow>) => {
-    const next = [...rows]
-      .sort((left, right) => {
-        const valueOrder =
-          options.direction === `asc`
-            ? left.orderValue - right.orderValue
-            : right.orderValue - left.orderValue
-        if (valueOrder !== 0) return valueOrder
-        if (left.key === right.key) return 0
-        return left.key < right.key ? -1 : 1
-      })
-      .slice(0, retainedSize)
+  const sortRows = (rows: ReadonlyArray<FullFlowPublishedOrderRow>) =>
+    [...rows].sort((left, right) => {
+      const valueOrder =
+        options.direction === `asc`
+          ? left.orderValue - right.orderValue
+          : right.orderValue - left.orderValue
+      if (valueOrder !== 0) return valueOrder
+      if (left.key === right.key) return 0
+      return left.key < right.key ? -1 : 1
+    })
+
+  const publicationRows = (publicationId: FullFlowPublicationId) => {
+    const publication = staged.get(publicationId)
+    const orderedRows = publication?.get(options.demandId)
+    if (!publication || !orderedRows) return undefined
+
+    const desired = new Map(
+      sortRows(orderedRows)
+        .slice(0, retainedSize)
+        .map((row) => [row.key, row] as const),
+    )
+    for (const demandId of activeAdditionalDemands) {
+      for (const row of publication.get(demandId) ?? []) {
+        desired.set(row.key, row)
+      }
+    }
+    return sortRows([...desired.values()])
+  }
+
+  const publish = (publicationId: FullFlowPublicationId) => {
+    const next = publicationRows(publicationId)
+    if (!next) return
     const previous = publications.at(-1)
     if (
       previous?.length === next.length &&
@@ -416,8 +453,7 @@ export function projectAtomicOrderedPublications(
       }
       case `commitPublication`: {
         if (attempts.size > 0) break
-        const rows = staged.get(event.publicationId)?.get(options.demandId)
-        if (rows) publish(rows)
+        publish(event.publicationId)
         break
       }
       case `beginReplacement`:
@@ -429,19 +465,49 @@ export function projectAtomicOrderedPublications(
         break
       case `settleReplacement`: {
         if (!attempts.has(event.publicationId)) break
-        attempts.set(event.publicationId, event.outcome)
+        attempts.set(
+          event.publicationId,
+          event.outcome === `success`
+            ? {
+                outcome: `success`,
+                publishable: event.extent === `exhausted`,
+              }
+            : { outcome: event.outcome, publishable: false },
+        )
         if ([...attempts.values()].some((outcome) => outcome === undefined)) {
           break
         }
+        const current =
+          currentReplacement === undefined
+            ? undefined
+            : attempts.get(currentReplacement)
         if (
           currentReplacement !== undefined &&
-          attempts.get(currentReplacement) === `success`
+          current?.outcome === `success` &&
+          current.publishable
         ) {
-          const rows = staged.get(currentReplacement)?.get(options.demandId)
-          if (rows) publish(rows)
+          publish(currentReplacement)
+          attempts.clear()
+          currentReplacement = undefined
+        } else if (current?.outcome !== `success`) {
+          attempts.clear()
+          currentReplacement = undefined
         }
-        attempts.clear()
-        currentReplacement = undefined
+        break
+      }
+      case `establishReplacementCoverage`: {
+        if (
+          event.publicationId !== currentReplacement ||
+          [...attempts.values()].some((outcome) => outcome === undefined)
+        ) {
+          break
+        }
+        const current = attempts.get(event.publicationId)
+        if (current?.outcome === `success`) {
+          publish(event.publicationId)
+          attempts.clear()
+          currentReplacement = undefined
+        }
         break
       }
       case `requestDemand`:
@@ -449,6 +515,8 @@ export function projectAtomicOrderedPublications(
       case `applyUnprovenRows`:
       case `rejectDemand`:
       case `releaseDemand`:
+        activeAdditionalDemands.delete(event.demandId)
+        break
       case `truncateSource`:
       case `cleanupSession`:
       case `restartSession`:

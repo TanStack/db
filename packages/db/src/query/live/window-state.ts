@@ -56,6 +56,11 @@ export class WindowState<
     return this.hasFullCoverage || this.coveredSize >= this.activeSize
   }
 
+  /** A replacement can publish only after proving its retained prefix. */
+  get coversRetainedWindow(): boolean {
+    return this.hasFullCoverage || this.coveredSize >= this.retainedSize
+  }
+
   get requiresFullRefinement(): boolean {
     return this.needsFullRefinement
   }

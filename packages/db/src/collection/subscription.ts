@@ -443,9 +443,13 @@ export class CollectionSubscription
 
     if (session.currentAttempt.failed) {
       this.abandonTruncateReplay(session)
-    } else {
-      this.flushTruncateReplay(session)
+      return
     }
+    // A fulfilled page can still say that more ordered rows exist. Keep the
+    // old publication until a continuation proves the whole retained prefix;
+    // request settlement alone is not a safe replacement boundary.
+    if (this.orderedWindow && !this.orderedWindow.coversRetainedWindow) return
+    this.flushTruncateReplay(session)
   }
 
   /**
@@ -931,6 +935,13 @@ export class CollectionSubscription
       return true
     }
 
+    // A truncate replacement is private until it has enough ordered evidence
+    // to publish. Still admit its source changes so a later continuation uses
+    // the exact replacement candidates, including deltas that raced the page.
+    if (this.orderedWindow && this.isBufferingForTruncate) {
+      this.orderedWindow.admitChanges(changes)
+    }
+
     const newChanges = this.filterAndFlipChanges(changes)
 
     // Reconciliation can reduce a source delta to no visible change. Do not
@@ -1290,6 +1301,8 @@ export class CollectionSubscription
       }
 
       if (this.isBufferingForTruncate || this.stalePublishedRows.size > 0) {
+        const session = this.truncateReplaySession
+        if (session) this.checkTruncateReplayComplete(session)
         return
       }
       const changes = this.reconcileOrderedWindow()
