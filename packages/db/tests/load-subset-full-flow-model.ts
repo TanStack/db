@@ -8,6 +8,97 @@ export type FullFlowPublishedOrderRow = {
   orderValue: number
 }
 
+export type OrderedContinuationEvidencePage = {
+  requestedPrefix: number
+  appliedKeys: ReadonlyArray<string>
+  extent: `continues` | `exhausted`
+}
+
+export type OrderedContinuationEvidence = {
+  visibleKeys: ReadonlyArray<string>
+  boundaryKey: string | undefined
+  coveredPrefixSize: number
+  coversTarget: boolean
+  rowsNeeded: number
+}
+
+/**
+ * Projects ordered evidence from request receipts alone. Requested size and
+ * source progress are independent inputs; only eligible applied rows count
+ * toward the visible prefix, while every applied row may advance its cursor.
+ */
+export function projectOrderedContinuationEvidence(options: {
+  sourceOrder: ReadonlyArray<string>
+  eligibleKeys: ReadonlySet<string>
+  targetSize: number
+  pages: ReadonlyArray<OrderedContinuationEvidencePage>
+}): OrderedContinuationEvidence {
+  const { sourceOrder, eligibleKeys, targetSize, pages } = options
+  const sourcePosition = new Map(
+    sourceOrder.map((key, position) => [key, position]),
+  )
+  const known = (keys: ReadonlySet<string>) =>
+    sourceOrder.filter((key) => keys.has(key))
+  const candidates = new Set<string>()
+  const provenance = new Set<string>()
+  const admitted = new Set<string>()
+  let coveredPrefixSize = 0
+  let exhausted = false
+
+  const initial = pages[0]
+  if (initial) {
+    for (const key of initial.appliedKeys) {
+      if (sourcePosition.has(key)) candidates.add(key)
+    }
+    exhausted = initial.extent === `exhausted`
+  }
+
+  for (const page of pages.slice(1)) {
+    if (exhausted) break
+    if (page.extent === `exhausted`) {
+      exhausted = true
+      break
+    }
+    for (const key of candidates) {
+      provenance.add(key)
+      admitted.add(key)
+    }
+    candidates.clear()
+    for (const key of page.appliedKeys) {
+      if (!sourcePosition.has(key)) continue
+      provenance.add(key)
+      admitted.add(key)
+    }
+    const eligibleAdmitted = known(admitted).filter((key) =>
+      eligibleKeys.has(key),
+    )
+    coveredPrefixSize = Math.max(
+      coveredPrefixSize,
+      Math.min(
+        page.requestedPrefix,
+        eligibleAdmitted.slice(0, targetSize).length,
+      ),
+    )
+  }
+
+  const visibleKeys = exhausted
+    ? sourceOrder.filter((key) => eligibleKeys.has(key)).slice(0, targetSize)
+    : known(admitted)
+        .filter((key) => eligibleKeys.has(key))
+        .slice(0, targetSize)
+  const boundaryKeys = exhausted
+    ? sourceOrder.slice(0, targetSize)
+    : known(provenance.size > 0 ? provenance : candidates).slice(0, targetSize)
+
+  return {
+    visibleKeys,
+    boundaryKey: boundaryKeys.at(-1),
+    coveredPrefixSize: exhausted ? Number.POSITIVE_INFINITY : coveredPrefixSize,
+    coversTarget: exhausted || coveredPrefixSize >= targetSize,
+    rowsNeeded: Math.max(0, targetSize - visibleKeys.length),
+  }
+}
+
 export type LoadSubsetFullFlowEvent =
   | {
       type: `requestDemand`

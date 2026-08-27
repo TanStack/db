@@ -911,6 +911,7 @@ async function runAdversarialOrderedProviderScenario(options: {
   providerPageCap?: number
   reportedExtent?: `computed` | `continues` | `unknown` | `exhausted`
   widenTo?: number
+  expectNoProgress?: boolean
 }): Promise<Array<LoadSubsetOptions>> {
   const loads: Array<LoadSubsetOptions> = []
   const delivered = new Set(options.initialRows?.map(({ id }) => id) ?? [])
@@ -934,6 +935,17 @@ async function runAdversarialOrderedProviderScenario(options: {
         return {
           loadSubset: (loadOptions: LoadSubsetOptions) => {
             loads.push(loadOptions)
+            if (loads.length > options.providerRows.length * 4 + 4) {
+              throw new Error(
+                `Ordered refinement exceeded its finite source work bound: ${JSON.stringify(
+                  loads.map(({ limit, offset, cursor }) => ({
+                    limit,
+                    offset,
+                    lastKey: cursor?.lastKey,
+                  })),
+                )}`,
+              )
+            }
             const providerMatch = options.useOffsetWhenAvailable
               ? options.providerRows.slice(
                   loadOptions.offset ?? 0,
@@ -1010,6 +1022,11 @@ async function runAdversarialOrderedProviderScenario(options: {
         limit: options.widenTo,
       })
       if (widened instanceof Promise) await widened
+      if (options.expectNoProgress) {
+        expect(live.utils.lastSubsetError).toMatchObject({
+          name: `OrderedLoadNoProgressError`,
+        })
+      }
       expect(loads.length).toBeGreaterThan(loadCount)
     }
     return loads
@@ -1466,6 +1483,17 @@ async function runPendingHistoryScenario(
 
     await settle(pending[0]!)
     for (let index = 1; index < pending.length; index++) {
+      if (index > rows.size * 4) {
+        throw new Error(
+          `Ordered continuation exceeded its finite source work bound: ${JSON.stringify(
+            pending.map(({ options }) => ({
+              limit: options.limit,
+              offset: options.offset,
+              lastKey: options.cursor?.lastKey,
+            })),
+          )}`,
+        )
+      }
       await settle(pending[index]!)
     }
     await Promise.all(outstanding)
@@ -2948,11 +2976,17 @@ describe(`pagination recomputation oracle`, () => {
         providerPageCap: 1,
         reportedExtent,
         widenTo: 2,
+        expectNoProgress: true,
       })
 
       expect(loads[1]?.limit).toBeUndefined()
       expect(loads[1]?.offset).toBeUndefined()
-      expect(loads.length).toBeGreaterThan(2)
+      expect(loads.map(({ limit }) => limit)).toEqual([
+        1,
+        undefined,
+        undefined,
+        2,
+      ])
     },
   )
 

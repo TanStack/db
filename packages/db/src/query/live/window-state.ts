@@ -48,12 +48,20 @@ export class WindowState<
     return this.activeSize
   }
 
+  get retainedPrefixSize(): number {
+    return this.retainedSize
+  }
+
   get localPrefixSize(): number {
     return this.readPrefix().length
   }
 
   get coversActiveWindow(): boolean {
     return this.hasFullCoverage || this.coveredSize >= this.activeSize
+  }
+
+  get coveredPrefixSize(): number {
+    return this.coveredSize
   }
 
   /** A replacement can publish only after proving its retained prefix. */
@@ -156,7 +164,12 @@ export class WindowState<
       // reacquire from the start before using any of it as a boundary.
       this.coveredSize = 0
     } else {
-      this.coveredSize = Math.max(this.coveredSize, requestedPrefix)
+      // A requested prefix is intent, not evidence. A short continuing page
+      // proves only the rows that this ordered demand has actually admitted.
+      this.coveredSize = Math.max(
+        this.coveredSize,
+        Math.min(requestedPrefix, this.localPrefixSize),
+      )
       this.needsPrefixRefresh = false
     }
   }
@@ -279,7 +292,10 @@ export class WindowState<
   }
 
   requestBoundary(): TotalOrderBoundary<TKey> | undefined {
-    const rows = this.readRows(
+    // Applied source rows prove cursor progress even when this subscription's
+    // predicate excludes them. Keep that source boundary separate from the
+    // eligible rows admitted to the visible result prefix.
+    const rows = this.readSourceRows(
       this.hasFullCoverage
         ? undefined
         : this.provenanceKeys.size > 0
@@ -289,6 +305,15 @@ export class WindowState<
     )
     const lastRow = rows.at(-1)
     return lastRow && this.totalOrder.boundary(lastRow.value, lastRow.key)
+  }
+
+  /**
+   * Distinguishes automatic refill passes without claiming a reusable cursor.
+   * Outcome-free loads can move this local boundary while requestBoundary()
+   * stays empty and forces the adapter request to refresh from the start.
+   */
+  progressBoundary(): TotalOrderBoundary<TKey> | undefined {
+    return this.requestBoundary() ?? this.boundary()
   }
 
   reconcile(
@@ -344,6 +369,20 @@ export class WindowState<
   ): Array<ChangeMessage<TRow, TKey>> {
     const rows = this.collection.currentStateAsChanges({
       ...(this.where && { where: this.where }),
+      orderBy: this.totalOrder.orderBy,
+    }) as Array<ChangeMessage<TRow, TKey>> | undefined
+    const allowed =
+      allowedKeys === undefined
+        ? (rows ?? [])
+        : (rows ?? []).filter((change) => allowedKeys.has(change.key))
+    return limit === undefined ? allowed : allowed.slice(0, limit)
+  }
+
+  private readSourceRows(
+    allowedKeys: ReadonlySet<TKey> | undefined,
+    limit?: number,
+  ): Array<ChangeMessage<TRow, TKey>> {
+    const rows = this.collection.currentStateAsChanges({
       orderBy: this.totalOrder.orderBy,
     }) as Array<ChangeMessage<TRow, TKey>> | undefined
     const allowed =

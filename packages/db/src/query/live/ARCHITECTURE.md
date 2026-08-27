@@ -417,12 +417,27 @@ later source writes and late settlements cannot reach public readers. Here a
 publication means a change to reader-visible state; an empty transport callback
 does not count as one.
 A requested limit, a settled promise, or the number of requests does not.
+Applied keys carry two distinct facts. Every applied source key may advance the
+continuation cursor, including a row excluded by the subscription predicate.
+Only applied rows admitted to that subscription's retained result prefix count
+toward its covered size. Thus a short continuing page cannot turn a requested
+prefix into achieved coverage, but an excluded row can still move the next
+request past source data that core has already inspected.
+
+Automatic continuation is monotonic. Its identity is the retained demanded
+prefix plus the exact total-order boundary, including the public key. Core may
+start another request only when that prefix grows or that boundary moves. If a
+continuing page establishes neither fact, core leaves the window uncovered,
+does not repeat the same request, and records a nonfatal no-progress diagnostic
+in `lastSubsetError`.
+
 An outcome-free completion (`true` or `Promise<void>`) supplies no reusable row
 provenance, source extent, or CoverageFact. Its exact request has still settled,
 so the owning subscription may admit only the current local prefix. A short
-page remains uncovered and triggers another pass. If the window later grows,
-core refreshes the required prefix from the start instead of continuing from
-those rows as a cursor boundary.
+page remains uncovered and triggers another pass. The admitted local boundary
+may distinguish those immediate passes, but it is scheduling state, not a
+transport cursor. If the window later grows, core refreshes the required prefix
+from the start instead of continuing from those rows as a cursor boundary.
 
 A bare child query is a Collection-valued include. It exposes one stable public
 Collection facade per active bucket in that edge:

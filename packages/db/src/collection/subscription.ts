@@ -597,6 +597,10 @@ export class CollectionSubscription
     return this.orderedWindow?.rowsNeeded() ?? 0
   }
 
+  get orderedRetainedWindowSize(): number {
+    return this.orderedWindow?.retainedPrefixSize ?? 0
+  }
+
   get hasOrderedCoverageForActiveWindow(): boolean {
     return this.orderedWindow?.coversActiveWindow ?? false
   }
@@ -605,11 +609,19 @@ export class CollectionSubscription
     const boundary =
       this.stalePublishedRows.size > 0
         ? this.orderedBoundary()
-        : this.orderedWindow?.requestBoundary()
+        : this.orderedWindow?.progressBoundary()
     return boundary === undefined
       ? undefined
       : (this.publishedRows.get(boundary.key) ??
           this.collection.get(boundary.key))
+  }
+
+  get orderedBoundaryKey(): string | number | undefined {
+    return (
+      this.stalePublishedRows.size > 0
+        ? this.orderedBoundary()
+        : this.orderedWindow?.progressBoundary()
+    )?.key
   }
 
   private orderedBoundary() {

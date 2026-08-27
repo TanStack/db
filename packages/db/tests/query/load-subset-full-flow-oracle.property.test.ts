@@ -4,19 +4,21 @@ import { createCollection } from '../../src/collection/index.js'
 import { createDeferred } from '../../src/deferred.js'
 import { BTreeIndex, ReverseIndex } from '../../src/index.js'
 import { Func, PropRef, Value } from '../../src/query/ir.js'
-import { createLiveQueryCollection } from '../../src/query/index.js'
+import { createLiveQueryCollection, eq } from '../../src/query/index.js'
 import { DeduplicatedLoadSubset } from '../../src/query/subset-dedupe.js'
+import { WindowState } from '../../src/query/live/window-state.js'
 import { evaluateReferenceExpression } from '../reference-expression.js'
 import {
   projectAdapterLifecycle,
   projectAtomicOrderedPublications,
   projectAuthorizedContinuationStarts,
+  projectOrderedContinuationEvidence,
   projectOrderedPublicationBoundary,
   projectRetainedRowKeys,
   projectReusableDemands,
   projectTransportLoads,
 } from '../load-subset-full-flow-model.js'
-import { flushPromises } from '../utils.js'
+import { flushPromises, mockSyncCollectionOptions } from '../utils.js'
 import {
   oracleRandomParameters,
   readOracleRunConfig,
@@ -617,6 +619,290 @@ it.each([`sync`, `async`] as const)(
       await source.cleanup()
     }
   },
+)
+
+it(`continues an ordered window after a short non-exhausted page`, async () => {
+  type Row = { id: number; rank: number; eligible: boolean }
+  const remoteRows: ReadonlyArray<Row> = [
+    { id: 1, rank: 1, eligible: true },
+    { id: 3, rank: 1, eligible: false },
+    { id: 2, rank: 2, eligible: true },
+  ]
+  const calls: Array<LoadSubsetOptions> = []
+  let begin!: () => void
+  let write!: (message: { type: `insert`; value: Row }) => void
+  let commit!: () => true | Promise<void>
+  const source = createCollection<Row>({
+    id: `full-flow-short-continuation-source`,
+    getKey: (row) => row.id,
+    syncMode: `on-demand`,
+    startSync: true,
+    autoIndex: `eager`,
+    defaultIndexType: BTreeIndex,
+    sync: {
+      sync: (params) => {
+        begin = params.begin
+        write = params.write
+        commit = params.commit
+        params.markReady()
+        return {
+          loadSubset: async (options) => {
+            calls.push(options)
+            await Promise.resolve()
+            const rows =
+              calls.length === 1
+                ? [remoteRows[0]!]
+                : calls.length === 2
+                  ? [remoteRows[1]!]
+                  : [remoteRows[2]!]
+            begin()
+            for (const row of rows) write({ type: `insert`, value: row })
+            const applied = commit()
+            if (applied !== true) await applied
+            return {
+              hasMore: calls.length < 3,
+              appliedRowKeys: rows.map(({ id }) => id),
+            }
+          },
+          unloadSubset: () => {},
+        }
+      },
+    },
+  })
+  const live = createLiveQueryCollection({
+    id: `full-flow-short-continuation-live`,
+    query: (q) =>
+      q
+        .from({ row: source })
+        .where(({ row }) => eq(row.eligible, true))
+        .orderBy(({ row }) => row.rank)
+        .limit(2),
+    startSync: true,
+  })
+
+  try {
+    await live.preload()
+    await flushPromises()
+
+    expect(calls).toHaveLength(3)
+    expect(calls.map(({ cursor }) => cursor?.lastKey)).toEqual([
+      undefined,
+      1,
+      3,
+    ])
+    expect(live.toArray.map(({ id }) => id)).toEqual([1, 2])
+  } finally {
+    await live.cleanup()
+    await source.cleanup()
+  }
+})
+
+it(`does not repeat an evidence-free ordered continuation`, async () => {
+  type Row = { id: number; rank: number }
+  const row: Row = { id: 1, rank: 1 }
+  const calls: Array<LoadSubsetOptions> = []
+  let begin!: () => void
+  let write!: (message: { type: `insert`; value: Row }) => void
+  let commit!: () => true | Promise<void>
+  const source = createCollection<Row>({
+    id: `full-flow-no-progress-source`,
+    getKey: (value) => value.id,
+    syncMode: `on-demand`,
+    startSync: true,
+    autoIndex: `eager`,
+    defaultIndexType: BTreeIndex,
+    sync: {
+      sync: (params) => {
+        begin = params.begin
+        write = params.write
+        commit = params.commit
+        params.markReady()
+        return {
+          loadSubset: async (options) => {
+            calls.push(options)
+            await Promise.resolve()
+            const rows = calls.length === 1 ? [row] : []
+            begin()
+            for (const value of rows) write({ type: `insert`, value })
+            const applied = commit()
+            if (applied !== true) await applied
+            return {
+              hasMore: true,
+              appliedRowKeys: rows.map(({ id }) => id),
+            }
+          },
+          unloadSubset: () => {},
+        }
+      },
+    },
+  })
+  const live = createLiveQueryCollection({
+    id: `full-flow-no-progress-live`,
+    query: (q) =>
+      q
+        .from({ row: source })
+        .orderBy(({ row: value }) => value.rank)
+        .limit(2),
+    startSync: true,
+  })
+
+  try {
+    await live.preload()
+    await flushPromises()
+
+    expect(calls).toHaveLength(2)
+    expect(live.toArray.map(({ id }) => id)).toEqual([1])
+    expect(live.utils.lastSubsetError).toMatchObject({
+      message: expect.stringContaining(`made no ordered progress`),
+    })
+
+    await live.utils.setWindow({ offset: 0, limit: 3 })
+    await flushPromises()
+
+    expect(calls).toHaveLength(3)
+    expect(calls[2]?.cursor?.lastKey).toBe(1)
+  } finally {
+    await live.cleanup()
+    await source.cleanup()
+  }
+})
+
+type OrderedContinuationEvidenceScenario = {
+  targetSize: number
+  eligibleKeys: ReadonlyArray<string>
+  pages: ReadonlyArray<{
+    requestedPrefix: number
+    appliedKeys: ReadonlyArray<string>
+    extent: `continues` | `exhausted`
+  }>
+}
+
+const orderedEvidenceKeyArbitrary = fc.constantFrom(`a`, `b`, `c`, `d`)
+const orderedContinuationEvidenceScenarioArbitrary: fc.Arbitrary<OrderedContinuationEvidenceScenario> =
+  fc.record({
+    targetSize: fc.integer({ min: 1, max: 4 }),
+    eligibleKeys: fc.uniqueArray(orderedEvidenceKeyArbitrary, {
+      minLength: 0,
+      maxLength: 4,
+    }),
+    pages: fc.array(
+      fc.record({
+        requestedPrefix: fc.integer({ min: 1, max: 4 }),
+        appliedKeys: fc.uniqueArray(orderedEvidenceKeyArbitrary, {
+          minLength: 0,
+          maxLength: 4,
+        }),
+        extent: fc.constantFrom(`continues` as const, `exhausted` as const),
+      }),
+      { minLength: 1, maxLength: 4 },
+    ),
+  })
+
+if (process.env.TANSTACK_DB_ORACLE_STATISTICS === `1`) {
+  fc.statistics(
+    orderedContinuationEvidenceScenarioArbitrary,
+    ({ eligibleKeys, pages }) => [
+      `empty-continuation=${pages.some(
+        (page) => page.extent === `continues` && page.appliedKeys.length === 0,
+      )}`,
+      `short-continuation=${pages.some(
+        (page) =>
+          page.extent === `continues` &&
+          page.appliedKeys.length < page.requestedPrefix,
+      )}`,
+      `excluded-applied-row=${pages.some((page) =>
+        page.appliedKeys.some((key) => !eligibleKeys.includes(key)),
+      )}`,
+      `exhaustion=${pages.some((page) => page.extent === `exhausted`)}`,
+    ],
+    oracleRandomParameters(1_000, fullFlowReplaySeed),
+  )
+}
+
+let orderedEvidenceHarnessId = 0
+
+async function runOrderedContinuationEvidenceScenario(
+  scenario: OrderedContinuationEvidenceScenario,
+): Promise<void> {
+  type Row = { id: string; rank: number; eligible: boolean }
+  const sourceOrder = [`a`, `b`, `c`, `d`]
+  const eligibleKeys = new Set(scenario.eligibleKeys)
+  const rows: Array<Row> = sourceOrder.map((id, index) => ({
+    id,
+    rank: index + 1,
+    eligible: eligibleKeys.has(id),
+  }))
+  const source = createCollection(
+    mockSyncCollectionOptions<Row>({
+      id: `ordered-evidence-oracle-${orderedEvidenceHarnessId++}`,
+      initialData: rows,
+      getKey: (row) => row.id,
+    }),
+  )
+  await source.preload()
+  const orderBy = [
+    {
+      expression: new PropRef([`rank`]),
+      compareOptions: { direction: `asc` as const, nulls: `first` as const },
+    },
+  ]
+  const where = new Func(`eq`, [new PropRef([`eligible`]), new Value(true)])
+  const window = new WindowState(source, orderBy, where, scenario.targetSize)
+
+  try {
+    const [initial, ...continuations] = scenario.pages
+    if (!initial) throw new Error(`Expected an initial evidence page`)
+    window.recordInitialCoverage(
+      initial.appliedKeys,
+      initial.extent === `exhausted`,
+    )
+    if (initial.extent !== `exhausted`) {
+      for (const page of continuations) {
+        window.recordContinuationCoverage(
+          page.appliedKeys,
+          page.extent === `exhausted`,
+          page.requestedPrefix,
+          window.coverageRevision,
+        )
+        if (page.extent === `exhausted`) break
+      }
+    }
+
+    const expected = projectOrderedContinuationEvidence({
+      sourceOrder,
+      eligibleKeys,
+      targetSize: scenario.targetSize,
+      pages: scenario.pages,
+    })
+    const actualKeys = window
+      .reconcile(new Map())
+      .filter((change) => change.type === `insert`)
+      .map(({ key }) => key)
+
+    expect(actualKeys).toEqual(expected.visibleKeys)
+    expect(window.requestBoundary()?.key).toBe(expected.boundaryKey)
+    expect(window.coveredPrefixSize).toBe(expected.coveredPrefixSize)
+    expect(window.coversActiveWindow).toBe(expected.coversTarget)
+    expect(window.rowsNeeded()).toBe(expected.rowsNeeded)
+  } finally {
+    await source.cleanup()
+  }
+}
+
+fcTest.prop([orderedContinuationEvidenceScenarioArbitrary], {
+  numRuns: 64 * fullFlowMultiplier,
+  seed: 17783,
+})(
+  `derives ordered progress from applied eligible evidence for a fixed seed`,
+  runOrderedContinuationEvidenceScenario,
+)
+
+fcTest.prop(
+  [orderedContinuationEvidenceScenarioArbitrary],
+  oracleRandomParameters(64 * fullFlowMultiplier, fullFlowReplaySeed),
+)(
+  `derives ordered progress from applied eligible evidence for a random or replayed seed`,
+  runOrderedContinuationEvidenceScenario,
 )
 
 type OrderedBoundaryProvenanceScenario = {

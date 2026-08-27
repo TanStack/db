@@ -257,6 +257,8 @@ export function computeOrderedLoadCursor(
   lastLoadRequestKey: string | undefined,
   alias: string,
   limit: number,
+  demandedPrefix = limit,
+  boundaryKey?: string | number,
 ):
   | {
       minValues: Array<unknown> | undefined
@@ -280,11 +282,14 @@ export function computeOrderedLoadCursor(
       : [extractedValues]
   }
 
-  // Deduplicate: skip if we already issued an identical load request
+  // Refill work may change its incidental page size as result rows arrive.
+  // Deduplicate by semantic progress instead: retained demand plus the exact
+  // source boundary, including its public key.
   const loadRequestKey = serializeValue({
     minValues: minValues ?? null,
+    boundaryKey: boundaryKey ?? null,
     offset,
-    limit,
+    demandedPrefix,
   })
   if (lastLoadRequestKey === loadRequestKey) {
     return undefined
