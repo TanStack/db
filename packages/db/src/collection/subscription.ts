@@ -323,23 +323,12 @@ export class CollectionSubscription
           attempt.pending.add(pending)
           void syncResult.then(
             () => {
-              if (
-                isCurrentAttempt() &&
-                this.subsetDemands.includes(demand) &&
-                !nextAcquisition.options.signal?.aborted
-              ) {
-                if (
-                  !this.tryReplaceSubsetAcquisition(
-                    demand,
-                    nextAcquisition,
-                    attempt,
-                  )
-                ) {
-                  attempt.failed = true
-                }
-              } else {
-                this.discardReplayAcquisition(demand, nextAcquisition)
-              }
+              this.completeReplayAcquisition(
+                session,
+                attempt,
+                demand,
+                nextAcquisition,
+              )
               this.settleTruncateReplay(session, attempt, pending)
             },
             () => {
@@ -357,11 +346,12 @@ export class CollectionSubscription
             },
           )
         } else {
-          if (
-            !this.tryReplaceSubsetAcquisition(demand, nextAcquisition, attempt)
-          ) {
-            attempt.failed = true
-          }
+          this.completeReplayAcquisition(
+            session,
+            attempt,
+            demand,
+            nextAcquisition,
+          )
         }
       }
 
@@ -619,22 +609,42 @@ export class CollectionSubscription
     demand.releaseSettled = false
   }
 
+  /** Attach a successful replay only while every owning authority is current. */
+  private completeReplayAcquisition(
+    session: TruncateReplaySession,
+    attempt: TruncateReplayAttempt,
+    demand: SubsetDemand,
+    next: ReplaySubsetAcquisition,
+  ): void {
+    const mayReplace =
+      this.truncateReplaySession === session &&
+      session.currentAttempt === attempt &&
+      this.subsetDemands.includes(demand) &&
+      demand.pendingReplayAcquisitions.has(next) &&
+      !demand.releaseSettled &&
+      !next.options.signal?.aborted
+
+    if (mayReplace) {
+      this.tryReplaceSubsetAcquisition(demand, next, attempt)
+    } else {
+      this.discardReplayAcquisition(demand, next)
+    }
+  }
+
   private tryReplaceSubsetAcquisition(
     demand: SubsetDemand,
     next: ReplaySubsetAcquisition,
     attempt: TruncateReplayAttempt,
-  ): boolean {
+  ): void {
     try {
       this.replaceSubsetAcquisition(demand, next)
       demand.pendingReplayAcquisitions.delete(next)
-      return true
     } catch (error) {
       // The old lease remains owned when its release fails. Release the new
       // acquisition and keep the old one available for a cleanup retry.
       this.discardReplayAcquisition(demand, next)
       this.recordLoadSubsetError(demand.options, error, true)
       attempt.failed = true
-      return false
     }
   }
 
