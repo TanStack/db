@@ -1014,6 +1014,8 @@ function hasAuthoritativeExtent(
 function sortKeys<TKey extends string | number>(
   keys: Iterable<TKey>,
 ): Array<TKey> {
+  // Ownership removals feed sync publication. Keep their deterministic order
+  // aligned with the DBSP key order used by the rest of the data plane.
   return Array.from(keys).sort(compareKeys)
 }
 

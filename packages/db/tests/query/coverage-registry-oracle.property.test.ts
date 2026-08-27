@@ -1407,13 +1407,17 @@ describe(`coverage registry oracle`, () => {
       prefix: 1,
     })
     const rows: ReadonlyArray<RowKey> = [10, `ä`, 2, `z`]
+    // Pins both shared laws: strings precede numbers, and strings use direct
+    // code-point order rather than locale-sensitive order.
+    const canonicalOrder: ReadonlyArray<RowKey> = [`z`, `ä`, 2, 10]
+    expect([...rows].sort(compareKeys)).toEqual(canonicalOrder)
 
     expect(registry.replaceRows(acquisition, rows)).toEqual({
       accepted: true,
       rowsToRemove: [],
     })
     expect(registry.releaseLease(lease)).toEqual({
-      rowsToRemove: [...rows].sort(compareKeys),
+      rowsToRemove: canonicalOrder,
     })
   })
 
