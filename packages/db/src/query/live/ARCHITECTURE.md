@@ -402,6 +402,15 @@ acquisition refines that evidence. Retained window size is grow-only for the
 life of the subscription, so a smaller request during replacement cannot undo a
 larger prefix already requested. Failure of the current ordered demand or any
 still-active demand publishes no replacement batch.
+
+`WindowState` owns current-generation admission and coverage. The subscription
+owns the last complete reader-visible publication as one snapshot: its rows,
+sent keys, and optional ordered prefix size and total-order boundary. An active
+or failed replay retains that snapshot unchanged until a complete replacement
+publishes or later source changes reconcile it. Offset and cursor restoration
+must derive from this snapshot; no parallel row-count or last-key fields may
+approximate the same state.
+
 Each active demand in that replacement settles on its own, and the replacement
 waits for every acquisition it started. The published reconciliation is the
 retained ordered prefix plus rows required by every still-active other demand.

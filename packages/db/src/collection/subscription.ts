@@ -73,14 +73,17 @@ type CollectionSubscriptionOptions = {
   onLoadSubsetError?: (event: SubscriptionLoadSubsetErrorEvent) => void
 }
 
-type TruncatePublicationState = {
+type OrderedPublicationState = {
+  prefixSize: number
+  boundary: TotalOrderBoundary | undefined
+}
+
+type PublicationState = {
   loadedInitialState: boolean
   snapshotSent: boolean
   sentKeys: Set<string | number>
   publishedRows: Map<string | number, object>
-  limitedSnapshotRowCount: number
-  lastSentKey: string | number | undefined
-  orderedBoundary: TotalOrderBoundary | undefined
+  ordered: OrderedPublicationState | undefined
 }
 
 type SubsetAcquisition = {
@@ -117,7 +120,7 @@ type TruncateReplayAttempt = {
 }
 
 type TruncateReplaySession = {
-  publicationState: TruncatePublicationState
+  publicationState: PublicationState
   buffer: Array<Array<ChangeMessage<any, any>>>
   attempts: Set<TruncateReplayAttempt>
   currentAttempt: TruncateReplayAttempt
@@ -151,15 +154,11 @@ export class CollectionSubscription
   // Keep track of the keys we've sent (needed for join and orderBy optimizations)
   private sentKeys = new Set<string | number>()
   private publishedRows = new Map<string | number, object>()
-  private stalePublishedRows = new Map<string | number, object>()
-  private lastCompleteOrderedBoundary: TotalOrderBoundary | undefined
-  private staleOrderedBoundary: TotalOrderBoundary | undefined
-
-  // Track the count of rows sent via requestLimitedSnapshot for offset-based pagination
-  private limitedSnapshotRowCount = 0
-
-  // Track the last key sent via requestLimitedSnapshot for cursor-based pagination
-  private lastSentKey: string | number | undefined
+  // One object owns the last complete ordered publication. A failed replay
+  // retains the full publication state instead of reconstructing it from
+  // parallel offset, key, and boundary fields.
+  private orderedPublication: OrderedPublicationState | undefined
+  private stalePublication: PublicationState | undefined
 
   private filteredCallback: (changes: Array<ChangeMessage<any, any>>) => boolean
 
@@ -209,7 +208,7 @@ export class CollectionSubscription
     ) => {
       this.trackPublishedRows(changes)
       this.trackSentKeys(changes)
-      this.refreshLastCompleteOrderedBoundary()
+      this.refreshOrderedPublication()
       callback(changes)
     }
 
@@ -252,10 +251,8 @@ export class CollectionSubscription
     if (demandsToReload.length === 0 || !hasLoadSubsetHandler) {
       this.snapshotSent = false
       this.loadedInitialState = false
-      this.limitedSnapshotRowCount = 0
-      this.lastSentKey = undefined
-      this.lastCompleteOrderedBoundary = undefined
-      this.staleOrderedBoundary = undefined
+      this.orderedPublication = undefined
+      this.stalePublication = undefined
       return
     }
 
@@ -272,9 +269,10 @@ export class CollectionSubscription
           snapshotSent: this.snapshotSent,
           sentKeys: new Set(this.sentKeys),
           publishedRows: new Map(this.publishedRows),
-          limitedSnapshotRowCount: this.limitedSnapshotRowCount,
-          lastSentKey: this.lastSentKey,
-          orderedBoundary: this.lastCompleteOrderedBoundary,
+          ordered:
+            this.orderedPublication === undefined
+              ? undefined
+              : { ...this.orderedPublication },
         },
         buffer: [],
         attempts: new Set(),
@@ -306,8 +304,6 @@ export class CollectionSubscription
     // Reset snapshot/pagination tracking state for the replacement snapshot.
     this.snapshotSent = false
     this.loadedInitialState = false
-    this.limitedSnapshotRowCount = 0
-    this.lastSentKey = undefined
 
     // Defer the requests so the truncate commit's deletes enter the session
     // buffer before a synchronous adapter can publish replacement rows.
@@ -472,11 +468,8 @@ export class CollectionSubscription
     this.snapshotSent = publicationState.snapshotSent
     this.sentKeys = new Set(publicationState.sentKeys)
     this.publishedRows = new Map(publicationState.publishedRows)
-    this.stalePublishedRows = new Map(publicationState.publishedRows)
-    this.limitedSnapshotRowCount = publicationState.limitedSnapshotRowCount
-    this.lastSentKey = publicationState.lastSentKey
-    this.lastCompleteOrderedBoundary = publicationState.orderedBoundary
-    this.staleOrderedBoundary = publicationState.orderedBoundary
+    this.orderedPublication = publicationState.ordered
+    this.stalePublication = publicationState
     this.truncateReplaySession = undefined
   }
 
@@ -485,15 +478,16 @@ export class CollectionSubscription
     if (this.truncateReplaySession !== session) return
     this.truncateReplaySession = undefined
 
-    const retainedDeletes = [...this.stalePublishedRows].map(
+    const retainedDeletes = [
+      ...(this.stalePublication?.publishedRows ?? []),
+    ].map(
       ([key, value]): ChangeMessage<any, any> => ({
         type: `delete`,
         key,
         value,
       }),
     )
-    this.stalePublishedRows.clear()
-    this.staleOrderedBoundary = undefined
+    this.stalePublication = undefined
 
     const merged = [...session.buffer.flat(), ...retainedDeletes]
     const activeDemandFilters = this.subsetDemands.map((demand) =>
@@ -517,19 +511,7 @@ export class CollectionSubscription
     // the dedupe set to what the subscriber actually received so a later
     // request can publish a row that belonged only to a released demand.
     this.sentKeys = new Set(this.publishedRows.keys())
-    if (this.orderByIndex) {
-      if (this.orderedWindow) {
-        this.limitedSnapshotRowCount = this.orderedWindow.localPrefixSize
-        this.lastSentKey = this.orderedBoundary()?.key
-      } else {
-        this.limitedSnapshotRowCount = this.sentKeys.size
-        const orderedSentKeys = this.orderByIndex.takeFromStart(
-          this.sentKeys.size,
-          (key) => this.sentKeys.has(key),
-        )
-        this.lastSentKey = orderedSentKeys.at(-1)
-      }
-    }
+    this.refreshOrderedPublication()
   }
 
   /** Reduce a replay's raw delete/insert stream to one exact semantic delta. */
@@ -592,7 +574,7 @@ export class CollectionSubscription
     this.orderedWindow.ensureSize(size)
     // Retain the new target now, but let the replacement epoch reconcile and
     // publish it together with the buffered source rows.
-    if (this.isBufferingForTruncate || this.stalePublishedRows.size > 0) {
+    if (this.isBufferingForTruncate || this.stalePublication) {
       return false
     }
     const changes = this.reconcileOrderedWindow()
@@ -618,10 +600,9 @@ export class CollectionSubscription
   }
 
   get orderedBoundaryRow(): object | undefined {
-    const boundary =
-      this.stalePublishedRows.size > 0
-        ? this.orderedBoundary()
-        : this.orderedWindow?.progressBoundary()
+    const boundary = this.retainedOrderedPublication
+      ? this.orderedBoundary()
+      : this.orderedWindow?.progressBoundary()
     return boundary === undefined
       ? undefined
       : (this.publishedRows.get(boundary.key) ??
@@ -630,16 +611,26 @@ export class CollectionSubscription
 
   get orderedBoundaryKey(): string | number | undefined {
     return (
-      this.stalePublishedRows.size > 0
+      this.retainedOrderedPublication
         ? this.orderedBoundary()
         : this.orderedWindow?.progressBoundary()
     )?.key
   }
 
   private orderedBoundary() {
-    return this.stalePublishedRows.size > 0
-      ? this.staleOrderedBoundary
-      : this.orderedWindow?.boundary()
+    return (
+      this.retainedOrderedPublication?.boundary ??
+      this.orderedWindow?.boundary()
+    )
+  }
+
+  private get retainedOrderedPublication():
+    | OrderedPublicationState
+    | undefined {
+    return (
+      this.truncateReplaySession?.publicationState.ordered ??
+      this.stalePublication?.ordered
+    )
   }
 
   private reconcileOrderedWindow(): Array<ChangeMessage<any, any>> {
@@ -657,20 +648,23 @@ export class CollectionSubscription
         ? undefined
         : (row) => additionalFilters.some((filter) => filter?.(row) ?? true),
     )
-    this.refreshLastCompleteOrderedBoundary()
+    this.refreshOrderedPublication()
     return changes
   }
 
-  /** Retain the exact ordered prefix boundary while its source rows exist. */
-  private refreshLastCompleteOrderedBoundary(): void {
+  /** Capture the exact continuation state of the last complete publication. */
+  private refreshOrderedPublication(): void {
     if (
       !this.orderedWindow ||
       this.isBufferingForTruncate ||
-      this.stalePublishedRows.size > 0
+      this.stalePublication
     ) {
       return
     }
-    this.lastCompleteOrderedBoundary = this.orderedWindow.boundary()
+    this.orderedPublication = {
+      prefixSize: this.orderedWindow.localPrefixSize,
+      boundary: this.orderedWindow.boundary(),
+    }
   }
 
   /**
@@ -950,7 +944,7 @@ export class CollectionSubscription
     if (
       this.orderedWindow &&
       !this.isBufferingForTruncate &&
-      this.stalePublishedRows.size === 0
+      !this.stalePublication
     ) {
       this.orderedWindow.admitChanges(changes)
       const orderedChanges = this.reconcileOrderedWindow()
@@ -1099,7 +1093,7 @@ export class CollectionSubscription
     if (
       this.orderedWindow &&
       !this.isBufferingForTruncate &&
-      this.stalePublishedRows.size === 0
+      !this.stalePublication
     ) {
       const changes = this.reconcileOrderedWindow()
       if (changes.length > 0) this.callback(changes)
@@ -1132,18 +1126,17 @@ export class CollectionSubscription
     )
 
     const where = this.options.whereExpression
+    const retainedPublication = this.retainedOrderedPublication
     const refreshPrefix =
-      this.stalePublishedRows.size === 0 &&
-      this.orderedWindow.requiresPrefixRefresh
+      !retainedPublication && this.orderedWindow.requiresPrefixRefresh
     // A failed truncate replay leaves the last complete publication visible
     // while the source collection is empty. Continue from that retained prefix
     // until a later replay replaces it.
-    const currentOffset =
-      this.stalePublishedRows.size > 0
-        ? this.limitedSnapshotRowCount
-        : refreshPrefix
-          ? 0
-          : this.orderedWindow.localPrefixSize
+    const currentOffset = retainedPublication
+      ? retainedPublication.prefixSize
+      : refreshPrefix
+        ? 0
+        : this.orderedWindow.localPrefixSize
     const requestedPrefix = refreshPrefix
       ? Math.max(this.orderedWindow.size, limit)
       : offset !== undefined
@@ -1154,7 +1147,7 @@ export class CollectionSubscription
     this.orderedWindow.ensureSize(requestedPrefix)
     let requiresUnboundedRefinement = this.orderedWindow.requiresFullRefinement
     const changes =
-      !this.isBufferingForTruncate && this.stalePublishedRows.size === 0
+      !this.isBufferingForTruncate && !this.stalePublication
         ? this.reconcileOrderedWindow()
         : []
 
@@ -1172,10 +1165,7 @@ export class CollectionSubscription
       return
     }
 
-    if (
-      this.stalePublishedRows.size === 0 &&
-      this.orderedWindow.coversActiveWindow
-    ) {
+    if (!retainedPublication && this.orderedWindow.coversActiveWindow) {
       // No adapter request was made. Use an impossible zero-window demand so
       // direct tracking can finish without claiming another demand's outcome.
       onLoadSubsetResult?.(true, {
@@ -1187,13 +1177,6 @@ export class CollectionSubscription
       return
     }
 
-    // Keep legacy offset bookkeeping aligned with the exact retained prefix.
-    this.limitedSnapshotRowCount = Math.max(
-      this.limitedSnapshotRowCount,
-      this.orderedWindow.localPrefixSize,
-    )
-    this.lastSentKey = this.orderedBoundary()?.key
-
     // Build cursor expressions for sync layer loadSubset
     // The cursor expressions are separate from the main where clause
     // so the sync layer can choose cursor-based or offset-based pagination
@@ -1204,10 +1187,9 @@ export class CollectionSubscription
           lastKey?: string | number
         }
       | undefined
-    const boundary =
-      this.stalePublishedRows.size > 0
-        ? this.orderedBoundary()
-        : this.orderedWindow.requestBoundary()
+    const boundary = retainedPublication
+      ? this.orderedBoundary()
+      : this.orderedWindow.requestBoundary()
     const cursorValues = boundary?.values ?? minValues
     if (cursorValues !== undefined && cursorValues.length > 0) {
       const canPushCursor = canExpressCursorOrder(orderBy, cursorValues)
@@ -1237,7 +1219,7 @@ export class CollectionSubscription
         cursorExpressions = {
           whereFrom: whereFromCursor,
           whereCurrent: whereCurrentCursor,
-          lastKey: boundary?.key ?? this.lastSentKey,
+          lastKey: boundary?.key ?? this.orderedPublication?.boundary?.key,
         }
       }
     }
@@ -1326,7 +1308,7 @@ export class CollectionSubscription
         )
       }
 
-      if (this.isBufferingForTruncate || this.stalePublishedRows.size > 0) {
+      if (this.isBufferingForTruncate || this.stalePublication) {
         const session = this.truncateReplaySession
         if (session) this.checkTruncateReplayComplete(session)
         return
@@ -1357,7 +1339,7 @@ export class CollectionSubscription
         }
         window.recordLocalRequestSatisfaction(ordered.requestedPrefix)
       }
-      if (this.isBufferingForTruncate || this.stalePublishedRows.size > 0) {
+      if (this.isBufferingForTruncate || this.stalePublication) {
         const session = this.truncateReplaySession
         if (session) this.checkTruncateReplayComplete(session)
         return
@@ -1439,17 +1421,22 @@ export class CollectionSubscription
   private reconcileStalePublishedChanges(
     changes: Array<ChangeMessage<any, any>>,
   ): Array<ChangeMessage<any, any>> {
-    if (this.stalePublishedRows.size === 0) return changes
+    const staleRows = this.stalePublication?.publishedRows
+    if (!staleRows) return changes
+    if (staleRows.size === 0) {
+      this.stalePublication = undefined
+      return changes
+    }
 
     const reconciled: Array<ChangeMessage<any, any>> = []
     for (const change of changes) {
-      const previous = this.stalePublishedRows.get(change.key)
+      const previous = staleRows.get(change.key)
       if (previous === undefined) {
         reconciled.push(change)
         continue
       }
 
-      this.stalePublishedRows.delete(change.key)
+      staleRows.delete(change.key)
       if (change.type === `delete`) {
         reconciled.push({
           ...change,
@@ -1464,10 +1451,7 @@ export class CollectionSubscription
         })
       }
     }
-    if (this.stalePublishedRows.size === 0) {
-      this.lastCompleteOrderedBoundary = undefined
-      this.staleOrderedBoundary = undefined
-    }
+    if (staleRows.size === 0) this.stalePublication = undefined
     return reconciled
   }
 
@@ -1497,16 +1481,6 @@ export class CollectionSubscription
         this.sentKeys.add(change.key)
       }
     }
-
-    // Keep the limited snapshot offset in sync with keys we've actually sent.
-    // This matters when loadSubset resolves asynchronously and requestLimitedSnapshot
-    // didn't have local rows to count yet.
-    if (this.orderByIndex) {
-      this.limitedSnapshotRowCount = Math.max(
-        this.limitedSnapshotRowCount,
-        this.orderedWindow?.localPrefixSize ?? this.sentKeys.size,
-      )
-    }
   }
 
   /**
@@ -1531,9 +1505,8 @@ export class CollectionSubscription
 
     // Stop any buffered replay from publishing after unsubscription.
     this.truncateReplaySession = undefined
-    this.stalePublishedRows.clear()
-    this.lastCompleteOrderedBoundary = undefined
-    this.staleOrderedBoundary = undefined
+    this.stalePublication = undefined
+    this.orderedPublication = undefined
 
     // Release the current adapter acquisition for each logical subset demand.
     const failedDemands: Array<SubsetDemand> = []

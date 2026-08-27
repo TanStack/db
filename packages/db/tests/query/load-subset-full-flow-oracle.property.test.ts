@@ -2529,7 +2529,30 @@ async function runAtomicOrderedReplayScenario(
       initialWindowSize: 1,
     })
   const expectPublicationHistory = () => {
-    expect(publications).toEqual(expectedPublications())
+    const expected = expectedPublications()
+    expect(publications).toEqual(expected)
+    if (unsubscribed) return
+
+    // Public rows alone cannot prove that replay restoration retained the
+    // ordered continuation state. Check the boundary after success, failure,
+    // overlapping replacement, and obsolete-attempt aborts as well.
+    const expectedOrderedBoundary = expected
+      .at(-1)
+      ?.filter(
+        ({ key }) =>
+          key !== initialOtherRow.id && key !== replacementOtherRow.id,
+      )
+      .at(-1)?.key
+    // Once a replacement publishes, progressBoundary may intentionally move
+    // past its visible prefix to prove transport progress. The restoration law
+    // here concerns the previous publication while replacement work is still
+    // buffered or has failed.
+    if (
+      expectedOrderedBoundary === initialRows[0]?.id ||
+      expectedOrderedBoundary === initialRows[1]?.id
+    ) {
+      expect(subscription.orderedBoundaryKey).toBe(expectedOrderedBoundary)
+    }
   }
   const beginReplacement = async () => {
     const pendingStart = pending.length
