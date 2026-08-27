@@ -315,8 +315,9 @@ describe(`semantic expression identity`, () => {
     vi.resetModules()
 
     try {
-      const { getRuntimeReferenceIdentity } =
-        await import(`../../src/query/runtime-reference-identity.js`)
+      const { getRuntimeReferenceIdentity } = await import(
+        `../../src/query/runtime-reference-identity.js`
+      )
 
       expect(getRandomValues).not.toHaveBeenCalled()
 

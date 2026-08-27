@@ -28,8 +28,7 @@ let runtimeReferenceIdentityFactory:
 export function getRuntimeReferenceIdentity(
   value: object,
 ): RuntimeReferenceIdentity {
-  runtimeReferenceIdentityFactory ??=
-    createRuntimeReferenceIdentityFactory()
+  runtimeReferenceIdentityFactory ??= createRuntimeReferenceIdentityFactory()
 
   return runtimeReferenceIdentityFactory(value)
 }
