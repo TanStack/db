@@ -1,4 +1,5 @@
 import { deepEquals } from '../../utils.js'
+import { compileSingleRowExpression } from '../compiler/evaluators.js'
 import { TotalOrder } from '../total-order.js'
 import type { CollectionImpl } from '../../collection/index.js'
 import type { ChangeMessage } from '../../types.js'
@@ -24,6 +25,7 @@ export class WindowState<
   private hasInitialCoverage = false
   private hasUnsettledInitialMutation = false
   private revision = 0
+  private readonly matchesWhere: (row: TRow) => boolean
   private readonly candidateKeys = new Set<TKey>()
   private readonly provenanceKeys = new Set<TKey>()
   private readonly admittedKeys = new Set<TKey>()
@@ -35,6 +37,10 @@ export class WindowState<
     targetSize: number,
   ) {
     this.totalOrder = new TotalOrder(orderBy, collection)
+    const evaluateWhere = where && compileSingleRowExpression(where)
+    this.matchesWhere = evaluateWhere
+      ? (row) => evaluateWhere(row as Record<string, unknown>) === true
+      : () => true
     this.activeSize = targetSize
     this.retainedSize = targetSize
   }
@@ -222,7 +228,15 @@ export class WindowState<
       return
     }
 
-    if (this.updateKnownPrefix(this.admittedKeys, changes)) {
+    const visibleChanges = changes.filter(
+      ({ value, previousValue }) =>
+        this.matchesWhere(value) ||
+        (previousValue !== undefined && this.matchesWhere(previousValue)),
+    )
+    if (
+      visibleChanges.length > 0 &&
+      this.updateKnownPrefix(this.admittedKeys, visibleChanges)
+    ) {
       this.revision++
       // A live change may update the visible prefix at once, but an applied
       // snapshot fact does not prove the new remote boundary. Reacquire from
@@ -295,13 +309,16 @@ export class WindowState<
     // Applied source rows prove cursor progress even when this subscription's
     // predicate excludes them. Keep that source boundary separate from the
     // eligible rows admitted to the visible result prefix.
+    const hasContinuationProvenance = this.provenanceKeys.size > 0
     const rows = this.readSourceRows(
       this.hasFullCoverage
         ? undefined
-        : this.provenanceKeys.size > 0
+        : hasContinuationProvenance
           ? this.provenanceKeys
           : this.candidateKeys,
-      this.retainedSize,
+      this.hasFullCoverage || !hasContinuationProvenance
+        ? this.retainedSize
+        : undefined,
     )
     const lastRow = rows.at(-1)
     return lastRow && this.totalOrder.boundary(lastRow.value, lastRow.key)

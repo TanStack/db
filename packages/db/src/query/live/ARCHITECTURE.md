@@ -423,6 +423,9 @@ Only applied rows admitted to that subscription's retained result prefix count
 toward its covered size. Thus a short continuing page cannot turn a requested
 prefix into achieved coverage, but an excluded row can still move the next
 request past source data that core has already inspected.
+Predicate-invisible source changes do not invalidate that visible prefix. When
+an applied receipt establishes those rows, they still remain exact source
+provenance and may move the continuation boundary.
 
 Automatic continuation is monotonic. Its identity is the retained demanded
 prefix plus the exact total-order boundary, including the public key. Core may

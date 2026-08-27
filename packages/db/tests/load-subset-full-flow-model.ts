@@ -88,7 +88,9 @@ export function projectOrderedContinuationEvidence(options: {
         .slice(0, targetSize)
   const boundaryKeys = exhausted
     ? sourceOrder.slice(0, targetSize)
-    : known(provenance.size > 0 ? provenance : candidates).slice(0, targetSize)
+    : provenance.size > 0
+      ? known(provenance)
+      : known(candidates).slice(0, targetSize)
 
   return {
     visibleKeys,

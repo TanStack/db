@@ -712,6 +712,85 @@ it.each([
   }
 })
 
+it(`continues across every excluded source row beyond the visible target`, async () => {
+  type Row = { id: number; rank: number; eligible: boolean }
+  const remoteRows: ReadonlyArray<Row> = [
+    { id: 1, rank: 1, eligible: true },
+    { id: 2, rank: 2, eligible: false },
+    { id: 3, rank: 3, eligible: false },
+    { id: 4, rank: 4, eligible: true },
+  ]
+  const calls: Array<LoadSubsetOptions> = []
+  let begin!: () => void
+  let write!: (message: { type: `insert`; value: Row }) => void
+  let commit!: () => true | Promise<void>
+  const source = createCollection<Row>({
+    id: `full-flow-excluded-progress-source`,
+    getKey: (row) => row.id,
+    syncMode: `on-demand`,
+    startSync: true,
+    autoIndex: `eager`,
+    defaultIndexType: BTreeIndex,
+    sync: {
+      sync: (params) => {
+        begin = params.begin
+        write = params.write
+        commit = params.commit
+        params.markReady()
+        return {
+          loadSubset: async (options) => {
+            calls.push(options)
+            await Promise.resolve()
+            const lastKey = options.cursor?.lastKey
+            const rowIndex =
+              lastKey === undefined
+                ? 0
+                : remoteRows.findIndex(({ id }) => id === lastKey) + 1
+            const row = remoteRows[rowIndex]
+            if (!row) throw new Error(`Expected another remote row`)
+            begin()
+            write({ type: `insert`, value: row })
+            const applied = commit()
+            if (applied !== true) await applied
+            return {
+              hasMore: rowIndex < remoteRows.length - 1,
+              appliedRowKeys: [row.id],
+            }
+          },
+          unloadSubset: () => {},
+        }
+      },
+    },
+  })
+  const live = createLiveQueryCollection({
+    id: `full-flow-excluded-progress-live`,
+    query: (q) =>
+      q
+        .from({ row: source })
+        .where(({ row }) => eq(row.eligible, true))
+        .orderBy(({ row }) => row.rank)
+        .limit(2),
+    startSync: true,
+  })
+
+  try {
+    await live.preload()
+    await flushPromises()
+
+    expect(calls).toHaveLength(4)
+    expect(calls.map(({ cursor }) => cursor?.lastKey)).toEqual([
+      undefined,
+      1,
+      2,
+      3,
+    ])
+    expect(live.toArray.map(({ id }) => id)).toEqual([1, 4])
+  } finally {
+    await live.cleanup()
+    await source.cleanup()
+  }
+})
+
 it(`does not repeat an evidence-free ordered continuation`, async () => {
   type Row = { id: number; rank: number }
   const row: Row = { id: 1, rank: 1 }
