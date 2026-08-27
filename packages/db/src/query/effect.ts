@@ -561,6 +561,9 @@ class EffectPipelineRunner<TRow extends object, TKey extends string | number> {
               pendingBuffers.get(sourceId)!.push(changes)
             } else {
               this.trackSentValues(sourceId, changes, orderByInfo.comparator)
+              if (this.subscriptions[sourceId]?.requiresOrderedPrefixRefresh) {
+                this.lastLoadRequestKey.delete(sourceId)
+              }
               const split = [...splitUpdates(changes)]
               this.handleSourceChanges(sourceId, split)
             }
@@ -624,6 +627,16 @@ class EffectPipelineRunner<TRow extends object, TKey extends string | number> {
         this.requestInitialOrderedSnapshot(alias, orderByInfo, subscription)
       }
 
+      if (orderByInfo) {
+        const truncateUnsubscribe = collection.on(`truncate`, () => {
+          this.lastLoadRequestKey.delete(sourceId)
+          this.biggestSentValue.delete(sourceId)
+          this.sentToD2KeysBySource.get(sourceId)?.clear()
+          this.pendingOrderedLoadPromise = undefined
+        })
+        this.unsubscribeCallbacks.add(truncateUnsubscribe)
+      }
+
       // Listen for status changes on source collections
       const statusUnsubscribe = collection.on(`status:change`, (event) => {
         if (this.disposed) return
@@ -684,6 +697,9 @@ class EffectPipelineRunner<TRow extends object, TKey extends string | number> {
       for (const changes of buffer) {
         if (orderByInfo) {
           this.trackSentValues(sourceId, changes, orderByInfo.comparator)
+          if (this.subscriptions[sourceId]?.requiresOrderedPrefixRefresh) {
+            this.lastLoadRequestKey.delete(sourceId)
+          }
           const split = [...splitUpdates(changes)]
           this.sendChangesToD2(sourceId, split)
         } else {
@@ -942,7 +958,8 @@ class EffectPipelineRunner<TRow extends object, TKey extends string | number> {
         limit: offset + limit,
         orderBy: normalizedOrderBy,
         trackLoadSubsetPromise: false,
-        onLoadSubsetResult: (result) => this.trackOrderedLoad(result),
+        onLoadSubsetResult: (result) =>
+          this.trackOrderedLoad(result, orderByInfo.sourceId),
       })
     } else {
       subscription.requestSnapshot({
@@ -996,7 +1013,11 @@ class EffectPipelineRunner<TRow extends object, TKey extends string | number> {
     }
   }
 
-  private trackOrderedLoad(result: LoadSubsetRequestResult): void {
+  private trackOrderedLoad(
+    result: LoadSubsetRequestResult,
+    sourceId: string,
+    loadRequestKey?: string,
+  ): void {
     if (!(result instanceof Promise)) return
     this.pendingOrderedLoadPromise = result
     const finish = () => {
@@ -1004,10 +1025,21 @@ class EffectPipelineRunner<TRow extends object, TKey extends string | number> {
         this.pendingOrderedLoadPromise = undefined
       }
     }
-    void result.then(() => {
-      finish()
-      this.loadMoreIfNeeded()
-    }, finish)
+    void result.then(
+      () => {
+        finish()
+        if (this.subscriptions[sourceId]?.requiresOrderedPrefixRefresh) {
+          this.lastLoadRequestKey.delete(sourceId)
+        }
+        this.loadMoreIfNeeded()
+      },
+      () => {
+        finish()
+        if (this.lastLoadRequestKey.get(sourceId) === loadRequestKey) {
+          this.lastLoadRequestKey.delete(sourceId)
+        }
+      },
+    )
   }
 
   /**
@@ -1029,6 +1061,8 @@ class EffectPipelineRunner<TRow extends object, TKey extends string | number> {
       this.lastLoadRequestKey.get(sourceId),
       alias,
       n,
+      subscription.orderedRetainedWindowSize,
+      subscription.orderedBoundaryKey,
     )
     if (!cursor) return // Duplicate request — skip
 
@@ -1041,7 +1075,7 @@ class EffectPipelineRunner<TRow extends object, TKey extends string | number> {
         minValues: cursor.minValues,
         trackLoadSubsetPromise: false,
         onLoadSubsetResult: (loadResult: LoadSubsetRequestResult) =>
-          this.trackOrderedLoad(loadResult),
+          this.trackOrderedLoad(loadResult, sourceId, cursor.loadRequestKey),
       })
     } catch (error) {
       if (subscription.lastError !== error) throw error

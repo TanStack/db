@@ -601,6 +601,10 @@ export class CollectionSubscription
     return this.orderedWindow?.retainedPrefixSize ?? 0
   }
 
+  get requiresOrderedPrefixRefresh(): boolean {
+    return this.orderedWindow?.requiresPrefixRefresh ?? false
+  }
+
   get hasOrderedCoverageForActiveWindow(): boolean {
     return this.orderedWindow?.coversActiveWindow ?? false
   }

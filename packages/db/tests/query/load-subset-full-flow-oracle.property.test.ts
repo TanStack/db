@@ -4,6 +4,7 @@ import { createCollection } from '../../src/collection/index.js'
 import { createDeferred } from '../../src/deferred.js'
 import { BTreeIndex, ReverseIndex } from '../../src/index.js'
 import { Func, PropRef, Value } from '../../src/query/ir.js'
+import { createEffect } from '../../src/query/effect.js'
 import { createLiveQueryCollection, eq } from '../../src/query/index.js'
 import { DeduplicatedLoadSubset } from '../../src/query/subset-dedupe.js'
 import { LIVE_QUERY_INTERNAL } from '../../src/query/live/internal.js'
@@ -25,6 +26,7 @@ import {
   oracleRandomParameters,
   readOracleRunConfig,
 } from '../oracle-config.js'
+import type { InitialQueryBuilder } from '../../src/query/builder/index.js'
 import type { LoadSubsetOptions, WritableDeep } from '../../src/types.js'
 import type { LoadSubsetFullFlowEvent } from '../load-subset-full-flow-model.js'
 
@@ -708,6 +710,314 @@ it.each([
     expect(live.toArray.map(({ id }) => id)).toEqual(scenario.expectedIds)
   } finally {
     await live.cleanup()
+    await source.cleanup()
+  }
+})
+
+type OrderedConsumer = `live-collection` | `effect`
+
+async function runTiedContinuationConsumer(consumer: OrderedConsumer): Promise<{
+  cursorKeys: Array<string | number | undefined>
+  limits: Array<number | undefined>
+  visibleIds: Array<number>
+}> {
+  type Row = { id: number; rank: number; eligible: boolean }
+  const initialRows: ReadonlyArray<Row> = [
+    { id: 1, rank: 1, eligible: true },
+    { id: 3, rank: 1, eligible: false },
+    { id: 4, rank: 1, eligible: false },
+  ]
+  const finalRow: Row = { id: 2, rank: 2, eligible: true }
+  const calls: Array<LoadSubsetOptions> = []
+  const pending: Array<
+    ReturnType<
+      typeof createDeferred<{
+        hasMore: boolean
+        appliedRowKeys: ReadonlyArray<number>
+      }>
+    >
+  > = []
+  const visible = new Map<number, Row>()
+  let begin!: () => void
+  let write!: (message: { type: `insert`; value: Row }) => void
+  let commit!: () => true | Promise<void>
+  const source = createCollection<Row>({
+    id: `full-flow-effect-parity-${consumer}`,
+    getKey: (row) => row.id,
+    syncMode: `on-demand`,
+    startSync: true,
+    autoIndex: `eager`,
+    defaultIndexType: BTreeIndex,
+    sync: {
+      sync: (params) => {
+        begin = params.begin
+        write = params.write
+        commit = params.commit
+        begin()
+        write({ type: `insert`, value: initialRows[1]! })
+        write({ type: `insert`, value: initialRows[2]! })
+        commit()
+        params.markReady()
+        return {
+          loadSubset: (options) => {
+            calls.push(options)
+            if (calls.length === 1) {
+              begin()
+              write({ type: `insert`, value: initialRows[0]! })
+              commit()
+            }
+            const request = createDeferred<{
+              hasMore: boolean
+              appliedRowKeys: ReadonlyArray<number>
+            }>()
+            pending.push(request)
+            return request.promise
+          },
+          unloadSubset: () => {},
+        }
+      },
+    },
+  })
+  const query = (q: InitialQueryBuilder) =>
+    q
+      .from({ row: source })
+      .where(({ row }) => eq(row.eligible, true))
+      .orderBy(({ row }) => row.rank)
+      .limit(2)
+
+  let live: ReturnType<typeof createLiveQueryCollection> | undefined
+  let preloadPromise: Promise<unknown> | undefined
+  let effect: ReturnType<typeof createEffect> | undefined
+  if (consumer === `live-collection`) {
+    live = createLiveQueryCollection({
+      id: `full-flow-effect-parity-live`,
+      query,
+      startSync: true,
+    })
+    preloadPromise = live.preload()
+  } else {
+    effect = createEffect<Row, number>({
+      query,
+      onBatch: (events) => {
+        for (const event of events) {
+          if (event.type === `exit`) visible.delete(event.key)
+          else visible.set(event.key, event.value)
+        }
+      },
+    })
+  }
+
+  try {
+    await flushPromises()
+    expect(pending).toHaveLength(1)
+    pending[0]!.resolve({ hasMore: true, appliedRowKeys: [initialRows[0]!.id] })
+    await flushPromises()
+    expect(pending).toHaveLength(2)
+    pending[1]!.resolve({ hasMore: true, appliedRowKeys: [initialRows[1]!.id] })
+    await flushPromises()
+    expect(pending).toHaveLength(3)
+    pending[2]!.resolve({ hasMore: true, appliedRowKeys: [initialRows[2]!.id] })
+    await flushPromises()
+    if (pending[3]) {
+      begin()
+      write({ type: `insert`, value: finalRow })
+      const applied = commit()
+      if (applied !== true) await applied
+      pending[3].resolve({ hasMore: false, appliedRowKeys: [finalRow.id] })
+      await flushPromises()
+    }
+    if (preloadPromise) await preloadPromise
+    return {
+      cursorKeys: calls.map(({ cursor }) => cursor?.lastKey),
+      limits: calls.map(({ limit }) => limit),
+      visibleIds: live
+        ? live.toArray.map(({ id }) => id)
+        : [...visible.keys()].sort((a, b) => a - b),
+    }
+  } finally {
+    if (live) await live.cleanup()
+    if (effect) await effect.dispose()
+    await source.cleanup()
+  }
+}
+
+it(`keeps ordered continuation progress equal across collection consumers`, async () => {
+  const [live, effect] = await Promise.all([
+    runTiedContinuationConsumer(`live-collection`),
+    runTiedContinuationConsumer(`effect`),
+  ])
+
+  expect(live.cursorKeys).toEqual([undefined, 1, 3, 4])
+  expect(live.visibleIds).toEqual([1, 2])
+  expect(effect).toEqual(live)
+})
+
+it(`retries an evidence-free Effect continuation after prefix refinement`, async () => {
+  type Row = { id: number; rank: number; label: string }
+  type Result = {
+    hasMore: boolean
+    appliedRowKeys: ReadonlyArray<number>
+  }
+  const firstRow: Row = {
+    id: 1,
+    rank: 1,
+    label: `before`,
+  }
+  const updatedFirstRow: Row = { ...firstRow, label: `after` }
+  const secondRow: Row = {
+    id: 2,
+    rank: 2,
+    label: `second`,
+  }
+  const calls: Array<LoadSubsetOptions> = []
+  const pending: Array<ReturnType<typeof createDeferred<Result>>> = []
+  const visible = new Map<number, Row>()
+  let begin!: () => void
+  let write!: (
+    message:
+      | { type: `insert`; value: Row }
+      | { type: `update`; value: Row; previousValue: Row },
+  ) => void
+  let commit!: () => true | Promise<void>
+  const source = createCollection<Row>({
+    id: `full-flow-effect-prefix-refinement`,
+    getKey: (row) => row.id,
+    syncMode: `on-demand`,
+    startSync: true,
+    autoIndex: `eager`,
+    defaultIndexType: BTreeIndex,
+    sync: {
+      sync: (params) => {
+        begin = params.begin
+        write = params.write
+        commit = params.commit
+        params.markReady()
+        return {
+          loadSubset: (options) => {
+            calls.push(options)
+            if (calls.length === 1) {
+              begin()
+              write({ type: `insert`, value: firstRow })
+              commit()
+            }
+            const request = createDeferred<Result>()
+            pending.push(request)
+            return request.promise
+          },
+          unloadSubset: () => {},
+        }
+      },
+    },
+  })
+  const effect = createEffect<Row, number>({
+    query: (q) =>
+      q
+        .from({ row: source })
+        .orderBy(({ row }) => row.rank)
+        .limit(2),
+    onBatch: (events) => {
+      for (const event of events) {
+        if (event.type === `exit`) visible.delete(event.key)
+        else visible.set(event.key, event.value)
+      }
+    },
+  })
+
+  try {
+    await flushPromises()
+    expect(pending).toHaveLength(1)
+    pending[0]!.resolve({ hasMore: true, appliedRowKeys: [firstRow.id] })
+    await flushPromises()
+    expect(pending).toHaveLength(2)
+    pending[1]!.resolve({ hasMore: true, appliedRowKeys: [firstRow.id] })
+    await flushPromises()
+    expect(pending).toHaveLength(3)
+    pending[2]!.resolve({ hasMore: true, appliedRowKeys: [] })
+    await flushPromises()
+    expect(calls).toHaveLength(3)
+
+    begin()
+    write({
+      type: `update`,
+      value: updatedFirstRow,
+      previousValue: firstRow,
+    })
+    const updated = commit()
+    if (updated !== true) await updated
+    await flushPromises()
+
+    expect(calls).toHaveLength(4)
+    begin()
+    write({ type: `insert`, value: secondRow })
+    const applied = commit()
+    if (applied !== true) await applied
+    pending[3]!.resolve({ hasMore: false, appliedRowKeys: [secondRow.id] })
+    await flushPromises()
+
+    expect([...visible.values()].map(({ id }) => id)).toEqual([1, 2])
+  } finally {
+    await effect.dispose()
+    await source.cleanup()
+  }
+})
+
+it(`does not continue an ordered Effect after teardown`, async () => {
+  type Row = { id: number; rank: number }
+  const row: Row = { id: 1, rank: 1 }
+  const pending = createDeferred<{
+    hasMore: boolean
+    appliedRowKeys: ReadonlyArray<number>
+  }>()
+  let calls = 0
+  let begin!: () => void
+  let write!: (message: { type: `insert`; value: Row }) => void
+  let commit!: () => true | Promise<void>
+  const source = createCollection<Row>({
+    id: `full-flow-effect-teardown-fence`,
+    getKey: (value) => value.id,
+    syncMode: `on-demand`,
+    startSync: true,
+    autoIndex: `eager`,
+    defaultIndexType: BTreeIndex,
+    sync: {
+      sync: (params) => {
+        begin = params.begin
+        write = params.write
+        commit = params.commit
+        params.markReady()
+        return {
+          loadSubset: () => {
+            calls++
+            begin()
+            write({ type: `insert`, value: row })
+            commit()
+            return pending.promise
+          },
+          unloadSubset: () => {},
+        }
+      },
+    },
+  })
+  const effect = createEffect<Row, number>({
+    query: (q) =>
+      q
+        .from({ row: source })
+        .orderBy(({ row: value }) => value.rank)
+        .limit(2),
+    onBatch: () => {},
+  })
+
+  try {
+    await flushPromises()
+    expect(calls).toBe(1)
+    await effect.dispose()
+
+    pending.resolve({ hasMore: true, appliedRowKeys: [row.id] })
+    await flushPromises()
+
+    expect(calls).toBe(1)
+  } finally {
+    await effect.dispose()
     await source.cleanup()
   }
 })

@@ -434,6 +434,14 @@ continuing page establishes neither fact, core leaves the window uncovered,
 does not repeat the same request, and records a nonfatal no-progress diagnostic
 in `lastSubsetError`.
 
+Live Collections and Effects keep separate consumer-local continuation state,
+but obey the same identity and reset law. A settled request remains the
+no-progress guard until its demanded prefix or total-order boundary changes;
+settlement alone must not permit a busy loop. Rejection, prefix refinement,
+truncate, and teardown revoke the old guard. The consumer-parity oracle runs
+the same hidden-boundary history through both implementations so neither can
+silently drift from this law.
+
 An outcome-free completion (`true` or `Promise<void>`) supplies no reusable row
 provenance, source extent, or CoverageFact. Its exact request has still settled,
 so the owning subscription may admit only the current local prefix. A short
