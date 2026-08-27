@@ -3,6 +3,7 @@ import { getLoadSubsetDemandKey } from './ir-stable-identity.js'
 import { snapshotLoadSubsetDemand } from './load-subset-options.js'
 import { isLoadSubsetRequestSubsumedBy } from './predicate-utils.js'
 import type { AppliedLoadSubsetOutcome, LoadSubsetOptions } from '../types.js'
+import type { DemandKey } from './ir-stable-identity.js'
 
 const demandLeaseBrand: unique symbol = Symbol(`DemandLease`)
 const acquisitionTokenBrand: unique symbol = Symbol(`AcquisitionToken`)
@@ -51,7 +52,8 @@ type CoverageClaim<TCoverage> = {
   scope: {
     collectionId: string
     sourceId: string | undefined
-    demandKey: string | undefined
+    demandKey: DemandKey | undefined
+    sequenceKey: DemandKey | undefined
     demand: LoadSubsetOptions | undefined
   }
   coverage: TCoverage | undefined
@@ -99,6 +101,43 @@ export type CoverageRegistryResourceCounts = Readonly<{
   retainedRowKeySlots: number
 }>
 
+export type CoverageEvidenceWorkCounts = Readonly<{
+  rowKeyCopies: number
+  demandSnapshots: number
+  demandKeyDerivations: number
+}>
+
+export type BorrowedCoverageEvidence<
+  TCoverage,
+  TRowKey extends string | number,
+> =
+  | Readonly<{
+      authority: `established`
+      acquisition: AcquisitionToken
+      demandKey: DemandKey | undefined
+      sequenceKey: DemandKey | undefined
+      generation: number
+      coverage: TCoverage
+    }>
+  | Readonly<{
+      authority: `applied`
+      acquisition: AcquisitionToken
+      collectionId: string
+      sourceId: string | undefined
+      demand: LoadSubsetOptions
+      demandKey: DemandKey | undefined
+      sequenceKey: DemandKey | undefined
+      generation: number
+      rowKeys: ReadonlySet<TRowKey>
+    }>
+  | Readonly<{
+      authority: `retained`
+      acquisition: AcquisitionToken
+      demandKey: DemandKey | undefined
+      generation: number
+      outcome: AppliedLoadSubsetOutcome
+    }>
+
 /**
  * Keeps logical demand, physical adapter resources, achieved coverage, and row
  * provenance separate. Coverage compaction is a derived antichain over active
@@ -143,6 +182,11 @@ export class CoverageRegistry<
   >()
   private claimSequence = 0
   private evidenceEpoch = 0
+  private evidenceWorkCounts = {
+    rowKeyCopies: 0,
+    demandSnapshots: 0,
+    demandKeyDerivations: 0,
+  }
 
   constructor(options: CoverageRegistryOptions<TDemand, TCoverage>) {
     this.coversDemand = options.coversDemand
@@ -258,7 +302,7 @@ export class CoverageRegistry<
               demand:
                 fallback.scope.demand === undefined
                   ? undefined
-                  : snapshotLoadSubsetDemand(fallback.scope.demand),
+                  : this.snapshotEvidenceDemand(fallback.scope.demand),
             },
             coverage: undefined,
             retainedOutcome: undefined,
@@ -267,7 +311,7 @@ export class CoverageRegistry<
     if (!claim) throw new Error(`Cannot attach to an unscoped acquisition`)
     if (
       options?.retainedOutcome !== undefined &&
-      !matchesOutcome(claim, options.retainedOutcome)
+      !this.matchesEvidenceOutcome(claim, options.retainedOutcome)
     ) {
       throw new Error(`Retained outcome does not match the attached claim`)
     }
@@ -280,11 +324,11 @@ export class CoverageRegistry<
       coverage:
         options?.coverage === undefined
           ? undefined
-          : this.snapshotCoverage(options.coverage),
+          : this.snapshotEvidenceCoverage(options.coverage),
       retainedOutcome:
         options?.retainedOutcome === undefined
           ? undefined
-          : snapshotAppliedOutcome(options.retainedOutcome),
+          : this.snapshotEvidenceOutcome(options.retainedOutcome),
     })
     if (options?.coverage !== undefined) {
       this.restoreCurrentAcquisition(claim.scopeKey)
@@ -304,7 +348,7 @@ export class CoverageRegistry<
           ? [
               {
                 acquisition,
-                coverage: this.snapshotCoverage(claim.coverage),
+                coverage: this.snapshotEvidenceCoverage(claim.coverage),
                 generation: claim.generation,
               },
             ]
@@ -334,11 +378,11 @@ export class CoverageRegistry<
               ) {
                 return []
               }
-              const rowKeys = Object.freeze([...record.rows])
+              const rowKeys = this.copyEvidenceRows(record.rows)
               return [
                 {
                   acquisition,
-                  outcome: snapshotAppliedOutcome({
+                  outcome: this.snapshotEvidenceOutcome({
                     collectionId: claim.scope.collectionId,
                     ...(claim.scope.sourceId === undefined
                       ? {}
@@ -354,6 +398,64 @@ export class CoverageRegistry<
             })
           : [],
     )
+  }
+
+  /**
+   * Borrows immutable evidence for internal selection. References stay valid
+   * until the registry's next mutation; public readers use snapshot methods.
+   */
+  *borrowEvidence(): IterableIterator<
+    BorrowedCoverageEvidence<TCoverage, TRowKey>
+  > {
+    for (const { acquisition, record, claim } of this.currentCoverageClaims()) {
+      if (record.releaseSettled || claim.coverage === undefined) continue
+      yield Object.freeze({
+        authority: `established` as const,
+        acquisition,
+        demandKey: claim.scope.demandKey,
+        sequenceKey: claim.scope.sequenceKey,
+        generation: claim.generation,
+        coverage: claim.coverage,
+      })
+    }
+
+    for (const [acquisition, record] of this.acquisitions) {
+      if (
+        record.evidenceEpoch === this.evidenceEpoch &&
+        record.applied &&
+        !record.releaseSettled &&
+        record.leases.size > 0
+      ) {
+        for (const [lease, claim] of record.claims) {
+          if (!record.leases.has(lease) || claim.scope.demand === undefined) {
+            continue
+          }
+          yield Object.freeze({
+            authority: `applied` as const,
+            acquisition,
+            collectionId: claim.scope.collectionId,
+            sourceId: claim.scope.sourceId,
+            demand: claim.scope.demand,
+            demandKey: claim.scope.demandKey,
+            sequenceKey: claim.scope.sequenceKey,
+            generation: claim.generation,
+            rowKeys: record.rows as ReadonlySet<TRowKey>,
+          })
+        }
+      }
+
+      for (const [lease, claim] of record.claims) {
+        if (record.leases.has(lease) && claim.retainedOutcome !== undefined) {
+          yield Object.freeze({
+            authority: `retained` as const,
+            acquisition,
+            demandKey: claim.scope.demandKey,
+            generation: claim.generation,
+            outcome: claim.retainedOutcome,
+          })
+        }
+      }
+    }
   }
 
   /**
@@ -387,7 +489,7 @@ export class CoverageRegistry<
       !record ||
       !claim ||
       record.releaseSettled ||
-      !matchesOutcome(claim, outcome) ||
+      !this.matchesEvidenceOutcome(claim, outcome) ||
       outcome.appliedRowKeys === undefined
     ) {
       return { accepted: false, published: false, rowsToRemove: [] }
@@ -424,7 +526,9 @@ export class CoverageRegistry<
       ? this.projectAppliedCoverage({ outcome, rows: nextRows })
       : undefined
     const nextCoverage =
-      coverage === undefined ? undefined : this.snapshotCoverage(coverage)
+      coverage === undefined
+        ? undefined
+        : this.snapshotEvidenceCoverage(coverage)
     if (record.leases.has(lease as DemandLease<unknown>)) {
       claim.coverage = nextCoverage
     }
@@ -434,7 +538,7 @@ export class CoverageRegistry<
       // publishes the adapter result.
       for (const [peerLease, peer] of record.claims) {
         if (record.leases.has(peerLease) && peer.scopeKey === claim.scopeKey) {
-          peer.coverage = this.snapshotCoverage(nextCoverage)
+          peer.coverage = this.snapshotEvidenceCoverage(nextCoverage)
         }
       }
     }
@@ -591,7 +695,7 @@ export class CoverageRegistry<
           return equivalent && candidate.sequence < covering.sequence
         }),
       )
-      .map(({ coverage }) => this.snapshotCoverage(coverage))
+      .map(({ coverage }) => this.snapshotEvidenceCoverage(coverage))
   }
 
   coverageEvidence(): Array<{ coverage: TCoverage; generation: number }> {
@@ -600,7 +704,7 @@ export class CoverageRegistry<
         ? []
         : [
             {
-              coverage: this.snapshotCoverage(claim.coverage),
+              coverage: this.snapshotEvidenceCoverage(claim.coverage),
               generation: claim.generation,
             },
           ],
@@ -616,7 +720,7 @@ export class CoverageRegistry<
     return Array.from(this.acquisitions.values()).flatMap((record) =>
       Array.from(record.claims.entries()).flatMap(([lease, claim]) =>
         record.leases.has(lease) && claim.retainedOutcome !== undefined
-          ? [snapshotAppliedOutcome(claim.retainedOutcome)]
+          ? [this.snapshotEvidenceOutcome(claim.retainedOutcome)]
           : [],
       ),
     )
@@ -662,6 +766,20 @@ export class CoverageRegistry<
     }
   }
 
+  /** @internal Work accounting used by evidence-path oracles. */
+  evidenceWork(): CoverageEvidenceWorkCounts {
+    return { ...this.evidenceWorkCounts }
+  }
+
+  /** @internal Resets work accounting without changing registry state. */
+  resetEvidenceWork(): void {
+    this.evidenceWorkCounts = {
+      rowKeyCopies: 0,
+      demandSnapshots: 0,
+      demandKeyDerivations: 0,
+    }
+  }
+
   /** Marks one acquisition observer's outcome-free or rejected result settled. */
   settleLease(
     acquisition: AcquisitionToken,
@@ -684,7 +802,9 @@ export class CoverageRegistry<
     this.rowOwners.clear()
     for (const record of this.acquisitions.values()) {
       record.applied = false
-      record.rows.clear()
+      // Borrowed evidence may still hold the old read-only Set during the
+      // current stack. Replace it instead of mutating that view in place.
+      record.rows = new Set()
       for (const claim of record.claims.values()) {
         claim.coverage = undefined
         claim.retainedOutcome = undefined
@@ -867,8 +987,9 @@ export class CoverageRegistry<
     },
     settlementPending: boolean,
   ): Omit<CoverageClaim<TCoverage>, `sequence`> {
-    const demand = snapshotLoadSubsetDemand(scope.demand)
-    const demandKey = getLoadSubsetDemandKey(demand)
+    const demand = this.snapshotEvidenceDemand(scope.demand)
+    const demandKey = this.deriveEvidenceDemandKey(demand)
+    const sequenceKey = this.deriveEvidenceSequenceKey(demand)
     return {
       generation,
       settlementPending,
@@ -877,11 +998,66 @@ export class CoverageRegistry<
         collectionId: scope.collectionId,
         sourceId: scope.sourceId,
         demandKey,
+        sequenceKey,
         demand,
       },
       coverage: undefined,
       retainedOutcome: undefined,
     }
+  }
+
+  private snapshotEvidenceCoverage(coverage: TCoverage): TCoverage {
+    this.evidenceWorkCounts.demandSnapshots++
+    this.evidenceWorkCounts.rowKeyCopies += this.coverageRowKeyCount(coverage)
+    return this.snapshotCoverage(coverage)
+  }
+
+  private snapshotEvidenceDemand(demand: LoadSubsetOptions): LoadSubsetOptions {
+    this.evidenceWorkCounts.demandSnapshots++
+    return snapshotLoadSubsetDemand(demand)
+  }
+
+  private deriveEvidenceDemandKey(
+    demand: LoadSubsetOptions,
+  ): DemandKey | undefined {
+    this.evidenceWorkCounts.demandKeyDerivations++
+    return getLoadSubsetDemandKey(demand)
+  }
+
+  private deriveEvidenceSequenceKey(
+    demand: LoadSubsetOptions,
+  ): DemandKey | undefined {
+    return this.deriveEvidenceDemandKey({
+      ...demand,
+      limit: undefined,
+      offset: undefined,
+    })
+  }
+
+  private snapshotEvidenceOutcome(
+    outcome: AppliedLoadSubsetOutcome,
+  ): AppliedLoadSubsetOutcome {
+    this.evidenceWorkCounts.demandSnapshots++
+    this.evidenceWorkCounts.rowKeyCopies += outcome.appliedRowKeys?.length ?? 0
+    return snapshotAppliedOutcome(outcome)
+  }
+
+  private copyEvidenceRows(rows: Iterable<TRowKey>): ReadonlyArray<TRowKey> {
+    const snapshot = Object.freeze([...rows])
+    this.evidenceWorkCounts.rowKeyCopies += snapshot.length
+    return snapshot
+  }
+
+  private matchesEvidenceOutcome(
+    claim: Pick<CoverageClaim<TCoverage>, `generation` | `scope`>,
+    outcome: AppliedLoadSubsetOutcome,
+  ): boolean {
+    return (
+      claim.generation === outcome.generation &&
+      claim.scope.collectionId === outcome.collectionId &&
+      claim.scope.sourceId === outcome.sourceId &&
+      claim.scope.demandKey === this.deriveEvidenceDemandKey(outcome.demand)
+    )
   }
 
   private findMatchingLease(
@@ -890,7 +1066,7 @@ export class CoverageRegistry<
   ): DemandLease<TDemand> | undefined {
     if (!record) return undefined
     const matching = Array.from(record.claims.entries()).filter(([, claim]) =>
-      matchesOutcome(claim, outcome),
+      this.matchesEvidenceOutcome(claim, outcome),
     )
     return (matching.find(([lease]) => record.leases.has(lease)) ??
       matching[0])?.[0] as DemandLease<TDemand> | undefined
@@ -991,18 +1167,6 @@ function createScopeKey(
   demandKey: string | undefined,
 ): string {
   return JSON.stringify([collectionId, sourceId ?? null, demandKey ?? null])
-}
-
-function matchesOutcome<TCoverage>(
-  claim: Pick<CoverageClaim<TCoverage>, `generation` | `scope`>,
-  outcome: AppliedLoadSubsetOutcome,
-): boolean {
-  return (
-    claim.generation === outcome.generation &&
-    claim.scope.collectionId === outcome.collectionId &&
-    claim.scope.sourceId === outcome.sourceId &&
-    claim.scope.demandKey === getLoadSubsetDemandKey(outcome.demand)
-  )
 }
 
 function hasAuthoritativeExtent(
