@@ -45,12 +45,13 @@ type AcquisitionRecord<TCoverage, TRowKey extends string | number> = {
 type CoverageClaim<TCoverage> = {
   sequence: number
   generation: number
+  settlementPending: boolean
   scopeKey: string
   scope: {
     collectionId: string
     sourceId: string | undefined
     demandKey: string | undefined
-    demand: LoadSubsetOptions
+    demand: LoadSubsetOptions | undefined
   }
   coverage: TCoverage | undefined
   retainedOutcome: AppliedLoadSubsetOutcome | undefined
@@ -61,6 +62,8 @@ export type CoverageRegistryOptions<TDemand, TCoverage> = {
   coversCoverage: (coverage: TCoverage, candidate: TCoverage) => boolean
   /** Takes a defensive snapshot for storage and every public read. */
   snapshotCoverage: (coverage: TCoverage) => TCoverage
+  /** Counts retained row-key slots in one coverage snapshot. */
+  coverageRowKeyCount?: (coverage: TCoverage) => number
   /**
    * Projects an exact applied source fact into the registry's coverage
    * domain. Return undefined when that fact cannot prove coverage.
@@ -84,6 +87,16 @@ export type CoveragePublicationResult<TRowKey extends string | number> =
 export type ReleaseResult<TRowKey extends string | number> = {
   rowsToRemove: Array<TRowKey>
 }
+
+export type CoverageRegistryResourceCounts = Readonly<{
+  liveLeases: number
+  acquisitions: number
+  claims: number
+  unsettledClaims: number
+  retainedDemands: number
+  retainedOutcomes: number
+  retainedRowKeySlots: number
+}>
 
 /**
  * Keeps logical demand, physical adapter resources, achieved coverage, and row
@@ -109,6 +122,7 @@ export class CoverageRegistry<
     rows: ReadonlySet<string | number>
   }) => TCoverage | undefined
   private readonly snapshotCoverage: (coverage: TCoverage) => TCoverage
+  private readonly coverageRowKeyCount: (coverage: TCoverage) => number
   private readonly leases = new Map<
     DemandLease<TDemand>,
     LeaseRecord<TDemand>
@@ -134,10 +148,11 @@ export class CoverageRegistry<
     this.coversCoverage = options.coversCoverage
     this.projectAppliedCoverage = options.projectAppliedCoverage
     this.snapshotCoverage = options.snapshotCoverage
+    this.coverageRowKeyCount = options.coverageRowKeyCount ?? (() => 0)
   }
 
   addLease(demand: TDemand): DemandLease<TDemand> {
-    const lease = { [demandLeaseBrand]: demand } as DemandLease<TDemand>
+    const lease = {} as DemandLease<TDemand>
     this.leases.set(lease, { demand, acquisitions: new Set() })
     return lease
   }
@@ -164,7 +179,7 @@ export class CoverageRegistry<
     const acquisition = {
       [acquisitionTokenBrand]: true,
     } as AcquisitionToken
-    const claim = this.createClaim(options.generation, options.scope)
+    const claim = this.createClaim(options.generation, options.scope, true)
     this.acquisitions.set(acquisition, {
       evidenceEpoch: this.evidenceEpoch,
       leases: new Set(options.leases as ReadonlyArray<DemandLease<unknown>>),
@@ -205,6 +220,8 @@ export class CoverageRegistry<
       coverage?: TCoverage
       /** Caller-relative evidence retained from an already applied acquisition. */
       retainedOutcome?: AppliedLoadSubsetOutcome
+      /** Whether this lease still has an async outcome that may publish. */
+      settlementPending?: boolean
     },
   ): void {
     const leaseRecord = this.leases.get(lease)
@@ -221,14 +238,27 @@ export class CoverageRegistry<
       throw new Error(`Cannot attach to an invalidated acquisition`)
     }
 
-    const fallback = acquisitionRecord.claims.values().next().value
+    const fallback = Array.from(acquisitionRecord.claims.entries()).find(
+      ([candidate]) => acquisitionRecord.leases.has(candidate),
+    )?.[1]
     const claim = options
-      ? this.createClaim(options.generation, options.scope)
+      ? this.createClaim(
+          options.generation,
+          options.scope,
+          options.settlementPending ?? false,
+        )
       : fallback
         ? {
             generation: fallback.generation,
+            settlementPending: false,
             scopeKey: fallback.scopeKey,
-            scope: fallback.scope,
+            scope: {
+              ...fallback.scope,
+              demand:
+                fallback.scope.demand === undefined
+                  ? undefined
+                  : snapshotLoadSubsetDemand(fallback.scope.demand),
+            },
             coverage: undefined,
             retainedOutcome: undefined,
           }
@@ -296,22 +326,30 @@ export class CoverageRegistry<
         record.evidenceEpoch === this.evidenceEpoch &&
         !record.releaseSettled &&
         record.leases.size > 0
-          ? Array.from(record.claims.values()).map((claim) => {
-              const rowKeys = Object.freeze([...record.rows])
-              return {
-                acquisition,
-                outcome: snapshotAppliedOutcome({
-                  collectionId: claim.scope.collectionId,
-                  ...(claim.scope.sourceId === undefined
-                    ? {}
-                    : { sourceId: claim.scope.sourceId }),
-                  demand: claim.scope.demand,
-                  generation: claim.generation,
-                  extent: `unknown`,
-                  appliedRowKeys: rowKeys,
-                }),
-                rowKeys,
+          ? Array.from(record.claims.entries()).flatMap(([lease, claim]) => {
+              if (
+                !record.leases.has(lease) ||
+                claim.scope.demand === undefined
+              ) {
+                return []
               }
+              const rowKeys = Object.freeze([...record.rows])
+              return [
+                {
+                  acquisition,
+                  outcome: snapshotAppliedOutcome({
+                    collectionId: claim.scope.collectionId,
+                    ...(claim.scope.sourceId === undefined
+                      ? {}
+                      : { sourceId: claim.scope.sourceId }),
+                    demand: claim.scope.demand,
+                    generation: claim.generation,
+                    extent: `unknown`,
+                    appliedRowKeys: rowKeys,
+                  }),
+                  rowKeys,
+                },
+              ]
             })
           : [],
     )
@@ -353,6 +391,7 @@ export class CoverageRegistry<
     ) {
       return { accepted: false, published: false, rowsToRemove: [] }
     }
+    const matchedLease = lease as DemandLease<TDemand>
 
     const canPublish = this.canPublish(acquisition, claim)
     const nextRows = new Set(outcome.appliedRowKeys as ReadonlyArray<TRowKey>)
@@ -362,17 +401,21 @@ export class CoverageRegistry<
       nextRows,
     )
     record.applied = true
-    for (const peer of record.claims.values()) {
-      peer.retainedOutcome = undefined
+    claim.settlementPending = false
+    for (const [peerLease, peer] of record.claims) {
+      if (record.leases.has(peerLease)) peer.retainedOutcome = undefined
     }
 
     // Generation currency controls reusable coverage, not physical row
     // ownership. A stale acquisition still owns every row it applied until
     // its physical resource is released.
     if (!canPublish) {
-      for (const peer of record.claims.values()) {
-        if (peer.scopeKey === claim.scopeKey) peer.coverage = undefined
+      for (const [peerLease, peer] of record.claims) {
+        if (record.leases.has(peerLease) && peer.scopeKey === claim.scopeKey) {
+          peer.coverage = undefined
+        }
       }
+      this.removeSettledDormantClaim(record, matchedLease, claim)
       return { accepted: false, published: false, rowsToRemove }
     }
 
@@ -381,13 +424,15 @@ export class CoverageRegistry<
       : undefined
     const nextCoverage =
       coverage === undefined ? undefined : this.snapshotCoverage(coverage)
-    claim.coverage = nextCoverage
+    if (record.leases.has(lease as DemandLease<unknown>)) {
+      claim.coverage = nextCoverage
+    }
     if (nextCoverage !== undefined) {
       // One physical result proves the same exact scope for every logical
       // owner attached to that acquisition, even when only one observer
       // publishes the adapter result.
-      for (const peer of record.claims.values()) {
-        if (peer.scopeKey === claim.scopeKey) {
+      for (const [peerLease, peer] of record.claims) {
+        if (record.leases.has(peerLease) && peer.scopeKey === claim.scopeKey) {
           peer.coverage = this.snapshotCoverage(nextCoverage)
         }
       }
@@ -402,11 +447,13 @@ export class CoverageRegistry<
       }
     }
 
-    return {
+    const result = {
       accepted: true,
       published: nextCoverage !== undefined,
       rowsToRemove,
     }
+    this.removeSettledDormantClaim(record, matchedLease, claim)
+    return result
   }
 
   replaceRows(
@@ -578,6 +625,54 @@ export class CoverageRegistry<
     return this.rowOwners.get(row)?.size ?? 0
   }
 
+  /** @internal Resource accounting used by lifecycle oracles. */
+  resourceCounts(): CoverageRegistryResourceCounts {
+    let claims = 0
+    let unsettledClaims = 0
+    let retainedDemands = 0
+    let retainedOutcomes = 0
+    let retainedRowKeySlots = 0
+
+    for (const record of this.acquisitions.values()) {
+      retainedRowKeySlots += record.rows.size
+      for (const claim of record.claims.values()) {
+        claims++
+        if (claim.settlementPending) unsettledClaims++
+        if (claim.scope.demand !== undefined) retainedDemands++
+        if (claim.coverage !== undefined) {
+          retainedRowKeySlots += this.coverageRowKeyCount(claim.coverage)
+        }
+        if (claim.retainedOutcome !== undefined) {
+          retainedOutcomes++
+          retainedRowKeySlots +=
+            claim.retainedOutcome.appliedRowKeys?.length ?? 0
+        }
+      }
+    }
+
+    return {
+      liveLeases: this.leases.size,
+      acquisitions: this.acquisitions.size,
+      claims,
+      unsettledClaims,
+      retainedDemands,
+      retainedOutcomes,
+      retainedRowKeySlots,
+    }
+  }
+
+  /** Marks one acquisition observer's outcome-free or rejected result settled. */
+  settleLease(
+    acquisition: AcquisitionToken,
+    lease: DemandLease<TDemand>,
+  ): void {
+    const record = this.acquisitions.get(acquisition)
+    const claim = record?.claims.get(lease as DemandLease<unknown>)
+    if (!record || !claim) return
+    claim.settlementPending = false
+    this.removeSettledDormantClaim(record, lease, claim)
+  }
+
   /**
    * Clears source evidence after a committed truncate without releasing the
    * logical demands or their physical adapter acquisitions.
@@ -621,6 +716,11 @@ export class CoverageRegistry<
         const current = this.currentAcquisitions.get(claim.scopeKey)
         if (current?.acquisition === acquisition && current.lease === lease) {
           this.restoreCurrentAcquisition(claim.scopeKey)
+        }
+        if (claim.settlementPending) {
+          this.compactDormantClaim(claim)
+        } else {
+          record.claims.delete(lease as DemandLease<unknown>)
         }
       }
       leaseRecord.acquisitions.delete(acquisition)
@@ -672,6 +772,25 @@ export class CoverageRegistry<
       } catch (error) {
         releaseErrors.push(error)
       }
+    }
+  }
+
+  private compactDormantClaim(claim: CoverageClaim<TCoverage>): void {
+    claim.scope.demand = undefined
+    claim.coverage = undefined
+    claim.retainedOutcome = undefined
+  }
+
+  private removeSettledDormantClaim(
+    record: AcquisitionRecord<TCoverage, TRowKey>,
+    lease: DemandLease<TDemand>,
+    claim: CoverageClaim<TCoverage>,
+  ): void {
+    if (
+      !claim.settlementPending &&
+      !record.leases.has(lease as DemandLease<unknown>)
+    ) {
+      record.claims.delete(lease as DemandLease<unknown>)
     }
   }
 
@@ -745,11 +864,13 @@ export class CoverageRegistry<
       sourceId?: string
       demand: LoadSubsetOptions
     },
+    settlementPending: boolean,
   ): Omit<CoverageClaim<TCoverage>, `sequence`> {
     const demand = snapshotLoadSubsetDemand(scope.demand)
     const demandKey = getLoadSubsetDemandKey(demand)
     return {
       generation,
+      settlementPending,
       scopeKey: createScopeKey(scope.collectionId, scope.sourceId, demandKey),
       scope: {
         collectionId: scope.collectionId,
@@ -814,6 +935,7 @@ export function createLoadSubsetCoverageRegistry<
       coverage.sourceId === candidate.sourceId &&
       isLoadSubsetRequestSubsumedBy(candidate.demand, coverage.demand),
     snapshotCoverage: snapshotAppliedCoverage,
+    coverageRowKeyCount: (coverage) => coverage.rowKeys.length,
     projectAppliedCoverage: ({ outcome, rows }) => {
       const limit = outcome.demand.limit
       if (limit === undefined) {

@@ -78,6 +78,74 @@ describe(`loadSubset outcomes`, () => {
     }
   })
 
+  it(`retires an outcome-free observer after it releases before settlement`, async () => {
+    const deferred = createDeferred<void>()
+    const collection = createCollection<{ id: string }>({
+      id: `load-subset-outcome-free-observer`,
+      getKey: (row) => row.id,
+      syncMode: `on-demand`,
+      startSync: true,
+      sync: {
+        sync: ({ markReady }) => {
+          markReady()
+          return { loadSubset: () => deferred.promise }
+        },
+      },
+    })
+    const first = { limit: 1 }
+    const second = { limit: 1 }
+
+    try {
+      const firstReady = collection._sync.loadSubset(first)
+      const secondReady = collection._sync.loadSubset(second)
+      expect(collection._sync.getLoadSubsetResourceCounts()).toEqual({
+        liveLeases: 2,
+        acquisitions: 1,
+        claims: 2,
+        unsettledClaims: 2,
+        retainedDemands: 2,
+        retainedOutcomes: 0,
+        retainedRowKeySlots: 0,
+      })
+
+      collection._sync.unloadSubset(first)
+      expect(collection._sync.getLoadSubsetResourceCounts()).toEqual({
+        liveLeases: 1,
+        acquisitions: 1,
+        claims: 2,
+        unsettledClaims: 2,
+        retainedDemands: 1,
+        retainedOutcomes: 0,
+        retainedRowKeySlots: 0,
+      })
+
+      deferred.resolve(undefined)
+      await Promise.all([firstReady, secondReady])
+      expect(collection._sync.getLoadSubsetResourceCounts()).toEqual({
+        liveLeases: 1,
+        acquisitions: 1,
+        claims: 1,
+        unsettledClaims: 0,
+        retainedDemands: 1,
+        retainedOutcomes: 0,
+        retainedRowKeySlots: 0,
+      })
+
+      collection._sync.unloadSubset(second)
+      expect(collection._sync.getLoadSubsetResourceCounts()).toEqual({
+        liveLeases: 0,
+        acquisitions: 0,
+        claims: 0,
+        unsettledClaims: 0,
+        retainedDemands: 0,
+        retainedOutcomes: 0,
+        retainedRowKeySlots: 0,
+      })
+    } finally {
+      await collection.cleanup()
+    }
+  })
+
   it(`publishes exact applied coverage through the collection sync boundary`, async () => {
     const unloadError = new Error(`unload failed`)
     let unloadShouldFail = true

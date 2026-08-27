@@ -45,6 +45,7 @@ import type { Deferred } from '../deferred'
 import type {
   AcquisitionToken,
   AppliedLoadSubsetCoverage,
+  CoverageRegistryResourceCounts,
   DemandLease,
 } from '../query/coverage-registry.js'
 
@@ -493,7 +494,11 @@ export class CollectionSyncManager<
             },
             (error: unknown) => {
               if (coverageOwnership) {
-                this.discardCoverageLease(ownerOptions, coverageOwnership.lease)
+                this.discardCoverageLease(
+                  ownerOptions,
+                  coverageOwnership.acquisition,
+                  coverageOwnership.lease,
+                )
               }
               deferred.reject(error)
             },
@@ -1020,7 +1025,7 @@ export class CollectionSyncManager<
             return appliedOutcome
           },
           (error: unknown) => {
-            this.discardCoverageLease(options, lease)
+            this.discardCoverageLease(options, acquisition, lease)
             throw error
           },
         )
@@ -1080,6 +1085,11 @@ export class CollectionSyncManager<
     AppliedLoadSubsetCoverage<TKey>
   > {
     return this.coverageRegistry.coverageAntichain()
+  }
+
+  /** @internal Resource accounting used by lifecycle oracles. */
+  public getLoadSubsetResourceCounts(): CoverageRegistryResourceCounts {
+    return this.coverageRegistry.resourceCounts()
   }
 
   /** @internal Exact active evidence for a physically skipped request. */
@@ -1145,6 +1155,7 @@ export class CollectionSyncManager<
       this.coverageRegistry.attachLease(lease, acquisition, {
         generation,
         scope: { collectionId: this.id, demand },
+        settlementPending: true,
       })
     } else {
       acquisition = this.coverageRegistry.addAcquisition({
@@ -1397,7 +1408,10 @@ export class CollectionSyncManager<
     lease: DemandLease<LoadSubsetOptions>,
     outcome: AppliedLoadSubsetOutcome,
   ): void {
-    if (outcome.appliedRowKeys === undefined) return
+    if (outcome.appliedRowKeys === undefined) {
+      this.coverageRegistry.settleLease(acquisition, lease)
+      return
+    }
     this.removeCoverageRows(
       this.coverageRegistry.publishOutcome(acquisition, lease, outcome)
         .rowsToRemove,
@@ -1420,6 +1434,7 @@ export class CollectionSyncManager<
 
   private discardCoverageLease(
     options: LoadSubsetOptions,
+    acquisition: AcquisitionToken,
     lease: DemandLease<LoadSubsetOptions>,
   ): void {
     const leases = this.coverageLeasesByOwner.get(options)
@@ -1431,6 +1446,7 @@ export class CollectionSyncManager<
     this.removeCoverageRows(
       this.coverageRegistry.releaseLease(lease).rowsToRemove,
     )
+    this.coverageRegistry.settleLease(acquisition, lease)
   }
 
   private removeCoverageRows(rows: ReadonlyArray<TKey>): void {
