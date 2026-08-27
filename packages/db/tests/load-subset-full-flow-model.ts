@@ -368,10 +368,13 @@ export function projectOrderedPublicationBoundary(
 }
 
 /**
- * Projects public ordered snapshots across replacement epochs. Resizes and
- * staged rows change private replacement state only. A successful current
- * replacement publishes once after every overlapping attempt has settled;
- * failure keeps the previous publication.
+ * Projects semantic ordered publications across replacement epochs. Empty
+ * transport callbacks do not appear here because they cannot change public
+ * state. Demand activity comes only from request and release events. Staged
+ * rows stay private until every acquisition has settled, then the current
+ * replacement publishes the retained ordered prefix plus rows required by
+ * still-active demands. Failure keeps the previous publication, and cleanup is
+ * a terminal fence against late writes and settlements.
  */
 export function projectAtomicOrderedPublications(
   history: ReadonlyArray<LoadSubsetFullFlowEvent>,

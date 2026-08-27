@@ -400,11 +400,16 @@ reconciliation once, but only after applied evidence proves the retained prefix
 or authoritative exhaustion. A continuing page stays private while its next
 acquisition refines that evidence; failure publishes no replacement batch.
 Each active demand in that replacement settles on its own, and the replacement
-waits for every acquisition it started. Releasing a demand removes its rows from
-the desired union, but does not erase that settlement barrier. A superseded
-attempt's rows stay private, and only the current reconciliation may publish.
-Teardown discards the whole replacement epoch, so later source writes and late
-settlements cannot reach public readers.
+waits for every acquisition it started. The published reconciliation is the
+retained ordered prefix plus rows required by every still-active other demand.
+Releasing a demand removes its rows from that union, but does not erase that
+settlement barrier. Source deltas that race the current replacement stay private
+until reconciliation, then join the retained prefix when their order places
+them there. A superseded attempt's rows stay private, and only the current
+reconciliation may publish. Teardown discards the whole replacement epoch, so
+later source writes and late settlements cannot reach public readers. Here a
+publication means a change to reader-visible state; an empty transport callback
+does not count as one.
 A requested limit, a settled promise, or the number of requests does not.
 An outcome-free completion (`true` or `Promise<void>`) supplies no reusable row
 provenance, source extent, or CoverageFact. Its exact request has still settled,
