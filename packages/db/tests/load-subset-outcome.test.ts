@@ -648,6 +648,71 @@ describe(`loadSubset outcomes`, () => {
     }
   })
 
+  it(`keeps rows applied by an older active acquisition after a newer owner releases`, async () => {
+    type PendingLoad = {
+      succeed: () => Promise<void>
+    }
+    const pending: Array<PendingLoad> = []
+    let hasWrittenRow = false
+    const collection = createCollection<{ id: string }>({
+      id: `load-subset-stale-generation-row-owner`,
+      getKey: (row) => row.id,
+      syncMode: `on-demand`,
+      startSync: true,
+      sync: {
+        sync: ({ begin, write, commit, markReady }) => {
+          markReady()
+          return {
+            loadSubset: () =>
+              new Promise((resolve) => {
+                pending.push({
+                  succeed: async () => {
+                    begin()
+                    write({
+                      type: hasWrittenRow ? `update` : `insert`,
+                      value: { id: `shared` },
+                    })
+                    hasWrittenRow = true
+                    const applied = commit()
+                    if (applied !== true) await applied
+                    resolve({
+                      hasMore: false,
+                      appliedRowKeys: [`shared`],
+                    })
+                  },
+                })
+              }),
+            unloadSubset: vi.fn(),
+          }
+        },
+      },
+    })
+
+    try {
+      const olderOptions = { limit: 1 }
+      const newerOptions = { limit: 1 }
+      const older = collection._sync.loadSubset(olderOptions)
+      const newer = collection._sync.loadSubset(newerOptions)
+      if (older === true || newer === true) {
+        throw new Error(`Expected asynchronous loads`)
+      }
+
+      await pending[1]!.succeed()
+      await newer
+      await pending[0]!.succeed()
+      await older
+
+      expect(Array.from(collection.keys())).toEqual([`shared`])
+      collection._sync.unloadSubset(newerOptions)
+      expect(Array.from(collection.keys())).toEqual([`shared`])
+
+      collection._sync.unloadSubset(olderOptions)
+      expect(Array.from(collection.keys())).toEqual([])
+    } finally {
+      await collection.cleanup()
+    }
+  })
+
   it(`owns applied rows even when source extent is unknown`, async () => {
     const collection = createCollection<{ id: string }>({
       id: `load-subset-unknown-row-provenance`,

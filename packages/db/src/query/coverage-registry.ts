@@ -335,19 +335,14 @@ export class CoverageRegistry<
       !record ||
       !claim ||
       record.releaseSettled ||
-      !this.canPublish(acquisition, claim) ||
       !matchesOutcome(claim, outcome) ||
       outcome.appliedRowKeys === undefined
     ) {
       return { accepted: false, published: false, rowsToRemove: [] }
     }
 
+    const canPublish = this.canPublish(acquisition, claim)
     const nextRows = new Set(outcome.appliedRowKeys as ReadonlyArray<TRowKey>)
-    const coverage = hasAuthoritativeExtent(outcome)
-      ? this.projectAppliedCoverage({ outcome, rows: nextRows })
-      : undefined
-    const nextCoverage =
-      coverage === undefined ? undefined : this.snapshotCoverage(coverage)
     const rowsToRemove = this.replaceRowsForRecord(
       acquisition,
       record,
@@ -357,6 +352,22 @@ export class CoverageRegistry<
     for (const peer of record.claims.values()) {
       peer.retainedOutcome = undefined
     }
+
+    // Generation currency controls reusable coverage, not physical row
+    // ownership. A stale acquisition still owns every row it applied until
+    // its physical resource is released.
+    if (!canPublish) {
+      for (const peer of record.claims.values()) {
+        if (peer.scopeKey === claim.scopeKey) peer.coverage = undefined
+      }
+      return { accepted: false, published: false, rowsToRemove }
+    }
+
+    const coverage = hasAuthoritativeExtent(outcome)
+      ? this.projectAppliedCoverage({ outcome, rows: nextRows })
+      : undefined
+    const nextCoverage =
+      coverage === undefined ? undefined : this.snapshotCoverage(coverage)
     claim.coverage = nextCoverage
     if (nextCoverage !== undefined) {
       // One physical result proves the same exact scope for every logical

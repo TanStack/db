@@ -685,26 +685,32 @@ class PublishCommand implements Command<RegistryModel, RegistryReal> {
       claim?.sourceId ?? acquisition.sourceId,
       this.rows,
     )
+    const matchesClaim =
+      leaseIndex !== undefined && this.generationDelta === 0 && this.exactScope
     const accepted =
-      leaseIndex !== undefined &&
-      canPublishModelAcquisition(model, acquisitionIndex, leaseIndex) &&
-      this.generationDelta === 0 &&
-      this.exactScope
-    const rowsToRemove = accepted
+      matchesClaim &&
+      canPublishModelAcquisition(model, acquisitionIndex, leaseIndex)
+    const rowsToRemove = matchesClaim
       ? replaceModelRows(model, acquisitionIndex, new Set(this.rows))
       : []
     const published =
       accepted &&
       this.extent !== `unknown` &&
       (this.rows.length >= claim!.prefix || this.extent === `exhausted`)
-    if (accepted) {
+    if (matchesClaim) {
       acquisition.applied = true
       for (const peer of acquisition.claims.values()) {
         peer.retainedOutcome = undefined
       }
-      claim!.coverage = published ? claim!.prefix : undefined
       const scope = scopeKey(claim!.sourceId, claim!.prefix)
-      if (published) {
+      if (!accepted) {
+        for (const peer of acquisition.claims.values()) {
+          if (scopeKey(peer.sourceId, peer.prefix) === scope) {
+            peer.coverage = undefined
+          }
+        }
+      } else if (published) {
+        claim!.coverage = claim!.prefix
         for (const peer of acquisition.claims.values()) {
           if (scopeKey(peer.sourceId, peer.prefix) === scope) {
             peer.coverage = claim!.prefix
@@ -712,6 +718,7 @@ class PublishCommand implements Command<RegistryModel, RegistryReal> {
         }
         restoreModelCurrent(model, scope)
       } else {
+        claim!.coverage = undefined
         const current = model.currentByScope.get(scope)
         if (
           current?.acquisition === acquisitionIndex &&
@@ -1037,6 +1044,88 @@ describe(`coverage registry oracle`, () => {
     registry.releaseAcquisition(retry)
     expect(registry.coverageAntichain()).toEqual([{ prefix: 1 }])
     expect(registry.rowOwnerCount(`prior`)).toBe(1)
+  })
+
+  it(`keeps rows owned by every active acquisition when stale coverage cannot publish`, () => {
+    const registry = createPrefixRegistry()
+    const olderLease = registry.addLease(1)
+    const newerLease = registry.addLease(1)
+    const older = addPrefixAcquisition(registry, {
+      generation: 1,
+      leases: [olderLease],
+      release: vi.fn(),
+      prefix: 1,
+    })
+    const newer = addPrefixAcquisition(registry, {
+      generation: 2,
+      leases: [newerLease],
+      release: vi.fn(),
+      prefix: 1,
+    })
+
+    expect(
+      registry.publishOutcome(
+        newer,
+        createPrefixOutcome(2, 1, `exhausted`, `prefixes`, `items`, [`a`]),
+      ),
+    ).toEqual({ accepted: true, published: true, rowsToRemove: [] })
+    expect(
+      registry.publishOutcome(
+        older,
+        createPrefixOutcome(1, 1, `exhausted`, `prefixes`, `items`, [`a`]),
+      ),
+    ).toEqual({ accepted: false, published: false, rowsToRemove: [] })
+
+    expect(registry.rowOwnerCount(`a`)).toBe(2)
+    expect(registry.releaseLease(newerLease)).toEqual({ rowsToRemove: [] })
+    expect(registry.coverageAntichain()).toEqual([])
+    expect(registry.rowOwnerCount(`a`)).toBe(1)
+
+    expect(registry.releaseLease(olderLease)).toEqual({
+      rowsToRemove: [`a`],
+    })
+  })
+
+  it(`keeps the same row safe when acquisition generations settle in either order`, () => {
+    for (const newerSettlesFirst of [false, true]) {
+      const registry = createPrefixRegistry()
+      const olderLease = registry.addLease(1)
+      const newerLease = registry.addLease(1)
+      const older = addPrefixAcquisition(registry, {
+        generation: 1,
+        leases: [olderLease],
+        release: vi.fn(),
+        prefix: 1,
+      })
+      const newer = addPrefixAcquisition(registry, {
+        generation: 2,
+        leases: [newerLease],
+        release: vi.fn(),
+        prefix: 1,
+      })
+      const settle = (acquisition: typeof older, generation: number) =>
+        registry.publishOutcome(
+          acquisition,
+          createPrefixOutcome(generation, 1, `exhausted`, `prefixes`, `items`, [
+            `a`,
+          ]),
+        )
+
+      if (newerSettlesFirst) {
+        settle(newer, 2)
+        settle(older, 1)
+      } else {
+        settle(older, 1)
+        settle(newer, 2)
+      }
+
+      expect(registry.rowOwnerCount(`a`)).toBe(2)
+      expect(registry.releaseLease(newerLease)).toEqual({ rowsToRemove: [] })
+      expect(registry.rowOwnerCount(`a`)).toBe(1)
+      expect(registry.releaseLease(olderLease)).toEqual({
+        rowsToRemove: [`a`],
+      })
+    }
   })
 
   it(`records unknown-extent row ownership without publishing coverage`, () => {
