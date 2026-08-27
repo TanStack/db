@@ -41,7 +41,7 @@ let runtimeReferenceIdentityFactory:
   | undefined
 
 export function getRuntimeReferenceIdentity(
-  value: object,
+  value: object | symbol,
 ): RuntimeReferenceIdentity {
   runtimeReferenceIdentityFactory ??= createRuntimeReferenceIdentityFactory()
 

@@ -50,7 +50,10 @@ import {
   toBooleanPredicate,
 } from '../../src/query/compiler/evaluators.js'
 import { isLoadSubsetRequestSubsumedBy } from '../../src/query/predicate-utils.js'
-import { createRuntimeReferenceIdentityFactory } from '../../src/query/runtime-reference-identity.js'
+import {
+  createRuntimeReferenceIdentityFactory,
+  getRuntimeReferenceIdentity,
+} from '../../src/query/runtime-reference-identity.js'
 import {
   cloneLoadSubsetOptions,
   snapshotLoadSubsetDemand,
@@ -319,14 +322,14 @@ describe(`semantic expression identity`, () => {
     vi.resetModules()
 
     try {
-      const { getRuntimeReferenceIdentity } = await import(
+      const { getRuntimeReferenceIdentity: getIdentity } = await import(
         `../../src/query/runtime-reference-identity.js`
       )
 
       expect(getRandomValues).not.toHaveBeenCalled()
 
-      getRuntimeReferenceIdentity({})
-      getRuntimeReferenceIdentity({})
+      getIdentity({})
+      getIdentity({})
 
       expect(getRandomValues).toHaveBeenCalledOnce()
     } finally {
@@ -363,6 +366,14 @@ describe(`semantic expression identity`, () => {
 
     expect(runtime(symbol)).toEqual(runtime(symbol))
     expect(runtime(Symbol(`same description`))).not.toEqual(runtime(symbol))
+  })
+
+  it(`accepts symbols through the shared runtime identity getter`, () => {
+    const symbol = Symbol(`shared runtime`)
+
+    expect(getRuntimeReferenceIdentity(symbol)).toEqual(
+      getRuntimeReferenceIdentity(symbol),
+    )
   })
 
   it(`falls back when the runtime crypto object lacks getRandomValues`, () => {
