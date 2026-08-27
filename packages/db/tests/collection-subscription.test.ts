@@ -585,7 +585,7 @@ describe(`CollectionSubscription status tracking`, () => {
   })
 
   it.each([`return`, `resolve`] as const)(
-    `publishes same-key replay ownership before releasing the old acquisition ($0)`,
+    `keeps same-key replay visible while only authoritative completion publishes ownership ($0)`,
     async (delivery) => {
       type Row = { id: string; value: number }
       let begin!: () => void
@@ -638,10 +638,14 @@ describe(`CollectionSubscription status tracking`, () => {
         await flushPromises()
 
         expect(Array.from(collection.keys())).toEqual([`same`])
-        expect(collection._sync.getLoadSubsetCoverage()).toHaveLength(1)
+        expect(collection._sync.getLoadSubsetCoverage()).toHaveLength(
+          delivery === `resolve` ? 1 : 0,
+        )
 
         subscription.unsubscribe()
-        expect(Array.from(collection.keys())).toEqual([])
+        expect(Array.from(collection.keys())).toEqual(
+          delivery === `resolve` ? [] : [`same`],
+        )
       } finally {
         await collection.cleanup()
       }

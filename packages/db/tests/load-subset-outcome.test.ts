@@ -19,6 +19,65 @@ import type {
 } from '../src/types.js'
 
 describe(`loadSubset outcomes`, () => {
+  it(`invalidates applied subset coverage when its source truncates`, async () => {
+    let stageTruncate: () => void = () => {
+      throw new Error(`source has not started`)
+    }
+    let commitSource: () => true | Promise<void> = () => {
+      throw new Error(`source has not started`)
+    }
+    const unloadSubset = vi.fn()
+    const collection = createCollection<{ id: string }>({
+      id: `load-subset-outcome-truncate-coverage`,
+      getKey: (row) => row.id,
+      syncMode: `on-demand`,
+      startSync: true,
+      sync: {
+        sync: ({ begin, write, commit, truncate, markReady }) => {
+          markReady()
+          stageTruncate = () => {
+            begin()
+            truncate()
+          }
+          commitSource = commit
+          return {
+            loadSubset: async () => {
+              begin()
+              write({ type: `insert`, value: { id: `a` } })
+              const applied = commit()
+              if (applied !== true) await applied
+              return { hasMore: false, appliedRowKeys: [`a`] }
+            },
+            unloadSubset,
+          }
+        },
+      },
+    })
+    const options = { limit: 1 }
+
+    try {
+      await collection._sync.loadSubset(options)
+      expect(Array.from(collection.keys())).toEqual([`a`])
+      expect(collection._sync.getLoadSubsetCoverage()).toHaveLength(1)
+
+      stageTruncate()
+      expect(Array.from(collection.keys())).toEqual([`a`])
+      expect(collection._sync.getLoadSubsetCoverage()).toHaveLength(1)
+
+      const truncated = commitSource()
+      if (truncated !== true) await truncated
+
+      expect(Array.from(collection.keys())).toEqual([])
+      expect(collection._sync.getLoadSubsetCoverage()).toEqual([])
+      expect(collection._sync.getLoadSubsetOutcome(options)).toBeUndefined()
+
+      collection._sync.unloadSubset(options)
+      expect(unloadSubset).toHaveBeenCalledOnce()
+    } finally {
+      await collection.cleanup()
+    }
+  })
+
   it(`publishes exact applied coverage through the collection sync boundary`, async () => {
     const unloadError = new Error(`unload failed`)
     let unloadShouldFail = true

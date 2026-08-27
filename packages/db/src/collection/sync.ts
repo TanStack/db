@@ -149,6 +149,12 @@ export class CollectionSyncManager<
     this.state = deps.state
     this.lifecycle = deps.lifecycle
     this._events = deps.events
+    this._events.on(`truncate`, () => {
+      this.coverageRegistry.invalidateAppliedEvidence()
+      this.coverageAcquisitionsByPromise = new WeakMap()
+      // The truncate transaction already removed every source row.
+      this.pendingCoverageRowsToRemove.clear()
+    })
   }
 
   /** Mark the active sync transaction as changing collection layout. */

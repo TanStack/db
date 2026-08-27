@@ -112,6 +112,7 @@ type ModelClaim = {
 type ModelAcquisition = {
   active: boolean
   applied: boolean
+  evidenceEpoch: number
   generation: number
   prefix: Prefix
   sourceId: string
@@ -128,6 +129,7 @@ type RegistryModel = {
   acquisitions: Array<ModelAcquisition>
   currentByScope: Map<string, { acquisition: number; lease: number }>
   claimSequence: number
+  evidenceEpoch: number
 }
 
 type ReleaseProbe = {
@@ -195,6 +197,7 @@ function addModelAcquisition(
   model.acquisitions.push({
     active: true,
     applied: false,
+    evidenceEpoch: model.evidenceEpoch,
     generation: options.generation,
     prefix: options.prefix,
     sourceId: options.sourceId,
@@ -230,6 +233,7 @@ function canPublishModelAcquisition(
   const claim = acquisition.claims.get(leaseIndex)
   if (!claim) return false
   if (!acquisition.active || acquisition.releaseSettled) return false
+  if (acquisition.evidenceEpoch !== model.evidenceEpoch) return false
   const currentIndex = model.currentByScope.get(
     scopeKey(claim.sourceId, claim.prefix),
   )
@@ -248,7 +252,9 @@ function canPublishModelAcquisition(
 function restoreModelCurrent(model: RegistryModel, scope: string): void {
   const candidate = model.acquisitions
     .flatMap((acquisition, acquisitionIndex) =>
-      !acquisition.active || acquisition.releaseSettled
+      !acquisition.active ||
+      acquisition.releaseSettled ||
+      acquisition.evidenceEpoch !== model.evidenceEpoch
         ? []
         : Array.from(acquisition.claims.entries()).map(([lease, claim]) => ({
             acquisition,
@@ -393,6 +399,7 @@ function assertRegistryModel(model: RegistryModel, real: RegistryReal): void {
     (acquisition, acquisitionIndex) =>
       acquisition.active &&
       acquisition.applied &&
+      acquisition.evidenceEpoch === model.evidenceEpoch &&
       !acquisition.releaseSettled &&
       acquisition.leases.size > 0
         ? Array.from(acquisition.claims.values()).map((claim) => ({
@@ -511,11 +518,17 @@ class AttachLeaseCommand implements Command<RegistryModel, RegistryReal> {
           real.acquisitions[acquisitionIndex]!,
         ),
       ).toThrow(`Cannot attach to a released acquisition`)
+    } else if (acquisition.leases.has(leaseIndex)) {
+      assertRegistryModel(model, real)
+      return
+    } else if (acquisition.evidenceEpoch !== model.evidenceEpoch) {
+      expect(() =>
+        real.registry.attachLease(
+          real.leases[leaseIndex]!,
+          real.acquisitions[acquisitionIndex]!,
+        ),
+      ).toThrow(`Cannot attach to an invalidated acquisition`)
     } else {
-      if (acquisition.leases.has(leaseIndex)) {
-        assertRegistryModel(model, real)
-        return
-      }
       model.leases[leaseIndex]!.acquisitions.add(acquisitionIndex)
       acquisition.leases.add(leaseIndex)
       const prefix = model.leases[leaseIndex]!.prefix
@@ -742,6 +755,31 @@ class PublishCommand implements Command<RegistryModel, RegistryReal> {
     `publish(acquisition=${this.rawAcquisition}, rows=${this.rows.join(``)}, generationDelta=${this.generationDelta}, exact=${this.exactScope}, extent=${this.extent})`
 }
 
+class InvalidateEvidenceCommand implements Command<
+  RegistryModel,
+  RegistryReal
+> {
+  check = () => true
+
+  run(model: RegistryModel, real: RegistryReal): void {
+    model.evidenceEpoch++
+    model.currentByScope.clear()
+    for (const acquisition of model.acquisitions) {
+      if (!acquisition.active) continue
+      acquisition.applied = false
+      acquisition.rows.clear()
+      for (const claim of acquisition.claims.values()) {
+        claim.coverage = undefined
+        claim.retainedOutcome = undefined
+      }
+    }
+    real.registry.invalidateAppliedEvidence()
+    assertRegistryModel(model, real)
+  }
+
+  toString = () => `invalidateAppliedEvidence()`
+}
+
 class ReleaseAcquisitionCommand implements Command<
   RegistryModel,
   RegistryReal
@@ -866,6 +904,54 @@ class DisposeCommand implements Command<RegistryModel, RegistryReal> {
 }
 
 describe(`coverage registry oracle`, () => {
+  it(`fences old evidence while retaining its physical release obligation`, () => {
+    const registry = createPrefixRegistry()
+    const oldRelease = vi.fn()
+    const oldLease = registry.addLease(1)
+    const oldAcquisition = addPrefixAcquisition(registry, {
+      generation: 1,
+      leases: [oldLease],
+      release: oldRelease,
+      prefix: 1,
+    })
+    publishPrefix(registry, oldAcquisition, 1, 1, [`a`])
+
+    registry.invalidateAppliedEvidence()
+    expect(registry.coverageAntichain()).toEqual([])
+    expect(registry.retainedOutcomeEvidence()).toEqual([])
+    expect(registry.appliedAcquisitionEvidence()).toEqual([])
+    expect(registry.rowOwnerCount(`a`)).toBe(0)
+
+    expect(
+      registry.publishOutcome(
+        oldAcquisition,
+        createPrefixOutcome(1, 1, `exhausted`, `prefixes`, `items`, [`old`]),
+      ),
+    ).toEqual({ accepted: false, published: false, rowsToRemove: [] })
+    expect(registry.coverageAntichain()).toEqual([])
+    expect(registry.rowOwnerCount(`old`)).toBe(1)
+
+    const freshRelease = vi.fn()
+    const freshLease = registry.addLease(1)
+    const freshAcquisition = addPrefixAcquisition(registry, {
+      generation: 2,
+      leases: [freshLease],
+      release: freshRelease,
+      prefix: 1,
+    })
+    publishPrefix(registry, freshAcquisition, 2, 1, [`fresh`])
+    expect(registry.coverageAntichain()).toEqual([{ prefix: 1 }])
+
+    expect(registry.releaseLease(oldLease)).toEqual({
+      rowsToRemove: [`old`],
+    })
+    expect(oldRelease).toHaveBeenCalledOnce()
+    expect(registry.releaseLease(freshLease)).toEqual({
+      rowsToRemove: [`fresh`],
+    })
+    expect(freshRelease).toHaveBeenCalledOnce()
+  })
+
   it(`keeps caller-relative claims on one physical acquisition`, () => {
     const registry = createPrefixRegistry()
     const release = vi.fn()
@@ -1542,6 +1628,7 @@ describe(`coverage registry oracle`, () => {
       ),
     fc.nat().map((acquisition) => new ReleaseAcquisitionCommand(acquisition)),
     fc.nat().map((lease) => new ReleaseLeaseCommand(lease)),
+    fc.constant(new InvalidateEvidenceCommand()),
     fc.constant(new DisposeCommand()),
   ]
 
@@ -1562,6 +1649,7 @@ describe(`coverage registry oracle`, () => {
             acquisitions: [],
             currentByScope: new Map(),
             claimSequence: 0,
+            evidenceEpoch: 0,
           },
           real: {
             registry: createPrefixRegistry(),

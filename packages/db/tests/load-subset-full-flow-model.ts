@@ -17,6 +17,21 @@ export type LoadSubsetFullFlowEvent =
       rowKeys: ReadonlyArray<string>
     }
   | {
+      type: `applyUnprovenRows`
+      ownerId: FullFlowOwnerId
+      demandId: FullFlowDemandId
+      rowKeys: ReadonlyArray<string>
+    }
+  | {
+      type: `rejectDemand`
+      ownerId: FullFlowOwnerId
+      demandId: FullFlowDemandId
+    }
+  | {
+      type: `truncateSource`
+      sessionId: FullFlowSessionId
+    }
+  | {
       type: `releaseDemand`
       ownerId: FullFlowOwnerId
       demandId: FullFlowDemandId
@@ -72,6 +87,8 @@ export function projectTransportLoads(
   history: ReadonlyArray<LoadSubsetFullFlowEvent>,
 ): number {
   const reusableDemands = new Set<FullFlowDemandId>()
+  const requestEpochs = new Map<FullFlowOwnerId, number>()
+  let sourceEpoch = 0
   let loads = 0
 
   for (const event of history) {
@@ -80,9 +97,21 @@ export function projectTransportLoads(
         if (!event.alreadyAborted && !reusableDemands.has(event.demandId)) {
           loads++
         }
+        if (!event.alreadyAborted) {
+          requestEpochs.set(event.ownerId, sourceEpoch)
+        }
         break
       case `applyAuthoritativeRows`:
-        reusableDemands.add(event.demandId)
+        if (requestEpochs.get(event.ownerId) === sourceEpoch) {
+          reusableDemands.add(event.demandId)
+        }
+        break
+      case `truncateSource`:
+        sourceEpoch++
+        reusableDemands.clear()
+        break
+      case `applyUnprovenRows`:
+      case `rejectDemand`:
         break
       case `releaseDemand`:
         if (event.invalidatesAdapterEvidence) {
@@ -97,6 +126,45 @@ export function projectTransportLoads(
   return loads
 }
 
+/** Projects reusable demand evidence without using registry state. */
+export function projectReusableDemands(
+  history: ReadonlyArray<LoadSubsetFullFlowEvent>,
+): Array<FullFlowDemandId> {
+  const reusableDemands = new Set<FullFlowDemandId>()
+  const requestEpochs = new Map<FullFlowOwnerId, number>()
+  let sourceEpoch = 0
+
+  for (const event of history) {
+    switch (event.type) {
+      case `requestDemand`:
+        if (!event.alreadyAborted) {
+          requestEpochs.set(event.ownerId, sourceEpoch)
+        }
+        break
+      case `applyAuthoritativeRows`:
+        if (requestEpochs.get(event.ownerId) === sourceEpoch) {
+          reusableDemands.add(event.demandId)
+        }
+        break
+      case `truncateSource`:
+        sourceEpoch++
+        reusableDemands.clear()
+        break
+      case `releaseDemand`:
+        if (event.invalidatesAdapterEvidence) {
+          reusableDemands.delete(event.demandId)
+        }
+        break
+      case `applyUnprovenRows`:
+      case `rejectDemand`:
+      case `restartSession`:
+        break
+    }
+  }
+
+  return [...reusableDemands].sort()
+}
+
 /** Derives visible row identity without consulting Collection implementation. */
 export function projectRetainedRowKeys(
   history: ReadonlyArray<LoadSubsetFullFlowEvent>,
@@ -104,9 +172,13 @@ export function projectRetainedRowKeys(
   const retainedRows = new Set<string>()
 
   for (const event of history) {
-    if (event.type === `applyAuthoritativeRows`) {
+    if (
+      event.type === `applyAuthoritativeRows` ||
+      event.type === `applyUnprovenRows`
+    ) {
       event.rowKeys.forEach((key) => retainedRows.add(key))
     }
+    if (event.type === `truncateSource`) retainedRows.clear()
     if (event.type === `releaseDemand` && event.finalRowOwner) {
       event.rowKeys.forEach((key) => retainedRows.delete(key))
     }

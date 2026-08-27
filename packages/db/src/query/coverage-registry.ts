@@ -33,6 +33,7 @@ type LeaseRecord<TDemand> = {
 }
 
 type AcquisitionRecord<TCoverage, TRowKey extends string | number> = {
+  evidenceEpoch: number
   leases: Set<DemandLease<unknown>>
   claims: Map<DemandLease<unknown>, CoverageClaim<TCoverage>>
   release: () => void
@@ -126,6 +127,7 @@ export class CoverageRegistry<
     }
   >()
   private claimSequence = 0
+  private evidenceEpoch = 0
 
   constructor(options: CoverageRegistryOptions<TDemand, TCoverage>) {
     this.coversDemand = options.coversDemand
@@ -164,6 +166,7 @@ export class CoverageRegistry<
     } as AcquisitionToken
     const claim = this.createClaim(options.generation, options.scope)
     this.acquisitions.set(acquisition, {
+      evidenceEpoch: this.evidenceEpoch,
       leases: new Set(options.leases as ReadonlyArray<DemandLease<unknown>>),
       claims: new Map(
         options.leases.map((lease) => [
@@ -182,7 +185,11 @@ export class CoverageRegistry<
 
   isAcquisitionAttachable(acquisition: AcquisitionToken): boolean {
     const record = this.acquisitions.get(acquisition)
-    return record !== undefined && !record.releaseSettled
+    return (
+      record !== undefined &&
+      !record.releaseSettled &&
+      record.evidenceEpoch === this.evidenceEpoch
+    )
   }
 
   attachLease(
@@ -210,6 +217,9 @@ export class CoverageRegistry<
       throw new Error(`Cannot attach to a released acquisition`)
     }
     if (acquisitionRecord.leases.has(lease as DemandLease<unknown>)) return
+    if (acquisitionRecord.evidenceEpoch !== this.evidenceEpoch) {
+      throw new Error(`Cannot attach to an invalidated acquisition`)
+    }
 
     const fallback = acquisitionRecord.claims.values().next().value
     const claim = options
@@ -282,7 +292,10 @@ export class CoverageRegistry<
   }> {
     return Array.from(this.acquisitions.entries()).flatMap(
       ([acquisition, record]) =>
-        record.applied && !record.releaseSettled && record.leases.size > 0
+        record.applied &&
+        record.evidenceEpoch === this.evidenceEpoch &&
+        !record.releaseSettled &&
+        record.leases.size > 0
           ? Array.from(record.claims.values()).map((claim) => {
               const rowKeys = Object.freeze([...record.rows])
               return {
@@ -481,6 +494,8 @@ export class CoverageRegistry<
     acquisition: AcquisitionToken,
     claim: CoverageClaim<TCoverage>,
   ): boolean {
+    const record = this.acquisitions.get(acquisition)
+    if (record?.evidenceEpoch !== this.evidenceEpoch) return false
     const current = this.currentAcquisitions.get(claim.scopeKey)
     return (
       current === undefined ||
@@ -561,6 +576,24 @@ export class CoverageRegistry<
 
   rowOwnerCount(row: TRowKey): number {
     return this.rowOwners.get(row)?.size ?? 0
+  }
+
+  /**
+   * Clears source evidence after a committed truncate without releasing the
+   * logical demands or their physical adapter acquisitions.
+   */
+  invalidateAppliedEvidence(): void {
+    this.evidenceEpoch++
+    this.currentAcquisitions.clear()
+    this.rowOwners.clear()
+    for (const record of this.acquisitions.values()) {
+      record.applied = false
+      record.rows.clear()
+      for (const claim of record.claims.values()) {
+        claim.coverage = undefined
+        claim.retainedOutcome = undefined
+      }
+    }
   }
 
   releaseLease(lease: DemandLease<TDemand>): ReleaseResult<TRowKey> {
@@ -678,7 +711,7 @@ export class CoverageRegistry<
   private restoreCurrentAcquisition(scopeKey: string): void {
     const candidate = Array.from(this.acquisitions.entries())
       .flatMap(([acquisition, record]) =>
-        record.releaseSettled
+        record.releaseSettled || record.evidenceEpoch !== this.evidenceEpoch
           ? []
           : Array.from(record.claims.entries()).flatMap(([lease, claim]) =>
               record.leases.has(lease) &&
@@ -750,6 +783,7 @@ export class CoverageRegistry<
     return Array.from(this.acquisitions.entries()).flatMap(
       ([acquisition, record]) =>
         Array.from(record.claims.entries()).flatMap(([lease, claim]) =>
+          record.evidenceEpoch === this.evidenceEpoch &&
           record.leases.has(lease) &&
           claim.coverage !== undefined &&
           this.isCurrent(acquisition, lease, claim)
