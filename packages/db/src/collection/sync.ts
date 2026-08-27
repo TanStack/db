@@ -1437,10 +1437,10 @@ export class CollectionSyncManager<
       (row) => this.coverageRegistry.rowOwnerCount(row) === 0,
     )
     if (unownedRows.length === 0) return
-    const result = this.state.deleteSyncedRows(unownedRows)
-    if (result !== true) {
-      throw new Error(`Immediate coverage row cleanup did not settle`)
-    }
+    // During publication this immediate transaction queues behind the batch
+    // whose listener released the coverage. The state drain applies it before
+    // the outer commit returns and owns the ignored receipt's rejection path.
+    this.state.deleteSyncedRows(unownedRows)
     unownedRows.forEach((row) => this.pendingCoverageRowsToRemove.delete(row))
   }
 

@@ -3,6 +3,7 @@ import { describe, expect, it, vi } from 'vitest'
 import { createCollection } from '../src/collection/index.js'
 import { createDeferred } from '../src/deferred.js'
 import { oracleRandomParameters, readOracleRunConfig } from './oracle-config.js'
+import { flushPromises } from './utils.js'
 import type { SyncConfig } from '../src/types.js'
 
 type Row = {
@@ -30,6 +31,33 @@ const listenerScenarioArbitrary: fc.Arbitrary<ListenerScenario> = fc.record({
   leaveOpen: fc.boolean(),
   afterOpen: fc.array(listenerActionArbitrary, { maxLength: 2 }),
 })
+
+function enumerateActions(maxLength: number): Array<Array<ListenerAction>> {
+  const histories: Array<Array<ListenerAction>> = [[]]
+  for (let length = 1; length <= maxLength; length++) {
+    const previous = histories.filter(
+      (history) => history.length === length - 1,
+    )
+    histories.push(
+      ...previous.flatMap((history) =>
+        ([`commit`, `abort`] as const).map((action) => [...history, action]),
+      ),
+    )
+  }
+  return histories
+}
+
+const exhaustiveListenerScenarios: Array<ListenerScenario> = enumerateActions(
+  2,
+).flatMap((beforeOpen) =>
+  enumerateActions(2).flatMap((afterOpen) =>
+    [false, true].map((leaveOpen) => ({
+      beforeOpen,
+      leaveOpen,
+      afterOpen,
+    })),
+  ),
+)
 
 let generatedHarnessId = 0
 
@@ -81,6 +109,8 @@ async function runListenerScenario(scenario: ListenerScenario): Promise<void> {
   )
   const batches: Array<Array<number>> = []
   const committedKeys: Array<number> = []
+  const committedReceipts: Array<Promise<void>> = []
+  const abortedReceipts: Array<PromiseSettledResult<void>> = []
   let openKey: number | undefined
   let nextKey = 2
   let listenerDepth = 0
@@ -92,14 +122,20 @@ async function runListenerScenario(scenario: ListenerScenario): Promise<void> {
     stageInsert(harness.sync, { id: key, value: action })
     if (action === `commit`) {
       committedKeys.push(key)
-      harness.sync.commit()
+      const receipt = harness.sync.commit()
+      if (receipt !== true) committedReceipts.push(receipt)
       return
     }
 
     const controller = new AbortController()
     controller.abort()
     const receipt = harness.sync.commit(controller.signal)
-    if (receipt !== true) void receipt.catch(() => undefined)
+    if (receipt !== true) {
+      void receipt.then(
+        () => abortedReceipts.push({ status: `fulfilled`, value: undefined }),
+        (reason) => abortedReceipts.push({ status: `rejected`, reason }),
+      )
+    }
   }
 
   const subscription = collection.subscribeChanges((changes) => {
@@ -130,6 +166,16 @@ async function runListenerScenario(scenario: ListenerScenario): Promise<void> {
       ...(committedKeys.length > 0 ? [committedKeys] : []),
     ])
     expect(maxListenerDepth).toBe(1)
+    await Promise.all(committedReceipts)
+    await flushPromises()
+    expect(committedReceipts).toHaveLength(committedKeys.length)
+    expect(abortedReceipts).toHaveLength(
+      scenario.beforeOpen.filter((action) => action === `abort`).length +
+        scenario.afterOpen.filter((action) => action === `abort`).length,
+    )
+    expect(abortedReceipts.every(({ status }) => status === `rejected`)).toBe(
+      true,
+    )
 
     if (openKey !== undefined) {
       harness.sync.commit()
@@ -303,7 +349,7 @@ describe(`sync publication reentrancy`, () => {
     }
   })
 
-  it(`finishes a committed batch before surfacing a listener error`, async () => {
+  it(`drains callback work before surfacing a listener error`, async () => {
     const harness = createSyncHarness(`throwing-sync-listener`)
     const { collection } = harness
     const failure = new Error(`listener failed`)
@@ -317,21 +363,30 @@ describe(`sync publication reentrancy`, () => {
         return originalSet(key, value)
       },
     )
-    let shouldThrow = true
-    const subscription = collection.subscribeChanges(() => {
-      if (shouldThrow) throw failure
+    let queuedReceipt: Promise<void> | undefined
+    const subscription = collection.subscribeChanges((changes) => {
+      if (!changes.some(({ key }) => key === 1)) return
+      stageInsert(harness.sync, { id: 2, value: `queued` })
+      const receipt = harness.sync.commit()
+      if (receipt === true) {
+        throw new Error(`Expected callback-created work to queue`)
+      }
+      queuedReceipt = receipt
+      throw failure
     })
 
     try {
       stageInsert(harness.sync, { id: 1, value: `first` })
       expect(() => harness.sync.commit()).toThrow(failure)
       expect(collection.get(1)).toMatchObject({ id: 1, value: `first` })
+      expect(collection.get(2)).toMatchObject({ id: 2, value: `queued` })
+      expect(queuedReceipt).toBeDefined()
+      await expect(queuedReceipt).resolves.toBeUndefined()
 
-      shouldThrow = false
-      stageInsert(harness.sync, { id: 2, value: `second` })
+      stageInsert(harness.sync, { id: 3, value: `second` })
       expect(() => harness.sync.commit()).not.toThrow()
 
-      expect(appliedKeys).toEqual([1, 2])
+      expect(appliedKeys).toEqual([1, 2, 3])
     } finally {
       subscription.unsubscribe()
       await collection.cleanup()
@@ -429,6 +484,71 @@ describe(`sync publication reentrancy`, () => {
     }
   })
 
+  it(`releases applied subset coverage from inside its publication callback`, async () => {
+    let sync!: SyncOps
+    const unloadSubset = vi.fn()
+    const collection = createCollection<Row, number>({
+      id: `listener-subset-release-row-gc`,
+      getKey: (row) => row.id,
+      syncMode: `on-demand`,
+      startSync: true,
+      sync: {
+        sync: (ops) => {
+          sync = ops
+          ops.markReady()
+          return {
+            loadSubset: async () => {
+              stageInsert(ops, { id: 2, value: `owned` })
+              const receipt = ops.commit()
+              if (receipt !== true) await receipt
+              return { hasMore: false, appliedRowKeys: [2] }
+            },
+            unloadSubset,
+          }
+        },
+      },
+    })
+    let ownerUnsubscribed = false
+    const owner = collection.subscribeChanges((changes) => {
+      if (ownerUnsubscribed || !changes.some(({ key }) => key === 1)) return
+      ownerUnsubscribed = true
+      owner.unsubscribe()
+    })
+    owner.requestSnapshot({ optimizedOnly: false })
+    await flushPromises()
+    expect(collection._sync.getLoadSubsetCoverage()).toHaveLength(1)
+
+    const batches: Array<Array<number>> = []
+    let listenerDepth = 0
+    let maxListenerDepth = 0
+    const observer = collection.subscribeChanges(
+      (changes) => {
+        listenerDepth++
+        maxListenerDepth = Math.max(maxListenerDepth, listenerDepth)
+        batches.push(changes.map((change) => change.key as number))
+        listenerDepth--
+      },
+      { includeInitialState: true },
+    )
+    batches.length = 0
+
+    try {
+      stageInsert(sync, { id: 1, value: `outer` })
+      expect(() => sync.commit()).not.toThrow()
+
+      expect(ownerUnsubscribed).toBe(true)
+      expect(unloadSubset).toHaveBeenCalledOnce()
+      expect(collection._sync.getLoadSubsetCoverage()).toEqual([])
+      expect(collection.get(2)).toBeUndefined()
+      expect(batches).toEqual([[1], [2]])
+      expect(maxListenerDepth).toBe(1)
+    } finally {
+      owner.unsubscribe()
+      observer.unsubscribe()
+      await collection.cleanup()
+    }
+  })
+
   it(`keeps normal listener sync work queued behind optimistic persistence`, async () => {
     let sync!: SyncOps
     const mutation = createDeferred<void>()
@@ -473,6 +593,12 @@ describe(`sync publication reentrancy`, () => {
       mutation.resolve()
       subscription.unsubscribe()
       await collection.cleanup()
+    }
+  })
+
+  it(`matches every bounded reentrant listener history`, async () => {
+    for (const scenario of exhaustiveListenerScenarios) {
+      await runListenerScenario(scenario)
     }
   })
 
