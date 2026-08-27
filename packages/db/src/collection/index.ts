@@ -4,6 +4,7 @@ import {
   CollectionRequiresConfigError,
   CollectionRequiresSyncConfigError,
 } from '../errors'
+import { registerCollectionKeyAccessor } from '../utils/collection-key.js'
 import { currentStateAsChanges } from './change-events'
 
 import { CollectionStateManager } from './state'
@@ -103,19 +104,6 @@ function cleanupCollectionSyncConfig(sync: object): void {
     sync as unknown as { [collectionSyncConfigCleanup]?: () => void }
   )[collectionSyncConfigCleanup]
   cleanup?.()
-}
-
-function valueAtPath(item: object, path: ReadonlyArray<string>): unknown {
-  let value: unknown = item
-  for (const part of path) {
-    if (value === null || typeof value !== `object`) return undefined
-    value = (value as Record<string, unknown>)[part]
-  }
-  return value
-}
-
-function sameCollectionKey(left: unknown, right: unknown): boolean {
-  return left === right || (Number.isNaN(left) && Number.isNaN(right))
 }
 
 /**
@@ -398,27 +386,6 @@ export class CollectionImpl<
       this.id = safeRandomUUID()
     }
 
-    if (config.keyPath?.length === 0) {
-      throw new CollectionConfigurationError(`keyPath must not be empty`)
-    }
-
-    const keyPath = config.keyPath
-      ? Object.freeze([...config.keyPath])
-      : undefined
-    const configuredGetKey = config.getKey
-    const getKey = keyPath
-      ? (item: TOutput): TKey => {
-          const key = configuredGetKey(item)
-          const pathValue = valueAtPath(item, keyPath)
-          if (!sameCollectionKey(key, pathValue)) {
-            throw new CollectionConfigurationError(
-              `getKey(item) must equal the value at keyPath ${keyPath.join(`.`)}`,
-            )
-          }
-          return key
-        }
-      : configuredGetKey
-
     // Set default values for optional config properties
     const collectionUtils = config.utils ?? {}
     const collectionSync = materializeCollectionSyncConfig(
@@ -428,11 +395,10 @@ export class CollectionImpl<
     this.config = {
       ...config,
       sync: collectionSync,
-      getKey,
-      keyPath,
       autoIndex: config.autoIndex ?? `off`,
       utils: collectionUtils,
     }
+    registerCollectionKeyAccessor(this, config.getKey)
     // Attach utilities before eager sync starts so adapters can bind helpers
     // during sync setup. Preserve the adapter's object identity by default.
     this.utils = collectionUtils
@@ -721,10 +687,6 @@ export class CollectionImpl<
 
   public getKeyFromItem(item: TOutput): TKey {
     return this.config.getKey(item)
-  }
-
-  public getKeyPath(): ReadonlyArray<string> | undefined {
-    return this.config.keyPath
   }
 
   /**

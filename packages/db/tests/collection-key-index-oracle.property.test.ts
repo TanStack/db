@@ -18,12 +18,10 @@ let collectionId = 0
 function collectionWithRows(
   rows: Array<Row>,
   getKey: (row: Row) => string = (row) => row.id,
-  keyPath: ReadonlyArray<string> | null = [`id`],
 ) {
   return createCollection<Row>({
     id: `implicit-key-index-oracle-${collectionId++}`,
     getKey,
-    keyPath: keyPath ?? undefined,
     autoIndex: `off`,
     startSync: true,
     sync: {
@@ -111,7 +109,6 @@ describe(`implicit collection key index oracle`, () => {
     const collection = collectionWithRows(
       [{ id: `a`, value: 1 }],
       (row) => `${row.id}:${row.value}`,
-      null,
     )
 
     expect(
@@ -122,15 +119,12 @@ describe(`implicit collection key index oracle`, () => {
     ).toBeUndefined()
   })
 
-  it(`uses a declared nested key path for equality and IN lookups`, () => {
+  it(`infers a nested key path for equality and IN lookups`, () => {
     const rows = [
       { id: `outer-a`, nested: { id: `a` }, value: 1 },
       { id: `outer-b`, nested: { id: `b` }, value: 2 },
     ]
-    const collection = collectionWithRows(rows, (row) => row.nested!.id, [
-      `nested`,
-      `id`,
-    ])
+    const collection = collectionWithRows(rows, (row) => row.nested!.id)
 
     expect(
       currentStateAsChanges(collection, {
@@ -151,18 +145,17 @@ describe(`implicit collection key index oracle`, () => {
     ).toEqual([`a`, `b`])
   })
 
-  it(`copies a declared key path before exposing it to callers`, () => {
-    const keyPath = [`nested`, `id`]
+  it(`keeps inferred key metadata internal and immutable`, () => {
     const collection = collectionWithRows(
       [{ id: `outer-a`, nested: { id: `a` }, value: 1 }],
       (row) => row.nested!.id,
-      keyPath,
     )
 
-    keyPath.splice(0, keyPath.length, `id`)
-
-    expect(collection.getKeyPath()).toEqual([`nested`, `id`])
-    expect(Object.isFrozen(collection.getKeyPath())).toBe(true)
+    const inferredPath = getCollectionKeyPath(collection)
+    expect(inferredPath).toEqual([`nested`, `id`])
+    expect(Object.isFrozen(inferredPath)).toBe(true)
+    expect(`keyPath` in collection.config).toBe(false)
+    expect(`getKeyPath` in collection).toBe(false)
     expect(
       currentStateAsChanges(collection, {
         where: new Func(`eq`, [new Value(`a`), new PropRef([`nested`, `id`])]),
@@ -190,7 +183,6 @@ describe(`implicit collection key index oracle`, () => {
     const collection = createCollection<NumericRow, number>({
       id: `implicit-numeric-key-index-oracle-${collectionId++}`,
       getKey: (row) => row.id,
-      keyPath: [`id`],
       autoIndex: `off`,
       startSync: true,
       sync: {
@@ -221,7 +213,6 @@ describe(`implicit collection key index oracle`, () => {
     const collection = collectionWithRows(
       [{ id: ``, fallback: `actual-key`, value: 1 }],
       (row) => row.id || row.fallback!,
-      null,
     )
 
     expect(
@@ -230,29 +221,6 @@ describe(`implicit collection key index oracle`, () => {
         optimizedOnly: true,
       }),
     ).toBeUndefined()
-  })
-
-  it(`rejects a direct-key declaration that disagrees with getKey`, () => {
-    const row = { id: ``, fallback: `actual-key`, value: 1 }
-    const collection = collectionWithRows(
-      [],
-      (item) => item.id || item.fallback!,
-      [`id`],
-    )
-
-    expect(() => collection.getKeyFromItem(row)).toThrow(
-      /must equal the value at keyPath id/,
-    )
-  })
-
-  it(`rejects a false key-path declaration during sync ingestion`, () => {
-    expect(() =>
-      collectionWithRows(
-        [{ id: ``, fallback: `actual-key`, value: 1 }],
-        (item) => item.id || item.fallback!,
-        [`id`],
-      ),
-    ).toThrow(/must equal the value at keyPath id/)
   })
 
   fcTest.prop(
@@ -274,42 +242,52 @@ describe(`implicit collection key index oracle`, () => {
       }),
     ],
     { numRuns: 100 },
-  )(
-    `does not infer a key-path capability from arbitrary functions`,
-    (form, row) => {
-      const getKey = (item: Row): string => {
-        switch (form) {
-          case `direct`:
-            return item.id
-          case `destructured`: {
-            const { id } = item
-            return id
-          }
-          case `bracket`:
-            return item[`id`]
-          case `nested`:
-            return { row: item }.row.id
-          case `conditional`:
-            return item.id || item.fallback!
-          case `computed`:
-            return `${item.id}:${item.value}`
-          case `coerced`:
-            return String(item.id)
-          case `closure`: {
-            const read = (value: Row) => value.id
-            return read(item)
-          }
+  )(`infers only extractors that return one field unchanged`, (form, row) => {
+    const getKey = (item: Row): string => {
+      switch (form) {
+        case `direct`:
+          return item.id
+        case `destructured`: {
+          const { id } = item
+          return id
         }
-        throw new Error(`Unknown key extractor form: ${form}`)
+        case `bracket`:
+          return item[`id`]
+        case `nested`:
+          return { row: item }.row.id
+        case `conditional`:
+          return item.id || item.fallback!
+        case `computed`:
+          return `${item.id}:${item.value}`
+        case `coerced`:
+          return String(item.id)
+        case `closure`: {
+          const read = (value: Row) => value.id
+          return read(item)
+        }
       }
-      const collection = collectionWithRows([row], getKey, null)
+      throw new Error(`Unknown key extractor form: ${form}`)
+    }
+    const collection = collectionWithRows([row], getKey)
+    const isExactFieldAccessor = [
+      `direct`,
+      `destructured`,
+      `bracket`,
+      `nested`,
+      `closure`,
+    ].includes(form)
 
-      expect(
-        currentStateAsChanges(collection, {
-          where: new Func(`eq`, [new PropRef([`id`]), new Value(row.id)]),
-          optimizedOnly: true,
-        }),
-      ).toBeUndefined()
-    },
-  )
+    expect(getCollectionKeyPath(collection)).toEqual(
+      isExactFieldAccessor ? [`id`] : undefined,
+    )
+    const optimized = currentStateAsChanges(collection, {
+      where: new Func(`eq`, [new PropRef([`id`]), new Value(row.id)]),
+      optimizedOnly: true,
+    })
+    if (isExactFieldAccessor) {
+      expect(optimized?.map((change) => change.key)).toEqual([row.id])
+    } else {
+      expect(optimized).toBeUndefined()
+    }
+  })
 })

@@ -1028,7 +1028,6 @@ describe(`Lazy join on a collection key`, () => {
       mockSyncCollectionOptions<Member>({
         id: `implicit-key-index-members`,
         getKey: (member) => member.id,
-        keyPath: [`id`],
         initialData: [{ id: `m1`, name: `Ada` }],
         syncMode: `on-demand`,
         autoIndex: `off`,

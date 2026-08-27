@@ -18,9 +18,7 @@ export interface CollectionLike<
 > extends Pick<
   Collection<T, TKey>,
   `get` | `has` | `entries` | `indexes` | `id` | `compareOptions`
-> {
-  getKeyPath?: () => ReadonlyArray<string> | undefined
-}
+> {}
 
 /**
  * StringSortOpts - Options for string sorting behavior
@@ -615,17 +613,6 @@ export interface BaseCollectionConfig<
    * getKey: (item) => item.uuid
    */
   getKey: (item: T) => TKey
-  /**
-   * Declares that `getKey` is exactly the value at this field path.
-   *
-   * Collections can use their key map as an implicit equality index only when
-   * this path is present. The collection validates the declaration whenever it
-   * extracts a key and throws if the values differ.
-   *
-   * @example
-   * keyPath: [`uuid`]
-   */
-  keyPath?: ReadonlyArray<string>
   /**
    * Time in milliseconds after which the collection will be garbage collected
    * when it has no active subscribers. Defaults to 5 minutes (300000ms).

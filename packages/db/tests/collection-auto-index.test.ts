@@ -497,7 +497,6 @@ describe(`Collection Auto-Indexing`, () => {
 
     const rightCollection = createCollection<TestItem2, string>({
       getKey: (item) => item.id2,
-      keyPath: [`id2`],
       autoIndex: `eager`,
       defaultIndexType: BTreeIndex,
       startSync: true,
@@ -598,7 +597,6 @@ describe(`Collection Auto-Indexing`, () => {
 
     const rightCollection = createCollection<TestItem2, string>({
       getKey: (item) => item.id2,
-      keyPath: [`id2`],
       autoIndex: `eager`,
       defaultIndexType: BTreeIndex,
       startSync: true,

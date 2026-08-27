@@ -233,7 +233,6 @@ function createTestItemCollection(autoIndex: `off` | `eager` = `off`) {
     mockSyncCollectionOptions<TestItem>({
       id: `test-collection`,
       getKey: (item) => item.id,
-      keyPath: [`id`],
       initialData: testData,
       autoIndex,
       defaultIndexType: BTreeIndex,
@@ -602,7 +601,6 @@ describe(`Query Index Optimization`, () => {
       // Create a second collection for the join with its own index
       const secondCollection = createCollection<TestItem, string>({
         getKey: (item) => item.id,
-        keyPath: [`id`],
         autoIndex: `off`,
         defaultIndexType: BTreeIndex,
         startSync: true,
@@ -703,7 +701,6 @@ describe(`Query Index Optimization`, () => {
       // Create a second collection for the join with its own index
       const secondCollection = createCollection<TestItem2, string>({
         getKey: (item) => item.id2,
-        keyPath: [`id2`],
         autoIndex: `off`,
         startSync: true,
         sync: {
@@ -800,7 +797,6 @@ describe(`Query Index Optimization`, () => {
       // Create a second collection for the join with its own index
       const secondCollection = createCollection<TestItem2, string>({
         getKey: (item) => item.id2,
-        keyPath: [`id2`],
         autoIndex: `off`,
         startSync: true,
         sync: {
@@ -890,7 +886,6 @@ describe(`Query Index Optimization`, () => {
       // Create a second collection for the join with its own index
       const secondCollection = createCollection<TestItem2, string>({
         getKey: (item) => item.id2,
-        keyPath: [`id2`],
         autoIndex: `off`,
         defaultIndexType: BTreeIndex,
         startSync: true,
@@ -1004,7 +999,6 @@ describe(`Query Index Optimization`, () => {
       // Create a second collection for the join with its own index
       const secondCollection = createCollection<TestItem2, string>({
         getKey: (item) => item.id2,
-        keyPath: [`id2`],
         autoIndex: `off`,
         startSync: true,
         sync: {
@@ -1092,7 +1086,6 @@ describe(`Query Index Optimization`, () => {
       // Create a second collection for the join with its own index
       const secondCollection = createCollection<TestItem2, string>({
         getKey: (item) => item.id2,
-        keyPath: [`id2`],
         autoIndex: `off`,
         startSync: true,
         sync: {
@@ -1181,7 +1174,6 @@ describe(`Query Index Optimization`, () => {
       // Create a second collection for the join with its own index
       const secondCollection = createCollection<TestItem2, string>({
         getKey: (item) => item.id2,
-        keyPath: [`id2`],
         autoIndex: `off`,
         startSync: true,
         sync: {
