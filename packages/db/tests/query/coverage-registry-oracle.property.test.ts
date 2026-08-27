@@ -1877,6 +1877,38 @@ describe(`coverage registry oracle`, () => {
     expect(registry.coverageAntichain()).toEqual([{ prefix: 20 }])
   })
 
+  it(`reads borrowed established evidence lazily`, () => {
+    const registry = createPrefixRegistry()
+    const firstLease = registry.addLease(1)
+    const firstAcquisition = addPrefixAcquisition(registry, {
+      generation: 1,
+      leases: [firstLease],
+      release: vi.fn(),
+      prefix: 1,
+    })
+    publishPrefix(registry, firstAcquisition, 1, 1)
+
+    const evidence = registry.borrowEvidence()
+    expect(evidence.next().value).toMatchObject({
+      authority: `established`,
+      acquisition: firstAcquisition,
+    })
+
+    const secondLease = registry.addLease(2)
+    const secondAcquisition = addPrefixAcquisition(registry, {
+      generation: 2,
+      leases: [secondLease],
+      release: vi.fn(),
+      prefix: 2,
+    })
+    publishPrefix(registry, secondAcquisition, 2, 2)
+    expect(
+      Array.from(evidence).filter(
+        (candidate) => candidate.authority === `established`,
+      ),
+    ).toEqual([expect.objectContaining({ acquisition: secondAcquisition })])
+  })
+
   const rowSet = fc.uniqueArray(fc.constantFrom(...modelRows), {
     maxLength: modelRows.length,
   })

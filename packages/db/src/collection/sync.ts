@@ -997,10 +997,10 @@ export class CollectionSyncManager<
       this.syncStartRequested = true
       const deferred = createDeferred<AppliedLoadSubsetOutcome>()
       const loadOptions = cloneLoadSubsetOptions(options)
-      const demand = snapshotLoadSubsetDemand(loadOptions)
+      const demand = this.snapshotEvidenceDemand(loadOptions)
       // Demand identity is part of acquisition scope. Reject unsupported
       // values before an adapter can perform irreversible work.
-      getLoadSubsetDemandKey(demand)
+      this.deriveEvidenceDemandKey(demand)
       const generation = ++this.loadSubsetGeneration
       this.deferredLoadSubsets.push({
         ownerOptions: options,
@@ -1014,9 +1014,9 @@ export class CollectionSyncManager<
     }
 
     if (this.syncLoadSubsetFn) {
-      const demand = snapshotLoadSubsetDemand(options)
+      const demand = this.snapshotEvidenceDemand(options)
       // Validate and hash the retained scope before starting adapter work.
-      getLoadSubsetDemandKey(demand)
+      this.deriveEvidenceDemandKey(demand)
       const generation = ++this.loadSubsetGeneration
       const pendingCoverageDemand = this.retainPendingCoverageDemand(options)
       let result: ReturnType<LoadSubsetFn>

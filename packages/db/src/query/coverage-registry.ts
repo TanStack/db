@@ -340,7 +340,7 @@ export class CoverageRegistry<
     coverage: TCoverage
     generation: number
   }> {
-    return this.currentCoverageClaims().flatMap(
+    return Array.from(this.currentCoverageClaims()).flatMap(
       ({ acquisition, record, claim }) =>
         !record.releaseSettled &&
         claim.coverage !== undefined &&
@@ -672,10 +672,11 @@ export class CoverageRegistry<
   }
 
   coverageAntichain(): Array<TCoverage> {
-    const facts = this.currentCoverageClaims().flatMap(({ claim }) =>
-      claim.coverage === undefined
-        ? []
-        : [claim as CoverageClaim<TCoverage> & { coverage: TCoverage }],
+    const facts = Array.from(this.currentCoverageClaims()).flatMap(
+      ({ claim }) =>
+        claim.coverage === undefined
+          ? []
+          : [claim as CoverageClaim<TCoverage> & { coverage: TCoverage }],
     )
 
     return facts
@@ -699,7 +700,7 @@ export class CoverageRegistry<
   }
 
   coverageEvidence(): Array<{ coverage: TCoverage; generation: number }> {
-    return this.currentCoverageClaims().flatMap(({ claim }) =>
+    return Array.from(this.currentCoverageClaims()).flatMap(({ claim }) =>
       claim.coverage === undefined
         ? []
         : [
@@ -1072,23 +1073,24 @@ export class CoverageRegistry<
       matching[0])?.[0] as DemandLease<TDemand> | undefined
   }
 
-  private currentCoverageClaims(): Array<{
+  private *currentCoverageClaims(): IterableIterator<{
     acquisition: AcquisitionToken
     record: AcquisitionRecord<TCoverage, TRowKey>
     lease: DemandLease<unknown>
     claim: CoverageClaim<TCoverage>
   }> {
-    return Array.from(this.acquisitions.entries()).flatMap(
-      ([acquisition, record]) =>
-        Array.from(record.claims.entries()).flatMap(([lease, claim]) =>
-          record.evidenceEpoch === this.evidenceEpoch &&
+    for (const [acquisition, record] of this.acquisitions) {
+      if (record.evidenceEpoch !== this.evidenceEpoch) continue
+      for (const [lease, claim] of record.claims) {
+        if (
           record.leases.has(lease) &&
           claim.coverage !== undefined &&
           this.isCurrent(acquisition, lease, claim)
-            ? [{ acquisition, record, lease, claim }]
-            : [],
-        ),
-    )
+        ) {
+          yield { acquisition, record, lease, claim }
+        }
+      }
+    }
   }
 }
 
