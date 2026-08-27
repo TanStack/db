@@ -31,10 +31,7 @@ describe(`getKey query planning`, () => {
     try {
       await collection.stateWhenReady()
       const callsAfterSync = getKeyCalls
-      const where = new Func(`eq`, [
-        new PropRef([`id`]),
-        new Value(`special`),
-      ])
+      const where = new Func(`eq`, [new PropRef([`id`]), new Value(`special`)])
 
       expect(
         currentStateAsChanges(collection, { where, optimizedOnly: true }),
