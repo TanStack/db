@@ -23,8 +23,8 @@ Example: `{ users: usersCollection }`
 
 ```ts
 [alias: string]: 
+  | QueryBuilder<any>
   | CollectionImpl<any, any, {
 }, StandardSchemaV1<unknown, unknown>, any>
-  | CollectionOptionsIdentity<any, any, any, any, any>
-| QueryBuilder<Context>
+| CollectionOptionsIdentity<any, any, any, any, any>
 ```

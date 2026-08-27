@@ -313,6 +313,27 @@ describe(`semantic expression identity`, () => {
     },
   )
 
+  it(`does not initialize runtime reference identities during module evaluation`, async () => {
+    const getRandomValues = vi.fn((values: Uint32Array) => values)
+    vi.stubGlobal(`crypto`, { getRandomValues })
+    vi.resetModules()
+
+    try {
+      const { getRuntimeReferenceIdentity } = await import(
+        `../../src/query/runtime-reference-identity.js`
+      )
+
+      expect(getRandomValues).not.toHaveBeenCalled()
+
+      getRuntimeReferenceIdentity({})
+      getRuntimeReferenceIdentity({})
+
+      expect(getRandomValues).toHaveBeenCalledOnce()
+    } finally {
+      vi.unstubAllGlobals()
+    }
+  })
+
   it(`does not reuse reference identities across runtimes`, () => {
     const firstRuntime = createRuntimeReferenceIdentityFactory()
     const secondRuntime = createRuntimeReferenceIdentityFactory()

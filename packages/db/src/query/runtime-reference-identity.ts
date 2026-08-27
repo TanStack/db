@@ -36,8 +36,17 @@ export function createRuntimeReferenceIdentityFactory(): (
   }
 }
 
-export const getRuntimeReferenceIdentity =
-  createRuntimeReferenceIdentityFactory()
+let runtimeReferenceIdentityFactory:
+  | ReturnType<typeof createRuntimeReferenceIdentityFactory>
+  | undefined
+
+export function getRuntimeReferenceIdentity(
+  value: object,
+): RuntimeReferenceIdentity {
+  runtimeReferenceIdentityFactory ??= createRuntimeReferenceIdentityFactory()
+
+  return runtimeReferenceIdentityFactory(value)
+}
 
 function createRuntimeReferenceNamespace(): string {
   const randomValues = new Uint32Array(4)

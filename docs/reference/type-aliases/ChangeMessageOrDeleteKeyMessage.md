@@ -11,7 +11,7 @@ type ChangeMessageOrDeleteKeyMessage<T, TKey> =
 | DeleteKeyMessage<TKey>;
 ```
 
-Defined in: [packages/db/src/types.ts:425](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L425)
+Defined in: [packages/db/src/types.ts:466](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L466)
 
 ## Type Parameters
 
