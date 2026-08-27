@@ -265,7 +265,10 @@ export class DeduplicatedLoadSubset {
    *
    * The reset is intentionally conservative. One released request may clear
    * evidence still useful to another owner, causing a later refetch, but it can
-   * never reuse evidence for rows that core no longer retains.
+   * never reuse evidence for rows that core no longer retains. Until adapters
+   * report which retained rows came from which demand, the settled-case cost is
+   * bounded to one new physical request for each distinct demand revisited
+   * before deduplication state is rebuilt.
    */
   unloadSubset = (_options: LoadSubsetOptions): void => {
     this.reset()

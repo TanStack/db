@@ -9,6 +9,10 @@ export function createRuntimeReferenceIdentityFactory(): (
 ) => RuntimeReferenceIdentity {
   let namespace: string | undefined
   const referenceIds = new WeakMap<object, number>()
+  // Symbols cannot be WeakMap keys. Stable identity for the same live symbol
+  // therefore costs one strong entry for this factory's lifetime. Eviction
+  // would let a later lookup assign a different identity and corrupt cache
+  // equality, so keep this explicit until JavaScript offers weak symbol keys.
   const symbolReferenceIds = new Map<symbol, number>()
   let sequence = 0
 

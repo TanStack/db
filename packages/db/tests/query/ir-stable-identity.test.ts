@@ -336,6 +336,14 @@ describe(`semantic expression identity`, () => {
     }
   })
 
+  it(`keeps each symbol identity stable for the factory lifetime`, () => {
+    const runtime = createRuntimeReferenceIdentityFactory()
+    const symbol = Symbol(`same description`)
+
+    expect(runtime(symbol)).toEqual(runtime(symbol))
+    expect(runtime(Symbol(`same description`))).not.toEqual(runtime(symbol))
+  })
+
   it(`falls back when the runtime crypto object lacks getRandomValues`, () => {
     vi.stubGlobal(`crypto`, {})
     try {
