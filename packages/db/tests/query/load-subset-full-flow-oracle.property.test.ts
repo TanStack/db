@@ -716,33 +716,84 @@ it.each([
 
 type OrderedConsumer = `live-collection` | `effect`
 
-async function runTiedContinuationConsumer(consumer: OrderedConsumer): Promise<{
+type OrderedConsumerParityScenario = {
+  middleCount: 0 | 1 | 2 | 3
+  middleEligible: boolean
+  tied: boolean
+}
+
+type OrderedConsumerParityObservation = {
   cursorKeys: Array<string | number | undefined>
   limits: Array<number | undefined>
   visibleIds: Array<number>
-}> {
+  ready: boolean
+}
+
+const orderedConsumerParityScenarioArbitrary: fc.Arbitrary<OrderedConsumerParityScenario> =
+  fc.record({
+    middleCount: fc.constantFrom(
+      0 as const,
+      1 as const,
+      2 as const,
+      3 as const,
+    ),
+    middleEligible: fc.boolean(),
+    tied: fc.boolean(),
+  })
+
+const exhaustiveOrderedConsumerParityScenarios: ReadonlyArray<OrderedConsumerParityScenario> =
+  ([0, 1, 2, 3] as const).flatMap((middleCount) =>
+    [false, true].flatMap((middleEligible) =>
+      [false, true].map((tied) => ({
+        middleCount,
+        middleEligible,
+        tied,
+      })),
+    ),
+  )
+
+let orderedConsumerParityHarnessId = 0
+
+async function runTiedContinuationConsumer(
+  consumer: OrderedConsumer,
+  scenario: OrderedConsumerParityScenario,
+): Promise<OrderedConsumerParityObservation> {
   type Row = { id: number; rank: number; eligible: boolean }
-  const initialRows: ReadonlyArray<Row> = [
-    { id: 1, rank: 1, eligible: true },
-    { id: 3, rank: 1, eligible: false },
-    { id: 4, rank: 1, eligible: false },
-  ]
-  const finalRow: Row = { id: 2, rank: 2, eligible: true }
+  const firstRow: Row = { id: 1, rank: 1, eligible: true }
+  const middleRows: ReadonlyArray<Row> = Array.from(
+    { length: scenario.middleCount },
+    (_, index) => ({
+      id: index + 3,
+      rank: scenario.tied ? 1 : index + 2,
+      eligible: scenario.middleEligible,
+    }),
+  )
+  const finalRow: Row = {
+    id: 2,
+    rank: scenario.tied ? 2 : scenario.middleCount + 2,
+    eligible: true,
+  }
+  const pageRows = [firstRow, ...middleRows, finalRow]
   const calls: Array<LoadSubsetOptions> = []
-  const pending: Array<
-    ReturnType<
+  const pending: Array<{
+    request: ReturnType<
       typeof createDeferred<{
         hasMore: boolean
         appliedRowKeys: ReadonlyArray<number>
       }>
     >
-  > = []
+    result: {
+      hasMore: boolean
+      appliedRowKeys: ReadonlyArray<number>
+    }
+    rowToApply?: Row
+  }> = []
   const visible = new Map<number, Row>()
   let begin!: () => void
   let write!: (message: { type: `insert`; value: Row }) => void
   let commit!: () => true | Promise<void>
   const source = createCollection<Row>({
-    id: `full-flow-effect-parity-${consumer}`,
+    id: `full-flow-effect-parity-${consumer}-${orderedConsumerParityHarnessId++}`,
     getKey: (row) => row.id,
     syncMode: `on-demand`,
     startSync: true,
@@ -754,23 +805,34 @@ async function runTiedContinuationConsumer(consumer: OrderedConsumer): Promise<{
         write = params.write
         commit = params.commit
         begin()
-        write({ type: `insert`, value: initialRows[1]! })
-        write({ type: `insert`, value: initialRows[2]! })
+        for (const row of middleRows) {
+          write({ type: `insert`, value: row })
+        }
         commit()
         params.markReady()
         return {
           loadSubset: (options) => {
+            const pageIndex = calls.length
             calls.push(options)
-            if (calls.length === 1) {
+            const row = pageRows[pageIndex]
+            if (pageIndex === 0) {
+              if (!row) throw new Error(`Ordered consumer exceeded its pages`)
               begin()
-              write({ type: `insert`, value: initialRows[0]! })
+              write({ type: `insert`, value: row })
               commit()
             }
             const request = createDeferred<{
               hasMore: boolean
               appliedRowKeys: ReadonlyArray<number>
             }>()
-            pending.push(request)
+            pending.push({
+              request,
+              result: {
+                hasMore: pageIndex < pageRows.length - 1,
+                appliedRowKeys: row ? [row.id] : [],
+              },
+              rowToApply: pageIndex === pageRows.length - 1 ? row : undefined,
+            })
             return request.promise
           },
           unloadSubset: () => {},
@@ -787,6 +849,7 @@ async function runTiedContinuationConsumer(consumer: OrderedConsumer): Promise<{
 
   let live: ReturnType<typeof createLiveQueryCollection> | undefined
   let preloadPromise: Promise<unknown> | undefined
+  let preloadSettled = consumer === `effect`
   let effect: ReturnType<typeof createEffect> | undefined
   if (consumer === `live-collection`) {
     live = createLiveQueryCollection({
@@ -795,6 +858,12 @@ async function runTiedContinuationConsumer(consumer: OrderedConsumer): Promise<{
       startSync: true,
     })
     preloadPromise = live.preload()
+    void preloadPromise.then(
+      () => {
+        preloadSettled = true
+      },
+      () => {},
+    )
   } else {
     effect = createEffect<Row, number>({
       query,
@@ -809,30 +878,30 @@ async function runTiedContinuationConsumer(consumer: OrderedConsumer): Promise<{
 
   try {
     await flushPromises()
-    expect(pending).toHaveLength(1)
-    pending[0]!.resolve({ hasMore: true, appliedRowKeys: [initialRows[0]!.id] })
-    await flushPromises()
-    expect(pending).toHaveLength(2)
-    pending[1]!.resolve({ hasMore: true, appliedRowKeys: [initialRows[1]!.id] })
-    await flushPromises()
-    expect(pending).toHaveLength(3)
-    pending[2]!.resolve({ hasMore: true, appliedRowKeys: [initialRows[2]!.id] })
-    await flushPromises()
-    if (pending[3]) {
-      begin()
-      write({ type: `insert`, value: finalRow })
-      const applied = commit()
-      if (applied !== true) await applied
-      pending[3].resolve({ hasMore: false, appliedRowKeys: [finalRow.id] })
+    let settled = 0
+    while (settled < pending.length) {
+      if (settled > pageRows.length) {
+        throw new Error(`Ordered consumer did not reach a fixed point`)
+      }
+      const page = pending[settled]!
+      settled++
+      if (page.rowToApply) {
+        begin()
+        write({ type: `insert`, value: page.rowToApply })
+        const applied = commit()
+        if (applied !== true) await applied
+      }
+      page.request.resolve(page.result)
       await flushPromises()
     }
-    if (preloadPromise) await preloadPromise
+    if (preloadPromise && preloadSettled) await preloadPromise
     return {
       cursorKeys: calls.map(({ cursor }) => cursor?.lastKey),
       limits: calls.map(({ limit }) => limit),
       visibleIds: live
         ? live.toArray.map(({ id }) => id)
         : [...visible.keys()].sort((a, b) => a - b),
+      ready: preloadSettled,
     }
   } finally {
     if (live) await live.cleanup()
@@ -841,16 +910,101 @@ async function runTiedContinuationConsumer(consumer: OrderedConsumer): Promise<{
   }
 }
 
-it(`keeps ordered continuation progress equal across collection consumers`, async () => {
+function projectOrderedConsumerParity(
+  scenario: OrderedConsumerParityScenario,
+): Pick<
+  OrderedConsumerParityObservation,
+  `cursorKeys` | `visibleIds` | `ready`
+> {
+  if (scenario.middleEligible && scenario.middleCount > 0) {
+    return {
+      cursorKeys: [undefined, 1],
+      visibleIds: [1, 3],
+      ready: true,
+    }
+  }
+
+  return {
+    cursorKeys: [
+      undefined,
+      1,
+      ...Array.from({ length: scenario.middleCount }, (_, index) => index + 3),
+    ],
+    visibleIds: [1, 2],
+    ready: true,
+  }
+}
+
+async function assertOrderedConsumerParity(
+  scenario: OrderedConsumerParityScenario,
+): Promise<void> {
   const [live, effect] = await Promise.all([
-    runTiedContinuationConsumer(`live-collection`),
-    runTiedContinuationConsumer(`effect`),
+    runTiedContinuationConsumer(`live-collection`, scenario),
+    runTiedContinuationConsumer(`effect`, scenario),
+  ])
+  const expected = projectOrderedConsumerParity(scenario)
+
+  expect({
+    cursorKeys: live.cursorKeys,
+    visibleIds: live.visibleIds,
+    ready: live.ready,
+  }).toEqual(expected)
+  expect(effect).toEqual(live)
+}
+
+it(`keeps ordered continuation progress equal across collection consumers`, async () => {
+  const scenario: OrderedConsumerParityScenario = {
+    middleCount: 2,
+    middleEligible: false,
+    tied: true,
+  }
+  const [live, effect] = await Promise.all([
+    runTiedContinuationConsumer(`live-collection`, scenario),
+    runTiedContinuationConsumer(`effect`, scenario),
   ])
 
   expect(live.cursorKeys).toEqual([undefined, 1, 3, 4])
   expect(live.visibleIds).toEqual([1, 2])
   expect(effect).toEqual(live)
 })
+
+it(`keeps consumer parity when only the middle rows become eligible`, async () => {
+  const scenario: OrderedConsumerParityScenario = {
+    middleCount: 2,
+    middleEligible: true,
+    tied: true,
+  }
+  const [live, effect] = await Promise.all([
+    runTiedContinuationConsumer(`live-collection`, scenario),
+    runTiedContinuationConsumer(`effect`, scenario),
+  ])
+
+  expect(live.cursorKeys).toEqual([undefined, 1])
+  expect(live.visibleIds).toEqual([1, 3])
+  expect(effect).toEqual(live)
+})
+
+it(`exhausts bounded ordered continuation histories across collection consumers`, async () => {
+  for (const scenario of exhaustiveOrderedConsumerParityScenarios) {
+    await assertOrderedConsumerParity(scenario)
+  }
+})
+
+fcTest.prop([orderedConsumerParityScenarioArbitrary], {
+  numRuns: 12 * fullFlowMultiplier,
+  seed: 17785,
+})(
+  `keeps ordered collection consumers equal for a fixed seed`,
+  assertOrderedConsumerParity,
+)
+
+fcTest.prop(
+  [orderedConsumerParityScenarioArbitrary],
+  oracleRandomParameters(12 * fullFlowMultiplier, fullFlowReplaySeed),
+)(
+  `keeps ordered collection consumers equal for a random or replayed seed`,
+  assertOrderedConsumerParity,
+)
 
 it(`retries an evidence-free Effect continuation after prefix refinement`, async () => {
   type Row = { id: number; rank: number; label: string }
@@ -957,6 +1111,282 @@ it(`retries an evidence-free Effect continuation after prefix refinement`, async
     expect([...visible.values()].map(({ id }) => id)).toEqual([1, 2])
   } finally {
     await effect.dispose()
+    await source.cleanup()
+  }
+})
+
+it(`retries an evidence-free ordered Effect after truncate`, async () => {
+  type Row = { id: number; rank: number }
+  type Result = {
+    hasMore: boolean
+    appliedRowKeys: ReadonlyArray<number>
+  }
+  const finalRow: Row = { id: 2, rank: 2 }
+  const calls: Array<LoadSubsetOptions> = []
+  const pending: Array<ReturnType<typeof createDeferred<Result>>> = []
+  const visible = new Map<number, Row>()
+  let begin!: () => void
+  let write!: (message: { type: `insert`; value: Row }) => void
+  let commit!: () => true | Promise<void>
+  let truncate!: () => void
+  const source = createCollection<Row>({
+    id: `full-flow-effect-truncate-reset`,
+    getKey: (row) => row.id,
+    syncMode: `on-demand`,
+    startSync: true,
+    autoIndex: `eager`,
+    defaultIndexType: BTreeIndex,
+    sync: {
+      sync: (params) => {
+        begin = params.begin
+        write = params.write
+        commit = params.commit
+        truncate = params.truncate
+        params.markReady()
+        return {
+          loadSubset: (options) => {
+            calls.push(options)
+            const request = createDeferred<Result>()
+            pending.push(request)
+            return request.promise
+          },
+          unloadSubset: () => {},
+        }
+      },
+    },
+  })
+  const effect = createEffect<Row, number>({
+    query: (q) =>
+      q
+        .from({ row: source })
+        .orderBy(({ row }) => row.rank)
+        .limit(1),
+    onBatch: (events) => {
+      for (const event of events) {
+        if (event.type === `exit`) visible.delete(event.key)
+        else visible.set(event.key, event.value)
+      }
+    },
+  })
+
+  try {
+    await flushPromises()
+    expect(pending).toHaveLength(1)
+    pending[0]!.resolve({ hasMore: true, appliedRowKeys: [] })
+    await flushPromises()
+    expect(pending).toHaveLength(2)
+    pending[1]!.resolve({ hasMore: true, appliedRowKeys: [] })
+    await flushPromises()
+    expect(calls).toHaveLength(2)
+
+    begin()
+    truncate()
+    const replacement = commit()
+    await flushPromises()
+    // Both retained logical demands replay, but Effect must not add a third
+    // transport until those replacement acquisitions have settled.
+    expect(pending).toHaveLength(4)
+
+    pending[2]!.resolve({ hasMore: true, appliedRowKeys: [] })
+    await flushPromises()
+    expect(pending).toHaveLength(4)
+    pending[3]!.resolve({ hasMore: true, appliedRowKeys: [] })
+    await flushPromises()
+    expect(pending).toHaveLength(5)
+
+    begin()
+    write({ type: `insert`, value: finalRow })
+    const applied = commit()
+    if (applied !== true) await applied
+    pending[4]!.resolve({ hasMore: false, appliedRowKeys: [finalRow.id] })
+    if (replacement !== true) await replacement
+    await flushPromises()
+
+    expect([...visible.keys()]).toEqual([finalRow.id])
+    expect(calls).toHaveLength(5)
+  } finally {
+    await effect.dispose()
+    await source.cleanup()
+  }
+})
+
+it(`rechecks an ordered Effect after synchronous truncate replay`, async () => {
+  type Row = { id: number; rank: number }
+  type Result = {
+    hasMore: boolean
+    appliedRowKeys: ReadonlyArray<number>
+  }
+  const finalRow: Row = { id: 2, rank: 2 }
+  const pending: Array<ReturnType<typeof createDeferred<Result>>> = []
+  const visible = new Map<number, Row>()
+  let calls = 0
+  let replaying = false
+  let replayCalls = 0
+  let begin!: () => void
+  let write!: (message: { type: `insert`; value: Row }) => void
+  let commit!: () => true | Promise<void>
+  let truncate!: () => void
+  const source = createCollection<Row>({
+    id: `full-flow-effect-sync-truncate-reset`,
+    getKey: (row) => row.id,
+    syncMode: `on-demand`,
+    startSync: true,
+    autoIndex: `eager`,
+    defaultIndexType: BTreeIndex,
+    sync: {
+      sync: (params) => {
+        begin = params.begin
+        write = params.write
+        commit = params.commit
+        truncate = params.truncate
+        params.markReady()
+        return {
+          loadSubset: () => {
+            calls++
+            if (!replaying) {
+              const request = createDeferred<Result>()
+              pending.push(request)
+              return request.promise
+            }
+
+            replayCalls++
+            if (replayCalls === 3) {
+              begin()
+              write({ type: `insert`, value: finalRow })
+              commit()
+            }
+            return true
+          },
+          unloadSubset: () => {},
+        }
+      },
+    },
+  })
+  const effect = createEffect<Row, number>({
+    query: (q) =>
+      q
+        .from({ row: source })
+        .orderBy(({ row }) => row.rank)
+        .limit(1),
+    onBatch: (events) => {
+      for (const event of events) {
+        if (event.type === `exit`) visible.delete(event.key)
+        else visible.set(event.key, event.value)
+      }
+    },
+  })
+
+  try {
+    await flushPromises()
+    pending[0]!.resolve({ hasMore: true, appliedRowKeys: [] })
+    await flushPromises()
+    pending[1]!.resolve({ hasMore: true, appliedRowKeys: [] })
+    await flushPromises()
+    expect(calls).toBe(2)
+
+    replaying = true
+    begin()
+    truncate()
+    const replacement = commit()
+    await flushPromises()
+    if (replacement !== true) await replacement
+
+    expect(replayCalls).toBe(3)
+    expect(calls).toBe(5)
+    expect([...visible.keys()]).toEqual([finalRow.id])
+  } finally {
+    await effect.dispose()
+    await source.cleanup()
+  }
+})
+
+it(`replaces an ordered Effect only after a rejected continuation disposes it`, async () => {
+  type Row = { id: number; rank: number }
+  const firstRow: Row = { id: 1, rank: 1 }
+  const replacementRow: Row = { id: 2, rank: 2 }
+  const failure = new Error(`ordered continuation failed`)
+  let calls = 0
+  let begin!: () => void
+  let write!: (
+    message: { type: `insert`; value: Row } | { type: `delete`; value: Row },
+  ) => void
+  let commit!: () => true | Promise<void>
+  const source = createCollection<Row>({
+    id: `full-flow-effect-rejection-reset`,
+    getKey: (row) => row.id,
+    syncMode: `on-demand`,
+    startSync: true,
+    autoIndex: `eager`,
+    defaultIndexType: BTreeIndex,
+    sync: {
+      sync: (params) => {
+        begin = params.begin
+        write = params.write
+        commit = params.commit
+        params.markReady()
+        return {
+          loadSubset: () => {
+            calls++
+            if (calls === 2) return Promise.reject(failure)
+            const row = calls === 1 ? firstRow : replacementRow
+            begin()
+            write({ type: `insert`, value: row })
+            commit()
+            return Promise.resolve()
+          },
+          unloadSubset: () => {},
+        }
+      },
+    },
+  })
+  const errors: Array<Error> = []
+  const first = createEffect<Row, number>({
+    query: (q) =>
+      q
+        .from({ row: source })
+        .orderBy(({ row }) => row.rank)
+        .limit(1),
+    onBatch: () => {},
+    onSourceError: (error) => errors.push(error),
+  })
+  let second: ReturnType<typeof createEffect<Row, number>> | undefined
+
+  try {
+    await flushPromises()
+    expect(calls).toBe(1)
+
+    begin()
+    write({ type: `delete`, value: firstRow })
+    const removed = commit()
+    if (removed !== true) await removed
+    await flushPromises()
+
+    expect(calls).toBe(2)
+    expect(errors).toEqual([failure])
+    expect(first.disposed).toBe(true)
+
+    const visible = new Map<number, Row>()
+    second = createEffect<Row, number>({
+      query: (q) =>
+        q
+          .from({ row: source })
+          .orderBy(({ row }) => row.rank)
+          .limit(1),
+      onBatch: (events) => {
+        for (const event of events) {
+          if (event.type === `exit`) visible.delete(event.key)
+          else visible.set(event.key, event.value)
+        }
+      },
+    })
+    await flushPromises()
+
+    expect(calls).toBe(3)
+    expect(second.disposed).toBe(false)
+    expect([...visible.keys()]).toEqual([replacementRow.id])
+  } finally {
+    await first.dispose()
+    if (second) await second.dispose()
     await source.cleanup()
   }
 })

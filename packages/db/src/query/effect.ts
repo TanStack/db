@@ -1016,30 +1016,31 @@ class EffectPipelineRunner<TRow extends object, TKey extends string | number> {
   private trackOrderedLoad(
     result: LoadSubsetRequestResult,
     sourceId: string,
-    loadRequestKey?: string,
   ): void {
-    if (!(result instanceof Promise)) return
+    const continueAfterFulfillment = () => {
+      if (this.disposed) return
+      if (this.subscriptions[sourceId]?.requiresOrderedPrefixRefresh) {
+        this.lastLoadRequestKey.delete(sourceId)
+      }
+      this.loadMoreIfNeeded()
+    }
+    if (!(result instanceof Promise)) {
+      // A synchronous truncate replay notifies this observer before replay
+      // setup completes. Continue on the next microtask so every replacement
+      // demand is registered before the consumer asks for another page.
+      queueMicrotask(continueAfterFulfillment)
+      return
+    }
     this.pendingOrderedLoadPromise = result
     const finish = () => {
       if (this.pendingOrderedLoadPromise === result) {
         this.pendingOrderedLoadPromise = undefined
       }
     }
-    void result.then(
-      () => {
-        finish()
-        if (this.subscriptions[sourceId]?.requiresOrderedPrefixRefresh) {
-          this.lastLoadRequestKey.delete(sourceId)
-        }
-        this.loadMoreIfNeeded()
-      },
-      () => {
-        finish()
-        if (this.lastLoadRequestKey.get(sourceId) === loadRequestKey) {
-          this.lastLoadRequestKey.delete(sourceId)
-        }
-      },
-    )
+    void result.then(() => {
+      finish()
+      continueAfterFulfillment()
+    }, finish)
   }
 
   /**
@@ -1075,7 +1076,7 @@ class EffectPipelineRunner<TRow extends object, TKey extends string | number> {
         minValues: cursor.minValues,
         trackLoadSubsetPromise: false,
         onLoadSubsetResult: (loadResult: LoadSubsetRequestResult) =>
-          this.trackOrderedLoad(loadResult, sourceId, cursor.loadRequestKey),
+          this.trackOrderedLoad(loadResult, sourceId),
       })
     } catch (error) {
       if (subscription.lastError !== error) throw error

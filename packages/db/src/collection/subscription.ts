@@ -95,6 +95,10 @@ type ReplaySubsetAcquisition = SubsetAcquisition & {
 
 type SubsetDemand = SubsetAcquisition & {
   requestOptions: LoadSubsetOptions
+  onLoadSubsetResult?: (
+    result: LoadSubsetRequestResult,
+    demand: LoadSubsetOptions,
+  ) => void
   ordered?: {
     requestedPrefix: number
     hadBoundary: boolean
@@ -395,6 +399,10 @@ export class CollectionSubscription
             !nextAcquisition.options.signal?.aborted
           )
         })
+        // Preserve the original demand's consumer-local in-flight guard. This
+        // observer is registered last so its settlement sees replay ownership,
+        // coverage, and attempt bookkeeping before it may continue the window.
+        demand.onLoadSubsetResult?.(syncResult, nextAcquisition.options)
       }
 
       attempt.setupComplete = true
@@ -1023,6 +1031,7 @@ export class CollectionSubscription
     }
 
     const { demand, result: syncResult } = this.startSubsetDemand(loadOptions)
+    demand.onLoadSubsetResult = opts?.onLoadSubsetResult
     if (opts?.where) this.requestedSubsetWhere.set(loadOptions, opts.where)
 
     // Pass the raw loadSubset result to the caller for external tracking
@@ -1266,6 +1275,7 @@ export class CollectionSubscription
       requiresUnboundedRefinement,
       revision: this.orderedWindow.coverageRevision,
     })
+    demand.onLoadSubsetResult = onLoadSubsetResult
 
     this.observeOrderedCoverage(syncResult, demand)
     // Pass the raw loadSubset result to the caller for external tracking
@@ -1347,10 +1357,13 @@ export class CollectionSubscription
         }
         window.recordLocalRequestSatisfaction(ordered.requestedPrefix)
       }
-      if (!this.isBufferingForTruncate && this.stalePublishedRows.size === 0) {
-        const changes = this.reconcileOrderedWindow()
-        if (changes.length > 0) this.callback(changes)
+      if (this.isBufferingForTruncate || this.stalePublishedRows.size > 0) {
+        const session = this.truncateReplaySession
+        if (session) this.checkTruncateReplayComplete(session)
+        return
       }
+      const changes = this.reconcileOrderedWindow()
+      if (changes.length > 0) this.callback(changes)
     }
   }
 
