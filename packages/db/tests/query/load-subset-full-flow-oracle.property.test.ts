@@ -6,6 +6,8 @@ import { BTreeIndex, ReverseIndex } from '../../src/index.js'
 import { Func, PropRef, Value } from '../../src/query/ir.js'
 import { createLiveQueryCollection, eq } from '../../src/query/index.js'
 import { DeduplicatedLoadSubset } from '../../src/query/subset-dedupe.js'
+import { LIVE_QUERY_INTERNAL } from '../../src/query/live/internal.js'
+import { computeOrderedLoadCursor } from '../../src/query/live/utils.js'
 import { WindowState } from '../../src/query/live/window-state.js'
 import { evaluateReferenceExpression } from '../reference-expression.js'
 import {
@@ -23,7 +25,7 @@ import {
   oracleRandomParameters,
   readOracleRunConfig,
 } from '../oracle-config.js'
-import type { LoadSubsetOptions } from '../../src/types.js'
+import type { LoadSubsetOptions, WritableDeep } from '../../src/types.js'
 import type { LoadSubsetFullFlowEvent } from '../load-subset-full-flow-model.js'
 
 type AdapterLifecycleEvent =
@@ -621,11 +623,26 @@ it.each([`sync`, `async`] as const)(
   },
 )
 
-it(`continues an ordered window after a short non-exhausted page`, async () => {
+it.each([
+  {
+    name: `continues past an excluded source row`,
+    middleEligible: false,
+    expectedCalls: 3,
+    expectedCursorKeys: [undefined, 1, 3],
+    expectedIds: [1, 2],
+  },
+  {
+    name: `keeps the same source progress when that row is eligible`,
+    middleEligible: true,
+    expectedCalls: 3,
+    expectedCursorKeys: [undefined, 1, undefined],
+    expectedIds: [1, 3],
+  },
+] as const)(`$name after a short non-exhausted page`, async (scenario) => {
   type Row = { id: number; rank: number; eligible: boolean }
   const remoteRows: ReadonlyArray<Row> = [
     { id: 1, rank: 1, eligible: true },
-    { id: 3, rank: 1, eligible: false },
+    { id: 3, rank: 1, eligible: scenario.middleEligible },
     { id: 2, rank: 2, eligible: true },
   ]
   const calls: Array<LoadSubsetOptions> = []
@@ -684,13 +701,11 @@ it(`continues an ordered window after a short non-exhausted page`, async () => {
     await live.preload()
     await flushPromises()
 
-    expect(calls).toHaveLength(3)
-    expect(calls.map(({ cursor }) => cursor?.lastKey)).toEqual([
-      undefined,
-      1,
-      3,
-    ])
-    expect(live.toArray.map(({ id }) => id)).toEqual([1, 2])
+    expect(calls).toHaveLength(scenario.expectedCalls)
+    expect(calls.map(({ cursor }) => cursor?.lastKey)).toEqual(
+      scenario.expectedCursorKeys,
+    )
+    expect(live.toArray.map(({ id }) => id)).toEqual(scenario.expectedIds)
   } finally {
     await live.cleanup()
     await source.cleanup()
@@ -755,12 +770,19 @@ it(`does not repeat an evidence-free ordered continuation`, async () => {
     expect(live.utils.lastSubsetError).toMatchObject({
       message: expect.stringContaining(`made no ordered progress`),
     })
+    const [subscription] = Object.values(
+      live.utils[LIVE_QUERY_INTERNAL].getBuilder().subscriptions,
+    )
+    expect(subscription?.hasOrderedCoverageForActiveWindow).toBe(false)
+    expect(subscription?.orderedRowsNeeded).toBe(1)
 
     await live.utils.setWindow({ offset: 0, limit: 3 })
     await flushPromises()
 
     expect(calls).toHaveLength(3)
     expect(calls[2]?.cursor?.lastKey).toBe(1)
+    expect(subscription?.hasOrderedCoverageForActiveWindow).toBe(false)
+    expect(subscription?.orderedRowsNeeded).toBe(2)
   } finally {
     await live.cleanup()
     await source.cleanup()
@@ -821,19 +843,66 @@ if (process.env.TANSTACK_DB_ORACLE_STATISTICS === `1`) {
 
 let orderedEvidenceHarnessId = 0
 
+type OrderedEvidenceRow = {
+  id: string
+  rank: number
+  eligible: boolean
+}
+
+function assertOrderedContinuationEvidence(
+  window: WindowState<WritableDeep<OrderedEvidenceRow>, string | number>,
+  scenario: OrderedContinuationEvidenceScenario,
+  sourceOrder: ReadonlyArray<string> = [`a`, `b`, `c`, `d`],
+): void {
+  const eligibleKeys = new Set(scenario.eligibleKeys)
+  const [initial, ...continuations] = scenario.pages
+  if (!initial) throw new Error(`Expected an initial evidence page`)
+  window.recordInitialCoverage(
+    initial.appliedKeys,
+    initial.extent === `exhausted`,
+  )
+  if (initial.extent !== `exhausted`) {
+    for (const page of continuations) {
+      window.recordContinuationCoverage(
+        page.appliedKeys,
+        page.extent === `exhausted`,
+        page.requestedPrefix,
+        window.coverageRevision,
+      )
+      if (page.extent === `exhausted`) break
+    }
+  }
+
+  const expected = projectOrderedContinuationEvidence({
+    sourceOrder,
+    eligibleKeys,
+    targetSize: scenario.targetSize,
+    pages: scenario.pages,
+  })
+  const actualKeys = window
+    .reconcile(new Map())
+    .filter((change) => change.type === `insert`)
+    .map(({ key }) => key)
+
+  expect(actualKeys).toEqual(expected.visibleKeys)
+  expect(window.requestBoundary()?.key).toBe(expected.boundaryKey)
+  expect(window.coveredPrefixSize).toBe(expected.coveredPrefixSize)
+  expect(window.coversActiveWindow).toBe(expected.coversTarget)
+  expect(window.rowsNeeded()).toBe(expected.rowsNeeded)
+}
+
 async function runOrderedContinuationEvidenceScenario(
   scenario: OrderedContinuationEvidenceScenario,
 ): Promise<void> {
-  type Row = { id: string; rank: number; eligible: boolean }
   const sourceOrder = [`a`, `b`, `c`, `d`]
   const eligibleKeys = new Set(scenario.eligibleKeys)
-  const rows: Array<Row> = sourceOrder.map((id, index) => ({
+  const rows: Array<OrderedEvidenceRow> = sourceOrder.map((id, index) => ({
     id,
     rank: index + 1,
     eligible: eligibleKeys.has(id),
   }))
   const source = createCollection(
-    mockSyncCollectionOptions<Row>({
+    mockSyncCollectionOptions<OrderedEvidenceRow>({
       id: `ordered-evidence-oracle-${orderedEvidenceHarnessId++}`,
       initialData: rows,
       getKey: (row) => row.id,
@@ -850,44 +919,200 @@ async function runOrderedContinuationEvidenceScenario(
   const window = new WindowState(source, orderBy, where, scenario.targetSize)
 
   try {
-    const [initial, ...continuations] = scenario.pages
-    if (!initial) throw new Error(`Expected an initial evidence page`)
-    window.recordInitialCoverage(
-      initial.appliedKeys,
-      initial.extent === `exhausted`,
-    )
-    if (initial.extent !== `exhausted`) {
-      for (const page of continuations) {
-        window.recordContinuationCoverage(
-          page.appliedKeys,
-          page.extent === `exhausted`,
-          page.requestedPrefix,
-          window.coverageRevision,
-        )
-        if (page.extent === `exhausted`) break
-      }
-    }
-
-    const expected = projectOrderedContinuationEvidence({
-      sourceOrder,
-      eligibleKeys,
-      targetSize: scenario.targetSize,
-      pages: scenario.pages,
-    })
-    const actualKeys = window
-      .reconcile(new Map())
-      .filter((change) => change.type === `insert`)
-      .map(({ key }) => key)
-
-    expect(actualKeys).toEqual(expected.visibleKeys)
-    expect(window.requestBoundary()?.key).toBe(expected.boundaryKey)
-    expect(window.coveredPrefixSize).toBe(expected.coveredPrefixSize)
-    expect(window.coversActiveWindow).toBe(expected.coversTarget)
-    expect(window.rowsNeeded()).toBe(expected.rowsNeeded)
+    assertOrderedContinuationEvidence(window, scenario)
   } finally {
     await source.cleanup()
   }
 }
+
+it(`exhausts the bounded ordered-evidence model`, async () => {
+  const boundedKeys = [`a`, `b`] as const
+  const keySets: Array<Array<(typeof boundedKeys)[number]>> = [[]]
+  for (const key of boundedKeys) {
+    keySets.push(...keySets.map((keys) => [...keys, key]))
+  }
+  const pages = [1, 2].flatMap((requestedPrefix) =>
+    keySets.flatMap((appliedKeys) =>
+      ([`continues`, `exhausted`] as const).map((extent) => ({
+        requestedPrefix,
+        appliedKeys,
+        extent,
+      })),
+    ),
+  )
+  const histories = [
+    ...pages.map((page) => [page]),
+    ...pages.flatMap((first) => pages.map((second) => [first, second])),
+  ]
+  const sourceOrder = [...boundedKeys]
+  let checked = 0
+
+  for (const eligible of keySets) {
+    const eligibleKeys = new Set<string>(eligible)
+    const rows: Array<OrderedEvidenceRow> = sourceOrder.map((id, index) => ({
+      id,
+      rank: index + 1,
+      eligible: eligibleKeys.has(id),
+    }))
+    const source = createCollection(
+      mockSyncCollectionOptions<OrderedEvidenceRow>({
+        id: `ordered-evidence-exhaustive-${orderedEvidenceHarnessId++}`,
+        initialData: rows,
+        getKey: (row) => row.id,
+      }),
+    )
+    await source.preload()
+    const orderBy = [
+      {
+        expression: new PropRef([`rank`]),
+        compareOptions: { direction: `asc` as const, nulls: `first` as const },
+      },
+    ]
+    const where = new Func(`eq`, [new PropRef([`eligible`]), new Value(true)])
+
+    try {
+      for (const targetSize of [1, 2]) {
+        for (const evidencePages of histories) {
+          const scenario: OrderedContinuationEvidenceScenario = {
+            targetSize,
+            eligibleKeys: eligible,
+            pages: evidencePages,
+          }
+          assertOrderedContinuationEvidence(
+            new WindowState(source, orderBy, where, targetSize),
+            scenario,
+            sourceOrder,
+          )
+          checked++
+        }
+      }
+    } finally {
+      await source.cleanup()
+    }
+  }
+
+  expect(checked).toBe(2_176)
+})
+
+type AutomaticOrderedProgressState = {
+  demandedPrefix: number
+  refillLimit: number
+  boundary?: { rank: number; key: string }
+}
+
+function assertAutomaticOrderedProgress(
+  states: ReadonlyArray<AutomaticOrderedProgressState>,
+): void {
+  const orderByInfo = {
+    orderBy: [
+      {
+        expression: new PropRef([`rank`]),
+        compareOptions: {
+          direction: `asc` as const,
+          nulls: `first` as const,
+        },
+      },
+    ],
+    offset: 0,
+    valueExtractorForRawRow: (row: Record<string, unknown>) => row.rank,
+  }
+  let lastLoadRequestKey: string | undefined
+  let lastAcceptedIdentity: string | undefined
+
+  for (const state of states) {
+    const identity = JSON.stringify({
+      demandedPrefix: state.demandedPrefix,
+      rank: state.boundary?.rank ?? null,
+      key: state.boundary?.key ?? null,
+    })
+    const request = computeOrderedLoadCursor(
+      orderByInfo,
+      state.boundary,
+      lastLoadRequestKey,
+      `row`,
+      state.refillLimit,
+      state.demandedPrefix,
+      state.boundary?.key,
+    )
+    const shouldStart = identity !== lastAcceptedIdentity
+
+    expect(request !== undefined).toBe(shouldStart)
+    if (request) {
+      lastLoadRequestKey = request.loadRequestKey
+      lastAcceptedIdentity = identity
+    }
+  }
+}
+
+const automaticOrderedProgressStateArbitrary: fc.Arbitrary<AutomaticOrderedProgressState> =
+  fc.record({
+    demandedPrefix: fc.integer({ min: 1, max: 4 }),
+    refillLimit: fc.integer({ min: 1, max: 4 }),
+    boundary: fc.option(
+      fc.record({
+        rank: fc.integer({ min: -1, max: 2 }),
+        key: fc.constantFrom(`a`, `b`, `c`),
+      }),
+      { nil: undefined },
+    ),
+  })
+
+it(`exhausts the bounded automatic-progress transition law`, () => {
+  const boundaries: ReadonlyArray<AutomaticOrderedProgressState[`boundary`]> = [
+    undefined,
+    { rank: 0, key: `a` },
+    { rank: 0, key: `b` },
+    { rank: 1, key: `a` },
+  ]
+  const states = [1, 2].flatMap((demandedPrefix) =>
+    [1, 2].flatMap((refillLimit) =>
+      boundaries.map((boundary) => ({
+        demandedPrefix,
+        refillLimit,
+        boundary,
+      })),
+    ),
+  )
+  let checked = 0
+
+  for (const first of states) {
+    for (const second of states) {
+      assertAutomaticOrderedProgress([first, second])
+      checked++
+    }
+  }
+
+  expect(checked).toBe(256)
+})
+
+fcTest.prop(
+  [
+    fc.array(automaticOrderedProgressStateArbitrary, {
+      minLength: 1,
+      maxLength: 8,
+    }),
+  ],
+  {
+    numRuns: 128 * fullFlowMultiplier,
+    seed: 17784,
+  },
+)(
+  `starts automatic continuation only for new semantic progress with a fixed seed`,
+  assertAutomaticOrderedProgress,
+)
+
+fcTest.prop(
+  [
+    fc.array(automaticOrderedProgressStateArbitrary, {
+      minLength: 1,
+      maxLength: 8,
+    }),
+  ],
+  oracleRandomParameters(128 * fullFlowMultiplier, fullFlowReplaySeed),
+)(
+  `starts automatic continuation only for new semantic progress with a random or replayed seed`,
+  assertAutomaticOrderedProgress,
+)
 
 fcTest.prop([orderedContinuationEvidenceScenarioArbitrary], {
   numRuns: 64 * fullFlowMultiplier,
