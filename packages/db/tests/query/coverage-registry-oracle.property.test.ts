@@ -1,4 +1,5 @@
 import { fc, test as fcTest } from '@fast-check/vitest'
+import { compareKeys } from '@tanstack/db-ivm'
 import { describe, expect, it, vi } from 'vitest'
 import {
   CoverageRegistry,
@@ -10,7 +11,7 @@ import type { Command } from 'fast-check'
 
 type Prefix = number
 type PrefixCoverage = Readonly<{ prefix: Prefix }>
-type RowKey = string
+type RowKey = string | number
 
 function createPrefixRegistry(): CoverageRegistry<
   Prefix,
@@ -265,7 +266,7 @@ type RegistryReal = {
   releases: Array<ReleaseProbe>
 }
 
-const modelRows = [`a`, `b`, `c`, `d`] as const
+const modelRows = [`a`, `ä`, 2, 10] as const satisfies ReadonlyArray<RowKey>
 
 function activeIndex<T extends { active: boolean }>(
   records: ReadonlyArray<T>,
@@ -411,7 +412,7 @@ function replaceModelRows(
       ).length === 1,
   )
   acquisition.rows = new Set(nextRows)
-  return rowsToRemove.sort()
+  return rowsToRemove.sort(compareKeys)
 }
 
 function retireModelAcquisition(
@@ -1046,7 +1047,7 @@ class ReleaseLeaseCommand implements Command<RegistryModel, RegistryReal> {
     lease.active = false
     lease.acquisitions.clear()
     expect(real.registry.releaseLease(real.leases[leaseIndex]!)).toEqual({
-      rowsToRemove: [...rowsToRemove].sort(),
+      rowsToRemove: [...rowsToRemove].sort(compareKeys),
     })
     assertRegistryModel(model, real)
   }
@@ -1080,7 +1081,7 @@ class DisposeCommand implements Command<RegistryModel, RegistryReal> {
       lease.acquisitions.clear()
     })
     expect(real.registry.dispose()).toEqual({
-      rowsToRemove: [...rowsToRemove].sort(),
+      rowsToRemove: [...rowsToRemove].sort(compareKeys),
     })
     assertRegistryModel(model, real)
   }
@@ -1393,6 +1394,26 @@ describe(`coverage registry oracle`, () => {
 
     expect(registry.releaseLease(secondLease)).toEqual({
       rowsToRemove: [`second`, `shared`],
+    })
+  })
+
+  it(`orders released mixed keys with the shared key comparator`, () => {
+    const registry = createPrefixRegistry()
+    const lease = registry.addLease(1)
+    const acquisition = addPrefixAcquisition(registry, {
+      generation: 1,
+      leases: [lease],
+      release: vi.fn(),
+      prefix: 1,
+    })
+    const rows: ReadonlyArray<RowKey> = [10, `ä`, 2, `z`]
+
+    expect(registry.replaceRows(acquisition, rows)).toEqual({
+      accepted: true,
+      rowsToRemove: [],
+    })
+    expect(registry.releaseLease(lease)).toEqual({
+      rowsToRemove: [...rows].sort(compareKeys),
     })
   })
 

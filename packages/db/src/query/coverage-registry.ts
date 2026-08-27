@@ -1,3 +1,4 @@
+import { compareKeys } from '@tanstack/db-ivm'
 import { getLoadSubsetDemandKey } from './ir-stable-identity.js'
 import { snapshotLoadSubsetDemand } from './load-subset-options.js'
 import { isLoadSubsetRequestSubsumedBy } from './predicate-utils.js'
@@ -1013,14 +1014,7 @@ function hasAuthoritativeExtent(
 function sortKeys<TKey extends string | number>(
   keys: Iterable<TKey>,
 ): Array<TKey> {
-  return Array.from(keys).sort((left, right) => {
-    if (typeof left === `number` && typeof right === `number`) {
-      return left - right
-    }
-    if (typeof left === `number`) return -1
-    if (typeof right === `number`) return 1
-    return left.localeCompare(right)
-  })
+  return Array.from(keys).sort(compareKeys)
 }
 
 function throwReleaseErrors(errors: Array<unknown>): void {
