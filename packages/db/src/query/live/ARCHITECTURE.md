@@ -546,13 +546,6 @@ units. Queries without includes retain their original pipeline unless a joined
 custom-key query needs contributor reduction. Inline materialization must not
 create recursive Collection machinery.
 
-A Collection's key map is an applicable equality index when its existing
-`getKey` accessor returns one row field unchanged. Planning derives that field
-path internally with the query reference proxy and verifies the extractor
-against falsy and nullish values before using the path. Computed, conditional,
-or coerced keys use an explicit index or the existing scan fallback. There is
-no second public declaration of key identity.
-
 ## Normative laws
 
 1. **Alpha-renaming:** changing any accepted alias to another unused name cannot

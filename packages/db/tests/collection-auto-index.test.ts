@@ -473,7 +473,7 @@ describe(`Collection Auto-Indexing`, () => {
     subscription.unsubscribe()
   })
 
-  it(`should use the collection key without creating an eager join index`, async () => {
+  it(`should create auto-indexes for join key on lazy collection when joining`, async () => {
     const leftCollection = createCollection<TestItem, string>({
       getKey: (item) => item.id,
       autoIndex: `eager`,
@@ -552,11 +552,18 @@ describe(`Collection Auto-Indexing`, () => {
 
     expect(liveQuery.size).toBe(testData.length)
 
-    expect(rightCollection.indexes.size).toBe(0)
+    expect(rightCollection.indexes.size).toBe(1)
+
+    const index = rightCollection.indexes.values().next().value!
+    expect(index.expression).toEqual({
+      type: `ref`,
+      path: [`id2`],
+    })
 
     const tracker = createIndexUsageTracker(rightCollection)
 
-    // The collection key map serves the incremental join without an index query.
+    // Now send another item through the left collection
+    // and check that it used the index to join it to items of the right collection
 
     leftCollection.insert({
       id: `other2`,
@@ -566,14 +573,21 @@ describe(`Collection Auto-Indexing`, () => {
       createdAt: new Date(),
     })
 
-    expect(tracker.stats.queriesExecuted).toEqual([])
+    expect(tracker.stats.queriesExecuted).toEqual([
+      {
+        type: `index`,
+        operation: `in`,
+        field: `id2`,
+        value: [`other2`],
+      },
+    ])
 
     expect(liveQuery.size).toBe(testData.length + 1)
 
     tracker.restore()
   })
 
-  it(`should use the collection key in a joined subquery without creating an eager index`, async () => {
+  it(`should create auto-indexes for join key on lazy collection when joining subquery`, async () => {
     const leftCollection = createCollection<TestItem, string>({
       getKey: (item) => item.id,
       autoIndex: `eager`,
@@ -659,11 +673,18 @@ describe(`Collection Auto-Indexing`, () => {
 
     expect(liveQuery.size).toBe(testData.length)
 
-    expect(rightCollection.indexes.size).toBe(0)
+    expect(rightCollection.indexes.size).toBe(1)
+
+    const index = rightCollection.indexes.values().next().value!
+    expect(index.expression).toEqual({
+      type: `ref`,
+      path: [`id2`],
+    })
 
     const tracker = createIndexUsageTracker(rightCollection)
 
-    // The collection key map serves the incremental join without an index query.
+    // Now send another item through the left collection
+    // and check that it used the index to join it to items of the right collection
 
     leftCollection.insert({
       id: `other2`,
@@ -673,7 +694,14 @@ describe(`Collection Auto-Indexing`, () => {
       createdAt: new Date(),
     })
 
-    expect(tracker.stats.queriesExecuted).toEqual([])
+    expect(tracker.stats.queriesExecuted).toEqual([
+      {
+        type: `index`,
+        operation: `in`,
+        field: `id2`,
+        value: [`other2`],
+      },
+    ])
 
     expect(liveQuery.size).toBe(testData.length + 1)
 

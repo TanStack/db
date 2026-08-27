@@ -4,7 +4,6 @@ import {
   CollectionRequiresConfigError,
   CollectionRequiresSyncConfigError,
 } from '../errors'
-import { registerCollectionKeyAccessor } from '../utils/collection-key.js'
 import { currentStateAsChanges } from './change-events'
 
 import { CollectionStateManager } from './state'
@@ -398,7 +397,6 @@ export class CollectionImpl<
       autoIndex: config.autoIndex ?? `off`,
       utils: collectionUtils,
     }
-    registerCollectionKeyAccessor(this, config.getKey)
     // Attach utilities before eager sync starts so adapters can bind helpers
     // during sync setup. Preserve the adapter's object identity by default.
     this.utils = collectionUtils

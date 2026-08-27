@@ -18,7 +18,6 @@ import {
 } from '../../errors.js'
 import { normalizeValue } from '../../utils/comparison.js'
 import { ensureIndexForField } from '../../indexes/auto-index.js'
-import { isCollectionKeyPath } from '../../utils/collection-key.js'
 import { compileExpression } from './evaluators.js'
 import { getLazyLoadTargets } from './lazy-targets.js'
 import { crossJoinParentRoutes } from './parent-routes.js'
@@ -395,7 +394,7 @@ function processJoin(
 
       for (const target of lazyTargets) {
         const fieldName = target.path[0]
-        if (fieldName && !isCollectionKeyPath(target.collection, target.path)) {
+        if (fieldName) {
           ensureIndexForField(fieldName, target.path, target.collection)
         }
       }
