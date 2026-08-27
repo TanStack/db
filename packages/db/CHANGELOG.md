@@ -1,5 +1,11 @@
 # @tanstack/db
 
+## 0.8.6
+
+### Patch Changes
+
+- Lazily initialize runtime reference identities to avoid generating random values during Cloudflare Worker module evaluation. ([#1782](https://github.com/TanStack/db/pull/1782))
+
 ## 0.8.5
 
 ### Patch Changes
