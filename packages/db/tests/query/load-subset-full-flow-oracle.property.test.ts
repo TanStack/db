@@ -958,6 +958,10 @@ type AtomicOrderedReplayScenario = {
   settleCurrentFirst: boolean
   sourceDelta: boolean
   otherDemand: `none` | `active` | `released`
+  otherOutcome?: `resolve` | `reject`
+  demandSettlementOrder?: `ordered-first` | `other-first`
+  releaseAfterOrdered?: boolean
+  terminal?: `settle` | `unsubscribe`
 }
 
 const atomicOrderedReplayArbitrary: fc.Arbitrary<AtomicOrderedReplayScenario> =
@@ -1020,6 +1024,8 @@ async function runAtomicOrderedReplayScenario(
       | `new-b`
       | `delta`
       | `tail`
+      | `obsolete`
+      | `partial`
       | `old-other`
       | `new-other`
     rank: number
@@ -1057,6 +1063,16 @@ async function runAtomicOrderedReplayScenario(
     rank: scenario.direction === `asc` ? 3 : 0,
     route: `ordered`,
   }
+  const obsoleteRow: Row = {
+    id: `obsolete`,
+    rank: scenario.direction === `asc` ? -1 : 4,
+    route: `ordered`,
+  }
+  const partialRow: Row = {
+    id: `partial`,
+    rank: scenario.direction === `asc` ? -2 : 5,
+    route: `ordered`,
+  }
   const initialOtherRow: Row = {
     id: `old-other`,
     rank: scenario.direction === `asc` ? 100 : -100,
@@ -1085,6 +1101,7 @@ async function runAtomicOrderedReplayScenario(
   let initialOrderedLoad = true
   let initialOtherLoad = true
   let replacementSequence = 0
+  let unsubscribed = false
   const pending: Array<PendingReplay> = []
   const history: Array<LoadSubsetFullFlowEvent> = [
     {
@@ -1178,7 +1195,6 @@ async function runAtomicOrderedReplayScenario(
   const expectedPublications = () =>
     projectAtomicOrderedPublications(history, {
       demandId: `ordered`,
-      additionalDemandIds: scenario.otherDemand === `none` ? [] : [`other`],
       direction: scenario.direction,
       initialWindowSize: 1,
     })
@@ -1199,6 +1215,9 @@ async function runAtomicOrderedReplayScenario(
     history.push({
       type: `beginReplacement`,
       publicationId,
+      demandIds: acquisitions.map((acquisition) =>
+        acquisition === ordered ? `ordered` : `other`,
+      ),
     })
     expectPublicationHistory()
     return { publicationId, acquisitions, ordered } satisfies PendingAttempt
@@ -1208,6 +1227,11 @@ async function runAtomicOrderedReplayScenario(
     outcome: `success` | `failure` | `abort`,
     rows: ReadonlyArray<Row>,
     extent: `exhausted` | `continues` = `exhausted`,
+    otherOutcome: `success` | `failure` = outcome === `success`
+      ? `success`
+      : `failure`,
+    demandOrder: `ordered-first` | `other-first` = `ordered-first`,
+    releaseOtherAfterOrdered = false,
   ) => {
     if (rows.length > 0) {
       await applyRows(rows)
@@ -1219,10 +1243,20 @@ async function runAtomicOrderedReplayScenario(
       })
       expectPublicationHistory()
     }
-    for (const acquisition of replay.acquisitions) {
+    const acquisitions = [...replay.acquisitions].sort((left, right) => {
+      const leftOrdered = left === replay.ordered
+      const rightOrdered = right === replay.ordered
+      if (leftOrdered === rightOrdered) return 0
+      const orderedFirst = demandOrder === `ordered-first`
+      return leftOrdered === orderedFirst ? -1 : 1
+    })
+    for (const acquisition of acquisitions) {
+      const isOrdered = acquisition === replay.ordered
+      const demandId = isOrdered ? `ordered` : `other`
+      const desiredOutcome = isOrdered ? outcome : otherOutcome
       const aborted = acquisition.options.signal?.aborted ?? false
-      if (outcome === `success` && !aborted) {
-        const isOrdered = acquisition === replay.ordered
+      const settledOutcome = aborted ? `abort` : desiredOutcome
+      if (settledOutcome === `success`) {
         acquisition.deferred.resolve({
           hasMore: isOrdered ? extent === `continues` : false,
           appliedRowKeys: isOrdered
@@ -1231,30 +1265,45 @@ async function runAtomicOrderedReplayScenario(
         })
       } else {
         const error = new Error(
-          outcome === `abort` || aborted
+          settledOutcome === `abort`
             ? `obsolete replay aborted`
             : `replay failed`,
         )
-        if (outcome === `abort` || aborted) error.name = `AbortError`
+        if (settledOutcome === `abort`) error.name = `AbortError`
         acquisition.deferred.reject(error)
       }
+      history.push(
+        settledOutcome === `success`
+          ? {
+              type: `settleReplacement`,
+              publicationId: replay.publicationId,
+              demandId,
+              outcome: settledOutcome,
+              extent: isOrdered ? extent : `exhausted`,
+            }
+          : {
+              type: `settleReplacement`,
+              publicationId: replay.publicationId,
+              demandId,
+              outcome: settledOutcome,
+            },
+      )
+      await flushPromises()
+      expectPublicationHistory()
+
+      if (isOrdered && releaseOtherAfterOrdered) {
+        subscription.releaseSnapshot(otherWhere)
+        history.push({
+          type: `releaseDemand`,
+          ownerId: `other-owner`,
+          demandId: `other`,
+          rowKeys: [replacementOtherRow.id],
+          finalRowOwner: true,
+          invalidatesAdapterEvidence: true,
+        })
+        expectPublicationHistory()
+      }
     }
-    history.push(
-      outcome === `success`
-        ? {
-            type: `settleReplacement`,
-            publicationId: replay.publicationId,
-            outcome,
-            extent,
-          }
-        : {
-            type: `settleReplacement`,
-            publicationId: replay.publicationId,
-            outcome,
-          },
-    )
-    await flushPromises()
-    expectPublicationHistory()
   }
 
   try {
@@ -1263,6 +1312,13 @@ async function runAtomicOrderedReplayScenario(
     expectPublicationHistory()
 
     if (scenario.otherDemand !== `none`) {
+      history.push({
+        type: `requestDemand`,
+        ownerId: `other-owner`,
+        sessionId: `atomic-session`,
+        demandId: `other`,
+        alreadyAborted: false,
+      })
       subscription.requestSnapshot({ where: otherWhere })
       await flushPromises()
       history.push(
@@ -1278,6 +1334,16 @@ async function runAtomicOrderedReplayScenario(
     }
 
     const firstReplay = await beginReplacement()
+    if (scenario.overlap) {
+      await applyRows([obsoleteRow])
+      history.push({
+        type: `stagePublicationRows`,
+        publicationId: firstReplay.publicationId,
+        demandId: `ordered`,
+        rows: toModelRows([obsoleteRow]),
+      })
+      expectPublicationHistory()
+    }
     const currentReplay = scenario.overlap
       ? await beginReplacement()
       : firstReplay
@@ -1329,6 +1395,38 @@ async function runAtomicOrderedReplayScenario(
       expectPublicationHistory()
     }
 
+    if (scenario.terminal === `unsubscribe`) {
+      await applyRows([partialRow])
+      history.push({
+        type: `stagePublicationRows`,
+        publicationId: currentReplay.publicationId,
+        demandId: `ordered`,
+        rows: toModelRows([partialRow]),
+      })
+      expectPublicationHistory()
+      subscription.unsubscribe()
+      unsubscribed = true
+      history.push({ type: `cleanupSession`, sessionId: `atomic-session` })
+      expectPublicationHistory()
+      expect(
+        currentReplay.acquisitions.every(
+          ({ options }) => options.signal?.aborted,
+        ),
+      ).toBe(true)
+      await applyRows([continuationRow])
+      history.push({
+        type: `stagePublicationRows`,
+        publicationId: currentReplay.publicationId,
+        demandId: `ordered`,
+        rows: toModelRows([partialRow, continuationRow]),
+      })
+      expectPublicationHistory()
+      await settle(currentReplay, `abort`, [])
+      if (scenario.overlap) await settle(firstReplay, `abort`, [])
+      expectPublicationHistory()
+      return
+    }
+
     const finalRows = [
       ...replacementRows,
       ...(scenario.sourceDelta ? [sourceDelta] : []),
@@ -1346,6 +1444,15 @@ async function runAtomicOrderedReplayScenario(
         scenario.currentOutcome === `resolve` ? `success` : `failure`,
         scenario.currentOutcome === `resolve` ? finalRows : partialFailureRows,
         scenario.currentExtent,
+        scenario.otherOutcome === `resolve`
+          ? `success`
+          : scenario.otherOutcome === `reject`
+            ? `failure`
+            : scenario.currentOutcome === `resolve`
+              ? `success`
+              : `failure`,
+        scenario.demandSettlementOrder,
+        scenario.releaseAfterOrdered,
       )
     const settleObsolete = () => settle(firstReplay, `abort`, [])
 
@@ -1407,10 +1514,79 @@ async function runAtomicOrderedReplayScenario(
         appliedRowKeys: [],
       })
     await flushPromises()
-    subscription.unsubscribe()
+    if (!unsubscribed) subscription.unsubscribe()
     await collection.cleanup()
   }
 }
+
+const mixedDemandSettlementScenarios: ReadonlyArray<AtomicOrderedReplayScenario> =
+  ([`asc`, `desc`] as const).flatMap((direction) => [
+    ...([`ordered-first`, `other-first`] as const).flatMap(
+      (demandSettlementOrder) => [
+        {
+          direction,
+          resizeOrder: `grow-shrink` as const,
+          overlap: false,
+          currentOutcome: `resolve` as const,
+          currentExtent: `exhausted` as const,
+          settleCurrentFirst: false,
+          sourceDelta: false,
+          otherDemand: `active` as const,
+          otherOutcome: `reject` as const,
+          demandSettlementOrder,
+        },
+        {
+          direction,
+          resizeOrder: `grow-shrink` as const,
+          overlap: false,
+          currentOutcome: `reject` as const,
+          currentExtent: `exhausted` as const,
+          settleCurrentFirst: false,
+          sourceDelta: false,
+          otherDemand: `active` as const,
+          otherOutcome: `resolve` as const,
+          demandSettlementOrder,
+        },
+      ],
+    ),
+    {
+      direction,
+      resizeOrder: `grow-shrink` as const,
+      overlap: false,
+      currentOutcome: `resolve` as const,
+      currentExtent: `exhausted` as const,
+      settleCurrentFirst: false,
+      sourceDelta: false,
+      otherDemand: `active` as const,
+      otherOutcome: `reject` as const,
+      demandSettlementOrder: `ordered-first` as const,
+      releaseAfterOrdered: true,
+    },
+  ])
+
+it(`keeps mixed demand settlements inside one replacement epoch`, async () => {
+  for (const scenario of mixedDemandSettlementScenarios) {
+    await runAtomicOrderedReplayScenario(scenario)
+  }
+})
+
+it(`discards pending replacement epochs on teardown`, async () => {
+  for (const direction of [`asc`, `desc`] as const) {
+    for (const overlap of [false, true]) {
+      await runAtomicOrderedReplayScenario({
+        direction,
+        resizeOrder: `grow-shrink`,
+        overlap,
+        currentOutcome: `resolve`,
+        currentExtent: `exhausted`,
+        settleCurrentFirst: false,
+        sourceDelta: false,
+        otherDemand: `none`,
+        terminal: `unsubscribe`,
+      })
+    }
+  }
+})
 
 it(`keeps ordered replacement publication atomic across every bounded history`, async () => {
   for (const scenario of exhaustiveAtomicOrderedReplayScenarios) {

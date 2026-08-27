@@ -399,6 +399,12 @@ pending. A successful current replacement publishes its settled ordered
 reconciliation once, but only after applied evidence proves the retained prefix
 or authoritative exhaustion. A continuing page stays private while its next
 acquisition refines that evidence; failure publishes no replacement batch.
+Each active demand in that replacement settles on its own, and the replacement
+waits for every acquisition it started. Releasing a demand removes its rows from
+the desired union, but does not erase that settlement barrier. A superseded
+attempt's rows stay private, and only the current reconciliation may publish.
+Teardown discards the whole replacement epoch, so later source writes and late
+settlements cannot reach public readers.
 A requested limit, a settled promise, or the number of requests does not.
 An outcome-free completion (`true` or `Promise<void>`) supplies no reusable row
 provenance, source extent, or CoverageFact. Its exact request has still settled,

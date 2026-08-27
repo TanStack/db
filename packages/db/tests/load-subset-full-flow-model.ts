@@ -82,15 +82,18 @@ export type LoadSubsetFullFlowEvent =
   | {
       type: `beginReplacement`
       publicationId: FullFlowPublicationId
+      demandIds: ReadonlyArray<FullFlowDemandId>
     }
   | {
       type: `settleReplacement`
       publicationId: FullFlowPublicationId
+      demandId: FullFlowDemandId
       outcome: `failure` | `abort`
     }
   | {
       type: `settleReplacement`
       publicationId: FullFlowPublicationId
+      demandId: FullFlowDemandId
       outcome: `success`
       extent: `exhausted` | `continues`
     }
@@ -374,7 +377,6 @@ export function projectAtomicOrderedPublications(
   history: ReadonlyArray<LoadSubsetFullFlowEvent>,
   options: {
     demandId: FullFlowDemandId
-    additionalDemandIds?: ReadonlyArray<FullFlowDemandId>
     direction: `asc` | `desc`
     initialWindowSize: number
   },
@@ -385,14 +387,18 @@ export function projectAtomicOrderedPublications(
   >()
   const attempts = new Map<
     FullFlowPublicationId,
-    | { outcome: `success`; publishable: boolean }
-    | { outcome: `failure` | `abort`; publishable: false }
-    | undefined
+    Map<
+      FullFlowDemandId,
+      | { outcome: `success`; publishable: boolean }
+      | { outcome: `failure` | `abort`; publishable: false }
+      | undefined
+    >
   >()
-  const activeAdditionalDemands = new Set(options.additionalDemandIds ?? [])
+  const activeAdditionalDemands = new Set<FullFlowDemandId>()
   const publications: Array<ReadonlyArray<FullFlowPublishedOrderRow>> = []
   let currentReplacement: FullFlowPublicationId | undefined
   let retainedSize = options.initialWindowSize
+  let closed = false
 
   const sortRows = (rows: ReadonlyArray<FullFlowPublishedOrderRow>) =>
     [...rows].sort((left, right) => {
@@ -440,7 +446,35 @@ export function projectAtomicOrderedPublications(
     publications.push(next)
   }
 
+  const finishCurrentReplacement = () => {
+    if (currentReplacement === undefined) return
+    if (
+      [...attempts.values()].some((demands) =>
+        [...demands.values()].some((outcome) => outcome === undefined),
+      )
+    ) {
+      return
+    }
+
+    const current = attempts.get(currentReplacement)
+    const ordered = current?.get(options.demandId)
+    const activeDemandFailed = [...activeAdditionalDemands].some(
+      (demandId) => current?.get(demandId)?.outcome !== `success`,
+    )
+    if (ordered?.outcome !== `success` || activeDemandFailed) {
+      attempts.clear()
+      currentReplacement = undefined
+      return
+    }
+    if (!ordered.publishable) return
+
+    publish(currentReplacement)
+    attempts.clear()
+    currentReplacement = undefined
+  }
+
   for (const event of history) {
+    if (closed) continue
     switch (event.type) {
       case `stagePublicationRows`: {
         let publication = staged.get(event.publicationId)
@@ -457,16 +491,20 @@ export function projectAtomicOrderedPublications(
         break
       }
       case `beginReplacement`:
-        attempts.set(event.publicationId, undefined)
+        attempts.set(
+          event.publicationId,
+          new Map(event.demandIds.map((demandId) => [demandId, undefined])),
+        )
         currentReplacement = event.publicationId
         break
       case `resizeOrderedWindow`:
         retainedSize = Math.max(retainedSize, event.size)
         break
       case `settleReplacement`: {
-        if (!attempts.has(event.publicationId)) break
-        attempts.set(
-          event.publicationId,
+        const attempt = attempts.get(event.publicationId)
+        if (!attempt?.has(event.demandId)) break
+        attempt.set(
+          event.demandId,
           event.outcome === `success`
             ? {
                 outcome: `success`,
@@ -474,55 +512,41 @@ export function projectAtomicOrderedPublications(
               }
             : { outcome: event.outcome, publishable: false },
         )
-        if ([...attempts.values()].some((outcome) => outcome === undefined)) {
-          break
-        }
-        const current =
-          currentReplacement === undefined
-            ? undefined
-            : attempts.get(currentReplacement)
-        if (
-          currentReplacement !== undefined &&
-          current?.outcome === `success` &&
-          current.publishable
-        ) {
-          publish(currentReplacement)
-          attempts.clear()
-          currentReplacement = undefined
-        } else if (current?.outcome !== `success`) {
-          attempts.clear()
-          currentReplacement = undefined
-        }
+        finishCurrentReplacement()
         break
       }
       case `establishReplacementCoverage`: {
-        if (
-          event.publicationId !== currentReplacement ||
-          [...attempts.values()].some((outcome) => outcome === undefined)
-        ) {
-          break
-        }
-        const current = attempts.get(event.publicationId)
-        if (current?.outcome === `success`) {
-          publish(event.publicationId)
-          attempts.clear()
-          currentReplacement = undefined
+        if (event.publicationId !== currentReplacement) break
+        const ordered = attempts.get(event.publicationId)?.get(options.demandId)
+        if (ordered?.outcome === `success`) {
+          ordered.publishable = true
+          finishCurrentReplacement()
         }
         break
       }
       case `requestDemand`:
+        if (!event.alreadyAborted && event.demandId !== options.demandId) {
+          activeAdditionalDemands.add(event.demandId)
+        }
+        break
       case `applyAuthoritativeRows`:
       case `applyUnprovenRows`:
       case `rejectDemand`:
+        break
       case `releaseDemand`:
         activeAdditionalDemands.delete(event.demandId)
         break
       case `truncateSource`:
-      case `cleanupSession`:
       case `restartSession`:
       case `advanceWindowRevision`:
       case `scheduleContinuation`:
       case `runContinuation`:
+        break
+      case `cleanupSession`:
+        attempts.clear()
+        currentReplacement = undefined
+        activeAdditionalDemands.clear()
+        closed = true
         break
     }
   }
