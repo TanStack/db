@@ -6,6 +6,7 @@ import { BTreeIndex, ReverseIndex } from '../../src/index.js'
 import { Func, PropRef, Value } from '../../src/query/ir.js'
 import { createLiveQueryCollection } from '../../src/query/index.js'
 import { DeduplicatedLoadSubset } from '../../src/query/subset-dedupe.js'
+import { evaluateReferenceExpression } from '../reference-expression.js'
 import {
   projectAdapterLifecycle,
   projectAuthorizedContinuationStarts,
@@ -621,6 +622,7 @@ type OrderedBoundaryProvenanceScenario = {
   direction: `asc` | `desc`
   offset: 0 | 1
   tied: boolean
+  addedRowPlacement: `before` | `after`
   replayFailure: `throw` | `reject`
 }
 
@@ -629,6 +631,7 @@ const orderedBoundaryProvenanceArbitrary: fc.Arbitrary<OrderedBoundaryProvenance
     direction: fc.constantFrom(`asc` as const, `desc` as const),
     offset: fc.constantFrom(0 as const, 1 as const),
     tied: fc.boolean(),
+    addedRowPlacement: fc.constantFrom(`before` as const, `after` as const),
     replayFailure: fc.constantFrom(`throw` as const, `reject` as const),
   })
 
@@ -636,12 +639,15 @@ const exhaustiveOrderedBoundaryProvenanceScenarios: ReadonlyArray<OrderedBoundar
   ([`asc`, `desc`] as const).flatMap((direction) =>
     ([0, 1] as const).flatMap((offset) =>
       [false, true].flatMap((tied) =>
-        ([`throw`, `reject`] as const).map((replayFailure) => ({
-          direction,
-          offset,
-          tied,
-          replayFailure,
-        })),
+        ([`before`, `after`] as const).flatMap((addedRowPlacement) =>
+          ([`throw`, `reject`] as const).map((replayFailure) => ({
+            direction,
+            offset,
+            tied,
+            addedRowPlacement,
+            replayFailure,
+          })),
+        ),
       ),
     ),
   )
@@ -661,9 +667,20 @@ async function runOrderedBoundaryProvenanceScenario(
     { id: `b`, rank: scenario.tied ? 5 : 2, route: `ordered` },
     { id: `c`, rank: scenario.tied ? 5 : 3, route: `ordered` },
   ]
-  const unrelatedRow: Row = {
+  const addedRow: Row = {
     id: `z`,
-    rank: scenario.tied ? 5 : scenario.direction === `asc` ? 99 : -99,
+    rank:
+      scenario.addedRowPlacement === `before`
+        ? scenario.direction === `asc`
+          ? 0
+          : 6
+        : scenario.direction === `asc`
+          ? scenario.tied
+            ? 5
+            : 99
+          : scenario.tied
+            ? 5
+            : -99,
     route: `unrelated`,
   }
   const orderedForDirection = [...orderedRows].sort((left, right) => {
@@ -673,7 +690,21 @@ async function runOrderedBoundaryProvenanceScenario(
         : right.rank - left.rank
     return valueOrder || left.id.localeCompare(right.id)
   })
+  const rowsAfterAdditionalDemand = [...orderedRows, addedRow].sort(
+    (left, right) => {
+      const valueOrder =
+        scenario.direction === `asc`
+          ? left.rank - right.rank
+          : right.rank - left.rank
+      return valueOrder || left.id.localeCompare(right.id)
+    },
+  )
   const prefixSize = scenario.offset + 1
+  const expectedOrderedPrefix = (
+    scenario.addedRowPlacement === `before`
+      ? rowsAfterAdditionalDemand
+      : orderedForDirection
+  ).slice(0, prefixSize)
   const history: Array<LoadSubsetFullFlowEvent> = [
     {
       type: `stagePublicationRows`,
@@ -684,14 +715,44 @@ async function runOrderedBoundaryProvenanceScenario(
         orderValue: row.rank,
       })),
     },
+    { type: `commitPublication`, publicationId: `initial-publication` },
+    // A later row before the prefix changes the ordered publication. A row
+    // after it remains only unordered-retention data and cannot move its
+    // continuation boundary.
+    ...(scenario.addedRowPlacement === `before`
+      ? ([
+          {
+            type: `stagePublicationRows`,
+            publicationId: `additional-publication`,
+            demandId: `ordered-window`,
+            rows: expectedOrderedPrefix.map((row) => ({
+              key: row.id,
+              orderValue: row.rank,
+            })),
+          },
+        ] satisfies Array<LoadSubsetFullFlowEvent>)
+      : []),
     {
       type: `stagePublicationRows`,
-      publicationId: `initial-publication`,
-      demandId: `unrelated-filter`,
-      rows: [{ key: unrelatedRow.id, orderValue: unrelatedRow.rank }],
+      publicationId: `additional-publication`,
+      demandId: `unordered-retention`,
+      rows: [{ key: addedRow.id, orderValue: addedRow.rank }],
     },
-    { type: `commitPublication`, publicationId: `initial-publication` },
+    { type: `commitPublication`, publicationId: `additional-publication` },
     { type: `truncateSource`, sessionId: `session` },
+    {
+      type: `stagePublicationRows`,
+      publicationId: `failed-replacement`,
+      demandId: `ordered-window`,
+      rows: [
+        {
+          key: expectedOrderedPrefix.at(-1)!.id,
+          orderValue:
+            expectedOrderedPrefix.at(-1)!.rank +
+            (scenario.direction === `asc` ? 100 : -100),
+        },
+      ],
+    },
     {
       type: `rejectDemand`,
       ownerId: `ordered-owner`,
@@ -704,6 +765,12 @@ async function runOrderedBoundaryProvenanceScenario(
     prefixSize,
   })
   if (!expectedBoundary) throw new Error(`Expected an ordered boundary`)
+  const partialReplayRow: Row = {
+    id: expectedBoundary.key as Row[`id`],
+    rank:
+      expectedBoundary.orderValue + (scenario.direction === `asc` ? 100 : -100),
+    route: expectedBoundary.key === addedRow.id ? `unrelated` : `ordered`,
+  }
 
   let begin!: () => void
   let write!: (message: { type: `insert`; value: Row }) => void
@@ -734,7 +801,7 @@ async function runOrderedBoundaryProvenanceScenario(
           loadSubset: (options) => {
             loadOptions.push(options)
             if (phase === `initial`) {
-              const rows = options.orderBy ? orderedRows : [unrelatedRow]
+              const rows = options.orderBy ? orderedRows : [addedRow]
               return applyRows(rows).then(() => ({
                 hasMore: false,
                 appliedRowKeys: rows.map(({ id }) => id),
@@ -742,9 +809,15 @@ async function runOrderedBoundaryProvenanceScenario(
             }
             if (phase === `replay` && options.orderBy) {
               if (scenario.replayFailure === `throw`) {
+                begin()
+                write({ type: `insert`, value: partialReplayRow })
+                const receipt = commit()
+                if (receipt !== true) void receipt.catch(() => {})
                 throw new Error(`ordered replay failed`)
               }
-              return Promise.reject(new Error(`ordered replay failed`))
+              return applyRows([partialReplayRow]).then(() =>
+                Promise.reject(new Error(`ordered replay failed`)),
+              )
             }
             return Promise.resolve({
               hasMore: false,
@@ -797,12 +870,17 @@ async function runOrderedBoundaryProvenanceScenario(
 
     expect([...visible.keys()].sort()).toEqual(
       [
-        ...orderedForDirection.slice(0, prefixSize).map(({ id }) => id),
-        unrelatedRow.id,
+        ...new Set([
+          ...rowsAfterAdditionalDemand.slice(0, prefixSize).map(({ id }) => id),
+          addedRow.id,
+        ]),
       ].sort(),
     )
     expect((subscription.orderedBoundaryRow as Row | undefined)?.id).toBe(
       expectedBoundary.key,
+    )
+    expect((subscription.orderedBoundaryRow as Row | undefined)?.rank).toBe(
+      expectedBoundary.orderValue,
     )
 
     phase = `replay`
@@ -822,7 +900,26 @@ async function runOrderedBoundaryProvenanceScenario(
     await flushPromises()
 
     expect(loadOptions).toHaveLength(beforeProbe + 1)
-    expect(loadOptions.at(-1)?.cursor?.lastKey).toBe(expectedBoundary.key)
+    const cursor = loadOptions.at(-1)?.cursor
+    expect(cursor?.lastKey).toBe(expectedBoundary.key)
+    expect(cursor?.whereCurrent).toBeDefined()
+    expect(cursor?.whereFrom).toBeDefined()
+    expect(
+      evaluateReferenceExpression(cursor!.whereCurrent, {
+        rank: expectedBoundary.orderValue,
+      }),
+    ).toBe(true)
+    expect(
+      evaluateReferenceExpression(cursor!.whereCurrent, {
+        rank: expectedBoundary.orderValue + 1,
+      }),
+    ).toBe(false)
+    expect(
+      evaluateReferenceExpression(cursor!.whereFrom, {
+        rank:
+          expectedBoundary.orderValue + (scenario.direction === `asc` ? 1 : -1),
+      }),
+    ).toBe(true)
   } finally {
     subscription.unsubscribe()
     await source.cleanup()
@@ -836,7 +933,7 @@ it(`keeps failed-replay cursors scoped to the last complete ordered publication`
 })
 
 fcTest.prop([orderedBoundaryProvenanceArbitrary], {
-  numRuns: 16 * fullFlowMultiplier,
+  numRuns: 32 * fullFlowMultiplier,
   seed: 1778,
 })(
   `keeps ordered boundary provenance for a fixed seed`,
@@ -845,7 +942,7 @@ fcTest.prop([orderedBoundaryProvenanceArbitrary], {
 
 fcTest.prop(
   [orderedBoundaryProvenanceArbitrary],
-  oracleRandomParameters(16 * fullFlowMultiplier, fullFlowReplaySeed),
+  oracleRandomParameters(32 * fullFlowMultiplier, fullFlowReplaySeed),
 )(
   `keeps ordered boundary provenance for a random or replayed seed`,
   runOrderedBoundaryProvenanceScenario,
