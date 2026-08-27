@@ -77,6 +77,17 @@ type SequentialReplayScenario = {
   loads: ReadonlyArray<SequentialReplayLoad>
 }
 
+type ReplayCompletionScenario = {
+  delivery: `return` | `resolve`
+  obsoleteBy:
+    | `stay-active`
+    | `release-snapshot`
+    | `unsubscribe`
+    | `request-abort`
+    | `newer-truncate`
+  failingUnload: `none` | `initial` | `first-replay`
+}
+
 type CleanupRestartScenario = {
   oldOutcome: `resolve` | `reject`
   newOutcome: `resolve` | `reject`
@@ -216,6 +227,44 @@ const sequentialReplayScenarioArbitrary: fc.Arbitrary<SequentialReplayScenario> 
       { minLength: 1, maxLength: 3 },
     ),
   })
+
+const replayCompletionScenarioArbitrary: fc.Arbitrary<ReplayCompletionScenario> =
+  fc.record({
+    delivery: fc.constantFrom(`return` as const, `resolve` as const),
+    obsoleteBy: fc.constantFrom(
+      `stay-active` as const,
+      `release-snapshot` as const,
+      `unsubscribe` as const,
+      `request-abort` as const,
+      `newer-truncate` as const,
+    ),
+    failingUnload: fc.constantFrom(
+      `none` as const,
+      `initial` as const,
+      `first-replay` as const,
+    ),
+  })
+
+const exhaustiveReplayCompletionScenarios: Array<ReplayCompletionScenario> = [
+  `return` as const,
+  `resolve` as const,
+].flatMap((delivery) =>
+  (
+    [
+      `stay-active`,
+      `release-snapshot`,
+      `unsubscribe`,
+      `request-abort`,
+      `newer-truncate`,
+    ] as const
+  ).flatMap((obsoleteBy) =>
+    ([`none`, `initial`, `first-replay`] as const).map((failingUnload) => ({
+      delivery,
+      obsoleteBy,
+      failingUnload,
+    })),
+  ),
+)
 
 const cleanupRestartScenarioArbitrary: fc.Arbitrary<CleanupRestartScenario> =
   fc.record({
@@ -951,6 +1000,170 @@ async function runSequentialReplayScenario(
     for (const load of pending) load.deferred.resolve()
     await flushPromises()
     if (!unsubscribed) subscription.unsubscribe()
+    await collection.cleanup()
+  }
+}
+
+let replayCompletionHarnessId = 0
+
+async function runReplayCompletionScenario(
+  scenario: ReplayCompletionScenario,
+): Promise<void> {
+  let begin!: () => void
+  let commit!: () => void
+  let truncate!: () => void
+  const requestAbortController = new AbortController()
+  const where = new Func(`eq`, [new PropRef([`id`]), new Value(`one`)])
+  const loads: Array<LoadSubsetOptions> = []
+  const leases = new Map<
+    LoadSubsetOptions,
+    { index: number; attempts: number; accepted: number; active: boolean }
+  >()
+  const pending: Array<ReturnType<typeof createDeferred<void>>> = []
+  let actionRan = false
+  let failedUnload = false
+
+  const truncateSource = () => {
+    begin()
+    truncate()
+    commit()
+  }
+
+  const runObsolescenceAction = () => {
+    if (actionRan) return
+    actionRan = true
+    try {
+      switch (scenario.obsoleteBy) {
+        case `stay-active`:
+          break
+        case `release-snapshot`:
+          subscription.releaseSnapshot(where)
+          break
+        case `unsubscribe`:
+          subscription.unsubscribe()
+          break
+        case `request-abort`:
+          requestAbortController.abort()
+          break
+        case `newer-truncate`:
+          truncateSource()
+          break
+      }
+    } catch {
+      // A failed physical release remains active and must be retried below.
+    }
+  }
+
+  const collection = createCollection<ReplayRow>({
+    id: `replay-completion-authority-${replayCompletionHarnessId++}`,
+    getKey: (row) => row.id,
+    syncMode: `on-demand`,
+    sync: {
+      sync: (params) => {
+        begin = params.begin
+        commit = params.commit
+        truncate = params.truncate
+        params.markReady()
+        return {
+          loadSubset: (options) => {
+            const index = loads.length
+            loads.push(options)
+            leases.set(options, {
+              index,
+              attempts: 0,
+              accepted: 0,
+              active: true,
+            })
+            if (index === 0) return true
+
+            if (scenario.delivery === `return`) {
+              if (index === 1) runObsolescenceAction()
+              return true
+            }
+
+            const deferred = createDeferred<void>()
+            pending.push(deferred)
+            return deferred.promise
+          },
+          unloadSubset: (options) => {
+            const lease = leases.get(options)
+            if (!lease) throw new Error(`Unknown replay acquisition`)
+            lease.attempts++
+            const shouldFail =
+              !failedUnload &&
+              ((scenario.failingUnload === `initial` && lease.index === 0) ||
+                (scenario.failingUnload === `first-replay` &&
+                  lease.index === 1))
+            if (shouldFail) {
+              failedUnload = true
+              throw new Error(`Physical release failed`)
+            }
+            lease.accepted++
+            lease.active = false
+          },
+        }
+      },
+    },
+  })
+  const subscription = collection.subscribeChanges(() => {}, {
+    includeInitialState: false,
+  })
+
+  try {
+    subscription.requestSnapshot({
+      where,
+      signal: requestAbortController.signal,
+      optimizedOnly: false,
+    })
+    truncateSource()
+    await flushPromises()
+
+    if (scenario.delivery === `resolve`) {
+      runObsolescenceAction()
+      await flushPromises()
+      const settlementOrder =
+        scenario.obsoleteBy === `newer-truncate`
+          ? [...pending].reverse()
+          : pending
+      for (const deferred of settlementOrder) {
+        deferred.resolve()
+        await flushPromises()
+      }
+    }
+
+    await flushPromises()
+    expect(actionRan).toBe(true)
+    expect(loads).toHaveLength(scenario.obsoleteBy === `newer-truncate` ? 3 : 2)
+
+    for (let retry = 0; retry < 3; retry++) {
+      try {
+        subscription.unsubscribe()
+      } catch {
+        // Retrying a failed exact release is required and remains idempotent.
+      }
+      await flushPromises()
+      if ([...leases.values()].every(({ active }) => !active)) break
+    }
+
+    for (const lease of leases.values()) {
+      expect(lease.accepted).toBe(1)
+      expect(lease.active).toBe(false)
+      expect(lease.attempts).toBe(
+        1 +
+          Number(
+            (scenario.failingUnload === `initial` && lease.index === 0) ||
+              (scenario.failingUnload === `first-replay` && lease.index === 1),
+          ),
+      )
+    }
+  } finally {
+    for (const deferred of pending) deferred.resolve()
+    await flushPromises()
+    try {
+      subscription.unsubscribe()
+    } catch {
+      subscription.unsubscribe()
+    }
     await collection.cleanup()
   }
 }
@@ -2030,6 +2243,28 @@ describe(`CollectionSubscription replay oracle`, () => {
     `matches synchronous, asynchronous, and partial-failure replay laws`,
     runSequentialReplayScenario,
     generatedTimeout,
+  )
+
+  it(`releases every exact acquisition once across bounded replay completion histories`, async () => {
+    for (const scenario of exhaustiveReplayCompletionScenarios) {
+      await runReplayCompletionScenario(scenario)
+    }
+  })
+
+  fcTest.prop([replayCompletionScenarioArbitrary], {
+    numRuns: generatedRuns,
+    seed: 1761,
+  })(
+    `preserves replay completion authority for a fixed seed`,
+    runReplayCompletionScenario,
+  )
+
+  fcTest.prop(
+    [replayCompletionScenarioArbitrary],
+    oracleRandomParameters(generatedRuns, replaySeed),
+  )(
+    `preserves replay completion authority for a random or replayed seed`,
+    runReplayCompletionScenario,
   )
 
   fcTest.prop([cleanupRestartScenarioArbitrary], {

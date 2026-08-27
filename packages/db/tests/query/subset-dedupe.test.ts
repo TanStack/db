@@ -87,6 +87,37 @@ describe(`createDeduplicatedLoadSubset`, () => {
     },
   )
 
+  it(`bounds conservative adapter-wide invalidation to one refetch per revisited demand`, async () => {
+    const loadSubset = vi.fn(() => Promise.resolve())
+    const deduplicated = new DeduplicatedLoadSubset({ loadSubset })
+    const demands = Array.from({ length: 6 }, (_, id) => ({
+      where: eq(ref(`id`), val(id)),
+      limit: 1,
+    }))
+
+    for (const demand of demands) await deduplicated.loadSubset(demand)
+    expect(loadSubset).toHaveBeenCalledTimes(demands.length)
+
+    // Core may delete rows owned by any remembered request when one collection
+    // owner leaves. Without adapter row provenance, preserving the other five
+    // request facts would be unsafe, so one release invalidates all six.
+    deduplicated.unloadSubset(demands[0]!)
+    for (const demand of demands.slice(1)) {
+      await deduplicated.loadSubset(demand)
+    }
+    expect(loadSubset).toHaveBeenCalledTimes(
+      demands.length + demands.length - 1,
+    )
+
+    // Once those demands have rebuilt the cache, revisiting them is free again.
+    for (const demand of demands.slice(1)) {
+      expect(deduplicated.loadSubset(demand)).toBe(true)
+    }
+    expect(loadSubset).toHaveBeenCalledTimes(
+      demands.length + demands.length - 1,
+    )
+  })
+
   it(`does not restore invalidated coverage when unloaded work settles late`, async () => {
     let resolveLoad: (() => void) | undefined
     const loadSubset = vi.fn(

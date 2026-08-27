@@ -1,4 +1,5 @@
-import { expect, it } from 'vitest'
+import { fc, test as fcTest } from '@fast-check/vitest'
+import { expect, it, vi } from 'vitest'
 import { createCollection } from '../../src/collection/index.js'
 import { createDeferred } from '../../src/deferred.js'
 import { BTreeIndex } from '../../src/index.js'
@@ -8,9 +9,14 @@ import {
   projectAdapterLifecycle,
   projectAuthorizedContinuationStarts,
   projectRetainedRowKeys,
+  projectReusableDemands,
   projectTransportLoads,
 } from '../load-subset-full-flow-model.js'
 import { flushPromises } from '../utils.js'
+import {
+  oracleRandomParameters,
+  readOracleRunConfig,
+} from '../oracle-config.js'
 import type { LoadSubsetOptions } from '../../src/types.js'
 import type { LoadSubsetFullFlowEvent } from '../load-subset-full-flow-model.js'
 
@@ -28,6 +34,233 @@ function visibleRows<Row extends { id: string; value: number }>(
   values: Iterable<Row>,
 ): Array<{ id: string; value: number }> {
   return Array.from(values, ({ id, value }) => ({ id, value }))
+}
+
+type TruncateCoverageScenario = {
+  oldRequest: `none` | `settles-late`
+  freshResult: `authoritative` | `unknown` | `reject`
+  settlementOrder: `old-first` | `fresh-first`
+}
+
+const truncateCoverageScenarioArbitrary: fc.Arbitrary<TruncateCoverageScenario> =
+  fc.record({
+    oldRequest: fc.constantFrom(`none` as const, `settles-late` as const),
+    freshResult: fc.constantFrom(
+      `authoritative` as const,
+      `unknown` as const,
+      `reject` as const,
+    ),
+    settlementOrder: fc.constantFrom(
+      `old-first` as const,
+      `fresh-first` as const,
+    ),
+  })
+
+const exhaustiveTruncateCoverageScenarios: Array<TruncateCoverageScenario> = [
+  `none` as const,
+  `settles-late` as const,
+].flatMap((oldRequest) =>
+  ([`authoritative`, `unknown`, `reject`] as const).flatMap((freshResult) =>
+    ([`old-first`, `fresh-first`] as const).map((settlementOrder) => ({
+      oldRequest,
+      freshResult,
+      settlementOrder,
+    })),
+  ),
+)
+
+const { multiplier: truncateMultiplier, replaySeed: truncateReplaySeed } =
+  readOracleRunConfig()
+
+let truncateCoverageHarnessId = 0
+
+async function runTruncateCoverageScenario(
+  scenario: TruncateCoverageScenario,
+): Promise<void> {
+  type Row = { id: string; value: number }
+  type AdapterResult = {
+    hasMore: boolean | undefined
+    appliedRowKeys: ReadonlyArray<string>
+  }
+  let begin!: () => void
+  let write!: (message: { type: `insert`; value: Row }) => void
+  let commit!: () => true | Promise<void>
+  let truncate!: () => void
+  const pending = new Map<
+    LoadSubsetOptions,
+    ReturnType<typeof createDeferred<AdapterResult>>
+  >()
+  const unloadSubset = vi.fn()
+  const source = createCollection<Row>({
+    id: `truncate-coverage-oracle-${truncateCoverageHarnessId++}`,
+    getKey: (row) => row.id,
+    syncMode: `on-demand`,
+    startSync: true,
+    sync: {
+      sync: (params) => {
+        begin = params.begin
+        write = params.write
+        commit = params.commit
+        truncate = params.truncate
+        params.markReady()
+        return {
+          loadSubset: (options) => {
+            const request = createDeferred<AdapterResult>()
+            pending.set(options, request)
+            return request.promise
+          },
+          unloadSubset,
+        }
+      },
+    },
+  })
+  const initialOptions = { limit: 1 }
+  const oldOptions = { limit: 2 }
+  const freshOptions = { limit: 3 }
+  const histories: Array<LoadSubsetFullFlowEvent> = []
+  const activeOptions: Array<LoadSubsetOptions> = []
+
+  const request = (ownerId: string, options: LoadSubsetOptions) => {
+    histories.push({
+      type: `requestDemand`,
+      ownerId,
+      sessionId: `session`,
+      demandId: `prefix-${options.limit}`,
+      alreadyAborted: false,
+    })
+    activeOptions.push(options)
+    const result = source._sync.loadSubset(options)
+    if (result === true) throw new Error(`Expected a controlled async request`)
+    return result
+  }
+
+  const apply = async (
+    ownerId: string,
+    options: LoadSubsetOptions,
+    rows: ReadonlyArray<Row>,
+    hasMore: boolean | undefined,
+  ) => {
+    begin()
+    for (const row of rows) write({ type: `insert`, value: row })
+    const applied = commit()
+    if (applied !== true) await applied
+    pending.get(options)!.resolve({
+      hasMore,
+      appliedRowKeys: rows.map(({ id }) => id),
+    })
+    histories.push({
+      type:
+        hasMore === undefined ? `applyUnprovenRows` : `applyAuthoritativeRows`,
+      ownerId,
+      demandId: `prefix-${options.limit}`,
+      rowKeys: rows.map(({ id }) => id),
+    })
+  }
+
+  const reject = (ownerId: string, options: LoadSubsetOptions) => {
+    pending.get(options)!.reject(new Error(`fresh replay failed`))
+    histories.push({
+      type: `rejectDemand`,
+      ownerId,
+      demandId: `prefix-${options.limit}`,
+    })
+  }
+
+  const expectModel = () => {
+    const actualReusable = activeOptions
+      .filter(
+        (options) => source._sync.getLoadSubsetOutcome(options) !== undefined,
+      )
+      .map((options) => `prefix-${options.limit}`)
+      .sort()
+    expect(actualReusable).toEqual(projectReusableDemands(histories))
+    expect(Array.from(source.keys()).sort()).toEqual(
+      projectRetainedRowKeys(histories),
+    )
+  }
+
+  try {
+    const initialLoad = request(`initial`, initialOptions)
+    await apply(`initial`, initialOptions, [{ id: `initial`, value: 1 }], false)
+    await initialLoad
+    expectModel()
+
+    const oldLoad =
+      scenario.oldRequest === `settles-late`
+        ? request(`old`, oldOptions)
+        : undefined
+
+    begin()
+    truncate()
+    const truncated = commit()
+    if (truncated !== true) await truncated
+    histories.push({ type: `truncateSource`, sessionId: `session` })
+    expectModel()
+
+    const freshLoad = request(`fresh`, freshOptions)
+    const settleOld = async () => {
+      if (!oldLoad) return
+      await apply(`old`, oldOptions, [{ id: `old`, value: 2 }], false)
+      await oldLoad
+      expectModel()
+    }
+    const settleFresh = async () => {
+      if (scenario.freshResult === `reject`) {
+        reject(`fresh`, freshOptions)
+        await expect(freshLoad).rejects.toThrow(`fresh replay failed`)
+      } else {
+        await apply(
+          `fresh`,
+          freshOptions,
+          [{ id: `fresh`, value: 3 }],
+          scenario.freshResult === `authoritative` ? false : undefined,
+        )
+        await freshLoad
+      }
+      expectModel()
+    }
+
+    if (scenario.settlementOrder === `fresh-first`) {
+      await settleFresh()
+      await settleOld()
+    } else {
+      await settleOld()
+      await settleFresh()
+    }
+
+    for (const options of activeOptions) {
+      source._sync.unloadSubset(options)
+      histories.push({
+        type: `releaseDemand`,
+        ownerId:
+          options === initialOptions
+            ? `initial`
+            : options === oldOptions
+              ? `old`
+              : `fresh`,
+        demandId: `prefix-${options.limit}`,
+        rowKeys:
+          options === initialOptions
+            ? [`initial`]
+            : options === oldOptions
+              ? [`old`]
+              : scenario.freshResult === `reject`
+                ? []
+                : [`fresh`],
+        finalRowOwner: true,
+        invalidatesAdapterEvidence: true,
+      })
+    }
+    expect(unloadSubset.mock.calls.map(([options]) => options)).toEqual(
+      activeOptions,
+    )
+    expectModel()
+  } finally {
+    for (const pendingRequest of pending.values()) {
+      pendingRequest.reject(new Error(`test cleanup`))
+    }
+    await source.cleanup()
+  }
 }
 
 it(`does not release physical work when an already-aborted demand skips adapter start`, async () => {
@@ -211,7 +444,6 @@ it(`reloads authoritative rows after final-owner cleanup invalidates retained ad
     ])
   }
 })
-
 it(`does not let an ordered continuation from a cleaned session start new work after restart`, async () => {
   type Row = { id: number; rank: number }
   const history: ReadonlyArray<LoadSubsetFullFlowEvent> = [
@@ -381,4 +613,23 @@ it.each([`sync`, `async`] as const)(
       await source.cleanup()
     }
   },
+)
+
+it(`matches the truncate evidence model across every bounded settlement history`, async () => {
+  for (const scenario of exhaustiveTruncateCoverageScenarios) {
+    await runTruncateCoverageScenario(scenario)
+  }
+})
+
+fcTest.prop([truncateCoverageScenarioArbitrary], {
+  numRuns: 12 * truncateMultiplier,
+  seed: 1774,
+})(`fences pre-truncate evidence for a fixed seed`, runTruncateCoverageScenario)
+
+fcTest.prop(
+  [truncateCoverageScenarioArbitrary],
+  oracleRandomParameters(12 * truncateMultiplier, truncateReplaySeed),
+)(
+  `fences pre-truncate evidence for a random or replayed seed`,
+  runTruncateCoverageScenario,
 )

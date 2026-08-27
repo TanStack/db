@@ -50,7 +50,10 @@ import {
   toBooleanPredicate,
 } from '../../src/query/compiler/evaluators.js'
 import { isLoadSubsetRequestSubsumedBy } from '../../src/query/predicate-utils.js'
-import { createRuntimeReferenceIdentityFactory } from '../../src/query/runtime-reference-identity.js'
+import {
+  createRuntimeReferenceIdentityFactory,
+  getRuntimeReferenceIdentity,
+} from '../../src/query/runtime-reference-identity.js'
 import {
   cloneLoadSubsetOptions,
   snapshotLoadSubsetDemand,
@@ -313,6 +316,27 @@ describe(`semantic expression identity`, () => {
     },
   )
 
+  it(`does not initialize runtime reference identities during module evaluation`, async () => {
+    const getRandomValues = vi.fn((values: Uint32Array) => values)
+    vi.stubGlobal(`crypto`, { getRandomValues })
+    vi.resetModules()
+
+    try {
+      const { getRuntimeReferenceIdentity: getIdentity } = await import(
+        `../../src/query/runtime-reference-identity.js`
+      )
+
+      expect(getRandomValues).not.toHaveBeenCalled()
+
+      getIdentity({})
+      getIdentity({})
+
+      expect(getRandomValues).toHaveBeenCalledOnce()
+    } finally {
+      vi.unstubAllGlobals()
+    }
+  })
+
   it(`does not reuse reference identities across runtimes`, () => {
     const firstRuntime = createRuntimeReferenceIdentityFactory()
     const secondRuntime = createRuntimeReferenceIdentityFactory()
@@ -334,6 +358,22 @@ describe(`semantic expression identity`, () => {
     } finally {
       vi.unstubAllGlobals()
     }
+  })
+
+  it(`keeps each symbol identity stable for the factory lifetime`, () => {
+    const runtime = createRuntimeReferenceIdentityFactory()
+    const symbol = Symbol(`same description`)
+
+    expect(runtime(symbol)).toEqual(runtime(symbol))
+    expect(runtime(Symbol(`same description`))).not.toEqual(runtime(symbol))
+  })
+
+  it(`accepts symbols through the shared runtime identity getter`, () => {
+    const symbol = Symbol(`shared runtime`)
+
+    expect(getRuntimeReferenceIdentity(symbol)).toEqual(
+      getRuntimeReferenceIdentity(symbol),
+    )
   })
 
   it(`falls back when the runtime crypto object lacks getRandomValues`, () => {

@@ -341,19 +341,12 @@ export class CollectionSubscription
           // request can join this atomic attempt before it completes.
           void syncResult.then(
             () => {
-              if (
-                isCurrentAttempt() &&
-                this.subsetDemands.includes(demand) &&
-                !nextAcquisition.options.signal?.aborted
-              ) {
-                ownsReplacement = this.tryReplaceSubsetAcquisition(
-                  demand,
-                  nextAcquisition,
-                  attempt,
-                )
-              } else {
-                this.discardReplayAcquisition(demand, nextAcquisition)
-              }
+              ownsReplacement = this.completeReplayAcquisition(
+                session,
+                attempt,
+                demand,
+                nextAcquisition,
+              )
             },
             () => {
               const failedCurrentDemand =
@@ -369,10 +362,11 @@ export class CollectionSubscription
             },
           )
         } else {
-          ownsReplacement = this.tryReplaceSubsetAcquisition(
+          ownsReplacement = this.completeReplayAcquisition(
+            session,
+            attempt,
             demand,
             nextAcquisition,
-            attempt,
           )
         }
 
@@ -727,6 +721,28 @@ export class CollectionSubscription
     demand.removeRequestAbortListener = next.removeRequestAbortListener
     demand.releaseFailed = false
     demand.releaseSettled = false
+  }
+
+  /** Attach a successful replay only while every owning authority is current. */
+  private completeReplayAcquisition(
+    session: TruncateReplaySession,
+    attempt: TruncateReplayAttempt,
+    demand: SubsetDemand,
+    next: ReplaySubsetAcquisition,
+  ): boolean {
+    const mayReplace =
+      this.truncateReplaySession === session &&
+      session.currentAttempt === attempt &&
+      this.subsetDemands.includes(demand) &&
+      demand.pendingReplayAcquisitions.has(next) &&
+      !demand.releaseSettled &&
+      !next.options.signal?.aborted
+
+    if (mayReplace) {
+      return this.tryReplaceSubsetAcquisition(demand, next, attempt)
+    }
+    this.discardReplayAcquisition(demand, next)
+    return false
   }
 
   private tryReplaceSubsetAcquisition(

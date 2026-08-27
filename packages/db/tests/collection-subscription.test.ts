@@ -585,7 +585,7 @@ describe(`CollectionSubscription status tracking`, () => {
   })
 
   it.each([`return`, `resolve`] as const)(
-    `publishes same-key replay ownership before releasing the old acquisition ($0)`,
+    `keeps same-key replay visible while only authoritative completion publishes ownership ($0)`,
     async (delivery) => {
       type Row = { id: string; value: number }
       let begin!: () => void
@@ -638,10 +638,14 @@ describe(`CollectionSubscription status tracking`, () => {
         await flushPromises()
 
         expect(Array.from(collection.keys())).toEqual([`same`])
-        expect(collection._sync.getLoadSubsetCoverage()).toHaveLength(1)
+        expect(collection._sync.getLoadSubsetCoverage()).toHaveLength(
+          delivery === `resolve` ? 1 : 0,
+        )
 
         subscription.unsubscribe()
-        expect(Array.from(collection.keys())).toEqual([])
+        expect(Array.from(collection.keys())).toEqual(
+          delivery === `resolve` ? [] : [`same`],
+        )
       } finally {
         await collection.cleanup()
       }
@@ -1136,6 +1140,62 @@ describe(`CollectionSubscription status tracking`, () => {
     // The initial load and the later successful replay each acquired a lease.
     expect(unloadCount).toBe(2)
     await collection.cleanup()
+  })
+
+  it(`releases each acquisition once when a synchronous replay releases its demand`, async () => {
+    const loads: Array<LoadSubsetOptions> = []
+    const unloads: Array<LoadSubsetOptions> = []
+    const where = new Func(`eq`, [new PropRef([`id`]), new Value(`requested`)])
+    let truncateSource: () => void = () => {
+      throw new Error(`source has not started`)
+    }
+    let releaseReplayDemand: () => void = () => {
+      throw new Error(`subscription has not started`)
+    }
+    const collection = createCollection<{ id: string }>({
+      id: `synchronous-replay-release`,
+      getKey: (item) => item.id,
+      syncMode: `on-demand`,
+      sync: {
+        sync: ({ begin, commit, markReady, truncate }) => {
+          markReady()
+          truncateSource = () => {
+            begin()
+            truncate()
+            commit()
+          }
+          return {
+            loadSubset: (options) => {
+              loads.push(options)
+              if (loads.length === 2) releaseReplayDemand()
+              return true
+            },
+            unloadSubset: (options) => unloads.push(options),
+          }
+        },
+      },
+    })
+    const subscription = collection.subscribeChanges(() => {}, {
+      includeInitialState: false,
+    })
+    releaseReplayDemand = () => subscription.releaseSnapshot(where)
+
+    try {
+      subscription.requestSnapshot({
+        where,
+        optimizedOnly: false,
+      })
+      truncateSource()
+      await flushPromises()
+
+      expect(loads).toHaveLength(2)
+      expect(unloads).toHaveLength(2)
+      expect(unloads[0]).toBe(loads[1])
+      expect(unloads[1]).toBe(loads[0])
+    } finally {
+      subscription.unsubscribe()
+      await collection.cleanup()
+    }
   })
 
   it.each([`throw`, `reject`] as const)(

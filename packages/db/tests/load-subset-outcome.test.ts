@@ -19,6 +19,133 @@ import type {
 } from '../src/types.js'
 
 describe(`loadSubset outcomes`, () => {
+  it(`invalidates applied subset coverage when its source truncates`, async () => {
+    let stageTruncate: () => void = () => {
+      throw new Error(`source has not started`)
+    }
+    let commitSource: () => true | Promise<void> = () => {
+      throw new Error(`source has not started`)
+    }
+    const unloadSubset = vi.fn()
+    const collection = createCollection<{ id: string }>({
+      id: `load-subset-outcome-truncate-coverage`,
+      getKey: (row) => row.id,
+      syncMode: `on-demand`,
+      startSync: true,
+      sync: {
+        sync: ({ begin, write, commit, truncate, markReady }) => {
+          markReady()
+          stageTruncate = () => {
+            begin()
+            truncate()
+          }
+          commitSource = commit
+          return {
+            loadSubset: async () => {
+              begin()
+              write({ type: `insert`, value: { id: `a` } })
+              const applied = commit()
+              if (applied !== true) await applied
+              return { hasMore: false, appliedRowKeys: [`a`] }
+            },
+            unloadSubset,
+          }
+        },
+      },
+    })
+    const options = { limit: 1 }
+
+    try {
+      await collection._sync.loadSubset(options)
+      expect(Array.from(collection.keys())).toEqual([`a`])
+      expect(collection._sync.getLoadSubsetCoverage()).toHaveLength(1)
+
+      stageTruncate()
+      expect(Array.from(collection.keys())).toEqual([`a`])
+      expect(collection._sync.getLoadSubsetCoverage()).toHaveLength(1)
+
+      const truncated = commitSource()
+      if (truncated !== true) await truncated
+
+      expect(Array.from(collection.keys())).toEqual([])
+      expect(collection._sync.getLoadSubsetCoverage()).toEqual([])
+      expect(collection._sync.getLoadSubsetOutcome(options)).toBeUndefined()
+
+      collection._sync.unloadSubset(options)
+      expect(unloadSubset).toHaveBeenCalledOnce()
+    } finally {
+      await collection.cleanup()
+    }
+  })
+
+  it(`retires an outcome-free observer after it releases before settlement`, async () => {
+    const deferred = createDeferred<void>()
+    const collection = createCollection<{ id: string }>({
+      id: `load-subset-outcome-free-observer`,
+      getKey: (row) => row.id,
+      syncMode: `on-demand`,
+      startSync: true,
+      sync: {
+        sync: ({ markReady }) => {
+          markReady()
+          return { loadSubset: () => deferred.promise }
+        },
+      },
+    })
+    const first = { limit: 1 }
+    const second = { limit: 1 }
+
+    try {
+      const firstReady = collection._sync.loadSubset(first)
+      const secondReady = collection._sync.loadSubset(second)
+      expect(collection._sync.getLoadSubsetResourceCounts()).toEqual({
+        liveLeases: 2,
+        acquisitions: 1,
+        claims: 2,
+        unsettledClaims: 2,
+        retainedDemands: 2,
+        retainedOutcomes: 0,
+        retainedRowKeySlots: 0,
+      })
+
+      collection._sync.unloadSubset(first)
+      expect(collection._sync.getLoadSubsetResourceCounts()).toEqual({
+        liveLeases: 1,
+        acquisitions: 1,
+        claims: 2,
+        unsettledClaims: 2,
+        retainedDemands: 1,
+        retainedOutcomes: 0,
+        retainedRowKeySlots: 0,
+      })
+
+      deferred.resolve(undefined)
+      await Promise.all([firstReady, secondReady])
+      expect(collection._sync.getLoadSubsetResourceCounts()).toEqual({
+        liveLeases: 1,
+        acquisitions: 1,
+        claims: 1,
+        unsettledClaims: 0,
+        retainedDemands: 1,
+        retainedOutcomes: 0,
+        retainedRowKeySlots: 0,
+      })
+
+      collection._sync.unloadSubset(second)
+      expect(collection._sync.getLoadSubsetResourceCounts()).toEqual({
+        liveLeases: 0,
+        acquisitions: 0,
+        claims: 0,
+        unsettledClaims: 0,
+        retainedDemands: 0,
+        retainedOutcomes: 0,
+        retainedRowKeySlots: 0,
+      })
+    } finally {
+      await collection.cleanup()
+    }
+  })
+
   it(`publishes exact applied coverage through the collection sync boundary`, async () => {
     const unloadError = new Error(`unload failed`)
     let unloadShouldFail = true
@@ -643,6 +770,71 @@ describe(`loadSubset outcomes`, () => {
       expect(collection._sync.getLoadSubsetCoverage()).toMatchObject([
         { rowKeys: [`first`] },
       ])
+    } finally {
+      await collection.cleanup()
+    }
+  })
+
+  it(`keeps rows applied by an older active acquisition after a newer owner releases`, async () => {
+    type PendingLoad = {
+      succeed: () => Promise<void>
+    }
+    const pending: Array<PendingLoad> = []
+    let hasWrittenRow = false
+    const collection = createCollection<{ id: string }>({
+      id: `load-subset-stale-generation-row-owner`,
+      getKey: (row) => row.id,
+      syncMode: `on-demand`,
+      startSync: true,
+      sync: {
+        sync: ({ begin, write, commit, markReady }) => {
+          markReady()
+          return {
+            loadSubset: () =>
+              new Promise((resolve) => {
+                pending.push({
+                  succeed: async () => {
+                    begin()
+                    write({
+                      type: hasWrittenRow ? `update` : `insert`,
+                      value: { id: `shared` },
+                    })
+                    hasWrittenRow = true
+                    const applied = commit()
+                    if (applied !== true) await applied
+                    resolve({
+                      hasMore: false,
+                      appliedRowKeys: [`shared`],
+                    })
+                  },
+                })
+              }),
+            unloadSubset: vi.fn(),
+          }
+        },
+      },
+    })
+
+    try {
+      const olderOptions = { limit: 1 }
+      const newerOptions = { limit: 1 }
+      const older = collection._sync.loadSubset(olderOptions)
+      const newer = collection._sync.loadSubset(newerOptions)
+      if (older === true || newer === true) {
+        throw new Error(`Expected asynchronous loads`)
+      }
+
+      await pending[1]!.succeed()
+      await newer
+      await pending[0]!.succeed()
+      await older
+
+      expect(Array.from(collection.keys())).toEqual([`shared`])
+      collection._sync.unloadSubset(newerOptions)
+      expect(Array.from(collection.keys())).toEqual([`shared`])
+
+      collection._sync.unloadSubset(olderOptions)
+      expect(Array.from(collection.keys())).toEqual([])
     } finally {
       await collection.cleanup()
     }
