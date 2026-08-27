@@ -9,6 +9,7 @@ import { DeduplicatedLoadSubset } from '../../src/query/subset-dedupe.js'
 import { evaluateReferenceExpression } from '../reference-expression.js'
 import {
   projectAdapterLifecycle,
+  projectAtomicOrderedPublications,
   projectAuthorizedContinuationStarts,
   projectOrderedPublicationBoundary,
   projectRetainedRowKeys,
@@ -946,6 +947,334 @@ fcTest.prop(
 )(
   `keeps ordered boundary provenance for a random or replayed seed`,
   runOrderedBoundaryProvenanceScenario,
+)
+
+type AtomicOrderedReplayScenario = {
+  direction: `asc` | `desc`
+  resizeOrder: `grow-shrink` | `shrink-grow`
+  overlap: boolean
+  currentOutcome: `resolve` | `reject`
+  settleCurrentFirst: boolean
+  sourceDelta: boolean
+}
+
+const atomicOrderedReplayArbitrary: fc.Arbitrary<AtomicOrderedReplayScenario> =
+  fc.record({
+    direction: fc.constantFrom(`asc` as const, `desc` as const),
+    resizeOrder: fc.constantFrom(
+      `grow-shrink` as const,
+      `shrink-grow` as const,
+    ),
+    overlap: fc.boolean(),
+    currentOutcome: fc.constantFrom(`resolve` as const, `reject` as const),
+    settleCurrentFirst: fc.boolean(),
+    sourceDelta: fc.boolean(),
+  })
+
+const exhaustiveAtomicOrderedReplayScenarios: ReadonlyArray<AtomicOrderedReplayScenario> =
+  ([`asc`, `desc`] as const).flatMap((direction) =>
+    ([`grow-shrink`, `shrink-grow`] as const).flatMap((resizeOrder) =>
+      [false, true].flatMap((overlap) =>
+        ([`resolve`, `reject`] as const).flatMap((currentOutcome) =>
+          [false, true].flatMap((settleCurrentFirst) =>
+            [false, true].map((sourceDelta) => ({
+              direction,
+              resizeOrder,
+              overlap,
+              currentOutcome,
+              settleCurrentFirst,
+              sourceDelta,
+            })),
+          ),
+        ),
+      ),
+    ),
+  )
+
+let atomicReplayHarnessId = 0
+
+async function runAtomicOrderedReplayScenario(
+  scenario: AtomicOrderedReplayScenario,
+): Promise<void> {
+  type Row = {
+    id: `old-a` | `old-b` | `new-a` | `new-b` | `delta`
+    rank: number
+  }
+  type Outcome = {
+    hasMore: boolean
+    appliedRowKeys: ReadonlyArray<Row[`id`]>
+  }
+  type PendingReplay = {
+    publicationId: string
+    options: LoadSubsetOptions
+    deferred: ReturnType<typeof createDeferred<Outcome>>
+  }
+
+  const initialRows: ReadonlyArray<Row> = [
+    { id: `old-a`, rank: 1 },
+    { id: `old-b`, rank: 2 },
+  ]
+  const replacementRows: ReadonlyArray<Row> = [
+    { id: `new-a`, rank: 1 },
+    { id: `new-b`, rank: 2 },
+  ]
+  const sourceDelta: Row = {
+    id: `delta`,
+    rank: scenario.direction === `asc` ? 0 : 3,
+  }
+  const orderRows = (rows: ReadonlyArray<Row>) =>
+    [...rows].sort((left, right) => {
+      const valueOrder =
+        scenario.direction === `asc`
+          ? left.rank - right.rank
+          : right.rank - left.rank
+      return valueOrder || left.id.localeCompare(right.id)
+    })
+  const toModelRows = (rows: ReadonlyArray<Row>) =>
+    rows.map(({ id: key, rank: orderValue }) => ({ key, orderValue }))
+
+  let begin!: () => void
+  let write!: (message: { type: `insert`; value: Row }) => void
+  let commit!: () => true | Promise<void>
+  let truncate!: () => void
+  let initialLoad = true
+  const pending: Array<PendingReplay> = []
+  const history: Array<LoadSubsetFullFlowEvent> = [
+    {
+      type: `stagePublicationRows`,
+      publicationId: `initial`,
+      demandId: `ordered`,
+      rows: toModelRows(initialRows),
+    },
+    { type: `commitPublication`, publicationId: `initial` },
+  ]
+
+  const applyRows = async (rows: ReadonlyArray<Row>) => {
+    begin()
+    for (const row of rows) write({ type: `insert`, value: row })
+    const receipt = commit()
+    if (receipt !== true) await receipt
+  }
+
+  const collection = createCollection<Row>({
+    id: `atomic-ordered-replay-${atomicReplayHarnessId++}`,
+    getKey: (row) => row.id,
+    syncMode: `on-demand`,
+    startSync: true,
+    sync: {
+      sync: (params) => {
+        begin = params.begin
+        write = params.write
+        commit = params.commit
+        truncate = params.truncate
+        params.markReady()
+        return {
+          loadSubset: (options) => {
+            if (initialLoad) {
+              initialLoad = false
+              return applyRows(initialRows).then(() => ({
+                hasMore: false,
+                appliedRowKeys: initialRows.map(({ id }) => id),
+              }))
+            }
+            const publicationId = `replacement-${pending.length}`
+            const deferred = createDeferred<Outcome>()
+            pending.push({ publicationId, options, deferred })
+            return deferred.promise
+          },
+          unloadSubset: () => {},
+        }
+      },
+    },
+  })
+  const index = collection.createIndex((row) => row.rank, {
+    indexType: BTreeIndex,
+  })
+  const orderedIndex =
+    scenario.direction === `asc` ? index : new ReverseIndex(index)
+  const orderBy = [
+    {
+      expression: new PropRef([`rank`]),
+      compareOptions: {
+        direction: scenario.direction,
+        nulls: `first` as const,
+      },
+    },
+  ]
+  const visible = new Map<Row[`id`], Row>()
+  const publications: Array<
+    ReadonlyArray<{ key: string; orderValue: number }>
+  > = []
+  const subscription = collection.subscribeChanges((changes) => {
+    for (const change of changes) {
+      const key = change.key as Row[`id`]
+      if (change.type === `delete`) visible.delete(key)
+      else visible.set(key, change.value)
+    }
+    publications.push(toModelRows(orderRows([...visible.values()])))
+  })
+  subscription.setOrderByIndex(orderedIndex)
+
+  const expectedPublications = () =>
+    projectAtomicOrderedPublications(history, {
+      demandId: `ordered`,
+      direction: scenario.direction,
+      initialWindowSize: 1,
+    })
+  const expectPublicationHistory = () => {
+    expect(publications).toEqual(expectedPublications())
+  }
+  const beginReplacement = async () => {
+    begin()
+    truncate()
+    const receipt = commit()
+    if (receipt !== true) await receipt
+    await flushPromises()
+    const replay = pending.at(-1)
+    if (!replay) throw new Error(`Expected a replacement acquisition`)
+    history.push({
+      type: `beginReplacement`,
+      publicationId: replay.publicationId,
+    })
+    expectPublicationHistory()
+    return replay
+  }
+  const settle = async (
+    replay: PendingReplay,
+    outcome: `success` | `failure` | `abort`,
+    rows: ReadonlyArray<Row>,
+  ) => {
+    if (rows.length > 0) {
+      await applyRows(rows)
+      history.push({
+        type: `stagePublicationRows`,
+        publicationId: replay.publicationId,
+        demandId: `ordered`,
+        rows: toModelRows(rows),
+      })
+      expectPublicationHistory()
+    }
+    if (outcome === `success`) {
+      replay.deferred.resolve({
+        hasMore: false,
+        appliedRowKeys: replacementRows.map(({ id }) => id),
+      })
+    } else {
+      const error = new Error(
+        outcome === `abort` ? `obsolete replay aborted` : `replay failed`,
+      )
+      if (outcome === `abort`) error.name = `AbortError`
+      replay.deferred.reject(error)
+    }
+    history.push({
+      type: `settleReplacement`,
+      publicationId: replay.publicationId,
+      outcome,
+    })
+    await flushPromises()
+    expectPublicationHistory()
+  }
+
+  try {
+    subscription.requestLimitedSnapshot({ orderBy, limit: 1 })
+    await flushPromises()
+    expectPublicationHistory()
+
+    const firstReplay = await beginReplacement()
+    const currentReplay = scenario.overlap
+      ? await beginReplacement()
+      : firstReplay
+    if (scenario.overlap) {
+      expect(firstReplay.options.signal?.aborted).toBe(true)
+    }
+
+    const resizeSizes =
+      scenario.resizeOrder === `grow-shrink`
+        ? ([2, 0] as const)
+        : ([0, 2] as const)
+    for (const size of resizeSizes) {
+      history.push({ type: `resizeOrderedWindow`, size })
+      subscription.ensureOrderedWindowSize(size)
+      expectPublicationHistory()
+    }
+
+    if (scenario.sourceDelta) {
+      await applyRows([sourceDelta])
+      history.push({
+        type: `stagePublicationRows`,
+        publicationId: currentReplay.publicationId,
+        demandId: `ordered`,
+        rows: toModelRows([sourceDelta]),
+      })
+      expectPublicationHistory()
+    }
+
+    const finalRows = [
+      ...replacementRows,
+      ...(scenario.sourceDelta ? [sourceDelta] : []),
+    ]
+    const partialFailureRows: ReadonlyArray<Row> = [
+      { id: `new-a`, rank: scenario.direction === `asc` ? 99 : -99 },
+    ]
+    const settleCurrent = () =>
+      settle(
+        currentReplay,
+        scenario.currentOutcome === `resolve` ? `success` : `failure`,
+        scenario.currentOutcome === `resolve` ? finalRows : partialFailureRows,
+      )
+    const settleObsolete = () => settle(firstReplay, `abort`, [])
+
+    if (!scenario.overlap) {
+      await settleCurrent()
+    } else if (scenario.settleCurrentFirst) {
+      await settleCurrent()
+      await settleObsolete()
+    } else {
+      await settleObsolete()
+      await settleCurrent()
+    }
+
+    const expectedKeys = expectedPublications().map((rows) =>
+      rows.map(({ key }) => key),
+    )
+    expect(publications.map((rows) => rows.map(({ key }) => key))).toEqual(
+      expectedKeys,
+    )
+    expect(publications).toHaveLength(
+      scenario.currentOutcome === `resolve` ? 2 : 1,
+    )
+  } finally {
+    for (const replay of pending)
+      replay.deferred.resolve({
+        hasMore: false,
+        appliedRowKeys: [],
+      })
+    await flushPromises()
+    subscription.unsubscribe()
+    await collection.cleanup()
+  }
+}
+
+it(`keeps ordered replacement publication atomic across every bounded history`, async () => {
+  for (const scenario of exhaustiveAtomicOrderedReplayScenarios) {
+    await runAtomicOrderedReplayScenario(scenario)
+  }
+})
+
+fcTest.prop([atomicOrderedReplayArbitrary], {
+  numRuns: 32 * fullFlowMultiplier,
+  seed: 17781,
+})(
+  `keeps ordered replacement publication atomic for a fixed seed`,
+  runAtomicOrderedReplayScenario,
+)
+
+fcTest.prop(
+  [atomicOrderedReplayArbitrary],
+  oracleRandomParameters(32 * fullFlowMultiplier, fullFlowReplaySeed),
+)(
+  `keeps ordered replacement publication atomic for a random or replayed seed`,
+  runAtomicOrderedReplayScenario,
 )
 
 it(`matches the truncate evidence model across every bounded settlement history`, async () => {

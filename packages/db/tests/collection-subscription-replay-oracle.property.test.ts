@@ -1926,8 +1926,16 @@ describe(`CollectionSubscription replay oracle`, () => {
         },
       ]
       const batches: Array<Array<OrderedReplayRow[`id`]>> = []
+      const visibleIds = new Set<OrderedReplayRow[`id`]>()
+      const publicationSnapshots: Array<Array<OrderedReplayRow[`id`]>> = []
       const subscription = collection.subscribeChanges((changes) => {
         batches.push(changes.map(({ value }) => value.id))
+        for (const change of changes) {
+          if (change.type === `delete`)
+            visibleIds.delete(change.key as OrderedReplayRow[`id`])
+          else visibleIds.add(change.key as OrderedReplayRow[`id`])
+        }
+        publicationSnapshots.push([...visibleIds].sort())
       })
       subscription.setOrderByIndex(orderedIndex)
 
@@ -1970,6 +1978,13 @@ describe(`CollectionSubscription replay oracle`, () => {
         expectSameSubsetRequest(replayOptions[0]!, loadOptions[0]!)
         expectSameSubsetRequest(replayOptions[1]!, loadOptions[1]!)
 
+        if (delivery === `resolve` || delivery === `reject`) {
+          const batchesBeforeResize = batches.length
+          subscription.ensureOrderedWindowSize(2)
+          subscription.ensureOrderedWindowSize(1)
+          expect(batches).toHaveLength(batchesBeforeResize)
+        }
+
         if (delivery === `resolve`) {
           expect(replayLoads).toHaveLength(2)
           installReplayRows()
@@ -1994,6 +2009,13 @@ describe(`CollectionSubscription replay oracle`, () => {
         await flushPromises()
         expect(collection.toArray.map(({ id }) => id).sort()).toEqual(
           succeeds ? [...expectedIds].sort() : [],
+        )
+        expect(publicationSnapshots).toEqual(
+          delivery === `resolve`
+            ? [[initialIds[0]], [...expectedIds].sort()]
+            : delivery === `return` && identity === `changed`
+              ? [[initialIds[0]], [expectedIds[0]]]
+              : [[initialIds[0]]],
         )
 
         const loadCountBeforeWiden = loadOptions.length

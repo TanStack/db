@@ -79,6 +79,19 @@ export type LoadSubsetFullFlowEvent =
       type: `commitPublication`
       publicationId: FullFlowPublicationId
     }
+  | {
+      type: `beginReplacement`
+      publicationId: FullFlowPublicationId
+    }
+  | {
+      type: `settleReplacement`
+      publicationId: FullFlowPublicationId
+      outcome: `success` | `failure` | `abort`
+    }
+  | {
+      type: `resizeOrderedWindow`
+      size: number
+    }
 
 export type ExpectedAdapterLifecycleEvent = {
   type: `invoke` | `release`
@@ -160,6 +173,9 @@ export function projectTransportLoads(
       case `runContinuation`:
       case `stagePublicationRows`:
       case `commitPublication`:
+      case `beginReplacement`:
+      case `settleReplacement`:
+      case `resizeOrderedWindow`:
         break
     }
   }
@@ -228,6 +244,9 @@ export function projectAuthorizedContinuationStarts(
       case `releaseDemand`:
       case `stagePublicationRows`:
       case `commitPublication`:
+      case `beginReplacement`:
+      case `settleReplacement`:
+      case `resizeOrderedWindow`:
         break
     }
   }
@@ -273,6 +292,9 @@ export function projectReusableDemands(
       case `runContinuation`:
       case `stagePublicationRows`:
       case `commitPublication`:
+      case `beginReplacement`:
+      case `settleReplacement`:
+      case `resizeOrderedWindow`:
         break
     }
   }
@@ -327,6 +349,117 @@ export function projectOrderedPublicationBoundary(
     return left.key < right.key ? -1 : 1
   })
   return sorted.slice(0, options.prefixSize).at(-1)
+}
+
+/**
+ * Projects public ordered snapshots across replacement epochs. Resizes and
+ * staged rows change private replacement state only. A successful current
+ * replacement publishes once after every overlapping attempt has settled;
+ * failure keeps the previous publication.
+ */
+export function projectAtomicOrderedPublications(
+  history: ReadonlyArray<LoadSubsetFullFlowEvent>,
+  options: {
+    demandId: FullFlowDemandId
+    direction: `asc` | `desc`
+    initialWindowSize: number
+  },
+): ReadonlyArray<ReadonlyArray<FullFlowPublishedOrderRow>> {
+  const staged = new Map<
+    FullFlowPublicationId,
+    Map<FullFlowDemandId, ReadonlyArray<FullFlowPublishedOrderRow>>
+  >()
+  const attempts = new Map<
+    FullFlowPublicationId,
+    `success` | `failure` | `abort` | undefined
+  >()
+  const publications: Array<ReadonlyArray<FullFlowPublishedOrderRow>> = []
+  let currentReplacement: FullFlowPublicationId | undefined
+  let retainedSize = options.initialWindowSize
+
+  const publish = (rows: ReadonlyArray<FullFlowPublishedOrderRow>) => {
+    const next = [...rows]
+      .sort((left, right) => {
+        const valueOrder =
+          options.direction === `asc`
+            ? left.orderValue - right.orderValue
+            : right.orderValue - left.orderValue
+        if (valueOrder !== 0) return valueOrder
+        if (left.key === right.key) return 0
+        return left.key < right.key ? -1 : 1
+      })
+      .slice(0, retainedSize)
+    const previous = publications.at(-1)
+    if (
+      previous?.length === next.length &&
+      previous.every(
+        (row, index) =>
+          row.key === next[index]!.key &&
+          row.orderValue === next[index]!.orderValue,
+      )
+    ) {
+      return
+    }
+    publications.push(next)
+  }
+
+  for (const event of history) {
+    switch (event.type) {
+      case `stagePublicationRows`: {
+        let publication = staged.get(event.publicationId)
+        if (!publication) {
+          publication = new Map()
+          staged.set(event.publicationId, publication)
+        }
+        publication.set(event.demandId, event.rows)
+        break
+      }
+      case `commitPublication`: {
+        if (attempts.size > 0) break
+        const rows = staged.get(event.publicationId)?.get(options.demandId)
+        if (rows) publish(rows)
+        break
+      }
+      case `beginReplacement`:
+        attempts.set(event.publicationId, undefined)
+        currentReplacement = event.publicationId
+        break
+      case `resizeOrderedWindow`:
+        retainedSize = Math.max(retainedSize, event.size)
+        break
+      case `settleReplacement`: {
+        if (!attempts.has(event.publicationId)) break
+        attempts.set(event.publicationId, event.outcome)
+        if ([...attempts.values()].some((outcome) => outcome === undefined)) {
+          break
+        }
+        if (
+          currentReplacement !== undefined &&
+          attempts.get(currentReplacement) === `success`
+        ) {
+          const rows = staged.get(currentReplacement)?.get(options.demandId)
+          if (rows) publish(rows)
+        }
+        attempts.clear()
+        currentReplacement = undefined
+        break
+      }
+      case `requestDemand`:
+      case `applyAuthoritativeRows`:
+      case `applyUnprovenRows`:
+      case `rejectDemand`:
+      case `releaseDemand`:
+      case `truncateSource`:
+      case `cleanupSession`:
+      case `restartSession`:
+      case `advanceWindowRevision`:
+      case `scheduleContinuation`:
+      case `runContinuation`:
+        break
+    }
+  }
+
+  return publications
 }
 
 /** Derives visible row identity without consulting Collection implementation. */

@@ -489,11 +489,17 @@ export class CollectionSubscription
         ? createFilterFunctionFromExpression(demand.requestOptions.where)
         : undefined,
     )
-    const replacement = this.createPublicationDiff(
-      session.publicationState.publishedRows,
-      merged,
-      (value) => activeDemandFilters.some((filter) => filter?.(value) ?? true),
-    )
+    // The raw replay buffer can contain rows retained for another demand or
+    // outside the ordered prefix. Publish the settled ordered reconciliation
+    // as the replacement's one atomic batch.
+    const replacement = this.orderedWindow
+      ? this.reconcileOrderedWindow()
+      : this.createPublicationDiff(
+          session.publicationState.publishedRows,
+          merged,
+          (value) =>
+            activeDemandFilters.some((filter) => filter?.(value) ?? true),
+        )
     if (replacement.length > 0) this.filteredCallback(replacement)
     // Buffering records every source key before active-demand filtering. Reset
     // the dedupe set to what the subscriber actually received so a later
@@ -572,7 +578,11 @@ export class CollectionSubscription
   ensureOrderedWindowSize(size: number): boolean {
     if (!this.orderedWindow) return false
     this.orderedWindow.ensureSize(size)
-    if (this.stalePublishedRows.size > 0) return false
+    // Retain the new target now, but let the replacement epoch reconcile and
+    // publish it together with the buffered source rows.
+    if (this.isBufferingForTruncate || this.stalePublishedRows.size > 0) {
+      return false
+    }
     const changes = this.reconcileOrderedWindow()
     if (changes.length === 0) return false
     this.callback(changes)

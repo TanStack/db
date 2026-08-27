@@ -393,8 +393,11 @@ Every continuation boundary comes from rows established by the same ordered
 demand. Rows retained for another query, join, or window cannot move it. During
 a failed truncate replay, the last complete publication remains the boundary;
 a partial replacement snapshot has no continuation provenance. Exact applied
-row keys and source extent advance retained coverage. A requested limit, a
-settled promise, or the number of requests does not.
+row keys and source extent advance retained coverage. Public readers also keep
+that last complete publication while every overlapping replacement attempt is
+pending. A successful current replacement publishes its settled ordered
+reconciliation once; failure publishes no replacement batch.
+A requested limit, a settled promise, or the number of requests does not.
 An outcome-free completion (`true` or `Promise<void>`) supplies no reusable row
 provenance, source extent, or CoverageFact. Its exact request has still settled,
 so the owning subscription may admit only the current local prefix. A short
