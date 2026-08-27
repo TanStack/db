@@ -2,12 +2,14 @@ import { fc, test as fcTest } from '@fast-check/vitest'
 import { expect, it, vi } from 'vitest'
 import { createCollection } from '../../src/collection/index.js'
 import { createDeferred } from '../../src/deferred.js'
-import { BTreeIndex } from '../../src/index.js'
+import { BTreeIndex, ReverseIndex } from '../../src/index.js'
+import { Func, PropRef, Value } from '../../src/query/ir.js'
 import { createLiveQueryCollection } from '../../src/query/index.js'
 import { DeduplicatedLoadSubset } from '../../src/query/subset-dedupe.js'
 import {
   projectAdapterLifecycle,
   projectAuthorizedContinuationStarts,
+  projectOrderedPublicationBoundary,
   projectRetainedRowKeys,
   projectReusableDemands,
   projectTransportLoads,
@@ -69,7 +71,7 @@ const exhaustiveTruncateCoverageScenarios: Array<TruncateCoverageScenario> = [
   ),
 )
 
-const { multiplier: truncateMultiplier, replaySeed: truncateReplaySeed } =
+const { multiplier: fullFlowMultiplier, replaySeed: fullFlowReplaySeed } =
   readOracleRunConfig()
 
 let truncateCoverageHarnessId = 0
@@ -615,6 +617,240 @@ it.each([`sync`, `async`] as const)(
   },
 )
 
+type OrderedBoundaryProvenanceScenario = {
+  direction: `asc` | `desc`
+  offset: 0 | 1
+  tied: boolean
+  replayFailure: `throw` | `reject`
+}
+
+const orderedBoundaryProvenanceArbitrary: fc.Arbitrary<OrderedBoundaryProvenanceScenario> =
+  fc.record({
+    direction: fc.constantFrom(`asc` as const, `desc` as const),
+    offset: fc.constantFrom(0 as const, 1 as const),
+    tied: fc.boolean(),
+    replayFailure: fc.constantFrom(`throw` as const, `reject` as const),
+  })
+
+const exhaustiveOrderedBoundaryProvenanceScenarios: ReadonlyArray<OrderedBoundaryProvenanceScenario> =
+  ([`asc`, `desc`] as const).flatMap((direction) =>
+    ([0, 1] as const).flatMap((offset) =>
+      [false, true].flatMap((tied) =>
+        ([`throw`, `reject`] as const).map((replayFailure) => ({
+          direction,
+          offset,
+          tied,
+          replayFailure,
+        })),
+      ),
+    ),
+  )
+
+let orderedBoundaryHarnessId = 0
+
+async function runOrderedBoundaryProvenanceScenario(
+  scenario: OrderedBoundaryProvenanceScenario,
+): Promise<void> {
+  type Row = {
+    id: `a` | `b` | `c` | `z`
+    rank: number
+    route: `ordered` | `unrelated`
+  }
+  const orderedRows: ReadonlyArray<Row> = [
+    { id: `a`, rank: scenario.tied ? 5 : 1, route: `ordered` },
+    { id: `b`, rank: scenario.tied ? 5 : 2, route: `ordered` },
+    { id: `c`, rank: scenario.tied ? 5 : 3, route: `ordered` },
+  ]
+  const unrelatedRow: Row = {
+    id: `z`,
+    rank: scenario.tied ? 5 : scenario.direction === `asc` ? 99 : -99,
+    route: `unrelated`,
+  }
+  const orderedForDirection = [...orderedRows].sort((left, right) => {
+    const valueOrder =
+      scenario.direction === `asc`
+        ? left.rank - right.rank
+        : right.rank - left.rank
+    return valueOrder || left.id.localeCompare(right.id)
+  })
+  const prefixSize = scenario.offset + 1
+  const history: Array<LoadSubsetFullFlowEvent> = [
+    {
+      type: `stagePublicationRows`,
+      publicationId: `initial-publication`,
+      demandId: `ordered-window`,
+      rows: orderedForDirection.slice(0, prefixSize).map((row) => ({
+        key: row.id,
+        orderValue: row.rank,
+      })),
+    },
+    {
+      type: `stagePublicationRows`,
+      publicationId: `initial-publication`,
+      demandId: `unrelated-filter`,
+      rows: [{ key: unrelatedRow.id, orderValue: unrelatedRow.rank }],
+    },
+    { type: `commitPublication`, publicationId: `initial-publication` },
+    { type: `truncateSource`, sessionId: `session` },
+    {
+      type: `rejectDemand`,
+      ownerId: `ordered-owner`,
+      demandId: `ordered-window`,
+    },
+  ]
+  const expectedBoundary = projectOrderedPublicationBoundary(history, {
+    demandId: `ordered-window`,
+    direction: scenario.direction,
+    prefixSize,
+  })
+  if (!expectedBoundary) throw new Error(`Expected an ordered boundary`)
+
+  let begin!: () => void
+  let write!: (message: { type: `insert`; value: Row }) => void
+  let commit!: () => true | Promise<void>
+  let truncate!: () => void
+  let phase: `initial` | `replay` | `probe` = `initial`
+  const loadOptions: Array<LoadSubsetOptions> = []
+  const visible = new Map<Row[`id`], Row>()
+  const applyRows = async (rows: ReadonlyArray<Row>) => {
+    begin()
+    for (const row of rows) write({ type: `insert`, value: row })
+    const receipt = commit()
+    if (receipt !== true) await receipt
+  }
+  const source = createCollection<Row>({
+    id: `ordered-boundary-provenance-${orderedBoundaryHarnessId++}`,
+    getKey: (row) => row.id,
+    syncMode: `on-demand`,
+    startSync: true,
+    sync: {
+      sync: (params) => {
+        begin = params.begin
+        write = params.write
+        commit = params.commit
+        truncate = params.truncate
+        params.markReady()
+        return {
+          loadSubset: (options) => {
+            loadOptions.push(options)
+            if (phase === `initial`) {
+              const rows = options.orderBy ? orderedRows : [unrelatedRow]
+              return applyRows(rows).then(() => ({
+                hasMore: false,
+                appliedRowKeys: rows.map(({ id }) => id),
+              }))
+            }
+            if (phase === `replay` && options.orderBy) {
+              if (scenario.replayFailure === `throw`) {
+                throw new Error(`ordered replay failed`)
+              }
+              return Promise.reject(new Error(`ordered replay failed`))
+            }
+            return Promise.resolve({
+              hasMore: false,
+              appliedRowKeys: [],
+            })
+          },
+          unloadSubset: () => {},
+        }
+      },
+    },
+  })
+  const index = source.createIndex((row) => row.rank, {
+    indexType: BTreeIndex,
+  })
+  const orderedIndex =
+    scenario.direction === `asc` ? index : new ReverseIndex(index)
+  const orderBy = [
+    {
+      expression: new PropRef([`rank`]),
+      compareOptions: {
+        direction: scenario.direction,
+        nulls: `first` as const,
+      },
+    },
+  ]
+  const unrelatedWhere = new Func(`eq`, [
+    new PropRef([`route`]),
+    new Value(`unrelated`),
+  ])
+  const subscription = source.subscribeChanges((changes) => {
+    for (const change of changes) {
+      if (change.type === `delete`) visible.delete(change.key as Row[`id`])
+      else visible.set(change.key as Row[`id`], change.value)
+    }
+  })
+  subscription.setOrderByIndex(orderedIndex)
+
+  try {
+    subscription.requestLimitedSnapshot({
+      orderBy,
+      limit: 1,
+      offset: scenario.offset,
+    })
+    await flushPromises()
+    subscription.requestSnapshot({
+      where: unrelatedWhere,
+      optimizedOnly: false,
+    })
+    await flushPromises()
+
+    expect([...visible.keys()].sort()).toEqual(
+      [
+        ...orderedForDirection.slice(0, prefixSize).map(({ id }) => id),
+        unrelatedRow.id,
+      ].sort(),
+    )
+    expect((subscription.orderedBoundaryRow as Row | undefined)?.id).toBe(
+      expectedBoundary.key,
+    )
+
+    phase = `replay`
+    begin()
+    truncate()
+    const receipt = commit()
+    if (receipt !== true) await receipt
+    await flushPromises()
+
+    phase = `probe`
+    const beforeProbe = loadOptions.length
+    subscription.requestLimitedSnapshot({
+      orderBy,
+      limit: 1,
+      offset: scenario.offset,
+    })
+    await flushPromises()
+
+    expect(loadOptions).toHaveLength(beforeProbe + 1)
+    expect(loadOptions.at(-1)?.cursor?.lastKey).toBe(expectedBoundary.key)
+  } finally {
+    subscription.unsubscribe()
+    await source.cleanup()
+  }
+}
+
+it(`keeps failed-replay cursors scoped to the last complete ordered publication`, async () => {
+  for (const scenario of exhaustiveOrderedBoundaryProvenanceScenarios) {
+    await runOrderedBoundaryProvenanceScenario(scenario)
+  }
+})
+
+fcTest.prop([orderedBoundaryProvenanceArbitrary], {
+  numRuns: 16 * fullFlowMultiplier,
+  seed: 1778,
+})(
+  `keeps ordered boundary provenance for a fixed seed`,
+  runOrderedBoundaryProvenanceScenario,
+)
+
+fcTest.prop(
+  [orderedBoundaryProvenanceArbitrary],
+  oracleRandomParameters(16 * fullFlowMultiplier, fullFlowReplaySeed),
+)(
+  `keeps ordered boundary provenance for a random or replayed seed`,
+  runOrderedBoundaryProvenanceScenario,
+)
+
 it(`matches the truncate evidence model across every bounded settlement history`, async () => {
   for (const scenario of exhaustiveTruncateCoverageScenarios) {
     await runTruncateCoverageScenario(scenario)
@@ -622,13 +858,13 @@ it(`matches the truncate evidence model across every bounded settlement history`
 })
 
 fcTest.prop([truncateCoverageScenarioArbitrary], {
-  numRuns: 12 * truncateMultiplier,
+  numRuns: 12 * fullFlowMultiplier,
   seed: 1774,
 })(`fences pre-truncate evidence for a fixed seed`, runTruncateCoverageScenario)
 
 fcTest.prop(
   [truncateCoverageScenarioArbitrary],
-  oracleRandomParameters(12 * truncateMultiplier, truncateReplaySeed),
+  oracleRandomParameters(12 * fullFlowMultiplier, fullFlowReplaySeed),
 )(
   `fences pre-truncate evidence for a random or replayed seed`,
   runTruncateCoverageScenario,

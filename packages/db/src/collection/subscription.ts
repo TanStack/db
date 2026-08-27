@@ -14,6 +14,7 @@ import {
   createFilteredCallback,
 } from './change-events.js'
 import type { BasicExpression, OrderBy } from '../query/ir.js'
+import type { TotalOrderBoundary } from '../query/total-order.js'
 import type { IndexInterface } from '../indexes/base-index.js'
 import type {
   AppliedLoadSubsetOutcome,
@@ -79,6 +80,7 @@ type TruncatePublicationState = {
   publishedRows: Map<string | number, object>
   limitedSnapshotRowCount: number
   lastSentKey: string | number | undefined
+  orderedBoundary: TotalOrderBoundary | undefined
 }
 
 type SubsetAcquisition = {
@@ -146,6 +148,8 @@ export class CollectionSubscription
   private sentKeys = new Set<string | number>()
   private publishedRows = new Map<string | number, object>()
   private stalePublishedRows = new Map<string | number, object>()
+  private lastCompleteOrderedBoundary: TotalOrderBoundary | undefined
+  private staleOrderedBoundary: TotalOrderBoundary | undefined
 
   // Track the count of rows sent via requestLimitedSnapshot for offset-based pagination
   private limitedSnapshotRowCount = 0
@@ -201,6 +205,7 @@ export class CollectionSubscription
     ) => {
       this.trackPublishedRows(changes)
       this.trackSentKeys(changes)
+      this.refreshLastCompleteOrderedBoundary()
       callback(changes)
     }
 
@@ -245,6 +250,8 @@ export class CollectionSubscription
       this.loadedInitialState = false
       this.limitedSnapshotRowCount = 0
       this.lastSentKey = undefined
+      this.lastCompleteOrderedBoundary = undefined
+      this.staleOrderedBoundary = undefined
       return
     }
 
@@ -263,6 +270,7 @@ export class CollectionSubscription
           publishedRows: new Map(this.publishedRows),
           limitedSnapshotRowCount: this.limitedSnapshotRowCount,
           lastSentKey: this.lastSentKey,
+          orderedBoundary: this.lastCompleteOrderedBoundary,
         },
         buffer: [],
         attempts: new Set(),
@@ -455,6 +463,8 @@ export class CollectionSubscription
     this.stalePublishedRows = new Map(publicationState.publishedRows)
     this.limitedSnapshotRowCount = publicationState.limitedSnapshotRowCount
     this.lastSentKey = publicationState.lastSentKey
+    this.lastCompleteOrderedBoundary = publicationState.orderedBoundary
+    this.staleOrderedBoundary = publicationState.orderedBoundary
     this.truncateReplaySession = undefined
   }
 
@@ -471,6 +481,7 @@ export class CollectionSubscription
       }),
     )
     this.stalePublishedRows.clear()
+    this.staleOrderedBoundary = undefined
 
     const merged = [...session.buffer.flat(), ...retainedDeletes]
     const activeDemandFilters = this.subsetDemands.map((demand) =>
@@ -588,9 +599,9 @@ export class CollectionSubscription
   }
 
   private orderedBoundary() {
-    return this.orderedWindow?.boundary(
-      this.stalePublishedRows.size > 0 ? this.publishedRows : undefined,
-    )
+    return this.stalePublishedRows.size > 0
+      ? this.staleOrderedBoundary
+      : this.orderedWindow?.boundary()
   }
 
   private reconcileOrderedWindow(): Array<ChangeMessage<any, any>> {
@@ -602,12 +613,26 @@ export class CollectionSubscription
           ? createFilterFunctionFromExpression(demand.requestOptions.where)
           : undefined,
       )
-    return this.orderedWindow.reconcile(
+    const changes = this.orderedWindow.reconcile(
       this.publishedRows,
       additionalFilters.length === 0
         ? undefined
         : (row) => additionalFilters.some((filter) => filter?.(row) ?? true),
     )
+    this.refreshLastCompleteOrderedBoundary()
+    return changes
+  }
+
+  /** Retain the exact ordered prefix boundary while its source rows exist. */
+  private refreshLastCompleteOrderedBoundary(): void {
+    if (
+      !this.orderedWindow ||
+      this.isBufferingForTruncate ||
+      this.stalePublishedRows.size > 0
+    ) {
+      return
+    }
+    this.lastCompleteOrderedBoundary = this.orderedWindow.boundary()
   }
 
   /**
@@ -1387,6 +1412,10 @@ export class CollectionSubscription
         })
       }
     }
+    if (this.stalePublishedRows.size === 0) {
+      this.lastCompleteOrderedBoundary = undefined
+      this.staleOrderedBoundary = undefined
+    }
     return reconciled
   }
 
@@ -1451,6 +1480,8 @@ export class CollectionSubscription
     // Stop any buffered replay from publishing after unsubscription.
     this.truncateReplaySession = undefined
     this.stalePublishedRows.clear()
+    this.lastCompleteOrderedBoundary = undefined
+    this.staleOrderedBoundary = undefined
 
     // Release the current adapter acquisition for each logical subset demand.
     const failedDemands: Array<SubsetDemand> = []

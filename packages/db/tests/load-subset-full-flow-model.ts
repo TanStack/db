@@ -1,6 +1,12 @@
 export type FullFlowOwnerId = string
 export type FullFlowSessionId = string
 export type FullFlowDemandId = string
+export type FullFlowPublicationId = string
+
+export type FullFlowPublishedOrderRow = {
+  key: string
+  orderValue: number
+}
 
 export type LoadSubsetFullFlowEvent =
   | {
@@ -62,6 +68,16 @@ export type LoadSubsetFullFlowEvent =
   | {
       type: `runContinuation`
       taskId: string
+    }
+  | {
+      type: `stagePublicationRows`
+      publicationId: FullFlowPublicationId
+      demandId: FullFlowDemandId
+      rows: ReadonlyArray<FullFlowPublishedOrderRow>
+    }
+  | {
+      type: `commitPublication`
+      publicationId: FullFlowPublicationId
     }
 
 export type ExpectedAdapterLifecycleEvent = {
@@ -142,6 +158,8 @@ export function projectTransportLoads(
       case `advanceWindowRevision`:
       case `scheduleContinuation`:
       case `runContinuation`:
+      case `stagePublicationRows`:
+      case `commitPublication`:
         break
     }
   }
@@ -208,6 +226,8 @@ export function projectAuthorizedContinuationStarts(
       case `rejectDemand`:
       case `truncateSource`:
       case `releaseDemand`:
+      case `stagePublicationRows`:
+      case `commitPublication`:
         break
     }
   }
@@ -251,12 +271,64 @@ export function projectReusableDemands(
       case `advanceWindowRevision`:
       case `scheduleContinuation`:
       case `runContinuation`:
+      case `stagePublicationRows`:
+      case `commitPublication`:
         break
     }
   }
 
   return [...reusableDemands].sort()
 }
+
+/**
+ * Projects the last complete ordered boundary from public publication
+ * provenance. Rows published for another demand cannot move this boundary,
+ * and an uncommitted replacement cannot supersede the last complete snapshot.
+ */
+export function projectOrderedPublicationBoundary(
+  history: ReadonlyArray<LoadSubsetFullFlowEvent>,
+  options: {
+    demandId: FullFlowDemandId
+    direction: `asc` | `desc`
+    prefixSize: number
+  },
+): FullFlowPublishedOrderRow | undefined {
+  const staged = new Map<
+    FullFlowPublicationId,
+    Map<FullFlowDemandId, ReadonlyArray<FullFlowPublishedOrderRow>>
+  >()
+  let committedRows: ReadonlyArray<FullFlowPublishedOrderRow> = []
+
+  for (const event of history) {
+    if (event.type === `stagePublicationRows`) {
+      let publication = staged.get(event.publicationId)
+      if (!publication) {
+        publication = new Map()
+        staged.set(event.publicationId, publication)
+      }
+      publication.set(event.demandId, event.rows)
+      continue
+    }
+    if (event.type === `commitPublication`) {
+      const publication = staged.get(event.publicationId)
+      if (publication?.has(options.demandId)) {
+        committedRows = publication.get(options.demandId) ?? []
+      }
+    }
+  }
+
+  const sorted = [...committedRows].sort((left, right) => {
+    const valueOrder =
+      options.direction === `asc`
+        ? left.orderValue - right.orderValue
+        : right.orderValue - left.orderValue
+    if (valueOrder !== 0) return valueOrder
+    if (left.key === right.key) return 0
+    return left.key < right.key ? -1 : 1
+  })
+  return sorted.slice(0, options.prefixSize).at(-1)
+}
+
 /** Derives visible row identity without consulting Collection implementation. */
 export function projectRetainedRowKeys(
   history: ReadonlyArray<LoadSubsetFullFlowEvent>,
