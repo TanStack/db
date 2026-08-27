@@ -15,6 +15,7 @@ import type { Collection } from '../../collection/index.js'
 import type {
   AppliedLoadSubsetOutcome,
   ChangeMessage,
+  LoadSubsetOptions,
   LoadSubsetRequestResult,
   SubscriptionLoadSubsetErrorEvent,
   SubscriptionStatusChangeEvent,
@@ -55,7 +56,10 @@ export class CollectionSubscriber<
 
   // Direct load tracking callback for ordered path (set during subscribeToOrderedChanges,
   // used by loadNextItems for subsequent requestLimitedSnapshot calls)
-  private orderedLoadSubsetResult?: (result: LoadSubsetRequestResult) => void
+  private orderedLoadSubsetResult?: (
+    result: LoadSubsetRequestResult,
+    demand: LoadSubsetOptions,
+  ) => void
   private pendingOrderedLoadPromise:
     | Promise<AppliedLoadSubsetOutcome>
     | undefined
@@ -88,7 +92,10 @@ export class CollectionSubscriber<
     // Direct load promise tracking: pipes loadSubset results straight to the
     // live query collection, avoiding the multi-hop deferred promise chain that
     // can break under microtask timing (e.g., queueMicrotask in TanStack Query).
-    const trackLoadResult = (result: LoadSubsetRequestResult) => {
+    const trackLoadResult = (
+      result: LoadSubsetRequestResult,
+      demand: LoadSubsetOptions,
+    ) => {
       if (result instanceof Promise) {
         // Defer the tracked rejection by one microtask so the subscription's
         // error event can put an initial live query in error before loading
@@ -110,6 +117,13 @@ export class CollectionSubscriber<
           )
         }
       } else {
+        const outcome = this.collection._sync.getLoadSubsetOutcome(demand)
+        if (outcome) {
+          this.collectionConfigBuilder.trackRetainedSubsetOutcome(
+            outcome,
+            this.sourceId,
+          )
+        }
         initialSubsetPending = false
       }
     }
@@ -190,6 +204,10 @@ export class CollectionSubscriber<
 
       this.demand.clear()
       subscription.unsubscribe()
+      this.collectionConfigBuilder.releaseSubscriptionReference(
+        this.sourceId,
+        subscription,
+      )
     }
     // currentSyncState is always defined when subscribe() is called
     // (called during sync session setup)
@@ -286,7 +304,10 @@ export class CollectionSubscriber<
     whereExpression: BasicExpression<boolean> | undefined,
     includeInitialState: boolean,
     onStatusChange: (event: SubscriptionStatusChangeEvent) => void,
-    onLoadSubsetResult: (result: LoadSubsetRequestResult) => void,
+    onLoadSubsetResult: (
+      result: LoadSubsetRequestResult,
+      demand: LoadSubsetOptions,
+    ) => void,
     onLoadSubsetError: (event: SubscriptionLoadSubsetErrorEvent) => void,
   ): CollectionSubscription {
     const sendChanges = (
@@ -321,7 +342,10 @@ export class CollectionSubscriber<
     whereExpression: BasicExpression<boolean> | undefined,
     orderByInfo: OrderByOptimizationInfo,
     onStatusChange: (event: SubscriptionStatusChangeEvent) => void,
-    onLoadSubsetResult: (result: LoadSubsetRequestResult) => void,
+    onLoadSubsetResult: (
+      result: LoadSubsetRequestResult,
+      demand: LoadSubsetOptions,
+    ) => void,
     onLoadSubsetError: (event: SubscriptionLoadSubsetErrorEvent) => void,
   ): CollectionSubscription {
     const { orderBy, offset, limit, index } = orderByInfo
@@ -329,7 +353,10 @@ export class CollectionSubscriber<
     // Store the callback so loadNextItems can also use direct tracking.
     // Track in-flight ordered loads to avoid issuing redundant requests while
     // a previous snapshot is still pending.
-    const handleLoadSubsetResult = (result: LoadSubsetRequestResult) => {
+    const handleLoadSubsetResult = (
+      result: LoadSubsetRequestResult,
+      demand: LoadSubsetOptions,
+    ) => {
       if (result instanceof Promise) {
         this.pendingOrderedLoadPromise = result
         const finish = () => {
@@ -339,7 +366,7 @@ export class CollectionSubscriber<
         }
         void result.then(finish, finish)
       }
-      onLoadSubsetResult(result)
+      onLoadSubsetResult(result, demand)
     }
 
     this.orderedLoadSubsetResult = handleLoadSubsetResult
@@ -520,7 +547,7 @@ export class CollectionSubscriber<
         limit: n,
         minValues: cursor.minValues,
         trackLoadSubsetPromise: false,
-        onLoadSubsetResult: (result) => {
+        onLoadSubsetResult: (result, demand) => {
           if (result instanceof Promise) {
             void result.then(undefined, () => {
               if (this.lastLoadRequestKey === loadRequestKey) {
@@ -528,7 +555,7 @@ export class CollectionSubscriber<
               }
             })
           }
-          this.orderedLoadSubsetResult?.(result)
+          this.orderedLoadSubsetResult?.(result, demand)
         },
       })
     } catch (error) {

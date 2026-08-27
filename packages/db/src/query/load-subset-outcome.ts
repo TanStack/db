@@ -54,6 +54,7 @@ export function createAppliedLoadSubsetOutcome(
   generation: number,
   sourceResult: void | LoadSubsetResult,
 ): AppliedLoadSubsetOutcome {
+  const appliedRowKeys = sourceResult?.appliedRowKeys
   return {
     collectionId,
     demand,
@@ -64,6 +65,9 @@ export function createAppliedLoadSubsetOutcome(
         : sourceResult?.hasMore === false
           ? `exhausted`
           : `unknown`,
+    ...(appliedRowKeys === undefined
+      ? {}
+      : { appliedRowKeys: Object.freeze([...appliedRowKeys]) }),
   }
 }
 

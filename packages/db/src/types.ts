@@ -344,6 +344,12 @@ export interface LoadSubsetResult {
    * direction.
    */
   hasMore: boolean | undefined
+  /**
+   * Keys whose establishing writes were applied by this exact acquisition.
+   * @internal Coverage bookkeeping only; adapters omit this unless they can
+   * prove row provenance for the returned result.
+   */
+  appliedRowKeys?: ReadonlyArray<string | number>
 }
 
 /** @internal Normalized source extent for one applied subset demand. */
@@ -360,6 +366,8 @@ export interface AppliedLoadSubsetOutcome {
   demand: LoadSubsetOptions
   generation: number
   extent: SourceExtent
+  /** @internal Applied row provenance supplied by the exact acquisition. */
+  appliedRowKeys?: ReadonlyArray<string | number>
 }
 
 /** @internal Result returned by the collection's normalized subset boundary. */
@@ -973,7 +981,10 @@ export interface SubscribeChangesOptions<
    * Allows the caller to directly track the loading promise for isReady status.
    * @internal
    */
-  onLoadSubsetResult?: (result: LoadSubsetRequestResult) => void
+  onLoadSubsetResult?: (
+    result: LoadSubsetRequestResult,
+    demand: LoadSubsetOptions,
+  ) => void
   /** Receives subset-load failures scoped to this subscription. @internal */
   onLoadSubsetError?: (event: SubscriptionLoadSubsetErrorEvent) => void
 }

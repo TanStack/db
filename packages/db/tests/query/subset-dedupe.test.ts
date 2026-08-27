@@ -45,6 +45,98 @@ function not(expression: BasicExpression<boolean>): Func {
 }
 
 describe(`createDeduplicatedLoadSubset`, () => {
+  it.each(
+    [
+      {
+        name: `unbounded`,
+        createOptions: (): LoadSubsetOptions => ({}),
+      },
+      {
+        name: `filtered`,
+        createOptions: (): LoadSubsetOptions => ({
+          where: eq(ref(`status`), val(`active`)),
+        }),
+      },
+      {
+        name: `limited`,
+        createOptions: (): LoadSubsetOptions => ({ limit: 2 }),
+      },
+    ].flatMap((coverage) =>
+      ([`sync`, `async`] as const).map((settlement) => ({
+        ...coverage,
+        settlement,
+      })),
+    ),
+  )(
+    `invalidates $settlement $name settled coverage on unload`,
+    async ({ createOptions, settlement }) => {
+      const loadSubset = vi.fn(() =>
+        settlement === `sync` ? (true as const) : Promise.resolve(),
+      )
+      const deduplicated = new DeduplicatedLoadSubset({ loadSubset })
+      const owner = createOptions()
+
+      await deduplicated.loadSubset(owner)
+      expect(deduplicated.loadSubset(createOptions())).toBe(true)
+      expect(loadSubset).toHaveBeenCalledTimes(1)
+
+      deduplicated.unloadSubset(owner)
+      await deduplicated.loadSubset(createOptions())
+
+      expect(loadSubset).toHaveBeenCalledTimes(2)
+    },
+  )
+
+  it(`bounds conservative adapter-wide invalidation to one refetch per revisited demand`, async () => {
+    const loadSubset = vi.fn(() => Promise.resolve())
+    const deduplicated = new DeduplicatedLoadSubset({ loadSubset })
+    const demands = Array.from({ length: 6 }, (_, id) => ({
+      where: eq(ref(`id`), val(id)),
+      limit: 1,
+    }))
+
+    for (const demand of demands) await deduplicated.loadSubset(demand)
+    expect(loadSubset).toHaveBeenCalledTimes(demands.length)
+
+    // Core may delete rows owned by any remembered request when one collection
+    // owner leaves. Without adapter row provenance, preserving the other five
+    // request facts would be unsafe, so one release invalidates all six.
+    deduplicated.unloadSubset(demands[0]!)
+    for (const demand of demands.slice(1)) {
+      await deduplicated.loadSubset(demand)
+    }
+    expect(loadSubset).toHaveBeenCalledTimes(
+      demands.length + demands.length - 1,
+    )
+
+    // Once those demands have rebuilt the cache, revisiting them is free again.
+    for (const demand of demands.slice(1)) {
+      expect(deduplicated.loadSubset(demand)).toBe(true)
+    }
+    expect(loadSubset).toHaveBeenCalledTimes(
+      demands.length + demands.length - 1,
+    )
+  })
+
+  it(`does not restore invalidated coverage when unloaded work settles late`, async () => {
+    let resolveLoad: (() => void) | undefined
+    const loadSubset = vi.fn(
+      () => new Promise<void>((resolve) => (resolveLoad = resolve)),
+    )
+    const deduplicated = new DeduplicatedLoadSubset({ loadSubset })
+    const owner = new AbortController()
+    const options = { limit: 2, signal: owner.signal }
+    const first = deduplicated.loadSubset(options)
+
+    owner.abort()
+    deduplicated.unloadSubset(options)
+    resolveLoad?.()
+    await first
+
+    deduplicated.loadSubset({ limit: 2 })
+    expect(loadSubset).toHaveBeenCalledTimes(2)
+  })
+
   it(`shares in-flight work while any cancellation owner remains active`, async () => {
     let resolveLoad: (() => void) | undefined
     let sharedSignal: AbortSignal | undefined

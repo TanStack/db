@@ -255,6 +255,26 @@ export class DeduplicatedLoadSubset {
   }
 
   /**
+   * Invalidates request coverage when its Collection owner releases it.
+   *
+   * Deduplication is safe only while the rows established by the remembered
+   * requests remain available to the Collection. Core may delete those rows
+   * after the final subset owner releases, so adapters that retain this helper
+   * across live-query lifetimes must return this method as their unloadSubset
+   * callback.
+   *
+   * The reset is intentionally conservative. One released request may clear
+   * evidence still useful to another owner, causing a later refetch, but it can
+   * never reuse evidence for rows that core no longer retains. Until adapters
+   * report which retained rows came from which demand, the settled-case cost is
+   * bounded to one new physical request for each distinct demand revisited
+   * before deduplication state is rebuilt.
+   */
+  unloadSubset = (_options: LoadSubsetOptions): void => {
+    this.reset()
+  }
+
+  /**
    * Reset all tracking state.
    * Clears the history of loaded predicates and in-flight calls.
    * Use this when you want to start fresh, for example after clearing the underlying data store.

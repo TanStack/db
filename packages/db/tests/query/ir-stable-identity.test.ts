@@ -50,7 +50,14 @@ import {
   toBooleanPredicate,
 } from '../../src/query/compiler/evaluators.js'
 import { isLoadSubsetRequestSubsumedBy } from '../../src/query/predicate-utils.js'
-import { createRuntimeReferenceIdentityFactory } from '../../src/query/runtime-reference-identity.js'
+import {
+  createRuntimeReferenceIdentityFactory,
+  getRuntimeReferenceIdentity,
+} from '../../src/query/runtime-reference-identity.js'
+import {
+  cloneLoadSubsetOptions,
+  snapshotLoadSubsetDemand,
+} from '../../src/query/load-subset-options.js'
 import type { BasicExpression, QueryIR } from '../../src/query/ir.js'
 import type { LoadSubsetOptions } from '../../src/types.js'
 
@@ -309,11 +316,64 @@ describe(`semantic expression identity`, () => {
     },
   )
 
+  it(`does not initialize runtime reference identities during module evaluation`, async () => {
+    const getRandomValues = vi.fn((values: Uint32Array) => values)
+    vi.stubGlobal(`crypto`, { getRandomValues })
+    vi.resetModules()
+
+    try {
+      const { getRuntimeReferenceIdentity: getIdentity } = await import(
+        `../../src/query/runtime-reference-identity.js`
+      )
+
+      expect(getRandomValues).not.toHaveBeenCalled()
+
+      getIdentity({})
+      getIdentity({})
+
+      expect(getRandomValues).toHaveBeenCalledOnce()
+    } finally {
+      vi.unstubAllGlobals()
+    }
+  })
+
   it(`does not reuse reference identities across runtimes`, () => {
     const firstRuntime = createRuntimeReferenceIdentityFactory()
     const secondRuntime = createRuntimeReferenceIdentityFactory()
 
     expect(firstRuntime({ a: 1 })).not.toEqual(secondRuntime({ b: 2 }))
+  })
+
+  it(`defers runtime entropy until an identity is requested`, () => {
+    const getRandomValues = vi.fn((values: Uint32Array) => values)
+    vi.stubGlobal(`crypto`, { getRandomValues })
+    try {
+      const runtime = createRuntimeReferenceIdentityFactory()
+
+      expect(getRandomValues).not.toHaveBeenCalled()
+
+      runtime({ a: 1 })
+
+      expect(getRandomValues).toHaveBeenCalledOnce()
+    } finally {
+      vi.unstubAllGlobals()
+    }
+  })
+
+  it(`keeps each symbol identity stable for the factory lifetime`, () => {
+    const runtime = createRuntimeReferenceIdentityFactory()
+    const symbol = Symbol(`same description`)
+
+    expect(runtime(symbol)).toEqual(runtime(symbol))
+    expect(runtime(Symbol(`same description`))).not.toEqual(runtime(symbol))
+  })
+
+  it(`accepts symbols through the shared runtime identity getter`, () => {
+    const symbol = Symbol(`shared runtime`)
+
+    expect(getRuntimeReferenceIdentity(symbol)).toEqual(
+      getRuntimeReferenceIdentity(symbol),
+    )
   })
 
   it(`falls back when the runtime crypto object lacks getRandomValues`, () => {
@@ -437,6 +497,59 @@ describe(`loadSubset demand identity`, () => {
     expect(getLoadSubsetDemandKey({ where: first, offset: 0 })).toBe(
       getLoadSubsetDemandKey({ where: first }),
     )
+  })
+
+  it(`uses runtime reference identity for opaque demand values`, () => {
+    const field = new PropRef<unknown>([`row`, `value`])
+    const firstFunction = () => `value`
+    const secondFunction = () => `value`
+    const firstSymbol = Symbol(`value`)
+    const secondSymbol = Symbol(`value`)
+    const createDemands = (value: unknown): Array<LoadSubsetOptions> => [
+      { where: new Func(`eq`, [field, new Value(value)]) },
+      { where: new Func(`in`, [field, new Value([value])]) },
+      {
+        orderBy: [
+          {
+            expression: new Func(`coalesce`, [field, new Value(value)]),
+            compareOptions: { direction: `asc`, nulls: `first` },
+          },
+        ],
+      },
+      {
+        cursor: {
+          whereFrom: new Func(`gt`, [field, new Value(value)]),
+          whereCurrent: new Func(`eq`, [field, new Value(value)]),
+        },
+      },
+    ]
+
+    for (const [firstValue, secondValue] of [
+      [firstFunction, secondFunction],
+      [firstSymbol, secondSymbol],
+    ] as const) {
+      const firstDemands = createDemands(firstValue)
+      const secondDemands = createDemands(secondValue)
+
+      firstDemands.forEach((demand, index) => {
+        const demandKey = getLoadSubsetDemandKey(demand)
+        expect(getLoadSubsetDemandKey(cloneLoadSubsetOptions(demand))).toBe(
+          demandKey,
+        )
+        expect(getLoadSubsetDemandKey(snapshotLoadSubsetDemand(demand))).toBe(
+          demandKey,
+        )
+        expect(getLoadSubsetDemandKey(secondDemands[index]!)).not.toBe(
+          demandKey,
+        )
+      })
+    }
+
+    expect(() =>
+      getStableExpressionHash(
+        new Func(`eq`, [field, new Value(firstFunction)]),
+      ),
+    ).toThrow(/function value/)
   })
 
   it.each([

@@ -2,6 +2,7 @@ import { deepEquals } from '../utils'
 import { SortedMap } from '../SortedMap'
 import { enrichRowWithVirtualProps } from '../virtual-props.js'
 import { SyncTransactionAbortedError } from '../errors.js'
+import { createDeferred } from '../deferred'
 import { DIRECT_TRANSACTION_METADATA_KEY } from './transaction-metadata.js'
 import type {
   VirtualOrigin,
@@ -132,6 +133,7 @@ export class CollectionStateManager<
   public recentlySyncedKeys = new Set<TKey>()
   public hasReceivedFirstCommit = false
   public isCommittingSyncTransactions = false
+  private isDrainingSyncTransactions = false
   public isLocalOnly = false
 
   /**
@@ -829,6 +831,28 @@ export class CollectionStateManager<
    * This method processes operations from pending transactions and applies them to the synced data
    */
   commitPendingTransactions = () => {
+    if (this.isDrainingSyncTransactions) return
+
+    this.isDrainingSyncTransactions = true
+    let firstPublicationError: { error: unknown } | undefined
+    try {
+      let processed: boolean
+      do {
+        const result = this.commitNextPendingTransactionBatch()
+        processed = result.processed
+        if (processed) firstPublicationError ??= result.publicationError
+      } while (processed)
+    } finally {
+      this.isDrainingSyncTransactions = false
+    }
+
+    if (firstPublicationError) throw firstPublicationError.error
+  }
+
+  private commitNextPendingTransactionBatch(): {
+    processed: boolean
+    publicationError?: { error: unknown }
+  } {
     // Check if there are any persisting transaction
     let hasPersistingTransaction = false
     for (const transaction of this.transactions.values()) {
@@ -875,6 +899,10 @@ export class CollectionStateManager<
       },
     )
 
+    if (committedSyncedTransactions.length === 0) {
+      return { processed: false }
+    }
+
     // Process committed transactions if:
     // 1. No persisting user transaction (normal sync flow), OR
     // 2. There's a truncate operation (must be processed immediately), OR
@@ -886,6 +914,10 @@ export class CollectionStateManager<
     // non-immediate transactions would be applied later and could overwrite newer state.
     // Processing all committed transactions together preserves causal ordering.
     if (!hasPersistingTransaction || hasTruncateSync || hasImmediateSync) {
+      // This queue remains authoritative while user callbacks run. Transactions
+      // opened by a callback must not be overwritten by this batch's snapshot.
+      this.pendingSyncedTransactions = uncommittedSyncedTransactions
+
       // Application is now the point of no return. Event listeners run before
       // the receipts resolve, so a signal aborted from one of those listeners
       // must not cancel writes that are already becoming visible.
@@ -1356,9 +1388,14 @@ export class CollectionStateManager<
       }
 
       // End batching and emit all events (combines any batched events with sync events)
-      this.changes.emitEvents(events, true, layoutChanged)
-
-      this.pendingSyncedTransactions = uncommittedSyncedTransactions
+      let publicationError: { error: unknown } | undefined
+      try {
+        this.changes.emitEvents(events, true, layoutChanged)
+      } catch (error) {
+        // The state is already committed. Finish this batch and drain any work
+        // queued by earlier listeners before surfacing their publication error.
+        publicationError = { error }
+      }
 
       // Clear the pre-sync state since sync operations are complete
       this.preSyncVisibleState.clear()
@@ -1376,7 +1413,45 @@ export class CollectionStateManager<
       for (const transaction of committedSyncedTransactions) {
         transaction.applied.resolve()
       }
+
+      return { processed: true, publicationError }
     }
+
+    return { processed: false }
+  }
+
+  /** Apply source-row garbage collection through the normal sync boundary. */
+  public deleteSyncedRows(keys: ReadonlyArray<TKey>): true | Promise<void> {
+    const existingKeys = keys.filter((key) => this.syncedData.has(key))
+    if (existingKeys.length === 0) return true
+
+    const applied = createDeferred<void>()
+    // Some internal callers only need synchronous completion. Preserve the
+    // receipt for queued cases without allowing an ignored rejection to leak.
+    void applied.promise.catch(() => undefined)
+    const deletedKeys = new Set<TKey>(existingKeys)
+    this.pendingSyncedTransactions.push({
+      committed: true,
+      applicationStarted: false,
+      layoutChanged: false,
+      operations: existingKeys.map(
+        (key): OptimisticChangeMessage<TOutput, TKey> => ({
+          type: `delete`,
+          key,
+        }),
+      ),
+      deletedKeys,
+      rowMetadataWrites: new Map(
+        existingKeys.map((key) => [key, { type: `delete` as const }]),
+      ),
+      collectionMetadataWrites: new Map(),
+      // Coverage GC is part of releasing source ownership, so it cannot wait
+      // behind a user mutation that may itself observe the released rows.
+      immediate: true,
+      applied,
+    })
+    this.commitPendingTransactions()
+    return applied.isPending() ? applied.promise : true
   }
 
   /** Abandons one committed transaction before it becomes visible. */

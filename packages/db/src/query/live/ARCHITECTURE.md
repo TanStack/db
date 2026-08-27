@@ -477,14 +477,79 @@ visible. Rejected, canceled, and obsolete acquisitions establish no coverage.
 Sources must honor cancellation before publishing request-scoped rows.
 
 After those writes are applied, `loadSubset` may resolve with
-`{ hasMore: boolean | undefined }`. Core normalizes that source fact to
-`continues`, `exhausted`, or `unknown` and binds it to the exact collection
-demand and attempt generation; an omitted result also remains `unknown`. A
-request reused for a narrower demand may
+`{ hasMore: boolean | undefined, appliedRowKeys?: readonly Key[] }`. Core
+normalizes the extent to `continues`, `exhausted`, or `unknown` and binds it to
+the exact collection demand and attempt generation. The optional keys are the
+rows established by that same applied acquisition, not a later scan of the
+Collection. An omitted result remains `unknown`. A request reused for a narrower demand may
 settle that demand, but its raw extent does not become a fact about the narrower
 demand. Live-query plumbing preserves these outcomes through lazy demand and
 window coordination. Only the root paginated source may use them to replace a
 peek-based pagination decision.
+
+The Collection sync boundary gives each logical owner a demand lease and each
+physical attempt an acquisition token. Logical peers waiting on the same
+physical promise attach their leases to that one acquisition even when their
+canonical demands differ. Each lease keeps its own demand, generation, and
+coverage claim, while the physical acquisition owns one applied row set until
+its final lease releases. A released lease stops contributing active coverage
+at once, but its immutable publication identity remains dormant until the
+physical acquisition settles or retires. This lets an exact physical result
+attach its applied rows when that exact caller released before settlement but a
+peer still owns the physical work. A synchronous `true` result creates no
+physical resource. It attaches the new logical lease to an active acquisition
+whose published coverage proves the demand. Exact-scope reuse may also attach
+ownership-only to a live applied acquisition whose extent remains unknown.
+Non-exact applied evidence attaches only when its rows locally prove
+caller-relative continuation. An exact or locally proven continuing projection
+may become caller-relative evidence, but only the continuing projection becomes
+a new coverage fact. Unknown evidence still owns the physical acquisition and
+rows; it does not enter the coverage antichain or satisfy a later demand.
+Starting a newer attempt does not supersede
+viable coverage; the current generation advances only when that attempt
+publishes authoritative coverage.
+
+The coverage registry accepts an exact applied outcome and its row keys as one
+publication. It rejects stale or mismatched tokens for the same physical
+collection, optional source, and canonical demand. An `unknown` extent records
+the acquisition's applied row ownership but proves no coverage. A finite prefix
+of `N` is established only by at least `N` applied authoritative rows, or fewer
+rows plus exact source exhaustion. Callers cannot derive achieved coverage from
+the requested limit or publish rows and coverage in separate steps. Failed,
+canceled, and stale work publishes neither rows nor coverage. Public reads
+return defensive snapshots; fact compaction never mutates or retires the
+underlying leases, acquisitions, or row ownership.
+
+A truncate replay publishes replacement applied rows and their acquisition
+ownership before it releases the prior lease. This handoff is one ownership
+transition from the Collection's point of view: replacing a row with the same
+key cannot let old-owner garbage collection delete the new value. A failed or
+obsolete replacement leaves the old lease in place and retires only the new
+attempt.
+
+An imperative load operation reports caller-relative evidence, not merely the
+promises started while it was active. If a successful operation starts no new
+physical request because exact active coverage already proves its demand, it
+retains that applied outcome in the operation result instead of publishing an
+empty outcome set.
+
+Adapter release and `unloadSubset` callbacks must be idempotent and
+non-throwing. Core still treats a thrown callback defensively: it surfaces the
+original error but preserves the acquisition, lease, coverage, and row owners.
+A later cleanup retries callbacks that have not yet settled. Logical ownership
+retires only after every callback required by that release step succeeds. Rows
+whose final acquisition owner retires are deleted once through the normal
+Collection sync boundary; shared rows remain until their final owner retires.
+An adapter that uses `DeduplicatedLoadSubset` across live-query lifetimes must
+also return the helper's paired `unloadSubset` callback. That callback
+invalidates remembered request coverage when core may delete its establishing
+rows. A dedupe hit cannot outlive the evidence it claims to reuse.
+
+An eager Query DB collection owns its base query for the Collection lifetime.
+If TanStack Query removes that cache entry while the Collection has no public
+listeners, the adapter must replace the detached observer without retiring the
+base query's rows. Later cache updates and refetches must still flow through
+that lifetime observer.
 
 A transaction `mutationFn` must not start or await collection or live-query
 preloads. User persistence owns the causal queue while that function runs, so a
@@ -637,6 +702,8 @@ create recursive Collection machinery.
 | Collection facades, event coherence, and route activation                   | `packages/db/tests/query/includes-collection-oracle.property.test.ts`     |
 | Correlated physical work                                                    | `packages/db/tests/query/includes-work-counter-oracle.test.ts`            |
 | Route-context discovery and transport across recursive and join boundaries  | `packages/db/tests/query/includes-context-transport-oracle.test.ts`       |
+| Coverage leases, acquisitions, fact compaction, and row provenance          | `packages/db/tests/query/coverage-registry-oracle.property.test.ts`       |
+| Applied coverage publication through the Collection sync boundary           | `packages/db/tests/load-subset-outcome.test.ts`                           |
 | Query-db ownership                                                          | `packages/query-db-collection/tests/ownership-lifecycle.oracle.test.ts`   |
 | Reachable nested shape                                                      | `packages/query-db-collection/tests/includes-work-counter-oracle.test.ts` |
 

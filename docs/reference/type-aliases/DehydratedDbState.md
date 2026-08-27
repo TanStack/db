@@ -9,7 +9,7 @@ title: DehydratedDbState
 type DehydratedDbState = object;
 ```
 
-Defined in: [packages/db/src/client.ts:129](https://github.com/TanStack/db/blob/main/packages/db/src/client.ts#L129)
+Defined in: [packages/db/src/client.ts:130](https://github.com/TanStack/db/blob/main/packages/db/src/client.ts#L130)
 
 ## Properties
 
@@ -19,7 +19,7 @@ Defined in: [packages/db/src/client.ts:129](https://github.com/TanStack/db/blob/
 collections: DehydratedCollectionChunk[];
 ```
 
-Defined in: [packages/db/src/client.ts:130](https://github.com/TanStack/db/blob/main/packages/db/src/client.ts#L130)
+Defined in: [packages/db/src/client.ts:131](https://github.com/TanStack/db/blob/main/packages/db/src/client.ts#L131)
 
 ***
 
@@ -29,4 +29,4 @@ Defined in: [packages/db/src/client.ts:130](https://github.com/TanStack/db/blob/
 optional liveQueries: DehydratedLiveQuery[];
 ```
 
-Defined in: [packages/db/src/client.ts:131](https://github.com/TanStack/db/blob/main/packages/db/src/client.ts#L131)
+Defined in: [packages/db/src/client.ts:132](https://github.com/TanStack/db/blob/main/packages/db/src/client.ts#L132)

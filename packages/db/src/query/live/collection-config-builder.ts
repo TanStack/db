@@ -349,7 +349,9 @@ export class CollectionConfigBuilder<
         windowOperationGeneration === this.windowOperationGeneration &&
         this.currentSyncConfig !== undefined
       ) {
-        this.lastWindowOutcomes = loadOperation?.getOutcomes() ?? []
+        this.lastWindowOutcomes = this.resolveWindowOutcomes(
+          loadOperation?.getOutcomes() ?? [],
+        )
       }
       return true
     }
@@ -362,7 +364,9 @@ export class CollectionConfigBuilder<
         ) {
           return
         }
-        this.lastWindowOutcomes = loadOperation!.getOutcomes()
+        this.lastWindowOutcomes = this.resolveWindowOutcomes(
+          loadOperation!.getOutcomes(),
+        )
       },
       () => {
         // The original promise carries the failure to the caller. This
@@ -370,6 +374,14 @@ export class CollectionConfigBuilder<
       },
     )
     return ready
+  }
+
+  private resolveWindowOutcomes(
+    outcomes: ReadonlyArray<AppliedLoadSubsetOutcome>,
+  ): ReadonlyArray<AppliedLoadSubsetOutcome> {
+    if (outcomes.length > 0) return outcomes
+    if (this.lastWindowOutcomes.length > 0) return this.lastWindowOutcomes
+    return [...this.latestSubsetOutcomes.values()]
   }
 
   getWindow(): { offset: number; limit: number } | undefined {
@@ -483,6 +495,15 @@ export class CollectionConfigBuilder<
       return scoped
     })
     this.liveQueryCollection!._sync.trackLoadPromise(tracked)
+  }
+
+  trackRetainedSubsetOutcome(
+    outcome: AppliedLoadSubsetOutcome,
+    sourceId?: string,
+  ): void {
+    const scoped = sourceId === undefined ? outcome : { ...outcome, sourceId }
+    this.recordSubsetOutcome(scoped)
+    this.liveQueryCollection!._sync.trackLoadSubsetOperationOutcome(scoped)
   }
 
   trackSubsetLoadOperationPromise(
@@ -773,6 +794,15 @@ export class CollectionConfigBuilder<
     return this.runCount
   }
 
+  releaseSubscriptionReference(
+    sourceId: string,
+    subscription: CollectionSubscription,
+  ): void {
+    if (this.subscriptions[sourceId] === subscription) {
+      delete this.subscriptions[sourceId]
+    }
+  }
+
   private syncFn(config: SyncMethods<TResult>) {
     const syncSession = ++this.syncSession
     // Store reference to the live query collection for error state transitions
@@ -793,65 +823,56 @@ export class CollectionConfigBuilder<
       unsubscribeCallbacks: new Set<() => void>(),
     }
 
+    let teardownStarted = false
+    let runtimeCleared = false
     let tornDown = false
     const teardown = () => {
       if (tornDown) return
-      tornDown = true
-      if (this.syncSession === syncSession) this.syncSession++
+      if (!teardownStarted) {
+        teardownStarted = true
+        if (this.syncSession === syncSession) this.syncSession++
+      }
 
       let firstCleanupError: unknown
       for (const unsubscribe of syncState.unsubscribeCallbacks) {
         try {
           unsubscribe()
+          syncState.unsubscribeCallbacks.delete(unsubscribe)
         } catch (error) {
           firstCleanupError ??= error
         }
       }
-      syncState.unsubscribeCallbacks.clear()
 
-      // Clear current sync session state
-      this.currentSyncConfig = undefined
-      this.currentSyncState = undefined
-      this.maybeRunGraphFn = undefined
-      this.currentWindow = undefined
-      this.isInErrorState = false
-      this.fatalQueryError = false
-      this.erroredSourceIds.clear()
-
-      // Clear all pending graph runs to prevent memory leaks from in-flight transactions
-      // that may flush after the sync session ends
-      this.pendingGraphRuns.clear()
-
-      // Reset caches so a fresh graph/pipeline is compiled on next start
-      // This avoids reusing a finalized D2 graph across GC restarts
-      this.graphCache = undefined
-      this.inputsCache = undefined
-      this.pipelineCache = undefined
-      this.sourceWhereClausesCache = undefined
-      this.bucketFacadesCache = undefined
-
-      // Reset lazy source alias state
-      this.lazySources.clear()
-      this.demandGenerations.clear()
-      this.activeDemands.clear()
-      this.latestSubsetOutcomes.clear()
-      this.lastWindowOutcomes = []
-      this.optimizableOrderByCollections = {}
-      this.lazySourcesCallbacks = {}
-
-      // Clear subscription references to prevent memory leaks
-      // Note: Individual subscriptions are already unsubscribed via unsubscribeCallbacks
-      Object.keys(this.subscriptions).forEach(
-        (key) => delete this.subscriptions[key],
-      )
-      this.compiledAliasToCollectionId = {}
-
-      // Unregister from scheduler's onClear listener to prevent memory leaks
-      // The scheduler's listener Set would otherwise keep a strong reference to this builder
-      this.unsubscribeFromSchedulerClears?.()
-      this.unsubscribeFromSchedulerClears = undefined
+      if (!runtimeCleared) {
+        runtimeCleared = true
+        // Release callbacks may synchronously publish final source deletes.
+        // Keep the old graph alive through that pass, then retire its runtime
+        // even when one resource must be retried later.
+        this.currentSyncConfig = undefined
+        this.currentSyncState = undefined
+        this.maybeRunGraphFn = undefined
+        this.currentWindow = undefined
+        this.isInErrorState = false
+        this.fatalQueryError = false
+        this.erroredSourceIds.clear()
+        this.pendingGraphRuns.clear()
+        this.graphCache = undefined
+        this.inputsCache = undefined
+        this.pipelineCache = undefined
+        this.sourceWhereClausesCache = undefined
+        this.bucketFacadesCache = undefined
+        this.lazySources.clear()
+        this.demandGenerations.clear()
+        this.activeDemands.clear()
+        this.latestSubsetOutcomes.clear()
+        this.lastWindowOutcomes = []
+        this.optimizableOrderByCollections = {}
+        this.lazySourcesCallbacks = {}
+        this.compiledAliasToCollectionId = {}
+      }
 
       if (firstCleanupError !== undefined) throw firstCleanupError
+      tornDown = true
     }
 
     try {
@@ -864,11 +885,18 @@ export class CollectionConfigBuilder<
 
       // Listen for scheduler context clears to clean up our pending state
       // Re-register on each sync start so the listener is active for the sync session's lifetime
-      this.unsubscribeFromSchedulerClears = transactionScopedScheduler.onClear(
+      const schedulerUnsubscribe = transactionScopedScheduler.onClear(
         (contextId) => {
           this.clearPendingGraphRun(contextId)
         },
       )
+      this.unsubscribeFromSchedulerClears = schedulerUnsubscribe
+      syncState.unsubscribeCallbacks.add(() => {
+        schedulerUnsubscribe()
+        if (this.unsubscribeFromSchedulerClears === schedulerUnsubscribe) {
+          this.unsubscribeFromSchedulerClears = undefined
+        }
+      })
 
       // Listen for loadingSubset changes on the live query collection BEFORE subscribing.
       // This ensures we don't miss the event if subset loading completes synchronously.

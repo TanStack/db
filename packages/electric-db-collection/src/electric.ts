@@ -2064,6 +2064,7 @@ function createElectricSync<T extends Row<unknown>>(
       // The loadSubset method is auto-bound, so it can be safely returned directly
       return {
         loadSubset: loadSubsetDedupe?.loadSubset,
+        unloadSubset: loadSubsetDedupe?.unloadSubset,
         cleanup: () => {
           // Unsubscribe from the stream
           unsubscribeStream()
