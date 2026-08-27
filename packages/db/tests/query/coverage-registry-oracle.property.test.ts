@@ -921,6 +921,13 @@ describe(`coverage registry oracle`, () => {
     expect(registry.retainedOutcomeEvidence()).toEqual([])
     expect(registry.appliedAcquisitionEvidence()).toEqual([])
     expect(registry.rowOwnerCount(`a`)).toBe(0)
+    expect(registry.isAcquisitionAttachable(oldAcquisition)).toBe(false)
+
+    const lateLease = registry.addLease(1)
+    expect(() => registry.attachLease(lateLease, oldAcquisition)).toThrow(
+      `Cannot attach to an invalidated acquisition`,
+    )
+    registry.releaseLease(lateLease)
 
     expect(
       registry.publishOutcome(
