@@ -1,4 +1,5 @@
 import type { CollectionConfigBuilder } from './collection-config-builder.js'
+import type { BucketFacadeMetrics } from './bucket-facade-adapter.js'
 
 /**
  * Symbol for accessing internal utilities that should not be part of the public API
@@ -10,6 +11,7 @@ export const LIVE_QUERY_INTERNAL = Symbol(`liveQueryInternal`)
  */
 export type LiveQueryInternalUtils = {
   getBuilder: () => CollectionConfigBuilder<any, any>
+  getBucketFacadeMetrics: () => BucketFacadeMetrics
   hasCustomGetKey: boolean
   hasJoins: boolean
   hasDistinct: boolean

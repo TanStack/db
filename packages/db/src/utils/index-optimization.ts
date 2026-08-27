@@ -19,6 +19,7 @@ import { DEFAULT_COMPARE_OPTIONS } from '../utils.js'
 import { ReverseIndex } from '../indexes/reverse-index.js'
 import { hasVirtualPropPath } from '../virtual-props.js'
 import { makeComparator } from './comparison.js'
+import { isCollectionKeyPath, lookupCollectionKeys } from './collection-key.js'
 import type { CompareOptions } from '../query/builder/types.js'
 import type { IndexInterface, IndexOperation } from '../indexes/base-index.js'
 import type { BasicExpression } from '../query/ir.js'
@@ -521,11 +522,19 @@ function optimizeSimpleComparison<
 
   if (fieldArg && valueArg) {
     const fieldPath = (fieldArg as any).path
+    const queryValue = (valueArg as any).value
+
+    if (operation === `eq` && isCollectionKeyPath(collection, fieldPath)) {
+      return {
+        canOptimize: true,
+        matchingKeys: lookupCollectionKeys(collection, [queryValue]),
+        isExact: isExactComparisonValue(queryValue),
+      }
+    }
+
     const index = findIndexForField(collection, fieldPath)
 
     if (index) {
-      const queryValue = (valueArg as any).value
-
       // Map operation to IndexOperation enum
       const indexOperation = operation as IndexOperation
 
@@ -597,6 +606,12 @@ function canOptimizeSimpleComparison<
   }
 
   if (fieldPath) {
+    if (
+      expression.name === `eq` &&
+      isCollectionKeyPath(collection, fieldPath)
+    ) {
+      return true
+    }
     const index = findIndexForField(collection, fieldPath)
     return index !== undefined
   }
@@ -754,13 +769,22 @@ function optimizeInArrayExpression<
   ) {
     const fieldPath = (fieldArg as any).path
     const values = (arrayArg as any).value
-    const index = findIndexForField(collection, fieldPath)
 
     // A nullish or NaN member can never be matched by `IN` (a comparison
     // against null/undefined/NaN is never true), but the index would still
     // return rows with such an indexed value. When the list contains one of
     // those the result is a superset that the caller must re-filter.
     const isExact = values.every((value: any) => isExactComparisonValue(value))
+
+    if (isCollectionKeyPath(collection, fieldPath)) {
+      return {
+        canOptimize: true,
+        matchingKeys: lookupCollectionKeys(collection, values),
+        isExact,
+      }
+    }
+
+    const index = findIndexForField(collection, fieldPath)
 
     if (index) {
       // Check if the index supports IN operation
@@ -804,6 +828,9 @@ function canOptimizeInArrayExpression<
     Array.isArray((arrayArg as any).value)
   ) {
     const fieldPath = (fieldArg as any).path
+    if (isCollectionKeyPath(collection, fieldPath)) {
+      return true
+    }
     const index = findIndexForField(collection, fieldPath)
     return index !== undefined
   }

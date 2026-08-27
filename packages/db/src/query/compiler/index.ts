@@ -37,6 +37,7 @@ import {
   isExpressionLike,
 } from '../ir.js'
 import { ensureIndexForField } from '../../indexes/auto-index.js'
+import { isCollectionKeyPath } from '../../utils/collection-key.js'
 import { deepEquals } from '../../utils.js'
 import { normalizeValue } from '../../utils/comparison.js'
 import {
@@ -728,7 +729,10 @@ export function compileQuery(
         // 2. Ensure an index on the correlation field for efficient lookups
         for (const target of lazyTargets) {
           const targetFieldName = target.path[0]
-          if (targetFieldName) {
+          if (
+            targetFieldName &&
+            !isCollectionKeyPath(target.collection, target.path)
+          ) {
             ensureIndexForField(targetFieldName, target.path, target.collection)
           }
         }

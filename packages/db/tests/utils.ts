@@ -243,6 +243,7 @@ type MockSyncCollectionConfig<T extends object = Record<string, unknown>> = {
   id: string
   initialData: Array<T>
   getKey: (item: T) => string | number
+  keyPath?: ReadonlyArray<string>
   autoIndex?: `off` | `eager`
   sync?: SyncConfig<T>
   syncMode?: `eager` | `on-demand`
@@ -357,6 +358,7 @@ export function mockSyncCollectionOptions<
 type MockSyncCollectionConfigNoInitialState<T> = {
   id: string
   getKey: (item: T) => string | number
+  keyPath?: ReadonlyArray<string>
   autoIndex?: `off` | `eager`
   startSync?: boolean
   defaultIndexType?: IndexConstructor

@@ -1570,13 +1570,19 @@ export function queryCollectionOptions(
 
         newItemsMap.forEach((newItem, key) => {
           const owners = getPersistedOwners(key)
-          if (!owners.has(hashedQueryKey)) {
+          const addsOwner = !owners.has(hashedQueryKey)
+          const insertsRow = !currentSyncedItems.has(key)
+          if (addsOwner) {
             owners.add(hashedQueryKey)
-            setPersistedOwners(key, owners)
           }
           addRowOwner(key, hashedQueryKey)
-          if (!currentSyncedItems.has(key)) {
+          if (insertsRow) {
             write({ type: `insert`, value: newItem })
+          }
+          if (addsOwner || insertsRow) {
+            // An insert clears stale metadata for its key. Stage ownership
+            // afterward so rows and ownership commit as one state change.
+            setPersistedOwners(key, owners)
           }
         })
 
@@ -1937,21 +1943,17 @@ export function queryCollectionOptions(
 
       const hasListeners = observer?.hasListeners() ?? false
 
+      // Refcounts are explicit ownership tokens. A cache event can remove the
+      // observer while an eager or active acquisition still owns this query.
+      if (refcount > 0) {
+        return
+      }
+
       if (hasListeners) {
         // During invalidateQueries, TanStack Query keeps internal listeners alive.
         // Leave refcount at 0 but keep observer so it can resubscribe.
         queryRefCounts.set(hashedQueryKey, 0)
         return
-      }
-
-      // No listeners means the query is truly idle.
-      // Even if refcount > 0, we treat hasListeners as authoritative to prevent leaks.
-      // This can happen if subscriptions are GC'd without calling unloadSubset.
-      if (refcount > 0) {
-        console.warn(
-          `[cleanupQueryIfIdle] Invariant violation: refcount=${refcount} but no listeners. Cleaning up to prevent leak.`,
-          { hashedQueryKey },
-        )
       }
 
       if (

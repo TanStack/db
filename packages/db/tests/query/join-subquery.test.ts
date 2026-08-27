@@ -1012,3 +1012,63 @@ describe(`Lazy join without a usable index`, () => {
     }
   })
 })
+
+describe(`Lazy join on a collection key`, () => {
+  test(`uses the collection key map without an explicit field index`, async () => {
+    type Team = { id: string; memberId: string }
+    type Member = { id: string; name: string }
+    const teams = createCollection(
+      mockSyncCollectionOptions<Team>({
+        id: `implicit-key-index-teams`,
+        getKey: (team) => team.id,
+        initialData: [{ id: `t1`, memberId: `m1` }],
+      }),
+    )
+    const members = createCollection(
+      mockSyncCollectionOptions<Member>({
+        id: `implicit-key-index-members`,
+        getKey: (member) => member.id,
+        keyPath: [`id`],
+        initialData: [{ id: `m1`, name: `Ada` }],
+        syncMode: `on-demand`,
+        autoIndex: `off`,
+        sync: {
+          sync: ({ begin, write, commit, markReady }) => {
+            begin()
+            write({ type: `insert`, value: { id: `m1`, name: `Ada` } })
+            commit()
+            markReady()
+            return { loadSubset: () => true }
+          },
+        },
+      }),
+    )
+    const warnSpy = vi.spyOn(console, `warn`).mockImplementation(() => {})
+    const live = createLiveQueryCollection((q) =>
+      q
+        .from({ team: teams })
+        .leftJoin({ member: members }, ({ team, member }) =>
+          eq(team.memberId, member.id),
+        )
+        .select(({ team, member }) => ({
+          id: team.id,
+          memberName: member.name,
+        })),
+    )
+
+    try {
+      await live.preload()
+      expect(live.toArray.map(stripVirtualProps)).toEqual([
+        { id: `t1`, memberName: `Ada` },
+      ])
+      expect(
+        warnSpy.mock.calls
+          .map((call) => String(call[0]))
+          .filter((message) => message.includes(`Join requires an index`)),
+      ).toEqual([])
+    } finally {
+      warnSpy.mockRestore()
+      await Promise.all([live.cleanup(), teams.cleanup(), members.cleanup()])
+    }
+  })
+})

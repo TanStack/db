@@ -1283,6 +1283,9 @@ importers:
         specifier: ^4.4.3
         version: 4.4.3
     devDependencies:
+      '@tanstack/query-core':
+        specifier: ^5.90.20
+        version: 5.90.20
       '@types/debug':
         specifier: ^4.1.12
         version: 4.1.12
