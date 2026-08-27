@@ -370,11 +370,14 @@ export function projectOrderedPublicationBoundary(
 /**
  * Projects semantic ordered publications across replacement epochs. Empty
  * transport callbacks do not appear here because they cannot change public
- * state. Demand activity comes only from request and release events. Staged
- * rows stay private until every acquisition has settled, then the current
- * replacement publishes the retained ordered prefix plus rows required by
- * still-active demands. Failure keeps the previous publication, and cleanup is
- * a terminal fence against late writes and settlements.
+ * state. Demand activity comes only from request and release events, and the
+ * retained window size is grow-only. Staged rows stay private until every
+ * acquisition has settled, then the current replacement publishes the retained
+ * ordered prefix plus rows required by still-active demands. Abort or failure
+ * from a released demand or obsolete attempt satisfies its barrier without
+ * vetoing the current attempt. Failure of a current active demand keeps the
+ * previous publication, and cleanup is a terminal fence against late writes
+ * and settlements.
  */
 export function projectAtomicOrderedPublications(
   history: ReadonlyArray<LoadSubsetFullFlowEvent>,

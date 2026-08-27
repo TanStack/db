@@ -1293,6 +1293,10 @@ async function runAtomicOrderedReplayScenario(
 
       if (isOrdered && releaseOtherAfterOrdered) {
         subscription.releaseSnapshot(otherWhere)
+        const released = replay.acquisitions.find(
+          (candidate) => candidate !== replay.ordered,
+        )
+        expect(released?.options.signal?.aborted).toBe(true)
         history.push({
           type: `releaseDemand`,
           ownerId: `other-owner`,
@@ -1348,7 +1352,11 @@ async function runAtomicOrderedReplayScenario(
       ? await beginReplacement()
       : firstReplay
     if (scenario.overlap) {
-      expect(firstReplay.ordered.options.signal?.aborted).toBe(true)
+      expect(
+        firstReplay.acquisitions.every(
+          ({ options }) => options.signal?.aborted,
+        ),
+      ).toBe(true)
     }
 
     const resizeSizes =

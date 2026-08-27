@@ -398,14 +398,20 @@ that last complete publication while every overlapping replacement attempt is
 pending. A successful current replacement publishes its settled ordered
 reconciliation once, but only after applied evidence proves the retained prefix
 or authoritative exhaustion. A continuing page stays private while its next
-acquisition refines that evidence; failure publishes no replacement batch.
+acquisition refines that evidence. Retained window size is grow-only for the
+life of the subscription, so a smaller request during replacement cannot undo a
+larger prefix already requested. Failure of the current ordered demand or any
+still-active demand publishes no replacement batch.
 Each active demand in that replacement settles on its own, and the replacement
 waits for every acquisition it started. The published reconciliation is the
 retained ordered prefix plus rows required by every still-active other demand.
 Releasing a demand removes its rows from that union, but does not erase that
-settlement barrier. Source deltas that race the current replacement stay private
-until reconciliation, then join the retained prefix when their order places
-them there. A superseded attempt's rows stay private, and only the current
+settlement barrier or turn its cooperative abort into a replacement failure.
+Starting a newer attempt aborts every older acquisition. Those obsolete
+acquisitions must still settle, but their abort cannot veto a successful current
+attempt. Source deltas that race the current replacement stay private until
+reconciliation, then join the retained prefix when their order places them
+there. A superseded attempt's rows stay private, and only the current
 reconciliation may publish. Teardown discards the whole replacement epoch, so
 later source writes and late settlements cannot reach public readers. Here a
 publication means a change to reader-visible state; an empty transport callback
