@@ -8,6 +8,7 @@ import { Store } from '@tanstack/store'
 import DebugModule from 'debug'
 import {
   DeduplicatedLoadSubset,
+  SyncTransactionAbortedError,
   and,
   withCollectionConfigFactory,
 } from '@tanstack/db'
@@ -553,7 +554,6 @@ function createLoadSubsetDedupe<T extends Row<unknown>>({
   encodeColumnName?: ColumnEncoder
   /**
    * Abort signal to check if the stream has been aborted during cleanup.
-   * When aborted, errors from requestSnapshot are silently ignored.
    */
   signal: AbortSignal
 }): DeduplicatedLoadSubset | null {
@@ -581,7 +581,12 @@ function createLoadSubsetDedupe<T extends Row<unknown>>({
     const commitCursor = getCommitCursor()
     const isAborted = (): boolean =>
       signal.aborted || opts.signal?.aborted === true
-    if (isAborted()) return
+    const throwIfAborted = () => {
+      if (isAborted()) {
+        throw new SyncTransactionAbortedError()
+      }
+    }
+    throwIfAborted()
 
     if (isBufferingInitialSync()) {
       const snapshotParams = compileSQL<T>(opts, compileOptions)
@@ -667,6 +672,7 @@ function createLoadSubsetDedupe<T extends Row<unknown>>({
           aborted,
         ])
       } catch (error) {
+        throwIfAborted()
         if (handleSnapshotError(error, `forceDisconnectAndRefresh`)) {
           return
         }
@@ -680,7 +686,7 @@ function createLoadSubsetDedupe<T extends Row<unknown>>({
       }
     }
 
-    if (isAborted()) return
+    throwIfAborted()
 
     // Upstream limitation: ShapeStream.requestSnapshot() publishes its rows
     // through the stream callback before its Promise resolves. It accepts no

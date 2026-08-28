@@ -2925,21 +2925,26 @@ describe(`Electric Integration`, () => {
         let loadSettled = false
         const load = Promise.resolve(
           testCollection._sync.loadSubset({ limit: 10 }),
-        ).then(() => {
+        ).finally(() => {
           loadSettled = true
         })
+        const loadError = load.then(
+          () => undefined,
+          (error: unknown) => error,
+        )
 
         await Promise.resolve()
         await testCollection.cleanup()
         await vi.advanceTimersByTimeAsync(0)
 
         expect(loadSettled).toBe(true)
+        await expect(loadError).resolves.toMatchObject({ name: `AbortError` })
         expect(mockRequestSnapshot).not.toHaveBeenCalled()
         expect(vi.getTimerCount()).toBe(0)
 
         refresh.resolve()
         await refresh.promise
-        await load
+        await load.catch(() => undefined)
         expect(mockRequestSnapshot).not.toHaveBeenCalled()
       } finally {
         refresh.resolve()
@@ -3001,7 +3006,7 @@ describe(`Electric Integration`, () => {
       expect(commit).not.toHaveBeenCalled()
     })
 
-    it(`does not start a refresh when the collection signal is already aborted`, async () => {
+    it(`rejects before starting a refresh when the collection signal is already aborted`, async () => {
       mockStream.isUpToDate = true
       const abortController = new AbortController()
       abortController.abort()
@@ -3019,7 +3024,9 @@ describe(`Electric Integration`, () => {
         }),
       )
 
-      await testCollection._sync.loadSubset({ limit: 10 })
+      await expect(
+        testCollection._sync.loadSubset({ limit: 10 }),
+      ).rejects.toMatchObject({ name: `AbortError` })
 
       expect(mockForceDisconnectAndRefresh).not.toHaveBeenCalled()
       expect(mockRequestSnapshot).not.toHaveBeenCalled()
@@ -3044,15 +3051,22 @@ describe(`Electric Integration`, () => {
             limit: 10,
             signal: abortController.signal,
           }),
-        ).then(() => {
+        ).finally(() => {
           abortedLoadSettled = true
         })
+        const abortedLoadError = abortedLoad.then(
+          () => undefined,
+          (error: unknown) => error,
+        )
 
         await Promise.resolve()
         abortController.abort()
         await vi.advanceTimersByTimeAsync(0)
 
         expect(abortedLoadSettled).toBe(true)
+        await expect(abortedLoadError).resolves.toMatchObject({
+          name: `AbortError`,
+        })
         expect(mockRequestSnapshot).not.toHaveBeenCalled()
         expect(vi.getTimerCount()).toBe(0)
 
@@ -3062,7 +3076,7 @@ describe(`Electric Integration`, () => {
         expect(mockForceDisconnectAndRefresh).toHaveBeenCalledTimes(2)
         expect(mockRequestSnapshot).toHaveBeenCalledTimes(1)
         await testCollection.cleanup()
-        await abortedLoad
+        await abortedLoad.catch(() => undefined)
       } finally {
         refresh.resolve()
         await vi.runOnlyPendingTimersAsync()
