@@ -3,11 +3,11 @@ import { SortedMap } from '../SortedMap'
 import { enrichRowWithVirtualProps } from '../virtual-props.js'
 import { SyncTransactionAbortedError } from '../errors.js'
 import { createDeferred } from '../deferred'
-import { DIRECT_TRANSACTION_METADATA_KEY } from './transaction-metadata.js'
 import {
   copySyncRequestSignal,
   setSyncRequestSignal,
-} from './sync-transaction-provenance.js'
+} from '../load-subset-request-provenance.js'
+import { DIRECT_TRANSACTION_METADATA_KEY } from './transaction-metadata.js'
 import type {
   VirtualOrigin,
   VirtualRowProps,

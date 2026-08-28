@@ -3,6 +3,10 @@ import { and, gte, lt } from '../query/builder/functions.js'
 import { Value } from '../query/ir.js'
 import { EventEmitter } from '../event-emitter.js'
 import {
+  getSyncRequestSignal,
+  isLoadSubsetRequestSignalFor,
+} from '../load-subset-request-provenance.js'
+import {
   buildCursor,
   buildCursorEquality,
   canExpressCursorOrder,
@@ -13,7 +17,6 @@ import {
   createFilterFunctionFromExpression,
   createFilteredCallback,
 } from './change-events.js'
-import { getSyncRequestSignal } from './sync-transaction-provenance.js'
 import type { BasicExpression, OrderBy } from '../query/ir.js'
 import type { TotalOrderBoundary } from '../query/total-order.js'
 import type { IndexInterface } from '../indexes/base-index.js'
@@ -877,23 +880,26 @@ export class CollectionSubscription
     const requestSignal = getSyncRequestSignal(change)
     if (requestSignal === undefined) return `ordered-source`
 
+    let belongsToAdditionalDemand = false
     for (const demand of this.subsetDemands) {
       if (
-        demand.ordered === undefined &&
-        demand.options.signal === requestSignal
+        demand.options.signal !== undefined &&
+        isLoadSubsetRequestSignalFor(requestSignal, demand.options.signal)
       ) {
-        return `additional-demand`
+        if (demand.ordered !== undefined) return `ordered-source`
+        belongsToAdditionalDemand = true
       }
       for (const pending of demand.pendingReplayAcquisitions) {
         if (
-          pending.ordered === undefined &&
-          pending.options.signal === requestSignal
+          pending.options.signal !== undefined &&
+          isLoadSubsetRequestSignalFor(requestSignal, pending.options.signal)
         ) {
-          return `additional-demand`
+          if (pending.ordered !== undefined) return `ordered-source`
+          belongsToAdditionalDemand = true
         }
       }
     }
-    return `ordered-source`
+    return belongsToAdditionalDemand ? `additional-demand` : `ordered-source`
   }
 
   private buildOrderedCursorExpressions(

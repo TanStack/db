@@ -2111,7 +2111,7 @@ describe(`CollectionSubscription replay oracle`, () => {
     }
   })
 
-  it.each([`sync`, `async`, `ordinary`] as const)(
+  it.each([`sync`, `async`, `ordinary`, `deduplicated`] as const)(
     `reconciles failed ordered publications for coverage and sibling-demand changes: %s`,
     async (writeTiming) => {
       type Row = { id: `a` | `x` | `y`; rank: number }
@@ -2129,6 +2129,20 @@ describe(`CollectionSubscription replay oracle`, () => {
       const loadOptions: Array<LoadSubsetOptions> = []
       const replayLoads: Array<ReturnType<typeof createDeferred<Outcome>>> = []
       let siblingLoad: ReturnType<typeof createDeferred<Outcome>> | undefined
+      const publishSiblingRow = (signal: AbortSignal | undefined) => {
+        const outcome = {
+          hasMore: false,
+          appliedRowKeys: [`x`] as const,
+        }
+        begin()
+        write({ type: `update`, value: { id: `x`, rank: -1 } })
+        commit(signal)
+        return outcome
+      }
+      const deduplicatedSiblingLoad = new DeduplicatedLoadSubset({
+        loadSubset: (options) =>
+          Promise.resolve(publishSiblingRow(options.signal)),
+      })
       const collection = createCollection<Row>({
         id: `failed-ordered-sibling-demand`,
         getKey: (row) => row.id,
@@ -2158,19 +2172,14 @@ describe(`CollectionSubscription replay oracle`, () => {
                     siblingLoad = createDeferred<Outcome>()
                     return siblingLoad.promise
                   }
-                  const outcome = {
-                    hasMore: false,
-                    appliedRowKeys: [`x`] as const,
-                  }
-                  const updateRejectedRow = () => {
-                    begin()
-                    write({ type: `update`, value: { id: `x`, rank: -1 } })
-                    commit(options.signal)
-                    return outcome
+                  if (writeTiming === `deduplicated`) {
+                    return deduplicatedSiblingLoad.loadSubset(options)
                   }
                   return writeTiming === `sync`
-                    ? Promise.resolve(updateRejectedRow())
-                    : Promise.resolve().then(updateRejectedRow)
+                    ? Promise.resolve(publishSiblingRow(options.signal))
+                    : Promise.resolve().then(() =>
+                        publishSiblingRow(options.signal),
+                      )
                 }
                 if (loadCount === 2 || loadCount > 5) {
                   return Promise.resolve({

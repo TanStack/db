@@ -424,9 +424,12 @@ without changing the ordered boundary. Request-scoped adapter transactions
 pass the exact acquisition signal to `commit(signal)`. Core retains that signal
 as internal change provenance, so writes for an unordered demand have the same
 additional-only provenance as its local snapshot even when they arrive
-asynchronously. An unsettled request does not claim unrelated transactions
-merely because their lifetimes overlap. Ordinary live source changes and
-ordered acquisitions may evolve the ordered candidate set. A
+asynchronously. When a dedupe wrapper replaces logical request signals with a
+shared physical lease signal, it records that signal lineage. Provenance tests
+follow the lineage through nested wrappers instead of treating physical signal
+replacement as new authority. An unsettled request does not claim unrelated
+transactions merely because their lifetimes overlap. Ordinary live source
+changes and ordered acquisitions may evolve the ordered candidate set. A
 failed generation also clears its private coverage evidence; a successful
 ordered acquisition from that generation cannot suppress the next request when
 another demand makes the whole replacement fail. Reader-visible boundaries and
