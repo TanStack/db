@@ -1689,15 +1689,15 @@ describe(`pagination recomputation oracle`, () => {
     const recordUnhandled = (reason: unknown) => unhandled.push(reason)
     const targets: ReadonlyArray<CleanupTarget> = [
       {
-        cleanup: () => {
+        cleanup: async () => {
           events.push(`first`)
+          await laterCleanup.promise
           throw firstFailure
         },
       },
       {
-        cleanup: async () => {
+        cleanup: () => {
           events.push(`second`)
-          await laterCleanup.promise
           throw secondFailure
         },
       },
