@@ -2996,7 +2996,7 @@ async function runAtomicOrderedReplayScenario(
         expect(
           evaluateReferenceExpression(restoration.options.cursor!.whereFrom, {
             rank:
-              (expectedBoundary.orderValue) +
+              expectedBoundary.orderValue +
               (scenario.direction === `asc` ? 1 : -1),
           }),
         ).toBe(true)

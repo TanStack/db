@@ -1370,14 +1370,13 @@ export class CollectionSubscription
     const window = this.orderedWindow
     if (!ordered || !window) return
 
+    const mayApply = () =>
+      shouldApply() &&
+      this.subsetDemands.includes(demand) &&
+      !acquisition.options.signal?.aborted
+
     const apply = (outcome?: AppliedLoadSubsetOutcome) => {
-      if (
-        !shouldApply() ||
-        !this.subsetDemands.includes(demand) ||
-        acquisition.options.signal?.aborted
-      ) {
-        return
-      }
+      if (!mayApply()) return
 
       // The settled outcome is the caller-relative acquisition evidence. Its
       // applied keys remain useful even when the source cannot prove an extent,
@@ -1412,6 +1411,7 @@ export class CollectionSubscription
     if (result instanceof Promise) {
       void result.then(apply, () => {})
     } else {
+      if (!mayApply()) return
       const hasSubsetLoader = this.collection._sync.syncLoadSubsetFn !== null
       if (!hasSubsetLoader) {
         // Eager sources are already complete.
@@ -1423,7 +1423,7 @@ export class CollectionSubscription
         )
       } else {
         const retainedOutcome = this.collection._sync.getLoadSubsetOutcome(
-          demand.options,
+          acquisition.options,
         )
         if (retainedOutcome) {
           apply(retainedOutcome)

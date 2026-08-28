@@ -1799,6 +1799,79 @@ describe(`CollectionSubscription replay oracle`, () => {
     }
   })
 
+  it.each([`return`, `resolve`] as const)(
+    `does not publish ordered coverage after reentrant snapshot release: %s`,
+    async (resultKind) => {
+      let begin!: () => void
+      let write!: (
+        message: ChangeMessageOrDeleteKeyMessage<ReplayRow, string>,
+      ) => void
+      let commit!: () => void
+      let releaseDuringLoad = () => {}
+      const loads: Array<LoadSubsetOptions> = []
+      const where = new Func(`eq`, [new PropRef([`value`]), new Value(1)])
+      const collection = createCollection<ReplayRow>({
+        id: `reentrant-ordered-release-${resultKind}`,
+        getKey: (row) => row.id,
+        syncMode: `on-demand`,
+        sync: {
+          sync: (params) => {
+            begin = params.begin
+            write = params.write
+            commit = params.commit
+            params.markReady()
+            return {
+              loadSubset: (options) => {
+                loads.push(options)
+                if (loads.length === 1) {
+                  begin()
+                  write({ type: `insert`, value: { id: `one`, value: 1 } })
+                  commit()
+                  releaseDuringLoad()
+                }
+                return resultKind === `return` ? true : Promise.resolve()
+              },
+              unloadSubset: () => {},
+            }
+          },
+        },
+      })
+      const index = collection.createIndex((row) => row.value, {
+        indexType: BTreeIndex,
+      })
+      const orderBy: OrderBy = [
+        {
+          expression: new PropRef([`value`]),
+          compareOptions: { direction: `asc`, nulls: `first` },
+        },
+      ]
+      const published: Array<ReplayChange> = []
+      const subscription = collection.subscribeChanges(
+        (changes) => {
+          published.push(...changes)
+        },
+        { whereExpression: where },
+      )
+      subscription.setOrderByIndex(index)
+      releaseDuringLoad = () => subscription.releaseSnapshot(where)
+
+      try {
+        subscription.requestLimitedSnapshot({ orderBy, limit: 1 })
+        await flushPromises()
+
+        expect(loads).toHaveLength(1)
+        expect(published).toEqual([])
+
+        subscription.requestLimitedSnapshot({ orderBy, limit: 1 })
+        await flushPromises()
+        expect(loads).toHaveLength(2)
+      } finally {
+        subscription.unsubscribe()
+        await collection.cleanup()
+      }
+    },
+  )
+
   it(`uses the published replacement as the baseline of a reentrant replay`, async () => {
     let begin!: () => void
     let write!: (
