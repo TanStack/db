@@ -1,4 +1,5 @@
 import {
+  isUint8ArrayCandidate,
   readDateTimestamp,
   snapshotTemporalEqualityValue,
   snapshotUint8ArrayBytes,
@@ -105,7 +106,7 @@ function snapshotEqualityValue<T>(value: T): T {
     return Buffer.from(snapshotUint8ArrayBytes(value)) as T
   }
 
-  if (value instanceof Uint8Array) {
+  if (isUint8ArrayCandidate(value)) {
     return snapshotUint8ArrayBytes(value) as T
   }
 

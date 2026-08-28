@@ -4,6 +4,7 @@ import {
   cloneOptions,
 } from '../../src/query/subset-dedupe'
 import { Func, PropRef, Value } from '../../src/query/ir'
+import { createCrossRealmUint8Array } from '../utils'
 import type { BasicExpression, OrderBy } from '../../src/query/ir'
 import type { LoadSubsetOptions } from '../../src/types'
 
@@ -96,6 +97,28 @@ describe(`createDeduplicatedLoadSubset`, () => {
       deduplicated.loadSubset({ where: eq(ref(`token`), val(bytes)) }),
     ).toThrow(/Cannot snapshot binary equality value/)
     expect(loadSubset).not.toHaveBeenCalled()
+  })
+
+  it(`retains cross-realm binary coverage by acquired bytes`, () => {
+    const acquired: Array<Array<number>> = []
+    const loadSubset = vi.fn((options: LoadSubsetOptions) => {
+      acquired.push(
+        Array.from(((options.where as Func).args[1] as Value).value),
+      )
+      return true as const
+    })
+    const deduplicated = new DeduplicatedLoadSubset({ loadSubset })
+    const bytes = createCrossRealmUint8Array([1])
+    const demand = (): LoadSubsetOptions => ({
+      where: eq(ref(`token`), val(bytes)),
+    })
+
+    deduplicated.loadSubset(demand())
+    bytes[0] = 2
+    deduplicated.loadSubset(demand())
+
+    expect(acquired).toEqual([[1], [2]])
+    expect(loadSubset).toHaveBeenCalledTimes(2)
   })
 
   it(`observes computed membership once for tracking and acquisition`, () => {

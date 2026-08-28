@@ -38,9 +38,33 @@ export function readDateTimestamp(value: Date): number {
   return Reflect.apply(Date.prototype.getTime, value, [])
 }
 
+const typedArrayTagGetter = Object.getOwnPropertyDescriptor(
+  Object.getPrototypeOf(Uint8Array.prototype),
+  Symbol.toStringTag,
+)?.get
+
+/** Whether a value has intrinsic Uint8Array slots, independent of its realm. */
+export function hasIntrinsicUint8ArraySlots(
+  value: unknown,
+): value is Uint8Array {
+  return (
+    ArrayBuffer.isView(value) &&
+    typedArrayTagGetter !== undefined &&
+    Reflect.apply(typedArrayTagGetter, value, []) === `Uint8Array`
+  )
+}
+
+/**
+ * Whether a value must use binary equality semantics. Local prototype claims
+ * enter this path so slot-less proxies are rejected instead of becoming opaque.
+ */
+export function isUint8ArrayCandidate(value: unknown): value is Uint8Array {
+  return value instanceof Uint8Array || hasIntrinsicUint8ArraySlots(value)
+}
+
 /** Copy a Uint8Array's internal bytes without invoking custom iteration. */
 export function snapshotUint8ArrayBytes(value: Uint8Array): Uint8Array {
-  if (!ArrayBuffer.isView(value)) {
+  if (!hasIntrinsicUint8ArraySlots(value)) {
     throw new TypeError(
       `Cannot snapshot binary equality value without intrinsic typed-array slots`,
     )
@@ -162,11 +186,13 @@ export const defaultComparator = makeComparator({
  * Compare two Uint8Arrays for content equality
  */
 function areUint8ArraysEqual(a: Uint8Array, b: Uint8Array): boolean {
-  if (a.byteLength !== b.byteLength) {
+  const aBytes = snapshotUint8ArrayBytes(a)
+  const bBytes = snapshotUint8ArrayBytes(b)
+  if (aBytes.byteLength !== bBytes.byteLength) {
     return false
   }
-  for (let i = 0; i < a.byteLength; i++) {
-    if (a[i] !== b[i]) {
+  for (let i = 0; i < aBytes.byteLength; i++) {
+    if (aBytes[i] !== bBytes[i]) {
       return false
     }
   }
@@ -286,11 +312,7 @@ export function normalizeValue(value: any): any {
 
   // Normalize Uint8Arrays/Buffers to a string representation for Map key usage
   // This enables content-based equality for binary data like ULIDs
-  const isUint8Array =
-    (typeof Buffer !== `undefined` && value instanceof Buffer) ||
-    value instanceof Uint8Array
-
-  if (isUint8Array) {
+  if (isUint8ArrayCandidate(value)) {
     // Convert to a string representation that can be used as a Map key.
     // Equality compares every binary value by content, so index keys must not
     // switch to reference identity at an arbitrary byte length.
@@ -407,12 +429,8 @@ export function areValuesEqual(a: any, b: any): boolean {
   }
 
   // Check for Uint8Array/Buffer comparison
-  const aIsUint8Array =
-    (typeof Buffer !== `undefined` && a instanceof Buffer) ||
-    a instanceof Uint8Array
-  const bIsUint8Array =
-    (typeof Buffer !== `undefined` && b instanceof Buffer) ||
-    b instanceof Uint8Array
+  const aIsUint8Array = isUint8ArrayCandidate(a)
+  const bIsUint8Array = isUint8ArrayCandidate(b)
 
   // If both are Uint8Arrays, compare by content
   if (aIsUint8Array && bIsUint8Array) {

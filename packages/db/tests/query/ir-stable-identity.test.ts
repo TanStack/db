@@ -59,6 +59,8 @@ import {
   cloneLoadSubsetOptions,
   snapshotLoadSubsetDemand,
 } from '../../src/query/load-subset-options.js'
+import { areValuesEqual, normalizeValue } from '../../src/utils/comparison.js'
+import { createCrossRealmUint8Array } from '../utils.js'
 import type { BasicExpression, QueryIR } from '../../src/query/ir.js'
 import type { LoadSubsetOptions } from '../../src/types.js'
 
@@ -659,6 +661,27 @@ describe(`loadSubset demand identity`, () => {
     expect(() => getLoadSubsetDemandKey(demand)).toThrow(
       /Cannot snapshot binary equality value/,
     )
+  })
+
+  it(`snapshots intrinsic Uint8Array values across realms`, () => {
+    const bytes = createCrossRealmUint8Array([1, 2, 3])
+    const demand: LoadSubsetOptions = {
+      where: new Func(`eq`, [new PropRef([`id`]), new Value(bytes)]),
+    }
+    const demandKey = getLoadSubsetDemandKey(demand)
+    const snapshot = cloneLoadSubsetOptions(demand)
+    const snapshotBytes = ((snapshot.where as Func).args[1] as Value).value
+
+    expect(areValuesEqual(bytes, new Uint8Array([1, 2, 3]))).toBe(true)
+    expect(normalizeValue(bytes)).toBe(
+      normalizeValue(new Uint8Array([1, 2, 3])),
+    )
+
+    bytes[0] = 9
+
+    expect(snapshotBytes).not.toBe(bytes)
+    expect(snapshotBytes).toEqual(new Uint8Array([1, 2, 3]))
+    expect(getLoadSubsetDemandKey(snapshot)).toBe(demandKey)
   })
 
   it.each([`coalesce`, `caseWhen`] as const)(

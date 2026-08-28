@@ -1,4 +1,5 @@
 import {
+  isUint8ArrayCandidate,
   normalizeValue,
   snapshotTemporalEqualityValue,
   snapshotUint8ArrayBytes,
@@ -1045,15 +1046,8 @@ function canonicalizeEqualityRuntimeValue(
 
   // Equality compares Uint8Array and Buffer values by content, independent of
   // their concrete constructor and size.
-  const isUint8Array =
-    (typeof Buffer !== `undefined` && value instanceof Buffer) ||
-    value instanceof Uint8Array
-  if (isUint8Array) {
-    return [
-      `binary`,
-      `Uint8Array`,
-      Array.from(snapshotUint8ArrayBytes(value as Uint8Array)),
-    ]
+  if (isUint8ArrayCandidate(value)) {
+    return [`binary`, `Uint8Array`, Array.from(snapshotUint8ArrayBytes(value))]
   }
 
   if (isTemporal(value)) {
@@ -1203,7 +1197,7 @@ function canonicalizeOrderingRuntimeValue(
   }
 
   const normalized = normalizeValue(value)
-  if (normalized !== value && !(value instanceof Uint8Array)) {
+  if (normalized !== value && !isUint8ArrayCandidate(value)) {
     return canonicalizeRuntimeValue(normalized, path, seen)
   }
 

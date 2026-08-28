@@ -23,7 +23,11 @@ import {
   projectReusableDemands,
   projectTransportLoads,
 } from '../load-subset-full-flow-model.js'
-import { flushPromises, mockSyncCollectionOptions } from '../utils.js'
+import {
+  createCrossRealmUint8Array,
+  flushPromises,
+  mockSyncCollectionOptions,
+} from '../utils.js'
 import {
   oracleRandomParameters,
   readOracleRunConfig,
@@ -455,6 +459,69 @@ it(`rejects binary values without intrinsic typed-array slots before adapter acq
     expect(adapterCalls).toBe(0)
     expect(collection.subscriberCount).toBe(0)
   } finally {
+    await collection.cleanup()
+  }
+})
+
+it(`freezes cross-realm binary equality across filtering and acquisition`, async () => {
+  type Row = { id: `original` | `changed`; token: Uint8Array }
+  const rows: ReadonlyArray<Row> = [
+    { id: `original`, token: new Uint8Array([1]) },
+    { id: `changed`, token: new Uint8Array([2]) },
+  ]
+  const callerToken = createCrossRealmUint8Array([1])
+  let acquired: LoadSubsetOptions | undefined
+  const collection = createCollection<Row>({
+    id: `frozen-cross-realm-binary-equality`,
+    getKey: (row) => row.id,
+    syncMode: `on-demand`,
+    startSync: true,
+    sync: {
+      sync: ({ begin, write, commit, markReady }) => {
+        begin()
+        rows.forEach((value) => write({ type: `insert`, value }))
+        commit()
+        markReady()
+        return {
+          loadSubset: (options) => {
+            acquired = options
+            return true
+          },
+          unloadSubset: () => {},
+        }
+      },
+    },
+  })
+  const visible = new Set<Row[`id`]>()
+  const subscription = collection.subscribeChanges(
+    (changes) => {
+      for (const change of changes) {
+        if (change.type === `delete`) visible.delete(change.key as Row[`id`])
+        else visible.add(change.key as Row[`id`])
+      }
+    },
+    {
+      whereExpression: new Func(`eq`, [
+        new PropRef([`token`]),
+        new Value(callerToken),
+      ]),
+    },
+  )
+
+  try {
+    callerToken[0] = 2
+    subscription.requestSnapshot({ optimizedOnly: false })
+
+    expect([...visible]).toEqual([`original`])
+    const acquiredValue = (
+      (acquired?.where as Func | undefined)?.args[1] as
+        | Value<Uint8Array>
+        | undefined
+    )?.value
+    expect(acquiredValue).toEqual(new Uint8Array([1]))
+    expect(acquiredValue).not.toBe(callerToken)
+  } finally {
+    subscription.unsubscribe()
     await collection.cleanup()
   }
 })
