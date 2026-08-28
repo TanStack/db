@@ -110,14 +110,9 @@ type ReplaySubsetAcquisition = SubsetAcquisition & {
   abortController: AbortController
 }
 
-type SubsetCleanupFailure = Readonly<{
-  error: unknown
-  options: LoadSubsetOptions
-}>
-
 type ReplayHandoffResult =
   | { installed: true }
-  | { installed: false; failure?: SubsetCleanupFailure }
+  | { installed: false; failures?: ReadonlyArray<SubsetFailureOccurrence> }
 
 type SubsetDemand = SubsetAcquisition & {
   requestOptions: LoadSubsetOptions
@@ -154,21 +149,26 @@ type TruncateReplayContext = Readonly<{
   attempt: TruncateReplayAttempt
 }>
 
-type ReplayCallbackFailure = Readonly<{
+type SubsetFailureOccurrence = Readonly<{
   error: unknown
   options: LoadSubsetOptions
   attributed: boolean
 }>
 
-type ReplayCallbackFailureGroup = Readonly<{
+type SubsetFailureGroup = Readonly<{
   propagatedError: unknown
-  failures: ReadonlyArray<ReplayCallbackFailure>
+  failures: ReadonlyArray<SubsetFailureOccurrence>
 }>
 
 type ReplayResultCallbackFrame = {
   replayContext: TruncateReplayContext
   previous: ReplayResultCallbackFrame | undefined
-  failureGroups: Array<ReplayCallbackFailureGroup>
+  failureGroups: Array<SubsetFailureGroup>
+}
+
+type SubsetCleanupBoundaryFrame = {
+  previous: SubsetCleanupBoundaryFrame | undefined
+  failureGroups: Array<SubsetFailureGroup>
 }
 
 class SubsetCleanupAggregateError extends AggregateError {
@@ -248,6 +248,7 @@ export class CollectionSubscription
   // callbacks run. Payload identity alone cannot distinguish two operations
   // that throw the same Error object.
   private activeReplayResultCallback: ReplayResultCallbackFrame | undefined
+  private activeSubsetCleanupBoundary: SubsetCleanupBoundaryFrame | undefined
 
   private isActiveDemand(demand: SubsetDemand): boolean {
     return demand.active && this.subsetDemands.includes(demand)
@@ -553,16 +554,12 @@ export class CollectionSubscription
                   error,
                 )
               }
-              const cleanupFailure = this.discardReplayAcquisition(
+              const cleanupFailures = this.discardReplayAcquisition(
                 demand,
                 nextAcquisition,
               )
-              if (cleanupFailure) {
-                this.queueTruncateReplayError(
-                  session,
-                  cleanupFailure.options,
-                  cleanupFailure.error,
-                )
+              if (cleanupFailures) {
+                this.queueUnattributedReplayFailures(session, cleanupFailures)
               }
             },
           )
@@ -631,11 +628,23 @@ export class CollectionSubscription
     session.errors.push({ options, error })
   }
 
-  /** Record which adapter failure occurrences propagate through one callback. */
-  private noteReplayCallbackFailures(
-    replayContext: TruncateReplayContext | undefined,
-    group: ReplayCallbackFailureGroup,
+  private queueUnattributedReplayFailures(
+    session: TruncateReplaySession,
+    failures: ReadonlyArray<SubsetFailureOccurrence>,
   ): void {
+    for (const failure of failures) {
+      if (!failure.attributed) {
+        this.queueTruncateReplayError(session, failure.options, failure.error)
+      }
+    }
+  }
+
+  /** Record which adapter failure occurrences propagate through one callback. */
+  private noteSubsetFailureGroup(
+    replayContext: TruncateReplayContext | undefined,
+    group: SubsetFailureGroup,
+  ): void {
+    this.activeSubsetCleanupBoundary?.failureGroups.push(group)
     const frame = this.activeReplayResultCallback
     if (
       !frame ||
@@ -644,6 +653,32 @@ export class CollectionSubscription
       return
     }
     frame.failureGroups.push(group)
+  }
+
+  /** Preserve nested cleanup provenance across one arbitrary adapter callback. */
+  private captureSubsetCleanupFailures(
+    options: LoadSubsetOptions,
+    callback: () => void,
+  ): ReadonlyArray<SubsetFailureOccurrence> | undefined {
+    const frame: SubsetCleanupBoundaryFrame = {
+      previous: this.activeSubsetCleanupBoundary,
+      failureGroups: [],
+    }
+    this.activeSubsetCleanupBoundary = frame
+    try {
+      callback()
+      return undefined
+    } catch (error) {
+      for (let index = frame.failureGroups.length - 1; index >= 0; index--) {
+        const group = frame.failureGroups[index]
+        if (group && Object.is(group.propagatedError, error)) {
+          return group.failures
+        }
+      }
+      return [{ error, options, attributed: false }]
+    } finally {
+      this.activeSubsetCleanupBoundary = frame.previous
+    }
   }
 
   /** Attribute one replay callback failure without merging equal payloads. */
@@ -670,7 +705,7 @@ export class CollectionSubscription
       callback()
     } catch (error) {
       if (this.truncateReplaySession !== replayContext.session) throw error
-      let propagated: ReplayCallbackFailureGroup | undefined
+      let propagated: SubsetFailureGroup | undefined
       for (let index = frame.failureGroups.length - 1; index >= 0; index--) {
         const group = frame.failureGroups[index]
         if (group && Object.is(group.propagatedError, error)) {
@@ -1343,14 +1378,13 @@ export class CollectionSubscription
     const previousOptions = demand.options
     const removePreviousAbortListener = demand.removeRequestAbortListener
     try {
-      try {
-        this.collection._sync.unloadSubset(previousOptions)
-      } catch (error) {
-        return {
-          installed: false,
-          failure: { error, options: previousOptions },
-        }
-      }
+      const failures = this.captureSubsetCleanupFailures(
+        previousOptions,
+        () => {
+          this.collection._sync.unloadSubset(previousOptions)
+        },
+      )
+      if (failures) return { installed: false, failures }
       removePreviousAbortListener?.()
       demand.releaseFailed = false
       demand.releaseSettled = true
@@ -1359,13 +1393,12 @@ export class CollectionSubscription
       // logical demand. In that case the replacement must never become its
       // new live acquisition.
       if (!this.isActiveDemand(demand)) {
-        try {
-          this.releaseReplayAcquisitionUnprotected(demand, next)
-        } catch (error) {
-          return {
-            installed: false,
-            failure: { error, options: next.options },
-          }
+        const replacementFailures = this.captureSubsetCleanupFailures(
+          next.options,
+          () => this.releaseReplayAcquisitionUnprotected(demand, next),
+        )
+        if (replacementFailures) {
+          return { installed: false, failures: replacementFailures }
         }
         return { installed: false }
       }
@@ -1400,13 +1433,9 @@ export class CollectionSubscription
     if (mayReplace) {
       return this.tryReplaceSubsetAcquisition(session, demand, next, attempt)
     }
-    const cleanupFailure = this.discardReplayAcquisition(demand, next)
-    if (cleanupFailure) {
-      this.queueTruncateReplayError(
-        session,
-        cleanupFailure.options,
-        cleanupFailure.error,
-      )
+    const cleanupFailures = this.discardReplayAcquisition(demand, next)
+    if (cleanupFailures) {
+      this.queueUnattributedReplayFailures(session, cleanupFailures)
     }
     return false
   }
@@ -1422,22 +1451,14 @@ export class CollectionSubscription
       demand.pendingReplayAcquisitions.delete(next)
       return true
     }
-    if (handoff.failure) {
+    if (handoff.failures) {
       // The old lease remains owned when its release fails. Release the new
       // acquisition and preserve every failed cleanup as a distinct event.
-      const discardFailure = this.discardReplayAcquisition(demand, next)
+      const discardFailures = this.discardReplayAcquisition(demand, next)
       attempt.failed = true
-      this.queueTruncateReplayError(
-        session,
-        handoff.failure.options,
-        handoff.failure.error,
-      )
-      if (discardFailure) {
-        this.queueTruncateReplayError(
-          session,
-          discardFailure.options,
-          discardFailure.error,
-        )
+      this.queueUnattributedReplayFailures(session, handoff.failures)
+      if (discardFailures) {
+        this.queueUnattributedReplayFailures(session, discardFailures)
       }
     }
     return false
@@ -1446,15 +1467,12 @@ export class CollectionSubscription
   private discardReplayAcquisition(
     demand: SubsetDemand,
     next: ReplaySubsetAcquisition,
-  ): SubsetCleanupFailure | undefined {
-    try {
-      this.releaseReplayAcquisition(demand, next)
-      return undefined
-    } catch (error) {
-      // Keep the failed acquisition on the demand. releaseSnapshot,
-      // unsubscribe, or collection cleanup will retry its exact owner route.
-      return { error, options: next.options }
-    }
+  ): ReadonlyArray<SubsetFailureOccurrence> | undefined {
+    // A failed acquisition stays on the demand. releaseSnapshot, unsubscribe,
+    // or collection cleanup will retry its exact owner route.
+    return this.captureSubsetCleanupFailures(next.options, () =>
+      this.releaseReplayAcquisition(demand, next),
+    )
   }
 
   private releaseReplayAcquisition(
@@ -1491,7 +1509,7 @@ export class CollectionSubscription
     demand.releaseInProgress = true
     try {
       demand.abortController?.abort()
-      const releaseFailures: Array<ReplayCallbackFailure> = []
+      const releaseFailures: Array<SubsetFailureOccurrence> = []
       for (const pending of [...demand.pendingReplayAcquisitions]) {
         try {
           this.releaseReplayAcquisitionUnprotected(demand, pending)
@@ -1523,7 +1541,7 @@ export class CollectionSubscription
         const propagatedError = createSubsetCleanupError(
           releaseFailures.map(({ error }) => error),
         )
-        this.noteReplayCallbackFailures(undefined, {
+        this.noteSubsetFailureGroup(undefined, {
           propagatedError,
           failures: releaseFailures,
         })
@@ -1596,7 +1614,7 @@ export class CollectionSubscription
             acquisition.options,
             error,
           )
-          this.noteReplayCallbackFailures(replayContext, {
+          this.noteSubsetFailureGroup(replayContext, {
             propagatedError: error,
             failures: [
               {

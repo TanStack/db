@@ -5423,6 +5423,116 @@ describe(`CollectionSubscription replay oracle`, () => {
     }
   })
 
+  it(`preserves nested cleanup occurrences across another demand's replay handoff`, async () => {
+    type Row = { id: string; version: number }
+    let begin!: () => void
+    let write!: (message: ChangeMessageOrDeleteKeyMessage<Row, string>) => void
+    let commit!: () => true | Promise<void>
+    let truncate!: () => void
+    let nested = false
+    const replayA = createDeferred<void>()
+    const replayB = createDeferred<void>()
+    const loads: Array<LoadSubsetOptions> = []
+    const unloads: Array<LoadSubsetOptions> = []
+    const failed = new Set<LoadSubsetOptions>()
+    const pendingBFailure = new Error(`pending B cleanup failed`)
+    const currentBFailure = new Error(`current B cleanup failed`)
+    type TestSubscription = ReturnType<
+      ReturnType<typeof createCollection<Row>>[`subscribeChanges`]
+    >
+    const owner: { current?: TestSubscription } = {}
+    const collection = createCollection<Row>({
+      id: `nested-demand-replay-handoff-cleanup`,
+      getKey: (row) => row.id,
+      syncMode: `on-demand`,
+      sync: {
+        sync: (params) => {
+          begin = params.begin
+          write = params.write
+          commit = params.commit
+          truncate = params.truncate
+          params.markReady()
+          return {
+            loadSubset: (options) => {
+              loads.push(options)
+              const id = loads.length % 2 === 1 ? `a` : `b`
+              if (loads.length <= 2) {
+                begin()
+                write({ type: `insert`, value: { id, version: 1 } })
+                commit()
+                return true
+              }
+              return loads.length === 3 ? replayA.promise : replayB.promise
+            },
+            unloadSubset: (options) => {
+              unloads.push(options)
+              if (options === loads[0] && !nested) {
+                nested = true
+                owner.current!.releaseSnapshot(whereB)
+              }
+              if (failed.has(options)) return
+              if (options === loads[3]) {
+                failed.add(options)
+                throw pendingBFailure
+              }
+              if (options === loads[1]) {
+                failed.add(options)
+                throw currentBFailure
+              }
+            },
+          }
+        },
+      },
+    })
+    const whereA = new Func(`eq`, [new PropRef([`id`]), new Value(`a`)])
+    const whereB = new Func(`eq`, [new PropRef([`id`]), new Value(`b`)])
+    const visible = new Set<string>()
+    const reported: Array<{ error: unknown; options: LoadSubsetOptions }> = []
+    const subscription = collection.subscribeChanges((changes) => {
+      for (const change of changes) {
+        if (change.type === `delete`) visible.delete(String(change.key))
+        else visible.add(String(change.key))
+      }
+    })
+    owner.current = subscription
+    subscription.on(`loadSubset:error`, ({ error, options }) =>
+      reported.push({ error, options }),
+    )
+
+    try {
+      subscription.requestSnapshot({ where: whereA })
+      subscription.requestSnapshot({ where: whereB })
+      begin()
+      truncate()
+      commit()
+      await flushPromises()
+
+      replayA.resolve()
+      replayB.resolve()
+      await flushPromises()
+
+      expect(reported.map(({ error }) => error)).toEqual([
+        pendingBFailure,
+        currentBFailure,
+      ])
+      expect(reported[0]?.options).toBe(loads[3])
+      expect(reported[1]?.options).toBe(loads[1])
+      expect(unloads.map((options) => loads.indexOf(options))).toEqual([
+        0, 3, 1, 2, 3,
+      ])
+      expect([...visible].sort()).toEqual([`a`, `b`])
+      expect(subscription.status).toBe(`ready`)
+
+      subscription.unsubscribe()
+      expect(unloads.map((options) => loads.indexOf(options))).toEqual([
+        0, 3, 1, 2, 3, 0, 1,
+      ])
+    } finally {
+      subscription.unsubscribe()
+      await collection.cleanup()
+    }
+  })
+
   it(`collects inactive demand state after late replay cleanup succeeds`, async () => {
     type Row = { id: string; rank: number }
     type Outcome = { hasMore: boolean; appliedRowKeys: ReadonlyArray<string> }

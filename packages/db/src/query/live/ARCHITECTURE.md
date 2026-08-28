@@ -539,7 +539,11 @@ payload identity. This distinguishes no reported error from a reported
 Automatic replay handoff follows the same boundary law. A failed release of the
 old acquisition and a failed discard of its replacement are two reportable
 occurrences, each tied to its own exact options object. Reentrant owner release
-cannot make replacement cleanup appear to belong to the old acquisition.
+cannot make replacement cleanup appear to belong to the old acquisition. The
+same rule crosses logical demands: if one adapter cleanup reentrantly releases
+another demand, an automatic-cleanup frame carries every nested occurrence
+through the outer callback without merging them into an aggregate event or
+relabeling them as the outer acquisition.
 A requested limit, a settled promise, or the number of requests does not.
 Applied keys carry two distinct facts. Every applied source key may advance the
 continuation cursor, including a row excluded by the subscription predicate.

@@ -8,7 +8,7 @@ type Delivery = `throw` | `reject`
 type Consumer = `effect` | `live`
 type StartupPath = `direct` | `ordered` | `lazy`
 type IncrementalPath = Exclude<StartupPath, `direct`>
-type FailureValue = `error` | `nan`
+type FailureValue = `error` | `nan` | `undefined`
 
 type Row = {
   id: number
@@ -56,7 +56,7 @@ const incrementalCases: ReadonlyArray<IncrementalFailureCase> = (
 ).flatMap((consumer) =>
   ([`ordered`, `lazy`] as const).flatMap((path) =>
     ([`throw`, `reject`] as const).flatMap((delivery) =>
-      ([`error`, `nan`] as const).map((failureValue) => ({
+      ([`error`, `nan`, `undefined`] as const).map((failureValue) => ({
         name: `${consumer} ${path} ${delivery} ${failureValue}`,
         consumer,
         path,
@@ -81,7 +81,12 @@ function fail(delivery: Delivery, error: unknown): Promise<never> {
   return Promise.reject(error)
 }
 
-function createFailingSource(id: string, delivery: Delivery, error: unknown) {
+function createFailingSource(
+  id: string,
+  delivery: Delivery,
+  error: unknown,
+  onLoad = () => {},
+) {
   return createCollection<Row>({
     id,
     getKey: (item) => item.id,
@@ -92,7 +97,10 @@ function createFailingSource(id: string, delivery: Delivery, error: unknown) {
       sync: ({ markReady }) => {
         markReady()
         return {
-          loadSubset: () => fail(delivery, error),
+          loadSubset: () => {
+            onLoad()
+            return fail(delivery, error)
+          },
         }
       },
     },
@@ -245,17 +253,19 @@ describe(`loadSubset failure matrix`, () => {
       const error: unknown =
         failureValue === `nan`
           ? Number.NaN
-          : new Error(`${consumer} ${path} incremental failed`)
+          : failureValue === `undefined`
+            ? undefined
+            : new Error(`${consumer} ${path} incremental failed`)
       const suffix = `${consumer}-${path}-${delivery}-${failureValue}`
       let triggerFailure: () => void
       let primary: RowCollection
       let child: RowCollection
+      let loadCount = 0
 
       if (path === `ordered`) {
         let begin!: () => void
         let write!: (message: { type: `insert` | `delete`; value: Row }) => void
         let commit!: () => void
-        let loadCount = 0
         primary = createCollection<Row>({
           id: `failure-matrix-incremental-ordered-${suffix}`,
           getKey: (item) => item.id,
@@ -296,6 +306,7 @@ describe(`loadSubset failure matrix`, () => {
           `failure-matrix-incremental-child-${suffix}`,
           delivery,
           error,
+          () => loadCount++,
         )
         triggerFailure = () => {
           primary.utils.begin()
@@ -335,6 +346,8 @@ describe(`loadSubset failure matrix`, () => {
             await live.cleanup()
           }
         }
+
+        expect(loadCount).toBe(path === `ordered` ? 2 : 1)
 
         expect(primary.subscriberCount).toBe(0)
         if (path === `lazy`) expect(child.subscriberCount).toBe(0)
