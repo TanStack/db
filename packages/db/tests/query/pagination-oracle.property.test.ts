@@ -1681,48 +1681,69 @@ async function expectInflightRequestFillsNewWindow(): Promise<void> {
 
 describe(`pagination recomputation oracle`, () => {
   it(`observes cleanup failure after every teardown settles`, async () => {
-    const failure = new Error(`cleanup failed`)
+    const firstFailure = new Error(`first cleanup failed`)
+    const secondFailure = new Error(`second cleanup failed`)
     const laterCleanup = createDeferred<void>()
     const events: Array<string> = []
     const unhandled: Array<unknown> = []
     const recordUnhandled = (reason: unknown) => unhandled.push(reason)
+    const targets: ReadonlyArray<CleanupTarget> = [
+      {
+        cleanup: () => {
+          events.push(`first`)
+          throw firstFailure
+        },
+      },
+      {
+        cleanup: async () => {
+          events.push(`second`)
+          await laterCleanup.promise
+          throw secondFailure
+        },
+      },
+      {
+        cleanup: () => {
+          events.push(`third`)
+        },
+      },
+    ]
+    const observeFirstFailure = (cleanup: Promise<void>) =>
+      cleanup.then(
+        () => {
+          throw new Error(`expected cleanup to reject`)
+        },
+        (error: unknown) => expect(error).toBe(firstFailure),
+      )
     let cleanupFinished = false
     process.on(`unhandledRejection`, recordUnhandled)
 
     try {
-      const cleanup = cleanupAll(
-        {
-          cleanup: () => {
-            events.push(`failed`)
-            return Promise.reject(failure)
-          },
-        },
-        {
-          cleanup: async () => {
-            await laterCleanup.promise
-            events.push(`settled`)
-          },
-        },
-      ).finally(() => {
+      const cleanup = cleanupAll(...targets).finally(() => {
         cleanupFinished = true
       })
-      const observedFailure = cleanup.then(
-        () => {
-          throw new Error(`expected cleanup to reject`)
-        },
-        (error: unknown) => expect(error).toBe(failure),
-      )
+      const observedFailure = observeFirstFailure(cleanup)
 
       await flushPromises()
-      expect(events).toEqual([`failed`])
+      expect(events).toEqual([`first`, `second`, `third`])
       expect(cleanupFinished).toBe(false)
       expect(unhandled).toEqual([])
 
       laterCleanup.resolve()
       await observedFailure
       await flushPromises()
-      expect(events).toEqual([`failed`, `settled`])
       expect(cleanupFinished).toBe(true)
+      expect(unhandled).toEqual([])
+
+      await observeFirstFailure(cleanupAll(...targets))
+      await flushPromises()
+      expect(events).toEqual([
+        `first`,
+        `second`,
+        `third`,
+        `first`,
+        `second`,
+        `third`,
+      ])
       expect(unhandled).toEqual([])
     } finally {
       laterCleanup.resolve()
