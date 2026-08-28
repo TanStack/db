@@ -8,6 +8,7 @@ type Delivery = `throw` | `reject`
 type Consumer = `effect` | `live`
 type StartupPath = `direct` | `ordered` | `lazy`
 type IncrementalPath = Exclude<StartupPath, `direct`>
+type FailureValue = `error` | `nan`
 
 type Row = {
   id: number
@@ -20,6 +21,10 @@ type FailureCase<TPath extends StartupPath> = {
   consumer: Consumer
   path: TPath
   delivery: Delivery
+}
+
+type IncrementalFailureCase = FailureCase<IncrementalPath> & {
+  failureValue: FailureValue
 }
 
 const row: Row = { id: 1, rank: 1, parentId: 1 }
@@ -40,25 +45,28 @@ const startupCases: ReadonlyArray<FailureCase<StartupPath>> = (
 
 // Direct queries have no automatic later demand. Ordered refills and lazy
 // relationship routes do, so only those paths have incremental cells.
-const incrementalCases: ReadonlyArray<FailureCase<IncrementalPath>> = (
+const incrementalCases: ReadonlyArray<IncrementalFailureCase> = (
   [`effect`, `live`] as const
 ).flatMap((consumer) =>
   ([`ordered`, `lazy`] as const).flatMap((path) =>
-    ([`throw`, `reject`] as const).map((delivery) => ({
-      name: `${consumer} ${path} ${delivery}`,
-      consumer,
-      path,
-      delivery,
-    })),
+    ([`throw`, `reject`] as const).flatMap((delivery) =>
+      ([`error`, `nan`] as const).map((failureValue) => ({
+        name: `${consumer} ${path} ${delivery} ${failureValue}`,
+        consumer,
+        path,
+        delivery,
+        failureValue,
+      })),
+    ),
   ),
 )
 
-function fail(delivery: Delivery, error: Error): Promise<never> {
+function fail(delivery: Delivery, error: unknown): Promise<never> {
   if (delivery === `throw`) throw error
   return Promise.reject(error)
 }
 
-function createFailingSource(id: string, delivery: Delivery, error: Error) {
+function createFailingSource(id: string, delivery: Delivery, error: unknown) {
   return createCollection<Row>({
     id,
     getKey: (item) => item.id,
@@ -218,9 +226,12 @@ describe(`loadSubset failure matrix`, () => {
 
   it.each(incrementalCases)(
     `reports an incremental failure without escaping its source commit: $name`,
-    async ({ consumer, path, delivery }) => {
-      const error = new Error(`${consumer} ${path} incremental failed`)
-      const suffix = `${consumer}-${path}-${delivery}`
+    async ({ consumer, path, delivery, failureValue }) => {
+      const error: unknown =
+        failureValue === `nan`
+          ? Number.NaN
+          : new Error(`${consumer} ${path} incremental failed`)
+      const suffix = `${consumer}-${path}-${delivery}-${failureValue}`
       let triggerFailure: () => void
       let primary: RowCollection
       let child: RowCollection
@@ -286,7 +297,12 @@ describe(`loadSubset failure matrix`, () => {
             triggerFailure()
             await flushFailures()
 
-            expect(sourceErrors).toEqual([error])
+            expect(sourceErrors).toHaveLength(1)
+            if (failureValue === `error`) {
+              expect(sourceErrors[0]).toBe(error)
+            } else {
+              expect(sourceErrors[0]).toBeInstanceOf(Error)
+            }
             expect(effect.disposed).toBe(true)
           } finally {
             await effect.dispose()
@@ -299,7 +315,7 @@ describe(`loadSubset failure matrix`, () => {
             await flushFailures()
 
             expect(live.status).toBe(path === `lazy` ? `error` : `ready`)
-            expect(live.utils.lastSubsetError).toBe(error)
+            expect(Object.is(live.utils.lastSubsetError, error)).toBe(true)
           } finally {
             await live.cleanup()
           }

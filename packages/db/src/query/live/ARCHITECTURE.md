@@ -528,6 +528,12 @@ identity, distinguish occurrences: a later cleanup remains a separate failure
 even when it throws the same value. A callback frame retains every boundary
 occurrence and associates a propagated value with the latest SameValue match,
 so `undefined`, `NaN`, primitives, and objects follow the same law.
+One logical release may cross both a pending replacement acquisition and its
+original acquisition. If several cleanup boundaries fail, the callback frame
+retains them as one propagated group and reports every occurrence against its
+exact acquisition options after restoration. Effect and Live Collection error
+classification also uses SameValue semantics; a reported `NaN` is not a new
+graph failure merely because `NaN !== NaN`.
 A requested limit, a settled promise, or the number of requests does not.
 Applied keys carry two distinct facts. Every applied source key may advance the
 continuation cursor, including a row excluded by the subscription predicate.
@@ -657,7 +663,11 @@ through generic delivery.
 Unsubscription closes the acquisition boundary before adapter cleanup starts.
 An `unloadSubset` callback or unsubscribe listener may reenter public request
 methods, but those methods cannot start a new acquisition after teardown has
-begun. Repeated unsubscribe calls may still retry retained cleanup debt.
+begun. Teardown attempts every owned acquisition. It rethrows one failure
+unchanged, or an `AggregateError` whose ordered `errors` list retains every
+failure occurrence when several boundaries fail. Repeated unsubscribe calls
+may still retry each retained cleanup debt against the same acquisition
+options.
 
 Its semantic contract is:
 

@@ -1962,6 +1962,7 @@ describe(`createEffect`, () => {
       const loadFailure = new Error(`ordered subset failed`)
       const cleanupFailure = new Error(`ordered subset cleanup failed`)
       let loadCount = 0
+      let unloadCount = 0
       let removeVisibleRow: () => void = () => {
         throw new Error(`source has not started`)
       }
@@ -1989,6 +1990,7 @@ describe(`createEffect`, () => {
                 return Promise.resolve()
               },
               unloadSubset: () => {
+                unloadCount++
                 throw cleanupFailure
               },
             }
@@ -2016,12 +2018,17 @@ describe(`createEffect`, () => {
 
         expect(sourceErrors).toEqual([loadFailure])
         expect(effect.disposed).toBe(true)
-        expect(consoleErrorSpy).toHaveBeenCalledWith(
-          expect.stringContaining(`failed to dispose after a source error`),
+        expect(unloadCount).toBe(2)
+        const cleanupError = consoleErrorSpy.mock.calls.find(([message]) =>
+          String(message).includes(`failed to dispose after a source error`),
+        )?.[1]
+        expect(cleanupError).toBeInstanceOf(AggregateError)
+        expect((cleanupError as AggregateError).errors).toEqual([
           cleanupFailure,
-        )
+          cleanupFailure,
+        ])
+        await expect(effect.dispose()).rejects.toBe(cleanupError)
       } finally {
-        await expect(effect.dispose()).rejects.toBe(cleanupFailure)
         consoleErrorSpy.mockRestore()
         await users.cleanup()
       }

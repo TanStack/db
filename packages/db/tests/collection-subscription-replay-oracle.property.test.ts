@@ -3726,6 +3726,237 @@ describe(`CollectionSubscription replay oracle`, () => {
     },
   )
 
+  it.each(
+    ([`unordered`, `ordered`] as const).flatMap((demandKind) =>
+      ([`distinct`, `shared`] as const).map(
+        (failureValues) => [demandKind, failureValues] as const,
+      ),
+    ),
+  )(
+    `reports every acquisition cleanup failure from one replay callback release: %s %s`,
+    async (demandKind, failureValues) => {
+      type Row = { id: string; rank: number; version: number }
+      const where = new Func(`eq`, [new PropRef([`id`]), new Value(`a`)])
+      const orderBy: OrderBy = [
+        {
+          expression: new PropRef([`rank`]),
+          compareOptions: { direction: `asc`, nulls: `first` },
+        },
+      ]
+      const replay = createDeferred<void>()
+      const sharedFailure = new Error(`shared cleanup failure`)
+      const replayFailure =
+        failureValues === `shared`
+          ? sharedFailure
+          : new Error(`replay cleanup failed`)
+      const initialFailure =
+        failureValues === `shared`
+          ? sharedFailure
+          : new Error(`initial cleanup failed`)
+      let begin!: () => void
+      let write!: (
+        message: ChangeMessageOrDeleteKeyMessage<Row, string>,
+      ) => void
+      let commit!: (signal?: AbortSignal) => true | Promise<void>
+      let truncate!: () => void
+      let loadCount = 0
+      let callbackCount = 0
+      const loads: Array<LoadSubsetOptions> = []
+      const unloads: Array<LoadSubsetOptions> = []
+      const failedOnce = new Set<LoadSubsetOptions>()
+      const collection = createCollection<Row>({
+        id: `multi-cleanup-callback-${demandKind}-${failureValues}`,
+        getKey: (row) => row.id,
+        syncMode: `on-demand`,
+        sync: {
+          sync: (params) => {
+            begin = params.begin
+            write = params.write
+            commit = params.commit
+            truncate = params.truncate
+            params.markReady()
+            return {
+              loadSubset: (options) => {
+                loads.push(options)
+                loadCount++
+                if (loadCount === 1) {
+                  begin()
+                  write({
+                    type: `insert`,
+                    value: { id: `a`, rank: 1, version: 1 },
+                  })
+                  commit(options.signal)
+                  return Promise.resolve()
+                }
+                return replay.promise
+              },
+              unloadSubset: (options) => {
+                unloads.push(options)
+                if (failedOnce.has(options)) return
+                failedOnce.add(options)
+                if (options === loads[1]) throw replayFailure
+                if (options === loads[0]) throw initialFailure
+              },
+            }
+          },
+        },
+      })
+      const visible = new Map<string, Row>()
+      const errorObservations: Array<{
+        error: unknown
+        options: LoadSubsetOptions
+        visibleVersion: number | undefined
+      }> = []
+      const subscription = collection.subscribeChanges(
+        (changes) => {
+          for (const change of changes) {
+            const key = String(change.key)
+            if (change.type === `delete`) visible.delete(key)
+            else visible.set(key, change.value)
+          }
+        },
+        { whereExpression: where },
+      )
+      subscription.on(`loadSubset:error`, ({ error, options }) => {
+        errorObservations.push({
+          error,
+          options,
+          visibleVersion: visible.get(`a`)?.version,
+        })
+      })
+      if (demandKind === `ordered`) {
+        const index = collection.createIndex((row) => row.rank, {
+          indexType: BTreeIndex,
+        })
+        subscription.setOrderByIndex(index)
+      }
+      const onLoadSubsetResult = () => {
+        callbackCount++
+        if (callbackCount === 2) subscription.releaseSnapshot(where)
+      }
+
+      try {
+        if (demandKind === `ordered`) {
+          subscription.requestLimitedSnapshot({
+            orderBy,
+            limit: 1,
+            onLoadSubsetResult,
+          })
+        } else {
+          subscription.requestSnapshot({ where, onLoadSubsetResult })
+        }
+        await flushPromises()
+        expect(visible.get(`a`)?.version).toBe(1)
+
+        begin()
+        truncate()
+        commit()
+        await flushPromises()
+        replay.resolve()
+        await flushPromises()
+        await flushPromises()
+
+        expect(errorObservations).toHaveLength(2)
+        expect(Object.is(errorObservations[0]?.error, replayFailure)).toBe(true)
+        expect(errorObservations[0]?.options).toBe(loads[1])
+        expect(Object.is(errorObservations[1]?.error, initialFailure)).toBe(
+          true,
+        )
+        expect(errorObservations[1]?.options).toBe(loads[0])
+        const finalVisibleVersion = visible.get(`a`)?.version
+        expect(
+          errorObservations.map(({ visibleVersion }) => visibleVersion),
+        ).toEqual([finalVisibleVersion, finalVisibleVersion])
+        expect(subscription.status).toBe(`ready`)
+
+        subscription.unsubscribe()
+        expect(unloads.filter((options) => options === loads[1])).toHaveLength(
+          2,
+        )
+        expect(unloads.filter((options) => options === loads[0])).toHaveLength(
+          2,
+        )
+      } finally {
+        subscription.unsubscribe()
+        await collection.cleanup()
+      }
+    },
+  )
+
+  it.each([`distinct`, `shared`, `undefined`] as const)(
+    `aggregates every public unsubscribe cleanup failure and retries exact acquisitions: %s`,
+    async (failureValues) => {
+      type Row = { id: string }
+      const whereA = new Func(`eq`, [new PropRef([`id`]), new Value(`a`)])
+      const whereB = new Func(`eq`, [new PropRef([`id`]), new Value(`b`)])
+      const sharedFailure = new Error(`shared unsubscribe failure`)
+      const failures: ReadonlyArray<unknown> =
+        failureValues === `undefined`
+          ? [undefined, undefined]
+          : failureValues === `shared`
+            ? [sharedFailure, sharedFailure]
+            : [
+                new Error(`first unsubscribe failure`),
+                new Error(`second unsubscribe failure`),
+              ]
+      const loads: Array<LoadSubsetOptions> = []
+      const unloads: Array<LoadSubsetOptions> = []
+      const failedOnce = new Set<LoadSubsetOptions>()
+      const collection = createCollection<Row>({
+        id: `aggregate-unsubscribe-cleanup-${failureValues}`,
+        getKey: (row) => row.id,
+        syncMode: `on-demand`,
+        sync: {
+          sync: ({ markReady }) => {
+            markReady()
+            return {
+              loadSubset: (options) => {
+                loads.push(options)
+                return true
+              },
+              unloadSubset: (options) => {
+                unloads.push(options)
+                if (failedOnce.has(options)) return
+                failedOnce.add(options)
+                const index = loads.indexOf(options)
+                if (index !== -1) throw failures[index]
+              },
+            }
+          },
+        },
+      })
+      const subscription = collection.subscribeChanges(() => {})
+
+      try {
+        subscription.requestSnapshot({ where: whereA })
+        subscription.requestSnapshot({ where: whereB })
+        expect(loads).toHaveLength(2)
+
+        let didThrow = false
+        let thrownValue: unknown
+        try {
+          subscription.unsubscribe()
+        } catch (error) {
+          didThrow = true
+          thrownValue = error
+        }
+
+        expect(didThrow).toBe(true)
+        expect(thrownValue).toBeInstanceOf(AggregateError)
+        const aggregateErrors = (thrownValue as AggregateError).errors
+        expect(aggregateErrors).toHaveLength(2)
+        expect(Object.is(aggregateErrors[0], failures[0])).toBe(true)
+        expect(Object.is(aggregateErrors[1], failures[1])).toBe(true)
+        expect(unloads).toEqual(loads)
+
+        expect(() => subscription.unsubscribe()).not.toThrow()
+        expect(unloads).toEqual([...loads, ...loads])
+      } finally {
+        await collection.cleanup()
+      }
+    },
+  )
+
   it(`surfaces undefined teardown failure and retries its exact cleanup`, async () => {
     type Row = { id: string }
     const where = new Func(`eq`, [new PropRef([`id`]), new Value(`a`)])

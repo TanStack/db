@@ -151,10 +151,37 @@ type ReplayCallbackFailure = Readonly<{
   attributed: boolean
 }>
 
+type ReplayCallbackFailureGroup = Readonly<{
+  propagatedError: unknown
+  failures: ReadonlyArray<ReplayCallbackFailure>
+}>
+
 type ReplayResultCallbackFrame = {
   replayContext: TruncateReplayContext
   previous: ReplayResultCallbackFrame | undefined
-  failures: Array<ReplayCallbackFailure>
+  failureGroups: Array<ReplayCallbackFailureGroup>
+}
+
+class SubsetCleanupAggregateError extends AggregateError {
+  constructor(errors: ReadonlyArray<unknown>) {
+    super(errors, `Several subset acquisition releases failed`)
+  }
+}
+
+function createSubsetCleanupError(errors: ReadonlyArray<unknown>): unknown {
+  if (errors.length === 1) return errors[0]
+  return new SubsetCleanupAggregateError(errors)
+}
+
+function appendSubsetCleanupErrors(
+  errors: Array<unknown>,
+  error: unknown,
+): void {
+  if (error instanceof SubsetCleanupAggregateError) {
+    errors.push(...error.errors)
+  } else {
+    errors.push(error)
+  }
 }
 
 export class CollectionSubscription
@@ -580,10 +607,10 @@ export class CollectionSubscription
     session.errors.push({ options, error })
   }
 
-  /** Record which adapter failure occurrence is propagating through a callback. */
-  private noteReplayCallbackFailure(
+  /** Record which adapter failure occurrences propagate through one callback. */
+  private noteReplayCallbackFailures(
     replayContext: TruncateReplayContext | undefined,
-    failure: ReplayCallbackFailure,
+    group: ReplayCallbackFailureGroup,
   ): void {
     const frame = this.activeReplayResultCallback
     if (
@@ -592,7 +619,7 @@ export class CollectionSubscription
     ) {
       return
     }
-    frame.failures.push(failure)
+    frame.failureGroups.push(group)
   }
 
   /** Attribute one replay callback failure without merging equal payloads. */
@@ -612,29 +639,37 @@ export class CollectionSubscription
     const frame: ReplayResultCallbackFrame = {
       replayContext,
       previous: this.activeReplayResultCallback,
-      failures: [],
+      failureGroups: [],
     }
     this.activeReplayResultCallback = frame
     try {
       callback()
     } catch (error) {
       if (this.truncateReplaySession !== replayContext.session) throw error
-      let propagated: ReplayCallbackFailure | undefined
-      for (let index = frame.failures.length - 1; index >= 0; index--) {
-        const failure = frame.failures[index]
-        if (failure && Object.is(failure.error, error)) {
-          propagated = failure
+      let propagated: ReplayCallbackFailureGroup | undefined
+      for (let index = frame.failureGroups.length - 1; index >= 0; index--) {
+        const group = frame.failureGroups[index]
+        if (group && Object.is(group.propagatedError, error)) {
+          propagated = group
           break
         }
       }
-      if (!propagated?.attributed) {
+      const unattributed = propagated?.failures.filter(
+        (failure) => !failure.attributed,
+      )
+      if (!propagated || (unattributed && unattributed.length > 0)) {
         replayContext.attempt.failed = true
-        const failureOptions = propagated?.options ?? options
-        this.queueTruncateReplayError(
-          replayContext.session,
-          failureOptions,
-          error,
-        )
+        if (unattributed) {
+          for (const failure of unattributed) {
+            this.queueTruncateReplayError(
+              replayContext.session,
+              failure.options,
+              failure.error,
+            )
+          }
+        } else {
+          this.queueTruncateReplayError(replayContext.session, options, error)
+        }
         this.checkTruncateReplayComplete(replayContext.session)
       }
     } finally {
@@ -1397,16 +1432,16 @@ export class CollectionSubscription
     demand.releaseInProgress = true
     try {
       demand.abortController?.abort()
-      let firstReleaseFailure: ReplayCallbackFailure | undefined
+      const releaseFailures: Array<ReplayCallbackFailure> = []
       for (const pending of [...demand.pendingReplayAcquisitions]) {
         try {
           this.releaseReplayAcquisitionUnprotected(demand, pending)
         } catch (error) {
-          firstReleaseFailure ??= {
+          releaseFailures.push({
             error,
             options: pending.options,
             attributed: false,
-          }
+          })
         }
       }
       if (!demand.releaseSettled) {
@@ -1416,18 +1451,24 @@ export class CollectionSubscription
           demand.releaseSettled = true
         } catch (error) {
           demand.releaseFailed = true
-          firstReleaseFailure ??= {
+          releaseFailures.push({
             error,
             options: demand.options,
             attributed: false,
-          }
+          })
         } finally {
           demand.removeRequestAbortListener?.()
         }
       }
-      if (firstReleaseFailure) {
-        this.noteReplayCallbackFailure(undefined, firstReleaseFailure)
-        throw firstReleaseFailure.error
+      if (releaseFailures.length > 0) {
+        const propagatedError = createSubsetCleanupError(
+          releaseFailures.map(({ error }) => error),
+        )
+        this.noteReplayCallbackFailures(undefined, {
+          propagatedError,
+          failures: releaseFailures,
+        })
+        throw propagatedError
       }
     } finally {
       demand.releaseInProgress = false
@@ -1496,10 +1537,15 @@ export class CollectionSubscription
             acquisition.options,
             error,
           )
-          this.noteReplayCallbackFailure(replayContext, {
-            error,
-            options: acquisition.options,
-            attributed: true,
+          this.noteReplayCallbackFailures(replayContext, {
+            propagatedError: error,
+            failures: [
+              {
+                error,
+                options: acquisition.options,
+                attributed: true,
+              },
+            ],
           })
           this.checkTruncateReplayComplete(replayContext.session)
         } else {
@@ -2293,13 +2339,13 @@ export class CollectionSubscription
     // unsubscribe listeners may reenter public methods, but they cannot create
     // work that escapes the cleanup pass already in progress.
     this.unsubscribed = true
-    let firstCleanupFailure: { error: unknown } | undefined
+    const cleanupErrors: Array<unknown> = []
 
     // Clean up truncate event listener
     try {
       this.truncateCleanup?.()
     } catch (error) {
-      firstCleanupFailure = { error }
+      cleanupErrors.push(error)
     }
     this.truncateCleanup = undefined
 
@@ -2314,7 +2360,7 @@ export class CollectionSubscription
       try {
         this.releaseSubsetDemand(demand)
       } catch (error) {
-        firstCleanupFailure ??= { error }
+        appendSubsetCleanupErrors(cleanupErrors, error)
       }
     }
     this.subsetDemands = this.subsetDemands.filter(
@@ -2328,12 +2374,14 @@ export class CollectionSubscription
         subscription: this,
       })
     } catch (error) {
-      firstCleanupFailure ??= { error }
+      cleanupErrors.push(error)
     } finally {
       // Clear all event listeners to prevent memory leaks
       this.clearListeners()
     }
 
-    if (firstCleanupFailure) throw firstCleanupFailure.error
+    if (cleanupErrors.length > 0) {
+      throw createSubsetCleanupError(cleanupErrors)
+    }
   }
 }

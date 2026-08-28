@@ -743,7 +743,7 @@ class EffectPipelineRunner<TRow extends object, TKey extends string | number> {
       // The subscription error event already reports adapter failures and
       // disposes this effect. Do not let that query-local failure escape the
       // source commit, but keep unrelated graph errors visible.
-      if (subscription.lastError !== error) throw error
+      if (!Object.is(subscription.lastError, error)) throw error
       if (this.starting) throw error
       return
     }
@@ -1079,7 +1079,7 @@ class EffectPipelineRunner<TRow extends object, TKey extends string | number> {
           this.trackOrderedLoad(loadResult, sourceId),
       })
     } catch (error) {
-      if (subscription.lastError !== error) throw error
+      if (!Object.is(subscription.lastError, error)) throw error
       // subscribeChanges already routed the error through onSourceError. Do
       // not let an automatic refill fail the source transaction that exposed
       // the missing row.

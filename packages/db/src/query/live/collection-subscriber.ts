@@ -227,7 +227,7 @@ export class CollectionSubscriber<
       // Convert that synchronous form to the same query-local fatal demand
       // state as a rejected load, without letting it escape the source commit.
       // Preserve unrelated graph/programming errors as throws.
-      if (subscription.lastError !== error) throw error
+      if (!Object.is(subscription.lastError, error)) throw error
       const isInitialSync =
         this.collectionConfigBuilder.liveQueryCollection?.status === `loading`
       const generation = this.collectionConfigBuilder.beginDemand(plan.id)
@@ -497,7 +497,7 @@ export class CollectionSubscriber<
       // prefix. One row is enough to request the boundary equivalence class.
       this.loadNextItems(Math.max(1, n), subscription)
     } catch (error) {
-      if (subscription.lastError !== error) throw error
+      if (!Object.is(subscription.lastError, error)) throw error
       // The subscription already reported the failure. Automatic refills
       // must not make the source transaction that exposed the gap fail.
     }
