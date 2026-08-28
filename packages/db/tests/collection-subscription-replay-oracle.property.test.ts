@@ -1872,6 +1872,236 @@ describe(`CollectionSubscription replay oracle`, () => {
     },
   )
 
+  it.each([`asc`, `desc`] as const)(
+    `keeps failed ordered replay deltas inside the retained top-K window: %s`,
+    async (direction) => {
+      type Row = { id: `a` | `b` | `z`; rank: number }
+      type Outcome = {
+        hasMore: boolean
+        appliedRowKeys: ReadonlyArray<Row[`id`]>
+      }
+      let begin!: () => void
+      let write!: (
+        message: ChangeMessageOrDeleteKeyMessage<Row, Row[`id`]>,
+      ) => void
+      let commit!: () => void
+      let truncate!: () => void
+      let loadCount = 0
+      const replay = createDeferred<Outcome>()
+      const collection = createCollection<Row>({
+        id: `failed-ordered-top-k-delta-${direction}`,
+        getKey: (row) => row.id,
+        syncMode: `on-demand`,
+        sync: {
+          sync: (params) => {
+            begin = params.begin
+            write = params.write
+            commit = params.commit
+            truncate = params.truncate
+            params.markReady()
+            return {
+              loadSubset: () => {
+                loadCount++
+                if (loadCount === 1) {
+                  begin()
+                  write({ type: `insert`, value: { id: `a`, rank: 1 } })
+                  commit()
+                  return Promise.resolve({
+                    hasMore: false,
+                    appliedRowKeys: [`a`] as const,
+                  })
+                }
+                return replay.promise
+              },
+              unloadSubset: () => {},
+            }
+          },
+        },
+      })
+      const ascendingIndex = collection.createIndex((row) => row.rank, {
+        indexType: BTreeIndex,
+      })
+      const index =
+        direction === `asc` ? ascendingIndex : new ReverseIndex(ascendingIndex)
+      const orderBy: OrderBy = [
+        {
+          expression: new PropRef([`rank`]),
+          compareOptions: { direction, nulls: `first` },
+        },
+      ]
+      const visible = new Set<Row[`id`]>()
+      const batches: Array<Array<Row[`id`]>> = []
+      const subscription = collection.subscribeChanges((changes) => {
+        batches.push(changes.map(({ key }) => key as Row[`id`]))
+        for (const change of changes) {
+          const key = change.key as Row[`id`]
+          if (change.type === `delete`) visible.delete(key)
+          else visible.add(key)
+        }
+      })
+      subscription.setOrderByIndex(index)
+
+      try {
+        subscription.requestLimitedSnapshot({ orderBy, limit: 1 })
+        await flushPromises()
+        expect([...visible]).toEqual([`a`])
+
+        begin()
+        truncate()
+        commit()
+        await flushPromises()
+        replay.reject(new Error(`ordered replay failed`))
+        await flushPromises()
+
+        const batchesBeforeDelta = batches.length
+        // Reconfirm the retained public row in the new source generation. This
+        // must not emit a duplicate, but it makes a later source delete real.
+        begin()
+        write({ type: `insert`, value: { id: `a`, rank: 1 } })
+        commit()
+        begin()
+        write({
+          type: `insert`,
+          value: { id: `z`, rank: direction === `asc` ? 100 : -100 },
+        })
+        commit()
+
+        expect([...visible]).toEqual([`a`])
+        expect(batches).toHaveLength(batchesBeforeDelta)
+        expect(subscription.orderedBoundaryKey).toBe(`a`)
+
+        begin()
+        write({
+          type: `insert`,
+          value: { id: `b`, rank: direction === `asc` ? 0 : 2 },
+        })
+        commit()
+        expect([...visible]).toEqual([`b`])
+        expect(subscription.orderedBoundaryKey).toBe(`b`)
+
+        begin()
+        write({ type: `delete`, key: `b` })
+        commit()
+        expect([...visible]).toEqual([`a`])
+        expect(subscription.orderedBoundaryKey).toBe(`a`)
+
+        begin()
+        write({ type: `delete`, key: `a` })
+        commit()
+        expect([...visible]).toEqual([`z`])
+        expect(subscription.orderedBoundaryKey).toBe(`z`)
+      } finally {
+        subscription.unsubscribe()
+        await collection.cleanup()
+      }
+    },
+  )
+
+  it(`retains an empty failed ordered publication across invisible deltas`, async () => {
+    type Row = {
+      id: `private` | `invisible`
+      rank: number
+      route: `visible` | `invisible`
+    }
+    type Outcome = {
+      hasMore: boolean
+      appliedRowKeys: ReadonlyArray<Row[`id`]>
+    }
+    let begin!: () => void
+    let write!: (
+      message: ChangeMessageOrDeleteKeyMessage<Row, Row[`id`]>,
+    ) => void
+    let commit!: () => void
+    let truncate!: () => void
+    let loadCount = 0
+    const replay = createDeferred<Outcome>()
+    const laterLoad = createDeferred<Outcome>()
+    const loadOptions: Array<LoadSubsetOptions> = []
+    const collection = createCollection<Row>({
+      id: `empty-failed-ordered-invisible-delta`,
+      getKey: (row) => row.id,
+      syncMode: `on-demand`,
+      sync: {
+        sync: (params) => {
+          begin = params.begin
+          write = params.write
+          commit = params.commit
+          truncate = params.truncate
+          params.markReady()
+          return {
+            loadSubset: (options) => {
+              loadCount++
+              loadOptions.push(options)
+              if (loadCount === 1) {
+                return Promise.resolve({
+                  hasMore: false,
+                  appliedRowKeys: [] as const,
+                })
+              }
+              return loadCount === 2 ? replay.promise : laterLoad.promise
+            },
+            unloadSubset: () => {},
+          }
+        },
+      },
+    })
+    const index = collection.createIndex((row) => row.rank, {
+      indexType: BTreeIndex,
+    })
+    const orderBy: OrderBy = [
+      {
+        expression: new PropRef([`rank`]),
+        compareOptions: { direction: `asc`, nulls: `first` },
+      },
+    ]
+    const where = new Func(`eq`, [new PropRef([`route`]), new Value(`visible`)])
+    let publishedChangeCount = 0
+    const subscription = collection.subscribeChanges(
+      (changes) => {
+        publishedChangeCount += changes.length
+      },
+      { whereExpression: where },
+    )
+    subscription.setOrderByIndex(index)
+
+    try {
+      subscription.requestLimitedSnapshot({ orderBy, limit: 1 })
+      await flushPromises()
+      expect(publishedChangeCount).toBe(0)
+      expect(subscription.orderedBoundaryKey).toBeUndefined()
+
+      begin()
+      truncate()
+      commit()
+      await flushPromises()
+      begin()
+      write({
+        type: `insert`,
+        value: { id: `private`, rank: 10, route: `visible` },
+      })
+      commit()
+      replay.reject(new Error(`ordered replay failed`))
+      await flushPromises()
+
+      begin()
+      write({
+        type: `insert`,
+        value: { id: `invisible`, rank: 0, route: `invisible` },
+      })
+      commit()
+
+      subscription.requestLimitedSnapshot({ orderBy, limit: 1 })
+      expect(loadOptions).toHaveLength(3)
+      expect(loadOptions[2]).toMatchObject({ offset: 0 })
+      expect(loadOptions[2]?.cursor).toBeUndefined()
+      expect(subscription.orderedBoundaryKey).toBeUndefined()
+      expect(publishedChangeCount).toBe(0)
+    } finally {
+      subscription.unsubscribe()
+      await collection.cleanup()
+    }
+  })
+
   it(`uses the published replacement as the baseline of a reentrant replay`, async () => {
     let begin!: () => void
     let write!: (

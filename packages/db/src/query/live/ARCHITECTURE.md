@@ -407,7 +407,13 @@ still-active demand publishes no replacement batch.
 owns the last complete reader-visible publication as one snapshot: its rows,
 sent keys, and optional ordered prefix size and total-order boundary. An active
 or failed replay retains that snapshot unchanged until a complete replacement
-publishes or later source changes reconcile it. Reader-visible boundaries and
+publishes or later source changes reconcile it. After failure, ordered source
+changes evolve a candidate set rooted in that public snapshot under the same
+predicate, retained size, and `TotalOrder`. A worse-ranked row stays private but
+remains available to refill the prefix; rows installed only by the rejected
+replacement never enter this set. An empty retained publication is still a
+present publication and cannot collapse into absent state after an unrelated
+change. Reader-visible boundaries and
 failed-replay offset or cursor restoration derive from this snapshot and ignore
 caller offset or cursor hints. A continuation that is still proving the active
 replacement instead derives from `WindowState`'s private current-generation

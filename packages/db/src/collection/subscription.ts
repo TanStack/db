@@ -656,6 +656,84 @@ export class CollectionSubscription
     return changes
   }
 
+  /**
+   * Evolve a failed replay's last good ordered publication without admitting
+   * rows installed by the rejected replacement. Later source deltas form a
+   * new, isolated candidate set around that public baseline. Keeping this
+   * state even when the public prefix is empty prevents private replay progress
+   * from becoming a cursor or publication boundary.
+   */
+  private reconcileStaleOrderedPublication(
+    changes: ReadonlyArray<ChangeMessage<any, string | number>>,
+  ): Array<ChangeMessage<any, any>> {
+    const stalePublication = this.stalePublication
+    const ordered = stalePublication?.ordered
+    const window = this.orderedWindow
+    if (!stalePublication || !ordered || !window) return []
+
+    const orderedFilter = this.options.whereExpression
+      ? createFilterFunctionFromExpression(this.options.whereExpression)
+      : undefined
+    const additionalFilters = this.subsetDemands
+      .filter((demand) => demand.ordered === undefined)
+      .map((demand) =>
+        demand.requestOptions.where
+          ? createFilterFunctionFromExpression(demand.requestOptions.where)
+          : undefined,
+      )
+    const isOrderedRow = (row: object) => orderedFilter?.(row) ?? true
+    const isAdditionalRow = (row: object) =>
+      additionalFilters.some((filter) => filter?.(row) ?? true)
+
+    for (const change of changes) {
+      if (change.type === `delete`) {
+        stalePublication.publishedRows.delete(change.key)
+      } else if (isOrderedRow(change.value) || isAdditionalRow(change.value)) {
+        stalePublication.publishedRows.set(change.key, change.value)
+      } else {
+        stalePublication.publishedRows.delete(change.key)
+      }
+    }
+
+    const orderedRows = [...stalePublication.publishedRows]
+      .filter(([, row]) => isOrderedRow(row))
+      .sort((left, right) => window.totalOrder.compareEntries(left, right))
+      .slice(0, window.retainedPrefixSize)
+    const desired = new Map<string | number, object>(orderedRows)
+    if (additionalFilters.length > 0) {
+      for (const [key, row] of stalePublication.publishedRows) {
+        if (isAdditionalRow(row)) desired.set(key, row)
+      }
+    }
+
+    const lastOrderedRow = orderedRows.at(-1)
+    const nextOrderedPublication: OrderedPublicationState = {
+      prefixSize: orderedRows.length,
+      boundary:
+        lastOrderedRow === undefined
+          ? undefined
+          : window.totalOrder.boundary(lastOrderedRow[1], lastOrderedRow[0]),
+    }
+    stalePublication.ordered = nextOrderedPublication
+    this.orderedPublication = { ...nextOrderedPublication }
+
+    const reconciled: Array<ChangeMessage<any, any>> = []
+    for (const [key, previousValue] of this.publishedRows) {
+      const value = desired.get(key)
+      if (value === undefined) {
+        reconciled.push({ type: `delete`, key, value: previousValue })
+      } else if (!deepEquals(value, previousValue)) {
+        reconciled.push({ type: `update`, key, value, previousValue })
+      }
+    }
+    for (const [key, value] of desired) {
+      if (!this.publishedRows.has(key)) {
+        reconciled.push({ type: `insert`, key, value })
+      }
+    }
+    return reconciled
+  }
+
   /** Capture the exact continuation state of the last complete publication. */
   private refreshOrderedPublication(): void {
     if (
@@ -1045,6 +1123,17 @@ export class CollectionSubscription
   }
 
   emitEvents(changes: Array<ChangeMessage<any, any>>): boolean {
+    if (
+      this.orderedWindow &&
+      !this.isBufferingForTruncate &&
+      this.stalePublication?.ordered
+    ) {
+      const orderedChanges = this.reconcileStaleOrderedPublication(changes)
+      if (changes.length > 0 && orderedChanges.length === 0) return false
+      this.callback(orderedChanges)
+      return true
+    }
+
     if (
       this.orderedWindow &&
       !this.isBufferingForTruncate &&
