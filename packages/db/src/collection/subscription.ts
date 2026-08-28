@@ -998,6 +998,7 @@ export class CollectionSubscription
         if (!demand.active) continue
         if (
           demand.options.signal !== undefined &&
+          !demand.options.signal.aborted &&
           isLoadSubsetRequestSignalFor(requestSignal, demand.options.signal)
         ) {
           if (demand.ordered !== undefined) return `ordered-source`
@@ -1005,6 +1006,7 @@ export class CollectionSubscription
         for (const pending of demand.pendingReplayAcquisitions) {
           if (
             pending.options.signal !== undefined &&
+            !pending.options.signal.aborted &&
             isLoadSubsetRequestSignalFor(requestSignal, pending.options.signal)
           ) {
             if (pending.ordered !== undefined) return `ordered-source`
@@ -1323,14 +1325,21 @@ export class CollectionSubscription
     // starts. A genuine load throw removes this tentative logical owner below.
     this.subsetDemands.push(demand)
     try {
-      const result = this.loadSubset(acquisition.options)
+      // A synchronous start failure is not observable until the tentative
+      // owner has rolled back. Otherwise an error listener can reenter release
+      // and unload a request that never established an acquisition.
+      const result = this.collection._sync.loadSubset(acquisition.options)
       return { demand, acquisition, result }
     } catch (error) {
+      const shouldReportError = !acquisition.options.signal?.aborted
       const demandIndex = this.subsetDemands.indexOf(demand)
       if (demandIndex !== -1 && !demand.releaseFailed) {
         this.subsetDemands.splice(demandIndex, 1)
         acquisition.abortController.abort()
         acquisition.removeRequestAbortListener?.()
+      }
+      if (shouldReportError) {
+        this.recordLoadSubsetError(acquisition.options, error, true)
       }
       throw error
     }
@@ -1754,6 +1763,12 @@ export class CollectionSubscription
       requiresUnboundedRefinement,
       revision: this.orderedWindow.coverageRevision,
     })
+    if (!this.isActiveDemand(demand)) {
+      // Match unordered acquisition semantics: work released during adapter
+      // entry cannot report a result, affect readiness, or establish coverage.
+      if (syncResult instanceof Promise) void syncResult.catch(() => {})
+      return
+    }
     demand.onLoadSubsetResult = onLoadSubsetResult
 
     this.observeOrderedCoverage(syncResult, demand, acquisition)

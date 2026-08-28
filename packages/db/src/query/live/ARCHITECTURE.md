@@ -442,7 +442,10 @@ additional-only; a peer may keep its shared physical lease alive after the
 local logical demand is released, but that cannot grant local ordered
 authority. Logical release takes effect before adapter cleanup. If
 `unloadSubset` throws, the inactive demand may remain only as cleanup debt; it
-cannot filter rows, join replay, accept settlement, or supply authority. A
+cannot filter rows, join replay, accept settlement, or supply authority. The
+same rule applies to an aborted replay acquisition retained only so its exact
+cleanup can be retried: matching shared-physical signal lineage does not make
+that obsolete acquisition current again. A
 shared physical owner may keep the row in the core collection, but the ordered
 coordinator supplies no public row or continuation boundary after its last
 local ordered demand leaves. Retiring that last owner clears the coordinator's
@@ -598,12 +601,13 @@ A Collection subscription installs each logical subset owner before it calls
 the source adapter. Reentrant release during `loadSubset` must therefore see and
 release that exact acquisition. It also registers the caller's original
 predicate before adapter entry, because the transport predicate may combine it
-with the subscription predicate. After adapter return, the request rechecks
-logical ownership before it reports results or scans local state; a demand
-released during adapter code cannot publish a later snapshot. A synchronous
-`loadSubset` throw that did not follow a failed release rolls the tentative
-owner back without calling `unloadSubset`; a failed release keeps the owner so a
-later cleanup can retry the same acquisition identity.
+with the subscription predicate. After adapter return, both ordered and
+unordered requests recheck logical ownership before they report results, track
+loading state, establish coverage, or scan local state; a demand released
+during adapter code cannot publish a later snapshot. A synchronous `loadSubset`
+throw that did not follow a failed release rolls the tentative owner back before
+it emits the error and without calling `unloadSubset`; a failed release keeps
+the owner so a later cleanup can retry the same acquisition identity.
 
 A failed publication may retain rows owned only by unordered demands after the
 last ordered owner leaves. A later ordered incarnation starts with an empty
