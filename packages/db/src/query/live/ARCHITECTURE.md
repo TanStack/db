@@ -541,6 +541,11 @@ error payloads or members of a public aggregate.
 Nested replay callback frames pass recognized failure groups to their
 containing frame. Once a frame attributes an occurrence, containing frames may
 recognize its propagation token but must not report the occurrence again.
+The same rule crosses recursive acquisition starts. An intermediate
+`loadSubset` that lets a nested `requestSnapshot` carrier escape must roll back
+its own tentative owner and rethrow that carrier unchanged. It does not create
+a failure for its own options; only the innermost adapter boundary originated
+the occurrence.
 Teardown dispatches `unsubscribed` listeners synchronously and collects their
 throws after adapter cleanup failures. Ordinary event delivery keeps its
 asynchronous listener-error behavior. A retained replay error batch completes

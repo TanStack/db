@@ -8,6 +8,10 @@ class TestEventEmitter extends EventEmitter<{ event: { id: number } }> {
   emit(id: number): void {
     this.emitInner(`event`, { id })
   }
+
+  clear(): void {
+    this.clearListeners()
+  }
 }
 
 describe(`Collection Events System`, () => {
@@ -312,6 +316,45 @@ describe(`Collection Events System`, () => {
       unsubscribe()
       emitter.emit(1)
 
+      expect(onceListener).not.toHaveBeenCalled()
+    })
+
+    it(`removes every pending once registration for the same callback`, () => {
+      const emitter = new TestEventEmitter()
+      const onceListener = vi.fn()
+      emitter.once(`event`, onceListener)
+      emitter.once(`event`, onceListener)
+
+      emitter.off(`event`, onceListener)
+      emitter.emit(1)
+
+      expect(onceListener).not.toHaveBeenCalled()
+    })
+
+    it(`removes a once listener before a reentrant emission`, () => {
+      const emitter = new TestEventEmitter()
+      const observed: Array<number> = []
+      emitter.once(`event`, ({ id }) => {
+        observed.push(id)
+        emitter.emit(2)
+      })
+
+      emitter.emit(1)
+
+      expect(observed).toEqual([1])
+    })
+
+    it(`clears ordinary and once listeners together`, () => {
+      const emitter = new TestEventEmitter()
+      const ordinaryListener = vi.fn()
+      const onceListener = vi.fn()
+      emitter.on(`event`, ordinaryListener)
+      emitter.once(`event`, onceListener)
+
+      emitter.clear()
+      emitter.emit(1)
+
+      expect(ordinaryListener).not.toHaveBeenCalled()
       expect(onceListener).not.toHaveBeenCalled()
     })
 

@@ -1758,6 +1758,7 @@ export class CollectionSubscription
       return { demand, acquisition, result, replayContext }
     } catch (error) {
       const shouldReportError = !acquisition.options.signal?.aborted
+      const isPropagatedFailure = error instanceof SubsetFailurePropagation
       let propagatedError = error
       const demandIndex = this.subsetDemands.indexOf(demand)
       if (demandIndex !== -1 && !demand.releaseFailed) {
@@ -1765,7 +1766,7 @@ export class CollectionSubscription
         acquisition.abortController.abort()
         acquisition.removeRequestAbortListener?.()
       }
-      if (shouldReportError) {
+      if (shouldReportError && !isPropagatedFailure) {
         propagatedError = this.propagatedSubsetFailure(error)
         const occurrence = this.createSubsetFailureOccurrence(
           acquisition.options,

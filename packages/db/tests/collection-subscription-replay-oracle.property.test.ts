@@ -3794,6 +3794,78 @@ describe(`CollectionSubscription replay oracle`, () => {
     },
   )
 
+  it(`reports one originating failure through recursive callback-created starts`, async () => {
+    type Row = { id: string }
+    const whereOuter = new Func(`eq`, [new PropRef([`id`]), new Value(`a`)])
+    const whereMiddle = new Func(`eq`, [
+      new PropRef([`id`]),
+      new Value(`middle`),
+    ])
+    const whereInner = new Func(`eq`, [new PropRef([`id`]), new Value(`inner`)])
+    const failure = new Error(`recursive callback-created start failed`)
+    const errors: Array<{ error: unknown; options: LoadSubsetOptions }> = []
+    let begin!: () => void
+    let commit!: () => true | Promise<void>
+    let truncate!: () => void
+    let callbackCount = 0
+    let innerOptions: LoadSubsetOptions | undefined
+    const collection = createCollection<Row>({
+      id: `recursive-callback-created-start-failure`,
+      getKey: (row) => row.id,
+      syncMode: `on-demand`,
+      sync: {
+        sync: (params) => {
+          begin = params.begin
+          commit = params.commit
+          truncate = params.truncate
+          params.markReady()
+          return {
+            loadSubset: (options) => {
+              if (options.where === whereInner) {
+                innerOptions = options
+                throw failure
+              }
+              if (options.where === whereMiddle) {
+                requestInner()
+              }
+              return true
+            },
+            unloadSubset: () => {},
+          }
+        },
+      },
+    })
+    const subscription = collection.subscribeChanges(() => {})
+    const requestInner = () =>
+      subscription.requestSnapshot({ where: whereInner })
+    subscription.on(`loadSubset:error`, ({ error, options }) => {
+      errors.push({ error, options })
+    })
+
+    try {
+      subscription.requestSnapshot({
+        where: whereOuter,
+        onLoadSubsetResult: () => {
+          callbackCount++
+          if (callbackCount === 2) {
+            subscription.requestSnapshot({ where: whereMiddle })
+          }
+        },
+      })
+      begin()
+      truncate()
+      commit()
+      await flushPromises()
+
+      expect(errors).toEqual([{ error: failure, options: innerOptions }])
+      expect(subscription.lastError).toBe(failure)
+      expect(subscription.lastErrorVersion).toBe(1)
+    } finally {
+      subscription.unsubscribe()
+      await collection.cleanup()
+    }
+  })
+
   it.each(
     ([`unordered`, `ordered`] as const).flatMap((demandKind) =>
       (
@@ -6399,6 +6471,7 @@ describe(`CollectionSubscription replay oracle`, () => {
     const replayB = createDeferred<void>()
     const failureA = new Error(`first queued replay failed`)
     const failureB = new Error(`second queued replay failed`)
+    const cleanupFailure = new Error(`reentrant cleanup failed`)
     const listenerFailure = new Error(`reentrant error listener failed`)
     const loads: Array<LoadSubsetOptions> = []
     const reported: Array<{
@@ -6406,6 +6479,8 @@ describe(`CollectionSubscription replay oracle`, () => {
       options: LoadSubsetOptions
     }> = []
     const surfacedErrors: Array<unknown> = []
+    const cleanupErrors: Array<unknown> = []
+    const onceErrors: Array<unknown> = []
     const nativeQueueMicrotask = globalThis.queueMicrotask
     const queueMicrotaskSpy = vi
       .spyOn(globalThis, `queueMicrotask`)
@@ -6423,6 +6498,7 @@ describe(`CollectionSubscription replay oracle`, () => {
     let truncate!: () => void
     let replaying = false
     let terminalCalls = 0
+    let unloadAttempts = 0
     const collection = createCollection<Row>({
       id: `queued-replay-errors-before-listener-teardown`,
       getKey: (row) => row.id,
@@ -6441,7 +6517,13 @@ describe(`CollectionSubscription replay oracle`, () => {
                 ? replayA.promise
                 : replayB.promise
             },
-            unloadSubset: () => {},
+            unloadSubset: (options) => {
+              if (options.where !== whereA) return
+              unloadAttempts++
+              if (unloadAttempts <= 2) {
+                throw cleanupFailure
+              }
+            },
           }
         },
       },
@@ -6452,11 +6534,22 @@ describe(`CollectionSubscription replay oracle`, () => {
     })
     subscription.on(`loadSubset:error`, ({ error, options }) => {
       reported.push({ error, options })
-      subscription.unsubscribe()
+      if (reported.length === 1) {
+        subscription.off(`loadSubset:error`, onceListener)
+      }
+      try {
+        subscription.unsubscribe()
+      } catch (cleanupError) {
+        cleanupErrors.push(cleanupError)
+      }
       if (reported.length === 1) {
         throw listenerFailure
       }
     })
+    const onceListener = ({ error }: { error: unknown }) => {
+      onceErrors.push(error)
+    }
+    subscription.once(`loadSubset:error`, onceListener)
 
     try {
       subscription.requestSnapshot({ where: whereA })
@@ -6471,14 +6564,25 @@ describe(`CollectionSubscription replay oracle`, () => {
       replayB.reject(failureB)
       await flushPromises()
 
-      expect(reported).toEqual([
-        { error: failureA, options: loads[2] },
-        { error: failureB, options: loads[3] },
+      expect(reported.map(({ error }) => error)).toEqual([
+        failureA,
+        cleanupFailure,
+        failureB,
       ])
+      expect(reported[0]?.options).toBe(loads[2])
+      expect(reported[1]?.options).toBe(loads[2])
+      expect(reported[2]?.options).toBe(loads[3])
       expect(subscription.lastError).toBe(failureB)
-      expect(subscription.lastErrorVersion).toBe(2)
+      expect(subscription.lastErrorVersion).toBe(3)
       expect(terminalCalls).toBe(1)
       expect(surfacedErrors).toEqual([listenerFailure])
+      expect(cleanupErrors).toEqual([cleanupFailure])
+      expect(onceErrors).toEqual([])
+
+      const attemptsBeforeRetry = unloadAttempts
+      subscription.unsubscribe()
+      expect(unloadAttempts).toBe(attemptsBeforeRetry + 1)
+      expect(terminalCalls).toBe(1)
     } finally {
       queueMicrotaskSpy.mockRestore()
       subscription.unsubscribe()
