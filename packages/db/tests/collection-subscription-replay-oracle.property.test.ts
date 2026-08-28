@@ -3794,9 +3794,15 @@ describe(`CollectionSubscription replay oracle`, () => {
     },
   )
 
-  it.each([`sync`, `async`] as const)(
-    `reports one originating failure through recursive callback-created starts: %s`,
-    async (propagation) => {
+  it.each(
+    ([`ordinary`, `cleanup`, `replay`] as const).flatMap((originContext) =>
+      ([`sync`, `async`] as const).map(
+        (propagation) => [originContext, propagation] as const,
+      ),
+    ),
+  )(
+    `reports one originating failure through recursive %s starts: %s`,
+    async (originContext, propagation) => {
       type Row = { id: string }
       const whereOuter = new Func(`eq`, [new PropRef([`id`]), new Value(`a`)])
       const whereMiddle = new Func(`eq`, [
@@ -3815,7 +3821,7 @@ describe(`CollectionSubscription replay oracle`, () => {
       let callbackCount = 0
       let innerOptions: LoadSubsetOptions | undefined
       const collection = createCollection<Row>({
-        id: `recursive-callback-created-start-failure-${propagation}`,
+        id: `recursive-start-failure-${originContext}-${propagation}`,
         getKey: (row) => row.id,
         syncMode: `on-demand`,
         sync: {
@@ -3841,7 +3847,14 @@ describe(`CollectionSubscription replay oracle`, () => {
                 }
                 return true
               },
-              unloadSubset: () => {},
+              unloadSubset: (options) => {
+                if (
+                  originContext === `cleanup` &&
+                  options.where === whereOuter
+                ) {
+                  requestMiddle()
+                }
+              },
             }
           },
         },
@@ -3849,25 +3862,45 @@ describe(`CollectionSubscription replay oracle`, () => {
       const subscription = collection.subscribeChanges(() => {})
       const requestInner = () =>
         subscription.requestSnapshot({ where: whereInner })
+      const requestMiddle = () =>
+        subscription.requestSnapshot({ where: whereMiddle })
       subscription.on(`loadSubset:error`, ({ error, options }) => {
         errors.push({ error, options })
       })
 
       try {
-        subscription.requestSnapshot({
-          where: whereOuter,
-          onLoadSubsetResult: () => {
-            callbackCount++
-            if (callbackCount === 2) {
-              subscription.requestSnapshot({ where: whereMiddle })
-            }
-          },
-        })
-        begin()
-        truncate()
-        commit()
+        let thrown: unknown
+        try {
+          if (originContext === `ordinary`) {
+            requestMiddle()
+          } else if (originContext === `cleanup`) {
+            subscription.requestSnapshot({ where: whereOuter })
+            subscription.releaseSnapshot(whereOuter)
+          } else {
+            subscription.requestSnapshot({
+              where: whereOuter,
+              onLoadSubsetResult: () => {
+                callbackCount++
+                if (callbackCount === 2) requestMiddle()
+              },
+            })
+            begin()
+            truncate()
+            commit()
+          }
+        } catch (error) {
+          thrown = error
+        }
         await flushPromises()
 
+        if (
+          originContext === `cleanup` ||
+          (originContext === `ordinary` && propagation === `sync`)
+        ) {
+          expect(Object.is(thrown, failure)).toBe(true)
+        } else {
+          expect(thrown).toBeUndefined()
+        }
         expect(errors).toEqual([{ error: failure, options: innerOptions }])
         expect(subscription.lastError).toBe(failure)
         expect(subscription.lastErrorVersion).toBe(1)

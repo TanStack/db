@@ -551,6 +551,16 @@ does not turn the carrier into a second public failure. This is a general
 promise-observer law, not a replay-only exception; cleanup and ordinary demand
 paths must consume the private carrier in the same way while still completing
 their status bookkeeping.
+Ordinary recursive acquisition follows this law even when no cleanup or replay
+callback is active. The live acquisition chain itself supplies the causal
+authority: a nested failure names its unsuspended containing acquisitions as
+adopters. The outermost ordinary synchronous request unwraps the carrier before
+returning control to its caller.
+A cleanup failure raised reentrantly inside the acquisition being started stays
+as its raw payload while adapter code can catch it. The active acquisition
+frame retains that occurrence, so letting the same failure escape does not
+turn cleanup into a second load failure; a newly thrown value remains a new
+adapter occurrence.
 Carrier authority is acquisition-scoped. It records the exact containing
 acquisitions that were active above the originating failure, and only those
 acquisitions may consume it as adopted propagation. If adapter code retains a

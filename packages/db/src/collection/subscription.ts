@@ -178,6 +178,7 @@ type SubsetCleanupBoundaryFrame = {
 type SubsetAcquisitionFrame = Readonly<{
   options: LoadSubsetOptions
   previous: SubsetAcquisitionFrame | undefined
+  failureGroups: Array<SubsetFailureGroup>
 }>
 
 type SubsetCleanupCaptureResult = Readonly<{
@@ -691,12 +692,13 @@ export class CollectionSubscription
     }
   }
 
-  /** Record which adapter failure occurrences propagate through one callback. */
+  /** Record which adapter failure occurrences propagate through one frame. */
   private noteSubsetFailureGroup(
     replayContext: TruncateReplayContext | undefined,
     group: SubsetFailureGroup,
   ): void {
     this.activeSubsetCleanupBoundary?.failureGroups.push(group)
+    this.activeSubsetAcquisition?.failureGroups.push(group)
     const frame = this.activeReplayResultCallback
     if (
       !frame ||
@@ -721,10 +723,14 @@ export class CollectionSubscription
   /** Tokenize nested propagation without changing the reported payload. */
   private propagatedSubsetFailure(
     error: unknown,
-    excludeCurrentAcquisition = false,
+    {
+      excludeCurrentAcquisition = false,
+      callbackBoundaryOnly = false,
+    }: {
+      excludeCurrentAcquisition?: boolean
+      callbackBoundaryOnly?: boolean
+    } = {},
   ): unknown {
-    if (!this.subsetFailureBoundaryOptions()) return error
-
     const adoptingOptions = new Set<LoadSubsetOptions>()
     let frame = excludeCurrentAcquisition
       ? this.activeSubsetAcquisition?.previous
@@ -732,6 +738,12 @@ export class CollectionSubscription
     while (frame) {
       adoptingOptions.add(frame.options)
       frame = frame.previous
+    }
+    if (
+      !this.subsetFailureBoundaryOptions() &&
+      (callbackBoundaryOnly || adoptingOptions.size === 0)
+    ) {
+      return error
     }
     return new SubsetFailurePropagation(error, adoptingOptions)
   }
@@ -1747,7 +1759,9 @@ export class CollectionSubscription
         const cleanupError = createSubsetCleanupError(
           releaseFailures.map(({ error: failure }) => failure),
         )
-        const propagatedError = this.propagatedSubsetFailure(cleanupError)
+        const propagatedError = this.propagatedSubsetFailure(cleanupError, {
+          callbackBoundaryOnly: true,
+        })
         this.noteSubsetFailureGroup(undefined, {
           propagatedError,
           failures: releaseFailures,
@@ -1799,6 +1813,7 @@ export class CollectionSubscription
     const acquisitionFrame: SubsetAcquisitionFrame = {
       options: acquisition.options,
       previous: this.activeSubsetAcquisition,
+      failureGroups: [],
     }
     this.activeSubsetAcquisition = acquisitionFrame
     try {
@@ -1810,8 +1825,11 @@ export class CollectionSubscription
     } catch (error) {
       const shouldReportError = !acquisition.options.signal?.aborted
       const isPropagatedFailure =
-        error instanceof SubsetFailurePropagation &&
-        error.isAdoptedBy(acquisition.options)
+        (error instanceof SubsetFailurePropagation &&
+          error.isAdoptedBy(acquisition.options)) ||
+        acquisitionFrame.failureGroups.some((group) =>
+          Object.is(group.propagatedError, error),
+        )
       const publicError = this.publicSubsetFailure(error)
       let propagatedError = error
       const demandIndex = this.subsetDemands.indexOf(demand)
@@ -1820,8 +1838,26 @@ export class CollectionSubscription
         acquisition.abortController.abort()
         acquisition.removeRequestAbortListener?.()
       }
-      if (shouldReportError && !isPropagatedFailure) {
-        propagatedError = this.propagatedSubsetFailure(publicError, true)
+      if (shouldReportError && isPropagatedFailure) {
+        const retainedFailures = acquisitionFrame.failureGroups.flatMap(
+          (group) =>
+            Object.is(group.propagatedError, error) ? group.failures : [],
+        )
+        if (retainedFailures.length > 0) {
+          propagatedError = this.propagatedSubsetFailure(publicError, {
+            excludeCurrentAcquisition: true,
+          })
+          if (!Object.is(propagatedError, error)) {
+            this.noteSubsetFailureGroup(replayContext, {
+              propagatedError,
+              failures: retainedFailures,
+            })
+          }
+        }
+      } else if (shouldReportError) {
+        propagatedError = this.propagatedSubsetFailure(publicError, {
+          excludeCurrentAcquisition: true,
+        })
         const occurrence = this.createSubsetFailureOccurrence(
           acquisition.options,
           publicError,
@@ -1850,7 +1886,11 @@ export class CollectionSubscription
           this.noteSubsetFailureGroup(undefined, group)
         }
       }
-      throw propagatedError
+      const escapesOrdinaryOutermostStart =
+        isPropagatedFailure &&
+        acquisitionFrame.previous === undefined &&
+        !this.subsetFailureBoundaryOptions()
+      throw escapesOrdinaryOutermostStart ? publicError : propagatedError
     } finally {
       this.activeSubsetAcquisition = acquisitionFrame.previous
     }
@@ -2745,7 +2785,9 @@ export class CollectionSubscription
       const cleanupError = createSubsetCleanupError(
         cleanupFailures.map(({ error }) => error),
       )
-      const propagatedError = this.propagatedSubsetFailure(cleanupError)
+      const propagatedError = this.propagatedSubsetFailure(cleanupError, {
+        callbackBoundaryOnly: true,
+      })
       if (!Object.is(propagatedError, cleanupError)) {
         const occurrences = cleanupFailures.flatMap(({ occurrence }) =>
           occurrence ? [occurrence] : [],
