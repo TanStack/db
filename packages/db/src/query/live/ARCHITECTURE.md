@@ -507,6 +507,9 @@ retained until every attempt acquisition settles. An acquisition started by a
 result callback while replay is active joins the same attempt, including its
 sync throw or async rejection. Callback-created replacement work therefore
 cannot leave a private epoch open after status returns to ready.
+Enrollment precedes the new acquisition's own result callback. A callback may
+retire its logical owner and revoke its publication or failure authority, but
+the physical settlement remains part of the attempt barrier.
 A requested limit, a settled promise, or the number of requests does not.
 Applied keys carry two distinct facts. Every applied source key may advance the
 continuation cursor, including a row excluded by the subscription predicate.

@@ -3409,6 +3409,150 @@ describe(`CollectionSubscription replay oracle`, () => {
     },
   )
 
+  it.each(
+    ([`unordered`, `ordered`] as const).flatMap((demandKind) =>
+      ([`resolve`, `reject`] as const).map(
+        (settlement) => [demandKind, settlement] as const,
+      ),
+    ),
+  )(
+    `keeps a self-released callback demand in the replay barrier: %s %s`,
+    async (demandKind, settlement) => {
+      type Row = { id: string; value: number }
+      const subscriptionWhere = new Func(`gte`, [
+        new PropRef([`value`]),
+        new Value(0),
+      ])
+      const whereA = new Func(`eq`, [new PropRef([`id`]), new Value(`a`)])
+      const whereB = new Func(`eq`, [new PropRef([`id`]), new Value(`b`)])
+      const orderBy: OrderBy = [
+        {
+          expression: new PropRef([`value`]),
+          compareOptions: { direction: `asc`, nulls: `first` },
+        },
+      ]
+      const callbackDemand = createDeferred<void>()
+      let begin!: () => void
+      let write!: (
+        message: ChangeMessageOrDeleteKeyMessage<Row, string>,
+      ) => void
+      let commit!: (signal?: AbortSignal) => true | Promise<void>
+      let truncate!: () => void
+      let replaying = false
+      let originalResultCount = 0
+      let callbackDemandOptions: LoadSubsetOptions | undefined
+      const loads: Array<LoadSubsetOptions> = []
+      const unloads: Array<LoadSubsetOptions> = []
+      const collection = createCollection<Row>({
+        id: `self-released-callback-demand-${demandKind}-${settlement}`,
+        getKey: (row) => row.id,
+        syncMode: `on-demand`,
+        sync: {
+          sync: (params) => {
+            begin = params.begin
+            write = params.write
+            commit = params.commit
+            truncate = params.truncate
+            params.markReady()
+            return {
+              loadSubset: (options) => {
+                loads.push(options)
+                if (loads.length === 3) {
+                  callbackDemandOptions = options
+                  return callbackDemand.promise
+                }
+                begin()
+                write({ type: `insert`, value: { id: `a`, value: 1 } })
+                commit(options.signal)
+                return replaying ? true : Promise.resolve()
+              },
+              unloadSubset: (options) => unloads.push(options),
+            }
+          },
+        },
+      })
+      const index = collection.createIndex((row) => row.value, {
+        indexType: BTreeIndex,
+      })
+      const visible = new Map<string, Row>()
+      const errors: Array<unknown> = []
+      const subscription = collection.subscribeChanges(
+        (changes) => {
+          for (const change of changes) {
+            const key = String(change.key)
+            if (change.type === `delete`) visible.delete(key)
+            else visible.set(key, change.value)
+          }
+        },
+        { whereExpression: subscriptionWhere },
+      )
+      subscription.setOrderByIndex(index)
+      subscription.on(`loadSubset:error`, ({ error }) => errors.push(error))
+
+      try {
+        subscription.requestSnapshot({
+          where: whereA,
+          optimizedOnly: false,
+          onLoadSubsetResult: () => {
+            originalResultCount++
+            if (originalResultCount !== 2) return
+            if (demandKind === `ordered`) {
+              subscription.requestLimitedSnapshot({
+                orderBy,
+                limit: 1,
+                onLoadSubsetResult: () =>
+                  subscription.releaseSnapshot(subscriptionWhere),
+              })
+            } else {
+              subscription.requestSnapshot({
+                where: whereB,
+                optimizedOnly: false,
+                onLoadSubsetResult: () => subscription.releaseSnapshot(whereB),
+              })
+            }
+          },
+        })
+        await flushPromises()
+
+        replaying = true
+        begin()
+        truncate()
+        commit()
+        await flushPromises()
+
+        expect(callbackDemandOptions?.signal?.aborted).toBe(true)
+        expect(subscription.status).toBe(`loadingSubset`)
+        expect([...visible.keys()]).toEqual([`a`])
+
+        begin()
+        write({ type: `insert`, value: { id: `z`, value: 3 } })
+        commit()
+        await flushPromises()
+        expect([...visible.keys()]).toEqual([`a`])
+
+        if (settlement === `resolve`) callbackDemand.resolve()
+        else callbackDemand.reject(new Error(`released callback demand`))
+        await flushPromises()
+
+        expect(subscription.status).toBe(`ready`)
+        expect([...visible.keys()]).toEqual([`a`])
+        expect(errors).toEqual([])
+        expect(
+          unloads.filter((options) => options === callbackDemandOptions),
+        ).toHaveLength(1)
+
+        begin()
+        write({ type: `insert`, value: { id: `w`, value: 4 } })
+        commit()
+        await flushPromises()
+        expect([...visible.keys()].sort()).toEqual([`a`, `w`])
+      } finally {
+        subscription.unsubscribe()
+        await collection.cleanup()
+      }
+    },
+  )
+
   it(`revokes ordered authority when an additional demand replaces a candidate version`, async () => {
     type Row = { id: `a` | `x`; rank: number }
     type Outcome = {

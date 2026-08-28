@@ -1548,6 +1548,21 @@ export class CollectionSubscription
     // the transport predicate.
     if (opts?.where) this.requestedSubsetWhere.set(loadOptions, opts.where)
     const { demand, result: syncResult } = this.startSubsetDemand(loadOptions)
+    // Replay settlement owns the acquisition even if the result callback
+    // immediately releases its logical demand. Install the barrier and its
+    // status observer before invoking arbitrary callback code.
+    const replayTracksResult = this.trackDemandStartedDuringReplay(
+      demand,
+      syncResult,
+    )
+    if (replayTracksResult) {
+      this.observeLoadSubsetResult(
+        syncResult,
+        demand.options,
+        opts?.trackLoadSubsetPromise ?? true,
+        () => false,
+      )
+    }
     if (this.ignoreObsoleteSubsetResult(demand, syncResult)) {
       // The adapter synchronously released or the caller had already aborted
       // this demand. Observe only to consume a possible rejection; obsolete
@@ -1560,17 +1575,13 @@ export class CollectionSubscription
     opts?.onLoadSubsetResult?.(syncResult, demand.options)
     if (this.ignoreObsoleteSubsetResult(demand, syncResult)) return false
 
-    const replayTracksResult = this.trackDemandStartedDuringReplay(
-      demand,
-      syncResult,
-    )
-
-    this.observeLoadSubsetResult(
-      syncResult,
-      demand.options,
-      opts?.trackLoadSubsetPromise ?? true,
-      () => !replayTracksResult,
-    )
+    if (!replayTracksResult) {
+      this.observeLoadSubsetResult(
+        syncResult,
+        demand.options,
+        opts?.trackLoadSubsetPromise ?? true,
+      )
+    }
 
     // Also load data immediately from the collection
     let snapshot: Array<ChangeMessage<any, any>> | void
@@ -1836,6 +1847,23 @@ export class CollectionSubscription
       requiresUnboundedRefinement,
       revision: this.orderedWindow.coverageRevision,
     })
+
+    // Ordered evidence must settle before the replay barrier. The barrier and
+    // its status observer in turn precede arbitrary result callbacks, so a
+    // callback can retire authority without erasing pending work.
+    this.observeOrderedCoverage(syncResult, demand, acquisition)
+    const replayTracksResult = this.trackDemandStartedDuringReplay(
+      demand,
+      syncResult,
+    )
+    if (replayTracksResult) {
+      this.observeLoadSubsetResult(
+        syncResult,
+        demand.options,
+        shouldTrackLoadSubsetPromise,
+        () => false,
+      )
+    }
     if (this.ignoreObsoleteSubsetResult(demand, syncResult)) {
       // Match unordered acquisition semantics: work released during adapter
       // entry cannot report a result, affect readiness, or establish coverage.
@@ -1843,20 +1871,16 @@ export class CollectionSubscription
     }
     demand.onLoadSubsetResult = onLoadSubsetResult
 
-    this.observeOrderedCoverage(syncResult, demand, acquisition)
     // Pass the raw loadSubset result to the caller for external tracking
     onLoadSubsetResult?.(syncResult, demand.options)
     if (this.ignoreObsoleteSubsetResult(demand, syncResult)) return
-    const replayTracksResult = this.trackDemandStartedDuringReplay(
-      demand,
-      syncResult,
-    )
-    this.observeLoadSubsetResult(
-      syncResult,
-      demand.options,
-      shouldTrackLoadSubsetPromise,
-      () => !replayTracksResult,
-    )
+    if (!replayTracksResult) {
+      this.observeLoadSubsetResult(
+        syncResult,
+        demand.options,
+        shouldTrackLoadSubsetPromise,
+      )
+    }
   }
 
   private observeOrderedCoverage(
