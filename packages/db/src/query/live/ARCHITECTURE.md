@@ -501,6 +501,12 @@ publication or restoration all finish before `status:ready` or
 `loadSubset:error` listeners run. Reentrant listener work therefore starts in a
 stable publication epoch; it cannot enter a private buffer that the same
 settlement is about to discard.
+
+That barrier belongs to the whole replay attempt, not to one request. Errors are
+retained until every attempt acquisition settles. An acquisition started by a
+result callback while replay is active joins the same attempt, including its
+sync throw or async rejection. Callback-created replacement work therefore
+cannot leave a private epoch open after status returns to ready.
 A requested limit, a settled promise, or the number of requests does not.
 Applied keys carry two distinct facts. Every applied source key may advance the
 continuation cursor, including a row excluded by the subscription predicate.
