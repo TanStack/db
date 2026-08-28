@@ -2283,6 +2283,7 @@ fcTest.prop(
 type AtomicOrderedReplayScenario = {
   direction: `asc` | `desc`
   initialPublication?: `empty` | `nonempty`
+  callerContinuation?: `none` | `min-values` | `offset` | `both`
   resizeOrder: `grow-shrink` | `shrink-grow`
   overlap: boolean
   currentOutcome: `resolve` | `reject`
@@ -2301,6 +2302,12 @@ const atomicOrderedReplayArbitrary: fc.Arbitrary<AtomicOrderedReplayScenario> =
   fc.record({
     direction: fc.constantFrom(`asc` as const, `desc` as const),
     initialPublication: fc.constantFrom(`empty` as const, `nonempty` as const),
+    callerContinuation: fc.constantFrom(
+      `none` as const,
+      `min-values` as const,
+      `offset` as const,
+      `both` as const,
+    ),
     resizeOrder: fc.constantFrom(
       `grow-shrink` as const,
       `shrink-grow` as const,
@@ -2514,6 +2521,15 @@ async function runAtomicOrderedReplayScenario(
       },
     },
   ]
+  const callerContinuation = scenario.callerContinuation ?? `min-values`
+  const callerContinuationOptions = {
+    ...(callerContinuation === `min-values` || callerContinuation === `both`
+      ? { minValues: [scenario.direction === `asc` ? 2 : 1] }
+      : {}),
+    ...(callerContinuation === `offset` || callerContinuation === `both`
+      ? { offset: 99 }
+      : {}),
+  }
   const otherWhere = new Func(`eq`, [
     new PropRef([`route`]),
     new Value(`other`),
@@ -2865,9 +2881,7 @@ async function runAtomicOrderedReplayScenario(
         orderBy,
         limit: 2,
         trackLoadSubsetPromise: false,
-        ...(hasEmptyContinuingReplay
-          ? { minValues: [scenario.direction === `asc` ? 2 : 1] }
-          : {}),
+        ...(hasEmptyContinuingReplay ? callerContinuationOptions : {}),
       })
       await flushPromises()
       const continuation = pending.at(-1)
@@ -2877,6 +2891,7 @@ async function runAtomicOrderedReplayScenario(
       if (hasEmptyContinuingReplay) {
         expect(continuation.options.offset).toBe(0)
         expect(continuation.options.cursor).toBeUndefined()
+        expect(subscription.orderedRetainedWindowSize).toBe(2)
         expectPublicationHistory()
         return
       }
@@ -2898,7 +2913,7 @@ async function runAtomicOrderedReplayScenario(
       subscription.requestLimitedSnapshot({
         orderBy,
         limit: 1,
-        minValues: [scenario.direction === `asc` ? 2 : 1],
+        ...callerContinuationOptions,
         trackLoadSubsetPromise: false,
       })
       await flushPromises()
@@ -2909,9 +2924,15 @@ async function runAtomicOrderedReplayScenario(
       expect(restoration.options.offset).toBe(
         finalProjection.currentPublication?.orderedPrefixSize ?? 0,
       )
-      expect(restoration.options.cursor?.lastKey).toBe(
-        finalProjection.currentPublication?.orderedBoundary?.key,
-      )
+      expect(subscription.orderedRetainedWindowSize).toBe(2)
+      const expectedBoundary =
+        finalProjection.currentPublication?.orderedBoundary
+      if (expectedBoundary === undefined) {
+        expect(restoration.options.cursor).toBeUndefined()
+      } else {
+        expect(restoration.options.cursor).toBeDefined()
+        expect(restoration.options.cursor?.lastKey).toBe(expectedBoundary.key)
+      }
     }
 
     const expectedKeys = expectedPublications().map((rows) =>
@@ -2978,20 +2999,54 @@ const mixedDemandSettlementScenarios: ReadonlyArray<AtomicOrderedReplayScenario>
     },
   ])
 
-it(`does not reuse a public cursor when an active replacement has no progress`, async () => {
+it(`does not reuse caller or public continuation state when an active replacement has no progress`, async () => {
   for (const direction of [`asc`, `desc`] as const) {
-    await runAtomicOrderedReplayScenario({
-      direction,
-      initialPublication: `nonempty`,
-      resizeOrder: `grow-shrink`,
-      overlap: false,
-      currentOutcome: `resolve`,
-      currentExtent: `continues`,
-      emptyContinuingReplay: true,
-      settleCurrentFirst: false,
-      sourceDelta: false,
-      otherDemand: `none`,
-    })
+    for (const callerContinuation of [
+      `none`,
+      `min-values`,
+      `offset`,
+      `both`,
+    ] as const) {
+      await runAtomicOrderedReplayScenario({
+        direction,
+        initialPublication: `nonempty`,
+        callerContinuation,
+        resizeOrder: `grow-shrink`,
+        overlap: false,
+        currentOutcome: `resolve`,
+        currentExtent: `continues`,
+        emptyContinuingReplay: true,
+        settleCurrentFirst: false,
+        sourceDelta: false,
+        otherDemand: `none`,
+      })
+    }
+  }
+})
+
+it(`restores failed replay continuation only from the last complete publication`, async () => {
+  for (const direction of [`asc`, `desc`] as const) {
+    for (const initialPublication of [`empty`, `nonempty`] as const) {
+      for (const callerContinuation of [
+        `none`,
+        `min-values`,
+        `offset`,
+        `both`,
+      ] as const) {
+        await runAtomicOrderedReplayScenario({
+          direction,
+          initialPublication,
+          callerContinuation,
+          resizeOrder: `grow-shrink`,
+          overlap: false,
+          currentOutcome: `reject`,
+          currentExtent: `continues`,
+          settleCurrentFirst: false,
+          sourceDelta: false,
+          otherDemand: `none`,
+        })
+      }
+    }
   }
 })
 

@@ -1128,6 +1128,8 @@ export class CollectionSubscription
     const where = this.options.whereExpression
     const retainedPublication = this.retainedOrderedPublication
     const activeReplacement = this.truncateReplaySession !== undefined
+    const replayOwnsContinuation =
+      activeReplacement || retainedPublication !== undefined
     const refreshPrefix =
       !retainedPublication && this.orderedWindow.requiresPrefixRefresh
     // An active replacement continues its private source progress so it can
@@ -1140,13 +1142,15 @@ export class CollectionSubscription
         : refreshPrefix
           ? 0
           : this.orderedWindow.localPrefixSize
-    const requestedPrefix = refreshPrefix
-      ? Math.max(this.orderedWindow.size, limit)
-      : offset !== undefined
-        ? offset + limit
-        : minValues !== undefined
-          ? currentOffset + limit
-          : limit
+    const requestedPrefix = replayOwnsContinuation
+      ? currentOffset + limit
+      : refreshPrefix
+        ? Math.max(this.orderedWindow.size, limit)
+        : offset !== undefined
+          ? offset + limit
+          : minValues !== undefined
+            ? currentOffset + limit
+            : limit
     this.orderedWindow.ensureSize(requestedPrefix)
     let requiresUnboundedRefinement = this.orderedWindow.requiresFullRefinement
     const changes =
@@ -1196,7 +1200,7 @@ export class CollectionSubscription
         ? this.orderedBoundary()
         : this.orderedWindow.requestBoundary()
     const cursorValues =
-      boundary?.values ?? (activeReplacement ? undefined : minValues)
+      boundary?.values ?? (replayOwnsContinuation ? undefined : minValues)
     if (cursorValues !== undefined && cursorValues.length > 0) {
       const canPushCursor = canExpressCursorOrder(orderBy, cursorValues)
       if (!canPushCursor) requiresUnboundedRefinement = true
@@ -1227,7 +1231,7 @@ export class CollectionSubscription
           whereCurrent: whereCurrentCursor,
           lastKey:
             boundary?.key ??
-            (activeReplacement
+            (replayOwnsContinuation
               ? undefined
               : this.orderedPublication?.boundary?.key),
         }
@@ -1257,7 +1261,11 @@ export class CollectionSubscription
             limit,
             orderBy,
             cursor: cursorExpressions, // Cursor expressions passed separately
-            offset: offset ?? currentOffset, // Use provided offset, or auto-tracked offset
+            // Replay continuation is owned by the replacement generation or
+            // retained publication, never by stale caller hints.
+            offset: replayOwnsContinuation
+              ? currentOffset
+              : (offset ?? currentOffset),
             subscription: this,
           }
 
