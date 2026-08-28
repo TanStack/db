@@ -446,10 +446,21 @@ cannot filter rows, join replay, accept settlement, or supply authority. A
 shared physical owner may keep the row in the core collection, but the ordered
 coordinator supplies no public row or continuation boundary after its last
 local ordered demand leaves. Retiring that last owner clears the coordinator's
-coverage and retained publication before cleanup is attempted. Adapter cleanup
-is also a reentrancy boundary: releasing one exact acquisition is idempotent,
-and completion removes that demand by object identity so a callback cannot make
-a stale array position delete a newly-created owner. A
+coverage and immediately retracts its exclusive public rows, even while a
+truncate replacement remains in flight. Every retained replay baseline is
+updated to that same public state, so retired rows cannot suppress a later
+same-version insert. With no active ordered owner, ordinary source changes do
+not enter the dormant ordered window or create a later cursor. Adapter cleanup
+is also a reentrancy boundary: releasing one exact acquisition is idempotent.
+`releaseSnapshot(where)` releases the active logical owner; internal demand
+controllers also pass the acquisition's stable request signal when they must
+retry cleanup for one exact inactive owner among identical predicates. Replay
+handoff uses the same guard. If `unloadSubset` reenters release, the old
+acquisition retires once and the new acquisition is discarded rather than
+installed for the now-inactive demand. Completion removes that demand by object
+identity only after its current and pending replay acquisitions have all
+settled, so a callback cannot make a stale array position delete a newly-created
+owner. A
 failed generation also clears its private coverage evidence; a successful
 ordered acquisition from that generation cannot suppress the next request when
 another demand makes the whole replacement fail. Reader-visible boundaries and
@@ -675,7 +686,9 @@ ownership before it releases the prior lease. This handoff is one ownership
 transition from the Collection's point of view: replacing a row with the same
 key cannot let old-owner garbage collection delete the new value. A failed or
 obsolete replacement leaves the old lease in place and retires only the new
-attempt.
+attempt. If logical release reenters while the old lease is being retired, the
+handoff must not install the replacement. It releases that replacement exactly
+once and collects the inactive demand after all late cleanup succeeds.
 
 An imperative load operation reports caller-relative evidence, not merely the
 promises started while it was active. If a successful operation starts no new

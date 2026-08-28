@@ -198,16 +198,89 @@ export class CollectionSubscription
     )
   }
 
-  /** Remove ordered authority when its last logical owner leaves. */
+  private activeAdditionalFilters(): Array<(row: object) => boolean> {
+    return this.subsetDemands
+      .filter((demand) => demand.active && demand.ordered === undefined)
+      .map((demand) =>
+        demand.requestOptions.where
+          ? createFilterFunctionFromExpression<object>(
+              demand.requestOptions.where,
+            )
+          : () => true,
+      )
+  }
+
+  private diffPublishedRows(
+    desired: ReadonlyMap<string | number, object>,
+  ): Array<ChangeMessage<any, any>> {
+    const changes: Array<ChangeMessage<any, any>> = []
+    for (const [key, previousValue] of this.publishedRows) {
+      const value = desired.get(key)
+      if (value === undefined) {
+        changes.push({ type: `delete`, key, value: previousValue })
+      } else if (!deepEquals(value, previousValue)) {
+        changes.push({ type: `update`, key, value, previousValue })
+      }
+    }
+    for (const [key, value] of desired) {
+      if (!this.publishedRows.has(key)) {
+        changes.push({ type: `insert`, key, value })
+      }
+    }
+    return changes
+  }
+
+  /** Keep every retained replay baseline equal to what consumers still see. */
+  private synchronizeRetainedPublication(): void {
+    if (this.stalePublication) {
+      this.stalePublication.publishedRows = new Map(this.publishedRows)
+      this.stalePublication.sentKeys = new Set(this.sentKeys)
+      this.stalePublication.ordered = undefined
+      if (this.stalePublication.publishedRows.size === 0) {
+        this.stalePublication = undefined
+      }
+    }
+    if (this.truncateReplaySession) {
+      const publication = this.truncateReplaySession.publicationState
+      publication.publishedRows = new Map(this.publishedRows)
+      publication.sentKeys = new Set(this.sentKeys)
+      publication.ordered = undefined
+    }
+  }
+
+  /** Remove ordered authority and its exclusive rows when its last owner leaves. */
   private retireUnownedOrderedPublication(): void {
     if (!this.orderedWindow || this.hasActiveOrderedDemand()) return
 
+    const additionalFilters = this.activeAdditionalFilters()
+    const desired = new Map(
+      [...this.publishedRows].filter(([, row]) =>
+        additionalFilters.some((filter) => filter(row)),
+      ),
+    )
     this.orderedWindow.resetCoverage()
     this.orderedPublication = undefined
     if (this.stalePublication) this.stalePublication.ordered = undefined
     if (this.truncateReplaySession) {
       this.truncateReplaySession.publicationState.ordered = undefined
     }
+    const changes = this.diffPublishedRows(desired)
+    if (changes.length > 0) this.callback(changes)
+    this.synchronizeRetainedPublication()
+  }
+
+  /** Forget inactive demand state after every owned adapter lease is gone. */
+  private collectReleasedDemand(demand: SubsetDemand): void {
+    if (
+      demand.active ||
+      demand.releaseInProgress ||
+      !demand.releaseSettled ||
+      demand.pendingReplayAcquisitions.size > 0
+    ) {
+      return
+    }
+    const index = this.subsetDemands.indexOf(demand)
+    if (index !== -1) this.subsetDemands.splice(index, 1)
   }
 
   public get status(): SubscriptionStatus {
@@ -698,18 +771,12 @@ export class CollectionSubscription
 
   private reconcileOrderedWindow(): Array<ChangeMessage<any, any>> {
     if (!this.orderedWindow) return []
-    const additionalFilters = this.subsetDemands
-      .filter((demand) => demand.active && demand.ordered === undefined)
-      .map((demand) =>
-        demand.requestOptions.where
-          ? createFilterFunctionFromExpression(demand.requestOptions.where)
-          : undefined,
-      )
+    const additionalFilters = this.activeAdditionalFilters()
     const changes = this.orderedWindow.reconcile(
       this.publishedRows,
       additionalFilters.length === 0
         ? undefined
-        : (row) => additionalFilters.some((filter) => filter?.(row) ?? true),
+        : (row) => additionalFilters.some((filter) => filter(row)),
     )
     this.refreshOrderedPublication()
     return changes
@@ -739,16 +806,10 @@ export class CollectionSubscription
     const orderedFilter = this.options.whereExpression
       ? createFilterFunctionFromExpression(this.options.whereExpression)
       : undefined
-    const additionalFilters = this.subsetDemands
-      .filter((demand) => demand.active && demand.ordered === undefined)
-      .map((demand) =>
-        demand.requestOptions.where
-          ? createFilterFunctionFromExpression(demand.requestOptions.where)
-          : undefined,
-      )
+    const additionalFilters = this.activeAdditionalFilters()
     const isOrderedRow = (row: object) => orderedFilter?.(row) ?? true
     const isAdditionalRow = (row: object) =>
-      additionalFilters.some((filter) => filter?.(row) ?? true)
+      additionalFilters.some((filter) => filter(row))
     const orderedCandidates = ordered.candidateRows
 
     for (const change of changes) {
@@ -1084,17 +1145,35 @@ export class CollectionSubscription
   private replaceSubsetAcquisition(
     demand: SubsetDemand,
     next: SubsetAcquisition & { abortController: AbortController },
-  ): void {
+  ): boolean {
+    if (demand.releaseInProgress) return false
+    demand.releaseInProgress = true
     const previousOptions = demand.options
     const removePreviousAbortListener = demand.removeRequestAbortListener
-    this.collection._sync.unloadSubset(previousOptions)
-    removePreviousAbortListener?.()
-    demand.options = next.options
-    demand.ordered = next.ordered
-    demand.abortController = next.abortController
-    demand.removeRequestAbortListener = next.removeRequestAbortListener
-    demand.releaseFailed = false
-    demand.releaseSettled = false
+    try {
+      this.collection._sync.unloadSubset(previousOptions)
+      removePreviousAbortListener?.()
+      demand.releaseFailed = false
+      demand.releaseSettled = true
+
+      // unloadSubset is user adapter code and may synchronously release the
+      // logical demand. In that case the replacement must never become its
+      // new live acquisition.
+      if (!this.isActiveDemand(demand)) {
+        this.releaseReplayAcquisitionUnprotected(demand, next)
+        return false
+      }
+
+      demand.options = next.options
+      demand.ordered = next.ordered
+      demand.abortController = next.abortController
+      demand.removeRequestAbortListener = next.removeRequestAbortListener
+      demand.releaseSettled = false
+      return true
+    } finally {
+      demand.releaseInProgress = false
+      this.collectReleasedDemand(demand)
+    }
   }
 
   /** Attach a successful replay only while every owning authority is current. */
@@ -1125,9 +1204,9 @@ export class CollectionSubscription
     attempt: TruncateReplayAttempt,
   ): boolean {
     try {
-      this.replaceSubsetAcquisition(demand, next)
-      demand.pendingReplayAcquisitions.delete(next)
-      return true
+      const installed = this.replaceSubsetAcquisition(demand, next)
+      if (installed) demand.pendingReplayAcquisitions.delete(next)
+      return installed
     } catch (error) {
       // The old lease remains owned when its release fails. Release the new
       // acquisition and keep the old one available for a cleanup retry.
@@ -1154,6 +1233,20 @@ export class CollectionSubscription
     demand: SubsetDemand,
     next: ReplaySubsetAcquisition,
   ): void {
+    if (demand.releaseInProgress) return
+    demand.releaseInProgress = true
+    try {
+      this.releaseReplayAcquisitionUnprotected(demand, next)
+    } finally {
+      demand.releaseInProgress = false
+      this.collectReleasedDemand(demand)
+    }
+  }
+
+  private releaseReplayAcquisitionUnprotected(
+    demand: SubsetDemand,
+    next: ReplaySubsetAcquisition,
+  ): void {
     if (!demand.pendingReplayAcquisitions.has(next)) return
     next.abortController.abort()
     try {
@@ -1173,7 +1266,7 @@ export class CollectionSubscription
       let firstReleaseError: unknown
       for (const pending of [...demand.pendingReplayAcquisitions]) {
         try {
-          this.releaseReplayAcquisition(demand, pending)
+          this.releaseReplayAcquisitionUnprotected(demand, pending)
         } catch (error) {
           firstReleaseError ??= error
         }
@@ -1193,6 +1286,7 @@ export class CollectionSubscription
       if (firstReleaseError !== undefined) throw firstReleaseError
     } finally {
       demand.releaseInProgress = false
+      this.collectReleasedDemand(demand)
     }
   }
 
@@ -1270,6 +1364,7 @@ export class CollectionSubscription
   emitEvents(changes: Array<ChangeMessage<any, any>>): boolean {
     if (
       this.orderedWindow &&
+      this.hasActiveOrderedDemand() &&
       !this.isBufferingForTruncate &&
       this.stalePublication?.ordered
     ) {
@@ -1284,6 +1379,7 @@ export class CollectionSubscription
 
     if (
       this.orderedWindow &&
+      this.hasActiveOrderedDemand() &&
       !this.isBufferingForTruncate &&
       !this.stalePublication
     ) {
@@ -1297,7 +1393,11 @@ export class CollectionSubscription
     // A truncate replacement is private until it has enough ordered evidence
     // to publish. Still admit its source changes so a later continuation uses
     // the exact replacement candidates, including deltas that raced the page.
-    if (this.orderedWindow && this.isBufferingForTruncate) {
+    if (
+      this.orderedWindow &&
+      this.hasActiveOrderedDemand() &&
+      this.isBufferingForTruncate
+    ) {
       this.orderedWindow.admitChanges(changes)
     }
 
@@ -1436,22 +1536,36 @@ export class CollectionSubscription
   }
 
   /** Release one exact subset request while keeping the subscription alive. */
-  releaseSnapshot(where: BasicExpression<boolean>): void {
+  releaseSnapshot(
+    where: BasicExpression<boolean>,
+    acquisitionSignal?: AbortSignal,
+  ): void {
     const matchesWhere = (demand: SubsetDemand) =>
       demand.requestOptions.where === where ||
       this.requestedSubsetWhere.get(demand.requestOptions) === where
-    let index = this.subsetDemands.findIndex(
-      (demand) => demand.active && matchesWhere(demand),
-    )
-    if (index === -1) {
+    const matchesAcquisition = (demand: SubsetDemand) =>
+      acquisitionSignal === undefined ||
+      demand.requestOptions.signal === acquisitionSignal ||
+      demand.options.signal === acquisitionSignal ||
+      [...demand.pendingReplayAcquisitions].some(
+        (pending) => pending.options.signal === acquisitionSignal,
+      )
+    let demand =
+      acquisitionSignal === undefined
+        ? this.subsetDemands.find(
+            (candidate) => candidate.active && matchesWhere(candidate),
+          )
+        : this.subsetDemands.find(
+            (candidate) =>
+              matchesWhere(candidate) && matchesAcquisition(candidate),
+          )
+    if (!demand && acquisitionSignal === undefined) {
       // A prior unload may have failed after logical release. With no active
       // owner left, a repeated release retries that exact cleanup debt.
-      index = this.subsetDemands.findIndex(matchesWhere)
+      demand = this.subsetDemands.find(matchesWhere)
     }
-    if (index === -1) return
-
-    const demand = this.subsetDemands[index]
     if (!demand) return
+
     demand.active = false
     if (demand.ordered !== undefined) this.retireUnownedOrderedPublication()
     let releaseError: unknown
@@ -1460,13 +1574,7 @@ export class CollectionSubscription
     } catch (error) {
       releaseError = error
     } finally {
-      if (
-        demand.releaseSettled &&
-        demand.pendingReplayAcquisitions.size === 0
-      ) {
-        const currentIndex = this.subsetDemands.indexOf(demand)
-        if (currentIndex !== -1) this.subsetDemands.splice(currentIndex, 1)
-      }
+      this.collectReleasedDemand(demand)
       if (this.orderedWindow && !this.isBufferingForTruncate) {
         const changes = this.stalePublication?.ordered
           ? this.reconcileStaleOrderedPublication([])
@@ -1874,17 +1982,18 @@ export class CollectionSubscription
     this.orderedPublication = undefined
 
     // Release the current adapter acquisition for each logical subset demand.
-    const failedDemands: Array<SubsetDemand> = []
-    for (const demand of this.subsetDemands) {
+    for (const demand of [...this.subsetDemands]) {
       demand.active = false
       try {
         this.releaseSubsetDemand(demand)
       } catch (error) {
         firstCleanupError ??= error
-        failedDemands.push(demand)
       }
     }
-    this.subsetDemands = failedDemands
+    this.subsetDemands = this.subsetDemands.filter(
+      (demand) =>
+        !demand.releaseSettled || demand.pendingReplayAcquisitions.size > 0,
+    )
 
     try {
       this.emitInner(`unsubscribed`, {
