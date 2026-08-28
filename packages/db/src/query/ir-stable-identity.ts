@@ -1,7 +1,10 @@
 import { normalizeValue } from '../utils/comparison.js'
 import { isRefProxy, toExpression } from './builder/ref-proxy.js'
 import { getQueryIR } from './builder/get-query-ir.js'
-import { getExpressionArgumentValueContext } from './expression-value-context.js'
+import {
+  assertSnapshotCapableStructuralValue,
+  getExpressionArgumentValueContext,
+} from './expression-value-context.js'
 import { getRuntimeReferenceIdentity } from './runtime-reference-identity.js'
 import type { ExpressionValueContext } from './expression-value-context.js'
 import type {
@@ -1086,6 +1089,7 @@ function canonicalizeStructuralRuntimeValue(
   seen: WeakSet<object>,
   opaqueValueIdentity: OpaqueValueIdentity = `reject`,
 ): StableIdentityValue {
+  assertSnapshotCapableStructuralValue(value, path)
   if (
     opaqueValueIdentity === `runtime-reference` &&
     (typeof value === `function` || typeof value === `symbol`)

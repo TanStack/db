@@ -2362,10 +2362,18 @@ export class CollectionSubscription
       )
     }
 
+    const orderedRequest = cloneLoadSubsetOptions({
+      where: this.options.whereExpression,
+      orderBy,
+      limit,
+    })
+    orderBy = orderedRequest.orderBy!
+    const where = orderedRequest.where
+
     this.orderedWindow ??= new WindowState(
       this.collection,
       orderBy,
-      this.options.whereExpression,
+      where,
       limit,
     )
 
@@ -2381,7 +2389,6 @@ export class CollectionSubscription
       }
     }
 
-    const where = this.options.whereExpression
     const retainedPublication = this.retainedOrderedPublication
     const activeReplacement = this.truncateReplaySession !== undefined
     const replayOwnsContinuation =
@@ -2495,12 +2502,16 @@ export class CollectionSubscription
       acquisition,
       result: syncResult,
       replayContext: startedReplayContext,
-    } = this.startSubsetDemand(loadOptions, {
-      requestedPrefix,
-      hadBoundary: boundary !== undefined || refreshPrefix,
-      requiresUnboundedRefinement,
-      revision: this.orderedWindow.coverageRevision,
-    })
+    } = this.startSubsetDemand(
+      loadOptions,
+      {
+        requestedPrefix,
+        hadBoundary: boundary !== undefined || refreshPrefix,
+        requiresUnboundedRefinement,
+        revision: this.orderedWindow.coverageRevision,
+      },
+      this.options.whereExpression,
+    )
 
     // A synchronous continuation can complete ordered coverage. Retain its
     // callback before applying that evidence so callback failure can still

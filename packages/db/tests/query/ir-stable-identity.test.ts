@@ -575,6 +575,82 @@ describe(`loadSubset demand identity`, () => {
   })
 
   it.each([
+    [`symbol coercion`, () => ({ [Symbol.toPrimitive]: () => `A` }), `A`],
+    [
+      `non-enumerable coercion`,
+      () => {
+        const value = {}
+        Object.defineProperty(value, `toString`, {
+          value: () => `A`,
+        })
+        return value
+      },
+      `A`,
+    ],
+    [
+      `opaque mutable coercion`,
+      () =>
+        new (class {
+          value = `A`;
+          [Symbol.toPrimitive]() {
+            return this.value
+          }
+        })(),
+      `A`,
+    ],
+    [
+      `indexed accessor coercion`,
+      () => {
+        const value: Array<string> = []
+        Object.defineProperty(value, `0`, {
+          enumerable: true,
+          get: () => `A`,
+        })
+        return value
+      },
+      `A`,
+    ],
+    [
+      `built-in subclass coercion`,
+      () =>
+        new (class extends Array<string> {
+          [Symbol.toPrimitive]() {
+            return `A`
+          }
+        })(),
+      `A`,
+    ],
+    [
+      `cyclic structure`,
+      () => {
+        const value: { self?: unknown } = {}
+        value.self = value
+        return value
+      },
+      `[object Object]`,
+    ],
+  ] as const)(
+    `rejects unsupported %s before retaining structural demand state`,
+    (_label, createValue, expected) => {
+      const value = createValue()
+      const demand: LoadSubsetOptions = {
+        where: new Func<boolean>(`eq`, [
+          new Func(`concat`, [new Value(value)]),
+          new Value(expected),
+        ]),
+      }
+
+      expect(compileExpression(demand.where!)({})).toBe(true)
+      expect(() => cloneLoadSubsetOptions(demand)).toThrow(
+        /snapshot structural expression value/i,
+      )
+      expect(() => getLoadSubsetDemandKey(demand)).toThrow(
+        /snapshot structural expression value/i,
+      )
+    },
+  )
+
+  it.each([
     [`signed zero`, -0, 0],
     [`invalid Date`, new Date(Number.NaN), new Date(Number.NaN)],
     [

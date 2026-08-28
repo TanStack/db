@@ -1,5 +1,8 @@
 import { Func, PropRef, Value } from './ir.js'
-import { getExpressionArgumentValueContext } from './expression-value-context.js'
+import {
+  assertSnapshotCapableStructuralValue,
+  getExpressionArgumentValueContext,
+} from './expression-value-context.js'
 import type { ExpressionValueContext } from './expression-value-context.js'
 import type { BasicExpression } from './ir.js'
 import type { LoadSubsetOptions } from '../types.js'
@@ -60,7 +63,7 @@ function cloneBasicExpression<T>(
           : context === `ordering-operand`
             ? snapshotStructuralValue(expression.value)
             : context === `structural-operand`
-              ? snapshotStructuralValue(expression.value)
+              ? snapshotStructuralOperand(expression.value)
               : expression.value,
       )
     case `func`:
@@ -88,6 +91,11 @@ function cloneBasicExpression<T>(
         }),
       )
   }
+}
+
+function snapshotStructuralOperand<T>(value: T): T {
+  assertSnapshotCapableStructuralValue(value)
+  return snapshotStructuralValue(value)
 }
 
 function snapshotEqualityValue<T>(value: T): T {

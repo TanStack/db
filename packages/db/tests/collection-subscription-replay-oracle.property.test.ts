@@ -5291,6 +5291,123 @@ describe(`CollectionSubscription replay oracle`, () => {
     }
   })
 
+  it.each([`reference-path`, `direction`] as const)(
+    `snapshots ordered demand state before %s mutation`,
+    async (mutation) => {
+      type Row = {
+        id: `a` | `b`
+        rank: number
+        other: number
+        version: number
+      }
+      let begin!: () => void
+      let write!: (
+        message: ChangeMessageOrDeleteKeyMessage<Row, Row[`id`]>,
+      ) => void
+      let commit!: () => void
+      const collection = createCollection<Row>({
+        id: `ordered-demand-snapshot-${mutation}`,
+        getKey: (row) => row.id,
+        syncMode: `on-demand`,
+        sync: {
+          sync: (params) => {
+            begin = params.begin
+            write = params.write
+            commit = params.commit
+            begin()
+            write({
+              type: `insert`,
+              value: { id: `a`, rank: 1, other: 2, version: 0 },
+            })
+            write({
+              type: `insert`,
+              value: { id: `b`, rank: 2, other: 1, version: 0 },
+            })
+            commit()
+            params.markReady()
+            return { loadSubset: () => true }
+          },
+        },
+      })
+      const index = collection.createIndex((row) => row.rank, {
+        indexType: BTreeIndex,
+      })
+      const orderRef = new PropRef<number>([`rank`])
+      const compareOptions: OrderBy[number][`compareOptions`] = {
+        direction: `asc`,
+        nulls: `first`,
+        stringSort: `lexical`,
+      }
+      const orderBy: OrderBy = [{ expression: orderRef, compareOptions }]
+      const visible = new Map<Row[`id`], Row>()
+      const subscription = collection.subscribeChanges((changes) => {
+        for (const change of changes) {
+          const key = change.key as Row[`id`]
+          if (change.type === `delete`) visible.delete(key)
+          else visible.set(key, change.value)
+        }
+      })
+      subscription.setOrderByIndex(index)
+
+      try {
+        subscription.requestLimitedSnapshot({ orderBy, limit: 1 })
+        expect([...visible.keys()]).toEqual([`a`])
+
+        if (mutation === `reference-path`) orderRef.path[0] = `other`
+        else compareOptions.direction = `desc`
+
+        begin()
+        write({
+          type: `update`,
+          value: { id: `b`, rank: 2, other: 1, version: 1 },
+        })
+        commit()
+
+        expect([...visible.keys()]).toEqual([`a`])
+      } finally {
+        subscription.unsubscribe()
+        await collection.cleanup()
+      }
+    },
+  )
+
+  it(`rejects unsupported structural demand constants before adapter entry`, async () => {
+    type Row = { id: string }
+    let loadCount = 0
+    const collection = createCollection<Row>({
+      id: `unsupported-structural-demand`,
+      getKey: (row) => row.id,
+      syncMode: `on-demand`,
+      sync: {
+        sync: (params) => {
+          params.markReady()
+          return {
+            loadSubset: () => {
+              loadCount++
+              return true
+            },
+          }
+        },
+      },
+    })
+    const subscription = collection.subscribeChanges(() => {})
+    const value = { [Symbol.toPrimitive]: () => `A` }
+    const where = new Func<boolean>(`eq`, [
+      new Func(`concat`, [new Value(value)]),
+      new Value(`A`),
+    ])
+
+    try {
+      expect(() => subscription.requestSnapshot({ where })).toThrow(
+        /snapshot structural expression value/i,
+      )
+      expect(loadCount).toBe(0)
+    } finally {
+      subscription.unsubscribe()
+      await collection.cleanup()
+    }
+  })
+
   it(`releases ordered publication authority before retrying failed adapter cleanup`, async () => {
     type Row = { id: string; rank: number }
     let begin!: () => void
