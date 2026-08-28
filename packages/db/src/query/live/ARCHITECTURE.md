@@ -395,6 +395,12 @@ require a future adapter capability with an opaque cursor that preserves the
 provider's exact collation and snapshot. Until that contract exists, an
 unbounded fetch is the only sound continuation.
 
+The same rule applies when no range index can support ordered continuation.
+Core issues one unbounded ordered acquisition, then lets D2 apply joins,
+predicates, and top-K to the full readable source. It must not issue a limited
+page and then disable continuation: later relational operators may reject that
+page and leave the result window short.
+
 Test adapters must obey the same boundary contract as production adapters. A
 mock that reports exhaustion must have made every matching source row readable
 before its result settles. A mock that reports more data must honor later

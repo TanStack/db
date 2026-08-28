@@ -947,8 +947,8 @@ class EffectPipelineRunner<TRow extends object, TKey extends string | number> {
 
   /**
    * Request the initial ordered snapshot for an alias.
-   * Uses requestLimitedSnapshot (index-based cursor) or requestSnapshot
-   * (full load with limit) depending on whether an index is available.
+   * Uses requestLimitedSnapshot (index-based cursor) or an unbounded
+   * requestSnapshot depending on whether an index is available.
    */
   private requestInitialOrderedSnapshot(
     alias: string,
@@ -968,9 +968,10 @@ class EffectPipelineRunner<TRow extends object, TKey extends string | number> {
           this.trackOrderedLoad(result, orderByInfo.sourceId),
       })
     } else {
+      // Without an index there is no sound cursor continuation. Load the full
+      // ordered source so later relational operators cannot underfill top-K.
       subscription.requestSnapshot({
         orderBy: normalizedOrderBy,
-        limit: offset + limit,
         trackLoadSubsetPromise: false,
       })
     }

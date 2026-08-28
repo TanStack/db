@@ -404,6 +404,7 @@ function withAppliedSubsetEvidence<TRow extends { id: number }>(
 function createConformingOrderedSource<TRow extends { id: number }>(
   id: string,
   rows: ReadonlyArray<TRow>,
+  autoIndex: `eager` | `off` = `eager`,
 ) {
   const requests: Array<LoadSubsetOptions> = []
   const delivered = new Set<number>()
@@ -412,7 +413,7 @@ function createConformingOrderedSource<TRow extends { id: number }>(
     getKey: (row) => row.id,
     syncMode: `on-demand`,
     startSync: true,
-    autoIndex: `eager`,
+    autoIndex,
     defaultIndexType: BTreeIndex,
     sync: {
       sync: ({ begin, write, commit, markReady }) => {
@@ -1719,6 +1720,57 @@ describe(`pagination recomputation oracle`, () => {
       expect(requests).toHaveLength(2)
       expect(requests[0]?.limit).toBe(2)
       expect(requests[1]?.cursor).toBeDefined()
+    } finally {
+      live.cleanup()
+      childSource.cleanup()
+      parentSource.cleanup()
+    }
+  })
+
+  it(`loads the full ordered source when no continuation index exists`, async () => {
+    type ParentRow = { id: number; rank: number; groupId: number }
+    type ChildRow = { id: number; groupId: number }
+    const parents = [
+      { id: 1, rank: 0, groupId: 1 },
+      { id: 2, rank: 1, groupId: 2 },
+      { id: 3, rank: 2, groupId: 3 },
+      { id: 4, rank: 3, groupId: 4 },
+    ] satisfies ReadonlyArray<ParentRow>
+    const { requests, source: parentSource } = createConformingOrderedSource(
+      `pagination-no-index-underfill-source-${collectionSequence++}`,
+      parents,
+      `off`,
+    )
+    const childSource = createCollection(
+      mockSyncCollectionOptions({
+        id: `pagination-no-index-underfill-child-${collectionSequence++}`,
+        initialData: [
+          { id: 20, groupId: 2 },
+          { id: 30, groupId: 3 },
+          { id: 40, groupId: 4 },
+        ] satisfies ReadonlyArray<ChildRow>,
+        getKey: (row: ChildRow) => row.id,
+      }),
+    )
+    const live = createLiveQueryCollection((query) =>
+      query
+        .from({ parent: parentSource })
+        .innerJoin({ child: childSource }, ({ parent, child }) =>
+          eq(parent.groupId, child.groupId),
+        )
+        .orderBy(({ parent }) => parent.rank, `asc`)
+        .orderBy(({ parent }) => parent.id, `asc`)
+        .limit(2)
+        .select(({ parent }) => ({ id: parent.id })),
+    )
+
+    try {
+      await live.preload()
+      await flushPromises()
+
+      expect(Array.from(live.values(), ({ id }) => id)).toEqual([2, 3])
+      expect(requests).toHaveLength(1)
+      expect(requests[0]?.limit).toBeUndefined()
     } finally {
       live.cleanup()
       childSource.cleanup()

@@ -448,10 +448,10 @@ export class CollectionSubscriber<
         onLoadSubsetResult: handleLoadSubsetResult,
       })
     } else {
-      // No index available (e.g., non-ref expression): pass orderBy/limit to loadSubset
+      // Without an index there is no sound cursor continuation. Load the full
+      // ordered source so later relational operators cannot underfill top-K.
       subscription.requestSnapshot({
         orderBy: normalizedOrderBy,
-        limit: offset + limit,
         trackLoadSubsetPromise: false,
         onLoadSubsetResult: handleLoadSubsetResult,
       })
