@@ -27,6 +27,12 @@ type IncrementalFailureCase = FailureCase<IncrementalPath> & {
   failureValue: FailureValue
 }
 
+type CleanupFailureCase = {
+  name: string
+  consumer: Consumer
+  failure: unknown
+}
+
 const row: Row = { id: 1, rank: 1, parentId: 1 }
 
 // Every query form can fail while it acquires initial coverage.
@@ -60,6 +66,15 @@ const incrementalCases: ReadonlyArray<IncrementalFailureCase> = (
     ),
   ),
 )
+
+const cleanupFailureObject = { kind: `cleanup-failure` }
+const cleanupFailureCases: ReadonlyArray<CleanupFailureCase> = (
+  [`effect`, `live`] as const
+).flatMap((consumer) => [
+  { name: `${consumer} undefined`, consumer, failure: undefined },
+  { name: `${consumer} NaN`, consumer, failure: Number.NaN },
+  { name: `${consumer} object`, consumer, failure: cleanupFailureObject },
+])
 
 function fail(delivery: Delivery, error: unknown): Promise<never> {
   if (delivery === `throw`) throw error
@@ -329,6 +344,92 @@ describe(`loadSubset failure matrix`, () => {
             ? [primary.cleanup()]
             : [primary.cleanup(), child.cleanup()],
         )
+      }
+    },
+  )
+
+  it.each(cleanupFailureCases)(
+    `does not mistake an unreported cleanup failure for a source error: $name`,
+    async ({ consumer, failure }) => {
+      const suffix = `${consumer}-${
+        failure === undefined
+          ? `undefined`
+          : typeof failure === `number`
+            ? `nan`
+            : `object`
+      }`
+      const parent = createStaticSource(`cleanup-failure-parent-${suffix}`, [
+        row,
+      ])
+      let unloadCount = 0
+      const child = createCollection<Row>({
+        id: `cleanup-failure-child-${suffix}`,
+        getKey: (item) => item.id,
+        syncMode: `on-demand`,
+        autoIndex: `eager`,
+        defaultIndexType: BTreeIndex,
+        sync: {
+          sync: ({ markReady }) => {
+            markReady()
+            return {
+              loadSubset: () => true,
+              unloadSubset: () => {
+                unloadCount++
+                if (unloadCount === 1) throw failure
+              },
+            }
+          },
+        },
+      })
+      const sourceErrors: Array<unknown> = []
+      const effect =
+        consumer === `effect`
+          ? createEffect({
+              query: (q) =>
+                q
+                  .from({ item: parent })
+                  .leftJoin({ child }, ({ item, child: childRow }) =>
+                    eq(item.id, childRow.parentId),
+                  ),
+              onBatch: () => {},
+              onSourceError: (error) => sourceErrors.push(error),
+            })
+          : undefined
+      const live =
+        consumer === `live`
+          ? createLiveQueryCollection((q) =>
+              q
+                .from({ item: parent })
+                .leftJoin({ child }, ({ item, child: childRow }) =>
+                  eq(item.id, childRow.parentId),
+                ),
+            )
+          : undefined
+
+      try {
+        if (live) await live.preload()
+        await flushFailures()
+
+        let didThrow = false
+        let thrown: unknown
+        try {
+          parent.utils.begin()
+          parent.utils.write({ type: `delete`, value: row })
+          parent.utils.commit()
+        } catch (error) {
+          didThrow = true
+          thrown = error
+        }
+
+        expect(didThrow).toBe(true)
+        expect(Object.is(thrown, failure)).toBe(true)
+        expect(sourceErrors).toEqual([])
+        if (live) expect(live.utils.lastSubsetError).toBeUndefined()
+      } finally {
+        if (effect) await effect.dispose()
+        if (live) await live.cleanup()
+        expect(unloadCount).toBe(2)
+        await Promise.all([parent.cleanup(), child.cleanup()])
       }
     },
   )

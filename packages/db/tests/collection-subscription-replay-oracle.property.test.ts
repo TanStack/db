@@ -5246,6 +5246,183 @@ describe(`CollectionSubscription replay oracle`, () => {
     }
   })
 
+  it(`reports every failed acquisition cleanup while abandoning a replay handoff`, async () => {
+    type Row = { id: string; version: number }
+    let begin!: () => void
+    let write!: (message: ChangeMessageOrDeleteKeyMessage<Row, string>) => void
+    let commit!: () => true | Promise<void>
+    let truncate!: () => void
+    let loadCount = 0
+    const replay = createDeferred<void>()
+    const loads: Array<LoadSubsetOptions> = []
+    const unloads: Array<LoadSubsetOptions> = []
+    const failed = new Set<LoadSubsetOptions>()
+    const oldFailure = new Error(`old acquisition cleanup failed`)
+    const replacementFailure = new Error(
+      `replacement acquisition cleanup failed`,
+    )
+    const collection = createCollection<Row>({
+      id: `replay-handoff-multiple-cleanup-failures`,
+      getKey: (row) => row.id,
+      syncMode: `on-demand`,
+      sync: {
+        sync: (params) => {
+          begin = params.begin
+          write = params.write
+          commit = params.commit
+          truncate = params.truncate
+          params.markReady()
+          return {
+            loadSubset: (options) => {
+              loads.push(options)
+              loadCount++
+              begin()
+              write({
+                type: `insert`,
+                value: { id: `a`, version: loadCount },
+              })
+              commit()
+              return loadCount === 1 ? true : replay.promise
+            },
+            unloadSubset: (options) => {
+              unloads.push(options)
+              if (failed.has(options)) return
+              failed.add(options)
+              if (options === loads[0]) throw oldFailure
+              if (options === loads[1]) throw replacementFailure
+            },
+          }
+        },
+      },
+    })
+    const where = new Func(`eq`, [new PropRef([`id`]), new Value(`a`)])
+    const visible = new Map<string, Row>()
+    const reported: Array<{ error: unknown; options: LoadSubsetOptions }> = []
+    let unsubscribed = false
+    const subscription = collection.subscribeChanges((changes) => {
+      for (const change of changes) {
+        if (change.type === `delete`) visible.delete(String(change.key))
+        else visible.set(String(change.key), change.value)
+      }
+    })
+    subscription.on(`loadSubset:error`, ({ error, options }) =>
+      reported.push({ error, options }),
+    )
+
+    try {
+      subscription.requestSnapshot({ where })
+      begin()
+      truncate()
+      commit()
+      await flushPromises()
+
+      replay.resolve()
+      await flushPromises()
+
+      expect(reported.map(({ error }) => error)).toEqual([
+        oldFailure,
+        replacementFailure,
+      ])
+      expect(reported[0]?.options).toBe(loads[0])
+      expect(reported[1]?.options).toBe(loads[1])
+      expect(visible.get(`a`)?.version).toBe(1)
+      expect(subscription.status).toBe(`ready`)
+
+      subscription.unsubscribe()
+      unsubscribed = true
+      expect(unloads).toEqual([loads[0], loads[1], loads[1], loads[0]])
+    } finally {
+      if (!unsubscribed) subscription.unsubscribe()
+      await collection.cleanup()
+    }
+  })
+
+  it(`attributes a reentrant replay handoff cleanup failure to its exact acquisition`, async () => {
+    type Row = { id: string; version: number }
+    let begin!: () => void
+    let write!: (message: ChangeMessageOrDeleteKeyMessage<Row, string>) => void
+    let commit!: () => true | Promise<void>
+    let truncate!: () => void
+    let loadCount = 0
+    let reentered = false
+    let replacementFailed = false
+    const replay = createDeferred<void>()
+    const loads: Array<LoadSubsetOptions> = []
+    const unloads: Array<LoadSubsetOptions> = []
+    const replacementFailure = new Error(`replacement cleanup failed`)
+    type TestSubscription = ReturnType<
+      ReturnType<typeof createCollection<Row>>[`subscribeChanges`]
+    >
+    const owner: { current?: TestSubscription } = {}
+    const collection = createCollection<Row>({
+      id: `reentrant-replay-handoff-cleanup-attribution`,
+      getKey: (row) => row.id,
+      syncMode: `on-demand`,
+      sync: {
+        sync: (params) => {
+          begin = params.begin
+          write = params.write
+          commit = params.commit
+          truncate = params.truncate
+          params.markReady()
+          return {
+            loadSubset: (options) => {
+              loads.push(options)
+              loadCount++
+              begin()
+              write({
+                type: `insert`,
+                value: { id: `a`, version: loadCount },
+              })
+              commit()
+              return loadCount === 1 ? true : replay.promise
+            },
+            unloadSubset: (options) => {
+              unloads.push(options)
+              if (options === loads[0] && !reentered) {
+                reentered = true
+                owner.current!.releaseSnapshot(where)
+                return
+              }
+              if (options === loads[1] && !replacementFailed) {
+                replacementFailed = true
+                throw replacementFailure
+              }
+            },
+          }
+        },
+      },
+    })
+    const where = new Func(`eq`, [new PropRef([`id`]), new Value(`a`)])
+    const reported: Array<{ error: unknown; options: LoadSubsetOptions }> = []
+    const subscription = collection.subscribeChanges(() => {}, {
+      whereExpression: where,
+    })
+    owner.current = subscription
+    subscription.on(`loadSubset:error`, ({ error, options }) =>
+      reported.push({ error, options }),
+    )
+
+    try {
+      subscription.requestSnapshot({ where })
+      begin()
+      truncate()
+      commit()
+      await flushPromises()
+
+      replay.resolve()
+      await flushPromises()
+
+      expect(reported.map(({ error }) => error)).toEqual([replacementFailure])
+      expect(reported[0]?.options).toBe(loads[1])
+      expect(unloads).toEqual([loads[0], loads[1], loads[1]])
+      expect(subscription.status).toBe(`ready`)
+    } finally {
+      subscription.unsubscribe()
+      await collection.cleanup()
+    }
+  })
+
   it(`collects inactive demand state after late replay cleanup succeeds`, async () => {
     type Row = { id: string; rank: number }
     type Outcome = { hasMore: boolean; appliedRowKeys: ReadonlyArray<string> }

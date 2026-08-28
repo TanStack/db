@@ -110,6 +110,15 @@ type ReplaySubsetAcquisition = SubsetAcquisition & {
   abortController: AbortController
 }
 
+type SubsetCleanupFailure = Readonly<{
+  error: unknown
+  options: LoadSubsetOptions
+}>
+
+type ReplayHandoffResult =
+  | { installed: true }
+  | { installed: false; failure?: SubsetCleanupFailure }
+
 type SubsetDemand = SubsetAcquisition & {
   requestOptions: LoadSubsetOptions
   onLoadSubsetResult?: (
@@ -226,6 +235,7 @@ export class CollectionSubscription
   // Status tracking
   private _status: SubscriptionStatus = `ready`
   private _lastError: unknown | undefined
+  private _lastErrorVersion = 0
   private unsubscribed = false
   private pendingLoadSubsetPromises: Set<Promise<unknown>> = new Set()
   // Cleanup function for truncate event listener
@@ -350,6 +360,10 @@ export class CollectionSubscription
 
   public get lastError(): unknown | undefined {
     return this._lastError
+  }
+
+  public get lastErrorVersion(): number {
+    return this._lastErrorVersion
   }
 
   constructor(
@@ -539,7 +553,17 @@ export class CollectionSubscription
                   error,
                 )
               }
-              this.discardReplayAcquisition(demand, nextAcquisition)
+              const cleanupFailure = this.discardReplayAcquisition(
+                demand,
+                nextAcquisition,
+              )
+              if (cleanupFailure) {
+                this.queueTruncateReplayError(
+                  session,
+                  cleanupFailure.options,
+                  cleanupFailure.error,
+                )
+              }
             },
           )
         } else {
@@ -1313,13 +1337,20 @@ export class CollectionSubscription
   private replaceSubsetAcquisition(
     demand: SubsetDemand,
     next: SubsetAcquisition & { abortController: AbortController },
-  ): boolean {
-    if (demand.releaseInProgress) return false
+  ): ReplayHandoffResult {
+    if (demand.releaseInProgress) return { installed: false }
     demand.releaseInProgress = true
     const previousOptions = demand.options
     const removePreviousAbortListener = demand.removeRequestAbortListener
     try {
-      this.collection._sync.unloadSubset(previousOptions)
+      try {
+        this.collection._sync.unloadSubset(previousOptions)
+      } catch (error) {
+        return {
+          installed: false,
+          failure: { error, options: previousOptions },
+        }
+      }
       removePreviousAbortListener?.()
       demand.releaseFailed = false
       demand.releaseSettled = true
@@ -1328,8 +1359,15 @@ export class CollectionSubscription
       // logical demand. In that case the replacement must never become its
       // new live acquisition.
       if (!this.isActiveDemand(demand)) {
-        this.releaseReplayAcquisitionUnprotected(demand, next)
-        return false
+        try {
+          this.releaseReplayAcquisitionUnprotected(demand, next)
+        } catch (error) {
+          return {
+            installed: false,
+            failure: { error, options: next.options },
+          }
+        }
+        return { installed: false }
       }
 
       demand.options = next.options
@@ -1337,7 +1375,7 @@ export class CollectionSubscription
       demand.abortController = next.abortController
       demand.removeRequestAbortListener = next.removeRequestAbortListener
       demand.releaseSettled = false
-      return true
+      return { installed: true }
     } finally {
       demand.releaseInProgress = false
       this.collectReleasedDemand(demand)
@@ -1362,7 +1400,14 @@ export class CollectionSubscription
     if (mayReplace) {
       return this.tryReplaceSubsetAcquisition(session, demand, next, attempt)
     }
-    this.discardReplayAcquisition(demand, next)
+    const cleanupFailure = this.discardReplayAcquisition(demand, next)
+    if (cleanupFailure) {
+      this.queueTruncateReplayError(
+        session,
+        cleanupFailure.options,
+        cleanupFailure.error,
+      )
+    }
     return false
   }
 
@@ -1372,29 +1417,43 @@ export class CollectionSubscription
     next: ReplaySubsetAcquisition,
     attempt: TruncateReplayAttempt,
   ): boolean {
-    try {
-      const installed = this.replaceSubsetAcquisition(demand, next)
-      if (installed) demand.pendingReplayAcquisitions.delete(next)
-      return installed
-    } catch (error) {
-      // The old lease remains owned when its release fails. Release the new
-      // acquisition and keep the old one available for a cleanup retry.
-      this.discardReplayAcquisition(demand, next)
-      attempt.failed = true
-      this.queueTruncateReplayError(session, demand.options, error)
-      return false
+    const handoff = this.replaceSubsetAcquisition(demand, next)
+    if (handoff.installed) {
+      demand.pendingReplayAcquisitions.delete(next)
+      return true
     }
+    if (handoff.failure) {
+      // The old lease remains owned when its release fails. Release the new
+      // acquisition and preserve every failed cleanup as a distinct event.
+      const discardFailure = this.discardReplayAcquisition(demand, next)
+      attempt.failed = true
+      this.queueTruncateReplayError(
+        session,
+        handoff.failure.options,
+        handoff.failure.error,
+      )
+      if (discardFailure) {
+        this.queueTruncateReplayError(
+          session,
+          discardFailure.options,
+          discardFailure.error,
+        )
+      }
+    }
+    return false
   }
 
   private discardReplayAcquisition(
     demand: SubsetDemand,
     next: ReplaySubsetAcquisition,
-  ): void {
+  ): SubsetCleanupFailure | undefined {
     try {
       this.releaseReplayAcquisition(demand, next)
-    } catch {
+      return undefined
+    } catch (error) {
       // Keep the failed acquisition on the demand. releaseSnapshot,
       // unsubscribe, or collection cleanup will retry its exact owner route.
+      return { error, options: next.options }
     }
   }
 
@@ -1620,6 +1679,7 @@ export class CollectionSubscription
     if (options.signal?.aborted && !reportAborted) return
 
     this._lastError = error
+    this._lastErrorVersion++
     this.emitInner(`loadSubset:error`, {
       type: `loadSubset:error`,
       subscription: this,

@@ -219,6 +219,7 @@ export class CollectionSubscriber<
     plan: LazyDemandPlan,
     keys: Set<unknown>,
   ): void {
+    const errorVersion = subscription.lastErrorVersion
     let update
     try {
       update = this.demand.setDemand(subscription, plan, keys)
@@ -227,7 +228,12 @@ export class CollectionSubscriber<
       // Convert that synchronous form to the same query-local fatal demand
       // state as a rejected load, without letting it escape the source commit.
       // Preserve unrelated graph/programming errors as throws.
-      if (!Object.is(subscription.lastError, error)) throw error
+      if (
+        subscription.lastErrorVersion === errorVersion ||
+        !Object.is(subscription.lastError, error)
+      ) {
+        throw error
+      }
       const isInitialSync =
         this.collectionConfigBuilder.liveQueryCollection?.status === `loading`
       const generation = this.collectionConfigBuilder.beginDemand(plan.id)
@@ -492,12 +498,18 @@ export class CollectionSubscriber<
     }
 
     const n = Math.max(dataNeeded(), subscription.orderedRowsNeeded)
+    const errorVersion = subscription.lastErrorVersion
     try {
       // Local rows may fill the visible window without proving its remote
       // prefix. One row is enough to request the boundary equivalence class.
       this.loadNextItems(Math.max(1, n), subscription)
     } catch (error) {
-      if (!Object.is(subscription.lastError, error)) throw error
+      if (
+        subscription.lastErrorVersion === errorVersion ||
+        !Object.is(subscription.lastError, error)
+      ) {
+        throw error
+      }
       // The subscription already reported the failure. Automatic refills
       // must not make the source transaction that exposed the gap fail.
     }

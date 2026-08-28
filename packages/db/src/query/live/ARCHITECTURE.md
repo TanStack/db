@@ -532,8 +532,14 @@ One logical release may cross both a pending replacement acquisition and its
 original acquisition. If several cleanup boundaries fail, the callback frame
 retains them as one propagated group and reports every occurrence against its
 exact acquisition options after restoration. Effect and Live Collection error
-classification also uses SameValue semantics; a reported `NaN` is not a new
-graph failure merely because `NaN !== NaN`.
+classification compares both a monotonic error occurrence and SameValue
+payload identity. This distinguishes no reported error from a reported
+`undefined`, while a reported `NaN` is not a new graph failure merely because
+`NaN !== NaN`.
+Automatic replay handoff follows the same boundary law. A failed release of the
+old acquisition and a failed discard of its replacement are two reportable
+occurrences, each tied to its own exact options object. Reentrant owner release
+cannot make replacement cleanup appear to belong to the old acquisition.
 A requested limit, a settled promise, or the number of requests does not.
 Applied keys carry two distinct facts. Every applied source key may advance the
 continuation cursor, including a row excluded by the subscription predicate.

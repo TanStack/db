@@ -736,6 +736,7 @@ class EffectPipelineRunner<TRow extends object, TKey extends string | number> {
     plan: LazyDemandPlan,
     keys: Set<unknown>,
   ): void {
+    const errorVersion = subscription.lastErrorVersion
     let update
     try {
       update = this.demand.setDemand(subscription, plan, keys)
@@ -743,7 +744,12 @@ class EffectPipelineRunner<TRow extends object, TKey extends string | number> {
       // The subscription error event already reports adapter failures and
       // disposes this effect. Do not let that query-local failure escape the
       // source commit, but keep unrelated graph errors visible.
-      if (!Object.is(subscription.lastError, error)) throw error
+      if (
+        subscription.lastErrorVersion === errorVersion ||
+        !Object.is(subscription.lastError, error)
+      ) {
+        throw error
+      }
       if (this.starting) throw error
       return
     }
@@ -1069,6 +1075,7 @@ class EffectPipelineRunner<TRow extends object, TKey extends string | number> {
 
     this.lastLoadRequestKey.set(sourceId, cursor.loadRequestKey)
 
+    const errorVersion = subscription.lastErrorVersion
     try {
       subscription.requestLimitedSnapshot({
         orderBy: cursor.normalizedOrderBy,
@@ -1079,7 +1086,12 @@ class EffectPipelineRunner<TRow extends object, TKey extends string | number> {
           this.trackOrderedLoad(loadResult, sourceId),
       })
     } catch (error) {
-      if (!Object.is(subscription.lastError, error)) throw error
+      if (
+        subscription.lastErrorVersion === errorVersion ||
+        !Object.is(subscription.lastError, error)
+      ) {
+        throw error
+      }
       // subscribeChanges already routed the error through onSourceError. Do
       // not let an automatic refill fail the source transaction that exposed
       // the missing row.
