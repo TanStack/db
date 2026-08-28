@@ -2922,6 +2922,23 @@ async function runAtomicOrderedReplayScenario(
           rank: scenario.direction === `asc` ? 0 : 3,
         }),
       ).toBe(false)
+      expect(
+        evaluateReferenceExpression(continuation.options.cursor!.whereFrom, {
+          rank:
+            expectedPrivateBoundary.rank +
+            (scenario.direction === `asc` ? 1 : -1),
+        }),
+      ).toBe(true)
+      expect(
+        evaluateReferenceExpression(continuation.options.cursor!.whereFrom, {
+          rank: expectedPrivateBoundary.rank,
+        }),
+      ).toBe(false)
+      expect(
+        evaluateReferenceExpression(continuation.options.cursor!.whereFrom, {
+          rank: scenario.direction === `asc` ? 0 : 3,
+        }),
+      ).toBe(false)
       continuation.deferred.resolve({
         hasMore: true,
         appliedRowKeys: [continuationRow.id],
@@ -2975,6 +2992,23 @@ async function runAtomicOrderedReplayScenario(
             restoration.options.cursor!.whereCurrent,
             { rank: scenario.direction === `asc` ? 0 : 3 },
           ),
+        ).toBe(false)
+        expect(
+          evaluateReferenceExpression(restoration.options.cursor!.whereFrom, {
+            rank:
+              (expectedBoundary.orderValue) +
+              (scenario.direction === `asc` ? 1 : -1),
+          }),
+        ).toBe(true)
+        expect(
+          evaluateReferenceExpression(restoration.options.cursor!.whereFrom, {
+            rank: expectedBoundary.orderValue,
+          }),
+        ).toBe(false)
+        expect(
+          evaluateReferenceExpression(restoration.options.cursor!.whereFrom, {
+            rank: scenario.direction === `asc` ? 0 : 3,
+          }),
         ).toBe(false)
       }
     }

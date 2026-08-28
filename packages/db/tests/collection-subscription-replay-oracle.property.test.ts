@@ -1632,6 +1632,173 @@ describe(`CollectionSubscription replay oracle`, () => {
     }
   })
 
+  it(`ignores ordered coverage from an initial acquisition retired by replay`, async () => {
+    type Outcome = {
+      hasMore: boolean
+      appliedRowKeys: ReadonlyArray<ReplayRow[`id`]>
+    }
+    let begin!: () => void
+    let write!: (
+      message: ChangeMessageOrDeleteKeyMessage<ReplayRow, string>,
+    ) => void
+    let commit!: () => void
+    let truncate!: () => void
+    const loads: Array<{
+      options: LoadSubsetOptions
+      deferred: ReturnType<typeof createDeferred<Outcome>>
+    }> = []
+    const collection = createCollection<ReplayRow>({
+      id: `retired-initial-ordered-coverage`,
+      getKey: (row) => row.id,
+      syncMode: `on-demand`,
+      sync: {
+        sync: (params) => {
+          begin = params.begin
+          write = params.write
+          commit = params.commit
+          truncate = params.truncate
+          params.markReady()
+          return {
+            loadSubset: (options) => {
+              const deferred = createDeferred<Outcome>()
+              loads.push({ options, deferred })
+              return deferred.promise
+            },
+            unloadSubset: () => {},
+          }
+        },
+      },
+    })
+    const index = collection.createIndex((row) => row.value, {
+      indexType: BTreeIndex,
+    })
+    const orderBy: OrderBy = [
+      {
+        expression: new PropRef([`value`]),
+        compareOptions: { direction: `asc`, nulls: `first` },
+      },
+    ]
+    const visible = new Set<ReplayRow[`id`]>()
+    const subscription = collection.subscribeChanges((changes) => {
+      for (const change of changes) {
+        const key = change.key as ReplayRow[`id`]
+        if (change.type === `delete`) visible.delete(key)
+        else visible.add(key)
+      }
+    })
+    subscription.setOrderByIndex(index)
+
+    try {
+      subscription.requestLimitedSnapshot({ orderBy, limit: 1 })
+      begin()
+      write({ type: `insert`, value: { id: `one`, value: 1 } })
+      commit()
+
+      begin()
+      truncate()
+      commit()
+      await flushPromises()
+      expect(loads).toHaveLength(2)
+      expect(loads[0]?.options.signal?.aborted).toBe(true)
+
+      begin()
+      write({ type: `insert`, value: { id: `two`, value: 2 } })
+      commit()
+      loads[1]?.deferred.resolve({
+        hasMore: true,
+        appliedRowKeys: [`two`],
+      })
+      await flushPromises()
+      expect([...visible]).toEqual([])
+      expect(subscription.orderedBoundaryKey).toBeUndefined()
+
+      loads[0]?.deferred.resolve({
+        hasMore: false,
+        appliedRowKeys: [`one`],
+      })
+      await flushPromises()
+
+      expect([...visible]).toEqual([])
+      expect(subscription.orderedBoundaryKey).toBeUndefined()
+    } finally {
+      for (const load of loads) {
+        load.deferred.resolve({ hasMore: false, appliedRowKeys: [] })
+      }
+      subscription.unsubscribe()
+      await collection.cleanup()
+    }
+  })
+
+  it(`preserves unbounded locale refinement when replaying a demand`, async () => {
+    type LocaleRow = { id: string; label: string }
+    let begin!: () => void
+    let commit!: () => void
+    let truncate!: () => void
+    const loads: Array<LoadSubsetOptions> = []
+    const collection = createCollection<LocaleRow>({
+      id: `unbounded-locale-replay`,
+      getKey: (row) => row.id,
+      syncMode: `on-demand`,
+      sync: {
+        sync: (params) => {
+          begin = params.begin
+          commit = params.commit
+          truncate = params.truncate
+          params.markReady()
+          return {
+            loadSubset: (options) => {
+              loads.push(options)
+              return true
+            },
+            unloadSubset: () => {},
+          }
+        },
+      },
+    })
+    const index = collection.createIndex((row) => row.label, {
+      indexType: BTreeIndex,
+    })
+    const orderBy: OrderBy = [
+      {
+        expression: new PropRef([`label`]),
+        compareOptions: {
+          direction: `asc`,
+          nulls: `first`,
+          stringSort: `locale`,
+          locale: `en-US`,
+          localeOptions: { numeric: true },
+        },
+      },
+    ]
+    const subscription = collection.subscribeChanges(() => {})
+    subscription.setOrderByIndex(index)
+
+    try {
+      subscription.requestLimitedSnapshot({
+        orderBy,
+        limit: 1,
+        minValues: [`item2`],
+      })
+      expect(loads).toHaveLength(1)
+      expect(loads[0]?.limit).toBeUndefined()
+      expect(loads[0]?.offset).toBeUndefined()
+      expect(loads[0]?.cursor).toBeUndefined()
+
+      begin()
+      truncate()
+      commit()
+      await flushPromises()
+
+      expect(loads).toHaveLength(2)
+      expect(loads[1]?.limit).toBeUndefined()
+      expect(loads[1]?.offset).toBeUndefined()
+      expect(loads[1]?.cursor).toBeUndefined()
+    } finally {
+      subscription.unsubscribe()
+      await collection.cleanup()
+    }
+  })
+
   it(`uses the published replacement as the baseline of a reentrant replay`, async () => {
     let begin!: () => void
     let write!: (

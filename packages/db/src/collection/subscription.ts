@@ -86,8 +86,16 @@ type PublicationState = {
   ordered: OrderedPublicationState | undefined
 }
 
+type OrderedAcquisitionState = Readonly<{
+  requestedPrefix: number
+  hadBoundary: boolean
+  requiresUnboundedRefinement: boolean
+  revision: number
+}>
+
 type SubsetAcquisition = {
   options: LoadSubsetOptions
+  ordered?: OrderedAcquisitionState
   abortController?: AbortController
   removeRequestAbortListener?: () => void
 }
@@ -102,12 +110,6 @@ type SubsetDemand = SubsetAcquisition & {
     result: LoadSubsetRequestResult,
     demand: LoadSubsetOptions,
   ) => void
-  ordered?: {
-    requestedPrefix: number
-    hadBoundary: boolean
-    requiresUnboundedRefinement: boolean
-    revision: number
-  }
   pendingReplayAcquisitions: Set<ReplaySubsetAcquisition>
   releaseFailed: boolean
   releaseSettled: boolean
@@ -316,9 +318,6 @@ export class CollectionSubscription
         const isCurrentAttempt = () =>
           this.truncateReplaySession === session &&
           session.currentAttempt === attempt
-        if (demand.ordered && this.orderedWindow) {
-          demand.ordered.revision = this.orderedWindow.coverageRevision
-        }
         const nextAcquisition = this.createSubsetAcquisition(demand, true)
         demand.pendingReplayAcquisitions.add(nextAcquisition)
         let syncResult: LoadSubsetRequestResult
@@ -381,7 +380,12 @@ export class CollectionSubscription
         if (demand.ordered !== undefined) {
           // The replacement acquisition, not the retired generation, owns any
           // row provenance published by this replay result.
-          this.observeOrderedCoverage(syncResult, demand, () => ownsReplacement)
+          this.observeOrderedCoverage(
+            syncResult,
+            demand,
+            nextAcquisition,
+            () => ownsReplacement,
+          )
         }
 
         // Register this after ordered coverage so replay publication cannot
@@ -776,12 +780,17 @@ export class CollectionSubscription
     }
   }
 
-  /** Rebuild ordered transport state from this replacement generation. */
-  private createReplayRequestOptions(demand: SubsetDemand): LoadSubsetOptions {
+  /** Rebuild ordered transport and evidence from this replacement generation. */
+  private createReplayRequest(demand: SubsetDemand): {
+    options: LoadSubsetOptions
+    ordered: OrderedAcquisitionState | undefined
+  } {
     const ordered = demand.ordered
     const window = this.orderedWindow
     const orderBy = demand.requestOptions.orderBy
-    if (!ordered || !window || !orderBy) return demand.requestOptions
+    if (!ordered || !window || !orderBy) {
+      return { options: demand.requestOptions, ordered }
+    }
 
     const boundary = window.requestBoundary()
     const builtCursor = this.buildOrderedCursorExpressions(
@@ -790,28 +799,37 @@ export class CollectionSubscription
       boundary?.key,
     )
     const requiresUnboundedRefinement =
-      window.requiresFullRefinement || builtCursor.requiresUnboundedRefinement
+      ordered.requiresUnboundedRefinement ||
+      window.requiresFullRefinement ||
+      builtCursor.requiresUnboundedRefinement
     const currentOffset = window.localPrefixSize
     const limit = demand.requestOptions.limit
-
-    ordered.requestedPrefix =
-      limit === undefined ? ordered.requestedPrefix : currentOffset + limit
-    ordered.hadBoundary = boundary !== undefined
-    ordered.requiresUnboundedRefinement = requiresUnboundedRefinement
-    ordered.revision = window.coverageRevision
+    const replayOrdered: OrderedAcquisitionState = {
+      requestedPrefix:
+        limit === undefined ? ordered.requestedPrefix : currentOffset + limit,
+      hadBoundary: boundary !== undefined,
+      requiresUnboundedRefinement,
+      revision: window.coverageRevision,
+    }
 
     if (requiresUnboundedRefinement) {
       return {
-        where: demand.requestOptions.where,
-        orderBy,
-        subscription: demand.requestOptions.subscription,
+        options: {
+          where: demand.requestOptions.where,
+          orderBy,
+          subscription: demand.requestOptions.subscription,
+        },
+        ordered: replayOrdered,
       }
     }
 
     return {
-      ...demand.requestOptions,
-      cursor: builtCursor.cursor,
-      offset: currentOffset,
+      options: {
+        ...demand.requestOptions,
+        cursor: builtCursor.cursor,
+        offset: currentOffset,
+      },
+      ordered: replayOrdered,
     }
   }
 
@@ -822,9 +840,9 @@ export class CollectionSubscription
   ): SubsetAcquisition & { abortController: AbortController } {
     const abortController = new AbortController()
     const requestSignal = demand.requestOptions.signal
-    const requestOptions = replay
-      ? this.createReplayRequestOptions(demand)
-      : demand.requestOptions
+    const request = replay
+      ? this.createReplayRequest(demand)
+      : { options: demand.requestOptions, ordered: demand.ordered }
     let removeRequestAbortListener: (() => void) | undefined
 
     if (requestSignal?.aborted) {
@@ -838,9 +856,10 @@ export class CollectionSubscription
 
     return {
       options: {
-        ...requestOptions,
+        ...request.options,
         signal: abortController.signal,
       },
+      ordered: request.ordered,
       abortController,
       removeRequestAbortListener,
     }
@@ -856,6 +875,7 @@ export class CollectionSubscription
     this.collection._sync.unloadSubset(previousOptions)
     removePreviousAbortListener?.()
     demand.options = next.options
+    demand.ordered = next.ordered
     demand.abortController = next.abortController
     demand.removeRequestAbortListener = next.removeRequestAbortListener
     demand.releaseFailed = false
@@ -961,6 +981,7 @@ export class CollectionSubscription
     ordered?: SubsetDemand[`ordered`],
   ): {
     demand: SubsetDemand
+    acquisition: SubsetAcquisition & { abortController: AbortController }
     result: LoadSubsetRequestResult
   } {
     const demand: SubsetDemand = {
@@ -973,18 +994,19 @@ export class CollectionSubscription
     }
     const acquisition = this.createSubsetAcquisition(demand)
     demand.options = acquisition.options
+    demand.ordered = acquisition.ordered
     demand.abortController = acquisition.abortController
     demand.removeRequestAbortListener = acquisition.removeRequestAbortListener
     if (acquisition.abortController.signal.aborted) {
       acquisition.removeRequestAbortListener?.()
-      return { demand, result: true }
+      return { demand, acquisition, result: true }
     }
     // Reentrant release must see the exact acquisition before adapter work
     // starts. A genuine load throw removes this tentative logical owner below.
     this.subsetDemands.push(demand)
     try {
       const result = this.loadSubset(acquisition.options)
-      return { demand, result }
+      return { demand, acquisition, result }
     } catch (error) {
       const demandIndex = this.subsetDemands.indexOf(demand)
       if (demandIndex !== -1 && !demand.releaseFailed) {
@@ -1316,7 +1338,11 @@ export class CollectionSubscription
             subscription: this,
           }
 
-    const { demand, result: syncResult } = this.startSubsetDemand(loadOptions, {
+    const {
+      demand,
+      acquisition,
+      result: syncResult,
+    } = this.startSubsetDemand(loadOptions, {
       requestedPrefix,
       hadBoundary: boundary !== undefined || refreshPrefix,
       requiresUnboundedRefinement,
@@ -1324,7 +1350,7 @@ export class CollectionSubscription
     })
     demand.onLoadSubsetResult = onLoadSubsetResult
 
-    this.observeOrderedCoverage(syncResult, demand)
+    this.observeOrderedCoverage(syncResult, demand, acquisition)
     // Pass the raw loadSubset result to the caller for external tracking
     onLoadSubsetResult?.(syncResult, demand.options)
     this.observeLoadSubsetResult(
@@ -1337,9 +1363,10 @@ export class CollectionSubscription
   private observeOrderedCoverage(
     result: LoadSubsetRequestResult,
     demand: SubsetDemand,
+    acquisition: SubsetAcquisition,
     shouldApply: () => boolean = () => true,
   ): void {
-    const ordered = demand.ordered
+    const ordered = acquisition.ordered
     const window = this.orderedWindow
     if (!ordered || !window) return
 
@@ -1347,7 +1374,7 @@ export class CollectionSubscription
       if (
         !shouldApply() ||
         !this.subsetDemands.includes(demand) ||
-        demand.options.signal?.aborted
+        acquisition.options.signal?.aborted
       ) {
         return
       }
