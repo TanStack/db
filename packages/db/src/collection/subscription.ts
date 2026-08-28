@@ -260,6 +260,8 @@ export class CollectionSubscription
   private activeReplayResultCallback: ReplayResultCallbackFrame | undefined
   private activeSubsetCleanupBoundary: SubsetCleanupBoundaryFrame | undefined
   private nextSubsetFailureOrder = 0
+  private replayErrorReportDepth = 0
+  private clearListenersAfterReplayErrors = false
   private unsubscribeInProgress = false
 
   private isActiveDemand(demand: SubsetDemand): boolean {
@@ -839,9 +841,21 @@ export class CollectionSubscription
   }
 
   private reportTruncateReplayErrors(session: TruncateReplaySession): void {
-    session.errors.sort((left, right) => left.order - right.order)
-    while (session.errors.length > 0) {
-      this.reportSubsetFailureOccurrence(session.errors.shift()!)
+    this.replayErrorReportDepth++
+    try {
+      session.errors.sort((left, right) => left.order - right.order)
+      while (session.errors.length > 0) {
+        this.reportSubsetFailureOccurrence(session.errors.shift()!)
+      }
+    } finally {
+      this.replayErrorReportDepth--
+      if (
+        this.replayErrorReportDepth === 0 &&
+        this.clearListenersAfterReplayErrors
+      ) {
+        this.clearListenersAfterReplayErrors = false
+        this.clearListeners()
+      }
     }
   }
 
@@ -2565,7 +2579,9 @@ export class CollectionSubscription
   }
 
   unsubscribe() {
-    if (this.unsubscribeInProgress) return
+    if (this.unsubscribeInProgress || this.clearListenersAfterReplayErrors) {
+      return
+    }
     this.unsubscribeInProgress = true
     try {
       this.unsubscribeOnce()
@@ -2640,7 +2656,14 @@ export class CollectionSubscription
       for (const error of listenerErrors) recordCleanupError(error)
     } finally {
       // Clear all event listeners to prevent memory leaks
-      this.clearListeners()
+      if (this.replayErrorReportDepth > 0) {
+        // Retained replay failures form one ordered report batch. Reentrant
+        // teardown may release ownership now, but it cannot erase later
+        // occurrences that were already retained before the first dispatch.
+        this.clearListenersAfterReplayErrors = true
+      } else {
+        this.clearListeners()
+      }
     }
 
     if (cleanupFailures.length > 0) {

@@ -287,6 +287,48 @@ describe(`Collection Events System`, () => {
         queueMicrotaskSpy.mockRestore()
       }
     })
+
+    it(`removes a pending once listener through off`, () => {
+      const emitter = new TestEventEmitter()
+      const calls: Array<string> = []
+      const onceListener = vi.fn(() => calls.push(`once`))
+      emitter.on(`event`, () => {
+        calls.push(`off`)
+        emitter.off(`event`, onceListener)
+      })
+      emitter.once(`event`, onceListener)
+
+      emitter.emit(1)
+
+      expect(calls).toEqual([`off`])
+      expect(onceListener).not.toHaveBeenCalled()
+    })
+
+    it(`removes a pending once listener through its returned unsubscribe`, () => {
+      const emitter = new TestEventEmitter()
+      const onceListener = vi.fn()
+      const unsubscribe = emitter.once(`event`, onceListener)
+
+      unsubscribe()
+      emitter.emit(1)
+
+      expect(onceListener).not.toHaveBeenCalled()
+    })
+
+    it(`exposes the same pending-once removal law through Collection`, () => {
+      const calls: Array<string> = []
+      const onceListener = vi.fn(() => calls.push(`once`))
+      collection.on(`status:change`, () => {
+        calls.push(`off`)
+        collection.off(`status:change`, onceListener)
+      })
+      collection.once(`status:change`, onceListener)
+
+      collection.startSyncImmediate()
+
+      expect(calls).toEqual([`off`])
+      expect(onceListener).not.toHaveBeenCalled()
+    })
   })
 
   describe(`Event Structure`, () => {

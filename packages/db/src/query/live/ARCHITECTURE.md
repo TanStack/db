@@ -543,7 +543,14 @@ containing frame. Once a frame attributes an occurrence, containing frames may
 recognize its propagation token but must not report the occurrence again.
 Teardown dispatches `unsubscribed` listeners synchronously and collects their
 throws after adapter cleanup failures. Ordinary event delivery keeps its
-asynchronous listener-error behavior.
+asynchronous listener-error behavior. A retained replay error batch completes
+against its current listener set even if the first listener reenters teardown;
+teardown defers only its global listener clear until that batch ends. Explicit
+`off` and `once` removal still take effect between events. A once-listener is
+indexed by both its wrapper and original callback, so `off(event, original)`
+can remove it before invocation. A second unsubscribe request during that
+deferred-clear interval cannot redispatch the terminal event; a later explicit
+call after the batch may still retry cleanup debt.
 `onLoadSubsetResult`, `requestSnapshot`, and `releaseSnapshot` are internal
 composition APIs. A nested synchronous failure may use the private propagation
 token across that callback; internal code must rethrow the caught value

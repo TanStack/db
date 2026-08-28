@@ -6391,6 +6391,101 @@ describe(`CollectionSubscription replay oracle`, () => {
     }
   })
 
+  it(`finishes a queued replay error batch before reentrant listener teardown`, async () => {
+    type Row = { id: `a` | `b` }
+    const whereA = new Func(`eq`, [new PropRef([`id`]), new Value(`a`)])
+    const whereB = new Func(`eq`, [new PropRef([`id`]), new Value(`b`)])
+    const replayA = createDeferred<void>()
+    const replayB = createDeferred<void>()
+    const failureA = new Error(`first queued replay failed`)
+    const failureB = new Error(`second queued replay failed`)
+    const listenerFailure = new Error(`reentrant error listener failed`)
+    const loads: Array<LoadSubsetOptions> = []
+    const reported: Array<{
+      error: unknown
+      options: LoadSubsetOptions
+    }> = []
+    const surfacedErrors: Array<unknown> = []
+    const nativeQueueMicrotask = globalThis.queueMicrotask
+    const queueMicrotaskSpy = vi
+      .spyOn(globalThis, `queueMicrotask`)
+      .mockImplementation((callback) =>
+        nativeQueueMicrotask(() => {
+          try {
+            callback()
+          } catch (error) {
+            surfacedErrors.push(error)
+          }
+        }),
+      )
+    let begin!: () => void
+    let commit!: () => true | Promise<void>
+    let truncate!: () => void
+    let replaying = false
+    let terminalCalls = 0
+    const collection = createCollection<Row>({
+      id: `queued-replay-errors-before-listener-teardown`,
+      getKey: (row) => row.id,
+      syncMode: `on-demand`,
+      sync: {
+        sync: (params) => {
+          begin = params.begin
+          commit = params.commit
+          truncate = params.truncate
+          params.markReady()
+          return {
+            loadSubset: (options) => {
+              loads.push(options)
+              if (!replaying) return true
+              return options.where === whereA
+                ? replayA.promise
+                : replayB.promise
+            },
+            unloadSubset: () => {},
+          }
+        },
+      },
+    })
+    const subscription = collection.subscribeChanges(() => {})
+    subscription.on(`unsubscribed`, () => {
+      terminalCalls++
+    })
+    subscription.on(`loadSubset:error`, ({ error, options }) => {
+      reported.push({ error, options })
+      subscription.unsubscribe()
+      if (reported.length === 1) {
+        throw listenerFailure
+      }
+    })
+
+    try {
+      subscription.requestSnapshot({ where: whereA })
+      subscription.requestSnapshot({ where: whereB })
+      replaying = true
+      begin()
+      truncate()
+      commit()
+      await flushPromises()
+
+      replayA.reject(failureA)
+      replayB.reject(failureB)
+      await flushPromises()
+
+      expect(reported).toEqual([
+        { error: failureA, options: loads[2] },
+        { error: failureB, options: loads[3] },
+      ])
+      expect(subscription.lastError).toBe(failureB)
+      expect(subscription.lastErrorVersion).toBe(2)
+      expect(terminalCalls).toBe(1)
+      expect(surfacedErrors).toEqual([listenerFailure])
+    } finally {
+      queueMicrotaskSpy.mockRestore()
+      subscription.unsubscribe()
+      await collection.cleanup()
+    }
+  })
+
   it(`reports a caught replay start failure before callback teardown`, async () => {
     type Row = { id: string }
     const whereA = new Func(`eq`, [new PropRef([`id`]), new Value(`a`)])
