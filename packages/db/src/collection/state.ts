@@ -1173,7 +1173,6 @@ export class CollectionStateManager<
           } else {
             this.syncedMetadata.set(key, metadataWrite.value)
           }
-          recordRequestProvenance(key, transaction.requestSignal)
         }
 
         for (const [

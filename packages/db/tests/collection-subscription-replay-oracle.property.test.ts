@@ -15,6 +15,7 @@ import type { OrderBy } from '../src/query/ir.js'
 import type {
   ChangeMessageOrDeleteKeyMessage,
   LoadSubsetOptions,
+  SyncMetadataApi,
 } from '../src/types.js'
 import type { LoadSubsetFullFlowEvent } from './load-subset-full-flow-model.js'
 
@@ -2118,6 +2119,8 @@ describe(`CollectionSubscription replay oracle`, () => {
     `deduplicated`,
     `mixed-equal-batch`,
     `mixed-replacement-batch`,
+    `mixed-metadata-batch`,
+    `mixed-request-metadata-batch`,
   ] as const)(
     `reconciles failed ordered publications for coverage and sibling-demand changes: %s`,
     async (writeTiming) => {
@@ -2132,6 +2135,7 @@ describe(`CollectionSubscription replay oracle`, () => {
       ) => void
       let commit!: (signal?: AbortSignal) => true | Promise<void>
       let truncate!: () => void
+      let metadata!: SyncMetadataApi<Row[`id`]>
       let loadCount = 0
       const loadOptions: Array<LoadSubsetOptions> = []
       const replayLoads: Array<ReturnType<typeof createDeferred<Outcome>>> = []
@@ -2152,7 +2156,9 @@ describe(`CollectionSubscription replay oracle`, () => {
           deduplicatedOptions = options
           if (
             writeTiming === `mixed-equal-batch` ||
-            writeTiming === `mixed-replacement-batch`
+            writeTiming === `mixed-replacement-batch` ||
+            writeTiming === `mixed-metadata-batch` ||
+            writeTiming === `mixed-request-metadata-batch`
           ) {
             siblingLoad = createDeferred<Outcome>()
             return siblingLoad.promise
@@ -2170,6 +2176,7 @@ describe(`CollectionSubscription replay oracle`, () => {
             write = params.write
             commit = params.commit
             truncate = params.truncate
+            metadata = params.metadata!
             params.markReady()
             return {
               loadSubset: (options) => {
@@ -2192,7 +2199,9 @@ describe(`CollectionSubscription replay oracle`, () => {
                   if (
                     writeTiming === `deduplicated` ||
                     writeTiming === `mixed-equal-batch` ||
-                    writeTiming === `mixed-replacement-batch`
+                    writeTiming === `mixed-replacement-batch` ||
+                    writeTiming === `mixed-metadata-batch` ||
+                    writeTiming === `mixed-request-metadata-batch`
                   ) {
                     return deduplicatedSiblingLoad.loadSubset(options)
                   }
@@ -2277,7 +2286,9 @@ describe(`CollectionSubscription replay oracle`, () => {
           await flushPromises()
         } else if (
           writeTiming === `mixed-equal-batch` ||
-          writeTiming === `mixed-replacement-batch`
+          writeTiming === `mixed-replacement-batch` ||
+          writeTiming === `mixed-metadata-batch` ||
+          writeTiming === `mixed-request-metadata-batch`
         ) {
           const hold = createDeferred<void>()
           const transaction = createTransaction({
@@ -2288,26 +2299,48 @@ describe(`CollectionSubscription replay oracle`, () => {
 
           begin()
           write({ type: `update`, value: { id: `x`, rank: -1 } })
-          const ordinaryReceipt = commit()
+          const firstReceipt = commit(
+            writeTiming === `mixed-metadata-batch`
+              ? deduplicatedOptions?.signal
+              : undefined,
+          )
           begin()
-          write({
-            type: `update`,
-            value: {
-              id: `x`,
-              rank: writeTiming === `mixed-equal-batch` ? -1 : -2,
-            },
-          })
-          const requestReceipt = commit(deduplicatedOptions?.signal)
+          if (
+            writeTiming === `mixed-metadata-batch` ||
+            writeTiming === `mixed-request-metadata-batch`
+          ) {
+            metadata.row.set(`x`, {
+              source:
+                writeTiming === `mixed-metadata-batch`
+                  ? `ordinary-metadata`
+                  : `request-metadata`,
+            })
+          } else {
+            write({
+              type: `update`,
+              value: {
+                id: `x`,
+                rank: writeTiming === `mixed-equal-batch` ? -1 : -2,
+              },
+            })
+          }
+          const secondReceipt = commit(
+            writeTiming === `mixed-metadata-batch`
+              ? undefined
+              : deduplicatedOptions?.signal,
+          )
 
           hold.resolve()
           await transaction.isPersisted.promise
-          if (ordinaryReceipt !== true) await ordinaryReceipt
-          if (requestReceipt !== true) await requestReceipt
+          if (firstReceipt !== true) await firstReceipt
+          if (secondReceipt !== true) await secondReceipt
           siblingLoad?.resolve({ hasMore: false, appliedRowKeys: [`x`] })
           await flushPromises()
         }
         const hasOrdinaryAuthority =
-          writeTiming === `ordinary` || writeTiming === `mixed-equal-batch`
+          writeTiming === `ordinary` ||
+          writeTiming === `mixed-equal-batch` ||
+          writeTiming === `mixed-request-metadata-batch`
         const expectedBoundary = hasOrdinaryAuthority ? `x` : `a`
         expect.soft([...visible].sort()).toEqual([`a`, `x`])
         expect.soft(subscription.orderedBoundaryKey).toBe(expectedBoundary)
