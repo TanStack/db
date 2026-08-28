@@ -2099,10 +2099,12 @@ describe(`pagination recomputation oracle`, () => {
       expect(refinement.options.limit).toBeUndefined()
       expect(refinement.options.offset).toBeUndefined()
 
+      const transportCount = pending.length
       const widened = live.utils.setWindow({ offset: 0, limit: 2 })
       expect(widened).toBe(true)
 
       expect(Array.from(live.values(), ({ id }) => id)).toEqual([1, 2])
+      expect(pending).toHaveLength(transportCount)
     } finally {
       for (const request of pending) request.deferred.resolve()
       live.cleanup()
@@ -2962,6 +2964,7 @@ describe(`pagination recomputation oracle`, () => {
     expect(loads).toHaveLength(2)
     expect(loads[1]?.limit).toBeUndefined()
     expect(loads[1]?.offset).toBeUndefined()
+    expect(loads[1]?.cursor).toBeUndefined()
   })
 
   it.each([`continues`, `unknown`] as const)(
@@ -2985,6 +2988,9 @@ describe(`pagination recomputation oracle`, () => {
       expect(loads[1]?.limit).toBeUndefined()
       expect(loads[1]?.offset).toBeUndefined()
       expect(loads.map(({ limit }) => limit)).toEqual([1, undefined, undefined])
+      expect(loads.slice(1).every(({ cursor }) => cursor === undefined)).toBe(
+        true,
+      )
     },
   )
 

@@ -388,6 +388,12 @@ prefix is only a candidate prefix. Core expands the complete source-order
 boundary class, then applies the public-key tie-break locally. Locale and
 reference orders that the predicate IR cannot express fetch the full filtered
 region and refine it locally.
+That fallback issues no structural cursor: a lexical predicate is not a locale
+boundary. Once the unbounded result proves the needed prefix, widening within
+that result performs no more transport work. Bounded locale continuation would
+require a future adapter capability with an opaque cursor that preserves the
+provider's exact collation and snapshot. Until that contract exists, an
+unbounded fetch is the only sound continuation.
 
 Every continuation boundary comes from rows established by the same ordered
 demand. Rows retained for another query, join, or window cannot move it. During
