@@ -468,6 +468,10 @@ export class CollectionSubscription
   private abandonTruncateReplay(session: TruncateReplaySession): void {
     if (this.truncateReplaySession !== session) return
     const publicationState = session.publicationState
+    // Evidence established by the rejected source generation cannot satisfy a
+    // later consumer guard. The retained publication remains public, but the
+    // next acquisition must prove coverage again.
+    this.orderedWindow?.resetCoverage()
     this.loadedInitialState = publicationState.loadedInitialState
     this.snapshotSent = publicationState.snapshotSent
     this.sentKeys = new Set(publicationState.sentKeys)
@@ -578,8 +582,14 @@ export class CollectionSubscription
     this.orderedWindow.ensureSize(size)
     // Retain the new target now, but let the replacement epoch reconcile and
     // publish it together with the buffered source rows.
-    if (this.isBufferingForTruncate || this.stalePublication) {
+    if (this.isBufferingForTruncate) {
       return false
+    }
+    if (this.stalePublication?.ordered) {
+      const changes = this.reconcileStaleOrderedPublication([])
+      if (changes.length === 0) return false
+      this.callback(changes)
+      return true
     }
     const changes = this.reconcileOrderedWindow()
     if (changes.length === 0) return false
@@ -692,6 +702,11 @@ export class CollectionSubscription
         stalePublication.publishedRows.set(change.key, change.value)
       } else {
         stalePublication.publishedRows.delete(change.key)
+      }
+    }
+    for (const [key, row] of stalePublication.publishedRows) {
+      if (!isOrderedRow(row) && !isAdditionalRow(row)) {
+        stalePublication.publishedRows.delete(key)
       }
     }
 
@@ -1253,6 +1268,17 @@ export class CollectionSubscription
       return false
     }
 
+    if (
+      this.orderedWindow &&
+      !this.isBufferingForTruncate &&
+      this.stalePublication?.ordered
+    ) {
+      this.snapshotSent = true
+      const changes = this.reconcileStaleOrderedPublication(snapshot)
+      if (changes.length > 0) this.callback(changes)
+      return true
+    }
+
     // Only send changes that have not been sent yet
     const filteredSnapshot = snapshot.filter(
       (change) => !this.sentKeys.has(change.key),
@@ -1283,12 +1309,10 @@ export class CollectionSubscription
     if (!demand) return
     this.releaseSubsetDemand(demand)
     this.subsetDemands.splice(index, 1)
-    if (
-      this.orderedWindow &&
-      !this.isBufferingForTruncate &&
-      !this.stalePublication
-    ) {
-      const changes = this.reconcileOrderedWindow()
+    if (this.orderedWindow && !this.isBufferingForTruncate) {
+      const changes = this.stalePublication?.ordered
+        ? this.reconcileStaleOrderedPublication([])
+        : this.reconcileOrderedWindow()
       if (changes.length > 0) this.callback(changes)
     }
   }

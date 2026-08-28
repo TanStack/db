@@ -413,7 +413,11 @@ predicate, retained size, and `TotalOrder`. A worse-ranked row stays private but
 remains available to refill the prefix; rows installed only by the rejected
 replacement never enter this set. An empty retained publication is still a
 present publication and cannot collapse into absent state after an unrelated
-change. Reader-visible boundaries and
+change. Source deltas, retained-window changes, new local snapshots, and demand
+release all run this one reducer because each can change the public union. A
+failed generation also clears its private coverage evidence; a successful
+ordered acquisition from that generation cannot suppress the next request when
+another demand makes the whole replacement fail. Reader-visible boundaries and
 failed-replay offset or cursor restoration derive from this snapshot and ignore
 caller offset or cursor hints. A continuation that is still proving the active
 replacement instead derives from `WindowState`'s private current-generation
