@@ -433,7 +433,11 @@ combine their authorities, while a different later version replaces the
 earlier authorities. Row metadata writes do not confer row authority because
 they do not produce a new row version. An unsettled request does not claim
 unrelated transactions merely because their lifetimes overlap. Ordinary live
-source changes and ordered acquisitions may evolve the ordered candidate set. A
+source changes and ordered acquisitions may evolve the ordered candidate set.
+A request-scoped write with no active ordered owner in this subscription stays
+additional-only; a peer may keep its shared physical lease alive after the
+local logical demand is released, but that cannot grant local ordered
+authority. A
 failed generation also clears its private coverage evidence; a successful
 ordered acquisition from that generation cannot suppress the next request when
 another demand makes the whole replacement fail. Reader-visible boundaries and

@@ -882,7 +882,6 @@ export class CollectionSubscription
       return `ordered-source`
     }
 
-    let belongsToAdditionalDemand = false
     for (const requestSignal of provenance.requestSignals) {
       for (const demand of this.subsetDemands) {
         if (
@@ -890,7 +889,6 @@ export class CollectionSubscription
           isLoadSubsetRequestSignalFor(requestSignal, demand.options.signal)
         ) {
           if (demand.ordered !== undefined) return `ordered-source`
-          belongsToAdditionalDemand = true
         }
         for (const pending of demand.pendingReplayAcquisitions) {
           if (
@@ -898,12 +896,14 @@ export class CollectionSubscription
             isLoadSubsetRequestSignalFor(requestSignal, pending.options.signal)
           ) {
             if (pending.ordered !== undefined) return `ordered-source`
-            belongsToAdditionalDemand = true
           }
         }
       }
     }
-    return belongsToAdditionalDemand ? `additional-demand` : `ordered-source`
+    // A tagged request that has no active ordered owner here may belong to an
+    // unordered, released, or peer demand. None may mint ordered authority for
+    // this subscription. Untagged transactions took the ordinary branch above.
+    return `additional-demand`
   }
 
   private buildOrderedCursorExpressions(

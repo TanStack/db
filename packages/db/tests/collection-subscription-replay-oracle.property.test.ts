@@ -2121,6 +2121,7 @@ describe(`CollectionSubscription replay oracle`, () => {
     `mixed-replacement-batch`,
     `mixed-metadata-batch`,
     `mixed-request-metadata-batch`,
+    `deduplicated-after-release`,
   ] as const)(
     `reconciles failed ordered publications for coverage and sibling-demand changes: %s`,
     async (writeTiming) => {
@@ -2158,7 +2159,8 @@ describe(`CollectionSubscription replay oracle`, () => {
             writeTiming === `mixed-equal-batch` ||
             writeTiming === `mixed-replacement-batch` ||
             writeTiming === `mixed-metadata-batch` ||
-            writeTiming === `mixed-request-metadata-batch`
+            writeTiming === `mixed-request-metadata-batch` ||
+            writeTiming === `deduplicated-after-release`
           ) {
             siblingLoad = createDeferred<Outcome>()
             return siblingLoad.promise
@@ -2191,7 +2193,11 @@ describe(`CollectionSubscription replay oracle`, () => {
                     appliedRowKeys: [`a`] as const,
                   })
                 }
-                if (loadCount === 5) {
+                if (
+                  loadCount === 5 ||
+                  (writeTiming === `deduplicated-after-release` &&
+                    loadCount === 6)
+                ) {
                   if (writeTiming === `ordinary`) {
                     siblingLoad = createDeferred<Outcome>()
                     return siblingLoad.promise
@@ -2201,7 +2207,8 @@ describe(`CollectionSubscription replay oracle`, () => {
                     writeTiming === `mixed-equal-batch` ||
                     writeTiming === `mixed-replacement-batch` ||
                     writeTiming === `mixed-metadata-batch` ||
-                    writeTiming === `mixed-request-metadata-batch`
+                    writeTiming === `mixed-request-metadata-batch` ||
+                    writeTiming === `deduplicated-after-release`
                   ) {
                     return deduplicatedSiblingLoad.loadSubset(options)
                   }
@@ -2248,6 +2255,9 @@ describe(`CollectionSubscription replay oracle`, () => {
         }
       })
       subscription.setOrderByIndex(index)
+      let peerSubscription:
+        | ReturnType<typeof collection.subscribeChanges>
+        | undefined
 
       try {
         subscription.requestLimitedSnapshot({ orderBy, limit: 1 })
@@ -2336,13 +2346,39 @@ describe(`CollectionSubscription replay oracle`, () => {
           if (secondReceipt !== true) await secondReceipt
           siblingLoad?.resolve({ hasMore: false, appliedRowKeys: [`x`] })
           await flushPromises()
+        } else if (writeTiming === `deduplicated-after-release`) {
+          peerSubscription = collection.subscribeChanges(() => {})
+          peerSubscription.requestSnapshot({ where: xWhere })
+          await flushPromises()
+
+          const hold = createDeferred<void>()
+          const transaction = createTransaction({
+            mutationFn: () => hold.promise,
+          })
+          transaction.mutate(() => collection.insert({ id: `y`, rank: 1_000 }))
+          await flushPromises()
+
+          begin()
+          write({ type: `update`, value: { id: `x`, rank: -1 } })
+          const requestReceipt = commit(deduplicatedOptions?.signal)
+          subscription.releaseSnapshot(xWhere)
+
+          hold.resolve()
+          await transaction.isPersisted.promise
+          if (requestReceipt !== true) await requestReceipt
+          siblingLoad?.resolve({ hasMore: false, appliedRowKeys: [`x`] })
+          await flushPromises()
         }
         const hasOrdinaryAuthority =
           writeTiming === `ordinary` ||
           writeTiming === `mixed-equal-batch` ||
           writeTiming === `mixed-request-metadata-batch`
         const expectedBoundary = hasOrdinaryAuthority ? `x` : `a`
-        expect.soft([...visible].sort()).toEqual([`a`, `x`])
+        const releasedBeforeApplication =
+          writeTiming === `deduplicated-after-release`
+        expect
+          .soft([...visible].sort())
+          .toEqual(releasedBeforeApplication ? [`a`] : [`a`, `x`])
         expect.soft(subscription.orderedBoundaryKey).toBe(expectedBoundary)
 
         subscription.releaseSnapshot(xWhere)
@@ -2368,6 +2404,7 @@ describe(`CollectionSubscription replay oracle`, () => {
         })
       } finally {
         subscription.unsubscribe()
+        peerSubscription?.unsubscribe()
         await collection.cleanup()
       }
     },
