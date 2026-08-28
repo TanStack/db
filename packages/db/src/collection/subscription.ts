@@ -141,7 +141,7 @@ type TruncateReplaySession = {
   buffer: Array<Array<ChangeMessage<any, any>>>
   attempts: Set<TruncateReplayAttempt>
   currentAttempt: TruncateReplayAttempt
-  errors: Array<{ options: LoadSubsetOptions; error: unknown }>
+  errors: Array<SubsetFailureOccurrence>
 }
 
 type TruncateReplayContext = Readonly<{
@@ -152,7 +152,9 @@ type TruncateReplayContext = Readonly<{
 type SubsetFailureOccurrence = {
   readonly error: unknown
   readonly options: LoadSubsetOptions
+  readonly order: number
   attributed: boolean
+  reported: boolean
 }
 
 type SubsetFailureGroup = Readonly<{
@@ -257,6 +259,7 @@ export class CollectionSubscription
   // that throw the same Error object.
   private activeReplayResultCallback: ReplayResultCallbackFrame | undefined
   private activeSubsetCleanupBoundary: SubsetCleanupBoundaryFrame | undefined
+  private nextSubsetFailureOrder = 0
   private unsubscribeInProgress = false
 
   private isActiveDemand(demand: SubsetDemand): boolean {
@@ -632,9 +635,14 @@ export class CollectionSubscription
     session: TruncateReplaySession,
     options: LoadSubsetOptions,
     error: unknown,
+    occurrence?: SubsetFailureOccurrence,
   ): void {
     if (this.truncateReplaySession !== session) return
-    session.errors.push({ options, error })
+    const failure =
+      occurrence ?? this.createSubsetFailureOccurrence(options, error)
+    if (failure.reported || session.errors.includes(failure)) return
+    failure.attributed = true
+    session.errors.push(failure)
   }
 
   private queueUnattributedReplayFailures(
@@ -644,9 +652,26 @@ export class CollectionSubscription
     if (this.truncateReplaySession !== session) return
     for (const failure of failures) {
       if (!failure.attributed) {
-        this.queueTruncateReplayError(session, failure.options, failure.error)
-        failure.attributed = true
+        this.queueTruncateReplayError(
+          session,
+          failure.options,
+          failure.error,
+          failure,
+        )
       }
+    }
+  }
+
+  private createSubsetFailureOccurrence(
+    options: LoadSubsetOptions,
+    error: unknown,
+  ): SubsetFailureOccurrence {
+    return {
+      error,
+      options,
+      order: this.nextSubsetFailureOrder++,
+      attributed: false,
+      reported: false,
     }
   }
 
@@ -713,7 +738,7 @@ export class CollectionSubscription
         Object.is(group.propagatedError, caughtError),
       )
     if (caught && !propagatedNestedFailure) {
-      failures.push({ error: caughtError, options, attributed: false })
+      failures.push(this.createSubsetFailureOccurrence(options, caughtError))
     }
     return {
       completed: !caught,
@@ -793,8 +818,8 @@ export class CollectionSubscription
         replayContext.session,
         failure.options,
         failure.error,
+        failure,
       )
-      failure.attributed = true
     }
     if (hasCallbackFailure) {
       this.queueTruncateReplayError(replayContext.session, options, caughtError)
@@ -802,15 +827,26 @@ export class CollectionSubscription
     this.checkTruncateReplayComplete(replayContext.session)
   }
 
+  private reportSubsetFailureOccurrence(
+    failure: SubsetFailureOccurrence,
+  ): void {
+    if (failure.reported) return
+    // Mark first because an error listener may reenter teardown while the
+    // public event is being dispatched.
+    failure.attributed = true
+    failure.reported = true
+    this.recordLoadSubsetError(failure.options, failure.error, true)
+  }
+
   private reportTruncateReplayErrors(session: TruncateReplaySession): void {
-    const errors = session.errors.splice(0)
-    for (const { options, error } of errors) {
-      this.recordLoadSubsetError(options, error, true)
+    session.errors.sort((left, right) => left.order - right.order)
+    while (session.errors.length > 0) {
+      this.reportSubsetFailureOccurrence(session.errors.shift()!)
     }
   }
 
-  /** Report callback failures before teardown discards their replay session. */
-  private reportActiveReplayCallbackFailuresBeforeTeardown(): void {
+  /** Report every retained failure before teardown discards its replay session. */
+  private reportReplayFailuresBeforeTeardown(): void {
     const session = this.truncateReplaySession
     if (!session) return
 
@@ -822,15 +858,24 @@ export class CollectionSubscription
     }
 
     const seen = new Set<SubsetFailureOccurrence>()
+    const failures: Array<SubsetFailureOccurrence> = []
+    for (const failure of session.errors.splice(0)) {
+      if (seen.has(failure)) continue
+      seen.add(failure)
+      failures.push(failure)
+    }
     for (const callbackFrame of frames.reverse()) {
       for (const group of callbackFrame.failureGroups) {
         for (const failure of group.failures) {
-          if (seen.has(failure)) continue
+          if (failure.reported || seen.has(failure)) continue
           seen.add(failure)
-          this.recordLoadSubsetError(failure.options, failure.error, true)
-          failure.attributed = true
+          failures.push(failure)
         }
       }
+    }
+    failures.sort((left, right) => left.order - right.order)
+    for (const failure of failures) {
+      this.reportSubsetFailureOccurrence(failure)
     }
   }
 
@@ -1708,15 +1753,13 @@ export class CollectionSubscription
       }
       if (shouldReportError) {
         propagatedError = this.propagatedSubsetFailure(error)
+        const occurrence = this.createSubsetFailureOccurrence(
+          acquisition.options,
+          error,
+        )
         const group: SubsetFailureGroup = {
           propagatedError,
-          failures: [
-            {
-              error,
-              options: acquisition.options,
-              attributed: true,
-            },
-          ],
+          failures: [occurrence],
         }
         if (
           replayContext &&
@@ -1727,10 +1770,13 @@ export class CollectionSubscription
             replayContext.session,
             acquisition.options,
             error,
+            occurrence,
           )
           this.noteSubsetFailureGroup(replayContext, group)
           this.checkTruncateReplayComplete(replayContext.session)
         } else {
+          occurrence.attributed = true
+          occurrence.reported = true
           this.recordLoadSubsetError(acquisition.options, error, true)
           this.noteSubsetFailureGroup(undefined, group)
         }
@@ -2533,7 +2579,7 @@ export class CollectionSubscription
     // unsubscribe listeners may reenter public methods, but they cannot create
     // work that escapes the cleanup pass already in progress.
     this.unsubscribed = true
-    this.reportActiveReplayCallbackFailuresBeforeTeardown()
+    this.reportReplayFailuresBeforeTeardown()
     const boundaryOptions = this.subsetFailureBoundaryOptions()
     const cleanupFailures: Array<{
       error: unknown
@@ -2544,11 +2590,10 @@ export class CollectionSubscription
         boundaryOptions
           ? {
               error,
-              occurrence: {
+              occurrence: this.createSubsetFailureOccurrence(
+                boundaryOptions,
                 error,
-                options: boundaryOptions,
-                attributed: false,
-              },
+              ),
             }
           : { error },
       )

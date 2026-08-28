@@ -6207,6 +6207,190 @@ describe(`CollectionSubscription replay oracle`, () => {
     }
   })
 
+  it(`reports a queued sibling replay failure before callback teardown`, async () => {
+    type Row = { id: `a` | `b` | `c` }
+    const ids = [`a`, `b`, `c`] as const
+    const wheres = ids.map(
+      (id) => new Func(`eq`, [new PropRef([`id`]), new Value(id)]),
+    )
+    const replays = ids.map(() => createDeferred<void>())
+    const failure = new Error(`queued sibling replay failed`)
+    const loads: Array<LoadSubsetOptions> = []
+    const reported: Array<{
+      error: unknown
+      options: LoadSubsetOptions
+    }> = []
+    let begin!: () => void
+    let commit!: () => true | Promise<void>
+    let truncate!: () => void
+    const collection = createCollection<Row>({
+      id: `queued-sibling-replay-before-unsubscribe`,
+      getKey: (row) => row.id,
+      syncMode: `on-demand`,
+      sync: {
+        sync: (params) => {
+          begin = params.begin
+          commit = params.commit
+          truncate = params.truncate
+          params.markReady()
+          return {
+            loadSubset: (options) => {
+              loads.push(options)
+              const loadIndex = loads.length - 1
+              return loadIndex < ids.length
+                ? true
+                : replays[loadIndex - ids.length]!.promise
+            },
+            unloadSubset: () => {},
+          }
+        },
+      },
+    })
+    const subscription = collection.subscribeChanges(() => {})
+    subscription.on(`loadSubset:error`, ({ error, options }) =>
+      reported.push({ error, options }),
+    )
+
+    try {
+      for (const [index, where] of wheres.entries()) {
+        subscription.requestSnapshot({
+          where,
+          ...(index === 1 && {
+            onLoadSubsetResult: (result) => {
+              if (result instanceof Promise) {
+                void result.then(() => subscription.unsubscribe())
+              }
+            },
+          }),
+        })
+      }
+
+      begin()
+      truncate()
+      commit()
+      await flushPromises()
+
+      replays[0]!.reject(failure)
+      await flushPromises()
+      expect(reported).toEqual([])
+
+      replays[1]!.resolve()
+      await flushPromises()
+
+      expect(reported).toEqual([{ error: failure, options: loads[3] }])
+      expect(subscription.lastError).toBe(failure)
+      expect(subscription.lastErrorVersion).toBe(1)
+
+      replays[2]!.reject(new Error(`late obsolete replay failure`))
+      await flushPromises()
+      expect(reported).toEqual([{ error: failure, options: loads[3] }])
+      expect(subscription.lastErrorVersion).toBe(1)
+    } finally {
+      subscription.unsubscribe()
+      await collection.cleanup()
+    }
+  })
+
+  it(`reports queued and active replay failures in occurrence order`, async () => {
+    type Row = { id: string }
+    const whereA = new Func(`eq`, [new PropRef([`id`]), new Value(`a`)])
+    const whereB = new Func(`eq`, [new PropRef([`id`]), new Value(`b`)])
+    const whereC = new Func(`eq`, [new PropRef([`id`]), new Value(`c`)])
+    const whereNested = new Func(`eq`, [
+      new PropRef([`id`]),
+      new Value(`nested`),
+    ])
+    const replayFailure = new Error(`prior replay failed`)
+    const cleanupFailure = new Error(`callback cleanup failed`)
+    const startFailure = new Error(`callback start failed`)
+    const loads: Array<LoadSubsetOptions> = []
+    const reported: Array<{
+      error: unknown
+      options: LoadSubsetOptions
+    }> = []
+    let begin!: () => void
+    let commit!: () => true | Promise<void>
+    let truncate!: () => void
+    let replaying = false
+    let callbackCount = 0
+    let cleanupFailed = false
+    let nestedOptions: LoadSubsetOptions | undefined
+    const collection = createCollection<Row>({
+      id: `queued-and-active-replay-failure-order`,
+      getKey: (row) => row.id,
+      syncMode: `on-demand`,
+      sync: {
+        sync: (params) => {
+          begin = params.begin
+          commit = params.commit
+          truncate = params.truncate
+          params.markReady()
+          return {
+            loadSubset: (options) => {
+              loads.push(options)
+              if (options.where === whereNested) {
+                nestedOptions = options
+                throw startFailure
+              }
+              if (replaying && options.where === whereA) throw replayFailure
+              return true
+            },
+            unloadSubset: (options) => {
+              if (options.where === whereC && !cleanupFailed) {
+                cleanupFailed = true
+                throw cleanupFailure
+              }
+            },
+          }
+        },
+      },
+    })
+    const subscription = collection.subscribeChanges(() => {})
+    subscription.on(`loadSubset:error`, ({ error, options }) =>
+      reported.push({ error, options }),
+    )
+
+    try {
+      subscription.requestSnapshot({ where: whereA })
+      subscription.requestSnapshot({
+        where: whereB,
+        onLoadSubsetResult: () => {
+          callbackCount++
+          if (callbackCount !== 2) return
+          try {
+            subscription.releaseSnapshot(whereC)
+          } catch {
+            // Teardown must retain this active callback-frame occurrence.
+          }
+          try {
+            subscription.requestSnapshot({ where: whereNested })
+          } catch {
+            // This occurrence is both queued and reachable through the frame.
+          }
+          subscription.unsubscribe()
+        },
+      })
+      subscription.requestSnapshot({ where: whereC })
+
+      replaying = true
+      begin()
+      truncate()
+      commit()
+      await flushPromises()
+
+      expect(reported).toEqual([
+        { error: replayFailure, options: loads[3] },
+        { error: cleanupFailure, options: loads[2] },
+        { error: startFailure, options: nestedOptions },
+      ])
+      expect(subscription.lastError).toBe(startFailure)
+      expect(subscription.lastErrorVersion).toBe(3)
+    } finally {
+      subscription.unsubscribe()
+      await collection.cleanup()
+    }
+  })
+
   it(`reports a caught replay start failure before callback teardown`, async () => {
     type Row = { id: string }
     const whereA = new Func(`eq`, [new PropRef([`id`]), new Value(`a`)])

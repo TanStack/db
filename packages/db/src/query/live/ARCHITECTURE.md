@@ -548,9 +548,13 @@ asynchronous listener-error behavior.
 composition APIs. A nested synchronous failure may use the private propagation
 token across that callback; internal code must rethrow the caught value
 unchanged. Before callback-triggered teardown discards a replay session, the
-subscription reports every retained original occurrence against its exact
-options. Teardown ignores reentrant `unsubscribe()` calls while one pass is in
-progress, but a later call may still retry retained adapter cleanup debt.
+subscription merges failures already queued by sibling acquisitions with
+occurrences retained by every active callback frame. It reports each unique
+occurrence in creation order against its exact options before clearing the
+session. An occurrence that is both queued and reachable through a callback
+frame still reports once. Teardown ignores reentrant `unsubscribe()` calls
+while one pass is in progress, but a later call may still retry retained
+adapter cleanup debt.
 One logical release may cross both a pending replacement acquisition and its
 original acquisition. If several cleanup boundaries fail, the callback frame
 retains them as one propagated group and reports every occurrence against its
