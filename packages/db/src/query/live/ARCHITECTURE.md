@@ -743,21 +743,24 @@ shared abort lease. If one owner releases its lease, the source request remains
 active while another owner still needs its coverage. The source signal aborts
 only after every attached owner has released it.
 
-A Collection subscription installs each logical subset owner before it calls
-the source adapter. Reentrant release during `loadSubset` must therefore see and
-release that exact acquisition. It also registers the caller's original
-predicate before adapter entry, because the transport predicate may combine it
-with the subscription predicate. After adapter return, both ordered and
-unordered requests recheck logical ownership before they report results, track
-loading state, establish coverage, or scan local state; a demand released
-during adapter code cannot publish a later snapshot. A synchronous `loadSubset`
-throw that did not follow a failed release rolls the tentative owner back before
-it emits the error and without calling `unloadSubset`; a failed release keeps
-the owner so a later cleanup can retry the same acquisition identity.
-The logical owner also retains its compiled predicate. Reconciliation reuses
-that evaluator across source changes and truncate acquisition replacement. A
-released owner cannot supply a predicate, and a later logical demand compiles
-its own evaluator even when it reuses the same expression object.
+A Collection subscription snapshots each logical subset demand before it calls
+the source adapter. That stable snapshot drives the adapter transport,
+acquisition evidence, compiled predicate, and later truncate replay. The
+caller's original predicate is retained only as a release handle, because the
+transport predicate may combine it with the subscription predicate. The
+subscription then installs the logical owner before adapter entry. Reentrant
+release during `loadSubset` must therefore see and release that exact
+acquisition. After adapter return, both ordered and unordered requests recheck
+logical ownership before they report results, track loading state, establish
+coverage, or scan local state; a demand released during adapter code cannot
+publish a later snapshot. A synchronous `loadSubset` throw that did not follow
+a failed release rolls the tentative owner back before it emits the error and
+without calling `unloadSubset`; a failed release keeps the owner so a later
+cleanup can retry the same acquisition identity. Reconciliation reuses the
+logical owner's evaluator across source changes and truncate acquisition
+replacement. A released owner cannot supply a predicate, and a later logical
+demand compiles its own evaluator even when it reuses the same expression
+object.
 Result callbacks are also arbitrary reentrancy boundaries. After invoking one,
 the request checks the same exact owner again before it tracks status, applies
 coverage, or scans local rows. A callback may release or unsubscribe; obsolete

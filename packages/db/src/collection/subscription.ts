@@ -6,6 +6,7 @@ import {
   getSyncRequestProvenance,
   isLoadSubsetRequestSignalFor,
 } from '../load-subset-request-provenance.js'
+import { cloneLoadSubsetOptions } from '../query/load-subset-options.js'
 import {
   buildCursor,
   buildCursorEquality,
@@ -1898,17 +1899,19 @@ export class CollectionSubscription
   private startSubsetDemand(
     requestOptions: LoadSubsetOptions,
     ordered?: SubsetDemand[`ordered`],
+    releaseWhere = requestOptions.where,
   ): {
     demand: SubsetDemand
     acquisition: SubsetAcquisition & { abortController: AbortController }
     result: LoadSubsetRequestResult
     replayContext: TruncateReplayContext | undefined
   } {
+    const stableRequestOptions = cloneLoadSubsetOptions(requestOptions)
     const demand: SubsetDemand = {
-      requestOptions,
-      options: requestOptions,
-      matchesWhere: requestOptions.where
-        ? createFilterFunctionFromExpression<object>(requestOptions.where)
+      requestOptions: stableRequestOptions,
+      options: stableRequestOptions,
+      matchesWhere: stableRequestOptions.where
+        ? createFilterFunctionFromExpression<object>(stableRequestOptions.where)
         : matchesEveryRow,
       ...(ordered === undefined ? {} : { ordered }),
       pendingReplayAcquisitions: new Set(),
@@ -1916,6 +1919,9 @@ export class CollectionSubscription
       releaseInProgress: false,
       releaseFailed: false,
       releaseSettled: false,
+    }
+    if (releaseWhere) {
+      this.requestedSubsetWhere.set(stableRequestOptions, releaseWhere)
     }
     const acquisition = this.createSubsetAcquisition(demand)
     demand.options = acquisition.options
@@ -2180,15 +2186,11 @@ export class CollectionSubscription
       limit: opts?.limit,
     }
 
-    // Reentrant adapter code must be able to release a request by the exact
-    // caller predicate even when the subscription predicate was combined into
-    // the transport predicate.
-    if (opts?.where) this.requestedSubsetWhere.set(loadOptions, opts.where)
     const {
       demand,
       result: syncResult,
       replayContext: startedReplayContext,
-    } = this.startSubsetDemand(loadOptions)
+    } = this.startSubsetDemand(loadOptions, undefined, opts?.where)
     const replayTracksCallback =
       this.retainReplayResultCallback(startedReplayContext)
     // Replay settlement owns the acquisition even if the result callback
