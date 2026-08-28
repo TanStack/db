@@ -1688,7 +1688,7 @@ export class CollectionSubscription
 
     return {
       options: {
-        ...request.options,
+        ...cloneLoadSubsetOptions(request.options),
         signal: abortController.signal,
       },
       ordered: request.ordered,

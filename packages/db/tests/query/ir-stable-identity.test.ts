@@ -552,6 +552,28 @@ describe(`loadSubset demand identity`, () => {
     ).toThrow(/function value/)
   })
 
+  it(`snapshots structural function operands without changing demand identity`, () => {
+    const bytes = Buffer.from([65])
+    const demand: LoadSubsetOptions = {
+      where: new Func<boolean>(`eq`, [
+        new Func(`concat`, [new Value(bytes)]),
+        new Value(`A`),
+      ]),
+    }
+    const demandKey = getLoadSubsetDemandKey(demand)
+    const snapshot = cloneLoadSubsetOptions(demand)
+    const snapshotBytes = (
+      ((snapshot.where as Func).args[0] as Func).args[0] as Value<Buffer>
+    ).value
+
+    expect(snapshotBytes).not.toBe(bytes)
+    expect(getLoadSubsetDemandKey(snapshot)).toBe(demandKey)
+
+    bytes[0] = 66
+    expect(compileExpression(demand.where!)({})).toBe(false)
+    expect(compileExpression(snapshot.where!)({})).toBe(true)
+  })
+
   it.each([
     [`signed zero`, -0, 0],
     [`invalid Date`, new Date(Number.NaN), new Date(Number.NaN)],

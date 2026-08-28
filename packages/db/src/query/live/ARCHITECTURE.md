@@ -744,8 +744,12 @@ active while another owner still needs its coverage. The source signal aborts
 only after every attached owner has released it.
 
 A Collection subscription snapshots each logical subset demand before it calls
-the source adapter. That stable snapshot drives the adapter transport,
-acquisition evidence, compiled predicate, and later truncate replay. The
+the source adapter. That private snapshot drives acquisition evidence, the
+compiled predicate, and later truncate replay. Each adapter acquisition gets a
+separate clone derived from it, so neither caller nor adapter mutation can
+rewrite the logical demand or another acquisition. Values observed by scalar
+functions are snapshotted according to that function's semantics; opaque
+values used by reference-sensitive equality retain their identity. The
 caller's original predicate is retained only as a release handle, because the
 transport predicate may combine it with the subscription predicate. The
 subscription then installs the logical owner before adapter entry. Reentrant

@@ -5157,7 +5157,13 @@ describe(`CollectionSubscription replay oracle`, () => {
           return {
             loadSubset: (options) => {
               loads.push(options)
-              return loads.length === 1 ? true : replay.promise
+              if (loads.length === 1) {
+                // Adapter code owns only this acquisition copy. Mutating it
+                // must not rewrite the private demand used by later replay.
+                ;((options.where as Func).args[0] as PropRef).path[0] = `other`
+                return true
+              }
+              return replay.promise
             },
             unloadSubset: (options) => {
               unloads.push(options)
@@ -5202,6 +5208,82 @@ describe(`CollectionSubscription replay oracle`, () => {
 
       subscription.releaseSnapshot(where)
       expect(unloads.at(-1)).toBe(loads[1])
+    } finally {
+      replay.resolve({ hasMore: false, appliedRowKeys: [] })
+      subscription.unsubscribe()
+      await collection.cleanup()
+    }
+  })
+
+  it(`snapshots mutable values beneath output-producing predicate functions`, async () => {
+    type Row = { id: `row` }
+    type Outcome = {
+      hasMore: false
+      appliedRowKeys: ReadonlyArray<Row[`id`]>
+    }
+    let begin!: () => void
+    let write!: (
+      message: ChangeMessageOrDeleteKeyMessage<Row, Row[`id`]>,
+    ) => void
+    let commit!: (signal?: AbortSignal) => true | Promise<void>
+    let truncate!: () => void
+    const replay = createDeferred<Outcome>()
+    const loads: Array<LoadSubsetOptions> = []
+    const collection = createCollection<Row>({
+      id: `logical-demand-value-snapshot`,
+      getKey: (row) => row.id,
+      syncMode: `on-demand`,
+      sync: {
+        sync: (params) => {
+          begin = params.begin
+          write = params.write
+          commit = params.commit
+          truncate = params.truncate
+          begin()
+          write({ type: `insert`, value: { id: `row` } })
+          commit()
+          params.markReady()
+          return {
+            loadSubset: (options) => {
+              loads.push(options)
+              return loads.length === 1 ? true : replay.promise
+            },
+          }
+        },
+      },
+    })
+    const visible = new Map<Row[`id`], Row>()
+    const subscription = collection.subscribeChanges((changes) => {
+      for (const change of changes) {
+        const key = change.key as Row[`id`]
+        if (change.type === `delete`) visible.delete(key)
+        else visible.set(key, change.value)
+      }
+    })
+    const bytes = Buffer.from([65])
+    const where = new Func<boolean>(`eq`, [
+      new Func(`concat`, [new Value(bytes)]),
+      new Value(`A`),
+    ])
+
+    try {
+      subscription.requestSnapshot({ where })
+      expect([...visible.keys()]).toEqual([`row`])
+
+      bytes[0] = 66
+      begin()
+      truncate()
+      commit()
+      await flushPromises()
+
+      begin()
+      write({ type: `insert`, value: { id: `row` } })
+      const receipt = commit(loads[1]?.signal)
+      if (receipt !== true) await receipt
+      replay.resolve({ hasMore: false, appliedRowKeys: [`row`] })
+      await flushPromises()
+
+      expect([...visible.keys()]).toEqual([`row`])
     } finally {
       replay.resolve({ hasMore: false, appliedRowKeys: [] })
       subscription.unsubscribe()

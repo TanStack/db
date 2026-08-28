@@ -1,7 +1,9 @@
 import { normalizeValue } from '../utils/comparison.js'
 import { isRefProxy, toExpression } from './builder/ref-proxy.js'
 import { getQueryIR } from './builder/get-query-ir.js'
+import { getExpressionArgumentValueContext } from './expression-value-context.js'
 import { getRuntimeReferenceIdentity } from './runtime-reference-identity.js'
+import type { ExpressionValueContext } from './expression-value-context.js'
 import type {
   Aggregate,
   BasicExpression,
@@ -25,11 +27,6 @@ type StableIdentityValue =
   | string
   | Array<StableIdentityValue>
   | { [key: string]: StableIdentityValue }
-
-type ValueIdentityContext =
-  | `exact-output`
-  | `equality-operand`
-  | `ordering-operand`
 
 type OpaqueValueIdentity = `reject` | `runtime-reference`
 
@@ -568,7 +565,7 @@ function canonicalizeOrderBy(
   orderBy: OrderByClause,
   path: string,
   seen: WeakSet<object>,
-  valueContext: ValueIdentityContext = `exact-output`,
+  valueContext: ExpressionValueContext = `exact-output`,
   scope?: AliasScope,
   opaqueValueIdentity: OpaqueValueIdentity = `reject`,
 ): StableIdentityValue {
@@ -597,7 +594,7 @@ function canonicalizeExpression(
     | ConditionalSelect,
   path: string,
   seen: WeakSet<object>,
-  valueContext: ValueIdentityContext = `exact-output`,
+  valueContext: ExpressionValueContext = `exact-output`,
   scope?: AliasScope,
   opaqueValueIdentity: OpaqueValueIdentity = `reject`,
 ): StableIdentityValue {
@@ -644,12 +641,19 @@ function canonicalizeExpression(
                 seen,
                 opaqueValueIdentity,
               )
-            : canonicalizeExactOutputRuntimeValue(
-                expression.value,
-                `${path}.value`,
-                seen,
-                opaqueValueIdentity,
-              ),
+            : valueContext === `structural-operand`
+              ? canonicalizeStructuralRuntimeValue(
+                  expression.value,
+                  `${path}.value`,
+                  seen,
+                  opaqueValueIdentity,
+                )
+              : canonicalizeExactOutputRuntimeValue(
+                  expression.value,
+                  `${path}.value`,
+                  seen,
+                  opaqueValueIdentity,
+                ),
     }
   }
 
@@ -687,21 +691,17 @@ function canonicalizeExpression(
       ])
     }
 
-    const operandContext: ValueIdentityContext =
-      expression.name === `eq`
-        ? `equality-operand`
-        : expression.name === `gt` ||
-            expression.name === `gte` ||
-            expression.name === `lt` ||
-            expression.name === `lte`
-          ? `ordering-operand`
-          : `exact-output`
     const args = expression.args.map((arg, index) =>
       canonicalizeExpression(
         arg,
         `${path}.args[${index}]`,
         seen,
-        operandContext,
+        getExpressionArgumentValueContext(
+          expression.name,
+          index,
+          expression.args.length,
+          valueContext,
+        ),
         scope,
         opaqueValueIdentity,
       ),
@@ -1078,6 +1078,37 @@ function canonicalizeEqualityRuntimeValue(
   }
 
   return canonicalizeRuntimeValue(value, path, seen)
+}
+
+function canonicalizeStructuralRuntimeValue(
+  value: unknown,
+  path: string,
+  seen: WeakSet<object>,
+  opaqueValueIdentity: OpaqueValueIdentity = `reject`,
+): StableIdentityValue {
+  if (
+    opaqueValueIdentity === `runtime-reference` &&
+    (typeof value === `function` || typeof value === `symbol`)
+  ) {
+    return getRuntimeReferenceIdentity(value)
+  }
+
+  if (value instanceof Date && Number.isNaN(value.getTime())) {
+    return canonicalizeRuntimeValue(Number.NaN, path, seen)
+  }
+
+  try {
+    return canonicalizeRuntimeValue(value, path, seen)
+  } catch (error) {
+    if (
+      error instanceof UnhashableQueryIRError &&
+      typeof value === `object` &&
+      value !== null
+    ) {
+      return getRuntimeReferenceIdentity(value)
+    }
+    throw error
+  }
 }
 
 function canonicalizeOrderingRuntimeValue(

@@ -1,4 +1,6 @@
 import { Func, PropRef, Value } from './ir.js'
+import { getExpressionArgumentValueContext } from './expression-value-context.js'
+import type { ExpressionValueContext } from './expression-value-context.js'
 import type { BasicExpression } from './ir.js'
 import type { LoadSubsetOptions } from '../types.js'
 
@@ -44,14 +46,9 @@ export function snapshotLoadSubsetDemand(
   return demand
 }
 
-type ExpressionCloneContext =
-  | `exact-output`
-  | `equality-operand`
-  | `ordering-operand`
-
 function cloneBasicExpression<T>(
   expression: BasicExpression<T>,
-  context: ExpressionCloneContext = `exact-output`,
+  context: ExpressionValueContext = `exact-output`,
 ): BasicExpression<T> {
   switch (expression.type) {
     case `ref`:
@@ -62,7 +59,9 @@ function cloneBasicExpression<T>(
           ? snapshotEqualityValue(expression.value)
           : context === `ordering-operand`
             ? snapshotStructuralValue(expression.value)
-            : expression.value,
+            : context === `structural-operand`
+              ? snapshotStructuralValue(expression.value)
+              : expression.value,
       )
     case `func`:
       return new Func<T>(
@@ -79,20 +78,16 @@ function cloneBasicExpression<T>(
             )
           }
 
-          const argumentContext: ExpressionCloneContext =
-            expression.name === `eq`
-              ? `equality-operand`
-              : isOrderingFunction(expression.name)
-                ? `ordering-operand`
-                : `exact-output`
+          const argumentContext = getExpressionArgumentValueContext(
+            expression.name,
+            index,
+            expression.args.length,
+            context,
+          )
           return cloneBasicExpression(arg, argumentContext)
         }),
       )
   }
-}
-
-function isOrderingFunction(name: string): boolean {
-  return name === `gt` || name === `gte` || name === `lt` || name === `lte`
 }
 
 function snapshotEqualityValue<T>(value: T): T {
