@@ -5533,6 +5533,148 @@ describe(`CollectionSubscription replay oracle`, () => {
     }
   })
 
+  it.each([
+    { mode: `propagates the nested failure`, behavior: `propagate` },
+    { mode: `swallows the nested failure`, behavior: `swallow` },
+    { mode: `replaces it with another failure`, behavior: `replace` },
+  ])(
+    `preserves cleanup provenance when an intermediate adapter $mode`,
+    async ({ behavior }) => {
+      type Row = { id: string }
+      let begin!: () => void
+      let write!: (
+        message: ChangeMessageOrDeleteKeyMessage<Row, string>,
+      ) => void
+      let commit!: () => true | Promise<void>
+      let truncate!: () => void
+      const ids = [`a`, `b`, `c`] as const
+      const wheres = ids.map(
+        (id) => new Func(`eq`, [new PropRef([`id`]), new Value(id)]),
+      )
+      const replays = ids.map(() => createDeferred<void>())
+      const loads: Array<LoadSubsetOptions> = []
+      const unloads: Array<LoadSubsetOptions> = []
+      const failed = new Set<LoadSubsetOptions>()
+      const failureB = new Error(`B cleanup failed`)
+      const failureC = new Error(`C cleanup failed`)
+      let nestedA = false
+      let nestedB = false
+      type TestSubscription = ReturnType<
+        ReturnType<typeof createCollection<Row>>[`subscribeChanges`]
+      >
+      const owner: { current?: TestSubscription } = {}
+      const collection = createCollection<Row>({
+        id: `deep-nested-replay-cleanup-${behavior}`,
+        getKey: (row) => row.id,
+        syncMode: `on-demand`,
+        sync: {
+          sync: (params) => {
+            begin = params.begin
+            write = params.write
+            commit = params.commit
+            truncate = params.truncate
+            params.markReady()
+            return {
+              loadSubset: (options) => {
+                loads.push(options)
+                const index = loads.length - 1
+                if (index < ids.length) {
+                  begin()
+                  write({ type: `insert`, value: { id: ids[index]! } })
+                  commit()
+                  return true
+                }
+                return replays[index - ids.length]!.promise
+              },
+              unloadSubset: (options) => {
+                unloads.push(options)
+                if (options === loads[0] && !nestedA) {
+                  nestedA = true
+                  owner.current!.releaseSnapshot(wheres[1]!)
+                }
+                if (options === loads[1] && !nestedB) {
+                  nestedB = true
+                  if (behavior !== `propagate`) {
+                    try {
+                      owner.current!.releaseSnapshot(wheres[2]!)
+                    } catch {
+                      // The cleanup boundary must retain the nested occurrence
+                      // even when this adapter handles the propagated error.
+                    }
+                    if (behavior === `replace` && !failed.has(options)) {
+                      failed.add(options)
+                      throw failureB
+                    }
+                  } else {
+                    owner.current!.releaseSnapshot(wheres[2]!)
+                  }
+                }
+                if (options === loads[2] && !failed.has(options)) {
+                  failed.add(options)
+                  throw failureC
+                }
+              },
+            }
+          },
+        },
+      })
+      const visible = new Set<string>()
+      const reported: Array<{
+        error: unknown
+        options: LoadSubsetOptions
+      }> = []
+      const subscription = collection.subscribeChanges((changes) => {
+        for (const change of changes) {
+          if (change.type === `delete`) visible.delete(String(change.key))
+          else visible.add(String(change.key))
+        }
+      })
+      owner.current = subscription
+      subscription.on(`loadSubset:error`, ({ error, options }) =>
+        reported.push({ error, options }),
+      )
+
+      try {
+        for (const where of wheres) subscription.requestSnapshot({ where })
+        begin()
+        truncate()
+        commit()
+        await flushPromises()
+
+        for (const replay of replays) replay.resolve()
+        await flushPromises()
+
+        expect(reported.map(({ error }) => error)).toEqual(
+          behavior === `replace` ? [failureC, failureB] : [failureC],
+        )
+        expect(reported.map(({ options }) => loads.indexOf(options))).toEqual(
+          behavior === `replace` ? [2, 1] : [2],
+        )
+        expect(unloads.map((options) => loads.indexOf(options))).toEqual([
+          0, 4, 1, 5, 2, 3,
+        ])
+        expect([...visible].sort()).toEqual(ids)
+        expect(subscription.status).toBe(`ready`)
+
+        subscription.unsubscribe()
+        expect(unloads.map((options) => loads.indexOf(options))).toEqual([
+          0,
+          4,
+          1,
+          5,
+          2,
+          3,
+          0,
+          ...(behavior === `swallow` ? [] : [1]),
+          2,
+        ])
+      } finally {
+        subscription.unsubscribe()
+        await collection.cleanup()
+      }
+    },
+  )
+
   it(`collects inactive demand state after late replay cleanup succeeds`, async () => {
     type Row = { id: string; rank: number }
     type Outcome = { hasMore: boolean; appliedRowKeys: ReadonlyArray<string> }

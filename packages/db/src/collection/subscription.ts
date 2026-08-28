@@ -111,7 +111,7 @@ type ReplaySubsetAcquisition = SubsetAcquisition & {
 }
 
 type ReplayHandoffResult =
-  | { installed: true }
+  | { installed: true; failures?: ReadonlyArray<SubsetFailureOccurrence> }
   | { installed: false; failures?: ReadonlyArray<SubsetFailureOccurrence> }
 
 type SubsetDemand = SubsetAcquisition & {
@@ -170,6 +170,11 @@ type SubsetCleanupBoundaryFrame = {
   previous: SubsetCleanupBoundaryFrame | undefined
   failureGroups: Array<SubsetFailureGroup>
 }
+
+type SubsetCleanupCaptureResult = Readonly<{
+  completed: boolean
+  failures?: ReadonlyArray<SubsetFailureOccurrence>
+}>
 
 class SubsetCleanupAggregateError extends AggregateError {
   constructor(errors: ReadonlyArray<unknown>) {
@@ -659,25 +664,35 @@ export class CollectionSubscription
   private captureSubsetCleanupFailures(
     options: LoadSubsetOptions,
     callback: () => void,
-  ): ReadonlyArray<SubsetFailureOccurrence> | undefined {
+  ): SubsetCleanupCaptureResult {
     const frame: SubsetCleanupBoundaryFrame = {
       previous: this.activeSubsetCleanupBoundary,
       failureGroups: [],
     }
     this.activeSubsetCleanupBoundary = frame
+    let caught = false
+    let caughtError: unknown
     try {
       callback()
-      return undefined
     } catch (error) {
-      for (let index = frame.failureGroups.length - 1; index >= 0; index--) {
-        const group = frame.failureGroups[index]
-        if (group && Object.is(group.propagatedError, error)) {
-          return group.failures
-        }
-      }
-      return [{ error, options, attributed: false }]
+      caught = true
+      caughtError = error
     } finally {
       this.activeSubsetCleanupBoundary = frame.previous
+    }
+
+    const failures = frame.failureGroups.flatMap((group) => group.failures)
+    const propagatedNestedFailure =
+      caught &&
+      frame.failureGroups.some((group) =>
+        Object.is(group.propagatedError, caughtError),
+      )
+    if (caught && !propagatedNestedFailure) {
+      failures.push({ error: caughtError, options, attributed: false })
+    }
+    return {
+      completed: !caught,
+      ...(failures.length > 0 && { failures }),
     }
   }
 
@@ -1377,14 +1392,21 @@ export class CollectionSubscription
     demand.releaseInProgress = true
     const previousOptions = demand.options
     const removePreviousAbortListener = demand.removeRequestAbortListener
+    const failures: Array<SubsetFailureOccurrence> = []
     try {
-      const failures = this.captureSubsetCleanupFailures(
+      const previousCleanup = this.captureSubsetCleanupFailures(
         previousOptions,
         () => {
           this.collection._sync.unloadSubset(previousOptions)
         },
       )
-      if (failures) return { installed: false, failures }
+      if (previousCleanup.failures) failures.push(...previousCleanup.failures)
+      if (!previousCleanup.completed) {
+        return {
+          installed: false,
+          ...(failures.length > 0 && { failures }),
+        }
+      }
       removePreviousAbortListener?.()
       demand.releaseFailed = false
       demand.releaseSettled = true
@@ -1393,14 +1415,17 @@ export class CollectionSubscription
       // logical demand. In that case the replacement must never become its
       // new live acquisition.
       if (!this.isActiveDemand(demand)) {
-        const replacementFailures = this.captureSubsetCleanupFailures(
+        const replacementCleanup = this.captureSubsetCleanupFailures(
           next.options,
           () => this.releaseReplayAcquisitionUnprotected(demand, next),
         )
-        if (replacementFailures) {
-          return { installed: false, failures: replacementFailures }
+        if (replacementCleanup.failures) {
+          failures.push(...replacementCleanup.failures)
         }
-        return { installed: false }
+        return {
+          installed: false,
+          ...(failures.length > 0 && { failures }),
+        }
       }
 
       demand.options = next.options
@@ -1408,7 +1433,10 @@ export class CollectionSubscription
       demand.abortController = next.abortController
       demand.removeRequestAbortListener = next.removeRequestAbortListener
       demand.releaseSettled = false
-      return { installed: true }
+      return {
+        installed: true,
+        ...(failures.length > 0 && { failures }),
+      }
     } finally {
       demand.releaseInProgress = false
       this.collectReleasedDemand(demand)
@@ -1447,6 +1475,10 @@ export class CollectionSubscription
     attempt: TruncateReplayAttempt,
   ): boolean {
     const handoff = this.replaceSubsetAcquisition(demand, next)
+    if (handoff.failures) {
+      attempt.failed = true
+      this.queueUnattributedReplayFailures(session, handoff.failures)
+    }
     if (handoff.installed) {
       demand.pendingReplayAcquisitions.delete(next)
       return true
@@ -1455,8 +1487,6 @@ export class CollectionSubscription
       // The old lease remains owned when its release fails. Release the new
       // acquisition and preserve every failed cleanup as a distinct event.
       const discardFailures = this.discardReplayAcquisition(demand, next)
-      attempt.failed = true
-      this.queueUnattributedReplayFailures(session, handoff.failures)
       if (discardFailures) {
         this.queueUnattributedReplayFailures(session, discardFailures)
       }
@@ -1472,7 +1502,7 @@ export class CollectionSubscription
     // or collection cleanup will retry its exact owner route.
     return this.captureSubsetCleanupFailures(next.options, () =>
       this.releaseReplayAcquisition(demand, next),
-    )
+    ).failures
   }
 
   private releaseReplayAcquisition(
@@ -1511,28 +1541,23 @@ export class CollectionSubscription
       demand.abortController?.abort()
       const releaseFailures: Array<SubsetFailureOccurrence> = []
       for (const pending of [...demand.pendingReplayAcquisitions]) {
-        try {
-          this.releaseReplayAcquisitionUnprotected(demand, pending)
-        } catch (error) {
-          releaseFailures.push({
-            error,
-            options: pending.options,
-            attributed: false,
-          })
-        }
+        const cleanup = this.captureSubsetCleanupFailures(pending.options, () =>
+          this.releaseReplayAcquisitionUnprotected(demand, pending),
+        )
+        if (cleanup.failures) releaseFailures.push(...cleanup.failures)
       }
       if (!demand.releaseSettled) {
         try {
-          this.collection._sync.unloadSubset(demand.options)
-          demand.releaseFailed = false
-          demand.releaseSettled = true
-        } catch (error) {
-          demand.releaseFailed = true
-          releaseFailures.push({
-            error,
-            options: demand.options,
-            attributed: false,
-          })
+          const cleanup = this.captureSubsetCleanupFailures(
+            demand.options,
+            () => {
+              this.collection._sync.unloadSubset(demand.options)
+              demand.releaseFailed = false
+              demand.releaseSettled = true
+            },
+          )
+          if (!cleanup.completed) demand.releaseFailed = true
+          if (cleanup.failures) releaseFailures.push(...cleanup.failures)
         } finally {
           demand.removeRequestAbortListener?.()
         }

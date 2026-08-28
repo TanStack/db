@@ -543,7 +543,10 @@ cannot make replacement cleanup appear to belong to the old acquisition. The
 same rule crosses logical demands: if one adapter cleanup reentrantly releases
 another demand, an automatic-cleanup frame carries every nested occurrence
 through the outer callback without merging them into an aggregate event or
-relabeling them as the outer acquisition.
+relabeling them as the outer acquisition. This composes recursively. An
+intermediate cleanup cannot replace a deeper acquisition's provenance merely
+by propagating the same payload, catching it, or throwing another error after
+it; each originating cleanup remains one ordered occurrence.
 A requested limit, a settled promise, or the number of requests does not.
 Applied keys carry two distinct facts. Every applied source key may advance the
 continuation cursor, including a row excluded by the subscription predicate.
