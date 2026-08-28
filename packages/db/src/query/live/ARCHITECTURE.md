@@ -415,7 +415,11 @@ progress and also ignores caller continuation hints; that progress cannot
 escape through a public boundary before the replacement publishes. If that
 generation has no private progress, its next request starts at offset zero
 without a cursor; it must not borrow caller cursor values or the old public key.
-No parallel row-count or last-key fields may approximate either state.
+This applies both to later continuation requests and to acquisitions rebuilt
+from stored demands at truncate start: replay must reconstruct transport state
+at the acquisition boundary instead of cloning the retired generation's offset
+or cursor. No parallel row-count or last-key fields may approximate either
+state.
 
 Each active demand in that replacement settles on its own, and the replacement
 waits for every acquisition it started. The published reconciliation is the

@@ -396,6 +396,18 @@ function expectSameSubsetRequest(
   expect(actual.offset).toBe(expected.offset)
 }
 
+function expectReplayRequestToRestart(
+  actual: LoadSubsetOptions,
+  stored: LoadSubsetOptions,
+  expectedOffset = 0,
+): void {
+  expect(actual.where).toBe(stored.where)
+  expect(actual.orderBy).toBe(stored.orderBy)
+  expect(actual.limit).toBe(stored.limit)
+  expect(actual.cursor).toBeUndefined()
+  expect(actual.offset).toBe(expectedOffset)
+}
+
 async function runReplayScenario(scenario: ReplayScenario): Promise<void> {
   let begin!: () => void
   let write!: (
@@ -1977,8 +1989,14 @@ describe(`CollectionSubscription replay oracle`, () => {
         const replayOptions = loadOptions
           .slice(2)
           .filter((options) => options.limit !== undefined)
-        expectSameSubsetRequest(replayOptions[0]!, loadOptions[0]!)
-        expectSameSubsetRequest(replayOptions[1]!, loadOptions[1]!)
+        expectReplayRequestToRestart(replayOptions[0]!, loadOptions[0]!)
+        expectReplayRequestToRestart(
+          replayOptions[1]!,
+          loadOptions[1]!,
+          // A synchronous first replay acquisition can establish private
+          // current-generation progress before the second one is rebuilt.
+          delivery === `return` ? 1 : 0,
+        )
 
         if (delivery === `resolve` || delivery === `reject`) {
           const batchesBeforeResize = batches.length

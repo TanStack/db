@@ -319,7 +319,7 @@ export class CollectionSubscription
         if (demand.ordered && this.orderedWindow) {
           demand.ordered.revision = this.orderedWindow.coverageRevision
         }
-        const nextAcquisition = this.createSubsetAcquisition(demand)
+        const nextAcquisition = this.createSubsetAcquisition(demand, true)
         demand.pendingReplayAcquisitions.add(nextAcquisition)
         let syncResult: LoadSubsetRequestResult
         try {
@@ -737,12 +737,94 @@ export class CollectionSubscription
     }
   }
 
+  private buildOrderedCursorExpressions(
+    orderBy: OrderBy,
+    cursorValues: ReadonlyArray<unknown> | undefined,
+    lastKey: string | number | undefined,
+  ): {
+    cursor: LoadSubsetOptions[`cursor`]
+    requiresUnboundedRefinement: boolean
+  } {
+    if (cursorValues === undefined || cursorValues.length === 0) {
+      return { cursor: undefined, requiresUnboundedRefinement: false }
+    }
+
+    if (!canExpressCursorOrder(orderBy, cursorValues)) {
+      return { cursor: undefined, requiresUnboundedRefinement: true }
+    }
+
+    const whereFrom = buildCursor(orderBy, [...cursorValues])
+    if (!whereFrom) {
+      return { cursor: undefined, requiresUnboundedRefinement: false }
+    }
+
+    const { expression } = orderBy[0]!
+    const cursorMinValue = cursorValues[0]
+    // A JS Date represents a 1ms range while some backends retain finer
+    // precision, so equality must cover that complete interval.
+    const whereCurrent =
+      cursorMinValue instanceof Date
+        ? and(
+            gte(expression, new Value(cursorMinValue)),
+            lt(expression, new Value(new Date(cursorMinValue.getTime() + 1))),
+          )
+        : buildCursorEquality(expression, cursorMinValue)
+
+    return {
+      cursor: { whereFrom, whereCurrent, lastKey },
+      requiresUnboundedRefinement: false,
+    }
+  }
+
+  /** Rebuild ordered transport state from this replacement generation. */
+  private createReplayRequestOptions(demand: SubsetDemand): LoadSubsetOptions {
+    const ordered = demand.ordered
+    const window = this.orderedWindow
+    const orderBy = demand.requestOptions.orderBy
+    if (!ordered || !window || !orderBy) return demand.requestOptions
+
+    const boundary = window.requestBoundary()
+    const builtCursor = this.buildOrderedCursorExpressions(
+      orderBy,
+      boundary?.values,
+      boundary?.key,
+    )
+    const requiresUnboundedRefinement =
+      window.requiresFullRefinement || builtCursor.requiresUnboundedRefinement
+    const currentOffset = window.localPrefixSize
+    const limit = demand.requestOptions.limit
+
+    ordered.requestedPrefix =
+      limit === undefined ? ordered.requestedPrefix : currentOffset + limit
+    ordered.hadBoundary = boundary !== undefined
+    ordered.requiresUnboundedRefinement = requiresUnboundedRefinement
+    ordered.revision = window.coverageRevision
+
+    if (requiresUnboundedRefinement) {
+      return {
+        where: demand.requestOptions.where,
+        orderBy,
+        subscription: demand.requestOptions.subscription,
+      }
+    }
+
+    return {
+      ...demand.requestOptions,
+      cursor: builtCursor.cursor,
+      offset: currentOffset,
+    }
+  }
+
   /** Create a fresh, abortable adapter acquisition for a replay generation. */
   private createSubsetAcquisition(
     demand: SubsetDemand,
+    replay = false,
   ): SubsetAcquisition & { abortController: AbortController } {
     const abortController = new AbortController()
     const requestSignal = demand.requestOptions.signal
+    const requestOptions = replay
+      ? this.createReplayRequestOptions(demand)
+      : demand.requestOptions
     let removeRequestAbortListener: (() => void) | undefined
 
     if (requestSignal?.aborted) {
@@ -756,7 +838,7 @@ export class CollectionSubscription
 
     return {
       options: {
-        ...demand.requestOptions,
+        ...requestOptions,
         signal: abortController.signal,
       },
       abortController,
@@ -1184,16 +1266,6 @@ export class CollectionSubscription
       return
     }
 
-    // Build cursor expressions for sync layer loadSubset
-    // The cursor expressions are separate from the main where clause
-    // so the sync layer can choose cursor-based or offset-based pagination
-    let cursorExpressions:
-      | {
-          whereFrom: BasicExpression<boolean>
-          whereCurrent: BasicExpression<boolean>
-          lastKey?: string | number
-        }
-      | undefined
     const boundary = activeReplacement
       ? this.orderedWindow.requestBoundary()
       : retainedPublication
@@ -1201,41 +1273,16 @@ export class CollectionSubscription
         : this.orderedWindow.requestBoundary()
     const cursorValues =
       boundary?.values ?? (replayOwnsContinuation ? undefined : minValues)
-    if (cursorValues !== undefined && cursorValues.length > 0) {
-      const canPushCursor = canExpressCursorOrder(orderBy, cursorValues)
-      if (!canPushCursor) requiresUnboundedRefinement = true
-      const whereFromCursor = canPushCursor
-        ? buildCursor(orderBy, [...cursorValues])
-        : undefined
-
-      if (whereFromCursor) {
-        const { expression } = orderBy[0]!
-        const cursorMinValue = cursorValues[0]
-
-        // Build the whereCurrent expression for the first orderBy column
-        // For Date values, we need to handle precision differences between JS (ms) and backends (μs)
-        // A JS Date represents a 1ms range, so we query for all values within that range
-        let whereCurrentCursor: BasicExpression<boolean>
-        if (cursorMinValue instanceof Date) {
-          const cursorMinValuePlus1ms = new Date(cursorMinValue.getTime() + 1)
-          whereCurrentCursor = and(
-            gte(expression, new Value(cursorMinValue)),
-            lt(expression, new Value(cursorMinValuePlus1ms)),
-          )
-        } else {
-          whereCurrentCursor = buildCursorEquality(expression, cursorMinValue)
-        }
-
-        cursorExpressions = {
-          whereFrom: whereFromCursor,
-          whereCurrent: whereCurrentCursor,
-          lastKey:
-            boundary?.key ??
-            (replayOwnsContinuation
-              ? undefined
-              : this.orderedPublication?.boundary?.key),
-        }
-      }
+    const builtCursor = this.buildOrderedCursorExpressions(
+      orderBy,
+      cursorValues,
+      boundary?.key ??
+        (replayOwnsContinuation
+          ? undefined
+          : this.orderedPublication?.boundary?.key),
+    )
+    if (builtCursor.requiresUnboundedRefinement) {
+      requiresUnboundedRefinement = true
     }
 
     // Request the sync layer to load more data
@@ -1260,7 +1307,7 @@ export class CollectionSubscription
             where, // Main filter only, no cursor
             limit,
             orderBy,
-            cursor: cursorExpressions, // Cursor expressions passed separately
+            cursor: builtCursor.cursor, // Cursor expressions passed separately
             // Replay continuation is owned by the replacement generation or
             // retained publication, never by stale caller hints.
             offset: replayOwnsContinuation

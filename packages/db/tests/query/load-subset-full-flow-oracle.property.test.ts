@@ -2524,12 +2524,14 @@ async function runAtomicOrderedReplayScenario(
   const callerContinuation = scenario.callerContinuation ?? `min-values`
   const callerContinuationOptions = {
     ...(callerContinuation === `min-values` || callerContinuation === `both`
-      ? { minValues: [scenario.direction === `asc` ? 2 : 1] }
+      ? { minValues: [scenario.direction === `asc` ? 0 : 3] }
       : {}),
     ...(callerContinuation === `offset` || callerContinuation === `both`
-      ? { offset: 99 }
+      ? { offset: 1 }
       : {}),
   }
+  const initialWindowSize =
+    callerContinuation === `offset` || callerContinuation === `both` ? 2 : 1
   const otherWhere = new Func(`eq`, [
     new PropRef([`route`]),
     new Value(`other`),
@@ -2555,13 +2557,13 @@ async function runAtomicOrderedReplayScenario(
     projectAtomicOrderedPublicationState(history, {
       demandId: `ordered`,
       direction: scenario.direction,
-      initialWindowSize: 1,
+      initialWindowSize,
     })
   const expectedPublications = () =>
     projectAtomicOrderedPublications(history, {
       demandId: `ordered`,
       direction: scenario.direction,
-      initialWindowSize: 1,
+      initialWindowSize,
     })
   const expectPublicationHistory = () => {
     const projection = expectedPublicationProjection()
@@ -2589,6 +2591,8 @@ async function runAtomicOrderedReplayScenario(
     const acquisitions = pending.slice(pendingStart)
     const ordered = acquisitions.find(({ options }) => options.orderBy)
     if (!ordered) throw new Error(`Expected an ordered replacement acquisition`)
+    expect(ordered.options.offset).toBe(0)
+    expect(ordered.options.cursor).toBeUndefined()
     const publicationId = `replacement-${replacementSequence++}`
     history.push({
       type: `beginReplacement`,
@@ -2693,7 +2697,11 @@ async function runAtomicOrderedReplayScenario(
   }
 
   try {
-    subscription.requestLimitedSnapshot({ orderBy, limit: 1 })
+    subscription.requestLimitedSnapshot({
+      orderBy,
+      limit: 1,
+      ...callerContinuationOptions,
+    })
     await flushPromises()
     expectPublicationHistory()
 
@@ -2881,7 +2889,7 @@ async function runAtomicOrderedReplayScenario(
         orderBy,
         limit: 2,
         trackLoadSubsetPromise: false,
-        ...(hasEmptyContinuingReplay ? callerContinuationOptions : {}),
+        ...callerContinuationOptions,
       })
       await flushPromises()
       const continuation = pending.at(-1)
@@ -2895,6 +2903,25 @@ async function runAtomicOrderedReplayScenario(
         expectPublicationHistory()
         return
       }
+      const expectedPrivateBoundary = orderRows(finalRows).slice(0, 2).at(-1)!
+      // Applied-but-unrefined rows establish a private cursor, not an admitted
+      // local prefix, so offset remains zero until refinement settles.
+      expect(continuation.options.offset).toBe(0)
+      expect(continuation.options.cursor?.lastKey).toBe(
+        expectedPrivateBoundary.id,
+      )
+      expect(continuation.options.cursor?.whereCurrent).toBeDefined()
+      expect(continuation.options.cursor?.whereFrom).toBeDefined()
+      expect(
+        evaluateReferenceExpression(continuation.options.cursor!.whereCurrent, {
+          rank: expectedPrivateBoundary.rank,
+        }),
+      ).toBe(true)
+      expect(
+        evaluateReferenceExpression(continuation.options.cursor!.whereCurrent, {
+          rank: scenario.direction === `asc` ? 0 : 3,
+        }),
+      ).toBe(false)
       continuation.deferred.resolve({
         hasMore: true,
         appliedRowKeys: [continuationRow.id],
@@ -2924,7 +2951,12 @@ async function runAtomicOrderedReplayScenario(
       expect(restoration.options.offset).toBe(
         finalProjection.currentPublication?.orderedPrefixSize ?? 0,
       )
-      expect(subscription.orderedRetainedWindowSize).toBe(2)
+      expect(subscription.orderedRetainedWindowSize).toBe(
+        Math.max(
+          2,
+          (finalProjection.currentPublication?.orderedPrefixSize ?? 0) + 1,
+        ),
+      )
       const expectedBoundary =
         finalProjection.currentPublication?.orderedBoundary
       if (expectedBoundary === undefined) {
@@ -2932,6 +2964,18 @@ async function runAtomicOrderedReplayScenario(
       } else {
         expect(restoration.options.cursor).toBeDefined()
         expect(restoration.options.cursor?.lastKey).toBe(expectedBoundary.key)
+        expect(
+          evaluateReferenceExpression(
+            restoration.options.cursor!.whereCurrent,
+            { rank: expectedBoundary.orderValue },
+          ),
+        ).toBe(true)
+        expect(
+          evaluateReferenceExpression(
+            restoration.options.cursor!.whereCurrent,
+            { rank: scenario.direction === `asc` ? 0 : 3 },
+          ),
+        ).toBe(false)
       }
     }
 
@@ -3016,6 +3060,25 @@ it(`does not reuse caller or public continuation state when an active replacemen
         currentOutcome: `resolve`,
         currentExtent: `continues`,
         emptyContinuingReplay: true,
+        settleCurrentFirst: false,
+        sourceDelta: false,
+        otherDemand: `none`,
+      })
+    }
+  }
+})
+
+it(`uses only private boundary semantics when an active replacement has progress`, async () => {
+  for (const direction of [`asc`, `desc`] as const) {
+    for (const callerContinuation of [`min-values`, `both`] as const) {
+      await runAtomicOrderedReplayScenario({
+        direction,
+        initialPublication: `nonempty`,
+        callerContinuation,
+        resizeOrder: `shrink-grow`,
+        overlap: false,
+        currentOutcome: `resolve`,
+        currentExtent: `continues`,
         settleCurrentFirst: false,
         sourceDelta: false,
         otherDemand: `none`,
