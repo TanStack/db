@@ -180,6 +180,7 @@ export class CollectionSubscription
   // Status tracking
   private _status: SubscriptionStatus = `ready`
   private _lastError: unknown | undefined
+  private unsubscribed = false
   private pendingLoadSubsetPromises: Set<Promise<unknown>> = new Set()
   // Cleanup function for truncate event listener
   private truncateCleanup: (() => void) | undefined
@@ -1427,6 +1428,7 @@ export class CollectionSubscription
    * or, the entire state was already loaded.
    */
   requestSnapshot(opts?: RequestSnapshotOptions): boolean {
+    if (this.unsubscribed) return false
     if (this.loadedInitialState) {
       // Subscription was deoptimized so we already sent the entire initial state
       return false
@@ -1465,9 +1467,19 @@ export class CollectionSubscription
       limit: opts?.limit,
     }
 
-    const { demand, result: syncResult } = this.startSubsetDemand(loadOptions)
-    demand.onLoadSubsetResult = opts?.onLoadSubsetResult
+    // Reentrant adapter code must be able to release a request by the exact
+    // caller predicate even when the subscription predicate was combined into
+    // the transport predicate.
     if (opts?.where) this.requestedSubsetWhere.set(loadOptions, opts.where)
+    const { demand, result: syncResult } = this.startSubsetDemand(loadOptions)
+    if (!this.isActiveDemand(demand)) {
+      // The adapter synchronously released or the caller had already aborted
+      // this demand. Observe only to consume a possible rejection; obsolete
+      // work cannot report status, establish readiness, or publish a scan.
+      if (syncResult instanceof Promise) void syncResult.catch(() => {})
+      return false
+    }
+    demand.onLoadSubsetResult = opts?.onLoadSubsetResult
 
     // Pass the raw loadSubset result to the caller for external tracking
     opts?.onLoadSubsetResult?.(syncResult, demand.options)
@@ -1597,6 +1609,7 @@ export class CollectionSubscription
     trackLoadSubsetPromise: shouldTrackLoadSubsetPromise = true,
     onLoadSubsetResult,
   }: RequestLimitedSnapshotOptions) {
+    if (this.unsubscribed) return
     if (!this.orderByIndex) {
       throw new Error(
         `Ordered snapshot was requested but no index was found. You have to call setOrderByIndex before requesting an ordered snapshot.`,
@@ -1609,6 +1622,18 @@ export class CollectionSubscription
       this.options.whereExpression,
       limit,
     )
+
+    if (this.stalePublication && !this.stalePublication.ordered) {
+      // A failed replay may leave rows that are still owned only by active
+      // unordered demands. A later ordered incarnation starts with no ordered
+      // candidates, but it must still route ingress through top-K admission
+      // while preserving that additional publication baseline.
+      this.stalePublication.ordered = {
+        prefixSize: 0,
+        boundary: undefined,
+        candidateRows: new Map(),
+      }
+    }
 
     const where = this.options.whereExpression
     const retainedPublication = this.retainedOrderedPublication
@@ -1966,6 +1991,10 @@ export class CollectionSubscription
   }
 
   unsubscribe() {
+    // Teardown is a permanent acquisition boundary. Adapter cleanup and
+    // unsubscribe listeners may reenter public methods, but they cannot create
+    // work that escapes the cleanup pass already in progress.
+    this.unsubscribed = true
     let firstCleanupError: unknown
 
     // Clean up truncate event listener

@@ -596,10 +596,26 @@ only after every attached owner has released it.
 
 A Collection subscription installs each logical subset owner before it calls
 the source adapter. Reentrant release during `loadSubset` must therefore see and
-release that exact acquisition. A synchronous `loadSubset` throw that did not
-follow a failed release rolls the tentative owner back without calling
-`unloadSubset`; a failed release keeps the owner so a later cleanup can retry the
-same acquisition identity.
+release that exact acquisition. It also registers the caller's original
+predicate before adapter entry, because the transport predicate may combine it
+with the subscription predicate. After adapter return, the request rechecks
+logical ownership before it reports results or scans local state; a demand
+released during adapter code cannot publish a later snapshot. A synchronous
+`loadSubset` throw that did not follow a failed release rolls the tentative
+owner back without calling `unloadSubset`; a failed release keeps the owner so a
+later cleanup can retry the same acquisition identity.
+
+A failed publication may retain rows owned only by unordered demands after the
+last ordered owner leaves. A later ordered incarnation starts with an empty
+ordered candidate set over that retained additional baseline. Its source rows
+still enter the ordered admission path, so it publishes only the proven top-K
+union the active unordered rows; a nonempty stale baseline cannot route them
+through generic delivery.
+
+Unsubscription closes the acquisition boundary before adapter cleanup starts.
+An `unloadSubset` callback or unsubscribe listener may reenter public request
+methods, but those methods cannot start a new acquisition after teardown has
+begun. Repeated unsubscribe calls may still retry retained cleanup debt.
 
 Its semantic contract is:
 

@@ -1873,6 +1873,92 @@ describe(`CollectionSubscription replay oracle`, () => {
     },
   )
 
+  it.each(
+    ([false, true] as const).flatMap((combinedPredicate) =>
+      ([`where`, `exact`] as const).flatMap((releaseMode) =>
+        ([`return`, `resolve`] as const).map(
+          (resultKind) => [combinedPredicate, releaseMode, resultKind] as const,
+        ),
+      ),
+    ),
+  )(
+    `does not publish an unordered snapshot after reentrant release: combined=%s release=%s result=%s`,
+    async (combinedPredicate, releaseMode, resultKind) => {
+      type Row = { id: string; value: number }
+      let releaseDuringLoad = () => {}
+      const loads: Array<LoadSubsetOptions> = []
+      const unloads: Array<LoadSubsetOptions> = []
+      const requestWhere = new Func(`eq`, [new PropRef([`id`]), new Value(`a`)])
+      const subscriptionWhere = combinedPredicate
+        ? new Func(`gte`, [new PropRef([`value`]), new Value(0)])
+        : undefined
+      const callerAbort = new AbortController()
+      const collection = createCollection<Row>({
+        id: `reentrant-unordered-release-${combinedPredicate}-${releaseMode}-${resultKind}`,
+        getKey: (row) => row.id,
+        syncMode: `on-demand`,
+        sync: {
+          sync: (params) => {
+            params.begin()
+            params.write({
+              type: `insert`,
+              value: { id: `a`, value: 1 },
+            })
+            params.commit()
+            params.markReady()
+            return {
+              loadSubset: (options) => {
+                loads.push(options)
+                releaseDuringLoad()
+                return resultKind === `return` ? true : Promise.resolve()
+              },
+              unloadSubset: (options) => {
+                unloads.push(options)
+              },
+            }
+          },
+        },
+      })
+      // Start sync and retain its ordinary source row independently of the
+      // demand under test. The tested request must not publish that local row
+      // after its own acquisition releases inside loadSubset.
+      const sourceOwner = collection.subscribeChanges(() => {}, {
+        includeInitialState: false,
+      })
+      await flushPromises()
+      let publicationCount = 0
+      const subscription = collection.subscribeChanges(
+        (changes) => {
+          publicationCount += changes.length
+        },
+        { whereExpression: subscriptionWhere },
+      )
+      releaseDuringLoad = () =>
+        subscription.releaseSnapshot(
+          requestWhere,
+          releaseMode === `exact` ? callerAbort.signal : undefined,
+        )
+
+      try {
+        const requested = subscription.requestSnapshot({
+          where: requestWhere,
+          signal: callerAbort.signal,
+        })
+        await flushPromises()
+
+        expect(requested).toBe(false)
+        expect(loads).toHaveLength(1)
+        expect(unloads).toEqual(loads)
+        expect(loads[0]?.signal?.aborted).toBe(true)
+        expect(publicationCount).toBe(0)
+      } finally {
+        subscription.unsubscribe()
+        sourceOwner.unsubscribe()
+        await collection.cleanup()
+      }
+    },
+  )
+
   it.each([`asc`, `desc`] as const)(
     `keeps failed ordered replay deltas inside the retained top-K window: %s`,
     async (direction) => {
@@ -3258,6 +3344,167 @@ describe(`CollectionSubscription replay oracle`, () => {
       expect(retainedDemands).toEqual([])
     } finally {
       failReplayUnload = false
+      subscription.unsubscribe()
+      await collection.cleanup()
+    }
+  })
+
+  it(`restores top-K admission when ordered demand restarts over a stale additional row`, async () => {
+    type Row = { id: string; rank: number }
+    let begin!: () => void
+    let write!: (message: ChangeMessageOrDeleteKeyMessage<Row, string>) => void
+    let commit!: (signal?: AbortSignal) => true | Promise<void>
+    let truncate!: () => void
+    let loadCount = 0
+    const collection = createCollection<Row>({
+      id: `ordered-restart-over-stale-additional-row`,
+      getKey: (row) => row.id,
+      syncMode: `on-demand`,
+      sync: {
+        sync: (params) => {
+          begin = params.begin
+          write = params.write
+          commit = params.commit
+          truncate = params.truncate
+          params.markReady()
+          return {
+            loadSubset: (options) => {
+              loadCount++
+              if (loadCount === 1) {
+                begin()
+                write({ type: `insert`, value: { id: `a`, rank: 1 } })
+                commit(options.signal)
+                return Promise.resolve({
+                  hasMore: false,
+                  appliedRowKeys: [`a`] as const,
+                })
+              }
+              if (loadCount === 2) return true
+              if (loadCount === 3) {
+                return Promise.reject(new Error(`ordered replay failed`))
+              }
+              if (loadCount === 4) {
+                begin()
+                write({ type: `insert`, value: { id: `a`, rank: 1 } })
+                commit(options.signal)
+                return Promise.resolve({
+                  hasMore: false,
+                  appliedRowKeys: [`a`] as const,
+                })
+              }
+              if (loadCount === 5) {
+                begin()
+                write({ type: `insert`, value: { id: `x`, rank: 0 } })
+                write({ type: `insert`, value: { id: `y`, rank: 2 } })
+                commit(options.signal)
+                return Promise.resolve({
+                  hasMore: false,
+                  appliedRowKeys: [`x`, `y`] as const,
+                })
+              }
+              return true
+            },
+            unloadSubset: () => {},
+          }
+        },
+      },
+    })
+    const orderedWhere = new Func(`gte`, [new PropRef([`rank`]), new Value(0)])
+    const additionalWhere = new Func(`eq`, [
+      new PropRef([`id`]),
+      new Value(`a`),
+    ])
+    const orderBy: OrderBy = [
+      {
+        expression: new PropRef([`rank`]),
+        compareOptions: { direction: `asc`, nulls: `first` },
+      },
+    ]
+    const index = collection.createIndex((row) => row.rank, {
+      indexType: BTreeIndex,
+    })
+    const visible = new Map<string, Row>()
+    const subscription = collection.subscribeChanges(
+      (changes) => {
+        for (const change of changes) {
+          const key = String(change.key)
+          if (change.type === `delete`) visible.delete(key)
+          else visible.set(key, change.value)
+        }
+      },
+      { whereExpression: orderedWhere },
+    )
+    subscription.setOrderByIndex(index)
+
+    try {
+      subscription.requestLimitedSnapshot({ orderBy, limit: 1 })
+      await flushPromises()
+      subscription.requestSnapshot({ where: additionalWhere })
+      await flushPromises()
+
+      begin()
+      truncate()
+      commit()
+      await flushPromises()
+      subscription.releaseSnapshot(orderedWhere)
+
+      expect([...visible.keys()]).toEqual([`a`])
+      expect(subscription.orderedBoundaryKey).toBeUndefined()
+
+      subscription.requestLimitedSnapshot({ orderBy, limit: 1 })
+      await flushPromises()
+
+      expect([...visible.keys()].sort()).toEqual([`a`, `x`])
+      expect(subscription.orderedBoundaryKey).toBe(`x`)
+    } finally {
+      subscription.unsubscribe()
+      await collection.cleanup()
+    }
+  })
+
+  it(`rejects a reentrant subset acquisition after unsubscribe starts`, async () => {
+    type Row = { id: string }
+    const where = new Func(`eq`, [new PropRef([`id`]), new Value(`a`)])
+    const loads: Array<LoadSubsetOptions> = []
+    const unloads: Array<LoadSubsetOptions> = []
+    let acquireDuringUnload = () => {}
+    let reentered = false
+    const collection = createCollection<Row>({
+      id: `unsubscribe-reentrant-acquisition`,
+      getKey: (row) => row.id,
+      syncMode: `on-demand`,
+      sync: {
+        sync: ({ markReady }) => {
+          markReady()
+          return {
+            loadSubset: (options) => {
+              loads.push(options)
+              return true
+            },
+            unloadSubset: (options) => {
+              unloads.push(options)
+              if (!reentered) {
+                reentered = true
+                acquireDuringUnload()
+              }
+            },
+          }
+        },
+      },
+    })
+    const subscription = collection.subscribeChanges(() => {})
+    acquireDuringUnload = () => {
+      subscription.requestSnapshot({ where })
+    }
+
+    try {
+      subscription.requestSnapshot({ where })
+      subscription.unsubscribe()
+
+      expect(loads).toHaveLength(1)
+      expect(unloads).toEqual(loads)
+      expect(loads[0]?.signal?.aborted).toBe(true)
+    } finally {
       subscription.unsubscribe()
       await collection.cleanup()
     }

@@ -1029,7 +1029,10 @@ async function runAdversarialOrderedProviderScenario(options: {
       }
       expect(loads.length).toBeGreaterThan(loadCount)
     }
-    return loads
+    // Snapshot observations before cleanup. Teardown must not create fresh
+    // source demand, and callers must not mistake such work for the scenario's
+    // final refinement request.
+    return [...loads]
   } finally {
     live.cleanup()
     source.cleanup()
@@ -2981,12 +2984,7 @@ describe(`pagination recomputation oracle`, () => {
 
       expect(loads[1]?.limit).toBeUndefined()
       expect(loads[1]?.offset).toBeUndefined()
-      expect(loads.map(({ limit }) => limit)).toEqual([
-        1,
-        undefined,
-        undefined,
-        2,
-      ])
+      expect(loads.map(({ limit }) => limit)).toEqual([1, undefined, undefined])
     },
   )
 
