@@ -798,7 +798,23 @@ export class CollectionSubscription
     }
     this.activeSubsetAcquisition = frame
     try {
-      return { completed: true, value: enter() }
+      const value = enter()
+      if (
+        replayContext &&
+        this.truncateReplaySession === replayContext.session
+      ) {
+        const retainedFailures = frame.failureGroups.flatMap((group) =>
+          group.failures.filter((failure) => !failure.attributed),
+        )
+        if (retainedFailures.length > 0) {
+          replayContext.attempt.failed = true
+          this.queueUnattributedReplayFailures(
+            replayContext.session,
+            retainedFailures,
+          )
+        }
+      }
+      return { completed: true, value }
     } catch (error) {
       const adoptedCarrier =
         error instanceof SubsetFailurePropagation && error.isAdoptedBy(options)

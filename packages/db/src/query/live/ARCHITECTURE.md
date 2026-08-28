@@ -596,6 +596,10 @@ already-settled promise adoption have attributed their failures. Those failures
 publish once against their exact originating options before the terminal event;
 failed cleanup remains retryable. Outside replay, nested teardown keeps its
 ordinary synchronous aggregation contract.
+If teardown cleanup fails while replay adapter entry remains active, that
+acquisition frame retains the exact cleanup occurrence even when adapter code
+catches the teardown throw and returns success. A successful adapter return
+cannot erase a nested failure which the subscription already observed.
 `onLoadSubsetResult`, `requestSnapshot`, and `releaseSnapshot` are internal
 composition APIs. A nested synchronous failure may use the private propagation
 token across that callback; internal code must rethrow the caught value
