@@ -145,6 +145,18 @@ type TruncateReplayContext = Readonly<{
   attempt: TruncateReplayAttempt
 }>
 
+type ReplayCallbackFailure = Readonly<{
+  error: unknown
+  options: LoadSubsetOptions
+  attributed: boolean
+}>
+
+type ReplayResultCallbackFrame = {
+  replayContext: TruncateReplayContext
+  previous: ReplayResultCallbackFrame | undefined
+  propagatedFailure?: ReplayCallbackFailure
+}
+
 export class CollectionSubscription
   extends EventEmitter<SubscriptionEvents>
   implements Subscription
@@ -195,6 +207,10 @@ export class CollectionSubscription
   // One replay session owns the publication baseline, overlapping attempts,
   // and buffered changes until every attempt settles.
   private truncateReplaySession: TruncateReplaySession | undefined
+  // Adapter boundaries identify failure occurrences while arbitrary replay
+  // callbacks run. Payload identity alone cannot distinguish two operations
+  // that throw the same Error object.
+  private activeReplayResultCallback: ReplayResultCallbackFrame | undefined
 
   private isActiveDemand(demand: SubsetDemand): boolean {
     return demand.active && this.subsetDemands.includes(demand)
@@ -542,29 +558,12 @@ export class CollectionSubscription
         // Preserve the original demand's consumer-local in-flight guard. This
         // observer is registered last so its settlement sees replay ownership,
         // coverage, and attempt bookkeeping before it may continue the window.
-        const replayErrorStart = session.errors.length
-        try {
-          demand.onLoadSubsetResult?.(syncResult, nextAcquisition.options)
-        } catch (error) {
-          if (this.truncateReplaySession !== session) throw error
-          if (
-            !this.wasTruncateReplayErrorQueuedSince(
-              session,
-              replayErrorStart,
-              error,
-            )
-          ) {
-            // A result callback may reenter release and surface adapter
-            // cleanup failure. Keep setup moving and report only after this
-            // attempt has restored its last complete publication.
-            attempt.failed = true
-            this.queueTruncateReplayError(
-              session,
-              nextAcquisition.options,
-              error,
-            )
-          }
-        }
+        this.invokeReplayResultCallback(
+          { session, attempt },
+          nextAcquisition.options,
+          () =>
+            demand.onLoadSubsetResult?.(syncResult, nextAcquisition.options),
+        )
       }
 
       attempt.setupComplete = true
@@ -581,15 +580,61 @@ export class CollectionSubscription
     session.errors.push({ options, error })
   }
 
-  private wasTruncateReplayErrorQueuedSince(
-    session: TruncateReplaySession,
-    start: number,
-    error: unknown,
-  ): boolean {
-    for (let index = start; index < session.errors.length; index++) {
-      if (session.errors[index]?.error === error) return true
+  /** Record which adapter failure occurrence is propagating through a callback. */
+  private noteReplayCallbackFailure(
+    replayContext: TruncateReplayContext | undefined,
+    failure: ReplayCallbackFailure,
+  ): void {
+    const frame = this.activeReplayResultCallback
+    if (
+      !frame ||
+      (replayContext && frame.replayContext.session !== replayContext.session)
+    ) {
+      return
     }
-    return false
+    frame.propagatedFailure = failure
+  }
+
+  /** Attribute one replay callback failure without merging equal payloads. */
+  private invokeReplayResultCallback(
+    replayContext: TruncateReplayContext | undefined,
+    options: LoadSubsetOptions,
+    callback: () => void,
+  ): void {
+    if (
+      !replayContext ||
+      this.truncateReplaySession !== replayContext.session
+    ) {
+      callback()
+      return
+    }
+
+    const frame: ReplayResultCallbackFrame = {
+      replayContext,
+      previous: this.activeReplayResultCallback,
+    }
+    this.activeReplayResultCallback = frame
+    try {
+      callback()
+    } catch (error) {
+      if (this.truncateReplaySession !== replayContext.session) throw error
+      const propagated = frame.propagatedFailure
+      if (!(propagated?.attributed && propagated.error === error)) {
+        replayContext.attempt.failed = true
+        const failureOptions =
+          propagated !== undefined && propagated.error === error
+            ? propagated.options
+            : options
+        this.queueTruncateReplayError(
+          replayContext.session,
+          failureOptions,
+          error,
+        )
+        this.checkTruncateReplayComplete(replayContext.session)
+      }
+    } finally {
+      this.activeReplayResultCallback = frame.previous
+    }
   }
 
   private reportTruncateReplayErrors(session: TruncateReplaySession): void {
@@ -1347,12 +1392,16 @@ export class CollectionSubscription
     demand.releaseInProgress = true
     try {
       demand.abortController?.abort()
-      let firstReleaseError: unknown
+      let firstReleaseFailure: ReplayCallbackFailure | undefined
       for (const pending of [...demand.pendingReplayAcquisitions]) {
         try {
           this.releaseReplayAcquisitionUnprotected(demand, pending)
         } catch (error) {
-          firstReleaseError ??= error
+          firstReleaseFailure ??= {
+            error,
+            options: pending.options,
+            attributed: false,
+          }
         }
       }
       if (!demand.releaseSettled) {
@@ -1362,12 +1411,19 @@ export class CollectionSubscription
           demand.releaseSettled = true
         } catch (error) {
           demand.releaseFailed = true
-          firstReleaseError ??= error
+          firstReleaseFailure ??= {
+            error,
+            options: demand.options,
+            attributed: false,
+          }
         } finally {
           demand.removeRequestAbortListener?.()
         }
       }
-      if (firstReleaseError !== undefined) throw firstReleaseError
+      if (firstReleaseFailure) {
+        this.noteReplayCallbackFailure(undefined, firstReleaseFailure)
+        throw firstReleaseFailure.error
+      }
     } finally {
       demand.releaseInProgress = false
       this.collectReleasedDemand(demand)
@@ -1435,6 +1491,11 @@ export class CollectionSubscription
             acquisition.options,
             error,
           )
+          this.noteReplayCallbackFailure(replayContext, {
+            error,
+            options: acquisition.options,
+            attributed: true,
+          })
           this.checkTruncateReplayComplete(replayContext.session)
         } else {
           this.recordLoadSubsetError(acquisition.options, error, true)
@@ -1496,35 +1557,6 @@ export class CollectionSubscription
       return this.isActiveDemand(demand) && !demand.options.signal?.aborted
     })
     return replayContext
-  }
-
-  /** Turn a replay-scoped result-callback throw into attempt failure. */
-  private failReplayResultCallback(
-    replayContext: TruncateReplayContext | undefined,
-    options: LoadSubsetOptions,
-    error: unknown,
-    replayErrorStart: number | undefined,
-  ): boolean {
-    if (
-      !replayContext ||
-      this.truncateReplaySession !== replayContext.session
-    ) {
-      return false
-    }
-    if (
-      replayErrorStart !== undefined &&
-      this.wasTruncateReplayErrorQueuedSince(
-        replayContext.session,
-        replayErrorStart,
-        error,
-      )
-    ) {
-      return true
-    }
-    replayContext.attempt.failed = true
-    this.queueTruncateReplayError(replayContext.session, options, error)
-    this.checkTruncateReplayComplete(replayContext.session)
-    return true
   }
 
   private recordLoadSubsetError(
@@ -1695,20 +1727,10 @@ export class CollectionSubscription
     demand.onLoadSubsetResult = opts?.onLoadSubsetResult
 
     // Pass the raw loadSubset result to the caller for external tracking
-    const replayErrorStart = replayTracksResult?.session.errors.length
     try {
-      opts?.onLoadSubsetResult?.(syncResult, demand.options)
-    } catch (error) {
-      if (
-        !this.failReplayResultCallback(
-          replayTracksResult,
-          demand.options,
-          error,
-          replayErrorStart,
-        )
-      ) {
-        throw error
-      }
+      this.invokeReplayResultCallback(replayTracksResult, demand.options, () =>
+        opts?.onLoadSubsetResult?.(syncResult, demand.options),
+      )
     } finally {
       this.releaseReplayResultCallback(replayTracksCallback)
     }
@@ -2020,20 +2042,10 @@ export class CollectionSubscription
     demand.onLoadSubsetResult = onLoadSubsetResult
 
     // Pass the raw loadSubset result to the caller for external tracking
-    const replayErrorStart = replayTracksResult?.session.errors.length
     try {
-      onLoadSubsetResult?.(syncResult, demand.options)
-    } catch (error) {
-      if (
-        !this.failReplayResultCallback(
-          replayTracksResult,
-          demand.options,
-          error,
-          replayErrorStart,
-        )
-      ) {
-        throw error
-      }
+      this.invokeReplayResultCallback(replayTracksResult, demand.options, () =>
+        onLoadSubsetResult?.(syncResult, demand.options),
+      )
     } finally {
       this.releaseReplayResultCallback(replayTracksCallback)
     }

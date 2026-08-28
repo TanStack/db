@@ -3483,6 +3483,160 @@ describe(`CollectionSubscription replay oracle`, () => {
 
   it.each(
     ([`unordered`, `ordered`] as const).flatMap((demandKind) =>
+      ([`distinct`, `shared`] as const).map(
+        (errorIdentity) => [demandKind, errorIdentity] as const,
+      ),
+    ),
+  )(
+    `attributes nested start and exact cleanup as separate callback failures: %s %s error`,
+    async (demandKind, errorIdentity) => {
+      type Row = { id: string; rank: number; version: number }
+      const whereOuter = new Func(`eq`, [new PropRef([`id`]), new Value(`a`)])
+      const whereNested = new Func(`eq`, [
+        new PropRef([`id`]),
+        new Value(`nested`),
+      ])
+      const whereCleanup = new Func(`eq`, [
+        new PropRef([`id`]),
+        new Value(`cleanup`),
+      ])
+      const orderBy: OrderBy = [
+        {
+          expression: new PropRef([`rank`]),
+          compareOptions: { direction: `asc`, nulls: `first` },
+        },
+      ]
+      const startError = new Error(`nested start failed`)
+      const cleanupError =
+        errorIdentity === `shared`
+          ? startError
+          : new Error(`exact cleanup failed`)
+      let begin!: () => void
+      let write!: (
+        message: ChangeMessageOrDeleteKeyMessage<Row, string>,
+      ) => void
+      let commit!: (signal?: AbortSignal) => true | Promise<void>
+      let truncate!: () => void
+      let outerLoadCount = 0
+      let callbackCount = 0
+      let cleanupArmed = false
+      let cleanupThrowCount = 0
+      const collection = createCollection<Row>({
+        id: `callback-failure-occurrence-${demandKind}-${errorIdentity}`,
+        getKey: (row) => row.id,
+        syncMode: `on-demand`,
+        sync: {
+          sync: (params) => {
+            begin = params.begin
+            write = params.write
+            commit = params.commit
+            truncate = params.truncate
+            params.markReady()
+            return {
+              loadSubset: (options) => {
+                if (options.where === whereNested) throw startError
+                if (
+                  options.where === whereOuter ||
+                  options.orderBy !== undefined
+                ) {
+                  outerLoadCount++
+                  begin()
+                  write({
+                    type: `insert`,
+                    value: {
+                      id: `a`,
+                      rank: 1,
+                      version: outerLoadCount,
+                    },
+                  })
+                  commit(options.signal)
+                }
+                return true
+              },
+              unloadSubset: (options) => {
+                if (
+                  cleanupArmed &&
+                  options.where === whereCleanup &&
+                  cleanupThrowCount === 0
+                ) {
+                  cleanupThrowCount++
+                  throw cleanupError
+                }
+              },
+            }
+          },
+        },
+      })
+      const index = collection.createIndex((row) => row.rank, {
+        indexType: BTreeIndex,
+      })
+      const visible = new Map<string, Row>()
+      const errors: Array<{
+        error: unknown
+        where: LoadSubsetOptions[`where`]
+      }> = []
+      const subscription = collection.subscribeChanges((changes) => {
+        for (const change of changes) {
+          const key = String(change.key)
+          if (change.type === `delete`) visible.delete(key)
+          else visible.set(key, change.value)
+        }
+      })
+      subscription.setOrderByIndex(index)
+      subscription.on(`loadSubset:error`, ({ error, options }) =>
+        errors.push({ error, where: options.where }),
+      )
+
+      const onLoadSubsetResult = () => {
+        callbackCount++
+        if (callbackCount !== 2) return
+        try {
+          subscription.requestSnapshot({ where: whereNested })
+        } catch (error) {
+          expect(error).toBe(startError)
+        }
+        cleanupArmed = true
+        subscription.releaseSnapshot(whereCleanup)
+      }
+
+      try {
+        subscription.requestSnapshot({ where: whereCleanup })
+        if (demandKind === `ordered`) {
+          subscription.requestLimitedSnapshot({
+            orderBy,
+            limit: 1,
+            onLoadSubsetResult,
+          })
+        } else {
+          subscription.requestSnapshot({
+            where: whereOuter,
+            onLoadSubsetResult,
+          })
+        }
+        await flushPromises()
+        expect(visible.get(`a`)?.version).toBe(1)
+
+        begin()
+        truncate()
+        commit()
+        await flushPromises()
+
+        expect(errors).toEqual([
+          { error: startError, where: whereNested },
+          { error: cleanupError, where: whereCleanup },
+        ])
+        expect(cleanupThrowCount).toBe(1)
+        expect(subscription.status).toBe(`ready`)
+        expect(visible.get(`a`)?.version).toBe(1)
+      } finally {
+        subscription.unsubscribe()
+        await collection.cleanup()
+      }
+    },
+  )
+
+  it.each(
+    ([`unordered`, `ordered`] as const).flatMap((demandKind) =>
       ([`resolve`, `reject`] as const).flatMap((settlement) =>
         ([`succeed`, `throw`] as const).map(
           (cleanup) => [demandKind, settlement, cleanup] as const,
