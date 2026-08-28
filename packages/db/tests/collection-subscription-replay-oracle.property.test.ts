@@ -2111,139 +2111,157 @@ describe(`CollectionSubscription replay oracle`, () => {
     }
   })
 
-  it(`reconciles failed ordered publications for coverage and sibling-demand changes`, async () => {
-    type Row = { id: `a` | `x` | `y`; rank: number }
-    type Outcome = {
-      hasMore: boolean
-      appliedRowKeys: ReadonlyArray<Row[`id`]>
-    }
-    let begin!: () => void
-    let write!: (
-      message: ChangeMessageOrDeleteKeyMessage<Row, Row[`id`]>,
-    ) => void
-    let commit!: () => void
-    let truncate!: () => void
-    let loadCount = 0
-    const loadOptions: Array<LoadSubsetOptions> = []
-    const replayLoads: Array<ReturnType<typeof createDeferred<Outcome>>> = []
-    const collection = createCollection<Row>({
-      id: `failed-ordered-sibling-demand`,
-      getKey: (row) => row.id,
-      syncMode: `on-demand`,
-      sync: {
-        sync: (params) => {
-          begin = params.begin
-          write = params.write
-          commit = params.commit
-          truncate = params.truncate
-          params.markReady()
-          return {
-            loadSubset: (options) => {
-              loadOptions.push(options)
-              loadCount++
-              if (loadCount === 1) {
-                begin()
-                write({ type: `insert`, value: { id: `a`, rank: 1 } })
-                commit()
-                return Promise.resolve({
-                  hasMore: false,
-                  appliedRowKeys: [`a`] as const,
-                })
-              }
-              if (loadCount === 2 || loadCount > 4) {
-                return Promise.resolve({
-                  hasMore: false,
-                  appliedRowKeys: [] as const,
-                })
-              }
-              const deferred = createDeferred<Outcome>()
-              replayLoads.push(deferred)
-              return deferred.promise
-            },
-            unloadSubset: () => {},
-          }
-        },
-      },
-    })
-    const index = collection.createIndex((row) => row.rank, {
-      indexType: BTreeIndex,
-    })
-    const orderBy: OrderBy = [
-      {
-        expression: new PropRef([`rank`]),
-        compareOptions: { direction: `asc`, nulls: `first` },
-      },
-    ]
-    const seedSiblingWhere = new Func(`eq`, [
-      new PropRef([`id`]),
-      new Value(`a`),
-    ])
-    const visible = new Set<Row[`id`]>()
-    const subscription = collection.subscribeChanges((changes) => {
-      for (const change of changes) {
-        const key = change.key as Row[`id`]
-        if (change.type === `delete`) visible.delete(key)
-        else visible.add(key)
+  it.each([`sync`, `async`] as const)(
+    `reconciles failed ordered publications for coverage and sibling-demand changes: %s`,
+    async (writeTiming) => {
+      type Row = { id: `a` | `x` | `y`; rank: number }
+      type Outcome = {
+        hasMore: boolean
+        appliedRowKeys: ReadonlyArray<Row[`id`]>
       }
-    })
-    subscription.setOrderByIndex(index)
-
-    try {
-      subscription.requestLimitedSnapshot({ orderBy, limit: 1 })
-      subscription.requestSnapshot({ where: seedSiblingWhere })
-      await flushPromises()
-      expect([...visible]).toEqual([`a`])
-
-      begin()
-      truncate()
-      commit()
-      await flushPromises()
-      expect(replayLoads).toHaveLength(2)
-
-      begin()
-      write({ type: `insert`, value: { id: `x`, rank: 0 } })
-      commit()
-      replayLoads[0]?.resolve({
-        hasMore: false,
-        appliedRowKeys: [`x`],
+      let begin!: () => void
+      let write!: (
+        message: ChangeMessageOrDeleteKeyMessage<Row, Row[`id`]>,
+      ) => void
+      let commit!: () => void
+      let truncate!: () => void
+      let loadCount = 0
+      const loadOptions: Array<LoadSubsetOptions> = []
+      const replayLoads: Array<ReturnType<typeof createDeferred<Outcome>>> = []
+      const collection = createCollection<Row>({
+        id: `failed-ordered-sibling-demand`,
+        getKey: (row) => row.id,
+        syncMode: `on-demand`,
+        sync: {
+          sync: (params) => {
+            begin = params.begin
+            write = params.write
+            commit = params.commit
+            truncate = params.truncate
+            params.markReady()
+            return {
+              loadSubset: (options) => {
+                loadOptions.push(options)
+                loadCount++
+                if (loadCount === 1) {
+                  begin()
+                  write({ type: `insert`, value: { id: `a`, rank: 1 } })
+                  commit()
+                  return Promise.resolve({
+                    hasMore: false,
+                    appliedRowKeys: [`a`] as const,
+                  })
+                }
+                if (loadCount === 5) {
+                  const outcome = {
+                    hasMore: false,
+                    appliedRowKeys: [`x`] as const,
+                  }
+                  const updateRejectedRow = () => {
+                    begin()
+                    write({ type: `update`, value: { id: `x`, rank: -1 } })
+                    commit()
+                    return outcome
+                  }
+                  return writeTiming === `sync`
+                    ? Promise.resolve(updateRejectedRow())
+                    : Promise.resolve().then(updateRejectedRow)
+                }
+                if (loadCount === 2 || loadCount > 5) {
+                  return Promise.resolve({
+                    hasMore: false,
+                    appliedRowKeys: [] as const,
+                  })
+                }
+                const deferred = createDeferred<Outcome>()
+                replayLoads.push(deferred)
+                return deferred.promise
+              },
+              unloadSubset: () => {},
+            }
+          },
+        },
       })
-      replayLoads[1]?.reject(new Error(`sibling replay failed`))
-      await flushPromises()
-
-      expect([...visible]).toEqual([`a`])
-      expect.soft(subscription.hasOrderedCoverageForActiveWindow).toBe(false)
-      expect.soft(subscription.orderedBoundaryKey).toBe(`a`)
-
-      const xWhere = new Func(`eq`, [new PropRef([`id`]), new Value(`x`)])
-      subscription.requestSnapshot({ where: xWhere })
-      await flushPromises()
-      expect.soft([...visible].sort()).toEqual([`a`, `x`])
-      expect.soft(subscription.orderedBoundaryKey).toBe(`a`)
-
-      subscription.releaseSnapshot(xWhere)
-      expect.soft([...visible]).toEqual([`a`])
-      expect.soft(subscription.orderedBoundaryKey).toBe(`a`)
-
-      subscription.requestSnapshot({ where: xWhere })
-      await flushPromises()
-      expect([...visible].sort()).toEqual([`a`, `x`])
-
-      begin()
-      write({ type: `insert`, value: { id: `y`, rank: 200 } })
-      commit()
-      expect.soft([...visible].sort()).toEqual([`a`, `x`])
-
-      subscription.requestLimitedSnapshot({ orderBy, limit: 1 })
-      await flushPromises()
-      expect.soft(loadOptions.at(-1)).toMatchObject({
-        offset: 1,
-        cursor: { lastKey: `a` },
+      const index = collection.createIndex((row) => row.rank, {
+        indexType: BTreeIndex,
       })
-    } finally {
-      subscription.unsubscribe()
-      await collection.cleanup()
-    }
-  })
+      const orderBy: OrderBy = [
+        {
+          expression: new PropRef([`rank`]),
+          compareOptions: { direction: `asc`, nulls: `first` },
+        },
+      ]
+      const seedSiblingWhere = new Func(`eq`, [
+        new PropRef([`id`]),
+        new Value(`a`),
+      ])
+      const visible = new Set<Row[`id`]>()
+      const subscription = collection.subscribeChanges((changes) => {
+        for (const change of changes) {
+          const key = change.key as Row[`id`]
+          if (change.type === `delete`) visible.delete(key)
+          else visible.add(key)
+        }
+      })
+      subscription.setOrderByIndex(index)
+
+      try {
+        subscription.requestLimitedSnapshot({ orderBy, limit: 1 })
+        subscription.requestSnapshot({ where: seedSiblingWhere })
+        await flushPromises()
+        expect([...visible]).toEqual([`a`])
+
+        begin()
+        truncate()
+        commit()
+        await flushPromises()
+        expect(replayLoads).toHaveLength(2)
+
+        begin()
+        write({ type: `insert`, value: { id: `x`, rank: 0 } })
+        commit()
+        replayLoads[0]?.resolve({
+          hasMore: false,
+          appliedRowKeys: [`x`],
+        })
+        replayLoads[1]?.reject(new Error(`sibling replay failed`))
+        await flushPromises()
+
+        expect([...visible]).toEqual([`a`])
+        expect.soft(subscription.hasOrderedCoverageForActiveWindow).toBe(false)
+        expect.soft(subscription.orderedBoundaryKey).toBe(`a`)
+
+        const xWhere = new Func(`eq`, [new PropRef([`id`]), new Value(`x`)])
+        subscription.requestSnapshot({ where: xWhere })
+        await flushPromises()
+        expect.soft([...visible].sort()).toEqual([`a`, `x`])
+        expect.soft(subscription.orderedBoundaryKey).toBe(`a`)
+
+        subscription.releaseSnapshot(xWhere)
+        expect.soft([...visible]).toEqual([`a`])
+        expect.soft(subscription.orderedBoundaryKey).toBe(`a`)
+
+        subscription.requestSnapshot({ where: xWhere })
+        await flushPromises()
+        expect([...visible].sort()).toEqual([`a`, `x`])
+
+        begin()
+        write({ type: `insert`, value: { id: `y`, rank: 200 } })
+        commit()
+        expect.soft([...visible].sort()).toEqual([`a`, `x`])
+
+        subscription.requestLimitedSnapshot({ orderBy, limit: 1 })
+        await flushPromises()
+        expect.soft(loadOptions.at(-1)).toMatchObject({
+          offset: 1,
+          cursor: { lastKey: `a` },
+        })
+      } finally {
+        subscription.unsubscribe()
+        await collection.cleanup()
+      }
+    },
+  )
 
   it(`uses the published replacement as the baseline of a reentrant replay`, async () => {
     let begin!: () => void

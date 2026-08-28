@@ -173,6 +173,11 @@ export class CollectionSubscription
   private _status: SubscriptionStatus = `ready`
   private _lastError: unknown | undefined
   private pendingLoadSubsetPromises: Set<Promise<unknown>> = new Set()
+  // Adapter writes have no per-row origin tag. Retain the acquisition context
+  // across its synchronous call and promise so an unordered demand cannot
+  // accidentally authorize rows for a stale ordered publication.
+  private activeLoadSubsetOptions: Array<LoadSubsetOptions> = []
+  private pendingUnorderedLoadSubsetOptions = new Set<LoadSubsetOptions>()
 
   // Cleanup function for truncate event listener
   private truncateCleanup: (() => void) | undefined
@@ -298,8 +303,10 @@ export class CollectionSubscription
     // the old work before it can install rows into the new generation.
     for (const demand of demandsToReload) {
       demand.abortController?.abort()
+      this.pendingUnorderedLoadSubsetOptions.delete(demand.options)
       for (const pending of demand.pendingReplayAcquisitions) {
         pending.abortController.abort()
+        this.pendingUnorderedLoadSubsetOptions.delete(pending.options)
       }
     }
 
@@ -680,7 +687,7 @@ export class CollectionSubscription
    */
   private reconcileStaleOrderedPublication(
     changes: ReadonlyArray<ChangeMessage<any, string | number>>,
-    source: `source-change` | `local-snapshot` = `source-change`,
+    source: `ordered-source` | `additional-demand` = `ordered-source`,
   ): Array<ChangeMessage<any, any>> {
     const stalePublication = this.stalePublication
     const ordered = stalePublication?.ordered
@@ -701,7 +708,7 @@ export class CollectionSubscription
     const isAdditionalRow = (row: object) =>
       additionalFilters.some((filter) => filter?.(row) ?? true)
     const orderedCandidates = ordered.candidateRows
-    const admitsOrderedCandidates = source === `source-change`
+    const admitsOrderedCandidates = source === `ordered-source`
 
     for (const change of changes) {
       if (change.type === `delete`) {
@@ -856,12 +863,45 @@ export class CollectionSubscription
     options: LoadSubsetOptions,
     shouldReportError: () => boolean = () => true,
   ): LoadSubsetRequestResult {
+    const tracksUnorderedAcquisition = options.orderBy === undefined
+    this.activeLoadSubsetOptions.push(options)
+    if (tracksUnorderedAcquisition) {
+      this.pendingUnorderedLoadSubsetOptions.add(options)
+    }
+
+    let result: LoadSubsetRequestResult
     try {
-      return this.collection._sync.loadSubset(options)
+      result = this.collection._sync.loadSubset(options)
     } catch (error) {
+      this.pendingUnorderedLoadSubsetOptions.delete(options)
       if (shouldReportError()) this.recordLoadSubsetError(options, error)
       throw error
+    } finally {
+      this.activeLoadSubsetOptions.pop()
     }
+
+    if (tracksUnorderedAcquisition) {
+      if (result instanceof Promise) {
+        const finish = () =>
+          this.pendingUnorderedLoadSubsetOptions.delete(options)
+        void result.then(finish, finish)
+      } else {
+        this.pendingUnorderedLoadSubsetOptions.delete(options)
+      }
+    }
+    return result
+  }
+
+  private staleChangeSource(): `ordered-source` | `additional-demand` {
+    const activeOptions = this.activeLoadSubsetOptions.at(-1)
+    if (activeOptions !== undefined) {
+      return activeOptions.orderBy === undefined
+        ? `additional-demand`
+        : `ordered-source`
+    }
+    return this.pendingUnorderedLoadSubsetOptions.size > 0
+      ? `additional-demand`
+      : `ordered-source`
   }
 
   private buildOrderedCursorExpressions(
@@ -995,6 +1035,7 @@ export class CollectionSubscription
   ): void {
     const previousOptions = demand.options
     const removePreviousAbortListener = demand.removeRequestAbortListener
+    this.pendingUnorderedLoadSubsetOptions.delete(previousOptions)
     this.collection._sync.unloadSubset(previousOptions)
     removePreviousAbortListener?.()
     demand.options = next.options
@@ -1064,6 +1105,7 @@ export class CollectionSubscription
   ): void {
     if (!demand.pendingReplayAcquisitions.has(next)) return
     next.abortController.abort()
+    this.pendingUnorderedLoadSubsetOptions.delete(next.options)
     try {
       this.collection._sync.unloadSubset(next.options)
       demand.pendingReplayAcquisitions.delete(next)
@@ -1075,6 +1117,7 @@ export class CollectionSubscription
   /** Abort and release one current adapter acquisition. */
   private releaseSubsetDemand(demand: SubsetDemand): void {
     demand.abortController?.abort()
+    this.pendingUnorderedLoadSubsetOptions.delete(demand.options)
     let firstReleaseError: unknown
     for (const pending of [...demand.pendingReplayAcquisitions]) {
       try {
@@ -1173,7 +1216,10 @@ export class CollectionSubscription
       !this.isBufferingForTruncate &&
       this.stalePublication?.ordered
     ) {
-      const orderedChanges = this.reconcileStaleOrderedPublication(changes)
+      const orderedChanges = this.reconcileStaleOrderedPublication(
+        changes,
+        this.staleChangeSource(),
+      )
       if (changes.length > 0 && orderedChanges.length === 0) return false
       this.callback(orderedChanges)
       return true
@@ -1309,7 +1355,7 @@ export class CollectionSubscription
       // the ordered prefix.
       const changes = this.reconcileStaleOrderedPublication(
         snapshot,
-        `local-snapshot`,
+        `additional-demand`,
       )
       if (changes.length > 0) this.callback(changes)
       return true
@@ -1748,6 +1794,8 @@ export class CollectionSubscription
     this.truncateReplaySession = undefined
     this.stalePublication = undefined
     this.orderedPublication = undefined
+    this.activeLoadSubsetOptions.length = 0
+    this.pendingUnorderedLoadSubsetOptions.clear()
 
     // Release the current adapter acquisition for each logical subset demand.
     const failedDemands: Array<SubsetDemand> = []

@@ -420,8 +420,12 @@ candidates separate from rows visible only for another demand. A new local
 snapshot may add the latter to the public union, but it cannot promote a row
 left by the rejected generation into the ordered prefix, even when that row
 matches the ordered predicate. Releasing that demand removes the row again
-without changing the ordered boundary. A failed generation also clears its
-private coverage evidence; a successful
+without changing the ordered boundary. Adapter writes inherit the acquisition
+that is running or unsettled: writes for an unordered demand have the same
+additional-only provenance as its local snapshot, whether they arrive before
+`loadSubset` returns or before its promise settles. Ordinary live source
+changes and ordered acquisitions may evolve the ordered candidate set. A
+failed generation also clears its private coverage evidence; a successful
 ordered acquisition from that generation cannot suppress the next request when
 another demand makes the whole replacement fail. Reader-visible boundaries and
 failed-replay offset or cursor restoration derive from this snapshot and ignore
