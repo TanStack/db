@@ -3033,7 +3033,7 @@ describe(`Electric Integration`, () => {
       await testCollection.cleanup()
     })
 
-    it(`should retry a refresh wait after the requesting demand is aborted`, async () => {
+    it(`retries immediately after the requesting demand is aborted`, async () => {
       vi.useFakeTimers()
       const refresh = createDeferred<void>()
 
@@ -3061,24 +3061,161 @@ describe(`Electric Integration`, () => {
 
         await Promise.resolve()
         abortController.abort()
+
+        expect(mockRequestSnapshot).not.toHaveBeenCalled()
+
+        mockForceDisconnectAndRefresh.mockResolvedValueOnce(undefined)
+        const retry = testCollection._sync.loadSubset({ limit: 10 })
+
+        expect(mockForceDisconnectAndRefresh).toHaveBeenCalledTimes(2)
         await vi.advanceTimersByTimeAsync(0)
 
         expect(abortedLoadSettled).toBe(true)
         await expect(abortedLoadError).resolves.toMatchObject({
           name: `AbortError`,
         })
-        expect(mockRequestSnapshot).not.toHaveBeenCalled()
         expect(vi.getTimerCount()).toBe(0)
 
-        mockForceDisconnectAndRefresh.mockResolvedValueOnce(undefined)
-        await testCollection._sync.loadSubset({ limit: 10 })
+        await retry
 
-        expect(mockForceDisconnectAndRefresh).toHaveBeenCalledTimes(2)
         expect(mockRequestSnapshot).toHaveBeenCalledTimes(1)
         await testCollection.cleanup()
         await abortedLoad.catch(() => undefined)
       } finally {
         refresh.resolve()
+        await vi.runOnlyPendingTimersAsync()
+        vi.useRealTimers()
+      }
+    })
+
+    it.each([`request`, `collection`] as const)(
+      `prefers AbortError when refresh rejection races %s cancellation`,
+      async (cancellationSource) => {
+        vi.useFakeTimers()
+        let rejectRefresh: (error: Error) => void = () => {}
+        const refresh = new Promise<void>((_resolve, reject) => {
+          rejectRefresh = reject
+        })
+        const request = new AbortController()
+        let testCollection:
+          | ReturnType<typeof createOnDemandCollection>
+          | undefined
+
+        try {
+          mockStream.isUpToDate = true
+          mockForceDisconnectAndRefresh.mockReturnValueOnce(refresh)
+          testCollection = createOnDemandCollection(
+            `on-demand-refresh-${cancellationSource}-race-test`,
+          )
+          const load = Promise.resolve(
+            testCollection._sync.loadSubset({
+              limit: 10,
+              signal: request.signal,
+            }),
+          )
+          const loadError = load.then(
+            () => undefined,
+            (error: unknown) => error,
+          )
+
+          await Promise.resolve()
+          rejectRefresh(new Error(`refresh failed`))
+          if (cancellationSource === `request`) {
+            request.abort()
+          } else {
+            await testCollection.cleanup()
+          }
+
+          await expect(loadError).resolves.toMatchObject({
+            name: `AbortError`,
+          })
+          expect(mockRequestSnapshot).not.toHaveBeenCalled()
+          await load.catch(() => undefined)
+        } finally {
+          request.abort()
+          await testCollection?.cleanup()
+          await vi.runOnlyPendingTimersAsync()
+          vi.useRealTimers()
+        }
+      },
+    )
+
+    it(`removes every abort listener installed by a canceled refresh wait`, async () => {
+      vi.useFakeTimers()
+      const refresh = createDeferred<void>()
+      const request = new AbortController()
+      const added: Array<{
+        signal: AbortSignal
+        listener: EventListenerOrEventListenerObject
+      }> = []
+      const removed: Array<{
+        signal: AbortSignal
+        listener: EventListenerOrEventListenerObject
+      }> = []
+      const originalAdd = AbortSignal.prototype.addEventListener
+      const originalRemove = AbortSignal.prototype.removeEventListener
+      mockStream.isUpToDate = true
+      mockForceDisconnectAndRefresh.mockReturnValueOnce(refresh.promise)
+      const testCollection = createOnDemandCollection(
+        `on-demand-refresh-listener-cleanup-test`,
+      )
+
+      const addSpy = vi
+        .spyOn(AbortSignal.prototype, `addEventListener`)
+        .mockImplementation(function (
+          this: AbortSignal,
+          type,
+          listener,
+          options,
+        ) {
+          if (type === `abort`) added.push({ signal: this, listener })
+          return originalAdd.call(this, type, listener, options)
+        })
+      const removeSpy = vi
+        .spyOn(AbortSignal.prototype, `removeEventListener`)
+        .mockImplementation(function (
+          this: AbortSignal,
+          type,
+          listener,
+          options,
+        ) {
+          if (type === `abort`) removed.push({ signal: this, listener })
+          return originalRemove.call(this, type, listener, options)
+        })
+
+      try {
+        const load = Promise.resolve(
+          testCollection._sync.loadSubset({
+            limit: 10,
+            signal: request.signal,
+          }),
+        )
+        const loadError = load.then(
+          () => undefined,
+          (error: unknown) => error,
+        )
+
+        await Promise.resolve()
+        request.abort()
+        await expect(loadError).resolves.toMatchObject({ name: `AbortError` })
+
+        expect(added.length).toBeGreaterThan(0)
+        for (const installed of added) {
+          expect(
+            removed.some(
+              (candidate) =>
+                candidate.signal === installed.signal &&
+                candidate.listener === installed.listener,
+            ),
+          ).toBe(true)
+        }
+        await load.catch(() => undefined)
+      } finally {
+        request.abort()
+        refresh.resolve()
+        await testCollection.cleanup()
+        addSpy.mockRestore()
+        removeSpy.mockRestore()
         await vi.runOnlyPendingTimersAsync()
         vi.useRealTimers()
       }

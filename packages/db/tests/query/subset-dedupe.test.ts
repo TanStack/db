@@ -118,6 +118,30 @@ describe(`createDeduplicatedLoadSubset`, () => {
     await retry
   })
 
+  it(`does not reuse an aborted in-flight lease while its work is still settling`, async () => {
+    const releases: Array<() => void> = []
+    const loadSubset = vi.fn(
+      () => new Promise<void>((resolve) => releases.push(resolve)),
+    )
+    const deduplicated = new DeduplicatedLoadSubset({ loadSubset })
+    const owner = new AbortController()
+    const where = gt(ref(`age`), val(10))
+
+    const canceled = deduplicated.loadSubset({
+      where,
+      signal: owner.signal,
+    })
+    owner.abort()
+
+    const retry = deduplicated.loadSubset({ where })
+
+    expect(loadSubset).toHaveBeenCalledTimes(2)
+    expect(retry).not.toBe(canceled)
+
+    for (const release of releases) release()
+    await Promise.all([canceled, retry])
+  })
+
   it(`keeps shared work active for a signal-less owner`, async () => {
     let resolveLoad: (() => void) | undefined
     let sharedSignal: AbortSignal | undefined
