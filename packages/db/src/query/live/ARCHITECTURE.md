@@ -545,7 +545,9 @@ The same rule crosses recursive acquisition starts. An intermediate
 `loadSubset` that lets a nested `requestSnapshot` carrier escape must roll back
 its own tentative owner and rethrow that carrier unchanged. It does not create
 a failure for its own options; only the innermost adapter boundary originated
-the occurrence.
+the occurrence. Promise adoption follows the same rule: if an asynchronous
+intermediate acquisition rejects with that carrier, its settlement observer
+does not turn the carrier into a second public failure.
 Teardown dispatches `unsubscribed` listeners synchronously and collects their
 throws after adapter cleanup failures. Ordinary event delivery keeps its
 asynchronous listener-error behavior. A retained replay error batch completes
@@ -555,7 +557,9 @@ teardown defers only its global listener clear until that batch ends. Explicit
 indexed by both its wrapper and original callback, so `off(event, original)`
 can remove it before invocation. A second unsubscribe request during that
 deferred-clear interval cannot redispatch the terminal event; a later explicit
-call after the batch may still retry cleanup debt.
+call after the batch may still retry cleanup debt. Cleanup retries never
+redispatch `unsubscribed`, including to a listener registered after the first
+teardown pass; terminal publication is one lifetime edge.
 `onLoadSubsetResult`, `requestSnapshot`, and `releaseSnapshot` are internal
 composition APIs. A nested synchronous failure may use the private propagation
 token across that callback; internal code must rethrow the caught value

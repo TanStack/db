@@ -247,6 +247,7 @@ export class CollectionSubscription
   private _lastError: unknown | undefined
   private _lastErrorVersion = 0
   private unsubscribed = false
+  private terminalEventDispatched = false
   private pendingLoadSubsetPromises: Set<Promise<unknown>> = new Set()
   // Cleanup function for truncate event listener
   private truncateCleanup: (() => void) | undefined
@@ -1842,6 +1843,12 @@ export class CollectionSubscription
     void result.then(
       () => {},
       (error: unknown) => {
+        if (error instanceof SubsetFailurePropagation) {
+          // The originating nested boundary already failed this replay and
+          // retained its public payload. Promise adoption must not turn the
+          // private propagation carrier into a second adapter occurrence.
+          return
+        }
         if (this.isActiveDemand(demand) && !demand.options.signal?.aborted) {
           attempt.failed = true
           this.queueTruncateReplayError(session, demand.options, error)
@@ -2650,11 +2657,16 @@ export class CollectionSubscription
     )
 
     try {
-      const listenerErrors = this.emitInnerCollectErrors(`unsubscribed`, {
-        type: `unsubscribed`,
-        subscription: this,
-      })
-      for (const error of listenerErrors) recordCleanupError(error)
+      if (!this.terminalEventDispatched) {
+        // Cleanup debt may require later unsubscribe passes, but terminal
+        // publication is one lifecycle edge for the subscription.
+        this.terminalEventDispatched = true
+        const listenerErrors = this.emitInnerCollectErrors(`unsubscribed`, {
+          type: `unsubscribed`,
+          subscription: this,
+        })
+        for (const error of listenerErrors) recordCleanupError(error)
+      }
     } finally {
       // Clear all event listeners to prevent memory leaks
       if (this.replayErrorReportDepth > 0) {

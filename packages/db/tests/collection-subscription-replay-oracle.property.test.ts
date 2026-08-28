@@ -3794,77 +3794,89 @@ describe(`CollectionSubscription replay oracle`, () => {
     },
   )
 
-  it(`reports one originating failure through recursive callback-created starts`, async () => {
-    type Row = { id: string }
-    const whereOuter = new Func(`eq`, [new PropRef([`id`]), new Value(`a`)])
-    const whereMiddle = new Func(`eq`, [
-      new PropRef([`id`]),
-      new Value(`middle`),
-    ])
-    const whereInner = new Func(`eq`, [new PropRef([`id`]), new Value(`inner`)])
-    const failure = new Error(`recursive callback-created start failed`)
-    const errors: Array<{ error: unknown; options: LoadSubsetOptions }> = []
-    let begin!: () => void
-    let commit!: () => true | Promise<void>
-    let truncate!: () => void
-    let callbackCount = 0
-    let innerOptions: LoadSubsetOptions | undefined
-    const collection = createCollection<Row>({
-      id: `recursive-callback-created-start-failure`,
-      getKey: (row) => row.id,
-      syncMode: `on-demand`,
-      sync: {
-        sync: (params) => {
-          begin = params.begin
-          commit = params.commit
-          truncate = params.truncate
-          params.markReady()
-          return {
-            loadSubset: (options) => {
-              if (options.where === whereInner) {
-                innerOptions = options
-                throw failure
-              }
-              if (options.where === whereMiddle) {
-                requestInner()
-              }
-              return true
-            },
-            unloadSubset: () => {},
-          }
-        },
-      },
-    })
-    const subscription = collection.subscribeChanges(() => {})
-    const requestInner = () =>
-      subscription.requestSnapshot({ where: whereInner })
-    subscription.on(`loadSubset:error`, ({ error, options }) => {
-      errors.push({ error, options })
-    })
-
-    try {
-      subscription.requestSnapshot({
-        where: whereOuter,
-        onLoadSubsetResult: () => {
-          callbackCount++
-          if (callbackCount === 2) {
-            subscription.requestSnapshot({ where: whereMiddle })
-          }
+  it.each([`sync`, `async`] as const)(
+    `reports one originating failure through recursive callback-created starts: %s`,
+    async (propagation) => {
+      type Row = { id: string }
+      const whereOuter = new Func(`eq`, [new PropRef([`id`]), new Value(`a`)])
+      const whereMiddle = new Func(`eq`, [
+        new PropRef([`id`]),
+        new Value(`middle`),
+      ])
+      const whereInner = new Func(`eq`, [
+        new PropRef([`id`]),
+        new Value(`inner`),
+      ])
+      const failure = new Error(`recursive callback-created start failed`)
+      const errors: Array<{ error: unknown; options: LoadSubsetOptions }> = []
+      let begin!: () => void
+      let commit!: () => true | Promise<void>
+      let truncate!: () => void
+      let callbackCount = 0
+      let innerOptions: LoadSubsetOptions | undefined
+      const collection = createCollection<Row>({
+        id: `recursive-callback-created-start-failure-${propagation}`,
+        getKey: (row) => row.id,
+        syncMode: `on-demand`,
+        sync: {
+          sync: (params) => {
+            begin = params.begin
+            commit = params.commit
+            truncate = params.truncate
+            params.markReady()
+            return {
+              loadSubset: (options) => {
+                if (options.where === whereInner) {
+                  innerOptions = options
+                  throw failure
+                }
+                if (options.where === whereMiddle) {
+                  if (propagation === `async`) {
+                    return (async () => {
+                      requestInner()
+                      await Promise.resolve()
+                    })()
+                  }
+                  requestInner()
+                }
+                return true
+              },
+              unloadSubset: () => {},
+            }
+          },
         },
       })
-      begin()
-      truncate()
-      commit()
-      await flushPromises()
+      const subscription = collection.subscribeChanges(() => {})
+      const requestInner = () =>
+        subscription.requestSnapshot({ where: whereInner })
+      subscription.on(`loadSubset:error`, ({ error, options }) => {
+        errors.push({ error, options })
+      })
 
-      expect(errors).toEqual([{ error: failure, options: innerOptions }])
-      expect(subscription.lastError).toBe(failure)
-      expect(subscription.lastErrorVersion).toBe(1)
-    } finally {
-      subscription.unsubscribe()
-      await collection.cleanup()
-    }
-  })
+      try {
+        subscription.requestSnapshot({
+          where: whereOuter,
+          onLoadSubsetResult: () => {
+            callbackCount++
+            if (callbackCount === 2) {
+              subscription.requestSnapshot({ where: whereMiddle })
+            }
+          },
+        })
+        begin()
+        truncate()
+        commit()
+        await flushPromises()
+
+        expect(errors).toEqual([{ error: failure, options: innerOptions }])
+        expect(subscription.lastError).toBe(failure)
+        expect(subscription.lastErrorVersion).toBe(1)
+      } finally {
+        subscription.unsubscribe()
+        await collection.cleanup()
+      }
+    },
+  )
 
   it.each(
     ([`unordered`, `ordered`] as const).flatMap((demandKind) =>
@@ -6766,6 +6778,42 @@ describe(`CollectionSubscription replay oracle`, () => {
 
     expect(() => subscription.unsubscribe()).not.toThrow()
     expect(calls).toBe(1)
+    await expect(collection.cleanup()).resolves.toBeUndefined()
+  })
+
+  it(`does not redispatch the terminal event while retrying cleanup debt`, async () => {
+    type Row = { id: string }
+    const where = new Func(`eq`, [new PropRef([`id`]), new Value(`a`)])
+    const cleanupFailure = new Error(`first cleanup attempt failed`)
+    const events: Array<`first` | `retry`> = []
+    let unloads = 0
+    const collection = createCollection<Row>({
+      id: `terminal-event-cleanup-retry`,
+      getKey: (row) => row.id,
+      syncMode: `on-demand`,
+      sync: {
+        sync: (params) => {
+          params.markReady()
+          return {
+            loadSubset: () => true,
+            unloadSubset: () => {
+              unloads++
+              if (unloads === 1) throw cleanupFailure
+            },
+          }
+        },
+      },
+    })
+    const subscription = collection.subscribeChanges(() => {})
+    subscription.requestSnapshot({ where })
+    subscription.on(`unsubscribed`, () => events.push(`first`))
+
+    expect(() => subscription.unsubscribe()).toThrow(cleanupFailure)
+    subscription.on(`unsubscribed`, () => events.push(`retry`))
+    expect(() => subscription.unsubscribe()).not.toThrow()
+
+    expect(unloads).toBe(2)
+    expect(events).toEqual([`first`])
     await expect(collection.cleanup()).resolves.toBeUndefined()
   })
 
