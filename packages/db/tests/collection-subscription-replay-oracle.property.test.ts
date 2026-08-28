@@ -3702,6 +3702,208 @@ describe(`CollectionSubscription replay oracle`, () => {
     },
   )
 
+  it.each(
+    ([`sync`, `async`] as const).flatMap((settlement) =>
+      (
+        [`none`, `cleanup-succeed`, `cleanup-throw`, `callback-throw`] as const
+      ).map((callback) => [settlement, callback] as const),
+    ),
+  )(
+    `settles a post-setup ordered continuation callback before publication: %s %s`,
+    async (settlement, callback) => {
+      type Row = {
+        id: `a` | `b`
+        rank: number
+        version: number
+      }
+      type Outcome = {
+        hasMore: boolean
+        appliedRowKeys: ReadonlyArray<Row[`id`]>
+      }
+      const where = new Func(`gte`, [new PropRef([`rank`]), new Value(0)])
+      const orderBy: OrderBy = [
+        {
+          expression: new PropRef([`rank`]),
+          compareOptions: { direction: `asc`, nulls: `first` },
+        },
+      ]
+      const replayPage = createDeferred<Outcome>()
+      const callbackError = new Error(`continuation callback failed`)
+      const cleanupError = new Error(`continuation cleanup failed`)
+      let begin!: () => void
+      let write!: (
+        message: ChangeMessageOrDeleteKeyMessage<Row, Row[`id`]>,
+      ) => void
+      let commit!: (signal?: AbortSignal) => true | Promise<void>
+      let truncate!: () => void
+      let loadCount = 0
+      let initialCallbackCount = 0
+      let continuationOptions: LoadSubsetOptions | undefined
+      let cleanupFailuresRemaining = callback === `cleanup-throw` ? 1 : 0
+      let escapedCallbackError: unknown
+      const unloads: Array<LoadSubsetOptions> = []
+      const collection = createCollection<Row>({
+        id: `post-setup-continuation-${settlement}-${callback}`,
+        getKey: (row) => row.id,
+        syncMode: `on-demand`,
+        sync: {
+          sync: (params) => {
+            begin = params.begin
+            write = params.write
+            commit = params.commit
+            truncate = params.truncate
+            params.markReady()
+            return {
+              loadSubset: (options) => {
+                loadCount++
+                begin()
+                if (loadCount === 1) {
+                  write({
+                    type: `insert`,
+                    value: { id: `a`, rank: 1, version: 1 },
+                  })
+                  write({
+                    type: `insert`,
+                    value: { id: `b`, rank: 2, version: 1 },
+                  })
+                  commit(options.signal)
+                  return Promise.resolve({
+                    hasMore: false,
+                    appliedRowKeys: [`a`, `b`] as const,
+                  })
+                }
+                if (loadCount === 2) {
+                  write({
+                    type: `insert`,
+                    value: { id: `a`, rank: 1, version: 2 },
+                  })
+                  commit(options.signal)
+                  return replayPage.promise
+                }
+
+                continuationOptions = options
+                write({
+                  type: `insert`,
+                  value: { id: `b`, rank: 2, version: 2 },
+                })
+                commit(options.signal)
+                return settlement === `sync` ? true : Promise.resolve()
+              },
+              unloadSubset: (options) => {
+                unloads.push(options)
+                if (
+                  options === continuationOptions &&
+                  cleanupFailuresRemaining > 0
+                ) {
+                  cleanupFailuresRemaining--
+                  throw cleanupError
+                }
+              },
+            }
+          },
+        },
+      })
+      const index = collection.createIndex((row) => row.rank, {
+        indexType: BTreeIndex,
+      })
+      const visible = new Map<Row[`id`], Row>()
+      const errors: Array<unknown> = []
+      const errorObservations: Array<ReadonlyArray<string>> = []
+      const subscription = collection.subscribeChanges(
+        (changes) => {
+          for (const change of changes) {
+            const key = change.key as Row[`id`]
+            if (change.type === `delete`) visible.delete(key)
+            else visible.set(key, change.value)
+          }
+        },
+        { whereExpression: where },
+      )
+      subscription.setOrderByIndex(index)
+      subscription.on(`loadSubset:error`, ({ error }) => {
+        errors.push(error)
+        errorObservations.push(
+          [...visible.values()].map((row) => `${row.id}@${row.version}`),
+        )
+      })
+
+      try {
+        subscription.requestLimitedSnapshot({
+          orderBy,
+          limit: 2,
+          onLoadSubsetResult: (result) => {
+            initialCallbackCount++
+            if (initialCallbackCount !== 2 || !(result instanceof Promise)) {
+              return
+            }
+            void result.then(() => {
+              try {
+                subscription.requestLimitedSnapshot({
+                  orderBy,
+                  limit: 2,
+                  onLoadSubsetResult: (_result, options) => {
+                    if (callback === `callback-throw`) throw callbackError
+                    if (callback.startsWith(`cleanup-`)) {
+                      subscription.releaseSnapshot(where, options.signal)
+                    }
+                  },
+                })
+              } catch (error) {
+                escapedCallbackError = error
+              }
+            })
+          },
+        })
+        await flushPromises()
+        expect(
+          [...visible.values()].map((row) => `${row.id}@${row.version}`),
+        ).toEqual([`a@1`, `b@1`])
+
+        begin()
+        truncate()
+        commit()
+        await flushPromises()
+        replayPage.resolve({ hasMore: true, appliedRowKeys: [`a`] })
+        await flushPromises()
+        await flushPromises()
+
+        const publishesReplacement =
+          callback === `none` ||
+          (callback === `cleanup-succeed` && settlement === `sync`)
+        expect(subscription.status).toBe(`ready`)
+        expect(escapedCallbackError).toBeUndefined()
+        expect(
+          [...visible.values()].map((row) => `${row.id}@${row.version}`),
+        ).toEqual(publishesReplacement ? [`a@2`, `b@2`] : [`a@1`, `b@1`])
+        const expectedError =
+          callback === `cleanup-throw`
+            ? cleanupError
+            : callback === `callback-throw`
+              ? callbackError
+              : undefined
+        expect(errors).toEqual(expectedError ? [expectedError] : [])
+        expect(errorObservations).toEqual(expectedError ? [[`a@1`, `b@1`]] : [])
+
+        if (callback.startsWith(`cleanup-`)) {
+          expect(continuationOptions?.signal?.aborted).toBe(true)
+          expect(
+            unloads.filter((options) => options === continuationOptions),
+          ).toHaveLength(1)
+        }
+        if (callback === `cleanup-throw`) {
+          subscription.releaseSnapshot(where, continuationOptions?.signal)
+          subscription.releaseSnapshot(where, continuationOptions?.signal)
+          expect(
+            unloads.filter((options) => options === continuationOptions),
+          ).toHaveLength(2)
+        }
+      } finally {
+        subscription.unsubscribe()
+        await collection.cleanup()
+      }
+    },
+  )
+
   it(`revokes ordered authority when an additional demand replaces a candidate version`, async () => {
     type Row = { id: `a` | `x`; rank: number }
     type Outcome = {

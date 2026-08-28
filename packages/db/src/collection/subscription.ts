@@ -127,6 +127,7 @@ type SubsetDemand = SubsetAcquisition & {
 
 type TruncateReplayAttempt = {
   pending: Set<{ promise: Promise<unknown> }>
+  pendingCallbacks: number
   failed: boolean
   setupComplete: boolean
 }
@@ -381,6 +382,7 @@ export class CollectionSubscription
 
     const attempt: TruncateReplayAttempt = {
       pending: new Set(),
+      pendingCallbacks: 0,
       failed: false,
       setupComplete: false,
     }
@@ -609,7 +611,13 @@ export class CollectionSubscription
   private checkTruncateReplayComplete(session: TruncateReplaySession): void {
     if (this.truncateReplaySession !== session) return
     for (const attempt of session.attempts) {
-      if (!attempt.setupComplete || attempt.pending.size > 0) return
+      if (
+        !attempt.setupComplete ||
+        attempt.pending.size > 0 ||
+        attempt.pendingCallbacks > 0
+      ) {
+        return
+      }
     }
 
     if (session.currentAttempt.failed) {
@@ -1412,6 +1420,30 @@ export class CollectionSubscription
     }
   }
 
+  /** Keep replay publication private until one result callback returns. */
+  private retainReplayResultCallback(
+    replayContext: TruncateReplayContext | undefined,
+  ): TruncateReplayContext | undefined {
+    if (
+      !replayContext ||
+      this.truncateReplaySession !== replayContext.session
+    ) {
+      return undefined
+    }
+    replayContext.attempt.pendingCallbacks++
+    return replayContext
+  }
+
+  private releaseReplayResultCallback(
+    replayContext: TruncateReplayContext | undefined,
+  ): void {
+    if (!replayContext) return
+    replayContext.attempt.pendingCallbacks--
+    if (this.truncateReplaySession === replayContext.session) {
+      this.checkTruncateReplayComplete(replayContext.session)
+    }
+  }
+
   /** Join demand work started by a replay callback to that publication epoch. */
   private trackDemandStartedDuringReplay(
     demand: SubsetDemand,
@@ -1600,6 +1632,8 @@ export class CollectionSubscription
       result: syncResult,
       replayContext: startedReplayContext,
     } = this.startSubsetDemand(loadOptions)
+    const replayTracksCallback =
+      this.retainReplayResultCallback(startedReplayContext)
     // Replay settlement owns the acquisition even if the result callback
     // immediately releases its logical demand. Install the barrier and its
     // status observer before invoking arbitrary callback code.
@@ -1620,6 +1654,7 @@ export class CollectionSubscription
       // The adapter synchronously released or the caller had already aborted
       // this demand. Observe only to consume a possible rejection; obsolete
       // work cannot report status, establish readiness, or publish a scan.
+      this.releaseReplayResultCallback(replayTracksCallback)
       return false
     }
     demand.onLoadSubsetResult = opts?.onLoadSubsetResult
@@ -1637,6 +1672,8 @@ export class CollectionSubscription
       ) {
         throw error
       }
+    } finally {
+      this.releaseReplayResultCallback(replayTracksCallback)
     }
     if (this.ignoreObsoleteSubsetResult(demand, syncResult)) return false
 
@@ -1914,6 +1951,12 @@ export class CollectionSubscription
       revision: this.orderedWindow.coverageRevision,
     })
 
+    // A synchronous continuation can complete ordered coverage. Retain its
+    // callback before applying that evidence so callback failure can still
+    // restore the originating replay publication.
+    const replayTracksCallback =
+      this.retainReplayResultCallback(startedReplayContext)
+
     // Ordered evidence must settle before the replay barrier. The barrier and
     // its status observer in turn precede arbitrary result callbacks, so a
     // callback can retire authority without erasing pending work.
@@ -1934,6 +1977,7 @@ export class CollectionSubscription
     if (this.ignoreObsoleteSubsetResult(demand, syncResult)) {
       // Match unordered acquisition semantics: work released during adapter
       // entry cannot report a result, affect readiness, or establish coverage.
+      this.releaseReplayResultCallback(replayTracksCallback)
       return
     }
     demand.onLoadSubsetResult = onLoadSubsetResult
@@ -1951,6 +1995,8 @@ export class CollectionSubscription
       ) {
         throw error
       }
+    } finally {
+      this.releaseReplayResultCallback(replayTracksCallback)
     }
     if (this.ignoreObsoleteSubsetResult(demand, syncResult)) return
     if (!replayTracksResult) {

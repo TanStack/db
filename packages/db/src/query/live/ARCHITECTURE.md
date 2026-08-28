@@ -517,6 +517,10 @@ Replay captures that attempt identity before adapter entry and carries it
 through settlement and result callbacks. Reentrant adapter or callback work may
 start a newer attempt, but an older acquisition's failure cannot veto that
 newer attempt's complete replacement.
+A result callback is itself part of the captured attempt barrier. In
+particular, synchronous ordered evidence cannot publish a post-setup
+continuation until that callback returns; a callback or cleanup failure first
+restores the prior complete publication, then reports its error.
 A requested limit, a settled promise, or the number of requests does not.
 Applied keys carry two distinct facts. Every applied source key may advance the
 continuation cursor, including a row excluded by the subscription predicate.
