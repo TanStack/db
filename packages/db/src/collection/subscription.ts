@@ -535,7 +535,16 @@ export class CollectionSubscription
         // Preserve the original demand's consumer-local in-flight guard. This
         // observer is registered last so its settlement sees replay ownership,
         // coverage, and attempt bookkeeping before it may continue the window.
-        demand.onLoadSubsetResult?.(syncResult, nextAcquisition.options)
+        try {
+          demand.onLoadSubsetResult?.(syncResult, nextAcquisition.options)
+        } catch (error) {
+          if (this.truncateReplaySession !== session) throw error
+          // A result callback may reenter release and surface adapter cleanup
+          // failure. Keep setup moving and report only after this attempt has
+          // restored its last complete publication.
+          attempt.failed = true
+          this.queueTruncateReplayError(session, nextAcquisition.options, error)
+        }
       }
 
       attempt.setupComplete = true
@@ -1412,6 +1421,19 @@ export class CollectionSubscription
     return true
   }
 
+  /** Turn a replay-scoped result-callback throw into attempt failure. */
+  private failReplayResultCallback(
+    options: LoadSubsetOptions,
+    error: unknown,
+  ): boolean {
+    const session = this.truncateReplaySession
+    if (!session) return false
+    session.currentAttempt.failed = true
+    this.queueTruncateReplayError(session, options, error)
+    this.checkTruncateReplayComplete(session)
+    return true
+  }
+
   private recordLoadSubsetError(
     options: LoadSubsetOptions,
     error: unknown,
@@ -1572,7 +1594,11 @@ export class CollectionSubscription
     demand.onLoadSubsetResult = opts?.onLoadSubsetResult
 
     // Pass the raw loadSubset result to the caller for external tracking
-    opts?.onLoadSubsetResult?.(syncResult, demand.options)
+    try {
+      opts?.onLoadSubsetResult?.(syncResult, demand.options)
+    } catch (error) {
+      if (!this.failReplayResultCallback(demand.options, error)) throw error
+    }
     if (this.ignoreObsoleteSubsetResult(demand, syncResult)) return false
 
     if (!replayTracksResult) {
@@ -1872,7 +1898,11 @@ export class CollectionSubscription
     demand.onLoadSubsetResult = onLoadSubsetResult
 
     // Pass the raw loadSubset result to the caller for external tracking
-    onLoadSubsetResult?.(syncResult, demand.options)
+    try {
+      onLoadSubsetResult?.(syncResult, demand.options)
+    } catch (error) {
+      if (!this.failReplayResultCallback(demand.options, error)) throw error
+    }
     if (this.ignoreObsoleteSubsetResult(demand, syncResult)) return
     if (!replayTracksResult) {
       this.observeLoadSubsetResult(

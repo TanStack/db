@@ -3411,13 +3411,15 @@ describe(`CollectionSubscription replay oracle`, () => {
 
   it.each(
     ([`unordered`, `ordered`] as const).flatMap((demandKind) =>
-      ([`resolve`, `reject`] as const).map(
-        (settlement) => [demandKind, settlement] as const,
+      ([`resolve`, `reject`] as const).flatMap((settlement) =>
+        ([`succeed`, `throw`] as const).map(
+          (cleanup) => [demandKind, settlement, cleanup] as const,
+        ),
       ),
     ),
   )(
-    `keeps a self-released callback demand in the replay barrier: %s %s`,
-    async (demandKind, settlement) => {
+    `keeps a self-released callback demand in the replay barrier: %s %s %s`,
+    async (demandKind, settlement, cleanup) => {
       type Row = { id: string; value: number }
       const subscriptionWhere = new Func(`gte`, [
         new PropRef([`value`]),
@@ -3441,6 +3443,8 @@ describe(`CollectionSubscription replay oracle`, () => {
       let replaying = false
       let originalResultCount = 0
       let callbackDemandOptions: LoadSubsetOptions | undefined
+      let cleanupFailuresRemaining = cleanup === `throw` ? 1 : 0
+      const cleanupError = new Error(`callback cleanup failed`)
       const loads: Array<LoadSubsetOptions> = []
       const unloads: Array<LoadSubsetOptions> = []
       const collection = createCollection<Row>({
@@ -3466,7 +3470,16 @@ describe(`CollectionSubscription replay oracle`, () => {
                 commit(options.signal)
                 return replaying ? true : Promise.resolve()
               },
-              unloadSubset: (options) => unloads.push(options),
+              unloadSubset: (options) => {
+                unloads.push(options)
+                if (
+                  options === callbackDemandOptions &&
+                  cleanupFailuresRemaining > 0
+                ) {
+                  cleanupFailuresRemaining--
+                  throw cleanupError
+                }
+              },
             }
           },
         },
@@ -3536,7 +3549,7 @@ describe(`CollectionSubscription replay oracle`, () => {
 
         expect(subscription.status).toBe(`ready`)
         expect([...visible.keys()]).toEqual([`a`])
-        expect(errors).toEqual([])
+        expect(errors).toEqual(cleanup === `throw` ? [cleanupError] : [])
         expect(
           unloads.filter((options) => options === callbackDemandOptions),
         ).toHaveLength(1)
