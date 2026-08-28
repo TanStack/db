@@ -149,11 +149,11 @@ type TruncateReplayContext = Readonly<{
   attempt: TruncateReplayAttempt
 }>
 
-type SubsetFailureOccurrence = Readonly<{
-  error: unknown
-  options: LoadSubsetOptions
+type SubsetFailureOccurrence = {
+  readonly error: unknown
+  readonly options: LoadSubsetOptions
   attributed: boolean
-}>
+}
 
 type SubsetFailureGroup = Readonly<{
   propagatedError: unknown
@@ -640,9 +640,11 @@ export class CollectionSubscription
     session: TruncateReplaySession,
     failures: ReadonlyArray<SubsetFailureOccurrence>,
   ): void {
+    if (this.truncateReplaySession !== session) return
     for (const failure of failures) {
       if (!failure.attributed) {
         this.queueTruncateReplayError(session, failure.options, failure.error)
+        failure.attributed = true
       }
     }
   }
@@ -759,6 +761,13 @@ export class CollectionSubscription
       return
     }
 
+    if (
+      frame.previous?.replayContext.session === replayContext.session &&
+      frame.failureGroups.length > 0
+    ) {
+      frame.previous.failureGroups.push(...frame.failureGroups)
+    }
+
     const seen = new Set<SubsetFailureOccurrence>()
     const nestedFailures: Array<SubsetFailureOccurrence> = []
     for (const group of frame.failureGroups) {
@@ -784,6 +793,7 @@ export class CollectionSubscription
         failure.options,
         failure.error,
       )
+      failure.attributed = true
     }
     if (hasCallbackFailure) {
       this.queueTruncateReplayError(replayContext.session, options, caughtError)
@@ -2541,12 +2551,11 @@ export class CollectionSubscription
     )
 
     try {
-      this.emitInner(`unsubscribed`, {
+      const listenerErrors = this.emitInnerCollectErrors(`unsubscribed`, {
         type: `unsubscribed`,
         subscription: this,
       })
-    } catch (error) {
-      recordCleanupError(error)
+      for (const error of listenerErrors) recordCleanupError(error)
     } finally {
       // Clear all event listeners to prevent memory leaks
       this.clearListeners()

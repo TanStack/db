@@ -538,6 +538,12 @@ Public teardown follows the same rule: it aggregates original failure payloads
 at the outermost boundary and carries occurrence records through a containing
 cleanup or replay callback. Internal propagation tokens never become public
 error payloads or members of a public aggregate.
+Nested replay callback frames pass recognized failure groups to their
+containing frame. Once a frame attributes an occurrence, containing frames may
+recognize its propagation token but must not report the occurrence again.
+Teardown dispatches `unsubscribed` listeners synchronously and collects their
+throws after adapter cleanup failures. Ordinary event delivery keeps its
+asynchronous listener-error behavior.
 One logical release may cross both a pending replacement acquisition and its
 original acquisition. If several cleanup boundaries fail, the callback frame
 retains them as one propagated group and reports every occurrence against its

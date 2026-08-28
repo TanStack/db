@@ -110,6 +110,28 @@ export class EventEmitter<TEvents extends Record<string, any>> {
   }
 
   /**
+   * Emit an event and return every listener failure to the caller.
+   *
+   * Teardown paths use this when listener failures must join a synchronous
+   * cleanup result. Ordinary event delivery keeps its asynchronous surfacing
+   * behavior through emitInner.
+   */
+  protected emitInnerCollectErrors<T extends keyof TEvents>(
+    event: T,
+    eventPayload: TEvents[T],
+  ): ReadonlyArray<unknown> {
+    const errors: Array<unknown> = []
+    this.listeners.get(event)?.forEach((listener) => {
+      try {
+        listener(eventPayload)
+      } catch (error) {
+        errors.push(error)
+      }
+    })
+    return errors
+  }
+
+  /**
    * Clear all listeners
    */
   protected clearListeners(): void {

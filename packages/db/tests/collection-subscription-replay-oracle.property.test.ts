@@ -1,5 +1,5 @@
 import { fc, test as fcTest } from '@fast-check/vitest'
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 import { createCollection } from '../src/collection/index.js'
 import { createDeferred } from '../src/deferred.js'
 import { BTreeIndex } from '../src/indexes/btree-index.js'
@@ -6036,6 +6036,173 @@ describe(`CollectionSubscription replay oracle`, () => {
       ])
     } finally {
       subscription.unsubscribe()
+      await collection.cleanup()
+    }
+  })
+
+  it(`carries a true cleanup failure across nested replay callback frames once`, async () => {
+    type Row = { id: string }
+    const whereA = new Func(`eq`, [new PropRef([`id`]), new Value(`a`)])
+    const whereB = new Func(`eq`, [new PropRef([`id`]), new Value(`b`)])
+    const whereC = new Func(`eq`, [new PropRef([`id`]), new Value(`c`)])
+    const cleanupFailure = new Error(`nested callback cleanup failed`)
+    const loads: Array<LoadSubsetOptions> = []
+    const unloads: Array<LoadSubsetOptions> = []
+    const reported: Array<{
+      error: unknown
+      options: LoadSubsetOptions
+    }> = []
+    let begin!: () => void
+    let commit!: () => true | Promise<void>
+    let truncate!: () => void
+    let cleanupArmed = false
+    let cleanupFailed = false
+    let outerCallbackCount = 0
+    const collection = createCollection<Row>({
+      id: `nested-replay-callback-frame-cleanup`,
+      getKey: (row) => row.id,
+      syncMode: `on-demand`,
+      sync: {
+        sync: (params) => {
+          begin = params.begin
+          commit = params.commit
+          truncate = params.truncate
+          params.markReady()
+          return {
+            loadSubset: (options) => {
+              loads.push(options)
+              return true
+            },
+            unloadSubset: (options) => {
+              unloads.push(options)
+              if (cleanupArmed && options.where === whereC && !cleanupFailed) {
+                cleanupFailed = true
+                throw cleanupFailure
+              }
+            },
+          }
+        },
+      },
+    })
+    const subscription = collection.subscribeChanges(() => {})
+    subscription.on(`loadSubset:error`, ({ error, options }) =>
+      reported.push({ error, options }),
+    )
+    let unsubscribed = false
+
+    try {
+      subscription.requestSnapshot({ where: whereC })
+      subscription.requestSnapshot({
+        where: whereA,
+        onLoadSubsetResult: () => {
+          outerCallbackCount++
+          if (outerCallbackCount !== 2) return
+
+          let propagatedCleanup: unknown
+          subscription.requestSnapshot({
+            where: whereB,
+            onLoadSubsetResult: () => {
+              cleanupArmed = true
+              try {
+                subscription.releaseSnapshot(whereC)
+              } catch (error) {
+                propagatedCleanup = error
+              }
+            },
+          })
+          throw propagatedCleanup
+        },
+      })
+
+      begin()
+      truncate()
+      commit()
+      await flushPromises()
+
+      expect(reported).toHaveLength(1)
+      expect(reported[0]!.error).toBe(cleanupFailure)
+      expect(loads.indexOf(reported[0]!.options)).toBe(2)
+      expect(unloads.map((options) => loads.indexOf(options))).toEqual([
+        0, 1, 2,
+      ])
+
+      subscription.unsubscribe()
+      unsubscribed = true
+      expect(unloads.map((options) => loads.indexOf(options))).toEqual([
+        0, 1, 2, 2, 3, 4,
+      ])
+    } finally {
+      if (!unsubscribed) subscription.unsubscribe()
+      await collection.cleanup()
+    }
+  })
+
+  it(`aggregates unsubscribe listener failures after adapter cleanup`, async () => {
+    type Row = { id: string }
+    const where = new Func(`eq`, [new PropRef([`id`]), new Value(`a`)])
+    const cleanupFailure = new Error(`adapter cleanup failed`)
+    const listenerFailure = new Error(`unsubscribe listener failed`)
+    const loads: Array<LoadSubsetOptions> = []
+    const unloads: Array<LoadSubsetOptions> = []
+    const deferredMicrotasks: Array<VoidFunction> = []
+    let cleanupFailed = false
+    const collection = createCollection<Row>({
+      id: `unsubscribe-listener-cleanup-order`,
+      getKey: (row) => row.id,
+      syncMode: `on-demand`,
+      sync: {
+        sync: (params) => {
+          params.markReady()
+          return {
+            loadSubset: (options) => {
+              loads.push(options)
+              return true
+            },
+            unloadSubset: (options) => {
+              unloads.push(options)
+              if (!cleanupFailed) {
+                cleanupFailed = true
+                throw cleanupFailure
+              }
+            },
+          }
+        },
+      },
+    })
+    const subscription = collection.subscribeChanges(() => {})
+    subscription.on(`unsubscribed`, () => {
+      throw listenerFailure
+    })
+    const queueMicrotaskSpy = vi
+      .spyOn(globalThis, `queueMicrotask`)
+      .mockImplementation((callback) => deferredMicrotasks.push(callback))
+
+    try {
+      subscription.requestSnapshot({ where })
+      let thrown: unknown
+      try {
+        subscription.unsubscribe()
+      } catch (error) {
+        thrown = error
+      }
+
+      expect(thrown).toBeInstanceOf(AggregateError)
+      expect((thrown as AggregateError).errors).toEqual([
+        cleanupFailure,
+        listenerFailure,
+      ])
+      expect(deferredMicrotasks).toEqual([])
+      expect(unloads).toEqual([loads[0]])
+
+      subscription.unsubscribe()
+      expect(unloads).toEqual([loads[0], loads[0]])
+    } finally {
+      queueMicrotaskSpy.mockRestore()
+      try {
+        subscription.unsubscribe()
+      } catch {
+        // The assertions above own the first teardown failure.
+      }
       await collection.cleanup()
     }
   })
