@@ -7,6 +7,7 @@ import { ReverseIndex } from '../src/indexes/reverse-index.js'
 import { Func, PropRef, Value } from '../src/query/ir.js'
 import { DeduplicatedLoadSubset } from '../src/query/subset-dedupe.js'
 import { createTransaction } from '../src/transactions.js'
+import { projectAtomicOrderedPublicationState } from './load-subset-full-flow-model.js'
 import { oracleRandomParameters, readOracleRunConfig } from './oracle-config.js'
 import { flushPromises } from './utils.js'
 import type { Collection } from '../src/collection/index.js'
@@ -15,6 +16,7 @@ import type {
   ChangeMessageOrDeleteKeyMessage,
   LoadSubsetOptions,
 } from '../src/types.js'
+import type { LoadSubsetFullFlowEvent } from './load-subset-full-flow-model.js'
 
 type ReplayRow = {
   id: `one` | `two`
@@ -2031,6 +2033,258 @@ describe(`CollectionSubscription replay oracle`, () => {
             offset: 1,
             cursor: { lastKey: initialIds[0] },
           })
+        }
+      } finally {
+        subscription.unsubscribe()
+        await collection.cleanup()
+      }
+    },
+  )
+
+  it.each([`resolve`, `reject`] as const)(
+    `keeps an empty ordered publication private until every replay demand settles: %s`,
+    async (otherOutcome) => {
+      type Row = {
+        id: `new-ordered`
+        rank: number
+        route: `ordered` | `other`
+      }
+      type Outcome = {
+        hasMore: boolean
+        appliedRowKeys: ReadonlyArray<Row[`id`]>
+      }
+      let begin!: () => void
+      let write!: (
+        message: ChangeMessageOrDeleteKeyMessage<Row, Row[`id`]>,
+      ) => void
+      let commit!: () => void
+      let truncate!: () => void
+      let initialLoads = 2
+      const history: Array<LoadSubsetFullFlowEvent> = [
+        {
+          type: `stagePublicationRows`,
+          publicationId: `initial`,
+          demandId: `ordered`,
+          rows: [],
+        },
+        { type: `commitPublication`, publicationId: `initial` },
+        {
+          type: `requestDemand`,
+          ownerId: `other-owner`,
+          sessionId: `session`,
+          demandId: `other`,
+          alreadyAborted: false,
+        },
+        {
+          type: `stagePublicationRows`,
+          publicationId: `initial`,
+          demandId: `other`,
+          rows: [],
+        },
+        { type: `commitPublication`, publicationId: `initial` },
+      ]
+      const expectedBoundary = () =>
+        projectAtomicOrderedPublicationState(history, {
+          demandId: `ordered`,
+          direction: `asc`,
+          initialWindowSize: 1,
+        }).currentPublication?.orderedBoundary?.key
+      const replayLoads: Array<{
+        options: LoadSubsetOptions
+        deferred: ReturnType<typeof createDeferred<Outcome>>
+      }> = []
+      const collection = createCollection<Row>({
+        id: `empty-ordered-replay-${otherOutcome}`,
+        getKey: (row) => row.id,
+        syncMode: `on-demand`,
+        sync: {
+          sync: (params) => {
+            begin = params.begin
+            write = params.write
+            commit = params.commit
+            truncate = params.truncate
+            params.markReady()
+            return {
+              loadSubset: (options) => {
+                if (initialLoads > 0) {
+                  initialLoads--
+                  return Promise.resolve({
+                    hasMore: false,
+                    appliedRowKeys: [],
+                  })
+                }
+                const deferred = createDeferred<Outcome>()
+                replayLoads.push({ options, deferred })
+                return deferred.promise
+              },
+              unloadSubset: () => {},
+            }
+          },
+        },
+      })
+      const index = collection.createIndex((row) => row.rank, {
+        indexType: BTreeIndex,
+      })
+      const orderBy: OrderBy = [
+        {
+          expression: new PropRef([`rank`]),
+          compareOptions: { direction: `asc`, nulls: `first` },
+        },
+      ]
+      const otherWhere = new Func(`eq`, [
+        new PropRef([`route`]),
+        new Value(`other`),
+      ])
+      const visible = new Set<Row[`id`]>()
+      const subscription = collection.subscribeChanges((changes) => {
+        for (const change of changes) {
+          const key = change.key as Row[`id`]
+          if (change.type === `delete`) visible.delete(key)
+          else visible.add(key)
+        }
+      })
+      subscription.setOrderByIndex(index)
+
+      try {
+        subscription.requestLimitedSnapshot({ orderBy, limit: 1 })
+        subscription.requestSnapshot({ where: otherWhere })
+        await flushPromises()
+        expect([...visible]).toEqual([])
+        expect(subscription.orderedBoundaryKey).toBeUndefined()
+
+        begin()
+        truncate()
+        commit()
+        await flushPromises()
+        expect(replayLoads).toHaveLength(2)
+        history.push({
+          type: `beginReplacement`,
+          publicationId: `replacement`,
+          demandIds: [`ordered`, `other`],
+        })
+
+        const orderedReplay = replayLoads.find(({ options }) => options.orderBy)
+        const otherReplay = replayLoads.find(({ options }) => !options.orderBy)
+        if (!orderedReplay || !otherReplay) {
+          throw new Error(`Expected ordered and additional replay demands`)
+        }
+
+        begin()
+        write({
+          type: `insert`,
+          value: { id: `new-ordered`, rank: 1, route: `ordered` },
+        })
+        commit()
+        history.push({
+          type: `stagePublicationRows`,
+          publicationId: `replacement`,
+          demandId: `ordered`,
+          rows: [{ key: `new-ordered`, orderValue: 1 }],
+        })
+        orderedReplay.deferred.resolve({
+          hasMore: false,
+          appliedRowKeys: [`new-ordered`],
+        })
+        history.push({
+          type: `settleReplacement`,
+          publicationId: `replacement`,
+          demandId: `ordered`,
+          outcome: `success`,
+          extent: `exhausted`,
+        })
+        await flushPromises()
+
+        expect([...visible]).toEqual([])
+        expect(subscription.orderedBoundaryKey).toBe(expectedBoundary())
+
+        if (otherOutcome === `resolve`) {
+          otherReplay.deferred.resolve({
+            hasMore: false,
+            appliedRowKeys: [],
+          })
+          history.push({
+            type: `settleReplacement`,
+            publicationId: `replacement`,
+            demandId: `other`,
+            outcome: `success`,
+            extent: `exhausted`,
+          })
+        } else {
+          otherReplay.deferred.reject(new Error(`other replay failed`))
+          history.push({
+            type: `settleReplacement`,
+            publicationId: `replacement`,
+            demandId: `other`,
+            outcome: `failure`,
+          })
+        }
+        await flushPromises()
+
+        expect([...visible]).toEqual(
+          otherOutcome === `resolve` ? [`new-ordered`] : [],
+        )
+        expect(subscription.orderedBoundaryKey).toBe(expectedBoundary())
+
+        if (otherOutcome === `resolve`) {
+          // Fail the next generation so the changed-key publication becomes
+          // the retained restoration baseline, then widen it. The request must
+          // continue from the new public key and prefix.
+          begin()
+          truncate()
+          commit()
+          await flushPromises()
+          const nextReplayLoads = replayLoads.slice(2)
+          expect(nextReplayLoads).toHaveLength(2)
+          history.push({
+            type: `beginReplacement`,
+            publicationId: `failed-replacement`,
+            demandIds: [`ordered`, `other`],
+          })
+          const nextOrderedReplay = nextReplayLoads.find(
+            ({ options }) => options.orderBy,
+          )
+          const nextOtherReplay = nextReplayLoads.find(
+            ({ options }) => !options.orderBy,
+          )
+          if (!nextOrderedReplay || !nextOtherReplay) {
+            throw new Error(`Expected the next ordered and additional replays`)
+          }
+          nextOrderedReplay.deferred.reject(new Error(`next replay failed`))
+          history.push({
+            type: `settleReplacement`,
+            publicationId: `failed-replacement`,
+            demandId: `ordered`,
+            outcome: `failure`,
+          })
+          nextOtherReplay.deferred.resolve({
+            hasMore: false,
+            appliedRowKeys: [],
+          })
+          history.push({
+            type: `settleReplacement`,
+            publicationId: `failed-replacement`,
+            demandId: `other`,
+            outcome: `success`,
+            extent: `exhausted`,
+          })
+          await flushPromises()
+          expect(subscription.orderedBoundaryKey).toBe(expectedBoundary())
+
+          const loadCountBeforeWiden = replayLoads.length
+          subscription.requestLimitedSnapshot({
+            orderBy,
+            limit: 1,
+            minValues: [1],
+          })
+          expect(replayLoads[loadCountBeforeWiden]?.options).toMatchObject({
+            offset: 1,
+            cursor: { lastKey: `new-ordered` },
+          })
+          replayLoads[loadCountBeforeWiden]?.deferred.resolve({
+            hasMore: false,
+            appliedRowKeys: [],
+          })
+          await flushPromises()
         }
       } finally {
         subscription.unsubscribe()

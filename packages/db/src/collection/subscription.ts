@@ -618,10 +618,10 @@ export class CollectionSubscription
   }
 
   private orderedBoundary() {
-    return (
-      this.retainedOrderedPublication?.boundary ??
-      this.orderedWindow?.boundary()
-    )
+    const retainedPublication = this.retainedOrderedPublication
+    return retainedPublication === undefined
+      ? this.orderedWindow?.boundary()
+      : retainedPublication.boundary
   }
 
   private get retainedOrderedPublication():
@@ -1127,16 +1127,19 @@ export class CollectionSubscription
 
     const where = this.options.whereExpression
     const retainedPublication = this.retainedOrderedPublication
+    const activeReplacement = this.truncateReplaySession !== undefined
     const refreshPrefix =
       !retainedPublication && this.orderedWindow.requiresPrefixRefresh
-    // A failed truncate replay leaves the last complete publication visible
-    // while the source collection is empty. Continue from that retained prefix
-    // until a later replay replaces it.
-    const currentOffset = retainedPublication
-      ? retainedPublication.prefixSize
-      : refreshPrefix
-        ? 0
-        : this.orderedWindow.localPrefixSize
+    // An active replacement continues its private source progress so it can
+    // prove a new publication. A failed replay instead continues from the last
+    // complete public prefix until a later replay replaces it.
+    const currentOffset = activeReplacement
+      ? this.orderedWindow.localPrefixSize
+      : retainedPublication
+        ? retainedPublication.prefixSize
+        : refreshPrefix
+          ? 0
+          : this.orderedWindow.localPrefixSize
     const requestedPrefix = refreshPrefix
       ? Math.max(this.orderedWindow.size, limit)
       : offset !== undefined
@@ -1187,9 +1190,11 @@ export class CollectionSubscription
           lastKey?: string | number
         }
       | undefined
-    const boundary = retainedPublication
-      ? this.orderedBoundary()
-      : this.orderedWindow.requestBoundary()
+    const boundary = activeReplacement
+      ? this.orderedWindow.requestBoundary()
+      : retainedPublication
+        ? this.orderedBoundary()
+        : this.orderedWindow.requestBoundary()
     const cursorValues = boundary?.values ?? minValues
     if (cursorValues !== undefined && cursorValues.length > 0) {
       const canPushCursor = canExpressCursorOrder(orderBy, cursorValues)

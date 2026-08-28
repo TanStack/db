@@ -480,6 +480,35 @@ export function projectAtomicOrderedPublications(
     initialWindowSize: number
   },
 ): ReadonlyArray<ReadonlyArray<FullFlowPublishedOrderRow>> {
+  return projectAtomicOrderedPublicationState(history, options).publications
+}
+
+export type AtomicOrderedPublicationState = {
+  rows: ReadonlyArray<FullFlowPublishedOrderRow>
+  orderedPrefixSize: number
+  orderedBoundary: FullFlowPublishedOrderRow | undefined
+}
+
+export type AtomicOrderedPublicationProjection = {
+  publications: ReadonlyArray<ReadonlyArray<FullFlowPublishedOrderRow>>
+  currentPublication: AtomicOrderedPublicationState | undefined
+  retainsPreviousPublication: boolean
+}
+
+/**
+ * Projects both reader-visible rows and the ordered continuation state owned by
+ * that publication. The explicit optional boundary matters: an empty retained
+ * publication has a valid `undefined` boundary and must not fall through to a
+ * private replacement's progress boundary.
+ */
+export function projectAtomicOrderedPublicationState(
+  history: ReadonlyArray<LoadSubsetFullFlowEvent>,
+  options: {
+    demandId: FullFlowDemandId
+    direction: `asc` | `desc`
+    initialWindowSize: number
+  },
+): AtomicOrderedPublicationProjection {
   const staged = new Map<
     FullFlowPublicationId,
     Map<FullFlowDemandId, ReadonlyArray<FullFlowPublishedOrderRow>>
@@ -495,6 +524,8 @@ export function projectAtomicOrderedPublications(
   >()
   const activeAdditionalDemands = new Set<FullFlowDemandId>()
   const publications: Array<ReadonlyArray<FullFlowPublishedOrderRow>> = []
+  let currentPublication: AtomicOrderedPublicationState | undefined
+  let retainsPreviousPublication = false
   let currentReplacement: FullFlowPublicationId | undefined
   let retainedSize = options.initialWindowSize
   let closed = false
@@ -510,39 +541,48 @@ export function projectAtomicOrderedPublications(
       return left.key < right.key ? -1 : 1
     })
 
-  const publicationRows = (publicationId: FullFlowPublicationId) => {
+  const publicationState = (
+    publicationId: FullFlowPublicationId,
+  ): AtomicOrderedPublicationState | undefined => {
     const publication = staged.get(publicationId)
     const orderedRows = publication?.get(options.demandId)
     if (!publication || !orderedRows) return undefined
 
-    const desired = new Map(
-      sortRows(orderedRows)
-        .slice(0, retainedSize)
-        .map((row) => [row.key, row] as const),
-    )
+    const orderedPrefix = sortRows(orderedRows).slice(0, retainedSize)
+    const desired = new Map(orderedPrefix.map((row) => [row.key, row] as const))
     for (const demandId of activeAdditionalDemands) {
       for (const row of publication.get(demandId) ?? []) {
         desired.set(row.key, row)
       }
     }
-    return sortRows([...desired.values()])
+    return {
+      rows: sortRows([...desired.values()]),
+      orderedPrefixSize: orderedPrefix.length,
+      orderedBoundary: orderedPrefix.at(-1),
+    }
   }
 
   const publish = (publicationId: FullFlowPublicationId) => {
-    const next = publicationRows(publicationId)
+    const next = publicationState(publicationId)
     if (!next) return
     const previous = publications.at(-1)
-    if (
-      previous?.length === next.length &&
-      previous.every(
-        (row, index) =>
-          row.key === next[index]!.key &&
-          row.orderValue === next[index]!.orderValue,
-      )
-    ) {
+    if (previous === undefined && next.rows.length === 0) {
+      currentPublication = next
       return
     }
-    publications.push(next)
+    if (
+      previous?.length === next.rows.length &&
+      previous.every(
+        (row, index) =>
+          row.key === next.rows[index]!.key &&
+          row.orderValue === next.rows[index]!.orderValue,
+      )
+    ) {
+      currentPublication = next
+      return
+    }
+    publications.push(next.rows)
+    currentPublication = next
   }
 
   const finishCurrentReplacement = () => {
@@ -563,6 +603,7 @@ export function projectAtomicOrderedPublications(
     if (ordered?.outcome !== `success` || activeDemandFailed) {
       attempts.clear()
       currentReplacement = undefined
+      retainsPreviousPublication = true
       return
     }
     if (!ordered.publishable) return
@@ -570,6 +611,7 @@ export function projectAtomicOrderedPublications(
     publish(currentReplacement)
     attempts.clear()
     currentReplacement = undefined
+    retainsPreviousPublication = false
   }
 
   for (const event of history) {
@@ -587,6 +629,7 @@ export function projectAtomicOrderedPublications(
       case `commitPublication`: {
         if (attempts.size > 0) break
         publish(event.publicationId)
+        retainsPreviousPublication = false
         break
       }
       case `beginReplacement`:
@@ -595,6 +638,7 @@ export function projectAtomicOrderedPublications(
           new Map(event.demandIds.map((demandId) => [demandId, undefined])),
         )
         currentReplacement = event.publicationId
+        retainsPreviousPublication = true
         break
       case `resizeOrderedWindow`:
         retainedSize = Math.max(retainedSize, event.size)
@@ -645,12 +689,17 @@ export function projectAtomicOrderedPublications(
         attempts.clear()
         currentReplacement = undefined
         activeAdditionalDemands.clear()
+        retainsPreviousPublication = false
         closed = true
         break
     }
   }
 
-  return publications
+  return {
+    publications,
+    currentPublication,
+    retainsPreviousPublication,
+  }
 }
 
 /** Derives visible row identity without consulting Collection implementation. */

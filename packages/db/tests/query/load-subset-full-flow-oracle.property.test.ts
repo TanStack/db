@@ -13,6 +13,7 @@ import { WindowState } from '../../src/query/live/window-state.js'
 import { evaluateReferenceExpression } from '../reference-expression.js'
 import {
   projectAdapterLifecycle,
+  projectAtomicOrderedPublicationState,
   projectAtomicOrderedPublications,
   projectAuthorizedContinuationStarts,
   projectOrderedContinuationEvidence,
@@ -2281,6 +2282,7 @@ fcTest.prop(
 
 type AtomicOrderedReplayScenario = {
   direction: `asc` | `desc`
+  initialPublication?: `empty` | `nonempty`
   resizeOrder: `grow-shrink` | `shrink-grow`
   overlap: boolean
   currentOutcome: `resolve` | `reject`
@@ -2297,6 +2299,7 @@ type AtomicOrderedReplayScenario = {
 const atomicOrderedReplayArbitrary: fc.Arbitrary<AtomicOrderedReplayScenario> =
   fc.record({
     direction: fc.constantFrom(`asc` as const, `desc` as const),
+    initialPublication: fc.constantFrom(`empty` as const, `nonempty` as const),
     resizeOrder: fc.constantFrom(
       `grow-shrink` as const,
       `shrink-grow` as const,
@@ -2314,24 +2317,27 @@ const atomicOrderedReplayArbitrary: fc.Arbitrary<AtomicOrderedReplayScenario> =
   })
 
 const exhaustiveAtomicOrderedReplayScenarios: ReadonlyArray<AtomicOrderedReplayScenario> =
-  ([`asc`, `desc`] as const).flatMap((direction) =>
-    ([`grow-shrink`, `shrink-grow`] as const).flatMap((resizeOrder) =>
-      [false, true].flatMap((overlap) =>
-        ([`resolve`, `reject`] as const).flatMap((currentOutcome) =>
-          ([`exhausted`, `continues`] as const).flatMap((currentExtent) =>
-            [false, true].flatMap((settleCurrentFirst) =>
-              [false, true].flatMap((sourceDelta) =>
-                ([`none`, `active`, `released`] as const).map(
-                  (otherDemand) => ({
-                    direction,
-                    resizeOrder,
-                    overlap,
-                    currentOutcome,
-                    currentExtent,
-                    settleCurrentFirst,
-                    sourceDelta,
-                    otherDemand,
-                  }),
+  ([`empty`, `nonempty`] as const).flatMap((initialPublication) =>
+    ([`asc`, `desc`] as const).flatMap((direction) =>
+      ([`grow-shrink`, `shrink-grow`] as const).flatMap((resizeOrder) =>
+        [false, true].flatMap((overlap) =>
+          ([`resolve`, `reject`] as const).flatMap((currentOutcome) =>
+            ([`exhausted`, `continues`] as const).flatMap((currentExtent) =>
+              [false, true].flatMap((settleCurrentFirst) =>
+                [false, true].flatMap((sourceDelta) =>
+                  ([`none`, `active`, `released`] as const).map(
+                    (otherDemand) => ({
+                      direction,
+                      initialPublication,
+                      resizeOrder,
+                      overlap,
+                      currentOutcome,
+                      currentExtent,
+                      settleCurrentFirst,
+                      sourceDelta,
+                      otherDemand,
+                    }),
+                  ),
                 ),
               ),
             ),
@@ -2375,10 +2381,13 @@ async function runAtomicOrderedReplayScenario(
     ordered: PendingReplay
   }
 
-  const initialRows: ReadonlyArray<Row> = [
-    { id: `old-a`, rank: 1, route: `ordered` },
-    { id: `old-b`, rank: 2, route: `ordered` },
-  ]
+  const initialRows: ReadonlyArray<Row> =
+    scenario.initialPublication === `empty`
+      ? []
+      : [
+          { id: `old-a`, rank: 1, route: `ordered` },
+          { id: `old-b`, rank: 2, route: `ordered` },
+        ]
   const replacementRows: ReadonlyArray<Row> = [
     { id: `new-a`, rank: 1, route: `ordered` },
     { id: `new-b`, rank: 2, route: `ordered` },
@@ -2408,6 +2417,8 @@ async function runAtomicOrderedReplayScenario(
     rank: scenario.direction === `asc` ? 100 : -100,
     route: `other`,
   }
+  const initialOtherRows =
+    scenario.initialPublication === `empty` ? [] : [initialOtherRow]
   const replacementOtherRow: Row = {
     id: `new-other`,
     rank: scenario.direction === `asc` ? 101 : -101,
@@ -2473,9 +2484,9 @@ async function runAtomicOrderedReplayScenario(
             }
             if (initialOtherLoad && !options.orderBy) {
               initialOtherLoad = false
-              return applyRows([initialOtherRow]).then(() => ({
+              return applyRows(initialOtherRows).then(() => ({
                 hasMore: false,
-                appliedRowKeys: [initialOtherRow.id],
+                appliedRowKeys: initialOtherRows.map(({ id }) => id),
               }))
             }
             const deferred = createDeferred<Outcome>()
@@ -2529,29 +2540,23 @@ async function runAtomicOrderedReplayScenario(
       initialWindowSize: 1,
     })
   const expectPublicationHistory = () => {
-    const expected = expectedPublications()
+    const projection = projectAtomicOrderedPublicationState(history, {
+      demandId: `ordered`,
+      direction: scenario.direction,
+      initialWindowSize: 1,
+    })
+    const expected = projection.publications
     expect(publications).toEqual(expected)
     if (unsubscribed) return
 
-    // Public rows alone cannot prove that replay restoration retained the
-    // ordered continuation state. Check the boundary after success, failure,
-    // overlapping replacement, and obsolete-attempt aborts as well.
-    const expectedOrderedBoundary = expected
-      .at(-1)
-      ?.filter(
-        ({ key }) =>
-          key !== initialOtherRow.id && key !== replacementOtherRow.id,
+    // Normal progress may move past the visible prefix. During replacement or
+    // after replay failure, however, continuation state belongs to the exact
+    // retained publication. Assert its optional boundary, including the empty
+    // publication's meaningful `undefined` value.
+    if (projection.retainsPreviousPublication) {
+      expect(subscription.orderedBoundaryKey).toBe(
+        projection.currentPublication?.orderedBoundary?.key,
       )
-      .at(-1)?.key
-    // Once a replacement publishes, progressBoundary may intentionally move
-    // past its visible prefix to prove transport progress. The restoration law
-    // here concerns the previous publication while replacement work is still
-    // buffered or has failed.
-    if (
-      expectedOrderedBoundary === initialRows[0]?.id ||
-      expectedOrderedBoundary === initialRows[1]?.id
-    ) {
-      expect(subscription.orderedBoundaryKey).toBe(expectedOrderedBoundary)
     }
   }
   const beginReplacement = async () => {
@@ -2683,7 +2688,7 @@ async function runAtomicOrderedReplayScenario(
           type: `stagePublicationRows`,
           publicationId: `initial`,
           demandId: `other`,
-          rows: toModelRows([initialOtherRow]),
+          rows: toModelRows(initialOtherRows),
         },
         { type: `commitPublication`, publicationId: `initial` },
       )

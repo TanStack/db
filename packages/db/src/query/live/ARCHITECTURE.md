@@ -407,9 +407,12 @@ still-active demand publishes no replacement batch.
 owns the last complete reader-visible publication as one snapshot: its rows,
 sent keys, and optional ordered prefix size and total-order boundary. An active
 or failed replay retains that snapshot unchanged until a complete replacement
-publishes or later source changes reconcile it. Offset and cursor restoration
-must derive from this snapshot; no parallel row-count or last-key fields may
-approximate the same state.
+publishes or later source changes reconcile it. Reader-visible boundaries and
+failed-replay offset or cursor restoration derive from this snapshot. A
+continuation that is still proving the active replacement instead derives from
+`WindowState`'s private current-generation progress; that progress cannot escape
+through a public boundary before the replacement publishes. No parallel
+row-count or last-key fields may approximate either state.
 
 Each active demand in that replacement settles on its own, and the replacement
 waits for every acquisition it started. The published reconciliation is the
