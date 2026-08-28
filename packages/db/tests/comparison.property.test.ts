@@ -384,10 +384,11 @@ describe(`normalizeValue property-based tests`, () => {
   )
 
   fcTest.prop([fc.uint8Array({ minLength: 129, maxLength: 200 })])(
-    `large Uint8Arrays are not normalized`,
+    `large Uint8Arrays normalize to string representation`,
     (arr) => {
       const normalized = normalizeValue(arr)
-      expect(normalized).toBe(arr)
+      expect(typeof normalized).toBe(`string`)
+      expect(normalized).toMatch(/^__u8__/)
     },
   )
 

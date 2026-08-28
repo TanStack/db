@@ -1166,6 +1166,7 @@ function canonicalizeOrderingRuntimeValue(
   seen: WeakSet<object>,
   opaqueValueIdentity: OpaqueValueIdentity = `reject`,
 ): StableIdentityValue {
+  assertSnapshotCapableStructuralValue(value, path)
   if (
     opaqueValueIdentity === `runtime-reference` &&
     (typeof value === `function` || typeof value === `symbol`)

@@ -45,6 +45,35 @@ function not(expression: BasicExpression<boolean>): Func {
 }
 
 describe(`createDeduplicatedLoadSubset`, () => {
+  it(`does not let mutation rewrite settled large-binary coverage`, () => {
+    const loadSubset = vi.fn(() => true as const)
+    const deduplicated = new DeduplicatedLoadSubset({ loadSubset })
+    const mutableToken = new Uint8Array(129).fill(1)
+    const demand = (token: Uint8Array): LoadSubsetOptions => ({
+      where: eq(ref(`token`), val(token)),
+      limit: 1,
+    })
+
+    deduplicated.loadSubset(demand(mutableToken))
+    mutableToken.fill(2)
+    deduplicated.loadSubset(demand(new Uint8Array(129).fill(2)))
+
+    expect(loadSubset).toHaveBeenCalledTimes(2)
+  })
+
+  it(`rejects unsupported relational coercion before adapter entry`, () => {
+    const loadSubset = vi.fn(() => true as const)
+    const deduplicated = new DeduplicatedLoadSubset({ loadSubset })
+    const coercion = { [Symbol.toPrimitive]: () => 1 }
+
+    expect(() =>
+      deduplicated.loadSubset({
+        where: gt(ref(`value`), val(coercion)),
+      }),
+    ).toThrow(/Cannot snapshot structural expression value/)
+    expect(loadSubset).not.toHaveBeenCalled()
+  })
+
   it(`does not deduplicate structural predicates with different observable key order`, () => {
     const left = Object.create(null) as Record<string, number>
     left.a = 1

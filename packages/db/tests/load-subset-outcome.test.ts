@@ -935,7 +935,7 @@ describe(`loadSubset outcomes`, () => {
     },
   )
 
-  it(`tracks opaque demand values by runtime reference`, async () => {
+  it(`tracks opaque equality demand values by runtime reference`, async () => {
     const loadSubset = vi.fn((_options: LoadSubsetOptions) =>
       Promise.resolve({ hasMore: false }),
     )
@@ -958,20 +958,6 @@ describe(`loadSubset outcomes`, () => {
       const createDemands = (value: unknown): Array<LoadSubsetOptions> => [
         { where: new Func(`eq`, [field, new Value(value)]) },
         { where: new Func(`in`, [field, new Value([value])]) },
-        {
-          orderBy: [
-            {
-              expression: new Func(`coalesce`, [field, new Value(value)]),
-              compareOptions: { direction: `asc`, nulls: `first` },
-            },
-          ],
-        },
-        {
-          cursor: {
-            whereFrom: new Func(`gt`, [field, new Value(value)]),
-            whereCurrent: new Func(`eq`, [field, new Value(value)]),
-          },
-        },
       ]
       const demands = [
         ...createDemands(() => `opaque`),

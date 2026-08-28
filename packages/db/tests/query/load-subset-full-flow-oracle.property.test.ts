@@ -345,6 +345,109 @@ it(`does not release physical work when an already-aborted demand skips adapter 
   }
 })
 
+it.each([127, 128, 129])(
+  `freezes a %i-byte equality constant across local filtering and adapter acquisition`,
+  async (byteLength) => {
+    type Row = { id: `original` | `changed`; token: Uint8Array }
+    const originalToken = new Uint8Array(byteLength).fill(1)
+    const changedToken = new Uint8Array(byteLength).fill(2)
+    const callerToken = new Uint8Array(originalToken)
+    const rows: ReadonlyArray<Row> = [
+      { id: `original`, token: originalToken },
+      { id: `changed`, token: changedToken },
+    ]
+    let acquired: LoadSubsetOptions | undefined
+    const collection = createCollection<Row>({
+      id: `frozen-binary-equality-${byteLength}`,
+      getKey: (row) => row.id,
+      syncMode: `on-demand`,
+      startSync: true,
+      sync: {
+        sync: ({ begin, write, commit, markReady }) => {
+          begin()
+          rows.forEach((value) => write({ type: `insert`, value }))
+          commit()
+          markReady()
+          return {
+            loadSubset: (options) => {
+              acquired = options
+              return true
+            },
+            unloadSubset: () => {},
+          }
+        },
+      },
+    })
+    const visible = new Set<Row[`id`]>()
+    const where = new Func<boolean>(`eq`, [
+      new PropRef([`token`]),
+      new Value(callerToken),
+    ])
+    const subscription = collection.subscribeChanges(
+      (changes) => {
+        for (const change of changes) {
+          if (change.type === `delete`) visible.delete(change.key as Row[`id`])
+          else visible.add(change.key as Row[`id`])
+        }
+      },
+      { whereExpression: where },
+    )
+
+    try {
+      callerToken.fill(2)
+      subscription.requestSnapshot({ optimizedOnly: false })
+
+      expect([...visible]).toEqual([`original`])
+      const acquiredValue = (
+        (acquired?.where as Func | undefined)?.args[1] as
+          | Value<Uint8Array>
+          | undefined
+      )?.value
+      expect(acquiredValue).toEqual(originalToken)
+      expect(acquiredValue).not.toBe(callerToken)
+    } finally {
+      subscription.unsubscribe()
+      await collection.cleanup()
+    }
+  },
+)
+
+it(`rejects unsupported relational coercion before adapter entry`, async () => {
+  let adapterCalls = 0
+  const collection = createCollection<{ id: string; value: number }>({
+    id: `unsupported-relational-coercion`,
+    getKey: (row) => row.id,
+    syncMode: `on-demand`,
+    sync: {
+      sync: ({ markReady }) => {
+        markReady()
+        return {
+          loadSubset: () => {
+            adapterCalls += 1
+            return true
+          },
+        }
+      },
+    },
+  })
+  const coercion = { [Symbol.toPrimitive]: () => 1 }
+
+  try {
+    expect(() =>
+      collection.subscribeChanges(() => {}, {
+        whereExpression: new Func(`gt`, [
+          new PropRef([`value`]),
+          new Value(coercion),
+        ]),
+      }),
+    ).toThrow(/Cannot snapshot structural expression value/)
+    expect(adapterCalls).toBe(0)
+    expect(collection.subscriberCount).toBe(0)
+  } finally {
+    await collection.cleanup()
+  }
+})
+
 it(`reloads authoritative rows after final-owner cleanup invalidates retained adapter coverage`, async () => {
   type Row = { id: string; value: number }
   const row: Row = { id: `row`, value: 1 }

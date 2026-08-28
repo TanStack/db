@@ -47,6 +47,7 @@ import {
 } from '../../src/query/ir.js'
 import {
   compileExpression,
+  compileSingleRowExpression,
   toBooleanPredicate,
 } from '../../src/query/compiler/evaluators.js'
 import { isLoadSubsetRequestSubsumedBy } from '../../src/query/predicate-utils.js'
@@ -508,20 +509,6 @@ describe(`loadSubset demand identity`, () => {
     const createDemands = (value: unknown): Array<LoadSubsetOptions> => [
       { where: new Func(`eq`, [field, new Value(value)]) },
       { where: new Func(`in`, [field, new Value([value])]) },
-      {
-        orderBy: [
-          {
-            expression: new Func(`coalesce`, [field, new Value(value)]),
-            compareOptions: { direction: `asc`, nulls: `first` },
-          },
-        ],
-      },
-      {
-        cursor: {
-          whereFrom: new Func(`gt`, [field, new Value(value)]),
-          whereCurrent: new Func(`eq`, [field, new Value(value)]),
-        },
-      },
     ]
 
     for (const [firstValue, secondValue] of [
@@ -574,7 +561,7 @@ describe(`loadSubset demand identity`, () => {
     expect(compileExpression(snapshot.where!)({})).toBe(true)
   })
 
-  it(`retains reference-sensitive large binary equality values`, () => {
+  it(`snapshots large binary equality values without changing demand identity`, () => {
     const bytes = new Uint8Array(129).fill(7)
     const demand: LoadSubsetOptions = {
       where: new Func<boolean>(`eq`, [new PropRef([`id`]), new Value(bytes)]),
@@ -582,9 +569,60 @@ describe(`loadSubset demand identity`, () => {
     const snapshot = cloneLoadSubsetOptions(demand)
     const snapshotBytes = ((snapshot.where as Func).args[1] as Value).value
 
-    expect(snapshotBytes).toBe(bytes)
+    expect(snapshotBytes).not.toBe(bytes)
+    expect(snapshotBytes).toEqual(bytes)
     expect(getLoadSubsetDemandKey(snapshot)).toBe(
       getLoadSubsetDemandKey(demand),
+    )
+
+    bytes.fill(8)
+    expect(
+      compileSingleRowExpression(demand.where!)({
+        id: new Uint8Array(129).fill(7),
+      }),
+    ).toBe(false)
+    expect(
+      compileSingleRowExpression(snapshot.where!)({
+        id: new Uint8Array(129).fill(7),
+      }),
+    ).toBe(true)
+  })
+
+  it.each([
+    [`function`, () => () => 1],
+    [`symbol coercion`, () => ({ [Symbol.toPrimitive]: () => 1 })],
+    [
+      `indexed accessor`,
+      () => {
+        const value: Array<unknown> = []
+        Object.defineProperty(value, `0`, {
+          enumerable: true,
+          get: () => 1,
+        })
+        return value
+      },
+    ],
+    [
+      `cycle`,
+      () => {
+        const value: Array<unknown> = []
+        value.push(value)
+        return value
+      },
+    ],
+  ])(`rejects %s in ordering operands`, (_name, createValue) => {
+    const demand: LoadSubsetOptions = {
+      where: new Func<boolean>(`gt`, [
+        new PropRef([`value`]),
+        new Value(createValue()),
+      ]),
+    }
+
+    expect(() => cloneLoadSubsetOptions(demand)).toThrow(
+      /Cannot snapshot structural expression value/,
+    )
+    expect(() => getLoadSubsetDemandKey(demand)).toThrow(
+      /Cannot snapshot structural expression value/,
     )
   })
 

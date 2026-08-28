@@ -1,4 +1,3 @@
-import { normalizeValue } from '../utils/comparison.js'
 import { Func, PropRef, Value } from './ir.js'
 import {
   assertSnapshotCapableStructuralValue,
@@ -62,7 +61,7 @@ function cloneBasicExpression<T>(
         context === `equality-operand`
           ? snapshotEqualityValue(expression.value)
           : context === `ordering-operand`
-            ? snapshotStructuralValue(expression.value)
+            ? snapshotStructuralOperand(expression.value)
             : context === `structural-operand`
               ? snapshotStructuralOperand(expression.value)
               : expression.value,
@@ -104,14 +103,12 @@ function snapshotEqualityValue<T>(value: T): T {
     return new Date(value.getTime()) as T
   }
 
-  // Large binaries use reference identity in indexes. Clone only values for
-  // which normalization establishes a content key.
   if (typeof Buffer !== `undefined` && value instanceof Buffer) {
-    return (normalizeValue(value) === value ? value : Buffer.from(value)) as T
+    return Buffer.from(value) as T
   }
 
   if (value instanceof Uint8Array) {
-    return (normalizeValue(value) === value ? value : value.slice()) as T
+    return value.slice() as T
   }
 
   // Other objects use reference equality in predicate identity and comparison.
