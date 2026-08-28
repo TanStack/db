@@ -1353,7 +1353,7 @@ export class CollectionSubscription
     }
 
     void syncResult.then(finish, (error: unknown) => {
-      if (shouldReportError()) {
+      if (!(error instanceof SubsetFailurePropagation) && shouldReportError()) {
         this.recordLoadSubsetError(options, error, reportAborted)
       }
       finish()

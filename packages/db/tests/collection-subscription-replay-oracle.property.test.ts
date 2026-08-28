@@ -6887,6 +6887,144 @@ describe(`CollectionSubscription replay oracle`, () => {
     }
   })
 
+  it(`reports a promise-adopted acquisition failure nested inside cleanup once`, async () => {
+    type Row = { id: string }
+    const whereOuter = new Func(`eq`, [new PropRef([`id`]), new Value(`outer`)])
+    const whereMiddle = new Func(`eq`, [
+      new PropRef([`id`]),
+      new Value(`middle`),
+    ])
+    const whereInner = new Func(`eq`, [new PropRef([`id`]), new Value(`inner`)])
+    const failure = new Error(`nested asynchronous acquisition failed`)
+    let innerOptions: LoadSubsetOptions | undefined
+    type TestSubscription = ReturnType<
+      ReturnType<typeof createCollection<Row>>[`subscribeChanges`]
+    >
+    const owner: { current?: TestSubscription } = {}
+    const collection = createCollection<Row>({
+      id: `promise-adopted-acquisition-failure-inside-cleanup`,
+      getKey: (row) => row.id,
+      syncMode: `on-demand`,
+      sync: {
+        sync: (params) => {
+          params.markReady()
+          return {
+            loadSubset: (options) => {
+              if (options.where === whereInner) {
+                innerOptions = options
+                throw failure
+              }
+              if (options.where === whereMiddle) {
+                return (async () => {
+                  owner.current!.requestSnapshot({ where: whereInner })
+                  await Promise.resolve()
+                })()
+              }
+              return true
+            },
+            unloadSubset: (options) => {
+              if (options.where === whereOuter) {
+                owner.current!.requestSnapshot({ where: whereMiddle })
+              }
+            },
+          }
+        },
+      },
+    })
+    const reported: Array<{ error: unknown; options: LoadSubsetOptions }> = []
+    const subscription = collection.subscribeChanges(() => {})
+    owner.current = subscription
+    subscription.on(`loadSubset:error`, ({ error, options }) =>
+      reported.push({ error, options }),
+    )
+
+    try {
+      subscription.requestSnapshot({ where: whereOuter })
+      expect(() => subscription.releaseSnapshot(whereOuter)).toThrow(failure)
+      await flushPromises()
+
+      expect(reported).toHaveLength(1)
+      expect(Object.is(reported[0]?.error, failure)).toBe(true)
+      expect(reported[0]?.options).toBe(innerOptions)
+      expect(subscription.lastError).toBe(failure)
+      expect(subscription.lastErrorVersion).toBe(1)
+    } finally {
+      subscription.unsubscribe()
+      await collection.cleanup()
+    }
+  })
+
+  it(`keeps failures after asynchronous suspension as distinct adapter occurrences`, async () => {
+    type Row = { id: string }
+    const whereOuter = new Func(`eq`, [new PropRef([`id`]), new Value(`outer`)])
+    const whereMiddle = new Func(`eq`, [
+      new PropRef([`id`]),
+      new Value(`middle`),
+    ])
+    const whereInner = new Func(`eq`, [new PropRef([`id`]), new Value(`inner`)])
+    const failure = new Error(`shared asynchronous failure payload`)
+    let middleOptions: LoadSubsetOptions | undefined
+    let innerOptions: LoadSubsetOptions | undefined
+    type TestSubscription = ReturnType<
+      ReturnType<typeof createCollection<Row>>[`subscribeChanges`]
+    >
+    const owner: { current?: TestSubscription } = {}
+    const collection = createCollection<Row>({
+      id: `suspended-acquisition-failure-inside-cleanup`,
+      getKey: (row) => row.id,
+      syncMode: `on-demand`,
+      sync: {
+        sync: (params) => {
+          params.markReady()
+          return {
+            loadSubset: (options) => {
+              if (options.where === whereInner) {
+                innerOptions = options
+                throw failure
+              }
+              if (options.where === whereMiddle) {
+                middleOptions = options
+                return (async () => {
+                  await Promise.resolve()
+                  owner.current!.requestSnapshot({ where: whereInner })
+                })()
+              }
+              return true
+            },
+            unloadSubset: (options) => {
+              if (options.where === whereOuter) {
+                owner.current!.requestSnapshot({ where: whereMiddle })
+              }
+            },
+          }
+        },
+      },
+    })
+    const reported: Array<{ error: unknown; options: LoadSubsetOptions }> = []
+    const subscription = collection.subscribeChanges(() => {})
+    owner.current = subscription
+    subscription.on(`loadSubset:error`, ({ error, options }) =>
+      reported.push({ error, options }),
+    )
+
+    try {
+      subscription.requestSnapshot({ where: whereOuter })
+      subscription.releaseSnapshot(whereOuter)
+      await flushPromises()
+
+      expect(reported).toHaveLength(2)
+      expect(Object.is(reported[0]?.error, failure)).toBe(true)
+      expect(reported[0]?.options).toBe(innerOptions)
+      expect(Object.is(reported[1]?.error, failure)).toBe(true)
+      expect(reported[1]?.options).toBe(middleOptions)
+      expect(subscription.lastError).toBe(failure)
+      expect(subscription.lastErrorVersion).toBe(2)
+    } finally {
+      subscription.unsubscribe()
+      await collection.cleanup()
+    }
+  })
+
   it.each([
     { name: `Error`, failure: new Error(`shared cleanup payload`) },
     {

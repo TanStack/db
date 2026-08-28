@@ -547,7 +547,15 @@ its own tentative owner and rethrow that carrier unchanged. It does not create
 a failure for its own options; only the innermost adapter boundary originated
 the occurrence. Promise adoption follows the same rule: if an asynchronous
 intermediate acquisition rejects with that carrier, its settlement observer
-does not turn the carrier into a second public failure.
+does not turn the carrier into a second public failure. This is a general
+promise-observer law, not a replay-only exception; cleanup and ordinary demand
+paths must consume the private carrier in the same way while still completing
+their status bookkeeping.
+The carrier proves only propagation that remains inside the synchronous
+callback boundary or is adopted by a promise created there. If adapter code
+suspends first and starts another acquisition later, the core observes two
+adapter boundaries and reports both failures. Equal payloads cannot prove that
+one occurrence caused the other, so the core never deduplicates them by value.
 Teardown dispatches `unsubscribed` listeners synchronously and collects their
 throws after adapter cleanup failures. Ordinary event delivery keeps its
 asynchronous listener-error behavior. A retained replay error batch completes
