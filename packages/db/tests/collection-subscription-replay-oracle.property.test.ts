@@ -122,6 +122,128 @@ type PendingReplay = {
   settled: boolean
 }
 
+type NestedCleanupEdge = Readonly<{
+  targets: ReadonlyArray<number>
+  catchFailures: boolean
+}>
+
+type NestedCleanupGraph = Readonly<{
+  id: string
+  ids: ReadonlyArray<string>
+  edges: ReadonlyMap<number, NestedCleanupEdge>
+  failures: ReadonlyMap<number, unknown>
+}>
+
+async function exerciseNestedCleanupGraph({
+  id,
+  ids,
+  edges,
+  failures,
+}: NestedCleanupGraph) {
+  type Row = { id: string }
+  let begin!: () => void
+  let write!: (message: ChangeMessageOrDeleteKeyMessage<Row, string>) => void
+  let commit!: () => true | Promise<void>
+  let truncate!: () => void
+  const wheres = ids.map(
+    (rowId) => new Func(`eq`, [new PropRef([`id`]), new Value(rowId)]),
+  )
+  const replays = ids.map(() => createDeferred<void>())
+  const loads: Array<LoadSubsetOptions> = []
+  const unloads: Array<LoadSubsetOptions> = []
+  const visitedEdges = new Set<number>()
+  const failedOptions = new Set<LoadSubsetOptions>()
+  type TestSubscription = ReturnType<
+    ReturnType<typeof createCollection<Row>>[`subscribeChanges`]
+  >
+  const owner: { current?: TestSubscription } = {}
+  const collection = createCollection<Row>({
+    id,
+    getKey: (row) => row.id,
+    syncMode: `on-demand`,
+    sync: {
+      sync: (params) => {
+        begin = params.begin
+        write = params.write
+        commit = params.commit
+        truncate = params.truncate
+        params.markReady()
+        return {
+          loadSubset: (options) => {
+            loads.push(options)
+            const index = loads.length - 1
+            if (index < ids.length) {
+              begin()
+              write({ type: `insert`, value: { id: ids[index]! } })
+              commit()
+              return true
+            }
+            return replays[index - ids.length]!.promise
+          },
+          unloadSubset: (options) => {
+            unloads.push(options)
+            const index = loads.indexOf(options)
+            const edge = edges.get(index)
+            if (edge && !visitedEdges.has(index)) {
+              visitedEdges.add(index)
+              for (const target of edge.targets) {
+                if (edge.catchFailures) {
+                  try {
+                    owner.current!.releaseSnapshot(wheres[target]!)
+                  } catch {
+                    // The graph decides whether this cleanup later throws its
+                    // own failure or completes after handling nested failures.
+                  }
+                } else {
+                  owner.current!.releaseSnapshot(wheres[target]!)
+                }
+              }
+            }
+            const failure = failures.get(index)
+            if (failures.has(index) && !failedOptions.has(options)) {
+              failedOptions.add(options)
+              throw failure
+            }
+          },
+        }
+      },
+    },
+  })
+  const visible = new Set<string>()
+  const reported: Array<{ error: unknown; optionsIndex: number }> = []
+  const subscription = collection.subscribeChanges((changes) => {
+    for (const change of changes) {
+      if (change.type === `delete`) visible.delete(String(change.key))
+      else visible.add(String(change.key))
+    }
+  })
+  owner.current = subscription
+  subscription.on(`loadSubset:error`, ({ error, options }) =>
+    reported.push({ error, optionsIndex: loads.indexOf(options) }),
+  )
+
+  try {
+    for (const where of wheres) subscription.requestSnapshot({ where })
+    begin()
+    truncate()
+    commit()
+    await flushPromises()
+
+    for (const replay of replays) replay.resolve()
+    await flushPromises()
+
+    const beforeRetry = unloads.map((options) => loads.indexOf(options))
+    const status = subscription.status
+    const publishedIds = [...visible].sort()
+    subscription.unsubscribe()
+    const afterRetry = unloads.map((options) => loads.indexOf(options))
+    return { reported, beforeRetry, afterRetry, status, publishedIds }
+  } finally {
+    subscription.unsubscribe()
+    await collection.cleanup()
+  }
+}
+
 const rowArbitrary: fc.Arbitrary<ReplayRow> = fc.record({
   id: fc.constantFrom(`one` as const, `two` as const),
   value: fc.integer({ min: -2, max: 2 }),
@@ -5674,6 +5796,110 @@ describe(`CollectionSubscription replay oracle`, () => {
       }
     },
   )
+
+  it.each([
+    { name: `Error`, failure: new Error(`shared cleanup payload`) },
+    {
+      name: `AggregateError`,
+      failure: new AggregateError(
+        [new Error(`inner cleanup payload`)],
+        `shared cleanup payload`,
+      ),
+    },
+    { name: `undefined`, failure: undefined },
+    { name: `NaN`, failure: Number.NaN },
+  ])(
+    `distinguishes nested and outer cleanup occurrences with the same $name payload`,
+    async ({ failure }) => {
+      const result = await exerciseNestedCleanupGraph({
+        id: `same-payload-nested-cleanup-${String(failure)}`,
+        ids: [`a`, `b`],
+        edges: new Map([[0, { targets: [1], catchFailures: true }]]),
+        failures: new Map([
+          [0, failure],
+          [1, failure],
+        ]),
+      })
+
+      expect(result.reported.map(({ error }) => error)).toEqual([
+        failure,
+        failure,
+      ])
+      expect(result.reported.map(({ optionsIndex }) => optionsIndex)).toEqual([
+        1, 0,
+      ])
+      expect(result.beforeRetry).toEqual([0, 3, 1, 2])
+      expect(result.afterRetry).toEqual([0, 3, 1, 2, 0, 1])
+      expect(result.publishedIds).toEqual([`a`, `b`])
+      expect(result.status).toBe(`ready`)
+    },
+  )
+
+  it(`installs a completed handoff while retaining its nested cleanup failure`, async () => {
+    const nestedFailure = new Error(`nested cleanup failed`)
+    const result = await exerciseNestedCleanupGraph({
+      id: `completed-handoff-with-nested-failure`,
+      ids: [`a`, `b`],
+      edges: new Map([[0, { targets: [1], catchFailures: true }]]),
+      failures: new Map([[1, nestedFailure]]),
+    })
+
+    expect(result.reported).toEqual([{ error: nestedFailure, optionsIndex: 1 }])
+    expect(result.beforeRetry).toEqual([0, 3, 1])
+    expect(result.afterRetry).toEqual([0, 3, 1, 2, 1])
+    expect(result.publishedIds).toEqual([`a`, `b`])
+    expect(result.status).toBe(`ready`)
+  })
+
+  it(`preserves failure order and ownership through four cleanup levels`, async () => {
+    const failureC = new Error(`C cleanup failed`)
+    const failureD = new Error(`D cleanup failed`)
+    const result = await exerciseNestedCleanupGraph({
+      id: `four-level-nested-cleanup`,
+      ids: [`a`, `b`, `c`, `d`],
+      edges: new Map([
+        [0, { targets: [1], catchFailures: false }],
+        [1, { targets: [2], catchFailures: true }],
+        [2, { targets: [3], catchFailures: true }],
+      ]),
+      failures: new Map([
+        [2, failureC],
+        [3, failureD],
+      ]),
+    })
+
+    expect(result.reported).toEqual([
+      { error: failureD, optionsIndex: 3 },
+      { error: failureC, optionsIndex: 2 },
+    ])
+    expect(result.beforeRetry).toEqual([0, 5, 1, 6, 2, 7, 3, 4])
+    expect(result.afterRetry).toEqual([0, 5, 1, 6, 2, 7, 3, 4, 0, 2, 3])
+    expect(result.publishedIds).toEqual([`a`, `b`, `c`, `d`])
+    expect(result.status).toBe(`ready`)
+  })
+
+  it(`preserves sibling cleanup failures in callback order`, async () => {
+    const failureB = new Error(`B cleanup failed`)
+    const failureC = new Error(`C cleanup failed`)
+    const result = await exerciseNestedCleanupGraph({
+      id: `sibling-nested-cleanup`,
+      ids: [`a`, `b`, `c`],
+      edges: new Map([[0, { targets: [1, 2], catchFailures: true }]]),
+      failures: new Map([
+        [1, failureB],
+        [2, failureC],
+      ]),
+    })
+
+    expect(result.reported).toEqual([
+      { error: failureB, optionsIndex: 1 },
+      { error: failureC, optionsIndex: 2 },
+    ])
+    expect(result.beforeRetry).toEqual([0, 4, 1, 5, 2])
+    expect(result.afterRetry).toEqual([0, 4, 1, 5, 2, 3, 1, 2])
+    expect(result.publishedIds).toEqual([`a`, `b`, `c`])
+    expect(result.status).toBe(`ready`)
+  })
 
   it(`collects inactive demand state after late replay cleanup succeeds`, async () => {
     type Row = { id: string; rank: number }

@@ -182,6 +182,18 @@ class SubsetCleanupAggregateError extends AggregateError {
   }
 }
 
+/** Internal carrier that distinguishes propagation from an equal new throw. */
+class SubsetFailurePropagation extends Error {
+  constructor(readonly payload: unknown) {
+    super(
+      payload instanceof Error
+        ? payload.message
+        : `A nested subset operation failed`,
+    )
+    this.name = `SubsetFailurePropagation`
+  }
+}
+
 function createSubsetCleanupError(errors: ReadonlyArray<unknown>): unknown {
   if (errors.length === 1) return errors[0]
   return new SubsetCleanupAggregateError(errors)
@@ -658,6 +670,13 @@ export class CollectionSubscription
       return
     }
     frame.failureGroups.push(group)
+  }
+
+  /** Tokenize nested propagation without changing the reported payload. */
+  private propagatedSubsetFailure(error: unknown): unknown {
+    return this.activeSubsetCleanupBoundary
+      ? new SubsetFailurePropagation(error)
+      : error
   }
 
   /** Preserve nested cleanup provenance across one arbitrary adapter callback. */
@@ -1563,9 +1582,10 @@ export class CollectionSubscription
         }
       }
       if (releaseFailures.length > 0) {
-        const propagatedError = createSubsetCleanupError(
-          releaseFailures.map(({ error }) => error),
+        const cleanupError = createSubsetCleanupError(
+          releaseFailures.map(({ error: failure }) => failure),
         )
+        const propagatedError = this.propagatedSubsetFailure(cleanupError)
         this.noteSubsetFailureGroup(undefined, {
           propagatedError,
           failures: releaseFailures,
@@ -1622,6 +1642,7 @@ export class CollectionSubscription
       return { demand, acquisition, result, replayContext }
     } catch (error) {
       const shouldReportError = !acquisition.options.signal?.aborted
+      let propagatedError = error
       const demandIndex = this.subsetDemands.indexOf(demand)
       if (demandIndex !== -1 && !demand.releaseFailed) {
         this.subsetDemands.splice(demandIndex, 1)
@@ -1629,6 +1650,17 @@ export class CollectionSubscription
         acquisition.removeRequestAbortListener?.()
       }
       if (shouldReportError) {
+        propagatedError = this.propagatedSubsetFailure(error)
+        const group: SubsetFailureGroup = {
+          propagatedError,
+          failures: [
+            {
+              error,
+              options: acquisition.options,
+              attributed: true,
+            },
+          ],
+        }
         if (
           replayContext &&
           this.truncateReplaySession === replayContext.session
@@ -1639,22 +1671,14 @@ export class CollectionSubscription
             acquisition.options,
             error,
           )
-          this.noteSubsetFailureGroup(replayContext, {
-            propagatedError: error,
-            failures: [
-              {
-                error,
-                options: acquisition.options,
-                attributed: true,
-              },
-            ],
-          })
+          this.noteSubsetFailureGroup(replayContext, group)
           this.checkTruncateReplayComplete(replayContext.session)
         } else {
           this.recordLoadSubsetError(acquisition.options, error, true)
+          this.noteSubsetFailureGroup(undefined, group)
         }
       }
-      throw error
+      throw propagatedError
     }
   }
 

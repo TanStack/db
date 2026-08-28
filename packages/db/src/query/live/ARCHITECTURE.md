@@ -525,9 +525,11 @@ If a nested acquisition has already attributed a failure occurrence to its
 captured attempt, propagation through the containing callback does not create a
 second attribution or error event. Adapter boundaries, not thrown-value
 identity, distinguish occurrences: a later cleanup remains a separate failure
-even when it throws the same value. A callback frame retains every boundary
-occurrence and associates a propagated value with the latest SameValue match,
-so `undefined`, `NaN`, primitives, and objects follow the same law.
+even when it throws the same value. An internal propagation token marks a true
+rethrow across nested cleanup boundaries; it never replaces the public error
+payload. A callback frame retains every boundary occurrence, so `undefined`,
+`NaN`, primitives, and objects follow the same law without using payload
+equality as boundary identity.
 One logical release may cross both a pending replacement acquisition and its
 original acquisition. If several cleanup boundaries fail, the callback frame
 retains them as one propagated group and reports every occurrence against its
