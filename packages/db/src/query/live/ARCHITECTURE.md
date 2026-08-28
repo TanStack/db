@@ -588,6 +588,14 @@ deferred-clear interval cannot redispatch the terminal event; a later explicit
 call after the batch may still retry cleanup debt. Cleanup retries never
 redispatch `unsubscribed`, including to a listener registered after the first
 teardown pass; terminal publication is one lifetime edge.
+If teardown is requested inside an adapter-entry, cleanup, or result-callback
+frame while replay is active, public acquisition authority closes immediately
+and adapter cleanup still runs synchronously. Replay-session discard, the
+terminal event, and listener clearing wait until the active frame stack and
+already-settled promise adoption have attributed their failures. Those failures
+publish once against their exact originating options before the terminal event;
+failed cleanup remains retryable. Outside replay, nested teardown keeps its
+ordinary synchronous aggregation contract.
 `onLoadSubsetResult`, `requestSnapshot`, and `releaseSnapshot` are internal
 composition APIs. A nested synchronous failure may use the private propagation
 token across that callback; internal code must rethrow the caught value

@@ -289,6 +289,8 @@ export class CollectionSubscription
   private replayErrorReportDepth = 0
   private clearListenersAfterReplayErrors = false
   private unsubscribeInProgress = false
+  private replayTeardownPending = false
+  private replayTeardownFinalizationScheduled = false
 
   private isActiveDemand(demand: SubsetDemand): boolean {
     return demand.active && this.subsetDemands.includes(demand)
@@ -553,7 +555,9 @@ export class CollectionSubscription
         )
         if (!entry.completed) {
           const shouldReportError =
-            isCurrentAttempt() && !nextAcquisition.options.signal?.aborted
+            isCurrentAttempt() &&
+            (!nextAcquisition.options.signal?.aborted ||
+              this.replayTeardownPending)
           demand.pendingReplayAcquisitions.delete(nextAcquisition)
           nextAcquisition.abortController.abort()
           nextAcquisition.removeRequestAbortListener?.()
@@ -596,8 +600,9 @@ export class CollectionSubscription
                 error instanceof SubsetFailurePropagation &&
                 error.isAdoptedBy(nextAcquisition.options)
               const failedCurrentDemand =
-                this.isActiveDemand(demand) &&
-                !nextAcquisition.options.signal?.aborted
+                (this.isActiveDemand(demand) &&
+                  !nextAcquisition.options.signal?.aborted) ||
+                (this.replayTeardownPending && isCurrentAttempt())
               // A released demand no longer participates in the current
               // replacement. Its cooperative AbortError must not discard the
               // successful rows from demands that are still active.
@@ -805,7 +810,7 @@ export class CollectionSubscription
       let propagatedError = error
       let directFailure: SubsetFailureOccurrence | undefined
 
-      if (!options.signal?.aborted) {
+      if (!options.signal?.aborted || this.replayTeardownPending) {
         if (retainedFailures.length > 0) {
           propagatedError = this.propagatedSubsetFailure(publicError, {
             excludeCurrentAcquisition: true,
@@ -1918,7 +1923,13 @@ export class CollectionSubscription
       return { demand, acquisition, result: entry.value, replayContext }
     }
 
-    const shouldReportError = !acquisition.options.signal?.aborted
+    const shouldReportError =
+      !acquisition.options.signal?.aborted ||
+      Boolean(
+        this.replayTeardownPending &&
+        replayContext &&
+        this.truncateReplaySession === replayContext.session,
+      )
     const demandIndex = this.subsetDemands.indexOf(demand)
     if (demandIndex !== -1 && !demand.releaseFailed) {
       this.subsetDemands.splice(demandIndex, 1)
@@ -2741,18 +2752,58 @@ export class CollectionSubscription
   }
 
   unsubscribe() {
-    if (this.unsubscribeInProgress || this.clearListenersAfterReplayErrors) {
+    if (
+      this.unsubscribeInProgress ||
+      this.clearListenersAfterReplayErrors ||
+      this.replayTeardownPending
+    ) {
       return
     }
+    const deferReplayFinalization = Boolean(
+      this.truncateReplaySession && this.hasActiveSubsetAdapterBoundary(),
+    )
+    if (deferReplayFinalization) this.replayTeardownPending = true
     this.unsubscribeInProgress = true
     try {
-      this.unsubscribeOnce()
+      this.unsubscribeOnce(deferReplayFinalization)
     } finally {
       this.unsubscribeInProgress = false
+      if (deferReplayFinalization) this.scheduleReplayTeardownFinalization()
     }
   }
 
-  private unsubscribeOnce(): void {
+  private hasActiveSubsetAdapterBoundary(): boolean {
+    return Boolean(
+      this.activeSubsetAcquisition ||
+      this.activeSubsetCleanupBoundary ||
+      this.activeReplayResultCallback,
+    )
+  }
+
+  /** Publish retained failures before final replay teardown becomes terminal. */
+  private scheduleReplayTeardownFinalization(): void {
+    if (this.replayTeardownFinalizationScheduled) return
+    this.replayTeardownFinalizationScheduled = true
+    queueMicrotask(() => {
+      // Adapter code may return an already-rejected Promise. Give its observer
+      // one turn to retain the failure before the teardown pass runs.
+      queueMicrotask(() => {
+        this.replayTeardownFinalizationScheduled = false
+        if (!this.replayTeardownPending) return
+        if (
+          this.hasActiveSubsetAdapterBoundary() ||
+          this.unsubscribeInProgress ||
+          this.clearListenersAfterReplayErrors
+        ) {
+          this.scheduleReplayTeardownFinalization()
+          return
+        }
+        this.finishReplayTeardown()
+      })
+    })
+  }
+
+  private unsubscribeOnce(deferReplayFinalization = false): void {
     // Teardown is a permanent acquisition boundary. Adapter cleanup and
     // unsubscribe listeners may reenter public methods, but they cannot create
     // work that escapes the cleanup pass already in progress.
@@ -2785,10 +2836,12 @@ export class CollectionSubscription
     }
     this.truncateCleanup = undefined
 
-    // Stop any buffered replay from publishing after unsubscription.
-    this.truncateReplaySession = undefined
-    this.stalePublication = undefined
-    this.orderedPublication = undefined
+    if (!deferReplayFinalization) {
+      // Stop any buffered replay from publishing after unsubscription.
+      this.truncateReplaySession = undefined
+      this.stalePublication = undefined
+      this.orderedPublication = undefined
+    }
 
     // Release the current adapter acquisition for each logical subset demand.
     for (const demand of [...this.subsetDemands]) {
@@ -2810,26 +2863,9 @@ export class CollectionSubscription
         !demand.releaseSettled || demand.pendingReplayAcquisitions.size > 0,
     )
 
-    try {
-      if (!this.terminalEventDispatched) {
-        // Cleanup debt may require later unsubscribe passes, but terminal
-        // publication is one lifecycle edge for the subscription.
-        this.terminalEventDispatched = true
-        const listenerErrors = this.emitInnerCollectErrors(`unsubscribed`, {
-          type: `unsubscribed`,
-          subscription: this,
-        })
-        for (const error of listenerErrors) recordCleanupError(error)
-      }
-    } finally {
-      // Clear all event listeners to prevent memory leaks
-      if (this.replayErrorReportDepth > 0) {
-        // Retained replay failures form one ordered report batch. Reentrant
-        // teardown may release ownership now, but it cannot erase later
-        // occurrences that were already retained before the first dispatch.
-        this.clearListenersAfterReplayErrors = true
-      } else {
-        this.clearListeners()
+    if (!deferReplayFinalization) {
+      for (const error of this.finishTerminalTeardown()) {
+        recordCleanupError(error)
       }
     }
 
@@ -2853,5 +2889,50 @@ export class CollectionSubscription
       }
       throw cleanupError
     }
+  }
+
+  private finishReplayTeardown(): void {
+    this.reportReplayFailuresBeforeTeardown()
+    this.truncateReplaySession = undefined
+    this.stalePublication = undefined
+    this.orderedPublication = undefined
+    const listenerErrors = this.finishTerminalTeardown()
+    this.replayTeardownPending = false
+    if (listenerErrors.length === 0) return
+
+    const terminalError = createSubsetCleanupError(listenerErrors)
+    // The reentrant unsubscribe call has already returned. Preserve terminal
+    // listener failures through the ordinary asynchronous event-error channel.
+    queueMicrotask(() => {
+      throw terminalError
+    })
+  }
+
+  private finishTerminalTeardown(): ReadonlyArray<unknown> {
+    const listenerErrors: Array<unknown> = []
+    try {
+      if (!this.terminalEventDispatched) {
+        // Cleanup debt may require later unsubscribe passes, but terminal
+        // publication is one lifecycle edge for the subscription.
+        this.terminalEventDispatched = true
+        listenerErrors.push(
+          ...this.emitInnerCollectErrors(`unsubscribed`, {
+            type: `unsubscribed`,
+            subscription: this,
+          }),
+        )
+      }
+    } finally {
+      // Clear all event listeners to prevent memory leaks
+      if (this.replayErrorReportDepth > 0) {
+        // Retained replay failures form one ordered report batch. Reentrant
+        // teardown may release ownership now, but it cannot erase later
+        // occurrences that were already retained before the first dispatch.
+        this.clearListenersAfterReplayErrors = true
+      } else {
+        this.clearListeners()
+      }
+    }
+    return listenerErrors
   }
 }

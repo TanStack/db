@@ -6812,6 +6812,176 @@ describe(`CollectionSubscription replay oracle`, () => {
     }
   })
 
+  it.each(
+    ([`adapter-entry`, `cleanup`, `result-callback`] as const).flatMap(
+      (activeFrame) =>
+        ([`before-failure`, `after-failure`] as const).map(
+          (teardownOrder) => [activeFrame, teardownOrder] as const,
+        ),
+    ),
+  )(
+    `retains exact replay failures when teardown starts in %s %s`,
+    async (activeFrame, teardownOrder) => {
+      type Row = { id: string }
+      const whereOuter = new Func(`eq`, [
+        new PropRef([`id`]),
+        new Value(`outer`),
+      ])
+      const whereCleanup = new Func(`eq`, [
+        new PropRef([`id`]),
+        new Value(`cleanup`),
+      ])
+      const whereInner = new Func(`eq`, [
+        new PropRef([`id`]),
+        new Value(`inner`),
+      ])
+      const whereAfterTeardown = new Func(`eq`, [
+        new PropRef([`id`]),
+        new Value(`after-teardown`),
+      ])
+      const failure = new Error(`failure while teardown is requested`)
+      const reported: Array<{
+        error: unknown
+        options: LoadSubsetOptions
+      }> = []
+      const lifecycle: Array<`error` | `terminal`> = []
+      const cleanupUnloads: Array<LoadSubsetOptions> = []
+      let begin!: () => void
+      let commit!: () => true | Promise<void>
+      let truncate!: () => void
+      let replaying = false
+      let callbackCount = 0
+      let failedOptions: LoadSubsetOptions | undefined
+      let failureStarted = false
+      let postTeardownRequestResult: boolean | undefined
+      let postTeardownLoads = 0
+
+      const requestInner = () =>
+        subscription.requestSnapshot({ where: whereInner })
+      const failWithinBoundary = (options: LoadSubsetOptions) => {
+        if (failureStarted) return
+        failureStarted = true
+        if (teardownOrder === `before-failure`) {
+          failedOptions = options
+          subscription.unsubscribe()
+          postTeardownRequestResult = subscription.requestSnapshot({
+            where: whereAfterTeardown,
+          })
+          throw failure
+        }
+        try {
+          requestInner()
+        } catch {
+          // The containing frame retains the exact inner occurrence.
+        }
+        subscription.unsubscribe()
+        postTeardownRequestResult = subscription.requestSnapshot({
+          where: whereAfterTeardown,
+        })
+      }
+
+      const collection = createCollection<Row>({
+        id: `teardown-during-${activeFrame}-${teardownOrder}`,
+        getKey: (row) => row.id,
+        syncMode: `on-demand`,
+        sync: {
+          sync: (params) => {
+            begin = params.begin
+            commit = params.commit
+            truncate = params.truncate
+            params.markReady()
+            return {
+              loadSubset: (options) => {
+                if (options.where === whereAfterTeardown) {
+                  postTeardownLoads++
+                }
+                if (options.where === whereInner) {
+                  failedOptions = options
+                  throw failure
+                }
+                if (
+                  replaying &&
+                  activeFrame === `adapter-entry` &&
+                  options.where === whereOuter
+                ) {
+                  failWithinBoundary(options)
+                }
+                if (
+                  replaying &&
+                  activeFrame === `cleanup` &&
+                  options.where === whereOuter
+                ) {
+                  subscription.releaseSnapshot(whereCleanup)
+                }
+                return true
+              },
+              unloadSubset: (options) => {
+                if (options.where !== whereCleanup) return
+                cleanupUnloads.push(options)
+                if (replaying && activeFrame === `cleanup`) {
+                  failWithinBoundary(options)
+                }
+              },
+            }
+          },
+        },
+      })
+      const subscription = collection.subscribeChanges(() => {})
+      subscription.on(`loadSubset:error`, ({ error, options }) => {
+        lifecycle.push(`error`)
+        reported.push({ error, options })
+      })
+      subscription.on(`unsubscribed`, () => {
+        lifecycle.push(`terminal`)
+        subscription.unsubscribe()
+      })
+
+      try {
+        subscription.requestSnapshot({
+          where: whereOuter,
+          onLoadSubsetResult: (_result, options) => {
+            callbackCount++
+            if (
+              replaying &&
+              activeFrame === `result-callback` &&
+              callbackCount === 2
+            ) {
+              failWithinBoundary(options)
+            }
+          },
+        })
+        subscription.requestSnapshot({ where: whereCleanup })
+
+        replaying = true
+        begin()
+        truncate()
+        commit()
+        await flushPromises()
+        await flushPromises()
+
+        expect(reported).toEqual([{ error: failure, options: failedOptions }])
+        expect(subscription.lastError).toBe(failure)
+        expect(subscription.lastErrorVersion).toBe(1)
+        expect(lifecycle).toEqual([`error`, `terminal`])
+        expect(postTeardownRequestResult).toBe(false)
+        expect(postTeardownLoads).toBe(0)
+
+        const unloadsAfterDeferredTeardown = cleanupUnloads.length
+        subscription.unsubscribe()
+        expect(cleanupUnloads).toHaveLength(
+          unloadsAfterDeferredTeardown +
+            (activeFrame === `cleanup` && teardownOrder === `before-failure`
+              ? 1
+              : 0),
+        )
+        expect(lifecycle).toEqual([`error`, `terminal`])
+      } finally {
+        subscription.unsubscribe()
+        await collection.cleanup()
+      }
+    },
+  )
+
   it(`dispatches the terminal event once under reentrant unsubscribe`, async () => {
     type Row = { id: string }
     const collection = createCollection<Row>({
