@@ -119,6 +119,8 @@ type SubsetDemand = SubsetAcquisition & {
   pendingReplayAcquisitions: Set<ReplaySubsetAcquisition>
   /** Logical ownership; failed unloads may retain an inactive cleanup debt. */
   active: boolean
+  /** Prevent adapter cleanup from releasing the same acquisition reentrantly. */
+  releaseInProgress: boolean
   releaseFailed: boolean
   releaseSettled: boolean
 }
@@ -188,6 +190,24 @@ export class CollectionSubscription
 
   private isActiveDemand(demand: SubsetDemand): boolean {
     return demand.active && this.subsetDemands.includes(demand)
+  }
+
+  private hasActiveOrderedDemand(): boolean {
+    return this.subsetDemands.some(
+      (demand) => demand.active && demand.ordered !== undefined,
+    )
+  }
+
+  /** Remove ordered authority when its last logical owner leaves. */
+  private retireUnownedOrderedPublication(): void {
+    if (!this.orderedWindow || this.hasActiveOrderedDemand()) return
+
+    this.orderedWindow.resetCoverage()
+    this.orderedPublication = undefined
+    if (this.stalePublication) this.stalePublication.ordered = undefined
+    if (this.truncateReplaySession) {
+      this.truncateReplaySession.publicationState.ordered = undefined
+    }
   }
 
   public get status(): SubscriptionStatus {
@@ -470,7 +490,13 @@ export class CollectionSubscription
     // A fulfilled page can still say that more ordered rows exist. Keep the
     // old publication until a continuation proves the whole retained prefix;
     // request settlement alone is not a safe replacement boundary.
-    if (this.orderedWindow && !this.orderedWindow.coversRetainedWindow) return
+    if (
+      this.orderedWindow &&
+      this.hasActiveOrderedDemand() &&
+      !this.orderedWindow.coversRetainedWindow
+    ) {
+      return
+    }
     this.flushTruncateReplay(session)
   }
 
@@ -614,7 +640,9 @@ export class CollectionSubscription
   }
 
   get orderedRowsNeeded(): number {
-    return this.orderedWindow?.rowsNeeded() ?? 0
+    return this.hasActiveOrderedDemand()
+      ? (this.orderedWindow?.rowsNeeded() ?? 0)
+      : 0
   }
 
   get orderedRetainedWindowSize(): number {
@@ -626,10 +654,14 @@ export class CollectionSubscription
   }
 
   get hasOrderedCoverageForActiveWindow(): boolean {
-    return this.orderedWindow?.coversActiveWindow ?? false
+    return (
+      this.hasActiveOrderedDemand() &&
+      (this.orderedWindow?.coversActiveWindow ?? false)
+    )
   }
 
   get orderedBoundaryRow(): object | undefined {
+    if (!this.hasActiveOrderedDemand()) return undefined
     const boundary = this.retainedOrderedPublication
       ? this.orderedBoundary()
       : this.orderedWindow?.progressBoundary()
@@ -640,6 +672,7 @@ export class CollectionSubscription
   }
 
   get orderedBoundaryKey(): string | number | undefined {
+    if (!this.hasActiveOrderedDemand()) return undefined
     return (
       this.retainedOrderedPublication
         ? this.orderedBoundary()
@@ -802,6 +835,7 @@ export class CollectionSubscription
   private refreshOrderedPublication(): void {
     if (
       !this.orderedWindow ||
+      !this.hasActiveOrderedDemand() ||
       this.isBufferingForTruncate ||
       this.stalePublication
     ) {
@@ -1132,28 +1166,34 @@ export class CollectionSubscription
 
   /** Abort and release one current adapter acquisition. */
   private releaseSubsetDemand(demand: SubsetDemand): void {
-    demand.abortController?.abort()
-    let firstReleaseError: unknown
-    for (const pending of [...demand.pendingReplayAcquisitions]) {
-      try {
-        this.releaseReplayAcquisition(demand, pending)
-      } catch (error) {
-        firstReleaseError ??= error
+    if (demand.releaseInProgress) return
+    demand.releaseInProgress = true
+    try {
+      demand.abortController?.abort()
+      let firstReleaseError: unknown
+      for (const pending of [...demand.pendingReplayAcquisitions]) {
+        try {
+          this.releaseReplayAcquisition(demand, pending)
+        } catch (error) {
+          firstReleaseError ??= error
+        }
       }
-    }
-    if (!demand.releaseSettled) {
-      try {
-        this.collection._sync.unloadSubset(demand.options)
-        demand.releaseFailed = false
-        demand.releaseSettled = true
-      } catch (error) {
-        demand.releaseFailed = true
-        firstReleaseError ??= error
-      } finally {
-        demand.removeRequestAbortListener?.()
+      if (!demand.releaseSettled) {
+        try {
+          this.collection._sync.unloadSubset(demand.options)
+          demand.releaseFailed = false
+          demand.releaseSettled = true
+        } catch (error) {
+          demand.releaseFailed = true
+          firstReleaseError ??= error
+        } finally {
+          demand.removeRequestAbortListener?.()
+        }
       }
+      if (firstReleaseError !== undefined) throw firstReleaseError
+    } finally {
+      demand.releaseInProgress = false
     }
-    if (firstReleaseError !== undefined) throw firstReleaseError
   }
 
   /** Start and retain the first acquisition for one logical subset demand. */
@@ -1171,6 +1211,7 @@ export class CollectionSubscription
       ...(ordered === undefined ? {} : { ordered }),
       pendingReplayAcquisitions: new Set(),
       active: true,
+      releaseInProgress: false,
       releaseFailed: false,
       releaseSettled: false,
     }
@@ -1412,6 +1453,7 @@ export class CollectionSubscription
     const demand = this.subsetDemands[index]
     if (!demand) return
     demand.active = false
+    if (demand.ordered !== undefined) this.retireUnownedOrderedPublication()
     let releaseError: unknown
     try {
       this.releaseSubsetDemand(demand)
@@ -1422,7 +1464,8 @@ export class CollectionSubscription
         demand.releaseSettled &&
         demand.pendingReplayAcquisitions.size === 0
       ) {
-        this.subsetDemands.splice(index, 1)
+        const currentIndex = this.subsetDemands.indexOf(demand)
+        if (currentIndex !== -1) this.subsetDemands.splice(currentIndex, 1)
       }
       if (this.orderedWindow && !this.isBufferingForTruncate) {
         const changes = this.stalePublication?.ordered

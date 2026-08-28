@@ -2578,6 +2578,164 @@ describe(`CollectionSubscription replay oracle`, () => {
     }
   })
 
+  it(`releases ordered publication authority before retrying failed adapter cleanup`, async () => {
+    type Row = { id: string; rank: number }
+    let begin!: () => void
+    let write!: (
+      message: ChangeMessageOrDeleteKeyMessage<Row, Row[`id`]>,
+    ) => void
+    let commit!: () => void
+    let loadCount = 0
+    let unloadCount = 0
+    let failNextUnload = true
+    const collection = createCollection<Row>({
+      id: `shared-ordered-release-cleanup-debt`,
+      getKey: (row) => row.id,
+      syncMode: `on-demand`,
+      sync: {
+        sync: (params) => {
+          begin = params.begin
+          write = params.write
+          commit = params.commit
+          params.markReady()
+          return {
+            loadSubset: () => {
+              loadCount++
+              if (loadCount === 1) {
+                begin()
+                write({ type: `insert`, value: { id: `a`, rank: 1 } })
+                commit()
+              }
+              return Promise.resolve({
+                hasMore: false,
+                appliedRowKeys: [`a`] as const,
+              })
+            },
+            unloadSubset: () => {
+              unloadCount++
+              if (failNextUnload) {
+                failNextUnload = false
+                throw new Error(`release failed`)
+              }
+            },
+          }
+        },
+      },
+    })
+    const where = new Func(`gte`, [new PropRef([`rank`]), new Value(0)])
+    const orderBy: OrderBy = [
+      {
+        expression: new PropRef([`rank`]),
+        compareOptions: { direction: `asc`, nulls: `first` },
+      },
+    ]
+    const index = collection.createIndex((row) => row.rank, {
+      indexType: BTreeIndex,
+    })
+    const visible = [new Set<string>(), new Set<string>()]
+    const createOrderedSubscription = (rows: Set<string>) => {
+      const subscription = collection.subscribeChanges(
+        (changes) => {
+          for (const change of changes) {
+            const key = String(change.key)
+            if (change.type === `delete`) rows.delete(key)
+            else rows.add(key)
+          }
+        },
+        { whereExpression: where },
+      )
+      subscription.setOrderByIndex(index)
+      return subscription
+    }
+    const first = createOrderedSubscription(visible[0]!)
+    const second = createOrderedSubscription(visible[1]!)
+
+    try {
+      first.requestLimitedSnapshot({ orderBy, limit: 1 })
+      second.requestLimitedSnapshot({ orderBy, limit: 1 })
+      await flushPromises()
+      expect(visible.map((rows) => [...rows])).toEqual([[`a`], [`a`]])
+
+      expect(() => first.releaseSnapshot(where)).toThrow(`release failed`)
+      expect([...visible[0]!]).toEqual([])
+      expect(first.orderedBoundaryKey).toBeUndefined()
+      expect([...visible[1]!]).toEqual([`a`])
+      expect(second.orderedBoundaryKey).toBe(`a`)
+      expect(collection.toArray.map(({ id }) => id)).toEqual([`a`])
+
+      first.releaseSnapshot(where)
+      expect([...visible[0]!]).toEqual([])
+      expect(first.orderedBoundaryKey).toBeUndefined()
+      expect([...visible[1]!]).toEqual([`a`])
+      expect(second.orderedBoundaryKey).toBe(`a`)
+      expect(collection.toArray.map(({ id }) => id)).toEqual([`a`])
+      expect(unloadCount).toBe(2)
+    } finally {
+      failNextUnload = false
+      first.unsubscribe()
+      second.unsubscribe()
+      await collection.cleanup()
+    }
+  })
+
+  it(`keeps reentrant release idempotent and retains a new same-predicate demand`, async () => {
+    type Row = { id: string; value: number }
+    const where = new Func(`eq`, [new PropRef([`id`]), new Value(`a`)])
+    const loads: Array<LoadSubsetOptions> = []
+    let loadCount = 0
+    let unloadCount = 0
+    type TestSubscription = ReturnType<
+      ReturnType<typeof createCollection<Row>>[`subscribeChanges`]
+    >
+    const owner: { current?: TestSubscription } = {}
+    const collection = createCollection<Row>({
+      id: `reentrant-release-same-predicate`,
+      getKey: (row) => row.id,
+      syncMode: `on-demand`,
+      sync: {
+        sync: ({ markReady }) => {
+          markReady()
+          return {
+            loadSubset: (options) => {
+              loadCount++
+              loads.push(options)
+              return true
+            },
+            unloadSubset: () => {
+              unloadCount++
+              if (unloadCount === 1) {
+                owner.current!.releaseSnapshot(where)
+                owner.current!.requestSnapshot({
+                  where,
+                  optimizedOnly: false,
+                })
+              }
+            },
+          }
+        },
+      },
+    })
+    const subscription = collection.subscribeChanges(() => {})
+    owner.current = subscription
+
+    try {
+      subscription.requestSnapshot({ where, optimizedOnly: false })
+      subscription.releaseSnapshot(where)
+
+      expect(loadCount).toBe(2)
+      expect(unloadCount).toBe(1)
+      expect(loads[0]?.signal?.aborted).toBe(true)
+      expect(loads[1]?.signal?.aborted).toBe(false)
+
+      subscription.unsubscribe()
+      expect(unloadCount).toBe(2)
+      expect(loads[1]?.signal?.aborted).toBe(true)
+    } finally {
+      subscription.unsubscribe()
+      await collection.cleanup()
+    }
+  })
+
   it(`uses the published replacement as the baseline of a reentrant replay`, async () => {
     let begin!: () => void
     let write!: (

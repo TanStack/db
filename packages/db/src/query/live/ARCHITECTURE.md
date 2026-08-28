@@ -443,6 +443,13 @@ local logical demand is released, but that cannot grant local ordered
 authority. Logical release takes effect before adapter cleanup. If
 `unloadSubset` throws, the inactive demand may remain only as cleanup debt; it
 cannot filter rows, join replay, accept settlement, or supply authority. A
+shared physical owner may keep the row in the core collection, but the ordered
+coordinator supplies no public row or continuation boundary after its last
+local ordered demand leaves. Retiring that last owner clears the coordinator's
+coverage and retained publication before cleanup is attempted. Adapter cleanup
+is also a reentrancy boundary: releasing one exact acquisition is idempotent,
+and completion removes that demand by object identity so a callback cannot make
+a stale array position delete a newly-created owner. A
 failed generation also clears its private coverage evidence; a successful
 ordered acquisition from that generation cannot suppress the next request when
 another demand makes the whole replacement fail. Reader-visible boundaries and
