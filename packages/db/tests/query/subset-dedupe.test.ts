@@ -80,6 +80,70 @@ describe(`createDeduplicatedLoadSubset`, () => {
     expect(loadSubset).toHaveBeenCalledTimes(2)
   })
 
+  it(`rejects binary proxies before adapter entry`, () => {
+    const loadSubset = vi.fn(() => true as const)
+    const deduplicated = new DeduplicatedLoadSubset({ loadSubset })
+    const bytes = new Proxy(new Uint8Array([2]), {
+      get: (target, key) =>
+        key === Symbol.iterator
+          ? function* () {
+              yield 1
+            }
+          : Reflect.get(target, key, target),
+    })
+
+    expect(() =>
+      deduplicated.loadSubset({ where: eq(ref(`token`), val(bytes)) }),
+    ).toThrow(/Cannot snapshot binary equality value/)
+    expect(loadSubset).not.toHaveBeenCalled()
+  })
+
+  it(`observes computed membership once for tracking and acquisition`, () => {
+    const first = new Uint8Array([1])
+    const second = new Uint8Array([2])
+    let observations = 0
+    const candidates = new Proxy([first], {
+      getOwnPropertyDescriptor: (target, key) => {
+        const descriptor = Reflect.getOwnPropertyDescriptor(target, key)
+        if (key !== `0` || descriptor === undefined) return descriptor
+        observations += 1
+        return {
+          ...descriptor,
+          value: observations === 1 ? first : second,
+        }
+      },
+    })
+    const acquired: Array<Uint8Array> = []
+    const loadSubset = vi.fn((options: LoadSubsetOptions) => {
+      acquired.push(
+        ...(
+          ((options.where as Func).args[1] as Func).args[0] as Value<
+            Array<Uint8Array>
+          >
+        ).value,
+      )
+      return true as const
+    })
+    const deduplicated = new DeduplicatedLoadSubset({ loadSubset })
+
+    deduplicated.loadSubset({
+      where: new Func(`in`, [
+        ref(`token`),
+        new Func(`coalesce`, [val(candidates)]),
+      ]),
+    })
+    deduplicated.loadSubset({
+      where: new Func(`in`, [
+        ref(`token`),
+        new Func(`coalesce`, [val([first])]),
+      ]),
+    })
+
+    expect(observations).toBe(1)
+    expect(acquired).toEqual([first])
+    expect(loadSubset).toHaveBeenCalledTimes(1)
+  })
+
   it(`rejects custom membership observation before adapter entry`, () => {
     const loadSubset = vi.fn(() => true as const)
     const deduplicated = new DeduplicatedLoadSubset({ loadSubset })

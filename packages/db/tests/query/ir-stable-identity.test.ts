@@ -640,6 +640,27 @@ describe(`loadSubset demand identity`, () => {
     )
   })
 
+  it(`rejects binary values without intrinsic typed-array slots`, () => {
+    const bytes = new Proxy(new Uint8Array([2]), {
+      get: (target, key) =>
+        key === Symbol.iterator
+          ? function* () {
+              yield 1
+            }
+          : Reflect.get(target, key, target),
+    })
+    const demand: LoadSubsetOptions = {
+      where: new Func(`eq`, [new PropRef([`id`]), new Value(bytes)]),
+    }
+
+    expect(() => cloneLoadSubsetOptions(demand)).toThrow(
+      /Cannot snapshot binary equality value/,
+    )
+    expect(() => getLoadSubsetDemandKey(demand)).toThrow(
+      /Cannot snapshot binary equality value/,
+    )
+  })
+
   it.each([`coalesce`, `caseWhen`] as const)(
     `snapshots equality candidates returned by %s`,
     (wrapper) => {
@@ -766,24 +787,37 @@ describe(`loadSubset demand identity`, () => {
     )
   })
 
-  it(`clones genuine Temporal equality values without changing their type or identity`, () => {
-    const date = Temporal.PlainDate.from(`2024-01-15`)
-    const demand: LoadSubsetOptions = {
-      where: new Func<boolean>(`eq`, [new PropRef([`date`]), new Value(date)]),
-    }
-    const demandKey = getLoadSubsetDemandKey(demand)
-    const snapshot = cloneLoadSubsetOptions(demand)
-    const snapshotDate = ((snapshot.where as Func).args[1] as Value).value
+  it.each([
+    [`Duration`, Temporal.Duration.from(`P1DT2H`)],
+    [`Instant`, Temporal.Instant.from(`2024-01-15T12:00:00Z`)],
+    [`PlainDate`, Temporal.PlainDate.from(`2024-01-15`)],
+    [`PlainDateTime`, Temporal.PlainDateTime.from(`2024-01-15T12:00:00`)],
+    [`PlainMonthDay`, Temporal.PlainMonthDay.from(`01-15`)],
+    [`PlainTime`, Temporal.PlainTime.from(`12:00:00`)],
+    [`PlainYearMonth`, Temporal.PlainYearMonth.from(`2024-01`)],
+    [`ZonedDateTime`, Temporal.ZonedDateTime.from(`2024-01-15T12:00:00Z[UTC]`)],
+  ])(
+    `clones genuine Temporal.%s equality values without changing type or identity`,
+    (_name, value) => {
+      const demand: LoadSubsetOptions = {
+        where: new Func<boolean>(`eq`, [
+          new PropRef([`value`]),
+          new Value(value),
+        ]),
+      }
+      const demandKey = getLoadSubsetDemandKey(demand)
+      const snapshot = cloneLoadSubsetOptions(demand)
+      const snapshotValue = ((snapshot.where as Func).args[1] as Value).value
 
-    expect(snapshotDate).not.toBe(date)
-    expect(snapshotDate).toBeInstanceOf(Temporal.PlainDate)
-    expect(getLoadSubsetDemandKey(snapshot)).toBe(demandKey)
-    expect(
-      compileSingleRowExpression(snapshot.where!)({
-        date: Temporal.PlainDate.from(`2024-01-15`),
-      }),
-    ).toBe(true)
-  })
+      expect(snapshotValue).not.toBe(value)
+      expect(Object.getPrototypeOf(snapshotValue)).toBe(
+        Object.getPrototypeOf(value),
+      )
+      expect(String(snapshotValue)).toBe(String(value))
+      expect(getLoadSubsetDemandKey(snapshot)).toBe(demandKey)
+      expect(compileSingleRowExpression(snapshot.where!)({ value })).toBe(true)
+    },
+  )
 
   it.each([
     [`function`, () => () => 1],

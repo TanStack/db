@@ -40,6 +40,11 @@ export function readDateTimestamp(value: Date): number {
 
 /** Copy a Uint8Array's internal bytes without invoking custom iteration. */
 export function snapshotUint8ArrayBytes(value: Uint8Array): Uint8Array {
+  if (!ArrayBuffer.isView(value)) {
+    throw new TypeError(
+      `Cannot snapshot binary equality value without intrinsic typed-array slots`,
+    )
+  }
   return new Uint8Array(value)
 }
 

@@ -416,6 +416,49 @@ it.each([127, 128, 129])(
   },
 )
 
+it(`rejects binary values without intrinsic typed-array slots before adapter acquisition`, async () => {
+  const bytes = new Proxy(new Uint8Array([2]), {
+    get: (target, key) =>
+      key === Symbol.iterator
+        ? function* () {
+            yield 1
+          }
+        : Reflect.get(target, key, target),
+  })
+  let adapterCalls = 0
+  const collection = createCollection<{ id: string; token: Uint8Array }>({
+    id: `reject-binary-proxy`,
+    getKey: (row) => row.id,
+    syncMode: `on-demand`,
+    sync: {
+      sync: ({ markReady }) => {
+        markReady()
+        return {
+          loadSubset: () => {
+            adapterCalls += 1
+            return true
+          },
+        }
+      },
+    },
+  })
+
+  try {
+    expect(() =>
+      collection.subscribeChanges(() => {}, {
+        whereExpression: new Func(`eq`, [
+          new PropRef([`token`]),
+          new Value(bytes),
+        ]),
+      }),
+    ).toThrow(/Cannot snapshot binary equality value/)
+    expect(adapterCalls).toBe(0)
+    expect(collection.subscriberCount).toBe(0)
+  } finally {
+    await collection.cleanup()
+  }
+})
+
 it(`keeps binary equality distinct from a sentinel-looking string`, async () => {
   type Row = { id: `binary` | `string`; token: Uint8Array | string }
   const binary = new Uint8Array([1, 2, 3])
