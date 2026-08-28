@@ -3366,12 +3366,7 @@ describe(`CollectionSubscription replay oracle`, () => {
             callbackCount++
             if (callbackCount !== 2) return
             subscription.releaseSnapshot(where)
-            try {
-              subscription.requestLimitedSnapshot({ orderBy, limit: 1 })
-            } catch {
-              // The adapter's synchronous failure is reported through the
-              // subscription error channel after the replay epoch restores.
-            }
+            subscription.requestLimitedSnapshot({ orderBy, limit: 1 })
           },
         })
         await flushPromises()
@@ -3408,6 +3403,83 @@ describe(`CollectionSubscription replay oracle`, () => {
       }
     },
   )
+
+  it(`reports one error when a callback-created unordered start failure propagates`, async () => {
+    type Row = { id: string; version: number }
+    const whereA = new Func(`eq`, [new PropRef([`id`]), new Value(`a`)])
+    const whereB = new Func(`eq`, [new PropRef([`id`]), new Value(`b`)])
+    const startError = new Error(`callback-created start failed`)
+    let begin!: () => void
+    let write!: (message: ChangeMessageOrDeleteKeyMessage<Row, string>) => void
+    let commit!: (signal?: AbortSignal) => true | Promise<void>
+    let truncate!: () => void
+    let loadCount = 0
+    let callbackCount = 0
+    const collection = createCollection<Row>({
+      id: `propagated-callback-start-failure`,
+      getKey: (row) => row.id,
+      syncMode: `on-demand`,
+      sync: {
+        sync: (params) => {
+          begin = params.begin
+          write = params.write
+          commit = params.commit
+          truncate = params.truncate
+          params.markReady()
+          return {
+            loadSubset: (options) => {
+              loadCount++
+              if (loadCount === 3) throw startError
+              begin()
+              write({
+                type: `insert`,
+                value: { id: `a`, version: loadCount },
+              })
+              commit(options.signal)
+              return loadCount === 1 ? Promise.resolve() : true
+            },
+            unloadSubset: () => {},
+          }
+        },
+      },
+    })
+    const visible = new Map<string, Row>()
+    const errors: Array<unknown> = []
+    const subscription = collection.subscribeChanges((changes) => {
+      for (const change of changes) {
+        const key = String(change.key)
+        if (change.type === `delete`) visible.delete(key)
+        else visible.set(key, change.value)
+      }
+    })
+    subscription.on(`loadSubset:error`, ({ error }) => errors.push(error))
+
+    try {
+      subscription.requestSnapshot({
+        where: whereA,
+        onLoadSubsetResult: () => {
+          callbackCount++
+          if (callbackCount === 2) {
+            subscription.requestSnapshot({ where: whereB })
+          }
+        },
+      })
+      await flushPromises()
+      expect(visible.get(`a`)?.version).toBe(1)
+
+      begin()
+      truncate()
+      commit()
+      await flushPromises()
+
+      expect(errors).toEqual([startError])
+      expect(subscription.status).toBe(`ready`)
+      expect(visible.get(`a`)?.version).toBe(1)
+    } finally {
+      subscription.unsubscribe()
+      await collection.cleanup()
+    }
+  })
 
   it.each(
     ([`unordered`, `ordered`] as const).flatMap((demandKind) =>

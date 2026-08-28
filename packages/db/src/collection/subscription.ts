@@ -542,15 +542,28 @@ export class CollectionSubscription
         // Preserve the original demand's consumer-local in-flight guard. This
         // observer is registered last so its settlement sees replay ownership,
         // coverage, and attempt bookkeeping before it may continue the window.
+        const replayErrorStart = session.errors.length
         try {
           demand.onLoadSubsetResult?.(syncResult, nextAcquisition.options)
         } catch (error) {
           if (this.truncateReplaySession !== session) throw error
-          // A result callback may reenter release and surface adapter cleanup
-          // failure. Keep setup moving and report only after this attempt has
-          // restored its last complete publication.
-          attempt.failed = true
-          this.queueTruncateReplayError(session, nextAcquisition.options, error)
+          if (
+            !this.wasTruncateReplayErrorQueuedSince(
+              session,
+              replayErrorStart,
+              error,
+            )
+          ) {
+            // A result callback may reenter release and surface adapter
+            // cleanup failure. Keep setup moving and report only after this
+            // attempt has restored its last complete publication.
+            attempt.failed = true
+            this.queueTruncateReplayError(
+              session,
+              nextAcquisition.options,
+              error,
+            )
+          }
         }
       }
 
@@ -566,6 +579,17 @@ export class CollectionSubscription
   ): void {
     if (this.truncateReplaySession !== session) return
     session.errors.push({ options, error })
+  }
+
+  private wasTruncateReplayErrorQueuedSince(
+    session: TruncateReplaySession,
+    start: number,
+    error: unknown,
+  ): boolean {
+    for (let index = start; index < session.errors.length; index++) {
+      if (session.errors[index]?.error === error) return true
+    }
+    return false
   }
 
   private reportTruncateReplayErrors(session: TruncateReplaySession): void {
@@ -1479,12 +1503,23 @@ export class CollectionSubscription
     replayContext: TruncateReplayContext | undefined,
     options: LoadSubsetOptions,
     error: unknown,
+    replayErrorStart: number | undefined,
   ): boolean {
     if (
       !replayContext ||
       this.truncateReplaySession !== replayContext.session
     ) {
       return false
+    }
+    if (
+      replayErrorStart !== undefined &&
+      this.wasTruncateReplayErrorQueuedSince(
+        replayContext.session,
+        replayErrorStart,
+        error,
+      )
+    ) {
+      return true
     }
     replayContext.attempt.failed = true
     this.queueTruncateReplayError(replayContext.session, options, error)
@@ -1660,6 +1695,7 @@ export class CollectionSubscription
     demand.onLoadSubsetResult = opts?.onLoadSubsetResult
 
     // Pass the raw loadSubset result to the caller for external tracking
+    const replayErrorStart = replayTracksResult?.session.errors.length
     try {
       opts?.onLoadSubsetResult?.(syncResult, demand.options)
     } catch (error) {
@@ -1668,6 +1704,7 @@ export class CollectionSubscription
           replayTracksResult,
           demand.options,
           error,
+          replayErrorStart,
         )
       ) {
         throw error
@@ -1983,6 +2020,7 @@ export class CollectionSubscription
     demand.onLoadSubsetResult = onLoadSubsetResult
 
     // Pass the raw loadSubset result to the caller for external tracking
+    const replayErrorStart = replayTracksResult?.session.errors.length
     try {
       onLoadSubsetResult?.(syncResult, demand.options)
     } catch (error) {
@@ -1991,6 +2029,7 @@ export class CollectionSubscription
           replayTracksResult,
           demand.options,
           error,
+          replayErrorStart,
         )
       ) {
         throw error

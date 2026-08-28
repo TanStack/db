@@ -521,6 +521,9 @@ A result callback is itself part of the captured attempt barrier. In
 particular, synchronous ordered evidence cannot publish a post-setup
 continuation until that callback returns; a callback or cleanup failure first
 restores the prior complete publication, then reports its error.
+If a nested acquisition has already attributed a thrown value to its captured
+attempt, propagation through the containing callback does not create a second
+failure attribution or error event.
 A requested limit, a settled promise, or the number of requests does not.
 Applied keys carry two distinct facts. Every applied source key may advance the
 continuation cursor, including a row excluded by the subscription predicate.
