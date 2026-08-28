@@ -5028,6 +5028,84 @@ describe(`CollectionSubscription replay oracle`, () => {
     }
   })
 
+  it(`compiles an additional-demand predicate once per logical demand`, async () => {
+    type Row = { id: string; rank: number }
+    let begin!: () => void
+    let write!: (
+      message: ChangeMessageOrDeleteKeyMessage<Row, Row[`id`]>,
+    ) => void
+    let commit!: () => void
+    const collection = createCollection<Row>({
+      id: `additional-demand-predicate-compilation`,
+      getKey: (row) => row.id,
+      syncMode: `on-demand`,
+      sync: {
+        sync: (params) => {
+          begin = params.begin
+          write = params.write
+          commit = params.commit
+          params.markReady()
+          return {
+            loadSubset: () => true,
+            unloadSubset: () => {},
+          }
+        },
+      },
+    })
+    const index = collection.createIndex((row) => row.rank, {
+      indexType: BTreeIndex,
+    })
+    const orderBy: OrderBy = [
+      {
+        expression: new PropRef([`rank`]),
+        compareOptions: { direction: `asc`, nulls: `first` },
+      },
+    ]
+    let expressionReads = 0
+    // Compilation reads the IR node type; the compiled evaluator does not.
+    // Count those reads without exposing test instrumentation in production.
+    const expression = new Proxy(
+      new Func<boolean>(`eq`, [new PropRef([`id`]), new Value(`sibling`)]),
+      {
+        get(target, property, receiver) {
+          if (property === `type`) expressionReads++
+          return Reflect.get(target, property, receiver)
+        },
+      },
+    )
+    const subscription = collection.subscribeChanges(() => {})
+    subscription.setOrderByIndex(index)
+
+    const publish = (value: Row) => {
+      begin()
+      write({ type: `insert`, value })
+      commit()
+    }
+
+    try {
+      subscription.requestLimitedSnapshot({ orderBy, limit: 1 })
+      subscription.requestSnapshot({ where: expression })
+      const firstDemandReads = expressionReads
+      expect(firstDemandReads).toBeGreaterThan(0)
+
+      publish({ id: `sibling`, rank: 2 })
+      publish({ id: `ordered`, rank: 1 })
+      expect(expressionReads).toBe(firstDemandReads)
+
+      subscription.releaseSnapshot(expression)
+      const beforeReplacement = expressionReads
+      subscription.requestSnapshot({ where: expression })
+      expect(expressionReads).toBeGreaterThan(beforeReplacement)
+      const replacementDemandReads = expressionReads
+
+      publish({ id: `later`, rank: 0 })
+      expect(expressionReads).toBe(replacementDemandReads)
+    } finally {
+      subscription.unsubscribe()
+      await collection.cleanup()
+    }
+  })
+
   it(`releases ordered publication authority before retrying failed adapter cleanup`, async () => {
     type Row = { id: string; rank: number }
     let begin!: () => void

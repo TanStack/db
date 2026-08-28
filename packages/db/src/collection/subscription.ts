@@ -116,6 +116,7 @@ type ReplayHandoffResult =
 
 type SubsetDemand = SubsetAcquisition & {
   requestOptions: LoadSubsetOptions
+  matchesWhere: (row: object) => boolean
   onLoadSubsetResult?: (
     result: LoadSubsetRequestResult,
     demand: LoadSubsetOptions,
@@ -227,6 +228,8 @@ function createSubsetCleanupError(errors: ReadonlyArray<unknown>): unknown {
   return new SubsetCleanupAggregateError(errors)
 }
 
+const matchesEveryRow = () => true
+
 export class CollectionSubscription
   extends EventEmitter<SubscriptionEvents>
   implements Subscription
@@ -315,13 +318,7 @@ export class CollectionSubscription
   private activeAdditionalFilters(): Array<(row: object) => boolean> {
     return this.subsetDemands
       .filter((demand) => demand.active && demand.ordered === undefined)
-      .map((demand) =>
-        demand.requestOptions.where
-          ? createFilterFunctionFromExpression<object>(
-              demand.requestOptions.where,
-            )
-          : () => true,
-      )
+      .map((demand) => demand.matchesWhere)
   }
 
   private diffPublishedRows(
@@ -1177,11 +1174,7 @@ export class CollectionSubscription
     const merged = [...session.buffer.flat(), ...retainedDeletes]
     const activeDemandFilters = this.subsetDemands
       .filter((demand) => demand.active)
-      .map((demand) =>
-        demand.requestOptions.where
-          ? createFilterFunctionFromExpression(demand.requestOptions.where)
-          : undefined,
-      )
+      .map((demand) => demand.matchesWhere)
     // The raw replay buffer can contain rows retained for another demand or
     // outside the ordered prefix. Publish the settled ordered reconciliation
     // as the replacement's one atomic batch.
@@ -1190,8 +1183,7 @@ export class CollectionSubscription
       : this.createPublicationDiff(
           session.publicationState.publishedRows,
           merged,
-          (value) =>
-            activeDemandFilters.some((filter) => filter?.(value) ?? true),
+          (value) => activeDemandFilters.some((filter) => filter(value)),
         )
     if (replacement.length > 0) this.filteredCallback(replacement)
     // Buffering records every source key before active-demand filtering. Reset
@@ -1915,6 +1907,9 @@ export class CollectionSubscription
     const demand: SubsetDemand = {
       requestOptions,
       options: requestOptions,
+      matchesWhere: requestOptions.where
+        ? createFilterFunctionFromExpression<object>(requestOptions.where)
+        : matchesEveryRow,
       ...(ordered === undefined ? {} : { ordered }),
       pendingReplayAcquisitions: new Set(),
       active: true,

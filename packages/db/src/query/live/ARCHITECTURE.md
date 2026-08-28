@@ -754,6 +754,10 @@ during adapter code cannot publish a later snapshot. A synchronous `loadSubset`
 throw that did not follow a failed release rolls the tentative owner back before
 it emits the error and without calling `unloadSubset`; a failed release keeps
 the owner so a later cleanup can retry the same acquisition identity.
+The logical owner also retains its compiled predicate. Reconciliation reuses
+that evaluator across source changes and truncate acquisition replacement. A
+released owner cannot supply a predicate, and a later logical demand compiles
+its own evaluator even when it reuses the same expression object.
 Result callbacks are also arbitrary reentrancy boundaries. After invoking one,
 the request checks the same exact owner again before it tracks status, applies
 coverage, or scans local rows. A callback may release or unsubscribe; obsolete
