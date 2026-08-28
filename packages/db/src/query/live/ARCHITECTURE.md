@@ -600,6 +600,10 @@ If teardown cleanup fails while replay adapter entry remains active, that
 acquisition frame retains the exact cleanup occurrence even when adapter code
 catches the teardown throw and returns success. A successful adapter return
 cannot erase a nested failure which the subscription already observed.
+The same retention applies to a throwing acquisition exit. Rethrowing the
+private carrier reports only the nested occurrence; throwing a distinct value
+or the same public payload without that carrier adds a new outer occurrence
+after every earlier nested occurrence.
 `onLoadSubsetResult`, `requestSnapshot`, and `releaseSnapshot` are internal
 composition APIs. A nested synchronous failure may use the private propagation
 token across that callback; internal code must rethrow the caught value

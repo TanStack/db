@@ -7124,6 +7124,136 @@ describe(`CollectionSubscription replay oracle`, () => {
     },
   )
 
+  it.each([
+    `propagate`,
+    `return`,
+    `throw-distinct`,
+    `throw-same-payload`,
+  ] as const)(
+    `retains nested replay cleanup across adapter terminal form %s`,
+    async (terminalForm) => {
+      type Row = { id: string }
+      const whereOuter = new Func(`eq`, [
+        new PropRef([`id`]),
+        new Value(`outer`),
+      ])
+      const whereCleanup = new Func(`eq`, [
+        new PropRef([`id`]),
+        new Value(`cleanup`),
+      ])
+      const whereInner = new Func(`eq`, [
+        new PropRef([`id`]),
+        new Value(`inner`),
+      ])
+      const nestedFailure = new Error(`nested cleanup failed`)
+      const outerFailure = new Error(`outer replay failed`)
+      const reported: Array<{
+        error: unknown
+        options: LoadSubsetOptions
+      }> = []
+      let begin!: () => void
+      let commit!: () => true | Promise<void>
+      let truncate!: () => void
+      let replaying = false
+      let outerLoads = 0
+      let cleanupFailed = false
+      let cleanupOptions: LoadSubsetOptions | undefined
+      let replayOuterOptions: LoadSubsetOptions | undefined
+      let cleanupUnloads = 0
+      let caughtNestedFailure: unknown
+
+      const collection = createCollection<Row>({
+        id: `nested-cleanup-${terminalForm}`,
+        getKey: (row) => row.id,
+        syncMode: `on-demand`,
+        sync: {
+          sync: (params) => {
+            begin = params.begin
+            commit = params.commit
+            truncate = params.truncate
+            params.markReady()
+            return {
+              loadSubset: (options) => {
+                if (options.where === whereInner) {
+                  subscription.releaseSnapshot(whereCleanup)
+                  return true
+                }
+                if (options.where !== whereOuter) return true
+                outerLoads++
+                if (!replaying || outerLoads !== 2) return true
+
+                replayOuterOptions = options
+                try {
+                  subscription.requestSnapshot({ where: whereInner })
+                } catch (error) {
+                  caughtNestedFailure = error
+                }
+
+                if (terminalForm === `return`) return true
+                if (terminalForm === `propagate`) throw caughtNestedFailure
+                if (terminalForm === `throw-same-payload`) {
+                  throw nestedFailure
+                }
+                throw outerFailure
+              },
+              unloadSubset: (options) => {
+                if (options.where !== whereCleanup) return
+                cleanupUnloads++
+                cleanupOptions ??= options
+                if (!cleanupFailed) {
+                  cleanupFailed = true
+                  throw nestedFailure
+                }
+              },
+            }
+          },
+        },
+      })
+      const subscription = collection.subscribeChanges(() => {})
+      subscription.on(`loadSubset:error`, ({ error, options }) =>
+        reported.push({ error, options }),
+      )
+
+      try {
+        subscription.requestSnapshot({ where: whereOuter })
+        subscription.requestSnapshot({ where: whereCleanup })
+
+        replaying = true
+        begin()
+        truncate()
+        commit()
+        await flushPromises()
+        await flushPromises()
+
+        expect(caughtNestedFailure).not.toBe(nestedFailure)
+        const outerError =
+          terminalForm === `throw-distinct`
+            ? outerFailure
+            : terminalForm === `throw-same-payload`
+              ? nestedFailure
+              : undefined
+        expect(reported).toEqual([
+          { error: nestedFailure, options: cleanupOptions },
+          ...(outerError === undefined
+            ? []
+            : [{ error: outerError, options: replayOuterOptions }]),
+        ])
+        expect(subscription.lastErrorVersion).toBe(
+          outerError === undefined ? 1 : 2,
+        )
+
+        subscription.releaseSnapshot(whereCleanup)
+        expect(cleanupUnloads).toBe(2)
+        expect(subscription.lastErrorVersion).toBe(
+          outerError === undefined ? 1 : 2,
+        )
+      } finally {
+        subscription.unsubscribe()
+        await collection.cleanup()
+      }
+    },
+  )
+
   it(`dispatches the terminal event once under reentrant unsubscribe`, async () => {
     type Row = { id: string }
     const collection = createCollection<Row>({

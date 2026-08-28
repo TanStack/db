@@ -785,6 +785,29 @@ export class CollectionSubscription
     return error instanceof SubsetFailurePropagation ? error.payload : error
   }
 
+  /** Keep every nested occurrence observed before an acquisition frame exits. */
+  private retainReplayAcquisitionFailures(
+    replayContext: TruncateReplayContext | undefined,
+    failureGroups: ReadonlyArray<SubsetFailureGroup>,
+  ): void {
+    if (
+      !replayContext ||
+      this.truncateReplaySession !== replayContext.session
+    ) {
+      return
+    }
+    const retainedFailures = failureGroups.flatMap((group) =>
+      group.failures.filter((failure) => !failure.attributed),
+    )
+    if (retainedFailures.length === 0) return
+
+    replayContext.attempt.failed = true
+    this.queueUnattributedReplayFailures(
+      replayContext.session,
+      retainedFailures,
+    )
+  }
+
   /** Run one adapter entry with the same causal frame on every start path. */
   private enterSubsetAcquisition<T>(
     options: LoadSubsetOptions,
@@ -799,21 +822,7 @@ export class CollectionSubscription
     this.activeSubsetAcquisition = frame
     try {
       const value = enter()
-      if (
-        replayContext &&
-        this.truncateReplaySession === replayContext.session
-      ) {
-        const retainedFailures = frame.failureGroups.flatMap((group) =>
-          group.failures.filter((failure) => !failure.attributed),
-        )
-        if (retainedFailures.length > 0) {
-          replayContext.attempt.failed = true
-          this.queueUnattributedReplayFailures(
-            replayContext.session,
-            retainedFailures,
-          )
-        }
-      }
+      this.retainReplayAcquisitionFailures(replayContext, frame.failureGroups)
       return { completed: true, value }
     } catch (error) {
       const adoptedCarrier =
@@ -851,6 +860,8 @@ export class CollectionSubscription
           })
         }
       }
+
+      this.retainReplayAcquisitionFailures(replayContext, frame.failureGroups)
 
       const escapesOrdinaryOutermostStart =
         propagated &&
