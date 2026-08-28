@@ -323,6 +323,22 @@ const nullableCursorScenarioArbitrary: fc.Arbitrary<NullableCursorScenario> =
     direction: fc.constantFrom(`asc` as const, `desc` as const),
   })
 
+type CleanupTarget = {
+  cleanup: () => unknown
+}
+
+async function cleanupAll(
+  ...targets: ReadonlyArray<CleanupTarget>
+): Promise<void> {
+  const results = await Promise.allSettled(
+    targets.map((target) => Promise.resolve().then(() => target.cleanup())),
+  )
+  const rejection = results.find(
+    (result): result is PromiseRejectedResult => result.status === `rejected`,
+  )
+  if (rejection) throw rejection.reason
+}
+
 const { multiplier, replaySeed } = readOracleRunConfig()
 const orderedScenarioRuns = 12 * multiplier
 const transitionScenarioRuns = 8 * multiplier
@@ -489,8 +505,7 @@ async function runPaginationScenario(
       )
     }
   } finally {
-    live.cleanup()
-    source.cleanup()
+    await cleanupAll(live, source)
   }
 }
 
@@ -576,8 +591,7 @@ async function runMultiOrderScenario(
       throw new TraceAssertionError(0, error)
     }
   } finally {
-    live.cleanup()
-    source.cleanup()
+    await cleanupAll(live, source)
   }
 }
 
@@ -665,8 +679,7 @@ async function runNullableCursorScenario(
     }
   } finally {
     for (const request of pending) request.deferred.resolve()
-    live.cleanup()
-    source.cleanup()
+    await cleanupAll(live, source)
   }
 }
 
@@ -738,8 +751,7 @@ async function runPaginationStateScenario(
       expectCurrentWindow(index + 1)
     }
   } finally {
-    live.cleanup()
-    source.cleanup()
+    await cleanupAll(live, source)
   }
 }
 
@@ -845,8 +857,7 @@ async function runOnDemandPaginationScenario(
     for (const load of loads)
       expect(load.orderBy).toMatchObject(expectedOrderBy)
   } finally {
-    live.cleanup()
-    source.cleanup()
+    await cleanupAll(live, source)
   }
 }
 
@@ -939,9 +950,7 @@ async function expectOnDemandWindowsAreCompletionOrderIndependent(
     expect(Array.from(secondLive.values(), ({ id }) => id)).toEqual([1, 2, 3])
   } finally {
     for (const request of pending) request.deferred.resolve()
-    firstLive.cleanup()
-    secondLive.cleanup()
-    source.cleanup()
+    await cleanupAll(firstLive, secondLive, source)
   }
 }
 
@@ -1085,8 +1094,7 @@ async function runAdversarialOrderedProviderScenario(options: {
     // final refinement request.
     return [...loads]
   } finally {
-    live.cleanup()
-    source.cleanup()
+    await cleanupAll(live, source)
   }
 }
 
@@ -1304,8 +1312,7 @@ async function runPendingMutationScenario(
   } finally {
     for (const request of pending) request.deferred.resolve()
     await Promise.allSettled(outstanding)
-    await live.cleanup()
-    await source.cleanup()
+    await cleanupAll(live, source)
   }
 }
 
@@ -1429,8 +1436,7 @@ async function runRejectedCursorRetryAfterMutation(): Promise<void> {
     }
   } finally {
     for (const request of pending) request.deferred.resolve()
-    live.cleanup()
-    source.cleanup()
+    await cleanupAll(live, source)
   }
 }
 
@@ -1573,8 +1579,7 @@ async function runPendingHistoryScenario(
   } finally {
     for (const request of pending) request.deferred.resolve()
     await Promise.allSettled(outstanding)
-    live.cleanup()
-    source.cleanup()
+    await cleanupAll(live, source)
   }
 }
 
@@ -1670,12 +1675,61 @@ async function expectInflightRequestFillsNewWindow(): Promise<void> {
     }
   } finally {
     for (const request of pending) request.deferred.resolve()
-    live.cleanup()
-    source.cleanup()
+    await cleanupAll(live, source)
   }
 }
 
 describe(`pagination recomputation oracle`, () => {
+  it(`observes cleanup failure after every teardown settles`, async () => {
+    const failure = new Error(`cleanup failed`)
+    const laterCleanup = createDeferred<void>()
+    const events: Array<string> = []
+    const unhandled: Array<unknown> = []
+    const recordUnhandled = (reason: unknown) => unhandled.push(reason)
+    let cleanupFinished = false
+    process.on(`unhandledRejection`, recordUnhandled)
+
+    try {
+      const cleanup = cleanupAll(
+        {
+          cleanup: () => {
+            events.push(`failed`)
+            return Promise.reject(failure)
+          },
+        },
+        {
+          cleanup: async () => {
+            await laterCleanup.promise
+            events.push(`settled`)
+          },
+        },
+      ).finally(() => {
+        cleanupFinished = true
+      })
+      const observedFailure = cleanup.then(
+        () => {
+          throw new Error(`expected cleanup to reject`)
+        },
+        (error: unknown) => expect(error).toBe(failure),
+      )
+
+      await flushPromises()
+      expect(events).toEqual([`failed`])
+      expect(cleanupFinished).toBe(false)
+      expect(unhandled).toEqual([])
+
+      laterCleanup.resolve()
+      await observedFailure
+      await flushPromises()
+      expect(events).toEqual([`failed`, `settled`])
+      expect(cleanupFinished).toBe(true)
+      expect(unhandled).toEqual([])
+    } finally {
+      laterCleanup.resolve()
+      process.off(`unhandledRejection`, recordUnhandled)
+    }
+  })
+
   it(`refills a joined result window through a contract-compliant source`, async () => {
     type ParentRow = { id: number; rank: number; groupId: number }
     type ChildRow = { id: number; groupId: number }
@@ -1721,9 +1775,7 @@ describe(`pagination recomputation oracle`, () => {
       expect(requests[0]?.limit).toBe(2)
       expect(requests[1]?.cursor).toBeDefined()
     } finally {
-      live.cleanup()
-      childSource.cleanup()
-      parentSource.cleanup()
+      await cleanupAll(live, childSource, parentSource)
     }
   })
 
@@ -1772,9 +1824,7 @@ describe(`pagination recomputation oracle`, () => {
       expect(requests).toHaveLength(1)
       expect(requests[0]?.limit).toBeUndefined()
     } finally {
-      live.cleanup()
-      childSource.cleanup()
-      parentSource.cleanup()
+      await cleanupAll(live, childSource, parentSource)
     }
   })
 
@@ -1825,9 +1875,7 @@ describe(`pagination recomputation oracle`, () => {
       expect(requests[0]?.orderBy).toHaveLength(1)
       expect(requests[1]?.cursor).toBeDefined()
     } finally {
-      live.cleanup()
-      childSource.cleanup()
-      parentSource.cleanup()
+      await cleanupAll(live, childSource, parentSource)
     }
   })
 
@@ -1949,8 +1997,7 @@ describe(`pagination recomputation oracle`, () => {
       expect(requests[1]).toMatchObject({ limit: 2, offset: 0 })
       expect(requests[1]?.cursor).toBeUndefined()
     } finally {
-      live.cleanup()
-      source.cleanup()
+      await cleanupAll(live, source)
     }
   })
 
@@ -2005,8 +2052,7 @@ describe(`pagination recomputation oracle`, () => {
       await live.preload()
       expect(Array.from(live.values(), ({ id }) => id)).toEqual([1, 2])
     } finally {
-      live.cleanup()
-      source.cleanup()
+      await cleanupAll(live, source)
     }
   })
 
@@ -2121,24 +2167,22 @@ describe(`pagination recomputation oracle`, () => {
             expectedCovering.slice(0, 1),
           )
         } finally {
-          covered.cleanup()
+          await cleanupAll(covered)
         }
 
         if (releaseFirst === `covering`) {
-          covering.cleanup()
+          await cleanupAll(covering)
           expect(Array.from(narrower.values(), ({ id }) => id)).toEqual(
             expectedCovering.slice(0, 2),
           )
         } else {
-          narrower.cleanup()
+          await cleanupAll(narrower)
           expect(Array.from(covering.values(), ({ id }) => id)).toEqual(
             expectedCovering,
           )
         }
       } finally {
-        covering.cleanup()
-        narrower.cleanup()
-        source.cleanup()
+        await cleanupAll(covering, narrower, source)
       }
     },
   )
@@ -2223,8 +2267,7 @@ describe(`pagination recomputation oracle`, () => {
       if (widened instanceof Promise) await widened
       expect(Array.from(live.values(), ({ id }) => id)).toEqual([1, 2])
     } finally {
-      live.cleanup()
-      source.cleanup()
+      await cleanupAll(live, source)
     }
   })
 
@@ -2313,8 +2356,7 @@ describe(`pagination recomputation oracle`, () => {
       expect(pending).toHaveLength(transportCount)
     } finally {
       for (const request of pending) request.deferred.resolve()
-      live.cleanup()
-      source.cleanup()
+      await cleanupAll(live, source)
     }
   })
 
@@ -2543,8 +2585,7 @@ describe(`pagination recomputation oracle`, () => {
       await live.utils.setWindow({ offset: 0, limit: 3 })
       expect(Array.from(live.values(), ({ id }) => id)).toEqual([1, 2, 9])
     } finally {
-      live.cleanup()
-      source.cleanup()
+      await cleanupAll(live, source)
     }
   })
 
@@ -2645,8 +2686,7 @@ describe(`pagination recomputation oracle`, () => {
         expect(loads.at(-1)).toMatchObject({ offset: 0, limit: 2 })
         expect(loads.at(-1)?.cursor).toBeUndefined()
       } finally {
-        live.cleanup()
-        source.cleanup()
+        await cleanupAll(live, source)
       }
     },
   )
@@ -2779,8 +2819,7 @@ describe(`pagination recomputation oracle`, () => {
         )
       } finally {
         for (const request of pending) request.deferred.resolve()
-        live.cleanup()
-        source.cleanup()
+        await cleanupAll(live, source)
       }
     },
   )
@@ -3282,8 +3321,7 @@ describe(`pagination recomputation oracle`, () => {
       await live.preload()
       expect(Array.from(live.values(), ({ id }) => id)).toEqual([3, 1])
     } finally {
-      live.cleanup()
-      source.cleanup()
+      await cleanupAll(live, source)
     }
   })
 
@@ -3309,8 +3347,7 @@ describe(`pagination recomputation oracle`, () => {
         await live.preload()
         expect(Array.from(live.values(), ({ id }) => id)).toEqual([1])
       } finally {
-        live.cleanup()
-        source.cleanup()
+        await cleanupAll(live, source)
       }
     },
   )
