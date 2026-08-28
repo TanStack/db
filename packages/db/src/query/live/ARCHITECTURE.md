@@ -551,6 +551,13 @@ does not turn the carrier into a second public failure. This is a general
 promise-observer law, not a replay-only exception; cleanup and ordinary demand
 paths must consume the private carrier in the same way while still completing
 their status bookkeeping.
+Carrier authority is acquisition-scoped. It records the exact containing
+acquisitions that were active above the originating failure, and only those
+acquisitions may consume it as adopted propagation. If adapter code retains a
+carrier and later throws or rejects it from an unrelated acquisition, that is
+a new boundary occurrence against the later options; the core unwraps the
+original payload before reporting or throwing it. Class identity alone is not
+causal provenance, and private carriers never cross a public boundary.
 The carrier proves only propagation that remains inside the synchronous
 callback boundary or is adopted by a promise created there. If adapter code
 suspends first and starts another acquisition later, the core observes two

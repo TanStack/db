@@ -175,6 +175,11 @@ type SubsetCleanupBoundaryFrame = {
   failureGroups: Array<SubsetFailureGroup>
 }
 
+type SubsetAcquisitionFrame = Readonly<{
+  options: LoadSubsetOptions
+  previous: SubsetAcquisitionFrame | undefined
+}>
+
 type SubsetCleanupCaptureResult = Readonly<{
   completed: boolean
   failures?: ReadonlyArray<SubsetFailureOccurrence>
@@ -188,13 +193,20 @@ class SubsetCleanupAggregateError extends AggregateError {
 
 /** Internal carrier that distinguishes propagation from an equal new throw. */
 class SubsetFailurePropagation extends Error {
-  constructor(readonly payload: unknown) {
+  constructor(
+    readonly payload: unknown,
+    private readonly adoptingOptions: ReadonlySet<LoadSubsetOptions>,
+  ) {
     super(
       payload instanceof Error
         ? payload.message
         : `A nested subset operation failed`,
     )
     this.name = `SubsetFailurePropagation`
+  }
+
+  isAdoptedBy(options: LoadSubsetOptions): boolean {
+    return this.adoptingOptions.has(options)
   }
 }
 
@@ -260,6 +272,7 @@ export class CollectionSubscription
   // that throw the same Error object.
   private activeReplayResultCallback: ReplayResultCallbackFrame | undefined
   private activeSubsetCleanupBoundary: SubsetCleanupBoundaryFrame | undefined
+  private activeSubsetAcquisition: SubsetAcquisitionFrame | undefined
   private nextSubsetFailureOrder = 0
   private replayErrorReportDepth = 0
   private clearListenersAfterReplayErrors = false
@@ -706,10 +719,25 @@ export class CollectionSubscription
   }
 
   /** Tokenize nested propagation without changing the reported payload. */
-  private propagatedSubsetFailure(error: unknown): unknown {
-    return this.subsetFailureBoundaryOptions()
-      ? new SubsetFailurePropagation(error)
-      : error
+  private propagatedSubsetFailure(
+    error: unknown,
+    excludeCurrentAcquisition = false,
+  ): unknown {
+    if (!this.subsetFailureBoundaryOptions()) return error
+
+    const adoptingOptions = new Set<LoadSubsetOptions>()
+    let frame = excludeCurrentAcquisition
+      ? this.activeSubsetAcquisition?.previous
+      : this.activeSubsetAcquisition
+    while (frame) {
+      adoptingOptions.add(frame.options)
+      frame = frame.previous
+    }
+    return new SubsetFailurePropagation(error, adoptingOptions)
+  }
+
+  private publicSubsetFailure(error: unknown): unknown {
+    return error instanceof SubsetFailurePropagation ? error.payload : error
   }
 
   /** Preserve nested cleanup provenance across one arbitrary adapter callback. */
@@ -741,7 +769,12 @@ export class CollectionSubscription
         Object.is(group.propagatedError, caughtError),
       )
     if (caught && !propagatedNestedFailure) {
-      failures.push(this.createSubsetFailureOccurrence(options, caughtError))
+      failures.push(
+        this.createSubsetFailureOccurrence(
+          options,
+          this.publicSubsetFailure(caughtError),
+        ),
+      )
     }
     return {
       completed: !caught,
@@ -759,7 +792,11 @@ export class CollectionSubscription
       !replayContext ||
       this.truncateReplaySession !== replayContext.session
     ) {
-      callback()
+      try {
+        callback()
+      } catch (error) {
+        throw this.publicSubsetFailure(error)
+      }
       return
     }
 
@@ -783,9 +820,7 @@ export class CollectionSubscription
 
     if (this.truncateReplaySession !== replayContext.session) {
       if (caught) {
-        throw caughtError instanceof SubsetFailurePropagation
-          ? caughtError.payload
-          : caughtError
+        throw this.publicSubsetFailure(caughtError)
       }
       return
     }
@@ -825,7 +860,11 @@ export class CollectionSubscription
       )
     }
     if (hasCallbackFailure) {
-      this.queueTruncateReplayError(replayContext.session, options, caughtError)
+      this.queueTruncateReplayError(
+        replayContext.session,
+        options,
+        this.publicSubsetFailure(caughtError),
+      )
     }
     this.checkTruncateReplayComplete(replayContext.session)
   }
@@ -1353,8 +1392,14 @@ export class CollectionSubscription
     }
 
     void syncResult.then(finish, (error: unknown) => {
-      if (!(error instanceof SubsetFailurePropagation) && shouldReportError()) {
-        this.recordLoadSubsetError(options, error, reportAborted)
+      const adoptedPropagation =
+        error instanceof SubsetFailurePropagation && error.isAdoptedBy(options)
+      if (!adoptedPropagation && shouldReportError()) {
+        this.recordLoadSubsetError(
+          options,
+          this.publicSubsetFailure(error),
+          reportAborted,
+        )
       }
       finish()
     })
@@ -1751,6 +1796,11 @@ export class CollectionSubscription
     // Reentrant release must see the exact acquisition before adapter work
     // starts. A genuine load throw removes this tentative logical owner below.
     this.subsetDemands.push(demand)
+    const acquisitionFrame: SubsetAcquisitionFrame = {
+      options: acquisition.options,
+      previous: this.activeSubsetAcquisition,
+    }
+    this.activeSubsetAcquisition = acquisitionFrame
     try {
       // A synchronous start failure is not observable until the tentative
       // owner has rolled back. Otherwise an error listener can reenter release
@@ -1759,7 +1809,10 @@ export class CollectionSubscription
       return { demand, acquisition, result, replayContext }
     } catch (error) {
       const shouldReportError = !acquisition.options.signal?.aborted
-      const isPropagatedFailure = error instanceof SubsetFailurePropagation
+      const isPropagatedFailure =
+        error instanceof SubsetFailurePropagation &&
+        error.isAdoptedBy(acquisition.options)
+      const publicError = this.publicSubsetFailure(error)
       let propagatedError = error
       const demandIndex = this.subsetDemands.indexOf(demand)
       if (demandIndex !== -1 && !demand.releaseFailed) {
@@ -1768,10 +1821,10 @@ export class CollectionSubscription
         acquisition.removeRequestAbortListener?.()
       }
       if (shouldReportError && !isPropagatedFailure) {
-        propagatedError = this.propagatedSubsetFailure(error)
+        propagatedError = this.propagatedSubsetFailure(publicError, true)
         const occurrence = this.createSubsetFailureOccurrence(
           acquisition.options,
-          error,
+          publicError,
         )
         const group: SubsetFailureGroup = {
           propagatedError,
@@ -1785,7 +1838,7 @@ export class CollectionSubscription
           this.queueTruncateReplayError(
             replayContext.session,
             acquisition.options,
-            error,
+            publicError,
             occurrence,
           )
           this.noteSubsetFailureGroup(replayContext, group)
@@ -1793,11 +1846,13 @@ export class CollectionSubscription
         } else {
           occurrence.attributed = true
           occurrence.reported = true
-          this.recordLoadSubsetError(acquisition.options, error, true)
+          this.recordLoadSubsetError(acquisition.options, publicError, true)
           this.noteSubsetFailureGroup(undefined, group)
         }
       }
       throw propagatedError
+    } finally {
+      this.activeSubsetAcquisition = acquisitionFrame.previous
     }
   }
 
@@ -1843,7 +1898,10 @@ export class CollectionSubscription
     void result.then(
       () => {},
       (error: unknown) => {
-        if (error instanceof SubsetFailurePropagation) {
+        if (
+          error instanceof SubsetFailurePropagation &&
+          error.isAdoptedBy(demand.options)
+        ) {
           // The originating nested boundary already failed this replay and
           // retained its public payload. Promise adoption must not turn the
           // private propagation carrier into a second adapter occurrence.
@@ -1851,7 +1909,11 @@ export class CollectionSubscription
         }
         if (this.isActiveDemand(demand) && !demand.options.signal?.aborted) {
           attempt.failed = true
-          this.queueTruncateReplayError(session, demand.options, error)
+          this.queueTruncateReplayError(
+            session,
+            demand.options,
+            this.publicSubsetFailure(error),
+          )
         }
       },
     )

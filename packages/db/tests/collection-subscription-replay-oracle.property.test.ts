@@ -6954,6 +6954,127 @@ describe(`CollectionSubscription replay oracle`, () => {
     }
   })
 
+  it.each(
+    ([`unordered`, `ordered`] as const).flatMap((demandKind) =>
+      ([`throw`, `reject`] as const).map(
+        (laterFailure) => [demandKind, laterFailure] as const,
+      ),
+    ),
+  )(
+    `does not let a retained propagation carrier erase a later %s %s`,
+    async (demandKind, laterFailure) => {
+      type Row = { id: string; rank: number }
+      const whereOuter = new Func(`eq`, [
+        new PropRef([`id`]),
+        new Value(`outer`),
+      ])
+      const whereMiddle = new Func(`eq`, [
+        new PropRef([`id`]),
+        new Value(`middle`),
+      ])
+      const whereInner = new Func(`eq`, [
+        new PropRef([`id`]),
+        new Value(`inner`),
+      ])
+      const whereLater = new Func(`eq`, [
+        new PropRef([`id`]),
+        new Value(`later`),
+      ])
+      const orderBy: OrderBy = [
+        {
+          expression: new PropRef([`rank`]),
+          compareOptions: { direction: `asc`, nulls: `first` },
+        },
+      ]
+      const failure = new Error(`retained carrier payload`)
+      let retainedCarrier: unknown
+      let innerOptions: LoadSubsetOptions | undefined
+      let laterOptions: LoadSubsetOptions | undefined
+      type TestSubscription = ReturnType<
+        ReturnType<typeof createCollection<Row>>[`subscribeChanges`]
+      >
+      const owner: { current?: TestSubscription } = {}
+      const collection = createCollection<Row>({
+        id: `retained-propagation-carrier-${demandKind}-${laterFailure}`,
+        getKey: (row) => row.id,
+        syncMode: `on-demand`,
+        sync: {
+          sync: (params) => {
+            params.markReady()
+            return {
+              loadSubset: (options) => {
+                if (options.where === whereInner) {
+                  innerOptions = options
+                  throw failure
+                }
+                if (options.where === whereMiddle) {
+                  try {
+                    owner.current!.requestSnapshot({ where: whereInner })
+                  } catch (error) {
+                    retainedCarrier = error
+                  }
+                  return true
+                }
+                if (
+                  options.where === whereLater ||
+                  (demandKind === `ordered` && options.orderBy === orderBy)
+                ) {
+                  laterOptions = options
+                  if (laterFailure === `throw`) throw retainedCarrier
+                  return Promise.reject(retainedCarrier)
+                }
+                return true
+              },
+              unloadSubset: (options) => {
+                if (options.where === whereOuter) {
+                  owner.current!.requestSnapshot({ where: whereMiddle })
+                }
+              },
+            }
+          },
+        },
+      })
+      const index = collection.createIndex((row) => row.rank, {
+        indexType: BTreeIndex,
+      })
+      const reported: Array<{ error: unknown; options: LoadSubsetOptions }> = []
+      const subscription = collection.subscribeChanges(() => {})
+      owner.current = subscription
+      subscription.setOrderByIndex(index)
+      subscription.on(`loadSubset:error`, ({ error, options }) =>
+        reported.push({ error, options }),
+      )
+
+      try {
+        subscription.requestSnapshot({ where: whereOuter })
+        expect(() => subscription.releaseSnapshot(whereOuter)).toThrow(failure)
+        expect(Object.is(retainedCarrier, failure)).toBe(false)
+
+        const requestLater = () =>
+          demandKind === `ordered`
+            ? subscription.requestLimitedSnapshot({ orderBy, limit: 1 })
+            : subscription.requestSnapshot({ where: whereLater })
+        if (laterFailure === `throw`) {
+          expect(requestLater).toThrow(failure)
+        } else {
+          requestLater()
+          await flushPromises()
+        }
+
+        expect(reported).toHaveLength(2)
+        expect(Object.is(reported[0]?.error, failure)).toBe(true)
+        expect(reported[0]?.options).toBe(innerOptions)
+        expect(Object.is(reported[1]?.error, failure)).toBe(true)
+        expect(reported[1]?.options).toBe(laterOptions)
+        expect(subscription.lastError).toBe(failure)
+        expect(subscription.lastErrorVersion).toBe(2)
+      } finally {
+        subscription.unsubscribe()
+        await collection.cleanup()
+      }
+    },
+  )
+
   it(`keeps failures after asynchronous suspension as distinct adapter occurrences`, async () => {
     type Row = { id: string }
     const whereOuter = new Func(`eq`, [new PropRef([`id`]), new Value(`outer`)])
