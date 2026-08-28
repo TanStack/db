@@ -415,7 +415,13 @@ replacement never enter this set. An empty retained publication is still a
 present publication and cannot collapse into absent state after an unrelated
 change. Source deltas, retained-window changes, new local snapshots, and demand
 release all run this one reducer because each can change the public union. A
-failed generation also clears its private coverage evidence; a successful
+single reducer does not erase provenance: it keeps ordered-authorized
+candidates separate from rows visible only for another demand. A new local
+snapshot may add the latter to the public union, but it cannot promote a row
+left by the rejected generation into the ordered prefix, even when that row
+matches the ordered predicate. Releasing that demand removes the row again
+without changing the ordered boundary. A failed generation also clears its
+private coverage evidence; a successful
 ordered acquisition from that generation cannot suppress the next request when
 another demand makes the whole replacement fail. Reader-visible boundaries and
 failed-replay offset or cursor restoration derive from this snapshot and ignore

@@ -62,6 +62,11 @@ export class WindowState<
     return this.readPrefix().length
   }
 
+  /** The exact rows in the current retained ordered publication. */
+  publicationEntries(): Array<readonly [TKey, TRow]> {
+    return this.readPrefix().map(({ key, value }) => [key, value] as const)
+  }
+
   get coversActiveWindow(): boolean {
     return this.hasFullCoverage || this.coveredSize >= this.activeSize
   }

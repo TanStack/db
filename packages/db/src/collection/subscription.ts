@@ -76,6 +76,8 @@ type CollectionSubscriptionOptions = {
 type OrderedPublicationState = {
   prefixSize: number
   boundary: TotalOrderBoundary | undefined
+  /** Rows authorized to participate in this ordered publication. */
+  candidateRows: Map<string | number, object>
 }
 
 type PublicationState = {
@@ -274,7 +276,10 @@ export class CollectionSubscription
           ordered:
             this.orderedPublication === undefined
               ? undefined
-              : { ...this.orderedPublication },
+              : {
+                  ...this.orderedPublication,
+                  candidateRows: new Map(this.orderedPublication.candidateRows),
+                },
         },
         buffer: [],
         attempts: new Set(),
@@ -675,6 +680,7 @@ export class CollectionSubscription
    */
   private reconcileStaleOrderedPublication(
     changes: ReadonlyArray<ChangeMessage<any, string | number>>,
+    source: `source-change` | `local-snapshot` = `source-change`,
   ): Array<ChangeMessage<any, any>> {
     const stalePublication = this.stalePublication
     const ordered = stalePublication?.ordered
@@ -694,24 +700,38 @@ export class CollectionSubscription
     const isOrderedRow = (row: object) => orderedFilter?.(row) ?? true
     const isAdditionalRow = (row: object) =>
       additionalFilters.some((filter) => filter?.(row) ?? true)
+    const orderedCandidates = ordered.candidateRows
+    const admitsOrderedCandidates = source === `source-change`
 
     for (const change of changes) {
       if (change.type === `delete`) {
         stalePublication.publishedRows.delete(change.key)
-      } else if (isOrderedRow(change.value) || isAdditionalRow(change.value)) {
-        stalePublication.publishedRows.set(change.key, change.value)
+        if (admitsOrderedCandidates) orderedCandidates.delete(change.key)
       } else {
-        stalePublication.publishedRows.delete(change.key)
+        if (admitsOrderedCandidates) {
+          if (isOrderedRow(change.value)) {
+            orderedCandidates.set(change.key, change.value)
+          } else {
+            orderedCandidates.delete(change.key)
+          }
+        }
+        if (
+          orderedCandidates.has(change.key) ||
+          isAdditionalRow(change.value)
+        ) {
+          stalePublication.publishedRows.set(change.key, change.value)
+        } else {
+          stalePublication.publishedRows.delete(change.key)
+        }
       }
     }
     for (const [key, row] of stalePublication.publishedRows) {
-      if (!isOrderedRow(row) && !isAdditionalRow(row)) {
+      if (!orderedCandidates.has(key) && !isAdditionalRow(row)) {
         stalePublication.publishedRows.delete(key)
       }
     }
 
-    const orderedRows = [...stalePublication.publishedRows]
-      .filter(([, row]) => isOrderedRow(row))
+    const orderedRows = [...orderedCandidates]
       .sort((left, right) => window.totalOrder.compareEntries(left, right))
       .slice(0, window.retainedPrefixSize)
     const desired = new Map<string | number, object>(orderedRows)
@@ -728,9 +748,13 @@ export class CollectionSubscription
         lastOrderedRow === undefined
           ? undefined
           : window.totalOrder.boundary(lastOrderedRow[1], lastOrderedRow[0]),
+      candidateRows: orderedCandidates,
     }
     stalePublication.ordered = nextOrderedPublication
-    this.orderedPublication = { ...nextOrderedPublication }
+    this.orderedPublication = {
+      ...nextOrderedPublication,
+      candidateRows: new Map(orderedCandidates),
+    }
 
     const reconciled: Array<ChangeMessage<any, any>> = []
     for (const [key, previousValue] of this.publishedRows) {
@@ -758,9 +782,15 @@ export class CollectionSubscription
     ) {
       return
     }
+    const publicationEntries = this.orderedWindow.publicationEntries()
+    const lastEntry = publicationEntries.at(-1)
     this.orderedPublication = {
-      prefixSize: this.orderedWindow.localPrefixSize,
-      boundary: this.orderedWindow.boundary(),
+      prefixSize: publicationEntries.length,
+      boundary:
+        lastEntry === undefined
+          ? undefined
+          : this.orderedWindow.totalOrder.boundary(lastEntry[1], lastEntry[0]),
+      candidateRows: new Map(publicationEntries),
     }
   }
 
@@ -1274,7 +1304,13 @@ export class CollectionSubscription
       this.stalePublication?.ordered
     ) {
       this.snapshotSent = true
-      const changes = this.reconcileStaleOrderedPublication(snapshot)
+      // A local snapshot can expose a row for this sibling demand, but it
+      // cannot prove that a row left behind by a rejected replay belongs in
+      // the ordered prefix.
+      const changes = this.reconcileStaleOrderedPublication(
+        snapshot,
+        `local-snapshot`,
+      )
       if (changes.length > 0) this.callback(changes)
       return true
     }
