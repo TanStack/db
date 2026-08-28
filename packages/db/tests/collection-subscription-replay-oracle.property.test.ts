@@ -2111,7 +2111,14 @@ describe(`CollectionSubscription replay oracle`, () => {
     }
   })
 
-  it.each([`sync`, `async`, `ordinary`, `deduplicated`] as const)(
+  it.each([
+    `sync`,
+    `async`,
+    `ordinary`,
+    `deduplicated`,
+    `mixed-equal-batch`,
+    `mixed-replacement-batch`,
+  ] as const)(
     `reconciles failed ordered publications for coverage and sibling-demand changes: %s`,
     async (writeTiming) => {
       type Row = { id: `a` | `x` | `y`; rank: number }
@@ -2123,12 +2130,13 @@ describe(`CollectionSubscription replay oracle`, () => {
       let write!: (
         message: ChangeMessageOrDeleteKeyMessage<Row, Row[`id`]>,
       ) => void
-      let commit!: (signal?: AbortSignal) => void
+      let commit!: (signal?: AbortSignal) => true | Promise<void>
       let truncate!: () => void
       let loadCount = 0
       const loadOptions: Array<LoadSubsetOptions> = []
       const replayLoads: Array<ReturnType<typeof createDeferred<Outcome>>> = []
       let siblingLoad: ReturnType<typeof createDeferred<Outcome>> | undefined
+      let deduplicatedOptions: LoadSubsetOptions | undefined
       const publishSiblingRow = (signal: AbortSignal | undefined) => {
         const outcome = {
           hasMore: false,
@@ -2140,8 +2148,17 @@ describe(`CollectionSubscription replay oracle`, () => {
         return outcome
       }
       const deduplicatedSiblingLoad = new DeduplicatedLoadSubset({
-        loadSubset: (options) =>
-          Promise.resolve(publishSiblingRow(options.signal)),
+        loadSubset: (options) => {
+          deduplicatedOptions = options
+          if (
+            writeTiming === `mixed-equal-batch` ||
+            writeTiming === `mixed-replacement-batch`
+          ) {
+            siblingLoad = createDeferred<Outcome>()
+            return siblingLoad.promise
+          }
+          return Promise.resolve(publishSiblingRow(options.signal))
+        },
       })
       const collection = createCollection<Row>({
         id: `failed-ordered-sibling-demand`,
@@ -2172,7 +2189,11 @@ describe(`CollectionSubscription replay oracle`, () => {
                     siblingLoad = createDeferred<Outcome>()
                     return siblingLoad.promise
                   }
-                  if (writeTiming === `deduplicated`) {
+                  if (
+                    writeTiming === `deduplicated` ||
+                    writeTiming === `mixed-equal-batch` ||
+                    writeTiming === `mixed-replacement-batch`
+                  ) {
                     return deduplicatedSiblingLoad.loadSubset(options)
                   }
                   return writeTiming === `sync`
@@ -2254,15 +2275,47 @@ describe(`CollectionSubscription replay oracle`, () => {
           commit()
           siblingLoad?.reject(new Error(`sibling acquisition failed`))
           await flushPromises()
+        } else if (
+          writeTiming === `mixed-equal-batch` ||
+          writeTiming === `mixed-replacement-batch`
+        ) {
+          const hold = createDeferred<void>()
+          const transaction = createTransaction({
+            mutationFn: () => hold.promise,
+          })
+          transaction.mutate(() => collection.insert({ id: `y`, rank: 1_000 }))
+          await flushPromises()
+
+          begin()
+          write({ type: `update`, value: { id: `x`, rank: -1 } })
+          const ordinaryReceipt = commit()
+          begin()
+          write({
+            type: `update`,
+            value: {
+              id: `x`,
+              rank: writeTiming === `mixed-equal-batch` ? -1 : -2,
+            },
+          })
+          const requestReceipt = commit(deduplicatedOptions?.signal)
+
+          hold.resolve()
+          await transaction.isPersisted.promise
+          if (ordinaryReceipt !== true) await ordinaryReceipt
+          if (requestReceipt !== true) await requestReceipt
+          siblingLoad?.resolve({ hasMore: false, appliedRowKeys: [`x`] })
+          await flushPromises()
         }
-        const expectedBoundary = writeTiming === `ordinary` ? `x` : `a`
+        const hasOrdinaryAuthority =
+          writeTiming === `ordinary` || writeTiming === `mixed-equal-batch`
+        const expectedBoundary = hasOrdinaryAuthority ? `x` : `a`
         expect.soft([...visible].sort()).toEqual([`a`, `x`])
         expect.soft(subscription.orderedBoundaryKey).toBe(expectedBoundary)
 
         subscription.releaseSnapshot(xWhere)
         expect
           .soft([...visible].sort())
-          .toEqual(writeTiming === `ordinary` ? [`a`, `x`] : [`a`])
+          .toEqual(hasOrdinaryAuthority ? [`a`, `x`] : [`a`])
         expect.soft(subscription.orderedBoundaryKey).toBe(expectedBoundary)
 
         subscription.requestSnapshot({ where: xWhere })

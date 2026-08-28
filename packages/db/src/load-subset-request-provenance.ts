@@ -1,22 +1,32 @@
-const requestSignals = new WeakMap<object, AbortSignal>()
+export type SyncRequestProvenance = Readonly<{
+  hasOrdinarySource: boolean
+  requestSignals: ReadonlySet<AbortSignal>
+}>
+
+const requestProvenance = new WeakMap<object, SyncRequestProvenance>()
 const parentSignals = new WeakMap<AbortSignal, Set<AbortSignal>>()
 
-/** Attach the exact physical request whose commit produced an internal change. */
-export function setSyncRequestSignal(
+/** Attach every source that produced the change's final row version. */
+export function setSyncRequestProvenance(
   change: object,
-  signal: AbortSignal | undefined,
+  provenance: SyncRequestProvenance | undefined,
 ): void {
-  if (signal !== undefined) requestSignals.set(change, signal)
+  if (provenance !== undefined) requestProvenance.set(change, provenance)
 }
 
 /** Preserve internal request provenance when a change is enriched for readers. */
-export function copySyncRequestSignal(source: object, target: object): void {
-  setSyncRequestSignal(target, requestSignals.get(source))
+export function copySyncRequestProvenance(
+  source: object,
+  target: object,
+): void {
+  setSyncRequestProvenance(target, requestProvenance.get(source))
 }
 
-/** Read the exact physical request whose commit produced an internal change. */
-export function getSyncRequestSignal(change: object): AbortSignal | undefined {
-  return requestSignals.get(change)
+/** Read the sources that produced the change's final row version. */
+export function getSyncRequestProvenance(
+  change: object,
+): SyncRequestProvenance | undefined {
+  return requestProvenance.get(change)
 }
 
 /** Record that shared physical work is owned by one logical request signal. */

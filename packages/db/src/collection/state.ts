@@ -4,8 +4,9 @@ import { enrichRowWithVirtualProps } from '../virtual-props.js'
 import { SyncTransactionAbortedError } from '../errors.js'
 import { createDeferred } from '../deferred'
 import {
-  copySyncRequestSignal,
-  setSyncRequestSignal,
+  copySyncRequestProvenance,
+  getSyncRequestProvenance,
+  setSyncRequestProvenance,
 } from '../load-subset-request-provenance.js'
 import { DIRECT_TRANSACTION_METADATA_KEY } from './transaction-metadata.js'
 import type {
@@ -352,7 +353,7 @@ export class CollectionStateManager<
       previousValue: enrichedPreviousValue,
       metadata: change.metadata,
     } as ChangeMessage<WithVirtualProps<TOutput, TKey>, TKey>
-    copySyncRequestSignal(change, enriched)
+    copySyncRequestProvenance(change, enriched)
     return enriched
   }
 
@@ -946,17 +947,50 @@ export class CollectionStateManager<
 
       // First collect all keys that will be affected by sync operations
       const changedKeys = new Set<TKey>()
-      const requestSignalsByKey = new Map<TKey, AbortSignal | undefined>()
       for (const transaction of committedSyncedTransactions) {
         for (const operation of transaction.operations) {
           const key = operation.key as TKey
           changedKeys.add(key)
-          requestSignalsByKey.set(key, transaction.requestSignal)
         }
         for (const [key] of transaction.rowMetadataWrites) {
           changedKeys.add(key)
-          requestSignalsByKey.set(key, transaction.requestSignal)
         }
+      }
+
+      type AppliedRequestProvenance = {
+        version: {
+          value: TOutput | undefined
+          origin: VirtualOrigin | undefined
+        }
+        hasOrdinarySource: boolean
+        requestSignals: Set<AbortSignal>
+      }
+      const requestProvenanceByKey = new Map<TKey, AppliedRequestProvenance>()
+      const provenanceForSignal = (signal: AbortSignal | undefined) => ({
+        hasOrdinarySource: signal === undefined,
+        requestSignals:
+          signal === undefined
+            ? new Set<AbortSignal>()
+            : new Set<AbortSignal>([signal]),
+      })
+      const recordRequestProvenance = (
+        key: TKey,
+        signal: AbortSignal | undefined,
+      ) => {
+        const version = {
+          value: this.syncedData.get(key),
+          origin: this.rowOrigins.get(key),
+        }
+        const previous = requestProvenanceByKey.get(key)
+        if (previous !== undefined && deepEquals(previous.version, version)) {
+          if (signal === undefined) previous.hasOrdinarySource = true
+          else previous.requestSignals.add(signal)
+          return
+        }
+        requestProvenanceByKey.set(key, {
+          version,
+          ...provenanceForSignal(signal),
+        })
       }
 
       const virtualSnapshotKeys = new Set(changedKeys)
@@ -1025,7 +1059,16 @@ export class CollectionStateManager<
               truncateOptimisticSnapshot?.upserts.get(key) ||
               this.syncedData.get(key)
             if (previousValue !== undefined) {
-              events.push({ type: `delete`, key, value: previousValue })
+              const event: ChangeMessage<TOutput, TKey> = {
+                type: `delete`,
+                key,
+                value: previousValue,
+              }
+              setSyncRequestProvenance(
+                event,
+                provenanceForSignal(transaction.requestSignal),
+              )
+              events.push(event)
             }
           }
 
@@ -1117,6 +1160,7 @@ export class CollectionStateManager<
               this.pendingOptimisticDirectDeletes.delete(key)
               break
           }
+          recordRequestProvenance(key, transaction.requestSignal)
           if (!transaction.preserveHydrationSeedKeys) {
             this.hydrationSeedKeys.delete(key)
             this.hydratedKeys.delete(key)
@@ -1126,9 +1170,10 @@ export class CollectionStateManager<
         for (const [key, metadataWrite] of transaction.rowMetadataWrites) {
           if (metadataWrite.type === `delete`) {
             this.syncedMetadata.delete(key)
-            continue
+          } else {
+            this.syncedMetadata.set(key, metadataWrite.value)
           }
-          this.syncedMetadata.set(key, metadataWrite.value)
+          recordRequestProvenance(key, transaction.requestSignal)
         }
 
         for (const [
@@ -1238,7 +1283,7 @@ export class CollectionStateManager<
               this.isThisCollection(mutation.collection) &&
               mutation.optimistic
             ) {
-              requestSignalsByKey.delete(mutation.key)
+              requestProvenanceByKey.delete(mutation.key)
               switch (mutation.type) {
                 case `insert`:
                 case `update`:
@@ -1274,7 +1319,7 @@ export class CollectionStateManager<
           this.pendingOptimisticUpserts.delete(key)
           this.pendingLocalOrigins.delete(key)
         }
-        requestSignalsByKey.delete(key)
+        requestProvenanceByKey.delete(key)
       }
       for (const key of this.pendingOptimisticDirectDeletes) {
         if (!changedKeys.has(key)) {
@@ -1282,7 +1327,7 @@ export class CollectionStateManager<
         }
         this.pendingOptimisticDeletes.delete(key)
         this.pendingLocalOrigins.delete(key)
-        requestSignalsByKey.delete(key)
+        requestProvenanceByKey.delete(key)
       }
       this.pendingOptimisticDirectUpserts.clear()
       this.pendingOptimisticDirectDeletes.clear()
@@ -1395,7 +1440,14 @@ export class CollectionStateManager<
       }
 
       for (const event of events) {
-        setSyncRequestSignal(event, requestSignalsByKey.get(event.key))
+        if (getSyncRequestProvenance(event) !== undefined) continue
+        const provenance = requestProvenanceByKey.get(event.key)
+        if (provenance !== undefined) {
+          setSyncRequestProvenance(event, {
+            hasOrdinarySource: provenance.hasOrdinarySource,
+            requestSignals: new Set(provenance.requestSignals),
+          })
+        }
       }
 
       // Update cached size after synced data changes

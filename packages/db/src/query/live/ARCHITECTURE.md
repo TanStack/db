@@ -427,9 +427,12 @@ additional-only provenance as its local snapshot even when they arrive
 asynchronously. When a dedupe wrapper replaces logical request signals with a
 shared physical lease signal, it records that signal lineage. Provenance tests
 follow the lineage through nested wrappers instead of treating physical signal
-replacement as new authority. An unsettled request does not claim unrelated
-transactions merely because their lifetimes overlap. Ordinary live source
-changes and ordered acquisitions may evolve the ordered candidate set. A
+replacement as new authority. If several same-key transactions collapse into
+one visible change, provenance reduces with the row version: value-equal writes
+combine their authorities, while a different later version replaces the
+earlier authorities. An unsettled request does not claim unrelated transactions
+merely because their lifetimes overlap. Ordinary live source changes and ordered
+acquisitions may evolve the ordered candidate set. A
 failed generation also clears its private coverage evidence; a successful
 ordered acquisition from that generation cannot suppress the next request when
 another demand makes the whole replacement fail. Reader-visible boundaries and

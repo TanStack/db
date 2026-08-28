@@ -3,7 +3,7 @@ import { and, gte, lt } from '../query/builder/functions.js'
 import { Value } from '../query/ir.js'
 import { EventEmitter } from '../event-emitter.js'
 import {
-  getSyncRequestSignal,
+  getSyncRequestProvenance,
   isLoadSubsetRequestSignalFor,
 } from '../load-subset-request-provenance.js'
 import {
@@ -877,25 +877,29 @@ export class CollectionSubscription
   private staleChangeSource(
     change: ChangeMessage<any, any>,
   ): `ordered-source` | `additional-demand` {
-    const requestSignal = getSyncRequestSignal(change)
-    if (requestSignal === undefined) return `ordered-source`
+    const provenance = getSyncRequestProvenance(change)
+    if (provenance === undefined || provenance.hasOrdinarySource) {
+      return `ordered-source`
+    }
 
     let belongsToAdditionalDemand = false
-    for (const demand of this.subsetDemands) {
-      if (
-        demand.options.signal !== undefined &&
-        isLoadSubsetRequestSignalFor(requestSignal, demand.options.signal)
-      ) {
-        if (demand.ordered !== undefined) return `ordered-source`
-        belongsToAdditionalDemand = true
-      }
-      for (const pending of demand.pendingReplayAcquisitions) {
+    for (const requestSignal of provenance.requestSignals) {
+      for (const demand of this.subsetDemands) {
         if (
-          pending.options.signal !== undefined &&
-          isLoadSubsetRequestSignalFor(requestSignal, pending.options.signal)
+          demand.options.signal !== undefined &&
+          isLoadSubsetRequestSignalFor(requestSignal, demand.options.signal)
         ) {
-          if (pending.ordered !== undefined) return `ordered-source`
+          if (demand.ordered !== undefined) return `ordered-source`
           belongsToAdditionalDemand = true
+        }
+        for (const pending of demand.pendingReplayAcquisitions) {
+          if (
+            pending.options.signal !== undefined &&
+            isLoadSubsetRequestSignalFor(requestSignal, pending.options.signal)
+          ) {
+            if (pending.ordered !== undefined) return `ordered-source`
+            belongsToAdditionalDemand = true
+          }
         }
       }
     }
