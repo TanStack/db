@@ -530,6 +530,14 @@ rethrow across nested cleanup boundaries; it never replaces the public error
 payload. A callback frame retains every boundary occurrence, so `undefined`,
 `NaN`, primitives, and objects follow the same law without using payload
 equality as boundary identity.
+The callback frame finalizes its unique retained occurrences whether the
+callback returns or throws. Catching a nested failure cannot make a replay
+successful. A later distinct throw adds one callback occurrence after the
+nested occurrences, while rethrowing the internal propagation token does not.
+Public teardown follows the same rule: it aggregates original failure payloads
+at the outermost boundary and carries occurrence records through a containing
+cleanup or replay callback. Internal propagation tokens never become public
+error payloads or members of a public aggregate.
 One logical release may cross both a pending replacement acquisition and its
 original acquisition. If several cleanup boundaries fail, the callback frame
 retains them as one propagated group and reports every occurrence against its

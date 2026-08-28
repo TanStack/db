@@ -162,11 +162,13 @@ type SubsetFailureGroup = Readonly<{
 
 type ReplayResultCallbackFrame = {
   replayContext: TruncateReplayContext
+  options: LoadSubsetOptions
   previous: ReplayResultCallbackFrame | undefined
   failureGroups: Array<SubsetFailureGroup>
 }
 
 type SubsetCleanupBoundaryFrame = {
+  options: LoadSubsetOptions
   previous: SubsetCleanupBoundaryFrame | undefined
   failureGroups: Array<SubsetFailureGroup>
 }
@@ -197,17 +199,6 @@ class SubsetFailurePropagation extends Error {
 function createSubsetCleanupError(errors: ReadonlyArray<unknown>): unknown {
   if (errors.length === 1) return errors[0]
   return new SubsetCleanupAggregateError(errors)
-}
-
-function appendSubsetCleanupErrors(
-  errors: Array<unknown>,
-  error: unknown,
-): void {
-  if (error instanceof SubsetCleanupAggregateError) {
-    errors.push(...error.errors)
-  } else {
-    errors.push(error)
-  }
 }
 
 export class CollectionSubscription
@@ -672,9 +663,20 @@ export class CollectionSubscription
     frame.failureGroups.push(group)
   }
 
+  private subsetFailureBoundaryOptions(): LoadSubsetOptions | undefined {
+    if (this.activeSubsetCleanupBoundary) {
+      return this.activeSubsetCleanupBoundary.options
+    }
+    const callbackFrame = this.activeReplayResultCallback
+    return callbackFrame &&
+      this.truncateReplaySession === callbackFrame.replayContext.session
+      ? callbackFrame.options
+      : undefined
+  }
+
   /** Tokenize nested propagation without changing the reported payload. */
   private propagatedSubsetFailure(error: unknown): unknown {
-    return this.activeSubsetCleanupBoundary
+    return this.subsetFailureBoundaryOptions()
       ? new SubsetFailurePropagation(error)
       : error
   }
@@ -685,6 +687,7 @@ export class CollectionSubscription
     callback: () => void,
   ): SubsetCleanupCaptureResult {
     const frame: SubsetCleanupBoundaryFrame = {
+      options,
       previous: this.activeSubsetCleanupBoundary,
       failureGroups: [],
     }
@@ -731,43 +734,61 @@ export class CollectionSubscription
 
     const frame: ReplayResultCallbackFrame = {
       replayContext,
+      options,
       previous: this.activeReplayResultCallback,
       failureGroups: [],
     }
     this.activeReplayResultCallback = frame
+    let caught = false
+    let caughtError: unknown
     try {
       callback()
     } catch (error) {
-      if (this.truncateReplaySession !== replayContext.session) throw error
-      let propagated: SubsetFailureGroup | undefined
-      for (let index = frame.failureGroups.length - 1; index >= 0; index--) {
-        const group = frame.failureGroups[index]
-        if (group && Object.is(group.propagatedError, error)) {
-          propagated = group
-          break
-        }
-      }
-      const unattributed = propagated?.failures.filter(
-        (failure) => !failure.attributed,
-      )
-      if (!propagated || (unattributed && unattributed.length > 0)) {
-        replayContext.attempt.failed = true
-        if (unattributed) {
-          for (const failure of unattributed) {
-            this.queueTruncateReplayError(
-              replayContext.session,
-              failure.options,
-              failure.error,
-            )
-          }
-        } else {
-          this.queueTruncateReplayError(replayContext.session, options, error)
-        }
-        this.checkTruncateReplayComplete(replayContext.session)
-      }
+      caught = true
+      caughtError = error
     } finally {
       this.activeReplayResultCallback = frame.previous
     }
+
+    if (this.truncateReplaySession !== replayContext.session) {
+      if (caught) {
+        throw caughtError instanceof SubsetFailurePropagation
+          ? caughtError.payload
+          : caughtError
+      }
+      return
+    }
+
+    const seen = new Set<SubsetFailureOccurrence>()
+    const nestedFailures: Array<SubsetFailureOccurrence> = []
+    for (const group of frame.failureGroups) {
+      for (const failure of group.failures) {
+        if (!failure.attributed && !seen.has(failure)) {
+          seen.add(failure)
+          nestedFailures.push(failure)
+        }
+      }
+    }
+    const propagated =
+      caught &&
+      frame.failureGroups.some((group) =>
+        Object.is(group.propagatedError, caughtError),
+      )
+    const hasCallbackFailure = caught && !propagated
+    if (nestedFailures.length === 0 && !hasCallbackFailure) return
+
+    replayContext.attempt.failed = true
+    for (const failure of nestedFailures) {
+      this.queueTruncateReplayError(
+        replayContext.session,
+        failure.options,
+        failure.error,
+      )
+    }
+    if (hasCallbackFailure) {
+      this.queueTruncateReplayError(replayContext.session, options, caughtError)
+    }
+    this.checkTruncateReplayComplete(replayContext.session)
   }
 
   private reportTruncateReplayErrors(session: TruncateReplaySession): void {
@@ -2466,13 +2487,31 @@ export class CollectionSubscription
     // unsubscribe listeners may reenter public methods, but they cannot create
     // work that escapes the cleanup pass already in progress.
     this.unsubscribed = true
-    const cleanupErrors: Array<unknown> = []
+    const boundaryOptions = this.subsetFailureBoundaryOptions()
+    const cleanupFailures: Array<{
+      error: unknown
+      occurrence?: SubsetFailureOccurrence
+    }> = []
+    const recordCleanupError = (error: unknown) => {
+      cleanupFailures.push(
+        boundaryOptions
+          ? {
+              error,
+              occurrence: {
+                error,
+                options: boundaryOptions,
+                attributed: false,
+              },
+            }
+          : { error },
+      )
+    }
 
     // Clean up truncate event listener
     try {
       this.truncateCleanup?.()
     } catch (error) {
-      cleanupErrors.push(error)
+      recordCleanupError(error)
     }
     this.truncateCleanup = undefined
 
@@ -2484,10 +2523,16 @@ export class CollectionSubscription
     // Release the current adapter acquisition for each logical subset demand.
     for (const demand of [...this.subsetDemands]) {
       demand.active = false
-      try {
-        this.releaseSubsetDemand(demand)
-      } catch (error) {
-        appendSubsetCleanupErrors(cleanupErrors, error)
+      const cleanup = this.captureSubsetCleanupFailures(demand.options, () =>
+        this.releaseSubsetDemand(demand),
+      )
+      if (cleanup.failures) {
+        cleanupFailures.push(
+          ...cleanup.failures.map((occurrence) => ({
+            error: occurrence.error,
+            occurrence,
+          })),
+        )
       }
     }
     this.subsetDemands = this.subsetDemands.filter(
@@ -2501,14 +2546,29 @@ export class CollectionSubscription
         subscription: this,
       })
     } catch (error) {
-      cleanupErrors.push(error)
+      recordCleanupError(error)
     } finally {
       // Clear all event listeners to prevent memory leaks
       this.clearListeners()
     }
 
-    if (cleanupErrors.length > 0) {
-      throw createSubsetCleanupError(cleanupErrors)
+    if (cleanupFailures.length > 0) {
+      const cleanupError = createSubsetCleanupError(
+        cleanupFailures.map(({ error }) => error),
+      )
+      const propagatedError = this.propagatedSubsetFailure(cleanupError)
+      if (!Object.is(propagatedError, cleanupError)) {
+        const occurrences = cleanupFailures.flatMap(({ occurrence }) =>
+          occurrence ? [occurrence] : [],
+        )
+        if (occurrences.length !== cleanupFailures.length) throw cleanupError
+        this.noteSubsetFailureGroup(undefined, {
+          propagatedError,
+          failures: occurrences,
+        })
+        throw propagatedError
+      }
+      throw cleanupError
     }
   }
 }

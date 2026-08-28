@@ -244,6 +244,122 @@ async function exerciseNestedCleanupGraph({
   }
 }
 
+type ReplayCallbackCleanupMode = `return` | `rethrow` | `distinct` | `same`
+
+async function exerciseReplayCallbackCleanup({
+  id,
+  nestedFailure,
+  outerFailure,
+  mode,
+}: {
+  id: string
+  nestedFailure: unknown
+  outerFailure: unknown
+  mode: ReplayCallbackCleanupMode
+}) {
+  type Row = { id: string; version: number }
+  const whereA = new Func(`eq`, [new PropRef([`id`]), new Value(`a`)])
+  const whereB = new Func(`eq`, [new PropRef([`id`]), new Value(`b`)])
+  let begin!: () => void
+  let write!: (message: ChangeMessageOrDeleteKeyMessage<Row, string>) => void
+  let commit!: () => true | Promise<void>
+  let truncate!: () => void
+  const loads: Array<LoadSubsetOptions> = []
+  const unloads: Array<LoadSubsetOptions> = []
+  let failedB = false
+  let cleanupArmed = false
+  let callbackCount = 0
+  const collection = createCollection<Row>({
+    id,
+    getKey: (row) => row.id,
+    syncMode: `on-demand`,
+    sync: {
+      sync: (params) => {
+        begin = params.begin
+        write = params.write
+        commit = params.commit
+        truncate = params.truncate
+        params.markReady()
+        return {
+          loadSubset: (options) => {
+            loads.push(options)
+            const rowId = loads.length % 2 === 1 ? `b` : `a`
+            begin()
+            write({
+              type: `insert`,
+              value: { id: rowId, version: loads.length },
+            })
+            commit()
+            return true
+          },
+          unloadSubset: (options) => {
+            unloads.push(options)
+            if (cleanupArmed && options.where === whereB && !failedB) {
+              failedB = true
+              throw nestedFailure
+            }
+          },
+        }
+      },
+    },
+  })
+  const visible = new Map<string, Row>()
+  const reported: Array<{ error: unknown; optionsIndex: number }> = []
+  const subscription = collection.subscribeChanges((changes) => {
+    for (const change of changes) {
+      if (change.type === `delete`) visible.delete(String(change.key))
+      else visible.set(String(change.key), change.value)
+    }
+  })
+  subscription.on(`loadSubset:error`, ({ error, options }) =>
+    reported.push({ error, optionsIndex: loads.indexOf(options) }),
+  )
+
+  try {
+    subscription.requestSnapshot({ where: whereB })
+    subscription.requestSnapshot({
+      where: whereA,
+      onLoadSubsetResult: () => {
+        callbackCount++
+        if (callbackCount !== 2) return
+        cleanupArmed = true
+        let caught: unknown
+        try {
+          subscription.releaseSnapshot(whereB)
+        } catch (error) {
+          caught = error
+        }
+        if (mode === `rethrow`) throw caught
+        if (mode === `distinct`) throw outerFailure
+        if (mode === `same`) throw nestedFailure
+      },
+    })
+    await flushPromises()
+
+    begin()
+    truncate()
+    commit()
+    await flushPromises()
+
+    const visibleVersions = [...visible]
+      .map(([rowId, row]) => [rowId, row.version] as const)
+      .sort(([left], [right]) => left.localeCompare(right))
+    const beforeRetry = unloads.map((options) => loads.indexOf(options))
+    subscription.unsubscribe()
+    const afterRetry = unloads.map((options) => loads.indexOf(options))
+    return {
+      reported,
+      visibleVersions,
+      beforeRetry,
+      afterRetry,
+      status: subscription.status,
+    }
+  } finally {
+    subscription.unsubscribe()
+    await collection.cleanup()
+  }
+}
+
 const rowArbitrary: fc.Arbitrary<ReplayRow> = fc.record({
   id: fc.constantFrom(`one` as const, `two` as const),
   value: fc.integer({ min: -2, max: 2 }),
@@ -3623,17 +3739,18 @@ describe(`CollectionSubscription replay oracle`, () => {
           subscription.requestSnapshot({ where: whereNested })
           return
         }
+        let propagatedStartFailure: unknown
         try {
           subscription.requestSnapshot({ where: whereNested })
         } catch (error) {
-          expect(error).toBe(startError)
+          propagatedStartFailure = error
         }
         try {
           subscription.requestSnapshot({ where: whereNestedSecond })
-        } catch (error) {
-          expect(error).toBe(secondStartError)
+        } catch {
+          // Both attributed failures remain attached to their own options.
         }
-        throw startError
+        throw propagatedStartFailure
       }
 
       try {
@@ -3804,8 +3921,9 @@ describe(`CollectionSubscription replay oracle`, () => {
         if (callbackCount !== 2) return
         try {
           subscription.requestSnapshot({ where: whereNested })
-        } catch (error) {
-          expect(Object.is(error, startError)).toBe(true)
+        } catch {
+          // The callback frame retains the attributed start failure while the
+          // later cleanup supplies the propagated boundary token.
         }
         cleanupArmed = true
         subscription.releaseSnapshot(whereCleanup)
@@ -5796,6 +5914,201 @@ describe(`CollectionSubscription replay oracle`, () => {
       }
     },
   )
+
+  it.each(
+    [
+      { name: `Error`, failure: new Error(`callback cleanup payload`) },
+      {
+        name: `AggregateError`,
+        failure: new AggregateError(
+          [new Error(`callback cleanup inner payload`)],
+          `callback cleanup payload`,
+        ),
+      },
+      { name: `undefined`, failure: undefined },
+      { name: `NaN`, failure: Number.NaN },
+    ].flatMap(({ name, failure }) =>
+      ([`return`, `rethrow`, `distinct`, `same`] as const).map((mode) => ({
+        name,
+        nestedFailure: failure,
+        outerFailure:
+          mode === `same` ? failure : new Error(`outer callback failed`),
+        mode,
+      })),
+    ),
+  )(
+    `preserves caught replay-callback cleanup failures: $name $mode`,
+    async ({ name, nestedFailure, outerFailure, mode }) => {
+      const result = await exerciseReplayCallbackCleanup({
+        id: `caught-callback-cleanup-${name}-${mode}`,
+        nestedFailure,
+        outerFailure,
+        mode,
+      })
+
+      const expectedErrors =
+        mode === `distinct`
+          ? [nestedFailure, outerFailure]
+          : mode === `same`
+            ? [nestedFailure, nestedFailure]
+            : [nestedFailure]
+      expect(result.reported.map(({ error }) => error)).toEqual(expectedErrors)
+      expect(result.reported.map(({ optionsIndex }) => optionsIndex)).toEqual(
+        expectedErrors.length === 1 ? [2] : [2, 3],
+      )
+      expect(result.visibleVersions).toEqual([
+        [`a`, 2],
+        [`b`, 1],
+      ])
+      expect(result.beforeRetry).toEqual([0, 1, 2])
+      expect(result.afterRetry).toEqual([0, 1, 2, 2, 3])
+      expect(result.status).toBe(`ready`)
+    },
+  )
+
+  it(`carries nested public teardown failures without exposing propagation tokens`, async () => {
+    type Row = { id: string }
+    const ids = [`a`, `b`, `c`] as const
+    const wheres = ids.map(
+      (id) => new Func(`eq`, [new PropRef([`id`]), new Value(id)]),
+    )
+    const failures = [
+      new Error(`B cleanup failed`),
+      new Error(`C cleanup failed`),
+    ] as const
+    const loads: Array<LoadSubsetOptions> = []
+    const unloads: Array<LoadSubsetOptions> = []
+    const failed = new Set<LoadSubsetOptions>()
+    let nested = false
+    type TestSubscription = ReturnType<
+      ReturnType<typeof createCollection<Row>>[`subscribeChanges`]
+    >
+    const owner: { current?: TestSubscription } = {}
+    const collection = createCollection<Row>({
+      id: `nested-public-teardown-cleanup`,
+      getKey: (row) => row.id,
+      syncMode: `on-demand`,
+      sync: {
+        sync: (params) => {
+          params.markReady()
+          return {
+            loadSubset: (options) => {
+              loads.push(options)
+              return true
+            },
+            unloadSubset: (options) => {
+              unloads.push(options)
+              const index = loads.indexOf(options)
+              if (index === 0 && !nested) {
+                nested = true
+                owner.current!.unsubscribe()
+              }
+              if ((index === 1 || index === 2) && !failed.has(options)) {
+                failed.add(options)
+                throw failures[index - 1]
+              }
+            },
+          }
+        },
+      },
+    })
+    const subscription = collection.subscribeChanges(() => {})
+    owner.current = subscription
+
+    try {
+      for (const where of wheres) subscription.requestSnapshot({ where })
+      let thrown: unknown
+      try {
+        subscription.releaseSnapshot(wheres[0]!)
+      } catch (error) {
+        thrown = error
+      }
+
+      expect(thrown).toBeInstanceOf(AggregateError)
+      expect((thrown as AggregateError).errors).toEqual(failures)
+      expect(unloads.map((options) => loads.indexOf(options))).toEqual([
+        0, 1, 2,
+      ])
+
+      subscription.unsubscribe()
+      expect(unloads.map((options) => loads.indexOf(options))).toEqual([
+        0, 1, 2, 0, 1, 2,
+      ])
+    } finally {
+      subscription.unsubscribe()
+      await collection.cleanup()
+    }
+  })
+
+  it(`preserves a synchronous acquisition failure nested inside cleanup`, async () => {
+    type Row = { id: string }
+    const whereA = new Func(`eq`, [new PropRef([`id`]), new Value(`a`)])
+    const whereB = new Func(`eq`, [new PropRef([`id`]), new Value(`b`)])
+    const failure = new Error(`nested acquisition failed`)
+    const loads: Array<LoadSubsetOptions> = []
+    const unloads: Array<LoadSubsetOptions> = []
+    let nestedOptions: LoadSubsetOptions | undefined
+    type TestSubscription = ReturnType<
+      ReturnType<typeof createCollection<Row>>[`subscribeChanges`]
+    >
+    const owner: { current?: TestSubscription } = {}
+    const collection = createCollection<Row>({
+      id: `synchronous-acquisition-failure-inside-cleanup`,
+      getKey: (row) => row.id,
+      syncMode: `on-demand`,
+      sync: {
+        sync: (params) => {
+          params.markReady()
+          return {
+            loadSubset: (options) => {
+              loads.push(options)
+              if (options.where === whereB) {
+                nestedOptions = options
+                throw failure
+              }
+              return true
+            },
+            unloadSubset: (options) => {
+              unloads.push(options)
+              if (options.where === whereA) {
+                try {
+                  owner.current!.requestSnapshot({ where: whereB })
+                } catch {
+                  // The surrounding cleanup boundary retains the attributed
+                  // failure even after adapter code handles its propagation.
+                }
+              }
+            },
+          }
+        },
+      },
+    })
+    const reported: Array<{ error: unknown; options: LoadSubsetOptions }> = []
+    const subscription = collection.subscribeChanges(() => {})
+    owner.current = subscription
+    subscription.on(`loadSubset:error`, (event) => reported.push(event))
+
+    try {
+      subscription.requestSnapshot({ where: whereA })
+      let thrown: unknown
+      try {
+        subscription.releaseSnapshot(whereA)
+      } catch (error) {
+        thrown = error
+      }
+
+      expect(Object.is(thrown, failure)).toBe(true)
+      expect(reported).toHaveLength(1)
+      expect(Object.is(reported[0]?.error, failure)).toBe(true)
+      expect(reported[0]?.options).toBe(nestedOptions)
+      expect(unloads).toEqual([loads[0]])
+      subscription.unsubscribe()
+      expect(unloads).toEqual([loads[0]])
+    } finally {
+      subscription.unsubscribe()
+      await collection.cleanup()
+    }
+  })
 
   it.each([
     { name: `Error`, failure: new Error(`shared cleanup payload`) },
