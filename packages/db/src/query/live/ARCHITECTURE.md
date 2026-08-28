@@ -513,6 +513,10 @@ the physical settlement remains part of the attempt barrier.
 If callback-driven cleanup throws, replay records an attempt failure and still
 finishes setup. The exact cleanup debt remains retryable; the cleanup error is
 reported only after the last complete publication has been restored.
+Replay captures that attempt identity before adapter entry and carries it
+through settlement and result callbacks. Reentrant adapter or callback work may
+start a newer attempt, but an older acquisition's failure cannot veto that
+newer attempt's complete replacement.
 A requested limit, a settled promise, or the number of requests does not.
 Applied keys carry two distinct facts. Every applied source key may advance the
 continuation cursor, including a row excluded by the subscription predicate.

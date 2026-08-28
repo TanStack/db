@@ -3566,6 +3566,142 @@ describe(`CollectionSubscription replay oracle`, () => {
     },
   )
 
+  it.each([`succeed`, `throw`] as const)(
+    `binds an overlapping callback cleanup error to its originating replay: %s`,
+    async (cleanup) => {
+      type Row = { id: string; value: number }
+      const whereA = new Func(`eq`, [new PropRef([`id`]), new Value(`a`)])
+      const whereC = new Func(`eq`, [new PropRef([`id`]), new Value(`c`)])
+      let begin!: () => void
+      let write!: (
+        message: ChangeMessageOrDeleteKeyMessage<Row, string>,
+      ) => void
+      let commit!: (signal?: AbortSignal) => true | Promise<void>
+      let truncate!: () => void
+      let originalCallbackCount = 0
+      let callbackDemandOptions: LoadSubsetOptions | undefined
+      let cleanupFailuresRemaining = cleanup === `throw` ? 1 : 0
+      const cleanupError = new Error(`overlapped callback cleanup failed`)
+      const loads: Array<LoadSubsetOptions> = []
+      const unloads: Array<LoadSubsetOptions> = []
+      const collection = createCollection<Row>({
+        id: `overlapping-callback-cleanup-${cleanup}`,
+        getKey: (row) => row.id,
+        syncMode: `on-demand`,
+        sync: {
+          sync: (params) => {
+            begin = params.begin
+            write = params.write
+            commit = params.commit
+            truncate = params.truncate
+            params.markReady()
+            return {
+              loadSubset: (options) => {
+                loads.push(options)
+                if (loads.length === 1) {
+                  begin()
+                  write({ type: `insert`, value: { id: `a`, value: 1 } })
+                  commit(options.signal)
+                  return Promise.resolve()
+                }
+                if (loads.length === 2) return true
+                if (loads.length === 3) {
+                  callbackDemandOptions = options
+                  return true
+                }
+
+                begin()
+                write({ type: `insert`, value: { id: `a`, value: 2 } })
+                commit(options.signal)
+                return true
+              },
+              unloadSubset: (options) => {
+                unloads.push(options)
+                if (
+                  options === callbackDemandOptions &&
+                  cleanupFailuresRemaining > 0
+                ) {
+                  cleanupFailuresRemaining--
+                  throw cleanupError
+                }
+              },
+            }
+          },
+        },
+      })
+      const visible = new Map<string, Row>()
+      const errors: Array<unknown> = []
+      const errorObservations: Array<ReadonlyArray<[string, number]>> = []
+      const subscription = collection.subscribeChanges((changes) => {
+        for (const change of changes) {
+          const key = String(change.key)
+          if (change.type === `delete`) visible.delete(key)
+          else visible.set(key, change.value)
+        }
+      })
+      subscription.on(`loadSubset:error`, ({ error }) => {
+        errors.push(error)
+        errorObservations.push(
+          [...visible].map(([key, row]) => [key, row.value] as const),
+        )
+      })
+
+      try {
+        subscription.requestSnapshot({
+          where: whereA,
+          onLoadSubsetResult: () => {
+            originalCallbackCount++
+            if (originalCallbackCount !== 2) return
+            subscription.requestSnapshot({
+              where: whereC,
+              onLoadSubsetResult: () => {
+                // This overlapping replay becomes current before cleanup of
+                // the callback-created demand can fail. The failure still
+                // belongs to the replay that enrolled that demand.
+                begin()
+                truncate()
+                commit()
+                subscription.releaseSnapshot(whereC)
+              },
+            })
+          },
+        })
+        await flushPromises()
+        expect([...visible.keys()]).toEqual([`a`])
+        expect(visible.get(`a`)?.value).toBe(1)
+
+        begin()
+        truncate()
+        commit()
+        await flushPromises()
+        await flushPromises()
+
+        expect(subscription.status).toBe(`ready`)
+        expect([...visible.keys()]).toEqual([`a`])
+        expect(visible.get(`a`)?.value).toBe(2)
+        expect(errors).toEqual(cleanup === `throw` ? [cleanupError] : [])
+        expect(errorObservations).toEqual(
+          cleanup === `throw` ? [[[`a`, 2]]] : [],
+        )
+        expect(callbackDemandOptions?.signal?.aborted).toBe(true)
+        expect(
+          unloads.filter((options) => options === callbackDemandOptions),
+        ).toHaveLength(1)
+
+        if (cleanup === `throw`) {
+          subscription.releaseSnapshot(whereC)
+          subscription.releaseSnapshot(whereC)
+          expect(
+            unloads.filter((options) => options === callbackDemandOptions),
+          ).toHaveLength(2)
+        }
+      } finally {
+        subscription.unsubscribe()
+        await collection.cleanup()
+      }
+    },
+  )
+
   it(`revokes ordered authority when an additional demand replaces a candidate version`, async () => {
     type Row = { id: `a` | `x`; rank: number }
     type Outcome = {
