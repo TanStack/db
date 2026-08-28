@@ -2122,6 +2122,7 @@ describe(`CollectionSubscription replay oracle`, () => {
     `mixed-metadata-batch`,
     `mixed-request-metadata-batch`,
     `deduplicated-after-release`,
+    `deduplicated-after-failed-release`,
   ] as const)(
     `reconciles failed ordered publications for coverage and sibling-demand changes: %s`,
     async (writeTiming) => {
@@ -2138,6 +2139,7 @@ describe(`CollectionSubscription replay oracle`, () => {
       let truncate!: () => void
       let metadata!: SyncMetadataApi<Row[`id`]>
       let loadCount = 0
+      let throwOnUnload = false
       const loadOptions: Array<LoadSubsetOptions> = []
       const replayLoads: Array<ReturnType<typeof createDeferred<Outcome>>> = []
       let siblingLoad: ReturnType<typeof createDeferred<Outcome>> | undefined
@@ -2160,7 +2162,8 @@ describe(`CollectionSubscription replay oracle`, () => {
             writeTiming === `mixed-replacement-batch` ||
             writeTiming === `mixed-metadata-batch` ||
             writeTiming === `mixed-request-metadata-batch` ||
-            writeTiming === `deduplicated-after-release`
+            writeTiming === `deduplicated-after-release` ||
+            writeTiming === `deduplicated-after-failed-release`
           ) {
             siblingLoad = createDeferred<Outcome>()
             return siblingLoad.promise
@@ -2195,7 +2198,8 @@ describe(`CollectionSubscription replay oracle`, () => {
                 }
                 if (
                   loadCount === 5 ||
-                  (writeTiming === `deduplicated-after-release` &&
+                  ((writeTiming === `deduplicated-after-release` ||
+                    writeTiming === `deduplicated-after-failed-release`) &&
                     loadCount === 6)
                 ) {
                   if (writeTiming === `ordinary`) {
@@ -2208,7 +2212,8 @@ describe(`CollectionSubscription replay oracle`, () => {
                     writeTiming === `mixed-replacement-batch` ||
                     writeTiming === `mixed-metadata-batch` ||
                     writeTiming === `mixed-request-metadata-batch` ||
-                    writeTiming === `deduplicated-after-release`
+                    writeTiming === `deduplicated-after-release` ||
+                    writeTiming === `deduplicated-after-failed-release`
                   ) {
                     return deduplicatedSiblingLoad.loadSubset(options)
                   }
@@ -2228,7 +2233,9 @@ describe(`CollectionSubscription replay oracle`, () => {
                 replayLoads.push(deferred)
                 return deferred.promise
               },
-              unloadSubset: () => {},
+              unloadSubset: () => {
+                if (throwOnUnload) throw new Error(`release failed`)
+              },
             }
           },
         },
@@ -2346,7 +2353,11 @@ describe(`CollectionSubscription replay oracle`, () => {
           if (secondReceipt !== true) await secondReceipt
           siblingLoad?.resolve({ hasMore: false, appliedRowKeys: [`x`] })
           await flushPromises()
-        } else if (writeTiming === `deduplicated-after-release`) {
+        } else if (
+          writeTiming === `deduplicated-after-release` ||
+          writeTiming === `deduplicated-after-failed-release`
+        ) {
+          const localLogicalSignal = loadOptions.at(-1)?.signal
           peerSubscription = collection.subscribeChanges(() => {})
           peerSubscription.requestSnapshot({ where: xWhere })
           await flushPromises()
@@ -2361,7 +2372,17 @@ describe(`CollectionSubscription replay oracle`, () => {
           begin()
           write({ type: `update`, value: { id: `x`, rank: -1 } })
           const requestReceipt = commit(deduplicatedOptions?.signal)
-          subscription.releaseSnapshot(xWhere)
+          if (writeTiming === `deduplicated-after-failed-release`) {
+            throwOnUnload = true
+            expect(() => subscription.releaseSnapshot(xWhere)).toThrow(
+              `release failed`,
+            )
+            throwOnUnload = false
+            expect(localLogicalSignal?.aborted).toBe(true)
+            expect(deduplicatedOptions?.signal?.aborted).toBe(false)
+          } else {
+            subscription.releaseSnapshot(xWhere)
+          }
 
           hold.resolve()
           await transaction.isPersisted.promise
@@ -2375,7 +2396,8 @@ describe(`CollectionSubscription replay oracle`, () => {
           writeTiming === `mixed-request-metadata-batch`
         const expectedBoundary = hasOrdinaryAuthority ? `x` : `a`
         const releasedBeforeApplication =
-          writeTiming === `deduplicated-after-release`
+          writeTiming === `deduplicated-after-release` ||
+          writeTiming === `deduplicated-after-failed-release`
         expect
           .soft([...visible].sort())
           .toEqual(releasedBeforeApplication ? [`a`] : [`a`, `x`])
@@ -2403,12 +2425,158 @@ describe(`CollectionSubscription replay oracle`, () => {
           cursor: { lastKey: expectedBoundary },
         })
       } finally {
+        throwOnUnload = false
         subscription.unsubscribe()
         peerSubscription?.unsubscribe()
         await collection.cleanup()
       }
     },
   )
+
+  it(`revokes ordered authority when an additional demand replaces a candidate version`, async () => {
+    type Row = { id: `a` | `x`; rank: number }
+    type Outcome = {
+      hasMore: boolean
+      appliedRowKeys: ReadonlyArray<Row[`id`]>
+    }
+    let begin!: () => void
+    let write!: (
+      message: ChangeMessageOrDeleteKeyMessage<Row, Row[`id`]>,
+    ) => void
+    let commit!: (signal?: AbortSignal) => true | Promise<void>
+    let truncate!: () => void
+    let loadCount = 0
+    let loadingAdditional = false
+    let physicalOptions: LoadSubsetOptions | undefined
+    const loadOptions: Array<LoadSubsetOptions> = []
+    const replayLoads: Array<ReturnType<typeof createDeferred<Outcome>>> = []
+    const additionalLoad = createDeferred<Outcome>()
+    const deduplicatedLoad = new DeduplicatedLoadSubset({
+      loadSubset: (options) => {
+        physicalOptions = options
+        return additionalLoad.promise
+      },
+    })
+    const collection = createCollection<Row>({
+      id: `failed-ordered-candidate-replacement`,
+      getKey: (row) => row.id,
+      syncMode: `on-demand`,
+      sync: {
+        sync: (params) => {
+          begin = params.begin
+          write = params.write
+          commit = params.commit
+          truncate = params.truncate
+          params.markReady()
+          return {
+            loadSubset: (options) => {
+              loadOptions.push(options)
+              if (loadingAdditional) return deduplicatedLoad.loadSubset(options)
+              loadCount++
+              if (loadCount === 1) {
+                begin()
+                write({ type: `insert`, value: { id: `a`, rank: 1 } })
+                commit()
+                return Promise.resolve({
+                  hasMore: false,
+                  appliedRowKeys: [`a`] as const,
+                })
+              }
+              if (loadCount === 2) {
+                return Promise.resolve({
+                  hasMore: false,
+                  appliedRowKeys: [] as const,
+                })
+              }
+              const deferred = createDeferred<Outcome>()
+              replayLoads.push(deferred)
+              return deferred.promise
+            },
+            unloadSubset: () => {},
+          }
+        },
+      },
+    })
+    const index = collection.createIndex((row) => row.rank, {
+      indexType: BTreeIndex,
+    })
+    const orderBy: OrderBy = [
+      {
+        expression: new PropRef([`rank`]),
+        compareOptions: { direction: `asc`, nulls: `first` },
+      },
+    ]
+    const orderedWhere = new Func(`gte`, [
+      new PropRef([`rank`]),
+      new Value(-1_000),
+    ])
+    const seedSiblingWhere = new Func(`eq`, [
+      new PropRef([`id`]),
+      new Value(`x`),
+    ])
+    const sameKeyWhere = new Func(`eq`, [new PropRef([`id`]), new Value(`a`)])
+    const visible = new Map<Row[`id`], Row>()
+    const visibleRows = () =>
+      [...visible.values()].map(({ id, rank }) => ({ id, rank }))
+    const subscription = collection.subscribeChanges(
+      (changes) => {
+        for (const change of changes) {
+          const key = change.key as Row[`id`]
+          if (change.type === `delete`) visible.delete(key)
+          else visible.set(key, change.value)
+        }
+      },
+      { whereExpression: orderedWhere },
+    )
+    subscription.setOrderByIndex(index)
+
+    try {
+      subscription.requestLimitedSnapshot({ orderBy, limit: 1 })
+      subscription.requestSnapshot({ where: seedSiblingWhere })
+      await flushPromises()
+
+      begin()
+      truncate()
+      commit()
+      await flushPromises()
+      expect(replayLoads).toHaveLength(2)
+
+      begin()
+      write({ type: `insert`, value: { id: `x`, rank: 0 } })
+      commit()
+      replayLoads[0]?.resolve({ hasMore: false, appliedRowKeys: [`x`] })
+      replayLoads[1]?.reject(new Error(`sibling replay failed`))
+      await flushPromises()
+      expect(visibleRows()).toEqual([{ id: `a`, rank: 1 }])
+
+      subscription.releaseSnapshot(seedSiblingWhere)
+      loadingAdditional = true
+      subscription.requestSnapshot({ where: sameKeyWhere })
+      await flushPromises()
+
+      begin()
+      write({ type: `update`, value: { id: `a`, rank: 100 } })
+      const receipt = commit(physicalOptions?.signal)
+      if (receipt !== true) await receipt
+      additionalLoad.resolve({ hasMore: false, appliedRowKeys: [`a`] })
+      await flushPromises()
+
+      expect(visibleRows()).toEqual([{ id: `a`, rank: 100 }])
+      expect(subscription.orderedBoundaryKey).toBeUndefined()
+
+      subscription.requestLimitedSnapshot({ orderBy, limit: 1 })
+      await flushPromises()
+      expect(loadOptions.at(-1)).toMatchObject({ offset: 0 })
+      expect(loadOptions.at(-1)?.cursor).toBeUndefined()
+
+      subscription.releaseSnapshot(sameKeyWhere)
+      expect(visibleRows()).toEqual([])
+      expect(subscription.orderedBoundaryKey).toBeUndefined()
+    } finally {
+      subscription.unsubscribe()
+      await collection.cleanup()
+    }
+  })
 
   it(`uses the published replacement as the baseline of a reentrant replay`, async () => {
     let begin!: () => void

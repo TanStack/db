@@ -117,6 +117,8 @@ type SubsetDemand = SubsetAcquisition & {
     demand: LoadSubsetOptions,
   ) => void
   pendingReplayAcquisitions: Set<ReplaySubsetAcquisition>
+  /** Logical ownership; failed unloads may retain an inactive cleanup debt. */
+  active: boolean
   releaseFailed: boolean
   releaseSettled: boolean
 }
@@ -184,6 +186,10 @@ export class CollectionSubscription
   // and buffered changes until every attempt settles.
   private truncateReplaySession: TruncateReplaySession | undefined
 
+  private isActiveDemand(demand: SubsetDemand): boolean {
+    return demand.active && this.subsetDemands.includes(demand)
+  }
+
   public get status(): SubscriptionStatus {
     return this._status
   }
@@ -247,7 +253,7 @@ export class CollectionSubscription
    * and retains subset ownership so a later truncate can retry the replay.
    */
   private handleTruncate() {
-    const demandsToReload = [...this.subsetDemands]
+    const demandsToReload = this.subsetDemands.filter((demand) => demand.active)
 
     // Only buffer if there's an actual loadSubset handler that can do async work.
     // Without a loadSubset handler, there's nothing to re-request and no reason to buffer.
@@ -321,7 +327,7 @@ export class CollectionSubscription
       if (this.truncateReplaySession !== session) return
 
       for (const demand of demandsToReload) {
-        if (!this.subsetDemands.includes(demand)) continue
+        if (!this.isActiveDemand(demand)) continue
 
         const isCurrentAttempt = () =>
           this.truncateReplaySession === session &&
@@ -365,7 +371,7 @@ export class CollectionSubscription
             },
             () => {
               const failedCurrentDemand =
-                this.subsetDemands.includes(demand) &&
+                this.isActiveDemand(demand) &&
                 !nextAcquisition.options.signal?.aborted
               // A released demand no longer participates in the current
               // replacement. Its cooperative AbortError must not discard the
@@ -403,7 +409,7 @@ export class CollectionSubscription
           // replacement. Its cooperative AbortError must not discard the
           // successful rows from demands that are still active.
           return (
-            this.subsetDemands.includes(demand) &&
+            this.isActiveDemand(demand) &&
             !nextAcquisition.options.signal?.aborted
           )
         })
@@ -506,11 +512,13 @@ export class CollectionSubscription
     this.stalePublication = undefined
 
     const merged = [...session.buffer.flat(), ...retainedDeletes]
-    const activeDemandFilters = this.subsetDemands.map((demand) =>
-      demand.requestOptions.where
-        ? createFilterFunctionFromExpression(demand.requestOptions.where)
-        : undefined,
-    )
+    const activeDemandFilters = this.subsetDemands
+      .filter((demand) => demand.active)
+      .map((demand) =>
+        demand.requestOptions.where
+          ? createFilterFunctionFromExpression(demand.requestOptions.where)
+          : undefined,
+      )
     // The raw replay buffer can contain rows retained for another demand or
     // outside the ordered prefix. Publish the settled ordered reconciliation
     // as the replacement's one atomic batch.
@@ -658,7 +666,7 @@ export class CollectionSubscription
   private reconcileOrderedWindow(): Array<ChangeMessage<any, any>> {
     if (!this.orderedWindow) return []
     const additionalFilters = this.subsetDemands
-      .filter((demand) => demand.ordered === undefined)
+      .filter((demand) => demand.active && demand.ordered === undefined)
       .map((demand) =>
         demand.requestOptions.where
           ? createFilterFunctionFromExpression(demand.requestOptions.where)
@@ -699,7 +707,7 @@ export class CollectionSubscription
       ? createFilterFunctionFromExpression(this.options.whereExpression)
       : undefined
     const additionalFilters = this.subsetDemands
-      .filter((demand) => demand.ordered === undefined)
+      .filter((demand) => demand.active && demand.ordered === undefined)
       .map((demand) =>
         demand.requestOptions.where
           ? createFilterFunctionFromExpression(demand.requestOptions.where)
@@ -716,12 +724,19 @@ export class CollectionSubscription
       const admitsOrderedCandidates = changeSource === `ordered-source`
       if (change.type === `delete`) {
         stalePublication.publishedRows.delete(change.key)
-        if (admitsOrderedCandidates) orderedCandidates.delete(change.key)
+        orderedCandidates.delete(change.key)
       } else {
         if (admitsOrderedCandidates) {
           if (isOrderedRow(change.value)) {
             orderedCandidates.set(change.key, change.value)
           } else {
+            orderedCandidates.delete(change.key)
+          }
+        } else {
+          const candidate = orderedCandidates.get(change.key)
+          if (candidate !== undefined && !deepEquals(candidate, change.value)) {
+            // Additional visibility may replace the collection's current row,
+            // but it cannot transfer ordered authority from an older version.
             orderedCandidates.delete(change.key)
           }
         }
@@ -884,6 +899,7 @@ export class CollectionSubscription
 
     for (const requestSignal of provenance.requestSignals) {
       for (const demand of this.subsetDemands) {
+        if (!demand.active) continue
         if (
           demand.options.signal !== undefined &&
           isLoadSubsetRequestSignalFor(requestSignal, demand.options.signal)
@@ -1057,7 +1073,7 @@ export class CollectionSubscription
     const mayReplace =
       this.truncateReplaySession === session &&
       session.currentAttempt === attempt &&
-      this.subsetDemands.includes(demand) &&
+      this.isActiveDemand(demand) &&
       demand.pendingReplayAcquisitions.has(next) &&
       !demand.releaseSettled &&
       !next.options.signal?.aborted
@@ -1154,6 +1170,7 @@ export class CollectionSubscription
       options: requestOptions,
       ...(ordered === undefined ? {} : { ordered }),
       pendingReplayAcquisitions: new Set(),
+      active: true,
       releaseFailed: false,
       releaseSettled: false,
     }
@@ -1379,23 +1396,42 @@ export class CollectionSubscription
 
   /** Release one exact subset request while keeping the subscription alive. */
   releaseSnapshot(where: BasicExpression<boolean>): void {
-    const index = this.subsetDemands.findIndex(
-      (demand) =>
-        demand.requestOptions.where === where ||
-        this.requestedSubsetWhere.get(demand.requestOptions) === where,
+    const matchesWhere = (demand: SubsetDemand) =>
+      demand.requestOptions.where === where ||
+      this.requestedSubsetWhere.get(demand.requestOptions) === where
+    let index = this.subsetDemands.findIndex(
+      (demand) => demand.active && matchesWhere(demand),
     )
+    if (index === -1) {
+      // A prior unload may have failed after logical release. With no active
+      // owner left, a repeated release retries that exact cleanup debt.
+      index = this.subsetDemands.findIndex(matchesWhere)
+    }
     if (index === -1) return
 
     const demand = this.subsetDemands[index]
     if (!demand) return
-    this.releaseSubsetDemand(demand)
-    this.subsetDemands.splice(index, 1)
-    if (this.orderedWindow && !this.isBufferingForTruncate) {
-      const changes = this.stalePublication?.ordered
-        ? this.reconcileStaleOrderedPublication([])
-        : this.reconcileOrderedWindow()
-      if (changes.length > 0) this.callback(changes)
+    demand.active = false
+    let releaseError: unknown
+    try {
+      this.releaseSubsetDemand(demand)
+    } catch (error) {
+      releaseError = error
+    } finally {
+      if (
+        demand.releaseSettled &&
+        demand.pendingReplayAcquisitions.size === 0
+      ) {
+        this.subsetDemands.splice(index, 1)
+      }
+      if (this.orderedWindow && !this.isBufferingForTruncate) {
+        const changes = this.stalePublication?.ordered
+          ? this.reconcileStaleOrderedPublication([])
+          : this.reconcileOrderedWindow()
+        if (changes.length > 0) this.callback(changes)
+      }
     }
+    if (releaseError !== undefined) throw releaseError
   }
 
   /**
@@ -1566,7 +1602,7 @@ export class CollectionSubscription
 
     const mayApply = () =>
       shouldApply() &&
-      this.subsetDemands.includes(demand) &&
+      this.isActiveDemand(demand) &&
       !acquisition.options.signal?.aborted
 
     const apply = (outcome?: AppliedLoadSubsetOutcome) => {
@@ -1797,6 +1833,7 @@ export class CollectionSubscription
     // Release the current adapter acquisition for each logical subset demand.
     const failedDemands: Array<SubsetDemand> = []
     for (const demand of this.subsetDemands) {
+      demand.active = false
       try {
         this.releaseSubsetDemand(demand)
       } catch (error) {

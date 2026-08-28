@@ -431,13 +431,18 @@ replacement as new authority. If several same-key transactions collapse into
 one visible change, provenance reduces with the row version: value-equal writes
 combine their authorities, while a different later version replaces the
 earlier authorities. Row metadata writes do not confer row authority because
-they do not produce a new row version. An unsettled request does not claim
+they do not produce a new row version. The same version rule holds in a failed
+publication: an additional-only update or delete of an ordered candidate
+revokes that candidate's old-version authority instead of resurrecting it when
+the additional demand leaves. An unsettled request does not claim
 unrelated transactions merely because their lifetimes overlap. Ordinary live
 source changes and ordered acquisitions may evolve the ordered candidate set.
 A request-scoped write with no active ordered owner in this subscription stays
 additional-only; a peer may keep its shared physical lease alive after the
 local logical demand is released, but that cannot grant local ordered
-authority. A
+authority. Logical release takes effect before adapter cleanup. If
+`unloadSubset` throws, the inactive demand may remain only as cleanup debt; it
+cannot filter rows, join replay, accept settlement, or supply authority. A
 failed generation also clears its private coverage evidence; a successful
 ordered acquisition from that generation cannot suppress the next request when
 another demand makes the whole replacement fail. Reader-visible boundaries and
