@@ -337,7 +337,11 @@ describe(`loadSubset with subqueries`, () => {
     const expectedOrderBy: OrderBy = [
       {
         expression: new PropRef([`scheduled_at`]),
-        compareOptions: { direction: `desc`, nulls: `first` },
+        compareOptions: {
+          direction: `desc`,
+          nulls: `first`,
+          stringSort: `locale`,
+        },
       },
     ]
 
@@ -378,7 +382,11 @@ describe(`loadSubset with subqueries`, () => {
     const expectedOrderBy: OrderBy = [
       {
         expression: new PropRef([`scheduled_at`]),
-        compareOptions: { direction: `desc`, nulls: `first` },
+        compareOptions: {
+          direction: `desc`,
+          nulls: `first`,
+          stringSort: `locale`,
+        },
       },
     ]
 

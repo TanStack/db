@@ -92,6 +92,7 @@ operators and a few boundary adapters:
 | Run the graph and publish root rows   | `packages/db/src/query/live/collection-config-builder.ts`                                              |
 | Publish Collection-valued buckets     | `packages/db/src/query/live/bucket-facade-adapter.ts`                                                  |
 | Start and release asynchronous demand | `packages/db/src/query/live/subset-demand-controller.ts`, `packages/db/src/collection/subscription.ts` |
+| Reconcile ordered source windows      | `packages/db/src/query/total-order.ts`, `packages/db/src/query/live/window-state.ts`                   |
 
 Queries without includes keep the original compiled pipeline and do not pay
 for facade state. The one exception is a joined query with a custom public-key
@@ -373,6 +374,309 @@ tie-breaker, normally the child public key. An order-only change is a
 bucket-value change for arrays, singletons, concatenation, and Collection
 layout.
 
+At the asynchronous source boundary, `TotalOrder` resolves every direction,
+null-placement, and string-collation option and appends the collection public
+key. `WindowState` uses that order for the retained prefix, admission, refill,
+and continuation boundary. Independent join demands may retain extra source
+rows, but those rows do not move the ordered boundary. The D2 top-K operator
+uses the same query terms and public-key tie-breaker for emitted layout.
+
+An adapter receives only the leading order terms owned by its lexical source.
+Later terms that depend on a joined or derived row stay in D2. Since the public
+key tie-breaker is local and is not part of the adapter query, a finite source
+prefix is only a candidate prefix. Core expands the complete source-order
+boundary class, then applies the public-key tie-break locally. Locale and
+reference orders that the predicate IR cannot express fetch the full filtered
+region and refine it locally.
+
+Every continuation boundary comes from rows established by the same ordered
+demand. Rows retained for another query, join, or window cannot move it. During
+a failed truncate replay, the last complete publication remains the boundary;
+a partial replacement snapshot has no continuation provenance. Exact applied
+row keys and source extent advance retained coverage. Public readers also keep
+that last complete publication while every overlapping replacement attempt is
+pending. A successful current replacement publishes its settled ordered
+reconciliation once, but only after applied evidence proves the retained prefix
+or authoritative exhaustion. A continuing page stays private while its next
+acquisition refines that evidence. Retained window size is grow-only for the
+life of the subscription, so a smaller request during replacement cannot undo a
+larger prefix already requested. Failure of the current ordered demand or any
+still-active demand publishes no replacement batch.
+
+`WindowState` owns current-generation admission and coverage. The subscription
+owns the last complete reader-visible publication as one snapshot: its rows,
+sent keys, and optional ordered prefix size and total-order boundary. An active
+or failed replay retains that snapshot unchanged until a complete replacement
+publishes or later source changes reconcile it. After failure, ordered source
+changes evolve a candidate set rooted in that public snapshot under the same
+predicate, retained size, and `TotalOrder`. A worse-ranked row stays private but
+remains available to refill the prefix; rows installed only by the rejected
+replacement never enter this set. An empty retained publication is still a
+present publication and cannot collapse into absent state after an unrelated
+change. Source deltas, retained-window changes, new local snapshots, and demand
+release all run this one reducer because each can change the public union. A
+single reducer does not erase provenance: it keeps ordered-authorized
+candidates separate from rows visible only for another demand. A new local
+snapshot may add the latter to the public union, but it cannot promote a row
+left by the rejected generation into the ordered prefix, even when that row
+matches the ordered predicate. Releasing that demand removes the row again
+without changing the ordered boundary. Request-scoped adapter transactions
+pass the exact acquisition signal to `commit(signal)`. Core retains that signal
+as internal change provenance, so writes for an unordered demand have the same
+additional-only provenance as its local snapshot even when they arrive
+asynchronously. When a dedupe wrapper replaces logical request signals with a
+shared physical lease signal, it records that signal lineage. Provenance tests
+follow the lineage through nested wrappers instead of treating physical signal
+replacement as new authority. If several same-key transactions collapse into
+one visible change, provenance reduces with the row version: value-equal writes
+combine their authorities, while a different later version replaces the
+earlier authorities. Row metadata writes do not confer row authority because
+they do not produce a new row version. The same version rule holds in a failed
+publication: an additional-only update or delete of an ordered candidate
+revokes that candidate's old-version authority instead of resurrecting it when
+the additional demand leaves. An unsettled request does not claim
+unrelated transactions merely because their lifetimes overlap. Ordinary live
+source changes and ordered acquisitions may evolve the ordered candidate set.
+A request-scoped write with no active ordered owner in this subscription stays
+additional-only; a peer may keep its shared physical lease alive after the
+local logical demand is released, but that cannot grant local ordered
+authority. Logical release takes effect before adapter cleanup. If
+`unloadSubset` throws, the inactive demand may remain only as cleanup debt; it
+cannot filter rows, join replay, accept settlement, or supply authority. The
+same rule applies to an aborted replay acquisition retained only so its exact
+cleanup can be retried: matching shared-physical signal lineage does not make
+that obsolete acquisition current again. A
+shared physical owner may keep the row in the core collection, but the ordered
+coordinator supplies no public row or continuation boundary after its last
+local ordered demand leaves. Retiring that last owner clears the coordinator's
+coverage and immediately retracts its exclusive public rows, even while a
+truncate replacement remains in flight. Every retained replay baseline is
+updated to that same public state, so retired rows cannot suppress a later
+same-version insert. With no active ordered owner, ordinary source changes do
+not enter the dormant ordered window or create a later cursor. Adapter cleanup
+is also a reentrancy boundary: releasing one exact acquisition is idempotent.
+`releaseSnapshot(where)` releases the active logical owner; internal demand
+controllers also pass the acquisition's stable request signal when they must
+retry cleanup for one exact inactive owner among identical predicates. Replay
+handoff uses the same guard. If `unloadSubset` reenters release, the old
+acquisition retires once and the new acquisition is discarded rather than
+installed for the now-inactive demand. Completion removes that demand by object
+identity only after its current and pending replay acquisitions have all
+settled, so a callback cannot make a stale array position delete a newly-created
+owner. A
+failed generation also clears its private coverage evidence; a successful
+ordered acquisition from that generation cannot suppress the next request when
+another demand makes the whole replacement fail. Reader-visible boundaries and
+failed-replay offset or cursor restoration derive from this snapshot and ignore
+caller offset or cursor hints. A continuation that is still proving the active
+replacement instead derives from `WindowState`'s private current-generation
+progress and also ignores caller continuation hints; that progress cannot
+escape through a public boundary before the replacement publishes. If that
+generation has no private progress, its next request starts at offset zero
+without a cursor; it must not borrow caller cursor values or the old public key.
+This applies both to later continuation requests and to acquisitions rebuilt
+from stored demands at truncate start: replay must reconstruct transport state
+at the acquisition boundary instead of cloning the retired generation's offset
+or cursor. No parallel row-count or last-key fields may approximate either
+state.
+
+Each active demand in that replacement settles on its own, and the replacement
+waits for every acquisition it started. The published reconciliation is the
+retained ordered prefix plus rows required by every still-active other demand.
+Releasing a demand removes its rows from that union, but does not erase that
+settlement barrier or turn its cooperative abort into a replacement failure.
+Starting a newer attempt aborts every older acquisition. Those obsolete
+acquisitions must still settle, but their abort cannot veto a successful current
+attempt. Source deltas that race the current replacement stay private until
+reconciliation, then join the retained prefix when their order places them
+there. A superseded attempt's rows stay private, and only the current
+reconciliation may publish. Teardown discards the whole replacement epoch, so
+later source writes and late settlements cannot reach public readers. Here a
+publication means a change to reader-visible state; an empty transport callback
+does not count as one.
+
+Replay settlement bookkeeping precedes observable status and error callbacks.
+Acquisition replacement, ordered evidence, attempt completion, and the resulting
+publication or restoration all finish before `status:ready` or
+`loadSubset:error` listeners run. Reentrant listener work therefore starts in a
+stable publication epoch; it cannot enter a private buffer that the same
+settlement is about to discard.
+
+That barrier belongs to the whole replay attempt, not to one request. Errors are
+retained until every attempt acquisition settles. An acquisition started by a
+result callback while replay is active joins the same attempt, including its
+sync throw or async rejection. Callback-created replacement work therefore
+cannot leave a private epoch open after status returns to ready.
+Enrollment precedes the new acquisition's own result callback. A callback may
+retire its logical owner and revoke its publication or failure authority, but
+the physical settlement remains part of the attempt barrier.
+If callback-driven cleanup throws, replay records an attempt failure and still
+finishes setup. The exact cleanup debt remains retryable; the cleanup error is
+reported only after the last complete publication has been restored.
+Replay captures that attempt identity before adapter entry and carries it
+through settlement and result callbacks. Reentrant adapter or callback work may
+start a newer attempt, but an older acquisition's failure cannot veto that
+newer attempt's complete replacement.
+A result callback is itself part of the captured attempt barrier. In
+particular, synchronous ordered evidence cannot publish a post-setup
+continuation until that callback returns; a callback or cleanup failure first
+restores the prior complete publication, then reports its error.
+If a nested acquisition has already attributed a failure occurrence to its
+captured attempt, propagation through the containing callback does not create a
+second attribution or error event. Adapter boundaries, not thrown-value
+identity, distinguish occurrences: a later cleanup remains a separate failure
+even when it throws the same value. An internal propagation token marks a true
+rethrow across nested cleanup boundaries; it never replaces the public error
+payload. A callback frame retains every boundary occurrence, so `undefined`,
+`NaN`, primitives, and objects follow the same law without using payload
+equality as boundary identity.
+The callback frame finalizes its unique retained occurrences whether the
+callback returns or throws. Catching a nested failure cannot make a replay
+successful. A later distinct throw adds one callback occurrence after the
+nested occurrences, while rethrowing the internal propagation token does not.
+Public teardown follows the same rule: it aggregates original failure payloads
+at the outermost boundary and carries occurrence records through a containing
+cleanup or replay callback. Internal propagation tokens never become public
+error payloads or members of a public aggregate.
+Nested replay callback frames pass recognized failure groups to their
+containing frame. Once a frame attributes an occurrence, containing frames may
+recognize its propagation token but must not report the occurrence again.
+The same rule crosses recursive acquisition starts. An intermediate
+`loadSubset` that lets a nested `requestSnapshot` carrier escape must roll back
+its own tentative owner and rethrow that carrier unchanged. It does not create
+a failure for its own options; only the innermost adapter boundary originated
+the occurrence. Promise adoption follows the same rule: if an asynchronous
+intermediate acquisition rejects with that carrier, its settlement observer
+does not turn the carrier into a second public failure. This is a general
+promise-observer law, not a replay-only exception; cleanup and ordinary demand
+paths must consume the private carrier in the same way while still completing
+their status bookkeeping.
+Ordinary recursive acquisition follows this law even when no cleanup or replay
+callback is active. The live acquisition chain itself supplies the causal
+authority: a nested failure names its unsuspended containing acquisitions as
+adopters. The outermost ordinary synchronous request unwraps the carrier before
+returning control to its caller.
+Initial demand and replay replacement adapter entry use the same acquisition
+frame boundary. Replay attempt ownership changes when the failure may publish;
+it does not change which adapter boundary originated the failure.
+A cleanup failure raised reentrantly inside the acquisition being started stays
+as its raw payload while adapter code can catch it. The active acquisition
+frame retains that occurrence, so letting the same failure escape does not
+turn cleanup into a second load failure; a newly thrown value remains a new
+adapter occurrence.
+Carrier authority is acquisition-scoped. It records the exact containing
+acquisitions that were active above the originating failure, and only those
+acquisitions may consume it as adopted propagation. If adapter code retains a
+carrier and later throws or rejects it from an unrelated acquisition, that is
+a new boundary occurrence against the later options; the core unwraps the
+original payload before reporting or throwing it. Class identity alone is not
+causal provenance, and private carriers never cross a public boundary.
+The carrier proves only propagation that remains inside the synchronous
+callback boundary or is adopted by a promise created there. If adapter code
+suspends first and starts another acquisition later, the core observes two
+adapter boundaries and reports both failures. Equal payloads cannot prove that
+one occurrence caused the other, so the core never deduplicates them by value.
+Teardown dispatches `unsubscribed` listeners synchronously and collects their
+throws after adapter cleanup failures. Ordinary event delivery keeps its
+asynchronous listener-error behavior. A retained replay error batch completes
+against its current listener set even if the first listener reenters teardown;
+teardown defers only its global listener clear until that batch ends. Explicit
+`off` and `once` removal still take effect between events. A once-listener is
+indexed by both its wrapper and original callback, so `off(event, original)`
+can remove it before invocation. A second unsubscribe request during that
+deferred-clear interval cannot redispatch the terminal event; a later explicit
+call after the batch may still retry cleanup debt. Cleanup retries never
+redispatch `unsubscribed`, including to a listener registered after the first
+teardown pass; terminal publication is one lifetime edge.
+If teardown is requested inside an adapter-entry, cleanup, or result-callback
+frame while replay is active, public acquisition authority closes immediately
+and adapter cleanup still runs synchronously. Replay-session discard, the
+terminal event, and listener clearing wait until the active frame stack and
+already-settled promise adoption have attributed their failures. Those failures
+publish once against their exact originating options before the terminal event;
+failed cleanup remains retryable. Outside replay, nested teardown keeps its
+ordinary synchronous aggregation contract.
+If teardown cleanup fails while replay adapter entry remains active, that
+acquisition frame retains the exact cleanup occurrence even when adapter code
+catches the teardown throw and returns success. A successful adapter return
+cannot erase a nested failure which the subscription already observed.
+The same retention applies to a throwing acquisition exit. Rethrowing the
+private carrier reports only the nested occurrence; throwing a distinct value
+or the same public payload without that carrier adds a new outer occurrence
+after every earlier nested occurrence.
+`onLoadSubsetResult`, `requestSnapshot`, and `releaseSnapshot` are internal
+composition APIs. A nested synchronous failure may use the private propagation
+token across that callback; internal code must rethrow the caught value
+unchanged. Before callback-triggered teardown discards a replay session, the
+subscription merges failures already queued by sibling acquisitions with
+occurrences retained by every active callback frame. It reports each unique
+occurrence in creation order against its exact options before clearing the
+session. An occurrence that is both queued and reachable through a callback
+frame still reports once. Teardown ignores reentrant `unsubscribe()` calls
+while one pass is in progress, but a later call may still retry retained
+adapter cleanup debt.
+One logical release may cross both a pending replacement acquisition and its
+original acquisition. If several cleanup boundaries fail, the callback frame
+retains them as one propagated group and reports every occurrence against its
+exact acquisition options after restoration. Effect and Live Collection error
+classification compares both a monotonic error occurrence and SameValue
+payload identity. This distinguishes no reported error from a reported
+`undefined`, while a reported `NaN` is not a new graph failure merely because
+`NaN !== NaN`.
+Automatic replay handoff follows the same boundary law. A failed release of the
+old acquisition and a failed discard of its replacement are two reportable
+occurrences, each tied to its own exact options object. Reentrant owner release
+cannot make replacement cleanup appear to belong to the old acquisition. The
+same rule crosses logical demands: if one adapter cleanup reentrantly releases
+another demand, an automatic-cleanup frame carries every nested occurrence
+through the outer callback without merging them into an aggregate event or
+relabeling them as the outer acquisition. This composes recursively. An
+intermediate cleanup cannot replace a deeper acquisition's provenance merely
+by propagating the same payload, catching it, or throwing another error after
+it; each originating cleanup remains one ordered occurrence.
+A requested limit, a settled promise, or the number of requests does not.
+Applied keys carry two distinct facts. Every applied source key may advance the
+continuation cursor, including a row excluded by the subscription predicate.
+Only applied rows admitted to that subscription's retained result prefix count
+toward its covered size. Thus a short continuing page cannot turn a requested
+prefix into achieved coverage, but an excluded row can still move the next
+request past source data that core has already inspected.
+Predicate-invisible source changes do not invalidate that visible prefix. When
+an applied receipt establishes those rows, they still remain exact source
+provenance and may move the continuation boundary.
+
+Automatic continuation is monotonic. Its identity is the retained demanded
+prefix plus the exact total-order boundary, including the public key. Core may
+start another request only when that prefix grows or that boundary moves. If a
+continuing page establishes neither fact, core leaves the window uncovered,
+does not repeat the same request, and records a nonfatal no-progress diagnostic
+in `lastSubsetError`.
+
+Live Collections and Effects keep separate consumer-local continuation state,
+but obey the same identity and reset law. A settled request remains the
+no-progress guard until its demanded prefix or total-order boundary changes;
+settlement alone must not permit a busy loop. Prefix refinement and truncate
+revoke an active guard. A rejected Effect source is not retried in place: the
+source error disposes that Effect, and teardown clears all of its guard state
+before a replacement consumer can start. The consumer-parity oracle runs the
+same hidden-boundary history through both implementations so neither can
+silently drift from this law.
+
+A truncate replay remains part of the original logical demand. Its replacement
+acquisition must therefore notify the same result observer that tracked the
+initial acquisition. Ordered consumers treat that replay as their in-flight
+load, so they cannot race it with a duplicate refill. If the replay settles
+without covering the retained prefix, its observer may start exactly one
+continuation after all replacement acquisitions have settled.
+
+An outcome-free completion (`true` or `Promise<void>`) supplies no reusable row
+provenance, source extent, or CoverageFact. Its exact request has still settled,
+so the owning subscription may admit only the current local prefix. A short
+page remains uncovered and triggers another pass. The admitted local boundary
+may distinguish those immediate passes, but it is scheduling state, not a
+transport cursor. If the window later grows, core refreshes the required prefix
+from the start instead of continuing from those rows as a cursor boundary.
+
 A bare child query is a Collection-valued include. It exposes one stable public
 Collection facade per active bucket in that edge:
 
@@ -435,10 +739,35 @@ only after every attached owner has released it.
 
 A Collection subscription installs each logical subset owner before it calls
 the source adapter. Reentrant release during `loadSubset` must therefore see and
-release that exact acquisition. A synchronous `loadSubset` throw that did not
-follow a failed release rolls the tentative owner back without calling
-`unloadSubset`; a failed release keeps the owner so a later cleanup can retry the
-same acquisition identity.
+release that exact acquisition. It also registers the caller's original
+predicate before adapter entry, because the transport predicate may combine it
+with the subscription predicate. After adapter return, both ordered and
+unordered requests recheck logical ownership before they report results, track
+loading state, establish coverage, or scan local state; a demand released
+during adapter code cannot publish a later snapshot. A synchronous `loadSubset`
+throw that did not follow a failed release rolls the tentative owner back before
+it emits the error and without calling `unloadSubset`; a failed release keeps
+the owner so a later cleanup can retry the same acquisition identity.
+Result callbacks are also arbitrary reentrancy boundaries. After invoking one,
+the request checks the same exact owner again before it tracks status, applies
+coverage, or scans local rows. A callback may release or unsubscribe; obsolete
+promises are then observed only to consume a possible rejection.
+
+A failed publication may retain rows owned only by unordered demands after the
+last ordered owner leaves. A later ordered incarnation starts with an empty
+ordered candidate set over that retained additional baseline. Its source rows
+still enter the ordered admission path, so it publishes only the proven top-K
+union the active unordered rows; a nonempty stale baseline cannot route them
+through generic delivery.
+
+Unsubscription closes the acquisition boundary before adapter cleanup starts.
+An `unloadSubset` callback or unsubscribe listener may reenter public request
+methods, but those methods cannot start a new acquisition after teardown has
+begun. Teardown attempts every owned acquisition. It rethrows one failure
+unchanged, or an `AggregateError` whose ordered `errors` list retains every
+failure occurrence when several boundaries fail. Repeated unsubscribe calls
+may still retry each retained cleanup debt against the same acquisition
+options.
 
 Its semantic contract is:
 
@@ -525,7 +854,9 @@ ownership before it releases the prior lease. This handoff is one ownership
 transition from the Collection's point of view: replacing a row with the same
 key cannot let old-owner garbage collection delete the new value. A failed or
 obsolete replacement leaves the old lease in place and retires only the new
-attempt.
+attempt. If logical release reenters while the old lease is being retired, the
+handoff must not install the replacement. It releases that replacement exactly
+once and collects the inactive demand after all late cleanup succeeds.
 
 An imperative load operation reports caller-relative evidence, not merely the
 promises started while it was active. If a successful operation starts no new
@@ -692,20 +1023,22 @@ create recursive Collection machinery.
 
 ## Executable contracts
 
-| Contract                                                                    | Test suite                                                                |
-| --------------------------------------------------------------------------- | ------------------------------------------------------------------------- |
-| State equivalence, route lifecycle, transition history, and batch partition | `packages/db/tests/query/includes-oracle.property.test.ts`                |
-| Joined multiplicity, alias identity, and null-key normalization             | `packages/db/tests/query/includes-query-shape-oracle.test.ts`             |
-| Demand, cancellation, and progressive timing                                | `packages/db/tests/query/includes-temporal-oracle.test.ts`                |
-| Optimistic confirmation, rollback, and later reactivity                     | `packages/db/tests/query/includes-optimistic-oracle.property.test.ts`     |
-| Coherent layered publication                                                | `packages/db/tests/query/includes-publication-oracle.test.ts`             |
-| Collection facades, event coherence, and route activation                   | `packages/db/tests/query/includes-collection-oracle.property.test.ts`     |
-| Correlated physical work                                                    | `packages/db/tests/query/includes-work-counter-oracle.test.ts`            |
-| Route-context discovery and transport across recursive and join boundaries  | `packages/db/tests/query/includes-context-transport-oracle.test.ts`       |
-| Coverage leases, acquisitions, fact compaction, and row provenance          | `packages/db/tests/query/coverage-registry-oracle.property.test.ts`       |
-| Applied coverage publication through the Collection sync boundary           | `packages/db/tests/load-subset-outcome.test.ts`                           |
-| Query-db ownership                                                          | `packages/query-db-collection/tests/ownership-lifecycle.oracle.test.ts`   |
-| Reachable nested shape                                                      | `packages/query-db-collection/tests/includes-work-counter-oracle.test.ts` |
+| Contract                                                                    | Test suite                                                                 |
+| --------------------------------------------------------------------------- | -------------------------------------------------------------------------- |
+| State equivalence, route lifecycle, transition history, and batch partition | `packages/db/tests/query/includes-oracle.property.test.ts`                 |
+| Joined multiplicity, alias identity, and null-key normalization             | `packages/db/tests/query/includes-query-shape-oracle.test.ts`              |
+| Demand, cancellation, and progressive timing                                | `packages/db/tests/query/includes-temporal-oracle.test.ts`                 |
+| Optimistic confirmation, rollback, and later reactivity                     | `packages/db/tests/query/includes-optimistic-oracle.property.test.ts`      |
+| Coherent layered publication                                                | `packages/db/tests/query/includes-publication-oracle.test.ts`              |
+| Collection facades, event coherence, and route activation                   | `packages/db/tests/query/includes-collection-oracle.property.test.ts`      |
+| Correlated physical work                                                    | `packages/db/tests/query/includes-work-counter-oracle.test.ts`             |
+| Route-context discovery and transport across recursive and join boundaries  | `packages/db/tests/query/includes-context-transport-oracle.test.ts`        |
+| Ordered source coverage, total boundaries, and window transitions           | `packages/db/tests/query/pagination-oracle.property.test.ts`               |
+| Truncate replacement, retained publication, and boundary provenance         | `packages/db/tests/collection-subscription-replay-oracle.property.test.ts` |
+| Coverage leases, acquisitions, fact compaction, and row provenance          | `packages/db/tests/query/coverage-registry-oracle.property.test.ts`        |
+| Applied coverage publication through the Collection sync boundary           | `packages/db/tests/load-subset-outcome.test.ts`                            |
+| Query-db ownership                                                          | `packages/query-db-collection/tests/ownership-lifecycle.oracle.test.ts`    |
+| Reachable nested shape                                                      | `packages/query-db-collection/tests/includes-work-counter-oracle.test.ts`  |
 
 Each oracle identifies the first divergent checkpoint and compares either the
 whole result or one exact structural difference. Correlated-materialization

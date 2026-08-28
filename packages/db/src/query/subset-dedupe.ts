@@ -1,3 +1,4 @@
+import { attachLoadSubsetRequestSignal } from '../load-subset-request-provenance.js'
 import {
   isLoadSubsetRequestSubsumedBy,
   isWhereSubset,
@@ -359,6 +360,7 @@ function createSharedAbortLease(
   }
 
   const attach = (signal: AbortSignal | undefined) => {
+    attachLoadSubsetRequestSignal(controller?.signal, signal)
     if (!signal) {
       hasUnabortableOwner = true
       return

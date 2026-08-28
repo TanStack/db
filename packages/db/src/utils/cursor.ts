@@ -1,4 +1,13 @@
-import { and, eq, gt, lt, or } from '../query/builder/functions.js'
+import {
+  and,
+  eq,
+  gt,
+  isNull,
+  isUndefined,
+  lt,
+  not,
+  or,
+} from '../query/builder/functions.js'
 import { Value } from '../query/ir.js'
 import type { BasicExpression, OrderBy } from '../query/ir.js'
 
@@ -26,13 +35,6 @@ export function buildCursor(
     return undefined
   }
 
-  // For single column, just use simple gt/lt
-  if (orderBy.length === 1) {
-    const { expression, compareOptions } = orderBy[0]!
-    const operator = compareOptions.direction === `asc` ? gt : lt
-    return operator(expression, new Value(values[0]))
-  }
-
   // For multi-column, build the composite cursor:
   // or(
   //   gt(col1, v1),
@@ -51,12 +53,11 @@ export function buildCursor(
     for (let j = 0; j < i; j++) {
       const prevClause = orderBy[j]!
       const prevValue = values[j]
-      eqConditions.push(eq(prevClause.expression, new Value(prevValue)))
+      eqConditions.push(buildCursorEquality(prevClause.expression, prevValue))
     }
 
     // Add the comparison for the current column (respecting direction)
-    const operator = clause.compareOptions.direction === `asc` ? gt : lt
-    const comparison = operator(clause.expression, new Value(value))
+    const comparison = cursorAfter(clause, value)
 
     if (eqConditions.length === 0) {
       // First column: just the comparison
@@ -75,4 +76,61 @@ export function buildCursor(
   }
   // Use reduce to combine with or() which expects exactly 2 args
   return clauses.reduce((acc, clause) => or(acc, clause))
+}
+
+/**
+ * Whether the public predicate IR can express this boundary's comparison.
+ * Unsupported values must use an unbounded boundary fetch and local TotalOrder
+ * refinement rather than a plausible but different provider order.
+ */
+export function canExpressCursorOrder(
+  orderBy: OrderBy,
+  values: ReadonlyArray<unknown>,
+): boolean {
+  return orderBy.every((clause, index) => {
+    const value = values[index]
+    if (value == null) return true
+    if (value instanceof Date) return Number.isFinite(value.getTime())
+    if (typeof value === `string`) {
+      return clause.compareOptions.stringSort === `lexical`
+    }
+    return (
+      typeof value === `number` ||
+      typeof value === `bigint` ||
+      typeof value === `boolean`
+    )
+  })
+}
+
+function cursorNullish(expression: BasicExpression): BasicExpression<boolean> {
+  return or(isNull(expression), isUndefined(expression))
+}
+
+export function buildCursorEquality(
+  expression: BasicExpression,
+  value: unknown,
+): BasicExpression<boolean> {
+  return value == null
+    ? cursorNullish(expression)
+    : eq(expression, new Value(value))
+}
+
+function cursorAfter(
+  clause: OrderBy[number],
+  value: unknown,
+): BasicExpression<boolean> {
+  const { expression, compareOptions } = clause
+  const nullish = cursorNullish(expression)
+
+  if (value == null) {
+    return compareOptions.nulls === `first` ? not(nullish) : new Value(false)
+  }
+
+  const compare =
+    compareOptions.direction === `asc`
+      ? gt(expression, new Value(value))
+      : lt(expression, new Value(value))
+  return compareOptions.nulls === `last`
+    ? or(compare, nullish)
+    : and(not(nullish), compare)
 }

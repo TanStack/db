@@ -11,8 +11,9 @@ import {
   optimizeExpressionWithIndexes,
 } from '../utils/index-optimization.js'
 import { ensureIndexForField } from '../indexes/auto-index.js'
-import { makeComparator } from '../utils/comparison.js'
+import { ReverseIndex } from '../indexes/reverse-index.js'
 import { buildCompareOptions } from '../query/compiler/order-by'
+import { TotalOrder } from '../query/total-order.js'
 import type {
   ChangeMessage,
   CollectionLike,
@@ -358,7 +359,30 @@ function getOrderedKeys<T extends object, TKey extends string | number>(
         // Take the keys that match the filter and limit
         // if no limit is provided `index.keyCount` is used,
         // i.e. we will take all keys that match the filter
-        return index.takeFromStart(limit ?? index.keyCount, filterFn)
+        if (!(index instanceof ReverseIndex)) {
+          return index.takeFromStart(limit ?? index.keyCount, filterFn)
+        }
+
+        // Reversing a value index also reverses keys inside an equal-value
+        // bucket, but query TotalOrder keeps its public-key tie-break ascending.
+        // Refine all matching indexed rows locally so a limit cannot cut the
+        // wrong side of a tied boundary.
+        const totalOrder = new TotalOrder(orderBy, collection)
+        const indexedEntries = index
+          .takeFromStart(index.keyCount, filterFn)
+          .flatMap((key) => {
+            const value = collection.get(key)
+            return value === undefined ? [] : [{ key, value }]
+          })
+        indexedEntries.sort((left, right) =>
+          totalOrder.compareEntries(
+            [left.key, left.value],
+            [right.key, right.value],
+          ),
+        )
+        return indexedEntries
+          .slice(0, limit ?? indexedEntries.length)
+          .map(({ key }) => key)
       }
     }
   }
@@ -375,24 +399,10 @@ function getOrderedKeys<T extends object, TKey extends string | number>(
     }
   }
 
-  // Sort using makeComparator
-  const compare = (a: { key: TKey; value: T }, b: { key: TKey; value: T }) => {
-    for (const clause of orderBy) {
-      const compareFn = makeComparator(clause.compareOptions)
-
-      // Extract values for comparison
-      const aValue = extractValueFromItem(a.value, clause.expression)
-      const bValue = extractValueFromItem(b.value, clause.expression)
-
-      const result = compareFn(aValue, bValue)
-      if (result !== 0) {
-        return result
-      }
-    }
-    return 0
-  }
-
-  allItems.sort(compare)
+  const totalOrder = new TotalOrder(orderBy, collection)
+  allItems.sort((left, right) =>
+    totalOrder.compareEntries([left.key, left.value], [right.key, right.value]),
+  )
   const sortedKeys = allItems.map((item) => item.key)
 
   // Apply limit if provided
@@ -402,24 +412,4 @@ function getOrderedKeys<T extends object, TKey extends string | number>(
 
   // if no limit is provided, we will return all keys
   return sortedKeys
-}
-
-/**
- * Helper function to extract a value from an item based on an expression
- */
-function extractValueFromItem(item: any, expression: BasicExpression): any {
-  if (expression.type === `ref`) {
-    const propRef = expression
-    let value = item
-    for (const pathPart of propRef.path) {
-      value = value?.[pathPart]
-    }
-    return value
-  } else if (expression.type === `val`) {
-    return expression.value
-  } else {
-    // It must be a function
-    const evaluator = compileSingleRowExpression(expression)
-    return evaluator(item as Record<string, unknown>)
-  }
 }

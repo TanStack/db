@@ -561,6 +561,9 @@ class EffectPipelineRunner<TRow extends object, TKey extends string | number> {
               pendingBuffers.get(sourceId)!.push(changes)
             } else {
               this.trackSentValues(sourceId, changes, orderByInfo.comparator)
+              if (this.subscriptions[sourceId]?.requiresOrderedPrefixRefresh) {
+                this.lastLoadRequestKey.delete(sourceId)
+              }
               const split = [...splitUpdates(changes)]
               this.handleSourceChanges(sourceId, split)
             }
@@ -624,6 +627,16 @@ class EffectPipelineRunner<TRow extends object, TKey extends string | number> {
         this.requestInitialOrderedSnapshot(alias, orderByInfo, subscription)
       }
 
+      if (orderByInfo) {
+        const truncateUnsubscribe = collection.on(`truncate`, () => {
+          this.lastLoadRequestKey.delete(sourceId)
+          this.biggestSentValue.delete(sourceId)
+          this.sentToD2KeysBySource.get(sourceId)?.clear()
+          this.pendingOrderedLoadPromise = undefined
+        })
+        this.unsubscribeCallbacks.add(truncateUnsubscribe)
+      }
+
       // Listen for status changes on source collections
       const statusUnsubscribe = collection.on(`status:change`, (event) => {
         if (this.disposed) return
@@ -684,6 +697,9 @@ class EffectPipelineRunner<TRow extends object, TKey extends string | number> {
       for (const changes of buffer) {
         if (orderByInfo) {
           this.trackSentValues(sourceId, changes, orderByInfo.comparator)
+          if (this.subscriptions[sourceId]?.requiresOrderedPrefixRefresh) {
+            this.lastLoadRequestKey.delete(sourceId)
+          }
           const split = [...splitUpdates(changes)]
           this.sendChangesToD2(sourceId, split)
         } else {
@@ -720,6 +736,7 @@ class EffectPipelineRunner<TRow extends object, TKey extends string | number> {
     plan: LazyDemandPlan,
     keys: Set<unknown>,
   ): void {
+    const errorVersion = subscription.lastErrorVersion
     let update
     try {
       update = this.demand.setDemand(subscription, plan, keys)
@@ -727,7 +744,12 @@ class EffectPipelineRunner<TRow extends object, TKey extends string | number> {
       // The subscription error event already reports adapter failures and
       // disposes this effect. Do not let that query-local failure escape the
       // source commit, but keep unrelated graph errors visible.
-      if (subscription.lastError !== error) throw error
+      if (
+        subscription.lastErrorVersion === errorVersion ||
+        !Object.is(subscription.lastError, error)
+      ) {
+        throw error
+      }
       if (this.starting) throw error
       return
     }
@@ -942,6 +964,8 @@ class EffectPipelineRunner<TRow extends object, TKey extends string | number> {
         limit: offset + limit,
         orderBy: normalizedOrderBy,
         trackLoadSubsetPromise: false,
+        onLoadSubsetResult: (result) =>
+          this.trackOrderedLoad(result, orderByInfo.sourceId),
       })
     } else {
       subscription.requestSnapshot({
@@ -973,16 +997,56 @@ class EffectPipelineRunner<TRow extends object, TKey extends string | number> {
     )) {
       if (!orderByInfo.dataNeeded || !orderByInfo.index) continue
 
+      const subscription = this.subscriptions[orderByInfo.sourceId]
+      if (!subscription) continue
+      subscription.ensureOrderedWindowSize(
+        orderByInfo.offset + orderByInfo.limit,
+      )
+      if (subscription.hasOrderedCoverageForActiveWindow) {
+        continue
+      }
+
       if (this.pendingOrderedLoadPromise) {
         // Wait for in-flight loads to complete before requesting more
         continue
       }
 
-      const n = orderByInfo.dataNeeded()
-      if (n > 0) {
-        this.loadNextItems(orderByInfo, n)
+      const n = Math.max(
+        orderByInfo.dataNeeded(),
+        subscription.orderedRowsNeeded,
+      )
+      this.loadNextItems(orderByInfo, Math.max(1, n))
+    }
+  }
+
+  private trackOrderedLoad(
+    result: LoadSubsetRequestResult,
+    sourceId: string,
+  ): void {
+    const continueAfterFulfillment = () => {
+      if (this.disposed) return
+      if (this.subscriptions[sourceId]?.requiresOrderedPrefixRefresh) {
+        this.lastLoadRequestKey.delete(sourceId)
+      }
+      this.loadMoreIfNeeded()
+    }
+    if (!(result instanceof Promise)) {
+      // A synchronous truncate replay notifies this observer before replay
+      // setup completes. Continue on the next microtask so every replacement
+      // demand is registered before the consumer asks for another page.
+      queueMicrotask(continueAfterFulfillment)
+      return
+    }
+    this.pendingOrderedLoadPromise = result
+    const finish = () => {
+      if (this.pendingOrderedLoadPromise === result) {
+        this.pendingOrderedLoadPromise = undefined
       }
     }
+    void result.then(() => {
+      finish()
+      continueAfterFulfillment()
+    }, finish)
   }
 
   /**
@@ -1000,36 +1064,34 @@ class EffectPipelineRunner<TRow extends object, TKey extends string | number> {
 
     const cursor = computeOrderedLoadCursor(
       orderByInfo,
-      this.biggestSentValue.get(sourceId),
+      subscription.orderedBoundaryRow,
       this.lastLoadRequestKey.get(sourceId),
       alias,
       n,
+      subscription.orderedRetainedWindowSize,
+      subscription.orderedBoundaryKey,
     )
     if (!cursor) return // Duplicate request — skip
 
     this.lastLoadRequestKey.set(sourceId, cursor.loadRequestKey)
 
+    const errorVersion = subscription.lastErrorVersion
     try {
       subscription.requestLimitedSnapshot({
         orderBy: cursor.normalizedOrderBy,
         limit: n,
         minValues: cursor.minValues,
         trackLoadSubsetPromise: false,
-        onLoadSubsetResult: (loadResult: LoadSubsetRequestResult) => {
-          // Track in-flight load to prevent redundant concurrent requests
-          if (loadResult instanceof Promise) {
-            this.pendingOrderedLoadPromise = loadResult
-            const finish = () => {
-              if (this.pendingOrderedLoadPromise === loadResult) {
-                this.pendingOrderedLoadPromise = undefined
-              }
-            }
-            void loadResult.then(finish, finish)
-          }
-        },
+        onLoadSubsetResult: (loadResult: LoadSubsetRequestResult) =>
+          this.trackOrderedLoad(loadResult, sourceId),
       })
     } catch (error) {
-      if (subscription.lastError !== error) throw error
+      if (
+        subscription.lastErrorVersion === errorVersion ||
+        !Object.is(subscription.lastError, error)
+      ) {
+        throw error
+      }
       // subscribeChanges already routed the error through onSourceError. Do
       // not let an automatic refill fail the source transaction that exposed
       // the missing row.

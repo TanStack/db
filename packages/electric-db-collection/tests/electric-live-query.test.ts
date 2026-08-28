@@ -1,11 +1,11 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import {
+  BasicIndex,
   createCollection,
   createLiveQueryCollection,
   eq,
   gt,
   lt,
-  BasicIndex,
 } from '@tanstack/db'
 import { electricCollectionOptions } from '../src/electric'
 import type { ElectricCollectionUtils } from '../src/electric'
@@ -1206,9 +1206,9 @@ describe(`Electric Collection - loadSubset deduplication`, () => {
     // Wait for the existing live query to re-request data after truncate
     await new Promise((resolve) => setTimeout(resolve, 0))
 
-    // The existing live query re-requests its data after truncate
-    // After must-refetch, the query requests data again (1 initial + 1 after truncate)
-    expect(mockRequestSnapshot).toHaveBeenCalledTimes(2)
+    // Truncate replays the exact demand once. Electric does not yet return an
+    // applied outcome, so the empty local prefix then requests one refill.
+    expect(mockRequestSnapshot).toHaveBeenCalledTimes(3)
 
     // Create the same live query again after reset
     // This should NOT be deduped because the reset cleared the deduplication state,
@@ -1227,8 +1227,8 @@ describe(`Electric Collection - loadSubset deduplication`, () => {
     await new Promise((resolve) => setTimeout(resolve, 0))
 
     // Should have more calls - the different query triggered a new request
-    // 1 initial + 1 after must-refetch + 1 for new query = 3
-    expect(mockRequestSnapshot).toHaveBeenCalledTimes(3)
+    // 1 initial + 1 replay + 1 outcome-free refill + 1 new query = 4
+    expect(mockRequestSnapshot).toHaveBeenCalledTimes(4)
   })
 
   it(`should deduplicate unlimited queries regardless of orderBy`, async () => {

@@ -1,7 +1,18 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { createCollection } from '../src/collection/index.js'
+import { EventEmitter } from '../src/event-emitter.js'
 import { BTreeIndex } from '../src/indexes/btree-index.js'
 import type { Collection } from '../src/collection/index.js'
+
+class TestEventEmitter extends EventEmitter<{ event: { id: number } }> {
+  emit(id: number): void {
+    this.emitInner(`event`, { id })
+  }
+
+  clear(): void {
+    this.clearListeners()
+  }
+}
 
 describe(`Collection Events System`, () => {
   let collection: Collection
@@ -255,6 +266,111 @@ describe(`Collection Events System`, () => {
       expect(listener).toHaveBeenCalledTimes(1) // Still only called once
 
       unsubscribe()
+    })
+
+    it(`removes a once listener before invoking a throwing callback`, () => {
+      const emitter = new TestEventEmitter()
+      const failure = new Error(`once listener failed`)
+      const deferredMicrotasks: Array<VoidFunction> = []
+      const queueMicrotaskSpy = vi
+        .spyOn(globalThis, `queueMicrotask`)
+        .mockImplementation((callback) => deferredMicrotasks.push(callback))
+      const listener = vi.fn(() => {
+        throw failure
+      })
+
+      try {
+        emitter.once(`event`, listener)
+        emitter.emit(1)
+        emitter.emit(2)
+
+        expect(listener).toHaveBeenCalledTimes(1)
+        expect(deferredMicrotasks).toHaveLength(1)
+        expect(() => deferredMicrotasks[0]!()).toThrow(failure)
+      } finally {
+        queueMicrotaskSpy.mockRestore()
+      }
+    })
+
+    it(`removes a pending once listener through off`, () => {
+      const emitter = new TestEventEmitter()
+      const calls: Array<string> = []
+      const onceListener = vi.fn(() => calls.push(`once`))
+      emitter.on(`event`, () => {
+        calls.push(`off`)
+        emitter.off(`event`, onceListener)
+      })
+      emitter.once(`event`, onceListener)
+
+      emitter.emit(1)
+
+      expect(calls).toEqual([`off`])
+      expect(onceListener).not.toHaveBeenCalled()
+    })
+
+    it(`removes a pending once listener through its returned unsubscribe`, () => {
+      const emitter = new TestEventEmitter()
+      const onceListener = vi.fn()
+      const unsubscribe = emitter.once(`event`, onceListener)
+
+      unsubscribe()
+      emitter.emit(1)
+
+      expect(onceListener).not.toHaveBeenCalled()
+    })
+
+    it(`removes every pending once registration for the same callback`, () => {
+      const emitter = new TestEventEmitter()
+      const onceListener = vi.fn()
+      emitter.once(`event`, onceListener)
+      emitter.once(`event`, onceListener)
+
+      emitter.off(`event`, onceListener)
+      emitter.emit(1)
+
+      expect(onceListener).not.toHaveBeenCalled()
+    })
+
+    it(`removes a once listener before a reentrant emission`, () => {
+      const emitter = new TestEventEmitter()
+      const observed: Array<number> = []
+      emitter.once(`event`, ({ id }) => {
+        observed.push(id)
+        emitter.emit(2)
+      })
+
+      emitter.emit(1)
+
+      expect(observed).toEqual([1])
+    })
+
+    it(`clears ordinary and once listeners together`, () => {
+      const emitter = new TestEventEmitter()
+      const ordinaryListener = vi.fn()
+      const onceListener = vi.fn()
+      emitter.on(`event`, ordinaryListener)
+      emitter.once(`event`, onceListener)
+
+      emitter.clear()
+      emitter.emit(1)
+
+      expect(ordinaryListener).not.toHaveBeenCalled()
+      expect(onceListener).not.toHaveBeenCalled()
+    })
+
+    it(`exposes the same pending-once removal law through Collection`, () => {
+      const calls: Array<string> = []
+      const onceListener = vi.fn(() => calls.push(`once`))
+      collection.on(`status:change`, () => {
+        calls.push(`off`)
+        collection.off(`status:change`, onceListener)
+      })
+      collection.once(`status:change`, onceListener)
+
+      collection.startSyncImmediate()
+
+      expect(calls).toEqual([`off`])
+      expect(onceListener).not.toHaveBeenCalled()
     })
   })
 

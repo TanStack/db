@@ -814,3 +814,17 @@ export class SetWindowRequiresOrderByError extends QueryCompilationError {
     )
   }
 }
+
+/**
+ * Diagnostic recorded when an ordered source says more rows exist but gives
+ * core neither a new cursor nor a larger demanded prefix to request.
+ */
+export class OrderedLoadNoProgressError extends TanStackDBError {
+  constructor(sourceId: string, demandedPrefix: number) {
+    super(
+      `Source '${sourceId}' made no ordered progress toward prefix ${demandedPrefix}: ` +
+        `the last continuing page established no new cursor.`,
+    )
+    this.name = `OrderedLoadNoProgressError`
+  }
+}

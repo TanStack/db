@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { Temporal } from 'temporal-polyfill'
-import { DefaultMap, serializeValue } from '../src/utils.js'
+import { DefaultMap, compareKeys, serializeValue } from '../src/utils.js'
 import { hash } from '../src/hashing/index.js'
 
 describe(`DefaultMap`, () => {
@@ -27,6 +27,14 @@ describe(`DefaultMap`, () => {
 
     map.update(`key`, (value) => value * 2)
     expect(map.get(`key`)).toBe(2)
+  })
+})
+
+describe(`compareKeys`, () => {
+  it(`orders finite numeric keys before NaN`, () => {
+    expect(compareKeys(1, Number.NaN)).toBeLessThan(0)
+    expect(compareKeys(Number.NaN, 1)).toBeGreaterThan(0)
+    expect(compareKeys(Number.NaN, Number.NaN)).toBe(0)
   })
 })
 

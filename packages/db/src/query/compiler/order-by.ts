@@ -6,6 +6,7 @@ import { defaultComparator, makeComparator } from '../../utils/comparison.js'
 import { PropRef, collectCollectionSources, followRef } from '../ir.js'
 import { ensureIndexForField } from '../../indexes/auto-index.js'
 import { findIndexForField } from '../../utils/index-optimization.js'
+import { resolveCompareOptions, resolveOrderBy } from '../total-order.js'
 import { compileExpression } from './evaluators.js'
 import { replaceAggregatesByRefs } from './group-by.js'
 import type { CompareOptions } from '../builder/types.js'
@@ -33,8 +34,6 @@ export type OrderByOptimizationInfo = {
   ) => number
   /** Extracts all orderBy column values from a raw row (array for multi-column) */
   valueExtractorForRawRow: (row: Record<string, unknown>) => unknown
-  /** Extracts only the first column value - used for index-based cursor */
-  firstColumnValueExtractor: (row: Record<string, unknown>) => unknown
   /** Index on the first orderBy column - used for lazy loading */
   index?: IndexInterface<string | number>
   dataNeeded?: () => number
@@ -70,7 +69,6 @@ export function processOrderBy(
       compareOptions: buildCompareOptions(clause, collection),
     }
   })
-
   // Create a value extractor function for the orderBy operator
   const valueExtractor = (row: NamespacedRow & { $selected?: any }) => {
     // The namespaced row contains:
@@ -134,14 +132,13 @@ export function processOrderBy(
   // Skip this optimization when using grouped ordering (includes with limit),
   // because the limit is per-group, not global — the child collection needs all data loaded.
   if (
-    limit &&
+    limit !== undefined &&
     !groupKeyFn &&
     rawQuery.from.type !== `unionFrom` &&
     rawQuery.from.type !== `unionAll`
   ) {
     let index: IndexInterface<string | number> | undefined
     let followRefCollection: Collection | undefined
-    let firstColumnValueExtractor: CompiledSingleRowExpression | undefined
     let orderByAlias: string = rawQuery.from.alias
     let orderBySourceId: string | undefined
 
@@ -160,10 +157,10 @@ export function processOrderBy(
         followRefCollection = followRefResult.collection
         orderBySourceId = followRefResult.sourceId
         const fieldName = followRefResult.path[0]
-        const compareOpts = buildCompareOptions(
-          firstClause,
-          followRefCollection,
-        )
+        // The query's first source defines implicit string collation for the
+        // whole order. Build the source index with that same resolved term so
+        // provider admission cannot disagree with emitted query order.
+        const compareOpts = buildCompareOptions(firstClause, collection)
 
         if (fieldName) {
           // Use a single-column comparator for the index, not the
@@ -181,12 +178,6 @@ export function processOrderBy(
             firstColumnCompareFn,
           )
         }
-
-        // First column value extractor - used for index cursor
-        firstColumnValueExtractor = compileExpression(
-          new PropRef(followRefResult.path),
-          true,
-        ) as CompiledSingleRowExpression
 
         index = findIndexForField(
           followRefCollection,
@@ -222,79 +213,58 @@ export function processOrderBy(
       }
     }
 
-    // Only create comparator and value extractors if the first column is a ref expression
-    // For aggregate or computed expressions, we can't extract values from raw collection rows
-    if (!firstColumnValueExtractor) {
-      // Skip optimization for non-ref expressions (aggregates, computed values, etc.)
-      // The query will still work, but without lazy loading optimization
-    } else if (orderBySourceId) {
-      // Build value extractors for all columns (must all be ref expressions for multi-column)
-      // Check if all orderBy expressions are ref types (required for multi-column extraction)
-      const allColumnsAreRefs = orderByClause.every(
-        (clause) => clause.expression.type === `ref`,
+    if (orderBySourceId) {
+      // A provider sees rows from one lexical source. Push only the leading
+      // order terms owned by that source; a later term from an independent
+      // join cannot be evaluated against this adapter's row shape. Stop at
+      // the first foreign or computed term because terms after it are not a
+      // valid prefix of the query order either.
+      const sourceTerms: Array<{
+        resolved: OrderByClause
+        extractor: CompiledSingleRowExpression
+        compare: (left: unknown, right: unknown) => number
+      }> = []
+      const resolvedOrderBy = resolveOrderBy(
+        orderByClause,
+        collection.compareOptions,
       )
+      for (let termIndex = 0; termIndex < orderByClause.length; termIndex++) {
+        const clause = orderByClause[termIndex]!
+        if (clause.expression.type !== `ref`) break
+        const followed = followRef(rawQuery, clause.expression, collection)
+        if (!followed || followed.sourceId !== orderBySourceId) break
+        const resolved = resolvedOrderBy[termIndex]!
+        sourceTerms.push({
+          resolved,
+          extractor: compileExpression(
+            new PropRef(followed.path),
+            true,
+          ) as CompiledSingleRowExpression,
+          compare: makeComparator(resolved.compareOptions),
+        })
+      }
+      const sourceOrderBy = sourceTerms.map(({ resolved }) => resolved)
+      const sourceExtractors = sourceTerms.map(({ extractor }) => extractor)
 
-      // Create extractors for all columns if they're all refs
-      const allColumnExtractors:
-        | Array<CompiledSingleRowExpression>
-        | undefined = allColumnsAreRefs
-        ? orderByClause.map((clause) => {
-            // We know it's a ref since we checked allColumnsAreRefs
-            const refExpr = clause.expression as PropRef
-            const followResult = followRef(rawQuery, refExpr, collection)
-            if (followResult) {
-              return compileExpression(
-                new PropRef(followResult.path),
-                true,
-              ) as CompiledSingleRowExpression
-            }
-            // Fallback for refs that don't follow
-            return compileExpression(
-              clause.expression,
-              true,
-            ) as CompiledSingleRowExpression
-          })
-        : undefined
-
-      // Create a comparator for raw rows (used for tracking sent values)
-      // This compares ALL orderBy columns for proper ordering
-      const comparator = (
+      const compareSourceRows = (
         a: Record<string, unknown> | null | undefined,
         b: Record<string, unknown> | null | undefined,
       ) => {
-        if (orderByClause.length === 1) {
-          // Single column: extract and compare
-          const extractedA = a ? firstColumnValueExtractor(a) : a
-          const extractedB = b ? firstColumnValueExtractor(b) : b
-          return compare(extractedA, extractedB)
+        for (const { extractor, compare: compareTerm } of sourceTerms) {
+          const result = compareTerm(a ? extractor(a) : a, b ? extractor(b) : b)
+          if (result !== 0) return result
         }
-        if (allColumnExtractors) {
-          // Multi-column with all refs: extract all values and compare
-          const extractAll = (
-            row: Record<string, unknown> | null | undefined,
-          ) => {
-            if (!row) return row
-            return allColumnExtractors.map((extractor) => extractor(row))
-          }
-          return compare(extractAll(a), extractAll(b))
-        }
-        // Fallback: can't compare (shouldn't happen since we skip non-ref cases)
         return 0
       }
 
       // Create a value extractor for raw rows that extracts ALL orderBy column values
       // This is used for tracking sent values and building composite cursors
       const rawRowValueExtractor = (row: Record<string, unknown>): unknown => {
-        if (orderByClause.length === 1) {
+        if (sourceExtractors.length === 1) {
           // Single column: return single value
-          return firstColumnValueExtractor(row)
+          return sourceExtractors[0]!(row)
         }
-        if (allColumnExtractors) {
-          // Multi-column: return array of all values
-          return allColumnExtractors.map((extractor) => extractor(row))
-        }
-        // Fallback (shouldn't happen)
-        return undefined
+        return sourceExtractors.map((extractor) => extractor(row))
       }
 
       orderByOptimizationInfo = {
@@ -302,11 +272,10 @@ export function processOrderBy(
         alias: orderByAlias,
         offset: offset ?? 0,
         limit,
-        comparator,
+        comparator: compareSourceRows,
         valueExtractorForRawRow: rawRowValueExtractor,
-        firstColumnValueExtractor: firstColumnValueExtractor,
         index,
-        orderBy: orderByClause,
+        orderBy: sourceOrderBy,
       }
 
       // Ordered loading is owned by one lexical source. A collection can occur
@@ -397,13 +366,5 @@ export function buildCompareOptions(
   clause: OrderByClause,
   collection: CollectionLike<any, any>,
 ): CompareOptions {
-  if (clause.compareOptions.stringSort !== undefined) {
-    return clause.compareOptions
-  }
-
-  return {
-    ...collection.compareOptions,
-    direction: clause.compareOptions.direction,
-    nulls: clause.compareOptions.nulls,
-  }
+  return resolveCompareOptions(clause, collection.compareOptions)
 }
