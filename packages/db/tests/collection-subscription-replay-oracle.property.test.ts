@@ -5371,6 +5371,114 @@ describe(`CollectionSubscription replay oracle`, () => {
     },
   )
 
+  it.each([`before-first-request`, `after-first-publication`] as const)(
+    `keeps one ordered machine when caller state mutates %s`,
+    async (timing) => {
+      type Row = {
+        id: `a` | `b`
+        group: `keep` | `drop`
+        alternate: `keep` | `drop`
+        rank: number
+        other: number
+      }
+      const loads: Array<LoadSubsetOptions> = []
+      const collection = createCollection<Row>({
+        id: `ordered-machine-${timing}`,
+        getKey: (row) => row.id,
+        syncMode: `on-demand`,
+        sync: {
+          sync: (params) => {
+            params.begin()
+            params.write({
+              type: `insert`,
+              value: {
+                id: `a`,
+                group: `keep`,
+                alternate: `drop`,
+                rank: 1,
+                other: 2,
+              },
+            })
+            params.write({
+              type: `insert`,
+              value: {
+                id: `b`,
+                group: `drop`,
+                alternate: `keep`,
+                rank: 2,
+                other: 1,
+              },
+            })
+            params.commit()
+            params.markReady()
+            return {
+              loadSubset: (options) => {
+                loads.push(options)
+                return true
+              },
+            }
+          },
+        },
+      })
+      const index = collection.createIndex((row) => row.rank, {
+        indexType: BTreeIndex,
+      })
+      const whereRef = new PropRef<Row[`group`]>([`group`])
+      const where = new Func<boolean>(`eq`, [
+        whereRef,
+        new Value<Row[`group`]>(`keep`),
+      ])
+      const orderRef = new PropRef<number>([`rank`])
+      const compareOptions: OrderBy[number][`compareOptions`] = {
+        direction: `asc`,
+        nulls: `first`,
+        stringSort: `lexical`,
+      }
+      const orderBy: OrderBy = [{ expression: orderRef, compareOptions }]
+      const visible = new Map<Row[`id`], Row>()
+      const subscription = collection.subscribeChanges(
+        (changes) => {
+          for (const change of changes) {
+            const key = change.key as Row[`id`]
+            if (change.type === `delete`) visible.delete(key)
+            else visible.set(key, change.value)
+          }
+        },
+        { whereExpression: where },
+      )
+      subscription.setOrderByIndex(index)
+      const mutateCallerState = () => {
+        whereRef.path[0] = `alternate`
+        if (timing === `after-first-publication`) {
+          orderRef.path[0] = `other`
+          compareOptions.direction = `desc`
+        }
+      }
+
+      try {
+        if (timing === `before-first-request`) mutateCallerState()
+        subscription.requestLimitedSnapshot({ orderBy, limit: 1 })
+
+        if (timing === `after-first-publication`) {
+          expect([...visible.keys()]).toEqual([`a`])
+          mutateCallerState()
+          subscription.requestLimitedSnapshot({ orderBy, limit: 2 })
+        }
+
+        const lastLoad = loads.at(-1)!
+        const loadedWhere = lastLoad.where as Func<boolean>
+        const loadedOrder = lastLoad.orderBy![0]!
+        expect((loadedWhere.args[0] as PropRef).path).toEqual([`group`])
+        expect((loadedOrder.expression as PropRef).path).toEqual([`rank`])
+        expect(loadedOrder.compareOptions.direction).toBe(`asc`)
+        expect([...visible.keys()]).toEqual([`a`])
+      } finally {
+        subscription.unsubscribe()
+        await collection.cleanup()
+      }
+    },
+  )
+
   it(`rejects unsupported structural demand constants before adapter entry`, async () => {
     type Row = { id: string }
     let loadCount = 0

@@ -1,3 +1,4 @@
+import { normalizeValue } from '../utils/comparison.js'
 import { Func, PropRef, Value } from './ir.js'
 import {
   assertSnapshotCapableStructuralValue,
@@ -103,12 +104,14 @@ function snapshotEqualityValue<T>(value: T): T {
     return new Date(value.getTime()) as T
   }
 
+  // Large binaries use reference identity in indexes. Clone only values for
+  // which normalization establishes a content key.
   if (typeof Buffer !== `undefined` && value instanceof Buffer) {
-    return Buffer.from(value) as T
+    return (normalizeValue(value) === value ? value : Buffer.from(value)) as T
   }
 
   if (value instanceof Uint8Array) {
-    return value.slice() as T
+    return (normalizeValue(value) === value ? value : value.slice()) as T
   }
 
   // Other objects use reference equality in predicate identity and comparison.
@@ -158,10 +161,15 @@ function snapshotStructuralValue<T>(
   }
 
   if (Array.isArray(value)) {
-    const result: Array<unknown> = []
+    const result: Array<unknown> = new Array(value.length)
     seen.set(value, result)
-    for (const item of value) {
-      result.push(snapshotStructuralValue(item, seen))
+    for (const key of Object.keys(value)) {
+      Object.defineProperty(result, key, {
+        configurable: true,
+        enumerable: true,
+        writable: true,
+        value: snapshotStructuralValue(value[Number(key)], seen),
+      })
     }
     return result as T
   }
@@ -197,10 +205,15 @@ function snapshotStructuralValue<T>(
   const result = Object.create(prototype) as Record<string, unknown>
   seen.set(value, result)
   for (const key of Object.keys(value)) {
-    result[key] = snapshotStructuralValue(
-      (value as Record<string, unknown>)[key],
-      seen,
-    )
+    Object.defineProperty(result, key, {
+      configurable: true,
+      enumerable: true,
+      writable: true,
+      value: snapshotStructuralValue(
+        (value as Record<string, unknown>)[key],
+        seen,
+      ),
+    })
   }
   return result as T
 }

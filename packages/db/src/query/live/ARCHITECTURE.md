@@ -743,28 +743,35 @@ shared abort lease. If one owner releases its lease, the source request remains
 active while another owner still needs its coverage. The source signal aborts
 only after every attached owner has released it.
 
-A Collection subscription snapshots each logical subset demand before it calls
-the source adapter. That private snapshot drives acquisition evidence, the
-compiled predicate, and later truncate replay. Each adapter acquisition gets a
-separate clone derived from it, so neither caller nor adapter mutation can
-rewrite the logical demand or another acquisition. Values observed by scalar
-functions use a closed snapshot-capable grammar; unsupported coercion hooks,
-opaque structural objects, and cycles fail before the demand is retained.
-Opaque values used by reference-sensitive equality retain their identity.
-Ordered requests take this snapshot before constructing `WindowState`, so the
-same stable order drives local reconciliation, boundaries, transport, replay,
-and evidence. The caller's original predicate is retained only as a release
+A Collection subscription snapshots its predicate when it is constructed. Its
+first ordered request also snapshots the total order. Later window requests may
+change the requested size, but local reconciliation, boundaries, transport,
+replay, and evidence all keep the same predicate and order for that
+subscription.
+
+Each logical subset demand then gets a private snapshot before adapter entry.
+Each adapter acquisition gets a separate clone derived from it, so neither
+caller nor adapter mutation can rewrite the subscription machine, logical
+demand, or another acquisition. Values observed by scalar functions use a
+closed snapshot-capable grammar. Its identity preserves every observable part
+of the clone, including prototype kind, property order, sparse-array holes,
+invalid Dates, and symbol identity. Unsupported coercion hooks, opaque
+structural objects, built-in subclasses, accessors, and cycles fail before the
+demand is retained. Opaque values used by reference-sensitive equality retain
+their identity. The caller's original predicate is retained only as a release
 handle, because the transport predicate may combine it with the subscription
-predicate. The subscription then installs the logical owner before adapter
-entry. Reentrant release during `loadSubset` must therefore see and release that
-exact acquisition. After adapter return, both ordered and unordered requests
-recheck logical ownership before they report results, track loading state,
-establish coverage, or scan local state; a demand released during adapter code
-cannot publish a later snapshot. A synchronous `loadSubset` throw that did not
-follow a failed release rolls the tentative owner back before it emits the
-error and without calling `unloadSubset`; a failed release keeps the owner so a
-later cleanup can retry the same acquisition identity. Reconciliation reuses
-the logical owner's evaluator across source changes and truncate acquisition
+predicate.
+
+The subscription installs the logical owner before adapter entry. Reentrant
+release during `loadSubset` must therefore see and release that exact
+acquisition. After adapter return, both ordered and unordered requests recheck
+logical ownership before they report results, track loading state, establish
+coverage, or scan local state; a demand released during adapter code cannot
+publish a later snapshot. A synchronous `loadSubset` throw that did not follow
+a failed release rolls the tentative owner back before it emits the error and
+without calling `unloadSubset`; a failed release keeps the owner so a later
+cleanup can retry the same acquisition identity. Reconciliation reuses the
+logical owner's evaluator across source changes and truncate acquisition
 replacement. A released owner cannot supply a predicate, and a later logical
 demand compiles its own evaluator even when it reuses the same expression
 object.

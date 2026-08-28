@@ -266,9 +266,14 @@ export class CollectionSubscription
   private stalePublication: PublicationState | undefined
 
   private filteredCallback: (changes: Array<ChangeMessage<any, any>>) => boolean
+  // Execution uses the frozen predicate; release keeps the caller's handle.
+  private readonly whereExpression: BasicExpression<boolean> | undefined
+  private readonly releaseWhereExpression: BasicExpression<boolean> | undefined
 
   private orderByIndex: IndexInterface<string | number> | undefined
   private orderedWindow: WindowState | undefined
+  // The first ordered request fixes this subscription's total order.
+  private orderedRequestOptions: LoadSubsetOptions | undefined
 
   // Status tracking
   private _status: SubscriptionStatus = `ready`
@@ -410,9 +415,13 @@ export class CollectionSubscription
   constructor(
     private collection: CollectionImpl<any, any, any, any, any>,
     private callback: (changes: Array<ChangeMessage<any, any>>) => void,
-    private options: CollectionSubscriptionOptions,
+    options: CollectionSubscriptionOptions,
   ) {
     super()
+    this.releaseWhereExpression = options.whereExpression
+    this.whereExpression = cloneLoadSubsetOptions({
+      where: options.whereExpression,
+    }).where
     if (options.onUnsubscribe) {
       this.on(`unsubscribed`, options.onUnsubscribe)
     }
@@ -421,8 +430,8 @@ export class CollectionSubscription
     }
 
     // Auto-index for where expressions if enabled
-    if (options.whereExpression) {
-      ensureIndexForExpression(options.whereExpression, this.collection)
+    if (this.whereExpression) {
+      ensureIndexForExpression(this.whereExpression, this.collection)
     }
 
     const callbackWithSentKeysTracking = (
@@ -437,8 +446,11 @@ export class CollectionSubscription
     this.callback = callbackWithSentKeysTracking
 
     // Create a filtered callback if where clause is provided
-    this.filteredCallback = options.whereExpression
-      ? createFilteredCallback(this.callback, options)
+    this.filteredCallback = this.whereExpression
+      ? createFilteredCallback(this.callback, {
+          ...options,
+          whereExpression: this.whereExpression,
+        })
       : (changes) => {
           this.callback(changes)
           return true
@@ -1360,8 +1372,8 @@ export class CollectionSubscription
     const window = this.orderedWindow
     if (!stalePublication || !ordered || !window) return []
 
-    const orderedFilter = this.options.whereExpression
-      ? createFilterFunctionFromExpression(this.options.whereExpression)
+    const orderedFilter = this.whereExpression
+      ? createFilterFunctionFromExpression(this.whereExpression)
       : undefined
     const additionalFilters = this.activeAdditionalFilters()
     const isOrderedRow = (row: object) => orderedFilter?.(row) ?? true
@@ -2154,7 +2166,7 @@ export class CollectionSubscription
     }
 
     const stateOpts: RequestSnapshotOptions = {
-      where: this.options.whereExpression,
+      where: this.whereExpression,
       optimizedOnly: opts?.optimizedOnly ?? false,
     }
 
@@ -2362,11 +2374,11 @@ export class CollectionSubscription
       )
     }
 
-    const orderedRequest = cloneLoadSubsetOptions({
-      where: this.options.whereExpression,
+    this.orderedRequestOptions ??= cloneLoadSubsetOptions({
+      where: this.whereExpression,
       orderBy,
-      limit,
     })
+    const orderedRequest = this.orderedRequestOptions
     orderBy = orderedRequest.orderBy!
     const where = orderedRequest.where
 
@@ -2510,7 +2522,7 @@ export class CollectionSubscription
         requiresUnboundedRefinement,
         revision: this.orderedWindow.coverageRevision,
       },
-      this.options.whereExpression,
+      this.releaseWhereExpression,
     )
 
     // A synchronous continuation can complete ordered coverage. Retain its

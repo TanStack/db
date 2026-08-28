@@ -574,6 +574,20 @@ describe(`loadSubset demand identity`, () => {
     expect(compileExpression(snapshot.where!)({})).toBe(true)
   })
 
+  it(`retains reference-sensitive large binary equality values`, () => {
+    const bytes = new Uint8Array(129).fill(7)
+    const demand: LoadSubsetOptions = {
+      where: new Func<boolean>(`eq`, [new PropRef([`id`]), new Value(bytes)]),
+    }
+    const snapshot = cloneLoadSubsetOptions(demand)
+    const snapshotBytes = ((snapshot.where as Func).args[1] as Value).value
+
+    expect(snapshotBytes).toBe(bytes)
+    expect(getLoadSubsetDemandKey(snapshot)).toBe(
+      getLoadSubsetDemandKey(demand),
+    )
+  })
+
   it.each([
     [`symbol coercion`, () => ({ [Symbol.toPrimitive]: () => `A` }), `A`],
     [
@@ -649,6 +663,51 @@ describe(`loadSubset demand identity`, () => {
       )
     },
   )
+
+  it.each([
+    [`nested invalid Date`, [new Date(Number.NaN)]],
+    [`nested symbol`, [Symbol(`immutable`)]],
+    [`sparse array`, new Array(1)],
+  ] as const)(
+    `preserves structural demand identity while cloning %s`,
+    (_label, value) => {
+      const demand: LoadSubsetOptions = {
+        where: new Func<boolean>(`eq`, [
+          new Func(`concat`, [new Value(value)]),
+          new Value(
+            compileExpression(new Func(`concat`, [new Value(value)]))({}),
+          ),
+        ]),
+      }
+      const snapshot = cloneLoadSubsetOptions(demand)
+
+      expect(compileExpression(snapshot.where!)({})).toBe(true)
+      expect(getLoadSubsetDemandKey(snapshot)).toBe(
+        getLoadSubsetDemandKey(demand),
+      )
+    },
+  )
+
+  it(`preserves an enumerable __proto__ data property while cloning`, () => {
+    const value: Record<string, unknown> = {}
+    Object.defineProperty(value, `__proto__`, {
+      enumerable: true,
+      value: null,
+    })
+    const demand: LoadSubsetOptions = {
+      where: new Func<boolean>(`eq`, [
+        new Func(`concat`, [new Value(value)]),
+        new Value(`[object Object]`),
+      ]),
+    }
+    const snapshot = cloneLoadSubsetOptions(demand)
+
+    expect(compileExpression(demand.where!)({})).toBe(true)
+    expect(compileExpression(snapshot.where!)({})).toBe(true)
+    expect(getLoadSubsetDemandKey(snapshot)).toBe(
+      getLoadSubsetDemandKey(demand),
+    )
+  })
 
   it.each([
     [`signed zero`, -0, 0],

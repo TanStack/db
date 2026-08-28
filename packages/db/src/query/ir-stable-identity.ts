@@ -1087,32 +1087,77 @@ function canonicalizeStructuralRuntimeValue(
   value: unknown,
   path: string,
   seen: WeakSet<object>,
-  opaqueValueIdentity: OpaqueValueIdentity = `reject`,
+  _opaqueValueIdentity: OpaqueValueIdentity = `reject`,
 ): StableIdentityValue {
   assertSnapshotCapableStructuralValue(value, path)
-  if (
-    opaqueValueIdentity === `runtime-reference` &&
-    (typeof value === `function` || typeof value === `symbol`)
-  ) {
+  return canonicalizeSnapshotStructuralValue(value, path, seen)
+}
+
+function canonicalizeSnapshotStructuralValue(
+  value: unknown,
+  path: string,
+  seen: WeakSet<object>,
+): StableIdentityValue {
+  if (typeof value === `symbol`) {
     return getRuntimeReferenceIdentity(value)
   }
 
-  if (value instanceof Date && Number.isNaN(value.getTime())) {
-    return canonicalizeRuntimeValue(Number.NaN, path, seen)
+  if (value instanceof Date) {
+    return Number.isNaN(value.getTime())
+      ? [`Date`, `Invalid`]
+      : canonicalizeRuntimeValue(value, path, seen)
   }
 
-  try {
-    return canonicalizeRuntimeValue(value, path, seen)
-  } catch (error) {
-    if (
-      error instanceof UnhashableQueryIRError &&
-      typeof value === `object` &&
-      value !== null
-    ) {
-      return getRuntimeReferenceIdentity(value)
-    }
-    throw error
+  if (Array.isArray(value)) {
+    return withCircularGuard(value, path, seen, () => [
+      `snapshotArray`,
+      value.length,
+      Object.keys(value).map((key) => [
+        key,
+        canonicalizeSnapshotStructuralValue(
+          value[Number(key)],
+          `${path}[${key}]`,
+          seen,
+        ),
+      ]),
+    ])
   }
+
+  if (value instanceof Map) {
+    return withCircularGuard(value, path, seen, () => [
+      `snapshotMap`,
+      Array.from(value.entries(), ([key, entryValue], index) => [
+        canonicalizeSnapshotStructuralValue(key, `${path}.key[${index}]`, seen),
+        canonicalizeSnapshotStructuralValue(
+          entryValue,
+          `${path}.value[${index}]`,
+          seen,
+        ),
+      ]),
+    ])
+  }
+
+  if (value instanceof Set) {
+    return withCircularGuard(value, path, seen, () => [
+      `snapshotSet`,
+      Array.from(value, (entry, index) =>
+        canonicalizeSnapshotStructuralValue(entry, `${path}[${index}]`, seen),
+      ),
+    ])
+  }
+
+  if (isPlainObject(value)) {
+    return withCircularGuard(value, path, seen, () => [
+      `snapshotObject`,
+      Object.getPrototypeOf(value) === null ? `null` : `plain`,
+      Object.keys(value).map((key) => [
+        key,
+        canonicalizeSnapshotStructuralValue(value[key], `${path}.${key}`, seen),
+      ]),
+    ])
+  }
+
+  return canonicalizeRuntimeValue(value, path, seen)
 }
 
 function canonicalizeOrderingRuntimeValue(

@@ -45,6 +45,26 @@ function not(expression: BasicExpression<boolean>): Func {
 }
 
 describe(`createDeduplicatedLoadSubset`, () => {
+  it(`does not deduplicate structural predicates with different observable key order`, () => {
+    const left = Object.create(null) as Record<string, number>
+    left.a = 1
+    left.b = 2
+    const right = Object.create(null) as Record<string, number>
+    right.b = 2
+    right.a = 1
+    const loadSubset = vi.fn(() => true as const)
+    const deduplicated = new DeduplicatedLoadSubset({ loadSubset })
+    const expected = JSON.stringify(left)
+    const demand = (value: Record<string, number>): LoadSubsetOptions => ({
+      where: eq(new Func(`concat`, [val(value)]), val(expected)),
+    })
+
+    deduplicated.loadSubset(demand(left))
+    deduplicated.loadSubset(demand(right))
+
+    expect(loadSubset).toHaveBeenCalledTimes(2)
+  })
+
   it.each(
     [
       {
