@@ -39,8 +39,8 @@ export class EventEmitter<TEvents extends Record<string, any>> {
     callback: (event: TEvents[T]) => void,
   ): () => void {
     const unsubscribe = this.on(event, (eventPayload) => {
-      callback(eventPayload)
       unsubscribe()
+      callback(eventPayload)
     })
     return unsubscribe
   }

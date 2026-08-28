@@ -1,7 +1,14 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { createCollection } from '../src/collection/index.js'
+import { EventEmitter } from '../src/event-emitter.js'
 import { BTreeIndex } from '../src/indexes/btree-index.js'
 import type { Collection } from '../src/collection/index.js'
+
+class TestEventEmitter extends EventEmitter<{ event: { id: number } }> {
+  emit(id: number): void {
+    this.emitInner(`event`, { id })
+  }
+}
 
 describe(`Collection Events System`, () => {
   let collection: Collection
@@ -255,6 +262,30 @@ describe(`Collection Events System`, () => {
       expect(listener).toHaveBeenCalledTimes(1) // Still only called once
 
       unsubscribe()
+    })
+
+    it(`removes a once listener before invoking a throwing callback`, () => {
+      const emitter = new TestEventEmitter()
+      const failure = new Error(`once listener failed`)
+      const deferredMicrotasks: Array<VoidFunction> = []
+      const queueMicrotaskSpy = vi
+        .spyOn(globalThis, `queueMicrotask`)
+        .mockImplementation((callback) => deferredMicrotasks.push(callback))
+      const listener = vi.fn(() => {
+        throw failure
+      })
+
+      try {
+        emitter.once(`event`, listener)
+        emitter.emit(1)
+        emitter.emit(2)
+
+        expect(listener).toHaveBeenCalledTimes(1)
+        expect(deferredMicrotasks).toHaveLength(1)
+        expect(() => deferredMicrotasks[0]!()).toThrow(failure)
+      } finally {
+        queueMicrotaskSpy.mockRestore()
+      }
     })
   })
 

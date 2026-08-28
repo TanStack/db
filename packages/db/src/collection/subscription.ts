@@ -257,6 +257,7 @@ export class CollectionSubscription
   // that throw the same Error object.
   private activeReplayResultCallback: ReplayResultCallbackFrame | undefined
   private activeSubsetCleanupBoundary: SubsetCleanupBoundaryFrame | undefined
+  private unsubscribeInProgress = false
 
   private isActiveDemand(demand: SubsetDemand): boolean {
     return demand.active && this.subsetDemands.includes(demand)
@@ -805,6 +806,31 @@ export class CollectionSubscription
     const errors = session.errors.splice(0)
     for (const { options, error } of errors) {
       this.recordLoadSubsetError(options, error, true)
+    }
+  }
+
+  /** Report callback failures before teardown discards their replay session. */
+  private reportActiveReplayCallbackFailuresBeforeTeardown(): void {
+    const session = this.truncateReplaySession
+    if (!session) return
+
+    const frames: Array<ReplayResultCallbackFrame> = []
+    let frame = this.activeReplayResultCallback
+    while (frame?.replayContext.session === session) {
+      frames.push(frame)
+      frame = frame.previous
+    }
+
+    const seen = new Set<SubsetFailureOccurrence>()
+    for (const callbackFrame of frames.reverse()) {
+      for (const group of callbackFrame.failureGroups) {
+        for (const failure of group.failures) {
+          if (seen.has(failure)) continue
+          seen.add(failure)
+          this.recordLoadSubsetError(failure.options, failure.error, true)
+          failure.attributed = true
+        }
+      }
     }
   }
 
@@ -2493,10 +2519,21 @@ export class CollectionSubscription
   }
 
   unsubscribe() {
+    if (this.unsubscribeInProgress) return
+    this.unsubscribeInProgress = true
+    try {
+      this.unsubscribeOnce()
+    } finally {
+      this.unsubscribeInProgress = false
+    }
+  }
+
+  private unsubscribeOnce(): void {
     // Teardown is a permanent acquisition boundary. Adapter cleanup and
     // unsubscribe listeners may reenter public methods, but they cannot create
     // work that escapes the cleanup pass already in progress.
     this.unsubscribed = true
+    this.reportActiveReplayCallbackFailuresBeforeTeardown()
     const boundaryOptions = this.subsetFailureBoundaryOptions()
     const cleanupFailures: Array<{
       error: unknown

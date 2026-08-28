@@ -6207,6 +6207,185 @@ describe(`CollectionSubscription replay oracle`, () => {
     }
   })
 
+  it(`reports a caught replay start failure before callback teardown`, async () => {
+    type Row = { id: string }
+    const whereA = new Func(`eq`, [new PropRef([`id`]), new Value(`a`)])
+    const whereNested = new Func(`eq`, [
+      new PropRef([`id`]),
+      new Value(`nested`),
+    ])
+    const failure = new Error(`nested replay start failed`)
+    const reported: Array<{
+      error: unknown
+      options: LoadSubsetOptions
+    }> = []
+    let begin!: () => void
+    let commit!: () => true | Promise<void>
+    let truncate!: () => void
+    let callbackCount = 0
+    let caught = false
+    let failedOptions: LoadSubsetOptions | undefined
+    const collection = createCollection<Row>({
+      id: `caught-replay-start-before-unsubscribe`,
+      getKey: (row) => row.id,
+      syncMode: `on-demand`,
+      sync: {
+        sync: (params) => {
+          begin = params.begin
+          commit = params.commit
+          truncate = params.truncate
+          params.markReady()
+          return {
+            loadSubset: (options) => {
+              if (options.where === whereNested) {
+                failedOptions = options
+                throw failure
+              }
+              return true
+            },
+            unloadSubset: () => {},
+          }
+        },
+      },
+    })
+    const subscription = collection.subscribeChanges(() => {})
+    subscription.on(`loadSubset:error`, ({ error, options }) =>
+      reported.push({ error, options }),
+    )
+
+    try {
+      subscription.requestSnapshot({
+        where: whereA,
+        onLoadSubsetResult: () => {
+          callbackCount++
+          if (callbackCount !== 2) return
+          try {
+            subscription.requestSnapshot({ where: whereNested })
+          } catch {
+            caught = true
+          }
+          subscription.unsubscribe()
+        },
+      })
+
+      begin()
+      truncate()
+      commit()
+      await flushPromises()
+
+      expect(caught).toBe(true)
+      expect(reported).toEqual([{ error: failure, options: failedOptions }])
+    } finally {
+      subscription.unsubscribe()
+      await collection.cleanup()
+    }
+  })
+
+  it(`reports and retries caught replay cleanup before callback teardown`, async () => {
+    type Row = { id: string }
+    const whereA = new Func(`eq`, [new PropRef([`id`]), new Value(`a`)])
+    const whereB = new Func(`eq`, [new PropRef([`id`]), new Value(`b`)])
+    const failure = new Error(`nested replay cleanup failed`)
+    const reported: Array<{
+      error: unknown
+      options: LoadSubsetOptions
+    }> = []
+    const unloads: Array<LoadSubsetOptions> = []
+    let begin!: () => void
+    let commit!: () => true | Promise<void>
+    let truncate!: () => void
+    let callbackCount = 0
+    let armed = false
+    let failed = false
+    let caught = false
+    let failedOptions: LoadSubsetOptions | undefined
+    const collection = createCollection<Row>({
+      id: `caught-replay-cleanup-before-unsubscribe`,
+      getKey: (row) => row.id,
+      syncMode: `on-demand`,
+      sync: {
+        sync: (params) => {
+          begin = params.begin
+          commit = params.commit
+          truncate = params.truncate
+          params.markReady()
+          return {
+            loadSubset: () => true,
+            unloadSubset: (options) => {
+              unloads.push(options)
+              if (armed && options.where === whereB && !failed) {
+                failed = true
+                failedOptions = options
+                throw failure
+              }
+            },
+          }
+        },
+      },
+    })
+    const subscription = collection.subscribeChanges(() => {})
+    subscription.on(`loadSubset:error`, ({ error, options }) =>
+      reported.push({ error, options }),
+    )
+
+    try {
+      subscription.requestSnapshot({ where: whereB })
+      subscription.requestSnapshot({
+        where: whereA,
+        onLoadSubsetResult: () => {
+          callbackCount++
+          if (callbackCount !== 2) return
+          armed = true
+          try {
+            subscription.releaseSnapshot(whereB)
+          } catch {
+            caught = true
+          }
+          subscription.unsubscribe()
+        },
+      })
+
+      begin()
+      truncate()
+      commit()
+      await flushPromises()
+
+      expect(caught).toBe(true)
+      expect(reported).toEqual([{ error: failure, options: failedOptions }])
+      expect(
+        unloads.filter((options) => options === failedOptions),
+      ).toHaveLength(2)
+    } finally {
+      subscription.unsubscribe()
+      await collection.cleanup()
+    }
+  })
+
+  it(`dispatches the terminal event once under reentrant unsubscribe`, async () => {
+    type Row = { id: string }
+    const collection = createCollection<Row>({
+      id: `reentrant-unsubscribe-listener`,
+      getKey: (row) => row.id,
+      syncMode: `on-demand`,
+      sync: {
+        sync: (params) => {
+          params.markReady()
+          return { loadSubset: () => true }
+        },
+      },
+    })
+    const subscription = collection.subscribeChanges(() => {})
+    let calls = 0
+    subscription.on(`unsubscribed`, () => {
+      calls++
+      subscription.unsubscribe()
+    })
+
+    expect(() => subscription.unsubscribe()).not.toThrow()
+    expect(calls).toBe(1)
+    await expect(collection.cleanup()).resolves.toBeUndefined()
+  })
+
   it(`preserves a synchronous acquisition failure nested inside cleanup`, async () => {
     type Row = { id: string }
     const whereA = new Func(`eq`, [new PropRef([`id`]), new Value(`a`)])

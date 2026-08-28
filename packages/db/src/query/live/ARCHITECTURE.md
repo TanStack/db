@@ -544,6 +544,13 @@ recognize its propagation token but must not report the occurrence again.
 Teardown dispatches `unsubscribed` listeners synchronously and collects their
 throws after adapter cleanup failures. Ordinary event delivery keeps its
 asynchronous listener-error behavior.
+`onLoadSubsetResult`, `requestSnapshot`, and `releaseSnapshot` are internal
+composition APIs. A nested synchronous failure may use the private propagation
+token across that callback; internal code must rethrow the caught value
+unchanged. Before callback-triggered teardown discards a replay session, the
+subscription reports every retained original occurrence against its exact
+options. Teardown ignores reentrant `unsubscribe()` calls while one pass is in
+progress, but a later call may still retry retained adapter cleanup debt.
 One logical release may cross both a pending replacement acquisition and its
 original acquisition. If several cleanup boundaries fail, the callback frame
 retains them as one propagated group and reports every occurrence against its
