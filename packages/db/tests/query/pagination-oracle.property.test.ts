@@ -15,6 +15,7 @@ import {
 import { evaluateReferenceExpression } from '../reference-expression.js'
 import { TraceAssertionError } from '../trace-runner.js'
 import { flushPromises, mockSyncCollectionOptions } from '../utils.js'
+import type { Deferred } from '../../src/deferred.js'
 import type { LoadSubsetOptions, LoadSubsetResult } from '../../src/types.js'
 
 type PageRow = {
@@ -1692,15 +1693,21 @@ describe(`pagination recomputation oracle`, () => {
     `observes $label cleanup failure after every teardown settles`,
     async ({ reason: firstFailure }) => {
       const secondFailure = new Error(`second cleanup failed`)
-      const laterCleanup = createDeferred<void>()
+      const firstFailureRelease = createDeferred<void>()
+      const lastCleanupRelease = createDeferred<void>()
+      const repeatedFirstFailureRelease = createDeferred<void>()
+      const repeatedLastCleanupRelease = createDeferred<void>()
       const events: Array<string> = []
       const unhandled: Array<unknown> = []
       const recordUnhandled = (reason: unknown) => unhandled.push(reason)
-      const targets: ReadonlyArray<CleanupTarget> = [
+      const createTargets = (
+        firstRelease: Deferred<void>,
+        lastRelease: Deferred<void>,
+      ): ReadonlyArray<CleanupTarget> => [
         {
           cleanup: async () => {
             events.push(`first`)
-            await laterCleanup.promise
+            await firstRelease.promise
             throw firstFailure
           },
         },
@@ -1711,8 +1718,9 @@ describe(`pagination recomputation oracle`, () => {
           },
         },
         {
-          cleanup: () => {
+          cleanup: async () => {
             events.push(`third`)
+            await lastRelease.promise
           },
         },
       ]
@@ -1727,7 +1735,9 @@ describe(`pagination recomputation oracle`, () => {
       process.on(`unhandledRejection`, recordUnhandled)
 
       try {
-        const cleanup = cleanupAll(...targets).finally(() => {
+        const cleanup = cleanupAll(
+          ...createTargets(firstFailureRelease, lastCleanupRelease),
+        ).finally(() => {
           cleanupFinished = true
         })
         const observedFailure = observeFirstFailure(cleanup)
@@ -1737,13 +1747,27 @@ describe(`pagination recomputation oracle`, () => {
         expect(cleanupFinished).toBe(false)
         expect(unhandled).toEqual([])
 
-        laterCleanup.resolve()
+        firstFailureRelease.resolve()
+        await flushPromises()
+        expect(cleanupFinished).toBe(false)
+        expect(unhandled).toEqual([])
+
+        lastCleanupRelease.resolve()
         await observedFailure
         await flushPromises()
         expect(cleanupFinished).toBe(true)
         expect(unhandled).toEqual([])
 
-        await observeFirstFailure(cleanupAll(...targets))
+        let repeatedCleanupFinished = false
+        const repeatedCleanup = cleanupAll(
+          ...createTargets(
+            repeatedFirstFailureRelease,
+            repeatedLastCleanupRelease,
+          ),
+        ).finally(() => {
+          repeatedCleanupFinished = true
+        })
+        const repeatedObservedFailure = observeFirstFailure(repeatedCleanup)
         await flushPromises()
         expect(events).toEqual([
           `first`,
@@ -1753,9 +1777,24 @@ describe(`pagination recomputation oracle`, () => {
           `second`,
           `third`,
         ])
+        expect(repeatedCleanupFinished).toBe(false)
+        expect(unhandled).toEqual([])
+
+        repeatedFirstFailureRelease.resolve()
+        await flushPromises()
+        expect(repeatedCleanupFinished).toBe(false)
+        expect(unhandled).toEqual([])
+
+        repeatedLastCleanupRelease.resolve()
+        await repeatedObservedFailure
+        await flushPromises()
+        expect(repeatedCleanupFinished).toBe(true)
         expect(unhandled).toEqual([])
       } finally {
-        laterCleanup.resolve()
+        firstFailureRelease.resolve()
+        lastCleanupRelease.resolve()
+        repeatedFirstFailureRelease.resolve()
+        repeatedLastCleanupRelease.resolve()
         process.off(`unhandledRejection`, recordUnhandled)
       }
     },
