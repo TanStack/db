@@ -1195,7 +1195,8 @@ export class CollectionSubscription
       : retainedPublication
         ? this.orderedBoundary()
         : this.orderedWindow.requestBoundary()
-    const cursorValues = boundary?.values ?? minValues
+    const cursorValues =
+      boundary?.values ?? (activeReplacement ? undefined : minValues)
     if (cursorValues !== undefined && cursorValues.length > 0) {
       const canPushCursor = canExpressCursorOrder(orderBy, cursorValues)
       if (!canPushCursor) requiresUnboundedRefinement = true
@@ -1224,7 +1225,11 @@ export class CollectionSubscription
         cursorExpressions = {
           whereFrom: whereFromCursor,
           whereCurrent: whereCurrentCursor,
-          lastKey: boundary?.key ?? this.orderedPublication?.boundary?.key,
+          lastKey:
+            boundary?.key ??
+            (activeReplacement
+              ? undefined
+              : this.orderedPublication?.boundary?.key),
         }
       }
     }

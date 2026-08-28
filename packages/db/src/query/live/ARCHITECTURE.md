@@ -411,8 +411,10 @@ publishes or later source changes reconcile it. Reader-visible boundaries and
 failed-replay offset or cursor restoration derive from this snapshot. A
 continuation that is still proving the active replacement instead derives from
 `WindowState`'s private current-generation progress; that progress cannot escape
-through a public boundary before the replacement publishes. No parallel
-row-count or last-key fields may approximate either state.
+through a public boundary before the replacement publishes. If that generation
+has no private progress, its next request starts without a cursor; it must not
+borrow caller cursor values or the old public key. No parallel row-count or
+last-key fields may approximate either state.
 
 Each active demand in that replacement settles on its own, and the replacement
 waits for every acquisition it started. The published reconciliation is the

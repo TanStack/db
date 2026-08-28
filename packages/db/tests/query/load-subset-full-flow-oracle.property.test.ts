@@ -2287,6 +2287,7 @@ type AtomicOrderedReplayScenario = {
   overlap: boolean
   currentOutcome: `resolve` | `reject`
   currentExtent: `exhausted` | `continues`
+  emptyContinuingReplay?: boolean
   settleCurrentFirst: boolean
   sourceDelta: boolean
   otherDemand: `none` | `active` | `released`
@@ -2307,6 +2308,7 @@ const atomicOrderedReplayArbitrary: fc.Arbitrary<AtomicOrderedReplayScenario> =
     overlap: fc.boolean(),
     currentOutcome: fc.constantFrom(`resolve` as const, `reject` as const),
     currentExtent: fc.constantFrom(`exhausted` as const, `continues` as const),
+    emptyContinuingReplay: fc.boolean(),
     settleCurrentFirst: fc.boolean(),
     sourceDelta: fc.boolean(),
     otherDemand: fc.constantFrom(
@@ -2533,6 +2535,12 @@ async function runAtomicOrderedReplayScenario(
   })
   subscription.setOrderByIndex(orderedIndex)
 
+  const expectedPublicationProjection = () =>
+    projectAtomicOrderedPublicationState(history, {
+      demandId: `ordered`,
+      direction: scenario.direction,
+      initialWindowSize: 1,
+    })
   const expectedPublications = () =>
     projectAtomicOrderedPublications(history, {
       demandId: `ordered`,
@@ -2540,11 +2548,7 @@ async function runAtomicOrderedReplayScenario(
       initialWindowSize: 1,
     })
   const expectPublicationHistory = () => {
-    const projection = projectAtomicOrderedPublicationState(history, {
-      demandId: `ordered`,
-      direction: scenario.direction,
-      initialWindowSize: 1,
-    })
+    const projection = expectedPublicationProjection()
     const expected = projection.publications
     expect(publications).toEqual(expected)
     if (unsubscribed) return
@@ -2590,9 +2594,13 @@ async function runAtomicOrderedReplayScenario(
       : `failure`,
     demandOrder: `ordered-first` | `other-first` = `ordered-first`,
     releaseOtherAfterOrdered = false,
+    appliedOrderedRowKeys: ReadonlyArray<Row[`id`]> = replacementRows.map(
+      ({ id }) => id,
+    ),
+    stageEmptyRows = false,
   ) => {
-    if (rows.length > 0) {
-      await applyRows(rows)
+    if (rows.length > 0) await applyRows(rows)
+    if (rows.length > 0 || stageEmptyRows) {
       history.push({
         type: `stagePublicationRows`,
         publicationId: replay.publicationId,
@@ -2618,7 +2626,7 @@ async function runAtomicOrderedReplayScenario(
         acquisition.deferred.resolve({
           hasMore: isOrdered ? extent === `continues` : false,
           appliedRowKeys: isOrdered
-            ? replacementRows.map(({ id }) => id)
+            ? appliedOrderedRowKeys
             : [replacementOtherRow.id],
         })
       } else {
@@ -2793,10 +2801,15 @@ async function runAtomicOrderedReplayScenario(
       return
     }
 
-    const finalRows = [
-      ...replacementRows,
-      ...(scenario.sourceDelta ? [sourceDelta] : []),
-    ]
+    const hasEmptyContinuingReplay =
+      scenario.emptyContinuingReplay === true &&
+      scenario.currentOutcome === `resolve` &&
+      scenario.currentExtent === `continues` &&
+      scenario.sourceDelta === false &&
+      scenario.otherDemand === `none`
+    const finalRows = hasEmptyContinuingReplay
+      ? []
+      : [...replacementRows, ...(scenario.sourceDelta ? [sourceDelta] : [])]
     const partialFailureRows: ReadonlyArray<Row> = [
       {
         id: `new-a`,
@@ -2819,6 +2832,8 @@ async function runAtomicOrderedReplayScenario(
               : `failure`,
         scenario.demandSettlementOrder,
         scenario.releaseAfterOrdered,
+        hasEmptyContinuingReplay ? [] : replacementRows.map(({ id }) => id),
+        hasEmptyContinuingReplay,
       )
     const settleObsolete = () => settle(firstReplay, `abort`, [])
 
@@ -2836,23 +2851,34 @@ async function runAtomicOrderedReplayScenario(
       scenario.currentOutcome === `resolve` &&
       scenario.currentExtent === `continues`
     ) {
-      await applyRows([continuationRow])
-      history.push({
-        type: `stagePublicationRows`,
-        publicationId: currentReplay.publicationId,
-        demandId: `ordered`,
-        rows: toModelRows([...finalRows, continuationRow]),
-      })
-      expectPublicationHistory()
+      if (!hasEmptyContinuingReplay) {
+        await applyRows([continuationRow])
+        history.push({
+          type: `stagePublicationRows`,
+          publicationId: currentReplay.publicationId,
+          demandId: `ordered`,
+          rows: toModelRows([...finalRows, continuationRow]),
+        })
+        expectPublicationHistory()
+      }
       subscription.requestLimitedSnapshot({
         orderBy,
         limit: 2,
         trackLoadSubsetPromise: false,
+        ...(hasEmptyContinuingReplay
+          ? { minValues: [scenario.direction === `asc` ? 2 : 1] }
+          : {}),
       })
       await flushPromises()
       const continuation = pending.at(-1)
       if (!continuation || continuation === currentReplay.ordered) {
         throw new Error(`Expected an ordered continuation acquisition`)
+      }
+      if (hasEmptyContinuingReplay) {
+        expect(continuation.options.offset).toBe(0)
+        expect(continuation.options.cursor).toBeUndefined()
+        expectPublicationHistory()
+        return
       }
       continuation.deferred.resolve({
         hasMore: true,
@@ -2864,6 +2890,28 @@ async function runAtomicOrderedReplayScenario(
       })
       await flushPromises()
       expectPublicationHistory()
+    }
+
+    const finalProjection = expectedPublicationProjection()
+    if (finalProjection.retainsPreviousPublication) {
+      const pendingStart = pending.length
+      subscription.requestLimitedSnapshot({
+        orderBy,
+        limit: 1,
+        minValues: [scenario.direction === `asc` ? 2 : 1],
+        trackLoadSubsetPromise: false,
+      })
+      await flushPromises()
+      const restoration = pending[pendingStart]
+      if (!restoration) {
+        throw new Error(`Expected a retained-publication restoration request`)
+      }
+      expect(restoration.options.offset).toBe(
+        finalProjection.currentPublication?.orderedPrefixSize ?? 0,
+      )
+      expect(restoration.options.cursor?.lastKey).toBe(
+        finalProjection.currentPublication?.orderedBoundary?.key,
+      )
     }
 
     const expectedKeys = expectedPublications().map((rows) =>
@@ -2929,6 +2977,23 @@ const mixedDemandSettlementScenarios: ReadonlyArray<AtomicOrderedReplayScenario>
       releaseAfterOrdered: true,
     },
   ])
+
+it(`does not reuse a public cursor when an active replacement has no progress`, async () => {
+  for (const direction of [`asc`, `desc`] as const) {
+    await runAtomicOrderedReplayScenario({
+      direction,
+      initialPublication: `nonempty`,
+      resizeOrder: `grow-shrink`,
+      overlap: false,
+      currentOutcome: `resolve`,
+      currentExtent: `continues`,
+      emptyContinuingReplay: true,
+      settleCurrentFirst: false,
+      sourceDelta: false,
+      otherDemand: `none`,
+    })
+  }
+})
 
 it(`keeps mixed demand settlements inside one replacement epoch`, async () => {
   for (const scenario of mixedDemandSettlementScenarios) {
