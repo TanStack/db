@@ -439,7 +439,7 @@ export class CollectionSubscriber<
     // under microtask timing (e.g., queueMicrotask delays in TanStack Query observers).
     if (index) {
       // We have an index on the first orderBy column - use lazy loading optimization
-      subscription.setOrderByIndex(index)
+      subscription.setOrderByIndex(index, orderByInfo.expandSourceOrderTies)
 
       subscription.requestLimitedSnapshot({
         limit: offset + limit,
@@ -472,7 +472,8 @@ export class CollectionSubscriber<
       return true
     }
 
-    const { dataNeeded, index, offset, limit } = orderByInfo
+    const { dataNeeded, index, offset, limit, refillFromResultDeficit } =
+      orderByInfo
 
     if (!dataNeeded || !index) {
       // dataNeeded is not set when there's no index (e.g., non-ref expression
@@ -482,7 +483,11 @@ export class CollectionSubscriber<
     }
 
     subscription.ensureOrderedWindowSize(offset + limit)
-    if (subscription.hasOrderedCoverageForActiveWindow) {
+    const missingResultRows = refillFromResultDeficit ? dataNeeded() : 0
+    if (
+      missingResultRows === 0 &&
+      subscription.hasOrderedCoverageForActiveWindow
+    ) {
       return true
     }
 
@@ -497,7 +502,21 @@ export class CollectionSubscriber<
       return true
     }
 
-    const n = Math.max(dataNeeded(), subscription.orderedRowsNeeded)
+    // A join or later predicate can discard source rows. Once the prior
+    // acquisition settles, grow the retained source prefix by the observed
+    // result deficit so already-local rows publish before another request.
+    // Never grow from callbacks while an acquisition is still pending: the
+    // same deficit can be observed more than once in that transaction.
+    if (missingResultRows > 0) {
+      subscription.ensureOrderedWindowSize(
+        subscription.orderedRetainedWindowSize + missingResultRows,
+      )
+    }
+    if (subscription.hasOrderedCoverageForActiveWindow) {
+      return true
+    }
+
+    const n = Math.max(missingResultRows, subscription.orderedRowsNeeded)
     const errorVersion = subscription.lastErrorVersion
     try {
       // Local rows may fill the visible window without proving its remote

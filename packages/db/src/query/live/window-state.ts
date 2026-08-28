@@ -35,6 +35,7 @@ export class WindowState<
     orderBy: OrderBy,
     private readonly where: BasicExpression<boolean> | undefined,
     targetSize: number,
+    private readonly expandSourceOrderTies = false,
   ) {
     this.totalOrder = new TotalOrder(orderBy, collection)
     const evaluateWhere = where && compileSingleRowExpression(where)
@@ -397,7 +398,32 @@ export class WindowState<
       allowedKeys === undefined
         ? (rows ?? [])
         : (rows ?? []).filter((change) => allowedKeys.has(change.key))
-    return limit === undefined ? allowed : allowed.slice(0, limit)
+    if (limit === undefined) return allowed
+    return this.expandSourceOrderTies
+      ? this.prefixThroughTieClass(allowed, limit)
+      : allowed.slice(0, limit)
+  }
+
+  /**
+   * A provider orders only by the source-owned query terms. Keep the complete
+   * boundary equivalence class so D2 can apply the local key tie-breaker and
+   * any later joined or derived order terms without missing candidates.
+   */
+  private prefixThroughTieClass(
+    rows: Array<ChangeMessage<TRow, TKey>>,
+    limit: number,
+  ): Array<ChangeMessage<TRow, TKey>> {
+    if (limit <= 0 || rows.length <= limit) return rows.slice(0, limit)
+
+    const boundary = rows[limit - 1]!
+    let end = limit
+    while (
+      end < rows.length &&
+      this.totalOrder.compareRows(boundary.value, rows[end]!.value) === 0
+    ) {
+      end++
+    }
+    return rows.slice(0, end)
   }
 
   private readSourceRows(

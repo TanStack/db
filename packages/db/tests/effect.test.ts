@@ -1390,6 +1390,88 @@ describe(`createEffect`, () => {
       )
     }
 
+    it(`refills a joined result window after source rows are rejected`, async () => {
+      type Parent = { id: number; rank: number; groupId: number }
+      type Child = { id: number; groupId: number }
+      const rows: ReadonlyArray<Parent> = [
+        { id: 1, rank: 0, groupId: 1 },
+        { id: 2, rank: 1, groupId: 2 },
+        { id: 3, rank: 2, groupId: 3 },
+        { id: 4, rank: 3, groupId: 4 },
+      ]
+      const delivered = new Set<number>()
+      let requestCount = 0
+      const parents = createCollection<Parent>({
+        id: `effect-joined-underfill-parents`,
+        getKey: (row) => row.id,
+        syncMode: `on-demand`,
+        startSync: true,
+        autoIndex: `eager`,
+        defaultIndexType: BTreeIndex,
+        sync: {
+          sync: ({ begin, write, commit, markReady }) => {
+            markReady()
+            return {
+              loadSubset: () => {
+                const requestNumber = ++requestCount
+                const requested = requestNumber === 1 ? rows.slice(0, 2) : rows
+                begin()
+                for (const row of requested) {
+                  if (delivered.has(row.id)) continue
+                  delivered.add(row.id)
+                  write({ type: `insert`, value: row })
+                }
+                const receipt = commit()
+                return Promise.resolve(receipt).then(() => ({
+                  hasMore: requestNumber === 1,
+                  appliedRowKeys: requested.map(({ id }) => id),
+                }))
+              },
+            }
+          },
+        },
+      })
+      const children = createCollection(
+        mockSyncCollectionOptions<Child>({
+          id: `effect-joined-underfill-children`,
+          getKey: (row) => row.id,
+          initialData: [
+            { id: 20, groupId: 2 },
+            { id: 30, groupId: 3 },
+            { id: 40, groupId: 4 },
+          ],
+        }),
+      )
+      const visible = new Set<number>()
+      const effect = createEffect<{ id: number }, string | number>({
+        query: (q) =>
+          q
+            .from({ parent: parents })
+            .innerJoin({ child: children }, ({ parent, child }) =>
+              eq(parent.groupId, child.groupId),
+            )
+            .orderBy(({ parent }) => parent.rank, `asc`)
+            .orderBy(({ parent }) => parent.id, `asc`)
+            .limit(2)
+            .select(({ parent }) => ({ id: parent.id })),
+        onEnter: ({ value }) => {
+          visible.add(value.id)
+        },
+        onExit: ({ value }) => {
+          visible.delete(value.id)
+        },
+      })
+
+      try {
+        await flushPromises()
+        expect([...visible]).toEqual([2, 3])
+        expect(requestCount).toBe(2)
+      } finally {
+        await effect.dispose()
+        await Promise.all([parents.cleanup(), children.cleanup()])
+      }
+    })
+
     it(`should load more data when pipeline filters items from the orderBy window`, async () => {
       // 6 users, ordered by name asc, limit 3
       // But we filter on active=true, and Bob/Dave are inactive

@@ -959,7 +959,7 @@ class EffectPipelineRunner<TRow extends object, TKey extends string | number> {
     const normalizedOrderBy = normalizeOrderByPaths(orderBy, alias)
 
     if (index) {
-      subscription.setOrderByIndex(index)
+      subscription.setOrderByIndex(index, orderByInfo.expandSourceOrderTies)
       subscription.requestLimitedSnapshot({
         limit: offset + limit,
         orderBy: normalizedOrderBy,
@@ -1002,7 +1002,11 @@ class EffectPipelineRunner<TRow extends object, TKey extends string | number> {
       subscription.ensureOrderedWindowSize(
         orderByInfo.offset + orderByInfo.limit,
       )
-      if (subscription.hasOrderedCoverageForActiveWindow) {
+      const missingResultRows = orderByInfo.dataNeeded()
+      if (
+        (!orderByInfo.refillFromResultDeficit || missingResultRows === 0) &&
+        subscription.hasOrderedCoverageForActiveWindow
+      ) {
         continue
       }
 
@@ -1011,10 +1015,16 @@ class EffectPipelineRunner<TRow extends object, TKey extends string | number> {
         continue
       }
 
-      const n = Math.max(
-        orderByInfo.dataNeeded(),
-        subscription.orderedRowsNeeded,
-      )
+      if (orderByInfo.refillFromResultDeficit && missingResultRows > 0) {
+        subscription.ensureOrderedWindowSize(
+          subscription.orderedRetainedWindowSize + missingResultRows,
+        )
+      }
+      if (subscription.hasOrderedCoverageForActiveWindow) {
+        continue
+      }
+
+      const n = Math.max(missingResultRows, subscription.orderedRowsNeeded)
       this.loadNextItems(orderByInfo, Math.max(1, n))
     }
   }

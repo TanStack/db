@@ -4,6 +4,7 @@ import { createCollection } from '../../src/collection/index.js'
 import { createDeferred } from '../../src/deferred.js'
 import { BTreeIndex } from '../../src/index.js'
 import { createLiveQueryCollection } from '../../src/query/live-query-collection.js'
+import { eq } from '../../src/query/builder/functions.js'
 import { PropRef } from '../../src/query/ir.js'
 import { DeduplicatedLoadSubset } from '../../src/query/subset-dedupe.js'
 import { makeComparator } from '../../src/utils/comparison.js'
@@ -398,6 +399,55 @@ function withAppliedSubsetEvidence<TRow extends { id: number }>(
       appliedRowKeys: requested.map(({ id }) => id),
     }
   })
+}
+
+function createConformingOrderedSource<TRow extends { id: number }>(
+  id: string,
+  rows: ReadonlyArray<TRow>,
+) {
+  const requests: Array<LoadSubsetOptions> = []
+  const delivered = new Set<number>()
+  const source = createCollection<TRow>({
+    id,
+    getKey: (row) => row.id,
+    syncMode: `on-demand`,
+    startSync: true,
+    autoIndex: `eager`,
+    defaultIndexType: BTreeIndex,
+    sync: {
+      sync: ({ begin, write, commit, markReady }) => {
+        markReady()
+        return {
+          loadSubset: (options: LoadSubsetOptions) => {
+            requests.push(options)
+            const requested = rowsForLoadSubset(rows, options)
+            begin()
+            for (const row of requested) {
+              if (delivered.has(row.id)) continue
+              delivered.add(row.id)
+              write({ type: `insert`, value: row })
+            }
+            const receipt = commit(options.signal)
+            const hasMore = options.cursor
+              ? rows.filter((row) =>
+                  Boolean(
+                    evaluateReferenceExpression(options.cursor!.whereFrom, row),
+                  ),
+                ).length > (options.limit ?? Number.POSITIVE_INFINITY)
+              : rows.length >
+                (options.offset ?? 0) +
+                  (options.limit ?? Number.POSITIVE_INFINITY)
+            return Promise.resolve(receipt).then(() => ({
+              hasMore,
+              appliedRowKeys: requested.map(({ id: key }) => key),
+            }))
+          },
+        }
+      },
+    },
+  })
+
+  return { requests, source }
 }
 
 async function runPaginationScenario(
@@ -1625,6 +1675,110 @@ async function expectInflightRequestFillsNewWindow(): Promise<void> {
 }
 
 describe(`pagination recomputation oracle`, () => {
+  it(`refills a joined result window through a contract-compliant source`, async () => {
+    type ParentRow = { id: number; rank: number; groupId: number }
+    type ChildRow = { id: number; groupId: number }
+    const parents = [
+      { id: 1, rank: 0, groupId: 1 },
+      { id: 2, rank: 1, groupId: 2 },
+      { id: 3, rank: 2, groupId: 3 },
+      { id: 4, rank: 3, groupId: 4 },
+    ] satisfies ReadonlyArray<ParentRow>
+    const { requests, source: parentSource } = createConformingOrderedSource(
+      `pagination-joined-underfill-source-${collectionSequence++}`,
+      parents,
+    )
+    const childSource = createCollection(
+      mockSyncCollectionOptions({
+        id: `pagination-joined-underfill-child-${collectionSequence++}`,
+        initialData: [
+          { id: 20, groupId: 2 },
+          { id: 30, groupId: 3 },
+          { id: 40, groupId: 4 },
+        ] satisfies ReadonlyArray<ChildRow>,
+        getKey: (row: ChildRow) => row.id,
+      }),
+    )
+    const live = createLiveQueryCollection((query) =>
+      query
+        .from({ parent: parentSource })
+        .innerJoin({ child: childSource }, ({ parent, child }) =>
+          eq(parent.groupId, child.groupId),
+        )
+        .orderBy(({ parent }) => parent.rank, `asc`)
+        .orderBy(({ parent }) => parent.id, `asc`)
+        .limit(2)
+        .select(({ parent }) => ({ id: parent.id })),
+    )
+
+    try {
+      await live.preload()
+      await flushPromises()
+
+      expect(Array.from(live.values(), ({ id }) => id)).toEqual([2, 3])
+      expect(requests).toHaveLength(2)
+      expect(requests[0]?.limit).toBe(2)
+      expect(requests[1]?.cursor).toBeDefined()
+    } finally {
+      live.cleanup()
+      childSource.cleanup()
+      parentSource.cleanup()
+    }
+  })
+
+  it(`refines a joined foreign order term through the source tie class`, async () => {
+    type ParentRow = { id: number; sourceRank: number; childId: number }
+    type ChildRow = { id: number; score: number }
+    const parents = [
+      { id: 1, sourceRank: 0, childId: 1 },
+      { id: 2, sourceRank: 0, childId: 2 },
+      { id: 3, sourceRank: 0, childId: 3 },
+      { id: 4, sourceRank: 0, childId: 4 },
+    ] satisfies ReadonlyArray<ParentRow>
+    const { requests, source: parentSource } = createConformingOrderedSource(
+      `pagination-joined-foreign-order-source-${collectionSequence++}`,
+      parents,
+    )
+    const childSource = createCollection(
+      mockSyncCollectionOptions({
+        id: `pagination-joined-foreign-order-child-${collectionSequence++}`,
+        initialData: [
+          { id: 1, score: 10 },
+          { id: 2, score: 20 },
+          { id: 3, score: 0 },
+          { id: 4, score: 30 },
+        ] satisfies ReadonlyArray<ChildRow>,
+        getKey: (row: ChildRow) => row.id,
+      }),
+    )
+    const live = createLiveQueryCollection((query) =>
+      query
+        .from({ parent: parentSource })
+        .leftJoin({ child: childSource }, ({ parent, child }) =>
+          eq(parent.childId, child.id),
+        )
+        .orderBy(({ parent }) => parent.sourceRank, `asc`)
+        .orderBy(({ child }) => child.score, `asc`)
+        .orderBy(({ parent }) => parent.id, `asc`)
+        .limit(2)
+        .select(({ parent }) => ({ id: parent.id })),
+    )
+
+    try {
+      await live.preload()
+      await flushPromises()
+
+      expect(Array.from(live.values(), ({ id }) => id)).toEqual([3, 1])
+      expect(requests).toHaveLength(2)
+      expect(requests[0]?.orderBy).toHaveLength(1)
+      expect(requests[1]?.cursor).toBeDefined()
+    } finally {
+      live.cleanup()
+      childSource.cleanup()
+      parentSource.cleanup()
+    }
+  })
+
   it(`materializes an empty source window`, async () => {
     await runPaginationScenario({
       ranks: [],

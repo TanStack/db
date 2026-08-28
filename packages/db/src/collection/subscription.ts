@@ -1249,8 +1249,11 @@ export class CollectionSubscription
     return this.truncateReplaySession !== undefined
   }
 
-  setOrderByIndex(index: IndexInterface<any>) {
+  private expandOrderedSourceTies = false
+
+  setOrderByIndex(index: IndexInterface<any>, expandSourceOrderTies = false) {
     this.orderByIndex = index
+    this.expandOrderedSourceTies = expandSourceOrderTies
   }
 
   /**
@@ -2387,6 +2390,7 @@ export class CollectionSubscription
       orderBy,
       where,
       limit,
+      this.expandOrderedSourceTies,
     )
 
     if (this.stalePublication && !this.stalePublication.ordered) {

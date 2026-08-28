@@ -395,6 +395,14 @@ require a future adapter capability with an opaque cursor that preserves the
 provider's exact collation and snapshot. Until that contract exists, an
 unbounded fetch is the only sound continuation.
 
+Test adapters must obey the same boundary contract as production adapters. A
+mock that reports exhaustion must have made every matching source row readable
+before its result settles. A mock that reports more data must honor later
+offset, cursor, and boundary-class refinement requests. Every applied row key
+must name a row established by that acquisition. Tests that withhold rows while
+claiming exhaustion, or ignore a refinement request, do not model a valid
+adapter and cannot establish a runtime defect.
+
 Every continuation boundary comes from rows established by the same ordered
 demand. Rows retained for another query, join, or window cannot move it. During
 a failed truncate replay, the last complete publication remains the boundary;
