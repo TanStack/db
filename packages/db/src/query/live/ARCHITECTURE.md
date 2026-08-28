@@ -494,6 +494,13 @@ reconciliation may publish. Teardown discards the whole replacement epoch, so
 later source writes and late settlements cannot reach public readers. Here a
 publication means a change to reader-visible state; an empty transport callback
 does not count as one.
+
+Replay settlement bookkeeping precedes observable status and error callbacks.
+Acquisition replacement, ordered evidence, attempt completion, and the resulting
+publication or restoration all finish before `status:ready` or
+`loadSubset:error` listeners run. Reentrant listener work therefore starts in a
+stable publication epoch; it cannot enter a private buffer that the same
+settlement is about to discard.
 A requested limit, a settled promise, or the number of requests does not.
 Applied keys carry two distinct facts. Every applied source key may advance the
 continuation cursor, including a row excluded by the subscription predicate.
@@ -608,6 +615,10 @@ during adapter code cannot publish a later snapshot. A synchronous `loadSubset`
 throw that did not follow a failed release rolls the tentative owner back before
 it emits the error and without calling `unloadSubset`; a failed release keeps
 the owner so a later cleanup can retry the same acquisition identity.
+Result callbacks are also arbitrary reentrancy boundaries. After invoking one,
+the request checks the same exact owner again before it tracks status, applies
+coverage, or scans local rows. A callback may release or unsubscribe; obsolete
+promises are then observed only to consume a possible rejection.
 
 A failed publication may retain rows owned only by unordered demands after the
 last ordered owner leaves. A later ordered incarnation starts with an empty

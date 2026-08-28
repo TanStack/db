@@ -193,6 +193,16 @@ export class CollectionSubscription
     return demand.active && this.subsetDemands.includes(demand)
   }
 
+  /** Consume only a possible rejection once arbitrary code retires a demand. */
+  private ignoreObsoleteSubsetResult(
+    demand: SubsetDemand,
+    result: LoadSubsetRequestResult,
+  ): boolean {
+    if (this.isActiveDemand(demand)) return false
+    if (result instanceof Promise) void result.catch(() => {})
+    return true
+  }
+
   private hasActiveOrderedDemand(): boolean {
     return this.subsetDemands.some(
       (demand) => demand.active && demand.ordered !== undefined,
@@ -420,6 +430,11 @@ export class CollectionSubscription
     queueMicrotask(() => {
       if (this.truncateReplaySession !== session) return
 
+      const synchronousErrors: Array<{
+        options: LoadSubsetOptions
+        error: unknown
+      }> = []
+
       for (const demand of demandsToReload) {
         if (!this.isActiveDemand(demand)) continue
 
@@ -430,26 +445,25 @@ export class CollectionSubscription
         demand.pendingReplayAcquisitions.add(nextAcquisition)
         let syncResult: LoadSubsetRequestResult
         try {
-          syncResult = this.loadSubset(
-            nextAcquisition.options,
-            isCurrentAttempt,
-          )
-        } catch {
+          syncResult = this.collection._sync.loadSubset(nextAcquisition.options)
+        } catch (error) {
+          const shouldReportError =
+            isCurrentAttempt() && !nextAcquisition.options.signal?.aborted
           demand.pendingReplayAcquisitions.delete(nextAcquisition)
           nextAcquisition.abortController.abort()
           nextAcquisition.removeRequestAbortListener?.()
           attempt.failed = true
+          if (shouldReportError) {
+            synchronousErrors.push({
+              options: nextAcquisition.options,
+              error,
+            })
+          }
           continue
         }
 
-        this.observeLoadSubsetResult(
-          syncResult,
-          nextAcquisition.options,
-          true,
-          () => isCurrentAttempt() && !nextAcquisition.options.signal?.aborted,
-        )
-
         let ownsReplacement = false
+        let shouldReportSettledError = false
         if (syncResult instanceof Promise) {
           // Install the replacement lease before ordered coverage observes the
           // same settlement. Replay publication is tracked last so a fallback
@@ -467,6 +481,7 @@ export class CollectionSubscription
               const failedCurrentDemand =
                 this.isActiveDemand(demand) &&
                 !nextAcquisition.options.signal?.aborted
+              shouldReportSettledError = failedCurrentDemand
               // A released demand no longer participates in the current
               // replacement. Its cooperative AbortError must not discard the
               // successful rows from demands that are still active.
@@ -507,6 +522,16 @@ export class CollectionSubscription
             !nextAcquisition.options.signal?.aborted
           )
         })
+        // Readiness and errors are observable callbacks. Register them only
+        // after replacement ownership, ordered evidence, and replay
+        // publication so listeners cannot reenter a half-settled replay.
+        this.observeLoadSubsetResult(
+          syncResult,
+          nextAcquisition.options,
+          true,
+          () => shouldReportSettledError,
+          true,
+        )
         // Preserve the original demand's consumer-local in-flight guard. This
         // observer is registered last so its settlement sees replay ownership,
         // coverage, and attempt bookkeeping before it may continue the window.
@@ -515,6 +540,12 @@ export class CollectionSubscription
 
       attempt.setupComplete = true
       this.checkTruncateReplayComplete(session)
+      // Synchronous adapter errors cannot be emitted until replay restoration
+      // has discarded its private buffer. Reentrant recovery then starts in a
+      // stable publication epoch just like asynchronous rejection recovery.
+      for (const { options, error } of synchronousErrors) {
+        this.recordLoadSubsetError(options, error, true)
+      }
     })
   }
 
@@ -950,6 +981,7 @@ export class CollectionSubscription
     options: LoadSubsetOptions,
     trackStatus: boolean,
     shouldReportError: () => boolean = () => true,
+    reportAborted = false,
   ) {
     if (!(syncResult instanceof Promise)) return
 
@@ -968,21 +1000,11 @@ export class CollectionSubscription
     }
 
     void syncResult.then(finish, (error: unknown) => {
-      if (shouldReportError()) this.recordLoadSubsetError(options, error)
+      if (shouldReportError()) {
+        this.recordLoadSubsetError(options, error, reportAborted)
+      }
       finish()
     })
-  }
-
-  private loadSubset(
-    options: LoadSubsetOptions,
-    shouldReportError: () => boolean = () => true,
-  ): LoadSubsetRequestResult {
-    try {
-      return this.collection._sync.loadSubset(options)
-    } catch (error) {
-      if (shouldReportError()) this.recordLoadSubsetError(options, error)
-      throw error
-    }
   }
 
   private staleChangeSource(
@@ -1481,17 +1503,17 @@ export class CollectionSubscription
     // the transport predicate.
     if (opts?.where) this.requestedSubsetWhere.set(loadOptions, opts.where)
     const { demand, result: syncResult } = this.startSubsetDemand(loadOptions)
-    if (!this.isActiveDemand(demand)) {
+    if (this.ignoreObsoleteSubsetResult(demand, syncResult)) {
       // The adapter synchronously released or the caller had already aborted
       // this demand. Observe only to consume a possible rejection; obsolete
       // work cannot report status, establish readiness, or publish a scan.
-      if (syncResult instanceof Promise) void syncResult.catch(() => {})
       return false
     }
     demand.onLoadSubsetResult = opts?.onLoadSubsetResult
 
     // Pass the raw loadSubset result to the caller for external tracking
     opts?.onLoadSubsetResult?.(syncResult, demand.options)
+    if (this.ignoreObsoleteSubsetResult(demand, syncResult)) return false
 
     this.observeLoadSubsetResult(
       syncResult,
@@ -1763,10 +1785,9 @@ export class CollectionSubscription
       requiresUnboundedRefinement,
       revision: this.orderedWindow.coverageRevision,
     })
-    if (!this.isActiveDemand(demand)) {
+    if (this.ignoreObsoleteSubsetResult(demand, syncResult)) {
       // Match unordered acquisition semantics: work released during adapter
       // entry cannot report a result, affect readiness, or establish coverage.
-      if (syncResult instanceof Promise) void syncResult.catch(() => {})
       return
     }
     demand.onLoadSubsetResult = onLoadSubsetResult
@@ -1774,6 +1795,7 @@ export class CollectionSubscription
     this.observeOrderedCoverage(syncResult, demand, acquisition)
     // Pass the raw loadSubset result to the caller for external tracking
     onLoadSubsetResult?.(syncResult, demand.options)
+    if (this.ignoreObsoleteSubsetResult(demand, syncResult)) return
     this.observeLoadSubsetResult(
       syncResult,
       demand.options,

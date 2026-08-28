@@ -2081,6 +2081,187 @@ describe(`CollectionSubscription replay oracle`, () => {
     },
   )
 
+  it.each(
+    ([`release-where`, `release-exact`, `unsubscribe`] as const).flatMap(
+      (action) =>
+        ([`return`, `resolve`, `reject`] as const).map(
+          (resultKind) => [action, resultKind] as const,
+        ),
+    ),
+  )(
+    `does not continue an unordered snapshot after result-callback ownership loss: %s %s`,
+    async (action, resultKind) => {
+      type Row = { id: string; value: number }
+      const result = createDeferred<void>()
+      const loads: Array<LoadSubsetOptions> = []
+      const unloads: Array<LoadSubsetOptions> = []
+      const callerAbort = new AbortController()
+      const collection = createCollection<Row>({
+        id: `unordered-result-callback-${action}-${resultKind}`,
+        getKey: (row) => row.id,
+        syncMode: `on-demand`,
+        sync: {
+          sync: (params) => {
+            params.begin()
+            params.write({ type: `insert`, value: { id: `a`, value: 1 } })
+            params.commit()
+            params.markReady()
+            return {
+              loadSubset: (options) => {
+                loads.push(options)
+                return resultKind === `return` ? true : result.promise
+              },
+              unloadSubset: (options) => {
+                unloads.push(options)
+              },
+            }
+          },
+        },
+      })
+      const sourceOwner = collection.subscribeChanges(() => {}, {
+        includeInitialState: false,
+      })
+      await flushPromises()
+      const requestWhere = new Func(`eq`, [new PropRef([`id`]), new Value(`a`)])
+      const subscriptionWhere = new Func(`gte`, [
+        new PropRef([`value`]),
+        new Value(0),
+      ])
+      let publicationCount = 0
+      const statuses: Array<string> = []
+      const subscription = collection.subscribeChanges(
+        (changes) => {
+          publicationCount += changes.length
+        },
+        { whereExpression: subscriptionWhere },
+      )
+      subscription.on(`status:change`, ({ status }) => statuses.push(status))
+
+      try {
+        const requested = subscription.requestSnapshot({
+          where: requestWhere,
+          signal: callerAbort.signal,
+          onLoadSubsetResult: () => {
+            if (action === `unsubscribe`) {
+              subscription.unsubscribe()
+            } else {
+              subscription.releaseSnapshot(
+                requestWhere,
+                action === `release-exact` ? callerAbort.signal : undefined,
+              )
+            }
+          },
+        })
+
+        expect(requested).toBe(false)
+        expect(loads).toHaveLength(1)
+        expect(unloads).toEqual(loads)
+        expect(loads[0]?.signal?.aborted).toBe(true)
+        expect(publicationCount).toBe(0)
+        expect(statuses).toEqual([])
+
+        if (resultKind === `reject`) {
+          result.reject(new Error(`obsolete unordered result`))
+        } else {
+          result.resolve()
+        }
+        await flushPromises()
+
+        expect(publicationCount).toBe(0)
+        expect(statuses).toEqual([])
+        expect(subscription.status).toBe(`ready`)
+      } finally {
+        subscription.unsubscribe()
+        sourceOwner.unsubscribe()
+        await collection.cleanup()
+      }
+    },
+  )
+
+  it.each(
+    ([`release`, `unsubscribe`] as const).flatMap((action) =>
+      ([`return`, `resolve`, `reject`] as const).map(
+        (resultKind) => [action, resultKind] as const,
+      ),
+    ),
+  )(
+    `does not track an ordered result after its callback releases ownership: %s %s`,
+    async (action, resultKind) => {
+      type Row = { id: string; rank: number }
+      const result = createDeferred<void>()
+      const loads: Array<LoadSubsetOptions> = []
+      const unloads: Array<LoadSubsetOptions> = []
+      const collection = createCollection<Row>({
+        id: `ordered-result-callback-${action}-${resultKind}`,
+        getKey: (row) => row.id,
+        syncMode: `on-demand`,
+        sync: {
+          sync: ({ markReady }) => {
+            markReady()
+            return {
+              loadSubset: (options) => {
+                loads.push(options)
+                return resultKind === `return` ? true : result.promise
+              },
+              unloadSubset: (options) => {
+                unloads.push(options)
+              },
+            }
+          },
+        },
+      })
+      const where = new Func(`gte`, [new PropRef([`rank`]), new Value(0)])
+      const orderBy: OrderBy = [
+        {
+          expression: new PropRef([`rank`]),
+          compareOptions: { direction: `asc`, nulls: `first` },
+        },
+      ]
+      const index = collection.createIndex((row) => row.rank, {
+        indexType: BTreeIndex,
+      })
+      const statuses: Array<string> = []
+      const subscription = collection.subscribeChanges(() => {}, {
+        whereExpression: where,
+      })
+      subscription.setOrderByIndex(index)
+      subscription.on(`status:change`, ({ status }) => statuses.push(status))
+      let resultCallbackCount = 0
+
+      try {
+        subscription.requestLimitedSnapshot({
+          orderBy,
+          limit: 1,
+          onLoadSubsetResult: () => {
+            resultCallbackCount++
+            if (action === `release`) subscription.releaseSnapshot(where)
+            else subscription.unsubscribe()
+          },
+        })
+
+        expect(resultCallbackCount).toBe(1)
+        expect(loads).toHaveLength(1)
+        expect(unloads).toEqual(loads)
+        expect(loads[0]?.signal?.aborted).toBe(true)
+        expect(statuses).toEqual([])
+
+        if (resultKind === `reject`) {
+          result.reject(new Error(`obsolete ordered result`))
+        } else {
+          result.resolve()
+        }
+        await flushPromises()
+
+        expect(resultCallbackCount).toBe(1)
+        expect(statuses).toEqual([])
+        expect(subscription.status).toBe(`ready`)
+      } finally {
+        subscription.unsubscribe()
+        await collection.cleanup()
+      }
+    },
+  )
+
   it.each([`asc`, `desc`] as const)(
     `keeps failed ordered replay deltas inside the retained top-K window: %s`,
     async (direction) => {
@@ -2742,6 +2923,233 @@ describe(`CollectionSubscription replay oracle`, () => {
       await collection.cleanup()
     }
   })
+
+  it(`publishes a replay replacement before reporting ready`, async () => {
+    type Row = { id: string; rank: number }
+    type Outcome = {
+      hasMore: boolean
+      appliedRowKeys: ReadonlyArray<string>
+    }
+    let begin!: () => void
+    let write!: (message: ChangeMessageOrDeleteKeyMessage<Row, string>) => void
+    let commit!: (signal?: AbortSignal) => true | Promise<void>
+    let truncate!: () => void
+    const replay = createDeferred<Outcome>()
+    const loads: Array<LoadSubsetOptions> = []
+    const collection = createCollection<Row>({
+      id: `replay-ready-after-publication`,
+      getKey: (row) => row.id,
+      syncMode: `on-demand`,
+      sync: {
+        sync: (params) => {
+          begin = params.begin
+          write = params.write
+          commit = params.commit
+          truncate = params.truncate
+          params.markReady()
+          return {
+            loadSubset: (options) => {
+              loads.push(options)
+              if (loads.length === 1) {
+                begin()
+                write({ type: `insert`, value: { id: `a`, rank: 1 } })
+                commit(options.signal)
+                return Promise.resolve({
+                  hasMore: false,
+                  appliedRowKeys: [`a`] as const,
+                })
+              }
+              return replay.promise
+            },
+            unloadSubset: () => {},
+          }
+        },
+      },
+    })
+    const orderBy: OrderBy = [
+      {
+        expression: new PropRef([`rank`]),
+        compareOptions: { direction: `asc`, nulls: `first` },
+      },
+    ]
+    const index = collection.createIndex((row) => row.rank, {
+      indexType: BTreeIndex,
+    })
+    const visible = new Map<string, Row>()
+    const readyObservations: Array<{
+      keys: ReadonlyArray<string>
+      boundary: string | number | undefined
+    }> = []
+    const subscription = collection.subscribeChanges((changes) => {
+      for (const change of changes) {
+        const key = String(change.key)
+        if (change.type === `delete`) visible.delete(key)
+        else visible.set(key, change.value)
+      }
+    })
+    subscription.setOrderByIndex(index)
+    subscription.on(`status:ready`, () => {
+      readyObservations.push({
+        keys: [...visible.keys()],
+        boundary: subscription.orderedBoundaryKey,
+      })
+    })
+
+    try {
+      subscription.requestLimitedSnapshot({ orderBy, limit: 1 })
+      await flushPromises()
+      expect([...visible.keys()]).toEqual([`a`])
+      readyObservations.length = 0
+
+      begin()
+      truncate()
+      commit()
+      await flushPromises()
+      begin()
+      write({ type: `insert`, value: { id: `x`, rank: 0 } })
+      const receipt = commit(loads[1]?.signal)
+      if (receipt !== true) await receipt
+
+      replay.resolve({ hasMore: false, appliedRowKeys: [`x`] })
+      await flushPromises()
+
+      expect(readyObservations).toEqual([{ keys: [`x`], boundary: `x` }])
+      expect([...visible.keys()]).toEqual([`x`])
+      expect(subscription.orderedBoundaryKey).toBe(`x`)
+    } finally {
+      subscription.unsubscribe()
+      await collection.cleanup()
+    }
+  })
+
+  it.each(
+    ([`throw`, `reject`] as const).flatMap((failureKind) =>
+      ([`reentrant`, `next-turn`] as const).map(
+        (listenerTiming) => [failureKind, listenerTiming] as const,
+      ),
+    ),
+  )(
+    `preserves demand started by a replay error listener: %s %s`,
+    async (failureKind, listenerTiming) => {
+      type Row = { id: string; rank: number }
+      type Outcome = {
+        hasMore: boolean
+        appliedRowKeys: ReadonlyArray<string>
+      }
+      let begin!: () => void
+      let write!: (
+        message: ChangeMessageOrDeleteKeyMessage<Row, string>,
+      ) => void
+      let commit!: (signal?: AbortSignal) => true | Promise<void>
+      let truncate!: () => void
+      const replay = createDeferred<Outcome>()
+      const loads: Array<LoadSubsetOptions> = []
+      const collection = createCollection<Row>({
+        id: `replay-error-demand-${failureKind}-${listenerTiming}`,
+        getKey: (row) => row.id,
+        syncMode: `on-demand`,
+        sync: {
+          sync: (params) => {
+            begin = params.begin
+            write = params.write
+            commit = params.commit
+            truncate = params.truncate
+            params.markReady()
+            return {
+              loadSubset: (options) => {
+                loads.push(options)
+                if (loads.length === 1) {
+                  begin()
+                  write({ type: `insert`, value: { id: `a`, rank: 1 } })
+                  commit(options.signal)
+                  return Promise.resolve({
+                    hasMore: false,
+                    appliedRowKeys: [`a`] as const,
+                  })
+                }
+                if (loads.length === 2) {
+                  if (failureKind === `throw`) {
+                    throw new Error(`replay failed`)
+                  }
+                  return replay.promise
+                }
+                begin()
+                write({ type: `insert`, value: { id: `x`, rank: 0 } })
+                commit(options.signal)
+                return true
+              },
+              unloadSubset: () => {},
+            }
+          },
+        },
+      })
+      const orderedWhere = new Func(`gte`, [
+        new PropRef([`rank`]),
+        new Value(0),
+      ])
+      const additionalWhere = new Func(`eq`, [
+        new PropRef([`id`]),
+        new Value(`x`),
+      ])
+      const orderBy: OrderBy = [
+        {
+          expression: new PropRef([`rank`]),
+          compareOptions: { direction: `asc`, nulls: `first` },
+        },
+      ]
+      const index = collection.createIndex((row) => row.rank, {
+        indexType: BTreeIndex,
+      })
+      const visible = new Map<string, Row>()
+      const subscription = collection.subscribeChanges(
+        (changes) => {
+          for (const change of changes) {
+            const key = String(change.key)
+            if (change.type === `delete`) visible.delete(key)
+            else visible.set(key, change.value)
+          }
+        },
+        { whereExpression: orderedWhere },
+      )
+      subscription.setOrderByIndex(index)
+      let errorCount = 0
+      subscription.on(`loadSubset:error`, () => {
+        errorCount++
+        const requestAdditional = () => {
+          subscription.requestSnapshot({
+            where: additionalWhere,
+            optimizedOnly: false,
+          })
+        }
+        if (listenerTiming === `next-turn`) queueMicrotask(requestAdditional)
+        else requestAdditional()
+      })
+
+      try {
+        subscription.requestLimitedSnapshot({ orderBy, limit: 1 })
+        await flushPromises()
+        begin()
+        truncate()
+        commit()
+        await flushPromises()
+        if (failureKind === `reject`) {
+          replay.reject(new Error(`replay failed`))
+        }
+        await flushPromises()
+
+        expect(errorCount).toBe(1)
+        expect([...visible.keys()].sort()).toEqual([`a`, `x`])
+        expect(subscription.orderedBoundaryKey).toBe(`a`)
+
+        subscription.releaseSnapshot(additionalWhere)
+        expect([...visible.keys()]).toEqual([`a`])
+        expect(subscription.orderedBoundaryKey).toBe(`a`)
+      } finally {
+        subscription.unsubscribe()
+        await collection.cleanup()
+      }
+    },
+  )
 
   it(`revokes ordered authority when an additional demand replaces a candidate version`, async () => {
     type Row = { id: `a` | `x`; rank: number }
