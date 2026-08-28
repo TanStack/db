@@ -525,7 +525,9 @@ If a nested acquisition has already attributed a failure occurrence to its
 captured attempt, propagation through the containing callback does not create a
 second attribution or error event. Adapter boundaries, not thrown-value
 identity, distinguish occurrences: a later cleanup remains a separate failure
-even when it throws the same `Error` object.
+even when it throws the same value. A callback frame retains every boundary
+occurrence and associates a propagated value with the latest SameValue match,
+so `undefined`, `NaN`, primitives, and objects follow the same law.
 A requested limit, a settled promise, or the number of requests does not.
 Applied keys carry two distinct facts. Every applied source key may advance the
 continuation cursor, including a row excluded by the subscription predicate.

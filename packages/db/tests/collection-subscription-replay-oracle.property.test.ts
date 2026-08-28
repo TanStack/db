@@ -3404,92 +3404,172 @@ describe(`CollectionSubscription replay oracle`, () => {
     },
   )
 
-  it(`reports one error when a callback-created unordered start failure propagates`, async () => {
-    type Row = { id: string; version: number }
-    const whereA = new Func(`eq`, [new PropRef([`id`]), new Value(`a`)])
-    const whereB = new Func(`eq`, [new PropRef([`id`]), new Value(`b`)])
-    const startError = new Error(`callback-created start failed`)
-    let begin!: () => void
-    let write!: (message: ChangeMessageOrDeleteKeyMessage<Row, string>) => void
-    let commit!: (signal?: AbortSignal) => true | Promise<void>
-    let truncate!: () => void
-    let loadCount = 0
-    let callbackCount = 0
-    const collection = createCollection<Row>({
-      id: `propagated-callback-start-failure`,
-      getKey: (row) => row.id,
-      syncMode: `on-demand`,
-      sync: {
-        sync: (params) => {
-          begin = params.begin
-          write = params.write
-          commit = params.commit
-          truncate = params.truncate
-          params.markReady()
-          return {
-            loadSubset: (options) => {
-              loadCount++
-              if (loadCount === 3) throw startError
-              begin()
-              write({
-                type: `insert`,
-                value: { id: `a`, version: loadCount },
-              })
-              commit(options.signal)
-              return loadCount === 1 ? Promise.resolve() : true
-            },
-            unloadSubset: () => {},
-          }
-        },
-      },
-    })
-    const visible = new Map<string, Row>()
-    const errors: Array<unknown> = []
-    const subscription = collection.subscribeChanges((changes) => {
-      for (const change of changes) {
-        const key = String(change.key)
-        if (change.type === `delete`) visible.delete(key)
-        else visible.set(key, change.value)
-      }
-    })
-    subscription.on(`loadSubset:error`, ({ error }) => errors.push(error))
-
-    try {
-      subscription.requestSnapshot({
-        where: whereA,
-        onLoadSubsetResult: () => {
-          callbackCount++
-          if (callbackCount === 2) {
-            subscription.requestSnapshot({ where: whereB })
-          }
-        },
-      })
-      await flushPromises()
-      expect(visible.get(`a`)?.version).toBe(1)
-
-      begin()
-      truncate()
-      commit()
-      await flushPromises()
-
-      expect(errors).toEqual([startError])
-      expect(subscription.status).toBe(`ready`)
-      expect(visible.get(`a`)?.version).toBe(1)
-    } finally {
-      subscription.unsubscribe()
-      await collection.cleanup()
-    }
-  })
-
   it.each(
     ([`unordered`, `ordered`] as const).flatMap((demandKind) =>
-      ([`distinct`, `shared`] as const).map(
-        (errorIdentity) => [demandKind, errorIdentity] as const,
+      ([`error`, `nan`, `non-latest`] as const).map(
+        (failureValue) => [demandKind, failureValue] as const,
       ),
     ),
   )(
-    `attributes nested start and exact cleanup as separate callback failures: %s %s error`,
-    async (demandKind, errorIdentity) => {
+    `reports one error when a callback-created start failure propagates: %s %s`,
+    async (demandKind, failureValue) => {
+      type Row = { id: string; rank: number; version: number }
+      const whereOuter = new Func(`eq`, [new PropRef([`id`]), new Value(`a`)])
+      const whereNested = new Func(`eq`, [
+        new PropRef([`id`]),
+        new Value(`nested`),
+      ])
+      const whereNestedSecond = new Func(`eq`, [
+        new PropRef([`id`]),
+        new Value(`nested-second`),
+      ])
+      const orderBy: OrderBy = [
+        {
+          expression: new PropRef([`rank`]),
+          compareOptions: { direction: `asc`, nulls: `first` },
+        },
+      ]
+      const startError: unknown =
+        failureValue === `nan`
+          ? Number.NaN
+          : new Error(`callback-created start failed`)
+      const secondStartError = new Error(`second callback-created start failed`)
+      let begin!: () => void
+      let write!: (
+        message: ChangeMessageOrDeleteKeyMessage<Row, string>,
+      ) => void
+      let commit!: (signal?: AbortSignal) => true | Promise<void>
+      let truncate!: () => void
+      let outerLoadCount = 0
+      let callbackCount = 0
+      const nestedOptions: Array<LoadSubsetOptions> = []
+      const collection = createCollection<Row>({
+        id: `propagated-callback-start-failure-${demandKind}-${failureValue}`,
+        getKey: (row) => row.id,
+        syncMode: `on-demand`,
+        sync: {
+          sync: (params) => {
+            begin = params.begin
+            write = params.write
+            commit = params.commit
+            truncate = params.truncate
+            params.markReady()
+            return {
+              loadSubset: (options) => {
+                if (options.where === whereNested) {
+                  nestedOptions.push(options)
+                  throw startError
+                }
+                if (options.where === whereNestedSecond) {
+                  nestedOptions.push(options)
+                  throw secondStartError
+                }
+                outerLoadCount++
+                begin()
+                write({
+                  type: `insert`,
+                  value: { id: `a`, rank: 1, version: outerLoadCount },
+                })
+                commit(options.signal)
+                return outerLoadCount === 1 ? Promise.resolve() : true
+              },
+              unloadSubset: () => {},
+            }
+          },
+        },
+      })
+      const index = collection.createIndex((row) => row.rank, {
+        indexType: BTreeIndex,
+      })
+      const visible = new Map<string, Row>()
+      const errors: Array<{ error: unknown; options: LoadSubsetOptions }> = []
+      const subscription = collection.subscribeChanges((changes) => {
+        for (const change of changes) {
+          const key = String(change.key)
+          if (change.type === `delete`) visible.delete(key)
+          else visible.set(key, change.value)
+        }
+      })
+      subscription.setOrderByIndex(index)
+      subscription.on(`loadSubset:error`, ({ error, options }) =>
+        errors.push({ error, options }),
+      )
+      const onLoadSubsetResult = () => {
+        callbackCount++
+        if (callbackCount !== 2) return
+        if (failureValue !== `non-latest`) {
+          subscription.requestSnapshot({ where: whereNested })
+          return
+        }
+        try {
+          subscription.requestSnapshot({ where: whereNested })
+        } catch (error) {
+          expect(error).toBe(startError)
+        }
+        try {
+          subscription.requestSnapshot({ where: whereNestedSecond })
+        } catch (error) {
+          expect(error).toBe(secondStartError)
+        }
+        throw startError
+      }
+
+      try {
+        if (demandKind === `ordered`) {
+          subscription.requestLimitedSnapshot({
+            orderBy,
+            limit: 1,
+            onLoadSubsetResult,
+          })
+        } else {
+          subscription.requestSnapshot({
+            where: whereOuter,
+            onLoadSubsetResult,
+          })
+        }
+        await flushPromises()
+        expect(visible.get(`a`)?.version).toBe(1)
+
+        begin()
+        truncate()
+        commit()
+        await flushPromises()
+
+        const expectedErrors =
+          failureValue === `non-latest`
+            ? [startError, secondStartError]
+            : [startError]
+        expect(errors).toHaveLength(expectedErrors.length)
+        for (const [observationIndex, error] of expectedErrors.entries()) {
+          expect(Object.is(errors[observationIndex]?.error, error)).toBe(true)
+          expect(errors[observationIndex]?.options).toBe(
+            nestedOptions[observationIndex],
+          )
+        }
+        expect(subscription.status).toBe(`ready`)
+        expect(visible.get(`a`)?.version).toBe(1)
+      } finally {
+        subscription.unsubscribe()
+        await collection.cleanup()
+      }
+    },
+  )
+
+  it.each(
+    ([`unordered`, `ordered`] as const).flatMap((demandKind) =>
+      (
+        [
+          `distinct-error`,
+          `shared-error`,
+          `undefined`,
+          `nan`,
+          `string`,
+        ] as const
+      ).map((failureValues) => [demandKind, failureValues] as const),
+    ),
+  )(
+    `attributes nested start and exact cleanup as separate callback failures: %s %s`,
+    async (demandKind, failureValues) => {
       type Row = { id: string; rank: number; version: number }
       const whereOuter = new Func(`eq`, [new PropRef([`id`]), new Value(`a`)])
       const whereNested = new Func(`eq`, [
@@ -3506,11 +3586,18 @@ describe(`CollectionSubscription replay oracle`, () => {
           compareOptions: { direction: `asc`, nulls: `first` },
         },
       ]
-      const startError = new Error(`nested start failed`)
-      const cleanupError =
-        errorIdentity === `shared`
-          ? startError
-          : new Error(`exact cleanup failed`)
+      const startError: unknown =
+        failureValues === `undefined`
+          ? undefined
+          : failureValues === `nan`
+            ? Number.NaN
+            : failureValues === `string`
+              ? `shared failure`
+              : new Error(`nested start failed`)
+      const cleanupError: unknown =
+        failureValues === `distinct-error`
+          ? new Error(`exact cleanup failed`)
+          : startError
       let begin!: () => void
       let write!: (
         message: ChangeMessageOrDeleteKeyMessage<Row, string>,
@@ -3521,8 +3608,10 @@ describe(`CollectionSubscription replay oracle`, () => {
       let callbackCount = 0
       let cleanupArmed = false
       let cleanupThrowCount = 0
+      let nestedOptions: LoadSubsetOptions | undefined
+      let cleanupOptions: LoadSubsetOptions | undefined
       const collection = createCollection<Row>({
-        id: `callback-failure-occurrence-${demandKind}-${errorIdentity}`,
+        id: `callback-failure-occurrence-${demandKind}-${failureValues}`,
         getKey: (row) => row.id,
         syncMode: `on-demand`,
         sync: {
@@ -3534,7 +3623,10 @@ describe(`CollectionSubscription replay oracle`, () => {
             params.markReady()
             return {
               loadSubset: (options) => {
-                if (options.where === whereNested) throw startError
+                if (options.where === whereNested) {
+                  nestedOptions = options
+                  throw startError
+                }
                 if (
                   options.where === whereOuter ||
                   options.orderBy !== undefined
@@ -3560,6 +3652,7 @@ describe(`CollectionSubscription replay oracle`, () => {
                   cleanupThrowCount === 0
                 ) {
                   cleanupThrowCount++
+                  cleanupOptions = options
                   throw cleanupError
                 }
               },
@@ -3571,10 +3664,7 @@ describe(`CollectionSubscription replay oracle`, () => {
         indexType: BTreeIndex,
       })
       const visible = new Map<string, Row>()
-      const errors: Array<{
-        error: unknown
-        where: LoadSubsetOptions[`where`]
-      }> = []
+      const errors: Array<{ error: unknown; options: LoadSubsetOptions }> = []
       const subscription = collection.subscribeChanges((changes) => {
         for (const change of changes) {
           const key = String(change.key)
@@ -3584,7 +3674,7 @@ describe(`CollectionSubscription replay oracle`, () => {
       })
       subscription.setOrderByIndex(index)
       subscription.on(`loadSubset:error`, ({ error, options }) =>
-        errors.push({ error, where: options.where }),
+        errors.push({ error, options }),
       )
 
       const onLoadSubsetResult = () => {
@@ -3593,7 +3683,7 @@ describe(`CollectionSubscription replay oracle`, () => {
         try {
           subscription.requestSnapshot({ where: whereNested })
         } catch (error) {
-          expect(error).toBe(startError)
+          expect(Object.is(error, startError)).toBe(true)
         }
         cleanupArmed = true
         subscription.releaseSnapshot(whereCleanup)
@@ -3621,10 +3711,11 @@ describe(`CollectionSubscription replay oracle`, () => {
         commit()
         await flushPromises()
 
-        expect(errors).toEqual([
-          { error: startError, where: whereNested },
-          { error: cleanupError, where: whereCleanup },
-        ])
+        expect(errors).toHaveLength(2)
+        expect(Object.is(errors[0]?.error, startError)).toBe(true)
+        expect(errors[0]?.options).toBe(nestedOptions)
+        expect(Object.is(errors[1]?.error, cleanupError)).toBe(true)
+        expect(errors[1]?.options).toBe(cleanupOptions)
         expect(cleanupThrowCount).toBe(1)
         expect(subscription.status).toBe(`ready`)
         expect(visible.get(`a`)?.version).toBe(1)
@@ -3634,6 +3725,57 @@ describe(`CollectionSubscription replay oracle`, () => {
       }
     },
   )
+
+  it(`surfaces undefined teardown failure and retries its exact cleanup`, async () => {
+    type Row = { id: string }
+    const where = new Func(`eq`, [new PropRef([`id`]), new Value(`a`)])
+    let loadedOptions: LoadSubsetOptions | undefined
+    const unloads: Array<LoadSubsetOptions> = []
+    const collection = createCollection<Row>({
+      id: `undefined-teardown-failure`,
+      getKey: (row) => row.id,
+      syncMode: `on-demand`,
+      sync: {
+        sync: (params) => {
+          params.markReady()
+          return {
+            loadSubset: (options) => {
+              loadedOptions = options
+              return true
+            },
+            unloadSubset: (options) => {
+              unloads.push(options)
+              if (unloads.length === 1) throw undefined
+            },
+          }
+        },
+      },
+    })
+    const subscription = collection.subscribeChanges(() => {})
+
+    try {
+      subscription.requestSnapshot({ where })
+      let didThrow = false
+      let thrownValue: unknown = Symbol(`not thrown`)
+      try {
+        subscription.unsubscribe()
+      } catch (error) {
+        didThrow = true
+        thrownValue = error
+      }
+
+      expect(didThrow).toBe(true)
+      expect(thrownValue).toBeUndefined()
+      expect(unloads).toHaveLength(1)
+      expect(unloads[0]).toBe(loadedOptions)
+
+      expect(() => subscription.unsubscribe()).not.toThrow()
+      expect(unloads).toHaveLength(2)
+      expect(unloads[1]).toBe(loadedOptions)
+    } finally {
+      await collection.cleanup()
+    }
+  })
 
   it.each(
     ([`unordered`, `ordered`] as const).flatMap((demandKind) =>
@@ -4884,6 +5026,7 @@ describe(`CollectionSubscription replay oracle`, () => {
     let failReplayUnload = true
     const replay = createDeferred<Outcome>()
     const loads: Array<LoadSubsetOptions> = []
+    const unloadSignals: Array<AbortSignal | undefined> = []
     const collection = createCollection<Row>({
       id: `late-replay-cleanup-collection`,
       getKey: (row) => row.id,
@@ -4911,6 +5054,7 @@ describe(`CollectionSubscription replay oracle`, () => {
               return replay.promise
             },
             unloadSubset: (options) => {
+              unloadSignals.push(options.signal)
               if (options.signal === loads[1]?.signal && failReplayUnload) {
                 failReplayUnload = false
                 throw new Error(`replay unload failed`)
@@ -4949,10 +5093,13 @@ describe(`CollectionSubscription replay oracle`, () => {
       replay.resolve({ hasMore: false, appliedRowKeys: [] })
       await flushPromises()
 
-      const retainedDemands = (
-        subscription as unknown as { subsetDemands: Array<unknown> }
-      ).subsetDemands
-      expect(retainedDemands).toEqual([])
+      expect(unloadSignals).toEqual([
+        loads[1]?.signal,
+        loads[0]?.signal,
+        loads[1]?.signal,
+      ])
+      subscription.unsubscribe()
+      expect(unloadSignals).toHaveLength(3)
     } finally {
       failReplayUnload = false
       subscription.unsubscribe()

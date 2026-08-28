@@ -154,7 +154,7 @@ type ReplayCallbackFailure = Readonly<{
 type ReplayResultCallbackFrame = {
   replayContext: TruncateReplayContext
   previous: ReplayResultCallbackFrame | undefined
-  propagatedFailure?: ReplayCallbackFailure
+  failures: Array<ReplayCallbackFailure>
 }
 
 export class CollectionSubscription
@@ -592,7 +592,7 @@ export class CollectionSubscription
     ) {
       return
     }
-    frame.propagatedFailure = failure
+    frame.failures.push(failure)
   }
 
   /** Attribute one replay callback failure without merging equal payloads. */
@@ -612,19 +612,24 @@ export class CollectionSubscription
     const frame: ReplayResultCallbackFrame = {
       replayContext,
       previous: this.activeReplayResultCallback,
+      failures: [],
     }
     this.activeReplayResultCallback = frame
     try {
       callback()
     } catch (error) {
       if (this.truncateReplaySession !== replayContext.session) throw error
-      const propagated = frame.propagatedFailure
-      if (!(propagated?.attributed && propagated.error === error)) {
+      let propagated: ReplayCallbackFailure | undefined
+      for (let index = frame.failures.length - 1; index >= 0; index--) {
+        const failure = frame.failures[index]
+        if (failure && Object.is(failure.error, error)) {
+          propagated = failure
+          break
+        }
+      }
+      if (!propagated?.attributed) {
         replayContext.attempt.failed = true
-        const failureOptions =
-          propagated !== undefined && propagated.error === error
-            ? propagated.options
-            : options
+        const failureOptions = propagated?.options ?? options
         this.queueTruncateReplayError(
           replayContext.session,
           failureOptions,
@@ -1834,11 +1839,11 @@ export class CollectionSubscription
 
     demand.active = false
     if (demand.ordered !== undefined) this.retireUnownedOrderedPublication()
-    let releaseError: unknown
+    let releaseFailure: { error: unknown } | undefined
     try {
       this.releaseSubsetDemand(demand)
     } catch (error) {
-      releaseError = error
+      releaseFailure = { error }
     } finally {
       this.collectReleasedDemand(demand)
       if (this.orderedWindow && !this.isBufferingForTruncate) {
@@ -1848,7 +1853,7 @@ export class CollectionSubscription
         if (changes.length > 0) this.callback(changes)
       }
     }
-    if (releaseError !== undefined) throw releaseError
+    if (releaseFailure) throw releaseFailure.error
   }
 
   /**
@@ -2288,13 +2293,13 @@ export class CollectionSubscription
     // unsubscribe listeners may reenter public methods, but they cannot create
     // work that escapes the cleanup pass already in progress.
     this.unsubscribed = true
-    let firstCleanupError: unknown
+    let firstCleanupFailure: { error: unknown } | undefined
 
     // Clean up truncate event listener
     try {
       this.truncateCleanup?.()
     } catch (error) {
-      firstCleanupError = error
+      firstCleanupFailure = { error }
     }
     this.truncateCleanup = undefined
 
@@ -2309,7 +2314,7 @@ export class CollectionSubscription
       try {
         this.releaseSubsetDemand(demand)
       } catch (error) {
-        firstCleanupError ??= error
+        firstCleanupFailure ??= { error }
       }
     }
     this.subsetDemands = this.subsetDemands.filter(
@@ -2323,12 +2328,12 @@ export class CollectionSubscription
         subscription: this,
       })
     } catch (error) {
-      firstCleanupError ??= error
+      firstCleanupFailure ??= { error }
     } finally {
       // Clear all event listeners to prevent memory leaks
       this.clearListeners()
     }
 
-    if (firstCleanupError !== undefined) throw firstCleanupError
+    if (firstCleanupFailure) throw firstCleanupFailure.error
   }
 }
