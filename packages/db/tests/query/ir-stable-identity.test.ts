@@ -588,6 +588,106 @@ describe(`loadSubset demand identity`, () => {
     ).toBe(true)
   })
 
+  it(`copies binary equality values without calling an overridden slice`, () => {
+    const bytes = new Uint8Array([1, 2, 3])
+    Object.defineProperty(bytes, `slice`, {
+      value: () => bytes,
+    })
+    const demand: LoadSubsetOptions = {
+      where: new Func<boolean>(`eq`, [new PropRef([`id`]), new Value(bytes)]),
+    }
+    const snapshot = cloneLoadSubsetOptions(demand)
+    const snapshotBytes = ((snapshot.where as Func).args[1] as Value).value
+
+    expect(snapshotBytes).not.toBe(bytes)
+    expect(snapshotBytes).toEqual(new Uint8Array([1, 2, 3]))
+
+    bytes.fill(9)
+    expect(
+      compileSingleRowExpression(snapshot.where!)({
+        id: new Uint8Array([1, 2, 3]),
+      }),
+    ).toBe(true)
+  })
+
+  it.each([`coalesce`, `caseWhen`] as const)(
+    `snapshots equality candidates returned by %s`,
+    (wrapper) => {
+      const candidates = [new Uint8Array([1])]
+      const candidateExpression =
+        wrapper === `coalesce`
+          ? new Func(`coalesce`, [new Value(candidates)])
+          : new Func(`caseWhen`, [
+              new Value(true),
+              new Value(candidates),
+              new Value([]),
+            ])
+      const demand: LoadSubsetOptions = {
+        where: new Func<boolean>(`in`, [
+          new PropRef([`token`]),
+          candidateExpression,
+        ]),
+      }
+      const demandKey = getLoadSubsetDemandKey(demand)
+      const snapshot = cloneLoadSubsetOptions(demand)
+
+      candidates[0]![0] = 2
+      candidates.push(new Uint8Array([3]))
+
+      expect(getLoadSubsetDemandKey(snapshot)).toBe(demandKey)
+      expect(
+        compileSingleRowExpression(snapshot.where!)({
+          token: new Uint8Array([1]),
+        }),
+      ).toBe(true)
+      expect(
+        compileSingleRowExpression(snapshot.where!)({
+          token: new Uint8Array([2]),
+        }),
+      ).toBe(false)
+    },
+  )
+
+  it(`rejects mutable Temporal-branded equality lookalikes`, () => {
+    let callerDate = `2024-01-15`
+    const callerValue = {
+      [Symbol.toStringTag]: `Temporal.PlainDate`,
+      toString: () => callerDate,
+    }
+    const demand: LoadSubsetOptions = {
+      where: new Func<boolean>(`eq`, [
+        new PropRef([`date`]),
+        new Value(callerValue),
+      ]),
+    }
+    expect(() => cloneLoadSubsetOptions(demand)).toThrow(
+      /Cannot snapshot Temporal.PlainDate equality value/,
+    )
+    expect(() => getLoadSubsetDemandKey(demand)).toThrow(
+      /Cannot snapshot Temporal.PlainDate equality value/,
+    )
+    callerDate = `2024-01-16`
+  })
+
+  it(`clones genuine Temporal equality values without changing their type or identity`, () => {
+    const date = Temporal.PlainDate.from(`2024-01-15`)
+    const demand: LoadSubsetOptions = {
+      where: new Func<boolean>(`eq`, [new PropRef([`date`]), new Value(date)]),
+    }
+    const demandKey = getLoadSubsetDemandKey(demand)
+    const snapshot = cloneLoadSubsetOptions(demand)
+    const snapshotDate = ((snapshot.where as Func).args[1] as Value).value
+
+    expect(snapshotDate).not.toBe(date)
+    expect(snapshotDate).toBeInstanceOf(Temporal.PlainDate)
+    expect(getLoadSubsetDemandKey(snapshot)).toBe(demandKey)
+    expect(
+      compileSingleRowExpression(snapshot.where!)({
+        date: Temporal.PlainDate.from(`2024-01-15`),
+      }),
+    ).toBe(true)
+  })
+
   it.each([
     [`function`, () => () => 1],
     [`symbol coercion`, () => ({ [Symbol.toPrimitive]: () => 1 })],

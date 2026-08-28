@@ -61,6 +61,29 @@ describe(`createDeduplicatedLoadSubset`, () => {
     expect(loadSubset).toHaveBeenCalledTimes(2)
   })
 
+  it(`does not let mutation rewrite computed membership coverage`, () => {
+    const loadSubset = vi.fn(() => true as const)
+    const deduplicated = new DeduplicatedLoadSubset({ loadSubset })
+    const candidates = [new Uint8Array([1])]
+    const demand = (): LoadSubsetOptions => ({
+      where: new Func(`in`, [
+        ref(`token`),
+        new Func(`coalesce`, [val(candidates)]),
+      ]),
+    })
+
+    deduplicated.loadSubset(demand())
+    candidates[0]![0] = 2
+    deduplicated.loadSubset({
+      where: new Func(`in`, [
+        ref(`token`),
+        new Func(`coalesce`, [val([new Uint8Array([2])])]),
+      ]),
+    })
+
+    expect(loadSubset).toHaveBeenCalledTimes(2)
+  })
+
   it(`rejects unsupported relational coercion before adapter entry`, () => {
     const loadSubset = vi.fn(() => true as const)
     const deduplicated = new DeduplicatedLoadSubset({ loadSubset })

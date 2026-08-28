@@ -1,6 +1,7 @@
 export type ExpressionValueContext =
   | `exact-output`
   | `equality-operand`
+  | `membership-candidates`
   | `ordering-operand`
   | `structural-operand`
 
@@ -11,7 +12,10 @@ export function getExpressionArgumentValueContext(
   argumentCount: number,
   resultContext: ExpressionValueContext,
 ): ExpressionValueContext {
-  if (name === `eq` || name === `in`) return `equality-operand`
+  if (name === `eq`) return `equality-operand`
+  if (name === `in`) {
+    return index === 0 ? `equality-operand` : `membership-candidates`
+  }
   if (isOrderingFunction(name)) return `ordering-operand`
 
   if (

@@ -1,5 +1,6 @@
 import { isTemporal } from '../utils'
 import type { CompareOptions } from '../query/builder/types'
+import type { TemporalLike } from '../utils'
 
 // WeakMap to store stable IDs for objects
 const objectIds = new WeakMap<object, number>()
@@ -162,10 +163,60 @@ function areUint8ArraysEqual(a: Uint8Array, b: Uint8Array): boolean {
  * This allows distinguishing between "start from beginning" (undefined parameter)
  * and "start from the key undefined" (actual undefined value in the tree).
  */
-export const UNDEFINED_SENTINEL = `__TS_DB_BTREE_UNDEFINED_VALUE__`
+const NORMALIZED_KEY_PREFIX = `\u0000tanstack-db:`
+
+function normalizedKey(kind: string, value: string): string {
+  return `${NORMALIZED_KEY_PREFIX}${kind}:${value}`
+}
+
+export const UNDEFINED_SENTINEL = normalizedKey(`undefined`, ``)
 const UNORDERABLE_BTREE_SENTINEL = Object.freeze({
   kind: `tanstack-db-unorderable`,
 })
+
+/** Clone a Temporal equality value without trusting mutable brand lookalikes. */
+export function snapshotTemporalEqualityValue(
+  value: TemporalLike,
+): TemporalLike {
+  const prototype = Object.getPrototypeOf(value)
+  const constructorDescriptor =
+    prototype === null
+      ? undefined
+      : Object.getOwnPropertyDescriptor(prototype, `constructor`)
+  const constructor = constructorDescriptor?.value
+  const fromDescriptor =
+    typeof constructor === `function`
+      ? Object.getOwnPropertyDescriptor(constructor, `from`)
+      : undefined
+  const toStringDescriptor =
+    prototype === null
+      ? undefined
+      : Object.getOwnPropertyDescriptor(prototype, `toString`)
+  if (
+    typeof constructor !== `function` ||
+    typeof fromDescriptor?.value !== `function` ||
+    typeof toStringDescriptor?.value !== `function`
+  ) {
+    throw new TypeError(
+      `Cannot snapshot ${value[Symbol.toStringTag]} equality value`,
+    )
+  }
+
+  const serialized = Reflect.apply(toStringDescriptor.value, value, [])
+  const snapshot = Reflect.apply(fromDescriptor.value, constructor, [
+    serialized,
+  ])
+  if (
+    snapshot === value ||
+    !isTemporal(snapshot) ||
+    snapshot[Symbol.toStringTag] !== value[Symbol.toStringTag]
+  ) {
+    throw new TypeError(
+      `Cannot snapshot ${value[Symbol.toStringTag]} equality value`,
+    )
+  }
+  return snapshot
+}
 
 /**
  * Normalize a value for comparison and Map key usage
@@ -176,6 +227,14 @@ const UNORDERABLE_BTREE_SENTINEL = Object.freeze({
  * for BTree index operations that need to distinguish undefined values.
  */
 export function normalizeValue(value: any): any {
+  // Internal normalized keys occupy a reserved string domain. Escape user
+  // strings in that domain so a literal cannot equal a binary or Temporal key.
+  if (typeof value === `string`) {
+    return value.startsWith(NORMALIZED_KEY_PREFIX)
+      ? normalizedKey(`string`, value)
+      : value
+  }
+
   if (typeof value !== `object` || value === null) {
     return value
   }
@@ -185,7 +244,10 @@ export function normalizeValue(value: any): any {
   }
 
   if (isTemporal(value)) {
-    return `__temporal__${value[Symbol.toStringTag]}__${value.toString()}`
+    return normalizedKey(
+      `temporal`,
+      `${value[Symbol.toStringTag]}:${value.toString()}`,
+    )
   }
 
   // Normalize Uint8Arrays/Buffers to a string representation for Map key usage
@@ -198,7 +260,7 @@ export function normalizeValue(value: any): any {
     // Convert to a string representation that can be used as a Map key.
     // Equality compares every binary value by content, so index keys must not
     // switch to reference identity at an arbitrary byte length.
-    return `__u8__${Array.from(value).join(`,`)}`
+    return normalizedKey(`binary`, Array.from(value).join(`,`))
   }
 
   return value

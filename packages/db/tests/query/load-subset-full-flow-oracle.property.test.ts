@@ -7,6 +7,7 @@ import { Func, PropRef, Value } from '../../src/query/ir.js'
 import { createEffect } from '../../src/query/effect.js'
 import { createLiveQueryCollection, eq } from '../../src/query/index.js'
 import { DeduplicatedLoadSubset } from '../../src/query/subset-dedupe.js'
+import { normalizeValue } from '../../src/utils/comparison.js'
 import { LIVE_QUERY_INTERNAL } from '../../src/query/live/internal.js'
 import { computeOrderedLoadCursor } from '../../src/query/live/utils.js'
 import { WindowState } from '../../src/query/live/window-state.js'
@@ -352,6 +353,9 @@ it.each([127, 128, 129])(
     const originalToken = new Uint8Array(byteLength).fill(1)
     const changedToken = new Uint8Array(byteLength).fill(2)
     const callerToken = new Uint8Array(originalToken)
+    Object.defineProperty(callerToken, `slice`, {
+      value: () => callerToken,
+    })
     const rows: ReadonlyArray<Row> = [
       { id: `original`, token: originalToken },
       { id: `changed`, token: changedToken },
@@ -411,6 +415,162 @@ it.each([127, 128, 129])(
     }
   },
 )
+
+it(`keeps binary equality distinct from a sentinel-looking string`, async () => {
+  type Row = { id: `binary` | `string`; token: Uint8Array | string }
+  const binary = new Uint8Array([1, 2, 3])
+  const sentinel = normalizeValue(binary) as string
+  const collection = createCollection<Row>({
+    id: `binary-string-normalization-domains`,
+    getKey: (row) => row.id,
+    syncMode: `on-demand`,
+    startSync: true,
+    sync: {
+      sync: ({ begin, write, commit, markReady }) => {
+        begin()
+        write({ type: `insert`, value: { id: `binary`, token: binary } })
+        write({ type: `insert`, value: { id: `string`, token: sentinel } })
+        commit()
+        markReady()
+        return { loadSubset: () => true }
+      },
+    },
+  })
+  const visible = new Set<Row[`id`]>()
+  const subscription = collection.subscribeChanges(
+    (changes) => {
+      for (const change of changes) {
+        if (change.type === `delete`) visible.delete(change.key as Row[`id`])
+        else visible.add(change.key as Row[`id`])
+      }
+    },
+    {
+      whereExpression: new Func(`eq`, [
+        new PropRef([`token`]),
+        new Value(binary),
+      ]),
+    },
+  )
+
+  try {
+    subscription.requestSnapshot({ optimizedOnly: false })
+    expect([...visible]).toEqual([`binary`])
+  } finally {
+    subscription.unsubscribe()
+    await collection.cleanup()
+  }
+})
+
+it(`freezes computed membership candidates across local filtering and adapter acquisition`, async () => {
+  type Row = { id: `original` | `changed`; token: Uint8Array }
+  const candidates = [new Uint8Array([1])]
+  let acquired: LoadSubsetOptions | undefined
+  const collection = createCollection<Row>({
+    id: `frozen-computed-membership-candidates`,
+    getKey: (row) => row.id,
+    syncMode: `on-demand`,
+    startSync: true,
+    sync: {
+      sync: ({ begin, write, commit, markReady }) => {
+        begin()
+        write({
+          type: `insert`,
+          value: { id: `original`, token: new Uint8Array([1]) },
+        })
+        write({
+          type: `insert`,
+          value: { id: `changed`, token: new Uint8Array([2]) },
+        })
+        commit()
+        markReady()
+        return {
+          loadSubset: (options) => {
+            acquired = options
+            return true
+          },
+        }
+      },
+    },
+  })
+  const visible = new Set<Row[`id`]>()
+  const subscription = collection.subscribeChanges(
+    (changes) => {
+      for (const change of changes) {
+        if (change.type === `delete`) visible.delete(change.key as Row[`id`])
+        else visible.add(change.key as Row[`id`])
+      }
+    },
+    {
+      whereExpression: new Func(`in`, [
+        new PropRef([`token`]),
+        new Func(`coalesce`, [new Value(candidates)]),
+      ]),
+    },
+  )
+
+  try {
+    candidates[0]![0] = 2
+    subscription.requestSnapshot({ optimizedOnly: false })
+
+    expect([...visible]).toEqual([`original`])
+    const acquiredCandidates = (
+      ((acquired?.where as Func).args[1] as Func).args[0] as Value<
+        Array<Uint8Array>
+      >
+    ).value
+    expect(acquiredCandidates).toEqual([new Uint8Array([1])])
+    expect(acquiredCandidates).not.toBe(candidates)
+  } finally {
+    subscription.unsubscribe()
+    await collection.cleanup()
+  }
+})
+
+it(`rejects mutable Temporal-branded equality lookalikes before adapter acquisition`, async () => {
+  type TemporalValue = {
+    [Symbol.toStringTag]: string
+    toString: () => string
+  }
+  type Row = { id: string; date: TemporalValue }
+  let callerDate = `2024-01-15`
+  const createDate = (read: () => string): TemporalValue => ({
+    [Symbol.toStringTag]: `Temporal.PlainDate`,
+    toString: read,
+  })
+  const callerValue = createDate(() => callerDate)
+  let adapterCalls = 0
+  const collection = createCollection<Row>({
+    id: `frozen-temporal-branded-equality`,
+    getKey: (row) => row.id,
+    syncMode: `on-demand`,
+    sync: {
+      sync: ({ markReady }) => {
+        markReady()
+        return {
+          loadSubset: () => {
+            adapterCalls += 1
+            return true
+          },
+        }
+      },
+    },
+  })
+  try {
+    expect(() =>
+      collection.subscribeChanges(() => {}, {
+        whereExpression: new Func(`eq`, [
+          new PropRef([`date`]),
+          new Value(callerValue),
+        ]),
+      }),
+    ).toThrow(/Cannot snapshot Temporal.PlainDate equality value/)
+    expect(adapterCalls).toBe(0)
+    expect(collection.subscriberCount).toBe(0)
+    callerDate = `2024-01-16`
+  } finally {
+    await collection.cleanup()
+  }
+})
 
 it(`rejects unsupported relational coercion before adapter entry`, async () => {
   let adapterCalls = 0

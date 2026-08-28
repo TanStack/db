@@ -1,4 +1,8 @@
-import { normalizeValue } from '../utils/comparison.js'
+import {
+  normalizeValue,
+  snapshotTemporalEqualityValue,
+} from '../utils/comparison.js'
+import { isTemporal } from '../utils.js'
 import { isRefProxy, toExpression } from './builder/ref-proxy.js'
 import { getQueryIR } from './builder/get-query-ir.js'
 import {
@@ -637,63 +641,38 @@ function canonicalizeExpression(
               scope,
               opaqueValueIdentity,
             )
-          : valueContext === `ordering-operand`
-            ? canonicalizeOrderingRuntimeValue(
+          : valueContext === `membership-candidates`
+            ? canonicalizeMembershipCandidates(
                 expression.value,
                 `${path}.value`,
                 seen,
+                scope,
                 opaqueValueIdentity,
               )
-            : valueContext === `structural-operand`
-              ? canonicalizeStructuralRuntimeValue(
+            : valueContext === `ordering-operand`
+              ? canonicalizeOrderingRuntimeValue(
                   expression.value,
                   `${path}.value`,
                   seen,
                   opaqueValueIdentity,
                 )
-              : canonicalizeExactOutputRuntimeValue(
-                  expression.value,
-                  `${path}.value`,
-                  seen,
-                  opaqueValueIdentity,
-                ),
+              : valueContext === `structural-operand`
+                ? canonicalizeStructuralRuntimeValue(
+                    expression.value,
+                    `${path}.value`,
+                    seen,
+                    opaqueValueIdentity,
+                  )
+                : canonicalizeExactOutputRuntimeValue(
+                    expression.value,
+                    `${path}.value`,
+                    seen,
+                    opaqueValueIdentity,
+                  ),
     }
   }
 
   if (expression.type === `func`) {
-    if (
-      expression.name === `in` &&
-      expression.args.length === 2 &&
-      expression.args[1]?.type === `val` &&
-      Array.isArray(expression.args[1].value)
-    ) {
-      const candidates = expression.args[1].value.map((value, index) =>
-        canonicalizeEqualityRuntimeValue(
-          value,
-          `${path}.args[1].value[${index}]`,
-          seen,
-          scope,
-          opaqueValueIdentity,
-        ),
-      )
-      return canonicalizeFunction(expression.name, [
-        canonicalizeExpression(
-          expression.args[0]!,
-          `${path}.args[0]`,
-          seen,
-          `equality-operand`,
-          scope,
-          opaqueValueIdentity,
-        ),
-        {
-          type: `val`,
-          // IN tests membership. Candidate order and duplicates do not change
-          // its result, but each candidate keeps its own equality semantics.
-          value: [`set`, sortUniqueStableIdentityValues(candidates)],
-        },
-      ])
-    }
-
     const args = expression.args.map((arg, index) =>
       canonicalizeExpression(
         arg,
@@ -1071,6 +1050,11 @@ function canonicalizeEqualityRuntimeValue(
     return [`binary`, `Uint8Array`, Array.from(value as Uint8Array)]
   }
 
+  if (isTemporal(value)) {
+    const snapshot = snapshotTemporalEqualityValue(value)
+    return canonicalizeRuntimeValue(normalizeValue(snapshot), path, seen)
+  }
+
   const normalized = normalizeValue(value)
   if (normalized !== value) {
     return canonicalizeRuntimeValue(normalized, path, seen)
@@ -1081,6 +1065,36 @@ function canonicalizeEqualityRuntimeValue(
   }
 
   return canonicalizeRuntimeValue(value, path, seen)
+}
+
+function canonicalizeMembershipCandidates(
+  value: unknown,
+  path: string,
+  seen: WeakSet<object>,
+  scope?: AliasScope,
+  opaqueValueIdentity: OpaqueValueIdentity = `reject`,
+): StableIdentityValue {
+  if (!Array.isArray(value)) {
+    return canonicalizeExactOutputRuntimeValue(
+      value,
+      path,
+      seen,
+      opaqueValueIdentity,
+    )
+  }
+
+  const candidates = Array.from(value, (candidate, index) =>
+    canonicalizeEqualityRuntimeValue(
+      candidate,
+      `${path}[${index}]`,
+      seen,
+      scope,
+      opaqueValueIdentity,
+    ),
+  )
+  // IN tests membership. Candidate order and duplicates do not change its
+  // result, but each candidate keeps its own equality semantics.
+  return [`set`, sortUniqueStableIdentityValues(candidates)]
 }
 
 function canonicalizeStructuralRuntimeValue(

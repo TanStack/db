@@ -1,3 +1,5 @@
+import { snapshotTemporalEqualityValue } from '../utils/comparison.js'
+import { isTemporal } from '../utils.js'
 import { Func, PropRef, Value } from './ir.js'
 import {
   assertSnapshotCapableStructuralValue,
@@ -60,27 +62,18 @@ function cloneBasicExpression<T>(
       return new Value<T>(
         context === `equality-operand`
           ? snapshotEqualityValue(expression.value)
-          : context === `ordering-operand`
-            ? snapshotStructuralOperand(expression.value)
-            : context === `structural-operand`
+          : context === `membership-candidates`
+            ? snapshotMembershipCandidates(expression.value)
+            : context === `ordering-operand`
               ? snapshotStructuralOperand(expression.value)
-              : expression.value,
+              : context === `structural-operand`
+                ? snapshotStructuralOperand(expression.value)
+                : expression.value,
       )
     case `func`:
       return new Func<T>(
         expression.name,
         expression.args.map((arg, index) => {
-          if (
-            expression.name === `in` &&
-            index === 1 &&
-            arg.type === `val` &&
-            Array.isArray(arg.value)
-          ) {
-            return new Value(
-              arg.value.map((value) => snapshotEqualityValue(value)),
-            )
-          }
-
           const argumentContext = getExpressionArgumentValueContext(
             expression.name,
             index,
@@ -104,15 +97,24 @@ function snapshotEqualityValue<T>(value: T): T {
   }
 
   if (typeof Buffer !== `undefined` && value instanceof Buffer) {
-    return Buffer.from(value) as T
+    return Buffer.from(new Uint8Array(value)) as T
   }
 
   if (value instanceof Uint8Array) {
-    return value.slice() as T
+    return new Uint8Array(value) as T
+  }
+
+  if (isTemporal(value)) {
+    return snapshotTemporalEqualityValue(value) as T
   }
 
   // Other objects use reference equality in predicate identity and comparison.
   return value
+}
+
+function snapshotMembershipCandidates<T>(value: T): T {
+  if (!Array.isArray(value)) return value
+  return Array.from(value, (candidate) => snapshotEqualityValue(candidate)) as T
 }
 
 function snapshotStructuralValue<T>(
