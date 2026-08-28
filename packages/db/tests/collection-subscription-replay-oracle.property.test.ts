@@ -3795,7 +3795,9 @@ describe(`CollectionSubscription replay oracle`, () => {
   )
 
   it.each(
-    ([`ordinary`, `cleanup`, `replay`] as const).flatMap((originContext) =>
+    (
+      [`ordinary`, `cleanup`, `replay-entry`, `replay-callback`] as const
+    ).flatMap((originContext) =>
       ([`sync`, `async`] as const).map(
         (propagation) => [originContext, propagation] as const,
       ),
@@ -3819,6 +3821,7 @@ describe(`CollectionSubscription replay oracle`, () => {
       let commit!: () => true | Promise<void>
       let truncate!: () => void
       let callbackCount = 0
+      let outerLoadCount = 0
       let innerOptions: LoadSubsetOptions | undefined
       const collection = createCollection<Row>({
         id: `recursive-start-failure-${originContext}-${propagation}`,
@@ -3835,6 +3838,21 @@ describe(`CollectionSubscription replay oracle`, () => {
                 if (options.where === whereInner) {
                   innerOptions = options
                   throw failure
+                }
+                if (options.where === whereOuter) {
+                  outerLoadCount++
+                  if (
+                    originContext === `replay-entry` &&
+                    outerLoadCount === 2
+                  ) {
+                    if (propagation === `async`) {
+                      return (async () => {
+                        requestInner()
+                        await Promise.resolve()
+                      })()
+                    }
+                    requestInner()
+                  }
                 }
                 if (options.where === whereMiddle) {
                   if (propagation === `async`) {
@@ -3881,7 +3899,12 @@ describe(`CollectionSubscription replay oracle`, () => {
               where: whereOuter,
               onLoadSubsetResult: () => {
                 callbackCount++
-                if (callbackCount === 2) requestMiddle()
+                if (
+                  originContext === `replay-callback` &&
+                  callbackCount === 2
+                ) {
+                  requestMiddle()
+                }
               },
             })
             begin()

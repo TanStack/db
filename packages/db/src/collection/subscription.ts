@@ -181,6 +181,17 @@ type SubsetAcquisitionFrame = Readonly<{
   failureGroups: Array<SubsetFailureGroup>
 }>
 
+type SubsetAcquisitionEntryResult<T> =
+  | Readonly<{ completed: true; value: T }>
+  | Readonly<{
+      completed: false
+      error: unknown
+      publicError: unknown
+      propagated: boolean
+      retainedFailures: ReadonlyArray<SubsetFailureOccurrence>
+      directFailure?: SubsetFailureOccurrence
+    }>
+
 type SubsetCleanupCaptureResult = Readonly<{
   completed: boolean
   failures?: ReadonlyArray<SubsetFailureOccurrence>
@@ -534,10 +545,13 @@ export class CollectionSubscription
           session.currentAttempt === attempt
         const nextAcquisition = this.createSubsetAcquisition(demand, true)
         demand.pendingReplayAcquisitions.add(nextAcquisition)
-        let syncResult: LoadSubsetRequestResult
-        try {
-          syncResult = this.collection._sync.loadSubset(nextAcquisition.options)
-        } catch (error) {
+        const replayContext = { session, attempt }
+        const entry = this.enterSubsetAcquisition(
+          nextAcquisition.options,
+          replayContext,
+          () => this.collection._sync.loadSubset(nextAcquisition.options),
+        )
+        if (!entry.completed) {
           const shouldReportError =
             isCurrentAttempt() && !nextAcquisition.options.signal?.aborted
           demand.pendingReplayAcquisitions.delete(nextAcquisition)
@@ -545,14 +559,23 @@ export class CollectionSubscription
           nextAcquisition.removeRequestAbortListener?.()
           attempt.failed = true
           if (shouldReportError) {
-            this.queueTruncateReplayError(
-              session,
-              nextAcquisition.options,
-              error,
-            )
+            if (entry.propagated) {
+              this.queueUnattributedReplayFailures(
+                session,
+                entry.retainedFailures,
+              )
+            } else if (entry.directFailure) {
+              this.queueTruncateReplayError(
+                session,
+                nextAcquisition.options,
+                entry.publicError,
+                entry.directFailure,
+              )
+            }
           }
           continue
         }
+        const syncResult = entry.value
 
         let ownsReplacement = false
         if (syncResult instanceof Promise) {
@@ -569,6 +592,9 @@ export class CollectionSubscription
               )
             },
             (error: unknown) => {
+              const adoptedPropagation =
+                error instanceof SubsetFailurePropagation &&
+                error.isAdoptedBy(nextAcquisition.options)
               const failedCurrentDemand =
                 this.isActiveDemand(demand) &&
                 !nextAcquisition.options.signal?.aborted
@@ -577,11 +603,13 @@ export class CollectionSubscription
               // successful rows from demands that are still active.
               if (failedCurrentDemand) {
                 attempt.failed = true
-                this.queueTruncateReplayError(
-                  session,
-                  nextAcquisition.options,
-                  error,
-                )
+                if (!adoptedPropagation) {
+                  this.queueTruncateReplayError(
+                    session,
+                    nextAcquisition.options,
+                    this.publicSubsetFailure(error),
+                  )
+                }
               }
               const cleanupFailures = this.discardReplayAcquisition(
                 demand,
@@ -750,6 +778,74 @@ export class CollectionSubscription
 
   private publicSubsetFailure(error: unknown): unknown {
     return error instanceof SubsetFailurePropagation ? error.payload : error
+  }
+
+  /** Run one adapter entry with the same causal frame on every start path. */
+  private enterSubsetAcquisition<T>(
+    options: LoadSubsetOptions,
+    replayContext: TruncateReplayContext | undefined,
+    enter: () => T,
+  ): SubsetAcquisitionEntryResult<T> {
+    const frame: SubsetAcquisitionFrame = {
+      options,
+      previous: this.activeSubsetAcquisition,
+      failureGroups: [],
+    }
+    this.activeSubsetAcquisition = frame
+    try {
+      return { completed: true, value: enter() }
+    } catch (error) {
+      const adoptedCarrier =
+        error instanceof SubsetFailurePropagation && error.isAdoptedBy(options)
+      const retainedFailures = frame.failureGroups.flatMap((group) =>
+        Object.is(group.propagatedError, error) ? group.failures : [],
+      )
+      const propagated = adoptedCarrier || retainedFailures.length > 0
+      const publicError = this.publicSubsetFailure(error)
+      let propagatedError = error
+      let directFailure: SubsetFailureOccurrence | undefined
+
+      if (!options.signal?.aborted) {
+        if (retainedFailures.length > 0) {
+          propagatedError = this.propagatedSubsetFailure(publicError, {
+            excludeCurrentAcquisition: true,
+          })
+          if (!Object.is(propagatedError, error)) {
+            this.noteSubsetFailureGroup(replayContext, {
+              propagatedError,
+              failures: retainedFailures,
+            })
+          }
+        } else if (!propagated) {
+          propagatedError = this.propagatedSubsetFailure(publicError, {
+            excludeCurrentAcquisition: true,
+          })
+          directFailure = this.createSubsetFailureOccurrence(
+            options,
+            publicError,
+          )
+          this.noteSubsetFailureGroup(replayContext, {
+            propagatedError,
+            failures: [directFailure],
+          })
+        }
+      }
+
+      const escapesOrdinaryOutermostStart =
+        propagated &&
+        frame.previous === undefined &&
+        !this.subsetFailureBoundaryOptions()
+      return {
+        completed: false,
+        error: escapesOrdinaryOutermostStart ? publicError : propagatedError,
+        publicError,
+        propagated,
+        retainedFailures,
+        directFailure,
+      }
+    } finally {
+      this.activeSubsetAcquisition = frame.previous
+    }
   }
 
   /** Preserve nested cleanup provenance across one arbitrary adapter callback. */
@@ -1810,90 +1906,46 @@ export class CollectionSubscription
     // Reentrant release must see the exact acquisition before adapter work
     // starts. A genuine load throw removes this tentative logical owner below.
     this.subsetDemands.push(demand)
-    const acquisitionFrame: SubsetAcquisitionFrame = {
-      options: acquisition.options,
-      previous: this.activeSubsetAcquisition,
-      failureGroups: [],
+    // A synchronous start failure is not observable until the tentative owner
+    // has rolled back. Otherwise an error listener can reenter release and
+    // unload a request that never established an acquisition.
+    const entry = this.enterSubsetAcquisition(
+      acquisition.options,
+      replayContext,
+      () => this.collection._sync.loadSubset(acquisition.options),
+    )
+    if (entry.completed) {
+      return { demand, acquisition, result: entry.value, replayContext }
     }
-    this.activeSubsetAcquisition = acquisitionFrame
-    try {
-      // A synchronous start failure is not observable until the tentative
-      // owner has rolled back. Otherwise an error listener can reenter release
-      // and unload a request that never established an acquisition.
-      const result = this.collection._sync.loadSubset(acquisition.options)
-      return { demand, acquisition, result, replayContext }
-    } catch (error) {
-      const shouldReportError = !acquisition.options.signal?.aborted
-      const isPropagatedFailure =
-        (error instanceof SubsetFailurePropagation &&
-          error.isAdoptedBy(acquisition.options)) ||
-        acquisitionFrame.failureGroups.some((group) =>
-          Object.is(group.propagatedError, error),
-        )
-      const publicError = this.publicSubsetFailure(error)
-      let propagatedError = error
-      const demandIndex = this.subsetDemands.indexOf(demand)
-      if (demandIndex !== -1 && !demand.releaseFailed) {
-        this.subsetDemands.splice(demandIndex, 1)
-        acquisition.abortController.abort()
-        acquisition.removeRequestAbortListener?.()
-      }
-      if (shouldReportError && isPropagatedFailure) {
-        const retainedFailures = acquisitionFrame.failureGroups.flatMap(
-          (group) =>
-            Object.is(group.propagatedError, error) ? group.failures : [],
-        )
-        if (retainedFailures.length > 0) {
-          propagatedError = this.propagatedSubsetFailure(publicError, {
-            excludeCurrentAcquisition: true,
-          })
-          if (!Object.is(propagatedError, error)) {
-            this.noteSubsetFailureGroup(replayContext, {
-              propagatedError,
-              failures: retainedFailures,
-            })
-          }
-        }
-      } else if (shouldReportError) {
-        propagatedError = this.propagatedSubsetFailure(publicError, {
-          excludeCurrentAcquisition: true,
-        })
-        const occurrence = this.createSubsetFailureOccurrence(
+
+    const shouldReportError = !acquisition.options.signal?.aborted
+    const demandIndex = this.subsetDemands.indexOf(demand)
+    if (demandIndex !== -1 && !demand.releaseFailed) {
+      this.subsetDemands.splice(demandIndex, 1)
+      acquisition.abortController.abort()
+      acquisition.removeRequestAbortListener?.()
+    }
+    if (shouldReportError && entry.directFailure) {
+      const occurrence = entry.directFailure
+      if (
+        replayContext &&
+        this.truncateReplaySession === replayContext.session
+      ) {
+        replayContext.attempt.failed = true
+        this.queueTruncateReplayError(
+          replayContext.session,
           acquisition.options,
-          publicError,
+          entry.publicError,
+          occurrence,
         )
-        const group: SubsetFailureGroup = {
-          propagatedError,
-          failures: [occurrence],
-        }
-        if (
-          replayContext &&
-          this.truncateReplaySession === replayContext.session
-        ) {
-          replayContext.attempt.failed = true
-          this.queueTruncateReplayError(
-            replayContext.session,
-            acquisition.options,
-            publicError,
-            occurrence,
-          )
-          this.noteSubsetFailureGroup(replayContext, group)
-          this.checkTruncateReplayComplete(replayContext.session)
-        } else {
-          occurrence.attributed = true
-          occurrence.reported = true
-          this.recordLoadSubsetError(acquisition.options, publicError, true)
-          this.noteSubsetFailureGroup(undefined, group)
-        }
+        this.checkTruncateReplayComplete(replayContext.session)
+      } else {
+        occurrence.attributed = true
+        occurrence.reported = true
+        this.recordLoadSubsetError(acquisition.options, entry.publicError, true)
       }
-      const escapesOrdinaryOutermostStart =
-        isPropagatedFailure &&
-        acquisitionFrame.previous === undefined &&
-        !this.subsetFailureBoundaryOptions()
-      throw escapesOrdinaryOutermostStart ? publicError : propagatedError
-    } finally {
-      this.activeSubsetAcquisition = acquisitionFrame.previous
     }
+    throw entry.error
   }
 
   /** Keep replay publication private until one result callback returns. */

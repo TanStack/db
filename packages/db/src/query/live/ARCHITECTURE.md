@@ -556,6 +556,9 @@ callback is active. The live acquisition chain itself supplies the causal
 authority: a nested failure names its unsuspended containing acquisitions as
 adopters. The outermost ordinary synchronous request unwraps the carrier before
 returning control to its caller.
+Initial demand and replay replacement adapter entry use the same acquisition
+frame boundary. Replay attempt ownership changes when the failure may publish;
+it does not change which adapter boundary originated the failure.
 A cleanup failure raised reentrantly inside the acquisition being started stays
 as its raw payload while adapter code can catch it. The active acquisition
 frame retains that occurrence, so letting the same failure escape does not
