@@ -610,6 +610,36 @@ describe(`loadSubset demand identity`, () => {
     ).toBe(true)
   })
 
+  it(`derives binary equality identity from intrinsic bytes`, () => {
+    const bytes = new Uint8Array([2])
+    Object.defineProperty(bytes, Symbol.iterator, {
+      value: function* () {
+        yield 1
+      },
+    })
+    const predicate = new Func<boolean>(`eq`, [
+      new PropRef([`id`]),
+      new Value(bytes),
+    ])
+
+    expect(getLoadSubsetDemandKey({ where: predicate })).toBe(
+      getLoadSubsetDemandKey({
+        where: new Func(`eq`, [
+          new PropRef([`id`]),
+          new Value(new Uint8Array([2])),
+        ]),
+      }),
+    )
+    expect(getLoadSubsetDemandKey({ where: predicate })).not.toBe(
+      getLoadSubsetDemandKey({
+        where: new Func(`eq`, [
+          new PropRef([`id`]),
+          new Value(new Uint8Array([1])),
+        ]),
+      }),
+    )
+  })
+
   it.each([`coalesce`, `caseWhen`] as const)(
     `snapshots equality candidates returned by %s`,
     (wrapper) => {
@@ -648,6 +678,28 @@ describe(`loadSubset demand identity`, () => {
     },
   )
 
+  it(`rejects membership arrays with custom observation hooks`, () => {
+    const candidates = [new Uint8Array([2])]
+    Object.defineProperty(candidates, Symbol.iterator, {
+      value: function* () {
+        yield new Uint8Array([1])
+      },
+    })
+    const demand: LoadSubsetOptions = {
+      where: new Func(`in`, [
+        new PropRef([`token`]),
+        new Func(`coalesce`, [new Value(candidates)]),
+      ]),
+    }
+
+    expect(() => cloneLoadSubsetOptions(demand)).toThrow(
+      /Cannot snapshot membership candidates/,
+    )
+    expect(() => getLoadSubsetDemandKey(demand)).toThrow(
+      /Cannot snapshot membership candidates/,
+    )
+  })
+
   it(`rejects mutable Temporal-branded equality lookalikes`, () => {
     let callerDate = `2024-01-15`
     const callerValue = {
@@ -667,6 +719,51 @@ describe(`loadSubset demand identity`, () => {
       /Cannot snapshot Temporal.PlainDate equality value/,
     )
     callerDate = `2024-01-16`
+  })
+
+  it(`rejects constructor-shaped Temporal equality lookalikes`, () => {
+    class TemporalLookalike {
+      static shared = `2024-01-15`
+      static from(): TemporalLookalike {
+        return new TemporalLookalike()
+      }
+      get [Symbol.toStringTag](): string {
+        return `Temporal.PlainDate`
+      }
+      toString(): string {
+        return TemporalLookalike.shared
+      }
+    }
+    const value = new TemporalLookalike()
+    const demand: LoadSubsetOptions = {
+      where: new Func(`eq`, [new PropRef([`date`]), new Value(value)]),
+    }
+
+    expect(() => cloneLoadSubsetOptions(demand)).toThrow(
+      /Cannot snapshot Temporal.PlainDate equality value/,
+    )
+    expect(() => getLoadSubsetDemandKey(demand)).toThrow(
+      /Cannot snapshot Temporal.PlainDate equality value/,
+    )
+  })
+
+  it(`reads Date equality values through the intrinsic getTime`, () => {
+    const date = new Date(2)
+    Object.defineProperty(date, `getTime`, {
+      value: () => 1,
+    })
+    const demand: LoadSubsetOptions = {
+      where: new Func(`eq`, [new PropRef([`date`]), new Value(date)]),
+    }
+    const snapshot = cloneLoadSubsetOptions(demand)
+    const snapshotDate = ((snapshot.where as Func).args[1] as Value<Date>).value
+
+    expect(snapshotDate.getTime()).toBe(2)
+    expect(getLoadSubsetDemandKey(snapshot)).toBe(
+      getLoadSubsetDemandKey({
+        where: new Func(`eq`, [new PropRef([`date`]), new Value(new Date(2))]),
+      }),
+    )
   })
 
   it(`clones genuine Temporal equality values without changing their type or identity`, () => {

@@ -526,21 +526,16 @@ it(`freezes computed membership candidates across local filtering and adapter ac
   }
 })
 
-it(`rejects mutable Temporal-branded equality lookalikes before adapter acquisition`, async () => {
-  type TemporalValue = {
-    [Symbol.toStringTag]: string
-    toString: () => string
-  }
-  type Row = { id: string; date: TemporalValue }
-  let callerDate = `2024-01-15`
-  const createDate = (read: () => string): TemporalValue => ({
-    [Symbol.toStringTag]: `Temporal.PlainDate`,
-    toString: read,
+it(`rejects custom membership observation before adapter acquisition`, async () => {
+  const candidates = [new Uint8Array([2])]
+  Object.defineProperty(candidates, Symbol.iterator, {
+    value: function* () {
+      yield new Uint8Array([1])
+    },
   })
-  const callerValue = createDate(() => callerDate)
   let adapterCalls = 0
-  const collection = createCollection<Row>({
-    id: `frozen-temporal-branded-equality`,
+  const collection = createCollection<{ id: string; token: Uint8Array }>({
+    id: `reject-custom-membership-observation`,
     getKey: (row) => row.id,
     syncMode: `on-demand`,
     sync: {
@@ -558,15 +553,121 @@ it(`rejects mutable Temporal-branded equality lookalikes before adapter acquisit
   try {
     expect(() =>
       collection.subscribeChanges(() => {}, {
+        whereExpression: new Func(`in`, [
+          new PropRef([`token`]),
+          new Func(`coalesce`, [new Value(candidates)]),
+        ]),
+      }),
+    ).toThrow(/Cannot snapshot membership candidates/)
+    expect(adapterCalls).toBe(0)
+    expect(collection.subscriberCount).toBe(0)
+  } finally {
+    await collection.cleanup()
+  }
+})
+
+it(`uses intrinsic Date state for local filtering and adapter acquisition`, async () => {
+  type Row = { id: `instance-hook` | `intrinsic`; date: Date }
+  const callerDate = new Date(2)
+  Object.defineProperty(callerDate, `getTime`, { value: () => 1 })
+  let acquired: LoadSubsetOptions | undefined
+  const collection = createCollection<Row>({
+    id: `intrinsic-date-equality`,
+    getKey: (row) => row.id,
+    syncMode: `on-demand`,
+    startSync: true,
+    sync: {
+      sync: ({ begin, write, commit, markReady }) => {
+        begin()
+        write({
+          type: `insert`,
+          value: { id: `instance-hook`, date: new Date(1) },
+        })
+        write({
+          type: `insert`,
+          value: { id: `intrinsic`, date: new Date(2) },
+        })
+        commit()
+        markReady()
+        return {
+          loadSubset: (options) => {
+            acquired = options
+            return true
+          },
+        }
+      },
+    },
+  })
+  const visible = new Set<Row[`id`]>()
+  const subscription = collection.subscribeChanges(
+    (changes) => {
+      for (const change of changes) {
+        if (change.type === `delete`) visible.delete(change.key as Row[`id`])
+        else visible.add(change.key as Row[`id`])
+      }
+    },
+    {
+      whereExpression: new Func(`eq`, [
+        new PropRef([`date`]),
+        new Value(callerDate),
+      ]),
+    },
+  )
+
+  try {
+    subscription.requestSnapshot({ optimizedOnly: false })
+
+    expect([...visible]).toEqual([`intrinsic`])
+    const acquiredDate = ((acquired?.where as Func).args[1] as Value<Date>)
+      .value
+    expect(acquiredDate.getTime()).toBe(2)
+  } finally {
+    subscription.unsubscribe()
+    await collection.cleanup()
+  }
+})
+
+it(`rejects constructor-shaped Temporal lookalikes before adapter acquisition`, async () => {
+  class TemporalLookalike {
+    static from(): TemporalLookalike {
+      return new TemporalLookalike()
+    }
+    get [Symbol.toStringTag](): string {
+      return `Temporal.PlainDate`
+    }
+    toString(): string {
+      return `2024-01-15`
+    }
+  }
+  let adapterCalls = 0
+  const collection = createCollection<{ id: string; date: TemporalLookalike }>({
+    id: `reject-constructor-shaped-temporal`,
+    getKey: (row) => row.id,
+    syncMode: `on-demand`,
+    sync: {
+      sync: ({ markReady }) => {
+        markReady()
+        return {
+          loadSubset: () => {
+            adapterCalls += 1
+            return true
+          },
+        }
+      },
+    },
+  })
+
+  try {
+    expect(() =>
+      collection.subscribeChanges(() => {}, {
         whereExpression: new Func(`eq`, [
           new PropRef([`date`]),
-          new Value(callerValue),
+          new Value(new TemporalLookalike()),
         ]),
       }),
     ).toThrow(/Cannot snapshot Temporal.PlainDate equality value/)
     expect(adapterCalls).toBe(0)
     expect(collection.subscriberCount).toBe(0)
-    callerDate = `2024-01-16`
   } finally {
     await collection.cleanup()
   }

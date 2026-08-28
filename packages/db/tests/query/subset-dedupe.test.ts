@@ -61,6 +61,94 @@ describe(`createDeduplicatedLoadSubset`, () => {
     expect(loadSubset).toHaveBeenCalledTimes(2)
   })
 
+  it(`does not let custom binary iteration alias intrinsic byte coverage`, () => {
+    const loadSubset = vi.fn(() => true as const)
+    const deduplicated = new DeduplicatedLoadSubset({ loadSubset })
+    const customBytes = new Uint8Array([2])
+    Object.defineProperty(customBytes, Symbol.iterator, {
+      value: function* () {
+        yield 1
+      },
+    })
+    const demand = (token: Uint8Array): LoadSubsetOptions => ({
+      where: eq(ref(`token`), val(token)),
+    })
+
+    deduplicated.loadSubset(demand(new Uint8Array([1])))
+    deduplicated.loadSubset(demand(customBytes))
+
+    expect(loadSubset).toHaveBeenCalledTimes(2)
+  })
+
+  it(`rejects custom membership observation before adapter entry`, () => {
+    const loadSubset = vi.fn(() => true as const)
+    const deduplicated = new DeduplicatedLoadSubset({ loadSubset })
+    const candidates = [new Uint8Array([2])]
+    Object.defineProperty(candidates, Symbol.iterator, {
+      value: function* () {
+        yield new Uint8Array([1])
+      },
+    })
+
+    expect(() =>
+      deduplicated.loadSubset({
+        where: new Func(`in`, [
+          ref(`token`),
+          new Func(`coalesce`, [val(candidates)]),
+        ]),
+      }),
+    ).toThrow(/Cannot snapshot membership candidates/)
+    expect(loadSubset).not.toHaveBeenCalled()
+  })
+
+  it(`uses intrinsic Date state for tracking and adapter acquisition`, () => {
+    const acquiredDates: Array<number> = []
+    const loadSubset = vi.fn((options: LoadSubsetOptions) => {
+      acquiredDates.push(
+        ((options.where as Func).args[1] as Value<Date>).value.getTime(),
+      )
+      return true as const
+    })
+    const deduplicated = new DeduplicatedLoadSubset({ loadSubset })
+    const date = new Date(2)
+    let observedTime = 0
+    Object.defineProperty(date, `getTime`, {
+      value: () => ++observedTime,
+    })
+    const demand = (value: Date): LoadSubsetOptions => ({
+      where: eq(ref(`date`), val(value)),
+    })
+
+    deduplicated.loadSubset(demand(date))
+    deduplicated.loadSubset(demand(new Date(1)))
+
+    expect(acquiredDates).toEqual([2, 1])
+    expect(loadSubset).toHaveBeenCalledTimes(2)
+  })
+
+  it(`rejects constructor-shaped Temporal lookalikes before adapter entry`, () => {
+    class TemporalLookalike {
+      static from(): TemporalLookalike {
+        return new TemporalLookalike()
+      }
+      get [Symbol.toStringTag](): string {
+        return `Temporal.PlainDate`
+      }
+      toString(): string {
+        return `2024-01-15`
+      }
+    }
+    const loadSubset = vi.fn(() => true as const)
+    const deduplicated = new DeduplicatedLoadSubset({ loadSubset })
+
+    expect(() =>
+      deduplicated.loadSubset({
+        where: eq(ref(`date`), val(new TemporalLookalike())),
+      }),
+    ).toThrow(/Cannot snapshot Temporal.PlainDate equality value/)
+    expect(loadSubset).not.toHaveBeenCalled()
+  })
+
   it(`does not let mutation rewrite computed membership coverage`, () => {
     const loadSubset = vi.fn(() => true as const)
     const deduplicated = new DeduplicatedLoadSubset({ loadSubset })

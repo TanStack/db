@@ -1,9 +1,14 @@
-import { snapshotTemporalEqualityValue } from '../utils/comparison.js'
+import {
+  readDateTimestamp,
+  snapshotTemporalEqualityValue,
+  snapshotUint8ArrayBytes,
+} from '../utils/comparison.js'
 import { isTemporal } from '../utils.js'
 import { Func, PropRef, Value } from './ir.js'
 import {
   assertSnapshotCapableStructuralValue,
   getExpressionArgumentValueContext,
+  snapshotMembershipCandidateValues,
 } from './expression-value-context.js'
 import type { ExpressionValueContext } from './expression-value-context.js'
 import type { BasicExpression } from './ir.js'
@@ -93,15 +98,15 @@ function snapshotStructuralOperand<T>(value: T): T {
 
 function snapshotEqualityValue<T>(value: T): T {
   if (value instanceof Date) {
-    return new Date(value.getTime()) as T
+    return new Date(readDateTimestamp(value)) as T
   }
 
   if (typeof Buffer !== `undefined` && value instanceof Buffer) {
-    return Buffer.from(new Uint8Array(value)) as T
+    return Buffer.from(snapshotUint8ArrayBytes(value)) as T
   }
 
   if (value instanceof Uint8Array) {
-    return new Uint8Array(value) as T
+    return snapshotUint8ArrayBytes(value) as T
   }
 
   if (isTemporal(value)) {
@@ -113,8 +118,9 @@ function snapshotEqualityValue<T>(value: T): T {
 }
 
 function snapshotMembershipCandidates<T>(value: T): T {
-  if (!Array.isArray(value)) return value
-  return Array.from(value, (candidate) => snapshotEqualityValue(candidate)) as T
+  const candidates = snapshotMembershipCandidateValues(value)
+  if (candidates === undefined) return value
+  return candidates.map((candidate) => snapshotEqualityValue(candidate)) as T
 }
 
 function snapshotStructuralValue<T>(

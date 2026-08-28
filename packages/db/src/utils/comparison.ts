@@ -29,8 +29,18 @@ function getObjectId(obj: object): number {
 export function isUnorderable(value: any): boolean {
   return (
     (typeof value === `number` && Number.isNaN(value)) ||
-    (value instanceof Date && Number.isNaN(value.getTime()))
+    (value instanceof Date && Number.isNaN(readDateTimestamp(value)))
   )
+}
+
+/** Read a Date's internal timestamp without invoking an instance override. */
+export function readDateTimestamp(value: Date): number {
+  return Reflect.apply(Date.prototype.getTime, value, [])
+}
+
+/** Copy a Uint8Array's internal bytes without invoking custom iteration. */
+export function snapshotUint8ArrayBytes(value: Uint8Array): Uint8Array {
+  return new Uint8Array(value)
 }
 
 /**
@@ -78,7 +88,7 @@ export const ascComparator = (a: any, b: any, opts: CompareOptions): number => {
 
   // If both are dates, compare them
   if (a instanceof Date && b instanceof Date) {
-    return a.getTime() - b.getTime()
+    return readDateTimestamp(a) - readDateTimestamp(b)
   }
 
   // If both are Temporal objects, use compareTemporalValues for correct semantic ordering
@@ -178,6 +188,7 @@ const UNORDERABLE_BTREE_SENTINEL = Object.freeze({
 export function snapshotTemporalEqualityValue(
   value: TemporalLike,
 ): TemporalLike {
+  const tag = value[Symbol.toStringTag]
   const prototype = Object.getPrototypeOf(value)
   const constructorDescriptor =
     prototype === null
@@ -192,16 +203,23 @@ export function snapshotTemporalEqualityValue(
     prototype === null
       ? undefined
       : Object.getOwnPropertyDescriptor(prototype, `toString`)
+  const brandAccessorName = TEMPORAL_BRAND_ACCESSORS[tag]
+  const brandAccessorDescriptor =
+    prototype === null || brandAccessorName === undefined
+      ? undefined
+      : Object.getOwnPropertyDescriptor(prototype, brandAccessorName)
   if (
     typeof constructor !== `function` ||
     typeof fromDescriptor?.value !== `function` ||
-    typeof toStringDescriptor?.value !== `function`
+    typeof toStringDescriptor?.value !== `function` ||
+    typeof brandAccessorDescriptor?.get !== `function`
   ) {
-    throw new TypeError(
-      `Cannot snapshot ${value[Symbol.toStringTag]} equality value`,
-    )
+    throw new TypeError(`Cannot snapshot ${tag} equality value`)
   }
 
+  // Temporal accessors brand-check their receiver's internal slots. A tag plus
+  // constructor-shaped methods is not enough to establish a genuine value.
+  Reflect.apply(brandAccessorDescriptor.get, value, [])
   const serialized = Reflect.apply(toStringDescriptor.value, value, [])
   const snapshot = Reflect.apply(fromDescriptor.value, constructor, [
     serialized,
@@ -209,13 +227,24 @@ export function snapshotTemporalEqualityValue(
   if (
     snapshot === value ||
     !isTemporal(snapshot) ||
-    snapshot[Symbol.toStringTag] !== value[Symbol.toStringTag]
+    snapshot[Symbol.toStringTag] !== tag ||
+    Object.getPrototypeOf(snapshot) !== prototype
   ) {
-    throw new TypeError(
-      `Cannot snapshot ${value[Symbol.toStringTag]} equality value`,
-    )
+    throw new TypeError(`Cannot snapshot ${tag} equality value`)
   }
+  Reflect.apply(brandAccessorDescriptor.get, snapshot, [])
   return snapshot
+}
+
+const TEMPORAL_BRAND_ACCESSORS: Readonly<Record<string, string>> = {
+  'Temporal.Duration': `years`,
+  'Temporal.Instant': `epochNanoseconds`,
+  'Temporal.PlainDate': `year`,
+  'Temporal.PlainDateTime': `year`,
+  'Temporal.PlainMonthDay': `day`,
+  'Temporal.PlainTime': `hour`,
+  'Temporal.PlainYearMonth': `year`,
+  'Temporal.ZonedDateTime': `epochNanoseconds`,
 }
 
 /**
@@ -240,7 +269,7 @@ export function normalizeValue(value: any): any {
   }
 
   if (value instanceof Date) {
-    return value.getTime()
+    return readDateTimestamp(value)
   }
 
   if (isTemporal(value)) {
@@ -260,7 +289,10 @@ export function normalizeValue(value: any): any {
     // Convert to a string representation that can be used as a Map key.
     // Equality compares every binary value by content, so index keys must not
     // switch to reference identity at an arbitrary byte length.
-    return normalizedKey(`binary`, Array.from(value).join(`,`))
+    return normalizedKey(
+      `binary`,
+      Array.from(snapshotUint8ArrayBytes(value)).join(`,`),
+    )
   }
 
   return value

@@ -410,6 +410,23 @@ describe(`normalizeValue property-based tests`, () => {
       expect(normalizeValue(normalized)).not.toBe(normalized)
     },
   )
+
+  fcTest(
+    `reads binary keys from intrinsic bytes instead of custom iteration`,
+    () => {
+      const bytes = new Uint8Array([2])
+      Object.defineProperty(bytes, Symbol.iterator, {
+        value: function* () {
+          yield 1
+        },
+      })
+
+      expect(normalizeValue(bytes)).toBe(normalizeValue(new Uint8Array([2])))
+      expect(normalizeValue(bytes)).not.toBe(
+        normalizeValue(new Uint8Array([1])),
+      )
+    },
+  )
 })
 
 describe(`areValuesEqual property-based tests`, () => {

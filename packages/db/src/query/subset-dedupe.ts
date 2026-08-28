@@ -168,10 +168,7 @@ export class DeduplicatedLoadSubset {
       ...options,
       signal: lease.signal,
     })
-    const loadOptions = cloneLoadSubsetOptions({
-      ...options,
-      signal: lease.signal,
-    })
+    const loadOptions = cloneLoadSubsetOptions(trackingOptions)
     if (
       this.unlimitedWhere !== undefined &&
       options.limit === undefined &&

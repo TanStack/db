@@ -1,6 +1,7 @@
 import {
   normalizeValue,
   snapshotTemporalEqualityValue,
+  snapshotUint8ArrayBytes,
 } from '../utils/comparison.js'
 import { isTemporal } from '../utils.js'
 import { isRefProxy, toExpression } from './builder/ref-proxy.js'
@@ -8,6 +9,7 @@ import { getQueryIR } from './builder/get-query-ir.js'
 import {
   assertSnapshotCapableStructuralValue,
   getExpressionArgumentValueContext,
+  snapshotMembershipCandidateValues,
 } from './expression-value-context.js'
 import { getRuntimeReferenceIdentity } from './runtime-reference-identity.js'
 import type { ExpressionValueContext } from './expression-value-context.js'
@@ -1047,7 +1049,11 @@ function canonicalizeEqualityRuntimeValue(
     (typeof Buffer !== `undefined` && value instanceof Buffer) ||
     value instanceof Uint8Array
   if (isUint8Array) {
-    return [`binary`, `Uint8Array`, Array.from(value as Uint8Array)]
+    return [
+      `binary`,
+      `Uint8Array`,
+      Array.from(snapshotUint8ArrayBytes(value as Uint8Array)),
+    ]
   }
 
   if (isTemporal(value)) {
@@ -1083,7 +1089,8 @@ function canonicalizeMembershipCandidates(
     )
   }
 
-  const candidates = Array.from(value, (candidate, index) =>
+  const candidateValues = snapshotMembershipCandidateValues(value, path)!
+  const candidates = candidateValues.map((candidate, index) =>
     canonicalizeEqualityRuntimeValue(
       candidate,
       `${path}[${index}]`,

@@ -52,6 +52,48 @@ export function assertSnapshotCapableStructuralValue(
   visitStructuralValue(value, path, new WeakSet(), new WeakSet())
 }
 
+/**
+ * Read an IN candidate array without invoking caller-defined iteration or
+ * accessors. The plain result gives later identity and adapter paths one stable
+ * observation of the request.
+ */
+export function snapshotMembershipCandidateValues(
+  value: unknown,
+  path = `value`,
+): Array<unknown> | undefined {
+  if (!Array.isArray(value)) return undefined
+  if (Object.getPrototypeOf(value) !== Array.prototype) {
+    throwUnsupportedMembership(path, `array subclasses are unsupported`)
+  }
+
+  const lengthDescriptor = Object.getOwnPropertyDescriptor(value, `length`)
+  const length = lengthDescriptor?.value
+  if (typeof length !== `number` || !Number.isInteger(length) || length < 0) {
+    throwUnsupportedMembership(path, `invalid array length`)
+  }
+
+  const snapshot = new Array<unknown>(length)
+  for (let index = 0; index < length; index++) snapshot[index] = undefined
+
+  for (const key of Reflect.ownKeys(value)) {
+    if (key === `length`) continue
+    if (typeof key !== `string` || !isArrayIndex(key)) {
+      throwUnsupportedMembership(path, `custom properties are unsupported`)
+    }
+
+    const descriptor = Object.getOwnPropertyDescriptor(value, key)!
+    if (!descriptor.enumerable || !(`value` in descriptor)) {
+      throwUnsupportedMembership(
+        `${path}.${key}`,
+        `non-enumerable indexed properties and accessors are unsupported`,
+      )
+    }
+    snapshot[Number(key)] = descriptor.value
+  }
+
+  return snapshot
+}
+
 function visitStructuralValue(
   value: unknown,
   path: string,
@@ -197,6 +239,12 @@ function isArrayIndex(key: string): boolean {
 function throwUnsupported(path: string, reason: string): never {
   throw new TypeError(
     `Cannot snapshot structural expression value at ${path}: ${reason}`,
+  )
+}
+
+function throwUnsupportedMembership(path: string, reason: string): never {
+  throw new TypeError(
+    `Cannot snapshot membership candidates at ${path}: ${reason}`,
   )
 }
 
