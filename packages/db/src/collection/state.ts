@@ -4,6 +4,10 @@ import { enrichRowWithVirtualProps } from '../virtual-props.js'
 import { SyncTransactionAbortedError } from '../errors.js'
 import { createDeferred } from '../deferred'
 import { DIRECT_TRANSACTION_METADATA_KEY } from './transaction-metadata.js'
+import {
+  copySyncRequestSignal,
+  setSyncRequestSignal,
+} from './sync-transaction-provenance.js'
 import type {
   VirtualOrigin,
   VirtualRowProps,
@@ -42,6 +46,8 @@ interface PendingSyncedTransaction<
     deletes: Set<TKey>
   }
   preserveHydrationSeedKeys?: boolean
+  /** Exact subset request whose commit produced this transaction. */
+  requestSignal?: AbortSignal
   /**
    * When true, this transaction should be processed immediately even if there
    * are persisting user transactions. Used by manual write operations (writeInsert,
@@ -339,13 +345,15 @@ export class CollectionStateManager<
         : this.enrichWithVirtualProps(change.previousValue, change.key)
       : undefined
 
-    return {
+    const enriched = {
       key: change.key,
       type: change.type,
       value: enrichedValue,
       previousValue: enrichedPreviousValue,
       metadata: change.metadata,
     } as ChangeMessage<WithVirtualProps<TOutput, TKey>, TKey>
+    copySyncRequestSignal(change, enriched)
+    return enriched
   }
 
   /**
@@ -938,12 +946,16 @@ export class CollectionStateManager<
 
       // First collect all keys that will be affected by sync operations
       const changedKeys = new Set<TKey>()
+      const requestSignalsByKey = new Map<TKey, AbortSignal | undefined>()
       for (const transaction of committedSyncedTransactions) {
         for (const operation of transaction.operations) {
-          changedKeys.add(operation.key as TKey)
+          const key = operation.key as TKey
+          changedKeys.add(key)
+          requestSignalsByKey.set(key, transaction.requestSignal)
         }
         for (const [key] of transaction.rowMetadataWrites) {
           changedKeys.add(key)
+          requestSignalsByKey.set(key, transaction.requestSignal)
         }
       }
 
@@ -1226,6 +1238,7 @@ export class CollectionStateManager<
               this.isThisCollection(mutation.collection) &&
               mutation.optimistic
             ) {
+              requestSignalsByKey.delete(mutation.key)
               switch (mutation.type) {
                 case `insert`:
                 case `update`:
@@ -1261,6 +1274,7 @@ export class CollectionStateManager<
           this.pendingOptimisticUpserts.delete(key)
           this.pendingLocalOrigins.delete(key)
         }
+        requestSignalsByKey.delete(key)
       }
       for (const key of this.pendingOptimisticDirectDeletes) {
         if (!changedKeys.has(key)) {
@@ -1268,6 +1282,7 @@ export class CollectionStateManager<
         }
         this.pendingOptimisticDeletes.delete(key)
         this.pendingLocalOrigins.delete(key)
+        requestSignalsByKey.delete(key)
       }
       this.pendingOptimisticDirectUpserts.clear()
       this.pendingOptimisticDirectDeletes.clear()
@@ -1377,6 +1392,10 @@ export class CollectionStateManager<
             previousValue: previousValueWithVirtual ?? previousVisibleValue,
           })
         }
+      }
+
+      for (const event of events) {
+        setSyncRequestSignal(event, requestSignalsByKey.get(event.key))
       }
 
       // Update cached size after synced data changes

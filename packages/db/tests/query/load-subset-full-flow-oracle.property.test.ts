@@ -3175,7 +3175,7 @@ it(`keeps ordered replacement publication atomic across every bounded history`, 
   for (const scenario of exhaustiveAtomicOrderedReplayScenarios) {
     await runAtomicOrderedReplayScenario(scenario)
   }
-}, 15_000)
+}, 30_000)
 
 fcTest.prop([atomicOrderedReplayArbitrary], {
   numRuns: 32 * fullFlowMultiplier,

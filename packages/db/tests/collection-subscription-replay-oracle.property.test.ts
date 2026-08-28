@@ -2111,7 +2111,7 @@ describe(`CollectionSubscription replay oracle`, () => {
     }
   })
 
-  it.each([`sync`, `async`] as const)(
+  it.each([`sync`, `async`, `ordinary`] as const)(
     `reconciles failed ordered publications for coverage and sibling-demand changes: %s`,
     async (writeTiming) => {
       type Row = { id: `a` | `x` | `y`; rank: number }
@@ -2123,11 +2123,12 @@ describe(`CollectionSubscription replay oracle`, () => {
       let write!: (
         message: ChangeMessageOrDeleteKeyMessage<Row, Row[`id`]>,
       ) => void
-      let commit!: () => void
+      let commit!: (signal?: AbortSignal) => void
       let truncate!: () => void
       let loadCount = 0
       const loadOptions: Array<LoadSubsetOptions> = []
       const replayLoads: Array<ReturnType<typeof createDeferred<Outcome>>> = []
+      let siblingLoad: ReturnType<typeof createDeferred<Outcome>> | undefined
       const collection = createCollection<Row>({
         id: `failed-ordered-sibling-demand`,
         getKey: (row) => row.id,
@@ -2153,6 +2154,10 @@ describe(`CollectionSubscription replay oracle`, () => {
                   })
                 }
                 if (loadCount === 5) {
+                  if (writeTiming === `ordinary`) {
+                    siblingLoad = createDeferred<Outcome>()
+                    return siblingLoad.promise
+                  }
                   const outcome = {
                     hasMore: false,
                     appliedRowKeys: [`x`] as const,
@@ -2160,7 +2165,7 @@ describe(`CollectionSubscription replay oracle`, () => {
                   const updateRejectedRow = () => {
                     begin()
                     write({ type: `update`, value: { id: `x`, rank: -1 } })
-                    commit()
+                    commit(options.signal)
                     return outcome
                   }
                   return writeTiming === `sync`
@@ -2234,12 +2239,22 @@ describe(`CollectionSubscription replay oracle`, () => {
         const xWhere = new Func(`eq`, [new PropRef([`id`]), new Value(`x`)])
         subscription.requestSnapshot({ where: xWhere })
         await flushPromises()
+        if (writeTiming === `ordinary`) {
+          begin()
+          write({ type: `update`, value: { id: `x`, rank: -1 } })
+          commit()
+          siblingLoad?.reject(new Error(`sibling acquisition failed`))
+          await flushPromises()
+        }
+        const expectedBoundary = writeTiming === `ordinary` ? `x` : `a`
         expect.soft([...visible].sort()).toEqual([`a`, `x`])
-        expect.soft(subscription.orderedBoundaryKey).toBe(`a`)
+        expect.soft(subscription.orderedBoundaryKey).toBe(expectedBoundary)
 
         subscription.releaseSnapshot(xWhere)
-        expect.soft([...visible]).toEqual([`a`])
-        expect.soft(subscription.orderedBoundaryKey).toBe(`a`)
+        expect
+          .soft([...visible].sort())
+          .toEqual(writeTiming === `ordinary` ? [`a`, `x`] : [`a`])
+        expect.soft(subscription.orderedBoundaryKey).toBe(expectedBoundary)
 
         subscription.requestSnapshot({ where: xWhere })
         await flushPromises()
@@ -2254,7 +2269,7 @@ describe(`CollectionSubscription replay oracle`, () => {
         await flushPromises()
         expect.soft(loadOptions.at(-1)).toMatchObject({
           offset: 1,
-          cursor: { lastKey: `a` },
+          cursor: { lastKey: expectedBoundary },
         })
       } finally {
         subscription.unsubscribe()

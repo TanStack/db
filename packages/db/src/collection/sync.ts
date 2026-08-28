@@ -359,6 +359,7 @@ export class CollectionSyncManager<
               return pendingTransaction.applied.promise
             }
 
+            pendingTransaction.requestSignal = signal
             pendingTransaction.committed = true
 
             const cancel = () => {

@@ -13,6 +13,7 @@ import {
   createFilterFunctionFromExpression,
   createFilteredCallback,
 } from './change-events.js'
+import { getSyncRequestSignal } from './sync-transaction-provenance.js'
 import type { BasicExpression, OrderBy } from '../query/ir.js'
 import type { TotalOrderBoundary } from '../query/total-order.js'
 import type { IndexInterface } from '../indexes/base-index.js'
@@ -173,12 +174,6 @@ export class CollectionSubscription
   private _status: SubscriptionStatus = `ready`
   private _lastError: unknown | undefined
   private pendingLoadSubsetPromises: Set<Promise<unknown>> = new Set()
-  // Adapter writes have no per-row origin tag. Retain the acquisition context
-  // across its synchronous call and promise so an unordered demand cannot
-  // accidentally authorize rows for a stale ordered publication.
-  private activeLoadSubsetOptions: Array<LoadSubsetOptions> = []
-  private pendingUnorderedLoadSubsetOptions = new Set<LoadSubsetOptions>()
-
   // Cleanup function for truncate event listener
   private truncateCleanup: (() => void) | undefined
 
@@ -303,10 +298,8 @@ export class CollectionSubscription
     // the old work before it can install rows into the new generation.
     for (const demand of demandsToReload) {
       demand.abortController?.abort()
-      this.pendingUnorderedLoadSubsetOptions.delete(demand.options)
       for (const pending of demand.pendingReplayAcquisitions) {
         pending.abortController.abort()
-        this.pendingUnorderedLoadSubsetOptions.delete(pending.options)
       }
     }
 
@@ -687,7 +680,12 @@ export class CollectionSubscription
    */
   private reconcileStaleOrderedPublication(
     changes: ReadonlyArray<ChangeMessage<any, string | number>>,
-    source: `ordered-source` | `additional-demand` = `ordered-source`,
+    source:
+      | `ordered-source`
+      | `additional-demand`
+      | ((
+          change: ChangeMessage<any, string | number>,
+        ) => `ordered-source` | `additional-demand`) = `ordered-source`,
   ): Array<ChangeMessage<any, any>> {
     const stalePublication = this.stalePublication
     const ordered = stalePublication?.ordered
@@ -708,9 +706,11 @@ export class CollectionSubscription
     const isAdditionalRow = (row: object) =>
       additionalFilters.some((filter) => filter?.(row) ?? true)
     const orderedCandidates = ordered.candidateRows
-    const admitsOrderedCandidates = source === `ordered-source`
 
     for (const change of changes) {
+      const changeSource =
+        typeof source === `function` ? source(change) : source
+      const admitsOrderedCandidates = changeSource === `ordered-source`
       if (change.type === `delete`) {
         stalePublication.publishedRows.delete(change.key)
         if (admitsOrderedCandidates) orderedCandidates.delete(change.key)
@@ -863,45 +863,37 @@ export class CollectionSubscription
     options: LoadSubsetOptions,
     shouldReportError: () => boolean = () => true,
   ): LoadSubsetRequestResult {
-    const tracksUnorderedAcquisition = options.orderBy === undefined
-    this.activeLoadSubsetOptions.push(options)
-    if (tracksUnorderedAcquisition) {
-      this.pendingUnorderedLoadSubsetOptions.add(options)
-    }
-
-    let result: LoadSubsetRequestResult
     try {
-      result = this.collection._sync.loadSubset(options)
+      return this.collection._sync.loadSubset(options)
     } catch (error) {
-      this.pendingUnorderedLoadSubsetOptions.delete(options)
       if (shouldReportError()) this.recordLoadSubsetError(options, error)
       throw error
-    } finally {
-      this.activeLoadSubsetOptions.pop()
     }
-
-    if (tracksUnorderedAcquisition) {
-      if (result instanceof Promise) {
-        const finish = () =>
-          this.pendingUnorderedLoadSubsetOptions.delete(options)
-        void result.then(finish, finish)
-      } else {
-        this.pendingUnorderedLoadSubsetOptions.delete(options)
-      }
-    }
-    return result
   }
 
-  private staleChangeSource(): `ordered-source` | `additional-demand` {
-    const activeOptions = this.activeLoadSubsetOptions.at(-1)
-    if (activeOptions !== undefined) {
-      return activeOptions.orderBy === undefined
-        ? `additional-demand`
-        : `ordered-source`
+  private staleChangeSource(
+    change: ChangeMessage<any, any>,
+  ): `ordered-source` | `additional-demand` {
+    const requestSignal = getSyncRequestSignal(change)
+    if (requestSignal === undefined) return `ordered-source`
+
+    for (const demand of this.subsetDemands) {
+      if (
+        demand.ordered === undefined &&
+        demand.options.signal === requestSignal
+      ) {
+        return `additional-demand`
+      }
+      for (const pending of demand.pendingReplayAcquisitions) {
+        if (
+          pending.ordered === undefined &&
+          pending.options.signal === requestSignal
+        ) {
+          return `additional-demand`
+        }
+      }
     }
-    return this.pendingUnorderedLoadSubsetOptions.size > 0
-      ? `additional-demand`
-      : `ordered-source`
+    return `ordered-source`
   }
 
   private buildOrderedCursorExpressions(
@@ -1035,7 +1027,6 @@ export class CollectionSubscription
   ): void {
     const previousOptions = demand.options
     const removePreviousAbortListener = demand.removeRequestAbortListener
-    this.pendingUnorderedLoadSubsetOptions.delete(previousOptions)
     this.collection._sync.unloadSubset(previousOptions)
     removePreviousAbortListener?.()
     demand.options = next.options
@@ -1105,7 +1096,6 @@ export class CollectionSubscription
   ): void {
     if (!demand.pendingReplayAcquisitions.has(next)) return
     next.abortController.abort()
-    this.pendingUnorderedLoadSubsetOptions.delete(next.options)
     try {
       this.collection._sync.unloadSubset(next.options)
       demand.pendingReplayAcquisitions.delete(next)
@@ -1117,7 +1107,6 @@ export class CollectionSubscription
   /** Abort and release one current adapter acquisition. */
   private releaseSubsetDemand(demand: SubsetDemand): void {
     demand.abortController?.abort()
-    this.pendingUnorderedLoadSubsetOptions.delete(demand.options)
     let firstReleaseError: unknown
     for (const pending of [...demand.pendingReplayAcquisitions]) {
       try {
@@ -1218,7 +1207,7 @@ export class CollectionSubscription
     ) {
       const orderedChanges = this.reconcileStaleOrderedPublication(
         changes,
-        this.staleChangeSource(),
+        (change) => this.staleChangeSource(change),
       )
       if (changes.length > 0 && orderedChanges.length === 0) return false
       this.callback(orderedChanges)
@@ -1794,8 +1783,6 @@ export class CollectionSubscription
     this.truncateReplaySession = undefined
     this.stalePublication = undefined
     this.orderedPublication = undefined
-    this.activeLoadSubsetOptions.length = 0
-    this.pendingUnorderedLoadSubsetOptions.clear()
 
     // Release the current adapter acquisition for each logical subset demand.
     const failedDemands: Array<SubsetDemand> = []
