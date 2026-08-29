@@ -693,7 +693,19 @@ the empty window into a positive request. The dedupe helper applies the same
 law when adapters call it directly: a zero-width request establishes no
 coverage and owns no physical acquisition. This also holds when no usable
 order index exists: core defers the full-snapshot fallback until the window
-first becomes positive, then requests it once for that subscription session.
+first becomes positive. One successful or pending fallback covers that
+subscription session. A synchronous throw or rejected fallback clears only
+that subscription's guard, so the same live query can retry. Cleanup creates a
+new subscription and a late settlement from the old one cannot clear the new
+guard. Truncate replay belongs to the subscription's retained demand; the live
+coordinator must not add a second fallback while that replay is in flight.
+
+The graph loader is part of the same quiescence pass as source processing. If a
+window change reaches the pass with no graph work, core calls the loader first.
+It then drains every graph step created by a synchronous adapter commit before
+publishing. Async settlement schedules another pass under the same rule. A
+successful retry therefore cannot commit source rows while leaving the live
+result stale until an unrelated later window change.
 
 Live Collections and Effects keep separate consumer-local continuation state,
 but obey the same identity and reset law. A settled request remains the

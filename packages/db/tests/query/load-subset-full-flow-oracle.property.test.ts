@@ -955,14 +955,95 @@ it.each([
   })
 })
 
-it(`retries unindexed transport after a rejected zero-to-positive refinement`, async () => {
+it.each([`sync throw`, `async reject`] as const)(
+  `retries unindexed transport after a %s during zero-to-positive refinement`,
+  async (failureMode) => {
+    type Row = { id: string; rank: number }
+    let attempts = 0
+    let begin!: () => void
+    let write!: (message: { type: `insert`; value: Row }) => void
+    let commit!: () => true | Promise<void>
+    const source = createCollection<Row>({
+      id: `unindexed-zero-refinement-retry`,
+      getKey: (row) => row.id,
+      syncMode: `on-demand`,
+      startSync: true,
+      autoIndex: `off`,
+      defaultIndexType: BTreeIndex,
+      sync: {
+        sync: (params) => {
+          begin = params.begin
+          write = params.write
+          commit = params.commit
+          params.markReady()
+          return {
+            loadSubset: () => {
+              attempts++
+              if (attempts === 1) {
+                const error = new Error(`fallback failed`)
+                if (failureMode === `sync throw`) throw error
+                return Promise.reject(error)
+              }
+              begin()
+              write({ type: `insert`, value: { id: `a`, rank: 1 } })
+              const applied = commit()
+              const outcome = { hasMore: false, appliedRowKeys: [`a`] }
+              return applied === true
+                ? Promise.resolve(outcome)
+                : applied.then(() => outcome)
+            },
+            unloadSubset: () => {},
+          }
+        },
+      },
+    })
+    const live = createLiveQueryCollection({
+      id: `unindexed-zero-refinement-retry-live`,
+      query: (q) =>
+        q
+          .from({ row: source })
+          .orderBy(({ row }) => row.rank)
+          .limit(0),
+      startSync: true,
+    })
+
+    try {
+      await live.preload()
+      expect(attempts).toBe(0)
+
+      if (failureMode === `sync throw`) {
+        expect(() => live.utils.setWindow({ offset: 0, limit: 1 })).toThrow(
+          `fallback failed`,
+        )
+      } else {
+        await expect(
+          live.utils.setWindow({ offset: 0, limit: 1 }),
+        ).rejects.toThrow(`fallback failed`)
+      }
+      await flushPromises()
+      await live.utils.setWindow({ offset: 0, limit: 1 })
+      await flushPromises()
+
+      expect(attempts).toBe(2)
+      expect(live.toArray.map(({ id }) => id)).toEqual([`a`])
+    } finally {
+      await Promise.all([live.cleanup(), source.cleanup()])
+    }
+  },
+)
+
+it(`fences an unindexed fallback settlement from a cleaned query session`, async () => {
   type Row = { id: string; rank: number }
-  let attempts = 0
+  type Result = {
+    hasMore: boolean
+    appliedRowKeys: ReadonlyArray<string>
+  }
+  const pending: Array<ReturnType<typeof createDeferred<Result>>> = []
   let begin!: () => void
   let write!: (message: { type: `insert`; value: Row }) => void
   let commit!: () => true | Promise<void>
   const source = createCollection<Row>({
-    id: `unindexed-zero-refinement-retry`,
+    id: `unindexed-fallback-session-fence`,
     getKey: (row) => row.id,
     syncMode: `on-demand`,
     startSync: true,
@@ -975,13 +1056,10 @@ it(`retries unindexed transport after a rejected zero-to-positive refinement`, a
         commit = params.commit
         params.markReady()
         return {
-          loadSubset: async () => {
-            attempts++
-            if (attempts === 1) throw new Error(`fallback failed`)
-            begin()
-            write({ type: `insert`, value: { id: `a`, rank: 1 } })
-            await commit()
-            return { hasMore: false, appliedRowKeys: [`a`] }
+          loadSubset: () => {
+            const request = createDeferred<Result>()
+            pending.push(request)
+            return request.promise
           },
           unloadSubset: () => {},
         }
@@ -989,7 +1067,7 @@ it(`retries unindexed transport after a rejected zero-to-positive refinement`, a
     },
   })
   const live = createLiveQueryCollection({
-    id: `unindexed-zero-refinement-retry-live`,
+    id: `unindexed-fallback-session-fence-live`,
     query: (q) =>
       q
         .from({ row: source })
@@ -997,21 +1075,146 @@ it(`retries unindexed transport after a rejected zero-to-positive refinement`, a
         .limit(0),
     startSync: true,
   })
+  let firstWindow: true | Promise<void> | undefined
+  let secondWindow: true | Promise<void> | undefined
 
   try {
     await live.preload()
-    expect(attempts).toBe(0)
+    firstWindow = live.utils.setWindow({ offset: 0, limit: 1 })
+    void Promise.resolve(firstWindow).catch(() => {})
+    expect(pending).toHaveLength(1)
 
-    await expect(live.utils.setWindow({ offset: 0, limit: 1 })).rejects.toThrow(
-      `fallback failed`,
-    )
+    await live.cleanup()
+    await live.preload()
+    secondWindow = live.utils.setWindow({ offset: 0, limit: 1 })
+    expect(pending).toHaveLength(2)
+
+    pending[0]!.reject(new Error(`stale fallback failed`))
     await flushPromises()
-    await live.utils.setWindow({ offset: 0, limit: 1 })
+    const repeatedWindow = live.utils.setWindow({ offset: 0, limit: 2 })
+    void Promise.resolve(repeatedWindow).catch(() => {})
+    expect(pending).toHaveLength(2)
+
+    begin()
+    write({ type: `insert`, value: { id: `a`, rank: 1 } })
+    const applied = commit()
+    if (applied !== true) await applied
+    pending[1]!.resolve({ hasMore: false, appliedRowKeys: [`a`] })
+    await secondWindow
     await flushPromises()
 
-    expect(attempts).toBe(2)
+    expect(pending).toHaveLength(2)
+    expect(live.toArray.map(({ id }) => id)).toEqual([`a`])
   } finally {
-    await Promise.all([live.cleanup(), source.cleanup()])
+    for (const request of pending) {
+      request.reject(new Error(`test cleanup`))
+    }
+    await Promise.all([
+      Promise.resolve(firstWindow).catch(() => undefined),
+      Promise.resolve(secondWindow).catch(() => undefined),
+      live.cleanup(),
+      source.cleanup(),
+    ])
+  }
+})
+
+it(`replays one unindexed fallback and publishes one replacement after truncate`, async () => {
+  type Row = { id: string; rank: number }
+  type Result = {
+    hasMore: boolean
+    appliedRowKeys: ReadonlyArray<string>
+  }
+  const pending: Array<ReturnType<typeof createDeferred<Result>>> = []
+  const batches: Array<ReadonlyArray<string>> = []
+  const callbackReads: Array<ReadonlyArray<string>> = []
+  let begin!: () => void
+  let write!: (message: { type: `insert`; value: Row }) => void
+  let commit!: () => true | Promise<void>
+  let truncate!: () => void
+  const source = createCollection<Row>({
+    id: `unindexed-fallback-truncate-replay`,
+    getKey: (row) => row.id,
+    syncMode: `on-demand`,
+    startSync: true,
+    autoIndex: `off`,
+    defaultIndexType: BTreeIndex,
+    sync: {
+      sync: (params) => {
+        begin = params.begin
+        write = params.write
+        commit = params.commit
+        truncate = params.truncate
+        params.markReady()
+        return {
+          loadSubset: () => {
+            const request = createDeferred<Result>()
+            pending.push(request)
+            return request.promise
+          },
+          unloadSubset: () => {},
+        }
+      },
+    },
+  })
+  const live = createLiveQueryCollection({
+    id: `unindexed-fallback-truncate-replay-live`,
+    query: (q) =>
+      q
+        .from({ row: source })
+        .orderBy(({ row }) => row.rank)
+        .limit(1),
+    startSync: true,
+  })
+  const subscription = live.subscribeChanges(
+    (changes) => {
+      batches.push(changes.map(({ key }) => String(key)).sort())
+      callbackReads.push(live.toArray.map(({ id }) => id).sort())
+    },
+    { includeInitialState: false },
+  )
+  const preload = live.preload()
+
+  try {
+    expect(pending).toHaveLength(1)
+    begin()
+    write({ type: `insert`, value: { id: `a`, rank: 1 } })
+    const initialApplied = commit()
+    if (initialApplied !== true) await initialApplied
+    pending[0]!.resolve({ hasMore: false, appliedRowKeys: [`a`] })
+    await preload
+    await flushPromises()
+    expect(live.toArray.map(({ id }) => id)).toEqual([`a`])
+
+    batches.length = 0
+    callbackReads.length = 0
+    begin()
+    truncate()
+    const replacement = commit()
+    await flushPromises()
+    expect(pending).toHaveLength(2)
+
+    begin()
+    write({ type: `insert`, value: { id: `b`, rank: 2 } })
+    const replacementApplied = commit()
+    if (replacementApplied !== true) await replacementApplied
+    pending[1]!.resolve({ hasMore: false, appliedRowKeys: [`b`] })
+    if (replacement !== true) await replacement
+    await flushPromises()
+
+    expect(pending).toHaveLength(2)
+    expect(live.toArray.map(({ id }) => id)).toEqual([`b`])
+    expect(batches).toHaveLength(1)
+    expect(callbackReads).toEqual([[`b`]])
+  } finally {
+    for (const request of pending) {
+      request.reject(new Error(`test cleanup`))
+    }
+    subscription.unsubscribe()
+    await Promise.all([
+      preload.catch(() => undefined),
+      live.cleanup(),
+      source.cleanup(),
+    ])
   }
 })
 

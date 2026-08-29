@@ -569,24 +569,22 @@ export class CollectionConfigBuilder<
 
       // Always run the graph if subscribed (eager execution)
       if (syncState.subscribedToAllCollections) {
-        let callbackCalled = false
+        // A window change can reach this point with no pending graph work.
+        // Let the loader run first so any synchronous source commit it starts
+        // becomes part of this same quiescence pass.
+        if (!syncState.graph.pendingWork()) {
+          callback?.()
+        }
+
         while (syncState.graph.pendingWork()) {
           syncState.graph.run()
           callback?.()
-          callbackCalled = true
         }
 
         // Publish only after every operator has reached quiescence. A source
         // change can reach sibling materializations in different graph steps;
         // flushing between those steps would expose a mixed root snapshot.
         syncState.flushPendingChanges?.()
-
-        // Ensure the callback runs at least once even when the graph has no pending work.
-        // This handles lazy loading scenarios where setWindow() increases the limit or
-        // an async loadSubset completes and we need to re-check if more data is needed.
-        if (!callbackCalled) {
-          callback?.()
-        }
 
         // On the initial run, we may need to do an empty commit to ensure that
         // the collection is initialized
