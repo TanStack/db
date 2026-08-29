@@ -40,6 +40,61 @@ export type OrderedContinuationEvidence = {
   rowsNeeded: number
 }
 
+export type MultiSourceOrderedRow = {
+  key: string
+  joinKey: string
+}
+
+export type MultiSourceOrderedWindow = {
+  visibleKeys: ReadonlyArray<string>
+  scannedPrimaryKeys: ReadonlyArray<string>
+  primaryCursorKeys: ReadonlyArray<string | undefined>
+  demandedJoinKeys: ReadonlyArray<string>
+  rowsNeeded: number
+  sourceExhausted: boolean
+}
+
+/**
+ * Projects the smallest primary-source prefix needed to fill a joined window.
+ * The caller supplies primary rows in total order, so this projector only owns
+ * the cross-source law: every scanned primary row advances source progress,
+ * while only rows admitted by the secondary source fill the visible window.
+ */
+export function projectMultiSourceOrderedWindow(options: {
+  primaryOrder: ReadonlyArray<MultiSourceOrderedRow>
+  secondaryJoinKeys: ReadonlySet<string>
+  targetSize: number
+}): MultiSourceOrderedWindow {
+  const scannedPrimaryKeys: Array<string> = []
+  const visibleKeys: Array<string> = []
+  const demandedJoinKeys: Array<string> = []
+  const seenJoinKeys = new Set<string>()
+
+  for (const row of options.primaryOrder) {
+    if (visibleKeys.length >= options.targetSize) break
+
+    scannedPrimaryKeys.push(row.key)
+    if (!seenJoinKeys.has(row.joinKey)) {
+      seenJoinKeys.add(row.joinKey)
+      demandedJoinKeys.push(row.joinKey)
+    }
+    if (options.secondaryJoinKeys.has(row.joinKey)) {
+      visibleKeys.push(row.key)
+    }
+  }
+
+  return {
+    visibleKeys,
+    scannedPrimaryKeys,
+    primaryCursorKeys: scannedPrimaryKeys.map((_, index) =>
+      index === 0 ? undefined : scannedPrimaryKeys[index - 1],
+    ),
+    demandedJoinKeys,
+    rowsNeeded: Math.max(0, options.targetSize - visibleKeys.length),
+    sourceExhausted: scannedPrimaryKeys.length === options.primaryOrder.length,
+  }
+}
+
 /**
  * Projects ordered evidence from request receipts alone. Requested size and
  * source progress are independent inputs; only eligible applied rows count

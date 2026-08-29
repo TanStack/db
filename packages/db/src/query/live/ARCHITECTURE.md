@@ -401,6 +401,15 @@ predicates, and top-K to the full readable source. It must not issue a limited
 page and then disable continuation: later relational operators may reject that
 page and leave the result window short.
 
+For an indexed ordered source above a join or later predicate, the visible
+window is the direct relational result: source order, then downstream
+operators, then top-K. Core must establish at least the shortest ordered source
+prefix that contains that result, advancing its cursor across source rows that
+the later relation rejects. A second source may settle after a continuation is
+already in flight, so safe extra primary rows may become readable. They do not
+change the top-K result or permit a shorter required prefix. Exhaustion may
+leave the window short; a non-exhausted source may not.
+
 Test adapters must obey the same boundary contract as production adapters. A
 mock that reports exhaustion must have made every matching source row readable
 before its result settles. A mock that reports more data must honor later
@@ -1070,27 +1079,27 @@ create recursive Collection machinery.
 
 ## Executable contracts
 
-| Contract                                                                    | Test suite                                                                 |
-| --------------------------------------------------------------------------- | -------------------------------------------------------------------------- |
-| State equivalence, route lifecycle, transition history, and batch partition | `packages/db/tests/query/includes-oracle.property.test.ts`                 |
-| Joined multiplicity, alias identity, and null-key normalization             | `packages/db/tests/query/includes-query-shape-oracle.test.ts`              |
-| Demand, cancellation, and progressive timing                                | `packages/db/tests/query/includes-temporal-oracle.test.ts`                 |
-| Optimistic confirmation, rollback, and later reactivity                     | `packages/db/tests/query/includes-optimistic-oracle.property.test.ts`      |
-| Coherent layered publication                                                | `packages/db/tests/query/includes-publication-oracle.test.ts`              |
-| Collection facades, event coherence, and route activation                   | `packages/db/tests/query/includes-collection-oracle.property.test.ts`      |
-| Correlated physical work                                                    | `packages/db/tests/query/includes-work-counter-oracle.test.ts`             |
-| Route-context discovery and transport across recursive and join boundaries  | `packages/db/tests/query/includes-context-transport-oracle.test.ts`        |
-| Ordered source coverage, total boundaries, and window transitions           | `packages/db/tests/query/pagination-oracle.property.test.ts`               |
-| Truncate replacement, retained publication, and boundary provenance         | `packages/db/tests/collection-subscription-replay-oracle.property.test.ts` |
-| Coverage leases, acquisitions, fact compaction, and row provenance          | `packages/db/tests/query/coverage-registry-oracle.property.test.ts`        |
-| Applied coverage publication through the Collection sync boundary           | `packages/db/tests/load-subset-outcome.test.ts`                            |
-| Scheduled acquisition, release retry, and stale settlement                  | `packages/db/tests/query/load-subset-lifecycle-oracle.property.test.ts`    |
-| End-to-end demand, continuation, and outcome-free boundaries                | `packages/db/tests/query/load-subset-full-flow-oracle.property.test.ts`    |
-| Subset acquisition, readiness, receipt, and replay refinement laws          | `packages/db/tests/query/load-subset-refinement-*.property.test.ts`        |
-| Production-boundary refinement drivers                                      | `packages/db/tests/query/load-subset-*-refinement-oracle.property.test.ts` |
-| Adapter final-owner release and remount transport                           | Electric `electric-live-query.test.ts`; PowerSync `on-demand-sync.test.ts` |
-| Query-db ownership                                                          | `packages/query-db-collection/tests/ownership-lifecycle.oracle.test.ts`    |
-| Reachable nested shape                                                      | `packages/query-db-collection/tests/includes-work-counter-oracle.test.ts`  |
+| Contract                                                                     | Test suite                                                                 |
+| ---------------------------------------------------------------------------- | -------------------------------------------------------------------------- |
+| State equivalence, route lifecycle, transition history, and batch partition  | `packages/db/tests/query/includes-oracle.property.test.ts`                 |
+| Joined multiplicity, alias identity, and null-key normalization              | `packages/db/tests/query/includes-query-shape-oracle.test.ts`              |
+| Demand, cancellation, and progressive timing                                 | `packages/db/tests/query/includes-temporal-oracle.test.ts`                 |
+| Optimistic confirmation, rollback, and later reactivity                      | `packages/db/tests/query/includes-optimistic-oracle.property.test.ts`      |
+| Coherent layered publication                                                 | `packages/db/tests/query/includes-publication-oracle.test.ts`              |
+| Collection facades, event coherence, and route activation                    | `packages/db/tests/query/includes-collection-oracle.property.test.ts`      |
+| Correlated physical work                                                     | `packages/db/tests/query/includes-work-counter-oracle.test.ts`             |
+| Route-context discovery and transport across recursive and join boundaries   | `packages/db/tests/query/includes-context-transport-oracle.test.ts`        |
+| Ordered source coverage, total boundaries, and window transitions            | `packages/db/tests/query/pagination-oracle.property.test.ts`               |
+| Truncate replacement, retained publication, and boundary provenance          | `packages/db/tests/collection-subscription-replay-oracle.property.test.ts` |
+| Coverage leases, acquisitions, fact compaction, and row provenance           | `packages/db/tests/query/coverage-registry-oracle.property.test.ts`        |
+| Applied coverage publication through the Collection sync boundary            | `packages/db/tests/load-subset-outcome.test.ts`                            |
+| Scheduled acquisition, release retry, and stale settlement                   | `packages/db/tests/query/load-subset-lifecycle-oracle.property.test.ts`    |
+| End-to-end demand, multi-source ordered continuation, and outcome boundaries | `packages/db/tests/query/load-subset-full-flow-oracle.property.test.ts`    |
+| Subset acquisition, readiness, receipt, and replay refinement laws           | `packages/db/tests/query/load-subset-refinement-*.property.test.ts`        |
+| Production-boundary refinement drivers                                       | `packages/db/tests/query/load-subset-*-refinement-oracle.property.test.ts` |
+| Adapter final-owner release and remount transport                            | Electric `electric-live-query.test.ts`; PowerSync `on-demand-sync.test.ts` |
+| Query-db ownership                                                           | `packages/query-db-collection/tests/ownership-lifecycle.oracle.test.ts`    |
+| Reachable nested shape                                                       | `packages/query-db-collection/tests/includes-work-counter-oracle.test.ts`  |
 
 Each oracle identifies the first divergent checkpoint and compares either the
 whole result or one exact structural difference. Correlated-materialization

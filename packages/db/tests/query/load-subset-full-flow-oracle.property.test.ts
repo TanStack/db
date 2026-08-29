@@ -17,6 +17,7 @@ import {
   projectAtomicOrderedPublicationState,
   projectAtomicOrderedPublications,
   projectAuthorizedContinuationStarts,
+  projectMultiSourceOrderedWindow,
   projectOrderedContinuationEvidence,
   projectOrderedPublicationBoundary,
   projectRetainedRowKeys,
@@ -146,6 +147,408 @@ it(`loads each side of a filtered inner join once`, async () => {
   }
 })
 
+const { multiplier: fullFlowMultiplier, replaySeed: fullFlowReplaySeed } =
+  readOracleRunConfig()
+
+type MultiSourceOrderedScenario = {
+  primaryRows: ReadonlyArray<{
+    id: string
+    rank: number
+    joinKey: string
+  }>
+  secondaryJoinKeys: ReadonlyArray<string>
+  targetSize: number
+  direction: `asc` | `desc`
+  secondaryPublication: `preloaded` | `on-demand`
+}
+
+const multiSourceJoinKeyArbitrary = fc.constantFrom(`x`, `y`, `z`)
+const multiSourceOrderedScenarioArbitrary: fc.Arbitrary<MultiSourceOrderedScenario> =
+  fc
+    .record({
+      ranks: fc.tuple(
+        fc.integer({ min: 0, max: 2 }),
+        fc.integer({ min: 0, max: 2 }),
+        fc.integer({ min: 0, max: 2 }),
+        fc.integer({ min: 0, max: 2 }),
+      ),
+      joinKeys: fc.tuple(
+        multiSourceJoinKeyArbitrary,
+        multiSourceJoinKeyArbitrary,
+        multiSourceJoinKeyArbitrary,
+        multiSourceJoinKeyArbitrary,
+      ),
+      secondaryJoinKeys: fc.uniqueArray(multiSourceJoinKeyArbitrary, {
+        maxLength: 3,
+      }),
+      targetSize: fc.integer({ min: 1, max: 3 }),
+      direction: fc.constantFrom(`asc` as const, `desc` as const),
+      secondaryPublication: fc.constantFrom(
+        `preloaded` as const,
+        `on-demand` as const,
+      ),
+    })
+    .map(({ ranks, joinKeys, ...scenario }) => ({
+      ...scenario,
+      primaryRows: [`a`, `b`, `c`, `d`].map((id, index) => ({
+        id,
+        rank: ranks[index]!,
+        joinKey: joinKeys[index]!,
+      })),
+    }))
+
+if (process.env.TANSTACK_DB_ORACLE_STATISTICS === `1`) {
+  fc.statistics(
+    multiSourceOrderedScenarioArbitrary,
+    ({
+      primaryRows,
+      secondaryJoinKeys,
+      targetSize,
+      direction,
+      secondaryPublication,
+    }) => [
+      `direction=${direction}`,
+      `target=${targetSize}`,
+      `secondary=${secondaryPublication}`,
+      `exhaustion=${
+        primaryRows.filter(({ joinKey }) => secondaryJoinKeys.includes(joinKey))
+          .length < targetSize
+      }`,
+      `leading-exclusion=${!secondaryJoinKeys.includes(
+        orderedPrimaryRows({
+          primaryRows,
+          secondaryJoinKeys,
+          targetSize,
+          direction,
+          secondaryPublication,
+        })[0]!.joinKey,
+      )}`,
+      `tied=${new Set(primaryRows.map(({ rank }) => rank)).size < primaryRows.length}`,
+    ],
+    oracleRandomParameters(1_000, fullFlowReplaySeed),
+  )
+}
+
+function orderedPrimaryRows(
+  scenario: MultiSourceOrderedScenario,
+): Array<MultiSourceOrderedScenario[`primaryRows`][number]> {
+  return [...scenario.primaryRows].sort((left, right) => {
+    const rankOrder =
+      scenario.direction === `asc`
+        ? left.rank - right.rank
+        : right.rank - left.rank
+    return rankOrder || left.id.localeCompare(right.id)
+  })
+}
+
+function containsOrderedSubsequence<T>(
+  values: ReadonlyArray<T>,
+  subsequence: ReadonlyArray<T>,
+): boolean {
+  let expectedIndex = 0
+  for (const value of values) {
+    if (expectedIndex === subsequence.length) return true
+    if (Object.is(value, subsequence[expectedIndex])) expectedIndex++
+  }
+  return expectedIndex === subsequence.length
+}
+
+let multiSourceOrderedHarnessId = 0
+
+async function runMultiSourceOrderedScenario(
+  scenario: MultiSourceOrderedScenario,
+): Promise<void> {
+  type PrimaryRow = MultiSourceOrderedScenario[`primaryRows`][number]
+  type SecondaryRow = { id: string; joinKey: string }
+
+  const primaryOrder = orderedPrimaryRows(scenario)
+  const projection = projectMultiSourceOrderedWindow({
+    primaryOrder: primaryOrder.map(({ id, joinKey }) => ({
+      key: id,
+      joinKey,
+    })),
+    secondaryJoinKeys: new Set(scenario.secondaryJoinKeys),
+    targetSize: scenario.targetSize,
+  })
+  const primaryCalls: Array<LoadSubsetOptions> = []
+  const primaryAppliedKeys: Array<string> = []
+  const secondaryCalls: Array<LoadSubsetOptions> = []
+  let primaryBegin!: () => void
+  let primaryWrite!: (message: { type: `insert`; value: PrimaryRow }) => void
+  let primaryCommit!: () => true | Promise<void>
+  const primary = createCollection<PrimaryRow>({
+    id: `multi-source-ordered-primary-${multiSourceOrderedHarnessId}`,
+    getKey: (row) => row.id,
+    syncMode: `on-demand`,
+    startSync: true,
+    autoIndex: `eager`,
+    defaultIndexType: BTreeIndex,
+    sync: {
+      sync: (params) => {
+        primaryBegin = params.begin
+        primaryWrite = params.write
+        primaryCommit = params.commit
+        params.markReady()
+        return {
+          loadSubset: async (options) => {
+            primaryCalls.push(options)
+            const lastKey = options.cursor?.lastKey
+            const previousIndex =
+              lastKey === undefined
+                ? -1
+                : primaryOrder.findIndex(({ id }) => id === lastKey)
+            const row = primaryOrder[previousIndex + 1]
+            if (row) {
+              primaryAppliedKeys.push(row.id)
+              primaryBegin()
+              primaryWrite({ type: `insert`, value: row })
+              const applied = primaryCommit()
+              if (applied !== true) await applied
+            }
+            return {
+              hasMore: previousIndex + 1 < primaryOrder.length - 1,
+              appliedRowKeys: row ? [row.id] : [],
+            }
+          },
+          unloadSubset: () => {},
+        }
+      },
+    },
+  })
+
+  let secondaryBegin!: () => void
+  let secondaryWrite!: (message: {
+    type: `insert`
+    value: SecondaryRow
+  }) => void
+  let secondaryCommit!: () => true | Promise<void>
+  const secondaryRows = scenario.secondaryJoinKeys.map((joinKey) => ({
+    id: `secondary-${joinKey}`,
+    joinKey,
+  }))
+  const secondary = createCollection<SecondaryRow>({
+    id: `multi-source-ordered-secondary-${multiSourceOrderedHarnessId}`,
+    getKey: (row) => row.id,
+    syncMode: `on-demand`,
+    startSync: true,
+    autoIndex: `eager`,
+    defaultIndexType: BTreeIndex,
+    sync: {
+      sync: (params) => {
+        secondaryBegin = params.begin
+        secondaryWrite = params.write
+        secondaryCommit = params.commit
+        if (
+          scenario.secondaryPublication === `preloaded` &&
+          secondaryRows.length > 0
+        ) {
+          secondaryBegin()
+          for (const row of secondaryRows) {
+            secondaryWrite({ type: `insert`, value: row })
+          }
+          const applied = secondaryCommit()
+          if (applied !== true) {
+            throw new Error(`Expected synchronous initial secondary rows`)
+          }
+        }
+        params.markReady()
+        return {
+          loadSubset: async (options) => {
+            secondaryCalls.push(options)
+            if (
+              scenario.secondaryPublication === `on-demand` &&
+              secondaryRows.length > 0
+            ) {
+              secondaryBegin()
+              for (const row of secondaryRows) {
+                secondaryWrite({ type: `insert`, value: row })
+              }
+              const applied = secondaryCommit()
+              if (applied !== true) await applied
+            }
+            return {
+              hasMore: false,
+              appliedRowKeys: secondaryRows.map(({ id }) => id),
+            }
+          },
+          unloadSubset: () => {},
+        }
+      },
+    },
+  })
+  const live = createLiveQueryCollection({
+    id: `multi-source-ordered-live-${multiSourceOrderedHarnessId++}`,
+    query: (q) =>
+      q
+        .from({ primaryRow: primary })
+        .innerJoin(
+          { secondaryRow: secondary },
+          ({ primaryRow, secondaryRow }) =>
+            eq(primaryRow.joinKey, secondaryRow.joinKey),
+        )
+        .orderBy(({ primaryRow }) => primaryRow.rank, scenario.direction)
+        .limit(scenario.targetSize),
+    startSync: true,
+  })
+
+  try {
+    await live.preload()
+    await flushPromises()
+
+    expect(live.toArray.map(({ primaryRow }) => primaryRow.id)).toEqual(
+      projection.visibleKeys,
+    )
+    const distinctPrimaryKeys = [...new Set(primaryAppliedKeys)]
+    expect(distinctPrimaryKeys).toEqual(
+      primaryOrder.slice(0, distinctPrimaryKeys.length).map(({ id }) => id),
+    )
+    expect(
+      distinctPrimaryKeys.slice(0, projection.scannedPrimaryKeys.length),
+    ).toEqual(projection.scannedPrimaryKeys)
+    expect(
+      containsOrderedSubsequence(
+        primaryCalls
+          .filter(({ orderBy }) => orderBy !== undefined)
+          .map(({ cursor }) => cursor?.lastKey as string | undefined),
+        projection.primaryCursorKeys,
+      ),
+    ).toBe(true)
+    expect(secondaryCalls.length).toBeGreaterThan(0)
+  } finally {
+    await Promise.all([live.cleanup(), primary.cleanup(), secondary.cleanup()])
+  }
+}
+
+it(`continues an ordered primary source until a joined window is full`, async () => {
+  await runMultiSourceOrderedScenario({
+    primaryRows: [
+      { id: `a`, rank: 1, joinKey: `a` },
+      { id: `b`, rank: 2, joinKey: `b` },
+      { id: `c`, rank: 3, joinKey: `c` },
+      { id: `d`, rank: 4, joinKey: `d` },
+    ],
+    secondaryJoinKeys: [`c`, `d`],
+    targetSize: 2,
+    direction: `asc`,
+    secondaryPublication: `preloaded`,
+  })
+})
+
+it(`projects the minimal primary prefix needed by a joined window`, () => {
+  const projection = projectMultiSourceOrderedWindow({
+    primaryOrder: [
+      { key: `a`, joinKey: `x` },
+      { key: `b`, joinKey: `y` },
+      { key: `c`, joinKey: `z` },
+      { key: `d`, joinKey: `x` },
+    ],
+    secondaryJoinKeys: new Set([`x`, `z`]),
+    targetSize: 2,
+  })
+
+  expect(projection).toEqual({
+    visibleKeys: [`a`, `c`],
+    scannedPrimaryKeys: [`a`, `b`, `c`],
+    primaryCursorKeys: [undefined, `a`, `b`],
+    demandedJoinKeys: [`x`, `y`, `z`],
+    rowsNeeded: 0,
+    sourceExhausted: false,
+  })
+})
+
+it(`erases join-key spelling and ignores unreachable secondary rows`, () => {
+  const original = projectMultiSourceOrderedWindow({
+    primaryOrder: [
+      { key: `a`, joinKey: `x` },
+      { key: `b`, joinKey: `y` },
+      { key: `c`, joinKey: `x` },
+    ],
+    secondaryJoinKeys: new Set([`x`, `unused`]),
+    targetSize: 2,
+  })
+  const renamed = projectMultiSourceOrderedWindow({
+    primaryOrder: [
+      { key: `a`, joinKey: `renamed-x` },
+      { key: `b`, joinKey: `renamed-y` },
+      { key: `c`, joinKey: `renamed-x` },
+    ],
+    secondaryJoinKeys: new Set([`renamed-x`]),
+    targetSize: 2,
+  })
+
+  expect({
+    visibleKeys: original.visibleKeys,
+    scannedPrimaryKeys: original.scannedPrimaryKeys,
+    primaryCursorKeys: original.primaryCursorKeys,
+    rowsNeeded: original.rowsNeeded,
+    sourceExhausted: original.sourceExhausted,
+  }).toEqual({
+    visibleKeys: renamed.visibleKeys,
+    scannedPrimaryKeys: renamed.scannedPrimaryKeys,
+    primaryCursorKeys: renamed.primaryCursorKeys,
+    rowsNeeded: renamed.rowsNeeded,
+    sourceExhausted: renamed.sourceExhausted,
+  })
+})
+
+it(`exhausts the bounded multi-source ordered-window model`, () => {
+  const rows = [
+    { key: `a`, joinKey: `x` },
+    { key: `b`, joinKey: `y` },
+    { key: `c`, joinKey: `z` },
+  ]
+  const joinKeys = [`x`, `y`, `z`] as const
+
+  for (let mask = 0; mask < 1 << joinKeys.length; mask++) {
+    const secondaryJoinKeys = new Set<string>(
+      joinKeys.filter((_, index) => (mask & (1 << index)) !== 0),
+    )
+    for (const targetSize of [1, 2, 3]) {
+      const projection = projectMultiSourceOrderedWindow({
+        primaryOrder: rows,
+        secondaryJoinKeys,
+        targetSize,
+      })
+      const direct = rows
+        .filter(({ joinKey }) => secondaryJoinKeys.has(joinKey))
+        .slice(0, targetSize)
+        .map(({ key }) => key)
+
+      expect(projection.visibleKeys).toEqual(direct)
+      expect(projection.rowsNeeded).toBe(
+        Math.max(0, targetSize - direct.length),
+      )
+      if (projection.scannedPrimaryKeys.length < rows.length) {
+        const shorterPrefix = rows.slice(
+          0,
+          projection.scannedPrimaryKeys.length - 1,
+        )
+        expect(
+          shorterPrefix.filter(({ joinKey }) => secondaryJoinKeys.has(joinKey)),
+        ).toHaveLength(targetSize - 1)
+      } else {
+        expect(projection.sourceExhausted).toBe(true)
+      }
+    }
+  }
+})
+
+fcTest.prop([multiSourceOrderedScenarioArbitrary], {
+  numRuns: 12 * fullFlowMultiplier,
+  seed: 17802,
+})(
+  `fills joined ordered windows for a fixed seed`,
+  runMultiSourceOrderedScenario,
+)
+
+fcTest.prop(
+  [multiSourceOrderedScenarioArbitrary],
+  oracleRandomParameters(12 * fullFlowMultiplier, fullFlowReplaySeed),
+)(
+  `fills joined ordered windows for a random or replayed seed`,
+  runMultiSourceOrderedScenario,
+)
+
 type TruncateCoverageScenario = {
   oldRequest: `none` | `settles-late`
   freshResult: `authoritative` | `unknown` | `reject`
@@ -178,9 +581,6 @@ const exhaustiveTruncateCoverageScenarios: Array<TruncateCoverageScenario> = [
     })),
   ),
 )
-
-const { multiplier: fullFlowMultiplier, replaySeed: fullFlowReplaySeed } =
-  readOracleRunConfig()
 
 let truncateCoverageHarnessId = 0
 
