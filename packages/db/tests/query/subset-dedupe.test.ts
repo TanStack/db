@@ -172,7 +172,7 @@ describe(`createDeduplicatedLoadSubset`, () => {
     expect(deduplicated.loadSubset({ where })).toBe(true)
   })
 
-  it(`releases in-flight cancellation owners when reset`, async () => {
+  it(`releases every owner from every in-flight lease when reset`, async () => {
     const releases: Array<() => void> = []
     const sharedSignals: Array<AbortSignal | undefined> = []
     const loadSubset = vi.fn(
@@ -183,7 +183,7 @@ describe(`createDeduplicatedLoadSubset`, () => {
         }),
     )
     const deduplicated = new DeduplicatedLoadSubset({ loadSubset })
-    const owners = [new AbortController(), new AbortController()]
+    const owners = Array.from({ length: 4 }, () => new AbortController())
     const addSpies = owners.map((owner) =>
       vi.spyOn(owner.signal, `addEventListener`),
     )
@@ -197,8 +197,16 @@ describe(`createDeduplicatedLoadSubset`, () => {
         signal: owners[0]!.signal,
       }),
       deduplicated.loadSubset({
-        where: lt(ref(`age`), val(0)),
+        where: gt(ref(`age`), val(10)),
         signal: owners[1]!.signal,
+      }),
+      deduplicated.loadSubset({
+        where: lt(ref(`age`), val(0)),
+        signal: owners[2]!.signal,
+      }),
+      deduplicated.loadSubset({
+        where: lt(ref(`age`), val(0)),
+        signal: owners[3]!.signal,
       }),
     ]
     expect(loadSubset).toHaveBeenCalledTimes(2)
@@ -216,6 +224,32 @@ describe(`createDeduplicatedLoadSubset`, () => {
     await Promise.all(loads)
     for (const removeSpy of removeSpies)
       expect(removeSpy).toHaveBeenCalledOnce()
+  })
+
+  it(`starts new work immediately after reset and protects it from old completion`, async () => {
+    const releases: Array<() => void> = []
+    const loadSubset = vi.fn(
+      () => new Promise<void>((resolve) => releases.push(resolve)),
+    )
+    const deduplicated = new DeduplicatedLoadSubset({ loadSubset })
+    const where = gt(ref(`age`), val(10))
+
+    const oldLoad = deduplicated.loadSubset({ where })
+    deduplicated.reset()
+    const currentLoad = deduplicated.loadSubset({ where })
+
+    expect(loadSubset).toHaveBeenCalledTimes(2)
+    expect(currentLoad).not.toBe(oldLoad)
+
+    releases[0]?.()
+    await oldLoad
+
+    const joinedLoad = deduplicated.loadSubset({ where })
+    expect(loadSubset).toHaveBeenCalledTimes(2)
+    expect(joinedLoad).toBe(currentLoad)
+
+    releases[1]?.()
+    await Promise.all([currentLoad, joinedLoad])
   })
 
   it(`should call underlying loadSubset on first call`, async () => {
