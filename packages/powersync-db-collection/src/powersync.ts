@@ -621,6 +621,8 @@ function createPowerSyncCollectionConfig<
         let stopped = false
         let lifecycleGeneration = 0
         let trackingRevision = 0
+        let reconciledTrackingRevision = 0
+        let rebuildPromise: Promise<void> | null = null
         let drainingReleases = false
         let releaseRetryTimer: ReturnType<typeof setTimeout> | undefined
         const hasStopped = () => stopped
@@ -638,66 +640,83 @@ function createPowerSyncCollectionConfig<
             .filter((demand) => demand.state === `active`)
             .map((demand) => demand.options.where)
 
-        const rebuildTracking = async (): Promise<void> => {
-          const generation = lifecycleGeneration
-          const revision = trackingRevision
-          const isCurrent = () =>
+        // One reconciliation owns every queued revision so callers cannot
+        // settle against a stale trigger configuration.
+        const reconcileTracking = async (): Promise<void> => {
+          while (
             !hasStopped() &&
-            lifecycleGeneration === generation &&
-            trackingRevision === revision
-          const appliedReceipts: Array<SyncAppliedReceipt> = []
+            reconciledTrackingRevision !== trackingRevision
+          ) {
+            const generation = lifecycleGeneration
+            const revision = trackingRevision
+            const isCurrent = () =>
+              !hasStopped() &&
+              lifecycleGeneration === generation &&
+              trackingRevision === revision
+            const appliedReceipts: Array<SyncAppliedReceipt> = []
 
-          await database.writeLock(async (ctx) => {
-            if (!isCurrent()) return
-            await flushDiffRecordsWithContext(ctx, appliedReceipts)
-            if (!isCurrent()) return
-            await safelyDisposeTracking(ctx)
-            if (!isCurrent()) return
+            await database.writeLock(async (ctx) => {
+              if (!isCurrent()) return
+              await flushDiffRecordsWithContext(ctx, appliedReceipts)
+              if (!isCurrent()) return
+              await safelyDisposeTracking(ctx)
+              if (!isCurrent()) return
 
-            const active = activeWhereExpressions()
-            if (active.length === 0) return
-            const combinedWhere =
-              active.length === 1
-                ? active[0]
-                : or(active[0], active[1], ...active.slice(2))
-            const compiledNewData = compileSQLite(
-              { where: combinedWhere },
-              { jsonColumn: 'NEW.data' },
-            )
-            const compiledOldData = compileSQLite(
-              { where: combinedWhere },
-              { jsonColumn: 'OLD.data' },
-            )
-            const compiledView = compileSQLite({ where: combinedWhere })
-            const newDataWhenClause = toInlinedWhereClause(compiledNewData)
-            const oldDataWhenClause = toInlinedWhereClause(compiledOldData)
-            const viewWhereClause = toInlinedWhereClause(compiledView)
+              const active = activeWhereExpressions()
+              if (active.length === 0) return
+              const combinedWhere =
+                active.length === 1
+                  ? active[0]
+                  : or(active[0], active[1], ...active.slice(2))
+              const compiledNewData = compileSQLite(
+                { where: combinedWhere },
+                { jsonColumn: 'NEW.data' },
+              )
+              const compiledOldData = compileSQLite(
+                { where: combinedWhere },
+                { jsonColumn: 'OLD.data' },
+              )
+              const compiledView = compileSQLite({ where: combinedWhere })
+              const newDataWhenClause = toInlinedWhereClause(compiledNewData)
+              const oldDataWhenClause = toInlinedWhereClause(compiledOldData)
+              const viewWhereClause = toInlinedWhereClause(compiledView)
 
-            await establishTracking(
-              {
-                setupContext: ctx,
-                when: {
-                  [DiffTriggerOperation.INSERT]: newDataWhenClause,
-                  [DiffTriggerOperation.UPDATE]: `(${newDataWhenClause}) OR (${oldDataWhenClause})`,
-                  [DiffTriggerOperation.DELETE]: oldDataWhenClause,
+              await establishTracking(
+                {
+                  setupContext: ctx,
+                  when: {
+                    [DiffTriggerOperation.INSERT]: newDataWhenClause,
+                    [DiffTriggerOperation.UPDATE]: `(${newDataWhenClause}) OR (${oldDataWhenClause})`,
+                    [DiffTriggerOperation.DELETE]: oldDataWhenClause,
+                  },
+                  writeType: (rowId: string) =>
+                    collection.has(rowId) ? `update` : `insert`,
+                  batchQuery: (
+                    lockContext: LockContext,
+                    batchSize: number,
+                    cursor: number,
+                  ) =>
+                    lockContext.getAll<TableType>(
+                      `SELECT * FROM ${viewName} WHERE ${viewWhereClause} LIMIT ? OFFSET ?`,
+                      [batchSize, cursor],
+                    ),
                 },
-                writeType: (rowId: string) =>
-                  collection.has(rowId) ? `update` : `insert`,
-                batchQuery: (
-                  lockContext: LockContext,
-                  batchSize: number,
-                  cursor: number,
-                ) =>
-                  lockContext.getAll<TableType>(
-                    `SELECT * FROM ${viewName} WHERE ${viewWhereClause} LIMIT ? OFFSET ?`,
-                    [batchSize, cursor],
-                  ),
-              },
-              appliedReceipts,
-            )
-            if (!isCurrent()) await safelyDisposeTracking(ctx)
+                appliedReceipts,
+              )
+              if (!isCurrent()) await safelyDisposeTracking(ctx)
+            })
+            await Promise.all(appliedReceipts)
+            if (isCurrent()) {
+              reconciledTrackingRevision = revision
+            }
+          }
+        }
+
+        const rebuildTracking = (): Promise<void> => {
+          rebuildPromise ??= reconcileTracking().finally(() => {
+            rebuildPromise = null
           })
-          await Promise.all(appliedReceipts)
+          return rebuildPromise
         }
 
         const loadSubset = async (
@@ -716,14 +735,12 @@ function createPowerSyncCollectionConfig<
 
           const demand: DemandRecord = { options, state: `provisional` }
           demands.set(options, demand)
-          trackingRevision++
           try {
             const cleanup = await restConfig.onLoadSubset?.(options)
             if (cleanup) demand.cleanup = cleanup
           } catch (error) {
             demand.state = `failed`
             demands.delete(options)
-            trackingRevision++
             throw error
           }
 
@@ -735,7 +752,6 @@ function createPowerSyncCollectionConfig<
           ) {
             demand.state = `released`
             demands.delete(options)
-            trackingRevision++
             demand.cleanup?.()
             return
           }
@@ -848,7 +864,7 @@ function createPowerSyncCollectionConfig<
           const wasActive = demand.state === `active`
           demand.state = `released`
           demands.delete(options)
-          trackingRevision++
+          if (wasActive) trackingRevision++
           try {
             demand.cleanup?.()
           } catch (error) {

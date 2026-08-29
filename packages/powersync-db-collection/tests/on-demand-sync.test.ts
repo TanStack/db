@@ -2533,6 +2533,88 @@ describe(`On-Demand Sync Mode`, () => {
       })
     }
 
+    function queueWriteLocks(db: PowerSyncDatabase) {
+      const queued: Array<() => Promise<void>> = []
+      vi.spyOn(db, `writeLock`).mockImplementation(
+        (callback) =>
+          new Promise((resolve, reject) => {
+            let started = false
+            queued.push(async () => {
+              if (started) return
+              started = true
+              try {
+                const result = await callback({} as never)
+                resolve(result as never)
+              } catch (error) {
+                reject(error)
+              }
+            })
+          }) as never,
+      )
+      return queued
+    }
+
+    async function startConcurrentLifecycleHarness() {
+      const db = await createDatabase()
+      const hooks: Array<ReturnType<typeof pDefer<void>>> = []
+      const hookCleanups: Array<ReturnType<typeof vi.fn>> = []
+      const onLoadSubset = vi.fn(() => {
+        const hook = pDefer<void>()
+        hooks.push(hook)
+        const cleanup = vi.fn()
+        hookCleanups.push(cleanup)
+        return hook.promise.then(() => cleanup)
+      })
+      const queuedLocks = queueWriteLocks(db)
+      const createDiffTrigger = vi
+        .spyOn(db.triggers, `createDiffTrigger`)
+        .mockResolvedValue(vi.fn())
+      const config = powerSyncCollectionOptions({
+        database: db,
+        table: APP_SCHEMA.props.products,
+        syncMode: `on-demand`,
+        onLoadSubset,
+      })
+      const sync = config.sync.sync({
+        collection: { status: `ready`, has: () => false },
+        begin: vi.fn(),
+        write: vi.fn(),
+        commit: () => true,
+        markReady: vi.fn(),
+        markError: vi.fn(),
+        truncate: vi.fn(),
+      } as never)
+      if (
+        !sync ||
+        typeof sync === `function` ||
+        !sync.loadSubset ||
+        !sync.unloadSubset
+      ) {
+        throw new Error(`Expected on-demand sync controls`)
+      }
+      const first = { where: eq(`category`, `electronics`) }
+      const second = { where: eq(`category`, `clothing`) }
+      const loadSubset = sync.loadSubset
+      const unloadSubset = sync.unloadSubset
+
+      return {
+        sync,
+        loadSubset,
+        unloadSubset,
+        first,
+        second,
+        hooks,
+        hookCleanups,
+        queuedLocks,
+        createDiffTrigger,
+        cleanup: async () => {
+          hooks.forEach((hook) => hook.resolve())
+          sync.cleanup?.()
+          await Promise.all(queuedLocks.map((run) => run()))
+        },
+      }
+    }
+
     it(`does not acquire a subset released while tracking startup is suspended`, async () => {
       const db = await createDatabase()
       const onLoadSubset = vi.fn()
@@ -2575,6 +2657,104 @@ describe(`On-Demand Sync Mode`, () => {
         expect(createDiffTrigger).not.toHaveBeenCalled()
       } finally {
         sync.cleanup?.()
+      }
+    })
+
+    it.each([`reject`, `release`] as const)(
+      `keeps an active rebuild current when a provisional hook will %s`,
+      async (secondOutcome) => {
+        const harness = await startConcurrentLifecycleHarness()
+        const hookFailure = new Error(`second hook failed`)
+        let firstSettled = false
+        let secondLoad: Promise<void> | undefined
+
+        try {
+          const firstLoad = Promise.resolve(
+            harness.loadSubset(harness.first),
+          ).then(() => {
+            firstSettled = true
+          })
+          await vi.waitFor(() => expect(harness.hooks).toHaveLength(1))
+          harness.hooks[0]!.resolve()
+          await vi.waitFor(() => expect(harness.queuedLocks).toHaveLength(1))
+
+          secondLoad = Promise.resolve(
+            harness.loadSubset(harness.second),
+          ).then(() => undefined)
+          await vi.waitFor(() => expect(harness.hooks).toHaveLength(2))
+
+          await harness.queuedLocks[0]!()
+          await new Promise((resolve) => setTimeout(resolve, 0))
+          expect(firstSettled).toBe(true)
+          expect(harness.createDiffTrigger).toHaveBeenCalledOnce()
+          const when = harness.createDiffTrigger.mock.calls[0]?.[0].when
+          expect(when?.INSERT).toContain(`electronics`)
+          expect(when?.INSERT).not.toContain(`clothing`)
+
+          if (secondOutcome === `reject`) {
+            harness.hooks[1]!.reject(hookFailure)
+            await expect(secondLoad).rejects.toBe(hookFailure)
+          } else {
+            harness.unloadSubset(harness.second)
+            harness.hooks[1]!.resolve()
+            await secondLoad
+          }
+
+          await firstLoad
+          expect(harness.queuedLocks).toHaveLength(1)
+          expect(harness.hookCleanups[1]).toHaveBeenCalledTimes(
+            secondOutcome === `release` ? 1 : 0,
+          )
+        } finally {
+          await harness.cleanup()
+          await secondLoad?.catch(() => undefined)
+        }
+      },
+    )
+
+    it(`does not settle a superseded rebuild before its replacement publishes`, async () => {
+      const harness = await startConcurrentLifecycleHarness()
+      let firstSettled = false
+      let firstLoad: Promise<void> | undefined
+      let secondLoad: Promise<void> | undefined
+
+      try {
+        firstLoad = Promise.resolve(
+          harness.loadSubset(harness.first),
+        ).then(() => {
+          firstSettled = true
+        })
+        await vi.waitFor(() => expect(harness.hooks).toHaveLength(1))
+        harness.hooks[0]!.resolve()
+        await vi.waitFor(() => expect(harness.queuedLocks).toHaveLength(1))
+
+        secondLoad = Promise.resolve(
+          harness.loadSubset(harness.second),
+        ).then(() => undefined)
+        await vi.waitFor(() => expect(harness.hooks).toHaveLength(2))
+        harness.hooks[1]!.resolve()
+        await new Promise((resolve) => setTimeout(resolve, 0))
+
+        await harness.queuedLocks[0]!()
+        await new Promise((resolve) => setTimeout(resolve, 0))
+        expect(firstSettled).toBe(false)
+        expect(harness.createDiffTrigger).not.toHaveBeenCalled()
+
+        await vi.waitFor(() => expect(harness.queuedLocks).toHaveLength(2))
+        await harness.queuedLocks[1]!()
+        await Promise.all([firstLoad, secondLoad])
+
+        expect(harness.queuedLocks).toHaveLength(2)
+        expect(harness.createDiffTrigger).toHaveBeenCalledOnce()
+        const when = harness.createDiffTrigger.mock.calls[0]?.[0].when
+        expect(when?.INSERT).toContain(`electronics`)
+        expect(when?.INSERT).toContain(`clothing`)
+      } finally {
+        await harness.cleanup()
+        await Promise.all([
+          firstLoad?.catch(() => undefined),
+          secondLoad?.catch(() => undefined),
+        ])
       }
     })
 
