@@ -3015,10 +3015,6 @@ describe(`Electric Integration`, () => {
         const load = Promise.resolve(
           testCollection._sync.loadSubset({ limit: 10 }),
         )
-        let loadSettled = false
-        void load.finally(() => {
-          loadSettled = true
-        })
         await vi.waitFor(() =>
           expect(mockRequestSnapshot).toHaveBeenCalledOnce(),
         )
@@ -3031,10 +3027,13 @@ describe(`Electric Integration`, () => {
           { headers: { control: `subset-end` } },
         ])
         request.resolve()
-        await Promise.resolve()
-        await Promise.resolve()
 
-        expect(loadSettled).toBe(false)
+        const nextTurn = new Promise<`next-turn`>((resolve) =>
+          setTimeout(() => resolve(`next-turn`), 0),
+        )
+        await expect(
+          Promise.race([load.then(() => `load-settled` as const), nextTurn]),
+        ).resolves.toBe(`next-turn`)
         expect(testCollection.has(2)).toBe(false)
 
         persistence.resolve()
@@ -3048,6 +3047,43 @@ describe(`Electric Integration`, () => {
         request.resolve()
         persistence.resolve()
         await transaction.isPersisted.promise.catch(() => undefined)
+        await testCollection.cleanup()
+      }
+    })
+
+    it(`rejects when collection cancellation lands after request fulfillment but before applied settlement`, async () => {
+      const request = createDeferred<void>()
+      mockRequestSnapshot.mockReturnValueOnce(request.promise)
+      const collectionAbortController = new AbortController()
+      const testCollection = createCollection(
+        electricCollectionOptions({
+          id: `on-demand-post-request-collection-cancel-test`,
+          shapeOptions: {
+            url: `http://test-url`,
+            params: { table: `test_table` },
+            signal: collectionAbortController.signal,
+          },
+          syncMode: `on-demand`,
+          getKey: (item: Row) => item.id as number,
+          startSync: true,
+        }),
+      )
+
+      try {
+        const load = Promise.resolve(
+          testCollection._sync.loadSubset({ limit: 10 }),
+        )
+        await vi.waitFor(() =>
+          expect(mockRequestSnapshot).toHaveBeenCalledOnce(),
+        )
+
+        request.resolve()
+        queueMicrotask(() => collectionAbortController.abort())
+
+        await expect(load).rejects.toMatchObject({ name: `AbortError` })
+      } finally {
+        collectionAbortController.abort()
+        request.resolve()
         await testCollection.cleanup()
       }
     })
