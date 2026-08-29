@@ -411,7 +411,9 @@ reverse join demand can instead make a later matching row readable without
 claiming reusable ordered-prefix coverage for skipped rows. A second source may
 settle after a continuation is already in flight, so safe extra primary rows
 may become readable. None of these paths may change the direct result or let an
-exhaustible source leave a provable window under-filled.
+unsettled source region leave a provable window under-filled. A short result is
+valid only when authoritative completeness across every involved source region
+proves that no remaining row can contribute before the window boundary.
 
 Test adapters must obey the same boundary contract as production adapters. A
 mock that reports exhaustion must have made every matching source row readable

@@ -77,7 +77,7 @@ export function projectMultiSourceOrderedWindow(options: {
   const joinedPairKeys: Array<string> = []
   const demandedJoinKeys: Array<string> = []
   const seenJoinKeys = new Set<string>()
-  const targetSize = options.offset + options.limit
+  const targetSize = options.limit === 0 ? 0 : options.offset + options.limit
   const secondaryRows = [...options.secondaryRows].sort((left, right) =>
     left.key.localeCompare(right.key),
   )
