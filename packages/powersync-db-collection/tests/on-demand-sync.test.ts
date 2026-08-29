@@ -2604,7 +2604,10 @@ describe(`On-Demand Sync Mode`, () => {
       const db = await createDatabase()
       const startupError = new Error(`change observation failed`)
       vi.spyOn(db.logger, `error`).mockImplementation(() => {})
-      vi.spyOn(console, `error`).mockImplementation(() => {})
+      const consoleError = vi
+        .spyOn(console, `error`)
+        .mockImplementation(() => {})
+      onTestFinished(() => consoleError.mockRestore())
       vi.spyOn(db, `onChangeWithCallback`).mockImplementation(() => {
         throw startupError
       })
