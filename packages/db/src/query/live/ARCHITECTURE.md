@@ -403,12 +403,15 @@ page and leave the result window short.
 
 For an indexed ordered source above a join or later predicate, the visible
 window is the direct relational result: source order, then downstream
-operators, then top-K. Core must establish at least the shortest ordered source
-prefix that contains that result, advancing its cursor across source rows that
-the later relation rejects. A second source may settle after a continuation is
-already in flight, so safe extra primary rows may become readable. They do not
-change the top-K result or permit a shorter required prefix. Exhaustion may
-leave the window short; a non-exhausted source may not.
+operators, then offset and top-K. Core may prove that result with the shortest
+ordered source prefix, or with other authoritative active demands that
+establish all contributors which can precede the boundary. A forward scan
+advances its cursor across source rows that the later relation rejects. A
+reverse join demand can instead make a later matching row readable without
+claiming reusable ordered-prefix coverage for skipped rows. A second source may
+settle after a continuation is already in flight, so safe extra primary rows
+may become readable. None of these paths may change the direct result or let an
+exhaustible source leave a provable window under-filled.
 
 Test adapters must obey the same boundary contract as production adapters. A
 mock that reports exhaustion must have made every matching source row readable
