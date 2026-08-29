@@ -3163,6 +3163,7 @@ describe(`On-Demand Sync Mode`, () => {
         })
         let restartedSync: ReturnType<typeof startSync> | undefined
         let restartedLoad: Promise<void> | undefined
+        let restartedCleaned = false
 
         try {
           await vi.waitFor(() => expect(scheduler.count()).toBe(1))
@@ -3206,13 +3207,14 @@ describe(`On-Demand Sync Mode`, () => {
           }
 
           restartedSync.cleanup?.()
-          await vi.waitFor(() => {
-            expect(hookCleanups[1]).toHaveBeenCalledOnce()
-            expect(trackingHandles[0]!.dispose).toHaveBeenCalledOnce()
-          })
+          restartedSync.cleanup?.()
+          restartedCleaned = true
+          await new Promise((resolve) => setTimeout(resolve, 0))
+          expect(hookCleanups[1]).toHaveBeenCalledOnce()
+          expect(trackingHandles[0]!.dispose).toHaveBeenCalledOnce()
         } finally {
           stoppedSync.cleanup?.()
-          restartedSync?.cleanup?.()
+          if (!restartedCleaned) restartedSync?.cleanup?.()
           if (scheduler.count() > 0) await scheduler.waitAll()
           await Promise.allSettled([stoppedLoad, restartedLoad])
         }
