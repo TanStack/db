@@ -26,6 +26,7 @@ type SharedAbortLease = {
 
 type LogicalLoadReservation = {
   generation: number
+  invalidatesCoverage: boolean
   inflight?: InflightCall
 }
 
@@ -119,8 +120,16 @@ export class DeduplicatedLoadSubset {
   loadSubset = (
     options: LoadSubsetOptions,
   ): true | Promise<void | LoadSubsetResult> => {
-    const reservation = this.reserveOwner(options)
+    const reservation = this.reserveOwner(options, options.limit !== 0)
     try {
+      // A zero-width window has no rows to acquire and establishes no coverage.
+      // Keep only its logical reservation so reused option objects still
+      // release in invocation order without invalidating another request.
+      if (options.limit === 0) {
+        this.onDeduplicate?.(options)
+        return true
+      }
+
       return this.loadSubsetRequest(options, reservation)
     } catch (error) {
       this.removeOwnerReservation(options, reservation)
@@ -309,6 +318,7 @@ export class DeduplicatedLoadSubset {
     // still release that logical demand later, but it must not invalidate a
     // newer request that happens to use equivalent options.
     if (!reservation || reservation.generation !== this.generation) return
+    if (!reservation.invalidatesCoverage) return
 
     this.clearLoadedTracking()
     const inflight = reservation.inflight
@@ -339,8 +349,14 @@ export class DeduplicatedLoadSubset {
     this.generation++
   }
 
-  private reserveOwner(options: LoadSubsetOptions): LogicalLoadReservation {
-    const reservation = { generation: this.generation }
+  private reserveOwner(
+    options: LoadSubsetOptions,
+    invalidatesCoverage: boolean,
+  ): LogicalLoadReservation {
+    const reservation = {
+      generation: this.generation,
+      invalidatesCoverage,
+    }
     const reservations = this.ownerReservations.get(options)
     if (reservations) reservations.push(reservation)
     else this.ownerReservations.set(options, [reservation])

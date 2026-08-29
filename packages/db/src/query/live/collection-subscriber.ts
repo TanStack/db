@@ -442,7 +442,7 @@ export class CollectionSubscriber<
       subscription.setOrderByIndex(index, orderByInfo.expandSourceOrderTies)
 
       subscription.requestLimitedSnapshot({
-        limit: offset + limit,
+        limit: limit === 0 ? 0 : offset + limit,
         orderBy: normalizedOrderBy,
         trackLoadSubsetPromise: false,
         onLoadSubsetResult: handleLoadSubsetResult,
@@ -474,6 +474,10 @@ export class CollectionSubscriber<
 
     const { dataNeeded, index, offset, limit, refillFromResultDeficit } =
       orderByInfo
+
+    // The ordered subscription keeps its coordinator for later window changes,
+    // but an empty active window must not start continuation work.
+    if (limit === 0) return true
 
     if (!dataNeeded || !index) {
       // dataNeeded is not set when there's no index (e.g., non-ref expression

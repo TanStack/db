@@ -369,11 +369,13 @@ async function runMultiSourceOrderedScenario(
   let releaseDelayedSecondaryReceipts = false
   const secondaryPublicationGate = createDeferred<void>()
   const establishedPrimaryKeys = new Set<string>()
+  const committedPrimaryKeys = new Set<string>()
   const primaryKeysEstablishedByLoads = new Set<string>()
   const establishedSecondaryKeys = new Set<string>()
   let primaryOrderedCallCount = 0
   let primaryOrderedCallCountAtSecondaryRelease: number | undefined
   let primaryKeysAtSecondaryRelease: ReadonlyArray<string> | undefined
+  let primaryCommittedKeysAtSecondaryRelease: ReadonlyArray<string> | undefined
   let primaryKeysBeforeSecondaryPublication: ReadonlyArray<string> | undefined
   let primaryBegin!: () => void
   let primaryWrite!: (message: { type: `insert`; value: PrimaryRow }) => void
@@ -392,12 +394,14 @@ async function runMultiSourceOrderedScenario(
     }
     const applied = primaryCommit()
     if (applied !== true) await applied
+    for (const row of freshRows) committedPrimaryKeys.add(row.id)
     return freshRows.map(({ id }) => id)
   }
 
   const releaseSecondaryPublication = (): void => {
     primaryOrderedCallCountAtSecondaryRelease ??= primaryOrderedCallCount
     primaryKeysAtSecondaryRelease ??= [...new Set(primaryOrderedVisitedKeys)]
+    primaryCommittedKeysAtSecondaryRelease ??= [...committedPrimaryKeys]
     secondaryPublicationGate.resolve()
   }
   if (scenario.limit === 0) secondaryPublicationGate.resolve()
@@ -601,10 +605,21 @@ async function runMultiSourceOrderedScenario(
 
   try {
     const preload = live.preload()
+    let preloadSettled = false
+    void preload.then(
+      () => {
+        preloadSettled = true
+      },
+      () => {
+        preloadSettled = true
+      },
+    )
     if (scenario.secondaryPublication === `preloaded-delayed-receipt`) {
       await flushPromises()
       if (scenario.secondaryRows.length > 0 && scenario.limit > 0) {
         expect(delayedSecondaryReceiptWaiters.length).toBeGreaterThan(0)
+        expect(preloadSettled).toBe(false)
+        expect(live.isReady()).toBe(false)
       }
       releaseDelayedSecondaryReceipts = true
       for (const waiter of [...delayedSecondaryReceiptWaiters].reverse()) {
@@ -614,12 +629,22 @@ async function runMultiSourceOrderedScenario(
     }
     await preload
     await flushPromises()
+    expect(preloadSettled).toBe(true)
 
     expect(
       live.toArray.map(
         ({ primaryRow, secondaryRow }) => `${primaryRow.id}:${secondaryRow.id}`,
       ),
     ).toEqual(projection.visiblePairKeys)
+
+    const initialPrimaryCallCount = primaryCalls.length
+    if (scenario.limit === 0) {
+      expect(
+        primaryCalls
+          .slice(0, initialPrimaryCallCount)
+          .filter(({ orderBy }) => orderBy !== undefined),
+      ).toEqual([])
+    }
 
     const refinedOffset = scenario.offset === 0 ? 1 : 0
     const refinedLimit = scenario.limit === 0 ? 1 : scenario.limit + 1
@@ -645,6 +670,16 @@ async function runMultiSourceOrderedScenario(
         ({ primaryRow, secondaryRow }) => `${primaryRow.id}:${secondaryRow.id}`,
       ),
     ).toEqual(refinedProjection.visiblePairKeys)
+
+    const primaryCallsBeforeZeroShrink = primaryCalls.length
+    await live.utils.setWindow({ offset: 2, limit: 0 })
+    await flushPromises()
+    expect(live.toArray).toEqual([])
+    expect(
+      primaryCalls
+        .slice(primaryCallsBeforeZeroShrink)
+        .filter(({ orderBy }) => orderBy !== undefined),
+    ).toEqual([])
 
     if (scenario.limit > 0) {
       expect(primaryCalls.some(({ orderBy }) => orderBy !== undefined)).toBe(
@@ -746,6 +781,9 @@ async function runMultiSourceOrderedScenario(
     if (scenario.secondaryPublication === `after-primary-continuation`) {
       if (scenario.limit > 0) {
         expect(primaryOrderedCallCountAtSecondaryRelease).toBe(2)
+        expect(primaryCommittedKeysAtSecondaryRelease).toEqual(
+          expect.arrayContaining(primaryOrderedVisitedKeys.slice(0, 2)),
+        )
         expect(primaryKeysBeforeSecondaryPublication?.length).toBe(2)
       }
     }
@@ -857,6 +895,71 @@ it.each([
   })
 })
 
+it(`keeps an Effect zero-limit join free of ordered transport work`, async () => {
+  type PrimaryRow = { id: string; rank: number; joinKey: string }
+  type SecondaryRow = { id: string; joinKey: string }
+  const primaryLoads: Array<LoadSubsetOptions> = []
+  const primary = createCollection<PrimaryRow>({
+    id: `multi-source-zero-limit-effect-primary`,
+    getKey: (row) => row.id,
+    syncMode: `on-demand`,
+    startSync: true,
+    autoIndex: `eager`,
+    defaultIndexType: BTreeIndex,
+    sync: {
+      sync: ({ markReady }) => {
+        markReady()
+        return {
+          loadSubset: (options) => {
+            primaryLoads.push(options)
+            return true
+          },
+          unloadSubset: () => {},
+        }
+      },
+    },
+  })
+  const secondary = createCollection<SecondaryRow>({
+    id: `multi-source-zero-limit-effect-secondary`,
+    getKey: (row) => row.id,
+    syncMode: `on-demand`,
+    startSync: true,
+    autoIndex: `eager`,
+    defaultIndexType: BTreeIndex,
+    sync: {
+      sync: ({ markReady }) => {
+        markReady()
+        return {
+          loadSubset: () => true,
+          unloadSubset: () => {},
+        }
+      },
+    },
+  })
+  const effect = createEffect({
+    query: (q) =>
+      q
+        .from({ primaryRow: primary })
+        .innerJoin(
+          { secondaryRow: secondary },
+          ({ primaryRow, secondaryRow }) =>
+            eq(primaryRow.joinKey, secondaryRow.joinKey),
+        )
+        .orderBy(({ primaryRow }) => primaryRow.rank)
+        .offset(2)
+        .limit(0),
+    onBatch: () => {},
+  })
+
+  try {
+    await flushPromises()
+    expect(primaryLoads).toEqual([])
+  } finally {
+    await effect.dispose()
+    await Promise.all([primary.cleanup(), secondary.cleanup()])
+  }
+})
+
 it(`settles concurrent secondary loads out of order across paged commits`, async () => {
   type PrimaryRow = { id: string; rank: number; joinKey: string }
   type SecondaryRow = { id: string; joinKey: string }
@@ -888,7 +991,10 @@ it(`settles concurrent secondary loads out of order across paged commits`, async
   ]
   const pendingSecondaryLoads: Array<PendingSecondaryLoad> = []
   const secondaryCompletionOrder: Array<number> = []
-  const secondaryReceipts: Array<ReadonlyArray<string>> = []
+  const secondaryReceipts: Array<{
+    requestIndex: number
+    appliedRowKeys: ReadonlyArray<string>
+  }> = []
   const secondaryLoadCommitSizes: Array<number> = []
   let secondaryBegin!: () => void
   let secondaryWrite!: (message: {
@@ -951,7 +1057,10 @@ it(`settles concurrent secondary loads out of order across paged commits`, async
               appliedRowKeys.push(row.id)
             }
             secondaryCompletionOrder.push(pending.requestIndex)
-            secondaryReceipts.push(appliedRowKeys)
+            secondaryReceipts.push({
+              requestIndex: pending.requestIndex,
+              appliedRowKeys,
+            })
             return { hasMore: false, appliedRowKeys }
           },
           unloadSubset: () => {},
@@ -998,9 +1107,20 @@ it(`settles concurrent secondary loads out of order across paged commits`, async
 
     expect(secondaryCompletionOrder).toEqual([1, 0])
     expect(secondaryLoadCommitSizes).toEqual([1, 1, 1, 1, 1])
-    expect(new Set(secondaryReceipts.flat())).toEqual(
+    expect(secondaryReceipts.map(({ requestIndex }) => requestIndex)).toEqual([
+      1, 0,
+    ])
+    const claimedSecondaryKeys = secondaryReceipts.flatMap(
+      ({ appliedRowKeys }) => appliedRowKeys,
+    )
+    expect(new Set(claimedSecondaryKeys).size).toBe(claimedSecondaryKeys.length)
+    expect(new Set(claimedSecondaryKeys)).toEqual(
       new Set(secondaryRows.map(({ id }) => id)),
     )
+    expect(secondaryReceipts[0]?.appliedRowKeys).toEqual(
+      [...secondaryRows].reverse().map(({ id }) => id),
+    )
+    expect(secondaryReceipts[1]?.appliedRowKeys).toEqual([])
     expect(
       liveA.toArray.map(
         ({ primaryRow, secondaryRow }) => `${primaryRow.id}:${secondaryRow.id}`,

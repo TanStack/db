@@ -961,7 +961,7 @@ class EffectPipelineRunner<TRow extends object, TKey extends string | number> {
     if (index) {
       subscription.setOrderByIndex(index, orderByInfo.expandSourceOrderTies)
       subscription.requestLimitedSnapshot({
-        limit: offset + limit,
+        limit: limit === 0 ? 0 : offset + limit,
         orderBy: normalizedOrderBy,
         trackLoadSubsetPromise: false,
         onLoadSubsetResult: (result) =>
@@ -997,7 +997,7 @@ class EffectPipelineRunner<TRow extends object, TKey extends string | number> {
       this.optimizableOrderByCollections,
     )) {
       if (!orderByInfo.dataNeeded || !orderByInfo.index) continue
-
+      if (orderByInfo.limit === 0) continue
       const subscription = this.subscriptions[orderByInfo.sourceId]
       if (!subscription) continue
       subscription.ensureOrderedWindowSize(

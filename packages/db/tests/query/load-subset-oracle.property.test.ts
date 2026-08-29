@@ -2164,14 +2164,37 @@ describe(`loadSubset coverage oracle`, () => {
     ),
   )
 
-  it(
-    `discovered trace: an empty ordered window issues no transport work`,
-    expectExactCountFailure(
-      () => countWindowLoads([{ direction: `asc`, offset: 0, limit: 0 }]),
-      1,
+  it(`an empty ordered window issues no transport work`, () => {
+    expect(countWindowLoads([{ direction: `asc`, offset: 0, limit: 0 }])).toBe(
       0,
-    ),
-  )
+    )
+  })
+
+  it(`releases a reused zero-window owner without invalidating later coverage`, () => {
+    let loads = 0
+    const dedupe = new DeduplicatedLoadSubset({
+      loadSubset: () => {
+        loads++
+        return true
+      },
+    })
+    const reusedOptions = toWindowOptions({
+      direction: `asc`,
+      offset: 0,
+      limit: 0,
+    })
+
+    expect(dedupe.loadSubset(reusedOptions)).toBe(true)
+    reusedOptions.limit = 1
+    expect(dedupe.loadSubset(reusedOptions)).toBe(true)
+    dedupe.unloadSubset(reusedOptions)
+    expect(
+      dedupe.loadSubset(
+        toWindowOptions({ direction: `asc`, offset: 0, limit: 1 }),
+      ),
+    ).toBe(true)
+    expect(loads).toBe(1)
+  })
 
   it(
     `discovered trace: an empty filtered window issues no transport work`,

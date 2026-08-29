@@ -686,6 +686,13 @@ continuing page establishes neither fact, core leaves the window uncovered,
 does not repeat the same request, and records a nonfatal no-progress diagnostic
 in `lastSubsetError`.
 
+An ordered window with an active limit of zero creates no ordered transport
+demand. Its coordinator remains alive so a later window change can load from
+the same order, but neither the initial offset nor a result deficit may turn
+the empty window into a positive request. The dedupe helper applies the same
+law when adapters call it directly: a zero-width request establishes no
+coverage and owns no physical acquisition.
+
 Live Collections and Effects keep separate consumer-local continuation state,
 but obey the same identity and reset law. A settled request remains the
 no-progress guard until its demanded prefix or total-order boundary changes;
