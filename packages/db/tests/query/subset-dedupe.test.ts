@@ -384,6 +384,79 @@ describe(`createDeduplicatedLoadSubset`, () => {
     expect(loadSubset).toHaveBeenCalledTimes(2)
   })
 
+  it.each([`reset`, `rejection`] as const)(
+    `keeps newer exact in-flight work when an older owner unloads after %s`,
+    async (oldOutcome) => {
+      const pending: Array<{
+        resolve: () => void
+        reject: (error: Error) => void
+      }> = []
+      const loadSubset = vi.fn(
+        () =>
+          new Promise<void>((resolve, reject) => {
+            pending.push({ resolve, reject })
+          }),
+      )
+      const deduplicated = new DeduplicatedLoadSubset({ loadSubset })
+      const reusedOptions = { limit: 2 }
+      const oldLoad = deduplicated.loadSubset(reusedOptions)
+
+      if (oldOutcome === `reset`) {
+        deduplicated.reset()
+      } else {
+        const rejected = expect(oldLoad).rejects.toThrow(`old failed`)
+        pending[0]!.reject(new Error(`old failed`))
+        await rejected
+      }
+
+      const freshLoad = deduplicated.loadSubset(reusedOptions)
+      deduplicated.unloadSubset(reusedOptions)
+      const peerLoad = deduplicated.loadSubset({ limit: 2 })
+
+      expect(loadSubset).toHaveBeenCalledTimes(2)
+      pending[1]!.resolve()
+      if (oldOutcome === `reset`) {
+        pending[0]!.resolve()
+        await oldLoad
+      }
+      await Promise.all([freshLoad, peerLoad])
+    },
+  )
+
+  it(`keeps shared exact in-flight work while another logical owner remains`, async () => {
+    let resolveLoad: (() => void) | undefined
+    const loadSubset = vi.fn(
+      () => new Promise<void>((resolve) => (resolveLoad = resolve)),
+    )
+    const deduplicated = new DeduplicatedLoadSubset({ loadSubset })
+    const firstOptions = { limit: 2 }
+    const first = deduplicated.loadSubset(firstOptions)
+    const second = deduplicated.loadSubset({ limit: 2 })
+
+    deduplicated.unloadSubset(firstOptions)
+    const peer = deduplicated.loadSubset({ limit: 2 })
+
+    expect(loadSubset).toHaveBeenCalledTimes(1)
+    resolveLoad?.()
+    await Promise.all([first, second, peer])
+  })
+
+  it(`ignores an unload that has no matching logical owner`, async () => {
+    let resolveLoad: (() => void) | undefined
+    const loadSubset = vi.fn(
+      () => new Promise<void>((resolve) => (resolveLoad = resolve)),
+    )
+    const deduplicated = new DeduplicatedLoadSubset({ loadSubset })
+    const load = deduplicated.loadSubset({ limit: 2 })
+
+    deduplicated.unloadSubset({ limit: 2 })
+    const peer = deduplicated.loadSubset({ limit: 2 })
+
+    expect(loadSubset).toHaveBeenCalledTimes(1)
+    resolveLoad?.()
+    await Promise.all([load, peer])
+  })
+
   it(`shares in-flight work while any cancellation owner remains active`, async () => {
     let resolveLoad: (() => void) | undefined
     let sharedSignal: AbortSignal | undefined

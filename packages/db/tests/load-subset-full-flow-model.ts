@@ -311,6 +311,78 @@ export type ExpectedAdapterLifecycleEvent = {
   ownerId: FullFlowOwnerId
 }
 
+type DemandAttemptRecord = {
+  ownerId: FullFlowOwnerId
+  demandId: FullFlowDemandId
+  settled: boolean
+  released: boolean
+}
+
+/** Reject histories that cannot name logical demand attempts unambiguously. */
+function assertWellFormedDemandAttempts(
+  history: ReadonlyArray<LoadSubsetFullFlowEvent>,
+): void {
+  const attempts = new Map<FullFlowAttemptId, DemandAttemptRecord>()
+
+  for (const event of history) {
+    if (event.type === `requestDemand`) {
+      if (attempts.has(event.attemptId)) {
+        throw new Error(
+          `Demand attempt "${event.attemptId}" was requested more than once`,
+        )
+      }
+      attempts.set(event.attemptId, {
+        ownerId: event.ownerId,
+        demandId: event.demandId,
+        settled: false,
+        released: false,
+      })
+      continue
+    }
+
+    const usesDemandAttempt =
+      event.type === `applyAuthoritativeRows` ||
+      event.type === `applyUnprovenRows` ||
+      event.type === `rejectDemand` ||
+      event.type === `settleDemandWithoutEvidence` ||
+      event.type === `releaseDemand`
+    if (!usesDemandAttempt) continue
+
+    const attempt = attempts.get(event.attemptId)
+    if (!attempt) {
+      throw new Error(
+        `Demand attempt "${event.attemptId}" was used before it was requested`,
+      )
+    }
+    if (attempt.demandId !== event.demandId) {
+      throw new Error(
+        `Demand attempt "${event.attemptId}" changed its demand identity`,
+      )
+    }
+    if (`ownerId` in event && attempt.ownerId !== event.ownerId) {
+      throw new Error(
+        `Demand attempt "${event.attemptId}" changed its owner identity`,
+      )
+    }
+
+    if (event.type === `releaseDemand`) {
+      if (attempt.released) {
+        throw new Error(
+          `Demand attempt "${event.attemptId}" was released more than once`,
+        )
+      }
+      attempt.released = true
+    } else {
+      if (attempt.settled) {
+        throw new Error(
+          `Demand attempt "${event.attemptId}" settled more than once`,
+        )
+      }
+      attempt.settled = true
+    }
+  }
+}
+
 /**
  * Projects logical adapter callback obligations.
  *
@@ -348,6 +420,7 @@ export function projectAdapterLifecycle(
 export function projectTransportLoads(
   history: ReadonlyArray<LoadSubsetFullFlowEvent>,
 ): number {
+  assertWellFormedDemandAttempts(history)
   const reusableDemands = new Map<FullFlowDemandId, FullFlowAttemptId>()
   const inFlightDemands = new Map<FullFlowDemandId, FullFlowAttemptId>()
   let loads = 0
@@ -516,6 +589,7 @@ export function projectAuthorizedContinuationStarts(
 export function projectReusableDemands(
   history: ReadonlyArray<LoadSubsetFullFlowEvent>,
 ): Array<FullFlowDemandId> {
+  assertWellFormedDemandAttempts(history)
   const reusableDemands = new Map<FullFlowDemandId, FullFlowAttemptId>()
   const attemptEpochs = new Map<FullFlowAttemptId, number>()
   let sourceEpoch = 0

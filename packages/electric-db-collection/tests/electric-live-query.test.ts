@@ -1211,9 +1211,9 @@ describe(`Electric Collection - loadSubset deduplication`, () => {
     // Wait for the existing live query to re-request data after truncate
     await new Promise((resolve) => setTimeout(resolve, 0))
 
-    // Truncate replays the exact demand once. Electric does not yet return an
-    // applied outcome, so the empty local prefix then requests one refill.
-    expect(mockRequestSnapshot).toHaveBeenCalledTimes(3)
+    // Truncate replays the exact demand once. Releasing the old acquisition
+    // must not discard that replacement while it is still owned.
+    expect(mockRequestSnapshot).toHaveBeenCalledTimes(2)
 
     // Create the same live query again after reset
     // This should NOT be deduped because the reset cleared the deduplication state,
@@ -1231,9 +1231,9 @@ describe(`Electric Collection - loadSubset deduplication`, () => {
 
     await new Promise((resolve) => setTimeout(resolve, 0))
 
-    // Should have more calls - the different query triggered a new request
-    // 1 initial + 1 replay + 1 outcome-free refill + 1 new query = 4
-    expect(mockRequestSnapshot).toHaveBeenCalledTimes(4)
+    // The different query triggers one more physical request.
+    // 1 initial + 1 replay + 1 new query = 3
+    expect(mockRequestSnapshot).toHaveBeenCalledTimes(3)
   })
 
   it(`should deduplicate unlimited queries regardless of orderBy`, async () => {

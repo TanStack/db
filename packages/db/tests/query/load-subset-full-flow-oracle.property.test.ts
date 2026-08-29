@@ -383,14 +383,22 @@ async function runTruncateCoverageScenario(
   }
 }
 
-it.each([`authoritative`, `unproven`, `rejected`] as const)(
+it.each([
+  `authoritative`,
+  `unproven`,
+  `rejected`,
+  `evidence-free`,
+  `released`,
+] as const)(
   `keeps fresh exact-demand work shared after a pre-truncate %s request settles`,
   async (oldOutcome) => {
     type Row = { id: string; value: number }
-    type AdapterResult = {
-      hasMore: boolean | undefined
-      appliedRowKeys: ReadonlyArray<string>
-    }
+    type AdapterResult =
+      | {
+          hasMore: boolean | undefined
+          appliedRowKeys: ReadonlyArray<string>
+        }
+      | undefined
     let begin!: () => void
     let write!: (message: { type: `insert`; value: Row }) => void
     let commit!: () => true | Promise<void>
@@ -417,6 +425,7 @@ it.each([`authoritative`, `unproven`, `rejected`] as const)(
           params.markReady()
           return {
             loadSubset: deduplicated.loadSubset,
+            unloadSubset: deduplicated.unloadSubset,
           }
         },
       },
@@ -446,10 +455,15 @@ it.each([`authoritative`, `unproven`, `rejected`] as const)(
       if (freshLoad === true) throw new Error(`Expected an async fresh request`)
       expect(pending).toHaveLength(2)
 
-      if (oldOutcome === `rejected`) {
+      if (oldOutcome === `released`) {
+        source._sync.unloadSubset(oldOptions)
+      } else if (oldOutcome === `rejected`) {
         const rejection = expect(oldLoad).rejects.toThrow(`old request failed`)
         pending[0]!.reject(new Error(`old request failed`))
         await rejection
+      } else if (oldOutcome === `evidence-free`) {
+        pending[0]!.resolve(undefined)
+        await oldLoad
       } else {
         await applyRows([{ id: `old-row`, value: 1 }])
         pending[0]!.resolve({
@@ -471,6 +485,10 @@ it.each([`authoritative`, `unproven`, `rejected`] as const)(
       })
       await Promise.all([freshLoad, peerLoad])
       expect(source._sync.getLoadSubsetOutcome(peerOptions)).toBeDefined()
+      if (oldOutcome === `released`) {
+        pending[0]!.resolve(undefined)
+        await oldLoad
+      }
     } finally {
       for (const request of pending) {
         request.reject(new Error(`test cleanup`))

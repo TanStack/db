@@ -421,6 +421,127 @@ it(`does not rebuild coverage when a released attempt settles after its replacem
   ).toEqual([])
 })
 
+it(`keeps fresh same-epoch work shared after an older rejected attempt releases`, () => {
+  const oldRequest: LoadSubsetFullFlowEvent = {
+    type: `requestDemand`,
+    ownerId: `old-owner`,
+    sessionId: `session`,
+    demandId: `exact-demand`,
+    attemptId: `old-attempt`,
+    alreadyAborted: false,
+  }
+  const freshRequest: LoadSubsetFullFlowEvent = {
+    type: `requestDemand`,
+    ownerId: `fresh-owner`,
+    sessionId: `session`,
+    demandId: `exact-demand`,
+    attemptId: `fresh-attempt`,
+    alreadyAborted: false,
+  }
+
+  expect(
+    projectTransportLoads([
+      oldRequest,
+      {
+        type: `rejectDemand`,
+        ownerId: `old-owner`,
+        demandId: `exact-demand`,
+        attemptId: `old-attempt`,
+      },
+      freshRequest,
+      {
+        type: `releaseDemand`,
+        ownerId: `old-owner`,
+        demandId: `exact-demand`,
+        attemptId: `old-attempt`,
+        rowKeys: [],
+        finalRowOwner: true,
+        invalidatesAdapterEvidence: true,
+      },
+      {
+        ...freshRequest,
+        ownerId: `peer-owner`,
+        attemptId: `peer-attempt`,
+      },
+    ]),
+  ).toBe(2)
+})
+
+it(`rejects histories that reuse one demand attempt identity`, () => {
+  const history: Array<LoadSubsetFullFlowEvent> = [
+    {
+      type: `requestDemand`,
+      ownerId: `old-owner`,
+      sessionId: `session`,
+      demandId: `exact-demand`,
+      attemptId: `reused-attempt`,
+      alreadyAborted: false,
+    },
+    {
+      type: `releaseDemand`,
+      ownerId: `old-owner`,
+      demandId: `exact-demand`,
+      attemptId: `reused-attempt`,
+      rowKeys: [],
+      finalRowOwner: true,
+      invalidatesAdapterEvidence: true,
+    },
+    {
+      type: `requestDemand`,
+      ownerId: `fresh-owner`,
+      sessionId: `session`,
+      demandId: `exact-demand`,
+      attemptId: `reused-attempt`,
+      alreadyAborted: false,
+    },
+    {
+      type: `applyAuthoritativeRows`,
+      ownerId: `old-owner`,
+      demandId: `exact-demand`,
+      attemptId: `reused-attempt`,
+      rowKeys: [`stale-row`],
+    },
+  ]
+
+  expect(() => projectTransportLoads(history)).toThrow(
+    `Demand attempt "reused-attempt" was requested more than once`,
+  )
+  expect(() => projectReusableDemands(history)).toThrow(
+    `Demand attempt "reused-attempt" was requested more than once`,
+  )
+})
+
+it(`rejects histories that settle one demand attempt twice`, () => {
+  const history: Array<LoadSubsetFullFlowEvent> = [
+    {
+      type: `requestDemand`,
+      ownerId: `owner`,
+      sessionId: `session`,
+      demandId: `demand`,
+      attemptId: `attempt`,
+      alreadyAborted: false,
+    },
+    {
+      type: `settleDemandWithoutEvidence`,
+      demandId: `demand`,
+      attemptId: `attempt`,
+    },
+    {
+      type: `rejectDemand`,
+      ownerId: `owner`,
+      demandId: `demand`,
+      attemptId: `attempt`,
+    },
+  ]
+
+  expect(() => projectTransportLoads(history)).toThrow(
+    `Demand attempt "attempt" settled more than once`,
+  )
+  expect(() => projectReusableDemands(history)).toThrow(
+    `Demand attempt "attempt" settled more than once`,
+  )
+})
+
 function renameHistoryIds(
   history: ReadonlyArray<LoadSubsetFullFlowEvent>,
   suffix: string,
@@ -594,6 +715,22 @@ for (const campaign of refinementCampaigns(1_779_003)) {
         { type: `runContinuation`, taskId: `task` },
       ]
 
+      const evidenceFreeHistory: Array<LoadSubsetFullFlowEvent> = [
+        {
+          type: `requestDemand`,
+          ownerId: `evidence-free-owner`,
+          sessionId: `session`,
+          demandId: `evidence-free-demand`,
+          attemptId: `evidence-free-attempt`,
+          alreadyAborted: false,
+        },
+        {
+          type: `settleDemandWithoutEvidence`,
+          demandId: `evidence-free-demand`,
+          attemptId: `evidence-free-attempt`,
+        },
+      ]
+
       const renamedDemand = renameHistoryIds(demandHistory, suffix)
       expect(
         renamedDemand.flatMap((event) =>
@@ -604,6 +741,14 @@ for (const campaign of refinementCampaigns(1_779_003)) {
           `attemptId` in event ? [`${event.attemptId}-${suffix}`] : [],
         ),
       )
+      expect(
+        renameHistoryIds(evidenceFreeHistory, suffix).flatMap((event) =>
+          `attemptId` in event ? [event.attemptId] : [],
+        ),
+      ).toEqual([
+        `evidence-free-attempt-${suffix}`,
+        `evidence-free-attempt-${suffix}`,
+      ])
       expect(projectTransportLoads(renamedDemand)).toBe(
         projectTransportLoads(demandHistory),
       )
