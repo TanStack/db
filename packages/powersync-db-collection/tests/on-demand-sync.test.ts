@@ -2538,15 +2538,18 @@ describe(`On-Demand Sync Mode`, () => {
     function queueWriteLocks(
       db: PowerSyncDatabase,
       scheduler?: Scheduler,
+      invocationOrder?: Array<string>,
     ) {
       const queued: Array<() => Promise<void>> = []
       vi.spyOn(db, `writeLock`).mockImplementation(
         (callback) =>
           new Promise((resolve, reject) => {
             let started = false
+            const label = `write-lock-${queued.length + 1}`
             const run = async () => {
               if (started) return
               started = true
+              invocationOrder?.push(label)
               try {
                 const result = await callback({} as never)
                 resolve(result as never)
@@ -2557,7 +2560,7 @@ describe(`On-Demand Sync Mode`, () => {
             queued.push(run)
             if (scheduler) {
               void scheduler
-                .schedule(Promise.resolve(), `write-lock-${queued.length}`)
+                .schedule(Promise.resolve(), label)
                 .then(run)
             }
           }) as never,
@@ -3083,6 +3086,136 @@ describe(`On-Demand Sync Mode`, () => {
           outcome,
           expectedActionOrder,
         )
+      },
+    )
+
+    it.each([
+      {
+        name: `the stopped callback runs before the restarted callback`,
+        order: [1, 2],
+        expectedInvocationOrder: [`write-lock-1`, `write-lock-2`],
+      },
+      {
+        name: `the restarted callback runs before the stopped callback`,
+        order: [2, 1],
+        expectedInvocationOrder: [`write-lock-2`, `write-lock-1`],
+      },
+    ])(
+      `keeps a restarted sync isolated when $name`,
+      async ({ order, expectedInvocationOrder }) => {
+        const scheduler = fc.schedulerFor(order)
+        const db = await createDatabase()
+        const invocationOrder: Array<string> = []
+        queueWriteLocks(db, scheduler, invocationOrder)
+        vi.spyOn(db, `getAll`).mockResolvedValue([])
+
+        const hookCleanups: Array<ReturnType<typeof vi.fn>> = []
+        const onLoadSubset = vi.fn(() => {
+          const cleanup = vi.fn()
+          hookCleanups.push(cleanup)
+          return cleanup
+        })
+        const trackingHandles: Array<{
+          when: Record<`INSERT` | `UPDATE` | `DELETE`, string>
+          dispose: ReturnType<typeof vi.fn>
+        }> = []
+        const createDiffTrigger = vi
+          .spyOn(db.triggers, `createDiffTrigger`)
+          .mockImplementation(({ when }) => {
+            const dispose = vi.fn(() => Promise.resolve())
+            trackingHandles.push({
+              when: when as Record<`INSERT` | `UPDATE` | `DELETE`, string>,
+              dispose,
+            })
+            return Promise.resolve(dispose)
+          })
+        const config = powerSyncCollectionOptions({
+          database: db,
+          table: APP_SCHEMA.props.products,
+          syncMode: `on-demand`,
+          onLoadSubset,
+        })
+        const startSync = () => {
+          const started = config.sync.sync({
+            collection: { status: `ready`, has: () => false },
+            begin: vi.fn(),
+            write: vi.fn(),
+            commit: () => true,
+            markReady: vi.fn(),
+            markError: vi.fn(),
+            truncate: vi.fn(),
+          } as never)
+          if (!started || typeof started === `function` || !started.loadSubset) {
+            throw new Error(`Expected on-demand sync controls`)
+          }
+          return started
+        }
+
+        const stoppedSync = startSync()
+        let stoppedSettled = false
+        let restartedSettled = false
+        const stoppedLoad = Promise.resolve(
+          stoppedSync.loadSubset!({
+            where: eq(`category`, `electronics`),
+          }),
+        ).then(() => {
+          stoppedSettled = true
+        })
+        let restartedSync: ReturnType<typeof startSync> | undefined
+        let restartedLoad: Promise<void> | undefined
+
+        try {
+          await vi.waitFor(() => expect(scheduler.count()).toBe(1))
+          stoppedSync.cleanup?.()
+
+          restartedSync = startSync()
+          restartedLoad = Promise.resolve(
+            restartedSync.loadSubset!({
+              where: eq(`category`, `clothing`),
+            }),
+          ).then(() => {
+            restartedSettled = true
+          })
+          await vi.waitFor(() => expect(scheduler.count()).toBe(2))
+          expect(stoppedSettled).toBe(false)
+          expect(restartedSettled).toBe(false)
+
+          await scheduler.waitOne()
+          const stoppedRunsFirst = order[0] === 1
+          await vi.waitFor(() => {
+            expect(stoppedSettled).toBe(stoppedRunsFirst)
+            expect(restartedSettled).toBe(!stoppedRunsFirst)
+          })
+
+          await scheduler.waitFor(
+            Promise.all([stoppedLoad, restartedLoad]),
+          )
+          await drainScheduledLifecycle(scheduler)
+
+          expect(invocationOrder).toEqual(expectedInvocationOrder)
+          expect(hookCleanups[0]).toHaveBeenCalledOnce()
+          expect(hookCleanups[1]).not.toHaveBeenCalled()
+          expect(createDiffTrigger).toHaveBeenCalledOnce()
+          expect(trackingHandles).toHaveLength(1)
+          expect(trackingHandles[0]!.dispose).not.toHaveBeenCalled()
+          for (const operation of [`INSERT`, `UPDATE`, `DELETE`] as const) {
+            expect(trackingHandles[0]!.when[operation]).toContain(`clothing`)
+            expect(trackingHandles[0]!.when[operation]).not.toContain(
+              `electronics`,
+            )
+          }
+
+          restartedSync.cleanup?.()
+          await vi.waitFor(() => {
+            expect(hookCleanups[1]).toHaveBeenCalledOnce()
+            expect(trackingHandles[0]!.dispose).toHaveBeenCalledOnce()
+          })
+        } finally {
+          stoppedSync.cleanup?.()
+          restartedSync?.cleanup?.()
+          if (scheduler.count() > 0) await scheduler.waitAll()
+          await Promise.allSettled([stoppedLoad, restartedLoad])
+        }
       },
     )
 
