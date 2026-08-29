@@ -552,6 +552,29 @@ describe(`createDeduplicatedLoadSubset`, () => {
     expect(loadSubset).toHaveBeenCalledTimes(3)
   })
 
+  it(`rolls back the exact throw behind an older stale owner`, () => {
+    const loadSubset = vi
+      .fn<LoadSubsetFn>()
+      .mockReturnValueOnce(true)
+      .mockImplementationOnce(() => {
+        throw new Error(`replacement start failed`)
+      })
+      .mockReturnValue(true)
+    const deduplicated = new DeduplicatedLoadSubset({ loadSubset })
+    const reusedOptions = { limit: 2 }
+
+    expect(deduplicated.loadSubset(reusedOptions)).toBe(true)
+    deduplicated.reset()
+    expect(() => deduplicated.loadSubset(reusedOptions)).toThrow(
+      `replacement start failed`,
+    )
+    expect(deduplicated.loadSubset(reusedOptions)).toBe(true)
+    deduplicated.unloadSubset(reusedOptions)
+    expect(deduplicated.loadSubset({ limit: 2 })).toBe(true)
+
+    expect(loadSubset).toHaveBeenCalledTimes(3)
+  })
+
   it(`consumes a stale owner before releasing a fresh reused owner`, () => {
     const loadSubset = vi
       .fn<LoadSubsetFn>()
