@@ -454,6 +454,49 @@ describe(`On-Demand Sync Mode`, () => {
     },
   )
 
+  it.each([
+    { receiptIndex: 0 },
+    { receiptIndex: 1 },
+    { receiptIndex: 2 },
+    { receiptIndex: 3 },
+  ])(
+    `fails fast at applied receipt $receiptIndex while later receipts remain pending`,
+    async ({ receiptIndex }) => {
+      const harness = await startAppliedOutcomeLoad(`rows`, 1)
+      const receiptFailure = new Error(
+        `applied receipt ${receiptIndex} failed before its suffix settled`,
+      )
+
+      try {
+        await vi.waitFor(() =>
+          expect(harness.receipts).toHaveLength(
+            harness.authoritativeRows.length + 1,
+          ),
+        )
+        expect(receiptIndex).toBeLessThan(harness.receipts.length)
+
+        harness.receipts
+          .slice(0, receiptIndex)
+          .forEach((receipt) => receipt.resolve())
+        const expectedRows = harness.authoritativeRows.slice(0, receiptIndex)
+        await vi.waitFor(() =>
+          expect(harness.readableRows.size).toBe(expectedRows.length),
+        )
+
+        harness.receipts[receiptIndex]!.reject(receiptFailure)
+        await expect(harness.observed).resolves.toEqual({
+          status: `rejected`,
+          reason: receiptFailure,
+        })
+        expect(
+          Array.from(harness.readableRows.values(), (row) => row.name).sort(),
+        ).toEqual(expectedRows.map((row) => row.name).sort())
+      } finally {
+        await harness.cleanup()
+      }
+    },
+  )
+
   it.each([`rows`, `empty`] as const)(
     `accepts an immediate applied outcome for a %s subset`,
     async (source) => {
