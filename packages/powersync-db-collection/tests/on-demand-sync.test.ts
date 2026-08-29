@@ -1,6 +1,7 @@
 import { randomUUID } from 'node:crypto'
 import { tmpdir } from 'node:os'
 import { PowerSyncDatabase, Schema, Table, column } from '@powersync/node'
+import { fc, test as fcTest } from '@fast-check/vitest'
 import {
   IR,
   and,
@@ -16,6 +17,7 @@ import {
 import pDefer from 'p-defer'
 import { describe, expect, it, onTestFinished, vi } from 'vitest'
 import { powerSyncCollectionOptions } from '../src'
+import type { Scheduler } from 'fast-check'
 
 const APP_SCHEMA = new Schema({
   products: new Table({
@@ -2533,13 +2535,16 @@ describe(`On-Demand Sync Mode`, () => {
       })
     }
 
-    function queueWriteLocks(db: PowerSyncDatabase) {
+    function queueWriteLocks(
+      db: PowerSyncDatabase,
+      scheduler?: Scheduler,
+    ) {
       const queued: Array<() => Promise<void>> = []
       vi.spyOn(db, `writeLock`).mockImplementation(
         (callback) =>
           new Promise((resolve, reject) => {
             let started = false
-            queued.push(async () => {
+            const run = async () => {
               if (started) return
               started = true
               try {
@@ -2548,13 +2553,17 @@ describe(`On-Demand Sync Mode`, () => {
               } catch (error) {
                 reject(error)
               }
-            })
+            }
+            queued.push(run)
+            if (scheduler) {
+              void scheduler.scheduleFunction(run)()
+            }
           }) as never,
       )
       return queued
     }
 
-    async function startConcurrentLifecycleHarness() {
+    async function startConcurrentLifecycleHarness(scheduler?: Scheduler) {
       const db = await createDatabase()
       const hooks: Array<ReturnType<typeof pDefer<void>>> = []
       const hookCleanups: Array<ReturnType<typeof vi.fn>> = []
@@ -2565,10 +2574,22 @@ describe(`On-Demand Sync Mode`, () => {
         hookCleanups.push(cleanup)
         return hook.promise.then(() => cleanup)
       })
-      const queuedLocks = queueWriteLocks(db)
+      const queuedLocks = queueWriteLocks(db, scheduler)
+      vi.spyOn(db, `getAll`).mockResolvedValue([])
+      const trackingHandles: Array<{
+        when: Record<`INSERT` | `UPDATE` | `DELETE`, string>
+        dispose: ReturnType<typeof vi.fn>
+      }> = []
       const createDiffTrigger = vi
         .spyOn(db.triggers, `createDiffTrigger`)
-        .mockResolvedValue(vi.fn())
+        .mockImplementation(({ when }) => {
+          const dispose = vi.fn(() => Promise.resolve())
+          trackingHandles.push({
+            when: when as Record<`INSERT` | `UPDATE` | `DELETE`, string>,
+            dispose,
+          })
+          return Promise.resolve(dispose)
+        })
       const config = powerSyncCollectionOptions({
         database: db,
         table: APP_SCHEMA.props.products,
@@ -2607,11 +2628,137 @@ describe(`On-Demand Sync Mode`, () => {
         hookCleanups,
         queuedLocks,
         createDiffTrigger,
+        trackingHandles,
         cleanup: async () => {
           hooks.forEach((hook) => hook.resolve())
           sync.cleanup?.()
           await Promise.all(queuedLocks.map((run) => run()))
         },
+      }
+    }
+
+    type ScheduledSecondOutcome =
+      | `activate`
+      | `reject`
+      | `release-during-hook`
+      | `release-after-publication`
+      | `cleanup-during-hook`
+      | `cleanup-after-publication`
+
+    async function drainScheduledLifecycle(scheduler: Scheduler) {
+      let quietTurns = 0
+      while (quietTurns < 2) {
+        if (scheduler.count() > 0) {
+          quietTurns = 0
+          await scheduler.waitAll()
+        } else {
+          quietTurns++
+          await Promise.resolve()
+        }
+      }
+    }
+
+    async function expectScheduledLifecycleMatches(
+      scheduler: Scheduler,
+      secondOutcome: ScheduledSecondOutcome,
+    ) {
+      const harness = await startConcurrentLifecycleHarness(scheduler)
+      const hookFailure = new Error(`scheduled hook failure`)
+      let firstError: unknown
+      let secondError: unknown
+
+      const firstLoad = Promise.resolve(
+        harness.loadSubset(harness.first),
+      )
+        .then(() => undefined)
+        .catch((error: unknown) => {
+          firstError = error
+        })
+      let secondLoad: Promise<void> | undefined
+
+      try {
+        await vi.waitFor(() => expect(harness.hooks).toHaveLength(1))
+        harness.hooks[0]!.resolve()
+        await vi.waitFor(() => expect(harness.queuedLocks).toHaveLength(1))
+
+        secondLoad = Promise.resolve(
+          harness.loadSubset(harness.second),
+        )
+          .then(() => undefined)
+          .catch((error: unknown) => {
+            secondError = error
+          })
+        await vi.waitFor(() => expect(harness.hooks).toHaveLength(2))
+
+        const schedule = (action: () => void) => {
+          void scheduler.scheduleFunction(() => Promise.resolve(action()))()
+        }
+        const endsInRelease = secondOutcome.startsWith(`release-`)
+        const endsInCleanup = secondOutcome.startsWith(`cleanup-`)
+        const actsAfterPublication = secondOutcome.endsWith(
+          `after-publication`,
+        )
+
+        if (secondOutcome === `reject`) {
+          schedule(() => harness.hooks[1]!.reject(hookFailure))
+        } else {
+          schedule(() => harness.hooks[1]!.resolve())
+          if (secondOutcome === `release-during-hook`) {
+            schedule(() => harness.unloadSubset(harness.second))
+          } else if (secondOutcome === `cleanup-during-hook`) {
+            schedule(() => harness.sync.cleanup?.())
+          }
+        }
+
+        await scheduler.waitFor(Promise.all([firstLoad, secondLoad]))
+        await drainScheduledLifecycle(scheduler)
+        if (actsAfterPublication) {
+          if (endsInRelease) {
+            harness.unloadSubset(harness.second)
+          } else {
+            harness.sync.cleanup?.()
+          }
+          await drainScheduledLifecycle(scheduler)
+        }
+
+        expect(firstError).toBeUndefined()
+        expect(secondError).toBe(
+          secondOutcome === `reject` ? hookFailure : undefined,
+        )
+        expect(harness.hookCleanups[0]).toHaveBeenCalledTimes(
+          endsInCleanup ? 1 : 0,
+        )
+        expect(harness.hookCleanups[1]).toHaveBeenCalledTimes(
+          endsInRelease || endsInCleanup ? 1 : 0,
+        )
+
+        const liveTracking = harness.trackingHandles.filter(
+          ({ dispose }) => dispose.mock.calls.length === 0,
+        )
+        if (endsInCleanup) {
+          expect(liveTracking).toEqual([])
+          return
+        }
+
+        expect(liveTracking).toHaveLength(1)
+        const finalInsert = liveTracking[0]!.when.INSERT
+        expect(finalInsert).toContain(`electronics`)
+        if (secondOutcome === `activate`) {
+          expect(finalInsert).toContain(`clothing`)
+        } else {
+          expect(finalInsert).not.toContain(`clothing`)
+        }
+        if (secondOutcome === `reject`) {
+          expect(
+            harness.trackingHandles.every(
+              ({ when }) => !when.INSERT.includes(`clothing`),
+            ),
+          ).toBe(true)
+        }
+      } finally {
+        await harness.cleanup()
+        if (scheduler.count() > 0) await scheduler.waitAll()
+        await Promise.allSettled([firstLoad, secondLoad])
       }
     }
 
@@ -2762,6 +2909,22 @@ describe(`On-Demand Sync Mode`, () => {
         ])
       }
     })
+
+    for (const secondOutcome of [
+      `activate`,
+      `reject`,
+      `release-during-hook`,
+      `release-after-publication`,
+      `cleanup-during-hook`,
+      `cleanup-after-publication`,
+    ] as const) {
+      fcTest.prop([fc.scheduler()], { numRuns: 8 })(
+        `keeps tracking coherent when concurrent lifecycle tasks end in ${secondOutcome}`,
+        async (scheduler) => {
+          await expectScheduledLifecycleMatches(scheduler, secondOutcome)
+        },
+      )
+    }
 
     it(`does not start queued tracking after collection cleanup`, async () => {
       const db = await createDatabase()
