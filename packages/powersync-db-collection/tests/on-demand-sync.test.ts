@@ -414,6 +414,68 @@ describe(`On-Demand Sync Mode`, () => {
     },
   )
 
+  it(`waits for the first applied receipt after every later batch applies`, async () => {
+    const harness = await startAppliedOutcomeLoad(`rows`, 1)
+
+    try {
+      await vi.waitFor(() =>
+        expect(harness.receipts).toHaveLength(
+          harness.authoritativeRows.length + 1,
+        ),
+      )
+
+      harness.receipts.slice(1).forEach((receipt) => receipt.resolve())
+      await vi.waitFor(() =>
+        expect(harness.readableRows.size).toBe(
+          harness.authoritativeRows.length - 1,
+        ),
+      )
+      expect(harness.isSettled()).toBe(false)
+
+      harness.receipts[0]!.resolve()
+      await expect(harness.observed).resolves.toEqual({
+        status: `fulfilled`,
+      })
+      expect(
+        Array.from(harness.readableRows.values(), (row) => row.name).sort(),
+      ).toEqual(harness.authoritativeRows.map((row) => row.name).sort())
+    } finally {
+      await harness.cleanup()
+    }
+  })
+
+  it(`preserves rejection from the terminal empty-batch receipt`, async () => {
+    const harness = await startAppliedOutcomeLoad(`rows`, 1)
+    const terminalFailure = new Error(`terminal applied receipt failed`)
+
+    try {
+      await vi.waitFor(() =>
+        expect(harness.receipts).toHaveLength(
+          harness.authoritativeRows.length + 1,
+        ),
+      )
+
+      harness.receipts.slice(0, -1).forEach((receipt) => receipt.resolve())
+      await vi.waitFor(() =>
+        expect(harness.readableRows.size).toBe(
+          harness.authoritativeRows.length,
+        ),
+      )
+      expect(harness.isSettled()).toBe(false)
+
+      harness.receipts.at(-1)!.reject(terminalFailure)
+      await expect(harness.observed).resolves.toEqual({
+        status: `rejected`,
+        reason: terminalFailure,
+      })
+      expect(
+        Array.from(harness.readableRows.values(), (row) => row.name).sort(),
+      ).toEqual(harness.authoritativeRows.map((row) => row.name).sort())
+    } finally {
+      await harness.cleanup()
+    }
+  })
+
   it.each([`rows`, `empty`] as const)(
     `accepts an immediate applied outcome for a %s subset`,
     async (source) => {
