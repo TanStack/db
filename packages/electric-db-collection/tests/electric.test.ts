@@ -2799,6 +2799,103 @@ describe(`Electric Integration`, () => {
       }
     })
 
+    it.each([`before-publication`, `after-publication`] as const)(
+      `keeps on-demand rows applied %s cancellation but retries the canceled demand`,
+      async (abortPhase) => {
+        const request = createDeferred<void>()
+        mockRequestSnapshot.mockReturnValueOnce(request.promise)
+        const testCollection = createOnDemandCollection(
+          `on-demand-${abortPhase}-abort-boundary-test`,
+        )
+        const abortController = new AbortController()
+
+        try {
+          const load = Promise.resolve(
+            testCollection._sync.loadSubset({
+              limit: 10,
+              signal: abortController.signal,
+            }),
+          )
+          const loadError = load.then(
+            () => undefined,
+            (error: unknown) => error,
+          )
+          await vi.waitFor(() =>
+            expect(mockRequestSnapshot).toHaveBeenCalledOnce(),
+          )
+
+          if (abortPhase === `before-publication`) abortController.abort()
+          subscriber([
+            {
+              key: `2`,
+              value: { id: 2, name: `Applied on-demand row` },
+              headers: { operation: `insert` },
+            },
+            { headers: { control: `subset-end` } },
+          ])
+          await vi.waitFor(() => expect(testCollection.has(2)).toBe(true))
+          if (abortPhase === `after-publication`) abortController.abort()
+          request.resolve()
+
+          await expect(loadError).resolves.toBeUndefined()
+          expect(stripVirtualProps(testCollection.get(2))).toEqual({
+            id: 2,
+            name: `Applied on-demand row`,
+          })
+          await load
+
+          const retry = Promise.resolve(
+            testCollection._sync.loadSubset({ limit: 10 }),
+          )
+          await vi.waitFor(() =>
+            expect(mockRequestSnapshot).toHaveBeenCalledTimes(2),
+          )
+          subscriber([{ headers: { control: `subset-end` } }])
+          await retry
+        } finally {
+          abortController.abort()
+          request.resolve()
+          await testCollection.cleanup()
+        }
+      },
+    )
+
+    it(`keeps on-demand coverage when cancellation happens after settlement`, async () => {
+      const request = createDeferred<void>()
+      mockRequestSnapshot.mockReturnValueOnce(request.promise)
+      const testCollection = createOnDemandCollection(
+        `on-demand-post-settlement-abort-test`,
+      )
+      const abortController = new AbortController()
+      const options = { limit: 10, signal: abortController.signal }
+
+      try {
+        const load = Promise.resolve(testCollection._sync.loadSubset(options))
+        await vi.waitFor(() =>
+          expect(mockRequestSnapshot).toHaveBeenCalledOnce(),
+        )
+        subscriber([
+          {
+            key: `2`,
+            value: { id: 2, name: `Settled on-demand row` },
+            headers: { operation: `insert` },
+          },
+          { headers: { control: `subset-end` } },
+        ])
+        request.resolve()
+        await load
+
+        abortController.abort()
+        expect(testCollection.has(2)).toBe(true)
+        await testCollection._sync.loadSubset({ limit: 10 })
+        expect(mockRequestSnapshot).toHaveBeenCalledOnce()
+      } finally {
+        abortController.abort()
+        request.resolve()
+        await testCollection.cleanup()
+      }
+    })
+
     it(`should refresh the stream before requesting on-demand snapshots when already up-to-date`, async () => {
       vi.clearAllMocks()
 
