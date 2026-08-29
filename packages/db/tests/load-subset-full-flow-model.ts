@@ -350,8 +350,6 @@ export function projectTransportLoads(
 ): number {
   const reusableDemands = new Map<FullFlowDemandId, FullFlowAttemptId>()
   const inFlightDemands = new Map<FullFlowDemandId, FullFlowAttemptId>()
-  const attemptEpochs = new Map<FullFlowAttemptId, number>()
-  let sourceEpoch = 0
   let loads = 0
 
   for (const event of history) {
@@ -364,19 +362,15 @@ export function projectTransportLoads(
         ) {
           loads++
           inFlightDemands.set(event.demandId, event.attemptId)
-          attemptEpochs.set(event.attemptId, sourceEpoch)
         }
         break
       case `applyAuthoritativeRows`: {
         if (inFlightDemands.get(event.demandId) !== event.attemptId) break
         inFlightDemands.delete(event.demandId)
-        if (attemptEpochs.get(event.attemptId) === sourceEpoch) {
-          reusableDemands.set(event.demandId, event.attemptId)
-        }
+        reusableDemands.set(event.demandId, event.attemptId)
         break
       }
       case `truncateSource`:
-        sourceEpoch++
         reusableDemands.clear()
         inFlightDemands.clear()
         break
@@ -543,11 +537,11 @@ export function projectReusableDemands(
         reusableDemands.clear()
         break
       case `releaseDemand`:
-        if (
-          event.invalidatesAdapterEvidence &&
-          reusableDemands.get(event.demandId) === event.attemptId
-        ) {
-          reusableDemands.delete(event.demandId)
+        if (event.invalidatesAdapterEvidence) {
+          attemptEpochs.delete(event.attemptId)
+          if (reusableDemands.get(event.demandId) === event.attemptId) {
+            reusableDemands.delete(event.demandId)
+          }
         }
         break
       case `applyUnprovenRows`:

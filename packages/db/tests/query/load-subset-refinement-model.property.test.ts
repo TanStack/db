@@ -382,6 +382,45 @@ it(`scopes reusable evidence to the physical attempt when an owner is reused`, (
   ).toBe(2)
 })
 
+it(`does not rebuild coverage when a released attempt settles after its replacement starts`, () => {
+  expect(
+    projectReusableDemands([
+      {
+        type: `requestDemand`,
+        ownerId: `old-owner`,
+        sessionId: `session`,
+        demandId: `exact-demand`,
+        attemptId: `old-attempt`,
+        alreadyAborted: false,
+      },
+      {
+        type: `releaseDemand`,
+        ownerId: `old-owner`,
+        demandId: `exact-demand`,
+        attemptId: `old-attempt`,
+        rowKeys: [],
+        finalRowOwner: true,
+        invalidatesAdapterEvidence: true,
+      },
+      {
+        type: `requestDemand`,
+        ownerId: `fresh-owner`,
+        sessionId: `session`,
+        demandId: `exact-demand`,
+        attemptId: `fresh-attempt`,
+        alreadyAborted: false,
+      },
+      {
+        type: `applyAuthoritativeRows`,
+        ownerId: `old-owner`,
+        demandId: `exact-demand`,
+        attemptId: `old-attempt`,
+        rowKeys: [`stale-row`],
+      },
+    ]),
+  ).toEqual([])
+})
+
 function renameHistoryIds(
   history: ReadonlyArray<LoadSubsetFullFlowEvent>,
   suffix: string,
@@ -509,7 +548,7 @@ for (const campaign of refinementCampaigns(1_779_002)) {
 
 for (const campaign of refinementCampaigns(1_779_003)) {
   fcTest.prop([fc.string({ minLength: 1, maxLength: 4 })], campaign.options)(
-    `demand, owner, session, and task names preserve projected laws (${campaign.label})`,
+    `demand, attempt, owner, session, and task names preserve projected laws (${campaign.label})`,
     (suffix) => {
       const demandHistory: Array<LoadSubsetFullFlowEvent> = [
         {
@@ -556,6 +595,15 @@ for (const campaign of refinementCampaigns(1_779_003)) {
       ]
 
       const renamedDemand = renameHistoryIds(demandHistory, suffix)
+      expect(
+        renamedDemand.flatMap((event) =>
+          `attemptId` in event ? [event.attemptId] : [],
+        ),
+      ).toEqual(
+        demandHistory.flatMap((event) =>
+          `attemptId` in event ? [`${event.attemptId}-${suffix}`] : [],
+        ),
+      )
       expect(projectTransportLoads(renamedDemand)).toBe(
         projectTransportLoads(demandHistory),
       )

@@ -382,6 +382,104 @@ async function runTruncateCoverageScenario(
     await source.cleanup()
   }
 }
+
+it.each([`authoritative`, `unproven`, `rejected`] as const)(
+  `keeps fresh exact-demand work shared after a pre-truncate %s request settles`,
+  async (oldOutcome) => {
+    type Row = { id: string; value: number }
+    type AdapterResult = {
+      hasMore: boolean | undefined
+      appliedRowKeys: ReadonlyArray<string>
+    }
+    let begin!: () => void
+    let write!: (message: { type: `insert`; value: Row }) => void
+    let commit!: () => true | Promise<void>
+    let truncate!: () => void
+    const pending: Array<ReturnType<typeof createDeferred<AdapterResult>>> = []
+    const deduplicated = new DeduplicatedLoadSubset({
+      loadSubset: () => {
+        const request = createDeferred<AdapterResult>()
+        pending.push(request)
+        return request.promise
+      },
+    })
+    const source = createCollection<Row>({
+      id: `same-demand-truncate-${oldOutcome}`,
+      getKey: (row) => row.id,
+      syncMode: `on-demand`,
+      startSync: true,
+      sync: {
+        sync: (params) => {
+          begin = params.begin
+          write = params.write
+          commit = params.commit
+          truncate = params.truncate
+          params.markReady()
+          return {
+            loadSubset: deduplicated.loadSubset,
+          }
+        },
+      },
+    })
+    const oldOptions = { limit: 2 }
+    const freshOptions = { limit: 2 }
+    const peerOptions = { limit: 2 }
+    const applyRows = async (rows: ReadonlyArray<Row>) => {
+      begin()
+      rows.forEach((row) => write({ type: `insert`, value: row }))
+      const applied = commit()
+      if (applied !== true) await applied
+    }
+
+    try {
+      const oldLoad = source._sync.loadSubset(oldOptions)
+      if (oldLoad === true) throw new Error(`Expected an async old request`)
+      expect(pending).toHaveLength(1)
+
+      begin()
+      truncate()
+      const truncated = commit()
+      if (truncated !== true) await truncated
+      deduplicated.reset()
+
+      const freshLoad = source._sync.loadSubset(freshOptions)
+      if (freshLoad === true) throw new Error(`Expected an async fresh request`)
+      expect(pending).toHaveLength(2)
+
+      if (oldOutcome === `rejected`) {
+        const rejection = expect(oldLoad).rejects.toThrow(`old request failed`)
+        pending[0]!.reject(new Error(`old request failed`))
+        await rejection
+      } else {
+        await applyRows([{ id: `old-row`, value: 1 }])
+        pending[0]!.resolve({
+          hasMore: oldOutcome === `authoritative` ? false : undefined,
+          appliedRowKeys: [`old-row`],
+        })
+        await oldLoad
+      }
+
+      expect(source._sync.getLoadSubsetOutcome(freshOptions)).toBeUndefined()
+      const peerLoad = source._sync.loadSubset(peerOptions)
+      if (peerLoad === true) throw new Error(`Expected a shared peer request`)
+      expect(pending).toHaveLength(2)
+
+      await applyRows([{ id: `fresh-row`, value: 2 }])
+      pending[1]!.resolve({
+        hasMore: false,
+        appliedRowKeys: [`fresh-row`],
+      })
+      await Promise.all([freshLoad, peerLoad])
+      expect(source._sync.getLoadSubsetOutcome(peerOptions)).toBeDefined()
+    } finally {
+      for (const request of pending) {
+        request.reject(new Error(`test cleanup`))
+      }
+      await source.cleanup()
+    }
+  },
+)
+
 it(`does not release physical work when an already-aborted demand skips adapter start`, async () => {
   const ownerId = `aborted-owner`
   const requestEvent: LoadSubsetFullFlowEvent = {
