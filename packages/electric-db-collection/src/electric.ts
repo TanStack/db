@@ -614,6 +614,11 @@ function createLoadSubsetDedupe<T extends Row<unknown>>({
     const commitCursor = getCommitCursor()
     const isAborted = (): boolean =>
       signal.aborted || opts.signal?.aborted === true
+    const throwIfCollectionAborted = () => {
+      if (signal.aborted) {
+        throw new SyncTransactionAbortedError()
+      }
+    }
     const throwIfAborted = () => {
       if (isAborted()) {
         throw new SyncTransactionAbortedError()
@@ -772,7 +777,9 @@ function createLoadSubsetDedupe<T extends Row<unknown>>({
       }
       throw error
     }
+    throwIfCollectionAborted()
     await waitForCommitsAfter(commitCursor)
+    throwIfCollectionAborted()
   }
 
   return new DeduplicatedLoadSubset({ loadSubset })
@@ -2063,7 +2070,7 @@ function createElectricSync<T extends Row<unknown>>(
 
             // Commit the atomic swap
             stageResumeMetadata()
-            applied = commit()
+            applied = commit(abortController.signal)
 
             // Exit buffering phase by marking that we've received up-to-date
             // isBufferingInitialSync() will now return false
@@ -2077,12 +2084,12 @@ function createElectricSync<T extends Row<unknown>>(
             // Both up-to-date and subset-end trigger a commit
             if (transactionStarted) {
               stageResumeMetadata()
-              applied = commit()
+              applied = commit(abortController.signal)
               transactionStarted = false
             } else if (commitPoint === `up-to-date` && metadata) {
               begin()
               stageResumeMetadata()
-              applied = commit()
+              applied = commit(abortController.signal)
             }
           }
           const readyErrorVersion = streamErrorVersion
