@@ -3006,15 +3006,20 @@ describe(`Electric Integration`, () => {
       expect(commit).not.toHaveBeenCalled()
     })
 
-    it.each([`collection`, `request`] as const)(
-      `rejects before starting a refresh when the %s signal is already aborted`,
-      async (signalSource) => {
+    it.each([
+      { syncMode: `on-demand`, signalSource: `collection` },
+      { syncMode: `on-demand`, signalSource: `request` },
+      { syncMode: `progressive`, signalSource: `collection` },
+      { syncMode: `progressive`, signalSource: `request` },
+    ] as const)(
+      `rejects before starting $syncMode work when the $signalSource signal is already aborted`,
+      async ({ syncMode, signalSource }) => {
         mockStream.isUpToDate = true
         const abortController = new AbortController()
         abortController.abort()
         const testCollection = createCollection(
           electricCollectionOptions({
-            id: `on-demand-refresh-${signalSource}-already-aborted-test`,
+            id: `${syncMode}-${signalSource}-already-aborted-test`,
             shapeOptions: {
               url: `http://test-url`,
               params: { table: `test_table` },
@@ -3023,7 +3028,7 @@ describe(`Electric Integration`, () => {
                   ? abortController.signal
                   : undefined,
             },
-            syncMode: `on-demand`,
+            syncMode,
             getKey: (item: Row) => item.id as number,
             startSync: true,
           }),
@@ -3039,6 +3044,7 @@ describe(`Electric Integration`, () => {
 
         expect(mockForceDisconnectAndRefresh).not.toHaveBeenCalled()
         expect(mockRequestSnapshot).not.toHaveBeenCalled()
+        expect(mockFetchSnapshot).not.toHaveBeenCalled()
         await testCollection.cleanup()
       },
     )
@@ -3098,9 +3104,14 @@ describe(`Electric Integration`, () => {
       }
     })
 
-    it.each([`request`, `collection`] as const)(
-      `prefers AbortError when refresh rejection races %s cancellation`,
-      async (cancellationSource) => {
+    it.each([
+      { cancellationSource: `request`, order: `rejection-first` },
+      { cancellationSource: `request`, order: `cancellation-first` },
+      { cancellationSource: `collection`, order: `rejection-first` },
+      { cancellationSource: `collection`, order: `cancellation-first` },
+    ] as const)(
+      `prefers AbortError for $cancellationSource cancellation in $order order`,
+      async ({ cancellationSource, order }) => {
         vi.useFakeTimers()
         let rejectRefresh: (error: Error) => void = () => {}
         const refresh = new Promise<void>((_resolve, reject) => {
@@ -3129,12 +3140,23 @@ describe(`Electric Integration`, () => {
           )
 
           await Promise.resolve()
-          rejectRefresh(new Error(`refresh failed`))
-          if (cancellationSource === `request`) {
-            request.abort()
-          } else {
-            await testCollection.cleanup()
+          let cleanup: Promise<void> | undefined
+          const cancel = () => {
+            if (cancellationSource === `request`) {
+              request.abort()
+            } else {
+              cleanup = testCollection?.cleanup()
+            }
           }
+          const reject = () => rejectRefresh(new Error(`refresh failed`))
+          if (order === `rejection-first`) {
+            reject()
+            cancel()
+          } else {
+            cancel()
+            reject()
+          }
+          await cleanup
 
           await expect(loadError).resolves.toMatchObject({
             name: `AbortError`,
@@ -3143,6 +3165,86 @@ describe(`Electric Integration`, () => {
           await load.catch(() => undefined)
         } finally {
           request.abort()
+          await testCollection?.cleanup()
+          await vi.runOnlyPendingTimersAsync()
+          vi.useRealTimers()
+        }
+      },
+    )
+
+    it.each([
+      { cancellationSource: `request`, lateSettlement: `fulfillment` },
+      { cancellationSource: `request`, lateSettlement: `rejection` },
+      { cancellationSource: `collection`, lateSettlement: `fulfillment` },
+      { cancellationSource: `collection`, lateSettlement: `rejection` },
+    ] as const)(
+      `keeps $cancellationSource cancellation final after late refresh $lateSettlement`,
+      async ({ cancellationSource, lateSettlement }) => {
+        vi.useFakeTimers()
+        let resolveRefresh: () => void = () => {}
+        let rejectRefresh: (error: Error) => void = () => {}
+        const refresh = new Promise<void>((resolve, reject) => {
+          resolveRefresh = resolve
+          rejectRefresh = reject
+        })
+        const refreshOutcome = refresh.then(
+          () => `fulfilled` as const,
+          () => `rejected` as const,
+        )
+        const request = new AbortController()
+        let testCollection:
+          | ReturnType<typeof createOnDemandCollection>
+          | undefined
+
+        try {
+          mockStream.isUpToDate = true
+          mockForceDisconnectAndRefresh.mockReturnValueOnce(refresh)
+          testCollection = createOnDemandCollection(
+            `on-demand-refresh-${cancellationSource}-late-${lateSettlement}-test`,
+          )
+          const load = Promise.resolve(
+            testCollection._sync.loadSubset({
+              limit: 10,
+              signal: request.signal,
+            }),
+          )
+          const loadError = load.then(
+            () => undefined,
+            (error: unknown) => error,
+          )
+
+          await Promise.resolve()
+          let cleanup: Promise<void> | undefined
+          if (cancellationSource === `request`) {
+            request.abort()
+          } else {
+            cleanup = testCollection.cleanup()
+          }
+          await expect(loadError).resolves.toMatchObject({
+            name: `AbortError`,
+          })
+          await cleanup
+          expect(mockRequestSnapshot).not.toHaveBeenCalled()
+
+          if (lateSettlement === `fulfillment`) {
+            resolveRefresh()
+          } else {
+            rejectRefresh(new Error(`late refresh failure`))
+          }
+          await expect(refreshOutcome).resolves.toBe(
+            lateSettlement === `fulfillment` ? `fulfilled` : `rejected`,
+          )
+          await Promise.resolve()
+
+          await expect(loadError).resolves.toMatchObject({
+            name: `AbortError`,
+          })
+          expect(mockRequestSnapshot).not.toHaveBeenCalled()
+          expect(vi.getTimerCount()).toBe(0)
+          await load.catch(() => undefined)
+        } finally {
+          request.abort()
+          resolveRefresh()
           await testCollection?.cleanup()
           await vi.runOnlyPendingTimersAsync()
           vi.useRealTimers()
@@ -3236,6 +3338,7 @@ describe(`Electric Integration`, () => {
           } else {
             await expect(loadError).resolves.toBeUndefined()
           }
+          expect(vi.getTimerCount()).toBe(0)
 
           expect(added.length).toBeGreaterThan(0)
           for (const installed of added) {
