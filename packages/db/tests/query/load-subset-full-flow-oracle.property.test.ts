@@ -384,14 +384,15 @@ async function runTruncateCoverageScenario(
 }
 
 it.each([
-  `authoritative`,
-  `unproven`,
-  `rejected`,
-  `evidence-free`,
-  `released`,
+  { oldOutcome: `authoritative`, freshSettlesFirst: false },
+  { oldOutcome: `unproven`, freshSettlesFirst: false },
+  { oldOutcome: `rejected`, freshSettlesFirst: false },
+  { oldOutcome: `evidence-free`, freshSettlesFirst: false },
+  { oldOutcome: `released`, freshSettlesFirst: false },
+  { oldOutcome: `released`, freshSettlesFirst: true },
 ] as const)(
-  `keeps fresh exact-demand work shared after a pre-truncate %s request settles`,
-  async (oldOutcome) => {
+  `keeps fresh exact-demand work shared after a pre-truncate $oldOutcome request (freshSettlesFirst=$freshSettlesFirst)`,
+  async ({ oldOutcome, freshSettlesFirst }) => {
     type Row = { id: string; value: number }
     type AdapterResult =
       | {
@@ -454,6 +455,24 @@ it.each([
       const freshLoad = source._sync.loadSubset(freshOptions)
       if (freshLoad === true) throw new Error(`Expected an async fresh request`)
       expect(pending).toHaveLength(2)
+
+      if (freshSettlesFirst) {
+        await applyRows([{ id: `fresh-row`, value: 2 }])
+        pending[1]!.resolve({
+          hasMore: false,
+          appliedRowKeys: [`fresh-row`],
+        })
+        await freshLoad
+
+        source._sync.unloadSubset(oldOptions)
+        expect(source._sync.loadSubset(peerOptions)).toBe(true)
+        expect(pending).toHaveLength(2)
+        expect(source._sync.getLoadSubsetOutcome(peerOptions)).toBeDefined()
+
+        pending[0]!.resolve(undefined)
+        await oldLoad
+        return
+      }
 
       if (oldOutcome === `released`) {
         source._sync.unloadSubset(oldOptions)

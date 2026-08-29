@@ -457,6 +457,29 @@ describe(`createDeduplicatedLoadSubset`, () => {
     await Promise.all([load, peer])
   })
 
+  it(`rolls back only the reservation whose adapter start throws`, async () => {
+    const pending: Array<() => void> = []
+    const loadSubset = vi
+      .fn()
+      .mockImplementationOnce(() => {
+        throw new Error(`start failed`)
+      })
+      .mockImplementation(
+        () => new Promise<void>((resolve) => pending.push(resolve)),
+      )
+    const deduplicated = new DeduplicatedLoadSubset({ loadSubset })
+    const reusedOptions = { limit: 2 }
+
+    expect(() => deduplicated.loadSubset(reusedOptions)).toThrow(`start failed`)
+    const accepted = deduplicated.loadSubset(reusedOptions)
+    deduplicated.unloadSubset(reusedOptions)
+    const peer = deduplicated.loadSubset({ limit: 2 })
+
+    expect(loadSubset).toHaveBeenCalledTimes(3)
+    pending.forEach((resolve) => resolve())
+    await Promise.all([accepted, peer])
+  })
+
   it(`shares in-flight work while any cancellation owner remains active`, async () => {
     let resolveLoad: (() => void) | undefined
     let sharedSignal: AbortSignal | undefined
