@@ -373,48 +373,7 @@ describe(`On-Demand Sync Mode`, () => {
     },
   )
 
-  it.each([`fulfill`, `reject`] as const)(
-    `waits for every applied receipt when a multi-batch subset will %s`,
-    async (settlement) => {
-      const harness = await startAppliedOutcomeLoad(`rows`, 1)
-      const laterFailure = new Error(`later applied receipt failed`)
-
-      try {
-        await vi.waitFor(() =>
-          expect(harness.receipts).toHaveLength(
-            harness.authoritativeRows.length + 1,
-          ),
-        )
-        expect(harness.isSettled()).toBe(false)
-        expect(harness.readableRows.size).toBe(0)
-
-        harness.receipts[0]!.resolve()
-        await vi.waitFor(() => expect(harness.readableRows.size).toBe(1))
-        expect(harness.isSettled()).toBe(false)
-
-        if (settlement === `reject`) {
-          harness.receipts[1]!.reject(laterFailure)
-          await expect(harness.observed).resolves.toEqual({
-            status: `rejected`,
-            reason: laterFailure,
-          })
-          expect(harness.readableRows.size).toBe(1)
-        } else {
-          harness.receipts.slice(1).forEach((receipt) => receipt.resolve())
-          await expect(harness.observed).resolves.toEqual({
-            status: `fulfilled`,
-          })
-          expect(
-            Array.from(harness.readableRows.values(), (row) => row.name).sort(),
-          ).toEqual(harness.authoritativeRows.map((row) => row.name).sort())
-        }
-      } finally {
-        await harness.cleanup()
-      }
-    },
-  )
-
-  it(`waits for the first applied receipt after every later batch applies`, async () => {
+  it(`waits for every applied receipt before fulfilling a multi-batch subset`, async () => {
     const harness = await startAppliedOutcomeLoad(`rows`, 1)
 
     try {
@@ -424,15 +383,17 @@ describe(`On-Demand Sync Mode`, () => {
         ),
       )
 
-      harness.receipts.slice(1).forEach((receipt) => receipt.resolve())
-      await vi.waitFor(() =>
-        expect(harness.readableRows.size).toBe(
-          harness.authoritativeRows.length - 1,
-        ),
-      )
-      expect(harness.isSettled()).toBe(false)
-
-      harness.receipts[0]!.resolve()
+      for (const [index, receipt] of harness.receipts.entries()) {
+        receipt.resolve()
+        await vi.waitFor(() =>
+          expect(harness.readableRows.size).toBe(
+            Math.min(index + 1, harness.authoritativeRows.length),
+          ),
+        )
+        if (index < harness.receipts.length - 1) {
+          expect(harness.isSettled()).toBe(false)
+        }
+      }
       await expect(harness.observed).resolves.toEqual({
         status: `fulfilled`,
       })
@@ -444,37 +405,54 @@ describe(`On-Demand Sync Mode`, () => {
     }
   })
 
-  it(`preserves rejection from the terminal empty-batch receipt`, async () => {
-    const harness = await startAppliedOutcomeLoad(`rows`, 1)
-    const terminalFailure = new Error(`terminal applied receipt failed`)
-
-    try {
-      await vi.waitFor(() =>
-        expect(harness.receipts).toHaveLength(
-          harness.authoritativeRows.length + 1,
-        ),
+  it.each([
+    { receiptIndex: 0 },
+    { receiptIndex: 1 },
+    { receiptIndex: 2 },
+    { receiptIndex: 3 },
+  ])(
+    `keeps applied receipt $receiptIndex independent in a multi-batch subset`,
+    async ({ receiptIndex }) => {
+      const harness = await startAppliedOutcomeLoad(`rows`, 1)
+      const receiptFailure = new Error(
+        `applied receipt ${receiptIndex} failed`,
       )
 
-      harness.receipts.slice(0, -1).forEach((receipt) => receipt.resolve())
-      await vi.waitFor(() =>
-        expect(harness.readableRows.size).toBe(
-          harness.authoritativeRows.length,
-        ),
-      )
-      expect(harness.isSettled()).toBe(false)
+      try {
+        await vi.waitFor(() =>
+          expect(harness.receipts).toHaveLength(
+            harness.authoritativeRows.length + 1,
+          ),
+        )
+        expect(receiptIndex).toBeLessThan(harness.receipts.length)
 
-      harness.receipts.at(-1)!.reject(terminalFailure)
-      await expect(harness.observed).resolves.toEqual({
-        status: `rejected`,
-        reason: terminalFailure,
-      })
-      expect(
-        Array.from(harness.readableRows.values(), (row) => row.name).sort(),
-      ).toEqual(harness.authoritativeRows.map((row) => row.name).sort())
-    } finally {
-      await harness.cleanup()
-    }
-  })
+        harness.receipts.forEach((receipt, index) => {
+          if (index !== receiptIndex) receipt.resolve()
+        })
+        const expectedRows = harness.authoritativeRows.filter(
+          (_row, index) => index !== receiptIndex,
+        )
+        await vi.waitFor(() =>
+          expect(harness.readableRows.size).toBe(expectedRows.length),
+        )
+        expect(
+          Array.from(harness.readableRows.values(), (row) => row.name).sort(),
+        ).toEqual(expectedRows.map((row) => row.name).sort())
+        expect(harness.isSettled()).toBe(false)
+
+        harness.receipts[receiptIndex]!.reject(receiptFailure)
+        await expect(harness.observed).resolves.toEqual({
+          status: `rejected`,
+          reason: receiptFailure,
+        })
+        expect(
+          Array.from(harness.readableRows.values(), (row) => row.name).sort(),
+        ).toEqual(expectedRows.map((row) => row.name).sort())
+      } finally {
+        await harness.cleanup()
+      }
+    },
+  )
 
   it.each([`rows`, `empty`] as const)(
     `accepts an immediate applied outcome for a %s subset`,
