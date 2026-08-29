@@ -10,6 +10,7 @@
 export type FullFlowOwnerId = string
 export type FullFlowSessionId = string
 export type FullFlowDemandId = string
+export type FullFlowAttemptId = string
 export type FullFlowSourceId = string
 export type FullFlowTransactionId = string
 export type FullFlowAcquisitionId = string
@@ -124,28 +125,33 @@ export type LoadSubsetFullFlowEvent =
       ownerId: FullFlowOwnerId
       sessionId: FullFlowSessionId
       demandId: FullFlowDemandId
+      attemptId: FullFlowAttemptId
       alreadyAborted: boolean
     }
   | {
       type: `applyAuthoritativeRows`
       ownerId: FullFlowOwnerId
       demandId: FullFlowDemandId
+      attemptId: FullFlowAttemptId
       rowKeys: ReadonlyArray<string>
     }
   | {
       type: `settleDemandWithoutEvidence`
       demandId: FullFlowDemandId
+      attemptId: FullFlowAttemptId
     }
   | {
       type: `applyUnprovenRows`
       ownerId: FullFlowOwnerId
       demandId: FullFlowDemandId
+      attemptId: FullFlowAttemptId
       rowKeys: ReadonlyArray<string>
     }
   | {
       type: `rejectDemand`
       ownerId: FullFlowOwnerId
       demandId: FullFlowDemandId
+      attemptId: FullFlowAttemptId
     }
   | {
       type: `truncateSource`
@@ -155,6 +161,7 @@ export type LoadSubsetFullFlowEvent =
       type: `releaseDemand`
       ownerId: FullFlowOwnerId
       demandId: FullFlowDemandId
+      attemptId: FullFlowAttemptId
       rowKeys: ReadonlyArray<string>
       finalRowOwner: boolean
       invalidatesAdapterEvidence: boolean
@@ -341,9 +348,9 @@ export function projectAdapterLifecycle(
 export function projectTransportLoads(
   history: ReadonlyArray<LoadSubsetFullFlowEvent>,
 ): number {
-  const reusableDemands = new Set<FullFlowDemandId>()
-  const inFlightDemands = new Set<FullFlowDemandId>()
-  const requestEpochs = new Map<FullFlowOwnerId, number>()
+  const reusableDemands = new Map<FullFlowDemandId, FullFlowAttemptId>()
+  const inFlightDemands = new Map<FullFlowDemandId, FullFlowAttemptId>()
+  const attemptEpochs = new Map<FullFlowAttemptId, number>()
   let sourceEpoch = 0
   let loads = 0
 
@@ -356,18 +363,18 @@ export function projectTransportLoads(
           !inFlightDemands.has(event.demandId)
         ) {
           loads++
-          inFlightDemands.add(event.demandId)
-        }
-        if (!event.alreadyAborted) {
-          requestEpochs.set(event.ownerId, sourceEpoch)
+          inFlightDemands.set(event.demandId, event.attemptId)
+          attemptEpochs.set(event.attemptId, sourceEpoch)
         }
         break
-      case `applyAuthoritativeRows`:
+      case `applyAuthoritativeRows`: {
+        if (inFlightDemands.get(event.demandId) !== event.attemptId) break
         inFlightDemands.delete(event.demandId)
-        if (requestEpochs.get(event.ownerId) === sourceEpoch) {
-          reusableDemands.add(event.demandId)
+        if (attemptEpochs.get(event.attemptId) === sourceEpoch) {
+          reusableDemands.set(event.demandId, event.attemptId)
         }
         break
+      }
       case `truncateSource`:
         sourceEpoch++
         reusableDemands.clear()
@@ -375,15 +382,19 @@ export function projectTransportLoads(
         break
       case `applyUnprovenRows`:
       case `rejectDemand`:
-        inFlightDemands.delete(event.demandId)
-        break
       case `settleDemandWithoutEvidence`:
-        inFlightDemands.delete(event.demandId)
+        if (inFlightDemands.get(event.demandId) === event.attemptId) {
+          inFlightDemands.delete(event.demandId)
+        }
         break
       case `releaseDemand`:
         if (event.invalidatesAdapterEvidence) {
-          reusableDemands.delete(event.demandId)
-          inFlightDemands.delete(event.demandId)
+          if (reusableDemands.get(event.demandId) === event.attemptId) {
+            reusableDemands.delete(event.demandId)
+          }
+          if (inFlightDemands.get(event.demandId) === event.attemptId) {
+            inFlightDemands.delete(event.demandId)
+          }
         }
         break
       case `restartSession`:
@@ -511,20 +522,20 @@ export function projectAuthorizedContinuationStarts(
 export function projectReusableDemands(
   history: ReadonlyArray<LoadSubsetFullFlowEvent>,
 ): Array<FullFlowDemandId> {
-  const reusableDemands = new Set<FullFlowDemandId>()
-  const requestEpochs = new Map<FullFlowOwnerId, number>()
+  const reusableDemands = new Map<FullFlowDemandId, FullFlowAttemptId>()
+  const attemptEpochs = new Map<FullFlowAttemptId, number>()
   let sourceEpoch = 0
 
   for (const event of history) {
     switch (event.type) {
       case `requestDemand`:
         if (!event.alreadyAborted) {
-          requestEpochs.set(event.ownerId, sourceEpoch)
+          attemptEpochs.set(event.attemptId, sourceEpoch)
         }
         break
       case `applyAuthoritativeRows`:
-        if (requestEpochs.get(event.ownerId) === sourceEpoch) {
-          reusableDemands.add(event.demandId)
+        if (attemptEpochs.get(event.attemptId) === sourceEpoch) {
+          reusableDemands.set(event.demandId, event.attemptId)
         }
         break
       case `truncateSource`:
@@ -532,7 +543,10 @@ export function projectReusableDemands(
         reusableDemands.clear()
         break
       case `releaseDemand`:
-        if (event.invalidatesAdapterEvidence) {
+        if (
+          event.invalidatesAdapterEvidence &&
+          reusableDemands.get(event.demandId) === event.attemptId
+        ) {
           reusableDemands.delete(event.demandId)
         }
         break
@@ -553,7 +567,7 @@ export function projectReusableDemands(
     }
   }
 
-  return [...reusableDemands].sort()
+  return [...reusableDemands.keys()].sort()
 }
 
 /**

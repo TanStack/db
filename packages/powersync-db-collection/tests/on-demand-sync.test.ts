@@ -1836,6 +1836,7 @@ describe(`On-Demand Sync Mode`, () => {
           ownerId: `owner-1`,
           sessionId: `session-1`,
           demandId: `electronics`,
+          attemptId: `attempt-1`,
           alreadyAborted: false,
         },
       ]
@@ -1846,6 +1847,7 @@ describe(`On-Demand Sync Mode`, () => {
           type: `applyAuthoritativeRows`,
           ownerId: `owner-1`,
           demandId: `electronics`,
+          attemptId: `attempt-1`,
           rowKeys: expectedRowKeys,
         })
         expect(first.toArray.map(({ id }) => String(id)).sort()).toEqual(
@@ -1858,6 +1860,7 @@ describe(`On-Demand Sync Mode`, () => {
             type: `releaseDemand`,
             ownerId: `owner-1`,
             demandId: `electronics`,
+            attemptId: `attempt-1`,
             rowKeys: expectedRowKeys,
             finalRowOwner: true,
             invalidatesAdapterEvidence: true,
@@ -1872,6 +1875,7 @@ describe(`On-Demand Sync Mode`, () => {
             ownerId: `owner-2`,
             sessionId: `session-2`,
             demandId: `electronics`,
+            attemptId: `attempt-2`,
             alreadyAborted: false,
           },
         )
@@ -1884,6 +1888,7 @@ describe(`On-Demand Sync Mode`, () => {
           type: `applyAuthoritativeRows`,
           ownerId: `owner-2`,
           demandId: `electronics`,
+          attemptId: `attempt-2`,
           rowKeys: expectedRowKeys,
         })
 

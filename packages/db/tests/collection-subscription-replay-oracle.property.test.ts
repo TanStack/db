@@ -8954,6 +8954,7 @@ describe(`CollectionSubscription replay oracle`, () => {
           ownerId: `other-owner`,
           sessionId: `session`,
           demandId: `other`,
+          attemptId: `other-attempt`,
           alreadyAborted: false,
         },
         {

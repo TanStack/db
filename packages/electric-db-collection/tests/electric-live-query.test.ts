@@ -1331,6 +1331,7 @@ describe(`Electric Collection - loadSubset deduplication`, () => {
         ownerId: `owner-1`,
         sessionId: `session-1`,
         demandId: `active-users`,
+        attemptId: `attempt-1`,
         alreadyAborted: false,
       },
     ]
@@ -1362,6 +1363,7 @@ describe(`Electric Collection - loadSubset deduplication`, () => {
         type: `applyAuthoritativeRows`,
         ownerId: `owner-1`,
         demandId: `active-users`,
+        attemptId: `attempt-1`,
         rowKeys: [String(row.id)],
       })
       expect(first.toArray.map(({ id }) => String(id))).toEqual([
@@ -1374,6 +1376,7 @@ describe(`Electric Collection - loadSubset deduplication`, () => {
           type: `releaseDemand`,
           ownerId: `owner-1`,
           demandId: `active-users`,
+          attemptId: `attempt-1`,
           rowKeys: [String(row.id)],
           finalRowOwner: true,
           invalidatesAdapterEvidence: true,
@@ -1388,6 +1391,7 @@ describe(`Electric Collection - loadSubset deduplication`, () => {
           ownerId: `owner-2`,
           sessionId: `session-2`,
           demandId: `active-users`,
+          attemptId: `attempt-2`,
           alreadyAborted: false,
         },
       )
@@ -1398,6 +1402,7 @@ describe(`Electric Collection - loadSubset deduplication`, () => {
         type: `applyAuthoritativeRows`,
         ownerId: `owner-2`,
         demandId: `active-users`,
+        attemptId: `attempt-2`,
         rowKeys: [String(row.id)],
       })
 

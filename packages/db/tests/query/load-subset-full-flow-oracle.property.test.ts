@@ -236,6 +236,7 @@ async function runTruncateCoverageScenario(
       ownerId,
       sessionId: `session`,
       demandId: `prefix-${options.limit}`,
+      attemptId: `${ownerId}-attempt`,
       alreadyAborted: false,
     })
     activeOptions.push(options)
@@ -263,6 +264,7 @@ async function runTruncateCoverageScenario(
         hasMore === undefined ? `applyUnprovenRows` : `applyAuthoritativeRows`,
       ownerId,
       demandId: `prefix-${options.limit}`,
+      attemptId: `${ownerId}-attempt`,
       rowKeys: rows.map(({ id }) => id),
     })
   }
@@ -273,6 +275,7 @@ async function runTruncateCoverageScenario(
       type: `rejectDemand`,
       ownerId,
       demandId: `prefix-${options.limit}`,
+      attemptId: `${ownerId}-attempt`,
     })
   }
 
@@ -349,6 +352,13 @@ async function runTruncateCoverageScenario(
               ? `old`
               : `fresh`,
         demandId: `prefix-${options.limit}`,
+        attemptId: `${
+          options === initialOptions
+            ? `initial`
+            : options === oldOptions
+              ? `old`
+              : `fresh`
+        }-attempt`,
         rowKeys:
           options === initialOptions
             ? [`initial`]
@@ -379,6 +389,7 @@ it(`does not release physical work when an already-aborted demand skips adapter 
     ownerId,
     sessionId: `session-1`,
     demandId: `all-rows`,
+    attemptId: `aborted-attempt`,
     alreadyAborted: true,
   }
   const history: ReadonlyArray<LoadSubsetFullFlowEvent> = [
@@ -387,6 +398,7 @@ it(`does not release physical work when an already-aborted demand skips adapter 
       type: `releaseDemand`,
       ownerId,
       demandId: `all-rows`,
+      attemptId: `aborted-attempt`,
       rowKeys: [],
       finalRowOwner: false,
       invalidatesAdapterEvidence: false,
@@ -921,18 +933,21 @@ it(`reloads authoritative rows after final-owner cleanup invalidates retained ad
       ownerId: `owner-1`,
       sessionId: `session-1`,
       demandId: `all-rows`,
+      attemptId: `attempt-1`,
       alreadyAborted: false,
     },
     {
       type: `applyAuthoritativeRows`,
       ownerId: `owner-1`,
       demandId: `all-rows`,
+      attemptId: `attempt-1`,
       rowKeys: [row.id],
     },
     {
       type: `releaseDemand`,
       ownerId: `owner-1`,
       demandId: `all-rows`,
+      attemptId: `attempt-1`,
       rowKeys: [row.id],
       finalRowOwner: true,
       invalidatesAdapterEvidence: true,
@@ -947,12 +962,14 @@ it(`reloads authoritative rows after final-owner cleanup invalidates retained ad
       ownerId: `owner-2`,
       sessionId: `session-2`,
       demandId: `all-rows`,
+      attemptId: `attempt-2`,
       alreadyAborted: false,
     },
     {
       type: `applyAuthoritativeRows`,
       ownerId: `owner-2`,
       demandId: `all-rows`,
+      attemptId: `attempt-2`,
       rowKeys: [row.id],
     },
   ]
@@ -1030,6 +1047,7 @@ it(`does not let an ordered continuation from a cleaned session start new work a
       ownerId: `owner-1`,
       sessionId: `session-1`,
       demandId: `top-1`,
+      attemptId: `attempt-1`,
       alreadyAborted: false,
     },
     {
@@ -1049,6 +1067,7 @@ it(`does not let an ordered continuation from a cleaned session start new work a
       ownerId: `owner-2`,
       sessionId: `session-2`,
       demandId: `top-1`,
+      attemptId: `attempt-2`,
       alreadyAborted: false,
     },
     { type: `runContinuation`, taskId: `load-1-settlement` },
@@ -2656,6 +2675,7 @@ async function runOrderedBoundaryProvenanceScenario(
       type: `rejectDemand`,
       ownerId: `ordered-owner`,
       demandId: `ordered-window`,
+      attemptId: `ordered-attempt`,
     },
   ]
   const expectedBoundary = projectOrderedPublicationBoundary(history, {
@@ -3254,6 +3274,7 @@ async function runAtomicOrderedReplayScenario(
           type: `releaseDemand`,
           ownerId: `other-owner`,
           demandId: `other`,
+          attemptId: `other-attempt`,
           rowKeys: [replacementOtherRow.id],
           finalRowOwner: true,
           invalidatesAdapterEvidence: true,
@@ -3278,6 +3299,7 @@ async function runAtomicOrderedReplayScenario(
         ownerId: `other-owner`,
         sessionId: `atomic-session`,
         demandId: `other`,
+        attemptId: `other-attempt`,
         alreadyAborted: false,
       })
       subscription.requestSnapshot({ where: otherWhere })
@@ -3341,6 +3363,7 @@ async function runAtomicOrderedReplayScenario(
           type: `releaseDemand`,
           ownerId: `other-owner`,
           demandId: `other`,
+          attemptId: `other-attempt`,
           rowKeys: [replacementOtherRow.id],
           finalRowOwner: true,
           invalidatesAdapterEvidence: true,

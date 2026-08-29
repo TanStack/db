@@ -10,6 +10,7 @@ import {
   projectAuthorizedContinuationStarts,
   projectReplayPublication,
   projectRetainedRowKeys,
+  projectReusableDemands,
   projectSourceReadiness,
   projectSyncTransactions,
   projectTransportLoads,
@@ -108,6 +109,7 @@ function enumerateDemandLifecycles(): Array<DemandLifecycleCase> {
               ownerId,
               sessionId: `session`,
               demandId: `demand`,
+              attemptId: `${ownerId}-attempt`,
               alreadyAborted,
             },
           ],
@@ -127,6 +129,7 @@ function enumerateDemandLifecycles(): Array<DemandLifecycleCase> {
             type: `releaseDemand`,
             ownerId,
             demandId: `demand`,
+            attemptId: `${ownerId}-attempt`,
             rowKeys: [],
             finalRowOwner: false,
             invalidatesAdapterEvidence: false,
@@ -166,11 +169,15 @@ it(`exhaustively projects exact adapter starts and releases for two owners`, () 
 })
 
 it(`shares concurrent exact demand and retries after evidence-free settlement`, () => {
-  const request = (ownerId: string): LoadSubsetFullFlowEvent => ({
+  const request = (
+    ownerId: string,
+    attemptId = `${ownerId}-attempt`,
+  ): LoadSubsetFullFlowEvent => ({
     type: `requestDemand`,
     ownerId,
     sessionId: `session`,
     demandId: `exact-demand`,
+    attemptId,
     alreadyAborted: false,
   })
   const concurrent = [request(`owner-a`), request(`owner-b`)]
@@ -186,6 +193,7 @@ it(`shares concurrent exact demand and retries after evidence-free settlement`, 
         type: `releaseDemand`,
         ownerId: `owner-a`,
         demandId: `exact-demand`,
+        attemptId: `owner-a-attempt`,
         rowKeys: [],
         finalRowOwner: true,
         invalidatesAdapterEvidence: true,
@@ -199,6 +207,7 @@ it(`shares concurrent exact demand and retries after evidence-free settlement`, 
       {
         type: `settleDemandWithoutEvidence`,
         demandId: `exact-demand`,
+        attemptId: `owner-a-attempt`,
       },
       request(`owner-c`),
     ]),
@@ -210,11 +219,167 @@ it(`shares concurrent exact demand and retries after evidence-free settlement`, 
         type: `applyAuthoritativeRows`,
         ownerId: `owner-a`,
         demandId: `exact-demand`,
+        attemptId: `owner-a-attempt`,
         rowKeys: [`row`],
       },
       request(`owner-c`),
     ]),
   ).toBe(1)
+})
+
+it.each([
+  {
+    name: `authoritative`,
+    event: {
+      type: `applyAuthoritativeRows`,
+      ownerId: `old-owner`,
+      demandId: `exact-demand`,
+      attemptId: `old-attempt`,
+      rowKeys: [`stale-row`],
+    },
+  },
+  {
+    name: `unproven`,
+    event: {
+      type: `applyUnprovenRows`,
+      ownerId: `old-owner`,
+      demandId: `exact-demand`,
+      attemptId: `old-attempt`,
+      rowKeys: [`stale-row`],
+    },
+  },
+  {
+    name: `rejected`,
+    event: {
+      type: `rejectDemand`,
+      ownerId: `old-owner`,
+      demandId: `exact-demand`,
+      attemptId: `old-attempt`,
+    },
+  },
+  {
+    name: `evidence-free`,
+    event: {
+      type: `settleDemandWithoutEvidence`,
+      demandId: `exact-demand`,
+      attemptId: `old-attempt`,
+    },
+  },
+  {
+    name: `released`,
+    event: {
+      type: `releaseDemand`,
+      ownerId: `old-owner`,
+      demandId: `exact-demand`,
+      attemptId: `old-attempt`,
+      rowKeys: [],
+      finalRowOwner: true,
+      invalidatesAdapterEvidence: true,
+    },
+  },
+] satisfies ReadonlyArray<{
+  name: string
+  event: LoadSubsetFullFlowEvent
+}>)(
+  `keeps fresh same-demand work shared when an old attempt is $name after truncate`,
+  ({ event }) => {
+    expect(
+      projectTransportLoads([
+        {
+          type: `requestDemand`,
+          ownerId: `old-owner`,
+          sessionId: `session`,
+          demandId: `exact-demand`,
+          attemptId: `old-attempt`,
+          alreadyAborted: false,
+        },
+        { type: `truncateSource`, sessionId: `session` },
+        {
+          type: `requestDemand`,
+          ownerId: `fresh-owner`,
+          sessionId: `session`,
+          demandId: `exact-demand`,
+          attemptId: `fresh-attempt`,
+          alreadyAborted: false,
+        },
+        event,
+        {
+          type: `requestDemand`,
+          ownerId: `peer-owner`,
+          sessionId: `session`,
+          demandId: `exact-demand`,
+          attemptId: `peer-attempt`,
+          alreadyAborted: false,
+        },
+      ]),
+    ).toBe(2)
+  },
+)
+
+it(`scopes reusable evidence to the physical attempt when an owner is reused`, () => {
+  const oldRequest: LoadSubsetFullFlowEvent = {
+    type: `requestDemand`,
+    ownerId: `stable-owner`,
+    sessionId: `session`,
+    demandId: `exact-demand`,
+    attemptId: `old-attempt`,
+    alreadyAborted: false,
+  }
+  const freshRequest: LoadSubsetFullFlowEvent = {
+    ...oldRequest,
+    attemptId: `fresh-attempt`,
+  }
+  const oldSettlement: LoadSubsetFullFlowEvent = {
+    type: `applyAuthoritativeRows`,
+    ownerId: `stable-owner`,
+    demandId: `exact-demand`,
+    attemptId: `old-attempt`,
+    rowKeys: [`stale-row`],
+  }
+  const freshSettlement: LoadSubsetFullFlowEvent = {
+    ...oldSettlement,
+    attemptId: `fresh-attempt`,
+    rowKeys: [`fresh-row`],
+  }
+  const staleRelease: LoadSubsetFullFlowEvent = {
+    type: `releaseDemand`,
+    ownerId: `stable-owner`,
+    demandId: `exact-demand`,
+    attemptId: `old-attempt`,
+    rowKeys: [`stale-row`],
+    finalRowOwner: true,
+    invalidatesAdapterEvidence: true,
+  }
+  const beforeFreshSettlement = [
+    oldRequest,
+    { type: `truncateSource`, sessionId: `session` } as const,
+    freshRequest,
+    oldSettlement,
+  ]
+
+  expect(projectReusableDemands(beforeFreshSettlement)).toEqual([])
+  expect(
+    projectReusableDemands([...beforeFreshSettlement, freshSettlement]),
+  ).toEqual([`exact-demand`])
+  expect(
+    projectReusableDemands([
+      ...beforeFreshSettlement,
+      freshSettlement,
+      staleRelease,
+    ]),
+  ).toEqual([`exact-demand`])
+  expect(
+    projectTransportLoads([
+      ...beforeFreshSettlement,
+      freshSettlement,
+      staleRelease,
+      {
+        ...freshRequest,
+        ownerId: `peer-owner`,
+        attemptId: `peer-attempt`,
+      },
+    ]),
+  ).toBe(2)
 })
 
 function renameHistoryIds(
@@ -229,18 +394,23 @@ function renameHistoryIds(
           ownerId: `${event.ownerId}-${suffix}`,
           sessionId: `${event.sessionId}-${suffix}`,
           demandId: `${event.demandId}-${suffix}`,
+          attemptId: `${event.attemptId}-${suffix}`,
         }
       case `applyAuthoritativeRows`:
+      case `applyUnprovenRows`:
+      case `rejectDemand`:
       case `releaseDemand`:
         return {
           ...event,
           ownerId: `${event.ownerId}-${suffix}`,
           demandId: `${event.demandId}-${suffix}`,
+          attemptId: `${event.attemptId}-${suffix}`,
         }
       case `settleDemandWithoutEvidence`:
         return {
           ...event,
           demandId: `${event.demandId}-${suffix}`,
+          attemptId: `${event.attemptId}-${suffix}`,
         }
       case `registerSourceDemand`:
       case `settleSourceDemand`:
@@ -347,18 +517,21 @@ for (const campaign of refinementCampaigns(1_779_003)) {
           ownerId: `owner`,
           sessionId: `session`,
           demandId: `demand`,
+          attemptId: `attempt`,
           alreadyAborted: false,
         },
         {
           type: `applyAuthoritativeRows`,
           ownerId: `owner`,
           demandId: `demand`,
+          attemptId: `attempt`,
           rowKeys: [`row`],
         },
         {
           type: `releaseDemand`,
           ownerId: `owner`,
           demandId: `demand`,
+          attemptId: `attempt`,
           rowKeys: [`row`],
           finalRowOwner: true,
           invalidatesAdapterEvidence: true,
@@ -370,6 +543,7 @@ for (const campaign of refinementCampaigns(1_779_003)) {
           ownerId: `owner`,
           sessionId: `session`,
           demandId: `demand`,
+          attemptId: `attempt`,
           alreadyAborted: false,
         },
         {
