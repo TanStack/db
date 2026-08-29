@@ -72,6 +72,19 @@ describe(`applied commit capture`, () => {
     },
   )
 
+  it(`observes a receipt failure before waiting begins`, async () => {
+    const registry = createAppliedCommitCaptureRegistry()
+    const capture = registry.capture()
+    const receipt = createDeferred()
+    const failure = new Error(`receipt failed before wait`)
+    registry.record(receipt.promise)
+
+    receipt.reject(failure)
+    await new Promise((resolve) => setTimeout(resolve, 0))
+
+    await expect(capture.wait()).rejects.toBe(failure)
+  })
+
   it(`records one receipt for every concurrent capture`, async () => {
     const registry = createAppliedCommitCaptureRegistry()
     const firstCapture = registry.capture()
