@@ -161,6 +161,7 @@ type MultiSourceOrderedScenario = {
   offset: number
   limit: number
   direction: `asc` | `desc`
+  primaryAutoIndex: `eager` | `off`
   secondaryPublication:
     | `preloaded`
     | `preloaded-delayed-receipt`
@@ -204,6 +205,7 @@ const multiSourceOrderedScenarioArbitrary: fc.Arbitrary<MultiSourceOrderedScenar
       offset: fc.integer({ min: 0, max: 2 }),
       limit: fc.integer({ min: 0, max: 2 }),
       direction: fc.constantFrom(`asc` as const, `desc` as const),
+      primaryAutoIndex: fc.constantFrom(`eager` as const, `off` as const),
       secondaryPublication: fc.constantFrom(
         `preloaded` as const,
         `preloaded-delayed-receipt` as const,
@@ -251,11 +253,13 @@ if (process.env.TANSTACK_DB_ORACLE_STATISTICS === `1`) {
       offset,
       limit,
       direction,
+      primaryAutoIndex,
       secondaryPublication,
       secondaryPageSize,
       secondaryCommitOrder,
     }) => [
       `direction=${direction}`,
+      `primary-auto-index=${primaryAutoIndex}`,
       `offset=${offset}`,
       `limit=${limit}`,
       `secondary=${secondaryPublication}`,
@@ -282,6 +286,7 @@ if (process.env.TANSTACK_DB_ORACLE_STATISTICS === `1`) {
             offset,
             limit,
             direction,
+            primaryAutoIndex,
             secondaryPublication,
             secondaryPageSize,
             secondaryCommitOrder,
@@ -420,7 +425,7 @@ async function runMultiSourceOrderedScenario(
     getKey: (row) => row.id,
     syncMode: `on-demand`,
     startSync: true,
-    autoIndex: `eager`,
+    autoIndex: scenario.primaryAutoIndex,
     defaultIndexType: BTreeIndex,
     sync: {
       sync: (params) => {
@@ -446,6 +451,24 @@ async function runMultiSourceOrderedScenario(
             }
 
             primaryOrderedCallCount++
+            if (options.limit === undefined) {
+              primaryOrderedVisitedKeys.push(
+                ...primaryOrder.map(({ id }) => id),
+              )
+              const appliedRowKeys = await applyPrimaryRows(primaryOrder)
+              if (
+                scenario.secondaryPublication ===
+                  `after-primary-continuation` ||
+                scenario.secondaryPublication === `after-primary-exhaustion`
+              ) {
+                releaseSecondaryPublication()
+              }
+              primaryReceipts.push(appliedRowKeys)
+              return {
+                hasMore: false,
+                appliedRowKeys,
+              }
+            }
             const lastKey = options.cursor?.lastKey
             const previousIndex =
               lastKey === undefined
@@ -670,6 +693,16 @@ async function runMultiSourceOrderedScenario(
         ({ primaryRow, secondaryRow }) => `${primaryRow.id}:${secondaryRow.id}`,
       ),
     ).toEqual(refinedProjection.visiblePairKeys)
+    if (scenario.limit === 0) {
+      const refinementCalls = primaryCalls
+        .slice(initialPrimaryCallCount)
+        .filter(({ orderBy }) => orderBy !== undefined)
+      expect(refinementCalls.length).toBeGreaterThan(0)
+      if (scenario.primaryAutoIndex === `off`) {
+        expect(refinementCalls).toHaveLength(1)
+        expect(refinementCalls[0]?.limit).toBeUndefined()
+      }
+    }
 
     const primaryCallsBeforeZeroShrink = primaryCalls.length
     await live.utils.setWindow({ offset: 2, limit: 0 })
@@ -780,11 +813,21 @@ async function runMultiSourceOrderedScenario(
 
     if (scenario.secondaryPublication === `after-primary-continuation`) {
       if (scenario.limit > 0) {
-        expect(primaryOrderedCallCountAtSecondaryRelease).toBe(2)
-        expect(primaryCommittedKeysAtSecondaryRelease).toEqual(
-          expect.arrayContaining(primaryOrderedVisitedKeys.slice(0, 2)),
-        )
-        expect(primaryKeysBeforeSecondaryPublication?.length).toBe(2)
+        if (scenario.primaryAutoIndex === `eager`) {
+          expect(primaryOrderedCallCountAtSecondaryRelease).toBe(2)
+          expect(primaryCommittedKeysAtSecondaryRelease).toEqual(
+            expect.arrayContaining(primaryOrderedVisitedKeys.slice(0, 2)),
+          )
+          expect(primaryKeysBeforeSecondaryPublication?.length).toBe(2)
+        } else {
+          expect(primaryOrderedCallCountAtSecondaryRelease).toBe(1)
+          expect(primaryCommittedKeysAtSecondaryRelease).toEqual(
+            expect.arrayContaining(primaryOrder.map(({ id }) => id)),
+          )
+          expect(primaryKeysBeforeSecondaryPublication).toEqual(
+            primaryOrder.map(({ id }) => id),
+          )
+        }
       }
     }
     if (scenario.secondaryPublication === `after-primary-exhaustion`) {
@@ -822,6 +865,7 @@ it.each([
     secondaryPublication: `preloaded` as const,
     secondaryPageSize: 1 as const,
     secondaryCommitOrder: `insertion` as const,
+    primaryAutoIndex: `eager` as const,
   },
   {
     name: `late secondary after continuation`,
@@ -834,6 +878,7 @@ it.each([
     secondaryPublication: `after-primary-continuation` as const,
     secondaryPageSize: 1 as const,
     secondaryCommitOrder: `reverse` as const,
+    primaryAutoIndex: `eager` as const,
   },
   {
     name: `delayed filtered secondary receipt`,
@@ -846,6 +891,7 @@ it.each([
     secondaryPublication: `preloaded-delayed-receipt` as const,
     secondaryPageSize: 1 as const,
     secondaryCommitOrder: `reverse` as const,
+    primaryAutoIndex: `eager` as const,
   },
   {
     name: `late secondary after primary exhaustion`,
@@ -855,6 +901,7 @@ it.each([
     secondaryPublication: `after-primary-exhaustion` as const,
     secondaryPageSize: 1 as const,
     secondaryCommitOrder: `insertion` as const,
+    primaryAutoIndex: `eager` as const,
   },
   {
     name: `joined multiplicity before offset`,
@@ -867,15 +914,27 @@ it.each([
     secondaryPublication: `preloaded` as const,
     secondaryPageSize: 2 as const,
     secondaryCommitOrder: `insertion` as const,
+    primaryAutoIndex: `eager` as const,
   },
   {
-    name: `zero-limit window`,
-    secondaryRows: [],
+    name: `indexed zero-limit window`,
+    secondaryRows: [{ id: `a-0`, joinKey: `a` }],
     offset: 2,
     limit: 0,
     secondaryPublication: `preloaded` as const,
     secondaryPageSize: 1 as const,
     secondaryCommitOrder: `insertion` as const,
+    primaryAutoIndex: `eager` as const,
+  },
+  {
+    name: `unindexed zero-limit window`,
+    secondaryRows: [{ id: `a-0`, joinKey: `a` }],
+    offset: 2,
+    limit: 0,
+    secondaryPublication: `preloaded` as const,
+    secondaryPageSize: 1 as const,
+    secondaryCommitOrder: `insertion` as const,
+    primaryAutoIndex: `off` as const,
   },
 ] satisfies ReadonlyArray<
   Pick<
@@ -886,6 +945,7 @@ it.each([
     | `secondaryPublication`
     | `secondaryPageSize`
     | `secondaryCommitOrder`
+    | `primaryAutoIndex`
   > & { name: string }
 >)(`$name`, async ({ name: _name, ...scenario }) => {
   await runMultiSourceOrderedScenario({
@@ -895,70 +955,133 @@ it.each([
   })
 })
 
-it(`keeps an Effect zero-limit join free of ordered transport work`, async () => {
-  type PrimaryRow = { id: string; rank: number; joinKey: string }
-  type SecondaryRow = { id: string; joinKey: string }
-  const primaryLoads: Array<LoadSubsetOptions> = []
-  const primary = createCollection<PrimaryRow>({
-    id: `multi-source-zero-limit-effect-primary`,
+it(`retries unindexed transport after a rejected zero-to-positive refinement`, async () => {
+  type Row = { id: string; rank: number }
+  let attempts = 0
+  let begin!: () => void
+  let write!: (message: { type: `insert`; value: Row }) => void
+  let commit!: () => true | Promise<void>
+  const source = createCollection<Row>({
+    id: `unindexed-zero-refinement-retry`,
     getKey: (row) => row.id,
     syncMode: `on-demand`,
     startSync: true,
-    autoIndex: `eager`,
+    autoIndex: `off`,
     defaultIndexType: BTreeIndex,
     sync: {
-      sync: ({ markReady }) => {
-        markReady()
+      sync: (params) => {
+        begin = params.begin
+        write = params.write
+        commit = params.commit
+        params.markReady()
         return {
-          loadSubset: (options) => {
-            primaryLoads.push(options)
-            return true
+          loadSubset: async () => {
+            attempts++
+            if (attempts === 1) throw new Error(`fallback failed`)
+            begin()
+            write({ type: `insert`, value: { id: `a`, rank: 1 } })
+            await commit()
+            return { hasMore: false, appliedRowKeys: [`a`] }
           },
           unloadSubset: () => {},
         }
       },
     },
   })
-  const secondary = createCollection<SecondaryRow>({
-    id: `multi-source-zero-limit-effect-secondary`,
-    getKey: (row) => row.id,
-    syncMode: `on-demand`,
-    startSync: true,
-    autoIndex: `eager`,
-    defaultIndexType: BTreeIndex,
-    sync: {
-      sync: ({ markReady }) => {
-        markReady()
-        return {
-          loadSubset: () => true,
-          unloadSubset: () => {},
-        }
-      },
-    },
-  })
-  const effect = createEffect({
+  const live = createLiveQueryCollection({
+    id: `unindexed-zero-refinement-retry-live`,
     query: (q) =>
       q
-        .from({ primaryRow: primary })
-        .innerJoin(
-          { secondaryRow: secondary },
-          ({ primaryRow, secondaryRow }) =>
-            eq(primaryRow.joinKey, secondaryRow.joinKey),
-        )
-        .orderBy(({ primaryRow }) => primaryRow.rank)
-        .offset(2)
+        .from({ row: source })
+        .orderBy(({ row }) => row.rank)
         .limit(0),
-    onBatch: () => {},
+    startSync: true,
   })
 
   try {
+    await live.preload()
+    expect(attempts).toBe(0)
+
+    await expect(live.utils.setWindow({ offset: 0, limit: 1 })).rejects.toThrow(
+      `fallback failed`,
+    )
     await flushPromises()
-    expect(primaryLoads).toEqual([])
+    await live.utils.setWindow({ offset: 0, limit: 1 })
+    await flushPromises()
+
+    expect(attempts).toBe(2)
   } finally {
-    await effect.dispose()
-    await Promise.all([primary.cleanup(), secondary.cleanup()])
+    await Promise.all([live.cleanup(), source.cleanup()])
   }
 })
+
+it.each([`eager`, `off`] as const)(
+  `keeps an Effect zero-limit join free of ordered transport work with autoIndex %s`,
+  async (autoIndex) => {
+    type PrimaryRow = { id: string; rank: number; joinKey: string }
+    type SecondaryRow = { id: string; joinKey: string }
+    const primaryLoads: Array<LoadSubsetOptions> = []
+    const primary = createCollection<PrimaryRow>({
+      id: `multi-source-zero-limit-effect-primary-${autoIndex}`,
+      getKey: (row) => row.id,
+      syncMode: `on-demand`,
+      startSync: true,
+      autoIndex,
+      defaultIndexType: BTreeIndex,
+      sync: {
+        sync: ({ markReady }) => {
+          markReady()
+          return {
+            loadSubset: (options) => {
+              primaryLoads.push(options)
+              return true
+            },
+            unloadSubset: () => {},
+          }
+        },
+      },
+    })
+    const secondary = createCollection<SecondaryRow>({
+      id: `multi-source-zero-limit-effect-secondary-${autoIndex}`,
+      getKey: (row) => row.id,
+      syncMode: `on-demand`,
+      startSync: true,
+      autoIndex: `eager`,
+      defaultIndexType: BTreeIndex,
+      sync: {
+        sync: ({ markReady }) => {
+          markReady()
+          return {
+            loadSubset: () => true,
+            unloadSubset: () => {},
+          }
+        },
+      },
+    })
+    const effect = createEffect({
+      query: (q) =>
+        q
+          .from({ primaryRow: primary })
+          .innerJoin(
+            { secondaryRow: secondary },
+            ({ primaryRow, secondaryRow }) =>
+              eq(primaryRow.joinKey, secondaryRow.joinKey),
+          )
+          .orderBy(({ primaryRow }) => primaryRow.rank)
+          .offset(2)
+          .limit(0),
+      onBatch: () => {},
+    })
+
+    try {
+      await flushPromises()
+      expect(primaryLoads).toEqual([])
+    } finally {
+      await effect.dispose()
+      await Promise.all([primary.cleanup(), secondary.cleanup()])
+    }
+  },
+)
 
 it(`settles concurrent secondary loads out of order across paged commits`, async () => {
   type PrimaryRow = { id: string; rank: number; joinKey: string }

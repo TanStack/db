@@ -958,10 +958,12 @@ class EffectPipelineRunner<TRow extends object, TKey extends string | number> {
     const { orderBy, offset, limit, index } = orderByInfo
     const normalizedOrderBy = normalizeOrderByPaths(orderBy, alias)
 
+    if (limit === 0) return
+
     if (index) {
       subscription.setOrderByIndex(index, orderByInfo.expandSourceOrderTies)
       subscription.requestLimitedSnapshot({
-        limit: limit === 0 ? 0 : offset + limit,
+        limit: offset + limit,
         orderBy: normalizedOrderBy,
         trackLoadSubsetPromise: false,
         onLoadSubsetResult: (result) =>

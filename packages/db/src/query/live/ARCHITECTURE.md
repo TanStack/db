@@ -691,7 +691,9 @@ demand. Its coordinator remains alive so a later window change can load from
 the same order, but neither the initial offset nor a result deficit may turn
 the empty window into a positive request. The dedupe helper applies the same
 law when adapters call it directly: a zero-width request establishes no
-coverage and owns no physical acquisition.
+coverage and owns no physical acquisition. This also holds when no usable
+order index exists: core defers the full-snapshot fallback until the window
+first becomes positive, then requests it once for that subscription session.
 
 Live Collections and Effects keep separate consumer-local continuation state,
 but obey the same identity and reset law. A settled request remains the

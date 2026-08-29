@@ -61,6 +61,7 @@ export class CollectionSubscriber<
   private pendingOrderedLoadPromise:
     | Promise<AppliedLoadSubsetOutcome>
     | undefined
+  private unindexedSnapshotSubscription: CollectionSubscription | undefined
   private readonly demand = new SubsetDemandController()
 
   constructor(
@@ -161,6 +162,7 @@ export class CollectionSubscriber<
         trackLoadResult,
         onLoadSubsetError,
       )
+      if (orderByInfo.limit === 0) initialSubsetPending = false
     } else {
       // Lazy sources load only the subsets demanded by the compiled graph.
       const includeInitialState = !this.collectionConfigBuilder.isLazySource(
@@ -353,6 +355,7 @@ export class CollectionSubscriber<
     onLoadSubsetError: (event: SubscriptionLoadSubsetErrorEvent) => void,
   ): CollectionSubscription {
     const { orderBy, offset, limit, index } = orderByInfo
+    this.unindexedSnapshotSubscription = undefined
 
     // Store the callback so loadNextItems can also use direct tracking.
     // Track in-flight ordered loads to avoid issuing redundant requests while
@@ -421,6 +424,9 @@ export class CollectionSubscriber<
       subscriptionHolder.current = undefined
       this.lastLoadRequestKey = undefined
       this.lastNoProgressRequestKey = undefined
+      if (this.unindexedSnapshotSubscription === subscription) {
+        this.unindexedSnapshotSubscription = undefined
+      }
 
       // Ordered continuations belong to this subscription session. A settled
       // load from a cleaned session must not refill through a later session.
@@ -447,14 +453,10 @@ export class CollectionSubscriber<
         trackLoadSubsetPromise: false,
         onLoadSubsetResult: handleLoadSubsetResult,
       })
-    } else {
+    } else if (limit > 0) {
       // Without an index there is no sound cursor continuation. Load the full
       // ordered source so later relational operators cannot underfill top-K.
-      subscription.requestSnapshot({
-        orderBy: normalizedOrderBy,
-        trackLoadSubsetPromise: false,
-        onLoadSubsetResult: handleLoadSubsetResult,
-      })
+      this.requestUnindexedSnapshot(subscription, normalizedOrderBy)
     }
 
     return subscription
@@ -479,10 +481,18 @@ export class CollectionSubscriber<
     // but an empty active window must not start continuation work.
     if (limit === 0) return true
 
-    if (!dataNeeded || !index) {
-      // dataNeeded is not set when there's no index (e.g., non-ref expression
-      // or auto-indexing is disabled). Without an index, lazy loading can't work —
-      // all data was already loaded eagerly via requestSnapshot.
+    if (!index) {
+      // A zero-width subscription defers this full fallback until the window
+      // first becomes positive. Once requested, the snapshot covers every
+      // later window because cursor continuation is unavailable.
+      this.requestUnindexedSnapshot(
+        subscription,
+        normalizeOrderByPaths(orderByInfo.orderBy, this.alias),
+      )
+      return true
+    }
+
+    if (!dataNeeded) {
       return true
     }
 
@@ -537,6 +547,36 @@ export class CollectionSubscriber<
       // must not make the source transaction that exposed the gap fail.
     }
     return true
+  }
+
+  private requestUnindexedSnapshot(
+    subscription: CollectionSubscription,
+    orderBy: LoadSubsetOptions[`orderBy`],
+  ): void {
+    if (this.unindexedSnapshotSubscription === subscription) return
+
+    this.unindexedSnapshotSubscription = subscription
+    try {
+      subscription.requestSnapshot({
+        orderBy,
+        trackLoadSubsetPromise: false,
+        onLoadSubsetResult: (result, demand) => {
+          if (result instanceof Promise) {
+            void result.catch(() => {
+              if (this.unindexedSnapshotSubscription === subscription) {
+                this.unindexedSnapshotSubscription = undefined
+              }
+            })
+          }
+          this.orderedLoadSubsetResult?.(result, demand)
+        },
+      })
+    } catch (error) {
+      if (this.unindexedSnapshotSubscription === subscription) {
+        this.unindexedSnapshotSubscription = undefined
+      }
+      throw error
+    }
   }
 
   private sendChangesToPipelineWithTracking(
