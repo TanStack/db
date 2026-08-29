@@ -6,7 +6,7 @@ import {
 import { Func, PropRef, Value } from '../../src/query/ir'
 import { createCrossRealmUint8Array } from '../utils'
 import type { BasicExpression, OrderBy } from '../../src/query/ir'
-import type { LoadSubsetOptions } from '../../src/types'
+import type { LoadSubsetFn, LoadSubsetOptions } from '../../src/types'
 
 // Helper functions to build expressions more easily
 function ref(path: string | Array<string>): PropRef {
@@ -478,6 +478,57 @@ describe(`createDeduplicatedLoadSubset`, () => {
     expect(loadSubset).toHaveBeenCalledTimes(3)
     pending.forEach((resolve) => resolve())
     await Promise.all([accepted, peer])
+  })
+
+  it(`does not cache synchronous work from before a reentrant reset`, () => {
+    const loadSubset = vi
+      .fn<LoadSubsetFn>()
+      .mockImplementationOnce(() => {
+        deduplicated.reset()
+        return true
+      })
+      .mockReturnValue(true)
+    const deduplicated = new DeduplicatedLoadSubset({ loadSubset })
+
+    expect(deduplicated.loadSubset({ limit: 2 })).toBe(true)
+    expect(deduplicated.loadSubset({ limit: 2 })).toBe(true)
+
+    expect(loadSubset).toHaveBeenCalledTimes(2)
+  })
+
+  it(`does not share pending work from before a reentrant reset`, async () => {
+    let resolveOld!: () => void
+    const loadSubset = vi
+      .fn<LoadSubsetFn>()
+      .mockImplementationOnce(() => {
+        deduplicated.reset()
+        return new Promise<void>((resolve) => (resolveOld = resolve))
+      })
+      .mockResolvedValue(undefined)
+    const deduplicated = new DeduplicatedLoadSubset({ loadSubset })
+
+    const oldLoad = deduplicated.loadSubset({ limit: 2 })
+    const freshLoad = deduplicated.loadSubset({ limit: 2 })
+
+    expect(loadSubset).toHaveBeenCalledTimes(2)
+    resolveOld()
+    await Promise.all([oldLoad, freshLoad])
+  })
+
+  it(`does not cache settled work from before a reentrant reset`, async () => {
+    const loadSubset = vi
+      .fn<LoadSubsetFn>()
+      .mockImplementationOnce(() => {
+        deduplicated.reset()
+        return Promise.resolve()
+      })
+      .mockResolvedValue(undefined)
+    const deduplicated = new DeduplicatedLoadSubset({ loadSubset })
+
+    await deduplicated.loadSubset({ limit: 2 })
+    await deduplicated.loadSubset({ limit: 2 })
+
+    expect(loadSubset).toHaveBeenCalledTimes(2)
   })
 
   it(`shares in-flight work while any cancellation owner remains active`, async () => {

@@ -218,6 +218,7 @@ export class DeduplicatedLoadSubset {
       isLoadSubsetRequestSubsumedBy(physicalRequest, candidate)
 
     // Call underlying loadSubset to load the missing data
+    const requestGeneration = this.generation
     let resultPromise: true | Promise<void | LoadSubsetResult>
     try {
       resultPromise = this._loadSubset(loadOptions)
@@ -228,7 +229,9 @@ export class DeduplicatedLoadSubset {
 
     // Handle both sync (true) and async (Promise<void>) return values
     if (resultPromise === true) {
-      if (!lease.aborted) this.updateTracking(trackingOptions)
+      if (requestGeneration === this.generation && !lease.aborted) {
+        this.updateTracking(trackingOptions)
+      }
       lease.dispose()
       return true
     } else {
@@ -237,7 +240,7 @@ export class DeduplicatedLoadSubset {
         options: trackingOptions,
         lease,
         matchesPhysicalRequest,
-        generation: this.generation,
+        generation: requestGeneration,
         trackable: true,
         reservations: new Set([reservation]),
         promise: resultPromise
@@ -275,7 +278,9 @@ export class DeduplicatedLoadSubset {
       )
 
       // Store the in-flight entry so concurrent subset calls can wait for it
-      this.inflightCalls.push(inflightEntry)
+      if (requestGeneration === this.generation) {
+        this.inflightCalls.push(inflightEntry)
+      }
       return projectLoadSubsetResultForCaller(
         inflightEntry.promise,
         options,

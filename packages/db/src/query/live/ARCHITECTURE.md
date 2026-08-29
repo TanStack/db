@@ -918,7 +918,10 @@ invalidates remembered request coverage when core may delete its establishing
 rows. Core pairs each accepted load with one release of the same options object.
 The helper keeps those logical owner reservations across resets so a late
 release cannot retire newer-generation work or work still shared by another
-owner. A dedupe hit cannot outlive the evidence it claims to reuse.
+owner. Adapter entry is a reentrancy boundary: capture the request generation
+before calling adapter code, and do not publish coverage or in-flight work if a
+reentrant reset has retired that generation. A dedupe hit cannot outlive the
+evidence it claims to reuse.
 
 An eager Query DB collection owns its base query for the Collection lifetime.
 If TanStack Query removes that cache entry while the Collection has no public
