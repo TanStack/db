@@ -2,6 +2,7 @@ import { randomUUID } from 'node:crypto'
 import { tmpdir } from 'node:os'
 import { PowerSyncDatabase, Schema, Table, column } from '@powersync/node'
 import {
+  IR,
   and,
   createCollection,
   createLiveQueryCollection,
@@ -217,6 +218,128 @@ describe(`On-Demand Sync Mode`, () => {
       await Promise.allSettled([preload])
     }
   })
+
+  it.each([
+    { source: `rows`, settlement: `fulfill` },
+    { source: `empty`, settlement: `fulfill` },
+    { source: `rows`, settlement: `reject` },
+    { source: `empty`, settlement: `reject` },
+  ] as const)(
+    `settles a $source subset only through an applied $settlement outcome`,
+    async ({ source, settlement }) => {
+      type ProductRow = {
+        id: string
+        name: string
+        price: number
+        category: string
+      }
+      type StagedChange = {
+        type: `insert` | `update` | `delete`
+        value?: ProductRow
+        key?: string
+      }
+
+      const db = await createDatabase()
+      await createTestProducts(db)
+      const category = source === `rows` ? `electronics` : `furniture`
+      const authoritativeRows = await db.getAll<ProductRow>(
+        `SELECT id, name, price, category FROM products WHERE category = ?`,
+        [category],
+      )
+      expect(authoritativeRows.length > 0).toBe(source === `rows`)
+      const receipt = pDefer<void>()
+      const receiptFailure = new Error(`applied receipt failed`)
+      const readableRows = new Map<string, ProductRow>()
+      let stagedChanges: Array<StagedChange> = []
+      const commit = vi.fn(() => {
+        const changes = stagedChanges
+        stagedChanges = []
+        return receipt.promise.then(() => {
+          for (const change of changes) {
+            if (change.type === `delete`) {
+              if (!change.key) throw new Error(`Delete requires a key`)
+              readableRows.delete(change.key)
+            } else {
+              if (!change.value) throw new Error(`Write requires a value`)
+              readableRows.set(change.value.id, change.value)
+            }
+          }
+        })
+      })
+      const config = powerSyncCollectionOptions({
+        database: db,
+        table: APP_SCHEMA.props.products,
+        syncMode: `on-demand`,
+      })
+      const sync = config.sync.sync({
+        collection: {
+          status: `ready`,
+          has: (key: string) => readableRows.has(key),
+        },
+        begin: vi.fn(() => {
+          stagedChanges = []
+        }),
+        write: vi.fn((change: StagedChange) => {
+          stagedChanges.push(change)
+        }),
+        commit,
+        markReady: vi.fn(),
+        markError: vi.fn(),
+        truncate: vi.fn(),
+      } as never)
+      if (!sync || typeof sync === `function` || !sync.loadSubset) {
+        throw new Error(`Expected on-demand sync controls`)
+      }
+
+      let settled = false
+      const where = new IR.Func<boolean>(`eq`, [
+        new IR.PropRef([`category`]),
+        new IR.Value(category),
+      ])
+      const observed = Promise.resolve(
+        sync.loadSubset({ where }),
+      ).then(
+        () => {
+          settled = true
+          return { status: `fulfilled` } as const
+        },
+        (reason: unknown) => {
+          settled = true
+          return { status: `rejected`, reason } as const
+        },
+      )
+
+      try {
+        await vi.waitFor(() => expect(commit).toHaveBeenCalledOnce())
+        expect(settled).toBe(false)
+        expect(readableRows.size).toBe(0)
+
+        if (settlement === `reject`) {
+          receipt.reject(receiptFailure)
+        } else {
+          receipt.resolve()
+        }
+
+        const result = await observed
+        if (settlement === `reject`) {
+          expect(result).toEqual({
+            status: `rejected`,
+            reason: receiptFailure,
+          })
+          expect(readableRows.size).toBe(0)
+        } else {
+          expect(result).toEqual({ status: `fulfilled` })
+          expect(
+            Array.from(readableRows.values(), (row) => row.name).sort(),
+          ).toEqual(authoritativeRows.map((row) => row.name).sort())
+        }
+      } finally {
+        receipt.resolve()
+        sync.cleanup?.()
+        await observed
+      }
+    },
+  )
 
   it(`should reactively update live query when new matching data is inserted into SQLite`, async () => {
     const db = await createDatabase()
