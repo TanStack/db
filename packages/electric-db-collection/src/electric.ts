@@ -561,6 +561,39 @@ function createLoadSubsetDedupe<T extends Row<unknown>>({
     return null
   }
 
+  const combineAbortSignals = (
+    ...signals: Array<AbortSignal | undefined>
+  ): { signal: AbortSignal; cleanup: () => void } => {
+    const uniqueSignals = Array.from(
+      new Set(
+        signals.filter(
+          (candidate): candidate is AbortSignal => candidate !== undefined,
+        ),
+      ),
+    )
+    if (uniqueSignals.length === 1) {
+      return { signal: uniqueSignals[0]!, cleanup: () => {} }
+    }
+
+    const controller = new AbortController()
+    const abort = () => controller.abort()
+    for (const candidate of uniqueSignals) {
+      if (candidate.aborted) {
+        abort()
+      } else {
+        candidate.addEventListener(`abort`, abort, { once: true })
+      }
+    }
+    return {
+      signal: controller.signal,
+      cleanup: () => {
+        for (const candidate of uniqueSignals) {
+          candidate.removeEventListener(`abort`, abort)
+        }
+      },
+    }
+  }
+
   const compileOptions = encodeColumnName ? { encodeColumnName } : undefined
   const logPrefix = collectionId ? `[${collectionId}] ` : ``
 
@@ -607,7 +640,12 @@ function createLoadSubsetDedupe<T extends Row<unknown>>({
               metadata: { ...row.headers },
             })
           }
-          await commit(opts.signal)
+          const commitSignal = combineAbortSignals(signal, opts.signal)
+          try {
+            await commit(commitSignal.signal)
+          } finally {
+            commitSignal.cleanup()
+          }
           debug(`${logPrefix}Applied snapshot with ${rows.length} rows`)
         }
       } catch (error) {
@@ -1608,19 +1646,21 @@ function createElectricSync<T extends Row<unknown>>(
 
       // Abort controller for the stream - wraps the signal if provided
       const abortController = new AbortController()
+      let removeShapeAbortListener = () => {}
 
       if (shapeOptions.signal) {
-        shapeOptions.signal.addEventListener(
-          `abort`,
-          () => {
-            abortController.abort()
-          },
-          {
-            once: true,
-          },
-        )
+        const abortFromShapeSignal = () => abortController.abort()
         if (shapeOptions.signal.aborted) {
           abortController.abort()
+        } else {
+          shapeOptions.signal.addEventListener(`abort`, abortFromShapeSignal, {
+            once: true,
+          })
+          removeShapeAbortListener = () =>
+            shapeOptions.signal?.removeEventListener(
+              `abort`,
+              abortFromShapeSignal,
+            )
         }
       }
 
@@ -2102,6 +2142,7 @@ function createElectricSync<T extends Row<unknown>>(
         cleanup: () => {
           // Unsubscribe from the stream
           unsubscribeStream()
+          removeShapeAbortListener()
           // Abort the abort controller to stop the stream
           abortController.abort()
           // Reset deduplication tracking so collection can load fresh data if restarted

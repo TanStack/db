@@ -26,12 +26,15 @@ const NativeAbortController = globalThis.AbortController
 function createDeferred<T>(): {
   promise: Promise<T>
   resolve: (value: T | PromiseLike<T>) => void
+  reject: (reason?: unknown) => void
 } {
   let resolve!: (value: T | PromiseLike<T>) => void
-  const promise = new Promise<T>((resolvePromise) => {
+  let reject!: (reason?: unknown) => void
+  const promise = new Promise<T>((resolvePromise, rejectPromise) => {
     resolve = resolvePromise
+    reject = rejectPromise
   })
-  return { promise, resolve }
+  return { promise, resolve, reject }
 }
 
 // Mock the ShapeStream module
@@ -2673,6 +2676,39 @@ describe(`Electric Integration`, () => {
         }),
       )
 
+    it(`removes the external shape abort listener across cleanup and restart`, async () => {
+      const externalAbort = new NativeAbortController()
+      const addSpy = vi.spyOn(externalAbort.signal, `addEventListener`)
+      const removeSpy = vi.spyOn(externalAbort.signal, `removeEventListener`)
+      const testCollection = createCollection(
+        electricCollectionOptions({
+          id: `shape-signal-listener-cleanup-test`,
+          shapeOptions: {
+            url: `http://test-url`,
+            params: { table: `test_table` },
+            signal: externalAbort.signal,
+          },
+          syncMode: `progressive`,
+          getKey: (item: Row) => item.id as number,
+          startSync: true,
+        }),
+      )
+
+      await testCollection.cleanup()
+      const subscription = testCollection.subscribeChanges(() => {})
+      await testCollection.cleanup()
+      subscription.unsubscribe()
+
+      const addedListeners = addSpy.mock.calls
+        .filter(([type]) => type === `abort`)
+        .map(([, listener]) => listener)
+      const removedListeners = removeSpy.mock.calls
+        .filter(([type]) => type === `abort`)
+        .map(([, listener]) => listener)
+      expect(addedListeners).toHaveLength(2)
+      expect(removedListeners).toEqual(addedListeners)
+    })
+
     it(`should not request snapshots during subscription in eager mode`, () => {
       vi.clearAllMocks()
 
@@ -3451,52 +3487,87 @@ describe(`Electric Integration`, () => {
       })
     })
 
-    it(`rejects a progressive snapshot aborted before application`, async () => {
-      mockFetchSnapshot.mockReset()
-      let resolveSnapshot!: (value: {
-        metadata: Record<string, never>
-        data: Array<{
-          key: string
-          value: Row
-          headers: { operation: `insert` }
-        }>
-      }) => void
-      mockFetchSnapshot.mockReturnValue(
-        new Promise((resolve) => {
-          resolveSnapshot = resolve
-        }),
-      )
-      mockSubscribe.mockImplementation(() => () => {})
-      const testCollection = createCollection(
-        electricCollectionOptions({
-          id: `progressive-aborted-snapshot-test`,
-          shapeOptions: {
-            url: `http://test-url`,
-            params: { table: `test_table` },
-          },
-          syncMode: `progressive`,
-          getKey: (item: Row) => item.id as number,
-          startSync: true,
-        }),
-      )
-      const abortController = new AbortController()
-
-      try {
-        expect(mockFetchSnapshot).not.toHaveBeenCalled()
-        const load = Promise.resolve(
-          testCollection._sync.loadSubset({
-            limit: 1,
-            signal: abortController.signal,
+    it.each([
+      { signalSource: `request`, result: `empty` },
+      { signalSource: `request`, result: `rows` },
+      { signalSource: `collection`, result: `empty` },
+      { signalSource: `collection`, result: `rows` },
+    ] as const)(
+      `rejects a progressive $result snapshot when the $signalSource signal aborts before application`,
+      async ({ signalSource, result }) => {
+        const snapshot = createDeferred<{
+          metadata: Record<string, never>
+          data: Array<{
+            key: string
+            value: Row
+            headers: { operation: `insert` }
+          }>
+        }>()
+        mockFetchSnapshot.mockReturnValue(snapshot.promise)
+        mockSubscribe.mockImplementation(() => () => {})
+        const collectionAbortController = new AbortController()
+        const requestAbortController = new AbortController()
+        const testCollection = createCollection(
+          electricCollectionOptions({
+            id: `progressive-${signalSource}-${result}-abort-test`,
+            shapeOptions: {
+              url: `http://test-url`,
+              params: { table: `test_table` },
+              signal: collectionAbortController.signal,
+            },
+            syncMode: `progressive`,
+            getKey: (item: Row) => item.id as number,
+            startSync: true,
           }),
         )
-        const loadError = load.then(
-          () => undefined,
-          (error: unknown) => error,
-        )
-        expect(mockFetchSnapshot).toHaveBeenCalledOnce()
-        expect(testCollection.has(2)).toBe(false)
-        abortController.abort()
-        resolveSnapshot({
+        const abortController =
+          signalSource === `request`
+            ? requestAbortController
+            : collectionAbortController
+
+        try {
+          expect(mockFetchSnapshot).not.toHaveBeenCalled()
+          const load = Promise.resolve(
+            testCollection._sync.loadSubset({
+              limit: 1,
+              signal: requestAbortController.signal,
+            }),
+          )
+          const loadError = load.then(
+            () => undefined,
+            (error: unknown) => error,
+          )
+          expect(mockFetchSnapshot).toHaveBeenCalledOnce()
+          abortController.abort()
+          snapshot.resolve({
+            metadata: {},
+            data:
+              result === `rows`
+                ? [
+                    {
+                      key: `2`,
+                      value: { id: 2, name: `Obsolete snapshot` },
+                      headers: { operation: `insert` },
+                    },
+                  ]
+                : [],
+          })
+          await expect(loadError).resolves.toMatchObject({ name: `AbortError` })
+          expect(testCollection.has(2)).toBe(false)
+          await load.catch(() => undefined)
+        } finally {
+          collectionAbortController.abort()
+          requestAbortController.abort()
+          snapshot.resolve({ metadata: {}, data: [] })
+          await testCollection.cleanup()
+        }
+      },
+    )
+
+    it.each([`request`, `collection`, `cleanup`] as const)(
+      `rejects a progressive snapshot when %s cancellation occurs while its commit is parked`,
+      async (cancellationSource) => {
+        mockFetchSnapshot.mockResolvedValue({
           metadata: {},
           data: [
             {
@@ -3506,31 +3577,92 @@ describe(`Electric Integration`, () => {
             },
           ],
         })
-        await expect(loadError).resolves.toMatchObject({ name: `AbortError` })
+        mockSubscribe.mockImplementation(() => () => {})
+        const collectionAbortController = new AbortController()
+        const testCollection = createCollection(
+          electricCollectionOptions({
+            id: `progressive-parked-abort-test`,
+            shapeOptions: {
+              url: `http://test-url`,
+              params: { table: `test_table` },
+              signal: collectionAbortController.signal,
+            },
+            syncMode: `progressive`,
+            getKey: (item: Row) => item.id as number,
+            startSync: true,
+          }),
+        )
+        const persistence = createDeferred<void>()
+        const transaction = createTransaction({
+          mutationFn: () => persistence.promise,
+        })
+        const requestAbortController = new AbortController()
+        const abortController =
+          cancellationSource === `request`
+            ? requestAbortController
+            : collectionAbortController
 
-        expect(testCollection.has(2)).toBe(false)
-        await load.catch(() => undefined)
-      } finally {
-        resolveSnapshot({ metadata: {}, data: [] })
-        await testCollection.cleanup()
-      }
-    })
+        try {
+          transaction.mutate(() =>
+            testCollection.insert({ id: 3, name: `Local row` }),
+          )
+          const load = Promise.resolve(
+            testCollection._sync.loadSubset({
+              limit: 1,
+              signal: requestAbortController.signal,
+            }),
+          )
+          const loadError = load.then(
+            () => undefined,
+            (error: unknown) => error,
+          )
+          await vi.waitFor(() =>
+            expect(mockFetchSnapshot).toHaveBeenCalledOnce(),
+          )
+          await Promise.resolve()
+          await Promise.resolve()
 
-    it(`rejects a progressive snapshot aborted while its commit is parked`, async () => {
-      mockFetchSnapshot.mockResolvedValue({
-        metadata: {},
-        data: [
-          {
-            key: `2`,
-            value: { id: 2, name: `Obsolete snapshot` },
-            headers: { operation: `insert` },
-          },
-        ],
-      })
-      mockSubscribe.mockImplementation(() => () => {})
-      const testCollection = createCollection(
-        electricCollectionOptions({
-          id: `progressive-parked-abort-test`,
+          expect(testCollection.has(2)).toBe(false)
+          if (cancellationSource === `cleanup`) {
+            await testCollection.cleanup()
+          } else {
+            abortController.abort()
+          }
+          persistence.resolve()
+          await transaction.isPersisted.promise
+          await expect(loadError).resolves.toMatchObject({ name: `AbortError` })
+
+          expect(testCollection.has(2)).toBe(false)
+          await load.catch(() => undefined)
+        } finally {
+          abortController.abort()
+          persistence.resolve()
+          await transaction.isPersisted.promise.catch(() => undefined)
+          await testCollection.cleanup()
+        }
+      },
+    )
+
+    it.each([`fetch`, `commit`] as const)(
+      `propagates an uncanceled progressive %s error`,
+      async (failurePhase) => {
+        const failure = new Error(`${failurePhase} failed`)
+        if (failurePhase === `fetch`) {
+          mockFetchSnapshot.mockRejectedValue(failure)
+        } else {
+          mockFetchSnapshot.mockResolvedValue({
+            metadata: {},
+            data: [
+              {
+                key: `2`,
+                value: { id: 2, name: `Snapshot row` },
+                headers: { operation: `insert` },
+              },
+            ],
+          })
+        }
+        const options = electricCollectionOptions({
+          id: `progressive-${failurePhase}-error-test`,
           shapeOptions: {
             url: `http://test-url`,
             params: { table: `test_table` },
@@ -3538,45 +3670,215 @@ describe(`Electric Integration`, () => {
           syncMode: `progressive`,
           getKey: (item: Row) => item.id as number,
           startSync: true,
-        }),
-      )
-      const persistence = createDeferred<void>()
-      const transaction = createTransaction({
-        mutationFn: () => persistence.promise,
-      })
-      const abortController = new AbortController()
+        })
+        const controls = options.sync.sync({
+          collection: { id: options.id, status: `loading` },
+          begin: vi.fn(),
+          write: vi.fn(),
+          commit:
+            failurePhase === `commit`
+              ? vi.fn(() => Promise.reject(failure))
+              : vi.fn(() => true as const),
+          markReady: vi.fn(),
+          markError: vi.fn(),
+          truncate: vi.fn(),
+        } as never)
+        if (
+          !controls ||
+          typeof controls === `function` ||
+          !controls.loadSubset
+        ) {
+          throw new Error(`Expected progressive sync controls`)
+        }
 
-      try {
-        transaction.mutate(() =>
-          testCollection.insert({ id: 3, name: `Local row` }),
-        )
+        try {
+          await expect(
+            Promise.resolve(controls.loadSubset({ limit: 1 })),
+          ).rejects.toBe(failure)
+        } finally {
+          controls.cleanup?.()
+        }
+      },
+    )
+
+    it.each([
+      { failurePhase: `fetch`, signalSource: `request`, order: `cancel-first` },
+      { failurePhase: `fetch`, signalSource: `request`, order: `error-first` },
+      {
+        failurePhase: `fetch`,
+        signalSource: `collection`,
+        order: `cancel-first`,
+      },
+      {
+        failurePhase: `fetch`,
+        signalSource: `collection`,
+        order: `error-first`,
+      },
+      {
+        failurePhase: `commit`,
+        signalSource: `request`,
+        order: `cancel-first`,
+      },
+      { failurePhase: `commit`, signalSource: `request`, order: `error-first` },
+      {
+        failurePhase: `commit`,
+        signalSource: `collection`,
+        order: `cancel-first`,
+      },
+      {
+        failurePhase: `commit`,
+        signalSource: `collection`,
+        order: `error-first`,
+      },
+    ] as const)(
+      `prefers AbortError when $signalSource cancellation races a progressive $failurePhase error in $order order`,
+      async ({ failurePhase, signalSource, order }) => {
+        const failure = new Error(`${failurePhase} failed`)
+        const fetch = createDeferred<{
+          metadata: Record<string, never>
+          data: Array<{
+            key: string
+            value: Row
+            headers: { operation: `insert` }
+          }>
+        }>()
+        const commit = createDeferred<void>()
+        if (failurePhase === `fetch`) {
+          mockFetchSnapshot.mockReturnValue(fetch.promise)
+        } else {
+          mockFetchSnapshot.mockResolvedValue({
+            metadata: {},
+            data: [
+              {
+                key: `2`,
+                value: { id: 2, name: `Snapshot row` },
+                headers: { operation: `insert` },
+              },
+            ],
+          })
+        }
+        const collectionAbortController = new AbortController()
+        const requestAbortController = new AbortController()
+        const options = electricCollectionOptions({
+          id: `progressive-${failurePhase}-${signalSource}-${order}-test`,
+          shapeOptions: {
+            url: `http://test-url`,
+            params: { table: `test_table` },
+            signal: collectionAbortController.signal,
+          },
+          syncMode: `progressive`,
+          getKey: (item: Row) => item.id as number,
+          startSync: true,
+        })
+        const commitMock =
+          failurePhase === `commit`
+            ? vi.fn(() => commit.promise)
+            : vi.fn(() => true as const)
+        const controls = options.sync.sync({
+          collection: { id: options.id, status: `loading` },
+          begin: vi.fn(),
+          write: vi.fn(),
+          commit: commitMock,
+          markReady: vi.fn(),
+          markError: vi.fn(),
+          truncate: vi.fn(),
+        } as never)
+        if (
+          !controls ||
+          typeof controls === `function` ||
+          !controls.loadSubset
+        ) {
+          throw new Error(`Expected progressive sync controls`)
+        }
+        const abortController =
+          signalSource === `request`
+            ? requestAbortController
+            : collectionAbortController
         const load = Promise.resolve(
-          testCollection._sync.loadSubset({
+          controls.loadSubset({
             limit: 1,
-            signal: abortController.signal,
+            signal: requestAbortController.signal,
           }),
         )
         const loadError = load.then(
           () => undefined,
           (error: unknown) => error,
         )
-        await vi.waitFor(() => expect(mockFetchSnapshot).toHaveBeenCalledOnce())
-        await Promise.resolve()
-        await Promise.resolve()
 
-        expect(testCollection.has(2)).toBe(false)
-        abortController.abort()
-        persistence.resolve()
-        await transaction.isPersisted.promise
-        await expect(loadError).resolves.toMatchObject({ name: `AbortError` })
+        try {
+          if (failurePhase === `commit`) {
+            await vi.waitFor(() => expect(commitMock).toHaveBeenCalledOnce())
+          }
+          if (order === `cancel-first`) abortController.abort()
+          if (failurePhase === `fetch`) fetch.reject(failure)
+          else commit.reject(failure)
+          if (order === `error-first`) abortController.abort()
 
-        expect(testCollection.has(2)).toBe(false)
-        await load.catch(() => undefined)
+          await expect(loadError).resolves.toMatchObject({ name: `AbortError` })
+          await load.catch(() => undefined)
+        } finally {
+          collectionAbortController.abort()
+          requestAbortController.abort()
+          fetch.resolve({ metadata: {}, data: [] })
+          commit.resolve()
+          controls.cleanup?.()
+        }
+      },
+    )
+
+    it(`keeps a progressive snapshot applied before cancellation`, async () => {
+      mockFetchSnapshot.mockResolvedValue({
+        metadata: {},
+        data: [
+          {
+            key: `2`,
+            value: { id: 2, name: `Applied snapshot` },
+            headers: { operation: `insert` },
+          },
+        ],
+      })
+      const requestAbortController = new AbortController()
+      const stagedRows: Array<Row> = []
+      const appliedRows: Array<Row> = []
+      const options = electricCollectionOptions({
+        id: `progressive-applied-before-abort-test`,
+        shapeOptions: {
+          url: `http://test-url`,
+          params: { table: `test_table` },
+        },
+        syncMode: `progressive`,
+        getKey: (item: Row) => item.id as number,
+        startSync: true,
+      })
+      const controls = options.sync.sync({
+        collection: { id: options.id, status: `loading` },
+        begin: vi.fn(),
+        write: vi.fn((change: { value: Row }) => stagedRows.push(change.value)),
+        commit: vi.fn(() => {
+          appliedRows.push(...stagedRows)
+          requestAbortController.abort()
+          return true as const
+        }),
+        markReady: vi.fn(),
+        markError: vi.fn(),
+        truncate: vi.fn(),
+      } as never)
+      if (!controls || typeof controls === `function` || !controls.loadSubset) {
+        throw new Error(`Expected progressive sync controls`)
+      }
+
+      try {
+        await expect(
+          Promise.resolve(
+            controls.loadSubset({
+              limit: 1,
+              signal: requestAbortController.signal,
+            }),
+          ),
+        ).resolves.toBeUndefined()
+        expect(appliedRows).toEqual([{ id: 2, name: `Applied snapshot` }])
       } finally {
-        abortController.abort()
-        persistence.resolve()
-        await transaction.isPersisted.promise.catch(() => undefined)
-        await testCollection.cleanup()
+        controls.cleanup?.()
       }
     })
 
