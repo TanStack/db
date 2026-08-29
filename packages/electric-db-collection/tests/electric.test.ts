@@ -3215,65 +3215,76 @@ describe(`Electric Integration`, () => {
       }
     })
 
-    it(`prefers collection cancellation over an already-rejected applied receipt`, async () => {
-      const request = createDeferred<void>()
-      mockRequestSnapshot.mockReturnValueOnce(request.promise)
-      const collectionAbortController = new AbortController()
-      const receiptFailure = new Error(`applied receipt failed`)
-      const options = electricCollectionOptions({
-        id: `on-demand-pre-wait-collection-cancel-test`,
-        shapeOptions: {
-          url: `http://test-url`,
-          params: { table: `test_table` },
-          signal: collectionAbortController.signal,
-        },
-        syncMode: `on-demand`,
-        getKey: (item: Row) => item.id as number,
-        startSync: true,
-      })
-      const commitMock = vi.fn(() => Promise.reject(receiptFailure))
-      const controls = options.sync.sync({
-        collection: {
-          id: options.id,
-          status: `loading`,
-          getKeyFromItem: (item: Row) => item.id,
-        },
-        begin: vi.fn(),
-        write: vi.fn(),
-        commit: commitMock,
-        markReady: vi.fn(),
-        markError: vi.fn(),
-        truncate: vi.fn(),
-      } as never)
-      if (!controls || typeof controls === `function` || !controls.loadSubset) {
-        throw new Error(`Expected on-demand sync controls`)
-      }
-
-      try {
-        const load = Promise.resolve(controls.loadSubset({ limit: 10 }))
-        await vi.waitFor(() =>
-          expect(mockRequestSnapshot).toHaveBeenCalledOnce(),
-        )
-        subscriber([
-          {
-            key: `2`,
-            value: { id: 2, name: `Rejected receipt row` },
-            headers: { operation: `insert` },
+    it.each([`external abort`, `cleanup`] as const)(
+      `prefers %s over an already-rejected applied receipt`,
+      async (cancellationSource) => {
+        const request = createDeferred<void>()
+        mockRequestSnapshot.mockReturnValueOnce(request.promise)
+        const collectionAbortController = new AbortController()
+        const receiptFailure = new Error(`applied receipt failed`)
+        const options = electricCollectionOptions({
+          id: `on-demand-pre-wait-collection-cancel-test`,
+          shapeOptions: {
+            url: `http://test-url`,
+            params: { table: `test_table` },
+            signal: collectionAbortController.signal,
           },
-          { headers: { control: `subset-end` } },
-        ])
-        await vi.waitFor(() => expect(commitMock).toHaveBeenCalledOnce())
+          syncMode: `on-demand`,
+          getKey: (item: Row) => item.id as number,
+          startSync: true,
+        })
+        const commitMock = vi.fn(() => Promise.reject(receiptFailure))
+        const controls = options.sync.sync({
+          collection: {
+            id: options.id,
+            status: `loading`,
+            getKeyFromItem: (item: Row) => item.id,
+          },
+          begin: vi.fn(),
+          write: vi.fn(),
+          commit: commitMock,
+          markReady: vi.fn(),
+          markError: vi.fn(),
+          truncate: vi.fn(),
+        } as never)
+        if (
+          !controls ||
+          typeof controls === `function` ||
+          !controls.loadSubset
+        ) {
+          throw new Error(`Expected on-demand sync controls`)
+        }
 
-        collectionAbortController.abort()
-        request.resolve()
+        try {
+          const load = Promise.resolve(controls.loadSubset({ limit: 10 }))
+          await vi.waitFor(() =>
+            expect(mockRequestSnapshot).toHaveBeenCalledOnce(),
+          )
+          subscriber([
+            {
+              key: `2`,
+              value: { id: 2, name: `Rejected receipt row` },
+              headers: { operation: `insert` },
+            },
+            { headers: { control: `subset-end` } },
+          ])
+          await vi.waitFor(() => expect(commitMock).toHaveBeenCalledOnce())
 
-        await expect(load).rejects.toMatchObject({ name: `AbortError` })
-      } finally {
-        collectionAbortController.abort()
-        request.resolve()
-        controls.cleanup?.()
-      }
-    })
+          if (cancellationSource === `external abort`) {
+            collectionAbortController.abort()
+          } else {
+            controls.cleanup?.()
+          }
+          request.resolve()
+
+          await expect(load).rejects.toMatchObject({ name: `AbortError` })
+        } finally {
+          collectionAbortController.abort()
+          request.resolve()
+          controls.cleanup?.()
+        }
+      },
+    )
 
     it.each([`success`, `rejection`, `cancellation`] as const)(
       `removes the on-demand request lease listener after %s`,
@@ -4926,9 +4937,16 @@ describe(`Electric Integration`, () => {
       },
     )
 
-    it.each([`progressive atomic-swap`, `metadata-only`] as const)(
-      `binds the %s commit to collection lifetime`,
-      (commitPath) => {
+    it.each(
+      ([`progressive atomic-swap`, `metadata-only`] as const).flatMap(
+        (commitPath) =>
+          ([`external abort`, `cleanup`] as const).map(
+            (cancellationSource) => [commitPath, cancellationSource] as const,
+          ),
+      ),
+    )(
+      `binds the %s commit to collection lifetime through %s`,
+      (commitPath, cancellationSource) => {
         const collectionAbortController = new AbortController()
         const receipt = createDeferred<void>()
         const metadataHarness = createInMemorySyncMetadataApi()
@@ -4985,7 +5003,11 @@ describe(`Electric Integration`, () => {
           expect(commitSignal).toBeDefined()
           expect(commitSignal?.aborted).toBe(false)
 
-          collectionAbortController.abort()
+          if (cancellationSource === `external abort`) {
+            collectionAbortController.abort()
+          } else {
+            controls.cleanup?.()
+          }
 
           expect(commitSignal?.aborted).toBe(true)
         } finally {
