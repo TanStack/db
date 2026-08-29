@@ -2329,4 +2329,30 @@ describe(`Collection isLoadingSubset property`, () => {
     expect(result).toBe(true)
     expect(collection.isLoadingSubset).toBe(false)
   })
+
+  it(`rejects an already-aborted subset request before calling the adapter`, async () => {
+    const loadSubset = vi.fn(() => true as const)
+    const collection = createCollection<{ id: string; value: string }>({
+      id: `already-aborted-subset-request`,
+      getKey: (item) => item.id,
+      syncMode: `on-demand`,
+      startSync: true,
+      sync: {
+        sync: ({ markReady }) => {
+          markReady()
+          return { loadSubset }
+        },
+      },
+    })
+    const request = new AbortController()
+    request.abort()
+
+    await expect(
+      collection._sync.loadSubset({ signal: request.signal }),
+    ).rejects.toMatchObject({ name: `AbortError` })
+
+    expect(loadSubset).not.toHaveBeenCalled()
+    expect(collection.isLoadingSubset).toBe(false)
+    await collection.cleanup()
+  })
 })
