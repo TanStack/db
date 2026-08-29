@@ -2556,7 +2556,9 @@ describe(`On-Demand Sync Mode`, () => {
             }
             queued.push(run)
             if (scheduler) {
-              void scheduler.scheduleFunction(run)()
+              void scheduler
+                .schedule(Promise.resolve(), `write-lock-${queued.length}`)
+                .then(run)
             }
           }) as never,
       )
@@ -2661,9 +2663,11 @@ describe(`On-Demand Sync Mode`, () => {
     async function expectScheduledLifecycleMatches(
       scheduler: Scheduler,
       secondOutcome: ScheduledSecondOutcome,
+      expectedActionOrder?: ReadonlyArray<string>,
     ) {
       const harness = await startConcurrentLifecycleHarness(scheduler)
       const hookFailure = new Error(`scheduled hook failure`)
+      const actionOrder: Array<string> = []
       let firstError: unknown
       let secondError: unknown
 
@@ -2690,8 +2694,11 @@ describe(`On-Demand Sync Mode`, () => {
           })
         await vi.waitFor(() => expect(harness.hooks).toHaveLength(2))
 
-        const schedule = (action: () => void) => {
-          void scheduler.scheduleFunction(() => Promise.resolve(action()))()
+        const schedule = (label: string, action: () => void) => {
+          void scheduler.schedule(Promise.resolve(), label).then(() => {
+            actionOrder.push(label)
+            action()
+          })
         }
         const endsInRelease = secondOutcome.startsWith(`release-`)
         const endsInCleanup = secondOutcome.startsWith(`cleanup-`)
@@ -2700,13 +2707,17 @@ describe(`On-Demand Sync Mode`, () => {
         )
 
         if (secondOutcome === `reject`) {
-          schedule(() => harness.hooks[1]!.reject(hookFailure))
+          schedule(`reject-second-hook`, () =>
+            harness.hooks[1]!.reject(hookFailure),
+          )
         } else {
-          schedule(() => harness.hooks[1]!.resolve())
+          schedule(`resolve-second-hook`, () => harness.hooks[1]!.resolve())
           if (secondOutcome === `release-during-hook`) {
-            schedule(() => harness.unloadSubset(harness.second))
+            schedule(`release-second-demand`, () =>
+              harness.unloadSubset(harness.second),
+            )
           } else if (secondOutcome === `cleanup-during-hook`) {
-            schedule(() => harness.sync.cleanup?.())
+            schedule(`cleanup-sync`, () => harness.sync.cleanup?.())
           }
         }
 
@@ -2719,6 +2730,10 @@ describe(`On-Demand Sync Mode`, () => {
             harness.sync.cleanup?.()
           }
           await drainScheduledLifecycle(scheduler)
+        }
+
+        if (expectedActionOrder) {
+          expect(actionOrder).toEqual(expectedActionOrder)
         }
 
         expect(firstError).toBeUndefined()
@@ -2741,17 +2756,22 @@ describe(`On-Demand Sync Mode`, () => {
         }
 
         expect(liveTracking).toHaveLength(1)
-        const finalInsert = liveTracking[0]!.when.INSERT
-        expect(finalInsert).toContain(`electronics`)
-        if (secondOutcome === `activate`) {
-          expect(finalInsert).toContain(`clothing`)
-        } else {
-          expect(finalInsert).not.toContain(`clothing`)
+        for (const operation of [`INSERT`, `UPDATE`, `DELETE`] as const) {
+          const finalClause = liveTracking[0]!.when[operation]
+          expect(finalClause).toContain(`electronics`)
+          if (secondOutcome === `activate`) {
+            expect(finalClause).toContain(`clothing`)
+          } else {
+            expect(finalClause).not.toContain(`clothing`)
+          }
         }
         if (secondOutcome === `reject`) {
           expect(
             harness.trackingHandles.every(
-              ({ when }) => !when.INSERT.includes(`clothing`),
+              ({ when }) =>
+                ([`INSERT`, `UPDATE`, `DELETE`] as const).every(
+                  (operation) => !when[operation].includes(`clothing`),
+                ),
             ),
           ).toBe(true)
         }
@@ -2910,6 +2930,104 @@ describe(`On-Demand Sync Mode`, () => {
       }
     })
 
+    it(`disposes superseded tracking before its replacement starts`, async () => {
+      const db = await createDatabase()
+      const hooks: Array<ReturnType<typeof pDefer<void>>> = []
+      const onLoadSubset = vi.fn(() => {
+        const hook = pDefer<void>()
+        hooks.push(hook)
+        return hook.promise.then(() => vi.fn())
+      })
+      const queuedLocks = queueWriteLocks(db)
+      vi.spyOn(db, `getAll`).mockResolvedValue([])
+
+      const triggerStarted = pDefer<void>()
+      const finishTrigger = pDefer<void>()
+      const staleDispose = vi.fn(() => Promise.resolve())
+      const currentDispose = vi.fn(() => Promise.resolve())
+      const triggerClauses: Array<
+        Record<`INSERT` | `UPDATE` | `DELETE`, string>
+      > = []
+      const createDiffTrigger = vi
+        .spyOn(db.triggers, `createDiffTrigger`)
+        .mockImplementation(async ({ when }) => {
+          triggerClauses.push(
+            when as Record<`INSERT` | `UPDATE` | `DELETE`, string>,
+          )
+          if (triggerClauses.length === 1) {
+            triggerStarted.resolve()
+            await finishTrigger.promise
+            return staleDispose
+          }
+          return currentDispose
+        })
+
+      const config = powerSyncCollectionOptions({
+        database: db,
+        table: APP_SCHEMA.props.products,
+        syncMode: `on-demand`,
+        onLoadSubset,
+      })
+      const sync = config.sync.sync({
+        collection: { status: `ready`, has: () => false },
+        begin: vi.fn(),
+        write: vi.fn(),
+        commit: () => true,
+        markReady: vi.fn(),
+        markError: vi.fn(),
+        truncate: vi.fn(),
+      } as never)
+      if (!sync || typeof sync === `function` || !sync.loadSubset) {
+        throw new Error(`Expected on-demand sync controls`)
+      }
+
+      const first = { where: eq(`category`, `electronics`) }
+      const second = { where: eq(`category`, `clothing`) }
+      let firstLoad: Promise<void> | undefined
+      let secondLoad: Promise<void> | undefined
+
+      try {
+        firstLoad = Promise.resolve(sync.loadSubset(first)).then(
+          () => undefined,
+        )
+        await vi.waitFor(() => expect(hooks).toHaveLength(1))
+        hooks[0]!.resolve()
+        await vi.waitFor(() => expect(queuedLocks).toHaveLength(1))
+
+        const staleRebuild = queuedLocks[0]!()
+        await triggerStarted.promise
+
+        secondLoad = Promise.resolve(sync.loadSubset(second)).then(
+          () => undefined,
+        )
+        await vi.waitFor(() => expect(hooks).toHaveLength(2))
+        hooks[1]!.resolve()
+        await new Promise((resolve) => setTimeout(resolve, 0))
+
+        finishTrigger.resolve()
+        await staleRebuild
+
+        expect(staleDispose).toHaveBeenCalledOnce()
+        expect(createDiffTrigger).toHaveBeenCalledOnce()
+
+        await vi.waitFor(() => expect(queuedLocks).toHaveLength(2))
+        await queuedLocks[1]!()
+        await Promise.all([firstLoad, secondLoad])
+
+        expect(createDiffTrigger).toHaveBeenCalledTimes(2)
+        expect(currentDispose).not.toHaveBeenCalled()
+        for (const operation of [`INSERT`, `UPDATE`, `DELETE`] as const) {
+          expect(triggerClauses[1]![operation]).toContain(`electronics`)
+          expect(triggerClauses[1]![operation]).toContain(`clothing`)
+        }
+      } finally {
+        hooks.forEach((hook) => hook.resolve())
+        sync.cleanup?.()
+        await Promise.all(queuedLocks.map((run) => run()))
+        await Promise.allSettled([firstLoad, secondLoad])
+      }
+    })
+
     for (const secondOutcome of [
       `activate`,
       `reject`,
@@ -2925,6 +3043,48 @@ describe(`On-Demand Sync Mode`, () => {
         },
       )
     }
+
+    it.each([
+      {
+        name: `release before hook resolution`,
+        outcome: `release-during-hook` as const,
+        order: [3, 2, 1],
+        expectedActionOrder: [
+          `release-second-demand`,
+          `resolve-second-hook`,
+        ],
+      },
+      {
+        name: `hook resolution before release`,
+        outcome: `release-during-hook` as const,
+        order: [2, 3, 1, 4],
+        expectedActionOrder: [
+          `resolve-second-hook`,
+          `release-second-demand`,
+        ],
+      },
+      {
+        name: `cleanup before hook resolution`,
+        outcome: `cleanup-during-hook` as const,
+        order: [3, 2, 1],
+        expectedActionOrder: [`cleanup-sync`, `resolve-second-hook`],
+      },
+      {
+        name: `hook resolution before cleanup`,
+        outcome: `cleanup-during-hook` as const,
+        order: [2, 3, 1],
+        expectedActionOrder: [`resolve-second-hook`, `cleanup-sync`],
+      },
+    ])(
+      `keeps tracking coherent when $name`,
+      async ({ outcome, order, expectedActionOrder }) => {
+        await expectScheduledLifecycleMatches(
+          fc.schedulerFor(order),
+          outcome,
+          expectedActionOrder,
+        )
+      },
+    )
 
     it(`does not start queued tracking after collection cleanup`, async () => {
       const db = await createDatabase()
