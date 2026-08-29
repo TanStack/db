@@ -3513,6 +3513,78 @@ describe(`Electric Integration`, () => {
       },
     )
 
+    it.each([`whereCurrent`, `whereFrom`] as const)(
+      `uses stable cursor error priority when $firstFailure rejects first`,
+      async (firstFailure) => {
+        const whereCurrent = createDeferred<void>()
+        const whereFrom = createDeferred<void>()
+        mockRequestSnapshot
+          .mockReturnValueOnce(whereCurrent.promise)
+          .mockReturnValueOnce(whereFrom.promise)
+        const testCollection = createOnDemandCollection(
+          `on-demand-cursor-${firstFailure}-first-double-error-test`,
+        )
+        const currentFailure = new Error(`whereCurrent request failed`)
+        const fromFailure = new Error(`whereFrom request failed`)
+        const id = new IR.PropRef([`id`])
+
+        try {
+          const load = Promise.resolve(
+            testCollection._sync.loadSubset({
+              limit: 10,
+              orderBy: [
+                {
+                  expression: id,
+                  compareOptions: {
+                    direction: `asc`,
+                    nulls: `last`,
+                    stringSort: `lexical`,
+                  },
+                },
+              ],
+              cursor: {
+                whereCurrent: new IR.Func(`eq`, [id, new IR.Value(1)]),
+                whereFrom: new IR.Func(`gt`, [id, new IR.Value(1)]),
+                lastKey: 1,
+              },
+            }),
+          )
+          const loadError = load.then(
+            () => undefined,
+            (error: unknown) => error,
+          )
+          await vi.waitFor(() =>
+            expect(mockRequestSnapshot).toHaveBeenCalledTimes(2),
+          )
+
+          const first =
+            firstFailure === `whereCurrent` ? whereCurrent : whereFrom
+          const second =
+            firstFailure === `whereCurrent` ? whereFrom : whereCurrent
+          first.reject(
+            firstFailure === `whereCurrent` ? currentFailure : fromFailure,
+          )
+
+          const nextTurn = new Promise<`next-turn`>((resolve) =>
+            setTimeout(() => resolve(`next-turn`), 0),
+          )
+          await expect(
+            Promise.race([loadError.then(() => `settled` as const), nextTurn]),
+          ).resolves.toBe(`next-turn`)
+
+          second.reject(
+            firstFailure === `whereCurrent` ? fromFailure : currentFailure,
+          )
+          await expect(loadError).resolves.toBe(currentFailure)
+          await load.catch(() => undefined)
+        } finally {
+          whereCurrent.resolve()
+          whereFrom.resolve()
+          await testCollection.cleanup()
+        }
+      },
+    )
+
     it(`waits for both cursor snapshot requests before settling`, async () => {
       const whereCurrent = createDeferred<void>()
       const whereFrom = createDeferred<void>()

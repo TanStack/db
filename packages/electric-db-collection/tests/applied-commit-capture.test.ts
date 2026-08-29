@@ -35,6 +35,19 @@ describe(`applied commit capture`, () => {
     await wait
   })
 
+  it(`seals the receipt set before waiting`, async () => {
+    const registry = createAppliedCommitCaptureRegistry()
+    const capture = registry.capture()
+    const lateReceipt = createDeferred()
+
+    const wait = capture.wait()
+    registry.record(lateReceipt.promise)
+
+    expect(registry.activeCount).toBe(0)
+    await expect(wait).resolves.toBeUndefined()
+    lateReceipt.resolve()
+  })
+
   it.each([`first`, `second`] as const)(
     `propagates a settled %s receipt failure`,
     async (failedReceipt) => {
@@ -96,10 +109,12 @@ describe(`applied commit capture`, () => {
     const registry = createAppliedCommitCaptureRegistry()
     const controller = new AbortController()
     controller.abort()
+    const addSpy = vi.spyOn(controller.signal, `addEventListener`)
 
     registry.capture(controller.signal)
 
     expect(registry.activeCount).toBe(0)
+    expect(addSpy).not.toHaveBeenCalled()
   })
 
   it.each([`wait`, `dispose`] as const)(
