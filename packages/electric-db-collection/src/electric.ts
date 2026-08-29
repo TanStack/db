@@ -764,7 +764,9 @@ function createLoadSubsetDedupe<T extends Row<unknown>>({
         await stream.requestSnapshot(snapshotParams)
       }
     } catch (error) {
-      if (opts.signal?.aborted) return
+      if (signal.aborted) {
+        throw new SyncTransactionAbortedError()
+      }
       if (handleSnapshotError(error, `requestSnapshot`)) {
         return
       }
