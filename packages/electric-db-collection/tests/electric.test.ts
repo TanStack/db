@@ -3215,6 +3215,66 @@ describe(`Electric Integration`, () => {
       }
     })
 
+    it(`prefers collection cancellation over an already-rejected applied receipt`, async () => {
+      const request = createDeferred<void>()
+      mockRequestSnapshot.mockReturnValueOnce(request.promise)
+      const collectionAbortController = new AbortController()
+      const receiptFailure = new Error(`applied receipt failed`)
+      const options = electricCollectionOptions({
+        id: `on-demand-pre-wait-collection-cancel-test`,
+        shapeOptions: {
+          url: `http://test-url`,
+          params: { table: `test_table` },
+          signal: collectionAbortController.signal,
+        },
+        syncMode: `on-demand`,
+        getKey: (item: Row) => item.id as number,
+        startSync: true,
+      })
+      const commitMock = vi.fn(() => Promise.reject(receiptFailure))
+      const controls = options.sync.sync({
+        collection: {
+          id: options.id,
+          status: `loading`,
+          getKeyFromItem: (item: Row) => item.id,
+        },
+        begin: vi.fn(),
+        write: vi.fn(),
+        commit: commitMock,
+        markReady: vi.fn(),
+        markError: vi.fn(),
+        truncate: vi.fn(),
+      } as never)
+      if (!controls || typeof controls === `function` || !controls.loadSubset) {
+        throw new Error(`Expected on-demand sync controls`)
+      }
+
+      try {
+        const load = Promise.resolve(controls.loadSubset({ limit: 10 }))
+        await vi.waitFor(() =>
+          expect(mockRequestSnapshot).toHaveBeenCalledOnce(),
+        )
+        subscriber([
+          {
+            key: `2`,
+            value: { id: 2, name: `Rejected receipt row` },
+            headers: { operation: `insert` },
+          },
+          { headers: { control: `subset-end` } },
+        ])
+        await vi.waitFor(() => expect(commitMock).toHaveBeenCalledOnce())
+
+        collectionAbortController.abort()
+        request.resolve()
+
+        await expect(load).rejects.toMatchObject({ name: `AbortError` })
+      } finally {
+        collectionAbortController.abort()
+        request.resolve()
+        controls.cleanup?.()
+      }
+    })
+
     it.each([`success`, `rejection`, `cancellation`] as const)(
       `removes the on-demand request lease listener after %s`,
       async (settlement) => {
@@ -4861,6 +4921,76 @@ describe(`Electric Integration`, () => {
           removeSpy.mockRestore()
           requestAbortController.abort()
           commit.resolve()
+          controls.cleanup?.()
+        }
+      },
+    )
+
+    it.each([`progressive atomic-swap`, `metadata-only`] as const)(
+      `binds the %s commit to collection lifetime`,
+      (commitPath) => {
+        const collectionAbortController = new AbortController()
+        const receipt = createDeferred<void>()
+        const metadataHarness = createInMemorySyncMetadataApi()
+        const isProgressive = commitPath === `progressive atomic-swap`
+        let commitSignal: AbortSignal | undefined
+        const options = electricCollectionOptions({
+          id: `${commitPath.replaceAll(` `, `-`)}-commit-signal-test`,
+          shapeOptions: {
+            url: `http://test-url`,
+            params: { table: `test_table` },
+            signal: collectionAbortController.signal,
+          },
+          syncMode: isProgressive ? `progressive` : `eager`,
+          getKey: (item: Row) => item.id as number,
+          startSync: true,
+        })
+        const commitMock = vi.fn((signal?: AbortSignal) => {
+          commitSignal = signal
+          return receipt.promise
+        })
+        const controls = options.sync.sync({
+          collection: {
+            id: options.id,
+            status: `loading`,
+            getKeyFromItem: (item: Row) => item.id,
+          },
+          begin: vi.fn(),
+          write: vi.fn(),
+          commit: commitMock,
+          markReady: vi.fn(),
+          markError: vi.fn(),
+          truncate: vi.fn(),
+          metadata: isProgressive ? undefined : metadataHarness.api,
+        } as never)
+        if (!controls || typeof controls === `function`) {
+          throw new Error(`Expected sync controls`)
+        }
+
+        try {
+          if (isProgressive) {
+            subscriber([
+              {
+                key: `2`,
+                value: { id: 2, name: `Buffered row` },
+                headers: { operation: `insert` },
+              },
+              { headers: { control: `up-to-date` } },
+            ])
+          } else {
+            subscriber([{ headers: { control: `up-to-date` } }])
+          }
+
+          expect(commitMock).toHaveBeenCalledOnce()
+          expect(commitSignal).toBeDefined()
+          expect(commitSignal?.aborted).toBe(false)
+
+          collectionAbortController.abort()
+
+          expect(commitSignal?.aborted).toBe(true)
+        } finally {
+          collectionAbortController.abort()
+          receipt.resolve()
           controls.cleanup?.()
         }
       },
