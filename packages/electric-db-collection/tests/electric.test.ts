@@ -3826,61 +3826,198 @@ describe(`Electric Integration`, () => {
       },
     )
 
-    it(`keeps a progressive snapshot applied before cancellation`, async () => {
-      mockFetchSnapshot.mockResolvedValue({
-        metadata: {},
-        data: [
-          {
-            key: `2`,
-            value: { id: 2, name: `Applied snapshot` },
-            headers: { operation: `insert` },
+    it.each([`request`, `collection`, `cleanup`] as const)(
+      `keeps a progressive snapshot applied before %s cancellation`,
+      async (cancellationSource) => {
+        mockFetchSnapshot.mockResolvedValue({
+          metadata: {},
+          data: [
+            {
+              key: `2`,
+              value: { id: 2, name: `Applied snapshot` },
+              headers: { operation: `insert` },
+            },
+          ],
+        })
+        const requestAbortController = new AbortController()
+        const collectionAbortController = new AbortController()
+        const stagedRows: Array<Row> = []
+        const appliedRows: Array<Row> = []
+        let cleanup = () => {}
+        const options = electricCollectionOptions({
+          id: `progressive-applied-before-${cancellationSource}-test`,
+          shapeOptions: {
+            url: `http://test-url`,
+            params: { table: `test_table` },
+            signal: collectionAbortController.signal,
           },
-        ],
-      })
-      const requestAbortController = new AbortController()
-      const stagedRows: Array<Row> = []
-      const appliedRows: Array<Row> = []
-      const options = electricCollectionOptions({
-        id: `progressive-applied-before-abort-test`,
-        shapeOptions: {
-          url: `http://test-url`,
-          params: { table: `test_table` },
-        },
-        syncMode: `progressive`,
-        getKey: (item: Row) => item.id as number,
-        startSync: true,
-      })
-      const controls = options.sync.sync({
-        collection: { id: options.id, status: `loading` },
-        begin: vi.fn(),
-        write: vi.fn((change: { value: Row }) => stagedRows.push(change.value)),
-        commit: vi.fn(() => {
-          appliedRows.push(...stagedRows)
-          requestAbortController.abort()
-          return true as const
-        }),
-        markReady: vi.fn(),
-        markError: vi.fn(),
-        truncate: vi.fn(),
-      } as never)
-      if (!controls || typeof controls === `function` || !controls.loadSubset) {
-        throw new Error(`Expected progressive sync controls`)
-      }
+          syncMode: `progressive`,
+          getKey: (item: Row) => item.id as number,
+          startSync: true,
+        })
+        const controls = options.sync.sync({
+          collection: { id: options.id, status: `loading` },
+          begin: vi.fn(),
+          write: vi.fn((change: { value: Row }) =>
+            stagedRows.push(change.value),
+          ),
+          commit: vi.fn(() => {
+            appliedRows.push(...stagedRows)
+            if (cancellationSource === `request`) {
+              requestAbortController.abort()
+            } else if (cancellationSource === `collection`) {
+              collectionAbortController.abort()
+            } else {
+              cleanup()
+            }
+            return true as const
+          }),
+          markReady: vi.fn(),
+          markError: vi.fn(),
+          truncate: vi.fn(),
+        } as never)
+        if (
+          !controls ||
+          typeof controls === `function` ||
+          !controls.loadSubset
+        ) {
+          throw new Error(`Expected progressive sync controls`)
+        }
+        cleanup = controls.cleanup ?? (() => {})
 
-      try {
-        await expect(
-          Promise.resolve(
+        try {
+          await expect(
+            Promise.resolve(
+              controls.loadSubset({
+                limit: 1,
+                signal: requestAbortController.signal,
+              }),
+            ),
+          ).resolves.toBeUndefined()
+          expect(appliedRows).toEqual([{ id: 2, name: `Applied snapshot` }])
+        } finally {
+          controls.cleanup?.()
+        }
+      },
+    )
+
+    it.each([`success`, `rejection`, `request-abort`, `cleanup`] as const)(
+      `removes combined commit abort listeners after %s`,
+      async (settlement) => {
+        mockFetchSnapshot.mockResolvedValue({
+          metadata: {},
+          data: [
+            {
+              key: `2`,
+              value: { id: 2, name: `Snapshot row` },
+              headers: { operation: `insert` },
+            },
+          ],
+        })
+        const commit = createDeferred<void>()
+        const requestAbortController = new AbortController()
+        const options = electricCollectionOptions({
+          id: `progressive-combined-listener-${settlement}-test`,
+          shapeOptions: {
+            url: `http://test-url`,
+            params: { table: `test_table` },
+          },
+          syncMode: `progressive`,
+          getKey: (item: Row) => item.id as number,
+          startSync: true,
+        })
+        const commitMock = vi.fn(() => commit.promise)
+        const controls = options.sync.sync({
+          collection: { id: options.id, status: `loading` },
+          begin: vi.fn(),
+          write: vi.fn(),
+          commit: commitMock,
+          markReady: vi.fn(),
+          markError: vi.fn(),
+          truncate: vi.fn(),
+        } as never)
+        if (
+          !controls ||
+          typeof controls === `function` ||
+          !controls.loadSubset
+        ) {
+          throw new Error(`Expected progressive sync controls`)
+        }
+
+        const added: Array<{
+          signal: AbortSignal
+          listener: EventListenerOrEventListenerObject
+        }> = []
+        const removed: Array<{
+          signal: AbortSignal
+          listener: EventListenerOrEventListenerObject
+        }> = []
+        const originalAdd = AbortSignal.prototype.addEventListener
+        const originalRemove = AbortSignal.prototype.removeEventListener
+        const addSpy = vi
+          .spyOn(AbortSignal.prototype, `addEventListener`)
+          .mockImplementation(function (
+            this: AbortSignal,
+            type,
+            listener,
+            listenerOptions,
+          ) {
+            if (type === `abort`) added.push({ signal: this, listener })
+            return originalAdd.call(this, type, listener, listenerOptions)
+          })
+        const removeSpy = vi
+          .spyOn(AbortSignal.prototype, `removeEventListener`)
+          .mockImplementation(function (
+            this: AbortSignal,
+            type,
+            listener,
+            listenerOptions,
+          ) {
+            if (type === `abort`) removed.push({ signal: this, listener })
+            return originalRemove.call(this, type, listener, listenerOptions)
+          })
+        const failure = new Error(`commit failed`)
+
+        try {
+          const load = Promise.resolve(
             controls.loadSubset({
               limit: 1,
               signal: requestAbortController.signal,
             }),
-          ),
-        ).resolves.toBeUndefined()
-        expect(appliedRows).toEqual([{ id: 2, name: `Applied snapshot` }])
-      } finally {
-        controls.cleanup?.()
-      }
-    })
+          )
+          const loadError = load.then(
+            () => undefined,
+            (error: unknown) => error,
+          )
+          await vi.waitFor(() => expect(commitMock).toHaveBeenCalledOnce())
+
+          if (settlement === `request-abort`) {
+            requestAbortController.abort()
+          } else if (settlement === `cleanup`) {
+            controls.cleanup?.()
+          }
+          if (settlement === `rejection`) commit.reject(failure)
+          else commit.resolve()
+
+          if (settlement === `rejection`) {
+            await expect(loadError).resolves.toBe(failure)
+          } else {
+            await expect(loadError).resolves.toBeUndefined()
+          }
+          await load.catch(() => undefined)
+
+          for (const installed of added) {
+            expect(removed).toContainEqual(installed)
+          }
+        } finally {
+          addSpy.mockRestore()
+          removeSpy.mockRestore()
+          requestAbortController.abort()
+          commit.resolve()
+          controls.cleanup?.()
+        }
+      },
+    )
 
     it(`should not request snapshots when loadSubset is called in eager mode`, async () => {
       vi.clearAllMocks()
