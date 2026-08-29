@@ -3564,9 +3564,14 @@ describe(`Electric Integration`, () => {
       },
     )
 
-    it.each([`request`, `collection`, `cleanup`] as const)(
-      `rejects a progressive snapshot when %s cancellation occurs while its commit is parked`,
-      async (cancellationSource) => {
+    it.each([
+      { cancellationSource: `request`, requestSignal: `present` },
+      { cancellationSource: `collection`, requestSignal: `present` },
+      { cancellationSource: `collection`, requestSignal: `absent` },
+      { cancellationSource: `cleanup`, requestSignal: `present` },
+    ] as const)(
+      `rejects a progressive snapshot when $cancellationSource cancellation occurs with the request signal $requestSignal while its commit is parked`,
+      async ({ cancellationSource, requestSignal }) => {
         mockFetchSnapshot.mockResolvedValue({
           metadata: {},
           data: [
@@ -3609,7 +3614,10 @@ describe(`Electric Integration`, () => {
           const load = Promise.resolve(
             testCollection._sync.loadSubset({
               limit: 1,
-              signal: requestAbortController.signal,
+              signal:
+                requestSignal === `present`
+                  ? requestAbortController.signal
+                  : undefined,
             }),
           )
           const loadError = load.then(
