@@ -1,4 +1,5 @@
 import { deepEquals } from '../../utils.js'
+import { compileSingleRowExpression } from '../compiler/evaluators.js'
 import { TotalOrder } from '../total-order.js'
 import type { CollectionImpl } from '../../collection/index.js'
 import type { ChangeMessage } from '../../types.js'
@@ -24,6 +25,7 @@ export class WindowState<
   private hasInitialCoverage = false
   private hasUnsettledInitialMutation = false
   private revision = 0
+  private readonly matchesWhere: (row: TRow) => boolean
   private readonly candidateKeys = new Set<TKey>()
   private readonly provenanceKeys = new Set<TKey>()
   private readonly admittedKeys = new Set<TKey>()
@@ -33,8 +35,13 @@ export class WindowState<
     orderBy: OrderBy,
     private readonly where: BasicExpression<boolean> | undefined,
     targetSize: number,
+    private readonly expandSourceOrderTies = false,
   ) {
     this.totalOrder = new TotalOrder(orderBy, collection)
+    const evaluateWhere = where && compileSingleRowExpression(where)
+    this.matchesWhere = evaluateWhere
+      ? (row) => evaluateWhere(row as Record<string, unknown>) === true
+      : () => true
     this.activeSize = targetSize
     this.retainedSize = targetSize
   }
@@ -48,12 +55,30 @@ export class WindowState<
     return this.activeSize
   }
 
+  get retainedPrefixSize(): number {
+    return this.retainedSize
+  }
+
   get localPrefixSize(): number {
     return this.readPrefix().length
   }
 
+  /** The exact rows in the current retained ordered publication. */
+  publicationEntries(): Array<readonly [TKey, TRow]> {
+    return this.readPrefix().map(({ key, value }) => [key, value] as const)
+  }
+
   get coversActiveWindow(): boolean {
     return this.hasFullCoverage || this.coveredSize >= this.activeSize
+  }
+
+  get coveredPrefixSize(): number {
+    return this.coveredSize
+  }
+
+  /** A replacement can publish only after proving its retained prefix. */
+  get coversRetainedWindow(): boolean {
+    return this.hasFullCoverage || this.coveredSize >= this.retainedSize
   }
 
   get requiresFullRefinement(): boolean {
@@ -151,7 +176,12 @@ export class WindowState<
       // reacquire from the start before using any of it as a boundary.
       this.coveredSize = 0
     } else {
-      this.coveredSize = Math.max(this.coveredSize, requestedPrefix)
+      // A requested prefix is intent, not evidence. A short continuing page
+      // proves only the rows that this ordered demand has actually admitted.
+      this.coveredSize = Math.max(
+        this.coveredSize,
+        Math.min(requestedPrefix, this.localPrefixSize),
+      )
       this.needsPrefixRefresh = false
     }
   }
@@ -204,7 +234,15 @@ export class WindowState<
       return
     }
 
-    if (this.updateKnownPrefix(this.admittedKeys, changes)) {
+    const visibleChanges = changes.filter(
+      ({ value, previousValue }) =>
+        this.matchesWhere(value) ||
+        (previousValue !== undefined && this.matchesWhere(previousValue)),
+    )
+    if (
+      visibleChanges.length > 0 &&
+      this.updateKnownPrefix(this.admittedKeys, visibleChanges)
+    ) {
       this.revision++
       // A live change may update the visible prefix at once, but an applied
       // snapshot fact does not prove the new remote boundary. Reacquire from
@@ -274,16 +312,31 @@ export class WindowState<
   }
 
   requestBoundary(): TotalOrderBoundary<TKey> | undefined {
-    const rows = this.readRows(
+    // Applied source rows prove cursor progress even when this subscription's
+    // predicate excludes them. Keep that source boundary separate from the
+    // eligible rows admitted to the visible result prefix.
+    const hasContinuationProvenance = this.provenanceKeys.size > 0
+    const rows = this.readSourceRows(
       this.hasFullCoverage
         ? undefined
-        : this.provenanceKeys.size > 0
+        : hasContinuationProvenance
           ? this.provenanceKeys
           : this.candidateKeys,
-      this.retainedSize,
+      this.hasFullCoverage || !hasContinuationProvenance
+        ? this.retainedSize
+        : undefined,
     )
     const lastRow = rows.at(-1)
     return lastRow && this.totalOrder.boundary(lastRow.value, lastRow.key)
+  }
+
+  /**
+   * Distinguishes automatic refill passes without claiming a reusable cursor.
+   * Outcome-free loads can move this local boundary while requestBoundary()
+   * stays empty and forces the adapter request to refresh from the start.
+   */
+  progressBoundary(): TotalOrderBoundary<TKey> | undefined {
+    return this.requestBoundary() ?? this.boundary()
   }
 
   reconcile(
@@ -339,6 +392,45 @@ export class WindowState<
   ): Array<ChangeMessage<TRow, TKey>> {
     const rows = this.collection.currentStateAsChanges({
       ...(this.where && { where: this.where }),
+      orderBy: this.totalOrder.orderBy,
+    }) as Array<ChangeMessage<TRow, TKey>> | undefined
+    const allowed =
+      allowedKeys === undefined
+        ? (rows ?? [])
+        : (rows ?? []).filter((change) => allowedKeys.has(change.key))
+    if (limit === undefined) return allowed
+    return this.expandSourceOrderTies
+      ? this.prefixThroughTieClass(allowed, limit)
+      : allowed.slice(0, limit)
+  }
+
+  /**
+   * A provider orders only by the source-owned query terms. Keep the complete
+   * boundary equivalence class so D2 can apply the local key tie-breaker and
+   * any later joined or derived order terms without missing candidates.
+   */
+  private prefixThroughTieClass(
+    rows: Array<ChangeMessage<TRow, TKey>>,
+    limit: number,
+  ): Array<ChangeMessage<TRow, TKey>> {
+    if (limit <= 0 || rows.length <= limit) return rows.slice(0, limit)
+
+    const boundary = rows[limit - 1]!
+    let end = limit
+    while (
+      end < rows.length &&
+      this.totalOrder.compareRows(boundary.value, rows[end]!.value) === 0
+    ) {
+      end++
+    }
+    return rows.slice(0, end)
+  }
+
+  private readSourceRows(
+    allowedKeys: ReadonlySet<TKey> | undefined,
+    limit?: number,
+  ): Array<ChangeMessage<TRow, TKey>> {
+    const rows = this.collection.currentStateAsChanges({
       orderBy: this.totalOrder.orderBy,
     }) as Array<ChangeMessage<TRow, TKey>> | undefined
     const allowed =

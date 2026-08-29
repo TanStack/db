@@ -47,14 +47,20 @@ import {
 } from '../../src/query/ir.js'
 import {
   compileExpression,
+  compileSingleRowExpression,
   toBooleanPredicate,
 } from '../../src/query/compiler/evaluators.js'
 import { isLoadSubsetRequestSubsumedBy } from '../../src/query/predicate-utils.js'
-import { createRuntimeReferenceIdentityFactory } from '../../src/query/runtime-reference-identity.js'
+import {
+  createRuntimeReferenceIdentityFactory,
+  getRuntimeReferenceIdentity,
+} from '../../src/query/runtime-reference-identity.js'
 import {
   cloneLoadSubsetOptions,
   snapshotLoadSubsetDemand,
 } from '../../src/query/load-subset-options.js'
+import { areValuesEqual, normalizeValue } from '../../src/utils/comparison.js'
+import { createCrossRealmUint8Array } from '../utils.js'
 import type { BasicExpression, QueryIR } from '../../src/query/ir.js'
 import type { LoadSubsetOptions } from '../../src/types.js'
 
@@ -313,6 +319,27 @@ describe(`semantic expression identity`, () => {
     },
   )
 
+  it(`does not initialize runtime reference identities during module evaluation`, async () => {
+    const getRandomValues = vi.fn((values: Uint32Array) => values)
+    vi.stubGlobal(`crypto`, { getRandomValues })
+    vi.resetModules()
+
+    try {
+      const { getRuntimeReferenceIdentity: getIdentity } = await import(
+        `../../src/query/runtime-reference-identity.js`
+      )
+
+      expect(getRandomValues).not.toHaveBeenCalled()
+
+      getIdentity({})
+      getIdentity({})
+
+      expect(getRandomValues).toHaveBeenCalledOnce()
+    } finally {
+      vi.unstubAllGlobals()
+    }
+  })
+
   it(`does not reuse reference identities across runtimes`, () => {
     const firstRuntime = createRuntimeReferenceIdentityFactory()
     const secondRuntime = createRuntimeReferenceIdentityFactory()
@@ -334,6 +361,22 @@ describe(`semantic expression identity`, () => {
     } finally {
       vi.unstubAllGlobals()
     }
+  })
+
+  it(`keeps each symbol identity stable for the factory lifetime`, () => {
+    const runtime = createRuntimeReferenceIdentityFactory()
+    const symbol = Symbol(`same description`)
+
+    expect(runtime(symbol)).toEqual(runtime(symbol))
+    expect(runtime(Symbol(`same description`))).not.toEqual(runtime(symbol))
+  })
+
+  it(`accepts symbols through the shared runtime identity getter`, () => {
+    const symbol = Symbol(`shared runtime`)
+
+    expect(getRuntimeReferenceIdentity(symbol)).toEqual(
+      getRuntimeReferenceIdentity(symbol),
+    )
   })
 
   it(`falls back when the runtime crypto object lacks getRandomValues`, () => {
@@ -468,20 +511,6 @@ describe(`loadSubset demand identity`, () => {
     const createDemands = (value: unknown): Array<LoadSubsetOptions> => [
       { where: new Func(`eq`, [field, new Value(value)]) },
       { where: new Func(`in`, [field, new Value([value])]) },
-      {
-        orderBy: [
-          {
-            expression: new Func(`coalesce`, [field, new Value(value)]),
-            compareOptions: { direction: `asc`, nulls: `first` },
-          },
-        ],
-      },
-      {
-        cursor: {
-          whereFrom: new Func(`gt`, [field, new Value(value)]),
-          whereCurrent: new Func(`eq`, [field, new Value(value)]),
-        },
-      },
     ]
 
     for (const [firstValue, secondValue] of [
@@ -510,6 +539,466 @@ describe(`loadSubset demand identity`, () => {
         new Func(`eq`, [field, new Value(firstFunction)]),
       ),
     ).toThrow(/function value/)
+  })
+
+  it(`snapshots structural function operands without changing demand identity`, () => {
+    const bytes = Buffer.from([65])
+    const demand: LoadSubsetOptions = {
+      where: new Func<boolean>(`eq`, [
+        new Func(`concat`, [new Value(bytes)]),
+        new Value(`A`),
+      ]),
+    }
+    const demandKey = getLoadSubsetDemandKey(demand)
+    const snapshot = cloneLoadSubsetOptions(demand)
+    const snapshotBytes = (
+      ((snapshot.where as Func).args[0] as Func).args[0] as Value<Buffer>
+    ).value
+
+    expect(snapshotBytes).not.toBe(bytes)
+    expect(getLoadSubsetDemandKey(snapshot)).toBe(demandKey)
+
+    bytes[0] = 66
+    expect(compileExpression(demand.where!)({})).toBe(false)
+    expect(compileExpression(snapshot.where!)({})).toBe(true)
+  })
+
+  it(`snapshots large binary equality values without changing demand identity`, () => {
+    const bytes = new Uint8Array(129).fill(7)
+    const demand: LoadSubsetOptions = {
+      where: new Func<boolean>(`eq`, [new PropRef([`id`]), new Value(bytes)]),
+    }
+    const snapshot = cloneLoadSubsetOptions(demand)
+    const snapshotBytes = ((snapshot.where as Func).args[1] as Value).value
+
+    expect(snapshotBytes).not.toBe(bytes)
+    expect(snapshotBytes).toEqual(bytes)
+    expect(getLoadSubsetDemandKey(snapshot)).toBe(
+      getLoadSubsetDemandKey(demand),
+    )
+
+    bytes.fill(8)
+    expect(
+      compileSingleRowExpression(demand.where!)({
+        id: new Uint8Array(129).fill(7),
+      }),
+    ).toBe(false)
+    expect(
+      compileSingleRowExpression(snapshot.where!)({
+        id: new Uint8Array(129).fill(7),
+      }),
+    ).toBe(true)
+  })
+
+  it(`copies binary equality values without calling an overridden slice`, () => {
+    const bytes = new Uint8Array([1, 2, 3])
+    Object.defineProperty(bytes, `slice`, {
+      value: () => bytes,
+    })
+    const demand: LoadSubsetOptions = {
+      where: new Func<boolean>(`eq`, [new PropRef([`id`]), new Value(bytes)]),
+    }
+    const snapshot = cloneLoadSubsetOptions(demand)
+    const snapshotBytes = ((snapshot.where as Func).args[1] as Value).value
+
+    expect(snapshotBytes).not.toBe(bytes)
+    expect(snapshotBytes).toEqual(new Uint8Array([1, 2, 3]))
+
+    bytes.fill(9)
+    expect(
+      compileSingleRowExpression(snapshot.where!)({
+        id: new Uint8Array([1, 2, 3]),
+      }),
+    ).toBe(true)
+  })
+
+  it(`derives binary equality identity from intrinsic bytes`, () => {
+    const bytes = new Uint8Array([2])
+    Object.defineProperty(bytes, Symbol.iterator, {
+      value: function* () {
+        yield 1
+      },
+    })
+    const predicate = new Func<boolean>(`eq`, [
+      new PropRef([`id`]),
+      new Value(bytes),
+    ])
+
+    expect(getLoadSubsetDemandKey({ where: predicate })).toBe(
+      getLoadSubsetDemandKey({
+        where: new Func(`eq`, [
+          new PropRef([`id`]),
+          new Value(new Uint8Array([2])),
+        ]),
+      }),
+    )
+    expect(getLoadSubsetDemandKey({ where: predicate })).not.toBe(
+      getLoadSubsetDemandKey({
+        where: new Func(`eq`, [
+          new PropRef([`id`]),
+          new Value(new Uint8Array([1])),
+        ]),
+      }),
+    )
+  })
+
+  it(`rejects binary values without intrinsic typed-array slots`, () => {
+    const bytes = new Proxy(new Uint8Array([2]), {
+      get: (target, key) =>
+        key === Symbol.iterator
+          ? function* () {
+              yield 1
+            }
+          : Reflect.get(target, key, target),
+    })
+    const demand: LoadSubsetOptions = {
+      where: new Func(`eq`, [new PropRef([`id`]), new Value(bytes)]),
+    }
+
+    expect(() => cloneLoadSubsetOptions(demand)).toThrow(
+      /Cannot snapshot binary equality value/,
+    )
+    expect(() => getLoadSubsetDemandKey(demand)).toThrow(
+      /Cannot snapshot binary equality value/,
+    )
+  })
+
+  it(`snapshots intrinsic Uint8Array values across realms`, () => {
+    const bytes = createCrossRealmUint8Array([1, 2, 3])
+    const demand: LoadSubsetOptions = {
+      where: new Func(`eq`, [new PropRef([`id`]), new Value(bytes)]),
+    }
+    const demandKey = getLoadSubsetDemandKey(demand)
+    const snapshot = cloneLoadSubsetOptions(demand)
+    const snapshotBytes = ((snapshot.where as Func).args[1] as Value).value
+
+    expect(areValuesEqual(bytes, new Uint8Array([1, 2, 3]))).toBe(true)
+    expect(normalizeValue(bytes)).toBe(
+      normalizeValue(new Uint8Array([1, 2, 3])),
+    )
+
+    bytes[0] = 9
+
+    expect(snapshotBytes).not.toBe(bytes)
+    expect(snapshotBytes).toEqual(new Uint8Array([1, 2, 3]))
+    expect(getLoadSubsetDemandKey(snapshot)).toBe(demandKey)
+  })
+
+  it.each([`coalesce`, `caseWhen`] as const)(
+    `snapshots equality candidates returned by %s`,
+    (wrapper) => {
+      const candidates = [new Uint8Array([1])]
+      const candidateExpression =
+        wrapper === `coalesce`
+          ? new Func(`coalesce`, [new Value(candidates)])
+          : new Func(`caseWhen`, [
+              new Value(true),
+              new Value(candidates),
+              new Value([]),
+            ])
+      const demand: LoadSubsetOptions = {
+        where: new Func<boolean>(`in`, [
+          new PropRef([`token`]),
+          candidateExpression,
+        ]),
+      }
+      const demandKey = getLoadSubsetDemandKey(demand)
+      const snapshot = cloneLoadSubsetOptions(demand)
+
+      candidates[0]![0] = 2
+      candidates.push(new Uint8Array([3]))
+
+      expect(getLoadSubsetDemandKey(snapshot)).toBe(demandKey)
+      expect(
+        compileSingleRowExpression(snapshot.where!)({
+          token: new Uint8Array([1]),
+        }),
+      ).toBe(true)
+      expect(
+        compileSingleRowExpression(snapshot.where!)({
+          token: new Uint8Array([2]),
+        }),
+      ).toBe(false)
+    },
+  )
+
+  it(`rejects membership arrays with custom observation hooks`, () => {
+    const candidates = [new Uint8Array([2])]
+    Object.defineProperty(candidates, Symbol.iterator, {
+      value: function* () {
+        yield new Uint8Array([1])
+      },
+    })
+    const demand: LoadSubsetOptions = {
+      where: new Func(`in`, [
+        new PropRef([`token`]),
+        new Func(`coalesce`, [new Value(candidates)]),
+      ]),
+    }
+
+    expect(() => cloneLoadSubsetOptions(demand)).toThrow(
+      /Cannot snapshot membership candidates/,
+    )
+    expect(() => getLoadSubsetDemandKey(demand)).toThrow(
+      /Cannot snapshot membership candidates/,
+    )
+  })
+
+  it(`rejects mutable Temporal-branded equality lookalikes`, () => {
+    let callerDate = `2024-01-15`
+    const callerValue = {
+      [Symbol.toStringTag]: `Temporal.PlainDate`,
+      toString: () => callerDate,
+    }
+    const demand: LoadSubsetOptions = {
+      where: new Func<boolean>(`eq`, [
+        new PropRef([`date`]),
+        new Value(callerValue),
+      ]),
+    }
+    expect(() => cloneLoadSubsetOptions(demand)).toThrow(
+      /Cannot snapshot Temporal.PlainDate equality value/,
+    )
+    expect(() => getLoadSubsetDemandKey(demand)).toThrow(
+      /Cannot snapshot Temporal.PlainDate equality value/,
+    )
+    callerDate = `2024-01-16`
+  })
+
+  it(`rejects constructor-shaped Temporal equality lookalikes`, () => {
+    class TemporalLookalike {
+      static shared = `2024-01-15`
+      static from(): TemporalLookalike {
+        return new TemporalLookalike()
+      }
+      get [Symbol.toStringTag](): string {
+        return `Temporal.PlainDate`
+      }
+      toString(): string {
+        return TemporalLookalike.shared
+      }
+    }
+    const value = new TemporalLookalike()
+    const demand: LoadSubsetOptions = {
+      where: new Func(`eq`, [new PropRef([`date`]), new Value(value)]),
+    }
+
+    expect(() => cloneLoadSubsetOptions(demand)).toThrow(
+      /Cannot snapshot Temporal.PlainDate equality value/,
+    )
+    expect(() => getLoadSubsetDemandKey(demand)).toThrow(
+      /Cannot snapshot Temporal.PlainDate equality value/,
+    )
+  })
+
+  it(`reads Date equality values through the intrinsic getTime`, () => {
+    const date = new Date(2)
+    Object.defineProperty(date, `getTime`, {
+      value: () => 1,
+    })
+    const demand: LoadSubsetOptions = {
+      where: new Func(`eq`, [new PropRef([`date`]), new Value(date)]),
+    }
+    const snapshot = cloneLoadSubsetOptions(demand)
+    const snapshotDate = ((snapshot.where as Func).args[1] as Value<Date>).value
+
+    expect(snapshotDate.getTime()).toBe(2)
+    expect(getLoadSubsetDemandKey(snapshot)).toBe(
+      getLoadSubsetDemandKey({
+        where: new Func(`eq`, [new PropRef([`date`]), new Value(new Date(2))]),
+      }),
+    )
+  })
+
+  it.each([
+    [`Duration`, Temporal.Duration.from(`P1DT2H`)],
+    [`Instant`, Temporal.Instant.from(`2024-01-15T12:00:00Z`)],
+    [`PlainDate`, Temporal.PlainDate.from(`2024-01-15`)],
+    [`PlainDateTime`, Temporal.PlainDateTime.from(`2024-01-15T12:00:00`)],
+    [`PlainMonthDay`, Temporal.PlainMonthDay.from(`01-15`)],
+    [`PlainTime`, Temporal.PlainTime.from(`12:00:00`)],
+    [`PlainYearMonth`, Temporal.PlainYearMonth.from(`2024-01`)],
+    [`ZonedDateTime`, Temporal.ZonedDateTime.from(`2024-01-15T12:00:00Z[UTC]`)],
+  ])(
+    `clones genuine Temporal.%s equality values without changing type or identity`,
+    (_name, value) => {
+      const demand: LoadSubsetOptions = {
+        where: new Func<boolean>(`eq`, [
+          new PropRef([`value`]),
+          new Value(value),
+        ]),
+      }
+      const demandKey = getLoadSubsetDemandKey(demand)
+      const snapshot = cloneLoadSubsetOptions(demand)
+      const snapshotValue = ((snapshot.where as Func).args[1] as Value).value
+
+      expect(snapshotValue).not.toBe(value)
+      expect(Object.getPrototypeOf(snapshotValue)).toBe(
+        Object.getPrototypeOf(value),
+      )
+      expect(String(snapshotValue)).toBe(String(value))
+      expect(getLoadSubsetDemandKey(snapshot)).toBe(demandKey)
+      expect(compileSingleRowExpression(snapshot.where!)({ value })).toBe(true)
+    },
+  )
+
+  it.each([
+    [`function`, () => () => 1],
+    [`symbol coercion`, () => ({ [Symbol.toPrimitive]: () => 1 })],
+    [
+      `indexed accessor`,
+      () => {
+        const value: Array<unknown> = []
+        Object.defineProperty(value, `0`, {
+          enumerable: true,
+          get: () => 1,
+        })
+        return value
+      },
+    ],
+    [
+      `cycle`,
+      () => {
+        const value: Array<unknown> = []
+        value.push(value)
+        return value
+      },
+    ],
+  ])(`rejects %s in ordering operands`, (_name, createValue) => {
+    const demand: LoadSubsetOptions = {
+      where: new Func<boolean>(`gt`, [
+        new PropRef([`value`]),
+        new Value(createValue()),
+      ]),
+    }
+
+    expect(() => cloneLoadSubsetOptions(demand)).toThrow(
+      /Cannot snapshot structural expression value/,
+    )
+    expect(() => getLoadSubsetDemandKey(demand)).toThrow(
+      /Cannot snapshot structural expression value/,
+    )
+  })
+
+  it.each([
+    [`symbol coercion`, () => ({ [Symbol.toPrimitive]: () => `A` }), `A`],
+    [
+      `non-enumerable coercion`,
+      () => {
+        const value = {}
+        Object.defineProperty(value, `toString`, {
+          value: () => `A`,
+        })
+        return value
+      },
+      `A`,
+    ],
+    [
+      `opaque mutable coercion`,
+      () =>
+        new (class {
+          value = `A`;
+          [Symbol.toPrimitive]() {
+            return this.value
+          }
+        })(),
+      `A`,
+    ],
+    [
+      `indexed accessor coercion`,
+      () => {
+        const value: Array<string> = []
+        Object.defineProperty(value, `0`, {
+          enumerable: true,
+          get: () => `A`,
+        })
+        return value
+      },
+      `A`,
+    ],
+    [
+      `built-in subclass coercion`,
+      () =>
+        new (class extends Array<string> {
+          [Symbol.toPrimitive]() {
+            return `A`
+          }
+        })(),
+      `A`,
+    ],
+    [
+      `cyclic structure`,
+      () => {
+        const value: { self?: unknown } = {}
+        value.self = value
+        return value
+      },
+      `[object Object]`,
+    ],
+  ] as const)(
+    `rejects unsupported %s before retaining structural demand state`,
+    (_label, createValue, expected) => {
+      const value = createValue()
+      const demand: LoadSubsetOptions = {
+        where: new Func<boolean>(`eq`, [
+          new Func(`concat`, [new Value(value)]),
+          new Value(expected),
+        ]),
+      }
+
+      expect(compileExpression(demand.where!)({})).toBe(true)
+      expect(() => cloneLoadSubsetOptions(demand)).toThrow(
+        /snapshot structural expression value/i,
+      )
+      expect(() => getLoadSubsetDemandKey(demand)).toThrow(
+        /snapshot structural expression value/i,
+      )
+    },
+  )
+
+  it.each([
+    [`nested invalid Date`, [new Date(Number.NaN)]],
+    [`nested symbol`, [Symbol(`immutable`)]],
+    [`sparse array`, new Array(1)],
+  ] as const)(
+    `preserves structural demand identity while cloning %s`,
+    (_label, value) => {
+      const demand: LoadSubsetOptions = {
+        where: new Func<boolean>(`eq`, [
+          new Func(`concat`, [new Value(value)]),
+          new Value(
+            compileExpression(new Func(`concat`, [new Value(value)]))({}),
+          ),
+        ]),
+      }
+      const snapshot = cloneLoadSubsetOptions(demand)
+
+      expect(compileExpression(snapshot.where!)({})).toBe(true)
+      expect(getLoadSubsetDemandKey(snapshot)).toBe(
+        getLoadSubsetDemandKey(demand),
+      )
+    },
+  )
+
+  it(`preserves an enumerable __proto__ data property while cloning`, () => {
+    const value: Record<string, unknown> = {}
+    Object.defineProperty(value, `__proto__`, {
+      enumerable: true,
+      value: null,
+    })
+    const demand: LoadSubsetOptions = {
+      where: new Func<boolean>(`eq`, [
+        new Func(`concat`, [new Value(value)]),
+        new Value(`[object Object]`),
+      ]),
+    }
+    const snapshot = cloneLoadSubsetOptions(demand)
+
+    expect(compileExpression(demand.where!)({})).toBe(true)
+    expect(compileExpression(snapshot.where!)({})).toBe(true)
+    expect(getLoadSubsetDemandKey(snapshot)).toBe(
+      getLoadSubsetDemandKey(demand),
+    )
   })
 
   it.each([

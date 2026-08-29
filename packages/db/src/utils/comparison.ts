@@ -1,5 +1,6 @@
 import { isTemporal } from '../utils'
 import type { CompareOptions } from '../query/builder/types'
+import type { TemporalLike } from '../utils'
 
 // WeakMap to store stable IDs for objects
 const objectIds = new WeakMap<object, number>()
@@ -28,8 +29,47 @@ function getObjectId(obj: object): number {
 export function isUnorderable(value: any): boolean {
   return (
     (typeof value === `number` && Number.isNaN(value)) ||
-    (value instanceof Date && Number.isNaN(value.getTime()))
+    (value instanceof Date && Number.isNaN(readDateTimestamp(value)))
   )
+}
+
+/** Read a Date's internal timestamp without invoking an instance override. */
+export function readDateTimestamp(value: Date): number {
+  return Reflect.apply(Date.prototype.getTime, value, [])
+}
+
+const typedArrayTagGetter = Object.getOwnPropertyDescriptor(
+  Object.getPrototypeOf(Uint8Array.prototype),
+  Symbol.toStringTag,
+)?.get
+
+/** Whether a value has intrinsic Uint8Array slots, independent of its realm. */
+export function hasIntrinsicUint8ArraySlots(
+  value: unknown,
+): value is Uint8Array {
+  return (
+    ArrayBuffer.isView(value) &&
+    typedArrayTagGetter !== undefined &&
+    Reflect.apply(typedArrayTagGetter, value, []) === `Uint8Array`
+  )
+}
+
+/**
+ * Whether a value must use binary equality semantics. Local prototype claims
+ * enter this path so slot-less proxies are rejected instead of becoming opaque.
+ */
+export function isUint8ArrayCandidate(value: unknown): value is Uint8Array {
+  return value instanceof Uint8Array || hasIntrinsicUint8ArraySlots(value)
+}
+
+/** Copy a Uint8Array's internal bytes without invoking custom iteration. */
+export function snapshotUint8ArrayBytes(value: Uint8Array): Uint8Array {
+  if (!hasIntrinsicUint8ArraySlots(value)) {
+    throw new TypeError(
+      `Cannot snapshot binary equality value without intrinsic typed-array slots`,
+    )
+  }
+  return new Uint8Array(value)
 }
 
 /**
@@ -77,7 +117,7 @@ export const ascComparator = (a: any, b: any, opts: CompareOptions): number => {
 
   // If both are dates, compare them
   if (a instanceof Date && b instanceof Date) {
-    return a.getTime() - b.getTime()
+    return readDateTimestamp(a) - readDateTimestamp(b)
   }
 
   // If both are Temporal objects, use compareTemporalValues for correct semantic ordering
@@ -146,11 +186,13 @@ export const defaultComparator = makeComparator({
  * Compare two Uint8Arrays for content equality
  */
 function areUint8ArraysEqual(a: Uint8Array, b: Uint8Array): boolean {
-  if (a.byteLength !== b.byteLength) {
+  const aBytes = snapshotUint8ArrayBytes(a)
+  const bBytes = snapshotUint8ArrayBytes(b)
+  if (aBytes.byteLength !== bBytes.byteLength) {
     return false
   }
-  for (let i = 0; i < a.byteLength; i++) {
-    if (a[i] !== b[i]) {
+  for (let i = 0; i < aBytes.byteLength; i++) {
+    if (aBytes[i] !== bBytes[i]) {
       return false
     }
   }
@@ -158,22 +200,83 @@ function areUint8ArraysEqual(a: Uint8Array, b: Uint8Array): boolean {
 }
 
 /**
- * Threshold for normalizing Uint8Arrays to string representations.
- * Arrays larger than this will use reference equality to avoid memory overhead.
- * 128 bytes is enough for common ID formats (ULIDs are 16 bytes, UUIDs are 16 bytes)
- * while avoiding excessive string allocation for large binary data.
- */
-const UINT8ARRAY_NORMALIZE_THRESHOLD = 128
-
-/**
  * Sentinel value representing undefined in normalized form.
  * This allows distinguishing between "start from beginning" (undefined parameter)
  * and "start from the key undefined" (actual undefined value in the tree).
  */
-export const UNDEFINED_SENTINEL = `__TS_DB_BTREE_UNDEFINED_VALUE__`
+const NORMALIZED_KEY_PREFIX = `\u0000tanstack-db:`
+
+function normalizedKey(kind: string, value: string): string {
+  return `${NORMALIZED_KEY_PREFIX}${kind}:${value}`
+}
+
+export const UNDEFINED_SENTINEL = normalizedKey(`undefined`, ``)
 const UNORDERABLE_BTREE_SENTINEL = Object.freeze({
   kind: `tanstack-db-unorderable`,
 })
+
+/** Clone a Temporal equality value without trusting mutable brand lookalikes. */
+export function snapshotTemporalEqualityValue(
+  value: TemporalLike,
+): TemporalLike {
+  const tag = value[Symbol.toStringTag]
+  const prototype = Object.getPrototypeOf(value)
+  const constructorDescriptor =
+    prototype === null
+      ? undefined
+      : Object.getOwnPropertyDescriptor(prototype, `constructor`)
+  const constructor = constructorDescriptor?.value
+  const fromDescriptor =
+    typeof constructor === `function`
+      ? Object.getOwnPropertyDescriptor(constructor, `from`)
+      : undefined
+  const toStringDescriptor =
+    prototype === null
+      ? undefined
+      : Object.getOwnPropertyDescriptor(prototype, `toString`)
+  const brandAccessorName = TEMPORAL_BRAND_ACCESSORS[tag]
+  const brandAccessorDescriptor =
+    prototype === null || brandAccessorName === undefined
+      ? undefined
+      : Object.getOwnPropertyDescriptor(prototype, brandAccessorName)
+  if (
+    typeof constructor !== `function` ||
+    typeof fromDescriptor?.value !== `function` ||
+    typeof toStringDescriptor?.value !== `function` ||
+    typeof brandAccessorDescriptor?.get !== `function`
+  ) {
+    throw new TypeError(`Cannot snapshot ${tag} equality value`)
+  }
+
+  // Temporal accessors brand-check their receiver's internal slots. A tag plus
+  // constructor-shaped methods is not enough to establish a genuine value.
+  Reflect.apply(brandAccessorDescriptor.get, value, [])
+  const serialized = Reflect.apply(toStringDescriptor.value, value, [])
+  const snapshot = Reflect.apply(fromDescriptor.value, constructor, [
+    serialized,
+  ])
+  if (
+    snapshot === value ||
+    !isTemporal(snapshot) ||
+    snapshot[Symbol.toStringTag] !== tag ||
+    Object.getPrototypeOf(snapshot) !== prototype
+  ) {
+    throw new TypeError(`Cannot snapshot ${tag} equality value`)
+  }
+  Reflect.apply(brandAccessorDescriptor.get, snapshot, [])
+  return snapshot
+}
+
+const TEMPORAL_BRAND_ACCESSORS: Readonly<Record<string, string>> = {
+  'Temporal.Duration': `years`,
+  'Temporal.Instant': `epochNanoseconds`,
+  'Temporal.PlainDate': `year`,
+  'Temporal.PlainDateTime': `year`,
+  'Temporal.PlainMonthDay': `day`,
+  'Temporal.PlainTime': `hour`,
+  'Temporal.PlainYearMonth': `year`,
+  'Temporal.ZonedDateTime': `epochNanoseconds`,
+}
 
 /**
  * Normalize a value for comparison and Map key usage
@@ -184,33 +287,39 @@ const UNORDERABLE_BTREE_SENTINEL = Object.freeze({
  * for BTree index operations that need to distinguish undefined values.
  */
 export function normalizeValue(value: any): any {
+  // Internal normalized keys occupy a reserved string domain. Escape user
+  // strings in that domain so a literal cannot equal a binary or Temporal key.
+  if (typeof value === `string`) {
+    return value.startsWith(NORMALIZED_KEY_PREFIX)
+      ? normalizedKey(`string`, value)
+      : value
+  }
+
   if (typeof value !== `object` || value === null) {
     return value
   }
 
   if (value instanceof Date) {
-    return value.getTime()
+    return readDateTimestamp(value)
   }
 
   if (isTemporal(value)) {
-    return `__temporal__${value[Symbol.toStringTag]}__${value.toString()}`
+    return normalizedKey(
+      `temporal`,
+      `${value[Symbol.toStringTag]}:${value.toString()}`,
+    )
   }
 
   // Normalize Uint8Arrays/Buffers to a string representation for Map key usage
   // This enables content-based equality for binary data like ULIDs
-  const isUint8Array =
-    (typeof Buffer !== `undefined` && value instanceof Buffer) ||
-    value instanceof Uint8Array
-
-  if (isUint8Array) {
-    // Only normalize small arrays to avoid memory overhead for large binary data
-    if (value.byteLength <= UINT8ARRAY_NORMALIZE_THRESHOLD) {
-      // Convert to a string representation that can be used as a Map key
-      // Use a special prefix to avoid collisions with user strings
-      return `__u8__${Array.from(value).join(`,`)}`
-    }
-    // For large arrays, fall back to reference equality
-    // Users working with large binary data should use a derived key if needed
+  if (isUint8ArrayCandidate(value)) {
+    // Convert to a string representation that can be used as a Map key.
+    // Equality compares every binary value by content, so index keys must not
+    // switch to reference identity at an arbitrary byte length.
+    return normalizedKey(
+      `binary`,
+      Array.from(snapshotUint8ArrayBytes(value)).join(`,`),
+    )
   }
 
   return value
@@ -320,12 +429,8 @@ export function areValuesEqual(a: any, b: any): boolean {
   }
 
   // Check for Uint8Array/Buffer comparison
-  const aIsUint8Array =
-    (typeof Buffer !== `undefined` && a instanceof Buffer) ||
-    a instanceof Uint8Array
-  const bIsUint8Array =
-    (typeof Buffer !== `undefined` && b instanceof Buffer) ||
-    b instanceof Uint8Array
+  const aIsUint8Array = isUint8ArrayCandidate(a)
+  const bIsUint8Array = isUint8ArrayCandidate(b)
 
   // If both are Uint8Arrays, compare by content
   if (aIsUint8Array && bIsUint8Array) {

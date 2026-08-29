@@ -1,7 +1,19 @@
-import { normalizeValue } from '../utils/comparison.js'
+import {
+  isUint8ArrayCandidate,
+  normalizeValue,
+  snapshotTemporalEqualityValue,
+  snapshotUint8ArrayBytes,
+} from '../utils/comparison.js'
+import { isTemporal } from '../utils.js'
 import { isRefProxy, toExpression } from './builder/ref-proxy.js'
 import { getQueryIR } from './builder/get-query-ir.js'
+import {
+  assertSnapshotCapableStructuralValue,
+  getExpressionArgumentValueContext,
+  snapshotMembershipCandidateValues,
+} from './expression-value-context.js'
 import { getRuntimeReferenceIdentity } from './runtime-reference-identity.js'
+import type { ExpressionValueContext } from './expression-value-context.js'
 import type {
   Aggregate,
   BasicExpression,
@@ -25,11 +37,6 @@ type StableIdentityValue =
   | string
   | Array<StableIdentityValue>
   | { [key: string]: StableIdentityValue }
-
-type ValueIdentityContext =
-  | `exact-output`
-  | `equality-operand`
-  | `ordering-operand`
 
 type OpaqueValueIdentity = `reject` | `runtime-reference`
 
@@ -568,7 +575,7 @@ function canonicalizeOrderBy(
   orderBy: OrderByClause,
   path: string,
   seen: WeakSet<object>,
-  valueContext: ValueIdentityContext = `exact-output`,
+  valueContext: ExpressionValueContext = `exact-output`,
   scope?: AliasScope,
   opaqueValueIdentity: OpaqueValueIdentity = `reject`,
 ): StableIdentityValue {
@@ -597,7 +604,7 @@ function canonicalizeExpression(
     | ConditionalSelect,
   path: string,
   seen: WeakSet<object>,
-  valueContext: ValueIdentityContext = `exact-output`,
+  valueContext: ExpressionValueContext = `exact-output`,
   scope?: AliasScope,
   opaqueValueIdentity: OpaqueValueIdentity = `reject`,
 ): StableIdentityValue {
@@ -637,71 +644,49 @@ function canonicalizeExpression(
               scope,
               opaqueValueIdentity,
             )
-          : valueContext === `ordering-operand`
-            ? canonicalizeOrderingRuntimeValue(
+          : valueContext === `membership-candidates`
+            ? canonicalizeMembershipCandidates(
                 expression.value,
                 `${path}.value`,
                 seen,
+                scope,
                 opaqueValueIdentity,
               )
-            : canonicalizeExactOutputRuntimeValue(
-                expression.value,
-                `${path}.value`,
-                seen,
-                opaqueValueIdentity,
-              ),
+            : valueContext === `ordering-operand`
+              ? canonicalizeOrderingRuntimeValue(
+                  expression.value,
+                  `${path}.value`,
+                  seen,
+                  opaqueValueIdentity,
+                )
+              : valueContext === `structural-operand`
+                ? canonicalizeStructuralRuntimeValue(
+                    expression.value,
+                    `${path}.value`,
+                    seen,
+                    opaqueValueIdentity,
+                  )
+                : canonicalizeExactOutputRuntimeValue(
+                    expression.value,
+                    `${path}.value`,
+                    seen,
+                    opaqueValueIdentity,
+                  ),
     }
   }
 
   if (expression.type === `func`) {
-    if (
-      expression.name === `in` &&
-      expression.args.length === 2 &&
-      expression.args[1]?.type === `val` &&
-      Array.isArray(expression.args[1].value)
-    ) {
-      const candidates = expression.args[1].value.map((value, index) =>
-        canonicalizeEqualityRuntimeValue(
-          value,
-          `${path}.args[1].value[${index}]`,
-          seen,
-          scope,
-          opaqueValueIdentity,
-        ),
-      )
-      return canonicalizeFunction(expression.name, [
-        canonicalizeExpression(
-          expression.args[0]!,
-          `${path}.args[0]`,
-          seen,
-          `equality-operand`,
-          scope,
-          opaqueValueIdentity,
-        ),
-        {
-          type: `val`,
-          // IN tests membership. Candidate order and duplicates do not change
-          // its result, but each candidate keeps its own equality semantics.
-          value: [`set`, sortUniqueStableIdentityValues(candidates)],
-        },
-      ])
-    }
-
-    const operandContext: ValueIdentityContext =
-      expression.name === `eq`
-        ? `equality-operand`
-        : expression.name === `gt` ||
-            expression.name === `gte` ||
-            expression.name === `lt` ||
-            expression.name === `lte`
-          ? `ordering-operand`
-          : `exact-output`
     const args = expression.args.map((arg, index) =>
       canonicalizeExpression(
         arg,
         `${path}.args[${index}]`,
         seen,
-        operandContext,
+        getExpressionArgumentValueContext(
+          expression.name,
+          index,
+          expression.args.length,
+          valueContext,
+        ),
         scope,
         opaqueValueIdentity,
       ),
@@ -1061,11 +1046,13 @@ function canonicalizeEqualityRuntimeValue(
 
   // Equality compares Uint8Array and Buffer values by content, independent of
   // their concrete constructor and size.
-  const isUint8Array =
-    (typeof Buffer !== `undefined` && value instanceof Buffer) ||
-    value instanceof Uint8Array
-  if (isUint8Array) {
-    return [`binary`, `Uint8Array`, Array.from(value as Uint8Array)]
+  if (isUint8ArrayCandidate(value)) {
+    return [`binary`, `Uint8Array`, Array.from(snapshotUint8ArrayBytes(value))]
+  }
+
+  if (isTemporal(value)) {
+    const snapshot = snapshotTemporalEqualityValue(value)
+    return canonicalizeRuntimeValue(normalizeValue(snapshot), path, seen)
   }
 
   const normalized = normalizeValue(value)
@@ -1080,12 +1067,121 @@ function canonicalizeEqualityRuntimeValue(
   return canonicalizeRuntimeValue(value, path, seen)
 }
 
+function canonicalizeMembershipCandidates(
+  value: unknown,
+  path: string,
+  seen: WeakSet<object>,
+  scope?: AliasScope,
+  opaqueValueIdentity: OpaqueValueIdentity = `reject`,
+): StableIdentityValue {
+  if (!Array.isArray(value)) {
+    return canonicalizeExactOutputRuntimeValue(
+      value,
+      path,
+      seen,
+      opaqueValueIdentity,
+    )
+  }
+
+  const candidateValues = snapshotMembershipCandidateValues(value, path)!
+  const candidates = candidateValues.map((candidate, index) =>
+    canonicalizeEqualityRuntimeValue(
+      candidate,
+      `${path}[${index}]`,
+      seen,
+      scope,
+      opaqueValueIdentity,
+    ),
+  )
+  // IN tests membership. Candidate order and duplicates do not change its
+  // result, but each candidate keeps its own equality semantics.
+  return [`set`, sortUniqueStableIdentityValues(candidates)]
+}
+
+function canonicalizeStructuralRuntimeValue(
+  value: unknown,
+  path: string,
+  seen: WeakSet<object>,
+  _opaqueValueIdentity: OpaqueValueIdentity = `reject`,
+): StableIdentityValue {
+  assertSnapshotCapableStructuralValue(value, path)
+  return canonicalizeSnapshotStructuralValue(value, path, seen)
+}
+
+function canonicalizeSnapshotStructuralValue(
+  value: unknown,
+  path: string,
+  seen: WeakSet<object>,
+): StableIdentityValue {
+  if (typeof value === `symbol`) {
+    return getRuntimeReferenceIdentity(value)
+  }
+
+  if (value instanceof Date) {
+    return Number.isNaN(value.getTime())
+      ? [`Date`, `Invalid`]
+      : canonicalizeRuntimeValue(value, path, seen)
+  }
+
+  if (Array.isArray(value)) {
+    return withCircularGuard(value, path, seen, () => [
+      `snapshotArray`,
+      value.length,
+      Object.keys(value).map((key) => [
+        key,
+        canonicalizeSnapshotStructuralValue(
+          value[Number(key)],
+          `${path}[${key}]`,
+          seen,
+        ),
+      ]),
+    ])
+  }
+
+  if (value instanceof Map) {
+    return withCircularGuard(value, path, seen, () => [
+      `snapshotMap`,
+      Array.from(value.entries(), ([key, entryValue], index) => [
+        canonicalizeSnapshotStructuralValue(key, `${path}.key[${index}]`, seen),
+        canonicalizeSnapshotStructuralValue(
+          entryValue,
+          `${path}.value[${index}]`,
+          seen,
+        ),
+      ]),
+    ])
+  }
+
+  if (value instanceof Set) {
+    return withCircularGuard(value, path, seen, () => [
+      `snapshotSet`,
+      Array.from(value, (entry, index) =>
+        canonicalizeSnapshotStructuralValue(entry, `${path}[${index}]`, seen),
+      ),
+    ])
+  }
+
+  if (isPlainObject(value)) {
+    return withCircularGuard(value, path, seen, () => [
+      `snapshotObject`,
+      Object.getPrototypeOf(value) === null ? `null` : `plain`,
+      Object.keys(value).map((key) => [
+        key,
+        canonicalizeSnapshotStructuralValue(value[key], `${path}.${key}`, seen),
+      ]),
+    ])
+  }
+
+  return canonicalizeRuntimeValue(value, path, seen)
+}
+
 function canonicalizeOrderingRuntimeValue(
   value: unknown,
   path: string,
   seen: WeakSet<object>,
   opaqueValueIdentity: OpaqueValueIdentity = `reject`,
 ): StableIdentityValue {
+  assertSnapshotCapableStructuralValue(value, path)
   if (
     opaqueValueIdentity === `runtime-reference` &&
     (typeof value === `function` || typeof value === `symbol`)
@@ -1101,7 +1197,7 @@ function canonicalizeOrderingRuntimeValue(
   }
 
   const normalized = normalizeValue(value)
-  if (normalized !== value && !(value instanceof Uint8Array)) {
+  if (normalized !== value && !isUint8ArrayCandidate(value)) {
     return canonicalizeRuntimeValue(normalized, path, seen)
   }
 

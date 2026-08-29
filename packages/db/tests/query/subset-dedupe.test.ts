@@ -4,6 +4,7 @@ import {
   cloneOptions,
 } from '../../src/query/subset-dedupe'
 import { Func, PropRef, Value } from '../../src/query/ir'
+import { createCrossRealmUint8Array } from '../utils'
 import type { BasicExpression, OrderBy } from '../../src/query/ir'
 import type { LoadSubsetOptions } from '../../src/types'
 
@@ -45,6 +46,252 @@ function not(expression: BasicExpression<boolean>): Func {
 }
 
 describe(`createDeduplicatedLoadSubset`, () => {
+  it(`does not let mutation rewrite settled large-binary coverage`, () => {
+    const loadSubset = vi.fn(() => true as const)
+    const deduplicated = new DeduplicatedLoadSubset({ loadSubset })
+    const mutableToken = new Uint8Array(129).fill(1)
+    const demand = (token: Uint8Array): LoadSubsetOptions => ({
+      where: eq(ref(`token`), val(token)),
+      limit: 1,
+    })
+
+    deduplicated.loadSubset(demand(mutableToken))
+    mutableToken.fill(2)
+    deduplicated.loadSubset(demand(new Uint8Array(129).fill(2)))
+
+    expect(loadSubset).toHaveBeenCalledTimes(2)
+  })
+
+  it(`does not let custom binary iteration alias intrinsic byte coverage`, () => {
+    const loadSubset = vi.fn(() => true as const)
+    const deduplicated = new DeduplicatedLoadSubset({ loadSubset })
+    const customBytes = new Uint8Array([2])
+    Object.defineProperty(customBytes, Symbol.iterator, {
+      value: function* () {
+        yield 1
+      },
+    })
+    const demand = (token: Uint8Array): LoadSubsetOptions => ({
+      where: eq(ref(`token`), val(token)),
+    })
+
+    deduplicated.loadSubset(demand(new Uint8Array([1])))
+    deduplicated.loadSubset(demand(customBytes))
+
+    expect(loadSubset).toHaveBeenCalledTimes(2)
+  })
+
+  it(`rejects binary proxies before adapter entry`, () => {
+    const loadSubset = vi.fn(() => true as const)
+    const deduplicated = new DeduplicatedLoadSubset({ loadSubset })
+    const bytes = new Proxy(new Uint8Array([2]), {
+      get: (target, key) =>
+        key === Symbol.iterator
+          ? function* () {
+              yield 1
+            }
+          : Reflect.get(target, key, target),
+    })
+
+    expect(() =>
+      deduplicated.loadSubset({ where: eq(ref(`token`), val(bytes)) }),
+    ).toThrow(/Cannot snapshot binary equality value/)
+    expect(loadSubset).not.toHaveBeenCalled()
+  })
+
+  it(`retains cross-realm binary coverage by acquired bytes`, () => {
+    const acquired: Array<Array<number>> = []
+    const loadSubset = vi.fn((options: LoadSubsetOptions) => {
+      acquired.push(
+        Array.from(((options.where as Func).args[1] as Value).value),
+      )
+      return true as const
+    })
+    const deduplicated = new DeduplicatedLoadSubset({ loadSubset })
+    const bytes = createCrossRealmUint8Array([1])
+    const demand = (): LoadSubsetOptions => ({
+      where: eq(ref(`token`), val(bytes)),
+    })
+
+    deduplicated.loadSubset(demand())
+    bytes[0] = 2
+    deduplicated.loadSubset(demand())
+
+    expect(acquired).toEqual([[1], [2]])
+    expect(loadSubset).toHaveBeenCalledTimes(2)
+  })
+
+  it(`observes computed membership once for tracking and acquisition`, () => {
+    const first = new Uint8Array([1])
+    const second = new Uint8Array([2])
+    let observations = 0
+    const candidates = new Proxy([first], {
+      getOwnPropertyDescriptor: (target, key) => {
+        const descriptor = Reflect.getOwnPropertyDescriptor(target, key)
+        if (key !== `0` || descriptor === undefined) return descriptor
+        observations += 1
+        return {
+          ...descriptor,
+          value: observations === 1 ? first : second,
+        }
+      },
+    })
+    const acquired: Array<Uint8Array> = []
+    const loadSubset = vi.fn((options: LoadSubsetOptions) => {
+      acquired.push(
+        ...(
+          ((options.where as Func).args[1] as Func).args[0] as Value<
+            Array<Uint8Array>
+          >
+        ).value,
+      )
+      return true as const
+    })
+    const deduplicated = new DeduplicatedLoadSubset({ loadSubset })
+
+    deduplicated.loadSubset({
+      where: new Func(`in`, [
+        ref(`token`),
+        new Func(`coalesce`, [val(candidates)]),
+      ]),
+    })
+    deduplicated.loadSubset({
+      where: new Func(`in`, [
+        ref(`token`),
+        new Func(`coalesce`, [val([first])]),
+      ]),
+    })
+
+    expect(observations).toBe(1)
+    expect(acquired).toEqual([first])
+    expect(loadSubset).toHaveBeenCalledTimes(1)
+  })
+
+  it(`rejects custom membership observation before adapter entry`, () => {
+    const loadSubset = vi.fn(() => true as const)
+    const deduplicated = new DeduplicatedLoadSubset({ loadSubset })
+    const candidates = [new Uint8Array([2])]
+    Object.defineProperty(candidates, Symbol.iterator, {
+      value: function* () {
+        yield new Uint8Array([1])
+      },
+    })
+
+    expect(() =>
+      deduplicated.loadSubset({
+        where: new Func(`in`, [
+          ref(`token`),
+          new Func(`coalesce`, [val(candidates)]),
+        ]),
+      }),
+    ).toThrow(/Cannot snapshot membership candidates/)
+    expect(loadSubset).not.toHaveBeenCalled()
+  })
+
+  it(`uses intrinsic Date state for tracking and adapter acquisition`, () => {
+    const acquiredDates: Array<number> = []
+    const loadSubset = vi.fn((options: LoadSubsetOptions) => {
+      acquiredDates.push(
+        ((options.where as Func).args[1] as Value<Date>).value.getTime(),
+      )
+      return true as const
+    })
+    const deduplicated = new DeduplicatedLoadSubset({ loadSubset })
+    const date = new Date(2)
+    let observedTime = 0
+    Object.defineProperty(date, `getTime`, {
+      value: () => ++observedTime,
+    })
+    const demand = (value: Date): LoadSubsetOptions => ({
+      where: eq(ref(`date`), val(value)),
+    })
+
+    deduplicated.loadSubset(demand(date))
+    deduplicated.loadSubset(demand(new Date(1)))
+
+    expect(acquiredDates).toEqual([2, 1])
+    expect(loadSubset).toHaveBeenCalledTimes(2)
+  })
+
+  it(`rejects constructor-shaped Temporal lookalikes before adapter entry`, () => {
+    class TemporalLookalike {
+      static from(): TemporalLookalike {
+        return new TemporalLookalike()
+      }
+      get [Symbol.toStringTag](): string {
+        return `Temporal.PlainDate`
+      }
+      toString(): string {
+        return `2024-01-15`
+      }
+    }
+    const loadSubset = vi.fn(() => true as const)
+    const deduplicated = new DeduplicatedLoadSubset({ loadSubset })
+
+    expect(() =>
+      deduplicated.loadSubset({
+        where: eq(ref(`date`), val(new TemporalLookalike())),
+      }),
+    ).toThrow(/Cannot snapshot Temporal.PlainDate equality value/)
+    expect(loadSubset).not.toHaveBeenCalled()
+  })
+
+  it(`does not let mutation rewrite computed membership coverage`, () => {
+    const loadSubset = vi.fn(() => true as const)
+    const deduplicated = new DeduplicatedLoadSubset({ loadSubset })
+    const candidates = [new Uint8Array([1])]
+    const demand = (): LoadSubsetOptions => ({
+      where: new Func(`in`, [
+        ref(`token`),
+        new Func(`coalesce`, [val(candidates)]),
+      ]),
+    })
+
+    deduplicated.loadSubset(demand())
+    candidates[0]![0] = 2
+    deduplicated.loadSubset({
+      where: new Func(`in`, [
+        ref(`token`),
+        new Func(`coalesce`, [val([new Uint8Array([2])])]),
+      ]),
+    })
+
+    expect(loadSubset).toHaveBeenCalledTimes(2)
+  })
+
+  it(`rejects unsupported relational coercion before adapter entry`, () => {
+    const loadSubset = vi.fn(() => true as const)
+    const deduplicated = new DeduplicatedLoadSubset({ loadSubset })
+    const coercion = { [Symbol.toPrimitive]: () => 1 }
+
+    expect(() =>
+      deduplicated.loadSubset({
+        where: gt(ref(`value`), val(coercion)),
+      }),
+    ).toThrow(/Cannot snapshot structural expression value/)
+    expect(loadSubset).not.toHaveBeenCalled()
+  })
+
+  it(`does not deduplicate structural predicates with different observable key order`, () => {
+    const left = Object.create(null) as Record<string, number>
+    left.a = 1
+    left.b = 2
+    const right = Object.create(null) as Record<string, number>
+    right.b = 2
+    right.a = 1
+    const loadSubset = vi.fn(() => true as const)
+    const deduplicated = new DeduplicatedLoadSubset({ loadSubset })
+    const expected = JSON.stringify(left)
+    const demand = (value: Record<string, number>): LoadSubsetOptions => ({
+      where: eq(new Func(`concat`, [val(value)]), val(expected)),
+    })
+
+    deduplicated.loadSubset(demand(left))
+    deduplicated.loadSubset(demand(right))
+
+    expect(loadSubset).toHaveBeenCalledTimes(2)
+  })
+
   it.each(
     [
       {
@@ -86,6 +333,37 @@ describe(`createDeduplicatedLoadSubset`, () => {
       expect(loadSubset).toHaveBeenCalledTimes(2)
     },
   )
+
+  it(`bounds conservative adapter-wide invalidation to one refetch per revisited demand`, async () => {
+    const loadSubset = vi.fn(() => Promise.resolve())
+    const deduplicated = new DeduplicatedLoadSubset({ loadSubset })
+    const demands = Array.from({ length: 6 }, (_, id) => ({
+      where: eq(ref(`id`), val(id)),
+      limit: 1,
+    }))
+
+    for (const demand of demands) await deduplicated.loadSubset(demand)
+    expect(loadSubset).toHaveBeenCalledTimes(demands.length)
+
+    // Core may delete rows owned by any remembered request when one collection
+    // owner leaves. Without adapter row provenance, preserving the other five
+    // request facts would be unsafe, so one release invalidates all six.
+    deduplicated.unloadSubset(demands[0]!)
+    for (const demand of demands.slice(1)) {
+      await deduplicated.loadSubset(demand)
+    }
+    expect(loadSubset).toHaveBeenCalledTimes(
+      demands.length + demands.length - 1,
+    )
+
+    // Once those demands have rebuilt the cache, revisiting them is free again.
+    for (const demand of demands.slice(1)) {
+      expect(deduplicated.loadSubset(demand)).toBe(true)
+    }
+    expect(loadSubset).toHaveBeenCalledTimes(
+      demands.length + demands.length - 1,
+    )
+  })
 
   it(`does not restore invalidated coverage when unloaded work settles late`, async () => {
     let resolveLoad: (() => void) | undefined

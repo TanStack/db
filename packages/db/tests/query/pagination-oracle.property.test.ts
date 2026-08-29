@@ -4,6 +4,7 @@ import { createCollection } from '../../src/collection/index.js'
 import { createDeferred } from '../../src/deferred.js'
 import { BTreeIndex } from '../../src/index.js'
 import { createLiveQueryCollection } from '../../src/query/live-query-collection.js'
+import { eq } from '../../src/query/builder/functions.js'
 import { PropRef } from '../../src/query/ir.js'
 import { DeduplicatedLoadSubset } from '../../src/query/subset-dedupe.js'
 import { makeComparator } from '../../src/utils/comparison.js'
@@ -14,6 +15,7 @@ import {
 import { evaluateReferenceExpression } from '../reference-expression.js'
 import { TraceAssertionError } from '../trace-runner.js'
 import { flushPromises, mockSyncCollectionOptions } from '../utils.js'
+import type { Deferred } from '../../src/deferred.js'
 import type { LoadSubsetOptions, LoadSubsetResult } from '../../src/types.js'
 
 type PageRow = {
@@ -322,6 +324,22 @@ const nullableCursorScenarioArbitrary: fc.Arbitrary<NullableCursorScenario> =
     direction: fc.constantFrom(`asc` as const, `desc` as const),
   })
 
+type CleanupTarget = {
+  cleanup: () => unknown
+}
+
+async function cleanupAll(
+  ...targets: ReadonlyArray<CleanupTarget>
+): Promise<void> {
+  const results = await Promise.allSettled(
+    targets.map((target) => Promise.resolve().then(() => target.cleanup())),
+  )
+  const rejection = results.find(
+    (result): result is PromiseRejectedResult => result.status === `rejected`,
+  )
+  if (rejection) throw rejection.reason
+}
+
 const { multiplier, replaySeed } = readOracleRunConfig()
 const orderedScenarioRuns = 12 * multiplier
 const transitionScenarioRuns = 8 * multiplier
@@ -400,6 +418,56 @@ function withAppliedSubsetEvidence<TRow extends { id: number }>(
   })
 }
 
+function createConformingOrderedSource<TRow extends { id: number }>(
+  id: string,
+  rows: ReadonlyArray<TRow>,
+  autoIndex: `eager` | `off` = `eager`,
+) {
+  const requests: Array<LoadSubsetOptions> = []
+  const delivered = new Set<number>()
+  const source = createCollection<TRow>({
+    id,
+    getKey: (row) => row.id,
+    syncMode: `on-demand`,
+    startSync: true,
+    autoIndex,
+    defaultIndexType: BTreeIndex,
+    sync: {
+      sync: ({ begin, write, commit, markReady }) => {
+        markReady()
+        return {
+          loadSubset: (options: LoadSubsetOptions) => {
+            requests.push(options)
+            const requested = rowsForLoadSubset(rows, options)
+            begin()
+            for (const row of requested) {
+              if (delivered.has(row.id)) continue
+              delivered.add(row.id)
+              write({ type: `insert`, value: row })
+            }
+            const receipt = commit(options.signal)
+            const hasMore = options.cursor
+              ? rows.filter((row) =>
+                  Boolean(
+                    evaluateReferenceExpression(options.cursor!.whereFrom, row),
+                  ),
+                ).length > (options.limit ?? Number.POSITIVE_INFINITY)
+              : rows.length >
+                (options.offset ?? 0) +
+                  (options.limit ?? Number.POSITIVE_INFINITY)
+            return Promise.resolve(receipt).then(() => ({
+              hasMore,
+              appliedRowKeys: requested.map(({ id: key }) => key),
+            }))
+          },
+        }
+      },
+    },
+  })
+
+  return { requests, source }
+}
+
 async function runPaginationScenario(
   scenario: PaginationScenario,
 ): Promise<void> {
@@ -438,8 +506,7 @@ async function runPaginationScenario(
       )
     }
   } finally {
-    live.cleanup()
-    source.cleanup()
+    await cleanupAll(live, source)
   }
 }
 
@@ -525,8 +592,7 @@ async function runMultiOrderScenario(
       throw new TraceAssertionError(0, error)
     }
   } finally {
-    live.cleanup()
-    source.cleanup()
+    await cleanupAll(live, source)
   }
 }
 
@@ -614,8 +680,7 @@ async function runNullableCursorScenario(
     }
   } finally {
     for (const request of pending) request.deferred.resolve()
-    live.cleanup()
-    source.cleanup()
+    await cleanupAll(live, source)
   }
 }
 
@@ -687,8 +752,7 @@ async function runPaginationStateScenario(
       expectCurrentWindow(index + 1)
     }
   } finally {
-    live.cleanup()
-    source.cleanup()
+    await cleanupAll(live, source)
   }
 }
 
@@ -794,8 +858,7 @@ async function runOnDemandPaginationScenario(
     for (const load of loads)
       expect(load.orderBy).toMatchObject(expectedOrderBy)
   } finally {
-    live.cleanup()
-    source.cleanup()
+    await cleanupAll(live, source)
   }
 }
 
@@ -888,9 +951,7 @@ async function expectOnDemandWindowsAreCompletionOrderIndependent(
     expect(Array.from(secondLive.values(), ({ id }) => id)).toEqual([1, 2, 3])
   } finally {
     for (const request of pending) request.deferred.resolve()
-    firstLive.cleanup()
-    secondLive.cleanup()
-    source.cleanup()
+    await cleanupAll(firstLive, secondLive, source)
   }
 }
 
@@ -911,6 +972,7 @@ async function runAdversarialOrderedProviderScenario(options: {
   providerPageCap?: number
   reportedExtent?: `computed` | `continues` | `unknown` | `exhausted`
   widenTo?: number
+  expectNoProgress?: boolean
 }): Promise<Array<LoadSubsetOptions>> {
   const loads: Array<LoadSubsetOptions> = []
   const delivered = new Set(options.initialRows?.map(({ id }) => id) ?? [])
@@ -934,6 +996,17 @@ async function runAdversarialOrderedProviderScenario(options: {
         return {
           loadSubset: (loadOptions: LoadSubsetOptions) => {
             loads.push(loadOptions)
+            if (loads.length > options.providerRows.length * 4 + 4) {
+              throw new Error(
+                `Ordered refinement exceeded its finite source work bound: ${JSON.stringify(
+                  loads.map(({ limit, offset, cursor }) => ({
+                    limit,
+                    offset,
+                    lastKey: cursor?.lastKey,
+                  })),
+                )}`,
+              )
+            }
             const providerMatch = options.useOffsetWhenAvailable
               ? options.providerRows.slice(
                   loadOptions.offset ?? 0,
@@ -1010,12 +1083,19 @@ async function runAdversarialOrderedProviderScenario(options: {
         limit: options.widenTo,
       })
       if (widened instanceof Promise) await widened
+      if (options.expectNoProgress) {
+        expect(live.utils.lastSubsetError).toMatchObject({
+          name: `OrderedLoadNoProgressError`,
+        })
+      }
       expect(loads.length).toBeGreaterThan(loadCount)
     }
-    return loads
+    // Snapshot observations before cleanup. Teardown must not create fresh
+    // source demand, and callers must not mistake such work for the scenario's
+    // final refinement request.
+    return [...loads]
   } finally {
-    live.cleanup()
-    source.cleanup()
+    await cleanupAll(live, source)
   }
 }
 
@@ -1233,8 +1313,7 @@ async function runPendingMutationScenario(
   } finally {
     for (const request of pending) request.deferred.resolve()
     await Promise.allSettled(outstanding)
-    await live.cleanup()
-    await source.cleanup()
+    await cleanupAll(live, source)
   }
 }
 
@@ -1358,8 +1437,7 @@ async function runRejectedCursorRetryAfterMutation(): Promise<void> {
     }
   } finally {
     for (const request of pending) request.deferred.resolve()
-    live.cleanup()
-    source.cleanup()
+    await cleanupAll(live, source)
   }
 }
 
@@ -1466,6 +1544,17 @@ async function runPendingHistoryScenario(
 
     await settle(pending[0]!)
     for (let index = 1; index < pending.length; index++) {
+      if (index > rows.size * 4) {
+        throw new Error(
+          `Ordered continuation exceeded its finite source work bound: ${JSON.stringify(
+            pending.map(({ options }) => ({
+              limit: options.limit,
+              offset: options.offset,
+              lastKey: options.cursor?.lastKey,
+            })),
+          )}`,
+        )
+      }
       await settle(pending[index]!)
     }
     await Promise.all(outstanding)
@@ -1491,8 +1580,7 @@ async function runPendingHistoryScenario(
   } finally {
     for (const request of pending) request.deferred.resolve()
     await Promise.allSettled(outstanding)
-    live.cleanup()
-    source.cleanup()
+    await cleanupAll(live, source)
   }
 }
 
@@ -1588,12 +1676,279 @@ async function expectInflightRequestFillsNewWindow(): Promise<void> {
     }
   } finally {
     for (const request of pending) request.deferred.resolve()
-    live.cleanup()
-    source.cleanup()
+    await cleanupAll(live, source)
   }
 }
 
 describe(`pagination recomputation oracle`, () => {
+  it.each([
+    { label: `Error`, reason: new Error(`first cleanup failed`) },
+    { label: `undefined`, reason: undefined },
+    { label: `null`, reason: null },
+    { label: `false`, reason: false },
+    { label: `zero`, reason: 0 },
+    { label: `NaN`, reason: Number.NaN },
+    { label: `empty string`, reason: `` },
+  ])(
+    `observes $label cleanup failure after every teardown settles`,
+    async ({ reason: firstFailure }) => {
+      const secondFailure = new Error(`second cleanup failed`)
+      const firstFailureRelease = createDeferred<void>()
+      const lastCleanupRelease = createDeferred<void>()
+      const repeatedFirstFailureRelease = createDeferred<void>()
+      const repeatedLastCleanupRelease = createDeferred<void>()
+      const events: Array<string> = []
+      const unhandled: Array<unknown> = []
+      const recordUnhandled = (reason: unknown) => unhandled.push(reason)
+      const createTargets = (
+        firstRelease: Deferred<void>,
+        lastRelease: Deferred<void>,
+      ): ReadonlyArray<CleanupTarget> => [
+        {
+          cleanup: async () => {
+            events.push(`first`)
+            await firstRelease.promise
+            throw firstFailure
+          },
+        },
+        {
+          cleanup: () => {
+            events.push(`second`)
+            throw secondFailure
+          },
+        },
+        {
+          cleanup: async () => {
+            events.push(`third`)
+            await lastRelease.promise
+          },
+        },
+      ]
+      const observeFirstFailure = (cleanup: Promise<void>) =>
+        cleanup.then(
+          () => {
+            throw new Error(`expected cleanup to reject`)
+          },
+          (error: unknown) => expect(error).toBe(firstFailure),
+        )
+      let cleanupFinished = false
+      process.on(`unhandledRejection`, recordUnhandled)
+
+      try {
+        const cleanup = cleanupAll(
+          ...createTargets(firstFailureRelease, lastCleanupRelease),
+        ).finally(() => {
+          cleanupFinished = true
+        })
+        const observedFailure = observeFirstFailure(cleanup)
+
+        await flushPromises()
+        expect(events).toEqual([`first`, `second`, `third`])
+        expect(cleanupFinished).toBe(false)
+        expect(unhandled).toEqual([])
+
+        firstFailureRelease.resolve()
+        await flushPromises()
+        expect(cleanupFinished).toBe(false)
+        expect(unhandled).toEqual([])
+
+        lastCleanupRelease.resolve()
+        await observedFailure
+        await flushPromises()
+        expect(cleanupFinished).toBe(true)
+        expect(unhandled).toEqual([])
+
+        let repeatedCleanupFinished = false
+        const repeatedCleanup = cleanupAll(
+          ...createTargets(
+            repeatedFirstFailureRelease,
+            repeatedLastCleanupRelease,
+          ),
+        ).finally(() => {
+          repeatedCleanupFinished = true
+        })
+        const repeatedObservedFailure = observeFirstFailure(repeatedCleanup)
+        await flushPromises()
+        expect(events).toEqual([
+          `first`,
+          `second`,
+          `third`,
+          `first`,
+          `second`,
+          `third`,
+        ])
+        expect(repeatedCleanupFinished).toBe(false)
+        expect(unhandled).toEqual([])
+
+        repeatedFirstFailureRelease.resolve()
+        await flushPromises()
+        expect(repeatedCleanupFinished).toBe(false)
+        expect(unhandled).toEqual([])
+
+        repeatedLastCleanupRelease.resolve()
+        await repeatedObservedFailure
+        await flushPromises()
+        expect(repeatedCleanupFinished).toBe(true)
+        expect(unhandled).toEqual([])
+      } finally {
+        firstFailureRelease.resolve()
+        lastCleanupRelease.resolve()
+        repeatedFirstFailureRelease.resolve()
+        repeatedLastCleanupRelease.resolve()
+        process.off(`unhandledRejection`, recordUnhandled)
+      }
+    },
+  )
+
+  it(`refills a joined result window through a contract-compliant source`, async () => {
+    type ParentRow = { id: number; rank: number; groupId: number }
+    type ChildRow = { id: number; groupId: number }
+    const parents = [
+      { id: 1, rank: 0, groupId: 1 },
+      { id: 2, rank: 1, groupId: 2 },
+      { id: 3, rank: 2, groupId: 3 },
+      { id: 4, rank: 3, groupId: 4 },
+    ] satisfies ReadonlyArray<ParentRow>
+    const { requests, source: parentSource } = createConformingOrderedSource(
+      `pagination-joined-underfill-source-${collectionSequence++}`,
+      parents,
+    )
+    const childSource = createCollection(
+      mockSyncCollectionOptions({
+        id: `pagination-joined-underfill-child-${collectionSequence++}`,
+        initialData: [
+          { id: 20, groupId: 2 },
+          { id: 30, groupId: 3 },
+          { id: 40, groupId: 4 },
+        ] satisfies ReadonlyArray<ChildRow>,
+        getKey: (row: ChildRow) => row.id,
+      }),
+    )
+    const live = createLiveQueryCollection((query) =>
+      query
+        .from({ parent: parentSource })
+        .innerJoin({ child: childSource }, ({ parent, child }) =>
+          eq(parent.groupId, child.groupId),
+        )
+        .orderBy(({ parent }) => parent.rank, `asc`)
+        .orderBy(({ parent }) => parent.id, `asc`)
+        .limit(2)
+        .select(({ parent }) => ({ id: parent.id })),
+    )
+
+    try {
+      await live.preload()
+      await flushPromises()
+
+      expect(Array.from(live.values(), ({ id }) => id)).toEqual([2, 3])
+      expect(requests).toHaveLength(2)
+      expect(requests[0]?.limit).toBe(2)
+      expect(requests[1]?.cursor).toBeDefined()
+    } finally {
+      await cleanupAll(live, childSource, parentSource)
+    }
+  })
+
+  it(`loads the full ordered source when no continuation index exists`, async () => {
+    type ParentRow = { id: number; rank: number; groupId: number }
+    type ChildRow = { id: number; groupId: number }
+    const parents = [
+      { id: 1, rank: 0, groupId: 1 },
+      { id: 2, rank: 1, groupId: 2 },
+      { id: 3, rank: 2, groupId: 3 },
+      { id: 4, rank: 3, groupId: 4 },
+    ] satisfies ReadonlyArray<ParentRow>
+    const { requests, source: parentSource } = createConformingOrderedSource(
+      `pagination-no-index-underfill-source-${collectionSequence++}`,
+      parents,
+      `off`,
+    )
+    const childSource = createCollection(
+      mockSyncCollectionOptions({
+        id: `pagination-no-index-underfill-child-${collectionSequence++}`,
+        initialData: [
+          { id: 20, groupId: 2 },
+          { id: 30, groupId: 3 },
+          { id: 40, groupId: 4 },
+        ] satisfies ReadonlyArray<ChildRow>,
+        getKey: (row: ChildRow) => row.id,
+      }),
+    )
+    const live = createLiveQueryCollection((query) =>
+      query
+        .from({ parent: parentSource })
+        .innerJoin({ child: childSource }, ({ parent, child }) =>
+          eq(parent.groupId, child.groupId),
+        )
+        .orderBy(({ parent }) => parent.rank, `asc`)
+        .orderBy(({ parent }) => parent.id, `asc`)
+        .limit(2)
+        .select(({ parent }) => ({ id: parent.id })),
+    )
+
+    try {
+      await live.preload()
+      await flushPromises()
+
+      expect(Array.from(live.values(), ({ id }) => id)).toEqual([2, 3])
+      expect(requests).toHaveLength(1)
+      expect(requests[0]?.limit).toBeUndefined()
+    } finally {
+      await cleanupAll(live, childSource, parentSource)
+    }
+  })
+
+  it(`refines a joined foreign order term through the source tie class`, async () => {
+    type ParentRow = { id: number; sourceRank: number; childId: number }
+    type ChildRow = { id: number; score: number }
+    const parents = [
+      { id: 1, sourceRank: 0, childId: 1 },
+      { id: 2, sourceRank: 0, childId: 2 },
+      { id: 3, sourceRank: 0, childId: 3 },
+      { id: 4, sourceRank: 0, childId: 4 },
+    ] satisfies ReadonlyArray<ParentRow>
+    const { requests, source: parentSource } = createConformingOrderedSource(
+      `pagination-joined-foreign-order-source-${collectionSequence++}`,
+      parents,
+    )
+    const childSource = createCollection(
+      mockSyncCollectionOptions({
+        id: `pagination-joined-foreign-order-child-${collectionSequence++}`,
+        initialData: [
+          { id: 1, score: 10 },
+          { id: 2, score: 20 },
+          { id: 3, score: 0 },
+          { id: 4, score: 30 },
+        ] satisfies ReadonlyArray<ChildRow>,
+        getKey: (row: ChildRow) => row.id,
+      }),
+    )
+    const live = createLiveQueryCollection((query) =>
+      query
+        .from({ parent: parentSource })
+        .leftJoin({ child: childSource }, ({ parent, child }) =>
+          eq(parent.childId, child.id),
+        )
+        .orderBy(({ parent }) => parent.sourceRank, `asc`)
+        .orderBy(({ child }) => child.score, `asc`)
+        .orderBy(({ parent }) => parent.id, `asc`)
+        .limit(2)
+        .select(({ parent }) => ({ id: parent.id })),
+    )
+
+    try {
+      await live.preload()
+      await flushPromises()
+
+      expect(Array.from(live.values(), ({ id }) => id)).toEqual([3, 1])
+      expect(requests).toHaveLength(2)
+      expect(requests[0]?.orderBy).toHaveLength(1)
+      expect(requests[1]?.cursor).toBeDefined()
+    } finally {
+      await cleanupAll(live, childSource, parentSource)
+    }
+  })
+
   it(`materializes an empty source window`, async () => {
     await runPaginationScenario({
       ranks: [],
@@ -1712,8 +2067,7 @@ describe(`pagination recomputation oracle`, () => {
       expect(requests[1]).toMatchObject({ limit: 2, offset: 0 })
       expect(requests[1]?.cursor).toBeUndefined()
     } finally {
-      live.cleanup()
-      source.cleanup()
+      await cleanupAll(live, source)
     }
   })
 
@@ -1768,8 +2122,7 @@ describe(`pagination recomputation oracle`, () => {
       await live.preload()
       expect(Array.from(live.values(), ({ id }) => id)).toEqual([1, 2])
     } finally {
-      live.cleanup()
-      source.cleanup()
+      await cleanupAll(live, source)
     }
   })
 
@@ -1884,24 +2237,22 @@ describe(`pagination recomputation oracle`, () => {
             expectedCovering.slice(0, 1),
           )
         } finally {
-          covered.cleanup()
+          await cleanupAll(covered)
         }
 
         if (releaseFirst === `covering`) {
-          covering.cleanup()
+          await cleanupAll(covering)
           expect(Array.from(narrower.values(), ({ id }) => id)).toEqual(
             expectedCovering.slice(0, 2),
           )
         } else {
-          narrower.cleanup()
+          await cleanupAll(narrower)
           expect(Array.from(covering.values(), ({ id }) => id)).toEqual(
             expectedCovering,
           )
         }
       } finally {
-        covering.cleanup()
-        narrower.cleanup()
-        source.cleanup()
+        await cleanupAll(covering, narrower, source)
       }
     },
   )
@@ -1986,8 +2337,7 @@ describe(`pagination recomputation oracle`, () => {
       if (widened instanceof Promise) await widened
       expect(Array.from(live.values(), ({ id }) => id)).toEqual([1, 2])
     } finally {
-      live.cleanup()
-      source.cleanup()
+      await cleanupAll(live, source)
     }
   })
 
@@ -2068,14 +2418,15 @@ describe(`pagination recomputation oracle`, () => {
       expect(refinement.options.limit).toBeUndefined()
       expect(refinement.options.offset).toBeUndefined()
 
+      const transportCount = pending.length
       const widened = live.utils.setWindow({ offset: 0, limit: 2 })
       expect(widened).toBe(true)
 
       expect(Array.from(live.values(), ({ id }) => id)).toEqual([1, 2])
+      expect(pending).toHaveLength(transportCount)
     } finally {
       for (const request of pending) request.deferred.resolve()
-      live.cleanup()
-      source.cleanup()
+      await cleanupAll(live, source)
     }
   })
 
@@ -2304,8 +2655,7 @@ describe(`pagination recomputation oracle`, () => {
       await live.utils.setWindow({ offset: 0, limit: 3 })
       expect(Array.from(live.values(), ({ id }) => id)).toEqual([1, 2, 9])
     } finally {
-      live.cleanup()
-      source.cleanup()
+      await cleanupAll(live, source)
     }
   })
 
@@ -2406,8 +2756,7 @@ describe(`pagination recomputation oracle`, () => {
         expect(loads.at(-1)).toMatchObject({ offset: 0, limit: 2 })
         expect(loads.at(-1)?.cursor).toBeUndefined()
       } finally {
-        live.cleanup()
-        source.cleanup()
+        await cleanupAll(live, source)
       }
     },
   )
@@ -2540,8 +2889,7 @@ describe(`pagination recomputation oracle`, () => {
         )
       } finally {
         for (const request of pending) request.deferred.resolve()
-        live.cleanup()
-        source.cleanup()
+        await cleanupAll(live, source)
       }
     },
   )
@@ -2931,6 +3279,7 @@ describe(`pagination recomputation oracle`, () => {
     expect(loads).toHaveLength(2)
     expect(loads[1]?.limit).toBeUndefined()
     expect(loads[1]?.offset).toBeUndefined()
+    expect(loads[1]?.cursor).toBeUndefined()
   })
 
   it.each([`continues`, `unknown`] as const)(
@@ -2948,11 +3297,15 @@ describe(`pagination recomputation oracle`, () => {
         providerPageCap: 1,
         reportedExtent,
         widenTo: 2,
+        expectNoProgress: true,
       })
 
       expect(loads[1]?.limit).toBeUndefined()
       expect(loads[1]?.offset).toBeUndefined()
-      expect(loads.length).toBeGreaterThan(2)
+      expect(loads.map(({ limit }) => limit)).toEqual([1, undefined, undefined])
+      expect(loads.slice(1).every(({ cursor }) => cursor === undefined)).toBe(
+        true,
+      )
     },
   )
 
@@ -3038,8 +3391,7 @@ describe(`pagination recomputation oracle`, () => {
       await live.preload()
       expect(Array.from(live.values(), ({ id }) => id)).toEqual([3, 1])
     } finally {
-      live.cleanup()
-      source.cleanup()
+      await cleanupAll(live, source)
     }
   })
 
@@ -3065,8 +3417,7 @@ describe(`pagination recomputation oracle`, () => {
         await live.preload()
         expect(Array.from(live.values(), ({ id }) => id)).toEqual([1])
       } finally {
-        live.cleanup()
-        source.cleanup()
+        await cleanupAll(live, source)
       }
     },
   )

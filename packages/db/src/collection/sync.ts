@@ -45,8 +45,11 @@ import type { Deferred } from '../deferred'
 import type {
   AcquisitionToken,
   AppliedLoadSubsetCoverage,
+  BorrowedCoverageEvidence,
+  CoverageRegistryResourceCounts,
   DemandLease,
 } from '../query/coverage-registry.js'
+import type { DemandKey } from '../query/ir-stable-identity.js'
 
 type DeferredLoadSubset = {
   ownerOptions: LoadSubsetOptions
@@ -81,6 +84,38 @@ type LoadSubsetOperation = {
   error?: unknown
   deferred?: Deferred<void>
 }
+
+export type LoadSubsetEvidenceWorkCounts = Readonly<{
+  rowKeyCopies: number
+  demandSnapshots: number
+  demandKeyDerivations: number
+}>
+
+type SatisfiedEvidenceAuthority = `applied` | `established`
+
+type SatisfiedEvidenceCandidate<TKey extends string | number> = Readonly<{
+  authority: SatisfiedEvidenceAuthority
+  acquisition: AcquisitionToken
+  collectionId: string
+  sourceId: string | undefined
+  demand: LoadSubsetOptions
+  demandKey: DemandKey | undefined
+  sequenceKey: DemandKey | undefined
+  sourceExtent: AppliedLoadSubsetOutcome[`extent`]
+  rowKeys: ReadonlyArray<TKey> | ReadonlySet<TKey>
+  generation: number
+}>
+
+type ProjectedSatisfiedEvidence<TKey extends string | number> = Readonly<{
+  candidate: SatisfiedEvidenceCandidate<TKey>
+  coverage: AppliedLoadSubsetCoverage<TKey> | undefined
+  outcome: AppliedLoadSubsetOutcome
+}>
+
+type SelectedSatisfiedEvidence<TKey extends string | number> = Readonly<{
+  candidate: SatisfiedEvidenceCandidate<TKey>
+  extent: AppliedLoadSubsetOutcome[`extent`]
+}>
 
 export class CollectionSyncManager<
   TOutput extends object = Record<string, unknown>,
@@ -129,6 +164,11 @@ export class CollectionSyncManager<
     SharedCoverageAcquisition
   >()
   private readonly pendingCoverageRowsToRemove = new Set<TKey>()
+  private evidenceWorkCounts = {
+    rowKeyCopies: 0,
+    demandSnapshots: 0,
+    demandKeyDerivations: 0,
+  }
 
   /**
    * Creates a new CollectionSyncManager instance
@@ -149,6 +189,12 @@ export class CollectionSyncManager<
     this.state = deps.state
     this.lifecycle = deps.lifecycle
     this._events = deps.events
+    this._events.on(`truncate`, () => {
+      this.coverageRegistry.invalidateAppliedEvidence()
+      this.coverageAcquisitionsByPromise = new WeakMap()
+      // The truncate transaction already removed every source row.
+      this.pendingCoverageRowsToRemove.clear()
+    })
   }
 
   /** Mark the active sync transaction as changing collection layout. */
@@ -313,6 +359,7 @@ export class CollectionSyncManager<
               return pendingTransaction.applied.promise
             }
 
+            pendingTransaction.requestSignal = signal
             pendingTransaction.committed = true
 
             const cancel = () => {
@@ -487,7 +534,11 @@ export class CollectionSyncManager<
             },
             (error: unknown) => {
               if (coverageOwnership) {
-                this.discardCoverageLease(ownerOptions, coverageOwnership.lease)
+                this.discardCoverageLease(
+                  ownerOptions,
+                  coverageOwnership.acquisition,
+                  coverageOwnership.lease,
+                )
               }
               deferred.reject(error)
             },
@@ -947,10 +998,10 @@ export class CollectionSyncManager<
       this.syncStartRequested = true
       const deferred = createDeferred<AppliedLoadSubsetOutcome>()
       const loadOptions = cloneLoadSubsetOptions(options)
-      const demand = snapshotLoadSubsetDemand(loadOptions)
+      const demand = this.snapshotEvidenceDemand(loadOptions)
       // Demand identity is part of acquisition scope. Reject unsupported
       // values before an adapter can perform irreversible work.
-      getLoadSubsetDemandKey(demand)
+      this.deriveEvidenceDemandKey(demand)
       const generation = ++this.loadSubsetGeneration
       this.deferredLoadSubsets.push({
         ownerOptions: options,
@@ -964,9 +1015,9 @@ export class CollectionSyncManager<
     }
 
     if (this.syncLoadSubsetFn) {
-      const demand = snapshotLoadSubsetDemand(options)
+      const demand = this.snapshotEvidenceDemand(options)
       // Validate and hash the retained scope before starting adapter work.
-      getLoadSubsetDemandKey(demand)
+      this.deriveEvidenceDemandKey(demand)
       const generation = ++this.loadSubsetGeneration
       const pendingCoverageDemand = this.retainPendingCoverageDemand(options)
       let result: ReturnType<LoadSubsetFn>
@@ -1014,7 +1065,7 @@ export class CollectionSyncManager<
             return appliedOutcome
           },
           (error: unknown) => {
-            this.discardCoverageLease(options, lease)
+            this.discardCoverageLease(options, acquisition, lease)
             throw error
           },
         )
@@ -1076,46 +1127,78 @@ export class CollectionSyncManager<
     return this.coverageRegistry.coverageAntichain()
   }
 
+  /** @internal Resource accounting used by lifecycle oracles. */
+  public getLoadSubsetResourceCounts(): CoverageRegistryResourceCounts {
+    return this.coverageRegistry.resourceCounts()
+  }
+
+  /** @internal Work accounting used by evidence-path oracles. */
+  public getLoadSubsetEvidenceWorkCounts(): LoadSubsetEvidenceWorkCounts {
+    const registry = this.coverageRegistry.evidenceWork()
+    return {
+      rowKeyCopies:
+        this.evidenceWorkCounts.rowKeyCopies + registry.rowKeyCopies,
+      demandSnapshots:
+        this.evidenceWorkCounts.demandSnapshots + registry.demandSnapshots,
+      demandKeyDerivations:
+        this.evidenceWorkCounts.demandKeyDerivations +
+        registry.demandKeyDerivations,
+    }
+  }
+
+  /** @internal Resets work accounting without changing collection state. */
+  public resetLoadSubsetEvidenceWorkCounts(): void {
+    this.evidenceWorkCounts = {
+      rowKeyCopies: 0,
+      demandSnapshots: 0,
+      demandKeyDerivations: 0,
+    }
+    this.coverageRegistry.resetEvidenceWork()
+  }
+
   /** @internal Exact active evidence for a physically skipped request. */
   public getLoadSubsetOutcome(
     demand: LoadSubsetOptions,
   ): AppliedLoadSubsetOutcome | undefined {
-    const demandKey = getLoadSubsetDemandKey(demand)
-    const evidence = [
-      ...this.coverageRegistry.coverageEvidence().map(
-        ({ coverage, generation }) =>
-          ({
-            collectionId: coverage.collectionId,
-            ...(coverage.sourceId === undefined
-              ? {}
-              : { sourceId: coverage.sourceId }),
-            demand: coverage.demand,
-            generation,
-            extent: coverage.extent,
-            appliedRowKeys: coverage.rowKeys,
-          }) satisfies AppliedLoadSubsetOutcome,
-      ),
-      ...this.coverageRegistry.retainedOutcomeEvidence(),
-    ]
-      .filter(
-        (outcome) =>
-          outcome.collectionId === this.id &&
-          getLoadSubsetDemandKey(outcome.demand) === demandKey,
-      )
-      .sort((left, right) => right.generation - left.generation)[0]
-    if (!evidence) return undefined
+    const demandKey = this.deriveEvidenceDemandKey(demand)
+    let selected: AppliedLoadSubsetOutcome | undefined
+    for (const evidence of this.coverageRegistry.borrowEvidence()) {
+      if (evidence.demandKey !== demandKey) continue
+      const outcome =
+        evidence.authority === `established`
+          ? ({
+              collectionId: evidence.coverage.collectionId,
+              ...(evidence.coverage.sourceId === undefined
+                ? {}
+                : { sourceId: evidence.coverage.sourceId }),
+              demand: evidence.coverage.demand,
+              generation: evidence.generation,
+              extent: evidence.coverage.extent,
+              appliedRowKeys: evidence.coverage.rowKeys,
+            } satisfies AppliedLoadSubsetOutcome)
+          : evidence.authority === `retained`
+            ? evidence.outcome
+            : undefined
+      if (
+        outcome?.collectionId === this.id &&
+        (selected === undefined || outcome.generation > selected.generation)
+      ) {
+        selected = outcome
+      }
+    }
+    if (!selected) return undefined
 
     return {
       collectionId: this.id,
-      ...(evidence.sourceId === undefined
+      ...(selected.sourceId === undefined
         ? {}
-        : { sourceId: evidence.sourceId }),
-      demand: snapshotLoadSubsetDemand(demand),
-      generation: evidence.generation,
-      extent: evidence.extent,
-      ...(evidence.appliedRowKeys === undefined
+        : { sourceId: selected.sourceId }),
+      demand: this.snapshotEvidenceDemand(demand),
+      generation: selected.generation,
+      extent: selected.extent,
+      ...(selected.appliedRowKeys === undefined
         ? {}
-        : { appliedRowKeys: Object.freeze([...evidence.appliedRowKeys]) }),
+        : { appliedRowKeys: this.copyEvidenceRows(selected.appliedRowKeys) }),
     }
   }
 
@@ -1139,6 +1222,7 @@ export class CollectionSyncManager<
       this.coverageRegistry.attachLease(lease, acquisition, {
         generation,
         scope: { collectionId: this.id, demand },
+        settlementPending: true,
       })
     } else {
       acquisition = this.coverageRegistry.addAcquisition({
@@ -1163,131 +1247,191 @@ export class CollectionSyncManager<
     generation: number,
   ): void {
     const lease = this.coverageRegistry.addLease(demand)
-    const demandKey = getLoadSubsetDemandKey(demand)
-    const covering = this.coverageRegistry
-      .coveringAcquisitions(demand)
-      .map((evidence) => ({
-        ...evidence,
-        projected: this.projectSatisfiedCoverage(
-          evidence.coverage,
-          demand,
-          generation,
-        ),
-      }))
-      .sort((left, right) => {
-        const leftExact =
-          getLoadSubsetDemandKey(left.coverage.demand) === demandKey
-        const rightExact =
-          getLoadSubsetDemandKey(right.coverage.demand) === demandKey
-        if (leftExact !== rightExact)
-          return Number(rightExact) - Number(leftExact)
-        const leftContinues = left.projected.outcome.extent === `continues`
-        const rightContinues = right.projected.outcome.extent === `continues`
-        if (leftContinues !== rightContinues) {
-          return Number(rightContinues) - Number(leftContinues)
-        }
-        return right.generation - left.generation
-      })[0]
-    if (covering) {
-      this.coverageRegistry.attachLease(lease, covering.acquisition, {
+    const demandKey = this.deriveEvidenceDemandKey(demand)
+    const sequenceKey = this.deriveEvidenceSequenceKey(demand)
+    const selected = this.selectSatisfiedEvidence(
+      this.coverageRegistry.borrowEvidence(),
+      demand,
+      demandKey,
+      sequenceKey,
+      generation,
+    )
+    if (selected) {
+      this.coverageRegistry.attachLease(lease, selected.candidate.acquisition, {
         generation,
         scope: { collectionId: this.id, demand },
-        ...(covering.projected.coverage === undefined
+        ...(selected.coverage === undefined
           ? {}
-          : { coverage: covering.projected.coverage }),
-        retainedOutcome: covering.projected.outcome,
+          : { coverage: selected.coverage }),
+        retainedOutcome: selected.outcome,
       })
-    } else {
-      const applied = this.coverageRegistry
-        .appliedAcquisitionEvidence()
-        .filter(({ outcome }) => outcome.collectionId === this.id)
-        .flatMap((evidence) => {
-          const projected = this.projectAppliedSatisfiedOutcome(
-            evidence.outcome,
-            evidence.rowKeys,
-            demand,
-            generation,
-          )
-          return projected === undefined ? [] : [{ ...evidence, projected }]
-        })
-        .sort((left, right) => {
-          const leftExact =
-            getLoadSubsetDemandKey(left.outcome.demand) === demandKey
-          const rightExact =
-            getLoadSubsetDemandKey(right.outcome.demand) === demandKey
-          if (leftExact !== rightExact) {
-            return Number(rightExact) - Number(leftExact)
-          }
-          return right.outcome.generation - left.outcome.generation
-        })[0]
-      if (applied) {
-        this.coverageRegistry.attachLease(lease, applied.acquisition, {
-          generation,
-          scope: { collectionId: this.id, demand },
-          ...(applied.projected.coverage === undefined
-            ? {}
-            : { coverage: applied.projected.coverage }),
-          retainedOutcome: applied.projected.outcome,
-        })
-      }
     }
     this.recordCoverageLease(ownerOptions, lease)
   }
 
-  private projectAppliedSatisfiedOutcome(
-    applied: AppliedLoadSubsetOutcome,
-    appliedRowKeys: ReadonlyArray<TKey>,
+  private selectSatisfiedEvidence(
+    evidence: Iterable<
+      BorrowedCoverageEvidence<AppliedLoadSubsetCoverage<TKey>, TKey>
+    >,
     demand: LoadSubsetOptions,
+    demandKey: DemandKey | undefined,
+    sequenceKey: DemandKey | undefined,
     generation: number,
-  ):
-    | {
-        coverage: AppliedLoadSubsetCoverage<TKey> | undefined
-        outcome: AppliedLoadSubsetOutcome
+  ): ProjectedSatisfiedEvidence<TKey> | undefined {
+    let established: SelectedSatisfiedEvidence<TKey> | undefined
+    let applied: SelectedSatisfiedEvidence<TKey> | undefined
+
+    for (const item of evidence) {
+      if (item.authority === `retained`) continue
+      if (item.authority === `established`) {
+        established = this.preferSatisfiedEvidence(
+          `established`,
+          established,
+          item,
+          demand,
+          demandKey,
+          sequenceKey,
+        )
+      } else {
+        applied = this.preferSatisfiedEvidence(
+          `applied`,
+          applied,
+          item,
+          demand,
+          demandKey,
+          sequenceKey,
+        )
       }
-    | undefined {
-    const retainedDemand = snapshotLoadSubsetDemand(demand)
-    const exact =
-      getLoadSubsetDemandKey(applied.demand) ===
-      getLoadSubsetDemandKey(retainedDemand)
+    }
+
+    const selected = established ?? applied
+    return selected === undefined
+      ? undefined
+      : this.projectSatisfiedEvidence(
+          selected.candidate,
+          demand,
+          generation,
+          selected.extent,
+        )
+  }
+
+  private preferSatisfiedEvidence(
+    authority: SatisfiedEvidenceAuthority,
+    selected: SelectedSatisfiedEvidence<TKey> | undefined,
+    evidence: BorrowedCoverageEvidence<AppliedLoadSubsetCoverage<TKey>, TKey>,
+    demand: LoadSubsetOptions,
+    demandKey: DemandKey | undefined,
+    sequenceKey: DemandKey | undefined,
+  ): SelectedSatisfiedEvidence<TKey> | undefined {
+    const candidate = this.toSatisfiedEvidenceCandidate(authority, evidence)
+    if (!candidate || candidate.collectionId !== this.id) return selected
+    const exact = candidate.demandKey === demandKey
     if (
-      !exact &&
-      !isLoadSubsetRequestSubsumedBy(retainedDemand, applied.demand)
+      authority === `established` &&
+      !isLoadSubsetRequestSubsumedBy(demand, candidate.demand)
     ) {
-      return undefined
+      return selected
+    }
+    if (
+      authority === `applied` &&
+      !exact &&
+      !isLoadSubsetRequestSubsumedBy(demand, candidate.demand)
+    ) {
+      return selected
     }
 
     const extent = exact
-      ? `unknown`
-      : this.provesRowsBeyondDemand(
-            {
-              demand: applied.demand,
-              extent: `unknown`,
-              rowKeys: appliedRowKeys,
-            },
-            retainedDemand,
-          )
+      ? authority === `established`
+        ? candidate.sourceExtent
+        : `unknown`
+      : this.provesRowsBeyondDemand(candidate, demand, sequenceKey)
         ? `continues`
-        : undefined
-    if (extent === undefined) return undefined
+        : authority === `established`
+          ? candidate.sourceExtent === `exhausted`
+            ? `exhausted`
+            : `unknown`
+          : undefined
+    if (extent === undefined) return selected
 
-    const rowKeys = Object.freeze([...appliedRowKeys])
+    const selectedExact = selected?.candidate.demandKey === demandKey
+    const selectedContinues = selected?.extent === `continues`
+    const candidateContinues = extent === `continues`
+    if (
+      selected === undefined ||
+      (exact && !selectedExact) ||
+      (exact === selectedExact && candidateContinues && !selectedContinues) ||
+      (exact === selectedExact &&
+        candidateContinues === selectedContinues &&
+        candidate.generation > selected.candidate.generation)
+    ) {
+      return { candidate, extent }
+    }
+    return selected
+  }
+
+  private toSatisfiedEvidenceCandidate(
+    authority: SatisfiedEvidenceAuthority,
+    evidence: BorrowedCoverageEvidence<AppliedLoadSubsetCoverage<TKey>, TKey>,
+  ): SatisfiedEvidenceCandidate<TKey> | undefined {
+    if (authority === `established`) {
+      if (evidence.authority !== `established`) return undefined
+      return {
+        authority,
+        acquisition: evidence.acquisition,
+        collectionId: evidence.coverage.collectionId,
+        sourceId: evidence.coverage.sourceId,
+        demand: evidence.coverage.demand,
+        demandKey: evidence.demandKey,
+        sequenceKey: evidence.sequenceKey,
+        sourceExtent: evidence.coverage.extent,
+        rowKeys: evidence.coverage.rowKeys,
+        generation: evidence.generation,
+      }
+    }
+    if (evidence.authority !== `applied`) return undefined
+    return {
+      authority,
+      acquisition: evidence.acquisition,
+      collectionId: evidence.collectionId,
+      sourceId: evidence.sourceId,
+      demand: evidence.demand,
+      demandKey: evidence.demandKey,
+      sequenceKey: evidence.sequenceKey,
+      sourceExtent: `unknown`,
+      rowKeys: evidence.rowKeys,
+      generation: evidence.generation,
+    }
+  }
+
+  private projectSatisfiedEvidence(
+    candidate: SatisfiedEvidenceCandidate<TKey>,
+    demand: LoadSubsetOptions,
+    generation: number,
+    extent: AppliedLoadSubsetOutcome[`extent`],
+  ): ProjectedSatisfiedEvidence<TKey> {
+    const retainedDemand = this.snapshotEvidenceDemand(demand)
+    const rowKeys = this.copyEvidenceRows(candidate.rowKeys)
     const outcome: AppliedLoadSubsetOutcome = {
-      collectionId: applied.collectionId,
-      ...(applied.sourceId === undefined ? {} : { sourceId: applied.sourceId }),
+      collectionId: candidate.collectionId,
+      ...(candidate.sourceId === undefined
+        ? {}
+        : { sourceId: candidate.sourceId }),
       demand: retainedDemand,
       generation,
       extent,
       appliedRowKeys: rowKeys,
     }
+
     return {
+      candidate,
       coverage:
         extent === `unknown`
           ? undefined
           : {
-              collectionId: applied.collectionId,
-              ...(applied.sourceId === undefined
+              collectionId: candidate.collectionId,
+              ...(candidate.sourceId === undefined
                 ? {}
-                : { sourceId: applied.sourceId }),
+                : { sourceId: candidate.sourceId }),
               demand: retainedDemand,
               extent,
               rowKeys,
@@ -1296,70 +1440,18 @@ export class CollectionSyncManager<
     }
   }
 
-  private projectSatisfiedCoverage(
-    covering: AppliedLoadSubsetCoverage<TKey>,
-    demand: LoadSubsetOptions,
-    generation: number,
-  ): {
-    coverage: AppliedLoadSubsetCoverage<TKey> | undefined
-    outcome: AppliedLoadSubsetOutcome
-  } {
-    const retainedDemand = snapshotLoadSubsetDemand(demand)
-    const exact =
-      getLoadSubsetDemandKey(covering.demand) ===
-      getLoadSubsetDemandKey(retainedDemand)
-    const extent = exact
-      ? covering.extent
-      : this.provesRowsBeyondDemand(covering, retainedDemand)
-        ? `continues`
-        : covering.extent === `exhausted`
-          ? `exhausted`
-          : `unknown`
-    const outcome: AppliedLoadSubsetOutcome = {
-      collectionId: covering.collectionId,
-      ...(covering.sourceId === undefined
-        ? {}
-        : { sourceId: covering.sourceId }),
-      demand: retainedDemand,
-      generation,
-      extent,
-      appliedRowKeys: Object.freeze([...covering.rowKeys]),
-    }
-
-    return {
-      coverage:
-        extent === `unknown`
-          ? undefined
-          : {
-              collectionId: covering.collectionId,
-              ...(covering.sourceId === undefined
-                ? {}
-                : { sourceId: covering.sourceId }),
-              demand: retainedDemand,
-              extent,
-              rowKeys: covering.rowKeys,
-            },
-      outcome,
-    }
-  }
-
   private provesRowsBeyondDemand(
     covering: {
       demand: LoadSubsetOptions
-      extent: AppliedLoadSubsetOutcome[`extent`]
-      rowKeys: ReadonlyArray<string | number>
+      sequenceKey: DemandKey | undefined
+      sourceExtent: AppliedLoadSubsetOutcome[`extent`]
+      rowKeys: ReadonlyArray<string | number> | ReadonlySet<string | number>
     },
     demand: LoadSubsetOptions,
+    demandSequenceKey: DemandKey | undefined,
   ): boolean {
     if (demand.limit === undefined) return false
-
-    const sequenceKey = (options: LoadSubsetOptions) =>
-      getLoadSubsetDemandKey({
-        ...snapshotLoadSubsetDemand(options),
-        limit: undefined,
-        offset: undefined,
-      })
-    if (sequenceKey(covering.demand) !== sequenceKey(demand)) return false
+    if (covering.sequenceKey !== demandSequenceKey) return false
 
     const coveringOffset = covering.demand.offset ?? 0
     const demandEnd = (demand.offset ?? 0) + demand.limit
@@ -1367,14 +1459,48 @@ export class CollectionSyncManager<
 
     const coveringLimit = covering.demand.limit
     if (
-      covering.extent === `continues` &&
+      covering.sourceExtent === `continues` &&
       coveringLimit !== undefined &&
       coveringOffset + coveringLimit >= demandEnd
     ) {
       return true
     }
 
-    return covering.rowKeys.length > demandEnd - coveringOffset
+    const rowCount =
+      `size` in covering.rowKeys
+        ? covering.rowKeys.size
+        : covering.rowKeys.length
+    return rowCount > demandEnd - coveringOffset
+  }
+
+  private snapshotEvidenceDemand(demand: LoadSubsetOptions): LoadSubsetOptions {
+    this.evidenceWorkCounts.demandSnapshots++
+    return snapshotLoadSubsetDemand(demand)
+  }
+
+  private deriveEvidenceDemandKey(
+    demand: LoadSubsetOptions,
+  ): ReturnType<typeof getLoadSubsetDemandKey> {
+    this.evidenceWorkCounts.demandKeyDerivations++
+    return getLoadSubsetDemandKey(demand)
+  }
+
+  private deriveEvidenceSequenceKey(
+    demand: LoadSubsetOptions,
+  ): ReturnType<typeof getLoadSubsetDemandKey> {
+    return this.deriveEvidenceDemandKey({
+      ...demand,
+      limit: undefined,
+      offset: undefined,
+    })
+  }
+
+  private copyEvidenceRows<TRowKey extends string | number>(
+    rows: Iterable<TRowKey>,
+  ): ReadonlyArray<TRowKey> {
+    const snapshot = Object.freeze([...rows])
+    this.evidenceWorkCounts.rowKeyCopies += snapshot.length
+    return snapshot
   }
 
   private recordCoverageLease(
@@ -1391,7 +1517,10 @@ export class CollectionSyncManager<
     lease: DemandLease<LoadSubsetOptions>,
     outcome: AppliedLoadSubsetOutcome,
   ): void {
-    if (outcome.appliedRowKeys === undefined) return
+    if (outcome.appliedRowKeys === undefined) {
+      this.coverageRegistry.settleLease(acquisition, lease)
+      return
+    }
     this.removeCoverageRows(
       this.coverageRegistry.publishOutcome(acquisition, lease, outcome)
         .rowsToRemove,
@@ -1414,6 +1543,7 @@ export class CollectionSyncManager<
 
   private discardCoverageLease(
     options: LoadSubsetOptions,
+    acquisition: AcquisitionToken,
     lease: DemandLease<LoadSubsetOptions>,
   ): void {
     const leases = this.coverageLeasesByOwner.get(options)
@@ -1425,6 +1555,7 @@ export class CollectionSyncManager<
     this.removeCoverageRows(
       this.coverageRegistry.releaseLease(lease).rowsToRemove,
     )
+    this.coverageRegistry.settleLease(acquisition, lease)
   }
 
   private removeCoverageRows(rows: ReadonlyArray<TKey>): void {
@@ -1437,10 +1568,10 @@ export class CollectionSyncManager<
       (row) => this.coverageRegistry.rowOwnerCount(row) === 0,
     )
     if (unownedRows.length === 0) return
-    const result = this.state.deleteSyncedRows(unownedRows)
-    if (result !== true) {
-      throw new Error(`Immediate coverage row cleanup did not settle`)
-    }
+    // During publication this immediate transaction queues behind the batch
+    // whose listener released the coverage. The state drain applies it before
+    // the outer commit returns and owns the ignored receipt's rejection path.
+    this.state.deleteSyncedRows(unownedRows)
     unownedRows.forEach((row) => this.pendingCoverageRowsToRemove.delete(row))
   }
 

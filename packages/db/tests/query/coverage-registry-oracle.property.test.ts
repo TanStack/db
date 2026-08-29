@@ -1,13 +1,17 @@
 import { fc, test as fcTest } from '@fast-check/vitest'
+import { compareKeys } from '@tanstack/db-ivm'
 import { describe, expect, it, vi } from 'vitest'
-import { CoverageRegistry } from '../../src/query/coverage-registry.js'
+import {
+  CoverageRegistry,
+  createLoadSubsetCoverageRegistry,
+} from '../../src/query/coverage-registry.js'
 import { oraclePropertyOptions } from '../oracle-config.js'
 import type { AppliedLoadSubsetOutcome } from '../../src/types.js'
 import type { Command } from 'fast-check'
 
 type Prefix = number
 type PrefixCoverage = Readonly<{ prefix: Prefix }>
-type RowKey = string
+type RowKey = string | number
 
 function createPrefixRegistry(): CoverageRegistry<
   Prefix,
@@ -94,6 +98,115 @@ function publishPrefix(
   ).toMatchObject({ accepted: true, published: true })
 }
 
+type ClaimChurn = `defer` | `outcome-free` | `release-first` | `settle-first`
+
+function runClaimChurn(history: ReadonlyArray<ClaimChurn>, rowCount: number) {
+  const registry = createLoadSubsetCoverageRegistry<RowKey>()
+  const release = vi.fn()
+  const demand = { limit: rowCount }
+  const rows = Array.from({ length: rowCount }, (_, index) => `row-${index}`)
+  const physical = registry.addLease(demand)
+  expect(Reflect.ownKeys(physical)).toEqual([])
+  const acquisition = registry.addAcquisition({
+    generation: 1,
+    scope: { collectionId: `items`, sourceId: `source`, demand },
+    leases: [physical],
+    release,
+  })
+  const initialOutcome = {
+    collectionId: `items`,
+    sourceId: `source`,
+    demand,
+    generation: 1,
+    extent: `exhausted` as const,
+    appliedRowKeys: rows,
+  }
+  expect(
+    registry.publishOutcome(acquisition, physical, initialOutcome),
+  ).toEqual({ accepted: true, published: true, rowsToRemove: [] })
+
+  const pending: Array<{
+    lease: ReturnType<typeof registry.addLease>
+    outcome: AppliedLoadSubsetOutcome
+  }> = []
+  const baselineRowKeySlots = rowCount * 2
+  const expectBounded = () => {
+    expect(registry.resourceCounts()).toEqual({
+      liveLeases: 1,
+      acquisitions: 1,
+      claims: 1 + pending.length,
+      unsettledClaims: pending.length,
+      retainedDemands: 1,
+      retainedOutcomes: 0,
+      retainedRowKeySlots: baselineRowKeySlots,
+    })
+    expect(registry.appliedAcquisitionEvidence()).toHaveLength(1)
+  }
+
+  history.forEach((mode, index) => {
+    const generation = index + 2
+    const lease = registry.addLease(demand)
+    const outcome = { ...initialOutcome, generation }
+    registry.attachLease(lease, acquisition, {
+      generation,
+      scope: { collectionId: `items`, sourceId: `source`, demand },
+      coverage: {
+        collectionId: `items`,
+        sourceId: `source`,
+        demand,
+        extent: `exhausted`,
+        rowKeys: rows,
+      },
+      retainedOutcome: outcome,
+      settlementPending: true,
+    })
+
+    if (mode === `settle-first`) {
+      expect(
+        registry.publishOutcome(acquisition, lease, outcome),
+      ).toMatchObject({ accepted: true, published: true })
+      expect(registry.releaseLease(lease)).toEqual({ rowsToRemove: [] })
+      expectBounded()
+      return
+    }
+
+    expect(registry.releaseLease(lease)).toEqual({ rowsToRemove: [] })
+    pending.push({ lease, outcome })
+    expectBounded()
+    if (mode === `release-first`) {
+      expect(
+        registry.publishOutcome(acquisition, lease, outcome),
+      ).toMatchObject({ accepted: true, published: true })
+      pending.pop()
+      expectBounded()
+    } else if (mode === `outcome-free`) {
+      registry.settleLease(acquisition, lease)
+      pending.pop()
+      expectBounded()
+    }
+  })
+
+  while (pending.length > 0) {
+    const next = pending.pop()!
+    expect(
+      registry.publishOutcome(acquisition, next.lease, next.outcome),
+    ).toMatchObject({ accepted: true, published: true })
+    expectBounded()
+  }
+
+  expect(registry.releaseLease(physical)).toEqual({ rowsToRemove: rows })
+  expect(release).toHaveBeenCalledOnce()
+  expect(registry.resourceCounts()).toEqual({
+    liveLeases: 0,
+    acquisitions: 0,
+    claims: 0,
+    unsettledClaims: 0,
+    retainedDemands: 0,
+    retainedOutcomes: 0,
+    retainedRowKeySlots: 0,
+  })
+}
+
 type ModelLease = {
   active: boolean
   prefix: Prefix
@@ -102,6 +215,7 @@ type ModelLease = {
 
 type ModelClaim = {
   generation: number
+  settlementPending: boolean
   prefix: Prefix
   sourceId: string
   coverage: Prefix | undefined
@@ -112,6 +226,7 @@ type ModelClaim = {
 type ModelAcquisition = {
   active: boolean
   applied: boolean
+  evidenceEpoch: number
   generation: number
   prefix: Prefix
   sourceId: string
@@ -128,6 +243,7 @@ type RegistryModel = {
   acquisitions: Array<ModelAcquisition>
   currentByScope: Map<string, { acquisition: number; lease: number }>
   claimSequence: number
+  evidenceEpoch: number
 }
 
 type ReleaseProbe = {
@@ -150,7 +266,7 @@ type RegistryReal = {
   releases: Array<ReleaseProbe>
 }
 
-const modelRows = [`a`, `b`, `c`, `d`] as const
+const modelRows = [`a`, `ä`, 2, 10] as const satisfies ReadonlyArray<RowKey>
 
 function activeIndex<T extends { active: boolean }>(
   records: ReadonlyArray<T>,
@@ -195,6 +311,7 @@ function addModelAcquisition(
   model.acquisitions.push({
     active: true,
     applied: false,
+    evidenceEpoch: model.evidenceEpoch,
     generation: options.generation,
     prefix: options.prefix,
     sourceId: options.sourceId,
@@ -204,6 +321,7 @@ function addModelAcquisition(
         options.leaseIndex,
         {
           generation: options.generation,
+          settlementPending: true,
           prefix: options.prefix,
           sourceId: options.sourceId,
           coverage: undefined,
@@ -230,6 +348,7 @@ function canPublishModelAcquisition(
   const claim = acquisition.claims.get(leaseIndex)
   if (!claim) return false
   if (!acquisition.active || acquisition.releaseSettled) return false
+  if (acquisition.evidenceEpoch !== model.evidenceEpoch) return false
   const currentIndex = model.currentByScope.get(
     scopeKey(claim.sourceId, claim.prefix),
   )
@@ -248,7 +367,9 @@ function canPublishModelAcquisition(
 function restoreModelCurrent(model: RegistryModel, scope: string): void {
   const candidate = model.acquisitions
     .flatMap((acquisition, acquisitionIndex) =>
-      !acquisition.active || acquisition.releaseSettled
+      !acquisition.active ||
+      acquisition.releaseSettled ||
+      acquisition.evidenceEpoch !== model.evidenceEpoch
         ? []
         : Array.from(acquisition.claims.entries()).map(([lease, claim]) => ({
             acquisition,
@@ -291,7 +412,7 @@ function replaceModelRows(
       ).length === 1,
   )
   acquisition.rows = new Set(nextRows)
-  return rowsToRemove.sort()
+  return rowsToRemove.sort(compareKeys)
 }
 
 function retireModelAcquisition(
@@ -393,23 +514,74 @@ function assertRegistryModel(model: RegistryModel, real: RegistryReal): void {
     (acquisition, acquisitionIndex) =>
       acquisition.active &&
       acquisition.applied &&
+      acquisition.evidenceEpoch === model.evidenceEpoch &&
       !acquisition.releaseSettled &&
       acquisition.leases.size > 0
-        ? Array.from(acquisition.claims.values()).map((claim) => ({
-            acquisition: real.acquisitions[acquisitionIndex],
-            rowKeys: [...acquisition.rows],
-            outcome: createPrefixOutcome(
-              claim.generation,
-              claim.prefix,
-              `unknown`,
-              `prefixes`,
-              claim.sourceId,
-              [...acquisition.rows],
-            ),
-          }))
+        ? Array.from(acquisition.claims.entries()).flatMap(([lease, claim]) =>
+            acquisition.leases.has(lease)
+              ? [
+                  {
+                    acquisition: real.acquisitions[acquisitionIndex],
+                    rowKeys: [...acquisition.rows],
+                    outcome: createPrefixOutcome(
+                      claim.generation,
+                      claim.prefix,
+                      `unknown`,
+                      `prefixes`,
+                      claim.sourceId,
+                      [...acquisition.rows],
+                    ),
+                  },
+                ]
+              : [],
+          )
         : [],
   )
   expect(real.registry.appliedAcquisitionEvidence()).toEqual(appliedEvidence)
+  const activeAcquisitions = model.acquisitions.filter(({ active }) => active)
+  const expectedResourceCounts = {
+    liveLeases: model.leases.filter(({ active }) => active).length,
+    acquisitions: activeAcquisitions.length,
+    claims: activeAcquisitions.reduce(
+      (count, acquisition) => count + acquisition.claims.size,
+      0,
+    ),
+    unsettledClaims: activeAcquisitions.reduce(
+      (count, acquisition) =>
+        count +
+        Array.from(acquisition.claims.values()).filter(
+          ({ settlementPending }) => settlementPending,
+        ).length,
+      0,
+    ),
+    retainedDemands: activeAcquisitions.reduce(
+      (count, acquisition) => count + acquisition.leases.size,
+      0,
+    ),
+    retainedOutcomes: retainedOutcomes.length,
+    retainedRowKeySlots: activeAcquisitions.reduce(
+      (count, acquisition) =>
+        count +
+        acquisition.rows.size +
+        Array.from(acquisition.claims.values()).reduce(
+          (claimCount, claim) =>
+            claimCount + (claim.retainedOutcome?.appliedRowKeys?.length ?? 0),
+          0,
+        ),
+      0,
+    ),
+  }
+  const resourceCounts = real.registry.resourceCounts()
+  expect(resourceCounts).toEqual(expectedResourceCounts)
+  expect(resourceCounts.claims).toBeLessThanOrEqual(
+    resourceCounts.liveLeases + resourceCounts.unsettledClaims,
+  )
+  expect(resourceCounts.retainedDemands).toBeLessThanOrEqual(
+    resourceCounts.liveLeases + resourceCounts.unsettledClaims,
+  )
+  expect(resourceCounts.retainedOutcomes).toBeLessThanOrEqual(
+    resourceCounts.liveLeases + resourceCounts.unsettledClaims,
+  )
   for (const row of modelRows) {
     expect(real.registry.rowOwnerCount(row)).toBe(
       model.acquisitions.filter(
@@ -511,11 +683,17 @@ class AttachLeaseCommand implements Command<RegistryModel, RegistryReal> {
           real.acquisitions[acquisitionIndex]!,
         ),
       ).toThrow(`Cannot attach to a released acquisition`)
+    } else if (acquisition.leases.has(leaseIndex)) {
+      assertRegistryModel(model, real)
+      return
+    } else if (acquisition.evidenceEpoch !== model.evidenceEpoch) {
+      expect(() =>
+        real.registry.attachLease(
+          real.leases[leaseIndex]!,
+          real.acquisitions[acquisitionIndex]!,
+        ),
+      ).toThrow(`Cannot attach to an invalidated acquisition`)
     } else {
-      if (acquisition.leases.has(leaseIndex)) {
-        assertRegistryModel(model, real)
-        return
-      }
       model.leases[leaseIndex]!.acquisitions.add(acquisitionIndex)
       acquisition.leases.add(leaseIndex)
       const prefix = model.leases[leaseIndex]!.prefix
@@ -532,6 +710,7 @@ class AttachLeaseCommand implements Command<RegistryModel, RegistryReal> {
             )
       acquisition.claims.set(leaseIndex, {
         generation: acquisition.generation,
+        settlementPending: false,
         prefix,
         sourceId: acquisition.sourceId,
         coverage: undefined,
@@ -685,33 +864,52 @@ class PublishCommand implements Command<RegistryModel, RegistryReal> {
       claim?.sourceId ?? acquisition.sourceId,
       this.rows,
     )
+    const matchesClaim =
+      leaseIndex !== undefined && this.generationDelta === 0 && this.exactScope
+    const receivesOutcome = matchesClaim && !acquisition.releaseSettled
     const accepted =
-      leaseIndex !== undefined &&
-      canPublishModelAcquisition(model, acquisitionIndex, leaseIndex) &&
-      this.generationDelta === 0 &&
-      this.exactScope
-    const rowsToRemove = accepted
+      receivesOutcome &&
+      canPublishModelAcquisition(model, acquisitionIndex, leaseIndex)
+    const rowsToRemove = receivesOutcome
       ? replaceModelRows(model, acquisitionIndex, new Set(this.rows))
       : []
     const published =
       accepted &&
       this.extent !== `unknown` &&
       (this.rows.length >= claim!.prefix || this.extent === `exhausted`)
-    if (accepted) {
+    if (receivesOutcome) {
       acquisition.applied = true
-      for (const peer of acquisition.claims.values()) {
-        peer.retainedOutcome = undefined
+      claim!.settlementPending = false
+      for (const [peerLease, peer] of acquisition.claims) {
+        if (acquisition.leases.has(peerLease)) {
+          peer.retainedOutcome = undefined
+        }
       }
-      claim!.coverage = published ? claim!.prefix : undefined
       const scope = scopeKey(claim!.sourceId, claim!.prefix)
-      if (published) {
-        for (const peer of acquisition.claims.values()) {
-          if (scopeKey(peer.sourceId, peer.prefix) === scope) {
+      if (!accepted) {
+        for (const [peerLease, peer] of acquisition.claims) {
+          if (
+            acquisition.leases.has(peerLease) &&
+            scopeKey(peer.sourceId, peer.prefix) === scope
+          ) {
+            peer.coverage = undefined
+          }
+        }
+      } else if (published) {
+        if (acquisition.leases.has(leaseIndex)) {
+          claim!.coverage = claim!.prefix
+        }
+        for (const [peerLease, peer] of acquisition.claims) {
+          if (
+            acquisition.leases.has(peerLease) &&
+            scopeKey(peer.sourceId, peer.prefix) === scope
+          ) {
             peer.coverage = claim!.prefix
           }
         }
         restoreModelCurrent(model, scope)
       } else {
+        claim!.coverage = undefined
         const current = model.currentByScope.get(scope)
         if (
           current?.acquisition === acquisitionIndex &&
@@ -719,6 +917,9 @@ class PublishCommand implements Command<RegistryModel, RegistryReal> {
         ) {
           restoreModelCurrent(model, scope)
         }
+      }
+      if (!acquisition.leases.has(leaseIndex)) {
+        acquisition.claims.delete(leaseIndex)
       }
     }
     expect(
@@ -733,6 +934,31 @@ class PublishCommand implements Command<RegistryModel, RegistryReal> {
 
   toString = () =>
     `publish(acquisition=${this.rawAcquisition}, rows=${this.rows.join(``)}, generationDelta=${this.generationDelta}, exact=${this.exactScope}, extent=${this.extent})`
+}
+
+class InvalidateEvidenceCommand implements Command<
+  RegistryModel,
+  RegistryReal
+> {
+  check = () => true
+
+  run(model: RegistryModel, real: RegistryReal): void {
+    model.evidenceEpoch++
+    model.currentByScope.clear()
+    for (const acquisition of model.acquisitions) {
+      if (!acquisition.active) continue
+      acquisition.applied = false
+      acquisition.rows.clear()
+      for (const claim of acquisition.claims.values()) {
+        claim.coverage = undefined
+        claim.retainedOutcome = undefined
+      }
+    }
+    real.registry.invalidateAppliedEvidence()
+    assertRegistryModel(model, real)
+  }
+
+  toString = () => `invalidateAppliedEvidence()`
 }
 
 class ReleaseAcquisitionCommand implements Command<
@@ -806,6 +1032,11 @@ class ReleaseLeaseCommand implements Command<RegistryModel, RegistryReal> {
         ) {
           restoreModelCurrent(model, scope)
         }
+        claim.coverage = undefined
+        claim.retainedOutcome = undefined
+        if (!claim.settlementPending) {
+          acquisition.claims.delete(leaseIndex)
+        }
       }
       if (acquisition.leases.size === 0) {
         retireModelAcquisition(model, acquisitionIndex).forEach((row) =>
@@ -816,7 +1047,7 @@ class ReleaseLeaseCommand implements Command<RegistryModel, RegistryReal> {
     lease.active = false
     lease.acquisitions.clear()
     expect(real.registry.releaseLease(real.leases[leaseIndex]!)).toEqual({
-      rowsToRemove: [...rowsToRemove].sort(),
+      rowsToRemove: [...rowsToRemove].sort(compareKeys),
     })
     assertRegistryModel(model, real)
   }
@@ -850,7 +1081,7 @@ class DisposeCommand implements Command<RegistryModel, RegistryReal> {
       lease.acquisitions.clear()
     })
     expect(real.registry.dispose()).toEqual({
-      rowsToRemove: [...rowsToRemove].sort(),
+      rowsToRemove: [...rowsToRemove].sort(compareKeys),
     })
     assertRegistryModel(model, real)
   }
@@ -859,6 +1090,61 @@ class DisposeCommand implements Command<RegistryModel, RegistryReal> {
 }
 
 describe(`coverage registry oracle`, () => {
+  it(`fences old evidence while retaining its physical release obligation`, () => {
+    const registry = createPrefixRegistry()
+    const oldRelease = vi.fn()
+    const oldLease = registry.addLease(1)
+    const oldAcquisition = addPrefixAcquisition(registry, {
+      generation: 1,
+      leases: [oldLease],
+      release: oldRelease,
+      prefix: 1,
+    })
+    publishPrefix(registry, oldAcquisition, 1, 1, [`a`])
+
+    registry.invalidateAppliedEvidence()
+    expect(registry.coverageAntichain()).toEqual([])
+    expect(registry.retainedOutcomeEvidence()).toEqual([])
+    expect(registry.appliedAcquisitionEvidence()).toEqual([])
+    expect(registry.rowOwnerCount(`a`)).toBe(0)
+    expect(registry.isAcquisitionAttachable(oldAcquisition)).toBe(false)
+
+    const lateLease = registry.addLease(1)
+    expect(() => registry.attachLease(lateLease, oldAcquisition)).toThrow(
+      `Cannot attach to an invalidated acquisition`,
+    )
+    registry.releaseLease(lateLease)
+
+    expect(
+      registry.publishOutcome(
+        oldAcquisition,
+        createPrefixOutcome(1, 1, `exhausted`, `prefixes`, `items`, [`old`]),
+      ),
+    ).toEqual({ accepted: false, published: false, rowsToRemove: [] })
+    expect(registry.coverageAntichain()).toEqual([])
+    expect(registry.rowOwnerCount(`old`)).toBe(1)
+
+    const freshRelease = vi.fn()
+    const freshLease = registry.addLease(1)
+    const freshAcquisition = addPrefixAcquisition(registry, {
+      generation: 2,
+      leases: [freshLease],
+      release: freshRelease,
+      prefix: 1,
+    })
+    publishPrefix(registry, freshAcquisition, 2, 1, [`fresh`])
+    expect(registry.coverageAntichain()).toEqual([{ prefix: 1 }])
+
+    expect(registry.releaseLease(oldLease)).toEqual({
+      rowsToRemove: [`old`],
+    })
+    expect(oldRelease).toHaveBeenCalledOnce()
+    expect(registry.releaseLease(freshLease)).toEqual({
+      rowsToRemove: [`fresh`],
+    })
+    expect(freshRelease).toHaveBeenCalledOnce()
+  })
+
   it(`keeps caller-relative claims on one physical acquisition`, () => {
     const registry = createPrefixRegistry()
     const release = vi.fn()
@@ -948,6 +1234,104 @@ describe(`coverage registry oracle`, () => {
     expect(release).toHaveBeenCalledOnce()
   })
 
+  it(`forgets settled claims released from a surviving acquisition`, () => {
+    const registry = createPrefixRegistry()
+    const physical = registry.addLease(1)
+    const acquisition = addPrefixAcquisition(registry, {
+      generation: 1,
+      leases: [physical],
+      release: vi.fn(),
+      prefix: 1,
+    })
+    publishPrefix(registry, acquisition, 1, 1, [`a`])
+
+    for (let generation = 2; generation <= 9; generation++) {
+      const peer = registry.addLease(1)
+      registry.attachLease(peer, acquisition, {
+        generation,
+        scope: {
+          collectionId: `prefixes`,
+          sourceId: `items`,
+          demand: { limit: 1 },
+        },
+      })
+      expect(
+        registry.publishOutcome(
+          acquisition,
+          peer,
+          createPrefixOutcome(generation, 1, `exhausted`, `prefixes`, `items`, [
+            `a`,
+          ]),
+        ),
+      ).toMatchObject({ accepted: true, published: true })
+      expect(registry.releaseLease(peer)).toEqual({ rowsToRemove: [] })
+    }
+
+    expect(registry.appliedAcquisitionEvidence()).toHaveLength(1)
+  })
+
+  it(`settles only the matching acquisition claim during a retry`, () => {
+    const registry = createPrefixRegistry()
+    const lease = registry.addLease(1)
+    const first = addPrefixAcquisition(registry, {
+      generation: 1,
+      leases: [lease],
+      release: vi.fn(),
+      prefix: 1,
+    })
+    addPrefixAcquisition(registry, {
+      generation: 2,
+      leases: [lease],
+      release: vi.fn(),
+      prefix: 1,
+    })
+
+    registry.settleLease(first, lease)
+
+    expect(registry.resourceCounts().unsettledClaims).toBe(1)
+    expect(
+      registry.publishOutcome(first, lease, createPrefixOutcome(1, 1)),
+    ).toEqual({ accepted: true, published: true, rowsToRemove: [] })
+  })
+
+  it(`bounds claim evidence across every short settlement history`, () => {
+    const modes: ReadonlyArray<ClaimChurn> = [
+      `settle-first`,
+      `release-first`,
+      `outcome-free`,
+      `defer`,
+    ]
+    for (const first of modes) {
+      for (const second of modes) {
+        for (const third of modes) {
+          for (const rowCount of [1, 4]) {
+            runClaimChurn([first, second, third], rowCount)
+          }
+        }
+      }
+    }
+  })
+
+  const claimChurnArbitrary = fc.array(
+    fc.constantFrom<ClaimChurn>(
+      `settle-first`,
+      `release-first`,
+      `outcome-free`,
+      `defer`,
+    ),
+    { minLength: 24, maxLength: 96 },
+  )
+
+  fcTest.prop([claimChurnArbitrary, fc.integer({ min: 1, max: 8 })], {
+    numRuns: 20,
+    seed: 1775,
+  })(`bounds long claim churn for a fixed seed`, runClaimChurn)
+
+  fcTest.prop(
+    [claimChurnArbitrary, fc.integer({ min: 1, max: 8 })],
+    oraclePropertyOptions(20),
+  )(`bounds long claim churn for a random or replayed seed`, runClaimChurn)
+
   it(`restores a compacted narrower fact when the wider acquisition retires`, () => {
     const registry = createPrefixRegistry()
     const narrowLease = registry.addLease(20)
@@ -1013,6 +1397,30 @@ describe(`coverage registry oracle`, () => {
     })
   })
 
+  it(`orders released mixed keys with the shared key comparator`, () => {
+    const registry = createPrefixRegistry()
+    const lease = registry.addLease(1)
+    const acquisition = addPrefixAcquisition(registry, {
+      generation: 1,
+      leases: [lease],
+      release: vi.fn(),
+      prefix: 1,
+    })
+    const rows: ReadonlyArray<RowKey> = [10, `ä`, 2, `z`]
+    // Pins both shared laws: strings precede numbers, and strings use direct
+    // code-point order rather than locale-sensitive order.
+    const canonicalOrder: ReadonlyArray<RowKey> = [`z`, `ä`, 2, 10]
+    expect([...rows].sort(compareKeys)).toEqual(canonicalOrder)
+
+    expect(registry.replaceRows(acquisition, rows)).toEqual({
+      accepted: true,
+      rowsToRemove: [],
+    })
+    expect(registry.releaseLease(lease)).toEqual({
+      rowsToRemove: canonicalOrder,
+    })
+  })
+
   it(`keeps the last successful generation current while a newer attempt is pending`, () => {
     const registry = createPrefixRegistry()
     const priorLease = registry.addLease(1)
@@ -1037,6 +1445,88 @@ describe(`coverage registry oracle`, () => {
     registry.releaseAcquisition(retry)
     expect(registry.coverageAntichain()).toEqual([{ prefix: 1 }])
     expect(registry.rowOwnerCount(`prior`)).toBe(1)
+  })
+
+  it(`keeps rows owned by every active acquisition when stale coverage cannot publish`, () => {
+    const registry = createPrefixRegistry()
+    const olderLease = registry.addLease(1)
+    const newerLease = registry.addLease(1)
+    const older = addPrefixAcquisition(registry, {
+      generation: 1,
+      leases: [olderLease],
+      release: vi.fn(),
+      prefix: 1,
+    })
+    const newer = addPrefixAcquisition(registry, {
+      generation: 2,
+      leases: [newerLease],
+      release: vi.fn(),
+      prefix: 1,
+    })
+
+    expect(
+      registry.publishOutcome(
+        newer,
+        createPrefixOutcome(2, 1, `exhausted`, `prefixes`, `items`, [`a`]),
+      ),
+    ).toEqual({ accepted: true, published: true, rowsToRemove: [] })
+    expect(
+      registry.publishOutcome(
+        older,
+        createPrefixOutcome(1, 1, `exhausted`, `prefixes`, `items`, [`a`]),
+      ),
+    ).toEqual({ accepted: false, published: false, rowsToRemove: [] })
+
+    expect(registry.rowOwnerCount(`a`)).toBe(2)
+    expect(registry.releaseLease(newerLease)).toEqual({ rowsToRemove: [] })
+    expect(registry.coverageAntichain()).toEqual([])
+    expect(registry.rowOwnerCount(`a`)).toBe(1)
+
+    expect(registry.releaseLease(olderLease)).toEqual({
+      rowsToRemove: [`a`],
+    })
+  })
+
+  it(`keeps the same row safe when acquisition generations settle in either order`, () => {
+    for (const newerSettlesFirst of [false, true]) {
+      const registry = createPrefixRegistry()
+      const olderLease = registry.addLease(1)
+      const newerLease = registry.addLease(1)
+      const older = addPrefixAcquisition(registry, {
+        generation: 1,
+        leases: [olderLease],
+        release: vi.fn(),
+        prefix: 1,
+      })
+      const newer = addPrefixAcquisition(registry, {
+        generation: 2,
+        leases: [newerLease],
+        release: vi.fn(),
+        prefix: 1,
+      })
+      const settle = (acquisition: typeof older, generation: number) =>
+        registry.publishOutcome(
+          acquisition,
+          createPrefixOutcome(generation, 1, `exhausted`, `prefixes`, `items`, [
+            `a`,
+          ]),
+        )
+
+      if (newerSettlesFirst) {
+        settle(newer, 2)
+        settle(older, 1)
+      } else {
+        settle(older, 1)
+        settle(newer, 2)
+      }
+
+      expect(registry.rowOwnerCount(`a`)).toBe(2)
+      expect(registry.releaseLease(newerLease)).toEqual({ rowsToRemove: [] })
+      expect(registry.rowOwnerCount(`a`)).toBe(1)
+      expect(registry.releaseLease(olderLease)).toEqual({
+        rowsToRemove: [`a`],
+      })
+    }
   })
 
   it(`records unknown-extent row ownership without publishing coverage`, () => {
@@ -1387,6 +1877,38 @@ describe(`coverage registry oracle`, () => {
     expect(registry.coverageAntichain()).toEqual([{ prefix: 20 }])
   })
 
+  it(`reads borrowed established evidence lazily`, () => {
+    const registry = createPrefixRegistry()
+    const firstLease = registry.addLease(1)
+    const firstAcquisition = addPrefixAcquisition(registry, {
+      generation: 1,
+      leases: [firstLease],
+      release: vi.fn(),
+      prefix: 1,
+    })
+    publishPrefix(registry, firstAcquisition, 1, 1)
+
+    const evidence = registry.borrowEvidence()
+    expect(evidence.next().value).toMatchObject({
+      authority: `established`,
+      acquisition: firstAcquisition,
+    })
+
+    const secondLease = registry.addLease(2)
+    const secondAcquisition = addPrefixAcquisition(registry, {
+      generation: 2,
+      leases: [secondLease],
+      release: vi.fn(),
+      prefix: 2,
+    })
+    publishPrefix(registry, secondAcquisition, 2, 2)
+    expect(
+      Array.from(evidence).filter(
+        (candidate) => candidate.authority === `established`,
+      ),
+    ).toEqual([expect.objectContaining({ acquisition: secondAcquisition })])
+  })
+
   const rowSet = fc.uniqueArray(fc.constantFrom(...modelRows), {
     maxLength: modelRows.length,
   })
@@ -1453,6 +1975,7 @@ describe(`coverage registry oracle`, () => {
       ),
     fc.nat().map((acquisition) => new ReleaseAcquisitionCommand(acquisition)),
     fc.nat().map((lease) => new ReleaseLeaseCommand(lease)),
+    fc.constant(new InvalidateEvidenceCommand()),
     fc.constant(new DisposeCommand()),
   ]
 
@@ -1473,6 +1996,7 @@ describe(`coverage registry oracle`, () => {
             acquisitions: [],
             currentByScope: new Map(),
             claimSequence: 0,
+            evidenceEpoch: 0,
           },
           real: {
             registry: createPrefixRegistry(),

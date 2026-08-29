@@ -65,7 +65,10 @@ export class SubsetDemandController {
       }
 
       segment.abortController.abort()
-      subscription.releaseSnapshot(segment.where)
+      subscription.releaseSnapshot(
+        segment.where,
+        segment.abortController.signal,
+      )
     }
 
     const coveredKeys = new Set(

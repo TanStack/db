@@ -375,36 +375,56 @@ describe(`normalizeValue property-based tests`, () => {
   })
 
   fcTest.prop([fc.uint8Array({ minLength: 0, maxLength: 128 })])(
-    `small Uint8Arrays normalize to string representation`,
+    `small Uint8Arrays normalize to a stable key`,
     (arr) => {
       const normalized = normalizeValue(arr)
       expect(typeof normalized).toBe(`string`)
-      expect(normalized).toMatch(/^__u8__/)
+      expect(normalized).toBe(normalizeValue(new Uint8Array(arr)))
     },
   )
 
   fcTest.prop([fc.uint8Array({ minLength: 129, maxLength: 200 })])(
-    `large Uint8Arrays are not normalized`,
+    `large Uint8Arrays normalize to a stable key`,
     (arr) => {
       const normalized = normalizeValue(arr)
-      expect(normalized).toBe(arr)
+      expect(typeof normalized).toBe(`string`)
+      expect(normalized).toBe(normalizeValue(new Uint8Array(arr)))
     },
   )
 
-  fcTest.prop([fc.string()])(`strings pass through unchanged`, (str) => {
-    expect(normalizeValue(str)).toBe(str)
-  })
+  fcTest.prop([fc.string()])(
+    `strings preserve equality after normalization`,
+    (str) => {
+      expect(normalizeValue(str)).toBe(normalizeValue(`${str}`))
+    },
+  )
 
   fcTest.prop([fc.integer()])(`integers pass through unchanged`, (n) => {
     expect(normalizeValue(n)).toBe(n)
   })
 
   fcTest.prop([fc.uint8Array({ minLength: 0, maxLength: 128 })])(
-    `normalization is idempotent for Uint8Arrays`,
+    `binary keys cannot collide with user strings`,
     (arr) => {
-      const normalized1 = normalizeValue(arr)
-      // For strings (which small arrays become), normalizing again should be identity
-      expect(normalizeValue(normalized1)).toBe(normalized1)
+      const normalized = normalizeValue(arr)
+      expect(normalizeValue(normalized)).not.toBe(normalized)
+    },
+  )
+
+  fcTest(
+    `reads binary keys from intrinsic bytes instead of custom iteration`,
+    () => {
+      const bytes = new Uint8Array([2])
+      Object.defineProperty(bytes, Symbol.iterator, {
+        value: function* () {
+          yield 1
+        },
+      })
+
+      expect(normalizeValue(bytes)).toBe(normalizeValue(new Uint8Array([2])))
+      expect(normalizeValue(bytes)).not.toBe(
+        normalizeValue(new Uint8Array([1])),
+      )
     },
   )
 })

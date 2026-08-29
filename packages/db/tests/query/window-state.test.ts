@@ -236,6 +236,7 @@ describe(`WindowState`, () => {
       expect(window.localPrefixSize).toBe(Math.min(requestedPrefix, 3))
       expect(window.coversActiveWindow).toBe(requestedPrefix <= 3)
       expect(window.requestBoundary()).toBeUndefined()
+      expect(window.progressBoundary()?.key).toBe(Math.min(requestedPrefix, 3))
       expect(window.requiresPrefixRefresh).toBe(true)
     },
   )

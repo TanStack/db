@@ -3,6 +3,11 @@ import { SortedMap } from '../SortedMap'
 import { enrichRowWithVirtualProps } from '../virtual-props.js'
 import { SyncTransactionAbortedError } from '../errors.js'
 import { createDeferred } from '../deferred'
+import {
+  copySyncRequestProvenance,
+  getSyncRequestProvenance,
+  setSyncRequestProvenance,
+} from '../load-subset-request-provenance.js'
 import { DIRECT_TRANSACTION_METADATA_KEY } from './transaction-metadata.js'
 import type {
   VirtualOrigin,
@@ -42,6 +47,8 @@ interface PendingSyncedTransaction<
     deletes: Set<TKey>
   }
   preserveHydrationSeedKeys?: boolean
+  /** Exact subset request whose commit produced this transaction. */
+  requestSignal?: AbortSignal
   /**
    * When true, this transaction should be processed immediately even if there
    * are persisting user transactions. Used by manual write operations (writeInsert,
@@ -133,6 +140,7 @@ export class CollectionStateManager<
   public recentlySyncedKeys = new Set<TKey>()
   public hasReceivedFirstCommit = false
   public isCommittingSyncTransactions = false
+  private isDrainingSyncTransactions = false
   public isLocalOnly = false
 
   /**
@@ -338,13 +346,15 @@ export class CollectionStateManager<
         : this.enrichWithVirtualProps(change.previousValue, change.key)
       : undefined
 
-    return {
+    const enriched = {
       key: change.key,
       type: change.type,
       value: enrichedValue,
       previousValue: enrichedPreviousValue,
       metadata: change.metadata,
     } as ChangeMessage<WithVirtualProps<TOutput, TKey>, TKey>
+    copySyncRequestProvenance(change, enriched)
+    return enriched
   }
 
   /**
@@ -830,6 +840,28 @@ export class CollectionStateManager<
    * This method processes operations from pending transactions and applies them to the synced data
    */
   commitPendingTransactions = () => {
+    if (this.isDrainingSyncTransactions) return
+
+    this.isDrainingSyncTransactions = true
+    let firstPublicationError: { error: unknown } | undefined
+    try {
+      let processed: boolean
+      do {
+        const result = this.commitNextPendingTransactionBatch()
+        processed = result.processed
+        if (processed) firstPublicationError ??= result.publicationError
+      } while (processed)
+    } finally {
+      this.isDrainingSyncTransactions = false
+    }
+
+    if (firstPublicationError) throw firstPublicationError.error
+  }
+
+  private commitNextPendingTransactionBatch(): {
+    processed: boolean
+    publicationError?: { error: unknown }
+  } {
     // Check if there are any persisting transaction
     let hasPersistingTransaction = false
     for (const transaction of this.transactions.values()) {
@@ -876,6 +908,10 @@ export class CollectionStateManager<
       },
     )
 
+    if (committedSyncedTransactions.length === 0) {
+      return { processed: false }
+    }
+
     // Process committed transactions if:
     // 1. No persisting user transaction (normal sync flow), OR
     // 2. There's a truncate operation (must be processed immediately), OR
@@ -887,6 +923,10 @@ export class CollectionStateManager<
     // non-immediate transactions would be applied later and could overwrite newer state.
     // Processing all committed transactions together preserves causal ordering.
     if (!hasPersistingTransaction || hasTruncateSync || hasImmediateSync) {
+      // This queue remains authoritative while user callbacks run. Transactions
+      // opened by a callback must not be overwritten by this batch's snapshot.
+      this.pendingSyncedTransactions = uncommittedSyncedTransactions
+
       // Application is now the point of no return. Event listeners run before
       // the receipts resolve, so a signal aborted from one of those listeners
       // must not cancel writes that are already becoming visible.
@@ -909,11 +949,48 @@ export class CollectionStateManager<
       const changedKeys = new Set<TKey>()
       for (const transaction of committedSyncedTransactions) {
         for (const operation of transaction.operations) {
-          changedKeys.add(operation.key as TKey)
+          const key = operation.key as TKey
+          changedKeys.add(key)
         }
         for (const [key] of transaction.rowMetadataWrites) {
           changedKeys.add(key)
         }
+      }
+
+      type AppliedRequestProvenance = {
+        version: {
+          value: TOutput | undefined
+          origin: VirtualOrigin | undefined
+        }
+        hasOrdinarySource: boolean
+        requestSignals: Set<AbortSignal>
+      }
+      const requestProvenanceByKey = new Map<TKey, AppliedRequestProvenance>()
+      const provenanceForSignal = (signal: AbortSignal | undefined) => ({
+        hasOrdinarySource: signal === undefined,
+        requestSignals:
+          signal === undefined
+            ? new Set<AbortSignal>()
+            : new Set<AbortSignal>([signal]),
+      })
+      const recordRequestProvenance = (
+        key: TKey,
+        signal: AbortSignal | undefined,
+      ) => {
+        const version = {
+          value: this.syncedData.get(key),
+          origin: this.rowOrigins.get(key),
+        }
+        const previous = requestProvenanceByKey.get(key)
+        if (previous !== undefined && deepEquals(previous.version, version)) {
+          if (signal === undefined) previous.hasOrdinarySource = true
+          else previous.requestSignals.add(signal)
+          return
+        }
+        requestProvenanceByKey.set(key, {
+          version,
+          ...provenanceForSignal(signal),
+        })
       }
 
       const virtualSnapshotKeys = new Set(changedKeys)
@@ -982,7 +1059,16 @@ export class CollectionStateManager<
               truncateOptimisticSnapshot?.upserts.get(key) ||
               this.syncedData.get(key)
             if (previousValue !== undefined) {
-              events.push({ type: `delete`, key, value: previousValue })
+              const event: ChangeMessage<TOutput, TKey> = {
+                type: `delete`,
+                key,
+                value: previousValue,
+              }
+              setSyncRequestProvenance(
+                event,
+                provenanceForSignal(transaction.requestSignal),
+              )
+              events.push(event)
             }
           }
 
@@ -1074,6 +1160,7 @@ export class CollectionStateManager<
               this.pendingOptimisticDirectDeletes.delete(key)
               break
           }
+          recordRequestProvenance(key, transaction.requestSignal)
           if (!transaction.preserveHydrationSeedKeys) {
             this.hydrationSeedKeys.delete(key)
             this.hydratedKeys.delete(key)
@@ -1083,9 +1170,9 @@ export class CollectionStateManager<
         for (const [key, metadataWrite] of transaction.rowMetadataWrites) {
           if (metadataWrite.type === `delete`) {
             this.syncedMetadata.delete(key)
-            continue
+          } else {
+            this.syncedMetadata.set(key, metadataWrite.value)
           }
-          this.syncedMetadata.set(key, metadataWrite.value)
         }
 
         for (const [
@@ -1195,6 +1282,7 @@ export class CollectionStateManager<
               this.isThisCollection(mutation.collection) &&
               mutation.optimistic
             ) {
+              requestProvenanceByKey.delete(mutation.key)
               switch (mutation.type) {
                 case `insert`:
                 case `update`:
@@ -1230,6 +1318,7 @@ export class CollectionStateManager<
           this.pendingOptimisticUpserts.delete(key)
           this.pendingLocalOrigins.delete(key)
         }
+        requestProvenanceByKey.delete(key)
       }
       for (const key of this.pendingOptimisticDirectDeletes) {
         if (!changedKeys.has(key)) {
@@ -1237,6 +1326,7 @@ export class CollectionStateManager<
         }
         this.pendingOptimisticDeletes.delete(key)
         this.pendingLocalOrigins.delete(key)
+        requestProvenanceByKey.delete(key)
       }
       this.pendingOptimisticDirectUpserts.clear()
       this.pendingOptimisticDirectDeletes.clear()
@@ -1348,6 +1438,17 @@ export class CollectionStateManager<
         }
       }
 
+      for (const event of events) {
+        if (getSyncRequestProvenance(event) !== undefined) continue
+        const provenance = requestProvenanceByKey.get(event.key)
+        if (provenance !== undefined) {
+          setSyncRequestProvenance(event, {
+            hasOrdinarySource: provenance.hasOrdinarySource,
+            requestSignals: new Set(provenance.requestSignals),
+          })
+        }
+      }
+
       // Update cached size after synced data changes
       this.size = this.calculateSize()
 
@@ -1357,9 +1458,14 @@ export class CollectionStateManager<
       }
 
       // End batching and emit all events (combines any batched events with sync events)
-      this.changes.emitEvents(events, true, layoutChanged)
-
-      this.pendingSyncedTransactions = uncommittedSyncedTransactions
+      let publicationError: { error: unknown } | undefined
+      try {
+        this.changes.emitEvents(events, true, layoutChanged)
+      } catch (error) {
+        // The state is already committed. Finish this batch and drain any work
+        // queued by earlier listeners before surfacing their publication error.
+        publicationError = { error }
+      }
 
       // Clear the pre-sync state since sync operations are complete
       this.preSyncVisibleState.clear()
@@ -1377,7 +1483,11 @@ export class CollectionStateManager<
       for (const transaction of committedSyncedTransactions) {
         transaction.applied.resolve()
       }
+
+      return { processed: true, publicationError }
     }
+
+    return { processed: false }
   }
 
   /** Apply source-row garbage collection through the normal sync boundary. */

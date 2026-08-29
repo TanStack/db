@@ -222,6 +222,10 @@ const temporalTypes = new Set([
   `Temporal.ZonedDateTime`,
 ])
 
+/**
+ * A Temporal value. Objects that claim a Temporal tag are expected to obey the
+ * Temporal contract, including immutable value semantics.
+ */
 export interface TemporalLike {
   [Symbol.toStringTag]: string
   toString: () => string

@@ -8,6 +8,7 @@ type Delivery = `throw` | `reject`
 type Consumer = `effect` | `live`
 type StartupPath = `direct` | `ordered` | `lazy`
 type IncrementalPath = Exclude<StartupPath, `direct`>
+type FailureValue = `error` | `nan` | `undefined`
 
 type Row = {
   id: number
@@ -20,6 +21,16 @@ type FailureCase<TPath extends StartupPath> = {
   consumer: Consumer
   path: TPath
   delivery: Delivery
+}
+
+type IncrementalFailureCase = FailureCase<IncrementalPath> & {
+  failureValue: FailureValue
+}
+
+type CleanupFailureCase = {
+  name: string
+  consumer: Consumer
+  failure: unknown
 }
 
 const row: Row = { id: 1, rank: 1, parentId: 1 }
@@ -40,25 +51,42 @@ const startupCases: ReadonlyArray<FailureCase<StartupPath>> = (
 
 // Direct queries have no automatic later demand. Ordered refills and lazy
 // relationship routes do, so only those paths have incremental cells.
-const incrementalCases: ReadonlyArray<FailureCase<IncrementalPath>> = (
+const incrementalCases: ReadonlyArray<IncrementalFailureCase> = (
   [`effect`, `live`] as const
 ).flatMap((consumer) =>
   ([`ordered`, `lazy`] as const).flatMap((path) =>
-    ([`throw`, `reject`] as const).map((delivery) => ({
-      name: `${consumer} ${path} ${delivery}`,
-      consumer,
-      path,
-      delivery,
-    })),
+    ([`throw`, `reject`] as const).flatMap((delivery) =>
+      ([`error`, `nan`, `undefined`] as const).map((failureValue) => ({
+        name: `${consumer} ${path} ${delivery} ${failureValue}`,
+        consumer,
+        path,
+        delivery,
+        failureValue,
+      })),
+    ),
   ),
 )
 
-function fail(delivery: Delivery, error: Error): Promise<never> {
+const cleanupFailureObject = { kind: `cleanup-failure` }
+const cleanupFailureCases: ReadonlyArray<CleanupFailureCase> = (
+  [`effect`, `live`] as const
+).flatMap((consumer) => [
+  { name: `${consumer} undefined`, consumer, failure: undefined },
+  { name: `${consumer} NaN`, consumer, failure: Number.NaN },
+  { name: `${consumer} object`, consumer, failure: cleanupFailureObject },
+])
+
+function fail(delivery: Delivery, error: unknown): Promise<never> {
   if (delivery === `throw`) throw error
   return Promise.reject(error)
 }
 
-function createFailingSource(id: string, delivery: Delivery, error: Error) {
+function createFailingSource(
+  id: string,
+  delivery: Delivery,
+  error: unknown,
+  onLoad = () => {},
+) {
   return createCollection<Row>({
     id,
     getKey: (item) => item.id,
@@ -69,7 +97,10 @@ function createFailingSource(id: string, delivery: Delivery, error: Error) {
       sync: ({ markReady }) => {
         markReady()
         return {
-          loadSubset: () => fail(delivery, error),
+          loadSubset: () => {
+            onLoad()
+            return fail(delivery, error)
+          },
         }
       },
     },
@@ -218,18 +249,23 @@ describe(`loadSubset failure matrix`, () => {
 
   it.each(incrementalCases)(
     `reports an incremental failure without escaping its source commit: $name`,
-    async ({ consumer, path, delivery }) => {
-      const error = new Error(`${consumer} ${path} incremental failed`)
-      const suffix = `${consumer}-${path}-${delivery}`
+    async ({ consumer, path, delivery, failureValue }) => {
+      const error: unknown =
+        failureValue === `nan`
+          ? Number.NaN
+          : failureValue === `undefined`
+            ? undefined
+            : new Error(`${consumer} ${path} incremental failed`)
+      const suffix = `${consumer}-${path}-${delivery}-${failureValue}`
       let triggerFailure: () => void
       let primary: RowCollection
       let child: RowCollection
+      let loadCount = 0
 
       if (path === `ordered`) {
         let begin!: () => void
         let write!: (message: { type: `insert` | `delete`; value: Row }) => void
         let commit!: () => void
-        let loadCount = 0
         primary = createCollection<Row>({
           id: `failure-matrix-incremental-ordered-${suffix}`,
           getKey: (item) => item.id,
@@ -270,6 +306,7 @@ describe(`loadSubset failure matrix`, () => {
           `failure-matrix-incremental-child-${suffix}`,
           delivery,
           error,
+          () => loadCount++,
         )
         triggerFailure = () => {
           primary.utils.begin()
@@ -286,7 +323,12 @@ describe(`loadSubset failure matrix`, () => {
             triggerFailure()
             await flushFailures()
 
-            expect(sourceErrors).toEqual([error])
+            expect(sourceErrors).toHaveLength(1)
+            if (failureValue === `error`) {
+              expect(sourceErrors[0]).toBe(error)
+            } else {
+              expect(sourceErrors[0]).toBeInstanceOf(Error)
+            }
             expect(effect.disposed).toBe(true)
           } finally {
             await effect.dispose()
@@ -299,11 +341,13 @@ describe(`loadSubset failure matrix`, () => {
             await flushFailures()
 
             expect(live.status).toBe(path === `lazy` ? `error` : `ready`)
-            expect(live.utils.lastSubsetError).toBe(error)
+            expect(Object.is(live.utils.lastSubsetError, error)).toBe(true)
           } finally {
             await live.cleanup()
           }
         }
+
+        expect(loadCount).toBe(path === `ordered` ? 2 : 1)
 
         expect(primary.subscriberCount).toBe(0)
         if (path === `lazy`) expect(child.subscriberCount).toBe(0)
@@ -313,6 +357,92 @@ describe(`loadSubset failure matrix`, () => {
             ? [primary.cleanup()]
             : [primary.cleanup(), child.cleanup()],
         )
+      }
+    },
+  )
+
+  it.each(cleanupFailureCases)(
+    `does not mistake an unreported cleanup failure for a source error: $name`,
+    async ({ consumer, failure }) => {
+      const suffix = `${consumer}-${
+        failure === undefined
+          ? `undefined`
+          : typeof failure === `number`
+            ? `nan`
+            : `object`
+      }`
+      const parent = createStaticSource(`cleanup-failure-parent-${suffix}`, [
+        row,
+      ])
+      let unloadCount = 0
+      const child = createCollection<Row>({
+        id: `cleanup-failure-child-${suffix}`,
+        getKey: (item) => item.id,
+        syncMode: `on-demand`,
+        autoIndex: `eager`,
+        defaultIndexType: BTreeIndex,
+        sync: {
+          sync: ({ markReady }) => {
+            markReady()
+            return {
+              loadSubset: () => true,
+              unloadSubset: () => {
+                unloadCount++
+                if (unloadCount === 1) throw failure
+              },
+            }
+          },
+        },
+      })
+      const sourceErrors: Array<unknown> = []
+      const effect =
+        consumer === `effect`
+          ? createEffect({
+              query: (q) =>
+                q
+                  .from({ item: parent })
+                  .leftJoin({ child }, ({ item, child: childRow }) =>
+                    eq(item.id, childRow.parentId),
+                  ),
+              onBatch: () => {},
+              onSourceError: (error) => sourceErrors.push(error),
+            })
+          : undefined
+      const live =
+        consumer === `live`
+          ? createLiveQueryCollection((q) =>
+              q
+                .from({ item: parent })
+                .leftJoin({ child }, ({ item, child: childRow }) =>
+                  eq(item.id, childRow.parentId),
+                ),
+            )
+          : undefined
+
+      try {
+        if (live) await live.preload()
+        await flushFailures()
+
+        let didThrow = false
+        let thrown: unknown
+        try {
+          parent.utils.begin()
+          parent.utils.write({ type: `delete`, value: row })
+          parent.utils.commit()
+        } catch (error) {
+          didThrow = true
+          thrown = error
+        }
+
+        expect(didThrow).toBe(true)
+        expect(Object.is(thrown, failure)).toBe(true)
+        expect(sourceErrors).toEqual([])
+        if (live) expect(live.utils.lastSubsetError).toBeUndefined()
+      } finally {
+        if (effect) await effect.dispose()
+        if (live) await live.cleanup()
+        expect(unloadCount).toBe(2)
+        await Promise.all([parent.cleanup(), child.cleanup()])
       }
     },
   )

@@ -69,14 +69,21 @@ export class TotalOrder<
     return { key, values: this.values(row) }
   }
 
+  /** Compare only the query-visible order terms, without the local key tie-breaker. */
+  compareRows(left: TRow, right: TRow): number {
+    for (const { extract, compare } of this.terms) {
+      const result = compare(extract(left), extract(right))
+      if (result !== 0) return result
+    }
+    return 0
+  }
+
   compareEntries(
     left: readonly [TKey, TRow],
     right: readonly [TKey, TRow],
   ): number {
-    for (const { extract, compare } of this.terms) {
-      const result = compare(extract(left[1]), extract(right[1]))
-      if (result !== 0) return result
-    }
+    const result = this.compareRows(left[1], right[1])
+    if (result !== 0) return result
     return compareKeys(left[0], right[0])
   }
 

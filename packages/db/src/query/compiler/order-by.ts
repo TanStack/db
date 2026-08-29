@@ -3,7 +3,12 @@ import {
   orderByWithFractionalIndex,
 } from '@tanstack/db-ivm'
 import { defaultComparator, makeComparator } from '../../utils/comparison.js'
-import { PropRef, collectCollectionSources, followRef } from '../ir.js'
+import {
+  PropRef,
+  collectCollectionSources,
+  followRef,
+  isResidualWhere,
+} from '../ir.js'
 import { ensureIndexForField } from '../../indexes/auto-index.js'
 import { findIndexForField } from '../../utils/index-optimization.js'
 import { resolveCompareOptions, resolveOrderBy } from '../total-order.js'
@@ -37,6 +42,10 @@ export type OrderByOptimizationInfo = {
   /** Index on the first orderBy column - used for lazy loading */
   index?: IndexInterface<string | number>
   dataNeeded?: () => number
+  /** D2 must see the complete source-order tie when later order terms are local. */
+  expandSourceOrderTies: boolean
+  /** Upstream relational operators can discard source rows before top-K. */
+  refillFromResultDeficit: boolean
 }
 
 /**
@@ -276,6 +285,20 @@ export function processOrderBy(
         valueExtractorForRawRow: rawRowValueExtractor,
         index,
         orderBy: sourceOrderBy,
+        expandSourceOrderTies: sourceTerms.length < orderByClause.length,
+        refillFromResultDeficit:
+          rawQuery.from.type !== `collectionRef` ||
+          rawQuery.from.sourceId !== orderBySourceId ||
+          (rawQuery.join?.some(
+            ({ type }) => type === `inner` || type === `right`,
+          ) ??
+            false) ||
+          (rawQuery.where?.some(isResidualWhere) ?? false) ||
+          (rawQuery.fnWhere?.length ?? 0) > 0 ||
+          rawQuery.groupBy !== undefined ||
+          rawQuery.having !== undefined ||
+          rawQuery.fnHaving !== undefined ||
+          rawQuery.distinct === true,
       }
 
       // Ordered loading is owned by one lexical source. A collection can occur

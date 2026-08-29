@@ -1,3 +1,4 @@
+import { OrderedLoadNoProgressError } from '../../errors.js'
 import {
   normalizeExpressionPaths,
   normalizeOrderByPaths,
@@ -8,7 +9,6 @@ import {
   filterDuplicateInserts,
   sendChangesToInput,
   splitUpdates,
-  trackBiggestSentValue,
 } from './utils.js'
 import { SubsetDemandController } from './subset-demand-controller.js'
 import type { Collection } from '../../collection/index.js'
@@ -35,13 +35,11 @@ export class CollectionSubscriber<
   TContext extends Context,
   TResult extends object = GetResult<TContext>,
 > {
-  // Keep track of the biggest value we've sent so far (needed for orderBy optimization)
-  private biggest: any = undefined
-
   // Track the most recent ordered load request key (cursor + window).
   // This avoids infinite loops from cached data re-writes while still allowing
   // window moves or new keys at the same cursor value to trigger new requests.
   private lastLoadRequestKey: string | undefined
+  private lastNoProgressRequestKey: string | undefined
 
   // Track deferred promises for subscription loading states
   private subscriptionLoadingPromises = new Map<
@@ -221,6 +219,7 @@ export class CollectionSubscriber<
     plan: LazyDemandPlan,
     keys: Set<unknown>,
   ): void {
+    const errorVersion = subscription.lastErrorVersion
     let update
     try {
       update = this.demand.setDemand(subscription, plan, keys)
@@ -229,7 +228,12 @@ export class CollectionSubscriber<
       // Convert that synchronous form to the same query-local fatal demand
       // state as a rejected load, without letting it escape the source commit.
       // Preserve unrelated graph/programming errors as throws.
-      if (subscription.lastError !== error) throw error
+      if (
+        subscription.lastErrorVersion === errorVersion ||
+        !Object.is(subscription.lastError, error)
+      ) {
+        throw error
+      }
       const isInitialSync =
         this.collectionConfigBuilder.liveQueryCollection?.status === `loading`
       const generation = this.collectionConfigBuilder.beginDemand(plan.id)
@@ -383,8 +387,6 @@ export class CollectionSubscriber<
     ) => {
       const changesArray = Array.isArray(changes) ? changes : [...changes]
 
-      this.trackSentValues(changesArray, orderByInfo.comparator)
-
       // Split live updates into a delete of the old value and an insert of the new value
       const splittedChanges = splitUpdates(changesArray)
       this.sendChangesToPipelineWithTracking(
@@ -407,8 +409,8 @@ export class CollectionSubscriber<
     // This ensures that after a must-refetch/truncate, we don't use stale cursor data
     // and allow re-inserts of previously sent keys
     const truncateUnsubscribe = this.collection.on(`truncate`, () => {
-      this.biggest = undefined
       this.lastLoadRequestKey = undefined
+      this.lastNoProgressRequestKey = undefined
       this.pendingOrderedLoadPromise = undefined
       this.sentToD2Keys.clear()
     })
@@ -417,6 +419,8 @@ export class CollectionSubscriber<
     subscription.on(`unsubscribed`, () => {
       truncateUnsubscribe()
       subscriptionHolder.current = undefined
+      this.lastLoadRequestKey = undefined
+      this.lastNoProgressRequestKey = undefined
 
       // Ordered continuations belong to this subscription session. A settled
       // load from a cleaned session must not refill through a later session.
@@ -435,7 +439,7 @@ export class CollectionSubscriber<
     // under microtask timing (e.g., queueMicrotask delays in TanStack Query observers).
     if (index) {
       // We have an index on the first orderBy column - use lazy loading optimization
-      subscription.setOrderByIndex(index)
+      subscription.setOrderByIndex(index, orderByInfo.expandSourceOrderTies)
 
       subscription.requestLimitedSnapshot({
         limit: offset + limit,
@@ -444,10 +448,10 @@ export class CollectionSubscriber<
         onLoadSubsetResult: handleLoadSubsetResult,
       })
     } else {
-      // No index available (e.g., non-ref expression): pass orderBy/limit to loadSubset
+      // Without an index there is no sound cursor continuation. Load the full
+      // ordered source so later relational operators cannot underfill top-K.
       subscription.requestSnapshot({
         orderBy: normalizedOrderBy,
-        limit: offset + limit,
         trackLoadSubsetPromise: false,
         onLoadSubsetResult: handleLoadSubsetResult,
       })
@@ -468,7 +472,8 @@ export class CollectionSubscriber<
       return true
     }
 
-    const { dataNeeded, index, offset, limit } = orderByInfo
+    const { dataNeeded, index, offset, limit, refillFromResultDeficit } =
+      orderByInfo
 
     if (!dataNeeded || !index) {
       // dataNeeded is not set when there's no index (e.g., non-ref expression
@@ -478,7 +483,11 @@ export class CollectionSubscriber<
     }
 
     subscription.ensureOrderedWindowSize(offset + limit)
-    if (subscription.hasOrderedCoverageForActiveWindow) {
+    const missingResultRows = refillFromResultDeficit ? dataNeeded() : 0
+    if (
+      missingResultRows === 0 &&
+      subscription.hasOrderedCoverageForActiveWindow
+    ) {
       return true
     }
 
@@ -493,13 +502,33 @@ export class CollectionSubscriber<
       return true
     }
 
-    const n = Math.max(dataNeeded(), subscription.orderedRowsNeeded)
+    // A join or later predicate can discard source rows. Once the prior
+    // acquisition settles, grow the retained source prefix by the observed
+    // result deficit so already-local rows publish before another request.
+    // Never grow from callbacks while an acquisition is still pending: the
+    // same deficit can be observed more than once in that transaction.
+    if (missingResultRows > 0) {
+      subscription.ensureOrderedWindowSize(
+        subscription.orderedRetainedWindowSize + missingResultRows,
+      )
+    }
+    if (subscription.hasOrderedCoverageForActiveWindow) {
+      return true
+    }
+
+    const n = Math.max(missingResultRows, subscription.orderedRowsNeeded)
+    const errorVersion = subscription.lastErrorVersion
     try {
       // Local rows may fill the visible window without proving its remote
       // prefix. One row is enough to request the boundary equivalence class.
       this.loadNextItems(Math.max(1, n), subscription)
     } catch (error) {
-      if (subscription.lastError !== error) throw error
+      if (
+        subscription.lastErrorVersion === errorVersion ||
+        !Object.is(subscription.lastError, error)
+      ) {
+        throw error
+      }
       // The subscription already reported the failure. Automatic refills
       // must not make the source transaction that exposed the gap fail.
     }
@@ -548,11 +577,25 @@ export class CollectionSubscriber<
       this.lastLoadRequestKey,
       this.alias,
       n,
+      subscription.orderedRetainedWindowSize,
+      subscription.orderedBoundaryKey,
     )
-    if (!cursor) return // Duplicate request — skip
+    if (!cursor) {
+      if (this.lastNoProgressRequestKey !== this.lastLoadRequestKey) {
+        this.lastNoProgressRequestKey = this.lastLoadRequestKey
+        this.collectionConfigBuilder.recordSubsetError(
+          new OrderedLoadNoProgressError(
+            this.sourceId,
+            subscription.orderedRetainedWindowSize,
+          ),
+        )
+      }
+      return
+    }
 
     const loadRequestKey = cursor.loadRequestKey
     this.lastLoadRequestKey = loadRequestKey
+    this.lastNoProgressRequestKey = undefined
 
     // Take the `n` items after the biggest sent value
     // Omit offset so requestLimitedSnapshot can advance based on
@@ -564,26 +607,12 @@ export class CollectionSubscriber<
         minValues: cursor.minValues,
         trackLoadSubsetPromise: false,
         onLoadSubsetResult: (result, demand) => {
-          const resetIfRequestWasRefinedFromStart = () => {
-            // WindowState can replace a computed continuation with a prefix
-            // refresh. That refresh does not satisfy the continuation key, so
-            // a later expansion must still be allowed to issue it.
-            if (
-              cursor.minValues !== undefined &&
-              demand.cursor === undefined &&
-              this.lastLoadRequestKey === loadRequestKey
-            ) {
-              this.lastLoadRequestKey = undefined
-            }
-          }
           if (result instanceof Promise) {
-            void result.then(resetIfRequestWasRefinedFromStart, () => {
+            void result.catch(() => {
               if (this.lastLoadRequestKey === loadRequestKey) {
                 this.lastLoadRequestKey = undefined
               }
             })
-          } else {
-            resetIfRequestWasRefinedFromStart()
           }
           this.orderedLoadSubsetResult?.(result, demand)
         },
@@ -612,22 +641,6 @@ export class CollectionSubscriber<
       return info
     }
     return undefined
-  }
-
-  private trackSentValues(
-    changes: Array<ChangeMessage<any, string | number>>,
-    comparator: (a: any, b: any) => number,
-  ): void {
-    const result = trackBiggestSentValue(
-      changes,
-      this.biggest,
-      this.sentToD2Keys,
-      comparator,
-    )
-    this.biggest = result.biggest
-    if (result.shouldResetLoadKey) {
-      this.lastLoadRequestKey = undefined
-    }
   }
 
   private ensureLoadingPromise(subscription: CollectionSubscription) {
