@@ -2953,7 +2953,7 @@ describe(`Electric Integration`, () => {
       }
     })
 
-    it(`does not start buffered snapshot publication after adapter cleanup`, async () => {
+    it(`rejects buffered snapshot publication after adapter cleanup`, async () => {
       const snapshot = createDeferred<{
         data: Array<{
           key: string
@@ -2988,7 +2988,11 @@ describe(`Electric Integration`, () => {
         throw new Error(`Expected progressive sync controls`)
       }
 
-      const load = controls.loadSubset({ limit: 10 })
+      const load = Promise.resolve(controls.loadSubset({ limit: 10 }))
+      const loadError = load.then(
+        () => undefined,
+        (error: unknown) => error,
+      )
       controls.cleanup?.()
       snapshot.resolve({
         data: [
@@ -2999,11 +3003,12 @@ describe(`Electric Integration`, () => {
           },
         ],
       })
-      if (load !== true) await load
+      await expect(loadError).resolves.toMatchObject({ name: `AbortError` })
 
       expect(begin).not.toHaveBeenCalled()
       expect(write).not.toHaveBeenCalled()
       expect(commit).not.toHaveBeenCalled()
+      await load.catch(() => undefined)
     })
 
     it.each([
@@ -3446,7 +3451,7 @@ describe(`Electric Integration`, () => {
       })
     })
 
-    it(`ignores a progressive snapshot after its subset request is aborted`, async () => {
+    it(`rejects a progressive snapshot aborted before application`, async () => {
       mockFetchSnapshot.mockReset()
       let resolveSnapshot!: (value: {
         metadata: Record<string, never>
@@ -3478,10 +3483,16 @@ describe(`Electric Integration`, () => {
 
       try {
         expect(mockFetchSnapshot).not.toHaveBeenCalled()
-        const load = testCollection._sync.loadSubset({
-          limit: 1,
-          signal: abortController.signal,
-        })
+        const load = Promise.resolve(
+          testCollection._sync.loadSubset({
+            limit: 1,
+            signal: abortController.signal,
+          }),
+        )
+        const loadError = load.then(
+          () => undefined,
+          (error: unknown) => error,
+        )
         expect(mockFetchSnapshot).toHaveBeenCalledOnce()
         expect(testCollection.has(2)).toBe(false)
         abortController.abort()
@@ -3495,16 +3506,17 @@ describe(`Electric Integration`, () => {
             },
           ],
         })
-        if (load instanceof Promise) await load
+        await expect(loadError).resolves.toMatchObject({ name: `AbortError` })
 
         expect(testCollection.has(2)).toBe(false)
+        await load.catch(() => undefined)
       } finally {
         resolveSnapshot({ metadata: {}, data: [] })
         await testCollection.cleanup()
       }
     })
 
-    it(`does not publish a progressive snapshot aborted while its commit is parked`, async () => {
+    it(`rejects a progressive snapshot aborted while its commit is parked`, async () => {
       mockFetchSnapshot.mockResolvedValue({
         metadata: {},
         data: [
@@ -3538,10 +3550,16 @@ describe(`Electric Integration`, () => {
         transaction.mutate(() =>
           testCollection.insert({ id: 3, name: `Local row` }),
         )
-        const load = testCollection._sync.loadSubset({
-          limit: 1,
-          signal: abortController.signal,
-        })
+        const load = Promise.resolve(
+          testCollection._sync.loadSubset({
+            limit: 1,
+            signal: abortController.signal,
+          }),
+        )
+        const loadError = load.then(
+          () => undefined,
+          (error: unknown) => error,
+        )
         await vi.waitFor(() => expect(mockFetchSnapshot).toHaveBeenCalledOnce())
         await Promise.resolve()
         await Promise.resolve()
@@ -3550,9 +3568,10 @@ describe(`Electric Integration`, () => {
         abortController.abort()
         persistence.resolve()
         await transaction.isPersisted.promise
-        if (load instanceof Promise) await load
+        await expect(loadError).resolves.toMatchObject({ name: `AbortError` })
 
         expect(testCollection.has(2)).toBe(false)
+        await load.catch(() => undefined)
       } finally {
         abortController.abort()
         persistence.resolve()
