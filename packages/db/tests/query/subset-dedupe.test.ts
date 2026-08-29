@@ -531,6 +531,86 @@ describe(`createDeduplicatedLoadSubset`, () => {
     expect(loadSubset).toHaveBeenCalledTimes(2)
   })
 
+  it(`rolls back a stale reservation when adapter reset precedes a throw`, () => {
+    const loadSubset = vi
+      .fn<LoadSubsetFn>()
+      .mockImplementationOnce(() => {
+        deduplicated.reset()
+        throw new Error(`start failed after reset`)
+      })
+      .mockReturnValue(true)
+    const deduplicated = new DeduplicatedLoadSubset({ loadSubset })
+    const reusedOptions = { limit: 2 }
+
+    expect(() => deduplicated.loadSubset(reusedOptions)).toThrow(
+      `start failed after reset`,
+    )
+    expect(deduplicated.loadSubset(reusedOptions)).toBe(true)
+    deduplicated.unloadSubset(reusedOptions)
+    expect(deduplicated.loadSubset({ limit: 2 })).toBe(true)
+
+    expect(loadSubset).toHaveBeenCalledTimes(3)
+  })
+
+  it(`consumes a stale owner before releasing a fresh reused owner`, () => {
+    const loadSubset = vi
+      .fn<LoadSubsetFn>()
+      .mockImplementationOnce(() => {
+        deduplicated.reset()
+        return true
+      })
+      .mockReturnValue(true)
+    const deduplicated = new DeduplicatedLoadSubset({ loadSubset })
+    const reusedOptions = { limit: 2 }
+
+    expect(deduplicated.loadSubset(reusedOptions)).toBe(true)
+    deduplicated.unloadSubset(reusedOptions)
+    expect(deduplicated.loadSubset(reusedOptions)).toBe(true)
+    deduplicated.unloadSubset(reusedOptions)
+    expect(deduplicated.loadSubset({ limit: 2 })).toBe(true)
+
+    expect(loadSubset).toHaveBeenCalledTimes(3)
+  })
+
+  it(`does not share work reset while installing Promise handlers`, async () => {
+    let resolveOld!: () => void
+    class ResetOnThenPromise extends Promise<void> {
+      static get [Symbol.species](): PromiseConstructor {
+        return Promise
+      }
+
+      override then<TResult1 = void, TResult2 = never>(
+        onfulfilled?:
+          | ((value: void) => TResult1 | PromiseLike<TResult1>)
+          | null,
+        onrejected?:
+          | ((reason: unknown) => TResult2 | PromiseLike<TResult2>)
+          | null,
+      ): Promise<TResult1 | TResult2> {
+        deduplicated.reset()
+        return super.then(onfulfilled, onrejected)
+      }
+    }
+    let loadSubsetCalls = 0
+    const loadSubset: LoadSubsetFn = () => {
+      loadSubsetCalls += 1
+      if (loadSubsetCalls === 1) {
+        return new ResetOnThenPromise((resolve) => {
+          resolveOld = resolve
+        })
+      }
+      return Promise.resolve()
+    }
+    const deduplicated = new DeduplicatedLoadSubset({ loadSubset })
+
+    const oldLoad = deduplicated.loadSubset({ limit: 2 })
+    const freshLoad = deduplicated.loadSubset({ limit: 2 })
+
+    expect(loadSubsetCalls).toBe(2)
+    resolveOld()
+    await Promise.all([oldLoad, freshLoad])
+  })
+
   it(`shares in-flight work while any cancellation owner remains active`, async () => {
     let resolveLoad: (() => void) | undefined
     let sharedSignal: AbortSignal | undefined
