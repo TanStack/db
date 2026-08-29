@@ -228,6 +228,7 @@ export class DeduplicatedLoadSubset {
     this.unlimitedWhere = undefined
     this.hasLoadedAllData = false
     this.limitedCalls = []
+    for (const inflight of this.inflightCalls) inflight.lease.dispose()
     this.inflightCalls = []
     // Increment generation to invalidate any in-flight completion handlers
     // This ensures requests that were started before reset() don't repopulate the state

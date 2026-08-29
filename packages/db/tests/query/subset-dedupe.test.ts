@@ -172,6 +172,52 @@ describe(`createDeduplicatedLoadSubset`, () => {
     expect(deduplicated.loadSubset({ where })).toBe(true)
   })
 
+  it(`releases in-flight cancellation owners when reset`, async () => {
+    const releases: Array<() => void> = []
+    const sharedSignals: Array<AbortSignal | undefined> = []
+    const loadSubset = vi.fn(
+      (options: LoadSubsetOptions) =>
+        new Promise<void>((resolve) => {
+          sharedSignals.push(options.signal)
+          releases.push(resolve)
+        }),
+    )
+    const deduplicated = new DeduplicatedLoadSubset({ loadSubset })
+    const owners = [new AbortController(), new AbortController()]
+    const addSpies = owners.map((owner) =>
+      vi.spyOn(owner.signal, `addEventListener`),
+    )
+    const removeSpies = owners.map((owner) =>
+      vi.spyOn(owner.signal, `removeEventListener`),
+    )
+
+    const loads = [
+      deduplicated.loadSubset({
+        where: gt(ref(`age`), val(10)),
+        signal: owners[0]!.signal,
+      }),
+      deduplicated.loadSubset({
+        where: lt(ref(`age`), val(0)),
+        signal: owners[1]!.signal,
+      }),
+    ]
+    expect(loadSubset).toHaveBeenCalledTimes(2)
+    for (const addSpy of addSpies) expect(addSpy).toHaveBeenCalledOnce()
+
+    deduplicated.reset()
+
+    for (const removeSpy of removeSpies)
+      expect(removeSpy).toHaveBeenCalledOnce()
+    for (const signal of sharedSignals) expect(signal?.aborted).toBe(false)
+    for (const owner of owners) owner.abort()
+    for (const signal of sharedSignals) expect(signal?.aborted).toBe(false)
+
+    for (const release of releases) release()
+    await Promise.all(loads)
+    for (const removeSpy of removeSpies)
+      expect(removeSpy).toHaveBeenCalledOnce()
+  })
+
   it(`should call underlying loadSubset on first call`, async () => {
     let callCount = 0
     const mockLoadSubset = () => {
