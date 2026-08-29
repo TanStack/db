@@ -3164,6 +3164,7 @@ describe(`On-Demand Sync Mode`, () => {
         let restartedSync: ReturnType<typeof startSync> | undefined
         let restartedLoad: Promise<void> | undefined
         let restartedCleaned = false
+        let usingFakeTimers = false
 
         try {
           await vi.waitFor(() => expect(scheduler.count()).toBe(1))
@@ -3206,13 +3207,18 @@ describe(`On-Demand Sync Mode`, () => {
             )
           }
 
+          vi.useFakeTimers()
+          usingFakeTimers = true
           restartedSync.cleanup?.()
           restartedSync.cleanup?.()
           restartedCleaned = true
-          await new Promise((resolve) => setTimeout(resolve, 0))
+          await vi.runAllTimersAsync()
           expect(hookCleanups[1]).toHaveBeenCalledOnce()
           expect(trackingHandles[0]!.dispose).toHaveBeenCalledOnce()
+          vi.useRealTimers()
+          usingFakeTimers = false
         } finally {
+          if (usingFakeTimers) vi.useRealTimers()
           stoppedSync.cleanup?.()
           if (!restartedCleaned) restartedSync?.cleanup?.()
           if (scheduler.count() > 0) await scheduler.waitAll()
