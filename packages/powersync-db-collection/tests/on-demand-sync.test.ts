@@ -2715,6 +2715,7 @@ describe(`On-Demand Sync Mode`, () => {
     it(`does not settle a superseded rebuild before its replacement publishes`, async () => {
       const harness = await startConcurrentLifecycleHarness()
       let firstSettled = false
+      let secondSettled = false
       let firstLoad: Promise<void> | undefined
       let secondLoad: Promise<void> | undefined
 
@@ -2730,14 +2731,18 @@ describe(`On-Demand Sync Mode`, () => {
 
         secondLoad = Promise.resolve(
           harness.loadSubset(harness.second),
-        ).then(() => undefined)
+        ).then(() => {
+          secondSettled = true
+        })
         await vi.waitFor(() => expect(harness.hooks).toHaveLength(2))
         harness.hooks[1]!.resolve()
         await new Promise((resolve) => setTimeout(resolve, 0))
+        expect(secondSettled).toBe(false)
 
         await harness.queuedLocks[0]!()
         await new Promise((resolve) => setTimeout(resolve, 0))
         expect(firstSettled).toBe(false)
+        expect(secondSettled).toBe(false)
         expect(harness.createDiffTrigger).not.toHaveBeenCalled()
 
         await vi.waitFor(() => expect(harness.queuedLocks).toHaveLength(2))
