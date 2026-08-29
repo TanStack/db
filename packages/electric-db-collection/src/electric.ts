@@ -18,6 +18,7 @@ import {
   TimeoutWaitingForMatchError,
   TimeoutWaitingForTxIdError,
 } from './errors'
+import { createAppliedCommitCaptureRegistry } from './applied-commit-capture'
 import { compileSQL } from './sql-compiler'
 import {
   addTagToIndex,
@@ -86,6 +87,8 @@ export interface ElectricTestHooks {
    * Allows tests to pause and validate snapshot phase before atomic swap completes
    */
   beforeMarkingReady?: () => Promise<void>
+  /** Reports the number of active on-demand applied-receipt captures. */
+  onActiveCommitCapturesChange?: (activeCount: number) => void
 }
 
 /**
@@ -543,7 +546,7 @@ function createLoadSubsetDedupe<T extends Row<unknown>>({
     metadata: Record<string, unknown>
   }) => void
   commit: (signal?: AbortSignal) => SyncAppliedReceipt
-  captureCommits: () => {
+  captureCommits: (signal?: AbortSignal) => {
     wait: () => Promise<void>
     dispose: () => void
   }
@@ -737,7 +740,7 @@ function createLoadSubsetDedupe<T extends Row<unknown>>({
     // aborted request can already have installed rows before the check below.
     // Full request-scoped cancellation requires support in the Electric client;
     // matching snapshots by parameters is unsafe for overlapping equal requests.
-    const commitCapture = captureCommits()
+    const commitCapture = captureCommits(signal)
     try {
       try {
         if (cursor) {
@@ -766,10 +769,14 @@ function createLoadSubsetDedupe<T extends Row<unknown>>({
             `${logPrefix}Requesting cursor.whereFrom snapshot (with limit ${limit})`,
           )
 
-          await Promise.all([
+          const requestResults = await Promise.allSettled([
             stream.requestSnapshot(whereCurrentParams),
             stream.requestSnapshot(whereFromParams),
           ])
+          const failedRequest = requestResults.find(
+            (result) => result.status === `rejected`,
+          )
+          if (failedRequest) throw failedRequest.reason
         } else {
           const snapshotParams = compileSQL<T>(opts, compileOptions)
           await stream.requestSnapshot(snapshotParams)
@@ -1592,38 +1599,13 @@ function createElectricSync<T extends Row<unknown>>(
         collection,
         metadata,
       } = params
-      const activeCommitCaptures = new Set<Set<Promise<void>>>()
+      const commitCaptures = createAppliedCommitCaptureRegistry(
+        testHooks?.onActiveCommitCapturesChange,
+      )
       const commit = (signal?: AbortSignal): SyncAppliedReceipt => {
         const applied = commitSyncTransaction(signal)
-        if (applied === true) {
-          return true
-        }
-        if (activeCommitCaptures.size > 0) {
-          for (const receipts of activeCommitCaptures) {
-            receipts.add(applied)
-          }
-          // A receipt can reject before its request Promise settles. Observe it
-          // now while retaining the original Promise for the capture to await.
-          void applied.catch(() => undefined)
-        }
+        commitCaptures.record(applied)
         return applied
-      }
-      const captureCommits = () => {
-        const receipts = new Set<Promise<void>>()
-        let active = true
-        const dispose = () => {
-          if (!active) return
-          active = false
-          activeCommitCaptures.delete(receipts)
-        }
-        activeCommitCaptures.add(receipts)
-        return {
-          wait: async () => {
-            dispose()
-            await Promise.all(receipts)
-          },
-          dispose,
-        }
       }
       const readPersistedResumeState = (): ElectricResumeState | undefined => {
         const persistedResumeState = metadata?.collection.get(`electric:resume`)
@@ -1872,7 +1854,7 @@ function createElectricSync<T extends Row<unknown>>(
         begin,
         write,
         commit,
-        captureCommits,
+        captureCommits: commitCaptures.capture,
         collectionId,
         // Pass the columnMapper's encode function to transform column names
         // (e.g., camelCase to snake_case) when compiling SQL for subset queries
