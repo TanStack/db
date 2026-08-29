@@ -3051,6 +3051,78 @@ describe(`Electric Integration`, () => {
       }
     })
 
+    it(`retains every applied receipt until the on-demand request settles`, async () => {
+      const request = createDeferred<void>()
+      mockRequestSnapshot.mockReturnValueOnce(request.promise)
+      const testCollection = createOnDemandCollection(
+        `on-demand-retained-receipts-test`,
+      )
+      const persistence = createDeferred<void>()
+      const transaction = createTransaction({
+        mutationFn: () => persistence.promise,
+      })
+
+      try {
+        transaction.mutate(() =>
+          testCollection.insert({ id: 3, name: `Local row` }),
+        )
+        const load = Promise.resolve(
+          testCollection._sync.loadSubset({ limit: 10 }),
+        )
+        const loadError = load.then(
+          () => undefined,
+          (error: unknown) => error,
+        )
+        await vi.waitFor(() =>
+          expect(mockRequestSnapshot).toHaveBeenCalledOnce(),
+        )
+
+        subscriber([
+          {
+            key: `2`,
+            value: { id: 2, name: `Applied row` },
+            headers: { operation: `insert` },
+          },
+          { headers: { control: `subset-end` } },
+        ])
+        subscriber([
+          {
+            key: `4`,
+            value: { id: 4, name: `Canceled row` },
+            headers: { operation: `insert` },
+          },
+          { headers: { control: `subset-end` } },
+        ])
+        expect(testCollection._state.pendingSyncedTransactions).toHaveLength(2)
+        const canceledReceipt =
+          testCollection._state.pendingSyncedTransactions[1]!
+        testCollection._state.cancelPendingSyncedTransaction(canceledReceipt)
+        await Promise.resolve()
+
+        request.resolve()
+        persistence.resolve()
+        await transaction.isPersisted.promise
+
+        await expect(loadError).resolves.toMatchObject({ name: `AbortError` })
+        expect(testCollection.has(2)).toBe(true)
+        expect(testCollection.has(4)).toBe(false)
+        await load.catch(() => undefined)
+
+        const retry = Promise.resolve(
+          testCollection._sync.loadSubset({ limit: 10 }),
+        )
+        await vi.waitFor(() =>
+          expect(mockRequestSnapshot).toHaveBeenCalledTimes(2),
+        )
+        await retry
+      } finally {
+        request.resolve()
+        persistence.resolve()
+        await transaction.isPersisted.promise.catch(() => undefined)
+        await testCollection.cleanup()
+      }
+    })
+
     it(`rejects when collection cancellation lands after request fulfillment but before applied settlement`, async () => {
       const request = createDeferred<void>()
       mockRequestSnapshot.mockReturnValueOnce(request.promise)
@@ -3365,6 +3437,59 @@ describe(`Electric Integration`, () => {
         await load.catch(() => undefined)
       } finally {
         abortController.abort()
+        whereCurrent.resolve()
+        whereFrom.resolve()
+        await testCollection.cleanup()
+      }
+    })
+
+    it(`waits for both cursor snapshot requests before settling`, async () => {
+      const whereCurrent = createDeferred<void>()
+      const whereFrom = createDeferred<void>()
+      mockRequestSnapshot
+        .mockReturnValueOnce(whereCurrent.promise)
+        .mockReturnValueOnce(whereFrom.promise)
+      const testCollection = createOnDemandCollection(
+        `on-demand-cursor-all-requests-test`,
+      )
+      const id = new IR.PropRef([`id`])
+
+      try {
+        const load = Promise.resolve(
+          testCollection._sync.loadSubset({
+            limit: 10,
+            orderBy: [
+              {
+                expression: id,
+                compareOptions: {
+                  direction: `asc`,
+                  nulls: `last`,
+                  stringSort: `lexical`,
+                },
+              },
+            ],
+            cursor: {
+              whereCurrent: new IR.Func(`eq`, [id, new IR.Value(1)]),
+              whereFrom: new IR.Func(`gt`, [id, new IR.Value(1)]),
+              lastKey: 1,
+            },
+          }),
+        )
+        await vi.waitFor(() =>
+          expect(mockRequestSnapshot).toHaveBeenCalledTimes(2),
+        )
+
+        whereCurrent.resolve()
+        const nextTurn = new Promise<`next-turn`>((resolve) =>
+          setTimeout(() => resolve(`next-turn`), 0),
+        )
+        await expect(
+          Promise.race([load.then(() => `load-settled` as const), nextTurn]),
+        ).resolves.toBe(`next-turn`)
+
+        whereFrom.resolve()
+        await load
+      } finally {
         whereCurrent.resolve()
         whereFrom.resolve()
         await testCollection.cleanup()

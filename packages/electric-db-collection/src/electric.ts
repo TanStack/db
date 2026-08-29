@@ -528,8 +528,7 @@ function createLoadSubsetDedupe<T extends Row<unknown>>({
   begin,
   write,
   commit,
-  getCommitCursor,
-  waitForCommitsAfter,
+  captureCommits,
   collectionId,
   encodeColumnName,
   signal,
@@ -544,8 +543,10 @@ function createLoadSubsetDedupe<T extends Row<unknown>>({
     metadata: Record<string, unknown>
   }) => void
   commit: (signal?: AbortSignal) => SyncAppliedReceipt
-  getCommitCursor: () => number
-  waitForCommitsAfter: (cursor: number) => Promise<void>
+  captureCommits: () => {
+    wait: () => Promise<void>
+    dispose: () => void
+  }
   collectionId?: string
   /**
    * Optional function to encode column names (e.g., camelCase to snake_case).
@@ -611,7 +612,6 @@ function createLoadSubsetDedupe<T extends Row<unknown>>({
   }
 
   const loadSubset = async (opts: LoadSubsetOptions) => {
-    const commitCursor = getCommitCursor()
     const isAborted = (): boolean =>
       signal.aborted || opts.signal?.aborted === true
     const throwIfCollectionAborted = () => {
@@ -737,49 +737,58 @@ function createLoadSubsetDedupe<T extends Row<unknown>>({
     // aborted request can already have installed rows before the check below.
     // Full request-scoped cancellation requires support in the Electric client;
     // matching snapshots by parameters is unsafe for overlapping equal requests.
+    const commitCapture = captureCommits()
     try {
-      if (cursor) {
-        const whereCurrentOpts: LoadSubsetOptions = {
-          where: where ? and(where, cursor.whereCurrent) : cursor.whereCurrent,
-          orderBy,
+      try {
+        if (cursor) {
+          const whereCurrentOpts: LoadSubsetOptions = {
+            where: where
+              ? and(where, cursor.whereCurrent)
+              : cursor.whereCurrent,
+            orderBy,
+          }
+          const whereCurrentParams = compileSQL<T>(
+            whereCurrentOpts,
+            compileOptions,
+          )
+
+          const whereFromOpts: LoadSubsetOptions = {
+            where: where ? and(where, cursor.whereFrom) : cursor.whereFrom,
+            orderBy,
+            limit,
+          }
+          const whereFromParams = compileSQL<T>(whereFromOpts, compileOptions)
+
+          debug(
+            `${logPrefix}Requesting cursor.whereCurrent snapshot (all ties)`,
+          )
+          debug(
+            `${logPrefix}Requesting cursor.whereFrom snapshot (with limit ${limit})`,
+          )
+
+          await Promise.all([
+            stream.requestSnapshot(whereCurrentParams),
+            stream.requestSnapshot(whereFromParams),
+          ])
+        } else {
+          const snapshotParams = compileSQL<T>(opts, compileOptions)
+          await stream.requestSnapshot(snapshotParams)
         }
-        const whereCurrentParams = compileSQL<T>(
-          whereCurrentOpts,
-          compileOptions,
-        )
-
-        const whereFromOpts: LoadSubsetOptions = {
-          where: where ? and(where, cursor.whereFrom) : cursor.whereFrom,
-          orderBy,
-          limit,
+      } catch (error) {
+        if (signal.aborted) {
+          throw new SyncTransactionAbortedError()
         }
-        const whereFromParams = compileSQL<T>(whereFromOpts, compileOptions)
-
-        debug(`${logPrefix}Requesting cursor.whereCurrent snapshot (all ties)`)
-        debug(
-          `${logPrefix}Requesting cursor.whereFrom snapshot (with limit ${limit})`,
-        )
-
-        await Promise.all([
-          stream.requestSnapshot(whereCurrentParams),
-          stream.requestSnapshot(whereFromParams),
-        ])
-      } else {
-        const snapshotParams = compileSQL<T>(opts, compileOptions)
-        await stream.requestSnapshot(snapshotParams)
+        if (handleSnapshotError(error, `requestSnapshot`)) {
+          return
+        }
+        throw error
       }
-    } catch (error) {
-      if (signal.aborted) {
-        throw new SyncTransactionAbortedError()
-      }
-      if (handleSnapshotError(error, `requestSnapshot`)) {
-        return
-      }
-      throw error
+      throwIfCollectionAborted()
+      await commitCapture.wait()
+      throwIfCollectionAborted()
+    } finally {
+      commitCapture.dispose()
     }
-    throwIfCollectionAborted()
-    await waitForCommitsAfter(commitCursor)
-    throwIfCollectionAborted()
   }
 
   return new DeduplicatedLoadSubset({ loadSubset })
@@ -1583,25 +1592,38 @@ function createElectricSync<T extends Row<unknown>>(
         collection,
         metadata,
       } = params
-      let commitSequence = 0
-      const pendingAppliedReceipts = new Map<number, Promise<void>>()
+      const activeCommitCaptures = new Set<Set<Promise<void>>>()
       const commit = (signal?: AbortSignal): SyncAppliedReceipt => {
-        const sequence = ++commitSequence
         const applied = commitSyncTransaction(signal)
         if (applied === true) {
           return true
         }
-        pendingAppliedReceipts.set(sequence, applied)
-        const removeReceipt = () => pendingAppliedReceipts.delete(sequence)
-        void applied.then(removeReceipt, removeReceipt)
+        if (activeCommitCaptures.size > 0) {
+          for (const receipts of activeCommitCaptures) {
+            receipts.add(applied)
+          }
+          // A receipt can reject before its request Promise settles. Observe it
+          // now while retaining the original Promise for the capture to await.
+          void applied.catch(() => undefined)
+        }
         return applied
       }
-      const waitForCommitsAfter = async (cursor: number): Promise<void> => {
-        await Promise.all(
-          Array.from(pendingAppliedReceipts, ([sequence, applied]) =>
-            sequence > cursor ? applied : undefined,
-          ),
-        )
+      const captureCommits = () => {
+        const receipts = new Set<Promise<void>>()
+        let active = true
+        const dispose = () => {
+          if (!active) return
+          active = false
+          activeCommitCaptures.delete(receipts)
+        }
+        activeCommitCaptures.add(receipts)
+        return {
+          wait: async () => {
+            dispose()
+            await Promise.all(receipts)
+          },
+          dispose,
+        }
       }
       const readPersistedResumeState = (): ElectricResumeState | undefined => {
         const persistedResumeState = metadata?.collection.get(`electric:resume`)
@@ -1850,8 +1872,7 @@ function createElectricSync<T extends Row<unknown>>(
         begin,
         write,
         commit,
-        getCommitCursor: () => commitSequence,
-        waitForCommitsAfter,
+        captureCommits,
         collectionId,
         // Pass the columnMapper's encode function to transform column names
         // (e.g., camelCase to snake_case) when compiling SQL for subset queries
