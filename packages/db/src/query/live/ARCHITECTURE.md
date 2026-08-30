@@ -1266,6 +1266,21 @@ count source reads or snapshots, sorts or total-order refinements, and predicate
 compilations independently. A stable result and request trace can still hide
 repeated local work.
 
+`WindowState` takes at most one ordered source snapshot per collection state
+revision. Boundary, coverage, publication, and reconciliation reads share that
+snapshot; the next committed source batch invalidates it. The query predicate
+is compiled once with the window and is evaluated over the shared ordered
+snapshot, so another view of the same revision does not rescan, resort, or
+recompile it.
+
+A descending single-column index walks indexed-value buckets in query order.
+It evaluates complete buckets until the requested filtered prefix is known,
+orders public keys ascending within each bucket, and stops after the sufficient
+boundary bucket. Rows in worse buckets cannot add source reads or total-order
+refinement work. An all-tied source is the deliberate worst case: the one
+boundary bucket is the whole source and must be inspected before the public-key
+suffix can choose top-K.
+
 Runtime reference identity has a different lifetime again. Objects use weak
 identity, but JavaScript symbols cannot be weak keys. Stable equality for the
 same live symbol therefore retains one strong entry per distinct symbol for the

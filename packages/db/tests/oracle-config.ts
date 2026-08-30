@@ -45,6 +45,8 @@ const staticOracleProperties = [
   `load-subset.distinct-window-predicate`,
   `load-subset.ordered-window`,
   `load-subset.rejected-waiter`,
+  `ordered-work.reverse-prefix`,
+  `ordered-work.snapshot-reuse`,
   `pagination.async-cursor`,
   `pagination.multi-order`,
   `pagination.nullable-cursor`,

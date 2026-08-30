@@ -521,19 +521,32 @@ export class BasicIndex<
   }
 
   get orderedEntriesArray(): Array<[any, Set<TKey>]> {
-    return this.sortedValues.map((value) => [
+    return Array.from(this.orderedBuckets(), ([value, keys]) => [
       value,
-      this.valueMap.get(value) ?? new Set(),
+      keys as Set<TKey>,
     ])
   }
 
   get orderedEntriesArrayReversed(): Array<[any, Set<TKey>]> {
-    const result: Array<[any, Set<TKey>]> = []
-    for (let i = this.sortedValues.length - 1; i >= 0; i--) {
-      const value = this.sortedValues[i]
-      result.push([value, this.valueMap.get(value) ?? new Set()])
+    return Array.from(this.orderedBucketsReversed(), ([value, keys]) => [
+      value,
+      keys as Set<TKey>,
+    ])
+  }
+
+  *orderedBuckets(): IterableIterator<readonly [unknown, ReadonlySet<TKey>]> {
+    for (const value of this.sortedValues) {
+      yield [value, this.valueMap.get(value) ?? new Set()]
     }
-    return result
+  }
+
+  *orderedBucketsReversed(): IterableIterator<
+    readonly [unknown, ReadonlySet<TKey>]
+  > {
+    for (let index = this.sortedValues.length - 1; index >= 0; index--) {
+      const value = this.sortedValues[index]
+      yield [value, this.valueMap.get(value) ?? new Set()]
+    }
   }
 
   get valueMapData(): Map<any, Set<TKey>> {

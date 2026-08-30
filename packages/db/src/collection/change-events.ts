@@ -1,3 +1,4 @@
+import { compareKeys } from '@tanstack/db-ivm'
 import {
   createSingleRowRefProxy,
   toExpression,
@@ -363,26 +364,25 @@ function getOrderedKeys<T extends object, TKey extends string | number>(
           return index.takeFromStart(limit ?? index.keyCount, filterFn)
         }
 
-        // Reversing a value index also reverses keys inside an equal-value
-        // bucket, but query TotalOrder keeps its public-key tie-break ascending.
-        // Refine all matching indexed rows locally so a limit cannot cut the
-        // wrong side of a tied boundary.
-        const totalOrder = new TotalOrder(orderBy, collection)
-        const indexedEntries = index
-          .takeFromStart(index.keyCount, filterFn)
-          .flatMap((key) => {
-            const value = collection.get(key)
-            return value === undefined ? [] : [{ key, value }]
-          })
-        indexedEntries.sort((left, right) =>
-          totalOrder.compareEntries(
-            [left.key, left.value],
-            [right.key, right.value],
-          ),
-        )
-        return indexedEntries
-          .slice(0, limit ?? indexedEntries.length)
-          .map(({ key }) => key)
+        // Reversing a value index must not reverse the public-key suffix of the
+        // query's total order. Walk value buckets in reverse value order, sort
+        // keys inside each bucket ascending, and stop after the first bucket
+        // that proves the requested prefix. The complete boundary bucket must
+        // be inspected because filtering can otherwise select the wrong key.
+        if (limit === 0) return []
+        const keys: Array<TKey> = []
+        for (const [, bucket] of index.orderedBuckets()) {
+          const matchingKeys = [...bucket].sort(compareKeys).filter(filterFn)
+          const remaining =
+            limit === undefined ? undefined : limit - keys.length
+          keys.push(
+            ...(remaining === undefined
+              ? matchingKeys
+              : matchingKeys.slice(0, remaining)),
+          )
+          if (limit !== undefined && keys.length === limit) break
+        }
+        return keys
       }
     }
   }

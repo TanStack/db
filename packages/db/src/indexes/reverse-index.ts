@@ -3,6 +3,13 @@ import type { OrderByDirection } from '../query/ir'
 import type { IndexInterface, IndexOperation, IndexStats } from './base-index'
 import type { RangeQueryOptions } from './btree-index'
 
+interface OrderedBucketIndex<TKey extends string | number> {
+  orderedBuckets: () => IterableIterator<readonly [unknown, ReadonlySet<TKey>]>
+  orderedBucketsReversed: () => IterableIterator<
+    readonly [unknown, ReadonlySet<TKey>]
+  >
+}
+
 export class ReverseIndex<
   TKey extends string | number,
 > implements IndexInterface<TKey> {
@@ -65,6 +72,26 @@ export class ReverseIndex<
 
   get orderedEntriesArrayReversed(): Array<[any, Set<TKey>]> {
     return this.originalIndex.orderedEntriesArray
+  }
+
+  orderedBuckets(): IterableIterator<readonly [unknown, ReadonlySet<TKey>]> {
+    const orderedIndex = this.originalIndex as IndexInterface<TKey> &
+      Partial<OrderedBucketIndex<TKey>>
+    return (
+      orderedIndex.orderedBucketsReversed?.() ??
+      this.originalIndex.orderedEntriesArrayReversed[Symbol.iterator]()
+    )
+  }
+
+  orderedBucketsReversed(): IterableIterator<
+    readonly [unknown, ReadonlySet<TKey>]
+  > {
+    const orderedIndex = this.originalIndex as IndexInterface<TKey> &
+      Partial<OrderedBucketIndex<TKey>>
+    return (
+      orderedIndex.orderedBuckets?.() ??
+      this.originalIndex.orderedEntriesArray[Symbol.iterator]()
+    )
   }
 
   // All operations below delegate to the original index

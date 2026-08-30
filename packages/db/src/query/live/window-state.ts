@@ -29,11 +29,17 @@ export class WindowState<
   private readonly candidateKeys = new Set<TKey>()
   private readonly provenanceKeys = new Set<TKey>()
   private readonly admittedKeys = new Set<TKey>()
+  private sourceSnapshot:
+    | {
+        revision: number
+        rows: Array<ChangeMessage<TRow, TKey>>
+      }
+    | undefined
 
   constructor(
     private readonly collection: CollectionImpl<TRow, TKey>,
     orderBy: OrderBy,
-    private readonly where: BasicExpression<boolean> | undefined,
+    where: BasicExpression<boolean> | undefined,
     targetSize: number,
     private readonly expandSourceOrderTies = false,
   ) {
@@ -390,14 +396,13 @@ export class WindowState<
     allowedKeys: ReadonlySet<TKey> | undefined,
     limit?: number,
   ): Array<ChangeMessage<TRow, TKey>> {
-    const rows = this.collection.currentStateAsChanges({
-      ...(this.where && { where: this.where }),
-      orderBy: this.totalOrder.orderBy,
-    }) as Array<ChangeMessage<TRow, TKey>> | undefined
+    const rows = this.readSourceSnapshot().filter(({ value }) =>
+      this.matchesWhere(value),
+    )
     const allowed =
       allowedKeys === undefined
-        ? (rows ?? [])
-        : (rows ?? []).filter((change) => allowedKeys.has(change.key))
+        ? rows
+        : rows.filter((change) => allowedKeys.has(change.key))
     if (limit === undefined) return allowed
     return this.expandSourceOrderTies
       ? this.prefixThroughTieClass(allowed, limit)
@@ -430,13 +435,27 @@ export class WindowState<
     allowedKeys: ReadonlySet<TKey> | undefined,
     limit?: number,
   ): Array<ChangeMessage<TRow, TKey>> {
-    const rows = this.collection.currentStateAsChanges({
-      orderBy: this.totalOrder.orderBy,
-    }) as Array<ChangeMessage<TRow, TKey>> | undefined
+    const rows = this.readSourceSnapshot()
     const allowed =
       allowedKeys === undefined
-        ? (rows ?? [])
-        : (rows ?? []).filter((change) => allowedKeys.has(change.key))
+        ? rows
+        : rows.filter((change) => allowedKeys.has(change.key))
     return limit === undefined ? allowed : allowed.slice(0, limit)
+  }
+
+  private readSourceSnapshot(): Array<ChangeMessage<TRow, TKey>> {
+    const revision = this.collection._stateRevision
+    if (
+      this.sourceSnapshot !== undefined &&
+      this.sourceSnapshot.revision === revision
+    ) {
+      return this.sourceSnapshot.rows
+    }
+
+    const rows = this.collection.currentStateAsChanges({
+      orderBy: this.totalOrder.orderBy,
+    }) as Array<ChangeMessage<TRow, TKey>>
+    this.sourceSnapshot = { revision, rows }
+    return rows
   }
 }

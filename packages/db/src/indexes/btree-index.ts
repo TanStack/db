@@ -441,19 +441,37 @@ export class BTreeIndex<
   }
 
   get orderedEntriesArray(): Array<[any, Set<TKey>]> {
-    return this.orderedEntries
-      .keysArray()
-      .map((key) => [
-        denormalizeUndefined(key),
-        this.valueMap.get(key) ?? new Set(),
-      ])
+    return Array.from(this.orderedBuckets(), ([value, keys]) => [
+      value,
+      keys as Set<TKey>,
+    ])
   }
 
   get orderedEntriesArrayReversed(): Array<[any, Set<TKey>]> {
-    return this.takeReversedFromEnd(this.orderedEntries.size).map((key) => [
-      denormalizeUndefined(key),
-      this.valueMap.get(key) ?? new Set(),
+    return Array.from(this.orderedBucketsReversed(), ([value, keys]) => [
+      value,
+      keys as Set<TKey>,
     ])
+  }
+
+  *orderedBuckets(): IterableIterator<readonly [unknown, ReadonlySet<TKey>]> {
+    let pair = this.orderedEntries.nextHigherPair(undefined)
+    while (pair !== undefined) {
+      const value = pair[0]
+      yield [denormalizeUndefined(value), this.valueMap.get(value) ?? new Set()]
+      pair = this.orderedEntries.nextHigherPair(value)
+    }
+  }
+
+  *orderedBucketsReversed(): IterableIterator<
+    readonly [unknown, ReadonlySet<TKey>]
+  > {
+    let pair = this.orderedEntries.nextLowerPair(undefined)
+    while (pair !== undefined) {
+      const value = pair[0]
+      yield [denormalizeUndefined(value), this.valueMap.get(value) ?? new Set()]
+      pair = this.orderedEntries.nextLowerPair(value)
+    }
   }
 
   get valueMapData(): Map<any, Set<TKey>> {
