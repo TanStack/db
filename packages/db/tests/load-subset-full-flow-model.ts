@@ -383,9 +383,13 @@ export type LoadSubsetFullFlowEvent =
   | {
       type: `establishReplacementCoverage`
       publicationId: FullFlowPublicationId
+      sourceId: FullFlowSourceId
+      demandId: FullFlowDemandId
     }
   | {
       type: `resizeOrderedWindow`
+      sourceId: FullFlowSourceId
+      demandId: FullFlowDemandId
       size: number
     }
 
@@ -1233,6 +1237,12 @@ export function projectAtomicOrderedPublicationState(
         retainsPreviousPublication = true
         break
       case `resizeOrderedWindow`:
+        if (
+          event.sourceId !== options.sourceId ||
+          event.demandId !== options.demandId
+        ) {
+          break
+        }
         retainedSize = Math.max(retainedSize, event.size)
         break
       case `settleReplacement`: {
@@ -1252,7 +1262,13 @@ export function projectAtomicOrderedPublicationState(
         break
       }
       case `establishReplacementCoverage`: {
-        if (event.publicationId !== currentReplacement) break
+        if (
+          event.publicationId !== currentReplacement ||
+          event.sourceId !== options.sourceId ||
+          event.demandId !== options.demandId
+        ) {
+          break
+        }
         const ordered = attempts.get(event.publicationId)?.get(targetDemand)
         if (ordered?.outcome === `success`) {
           ordered.publishable = true

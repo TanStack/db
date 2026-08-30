@@ -6562,7 +6562,12 @@ async function runAtomicOrderedReplayScenario(
         ? ([2, 0] as const)
         : ([0, 2] as const)
     for (const size of resizeSizes) {
-      history.push({ type: `resizeOrderedWindow`, size })
+      history.push({
+        type: `resizeOrderedWindow`,
+        sourceId: `source`,
+        demandId: `ordered`,
+        size,
+      })
       subscription.ensureOrderedWindowSize(size)
       expectPublicationHistory()
     }
@@ -6758,6 +6763,8 @@ async function runAtomicOrderedReplayScenario(
       history.push({
         type: `establishReplacementCoverage`,
         publicationId: currentReplay.publicationId,
+        sourceId: `source`,
+        demandId: `ordered`,
       })
       await flushPromises()
       expectPublicationHistory()

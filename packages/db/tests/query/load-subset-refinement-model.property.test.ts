@@ -996,6 +996,104 @@ it(`settles same-name replacement demands independently by source`, () => {
   ).toEqual([`new-ordered-row`, `source-a-row`, `source-b-row`])
 })
 
+it.each([`a-first`, `b-first`] as const)(
+  `keeps ordered boundaries source-qualified when staged %s`,
+  (stageOrder) => {
+    const stages: Array<LoadSubsetFullFlowEvent> = [
+      {
+        type: `stagePublicationRows`,
+        publicationId: `publication`,
+        sourceId: `source-a`,
+        demandId: `ordered`,
+        rows: [{ key: `row-a`, orderValue: 1 }],
+      },
+      {
+        type: `stagePublicationRows`,
+        publicationId: `publication`,
+        sourceId: `source-b`,
+        demandId: `ordered`,
+        rows: [{ key: `row-b`, orderValue: 2 }],
+      },
+    ]
+    if (stageOrder === `b-first`) stages.reverse()
+    const history = [
+      ...stages,
+      { type: `commitPublication`, publicationId: `publication` } as const,
+    ]
+    const boundary = (sourceId: string) =>
+      projectOrderedPublicationBoundary(history, {
+        sourceId,
+        demandId: `ordered`,
+        direction: `asc`,
+        prefixSize: 1,
+      })?.key
+
+    expect(boundary(`source-a`)).toBe(`row-a`)
+    expect(boundary(`source-b`)).toBe(`row-b`)
+  },
+)
+
+it(`applies target events only to their named source and demand`, () => {
+  const target = { sourceId: `source-a`, demandId: `ordered` } as const
+  const base: Array<LoadSubsetFullFlowEvent> = [
+    {
+      type: `stagePublicationRows`,
+      publicationId: `initial`,
+      ...target,
+      rows: [{ key: `old-row`, orderValue: 0 }],
+    },
+    { type: `commitPublication`, publicationId: `initial` },
+    {
+      type: `stagePublicationRows`,
+      publicationId: `replacement`,
+      ...target,
+      rows: [
+        { key: `new-row-a`, orderValue: 1 },
+        { key: `new-row-b`, orderValue: 2 },
+      ],
+    },
+    {
+      type: `beginReplacement`,
+      publicationId: `replacement`,
+      demands: [target],
+    },
+  ]
+  const settle: LoadSubsetFullFlowEvent = {
+    type: `settleReplacement`,
+    publicationId: `replacement`,
+    ...target,
+    outcome: `success`,
+    extent: `continues`,
+  }
+  const establish = (sourceId: string): LoadSubsetFullFlowEvent => ({
+    type: `establishReplacementCoverage`,
+    publicationId: `replacement`,
+    sourceId,
+    demandId: `ordered`,
+  })
+  const resize = (sourceId: string): LoadSubsetFullFlowEvent => ({
+    type: `resizeOrderedWindow`,
+    sourceId,
+    demandId: `ordered`,
+    size: 2,
+  })
+  const rows = (history: ReadonlyArray<LoadSubsetFullFlowEvent>) =>
+    projectAtomicOrderedPublicationState(history, {
+      ...target,
+      direction: `asc`,
+      initialWindowSize: 1,
+    }).currentPublication?.rows.map(({ key }) => key)
+
+  expect(rows([...base, settle, establish(`source-b`)])).toEqual([`old-row`])
+  expect(rows([...base, settle, establish(`source-a`)])).toEqual([`new-row-a`])
+  expect(
+    rows([...base, resize(`source-b`), settle, establish(`source-a`)]),
+  ).toEqual([`new-row-a`])
+  expect(
+    rows([...base, resize(`source-a`), settle, establish(`source-a`)]),
+  ).toEqual([`new-row-a`, `new-row-b`])
+})
+
 it.each([
   {
     name: `authoritative`,
@@ -1439,10 +1537,16 @@ function renameHistoryIds(
           demandId: `${event.demandId}-${suffix}`,
         }
       case `commitPublication`:
+        return {
+          ...event,
+          publicationId: `${event.publicationId}-${suffix}`,
+        }
       case `establishReplacementCoverage`:
         return {
           ...event,
           publicationId: `${event.publicationId}-${suffix}`,
+          sourceId: `${event.sourceId}-${suffix}`,
+          demandId: `${event.demandId}-${suffix}`,
         }
       case `beginReplacement`:
         return {
@@ -1457,6 +1561,12 @@ function renameHistoryIds(
         return {
           ...event,
           publicationId: `${event.publicationId}-${suffix}`,
+          sourceId: `${event.sourceId}-${suffix}`,
+          demandId: `${event.demandId}-${suffix}`,
+        }
+      case `resizeOrderedWindow`:
+        return {
+          ...event,
           sourceId: `${event.sourceId}-${suffix}`,
           demandId: `${event.demandId}-${suffix}`,
         }
@@ -2481,8 +2591,12 @@ function erasedIdentityReferences(
         add(eventIndex, `demandId`, event.demandId)
         break
       case `commitPublication`:
+        add(eventIndex, `publicationId`, event.publicationId)
+        break
       case `establishReplacementCoverage`:
         add(eventIndex, `publicationId`, event.publicationId)
+        add(eventIndex, `sourceId`, event.sourceId)
+        add(eventIndex, `demandId`, event.demandId)
         break
       case `beginReplacement`:
         add(eventIndex, `publicationId`, event.publicationId)
@@ -2507,7 +2621,10 @@ function erasedIdentityReferences(
         add(eventIndex, `demandId`, event.demandId)
         break
       case `establishPublication`:
+        break
       case `resizeOrderedWindow`:
+        add(eventIndex, `sourceId`, event.sourceId)
+        add(eventIndex, `demandId`, event.demandId)
         break
     }
   }
@@ -2601,7 +2718,12 @@ function publicationErasureHistories(): Array<Array<LoadSubsetFullFlowEvent>> {
         type: `commitPublication`,
         publicationId: `publication-a`,
       },
-      { type: `resizeOrderedWindow`, size: 2 },
+      {
+        type: `resizeOrderedWindow`,
+        sourceId: `source`,
+        demandId: `ordered`,
+        size: 2,
+      },
     ],
     [
       {
@@ -2657,6 +2779,8 @@ function publicationErasureHistories(): Array<Array<LoadSubsetFullFlowEvent>> {
       {
         type: `establishReplacementCoverage`,
         publicationId: `publication-b`,
+        sourceId: `source`,
+        demandId: `ordered`,
       },
       {
         type: `releaseDemand`,
