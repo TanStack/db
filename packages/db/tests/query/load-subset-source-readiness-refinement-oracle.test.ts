@@ -2,6 +2,7 @@ import { expect, it } from 'vitest'
 import { createCollection } from '../../src/collection/index.js'
 import { createDeferred } from '../../src/deferred.js'
 import { BTreeIndex } from '../../src/index.js'
+import { extractSimpleComparisons } from '../../src/query/expression-helpers.js'
 import {
   createLiveQueryCollection,
   eq,
@@ -10,6 +11,7 @@ import {
 import { projectSourceReadiness } from '../load-subset-full-flow-model.js'
 import { flushPromises } from '../utils.js'
 import type { LoadSubsetFullFlowEvent } from '../load-subset-full-flow-model.js'
+import type { LoadSubsetOptions } from '../../src/types.js'
 
 type Row = { id: string; group: string }
 
@@ -18,9 +20,9 @@ it.each([`resolve`, `reject`] as const)(
   async (oldOutcome) => {
     type Parent = { id: string; group: string }
     type Child = { id: string; group: string }
-    type Result = {
-      hasMore: boolean
-      appliedRowKeys: ReadonlyArray<string>
+    type PendingRequest = {
+      options: LoadSubsetOptions
+      rows: ReturnType<typeof createDeferred<ReadonlyArray<Child>>>
     }
     const sessionId = `session`
     const parentId = `readiness-generation-parent-${oldOutcome}`
@@ -54,7 +56,8 @@ it.each([`resolve`, `reject`] as const)(
     let childBegin!: () => void
     let childWrite!: (message: { type: `insert`; value: Child }) => void
     let childCommit!: () => true | Promise<void>
-    const pending: Array<ReturnType<typeof createDeferred<Result>>> = []
+    const pending: Array<PendingRequest> = []
+    const unloads: Array<LoadSubsetOptions> = []
     const child = createCollection<Child>({
       id: childId,
       getKey: (row) => row.id,
@@ -69,12 +72,27 @@ it.each([`resolve`, `reject`] as const)(
           childCommit = commit
           markReady()
           return {
-            loadSubset: () => {
-              const request = createDeferred<Result>()
-              pending.push(request)
-              return request.promise
+            loadSubset: (options) => {
+              const rows = createDeferred<ReadonlyArray<Child>>()
+              pending.push({ options, rows })
+              return rows.promise.then(async (acquiredRows) => {
+                if (acquiredRows.length > 0) {
+                  childBegin()
+                  for (const row of acquiredRows) {
+                    childWrite({ type: `insert`, value: row })
+                  }
+                  const applied = childCommit()
+                  if (applied !== true) await applied
+                }
+                return {
+                  hasMore: false,
+                  appliedRowKeys: acquiredRows.map((row) => row.id),
+                }
+              })
             },
-            unloadSubset: () => {},
+            unloadSubset: (options) => {
+              unloads.push(options)
+            },
           }
         },
       },
@@ -113,10 +131,25 @@ it.each([`resolve`, `reject`] as const)(
         preloadState = `rejected`
       },
     )
+    const requestedGroups = (options: LoadSubsetOptions): Array<string> =>
+      extractSimpleComparisons(options.where).flatMap((comparison) => {
+        if (comparison.field.join(`.`) !== `group`) return []
+        if (comparison.operator === `eq`) {
+          return typeof comparison.value === `string` ? [comparison.value] : []
+        }
+        if (comparison.operator !== `in` || !Array.isArray(comparison.value)) {
+          return []
+        }
+        return comparison.value.filter(
+          (value): value is string => typeof value === `string`,
+        )
+      })
+    let liveCleaned = false
 
     try {
       await flushPromises()
       expect(pending).toHaveLength(1)
+      expect(requestedGroups(pending[0]!.options)).toEqual([`old`])
       expect(live.status).toBe(projectSourceReadiness(history).status)
       expect(preloadState).toBe(`pending`)
 
@@ -128,6 +161,17 @@ it.each([`resolve`, `reject`] as const)(
       })
       const parentApplied = parentCommit()
       if (parentApplied !== true) await parentApplied
+      await flushPromises()
+
+      expect(pending).toHaveLength(2)
+      expect(requestedGroups(pending[0]!.options)).toEqual([`old`])
+      expect(requestedGroups(pending[1]!.options)).toEqual([`fresh`])
+      expect(pending[0]!.options.signal?.aborted).toBe(true)
+      expect(pending[1]!.options.signal?.aborted).toBe(false)
+      expect(
+        unloads.filter((options) => options === pending[0]!.options),
+      ).toHaveLength(1)
+      expect(unloads).not.toContain(pending[1]!.options)
       history.push(
         {
           type: `retireSourceDemand`,
@@ -144,16 +188,13 @@ it.each([`resolve`, `reject`] as const)(
           attemptId: freshAttemptId,
         },
       )
-      await flushPromises()
-
-      expect(pending).toHaveLength(2)
       expect(live.status).toBe(projectSourceReadiness(history).status)
       expect(preloadState).toBe(`pending`)
 
       if (oldOutcome === `resolve`) {
-        pending[0]!.resolve({ hasMore: false, appliedRowKeys: [] })
+        pending[0]!.rows.resolve([])
       } else {
-        pending[0]!.reject(new Error(`retired source demand failed`))
+        pending[0]!.rows.reject(new Error(`retired source demand failed`))
       }
       history.push({
         type: `settleSourceDemand`,
@@ -170,14 +211,8 @@ it.each([`resolve`, `reject`] as const)(
       expect(live.utils.lastSubsetError).toBeUndefined()
 
       const freshChild: Child = { id: `fresh-child`, group: `fresh` }
-      childBegin()
-      childWrite({ type: `insert`, value: freshChild })
-      const childApplied = childCommit()
-      if (childApplied !== true) await childApplied
-      pending[1]!.resolve({
-        hasMore: false,
-        appliedRowKeys: [freshChild.id],
-      })
+      expect(child.get(freshChild.id)).toBeUndefined()
+      pending[1]!.rows.resolve([freshChild])
       history.push({
         type: `settleSourceDemand`,
         sessionId,
@@ -192,17 +227,32 @@ it.each([`resolve`, `reject`] as const)(
       expect(live.status).toBe(projectSourceReadiness(history).status)
       expect(preloadState).toBe(`resolved`)
       expect(live.utils.lastSubsetError).toBeUndefined()
+      expect(child.get(freshChild.id)).toEqual(
+        expect.objectContaining(freshChild),
+      )
       expect(live.toArray).toEqual([
         expect.objectContaining({
           id: `parent`,
           children: [expect.objectContaining({ id: `fresh-child` })],
         }),
       ])
+      expect(pending[1]!.options.signal?.aborted).toBe(false)
+      expect(unloads).not.toContain(pending[1]!.options)
+
+      await live.cleanup()
+      liveCleaned = true
+      expect(pending[1]!.options.signal?.aborted).toBe(true)
+      expect(
+        unloads.filter((options) => options === pending[1]!.options),
+      ).toHaveLength(1)
     } finally {
       for (const request of pending) {
-        request.resolve({ hasMore: false, appliedRowKeys: [] })
+        request.rows.resolve([])
       }
-      await Promise.all([preload.catch(() => undefined), live.cleanup()])
+      await Promise.all([
+        preload.catch(() => undefined),
+        liveCleaned ? Promise.resolve() : live.cleanup(),
+      ])
       await Promise.all([parent.cleanup(), child.cleanup()])
     }
   },
