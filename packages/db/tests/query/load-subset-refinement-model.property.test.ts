@@ -851,56 +851,145 @@ it(`enumerates legal release and settlement orders across every refinement proje
         settlementOrder,
       )) {
         for (const oldOutcome of [`resolve`, `reject`] as const) {
+          const concreteSteps = actions.flatMap((action) =>
+            legalOrderEvents(action, oldOutcome).map((event) => ({
+              action,
+              event,
+            })),
+          )
           for (
             let prefixLength = 0;
-            prefixLength <= actions.length;
+            prefixLength <= concreteSteps.length;
             prefixLength++
           ) {
-            const prefix = actions.slice(0, prefixLength)
-            const history = [
-              ...legalOrderBaseHistory(),
-              ...prefix.flatMap((action) =>
-                legalOrderEvents(action, oldOutcome),
-              ),
-            ]
+            const prefix = concreteSteps.slice(0, prefixLength)
+            const prefixEvents = prefix.map(({ event }) => event)
+            const history = [...legalOrderBaseHistory(), ...prefixEvents]
             const diagnostic = JSON.stringify({
               releaseOrder,
               settlementOrder,
               actions,
               oldOutcome,
               prefixLength,
+              prefix: prefix.map(({ action, event }) => ({
+                action,
+                event: event.type,
+              })),
             })
-            const oldReleased = prefix.includes(`release-old`)
-            const peerReleased = prefix.includes(`release-peer`)
-            const oldSettled = prefix.includes(`settle-old`)
-            const freshSettled = prefix.includes(`settle-fresh`)
-            const replacementComplete = oldSettled && freshSettled
+            const eventIndex = (
+              predicate: (event: LoadSubsetFullFlowEvent) => boolean,
+            ) => prefixEvents.findIndex(predicate)
+            const oldReleased = eventIndex(
+              (event) =>
+                event.type === `releaseDemand` &&
+                event.attemptId === `attempt-old`,
+            )
+            const peerReleased = eventIndex(
+              (event) =>
+                event.type === `releaseDemand` &&
+                event.attemptId === `attempt-peer`,
+            )
+            const oldRowsApplied = eventIndex(
+              (event) =>
+                event.type === `applyAuthoritativeRows` &&
+                event.attemptId === `attempt-old`,
+            )
+            const freshRowsApplied = eventIndex(
+              (event) =>
+                event.type === `applyAuthoritativeRows` &&
+                event.attemptId === `attempt-fresh`,
+            )
+            const freshSourceSettled = eventIndex(
+              (event) =>
+                event.type === `settleSourceDemand` &&
+                event.attemptId === `attempt-fresh`,
+            )
+            const oldReplacementSettled = eventIndex(
+              (event) =>
+                event.type === `settleReplacement` &&
+                event.publicationId === `old-replacement` &&
+                event.sourceId === `source-a`,
+            )
+            const freshReplacementSettled = eventIndex(
+              (event) =>
+                event.type === `settleReplacement` &&
+                event.publicationId === `fresh-replacement` &&
+                event.sourceId === `source-a`,
+            )
+            const replacementComplete =
+              oldReplacementSettled >= 0 && freshReplacementSettled >= 0
+            const replacementCompletionIndex = Math.max(
+              oldReplacementSettled,
+              freshReplacementSettled,
+            )
             const expectedRows = [
-              ...(freshSettled
+              ...(freshRowsApplied >= 0
                 ? [{ sourceId: `source-a`, rowKey: `fresh-row` }]
                 : []),
-              ...(oldSettled && oldOutcome === `resolve` && !oldReleased
+              ...(oldRowsApplied >= 0 && oldReleased < 0
                 ? [{ sourceId: `source-a`, rowKey: `stale-row` }]
                 : []),
-              ...(!peerReleased
+              ...(peerReleased < 0
                 ? [{ sourceId: `source-b`, rowKey: `peer-row` }]
                 : []),
             ]
             const expectedEvidence = [
-              ...(freshSettled
+              ...(freshRowsApplied >= 0
                 ? [{ sourceId: `source-a`, demandId: `shared` }]
                 : []),
-              ...(!peerReleased
+              ...(peerReleased < 0
                 ? [{ sourceId: `source-b`, demandId: `shared` }]
                 : []),
             ]
-            const expectedPublicationRows = replacementComplete
-              ? [
-                  `fresh-ordered-row`,
-                  `fresh-row`,
-                  ...(!peerReleased ? [`peer-row`] : []),
-                ]
-              : [`old-ordered-row`, ...(!peerReleased ? [`peer-row`] : [])]
+            const oldOrderedRow = {
+              key: `old-ordered-row`,
+              orderValue: 0,
+            }
+            const freshOrderedRow = {
+              key: `fresh-ordered-row`,
+              orderValue: 0,
+            }
+            const freshRow = { key: `fresh-row`, orderValue: 1 }
+            const peerRow = { key: `peer-row`, orderValue: 2 }
+            const initialPublication = [oldOrderedRow, peerRow]
+            const publicationTransitions: Array<{
+              index: number
+              rows: Array<{ key: string; orderValue: number }>
+            }> = []
+            if (replacementComplete) {
+              publicationTransitions.push({
+                index: replacementCompletionIndex,
+                rows: [
+                  freshOrderedRow,
+                  freshRow,
+                  ...(peerReleased < 0 ||
+                  peerReleased > replacementCompletionIndex
+                    ? [peerRow]
+                    : []),
+                ],
+              })
+            }
+            if (peerReleased >= 0) {
+              publicationTransitions.push({
+                index: peerReleased,
+                rows:
+                  replacementComplete &&
+                  replacementCompletionIndex < peerReleased
+                    ? [freshOrderedRow, freshRow]
+                    : [oldOrderedRow],
+              })
+            }
+            publicationTransitions.sort(
+              (left, right) => left.index - right.index,
+            )
+            const expectedPublications = [
+              initialPublication,
+              ...publicationTransitions.map(({ rows }) => rows),
+            ]
+            const expectedCurrentRows = expectedPublications.at(-1)!
+            const expectedOrderedBoundary = replacementComplete
+              ? freshOrderedRow
+              : oldOrderedRow
 
             expect(projectTransportLoads(history), diagnostic).toBe(3)
             expect(projectRetainedSourceRows(history), diagnostic).toEqual(
@@ -910,21 +999,23 @@ it(`enumerates legal release and settlement orders across every refinement proje
               expectedEvidence,
             )
             expect(projectSourceReadiness(history), diagnostic).toEqual({
-              status: freshSettled ? `ready` : `loading`,
-              pendingSources: freshSettled ? [] : [`source-a`],
+              status: freshSourceSettled >= 0 ? `ready` : `loading`,
+              pendingSources: freshSourceSettled >= 0 ? [] : [`source-a`],
               failedSources: [],
             })
             const publication = projectAtomicOrderedPublicationState(
               history,
               publicationOptions,
             )
-            expect(
-              publication.currentPublication?.rows.map(({ key }) => key),
-              diagnostic,
-            ).toEqual(expectedPublicationRows)
-            expect(publication.retainsPreviousPublication, diagnostic).toBe(
-              !replacementComplete,
-            )
+            expect(publication, diagnostic).toEqual({
+              publications: expectedPublications,
+              currentPublication: {
+                rows: expectedCurrentRows,
+                orderedPrefixSize: 1,
+                orderedBoundary: expectedOrderedBoundary,
+              },
+              retainsPreviousPublication: !replacementComplete,
+            })
           }
         }
       }

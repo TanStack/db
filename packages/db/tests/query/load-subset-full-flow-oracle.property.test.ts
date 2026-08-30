@@ -6881,20 +6881,22 @@ const mixedDemandSettlementScenarios: ReadonlyArray<AtomicOrderedReplayScenario>
         },
       ],
     ),
-    {
-      direction,
-      resizeOrder: `grow-shrink` as const,
-      overlap: false,
-      currentOutcome: `resolve` as const,
-      currentExtent: `exhausted` as const,
-      settleCurrentFirst: false,
-      sourceDelta: false,
-      otherDemand: `active` as const,
-      otherOutcome: `reject` as const,
-      demandSettlementOrder: `ordered-first` as const,
-      releaseAfterOrdered: true,
-    },
   ])
+
+const releaseDuringPrivateReplayScenarios: ReadonlyArray<AtomicOrderedReplayScenario> =
+  ([`asc`, `desc`] as const).map((direction) => ({
+    direction,
+    resizeOrder: `grow-shrink`,
+    overlap: false,
+    currentOutcome: `resolve`,
+    currentExtent: `exhausted`,
+    settleCurrentFirst: false,
+    sourceDelta: false,
+    otherDemand: `active`,
+    otherOutcome: `reject`,
+    demandSettlementOrder: `ordered-first`,
+    releaseAfterOrdered: true,
+  }))
 
 it(`does not reuse caller or public continuation state when an active replacement has no progress`, async () => {
   for (const direction of [`asc`, `desc`] as const) {
@@ -6968,6 +6970,12 @@ it(`restores failed replay continuation only from the last complete publication`
 
 it(`keeps mixed demand settlements inside one replacement epoch`, async () => {
   for (const scenario of mixedDemandSettlementScenarios) {
+    await runAtomicOrderedReplayScenario(scenario)
+  }
+})
+
+it(`removes a released peer from the public baseline while replay remains private`, async () => {
+  for (const scenario of releaseDuringPrivateReplayScenarios) {
     await runAtomicOrderedReplayScenario(scenario)
   }
 })
