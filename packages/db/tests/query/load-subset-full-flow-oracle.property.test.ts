@@ -1034,12 +1034,17 @@ it.each([`sync throw`, `async reject`] as const)(
 
 it(`publishes once after a loader fills an indexed window across graph turns`, async () => {
   type Row = { id: string; rank: number }
+  type ObservedChange = {
+    type: `insert` | `update` | `delete`
+    key: string
+    value: Row
+  }
   const remoteRows: ReadonlyArray<Row> = [
     { id: `a`, rank: 1 },
     { id: `b`, rank: 2 },
   ]
-  const batches: Array<ReadonlyArray<string>> = []
-  const callbackReads: Array<ReadonlyArray<string>> = []
+  const batches: Array<ReadonlyArray<ObservedChange>> = []
+  const callbackReads: Array<ReadonlyArray<Row>> = []
   let loads = 0
   let begin!: () => void
   let write!: (message: { type: `insert`; value: Row }) => void
@@ -1083,6 +1088,7 @@ it(`publishes once after a loader fills an indexed window across graph turns`, a
         .limit(0),
     startSync: true,
   })
+  const readRows = () => live.toArray.map(({ id, rank }) => ({ id, rank }))
   let subscription: ReturnType<typeof live.subscribeChanges> | undefined
 
   try {
@@ -1091,13 +1097,14 @@ it(`publishes once after a loader fills an indexed window across graph turns`, a
       (changes) => {
         batches.push(
           changes
-            .map(
-              ({ type, key, value }) =>
-                `${type}:${String(key)}:${String(value.id)}`,
-            )
-            .sort(),
+            .map<ObservedChange>(({ type, key, value }) => ({
+              type,
+              key: String(key),
+              value: { id: value.id, rank: value.rank },
+            }))
+            .sort((left, right) => left.key.localeCompare(right.key)),
         )
-        callbackReads.push(live.toArray.map(({ id }) => id))
+        callbackReads.push(readRows())
       },
       { includeInitialState: false },
     )
@@ -1105,9 +1112,22 @@ it(`publishes once after a loader fills an indexed window across graph turns`, a
     await flushPromises()
 
     expect(loads).toBe(2)
-    expect(live.toArray.map(({ id }) => id)).toEqual([`a`, `b`])
-    expect(batches).toEqual([[`insert:a:a`, `insert:b:b`]])
-    expect(callbackReads).toEqual([[`a`, `b`]])
+    expect(readRows()).toEqual([
+      { id: `a`, rank: 1 },
+      { id: `b`, rank: 2 },
+    ])
+    expect(batches).toEqual([
+      [
+        { type: `insert`, key: `a`, value: { id: `a`, rank: 1 } },
+        { type: `insert`, key: `b`, value: { id: `b`, rank: 2 } },
+      ],
+    ])
+    expect(callbackReads).toEqual([
+      [
+        { id: `a`, rank: 1 },
+        { id: `b`, rank: 2 },
+      ],
+    ])
   } finally {
     subscription?.unsubscribe()
     await Promise.all([live.cleanup(), source.cleanup()])
@@ -1323,13 +1343,18 @@ it(`keeps an initial unindexed load scoped to its query session`, async () => {
 
 it(`replays one unindexed fallback and publishes one replacement after truncate`, async () => {
   type Row = { id: string; rank: number }
+  type ObservedChange = {
+    type: `insert` | `update` | `delete`
+    key: string
+    value: Row
+  }
   type Result = {
     hasMore: boolean
     appliedRowKeys: ReadonlyArray<string>
   }
   const pending: Array<ReturnType<typeof createDeferred<Result>>> = []
-  const batches: Array<ReadonlyArray<string>> = []
-  const callbackReads: Array<ReadonlyArray<string>> = []
+  const batches: Array<ReadonlyArray<ObservedChange>> = []
+  const callbackReads: Array<ReadonlyArray<Row>> = []
   let begin!: () => void
   let write!: (message: { type: `insert`; value: Row }) => void
   let commit!: () => true | Promise<void>
@@ -1368,17 +1393,19 @@ it(`replays one unindexed fallback and publishes one replacement after truncate`
         .limit(1),
     startSync: true,
   })
+  const readRows = () => live.toArray.map(({ id, rank }) => ({ id, rank }))
   const subscription = live.subscribeChanges(
     (changes) => {
       batches.push(
         changes
-          .map(
-            ({ type, key, value }) =>
-              `${type}:${String(key)}:${String(value.id)}`,
-          )
-          .sort(),
+          .map<ObservedChange>(({ type, key, value }) => ({
+            type,
+            key: String(key),
+            value: { id: value.id, rank: value.rank },
+          }))
+          .sort((left, right) => left.key.localeCompare(right.key)),
       )
-      callbackReads.push(live.toArray.map(({ id }) => id).sort())
+      callbackReads.push(readRows())
     },
     { includeInitialState: false },
   )
@@ -1393,36 +1420,36 @@ it(`replays one unindexed fallback and publishes one replacement after truncate`
     pending[0]!.resolve({ hasMore: false, appliedRowKeys: [`a`] })
     await preload
     await flushPromises()
-    expect(live.toArray.map(({ id }) => id)).toEqual([`a`])
+    expect(readRows()).toEqual([{ id: `a`, rank: 1 }])
 
     batches.length = 0
     callbackReads.length = 0
     begin()
     truncate()
-    expect(live.toArray.map(({ id }) => id)).toEqual([`a`])
+    expect(readRows()).toEqual([{ id: `a`, rank: 1 }])
     expect(batches).toHaveLength(0)
     expect(callbackReads).toHaveLength(0)
     const replacement = commit()
-    expect(live.toArray.map(({ id }) => id)).toEqual([`a`])
+    expect(readRows()).toEqual([{ id: `a`, rank: 1 }])
     expect(batches).toHaveLength(0)
     expect(callbackReads).toHaveLength(0)
     await flushPromises()
     expect(pending).toHaveLength(2)
-    expect(live.toArray.map(({ id }) => id)).toEqual([`a`])
+    expect(readRows()).toEqual([{ id: `a`, rank: 1 }])
     expect(batches).toHaveLength(0)
     expect(callbackReads).toHaveLength(0)
 
     begin()
     write({ type: `insert`, value: { id: `b`, rank: 2 } })
-    expect(live.toArray.map(({ id }) => id)).toEqual([`a`])
+    expect(readRows()).toEqual([{ id: `a`, rank: 1 }])
     expect(batches).toHaveLength(0)
     expect(callbackReads).toHaveLength(0)
     const replacementApplied = commit()
-    expect(live.toArray.map(({ id }) => id)).toEqual([`a`])
+    expect(readRows()).toEqual([{ id: `a`, rank: 1 }])
     expect(batches).toHaveLength(0)
     expect(callbackReads).toHaveLength(0)
     if (replacementApplied !== true) await replacementApplied
-    expect(live.toArray.map(({ id }) => id)).toEqual([`a`])
+    expect(readRows()).toEqual([{ id: `a`, rank: 1 }])
     expect(batches).toHaveLength(0)
     expect(callbackReads).toHaveLength(0)
     pending[1]!.resolve({ hasMore: false, appliedRowKeys: [`b`] })
@@ -1430,9 +1457,14 @@ it(`replays one unindexed fallback and publishes one replacement after truncate`
     await flushPromises()
 
     expect(pending).toHaveLength(2)
-    expect(live.toArray.map(({ id }) => id)).toEqual([`b`])
-    expect(batches).toEqual([[`delete:a:a`, `insert:b:b`]])
-    expect(callbackReads).toEqual([[`b`]])
+    expect(readRows()).toEqual([{ id: `b`, rank: 2 }])
+    expect(batches).toEqual([
+      [
+        { type: `delete`, key: `a`, value: { id: `a`, rank: 1 } },
+        { type: `insert`, key: `b`, value: { id: `b`, rank: 2 } },
+      ],
+    ])
+    expect(callbackReads).toEqual([[{ id: `b`, rank: 2 }]])
   } finally {
     for (const request of pending) {
       request.reject(new Error(`test cleanup`))
