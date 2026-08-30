@@ -1494,6 +1494,7 @@ function createUnindexedReplayHarness(id: string) {
     options: LoadSubsetOptions
     request?: ReturnType<typeof createDeferred<UnindexedReplayResult>>
   }> = []
+  const loadResults: Array<true | Promise<UnindexedReplayResult>> = []
   const unloads: Array<LoadSubsetOptions> = []
   const synchronousLoads = new Map<number, ReadonlyArray<UnindexedReplayRow>>()
   const batches: Array<ReadonlyArray<UnindexedReplayObservedChange>> = []
@@ -1527,11 +1528,15 @@ function createUnindexedReplayHarness(id: string) {
                 write({ type: `insert`, value: row })
               }
               commit()
-              return true
+              const result = true as const
+              loadResults.push(result)
+              return result
             }
             const request = createDeferred<UnindexedReplayResult>()
             pending.push({ options, request })
-            return request.promise
+            const result = request.promise
+            loadResults.push(result)
+            return result
           },
           unloadSubset: (options) => {
             unloads.push(options)
@@ -1601,6 +1606,7 @@ function createUnindexedReplayHarness(id: string) {
     source,
     live,
     pending,
+    loadResults,
     unloads,
     synchronousLoads,
     batches,
@@ -1710,8 +1716,14 @@ it.each([`async`, `sync`] as const)(
         expect(options.limit).toBeUndefined()
         expect(options.offset).toBeUndefined()
         expect(options.cursor).toBeUndefined()
+        expect(options.where).toBeUndefined()
         expect(options.signal).toBeInstanceOf(AbortSignal)
       }
+      expect(
+        harness.loadResults.map((result) =>
+          result === true ? `sync` : `async`,
+        ),
+      ).toEqual([`async`, `async`, successMode === `sync` ? `sync` : `async`])
       const signals = harness.pending.map(({ options }) => options.signal!)
       expect(new Set(signals)).toHaveLength(3)
       expect(signals.map(({ aborted }) => aborted)).toEqual([true, true, false])
